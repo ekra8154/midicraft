@@ -1,10 +1,10 @@
 {
-  "key.fast-noteblocks.toggle": "Toggle Fast Noteblocks",
+  "key.fast-noteblocks.toggle": "Toggle Fast Noteblocks Overlays",
   "key.fast-noteblocks.toggle_placement_sequence": "Toggle Note Placement Sequence",
   "category.fast-noteblocks": "Fast Noteblocks",
   "key.categories.fast-noteblocks.controls": "Fast Noteblocks",
-  "message.fast-noteblocks.enabled": "Fast Noteblocks enabled",
-  "message.fast-noteblocks.disabled": "Fast Noteblocks disabled",
+  "message.fast-noteblocks.enabled": "Fast Noteblocks overlays enabled",
+  "message.fast-noteblocks.disabled": "Fast Noteblocks overlays disabled",
   "message.fast-noteblocks.sequence_enabled": "Note placement sequence enabled",
   "message.fast-noteblocks.sequence_disabled": "Note placement sequence disabled",
   "title.fast-noteblocks.config": "Fast Noteblocks Settings",
@@ -27,3 +27,13 @@
   "guide.fast-noteblocks.sequence": "Pitch guide:\n0:F♯  1:G  2:G♯  3:A  4:A♯  5:B  6:C  7:C♯  8:D  9:D♯  10:E  11:F\n12:F♯  13:G  14:G♯  15:A  16:A♯  17:B  18:C  19:C♯  20:D  21:D♯  22:E  23:F  24:F♯",
   "error.fast-noteblocks.sequence": "Use comma-separated whole numbers from 0 to 24."
 }
+  "option.fast-noteblocks.mod_enabled": "Mod enabled",
+  "tooltip.fast-noteblocks.mod_enabled": "Master switch for every Fast Noteblocks feature.",
+  "option.fast-noteblocks.overlays_enabled": "Overlays enabled",
+  "tooltip.fast-noteblocks.overlays_enabled": "Master switch for all in-world overlays. The overlay keybind changes this setting persistently.",
+  "option.fast-noteblocks.note_block_overlays": "Note block overlays",
+  "tooltip.fast-noteblocks.note_block_overlays": "Shows note block labels and enables their overlay controls.",
+  "option.fast-noteblocks.nearby_previews": "Show nearby previews",
+  "tooltip.fast-noteblocks.nearby_previews": "Shows labels on all nearby note blocks. When disabled, a note block appears only while aiming at its center label position.",
+  "option.fast-noteblocks.radial_controls": "Radial controls",
+  "tooltip.fast-noteblocks.radial_controls": "Shows the A-G radial menu and enables scroll-to-tune controls.",

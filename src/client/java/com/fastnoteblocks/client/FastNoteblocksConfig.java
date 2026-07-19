@@ -23,6 +23,11 @@ public final class FastNoteblocksConfig {
 	private static final Path CONFIG_PATH = FabricLoader.getInstance().getConfigDir().resolve("fast-noteblocks.json");
 	private static FastNoteblocksConfig instance = defaults();
 
+	private boolean modEnabled;
+	private boolean overlaysEnabled;
+	private boolean noteBlockOverlaysEnabled;
+	private boolean nearbyPreviewsEnabled;
+	private boolean radialControlsEnabled;
 	private boolean invertScrolling;
 	private int viewDistance;
 	private int interactionDelayTicks;
@@ -48,6 +53,11 @@ public final class FastNoteblocksConfig {
 		try (Reader reader = Files.newBufferedReader(CONFIG_PATH)) {
 			StoredConfig stored = GSON.fromJson(reader, StoredConfig.class);
 			if (stored != null) {
+				instance.modEnabled = stored.modEnabled == null || stored.modEnabled;
+				instance.overlaysEnabled = stored.overlaysEnabled == null || stored.overlaysEnabled;
+				instance.noteBlockOverlaysEnabled = stored.noteBlockOverlaysEnabled == null || stored.noteBlockOverlaysEnabled;
+				instance.nearbyPreviewsEnabled = stored.nearbyPreviewsEnabled == null || stored.nearbyPreviewsEnabled;
+				instance.radialControlsEnabled = stored.radialControlsEnabled == null || stored.radialControlsEnabled;
 				instance.invertScrolling = Boolean.TRUE.equals(stored.invertScrolling);
 				instance.viewDistance = clampViewDistance(stored.viewDistance == null ? DEFAULT_VIEW_DISTANCE : stored.viewDistance);
 				instance.interactionDelayTicks = clampInteractionDelay(
@@ -84,6 +94,46 @@ public final class FastNoteblocksConfig {
 		} catch (IllegalArgumentException exception) {
 			return Optional.of(Component.translatable("error.fast-noteblocks.sequence"));
 		}
+	}
+
+	public boolean modEnabled() {
+		return modEnabled;
+	}
+
+	public void setModEnabled(boolean modEnabled) {
+		this.modEnabled = modEnabled;
+	}
+
+	public boolean overlaysEnabled() {
+		return overlaysEnabled;
+	}
+
+	public void setOverlaysEnabled(boolean overlaysEnabled) {
+		this.overlaysEnabled = overlaysEnabled;
+	}
+
+	public boolean noteBlockOverlaysEnabled() {
+		return noteBlockOverlaysEnabled;
+	}
+
+	public void setNoteBlockOverlaysEnabled(boolean noteBlockOverlaysEnabled) {
+		this.noteBlockOverlaysEnabled = noteBlockOverlaysEnabled;
+	}
+
+	public boolean nearbyPreviewsEnabled() {
+		return nearbyPreviewsEnabled;
+	}
+
+	public void setNearbyPreviewsEnabled(boolean nearbyPreviewsEnabled) {
+		this.nearbyPreviewsEnabled = nearbyPreviewsEnabled;
+	}
+
+	public boolean radialControlsEnabled() {
+		return radialControlsEnabled;
+	}
+
+	public void setRadialControlsEnabled(boolean radialControlsEnabled) {
+		this.radialControlsEnabled = radialControlsEnabled;
 	}
 
 	public boolean invertScrolling() {
@@ -144,6 +194,11 @@ public final class FastNoteblocksConfig {
 
 	private static FastNoteblocksConfig defaults() {
 		FastNoteblocksConfig config = new FastNoteblocksConfig();
+		config.modEnabled = true;
+		config.overlaysEnabled = true;
+		config.noteBlockOverlaysEnabled = true;
+		config.nearbyPreviewsEnabled = true;
+		config.radialControlsEnabled = true;
 		config.invertScrolling = false;
 		config.viewDistance = DEFAULT_VIEW_DISTANCE;
 		config.interactionDelayTicks = DEFAULT_INTERACTION_DELAY_TICKS;
@@ -163,6 +218,11 @@ public final class FastNoteblocksConfig {
 	}
 
 	private static final class StoredConfig {
+		private Boolean modEnabled;
+		private Boolean overlaysEnabled;
+		private Boolean noteBlockOverlaysEnabled;
+		private Boolean nearbyPreviewsEnabled;
+		private Boolean radialControlsEnabled;
 		private Boolean invertScrolling;
 		private Integer viewDistance;
 		private Integer interactionDelayTicks;
@@ -175,6 +235,11 @@ public final class FastNoteblocksConfig {
 		}
 
 		private StoredConfig(FastNoteblocksConfig config) {
+			this.modEnabled = config.modEnabled;
+			this.overlaysEnabled = config.overlaysEnabled;
+			this.noteBlockOverlaysEnabled = config.noteBlockOverlaysEnabled;
+			this.nearbyPreviewsEnabled = config.nearbyPreviewsEnabled;
+			this.radialControlsEnabled = config.radialControlsEnabled;
 			this.invertScrolling = config.invertScrolling;
 			this.viewDistance = config.viewDistance;
 			this.interactionDelayTicks = config.interactionDelayTicks;

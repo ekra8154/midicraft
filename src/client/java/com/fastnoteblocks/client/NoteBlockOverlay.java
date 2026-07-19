@@ -62,7 +62,6 @@ public final class NoteBlockOverlay {
 		"key.fast-noteblocks.toggle_placement_sequence", InputConstants.Type.KEYSYM, -1, CATEGORY
 	));
 
-	private boolean enabled;
 	private int ticksUntilRescan;
 	private ClientLevel lastLevel;
 	private BlockPos expandedBlock;
@@ -86,7 +85,12 @@ public final class NoteBlockOverlay {
 
 	public boolean handleScroll(double verticalAmount) {
 		Minecraft minecraft = Minecraft.getInstance();
-		if (!enabled || verticalAmount == 0.0 || minecraft.gui.screen() != null || !isReady(minecraft)) {
+		FastNoteblocksConfig config = FastNoteblocksConfig.get();
+		if (!noteBlockOverlaysActive(config)
+			|| !config.radialControlsEnabled()
+			|| verticalAmount == 0.0
+			|| minecraft.gui.screen() != null
+			|| !isReady(minecraft)) {
 			return false;
 		}
 
@@ -111,13 +115,14 @@ public final class NoteBlockOverlay {
 	private void tick(Minecraft minecraft) {
 		FastNoteblocksConfig config = FastNoteblocksConfig.get();
 		while (toggleKey.consumeClick()) {
-			enabled = !enabled;
+			config.setOverlaysEnabled(!config.overlaysEnabled());
+			FastNoteblocksConfig.save();
 			expandedBlock = null;
 			menuCenterFamily = null;
 			ticksUntilRescan = 0;
 			if (minecraft.player != null) {
 				minecraft.gui.hud.setOverlayMessage(Component.translatable(
-					enabled ? "message.fast-noteblocks.enabled" : "message.fast-noteblocks.disabled"
+					config.overlaysEnabled() ? "message.fast-noteblocks.enabled" : "message.fast-noteblocks.disabled"
 				), true);
 			}
 		}
@@ -163,12 +168,29 @@ public final class NoteBlockOverlay {
 			updatePlacementWatches(minecraft);
 			return;
 		}
+		if (!config.modEnabled()) {
+			nearbyNoteBlocks.clear();
+			clickQueue.clear();
+			expectedPitches.clear();
+			placementWatches.clear();
+			expandedBlock = null;
+			menuCenterFamily = null;
+			return;
+		}
+		if (!config.radialControlsEnabled()) {
+			expandedBlock = null;
+			menuCenterFamily = null;
+		}
 
 		updatePlacementWatches(minecraft);
 		updateExpectations(minecraft.level);
-		if (enabled && --ticksUntilRescan <= 0) {
+		if (noteBlockOverlaysActive(config) && --ticksUntilRescan <= 0) {
 			rescan(minecraft);
 			ticksUntilRescan = RESCAN_INTERVAL_TICKS;
+		} else if (!noteBlockOverlaysActive(config)) {
+			nearbyNoteBlocks.clear();
+			expandedBlock = null;
+			menuCenterFamily = null;
 		}
 		performNextClick(minecraft);
 	}
@@ -316,6 +338,7 @@ public final class NoteBlockOverlay {
 		}
 		if (performingAutomatedClick
 			|| !level.isClientSide()
+			|| !config.modEnabled()
 			|| !config.placementSequenceEnabled()
 			|| configuredSequence.isEmpty()
 			|| !player.getItemInHand(hand).is(Items.NOTE_BLOCK)) {
@@ -335,7 +358,7 @@ public final class NoteBlockOverlay {
 			placementWatches.clear();
 			return;
 		}
-		if (!FastNoteblocksConfig.get().placementSequenceEnabled()) {
+		if (!FastNoteblocksConfig.get().modEnabled() || !FastNoteblocksConfig.get().placementSequenceEnabled()) {
 			placementWatches.clear();
 			return;
 		}
@@ -389,7 +412,8 @@ public final class NoteBlockOverlay {
 
 	private void render(LevelRenderContext context) {
 		Minecraft minecraft = Minecraft.getInstance();
-		if (!enabled || !isReady(minecraft) || nearbyNoteBlocks.isEmpty()) {
+		FastNoteblocksConfig config = FastNoteblocksConfig.get();
+		if (!noteBlockOverlaysActive(config) || !isReady(minecraft) || nearbyNoteBlocks.isEmpty()) {
 			return;
 		}
 
@@ -404,10 +428,16 @@ public final class NoteBlockOverlay {
 				continue;
 			}
 
+			boolean focusedBlock = pos.equals(expandedBlock)
+				|| hovered != null && hovered.blockPos().equals(pos);
+			if (!config.nearbyPreviewsEnabled() && !focusedBlock) {
+				continue;
+			}
+
 			int pitch = displayedPitch(minecraft.level, pos);
 			boolean inRange = minecraft.player.isWithinBlockInteractionRange(pos, 0.0);
 			Vec3 right = labelRight(cameraPos, Vec3.atCenterOf(pos));
-			boolean expanded = pos.equals(expandedBlock);
+			boolean expanded = config.radialControlsEnabled() && pos.equals(expandedBlock);
 			poseStack.pushPose();
 			poseStack.translate(pos.getX() - cameraPos.x, pos.getY() - cameraPos.y, pos.getZ() - cameraPos.z);
 			char layoutCenterFamily = expanded && menuCenterFamily != null
@@ -432,11 +462,18 @@ public final class NoteBlockOverlay {
 	}
 
 	private HoveredLabel findHoveredLabel(Minecraft minecraft) {
+		boolean radialControlsEnabled = FastNoteblocksConfig.get().radialControlsEnabled();
+		if (!radialControlsEnabled) {
+			expandedBlock = null;
+			menuCenterFamily = null;
+		}
 		Camera camera = minecraft.gameRenderer.mainCamera();
 		Vec3 origin = camera.position();
 		Vec3 direction = new Vec3(camera.forwardVector()).normalize();
 
-		if (expandedBlock != null && minecraft.level.getBlockState(expandedBlock).is(Blocks.NOTE_BLOCK)) {
+		if (radialControlsEnabled
+			&& expandedBlock != null
+			&& minecraft.level.getBlockState(expandedBlock).is(Blocks.NOTE_BLOCK)) {
 			LabelHit expandedHit = hitLabelOnBlock(minecraft, expandedBlock, true, origin, direction);
 			if (expandedHit != null) {
 				return expandedHit.label();
@@ -459,8 +496,10 @@ public final class NoteBlockOverlay {
 		}
 
 		if (closest != null) {
-			expandedBlock = closest.label().blockPos();
-			menuCenterFamily = NotePitch.family(displayedPitch(minecraft.level, expandedBlock));
+			if (radialControlsEnabled) {
+				expandedBlock = closest.label().blockPos();
+				menuCenterFamily = NotePitch.family(displayedPitch(minecraft.level, expandedBlock));
+			}
 			return closest.label();
 		}
 		expandedBlock = null;
@@ -579,6 +618,10 @@ public final class NoteBlockOverlay {
 
 	private static boolean isReady(Minecraft minecraft) {
 		return minecraft.level != null && minecraft.player != null && minecraft.gameMode != null;
+	}
+
+	private static boolean noteBlockOverlaysActive(FastNoteblocksConfig config) {
+		return config.modEnabled() && config.overlaysEnabled() && config.noteBlockOverlaysEnabled();
 	}
 
 	private record PendingClicks(

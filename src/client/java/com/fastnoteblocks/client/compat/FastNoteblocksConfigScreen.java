@@ -20,6 +20,36 @@ public final class FastNoteblocksConfigScreen {
 
 		ConfigCategory general = builder.getOrCreateCategory(Component.translatable("category.fast-noteblocks.general"));
 		general.addEntry(entries.startBooleanToggle(
+				Component.translatable("option.fast-noteblocks.mod_enabled"), config.modEnabled())
+			.setDefaultValue(true)
+			.setTooltip(Component.translatable("tooltip.fast-noteblocks.mod_enabled"))
+			.setSaveConsumer(config::setModEnabled)
+			.build());
+		general.addEntry(entries.startBooleanToggle(
+				Component.translatable("option.fast-noteblocks.overlays_enabled"), config.overlaysEnabled())
+			.setDefaultValue(true)
+			.setTooltip(Component.translatable("tooltip.fast-noteblocks.overlays_enabled"))
+			.setSaveConsumer(config::setOverlaysEnabled)
+			.build());
+		general.addEntry(entries.startBooleanToggle(
+				Component.translatable("option.fast-noteblocks.note_block_overlays"), config.noteBlockOverlaysEnabled())
+			.setDefaultValue(true)
+			.setTooltip(Component.translatable("tooltip.fast-noteblocks.note_block_overlays"))
+			.setSaveConsumer(config::setNoteBlockOverlaysEnabled)
+			.build());
+		general.addEntry(entries.startBooleanToggle(
+				Component.translatable("option.fast-noteblocks.nearby_previews"), config.nearbyPreviewsEnabled())
+			.setDefaultValue(true)
+			.setTooltip(Component.translatable("tooltip.fast-noteblocks.nearby_previews"))
+			.setSaveConsumer(config::setNearbyPreviewsEnabled)
+			.build());
+		general.addEntry(entries.startBooleanToggle(
+				Component.translatable("option.fast-noteblocks.radial_controls"), config.radialControlsEnabled())
+			.setDefaultValue(true)
+			.setTooltip(Component.translatable("tooltip.fast-noteblocks.radial_controls"))
+			.setSaveConsumer(config::setRadialControlsEnabled)
+			.build());
+		general.addEntry(entries.startBooleanToggle(
 				Component.translatable("option.fast-noteblocks.invert_scroll"), config.invertScrolling())
 			.setDefaultValue(false)
 			.setTooltip(Component.translatable("tooltip.fast-noteblocks.invert_scroll"))

@@ -3,7 +3,7 @@
 A fully client-side Fabric mod for Minecraft Java Edition 26.2 that displays
 interactive A-G pitch controls above nearby note blocks.
 
-Press **N** to toggle the overlay. Each nearby note block shows one billboard
+Press **N** to toggle all overlays persistently. Each nearby note block shows one billboard
 label for its current pitch. Hover that label to open a compact radial A-G menu
 for only that note block. While in normal block-interaction range:
 
@@ -19,6 +19,12 @@ upper left whenever those letters are outside the center.
 When the optional Mod Menu and Cloth Config mods are installed, the Mod Menu
 configuration button provides:
 
+- a master switch for the entire mod;
+- persistent master switches for all overlays and specifically note block
+  overlays;
+- optional nearby previews; when disabled, labels are hidden until their center
+  position is targeted;
+- optional radial controls, including both the radial menu and scroll tuning;
 - inverted scrolling;
 - note-label view distance from 1 to 32 blocks;
 - interaction delay from 0 to 10 extra ticks, defaulting to the original
