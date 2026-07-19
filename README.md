@@ -31,13 +31,20 @@ configuration button provides:
   one-interaction-per-client-tick speed;
 - optional server-confirmation waiting;
 - optional unobstructed line-of-sight enforcement;
-- automatic note placement sequence enable/disable;
-- a validated, whitespace-agnostic comma-separated pitch sequence using values
-  from 0 through 24.
+- a resumable unified note-block and repeater placement sequence;
+- a validated, whitespace-agnostic sequence using note values `0` through `24`
+  and explicit repeater delays `1d` through `4d`.
 
-The placement sequence repeats for each newly placed note block. Its toggle key
-is unbound by default and can be assigned in Minecraft's Controls screen. Every
-time the sequence is enabled, it restarts at its first value.
+For example, `0, 2d, 4, 2d, 7` expects a note block tuned to pitch 0, a repeater
+set to delay 2, and so on. A mismatched placement does not advance the sequence,
+and only one step can be in progress at a time. The sequence repeats when it
+reaches the end.
+
+The sequence control key is unbound by default and can be assigned in
+Minecraft's Controls screen. Tap it to pause or resume without losing the
+current position, hold it with Left or Right Arrow to move one step, or
+double-tap it to return to the beginning. A brief HUD preview appears after
+these controls and shows the current and following steps.
 
 The settings screen includes a complete `0` through `24` pitch-name guide.
 

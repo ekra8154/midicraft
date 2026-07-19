@@ -83,7 +83,7 @@ public final class FastNoteblocksConfig {
 		}
 	}
 
-	public static List<Integer> parsePlacementSequence(String value) {
+	public static List<NoteSequence.Step> parsePlacementSequence(String value) {
 		return NoteSequence.parse(value);
 	}
 

@@ -8,8 +8,13 @@ import org.junit.jupiter.api.Test;
 
 class NoteSequenceTest {
 	@Test
-	void parsesWhitespaceAgnosticCommaSeparatedPitches() {
-		assertEquals(List.of(0, 4, 7, 12, 24), NoteSequence.parse(" 0,4, 7 , 12,24 "));
+	void parsesUnifiedWhitespaceAgnosticSequence() {
+		assertEquals(List.of(
+			NoteSequence.Step.note(0),
+			NoteSequence.Step.repeater(2),
+			NoteSequence.Step.note(7),
+			NoteSequence.Step.repeater(4)
+		), NoteSequence.parse(" 0, 2d, 7 , 4D "));
 	}
 
 	@Test
@@ -23,5 +28,7 @@ class NoteSequenceTest {
 		assertThrows(IllegalArgumentException.class, () -> NoteSequence.parse("-1,12"));
 		assertThrows(IllegalArgumentException.class, () -> NoteSequence.parse("0,25"));
 		assertThrows(IllegalArgumentException.class, () -> NoteSequence.parse("0,G,12"));
+		assertThrows(IllegalArgumentException.class, () -> NoteSequence.parse("0,0d,12"));
+		assertThrows(IllegalArgumentException.class, () -> NoteSequence.parse("0,5d,12"));
 	}
 }

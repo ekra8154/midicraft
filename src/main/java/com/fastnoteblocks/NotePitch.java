@@ -3,12 +3,12 @@ package com.fastnoteblocks;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Utilities for Minecraft's 25 chromatic note-block pitches (F♯3 through F♯5). */
+/** Utilities for Minecraft's 25 chromatic note-block pitches (F-sharp 3 through F-sharp 5). */
 public final class NotePitch {
 	public static final int PITCH_COUNT = 25;
 	private static final String[] NAMES = {
-		"F♯", "G", "G♯", "A", "A♯", "B", "C", "C♯", "D", "D♯", "E", "F",
-		"F♯", "G", "G♯", "A", "A♯", "B", "C", "C♯", "D", "D♯", "E", "F", "F♯"
+		"F\u266f", "G", "G\u266f", "A", "A\u266f", "B", "C", "C\u266f", "D", "D\u266f", "E", "F",
+		"F\u266f", "G", "G\u266f", "A", "A\u266f", "B", "C", "C\u266f", "D", "D\u266f", "E", "F", "F\u266f"
 	};
 
 	private NotePitch() {

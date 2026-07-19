@@ -1,6 +1,7 @@
 package com.fastnoteblocks.client;
 
 import com.fastnoteblocks.NotePitch;
+import com.fastnoteblocks.NoteSequence;
 import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.blaze3d.vertex.PoseStack;
 import java.util.ArrayDeque;
@@ -33,6 +34,7 @@ import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.NoteBlock;
+import net.minecraft.world.level.block.RepeaterBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
@@ -43,6 +45,7 @@ public final class NoteBlockOverlay {
 	private static final int RESCAN_INTERVAL_TICKS = 10;
 	private static final int PLACEMENT_WATCH_TICKS = 12;
 	private static final int INTERACTION_ACK_TIMEOUT_TICKS = 40;
+	private static final int SEQUENCE_DOUBLE_TAP_TICKS = 7;
 	private static final double LABEL_Y = 1.40;
 	private static final double MENU_HORIZONTAL_RADIUS = 0.72;
 	private static final double MENU_VERTICAL_RADIUS = 0.50;
@@ -53,8 +56,8 @@ public final class NoteBlockOverlay {
 
 	private final List<BlockPos> nearbyNoteBlocks = new ArrayList<>();
 	private final Deque<PendingClicks> clickQueue = new ArrayDeque<>();
-	private final Map<BlockPos, ExpectedPitch> expectedPitches = new HashMap<>();
-	private final Map<BlockPos, Integer> placementWatches = new HashMap<>();
+	private final Map<BlockPos, ExpectedStep> expectedSteps = new HashMap<>();
+	private final Map<BlockPos, PlacementWatch> placementWatches = new HashMap<>();
 	private final KeyMapping toggleKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
 		"key.fast-noteblocks.toggle", InputConstants.Type.KEYSYM, 78, CATEGORY
 	));
@@ -70,6 +73,10 @@ public final class NoteBlockOverlay {
 	private boolean lastPlacementSequenceEnabled;
 	private String lastPlacementSequenceText = "";
 	private boolean performingAutomatedClick;
+	private boolean sequenceStepInProgress;
+	private int pendingSequenceToggleTicks;
+	private boolean leftArrowDown;
+	private boolean rightArrowDown;
 
 	private NoteBlockOverlay() {
 	}
@@ -80,7 +87,7 @@ public final class NoteBlockOverlay {
 		lastPlacementSequenceText = config.placementSequence();
 		ClientTickEvents.END_CLIENT_TICK.register(this::tick);
 		LevelRenderEvents.COLLECT_SUBMITS.register(this::render);
-		UseBlockCallback.EVENT.register(this::watchForNoteBlockPlacement);
+		UseBlockCallback.EVENT.register(this::watchForSequencePlacement);
 	}
 
 	public boolean handleScroll(double verticalAmount) {
@@ -106,8 +113,9 @@ public final class NoteBlockOverlay {
 			: NotePitch.previousInFamily(currentPitch, hovered.family());
 		int clicks = NotePitch.clicksForward(currentPitch, targetPitch);
 		if (clicks > 0) {
-			clickQueue.addLast(PendingClicks.ready(hovered.blockPos(), clicks, false));
-			expectedPitches.put(hovered.blockPos(), new ExpectedPitch(targetPitch, 60, false));
+			NoteSequence.Step target = NoteSequence.Step.note(targetPitch);
+			clickQueue.addLast(PendingClicks.ready(hovered.blockPos(), clicks, false, target));
+			expectedSteps.put(hovered.blockPos(), new ExpectedStep(target, 60, false));
 		}
 		return true;
 	}
@@ -127,24 +135,9 @@ public final class NoteBlockOverlay {
 			}
 		}
 
-		while (placementSequenceKey.consumeClick()) {
-			config.setPlacementSequenceEnabled(!config.placementSequenceEnabled());
-			FastNoteblocksConfig.save();
-			if (config.placementSequenceEnabled()) {
-				resetPlacementSequence();
-			}
-			if (minecraft.player != null) {
-				minecraft.gui.hud.setOverlayMessage(Component.translatable(
-					config.placementSequenceEnabled()
-						? "message.fast-noteblocks.sequence_enabled"
-						: "message.fast-noteblocks.sequence_disabled"
-				), true);
-			}
-		}
+		handleSequenceControls(minecraft, config);
 
-		if (config.placementSequenceEnabled() && !lastPlacementSequenceEnabled) {
-			resetPlacementSequence();
-		} else if (!config.placementSequenceEnabled() && lastPlacementSequenceEnabled) {
+		if (!config.placementSequenceEnabled() && lastPlacementSequenceEnabled) {
 			cancelPlacementSequenceWork();
 		}
 		if (!config.placementSequence().equals(lastPlacementSequenceText)) {
@@ -157,8 +150,9 @@ public final class NoteBlockOverlay {
 			lastLevel = minecraft.level;
 			nearbyNoteBlocks.clear();
 			clickQueue.clear();
-			expectedPitches.clear();
+			expectedSteps.clear();
 			placementWatches.clear();
+			sequenceStepInProgress = false;
 			expandedBlock = null;
 			menuCenterFamily = null;
 			ticksUntilRescan = 0;
@@ -171,8 +165,9 @@ public final class NoteBlockOverlay {
 		if (!config.modEnabled()) {
 			nearbyNoteBlocks.clear();
 			clickQueue.clear();
-			expectedPitches.clear();
+			expectedSteps.clear();
 			placementWatches.clear();
+			sequenceStepInProgress = false;
 			expandedBlock = null;
 			menuCenterFamily = null;
 			return;
@@ -193,6 +188,96 @@ public final class NoteBlockOverlay {
 			menuCenterFamily = null;
 		}
 		performNextClick(minecraft);
+	}
+
+	private void handleSequenceControls(Minecraft minecraft, FastNoteblocksConfig config) {
+		boolean inGame = minecraft.gui.screen() == null;
+		while (placementSequenceKey.consumeClick()) {
+			if (!inGame) {
+				continue;
+			}
+			if (pendingSequenceToggleTicks > 0) {
+				pendingSequenceToggleTicks = 0;
+				resetPlacementSequence();
+				showSequenceHud(minecraft, "message.fast-noteblocks.sequence_reset");
+			} else {
+				pendingSequenceToggleTicks = SEQUENCE_DOUBLE_TAP_TICKS;
+			}
+		}
+
+		boolean leftDownNow = inGame && InputConstants.isKeyDown(minecraft.getWindow(), InputConstants.KEY_LEFT);
+		boolean rightDownNow = inGame && InputConstants.isKeyDown(minecraft.getWindow(), InputConstants.KEY_RIGHT);
+		if (inGame && placementSequenceKey.isDown()) {
+			if (leftDownNow && !leftArrowDown) {
+				pendingSequenceToggleTicks = 0;
+				movePlacementSequence(-1);
+				showSequenceHud(minecraft, "message.fast-noteblocks.sequence_previous");
+			}
+			if (rightDownNow && !rightArrowDown) {
+				pendingSequenceToggleTicks = 0;
+				movePlacementSequence(1);
+				showSequenceHud(minecraft, "message.fast-noteblocks.sequence_next");
+			}
+		}
+		leftArrowDown = leftDownNow;
+		rightArrowDown = rightDownNow;
+
+		if (pendingSequenceToggleTicks > 0 && --pendingSequenceToggleTicks == 0) {
+			config.setPlacementSequenceEnabled(!config.placementSequenceEnabled());
+			FastNoteblocksConfig.save();
+			if (!config.placementSequenceEnabled()) {
+				cancelPlacementSequenceWork();
+			}
+			showSequenceHud(minecraft, config.placementSequenceEnabled()
+				? "message.fast-noteblocks.sequence_resumed"
+				: "message.fast-noteblocks.sequence_paused");
+		}
+	}
+
+	private void movePlacementSequence(int amount) {
+		List<NoteSequence.Step> sequence = configuredSequence();
+		cancelPlacementSequenceWork();
+		if (!sequence.isEmpty()) {
+			placementSequenceIndex = Math.floorMod(placementSequenceIndex + amount, sequence.size());
+		}
+	}
+
+	private void showSequenceHud(Minecraft minecraft, String actionKey) {
+		if (minecraft.player == null) {
+			return;
+		}
+		List<NoteSequence.Step> sequence = configuredSequence();
+		if (sequence.isEmpty()) {
+			minecraft.gui.hud.setOverlayMessage(Component.translatable(
+				"message.fast-noteblocks.sequence_hud_empty", Component.translatable(actionKey)
+			), true);
+			return;
+		}
+		int index = Math.floorMod(placementSequenceIndex, sequence.size());
+		NoteSequence.Step current = sequence.get(index);
+		NoteSequence.Step after = sequence.get((index + 1) % sequence.size());
+		minecraft.gui.hud.setOverlayMessage(Component.translatable(
+			"message.fast-noteblocks.sequence_hud",
+			Component.translatable(actionKey),
+			index + 1,
+			sequence.size(),
+			describeStep(current),
+			describeStep(after)
+		), true);
+	}
+
+	private static Component describeStep(NoteSequence.Step step) {
+		return step.type() == NoteSequence.StepType.NOTE
+			? Component.translatable("message.fast-noteblocks.sequence_note", step.value(), NotePitch.name(step.value()))
+			: Component.translatable("message.fast-noteblocks.sequence_repeater", step.value());
+	}
+
+	private static List<NoteSequence.Step> configuredSequence() {
+		try {
+			return FastNoteblocksConfig.parsePlacementSequence(FastNoteblocksConfig.get().placementSequence());
+		} catch (IllegalArgumentException exception) {
+			return List.of();
+		}
 	}
 
 	private void rescan(Minecraft minecraft) {
@@ -217,15 +302,16 @@ public final class NoteBlockOverlay {
 			return;
 		}
 
-		if (!minecraft.level.getBlockState(pending.blockPos()).is(Blocks.NOTE_BLOCK)
+		BlockState state = minecraft.level.getBlockState(pending.blockPos());
+		if (!matchesStepBlock(state, pending.targetStep())
 			|| !minecraft.player.isWithinBlockInteractionRange(pending.blockPos(), 0.0)) {
 			cancelWorkForBlock(pending.blockPos());
 			return;
 		}
 
 		FastNoteblocksConfig config = FastNoteblocksConfig.get();
-		int actualPitch = minecraft.level.getBlockState(pending.blockPos()).getValue(NoteBlock.NOTE);
-		if (pending.expectedPitchAfterClick() >= 0) {
+		int actualValue = stepValue(state, pending.targetStep());
+		if (pending.expectedValueAfterClick() >= 0) {
 			if (!config.waitForServerAcknowledgement()) {
 				if (pending.remaining() <= 0) {
 					clickQueue.removeFirst();
@@ -234,7 +320,7 @@ public final class NoteBlockOverlay {
 				}
 				return;
 			}
-			if (actualPitch == pending.expectedPitchAfterClick()) {
+			if (actualValue == pending.expectedValueAfterClick()) {
 				if (pending.remaining() <= 0) {
 					clickQueue.removeFirst();
 				} else {
@@ -265,7 +351,7 @@ public final class NoteBlockOverlay {
 			performingAutomatedClick = false;
 		}
 		if (config.waitForServerAcknowledgement()) {
-			replaceFirstPending(pending.afterClick((actualPitch + 1) % NotePitch.PITCH_COUNT));
+			replaceFirstPending(pending.afterClick(nextStepValue(pending.targetStep(), actualValue)));
 		} else if (pending.remaining() <= 1) {
 			clickQueue.removeFirst();
 		} else {
@@ -291,7 +377,8 @@ public final class NoteBlockOverlay {
 			Vec3 fallbackLocation = Vec3.atCenterOf(pos).add(0.0, 0.0, -0.5);
 			return new BlockHitResult(fallbackLocation, Direction.NORTH, pos, false);
 		}
-		if (result.getDirection() == net.minecraft.core.Direction.UP
+		if (minecraft.level.getBlockState(pos).is(Blocks.NOTE_BLOCK)
+			&& result.getDirection() == net.minecraft.core.Direction.UP
 			&& minecraft.player.getMainHandItem().is(ItemTags.NOTE_BLOCK_TOP_INSTRUMENTS)) {
 			return null;
 		}
@@ -304,51 +391,91 @@ public final class NoteBlockOverlay {
 	}
 
 	private void cancelWorkForBlock(BlockPos pos) {
+		boolean placementSequenceWork = clickQueue.stream().anyMatch(
+			pending -> pending.blockPos().equals(pos) && pending.placementSequence()
+		);
 		clickQueue.removeIf(pending -> pending.blockPos().equals(pos));
-		expectedPitches.remove(pos);
+		ExpectedStep removed = expectedSteps.remove(pos);
+		if (placementSequenceWork || removed != null && removed.placementSequence()) {
+			sequenceStepInProgress = false;
+		}
 	}
 
 	private void updateExpectations(ClientLevel level) {
-		expectedPitches.entrySet().removeIf(entry -> {
+		expectedSteps.entrySet().removeIf(entry -> {
 			BlockState state = level.getBlockState(entry.getKey());
-			if (!state.is(Blocks.NOTE_BLOCK) || state.getValue(NoteBlock.NOTE) == entry.getValue().pitch()) {
+			ExpectedStep expected = entry.getValue();
+			if (!matchesStepBlock(state, expected.step())) {
+				if (expected.placementSequence()) {
+					sequenceStepInProgress = false;
+				}
 				return true;
 			}
-			int remaining = entry.getValue().ticksRemaining() - 1;
+			if (stepValue(state, expected.step()) == expected.step().value()) {
+				if (expected.placementSequence()) {
+					advancePlacementSequence();
+				}
+				return true;
+			}
+			int remaining = expected.ticksRemaining() - 1;
 			if (remaining <= 0) {
+				if (expected.placementSequence()) {
+					sequenceStepInProgress = false;
+				}
 				return true;
 			}
-			entry.setValue(new ExpectedPitch(entry.getValue().pitch(), remaining, entry.getValue().placementSequence()));
+			entry.setValue(new ExpectedStep(expected.step(), remaining, expected.placementSequence()));
 			return false;
 		});
 	}
 
-	private InteractionResult watchForNoteBlockPlacement(
+	private static boolean matchesStepBlock(BlockState state, NoteSequence.Step step) {
+		return step.type() == NoteSequence.StepType.NOTE
+			? state.is(Blocks.NOTE_BLOCK)
+			: state.is(Blocks.REPEATER);
+	}
+
+	private static int stepValue(BlockState state, NoteSequence.Step step) {
+		return step.type() == NoteSequence.StepType.NOTE
+			? state.getValue(NoteBlock.NOTE)
+			: state.getValue(RepeaterBlock.DELAY);
+	}
+
+	private static int nextStepValue(NoteSequence.Step step, int value) {
+		return step.type() == NoteSequence.StepType.NOTE
+			? (value + 1) % NotePitch.PITCH_COUNT
+			: value % 4 + 1;
+	}
+
+	private InteractionResult watchForSequencePlacement(
 		net.minecraft.world.entity.player.Player player,
 		net.minecraft.world.level.Level level,
 		InteractionHand hand,
 		BlockHitResult hitResult
 	) {
 		FastNoteblocksConfig config = FastNoteblocksConfig.get();
-		List<Integer> configuredSequence;
-		try {
-			configuredSequence = FastNoteblocksConfig.parsePlacementSequence(config.placementSequence());
-		} catch (IllegalArgumentException exception) {
-			configuredSequence = List.of();
-		}
+		List<NoteSequence.Step> sequence = configuredSequence();
 		if (performingAutomatedClick
 			|| !level.isClientSide()
 			|| !config.modEnabled()
 			|| !config.placementSequenceEnabled()
-			|| configuredSequence.isEmpty()
-			|| !player.getItemInHand(hand).is(Items.NOTE_BLOCK)) {
+			|| sequence.isEmpty()
+			|| sequenceStepInProgress) {
+			return InteractionResult.PASS;
+		}
+		NoteSequence.Step expected = sequence.get(Math.floorMod(placementSequenceIndex, sequence.size()));
+		boolean matchingItem = expected.type() == NoteSequence.StepType.NOTE
+			? player.getItemInHand(hand).is(Items.NOTE_BLOCK)
+			: player.getItemInHand(hand).is(Items.REPEATER);
+		if (!matchingItem) {
 			return InteractionResult.PASS;
 		}
 
 		BlockPlaceContext context = new BlockPlaceContext(player, hand, player.getItemInHand(hand), hitResult);
 		BlockPos placementPos = context.getClickedPos().immutable();
-		if (!level.getBlockState(placementPos).is(Blocks.NOTE_BLOCK)) {
-			placementWatches.put(placementPos, PLACEMENT_WATCH_TICKS);
+		if (!matchesStepBlock(level.getBlockState(placementPos), expected)) {
+			placementWatches.put(placementPos, new PlacementWatch(expected, PLACEMENT_WATCH_TICKS));
+			sequenceStepInProgress = true;
 		}
 		return InteractionResult.PASS;
 	}
@@ -356,46 +483,50 @@ public final class NoteBlockOverlay {
 	private void updatePlacementWatches(Minecraft minecraft) {
 		if (minecraft.level == null) {
 			placementWatches.clear();
+			sequenceStepInProgress = false;
 			return;
 		}
 		if (!FastNoteblocksConfig.get().modEnabled() || !FastNoteblocksConfig.get().placementSequenceEnabled()) {
 			placementWatches.clear();
+			sequenceStepInProgress = false;
 			return;
 		}
 
 		placementWatches.entrySet().removeIf(entry -> {
-			if (minecraft.level.getBlockState(entry.getKey()).is(Blocks.NOTE_BLOCK)) {
-				applyNextPlacementPitch(minecraft, entry.getKey());
+			PlacementWatch watch = entry.getValue();
+			if (matchesStepBlock(minecraft.level.getBlockState(entry.getKey()), watch.step())) {
+				applyPlacementStep(minecraft, entry.getKey(), watch.step());
 				return true;
 			}
-			int remaining = entry.getValue() - 1;
+			int remaining = watch.ticksRemaining() - 1;
 			if (remaining <= 0) {
+				sequenceStepInProgress = false;
 				return true;
 			}
-			entry.setValue(remaining);
+			entry.setValue(new PlacementWatch(watch.step(), remaining));
 			return false;
 		});
 	}
 
-	private void applyNextPlacementPitch(Minecraft minecraft, BlockPos pos) {
-		List<Integer> sequence;
-		try {
-			sequence = FastNoteblocksConfig.parsePlacementSequence(FastNoteblocksConfig.get().placementSequence());
-		} catch (IllegalArgumentException exception) {
-			return;
-		}
-		if (sequence.isEmpty()) {
-			return;
-		}
-
-		int targetPitch = sequence.get(placementSequenceIndex % sequence.size());
-		placementSequenceIndex = (placementSequenceIndex + 1) % sequence.size();
-		int currentPitch = minecraft.level.getBlockState(pos).getValue(NoteBlock.NOTE);
-		int clicks = NotePitch.clicksForward(currentPitch, targetPitch);
+	private void applyPlacementStep(Minecraft minecraft, BlockPos pos, NoteSequence.Step target) {
+		int currentValue = stepValue(minecraft.level.getBlockState(pos), target);
+		int clicks = target.type() == NoteSequence.StepType.NOTE
+			? NotePitch.clicksForward(currentValue, target.value())
+			: Math.floorMod(target.value() - currentValue, 4);
 		if (clicks > 0) {
-			clickQueue.addLast(PendingClicks.ready(pos, clicks, true));
-			expectedPitches.put(pos, new ExpectedPitch(targetPitch, 60, true));
+			clickQueue.addLast(PendingClicks.ready(pos, clicks, true, target));
+			expectedSteps.put(pos, new ExpectedStep(target, 60, true));
+		} else {
+			advancePlacementSequence();
 		}
+	}
+
+	private void advancePlacementSequence() {
+		List<NoteSequence.Step> sequence = configuredSequence();
+		if (!sequence.isEmpty()) {
+			placementSequenceIndex = (Math.floorMod(placementSequenceIndex, sequence.size()) + 1) % sequence.size();
+		}
+		sequenceStepInProgress = false;
 	}
 
 	private void resetPlacementSequence() {
@@ -406,8 +537,9 @@ public final class NoteBlockOverlay {
 
 	private void cancelPlacementSequenceWork() {
 		clickQueue.removeIf(PendingClicks::placementSequence);
-		expectedPitches.entrySet().removeIf(entry -> entry.getValue().placementSequence());
+		expectedSteps.entrySet().removeIf(entry -> entry.getValue().placementSequence());
 		placementWatches.clear();
+		sequenceStepInProgress = false;
 	}
 
 	private void render(LevelRenderContext context) {
@@ -564,9 +696,9 @@ public final class NoteBlockOverlay {
 	}
 
 	private int displayedPitch(ClientLevel level, BlockPos pos) {
-		ExpectedPitch expected = expectedPitches.get(pos);
-		if (expected != null) {
-			return expected.pitch();
+		ExpectedStep expected = expectedSteps.get(pos);
+		if (expected != null && expected.step().type() == NoteSequence.StepType.NOTE) {
+			return expected.step().value();
 		}
 		BlockState state = level.getBlockState(pos);
 		return state.is(Blocks.NOTE_BLOCK) ? state.getValue(NoteBlock.NOTE) : 0;
@@ -628,46 +760,55 @@ public final class NoteBlockOverlay {
 		BlockPos blockPos,
 		int remaining,
 		boolean placementSequence,
-		int expectedPitchAfterClick,
+		NoteSequence.Step targetStep,
+		int expectedValueAfterClick,
 		int ackTicksRemaining,
 		int cooldownTicks
 	) {
-		private static PendingClicks ready(BlockPos blockPos, int remaining, boolean placementSequence) {
-			return new PendingClicks(blockPos, remaining, placementSequence, -1, 0, 0);
+		private static PendingClicks ready(
+			BlockPos blockPos, int remaining, boolean placementSequence, NoteSequence.Step targetStep
+		) {
+			return new PendingClicks(blockPos, remaining, placementSequence, targetStep, -1, 0, 0);
 		}
 
-		private PendingClicks afterClick(int expectedPitch) {
+		private PendingClicks afterClick(int expectedValue) {
 			return new PendingClicks(
-				blockPos, remaining - 1, placementSequence, expectedPitch, INTERACTION_ACK_TIMEOUT_TICKS, 0
+				blockPos, remaining - 1, placementSequence, targetStep,
+				expectedValue, INTERACTION_ACK_TIMEOUT_TICKS, 0
 			);
 		}
 
 		private PendingClicks afterAcknowledgement(int cooldownTicks) {
-			return new PendingClicks(blockPos, remaining, placementSequence, -1, 0, cooldownTicks);
+			return new PendingClicks(blockPos, remaining, placementSequence, targetStep, -1, 0, cooldownTicks);
 		}
 
 		private PendingClicks withoutAcknowledgement(int cooldownTicks) {
-			return new PendingClicks(blockPos, remaining, placementSequence, -1, 0, cooldownTicks);
+			return new PendingClicks(blockPos, remaining, placementSequence, targetStep, -1, 0, cooldownTicks);
 		}
 
 		private PendingClicks afterUnconfirmedClick(int cooldownTicks) {
-			return new PendingClicks(blockPos, remaining - 1, placementSequence, -1, 0, cooldownTicks);
+			return new PendingClicks(blockPos, remaining - 1, placementSequence, targetStep, -1, 0, cooldownTicks);
 		}
 
 		private PendingClicks waitOneTick() {
 			return new PendingClicks(
-				blockPos, remaining, placementSequence, expectedPitchAfterClick, ackTicksRemaining - 1, cooldownTicks
+				blockPos, remaining, placementSequence, targetStep,
+				expectedValueAfterClick, ackTicksRemaining - 1, cooldownTicks
 			);
 		}
 
 		private PendingClicks coolDownOneTick() {
 			return new PendingClicks(
-				blockPos, remaining, placementSequence, expectedPitchAfterClick, ackTicksRemaining, cooldownTicks - 1
+				blockPos, remaining, placementSequence, targetStep,
+				expectedValueAfterClick, ackTicksRemaining, cooldownTicks - 1
 			);
 		}
 	}
 
-	private record ExpectedPitch(int pitch, int ticksRemaining, boolean placementSequence) {
+	private record ExpectedStep(NoteSequence.Step step, int ticksRemaining, boolean placementSequence) {
+	}
+
+	private record PlacementWatch(NoteSequence.Step step, int ticksRemaining) {
 	}
 
 	private record HoveredLabel(BlockPos blockPos, char family) {
