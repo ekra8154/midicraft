@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "fast-noteblocks",
+  "version": "${version}",
+  "name": "Fast Noteblocks",
+  "description": "Client-side note block pitch controls rendered in the world.",
+  "authors": ["ekra8154"],
+  "contact": {},
+  "license": "MIT",
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      "com.fastnoteblocks.client.FastNoteblocksClient"
+    ],
+    "modmenu": [
+      "com.fastnoteblocks.client.compat.FastNoteblocksModMenuIntegration"
+    ]
+  },
+  "mixins": [
+    "fast-noteblocks.client.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=0.19.3",
+    "minecraft": "26.2",
+    "java": ">=25",
+    "fabric-api": "*"
+  },
+  "suggests": {
+    "cloth-config": "*",
+    "modmenu": "*"
+  }
+}
