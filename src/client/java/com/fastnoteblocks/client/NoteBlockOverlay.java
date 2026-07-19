@@ -23,6 +23,7 @@ import net.minecraft.client.renderer.state.level.CameraRenderState;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
+import net.minecraft.tags.ItemTags;
 import net.minecraft.util.LightCoordsUtil;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
@@ -235,6 +236,9 @@ public final class NoteBlockOverlay {
 	}
 
 	private BlockHitResult visibleHitResult(Minecraft minecraft, BlockPos pos) {
+		if (minecraft.player.isSecondaryUseActive()) {
+			return null;
+		}
 		BlockHitResult result = minecraft.level.clip(new ClipContext(
 			minecraft.player.getEyePosition(),
 			Vec3.atCenterOf(pos),
@@ -242,7 +246,14 @@ public final class NoteBlockOverlay {
 			ClipContext.Fluid.NONE,
 			minecraft.player
 		));
-		return result.getBlockPos().equals(pos) ? result : null;
+		if (!result.getBlockPos().equals(pos)) {
+			return null;
+		}
+		if (result.getDirection() == net.minecraft.core.Direction.UP
+			&& minecraft.player.getMainHandItem().is(ItemTags.NOTE_BLOCK_TOP_INSTRUMENTS)) {
+			return null;
+		}
+		return result;
 	}
 
 	private void replaceFirstPending(PendingClicks replacement) {
