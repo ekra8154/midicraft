@@ -16,8 +16,8 @@ public final class FastNoteblocksConfig {
 	public static final int DEFAULT_VIEW_DISTANCE = 10;
 	public static final int MIN_VIEW_DISTANCE = 1;
 	public static final int MAX_VIEW_DISTANCE = 32;
-	public static final int DEFAULT_INTERACTION_DELAY_TICKS = 3;
-	public static final int MIN_INTERACTION_DELAY_TICKS = 1;
+	public static final int DEFAULT_INTERACTION_DELAY_TICKS = 0;
+	public static final int MIN_INTERACTION_DELAY_TICKS = 0;
 	public static final int MAX_INTERACTION_DELAY_TICKS = 10;
 	private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 	private static final Path CONFIG_PATH = FabricLoader.getInstance().getConfigDir().resolve("fast-noteblocks.json");
@@ -26,6 +26,8 @@ public final class FastNoteblocksConfig {
 	private boolean invertScrolling;
 	private int viewDistance;
 	private int interactionDelayTicks;
+	private boolean waitForServerAcknowledgement;
+	private boolean requireLineOfSight;
 	private boolean placementSequenceEnabled;
 	private String placementSequence;
 
@@ -51,6 +53,8 @@ public final class FastNoteblocksConfig {
 				instance.interactionDelayTicks = clampInteractionDelay(
 					stored.interactionDelayTicks == null ? DEFAULT_INTERACTION_DELAY_TICKS : stored.interactionDelayTicks
 				);
+				instance.waitForServerAcknowledgement = Boolean.TRUE.equals(stored.waitForServerAcknowledgement);
+				instance.requireLineOfSight = Boolean.TRUE.equals(stored.requireLineOfSight);
 				instance.placementSequenceEnabled = Boolean.TRUE.equals(stored.placementSequenceEnabled);
 				instance.placementSequence = stored.placementSequence == null ? "" : stored.placementSequence;
 			}
@@ -106,6 +110,22 @@ public final class FastNoteblocksConfig {
 		this.interactionDelayTicks = clampInteractionDelay(interactionDelayTicks);
 	}
 
+	public boolean waitForServerAcknowledgement() {
+		return waitForServerAcknowledgement;
+	}
+
+	public void setWaitForServerAcknowledgement(boolean waitForServerAcknowledgement) {
+		this.waitForServerAcknowledgement = waitForServerAcknowledgement;
+	}
+
+	public boolean requireLineOfSight() {
+		return requireLineOfSight;
+	}
+
+	public void setRequireLineOfSight(boolean requireLineOfSight) {
+		this.requireLineOfSight = requireLineOfSight;
+	}
+
 	public boolean placementSequenceEnabled() {
 		return placementSequenceEnabled;
 	}
@@ -127,6 +147,8 @@ public final class FastNoteblocksConfig {
 		config.invertScrolling = false;
 		config.viewDistance = DEFAULT_VIEW_DISTANCE;
 		config.interactionDelayTicks = DEFAULT_INTERACTION_DELAY_TICKS;
+		config.waitForServerAcknowledgement = false;
+		config.requireLineOfSight = false;
 		config.placementSequenceEnabled = false;
 		config.placementSequence = "";
 		return config;
@@ -144,6 +166,8 @@ public final class FastNoteblocksConfig {
 		private Boolean invertScrolling;
 		private Integer viewDistance;
 		private Integer interactionDelayTicks;
+		private Boolean waitForServerAcknowledgement;
+		private Boolean requireLineOfSight;
 		private Boolean placementSequenceEnabled;
 		private String placementSequence;
 
@@ -154,6 +178,8 @@ public final class FastNoteblocksConfig {
 			this.invertScrolling = config.invertScrolling;
 			this.viewDistance = config.viewDistance;
 			this.interactionDelayTicks = config.interactionDelayTicks;
+			this.waitForServerAcknowledgement = config.waitForServerAcknowledgement;
+			this.requireLineOfSight = config.requireLineOfSight;
 			this.placementSequenceEnabled = config.placementSequenceEnabled;
 			this.placementSequence = config.placementSequence;
 		}

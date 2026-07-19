@@ -43,6 +43,18 @@ public final class FastNoteblocksConfigScreen {
 			.setTooltip(Component.translatable("tooltip.fast-noteblocks.interaction_delay"))
 			.setSaveConsumer(config::setInteractionDelayTicks)
 			.build());
+		general.addEntry(entries.startBooleanToggle(
+				Component.translatable("option.fast-noteblocks.wait_for_ack"), config.waitForServerAcknowledgement())
+			.setDefaultValue(false)
+			.setTooltip(Component.translatable("tooltip.fast-noteblocks.wait_for_ack"))
+			.setSaveConsumer(config::setWaitForServerAcknowledgement)
+			.build());
+		general.addEntry(entries.startBooleanToggle(
+				Component.translatable("option.fast-noteblocks.require_line_of_sight"), config.requireLineOfSight())
+			.setDefaultValue(false)
+			.setTooltip(Component.translatable("tooltip.fast-noteblocks.require_line_of_sight"))
+			.setSaveConsumer(config::setRequireLineOfSight)
+			.build());
 
 		ConfigCategory placement = builder.getOrCreateCategory(Component.translatable("category.fast-noteblocks.placement"));
 		placement.addEntry(entries.startBooleanToggle(

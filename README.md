@@ -21,8 +21,10 @@ configuration button provides:
 
 - inverted scrolling;
 - note-label view distance from 1 to 32 blocks;
-- a conservative interaction delay, defaulting to 3 ticks after each server-
-  acknowledged tuning click;
+- interaction delay from 0 to 10 extra ticks, defaulting to the original
+  one-interaction-per-client-tick speed;
+- optional server-confirmation waiting;
+- optional unobstructed line-of-sight enforcement;
 - automatic note placement sequence enable/disable;
 - a validated, whitespace-agnostic comma-separated pitch sequence using values
   from 0 through 24.
@@ -35,12 +37,13 @@ The settings screen includes a complete `0` through `24` pitch-name guide.
 
 ## Multiplayer safety
 
-Automated tuning sends ordinary vanilla use-block interactions. It sends only
-one click at a time, waits for the resulting note change from the server, then
-applies the configured delay. It also requires normal interaction range and an
-unobstructed line from the player to the note block. This reduces unnecessary
-packets but cannot guarantee compatibility with every server's rules or
-anti-cheat configuration.
+Automated tuning sends ordinary vanilla use-block interactions. By default it
+can send one interaction per client tick, matching the mod's original behavior.
+Optional settings can add delay, wait for each resulting note change from the
+server, and require an unobstructed line from the player to the block. Normal
+interaction range is always enforced so the mod does not send packets that the
+server must reject. These controls cannot guarantee compatibility with every
+server's rules or anti-cheat configuration.
 
 The mod sends ordinary, rate-limited right-click interactions and requires no
 server-side installation. Keep the main hand in a state where a normal

@@ -21,6 +21,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.renderer.state.level.CameraRenderState;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.tags.ItemTags;
@@ -200,13 +201,22 @@ public final class NoteBlockOverlay {
 			return;
 		}
 
+		FastNoteblocksConfig config = FastNoteblocksConfig.get();
 		int actualPitch = minecraft.level.getBlockState(pending.blockPos()).getValue(NoteBlock.NOTE);
 		if (pending.expectedPitchAfterClick() >= 0) {
+			if (!config.waitForServerAcknowledgement()) {
+				if (pending.remaining() <= 0) {
+					clickQueue.removeFirst();
+				} else {
+					replaceFirstPending(pending.withoutAcknowledgement(config.interactionDelayTicks()));
+				}
+				return;
+			}
 			if (actualPitch == pending.expectedPitchAfterClick()) {
 				if (pending.remaining() <= 0) {
 					clickQueue.removeFirst();
 				} else {
-					replaceFirstPending(pending.afterAcknowledgement(FastNoteblocksConfig.get().interactionDelayTicks()));
+					replaceFirstPending(pending.afterAcknowledgement(config.interactionDelayTicks()));
 				}
 			} else if (pending.ackTicksRemaining() <= 0) {
 				cancelWorkForBlock(pending.blockPos());
@@ -221,7 +231,7 @@ public final class NoteBlockOverlay {
 			return;
 		}
 
-		BlockHitResult hitResult = visibleHitResult(minecraft, pending.blockPos());
+		BlockHitResult hitResult = interactionHitResult(minecraft, pending.blockPos(), config.requireLineOfSight());
 		if (hitResult == null) {
 			cancelWorkForBlock(pending.blockPos());
 			return;
@@ -232,10 +242,16 @@ public final class NoteBlockOverlay {
 		} finally {
 			performingAutomatedClick = false;
 		}
-		replaceFirstPending(pending.afterClick((actualPitch + 1) % NotePitch.PITCH_COUNT));
+		if (config.waitForServerAcknowledgement()) {
+			replaceFirstPending(pending.afterClick((actualPitch + 1) % NotePitch.PITCH_COUNT));
+		} else if (pending.remaining() <= 1) {
+			clickQueue.removeFirst();
+		} else {
+			replaceFirstPending(pending.afterUnconfirmedClick(config.interactionDelayTicks()));
+		}
 	}
 
-	private BlockHitResult visibleHitResult(Minecraft minecraft, BlockPos pos) {
+	private BlockHitResult interactionHitResult(Minecraft minecraft, BlockPos pos, boolean requireLineOfSight) {
 		if (minecraft.player.isSecondaryUseActive()) {
 			return null;
 		}
@@ -247,7 +263,11 @@ public final class NoteBlockOverlay {
 			minecraft.player
 		));
 		if (!result.getBlockPos().equals(pos)) {
-			return null;
+			if (requireLineOfSight) {
+				return null;
+			}
+			Vec3 fallbackLocation = Vec3.atCenterOf(pos).add(0.0, 0.0, -0.5);
+			return new BlockHitResult(fallbackLocation, Direction.NORTH, pos, false);
 		}
 		if (result.getDirection() == net.minecraft.core.Direction.UP
 			&& minecraft.player.getMainHandItem().is(ItemTags.NOTE_BLOCK_TOP_INSTRUMENTS)) {
@@ -581,6 +601,14 @@ public final class NoteBlockOverlay {
 
 		private PendingClicks afterAcknowledgement(int cooldownTicks) {
 			return new PendingClicks(blockPos, remaining, placementSequence, -1, 0, cooldownTicks);
+		}
+
+		private PendingClicks withoutAcknowledgement(int cooldownTicks) {
+			return new PendingClicks(blockPos, remaining, placementSequence, -1, 0, cooldownTicks);
+		}
+
+		private PendingClicks afterUnconfirmedClick(int cooldownTicks) {
+			return new PendingClicks(blockPos, remaining - 1, placementSequence, -1, 0, cooldownTicks);
 		}
 
 		private PendingClicks waitOneTick() {
