@@ -23,12 +23,22 @@ class NoteSequenceTest {
 	}
 
 	@Test
+	void expandsLongDelaysIntoTheMinimumNumberOfRepeaters() {
+		assertEquals(List.of(
+			new NoteSequence.Step(NoteSequence.StepType.REPEATER, 4, 10, 0, 3),
+			new NoteSequence.Step(NoteSequence.StepType.REPEATER, 4, 10, 1, 3),
+			new NoteSequence.Step(NoteSequence.StepType.REPEATER, 2, 10, 2, 3)
+		), NoteSequence.parse("10d"));
+		assertEquals(16, NoteSequence.parse("64d").size());
+	}
+
+	@Test
 	void rejectsMissingAndOutOfRangeEntries() {
 		assertThrows(IllegalArgumentException.class, () -> NoteSequence.parse("0,,12"));
 		assertThrows(IllegalArgumentException.class, () -> NoteSequence.parse("-1,12"));
 		assertThrows(IllegalArgumentException.class, () -> NoteSequence.parse("0,25"));
 		assertThrows(IllegalArgumentException.class, () -> NoteSequence.parse("0,G,12"));
 		assertThrows(IllegalArgumentException.class, () -> NoteSequence.parse("0,0d,12"));
-		assertThrows(IllegalArgumentException.class, () -> NoteSequence.parse("0,5d,12"));
+		assertThrows(IllegalArgumentException.class, () -> NoteSequence.parse("0,65d,12"));
 	}
 }

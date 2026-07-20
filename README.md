@@ -43,13 +43,16 @@ configuration button provides:
 - optional unobstructed line-of-sight enforcement;
 - a resumable unified note-block and repeater placement sequence;
 - a validated, whitespace-agnostic sequence using note values `0` through `24`
-  and explicit repeater delays `1d` through `4d`.
+  and explicit repeater delay groups `1d` through `64d`.
 
 For example, `0, 2d, 4, 2d, 7` expects a note block tuned to pitch 0, a repeater
 set to delay 2, and so on. A mismatched placement does not advance the sequence,
 and the sequence repeats when it reaches the end. Consecutive steps of the same
 block type can queue while earlier blocks are still adjusting; transitions
 between note blocks and repeaters wait for the current batch to finish.
+Long delay groups use the minimum number of physical repeaters: `10d` expands
+to `4d + 4d + 2d`. The HUD keeps that group in one dotted capsule while H +
+wheel and placement advance through its individual repeater dots.
 
 The sequence control key is unbound by default and can be assigned in
 Minecraft's Controls screen. Hold it to see the sequence, hold and scroll

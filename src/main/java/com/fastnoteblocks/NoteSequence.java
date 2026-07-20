@@ -4,18 +4,24 @@ import java.util.ArrayList;
 import java.util.List;
 
 public final class NoteSequence {
+	public static final int MAX_GROUPED_DELAY = 64;
+
 	public enum StepType {
 		NOTE,
 		REPEATER
 	}
 
-	public record Step(StepType type, int value) {
+	public record Step(StepType type, int value, int delayTotal, int delayIndex, int delayCount) {
 		public static Step note(int pitch) {
-			return new Step(StepType.NOTE, pitch);
+			return new Step(StepType.NOTE, pitch, 0, 0, 1);
 		}
 
 		public static Step repeater(int delay) {
-			return new Step(StepType.REPEATER, delay);
+			return new Step(StepType.REPEATER, delay, delay, 0, 1);
+		}
+
+		private static Step groupedRepeater(int delay, int total, int index, int count) {
+			return new Step(StepType.REPEATER, delay, total, index, count);
 		}
 	}
 
@@ -42,10 +48,16 @@ public final class NoteSequence {
 				throw new IllegalArgumentException("Sequence entries must be notes or repeater delays", exception);
 			}
 			if (repeater) {
-				if (parsed < 1 || parsed > 4) {
-					throw new IllegalArgumentException("Repeater delays must be between 1d and 4d");
+				if (parsed < 1 || parsed > MAX_GROUPED_DELAY) {
+					throw new IllegalArgumentException("Repeater delays must be between 1d and 64d");
 				}
-				steps.add(Step.repeater(parsed));
+				int repeaterCount = (parsed + 3) / 4;
+				int remaining = parsed;
+				for (int index = 0; index < repeaterCount; index++) {
+					int delay = Math.min(4, remaining);
+					steps.add(Step.groupedRepeater(delay, parsed, index, repeaterCount));
+					remaining -= delay;
+				}
 			} else {
 				if (parsed < 0 || parsed >= NotePitch.PITCH_COUNT) {
 					throw new IllegalArgumentException("Note pitches must be between 0 and 24");

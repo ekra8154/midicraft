@@ -98,8 +98,8 @@ public final class NoteBlockOverlay {
 	private int sequenceHudTicks;
 	private Component sequenceHudAction;
 	private SequenceHudMode sequenceHudMode = SequenceHudMode.FULL;
-	private NoteSequence.Step sequenceAdvanceFrom;
-	private NoteSequence.Step sequenceAdvanceTo;
+	private int sequenceAdvanceFromIndex = -1;
+	private int sequenceAdvanceToIndex = -1;
 	private int sequenceTapWindowTicks;
 	private boolean sequenceControlKeyDown;
 	private boolean sequenceGestureConsumed;
@@ -392,9 +392,9 @@ public final class NoteBlockOverlay {
 		sequenceHudTicks = SEQUENCE_HUD_TICKS;
 	}
 
-	private void showSequenceAdvance(NoteSequence.Step placed, NoteSequence.Step next) {
-		sequenceAdvanceFrom = placed;
-		sequenceAdvanceTo = next;
+	private void showSequenceAdvance(int placedIndex, int nextIndex) {
+		sequenceAdvanceFromIndex = placedIndex;
+		sequenceAdvanceToIndex = nextIndex;
 		sequenceHudAction = null;
 		sequenceHudMode = SequenceHudMode.ADVANCE;
 		sequenceHudTicks = SEQUENCE_ADVANCE_HUD_TICKS;
@@ -421,33 +421,35 @@ public final class NoteBlockOverlay {
 			), centerX, y, 0xFFFF5555);
 			return;
 		}
+		List<SequenceHudItem> items = sequenceHudItems(sequence);
 		if (!keyHeld && sequenceHudMode == SequenceHudMode.ADVANCE
-			&& sequenceAdvanceFrom != null && sequenceAdvanceTo != null) {
-			renderSequenceAdvance(graphics, deltaTracker, centerX, y);
+			&& sequenceAdvanceFromIndex >= 0 && sequenceAdvanceToIndex >= 0) {
+			renderSequenceAdvance(graphics, deltaTracker, centerX, y, sequence, items);
 			drawSequencePosition(graphics, centerX, y, sequence.size());
 			return;
 		}
 
 		int index = Math.max(0, Math.min(sequence.size() - 1, placementSequenceIndex));
-		SequenceHudToken current = sequenceHudToken(sequence.get(index));
+		int itemIndex = sequenceHudItemIndex(items, index);
+		SequenceHudToken current = sequenceHudToken(items.get(itemIndex), index);
 		int currentWidth = minecraft.font.width(current.text());
 		int currentX = centerX - currentWidth / 2;
 		drawSequenceHudToken(graphics, current, currentX, y, true);
 
 		int leftX = currentX - 7;
-		for (int offset = 1; offset <= SEQUENCE_HUD_RADIUS && index - offset >= 0; offset++) {
-			SequenceHudToken token = sequenceHudToken(sequence.get(index - offset));
+		for (int offset = 1; offset <= SEQUENCE_HUD_RADIUS && itemIndex - offset >= 0; offset++) {
+			SequenceHudToken token = sequenceHudToken(items.get(itemIndex - offset), -1);
 			int width = minecraft.font.width(token.text());
 			leftX -= width;
 			drawSequenceHudToken(graphics, token, leftX, y, false);
-			leftX -= token.repeater() ? 4 : 7;
+			leftX -= sequenceHudTokenGap(token);
 		}
 
 		int rightX = currentX + currentWidth + 7;
-		for (int offset = 1; offset <= SEQUENCE_HUD_RADIUS && index + offset < sequence.size(); offset++) {
-			SequenceHudToken token = sequenceHudToken(sequence.get(index + offset));
+		for (int offset = 1; offset <= SEQUENCE_HUD_RADIUS && itemIndex + offset < items.size(); offset++) {
+			SequenceHudToken token = sequenceHudToken(items.get(itemIndex + offset), -1);
 			drawSequenceHudToken(graphics, token, rightX, y, false);
-			rightX += minecraft.font.width(token.text()) + (token.repeater() ? 4 : 7);
+			rightX += minecraft.font.width(token.text()) + sequenceHudTokenGap(token);
 		}
 		drawSequencePosition(graphics, centerX, y, sequence.size());
 	}
@@ -459,30 +461,88 @@ public final class NoteBlockOverlay {
 	}
 
 	private void renderSequenceAdvance(
-		GuiGraphicsExtractor graphics, DeltaTracker deltaTracker, int centerX, int y
+		GuiGraphicsExtractor graphics,
+		DeltaTracker deltaTracker,
+		int centerX,
+		int y,
+		List<NoteSequence.Step> sequence,
+		List<SequenceHudItem> items
 	) {
 		Minecraft minecraft = Minecraft.getInstance();
-		SequenceHudToken placed = sequenceHudToken(sequenceAdvanceFrom);
-		SequenceHudToken next = sequenceHudToken(sequenceAdvanceTo);
+		int placedIndex = Math.max(0, Math.min(sequence.size() - 1, sequenceAdvanceFromIndex));
+		int nextIndex = Math.max(0, Math.min(sequence.size() - 1, sequenceAdvanceToIndex));
+		SequenceHudItem placedItem = items.get(sequenceHudItemIndex(items, placedIndex));
+		SequenceHudItem nextItem = items.get(sequenceHudItemIndex(items, nextIndex));
+		float elapsed = SEQUENCE_ADVANCE_HUD_TICKS - sequenceHudTicks
+			+ deltaTracker.getGameTimeDeltaPartialTick(false);
+		float progress = Math.max(0.0F, Math.min(1.0F, elapsed / SEQUENCE_ADVANCE_ANIMATION_TICKS));
+		if (placedItem == nextItem) {
+			int activeIndex = progress < 0.5F ? placedIndex : nextIndex;
+			SequenceHudToken token = sequenceHudToken(nextItem, activeIndex);
+			int x = centerX - minecraft.font.width(token.text()) / 2;
+			drawSequenceHudToken(graphics, token, x, y, true);
+			return;
+		}
+		SequenceHudToken placed = sequenceHudToken(placedItem, placedIndex);
+		SequenceHudToken next = sequenceHudToken(nextItem, nextIndex);
 		int placedWidth = minecraft.font.width(placed.text());
 		int nextWidth = minecraft.font.width(next.text());
 		int placedStartX = centerX - placedWidth / 2;
 		int nextStartX = placedStartX + placedWidth + 7;
 		int nextFinalX = centerX - nextWidth / 2;
 		int placedFinalX = nextFinalX - placedWidth - 7;
-		float elapsed = SEQUENCE_ADVANCE_HUD_TICKS - sequenceHudTicks
-			+ deltaTracker.getGameTimeDeltaPartialTick(false);
-		float progress = Math.max(0.0F, Math.min(1.0F, elapsed / SEQUENCE_ADVANCE_ANIMATION_TICKS));
 		int placedX = Math.round(placedStartX + (placedFinalX - placedStartX) * progress);
 		int nextX = Math.round(nextStartX + (nextFinalX - nextStartX) * progress);
 		drawSequenceHudToken(graphics, placed, placedX, y, false);
 		drawSequenceHudToken(graphics, next, nextX, y, true);
 	}
 
-	private static SequenceHudToken sequenceHudToken(NoteSequence.Step step) {
-		return step.type() == NoteSequence.StepType.NOTE
-			? new SequenceHudToken(NotePitch.name(step.value()) + " " + step.value(), false)
-			: new SequenceHudToken(step.value() + "d", true);
+	private static List<SequenceHudItem> sequenceHudItems(List<NoteSequence.Step> sequence) {
+		List<SequenceHudItem> items = new ArrayList<>();
+		for (int index = 0; index < sequence.size();) {
+			NoteSequence.Step step = sequence.get(index);
+			if (step.type() == NoteSequence.StepType.REPEATER && step.delayCount() > 1) {
+				int endIndex = Math.min(sequence.size() - 1, index + step.delayCount() - 1);
+				items.add(new SequenceHudItem(index, endIndex, step));
+				index = endIndex + 1;
+			} else {
+				items.add(new SequenceHudItem(index, index, step));
+				index++;
+			}
+		}
+		return items;
+	}
+
+	private static int sequenceHudItemIndex(List<SequenceHudItem> items, int physicalIndex) {
+		for (int index = 0; index < items.size(); index++) {
+			SequenceHudItem item = items.get(index);
+			if (physicalIndex >= item.startIndex() && physicalIndex <= item.endIndex()) {
+				return index;
+			}
+		}
+		return Math.max(0, items.size() - 1);
+	}
+
+	private static SequenceHudToken sequenceHudToken(SequenceHudItem item, int activePhysicalIndex) {
+		NoteSequence.Step step = item.step();
+		if (step.type() == NoteSequence.StepType.NOTE) {
+			return new SequenceHudToken(NotePitch.name(step.value()) + " " + step.value(), false, false);
+		}
+		if (step.delayCount() == 1) {
+			return new SequenceHudToken(step.value() + "d", true, false);
+		}
+		StringBuilder text = new StringBuilder().append(step.delayTotal()).append("d ");
+		for (int dot = 0; dot < step.delayCount(); dot++) {
+			if (dot > 0) {
+				text.append(' ');
+			}
+			text.append(activePhysicalIndex == item.startIndex() + dot ? '\u2022' : '\u00b7');
+		}
+		return new SequenceHudToken(text.toString(), true, true);
+	}
+
+	private static int sequenceHudTokenGap(SequenceHudToken token) {
+		return token.repeater() && !token.grouped() ? 4 : 7;
 	}
 
 	private static void drawSequenceHudToken(
@@ -492,7 +552,7 @@ public final class NoteBlockOverlay {
 		int width = minecraft.font.width(token.text());
 		if (current) {
 			graphics.fill(x - 4, y - 3, x + width + 4, y + minecraft.font.lineHeight + 3, 0xB8000000);
-		} else if (!token.repeater()) {
+		} else if (!token.repeater() || token.grouped()) {
 			graphics.fill(x - 2, y - 2, x + width + 2, y + minecraft.font.lineHeight + 2, 0x78000000);
 		}
 		int color = current ? 0xFFFFAA00 : token.repeater() ? 0xFF999999 : 0xFFFFFFFF;
@@ -785,7 +845,7 @@ public final class NoteBlockOverlay {
 			int previousIndex = Math.floorMod(placementSequenceIndex, sequence.size());
 			placementSequenceIndex = (previousIndex + 1) % sequence.size();
 			persistPlacementSequencePosition();
-			showSequenceAdvance(sequence.get(previousIndex), sequence.get(placementSequenceIndex));
+			showSequenceAdvance(previousIndex, placementSequenceIndex);
 			selectCurrentSequenceItem(Minecraft.getInstance());
 		}
 	}
@@ -1345,7 +1405,10 @@ public final class NoteBlockOverlay {
 	private record LabelOffset(double right, double up) {
 	}
 
-	private record SequenceHudToken(String text, boolean repeater) {
+	private record SequenceHudToken(String text, boolean repeater, boolean grouped) {
+	}
+
+	private record SequenceHudItem(int startIndex, int endIndex, NoteSequence.Step step) {
 	}
 
 	private enum SequenceHudMode {
