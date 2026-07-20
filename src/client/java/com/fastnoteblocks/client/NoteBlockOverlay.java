@@ -427,7 +427,7 @@ public final class NoteBlockOverlay {
 		if (!keyHeld && sequenceHudMode == SequenceHudMode.ADVANCE
 			&& sequenceAdvanceFromIndex >= 0 && sequenceAdvanceToIndex >= 0) {
 			renderSequenceAdvance(graphics, deltaTracker, centerX, y, sequence, items);
-			drawSequencePosition(graphics, centerX, y, sequence.size());
+			drawSequencePosition(graphics, centerX, y, sequence);
 			return;
 		}
 
@@ -453,13 +453,26 @@ public final class NoteBlockOverlay {
 			drawSequenceHudToken(graphics, token, rightX, y, false);
 			rightX += minecraft.font.width(token.text()) + sequenceHudTokenGap(token);
 		}
-		drawSequencePosition(graphics, centerX, y, sequence.size());
+		drawSequencePosition(graphics, centerX, y, sequence);
 	}
 
-	private void drawSequencePosition(GuiGraphicsExtractor graphics, int centerX, int y, int sequenceSize) {
+	private void drawSequencePosition(GuiGraphicsExtractor graphics, int centerX, int y, List<NoteSequence.Step> sequence) {
 		Minecraft minecraft = Minecraft.getInstance();
-		String position = (Math.floorMod(placementSequenceIndex, sequenceSize) + 1) + "/" + sequenceSize;
-		graphics.centeredText(minecraft.font, position, centerX, y + minecraft.font.lineHeight + 6, 0xFF777777);
+		NoteSequence.Progress progress = NoteSequence.progress(sequence, placementSequenceIndex);
+		String position = progress.position() + "/" + progress.total();
+		int positionY = y + minecraft.font.lineHeight + 6;
+		graphics.centeredText(minecraft.font, position, centerX, positionY, 0xFF999999);
+
+		String noteBlocks = progress.noteBlockPosition() + "/" + progress.noteBlockTotal() + " nb";
+		String repeaters = progress.repeaterPosition() + "/" + progress.repeaterTotal() + " rp";
+		int smallX = centerX + minecraft.font.width(position) / 2 + 5;
+		float scale = 0.65F;
+		graphics.pose().pushMatrix();
+		graphics.pose().translate(smallX, positionY - 1);
+		graphics.pose().scale(scale, scale);
+		graphics.text(minecraft.font, noteBlocks, 0, 0, 0xFF55FFFF, false);
+		graphics.text(minecraft.font, repeaters, 0, minecraft.font.lineHeight + 1, 0xFFFFAA00, false);
+		graphics.pose().popMatrix();
 	}
 
 	private void renderSequenceAdvance(

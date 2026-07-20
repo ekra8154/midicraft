@@ -41,4 +41,17 @@ class NoteSequenceTest {
 		assertThrows(IllegalArgumentException.class, () -> NoteSequence.parse("0,0d,12"));
 		assertThrows(IllegalArgumentException.class, () -> NoteSequence.parse("0,65d,12"));
 	}
+
+	@Test
+	void countsPhysicalNoteBlockAndRepeaterProgress() {
+		List<NoteSequence.Step> steps = NoteSequence.parse("0, 10d, 7, 2d");
+		assertEquals(
+			new NoteSequence.Progress(5, 6, 2, 2, 3, 4),
+			NoteSequence.progress(steps, 4)
+		);
+		assertEquals(
+			new NoteSequence.Progress(1, 6, 1, 2, 0, 4),
+			NoteSequence.progress(steps, 6)
+		);
+	}
 }

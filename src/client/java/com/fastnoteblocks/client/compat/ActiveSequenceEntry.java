@@ -188,7 +188,7 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 
 	@Override
 	public int getItemHeight() {
-		return expanded ? EDITOR_HEIGHT + 40 : 24;
+		return expanded ? EDITOR_HEIGHT + 51 : 24;
 	}
 
 	@Override
@@ -213,15 +213,35 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 		nameBox.extractRenderState(graphics, mouseX, mouseY, partialTick);
 
 		if (expanded) {
-			extractPitchGuide(graphics, x, y + 25, entryWidth);
+			extractSequenceCounts(graphics, x, y + 25);
+			extractPitchGuide(graphics, x, y + 36, entryWidth);
 			SequenceEditBox box = editor(entryWidth);
 			box.setX(x);
-			box.setY(y + 36);
+			box.setY(y + 47);
 			box.extractRenderState(graphics, mouseX, mouseY, partialTick);
 		}
 		if (!valid && mouseX >= labelX && mouseX <= nameX && mouseY >= y && mouseY < y + 20) {
 			graphics.setTooltipForNextFrame(Component.translatable("error.fast-noteblocks.sequence"), mouseX, mouseY);
 		}
+	}
+
+	private void extractSequenceCounts(GuiGraphicsExtractor graphics, int x, int y) {
+		NoteSequence.Progress progress;
+		try {
+			progress = NoteSequence.progress(NoteSequence.parse(getValue()), config.placementSequencePosition());
+		} catch (IllegalArgumentException ignored) {
+			return;
+		}
+		if (progress.total() == 0) {
+			return;
+		}
+		Component counts = Component.empty()
+			.append(Component.literal(progress.position() + "/" + progress.total() + " overall   ").withStyle(net.minecraft.ChatFormatting.GRAY))
+			.append(Component.literal(progress.noteBlockPosition() + "/" + progress.noteBlockTotal() + " note blocks   ")
+				.withStyle(net.minecraft.ChatFormatting.AQUA))
+			.append(Component.literal(progress.repeaterPosition() + "/" + progress.repeaterTotal() + " repeaters")
+				.withStyle(net.minecraft.ChatFormatting.GOLD));
+		graphics.text(Minecraft.getInstance().font, counts, x, y, 0xFFFFFFFF, false);
 	}
 
 	private static void extractPitchGuide(GuiGraphicsExtractor graphics, int x, int y, int width) {

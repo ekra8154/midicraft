@@ -25,6 +25,16 @@ public final class NoteSequence {
 		}
 	}
 
+	public record Progress(
+		int position,
+		int total,
+		int noteBlockPosition,
+		int noteBlockTotal,
+		int repeaterPosition,
+		int repeaterTotal
+	) {
+	}
+
 	private NoteSequence() {
 	}
 
@@ -66,5 +76,30 @@ public final class NoteSequence {
 			}
 		}
 		return List.copyOf(steps);
+	}
+
+	public static Progress progress(List<Step> steps, int currentIndex) {
+		if (steps == null || steps.isEmpty()) {
+			return new Progress(0, 0, 0, 0, 0, 0);
+		}
+		int index = Math.floorMod(currentIndex, steps.size());
+		int noteTotal = 0;
+		int repeaterTotal = 0;
+		int notePosition = 0;
+		int repeaterPosition = 0;
+		for (int i = 0; i < steps.size(); i++) {
+			if (steps.get(i).type() == StepType.NOTE) {
+				noteTotal++;
+				if (i <= index) {
+					notePosition++;
+				}
+			} else {
+				repeaterTotal++;
+				if (i <= index) {
+					repeaterPosition++;
+				}
+			}
+		}
+		return new Progress(index + 1, steps.size(), notePosition, noteTotal, repeaterPosition, repeaterTotal);
 	}
 }
