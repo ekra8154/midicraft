@@ -101,6 +101,7 @@ public final class FastNoteblocksConfig {
 	private boolean autoSelectSequenceBlock;
 	private String placementSequence;
 	private int placementSequencePosition;
+	private String activeSequenceName;
 	private String previewInstrument;
 	private List<SavedSequence> savedSequences;
 
@@ -152,6 +153,9 @@ public final class FastNoteblocksConfig {
 				instance.placementSequencePosition = Math.max(0,
 					stored.placementSequencePosition == null ? 0 : stored.placementSequencePosition
 				);
+				instance.activeSequenceName = stored.activeSequenceName == null || stored.activeSequenceName.isBlank()
+					? "Untitled sequence"
+					: stored.activeSequenceName;
 				instance.previewInstrument = stored.previewInstrument == null ? "HARP" : stored.previewInstrument;
 				instance.savedSequences = stored.savedSequences == null
 					? new ArrayList<>()
@@ -335,6 +339,16 @@ public final class FastNoteblocksConfig {
 		this.placementSequencePosition = Math.max(0, placementSequencePosition);
 	}
 
+	public String activeSequenceName() {
+		return activeSequenceName;
+	}
+
+	public void setActiveSequenceName(String activeSequenceName) {
+		this.activeSequenceName = activeSequenceName == null || activeSequenceName.isBlank()
+			? "Untitled sequence"
+			: activeSequenceName.trim();
+	}
+
 	public String previewInstrument() {
 		return previewInstrument;
 	}
@@ -370,6 +384,7 @@ public final class FastNoteblocksConfig {
 		config.autoSelectSequenceBlock = false;
 		config.placementSequence = "";
 		config.placementSequencePosition = 0;
+		config.activeSequenceName = "Untitled sequence";
 		config.previewInstrument = "HARP";
 		config.savedSequences = new ArrayList<>();
 		return config;
@@ -418,6 +433,7 @@ public final class FastNoteblocksConfig {
 		private Boolean autoSelectSequenceBlock;
 		private String placementSequence;
 		private Integer placementSequencePosition;
+		private String activeSequenceName;
 		private String previewInstrument;
 		private List<SavedSequence> savedSequences;
 
@@ -442,6 +458,7 @@ public final class FastNoteblocksConfig {
 			this.autoSelectSequenceBlock = config.autoSelectSequenceBlock;
 			this.placementSequence = config.placementSequence;
 			this.placementSequencePosition = config.placementSequencePosition;
+			this.activeSequenceName = config.activeSequenceName;
 			this.previewInstrument = config.previewInstrument;
 			this.savedSequences = config.savedSequences;
 		}

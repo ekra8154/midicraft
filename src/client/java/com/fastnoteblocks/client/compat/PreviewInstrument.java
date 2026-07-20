@@ -38,6 +38,11 @@ record PreviewInstrument(String id, String name, Item icon, Holder<SoundEvent> s
 	}
 
 	void play() {
-		Minecraft.getInstance().getSoundManager().play(SimpleSoundInstance.forUI(sound.value(), 1.0F, 0.55F));
+		play(12);
+	}
+
+	void play(int note) {
+		float pitch = (float)Math.pow(2.0, (note - 12) / 12.0);
+		Minecraft.getInstance().getSoundManager().play(SimpleSoundInstance.forUI(sound.value(), pitch, 0.55F));
 	}
 }

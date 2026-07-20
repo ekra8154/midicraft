@@ -70,6 +70,7 @@ final class InstrumentPreviewEntry extends AbstractConfigListEntry<String> {
 		}
 		PreviewInstrument instrument = PreviewInstrument.VALUES.get(i);
 		selected = instrument.id();
+		config.setPreviewInstrument(selected);
 		instrument.play();
 		return true;
 	}

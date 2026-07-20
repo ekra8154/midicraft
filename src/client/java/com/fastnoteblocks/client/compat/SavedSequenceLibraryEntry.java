@@ -26,6 +26,7 @@ final class SavedSequenceLibraryEntry extends AbstractConfigListEntry<List<Saved
 	private final List<SavedRow> rows = new ArrayList<>();
 	private final List<SavedSequence> initialValue;
 	private final Button addButton;
+	private final Button saveActiveButton;
 
 	SavedSequenceLibraryEntry(FastNoteblocksConfig config, ActiveSequenceEntry activeSequence) {
 		super(Component.literal("Saved sequences"), false);
@@ -36,9 +37,14 @@ final class SavedSequenceLibraryEntry extends AbstractConfigListEntry<List<Saved
 			rows.add(new SavedRow(saved));
 		}
 		this.addButton = Button.builder(Component.literal("+ Add sequence"), button ->
-			rows.add(new SavedRow(new SavedSequence("Untitled sequence", activeSequence.getValue()))))
-			.bounds(0, 0, 150, 20)
-			.tooltip(Tooltip.create(Component.literal("Save a new editable copy of the active sequence")))
+			rows.add(new SavedRow(new SavedSequence("Untitled sequence", ""))))
+			.bounds(0, 0, 120, 20)
+			.tooltip(Tooltip.create(Component.literal("Add a blank saved sequence")))
+			.build();
+		this.saveActiveButton = Button.builder(Component.literal("Save active sequence"), button ->
+			rows.add(new SavedRow(new SavedSequence(activeSequence.sequenceName(), activeSequence.getValue()))))
+			.bounds(0, 0, 140, 20)
+			.tooltip(Tooltip.create(Component.literal("Save a copy of the active sequence")))
 			.build();
 	}
 
@@ -60,9 +66,13 @@ final class SavedSequenceLibraryEntry extends AbstractConfigListEntry<List<Saved
 			row.extract(graphics, x, rowY, entryWidth, mouseX, mouseY, partialTick);
 			rowY += row.height() + 4;
 		}
-		addButton.setX(x + (entryWidth - addButton.getWidth()) / 2);
+		int footerWidth = addButton.getWidth() + 4 + saveActiveButton.getWidth();
+		addButton.setX(x + (entryWidth - footerWidth) / 2);
 		addButton.setY(rowY);
 		addButton.extractRenderState(graphics, mouseX, mouseY, partialTick);
+		saveActiveButton.setX(addButton.getX() + addButton.getWidth() + 4);
+		saveActiveButton.setY(rowY);
+		saveActiveButton.extractRenderState(graphics, mouseX, mouseY, partialTick);
 	}
 
 	private List<AbstractWidget> widgets() {
@@ -71,6 +81,7 @@ final class SavedSequenceLibraryEntry extends AbstractConfigListEntry<List<Saved
 			widgets.addAll(row.widgets());
 		}
 		widgets.add(addButton);
+		widgets.add(saveActiveButton);
 		return widgets;
 	}
 
@@ -124,7 +135,7 @@ final class SavedSequenceLibraryEntry extends AbstractConfigListEntry<List<Saved
 			singleBox.setMaxLength(12000);
 			singleBox.setValue(singleLine(saved.sequence()));
 			singleBox.addFormatter(this::formatCollapsed);
-			this.loadButton = Button.builder(Component.literal("Load"), button -> activeSequence.setValue(sequence()))
+			this.loadButton = Button.builder(Component.literal("Load"), button -> activeSequence.setSequence(nameBox.getValue(), sequence()))
 				.bounds(0, 0, 42, 20)
 				.tooltip(Tooltip.create(Component.literal("Restore this into the active sequence editor")))
 				.build();
