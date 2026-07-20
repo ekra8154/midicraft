@@ -179,6 +179,12 @@ public final class NoteBlockOverlay {
 			return false;
 		}
 		if (!FastNoteblocksConfig.get().placementSequenceEnabled()) {
+			if (!sequenceControlKeyDown) {
+				sequenceControlKeyDown = true;
+			}
+			sequenceGestureConsumed = true;
+			sequenceSecondTap = false;
+			sequenceTapWindowTicks = 0;
 			return true;
 		}
 		if (!sequenceControlKeyDown) {
@@ -296,7 +302,7 @@ public final class NoteBlockOverlay {
 		// Drain click counts so operating-system key repeats can never masquerade as extra taps.
 		while (placementSequenceKey.consumeClick()) {
 		}
-		if (!inGame || !config.placementSequenceEnabled()) {
+		if (!inGame) {
 			sequenceTapWindowTicks = 0;
 			sequenceControlKeyDown = placementSequenceKey.isDown();
 			sequenceGestureConsumed = sequenceControlKeyDown;
