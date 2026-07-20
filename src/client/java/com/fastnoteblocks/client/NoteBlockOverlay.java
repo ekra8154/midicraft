@@ -546,7 +546,7 @@ public final class NoteBlockOverlay {
 	private static SequenceHudToken sequenceHudToken(SequenceHudItem item, int activePhysicalIndex) {
 		NoteSequence.Step step = item.step();
 		if (step.type() == NoteSequence.StepType.NOTE) {
-			return new SequenceHudToken(NotePitch.name(step.value()) + " " + step.value(), false, false);
+			return new SequenceHudToken(NotePitch.name(step.value()) + step.value(), false, false);
 		}
 		if (step.delayCount() == 1) {
 			return new SequenceHudToken(step.value() + "d", true, false);
@@ -568,7 +568,7 @@ public final class NoteBlockOverlay {
 	private static int sequenceHudItemGap(SequenceHudItem left, SequenceHudItem right) {
 		if (left.step().type() == NoteSequence.StepType.NOTE
 			&& right.step().type() == NoteSequence.StepType.NOTE) {
-			return 1;
+			return 3;
 		}
 		return sequenceHudTokenGap(sequenceHudToken(left, -1));
 	}
