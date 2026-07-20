@@ -52,6 +52,16 @@ final class SequenceEditBox extends MultiLineEditBox {
 	}
 
 	@Override
+	public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+		double current = scrollAmount();
+		if ((scrollY > 0.0 && current <= 0.0)
+				|| (scrollY < 0.0 && current >= maxScrollAmount())) {
+			return false;
+		}
+		return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
+	}
+
+	@Override
 	protected void extractContents(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
 		extractPlaybackHighlight(graphics);
 		super.extractContents(graphics, mouseX, mouseY, partialTick);

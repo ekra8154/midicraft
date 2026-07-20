@@ -16,6 +16,9 @@ import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.components.events.GuiEventListener;
 import net.minecraft.client.gui.narration.NarratableEntry;
+import net.minecraft.client.gui.screens.ConfirmScreen;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.ItemStack;
 
@@ -41,12 +44,28 @@ final class SavedSequenceLibraryEntry extends AbstractConfigListEntry<List<Saved
 		}).bounds(0, 0, 120, 20)
 			.tooltip(Tooltip.create(Component.literal("Add a blank one-track sequence")))
 			.build();
-		this.saveActiveButton = Button.builder(Component.literal("Save active sequence"), button -> {
-			rows.add(new SavedRow(activeSequence.savedSequence()));
+		this.saveActiveButton = Button.builder(Component.literal("Save/update"), button -> {
+			SavedSequence active = activeSequence.savedSequence();
+			int existing = matchingRow(active.name());
+			if (existing >= 0) {
+				rows.set(existing, new SavedRow(active));
+			} else {
+				rows.add(new SavedRow(active));
+			}
 			persistLibrary();
-		}).bounds(0, 0, 140, 20)
-			.tooltip(Tooltip.create(Component.literal("Save a copy of every active track")))
+		}).bounds(0, 0, 100, 20)
+			.tooltip(Tooltip.create(Component.literal("Save the active composition, or update the saved composition with the same name")))
 			.build();
+	}
+
+	private int matchingRow(String name) {
+		String normalized = name.trim();
+		for (int i = 0; i < rows.size(); i++) {
+			if (rows.get(i).value().name().equalsIgnoreCase(normalized)) {
+				return i;
+			}
+		}
+		return -1;
 	}
 
 	private void syncLibrary() {
@@ -56,6 +75,20 @@ final class SavedSequenceLibraryEntry extends AbstractConfigListEntry<List<Saved
 	private void persistLibrary() {
 		syncLibrary();
 		FastNoteblocksConfig.save();
+	}
+
+	private void confirmDeleteSequence(SavedRow row) {
+		Minecraft minecraft = Minecraft.getInstance();
+		Screen returnScreen = minecraft.gui.screen();
+		minecraft.gui.setScreen(new ConfirmScreen(confirmed -> {
+			if (confirmed) {
+				rows.remove(row);
+				persistLibrary();
+			}
+			minecraft.gui.setScreen(returnScreen);
+		}, Component.literal("Delete saved sequence?"),
+			Component.literal("Delete \"" + row.nameBox.getValue() + "\"? This cannot be undone."),
+			CommonComponents.GUI_REMOVE, CommonComponents.GUI_CANCEL));
 	}
 
 	@Override
@@ -149,10 +182,8 @@ final class SavedSequenceLibraryEntry extends AbstractConfigListEntry<List<Saved
 			}).bounds(0, 0, 20, 20)
 				.tooltip(Tooltip.create(Component.literal("Show or hide this sequence's tracks")))
 				.build();
-			this.deleteButton = Button.builder(Component.literal("×").withStyle(ChatFormatting.RED), button -> {
-				rows.remove(this);
-				persistLibrary();
-			}).bounds(0, 0, 20, 20)
+			this.deleteButton = Button.builder(Component.literal("×").withStyle(ChatFormatting.RED), button -> confirmDeleteSequence(this))
+				.bounds(0, 0, 20, 20)
 				.tooltip(Tooltip.create(Component.literal("Delete this saved sequence")))
 				.build();
 		}

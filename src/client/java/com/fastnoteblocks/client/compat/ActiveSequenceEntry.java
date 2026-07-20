@@ -19,7 +19,10 @@ import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.components.events.GuiEventListener;
 import net.minecraft.client.gui.narration.NarratableEntry;
+import net.minecraft.client.gui.screens.ConfirmScreen;
+import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.MouseButtonEvent;
+import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
 import net.minecraft.util.Util;
 import net.minecraft.world.item.ItemStack;
@@ -125,6 +128,19 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 		}
 		updateTrackControls();
 		syncAndSave();
+	}
+
+	private void confirmDeleteTrack(TrackRow row) {
+		Minecraft minecraft = Minecraft.getInstance();
+		Screen returnScreen = minecraft.gui.screen();
+		minecraft.gui.setScreen(new ConfirmScreen(confirmed -> {
+			if (confirmed) {
+				deleteTrack(row);
+			}
+			minecraft.gui.setScreen(returnScreen);
+		}, Component.literal("Delete track?"),
+			Component.literal("Delete \"" + row.trackName.getValue() + "\"? This cannot be undone."),
+			CommonComponents.GUI_REMOVE, CommonComponents.GUI_CANCEL));
 	}
 
 	private void selectTrack(TrackRow row) {
@@ -376,7 +392,7 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 			}).bounds(0, 0, 20, 20)
 				.tooltip(Tooltip.create(Component.literal("Expand or collapse this track")))
 				.build();
-			this.deleteButton = Button.builder(Component.literal("×").withStyle(ChatFormatting.RED), button -> deleteTrack(this))
+			this.deleteButton = Button.builder(Component.literal("×").withStyle(ChatFormatting.RED), button -> confirmDeleteTrack(this))
 				.bounds(0, 0, 20, 20)
 				.tooltip(Tooltip.create(Component.literal("Delete this track")))
 				.build();
@@ -465,10 +481,10 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 					return;
 				}
 				Component counts = Component.empty()
-					.append(Component.literal(progress.position() + "/" + progress.total() + " overall   ").withStyle(ChatFormatting.GRAY))
-					.append(Component.literal(progress.noteBlockPosition() + "/" + progress.noteBlockTotal() + " note blocks   ")
+					.append(Component.literal(progress.total() + " overall   ").withStyle(ChatFormatting.GRAY))
+					.append(Component.literal(progress.noteBlockTotal() + " note blocks   ")
 						.withStyle(ChatFormatting.AQUA))
-					.append(Component.literal(progress.repeaterPosition() + "/" + progress.repeaterTotal() + " repeaters")
+					.append(Component.literal(progress.repeaterTotal() + " repeaters")
 						.withStyle(ChatFormatting.GOLD));
 				graphics.text(Minecraft.getInstance().font, counts, x, y, 0xFFFFFFFF, false);
 			} catch (IllegalArgumentException ignored) {
