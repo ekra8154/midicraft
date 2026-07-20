@@ -106,7 +106,7 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 		if (tracks.size() >= FastNoteblocksConfig.MAX_TRACKS) {
 			return;
 		}
-		tracks.add(new TrackRow(new SequenceTrack("Track " + (tracks.size() + 1), "", "HARP", 0)));
+		tracks.add(new TrackRow(new SequenceTrack("Track " + (tracks.size() + 1), "", "HARP", 0), false));
 		activeTrackIndex = tracks.size() - 1;
 		updateTrackControls();
 		syncAndSave();
@@ -354,9 +354,14 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 		private TrackPlayback playback;
 
 		TrackRow(SequenceTrack track) {
+			this(track, true);
+		}
+
+		TrackRow(SequenceTrack track, boolean initiallyExpanded) {
 			this.sequence = track.sequence();
 			this.instrument = PreviewInstrument.byId(track.instrument()).id();
 			this.position = track.position();
+			this.expanded = initiallyExpanded;
 			this.trackName = new EditBox(Minecraft.getInstance().font, 0, 0, 120, 20, Component.literal("Track name"));
 			trackName.setMaxLength(60);
 			trackName.setValue(track.name());
