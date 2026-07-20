@@ -508,6 +508,23 @@ public final class NoteBlockOverlay {
 				nextItemIndex + 1 < items.size() && chordAdjacent(nextItem, items.get(nextItemIndex + 1)));
 			return;
 		}
+		int chordStart = nextItemIndex;
+		int chordEnd = nextItemIndex;
+		if (nextItem.step().type() == NoteSequence.StepType.NOTE) {
+			while (chordStart > 0 && chordAdjacent(items.get(chordStart - 1), items.get(chordStart))) {
+				chordStart--;
+			}
+			while (chordEnd + 1 < items.size() && chordAdjacent(items.get(chordEnd), items.get(chordEnd + 1))) {
+				chordEnd++;
+			}
+		}
+		int chordSize = chordEnd - chordStart + 1;
+		if (chordSize >= 2 && chordSize <= 4) {
+			renderCompleteChordAdvance(
+				graphics, centerX, y, items, chordStart, chordEnd, placedItemIndex, nextItemIndex, nextIndex, progress
+			);
+			return;
+		}
 		SequenceHudToken placed = sequenceHudToken(placedItem, placedIndex);
 		SequenceHudToken next = sequenceHudToken(nextItem, nextIndex);
 		int placedWidth = minecraft.font.width(placed.text());
@@ -545,6 +562,57 @@ public final class NoteBlockOverlay {
 					&& chordAdjacent(upcomingItem, items.get(upcomingItemIndex + 1))) {
 				upcomingX += sequenceHudItemGap(upcomingItem, items.get(upcomingItemIndex + 1));
 			}
+		}
+	}
+
+	private static void renderCompleteChordAdvance(
+		GuiGraphicsExtractor graphics,
+		int centerX,
+		int y,
+		List<SequenceHudItem> items,
+		int chordStart,
+		int chordEnd,
+		int placedItemIndex,
+		int nextItemIndex,
+		int nextPhysicalIndex,
+		float progress
+	) {
+		Minecraft minecraft = Minecraft.getInstance();
+		List<Integer> relativeX = new ArrayList<>();
+		int cursor = 0;
+		for (int itemIndex = chordStart; itemIndex <= chordEnd; itemIndex++) {
+			relativeX.add(cursor);
+			SequenceHudToken token = sequenceHudToken(items.get(itemIndex), -1);
+			cursor += minecraft.font.width(token.text());
+			if (itemIndex < chordEnd) {
+				cursor += sequenceHudItemGap(items.get(itemIndex), items.get(itemIndex + 1));
+			}
+		}
+
+		int nextRelativeIndex = nextItemIndex - chordStart;
+		SequenceHudToken nextToken = sequenceHudToken(items.get(nextItemIndex), nextPhysicalIndex);
+		int finalOffset = centerX - relativeX.get(nextRelativeIndex) - minecraft.font.width(nextToken.text()) / 2;
+		int startOffset = finalOffset;
+		if (placedItemIndex >= chordStart && placedItemIndex <= chordEnd) {
+			int placedRelativeIndex = placedItemIndex - chordStart;
+			SequenceHudToken placedToken = sequenceHudToken(items.get(placedItemIndex), -1);
+			startOffset = centerX - relativeX.get(placedRelativeIndex) - minecraft.font.width(placedToken.text()) / 2;
+		}
+		int groupOffset = Math.round(startOffset + (finalOffset - startOffset) * progress);
+
+		for (int itemIndex = chordStart; itemIndex <= chordEnd; itemIndex++) {
+			SequenceHudItem item = items.get(itemIndex);
+			boolean current = itemIndex == nextItemIndex;
+			SequenceHudToken token = sequenceHudToken(item, current ? nextPhysicalIndex : -1);
+			drawSequenceHudToken(
+				graphics,
+				token,
+				groupOffset + relativeX.get(itemIndex - chordStart),
+				y,
+				current,
+				current && itemIndex > chordStart,
+				current && itemIndex < chordEnd
+			);
 		}
 	}
 
