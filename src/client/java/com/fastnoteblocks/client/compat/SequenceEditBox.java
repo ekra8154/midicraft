@@ -1,10 +1,12 @@
 package com.fastnoteblocks.client.compat;
 
+import com.fastnoteblocks.NotePitch;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.MultiLineEditBox;
 import net.minecraft.client.gui.components.MultilineTextField;
 import net.minecraft.network.chat.CommonComponents;
+import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.Style;
 
 final class SequenceEditBox extends MultiLineEditBox {
@@ -69,6 +71,54 @@ final class SequenceEditBox extends MultiLineEditBox {
 			}
 			y += editorFont.lineHeight;
 		}
+		extractNoteTooltip(graphics, value, mouseX, mouseY);
+	}
+
+	private void extractNoteTooltip(GuiGraphicsExtractor graphics, String value, int mouseX, int mouseY) {
+		if (!isMouseOver(mouseX, mouseY)) {
+			return;
+		}
+		int tokenStart = 0;
+		for (int i = 0; i <= value.length(); i++) {
+			if (i != value.length() && value.charAt(i) != ',') {
+				continue;
+			}
+			int from = tokenStart;
+			int to = i;
+			while (from < to && Character.isWhitespace(value.charAt(from))) {
+				from++;
+			}
+			while (to > from && Character.isWhitespace(value.charAt(to - 1))) {
+				to--;
+			}
+			String token = value.substring(from, to);
+			if (!token.endsWith("d") && !token.endsWith("D")) {
+				try {
+					int note = Integer.parseInt(token);
+					if (note >= 0 && note < NotePitch.PITCH_COUNT && tokenUnderMouse(value, from, to, mouseX, mouseY)) {
+						graphics.setTooltipForNextFrame(Component.literal(NotePitch.name(note)), mouseX, mouseY);
+						return;
+					}
+				} catch (NumberFormatException ignored) {
+				}
+			}
+			tokenStart = i + 1;
+		}
+	}
+
+	private boolean tokenUnderMouse(String value, int from, int to, int mouseX, int mouseY) {
+		int y = getInnerTop();
+		for (MultilineTextField.StringView line : this.textField.iterateLines()) {
+			if (from >= line.beginIndex() && to <= line.endIndex()) {
+				int screenY = (int)Math.round(y - scrollAmount());
+				int left = getInnerLeft() + editorFont.width(value.substring(line.beginIndex(), from));
+				int right = getInnerLeft() + editorFont.width(value.substring(line.beginIndex(), to));
+				return mouseX >= left && mouseX <= right
+					&& mouseY >= screenY - 1 && mouseY <= screenY + editorFont.lineHeight;
+			}
+			y += editorFont.lineHeight;
+		}
+		return false;
 	}
 
 	private void extractPlaybackHighlight(GuiGraphicsExtractor graphics) {
