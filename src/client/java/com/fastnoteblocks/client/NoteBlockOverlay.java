@@ -81,8 +81,6 @@ public final class NoteBlockOverlay {
 	private boolean sequenceControlKeyDown;
 	private boolean sequenceGestureConsumed;
 	private boolean sequenceResetGesture;
-	private boolean leftArrowDown;
-	private boolean rightArrowDown;
 
 	private NoteBlockOverlay() {
 	}
@@ -98,6 +96,9 @@ public final class NoteBlockOverlay {
 
 	public boolean handleScroll(double verticalAmount) {
 		Minecraft minecraft = Minecraft.getInstance();
+		if (verticalAmount != 0.0 && handleSequenceScroll(minecraft, verticalAmount)) {
+			return true;
+		}
 		FastNoteblocksConfig config = FastNoteblocksConfig.get();
 		if (!overlaysActive(config)
 			|| !config.interactiveControlsEnabled()
@@ -122,9 +123,11 @@ public final class NoteBlockOverlay {
 			clicks = Math.floorMod(targetDelay - currentDelay, 4);
 		} else {
 			int currentPitch = displayedPitch(minecraft.level, hovered.blockPos());
-			int targetPitch = forward
-				? NotePitch.nextInFamily(currentPitch, hovered.family())
-				: NotePitch.previousInFamily(currentPitch, hovered.family());
+			int targetPitch = NotePitch.family(currentPitch) == hovered.family()
+				? (forward
+					? NotePitch.nextInFamily(currentPitch, hovered.family())
+					: NotePitch.previousInFamily(currentPitch, hovered.family()))
+				: NotePitch.nextInFamily(currentPitch, hovered.family());
 			target = NoteSequence.Step.note(targetPitch);
 			clicks = NotePitch.clicksForward(currentPitch, targetPitch);
 		}
@@ -132,6 +135,33 @@ public final class NoteBlockOverlay {
 			clickQueue.addLast(PendingClicks.ready(hovered.blockPos(), clicks, false, target));
 			expectedSteps.put(hovered.blockPos(), new ExpectedStep(target, 60, false));
 		}
+		return true;
+	}
+
+	private boolean handleSequenceScroll(Minecraft minecraft, double verticalAmount) {
+		if (minecraft.gui.screen() != null || !placementSequenceKey.isDown()) {
+			return false;
+		}
+		if (!sequenceControlKeyDown) {
+			sequenceControlKeyDown = true;
+			if (pendingSequenceToggleTicks > 0) {
+				pendingSequenceToggleTicks = 0;
+				resetPlacementSequence();
+				showSequenceHud(minecraft, "message.fast-noteblocks.sequence_reset");
+				sequenceGestureConsumed = true;
+				sequenceResetGesture = true;
+			}
+		}
+		if (sequenceResetGesture) {
+			return true;
+		}
+		pendingSequenceToggleTicks = 0;
+		sequenceGestureConsumed = true;
+		int amount = verticalAmount > 0.0 ? -1 : 1;
+		movePlacementSequence(amount);
+		showSequenceHud(minecraft, amount < 0
+			? "message.fast-noteblocks.sequence_previous"
+			: "message.fast-noteblocks.sequence_next");
 		return true;
 	}
 
@@ -218,8 +248,6 @@ public final class NoteBlockOverlay {
 			sequenceControlKeyDown = placementSequenceKey.isDown();
 			sequenceGestureConsumed = sequenceControlKeyDown;
 			sequenceResetGesture = sequenceControlKeyDown;
-			leftArrowDown = false;
-			rightArrowDown = false;
 			return;
 		}
 
@@ -239,24 +267,6 @@ public final class NoteBlockOverlay {
 			}
 		}
 
-		boolean leftDownNow = InputConstants.isKeyDown(minecraft.getWindow(), InputConstants.KEY_LEFT);
-		boolean rightDownNow = InputConstants.isKeyDown(minecraft.getWindow(), InputConstants.KEY_RIGHT);
-		boolean movedThisTick = false;
-		if (keyDownNow && !sequenceResetGesture) {
-			if (leftDownNow && !leftArrowDown) {
-				pendingSequenceToggleTicks = 0;
-				movePlacementSequence(-1);
-				showSequenceHud(minecraft, "message.fast-noteblocks.sequence_previous");
-				sequenceGestureConsumed = true;
-				movedThisTick = true;
-			}
-			if (!movedThisTick && rightDownNow && !rightArrowDown) {
-				pendingSequenceToggleTicks = 0;
-				movePlacementSequence(1);
-				showSequenceHud(minecraft, "message.fast-noteblocks.sequence_next");
-				sequenceGestureConsumed = true;
-			}
-		}
 		if (releasedNow && !sequenceGestureConsumed) {
 			pendingSequenceToggleTicks = SEQUENCE_DOUBLE_TAP_TICKS;
 		}
@@ -265,8 +275,6 @@ public final class NoteBlockOverlay {
 			sequenceResetGesture = false;
 		}
 		sequenceControlKeyDown = keyDownNow;
-		leftArrowDown = leftDownNow;
-		rightArrowDown = rightDownNow;
 
 		if (pendingSequenceToggleTicks > 0 && --pendingSequenceToggleTicks == 0) {
 			config.setPlacementSequenceEnabled(!config.placementSequenceEnabled());
@@ -645,7 +653,9 @@ public final class NoteBlockOverlay {
 
 				int pitch = displayedPitch(minecraft.level, pos);
 				boolean inRange = minecraft.player.isWithinBlockInteractionRange(pos, 0.0);
-				Vec3 right = labelRight(cameraPos, Vec3.atCenterOf(pos));
+				Vec3 labelCenter = new Vec3(pos.getX() + 0.5, pos.getY() + LABEL_Y, pos.getZ() + 0.5);
+				Vec3 right = labelRight(cameraPos, labelCenter);
+				Vec3 up = labelUp(cameraPos, labelCenter, right);
 				boolean expanded = config.interactiveControlsEnabled() && pos.equals(expandedBlock);
 				poseStack.pushPose();
 				poseStack.translate(pos.getX() - cameraPos.x, pos.getY() - cameraPos.y, pos.getZ() - cameraPos.z);
@@ -658,7 +668,9 @@ public final class NoteBlockOverlay {
 					}
 					LabelOffset offset = labelOffset(layoutCenterFamily, family);
 					Vec3 attachment = new Vec3(
-						0.5 + right.x * offset.right(), LABEL_Y - 0.5 + offset.up(), 0.5 + right.z * offset.right()
+						0.5 + right.x * offset.right() + up.x * offset.up(),
+						LABEL_Y - 0.5 + right.y * offset.right() + up.y * offset.up(),
+						0.5 + right.z * offset.right() + up.z * offset.up()
 					);
 					boolean isHovered = hovered != null && !hovered.isRepeater()
 						&& hovered.blockPos().equals(pos) && hovered.family() == family;
@@ -765,7 +777,9 @@ public final class NoteBlockOverlay {
 	private LabelHit hitLabelOnBlock(Minecraft minecraft, BlockPos pos, boolean expanded, Vec3 origin, Vec3 direction) {
 		int pitch = displayedPitch(minecraft.level, pos);
 		boolean inRange = minecraft.player.isWithinBlockInteractionRange(pos, 0.0);
-		Vec3 right = labelRight(origin, Vec3.atCenterOf(pos));
+		Vec3 baseCenter = new Vec3(pos.getX() + 0.5, pos.getY() + LABEL_Y, pos.getZ() + 0.5);
+		Vec3 right = labelRight(origin, baseCenter);
+		Vec3 layoutUp = labelUp(origin, baseCenter, right);
 		LabelHit closest = null;
 		char layoutCenterFamily = expanded && menuCenterFamily != null
 			? menuCenterFamily
@@ -776,11 +790,9 @@ public final class NoteBlockOverlay {
 				continue;
 			}
 			LabelOffset offset = labelOffset(layoutCenterFamily, family);
-			Vec3 center = new Vec3(
-				pos.getX() + 0.5 + right.x * offset.right(),
-				pos.getY() + LABEL_Y + offset.up(),
-				pos.getZ() + 0.5 + right.z * offset.right()
-			);
+			Vec3 center = baseCenter
+				.add(right.scale(offset.right()))
+				.add(layoutUp.scale(offset.up()));
 			Vec3 normal = origin.subtract(center).normalize();
 			double denominator = direction.dot(normal);
 			if (Math.abs(denominator) < 1.0E-5) {
@@ -899,6 +911,12 @@ public final class NoteBlockOverlay {
 		Vec3 toCamera = cameraPos.subtract(blockCenter);
 		Vec3 right = new Vec3(-toCamera.z, 0.0, toCamera.x);
 		return right.lengthSqr() < 1.0E-6 ? new Vec3(1.0, 0.0, 0.0) : right.normalize();
+	}
+
+	private static Vec3 labelUp(Vec3 cameraPos, Vec3 labelCenter, Vec3 right) {
+		Vec3 normal = cameraPos.subtract(labelCenter).normalize();
+		Vec3 up = right.cross(normal);
+		return up.lengthSqr() < 1.0E-6 ? new Vec3(0.0, 1.0, 0.0) : up.normalize();
 	}
 
 	private static boolean isReady(Minecraft minecraft) {
