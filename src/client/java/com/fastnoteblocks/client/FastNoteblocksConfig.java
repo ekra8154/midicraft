@@ -13,6 +13,29 @@ import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.network.chat.Component;
 
 public final class FastNoteblocksConfig {
+	public enum OverlayMode {
+		BOTH(true, true),
+		NOTES_ONLY(true, false),
+		REPEATERS_ONLY(false, true),
+		OFF(false, false);
+
+		private final boolean notes;
+		private final boolean repeaters;
+
+		OverlayMode(boolean notes, boolean repeaters) {
+			this.notes = notes;
+			this.repeaters = repeaters;
+		}
+
+		public boolean includesNotes() {
+			return notes;
+		}
+
+		public boolean includesRepeaters() {
+			return repeaters;
+		}
+	}
+
 	public static final int DEFAULT_VIEW_DISTANCE = 10;
 	public static final int MIN_VIEW_DISTANCE = 1;
 	public static final int MAX_VIEW_DISTANCE = 32;
@@ -24,10 +47,10 @@ public final class FastNoteblocksConfig {
 	private static FastNoteblocksConfig instance = defaults();
 
 	private boolean modEnabled;
-	private boolean overlaysEnabled;
-	private boolean noteBlockOverlaysEnabled;
+	private OverlayMode overlayMode;
+	private OverlayMode previousOverlayMode;
 	private boolean nearbyPreviewsEnabled;
-	private boolean radialControlsEnabled;
+	private boolean interactiveControlsEnabled;
 	private boolean invertScrolling;
 	private int viewDistance;
 	private int interactionDelayTicks;
@@ -54,10 +77,14 @@ public final class FastNoteblocksConfig {
 			StoredConfig stored = GSON.fromJson(reader, StoredConfig.class);
 			if (stored != null) {
 				instance.modEnabled = stored.modEnabled == null || stored.modEnabled;
-				instance.overlaysEnabled = stored.overlaysEnabled == null || stored.overlaysEnabled;
-				instance.noteBlockOverlaysEnabled = stored.noteBlockOverlaysEnabled == null || stored.noteBlockOverlaysEnabled;
+				instance.overlayMode = stored.overlayMode == null ? migrateOverlayMode(stored) : stored.overlayMode;
+				instance.previousOverlayMode = stored.previousOverlayMode == null || stored.previousOverlayMode == OverlayMode.OFF
+					? (instance.overlayMode == OverlayMode.OFF ? OverlayMode.NOTES_ONLY : instance.overlayMode)
+					: stored.previousOverlayMode;
 				instance.nearbyPreviewsEnabled = stored.nearbyPreviewsEnabled == null || stored.nearbyPreviewsEnabled;
-				instance.radialControlsEnabled = stored.radialControlsEnabled == null || stored.radialControlsEnabled;
+				instance.interactiveControlsEnabled = stored.interactiveControlsEnabled == null
+					? stored.radialControlsEnabled == null || stored.radialControlsEnabled
+					: stored.interactiveControlsEnabled;
 				instance.invertScrolling = Boolean.TRUE.equals(stored.invertScrolling);
 				instance.viewDistance = clampViewDistance(stored.viewDistance == null ? DEFAULT_VIEW_DISTANCE : stored.viewDistance);
 				instance.interactionDelayTicks = clampInteractionDelay(
@@ -104,20 +131,30 @@ public final class FastNoteblocksConfig {
 		this.modEnabled = modEnabled;
 	}
 
+	public OverlayMode overlayMode() {
+		return overlayMode;
+	}
+
+	public void setOverlayMode(OverlayMode overlayMode) {
+		this.overlayMode = overlayMode == null ? OverlayMode.NOTES_ONLY : overlayMode;
+		if (this.overlayMode != OverlayMode.OFF) {
+			previousOverlayMode = this.overlayMode;
+		}
+	}
+
+	public void toggleOverlays() {
+		if (overlayMode == OverlayMode.OFF) {
+			overlayMode = previousOverlayMode == null || previousOverlayMode == OverlayMode.OFF
+				? OverlayMode.NOTES_ONLY
+				: previousOverlayMode;
+		} else {
+			previousOverlayMode = overlayMode;
+			overlayMode = OverlayMode.OFF;
+		}
+	}
+
 	public boolean overlaysEnabled() {
-		return overlaysEnabled;
-	}
-
-	public void setOverlaysEnabled(boolean overlaysEnabled) {
-		this.overlaysEnabled = overlaysEnabled;
-	}
-
-	public boolean noteBlockOverlaysEnabled() {
-		return noteBlockOverlaysEnabled;
-	}
-
-	public void setNoteBlockOverlaysEnabled(boolean noteBlockOverlaysEnabled) {
-		this.noteBlockOverlaysEnabled = noteBlockOverlaysEnabled;
+		return overlayMode != OverlayMode.OFF;
 	}
 
 	public boolean nearbyPreviewsEnabled() {
@@ -128,12 +165,12 @@ public final class FastNoteblocksConfig {
 		this.nearbyPreviewsEnabled = nearbyPreviewsEnabled;
 	}
 
-	public boolean radialControlsEnabled() {
-		return radialControlsEnabled;
+	public boolean interactiveControlsEnabled() {
+		return interactiveControlsEnabled;
 	}
 
-	public void setRadialControlsEnabled(boolean radialControlsEnabled) {
-		this.radialControlsEnabled = radialControlsEnabled;
+	public void setInteractiveControlsEnabled(boolean interactiveControlsEnabled) {
+		this.interactiveControlsEnabled = interactiveControlsEnabled;
 	}
 
 	public boolean invertScrolling() {
@@ -195,10 +232,10 @@ public final class FastNoteblocksConfig {
 	private static FastNoteblocksConfig defaults() {
 		FastNoteblocksConfig config = new FastNoteblocksConfig();
 		config.modEnabled = true;
-		config.overlaysEnabled = true;
-		config.noteBlockOverlaysEnabled = true;
+		config.overlayMode = OverlayMode.NOTES_ONLY;
+		config.previousOverlayMode = OverlayMode.NOTES_ONLY;
 		config.nearbyPreviewsEnabled = true;
-		config.radialControlsEnabled = true;
+		config.interactiveControlsEnabled = true;
 		config.invertScrolling = false;
 		config.viewDistance = DEFAULT_VIEW_DISTANCE;
 		config.interactionDelayTicks = DEFAULT_INTERACTION_DELAY_TICKS;
@@ -207,6 +244,15 @@ public final class FastNoteblocksConfig {
 		config.placementSequenceEnabled = false;
 		config.placementSequence = "";
 		return config;
+	}
+
+	private static OverlayMode migrateOverlayMode(StoredConfig stored) {
+		if (Boolean.FALSE.equals(stored.overlaysEnabled)) {
+			return OverlayMode.OFF;
+		}
+		return Boolean.FALSE.equals(stored.noteBlockOverlaysEnabled)
+			? OverlayMode.OFF
+			: OverlayMode.NOTES_ONLY;
 	}
 
 	private static int clampViewDistance(int distance) {
@@ -219,9 +265,13 @@ public final class FastNoteblocksConfig {
 
 	private static final class StoredConfig {
 		private Boolean modEnabled;
+		private OverlayMode overlayMode;
+		private OverlayMode previousOverlayMode;
+		// Legacy fields retained for migration from versions before the overlay selector.
 		private Boolean overlaysEnabled;
 		private Boolean noteBlockOverlaysEnabled;
 		private Boolean nearbyPreviewsEnabled;
+		private Boolean interactiveControlsEnabled;
 		private Boolean radialControlsEnabled;
 		private Boolean invertScrolling;
 		private Integer viewDistance;
@@ -236,10 +286,10 @@ public final class FastNoteblocksConfig {
 
 		private StoredConfig(FastNoteblocksConfig config) {
 			this.modEnabled = config.modEnabled;
-			this.overlaysEnabled = config.overlaysEnabled;
-			this.noteBlockOverlaysEnabled = config.noteBlockOverlaysEnabled;
+			this.overlayMode = config.overlayMode;
+			this.previousOverlayMode = config.previousOverlayMode;
 			this.nearbyPreviewsEnabled = config.nearbyPreviewsEnabled;
-			this.radialControlsEnabled = config.radialControlsEnabled;
+			this.interactiveControlsEnabled = config.interactiveControlsEnabled;
 			this.invertScrolling = config.invertScrolling;
 			this.viewDistance = config.viewDistance;
 			this.interactionDelayTicks = config.interactionDelayTicks;

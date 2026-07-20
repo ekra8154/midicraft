@@ -1,11 +1,12 @@
 # Fast Noteblocks
 
 A fully client-side Fabric mod for Minecraft Java Edition 26.2 that displays
-interactive A-G pitch controls above nearby note blocks.
+interactive pitch and delay controls above nearby note blocks and repeaters.
 
-Press **N** to toggle all overlays persistently. Each nearby note block shows one billboard
-label for its current pitch. Hover that label to open a compact radial A-G menu
-for only that note block. While in normal block-interaction range:
+Press **N** to switch overlays off or restore the last selected overlay mode.
+Each nearby note block shows one billboard label for its current pitch. Hover
+that label to open a compact radial A-G menu for only that note block. While in
+normal block-interaction range:
 
 - scroll up to select the next natural/sharp pitch in that letter family;
 - scroll down to select the previous pitch in that family.
@@ -14,19 +15,23 @@ The radial menu keeps the focused letter in place while scrolling repeatedly.
 Its order runs clockwise, with A at the top, B at the upper right, and G at the
 upper left whenever those letters are outside the center.
 
+Each nearby repeater shows its current `1` through `4` delay as a single label.
+Aim at the number and scroll up or down to cycle its delay in either direction.
+
 ## Settings
 
 When the optional Mod Menu and Cloth Config mods are installed, the Mod Menu
 configuration button provides:
 
 - a master switch for the entire mod;
-- persistent master switches for all overlays and specifically note block
-  overlays;
+- a four-way overlay selector: note blocks and repeaters, note blocks only
+  (default), repeaters only, or off;
 - optional nearby previews; when disabled, labels are hidden until their center
   position is targeted;
-- optional radial controls, including both the radial menu and scroll tuning;
+- optional interactive controls, including the note radial and scrolling for
+  both block types;
 - inverted scrolling;
-- note-label view distance from 1 to 32 blocks;
+- shared overlay view distance from 1 to 32 blocks;
 - interaction delay from 0 to 10 extra ticks, defaulting to the original
   one-interaction-per-client-tick speed;
 - optional server-confirmation waiting;
@@ -52,15 +57,15 @@ The settings screen includes a complete `0` through `24` pitch-name guide.
 
 Automated tuning sends ordinary vanilla use-block interactions. By default it
 can send one interaction per client tick, matching the mod's original behavior.
-Optional settings can add delay, wait for each resulting note change from the
-server, and require an unobstructed line from the player to the block. Normal
+Optional settings can add delay, wait for each resulting block-state change
+from the server, and require an unobstructed line from the player to the block. Normal
 interaction range is always enforced so the mod does not send packets that the
 server must reject. These controls cannot guarantee compatibility with every
 server's rules or anti-cheat configuration.
 
 The mod sends ordinary, rate-limited right-click interactions and requires no
 server-side installation. Keep the main hand in a state where a normal
-right-click can tune the note block.
+right-click can adjust the target block.
 
 ## Development
 

@@ -55,6 +55,7 @@ public final class NoteBlockOverlay {
 	);
 
 	private final List<BlockPos> nearbyNoteBlocks = new ArrayList<>();
+	private final List<BlockPos> nearbyRepeaters = new ArrayList<>();
 	private final Deque<PendingClicks> clickQueue = new ArrayDeque<>();
 	private final Map<BlockPos, ExpectedStep> expectedSteps = new HashMap<>();
 	private final Map<BlockPos, PlacementWatch> placementWatches = new HashMap<>();
@@ -93,8 +94,8 @@ public final class NoteBlockOverlay {
 	public boolean handleScroll(double verticalAmount) {
 		Minecraft minecraft = Minecraft.getInstance();
 		FastNoteblocksConfig config = FastNoteblocksConfig.get();
-		if (!noteBlockOverlaysActive(config)
-			|| !config.radialControlsEnabled()
+		if (!overlaysActive(config)
+			|| !config.interactiveControlsEnabled()
 			|| verticalAmount == 0.0
 			|| minecraft.gui.screen() != null
 			|| !isReady(minecraft)) {
@@ -106,14 +107,23 @@ public final class NoteBlockOverlay {
 			return false;
 		}
 
-		int currentPitch = displayedPitch(minecraft.level, hovered.blockPos());
 		boolean forward = FastNoteblocksConfig.get().invertScrolling() ? verticalAmount < 0.0 : verticalAmount > 0.0;
-		int targetPitch = forward
-			? NotePitch.nextInFamily(currentPitch, hovered.family())
-			: NotePitch.previousInFamily(currentPitch, hovered.family());
-		int clicks = NotePitch.clicksForward(currentPitch, targetPitch);
+		NoteSequence.Step target;
+		int clicks;
+		if (hovered.isRepeater()) {
+			int currentDelay = displayedRepeaterDelay(minecraft.level, hovered.blockPos());
+			int targetDelay = forward ? currentDelay % 4 + 1 : Math.floorMod(currentDelay - 2, 4) + 1;
+			target = NoteSequence.Step.repeater(targetDelay);
+			clicks = Math.floorMod(targetDelay - currentDelay, 4);
+		} else {
+			int currentPitch = displayedPitch(minecraft.level, hovered.blockPos());
+			int targetPitch = forward
+				? NotePitch.nextInFamily(currentPitch, hovered.family())
+				: NotePitch.previousInFamily(currentPitch, hovered.family());
+			target = NoteSequence.Step.note(targetPitch);
+			clicks = NotePitch.clicksForward(currentPitch, targetPitch);
+		}
 		if (clicks > 0) {
-			NoteSequence.Step target = NoteSequence.Step.note(targetPitch);
 			clickQueue.addLast(PendingClicks.ready(hovered.blockPos(), clicks, false, target));
 			expectedSteps.put(hovered.blockPos(), new ExpectedStep(target, 60, false));
 		}
@@ -123,7 +133,7 @@ public final class NoteBlockOverlay {
 	private void tick(Minecraft minecraft) {
 		FastNoteblocksConfig config = FastNoteblocksConfig.get();
 		while (toggleKey.consumeClick()) {
-			config.setOverlaysEnabled(!config.overlaysEnabled());
+			config.toggleOverlays();
 			FastNoteblocksConfig.save();
 			expandedBlock = null;
 			menuCenterFamily = null;
@@ -149,6 +159,7 @@ public final class NoteBlockOverlay {
 		if (minecraft.level != lastLevel) {
 			lastLevel = minecraft.level;
 			nearbyNoteBlocks.clear();
+			nearbyRepeaters.clear();
 			clickQueue.clear();
 			expectedSteps.clear();
 			placementWatches.clear();
@@ -164,6 +175,7 @@ public final class NoteBlockOverlay {
 		}
 		if (!config.modEnabled()) {
 			nearbyNoteBlocks.clear();
+			nearbyRepeaters.clear();
 			clickQueue.clear();
 			expectedSteps.clear();
 			placementWatches.clear();
@@ -172,18 +184,19 @@ public final class NoteBlockOverlay {
 			menuCenterFamily = null;
 			return;
 		}
-		if (!config.radialControlsEnabled()) {
+		if (!config.interactiveControlsEnabled() || !config.overlayMode().includesNotes()) {
 			expandedBlock = null;
 			menuCenterFamily = null;
 		}
 
 		updatePlacementWatches(minecraft);
 		updateExpectations(minecraft.level);
-		if (noteBlockOverlaysActive(config) && --ticksUntilRescan <= 0) {
+		if (overlaysActive(config) && --ticksUntilRescan <= 0) {
 			rescan(minecraft);
 			ticksUntilRescan = RESCAN_INTERVAL_TICKS;
-		} else if (!noteBlockOverlaysActive(config)) {
+		} else if (!overlaysActive(config)) {
 			nearbyNoteBlocks.clear();
+			nearbyRepeaters.clear();
 			expandedBlock = null;
 			menuCenterFamily = null;
 		}
@@ -282,6 +295,8 @@ public final class NoteBlockOverlay {
 
 	private void rescan(Minecraft minecraft) {
 		nearbyNoteBlocks.clear();
+		nearbyRepeaters.clear();
+		FastNoteblocksConfig.OverlayMode overlayMode = FastNoteblocksConfig.get().overlayMode();
 		int searchRadius = FastNoteblocksConfig.get().viewDistance();
 		BlockPos origin = minecraft.player.blockPosition();
 		BlockPos min = origin.offset(-searchRadius, -searchRadius, -searchRadius);
@@ -289,9 +304,13 @@ public final class NoteBlockOverlay {
 		double radiusSquared = searchRadius * searchRadius;
 
 		for (BlockPos mutablePos : BlockPos.betweenClosed(min, max)) {
-			if (mutablePos.distToCenterSqr(minecraft.player.position()) <= radiusSquared
-				&& minecraft.level.getBlockState(mutablePos).is(Blocks.NOTE_BLOCK)) {
-				nearbyNoteBlocks.add(mutablePos.immutable());
+			if (mutablePos.distToCenterSqr(minecraft.player.position()) <= radiusSquared) {
+				BlockState state = minecraft.level.getBlockState(mutablePos);
+				if (overlayMode.includesNotes() && state.is(Blocks.NOTE_BLOCK)) {
+					nearbyNoteBlocks.add(mutablePos.immutable());
+				} else if (overlayMode.includesRepeaters() && state.is(Blocks.REPEATER)) {
+					nearbyRepeaters.add(mutablePos.immutable());
+				}
 			}
 		}
 	}
@@ -545,7 +564,8 @@ public final class NoteBlockOverlay {
 	private void render(LevelRenderContext context) {
 		Minecraft minecraft = Minecraft.getInstance();
 		FastNoteblocksConfig config = FastNoteblocksConfig.get();
-		if (!noteBlockOverlaysActive(config) || !isReady(minecraft) || nearbyNoteBlocks.isEmpty()) {
+		if (!overlaysActive(config) || !isReady(minecraft)
+			|| (nearbyNoteBlocks.isEmpty() && nearbyRepeaters.isEmpty())) {
 			return;
 		}
 
@@ -554,48 +574,79 @@ public final class NoteBlockOverlay {
 		PoseStack poseStack = context.poseStack();
 		HoveredLabel hovered = findHoveredLabel(minecraft);
 
-		for (BlockPos pos : nearbyNoteBlocks) {
-			BlockState state = minecraft.level.getBlockState(pos);
-			if (!state.is(Blocks.NOTE_BLOCK)) {
-				continue;
-			}
-
-			boolean focusedBlock = pos.equals(expandedBlock)
-				|| hovered != null && hovered.blockPos().equals(pos);
-			if (!config.nearbyPreviewsEnabled() && !focusedBlock) {
-				continue;
-			}
-
-			int pitch = displayedPitch(minecraft.level, pos);
-			boolean inRange = minecraft.player.isWithinBlockInteractionRange(pos, 0.0);
-			Vec3 right = labelRight(cameraPos, Vec3.atCenterOf(pos));
-			boolean expanded = config.radialControlsEnabled() && pos.equals(expandedBlock);
-			poseStack.pushPose();
-			poseStack.translate(pos.getX() - cameraPos.x, pos.getY() - cameraPos.y, pos.getZ() - cameraPos.z);
-			char layoutCenterFamily = expanded && menuCenterFamily != null
-				? menuCenterFamily
-				: NotePitch.family(pitch);
-			for (char family : FAMILIES) {
-				if (!expanded && family != NotePitch.family(pitch)) {
+		if (config.overlayMode().includesNotes()) {
+			for (BlockPos pos : nearbyNoteBlocks) {
+				BlockState state = minecraft.level.getBlockState(pos);
+				if (!state.is(Blocks.NOTE_BLOCK)) {
 					continue;
 				}
-				LabelOffset offset = labelOffset(layoutCenterFamily, family);
-				Vec3 attachment = new Vec3(
-					0.5 + right.x * offset.right(), LABEL_Y - 0.5 + offset.up(), 0.5 + right.z * offset.right()
-				);
-				boolean isHovered = hovered != null && hovered.blockPos().equals(pos) && hovered.family() == family;
-				Component text = labelText(pitch, family, inRange, isHovered);
-				context.submitNodeCollector().submitNameTag(
-					poseStack, attachment, 0, text, true, LightCoordsUtil.FULL_BRIGHT, cameraState
-				);
+
+				boolean focusedBlock = pos.equals(expandedBlock)
+					|| hovered != null && hovered.blockPos().equals(pos);
+				if (!config.nearbyPreviewsEnabled() && !focusedBlock) {
+					continue;
+				}
+
+				int pitch = displayedPitch(minecraft.level, pos);
+				boolean inRange = minecraft.player.isWithinBlockInteractionRange(pos, 0.0);
+				Vec3 right = labelRight(cameraPos, Vec3.atCenterOf(pos));
+				boolean expanded = config.interactiveControlsEnabled() && pos.equals(expandedBlock);
+				poseStack.pushPose();
+				poseStack.translate(pos.getX() - cameraPos.x, pos.getY() - cameraPos.y, pos.getZ() - cameraPos.z);
+				char layoutCenterFamily = expanded && menuCenterFamily != null
+					? menuCenterFamily
+					: NotePitch.family(pitch);
+				for (char family : FAMILIES) {
+					if (!expanded && family != NotePitch.family(pitch)) {
+						continue;
+					}
+					LabelOffset offset = labelOffset(layoutCenterFamily, family);
+					Vec3 attachment = new Vec3(
+						0.5 + right.x * offset.right(), LABEL_Y - 0.5 + offset.up(), 0.5 + right.z * offset.right()
+					);
+					boolean isHovered = hovered != null && !hovered.isRepeater()
+						&& hovered.blockPos().equals(pos) && hovered.family() == family;
+					Component text = labelText(pitch, family, inRange, isHovered);
+					context.submitNodeCollector().submitNameTag(
+						poseStack, attachment, 0, text, true, LightCoordsUtil.FULL_BRIGHT, cameraState
+					);
+				}
+				poseStack.popPose();
 			}
-			poseStack.popPose();
+		}
+
+		if (config.overlayMode().includesRepeaters()) {
+			for (BlockPos pos : nearbyRepeaters) {
+				BlockState state = minecraft.level.getBlockState(pos);
+				if (!state.is(Blocks.REPEATER)) {
+					continue;
+				}
+				boolean isHovered = hovered != null && hovered.isRepeater() && hovered.blockPos().equals(pos);
+				if (!config.nearbyPreviewsEnabled() && !isHovered) {
+					continue;
+				}
+				boolean inRange = minecraft.player.isWithinBlockInteractionRange(pos, 0.0);
+				Component text = Component.literal(Integer.toString(displayedRepeaterDelay(minecraft.level, pos)));
+				if (isHovered) {
+					text = text.copy().withStyle(ChatFormatting.AQUA, ChatFormatting.BOLD, ChatFormatting.UNDERLINE);
+				} else {
+					text = text.copy().withStyle(inRange ? ChatFormatting.GOLD : ChatFormatting.GRAY, ChatFormatting.BOLD);
+				}
+				poseStack.pushPose();
+				poseStack.translate(pos.getX() - cameraPos.x, pos.getY() - cameraPos.y, pos.getZ() - cameraPos.z);
+				context.submitNodeCollector().submitNameTag(
+					poseStack, new Vec3(0.5, LABEL_Y - 0.5, 0.5), 0, text, true,
+					LightCoordsUtil.FULL_BRIGHT, cameraState
+				);
+				poseStack.popPose();
+			}
 		}
 	}
 
 	private HoveredLabel findHoveredLabel(Minecraft minecraft) {
-		boolean radialControlsEnabled = FastNoteblocksConfig.get().radialControlsEnabled();
-		if (!radialControlsEnabled) {
+		FastNoteblocksConfig config = FastNoteblocksConfig.get();
+		boolean interactiveControlsEnabled = config.interactiveControlsEnabled();
+		if (!interactiveControlsEnabled || !config.overlayMode().includesNotes()) {
 			expandedBlock = null;
 			menuCenterFamily = null;
 		}
@@ -603,7 +654,7 @@ public final class NoteBlockOverlay {
 		Vec3 origin = camera.position();
 		Vec3 direction = new Vec3(camera.forwardVector()).normalize();
 
-		if (radialControlsEnabled
+		if (interactiveControlsEnabled
 			&& expandedBlock != null
 			&& minecraft.level.getBlockState(expandedBlock).is(Blocks.NOTE_BLOCK)) {
 			LabelHit expandedHit = hitLabelOnBlock(minecraft, expandedBlock, true, origin, direction);
@@ -617,20 +668,36 @@ public final class NoteBlockOverlay {
 		}
 
 		LabelHit closest = null;
-		for (BlockPos pos : nearbyNoteBlocks) {
-			if (pos.equals(expandedBlock) || !minecraft.level.getBlockState(pos).is(Blocks.NOTE_BLOCK)) {
-				continue;
+		if (config.overlayMode().includesNotes()) {
+			for (BlockPos pos : nearbyNoteBlocks) {
+				if (pos.equals(expandedBlock) || !minecraft.level.getBlockState(pos).is(Blocks.NOTE_BLOCK)) {
+					continue;
+				}
+				LabelHit hit = hitLabelOnBlock(minecraft, pos, false, origin, direction);
+				if (hit != null && (closest == null || hit.distance() < closest.distance())) {
+					closest = hit;
+				}
 			}
-			LabelHit hit = hitLabelOnBlock(minecraft, pos, false, origin, direction);
-			if (hit != null && (closest == null || hit.distance() < closest.distance())) {
-				closest = hit;
+		}
+		if (config.overlayMode().includesRepeaters()) {
+			for (BlockPos pos : nearbyRepeaters) {
+				if (!minecraft.level.getBlockState(pos).is(Blocks.REPEATER)) {
+					continue;
+				}
+				LabelHit hit = hitRepeaterLabel(minecraft, pos, origin, direction);
+				if (hit != null && (closest == null || hit.distance() < closest.distance())) {
+					closest = hit;
+				}
 			}
 		}
 
 		if (closest != null) {
-			if (radialControlsEnabled) {
+			if (interactiveControlsEnabled && !closest.label().isRepeater()) {
 				expandedBlock = closest.label().blockPos();
 				menuCenterFamily = NotePitch.family(displayedPitch(minecraft.level, expandedBlock));
+			} else {
+				expandedBlock = null;
+				menuCenterFamily = null;
 			}
 			return closest.label();
 		}
@@ -678,6 +745,27 @@ public final class NoteBlockOverlay {
 		return closest;
 	}
 
+	private LabelHit hitRepeaterLabel(Minecraft minecraft, BlockPos pos, Vec3 origin, Vec3 direction) {
+		Vec3 center = new Vec3(pos.getX() + 0.5, pos.getY() + LABEL_Y, pos.getZ() + 0.5);
+		Vec3 normal = origin.subtract(center).normalize();
+		double denominator = direction.dot(normal);
+		if (Math.abs(denominator) < 1.0E-5) {
+			return null;
+		}
+		double distance = center.subtract(origin).dot(normal) / denominator;
+		if (distance <= 0.0) {
+			return null;
+		}
+		Vec3 right = labelRight(origin, Vec3.atCenterOf(pos));
+		Vec3 up = normal.cross(right).normalize();
+		Vec3 hitOffset = origin.add(direction.scale(distance)).subtract(center);
+		String text = Integer.toString(displayedRepeaterDelay(minecraft.level, pos));
+		double halfWidth = minecraft.font.width(text) * 0.0125 + 0.04;
+		return Math.abs(hitOffset.dot(right)) <= halfWidth && Math.abs(hitOffset.dot(up)) <= 0.15
+			? new LabelHit(new HoveredLabel(pos, null), distance)
+			: null;
+	}
+
 	private boolean isInsideMenuEnvelope(BlockPos pos, Vec3 origin, Vec3 direction) {
 		Vec3 center = new Vec3(pos.getX() + 0.5, pos.getY() + LABEL_Y, pos.getZ() + 0.5);
 		Vec3 normal = origin.subtract(center).normalize();
@@ -702,6 +790,15 @@ public final class NoteBlockOverlay {
 		}
 		BlockState state = level.getBlockState(pos);
 		return state.is(Blocks.NOTE_BLOCK) ? state.getValue(NoteBlock.NOTE) : 0;
+	}
+
+	private int displayedRepeaterDelay(ClientLevel level, BlockPos pos) {
+		ExpectedStep expected = expectedSteps.get(pos);
+		if (expected != null && expected.step().type() == NoteSequence.StepType.REPEATER) {
+			return expected.step().value();
+		}
+		BlockState state = level.getBlockState(pos);
+		return state.is(Blocks.REPEATER) ? state.getValue(RepeaterBlock.DELAY) : 1;
 	}
 
 	private Component labelText(int pitch, char family, boolean inRange, boolean hovered) {
@@ -752,8 +849,8 @@ public final class NoteBlockOverlay {
 		return minecraft.level != null && minecraft.player != null && minecraft.gameMode != null;
 	}
 
-	private static boolean noteBlockOverlaysActive(FastNoteblocksConfig config) {
-		return config.modEnabled() && config.overlaysEnabled() && config.noteBlockOverlaysEnabled();
+	private static boolean overlaysActive(FastNoteblocksConfig config) {
+		return config.modEnabled() && config.overlaysEnabled();
 	}
 
 	private record PendingClicks(
@@ -811,7 +908,10 @@ public final class NoteBlockOverlay {
 	private record PlacementWatch(NoteSequence.Step step, int ticksRemaining) {
 	}
 
-	private record HoveredLabel(BlockPos blockPos, char family) {
+	private record HoveredLabel(BlockPos blockPos, Character family) {
+		private boolean isRepeater() {
+			return family == null;
+		}
 	}
 
 	private record LabelHit(HoveredLabel label, double distance) {

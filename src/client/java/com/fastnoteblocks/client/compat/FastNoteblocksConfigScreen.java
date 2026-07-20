@@ -1,6 +1,7 @@
 package com.fastnoteblocks.client.compat;
 
 import com.fastnoteblocks.client.FastNoteblocksConfig;
+import com.fastnoteblocks.client.FastNoteblocksConfig.OverlayMode;
 import me.shedaniel.clothconfig2.api.ConfigBuilder;
 import me.shedaniel.clothconfig2.api.ConfigCategory;
 import me.shedaniel.clothconfig2.api.ConfigEntryBuilder;
@@ -25,17 +26,14 @@ public final class FastNoteblocksConfigScreen {
 			.setTooltip(Component.translatable("tooltip.fast-noteblocks.mod_enabled"))
 			.setSaveConsumer(config::setModEnabled)
 			.build());
-		general.addEntry(entries.startBooleanToggle(
-				Component.translatable("option.fast-noteblocks.overlays_enabled"), config.overlaysEnabled())
-			.setDefaultValue(true)
-			.setTooltip(Component.translatable("tooltip.fast-noteblocks.overlays_enabled"))
-			.setSaveConsumer(config::setOverlaysEnabled)
-			.build());
-		general.addEntry(entries.startBooleanToggle(
-				Component.translatable("option.fast-noteblocks.note_block_overlays"), config.noteBlockOverlaysEnabled())
-			.setDefaultValue(true)
-			.setTooltip(Component.translatable("tooltip.fast-noteblocks.note_block_overlays"))
-			.setSaveConsumer(config::setNoteBlockOverlaysEnabled)
+		general.addEntry(entries.startEnumSelector(
+				Component.translatable("option.fast-noteblocks.overlays"), OverlayMode.class, config.overlayMode())
+			.setDefaultValue(OverlayMode.NOTES_ONLY)
+			.setEnumNameProvider(value -> Component.translatable(
+				"option.fast-noteblocks.overlays." + ((OverlayMode) value).name().toLowerCase()
+			))
+			.setTooltip(Component.translatable("tooltip.fast-noteblocks.overlays"))
+			.setSaveConsumer(config::setOverlayMode)
 			.build());
 		general.addEntry(entries.startBooleanToggle(
 				Component.translatable("option.fast-noteblocks.nearby_previews"), config.nearbyPreviewsEnabled())
@@ -44,10 +42,10 @@ public final class FastNoteblocksConfigScreen {
 			.setSaveConsumer(config::setNearbyPreviewsEnabled)
 			.build());
 		general.addEntry(entries.startBooleanToggle(
-				Component.translatable("option.fast-noteblocks.radial_controls"), config.radialControlsEnabled())
+				Component.translatable("option.fast-noteblocks.interactive_controls"), config.interactiveControlsEnabled())
 			.setDefaultValue(true)
-			.setTooltip(Component.translatable("tooltip.fast-noteblocks.radial_controls"))
-			.setSaveConsumer(config::setRadialControlsEnabled)
+			.setTooltip(Component.translatable("tooltip.fast-noteblocks.interactive_controls"))
+			.setSaveConsumer(config::setInteractiveControlsEnabled)
 			.build());
 		general.addEntry(entries.startBooleanToggle(
 				Component.translatable("option.fast-noteblocks.invert_scroll"), config.invertScrolling())
