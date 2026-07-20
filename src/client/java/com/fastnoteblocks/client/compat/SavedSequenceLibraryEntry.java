@@ -37,15 +37,30 @@ final class SavedSequenceLibraryEntry extends AbstractConfigListEntry<List<Saved
 			rows.add(new SavedRow(saved));
 		}
 		this.addButton = Button.builder(Component.literal("+ Add sequence"), button ->
-			rows.add(new SavedRow(new SavedSequence("Untitled sequence", ""))))
+			{
+				rows.add(new SavedRow(new SavedSequence("Untitled sequence", "")));
+				persistLibrary();
+			})
 			.bounds(0, 0, 120, 20)
 			.tooltip(Tooltip.create(Component.literal("Add a blank saved sequence")))
 			.build();
 		this.saveActiveButton = Button.builder(Component.literal("Save active sequence"), button ->
-			rows.add(new SavedRow(new SavedSequence(activeSequence.sequenceName(), activeSequence.getValue()))))
+			{
+				rows.add(new SavedRow(new SavedSequence(activeSequence.sequenceName(), activeSequence.getValue())));
+				persistLibrary();
+			})
 			.bounds(0, 0, 140, 20)
 			.tooltip(Tooltip.create(Component.literal("Save a copy of the active sequence")))
 			.build();
+	}
+
+	private void syncLibrary() {
+		config.setSavedSequences(getValue());
+	}
+
+	private void persistLibrary() {
+		syncLibrary();
+		FastNoteblocksConfig.save();
 	}
 
 	@Override
@@ -112,7 +127,7 @@ final class SavedSequenceLibraryEntry extends AbstractConfigListEntry<List<Saved
 
 	@Override
 	public void save() {
-		config.setSavedSequences(getValue());
+		syncLibrary();
 	}
 
 	private final class SavedRow {
@@ -131,10 +146,12 @@ final class SavedSequenceLibraryEntry extends AbstractConfigListEntry<List<Saved
 			this.nameBox = new EditBox(Minecraft.getInstance().font, 0, 0, 100, 20, Component.literal("Sequence name"));
 			nameBox.setMaxLength(80);
 			nameBox.setValue(saved.name());
+			nameBox.setResponder(value -> syncLibrary());
 			this.singleBox = new EditBox(Minecraft.getInstance().font, 0, 0, 100, 20, Component.literal("Sequence"));
 			singleBox.setMaxLength(12000);
 			singleBox.setValue(singleLine(saved.sequence()));
 			singleBox.addFormatter(this::formatCollapsed);
+			singleBox.setResponder(value -> syncLibrary());
 			this.loadButton = Button.builder(Component.literal("Load"), button -> activeSequence.setSequence(nameBox.getValue(), sequence()))
 				.bounds(0, 0, 42, 20)
 				.tooltip(Tooltip.create(Component.literal("Restore this into the active sequence editor")))
@@ -143,7 +160,10 @@ final class SavedSequenceLibraryEntry extends AbstractConfigListEntry<List<Saved
 				.bounds(0, 0, 20, 20)
 				.tooltip(Tooltip.create(Component.literal("Expand or collapse this sequence")))
 				.build();
-			this.deleteButton = Button.builder(Component.literal("×").withStyle(ChatFormatting.RED), button -> rows.remove(this))
+			this.deleteButton = Button.builder(Component.literal("×").withStyle(ChatFormatting.RED), button -> {
+				rows.remove(this);
+				persistLibrary();
+			})
 				.bounds(0, 0, 20, 20)
 				.tooltip(Tooltip.create(Component.literal("Delete this saved sequence")))
 				.build();
@@ -176,6 +196,7 @@ final class SavedSequenceLibraryEntry extends AbstractConfigListEntry<List<Saved
 				String current = multiBox == null ? multiValue : multiBox.getValue();
 				multiBox = new SequenceEditBox(Minecraft.getInstance().font, width, EXPANDED_EDITOR_HEIGHT);
 				multiBox.setCharacterLimit(12000);
+				multiBox.setValueListener(value -> syncLibrary());
 				multiBox.setValue(current);
 				multiValue = current;
 			}

@@ -47,6 +47,7 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 		this.nameBox = new EditBox(Minecraft.getInstance().font, 0, 0, 150, 20, Component.literal("Active sequence name"));
 		nameBox.setMaxLength(80);
 		nameBox.setValue(initialName);
+		nameBox.setResponder(config::setActiveSequenceName);
 		this.expandButton = Button.builder(expandLabel(), button -> {
 			expanded = !expanded;
 			button.setMessage(expandLabel());
@@ -178,6 +179,7 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 			String current = editor == null ? value : editor.getValue();
 			editor = new SequenceEditBox(Minecraft.getInstance().font, width, EDITOR_HEIGHT);
 			editor.setCharacterLimit(12000);
+			editor.setValueListener(config::setPlacementSequence);
 			editor.setValue(current);
 			value = current;
 		}
