@@ -50,7 +50,8 @@ The sequence control key is unbound by default and can be assigned in
 Minecraft's Controls screen. Tap it to pause or resume without losing the
 current position, hold it with Left or Right Arrow to move one step, or
 double-tap it to return to the beginning. A brief HUD preview appears after
-these controls and shows the current and following steps.
+these controls and shows the current and following steps. Holding the sequence
+key by itself is inert; a tap is recognized only after the key is released.
 
 The settings screen includes a complete `0` through `24` pitch-name guide.
 

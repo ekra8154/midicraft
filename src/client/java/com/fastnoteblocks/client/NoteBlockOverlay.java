@@ -78,6 +78,9 @@ public final class NoteBlockOverlay {
 	private NoteSequence.StepType inFlightSequenceType;
 	private int inFlightSequenceSteps;
 	private int pendingSequenceToggleTicks;
+	private boolean sequenceControlKeyDown;
+	private boolean sequenceGestureConsumed;
+	private boolean sequenceResetGesture;
 	private boolean leftArrowDown;
 	private boolean rightArrowDown;
 
@@ -207,33 +210,61 @@ public final class NoteBlockOverlay {
 
 	private void handleSequenceControls(Minecraft minecraft, FastNoteblocksConfig config) {
 		boolean inGame = minecraft.gui.screen() == null;
+		// Drain click counts so operating-system key repeats can never masquerade as extra taps.
 		while (placementSequenceKey.consumeClick()) {
-			if (!inGame) {
-				continue;
-			}
+		}
+		if (!inGame) {
+			pendingSequenceToggleTicks = 0;
+			sequenceControlKeyDown = placementSequenceKey.isDown();
+			sequenceGestureConsumed = sequenceControlKeyDown;
+			sequenceResetGesture = sequenceControlKeyDown;
+			leftArrowDown = false;
+			rightArrowDown = false;
+			return;
+		}
+
+		boolean keyDownNow = placementSequenceKey.isDown();
+		boolean pressedNow = keyDownNow && !sequenceControlKeyDown;
+		boolean releasedNow = !keyDownNow && sequenceControlKeyDown;
+		if (pressedNow) {
 			if (pendingSequenceToggleTicks > 0) {
 				pendingSequenceToggleTicks = 0;
 				resetPlacementSequence();
 				showSequenceHud(minecraft, "message.fast-noteblocks.sequence_reset");
+				sequenceGestureConsumed = true;
+				sequenceResetGesture = true;
 			} else {
-				pendingSequenceToggleTicks = SEQUENCE_DOUBLE_TAP_TICKS;
+				sequenceGestureConsumed = false;
+				sequenceResetGesture = false;
 			}
 		}
 
-		boolean leftDownNow = inGame && InputConstants.isKeyDown(minecraft.getWindow(), InputConstants.KEY_LEFT);
-		boolean rightDownNow = inGame && InputConstants.isKeyDown(minecraft.getWindow(), InputConstants.KEY_RIGHT);
-		if (inGame && placementSequenceKey.isDown()) {
+		boolean leftDownNow = InputConstants.isKeyDown(minecraft.getWindow(), InputConstants.KEY_LEFT);
+		boolean rightDownNow = InputConstants.isKeyDown(minecraft.getWindow(), InputConstants.KEY_RIGHT);
+		boolean movedThisTick = false;
+		if (keyDownNow && !sequenceResetGesture) {
 			if (leftDownNow && !leftArrowDown) {
 				pendingSequenceToggleTicks = 0;
 				movePlacementSequence(-1);
 				showSequenceHud(minecraft, "message.fast-noteblocks.sequence_previous");
+				sequenceGestureConsumed = true;
+				movedThisTick = true;
 			}
-			if (rightDownNow && !rightArrowDown) {
+			if (!movedThisTick && rightDownNow && !rightArrowDown) {
 				pendingSequenceToggleTicks = 0;
 				movePlacementSequence(1);
 				showSequenceHud(minecraft, "message.fast-noteblocks.sequence_next");
+				sequenceGestureConsumed = true;
 			}
 		}
+		if (releasedNow && !sequenceGestureConsumed) {
+			pendingSequenceToggleTicks = SEQUENCE_DOUBLE_TAP_TICKS;
+		}
+		if (releasedNow) {
+			sequenceGestureConsumed = false;
+			sequenceResetGesture = false;
+		}
+		sequenceControlKeyDown = keyDownNow;
 		leftArrowDown = leftDownNow;
 		rightArrowDown = rightDownNow;
 
