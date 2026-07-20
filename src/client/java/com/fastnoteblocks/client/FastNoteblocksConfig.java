@@ -7,12 +7,20 @@ import java.io.Reader;
 import java.io.Writer;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.network.chat.Component;
 
 public final class FastNoteblocksConfig {
+	public record SavedSequence(String name, String sequence) {
+		public SavedSequence {
+			name = name == null || name.isBlank() ? "Untitled sequence" : name.trim();
+			sequence = sequence == null ? "" : sequence;
+		}
+	}
+
 	public enum OverlayMode {
 		BOTH(true, true),
 		NOTES_ONLY(true, false),
@@ -93,6 +101,8 @@ public final class FastNoteblocksConfig {
 	private boolean autoSelectSequenceBlock;
 	private String placementSequence;
 	private int placementSequencePosition;
+	private String previewInstrument;
+	private List<SavedSequence> savedSequences;
 
 	private FastNoteblocksConfig() {
 	}
@@ -142,6 +152,10 @@ public final class FastNoteblocksConfig {
 				instance.placementSequencePosition = Math.max(0,
 					stored.placementSequencePosition == null ? 0 : stored.placementSequencePosition
 				);
+				instance.previewInstrument = stored.previewInstrument == null ? "HARP" : stored.previewInstrument;
+				instance.savedSequences = stored.savedSequences == null
+					? new ArrayList<>()
+					: new ArrayList<>(stored.savedSequences);
 			}
 		} catch (Exception ignored) {
 			instance = defaults();
@@ -321,6 +335,22 @@ public final class FastNoteblocksConfig {
 		this.placementSequencePosition = Math.max(0, placementSequencePosition);
 	}
 
+	public String previewInstrument() {
+		return previewInstrument;
+	}
+
+	public void setPreviewInstrument(String previewInstrument) {
+		this.previewInstrument = previewInstrument == null || previewInstrument.isBlank() ? "HARP" : previewInstrument;
+	}
+
+	public List<SavedSequence> savedSequences() {
+		return List.copyOf(savedSequences);
+	}
+
+	public void setSavedSequences(List<SavedSequence> savedSequences) {
+		this.savedSequences = savedSequences == null ? new ArrayList<>() : new ArrayList<>(savedSequences);
+	}
+
 	private static FastNoteblocksConfig defaults() {
 		FastNoteblocksConfig config = new FastNoteblocksConfig();
 		config.modEnabled = true;
@@ -340,6 +370,8 @@ public final class FastNoteblocksConfig {
 		config.autoSelectSequenceBlock = false;
 		config.placementSequence = "";
 		config.placementSequencePosition = 0;
+		config.previewInstrument = "HARP";
+		config.savedSequences = new ArrayList<>();
 		return config;
 	}
 
@@ -386,6 +418,8 @@ public final class FastNoteblocksConfig {
 		private Boolean autoSelectSequenceBlock;
 		private String placementSequence;
 		private Integer placementSequencePosition;
+		private String previewInstrument;
+		private List<SavedSequence> savedSequences;
 
 		private StoredConfig() {
 		}
@@ -408,6 +442,8 @@ public final class FastNoteblocksConfig {
 			this.autoSelectSequenceBlock = config.autoSelectSequenceBlock;
 			this.placementSequence = config.placementSequence;
 			this.placementSequencePosition = config.placementSequencePosition;
+			this.previewInstrument = config.previewInstrument;
+			this.savedSequences = config.savedSequences;
 		}
 	}
 }

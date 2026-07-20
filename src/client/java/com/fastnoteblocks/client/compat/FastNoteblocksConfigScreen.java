@@ -133,16 +133,13 @@ public final class FastNoteblocksConfigScreen {
 			.setTooltip(Component.translatable("tooltip.fast-noteblocks.auto_select_sequence_block"))
 			.setSaveConsumer(config::setAutoSelectSequenceBlock)
 			.build());
+		placement.addEntry(new InstrumentPreviewEntry(config));
 		placement.addEntry(entries.startTextDescription(
-			Component.translatable("guide.fast-noteblocks.sequence")
+			Component.translatable("guide.fast-noteblocks.sequence_compact")
 		).build());
-		placement.addEntry(entries.startStrField(
-				Component.translatable("option.fast-noteblocks.sequence"), config.placementSequence())
-			.setDefaultValue("")
-			.setTooltip(Component.translatable("tooltip.fast-noteblocks.sequence"))
-			.setErrorSupplier(FastNoteblocksConfig::validatePlacementSequence)
-			.setSaveConsumer(config::setPlacementSequence)
-			.build());
+		ActiveSequenceEntry activeSequence = new ActiveSequenceEntry(config);
+		placement.addEntry(activeSequence);
+		placement.addEntry(new SavedSequenceLibraryEntry(config, activeSequence));
 
 		builder.setSavingRunnable(FastNoteblocksConfig::save);
 		return builder.build();
