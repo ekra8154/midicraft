@@ -28,7 +28,7 @@ public final class FastNoteblocksConfigScreen {
 			.build());
 		general.addEntry(entries.startEnumSelector(
 				Component.translatable("option.fast-noteblocks.overlays"), OverlayMode.class, config.overlayMode())
-			.setDefaultValue(OverlayMode.NOTES_ONLY)
+			.setDefaultValue(OverlayMode.BOTH)
 			.setEnumNameProvider(value -> Component.translatable(
 				"option.fast-noteblocks.overlays." + ((OverlayMode) value).name().toLowerCase()
 			))

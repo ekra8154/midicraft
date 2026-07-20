@@ -24,8 +24,8 @@ When the optional Mod Menu and Cloth Config mods are installed, the Mod Menu
 configuration button provides:
 
 - a master switch for the entire mod;
-- a four-way overlay selector: note blocks and repeaters, note blocks only
-  (default), repeaters only, or off;
+- a four-way overlay selector: note blocks and repeaters (default), note blocks
+  only, repeaters only, or off;
 - optional nearby previews; when disabled, labels are hidden until their center
   position is targeted;
 - optional interactive controls, including the note radial and scrolling for
@@ -42,8 +42,9 @@ configuration button provides:
 
 For example, `0, 2d, 4, 2d, 7` expects a note block tuned to pitch 0, a repeater
 set to delay 2, and so on. A mismatched placement does not advance the sequence,
-and only one step can be in progress at a time. The sequence repeats when it
-reaches the end.
+and the sequence repeats when it reaches the end. Consecutive steps of the same
+block type can queue while earlier blocks are still adjusting; transitions
+between note blocks and repeaters wait for the current batch to finish.
 
 The sequence control key is unbound by default and can be assigned in
 Minecraft's Controls screen. Tap it to pause or resume without losing the

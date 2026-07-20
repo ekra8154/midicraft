@@ -79,7 +79,7 @@ public final class FastNoteblocksConfig {
 				instance.modEnabled = stored.modEnabled == null || stored.modEnabled;
 				instance.overlayMode = stored.overlayMode == null ? migrateOverlayMode(stored) : stored.overlayMode;
 				instance.previousOverlayMode = stored.previousOverlayMode == null || stored.previousOverlayMode == OverlayMode.OFF
-					? (instance.overlayMode == OverlayMode.OFF ? OverlayMode.NOTES_ONLY : instance.overlayMode)
+					? (instance.overlayMode == OverlayMode.OFF ? OverlayMode.BOTH : instance.overlayMode)
 					: stored.previousOverlayMode;
 				instance.nearbyPreviewsEnabled = stored.nearbyPreviewsEnabled == null || stored.nearbyPreviewsEnabled;
 				instance.interactiveControlsEnabled = stored.interactiveControlsEnabled == null
@@ -136,7 +136,7 @@ public final class FastNoteblocksConfig {
 	}
 
 	public void setOverlayMode(OverlayMode overlayMode) {
-		this.overlayMode = overlayMode == null ? OverlayMode.NOTES_ONLY : overlayMode;
+		this.overlayMode = overlayMode == null ? OverlayMode.BOTH : overlayMode;
 		if (this.overlayMode != OverlayMode.OFF) {
 			previousOverlayMode = this.overlayMode;
 		}
@@ -145,7 +145,7 @@ public final class FastNoteblocksConfig {
 	public void toggleOverlays() {
 		if (overlayMode == OverlayMode.OFF) {
 			overlayMode = previousOverlayMode == null || previousOverlayMode == OverlayMode.OFF
-				? OverlayMode.NOTES_ONLY
+				? OverlayMode.BOTH
 				: previousOverlayMode;
 		} else {
 			previousOverlayMode = overlayMode;
@@ -232,8 +232,8 @@ public final class FastNoteblocksConfig {
 	private static FastNoteblocksConfig defaults() {
 		FastNoteblocksConfig config = new FastNoteblocksConfig();
 		config.modEnabled = true;
-		config.overlayMode = OverlayMode.NOTES_ONLY;
-		config.previousOverlayMode = OverlayMode.NOTES_ONLY;
+		config.overlayMode = OverlayMode.BOTH;
+		config.previousOverlayMode = OverlayMode.BOTH;
 		config.nearbyPreviewsEnabled = true;
 		config.interactiveControlsEnabled = true;
 		config.invertScrolling = false;
@@ -252,7 +252,7 @@ public final class FastNoteblocksConfig {
 		}
 		return Boolean.FALSE.equals(stored.noteBlockOverlaysEnabled)
 			? OverlayMode.OFF
-			: OverlayMode.NOTES_ONLY;
+			: OverlayMode.BOTH;
 	}
 
 	private static int clampViewDistance(int distance) {
