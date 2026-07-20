@@ -507,7 +507,13 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 				return false;
 			}
 			if (event.x() >= iconX && event.x() < iconX + 20 && event.y() >= iconY && event.y() < iconY + 20) {
-				paletteOpen = !paletteOpen;
+				if (!expanded) {
+					expanded = true;
+					paletteOpen = true;
+					collapseButton.setMessage(collapseLabel());
+				} else {
+					paletteOpen = !paletteOpen;
+				}
 				for (TrackRow track : tracks) {
 					if (track != this) {
 						track.paletteOpen = false;
@@ -531,7 +537,6 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 			}
 			PreviewInstrument selected = PreviewInstrument.VALUES.get(index);
 			instrument = selected.id();
-			paletteOpen = false;
 			selected.play();
 			syncAndSave();
 			return true;
