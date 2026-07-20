@@ -50,8 +50,8 @@ public final class NoteBlockOverlay {
 	private static final double REPEATER_LABEL_Y = LABEL_Y - 0.75;
 	private static final double MENU_HORIZONTAL_RADIUS = 0.72;
 	private static final double MENU_VERTICAL_RADIUS = 0.50;
-	private static final double REPEATER_MENU_HORIZONTAL_RADIUS = 0.38;
-	private static final double REPEATER_MENU_VERTICAL_RADIUS = 0.34;
+	private static final double REPEATER_MENU_HORIZONTAL_RADIUS = 0.24;
+	private static final double REPEATER_MENU_VERTICAL_RADIUS = 0.20;
 	private static final char[] FAMILIES = {'A', 'B', 'C', 'D', 'E', 'F', 'G'};
 	private static final KeyMapping.Category CATEGORY = KeyMapping.Category.register(
 		Identifier.fromNamespaceAndPath("fast-noteblocks", "controls")
