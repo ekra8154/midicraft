@@ -178,6 +178,9 @@ public final class NoteBlockOverlay {
 		if (minecraft.gui.screen() != null || !placementSequenceKey.isDown()) {
 			return false;
 		}
+		if (!FastNoteblocksConfig.get().placementSequenceEnabled()) {
+			return true;
+		}
 		if (!sequenceControlKeyDown) {
 			sequenceControlKeyDown = true;
 			sequenceGestureConsumed = false;
@@ -293,7 +296,7 @@ public final class NoteBlockOverlay {
 		// Drain click counts so operating-system key repeats can never masquerade as extra taps.
 		while (placementSequenceKey.consumeClick()) {
 		}
-		if (!inGame) {
+		if (!inGame || !config.placementSequenceEnabled()) {
 			sequenceTapWindowTicks = 0;
 			sequenceControlKeyDown = placementSequenceKey.isDown();
 			sequenceGestureConsumed = sequenceControlKeyDown;
@@ -359,7 +362,10 @@ public final class NoteBlockOverlay {
 	private void renderSequenceHud(GuiGraphicsExtractor graphics, DeltaTracker deltaTracker) {
 		Minecraft minecraft = Minecraft.getInstance();
 		boolean keyHeld = placementSequenceKey.isDown();
-		if ((!keyHeld && sequenceHudTicks <= 0) || minecraft.player == null || minecraft.gui.screen() != null) {
+		if (!FastNoteblocksConfig.get().placementSequenceEnabled()
+			|| (!keyHeld && sequenceHudTicks <= 0)
+			|| minecraft.player == null
+			|| minecraft.gui.screen() != null) {
 			return;
 		}
 		List<NoteSequence.Step> sequence = configuredSequence();
@@ -630,30 +636,6 @@ public final class NoteBlockOverlay {
 			: value % 4 + 1;
 	}
 
-	public boolean prepareSequencePlacement(LocalPlayer player, InteractionHand hand) {
-		FastNoteblocksConfig config = FastNoteblocksConfig.get();
-		List<NoteSequence.Step> sequence = configuredSequence();
-		if (hand != InteractionHand.MAIN_HAND
-			|| !config.modEnabled()
-			|| !config.placementSequenceEnabled()
-			|| !config.autoSelectSequenceBlock()
-			|| sequence.isEmpty()) {
-			return false;
-		}
-
-		NoteSequence.Step expected = sequence.get(Math.floorMod(placementSequenceIndex, sequence.size()));
-		int hotbarSlot = findSequenceItemSlot(player, expected);
-		if (hotbarSlot < 0) {
-			return false;
-		}
-		if (!placementWatches.isEmpty()
-			|| inFlightSequenceSteps > 0 && expected.type() != inFlightSequenceType) {
-			return true;
-		}
-		player.getInventory().setSelectedSlot(hotbarSlot);
-		return false;
-	}
-
 	private static int findSequenceItemSlot(LocalPlayer player, NoteSequence.Step expected) {
 		int selectedSlot = player.getInventory().getSelectedSlot();
 		if (sequenceItemMatches(player, expected, selectedSlot)) {
@@ -754,6 +736,18 @@ public final class NoteBlockOverlay {
 			int previousIndex = Math.floorMod(placementSequenceIndex, sequence.size());
 			placementSequenceIndex = (previousIndex + 1) % sequence.size();
 			showSequenceAdvance(sequence.get(previousIndex), sequence.get(placementSequenceIndex));
+			selectCurrentSequenceItem(Minecraft.getInstance(), sequence.get(placementSequenceIndex));
+		}
+	}
+
+	private static void selectCurrentSequenceItem(Minecraft minecraft, NoteSequence.Step current) {
+		FastNoteblocksConfig config = FastNoteblocksConfig.get();
+		if (!config.autoSelectSequenceBlock() || minecraft.player == null) {
+			return;
+		}
+		int hotbarSlot = findSequenceItemSlot(minecraft.player, current);
+		if (hotbarSlot >= 0) {
+			minecraft.player.getInventory().setSelectedSlot(hotbarSlot);
 		}
 	}
 

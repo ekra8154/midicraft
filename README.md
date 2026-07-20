@@ -53,19 +53,18 @@ between note blocks and repeaters wait for the current batch to finish.
 
 The sequence control key is unbound by default and can be assigned in
 Minecraft's Controls screen. Hold it to see the sequence, hold and scroll
-up/down for the previous/next step, or double-tap it to pause or resume without
-losing the current position. Manual scrolling stops at the first and last steps
-instead of wrapping. The sliding HUD keeps the next placement centered, with
+up/down for the previous/next step, or double-tap it to pause without losing the
+current position. While paused, the key is completely inactive; resume from the
+Mod Menu setting. Manual scrolling stops at the first and last steps instead of
+wrapping. The sliding HUD keeps the next placement centered, with
 compact repeater delay markers between the fuller note labels. Each successful
 placement briefly shows only the placed step sliding aside and its successor
 becoming current.
 
-The optional **Auto-select next block** setting selects a note block or repeater
-from the hotbar before each sequence placement. This allows alternating between
-the two block types by repeatedly right-clicking. If the required item is not in
-the hotbar, the click and selected slot are left unchanged. A premature click
-during a required note/repeater transition is held back so it cannot place an
-untracked block and shift the sequence.
+The optional **Auto-select after placement** setting passively changes to the
+note block or repeater needed for the new current step immediately after a
+successful placement. It never intercepts right-clicks. If the next required
+item is not in the hotbar, the selected slot is left unchanged.
 
 The settings screen includes a complete `0` through `24` pitch-name guide.
 

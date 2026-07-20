@@ -3,8 +3,7 @@
   "package": "com.fastnoteblocks.client.mixin",
   "compatibilityLevel": "JAVA_25",
   "client": [
-    "MouseHandlerMixin",
-    "MultiPlayerGameModeMixin"
+    "MouseHandlerMixin"
   ],
   "injectors": {
     "defaultRequire": 1
