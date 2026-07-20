@@ -1,6 +1,8 @@
 package com.fastnoteblocks.client.compat;
 
 import com.fastnoteblocks.NotePitch;
+import com.fastnoteblocks.NoteSequence;
+import java.util.List;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.MultiLineEditBox;
@@ -78,31 +80,25 @@ final class SequenceEditBox extends MultiLineEditBox {
 		if (!isMouseOver(mouseX, mouseY)) {
 			return;
 		}
-		int tokenStart = 0;
-		for (int i = 0; i <= value.length(); i++) {
-			if (i != value.length() && value.charAt(i) != ',') {
-				continue;
-			}
-			int from = tokenStart;
-			int to = i;
-			while (from < to && Character.isWhitespace(value.charAt(from))) {
-				from++;
-			}
-			while (to > from && Character.isWhitespace(value.charAt(to - 1))) {
-				to--;
-			}
-			String token = value.substring(from, to);
+		List<NoteSequence.Token> tokens;
+		try {
+			tokens = NoteSequence.tokens(value);
+		} catch (IllegalArgumentException ignored) {
+			return;
+		}
+		for (NoteSequence.Token sequenceToken : tokens) {
+			String token = sequenceToken.text();
 			if (!token.endsWith("d") && !token.endsWith("D")) {
 				try {
 					int note = Integer.parseInt(token);
-					if (note >= 0 && note < NotePitch.PITCH_COUNT && tokenUnderMouse(value, from, to, mouseX, mouseY)) {
+					if (note >= 0 && note < NotePitch.PITCH_COUNT
+						&& tokenUnderMouse(value, sequenceToken.from(), sequenceToken.to(), mouseX, mouseY)) {
 						graphics.setTooltipForNextFrame(Component.literal(NotePitch.name(note)), mouseX, mouseY);
 						return;
 					}
 				} catch (NumberFormatException ignored) {
 				}
 			}
-			tokenStart = i + 1;
 		}
 	}
 

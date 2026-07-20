@@ -23,6 +23,12 @@ class NoteSequenceTest {
 	}
 
 	@Test
+	void parsesWhitespaceSeparatedSequenceWhenThereAreNoCommas() {
+		assertEquals(NoteSequence.parse("3, 6, 8, 11, 2d, 6"), NoteSequence.parse("3  6\n8\t11 2d 6"));
+		assertThrows(IllegalArgumentException.class, () -> NoteSequence.parse("3 6, 8 11"));
+	}
+
+	@Test
 	void expandsLongDelaysIntoTheMinimumNumberOfRepeaters() {
 		assertEquals(List.of(
 			new NoteSequence.Step(NoteSequence.StepType.REPEATER, 4, 10, 0, 3),

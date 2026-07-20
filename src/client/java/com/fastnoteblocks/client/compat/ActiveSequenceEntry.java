@@ -148,28 +148,15 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 
 	private static List<TextRange> tokenRanges(String value) {
 		List<TextRange> ranges = new ArrayList<>();
-		int tokenStart = 0;
-		for (int i = 0; i <= value.length(); i++) {
-			if (i != value.length() && value.charAt(i) != ',') {
-				continue;
-			}
-			int from = tokenStart;
-			int to = i;
-			while (from < to && Character.isWhitespace(value.charAt(from))) {
-				from++;
-			}
-			while (to > from && Character.isWhitespace(value.charAt(to - 1))) {
-				to--;
-			}
-			String token = value.substring(from, to);
+		for (NoteSequence.Token sequenceToken : NoteSequence.tokens(value)) {
+			String token = sequenceToken.text();
 			int repeat = 1;
 			if (token.endsWith("d") || token.endsWith("D")) {
 				repeat = (Integer.parseInt(token.substring(0, token.length() - 1).trim()) + 3) / 4;
 			}
 			for (int copy = 0; copy < repeat; copy++) {
-				ranges.add(new TextRange(from, to));
+				ranges.add(new TextRange(sequenceToken.from(), sequenceToken.to()));
 			}
-			tokenStart = i + 1;
 		}
 		return List.copyOf(ranges);
 	}

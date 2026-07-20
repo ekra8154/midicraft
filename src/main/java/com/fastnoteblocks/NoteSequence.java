@@ -35,6 +35,9 @@ public final class NoteSequence {
 	) {
 	}
 
+	public record Token(String text, int from, int to) {
+	}
+
 	private NoteSequence() {
 	}
 
@@ -44,11 +47,8 @@ public final class NoteSequence {
 		}
 
 		List<Step> steps = new ArrayList<>();
-		for (String rawPart : value.split(",", -1)) {
-			String part = rawPart.trim();
-			if (part.isEmpty()) {
-				throw new IllegalArgumentException("Empty sequence entry");
-			}
+		for (Token token : tokens(value)) {
+			String part = token.text();
 			boolean repeater = part.endsWith("d") || part.endsWith("D");
 			String number = repeater ? part.substring(0, part.length() - 1).trim() : part;
 			int parsed;
@@ -76,6 +76,50 @@ public final class NoteSequence {
 			}
 		}
 		return List.copyOf(steps);
+	}
+
+	public static List<Token> tokens(String value) {
+		if (value == null || value.isBlank()) {
+			return List.of();
+		}
+		List<Token> tokens = new ArrayList<>();
+		if (value.indexOf(',') >= 0) {
+			int tokenStart = 0;
+			for (int i = 0; i <= value.length(); i++) {
+				if (i != value.length() && value.charAt(i) != ',') {
+					continue;
+				}
+				int from = tokenStart;
+				int to = i;
+				while (from < to && Character.isWhitespace(value.charAt(from))) {
+					from++;
+				}
+				while (to > from && Character.isWhitespace(value.charAt(to - 1))) {
+					to--;
+				}
+				if (from == to) {
+					throw new IllegalArgumentException("Empty sequence entry");
+				}
+				tokens.add(new Token(value.substring(from, to), from, to));
+				tokenStart = i + 1;
+			}
+		} else {
+			int index = 0;
+			while (index < value.length()) {
+				while (index < value.length() && Character.isWhitespace(value.charAt(index))) {
+					index++;
+				}
+				if (index >= value.length()) {
+					break;
+				}
+				int from = index;
+				while (index < value.length() && !Character.isWhitespace(value.charAt(index))) {
+					index++;
+				}
+				tokens.add(new Token(value.substring(from, index), from, index));
+			}
+		}
+		return List.copyOf(tokens);
 	}
 
 	public static Progress progress(List<Step> steps, int currentIndex) {

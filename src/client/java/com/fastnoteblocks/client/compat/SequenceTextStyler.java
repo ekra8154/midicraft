@@ -1,5 +1,6 @@
 package com.fastnoteblocks.client.compat;
 
+import com.fastnoteblocks.NoteSequence;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -20,14 +21,20 @@ final class SequenceTextStyler {
 	static Style[] styles(String text) {
 		Style[] styles = new Style[text.length()];
 		Arrays.fill(styles, NORMAL);
-		int tokenStart = 0;
-		for (int i = 0; i <= text.length(); i++) {
-			if (i == text.length() || text.charAt(i) == ',') {
-				styleToken(text, styles, tokenStart, i);
-				if (i < text.length()) {
-					styles[i] = PUNCTUATION;
+		for (int i = 0; i < text.length(); i++) {
+			if (text.charAt(i) == ',') {
+				styles[i] = PUNCTUATION;
+			}
+		}
+		try {
+			for (NoteSequence.Token token : NoteSequence.tokens(text)) {
+				styleToken(text, styles, token.from(), token.to());
+			}
+		} catch (IllegalArgumentException ignored) {
+			for (int i = 0; i < text.length(); i++) {
+				if (!Character.isWhitespace(text.charAt(i)) && text.charAt(i) != ',') {
+					styles[i] = INVALID;
 				}
-				tokenStart = i + 1;
 			}
 		}
 		return styles;
@@ -50,7 +57,7 @@ final class SequenceTextStyler {
 		Style style = INVALID;
 		try {
 			if (token.endsWith("d") || token.endsWith("D")) {
-				int delay = Integer.parseInt(token.substring(0, token.length() - 1));
+				int delay = Integer.parseInt(token.substring(0, token.length() - 1).trim());
 				if (delay >= 1 && delay <= 64) {
 					style = DELAY;
 				}

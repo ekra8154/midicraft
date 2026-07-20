@@ -49,7 +49,7 @@
   "option.fast-noteblocks.auto_select_sequence_block": "Auto-select current step",
   "tooltip.fast-noteblocks.auto_select_sequence_block": "Selects a note block or repeater from your hotbar whenever the current sequence step changes, including manual scrolling.",
   "option.fast-noteblocks.sequence": "Note and repeater sequence",
-  "tooltip.fast-noteblocks.sequence": "Comma-separated notes from 0 to 24 and total repeater delays from 1d to 64d. Long delays use the minimum number of repeaters. Example: 0, 10d, 7.",
+  "tooltip.fast-noteblocks.sequence": "Notes and delays may be comma-separated, or whitespace-separated when no commas are used. Notes are 0-24 and delays are 1d-64d. Example: 0, 10d, 7.",
   "guide.fast-noteblocks.sequence": "Sequence guide: notes use 0-24; repeater delay groups use 1d-64d. A long delay expands into the fewest repeaters: 10d becomes 4d + 4d + 2d. Example: 0, 10d, 7.\nControls: double-tap the sequence key to pause/resume. While running, hold to preview or hold and scroll up/down for the previous/next physical placement. While paused, single taps and holds have no sequence action, and the wheel continues to scroll the hotbar normally. Manual sequence scrolling stops at either end.\nPitch guide:\n0:F\u266f  1:G  2:G\u266f  3:A  4:A\u266f  5:B  6:C  7:C\u266f  8:D  9:D\u266f  10:E  11:F\n12:F\u266f  13:G  14:G\u266f  15:A  16:A\u266f  17:B  18:C  19:C\u266f  20:D  21:D\u266f  22:E  23:F  24:F\u266f",
   "guide.fast-noteblocks.sequence_compact": "Notes: 0-24 (aqua)   Delays: 1d-64d (gold)   Example: 0, 2d, 7\nPitch: 0:F♯  1:G  2:G♯  3:A  4:A♯  5:B  6:C ... 12:F♯ ... 24:F♯",
   "error.fast-noteblocks.sequence": "Notes must be 0-24 and repeater delay groups must be 1d-64d."
