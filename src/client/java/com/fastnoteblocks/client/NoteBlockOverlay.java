@@ -45,8 +45,6 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 
 public final class NoteBlockOverlay {
-	public static final NoteBlockOverlay INSTANCE = new NoteBlockOverlay();
-
 	private static final int RESCAN_INTERVAL_TICKS = 10;
 	private static final int PLACEMENT_WATCH_TICKS = 12;
 	private static final int INTERACTION_ACK_TIMEOUT_TICKS = 40;
@@ -65,6 +63,7 @@ public final class NoteBlockOverlay {
 	private static final KeyMapping.Category CATEGORY = KeyMapping.Category.register(
 		Identifier.fromNamespaceAndPath("fast-noteblocks", "controls")
 	);
+	public static final NoteBlockOverlay INSTANCE = new NoteBlockOverlay();
 
 	private final List<BlockPos> nearbyNoteBlocks = new ArrayList<>();
 	private final List<BlockPos> nearbyRepeaters = new ArrayList<>();
