@@ -50,6 +50,8 @@ public final class NoteBlockOverlay {
 	private static final double REPEATER_LABEL_Y = LABEL_Y - 0.75;
 	private static final double MENU_HORIZONTAL_RADIUS = 0.72;
 	private static final double MENU_VERTICAL_RADIUS = 0.50;
+	private static final double REPEATER_MENU_HORIZONTAL_RADIUS = 0.38;
+	private static final double REPEATER_MENU_VERTICAL_RADIUS = 0.34;
 	private static final char[] FAMILIES = {'A', 'B', 'C', 'D', 'E', 'F', 'G'};
 	private static final KeyMapping.Category CATEGORY = KeyMapping.Category.register(
 		Identifier.fromNamespaceAndPath("fast-noteblocks", "controls")
@@ -71,6 +73,8 @@ public final class NoteBlockOverlay {
 	private ClientLevel lastLevel;
 	private BlockPos expandedBlock;
 	private Character menuCenterFamily;
+	private BlockPos expandedRepeater;
+	private Integer repeaterBottomDelay;
 	private int placementSequenceIndex;
 	private boolean lastPlacementSequenceEnabled;
 	private String lastPlacementSequenceText = "";
@@ -118,7 +122,9 @@ public final class NoteBlockOverlay {
 		int clicks;
 		if (hovered.isRepeater()) {
 			int currentDelay = displayedRepeaterDelay(minecraft.level, hovered.blockPos());
-			int targetDelay = forward ? currentDelay % 4 + 1 : Math.floorMod(currentDelay - 2, 4) + 1;
+			int targetDelay = config.repeaterControlStyle() == FastNoteblocksConfig.RepeaterControlStyle.RADIAL_SELECT
+				? hovered.repeaterDelay()
+				: (forward ? currentDelay % 4 + 1 : Math.floorMod(currentDelay - 2, 4) + 1);
 			target = NoteSequence.Step.repeater(targetDelay);
 			clicks = Math.floorMod(targetDelay - currentDelay, 4);
 		} else {
@@ -172,6 +178,8 @@ public final class NoteBlockOverlay {
 			FastNoteblocksConfig.save();
 			expandedBlock = null;
 			menuCenterFamily = null;
+			expandedRepeater = null;
+			repeaterBottomDelay = null;
 			ticksUntilRescan = 0;
 			if (minecraft.player != null) {
 				minecraft.gui.hud.setOverlayMessage(Component.translatable(
@@ -201,6 +209,8 @@ public final class NoteBlockOverlay {
 			clearInFlightSequenceSteps();
 			expandedBlock = null;
 			menuCenterFamily = null;
+			expandedRepeater = null;
+			repeaterBottomDelay = null;
 			ticksUntilRescan = 0;
 		}
 
@@ -217,11 +227,19 @@ public final class NoteBlockOverlay {
 			clearInFlightSequenceSteps();
 			expandedBlock = null;
 			menuCenterFamily = null;
+			expandedRepeater = null;
+			repeaterBottomDelay = null;
 			return;
 		}
 		if (!config.interactiveControlsEnabled() || !config.overlayMode().includesNotes()) {
 			expandedBlock = null;
 			menuCenterFamily = null;
+		}
+		if (!config.interactiveControlsEnabled()
+			|| !config.overlayMode().includesRepeaters()
+			|| config.repeaterControlStyle() != FastNoteblocksConfig.RepeaterControlStyle.RADIAL_SELECT) {
+			expandedRepeater = null;
+			repeaterBottomDelay = null;
 		}
 
 		updatePlacementWatches(minecraft);
@@ -234,6 +252,8 @@ public final class NoteBlockOverlay {
 			nearbyRepeaters.clear();
 			expandedBlock = null;
 			menuCenterFamily = null;
+			expandedRepeater = null;
+			repeaterBottomDelay = null;
 		}
 		performNextClick(minecraft);
 	}
@@ -689,23 +709,48 @@ public final class NoteBlockOverlay {
 				if (!state.is(Blocks.REPEATER)) {
 					continue;
 				}
-				boolean isHovered = hovered != null && hovered.isRepeater() && hovered.blockPos().equals(pos);
-				if (!config.nearbyPreviewsEnabled() && !isHovered) {
+				boolean focused = pos.equals(expandedRepeater)
+					|| hovered != null && hovered.isRepeater() && hovered.blockPos().equals(pos);
+				if (!config.nearbyPreviewsEnabled() && !focused) {
 					continue;
 				}
 				boolean inRange = minecraft.player.isWithinBlockInteractionRange(pos, 0.0);
-				Component text = Component.literal(Integer.toString(displayedRepeaterDelay(minecraft.level, pos)));
-				if (isHovered) {
-					text = text.copy().withStyle(ChatFormatting.AQUA, ChatFormatting.BOLD, ChatFormatting.UNDERLINE);
-				} else {
-					text = text.copy().withStyle(inRange ? ChatFormatting.GOLD : ChatFormatting.GRAY, ChatFormatting.BOLD);
-				}
+				int currentDelay = displayedRepeaterDelay(minecraft.level, pos);
+				boolean expanded = config.interactiveControlsEnabled()
+					&& config.repeaterControlStyle() == FastNoteblocksConfig.RepeaterControlStyle.RADIAL_SELECT
+					&& pos.equals(expandedRepeater);
+				int layoutBottomDelay = expanded && repeaterBottomDelay != null ? repeaterBottomDelay : currentDelay;
+				Vec3 labelCenter = new Vec3(pos.getX() + 0.5, pos.getY() + REPEATER_LABEL_Y, pos.getZ() + 0.5);
+				Vec3 right = labelRight(cameraPos, labelCenter);
+				Vec3 up = labelUp(cameraPos, labelCenter, right);
 				poseStack.pushPose();
 				poseStack.translate(pos.getX() - cameraPos.x, pos.getY() - cameraPos.y, pos.getZ() - cameraPos.z);
-				context.submitNodeCollector().submitNameTag(
-					poseStack, new Vec3(0.5, REPEATER_LABEL_Y - 0.5, 0.5), 0, text, true,
-					LightCoordsUtil.FULL_BRIGHT, cameraState
-				);
+				for (int delay = 1; delay <= 4; delay++) {
+					if (!expanded && delay != currentDelay) {
+						continue;
+					}
+					LabelOffset offset = expanded
+						? repeaterLabelOffset(layoutBottomDelay, delay)
+						: new LabelOffset(0.0, 0.0);
+					Vec3 attachment = new Vec3(
+						0.5 + right.x * offset.right() + up.x * offset.up(),
+						REPEATER_LABEL_Y - 0.5 + right.y * offset.right() + up.y * offset.up(),
+						0.5 + right.z * offset.right() + up.z * offset.up()
+					);
+					boolean isHovered = hovered != null && hovered.isRepeater()
+						&& hovered.blockPos().equals(pos) && hovered.repeaterDelay() == delay;
+					Component text = Component.literal(Integer.toString(delay));
+					if (isHovered) {
+						text = text.copy().withStyle(ChatFormatting.AQUA, ChatFormatting.BOLD, ChatFormatting.UNDERLINE);
+					} else if (delay == currentDelay) {
+						text = text.copy().withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD);
+					} else {
+						text = text.copy().withStyle(inRange ? ChatFormatting.WHITE : ChatFormatting.GRAY);
+					}
+					context.submitNodeCollector().submitNameTag(
+						poseStack, attachment, 0, text, true, LightCoordsUtil.FULL_BRIGHT, cameraState
+					);
+				}
 				poseStack.popPose();
 			}
 		}
@@ -717,6 +762,13 @@ public final class NoteBlockOverlay {
 		if (!interactiveControlsEnabled || !config.overlayMode().includesNotes()) {
 			expandedBlock = null;
 			menuCenterFamily = null;
+		}
+		boolean repeaterRadialEnabled = interactiveControlsEnabled
+			&& config.overlayMode().includesRepeaters()
+			&& config.repeaterControlStyle() == FastNoteblocksConfig.RepeaterControlStyle.RADIAL_SELECT;
+		if (!repeaterRadialEnabled) {
+			expandedRepeater = null;
+			repeaterBottomDelay = null;
 		}
 		Camera camera = minecraft.gameRenderer.mainCamera();
 		Vec3 origin = camera.position();
@@ -730,7 +782,23 @@ public final class NoteBlockOverlay {
 				return expandedHit.label();
 			}
 			menuCenterFamily = NotePitch.family(displayedPitch(minecraft.level, expandedBlock));
-			if (isInsideMenuEnvelope(expandedBlock, origin, direction)) {
+			if (isInsideMenuEnvelope(
+				expandedBlock, LABEL_Y, 1.05, 0.78, origin, direction
+			)) {
+				return null;
+			}
+		}
+		if (repeaterRadialEnabled
+			&& expandedRepeater != null
+			&& minecraft.level.getBlockState(expandedRepeater).is(Blocks.REPEATER)) {
+			LabelHit expandedHit = hitRepeaterLabel(minecraft, expandedRepeater, true, origin, direction);
+			if (expandedHit != null) {
+				return expandedHit.label();
+			}
+			repeaterBottomDelay = displayedRepeaterDelay(minecraft.level, expandedRepeater);
+			if (isInsideMenuEnvelope(
+				expandedRepeater, REPEATER_LABEL_Y, 0.62, 0.58, origin, direction
+			)) {
 				return null;
 			}
 		}
@@ -752,7 +820,10 @@ public final class NoteBlockOverlay {
 				if (!minecraft.level.getBlockState(pos).is(Blocks.REPEATER)) {
 					continue;
 				}
-				LabelHit hit = hitRepeaterLabel(minecraft, pos, origin, direction);
+				if (pos.equals(expandedRepeater)) {
+					continue;
+				}
+				LabelHit hit = hitRepeaterLabel(minecraft, pos, false, origin, direction);
 				if (hit != null && (closest == null || hit.distance() < closest.distance())) {
 					closest = hit;
 				}
@@ -763,14 +834,25 @@ public final class NoteBlockOverlay {
 			if (interactiveControlsEnabled && !closest.label().isRepeater()) {
 				expandedBlock = closest.label().blockPos();
 				menuCenterFamily = NotePitch.family(displayedPitch(minecraft.level, expandedBlock));
+				expandedRepeater = null;
+				repeaterBottomDelay = null;
+			} else if (repeaterRadialEnabled) {
+				expandedRepeater = closest.label().blockPos();
+				repeaterBottomDelay = displayedRepeaterDelay(minecraft.level, expandedRepeater);
+				expandedBlock = null;
+				menuCenterFamily = null;
 			} else {
 				expandedBlock = null;
 				menuCenterFamily = null;
+				expandedRepeater = null;
+				repeaterBottomDelay = null;
 			}
 			return closest.label();
 		}
 		expandedBlock = null;
 		menuCenterFamily = null;
+		expandedRepeater = null;
+		repeaterBottomDelay = null;
 		return null;
 	}
 
@@ -807,35 +889,54 @@ public final class NoteBlockOverlay {
 			String text = labelString(pitch, family, inRange);
 			double halfWidth = minecraft.font.width(text) * 0.0125 + 0.04;
 			if (Math.abs(hitOffset.dot(right)) <= halfWidth && Math.abs(hitOffset.dot(up)) <= 0.15) {
-				closest = new LabelHit(new HoveredLabel(pos, family), distance);
+				closest = new LabelHit(new HoveredLabel(pos, family, -1), distance);
 			}
 		}
 		return closest;
 	}
 
-	private LabelHit hitRepeaterLabel(Minecraft minecraft, BlockPos pos, Vec3 origin, Vec3 direction) {
-		Vec3 center = new Vec3(pos.getX() + 0.5, pos.getY() + REPEATER_LABEL_Y, pos.getZ() + 0.5);
-		Vec3 normal = origin.subtract(center).normalize();
-		double denominator = direction.dot(normal);
-		if (Math.abs(denominator) < 1.0E-5) {
-			return null;
+	private LabelHit hitRepeaterLabel(
+		Minecraft minecraft, BlockPos pos, boolean expanded, Vec3 origin, Vec3 direction
+	) {
+		int currentDelay = displayedRepeaterDelay(minecraft.level, pos);
+		int layoutBottomDelay = expanded && repeaterBottomDelay != null ? repeaterBottomDelay : currentDelay;
+		Vec3 baseCenter = new Vec3(pos.getX() + 0.5, pos.getY() + REPEATER_LABEL_Y, pos.getZ() + 0.5);
+		Vec3 right = labelRight(origin, baseCenter);
+		Vec3 layoutUp = labelUp(origin, baseCenter, right);
+		LabelHit closest = null;
+		for (int delay = 1; delay <= 4; delay++) {
+			if (!expanded && delay != currentDelay) {
+				continue;
+			}
+			LabelOffset offset = expanded
+				? repeaterLabelOffset(layoutBottomDelay, delay)
+				: new LabelOffset(0.0, 0.0);
+			Vec3 center = baseCenter
+				.add(right.scale(offset.right()))
+				.add(layoutUp.scale(offset.up()));
+			Vec3 normal = origin.subtract(center).normalize();
+			double denominator = direction.dot(normal);
+			if (Math.abs(denominator) < 1.0E-5) {
+				continue;
+			}
+			double distance = center.subtract(origin).dot(normal) / denominator;
+			if (distance <= 0.0 || closest != null && distance >= closest.distance()) {
+				continue;
+			}
+			Vec3 hitOffset = origin.add(direction.scale(distance)).subtract(center);
+			Vec3 up = normal.cross(right).normalize();
+			double halfWidth = minecraft.font.width(Integer.toString(delay)) * 0.0125 + 0.04;
+			if (Math.abs(hitOffset.dot(right)) <= halfWidth && Math.abs(hitOffset.dot(up)) <= 0.15) {
+				closest = new LabelHit(new HoveredLabel(pos, null, delay), distance);
+			}
 		}
-		double distance = center.subtract(origin).dot(normal) / denominator;
-		if (distance <= 0.0) {
-			return null;
-		}
-		Vec3 right = labelRight(origin, Vec3.atCenterOf(pos));
-		Vec3 up = normal.cross(right).normalize();
-		Vec3 hitOffset = origin.add(direction.scale(distance)).subtract(center);
-		String text = Integer.toString(displayedRepeaterDelay(minecraft.level, pos));
-		double halfWidth = minecraft.font.width(text) * 0.0125 + 0.04;
-		return Math.abs(hitOffset.dot(right)) <= halfWidth && Math.abs(hitOffset.dot(up)) <= 0.15
-			? new LabelHit(new HoveredLabel(pos, null), distance)
-			: null;
+		return closest;
 	}
 
-	private boolean isInsideMenuEnvelope(BlockPos pos, Vec3 origin, Vec3 direction) {
-		Vec3 center = new Vec3(pos.getX() + 0.5, pos.getY() + LABEL_Y, pos.getZ() + 0.5);
+	private boolean isInsideMenuEnvelope(
+		BlockPos pos, double labelY, double halfWidth, double halfHeight, Vec3 origin, Vec3 direction
+	) {
+		Vec3 center = new Vec3(pos.getX() + 0.5, pos.getY() + labelY, pos.getZ() + 0.5);
 		Vec3 normal = origin.subtract(center).normalize();
 		double denominator = direction.dot(normal);
 		if (Math.abs(denominator) < 1.0E-5) {
@@ -848,7 +949,7 @@ public final class NoteBlockOverlay {
 		Vec3 right = labelRight(origin, Vec3.atCenterOf(pos));
 		Vec3 up = normal.cross(right).normalize();
 		Vec3 offset = origin.add(direction.scale(distance)).subtract(center);
-		return Math.abs(offset.dot(right)) <= 1.05 && Math.abs(offset.dot(up)) <= 0.78;
+		return Math.abs(offset.dot(right)) <= halfWidth && Math.abs(offset.dot(up)) <= halfHeight;
 	}
 
 	private int displayedPitch(ClientLevel level, BlockPos pos) {
@@ -905,6 +1006,16 @@ public final class NoteBlockOverlay {
 			outerIndex++;
 		}
 		throw new IllegalArgumentException("Unknown pitch family: " + family);
+	}
+
+	private static LabelOffset repeaterLabelOffset(int bottomDelay, int delay) {
+		return switch (Math.floorMod(delay - bottomDelay, 4)) {
+			case 0 -> new LabelOffset(0.0, -REPEATER_MENU_VERTICAL_RADIUS);
+			case 1 -> new LabelOffset(-REPEATER_MENU_HORIZONTAL_RADIUS, 0.0);
+			case 2 -> new LabelOffset(0.0, REPEATER_MENU_VERTICAL_RADIUS);
+			case 3 -> new LabelOffset(REPEATER_MENU_HORIZONTAL_RADIUS, 0.0);
+			default -> throw new IllegalStateException("Unexpected repeater delay offset");
+		};
 	}
 
 	private static Vec3 labelRight(Vec3 cameraPos, Vec3 blockCenter) {
@@ -982,7 +1093,7 @@ public final class NoteBlockOverlay {
 	private record PlacementWatch(NoteSequence.Step step, int ticksRemaining) {
 	}
 
-	private record HoveredLabel(BlockPos blockPos, Character family) {
+	private record HoveredLabel(BlockPos blockPos, Character family, int repeaterDelay) {
 		private boolean isRepeater() {
 			return family == null;
 		}

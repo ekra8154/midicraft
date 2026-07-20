@@ -36,6 +36,11 @@ public final class FastNoteblocksConfig {
 		}
 	}
 
+	public enum RepeaterControlStyle {
+		RADIAL_SELECT,
+		SCROLL
+	}
+
 	public static final int DEFAULT_VIEW_DISTANCE = 10;
 	public static final int MIN_VIEW_DISTANCE = 1;
 	public static final int MAX_VIEW_DISTANCE = 32;
@@ -51,6 +56,7 @@ public final class FastNoteblocksConfig {
 	private OverlayMode previousOverlayMode;
 	private boolean nearbyPreviewsEnabled;
 	private boolean interactiveControlsEnabled;
+	private RepeaterControlStyle repeaterControlStyle;
 	private boolean invertScrolling;
 	private int viewDistance;
 	private int interactionDelayTicks;
@@ -85,6 +91,9 @@ public final class FastNoteblocksConfig {
 				instance.interactiveControlsEnabled = stored.interactiveControlsEnabled == null
 					? stored.radialControlsEnabled == null || stored.radialControlsEnabled
 					: stored.interactiveControlsEnabled;
+				instance.repeaterControlStyle = stored.repeaterControlStyle == null
+					? RepeaterControlStyle.RADIAL_SELECT
+					: stored.repeaterControlStyle;
 				instance.invertScrolling = Boolean.TRUE.equals(stored.invertScrolling);
 				instance.viewDistance = clampViewDistance(stored.viewDistance == null ? DEFAULT_VIEW_DISTANCE : stored.viewDistance);
 				instance.interactionDelayTicks = clampInteractionDelay(
@@ -173,6 +182,16 @@ public final class FastNoteblocksConfig {
 		this.interactiveControlsEnabled = interactiveControlsEnabled;
 	}
 
+	public RepeaterControlStyle repeaterControlStyle() {
+		return repeaterControlStyle;
+	}
+
+	public void setRepeaterControlStyle(RepeaterControlStyle repeaterControlStyle) {
+		this.repeaterControlStyle = repeaterControlStyle == null
+			? RepeaterControlStyle.RADIAL_SELECT
+			: repeaterControlStyle;
+	}
+
 	public boolean invertScrolling() {
 		return invertScrolling;
 	}
@@ -236,6 +255,7 @@ public final class FastNoteblocksConfig {
 		config.previousOverlayMode = OverlayMode.BOTH;
 		config.nearbyPreviewsEnabled = true;
 		config.interactiveControlsEnabled = true;
+		config.repeaterControlStyle = RepeaterControlStyle.RADIAL_SELECT;
 		config.invertScrolling = false;
 		config.viewDistance = DEFAULT_VIEW_DISTANCE;
 		config.interactionDelayTicks = DEFAULT_INTERACTION_DELAY_TICKS;
@@ -272,6 +292,7 @@ public final class FastNoteblocksConfig {
 		private Boolean noteBlockOverlaysEnabled;
 		private Boolean nearbyPreviewsEnabled;
 		private Boolean interactiveControlsEnabled;
+		private RepeaterControlStyle repeaterControlStyle;
 		private Boolean radialControlsEnabled;
 		private Boolean invertScrolling;
 		private Integer viewDistance;
@@ -290,6 +311,7 @@ public final class FastNoteblocksConfig {
 			this.previousOverlayMode = config.previousOverlayMode;
 			this.nearbyPreviewsEnabled = config.nearbyPreviewsEnabled;
 			this.interactiveControlsEnabled = config.interactiveControlsEnabled;
+			this.repeaterControlStyle = config.repeaterControlStyle;
 			this.invertScrolling = config.invertScrolling;
 			this.viewDistance = config.viewDistance;
 			this.interactionDelayTicks = config.interactionDelayTicks;

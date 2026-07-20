@@ -2,6 +2,7 @@ package com.fastnoteblocks.client.compat;
 
 import com.fastnoteblocks.client.FastNoteblocksConfig;
 import com.fastnoteblocks.client.FastNoteblocksConfig.OverlayMode;
+import com.fastnoteblocks.client.FastNoteblocksConfig.RepeaterControlStyle;
 import me.shedaniel.clothconfig2.api.ConfigBuilder;
 import me.shedaniel.clothconfig2.api.ConfigCategory;
 import me.shedaniel.clothconfig2.api.ConfigEntryBuilder;
@@ -46,6 +47,18 @@ public final class FastNoteblocksConfigScreen {
 			.setDefaultValue(true)
 			.setTooltip(Component.translatable("tooltip.fast-noteblocks.interactive_controls"))
 			.setSaveConsumer(config::setInteractiveControlsEnabled)
+			.build());
+		general.addEntry(entries.startEnumSelector(
+				Component.translatable("option.fast-noteblocks.repeater_control_style"),
+				RepeaterControlStyle.class,
+				config.repeaterControlStyle())
+			.setDefaultValue(RepeaterControlStyle.RADIAL_SELECT)
+			.setEnumNameProvider(value -> Component.translatable(
+				"option.fast-noteblocks.repeater_control_style."
+					+ ((RepeaterControlStyle) value).name().toLowerCase()
+			))
+			.setTooltip(Component.translatable("tooltip.fast-noteblocks.repeater_control_style"))
+			.setSaveConsumer(config::setRepeaterControlStyle)
 			.build());
 		general.addEntry(entries.startBooleanToggle(
 				Component.translatable("option.fast-noteblocks.invert_scroll"), config.invertScrolling())

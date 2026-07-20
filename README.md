@@ -15,8 +15,11 @@ The radial menu keeps the focused letter in place while scrolling repeatedly.
 Its order runs clockwise, with A at the top, B at the upper right, and G at the
 upper left whenever those letters are outside the center.
 
-Each nearby repeater shows its current `1` through `4` delay as a single label.
-Aim at the number and scroll up or down to cycle its delay in either direction.
+Each nearby repeater shows its current `1` through `4` delay. The default radial
+style expands this into a four-number diamond with the current delay at the
+bottom. Aim at another number and scroll either way to select it; the layout
+stays pinned until focus leaves it, then rotates the new current delay to the
+bottom. An optional single-number scroll style cycles delays directionally.
 
 ## Settings
 
@@ -30,6 +33,7 @@ configuration button provides:
   position is targeted;
 - optional interactive controls, including the note radial and scrolling for
   both block types;
+- repeater control style: radial select (default) or directional scrolling;
 - inverted scrolling;
 - shared overlay view distance from 1 to 32 blocks;
 - interaction delay from 0 to 10 extra ticks, defaulting to the original
