@@ -3,6 +3,7 @@ package com.fastnoteblocks.client.compat;
 import com.fastnoteblocks.client.FastNoteblocksConfig;
 import com.fastnoteblocks.client.FastNoteblocksConfig.OverlayMode;
 import com.fastnoteblocks.client.FastNoteblocksConfig.RepeaterControlStyle;
+import com.fastnoteblocks.client.FastNoteblocksConfig.SequencingEditProtection;
 import me.shedaniel.clothconfig2.api.ConfigBuilder;
 import me.shedaniel.clothconfig2.api.ConfigCategory;
 import me.shedaniel.clothconfig2.api.ConfigEntryBuilder;
@@ -29,7 +30,7 @@ public final class FastNoteblocksConfigScreen {
 			.build());
 		general.addEntry(entries.startEnumSelector(
 				Component.translatable("option.fast-noteblocks.overlays"), OverlayMode.class, config.overlayMode())
-			.setDefaultValue(OverlayMode.BOTH)
+			.setDefaultValue(OverlayMode.NOTES_ONLY)
 			.setEnumNameProvider(value -> Component.translatable(
 				"option.fast-noteblocks.overlays." + ((OverlayMode) value).name().toLowerCase()
 			))
@@ -107,6 +108,18 @@ public final class FastNoteblocksConfigScreen {
 			.build());
 
 		ConfigCategory placement = builder.getOrCreateCategory(Component.translatable("category.fast-noteblocks.placement"));
+		placement.addEntry(entries.startEnumSelector(
+				Component.translatable("option.fast-noteblocks.sequencing_edit_protection"),
+				SequencingEditProtection.class,
+				config.sequencingEditProtection())
+			.setDefaultValue(SequencingEditProtection.RADIALS_AND_INTERACTIONS)
+			.setEnumNameProvider(value -> Component.translatable(
+				"option.fast-noteblocks.sequencing_edit_protection."
+					+ ((SequencingEditProtection) value).name().toLowerCase()
+			))
+			.setTooltip(Component.translatable("tooltip.fast-noteblocks.sequencing_edit_protection"))
+			.setSaveConsumer(config::setSequencingEditProtection)
+			.build());
 		placement.addEntry(entries.startBooleanToggle(
 				Component.translatable("option.fast-noteblocks.sequence_enabled"), config.placementSequenceEnabled())
 			.setDefaultValue(false)

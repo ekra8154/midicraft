@@ -41,6 +41,28 @@ public final class FastNoteblocksConfig {
 		SCROLL
 	}
 
+	public enum SequencingEditProtection {
+		RADIALS_ONLY(true, false),
+		RADIALS_AND_INTERACTIONS(true, true),
+		OFF(false, false);
+
+		private final boolean radials;
+		private final boolean interactions;
+
+		SequencingEditProtection(boolean radials, boolean interactions) {
+			this.radials = radials;
+			this.interactions = interactions;
+		}
+
+		public boolean blocksRadials() {
+			return radials;
+		}
+
+		public boolean blocksInteractions() {
+			return interactions;
+		}
+	}
+
 	public static final int DEFAULT_VIEW_DISTANCE = 10;
 	public static final int MIN_VIEW_DISTANCE = 1;
 	public static final int MAX_VIEW_DISTANCE = 32;
@@ -67,6 +89,7 @@ public final class FastNoteblocksConfig {
 	private boolean waitForServerAcknowledgement;
 	private boolean requireLineOfSight;
 	private boolean placementSequenceEnabled;
+	private SequencingEditProtection sequencingEditProtection;
 	private boolean autoSelectSequenceBlock;
 	private String placementSequence;
 	private int placementSequencePosition;
@@ -91,7 +114,7 @@ public final class FastNoteblocksConfig {
 				instance.modEnabled = stored.modEnabled == null || stored.modEnabled;
 				instance.overlayMode = stored.overlayMode == null ? migrateOverlayMode(stored) : stored.overlayMode;
 				instance.previousOverlayMode = stored.previousOverlayMode == null || stored.previousOverlayMode == OverlayMode.OFF
-					? (instance.overlayMode == OverlayMode.OFF ? OverlayMode.BOTH : instance.overlayMode)
+					? (instance.overlayMode == OverlayMode.OFF ? OverlayMode.NOTES_ONLY : instance.overlayMode)
 					: stored.previousOverlayMode;
 				instance.nearbyPreviewsEnabled = stored.nearbyPreviewsEnabled == null || stored.nearbyPreviewsEnabled;
 				instance.interactiveControlsEnabled = stored.interactiveControlsEnabled == null
@@ -111,6 +134,9 @@ public final class FastNoteblocksConfig {
 				instance.waitForServerAcknowledgement = Boolean.TRUE.equals(stored.waitForServerAcknowledgement);
 				instance.requireLineOfSight = Boolean.TRUE.equals(stored.requireLineOfSight);
 				instance.placementSequenceEnabled = Boolean.TRUE.equals(stored.placementSequenceEnabled);
+				instance.sequencingEditProtection = stored.sequencingEditProtection == null
+					? SequencingEditProtection.RADIALS_AND_INTERACTIONS
+					: stored.sequencingEditProtection;
 				instance.autoSelectSequenceBlock = Boolean.TRUE.equals(stored.autoSelectSequenceBlock);
 				instance.placementSequence = stored.placementSequence == null ? "" : stored.placementSequence;
 				instance.placementSequencePosition = Math.max(0,
@@ -158,7 +184,7 @@ public final class FastNoteblocksConfig {
 	}
 
 	public void setOverlayMode(OverlayMode overlayMode) {
-		this.overlayMode = overlayMode == null ? OverlayMode.BOTH : overlayMode;
+		this.overlayMode = overlayMode == null ? OverlayMode.NOTES_ONLY : overlayMode;
 		if (this.overlayMode != OverlayMode.OFF) {
 			previousOverlayMode = this.overlayMode;
 		}
@@ -167,7 +193,7 @@ public final class FastNoteblocksConfig {
 	public void toggleOverlays() {
 		if (overlayMode == OverlayMode.OFF) {
 			overlayMode = previousOverlayMode == null || previousOverlayMode == OverlayMode.OFF
-				? OverlayMode.BOTH
+				? OverlayMode.NOTES_ONLY
 				: previousOverlayMode;
 		} else {
 			previousOverlayMode = overlayMode;
@@ -261,6 +287,16 @@ public final class FastNoteblocksConfig {
 		this.placementSequenceEnabled = placementSequenceEnabled;
 	}
 
+	public SequencingEditProtection sequencingEditProtection() {
+		return sequencingEditProtection;
+	}
+
+	public void setSequencingEditProtection(SequencingEditProtection sequencingEditProtection) {
+		this.sequencingEditProtection = sequencingEditProtection == null
+			? SequencingEditProtection.RADIALS_AND_INTERACTIONS
+			: sequencingEditProtection;
+	}
+
 	public boolean autoSelectSequenceBlock() {
 		return autoSelectSequenceBlock;
 	}
@@ -288,8 +324,8 @@ public final class FastNoteblocksConfig {
 	private static FastNoteblocksConfig defaults() {
 		FastNoteblocksConfig config = new FastNoteblocksConfig();
 		config.modEnabled = true;
-		config.overlayMode = OverlayMode.BOTH;
-		config.previousOverlayMode = OverlayMode.BOTH;
+		config.overlayMode = OverlayMode.NOTES_ONLY;
+		config.previousOverlayMode = OverlayMode.NOTES_ONLY;
 		config.nearbyPreviewsEnabled = true;
 		config.interactiveControlsEnabled = true;
 		config.radialFocusDelayTicks = DEFAULT_RADIAL_FOCUS_DELAY_TICKS;
@@ -300,6 +336,7 @@ public final class FastNoteblocksConfig {
 		config.waitForServerAcknowledgement = false;
 		config.requireLineOfSight = false;
 		config.placementSequenceEnabled = false;
+		config.sequencingEditProtection = SequencingEditProtection.RADIALS_AND_INTERACTIONS;
 		config.autoSelectSequenceBlock = false;
 		config.placementSequence = "";
 		config.placementSequencePosition = 0;
@@ -345,6 +382,7 @@ public final class FastNoteblocksConfig {
 		private Boolean waitForServerAcknowledgement;
 		private Boolean requireLineOfSight;
 		private Boolean placementSequenceEnabled;
+		private SequencingEditProtection sequencingEditProtection;
 		private Boolean autoSelectSequenceBlock;
 		private String placementSequence;
 		private Integer placementSequencePosition;
@@ -366,6 +404,7 @@ public final class FastNoteblocksConfig {
 			this.waitForServerAcknowledgement = config.waitForServerAcknowledgement;
 			this.requireLineOfSight = config.requireLineOfSight;
 			this.placementSequenceEnabled = config.placementSequenceEnabled;
+			this.sequencingEditProtection = config.sequencingEditProtection;
 			this.autoSelectSequenceBlock = config.autoSelectSequenceBlock;
 			this.placementSequence = config.placementSequence;
 			this.placementSequencePosition = config.placementSequencePosition;

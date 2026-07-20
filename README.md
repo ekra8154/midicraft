@@ -27,8 +27,8 @@ When the optional Mod Menu and Cloth Config mods are installed, the Mod Menu
 configuration button provides:
 
 - a master switch for the entire mod;
-- a four-way overlay selector: note blocks and repeaters (default), note blocks
-  only, repeaters only, or off;
+- a four-way overlay selector: note blocks and repeaters, note blocks only
+  (default), repeaters only, or off;
 - optional nearby previews; when disabled, labels are hidden until their center
   position is targeted;
 - optional interactive controls, including the note radial and scrolling for
@@ -42,14 +42,16 @@ configuration button provides:
 - optional server-confirmation waiting;
 - optional unobstructed line-of-sight enforcement;
 - a resumable unified note-block and repeater placement sequence;
+- sequencing edit protection: radials only, radials and ordinary interactions
+  (default), or off;
 - a validated, whitespace-agnostic sequence using note values `0` through `24`
   and explicit repeater delay groups `1d` through `64d`.
 
 For example, `0, 2d, 4, 2d, 7` expects a note block tuned to pitch 0, a repeater
 set to delay 2, and so on. A mismatched placement does not advance the sequence,
-and the sequence repeats when it reaches the end. Consecutive steps of the same
-block type can queue while earlier blocks are still adjusting; transitions
-between note blocks and repeaters wait for the current batch to finish.
+and the sequence repeats when it reaches the end. New placements can advance
+regardless of whether earlier note blocks or repeaters are still tuning, so
+switching block types does not impose a completion wait.
 Long delay groups use the minimum number of physical repeaters: `10d` expands
 to `4d + 4d + 2d`. The HUD keeps that group in one dotted capsule while H +
 wheel and placement advance through its individual repeater dots.
