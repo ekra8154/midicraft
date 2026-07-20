@@ -134,9 +134,6 @@ public final class FastNoteblocksConfigScreen {
 			.setSaveConsumer(config::setAutoSelectSequenceBlock)
 			.build());
 		placement.addEntry(new InstrumentPreviewEntry(config));
-		placement.addEntry(entries.startTextDescription(
-			Component.translatable("guide.fast-noteblocks.sequence_compact")
-		).build());
 		ActiveSequenceEntry activeSequence = new ActiveSequenceEntry(config);
 		placement.addEntry(activeSequence);
 		placement.addEntry(new SavedSequenceLibraryEntry(config, activeSequence));

@@ -21,6 +21,8 @@ import net.minecraft.util.Util;
 
 final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 	private static final int EDITOR_HEIGHT = 86;
+	private static final String PITCH_GUIDE = "0:F♯  1:G  2:G♯  3:A  4:A♯  5:B  6:C  7:C♯  8:D  9:D♯  10:E  11:F  "
+		+ "12:F♯  13:G  14:G♯  15:A  16:A♯  17:B  18:C  19:C♯  20:D  21:D♯  22:E  23:F  24:F♯";
 	private final FastNoteblocksConfig config;
 	private final String initialValue;
 	private final String initialName;
@@ -32,6 +34,7 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 	private boolean expanded = true;
 	private boolean playing;
 	private List<Step> playbackSteps = List.of();
+	private List<TextRange> playbackRanges = List.of();
 	private int playbackIndex;
 	private long nextPlaybackAt;
 
@@ -88,6 +91,7 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 		}
 		try {
 			playbackSteps = NoteSequence.parse(getValue());
+			playbackRanges = tokenRanges(getValue());
 		} catch (IllegalArgumentException ignored) {
 			return;
 		}
@@ -103,7 +107,11 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 	private void stopPlayback() {
 		playing = false;
 		playbackSteps = List.of();
+		playbackRanges = List.of();
 		playbackIndex = 0;
+		if (editor != null) {
+			editor.clearPlaybackHighlight();
+		}
 		playButton.setMessage(playLabel());
 	}
 
@@ -118,15 +126,51 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 				return;
 			}
 			Step step = playbackSteps.get(playbackIndex);
+			if (editor != null && playbackIndex < playbackRanges.size()) {
+				TextRange range = playbackRanges.get(playbackIndex);
+				editor.setPlaybackHighlight(range.from(), range.to());
+			}
 			if (step.type() == StepType.NOTE) {
 				PreviewInstrument.byId(config.previewInstrument()).play(step.value());
 				playbackIndex++;
+				if (playbackIndex >= playbackSteps.size()) {
+					nextPlaybackAt = now + 150L;
+					return;
+				}
 			} else {
 				int remainingGroupSteps = Math.max(1, step.delayCount() - step.delayIndex());
 				playbackIndex = Math.min(playbackSteps.size(), playbackIndex + remainingGroupSteps);
 				nextPlaybackAt += step.delayTotal() * 100L;
 			}
 		}
+	}
+
+	private static List<TextRange> tokenRanges(String value) {
+		List<TextRange> ranges = new ArrayList<>();
+		int tokenStart = 0;
+		for (int i = 0; i <= value.length(); i++) {
+			if (i != value.length() && value.charAt(i) != ',') {
+				continue;
+			}
+			int from = tokenStart;
+			int to = i;
+			while (from < to && Character.isWhitespace(value.charAt(from))) {
+				from++;
+			}
+			while (to > from && Character.isWhitespace(value.charAt(to - 1))) {
+				to--;
+			}
+			String token = value.substring(from, to);
+			int repeat = 1;
+			if (token.endsWith("d") || token.endsWith("D")) {
+				repeat = (Integer.parseInt(token.substring(0, token.length() - 1).trim()) + 3) / 4;
+			}
+			for (int copy = 0; copy < repeat; copy++) {
+				ranges.add(new TextRange(from, to));
+			}
+			tokenStart = i + 1;
+		}
+		return List.copyOf(ranges);
 	}
 
 	private SequenceEditBox editor(int width) {
@@ -142,7 +186,7 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 
 	@Override
 	public int getItemHeight() {
-		return expanded ? EDITOR_HEIGHT + 28 : 24;
+		return expanded ? EDITOR_HEIGHT + 40 : 24;
 	}
 
 	@Override
@@ -167,14 +211,25 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 		nameBox.extractRenderState(graphics, mouseX, mouseY, partialTick);
 
 		if (expanded) {
+			extractPitchGuide(graphics, x, y + 25, entryWidth);
 			SequenceEditBox box = editor(entryWidth);
 			box.setX(x);
-			box.setY(y + 24);
+			box.setY(y + 36);
 			box.extractRenderState(graphics, mouseX, mouseY, partialTick);
 		}
 		if (!valid && mouseX >= labelX && mouseX <= nameX && mouseY >= y && mouseY < y + 20) {
 			graphics.setTooltipForNextFrame(Component.translatable("error.fast-noteblocks.sequence"), mouseX, mouseY);
 		}
+	}
+
+	private static void extractPitchGuide(GuiGraphicsExtractor graphics, int x, int y, int width) {
+		int textWidth = Minecraft.getInstance().font.width(PITCH_GUIDE);
+		float scale = Math.min(1.0F, width / (float)Math.max(1, textWidth));
+		graphics.pose().pushMatrix();
+		graphics.pose().translate(x, y);
+		graphics.pose().scale(scale, scale);
+		graphics.text(Minecraft.getInstance().font, PITCH_GUIDE, 0, 0, 0xFFBBBBBB, false);
+		graphics.pose().popMatrix();
 	}
 
 	private List<AbstractWidget> widgets() {
@@ -219,5 +274,8 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 	public void save() {
 		config.setActiveSequenceName(sequenceName());
 		config.setPlacementSequence(getValue());
+	}
+
+	private record TextRange(int from, int to) {
 	}
 }
