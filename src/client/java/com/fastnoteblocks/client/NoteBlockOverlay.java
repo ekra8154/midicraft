@@ -521,10 +521,31 @@ public final class NoteBlockOverlay {
 		int placedFinalX = nextFinalX - placedWidth - itemGap;
 		int placedX = Math.round(placedStartX + (placedFinalX - placedStartX) * progress);
 		int nextX = Math.round(nextStartX + (nextFinalX - nextStartX) * progress);
-		drawSequenceHudToken(graphics, placed, placedX, y, false, false, false);
-		drawSequenceHudToken(graphics, next, nextX, y, true,
-			nextItemIndex > 0 && chordAdjacent(items.get(nextItemIndex - 1), nextItem),
-			nextItemIndex + 1 < items.size() && chordAdjacent(nextItem, items.get(nextItemIndex + 1)));
+		boolean sliding = progress < 1.0F;
+		if (sliding) {
+			drawSequenceHudToken(graphics, placed, placedX, y, false, false, false);
+		}
+
+		int upcomingLimit = sliding ? 3 : 4;
+		int upcomingX = nextX;
+		for (int offset = 0; offset < upcomingLimit && nextItemIndex + offset < items.size(); offset++) {
+			int upcomingItemIndex = nextItemIndex + offset;
+			SequenceHudItem upcomingItem = items.get(upcomingItemIndex);
+			if (offset > 0 && !chordAdjacent(items.get(upcomingItemIndex - 1), upcomingItem)) {
+				break;
+			}
+			SequenceHudToken upcomingToken = sequenceHudToken(upcomingItem, offset == 0 ? nextIndex : -1);
+			boolean current = offset == 0;
+			drawSequenceHudToken(graphics, upcomingToken, upcomingX, y, current,
+				current && upcomingItemIndex > 0 && chordAdjacent(items.get(upcomingItemIndex - 1), upcomingItem),
+				current && upcomingItemIndex + 1 < items.size()
+					&& chordAdjacent(upcomingItem, items.get(upcomingItemIndex + 1)));
+			upcomingX += minecraft.font.width(upcomingToken.text());
+			if (upcomingItemIndex + 1 < items.size()
+					&& chordAdjacent(upcomingItem, items.get(upcomingItemIndex + 1))) {
+				upcomingX += sequenceHudItemGap(upcomingItem, items.get(upcomingItemIndex + 1));
+			}
+		}
 	}
 
 	private static List<SequenceHudItem> sequenceHudItems(List<NoteSequence.Step> sequence) {
