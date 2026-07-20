@@ -436,7 +436,9 @@ public final class NoteBlockOverlay {
 		SequenceHudToken current = sequenceHudToken(items.get(itemIndex), index);
 		int currentWidth = minecraft.font.width(current.text());
 		int currentX = centerX - currentWidth / 2;
-		drawSequenceHudToken(graphics, current, currentX, y, true);
+		drawSequenceHudToken(graphics, current, currentX, y, true,
+			itemIndex > 0 && chordAdjacent(items.get(itemIndex - 1), items.get(itemIndex)),
+			itemIndex + 1 < items.size() && chordAdjacent(items.get(itemIndex), items.get(itemIndex + 1)));
 
 		int leftX = currentX;
 		for (int offset = 1; offset <= SEQUENCE_HUD_RADIUS && itemIndex - offset >= 0; offset++) {
@@ -445,7 +447,7 @@ public final class NoteBlockOverlay {
 			SequenceHudToken token = sequenceHudToken(leftItem, -1);
 			int width = minecraft.font.width(token.text());
 			leftX -= sequenceHudItemGap(leftItem, items.get(leftItemIndex + 1)) + width;
-			drawSequenceHudToken(graphics, token, leftX, y, false);
+			drawSequenceHudToken(graphics, token, leftX, y, false, false, false);
 		}
 
 		int rightX = currentX + currentWidth;
@@ -454,7 +456,7 @@ public final class NoteBlockOverlay {
 			SequenceHudItem rightItem = items.get(rightItemIndex);
 			rightX += sequenceHudItemGap(items.get(rightItemIndex - 1), rightItem);
 			SequenceHudToken token = sequenceHudToken(rightItem, -1);
-			drawSequenceHudToken(graphics, token, rightX, y, false);
+			drawSequenceHudToken(graphics, token, rightX, y, false, false, false);
 			rightX += minecraft.font.width(token.text());
 		}
 		drawSequencePosition(graphics, centerX, y, sequence);
@@ -490,8 +492,10 @@ public final class NoteBlockOverlay {
 		Minecraft minecraft = Minecraft.getInstance();
 		int placedIndex = Math.max(0, Math.min(sequence.size() - 1, sequenceAdvanceFromIndex));
 		int nextIndex = Math.max(0, Math.min(sequence.size() - 1, sequenceAdvanceToIndex));
-		SequenceHudItem placedItem = items.get(sequenceHudItemIndex(items, placedIndex));
-		SequenceHudItem nextItem = items.get(sequenceHudItemIndex(items, nextIndex));
+		int placedItemIndex = sequenceHudItemIndex(items, placedIndex);
+		int nextItemIndex = sequenceHudItemIndex(items, nextIndex);
+		SequenceHudItem placedItem = items.get(placedItemIndex);
+		SequenceHudItem nextItem = items.get(nextItemIndex);
 		float elapsed = SEQUENCE_ADVANCE_HUD_TICKS - sequenceHudTicks
 			+ deltaTracker.getGameTimeDeltaPartialTick(false);
 		float progress = Math.max(0.0F, Math.min(1.0F, elapsed / SEQUENCE_ADVANCE_ANIMATION_TICKS));
@@ -499,7 +503,9 @@ public final class NoteBlockOverlay {
 			int activeIndex = progress < 0.5F ? placedIndex : nextIndex;
 			SequenceHudToken token = sequenceHudToken(nextItem, activeIndex);
 			int x = centerX - minecraft.font.width(token.text()) / 2;
-			drawSequenceHudToken(graphics, token, x, y, true);
+			drawSequenceHudToken(graphics, token, x, y, true,
+				nextItemIndex > 0 && chordAdjacent(items.get(nextItemIndex - 1), nextItem),
+				nextItemIndex + 1 < items.size() && chordAdjacent(nextItem, items.get(nextItemIndex + 1)));
 			return;
 		}
 		SequenceHudToken placed = sequenceHudToken(placedItem, placedIndex);
@@ -507,14 +513,18 @@ public final class NoteBlockOverlay {
 		int placedWidth = minecraft.font.width(placed.text());
 		int nextWidth = minecraft.font.width(next.text());
 		int placedStartX = centerX - placedWidth / 2;
-		int itemGap = sequenceHudItemGap(placedItem, nextItem);
+		int itemGap = nextItemIndex == placedItemIndex + 1
+			? sequenceHudItemGap(placedItem, nextItem)
+			: 7;
 		int nextStartX = placedStartX + placedWidth + itemGap;
 		int nextFinalX = centerX - nextWidth / 2;
 		int placedFinalX = nextFinalX - placedWidth - itemGap;
 		int placedX = Math.round(placedStartX + (placedFinalX - placedStartX) * progress);
 		int nextX = Math.round(nextStartX + (nextFinalX - nextStartX) * progress);
-		drawSequenceHudToken(graphics, placed, placedX, y, false);
-		drawSequenceHudToken(graphics, next, nextX, y, true);
+		drawSequenceHudToken(graphics, placed, placedX, y, false, false, false);
+		drawSequenceHudToken(graphics, next, nextX, y, true,
+			nextItemIndex > 0 && chordAdjacent(items.get(nextItemIndex - 1), nextItem),
+			nextItemIndex + 1 < items.size() && chordAdjacent(nextItem, items.get(nextItemIndex + 1)));
 	}
 
 	private static List<SequenceHudItem> sequenceHudItems(List<NoteSequence.Step> sequence) {
@@ -566,20 +576,32 @@ public final class NoteBlockOverlay {
 	}
 
 	private static int sequenceHudItemGap(SequenceHudItem left, SequenceHudItem right) {
-		if (left.step().type() == NoteSequence.StepType.NOTE
-			&& right.step().type() == NoteSequence.StepType.NOTE) {
-			return 3;
+		if (chordAdjacent(left, right)) {
+			return 5;
 		}
 		return sequenceHudTokenGap(sequenceHudToken(left, -1));
 	}
 
+	private static boolean chordAdjacent(SequenceHudItem left, SequenceHudItem right) {
+		return left.step().type() == NoteSequence.StepType.NOTE
+			&& right.step().type() == NoteSequence.StepType.NOTE;
+	}
+
 	private static void drawSequenceHudToken(
-		GuiGraphicsExtractor graphics, SequenceHudToken token, int x, int y, boolean current
+		GuiGraphicsExtractor graphics,
+		SequenceHudToken token,
+		int x,
+		int y,
+		boolean current,
+		boolean chordOnLeft,
+		boolean chordOnRight
 	) {
 		Minecraft minecraft = Minecraft.getInstance();
 		int width = minecraft.font.width(token.text());
 		if (current) {
-			graphics.fill(x - 4, y - 3, x + width + 4, y + minecraft.font.lineHeight + 3, 0xB8000000);
+			int leftPadding = chordOnLeft ? 2 : 4;
+			int rightPadding = chordOnRight ? 2 : 4;
+			graphics.fill(x - leftPadding, y - 3, x + width + rightPadding, y + minecraft.font.lineHeight + 3, 0xB8000000);
 		} else if (!token.repeater() || token.grouped()) {
 			graphics.fill(x - 2, y - 2, x + width + 2, y + minecraft.font.lineHeight + 2, 0x78000000);
 		}
