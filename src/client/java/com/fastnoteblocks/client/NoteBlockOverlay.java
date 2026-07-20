@@ -24,6 +24,7 @@ import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.renderer.state.level.CameraRenderState;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -50,7 +51,10 @@ public final class NoteBlockOverlay {
 	private static final int PLACEMENT_WATCH_TICKS = 12;
 	private static final int INTERACTION_ACK_TIMEOUT_TICKS = 40;
 	private static final int SEQUENCE_HUD_TICKS = 50;
+	private static final int SEQUENCE_ADVANCE_HUD_TICKS = 32;
+	private static final int SEQUENCE_ADVANCE_ANIMATION_TICKS = 6;
 	private static final int SEQUENCE_HUD_RADIUS = 4;
+	private static final int SEQUENCE_DOUBLE_TAP_TICKS = 7;
 	private static final double LABEL_Y = 1.40;
 	private static final double REPEATER_LABEL_Y = LABEL_Y - 0.75;
 	private static final double MENU_HORIZONTAL_RADIUS = 0.72;
@@ -80,6 +84,9 @@ public final class NoteBlockOverlay {
 	private Character menuCenterFamily;
 	private BlockPos expandedRepeater;
 	private Integer repeaterBottomDelay;
+	private BlockPos radialFocusCandidate;
+	private boolean radialFocusCandidateRepeater;
+	private long radialFocusStartedTick;
 	private int placementSequenceIndex;
 	private boolean lastPlacementSequenceEnabled;
 	private String lastPlacementSequenceText = "";
@@ -88,8 +95,13 @@ public final class NoteBlockOverlay {
 	private int inFlightSequenceSteps;
 	private int sequenceHudTicks;
 	private Component sequenceHudAction;
+	private SequenceHudMode sequenceHudMode = SequenceHudMode.FULL;
+	private NoteSequence.Step sequenceAdvanceFrom;
+	private NoteSequence.Step sequenceAdvanceTo;
+	private int sequenceTapWindowTicks;
 	private boolean sequenceControlKeyDown;
 	private boolean sequenceGestureConsumed;
+	private boolean sequenceSecondTap;
 
 	private NoteBlockOverlay() {
 	}
@@ -124,6 +136,14 @@ public final class NoteBlockOverlay {
 
 		HoveredLabel hovered = findHoveredLabel(minecraft);
 		if (hovered == null || !minecraft.player.isWithinBlockInteractionRange(hovered.blockPos(), 0.0)) {
+			return false;
+		}
+		if (!hovered.isRepeater() && !hovered.blockPos().equals(expandedBlock)) {
+			return false;
+		}
+		if (hovered.isRepeater()
+			&& config.repeaterControlStyle() == FastNoteblocksConfig.RepeaterControlStyle.RADIAL_SELECT
+			&& !hovered.blockPos().equals(expandedRepeater)) {
 			return false;
 		}
 
@@ -163,6 +183,8 @@ public final class NoteBlockOverlay {
 			sequenceGestureConsumed = false;
 		}
 		sequenceGestureConsumed = true;
+		sequenceSecondTap = false;
+		sequenceTapWindowTicks = 0;
 		int amount = verticalAmount > 0.0 ? -1 : 1;
 		movePlacementSequence(amount);
 		showSequenceHud(minecraft, null);
@@ -173,6 +195,9 @@ public final class NoteBlockOverlay {
 		if (sequenceHudTicks > 0) {
 			sequenceHudTicks--;
 		}
+		if (sequenceTapWindowTicks > 0) {
+			sequenceTapWindowTicks--;
+		}
 		FastNoteblocksConfig config = FastNoteblocksConfig.get();
 		while (toggleKey.consumeClick()) {
 			config.toggleOverlays();
@@ -181,6 +206,7 @@ public final class NoteBlockOverlay {
 			menuCenterFamily = null;
 			expandedRepeater = null;
 			repeaterBottomDelay = null;
+			clearRadialFocusCandidate();
 			ticksUntilRescan = 0;
 			if (minecraft.player != null) {
 				minecraft.gui.hud.setOverlayMessage(Component.translatable(
@@ -212,6 +238,7 @@ public final class NoteBlockOverlay {
 			menuCenterFamily = null;
 			expandedRepeater = null;
 			repeaterBottomDelay = null;
+			clearRadialFocusCandidate();
 			ticksUntilRescan = 0;
 		}
 
@@ -230,6 +257,7 @@ public final class NoteBlockOverlay {
 			menuCenterFamily = null;
 			expandedRepeater = null;
 			repeaterBottomDelay = null;
+			clearRadialFocusCandidate();
 			return;
 		}
 		if (!config.interactiveControlsEnabled() || !config.overlayMode().includesNotes()) {
@@ -255,6 +283,7 @@ public final class NoteBlockOverlay {
 			menuCenterFamily = null;
 			expandedRepeater = null;
 			repeaterBottomDelay = null;
+			clearRadialFocusCandidate();
 		}
 		performNextClick(minecraft);
 	}
@@ -265,8 +294,10 @@ public final class NoteBlockOverlay {
 		while (placementSequenceKey.consumeClick()) {
 		}
 		if (!inGame) {
+			sequenceTapWindowTicks = 0;
 			sequenceControlKeyDown = placementSequenceKey.isDown();
 			sequenceGestureConsumed = sequenceControlKeyDown;
+			sequenceSecondTap = false;
 			return;
 		}
 
@@ -275,9 +306,11 @@ public final class NoteBlockOverlay {
 		boolean releasedNow = !keyDownNow && sequenceControlKeyDown;
 		if (pressedNow) {
 			sequenceGestureConsumed = false;
+			sequenceSecondTap = sequenceTapWindowTicks > 0;
+			sequenceTapWindowTicks = 0;
 		}
 
-		if (releasedNow && !sequenceGestureConsumed) {
+		if (releasedNow && sequenceSecondTap && !sequenceGestureConsumed) {
 			config.setPlacementSequenceEnabled(!config.placementSequenceEnabled());
 			FastNoteblocksConfig.save();
 			if (!config.placementSequenceEnabled()) {
@@ -286,9 +319,12 @@ public final class NoteBlockOverlay {
 			showSequenceHud(minecraft, config.placementSequenceEnabled()
 				? "message.fast-noteblocks.sequence_resumed"
 				: "message.fast-noteblocks.sequence_paused");
+		} else if (releasedNow && !sequenceGestureConsumed) {
+			sequenceTapWindowTicks = SEQUENCE_DOUBLE_TAP_TICKS;
 		}
 		if (releasedNow) {
 			sequenceGestureConsumed = false;
+			sequenceSecondTap = false;
 		}
 		sequenceControlKeyDown = keyDownNow;
 	}
@@ -308,24 +344,39 @@ public final class NoteBlockOverlay {
 			return;
 		}
 		sequenceHudAction = actionKey == null ? null : Component.translatable(actionKey);
+		sequenceHudMode = SequenceHudMode.FULL;
 		sequenceHudTicks = SEQUENCE_HUD_TICKS;
+	}
+
+	private void showSequenceAdvance(NoteSequence.Step placed, NoteSequence.Step next) {
+		sequenceAdvanceFrom = placed;
+		sequenceAdvanceTo = next;
+		sequenceHudAction = null;
+		sequenceHudMode = SequenceHudMode.ADVANCE;
+		sequenceHudTicks = SEQUENCE_ADVANCE_HUD_TICKS;
 	}
 
 	private void renderSequenceHud(GuiGraphicsExtractor graphics, DeltaTracker deltaTracker) {
 		Minecraft minecraft = Minecraft.getInstance();
-		if (sequenceHudTicks <= 0 || minecraft.player == null || minecraft.gui.screen() != null) {
+		boolean keyHeld = placementSequenceKey.isDown();
+		if ((!keyHeld && sequenceHudTicks <= 0) || minecraft.player == null || minecraft.gui.screen() != null) {
 			return;
 		}
 		List<NoteSequence.Step> sequence = configuredSequence();
 		int centerX = graphics.guiWidth() / 2;
 		int y = graphics.guiHeight() / 2 + 28;
-		if (sequenceHudAction != null) {
+		if (sequenceHudTicks > 0 && sequenceHudAction != null && sequenceHudMode == SequenceHudMode.FULL) {
 			graphics.centeredText(minecraft.font, sequenceHudAction, centerX, y - 14, 0xFFCCCCCC);
 		}
 		if (sequence.isEmpty()) {
 			graphics.centeredText(minecraft.font, Component.translatable(
 				"message.fast-noteblocks.sequence_hud_empty"
 			), centerX, y, 0xFFFF5555);
+			return;
+		}
+		if (!keyHeld && sequenceHudMode == SequenceHudMode.ADVANCE
+			&& sequenceAdvanceFrom != null && sequenceAdvanceTo != null) {
+			renderSequenceAdvance(graphics, deltaTracker, centerX, y);
 			return;
 		}
 
@@ -350,6 +401,27 @@ public final class NoteBlockOverlay {
 			drawSequenceHudToken(graphics, token, rightX, y, false);
 			rightX += minecraft.font.width(token.text()) + (token.repeater() ? 4 : 7);
 		}
+	}
+
+	private void renderSequenceAdvance(
+		GuiGraphicsExtractor graphics, DeltaTracker deltaTracker, int centerX, int y
+	) {
+		Minecraft minecraft = Minecraft.getInstance();
+		SequenceHudToken placed = sequenceHudToken(sequenceAdvanceFrom);
+		SequenceHudToken next = sequenceHudToken(sequenceAdvanceTo);
+		int placedWidth = minecraft.font.width(placed.text());
+		int nextWidth = minecraft.font.width(next.text());
+		int placedStartX = centerX - placedWidth / 2;
+		int nextStartX = placedStartX + placedWidth + 7;
+		int nextFinalX = centerX - nextWidth / 2;
+		int placedFinalX = nextFinalX - placedWidth - 7;
+		float elapsed = SEQUENCE_ADVANCE_HUD_TICKS - sequenceHudTicks
+			+ deltaTracker.getGameTimeDeltaPartialTick(false);
+		float progress = Math.max(0.0F, Math.min(1.0F, elapsed / SEQUENCE_ADVANCE_ANIMATION_TICKS));
+		int placedX = Math.round(placedStartX + (placedFinalX - placedStartX) * progress);
+		int nextX = Math.round(nextStartX + (nextFinalX - nextStartX) * progress);
+		drawSequenceHudToken(graphics, placed, placedX, y, false);
+		drawSequenceHudToken(graphics, next, nextX, y, true);
 	}
 
 	private static SequenceHudToken sequenceHudToken(NoteSequence.Step step) {
@@ -558,6 +630,49 @@ public final class NoteBlockOverlay {
 			: value % 4 + 1;
 	}
 
+	public boolean prepareSequencePlacement(LocalPlayer player, InteractionHand hand) {
+		FastNoteblocksConfig config = FastNoteblocksConfig.get();
+		List<NoteSequence.Step> sequence = configuredSequence();
+		if (hand != InteractionHand.MAIN_HAND
+			|| !config.modEnabled()
+			|| !config.placementSequenceEnabled()
+			|| !config.autoSelectSequenceBlock()
+			|| sequence.isEmpty()) {
+			return false;
+		}
+
+		NoteSequence.Step expected = sequence.get(Math.floorMod(placementSequenceIndex, sequence.size()));
+		int hotbarSlot = findSequenceItemSlot(player, expected);
+		if (hotbarSlot < 0) {
+			return false;
+		}
+		if (!placementWatches.isEmpty()
+			|| inFlightSequenceSteps > 0 && expected.type() != inFlightSequenceType) {
+			return true;
+		}
+		player.getInventory().setSelectedSlot(hotbarSlot);
+		return false;
+	}
+
+	private static int findSequenceItemSlot(LocalPlayer player, NoteSequence.Step expected) {
+		int selectedSlot = player.getInventory().getSelectedSlot();
+		if (sequenceItemMatches(player, expected, selectedSlot)) {
+			return selectedSlot;
+		}
+		for (int slot = 0; slot < 9; slot++) {
+			if (sequenceItemMatches(player, expected, slot)) {
+				return slot;
+			}
+		}
+		return -1;
+	}
+
+	private static boolean sequenceItemMatches(LocalPlayer player, NoteSequence.Step expected, int slot) {
+		return expected.type() == NoteSequence.StepType.NOTE
+			? player.getInventory().getItem(slot).is(Items.NOTE_BLOCK)
+			: player.getInventory().getItem(slot).is(Items.REPEATER);
+	}
+
 	private InteractionResult watchForSequencePlacement(
 		net.minecraft.world.entity.player.Player player,
 		net.minecraft.world.level.Level level,
@@ -636,7 +751,9 @@ public final class NoteBlockOverlay {
 	private void advancePlacementSequenceCursor() {
 		List<NoteSequence.Step> sequence = configuredSequence();
 		if (!sequence.isEmpty()) {
-			placementSequenceIndex = (Math.floorMod(placementSequenceIndex, sequence.size()) + 1) % sequence.size();
+			int previousIndex = Math.floorMod(placementSequenceIndex, sequence.size());
+			placementSequenceIndex = (previousIndex + 1) % sequence.size();
+			showSequenceAdvance(sequence.get(previousIndex), sequence.get(placementSequenceIndex));
 		}
 	}
 
@@ -857,12 +974,25 @@ public final class NoteBlockOverlay {
 		}
 
 		if (closest != null) {
-			if (interactiveControlsEnabled && !closest.label().isRepeater()) {
+			boolean noteRadial = interactiveControlsEnabled && !closest.label().isRepeater();
+			boolean repeaterRadial = repeaterRadialEnabled && closest.label().isRepeater();
+			if (noteRadial || repeaterRadial) {
+				if (!radialFocusReady(minecraft, closest.label())) {
+					expandedBlock = null;
+					menuCenterFamily = null;
+					expandedRepeater = null;
+					repeaterBottomDelay = null;
+					return closest.label();
+				}
+			} else {
+				clearRadialFocusCandidate();
+			}
+			if (noteRadial) {
 				expandedBlock = closest.label().blockPos();
 				menuCenterFamily = NotePitch.family(displayedPitch(minecraft.level, expandedBlock));
 				expandedRepeater = null;
 				repeaterBottomDelay = null;
-			} else if (repeaterRadialEnabled) {
+			} else if (repeaterRadial) {
 				expandedRepeater = closest.label().blockPos();
 				repeaterBottomDelay = displayedRepeaterDelay(minecraft.level, expandedRepeater);
 				expandedBlock = null;
@@ -875,11 +1005,39 @@ public final class NoteBlockOverlay {
 			}
 			return closest.label();
 		}
+		clearRadialFocusCandidate();
 		expandedBlock = null;
 		menuCenterFamily = null;
 		expandedRepeater = null;
 		repeaterBottomDelay = null;
 		return null;
+	}
+
+	private boolean radialFocusReady(Minecraft minecraft, HoveredLabel label) {
+		int delay = FastNoteblocksConfig.get().radialFocusDelayTicks();
+		if (delay == 0) {
+			clearRadialFocusCandidate();
+			return true;
+		}
+		boolean sameCandidate = label.blockPos().equals(radialFocusCandidate)
+			&& label.isRepeater() == radialFocusCandidateRepeater;
+		if (!sameCandidate) {
+			radialFocusCandidate = label.blockPos();
+			radialFocusCandidateRepeater = label.isRepeater();
+			radialFocusStartedTick = minecraft.level.getGameTime();
+			return false;
+		}
+		if (minecraft.level.getGameTime() - radialFocusStartedTick < delay) {
+			return false;
+		}
+		clearRadialFocusCandidate();
+		return true;
+	}
+
+	private void clearRadialFocusCandidate() {
+		radialFocusCandidate = null;
+		radialFocusCandidateRepeater = false;
+		radialFocusStartedTick = 0L;
 	}
 
 	private LabelHit hitLabelOnBlock(Minecraft minecraft, BlockPos pos, boolean expanded, Vec3 origin, Vec3 direction) {
@@ -1132,5 +1290,10 @@ public final class NoteBlockOverlay {
 	}
 
 	private record SequenceHudToken(String text, boolean repeater) {
+	}
+
+	private enum SequenceHudMode {
+		FULL,
+		ADVANCE
 	}
 }

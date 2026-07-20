@@ -23,6 +23,8 @@
   "tooltip.fast-noteblocks.nearby_previews": "Shows all nearby enabled labels. When disabled, a label appears only while aiming at its position.",
   "option.fast-noteblocks.interactive_controls": "Interactive controls",
   "tooltip.fast-noteblocks.interactive_controls": "Enables scroll controls for note blocks and repeaters, including the note-selection radial.",
+  "option.fast-noteblocks.radial_focus_delay": "Radial focus delay (ticks)",
+  "tooltip.fast-noteblocks.radial_focus_delay": "Ticks the center label must stay under the crosshair before its radial opens and accepts scrolling. 0 opens immediately.",
   "option.fast-noteblocks.repeater_control_style": "Repeater control style",
   "option.fast-noteblocks.repeater_control_style.radial_select": "Radial select",
   "option.fast-noteblocks.repeater_control_style.scroll": "Scroll",
@@ -38,9 +40,11 @@
   "option.fast-noteblocks.require_line_of_sight": "Require unobstructed line of sight",
   "tooltip.fast-noteblocks.require_line_of_sight": "Cancels tuning if another block obstructs the path from your eyes to the target block. Disabled by default.",
   "option.fast-noteblocks.sequence_enabled": "Sequence running",
-  "tooltip.fast-noteblocks.sequence_enabled": "Runs or pauses the placement sequence without resetting its position. The sequence control key does the same.",
+  "tooltip.fast-noteblocks.sequence_enabled": "Runs or pauses the placement sequence without resetting its position. Double-tap the sequence control key to do the same.",
+  "option.fast-noteblocks.auto_select_sequence_block": "Auto-select next block",
+  "tooltip.fast-noteblocks.auto_select_sequence_block": "Before a sequence placement, selects a note block or repeater from your hotbar to match the next step. Missing items leave the click unchanged.",
   "option.fast-noteblocks.sequence": "Note and repeater sequence",
   "tooltip.fast-noteblocks.sequence": "Comma-separated notes from 0 to 24 and repeater delays from 1d to 4d. Example: 0, 2d, 4, 2d, 7.",
-  "guide.fast-noteblocks.sequence": "Sequence guide: notes use 0-24; repeaters use 1d-4d. Example: 0, 2d, 4, 2d, 7.\nControls: tap the sequence key to pause/resume; hold it and scroll up/down for the previous/next step. Manual scrolling stops at either end.\nPitch guide:\n0:F\u266f  1:G  2:G\u266f  3:A  4:A\u266f  5:B  6:C  7:C\u266f  8:D  9:D\u266f  10:E  11:F\n12:F\u266f  13:G  14:G\u266f  15:A  16:A\u266f  17:B  18:C  19:C\u266f  20:D  21:D\u266f  22:E  23:F  24:F\u266f",
+  "guide.fast-noteblocks.sequence": "Sequence guide: notes use 0-24; repeaters use 1d-4d. Example: 0, 2d, 4, 2d, 7.\nControls: hold the sequence key to preview; hold and scroll up/down for the previous/next step; double-tap to pause/resume. Manual scrolling stops at either end.\nPitch guide:\n0:F\u266f  1:G  2:G\u266f  3:A  4:A\u266f  5:B  6:C  7:C\u266f  8:D  9:D\u266f  10:E  11:F\n12:F\u266f  13:G  14:G\u266f  15:A  16:A\u266f  17:B  18:C  19:C\u266f  20:D  21:D\u266f  22:E  23:F  24:F\u266f",
   "error.fast-noteblocks.sequence": "Use comma-separated notes from 0 to 24 and repeater delays from 1d to 4d."
 }

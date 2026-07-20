@@ -35,6 +35,7 @@ configuration button provides:
   both block types;
 - repeater control style: radial select (default) or directional scrolling;
 - inverted scrolling;
+- configurable radial focus delay from 0 to 20 ticks, defaulting to 5;
 - shared overlay view distance from 1 to 32 blocks;
 - interaction delay from 0 to 10 extra ticks, defaulting to the original
   one-interaction-per-client-tick speed;
@@ -51,12 +52,20 @@ block type can queue while earlier blocks are still adjusting; transitions
 between note blocks and repeaters wait for the current batch to finish.
 
 The sequence control key is unbound by default and can be assigned in
-Minecraft's Controls screen. Tap it to pause or resume without losing the
-current position, or hold it and scroll up/down for the previous/next step.
-Manual scrolling stops at the first and last steps instead of wrapping. A brief
-sliding HUD window keeps the next placement centered, with compact repeater
-delay markers between the fuller note labels. Holding the sequence key by
-itself is inert; a tap is recognized only after the key is released.
+Minecraft's Controls screen. Hold it to see the sequence, hold and scroll
+up/down for the previous/next step, or double-tap it to pause or resume without
+losing the current position. Manual scrolling stops at the first and last steps
+instead of wrapping. The sliding HUD keeps the next placement centered, with
+compact repeater delay markers between the fuller note labels. Each successful
+placement briefly shows only the placed step sliding aside and its successor
+becoming current.
+
+The optional **Auto-select next block** setting selects a note block or repeater
+from the hotbar before each sequence placement. This allows alternating between
+the two block types by repeatedly right-clicking. If the required item is not in
+the hotbar, the click and selected slot are left unchanged. A premature click
+during a required note/repeater transition is held back so it cannot place an
+untracked block and shift the sequence.
 
 The settings screen includes a complete `0` through `24` pitch-name guide.
 

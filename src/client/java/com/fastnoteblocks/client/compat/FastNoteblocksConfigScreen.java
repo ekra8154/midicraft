@@ -48,6 +48,15 @@ public final class FastNoteblocksConfigScreen {
 			.setTooltip(Component.translatable("tooltip.fast-noteblocks.interactive_controls"))
 			.setSaveConsumer(config::setInteractiveControlsEnabled)
 			.build());
+		general.addEntry(entries.startIntSlider(
+				Component.translatable("option.fast-noteblocks.radial_focus_delay"),
+				config.radialFocusDelayTicks(),
+				FastNoteblocksConfig.MIN_RADIAL_FOCUS_DELAY_TICKS,
+				FastNoteblocksConfig.MAX_RADIAL_FOCUS_DELAY_TICKS)
+			.setDefaultValue(FastNoteblocksConfig.DEFAULT_RADIAL_FOCUS_DELAY_TICKS)
+			.setTooltip(Component.translatable("tooltip.fast-noteblocks.radial_focus_delay"))
+			.setSaveConsumer(config::setRadialFocusDelayTicks)
+			.build());
 		general.addEntry(entries.startEnumSelector(
 				Component.translatable("option.fast-noteblocks.repeater_control_style"),
 				RepeaterControlStyle.class,
@@ -103,6 +112,13 @@ public final class FastNoteblocksConfigScreen {
 			.setDefaultValue(false)
 			.setTooltip(Component.translatable("tooltip.fast-noteblocks.sequence_enabled"))
 			.setSaveConsumer(config::setPlacementSequenceEnabled)
+			.build());
+		placement.addEntry(entries.startBooleanToggle(
+				Component.translatable("option.fast-noteblocks.auto_select_sequence_block"),
+				config.autoSelectSequenceBlock())
+			.setDefaultValue(false)
+			.setTooltip(Component.translatable("tooltip.fast-noteblocks.auto_select_sequence_block"))
+			.setSaveConsumer(config::setAutoSelectSequenceBlock)
 			.build());
 		placement.addEntry(entries.startTextDescription(
 			Component.translatable("guide.fast-noteblocks.sequence")

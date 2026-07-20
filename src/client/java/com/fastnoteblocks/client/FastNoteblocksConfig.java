@@ -47,6 +47,9 @@ public final class FastNoteblocksConfig {
 	public static final int DEFAULT_INTERACTION_DELAY_TICKS = 0;
 	public static final int MIN_INTERACTION_DELAY_TICKS = 0;
 	public static final int MAX_INTERACTION_DELAY_TICKS = 10;
+	public static final int DEFAULT_RADIAL_FOCUS_DELAY_TICKS = 5;
+	public static final int MIN_RADIAL_FOCUS_DELAY_TICKS = 0;
+	public static final int MAX_RADIAL_FOCUS_DELAY_TICKS = 20;
 	private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 	private static final Path CONFIG_PATH = FabricLoader.getInstance().getConfigDir().resolve("fast-noteblocks.json");
 	private static FastNoteblocksConfig instance = defaults();
@@ -56,6 +59,7 @@ public final class FastNoteblocksConfig {
 	private OverlayMode previousOverlayMode;
 	private boolean nearbyPreviewsEnabled;
 	private boolean interactiveControlsEnabled;
+	private int radialFocusDelayTicks;
 	private RepeaterControlStyle repeaterControlStyle;
 	private boolean invertScrolling;
 	private int viewDistance;
@@ -63,6 +67,7 @@ public final class FastNoteblocksConfig {
 	private boolean waitForServerAcknowledgement;
 	private boolean requireLineOfSight;
 	private boolean placementSequenceEnabled;
+	private boolean autoSelectSequenceBlock;
 	private String placementSequence;
 
 	private FastNoteblocksConfig() {
@@ -91,6 +96,9 @@ public final class FastNoteblocksConfig {
 				instance.interactiveControlsEnabled = stored.interactiveControlsEnabled == null
 					? stored.radialControlsEnabled == null || stored.radialControlsEnabled
 					: stored.interactiveControlsEnabled;
+				instance.radialFocusDelayTicks = clampRadialFocusDelay(
+					stored.radialFocusDelayTicks == null ? DEFAULT_RADIAL_FOCUS_DELAY_TICKS : stored.radialFocusDelayTicks
+				);
 				instance.repeaterControlStyle = stored.repeaterControlStyle == null
 					? RepeaterControlStyle.RADIAL_SELECT
 					: stored.repeaterControlStyle;
@@ -102,6 +110,7 @@ public final class FastNoteblocksConfig {
 				instance.waitForServerAcknowledgement = Boolean.TRUE.equals(stored.waitForServerAcknowledgement);
 				instance.requireLineOfSight = Boolean.TRUE.equals(stored.requireLineOfSight);
 				instance.placementSequenceEnabled = Boolean.TRUE.equals(stored.placementSequenceEnabled);
+				instance.autoSelectSequenceBlock = Boolean.TRUE.equals(stored.autoSelectSequenceBlock);
 				instance.placementSequence = stored.placementSequence == null ? "" : stored.placementSequence;
 			}
 		} catch (Exception ignored) {
@@ -182,6 +191,14 @@ public final class FastNoteblocksConfig {
 		this.interactiveControlsEnabled = interactiveControlsEnabled;
 	}
 
+	public int radialFocusDelayTicks() {
+		return radialFocusDelayTicks;
+	}
+
+	public void setRadialFocusDelayTicks(int radialFocusDelayTicks) {
+		this.radialFocusDelayTicks = clampRadialFocusDelay(radialFocusDelayTicks);
+	}
+
 	public RepeaterControlStyle repeaterControlStyle() {
 		return repeaterControlStyle;
 	}
@@ -240,6 +257,14 @@ public final class FastNoteblocksConfig {
 		this.placementSequenceEnabled = placementSequenceEnabled;
 	}
 
+	public boolean autoSelectSequenceBlock() {
+		return autoSelectSequenceBlock;
+	}
+
+	public void setAutoSelectSequenceBlock(boolean autoSelectSequenceBlock) {
+		this.autoSelectSequenceBlock = autoSelectSequenceBlock;
+	}
+
 	public String placementSequence() {
 		return placementSequence;
 	}
@@ -255,6 +280,7 @@ public final class FastNoteblocksConfig {
 		config.previousOverlayMode = OverlayMode.BOTH;
 		config.nearbyPreviewsEnabled = true;
 		config.interactiveControlsEnabled = true;
+		config.radialFocusDelayTicks = DEFAULT_RADIAL_FOCUS_DELAY_TICKS;
 		config.repeaterControlStyle = RepeaterControlStyle.RADIAL_SELECT;
 		config.invertScrolling = false;
 		config.viewDistance = DEFAULT_VIEW_DISTANCE;
@@ -262,6 +288,7 @@ public final class FastNoteblocksConfig {
 		config.waitForServerAcknowledgement = false;
 		config.requireLineOfSight = false;
 		config.placementSequenceEnabled = false;
+		config.autoSelectSequenceBlock = false;
 		config.placementSequence = "";
 		return config;
 	}
@@ -283,6 +310,10 @@ public final class FastNoteblocksConfig {
 		return Math.max(MIN_INTERACTION_DELAY_TICKS, Math.min(MAX_INTERACTION_DELAY_TICKS, ticks));
 	}
 
+	private static int clampRadialFocusDelay(int ticks) {
+		return Math.max(MIN_RADIAL_FOCUS_DELAY_TICKS, Math.min(MAX_RADIAL_FOCUS_DELAY_TICKS, ticks));
+	}
+
 	private static final class StoredConfig {
 		private Boolean modEnabled;
 		private OverlayMode overlayMode;
@@ -292,6 +323,7 @@ public final class FastNoteblocksConfig {
 		private Boolean noteBlockOverlaysEnabled;
 		private Boolean nearbyPreviewsEnabled;
 		private Boolean interactiveControlsEnabled;
+		private Integer radialFocusDelayTicks;
 		private RepeaterControlStyle repeaterControlStyle;
 		private Boolean radialControlsEnabled;
 		private Boolean invertScrolling;
@@ -300,6 +332,7 @@ public final class FastNoteblocksConfig {
 		private Boolean waitForServerAcknowledgement;
 		private Boolean requireLineOfSight;
 		private Boolean placementSequenceEnabled;
+		private Boolean autoSelectSequenceBlock;
 		private String placementSequence;
 
 		private StoredConfig() {
@@ -311,6 +344,7 @@ public final class FastNoteblocksConfig {
 			this.previousOverlayMode = config.previousOverlayMode;
 			this.nearbyPreviewsEnabled = config.nearbyPreviewsEnabled;
 			this.interactiveControlsEnabled = config.interactiveControlsEnabled;
+			this.radialFocusDelayTicks = config.radialFocusDelayTicks;
 			this.repeaterControlStyle = config.repeaterControlStyle;
 			this.invertScrolling = config.invertScrolling;
 			this.viewDistance = config.viewDistance;
@@ -318,6 +352,7 @@ public final class FastNoteblocksConfig {
 			this.waitForServerAcknowledgement = config.waitForServerAcknowledgement;
 			this.requireLineOfSight = config.requireLineOfSight;
 			this.placementSequenceEnabled = config.placementSequenceEnabled;
+			this.autoSelectSequenceBlock = config.autoSelectSequenceBlock;
 			this.placementSequence = config.placementSequence;
 		}
 	}
