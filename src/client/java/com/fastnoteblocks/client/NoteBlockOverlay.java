@@ -88,6 +88,7 @@ public final class NoteBlockOverlay {
 	private boolean radialFocusCandidateRepeater;
 	private long radialFocusStartedTick;
 	private int placementSequenceIndex;
+	private boolean sequencePositionSavePending;
 	private boolean lastPlacementSequenceEnabled;
 	private boolean lastAutoSelectSequenceBlock;
 	private String lastPlacementSequenceText = "";
@@ -112,6 +113,14 @@ public final class NoteBlockOverlay {
 		lastPlacementSequenceEnabled = config.placementSequenceEnabled();
 		lastAutoSelectSequenceBlock = config.autoSelectSequenceBlock();
 		lastPlacementSequenceText = config.placementSequence();
+		List<NoteSequence.Step> sequence = configuredSequence();
+		placementSequenceIndex = sequence.isEmpty()
+			? 0
+			: Math.min(config.placementSequencePosition(), sequence.size() - 1);
+		if (placementSequenceIndex != config.placementSequencePosition()) {
+			config.setPlacementSequencePosition(placementSequenceIndex);
+			sequencePositionSavePending = true;
+		}
 		ClientTickEvents.END_CLIENT_TICK.register(this::tick);
 		LevelRenderEvents.COLLECT_SUBMITS.register(this::render);
 		HudElementRegistry.attachElementBefore(
@@ -128,6 +137,9 @@ public final class NoteBlockOverlay {
 			return true;
 		}
 		FastNoteblocksConfig config = FastNoteblocksConfig.get();
+		if (placementSequenceKey.isDown() && !config.placementSequenceEnabled()) {
+			return false;
+		}
 		if (!overlaysActive(config)
 			|| !config.interactiveControlsEnabled()
 			|| verticalAmount == 0.0
@@ -187,7 +199,7 @@ public final class NoteBlockOverlay {
 			sequenceGestureConsumed = true;
 			sequenceSecondTap = false;
 			sequenceTapWindowTicks = 0;
-			return true;
+			return false;
 		}
 		if (!sequenceControlKeyDown) {
 			sequenceControlKeyDown = true;
@@ -208,6 +220,10 @@ public final class NoteBlockOverlay {
 		}
 		if (sequenceTapWindowTicks > 0) {
 			sequenceTapWindowTicks--;
+		}
+		if (sequencePositionSavePending) {
+			FastNoteblocksConfig.save();
+			sequencePositionSavePending = false;
 		}
 		FastNoteblocksConfig config = FastNoteblocksConfig.get();
 		while (toggleKey.consumeClick()) {
@@ -334,9 +350,14 @@ public final class NoteBlockOverlay {
 			if (!config.placementSequenceEnabled()) {
 				cancelPlacementSequenceWork();
 			}
-			showSequenceHud(minecraft, config.placementSequenceEnabled()
-				? "message.fast-noteblocks.sequence_resumed"
-				: "message.fast-noteblocks.sequence_paused");
+			if (config.placementSequenceEnabled()) {
+				showSequenceHud(minecraft, "message.fast-noteblocks.sequence_resumed");
+			} else if (minecraft.player != null) {
+				sequenceHudTicks = 0;
+				minecraft.gui.hud.setOverlayMessage(Component.translatable(
+					"message.fast-noteblocks.sequence_paused"
+				), true);
+			}
 		} else if (releasedNow && !sequenceGestureConsumed) {
 			sequenceTapWindowTicks = SEQUENCE_DOUBLE_TAP_TICKS;
 		}
@@ -351,10 +372,14 @@ public final class NoteBlockOverlay {
 		List<NoteSequence.Step> sequence = configuredSequence();
 		cancelPlacementSequenceWork();
 		if (!sequence.isEmpty()) {
+			int previousIndex = placementSequenceIndex;
 			placementSequenceIndex = Math.max(0, Math.min(
 				sequence.size() - 1, placementSequenceIndex + amount
 			));
-			selectCurrentSequenceItem(Minecraft.getInstance());
+			if (placementSequenceIndex != previousIndex) {
+				persistPlacementSequencePosition();
+				selectCurrentSequenceItem(Minecraft.getInstance());
+			}
 		}
 	}
 
@@ -399,6 +424,7 @@ public final class NoteBlockOverlay {
 		if (!keyHeld && sequenceHudMode == SequenceHudMode.ADVANCE
 			&& sequenceAdvanceFrom != null && sequenceAdvanceTo != null) {
 			renderSequenceAdvance(graphics, deltaTracker, centerX, y);
+			drawSequencePosition(graphics, centerX, y, sequence.size());
 			return;
 		}
 
@@ -423,6 +449,13 @@ public final class NoteBlockOverlay {
 			drawSequenceHudToken(graphics, token, rightX, y, false);
 			rightX += minecraft.font.width(token.text()) + (token.repeater() ? 4 : 7);
 		}
+		drawSequencePosition(graphics, centerX, y, sequence.size());
+	}
+
+	private void drawSequencePosition(GuiGraphicsExtractor graphics, int centerX, int y, int sequenceSize) {
+		Minecraft minecraft = Minecraft.getInstance();
+		String position = (Math.floorMod(placementSequenceIndex, sequenceSize) + 1) + "/" + sequenceSize;
+		graphics.centeredText(minecraft.font, position, centerX, y + minecraft.font.lineHeight + 6, 0xFF777777);
 	}
 
 	private void renderSequenceAdvance(
@@ -751,6 +784,7 @@ public final class NoteBlockOverlay {
 		if (!sequence.isEmpty()) {
 			int previousIndex = Math.floorMod(placementSequenceIndex, sequence.size());
 			placementSequenceIndex = (previousIndex + 1) % sequence.size();
+			persistPlacementSequencePosition();
 			showSequenceAdvance(sequence.get(previousIndex), sequence.get(placementSequenceIndex));
 			selectCurrentSequenceItem(Minecraft.getInstance());
 		}
@@ -793,8 +827,14 @@ public final class NoteBlockOverlay {
 	private void resetPlacementSequence() {
 		cancelPlacementSequenceWork();
 		placementSequenceIndex = 0;
+		persistPlacementSequencePosition();
 		placementWatches.clear();
 		selectCurrentSequenceItem(Minecraft.getInstance());
+	}
+
+	private void persistPlacementSequencePosition() {
+		FastNoteblocksConfig.get().setPlacementSequencePosition(placementSequenceIndex);
+		sequencePositionSavePending = true;
 	}
 
 	private void cancelPlacementSequenceWork() {

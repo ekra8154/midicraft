@@ -69,6 +69,7 @@ public final class FastNoteblocksConfig {
 	private boolean placementSequenceEnabled;
 	private boolean autoSelectSequenceBlock;
 	private String placementSequence;
+	private int placementSequencePosition;
 
 	private FastNoteblocksConfig() {
 	}
@@ -112,6 +113,9 @@ public final class FastNoteblocksConfig {
 				instance.placementSequenceEnabled = Boolean.TRUE.equals(stored.placementSequenceEnabled);
 				instance.autoSelectSequenceBlock = Boolean.TRUE.equals(stored.autoSelectSequenceBlock);
 				instance.placementSequence = stored.placementSequence == null ? "" : stored.placementSequence;
+				instance.placementSequencePosition = Math.max(0,
+					stored.placementSequencePosition == null ? 0 : stored.placementSequencePosition
+				);
 			}
 		} catch (Exception ignored) {
 			instance = defaults();
@@ -273,6 +277,14 @@ public final class FastNoteblocksConfig {
 		this.placementSequence = placementSequence == null ? "" : placementSequence;
 	}
 
+	public int placementSequencePosition() {
+		return placementSequencePosition;
+	}
+
+	public void setPlacementSequencePosition(int placementSequencePosition) {
+		this.placementSequencePosition = Math.max(0, placementSequencePosition);
+	}
+
 	private static FastNoteblocksConfig defaults() {
 		FastNoteblocksConfig config = new FastNoteblocksConfig();
 		config.modEnabled = true;
@@ -290,6 +302,7 @@ public final class FastNoteblocksConfig {
 		config.placementSequenceEnabled = false;
 		config.autoSelectSequenceBlock = false;
 		config.placementSequence = "";
+		config.placementSequencePosition = 0;
 		return config;
 	}
 
@@ -334,6 +347,7 @@ public final class FastNoteblocksConfig {
 		private Boolean placementSequenceEnabled;
 		private Boolean autoSelectSequenceBlock;
 		private String placementSequence;
+		private Integer placementSequencePosition;
 
 		private StoredConfig() {
 		}
@@ -354,6 +368,7 @@ public final class FastNoteblocksConfig {
 			this.placementSequenceEnabled = config.placementSequenceEnabled;
 			this.autoSelectSequenceBlock = config.autoSelectSequenceBlock;
 			this.placementSequence = config.placementSequence;
+			this.placementSequencePosition = config.placementSequencePosition;
 		}
 	}
 }

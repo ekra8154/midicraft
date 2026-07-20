@@ -55,12 +55,15 @@ The sequence control key is unbound by default and can be assigned in
 Minecraft's Controls screen. Hold it to see the sequence, hold and scroll
 up/down for the previous/next step, or double-tap it to pause or resume without
 losing the current position. While paused, single taps, holds, and scrolling are
-inert; only a completed double-tap resumes the sequence. Manual scrolling stops
+inert for sequence control; only a completed double-tap resumes it, and the
+wheel continues to scroll the vanilla hotbar. Manual sequence scrolling stops
 at the first and last steps instead of wrapping. The sliding HUD keeps the next
 placement centered, with
 compact repeater delay markers between the fuller note labels. Each successful
 placement briefly shows only the placed step sliding aside and its successor
-becoming current.
+becoming current. A compact `x/X` counter appears under both HUD layouts, and
+the current sequence position is saved so long melodies resume at the same
+step after restarting.
 
 The optional **Auto-select current step** setting passively changes to the note
 block or repeater required by the current sequence step whenever the cursor
