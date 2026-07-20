@@ -41,11 +41,20 @@ configuration button provides:
   one-interaction-per-client-tick speed;
 - optional server-confirmation waiting;
 - optional unobstructed line-of-sight enforcement;
-- a resumable unified note-block and repeater placement sequence;
+- resumable compositions with up to four independently named tracks;
+- one instrument per track, including a Barrier instrument that mutes the
+  track without removing it from synchronized preview timing;
 - sequencing edit protection: radials only, radials and ordinary interactions
   (default), or off;
 - a validated, whitespace-agnostic sequence using note values `0` through `24`
   and explicit repeater delay groups `1d` through `64d`.
+
+Each track has its own sequence, instrument, collapse state, and persistent
+placement cursor. The selected Build track drives placement automation, the
+in-game timeline, counters, and hotbar selection. Preview plays every track
+together from time zero and follows the highlighted token vertically in each
+expanded editor. Existing single-track configs and saved sequences migrate to
+Track 1.
 
 For example, `0, 2d, 4, 2d, 7` expects a note block tuned to pitch 0, a repeater
 set to delay 2, and so on. A mismatched placement does not advance the sequence,

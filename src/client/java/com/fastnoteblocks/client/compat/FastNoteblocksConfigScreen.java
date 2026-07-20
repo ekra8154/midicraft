@@ -133,7 +133,6 @@ public final class FastNoteblocksConfigScreen {
 			.setTooltip(Component.translatable("tooltip.fast-noteblocks.auto_select_sequence_block"))
 			.setSaveConsumer(config::setAutoSelectSequenceBlock)
 			.build());
-		placement.addEntry(new InstrumentPreviewEntry(config));
 		ActiveSequenceEntry activeSequence = new ActiveSequenceEntry(config);
 		placement.addEntry(activeSequence);
 		placement.addEntry(new SavedSequenceLibraryEntry(config, activeSequence));

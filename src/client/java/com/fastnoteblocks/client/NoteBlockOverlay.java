@@ -91,6 +91,7 @@ public final class NoteBlockOverlay {
 	private boolean sequencePositionSavePending;
 	private boolean lastPlacementSequenceEnabled;
 	private boolean lastAutoSelectSequenceBlock;
+	private int lastActiveTrackIndex;
 	private String lastPlacementSequenceText = "";
 	private boolean performingAutomatedClick;
 	private int sequenceHudTicks;
@@ -110,6 +111,7 @@ public final class NoteBlockOverlay {
 		FastNoteblocksConfig config = FastNoteblocksConfig.get();
 		lastPlacementSequenceEnabled = config.placementSequenceEnabled();
 		lastAutoSelectSequenceBlock = config.autoSelectSequenceBlock();
+		lastActiveTrackIndex = config.activeTrackIndex();
 		lastPlacementSequenceText = config.placementSequence();
 		List<NoteSequence.Step> sequence = configuredSequence();
 		placementSequenceIndex = sequence.isEmpty()
@@ -253,11 +255,14 @@ public final class NoteBlockOverlay {
 		if (config.autoSelectSequenceBlock() && !lastAutoSelectSequenceBlock) {
 			selectCurrentSequenceItem(minecraft);
 		}
-		if (!config.placementSequence().equals(lastPlacementSequenceText)) {
+		if (config.activeTrackIndex() != lastActiveTrackIndex) {
+			loadActiveTrack(minecraft);
+		} else if (!config.placementSequence().equals(lastPlacementSequenceText)) {
 			resetPlacementSequence();
 		}
 		lastPlacementSequenceEnabled = config.placementSequenceEnabled();
 		lastAutoSelectSequenceBlock = config.autoSelectSequenceBlock();
+		lastActiveTrackIndex = config.activeTrackIndex();
 		lastPlacementSequenceText = config.placementSequence();
 
 		if (minecraft.level != lastLevel) {
@@ -414,8 +419,11 @@ public final class NoteBlockOverlay {
 		List<NoteSequence.Step> sequence = configuredSequence();
 		int centerX = graphics.guiWidth() / 2;
 		int y = graphics.guiHeight() / 2 + 28;
+		FastNoteblocksConfig.SequenceTrack activeTrack = FastNoteblocksConfig.get().activeTrack();
+		String trackLabel = activeTrack.name() + " · " + instrumentLabel(activeTrack.instrument());
+		graphics.centeredText(minecraft.font, trackLabel, centerX, y - 14, 0xFFAAAAAA);
 		if (sequenceHudTicks > 0 && sequenceHudAction != null && sequenceHudMode == SequenceHudMode.FULL) {
-			graphics.centeredText(minecraft.font, sequenceHudAction, centerX, y - 14, 0xFFCCCCCC);
+			graphics.centeredText(minecraft.font, sequenceHudAction, centerX, y - 25, 0xFFCCCCCC);
 		}
 		if (sequence.isEmpty()) {
 			graphics.centeredText(minecraft.font, Component.translatable(
@@ -460,6 +468,21 @@ public final class NoteBlockOverlay {
 			rightX += minecraft.font.width(token.text());
 		}
 		drawSequencePosition(graphics, centerX, y, sequence);
+	}
+
+	private static String instrumentLabel(String id) {
+		if (id == null || id.isBlank()) {
+			return "Harp";
+		}
+		String[] words = id.toLowerCase(java.util.Locale.ROOT).split("_");
+		StringBuilder result = new StringBuilder();
+		for (String word : words) {
+			if (!result.isEmpty()) {
+				result.append(' ');
+			}
+			result.append(Character.toUpperCase(word.charAt(0))).append(word.substring(1));
+		}
+		return result.toString();
 	}
 
 	private void drawSequencePosition(GuiGraphicsExtractor graphics, int centerX, int y, List<NoteSequence.Step> sequence) {
@@ -1001,6 +1024,21 @@ public final class NoteBlockOverlay {
 		persistPlacementSequencePosition();
 		placementWatches.clear();
 		selectCurrentSequenceItem(Minecraft.getInstance());
+	}
+
+	private void loadActiveTrack(Minecraft minecraft) {
+		cancelPlacementSequenceWork();
+		List<NoteSequence.Step> sequence = configuredSequence();
+		placementSequenceIndex = sequence.isEmpty()
+			? 0
+			: Math.min(FastNoteblocksConfig.get().placementSequencePosition(), sequence.size() - 1);
+		if (placementSequenceIndex != FastNoteblocksConfig.get().placementSequencePosition()) {
+			FastNoteblocksConfig.get().setPlacementSequencePosition(placementSequenceIndex);
+			sequencePositionSavePending = true;
+		}
+		placementWatches.clear();
+		selectCurrentSequenceItem(minecraft);
+		showSequenceHud(minecraft, null);
 	}
 
 	private void persistPlacementSequencePosition() {

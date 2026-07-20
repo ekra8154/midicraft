@@ -14,10 +14,49 @@ import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.network.chat.Component;
 
 public final class FastNoteblocksConfig {
-	public record SavedSequence(String name, String sequence) {
+	public static final int MAX_TRACKS = 4;
+
+	public record SequenceTrack(String name, String sequence, String instrument, int position) {
+		public SequenceTrack {
+			name = name == null || name.isBlank() ? "Track" : name.trim();
+			sequence = sequence == null ? "" : sequence;
+			instrument = instrument == null || instrument.isBlank() ? "HARP" : instrument;
+			position = Math.max(0, position);
+		}
+
+		public SequenceTrack withName(String value) {
+			return new SequenceTrack(value, sequence, instrument, position);
+		}
+
+		public SequenceTrack withSequence(String value) {
+			return new SequenceTrack(name, value, instrument, position);
+		}
+
+		public SequenceTrack withInstrument(String value) {
+			return new SequenceTrack(name, sequence, value, position);
+		}
+
+		public SequenceTrack withPosition(int value) {
+			return new SequenceTrack(name, sequence, instrument, value);
+		}
+	}
+
+	public record SavedSequence(String name, List<SequenceTrack> tracks, int activeTrackIndex, String sequence) {
 		public SavedSequence {
 			name = name == null || name.isBlank() ? "Untitled sequence" : name.trim();
-			sequence = sequence == null ? "" : sequence;
+			tracks = tracks == null || tracks.isEmpty()
+				? List.of(new SequenceTrack("Track 1", sequence, "HARP", 0))
+				: normalizeTracks(tracks);
+			activeTrackIndex = clampTrackIndex(activeTrackIndex, tracks.size());
+			sequence = null;
+		}
+
+		public SavedSequence(String name, String sequence) {
+			this(name, null, 0, sequence);
+		}
+
+		public SavedSequence(String name, List<SequenceTrack> tracks, int activeTrackIndex) {
+			this(name, tracks, activeTrackIndex, null);
 		}
 	}
 
@@ -103,6 +142,8 @@ public final class FastNoteblocksConfig {
 	private int placementSequencePosition;
 	private String activeSequenceName;
 	private String previewInstrument;
+	private List<SequenceTrack> tracks;
+	private int activeTrackIndex;
 	private List<SavedSequence> savedSequences;
 
 	private FastNoteblocksConfig() {
@@ -157,6 +198,13 @@ public final class FastNoteblocksConfig {
 					? "Untitled sequence"
 					: stored.activeSequenceName;
 				instance.previewInstrument = stored.previewInstrument == null ? "HARP" : stored.previewInstrument;
+				instance.tracks = stored.tracks == null || stored.tracks.isEmpty()
+					? List.of(new SequenceTrack("Track 1", instance.placementSequence,
+						instance.previewInstrument, instance.placementSequencePosition))
+					: normalizeTracks(stored.tracks);
+				instance.activeTrackIndex = clampTrackIndex(
+					stored.activeTrackIndex == null ? 0 : stored.activeTrackIndex, instance.tracks.size()
+				);
 				instance.savedSequences = stored.savedSequences == null
 					? new ArrayList<>()
 					: new ArrayList<>(stored.savedSequences);
@@ -324,19 +372,21 @@ public final class FastNoteblocksConfig {
 	}
 
 	public String placementSequence() {
-		return placementSequence;
+		return activeTrack().sequence();
 	}
 
 	public void setPlacementSequence(String placementSequence) {
-		this.placementSequence = placementSequence == null ? "" : placementSequence;
+		updateActiveTrack(activeTrack().withSequence(placementSequence));
+		this.placementSequence = activeTrack().sequence();
 	}
 
 	public int placementSequencePosition() {
-		return placementSequencePosition;
+		return activeTrack().position();
 	}
 
 	public void setPlacementSequencePosition(int placementSequencePosition) {
-		this.placementSequencePosition = Math.max(0, placementSequencePosition);
+		updateActiveTrack(activeTrack().withPosition(placementSequencePosition));
+		this.placementSequencePosition = activeTrack().position();
 	}
 
 	public String activeSequenceName() {
@@ -350,11 +400,35 @@ public final class FastNoteblocksConfig {
 	}
 
 	public String previewInstrument() {
-		return previewInstrument;
+		return activeTrack().instrument();
 	}
 
 	public void setPreviewInstrument(String previewInstrument) {
-		this.previewInstrument = previewInstrument == null || previewInstrument.isBlank() ? "HARP" : previewInstrument;
+		updateActiveTrack(activeTrack().withInstrument(previewInstrument));
+		this.previewInstrument = activeTrack().instrument();
+	}
+
+	public List<SequenceTrack> tracks() {
+		return List.copyOf(tracks);
+	}
+
+	public void setTracks(List<SequenceTrack> tracks) {
+		this.tracks = normalizeTracks(tracks);
+		activeTrackIndex = clampTrackIndex(activeTrackIndex, this.tracks.size());
+		syncLegacyTrackFields();
+	}
+
+	public int activeTrackIndex() {
+		return activeTrackIndex;
+	}
+
+	public void setActiveTrackIndex(int activeTrackIndex) {
+		this.activeTrackIndex = clampTrackIndex(activeTrackIndex, tracks.size());
+		syncLegacyTrackFields();
+	}
+
+	public SequenceTrack activeTrack() {
+		return tracks.get(clampTrackIndex(activeTrackIndex, tracks.size()));
 	}
 
 	public List<SavedSequence> savedSequences() {
@@ -386,6 +460,8 @@ public final class FastNoteblocksConfig {
 		config.placementSequencePosition = 0;
 		config.activeSequenceName = "Untitled sequence";
 		config.previewInstrument = "HARP";
+		config.tracks = List.of(new SequenceTrack("Track 1", "", "HARP", 0));
+		config.activeTrackIndex = 0;
 		config.savedSequences = new ArrayList<>();
 		return config;
 	}
@@ -409,6 +485,38 @@ public final class FastNoteblocksConfig {
 
 	private static int clampRadialFocusDelay(int ticks) {
 		return Math.max(MIN_RADIAL_FOCUS_DELAY_TICKS, Math.min(MAX_RADIAL_FOCUS_DELAY_TICKS, ticks));
+	}
+
+	private static List<SequenceTrack> normalizeTracks(List<SequenceTrack> tracks) {
+		List<SequenceTrack> normalized = new ArrayList<>();
+		if (tracks != null) {
+			for (SequenceTrack track : tracks) {
+				if (track != null && normalized.size() < MAX_TRACKS) {
+					normalized.add(new SequenceTrack(track.name(), track.sequence(), track.instrument(), track.position()));
+				}
+			}
+		}
+		if (normalized.isEmpty()) {
+			normalized.add(new SequenceTrack("Track 1", "", "HARP", 0));
+		}
+		return List.copyOf(normalized);
+	}
+
+	private static int clampTrackIndex(int index, int size) {
+		return Math.max(0, Math.min(Math.max(1, size) - 1, index));
+	}
+
+	private void updateActiveTrack(SequenceTrack track) {
+		List<SequenceTrack> updated = new ArrayList<>(tracks);
+		updated.set(clampTrackIndex(activeTrackIndex, updated.size()), track);
+		tracks = List.copyOf(updated);
+	}
+
+	private void syncLegacyTrackFields() {
+		SequenceTrack active = activeTrack();
+		placementSequence = active.sequence();
+		placementSequencePosition = active.position();
+		previewInstrument = active.instrument();
 	}
 
 	private static final class StoredConfig {
@@ -435,6 +543,8 @@ public final class FastNoteblocksConfig {
 		private Integer placementSequencePosition;
 		private String activeSequenceName;
 		private String previewInstrument;
+		private List<SequenceTrack> tracks;
+		private Integer activeTrackIndex;
 		private List<SavedSequence> savedSequences;
 
 		private StoredConfig() {
@@ -460,6 +570,8 @@ public final class FastNoteblocksConfig {
 			this.placementSequencePosition = config.placementSequencePosition;
 			this.activeSequenceName = config.activeSequenceName;
 			this.previewInstrument = config.previewInstrument;
+			this.tracks = config.tracks;
+			this.activeTrackIndex = config.activeTrackIndex;
 			this.savedSequences = config.savedSequences;
 		}
 	}

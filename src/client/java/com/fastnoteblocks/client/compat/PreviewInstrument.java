@@ -11,6 +11,7 @@ import net.minecraft.world.item.Items;
 
 record PreviewInstrument(String id, String name, Item icon, Holder<SoundEvent> sound) {
 	static final List<PreviewInstrument> VALUES = List.of(
+		new PreviewInstrument("MUTE", "Mute", Items.BARRIER, null),
 		new PreviewInstrument("HARP", "Harp", Items.GRASS_BLOCK, SoundEvents.NOTE_BLOCK_HARP),
 		new PreviewInstrument("BASS", "Bass", Items.OAK_PLANKS, SoundEvents.NOTE_BLOCK_BASS),
 		new PreviewInstrument("BASEDRUM", "Bass drum", Items.STONE, SoundEvents.NOTE_BLOCK_BASEDRUM),
@@ -34,7 +35,7 @@ record PreviewInstrument(String id, String name, Item icon, Holder<SoundEvent> s
 	);
 
 	static PreviewInstrument byId(String id) {
-		return VALUES.stream().filter(value -> value.id.equals(id)).findFirst().orElse(VALUES.getFirst());
+		return VALUES.stream().filter(value -> value.id.equals(id)).findFirst().orElse(VALUES.get(1));
 	}
 
 	void play() {
@@ -42,6 +43,9 @@ record PreviewInstrument(String id, String name, Item icon, Holder<SoundEvent> s
 	}
 
 	void play(int note) {
+		if (sound == null) {
+			return;
+		}
 		float pitch = (float)Math.pow(2.0, (note - 12) / 12.0);
 		Minecraft.getInstance().getSoundManager().play(SimpleSoundInstance.forUI(sound.value(), pitch, 0.55F));
 	}

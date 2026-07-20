@@ -2,6 +2,7 @@ package com.fastnoteblocks.client.compat;
 
 import com.fastnoteblocks.client.FastNoteblocksConfig;
 import com.fastnoteblocks.client.FastNoteblocksConfig.SavedSequence;
+import com.fastnoteblocks.client.FastNoteblocksConfig.SequenceTrack;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -16,11 +17,9 @@ import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.components.events.GuiEventListener;
 import net.minecraft.client.gui.narration.NarratableEntry;
 import net.minecraft.network.chat.Component;
-import net.minecraft.network.chat.Style;
-import net.minecraft.util.FormattedCharSequence;
+import net.minecraft.world.item.ItemStack;
 
 final class SavedSequenceLibraryEntry extends AbstractConfigListEntry<List<SavedSequence>> {
-	private static final int EXPANDED_EDITOR_HEIGHT = 60;
 	private final FastNoteblocksConfig config;
 	private final ActiveSequenceEntry activeSequence;
 	private final List<SavedRow> rows = new ArrayList<>();
@@ -36,21 +35,17 @@ final class SavedSequenceLibraryEntry extends AbstractConfigListEntry<List<Saved
 		for (SavedSequence saved : initialValue) {
 			rows.add(new SavedRow(saved));
 		}
-		this.addButton = Button.builder(Component.literal("+ Add sequence"), button ->
-			{
-				rows.add(new SavedRow(new SavedSequence("Untitled sequence", "")));
-				persistLibrary();
-			})
-			.bounds(0, 0, 120, 20)
-			.tooltip(Tooltip.create(Component.literal("Add a blank saved sequence")))
+		this.addButton = Button.builder(Component.literal("+ Add sequence"), button -> {
+			rows.add(new SavedRow(new SavedSequence("Untitled sequence", "")));
+			persistLibrary();
+		}).bounds(0, 0, 120, 20)
+			.tooltip(Tooltip.create(Component.literal("Add a blank one-track sequence")))
 			.build();
-		this.saveActiveButton = Button.builder(Component.literal("Save active sequence"), button ->
-			{
-				rows.add(new SavedRow(new SavedSequence(activeSequence.sequenceName(), activeSequence.getValue())));
-				persistLibrary();
-			})
-			.bounds(0, 0, 140, 20)
-			.tooltip(Tooltip.create(Component.literal("Save a copy of the active sequence")))
+		this.saveActiveButton = Button.builder(Component.literal("Save active sequence"), button -> {
+			rows.add(new SavedRow(activeSequence.savedSequence()));
+			persistLibrary();
+		}).bounds(0, 0, 140, 20)
+			.tooltip(Tooltip.create(Component.literal("Save a copy of every active track")))
 			.build();
 	}
 
@@ -65,7 +60,7 @@ final class SavedSequenceLibraryEntry extends AbstractConfigListEntry<List<Saved
 
 	@Override
 	public int getItemHeight() {
-		int height = 18 + 24;
+		int height = 42;
 		for (SavedRow row : rows) {
 			height += row.height() + 4;
 		}
@@ -131,79 +126,50 @@ final class SavedSequenceLibraryEntry extends AbstractConfigListEntry<List<Saved
 	}
 
 	private final class SavedRow {
+		private final SavedSequence saved;
 		private final EditBox nameBox;
-		private final EditBox singleBox;
-		private SequenceEditBox multiBox;
-		private String multiValue;
-		private boolean expanded;
 		private final Button loadButton;
 		private final Button expandButton;
 		private final Button deleteButton;
+		private boolean expanded;
 
 		SavedRow(SavedSequence saved) {
-			this.multiValue = saved.sequence();
-			this.expanded = saved.sequence().contains("\n");
-			this.nameBox = new EditBox(Minecraft.getInstance().font, 0, 0, 100, 20, Component.literal("Sequence name"));
+			this.saved = saved;
+			this.nameBox = new EditBox(Minecraft.getInstance().font, 0, 0, 120, 20, Component.literal("Sequence name"));
 			nameBox.setMaxLength(80);
 			nameBox.setValue(saved.name());
 			nameBox.setResponder(value -> syncLibrary());
-			this.singleBox = new EditBox(Minecraft.getInstance().font, 0, 0, 100, 20, Component.literal("Sequence"));
-			singleBox.setMaxLength(12000);
-			singleBox.setValue(singleLine(saved.sequence()));
-			singleBox.addFormatter(this::formatCollapsed);
-			singleBox.setResponder(value -> syncLibrary());
-			this.loadButton = Button.builder(Component.literal("Load"), button -> activeSequence.setSequence(nameBox.getValue(), sequence()))
+			this.loadButton = Button.builder(Component.literal("Load"), button -> activeSequence.setSequence(value()))
 				.bounds(0, 0, 42, 20)
-				.tooltip(Tooltip.create(Component.literal("Restore this into the active sequence editor")))
+				.tooltip(Tooltip.create(Component.literal("Restore this composition into the active editor")))
 				.build();
-			this.expandButton = Button.builder(expandLabel(), button -> toggleExpanded())
-				.bounds(0, 0, 20, 20)
-				.tooltip(Tooltip.create(Component.literal("Expand or collapse this sequence")))
+			this.expandButton = Button.builder(expandLabel(), button -> {
+				expanded = !expanded;
+				button.setMessage(expandLabel());
+			}).bounds(0, 0, 20, 20)
+				.tooltip(Tooltip.create(Component.literal("Show or hide this sequence's tracks")))
 				.build();
 			this.deleteButton = Button.builder(Component.literal("×").withStyle(ChatFormatting.RED), button -> {
 				rows.remove(this);
 				persistLibrary();
-			})
-				.bounds(0, 0, 20, 20)
+			}).bounds(0, 0, 20, 20)
 				.tooltip(Tooltip.create(Component.literal("Delete this saved sequence")))
 				.build();
-		}
-
-		int height() {
-			return expanded ? 84 : 20;
 		}
 
 		private Component expandLabel() {
 			return Component.literal(expanded ? "▾" : "▸");
 		}
 
-		private void toggleExpanded() {
-			if (expanded) {
-				multiValue = multiBox == null ? multiValue : multiBox.getValue();
-				singleBox.setValue(singleLine(multiValue));
-			} else {
-				multiValue = singleBox.getValue();
-				if (multiBox != null) {
-					multiBox.setValue(multiValue);
-				}
-			}
-			expanded = !expanded;
-			expandButton.setMessage(expandLabel());
+		int height() {
+			return expanded ? 24 + saved.tracks().size() * 22 : 20;
 		}
 
-		private SequenceEditBox multiBox(int width) {
-			if (multiBox == null || multiBox.getWidth() != width) {
-				String current = multiBox == null ? multiValue : multiBox.getValue();
-				multiBox = new SequenceEditBox(Minecraft.getInstance().font, width, EXPANDED_EDITOR_HEIGHT);
-				multiBox.setCharacterLimit(12000);
-				multiBox.setValueListener(value -> syncLibrary());
-				multiBox.setValue(current);
-				multiValue = current;
-			}
-			return multiBox;
+		SavedSequence value() {
+			return new SavedSequence(nameBox.getValue(), saved.tracks(), saved.activeTrackIndex());
 		}
 
-		private void extract(GuiGraphicsExtractor graphics, int x, int y, int width,
+		void extract(GuiGraphicsExtractor graphics, int x, int y, int width,
 				int mouseX, int mouseY, float partialTick) {
 			loadButton.setX(x);
 			loadButton.setY(y);
@@ -214,45 +180,31 @@ final class SavedSequenceLibraryEntry extends AbstractConfigListEntry<List<Saved
 			deleteButton.setX(x + width - 20);
 			deleteButton.setY(y);
 			deleteButton.extractRenderState(graphics, mouseX, mouseY, partialTick);
-
 			nameBox.setX(x + 70);
 			nameBox.setY(y);
-			if (expanded) {
-				nameBox.setWidth(width - 94);
-				nameBox.extractRenderState(graphics, mouseX, mouseY, partialTick);
-				SequenceEditBox box = multiBox(width - 70);
-				box.setX(x + 70);
-				box.setY(y + 24);
-				box.extractRenderState(graphics, mouseX, mouseY, partialTick);
-			} else {
-				int nameWidth = Math.min(110, Math.max(70, width / 3));
-				nameBox.setWidth(nameWidth);
-				nameBox.extractRenderState(graphics, mouseX, mouseY, partialTick);
-				singleBox.setX(x + 74 + nameWidth);
-				singleBox.setY(y);
-				singleBox.setWidth(Math.max(30, width - 98 - nameWidth));
-				singleBox.extractRenderState(graphics, mouseX, mouseY, partialTick);
+			nameBox.setWidth(Math.max(70, width - 164));
+			nameBox.extractRenderState(graphics, mouseX, mouseY, partialTick);
+			String summary = saved.tracks().size() + (saved.tracks().size() == 1 ? " track" : " tracks");
+			graphics.text(Minecraft.getInstance().font, summary, x + width - 88, y + 6, 0xFF999999, false);
+			if (!expanded) {
+				return;
+			}
+			int trackY = y + 24;
+			for (int i = 0; i < saved.tracks().size(); i++) {
+				SequenceTrack track = saved.tracks().get(i);
+				PreviewInstrument instrument = PreviewInstrument.byId(track.instrument());
+				graphics.item(new ItemStack(instrument.icon()), x + 4, trackY + 2);
+				String prefix = (i == saved.activeTrackIndex() ? "● " : "") + track.name() + ": ";
+				String text = prefix + singleLine(track.sequence());
+				graphics.text(Minecraft.getInstance().font,
+					Minecraft.getInstance().font.plainSubstrByWidth(text, Math.max(20, width - 28)),
+					x + 26, trackY + 6, i == saved.activeTrackIndex() ? 0xFF55FF55 : 0xFFCCCCCC, false);
+				trackY += 22;
 			}
 		}
 
-		private List<AbstractWidget> widgets() {
-			List<AbstractWidget> widgets = new ArrayList<>(List.of(loadButton, expandButton, nameBox, deleteButton));
-			widgets.add(expanded && multiBox != null ? multiBox : singleBox);
-			return widgets;
-		}
-
-		private String sequence() {
-			return expanded ? (multiBox == null ? multiValue : multiBox.getValue()) : singleBox.getValue();
-		}
-
-		private SavedSequence value() {
-			return new SavedSequence(nameBox.getValue(), sequence());
-		}
-
-		private FormattedCharSequence formatCollapsed(String partial, int offset) {
-			String value = singleBox.getValue();
-			Style[] styles = SequenceTextStyler.styles(value);
-			return SequenceTextStyler.sequence(value, styles, offset, offset + partial.length());
+		List<AbstractWidget> widgets() {
+			return List.of(loadButton, expandButton, nameBox, deleteButton);
 		}
 	}
 
