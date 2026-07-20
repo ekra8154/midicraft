@@ -52,10 +52,11 @@ between note blocks and repeaters wait for the current batch to finish.
 
 The sequence control key is unbound by default and can be assigned in
 Minecraft's Controls screen. Tap it to pause or resume without losing the
-current position, hold it and scroll up/down for the previous/next step, or
-double-tap it to return to the beginning. A brief HUD preview appears after
-these controls and shows the current and following steps. Holding the sequence
-key by itself is inert; a tap is recognized only after the key is released.
+current position, or hold it and scroll up/down for the previous/next step.
+Manual scrolling stops at the first and last steps instead of wrapping. A brief
+sliding HUD window keeps the next placement centered, with compact repeater
+delay markers between the fuller note labels. Holding the sequence key by
+itself is inert; a tap is recognized only after the key is released.
 
 The settings screen includes a complete `0` through `24` pitch-name guide.
 
