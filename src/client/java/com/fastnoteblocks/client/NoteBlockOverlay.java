@@ -89,6 +89,7 @@ public final class NoteBlockOverlay {
 	private long radialFocusStartedTick;
 	private int placementSequenceIndex;
 	private boolean lastPlacementSequenceEnabled;
+	private boolean lastAutoSelectSequenceBlock;
 	private String lastPlacementSequenceText = "";
 	private boolean performingAutomatedClick;
 	private NoteSequence.StepType inFlightSequenceType;
@@ -109,6 +110,7 @@ public final class NoteBlockOverlay {
 	public void register() {
 		FastNoteblocksConfig config = FastNoteblocksConfig.get();
 		lastPlacementSequenceEnabled = config.placementSequenceEnabled();
+		lastAutoSelectSequenceBlock = config.autoSelectSequenceBlock();
 		lastPlacementSequenceText = config.placementSequence();
 		ClientTickEvents.END_CLIENT_TICK.register(this::tick);
 		LevelRenderEvents.COLLECT_SUBMITS.register(this::render);
@@ -228,11 +230,17 @@ public final class NoteBlockOverlay {
 
 		if (!config.placementSequenceEnabled() && lastPlacementSequenceEnabled) {
 			cancelPlacementSequenceWork();
+		} else if (config.placementSequenceEnabled() && !lastPlacementSequenceEnabled) {
+			selectCurrentSequenceItem(minecraft);
+		}
+		if (config.autoSelectSequenceBlock() && !lastAutoSelectSequenceBlock) {
+			selectCurrentSequenceItem(minecraft);
 		}
 		if (!config.placementSequence().equals(lastPlacementSequenceText)) {
 			resetPlacementSequence();
 		}
 		lastPlacementSequenceEnabled = config.placementSequenceEnabled();
+		lastAutoSelectSequenceBlock = config.autoSelectSequenceBlock();
 		lastPlacementSequenceText = config.placementSequence();
 
 		if (minecraft.level != lastLevel) {
@@ -249,6 +257,7 @@ public final class NoteBlockOverlay {
 			repeaterBottomDelay = null;
 			clearRadialFocusCandidate();
 			ticksUntilRescan = 0;
+			selectCurrentSequenceItem(minecraft);
 		}
 
 		if (!isReady(minecraft)) {
@@ -345,6 +354,7 @@ public final class NoteBlockOverlay {
 			placementSequenceIndex = Math.max(0, Math.min(
 				sequence.size() - 1, placementSequenceIndex + amount
 			));
+			selectCurrentSequenceItem(Minecraft.getInstance());
 		}
 	}
 
@@ -742,15 +752,20 @@ public final class NoteBlockOverlay {
 			int previousIndex = Math.floorMod(placementSequenceIndex, sequence.size());
 			placementSequenceIndex = (previousIndex + 1) % sequence.size();
 			showSequenceAdvance(sequence.get(previousIndex), sequence.get(placementSequenceIndex));
-			selectCurrentSequenceItem(Minecraft.getInstance(), sequence.get(placementSequenceIndex));
+			selectCurrentSequenceItem(Minecraft.getInstance());
 		}
 	}
 
-	private static void selectCurrentSequenceItem(Minecraft minecraft, NoteSequence.Step current) {
+	private void selectCurrentSequenceItem(Minecraft minecraft) {
 		FastNoteblocksConfig config = FastNoteblocksConfig.get();
-		if (!config.autoSelectSequenceBlock() || minecraft.player == null) {
+		List<NoteSequence.Step> sequence = configuredSequence();
+		if (!config.placementSequenceEnabled()
+			|| !config.autoSelectSequenceBlock()
+			|| minecraft.player == null
+			|| sequence.isEmpty()) {
 			return;
 		}
+		NoteSequence.Step current = sequence.get(Math.floorMod(placementSequenceIndex, sequence.size()));
 		int hotbarSlot = findSequenceItemSlot(minecraft.player, current);
 		if (hotbarSlot >= 0) {
 			minecraft.player.getInventory().setSelectedSlot(hotbarSlot);
@@ -779,6 +794,7 @@ public final class NoteBlockOverlay {
 		cancelPlacementSequenceWork();
 		placementSequenceIndex = 0;
 		placementWatches.clear();
+		selectCurrentSequenceItem(Minecraft.getInstance());
 	}
 
 	private void cancelPlacementSequenceWork() {

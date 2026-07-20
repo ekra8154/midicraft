@@ -62,10 +62,12 @@ compact repeater delay markers between the fuller note labels. Each successful
 placement briefly shows only the placed step sliding aside and its successor
 becoming current.
 
-The optional **Auto-select after placement** setting passively changes to the
-note block or repeater needed for the new current step immediately after a
-successful placement. It never intercepts right-clicks. If the next required
-item is not in the hotbar, the selected slot is left unchanged.
+The optional **Auto-select current step** setting passively changes to the note
+block or repeater required by the current sequence step whenever the cursor
+moves. This includes successful placements, H + wheel navigation in either
+direction, sequence edits that reset the cursor, and resuming the sequence. It
+never intercepts right-clicks. If the required item is not in the hotbar, the
+selected slot is left unchanged.
 
 The settings screen includes a complete `0` through `24` pitch-name guide.
 
