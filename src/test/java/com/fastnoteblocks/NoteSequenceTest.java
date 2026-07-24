@@ -39,6 +39,33 @@ class NoteSequenceTest {
 	}
 
 	@Test
+	void scalesDelayTokensBeforeExpandingRepeaters() {
+		assertEquals(List.of(
+			new NoteSequence.Step(NoteSequence.StepType.NOTE, 0, 0, 0, 1),
+			new NoteSequence.Step(NoteSequence.StepType.REPEATER, 4, 4, 0, 1),
+			new NoteSequence.Step(NoteSequence.StepType.NOTE, 7, 0, 0, 1)
+		), NoteSequence.parse("0, 2d, 7", 8));
+		assertEquals(List.of(
+			new NoteSequence.Step(NoteSequence.StepType.REPEATER, 4, 6, 0, 2),
+			new NoteSequence.Step(NoteSequence.StepType.REPEATER, 2, 6, 1, 2)
+		), NoteSequence.parse("2d", 12));
+	}
+
+	@Test
+	void roundsFractionalScaledDelaysToTheNearestTick() {
+		assertEquals(List.of(
+			new NoteSequence.Step(NoteSequence.StepType.REPEATER, 2, 2, 0, 1)
+		), NoteSequence.parse("1d", 6));
+		assertEquals(List.of(
+			new NoteSequence.Step(NoteSequence.StepType.REPEATER, 4, 5, 0, 2),
+			new NoteSequence.Step(NoteSequence.StepType.REPEATER, 1, 5, 1, 2)
+		), NoteSequence.parse("3d", 6));
+		assertEquals(List.of(
+			new NoteSequence.Step(NoteSequence.StepType.REPEATER, 1, 1, 0, 1)
+		), NoteSequence.parse("1d", 1));
+	}
+
+	@Test
 	void rejectsMissingAndOutOfRangeEntries() {
 		assertThrows(IllegalArgumentException.class, () -> NoteSequence.parse("0,,12"));
 		assertThrows(IllegalArgumentException.class, () -> NoteSequence.parse("-1,12"));

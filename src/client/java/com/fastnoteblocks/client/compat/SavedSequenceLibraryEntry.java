@@ -197,7 +197,7 @@ final class SavedSequenceLibraryEntry extends AbstractConfigListEntry<List<Saved
 		}
 
 		SavedSequence value() {
-			return new SavedSequence(nameBox.getValue(), saved.tracks(), saved.activeTrackIndex());
+			return new SavedSequence(nameBox.getValue(), saved.tracks(), saved.activeTrackIndex(), saved.delayScaleQuarters());
 		}
 
 		void extract(GuiGraphicsExtractor graphics, int x, int y, int width,
@@ -215,7 +215,8 @@ final class SavedSequenceLibraryEntry extends AbstractConfigListEntry<List<Saved
 			nameBox.setY(y);
 			nameBox.setWidth(Math.max(70, width - 164));
 			nameBox.extractRenderState(graphics, mouseX, mouseY, partialTick);
-			String summary = saved.tracks().size() + (saved.tracks().size() == 1 ? " track" : " tracks");
+			String summary = saved.tracks().size() + (saved.tracks().size() == 1 ? " track" : " tracks")
+				+ " · " + FastNoteblocksConfig.delayScaleLabel(saved.delayScaleQuarters());
 			graphics.text(Minecraft.getInstance().font, summary, x + width - 88, y + 6, 0xFF999999, false);
 			if (!expanded) {
 				return;

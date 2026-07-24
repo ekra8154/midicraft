@@ -15,8 +15,11 @@ import net.minecraft.network.chat.Component;
 
 public final class FastNoteblocksConfig {
 	public static final int MAX_TRACKS = 4;
+	public static final int DEFAULT_SEQUENCE_DELAY_SCALE_QUARTERS = 4;
+	public static final int MIN_SEQUENCE_DELAY_SCALE_QUARTERS = 1;
+	public static final int MAX_SEQUENCE_DELAY_SCALE_QUARTERS = 32;
 
-	public record SequenceTrack(String name, String sequence, String instrument, int position) {
+	public record SequenceTrack(String name, String sequence, String instrument, int position, boolean buildEnabled) {
 		public SequenceTrack {
 			name = name == null || name.isBlank() ? "Track" : name.trim();
 			sequence = sequence == null ? "" : sequence;
@@ -24,39 +27,54 @@ public final class FastNoteblocksConfig {
 			position = Math.max(0, position);
 		}
 
+		public SequenceTrack(String name, String sequence, String instrument, int position) {
+			this(name, sequence, instrument, position, true);
+		}
+
 		public SequenceTrack withName(String value) {
-			return new SequenceTrack(value, sequence, instrument, position);
+			return new SequenceTrack(value, sequence, instrument, position, buildEnabled);
 		}
 
 		public SequenceTrack withSequence(String value) {
-			return new SequenceTrack(name, value, instrument, position);
+			return new SequenceTrack(name, value, instrument, position, buildEnabled);
 		}
 
 		public SequenceTrack withInstrument(String value) {
-			return new SequenceTrack(name, sequence, value, position);
+			return new SequenceTrack(name, sequence, value, position, buildEnabled);
 		}
 
 		public SequenceTrack withPosition(int value) {
-			return new SequenceTrack(name, sequence, instrument, value);
+			return new SequenceTrack(name, sequence, instrument, value, buildEnabled);
+		}
+
+		public SequenceTrack withBuildEnabled(boolean value) {
+			return new SequenceTrack(name, sequence, instrument, position, value);
 		}
 	}
 
-	public record SavedSequence(String name, List<SequenceTrack> tracks, int activeTrackIndex, String sequence) {
+	public record SavedSequence(String name, List<SequenceTrack> tracks, int activeTrackIndex, int delayScaleQuarters, String sequence) {
 		public SavedSequence {
 			name = name == null || name.isBlank() ? "Untitled sequence" : name.trim();
 			tracks = tracks == null || tracks.isEmpty()
 				? List.of(new SequenceTrack("Track 1", sequence, "HARP", 0))
 				: normalizeTracks(tracks);
 			activeTrackIndex = clampTrackIndex(activeTrackIndex, tracks.size());
+			delayScaleQuarters = delayScaleQuarters < MIN_SEQUENCE_DELAY_SCALE_QUARTERS
+				? DEFAULT_SEQUENCE_DELAY_SCALE_QUARTERS
+				: clampSequenceDelayScale(delayScaleQuarters);
 			sequence = null;
 		}
 
 		public SavedSequence(String name, String sequence) {
-			this(name, null, 0, sequence);
+			this(name, null, 0, DEFAULT_SEQUENCE_DELAY_SCALE_QUARTERS, sequence);
 		}
 
 		public SavedSequence(String name, List<SequenceTrack> tracks, int activeTrackIndex) {
-			this(name, tracks, activeTrackIndex, null);
+			this(name, tracks, activeTrackIndex, DEFAULT_SEQUENCE_DELAY_SCALE_QUARTERS, null);
+		}
+
+		public SavedSequence(String name, List<SequenceTrack> tracks, int activeTrackIndex, int delayScaleQuarters) {
+			this(name, tracks, activeTrackIndex, delayScaleQuarters, null);
 		}
 	}
 
@@ -110,6 +128,25 @@ public final class FastNoteblocksConfig {
 		}
 	}
 
+	public enum MidiQuantizeGrid {
+		AUTO,
+		QUARTER,
+		EIGHTH,
+		SIXTEENTH
+	}
+
+	public enum MidiRangeFit {
+		OCTAVE_SHIFT,
+		OCTAVE_WRAP,
+		CLAMP,
+		REJECT_OUT_OF_RANGE
+	}
+
+	public enum MidiTempoFit {
+		PRESERVE_ORIGINAL,
+		SNAP_TO_REPEATERS
+	}
+
 	public static final int DEFAULT_VIEW_DISTANCE = 10;
 	public static final int MIN_VIEW_DISTANCE = 1;
 	public static final int MAX_VIEW_DISTANCE = 32;
@@ -119,6 +156,9 @@ public final class FastNoteblocksConfig {
 	public static final int DEFAULT_RADIAL_FOCUS_DELAY_TICKS = 5;
 	public static final int MIN_RADIAL_FOCUS_DELAY_TICKS = 0;
 	public static final int MAX_RADIAL_FOCUS_DELAY_TICKS = 20;
+	public static final int DEFAULT_MIDI_MAX_IMPORTED_TRACKS = 4;
+	public static final int MIN_MIDI_MAX_IMPORTED_TRACKS = 1;
+	public static final int MAX_MIDI_MAX_IMPORTED_TRACKS = MAX_TRACKS;
 	private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 	private static final Path CONFIG_PATH = FabricLoader.getInstance().getConfigDir().resolve("fast-noteblocks.json");
 	private static FastNoteblocksConfig instance = defaults();
@@ -141,10 +181,18 @@ public final class FastNoteblocksConfig {
 	private String placementSequence;
 	private int placementSequencePosition;
 	private String activeSequenceName;
+	private int activeSequenceDelayScaleQuarters;
 	private String previewInstrument;
 	private List<SequenceTrack> tracks;
+	private boolean buildTrackFlagsInitialized;
 	private int activeTrackIndex;
 	private List<SavedSequence> savedSequences;
+	private MidiQuantizeGrid midiQuantizeGrid;
+	private MidiRangeFit midiRangeFit;
+	private boolean midiIgnorePercussion;
+	private int midiMaxImportedTracks;
+	private String midiDefaultInstrument;
+	private MidiTempoFit midiTempoFit;
 
 	private FastNoteblocksConfig() {
 	}
@@ -176,7 +224,7 @@ public final class FastNoteblocksConfig {
 					stored.radialFocusDelayTicks == null ? DEFAULT_RADIAL_FOCUS_DELAY_TICKS : stored.radialFocusDelayTicks
 				);
 				instance.repeaterControlStyle = stored.repeaterControlStyle == null
-					? RepeaterControlStyle.RADIAL_SELECT
+					? RepeaterControlStyle.SCROLL
 					: stored.repeaterControlStyle;
 				instance.invertScrolling = Boolean.TRUE.equals(stored.invertScrolling);
 				instance.viewDistance = clampViewDistance(stored.viewDistance == null ? DEFAULT_VIEW_DISTANCE : stored.viewDistance);
@@ -189,7 +237,7 @@ public final class FastNoteblocksConfig {
 				instance.sequencingEditProtection = stored.sequencingEditProtection == null
 					? SequencingEditProtection.RADIALS_AND_INTERACTIONS
 					: stored.sequencingEditProtection;
-				instance.autoSelectSequenceBlock = Boolean.TRUE.equals(stored.autoSelectSequenceBlock);
+				instance.autoSelectSequenceBlock = stored.autoSelectSequenceBlock == null || stored.autoSelectSequenceBlock;
 				instance.placementSequence = stored.placementSequence == null ? "" : stored.placementSequence;
 				instance.placementSequencePosition = Math.max(0,
 					stored.placementSequencePosition == null ? 0 : stored.placementSequencePosition
@@ -197,17 +245,45 @@ public final class FastNoteblocksConfig {
 				instance.activeSequenceName = stored.activeSequenceName == null || stored.activeSequenceName.isBlank()
 					? "Untitled sequence"
 					: stored.activeSequenceName;
+				instance.activeSequenceDelayScaleQuarters = clampSequenceDelayScale(
+					stored.activeSequenceDelayScaleQuarters == null
+						? legacyTimescaleToQuarters(stored.activeSequenceTimescale)
+						: stored.activeSequenceDelayScaleQuarters
+				);
 				instance.previewInstrument = stored.previewInstrument == null ? "HARP" : stored.previewInstrument;
+				boolean buildTrackFlagsInitialized = Boolean.TRUE.equals(stored.buildTrackFlagsInitialized);
 				instance.tracks = stored.tracks == null || stored.tracks.isEmpty()
 					? List.of(new SequenceTrack("Track 1", instance.placementSequence,
 						instance.previewInstrument, instance.placementSequencePosition))
 					: normalizeTracks(stored.tracks);
+				if (!buildTrackFlagsInitialized) {
+					instance.tracks = enableAllBuildTracks(instance.tracks);
+				}
+				instance.buildTrackFlagsInitialized = true;
 				instance.activeTrackIndex = clampTrackIndex(
 					stored.activeTrackIndex == null ? 0 : stored.activeTrackIndex, instance.tracks.size()
 				);
 				instance.savedSequences = stored.savedSequences == null
 					? new ArrayList<>()
 					: new ArrayList<>(stored.savedSequences);
+				if (!buildTrackFlagsInitialized) {
+					instance.savedSequences = instance.savedSequences.stream()
+						.map(saved -> new SavedSequence(saved.name(), enableAllBuildTracks(saved.tracks()),
+							saved.activeTrackIndex(), saved.delayScaleQuarters()))
+						.collect(java.util.stream.Collectors.toCollection(ArrayList::new));
+				}
+				instance.midiQuantizeGrid = stored.midiQuantizeGrid == null ? MidiQuantizeGrid.AUTO : stored.midiQuantizeGrid;
+				instance.midiRangeFit = stored.midiRangeFit == null ? MidiRangeFit.OCTAVE_SHIFT : stored.midiRangeFit;
+				instance.midiIgnorePercussion = stored.midiIgnorePercussion == null || stored.midiIgnorePercussion;
+				instance.midiMaxImportedTracks = clampMidiMaxImportedTracks(
+					stored.midiMaxImportedTracks == null
+						? DEFAULT_MIDI_MAX_IMPORTED_TRACKS
+						: stored.midiMaxImportedTracks
+				);
+				instance.midiDefaultInstrument = stored.midiDefaultInstrument == null || stored.midiDefaultInstrument.isBlank()
+					? "HARP"
+					: stored.midiDefaultInstrument;
+				instance.midiTempoFit = stored.midiTempoFit == null ? MidiTempoFit.SNAP_TO_REPEATERS : stored.midiTempoFit;
 			}
 		} catch (Exception ignored) {
 			instance = defaults();
@@ -225,7 +301,11 @@ public final class FastNoteblocksConfig {
 	}
 
 	public static List<NoteSequence.Step> parsePlacementSequence(String value) {
-		return NoteSequence.parse(value);
+		return NoteSequence.parse(value, get().activeSequenceDelayScaleQuarters());
+	}
+
+	public static List<NoteSequence.Step> parsePlacementSequence(String value, int delayScaleQuarters) {
+		return NoteSequence.parse(value, delayScaleQuarters);
 	}
 
 	public static Optional<Component> validatePlacementSequence(String value) {
@@ -301,7 +381,7 @@ public final class FastNoteblocksConfig {
 
 	public void setRepeaterControlStyle(RepeaterControlStyle repeaterControlStyle) {
 		this.repeaterControlStyle = repeaterControlStyle == null
-			? RepeaterControlStyle.RADIAL_SELECT
+			? RepeaterControlStyle.SCROLL
 			: repeaterControlStyle;
 	}
 
@@ -399,6 +479,14 @@ public final class FastNoteblocksConfig {
 			: activeSequenceName.trim();
 	}
 
+	public int activeSequenceDelayScaleQuarters() {
+		return activeSequenceDelayScaleQuarters;
+	}
+
+	public void setActiveSequenceDelayScaleQuarters(int activeSequenceDelayScaleQuarters) {
+		this.activeSequenceDelayScaleQuarters = clampSequenceDelayScale(activeSequenceDelayScaleQuarters);
+	}
+
 	public String previewInstrument() {
 		return activeTrack().instrument();
 	}
@@ -439,6 +527,56 @@ public final class FastNoteblocksConfig {
 		this.savedSequences = savedSequences == null ? new ArrayList<>() : new ArrayList<>(savedSequences);
 	}
 
+	public MidiQuantizeGrid midiQuantizeGrid() {
+		return midiQuantizeGrid;
+	}
+
+	public void setMidiQuantizeGrid(MidiQuantizeGrid midiQuantizeGrid) {
+		this.midiQuantizeGrid = midiQuantizeGrid == null ? MidiQuantizeGrid.AUTO : midiQuantizeGrid;
+	}
+
+	public MidiRangeFit midiRangeFit() {
+		return midiRangeFit;
+	}
+
+	public void setMidiRangeFit(MidiRangeFit midiRangeFit) {
+		this.midiRangeFit = midiRangeFit == null ? MidiRangeFit.OCTAVE_SHIFT : midiRangeFit;
+	}
+
+	public boolean midiIgnorePercussion() {
+		return midiIgnorePercussion;
+	}
+
+	public void setMidiIgnorePercussion(boolean midiIgnorePercussion) {
+		this.midiIgnorePercussion = midiIgnorePercussion;
+	}
+
+	public int midiMaxImportedTracks() {
+		return midiMaxImportedTracks;
+	}
+
+	public void setMidiMaxImportedTracks(int midiMaxImportedTracks) {
+		this.midiMaxImportedTracks = clampMidiMaxImportedTracks(midiMaxImportedTracks);
+	}
+
+	public String midiDefaultInstrument() {
+		return midiDefaultInstrument;
+	}
+
+	public void setMidiDefaultInstrument(String midiDefaultInstrument) {
+		this.midiDefaultInstrument = midiDefaultInstrument == null || midiDefaultInstrument.isBlank()
+			? "HARP"
+			: midiDefaultInstrument.trim();
+	}
+
+	public MidiTempoFit midiTempoFit() {
+		return midiTempoFit;
+	}
+
+	public void setMidiTempoFit(MidiTempoFit midiTempoFit) {
+		this.midiTempoFit = midiTempoFit == null ? MidiTempoFit.SNAP_TO_REPEATERS : midiTempoFit;
+	}
+
 	private static FastNoteblocksConfig defaults() {
 		FastNoteblocksConfig config = new FastNoteblocksConfig();
 		config.modEnabled = true;
@@ -447,7 +585,7 @@ public final class FastNoteblocksConfig {
 		config.nearbyPreviewsEnabled = true;
 		config.interactiveControlsEnabled = true;
 		config.radialFocusDelayTicks = DEFAULT_RADIAL_FOCUS_DELAY_TICKS;
-		config.repeaterControlStyle = RepeaterControlStyle.RADIAL_SELECT;
+		config.repeaterControlStyle = RepeaterControlStyle.SCROLL;
 		config.invertScrolling = false;
 		config.viewDistance = DEFAULT_VIEW_DISTANCE;
 		config.interactionDelayTicks = DEFAULT_INTERACTION_DELAY_TICKS;
@@ -455,14 +593,22 @@ public final class FastNoteblocksConfig {
 		config.requireLineOfSight = false;
 		config.placementSequenceEnabled = false;
 		config.sequencingEditProtection = SequencingEditProtection.RADIALS_AND_INTERACTIONS;
-		config.autoSelectSequenceBlock = false;
+		config.autoSelectSequenceBlock = true;
 		config.placementSequence = "";
 		config.placementSequencePosition = 0;
 		config.activeSequenceName = "Untitled sequence";
+		config.activeSequenceDelayScaleQuarters = DEFAULT_SEQUENCE_DELAY_SCALE_QUARTERS;
 		config.previewInstrument = "HARP";
 		config.tracks = List.of(new SequenceTrack("Track 1", "", "HARP", 0));
+		config.buildTrackFlagsInitialized = true;
 		config.activeTrackIndex = 0;
 		config.savedSequences = new ArrayList<>();
+		config.midiQuantizeGrid = MidiQuantizeGrid.AUTO;
+		config.midiRangeFit = MidiRangeFit.OCTAVE_SHIFT;
+		config.midiIgnorePercussion = true;
+		config.midiMaxImportedTracks = DEFAULT_MIDI_MAX_IMPORTED_TRACKS;
+		config.midiDefaultInstrument = "HARP";
+		config.midiTempoFit = MidiTempoFit.SNAP_TO_REPEATERS;
 		return config;
 	}
 
@@ -487,12 +633,29 @@ public final class FastNoteblocksConfig {
 		return Math.max(MIN_RADIAL_FOCUS_DELAY_TICKS, Math.min(MAX_RADIAL_FOCUS_DELAY_TICKS, ticks));
 	}
 
+	public static int clampSequenceDelayScale(int delayScaleQuarters) {
+		return Math.max(MIN_SEQUENCE_DELAY_SCALE_QUARTERS, Math.min(MAX_SEQUENCE_DELAY_SCALE_QUARTERS, delayScaleQuarters));
+	}
+
+	public static String delayScaleLabel(int delayScaleQuarters) {
+		return String.format(java.util.Locale.ROOT, "%.2fx", clampSequenceDelayScale(delayScaleQuarters) / 4.0F);
+	}
+
+	private static int clampMidiMaxImportedTracks(int tracks) {
+		return Math.max(MIN_MIDI_MAX_IMPORTED_TRACKS, Math.min(MAX_MIDI_MAX_IMPORTED_TRACKS, tracks));
+	}
+
+	private static int legacyTimescaleToQuarters(Integer timescale) {
+		return timescale == null ? DEFAULT_SEQUENCE_DELAY_SCALE_QUARTERS : timescale * 4;
+	}
+
 	private static List<SequenceTrack> normalizeTracks(List<SequenceTrack> tracks) {
 		List<SequenceTrack> normalized = new ArrayList<>();
 		if (tracks != null) {
 			for (SequenceTrack track : tracks) {
 				if (track != null && normalized.size() < MAX_TRACKS) {
-					normalized.add(new SequenceTrack(track.name(), track.sequence(), track.instrument(), track.position()));
+					normalized.add(new SequenceTrack(track.name(), track.sequence(), track.instrument(), track.position(),
+						track.buildEnabled()));
 				}
 			}
 		}
@@ -500,6 +663,14 @@ public final class FastNoteblocksConfig {
 			normalized.add(new SequenceTrack("Track 1", "", "HARP", 0));
 		}
 		return List.copyOf(normalized);
+	}
+
+	private static List<SequenceTrack> enableAllBuildTracks(List<SequenceTrack> tracks) {
+		List<SequenceTrack> enabled = new ArrayList<>();
+		for (SequenceTrack track : normalizeTracks(tracks)) {
+			enabled.add(track.withBuildEnabled(true));
+		}
+		return List.copyOf(enabled);
 	}
 
 	private static int clampTrackIndex(int index, int size) {
@@ -542,10 +713,19 @@ public final class FastNoteblocksConfig {
 		private String placementSequence;
 		private Integer placementSequencePosition;
 		private String activeSequenceName;
+		private Integer activeSequenceDelayScaleQuarters;
+		private Integer activeSequenceTimescale;
 		private String previewInstrument;
 		private List<SequenceTrack> tracks;
+		private Boolean buildTrackFlagsInitialized;
 		private Integer activeTrackIndex;
 		private List<SavedSequence> savedSequences;
+		private MidiQuantizeGrid midiQuantizeGrid;
+		private MidiRangeFit midiRangeFit;
+		private Boolean midiIgnorePercussion;
+		private Integer midiMaxImportedTracks;
+		private String midiDefaultInstrument;
+		private MidiTempoFit midiTempoFit;
 
 		private StoredConfig() {
 		}
@@ -569,10 +749,18 @@ public final class FastNoteblocksConfig {
 			this.placementSequence = config.placementSequence;
 			this.placementSequencePosition = config.placementSequencePosition;
 			this.activeSequenceName = config.activeSequenceName;
+			this.activeSequenceDelayScaleQuarters = config.activeSequenceDelayScaleQuarters;
 			this.previewInstrument = config.previewInstrument;
 			this.tracks = config.tracks;
+			this.buildTrackFlagsInitialized = config.buildTrackFlagsInitialized;
 			this.activeTrackIndex = config.activeTrackIndex;
 			this.savedSequences = config.savedSequences;
+			this.midiQuantizeGrid = config.midiQuantizeGrid;
+			this.midiRangeFit = config.midiRangeFit;
+			this.midiIgnorePercussion = config.midiIgnorePercussion;
+			this.midiMaxImportedTracks = config.midiMaxImportedTracks;
+			this.midiDefaultInstrument = config.midiDefaultInstrument;
+			this.midiTempoFit = config.midiTempoFit;
 		}
 	}
 }

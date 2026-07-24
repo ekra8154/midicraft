@@ -6,6 +6,7 @@ import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.blaze3d.vertex.PoseStack;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.List;
@@ -91,6 +92,7 @@ public final class NoteBlockOverlay {
 	private boolean lastPlacementSequenceEnabled;
 	private boolean lastAutoSelectSequenceBlock;
 	private int lastActiveTrackIndex;
+	private int lastSequenceDelayScaleQuarters;
 	private String lastPlacementSequenceText = "";
 	private boolean performingAutomatedClick;
 	private int sequenceHudTicks;
@@ -111,8 +113,9 @@ public final class NoteBlockOverlay {
 		lastPlacementSequenceEnabled = config.placementSequenceEnabled();
 		lastAutoSelectSequenceBlock = config.autoSelectSequenceBlock();
 		lastActiveTrackIndex = config.activeTrackIndex();
-		lastPlacementSequenceText = config.placementSequence();
-		List<NoteSequence.Step> sequence = configuredSequence();
+		lastSequenceDelayScaleQuarters = config.activeSequenceDelayScaleQuarters();
+		lastPlacementSequenceText = buildSequenceSignature(config);
+		List<BuildStep> sequence = configuredSequence();
 		placementSequenceIndex = sequence.isEmpty()
 			? 0
 			: Math.min(config.placementSequencePosition(), sequence.size() - 1);
@@ -254,15 +257,18 @@ public final class NoteBlockOverlay {
 		if (config.autoSelectSequenceBlock() && !lastAutoSelectSequenceBlock) {
 			selectCurrentSequenceItem(minecraft);
 		}
+		String sequenceSignature = buildSequenceSignature(config);
 		if (config.activeTrackIndex() != lastActiveTrackIndex) {
 			loadActiveTrack(minecraft);
-		} else if (!config.placementSequence().equals(lastPlacementSequenceText)) {
+		} else if (!sequenceSignature.equals(lastPlacementSequenceText)
+			|| config.activeSequenceDelayScaleQuarters() != lastSequenceDelayScaleQuarters) {
 			resetPlacementSequence();
 		}
 		lastPlacementSequenceEnabled = config.placementSequenceEnabled();
 		lastAutoSelectSequenceBlock = config.autoSelectSequenceBlock();
 		lastActiveTrackIndex = config.activeTrackIndex();
-		lastPlacementSequenceText = config.placementSequence();
+		lastSequenceDelayScaleQuarters = config.activeSequenceDelayScaleQuarters();
+		lastPlacementSequenceText = sequenceSignature;
 
 		if (minecraft.level != lastLevel) {
 			lastLevel = minecraft.level;
@@ -375,7 +381,7 @@ public final class NoteBlockOverlay {
 	}
 
 	private void movePlacementSequence(int amount) {
-		List<NoteSequence.Step> sequence = configuredSequence();
+		List<BuildStep> sequence = configuredSequence();
 		cancelPlacementSequenceWork();
 		if (!sequence.isEmpty()) {
 			int previousIndex = placementSequenceIndex;
@@ -415,12 +421,15 @@ public final class NoteBlockOverlay {
 			|| minecraft.gui.screen() != null) {
 			return;
 		}
-		List<NoteSequence.Step> sequence = configuredSequence();
+		List<BuildStep> sequence = configuredSequence();
 		int centerX = graphics.guiWidth() / 2;
 		int y = graphics.guiHeight() / 2 + 28;
-		FastNoteblocksConfig.SequenceTrack activeTrack = FastNoteblocksConfig.get().activeTrack();
-		String trackLabel = activeTrack.name() + " · " + instrumentLabel(activeTrack.instrument());
-		graphics.centeredText(minecraft.font, trackLabel, centerX, y - 14, 0xFFAAAAAA);
+		boolean showingAdvanceOnly = !keyHeld && sequenceHudMode == SequenceHudMode.ADVANCE
+			&& sequenceAdvanceFromIndex >= 0 && sequenceAdvanceToIndex >= 0;
+		if (!showingAdvanceOnly) {
+			String trackLabel = buildTrackLabel(FastNoteblocksConfig.get());
+			graphics.centeredText(minecraft.font, trackLabel, centerX, y - 14, 0xFFAAAAAA);
+		}
 		if (sequenceHudTicks > 0 && sequenceHudAction != null && sequenceHudMode == SequenceHudMode.FULL) {
 			graphics.centeredText(minecraft.font, sequenceHudAction, centerX, y - 25, 0xFFCCCCCC);
 		}
@@ -431,8 +440,7 @@ public final class NoteBlockOverlay {
 			return;
 		}
 		List<SequenceHudItem> items = sequenceHudItems(sequence);
-		if (!keyHeld && sequenceHudMode == SequenceHudMode.ADVANCE
-			&& sequenceAdvanceFromIndex >= 0 && sequenceAdvanceToIndex >= 0) {
+		if (showingAdvanceOnly) {
 			renderSequenceAdvance(graphics, deltaTracker, centerX, y, sequence, items);
 			drawSequencePosition(graphics, centerX, y, sequence);
 			return;
@@ -484,9 +492,20 @@ public final class NoteBlockOverlay {
 		return result.toString();
 	}
 
-	private void drawSequencePosition(GuiGraphicsExtractor graphics, int centerX, int y, List<NoteSequence.Step> sequence) {
+	private static String buildTrackLabel(FastNoteblocksConfig config) {
+		List<FastNoteblocksConfig.SequenceTrack> tracks = config.tracks();
+		List<String> enabled = new ArrayList<>();
+		for (int index = 0; index < tracks.size(); index++) {
+			if (tracks.get(index).buildEnabled() && !tracks.get(index).sequence().isBlank()) {
+				enabled.add(Integer.toString(index + 1));
+			}
+		}
+		return enabled.isEmpty() ? "Build: no enabled tracks" : "Build tracks: " + String.join(", ", enabled);
+	}
+
+	private void drawSequencePosition(GuiGraphicsExtractor graphics, int centerX, int y, List<BuildStep> sequence) {
 		Minecraft minecraft = Minecraft.getInstance();
-		NoteSequence.Progress progress = NoteSequence.progress(sequence, placementSequenceIndex);
+		NoteSequence.Progress progress = buildProgress(sequence, placementSequenceIndex);
 		String position = progress.position() + "/" + progress.total();
 		int positionY = y + minecraft.font.lineHeight + 6;
 		graphics.centeredText(minecraft.font, position, centerX, positionY, 0xFF999999);
@@ -503,12 +522,17 @@ public final class NoteBlockOverlay {
 		graphics.pose().popMatrix();
 	}
 
+	private static NoteSequence.Progress buildProgress(List<BuildStep> sequence, int currentIndex) {
+		List<NoteSequence.Step> steps = sequence.stream().map(BuildStep::step).toList();
+		return NoteSequence.progress(steps, currentIndex);
+	}
+
 	private void renderSequenceAdvance(
 		GuiGraphicsExtractor graphics,
 		DeltaTracker deltaTracker,
 		int centerX,
 		int y,
-		List<NoteSequence.Step> sequence,
+		List<BuildStep> sequence,
 		List<SequenceHudItem> items
 	) {
 		Minecraft minecraft = Minecraft.getInstance();
@@ -532,7 +556,7 @@ public final class NoteBlockOverlay {
 		}
 		int chordStart = nextItemIndex;
 		int chordEnd = nextItemIndex;
-		if (nextItem.step().type() == NoteSequence.StepType.NOTE) {
+		if (nextItem.step().step().type() == NoteSequence.StepType.NOTE) {
 			while (chordStart > 0 && chordAdjacent(items.get(chordStart - 1), items.get(chordStart))) {
 				chordStart--;
 			}
@@ -638,16 +662,24 @@ public final class NoteBlockOverlay {
 		}
 	}
 
-	private static List<SequenceHudItem> sequenceHudItems(List<NoteSequence.Step> sequence) {
+	private static List<SequenceHudItem> sequenceHudItems(List<BuildStep> sequence) {
 		List<SequenceHudItem> items = new ArrayList<>();
 		for (int index = 0; index < sequence.size();) {
-			NoteSequence.Step step = sequence.get(index);
+			BuildStep buildStep = sequence.get(index);
+			NoteSequence.Step step = buildStep.step();
 			if (step.type() == NoteSequence.StepType.REPEATER && step.delayCount() > 1) {
-				int endIndex = Math.min(sequence.size() - 1, index + step.delayCount() - 1);
-				items.add(new SequenceHudItem(index, endIndex, step));
+				int endIndex = index;
+				while (endIndex + 1 < sequence.size()
+					&& sequence.get(endIndex + 1).trackNumber() == buildStep.trackNumber()
+					&& sequence.get(endIndex + 1).step().type() == NoteSequence.StepType.REPEATER
+					&& sequence.get(endIndex + 1).step().delayTotal() == step.delayTotal()
+					&& sequence.get(endIndex + 1).step().delayIndex() == sequence.get(endIndex).step().delayIndex() + 1) {
+					endIndex++;
+				}
+				items.add(new SequenceHudItem(index, endIndex, buildStep));
 				index = endIndex + 1;
 			} else {
-				items.add(new SequenceHudItem(index, index, step));
+				items.add(new SequenceHudItem(index, index, buildStep));
 				index++;
 			}
 		}
@@ -665,12 +697,13 @@ public final class NoteBlockOverlay {
 	}
 
 	private static SequenceHudToken sequenceHudToken(SequenceHudItem item, int activePhysicalIndex) {
-		NoteSequence.Step step = item.step();
+		BuildStep buildStep = item.step();
+		NoteSequence.Step step = buildStep.step();
 		if (step.type() == NoteSequence.StepType.NOTE) {
-			return new SequenceHudToken(NotePitch.name(step.value()) + step.value(), false, false);
+			return new SequenceHudToken(NotePitch.name(step.value()) + step.value(), false, false, buildStep.trackNumber());
 		}
-		if (step.delayCount() == 1) {
-			return new SequenceHudToken(step.value() + "d", true, false);
+		if (step.delayCount() == 1 || item.startIndex() == item.endIndex()) {
+			return new SequenceHudToken(step.value() + "d", true, false, 0);
 		}
 		StringBuilder text = new StringBuilder().append(step.delayTotal()).append("d ");
 		for (int dot = 0; dot < step.delayCount(); dot++) {
@@ -679,7 +712,7 @@ public final class NoteBlockOverlay {
 			}
 			text.append(activePhysicalIndex == item.startIndex() + dot ? '\u2022' : '\u00b7');
 		}
-		return new SequenceHudToken(text.toString(), true, true);
+		return new SequenceHudToken(text.toString(), true, true, 0);
 	}
 
 	private static int sequenceHudTokenGap(SequenceHudToken token) {
@@ -694,8 +727,9 @@ public final class NoteBlockOverlay {
 	}
 
 	private static boolean chordAdjacent(SequenceHudItem left, SequenceHudItem right) {
-		return left.step().type() == NoteSequence.StepType.NOTE
-			&& right.step().type() == NoteSequence.StepType.NOTE;
+		return left.step().step().type() == NoteSequence.StepType.NOTE
+			&& right.step().step().type() == NoteSequence.StepType.NOTE
+			&& left.step().time() == right.step().time();
 	}
 
 	private static void drawSequenceHudToken(
@@ -718,14 +752,72 @@ public final class NoteBlockOverlay {
 		}
 		int color = current ? 0xFFFFAA00 : token.repeater() ? 0xFF999999 : 0xFFFFFFFF;
 		graphics.text(minecraft.font, token.text(), x, y, color, true);
+		if (!token.repeater() && token.trackNumber() > 0) {
+			graphics.pose().pushMatrix();
+			graphics.pose().translate(x - 4, y - 6);
+			graphics.pose().scale(0.55F, 0.55F);
+			graphics.text(minecraft.font, Integer.toString(token.trackNumber()), 0, 0, 0xFF55FFFF, true);
+			graphics.pose().popMatrix();
+		}
 	}
 
-	private static List<NoteSequence.Step> configuredSequence() {
+	private static List<BuildStep> configuredSequence() {
 		try {
-			return FastNoteblocksConfig.parsePlacementSequence(FastNoteblocksConfig.get().placementSequence());
+			FastNoteblocksConfig config = FastNoteblocksConfig.get();
+			List<NoteEvent> events = new ArrayList<>();
+			List<FastNoteblocksConfig.SequenceTrack> tracks = config.tracks();
+			for (int trackIndex = 0; trackIndex < tracks.size(); trackIndex++) {
+				FastNoteblocksConfig.SequenceTrack track = tracks.get(trackIndex);
+				if (!track.buildEnabled()) {
+					continue;
+				}
+				List<NoteSequence.Step> steps = NoteSequence.parse(track.sequence(), config.activeSequenceDelayScaleQuarters());
+				int time = 0;
+				for (int localIndex = 0; localIndex < steps.size(); localIndex++) {
+					NoteSequence.Step step = steps.get(localIndex);
+					if (step.type() == NoteSequence.StepType.NOTE) {
+						events.add(new NoteEvent(time, trackIndex + 1, localIndex, step));
+					} else {
+						time += step.value();
+					}
+				}
+			}
+			events.sort(Comparator.comparingInt(NoteEvent::time)
+				.thenComparingInt(NoteEvent::trackNumber)
+				.thenComparingInt(NoteEvent::localIndex));
+			List<BuildStep> merged = new ArrayList<>();
+			int currentTime = 0;
+			for (NoteEvent event : events) {
+				if (event.time() > currentTime) {
+					addTimelineDelay(merged, currentTime, event.time() - currentTime);
+					currentTime = event.time();
+				}
+				merged.add(new BuildStep(event.time(), event.trackNumber(), event.step()));
+			}
+			return List.copyOf(merged);
 		} catch (IllegalArgumentException exception) {
 			return List.of();
 		}
+	}
+
+	private static void addTimelineDelay(List<BuildStep> merged, int time, int delay) {
+		int remaining = delay;
+		while (remaining > 0) {
+			int chunk = Math.min(NoteSequence.MAX_GROUPED_DELAY, remaining);
+			for (NoteSequence.Step step : NoteSequence.parse(chunk + "d", FastNoteblocksConfig.DEFAULT_SEQUENCE_DELAY_SCALE_QUARTERS)) {
+				merged.add(new BuildStep(time, 0, step));
+				time += step.value();
+			}
+			remaining -= chunk;
+		}
+	}
+
+	private static String buildSequenceSignature(FastNoteblocksConfig config) {
+		StringBuilder signature = new StringBuilder().append(config.activeSequenceDelayScaleQuarters());
+		for (FastNoteblocksConfig.SequenceTrack track : config.tracks()) {
+			signature.append('|').append(track.buildEnabled()).append(':').append(track.sequence());
+		}
+		return signature.toString();
 	}
 
 	private void rescan(Minecraft minecraft) {
@@ -917,7 +1009,7 @@ public final class NoteBlockOverlay {
 		BlockHitResult hitResult
 	) {
 		FastNoteblocksConfig config = FastNoteblocksConfig.get();
-		List<NoteSequence.Step> sequence = configuredSequence();
+		List<BuildStep> sequence = configuredSequence();
 		if (!level.isClientSide() || !config.modEnabled()) {
 			return InteractionResult.PASS;
 		}
@@ -937,7 +1029,7 @@ public final class NoteBlockOverlay {
 			|| !placementWatches.isEmpty()) {
 			return InteractionResult.PASS;
 		}
-		NoteSequence.Step expected = sequence.get(Math.floorMod(placementSequenceIndex, sequence.size()));
+		NoteSequence.Step expected = sequence.get(Math.floorMod(placementSequenceIndex, sequence.size())).step();
 		boolean matchingItem = expected.type() == NoteSequence.StepType.NOTE
 			? player.getItemInHand(hand).is(Items.NOTE_BLOCK)
 			: player.getItemInHand(hand).is(Items.REPEATER);
@@ -991,7 +1083,7 @@ public final class NoteBlockOverlay {
 	}
 
 	private void advancePlacementSequenceCursor() {
-		List<NoteSequence.Step> sequence = configuredSequence();
+		List<BuildStep> sequence = configuredSequence();
 		if (!sequence.isEmpty()) {
 			int previousIndex = Math.floorMod(placementSequenceIndex, sequence.size());
 			placementSequenceIndex = (previousIndex + 1) % sequence.size();
@@ -1003,14 +1095,14 @@ public final class NoteBlockOverlay {
 
 	private void selectCurrentSequenceItem(Minecraft minecraft) {
 		FastNoteblocksConfig config = FastNoteblocksConfig.get();
-		List<NoteSequence.Step> sequence = configuredSequence();
+		List<BuildStep> sequence = configuredSequence();
 		if (!config.placementSequenceEnabled()
 			|| !config.autoSelectSequenceBlock()
 			|| minecraft.player == null
 			|| sequence.isEmpty()) {
 			return;
 		}
-		NoteSequence.Step current = sequence.get(Math.floorMod(placementSequenceIndex, sequence.size()));
+		NoteSequence.Step current = sequence.get(Math.floorMod(placementSequenceIndex, sequence.size())).step();
 		int hotbarSlot = findSequenceItemSlot(minecraft.player, current);
 		if (hotbarSlot >= 0) {
 			minecraft.player.getInventory().setSelectedSlot(hotbarSlot);
@@ -1027,7 +1119,7 @@ public final class NoteBlockOverlay {
 
 	private void loadActiveTrack(Minecraft minecraft) {
 		cancelPlacementSequenceWork();
-		List<NoteSequence.Step> sequence = configuredSequence();
+		List<BuildStep> sequence = configuredSequence();
 		placementSequenceIndex = sequence.isEmpty()
 			? 0
 			: Math.min(FastNoteblocksConfig.get().placementSequencePosition(), sequence.size() - 1);
@@ -1496,7 +1588,7 @@ public final class NoteBlockOverlay {
 			&& config.sequencingEditProtection().blocksRadials();
 	}
 
-	private static boolean isSequencingActive(FastNoteblocksConfig config, List<NoteSequence.Step> sequence) {
+	private static boolean isSequencingActive(FastNoteblocksConfig config, List<BuildStep> sequence) {
 		return config.modEnabled() && config.placementSequenceEnabled() && !sequence.isEmpty();
 	}
 
@@ -1567,10 +1659,16 @@ public final class NoteBlockOverlay {
 	private record LabelOffset(double right, double up) {
 	}
 
-	private record SequenceHudToken(String text, boolean repeater, boolean grouped) {
+	private record BuildStep(int time, int trackNumber, NoteSequence.Step step) {
 	}
 
-	private record SequenceHudItem(int startIndex, int endIndex, NoteSequence.Step step) {
+	private record NoteEvent(int time, int trackNumber, int localIndex, NoteSequence.Step step) {
+	}
+
+	private record SequenceHudToken(String text, boolean repeater, boolean grouped, int trackNumber) {
+	}
+
+	private record SequenceHudItem(int startIndex, int endIndex, BuildStep step) {
 	}
 
 	private enum SequenceHudMode {

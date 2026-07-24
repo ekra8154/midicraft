@@ -1,12 +1,17 @@
 package com.fastnoteblocks.client.compat;
 
 import com.fastnoteblocks.client.FastNoteblocksConfig;
+import com.fastnoteblocks.client.FastNoteblocksConfig.MidiQuantizeGrid;
+import com.fastnoteblocks.client.FastNoteblocksConfig.MidiRangeFit;
+import com.fastnoteblocks.client.FastNoteblocksConfig.MidiTempoFit;
 import com.fastnoteblocks.client.FastNoteblocksConfig.OverlayMode;
 import com.fastnoteblocks.client.FastNoteblocksConfig.RepeaterControlStyle;
 import com.fastnoteblocks.client.FastNoteblocksConfig.SequencingEditProtection;
+import me.shedaniel.clothconfig2.api.AbstractConfigListEntry;
 import me.shedaniel.clothconfig2.api.ConfigBuilder;
 import me.shedaniel.clothconfig2.api.ConfigCategory;
 import me.shedaniel.clothconfig2.api.ConfigEntryBuilder;
+import me.shedaniel.clothconfig2.impl.builders.SubCategoryBuilder;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 
@@ -49,7 +54,11 @@ public final class FastNoteblocksConfigScreen {
 			.setTooltip(Component.translatable("tooltip.fast-noteblocks.interactive_controls"))
 			.setSaveConsumer(config::setInteractiveControlsEnabled)
 			.build());
-		general.addEntry(entries.startIntSlider(
+
+		SubCategoryBuilder controlTuning = entries.startSubCategory(
+				Component.translatable("category.fast-noteblocks.control_tuning"))
+			.setExpanded(false);
+		controlTuning.add(entries.startIntSlider(
 				Component.translatable("option.fast-noteblocks.radial_focus_delay"),
 				config.radialFocusDelayTicks(),
 				FastNoteblocksConfig.MIN_RADIAL_FOCUS_DELAY_TICKS,
@@ -58,11 +67,11 @@ public final class FastNoteblocksConfigScreen {
 			.setTooltip(Component.translatable("tooltip.fast-noteblocks.radial_focus_delay"))
 			.setSaveConsumer(config::setRadialFocusDelayTicks)
 			.build());
-		general.addEntry(entries.startEnumSelector(
+		controlTuning.add(entries.startEnumSelector(
 				Component.translatable("option.fast-noteblocks.repeater_control_style"),
 				RepeaterControlStyle.class,
 				config.repeaterControlStyle())
-			.setDefaultValue(RepeaterControlStyle.RADIAL_SELECT)
+			.setDefaultValue(RepeaterControlStyle.SCROLL)
 			.setEnumNameProvider(value -> Component.translatable(
 				"option.fast-noteblocks.repeater_control_style."
 					+ ((RepeaterControlStyle) value).name().toLowerCase()
@@ -70,13 +79,7 @@ public final class FastNoteblocksConfigScreen {
 			.setTooltip(Component.translatable("tooltip.fast-noteblocks.repeater_control_style"))
 			.setSaveConsumer(config::setRepeaterControlStyle)
 			.build());
-		general.addEntry(entries.startBooleanToggle(
-				Component.translatable("option.fast-noteblocks.invert_scroll"), config.invertScrolling())
-			.setDefaultValue(false)
-			.setTooltip(Component.translatable("tooltip.fast-noteblocks.invert_scroll"))
-			.setSaveConsumer(config::setInvertScrolling)
-			.build());
-		general.addEntry(entries.startIntSlider(
+		controlTuning.add(entries.startIntSlider(
 				Component.translatable("option.fast-noteblocks.view_distance"),
 				config.viewDistance(),
 				FastNoteblocksConfig.MIN_VIEW_DISTANCE,
@@ -85,7 +88,18 @@ public final class FastNoteblocksConfigScreen {
 			.setTooltip(Component.translatable("tooltip.fast-noteblocks.view_distance"))
 			.setSaveConsumer(config::setViewDistance)
 			.build());
-		general.addEntry(entries.startIntSlider(
+		controlTuning.add(entries.startBooleanToggle(
+				Component.translatable("option.fast-noteblocks.invert_scroll"), config.invertScrolling())
+			.setDefaultValue(false)
+			.setTooltip(Component.translatable("tooltip.fast-noteblocks.invert_scroll"))
+			.setSaveConsumer(config::setInvertScrolling)
+			.build());
+		general.addEntry((AbstractConfigListEntry<?>) controlTuning.build());
+
+		SubCategoryBuilder serverFriendliness = entries.startSubCategory(
+				Component.translatable("category.fast-noteblocks.server_friendliness"))
+			.setExpanded(false);
+		serverFriendliness.add(entries.startIntSlider(
 				Component.translatable("option.fast-noteblocks.interaction_delay"),
 				config.interactionDelayTicks(),
 				FastNoteblocksConfig.MIN_INTERACTION_DELAY_TICKS,
@@ -94,18 +108,19 @@ public final class FastNoteblocksConfigScreen {
 			.setTooltip(Component.translatable("tooltip.fast-noteblocks.interaction_delay"))
 			.setSaveConsumer(config::setInteractionDelayTicks)
 			.build());
-		general.addEntry(entries.startBooleanToggle(
+		serverFriendliness.add(entries.startBooleanToggle(
 				Component.translatable("option.fast-noteblocks.wait_for_ack"), config.waitForServerAcknowledgement())
 			.setDefaultValue(false)
 			.setTooltip(Component.translatable("tooltip.fast-noteblocks.wait_for_ack"))
 			.setSaveConsumer(config::setWaitForServerAcknowledgement)
 			.build());
-		general.addEntry(entries.startBooleanToggle(
+		serverFriendliness.add(entries.startBooleanToggle(
 				Component.translatable("option.fast-noteblocks.require_line_of_sight"), config.requireLineOfSight())
 			.setDefaultValue(false)
 			.setTooltip(Component.translatable("tooltip.fast-noteblocks.require_line_of_sight"))
 			.setSaveConsumer(config::setRequireLineOfSight)
 			.build());
+		general.addEntry((AbstractConfigListEntry<?>) serverFriendliness.build());
 
 		ConfigCategory placement = builder.getOrCreateCategory(Component.translatable("category.fast-noteblocks.placement"));
 		placement.addEntry(entries.startEnumSelector(
@@ -129,13 +144,71 @@ public final class FastNoteblocksConfigScreen {
 		placement.addEntry(entries.startBooleanToggle(
 				Component.translatable("option.fast-noteblocks.auto_select_sequence_block"),
 				config.autoSelectSequenceBlock())
-			.setDefaultValue(false)
+			.setDefaultValue(true)
 			.setTooltip(Component.translatable("tooltip.fast-noteblocks.auto_select_sequence_block"))
 			.setSaveConsumer(config::setAutoSelectSequenceBlock)
 			.build());
 		ActiveSequenceEntry activeSequence = new ActiveSequenceEntry(config);
 		placement.addEntry(activeSequence);
 		placement.addEntry(new SavedSequenceLibraryEntry(config, activeSequence));
+
+		ConfigCategory midi = builder.getOrCreateCategory(Component.translatable("category.fast-noteblocks.midi"));
+		midi.addEntry(entries.startEnumSelector(
+				Component.translatable("option.fast-noteblocks.midi_quantize_grid"),
+				MidiQuantizeGrid.class,
+				config.midiQuantizeGrid())
+			.setDefaultValue(MidiQuantizeGrid.AUTO)
+			.setEnumNameProvider(value -> Component.translatable(
+				"option.fast-noteblocks.midi_quantize_grid." + ((MidiQuantizeGrid) value).name().toLowerCase()
+			))
+			.setTooltip(Component.translatable("tooltip.fast-noteblocks.midi_quantize_grid"))
+			.setSaveConsumer(config::setMidiQuantizeGrid)
+			.build());
+		midi.addEntry(entries.startEnumSelector(
+				Component.translatable("option.fast-noteblocks.midi_tempo_fit"),
+				MidiTempoFit.class,
+				config.midiTempoFit())
+			.setDefaultValue(MidiTempoFit.SNAP_TO_REPEATERS)
+			.setEnumNameProvider(value -> Component.translatable(
+				"option.fast-noteblocks.midi_tempo_fit." + ((MidiTempoFit) value).name().toLowerCase()
+			))
+			.setTooltip(Component.translatable("tooltip.fast-noteblocks.midi_tempo_fit"))
+			.setSaveConsumer(config::setMidiTempoFit)
+			.build());
+		midi.addEntry(entries.startEnumSelector(
+				Component.translatable("option.fast-noteblocks.midi_range_fit"),
+				MidiRangeFit.class,
+				config.midiRangeFit())
+			.setDefaultValue(MidiRangeFit.OCTAVE_SHIFT)
+			.setEnumNameProvider(value -> Component.translatable(
+				"option.fast-noteblocks.midi_range_fit." + ((MidiRangeFit) value).name().toLowerCase()
+			))
+			.setTooltip(Component.translatable("tooltip.fast-noteblocks.midi_range_fit"))
+			.setSaveConsumer(config::setMidiRangeFit)
+			.build());
+		midi.addEntry(entries.startBooleanToggle(
+				Component.translatable("option.fast-noteblocks.midi_ignore_percussion"),
+				config.midiIgnorePercussion())
+			.setDefaultValue(true)
+			.setTooltip(Component.translatable("tooltip.fast-noteblocks.midi_ignore_percussion"))
+			.setSaveConsumer(config::setMidiIgnorePercussion)
+			.build());
+		midi.addEntry(entries.startIntSlider(
+				Component.translatable("option.fast-noteblocks.midi_max_imported_tracks"),
+				config.midiMaxImportedTracks(),
+				FastNoteblocksConfig.MIN_MIDI_MAX_IMPORTED_TRACKS,
+				FastNoteblocksConfig.MAX_MIDI_MAX_IMPORTED_TRACKS)
+			.setDefaultValue(FastNoteblocksConfig.DEFAULT_MIDI_MAX_IMPORTED_TRACKS)
+			.setTooltip(Component.translatable("tooltip.fast-noteblocks.midi_max_imported_tracks"))
+			.setSaveConsumer(config::setMidiMaxImportedTracks)
+			.build());
+		midi.addEntry(entries.startStrField(
+				Component.translatable("option.fast-noteblocks.midi_default_instrument"),
+				config.midiDefaultInstrument())
+			.setDefaultValue("HARP")
+			.setTooltip(Component.translatable("tooltip.fast-noteblocks.midi_default_instrument"))
+			.setSaveConsumer(config::setMidiDefaultInstrument)
+			.build());
 
 		builder.setSavingRunnable(FastNoteblocksConfig::save);
 		return builder.build();

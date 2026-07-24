@@ -13,6 +13,7 @@ import me.shedaniel.clothconfig2.api.AbstractConfigListEntry;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.components.AbstractSliderButton;
 import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
@@ -26,6 +27,9 @@ import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
 import net.minecraft.util.Util;
 import net.minecraft.world.item.ItemStack;
+import org.lwjgl.PointerBuffer;
+import org.lwjgl.system.MemoryStack;
+import org.lwjgl.util.tinyfd.TinyFileDialogs;
 
 final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 	private static final int EDITOR_HEIGHT = 86;
@@ -37,11 +41,14 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 
 	private final FastNoteblocksConfig config;
 	private final String initialName;
+	private final int initialDelayScaleQuarters;
 	private final List<SequenceTrack> initialTracks;
 	private final int initialActiveTrack;
 	private final EditBox nameBox;
+	private final DelayScaleSlider delayScaleSlider;
 	private final Button expandButton;
 	private final Button playButton;
+	private final Button importMidiButton;
 	private final Button addTrackButton;
 	private final List<TrackRow> tracks = new ArrayList<>();
 	private boolean expanded = true;
@@ -52,6 +59,7 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 		super(Component.literal("Active sequence:"), false);
 		this.config = config;
 		this.initialName = config.activeSequenceName();
+		this.initialDelayScaleQuarters = config.activeSequenceDelayScaleQuarters();
 		this.initialTracks = config.tracks();
 		this.initialActiveTrack = config.activeTrackIndex();
 		this.activeTrackIndex = initialActiveTrack;
@@ -59,6 +67,7 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 		nameBox.setMaxLength(80);
 		nameBox.setValue(initialName);
 		nameBox.setResponder(value -> syncConfig());
+		this.delayScaleSlider = new DelayScaleSlider(0, 0, 96, 20, initialDelayScaleQuarters, value -> syncConfig());
 		this.expandButton = Button.builder(expandLabel(), button -> {
 			expanded = !expanded;
 			button.setMessage(expandLabel());
@@ -68,6 +77,10 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 		this.playButton = Button.builder(playLabel(), button -> togglePlayback())
 			.bounds(0, 0, 52, 20)
 			.tooltip(Tooltip.create(Component.literal("Preview every track together")))
+			.build();
+		this.importMidiButton = Button.builder(Component.literal("Import MIDI"), button -> importMidi())
+			.bounds(0, 0, 78, 20)
+			.tooltip(Tooltip.create(Component.literal("Import a .mid or .midi file into the active composition")))
 			.build();
 		this.addTrackButton = Button.builder(Component.literal("+ Add track"), button -> addTrack())
 			.bounds(0, 0, 120, 20)
@@ -81,14 +94,70 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 	}
 
 	SavedSequence savedSequence() {
-		return new SavedSequence(sequenceName(), trackValues(), activeTrackIndex);
+		return new SavedSequence(sequenceName(), trackValues(), activeTrackIndex, delayScaleQuarters());
 	}
 
 	void setSequence(SavedSequence saved) {
 		stopPlayback();
 		nameBox.setValue(saved.name());
+		delayScaleSlider.setScale(saved.delayScaleQuarters());
 		setTracks(saved.tracks(), saved.activeTrackIndex());
 		syncConfig();
+	}
+
+	private void importMidi() {
+		if (hasSequenceContent()) {
+			confirmImportMidi();
+			return;
+		}
+		chooseAndImportMidi();
+	}
+
+	private boolean hasSequenceContent() {
+		return tracks.stream().anyMatch(track -> !track.sequence().isBlank());
+	}
+
+	private void confirmImportMidi() {
+		Minecraft minecraft = Minecraft.getInstance();
+		Screen returnScreen = minecraft.gui.screen();
+		minecraft.gui.setScreen(new ConfirmScreen(confirmed -> {
+			minecraft.gui.setScreen(returnScreen);
+			if (confirmed) {
+				chooseAndImportMidi();
+			}
+		}, Component.literal("Replace active composition?"),
+			Component.literal("Importing MIDI will overwrite the active composition. Saved sequences are unchanged."),
+			Component.literal("Import"), CommonComponents.GUI_CANCEL));
+	}
+
+	private void chooseAndImportMidi() {
+		String path;
+		try (MemoryStack stack = MemoryStack.stackPush()) {
+			PointerBuffer filters = stack.mallocPointer(2);
+			filters.put(stack.UTF8("*.mid"));
+			filters.put(stack.UTF8("*.midi"));
+			filters.flip();
+			path = TinyFileDialogs.tinyfd_openFileDialog("Import MIDI", "", filters, "MIDI files", false);
+		}
+		if (path == null || path.isBlank()) {
+			return;
+		}
+		try {
+			MidiImporter.Result result = MidiImporter.importFile(path, config);
+			setSequence(result.sequence());
+			syncAndSave();
+			Minecraft minecraft = Minecraft.getInstance();
+			if (minecraft.player != null) {
+				minecraft.gui.hud.setOverlayMessage(Component.literal(result.report()), true);
+			}
+		} catch (Exception exception) {
+			Minecraft minecraft = Minecraft.getInstance();
+			Screen returnScreen = minecraft.gui.screen();
+			minecraft.gui.setScreen(new ConfirmScreen(confirmed -> minecraft.gui.setScreen(returnScreen),
+				Component.literal("MIDI import failed"),
+				Component.literal(exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage()),
+				CommonComponents.GUI_BACK, CommonComponents.GUI_CANCEL));
+		}
 	}
 
 	private void setTracks(List<SequenceTrack> values, int selectedTrack) {
@@ -149,9 +218,15 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 		syncAndSave();
 	}
 
+	private void toggleBuildTrack(TrackRow row) {
+		row.buildEnabled = !row.buildEnabled;
+		updateTrackControls();
+		syncAndSave();
+	}
+
 	private void updateTrackControls() {
 		for (int i = 0; i < tracks.size(); i++) {
-			tracks.get(i).updateControls(i == activeTrackIndex, tracks.size() > 1);
+			tracks.get(i).updateControls(tracks.size() > 1);
 		}
 		addTrackButton.active = tracks.size() < FastNoteblocksConfig.MAX_TRACKS;
 	}
@@ -162,8 +237,13 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 
 	private void syncConfig() {
 		config.setActiveSequenceName(sequenceName());
+		config.setActiveSequenceDelayScaleQuarters(delayScaleQuarters());
 		config.setTracks(trackValues());
 		config.setActiveTrackIndex(activeTrackIndex);
+	}
+
+	private int delayScaleQuarters() {
+		return delayScaleSlider.scaleQuarters();
 	}
 
 	private void syncAndSave() {
@@ -255,9 +335,15 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 		playButton.setX(x + entryWidth - playButton.getWidth());
 		playButton.setY(y);
 		playButton.extractRenderState(graphics, mouseX, mouseY, partialTick);
+		importMidiButton.setX(playButton.getX() - importMidiButton.getWidth() - 4);
+		importMidiButton.setY(y);
+		importMidiButton.extractRenderState(graphics, mouseX, mouseY, partialTick);
+		delayScaleSlider.setX(importMidiButton.getX() - delayScaleSlider.getWidth() - 4);
+		delayScaleSlider.setY(y);
+		delayScaleSlider.extractRenderState(graphics, mouseX, mouseY, partialTick);
 		nameBox.setX(nameX);
 		nameBox.setY(y);
-		nameBox.setWidth(Math.max(60, playButton.getX() - nameX - 4));
+		nameBox.setWidth(Math.max(60, delayScaleSlider.getX() - nameX - 4));
 		nameBox.extractRenderState(graphics, mouseX, mouseY, partialTick);
 		if (!expanded) {
 			return;
@@ -299,7 +385,9 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 	}
 
 	private List<AbstractWidget> widgets() {
-		List<AbstractWidget> widgets = new ArrayList<>(List.of(expandButton, nameBox, playButton));
+		List<AbstractWidget> widgets = new ArrayList<>(List.of(
+			expandButton, nameBox, delayScaleSlider, importMidiButton, playButton
+		));
 		if (expanded) {
 			for (TrackRow track : tracks) {
 				widgets.addAll(track.widgets());
@@ -332,6 +420,7 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 	@Override
 	public boolean isEdited() {
 		return !sequenceName().equals(initialName)
+			|| delayScaleQuarters() != initialDelayScaleQuarters
 			|| !trackValues().equals(initialTracks)
 			|| activeTrackIndex != initialActiveTrack;
 	}
@@ -361,6 +450,7 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 		private String sequence;
 		private String instrument;
 		private int position;
+		private boolean buildEnabled;
 		private boolean expanded = true;
 		private boolean paletteOpen;
 		private int iconX;
@@ -377,14 +467,15 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 			this.sequence = track.sequence();
 			this.instrument = PreviewInstrument.byId(track.instrument()).id();
 			this.position = track.position();
+			this.buildEnabled = track.buildEnabled();
 			this.expanded = initiallyExpanded;
 			this.trackName = new EditBox(Minecraft.getInstance().font, 0, 0, 120, 20, Component.literal("Track name"));
 			trackName.setMaxLength(60);
 			trackName.setValue(track.name());
 			trackName.setResponder(value -> syncConfig());
-			this.buildButton = Button.builder(Component.literal("Build"), button -> selectTrack(this))
+			this.buildButton = Button.builder(Component.literal("Build"), button -> toggleBuildTrack(this))
 				.bounds(0, 0, 52, 20)
-				.tooltip(Tooltip.create(Component.literal("Use this track for placement and the in-game timeline")))
+				.tooltip(Tooltip.create(Component.literal("Include this track in the in-game build sequence")))
 				.build();
 			this.collapseButton = Button.builder(collapseLabel(), button -> {
 				expanded = !expanded;
@@ -398,9 +489,9 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 				.build();
 		}
 
-		void updateControls(boolean active, boolean canDelete) {
-			buildButton.setMessage(Component.literal(active ? "● Build" : "○ Build")
-				.withStyle(active ? ChatFormatting.GREEN : ChatFormatting.GRAY));
+		void updateControls(boolean canDelete) {
+			buildButton.setMessage(Component.literal(buildEnabled ? "Build on" : "Build off")
+				.withStyle(buildEnabled ? ChatFormatting.GREEN : ChatFormatting.GRAY));
 			deleteButton.active = canDelete;
 		}
 
@@ -420,7 +511,7 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 		}
 
 		SequenceTrack value() {
-			return new SequenceTrack(trackName.getValue(), sequence(), instrument, position);
+			return new SequenceTrack(trackName.getValue(), sequence(), instrument, position, buildEnabled);
 		}
 
 		private SequenceEditBox editor(int width) {
@@ -476,7 +567,7 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 
 		private void extractCounts(GuiGraphicsExtractor graphics, int x, int y) {
 			try {
-				NoteSequence.Progress progress = NoteSequence.progress(NoteSequence.parse(sequence()), position);
+				NoteSequence.Progress progress = NoteSequence.progress(NoteSequence.parse(sequence(), delayScaleQuarters()), position);
 				if (progress.total() == 0) {
 					return;
 				}
@@ -576,14 +667,14 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 		boolean startPlayback(long start) {
 			List<Step> steps;
 			try {
-				steps = NoteSequence.parse(sequence());
+				steps = NoteSequence.parse(sequence(), delayScaleQuarters());
 			} catch (IllegalArgumentException ignored) {
 				return false;
 			}
 			if (steps.isEmpty()) {
 				return false;
 			}
-			playback = new TrackPlayback(steps, tokenRanges(sequence()), 0, start, true);
+			playback = new TrackPlayback(steps, tokenRanges(sequence(), delayScaleQuarters()), 0, start, true);
 			return true;
 		}
 
@@ -629,12 +720,16 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 		}
 	}
 
-	private static List<TextRange> tokenRanges(String value) {
+	private static List<TextRange> tokenRanges(String value, int delayScaleQuarters) {
 		List<TextRange> ranges = new ArrayList<>();
 		for (NoteSequence.Token token : NoteSequence.tokens(value)) {
 			int repeat = 1;
 			if (token.text().endsWith("d") || token.text().endsWith("D")) {
-				repeat = (Integer.parseInt(token.text().substring(0, token.text().length() - 1).trim()) + 3) / 4;
+				int delay = Math.max(1, Math.round(
+					Integer.parseInt(token.text().substring(0, token.text().length() - 1).trim())
+						* delayScaleQuarters / 4.0F
+				));
+				repeat = (delay + 3) / 4;
 			}
 			for (int copy = 0; copy < repeat; copy++) {
 				ranges.add(new TextRange(token.from(), token.to()));
@@ -647,5 +742,46 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 	}
 
 	private record TrackPlayback(List<Step> steps, List<TextRange> ranges, int index, long nextAt, boolean playing) {
+	}
+
+	private static final class DelayScaleSlider extends AbstractSliderButton {
+		private final java.util.function.IntConsumer listener;
+		private int scaleQuarters;
+
+		DelayScaleSlider(int x, int y, int width, int height, int scaleQuarters, java.util.function.IntConsumer listener) {
+			super(x, y, width, height, Component.empty(), 0.0);
+			this.listener = listener;
+			setScale(scaleQuarters);
+		}
+
+		int scaleQuarters() {
+			return scaleQuarters;
+		}
+
+		void setScale(int scaleQuarters) {
+			this.scaleQuarters = FastNoteblocksConfig.clampSequenceDelayScale(scaleQuarters);
+			value = (this.scaleQuarters - FastNoteblocksConfig.MIN_SEQUENCE_DELAY_SCALE_QUARTERS)
+				/ (double)(FastNoteblocksConfig.MAX_SEQUENCE_DELAY_SCALE_QUARTERS
+					- FastNoteblocksConfig.MIN_SEQUENCE_DELAY_SCALE_QUARTERS);
+			updateMessage();
+		}
+
+		@Override
+		protected void updateMessage() {
+			setMessage(Component.literal("Scale " + FastNoteblocksConfig.delayScaleLabel(scaleQuarters)));
+		}
+
+		@Override
+		protected void applyValue() {
+			int range = FastNoteblocksConfig.MAX_SEQUENCE_DELAY_SCALE_QUARTERS
+				- FastNoteblocksConfig.MIN_SEQUENCE_DELAY_SCALE_QUARTERS;
+			int updated = FastNoteblocksConfig.MIN_SEQUENCE_DELAY_SCALE_QUARTERS
+				+ Math.round((float)(value * range));
+			updated = FastNoteblocksConfig.clampSequenceDelayScale(updated);
+			if (updated != scaleQuarters) {
+				scaleQuarters = updated;
+				listener.accept(scaleQuarters);
+			}
+		}
 	}
 }

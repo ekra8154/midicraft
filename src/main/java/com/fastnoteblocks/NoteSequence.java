@@ -42,10 +42,15 @@ public final class NoteSequence {
 	}
 
 	public static List<Step> parse(String value) {
+		return parse(value, 4);
+	}
+
+	public static List<Step> parse(String value, int delayScaleQuarters) {
 		if (value == null || value.isBlank()) {
 			return List.of();
 		}
 
+		int scaleQuarters = Math.max(1, delayScaleQuarters);
 		List<Step> steps = new ArrayList<>();
 		for (Token token : tokens(value)) {
 			String part = token.text();
@@ -61,11 +66,12 @@ public final class NoteSequence {
 				if (parsed < 1 || parsed > MAX_GROUPED_DELAY) {
 					throw new IllegalArgumentException("Repeater delays must be between 1d and 64d");
 				}
-				int repeaterCount = (parsed + 3) / 4;
-				int remaining = parsed;
+				int scaled = Math.max(1, Math.round(parsed * scaleQuarters / 4.0F));
+				int repeaterCount = (scaled + 3) / 4;
+				int remaining = scaled;
 				for (int index = 0; index < repeaterCount; index++) {
 					int delay = Math.min(4, remaining);
-					steps.add(Step.groupedRepeater(delay, parsed, index, repeaterCount));
+					steps.add(Step.groupedRepeater(delay, scaled, index, repeaterCount));
 					remaining -= delay;
 				}
 			} else {
