@@ -197,7 +197,8 @@ final class SavedSequenceLibraryEntry extends AbstractConfigListEntry<List<Saved
 		}
 
 		SavedSequence value() {
-			return new SavedSequence(nameBox.getValue(), saved.tracks(), saved.activeTrackIndex(), saved.delayScaleQuarters());
+			return new SavedSequence(nameBox.getValue(), saved.tracks(), saved.activeTrackIndex(),
+				saved.delayScaleQuarters(), saved.composerProject());
 		}
 
 		void extract(GuiGraphicsExtractor graphics, int x, int y, int width,

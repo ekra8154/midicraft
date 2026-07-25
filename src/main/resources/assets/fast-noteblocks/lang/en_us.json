@@ -1,6 +1,7 @@
 {
   "key.fast-noteblocks.toggle": "Toggle Fast Noteblocks Overlays",
   "key.fast-noteblocks.toggle_placement_sequence": "Placement Sequence Control",
+  "key.fast-noteblocks.open_composer": "Open Fast Noteblocks Composer",
   "category.fast-noteblocks": "Fast Noteblocks",
   "key.categories.fast-noteblocks.controls": "Fast Noteblocks",
   "message.fast-noteblocks.enabled": "Fast Noteblocks overlays enabled",

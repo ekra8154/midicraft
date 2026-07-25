@@ -7,10 +7,15 @@ import com.fastnoteblocks.client.FastNoteblocksConfig.MidiRangeFit;
 import com.fastnoteblocks.client.FastNoteblocksConfig.MidiTempoFit;
 import com.fastnoteblocks.client.FastNoteblocksConfig.SavedSequence;
 import com.fastnoteblocks.client.FastNoteblocksConfig.SequenceTrack;
+import com.fastnoteblocks.client.composer.ComposerProject;
+import com.fastnoteblocks.client.composer.ComposerProject.Layer;
+import com.fastnoteblocks.client.composer.ComposerProject.NoteEvent;
 import java.io.File;
 import java.nio.file.Path;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -82,6 +87,114 @@ final class MidiImporter {
 		return new Result(new SavedSequence(
 			name, tracks, 0, FastNoteblocksConfig.DEFAULT_SEQUENCE_DELAY_SCALE_QUARTERS
 		), report);
+	}
+
+	static ProjectResult importProject(String path, FastNoteblocksConfig config) throws Exception {
+		javax.sound.midi.Sequence midi = MidiSystem.getSequence(new File(path));
+		if (midi.getDivisionType() != javax.sound.midi.Sequence.PPQ) {
+			throw new IllegalArgumentException("Only PPQ MIDI files are supported for now.");
+		}
+		int resolution = Math.max(1, midi.getResolution());
+		int tempo = firstTempo(midi);
+		List<ExactPart> parts = collectExactParts(midi, config.midiIgnorePercussion(), resolution).stream()
+			.filter(part -> !part.notes().isEmpty())
+			.sorted(Comparator.comparingInt((ExactPart part) -> part.notes().size()).reversed())
+			.limit(config.midiMaxImportedTracks())
+			.toList();
+		if (parts.isEmpty()) {
+			throw new IllegalArgumentException("No playable MIDI notes were found.");
+		}
+
+		String defaultInstrument = PreviewInstrument.byId(config.midiDefaultInstrument()).id();
+		List<Layer> layers = new ArrayList<>();
+		long nextId = 1L;
+		int outsideRange = 0;
+		for (int index = 0; index < parts.size(); index++) {
+			ExactPart part = parts.get(index);
+			List<NoteEvent> notes = new ArrayList<>();
+			for (ExactNote note : part.notes()) {
+				NoteEvent event = new NoteEvent(nextId++, note.midiNote(), note.startTick(),
+					Math.max(1L, note.endTick() - note.startTick()), note.velocity());
+				if (!event.isBuildable()) {
+					outsideRange++;
+				}
+				notes.add(event);
+			}
+			layers.add(new Layer(trackName(index, new Part(part.name(), part.trackIndex(), part.channel(), List.of())),
+				defaultInstrument, false, true, true, notes));
+		}
+		ComposerProject project = new ComposerProject(
+			fileName(path), resolution, tempo, layers, 0, nextId
+		);
+		String report = "Imported " + layers.size() + (layers.size() == 1 ? " layer" : " layers")
+			+ " at " + bpmLabel(tempo);
+		if (outsideRange > 0) {
+			report += "; " + outsideRange + " notes kept outside Minecraft's range";
+		}
+		return new ProjectResult(project, report);
+	}
+
+	private static List<ExactPart> collectExactParts(
+		javax.sound.midi.Sequence midi,
+		boolean ignorePercussion,
+		int resolution
+	) {
+		Map<PartKey, MutableExactPart> parts = new HashMap<>();
+		Track[] tracks = midi.getTracks();
+		for (int trackIndex = 0; trackIndex < tracks.length; trackIndex++) {
+			int currentTrackIndex = trackIndex;
+			Track track = tracks[trackIndex];
+			String name = trackName(track);
+			for (int eventIndex = 0; eventIndex < track.size(); eventIndex++) {
+				MidiEvent event = track.get(eventIndex);
+				if (!(event.getMessage() instanceof ShortMessage message)) {
+					continue;
+				}
+				int channel = message.getChannel();
+				if (ignorePercussion && channel == 9) {
+					continue;
+				}
+				PartKey key = new PartKey(trackIndex, channel);
+				MutableExactPart part = parts.computeIfAbsent(key,
+					ignored -> new MutableExactPart(name, currentTrackIndex, channel));
+				int command = message.getCommand();
+				int midiNote = message.getData1();
+				boolean noteOn = command == ShortMessage.NOTE_ON && message.getData2() > 0;
+				boolean noteOff = command == ShortMessage.NOTE_OFF
+					|| command == ShortMessage.NOTE_ON && message.getData2() == 0;
+				if (noteOn) {
+					part.active().computeIfAbsent(midiNote, ignored -> new ArrayDeque<>())
+						.addLast(new PendingNote(event.getTick(), message.getData2()));
+				} else if (noteOff) {
+					Deque<PendingNote> pending = part.active().get(midiNote);
+					if (pending != null && !pending.isEmpty()) {
+						PendingNote start = pending.removeFirst();
+						part.notes().add(new ExactNote(start.tick(), Math.max(start.tick() + 1L, event.getTick()),
+							midiNote, start.velocity()));
+					}
+				}
+			}
+			long fallbackEnd = Math.max(track.ticks(), resolution / 4L);
+			for (MutableExactPart part : parts.values()) {
+				if (part.trackIndex() != trackIndex) {
+					continue;
+				}
+				for (Map.Entry<Integer, Deque<PendingNote>> active : part.active().entrySet()) {
+					while (!active.getValue().isEmpty()) {
+						PendingNote start = active.getValue().removeFirst();
+						part.notes().add(new ExactNote(start.tick(), Math.max(start.tick() + resolution / 4L, fallbackEnd),
+							active.getKey(), start.velocity()));
+					}
+				}
+			}
+		}
+		return parts.values().stream()
+			.map(part -> new ExactPart(part.name(), part.trackIndex(), part.channel(),
+				part.notes().stream()
+					.sorted(Comparator.comparingLong(ExactNote::startTick)
+						.thenComparingInt(ExactNote::midiNote))
+					.toList()))
+			.toList();
 	}
 
 	private static List<Part> collectParts(javax.sound.midi.Sequence midi, boolean ignorePercussion) {
@@ -309,6 +422,9 @@ final class MidiImporter {
 	record Result(SavedSequence sequence, String report) {
 	}
 
+	record ProjectResult(ComposerProject project, String report) {
+	}
+
 	private record PartKey(int trackIndex, int channel) {
 	}
 
@@ -328,5 +444,26 @@ final class MidiImporter {
 	}
 
 	private record FittedNote(int pitch, boolean clamped, boolean skipped) {
+	}
+
+	private record PendingNote(long tick, int velocity) {
+	}
+
+	private record ExactNote(long startTick, long endTick, int midiNote, int velocity) {
+	}
+
+	private record ExactPart(String name, int trackIndex, int channel, List<ExactNote> notes) {
+	}
+
+	private record MutableExactPart(
+		String name,
+		int trackIndex,
+		int channel,
+		List<ExactNote> notes,
+		Map<Integer, Deque<PendingNote>> active
+	) {
+		private MutableExactPart(String name, int trackIndex, int channel) {
+			this(name, trackIndex, channel, new ArrayList<>(), new HashMap<>());
+		}
 	}
 }

@@ -2,6 +2,7 @@ package com.fastnoteblocks.client;
 
 import com.fastnoteblocks.NotePitch;
 import com.fastnoteblocks.NoteSequence;
+import com.fastnoteblocks.client.compat.ComposerScreen;
 import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.blaze3d.vertex.PoseStack;
 import java.util.ArrayDeque;
@@ -76,6 +77,9 @@ public final class NoteBlockOverlay {
 	));
 	private final KeyMapping placementSequenceKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
 		"key.fast-noteblocks.toggle_placement_sequence", InputConstants.Type.KEYSYM, -1, CATEGORY
+	));
+	private final KeyMapping composerKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
+		"key.fast-noteblocks.open_composer", InputConstants.Type.KEYSYM, -1, CATEGORY
 	));
 
 	private int ticksUntilRescan;
@@ -244,6 +248,11 @@ public final class NoteBlockOverlay {
 				minecraft.gui.hud.setOverlayMessage(Component.translatable(
 					config.overlaysEnabled() ? "message.fast-noteblocks.enabled" : "message.fast-noteblocks.disabled"
 				), true);
+			}
+		}
+		while (composerKey.consumeClick()) {
+			if (minecraft.gui.screen() == null) {
+				minecraft.gui.setScreen(new ComposerScreen(null, config));
 			}
 		}
 

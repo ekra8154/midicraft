@@ -99,12 +99,12 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 			.bounds(0, 0, 52, 20)
 			.tooltip(Tooltip.create(Component.literal("Preview every track together")))
 			.build();
-		this.viewModeButton = Button.builder(viewModeLabel(), button -> {
-			timelineMode = !timelineMode;
-			timelineScroll = 0;
-			button.setMessage(viewModeLabel());
-		}).bounds(0, 0, 68, 20)
-			.tooltip(Tooltip.create(Component.literal("Switch between text editing and shared-time timeline view")))
+		this.viewModeButton = Button.builder(Component.literal("Composer"), button -> {
+			syncAndSave();
+			Minecraft minecraft = Minecraft.getInstance();
+			minecraft.gui.setScreen(new ComposerScreen(minecraft.gui.screen(), config, this::reloadFromComposer));
+		}).bounds(0, 0, 72, 20)
+			.tooltip(Tooltip.create(Component.literal("Open the full piano-roll composition editor")))
 			.build();
 		this.importMidiButton = Button.builder(Component.literal("Import MIDI"), button -> importMidi())
 			.bounds(0, 0, 78, 20)
@@ -121,20 +121,33 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 		setTracks(config.tracks(), config.activeTrackIndex());
 	}
 
+	private void reloadFromComposer() {
+		stopPlayback();
+		setTracks(config.tracks(), config.activeTrackIndex());
+	}
+
 	String sequenceName() {
 		return nameBox.getValue().isBlank() ? "Untitled sequence" : nameBox.getValue().trim();
 	}
 
 	SavedSequence savedSequence() {
-		return new SavedSequence(sequenceName(), trackValues(), activeTrackIndex, delayScaleQuarters());
+		return new SavedSequence(sequenceName(), trackValues(), activeTrackIndex, delayScaleQuarters(),
+			config.composerProject());
 	}
 
 	void setSequence(SavedSequence saved) {
 		stopPlayback();
 		nameBox.setValue(saved.name());
 		delayScaleSlider.setScale(saved.delayScaleQuarters());
-		setTracks(saved.tracks(), saved.activeTrackIndex());
+		List<SequenceTrack> savedTracks = saved.composerProject() == null
+			? saved.tracks()
+			: saved.composerProject().toSequenceTracks(saved.tracks(), saved.delayScaleQuarters());
+		setTracks(savedTracks, saved.activeTrackIndex());
 		syncConfig();
+		if (saved.composerProject() != null) {
+			config.setComposerProject(saved.composerProject());
+			FastNoteblocksConfig.save();
+		}
 	}
 
 	private void importMidi() {
@@ -559,7 +572,7 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 		playButton.extractRenderState(graphics, mouseX, mouseY, partialTick);
 		viewModeButton.setX(playButton.getX() - viewModeButton.getWidth() - 4);
 		viewModeButton.setY(y);
-		viewModeButton.setMessage(viewModeLabel());
+		viewModeButton.setMessage(Component.literal("Composer"));
 		viewModeButton.extractRenderState(graphics, mouseX, mouseY, partialTick);
 		pasteLineButton.setX(viewModeButton.getX() - pasteLineButton.getWidth() - 4);
 		pasteLineButton.setY(y);

@@ -3,6 +3,7 @@ package com.fastnoteblocks.client;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.fastnoteblocks.NoteSequence;
+import com.fastnoteblocks.client.composer.ComposerProject;
 import java.io.Reader;
 import java.io.Writer;
 import java.nio.file.Files;
@@ -52,7 +53,14 @@ public final class FastNoteblocksConfig {
 		}
 	}
 
-	public record SavedSequence(String name, List<SequenceTrack> tracks, int activeTrackIndex, int delayScaleQuarters, String sequence) {
+	public record SavedSequence(
+		String name,
+		List<SequenceTrack> tracks,
+		int activeTrackIndex,
+		int delayScaleQuarters,
+		String sequence,
+		ComposerProject composerProject
+	) {
 		public SavedSequence {
 			name = name == null || name.isBlank() ? "Untitled sequence" : name.trim();
 			tracks = tracks == null || tracks.isEmpty()
@@ -66,15 +74,25 @@ public final class FastNoteblocksConfig {
 		}
 
 		public SavedSequence(String name, String sequence) {
-			this(name, null, 0, DEFAULT_SEQUENCE_DELAY_SCALE_QUARTERS, sequence);
+			this(name, null, 0, DEFAULT_SEQUENCE_DELAY_SCALE_QUARTERS, sequence, null);
 		}
 
 		public SavedSequence(String name, List<SequenceTrack> tracks, int activeTrackIndex) {
-			this(name, tracks, activeTrackIndex, DEFAULT_SEQUENCE_DELAY_SCALE_QUARTERS, null);
+			this(name, tracks, activeTrackIndex, DEFAULT_SEQUENCE_DELAY_SCALE_QUARTERS, null, null);
 		}
 
 		public SavedSequence(String name, List<SequenceTrack> tracks, int activeTrackIndex, int delayScaleQuarters) {
-			this(name, tracks, activeTrackIndex, delayScaleQuarters, null);
+			this(name, tracks, activeTrackIndex, delayScaleQuarters, null, null);
+		}
+
+		public SavedSequence(
+			String name,
+			List<SequenceTrack> tracks,
+			int activeTrackIndex,
+			int delayScaleQuarters,
+			ComposerProject composerProject
+		) {
+			this(name, tracks, activeTrackIndex, delayScaleQuarters, null, composerProject);
 		}
 	}
 
@@ -184,6 +202,7 @@ public final class FastNoteblocksConfig {
 	private int activeSequenceDelayScaleQuarters;
 	private String previewInstrument;
 	private List<SequenceTrack> tracks;
+	private ComposerProject composerProject;
 	private boolean buildTrackFlagsInitialized;
 	private int activeTrackIndex;
 	private List<SavedSequence> savedSequences;
@@ -263,13 +282,17 @@ public final class FastNoteblocksConfig {
 				instance.activeTrackIndex = clampTrackIndex(
 					stored.activeTrackIndex == null ? 0 : stored.activeTrackIndex, instance.tracks.size()
 				);
+				instance.composerProject = stored.composerProject == null
+					? ComposerProject.fromSequenceTracks(instance.activeSequenceName, instance.tracks,
+						instance.activeTrackIndex, instance.activeSequenceDelayScaleQuarters)
+					: stored.composerProject;
 				instance.savedSequences = stored.savedSequences == null
 					? new ArrayList<>()
 					: new ArrayList<>(stored.savedSequences);
 				if (!buildTrackFlagsInitialized) {
 					instance.savedSequences = instance.savedSequences.stream()
 						.map(saved -> new SavedSequence(saved.name(), enableAllBuildTracks(saved.tracks()),
-							saved.activeTrackIndex(), saved.delayScaleQuarters()))
+							saved.activeTrackIndex(), saved.delayScaleQuarters(), saved.composerProject()))
 						.collect(java.util.stream.Collectors.toCollection(ArrayList::new));
 				}
 				instance.midiQuantizeGrid = stored.midiQuantizeGrid == null ? MidiQuantizeGrid.AUTO : stored.midiQuantizeGrid;
@@ -477,6 +500,9 @@ public final class FastNoteblocksConfig {
 		this.activeSequenceName = activeSequenceName == null || activeSequenceName.isBlank()
 			? "Untitled sequence"
 			: activeSequenceName.trim();
+		if (composerProject != null) {
+			composerProject = composerProject.withName(this.activeSequenceName);
+		}
 	}
 
 	public int activeSequenceDelayScaleQuarters() {
@@ -485,6 +511,10 @@ public final class FastNoteblocksConfig {
 
 	public void setActiveSequenceDelayScaleQuarters(int activeSequenceDelayScaleQuarters) {
 		this.activeSequenceDelayScaleQuarters = clampSequenceDelayScale(activeSequenceDelayScaleQuarters);
+		if (composerProject != null) {
+			tracks = normalizeTracks(composerProject.toSequenceTracks(tracks, this.activeSequenceDelayScaleQuarters));
+			syncLegacyTrackFields();
+		}
 	}
 
 	public String previewInstrument() {
@@ -503,6 +533,30 @@ public final class FastNoteblocksConfig {
 	public void setTracks(List<SequenceTrack> tracks) {
 		this.tracks = normalizeTracks(tracks);
 		activeTrackIndex = clampTrackIndex(activeTrackIndex, this.tracks.size());
+		composerProject = ComposerProject.fromSequenceTracks(
+			activeSequenceName, this.tracks, activeTrackIndex, activeSequenceDelayScaleQuarters
+		);
+		syncLegacyTrackFields();
+	}
+
+	public ComposerProject composerProject() {
+		if (composerProject == null) {
+			composerProject = ComposerProject.fromSequenceTracks(
+				activeSequenceName, tracks, activeTrackIndex, activeSequenceDelayScaleQuarters
+			);
+		}
+		return composerProject;
+	}
+
+	public void setComposerProject(ComposerProject project) {
+		composerProject = project == null
+			? ComposerProject.fromSequenceTracks(activeSequenceName, tracks, activeTrackIndex,
+				activeSequenceDelayScaleQuarters)
+			: project;
+		activeSequenceName = composerProject.name();
+		activeTrackIndex = composerProject.activeLayerIndex();
+		tracks = normalizeTracks(composerProject.toSequenceTracks(tracks, activeSequenceDelayScaleQuarters));
+		activeTrackIndex = clampTrackIndex(activeTrackIndex, tracks.size());
 		syncLegacyTrackFields();
 	}
 
@@ -600,6 +654,7 @@ public final class FastNoteblocksConfig {
 		config.activeSequenceDelayScaleQuarters = DEFAULT_SEQUENCE_DELAY_SCALE_QUARTERS;
 		config.previewInstrument = "HARP";
 		config.tracks = List.of(new SequenceTrack("Track 1", "", "HARP", 0));
+		config.composerProject = ComposerProject.empty(config.activeSequenceName);
 		config.buildTrackFlagsInitialized = true;
 		config.activeTrackIndex = 0;
 		config.savedSequences = new ArrayList<>();
@@ -717,6 +772,7 @@ public final class FastNoteblocksConfig {
 		private Integer activeSequenceTimescale;
 		private String previewInstrument;
 		private List<SequenceTrack> tracks;
+		private ComposerProject composerProject;
 		private Boolean buildTrackFlagsInitialized;
 		private Integer activeTrackIndex;
 		private List<SavedSequence> savedSequences;
@@ -752,6 +808,7 @@ public final class FastNoteblocksConfig {
 			this.activeSequenceDelayScaleQuarters = config.activeSequenceDelayScaleQuarters;
 			this.previewInstrument = config.previewInstrument;
 			this.tracks = config.tracks;
+			this.composerProject = config.composerProject;
 			this.buildTrackFlagsInitialized = config.buildTrackFlagsInitialized;
 			this.activeTrackIndex = config.activeTrackIndex;
 			this.savedSequences = config.savedSequences;
