@@ -92,6 +92,10 @@ public record ComposerProject(
 			return new Layer(name, instrument, muted, buildEnabled, visible, value);
 		}
 
+		public Layer withName(String value) {
+			return new Layer(value, instrument, muted, buildEnabled, visible, notes);
+		}
+
 		public Layer withInstrument(String value) {
 			return new Layer(name, value, muted, buildEnabled, visible, notes);
 		}
@@ -217,6 +221,29 @@ public record ComposerProject(
 		return new ComposerProject(name, ppq, tempoMicrosPerQuarter, updated, target, nextNoteId + 1L);
 	}
 
+	public PasteResult pasteNotes(int layerIndex, List<ClipboardNote> clipboard, long startTick) {
+		if (clipboard == null || clipboard.isEmpty()) {
+			return new PasteResult(this, Set.of());
+		}
+		int target = Math.max(0, Math.min(layers.size() - 1, layerIndex));
+		Layer layer = layers.get(target);
+		List<NoteEvent> notes = new ArrayList<>(layer.notes());
+		Set<Long> addedIds = new LinkedHashSet<>();
+		long id = nextNoteId;
+		for (ClipboardNote copied : clipboard) {
+			NoteEvent added = new NoteEvent(id++, copied.midiNote(),
+				Math.max(0L, startTick + copied.tickOffset()), copied.durationTicks(), copied.velocity());
+			notes.add(added);
+			addedIds.add(added.id());
+		}
+		List<Layer> updated = new ArrayList<>(layers);
+		updated.set(target, layer.withNotes(notes));
+		return new PasteResult(
+			new ComposerProject(name, ppq, tempoMicrosPerQuarter, updated, target, id),
+			Set.copyOf(addedIds)
+		);
+	}
+
 	public ComposerProject deleteNotes(Set<Long> ids) {
 		if (ids == null || ids.isEmpty()) {
 			return this;
@@ -305,5 +332,17 @@ public record ComposerProject(
 			tokens.add(chunk + "d");
 			remaining -= chunk;
 		}
+	}
+
+	public record ClipboardNote(long tickOffset, int midiNote, long durationTicks, int velocity) {
+		public ClipboardNote {
+			tickOffset = Math.max(0L, tickOffset);
+			midiNote = Math.max(0, Math.min(127, midiNote));
+			durationTicks = Math.max(1L, durationTicks);
+			velocity = Math.max(1, Math.min(127, velocity));
+		}
+	}
+
+	public record PasteResult(ComposerProject project, Set<Long> noteIds) {
 	}
 }
