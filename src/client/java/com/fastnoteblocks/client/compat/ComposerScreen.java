@@ -567,17 +567,23 @@ public final class ComposerScreen extends Screen {
 		if (event.button() != 0 || !insideRoll(event.x(), event.y())) {
 			return super.mouseClicked(event, doubleClick);
 		}
-		NoteEvent hit = activeNoteAt(event.x(), event.y());
+		NoteHit hit = noteAt(event.x(), event.y());
 		if (hit != null) {
-			if (!selectedNotes.contains(hit.id())) {
+			if (hit.layerIndex() != project().activeLayerIndex()) {
+				selectedNotes.clear();
+				apply(project().withActiveLayer(hit.layerIndex()));
+				rebuildLayerButtons();
+			}
+			NoteEvent hitNote = hit.note();
+			if (!selectedNotes.contains(hitNote.id())) {
 				if (!event.hasControlDownWithQuirk()) {
 					selectedNotes.clear();
 				}
-				selectedNotes.add(hit.id());
+				selectedNotes.add(hitNote.id());
 			} else if (event.hasControlDownWithQuirk()) {
-				selectedNotes.remove(hit.id());
+				selectedNotes.remove(hitNote.id());
 			}
-			if (selectedNotes.contains(hit.id())) {
+			if (selectedNotes.contains(hitNote.id())) {
 				draggingNotes = true;
 				dragStartX = event.x();
 				dragStartY = event.y();
@@ -585,7 +591,7 @@ public final class ComposerScreen extends Screen {
 				dragPreview = null;
 				dragTickDelta = 0L;
 				dragPitchDelta = 0;
-				PreviewInstrument.byId(activeLayer().instrument()).play(hit.midiNote()
+				PreviewInstrument.byId(activeLayer().instrument()).play(hitNote.midiNote()
 					- ComposerProject.NOTE_BLOCK_BASE_MIDI_NOTE);
 			}
 			return true;
@@ -650,7 +656,7 @@ public final class ComposerScreen extends Screen {
 	@Override
 	public boolean mouseDragged(MouseButtonEvent event, double dx, double dy) {
 		if (draggingNotes) {
-			long tickDelta = snapTick(Math.round((event.x() - dragStartX) * ticksPerPixel));
+			long tickDelta = snapDelta(Math.round((event.x() - dragStartX) * ticksPerPixel));
 			int pitchDelta = (int)Math.round((dragStartY - event.y()) / ROW_HEIGHT);
 			if (tickDelta != dragTickDelta || pitchDelta != dragPitchDelta) {
 				dragTickDelta = tickDelta;
@@ -697,15 +703,21 @@ public final class ComposerScreen extends Screen {
 		if (!insideRoll(mouseX, mouseY)) {
 			return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
 		}
-		NoteEvent hovered = activeNoteAt(mouseX, mouseY);
+		NoteHit hovered = noteAt(mouseX, mouseY);
 		if (hovered != null && shiftDown()) {
-			if (!selectedNotes.contains(hovered.id())) {
+			if (hovered.layerIndex() != project().activeLayerIndex()) {
 				selectedNotes.clear();
-				selectedNotes.add(hovered.id());
+				apply(project().withActiveLayer(hovered.layerIndex()));
+				rebuildLayerButtons();
+			}
+			NoteEvent hoveredNote = hovered.note();
+			if (!selectedNotes.contains(hoveredNote.id())) {
+				selectedNotes.clear();
+				selectedNotes.add(hoveredNote.id());
 			}
 			int delta = scrollY > 0 ? 1 : -1;
 			apply(project().moveNotes(selectedNotes, 0L, delta));
-			NoteEvent changed = findNote(hovered.id());
+			NoteEvent changed = findNote(hoveredNote.id());
 			if (changed != null) {
 				PreviewInstrument.byId(activeLayer().instrument()).play(
 					changed.midiNote() - ComposerProject.NOTE_BLOCK_BASE_MIDI_NOTE
@@ -1009,8 +1021,26 @@ public final class ComposerScreen extends Screen {
 		return activeLayer().notes().stream().filter(note -> note.id() == id).findFirst().orElse(null);
 	}
 
-	private NoteEvent activeNoteAt(double mouseX, double mouseY) {
-		List<NoteEvent> notes = activeLayer().notes();
+	private NoteHit noteAt(double mouseX, double mouseY) {
+		int activeLayerIndex = project().activeLayerIndex();
+		NoteEvent active = noteAt(project().layers().get(activeLayerIndex), mouseX, mouseY);
+		if (active != null) {
+			return new NoteHit(activeLayerIndex, active);
+		}
+		for (int layerIndex = project().layers().size() - 1; layerIndex >= 0; layerIndex--) {
+			if (layerIndex == activeLayerIndex || !project().layers().get(layerIndex).visible()) {
+				continue;
+			}
+			NoteEvent note = noteAt(project().layers().get(layerIndex), mouseX, mouseY);
+			if (note != null) {
+				return new NoteHit(layerIndex, note);
+			}
+		}
+		return null;
+	}
+
+	private NoteEvent noteAt(Layer layer, double mouseX, double mouseY) {
+		List<NoteEvent> notes = layer.notes();
 		for (int index = notes.size() - 1; index >= 0; index--) {
 			NoteEvent note = notes.get(index);
 			if (noteRect(note).contains(mouseX, mouseY)) {
@@ -1065,6 +1095,11 @@ public final class ComposerScreen extends Screen {
 		return Math.max(0L, Math.round(tick / (double)grid) * grid);
 	}
 
+	private long snapDelta(long tickDelta) {
+		long grid = gridTicks();
+		return Math.round(tickDelta / (double)grid) * grid;
+	}
+
 	private boolean insideRoll(double x, double y) {
 		return x >= rollX && x < rollX + rollWidth && y >= rollY && y < rollY + rollHeight;
 	}
@@ -1106,5 +1141,8 @@ public final class ComposerScreen extends Screen {
 		boolean intersects(int otherLeft, int otherTop, int otherRight, int otherBottom) {
 			return right > otherLeft && left < otherRight && bottom > otherTop && top < otherBottom;
 		}
+	}
+
+	private record NoteHit(int layerIndex, NoteEvent note) {
 	}
 }
