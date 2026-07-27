@@ -47,6 +47,10 @@ record PreviewInstrument(String id, String name, Item icon, Holder<SoundEvent> s
 			return;
 		}
 		float pitch = (float)Math.pow(2.0, (note - 12) / 12.0);
-		Minecraft.getInstance().getSoundManager().play(SimpleSoundInstance.forUI(sound.value(), pitch, 0.55F));
+		Minecraft.getInstance().getSoundManager().play(
+			pitch >= 0.5F && pitch <= 2.0F
+				? SimpleSoundInstance.forUI(sound.value(), pitch, 0.55F)
+				: ExtendedPitchSoundInstance.forUI(sound.value(), pitch, 0.55F)
+		);
 	}
 }

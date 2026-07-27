@@ -10,10 +10,8 @@ import com.fastnoteblocks.client.composer.ComposerProject.PasteResult;
 import com.mojang.blaze3d.platform.InputConstants;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
@@ -59,8 +57,6 @@ public final class ComposerScreen extends Screen {
 	private boolean playing;
 	private long playbackStartedAt;
 	private final Set<Long> playedNotes = new LinkedHashSet<>();
-	private final Map<Long, Long> sourceNoteOffMicros = new HashMap<>();
-	private final MidiPreviewSynth midiSynth = new MidiPreviewSynth();
 	private long horizontalScroll;
 	private int topMidiNote = 91;
 	private double ticksPerPixel = 10.0;
@@ -804,7 +800,6 @@ public final class ComposerScreen extends Screen {
 	@Override
 	public void onClose() {
 		stopPlayback();
-		midiSynth.close();
 		saveProject();
 		onReturn.run();
 		minecraft.gui.setScreen(parent);
@@ -817,7 +812,6 @@ public final class ComposerScreen extends Screen {
 			playing = true;
 			playbackStartedAt = Util.getMillis();
 			playedNotes.clear();
-			sourceNoteOffMicros.clear();
 			playButton.setMessage(playLabel());
 		}
 	}
@@ -825,8 +819,6 @@ public final class ComposerScreen extends Screen {
 	private void stopPlayback() {
 		playing = false;
 		playedNotes.clear();
-		sourceNoteOffMicros.clear();
-		midiSynth.stopAll();
 		if (playButton != null) {
 			playButton.setMessage(playLabel());
 		}
@@ -845,16 +837,7 @@ public final class ComposerScreen extends Screen {
 		}
 		long tick = playbackTick();
 		long elapsedMicros = Math.max(0L, Util.getMillis() - playbackStartedAt) * 1000L;
-		if (!minecraftPreview) {
-			for (Map.Entry<Long, Long> entry : new ArrayList<>(sourceNoteOffMicros.entrySet())) {
-				if (elapsedMicros >= entry.getValue()) {
-					midiSynth.noteOff(entry.getKey());
-					sourceNoteOffMicros.remove(entry.getKey());
-				}
-			}
-		}
-		for (int layerIndex = 0; layerIndex < project().layers().size(); layerIndex++) {
-			Layer layer = project().layers().get(layerIndex);
+		for (Layer layer : project().layers()) {
 			if (layer.muted()) {
 				continue;
 			}
@@ -868,15 +851,7 @@ public final class ComposerScreen extends Screen {
 				}
 				if (elapsedMicros >= noteMicros && (!minecraftPreview || note.isBuildable())
 						&& playedNotes.add(note.id())) {
-					if (minecraftPreview || !midiSynth.noteOn(
-							note.id(), layerIndex, layer.instrument(), note.midiNote(), note.velocity())) {
-						instrument.play(note.midiNote() - ComposerProject.NOTE_BLOCK_BASE_MIDI_NOTE);
-					} else {
-						long durationMicros = Math.max(25_000L, Math.round(
-							note.durationTicks() * project().tempoMicrosPerQuarter() / (double)project().ppq()
-						));
-						sourceNoteOffMicros.put(note.id(), noteMicros + durationMicros);
-					}
+					instrument.play(note.midiNote() - ComposerProject.NOTE_BLOCK_BASE_MIDI_NOTE);
 				}
 			}
 		}
