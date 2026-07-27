@@ -15,7 +15,7 @@ import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.network.chat.Component;
 
 public final class FastNoteblocksConfig {
-	public static final int MAX_TRACKS = 4;
+	public static final int MAX_TRACKS = ComposerProject.MAX_LAYERS;
 	public static final int DEFAULT_SEQUENCE_DELAY_SCALE_QUARTERS = 4;
 	public static final int MIN_SEQUENCE_DELAY_SCALE_QUARTERS = 1;
 	public static final int MAX_SEQUENCE_DELAY_SCALE_QUARTERS = 32;
@@ -174,7 +174,7 @@ public final class FastNoteblocksConfig {
 	public static final int DEFAULT_RADIAL_FOCUS_DELAY_TICKS = 5;
 	public static final int MIN_RADIAL_FOCUS_DELAY_TICKS = 0;
 	public static final int MAX_RADIAL_FOCUS_DELAY_TICKS = 20;
-	public static final int DEFAULT_MIDI_MAX_IMPORTED_TRACKS = 4;
+	public static final int DEFAULT_MIDI_MAX_IMPORTED_TRACKS = ComposerProject.MAX_LAYERS;
 	public static final int MIN_MIDI_MAX_IMPORTED_TRACKS = 1;
 	public static final int MAX_MIDI_MAX_IMPORTED_TRACKS = MAX_TRACKS;
 	private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();

@@ -27,6 +27,7 @@ public record ComposerProject(
 ) {
 	public static final int DEFAULT_PPQ = 480;
 	public static final int DEFAULT_TEMPO_MICROS_PER_QUARTER = 500_000;
+	public static final int MAX_LAYERS = 10;
 	public static final int NOTE_BLOCK_BASE_MIDI_NOTE = 54;
 	public static final int NOTE_BLOCK_MAX_MIDI_NOTE = NOTE_BLOCK_BASE_MIDI_NOTE + NotePitch.PITCH_COUNT - 1;
 	public static final long DEFAULT_NOTE_DURATION_TICKS = DEFAULT_PPQ / 4L;
@@ -176,7 +177,7 @@ public record ComposerProject(
 	}
 
 	public ComposerProject addLayer() {
-		if (layers.size() >= 4) {
+		if (layers.size() >= MAX_LAYERS) {
 			return this;
 		}
 		List<Layer> updated = new ArrayList<>(layers);
@@ -305,7 +306,7 @@ public record ComposerProject(
 		List<Layer> normalized = new ArrayList<>();
 		if (source != null) {
 			for (Layer layer : source) {
-				if (layer != null && normalized.size() < 4) {
+				if (layer != null && normalized.size() < MAX_LAYERS) {
 					normalized.add(new Layer(layer.name(), layer.instrument(), layer.muted(),
 						layer.buildEnabled(), layer.visible(), layer.notes()));
 				}

@@ -37,7 +37,10 @@ public final class ComposerScreen extends Screen {
 	private static final int ROW_HEIGHT = 12;
 	private static final int MIN_MIDI_NOTE = 0;
 	private static final int MAX_MIDI_NOTE = 127;
-	private static final int[] LAYER_COLORS = {0xFF35D7E5, 0xFFFFB347, 0xFF9BE564, 0xFFD19BFF};
+	private static final int[] LAYER_COLORS = {
+		0xFF35D7E5, 0xFFFFB347, 0xFF9BE564, 0xFFD19BFF, 0xFFFF6B9A,
+		0xFF7CA7FF, 0xFFFFE66D, 0xFF8CE0C3, 0xFFFF8C5A, 0xFFC3F584
+	};
 
 	private final Screen parent;
 	private final Runnable onReturn;
@@ -208,9 +211,9 @@ public final class ComposerScreen extends Screen {
 			removeWidget(button);
 		}
 		moveLayerButtons.clear();
-		int y = height - 64;
+		int y = height - 86;
 		addLayerButton = addRenderableWidget(Button.builder(Component.literal("+ Layer"), button -> {
-			if (project().layers().size() < 4) {
+			if (project().layers().size() < ComposerProject.MAX_LAYERS) {
 				ComposerProject added = project().addLayer();
 				int newLayer = added.layers().size() - 1;
 				if (!selectedNotes.isEmpty()) {
@@ -220,23 +223,23 @@ public final class ComposerScreen extends Screen {
 				rebuildLayerButtons();
 				rebuildMoveLayerButtons();
 			}
-		}).bounds(8, y, 62, 18)
+		}).bounds(8, y, LAYER_PANEL_WIDTH - 16, 18)
 			.tooltip(Tooltip.create(Component.literal(
-				"Add a layer and move the current selection into it (maximum 4)"
+				"Add a layer and move the current selection into it (maximum 10)"
 			)))
 			.build());
 		moveLayerButtons.add(addLayerButton);
-		int buttonX = 74;
-		for (int index = 0; index < 4; index++) {
+		for (int index = 0; index < ComposerProject.MAX_LAYERS; index++) {
 			final int target = index;
+			int row = index / 5;
+			int column = index % 5;
 			Button move = addRenderableWidget(Button.builder(Component.literal("→" + (index + 1)),
 				button -> moveSelectionToLayer(target))
-				.bounds(buttonX, y, 27, 18)
+				.bounds(8 + column * 37, y + 22 + row * 20, 34, 18)
 				.tooltip(Tooltip.create(Component.literal("Move selected notes to Layer " + (index + 1))))
 				.build());
 			move.active = index < project().layers().size();
 			moveLayerButtons.add(move);
-			buttonX += 29;
 		}
 	}
 
@@ -419,7 +422,7 @@ public final class ComposerScreen extends Screen {
 		graphics.fill(LAYER_PANEL_WIDTH, TOOLBAR_HEIGHT, width, height, 0x99101115);
 		graphics.text(font, title, 8, TOOLBAR_HEIGHT + 4, 0xFFFFFFFF, false);
 		int active = project().activeLayerIndex();
-		graphics.text(font, Component.literal("Move selection:"), 74, height - 78, 0xFFAAAAAA, false);
+		graphics.text(font, Component.literal("Move selection:"), 8, height - 100, 0xFFAAAAAA, false);
 		graphics.text(font, Component.literal("Active: Layer " + (active + 1)), 8, height - 18,
 			LAYER_COLORS[active % LAYER_COLORS.length], false);
 	}
@@ -783,9 +786,12 @@ public final class ComposerScreen extends Screen {
 			return true;
 		}
 		int digit = event.getDigit();
-		if (event.hasControlDownWithQuirk() && digit >= 1 && digit <= 4) {
-			moveSelectionToLayer(digit - 1);
-			return true;
+		if (event.hasControlDownWithQuirk() && digit >= 0) {
+			int targetLayer = digit == 0 ? 9 : digit - 1;
+			if (targetLayer >= 0 && targetLayer < ComposerProject.MAX_LAYERS) {
+				moveSelectionToLayer(targetLayer);
+				return true;
+			}
 		}
 		if ((event.key() == GLFW.GLFW_KEY_DELETE || event.key() == GLFW.GLFW_KEY_BACKSPACE)
 				&& !selectedNotes.isEmpty()) {
@@ -835,7 +841,7 @@ public final class ComposerScreen extends Screen {
 			playButton.setMessage(playLabel());
 		}
 		if (addLayerButton != null) {
-			addLayerButton.active = project().layers().size() < 4;
+			addLayerButton.active = project().layers().size() < ComposerProject.MAX_LAYERS;
 		}
 		for (int index = 1; index < moveLayerButtons.size(); index++) {
 			moveLayerButtons.get(index).active = index - 1 < project().layers().size()

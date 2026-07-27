@@ -116,7 +116,7 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 			.build();
 		this.addTrackButton = Button.builder(Component.literal("+ Add track"), button -> addTrack())
 			.bounds(0, 0, 120, 20)
-			.tooltip(Tooltip.create(Component.literal("Add another track (maximum 4)")))
+			.tooltip(Tooltip.create(Component.literal("Add another track (maximum 10)")))
 			.build();
 		setTracks(config.tracks(), config.activeTrackIndex());
 	}
