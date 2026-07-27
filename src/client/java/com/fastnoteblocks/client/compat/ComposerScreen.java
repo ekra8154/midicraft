@@ -36,6 +36,8 @@ public final class ComposerScreen extends Screen {
 	private static final int PIANO_WIDTH = 48;
 	private static final int TIMELINE_RULER_HEIGHT = 16;
 	private static final int LAYER_ROW_HEIGHT = 42;
+	private static final int CONTEXT_MENU_WIDTH = 104;
+	private static final int CONTEXT_MENU_ROW_HEIGHT = 16;
 	private static final int ROW_HEIGHT = 12;
 	private static final int MIN_MIDI_NOTE = 0;
 	private static final int MAX_MIDI_NOTE = 127;
@@ -87,6 +89,9 @@ public final class ComposerScreen extends Screen {
 	private int editingLayer = -1;
 	private int snapSubdivision = 4;
 	private boolean minecraftPreview;
+	private boolean contextMenuOpen;
+	private int contextMenuX;
+	private int contextMenuY;
 
 	public ComposerScreen(Screen parent, FastNoteblocksConfig config) {
 		this(parent, config, () -> {
@@ -133,21 +138,6 @@ public final class ComposerScreen extends Screen {
 			.tooltip(Tooltip.create(Component.literal("Import MIDI into this composition")))
 			.build());
 		x += 86;
-		addRenderableWidget(Button.builder(Component.literal("−12"), button -> transposeSelected(-12))
-			.bounds(x, 7, 42, 20)
-			.tooltip(Tooltip.create(Component.literal("Move selected notes down one octave")))
-			.build());
-		x += 46;
-		addRenderableWidget(Button.builder(Component.literal("+12"), button -> transposeSelected(12))
-			.bounds(x, 7, 42, 20)
-			.tooltip(Tooltip.create(Component.literal("Move selected notes up one octave")))
-			.build());
-		x += 46;
-		addRenderableWidget(Button.builder(Component.literal("Fit range"), button -> fitSelectedToMinecraft())
-			.bounds(x, 7, 70, 20)
-			.tooltip(Tooltip.create(Component.literal("Octave-shift the selection into Minecraft's F♯3–F♯5 range")))
-			.build());
-		x += 74;
 		snapButton = addRenderableWidget(Button.builder(snapLabel(), button -> cycleSnap())
 			.bounds(x, 7, 78, 20)
 			.tooltip(Tooltip.create(Component.literal("Grid used when adding or dragging notes")))
@@ -412,6 +402,28 @@ public final class ComposerScreen extends Screen {
 		extractStatus(graphics);
 		super.extractRenderState(graphics, mouseX, mouseY, partialTick);
 		extractInstrumentMenu(graphics, mouseX, mouseY);
+		extractContextMenu(graphics, mouseX, mouseY);
+	}
+
+	private void extractContextMenu(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
+		if (!contextMenuOpen || selectedNotes.isEmpty()) {
+			return;
+		}
+		ContextAction[] actions = ContextAction.values();
+		int height = actions.length * CONTEXT_MENU_ROW_HEIGHT + 4;
+		graphics.fill(contextMenuX, contextMenuY, contextMenuX + CONTEXT_MENU_WIDTH, contextMenuY + height, 0xF0101115);
+		graphics.fill(contextMenuX, contextMenuY, contextMenuX + CONTEXT_MENU_WIDTH, contextMenuY + 1, 0xFFAAAAAA);
+		for (int index = 0; index < actions.length; index++) {
+			int rowY = contextMenuY + 2 + index * CONTEXT_MENU_ROW_HEIGHT;
+			boolean hovered = mouseX >= contextMenuX && mouseX < contextMenuX + CONTEXT_MENU_WIDTH
+				&& mouseY >= rowY && mouseY < rowY + CONTEXT_MENU_ROW_HEIGHT;
+			if (hovered) {
+				graphics.fill(contextMenuX + 2, rowY, contextMenuX + CONTEXT_MENU_WIDTH - 2,
+					rowY + CONTEXT_MENU_ROW_HEIGHT, 0xFF356070);
+			}
+			graphics.text(font, Component.literal(actions[index].label), contextMenuX + 6, rowY + 4,
+				0xFFFFFFFF, false);
+		}
 	}
 
 	private void extractInstrumentMenu(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
@@ -618,12 +630,18 @@ public final class ComposerScreen extends Screen {
 			.count();
 		String status = selectedNotes.size() + " selected"
 			+ (outOfRange > 0 ? "   " + outOfRange + " outside Minecraft range" : "")
-			+ "   Double-click to add • drag to move • drag empty space to select • Shift+wheel changes pitch";
+			+ "   Double-click to add • drag to move • right-click selection for actions";
 		graphics.text(font, status, rollX, height - 16, outOfRange > 0 ? 0xFFFF9999 : 0xFFBBBBBB, false);
 	}
 
 	@Override
 	public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
+		if (contextMenuOpen) {
+			if (handleContextMenuClick(event.x(), event.y())) {
+				return true;
+			}
+			contextMenuOpen = false;
+		}
 		if (event.button() == 0 && doubleClick) {
 			int layerIndex = layerHeaderAt(event.x(), event.y());
 			if (layerIndex >= 0) {
@@ -650,6 +668,25 @@ public final class ComposerScreen extends Screen {
 			setPlaybackStart(mouseTick(event.x()), true);
 			draggingPlayhead = true;
 			return true;
+		}
+		if (event.button() == 1 && insideRoll(event.x(), event.y())) {
+			NoteHit hit = noteAt(event.x(), event.y());
+			if (hit != null) {
+				if (hit.layerIndex() != project().activeLayerIndex()) {
+					apply(project().withActiveLayer(hit.layerIndex()));
+					rebuildLayerButtons();
+				}
+				if (!selectedNotes.contains(hit.note().id())) {
+					selectedNotes.clear();
+					selectedNotes.add(hit.note().id());
+				}
+				openContextMenu(event.x(), event.y());
+				return true;
+			}
+			if (!selectedNotes.isEmpty()) {
+				openContextMenu(event.x(), event.y());
+				return true;
+			}
 		}
 		if (event.button() != 0 || !insideRoll(event.x(), event.y())) {
 			return super.mouseClicked(event, doubleClick);
@@ -731,6 +768,46 @@ public final class ComposerScreen extends Screen {
 		updateLayer(instrumentMenuLayer,
 			layer.withInstrument(value.id()).withMuted("MUTE".equals(value.id())));
 		return true;
+	}
+
+	private void openContextMenu(double mouseX, double mouseY) {
+		ContextAction[] actions = ContextAction.values();
+		int menuHeight = actions.length * CONTEXT_MENU_ROW_HEIGHT + 4;
+		contextMenuX = Math.max(4, Math.min(width - CONTEXT_MENU_WIDTH - 4, (int)mouseX));
+		contextMenuY = Math.max(TOOLBAR_HEIGHT + 4, Math.min(height - menuHeight - 4, (int)mouseY));
+		contextMenuOpen = true;
+	}
+
+	private boolean handleContextMenuClick(double mouseX, double mouseY) {
+		if (mouseX < contextMenuX || mouseX >= contextMenuX + CONTEXT_MENU_WIDTH) {
+			return false;
+		}
+		int row = ((int)mouseY - contextMenuY - 2) / CONTEXT_MENU_ROW_HEIGHT;
+		ContextAction[] actions = ContextAction.values();
+		if (row < 0 || row >= actions.length) {
+			return false;
+		}
+		int rowY = contextMenuY + 2 + row * CONTEXT_MENU_ROW_HEIGHT;
+		if (mouseY < rowY || mouseY >= rowY + CONTEXT_MENU_ROW_HEIGHT) {
+			return false;
+		}
+		performContextAction(actions[row]);
+		contextMenuOpen = false;
+		return true;
+	}
+
+	private void performContextAction(ContextAction action) {
+		switch (action) {
+			case OCTAVE_DOWN -> transposeSelected(-12);
+			case OCTAVE_UP -> transposeSelected(12);
+			case FIT_RANGE -> fitSelectedToMinecraft();
+			case COPY -> copySelection();
+			case CUT -> {
+				copySelection();
+				deleteSelectedNotes();
+			}
+			case DELETE -> deleteSelectedNotes();
+		}
 	}
 
 	@Override
@@ -834,6 +911,10 @@ public final class ComposerScreen extends Screen {
 
 	@Override
 	public boolean keyPressed(KeyEvent event) {
+		if (contextMenuOpen && event.isEscape()) {
+			contextMenuOpen = false;
+			return true;
+		}
 		if (layerNameBox != null) {
 			if (event.isConfirmation()) {
 				commitLayerRename();
@@ -855,10 +936,7 @@ public final class ComposerScreen extends Screen {
 		}
 		if (event.isCut()) {
 			copySelection();
-			if (!selectedNotes.isEmpty()) {
-				apply(project().deleteNotes(selectedNotes));
-				selectedNotes.clear();
-			}
+			deleteSelectedNotes();
 			return true;
 		}
 		if (event.isPaste()) {
@@ -887,8 +965,7 @@ public final class ComposerScreen extends Screen {
 		}
 		if ((event.key() == GLFW.GLFW_KEY_DELETE || event.key() == GLFW.GLFW_KEY_BACKSPACE)
 				&& !selectedNotes.isEmpty()) {
-			apply(project().deleteNotes(selectedNotes));
-			selectedNotes.clear();
+			deleteSelectedNotes();
 			return true;
 		}
 		if (!selectedNotes.isEmpty() && (event.isLeft() || event.isRight() || event.isUp() || event.isDown())) {
@@ -1094,6 +1171,13 @@ public final class ComposerScreen extends Screen {
 			.toList();
 	}
 
+	private void deleteSelectedNotes() {
+		if (!selectedNotes.isEmpty()) {
+			apply(project().deleteNotes(selectedNotes));
+			selectedNotes.clear();
+		}
+	}
+
 	private void pasteClipboard() {
 		if (clipboard.isEmpty()) {
 			return;
@@ -1268,5 +1352,20 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private record NoteHit(int layerIndex, NoteEvent note) {
+	}
+
+	private enum ContextAction {
+		OCTAVE_DOWN("-12"),
+		OCTAVE_UP("+12"),
+		FIT_RANGE("Fit range"),
+		COPY("Copy"),
+		CUT("Cut"),
+		DELETE("Delete");
+
+		private final String label;
+
+		ContextAction(String label) {
+			this.label = label;
+		}
 	}
 }
