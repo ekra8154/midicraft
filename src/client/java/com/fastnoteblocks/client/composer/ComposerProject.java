@@ -208,6 +208,29 @@ public record ComposerProject(
 		return new ComposerProject(name, ppq, tempoMicrosPerQuarter, updated, target, nextNoteId);
 	}
 
+	public ComposerProject moveLayer(int layerIndex, int direction) {
+		if (direction == 0 || layers.size() <= 1) {
+			return this;
+		}
+		int from = Math.max(0, Math.min(layers.size() - 1, layerIndex));
+		int to = Math.max(0, Math.min(layers.size() - 1, from + direction));
+		if (from == to) {
+			return this;
+		}
+		List<Layer> updated = new ArrayList<>(layers);
+		Layer moving = updated.remove(from);
+		updated.add(to, moving);
+		int active = activeLayerIndex;
+		if (active == from) {
+			active = to;
+		} else if (from < active && to >= active) {
+			active--;
+		} else if (from > active && to <= active) {
+			active++;
+		}
+		return new ComposerProject(name, ppq, tempoMicrosPerQuarter, updated, active, nextNoteId);
+	}
+
 	public ComposerProject withName(String value) {
 		return new ComposerProject(value, ppq, tempoMicrosPerQuarter, layers, activeLayerIndex, nextNoteId);
 	}

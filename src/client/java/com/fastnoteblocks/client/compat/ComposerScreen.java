@@ -34,6 +34,8 @@ public final class ComposerScreen extends Screen {
 	private static final int TOOLBAR_HEIGHT = 34;
 	private static final int LAYER_PANEL_WIDTH = 196;
 	private static final int PIANO_WIDTH = 48;
+	private static final int TIMELINE_RULER_HEIGHT = 16;
+	private static final int LAYER_ROW_HEIGHT = 42;
 	private static final int ROW_HEIGHT = 12;
 	private static final int MIN_MIDI_NOTE = 0;
 	private static final int MAX_MIDI_NOTE = 127;
@@ -59,6 +61,8 @@ public final class ComposerScreen extends Screen {
 	private EditBox layerNameBox;
 	private boolean playing;
 	private long playbackStartedAt;
+	private long playbackStartTick;
+	private boolean draggingPlayhead;
 	private final Set<Long> playedNotes = new LinkedHashSet<>();
 	private long horizontalScroll;
 	private int topMidiNote = 91;
@@ -101,7 +105,7 @@ public final class ComposerScreen extends Screen {
 	@Override
 	protected void init() {
 		clearWidgets();
-		rollY = TOOLBAR_HEIGHT + 14;
+		rollY = TOOLBAR_HEIGHT + 14 + TIMELINE_RULER_HEIGHT;
 		rollHeight = Math.max(40, height - rollY - 24);
 		centerMinecraftRange();
 		int x = 8;
@@ -172,37 +176,57 @@ public final class ComposerScreen extends Screen {
 		for (int index = 0; index < project.layers().size(); index++) {
 			final int layerIndex = index;
 			Layer layer = project.layers().get(index);
-			int y = 48 + index * 68;
+			int y = layerY(index);
 			Button active = addRenderableWidget(Button.builder(layerLabel(index, layer), button -> {
 				apply(project().withActiveLayer(layerIndex));
 				selectedNotes.clear();
 				rebuildLayerButtons();
-			}).bounds(8, y, LAYER_PANEL_WIDTH - 16, 20).build());
+			}).bounds(8, y, LAYER_PANEL_WIDTH - 16, 20)
+				.tooltip(Tooltip.create(Component.literal("Make this the active editing layer")))
+				.build());
 			Button mute = addRenderableWidget(Button.builder(
-				Component.literal(layer.muted() ? "Unmute" : "Mute"),
+				Component.literal(layer.muted() ? "X" : "M"),
 				button -> updateLayer(layerIndex, project().layers().get(layerIndex).withMuted(
 					!project().layers().get(layerIndex).muted()
 				))
-			).bounds(8, y + 22, 50, 18).build());
+			).bounds(8, y + 22, 24, 16)
+				.tooltip(Tooltip.create(Component.literal(layer.muted() ? "Unmute layer" : "Mute layer")))
+				.build());
 			Button build = addRenderableWidget(Button.builder(
-				Component.literal(layer.buildEnabled() ? "Build" : "Skip"),
+				Component.literal(layer.buildEnabled() ? "B" : "-"),
 				button -> updateLayer(layerIndex, project().layers().get(layerIndex).withBuildEnabled(
 					!project().layers().get(layerIndex).buildEnabled()
 				))
-			).bounds(60, y + 22, 46, 18).build());
+			).bounds(34, y + 22, 24, 16)
+				.tooltip(Tooltip.create(Component.literal(layer.buildEnabled() ? "Included when building" : "Skipped when building")))
+				.build());
 			Button visible = addRenderableWidget(Button.builder(
-				Component.literal(layer.visible() ? "Shown" : "Hidden"),
+				Component.literal(layer.visible() ? "S" : "H"),
 				button -> updateLayer(layerIndex, project().layers().get(layerIndex).withVisible(
 					!project().layers().get(layerIndex).visible()
 				))
-			).bounds(108, y + 22, 54, 18).build());
+			).bounds(60, y + 22, 24, 16)
+				.tooltip(Tooltip.create(Component.literal(layer.visible() ? "Shown in the editor" : "Hidden in the editor")))
+				.build());
 			Button instrument = addRenderableWidget(Button.builder(
 				Component.literal(PreviewInstrument.byId(layer.instrument()).name()),
 				button -> instrumentMenuLayer = instrumentMenuLayer == layerIndex ? -1 : layerIndex
-			).bounds(8, y + 42, LAYER_PANEL_WIDTH - 16, 18)
+			).bounds(86, y + 22, 62, 16)
 				.tooltip(Tooltip.create(Component.literal("Open the note-block instrument palette")))
 				.build());
-			layerButtons.addAll(List.of(active, mute, build, visible, instrument));
+			Button up = addRenderableWidget(Button.builder(Component.literal("^"),
+				button -> moveLayer(layerIndex, -1))
+				.bounds(150, y + 22, 18, 16)
+				.tooltip(Tooltip.create(Component.literal("Move layer up")))
+				.build());
+			Button down = addRenderableWidget(Button.builder(Component.literal("v"),
+				button -> moveLayer(layerIndex, 1))
+				.bounds(170, y + 22, 18, 16)
+				.tooltip(Tooltip.create(Component.literal("Move layer down")))
+				.build());
+			up.active = layerIndex > 0;
+			down.active = layerIndex < project.layers().size() - 1;
+			layerButtons.addAll(List.of(active, mute, build, visible, instrument, up, down));
 		}
 	}
 
@@ -260,6 +284,15 @@ public final class ComposerScreen extends Screen {
 		apply(project().moveNotesToLayer(selectedNotes, target));
 		rebuildLayerButtons();
 		rebuildMoveLayerButtons();
+	}
+
+	private void moveLayer(int layerIndex, int direction) {
+		if (layerIndex < 0 || layerIndex >= project().layers().size()) {
+			return;
+		}
+		instrumentMenuLayer = -1;
+		apply(project().moveLayer(layerIndex, direction));
+		rebuildLayerButtons();
 	}
 
 	private void transposeSelected(int semitones) {
@@ -377,10 +410,11 @@ public final class ComposerScreen extends Screen {
 	@Override
 	public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
 		rollX = LAYER_PANEL_WIDTH + PIANO_WIDTH;
-		rollY = TOOLBAR_HEIGHT + 14;
+		rollY = TOOLBAR_HEIGHT + 14 + TIMELINE_RULER_HEIGHT;
 		rollWidth = Math.max(40, width - rollX - 8);
 		rollHeight = Math.max(40, height - rollY - 24);
 		extractPanels(graphics);
+		extractTimeRuler(graphics, mouseX, mouseY);
 		extractPianoRoll(graphics, mouseX, mouseY);
 		extractStatus(graphics);
 		super.extractRenderState(graphics, mouseX, mouseY, partialTick);
@@ -397,7 +431,7 @@ public final class ComposerScreen extends Screen {
 		int rows = (PreviewInstrument.VALUES.size() + columns - 1) / columns;
 		int menuHeight = rows * cell + 6;
 		int menuX = 8;
-		int requestedY = 48 + instrumentMenuLayer * 68 + 62;
+		int requestedY = layerY(instrumentMenuLayer) + LAYER_ROW_HEIGHT;
 		int menuY = Math.max(TOOLBAR_HEIGHT + 4, Math.min(height - menuHeight - 24, requestedY));
 		graphics.fill(menuX, menuY, menuX + menuWidth, menuY + menuHeight, 0xF0101115);
 		graphics.fill(menuX, menuY, menuX + menuWidth, menuY + 1, 0xFFAAAAAA);
@@ -421,10 +455,52 @@ public final class ComposerScreen extends Screen {
 		graphics.fill(0, TOOLBAR_HEIGHT, LAYER_PANEL_WIDTH, height, 0xB8101115);
 		graphics.fill(LAYER_PANEL_WIDTH, TOOLBAR_HEIGHT, width, height, 0x99101115);
 		graphics.text(font, title, 8, TOOLBAR_HEIGHT + 4, 0xFFFFFFFF, false);
+		for (int index = 0; index < project().layers().size(); index++) {
+			int y = layerY(index);
+			int color = LAYER_COLORS[index % LAYER_COLORS.length];
+			boolean activeLayer = index == project().activeLayerIndex();
+			graphics.fill(6, y - 2, LAYER_PANEL_WIDTH - 6, y + LAYER_ROW_HEIGHT - 2,
+				activeLayer ? 0x663F444A : 0x33292D34);
+			graphics.fill(6, y - 2, 10, y + LAYER_ROW_HEIGHT - 2, color);
+			if (activeLayer) {
+				graphics.fill(6, y - 2, LAYER_PANEL_WIDTH - 6, y - 1, color);
+				graphics.fill(6, y + LAYER_ROW_HEIGHT - 3, LAYER_PANEL_WIDTH - 6, y + LAYER_ROW_HEIGHT - 2, color);
+			}
+		}
 		int active = project().activeLayerIndex();
 		graphics.text(font, Component.literal("Move selection:"), 8, height - 100, 0xFFAAAAAA, false);
 		graphics.text(font, Component.literal("Active: Layer " + (active + 1)), 8, height - 18,
 			LAYER_COLORS[active % LAYER_COLORS.length], false);
+	}
+
+	private void extractTimeRuler(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
+		int rulerY = rollY - TIMELINE_RULER_HEIGHT;
+		graphics.fill(rollX, rulerY, rollX + rollWidth, rollY, 0xCC15181D);
+		graphics.fill(rollX, rollY - 1, rollX + rollWidth, rollY, 0xFF4A4F56);
+		long lastTick = horizontalScroll + (long)Math.ceil(rollWidth * ticksPerPixel);
+		long beatTicks = Math.max(1L, project().ppq());
+		long firstBeat = Math.max(0L, horizontalScroll / beatTicks);
+		for (long beat = firstBeat; beat * beatTicks <= lastTick + beatTicks; beat++) {
+			long tick = beat * beatTicks;
+			int x = tickX(tick);
+			if (x < rollX || x > rollX + rollWidth) {
+				continue;
+			}
+			boolean measure = beat % 4L == 0L;
+			graphics.fill(x, rulerY + (measure ? 1 : 6), x + 1, rollY, measure ? 0xFF9A9A9A : 0xFF686D73);
+			if (measure) {
+				graphics.text(font, Long.toString(beat / 4L + 1L), x + 3, rulerY + 2, 0xFFBFC4CA, false);
+			}
+		}
+		long markerTick = playing ? playbackTick() : playbackStartTick;
+		int markerX = tickX(markerTick);
+		if (markerX >= rollX && markerX <= rollX + rollWidth) {
+			graphics.fill(markerX - 3, rulerY + 1, markerX + 4, rulerY + 5, 0xFFFF5555);
+			graphics.fill(markerX - 1, rulerY + 5, markerX + 2, rollY, 0xFFFF5555);
+		}
+		if (mouseX >= rollX && mouseX < rollX + rollWidth && mouseY >= rulerY && mouseY < rollY) {
+			graphics.setTooltipForNextFrame(Component.literal("Drag to set playback start"), mouseX, mouseY);
+		}
 	}
 
 	private void extractPianoRoll(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
@@ -531,10 +607,7 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private void extractPlayhead(GuiGraphicsExtractor graphics) {
-		if (!playing) {
-			return;
-		}
-		long tick = playbackTick();
+		long tick = playing ? playbackTick() : playbackStartTick;
 		int x = tickX(tick);
 		if (x >= rollX && x <= rollX + rollWidth) {
 			graphics.fill(x, rollY, x + 2, rollY + rollHeight, 0xFFFF5555);
@@ -565,6 +638,11 @@ public final class ComposerScreen extends Screen {
 			commitLayerRename();
 		}
 		if (event.button() == 0 && handleInstrumentMenuClick(event.x(), event.y())) {
+			return true;
+		}
+		if (event.button() == 0 && insideRuler(event.x(), event.y())) {
+			setPlaybackStart(mouseTick(event.x()), true);
+			draggingPlayhead = true;
 			return true;
 		}
 		if (event.button() != 0 || !insideRoll(event.x(), event.y())) {
@@ -630,7 +708,7 @@ public final class ComposerScreen extends Screen {
 		int cell = 28;
 		int rows = (PreviewInstrument.VALUES.size() + columns - 1) / columns;
 		int menuX = 8;
-		int requestedY = 48 + instrumentMenuLayer * 68 + 62;
+		int requestedY = layerY(instrumentMenuLayer) + LAYER_ROW_HEIGHT;
 		int menuY = Math.max(TOOLBAR_HEIGHT + 4, Math.min(height - (rows * cell + 6) - 24, requestedY));
 		int column = (int)(mouseX - menuX - 3) / cell;
 		int row = (int)(mouseY - menuY - 3) / cell;
@@ -658,6 +736,10 @@ public final class ComposerScreen extends Screen {
 
 	@Override
 	public boolean mouseDragged(MouseButtonEvent event, double dx, double dy) {
+		if (draggingPlayhead) {
+			setPlaybackStart(mouseTick(event.x()), false);
+			return true;
+		}
 		if (draggingNotes) {
 			long tickDelta = snapDelta(Math.round((event.x() - dragStartX) * ticksPerPixel));
 			int pitchDelta = (int)Math.round((dragStartY - event.y()) / ROW_HEIGHT);
@@ -678,6 +760,10 @@ public final class ComposerScreen extends Screen {
 
 	@Override
 	public boolean mouseReleased(MouseButtonEvent event) {
+		if (draggingPlayhead) {
+			draggingPlayhead = false;
+			return true;
+		}
 		if (draggingNotes) {
 			draggingNotes = false;
 			if (dragPreview != null) {
@@ -834,6 +920,17 @@ public final class ComposerScreen extends Screen {
 		}
 	}
 
+	private void setPlaybackStart(long tick, boolean preview) {
+		playbackStartTick = Math.max(0L, Math.min(project().endTick(), snapTick(tick)));
+		if (playing) {
+			playbackStartedAt = Util.getMillis();
+			playedNotes.clear();
+		}
+		if (preview) {
+			minecraft.gui.hud.setOverlayMessage(Component.literal("Playback start: tick " + playbackStartTick), true);
+		}
+	}
+
 	private void stopPlayback() {
 		playing = false;
 		playedNotes.clear();
@@ -861,8 +958,11 @@ public final class ComposerScreen extends Screen {
 			}
 			PreviewInstrument instrument = PreviewInstrument.byId(layer.instrument());
 			for (NoteEvent note : layer.notes()) {
+				if (note.startTick() < playbackStartTick) {
+					continue;
+				}
 				long noteMicros = Math.round(
-					note.startTick() * project().tempoMicrosPerQuarter() / (double)project().ppq()
+					(note.startTick() - playbackStartTick) * project().tempoMicrosPerQuarter() / (double)project().ppq()
 				);
 				if (minecraftPreview) {
 					noteMicros = Math.round(noteMicros / 100_000.0) * 100_000L;
@@ -885,11 +985,12 @@ public final class ComposerScreen extends Screen {
 
 	private long playbackTick() {
 		long elapsedMicros = Math.max(0L, Util.getMillis() - playbackStartedAt) * 1000L;
-		return Math.round(elapsedMicros * project().ppq() / (double)project().tempoMicrosPerQuarter());
+		return playbackStartTick + Math.round(elapsedMicros * project().ppq() / (double)project().tempoMicrosPerQuarter());
 	}
 
 	private void undo() {
 		history.undo();
+		playbackStartTick = Math.min(playbackStartTick, project().endTick());
 		selectedNotes.clear();
 		saveProject();
 		rebuildLayerButtons();
@@ -899,6 +1000,7 @@ public final class ComposerScreen extends Screen {
 
 	private void redo() {
 		history.redo();
+		playbackStartTick = Math.min(playbackStartTick, project().endTick());
 		selectedNotes.clear();
 		saveProject();
 		rebuildLayerButtons();
@@ -908,6 +1010,7 @@ public final class ComposerScreen extends Screen {
 
 	private void apply(ComposerProject project) {
 		history.apply(project);
+		playbackStartTick = Math.min(playbackStartTick, project.endTick());
 		saveProject();
 		updateButtonStates();
 	}
@@ -922,7 +1025,7 @@ public final class ComposerScreen extends Screen {
 			return -1;
 		}
 		for (int index = 0; index < project().layers().size(); index++) {
-			int top = 48 + index * 68;
+			int top = layerY(index);
 			if (y >= top && y < top + 20) {
 				return index;
 			}
@@ -933,13 +1036,17 @@ public final class ComposerScreen extends Screen {
 	private void beginLayerRename(int layerIndex) {
 		cancelLayerRename();
 		editingLayer = layerIndex;
-		int y = 48 + layerIndex * 68;
+		int y = layerY(layerIndex);
 		layerNameBox = new EditBox(font, 32, y, LAYER_PANEL_WIDTH - 40, 20,
 			Component.literal("Layer name"));
 		layerNameBox.setMaxLength(48);
 		layerNameBox.setValue(project().layers().get(layerIndex).name());
 		addRenderableWidget(layerNameBox);
 		setInitialFocus(layerNameBox);
+	}
+
+	private static int layerY(int layerIndex) {
+		return 48 + layerIndex * LAYER_ROW_HEIGHT;
 	}
 
 	private void commitLayerRename() {
@@ -1108,6 +1215,11 @@ public final class ComposerScreen extends Screen {
 
 	private boolean insideRoll(double x, double y) {
 		return x >= rollX && x < rollX + rollWidth && y >= rollY && y < rollY + rollHeight;
+	}
+
+	private boolean insideRuler(double x, double y) {
+		return x >= rollX && x < rollX + rollWidth
+			&& y >= rollY - TIMELINE_RULER_HEIGHT && y < rollY;
 	}
 
 	private boolean shiftDown() {
