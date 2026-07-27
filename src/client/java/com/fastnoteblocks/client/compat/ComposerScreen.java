@@ -181,7 +181,7 @@ public final class ComposerScreen extends Screen {
 				apply(project().withActiveLayer(layerIndex));
 				selectedNotes.clear();
 				rebuildLayerButtons();
-			}).bounds(8, y, LAYER_PANEL_WIDTH - 16, 20)
+			}).bounds(14, y, LAYER_PANEL_WIDTH - 22, 20)
 				.tooltip(Tooltip.create(Component.literal("Make this the active editing layer")))
 				.build());
 			Button mute = addRenderableWidget(Button.builder(
@@ -189,7 +189,7 @@ public final class ComposerScreen extends Screen {
 				button -> updateLayer(layerIndex, project().layers().get(layerIndex).withMuted(
 					!project().layers().get(layerIndex).muted()
 				))
-			).bounds(8, y + 22, 24, 16)
+			).bounds(14, y + 22, 24, 16)
 				.tooltip(Tooltip.create(Component.literal(layer.muted() ? "Unmute layer" : "Mute layer")))
 				.build());
 			Button build = addRenderableWidget(Button.builder(
@@ -197,7 +197,7 @@ public final class ComposerScreen extends Screen {
 				button -> updateLayer(layerIndex, project().layers().get(layerIndex).withBuildEnabled(
 					!project().layers().get(layerIndex).buildEnabled()
 				))
-			).bounds(34, y + 22, 24, 16)
+			).bounds(40, y + 22, 24, 16)
 				.tooltip(Tooltip.create(Component.literal(layer.buildEnabled() ? "Included when building" : "Skipped when building")))
 				.build());
 			Button visible = addRenderableWidget(Button.builder(
@@ -205,13 +205,13 @@ public final class ComposerScreen extends Screen {
 				button -> updateLayer(layerIndex, project().layers().get(layerIndex).withVisible(
 					!project().layers().get(layerIndex).visible()
 				))
-			).bounds(60, y + 22, 24, 16)
+			).bounds(66, y + 22, 24, 16)
 				.tooltip(Tooltip.create(Component.literal(layer.visible() ? "Shown in the editor" : "Hidden in the editor")))
 				.build());
 			Button instrument = addRenderableWidget(Button.builder(
 				Component.literal(PreviewInstrument.byId(layer.instrument()).name()),
 				button -> instrumentMenuLayer = instrumentMenuLayer == layerIndex ? -1 : layerIndex
-			).bounds(86, y + 22, 62, 16)
+			).bounds(92, y + 22, 56, 16)
 				.tooltip(Tooltip.create(Component.literal("Open the note-block instrument palette")))
 				.build());
 			Button up = addRenderableWidget(Button.builder(Component.literal("^"),
@@ -459,12 +459,12 @@ public final class ComposerScreen extends Screen {
 			int y = layerY(index);
 			int color = LAYER_COLORS[index % LAYER_COLORS.length];
 			boolean activeLayer = index == project().activeLayerIndex();
-			graphics.fill(6, y - 2, LAYER_PANEL_WIDTH - 6, y + LAYER_ROW_HEIGHT - 2,
-				activeLayer ? 0x663F444A : 0x33292D34);
-			graphics.fill(6, y - 2, 10, y + LAYER_ROW_HEIGHT - 2, color);
+			graphics.fill(8, y - 3, LAYER_PANEL_WIDTH - 8, y - 2, 0x331D2026);
+			graphics.fill(8, y + LAYER_ROW_HEIGHT - 3, LAYER_PANEL_WIDTH - 8, y + LAYER_ROW_HEIGHT - 2, 0x441D2026);
+			graphics.fill(8, y, 12, y + 38, color);
 			if (activeLayer) {
-				graphics.fill(6, y - 2, LAYER_PANEL_WIDTH - 6, y - 1, color);
-				graphics.fill(6, y + LAYER_ROW_HEIGHT - 3, LAYER_PANEL_WIDTH - 6, y + LAYER_ROW_HEIGHT - 2, color);
+				graphics.fill(12, y, LAYER_PANEL_WIDTH - 8, y + 20, 0x332D333A);
+				graphics.fill(12, y + 19, LAYER_PANEL_WIDTH - 8, y + 20, color);
 			}
 		}
 		int active = project().activeLayerIndex();
