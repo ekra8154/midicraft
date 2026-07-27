@@ -177,13 +177,6 @@ public final class ComposerScreen extends Screen {
 			final int layerIndex = index;
 			Layer layer = project.layers().get(index);
 			int y = layerY(index);
-			Button active = addRenderableWidget(Button.builder(layerLabel(index, layer), button -> {
-				apply(project().withActiveLayer(layerIndex));
-				selectedNotes.clear();
-				rebuildLayerButtons();
-			}).bounds(14, y, LAYER_PANEL_WIDTH - 22, 20)
-				.tooltip(Tooltip.create(Component.literal("Make this the active editing layer")))
-				.build());
 			Button mute = addRenderableWidget(Button.builder(
 				Component.literal(layer.muted() ? "X" : "M"),
 				button -> updateLayer(layerIndex, project().layers().get(layerIndex).withMuted(
@@ -226,7 +219,7 @@ public final class ComposerScreen extends Screen {
 				.build());
 			up.active = layerIndex > 0;
 			down.active = layerIndex < project.layers().size() - 1;
-			layerButtons.addAll(List.of(active, mute, build, visible, instrument, up, down));
+			layerButtons.addAll(List.of(mute, build, visible, instrument, up, down));
 		}
 	}
 
@@ -235,7 +228,7 @@ public final class ComposerScreen extends Screen {
 			removeWidget(button);
 		}
 		moveLayerButtons.clear();
-		int y = height - 86;
+		int y = Math.min(height - 46, layerY(project().layers().size()) + 8);
 		addLayerButton = addRenderableWidget(Button.builder(Component.literal("+ Layer"), button -> {
 			if (project().layers().size() < ComposerProject.MAX_LAYERS) {
 				ComposerProject added = project().addLayer();
@@ -253,7 +246,7 @@ public final class ComposerScreen extends Screen {
 			)))
 			.build());
 		moveLayerButtons.add(addLayerButton);
-		for (int index = 0; index < ComposerProject.MAX_LAYERS; index++) {
+		for (int index = 0; index < 0; index++) {
 			final int target = index;
 			int row = index / 5;
 			int column = index % 5;
@@ -459,16 +452,20 @@ public final class ComposerScreen extends Screen {
 			int y = layerY(index);
 			int color = LAYER_COLORS[index % LAYER_COLORS.length];
 			boolean activeLayer = index == project().activeLayerIndex();
-			graphics.fill(8, y - 3, LAYER_PANEL_WIDTH - 8, y - 2, 0x331D2026);
-			graphics.fill(8, y + LAYER_ROW_HEIGHT - 3, LAYER_PANEL_WIDTH - 8, y + LAYER_ROW_HEIGHT - 2, 0x441D2026);
-			graphics.fill(8, y, 12, y + 38, color);
+			graphics.fill(8, y - 2, LAYER_PANEL_WIDTH - 8, y + LAYER_ROW_HEIGHT - 2,
+				activeLayer ? 0x66303740 : 0x44252A31);
+			graphics.fill(8, y - 2, LAYER_PANEL_WIDTH - 8, y - 1, activeLayer ? color : 0x66383D44);
+			graphics.fill(8, y + LAYER_ROW_HEIGHT - 3, LAYER_PANEL_WIDTH - 8, y + LAYER_ROW_HEIGHT - 2,
+				activeLayer ? color : 0x88383D44);
+			graphics.fill(8, y - 2, 12, y + LAYER_ROW_HEIGHT - 2, color);
 			if (activeLayer) {
-				graphics.fill(12, y, LAYER_PANEL_WIDTH - 8, y + 20, 0x332D333A);
-				graphics.fill(12, y + 19, LAYER_PANEL_WIDTH - 8, y + 20, color);
+				graphics.fill(12, y, LAYER_PANEL_WIDTH - 10, y + 20, 0x553D444D);
 			}
+			String marker = activeLayer ? "> " : "";
+			graphics.text(font, Component.literal(marker + "L" + (index + 1) + "  " + project().layers().get(index).name()),
+				22, y + 6, activeLayer ? 0xFFFFFFFF : 0xFFD6D8DD, false);
 		}
 		int active = project().activeLayerIndex();
-		graphics.text(font, Component.literal("Move selection:"), 8, height - 100, 0xFFAAAAAA, false);
 		graphics.text(font, Component.literal("Active: Layer " + (active + 1)), 8, height - 18,
 			LAYER_COLORS[active % LAYER_COLORS.length], false);
 	}
@@ -639,6 +636,15 @@ public final class ComposerScreen extends Screen {
 		}
 		if (event.button() == 0 && handleInstrumentMenuClick(event.x(), event.y())) {
 			return true;
+		}
+		if (event.button() == 0) {
+			int layerIndex = layerHeaderAt(event.x(), event.y());
+			if (layerIndex >= 0) {
+				apply(project().withActiveLayer(layerIndex));
+				selectedNotes.clear();
+				rebuildLayerButtons();
+				return true;
+			}
 		}
 		if (event.button() == 0 && insideRuler(event.x(), event.y())) {
 			setPlaybackStart(mouseTick(event.x()), true);
@@ -1021,12 +1027,12 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private int layerHeaderAt(double x, double y) {
-		if (x < 8 || x >= LAYER_PANEL_WIDTH - 8) {
+		if (x < 12 || x >= LAYER_PANEL_WIDTH - 10) {
 			return -1;
 		}
 		for (int index = 0; index < project().layers().size(); index++) {
 			int top = layerY(index);
-			if (y >= top && y < top + 20) {
+			if (y >= top && y < top + 21) {
 				return index;
 			}
 		}
