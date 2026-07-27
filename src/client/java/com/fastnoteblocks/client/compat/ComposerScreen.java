@@ -10,8 +10,10 @@ import com.fastnoteblocks.client.composer.ComposerProject.PasteResult;
 import com.mojang.blaze3d.platform.InputConstants;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
@@ -39,6 +41,8 @@ public final class ComposerScreen extends Screen {
 	private static final int CONTEXT_MENU_WIDTH = 104;
 	private static final int CONTEXT_MENU_ROW_HEIGHT = 16;
 	private static final int ROW_HEIGHT = 12;
+	private static final int MAX_SIMULTANEOUS_NOTES = 30;
+	private static final int CHORD_WARNING_THRESHOLD = 24;
 	private static final int MIN_MIDI_NOTE = 0;
 	private static final int MAX_MIDI_NOTE = 127;
 	private static final int[] LAYER_COLORS = {
@@ -581,6 +585,15 @@ public final class ComposerScreen extends Screen {
 					x + 3, rollY + 2, 0xFFAAAAAA, false);
 			}
 		}
+		for (Map.Entry<Long, Integer> entry : buildChordCounts().entrySet()) {
+			if (entry.getValue() <= MAX_SIMULTANEOUS_NOTES) {
+				continue;
+			}
+			int x = tickX(entry.getKey());
+			if (x >= rollX && x <= rollX + rollWidth) {
+				graphics.fill(x - 1, rollY, x + 2, rollY + rollHeight, 0x66FF3333);
+			}
+		}
 	}
 
 	private void extractNotes(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
@@ -628,10 +641,35 @@ public final class ComposerScreen extends Screen {
 			.flatMap(layer -> layer.notes().stream())
 			.filter(note -> !note.isBuildable())
 			.count();
+		Map<Long, Integer> chordCounts = buildChordCounts();
+		int peakChord = chordCounts.values().stream().mapToInt(Integer::intValue).max().orElse(0);
+		long overloaded = chordCounts.values().stream()
+			.filter(count -> count > MAX_SIMULTANEOUS_NOTES)
+			.count();
 		String status = selectedNotes.size() + " selected"
 			+ (outOfRange > 0 ? "   " + outOfRange + " outside Minecraft range" : "")
+			+ "   Build peak " + peakChord + "/" + MAX_SIMULTANEOUS_NOTES
+			+ (overloaded > 0 ? " (" + overloaded + " overloaded)" : "")
 			+ "   Double-click to add • drag to move • right-click selection for actions";
-		graphics.text(font, status, rollX, height - 16, outOfRange > 0 ? 0xFFFF9999 : 0xFFBBBBBB, false);
+		int color = overloaded > 0 || outOfRange > 0
+			? 0xFFFF7777
+			: peakChord >= CHORD_WARNING_THRESHOLD ? 0xFFFFAA00 : 0xFFBBBBBB;
+		graphics.text(font, status, rollX, height - 16, color, false);
+	}
+
+	private Map<Long, Integer> buildChordCounts() {
+		Map<Long, Integer> counts = new HashMap<>();
+		for (Layer layer : project().layers()) {
+			if (!layer.buildEnabled() || layer.muted()) {
+				continue;
+			}
+			for (NoteEvent note : layer.notes()) {
+				if (note.isBuildable()) {
+					counts.merge(note.startTick(), 1, Integer::sum);
+				}
+			}
+		}
+		return counts;
 	}
 
 	@Override

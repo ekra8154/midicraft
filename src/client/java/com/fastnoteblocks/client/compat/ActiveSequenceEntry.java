@@ -9,10 +9,13 @@ import com.fastnoteblocks.client.FastNoteblocksConfig.SavedSequence;
 import com.fastnoteblocks.client.FastNoteblocksConfig.SequenceTrack;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.function.Consumer;
 import me.shedaniel.clothconfig2.api.AbstractConfigListEntry;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
@@ -47,6 +50,9 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 	private static final int TIMELINE_ROW_HEIGHT = 22;
 	private static final int TIMELINE_TICK_WIDTH = 22;
 	private static final int TIMELINE_NOTE_WIDTH = 34;
+	private static final int MAX_SIMULTANEOUS_NOTES = 30;
+	private static final int CHORD_WARNING_THRESHOLD = 24;
+	private static final int COMPACT_LANE_SPACING = 4;
 	private static final String PITCH_GUIDE = "0:F♯  1:G  2:G♯  3:A  4:A♯  5:B  6:C  7:C♯  8:D  9:D♯  10:E  11:F  "
 		+ "12:F♯  13:G  14:G♯  15:A  16:A♯  17:B  18:C  19:C♯  20:D  21:D♯  22:E  23:F  24:F♯";
 
@@ -112,7 +118,7 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 			.build();
 		this.pasteLineButton = Button.builder(Component.literal("Place tracks"), button -> pastePlayableLine())
 			.bounds(0, 0, 90, 20)
-			.tooltip(Tooltip.create(Component.literal("Use commands to paste enabled build tracks as a straight playable line")))
+			.tooltip(Tooltip.create(Component.literal("Use commands to place enabled build tracks in the world")))
 			.build();
 		this.addTrackButton = Button.builder(Component.literal("+ Add track"), button -> addTrack())
 			.bounds(0, 0, 120, 20)
@@ -214,33 +220,59 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 		if (minecraft.player == null || minecraft.level == null) {
 			return;
 		}
-		PastePlan plan;
 		try {
-			plan = createPastePlan(minecraft);
+			ChordStats stats = chordStats(enabledEventNotes());
+			if (stats.peak() > MAX_SIMULTANEOUS_NOTES) {
+				throw new IllegalArgumentException(overloadMessage(stats));
+			}
 		} catch (IllegalArgumentException exception) {
 			minecraft.gui.hud.setOverlayMessage(Component.literal(exception.getMessage()).withStyle(ChatFormatting.RED), true);
 			return;
 		}
 		Screen returnScreen = minecraft.gui.screen();
+		minecraft.gui.setScreen(new PasteModeScreen(returnScreen, mode -> {
+			minecraft.gui.setScreen(returnScreen);
+			confirmPasteLayout(minecraft, mode, returnScreen);
+		}));
+	}
+
+	private void confirmPasteLayout(Minecraft minecraft, PasteMode mode, Screen returnScreen) {
+		PastePlan plan;
+		try {
+			plan = createPastePlan(minecraft, mode);
+		} catch (IllegalArgumentException exception) {
+			minecraft.gui.hud.setOverlayMessage(Component.literal(exception.getMessage()).withStyle(ChatFormatting.RED), true);
+			return;
+		}
 		minecraft.gui.setScreen(new ConfirmScreen(confirmed -> {
 			if (confirmed) {
 				CommandPasteSender.start(plan.commands());
 			}
 			minecraft.gui.setScreen(returnScreen);
 		}, Component.literal("Place active sequence tracks?"),
-			Component.literal(plan.commands().size() + " commands, about " + plan.length() + " blocks long. Requires /setblock permission and overwrites blocks."),
+			Component.literal(plan.mode().label() + ": " + plan.width() + " x " + plan.depth() + " x " + plan.height()
+				+ ", " + plan.commands().size() + " commands. Requires /setblock permission and overwrites blocks."),
 			Component.literal("Place"), CommonComponents.GUI_CANCEL));
 	}
 
-	private PastePlan createPastePlan(Minecraft minecraft) {
+	private PastePlan createPastePlan(Minecraft minecraft, PasteMode mode) {
 		List<EventNote> notes = enabledEventNotes();
 		if (notes.isEmpty()) {
 			throw new IllegalArgumentException("No enabled non-muted notes to paste");
 		}
+		ChordStats stats = chordStats(notes);
+		if (stats.peak() > MAX_SIMULTANEOUS_NOTES) {
+			throw new IllegalArgumentException(overloadMessage(stats));
+		}
 		Direction forward = minecraft.player.getDirection();
 		BlockPos origin = pasteOrigin(minecraft, forward);
-		Direction right = forward.getClockWise();
-		List<String> commands = new ArrayList<>();
+		return mode == PasteMode.COMPACT
+			? createCompactPastePlan(origin, forward, notes)
+			: createStraightPastePlan(origin, forward, notes);
+	}
+
+	private PastePlan createStraightPastePlan(BlockPos origin, Direction forward, List<EventNote> notes) {
+		PlacementPlan placements = new PlacementPlan();
 		int cursor = 0;
 		int currentTime = 0;
 		for (int index = 0; index < notes.size();) {
@@ -250,14 +282,11 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 			while (index < notes.size() && notes.get(index).time() == time) {
 				chord.add(notes.get(index++));
 			}
-			if (chord.size() > 30) {
-				throw new IllegalArgumentException("Paste line supports up to 30 notes on one tick for now");
-			}
-			DelayTrigger trigger = addDelayBeforeEvent(commands, origin, forward, cursor, delay);
-			cursor = addEventModule(commands, origin, forward, right, trigger.cursor(), trigger.triggerDelay(), chord);
+			DelayTrigger trigger = addDelayBeforeEvent(placements, origin, forward, cursor, delay);
+			cursor = addEventModule(placements, origin, forward, trigger.cursor(), trigger.triggerDelay(), chord);
 			currentTime = time;
 		}
-		return new PastePlan(deduplicateCommands(commands), cursor + 1);
+		return placements.finish(PasteMode.STRAIGHT);
 	}
 
 	private List<EventNote> enabledEventNotes() {
@@ -287,57 +316,242 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 		return List.copyOf(notes);
 	}
 
+	private static ChordStats chordStats(List<EventNote> notes) {
+		Map<Integer, Integer> counts = new LinkedHashMap<>();
+		for (EventNote note : notes) {
+			counts.merge(note.time(), 1, Integer::sum);
+		}
+		int peak = 0;
+		int peakTime = 0;
+		int overloadedTimes = 0;
+		for (Map.Entry<Integer, Integer> entry : counts.entrySet()) {
+			if (entry.getValue() > peak) {
+				peak = entry.getValue();
+				peakTime = entry.getKey();
+			}
+			if (entry.getValue() > MAX_SIMULTANEOUS_NOTES) {
+				overloadedTimes++;
+			}
+		}
+		return new ChordStats(peak, peakTime, overloadedTimes);
+	}
+
+	private ChordStats currentChordStats() {
+		if (!sequencesValid()) {
+			return new ChordStats(0, 0, 0);
+		}
+		return chordStats(enabledEventNotes());
+	}
+
+	private static String overloadMessage(ChordStats stats) {
+		return stats.peak() + " simultaneous notes at time " + stats.peakTime()
+			+ " exceeds the build limit of " + MAX_SIMULTANEOUS_NOTES;
+	}
+
 	private static BlockPos pasteOrigin(Minecraft minecraft, Direction forward) {
 		return minecraft.player.blockPosition().relative(forward).immutable();
 	}
 
-	private static DelayTrigger addDelayBeforeEvent(List<String> commands, BlockPos origin, Direction forward, int cursor, int delay) {
+	private PastePlan createCompactPastePlan(BlockPos origin, Direction forward, List<EventNote> notes) {
+		List<EventGroup> events = eventGroups(notes);
+		CompactLayout layout = chooseCompactLayout(events);
+		PlacementPlan placements = new PlacementPlan();
+		BlockPos cursor = origin;
+		Direction travel = forward;
+		Direction laneStep = forward.getClockWise();
+		int currentTime = 0;
+		for (int index = 0; index < events.size(); index++) {
+			EventGroup event = events.get(index);
+			int delay = event.time() - currentTime;
+			SpatialDelayTrigger trigger = addSpatialDelayBeforeEvent(placements, cursor, travel, delay);
+			cursor = addSpatialEventModule(placements, trigger.cursor(), travel, trigger.triggerDelay(), event.notes());
+			currentTime = event.time();
+			if (layout.breakAfter().contains(index + 1)) {
+				cursor = addCompactTurn(placements, cursor, travel, laneStep);
+				travel = travel.getOpposite();
+			}
+		}
+		return placements.finish(PasteMode.COMPACT);
+	}
+
+	private static List<EventGroup> eventGroups(List<EventNote> notes) {
+		List<EventGroup> result = new ArrayList<>();
+		int currentTime = 0;
+		for (int index = 0; index < notes.size();) {
+			int time = notes.get(index).time();
+			List<EventNote> chord = new ArrayList<>();
+			while (index < notes.size() && notes.get(index).time() == time) {
+				chord.add(notes.get(index++));
+			}
+			int delay = time - currentTime;
+			int delayRepeaters = Math.max(0, (delay - 1) / 4);
+			int eventLength = chord.size() <= 3 ? 2 : 1 + (chord.size() + 1) / 2;
+			result.add(new EventGroup(time, List.copyOf(chord), delayRepeaters + eventLength, chord.size() <= 3));
+			currentTime = time;
+		}
+		return List.copyOf(result);
+	}
+
+	private static CompactLayout chooseCompactLayout(List<EventGroup> events) {
+		int totalLength = events.stream().mapToInt(EventGroup::length).sum();
+		int largestEvent = events.stream().mapToInt(EventGroup::length).max().orElse(1);
+		Set<Integer> candidates = new HashSet<>();
+		candidates.add(totalLength);
+		candidates.add(largestEvent);
+		for (int rows = 1; rows <= events.size(); rows++) {
+			candidates.add(Math.max(largestEvent, (totalLength + rows - 1) / rows));
+		}
+		CompactLayout best = null;
+		for (int targetLength : candidates) {
+			CompactLayout candidate = compactLayoutForTarget(events, targetLength);
+			if (best == null
+					|| candidate.squareSize() < best.squareSize()
+					|| candidate.squareSize() == best.squareSize() && candidate.area() < best.area()) {
+				best = candidate;
+			}
+		}
+		return best == null ? new CompactLayout(Set.of(), totalLength, 3) : best;
+	}
+
+	private static CompactLayout compactLayoutForTarget(List<EventGroup> events, int targetLength) {
+		Set<Integer> breaks = new HashSet<>();
+		int rowLength = 0;
+		int rows = 1;
+		int cursor = 0;
+		int direction = 1;
+		int minimum = 0;
+		int maximum = 0;
+		for (int index = 0; index < events.size(); index++) {
+			int eventLength = events.get(index).length();
+			boolean safeTurn = index > 0 && events.get(index - 1).turnSafe();
+			if (rowLength > 0 && rowLength + eventLength > targetLength && safeTurn) {
+				breaks.add(index);
+				int outerTurn = cursor + direction;
+				minimum = Math.min(minimum, outerTurn);
+				maximum = Math.max(maximum, outerTurn);
+				direction = -direction;
+				rowLength = 0;
+				rows++;
+			}
+			int end = cursor + direction * eventLength;
+			minimum = Math.min(minimum, Math.min(cursor, end));
+			maximum = Math.max(maximum, Math.max(cursor, end));
+			cursor = end;
+			rowLength += eventLength;
+		}
+		int width = Math.max(1, maximum - minimum + 1);
+		int depth = (rows - 1) * COMPACT_LANE_SPACING + 3;
+		return new CompactLayout(Set.copyOf(breaks), width, depth);
+	}
+
+	private static BlockPos addCompactTurn(PlacementPlan placements, BlockPos cursor, Direction travel,
+			Direction laneStep) {
+		BlockPos outer = cursor.relative(travel);
+		set(placements, cursor, "minecraft:stone");
+		set(placements, cursor.above(), "minecraft:redstone_wire");
+		set(placements, outer, "minecraft:stone");
+		set(placements, outer.above(), "minecraft:redstone_wire");
+		for (int offset = 1; offset <= COMPACT_LANE_SPACING; offset++) {
+			BlockPos turn = outer.relative(laneStep, offset);
+			set(placements, turn, "minecraft:stone");
+			set(placements, turn.above(), "minecraft:redstone_wire");
+		}
+		return outer.relative(laneStep, COMPACT_LANE_SPACING).relative(travel.getOpposite());
+	}
+
+	private static SpatialDelayTrigger addSpatialDelayBeforeEvent(PlacementPlan placements, BlockPos cursor,
+			Direction travel, int delay) {
+		int remaining = delay;
+		while (remaining > 4) {
+			set(placements, cursor, "minecraft:stone");
+			set(placements, cursor.above(),
+				"minecraft:repeater[facing=" + repeaterFacing(travel) + ",delay=4]");
+			cursor = cursor.relative(travel);
+			remaining -= 4;
+		}
+		return new SpatialDelayTrigger(cursor, Math.max(1, remaining));
+	}
+
+	private static BlockPos addSpatialEventModule(PlacementPlan placements, BlockPos cursor, Direction travel,
+			int triggerDelay, List<EventNote> chord) {
+		set(placements, cursor, "minecraft:stone");
+		set(placements, cursor.above(),
+			"minecraft:repeater[facing=" + repeaterFacing(travel) + ",delay=" + triggerDelay + "]");
+		BlockPos anchor = cursor.relative(travel).above();
+		Direction side = travel.getClockWise();
+		if (chord.size() <= 3) {
+			placeNote(placements, anchor, chord.get(0));
+			if (chord.size() >= 2) {
+				placeNote(placements, anchor.relative(side), chord.get(1));
+			}
+			if (chord.size() >= 3) {
+				placeNote(placements, anchor.relative(side.getOpposite()), chord.get(2));
+			}
+			return cursor.relative(travel, 2);
+		}
+		int busLength = (chord.size() + 1) / 2;
+		for (int bus = 0; bus < busLength; bus++) {
+			BlockPos busPos = anchor.relative(travel, bus);
+			set(placements, busPos, "minecraft:stone");
+			set(placements, busPos.above(), "minecraft:redstone_wire");
+		}
+		for (int noteIndex = 0; noteIndex < chord.size(); noteIndex++) {
+			int bus = noteIndex / 2;
+			Direction noteSide = noteIndex % 2 == 0 ? side : side.getOpposite();
+			placeNote(placements, anchor.relative(travel, bus).relative(noteSide), chord.get(noteIndex));
+		}
+		return cursor.relative(travel, 1 + busLength);
+	}
+
+	private static DelayTrigger addDelayBeforeEvent(PlacementPlan placements, BlockPos origin, Direction forward,
+			int cursor, int delay) {
 		int remaining = delay;
 		while (remaining > 4) {
 			BlockPos pos = at(origin, forward, cursor, 0, 0);
-			set(commands, pos, "minecraft:stone");
-			set(commands, pos.above(), "minecraft:repeater[facing=" + repeaterFacing(forward) + ",delay=4]");
+			set(placements, pos, "minecraft:stone");
+			set(placements, pos.above(), "minecraft:repeater[facing=" + repeaterFacing(forward) + ",delay=4]");
 			cursor++;
 			remaining -= 4;
 		}
 		return new DelayTrigger(cursor, Math.max(1, remaining));
 	}
 
-	private static int addEventModule(List<String> commands, BlockPos origin, Direction forward, Direction right,
+	private static int addEventModule(PlacementPlan placements, BlockPos origin, Direction forward,
 			int cursor, int triggerDelay, List<EventNote> chord) {
+		Direction right = forward.getClockWise();
 		BlockPos triggerPos = at(origin, forward, cursor, 0, 0);
-		set(commands, triggerPos, "minecraft:stone");
-		set(commands, triggerPos.above(), "minecraft:repeater[facing=" + repeaterFacing(forward) + ",delay=" + triggerDelay + "]");
+		set(placements, triggerPos, "minecraft:stone");
+		set(placements, triggerPos.above(), "minecraft:repeater[facing=" + repeaterFacing(forward) + ",delay=" + triggerDelay + "]");
 		BlockPos anchor = at(origin, forward, cursor + 1, 1, 0);
 		if (chord.size() <= 3) {
-			placeNote(commands, anchor, chord.get(0));
+			placeNote(placements, anchor, chord.get(0));
 			if (chord.size() >= 2) {
-				placeNote(commands, anchor.relative(right), chord.get(1));
+				placeNote(placements, anchor.relative(right), chord.get(1));
 			}
 			if (chord.size() >= 3) {
-				placeNote(commands, anchor.relative(right.getOpposite()), chord.get(2));
+				placeNote(placements, anchor.relative(right.getOpposite()), chord.get(2));
 			}
 			return cursor + 2;
 		}
 		int busLength = (chord.size() + 1) / 2;
 		for (int bus = 0; bus < busLength; bus++) {
 			BlockPos busPos = anchor.relative(forward, bus);
-			set(commands, busPos, "minecraft:stone");
-			set(commands, busPos.above(), "minecraft:redstone_wire");
+			set(placements, busPos, "minecraft:stone");
+			set(placements, busPos.above(), "minecraft:redstone_wire");
 		}
 		for (int noteIndex = 0; noteIndex < chord.size(); noteIndex++) {
 			EventNote note = chord.get(noteIndex);
 			int bus = noteIndex / 2;
 			Direction side = noteIndex % 2 == 0 ? right : right.getOpposite();
-			placeNote(commands, anchor.relative(forward, bus).relative(side), note);
+			placeNote(placements, anchor.relative(forward, bus).relative(side), note);
 		}
 		return cursor + 1 + busLength;
 	}
 
-	private static void placeNote(List<String> commands, BlockPos notePos, EventNote note) {
-		set(commands, notePos.below(), note.instrumentBlock());
-		set(commands, notePos, "minecraft:note_block[note=" + note.pitch() + "]");
-		set(commands, notePos.above(), "minecraft:air");
+	private static void placeNote(PlacementPlan placements, BlockPos notePos, EventNote note) {
+		set(placements, notePos.below(), note.instrumentBlock());
+		set(placements, notePos, "minecraft:note_block[note=" + note.pitch() + "]");
+		set(placements, notePos.above(), "minecraft:air");
 	}
 
 	private static BlockPos at(BlockPos origin, Direction forward, int forwardOffset, int upOffset, int rightOffset) {
@@ -346,19 +560,8 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 			.above(upOffset);
 	}
 
-	private static void set(List<String> commands, BlockPos pos, String block) {
-		commands.add("setblock " + pos.getX() + " " + pos.getY() + " " + pos.getZ() + " " + block + " replace");
-	}
-
-	private static List<String> deduplicateCommands(List<String> commands) {
-		Map<String, String> byPosition = new LinkedHashMap<>();
-		for (String command : commands) {
-			String[] parts = command.split(" ", 6);
-			if (parts.length >= 5) {
-				byPosition.put(parts[1] + " " + parts[2] + " " + parts[3], command);
-			}
-		}
-		return List.copyOf(byPosition.values());
+	private static void set(PlacementPlan placements, BlockPos pos, String block) {
+		placements.set(pos, block);
 	}
 
 	private static String directionName(Direction direction) {
@@ -544,9 +747,9 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 			return 24;
 		}
 		if (timelineMode) {
-			return 60 + (tracks.size() + 1) * TIMELINE_ROW_HEIGHT + 18;
+			return 72 + (tracks.size() + 1) * TIMELINE_ROW_HEIGHT + 18;
 		}
-		int height = 36 + 24;
+		int height = 48 + 24;
 		for (TrackRow track : tracks) {
 			height += track.height() + 4;
 		}
@@ -557,10 +760,17 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 	public void extractRenderState(GuiGraphicsExtractor graphics, int index, int y, int x, int entryWidth,
 			int entryHeight, int mouseX, int mouseY, boolean hovered, float partialTick) {
 		updatePlayback();
+		ChordStats chordStats = currentChordStats();
 		playButton.active = sequencesValid();
-		pasteLineButton.active = sequencesValid() || CommandPasteSender.isRunning();
+		pasteLineButton.active = (sequencesValid() && chordStats.peak() <= MAX_SIMULTANEOUS_NOTES)
+			|| CommandPasteSender.isRunning();
 		pasteLineButton.setMessage(Component.literal(CommandPasteSender.isRunning() ? "Cancel place" : "Place tracks"));
 		pasteLineButton.setWidth(CommandPasteSender.isRunning() ? 92 : 90);
+		pasteLineButton.setTooltip(Tooltip.create(Component.literal(
+			chordStats.peak() > MAX_SIMULTANEOUS_NOTES
+				? overloadMessage(chordStats)
+				: "Place enabled build tracks. Peak chord: " + chordStats.peak() + "/" + MAX_SIMULTANEOUS_NOTES
+		)));
 		expandButton.setX(x);
 		expandButton.setY(y);
 		expandButton.extractRenderState(graphics, mouseX, mouseY, partialTick);
@@ -593,6 +803,7 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 
 		if (timelineMode) {
 			extractTimeline(graphics, x, y + 26, entryWidth, mouseX, mouseY);
+			extractBuildLimitStatus(graphics, x, y + entryHeight - 11, chordStats);
 			return;
 		}
 
@@ -605,6 +816,19 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 		addTrackButton.setX(x + (entryWidth - addTrackButton.getWidth()) / 2);
 		addTrackButton.setY(trackY);
 		addTrackButton.extractRenderState(graphics, mouseX, mouseY, partialTick);
+		extractBuildLimitStatus(graphics, x, y + entryHeight - 11, chordStats);
+	}
+
+	private static void extractBuildLimitStatus(GuiGraphicsExtractor graphics, int x, int y, ChordStats stats) {
+		int color = stats.peak() > MAX_SIMULTANEOUS_NOTES
+			? 0xFFFF5555
+			: stats.peak() >= CHORD_WARNING_THRESHOLD ? 0xFFFFAA00 : 0xFF999999;
+		String text = "Build peak: " + stats.peak() + "/" + MAX_SIMULTANEOUS_NOTES;
+		if (stats.overloadedTimes() > 0) {
+			text += " (" + stats.overloadedTimes() + " overloaded time"
+				+ (stats.overloadedTimes() == 1 ? "" : "s") + ")";
+		}
+		graphics.text(Minecraft.getInstance().font, Component.literal(text), x, y, color, false);
 	}
 
 	private static void extractPitchGuide(GuiGraphicsExtractor graphics, int x, int y, int width) {
@@ -1302,10 +1526,134 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 	private record EventNote(int time, int trackNumber, int order, int pitch, String instrumentBlock) {
 	}
 
-	private record PastePlan(List<String> commands, int length) {
+	private record EventGroup(int time, List<EventNote> notes, int length, boolean turnSafe) {
+	}
+
+	private record ChordStats(int peak, int peakTime, int overloadedTimes) {
+	}
+
+	private record CompactLayout(Set<Integer> breakAfter, int width, int depth) {
+		int squareSize() {
+			return Math.max(width, depth);
+		}
+
+		int area() {
+			return width * depth;
+		}
+	}
+
+	private enum PasteMode {
+		COMPACT("Compact"),
+		STRAIGHT("Straight");
+
+		private final String label;
+
+		PasteMode(String label) {
+			this.label = label;
+		}
+
+		String label() {
+			return label;
+		}
+	}
+
+	private record PastePlan(List<String> commands, int width, int depth, int height, PasteMode mode) {
 	}
 
 	private record DelayTrigger(int cursor, int triggerDelay) {
+	}
+
+	private record SpatialDelayTrigger(BlockPos cursor, int triggerDelay) {
+	}
+
+	private static final class PlacementPlan {
+		private final Map<BlockPos, String> blocks = new LinkedHashMap<>();
+		private int minimumX = Integer.MAX_VALUE;
+		private int minimumY = Integer.MAX_VALUE;
+		private int minimumZ = Integer.MAX_VALUE;
+		private int maximumX = Integer.MIN_VALUE;
+		private int maximumY = Integer.MIN_VALUE;
+		private int maximumZ = Integer.MIN_VALUE;
+
+		void set(BlockPos position, String block) {
+			BlockPos key = position.immutable();
+			String existing = blocks.putIfAbsent(key, block);
+			if (existing != null && !existing.equals(block)) {
+				throw new IllegalArgumentException("Placement layout collision at "
+					+ key.getX() + " " + key.getY() + " " + key.getZ());
+			}
+			if (!"minecraft:air".equals(block)) {
+				minimumX = Math.min(minimumX, key.getX());
+				minimumY = Math.min(minimumY, key.getY());
+				minimumZ = Math.min(minimumZ, key.getZ());
+				maximumX = Math.max(maximumX, key.getX());
+				maximumY = Math.max(maximumY, key.getY());
+				maximumZ = Math.max(maximumZ, key.getZ());
+			}
+		}
+
+		PastePlan finish(PasteMode mode) {
+			List<String> commands = blocks.entrySet().stream()
+				.map(entry -> "setblock " + entry.getKey().getX() + " " + entry.getKey().getY() + " "
+					+ entry.getKey().getZ() + " " + entry.getValue() + " replace")
+				.toList();
+			int widthX = maximumX < minimumX ? 0 : maximumX - minimumX + 1;
+			int widthZ = maximumZ < minimumZ ? 0 : maximumZ - minimumZ + 1;
+			int height = maximumY < minimumY ? 0 : maximumY - minimumY + 1;
+			return new PastePlan(commands, Math.max(widthX, widthZ), Math.min(widthX, widthZ), height, mode);
+		}
+	}
+
+	private static final class PasteModeScreen extends Screen {
+		private final Screen parent;
+		private final Consumer<PasteMode> selection;
+
+		PasteModeScreen(Screen parent, Consumer<PasteMode> selection) {
+			super(Component.literal("Choose placement layout"));
+			this.parent = parent;
+			this.selection = selection;
+		}
+
+		@Override
+		protected void init() {
+			int centerX = width / 2;
+			int buttonY = height / 2 + 8;
+			addRenderableWidget(Button.builder(Component.literal("Compact"), button -> choose(PasteMode.COMPACT))
+				.bounds(centerX - 126, buttonY, 80, 20)
+				.tooltip(Tooltip.create(Component.literal("Snake the circuit into the smallest near-square footprint")))
+				.build());
+			addRenderableWidget(Button.builder(Component.literal("Straight"), button -> choose(PasteMode.STRAIGHT))
+				.bounds(centerX - 40, buttonY, 80, 20)
+				.tooltip(Tooltip.create(Component.literal("Keep the original straight playable line")))
+				.build());
+			addRenderableWidget(Button.builder(CommonComponents.GUI_CANCEL, button -> onClose())
+				.bounds(centerX + 46, buttonY, 80, 20)
+				.build());
+		}
+
+		private void choose(PasteMode mode) {
+			selection.accept(mode);
+		}
+
+		@Override
+		public void extractBackground(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
+			extractBlurredBackground(graphics);
+			extractTransparentBackground(graphics);
+		}
+
+		@Override
+		public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
+			super.extractRenderState(graphics, mouseX, mouseY, partialTick);
+			graphics.centeredText(font, title, width / 2, height / 2 - 34, 0xFFFFFFFF);
+			graphics.centeredText(font,
+				Component.literal("Compact snakes into a near-square footprint; straight preserves the original line."),
+				width / 2, height / 2 - 14, 0xFFBBBBBB);
+		}
+
+		@Override
+		public void onClose() {
+			minecraft.gui.setScreen(parent);
+		}
 	}
 
 	private record TimelineHit(int trackIndex, int from, int to) {

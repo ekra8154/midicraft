@@ -29,7 +29,7 @@ public final class CommandPasteSender {
 		COMMANDS.addAll(commands);
 		total = COMMANDS.size();
 		sent = 0;
-		show(Component.literal("Pasting playable line: 0/" + total));
+		show(Component.literal("Placing sequence: 0/" + total));
 	}
 
 	static void cancel(boolean notify) {
@@ -38,7 +38,7 @@ public final class CommandPasteSender {
 		}
 		COMMANDS.clear();
 		if (notify) {
-			show(Component.literal("Playable line paste cancelled at " + sent + "/" + total));
+			show(Component.literal("Sequence placement cancelled at " + sent + "/" + total));
 		}
 		total = 0;
 		sent = 0;
@@ -57,11 +57,11 @@ public final class CommandPasteSender {
 			sent++;
 		}
 		if (COMMANDS.isEmpty()) {
-			show(Component.literal("Playable line paste complete: " + sent + "/" + total));
+			show(Component.literal("Sequence placement complete: " + sent + "/" + total));
 			total = 0;
 			sent = 0;
 		} else if (sent % 20 == 0) {
-			show(Component.literal("Pasting playable line: " + sent + "/" + total));
+			show(Component.literal("Placing sequence: " + sent + "/" + total));
 		}
 	}
 
