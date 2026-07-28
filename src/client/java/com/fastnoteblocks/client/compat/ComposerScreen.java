@@ -3,19 +3,18 @@ package com.fastnoteblocks.client.compat;
 import com.fastnoteblocks.client.FastNoteblocksConfig;
 import com.fastnoteblocks.client.composer.ComposerHistory;
 import com.fastnoteblocks.client.composer.ComposerProject;
+import com.fastnoteblocks.client.composer.SongAnalysis;
 import com.fastnoteblocks.client.composer.ComposerProject.ClipboardNote;
 import com.fastnoteblocks.client.composer.ComposerProject.Layer;
 import com.fastnoteblocks.client.composer.ComposerProject.MinecraftConversion;
 import com.fastnoteblocks.client.composer.ComposerProject.NoteEvent;
 import com.fastnoteblocks.client.composer.ComposerProject.PasteResult;
-import com.fastnoteblocks.client.composer.ComposerState;
 import com.mojang.blaze3d.platform.InputConstants;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.LinkedHashSet;
-import java.util.List;
 import java.util.Map;
+import java.util.List;
 import java.util.Set;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.AbstractSliderButton;
@@ -37,6 +36,8 @@ import org.lwjgl.util.tinyfd.TinyFileDialogs;
 
 public final class ComposerScreen extends Screen {
 	private static final int TOOLBAR_HEIGHT = 34;
+	/** Right edge of the toolbar's buttons: File..Build, Play, Snap and the speed slider. */
+	private static final int TOOLBAR_CONTROLS_RIGHT = 8 + 6 * 58 + 82 + 94;
 	private static final int LAYER_PANEL_WIDTH = 196;
 	private static final int PIANO_WIDTH = 48;
 	private static final int TIMELINE_RULER_HEIGHT = 16;
@@ -53,8 +54,7 @@ public final class ComposerScreen extends Screen {
 	private static final int TOOLBAR_MENU_ROW_HEIGHT = 18;
 	private static final int VELOCITY_CUTOFF_STEP = 8;
 	private static final int ROW_HEIGHT = 12;
-	private static final int MAX_SIMULTANEOUS_NOTES = 30;
-	private static final int CHORD_WARNING_THRESHOLD = 24;
+		private static final int CHORD_WARNING_THRESHOLD = 24;
 	private static final int MAX_PREVIEW_SOUNDS_PER_FRAME = 64;
 	private static final int MIN_GRID_PIXEL_SPACING = 4;
 	private static final int MIN_LABEL_PIXEL_SPACING = 32;
@@ -101,6 +101,8 @@ public final class ComposerScreen extends Screen {
 	private List<PlaybackEvent> playbackEvents = List.of();
 	private int playbackEventIndex;
 	private boolean draggingPlayhead;
+	private boolean draggingEndMarker;
+	private long lastEndDragAt;
 	private long horizontalScroll;
 	private int topMidiNote = 91;
 	private double ticksPerPixel = 10.0;
@@ -134,8 +136,7 @@ public final class ComposerScreen extends Screen {
 	private long hoveredNoteId = -1L;
 	private long hoveredSince;
 	private ComposerProject cachedStatsProject;
-	private int cachedStatsScale = -1;
-	private ProjectStats cachedStats;
+	private SongAnalysis cachedStats;
 
 	public ComposerScreen(Screen parent, FastNoteblocksConfig config) {
 		this(parent, config, () -> {
@@ -148,8 +149,7 @@ public final class ComposerScreen extends Screen {
 		this.config = config;
 		this.onReturn = onReturn == null ? () -> {
 		} : onReturn;
-		this.history = new ComposerHistory(new ComposerState(
-			config.composerProject(), config.composerSpeedQuarters()));
+		this.history = new ComposerHistory(config.composerProject());
 	}
 
 	@Override
@@ -175,6 +175,12 @@ public final class ComposerScreen extends Screen {
 			.tooltip(Tooltip.create(Component.literal("Select every note with a given build problem")))
 			.build());
 		x += 58;
+		addRenderableWidget(Button.builder(Component.literal("Build"), button -> toggleToolbarMenu(ToolbarMenu.BUILD, 240))
+			.bounds(x, 7, 54, 20)
+			.tooltip(Tooltip.create(Component.literal(
+				"Move layers into the build sequence, or paste them with commands")))
+			.build());
+		x += 58;
 		playButton = addRenderableWidget(Button.builder(playLabel(), button -> togglePlayback())
 			.bounds(x, 7, 54, 20)
 			.tooltip(Tooltip.create(Component.literal("Preview all unmuted layers")))
@@ -186,7 +192,7 @@ public final class ComposerScreen extends Screen {
 			.build());
 		x += 82;
 		delayScaleSlider = addRenderableWidget(new DelayScaleSlider(
-			x, 7, 94, 20, config.activeSequenceDelayScaleQuarters(), this::setDelayScale
+			x, 7, 94, 20, project().speedQuarters(), this::setDelayScale
 		));
 		delayScaleSlider.setTooltip(Tooltip.create(Component.literal(
 			"Playback speed, 0.25x to 8.00x. Higher is faster. Saving to the sequence bakes this "
@@ -224,17 +230,8 @@ public final class ComposerScreen extends Screen {
 					boolean next = !project().layers().get(layerIndex).muted();
 					updateLayers(layerIndex, target -> target.withMuted(next));
 				}
-			).bounds(14, y + 22, 24, 16)
+			).bounds(14, y + 22, 36, 16)
 				.tooltip(Tooltip.create(Component.literal(layer.muted() ? "Unmute layer" : "Mute layer")))
-				.build());
-			Button build = addRenderableWidget(Button.builder(
-				Component.literal(layer.buildEnabled() ? "B" : "-"),
-				button -> {
-					boolean next = !project().layers().get(layerIndex).buildEnabled();
-					updateLayers(layerIndex, target -> target.withBuildEnabled(next));
-				}
-			).bounds(40, y + 22, 24, 16)
-				.tooltip(Tooltip.create(Component.literal(layer.buildEnabled() ? "Included when building" : "Skipped when building")))
 				.build());
 			Button visible = addRenderableWidget(Button.builder(
 				Component.literal(layer.visible() ? "S" : "H"),
@@ -242,7 +239,7 @@ public final class ComposerScreen extends Screen {
 					boolean next = !project().layers().get(layerIndex).visible();
 					updateLayers(layerIndex, target -> target.withVisible(next));
 				}
-			).bounds(66, y + 22, 24, 16)
+			).bounds(54, y + 22, 36, 16)
 				.tooltip(Tooltip.create(Component.literal(layer.visible() ? "Shown in the editor" : "Hidden in the editor")))
 				.build());
 			Button instrument = addRenderableWidget(Button.builder(
@@ -263,7 +260,7 @@ public final class ComposerScreen extends Screen {
 				.build());
 			up.active = layerIndex > 0;
 			down.active = layerIndex < project.layers().size() - 1;
-			layerButtons.addAll(List.of(mute, build, visible, instrument, up, down));
+			layerButtons.addAll(List.of(mute, visible, instrument, up, down));
 		}
 	}
 
@@ -479,9 +476,9 @@ public final class ComposerScreen extends Screen {
 					Component.literal("This composition is already Minecraft-ready."));
 				return;
 			}
-			applyState(new ComposerState(conversion.project(),
-				FastNoteblocksConfig.DEFAULT_SEQUENCE_DELAY_SCALE_QUARTERS));
-			delayScaleSlider.setScale(FastNoteblocksConfig.DEFAULT_SEQUENCE_DELAY_SCALE_QUARTERS);
+			// Convert bakes the speed into the tempo, so the result plays at its own pace.
+			apply(conversion.project().withSpeedQuarters(ComposerProject.DEFAULT_SPEED_QUARTERS));
+			delayScaleSlider.setScale(ComposerProject.DEFAULT_SPEED_QUARTERS);
 			selectedNotes.clear();
 			instrumentMenuLayer = -1;
 			collapseAllButActive();
@@ -644,11 +641,10 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private void applyImportedProject(ComposerProject imported, String report) {
-		applyState(new ComposerState(imported,
-			FastNoteblocksConfig.DEFAULT_SEQUENCE_DELAY_SCALE_QUARTERS));
+		apply(imported.withSpeedQuarters(ComposerProject.DEFAULT_SPEED_QUARTERS));
 		selectedNotes.clear();
 		horizontalScroll = 0L;
-		delayScaleSlider.setScale(FastNoteblocksConfig.DEFAULT_SEQUENCE_DELAY_SCALE_QUARTERS);
+		delayScaleSlider.setScale(ComposerProject.DEFAULT_SPEED_QUARTERS);
 		collapseAllButActive();
 		centerMinecraftRange();
 		rebuildLayerButtons();
@@ -696,7 +692,7 @@ public final class ComposerScreen extends Screen {
 		}
 		LayerAction[] actions = LayerAction.values();
 		int menuHeight = actions.length * CONTEXT_MENU_ROW_HEIGHT + 4;
-		int menuWidth = LAYER_MENU_WIDTH;
+		int menuWidth = layerMenuWidth();
 		graphics.fill(layerMenuX, layerMenuY, layerMenuX + menuWidth, layerMenuY + menuHeight, 0xF0101115);
 		graphics.fill(layerMenuX, layerMenuY, layerMenuX + menuWidth, layerMenuY + 1, 0xFFAAAAAA);
 		for (int index = 0; index < actions.length; index++) {
@@ -708,24 +704,41 @@ public final class ComposerScreen extends Screen {
 				graphics.fill(layerMenuX + 2, rowY, layerMenuX + menuWidth - 2,
 					rowY + CONTEXT_MENU_ROW_HEIGHT, 0xFF356070);
 			}
-			String label = actions[index] == LayerAction.MERGE_SELECTED
-				? "Merge " + selectedLayers.size() + " layers"
-				: actions[index].label;
-			graphics.text(font, Component.literal(label), layerMenuX + 6, rowY + 4,
+			graphics.text(font, Component.literal(layerActionLabel(actions[index])), layerMenuX + 6, rowY + 4,
 				enabled ? 0xFFFFFFFF : 0xFF777777, false);
 		}
+	}
+
+	private String layerActionLabel(LayerAction action) {
+		int selected = selectedLayers.size();
+		return switch (action) {
+			case MERGE_SELECTED -> "Merge " + selected + " layers";
+			case INCLUDE_SELECTED -> "Include " + layerCountLabel(Math.max(1, selected)) + " in sequence";
+			case SET_INCLUDED_TO_SELECTION ->
+				"Include only " + layerCountLabel(Math.max(1, selected)) + " in sequence";
+			default -> action.label;
+		};
+	}
+
+	private int layerMenuWidth() {
+		int widest = LAYER_MENU_WIDTH;
+		for (LayerAction action : LayerAction.values()) {
+			widest = Math.max(widest, font.width(layerActionLabel(action)) + 14);
+		}
+		return widest;
 	}
 
 	private boolean layerActionEnabled(LayerAction action) {
 		return switch (action) {
 			case MERGE_SELECTED -> selectedLayers.size() >= 2;
+			case INCLUDE_SELECTED, SET_INCLUDED_TO_SELECTION -> !selectedLayers.isEmpty();
 			case SELECT_ALL, COLLAPSE_OTHERS -> true;
 		};
 	}
 
 	private boolean handleLayerMenuClick(double mouseX, double mouseY) {
 		LayerAction[] actions = LayerAction.values();
-		if (mouseX < layerMenuX || mouseX >= layerMenuX + LAYER_MENU_WIDTH) {
+		if (mouseX < layerMenuX || mouseX >= layerMenuX + layerMenuWidth()) {
 			return false;
 		}
 		int row = ((int)mouseY - layerMenuY - 2) / CONTEXT_MENU_ROW_HEIGHT;
@@ -739,6 +752,8 @@ public final class ComposerScreen extends Screen {
 		layerMenuOpen = false;
 		switch (action) {
 			case MERGE_SELECTED -> mergeSelectedLayers();
+			case INCLUDE_SELECTED -> setIncludedLayers(true);
+			case SET_INCLUDED_TO_SELECTION -> setIncludedLayers(false);
 			case SELECT_ALL -> {
 				selectedLayers.clear();
 				for (int index = 0; index < project().layers().size(); index++) {
@@ -781,8 +796,19 @@ public final class ComposerScreen extends Screen {
 		}
 	}
 
+	/**
+	 * Menu width from the widest row it holds.
+	 *
+	 * <p>Fixed widths were fine while every label was two words. Labels that count what they will
+	 * act on are not a fixed length, and were running past the edge of the panel they were drawn
+	 * in.</p>
+	 */
 	private int toolbarMenuWidth() {
-		return toolbarMenu == ToolbarMenu.IMPORT ? IMPORT_MENU_WIDTH : TOOLBAR_MENU_WIDTH;
+		int widest = toolbarMenu == ToolbarMenu.IMPORT ? IMPORT_MENU_WIDTH : TOOLBAR_MENU_WIDTH;
+		for (String row : toolbarRows()) {
+			widest = Math.max(widest, font.width(row) + 14);
+		}
+		return Math.min(widest, Math.max(60, width - toolbarMenuX - 4));
 	}
 
 	private List<String> toolbarRows() {
@@ -796,7 +822,8 @@ public final class ComposerScreen extends Screen {
 		}
 		List<String> rows = new ArrayList<>(actions.length);
 		for (ToolbarAction action : actions) {
-			rows.add(action.label + (selectedNotes.isEmpty() || !action.scopeable ? "" : " (selection)"));
+			rows.add(toolbarRowLabel(action)
+				+ (selectedNotes.isEmpty() || !action.scopeable ? "" : " (selection)"));
 		}
 		return rows;
 	}
@@ -824,6 +851,7 @@ public final class ComposerScreen extends Screen {
 		return switch (toolbarMenu) {
 			case FILE -> ToolbarAction.FILE_ACTIONS;
 			case EDIT -> ToolbarAction.EDIT_ACTIONS;
+			case BUILD -> ToolbarAction.BUILD_ACTIONS;
 			case SELECT -> ToolbarAction.SELECT_ACTIONS;
 			case IMPORT, NONE -> new ToolbarAction[0];
 		};
@@ -835,10 +863,15 @@ public final class ComposerScreen extends Screen {
 			case REDO -> history.canRedo();
 			case CONVERT, MERGE_REPEATS, QUANTIZE, FIT_ALL_RANGE, SNAP_TEMPO ->
 				project().layers().stream().anyMatch(layer -> !layer.notes().isEmpty());
-			case SELECT_OFF_GRID -> !projectStats().timing().offGrid().isEmpty();
-			case SELECT_TOO_FREQUENT -> !projectStats().timing().crowded().isEmpty();
+			case SELECT_OFF_GRID -> !projectStats().offGrid().isEmpty();
+			case SELECT_TOO_FREQUENT -> !projectStats().crowded().isEmpty();
 			case SELECT_OUT_OF_RANGE -> projectStats().outOfRange() > 0;
 			case SELECT_NONE -> !selectedNotes.isEmpty();
+			// Not disabled on an unbuildable song: greying it out would hide the reason. The status
+			// bar already names the problem and the planner refuses with a specific one.
+			case PASTE_IN_WORLD -> projectStats().totalNotes() > 0 || project().endTick() > 0L;
+			case INCLUDE_SELECTED, SET_INCLUDED_TO_SELECTION -> !selectionLayers().isEmpty();
+			case BUILD_CANCEL -> CommandPasteSender.isRunning();
 			default -> true;
 		};
 	}
@@ -874,7 +907,14 @@ public final class ComposerScreen extends Screen {
 	private void performToolbarAction(ToolbarAction action) {
 		switch (action) {
 			case IMPORT -> importSong();
-			case SAVE_TO_SEQUENCE -> saveToSequence();
+			case OPEN_SONGS -> minecraft.gui.setScreen(new SongsScreen(parent, config));
+			case COPY_AS_TEXT -> copySequenceAsText();
+			case INCLUDE_SELECTED -> setIncludedLayers(true);
+			case SET_INCLUDED_TO_SELECTION -> setIncludedLayers(false);
+			case PASTE_IN_WORLD -> pasteInWorld();
+			case BUILD_CANCEL -> CommandPasteSender.cancel(true);
+			case SAVE_COMPOSITION -> saveComposition();
+			case SAVE_COMPOSITION_AS -> saveCompositionAs();
 			case BACK_TO_SEQUENCES -> onClose();
 			case CLOSE_TO_GAME -> closeToGame();
 			case UNDO -> undo();
@@ -888,10 +928,13 @@ public final class ComposerScreen extends Screen {
 				project().withAllFittedToRange(selectedNotes));
 			case SNAP_TEMPO -> applyStep("Tempo snapped", project().withTempo(
 				project().repeaterAlignedTempoFor(minecraftConversionGridTicks(project()))));
+			case SNAP_END -> applyStep("End snapped", project().withEndTick(
+				snapEndToRepeaterGrid()));
+			case TRIM_END -> applyStep("Trimmed", project().trimmedToContent());
 			case SELECT_OFF_GRID -> selectNotesWhere("off grid",
-				note -> projectStats().timing().offGrid().contains(note.startTick()), true);
+				note -> projectStats().offGrid().contains(note.startTick()), true);
 			case SELECT_TOO_FREQUENT -> selectNotesWhere("too frequent",
-				note -> projectStats().timing().crowded().contains(note.startTick()), true);
+				note -> projectStats().crowded().contains(note.startTick()), true);
 			case SELECT_OUT_OF_RANGE -> selectNotesWhere("out of range",
 				note -> !note.isBuildable(), true);
 			case SELECT_ALL_NOTES -> selectNotesWhere("selected", note -> true, false);
@@ -956,6 +999,22 @@ public final class ComposerScreen extends Screen {
 				+ (selectionLayers().size() == 1 ? " layer" : " layers");
 		showResult(Component.literal(
 			selectedNotes.size() + " notes " + label + scope));
+	}
+
+	private String toolbarRowLabel(ToolbarAction action) {
+		int selected = selectionLayers().size();
+		if (selected > 0 && action == ToolbarAction.INCLUDE_SELECTED) {
+			return "Include " + layerCountLabel(selected) + " in sequence";
+		}
+		if (selected > 0 && action == ToolbarAction.SET_INCLUDED_TO_SELECTION) {
+			return "Include only " + layerCountLabel(selected) + " in sequence";
+		}
+		return action.label;
+	}
+
+	/** "this layer" reads better than "these 1 layer", and the count matters at any size. */
+	private static String layerCountLabel(int count) {
+		return count == 1 ? "this layer" : "these " + count + " layers";
 	}
 
 	private String importSettingLabel(ImportSetting setting) {
@@ -1094,10 +1153,23 @@ public final class ComposerScreen extends Screen {
 		}
 	}
 
+	/** The composition being edited, so which one it is never has to be remembered. */
+	private void extractCompositionName(GuiGraphicsExtractor graphics) {
+		int left = TOOLBAR_CONTROLS_RIGHT + 12;
+		if (left > width - 40) {
+			return;
+		}
+		String name = project().name();
+		String shown = font.width(name) <= width - left - 8
+			? name
+			: font.plainSubstrByWidth(name, width - left - 16) + "...";
+		graphics.text(font, shown, left, 13, 0xFFD6D8DD, false);
+	}
+
 	private void extractPanels(GuiGraphicsExtractor graphics) {
 		graphics.fill(0, TOOLBAR_HEIGHT, LAYER_PANEL_WIDTH, height, 0xB8101115);
 		graphics.fill(LAYER_PANEL_WIDTH, TOOLBAR_HEIGHT, width, height, 0x99101115);
-		graphics.text(font, title, 8, TOOLBAR_HEIGHT + 4, 0xFFFFFFFF, false);
+		graphics.text(font, "Layers", 8, TOOLBAR_HEIGHT + 4, 0xFF8A9098, false);
 		graphics.enableScissor(0, LAYER_LIST_TOP - 2, LAYER_PANEL_WIDTH, layerListBottom());
 		for (int index = 0; index < project().layers().size(); index++) {
 			int y = layerY(index);
@@ -1132,9 +1204,23 @@ public final class ComposerScreen extends Screen {
 			String mark = selected ? "✓ " : "";
 			graphics.text(font, Component.literal(mark + "L" + (index + 1) + "  " + layer.name() + summary),
 				26, y + 6, activeLayer ? 0xFFFFFFFF : selected ? 0xFFE8F4FF : 0xFFD6D8DD, false);
+			// Filled means this layer goes into the build sequence. Drawn on the header rather than
+			// in the button strip so it survives collapsing -- the point is telling at a glance what
+			// is in, and a row you cannot see cannot tell you anything.
+			graphics.text(font, Component.literal(layer.buildEnabled() ? "●" : "○"),
+				buildDotX(), y + 6, layer.buildEnabled() ? 0xFF5AD46A : 0xFF6A7078, false);
 		}
 		graphics.disableScissor();
 		extractLayerScrollbar(graphics);
+		// This panel draws without mouse coordinates, so the cached position is what there is.
+		int hoveredDot = buildDotAt(lastMouseX, lastMouseY);
+		if (hoveredDot >= 0) {
+			graphics.setTooltipForNextFrame(Component.literal(
+				project().layers().get(hoveredDot).buildEnabled()
+					? "In the build sequence - click to leave it out"
+					: "Left out of the build sequence - click to include it"),
+				(int)lastMouseX, (int)lastMouseY);
+		}
 	}
 
 	private void extractLayerScrollbar(GuiGraphicsExtractor graphics) {
@@ -1173,6 +1259,14 @@ public final class ComposerScreen extends Screen {
 				graphics.text(font, Long.toString(tick / measureTicks + 1L), x + 3, rulerY + 2, 0xFFBFC4CA, false);
 			}
 		}
+		int endX = tickX(project().endTick());
+		if (endX >= rollX && endX <= rollX + rollWidth) {
+			// Flag points back over the song, so the marker reads as the edge of something rather
+			// than the start of it. Red when the trailing gap is not a delay a build can place.
+			int endColor = projectStats().endMarkerIssue() ? 0xFFFF6B6B : 0xFFE8C05A;
+			graphics.fill(endX, rulerY + 1, endX + 1, rollY, endColor);
+			graphics.fill(endX - 7, rulerY + 1, endX, rulerY + 6, endColor);
+		}
 		long markerTick = playing ? playbackTick() : playbackStartTick;
 		int markerX = tickX(markerTick);
 		if (markerX >= rollX && markerX <= rollX + rollWidth) {
@@ -1180,7 +1274,9 @@ public final class ComposerScreen extends Screen {
 			graphics.fill(markerX - 1, rulerY + 5, markerX + 2, rollY, 0xFFFF5555);
 		}
 		if (mouseX >= rollX && mouseX < rollX + rollWidth && mouseY >= rulerY && mouseY < rollY) {
-			graphics.setTooltipForNextFrame(Component.literal("Drag to set playback start"), mouseX, mouseY);
+			graphics.setTooltipForNextFrame(Component.literal(overEndMarker(mouseX, mouseY)
+				? "Drag to set where the song ends"
+				: "Drag to set playback start"), mouseX, mouseY);
 		}
 	}
 
@@ -1230,6 +1326,7 @@ public final class ComposerScreen extends Screen {
 		graphics.disableScissor();
 
 		graphics.text(font, "Minecraft F♯3–F♯5", rollX + 5, TOOLBAR_HEIGHT + 3, 0xFF65F4FF, false);
+		extractCompositionName(graphics);
 	}
 
 	private void extractTimeGrid(GuiGraphicsExtractor graphics) {
@@ -1256,7 +1353,7 @@ public final class ComposerScreen extends Screen {
 			}
 		}
 		for (Map.Entry<Long, Integer> entry : projectStats().chordCounts().entrySet()) {
-			if (entry.getValue() <= MAX_SIMULTANEOUS_NOTES) {
+			if (entry.getValue() <= SongAnalysis.MAX_SIMULTANEOUS_NOTES) {
 				continue;
 			}
 			int x = tickX(entry.getKey());
@@ -1285,9 +1382,9 @@ public final class ComposerScreen extends Screen {
 
 	private void extractNotes(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
 		ComposerProject shown = displayProject();
-		ProjectStats stats = projectStats();
-		Set<Long> offGrid = stats.timing().offGrid();
-		Set<Long> crowded = stats.timing().crowded();
+		SongAnalysis stats = projectStats();
+		Set<Long> offGrid = stats.offGrid();
+		Set<Long> crowded = stats.crowded();
 		NoteEvent hoveredCandidate = null;
 		int hoveredCandidateLayer = -1;
 		long firstVisibleTick = Math.max(0L, horizontalScroll - stats.maximumNoteDuration());
@@ -1338,6 +1435,10 @@ public final class ComposerScreen extends Screen {
 					hoveredCandidateLayer = layerIndex;
 				}
 			}
+		}
+		int endX = tickX(project().endTick());
+		if (endX >= rollX && endX <= rollX + rollWidth) {
+			graphics.fill(endX, rollY, endX + 1, rollY + rollHeight, 0x66E8C05A);
 		}
 		extractHoveredNoteTooltip(graphics, hoveredCandidate, hoveredCandidateLayer,
 			crowded, offGrid, mouseX, mouseY);
@@ -1395,7 +1496,7 @@ public final class ComposerScreen extends Screen {
 					: " - shifts " + (shift > 0 ? "+" : "-") + Math.abs(shift / 12) + " oct on convert"))
 				.withStyle(net.minecraft.ChatFormatting.RED));
 		}
-		TimingIssues timing = projectStats().timing();
+		SongAnalysis timing = projectStats();
 		if (crowded.contains(note.startTick())) {
 			lines.add(Component.literal("Too frequent - only "
 					+ timing.gapLabel(note.startTick()) + " repeater ticks after the previous note")
@@ -1496,10 +1597,10 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private void extractStatus(GuiGraphicsExtractor graphics) {
-		ProjectStats stats = projectStats();
+		SongAnalysis stats = projectStats();
 		int peakChord = stats.peakChord();
 		long overloaded = stats.overloadedTicks();
-		boolean ready = buildable(stats);
+		boolean ready = stats.buildable();
 
 		// Most important first: the verdict, then whatever is blocking it, then context.
 		List<String> segments = new ArrayList<>();
@@ -1507,15 +1608,25 @@ public final class ComposerScreen extends Screen {
 		if (stats.outOfRange() > 0) {
 			segments.add(stats.outOfRange() + " out of range");
 		}
-		if (!stats.timing().crowded().isEmpty()) {
-			segments.add(stats.timing().crowded().size() + " too frequent");
+		if (!stats.crowded().isEmpty()) {
+			segments.add(stats.crowded().size() + " too frequent");
 		}
-		if (!stats.timing().offGrid().isEmpty()) {
-			segments.add(stats.timing().offGrid().size() + " off grid");
+		if (!stats.offGrid().isEmpty()) {
+			segments.add(stats.offGrid().size() + " off grid");
 		}
-		segments.add("peak " + peakChord + "/" + MAX_SIMULTANEOUS_NOTES
+		segments.add("peak " + peakChord + "/" + SongAnalysis.MAX_SIMULTANEOUS_NOTES
 			+ (overloaded > 0 ? " (" + overloaded + " over)" : ""));
 		segments.add(stats.totalNotes() + " notes · " + project().layers().size() + " layers");
+		int included = (int)project().layers().stream()
+			.filter(layer -> layer.buildEnabled() && !layer.muted())
+			.count();
+		if (included == 0) {
+			segments.add("nothing included");
+		} else {
+			SongBuilder.BlockCounts blocks = SongBuilder.blockCounts(project());
+			segments.add(blocks.total() + " blocks (" + blocks.noteBlocks() + " note · "
+				+ blocks.repeaters() + " repeater)");
+		}
 		if (!selectedNotes.isEmpty()) {
 			segments.add(selectedNotes.size() + " selected");
 		}
@@ -1537,91 +1648,15 @@ public final class ComposerScreen extends Screen {
 		graphics.text(font, status.toString(), 8, height - 16, color, false);
 	}
 
-	/** True when nothing left in the composition would misbuild or fail to build at all. */
-	private boolean buildable(ProjectStats stats) {
-		return stats.outOfRange() == 0
-			&& stats.overloadedTicks() == 0
-			&& stats.timing().crowded().isEmpty()
-			&& stats.timing().offGrid().isEmpty();
-	}
-
-	private ProjectStats projectStats() {
+	private SongAnalysis projectStats() {
 		ComposerProject current = project();
-		if (cachedStatsProject == current && cachedStats != null
-				&& cachedStatsScale == delayScaleQuarters()) {
+		// The speed is part of the project now, so identity is the whole cache key.
+		if (cachedStatsProject == current && cachedStats != null) {
 			return cachedStats;
 		}
-		Map<Long, Integer> counts = new HashMap<>();
-		int outOfRange = 0;
-		int totalNotes = 0;
-		long maximumNoteDuration = 1L;
-		for (Layer layer : current.layers()) {
-			for (NoteEvent note : layer.notes()) {
-				totalNotes++;
-				maximumNoteDuration = Math.max(maximumNoteDuration, note.durationTicks());
-				if (!note.isBuildable()) {
-					outOfRange++;
-				} else if (layer.buildEnabled() && !layer.muted()) {
-					counts.merge(note.startTick(), 1, Integer::sum);
-				}
-			}
-		}
-		int peak = counts.values().stream().mapToInt(Integer::intValue).max().orElse(0);
-		long overloaded = counts.values().stream().filter(count -> count > MAX_SIMULTANEOUS_NOTES).count();
 		cachedStatsProject = current;
-		cachedStatsScale = delayScaleQuarters();
-		cachedStats = new ProjectStats(outOfRange, Map.copyOf(counts), peak, overloaded,
-			maximumNoteDuration, totalNotes, timingIssues(current, counts.keySet()));
+		cachedStats = SongAnalysis.of(current);
 		return cachedStats;
-	}
-
-	/**
-	 * Composer ticks per Minecraft repeater tick, after the timescale.
-	 *
-	 * <p>A repeater cannot delay less than one tick, so this is the finest spacing a build can
-	 * express. Raising the timescale shrinks it, which is how a too-fast song is made buildable.</p>
-	 */
-	private double redstoneTickSpan(ComposerProject project) {
-		double span = project.ppq() * 100_000.0 / project.tempoMicrosPerQuarter();
-		return Math.max(1.0e-6, span / timescaleFactor());
-	}
-
-	/**
-	 * Event times a redstone build cannot reproduce: either landing off the repeater grid, or
-	 * arriving less than one repeater tick after the previous event.
-	 */
-	private TimingIssues timingIssues(ComposerProject project, Set<Long> eventTicks) {
-		double span = redstoneTickSpan(project);
-		List<Long> ordered = eventTicks.stream().sorted().toList();
-		Set<Long> offGrid = new LinkedHashSet<>();
-		Set<Long> crowded = new LinkedHashSet<>();
-		Map<Long, Double> gaps = new HashMap<>();
-		long previous = Long.MIN_VALUE;
-		for (long tick : ordered) {
-			if (previous != Long.MIN_VALUE) {
-				// A build is a chain of repeater delays, so only the gap between consecutive events
-				// has to be expressible. Where the song sits relative to time zero is irrelevant --
-				// an absolute-position test just flags every note when the musical grid and the
-				// repeater grid do not share a common multiple.
-				double gap = (tick - previous) / span;
-				gaps.put(tick, gap);
-				if (gap < 1.0 - 1.0e-6) {
-					crowded.add(tick);
-				} else if (Math.abs(gap - Math.round(gap)) > 0.02) {
-					offGrid.add(tick);
-				}
-			}
-			previous = tick;
-		}
-		return new TimingIssues(Set.copyOf(offGrid), Set.copyOf(crowded), Map.copyOf(gaps));
-	}
-
-	/** Off-grid gaps are not a whole repeater tick; crowded ones are under one tick entirely. */
-	private record TimingIssues(Set<Long> offGrid, Set<Long> crowded, Map<Long, Double> gaps) {
-		private String gapLabel(long tick) {
-			Double gap = gaps.get(tick);
-			return gap == null ? "?" : String.format(java.util.Locale.ROOT, "%.2f", gap);
-		}
 	}
 
 	@Override
@@ -1672,6 +1707,15 @@ public final class ComposerScreen extends Screen {
 			return true;
 		}
 		if (event.button() == 0) {
+			int dotLayer = buildDotAt(event.x(), event.y());
+			if (dotLayer >= 0) {
+				boolean next = !project().layers().get(dotLayer).buildEnabled();
+				updateLayers(dotLayer, target -> target.withBuildEnabled(next));
+				showResult(Component.literal(sequenceSummary()));
+				return true;
+			}
+		}
+		if (event.button() == 0) {
 			int layerIndex = layerHeaderAt(event.x(), event.y());
 			if (layerIndex >= 0 && isLayerCollapseArrow(event.x())) {
 				toggleLayerCollapsed(layerIndex);
@@ -1682,6 +1726,11 @@ public final class ComposerScreen extends Screen {
 				selectedNotes.clear();
 				return true;
 			}
+		}
+		if (event.button() == 0 && overEndMarker(event.x(), event.y())) {
+			draggingEndMarker = true;
+			lastEndDragAt = 0L;
+			return true;
 		}
 		if (event.button() == 0 && insideRuler(event.x(), event.y())) {
 			setPlaybackStart(mouseTick(event.x()), true);
@@ -1848,6 +1897,10 @@ public final class ComposerScreen extends Screen {
 	public boolean mouseDragged(MouseButtonEvent event, double dx, double dy) {
 		lastMouseX = event.x();
 		lastMouseY = event.y();
+		if (draggingEndMarker) {
+			setEndTick(snapTick(mouseTick(event.x())));
+			return true;
+		}
 		if (draggingPlayhead) {
 			setPlaybackStart(mouseTick(event.x()), false);
 			return true;
@@ -1872,6 +1925,10 @@ public final class ComposerScreen extends Screen {
 
 	@Override
 	public boolean mouseReleased(MouseButtonEvent event) {
+		if (draggingEndMarker) {
+			draggingEndMarker = false;
+			return true;
+		}
 		if (draggingPlayhead) {
 			draggingPlayhead = false;
 			return true;
@@ -2144,8 +2201,7 @@ public final class ComposerScreen extends Screen {
 	 * can actually play, which is useless if you cannot hear its effect.</p>
 	 */
 	private double timescaleFactor() {
-		return Math.max(1, delayScaleQuarters())
-			/ (double)FastNoteblocksConfig.DEFAULT_SEQUENCE_DELAY_SCALE_QUARTERS;
+		return Math.max(1, delayScaleQuarters()) / (double)ComposerProject.DEFAULT_SPEED_QUARTERS;
 	}
 
 	private long playbackTick() {
@@ -2221,11 +2277,7 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private void apply(ComposerProject project) {
-		applyState(history.current().withProject(project));
-	}
-
-	private void applyState(ComposerState state) {
-		history.apply(state);
+		history.apply(project);
 		afterStateChange();
 	}
 
@@ -2245,26 +2297,166 @@ public final class ComposerScreen extends Screen {
 	 * <p>Explicit rather than automatic on close: the projection drops everything the track text
 	 * cannot express, so leaving the composer should never quietly rewrite a sequence.</p>
 	 */
-	private void saveToSequence() {
+	/**
+	 * Writes the composition to its own file and says so.
+	 *
+	 * <p>Editing already saves on every change, so this changes nothing on disk that was not
+	 * already there. It exists because autosave is invisible, and being able to press save and be
+	 * told it worked is worth more than the keystroke costs.</p>
+	 */
+	private void saveComposition() {
 		saveProject();
-		config.publishComposerProject();
-		FastNoteblocksConfig.save();
-		ProjectStats stats = projectStats();
-		String report = String.format(java.util.Locale.ROOT,
-			"Composition written to active sequence - %d notes at %s",
-			stats.totalNotes(), FastNoteblocksConfig.delayScaleLabel(delayScaleQuarters()));
-		if (stats.outOfRange() > 0) {
-			report += ", " + stats.outOfRange() + " out of range dropped";
+		SongAnalysis stats = projectStats();
+		showResult(Component.literal(String.format(java.util.Locale.ROOT,
+			"Saved \"%s\" - %d notes, %d layers, %s at %s",
+			project().name(), stats.totalNotes(), project().layers().size(),
+			stats.lengthLabel(), FastNoteblocksConfig.delayScaleLabel(delayScaleQuarters()))));
+	}
+
+	/**
+	 * Fills in build dots from the current selection.
+	 *
+	 * <p>The dot is the one thing that decides what builds, so this writes dots rather than going
+	 * around them -- which is also the only way to change a lot at once. Adding leaves layers
+	 * outside the selection alone; setting clears them, so that one is a batch off as well as a
+	 * batch on.</p>
+	 *
+	 * <p>Nothing needs moving afterwards. The sequence is derived from these dots, so it has
+	 * already changed by the time this returns.</p>
+	 */
+	private void setIncludedLayers(boolean add) {
+		Set<Integer> chosen = new java.util.LinkedHashSet<>(selectionLayers());
+		if (chosen.isEmpty()) {
+			showResult(Component.literal("Select some layers first."));
+			return;
 		}
-		if (!stats.timing().crowded().isEmpty()) {
-			report += ", " + stats.timing().crowded().size() + " timings too close to build";
+		ComposerProject updated = project();
+		for (int index = 0; index < updated.layers().size(); index++) {
+			boolean include = chosen.contains(index)
+				|| (add && updated.layers().get(index).buildEnabled());
+			if (updated.layers().get(index).buildEnabled() != include) {
+				updated = updated.withLayer(index, updated.layers().get(index).withBuildEnabled(include));
+			}
+		}
+		if (updated.equals(project())) {
+			showResult(Component.literal("Those layers were already the included ones."));
+			return;
+		}
+		apply(updated);
+		rebuildLayerButtons();
+		showResult(Component.literal(sequenceSummary()));
+	}
+
+	/** What the build sequence now holds, for confirming a dot change did what was expected. */
+	private String sequenceSummary() {
+		var sequence = config.tracks();
+		if (sequence.isEmpty()) {
+			return "No layers included - the build sequence is empty.";
+		}
+		SongBuilder.BlockCounts blocks = SongBuilder.blockCounts(sequence);
+		String report = "Sequence: " + sequence.size() + (sequence.size() == 1 ? " layer" : " layers")
+			+ ", " + blocks.noteBlocks() + " note blocks, " + blocks.repeaters() + " repeaters";
+		SongAnalysis stats = projectStats();
+		if (stats.outOfRange() > 0) {
+			report += "; " + stats.outOfRange() + " out-of-range notes left out";
+		}
+		return report;
+	}
+
+	/**
+	 * Puts the build sequence on the clipboard, one line per included layer.
+	 *
+	 * <p>Text leaves the composer; it never comes back in over a composition. The projection drops
+	 * out-of-range notes, rounds every gap to a whole repeater tick and bakes the tempo away, so
+	 * reading it back would silently discard all three. Import text as a new composition instead.</p>
+	 */
+	private void copySequenceAsText() {
+		var sequence = config.tracks();
+		if (sequence.isEmpty()) {
+			showResult(Component.literal("Nothing is included, so there is no sequence to copy."));
+			return;
+		}
+		String text = sequence.stream()
+			.filter(track -> !track.sequence().isBlank())
+			.map(track -> ComposerProject.toSequenceLine(
+				track.name(), track.instrument(), track.sequence()))
+			.collect(java.util.stream.Collectors.joining(System.lineSeparator()));
+		if (text.isBlank()) {
+			showResult(Component.literal("The included layers have nothing buildable in them."));
+			return;
+		}
+		minecraft.keyboardHandler.setClipboard(text);
+		SongAnalysis stats = projectStats();
+		String report = "Copied the sequence - " + sequence.size()
+			+ (sequence.size() == 1 ? " layer, " : " layers, ") + text.length() + " characters at "
+			+ FastNoteblocksConfig.delayScaleLabel(delayScaleQuarters());
+		if (stats.outOfRange() > 0) {
+			report += ", " + stats.outOfRange() + " out-of-range notes left out";
 		}
 		showResult(Component.literal(report));
 	}
 
+	/**
+	 * Saves a copy under a new name and switches to it.
+	 *
+	 * <p>This is how a version gets held still. The sequence follows whichever composition is open,
+	 * so freezing a build means having a second composition rather than a frozen projection.</p>
+	 */
+	private void saveCompositionAs() {
+		minecraft.gui.setScreen(new NamePromptScreen(this, "Save composition as",
+			"Save a copy of \"" + project().name() + "\" under a new name",
+			project().name() + " copy", "Save copy", name -> {
+				String unique = FastNoteblocksConfig.songs().uniqueName(name);
+				ComposerProject copy = project().withName(unique);
+				String id = FastNoteblocksConfig.songs().newId(unique);
+				FastNoteblocksConfig.songs().save(id, copy);
+				config.setActiveSongId(id);
+				FastNoteblocksConfig.save();
+				minecraft.gui.setScreen(new ComposerScreen(parent, config));
+			}));
+	}
+
+	/** Pastes the build sequence with commands, for when you have op and would rather not place it by hand. */
+	private void pasteInWorld() {
+		if (CommandPasteSender.isRunning()) {
+			CommandPasteSender.cancel(true);
+			return;
+		}
+		if (minecraft.player == null || minecraft.level == null) {
+			showResult(Component.literal("Join a world before pasting."));
+			return;
+		}
+		if (config.tracks().stream().allMatch(track -> track.sequence().isBlank())) {
+			showResult(Component.literal(
+				"The build sequence is empty. Include some layers first."));
+			return;
+		}
+		minecraft.gui.setScreen(new BuildOptionsScreen(this, project().name(), config.tracks(),
+				pasteMode(), mode -> {
+			SongBuilder.PastePlan plan;
+			try {
+				plan = SongBuilder.plan(minecraft, config.tracks(), mode);
+			} catch (IllegalArgumentException refused) {
+				minecraft.gui.setScreen(this);
+				showResult(Component.literal(refused.getMessage())
+					.withStyle(net.minecraft.ChatFormatting.RED));
+				return;
+			}
+			CommandPasteSender.start(plan.commands());
+			minecraft.gui.setScreen(null);
+		}));
+	}
+
+	private SongBuilder.PasteMode pasteMode() {
+		try {
+			return SongBuilder.PasteMode.valueOf(config.pasteMode());
+		} catch (IllegalArgumentException unknown) {
+			return SongBuilder.PasteMode.COMPACT_CUBE;
+		}
+	}
+
 	private void saveProject() {
 		config.setComposerProject(project());
-		config.setComposerSpeedQuarters(delayScaleQuarters());
 		FastNoteblocksConfig.save();
 	}
 
@@ -2277,18 +2469,75 @@ public final class ComposerScreen extends Screen {
 		}
 		// The slider fires on every increment of a drag. Record one step for the gesture and fold
 		// the rest into it, or a single drag would push dozens of entries and evict real edits.
-		ComposerState next = history.current().withDelayScaleQuarters(scaleQuarters);
+		ComposerProject next = project().withSpeedQuarters(scaleQuarters);
 		long now = Util.getMillis();
 		if (now - lastScaleChangeAt < SCALE_COALESCE_MILLIS) {
 			history.replaceCurrent(next);
 			afterStateChange();
 		} else {
-			applyState(next);
+			apply(next);
 		}
 		lastScaleChangeAt = now;
 		if (playing) {
 			resetPlaybackSchedule();
 		}
+	}
+
+	/**
+	 * Moves the end marker, folding a whole drag into one history entry.
+	 *
+	 * <p>{@code withEndTick} refuses to go before the last note, so dragging left simply stops
+	 * there instead of silently cutting notes out of the build.</p>
+	 */
+	private void setEndTick(long tick) {
+		ComposerProject next = project().withEndTick(tick);
+		if (next.equals(project())) {
+			return;
+		}
+		long now = Util.getMillis();
+		if (now - lastEndDragAt < SCALE_COALESCE_MILLIS) {
+			history.replaceCurrent(next);
+			afterStateChange();
+		} else {
+			apply(next);
+		}
+		lastEndDragAt = now;
+	}
+
+	/**
+	 * The nearest end position whose trailing delay is a whole number of repeater ticks.
+	 *
+	 * <p>Quantizing cannot fix this the way it fixes a note: the marker's gap is measured from the
+	 * last note, wherever that landed, so it has to be snapped relative to that rather than to the
+	 * musical grid.</p>
+	 */
+	private long snapEndToRepeaterGrid() {
+		long content = project().contentEndTick();
+		double span = SongAnalysis.redstoneTickSpan(project());
+		long gap = Math.max(0L, project().endTick() - content);
+		return content + Math.round(Math.round(gap / span) * span);
+	}
+
+	/** Left edge of the build dot, inset from the panel's right edge. */
+	private int buildDotX() {
+		return LAYER_PANEL_WIDTH - 24;
+	}
+
+	/** The build dot's clickable box, a little larger than the glyph so it is easy to hit. */
+	private int buildDotAt(double x, double y) {
+		if (x < buildDotX() - 4 || x > buildDotX() + 12) {
+			return -1;
+		}
+		for (int index = 0; index < project().layers().size(); index++) {
+			if (!layerRowVisible(index)) {
+				continue;
+			}
+			int top = layerY(index);
+			if (y >= top + 2 && y < top + 18) {
+				return index;
+			}
+		}
+		return -1;
 	}
 
 	private int layerHeaderAt(double x, double y) {
@@ -2450,11 +2699,11 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private ComposerProject project() {
-		return history.current().project();
+		return history.current();
 	}
 
 	private int delayScaleQuarters() {
-		return history.current().delayScaleQuarters();
+		return project().speedQuarters();
 	}
 
 	private ComposerProject displayProject() {
@@ -2577,7 +2826,7 @@ public final class ComposerScreen extends Screen {
 	 */
 	private long gridTicks() {
 		if (snapSubdivision == SNAP_REPEATER) {
-			return Math.max(1L, Math.round(redstoneTickSpan(project())));
+			return Math.max(1L, Math.round(SongAnalysis.redstoneTickSpan(project())));
 		}
 		return snapSubdivision == 0 ? 1L : Math.max(1L, project().ppq() / snapSubdivision);
 	}
@@ -2594,6 +2843,11 @@ public final class ComposerScreen extends Screen {
 
 	private boolean insideRoll(double x, double y) {
 		return x >= rollX && x < rollX + rollWidth && y >= rollY && y < rollY + rollHeight;
+	}
+
+	/** The end marker's grab zone, a few pixels either side of it in the ruler. */
+	private boolean overEndMarker(double x, double y) {
+		return insideRuler(x, y) && Math.abs(x - tickX(project().endTick())) <= 4.0;
 	}
 
 	private boolean insideRuler(double x, double y) {
@@ -2694,19 +2948,9 @@ public final class ComposerScreen extends Screen {
 	private record NoteHit(int layerIndex, NoteEvent note) {
 	}
 
-	private record ProjectStats(
-		int outOfRange,
-		Map<Long, Integer> chordCounts,
-		int peakChord,
-		long overloadedTicks,
-		long maximumNoteDuration,
-		int totalNotes,
-		TimingIssues timing
-	) {
-	}
-
 	private enum ToolbarMenu {
 		NONE,
+		BUILD,
 		FILE,
 		EDIT,
 		SELECT,
@@ -2734,8 +2978,11 @@ public final class ComposerScreen extends Screen {
 
 	private enum ToolbarAction {
 		IMPORT("Import MIDI / NBS..."),
-		SAVE_TO_SEQUENCE("Save to sequence"),
-		BACK_TO_SEQUENCES("Back to sequences"),
+		OPEN_SONGS("Open composition..."),
+		COPY_AS_TEXT("Copy sequence as text"),
+		SAVE_COMPOSITION("Save composition"),
+		SAVE_COMPOSITION_AS("Save composition as..."),
+		BACK_TO_SEQUENCES("Back"),
 		CLOSE_TO_GAME("Close to game"),
 		UNDO("Undo"),
 		REDO("Redo"),
@@ -2744,6 +2991,12 @@ public final class ComposerScreen extends Screen {
 		QUANTIZE("Quantize to grid", true),
 		FIT_ALL_RANGE("Fit into range", true),
 		SNAP_TEMPO("Snap tempo (whole song)"),
+		INCLUDE_SELECTED("Include selected layers in sequence"),
+		SET_INCLUDED_TO_SELECTION("Include only selected layers in sequence"),
+		PASTE_IN_WORLD("Paste current sequence in world (requires op)..."),
+		BUILD_CANCEL("Cancel paste"),
+		SNAP_END("Snap end to grid"),
+		TRIM_END("Trim end to last note"),
 		SELECT_OFF_GRID("Off grid"),
 		SELECT_TOO_FREQUENT("Too frequent"),
 		SELECT_OUT_OF_RANGE("Out of range"),
@@ -2751,10 +3004,15 @@ public final class ComposerScreen extends Screen {
 		SELECT_NONE("Nothing");
 
 		private static final ToolbarAction[] FILE_ACTIONS = {
-			IMPORT, SAVE_TO_SEQUENCE, BACK_TO_SEQUENCES, CLOSE_TO_GAME
+			SAVE_COMPOSITION, SAVE_COMPOSITION_AS, OPEN_SONGS, IMPORT, COPY_AS_TEXT,
+			BACK_TO_SEQUENCES, CLOSE_TO_GAME
 		};
 		private static final ToolbarAction[] EDIT_ACTIONS = {
-			UNDO, REDO, CONVERT, MERGE_REPEATS, QUANTIZE, FIT_ALL_RANGE, SNAP_TEMPO
+			UNDO, REDO, CONVERT, MERGE_REPEATS, QUANTIZE, FIT_ALL_RANGE, SNAP_TEMPO,
+			SNAP_END, TRIM_END
+		};
+		private static final ToolbarAction[] BUILD_ACTIONS = {
+			INCLUDE_SELECTED, SET_INCLUDED_TO_SELECTION, PASTE_IN_WORLD, BUILD_CANCEL
 		};
 		private static final ToolbarAction[] SELECT_ACTIONS = {
 			SELECT_OFF_GRID, SELECT_TOO_FREQUENT, SELECT_OUT_OF_RANGE, SELECT_ALL_NOTES, SELECT_NONE
@@ -2776,6 +3034,8 @@ public final class ComposerScreen extends Screen {
 
 	private enum LayerAction {
 		MERGE_SELECTED("Merge selected"),
+		INCLUDE_SELECTED("Include selected layers in sequence"),
+		SET_INCLUDED_TO_SELECTION("Include only selected layers in sequence"),
 		SELECT_ALL("Select all layers"),
 		COLLAPSE_OTHERS("Collapse others");
 

@@ -166,9 +166,7 @@ public final class FastNoteblocksConfigScreen {
 			.setTooltip(Component.translatable("tooltip.fast-noteblocks.auto_select_sequence_block"))
 			.setSaveConsumer(config::setAutoSelectSequenceBlock)
 			.build());
-		ActiveSequenceEntry activeSequence = new ActiveSequenceEntry(config);
-		placement.addEntry(activeSequence);
-		placement.addEntry(new SavedSequenceLibraryEntry(config, activeSequence));
+
 
 		ConfigCategory midi = builder.getOrCreateCategory(Component.translatable("category.fast-noteblocks.midi"));
 		midi.addEntry(entries.startEnumSelector(

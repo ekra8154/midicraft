@@ -78,8 +78,10 @@ public final class NoteBlockOverlay {
 	private final KeyMapping placementSequenceKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
 		"key.fast-noteblocks.toggle_placement_sequence", InputConstants.Type.KEYSYM, -1, CATEGORY
 	));
+	// M, next to the overlay toggle on N. Bound by default because the composer is now the way in
+	// to every song, and an unbound key made it reachable only through Mod Menu.
 	private final KeyMapping composerKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
-		"key.fast-noteblocks.open_composer", InputConstants.Type.KEYSYM, -1, CATEGORY
+		"key.fast-noteblocks.open_composer", InputConstants.Type.KEYSYM, 77, CATEGORY
 	));
 
 	private int ticksUntilRescan;
@@ -117,7 +119,6 @@ public final class NoteBlockOverlay {
 		lastPlacementSequenceEnabled = config.placementSequenceEnabled();
 		lastAutoSelectSequenceBlock = config.autoSelectSequenceBlock();
 		lastActiveTrackIndex = config.activeTrackIndex();
-		lastSequenceDelayScaleQuarters = config.activeSequenceDelayScaleQuarters();
 		lastPlacementSequenceText = buildSequenceSignature(config);
 		List<BuildStep> sequence = configuredSequence();
 		placementSequenceIndex = sequence.isEmpty()
@@ -270,13 +271,12 @@ public final class NoteBlockOverlay {
 		if (config.activeTrackIndex() != lastActiveTrackIndex) {
 			loadActiveTrack(minecraft);
 		} else if (!sequenceSignature.equals(lastPlacementSequenceText)
-			|| config.activeSequenceDelayScaleQuarters() != lastSequenceDelayScaleQuarters) {
+				) {
 			resetPlacementSequence();
 		}
 		lastPlacementSequenceEnabled = config.placementSequenceEnabled();
 		lastAutoSelectSequenceBlock = config.autoSelectSequenceBlock();
 		lastActiveTrackIndex = config.activeTrackIndex();
-		lastSequenceDelayScaleQuarters = config.activeSequenceDelayScaleQuarters();
 		lastPlacementSequenceText = sequenceSignature;
 
 		if (minecraft.level != lastLevel) {
@@ -780,7 +780,7 @@ public final class NoteBlockOverlay {
 				if (!track.buildEnabled()) {
 					continue;
 				}
-				List<NoteSequence.Step> steps = NoteSequence.parse(track.sequence(), config.activeSequenceDelayScaleQuarters());
+				List<NoteSequence.Step> steps = NoteSequence.parse(track.sequence());
 				int time = 0;
 				for (int localIndex = 0; localIndex < steps.size(); localIndex++) {
 					NoteSequence.Step step = steps.get(localIndex);
@@ -822,7 +822,7 @@ public final class NoteBlockOverlay {
 	}
 
 	private static String buildSequenceSignature(FastNoteblocksConfig config) {
-		StringBuilder signature = new StringBuilder().append(config.activeSequenceDelayScaleQuarters());
+		StringBuilder signature = new StringBuilder();
 		for (FastNoteblocksConfig.SequenceTrack track : config.tracks()) {
 			signature.append('|').append(track.buildEnabled()).append(':').append(track.sequence());
 		}

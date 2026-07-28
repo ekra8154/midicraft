@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.fastnoteblocks.NoteSequence;
 import com.fastnoteblocks.client.composer.ComposerProject;
+import com.fastnoteblocks.client.composer.SongLibrary;
 import java.io.Reader;
 import java.io.Writer;
 import java.nio.file.Files;
@@ -218,6 +219,7 @@ public final class FastNoteblocksConfig {
 	public static final int MAX_MIDI_VELOCITY_CUTOFF = 127;
 	private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 	private static final Path CONFIG_PATH = FabricLoader.getInstance().getConfigDir().resolve("fast-noteblocks.json");
+	private static SongLibrary songs = SongLibrary.load();
 	private static FastNoteblocksConfig instance = defaults();
 
 	private boolean modEnabled;
@@ -235,14 +237,17 @@ public final class FastNoteblocksConfig {
 	private boolean placementSequenceEnabled;
 	private SequencingEditProtection sequencingEditProtection;
 	private boolean autoSelectSequenceBlock;
-	private String placementSequence;
-	private int placementSequencePosition;
 	private String activeSequenceName;
 	private int activeSequenceDelayScaleQuarters;
 	private int composerSpeedQuarters;
 	private String previewInstrument;
-	private List<SequenceTrack> tracks;
+	/** How far along placing the sequence you are. The only build state that outlives an edit. */
+	private int placementCursor;
+	private transient ComposerProject cachedSequenceProject;
+	private transient List<SequenceTrack> cachedSequence;
 	private ComposerProject composerProject;
+	private List<SequenceTrack> legacyTracks = List.of();
+	private String activeSongId;
 	private boolean buildTrackFlagsInitialized;
 	private int activeTrackIndex;
 	private List<SavedSequence> savedSequences;
@@ -257,6 +262,7 @@ public final class FastNoteblocksConfig {
 	private int conversionGapPercentile;
 	private int commandsPerTick;
 	private int maxBuildFloors;
+	private String pasteMode;
 
 	private FastNoteblocksConfig() {
 	}
@@ -302,10 +308,6 @@ public final class FastNoteblocksConfig {
 					? SequencingEditProtection.RADIALS_AND_INTERACTIONS
 					: stored.sequencingEditProtection;
 				instance.autoSelectSequenceBlock = stored.autoSelectSequenceBlock == null || stored.autoSelectSequenceBlock;
-				instance.placementSequence = stored.placementSequence == null ? "" : stored.placementSequence;
-				instance.placementSequencePosition = Math.max(0,
-					stored.placementSequencePosition == null ? 0 : stored.placementSequencePosition
-				);
 				instance.activeSequenceName = stored.activeSequenceName == null || stored.activeSequenceName.isBlank()
 					? "Untitled sequence"
 					: stored.activeSequenceName;
@@ -323,26 +325,28 @@ public final class FastNoteblocksConfig {
 							: stored.composerSpeedQuarters
 					);
 					instance.previewInstrument = stored.previewInstrument == null ? "HARP" : stored.previewInstrument;
-				boolean buildTrackFlagsInitialized = Boolean.TRUE.equals(stored.buildTrackFlagsInitialized);
-				instance.tracks = stored.tracks == null || stored.tracks.isEmpty()
-					? List.of(new SequenceTrack("Track 1", instance.placementSequence,
-						instance.previewInstrument, instance.placementSequencePosition))
+				// Tracks in an old settings file are migration input, not state: the sequence is
+				// derived now. They are kept only long enough to rebuild a composition that predates
+				// the library, in migrateSongsOutOfSettings.
+				instance.legacyTracks = stored.tracks == null || stored.tracks.isEmpty()
+					? List.of(new SequenceTrack("Track 1",
+						stored.placementSequence == null ? "" : stored.placementSequence,
+						instance.previewInstrument,
+						stored.placementSequencePosition == null ? 0 : stored.placementSequencePosition))
 					: normalizeTracks(stored.tracks);
-				if (!buildTrackFlagsInitialized) {
-					instance.tracks = enableAllBuildTracks(instance.tracks);
-				}
 				instance.buildTrackFlagsInitialized = true;
-				instance.activeTrackIndex = clampTrackIndex(
-					stored.activeTrackIndex == null ? 0 : stored.activeTrackIndex, instance.tracks.size()
-				);
+				instance.placementCursor = Math.max(0,
+					stored.placementSequencePosition == null ? 0 : stored.placementSequencePosition);
+				instance.activeTrackIndex = stored.activeTrackIndex == null ? 0 : stored.activeTrackIndex;
+				// Read only: whatever is here is pre-library data waiting to be migrated out.
 				instance.composerProject = stored.composerProject == null
-					? ComposerProject.fromSequenceTracks(instance.activeSequenceName, instance.tracks,
-						instance.activeTrackIndex, instance.activeSequenceDelayScaleQuarters)
-					: stored.composerProject;
+					? null
+					: stored.composerProject.withSpeedQuarters(instance.composerSpeedQuarters);
+				instance.activeSongId = stored.activeSongId;
 				instance.savedSequences = stored.savedSequences == null
 					? new ArrayList<>()
 					: new ArrayList<>(stored.savedSequences);
-				if (!buildTrackFlagsInitialized) {
+				if (!Boolean.TRUE.equals(stored.buildTrackFlagsInitialized)) {
 					instance.savedSequences = instance.savedSequences.stream()
 						.map(saved -> new SavedSequence(saved.name(), enableAllBuildTracks(saved.tracks()),
 							saved.activeTrackIndex(), saved.delayScaleQuarters(), saved.composerProject()))
@@ -376,6 +380,7 @@ public final class FastNoteblocksConfig {
 						? DEFAULT_REPEAT_MERGE_TICKS
 						: stored.repeatMergeTicks
 				);
+				instance.pasteMode = stored.pasteMode;
 				instance.midiVelocityCutoff = clampMidiVelocityCutoff(
 					stored.midiVelocityCutoff == null
 						? DEFAULT_MIDI_VELOCITY_CUTOFF
@@ -385,6 +390,66 @@ public final class FastNoteblocksConfig {
 		} catch (Exception ignored) {
 			instance = defaults();
 		}
+		songs = SongLibrary.load();
+		boolean migrated = songs.isEmpty();
+		instance.activeSongId = migrateSongsOutOfSettings(instance.activeSongId);
+		if (migrated) {
+			// Rewrite immediately so the settings file sheds the compositions it used to carry,
+			// rather than staying huge until something else happens to save.
+			save();
+		}
+	}
+
+	public static SongLibrary songs() {
+		return songs;
+	}
+
+	/**
+	 * Moves compositions out of the settings file the first time this build runs.
+	 *
+	 * <p>Only runs while the library is empty, so it cannot overwrite songs a later session wrote.
+	 * Library entries saved before compositions were stored alongside them have to be rebuilt from
+	 * their track text, which is lossy in the usual ways -- text carries neither tempo, nor pitches
+	 * outside the note-block range, nor anything finer than a repeater tick.</p>
+	 */
+	private static String migrateSongsOutOfSettings(String preferredId) {
+		if (!songs.isEmpty()) {
+			return preferredId != null && songs.song(preferredId) != null
+				? preferredId
+				: songs.ids().stream().findFirst().orElse(null);
+		}
+		String activeId = null;
+		ComposerProject active = instance.composerProject;
+		if (active == null || active.noteCount() == 0) {
+			// No composition stored, but the old settings file may still hold build tracks from
+			// before compositions existed at all. Rebuilding from them is lossy in the usual ways,
+			// and is the only thing there is to rebuild from.
+			ComposerProject fromTracks = ComposerProject.fromSequenceTracks(
+				instance.activeSequenceName, instance.legacyTracks, 0,
+				instance.activeSequenceDelayScaleQuarters);
+			active = fromTracks.noteCount() > 0 ? fromTracks : null;
+		}
+		if (active != null) {
+			activeId = songs.newId(active.name());
+			songs.save(activeId, active);
+		}
+		for (SavedSequence saved : instance.savedSequences) {
+			ComposerProject song = saved.composerProject() != null
+				? saved.composerProject()
+				: ComposerProject.fromSequenceTracks(saved.name(), saved.tracks(),
+					saved.activeTrackIndex(), saved.delayScaleQuarters());
+			songs.save(songs.newId(saved.name()), song.withName(saved.name()));
+		}
+		if (activeId == null) {
+			activeId = songs.ids().stream().findFirst().orElse(null);
+		}
+		if (activeId == null) {
+			activeId = songs.newId(instance.activeSequenceName);
+			songs.save(activeId, ComposerProject.empty(instance.activeSequenceName));
+		}
+		// The settings file keeps only a pointer from here on; save() no longer writes songs.
+		instance.savedSequences = new ArrayList<>();
+		return activeId;
 	}
 
 	public static void save() {
@@ -552,18 +617,12 @@ public final class FastNoteblocksConfig {
 		return activeTrack().sequence();
 	}
 
-	public void setPlacementSequence(String placementSequence) {
-		updateActiveTrack(activeTrack().withSequence(placementSequence));
-		this.placementSequence = activeTrack().sequence();
-	}
-
 	public int placementSequencePosition() {
-		return activeTrack().position();
+		return Math.max(0, placementCursor);
 	}
 
 	public void setPlacementSequencePosition(int placementSequencePosition) {
-		updateActiveTrack(activeTrack().withPosition(placementSequencePosition));
-		this.placementSequencePosition = activeTrack().position();
+		this.placementCursor = Math.max(0, placementSequencePosition);
 	}
 
 	public String activeSequenceName() {
@@ -594,99 +653,107 @@ public final class FastNoteblocksConfig {
 		this.activeSequenceDelayScaleQuarters = clampSequenceDelayScale(activeSequenceDelayScaleQuarters);
 	}
 
+	/**
+	 * Speed the composer last used, kept only to migrate documents saved before compositions
+	 * carried their own. New saves take it from the composition and this stops being read.
+	 */
 	public int composerSpeedQuarters() {
 		return composerSpeedQuarters;
 	}
 
-	public void setComposerSpeedQuarters(int composerSpeedQuarters) {
-		this.composerSpeedQuarters = clampSequenceDelayScale(composerSpeedQuarters);
-	}
-
 	public String previewInstrument() {
-		return activeTrack().instrument();
+		return previewInstrument;
 	}
 
 	public void setPreviewInstrument(String previewInstrument) {
-		updateActiveTrack(activeTrack().withInstrument(previewInstrument));
-		this.previewInstrument = activeTrack().instrument();
-	}
-
-	public List<SequenceTrack> tracks() {
-		return List.copyOf(tracks);
+		this.previewInstrument = previewInstrument == null || previewInstrument.isBlank()
+			? "HARP"
+			: previewInstrument;
 	}
 
 	/**
-	 * Replaces the build tracks. Deliberately leaves the composition alone.
+	 * The build sequence: the flat timeline of notes and repeaters this composition builds as.
 	 *
-	 * <p>This runs on every keystroke in the sequence editor. Rebuilding the composition from the
-	 * track text here meant any visit to the sequencer silently replaced it with a reconstruction:
-	 * tempo reset to the default, velocities flattened, note durations rounded, and every pitch
-	 * outside the note-block range dropped. The composition is the source of truth and only an
-	 * explicit publish writes tracks from it.</p>
+	 * <p>Derived, never stored. It is a pure function of the active composition and which of its
+	 * layers are included, so filling in a layer's dot changes it at once instead of leaving it
+	 * stale until a separate command is run. Include nothing and there is no sequence, rather than
+	 * whatever was last published lingering on.</p>
+	 *
+	 * <p>Cached on the project's identity, which is sound because ComposerProject is immutable:
+	 * every edit produces a new instance, so a stale cache cannot happen.</p>
 	 */
-	public void setTracks(List<SequenceTrack> tracks) {
-		this.tracks = normalizeTracks(tracks);
-		activeTrackIndex = clampTrackIndex(activeTrackIndex, this.tracks.size());
-		syncLegacyTrackFields();
+	public List<SequenceTrack> tracks() {
+		ComposerProject project = composerProject();
+		if (cachedSequenceProject != project || cachedSequence == null) {
+			cachedSequenceProject = project;
+			cachedSequence = project.toSequenceTracks(java.util.Set.of());
+		}
+		return cachedSequence;
+	}
+
+	public String activeSongId() {
+		return activeSongId;
+	}
+
+	/** Opens a different song. The one being left is already on disk; nothing is carried over. */
+	public void setActiveSongId(String id) {
+		if (id == null || songs.song(id) == null) {
+			return;
+		}
+		activeSongId = id;
+		composerProject = songs.song(id);
+		activeSequenceName = composerProject.name();
 	}
 
 	public ComposerProject composerProject() {
 		if (composerProject == null) {
-			composerProject = ComposerProject.fromSequenceTracks(
-				activeSequenceName, tracks, activeTrackIndex, activeSequenceDelayScaleQuarters
-			);
+			ComposerProject stored = songs.song(activeSongId);
+			if (stored == null) {
+				stored = ComposerProject.empty(activeSequenceName);
+				activeSongId = songs.newId(activeSequenceName);
+				songs.save(activeSongId, stored);
+			}
+			composerProject = stored;
 		}
 		return composerProject;
 	}
 
-	/** Stores the composition. Build tracks are untouched until {@link #publishComposerProject}. */
-	public void setComposerProject(ComposerProject project) {
-		composerProject = project == null
-			? ComposerProject.fromSequenceTracks(activeSequenceName, tracks, activeTrackIndex,
-				activeSequenceDelayScaleQuarters)
-			: project;
-		activeSequenceName = composerProject.name();
-	}
-
 	/**
-	 * Projects the composition onto the build tracks, replacing whatever was there.
+	 * Stores the composition, writing only its own file.
 	 *
-	 * <p>Lossy by nature -- the track text can only hold whole repeater delays and note-block
-	 * pitches -- which is exactly why it is an explicit action rather than a side effect of
-	 * leaving the composer.</p>
+	 * <p>Build tracks are untouched until {@link #publishComposerProject}: the projection drops
+	 * everything track text cannot express, so it stays an explicit action.</p>
 	 */
-	public void publishComposerProject() {
-		ComposerProject project = composerProject();
-		activeTrackIndex = project.activeLayerIndex();
-		// Write the delays already divided by the composer speed, then leave the sequence scale at
-		// 1.00x so nothing multiplies them back. Publishing at the sequence scale meant the two
-		// cancelled and the build always ran at the raw project tempo, however the composer was
-		// previewing it.
-		tracks = normalizeTracks(project.toSequenceTracks(tracks, composerSpeedQuarters));
-		activeSequenceDelayScaleQuarters = DEFAULT_SEQUENCE_DELAY_SCALE_QUARTERS;
-		activeTrackIndex = clampTrackIndex(activeTrackIndex, tracks.size());
-		syncLegacyTrackFields();
+	public void setComposerProject(ComposerProject project) {
+		if (project == null) {
+			return;
+		}
+		composerProject = project;
+		activeSequenceName = project.name();
+		if (activeSongId == null) {
+			activeSongId = songs.newId(project.name());
+		}
+		songs.save(activeSongId, project);
 	}
 
 	public int activeTrackIndex() {
-		return activeTrackIndex;
-	}
-
-	public void setActiveTrackIndex(int activeTrackIndex) {
-		this.activeTrackIndex = clampTrackIndex(activeTrackIndex, tracks.size());
-		syncLegacyTrackFields();
+		return clampTrackIndex(activeTrackIndex, tracks().size());
 	}
 
 	public SequenceTrack activeTrack() {
-		return tracks.get(clampTrackIndex(activeTrackIndex, tracks.size()));
+		List<SequenceTrack> sequence = tracks();
+		return sequence.isEmpty()
+			? new SequenceTrack("Track 1", "", previewInstrument, 0)
+			: sequence.get(clampTrackIndex(activeTrackIndex, sequence.size()));
 	}
 
-	public List<SavedSequence> savedSequences() {
-		return List.copyOf(savedSequences);
+	/** Remembered layout for the next build. Stored by name so the enum can move. */
+	public String pasteMode() {
+		return pasteMode == null ? "COMPACT_CUBE" : pasteMode;
 	}
 
-	public void setSavedSequences(List<SavedSequence> savedSequences) {
-		this.savedSequences = savedSequences == null ? new ArrayList<>() : new ArrayList<>(savedSequences);
+	public void setPasteMode(String pasteMode) {
+		this.pasteMode = pasteMode;
 	}
 
 	public MidiQuantizeGrid midiQuantizeGrid() {
@@ -796,12 +863,10 @@ public final class FastNoteblocksConfig {
 		config.placementSequenceEnabled = false;
 		config.sequencingEditProtection = SequencingEditProtection.RADIALS_AND_INTERACTIONS;
 		config.autoSelectSequenceBlock = true;
-		config.placementSequence = "";
-		config.placementSequencePosition = 0;
 		config.activeSequenceName = "Untitled sequence";
 		config.activeSequenceDelayScaleQuarters = DEFAULT_SEQUENCE_DELAY_SCALE_QUARTERS;
 		config.previewInstrument = "HARP";
-		config.tracks = List.of(new SequenceTrack("Track 1", "", "HARP", 0));
+		config.legacyTracks = List.of();
 		config.composerProject = ComposerProject.empty(config.activeSequenceName);
 		config.buildTrackFlagsInitialized = true;
 		config.activeTrackIndex = 0;
@@ -818,6 +883,7 @@ public final class FastNoteblocksConfig {
 		config.conversionGapPercentile = DEFAULT_CONVERSION_GAP_PERCENTILE;
 		config.commandsPerTick = DEFAULT_COMMANDS_PER_TICK;
 		config.maxBuildFloors = DEFAULT_MAX_BUILD_FLOORS;
+		config.pasteMode = "COMPACT_CUBE";
 		return config;
 	}
 
@@ -907,19 +973,6 @@ public final class FastNoteblocksConfig {
 		return Math.max(0, Math.min(Math.max(1, size) - 1, index));
 	}
 
-	private void updateActiveTrack(SequenceTrack track) {
-		List<SequenceTrack> updated = new ArrayList<>(tracks);
-		updated.set(clampTrackIndex(activeTrackIndex, updated.size()), track);
-		tracks = List.copyOf(updated);
-	}
-
-	private void syncLegacyTrackFields() {
-		SequenceTrack active = activeTrack();
-		placementSequence = active.sequence();
-		placementSequencePosition = active.position();
-		previewInstrument = active.instrument();
-	}
-
 	private static final class StoredConfig {
 		private Boolean modEnabled;
 		private OverlayMode overlayMode;
@@ -948,6 +1001,7 @@ public final class FastNoteblocksConfig {
 		private String previewInstrument;
 		private List<SequenceTrack> tracks;
 		private ComposerProject composerProject;
+		private String activeSongId;
 		private Boolean buildTrackFlagsInitialized;
 		private Integer activeTrackIndex;
 		private List<SavedSequence> savedSequences;
@@ -963,6 +1017,7 @@ public final class FastNoteblocksConfig {
 		private Integer conversionGapPercentile;
 		private Integer commandsPerTick;
 		private Integer maxBuildFloors;
+		private String pasteMode;
 
 		private StoredConfig() {
 		}
@@ -983,16 +1038,20 @@ public final class FastNoteblocksConfig {
 			this.placementSequenceEnabled = config.placementSequenceEnabled;
 			this.sequencingEditProtection = config.sequencingEditProtection;
 			this.autoSelectSequenceBlock = config.autoSelectSequenceBlock;
-			this.placementSequence = config.placementSequence;
-			this.placementSequencePosition = config.placementSequencePosition;
+			this.placementSequence = config.activeTrack().sequence();
+			this.placementSequencePosition = config.placementCursor;
 			this.activeSequenceName = config.activeSequenceName;
 			this.activeSequenceDelayScaleQuarters = config.activeSequenceDelayScaleQuarters;
 			this.previewInstrument = config.previewInstrument;
-			this.tracks = config.tracks;
-			this.composerProject = config.composerProject;
+			// The sequence is derived from the composition, so there is nothing here to store.
+			this.tracks = null;
+			// Songs live in their own files now. Leaving these null keeps the settings file small
+			// and stops one bad composition from taking every setting down with it on load.
+			this.composerProject = null;
+			this.activeSongId = config.activeSongId;
 			this.buildTrackFlagsInitialized = config.buildTrackFlagsInitialized;
 			this.activeTrackIndex = config.activeTrackIndex;
-			this.savedSequences = config.savedSequences;
+			this.savedSequences = null;
 			this.midiQuantizeGrid = config.midiQuantizeGrid;
 			this.midiRangeFit = config.midiRangeFit;
 			this.midiIgnorePercussion = config.midiIgnorePercussion;
@@ -1005,6 +1064,7 @@ public final class FastNoteblocksConfig {
 			this.conversionGapPercentile = config.conversionGapPercentile;
 			this.commandsPerTick = config.commandsPerTick;
 			this.maxBuildFloors = config.maxBuildFloors;
+			this.pasteMode = config.pasteMode;
 		}
 	}
 }

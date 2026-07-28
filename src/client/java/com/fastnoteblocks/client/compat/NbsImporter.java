@@ -162,7 +162,14 @@ final class NbsImporter {
 		int ppq = ComposerProject.DEFAULT_PPQ;
 		int tempoMicrosPerQuarter = Math.max(1, (int)Math.round(4_000_000.0 / baseTicksPerSecond));
 		String name = song.header().name().isBlank() ? fileName(path) : song.header().name();
-		ComposerProject project = new ComposerProject(name, ppq, tempoMicrosPerQuarter, layers, 0, nextId);
+		// NBS has always carried the song's length in its header; we simply never read it. Without
+		// it a song ends on its last note, losing whatever trailing silence the author wrote --
+		// which for a looping song is exactly the gap that makes the loop come round evenly.
+		long endTick = song.header().songLength() > 0
+			? timing.composerTick(song.header().songLength()) * NBS_TICK_SCALE
+			: 0L;
+		ComposerProject project = new ComposerProject(name, ppq, tempoMicrosPerQuarter, layers, 0, nextId,
+			endTick, ComposerProject.DEFAULT_SPEED_QUARTERS);
 		StringBuilder report = new StringBuilder()
 			.append("Imported NBS v").append(song.header().version())
 			.append(": ").append(song.notes().size()).append(" notes into ")

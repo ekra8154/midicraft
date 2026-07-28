@@ -145,8 +145,12 @@ final class MidiImporter {
 				"Every note fell below the velocity cutoff of " + velocityCutoff + "."
 			);
 		}
+		// Standard MIDI files end at an explicit End of Track event, and getTickLength reports it.
+		// That position is the song's real length: anything after the last note is trailing silence
+		// the author wrote on purpose, and dropping it used to shorten every import.
 		ComposerProject project = new ComposerProject(
-			fileName(path), resolution, tempo, layers, 0, nextId
+			fileName(path), resolution, tempo, layers, 0, nextId,
+			Math.max(0L, midi.getTickLength()), ComposerProject.DEFAULT_SPEED_QUARTERS
 		);
 		String report = "Imported " + layers.size() + (layers.size() == 1 ? " layer" : " layers")
 			+ " at " + bpmLabel(tempo);
