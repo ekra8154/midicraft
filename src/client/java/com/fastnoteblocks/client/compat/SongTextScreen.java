@@ -9,6 +9,7 @@ import java.util.List;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.components.MultiLineEditBox;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.CommonComponents;
@@ -28,12 +29,12 @@ final class SongTextScreen extends Screen {
 	private final Screen parent;
 	private final FastNoteblocksConfig config;
 	private EditBox nameBox;
-	private EditBox textBox;
+	private MultiLineEditBox textBox;
 	private Button createButton;
 	private String problem = "";
 
 	SongTextScreen(Screen parent, FastNoteblocksConfig config) {
-		super(Component.literal("New song from text"));
+		super(Component.literal("New composition from text"));
 		this.parent = parent;
 		this.config = config;
 	}
@@ -46,22 +47,27 @@ final class SongTextScreen extends Screen {
 		int top = Math.max(48, height / 2 - 60);
 
 		nameBox = new EditBox(font, left, top, boxWidth, 20, Component.literal("Name"));
-		nameBox.setValue(nameBox.getValue().isEmpty() ? "Untitled song" : nameBox.getValue());
+		nameBox.setValue(nameBox.getValue().isEmpty() ? "Untitled composition" : nameBox.getValue());
 		nameBox.setMaxLength(64);
 		addRenderableWidget(nameBox);
 
-		textBox = new EditBox(font, left, top + 44, boxWidth, 20, Component.literal("Sequence"));
-		textBox.setMaxLength(32000);
-		textBox.setResponder(value -> refresh());
-		addRenderableWidget(textBox);
+		// Multi-line, because a sequence's lines are parallel layers and pasting one back in has to
+		// keep them apart. A single-line box would silently flatten a chord into an arpeggio.
+		textBox = addRenderableWidget(MultiLineEditBox.builder()
+			.setX(left)
+			.setY(top + 44)
+			.setPlaceholder(Component.literal("12, 4d, 7    (one line per layer)"))
+			.build(font, boxWidth, 72, Component.literal("Sequence")));
+		textBox.setCharacterLimit(32000);
+		textBox.setValueListener(value -> refresh());
 
-		createButton = addRenderableWidget(Button.builder(Component.literal("Create song"), button -> create())
-			.bounds(left, top + 96, 110, 20)
+		createButton = addRenderableWidget(Button.builder(Component.literal("Create composition"), button -> create())
+			.bounds(left, top + 124, 130, 20)
 			.tooltip(Tooltip.create(Component.literal(
 				"Parses once into a composition. The text is not kept.")))
 			.build());
 		addRenderableWidget(Button.builder(CommonComponents.GUI_CANCEL, button -> onClose())
-			.bounds(left + 116, top + 96, 80, 20).build());
+			.bounds(left + 136, top + 124, 80, 20).build());
 		setInitialFocus(textBox);
 		refresh();
 	}
@@ -75,17 +81,26 @@ final class SongTextScreen extends Screen {
 			return;
 		}
 		try {
-			List<NoteSequence.Step> steps = NoteSequence.parse(value, 4);
-			long notes = steps.stream().filter(step -> step.type() == NoteSequence.StepType.NOTE).count();
-			long delayTicks = steps.stream()
-				.filter(step -> step.type() == NoteSequence.StepType.REPEATER)
-				.mapToLong(NoteSequence.Step::value)
-				.sum();
-			problem = notes + (notes == 1 ? " note, " : " notes, ")
-				+ delayTicks + " repeater ticks ("
-				+ String.format(java.util.Locale.ROOT, "%.1fs", delayTicks / 10.0) + ")"
-				+ (notes == 0 ? " - a bare repeater chain, which the end marker now carries" : "");
-			createButton.active = true;
+			long notes = 0;
+			long longestDelay = 0;
+			int layers = 0;
+			for (String line : value.split("\\R")) {
+				if (line.isBlank()) {
+					continue;
+				}
+				layers++;
+				List<NoteSequence.Step> steps = NoteSequence.parse(line, 4);
+				notes += steps.stream().filter(step -> step.type() == NoteSequence.StepType.NOTE).count();
+				longestDelay = Math.max(longestDelay, steps.stream()
+					.filter(step -> step.type() == NoteSequence.StepType.REPEATER)
+					.mapToLong(NoteSequence.Step::value)
+					.sum());
+			}
+			problem = layers + (layers == 1 ? " layer, " : " layers (parallel), ")
+				+ notes + (notes == 1 ? " note, " : " notes, ")
+				+ String.format(java.util.Locale.ROOT, "%.1fs", longestDelay / 10.0)
+				+ (notes == 0 ? " - a bare repeater chain, which the end marker carries" : "");
+			createButton.active = layers > 0;
 		} catch (IllegalArgumentException invalid) {
 			problem = invalid.getMessage();
 			createButton.active = false;
@@ -93,14 +108,12 @@ final class SongTextScreen extends Screen {
 	}
 
 	private void create() {
-		String name = nameBox.getValue().isBlank() ? "Untitled song" : nameBox.getValue().trim();
-		ComposerProject song = ComposerProject.fromSequenceTracks(
-			name,
-			List.of(new SequenceTrack("Track 1", textBox.getValue(), config.previewInstrument(), 0)),
-			0,
-			FastNoteblocksConfig.DEFAULT_SEQUENCE_DELAY_SCALE_QUARTERS
-		);
 		SongLibrary library = FastNoteblocksConfig.songs();
+		String name = library.uniqueName(nameBox.getValue().isBlank()
+			? "Untitled composition"
+			: nameBox.getValue().trim());
+		ComposerProject song = ComposerProject.fromSequenceText(
+			name, textBox.getValue(), config.previewInstrument());
 		String id = library.newId(name);
 		library.save(id, song);
 		config.setActiveSongId(id);
@@ -115,9 +128,10 @@ final class SongTextScreen extends Screen {
 		int left = (width - boxWidth) / 2;
 		int top = Math.max(48, height / 2 - 60);
 		graphics.text(font, "Name", left, top - 12, 0xFF8A9098, false);
-		graphics.text(font, "Sequence - pitches 0-24, delays like 4d", left, top + 32, 0xFF8A9098, false);
+		graphics.text(font, "Sequence - pitches 0-24, delays like 4d, one line per parallel layer",
+			left, top + 32, 0xFF8A9098, false);
 		if (!problem.isEmpty()) {
-			graphics.text(font, problem, left, top + 70,
+			graphics.text(font, problem, left, top + 122 - 12,
 				createButton != null && createButton.active ? 0xFF5AD46A : 0xFFFF6B6B, false);
 		}
 	}

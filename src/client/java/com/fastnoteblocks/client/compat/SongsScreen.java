@@ -100,8 +100,9 @@ public final class SongsScreen extends Screen {
 
 	private void create() {
 		SongLibrary library = FastNoteblocksConfig.songs();
-		String id = library.newId("Untitled song");
-		library.save(id, ComposerProject.empty("Untitled song"));
+		String name = library.uniqueName("Untitled composition");
+		String id = library.newId(name);
+		library.save(id, ComposerProject.empty(name));
 		open(id);
 	}
 
@@ -111,7 +112,7 @@ public final class SongsScreen extends Screen {
 
 	private void duplicate(Row row) {
 		SongLibrary library = FastNoteblocksConfig.songs();
-		String name = row.song().name() + " copy";
+		String name = library.uniqueName(row.song().name() + " copy");
 		library.save(library.newId(name), row.song().withName(name));
 		status = "Copied " + row.song().name();
 		init();

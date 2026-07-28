@@ -36,6 +36,8 @@ import org.lwjgl.util.tinyfd.TinyFileDialogs;
 
 public final class ComposerScreen extends Screen {
 	private static final int TOOLBAR_HEIGHT = 34;
+	/** Right edge of the toolbar's buttons: File..Build, Play, Snap and the speed slider. */
+	private static final int TOOLBAR_CONTROLS_RIGHT = 8 + 6 * 58 + 82 + 94;
 	private static final int LAYER_PANEL_WIDTH = 196;
 	private static final int PIANO_WIDTH = 48;
 	private static final int TIMELINE_RULER_HEIGHT = 16;
@@ -1151,10 +1153,23 @@ public final class ComposerScreen extends Screen {
 		}
 	}
 
+	/** The composition being edited, so which one it is never has to be remembered. */
+	private void extractCompositionName(GuiGraphicsExtractor graphics) {
+		int left = TOOLBAR_CONTROLS_RIGHT + 12;
+		if (left > width - 40) {
+			return;
+		}
+		String name = project().name();
+		String shown = font.width(name) <= width - left - 8
+			? name
+			: font.plainSubstrByWidth(name, width - left - 16) + "...";
+		graphics.text(font, shown, left, 13, 0xFFD6D8DD, false);
+	}
+
 	private void extractPanels(GuiGraphicsExtractor graphics) {
 		graphics.fill(0, TOOLBAR_HEIGHT, LAYER_PANEL_WIDTH, height, 0xB8101115);
 		graphics.fill(LAYER_PANEL_WIDTH, TOOLBAR_HEIGHT, width, height, 0x99101115);
-		graphics.text(font, title, 8, TOOLBAR_HEIGHT + 4, 0xFFFFFFFF, false);
+		graphics.text(font, "Layers", 8, TOOLBAR_HEIGHT + 4, 0xFF8A9098, false);
 		graphics.enableScissor(0, LAYER_LIST_TOP - 2, LAYER_PANEL_WIDTH, layerListBottom());
 		for (int index = 0; index < project().layers().size(); index++) {
 			int y = layerY(index);
@@ -1311,6 +1326,7 @@ public final class ComposerScreen extends Screen {
 		graphics.disableScissor();
 
 		graphics.text(font, "Minecraft F♯3–F♯5", rollX + 5, TOOLBAR_HEIGHT + 3, 0xFF65F4FF, false);
+		extractCompositionName(graphics);
 	}
 
 	private void extractTimeGrid(GuiGraphicsExtractor graphics) {
@@ -2389,8 +2405,9 @@ public final class ComposerScreen extends Screen {
 		minecraft.gui.setScreen(new NamePromptScreen(this, "Save composition as",
 			"Save a copy of \"" + project().name() + "\" under a new name",
 			project().name() + " copy", "Save copy", name -> {
-				ComposerProject copy = project().withName(name);
-				String id = FastNoteblocksConfig.songs().newId(name);
+				String unique = FastNoteblocksConfig.songs().uniqueName(name);
+				ComposerProject copy = project().withName(unique);
+				String id = FastNoteblocksConfig.songs().newId(unique);
 				FastNoteblocksConfig.songs().save(id, copy);
 				config.setActiveSongId(id);
 				FastNoteblocksConfig.save();

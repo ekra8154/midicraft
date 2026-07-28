@@ -126,6 +126,27 @@ public final class SongLibrary {
 		return true;
 	}
 
+	/**
+	 * The given name, numbered if a song already goes by it.
+	 *
+	 * <p>Ids are deduplicated on their own, so two songs could share a display name and be told
+	 * apart only by which row they sat on.</p>
+	 */
+	public String uniqueName(String name) {
+		String base = name == null || name.isBlank() ? "Untitled composition" : name.trim();
+		if (songs.values().stream().noneMatch(song -> song.name().equals(base))) {
+			return base;
+		}
+		for (int suffix = 2; suffix < 1000; suffix++) {
+			String candidate = base + " (" + suffix + ")";
+			String attempt = candidate;
+			if (songs.values().stream().noneMatch(song -> song.name().equals(attempt))) {
+				return candidate;
+			}
+		}
+		return base + " (" + System.currentTimeMillis() + ")";
+	}
+
 	/** A filename-safe id derived from a song's name, numbered if that name is already taken. */
 	public String newId(String name) {
 		String base = slug(name);

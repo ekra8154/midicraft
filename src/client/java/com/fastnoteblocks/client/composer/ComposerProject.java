@@ -175,6 +175,27 @@ public record ComposerProject(
 			DEFAULT_PPQ * 4L, DEFAULT_SPEED_QUARTERS);
 	}
 
+	/**
+	 * Reads a sequence's text back into a composition, one layer per line.
+	 *
+	 * <p>Lines are parallel, not consecutive. Each is an independent bus starting at tick zero,
+	 * which is what a sequence's tracks are and therefore what "Copy sequence as text" writes out.
+	 * Feeding the whole thing through the single-timeline tokenizer would splice the layers
+	 * end-to-end instead, turning a chord into an arpeggio.</p>
+	 */
+	public static ComposerProject fromSequenceText(String name, String text, String instrument) {
+		List<SequenceTrack> tracks = new ArrayList<>();
+		for (String line : (text == null ? "" : text).split("\\R")) {
+			if (!line.isBlank()) {
+				tracks.add(new SequenceTrack("Layer " + (tracks.size() + 1), line.trim(), instrument, 0));
+			}
+		}
+		if (tracks.isEmpty()) {
+			tracks.add(new SequenceTrack("Layer 1", "", instrument, 0));
+		}
+		return fromSequenceTracks(name, tracks, 0, DEFAULT_SPEED_QUARTERS);
+	}
+
 	public static ComposerProject fromSequenceTracks(
 		String name,
 		List<SequenceTrack> tracks,
