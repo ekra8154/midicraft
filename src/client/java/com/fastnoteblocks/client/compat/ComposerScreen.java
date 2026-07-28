@@ -737,6 +737,10 @@ public final class ComposerScreen extends Screen {
 				graphics.fill(layerMenuX + 2, rowY, layerMenuX + menuWidth - 2,
 					rowY + CONTEXT_MENU_ROW_HEIGHT, 0xFF356070);
 			}
+			if (hovered) {
+				graphics.setTooltipForNextFrame(
+					Component.literal(layerActionTooltip(actions[index])), mouseX, mouseY);
+			}
 			graphics.text(font, Component.literal(layerActionLabel(actions[index])), layerMenuX + 6, rowY + 4,
 				enabled ? 0xFFFFFFFF : 0xFF777777, false);
 		}
@@ -825,6 +829,18 @@ public final class ComposerScreen extends Screen {
 				if (!hint.isEmpty()) {
 					graphics.text(font, Component.literal(hint),
 						toolbarMenuX + menuWidth - 6 - font.width(hint), rowY + 5, 0xFF6E7480, false);
+				}
+			}
+			if (hovered) {
+				String describe = toolbarMenu == ToolbarMenu.IMPORT
+					? (index < ImportSetting.values().length
+						? importSettingTooltip(ImportSetting.values()[index])
+						: "")
+					: (index < toolbarActions().length
+						? toolbarActionTooltip(toolbarActions()[index])
+						: "");
+				if (!describe.isEmpty()) {
+					graphics.setTooltipForNextFrame(Component.literal(describe), mouseX, mouseY);
 				}
 			}
 			graphics.text(font, Component.literal(rows.get(index)), toolbarMenuX + 6, rowY + 5,
@@ -1046,6 +1062,110 @@ public final class ComposerScreen extends Screen {
 			selectedNotes.size() + " notes " + label + scope));
 	}
 
+	/**
+	 * What a menu row does, in a sentence.
+	 *
+	 * <p>Every row has one. Several of these actions are irreversible in the world or change the
+	 * whole song, and a bare verb like "Convert" or "Quantize" does not tell you which.</p>
+	 */
+	private String toolbarActionTooltip(ToolbarAction action) {
+		return switch (action) {
+			case IMPORT -> "Replace this composition with a MIDI or NBS file. Settings below "
+				+ "control how it is read.";
+			case OPEN_SONGS -> "The song library: open another composition, start one, or make a "
+				+ "copy.";
+			case COPY_AS_TEXT -> "Puts the build sequence on the clipboard, one line per included "
+				+ "layer. Out-of-range notes and sub-tick timing do not survive the trip.";
+			case SAVE_COMPOSITION -> "Writes this composition to its own file. Editing already "
+				+ "saves on every change, so this only confirms it.";
+			case SAVE_COMPOSITION_AS -> "Saves a copy under a new name and opens it. How to keep a "
+				+ "version still while you carry on editing.";
+			case BACK_TO_SEQUENCES -> "Leave the composer. Nothing is lost; edits are already saved.";
+			case CLOSE_TO_GAME -> "Close straight back to the game.";
+			case UNDO -> "Step back. History is kept for this visit only, not across sessions.";
+			case REDO -> "Step forward again.";
+			case CONVERT -> "Does the whole job at once: merge repeats, quantize, fit notes into "
+				+ "range, snap the tempo and the end marker. Slows the song if it is faster than "
+				+ "redstone can play.";
+			case MERGE_REPEATS -> "Collapses a pitch that re-triggers faster than the repeat "
+				+ "window. Songs fake sustain this way, and note blocks cannot sustain.";
+			case QUANTIZE -> "Moves note starts onto the musical grid. Fixes notes between beats, "
+				+ "not a grid that disagrees with redstone -- that is Snap tempo.";
+			case FIT_ALL_RANGE -> "Octave-shifts notes outside F#3-F#5 into it. Quick rather than "
+				+ "faithful: intervals across a layer can change.";
+			case SNAP_TEMPO -> "Nudges the tempo so the grid lands on whole repeater ticks. The "
+				+ "other half of quantize, and neither works alone.";
+			case SNAP_END -> "Moves the end marker so its trailing delay is a whole number of "
+				+ "repeater ticks.";
+			case TRIM_END -> "Pulls the end marker back to the last note, discarding trailing "
+				+ "silence.";
+			case INCLUDE_SELECTED -> "Fills in the build dot on the selected layers, adding them to "
+				+ "the sequence. The others are left as they are.";
+			case SET_INCLUDED_TO_SELECTION -> "Makes the selected layers the only included ones, "
+				+ "clearing the rest. A batch off as well as a batch on.";
+			case PASTE_IN_WORLD -> "Builds the sequence with /setblock. Needs permission, and "
+				+ "overwrites whatever is standing there.";
+			case BUILD_CANCEL -> "Stops a paste part-way. Blocks already placed stay put.";
+			case SELECT_OFF_GRID -> "Selects notes whose gap from the previous one is not a whole "
+				+ "repeater tick.";
+			case SELECT_TOO_FREQUENT -> "Selects notes arriving less than one repeater tick after "
+				+ "the previous one -- faster than redstone can retrigger.";
+			case SELECT_OUT_OF_RANGE -> "Selects notes outside the note-block range of F#3-F#5.";
+			case SELECT_ALL_NOTES -> "Selects every note on the active layers.";
+			case SELECT_NONE -> "Clears the selection.";
+		};
+	}
+
+	private static String layerActionTooltip(LayerAction action) {
+		return switch (action) {
+			case MERGE_SELECTED -> "Folds the selected layers into the lowest-numbered one, which "
+				+ "keeps its name and instrument.";
+			case INCLUDE_SELECTED -> "Fills in the build dot on the selected layers, adding them to "
+				+ "the sequence.";
+			case SET_INCLUDED_TO_SELECTION -> "Makes the selected layers the only included ones, "
+				+ "clearing the rest.";
+			case SELECT_ALL -> "Selects every layer.";
+			case COLLAPSE_OTHERS -> "Collapses every layer but the active one, to get a long list "
+				+ "out of the way.";
+		};
+	}
+
+	private static String importSettingTooltip(ImportSetting setting) {
+		return switch (setting) {
+			case QUANTIZE_GRID -> "Grid that imported notes are snapped onto. Auto picks one from "
+				+ "the song's own spacing.";
+			case TEMPO_FIT -> "Snap to repeaters nudges the tempo so the grid lands on whole "
+				+ "repeater ticks. Preserve original keeps the tempo and leaves the timing to you.";
+			case RANGE_FIT -> "What to do with notes outside F#3-F#5: shift them by octaves, wrap "
+				+ "them, clamp them to the edges, or keep them out of range for editing.";
+			case REPEAT_MERGE -> "How close a repeat of the same pitch must be to be collapsed. "
+				+ "This, not the velocity cutoff, is what removes fake sustain.";
+			case GRID_OUTLIERS -> "Share of the closest note gaps the automatic grid may ignore. "
+				+ "Without it a single tight pair sets the tempo for the whole song.";
+			case VELOCITY_CUTOFF -> "Notes quieter than this are dropped, since note blocks have no "
+				+ "volume. Set it too high and a quiet passage disappears -- the import report says "
+				+ "what range the file uses.";
+			case IGNORE_PERCUSSION -> "Skip MIDI channel 10, which is drums. They rarely map onto "
+				+ "note-block pitches.";
+			case MAX_TRACKS -> "How many parts to keep. Busiest first, so a sparse intro can be "
+				+ "cut; the import report says when that happens.";
+			case DEFAULT_INSTRUMENT -> "Note-block instrument given to every imported MIDI layer. "
+				+ "NBS imports keep their own.";
+		};
+	}
+
+	private static String contextActionTooltip(ContextAction action) {
+		return switch (action) {
+			case OCTAVE_DOWN -> "Drops the selected notes an octave.";
+			case OCTAVE_UP -> "Raises the selected notes an octave.";
+			case FIT_RANGE -> "Octave-shifts the selected notes into F#3-F#5, the range note "
+				+ "blocks can play.";
+			case COPY -> "Copies the selected notes.";
+			case CUT -> "Copies the selected notes and removes them.";
+			case DELETE -> "Removes the selected notes.";
+		};
+	}
+
 	/** Keyboard equivalent, shown beside a menu row so the shortcut can be discovered by using it. */
 	private static String toolbarShortcut(ToolbarAction action) {
 		return switch (action) {
@@ -1176,6 +1296,10 @@ public final class ComposerScreen extends Screen {
 			if (hovered) {
 				graphics.fill(contextMenuX + 2, rowY, contextMenuX + CONTEXT_MENU_WIDTH - 2,
 					rowY + CONTEXT_MENU_ROW_HEIGHT, 0xFF356070);
+			}
+			if (hovered) {
+				graphics.setTooltipForNextFrame(
+					Component.literal(contextActionTooltip(actions[index])), mouseX, mouseY);
 			}
 			graphics.text(font, Component.literal(actions[index].label), contextMenuX + 6, rowY + 4,
 				0xFFFFFFFF, false);

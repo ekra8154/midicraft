@@ -213,8 +213,17 @@ public final class FastNoteblocksConfig {
 	public static final int DEFAULT_REPEAT_MERGE_TICKS = 1;
 	public static final int MIN_REPEAT_MERGE_TICKS = 0;
 	public static final int MAX_REPEAT_MERGE_TICKS = 8;
-	/** Note blocks have no volume, so quiet imported notes become full-volume noise. 32 is the MIDI "pp" threshold. */
-	public static final int DEFAULT_MIDI_VELOCITY_CUTOFF = 32;
+	/**
+	 * Notes quieter than this are dropped on import, because note blocks have no volume and a
+	 * near-silent note arrives at full volume.
+	 *
+	 * <p>Was 32, the MIDI "pp" threshold, which is far too eager. A quiet piece can spend its
+	 * whole dynamic range below it -- Zoltraak.mid spans 16 to 47, so 32 removed its entire
+	 * fourteen-second opening crescendo. 8 still catches the near-inaudible tail of a fake-sustain
+	 * ramp while leaving real music alone, and Merge repeats is the tool that actually handles
+	 * fake sustain, regardless of how loud it is.</p>
+	 */
+	public static final int DEFAULT_MIDI_VELOCITY_CUTOFF = 8;
 	public static final int MIN_MIDI_VELOCITY_CUTOFF = 0;
 	public static final int MAX_MIDI_VELOCITY_CUTOFF = 127;
 	private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
