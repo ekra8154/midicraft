@@ -60,18 +60,23 @@ final class MidiImporter {
 		List<SequenceTrack> tracks = new ArrayList<>();
 		int skipped = 0;
 		int clamped = 0;
+		int quiet = 0;
 		for (int index = 0; index < parts.size(); index++) {
 			ConvertedPart converted = convertPart(
-				parts.get(index), gridTicks, resolution, tempoUsPerQuarter, config.midiRangeFit()
+				parts.get(index), gridTicks, resolution, tempoUsPerQuarter, config.midiRangeFit(),
+				config.midiVelocityCutoff()
 			);
 			skipped += converted.skipped();
 			clamped += converted.clamped();
+			quiet += converted.quiet();
 			if (!converted.sequence().isBlank()) {
 				tracks.add(new SequenceTrack(trackName(index, parts.get(index)), converted.sequence(), instrument, 0));
 			}
 		}
 		if (tracks.isEmpty()) {
-			throw new IllegalArgumentException("Every selected MIDI part was empty after range fitting.");
+			throw new IllegalArgumentException(quiet > 0
+				? "Every note fell below the velocity cutoff of " + config.midiVelocityCutoff() + "."
+				: "Every selected MIDI part was empty after range fitting.");
 		}
 
 		String name = fileName(path);
@@ -83,6 +88,9 @@ final class MidiImporter {
 		}
 		if (skipped > 0 || clamped > 0) {
 			report += " (" + skipped + " skipped, " + clamped + " clamped)";
+		}
+		if (quiet > 0) {
+			report += ", " + quiet + " below velocity " + config.midiVelocityCutoff();
 		}
 		return new Result(new SavedSequence(
 			name, tracks, 0, FastNoteblocksConfig.DEFAULT_SEQUENCE_DELAY_SCALE_QUARTERS
@@ -109,10 +117,16 @@ final class MidiImporter {
 		List<Layer> layers = new ArrayList<>();
 		long nextId = 1L;
 		int outsideRange = 0;
+		int quiet = 0;
+		int velocityCutoff = config.midiVelocityCutoff();
 		for (int index = 0; index < parts.size(); index++) {
 			ExactPart part = parts.get(index);
 			List<NoteEvent> notes = new ArrayList<>();
 			for (ExactNote note : part.notes()) {
+				if (note.velocity() < velocityCutoff) {
+					quiet++;
+					continue;
+				}
 				NoteEvent event = new NoteEvent(nextId++, note.midiNote(), note.startTick(),
 					Math.max(1L, note.endTick() - note.startTick()), note.velocity());
 				if (!event.isBuildable()) {
@@ -120,8 +134,16 @@ final class MidiImporter {
 				}
 				notes.add(event);
 			}
+			if (notes.isEmpty()) {
+				continue;
+			}
 			layers.add(new Layer(trackName(index, new Part(part.name(), part.trackIndex(), part.channel(), List.of())),
 				defaultInstrument, false, true, true, notes));
+		}
+		if (layers.isEmpty()) {
+			throw new IllegalArgumentException(
+				"Every note fell below the velocity cutoff of " + velocityCutoff + "."
+			);
 		}
 		ComposerProject project = new ComposerProject(
 			fileName(path), resolution, tempo, layers, 0, nextId
@@ -130,6 +152,9 @@ final class MidiImporter {
 			+ " at " + bpmLabel(tempo);
 		if (outsideRange > 0) {
 			report += "; " + outsideRange + " notes kept outside Minecraft's range";
+		}
+		if (quiet > 0) {
+			report += "; " + quiet + " notes below velocity " + velocityCutoff + " dropped";
 		}
 		return new ProjectResult(project, report);
 	}
@@ -217,7 +242,7 @@ final class MidiImporter {
 					PartKey key = new PartKey(currentTrackIndex, channel);
 					parts.computeIfAbsent(key, ignored -> new MutablePart(name, currentTrackIndex, channel))
 						.notes()
-						.add(new NoteStart(event.getTick(), shortMessage.getData1()));
+						.add(new NoteStart(event.getTick(), shortMessage.getData1(), shortMessage.getData2()));
 				}
 			}
 		}
@@ -231,13 +256,18 @@ final class MidiImporter {
 		int gridTicks,
 		int resolution,
 		int tempoUsPerQuarter,
-		MidiRangeFit rangeFit
+		MidiRangeFit rangeFit,
+		int velocityCutoff
 	) {
-		int shift = rangeFit == MidiRangeFit.CLAMP ? 0 : bestOctaveShift(part.notes());
+		List<NoteStart> audible = part.notes().stream()
+			.filter(note -> note.velocity() >= velocityCutoff)
+			.toList();
+		int quiet = part.notes().size() - audible.size();
+		int shift = rangeFit == MidiRangeFit.CLAMP ? 0 : bestOctaveShift(audible);
 		TreeMap<Long, LinkedHashSet<Integer>> groups = new TreeMap<>();
 		int skipped = 0;
 		int clamped = 0;
-		for (NoteStart note : part.notes()) {
+		for (NoteStart note : audible) {
 			int pitch = note.midiNote() - NOTE_BLOCK_BASE_MIDI_NOTE + shift;
 			FittedNote fitted = fitPitch(pitch, rangeFit);
 			if (fitted.skipped()) {
@@ -262,7 +292,7 @@ final class MidiImporter {
 			entry.getValue().stream().sorted().forEach(pitch -> tokens.add(Integer.toString(pitch)));
 			previousMinecraftTick = minecraftTick;
 		}
-		return new ConvertedPart(String.join(", ", tokens), skipped, clamped);
+		return new ConvertedPart(String.join(", ", tokens), skipped, clamped, quiet);
 	}
 
 	private static int midiTickToMinecraftTick(long midiTick, int resolution, int tempoUsPerQuarter) {
@@ -428,7 +458,7 @@ final class MidiImporter {
 	private record PartKey(int trackIndex, int channel) {
 	}
 
-	private record NoteStart(long tick, int midiNote) {
+	private record NoteStart(long tick, int midiNote, int velocity) {
 	}
 
 	private record MutablePart(String name, int trackIndex, int channel, List<NoteStart> notes) {
@@ -440,7 +470,7 @@ final class MidiImporter {
 	private record Part(String name, int trackIndex, int channel, List<NoteStart> notes) {
 	}
 
-	private record ConvertedPart(String sequence, int skipped, int clamped) {
+	private record ConvertedPart(String sequence, int skipped, int clamped, int quiet) {
 	}
 
 	private record FittedNote(int pitch, boolean clamped, boolean skipped) {

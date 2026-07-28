@@ -177,6 +177,29 @@ public final class FastNoteblocksConfig {
 	public static final int DEFAULT_MIDI_MAX_IMPORTED_TRACKS = ComposerProject.MAX_LAYERS;
 	public static final int MIN_MIDI_MAX_IMPORTED_TRACKS = 1;
 	public static final int MAX_MIDI_MAX_IMPORTED_TRACKS = MAX_TRACKS;
+	/**
+	 * Share of the closest note gaps the automatic convert grid is allowed to ignore. Picking the
+	 * grid from the single smallest gap lets one outlier in thousands of notes dictate the tempo
+	 * for the whole song. 0 restores that strict-minimum behaviour.
+	 */
+	public static final int DEFAULT_CONVERSION_GAP_PERCENTILE = 5;
+	public static final int MIN_CONVERSION_GAP_PERCENTILE = 0;
+	public static final int MAX_CONVERSION_GAP_PERCENTILE = 25;
+	/**
+	 * Commands sent per client tick when pasting a build. Singleplayer tolerates far more than the
+	 * original fixed rate of 2; servers may treat a high rate as command spam.
+	 */
+	public static final int DEFAULT_COMMANDS_PER_TICK = 32;
+	public static final int MIN_COMMANDS_PER_TICK = 1;
+	public static final int MAX_COMMANDS_PER_TICK = 256;
+	/** Repeats of a pitch closer than this many repeater ticks collapse on convert. 0 disables. */
+	public static final int DEFAULT_REPEAT_MERGE_TICKS = 1;
+	public static final int MIN_REPEAT_MERGE_TICKS = 0;
+	public static final int MAX_REPEAT_MERGE_TICKS = 8;
+	/** Note blocks have no volume, so quiet imported notes become full-volume noise. 32 is the MIDI "pp" threshold. */
+	public static final int DEFAULT_MIDI_VELOCITY_CUTOFF = 32;
+	public static final int MIN_MIDI_VELOCITY_CUTOFF = 0;
+	public static final int MAX_MIDI_VELOCITY_CUTOFF = 127;
 	private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 	private static final Path CONFIG_PATH = FabricLoader.getInstance().getConfigDir().resolve("fast-noteblocks.json");
 	private static FastNoteblocksConfig instance = defaults();
@@ -212,6 +235,10 @@ public final class FastNoteblocksConfig {
 	private int midiMaxImportedTracks;
 	private String midiDefaultInstrument;
 	private MidiTempoFit midiTempoFit;
+	private int midiVelocityCutoff;
+	private int repeatMergeTicks;
+	private int conversionGapPercentile;
+	private int commandsPerTick;
 
 	private FastNoteblocksConfig() {
 	}
@@ -307,6 +334,24 @@ public final class FastNoteblocksConfig {
 					? "HARP"
 					: stored.midiDefaultInstrument;
 				instance.midiTempoFit = stored.midiTempoFit == null ? MidiTempoFit.SNAP_TO_REPEATERS : stored.midiTempoFit;
+				instance.commandsPerTick = clampCommandsPerTick(
+					stored.commandsPerTick == null ? DEFAULT_COMMANDS_PER_TICK : stored.commandsPerTick
+				);
+				instance.conversionGapPercentile = clampConversionGapPercentile(
+					stored.conversionGapPercentile == null
+						? DEFAULT_CONVERSION_GAP_PERCENTILE
+						: stored.conversionGapPercentile
+				);
+				instance.repeatMergeTicks = clampRepeatMergeTicks(
+					stored.repeatMergeTicks == null
+						? DEFAULT_REPEAT_MERGE_TICKS
+						: stored.repeatMergeTicks
+				);
+				instance.midiVelocityCutoff = clampMidiVelocityCutoff(
+					stored.midiVelocityCutoff == null
+						? DEFAULT_MIDI_VELOCITY_CUTOFF
+						: stored.midiVelocityCutoff
+				);
 			}
 		} catch (Exception ignored) {
 			instance = defaults();
@@ -631,6 +676,38 @@ public final class FastNoteblocksConfig {
 		this.midiTempoFit = midiTempoFit == null ? MidiTempoFit.SNAP_TO_REPEATERS : midiTempoFit;
 	}
 
+	public int commandsPerTick() {
+		return commandsPerTick;
+	}
+
+	public void setCommandsPerTick(int commandsPerTick) {
+		this.commandsPerTick = clampCommandsPerTick(commandsPerTick);
+	}
+
+	public int conversionGapPercentile() {
+		return conversionGapPercentile;
+	}
+
+	public void setConversionGapPercentile(int conversionGapPercentile) {
+		this.conversionGapPercentile = clampConversionGapPercentile(conversionGapPercentile);
+	}
+
+	public int repeatMergeTicks() {
+		return repeatMergeTicks;
+	}
+
+	public void setRepeatMergeTicks(int repeatMergeTicks) {
+		this.repeatMergeTicks = clampRepeatMergeTicks(repeatMergeTicks);
+	}
+
+	public int midiVelocityCutoff() {
+		return midiVelocityCutoff;
+	}
+
+	public void setMidiVelocityCutoff(int midiVelocityCutoff) {
+		this.midiVelocityCutoff = clampMidiVelocityCutoff(midiVelocityCutoff);
+	}
+
 	private static FastNoteblocksConfig defaults() {
 		FastNoteblocksConfig config = new FastNoteblocksConfig();
 		config.modEnabled = true;
@@ -664,6 +741,10 @@ public final class FastNoteblocksConfig {
 		config.midiMaxImportedTracks = DEFAULT_MIDI_MAX_IMPORTED_TRACKS;
 		config.midiDefaultInstrument = "HARP";
 		config.midiTempoFit = MidiTempoFit.SNAP_TO_REPEATERS;
+		config.midiVelocityCutoff = DEFAULT_MIDI_VELOCITY_CUTOFF;
+		config.repeatMergeTicks = DEFAULT_REPEAT_MERGE_TICKS;
+		config.conversionGapPercentile = DEFAULT_CONVERSION_GAP_PERCENTILE;
+		config.commandsPerTick = DEFAULT_COMMANDS_PER_TICK;
 		return config;
 	}
 
@@ -698,6 +779,23 @@ public final class FastNoteblocksConfig {
 
 	private static int clampMidiMaxImportedTracks(int tracks) {
 		return Math.max(MIN_MIDI_MAX_IMPORTED_TRACKS, Math.min(MAX_MIDI_MAX_IMPORTED_TRACKS, tracks));
+	}
+
+	private static int clampCommandsPerTick(int commands) {
+		return Math.max(MIN_COMMANDS_PER_TICK, Math.min(MAX_COMMANDS_PER_TICK, commands));
+	}
+
+	private static int clampConversionGapPercentile(int percentile) {
+		return Math.max(MIN_CONVERSION_GAP_PERCENTILE,
+			Math.min(MAX_CONVERSION_GAP_PERCENTILE, percentile));
+	}
+
+	private static int clampRepeatMergeTicks(int ticks) {
+		return Math.max(MIN_REPEAT_MERGE_TICKS, Math.min(MAX_REPEAT_MERGE_TICKS, ticks));
+	}
+
+	private static int clampMidiVelocityCutoff(int velocity) {
+		return Math.max(MIN_MIDI_VELOCITY_CUTOFF, Math.min(MAX_MIDI_VELOCITY_CUTOFF, velocity));
 	}
 
 	private static int legacyTimescaleToQuarters(Integer timescale) {
@@ -782,6 +880,10 @@ public final class FastNoteblocksConfig {
 		private Integer midiMaxImportedTracks;
 		private String midiDefaultInstrument;
 		private MidiTempoFit midiTempoFit;
+		private Integer midiVelocityCutoff;
+		private Integer repeatMergeTicks;
+		private Integer conversionGapPercentile;
+		private Integer commandsPerTick;
 
 		private StoredConfig() {
 		}
@@ -818,6 +920,10 @@ public final class FastNoteblocksConfig {
 			this.midiMaxImportedTracks = config.midiMaxImportedTracks;
 			this.midiDefaultInstrument = config.midiDefaultInstrument;
 			this.midiTempoFit = config.midiTempoFit;
+			this.midiVelocityCutoff = config.midiVelocityCutoff;
+			this.repeatMergeTicks = config.repeatMergeTicks;
+			this.conversionGapPercentile = config.conversionGapPercentile;
+			this.commandsPerTick = config.commandsPerTick;
 		}
 	}
 }

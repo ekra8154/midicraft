@@ -1,5 +1,6 @@
 package com.fastnoteblocks.client.compat;
 
+import com.fastnoteblocks.client.FastNoteblocksConfig;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.List;
@@ -8,7 +9,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
 
 public final class CommandPasteSender {
-	private static final int COMMANDS_PER_TICK = 2;
+
 	private static final Deque<String> COMMANDS = new ArrayDeque<>();
 	private static int total;
 	private static int sent;
@@ -52,7 +53,8 @@ public final class CommandPasteSender {
 			cancel(true);
 			return;
 		}
-		for (int i = 0; i < COMMANDS_PER_TICK && !COMMANDS.isEmpty(); i++) {
+		int perTick = FastNoteblocksConfig.get().commandsPerTick();
+		for (int i = 0; i < perTick && !COMMANDS.isEmpty(); i++) {
 			minecraft.player.connection.sendCommand(COMMANDS.removeFirst());
 			sent++;
 		}

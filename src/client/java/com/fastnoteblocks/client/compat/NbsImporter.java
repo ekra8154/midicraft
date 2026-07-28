@@ -21,6 +21,12 @@ final class NbsImporter {
 	private static final int NBS_LOWEST_MIDI_NOTE = 21;
 	private static final int NBS_CUSTOM_INSTRUMENT_CENTER_KEY = 45;
 	private static final String TEMPO_CHANGER_NAME = "tempo changer";
+	/**
+	 * Composer ticks per NBS tick. NBS stores one tick per event, which is far too coarse for the
+	 * piano roll's zoom and grid limits, so events are spread over a standard-resolution timeline.
+	 * The tempo formula below cancels this factor out exactly, leaving playback speed unchanged.
+	 */
+	private static final int NBS_TICK_SCALE = ComposerProject.DEFAULT_PPQ / 4;
 	private static final String[] VANILLA_INSTRUMENTS = {
 		"HARP", "BASS", "BASEDRUM", "SNARE", "HAT", "GUITAR", "FLUTE", "BELL",
 		"CHIME", "XYLOPHONE", "IRON_XYLOPHONE", "COW_BELL", "DIDGERIDOO", "BIT", "BANJO", "PLING",
@@ -67,8 +73,10 @@ final class NbsImporter {
 		int customFallback = 0;
 		int skippedEvents = 0;
 		int skippedSilent = 0;
+		int skippedQuiet = 0;
 		int skippedUnselected = 0;
 		int pannedNotes = 0;
+		int velocityCutoff = config.midiVelocityCutoff();
 		for (NbsSong.Note note : song.notes()) {
 			NbsSong.CustomInstrument custom = customById.get(note.instrument());
 			if (custom != null && TEMPO_CHANGER_NAME.equals(normalize(custom.name()))) {
@@ -78,6 +86,11 @@ final class NbsImporter {
 			int layerVolume = layerVolume(song, note.layer());
 			if (note.velocity() <= 0 || layerVolume <= 0) {
 				skippedSilent++;
+				continue;
+			}
+			int velocity = scaledVelocity(note.velocity(), layerVolume);
+			if (velocity < velocityCutoff) {
+				skippedQuiet++;
 				continue;
 			}
 			InstrumentMapping mapping = mapInstrument(note.instrument(), song, custom, config);
@@ -110,8 +123,6 @@ final class NbsImporter {
 					|| midiNote > ComposerProject.NOTE_BLOCK_MAX_MIDI_NOTE) {
 				outsideRange++;
 			}
-			int velocity = Math.max(1, Math.min(127,
-				(int)Math.round(note.velocity() * layerVolume / 100.0 * 1.27)));
 			group.notes.add(new PendingNote(
 				timing.composerTick(note.tick()),
 				midiNote,
@@ -139,7 +150,8 @@ final class NbsImporter {
 			group.notes.sort(Comparator.comparingLong(PendingNote::tick).thenComparingInt(PendingNote::midiNote));
 			List<NoteEvent> notes = new ArrayList<>(group.notes.size());
 			for (PendingNote note : group.notes) {
-				notes.add(new NoteEvent(nextId++, note.midiNote(), note.tick(), 1L, note.velocity()));
+				notes.add(new NoteEvent(nextId++, note.midiNote(),
+					note.tick() * NBS_TICK_SCALE, NBS_TICK_SCALE, note.velocity()));
 			}
 			String layerName = group.sourceNames.size() == 1
 				? group.sourceNames.iterator().next()
@@ -147,7 +159,7 @@ final class NbsImporter {
 			layers.add(new Layer(layerName, group.instrument, false, true, true, notes));
 		}
 
-		int ppq = 4;
+		int ppq = ComposerProject.DEFAULT_PPQ;
 		int tempoMicrosPerQuarter = Math.max(1, (int)Math.round(4_000_000.0 / baseTicksPerSecond));
 		String name = song.header().name().isBlank() ? fileName(path) : song.header().name();
 		ComposerProject project = new ComposerProject(name, ppq, tempoMicrosPerQuarter, layers, 0, nextId);
@@ -171,6 +183,10 @@ final class NbsImporter {
 		if (skippedSilent > 0) {
 			report.append("; ").append(skippedSilent).append(" silent notes skipped");
 		}
+		if (skippedQuiet > 0) {
+			report.append("; ").append(skippedQuiet)
+				.append(" notes below velocity ").append(velocityCutoff).append(" dropped");
+		}
 		if (skippedUnselected > 0) {
 			report.append("; ").append(skippedUnselected).append(" notes excluded by instrument selection");
 		}
@@ -190,12 +206,17 @@ final class NbsImporter {
 			customById.put(instrument.id(), instrument);
 		}
 		Map<String, Integer> counts = new LinkedHashMap<>();
+		int velocityCutoff = config.midiVelocityCutoff();
 		for (NbsSong.Note note : song.notes()) {
 			NbsSong.CustomInstrument custom = customById.get(note.instrument());
 			if (custom != null && TEMPO_CHANGER_NAME.equals(normalize(custom.name()))) {
 				continue;
 			}
-			if (note.velocity() <= 0 || layerVolume(song, note.layer()) <= 0) {
+			int layerVolume = layerVolume(song, note.layer());
+			if (note.velocity() <= 0 || layerVolume <= 0) {
+				continue;
+			}
+			if (scaledVelocity(note.velocity(), layerVolume) < velocityCutoff) {
 				continue;
 			}
 			String id = mapInstrument(note.instrument(), song, custom, config).id();
@@ -257,6 +278,11 @@ final class NbsImporter {
 		if (value.contains("pling")) return "PLING";
 		if (value.contains("trumpet")) return "TRUMPET";
 		return null;
+	}
+
+	/** Converts an NBS 0-100 velocity, scaled by its layer volume, onto the MIDI 1-127 scale. */
+	private static int scaledVelocity(int noteVelocity, int layerVolume) {
+		return Math.max(1, Math.min(127, (int)Math.round(noteVelocity * layerVolume / 100.0 * 1.27)));
 	}
 
 	private static String layerName(NbsSong song, int index) {

@@ -256,8 +256,13 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 				minecraft.gui.setScreen(returnScreen);
 			}
 		}, Component.literal("Place active sequence tracks?"),
-			Component.literal(plan.mode().label() + ": " + plan.width() + " x " + plan.depth() + " x " + plan.height()
-				+ ", " + plan.commands().size() + " commands. Requires /setblock permission and overwrites blocks."),
+			Component.literal(plan.mode().label() + ": " + plan.width() + " x " + plan.depth() + " x "
+				+ plan.height() + ", " + plan.commands().size() + " commands at "
+				+ FastNoteblocksConfig.get().commandsPerTick() + "/tick ("
+				+ String.format(java.util.Locale.ROOT, "%.1f", plan.commands().size()
+					/ (FastNoteblocksConfig.get().commandsPerTick() * 20.0))
+				+ "s). Requires /setblock permission and overwrites blocks. High rates can trip "
+				+ "server command spam limits."),
 			Component.literal("Place"), CommonComponents.GUI_CANCEL));
 	}
 
@@ -575,9 +580,22 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 
 	private static void placeNote(PlacementPlan placements, BlockPos notePos, EventNote note) {
 		set(placements, notePos.below(), note.instrumentBlock());
+		if (FALLING_INSTRUMENT_BLOCKS.contains(note.instrumentBlock())) {
+			// Sand and friends drop the moment /setblock places them over air, taking the note
+			// block's instrument with them. Fill the space beneath, but never overwrite: anything
+			// already planned there is load-bearing and already does the supporting.
+			placements.support(notePos.below().below(), "minecraft:stone");
+		}
 		set(placements, notePos, "minecraft:note_block[note=" + note.pitch() + "]");
 		set(placements, notePos.above(), "minecraft:air");
 	}
+
+	/** Instrument blocks affected by gravity, which need something solid underneath them. */
+	private static final Set<String> FALLING_INSTRUMENT_BLOCKS = PreviewInstrument.VALUES.stream()
+		.filter(instrument -> net.minecraft.world.level.block.Block.byItem(instrument.icon())
+			instanceof net.minecraft.world.level.block.FallingBlock)
+		.map(instrument -> BuiltInRegistries.ITEM.getKey(instrument.icon()).toString())
+		.collect(java.util.stream.Collectors.toUnmodifiableSet());
 
 	private static BlockPos at(BlockPos origin, Direction forward, int forwardOffset, int upOffset, int rightOffset) {
 		return origin.relative(forward, forwardOffset)
@@ -1297,11 +1315,11 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 				String current = editor == null ? sequence : editor.getValue();
 				editor = new SequenceEditBox(Minecraft.getInstance().font, width, EDITOR_HEIGHT);
 				editor.setCharacterLimit(12000);
+				editor.setValue(current);
 				editor.setValueListener(value -> {
 					sequence = value;
 					syncConfig();
 				});
-				editor.setValue(current);
 				sequence = current;
 			}
 			if (pendingFocusFrom >= 0 && pendingFocusTo > pendingFocusFrom) {
@@ -1599,6 +1617,19 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 		private int maximumX = Integer.MIN_VALUE;
 		private int maximumY = Integer.MIN_VALUE;
 		private int maximumZ = Integer.MIN_VALUE;
+
+		/**
+		 * Fills a position only if nothing is planned there yet.
+		 *
+		 * <p>Deliberately does not replace a planned air block: air above a note block is what keeps
+		 * it audible, so overwriting one to prop something up would silence a note.</p>
+		 */
+		void support(BlockPos position, String block) {
+			if (blocks.containsKey(position.immutable())) {
+				return;
+			}
+			set(position, block);
+		}
 
 		void set(BlockPos position, String block) {
 			BlockPos key = position.immutable();

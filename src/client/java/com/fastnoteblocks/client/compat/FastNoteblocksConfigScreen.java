@@ -141,6 +141,15 @@ public final class FastNoteblocksConfigScreen {
 			.setTooltip(Component.translatable("tooltip.fast-noteblocks.sequence_enabled"))
 			.setSaveConsumer(config::setPlacementSequenceEnabled)
 			.build());
+		placement.addEntry(entries.startIntSlider(
+				Component.translatable("option.fast-noteblocks.commands_per_tick"),
+				config.commandsPerTick(),
+				FastNoteblocksConfig.MIN_COMMANDS_PER_TICK,
+				FastNoteblocksConfig.MAX_COMMANDS_PER_TICK)
+			.setDefaultValue(FastNoteblocksConfig.DEFAULT_COMMANDS_PER_TICK)
+			.setTooltip(Component.translatable("tooltip.fast-noteblocks.commands_per_tick"))
+			.setSaveConsumer(config::setCommandsPerTick)
+			.build());
 		placement.addEntry(entries.startBooleanToggle(
 				Component.translatable("option.fast-noteblocks.auto_select_sequence_block"),
 				config.autoSelectSequenceBlock())
@@ -185,6 +194,33 @@ public final class FastNoteblocksConfigScreen {
 			))
 			.setTooltip(Component.translatable("tooltip.fast-noteblocks.midi_range_fit"))
 			.setSaveConsumer(config::setMidiRangeFit)
+			.build());
+		midi.addEntry(entries.startIntSlider(
+				Component.translatable("option.fast-noteblocks.conversion_gap_percentile"),
+				config.conversionGapPercentile(),
+				FastNoteblocksConfig.MIN_CONVERSION_GAP_PERCENTILE,
+				FastNoteblocksConfig.MAX_CONVERSION_GAP_PERCENTILE)
+			.setDefaultValue(FastNoteblocksConfig.DEFAULT_CONVERSION_GAP_PERCENTILE)
+			.setTooltip(Component.translatable("tooltip.fast-noteblocks.conversion_gap_percentile"))
+			.setSaveConsumer(config::setConversionGapPercentile)
+			.build());
+		midi.addEntry(entries.startIntSlider(
+				Component.translatable("option.fast-noteblocks.repeat_merge_ticks"),
+				config.repeatMergeTicks(),
+				FastNoteblocksConfig.MIN_REPEAT_MERGE_TICKS,
+				FastNoteblocksConfig.MAX_REPEAT_MERGE_TICKS)
+			.setDefaultValue(FastNoteblocksConfig.DEFAULT_REPEAT_MERGE_TICKS)
+			.setTooltip(Component.translatable("tooltip.fast-noteblocks.repeat_merge_ticks"))
+			.setSaveConsumer(config::setRepeatMergeTicks)
+			.build());
+		midi.addEntry(entries.startIntSlider(
+				Component.translatable("option.fast-noteblocks.midi_velocity_cutoff"),
+				config.midiVelocityCutoff(),
+				FastNoteblocksConfig.MIN_MIDI_VELOCITY_CUTOFF,
+				FastNoteblocksConfig.MAX_MIDI_VELOCITY_CUTOFF)
+			.setDefaultValue(FastNoteblocksConfig.DEFAULT_MIDI_VELOCITY_CUTOFF)
+			.setTooltip(Component.translatable("tooltip.fast-noteblocks.midi_velocity_cutoff"))
+			.setSaveConsumer(config::setMidiVelocityCutoff)
 			.build());
 		midi.addEntry(entries.startBooleanToggle(
 				Component.translatable("option.fast-noteblocks.midi_ignore_percussion"),

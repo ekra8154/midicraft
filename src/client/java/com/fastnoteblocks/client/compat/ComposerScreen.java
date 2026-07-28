@@ -40,14 +40,28 @@ public final class ComposerScreen extends Screen {
 	private static final int PIANO_WIDTH = 48;
 	private static final int TIMELINE_RULER_HEIGHT = 16;
 	private static final int LAYER_ROW_HEIGHT = 42;
+	private static final int LAYER_COLLAPSED_ROW_HEIGHT = 20;
+	private static final int LAYER_LIST_TOP = 48;
+	private static final int MIN_ROW_HEIGHT = 4;
+	private static final int MAX_ROW_HEIGHT = 26;
 	private static final int CONTEXT_MENU_WIDTH = 104;
 	private static final int CONTEXT_MENU_ROW_HEIGHT = 16;
+	private static final int LAYER_MENU_WIDTH = 120;
 	private static final int TOOLBAR_MENU_WIDTH = 126;
+	private static final int IMPORT_MENU_WIDTH = 196;
 	private static final int TOOLBAR_MENU_ROW_HEIGHT = 18;
+	private static final int VELOCITY_CUTOFF_STEP = 8;
 	private static final int ROW_HEIGHT = 12;
 	private static final int MAX_SIMULTANEOUS_NOTES = 30;
 	private static final int CHORD_WARNING_THRESHOLD = 24;
 	private static final int MAX_PREVIEW_SOUNDS_PER_FRAME = 64;
+	private static final int MIN_GRID_PIXEL_SPACING = 4;
+	private static final int MIN_LABEL_PIXEL_SPACING = 32;
+	private static final double BOX_SCROLL_FULL_SPEED_PIXELS = 140.0;
+	private static final double BOX_SCROLL_MAX_PIXELS = 22.0;
+	private static final double BOX_SCROLL_MAX_ROWS = 2.0;
+	private static final long TOOLTIP_DWELL_MILLIS = 260L;
+	private static final int SNAP_REPEATER = -1;
 	private static final long PREVIEW_BACKLOG_TOLERANCE_MICROS = 100_000L;
 	private static final int MIN_MIDI_NOTE = 0;
 	private static final int MAX_MIDI_NOTE = 127;
@@ -63,6 +77,13 @@ public final class ComposerScreen extends Screen {
 	private final Set<Long> selectedNotes = new LinkedHashSet<>();
 	private final List<Button> layerButtons = new ArrayList<>();
 	private final List<Button> moveLayerButtons = new ArrayList<>();
+	private final Set<Integer> collapsedLayers = new LinkedHashSet<>();
+	private final Set<Integer> selectedLayers = new LinkedHashSet<>();
+	private int rowHeight = ROW_HEIGHT;
+	private int layerScroll;
+	private boolean layerMenuOpen;
+	private int layerMenuX;
+	private int layerMenuY;
 	private List<ClipboardNote> clipboard = List.of();
 	private Button playButton;
 	private Button snapButton;
@@ -102,7 +123,10 @@ public final class ComposerScreen extends Screen {
 	private int contextMenuY;
 	private ToolbarMenu toolbarMenu = ToolbarMenu.NONE;
 	private int toolbarMenuX;
+	private long hoveredNoteId = -1L;
+	private long hoveredSince;
 	private ComposerProject cachedStatsProject;
+	private int cachedStatsScale = -1;
 	private ProjectStats cachedStats;
 
 	public ComposerScreen(Screen parent, FastNoteblocksConfig config) {
@@ -132,6 +156,11 @@ public final class ComposerScreen extends Screen {
 		addRenderableWidget(Button.builder(Component.literal("Edit"), button -> toggleToolbarMenu(ToolbarMenu.EDIT, 66))
 			.bounds(x, 7, 54, 20).build());
 		x += 58;
+		addRenderableWidget(Button.builder(Component.literal("Import"), button -> toggleToolbarMenu(ToolbarMenu.IMPORT, 124))
+			.bounds(x, 7, 54, 20)
+			.tooltip(Tooltip.create(Component.literal("Settings applied when importing MIDI and NBS songs")))
+			.build());
+		x += 58;
 		playButton = addRenderableWidget(Button.builder(playLabel(), button -> togglePlayback())
 			.bounds(x, 7, 54, 20)
 			.tooltip(Tooltip.create(Component.literal("Preview all unmuted layers")))
@@ -146,7 +175,8 @@ public final class ComposerScreen extends Screen {
 			x, 7, 94, 20, config.activeSequenceDelayScaleQuarters(), this::setDelayScale
 		));
 		delayScaleSlider.setTooltip(Tooltip.create(Component.literal(
-			"Timescale for exported repeater delays (0.25x to 8.00x)"
+			"Speed of both preview and the built result (0.25x to 8.00x). "
+				+ "Lower it until the unbuildable-timing outlines clear."
 		)));
 		rebuildLayerButtons();
 		rebuildMoveLayerButtons();
@@ -163,27 +193,35 @@ public final class ComposerScreen extends Screen {
 			final int layerIndex = index;
 			Layer layer = project.layers().get(index);
 			int y = layerY(index);
+			// Collapsed rows show only their header, and rows scrolled outside the panel must not
+			// exist as widgets at all or they stay clickable over the piano roll.
+			if (collapsedLayers.contains(index) || !layerRowVisible(index)) {
+				continue;
+			}
 			Button mute = addRenderableWidget(Button.builder(
 				Component.literal(layer.muted() ? "X" : "M"),
-				button -> updateLayer(layerIndex, project().layers().get(layerIndex).withMuted(
-					!project().layers().get(layerIndex).muted()
-				))
+				button -> {
+					boolean next = !project().layers().get(layerIndex).muted();
+					updateLayers(layerIndex, target -> target.withMuted(next));
+				}
 			).bounds(14, y + 22, 24, 16)
 				.tooltip(Tooltip.create(Component.literal(layer.muted() ? "Unmute layer" : "Mute layer")))
 				.build());
 			Button build = addRenderableWidget(Button.builder(
 				Component.literal(layer.buildEnabled() ? "B" : "-"),
-				button -> updateLayer(layerIndex, project().layers().get(layerIndex).withBuildEnabled(
-					!project().layers().get(layerIndex).buildEnabled()
-				))
+				button -> {
+					boolean next = !project().layers().get(layerIndex).buildEnabled();
+					updateLayers(layerIndex, target -> target.withBuildEnabled(next));
+				}
 			).bounds(40, y + 22, 24, 16)
 				.tooltip(Tooltip.create(Component.literal(layer.buildEnabled() ? "Included when building" : "Skipped when building")))
 				.build());
 			Button visible = addRenderableWidget(Button.builder(
 				Component.literal(layer.visible() ? "S" : "H"),
-				button -> updateLayer(layerIndex, project().layers().get(layerIndex).withVisible(
-					!project().layers().get(layerIndex).visible()
-				))
+				button -> {
+					boolean next = !project().layers().get(layerIndex).visible();
+					updateLayers(layerIndex, target -> target.withVisible(next));
+				}
 			).bounds(66, y + 22, 24, 16)
 				.tooltip(Tooltip.create(Component.literal(layer.visible() ? "Shown in the editor" : "Hidden in the editor")))
 				.build());
@@ -214,7 +252,9 @@ public final class ComposerScreen extends Screen {
 			removeWidget(button);
 		}
 		moveLayerButtons.clear();
-		int y = Math.min(height - 46, layerY(project().layers().size()) + 8);
+		// Pinned to the bottom of the panel: with up to MAX_LAYERS rows the list scrolls, so this
+		// must not ride along with the last row or it drifts off screen.
+		int y = layerListBottom() + 4;
 		addLayerButton = addRenderableWidget(Button.builder(Component.literal("+ Layer"), button -> {
 			if (project().layers().size() < ComposerProject.MAX_LAYERS) {
 				ComposerProject added = project().addLayer();
@@ -247,6 +287,96 @@ public final class ComposerScreen extends Screen {
 		}
 	}
 
+	/** Keeps collapse state attached to the right rows, mirroring {@link ComposerProject#moveLayer}. */
+	private void remapCollapsedLayers(int layerIndex, int direction) {
+		int size = project().layers().size();
+		int from = Math.max(0, Math.min(size - 1, layerIndex));
+		int to = Math.max(0, Math.min(size - 1, from + direction));
+		if (from == to || collapsedLayers.isEmpty()) {
+			return;
+		}
+		Set<Integer> remapped = new LinkedHashSet<>();
+		for (int collapsed : collapsedLayers) {
+			if (collapsed == from) {
+				remapped.add(to);
+				continue;
+			}
+			int shifted = collapsed > from ? collapsed - 1 : collapsed;
+			remapped.add(shifted >= to ? shifted + 1 : shifted);
+		}
+		collapsedLayers.clear();
+		collapsedLayers.addAll(remapped);
+	}
+
+	/**
+	 * Collapses everything except the active layer. An import or a Minecraft conversion can produce
+	 * dozens of layers at once, and an all-expanded list buries the one being worked on.
+	 */
+	private void collapseAllButActive() {
+		collapsedLayers.clear();
+		int active = project().activeLayerIndex();
+		for (int index = 0; index < project().layers().size(); index++) {
+			if (index != active) {
+				collapsedLayers.add(index);
+			}
+		}
+		selectedLayers.clear();
+		selectedLayers.add(active);
+		layerScroll = 0;
+		layerMenuOpen = false;
+	}
+
+	private List<Integer> layersToEdit(int clickedIndex) {
+		if (selectedLayers.size() > 1 && selectedLayers.contains(clickedIndex)) {
+			return selectedLayers.stream().sorted().toList();
+		}
+		return List.of(clickedIndex);
+	}
+
+	/** Applies one change across every layer the click should affect, as a single undo step. */
+	private void updateLayers(int clickedIndex, java.util.function.UnaryOperator<Layer> mutation) {
+		ComposerProject updated = project();
+		for (int index : layersToEdit(clickedIndex)) {
+			if (index >= 0 && index < updated.layers().size()) {
+				updated = updated.withLayer(index, mutation.apply(updated.layers().get(index)));
+			}
+		}
+		apply(updated);
+		rebuildLayerButtons();
+	}
+
+	private void selectLayer(int layerIndex, boolean toggle, boolean range) {
+		if (toggle) {
+			if (!selectedLayers.remove(layerIndex)) {
+				selectedLayers.add(layerIndex);
+			}
+		} else if (range) {
+			int from = Math.min(project().activeLayerIndex(), layerIndex);
+			int to = Math.max(project().activeLayerIndex(), layerIndex);
+			for (int index = from; index <= to; index++) {
+				selectedLayers.add(index);
+			}
+		} else {
+			selectedLayers.clear();
+			selectedLayers.add(layerIndex);
+		}
+		if (selectedLayers.isEmpty()) {
+			selectedLayers.add(layerIndex);
+		}
+		apply(project().withActiveLayer(layerIndex));
+		rebuildLayerButtons();
+	}
+
+	private void mergeSelectedLayers() {
+		if (selectedLayers.size() < 2) {
+			return;
+		}
+		apply(project().mergeLayers(Set.copyOf(selectedLayers)));
+		collapseAllButActive();
+		rebuildLayerButtons();
+		rebuildMoveLayerButtons();
+	}
+
 	private Component layerLabel(int index, Layer layer) {
 		String marker = index == project().activeLayerIndex() ? "▶ " : "  ";
 		return Component.literal(marker + "L" + (index + 1) + "  " + layer.name());
@@ -271,6 +401,7 @@ public final class ComposerScreen extends Screen {
 			return;
 		}
 		instrumentMenuLayer = -1;
+		remapCollapsedLayers(layerIndex, direction);
 		apply(project().moveLayer(layerIndex, direction));
 		rebuildLayerButtons();
 	}
@@ -311,10 +442,19 @@ public final class ComposerScreen extends Screen {
 
 	private void convertToMinecraft() {
 		stopPlayback();
-		int gridTicks = minecraftConversionGridTicks();
+		// Bake the timescale into the tempo first, so converting at 2.00x produces a project that
+		// genuinely runs that fast rather than one that still depends on a slider. The slider then
+		// resets, which is what makes a second convert pass meaningful instead of compounding.
+		double factor = timescaleFactor();
+		ComposerProject source = factor == 1.0
+			? project()
+			: project().withTempo(Math.max(1,
+				(int)Math.round(project().tempoMicrosPerQuarter() / factor)));
+		int gridTicks = minecraftConversionGridTicks(source);
 		boolean snapTempo = config.midiTempoFit() == FastNoteblocksConfig.MidiTempoFit.SNAP_TO_REPEATERS;
 		try {
-			MinecraftConversion conversion = project().convertToMinecraft(gridTicks, snapTempo);
+			MinecraftConversion conversion = source.convertToMinecraft(
+				gridTicks, snapTempo, config.repeatMergeTicks());
 			if (conversion.project().equals(project())) {
 				minecraft.gui.hud.setOverlayMessage(
 					Component.literal("This composition is already Minecraft-ready."), true
@@ -322,15 +462,26 @@ public final class ComposerScreen extends Screen {
 				return;
 			}
 			apply(conversion.project());
+			delayScaleSlider.setScale(FastNoteblocksConfig.DEFAULT_SEQUENCE_DELAY_SCALE_QUARTERS);
+			setDelayScale(FastNoteblocksConfig.DEFAULT_SEQUENCE_DELAY_SCALE_QUARTERS);
 			selectedNotes.clear();
 			instrumentMenuLayer = -1;
+			collapseAllButActive();
 			centerMinecraftRange();
 			rebuildLayerButtons();
 			rebuildMoveLayerButtons();
 			String report = "Converted at " + conversionGridLabel(gridTicks)
 				+ ": " + conversion.shiftedNotes() + " pitch-shifted"
 				+ (conversion.addedLayers() > 0 ? ", +" + conversion.addedLayers() + " layers" : "")
-				+ (conversion.tempoChanged() ? ", tempo aligned to repeaters" : "");
+				+ (conversion.mergedRepeats() > 0
+					? ", " + conversion.mergedRepeats() + " repeats merged" : "");
+			if (conversion.slowedDown()) {
+				report += String.format(java.util.Locale.ROOT,
+					", SLOWED %.2fx - song is faster than redstone can play (max 10 notes/sec)",
+					conversion.tempoFactor());
+			} else if (conversion.tempoChanged()) {
+				report += ", tempo aligned to repeaters";
+			}
 			minecraft.gui.hud.setOverlayMessage(Component.literal(report), true);
 		} catch (IllegalStateException exception) {
 			minecraft.gui.setScreen(new ConfirmScreen(confirmed -> minecraft.gui.setScreen(this),
@@ -340,36 +491,39 @@ public final class ComposerScreen extends Screen {
 		}
 	}
 
-	private int minecraftConversionGridTicks() {
+	private int minecraftConversionGridTicks(ComposerProject source) {
 		return switch (config.midiQuantizeGrid()) {
-			case QUARTER -> project().ppq();
-			case EIGHTH -> Math.max(1, project().ppq() / 2);
-			case SIXTEENTH -> Math.max(1, project().ppq() / 4);
-			case AUTO -> automaticConversionGridTicks();
+			case QUARTER -> source.ppq();
+			case EIGHTH -> Math.max(1, source.ppq() / 2);
+			case SIXTEENTH -> Math.max(1, source.ppq() / 4);
+			case AUTO -> automaticConversionGridTicks(source);
 		};
 	}
 
-	private int automaticConversionGridTicks() {
-		List<Long> starts = project().layers().stream()
-			.flatMap(layer -> layer.notes().stream())
-			.map(NoteEvent::startTick)
-			.distinct()
-			.sorted()
-			.toList();
-		long smallestGap = Long.MAX_VALUE;
+	private int automaticConversionGridTicks(ComposerProject source) {
+		List<Long> starts = source.mergedStartTicks(config.repeatMergeTicks());
+		List<Long> gaps = new ArrayList<>();
 		for (int index = 1; index < starts.size(); index++) {
 			long gap = starts.get(index) - starts.get(index - 1);
-			if (gap > 0 && gap < smallestGap) {
-				smallestGap = gap;
+			if (gap > 0) {
+				gaps.add(gap);
 			}
 		}
-		if (smallestGap <= Math.max(1, project().ppq() * 3L / 8L)) {
-			return Math.max(1, project().ppq() / 4);
+		long smallestGap = Long.MAX_VALUE;
+		if (!gaps.isEmpty()) {
+			gaps.sort(null);
+			// Skip the closest few gaps so a handful of outliers cannot set the grid, and
+			// therefore the tempo, for the entire song. 0% is the strict minimum.
+			int skip = (int)(gaps.size() * (long)config.conversionGapPercentile() / 100L);
+			smallestGap = gaps.get(Math.min(gaps.size() - 1, Math.max(0, skip)));
 		}
-		if (smallestGap <= Math.max(1, project().ppq() * 3L / 4L)) {
-			return Math.max(1, project().ppq() / 2);
+		if (smallestGap <= Math.max(1, source.ppq() * 3L / 8L)) {
+			return Math.max(1, source.ppq() / 4);
 		}
-		return project().ppq();
+		if (smallestGap <= Math.max(1, source.ppq() * 3L / 4L)) {
+			return Math.max(1, source.ppq() / 2);
+		}
+		return source.ppq();
 	}
 
 	private String conversionGridLabel(int gridTicks) {
@@ -387,7 +541,8 @@ public final class ComposerScreen extends Screen {
 			case 1 -> 2;
 			case 2 -> 4;
 			case 4 -> 8;
-			case 8 -> 0;
+			case 8 -> SNAP_REPEATER;
+			case SNAP_REPEATER -> 0;
 			default -> 1;
 		};
 		snapButton.setMessage(snapLabel());
@@ -399,6 +554,7 @@ public final class ComposerScreen extends Screen {
 			case 2 -> "Snap 1/8";
 			case 4 -> "Snap 1/16";
 			case 8 -> "Snap 1/32";
+			case SNAP_REPEATER -> "Snap repeater";
 			default -> "Snap off";
 		});
 	}
@@ -473,6 +629,9 @@ public final class ComposerScreen extends Screen {
 		apply(imported);
 		selectedNotes.clear();
 		horizontalScroll = 0L;
+		delayScaleSlider.setScale(FastNoteblocksConfig.DEFAULT_SEQUENCE_DELAY_SCALE_QUARTERS);
+		setDelayScale(FastNoteblocksConfig.DEFAULT_SEQUENCE_DELAY_SCALE_QUARTERS);
+		collapseAllButActive();
 		centerMinecraftRange();
 		rebuildLayerButtons();
 		rebuildMoveLayerButtons();
@@ -508,32 +667,127 @@ public final class ComposerScreen extends Screen {
 		super.extractRenderState(graphics, mouseX, mouseY, partialTick);
 		extractInstrumentMenu(graphics, mouseX, mouseY);
 		extractContextMenu(graphics, mouseX, mouseY);
+		extractLayerMenu(graphics, mouseX, mouseY);
 		extractToolbarMenu(graphics, mouseX, mouseY);
 	}
 
-	private void extractToolbarMenu(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
-		ToolbarAction[] actions = toolbarActions();
-		if (actions.length == 0) {
+	private void extractLayerMenu(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
+		if (!layerMenuOpen) {
 			return;
 		}
-		int menuY = 28;
-		int menuHeight = actions.length * TOOLBAR_MENU_ROW_HEIGHT + 4;
-		graphics.fill(toolbarMenuX, menuY, toolbarMenuX + TOOLBAR_MENU_WIDTH, menuY + menuHeight, 0xF0101115);
-		graphics.fill(toolbarMenuX, menuY, toolbarMenuX + TOOLBAR_MENU_WIDTH, menuY + 1, 0xFFAAAAAA);
+		LayerAction[] actions = LayerAction.values();
+		int menuHeight = actions.length * CONTEXT_MENU_ROW_HEIGHT + 4;
+		int menuWidth = LAYER_MENU_WIDTH;
+		graphics.fill(layerMenuX, layerMenuY, layerMenuX + menuWidth, layerMenuY + menuHeight, 0xF0101115);
+		graphics.fill(layerMenuX, layerMenuY, layerMenuX + menuWidth, layerMenuY + 1, 0xFFAAAAAA);
 		for (int index = 0; index < actions.length; index++) {
-			ToolbarAction action = actions[index];
-			int rowY = menuY + 2 + index * TOOLBAR_MENU_ROW_HEIGHT;
-			boolean enabled = toolbarActionEnabled(action);
-			boolean hovered = enabled && mouseX >= toolbarMenuX
-				&& mouseX < toolbarMenuX + TOOLBAR_MENU_WIDTH
-				&& mouseY >= rowY && mouseY < rowY + TOOLBAR_MENU_ROW_HEIGHT;
+			int rowY = layerMenuY + 2 + index * CONTEXT_MENU_ROW_HEIGHT;
+			boolean enabled = layerActionEnabled(actions[index]);
+			boolean hovered = enabled && mouseX >= layerMenuX && mouseX < layerMenuX + menuWidth
+				&& mouseY >= rowY && mouseY < rowY + CONTEXT_MENU_ROW_HEIGHT;
 			if (hovered) {
-				graphics.fill(toolbarMenuX + 2, rowY, toolbarMenuX + TOOLBAR_MENU_WIDTH - 2,
-					rowY + TOOLBAR_MENU_ROW_HEIGHT, 0xFF356070);
+				graphics.fill(layerMenuX + 2, rowY, layerMenuX + menuWidth - 2,
+					rowY + CONTEXT_MENU_ROW_HEIGHT, 0xFF356070);
 			}
-			graphics.text(font, Component.literal(action.label), toolbarMenuX + 6, rowY + 5,
+			String label = actions[index] == LayerAction.MERGE_SELECTED
+				? "Merge " + selectedLayers.size() + " layers"
+				: actions[index].label;
+			graphics.text(font, Component.literal(label), layerMenuX + 6, rowY + 4,
 				enabled ? 0xFFFFFFFF : 0xFF777777, false);
 		}
+	}
+
+	private boolean layerActionEnabled(LayerAction action) {
+		return switch (action) {
+			case MERGE_SELECTED -> selectedLayers.size() >= 2;
+			case SELECT_ALL, COLLAPSE_OTHERS -> true;
+		};
+	}
+
+	private boolean handleLayerMenuClick(double mouseX, double mouseY) {
+		LayerAction[] actions = LayerAction.values();
+		if (mouseX < layerMenuX || mouseX >= layerMenuX + LAYER_MENU_WIDTH) {
+			return false;
+		}
+		int row = ((int)mouseY - layerMenuY - 2) / CONTEXT_MENU_ROW_HEIGHT;
+		if (row < 0 || row >= actions.length) {
+			return false;
+		}
+		LayerAction action = actions[row];
+		if (!layerActionEnabled(action)) {
+			return true;
+		}
+		layerMenuOpen = false;
+		switch (action) {
+			case MERGE_SELECTED -> mergeSelectedLayers();
+			case SELECT_ALL -> {
+				selectedLayers.clear();
+				for (int index = 0; index < project().layers().size(); index++) {
+					selectedLayers.add(index);
+				}
+			}
+			case COLLAPSE_OTHERS -> collapseAllButActive();
+		}
+		rebuildLayerButtons();
+		rebuildMoveLayerButtons();
+		return true;
+	}
+
+	private void extractToolbarMenu(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
+		List<String> rows = toolbarRows();
+		if (rows.isEmpty()) {
+			return;
+		}
+		int menuWidth = toolbarMenuWidth();
+		int menuY = 28;
+		int menuHeight = rows.size() * TOOLBAR_MENU_ROW_HEIGHT + 4;
+		graphics.fill(toolbarMenuX, menuY, toolbarMenuX + menuWidth, menuY + menuHeight, 0xF0101115);
+		graphics.fill(toolbarMenuX, menuY, toolbarMenuX + menuWidth, menuY + 1, 0xFFAAAAAA);
+		for (int index = 0; index < rows.size(); index++) {
+			int rowY = menuY + 2 + index * TOOLBAR_MENU_ROW_HEIGHT;
+			boolean enabled = toolbarRowEnabled(index);
+			boolean hovered = enabled && mouseX >= toolbarMenuX
+				&& mouseX < toolbarMenuX + menuWidth
+				&& mouseY >= rowY && mouseY < rowY + TOOLBAR_MENU_ROW_HEIGHT;
+			if (hovered) {
+				graphics.fill(toolbarMenuX + 2, rowY, toolbarMenuX + menuWidth - 2,
+					rowY + TOOLBAR_MENU_ROW_HEIGHT, 0xFF356070);
+			}
+			graphics.text(font, Component.literal(rows.get(index)), toolbarMenuX + 6, rowY + 5,
+				enabled ? 0xFFFFFFFF : 0xFF777777, false);
+		}
+		if (toolbarMenu == ToolbarMenu.IMPORT) {
+			graphics.text(font, Component.literal("Left-click cycles, right-click reverses"),
+				toolbarMenuX + 6, menuY + menuHeight + 3, 0xFF888888, false);
+		}
+	}
+
+	private int toolbarMenuWidth() {
+		return toolbarMenu == ToolbarMenu.IMPORT ? IMPORT_MENU_WIDTH : TOOLBAR_MENU_WIDTH;
+	}
+
+	private List<String> toolbarRows() {
+		ToolbarAction[] actions = toolbarActions();
+		if (toolbarMenu == ToolbarMenu.IMPORT) {
+			List<String> rows = new ArrayList<>();
+			for (ImportSetting setting : ImportSetting.values()) {
+				rows.add(importSettingLabel(setting));
+			}
+			return rows;
+		}
+		List<String> rows = new ArrayList<>(actions.length);
+		for (ToolbarAction action : actions) {
+			rows.add(action.label);
+		}
+		return rows;
+	}
+
+	private boolean toolbarRowEnabled(int index) {
+		if (toolbarMenu == ToolbarMenu.IMPORT) {
+			return true;
+		}
+		ToolbarAction[] actions = toolbarActions();
+		return index >= 0 && index < actions.length && toolbarActionEnabled(actions[index]);
 	}
 
 	private void toggleToolbarMenu(ToolbarMenu menu, int x) {
@@ -551,7 +805,7 @@ public final class ComposerScreen extends Screen {
 		return switch (toolbarMenu) {
 			case FILE -> ToolbarAction.FILE_ACTIONS;
 			case EDIT -> ToolbarAction.EDIT_ACTIONS;
-			case NONE -> new ToolbarAction[0];
+			case IMPORT, NONE -> new ToolbarAction[0];
 		};
 	}
 
@@ -564,24 +818,29 @@ public final class ComposerScreen extends Screen {
 		};
 	}
 
-	private boolean handleToolbarMenuClick(double mouseX, double mouseY) {
-		ToolbarAction[] actions = toolbarActions();
-		if (actions.length == 0 || mouseX < toolbarMenuX
-				|| mouseX >= toolbarMenuX + TOOLBAR_MENU_WIDTH) {
+	private boolean handleToolbarMenuClick(double mouseX, double mouseY, int button) {
+		List<String> rows = toolbarRows();
+		if (rows.isEmpty() || mouseX < toolbarMenuX
+				|| mouseX >= toolbarMenuX + toolbarMenuWidth()) {
 			return false;
 		}
 		int row = ((int)mouseY - 30) / TOOLBAR_MENU_ROW_HEIGHT;
-		if (row < 0 || row >= actions.length) {
+		if (row < 0 || row >= rows.size()) {
 			return false;
 		}
 		int rowY = 30 + row * TOOLBAR_MENU_ROW_HEIGHT;
 		if (mouseY < rowY || mouseY >= rowY + TOOLBAR_MENU_ROW_HEIGHT) {
 			return false;
 		}
-		ToolbarAction action = actions[row];
-		if (!toolbarActionEnabled(action)) {
+		if (!toolbarRowEnabled(row)) {
 			return true;
 		}
+		if (toolbarMenu == ToolbarMenu.IMPORT) {
+			// Settings stay open so several can be adjusted in one visit.
+			cycleImportSetting(ImportSetting.values()[row], button == 1 ? -1 : 1);
+			return true;
+		}
+		ToolbarAction action = toolbarActions()[row];
 		toolbarMenu = ToolbarMenu.NONE;
 		performToolbarAction(action);
 		return true;
@@ -596,6 +855,91 @@ public final class ComposerScreen extends Screen {
 			case REDO -> redo();
 			case CONVERT -> convertToMinecraft();
 		}
+	}
+
+	private String importSettingLabel(ImportSetting setting) {
+		return setting.label + ": " + switch (setting) {
+			case QUANTIZE_GRID -> switch (config.midiQuantizeGrid()) {
+				case AUTO -> "Auto";
+				case QUARTER -> "1/4";
+				case EIGHTH -> "1/8";
+				case SIXTEENTH -> "1/16";
+			};
+			case TEMPO_FIT -> config.midiTempoFit() == FastNoteblocksConfig.MidiTempoFit.SNAP_TO_REPEATERS
+				? "Snap to repeaters"
+				: "Preserve original";
+			case RANGE_FIT -> switch (config.midiRangeFit()) {
+				case OCTAVE_SHIFT -> "Octave shift";
+				case OCTAVE_WRAP -> "Octave wrap";
+				case CLAMP -> "Clamp";
+				case REJECT_OUT_OF_RANGE -> "Reject";
+			};
+			case GRID_OUTLIERS -> config.conversionGapPercentile() <= 0
+				? "none (strict)"
+				: "ignore closest " + config.conversionGapPercentile() + "%";
+			case REPEAT_MERGE -> config.repeatMergeTicks() <= FastNoteblocksConfig.MIN_REPEAT_MERGE_TICKS
+				? "off (keep all)"
+				: config.repeatMergeTicks() + (config.repeatMergeTicks() == 1 ? " tick" : " ticks");
+			case VELOCITY_CUTOFF -> config.midiVelocityCutoff() <= FastNoteblocksConfig.MIN_MIDI_VELOCITY_CUTOFF
+				? "off (keep all)"
+				: Integer.toString(config.midiVelocityCutoff());
+			case IGNORE_PERCUSSION -> config.midiIgnorePercussion() ? "ignored" : "imported";
+			case MAX_TRACKS -> Integer.toString(config.midiMaxImportedTracks());
+			case DEFAULT_INSTRUMENT -> PreviewInstrument.byId(config.midiDefaultInstrument()).name();
+		};
+	}
+
+	private void cycleImportSetting(ImportSetting setting, int direction) {
+		switch (setting) {
+			case QUANTIZE_GRID -> config.setMidiQuantizeGrid(
+				cycle(FastNoteblocksConfig.MidiQuantizeGrid.values(), config.midiQuantizeGrid(), direction));
+			case TEMPO_FIT -> config.setMidiTempoFit(
+				cycle(FastNoteblocksConfig.MidiTempoFit.values(), config.midiTempoFit(), direction));
+			case RANGE_FIT -> config.setMidiRangeFit(
+				cycle(FastNoteblocksConfig.MidiRangeFit.values(), config.midiRangeFit(), direction));
+			case VELOCITY_CUTOFF -> config.setMidiVelocityCutoff(cycleVelocityCutoff(direction));
+			case GRID_OUTLIERS -> {
+				int span = FastNoteblocksConfig.MAX_CONVERSION_GAP_PERCENTILE
+					- FastNoteblocksConfig.MIN_CONVERSION_GAP_PERCENTILE + 1;
+				int offset = config.conversionGapPercentile()
+					- FastNoteblocksConfig.MIN_CONVERSION_GAP_PERCENTILE;
+				config.setConversionGapPercentile(FastNoteblocksConfig.MIN_CONVERSION_GAP_PERCENTILE
+					+ Math.floorMod(offset + direction, span));
+			}
+			case REPEAT_MERGE -> {
+				int span = FastNoteblocksConfig.MAX_REPEAT_MERGE_TICKS
+					- FastNoteblocksConfig.MIN_REPEAT_MERGE_TICKS + 1;
+				int offset = config.repeatMergeTicks() - FastNoteblocksConfig.MIN_REPEAT_MERGE_TICKS;
+				config.setRepeatMergeTicks(FastNoteblocksConfig.MIN_REPEAT_MERGE_TICKS
+					+ Math.floorMod(offset + direction, span));
+			}
+			case IGNORE_PERCUSSION -> config.setMidiIgnorePercussion(!config.midiIgnorePercussion());
+			case MAX_TRACKS -> {
+				int span = FastNoteblocksConfig.MAX_MIDI_MAX_IMPORTED_TRACKS
+					- FastNoteblocksConfig.MIN_MIDI_MAX_IMPORTED_TRACKS + 1;
+				int offset = config.midiMaxImportedTracks() - FastNoteblocksConfig.MIN_MIDI_MAX_IMPORTED_TRACKS;
+				config.setMidiMaxImportedTracks(FastNoteblocksConfig.MIN_MIDI_MAX_IMPORTED_TRACKS
+					+ Math.floorMod(offset + direction, span));
+			}
+			case DEFAULT_INSTRUMENT -> {
+				int index = PreviewInstrument.VALUES.indexOf(
+					PreviewInstrument.byId(config.midiDefaultInstrument()));
+				config.setMidiDefaultInstrument(PreviewInstrument.VALUES.get(
+					Math.floorMod(index + direction, PreviewInstrument.VALUES.size())).id());
+			}
+		}
+		FastNoteblocksConfig.save();
+	}
+
+	/** Steps the cutoff in even increments, with a dedicated "off" stop at zero. */
+	private int cycleVelocityCutoff(int direction) {
+		int stops = FastNoteblocksConfig.MAX_MIDI_VELOCITY_CUTOFF / VELOCITY_CUTOFF_STEP + 1;
+		int current = config.midiVelocityCutoff() / VELOCITY_CUTOFF_STEP;
+		return Math.floorMod(current + direction, stops) * VELOCITY_CUTOFF_STEP;
+	}
+
+	private static <T extends Enum<T>> T cycle(T[] values, T current, int direction) {
+		return values[Math.floorMod(current.ordinal() + direction, values.length)];
 	}
 
 	private void extractContextMenu(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
@@ -653,26 +997,64 @@ public final class ComposerScreen extends Screen {
 		graphics.fill(0, TOOLBAR_HEIGHT, LAYER_PANEL_WIDTH, height, 0xB8101115);
 		graphics.fill(LAYER_PANEL_WIDTH, TOOLBAR_HEIGHT, width, height, 0x99101115);
 		graphics.text(font, title, 8, TOOLBAR_HEIGHT + 4, 0xFFFFFFFF, false);
+		graphics.enableScissor(0, LAYER_LIST_TOP - 2, LAYER_PANEL_WIDTH, layerListBottom());
 		for (int index = 0; index < project().layers().size(); index++) {
 			int y = layerY(index);
+			int rowHeight = layerRowHeight(index);
+			if (y + rowHeight < LAYER_LIST_TOP - 2 || y > layerListBottom()) {
+				continue;
+			}
 			int color = LAYER_COLORS[index % LAYER_COLORS.length];
 			boolean activeLayer = index == project().activeLayerIndex();
-			graphics.fill(8, y - 2, LAYER_PANEL_WIDTH - 8, y + LAYER_ROW_HEIGHT - 2,
-				activeLayer ? 0x66303740 : 0x44252A31);
+			boolean selected = selectedLayers.contains(index);
+			boolean collapsed = collapsedLayers.contains(index);
+			graphics.fill(8, y - 2, LAYER_PANEL_WIDTH - 8, y + rowHeight - 2,
+				activeLayer ? 0x88425A6B : selected ? 0x88344657 : 0x44252A31);
+			if (selected) {
+				// Unmistakable outline: a tinted background alone reads as noise on a dark panel.
+				int edge = activeLayer ? 0xFF8FD3FF : 0xFF5C93B8;
+				graphics.fill(8, y - 2, LAYER_PANEL_WIDTH - 8, y - 1, edge);
+				graphics.fill(8, y + rowHeight - 3, LAYER_PANEL_WIDTH - 8, y + rowHeight - 2, edge);
+				graphics.fill(LAYER_PANEL_WIDTH - 9, y - 2, LAYER_PANEL_WIDTH - 8, y + rowHeight - 2, edge);
+			}
 			graphics.fill(8, y - 2, LAYER_PANEL_WIDTH - 8, y - 1, activeLayer ? color : 0x66383D44);
-			graphics.fill(8, y + LAYER_ROW_HEIGHT - 3, LAYER_PANEL_WIDTH - 8, y + LAYER_ROW_HEIGHT - 2,
+			graphics.fill(8, y + rowHeight - 3, LAYER_PANEL_WIDTH - 8, y + rowHeight - 2,
 				activeLayer ? color : 0x88383D44);
-			graphics.fill(8, y - 2, 12, y + LAYER_ROW_HEIGHT - 2, color);
+			graphics.fill(8, y - 2, 12, y + rowHeight - 2, color);
 			if (activeLayer) {
 				graphics.fill(12, y, LAYER_PANEL_WIDTH - 10, y + 20, 0x553D444D);
 			}
-			String marker = activeLayer ? "> " : "";
-			graphics.text(font, Component.literal(marker + "L" + (index + 1) + "  " + project().layers().get(index).name()),
-				22, y + 6, activeLayer ? 0xFFFFFFFF : 0xFFD6D8DD, false);
+			graphics.text(font, Component.literal(collapsed ? "▸" : "▾"), 15, y + 6,
+				activeLayer ? 0xFFFFFFFF : 0xFF9BA0A6, false);
+			Layer layer = project().layers().get(index);
+			String summary = collapsed ? "  (" + layer.notes().size() + ")" : "";
+			String mark = selected ? "✓ " : "";
+			graphics.text(font, Component.literal(mark + "L" + (index + 1) + "  " + layer.name() + summary),
+				26, y + 6, activeLayer ? 0xFFFFFFFF : selected ? 0xFFE8F4FF : 0xFFD6D8DD, false);
 		}
+		graphics.disableScissor();
+		extractLayerScrollbar(graphics);
 		int active = project().activeLayerIndex();
-		graphics.text(font, Component.literal("Active: Layer " + (active + 1)), 8, height - 18,
+		String footer = "Layer " + (active + 1) + " of " + project().layers().size()
+			+ (selectedLayers.size() > 1 ? "   " + selectedLayers.size() + " selected" : "")
+			+ "   ctrl/shift-click";
+		graphics.text(font, Component.literal(footer), 8, height - 18,
 			LAYER_COLORS[active % LAYER_COLORS.length], false);
+	}
+
+	private void extractLayerScrollbar(GuiGraphicsExtractor graphics) {
+		int maximum = maxLayerScroll();
+		if (maximum <= 0) {
+			return;
+		}
+		int trackTop = LAYER_LIST_TOP - 2;
+		int trackHeight = layerListBottom() - trackTop;
+		int contentHeight = layerContentHeight();
+		int thumbHeight = Math.max(16, trackHeight * trackHeight / Math.max(1, contentHeight));
+		int thumbTop = trackTop + (trackHeight - thumbHeight) * layerScroll / maximum;
+		int x = LAYER_PANEL_WIDTH - 6;
+		graphics.fill(x, trackTop, x + 3, trackTop + trackHeight, 0x40FFFFFF);
+		graphics.fill(x, thumbTop, x + 3, thumbTop + thumbHeight, 0xAAFFFFFF);
 	}
 
 	private void extractTimeRuler(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
@@ -681,17 +1063,19 @@ public final class ComposerScreen extends Screen {
 		graphics.fill(rollX, rollY - 1, rollX + rollWidth, rollY, 0xFF4A4F56);
 		long lastTick = horizontalScroll + (long)Math.ceil(rollWidth * ticksPerPixel);
 		long beatTicks = Math.max(1L, project().ppq());
-		long firstBeat = Math.max(0L, horizontalScroll / beatTicks);
-		for (long beat = firstBeat; beat * beatTicks <= lastTick + beatTicks; beat++) {
-			long tick = beat * beatTicks;
+		long measureTicks = beatTicks * 4L;
+		long stepTicks = readableStep(beatTicks, measureTicks);
+		boolean showLabels = Math.max(stepTicks, measureTicks) / ticksPerPixel >= MIN_LABEL_PIXEL_SPACING;
+		for (long tick = Math.max(0L, horizontalScroll / stepTicks * stepTicks);
+				tick <= lastTick + stepTicks; tick += stepTicks) {
 			int x = tickX(tick);
 			if (x < rollX || x > rollX + rollWidth) {
 				continue;
 			}
-			boolean measure = beat % 4L == 0L;
+			boolean measure = tick % measureTicks == 0L;
 			graphics.fill(x, rulerY + (measure ? 1 : 6), x + 1, rollY, measure ? 0xFF9A9A9A : 0xFF686D73);
-			if (measure) {
-				graphics.text(font, Long.toString(beat / 4L + 1L), x + 3, rulerY + 2, 0xFFBFC4CA, false);
+			if (measure && showLabels) {
+				graphics.text(font, Long.toString(tick / measureTicks + 1L), x + 3, rulerY + 2, 0xFFBFC4CA, false);
 			}
 		}
 		long markerTick = playing ? playbackTick() : playbackStartTick;
@@ -713,7 +1097,7 @@ public final class ComposerScreen extends Screen {
 			if (y >= rollY + rollHeight) {
 				break;
 			}
-			if (y + ROW_HEIGHT < rollY) {
+			if (y + rowHeight < rollY) {
 				continue;
 			}
 			boolean black = isBlackKey(midi);
@@ -723,12 +1107,12 @@ public final class ComposerScreen extends Screen {
 			if (buildable) {
 				gridColor = black ? 0xC31C3B42 : 0xC322454C;
 			}
-			graphics.fill(pianoX, y, rollX, y + ROW_HEIGHT - 1, 0xFFE7E7E7);
+			graphics.fill(pianoX, y, rollX, y + rowHeight - 1, 0xFFE7E7E7);
 			if (black) {
-				graphics.fill(pianoX, y, pianoX + PIANO_WIDTH * 2 / 3, y + ROW_HEIGHT - 1, 0xFF303238);
+				graphics.fill(pianoX, y, pianoX + PIANO_WIDTH * 2 / 3, y + rowHeight - 1, 0xFF303238);
 			}
-			graphics.fill(pianoX, y + ROW_HEIGHT - 1, rollX, y + ROW_HEIGHT, 0xFF55575C);
-			graphics.fill(rollX, y, rollX + rollWidth, y + ROW_HEIGHT - 1, gridColor);
+			graphics.fill(pianoX, y + rowHeight - 1, rollX, y + rowHeight, 0xFF55575C);
+			graphics.fill(rollX, y, rollX + rollWidth, y + rowHeight - 1, gridColor);
 			if (midi % 12 == 0) {
 				graphics.text(font, midiName(midi), pianoX + 2, y + 2, 0xFF222222, false);
 			}
@@ -756,21 +1140,23 @@ public final class ComposerScreen extends Screen {
 	private void extractTimeGrid(GuiGraphicsExtractor graphics) {
 		long subdivisionTicks = snapSubdivision == 0
 			? Math.max(1L, project().ppq() / 4L)
-			: Math.max(1L, project().ppq() / snapSubdivision);
+			: gridTicks();
 		long lastTick = horizontalScroll + (long)Math.ceil(rollWidth * ticksPerPixel);
-		long firstGrid = Math.max(0L, horizontalScroll / subdivisionTicks);
-		for (long grid = firstGrid; grid * subdivisionTicks <= lastTick + subdivisionTicks; grid++) {
-			long tick = grid * subdivisionTicks;
+		long measureTicks = Math.max(1L, project().ppq() * 4L);
+		long stepTicks = readableStep(subdivisionTicks, measureTicks);
+		boolean showLabels = Math.max(stepTicks, measureTicks) / ticksPerPixel >= MIN_LABEL_PIXEL_SPACING;
+		for (long tick = Math.max(0L, horizontalScroll / stepTicks * stepTicks);
+				tick <= lastTick + stepTicks; tick += stepTicks) {
 			int x = tickX(tick);
 			if (x < rollX || x > rollX + rollWidth) {
 				continue;
 			}
 			boolean beat = tick % project().ppq() == 0;
-			boolean measure = tick % (project().ppq() * 4L) == 0;
+			boolean measure = tick % measureTicks == 0;
 			graphics.fill(x, rollY, x + 1, rollY + rollHeight,
 				measure ? 0x66777777 : beat ? 0x443F444A : 0x242F343A);
-			if (measure) {
-				graphics.text(font, Long.toString(tick / (project().ppq() * 4L) + 1),
+			if (measure && showLabels) {
+				graphics.text(font, Long.toString(tick / measureTicks + 1),
 					x + 3, rollY + 2, 0xFFAAAAAA, false);
 			}
 		}
@@ -785,16 +1171,39 @@ public final class ComposerScreen extends Screen {
 		}
 	}
 
+	/**
+	 * Widens a grid step until its lines are at least {@link #MIN_GRID_PIXEL_SPACING} pixels apart,
+	 * snapping to whole measures once the step outgrows one. Low-resolution projects — NBS imports,
+	 * coarse MIDI files — otherwise ask for a line every tick, which at low zoom means tens of
+	 * thousands of fills and measure labels every single frame.
+	 */
+	private long readableStep(long stepTicks, long measureTicks) {
+		long step = Math.max(1L, stepTicks);
+		while (step / ticksPerPixel < MIN_GRID_PIXEL_SPACING) {
+			step *= 2L;
+		}
+		if (step > measureTicks) {
+			step = (step + measureTicks - 1L) / measureTicks * measureTicks;
+		}
+		return step;
+	}
+
 	private void extractNotes(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
 		ComposerProject shown = displayProject();
-		long firstVisibleTick = Math.max(0L, horizontalScroll - projectStats().maximumNoteDuration());
+		ProjectStats stats = projectStats();
+		Set<Long> offGrid = stats.timing().offGrid();
+		Set<Long> crowded = stats.timing().crowded();
+		NoteEvent hoveredCandidate = null;
+		int hoveredCandidateLayer = -1;
+		long firstVisibleTick = Math.max(0L, horizontalScroll - stats.maximumNoteDuration());
 		long lastVisibleTick = horizontalScroll + (long)Math.ceil(rollWidth * ticksPerPixel);
-		for (int layerIndex = 0; layerIndex < shown.layers().size(); layerIndex++) {
+		for (int layerIndex : noteDrawOrder(shown)) {
 			Layer layer = shown.layers().get(layerIndex);
 			if (!layer.visible()) {
 				continue;
 			}
 			boolean active = layerIndex == shown.activeLayerIndex();
+			boolean highlighted = active || selectedLayers.contains(layerIndex);
 			List<NoteEvent> notes = layer.notes();
 			for (int noteIndex = lowerBoundStart(notes, firstVisibleTick);
 					noteIndex < notes.size(); noteIndex++) {
@@ -807,22 +1216,144 @@ public final class ComposerScreen extends Screen {
 					continue;
 				}
 				boolean selected = selectedNotes.contains(note.id());
-				int color = active ? LAYER_COLORS[layerIndex % LAYER_COLORS.length] : 0xFF777A80;
+				int color = highlighted ? LAYER_COLORS[layerIndex % LAYER_COLORS.length] : 0xFF777A80;
 				if (!note.isBuildable()) {
-					color = active ? 0xFFFF6B6B : 0xFF755050;
+					color = highlighted ? 0xFFFF6B6B : 0xFF755050;
 				}
 				if (selected) {
 					graphics.fill(rect.left - 1, rect.top - 1, rect.right + 1, rect.bottom + 1, 0xFFFFFFFF);
 				}
 				graphics.fill(rect.left, rect.top, rect.right, rect.bottom, color);
-				if (active && mouseX >= rect.left && mouseX < rect.right && mouseY >= rect.top && mouseY < rect.bottom) {
-					graphics.setTooltipForNextFrame(Component.literal(
-						midiName(note.midiNote()) + "  tick " + note.startTick()
-							+ (note.isBuildable() ? "  note " + note.noteBlockPitch() : "  outside Minecraft range")
-					), mouseX, mouseY);
+				boolean tooFrequent = crowded.contains(note.startTick());
+				if (tooFrequent || offGrid.contains(note.startTick())) {
+					// Outline rather than recolour: a layer colour may itself be orange.
+					// Orange means arrives-too-soon-to-build; yellow means lands-between-ticks.
+					int warn = tooFrequent
+						? (highlighted ? 0xFFFF9A2E : 0x55FF9A2E)
+						: (highlighted ? 0xFFFFE45C : 0x55FFE45C);
+					graphics.fill(rect.left, rect.top, rect.right, rect.top + 1, warn);
+					graphics.fill(rect.left, rect.bottom - 1, rect.right, rect.bottom, warn);
+					graphics.fill(rect.left, rect.top, rect.left + 1, rect.bottom, warn);
+					graphics.fill(rect.right - 1, rect.top, rect.right, rect.bottom, warn);
+				}
+				if (mouseX >= rect.left && mouseX < rect.right
+						&& mouseY >= rect.top && mouseY < rect.bottom) {
+					// Topmost wins: draw order runs back to front, so a later hit overwrites.
+					hoveredCandidate = note;
+					hoveredCandidateLayer = layerIndex;
 				}
 			}
 		}
+		extractHoveredNoteTooltip(graphics, hoveredCandidate, hoveredCandidateLayer,
+			crowded, offGrid, mouseX, mouseY);
+	}
+
+	/**
+	 * Shows details for the note under the cursor once it has been held there briefly.
+	 *
+	 * <p>The dwell gate matters on dense imports: without it, sweeping the mouse across a packed
+	 * roll fires a different tooltip every frame.</p>
+	 */
+	private void extractHoveredNoteTooltip(
+		GuiGraphicsExtractor graphics,
+		NoteEvent note,
+		int layerIndex,
+		Set<Long> crowded,
+		Set<Long> offGrid,
+		int mouseX,
+		int mouseY
+	) {
+		if (note == null || layerIndex < 0 || layerIndex >= project().layers().size()) {
+			hoveredNoteId = -1L;
+			return;
+		}
+		if (note.id() != hoveredNoteId) {
+			hoveredNoteId = note.id();
+			hoveredSince = Util.getMillis();
+			return;
+		}
+		if (Util.getMillis() - hoveredSince < TOOLTIP_DWELL_MILLIS) {
+			return;
+		}
+		// One Component per line: the single-Component overload does not break on newlines, it
+		// renders them as missing-glyph boxes.
+		List<Component> lines = new ArrayList<>();
+		lines.add(Component.literal(midiName(note.midiNote()) + "   tick " + note.startTick()));
+		lines.add(Component.literal("Layer " + (layerIndex + 1) + "  "
+				+ project().layers().get(layerIndex).name())
+			.withStyle(net.minecraft.ChatFormatting.GRAY));
+		if (note.isBuildable()) {
+			lines.add(Component.literal("Note block pitch " + note.noteBlockPitch())
+				.withStyle(net.minecraft.ChatFormatting.GRAY));
+		} else {
+			int shift = octaveShiftIntoRange(note.midiNote());
+			lines.add(Component.literal("Outside Minecraft range" + (shift == 0
+					? " - no octave fits"
+					: " - shifts " + (shift > 0 ? "+" : "-") + Math.abs(shift / 12) + " oct on convert"))
+				.withStyle(net.minecraft.ChatFormatting.RED));
+		}
+		TimingIssues timing = projectStats().timing();
+		if (crowded.contains(note.startTick())) {
+			lines.add(Component.literal("Too frequent - only "
+					+ timing.gapLabel(note.startTick()) + " repeater ticks after the previous note")
+				.withStyle(net.minecraft.ChatFormatting.GOLD));
+		}
+		if (offGrid.contains(note.startTick())) {
+			lines.add(Component.literal("Off grid - "
+					+ timing.gapLabel(note.startTick())
+					+ " repeater ticks after the previous note, not a whole number")
+				.withStyle(net.minecraft.ChatFormatting.YELLOW));
+		}
+		graphics.setComponentTooltipForNextFrame(font, lines, mouseX, mouseY);
+	}
+
+	/** Nearest octave shift that would bring a note into the note-block range, or 0 if none does. */
+	private static int octaveShiftIntoRange(int midiNote) {
+		int best = 0;
+		int bestDistance = Integer.MAX_VALUE;
+		for (int shift = -120; shift <= 120; shift += 12) {
+			int shifted = midiNote + shift;
+			if (shifted >= ComposerProject.NOTE_BLOCK_BASE_MIDI_NOTE
+					&& shifted <= ComposerProject.NOTE_BLOCK_MAX_MIDI_NOTE
+					&& Math.abs(shift) < bestDistance) {
+				best = shift;
+				bestDistance = Math.abs(shift);
+			}
+		}
+		return best;
+	}
+
+	/**
+	 * Paint order, back to front. Panel order is inverted so the row nearest the top of the list
+	 * wins overlaps, selected layers lift above unselected ones, and the active layer is drawn
+	 * last so it is never buried by a layer that happens to sit below it.
+	 */
+	private List<Integer> noteDrawOrder(ComposerProject shown) {
+		int active = shown.activeLayerIndex();
+		List<Integer> order = new ArrayList<>();
+		for (int index = shown.layers().size() - 1; index >= 0; index--) {
+			if (index != active && !selectedLayers.contains(index)) {
+				order.add(index);
+			}
+		}
+		for (int index = shown.layers().size() - 1; index >= 0; index--) {
+			if (index != active && selectedLayers.contains(index)) {
+				order.add(index);
+			}
+		}
+		if (active >= 0 && active < shown.layers().size()) {
+			order.add(active);
+		}
+		return order;
+	}
+
+	/** Layers that note selection and box-select act on. */
+	private List<Integer> selectionLayers() {
+		List<Integer> valid = selectedLayers.stream()
+			.filter(index -> index >= 0 && index < project().layers().size())
+			.sorted()
+			.toList();
+		return valid.isEmpty() ? List.of(project().activeLayerIndex()) : valid;
 	}
 
 	private void extractPlayhead(GuiGraphicsExtractor graphics) {
@@ -838,8 +1369,13 @@ public final class ComposerScreen extends Screen {
 		int outOfRange = stats.outOfRange();
 		int peakChord = stats.peakChord();
 		long overloaded = stats.overloadedTicks();
-		String status = selectedNotes.size() + " selected"
+		String status = stats.totalNotes() + " notes in " + project().layers().size() + " layers"
+			+ "   " + selectedNotes.size() + " selected"
 			+ (outOfRange > 0 ? "   " + outOfRange + " outside Minecraft range" : "")
+			+ (stats.timing().crowded().isEmpty() ? ""
+				: "   " + stats.timing().crowded().size() + " too frequent")
+			+ (stats.timing().offGrid().isEmpty() ? ""
+				: "   " + stats.timing().offGrid().size() + " off grid")
 			+ "   Build peak " + peakChord + "/" + MAX_SIMULTANEOUS_NOTES
 			+ (overloaded > 0 ? " (" + overloaded + " overloaded)" : "")
 			+ "   Double-click to add • drag to move • right-click deletes or opens selection actions";
@@ -851,14 +1387,17 @@ public final class ComposerScreen extends Screen {
 
 	private ProjectStats projectStats() {
 		ComposerProject current = project();
-		if (cachedStatsProject == current && cachedStats != null) {
+		if (cachedStatsProject == current && cachedStats != null
+				&& cachedStatsScale == config.activeSequenceDelayScaleQuarters()) {
 			return cachedStats;
 		}
 		Map<Long, Integer> counts = new HashMap<>();
 		int outOfRange = 0;
+		int totalNotes = 0;
 		long maximumNoteDuration = 1L;
 		for (Layer layer : current.layers()) {
 			for (NoteEvent note : layer.notes()) {
+				totalNotes++;
 				maximumNoteDuration = Math.max(maximumNoteDuration, note.durationTicks());
 				if (!note.isBuildable()) {
 					outOfRange++;
@@ -870,17 +1409,74 @@ public final class ComposerScreen extends Screen {
 		int peak = counts.values().stream().mapToInt(Integer::intValue).max().orElse(0);
 		long overloaded = counts.values().stream().filter(count -> count > MAX_SIMULTANEOUS_NOTES).count();
 		cachedStatsProject = current;
-		cachedStats = new ProjectStats(outOfRange, Map.copyOf(counts), peak, overloaded, maximumNoteDuration);
+		cachedStatsScale = config.activeSequenceDelayScaleQuarters();
+		cachedStats = new ProjectStats(outOfRange, Map.copyOf(counts), peak, overloaded,
+			maximumNoteDuration, totalNotes, timingIssues(current, counts.keySet()));
 		return cachedStats;
+	}
+
+	/**
+	 * Composer ticks per Minecraft repeater tick, after the timescale.
+	 *
+	 * <p>A repeater cannot delay less than one tick, so this is the finest spacing a build can
+	 * express. Raising the timescale shrinks it, which is how a too-fast song is made buildable.</p>
+	 */
+	private double redstoneTickSpan(ComposerProject project) {
+		double span = project.ppq() * 100_000.0 / project.tempoMicrosPerQuarter();
+		return Math.max(1.0e-6, span / timescaleFactor());
+	}
+
+	/**
+	 * Event times a redstone build cannot reproduce: either landing off the repeater grid, or
+	 * arriving less than one repeater tick after the previous event.
+	 */
+	private TimingIssues timingIssues(ComposerProject project, Set<Long> eventTicks) {
+		double span = redstoneTickSpan(project);
+		List<Long> ordered = eventTicks.stream().sorted().toList();
+		Set<Long> offGrid = new LinkedHashSet<>();
+		Set<Long> crowded = new LinkedHashSet<>();
+		Map<Long, Double> gaps = new HashMap<>();
+		long previous = Long.MIN_VALUE;
+		for (long tick : ordered) {
+			if (previous != Long.MIN_VALUE) {
+				// A build is a chain of repeater delays, so only the gap between consecutive events
+				// has to be expressible. Where the song sits relative to time zero is irrelevant --
+				// an absolute-position test just flags every note when the musical grid and the
+				// repeater grid do not share a common multiple.
+				double gap = (tick - previous) / span;
+				gaps.put(tick, gap);
+				if (gap < 1.0 - 1.0e-6) {
+					crowded.add(tick);
+				} else if (Math.abs(gap - Math.round(gap)) > 0.02) {
+					offGrid.add(tick);
+				}
+			}
+			previous = tick;
+		}
+		return new TimingIssues(Set.copyOf(offGrid), Set.copyOf(crowded), Map.copyOf(gaps));
+	}
+
+	/** Off-grid gaps are not a whole repeater tick; crowded ones are under one tick entirely. */
+	private record TimingIssues(Set<Long> offGrid, Set<Long> crowded, Map<Long, Double> gaps) {
+		private String gapLabel(long tick) {
+			Double gap = gaps.get(tick);
+			return gap == null ? "?" : String.format(java.util.Locale.ROOT, "%.2f", gap);
+		}
 	}
 
 	@Override
 	public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
 		if (toolbarMenu != ToolbarMenu.NONE) {
-			if (handleToolbarMenuClick(event.x(), event.y())) {
+			if (handleToolbarMenuClick(event.x(), event.y(), event.button())) {
 				return true;
 			}
 			toolbarMenu = ToolbarMenu.NONE;
+		}
+		if (layerMenuOpen) {
+			if (handleLayerMenuClick(event.x(), event.y())) {
+				return true;
+			}
+			layerMenuOpen = false;
 		}
 		if (contextMenuOpen) {
 			if (handleContextMenuClick(event.x(), event.y())) {
@@ -888,9 +1484,23 @@ public final class ComposerScreen extends Screen {
 			}
 			contextMenuOpen = false;
 		}
-		if (event.button() == 0 && doubleClick) {
+		if (event.button() == 1) {
 			int layerIndex = layerHeaderAt(event.x(), event.y());
 			if (layerIndex >= 0) {
+				if (!selectedLayers.contains(layerIndex)) {
+					selectLayer(layerIndex, false, false);
+				}
+				layerMenuOpen = true;
+				layerMenuX = (int)event.x();
+				layerMenuY = (int)event.y();
+				contextMenuOpen = false;
+				return true;
+			}
+		}
+		if (event.button() == 0 && doubleClick) {
+			int layerIndex = layerHeaderAt(event.x(), event.y());
+			if (layerIndex >= 0 && !isLayerCollapseArrow(event.x())
+					&& !controlDown() && !shiftDown()) {
 				beginLayerRename(layerIndex);
 				return true;
 			}
@@ -903,10 +1513,13 @@ public final class ComposerScreen extends Screen {
 		}
 		if (event.button() == 0) {
 			int layerIndex = layerHeaderAt(event.x(), event.y());
+			if (layerIndex >= 0 && isLayerCollapseArrow(event.x())) {
+				toggleLayerCollapsed(layerIndex);
+				return true;
+			}
 			if (layerIndex >= 0) {
-				apply(project().withActiveLayer(layerIndex));
+				selectLayer(layerIndex, controlDown(), shiftDown());
 				selectedNotes.clear();
-				rebuildLayerButtons();
 				return true;
 			}
 		}
@@ -943,8 +1556,13 @@ public final class ComposerScreen extends Screen {
 		}
 		NoteHit hit = noteAt(event.x(), event.y());
 		if (hit != null) {
-			if (hit.layerIndex() != project().activeLayerIndex()) {
+			if (!selectedLayers.contains(hit.layerIndex())) {
 				selectedNotes.clear();
+				selectedLayers.clear();
+				selectedLayers.add(hit.layerIndex());
+				apply(project().withActiveLayer(hit.layerIndex()));
+				rebuildLayerButtons();
+			} else if (hit.layerIndex() != project().activeLayerIndex()) {
 				apply(project().withActiveLayer(hit.layerIndex()));
 				rebuildLayerButtons();
 			}
@@ -1014,9 +1632,8 @@ public final class ComposerScreen extends Screen {
 		}
 		PreviewInstrument value = PreviewInstrument.VALUES.get(index);
 		value.play(12);
-		Layer layer = project().layers().get(instrumentMenuLayer);
-		updateLayer(instrumentMenuLayer,
-			layer.withInstrument(value.id()).withMuted("MUTE".equals(value.id())));
+		updateLayers(instrumentMenuLayer,
+			target -> target.withInstrument(value.id()).withMuted("MUTE".equals(value.id())));
 		return true;
 	}
 
@@ -1069,13 +1686,15 @@ public final class ComposerScreen extends Screen {
 
 	@Override
 	public boolean mouseDragged(MouseButtonEvent event, double dx, double dy) {
+		lastMouseX = event.x();
+		lastMouseY = event.y();
 		if (draggingPlayhead) {
 			setPlaybackStart(mouseTick(event.x()), false);
 			return true;
 		}
 		if (draggingNotes) {
 			long tickDelta = snapDelta(Math.round((event.x() - dragStartX) * ticksPerPixel));
-			int pitchDelta = (int)Math.round((dragStartY - event.y()) / ROW_HEIGHT);
+			int pitchDelta = (int)Math.round((dragStartY - event.y()) / rowHeight);
 			if (tickDelta != dragTickDelta || pitchDelta != dragPitchDelta) {
 				dragTickDelta = tickDelta;
 				dragPitchDelta = pitchDelta;
@@ -1116,8 +1735,21 @@ public final class ComposerScreen extends Screen {
 
 	@Override
 	public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+		if (mouseX < LAYER_PANEL_WIDTH && mouseY >= LAYER_LIST_TOP - 2 && mouseY <= layerListBottom()) {
+			scrollLayers(scrollY > 0 ? -LAYER_COLLAPSED_ROW_HEIGHT : LAYER_COLLAPSED_ROW_HEIGHT);
+			return true;
+		}
 		if (mouseX >= LAYER_PANEL_WIDTH && mouseX < rollX
 				&& mouseY >= rollY && mouseY < rollY + rollHeight) {
+			if (controlDown()) {
+				// Vertical zoom: shrink the rows to fit more of the pitch range on screen at once.
+				int anchoredMidi = mouseMidi(mouseY);
+				rowHeight = Math.max(MIN_ROW_HEIGHT, Math.min(MAX_ROW_HEIGHT,
+					rowHeight + (scrollY > 0 ? 1 : -1)));
+				topMidiNote = Math.max(MIN_MIDI_NOTE, Math.min(MAX_MIDI_NOTE,
+					anchoredMidi + (int)Math.floor((mouseY - rollY) / rowHeight)));
+				return true;
+			}
 			topMidiNote = Math.max(12, Math.min(MAX_MIDI_NOTE,
 				topMidiNote + (scrollY > 0 ? 3 : -3)));
 			return true;
@@ -1127,7 +1759,7 @@ public final class ComposerScreen extends Screen {
 		}
 		if (controlDown()) {
 			long anchoredTick = mouseTick(mouseX);
-			ticksPerPixel = Math.max(1.5, Math.min(80.0,
+			ticksPerPixel = Math.max(1.5, Math.min(maxTicksPerPixel(),
 				ticksPerPixel * (scrollY > 0 ? 0.8 : 1.25)));
 			horizontalScroll = Math.max(0L,
 				anchoredTick - Math.round((mouseX - rollX) * ticksPerPixel));
@@ -1166,7 +1798,10 @@ public final class ComposerScreen extends Screen {
 		}
 		if (event.isSelectAll()) {
 			selectedNotes.clear();
-			activeLayer().notes().forEach(note -> selectedNotes.add(note.id()));
+			for (int layerIndex : selectionLayers()) {
+				project().layers().get(layerIndex).notes()
+					.forEach(note -> selectedNotes.add(note.id()));
+			}
 			return true;
 		}
 		if (event.isCopy()) {
@@ -1220,7 +1855,46 @@ public final class ComposerScreen extends Screen {
 	@Override
 	public void tick() {
 		updatePlayback();
+		updateBoxScroll();
 		updateButtonStates();
+	}
+
+	/**
+	 * Scrolls the roll while a selection box is dragged past its edge, faster the further out the
+	 * cursor is. The drag anchor is moved by the same amount so the box stays pinned to the notes
+	 * it was started over rather than sliding across them.
+	 */
+	private void updateBoxScroll() {
+		if (!selectingBox) {
+			return;
+		}
+		double right = lastMouseX - (rollX + rollWidth);
+		double left = rollX - lastMouseX;
+		double below = lastMouseY - (rollY + rollHeight);
+		double above = rollY - lastMouseY;
+
+		double horizontal = right > 0 ? right : left > 0 ? -left : 0.0;
+		if (horizontal != 0.0) {
+			double pixels = Math.signum(horizontal)
+				* Math.min(1.0, Math.abs(horizontal) / BOX_SCROLL_FULL_SPEED_PIXELS)
+				* BOX_SCROLL_MAX_PIXELS;
+			long previous = horizontalScroll;
+			horizontalScroll = Math.max(0L, horizontalScroll + Math.round(pixels * ticksPerPixel));
+			dragStartX -= (horizontalScroll - previous) / ticksPerPixel;
+		}
+
+		double vertical = below > 0 ? below : above > 0 ? -above : 0.0;
+		if (vertical != 0.0) {
+			double rows = Math.signum(vertical)
+				* Math.min(1.0, Math.abs(vertical) / BOX_SCROLL_FULL_SPEED_PIXELS)
+				* BOX_SCROLL_MAX_ROWS;
+			int previous = topMidiNote;
+			topMidiNote = Math.max(MIN_MIDI_NOTE, Math.min(MAX_MIDI_NOTE,
+				topMidiNote - (int)Math.round(rows)));
+			dragStartY += (topMidiNote - previous) * (double)rowHeight;
+		}
+		selectionEndX = lastMouseX;
+		selectionEndY = lastMouseY;
 	}
 
 	@Override
@@ -1301,14 +1975,28 @@ public final class ComposerScreen extends Screen {
 		}
 	}
 
+	/**
+	 * Playback speed multiplier from the timescale slider.
+	 *
+	 * <p>The exported delay for a gap is {@code physical * 4 / delayScaleQuarters}, so a larger
+	 * scale means shorter repeater delays and a faster build. Preview applies the same factor so
+	 * what you hear matches what gets placed — the slider is the knob for finding a speed Minecraft
+	 * can actually play, which is useless if you cannot hear its effect.</p>
+	 */
+	private double timescaleFactor() {
+		return Math.max(1, config.activeSequenceDelayScaleQuarters())
+			/ (double)FastNoteblocksConfig.DEFAULT_SEQUENCE_DELAY_SCALE_QUARTERS;
+	}
+
 	private long playbackTick() {
 		long elapsedMicros = Math.max(0L, Util.getMillis() - playbackStartedAt) * 1000L;
-		return playbackStartTick + Math.round(elapsedMicros * project().ppq() / (double)project().tempoMicrosPerQuarter());
+		return playbackStartTick + Math.round(elapsedMicros * project().ppq() * timescaleFactor()
+			/ (double)project().tempoMicrosPerQuarter());
 	}
 
 	private long previewBacklogToleranceTicks() {
 		return Math.max(1L, (long)Math.ceil(
-			PREVIEW_BACKLOG_TOLERANCE_MICROS * project().ppq()
+			PREVIEW_BACKLOG_TOLERANCE_MICROS * project().ppq() * timescaleFactor()
 				/ (double)project().tempoMicrosPerQuarter()
 		));
 	}
@@ -1385,13 +2073,23 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private void setDelayScale(int scaleQuarters) {
+		// Re-anchor first: the playhead is derived from elapsed real time, so changing the factor
+		// without pinning the current tick would make playback jump.
+		if (playing) {
+			playbackStartTick = Math.max(0L, Math.min(project().endTick(), playbackTick()));
+			playbackStartedAt = Util.getMillis();
+		}
 		config.setComposerProject(project());
 		config.setActiveSequenceDelayScaleQuarters(scaleQuarters);
 		FastNoteblocksConfig.save();
+		if (playing) {
+			resetPlaybackSchedule();
+		}
 	}
 
 	private int layerHeaderAt(double x, double y) {
-		if (x < 12 || x >= LAYER_PANEL_WIDTH - 10) {
+		if (x < 12 || x >= LAYER_PANEL_WIDTH - 10
+				|| y < LAYER_LIST_TOP - 2 || y > layerListBottom()) {
 			return -1;
 		}
 		for (int index = 0; index < project().layers().size(); index++) {
@@ -1401,6 +2099,11 @@ public final class ComposerScreen extends Screen {
 			}
 		}
 		return -1;
+	}
+
+	/** The collapse arrow occupies the left edge of a layer header, before the name. */
+	private boolean isLayerCollapseArrow(double x) {
+		return x >= 12 && x < 26;
 	}
 
 	private void beginLayerRename(int layerIndex) {
@@ -1415,8 +2118,61 @@ public final class ComposerScreen extends Screen {
 		setInitialFocus(layerNameBox);
 	}
 
-	private static int layerY(int layerIndex) {
-		return 48 + layerIndex * LAYER_ROW_HEIGHT;
+	private int layerY(int layerIndex) {
+		int y = LAYER_LIST_TOP - layerScroll;
+		for (int index = 0; index < layerIndex; index++) {
+			y += layerRowHeight(index);
+		}
+		return y;
+	}
+
+	private int layerRowHeight(int layerIndex) {
+		return collapsedLayers.contains(layerIndex) ? LAYER_COLLAPSED_ROW_HEIGHT : LAYER_ROW_HEIGHT;
+	}
+
+	/** Bottom of the scrollable layer list, leaving room for the pinned "+ Layer" row and footer. */
+	private int layerListBottom() {
+		return height - 46;
+	}
+
+	private int layerContentHeight() {
+		int total = 0;
+		for (int index = 0; index < project().layers().size(); index++) {
+			total += layerRowHeight(index);
+		}
+		return total;
+	}
+
+	private int maxLayerScroll() {
+		return Math.max(0, layerContentHeight() - (layerListBottom() - LAYER_LIST_TOP));
+	}
+
+	private void scrollLayers(int deltaPixels) {
+		int clamped = Math.max(0, Math.min(maxLayerScroll(), layerScroll + deltaPixels));
+		if (clamped != layerScroll) {
+			layerScroll = clamped;
+			cancelLayerRename();
+			instrumentMenuLayer = -1;
+			rebuildLayerButtons();
+			rebuildMoveLayerButtons();
+		}
+	}
+
+	private void toggleLayerCollapsed(int layerIndex) {
+		if (!collapsedLayers.remove(layerIndex)) {
+			collapsedLayers.add(layerIndex);
+		}
+		cancelLayerRename();
+		instrumentMenuLayer = -1;
+		layerScroll = Math.min(layerScroll, maxLayerScroll());
+		rebuildLayerButtons();
+		rebuildMoveLayerButtons();
+	}
+
+	/** True when a layer row is fully inside the scrollable viewport. */
+	private boolean layerRowVisible(int layerIndex) {
+		int top = layerY(layerIndex);
+		return top >= LAYER_LIST_TOP - 2 && top + layerRowHeight(layerIndex) <= layerListBottom() + 2;
 	}
 
 	private void commitLayerRename() {
@@ -1502,16 +2258,14 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private NoteHit noteAt(double mouseX, double mouseY) {
-		int activeLayerIndex = project().activeLayerIndex();
-		NoteEvent active = noteAt(project().layers().get(activeLayerIndex), mouseX, mouseY);
-		if (active != null) {
-			return new NoteHit(activeLayerIndex, active);
-		}
-		for (int layerIndex = project().layers().size() - 1; layerIndex >= 0; layerIndex--) {
-			if (layerIndex == activeLayerIndex || !project().layers().get(layerIndex).visible()) {
+		List<Integer> order = noteDrawOrder(project());
+		for (int position = order.size() - 1; position >= 0; position--) {
+			int layerIndex = order.get(position);
+			Layer layer = project().layers().get(layerIndex);
+			if (!layer.visible()) {
 				continue;
 			}
-			NoteEvent note = noteAt(project().layers().get(layerIndex), mouseX, mouseY);
+			NoteEvent note = noteAt(layer, mouseX, mouseY);
 			if (note != null) {
 				return new NoteHit(layerIndex, note);
 			}
@@ -1535,9 +2289,15 @@ public final class ComposerScreen extends Screen {
 		int right = (int)Math.max(dragStartX, selectionEndX);
 		int top = (int)Math.min(dragStartY, selectionEndY);
 		int bottom = (int)Math.max(dragStartY, selectionEndY);
-		for (NoteEvent note : activeLayer().notes()) {
-			if (noteRect(note).intersects(left, top, right, bottom)) {
-				selectedNotes.add(note.id());
+		for (int layerIndex : selectionLayers()) {
+			Layer layer = project().layers().get(layerIndex);
+			if (!layer.visible()) {
+				continue;
+			}
+			for (NoteEvent note : layer.notes()) {
+				if (noteRect(note).intersects(left, top, right, bottom)) {
+					selectedNotes.add(note.id());
+				}
 			}
 		}
 	}
@@ -1546,7 +2306,7 @@ public final class ComposerScreen extends Screen {
 		int left = tickX(note.startTick());
 		int width = Math.max(7, (int)Math.round(note.durationTicks() / ticksPerPixel));
 		int top = noteY(note.midiNote()) + 1;
-		return new NoteRect(left, top, left + width, top + ROW_HEIGHT - 2);
+		return new NoteRect(left, top, left + width, top + rowHeight - 2);
 	}
 
 	private static int lowerBoundStart(List<NoteEvent> notes, long tick) {
@@ -1572,15 +2332,38 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private int noteY(int midiNote) {
-		return rollY + (topMidiNote - midiNote) * ROW_HEIGHT;
+		return rollY + (topMidiNote - midiNote) * rowHeight;
 	}
 
 	private int mouseMidi(double y) {
 		return Math.max(MIN_MIDI_NOTE, Math.min(MAX_MIDI_NOTE,
-			topMidiNote - (int)Math.floor((y - rollY) / ROW_HEIGHT)));
+			topMidiNote - (int)Math.floor((y - rollY) / rowHeight)));
 	}
 
+	/**
+	 * Zoom-out limit, wide enough to always fit the whole song plus margin.
+	 *
+	 * <p>A fixed cap only worked while projects were low-resolution; a 480-PPQ import is two orders
+	 * of magnitude longer in ticks, and an 80 tick/pixel ceiling would strand most of it off screen.
+	 * Zooming this far out is only affordable because the grid step widens with the zoom.</p>
+	 */
+	private double maxTicksPerPixel() {
+		long span = Math.max(1L, project().endTick());
+		return Math.max(80.0, span * 1.2 / Math.max(1, rollWidth));
+	}
+
+	/**
+	 * Spacing that placement and dragging snap to.
+	 *
+	 * <p>The musical subdivisions need not line up with the repeater grid: at 480 PPQ and this
+	 * project's tempo a quarter note is 1.25 repeater ticks, so notes on a 1/16 grid only coincide
+	 * with a repeater tick once every four quarter notes. {@code SNAP_REPEATER} snaps to the
+	 * repeater grid itself so every placement is directly buildable.</p>
+	 */
 	private long gridTicks() {
+		if (snapSubdivision == SNAP_REPEATER) {
+			return Math.max(1L, Math.round(redstoneTickSpan(project())));
+		}
 		return snapSubdivision == 0 ? 1L : Math.max(1L, project().ppq() / snapSubdivision);
 	}
 
@@ -1608,8 +2391,13 @@ public final class ComposerScreen extends Screen {
 			|| InputConstants.isKeyDown(minecraft.getWindow(), GLFW.GLFW_KEY_RIGHT_CONTROL);
 	}
 
+	private boolean shiftDown() {
+		return InputConstants.isKeyDown(minecraft.getWindow(), GLFW.GLFW_KEY_LEFT_SHIFT)
+			|| InputConstants.isKeyDown(minecraft.getWindow(), GLFW.GLFW_KEY_RIGHT_SHIFT);
+	}
+
 	private void centerMinecraftRange() {
-		int visibleRows = Math.max(8, rollHeight / ROW_HEIGHT);
+		int visibleRows = Math.max(8, rollHeight / rowHeight);
 		topMidiNote = Math.max(12, Math.min(MAX_MIDI_NOTE,
 			(ComposerProject.NOTE_BLOCK_BASE_MIDI_NOTE + ComposerProject.NOTE_BLOCK_MAX_MIDI_NOTE) / 2
 				+ visibleRows / 2));
@@ -1696,14 +2484,36 @@ public final class ComposerScreen extends Screen {
 		Map<Long, Integer> chordCounts,
 		int peakChord,
 		long overloadedTicks,
-		long maximumNoteDuration
+		long maximumNoteDuration,
+		int totalNotes,
+		TimingIssues timing
 	) {
 	}
 
 	private enum ToolbarMenu {
 		NONE,
 		FILE,
-		EDIT
+		EDIT,
+		IMPORT
+	}
+
+	/** MIDI and NBS import settings, surfaced here so the Composer does not depend on Mod Menu. */
+	private enum ImportSetting {
+		QUANTIZE_GRID("Quantize"),
+		TEMPO_FIT("Tempo"),
+		RANGE_FIT("Range fit"),
+		REPEAT_MERGE("Merge repeats"),
+		GRID_OUTLIERS("Grid outliers"),
+		VELOCITY_CUTOFF("Velocity cutoff"),
+		IGNORE_PERCUSSION("Percussion"),
+		MAX_TRACKS("Max tracks"),
+		DEFAULT_INSTRUMENT("Instrument");
+
+		private final String label;
+
+		ImportSetting(String label) {
+			this.label = label;
+		}
 	}
 
 	private enum ToolbarAction {
@@ -1723,6 +2533,18 @@ public final class ComposerScreen extends Screen {
 		private final String label;
 
 		ToolbarAction(String label) {
+			this.label = label;
+		}
+	}
+
+	private enum LayerAction {
+		MERGE_SELECTED("Merge selected"),
+		SELECT_ALL("Select all layers"),
+		COLLAPSE_OTHERS("Collapse others");
+
+		private final String label;
+
+		LayerAction(String label) {
 			this.label = label;
 		}
 	}

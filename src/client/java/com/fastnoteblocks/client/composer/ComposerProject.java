@@ -29,7 +29,7 @@ public record ComposerProject(
 ) {
 	public static final int DEFAULT_PPQ = 480;
 	public static final int DEFAULT_TEMPO_MICROS_PER_QUARTER = 500_000;
-	public static final int MAX_LAYERS = 16;
+	public static final int MAX_LAYERS = 30;
 	public static final int NOTE_BLOCK_BASE_MIDI_NOTE = 54;
 	public static final int NOTE_BLOCK_MAX_MIDI_NOTE = NOTE_BLOCK_BASE_MIDI_NOTE + NotePitch.PITCH_COUNT - 1;
 	public static final long DEFAULT_NOTE_DURATION_TICKS = DEFAULT_PPQ / 4L;
@@ -120,8 +120,18 @@ public record ComposerProject(
 		ComposerProject project,
 		int shiftedNotes,
 		int addedLayers,
-		boolean tempoChanged
+		boolean tempoChanged,
+		double tempoFactor,
+		int mergedRepeats
 	) {
+		/**
+		 * How much slower the converted song plays. Greater than 1 means the source was faster than
+		 * redstone can represent — a repeater cannot delay less than one tick, so a song wanting
+		 * more than 10 events per second has to be stretched to fit.
+		 */
+		public boolean slowedDown() {
+			return tempoFactor > 1.01;
+		}
 	}
 
 	public static ComposerProject empty(String name) {
@@ -143,9 +153,11 @@ public record ComposerProject(
 		for (SequenceTrack track : tracks) {
 			List<NoteEvent> notes = new ArrayList<>();
 			long time = 0L;
-			for (Step step : NoteSequence.parse(track.sequence(), delayScaleQuarters)) {
+			for (Step step : parseForProjection(track.sequence(), delayScaleQuarters)) {
 				if (step.type() == StepType.REPEATER) {
-					time += minecraftTickToComposerTick(step.value(), DEFAULT_PPQ, DEFAULT_TEMPO_MICROS_PER_QUARTER);
+					time += minecraftTickToComposerTick(
+						step.value(), DEFAULT_PPQ, DEFAULT_TEMPO_MICROS_PER_QUARTER
+					);
 				} else {
 					notes.add(new NoteEvent(nextId++, NOTE_BLOCK_BASE_MIDI_NOTE + step.value(), time,
 						DEFAULT_NOTE_DURATION_TICKS, 96));
@@ -156,6 +168,25 @@ public record ComposerProject(
 		}
 		return new ComposerProject(name, DEFAULT_PPQ, DEFAULT_TEMPO_MICROS_PER_QUARTER,
 			layers, activeTrackIndex, nextId);
+	}
+
+	/**
+	 * Parses sequence text for this derived view, treating unparseable text as empty.
+	 *
+	 * <p>Track text is edited a keystroke at a time and every keystroke syncs the config, so a
+	 * half-typed entry like {@code "0, 2d,"} is a normal transient state rather than an error.
+	 * The text itself stays the source of truth in the track, so this projection fills back in as
+	 * soon as it parses again. Matches how the in-world builder already degrades on invalid text.</p>
+	 */
+	private static List<Step> parseForProjection(String sequence, int delayScaleQuarters) {
+		if (sequence == null || sequence.isBlank()) {
+			return List.of();
+		}
+		try {
+			return NoteSequence.parse(sequence, delayScaleQuarters);
+		} catch (IllegalArgumentException stillBeingTyped) {
+			return List.of();
+		}
 	}
 
 	public List<SequenceTrack> toSequenceTracks(List<SequenceTrack> previousTracks, int delayScaleQuarters) {
@@ -218,6 +249,40 @@ public record ComposerProject(
 		return new ComposerProject(name, ppq, tempoMicrosPerQuarter, updated, target, nextNoteId);
 	}
 
+	/**
+	 * Folds every selected layer into the lowest-numbered one, which keeps its name, instrument and
+	 * flags. Notes are re-sorted by the layer constructor, so overlapping material interleaves.
+	 */
+	public ComposerProject mergeLayers(Set<Integer> layerIndices) {
+		if (layerIndices == null || layerIndices.size() < 2) {
+			return this;
+		}
+		List<Integer> sorted = layerIndices.stream()
+			.filter(index -> index >= 0 && index < layers.size())
+			.distinct()
+			.sorted()
+			.toList();
+		if (sorted.size() < 2) {
+			return this;
+		}
+		int target = sorted.getFirst();
+		List<NoteEvent> merged = new ArrayList<>();
+		for (int index : sorted) {
+			merged.addAll(layers.get(index).notes());
+		}
+		List<Layer> updated = new ArrayList<>();
+		int mergedIndex = 0;
+		for (int index = 0; index < layers.size(); index++) {
+			if (index == target) {
+				mergedIndex = updated.size();
+				updated.add(layers.get(index).withNotes(merged));
+			} else if (!sorted.contains(index)) {
+				updated.add(layers.get(index));
+			}
+		}
+		return new ComposerProject(name, ppq, tempoMicrosPerQuarter, updated, mergedIndex, nextNoteId);
+	}
+
 	public ComposerProject moveLayer(int layerIndex, int direction) {
 		if (direction == 0 || layers.size() <= 1) {
 			return this;
@@ -241,12 +306,29 @@ public record ComposerProject(
 		return new ComposerProject(name, ppq, tempoMicrosPerQuarter, updated, active, nextNoteId);
 	}
 
+	public ComposerProject withTempo(int value) {
+		return new ComposerProject(name, ppq, value, layers, activeLayerIndex, nextNoteId);
+	}
+
 	public ComposerProject withName(String value) {
 		return new ComposerProject(value, ppq, tempoMicrosPerQuarter, layers, activeLayerIndex, nextNoteId);
 	}
 
 	public MinecraftConversion convertToMinecraft(int quantizeTicks, boolean snapTempo) {
+		return convertToMinecraft(quantizeTicks, snapTempo, 0);
+	}
+
+	/**
+	 * @param repeatMergeTicks how many repeater ticks a repeat of the same pitch must clear to
+	 *     survive; 0 disables merging. Songs that fake sustain by re-triggering a note every tick
+	 *     are otherwise unbuildable, and force the whole song to be slowed to fit them.
+	 */
+	public MinecraftConversion convertToMinecraft(int quantizeTicks, boolean snapTempo, int repeatMergeTicks) {
 		int grid = Math.max(1, quantizeTicks);
+		double repeatWindow = repeatMergeTicks <= 0
+			? 0.0
+			: repeatMergeTicks * ppq * 100_000.0 / tempoMicrosPerQuarter;
+		int mergedRepeats = 0;
 		int convertedTempo = snapTempo ? repeaterAlignedTempo(grid) : tempoMicrosPerQuarter;
 		List<Layer> convertedLayers = new ArrayList<>();
 		int convertedActiveLayer = 0;
@@ -257,11 +339,13 @@ public record ComposerProject(
 			.thenComparingInt(Integer::intValue);
 		for (int layerIndex = 0; layerIndex < layers.size(); layerIndex++) {
 			Layer source = layers.get(layerIndex);
+			List<NoteEvent> sourceNotes = mergeRepeats(source.notes(), repeatWindow);
+			mergedRepeats += source.notes().size() - sourceNotes.size();
 			Map<Integer, List<NoteEvent>> notesByShift = new TreeMap<>(shiftsNearestFirst);
-			if (source.notes().isEmpty()) {
+			if (sourceNotes.isEmpty()) {
 				notesByShift.put(0, List.of());
 			}
-			for (NoteEvent note : source.notes()) {
+			for (NoteEvent note : sourceNotes) {
 				int shift = octaveShiftIntoNoteBlockRange(note.midiNote());
 				long quantizedStart = Math.max(0L, Math.round(note.startTick() / (double)grid) * (long)grid);
 				NoteEvent converted = note.movedTo(quantizedStart, note.midiNote() + shift);
@@ -307,8 +391,28 @@ public record ComposerProject(
 			converted,
 			shiftedNotes,
 			Math.max(0, convertedLayers.size() - layers.size()),
-			convertedTempo != tempoMicrosPerQuarter
+			convertedTempo != tempoMicrosPerQuarter,
+			convertedTempo / (double)tempoMicrosPerQuarter,
+			mergedRepeats
 		);
+	}
+
+	/**
+	 * Distinct note starts as {@link #convertToMinecraft} will see them, after repeat merging.
+	 *
+	 * <p>Grid selection has to run on the merged timeline. Measuring the raw notes would let the
+	 * very repeats that merging removes go on dictating the grid, and therefore the tempo.</p>
+	 */
+	public List<Long> mergedStartTicks(int repeatMergeTicks) {
+		double window = repeatMergeTicks <= 0
+			? 0.0
+			: repeatMergeTicks * ppq * 100_000.0 / tempoMicrosPerQuarter;
+		return layers.stream()
+			.flatMap(layer -> mergeRepeats(layer.notes(), window).stream())
+			.map(NoteEvent::startTick)
+			.distinct()
+			.sorted()
+			.toList();
 	}
 
 	public ComposerProject addNote(int layerIndex, int midiNote, long startTick, long durationTicks) {
@@ -387,10 +491,14 @@ public record ComposerProject(
 		long previousTick = 0L;
 		for (int index = 0; index < buildable.size();) {
 			long eventTick = buildable.get(index).startTick();
-			int physicalDelay = composerTicksToMinecraftTicks(
+			// Round once, after the timescale is applied. Rounding to whole repeater ticks first
+			// destroys any gap shorter than one tick, which makes the timescale slider inert on
+			// fast songs: 0.3125 ticks collapses to 0, and 0 stays 0 at every scale.
+			double physicalDelay = composerTicksToMinecraftTicks(
 				Math.max(0L, eventTick - previousTick), ppq, tempoMicrosPerQuarter
 			);
-			int rawDelay = Math.max(0, Math.round(physicalDelay * 4.0F / Math.max(1, delayScaleQuarters)));
+			int rawDelay = (int)Math.max(0L,
+				Math.round(physicalDelay * 4.0 / Math.max(1, delayScaleQuarters)));
 			addDelayTokens(tokens, rawDelay);
 			while (index < buildable.size() && buildable.get(index).startTick() == eventTick) {
 				tokens.add(Integer.toString(buildable.get(index).noteBlockPitch()));
@@ -421,8 +529,9 @@ public record ComposerProject(
 		return Math.max(0L, Math.round(minecraftTicks * 100_000.0 * ppq / tempoMicrosPerQuarter));
 	}
 
-	private static int composerTicksToMinecraftTicks(long ticks, int ppq, int tempoMicrosPerQuarter) {
-		return Math.max(0, (int)Math.round(ticks * tempoMicrosPerQuarter / (double)ppq / 100_000.0));
+	/** Composer ticks to Minecraft repeater ticks, unrounded so callers can round once at the end. */
+	private static double composerTicksToMinecraftTicks(long ticks, int ppq, int tempoMicrosPerQuarter) {
+		return Math.max(0.0, ticks * tempoMicrosPerQuarter / (double)ppq / 100_000.0);
 	}
 
 	private int repeaterAlignedTempo(int gridTicks) {
@@ -431,6 +540,40 @@ public record ComposerProject(
 		return Math.max(1, (int)Math.round(
 			nearestRepeaterTicks * 100_000.0 * ppq / gridTicks
 		));
+	}
+
+	/**
+	 * Collapses runs of the same pitch that re-trigger faster than {@code windowTicks} apart,
+	 * keeping the first note of each run and stretching it over the notes it absorbed.
+	 *
+	 * <p>The window is measured against the previous note in the run rather than the note that
+	 * started it, so an arbitrarily long decay ramp folds down to its attack.</p>
+	 */
+	private static List<NoteEvent> mergeRepeats(List<NoteEvent> notes, double windowTicks) {
+		if (windowTicks <= 0.0 || notes.size() < 2) {
+			return notes;
+		}
+		List<NoteEvent> kept = new ArrayList<>(notes.size());
+		Map<Integer, Integer> anchorIndex = new java.util.HashMap<>();
+		Map<Integer, Long> lastStart = new java.util.HashMap<>();
+		for (NoteEvent note : notes) {
+			int pitch = note.midiNote();
+			Long previousStart = lastStart.get(pitch);
+			if (previousStart != null && note.startTick() - previousStart < windowTicks) {
+				int index = anchorIndex.get(pitch);
+				NoteEvent anchor = kept.get(index);
+				long absorbedEnd = note.startTick() + note.durationTicks();
+				kept.set(index, new NoteEvent(anchor.id(), anchor.midiNote(), anchor.startTick(),
+					Math.max(anchor.durationTicks(), absorbedEnd - anchor.startTick()),
+					anchor.velocity()));
+				lastStart.put(pitch, note.startTick());
+				continue;
+			}
+			anchorIndex.put(pitch, kept.size());
+			lastStart.put(pitch, note.startTick());
+			kept.add(note);
+		}
+		return List.copyOf(kept);
 	}
 
 	private static int octaveShiftIntoNoteBlockRange(int midiNote) {
