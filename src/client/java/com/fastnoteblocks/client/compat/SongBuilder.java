@@ -9,11 +9,9 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.TreeSet;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -135,7 +133,86 @@ public final class SongBuilder {
 
 	static final int MAX_SIMULTANEOUS_NOTES = 30;
 
-	private static final int COMPACT_LANE_SPACING = 4;
+	/**
+	 * The widest two lane centres ever have to be apart: a chord of three or more reaches a block
+	 * to either side of its lane, and one empty column has to separate the two.
+	 *
+	 * <p>Also the spacing every estimate assumes. Deciding where a lane ends must not depend on how
+	 * wide the lanes turned out, or the two passes in {@link #createCubePastePlan} would disagree
+	 * about which events belong to which lane.</p>
+	 */
+	private static final int MAX_LANE_SPACING = 4;
+
+	/** The tightest two lane centres are ever placed: one note wide each, one empty column between. */
+	private static final int MIN_LANE_SPACING = 2;
+
+	/**
+	 * Whether a chord can be built into a corner instead of into the lane.
+	 *
+	 * <p>Judged against the tightest corner rather than the one this pair of lanes will actually
+	 * get. Both passes over the cube walk have to make the same choice event for event, and only
+	 * the second one knows how wide any corner ended up.</p>
+	 */
+	private static boolean fitsInCorner(EventGroup event) {
+		return event.notes().size() <= 2 * MIN_LANE_SPACING;
+	}
+
+	/**
+	 * How far a lane's modules reach either side of its centre line.
+	 *
+	 * <p>Measured against the lane step -- the direction the serpentine walks -- and not against
+	 * travel, which reverses every lane. That is the whole trick: because a two-note chord always
+	 * puts its second note the same way round, two neighbouring lanes can never both grow into the
+	 * gap between them, so a sparse pair can sit three apart instead of four.</p>
+	 */
+	private record LaneReach(int back, int forward) {
+		static final LaneReach NONE = new LaneReach(0, 0);
+
+		static LaneReach of(int chordSize) {
+			if (chordSize <= 1) {
+				return NONE;
+			}
+			return chordSize <= 2 ? new LaneReach(0, 1) : new LaneReach(1, 1);
+		}
+
+		LaneReach widest(LaneReach other) {
+			return new LaneReach(Math.max(back, other.back), Math.max(forward, other.forward));
+		}
+
+		int width() {
+			return back + forward + 1;
+		}
+	}
+
+	/** The reach of the widest chord in a run of events. */
+	private static LaneReach laneReach(List<EventGroup> events, int from, int to) {
+		LaneReach reach = LaneReach.NONE;
+		for (int index = from; index < to && index < events.size(); index++) {
+			reach = reach.widest(LaneReach.of(events.get(index).notes().size()));
+		}
+		return reach;
+	}
+
+	/** Lane centres far enough apart to leave exactly one empty column between two lanes. */
+	private static int laneSpacing(LaneReach lane, LaneReach next) {
+		return Math.max(2, lane.forward() + next.back() + 2);
+	}
+
+	/**
+	 * Spacing for each lane boundary, keyed by the event index the next lane starts at.
+	 *
+	 * @param starts the event index each lane begins at, in order, starting with 0
+	 */
+	private static Map<Integer, Integer> laneSpacings(List<EventGroup> events, List<Integer> starts) {
+		Map<Integer, Integer> spacings = new LinkedHashMap<>();
+		for (int lane = 1; lane < starts.size(); lane++) {
+			LaneReach before = laneReach(events, starts.get(lane - 1), starts.get(lane));
+			LaneReach after = laneReach(events, starts.get(lane),
+				lane + 1 < starts.size() ? starts.get(lane + 1) : events.size());
+			spacings.put(starts.get(lane), laneSpacing(before, after));
+		}
+		return spacings;
+	}
 
 	/**
 	 * Vertical period of a cube floor: a module occupies its floor level, the note-block level
@@ -225,10 +302,18 @@ public final class SongBuilder {
 			EventGroup event = events.get(index);
 			int delay = event.time() - currentTime;
 			SpatialDelayTrigger trigger = addSpatialDelayBeforeEvent(placements, cursor, travel, delay);
-			cursor = addSpatialEventModule(placements, trigger.cursor(), travel, trigger.triggerDelay(), event.notes());
 			currentTime = event.time();
-			if (layout.breakAfter().contains(index + 1)) {
-				cursor = addCompactTurn(placements, cursor, travel, laneStep, COMPACT_LANE_SPACING);
+			Integer spacing = layout.spacingAt().get(index + 1);
+			if (spacing != null && fitsInCorner(event)) {
+				cursor = addTurnEventModule(placements, trigger.cursor(), travel, laneStep, spacing,
+					trigger.triggerDelay(), event.notes());
+				travel = travel.getOpposite();
+				continue;
+			}
+			cursor = addSpatialEventModule(placements, trigger.cursor(), travel, laneStep,
+				trigger.triggerDelay(), event.notes());
+			if (spacing != null) {
+				cursor = addCompactTurn(placements, cursor, travel, laneStep, spacing, event.time());
 				travel = travel.getOpposite();
 			}
 		}
@@ -250,7 +335,7 @@ public final class SongBuilder {
 		int floors = chooseCubeFloors(totalLength);
 		int perFloor = Math.max(1, (totalLength + floors - 1) / floors);
 		int lanesPerFloor = Math.max(1,
-			(int)Math.round(Math.sqrt(perFloor / (double)COMPACT_LANE_SPACING)));
+			(int)Math.round(Math.sqrt(perFloor / (double)MAX_LANE_SPACING)));
 		int longestEvent = events.stream().mapToInt(EventGroup::length).max().orElse(1);
 		// The wall has to clear the longest single event, or an event that cannot fit between the
 		// walls would turn on every attempt and never advance.
@@ -261,7 +346,29 @@ public final class SongBuilder {
 		lanesPerFloor = Math.max(1,
 			(int)Math.ceil(countCubeLanes(events, laneWidth) / (double)floors));
 
+		// Two passes over the same walk. A lane ends where it meets a wall and the walls stand on
+		// the travel axis, so how far apart the lanes sit cannot move a single boundary -- which is
+		// what lets the first pass report the lanes the second one will need to measure.
+		List<Integer> starts = walkCube(events, origin, forward, laneWidth, lanesPerFloor,
+			new PlacementPlan(), Map.of());
 		PlacementPlan placements = new PlacementPlan();
+		walkCube(events, origin, forward, laneWidth, lanesPerFloor, placements,
+			laneSpacings(events, starts));
+		return placements.finish(PasteMode.COMPACT_CUBE);
+	}
+
+	/**
+	 * Walks the events through the stack of floors, placing as it goes.
+	 *
+	 * @param spacings lane spacing keyed by the event index a lane starts at; anything missing falls
+	 *     back to the widest, which is what the measuring pass wants
+	 * @return the event index each lane starts at, in order
+	 */
+	private static List<Integer> walkCube(List<EventGroup> events, BlockPos origin, Direction forward,
+			int laneWidth, int lanesPerFloor, PlacementPlan placements,
+			Map<Integer, Integer> spacings) {
+		List<Integer> starts = new ArrayList<>();
+		starts.add(0);
 		BlockPos cursor = origin;
 		Direction travel = forward;
 		Direction laneStep = forward.getClockWise();
@@ -272,34 +379,50 @@ public final class SongBuilder {
 		int farWall = origin.getX() + laneWidth;
 		int currentTime = 0;
 		int laneIndex = 0;
-		boolean laneStarted = false;
 		for (int index = 0; index < events.size(); index++) {
 			EventGroup event = events.get(index);
-			boolean canLeave = index > 0
-				&& events.get(index - 1).maxSafeTurnDistance() >= COMPACT_LANE_SPACING;
-			int projected = cursor.getX() + travel.getStepX() * event.length();
-			if (canLeave && laneStarted && (projected > farWall || projected < nearWall)) {
-				if (laneIndex + 1 >= lanesPerFloor) {
-					cursor = addGlassRiser(placements, cursor, travel, laneStep);
-					// Reverse both axes so the next floor retraces this one within the same volume.
-					travel = travel.getOpposite();
-					laneStep = laneStep.getOpposite();
-					laneIndex = 0;
-				} else {
-					cursor = addCompactTurn(placements, cursor, travel, laneStep, COMPACT_LANE_SPACING);
-					travel = travel.getOpposite();
-					laneIndex++;
-				}
-				laneStarted = false;
-			}
 			int delay = event.time() - currentTime;
 			SpatialDelayTrigger trigger = addSpatialDelayBeforeEvent(placements, cursor, travel, delay);
-			cursor = addSpatialEventModule(placements, trigger.cursor(), travel,
-				trigger.triggerDelay(), event.notes());
 			currentTime = event.time();
-			laneStarted = true;
+			// One event of lookahead. Whether this event is the last of its lane has to be settled
+			// before it is placed, because the last one is built into the corner; asking after the
+			// fact, as this walk used to, leaves the corner with nothing to carry.
+			int landing = cursor.getX() + travel.getStepX() * event.length();
+			int next = index + 1 < events.size()
+				? landing + travel.getStepX() * events.get(index + 1).length()
+				: landing;
+			boolean turnAfter = index + 1 < events.size()
+				&& event.maxSafeTurnDistance() >= MAX_LANE_SPACING
+				&& (next > farWall || next < nearWall);
+			boolean riser = turnAfter && laneIndex + 1 >= lanesPerFloor;
+			int spacing = spacings.getOrDefault(index + 1, MAX_LANE_SPACING);
+			if (turnAfter && !riser && fitsInCorner(event)) {
+				cursor = addTurnEventModule(placements, trigger.cursor(), travel, laneStep, spacing,
+					trigger.triggerDelay(), event.notes());
+				travel = travel.getOpposite();
+				laneIndex++;
+				starts.add(index + 1);
+				continue;
+			}
+			cursor = addSpatialEventModule(placements, trigger.cursor(), travel, laneStep,
+				trigger.triggerDelay(), event.notes());
+			if (!turnAfter) {
+				continue;
+			}
+			starts.add(index + 1);
+			if (riser) {
+				cursor = addGlassRiser(placements, cursor, travel, laneStep, currentTime);
+				// Reverse both axes so the next floor retraces this one within the same volume.
+				travel = travel.getOpposite();
+				laneStep = laneStep.getOpposite();
+				laneIndex = 0;
+			} else {
+				cursor = addCompactTurn(placements, cursor, travel, laneStep, spacing, currentTime);
+				travel = travel.getOpposite();
+				laneIndex++;
+			}
 		}
-		return placements.finish(PasteMode.COMPACT_CUBE);
+		return starts;
 	}
 
 	/**
@@ -316,7 +439,7 @@ public final class SongBuilder {
 		for (int index = 0; index < events.size(); index++) {
 			EventGroup event = events.get(index);
 			boolean canLeave = index > 0
-				&& events.get(index - 1).maxSafeTurnDistance() >= COMPACT_LANE_SPACING;
+				&& events.get(index - 1).maxSafeTurnDistance() >= MAX_LANE_SPACING;
 			int projected = position + step * event.length();
 			if (canLeave && laneStarted && (projected > laneWidth || projected < 0)) {
 				step = -step;
@@ -360,8 +483,8 @@ public final class SongBuilder {
 	 *     the way it came
 	 */
 	private static BlockPos addGlassRiser(PlacementPlan placements, BlockPos cursor, Direction travel,
-			Direction laneStep) {
-		set(placements, cursor, "minecraft:stone");
+			Direction laneStep, int time) {
+		placements.powered(cursor, "minecraft:stone", time);
 		set(placements, cursor.above(), "minecraft:redstone_wire");
 		BlockPos columnA = cursor.relative(travel);
 		BlockPos columnB = columnA.relative(travel);
@@ -415,7 +538,7 @@ public final class SongBuilder {
 				best = candidate;
 			}
 		}
-		return best == null ? new CompactLayout(Set.of(), totalLength, 3) : best;
+		return best == null ? new CompactLayout(Map.of(), totalLength, 3) : best;
 	}
 
 	private static int totalEventLength(List<EventGroup> events) {
@@ -435,25 +558,26 @@ public final class SongBuilder {
 	}
 
 	private static CompactLayout compactLayoutForTarget(List<EventGroup> events, int targetLength) {
-		Set<Integer> breaks = new HashSet<>();
+		List<Integer> starts = new ArrayList<>();
+		starts.add(0);
 		int rowLength = 0;
-		int rows = 1;
 		int cursor = 0;
 		int direction = 1;
 		int minimum = 0;
 		int maximum = 0;
 		for (int index = 0; index < events.size(); index++) {
 			int eventLength = events.get(index).length();
+			// The widest spacing, not the one this pair will end up with. Where a lane ends has to
+			// be settled before the lanes can be measured, because the measurement reads the lanes.
 			boolean safeTurn = index > 0
-				&& events.get(index - 1).maxSafeTurnDistance() >= COMPACT_LANE_SPACING;
+				&& events.get(index - 1).maxSafeTurnDistance() >= MAX_LANE_SPACING;
 			if (rowLength > 0 && rowLength + eventLength > targetLength && safeTurn) {
-				breaks.add(index);
+				starts.add(index);
 				int outerTurn = cursor + direction;
 				minimum = Math.min(minimum, outerTurn);
 				maximum = Math.max(maximum, outerTurn);
 				direction = -direction;
 				rowLength = 0;
-				rows++;
 			}
 			int end = cursor + direction * eventLength;
 			minimum = Math.min(minimum, Math.min(cursor, end));
@@ -461,25 +585,66 @@ public final class SongBuilder {
 			cursor = end;
 			rowLength += eventLength;
 		}
+		Map<Integer, Integer> spacings = laneSpacings(events, starts);
 		int width = Math.max(1, maximum - minimum + 1);
-		int depth = (rows - 1) * COMPACT_LANE_SPACING + 3;
-		return new CompactLayout(Set.copyOf(breaks), width, depth);
+		int depth = spacings.values().stream().mapToInt(Integer::intValue).sum()
+			+ laneReach(events, 0, starts.size() > 1 ? starts.get(1) : events.size()).width();
+		return new CompactLayout(spacings, width, depth);
+	}
+
+	/**
+	 * Builds an event and the turn out of its lane as one piece.
+	 *
+	 * <p>A corner is a run of stone with dust along it, which is exactly what a chord's bus is, so
+	 * the event arriving at the end of a lane can hang its notes off the corner rather than be laid
+	 * out first and leave the corner bare. No later event can use it: dust carries no delay, so
+	 * everything touching a corner sounds at the instant the signal crosses it, and that instant
+	 * belongs to this event and no other.</p>
+	 *
+	 * @return the cursor for the next lane, which travels back the way this one came
+	 */
+	private static BlockPos addTurnEventModule(PlacementPlan placements, BlockPos cursor, Direction travel,
+			Direction laneStep, int laneDistance, int triggerDelay, List<EventNote> chord) {
+		int time = chord.get(0).time();
+		set(placements, cursor, "minecraft:stone");
+		set(placements, cursor.above(),
+			"minecraft:repeater[facing=" + repeaterFacing(travel) + ",delay=" + triggerDelay + "]");
+		// One level up from the lane floor, like a bus and unlike a plain turn: notes have to sit
+		// beside a block that is powered, and dust does not pass its signal sideways into a note
+		// block. Hung off the dust itself they would stay silent.
+		BlockPos corner = cursor.relative(travel).above();
+		List<BlockPos> slots = new ArrayList<>();
+		for (int offset = 0; offset <= laneDistance; offset++) {
+			BlockPos run = corner.relative(laneStep, offset);
+			placements.powered(run, "minecraft:stone", time);
+			set(placements, run.above(), "minecraft:redstone_wire");
+			slots.add(run.relative(travel));
+			// The near side of the first cell is the repeater driving it, and the near side of the
+			// last is where the next lane's repeater has to stand.
+			if (offset > 0 && offset < laneDistance) {
+				slots.add(run.relative(travel.getOpposite()));
+			}
+		}
+		for (int index = 0; index < chord.size(); index++) {
+			placeNote(placements, slots.get(index), chord.get(index));
+		}
+		return cursor.relative(laneStep, laneDistance);
 	}
 
 	private static BlockPos addCompactTurn(PlacementPlan placements, BlockPos cursor, Direction travel,
-			Direction laneStep, int laneDistance) {
+			Direction laneStep, int laneDistance, int time) {
 		if (laneDistance < 1 || laneDistance > 13) {
 			throw new IllegalArgumentException("Compact turn distance " + laneDistance
 				+ " exceeds the safe redstone range");
 		}
 		BlockPos outer = cursor.relative(travel);
-		set(placements, cursor, "minecraft:stone");
+		placements.powered(cursor, "minecraft:stone", time);
 		set(placements, cursor.above(), "minecraft:redstone_wire");
-		set(placements, outer, "minecraft:stone");
+		placements.powered(outer, "minecraft:stone", time);
 		set(placements, outer.above(), "minecraft:redstone_wire");
 		for (int offset = 1; offset <= laneDistance; offset++) {
 			BlockPos turn = outer.relative(laneStep, offset);
-			set(placements, turn, "minecraft:stone");
+			placements.powered(turn, "minecraft:stone", time);
 			set(placements, turn.above(), "minecraft:redstone_wire");
 		}
 		return outer.relative(laneStep, laneDistance).relative(travel.getOpposite());
@@ -498,32 +663,40 @@ public final class SongBuilder {
 		return new SpatialDelayTrigger(cursor, Math.max(1, remaining));
 	}
 
+	/**
+	 * @param laneStep the direction the serpentine walks, which is the side a chord grows into
+	 *     first. Pinning it to the lane step rather than to travel -- which reverses every lane --
+	 *     is what makes {@link LaneReach} predictable enough to pack lanes closer than four apart.
+	 */
 	private static BlockPos addSpatialEventModule(PlacementPlan placements, BlockPos cursor, Direction travel,
-			int triggerDelay, List<EventNote> chord) {
+			Direction laneStep, int triggerDelay, List<EventNote> chord) {
+		int time = chord.get(0).time();
 		set(placements, cursor, "minecraft:stone");
 		set(placements, cursor.above(),
 			"minecraft:repeater[facing=" + repeaterFacing(travel) + ",delay=" + triggerDelay + "]");
 		BlockPos anchor = cursor.relative(travel).above();
-		Direction side = travel.getClockWise();
 		if (chord.size() <= 3) {
 			placeNote(placements, anchor, chord.get(0));
+			// The repeater drives the anchor directly, and a note block is a full block, so the
+			// anchor passes that power on to whatever is beside it -- including the next repeater.
+			placements.powered(anchor, time);
 			if (chord.size() >= 2) {
-				placeNote(placements, anchor.relative(side), chord.get(1));
+				placeNote(placements, anchor.relative(laneStep), chord.get(1));
 			}
 			if (chord.size() >= 3) {
-				placeNote(placements, anchor.relative(side.getOpposite()), chord.get(2));
+				placeNote(placements, anchor.relative(laneStep.getOpposite()), chord.get(2));
 			}
 			return cursor.relative(travel, 2);
 		}
 		int busLength = (chord.size() + 1) / 2;
 		for (int bus = 0; bus < busLength; bus++) {
 			BlockPos busPos = anchor.relative(travel, bus);
-			set(placements, busPos, "minecraft:stone");
+			placements.powered(busPos, "minecraft:stone", time);
 			set(placements, busPos.above(), "minecraft:redstone_wire");
 		}
 		for (int noteIndex = 0; noteIndex < chord.size(); noteIndex++) {
 			int bus = noteIndex / 2;
-			Direction noteSide = noteIndex % 2 == 0 ? side : side.getOpposite();
+			Direction noteSide = noteIndex % 2 == 0 ? laneStep : laneStep.getOpposite();
 			placeNote(placements, anchor.relative(travel, bus).relative(noteSide), chord.get(noteIndex));
 		}
 		return cursor.relative(travel, 1 + busLength);
@@ -549,8 +722,10 @@ public final class SongBuilder {
 		set(placements, triggerPos, "minecraft:stone");
 		set(placements, triggerPos.above(), "minecraft:repeater[facing=" + repeaterFacing(forward) + ",delay=" + triggerDelay + "]");
 		BlockPos anchor = at(origin, forward, cursor + 1, 1, 0);
+		int time = chord.get(0).time();
 		if (chord.size() <= 3) {
 			placeNote(placements, anchor, chord.get(0));
+			placements.powered(anchor, time);
 			if (chord.size() >= 2) {
 				placeNote(placements, anchor.relative(right), chord.get(1));
 			}
@@ -562,7 +737,7 @@ public final class SongBuilder {
 		int busLength = (chord.size() + 1) / 2;
 		for (int bus = 0; bus < busLength; bus++) {
 			BlockPos busPos = anchor.relative(forward, bus);
-			set(placements, busPos, "minecraft:stone");
+			placements.powered(busPos, "minecraft:stone", time);
 			set(placements, busPos.above(), "minecraft:redstone_wire");
 		}
 		for (int noteIndex = 0; noteIndex < chord.size(); noteIndex++) {
@@ -583,6 +758,7 @@ public final class SongBuilder {
 			placements.support(notePos.below().below(), "minecraft:stone");
 		}
 		set(placements, notePos, "minecraft:note_block[note=" + note.pitch() + "]");
+		placements.note(notePos, note.time());
 		set(placements, notePos.above(), "minecraft:air");
 	}
 
@@ -639,7 +815,7 @@ public final class SongBuilder {
 	private record ChordStats(int peak, int peakTime, int overloadedTimes) {
 	}
 
-	private record CompactLayout(Set<Integer> breakAfter, int width, int depth) {
+	private record CompactLayout(Map<Integer, Integer> spacingAt, int width, int depth) {
 		int squareSize() {
 			return Math.max(width, depth);
 		}
@@ -676,6 +852,18 @@ public final class SongBuilder {
 
 	private static final class PlacementPlan {
 		private final Map<BlockPos, String> blocks = new LinkedHashMap<>();
+		/** Note block positions and the event tick each one belongs to. */
+		private final Map<BlockPos, Integer> notes = new LinkedHashMap<>();
+		/**
+		 * Positions that receive direct power, and when.
+		 *
+		 * <p>Only these can set a note block off: a note block plays when a neighbour is
+		 * <em>directly</em> powered, which means the block a repeater faces or a block with dust
+		 * sitting on it. A block that is merely next to one of those does not pass it on, which is
+		 * why a chord's side notes stay silent until their anchor fires and why two lanes can be
+		 * packed to within one empty column of each other.</p>
+		 */
+		private final Map<BlockPos, Integer> powered = new LinkedHashMap<>();
 		private int minimumX = Integer.MAX_VALUE;
 		private int minimumY = Integer.MAX_VALUE;
 		private int minimumZ = Integer.MAX_VALUE;
@@ -696,6 +884,58 @@ public final class SongBuilder {
 			set(position, block);
 		}
 
+		/** Places a block and records that the signal reaches it at {@code time}. */
+		void powered(BlockPos position, String block, int time) {
+			set(position, block);
+			powered(position, time);
+		}
+
+		void powered(BlockPos position, int time) {
+			powered.put(position.immutable(), time);
+		}
+
+		void note(BlockPos position, int time) {
+			notes.put(position.immutable(), time);
+		}
+
+		/**
+		 * Checks that every note block plays, and plays once, at the moment it is supposed to.
+		 *
+		 * <p>A layout mistake here is silent: the build goes up, looks right, and plays a note two
+		 * lanes away half a bar early. Both halves matter -- an untriggered note is a hole in the
+		 * song, and a note reached by a foreign event is a wrong note -- and between them they are
+		 * what makes it safe to pack lanes by measurement rather than by a constant.</p>
+		 */
+		void verify() {
+			for (Map.Entry<BlockPos, Integer> note : notes.entrySet()) {
+				int time = note.getValue();
+				Integer own = powered.get(note.getKey());
+				boolean triggered = own != null && own == time;
+				for (Direction direction : Direction.values()) {
+					Integer neighbour = powered.get(note.getKey().relative(direction));
+					if (neighbour == null) {
+						continue;
+					}
+					if (neighbour != time) {
+						throw new IllegalArgumentException("Refusing to build a broken machine: the "
+							+ "note at " + describe(note.getKey()) + " belongs to tick " + time
+							+ " but would also sound at tick " + neighbour
+							+ ". This is a bug in the layout, not in the song.");
+					}
+					triggered = true;
+				}
+				if (!triggered) {
+					throw new IllegalArgumentException("Refusing to build a broken machine: the note "
+						+ "at " + describe(note.getKey()) + " has nothing to set it off. This is a "
+						+ "bug in the layout, not in the song.");
+				}
+			}
+		}
+
+		private static String describe(BlockPos position) {
+			return position.getX() + " " + position.getY() + " " + position.getZ();
+		}
+
 		void set(BlockPos position, String block) {
 			BlockPos key = position.immutable();
 			String existing = blocks.putIfAbsent(key, block);
@@ -714,6 +954,7 @@ public final class SongBuilder {
 		}
 
 		PastePlan finish(PasteMode mode) {
+			verify();
 			List<String> commands = blocks.entrySet().stream()
 				.map(entry -> "setblock " + entry.getKey().getX() + " " + entry.getKey().getY() + " "
 					+ entry.getKey().getZ() + " " + entry.getValue() + " replace")
