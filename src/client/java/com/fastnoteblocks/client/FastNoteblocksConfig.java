@@ -757,37 +757,6 @@ public final class FastNoteblocksConfig {
 		return tracks.get(clampTrackIndex(activeTrackIndex, tracks.size()));
 	}
 
-	/**
-	 * The library as the old sequence list saw it, so the Mod Menu screen keeps working while the
-	 * songs screen is built. Reading this projects every song, which is why nothing else uses it.
-	 */
-	public List<SavedSequence> savedSequences() {
-		List<SavedSequence> result = new ArrayList<>();
-		for (String id : songs.ids()) {
-			ComposerProject song = songs.song(id);
-			result.add(new SavedSequence(song.name(), song.toSequenceTracks(null),
-				song.activeLayerIndex(), DEFAULT_SEQUENCE_DELAY_SCALE_QUARTERS, song));
-		}
-		return List.copyOf(result);
-	}
-
-	public void setSavedSequences(List<SavedSequence> updated) {
-		List<SavedSequence> entries = updated == null ? List.of() : updated;
-		List<String> existing = songs.ids();
-		for (int index = 0; index < entries.size(); index++) {
-			SavedSequence entry = entries.get(index);
-			ComposerProject song = entry.composerProject() != null
-				? entry.composerProject().withName(entry.name())
-				: ComposerProject.fromSequenceTracks(entry.name(), entry.tracks(),
-					entry.activeTrackIndex(), entry.delayScaleQuarters());
-			String id = index < existing.size() ? existing.get(index) : songs.newId(entry.name());
-			songs.save(id, song);
-		}
-		for (int index = entries.size(); index < existing.size(); index++) {
-			songs.delete(existing.get(index));
-		}
-	}
-
 	public MidiQuantizeGrid midiQuantizeGrid() {
 		return midiQuantizeGrid;
 	}
