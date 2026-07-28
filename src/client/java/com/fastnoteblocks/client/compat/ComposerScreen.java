@@ -173,6 +173,11 @@ public final class ComposerScreen extends Screen {
 			.tooltip(Tooltip.create(Component.literal("Select every note with a given build problem")))
 			.build());
 		x += 58;
+		addRenderableWidget(Button.builder(Component.literal("Build"), button -> toggleToolbarMenu(ToolbarMenu.BUILD, 240))
+			.bounds(x, 7, 54, 20)
+			.tooltip(Tooltip.create(Component.literal("Place this composition in the world")))
+			.build());
+		x += 58;
 		playButton = addRenderableWidget(Button.builder(playLabel(), button -> togglePlayback())
 			.bounds(x, 7, 54, 20)
 			.tooltip(Tooltip.create(Component.literal("Preview all unmuted layers")))
@@ -793,7 +798,8 @@ public final class ComposerScreen extends Screen {
 		}
 		List<String> rows = new ArrayList<>(actions.length);
 		for (ToolbarAction action : actions) {
-			rows.add(action.label + (selectedNotes.isEmpty() || !action.scopeable ? "" : " (selection)"));
+			rows.add(toolbarRowLabel(action)
+				+ (selectedNotes.isEmpty() || !action.scopeable ? "" : " (selection)"));
 		}
 		return rows;
 	}
@@ -821,6 +827,7 @@ public final class ComposerScreen extends Screen {
 		return switch (toolbarMenu) {
 			case FILE -> ToolbarAction.FILE_ACTIONS;
 			case EDIT -> ToolbarAction.EDIT_ACTIONS;
+			case BUILD -> ToolbarAction.BUILD_ACTIONS;
 			case SELECT -> ToolbarAction.SELECT_ACTIONS;
 			case IMPORT, NONE -> new ToolbarAction[0];
 		};
@@ -836,6 +843,10 @@ public final class ComposerScreen extends Screen {
 			case SELECT_TOO_FREQUENT -> !projectStats().crowded().isEmpty();
 			case SELECT_OUT_OF_RANGE -> projectStats().outOfRange() > 0;
 			case SELECT_NONE -> !selectedNotes.isEmpty();
+			// Refusing to build an unbuildable song here would only hide why. The status bar
+			// already says what is wrong, and the planner reports anything it cannot place.
+			case BUILD_IN_WORLD -> projectStats().totalNotes() > 0 || project().endTick() > 0L;
+			case BUILD_CANCEL -> CommandPasteSender.isRunning();
 			default -> true;
 		};
 	}
@@ -863,6 +874,11 @@ public final class ComposerScreen extends Screen {
 			return true;
 		}
 		ToolbarAction action = toolbarActions()[row];
+		if (action == ToolbarAction.BUILD_MODE) {
+			// Stays open: the layout is picked by eye against the counts above it.
+			cyclePasteMode();
+			return true;
+		}
 		toolbarMenu = ToolbarMenu.NONE;
 		performToolbarAction(action);
 		return true;
@@ -873,6 +889,9 @@ public final class ComposerScreen extends Screen {
 			case IMPORT -> importSong();
 			case OPEN_SONGS -> minecraft.gui.setScreen(new SongsScreen(parent, config));
 			case COPY_AS_TEXT -> copyActiveLayerAsText();
+			case BUILD_IN_WORLD -> buildInWorld();
+			case BUILD_MODE -> cyclePasteMode();
+			case BUILD_CANCEL -> CommandPasteSender.cancel(true);
 			case SAVE_TO_SEQUENCE -> saveToSequence();
 			case BACK_TO_SEQUENCES -> onClose();
 			case CLOSE_TO_GAME -> closeToGame();
@@ -958,6 +977,14 @@ public final class ComposerScreen extends Screen {
 				+ (selectionLayers().size() == 1 ? " layer" : " layers");
 		showResult(Component.literal(
 			selectedNotes.size() + " notes " + label + scope));
+	}
+
+	private String toolbarRowLabel(ToolbarAction action) {
+		return switch (action) {
+			case BUILD_MODE -> action.label + ": " + pasteMode().label();
+			case BUILD_IN_WORLD -> CommandPasteSender.isRunning() ? "Stop building" : action.label;
+			default -> action.label;
+		};
 	}
 
 	private String importSettingLabel(ImportSetting setting) {
@@ -1532,6 +1559,9 @@ public final class ComposerScreen extends Screen {
 		segments.add("peak " + peakChord + "/" + SongAnalysis.MAX_SIMULTANEOUS_NOTES
 			+ (overloaded > 0 ? " (" + overloaded + " over)" : ""));
 		segments.add(stats.totalNotes() + " notes · " + project().layers().size() + " layers");
+		SongBuilder.BlockCounts blocks = SongBuilder.blockCounts(project());
+		segments.add(blocks.total() + " blocks (" + blocks.noteBlocks() + " note · "
+			+ blocks.repeaters() + " repeater)");
 		if (!selectedNotes.isEmpty()) {
 			segments.add(selectedNotes.size() + " selected");
 		}
@@ -2234,6 +2264,66 @@ public final class ComposerScreen extends Screen {
 		showResult(Component.literal(report));
 	}
 
+	/**
+	 * Places the composition in the world.
+	 *
+	 * <p>Publishes first, so the in-world placement overlay is looking at the same thing that was
+	 * just built, then hands the plan to the command sender. The plan comes from the composition
+	 * itself -- no track text is consulted on the way.</p>
+	 */
+	private void buildInWorld() {
+		if (CommandPasteSender.isRunning()) {
+			CommandPasteSender.cancel(true);
+			return;
+		}
+		if (minecraft.player == null || minecraft.level == null) {
+			showResult(Component.literal("Join a world before building."));
+			return;
+		}
+		SongBuilder.PastePlan plan;
+		try {
+			saveToSequence();
+			plan = SongBuilder.plan(minecraft, project(), pasteMode());
+		} catch (IllegalArgumentException refused) {
+			showResult(Component.literal(refused.getMessage())
+				.withStyle(net.minecraft.ChatFormatting.RED));
+			return;
+		}
+		double seconds = plan.commands().size() / (config.commandsPerTick() * 20.0);
+		minecraft.gui.setScreen(new ConfirmScreen(
+			confirmed -> {
+				if (confirmed) {
+					CommandPasteSender.start(plan.commands());
+					minecraft.gui.setScreen(null);
+				} else {
+					minecraft.gui.setScreen(this);
+				}
+			},
+			Component.literal("Build \"" + project().name() + "\" here?"),
+			Component.literal(String.format(java.util.Locale.ROOT,
+				"%s: %d x %d x %d, %d commands at %d/tick (%.1fs). Requires /setblock permission "
+					+ "and overwrites blocks. High rates can trip server command spam limits.",
+				plan.mode().label(), plan.width(), plan.depth(), plan.height(),
+				plan.commands().size(), config.commandsPerTick(), seconds)),
+			Component.literal("Build"), CommonComponents.GUI_CANCEL));
+	}
+
+	private SongBuilder.PasteMode pasteMode() {
+		try {
+			return SongBuilder.PasteMode.valueOf(config.pasteMode());
+		} catch (IllegalArgumentException unknown) {
+			return SongBuilder.PasteMode.COMPACT_CUBE;
+		}
+	}
+
+	private void cyclePasteMode() {
+		SongBuilder.PasteMode[] modes = SongBuilder.PasteMode.values();
+		SongBuilder.PasteMode next = modes[(pasteMode().ordinal() + 1) % modes.length];
+		config.setPasteMode(next.name());
+		FastNoteblocksConfig.save();
+		showResult(Component.literal("Build layout: " + next.label()));
+	}
+
 	private void saveProject() {
 		config.setComposerProject(project());
 		FastNoteblocksConfig.save();
@@ -2707,6 +2797,7 @@ public final class ComposerScreen extends Screen {
 
 	private enum ToolbarMenu {
 		NONE,
+		BUILD,
 		FILE,
 		EDIT,
 		SELECT,
@@ -2746,6 +2837,9 @@ public final class ComposerScreen extends Screen {
 		QUANTIZE("Quantize to grid", true),
 		FIT_ALL_RANGE("Fit into range", true),
 		SNAP_TEMPO("Snap tempo (whole song)"),
+		BUILD_IN_WORLD("Build in world..."),
+		BUILD_MODE("Layout"),
+		BUILD_CANCEL("Cancel build"),
 		SNAP_END("Snap end to grid"),
 		TRIM_END("Trim end to last note"),
 		SELECT_OFF_GRID("Off grid"),
@@ -2760,6 +2854,9 @@ public final class ComposerScreen extends Screen {
 		private static final ToolbarAction[] EDIT_ACTIONS = {
 			UNDO, REDO, CONVERT, MERGE_REPEATS, QUANTIZE, FIT_ALL_RANGE, SNAP_TEMPO,
 			SNAP_END, TRIM_END
+		};
+		private static final ToolbarAction[] BUILD_ACTIONS = {
+			BUILD_IN_WORLD, BUILD_MODE, BUILD_CANCEL
 		};
 		private static final ToolbarAction[] SELECT_ACTIONS = {
 			SELECT_OFF_GRID, SELECT_TOO_FREQUENT, SELECT_OUT_OF_RANGE, SELECT_ALL_NOTES, SELECT_NONE

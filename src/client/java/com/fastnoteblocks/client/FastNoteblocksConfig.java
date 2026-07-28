@@ -258,6 +258,7 @@ public final class FastNoteblocksConfig {
 	private int conversionGapPercentile;
 	private int commandsPerTick;
 	private int maxBuildFloors;
+	private String pasteMode;
 
 	private FastNoteblocksConfig() {
 	}
@@ -376,6 +377,7 @@ public final class FastNoteblocksConfig {
 						? DEFAULT_REPEAT_MERGE_TICKS
 						: stored.repeatMergeTicks
 				);
+				instance.pasteMode = stored.pasteMode;
 				instance.midiVelocityCutoff = clampMidiVelocityCutoff(
 					stored.midiVelocityCutoff == null
 						? DEFAULT_MIDI_VELOCITY_CUTOFF
@@ -757,6 +759,15 @@ public final class FastNoteblocksConfig {
 		return tracks.get(clampTrackIndex(activeTrackIndex, tracks.size()));
 	}
 
+	/** Remembered layout for the next build. Stored by name so the enum can move. */
+	public String pasteMode() {
+		return pasteMode == null ? "COMPACT_CUBE" : pasteMode;
+	}
+
+	public void setPasteMode(String pasteMode) {
+		this.pasteMode = pasteMode;
+	}
+
 	public MidiQuantizeGrid midiQuantizeGrid() {
 		return midiQuantizeGrid;
 	}
@@ -884,6 +895,7 @@ public final class FastNoteblocksConfig {
 		config.conversionGapPercentile = DEFAULT_CONVERSION_GAP_PERCENTILE;
 		config.commandsPerTick = DEFAULT_COMMANDS_PER_TICK;
 		config.maxBuildFloors = DEFAULT_MAX_BUILD_FLOORS;
+		config.pasteMode = "COMPACT_CUBE";
 		return config;
 	}
 
@@ -1034,6 +1046,7 @@ public final class FastNoteblocksConfig {
 		private Integer conversionGapPercentile;
 		private Integer commandsPerTick;
 		private Integer maxBuildFloors;
+		private String pasteMode;
 
 		private StoredConfig() {
 		}
@@ -1079,6 +1092,7 @@ public final class FastNoteblocksConfig {
 			this.conversionGapPercentile = config.conversionGapPercentile;
 			this.commandsPerTick = config.commandsPerTick;
 			this.maxBuildFloors = config.maxBuildFloors;
+			this.pasteMode = config.pasteMode;
 		}
 	}
 }

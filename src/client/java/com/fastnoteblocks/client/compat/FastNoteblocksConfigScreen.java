@@ -166,9 +166,7 @@ public final class FastNoteblocksConfigScreen {
 			.setTooltip(Component.translatable("tooltip.fast-noteblocks.auto_select_sequence_block"))
 			.setSaveConsumer(config::setAutoSelectSequenceBlock)
 			.build());
-		// The build queue only. The song library has its own screen -- listing songs here as well
-		// meant two editors over the same files, and this one matched rows to files by position.
-		placement.addEntry(new ActiveSequenceEntry(config));
+
 
 		ConfigCategory midi = builder.getOrCreateCategory(Component.translatable("category.fast-noteblocks.midi"));
 		midi.addEntry(entries.startEnumSelector(
