@@ -137,9 +137,9 @@ public final class SongBuilder {
 	 * The widest two lane centres ever have to be apart: a chord of three or more reaches a block
 	 * to either side of its lane, and one empty column has to separate the two.
 	 *
-	 * <p>Also the spacing every estimate assumes. Deciding where a lane ends must not depend on how
-	 * wide the lanes turned out, or the two passes in {@link #createCubePastePlan} would disagree
-	 * about which events belong to which lane.</p>
+	 * <p>Also the spacing every estimate assumes. Where a lane ends is settled on the travel axis
+	 * alone, so it never depends on how wide the lanes turned out -- which is what lets a lane be
+	 * measured before it is walked.</p>
 	 */
 	private static final int MAX_LANE_SPACING = 4;
 
@@ -150,8 +150,8 @@ public final class SongBuilder {
 	 * Whether a chord can be built into a corner instead of into the lane.
 	 *
 	 * <p>Judged against the tightest corner rather than the one this pair of lanes will actually
-	 * get. Both passes over the cube walk have to make the same choice event for event, and only
-	 * the second one knows how wide any corner ended up.</p>
+	 * get, because the answer decides where the next lane starts and so has to be settled before
+	 * the corner has been measured.</p>
 	 */
 	private static boolean fitsInCorner(EventGroup event) {
 		return event.notes().size() <= 2 * MIN_LANE_SPACING;
@@ -258,7 +258,7 @@ public final class SongBuilder {
 			cursor = addEventModule(placements, origin, forward, trigger.cursor(), trigger.triggerDelay(), chord);
 			currentTime = time;
 		}
-		return placements.finish(PasteMode.STRAIGHT);
+		return placements.finish(PasteMode.STRAIGHT, origin);
 	}
 
 	private static ChordStats chordStats(List<EventNote> notes) {
@@ -317,7 +317,7 @@ public final class SongBuilder {
 				travel = travel.getOpposite();
 			}
 		}
-		return placements.finish(PasteMode.COMPACT);
+		return placements.finish(PasteMode.COMPACT, origin);
 	}
 
 	/**
@@ -340,35 +340,34 @@ public final class SongBuilder {
 		// The wall has to clear the longest single event, or an event that cannot fit between the
 		// walls would turn on every attempt and never advance.
 		int laneWidth = Math.max(longestEvent + 2, Math.max(1, perFloor / lanesPerFloor));
-		// Size floors from the lanes the walk actually needs. A wall-bounded lane holds a little
-		// less than the flat length estimate predicts, so trusting the estimate overshot the floor
-		// count and left the stack taller than the footprint it was supposed to match.
-		lanesPerFloor = Math.max(1,
-			(int)Math.ceil(countCubeLanes(events, laneWidth) / (double)floors));
-
-		// Two passes over the same walk. A lane ends where it meets a wall and the walls stand on
-		// the travel axis, so how far apart the lanes sit cannot move a single boundary -- which is
-		// what lets the first pass report the lanes the second one will need to measure.
-		List<Integer> starts = walkCube(events, origin, forward, laneWidth, lanesPerFloor,
-			new PlacementPlan(), Map.of());
+		// A floor is as wide as the stack is, not as many lanes as the one below it. Counting lanes
+		// was fine while every lane was four apart; now that a sparse lane pair sits two apart, a
+		// count leaves a floor of narrow lanes covering half the footprint of the floor under it --
+		// and a floor of wide ones hanging off the edge of it.
+		int corridor = cubeCorridor(
+			List.copyOf(laneSpacings(events, cubeLanePartition(events, laneWidth)).values()), floors);
+		// The estimate reads a lane partition, and the walk decides its lanes as it goes, so the two
+		// differ by a lane here and there -- enough to spill one lane onto a floor of its own. Walk
+		// it dry and widen until the stack really is the height it was sized for.
+		for (int attempt = 0; attempt < 8
+			&& walkCube(events, origin, forward, laneWidth, corridor, PlacementPlan.dry()) > floors;
+				attempt++) {
+			corridor += MAX_LANE_SPACING;
+		}
 		PlacementPlan placements = new PlacementPlan();
-		walkCube(events, origin, forward, laneWidth, lanesPerFloor, placements,
-			laneSpacings(events, starts));
-		return placements.finish(PasteMode.COMPACT_CUBE);
+		walkCube(events, origin, forward, laneWidth, corridor, placements);
+		return placements.finish(PasteMode.COMPACT_CUBE, origin);
 	}
 
 	/**
 	 * Walks the events through the stack of floors, placing as it goes.
 	 *
-	 * @param spacings lane spacing keyed by the event index a lane starts at; anything missing falls
-	 *     back to the widest, which is what the measuring pass wants
-	 * @return the event index each lane starts at, in order
+	 * @param corridor how far, across the lanes, a floor may reach from the edge it starts at
+	 * @return how many floors the stack ended up with
 	 */
-	private static List<Integer> walkCube(List<EventGroup> events, BlockPos origin, Direction forward,
-			int laneWidth, int lanesPerFloor, PlacementPlan placements,
-			Map<Integer, Integer> spacings) {
-		List<Integer> starts = new ArrayList<>();
-		starts.add(0);
+	private static int walkCube(List<EventGroup> events, BlockPos origin, Direction forward,
+			int laneWidth, int corridor, PlacementPlan placements) {
+		int floorsUsed = 1;
 		BlockPos cursor = origin;
 		Direction travel = forward;
 		Direction laneStep = forward.getClockWise();
@@ -378,7 +377,7 @@ public final class SongBuilder {
 		int nearWall = origin.getX();
 		int farWall = origin.getX() + laneWidth;
 		int currentTime = 0;
-		int laneIndex = 0;
+		int laneStart = 0;
 		for (int index = 0; index < events.size(); index++) {
 			EventGroup event = events.get(index);
 			int delay = event.time() - currentTime;
@@ -394,62 +393,128 @@ public final class SongBuilder {
 			boolean turnAfter = index + 1 < events.size()
 				&& event.maxSafeTurnDistance() >= MAX_LANE_SPACING
 				&& (next > farWall || next < nearWall);
-			boolean riser = turnAfter && laneIndex + 1 >= lanesPerFloor;
-			int spacing = spacings.getOrDefault(index + 1, MAX_LANE_SPACING);
-			if (turnAfter && !riser && fitsInCorner(event)) {
+			if (!turnAfter) {
+				cursor = addSpatialEventModule(placements, trigger.cursor(), travel, laneStep,
+					trigger.triggerDelay(), event.notes());
+				continue;
+			}
+			// A corner has to be as wide as the two lanes it joins, so the next lane has to be
+			// measured before it is walked. Where it ends is arithmetic -- the same walls, the same
+			// rule -- and a corner built into an event leaves the travel position where the event's
+			// trigger stood rather than past it.
+			boolean cornerBuilt = fitsInCorner(event);
+			int nextStart = cornerBuilt ? trigger.cursor().getX() : landing;
+			int spacing = laneSpacing(laneReach(events, laneStart, index + 1),
+				laneReach(events, index + 1,
+					laneEnd(events, index + 1, nextStart, -travel.getStepX(), nearWall, farWall)));
+			laneStart = index + 1;
+			int nextLane = cursor.getZ() + laneStep.getStepZ() * spacing - origin.getZ();
+			boolean riser = nextLane < 0 || nextLane > corridor;
+			if (!riser && cornerBuilt) {
 				cursor = addTurnEventModule(placements, trigger.cursor(), travel, laneStep, spacing,
 					trigger.triggerDelay(), event.notes());
 				travel = travel.getOpposite();
-				laneIndex++;
-				starts.add(index + 1);
 				continue;
 			}
 			cursor = addSpatialEventModule(placements, trigger.cursor(), travel, laneStep,
 				trigger.triggerDelay(), event.notes());
-			if (!turnAfter) {
-				continue;
-			}
-			starts.add(index + 1);
 			if (riser) {
-				cursor = addGlassRiser(placements, cursor, travel, laneStep, currentTime);
+				// Land back into the floor rather than one step further out. Stepping out was
+				// harmless while every floor was exactly as wide as the last, and is how the stack
+				// crept past its own starting edge once they stopped being.
+				cursor = addGlassRiser(placements, cursor, travel, laneStep.getOpposite(),
+					currentTime);
 				// Reverse both axes so the next floor retraces this one within the same volume.
 				travel = travel.getOpposite();
 				laneStep = laneStep.getOpposite();
-				laneIndex = 0;
+				floorsUsed++;
 			} else {
 				cursor = addCompactTurn(placements, cursor, travel, laneStep, spacing, currentTime);
 				travel = travel.getOpposite();
-				laneIndex++;
 			}
 		}
-		return starts;
+		return floorsUsed;
 	}
 
 	/**
-	 * Counts the lanes a wall-bounded walk needs, without placing anything.
+	 * The narrowest corridor that still stacks the lanes in {@code floors} floors or fewer.
 	 *
-	 * <p>Mirrors the turn rule in the real pass: a lane ends when the next event would cross a
-	 * wall, and a turn leaves the travel-axis position unchanged.</p>
+	 * <p>Dividing the lanes evenly is not enough. A floor stops when the <em>next</em> lane would
+	 * cross the far side, so it always ends a little short of the corridor, and those shortfalls add
+	 * up into one more floor carrying a single lane -- the thin slab on top that gives away that the
+	 * stack was sized by arithmetic rather than by walking it.</p>
 	 */
-	private static int countCubeLanes(List<EventGroup> events, int laneWidth) {
+	private static int cubeCorridor(List<Integer> spacings, int floors) {
+		int span = Math.max(MAX_LANE_SPACING, spacings.stream().mapToInt(Integer::intValue).sum());
+		for (int corridor = MAX_LANE_SPACING; corridor < span; corridor++) {
+			if (cubeFloorCount(spacings, corridor) <= floors) {
+				return corridor;
+			}
+		}
+		return span;
+	}
+
+	/** How many floors the lanes need if a floor may reach {@code corridor} across. */
+	private static int cubeFloorCount(List<Integer> spacings, int corridor) {
+		int used = 1;
 		int position = 0;
 		int step = 1;
-		int lanes = 1;
-		boolean laneStarted = false;
-		for (int index = 0; index < events.size(); index++) {
-			EventGroup event = events.get(index);
-			boolean canLeave = index > 0
-				&& events.get(index - 1).maxSafeTurnDistance() >= MAX_LANE_SPACING;
-			int projected = position + step * event.length();
-			if (canLeave && laneStarted && (projected > laneWidth || projected < 0)) {
+		for (int spacing : spacings) {
+			int next = position + step * spacing;
+			if (next < 0 || next > corridor) {
+				used++;
+				// A riser lands one lane back into the floor it leaves, and the next floor
+				// retraces it from there.
+				position -= step;
 				step = -step;
-				lanes++;
-				laneStarted = false;
+			} else {
+				position = next;
 			}
-			position += step * event.length();
-			laneStarted = true;
 		}
-		return lanes;
+		return used;
+	}
+
+	/**
+	 * Where the lane starting at {@code from} ends, without placing anything.
+	 *
+	 * <p>Mirrors the turn rule in the walk itself: a lane ends when the event after the next one
+	 * would cross a wall.</p>
+	 */
+	private static int laneEnd(List<EventGroup> events, int from, int position, int step,
+			int nearWall, int farWall) {
+		for (int index = from; index < events.size(); index++) {
+			int landing = position + step * events.get(index).length();
+			if (index + 1 < events.size()
+					&& events.get(index).maxSafeTurnDistance() >= MAX_LANE_SPACING) {
+				int next = landing + step * events.get(index + 1).length();
+				if (next > farWall || next < nearWall) {
+					return index + 1;
+				}
+			}
+			position = landing;
+		}
+		return events.size();
+	}
+
+	/** The lanes a wall-bounded walk needs, as the event index each one starts at. */
+	private static List<Integer> cubeLanePartition(List<EventGroup> events, int laneWidth) {
+		List<Integer> starts = new ArrayList<>();
+		starts.add(0);
+		int position = 0;
+		int step = 1;
+		for (int index = 0; index < events.size(); index++) {
+			position += step * events.get(index).length();
+			if (index + 1 >= events.size()
+					|| events.get(index).maxSafeTurnDistance() < MAX_LANE_SPACING) {
+				continue;
+			}
+			int next = position + step * events.get(index + 1).length();
+			if (next > laneWidth || next < 0) {
+				starts.add(index + 1);
+				step = -step;
+			}
+		}
+		return starts;
 	}
 
 	/** Picks the floor count whose largest dimension is smallest, i.e. the most cube-like. */
@@ -851,6 +916,14 @@ public final class SongBuilder {
 	}
 
 	private static final class PlacementPlan {
+		/** A plan that records nothing, for walking the layout to measure it rather than build it. */
+		static PlacementPlan dry() {
+			PlacementPlan plan = new PlacementPlan();
+			plan.recording = false;
+			return plan;
+		}
+
+		private boolean recording = true;
 		private final Map<BlockPos, String> blocks = new LinkedHashMap<>();
 		/** Note block positions and the event tick each one belongs to. */
 		private final Map<BlockPos, Integer> notes = new LinkedHashMap<>();
@@ -891,11 +964,15 @@ public final class SongBuilder {
 		}
 
 		void powered(BlockPos position, int time) {
-			powered.put(position.immutable(), time);
+			if (recording) {
+				powered.put(position.immutable(), time);
+			}
 		}
 
 		void note(BlockPos position, int time) {
-			notes.put(position.immutable(), time);
+			if (recording) {
+				notes.put(position.immutable(), time);
+			}
 		}
 
 		/**
@@ -937,6 +1014,9 @@ public final class SongBuilder {
 		}
 
 		void set(BlockPos position, String block) {
+			if (!recording) {
+				return;
+			}
 			BlockPos key = position.immutable();
 			String existing = blocks.putIfAbsent(key, block);
 			if (existing != null && !existing.equals(block)) {
@@ -953,11 +1033,20 @@ public final class SongBuilder {
 			}
 		}
 
-		PastePlan finish(PasteMode mode) {
+		PastePlan finish(PasteMode mode, BlockPos origin) {
 			verify();
+			// Nothing lands behind you. The walk reaches a block outside its own walls here and
+			// there -- a chord hanging off the far side of the first lane, a corner overshooting the
+			// end of one, a floor not quite the width of the one below it -- and a build that starts
+			// a block behind where you were standing is a build you cannot line up from a corner.
+			// Sliding the finished plan is exact and costs nothing; the height is left alone,
+			// because that is measured from your feet and not from a wall.
+			int shiftX = minimumX == Integer.MAX_VALUE ? 0 : origin.getX() - minimumX;
+			int shiftZ = minimumZ == Integer.MAX_VALUE ? 0 : origin.getZ() - minimumZ;
 			List<String> commands = blocks.entrySet().stream()
-				.map(entry -> "setblock " + entry.getKey().getX() + " " + entry.getKey().getY() + " "
-					+ entry.getKey().getZ() + " " + entry.getValue() + " replace")
+				.map(entry -> "setblock " + (entry.getKey().getX() + shiftX) + " "
+					+ entry.getKey().getY() + " " + (entry.getKey().getZ() + shiftZ) + " "
+					+ entry.getValue() + " replace")
 				.toList();
 			int widthX = maximumX < minimumX ? 0 : maximumX - minimumX + 1;
 			int widthZ = maximumZ < minimumZ ? 0 : maximumZ - minimumZ + 1;
