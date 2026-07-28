@@ -237,8 +237,6 @@ public final class FastNoteblocksConfig {
 	private boolean placementSequenceEnabled;
 	private SequencingEditProtection sequencingEditProtection;
 	private boolean autoSelectSequenceBlock;
-	private String placementSequence;
-	private int placementSequencePosition;
 	private String activeSequenceName;
 	private int activeSequenceDelayScaleQuarters;
 	private int composerSpeedQuarters;
@@ -305,10 +303,6 @@ public final class FastNoteblocksConfig {
 					? SequencingEditProtection.RADIALS_AND_INTERACTIONS
 					: stored.sequencingEditProtection;
 				instance.autoSelectSequenceBlock = stored.autoSelectSequenceBlock == null || stored.autoSelectSequenceBlock;
-				instance.placementSequence = stored.placementSequence == null ? "" : stored.placementSequence;
-				instance.placementSequencePosition = Math.max(0,
-					stored.placementSequencePosition == null ? 0 : stored.placementSequencePosition
-				);
 				instance.activeSequenceName = stored.activeSequenceName == null || stored.activeSequenceName.isBlank()
 					? "Untitled sequence"
 					: stored.activeSequenceName;
@@ -328,8 +322,10 @@ public final class FastNoteblocksConfig {
 					instance.previewInstrument = stored.previewInstrument == null ? "HARP" : stored.previewInstrument;
 				boolean buildTrackFlagsInitialized = Boolean.TRUE.equals(stored.buildTrackFlagsInitialized);
 				instance.tracks = stored.tracks == null || stored.tracks.isEmpty()
-					? List.of(new SequenceTrack("Track 1", instance.placementSequence,
-						instance.previewInstrument, instance.placementSequencePosition))
+					? List.of(new SequenceTrack("Track 1",
+						stored.placementSequence == null ? "" : stored.placementSequence,
+						instance.previewInstrument,
+						stored.placementSequencePosition == null ? 0 : stored.placementSequencePosition))
 					: normalizeTracks(stored.tracks);
 				if (!buildTrackFlagsInitialized) {
 					instance.tracks = enableAllBuildTracks(instance.tracks);
@@ -390,7 +386,13 @@ public final class FastNoteblocksConfig {
 			instance = defaults();
 		}
 		songs = SongLibrary.load();
+		boolean migrated = songs.isEmpty();
 		instance.activeSongId = migrateSongsOutOfSettings(instance.activeSongId);
+		if (migrated) {
+			// Rewrite immediately so the settings file sheds the compositions it used to carry,
+			// rather than staying huge until something else happens to save.
+			save();
+		}
 	}
 
 	public static SongLibrary songs() {
@@ -596,13 +598,13 @@ public final class FastNoteblocksConfig {
 		this.autoSelectSequenceBlock = autoSelectSequenceBlock;
 	}
 
+	/** The build queue's current track text. There is no second copy of it anywhere. */
 	public String placementSequence() {
 		return activeTrack().sequence();
 	}
 
 	public void setPlacementSequence(String placementSequence) {
 		updateActiveTrack(activeTrack().withSequence(placementSequence));
-		this.placementSequence = activeTrack().sequence();
 	}
 
 	public int placementSequencePosition() {
@@ -611,7 +613,6 @@ public final class FastNoteblocksConfig {
 
 	public void setPlacementSequencePosition(int placementSequencePosition) {
 		updateActiveTrack(activeTrack().withPosition(placementSequencePosition));
-		this.placementSequencePosition = activeTrack().position();
 	}
 
 	public String activeSequenceName() {
@@ -894,8 +895,6 @@ public final class FastNoteblocksConfig {
 		config.placementSequenceEnabled = false;
 		config.sequencingEditProtection = SequencingEditProtection.RADIALS_AND_INTERACTIONS;
 		config.autoSelectSequenceBlock = true;
-		config.placementSequence = "";
-		config.placementSequencePosition = 0;
 		config.activeSequenceName = "Untitled sequence";
 		config.activeSequenceDelayScaleQuarters = DEFAULT_SEQUENCE_DELAY_SCALE_QUARTERS;
 		config.previewInstrument = "HARP";
@@ -1011,11 +1010,15 @@ public final class FastNoteblocksConfig {
 		tracks = List.copyOf(updated);
 	}
 
+	/**
+	 * Keeps the preview instrument pointing at the active track.
+	 *
+	 * <p>Used to mirror the track's text and position into loose fields as well, which is how
+	 * typing a loop for the in-world overlay could edit a song: the two were literally the same
+	 * string. The track is now the only place either lives.</p>
+	 */
 	private void syncLegacyTrackFields() {
-		SequenceTrack active = activeTrack();
-		placementSequence = active.sequence();
-		placementSequencePosition = active.position();
-		previewInstrument = active.instrument();
+		previewInstrument = activeTrack().instrument();
 	}
 
 	private static final class StoredConfig {
@@ -1082,8 +1085,8 @@ public final class FastNoteblocksConfig {
 			this.placementSequenceEnabled = config.placementSequenceEnabled;
 			this.sequencingEditProtection = config.sequencingEditProtection;
 			this.autoSelectSequenceBlock = config.autoSelectSequenceBlock;
-			this.placementSequence = config.placementSequence;
-			this.placementSequencePosition = config.placementSequencePosition;
+			this.placementSequence = config.activeTrack().sequence();
+			this.placementSequencePosition = config.activeTrack().position();
 			this.activeSequenceName = config.activeSequenceName;
 			this.activeSequenceDelayScaleQuarters = config.activeSequenceDelayScaleQuarters;
 			this.previewInstrument = config.previewInstrument;

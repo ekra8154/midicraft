@@ -20,7 +20,6 @@ import me.shedaniel.clothconfig2.api.AbstractConfigListEntry;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
-import net.minecraft.client.gui.components.AbstractSliderButton;
 import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
@@ -65,11 +64,9 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 
 	private final FastNoteblocksConfig config;
 	private final String initialName;
-	private final int initialDelayScaleQuarters;
 	private final List<SequenceTrack> initialTracks;
 	private final int initialActiveTrack;
 	private final EditBox nameBox;
-	private final DelayScaleSlider delayScaleSlider;
 	private final Button expandButton;
 	private final Button playButton;
 	private final Button viewModeButton;
@@ -93,7 +90,6 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 		super(Component.literal("Active sequence:"), false);
 		this.config = config;
 		this.initialName = config.activeSequenceName();
-		this.initialDelayScaleQuarters = config.activeSequenceDelayScaleQuarters();
 		this.initialTracks = config.tracks();
 		this.initialActiveTrack = config.activeTrackIndex();
 		this.activeTrackIndex = initialActiveTrack;
@@ -101,7 +97,6 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 		nameBox.setMaxLength(80);
 		nameBox.setValue(initialName);
 		nameBox.setResponder(value -> syncConfig());
-		this.delayScaleSlider = new DelayScaleSlider(0, 0, 96, 20, initialDelayScaleQuarters, value -> syncConfig());
 		this.expandButton = Button.builder(expandLabel(), button -> {
 			expanded = !expanded;
 			button.setMessage(expandLabel());
@@ -153,7 +148,6 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 	void setSequence(SavedSequence saved) {
 		stopPlayback();
 		nameBox.setValue(saved.name());
-		delayScaleSlider.setScale(saved.delayScaleQuarters());
 		List<SequenceTrack> savedTracks = saved.composerProject() == null
 			? saved.tracks()
 			: saved.composerProject().toSequenceTracks(saved.tracks());
@@ -869,13 +863,19 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 
 	private void syncConfig() {
 		config.setActiveSequenceName(sequenceName());
-		config.setActiveSequenceDelayScaleQuarters(delayScaleQuarters());
 		config.setTracks(trackValues());
 		config.setActiveTrackIndex(activeTrackIndex);
 	}
 
+	/**
+	 * Sequence text is read exactly as written: {@code 4d} is four repeater ticks, always.
+	 *
+	 * <p>There used to be a stored multiplier here, which meant the same text described different
+	 * timings depending on a slider elsewhere. Compositions carry their own speed and bake it in
+	 * when they publish, so nothing needs to scale the text afterwards.</p>
+	 */
 	private int delayScaleQuarters() {
-		return delayScaleSlider.scaleQuarters();
+		return FastNoteblocksConfig.DEFAULT_SEQUENCE_DELAY_SCALE_QUARTERS;
 	}
 
 	private void syncAndSave() {
@@ -996,12 +996,10 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 		importMidiButton.setX(pasteLineButton.getX() - importMidiButton.getWidth() - 4);
 		importMidiButton.setY(y);
 		importMidiButton.extractRenderState(graphics, mouseX, mouseY, partialTick);
-		delayScaleSlider.setX(importMidiButton.getX() - delayScaleSlider.getWidth() - 4);
-		delayScaleSlider.setY(y);
-		delayScaleSlider.extractRenderState(graphics, mouseX, mouseY, partialTick);
+
 		nameBox.setX(nameX);
 		nameBox.setY(y);
-		nameBox.setWidth(Math.max(60, delayScaleSlider.getX() - nameX - 4));
+		nameBox.setWidth(Math.max(60, importMidiButton.getX() - nameX - 4));
 		nameBox.extractRenderState(graphics, mouseX, mouseY, partialTick);
 		if (!expanded) {
 			return;
@@ -1343,7 +1341,7 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 
 	private List<AbstractWidget> widgets() {
 		List<AbstractWidget> widgets = new ArrayList<>(List.of(
-			expandButton, nameBox, delayScaleSlider, importMidiButton, pasteLineButton, viewModeButton, playButton
+			expandButton, nameBox, importMidiButton, pasteLineButton, viewModeButton, playButton
 		));
 		if (expanded && !timelineMode) {
 			for (TrackRow track : tracks) {
@@ -1377,7 +1375,6 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 	@Override
 	public boolean isEdited() {
 		return !sequenceName().equals(initialName)
-			|| delayScaleQuarters() != initialDelayScaleQuarters
 			|| !trackValues().equals(initialTracks)
 			|| activeTrackIndex != initialActiveTrack;
 	}
@@ -1895,46 +1892,4 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 	private record TrackPlayback(List<Step> steps, List<TextRange> ranges, int index, long nextAt, boolean playing) {
 	}
 
-	private static final class DelayScaleSlider extends AbstractSliderButton {
-		private final java.util.function.IntConsumer listener;
-		private int scaleQuarters;
-
-		DelayScaleSlider(int x, int y, int width, int height, int scaleQuarters, java.util.function.IntConsumer listener) {
-			super(x, y, width, height, Component.empty(), 0.0);
-			this.listener = listener;
-			setScale(scaleQuarters);
-		}
-
-		int scaleQuarters() {
-			return scaleQuarters;
-		}
-
-		void setScale(int scaleQuarters) {
-			this.scaleQuarters = FastNoteblocksConfig.clampSequenceDelayScale(scaleQuarters);
-			value = (this.scaleQuarters - FastNoteblocksConfig.MIN_SEQUENCE_DELAY_SCALE_QUARTERS)
-				/ (double)(FastNoteblocksConfig.MAX_SEQUENCE_DELAY_SCALE_QUARTERS
-					- FastNoteblocksConfig.MIN_SEQUENCE_DELAY_SCALE_QUARTERS);
-			updateMessage();
-		}
-
-		@Override
-		protected void updateMessage() {
-			// Deliberately not called "speed": this multiplies every delay, so a higher value
-			// plays slower -- the opposite of the composer's speed slider.
-			setMessage(Component.literal("Delay x" + FastNoteblocksConfig.delayScaleLabel(scaleQuarters)));
-		}
-
-		@Override
-		protected void applyValue() {
-			int range = FastNoteblocksConfig.MAX_SEQUENCE_DELAY_SCALE_QUARTERS
-				- FastNoteblocksConfig.MIN_SEQUENCE_DELAY_SCALE_QUARTERS;
-			int updated = FastNoteblocksConfig.MIN_SEQUENCE_DELAY_SCALE_QUARTERS
-				+ Math.round((float)(value * range));
-			updated = FastNoteblocksConfig.clampSequenceDelayScale(updated);
-			if (updated != scaleQuarters) {
-				scaleQuarters = updated;
-				listener.accept(scaleQuarters);
-			}
-		}
-	}
 }

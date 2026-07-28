@@ -184,7 +184,7 @@ public final class ComposerScreen extends Screen {
 			.build());
 		x += 82;
 		delayScaleSlider = addRenderableWidget(new DelayScaleSlider(
-			x, 7, 94, 20, config.activeSequenceDelayScaleQuarters(), this::setDelayScale
+			x, 7, 94, 20, project().speedQuarters(), this::setDelayScale
 		));
 		delayScaleSlider.setTooltip(Tooltip.create(Component.literal(
 			"Playback speed, 0.25x to 8.00x. Higher is faster. Saving to the sequence bakes this "
@@ -872,6 +872,7 @@ public final class ComposerScreen extends Screen {
 		switch (action) {
 			case IMPORT -> importSong();
 			case OPEN_SONGS -> minecraft.gui.setScreen(new SongsScreen(parent, config));
+			case COPY_AS_TEXT -> copyActiveLayerAsText();
 			case SAVE_TO_SEQUENCE -> saveToSequence();
 			case BACK_TO_SEQUENCES -> onClose();
 			case CLOSE_TO_GAME -> closeToGame();
@@ -2209,6 +2210,30 @@ public final class ComposerScreen extends Screen {
 		showResult(Component.literal(report));
 	}
 
+	/**
+	 * Puts the active layer's build projection on the clipboard.
+	 *
+	 * <p>Text leaves the composer, it never comes back in over a composition: the projection drops
+	 * out-of-range notes, rounds every gap to a whole repeater tick and bakes the tempo away, so
+	 * reading it back would silently discard all three. Import text as a new song instead.</p>
+	 */
+	private void copyActiveLayerAsText() {
+		Layer layer = project().layers().get(project().activeLayerIndex());
+		String text = project().toText(layer);
+		if (text.isBlank()) {
+			showResult(Component.literal("\"" + layer.name() + "\" has nothing buildable to copy."));
+			return;
+		}
+		minecraft.keyboardHandler.setClipboard(text);
+		long dropped = layer.notes().stream().filter(note -> !note.isBuildable()).count();
+		String report = "Copied \"" + layer.name() + "\" - " + text.length() + " characters at "
+			+ FastNoteblocksConfig.delayScaleLabel(delayScaleQuarters());
+		if (dropped > 0) {
+			report += ", " + dropped + " out-of-range notes left out";
+		}
+		showResult(Component.literal(report));
+	}
+
 	private void saveProject() {
 		config.setComposerProject(project());
 		FastNoteblocksConfig.save();
@@ -2710,6 +2735,7 @@ public final class ComposerScreen extends Screen {
 	private enum ToolbarAction {
 		IMPORT("Import MIDI / NBS..."),
 		OPEN_SONGS("Open song..."),
+		COPY_AS_TEXT("Copy layer as text"),
 		SAVE_TO_SEQUENCE("Save to sequence"),
 		BACK_TO_SEQUENCES("Back"),
 		CLOSE_TO_GAME("Close to game"),
@@ -2729,7 +2755,7 @@ public final class ComposerScreen extends Screen {
 		SELECT_NONE("Nothing");
 
 		private static final ToolbarAction[] FILE_ACTIONS = {
-			IMPORT, OPEN_SONGS, SAVE_TO_SEQUENCE, BACK_TO_SEQUENCES, CLOSE_TO_GAME
+			IMPORT, OPEN_SONGS, COPY_AS_TEXT, SAVE_TO_SEQUENCE, BACK_TO_SEQUENCES, CLOSE_TO_GAME
 		};
 		private static final ToolbarAction[] EDIT_ACTIONS = {
 			UNDO, REDO, CONVERT, MERGE_REPEATS, QUANTIZE, FIT_ALL_RANGE, SNAP_TEMPO,
