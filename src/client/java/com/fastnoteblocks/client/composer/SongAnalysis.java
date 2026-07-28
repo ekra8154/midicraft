@@ -39,12 +39,19 @@ public record SongAnalysis(
 		int totalNotes = 0;
 		long maximumNoteDuration = 1L;
 		for (Layer layer : project.layers()) {
+			// Only included layers are judged. A layer left out of the sequence cannot stop a build
+			// it is not part of, and importing a song to keep one line of it should not leave the
+			// verdict red forever over notes nobody is going to place.
+			boolean included = layer.buildEnabled();
 			for (NoteEvent note : layer.notes()) {
 				totalNotes++;
 				maximumNoteDuration = Math.max(maximumNoteDuration, note.durationTicks());
+				if (!included) {
+					continue;
+				}
 				if (!note.isBuildable()) {
 					outOfRange++;
-				} else if (layer.buildEnabled() && !layer.muted()) {
+				} else {
 					counts.merge(note.startTick(), 1, Integer::sum);
 				}
 			}

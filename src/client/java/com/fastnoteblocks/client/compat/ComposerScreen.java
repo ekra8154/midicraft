@@ -101,6 +101,13 @@ public final class ComposerScreen extends Screen {
 	private List<PlaybackEvent> playbackEvents = List.of();
 	private int playbackEventIndex;
 	private boolean draggingPlayhead;
+	/**
+	 * Layers being listened to alone.
+	 *
+	 * <p>Deliberately not on the composition and not saved. Solo is a way of hearing one thing
+	 * while you work on it, not a property of the song, and it has no bearing on what builds.</p>
+	 */
+	private final Set<Integer> soloedLayers = new LinkedHashSet<>();
 	private boolean draggingEndMarker;
 	private long lastEndDragAt;
 	private long horizontalScroll;
@@ -215,6 +222,11 @@ public final class ComposerScreen extends Screen {
 		}
 		layerButtons.clear();
 		ComposerProject project = project();
+		// Solo is held by index, so anything that adds, removes or reorders layers would leave it
+		// pointing at the wrong one. Dropping it is better than silencing something at random.
+		if (soloedLayers.removeIf(index -> index >= project.layers().size()) && playing) {
+			resetPlaybackSchedule();
+		}
 		for (int index = 0; index < project.layers().size(); index++) {
 			final int layerIndex = index;
 			Layer layer = project.layers().get(index);
@@ -230,16 +242,37 @@ public final class ComposerScreen extends Screen {
 					boolean next = !project().layers().get(layerIndex).muted();
 					updateLayers(layerIndex, target -> target.withMuted(next));
 				}
-			).bounds(14, y + 22, 36, 16)
+			).bounds(14, y + 22, 22, 16)
 				.tooltip(Tooltip.create(Component.literal(layer.muted() ? "Unmute layer" : "Mute layer")))
 				.build());
+			boolean soloed = soloedLayers.contains(index);
+			Button solo = addRenderableWidget(Button.builder(
+				Component.literal("S").withStyle(soloed
+					? net.minecraft.ChatFormatting.YELLOW
+					: net.minecraft.ChatFormatting.GRAY),
+				button -> {
+					if (!soloedLayers.remove(layerIndex)) {
+						soloedLayers.add(layerIndex);
+					}
+					if (playing) {
+						resetPlaybackSchedule();
+					}
+					rebuildLayerButtons();
+				}
+			).bounds(38, y + 22, 22, 16)
+				.tooltip(Tooltip.create(Component.literal(soloed
+					? "Stop soloing - hear everything again"
+					: "Hear this layer alone. Listening only; it does not change what builds.")))
+				.build());
 			Button visible = addRenderableWidget(Button.builder(
-				Component.literal(layer.visible() ? "S" : "H"),
+				// An eye rather than a letter, so S could go to solo. Same Geometric Shapes block
+				// as the arrows and dots already drawn here, so the font covers it.
+				Component.literal(layer.visible() ? "◉" : "◌"),
 				button -> {
 					boolean next = !project().layers().get(layerIndex).visible();
 					updateLayers(layerIndex, target -> target.withVisible(next));
 				}
-			).bounds(54, y + 22, 36, 16)
+			).bounds(62, y + 22, 26, 16)
 				.tooltip(Tooltip.create(Component.literal(layer.visible() ? "Shown in the editor" : "Hidden in the editor")))
 				.build());
 			Button instrument = addRenderableWidget(Button.builder(
@@ -260,7 +293,7 @@ public final class ComposerScreen extends Screen {
 				.build());
 			up.active = layerIndex > 0;
 			down.active = layerIndex < project.layers().size() - 1;
-			layerButtons.addAll(List.of(mute, visible, instrument, up, down));
+			layerButtons.addAll(List.of(mute, solo, visible, instrument, up, down));
 		}
 	}
 
@@ -1649,7 +1682,7 @@ public final class ComposerScreen extends Screen {
 			+ (overloaded > 0 ? " (" + overloaded + " over)" : ""));
 		segments.add(stats.totalNotes() + " notes · " + project().layers().size() + " layers");
 		int included = (int)project().layers().stream()
-			.filter(layer -> layer.buildEnabled() && !layer.muted())
+			.filter(Layer::buildEnabled)
 			.count();
 		if (included == 0) {
 			segments.add("nothing included");
@@ -2038,8 +2071,7 @@ public final class ComposerScreen extends Screen {
 			}
 		}
 		if (event.key() == GLFW.GLFW_KEY_SPACE && layerNameBox == null) {
-			if (playing || project().layers().stream()
-					.anyMatch(layer -> !layer.muted() && !layer.notes().isEmpty())) {
+			if (playing || anythingAudible()) {
 				togglePlayback();
 			}
 			return true;
@@ -2276,10 +2308,31 @@ public final class ComposerScreen extends Screen {
 		));
 	}
 
+	private boolean anythingAudible() {
+		for (int index = 0; index < project().layers().size(); index++) {
+			if (audible(index) && !project().layers().get(index).notes().isEmpty()) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/** Whether a layer is heard: soloing any layer silences the rest until it is cleared. */
+	private boolean audible(int layerIndex) {
+		if (layerIndex < 0 || layerIndex >= project().layers().size()) {
+			return false;
+		}
+		if (!soloedLayers.isEmpty()) {
+			return soloedLayers.contains(layerIndex);
+		}
+		return !project().layers().get(layerIndex).muted();
+	}
+
 	private void resetPlaybackSchedule() {
 		List<PlaybackEvent> events = new ArrayList<>();
-		for (Layer layer : project().layers()) {
-			if (layer.muted()) {
+		for (int layerIndex = 0; layerIndex < project().layers().size(); layerIndex++) {
+			Layer layer = project().layers().get(layerIndex);
+			if (!audible(layerIndex)) {
 				continue;
 			}
 			PreviewInstrument instrument = PreviewInstrument.byId(layer.instrument());
@@ -2748,7 +2801,7 @@ public final class ComposerScreen extends Screen {
 
 	private void updateButtonStates() {
 		if (playButton != null) {
-			playButton.active = project().layers().stream().anyMatch(layer -> !layer.muted() && !layer.notes().isEmpty());
+			playButton.active = anythingAudible();
 			playButton.setMessage(playLabel());
 		}
 	}

@@ -309,8 +309,10 @@ public record ComposerProject(
 		List<SequenceTrack> result = new ArrayList<>();
 		for (int index = 0; index < layers.size(); index++) {
 			Layer layer = layers.get(index);
+			// Mute is about listening, not building. Once solo exists, muting a layer to hear
+			// around it would otherwise drop it out of the build without saying so.
 			boolean chosen = layerIndices == null || layerIndices.isEmpty()
-				? layer.buildEnabled() && !layer.muted()
+				? layer.buildEnabled()
 				: layerIndices.contains(index);
 			if (!chosen) {
 				continue;

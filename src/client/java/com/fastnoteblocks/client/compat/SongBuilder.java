@@ -34,14 +34,14 @@ public final class SongBuilder {
 	/**
 	 * The composition flattened into the events a build places, in the order it places them.
 	 *
-	 * <p>Muted layers and layers with Build off are left out, which is what makes those switches
-	 * mean something at build time rather than only during preview.</p>
+	 * <p>Layers left out of the sequence are skipped. Mute is not consulted: it decides what you
+	 * hear, and the dot decides what gets built.</p>
 	 */
 	static List<EventNote> eventNotes(ComposerProject project) {
 		List<EventNote> notes = new ArrayList<>();
 		for (int layerIndex = 0; layerIndex < project.layers().size(); layerIndex++) {
 			Layer layer = project.layers().get(layerIndex);
-			if (layer.muted() || !layer.buildEnabled()) {
+			if (!layer.buildEnabled()) {
 				continue;
 			}
 			String instrumentBlock = instrumentBlockId(layer.instrument());
