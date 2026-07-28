@@ -61,9 +61,50 @@ public final class SongBuilder {
 		return List.copyOf(notes);
 	}
 
+	/**
+	 * The build sequence flattened into events.
+	 *
+	 * <p>The sequence is what actually gets placed, whether by hand in survival or by command, so
+	 * pasting reads this rather than the composition. Planning from the composition instead would
+	 * mean the two disagreed the moment you moved a subset of layers across.</p>
+	 */
+	static List<EventNote> eventNotes(List<FastNoteblocksConfig.SequenceTrack> tracks) {
+		List<EventNote> notes = new ArrayList<>();
+		for (int trackIndex = 0; trackIndex < tracks.size(); trackIndex++) {
+			FastNoteblocksConfig.SequenceTrack track = tracks.get(trackIndex);
+			String instrumentBlock = instrumentBlockId(track.instrument());
+			int time = 0;
+			int order = 0;
+			List<Step> steps;
+			try {
+				steps = com.fastnoteblocks.NoteSequence.parse(track.sequence());
+			} catch (IllegalArgumentException unparseable) {
+				continue;
+			}
+			for (Step step : steps) {
+				if (step.type() == StepType.NOTE) {
+					notes.add(new EventNote(time, trackIndex + 1, order++, step.value(), instrumentBlock));
+				} else {
+					time += step.value();
+				}
+			}
+		}
+		notes.sort(Comparator.comparingInt(EventNote::time)
+			.thenComparingInt(EventNote::trackNumber)
+			.thenComparingInt(EventNote::order));
+		return List.copyOf(notes);
+	}
+
+	static BlockCounts blockCounts(List<FastNoteblocksConfig.SequenceTrack> tracks) {
+		return countBlocks(eventNotes(tracks));
+	}
+
 	/** How many blocks of each kind the build would place, for the composer's status bar. */
 	static BlockCounts blockCounts(ComposerProject project) {
-		List<EventNote> notes = eventNotes(project);
+		return countBlocks(eventNotes(project));
+	}
+
+	private static BlockCounts countBlocks(List<EventNote> notes) {
 		int noteBlocks = notes.size();
 		int repeaters = 0;
 		int previous = 0;
@@ -87,8 +128,9 @@ public final class SongBuilder {
 	 *
 	 * @throws IllegalArgumentException with a message meant to be shown to the player
 	 */
-	static PastePlan plan(Minecraft minecraft, ComposerProject project, PasteMode mode) {
-		return createPastePlan(minecraft, project, mode);
+	static PastePlan plan(Minecraft minecraft, List<FastNoteblocksConfig.SequenceTrack> tracks,
+			PasteMode mode) {
+		return createPastePlan(minecraft, eventNotes(tracks), mode);
 	}
 
 	static final int MAX_SIMULTANEOUS_NOTES = 30;
@@ -102,11 +144,11 @@ public final class SongBuilder {
 	 */
 	private static final int CUBE_FLOOR_HEIGHT = 4;
 
-	private static PastePlan createPastePlan(Minecraft minecraft, ComposerProject project,
+	private static PastePlan createPastePlan(Minecraft minecraft, List<EventNote> notes,
 			PasteMode mode) {
-		List<EventNote> notes = eventNotes(project);
 		if (notes.isEmpty()) {
-			throw new IllegalArgumentException("No enabled non-muted notes to paste");
+			throw new IllegalArgumentException(
+				"The build sequence is empty. Move some layers into it first.");
 		}
 		ChordStats stats = chordStats(notes);
 		if (stats.peak() > MAX_SIMULTANEOUS_NOTES) {

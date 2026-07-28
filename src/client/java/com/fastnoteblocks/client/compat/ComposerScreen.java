@@ -838,7 +838,7 @@ public final class ComposerScreen extends Screen {
 			// Not disabled on an unbuildable song: greying it out would hide the reason. The status
 			// bar already names the problem and the planner refuses with a specific one.
 			case PASTE_IN_WORLD -> projectStats().totalNotes() > 0 || project().endTick() > 0L;
-			case MOVE_SELECTED_TO_SEQUENCE -> !selectionLayers().isEmpty();
+			case INCLUDE_SELECTED_AND_MOVE -> !selectionLayers().isEmpty();
 			case BUILD_CANCEL -> CommandPasteSender.isRunning();
 			default -> true;
 		};
@@ -877,9 +877,8 @@ public final class ComposerScreen extends Screen {
 			case IMPORT -> importSong();
 			case OPEN_SONGS -> minecraft.gui.setScreen(new SongsScreen(parent, config));
 			case COPY_AS_TEXT -> copyActiveLayerAsText();
-			case MOVE_TO_SEQUENCE -> moveToBuildSequence(Set.of(), "every layer marked for building");
-			case MOVE_SELECTED_TO_SEQUENCE -> moveToBuildSequence(
-				new java.util.LinkedHashSet<>(selectionLayers()), "the selected layers");
+			case MOVE_TO_SEQUENCE -> moveToBuildSequence();
+			case INCLUDE_SELECTED_AND_MOVE -> includeSelectedThenMove();
 			case PASTE_IN_WORLD -> pasteInWorld();
 			case BUILD_CANCEL -> CommandPasteSender.cancel(true);
 			case SAVE_COMPOSITION -> saveComposition();
@@ -970,9 +969,9 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private String toolbarRowLabel(ToolbarAction action) {
-		if (action == ToolbarAction.MOVE_SELECTED_TO_SEQUENCE && !selectionLayers().isEmpty()) {
+		if (action == ToolbarAction.INCLUDE_SELECTED_AND_MOVE && !selectionLayers().isEmpty()) {
 			int count = selectionLayers().size();
-			return "Move " + count + (count == 1 ? " layer" : " layers") + " to build sequence";
+			return "Include only these " + count + " layers, then move";
 		}
 		return action.label;
 	}
@@ -2284,21 +2283,19 @@ public final class ComposerScreen extends Screen {
 	 * layers: the sequence is the thing that remembers the decision, so nothing needs to persist
 	 * the choice that produced it.</p>
 	 */
-	private void moveToBuildSequence(Set<Integer> layerIndices, String description) {
+	private void moveToBuildSequence() {
 		saveProject();
-		int tracks = config.publishComposerProject(layerIndices);
+		int tracks = config.publishComposerProject(Set.of());
 		FastNoteblocksConfig.save();
 		if (tracks == 0) {
-			showResult(Component.literal(layerIndices.isEmpty()
-				? "No layers are marked for building. Fill in a layer's build dot first."
-				: "Those layers have nothing buildable in them."));
+			showResult(Component.literal(
+				"No layers are included. Fill in a layer's dot, or use Include only selected."));
 			return;
 		}
 		SongAnalysis stats = projectStats();
-		SongBuilder.BlockCounts blocks = SongBuilder.blockCounts(project());
+		SongBuilder.BlockCounts blocks = SongBuilder.blockCounts(config.tracks());
 		String report = "Build sequence: " + tracks + (tracks == 1 ? " track" : " tracks")
-			+ " from " + description + " - " + blocks.noteBlocks() + " note blocks, "
-			+ blocks.repeaters() + " repeaters";
+			+ ", " + blocks.noteBlocks() + " note blocks, " + blocks.repeaters() + " repeaters";
 		if (stats.outOfRange() > 0) {
 			report += "; " + stats.outOfRange() + " out-of-range notes left out";
 		}
@@ -2308,7 +2305,35 @@ public final class ComposerScreen extends Screen {
 		showResult(Component.literal(report));
 	}
 
-	/** Builds the composition with commands, for when you have op and do not want to place it by hand. */
+	/**
+	 * Sets the included layers from the current selection, then moves them across.
+	 *
+	 * <p>The dot stays the one thing that decides what builds -- this writes the dots rather than
+	 * going around them, which is also the only way to change a lot of them at once. "Only" is
+	 * load-bearing: layers outside the selection are cleared, so this is a batch off as well as a
+	 * batch on.</p>
+	 */
+	private void includeSelectedThenMove() {
+		Set<Integer> chosen = new java.util.LinkedHashSet<>(selectionLayers());
+		if (chosen.isEmpty()) {
+			showResult(Component.literal("Select some layers first."));
+			return;
+		}
+		ComposerProject updated = project();
+		for (int index = 0; index < updated.layers().size(); index++) {
+			boolean include = chosen.contains(index);
+			if (updated.layers().get(index).buildEnabled() != include) {
+				updated = updated.withLayer(index, updated.layers().get(index).withBuildEnabled(include));
+			}
+		}
+		if (!updated.equals(project())) {
+			apply(updated);
+			rebuildLayerButtons();
+		}
+		moveToBuildSequence();
+	}
+
+	/** Pastes the build sequence with commands, for when you have op and would rather not place it by hand. */
 	private void pasteInWorld() {
 		if (CommandPasteSender.isRunning()) {
 			CommandPasteSender.cancel(true);
@@ -2318,10 +2343,16 @@ public final class ComposerScreen extends Screen {
 			showResult(Component.literal("Join a world before pasting."));
 			return;
 		}
-		minecraft.gui.setScreen(new BuildOptionsScreen(this, project(), pasteMode(), mode -> {
+		if (config.tracks().stream().allMatch(track -> track.sequence().isBlank())) {
+			showResult(Component.literal(
+				"The build sequence is empty. Move some layers into it first."));
+			return;
+		}
+		minecraft.gui.setScreen(new BuildOptionsScreen(this, project().name(), config.tracks(),
+				pasteMode(), mode -> {
 			SongBuilder.PastePlan plan;
 			try {
-				plan = SongBuilder.plan(minecraft, project(), mode);
+				plan = SongBuilder.plan(minecraft, config.tracks(), mode);
 			} catch (IllegalArgumentException refused) {
 				minecraft.gui.setScreen(this);
 				showResult(Component.literal(refused.getMessage())
@@ -2876,9 +2907,9 @@ public final class ComposerScreen extends Screen {
 		QUANTIZE("Quantize to grid", true),
 		FIT_ALL_RANGE("Fit into range", true),
 		SNAP_TEMPO("Snap tempo (whole song)"),
-		MOVE_TO_SEQUENCE("Move to build sequence"),
-		MOVE_SELECTED_TO_SEQUENCE("Move selected layers to build sequence"),
-		PASTE_IN_WORLD("Paste in world (requires op)..."),
+		MOVE_TO_SEQUENCE("Move included layers to sequence"),
+		INCLUDE_SELECTED_AND_MOVE("Include only selected layers, then move"),
+		PASTE_IN_WORLD("Paste current sequence in world (requires op)..."),
 		BUILD_CANCEL("Cancel paste"),
 		SNAP_END("Snap end to grid"),
 		TRIM_END("Trim end to last note"),
@@ -2896,7 +2927,7 @@ public final class ComposerScreen extends Screen {
 			SNAP_END, TRIM_END
 		};
 		private static final ToolbarAction[] BUILD_ACTIONS = {
-			MOVE_TO_SEQUENCE, MOVE_SELECTED_TO_SEQUENCE, PASTE_IN_WORLD, BUILD_CANCEL
+			MOVE_TO_SEQUENCE, INCLUDE_SELECTED_AND_MOVE, PASTE_IN_WORLD, BUILD_CANCEL
 		};
 		private static final ToolbarAction[] SELECT_ACTIONS = {
 			SELECT_OFF_GRID, SELECT_TOO_FREQUENT, SELECT_OUT_OF_RANGE, SELECT_ALL_NOTES, SELECT_NONE

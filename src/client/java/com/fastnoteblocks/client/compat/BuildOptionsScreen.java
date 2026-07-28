@@ -1,7 +1,7 @@
 package com.fastnoteblocks.client.compat;
 
 import com.fastnoteblocks.client.FastNoteblocksConfig;
-import com.fastnoteblocks.client.composer.ComposerProject;
+import java.util.List;
 import java.util.Locale;
 import java.util.function.Consumer;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -21,20 +21,23 @@ import net.minecraft.network.chat.Component;
  */
 final class BuildOptionsScreen extends Screen {
 	private final Screen parent;
-	private final ComposerProject project;
+	private final String songName;
+	private final List<FastNoteblocksConfig.SequenceTrack> sequence;
 	private final Consumer<SongBuilder.PasteMode> confirm;
 	private SongBuilder.PasteMode mode;
 	private int commandsPerTick;
 
 	BuildOptionsScreen(
 		Screen parent,
-		ComposerProject project,
+		String songName,
+		List<FastNoteblocksConfig.SequenceTrack> sequence,
 		SongBuilder.PasteMode initialMode,
 		Consumer<SongBuilder.PasteMode> confirm
 	) {
-		super(Component.literal("Paste in world"));
+		super(Component.literal("Paste sequence in world"));
 		this.parent = parent;
-		this.project = project;
+		this.songName = songName;
+		this.sequence = sequence;
 		this.confirm = confirm;
 		this.mode = initialMode;
 		this.commandsPerTick = FastNoteblocksConfig.get().commandsPerTick();
@@ -101,12 +104,12 @@ final class BuildOptionsScreen extends Screen {
 		int left = (this.width - width) / 2;
 		int top = Math.max(40, height / 2 - 78);
 
-		graphics.text(font, "Paste \"" + project.name() + "\" with /setblock", left, top - 14,
-			0xFFFFFFFF, false);
+		graphics.text(font, "Paste the build sequence of \"" + songName + "\" with /setblock",
+			left, top - 14, 0xFFFFFFFF, false);
 		graphics.text(font, "Layout", left, top + 2, 0xFF8A9098, false);
 
 		int rateY = top + 14 + SongBuilder.PasteMode.values().length * 22 + 16;
-		SongBuilder.BlockCounts blocks = SongBuilder.blockCounts(project);
+		SongBuilder.BlockCounts blocks = SongBuilder.blockCounts(sequence);
 		int commands = blocks.total();
 		double seconds = commands / (commandsPerTick * 20.0);
 		graphics.text(font, String.format(Locale.ROOT, "%d commands per tick", commandsPerTick),
