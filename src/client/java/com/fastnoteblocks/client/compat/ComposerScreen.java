@@ -2377,8 +2377,9 @@ public final class ComposerScreen extends Screen {
 			return;
 		}
 		String text = sequence.stream()
-			.map(FastNoteblocksConfig.SequenceTrack::sequence)
-			.filter(line -> !line.isBlank())
+			.filter(track -> !track.sequence().isBlank())
+			.map(track -> ComposerProject.toSequenceLine(
+				track.name(), track.instrument(), track.sequence()))
 			.collect(java.util.stream.Collectors.joining(System.lineSeparator()));
 		if (text.isBlank()) {
 			showResult(Component.literal("The included layers have nothing buildable in them."));

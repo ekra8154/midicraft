@@ -187,13 +187,56 @@ public record ComposerProject(
 		List<SequenceTrack> tracks = new ArrayList<>();
 		for (String line : (text == null ? "" : text).split("\\R")) {
 			if (!line.isBlank()) {
-				tracks.add(new SequenceTrack("Layer " + (tracks.size() + 1), line.trim(), instrument, 0));
+				tracks.add(parseSequenceLine(line, tracks.size() + 1, instrument));
 			}
 		}
 		if (tracks.isEmpty()) {
 			tracks.add(new SequenceTrack("Layer 1", "", instrument, 0));
 		}
 		return fromSequenceTracks(name, tracks, 0, DEFAULT_SPEED_QUARTERS);
+	}
+
+	/**
+	 * Renders one layer as a line of a copied sequence: {@code Name [INSTRUMENT]: 0, 5d, 4}.
+	 *
+	 * <p>The header is written always and read optionally, so hand-typed text can be as bare as
+	 * {@code 0, 5d, 4} while a copy still round-trips with its names and instruments intact.</p>
+	 */
+	public static String toSequenceLine(String layerName, String instrument, String sequence) {
+		String label = layerName == null || layerName.isBlank() ? "Layer" : layerName.trim();
+		String sound = instrument == null || instrument.isBlank() ? "HARP" : instrument;
+		return label + " [" + sound + "]: " + sequence;
+	}
+
+	/**
+	 * Reads one line, with or without its header.
+	 *
+	 * <p>Splits on the last colon rather than the first, because a colon cannot occur in sequence
+	 * text but can easily occur in a layer's name. A line with no colon at all is bare sequence:
+	 * the layer is numbered and takes the default instrument.</p>
+	 */
+	private static SequenceTrack parseSequenceLine(String line, int number, String fallbackInstrument) {
+		String defaultInstrument = fallbackInstrument == null || fallbackInstrument.isBlank()
+			? "HARP"
+			: fallbackInstrument;
+		int split = line.lastIndexOf(':');
+		if (split < 0) {
+			return new SequenceTrack("Layer " + number, line.trim(), defaultInstrument, 0);
+		}
+		String header = line.substring(0, split).trim();
+		String sequence = line.substring(split + 1).trim();
+		String instrument = defaultInstrument;
+		int open = header.lastIndexOf('[');
+		int close = header.lastIndexOf(']');
+		if (open >= 0 && close > open) {
+			String named = header.substring(open + 1, close).trim();
+			if (!named.isEmpty()) {
+				instrument = named.toUpperCase(java.util.Locale.ROOT);
+			}
+			header = header.substring(0, open).trim();
+		}
+		return new SequenceTrack(header.isEmpty() ? "Layer " + number : header,
+			sequence, instrument, 0);
 	}
 
 	public static ComposerProject fromSequenceTracks(
