@@ -142,6 +142,15 @@ public final class FastNoteblocksConfigScreen {
 			.setSaveConsumer(config::setPlacementSequenceEnabled)
 			.build());
 		placement.addEntry(entries.startIntSlider(
+				Component.translatable("option.fast-noteblocks.max_build_floors"),
+				config.maxBuildFloors(),
+				FastNoteblocksConfig.MIN_MAX_BUILD_FLOORS,
+				FastNoteblocksConfig.MAX_MAX_BUILD_FLOORS)
+			.setDefaultValue(FastNoteblocksConfig.DEFAULT_MAX_BUILD_FLOORS)
+			.setTooltip(Component.translatable("tooltip.fast-noteblocks.max_build_floors"))
+			.setSaveConsumer(config::setMaxBuildFloors)
+			.build());
+		placement.addEntry(entries.startIntSlider(
 				Component.translatable("option.fast-noteblocks.commands_per_tick"),
 				config.commandsPerTick(),
 				FastNoteblocksConfig.MIN_COMMANDS_PER_TICK,

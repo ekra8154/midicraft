@@ -186,6 +186,14 @@ public final class FastNoteblocksConfig {
 	public static final int MIN_CONVERSION_GAP_PERCENTILE = 0;
 	public static final int MAX_CONVERSION_GAP_PERCENTILE = 25;
 	/**
+	 * Floors a Compact cube build may stack. Each floor's first repeater refreshes the signal, so
+	 * the glass riser only ever carries it four blocks -- the old four-floor ceiling came from a
+	 * parallel-power design and does not apply to a single continuous chain.
+	 */
+	public static final int DEFAULT_MAX_BUILD_FLOORS = 16;
+	public static final int MIN_MAX_BUILD_FLOORS = 1;
+	public static final int MAX_MAX_BUILD_FLOORS = 64;
+	/**
 	 * Commands sent per client tick when pasting a build. Singleplayer tolerates far more than the
 	 * original fixed rate of 2; servers may treat a high rate as command spam.
 	 */
@@ -239,6 +247,7 @@ public final class FastNoteblocksConfig {
 	private int repeatMergeTicks;
 	private int conversionGapPercentile;
 	private int commandsPerTick;
+	private int maxBuildFloors;
 
 	private FastNoteblocksConfig() {
 	}
@@ -334,6 +343,9 @@ public final class FastNoteblocksConfig {
 					? "HARP"
 					: stored.midiDefaultInstrument;
 				instance.midiTempoFit = stored.midiTempoFit == null ? MidiTempoFit.SNAP_TO_REPEATERS : stored.midiTempoFit;
+				instance.maxBuildFloors = clampMaxBuildFloors(
+					stored.maxBuildFloors == null ? DEFAULT_MAX_BUILD_FLOORS : stored.maxBuildFloors
+				);
 				instance.commandsPerTick = clampCommandsPerTick(
 					stored.commandsPerTick == null ? DEFAULT_COMMANDS_PER_TICK : stored.commandsPerTick
 				);
@@ -676,6 +688,14 @@ public final class FastNoteblocksConfig {
 		this.midiTempoFit = midiTempoFit == null ? MidiTempoFit.SNAP_TO_REPEATERS : midiTempoFit;
 	}
 
+	public int maxBuildFloors() {
+		return maxBuildFloors;
+	}
+
+	public void setMaxBuildFloors(int maxBuildFloors) {
+		this.maxBuildFloors = clampMaxBuildFloors(maxBuildFloors);
+	}
+
 	public int commandsPerTick() {
 		return commandsPerTick;
 	}
@@ -745,6 +765,7 @@ public final class FastNoteblocksConfig {
 		config.repeatMergeTicks = DEFAULT_REPEAT_MERGE_TICKS;
 		config.conversionGapPercentile = DEFAULT_CONVERSION_GAP_PERCENTILE;
 		config.commandsPerTick = DEFAULT_COMMANDS_PER_TICK;
+		config.maxBuildFloors = DEFAULT_MAX_BUILD_FLOORS;
 		return config;
 	}
 
@@ -779,6 +800,10 @@ public final class FastNoteblocksConfig {
 
 	private static int clampMidiMaxImportedTracks(int tracks) {
 		return Math.max(MIN_MIDI_MAX_IMPORTED_TRACKS, Math.min(MAX_MIDI_MAX_IMPORTED_TRACKS, tracks));
+	}
+
+	private static int clampMaxBuildFloors(int floors) {
+		return Math.max(MIN_MAX_BUILD_FLOORS, Math.min(MAX_MAX_BUILD_FLOORS, floors));
 	}
 
 	private static int clampCommandsPerTick(int commands) {
@@ -884,6 +909,7 @@ public final class FastNoteblocksConfig {
 		private Integer repeatMergeTicks;
 		private Integer conversionGapPercentile;
 		private Integer commandsPerTick;
+		private Integer maxBuildFloors;
 
 		private StoredConfig() {
 		}
@@ -924,6 +950,7 @@ public final class FastNoteblocksConfig {
 			this.repeatMergeTicks = config.repeatMergeTicks;
 			this.conversionGapPercentile = config.conversionGapPercentile;
 			this.commandsPerTick = config.commandsPerTick;
+			this.maxBuildFloors = config.maxBuildFloors;
 		}
 	}
 }

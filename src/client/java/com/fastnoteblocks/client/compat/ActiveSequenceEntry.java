@@ -53,6 +53,13 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 	private static final int MAX_SIMULTANEOUS_NOTES = 30;
 	private static final int CHORD_WARNING_THRESHOLD = 24;
 	private static final int COMPACT_LANE_SPACING = 4;
+	/**
+	 * Vertical period of a cube floor: a module occupies its floor level, the note-block level
+	 * above it, the air gap above that, and one level below for a falling instrument block's
+	 * support. Four is the tightest spacing that never lets two floors touch.
+	 */
+	private static final int CUBE_FLOOR_HEIGHT = 4;
+
 	private static final String PITCH_GUIDE = "0:F♯  1:G  2:G♯  3:A  4:A♯  5:B  6:C  7:C♯  8:D  9:D♯  10:E  11:F  "
 		+ "12:F♯  13:G  14:G♯  15:A  16:A♯  17:B  18:C  19:C♯  20:D  21:D♯  22:E  23:F  24:F♯";
 
@@ -275,9 +282,13 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 		if (stats.peak() > MAX_SIMULTANEOUS_NOTES) {
 			throw new IllegalArgumentException(overloadMessage(stats));
 		}
-		Direction forward = minecraft.player.getDirection();
+		// Fixed world axes rather than the player's facing: travel runs +X and lanes step +Z, so a
+		// build always grows into positive coordinates and you know where it will land before you
+		// commit to it. Alternating floors double back inside that volume, never past the origin.
+		Direction forward = Direction.EAST;
 		BlockPos origin = pasteOrigin(minecraft, forward);
 		return switch (mode) {
+			case COMPACT_CUBE -> createCubePastePlan(origin, forward, notes);
 			case COMPACT -> createCompactPastePlan(origin, forward, notes);
 			case STRAIGHT -> createStraightPastePlan(origin, forward, notes);
 		};
@@ -384,6 +395,153 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 			}
 		}
 		return placements.finish(PasteMode.COMPACT);
+	}
+
+	/**
+	 * Folds the signal path into a cube: serpentine across a floor, climb a glass riser, then
+	 * serpentine back across the next floor.
+	 *
+	 * <p>Floors deliberately do not map to composer layers. The path is one continuous chain
+	 * through the timeline, exactly as in the flat compact mode, and a layer only decides which
+	 * instrument block sits under a note. A conversion can easily produce dozens of layers, so
+	 * giving each one a floor would neither fit nor mean anything musically.</p>
+	 */
+	private PastePlan createCubePastePlan(BlockPos origin, Direction forward, List<EventNote> notes) {
+		List<EventGroup> events = eventGroups(notes);
+		int totalLength = totalEventLength(events);
+		int floors = chooseCubeFloors(totalLength);
+		int perFloor = Math.max(1, (totalLength + floors - 1) / floors);
+		int lanesPerFloor = Math.max(1,
+			(int)Math.round(Math.sqrt(perFloor / (double)COMPACT_LANE_SPACING)));
+		int longestEvent = events.stream().mapToInt(EventGroup::length).max().orElse(1);
+		// The wall has to clear the longest single event, or an event that cannot fit between the
+		// walls would turn on every attempt and never advance.
+		int laneWidth = Math.max(longestEvent + 2, Math.max(1, perFloor / lanesPerFloor));
+		// Size floors from the lanes the walk actually needs. A wall-bounded lane holds a little
+		// less than the flat length estimate predicts, so trusting the estimate overshot the floor
+		// count and left the stack taller than the footprint it was supposed to match.
+		lanesPerFloor = Math.max(1,
+			(int)Math.ceil(countCubeLanes(events, laneWidth) / (double)floors));
+
+		PlacementPlan placements = new PlacementPlan();
+		BlockPos cursor = origin;
+		Direction travel = forward;
+		Direction laneStep = forward.getClockWise();
+		// Lanes turn at a fixed wall rather than after a fixed amount of content. Events run up to
+		// a dozen blocks long, so a length budget let each lane stop anywhere in a wide window and
+		// the ragged ends compounded into visible shear across the stack.
+		int nearWall = origin.getX();
+		int farWall = origin.getX() + laneWidth;
+		int currentTime = 0;
+		int laneIndex = 0;
+		boolean laneStarted = false;
+		for (int index = 0; index < events.size(); index++) {
+			EventGroup event = events.get(index);
+			boolean canLeave = index > 0
+				&& events.get(index - 1).maxSafeTurnDistance() >= COMPACT_LANE_SPACING;
+			int projected = cursor.getX() + travel.getStepX() * event.length();
+			if (canLeave && laneStarted && (projected > farWall || projected < nearWall)) {
+				if (laneIndex + 1 >= lanesPerFloor) {
+					cursor = addGlassRiser(placements, cursor, travel, laneStep);
+					// Reverse both axes so the next floor retraces this one within the same volume.
+					travel = travel.getOpposite();
+					laneStep = laneStep.getOpposite();
+					laneIndex = 0;
+				} else {
+					cursor = addCompactTurn(placements, cursor, travel, laneStep, COMPACT_LANE_SPACING);
+					travel = travel.getOpposite();
+					laneIndex++;
+				}
+				laneStarted = false;
+			}
+			int delay = event.time() - currentTime;
+			SpatialDelayTrigger trigger = addSpatialDelayBeforeEvent(placements, cursor, travel, delay);
+			cursor = addSpatialEventModule(placements, trigger.cursor(), travel,
+				trigger.triggerDelay(), event.notes());
+			currentTime = event.time();
+			laneStarted = true;
+		}
+		return placements.finish(PasteMode.COMPACT_CUBE);
+	}
+
+	/**
+	 * Counts the lanes a wall-bounded walk needs, without placing anything.
+	 *
+	 * <p>Mirrors the turn rule in the real pass: a lane ends when the next event would cross a
+	 * wall, and a turn leaves the travel-axis position unchanged.</p>
+	 */
+	private static int countCubeLanes(List<EventGroup> events, int laneWidth) {
+		int position = 0;
+		int step = 1;
+		int lanes = 1;
+		boolean laneStarted = false;
+		for (int index = 0; index < events.size(); index++) {
+			EventGroup event = events.get(index);
+			boolean canLeave = index > 0
+				&& events.get(index - 1).maxSafeTurnDistance() >= COMPACT_LANE_SPACING;
+			int projected = position + step * event.length();
+			if (canLeave && laneStarted && (projected > laneWidth || projected < 0)) {
+				step = -step;
+				lanes++;
+				laneStarted = false;
+			}
+			position += step * event.length();
+			laneStarted = true;
+		}
+		return lanes;
+	}
+
+	/** Picks the floor count whose largest dimension is smallest, i.e. the most cube-like. */
+	private static int chooseCubeFloors(int totalLength) {
+		int best = 1;
+		int bestSpan = Integer.MAX_VALUE;
+		int maximum = FastNoteblocksConfig.get().maxBuildFloors();
+		for (int floors = 1; floors <= maximum; floors++) {
+			int perFloor = Math.max(1, (totalLength + floors - 1) / floors);
+			int side = (int)Math.ceil(2.0 * Math.sqrt(perFloor));
+			int height = floors * CUBE_FLOOR_HEIGHT;
+			int span = Math.max(side, height);
+			if (span < bestSpan) {
+				bestSpan = span;
+				best = floors;
+			}
+		}
+		return best;
+	}
+
+	/**
+	 * Carries the signal up one floor in a 1x2 footprint by alternating glass and dust between two
+	 * columns.
+	 *
+	 * <p>Each dust sits one block up and one across from the previous one, which redstone connects
+	 * diagonally, and the block directly above each lower dust is glass. Because glass is
+	 * transparent the diagonal is allowed, and because glass still supports dust the next step has
+	 * something to sit on. This only works upward.</p>
+	 *
+	 * @return the floor-level cursor for the first module of the next floor, which travels back
+	 *     the way it came
+	 */
+	private static BlockPos addGlassRiser(PlacementPlan placements, BlockPos cursor, Direction travel,
+			Direction laneStep) {
+		set(placements, cursor, "minecraft:stone");
+		set(placements, cursor.above(), "minecraft:redstone_wire");
+		BlockPos columnA = cursor.relative(travel);
+		BlockPos columnB = columnA.relative(travel);
+		set(placements, columnA.above(1), "minecraft:glass");
+		set(placements, columnA.above(2), "minecraft:redstone_wire");
+		set(placements, columnB.above(2), "minecraft:glass");
+		set(placements, columnB.above(3), "minecraft:redstone_wire");
+		set(placements, columnA.above(3), "minecraft:glass");
+		set(placements, columnA.above(4), "minecraft:redstone_wire");
+		set(placements, columnB.above(4), "minecraft:glass");
+		set(placements, columnB.above(5), "minecraft:redstone_wire");
+		// Step sideways at the top so the path can leave heading back the way it came. Without
+		// this the next floor could only continue forwards, since a repeater reads from the side
+		// it faces and would otherwise have the riser behind it.
+		BlockPos landing = columnB.relative(laneStep);
+		set(placements, landing.above(CUBE_FLOOR_HEIGHT), "minecraft:stone");
+		set(placements, landing.above(CUBE_FLOOR_HEIGHT + 1), "minecraft:redstone_wire");
+		return landing.relative(travel.getOpposite()).above(CUBE_FLOOR_HEIGHT);
 	}
 
 	private static List<EventGroup> eventGroups(List<EventNote> notes) {
@@ -625,6 +783,11 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 		PreviewInstrument preview = PreviewInstrument.byId(instrument);
 		if ("MUTE".equals(preview.id())) {
 			return null;
+		}
+		if ("HARP".equals(preview.id())) {
+			// A note block over anything unrecognised already plays harp, so air is identical in
+			// sound and costs nothing. Placing grass would waste a block per piano note.
+			return "minecraft:air";
 		}
 		return BuiltInRegistries.ITEM.getKey(preview.icon()).toString();
 	}
@@ -1586,7 +1749,8 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 	}
 
 	private enum PasteMode {
-		COMPACT("Compact"),
+		COMPACT_CUBE("Compact cube"),
+		COMPACT("Compact square"),
 		STRAIGHT("Straight");
 
 		private final String label;
@@ -1674,18 +1838,26 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 		protected void init() {
 			int centerX = width / 2;
 			int buttonY = height / 2 + 8;
-			addRenderableWidget(Button.builder(Component.literal("Compact"), button -> choose(PasteMode.COMPACT))
-				.bounds(centerX - 138, buttonY, 88, 20)
+			addRenderableWidget(Button.builder(Component.literal("Compact cube"),
+					button -> choose(PasteMode.COMPACT_CUBE))
+				.bounds(centerX - 186, buttonY, 88, 20)
 				.tooltip(Tooltip.create(Component.literal(
-					"Fold one continuous signal path into a compact snake"
+					"Stack the snake over several floors so the whole build stays in earshot"
+				)))
+				.build());
+			addRenderableWidget(Button.builder(Component.literal("Compact square"),
+					button -> choose(PasteMode.COMPACT))
+				.bounds(centerX - 92, buttonY, 88, 20)
+				.tooltip(Tooltip.create(Component.literal(
+					"Fold one continuous signal path into a flat compact snake"
 				)))
 				.build());
 			addRenderableWidget(Button.builder(Component.literal("Straight"), button -> choose(PasteMode.STRAIGHT))
-				.bounds(centerX - 44, buttonY, 88, 20)
+				.bounds(centerX + 2, buttonY, 88, 20)
 				.tooltip(Tooltip.create(Component.literal("Keep the original straight playable line")))
 				.build());
 			addRenderableWidget(Button.builder(CommonComponents.GUI_CANCEL, button -> onClose())
-				.bounds(centerX + 50, buttonY, 88, 20)
+				.bounds(centerX + 96, buttonY, 88, 20)
 				.build());
 		}
 
