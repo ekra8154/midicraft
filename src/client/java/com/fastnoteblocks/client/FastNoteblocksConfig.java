@@ -241,8 +241,12 @@ public final class FastNoteblocksConfig {
 	private int activeSequenceDelayScaleQuarters;
 	private int composerSpeedQuarters;
 	private String previewInstrument;
-	private List<SequenceTrack> tracks;
+	/** How far along placing the sequence you are. The only build state that outlives an edit. */
+	private int placementCursor;
+	private transient ComposerProject cachedSequenceProject;
+	private transient List<SequenceTrack> cachedSequence;
 	private ComposerProject composerProject;
+	private List<SequenceTrack> legacyTracks = List.of();
 	private String activeSongId;
 	private boolean buildTrackFlagsInitialized;
 	private int activeTrackIndex;
@@ -321,20 +325,19 @@ public final class FastNoteblocksConfig {
 							: stored.composerSpeedQuarters
 					);
 					instance.previewInstrument = stored.previewInstrument == null ? "HARP" : stored.previewInstrument;
-				boolean buildTrackFlagsInitialized = Boolean.TRUE.equals(stored.buildTrackFlagsInitialized);
-				instance.tracks = stored.tracks == null || stored.tracks.isEmpty()
+				// Tracks in an old settings file are migration input, not state: the sequence is
+				// derived now. They are kept only long enough to rebuild a composition that predates
+				// the library, in migrateSongsOutOfSettings.
+				instance.legacyTracks = stored.tracks == null || stored.tracks.isEmpty()
 					? List.of(new SequenceTrack("Track 1",
 						stored.placementSequence == null ? "" : stored.placementSequence,
 						instance.previewInstrument,
 						stored.placementSequencePosition == null ? 0 : stored.placementSequencePosition))
 					: normalizeTracks(stored.tracks);
-				if (!buildTrackFlagsInitialized) {
-					instance.tracks = enableAllBuildTracks(instance.tracks);
-				}
 				instance.buildTrackFlagsInitialized = true;
-				instance.activeTrackIndex = clampTrackIndex(
-					stored.activeTrackIndex == null ? 0 : stored.activeTrackIndex, instance.tracks.size()
-				);
+				instance.placementCursor = Math.max(0,
+					stored.placementSequencePosition == null ? 0 : stored.placementSequencePosition);
+				instance.activeTrackIndex = stored.activeTrackIndex == null ? 0 : stored.activeTrackIndex;
 				// Read only: whatever is here is pre-library data waiting to be migrated out.
 				instance.composerProject = stored.composerProject == null
 					? null
@@ -343,7 +346,7 @@ public final class FastNoteblocksConfig {
 				instance.savedSequences = stored.savedSequences == null
 					? new ArrayList<>()
 					: new ArrayList<>(stored.savedSequences);
-				if (!buildTrackFlagsInitialized) {
+				if (!Boolean.TRUE.equals(stored.buildTrackFlagsInitialized)) {
 					instance.savedSequences = instance.savedSequences.stream()
 						.map(saved -> new SavedSequence(saved.name(), enableAllBuildTracks(saved.tracks()),
 							saved.activeTrackIndex(), saved.delayScaleQuarters(), saved.composerProject()))
@@ -416,9 +419,19 @@ public final class FastNoteblocksConfig {
 				: songs.ids().stream().findFirst().orElse(null);
 		}
 		String activeId = null;
-		if (instance.composerProject != null && instance.composerProject.noteCount() > 0) {
-			activeId = songs.newId(instance.composerProject.name());
-			songs.save(activeId, instance.composerProject);
+		ComposerProject active = instance.composerProject;
+		if (active == null || active.noteCount() == 0) {
+			// No composition stored, but the old settings file may still hold build tracks from
+			// before compositions existed at all. Rebuilding from them is lossy in the usual ways,
+			// and is the only thing there is to rebuild from.
+			ComposerProject fromTracks = ComposerProject.fromSequenceTracks(
+				instance.activeSequenceName, instance.legacyTracks, 0,
+				instance.activeSequenceDelayScaleQuarters);
+			active = fromTracks.noteCount() > 0 ? fromTracks : null;
+		}
+		if (active != null) {
+			activeId = songs.newId(active.name());
+			songs.save(activeId, active);
 		}
 		for (SavedSequence saved : instance.savedSequences) {
 			ComposerProject song = saved.composerProject() != null
@@ -600,21 +613,16 @@ public final class FastNoteblocksConfig {
 		this.autoSelectSequenceBlock = autoSelectSequenceBlock;
 	}
 
-	/** The build queue's current track text. There is no second copy of it anywhere. */
 	public String placementSequence() {
 		return activeTrack().sequence();
 	}
 
-	public void setPlacementSequence(String placementSequence) {
-		updateActiveTrack(activeTrack().withSequence(placementSequence));
-	}
-
 	public int placementSequencePosition() {
-		return activeTrack().position();
+		return Math.max(0, placementCursor);
 	}
 
 	public void setPlacementSequencePosition(int placementSequencePosition) {
-		updateActiveTrack(activeTrack().withPosition(placementSequencePosition));
+		this.placementCursor = Math.max(0, placementSequencePosition);
 	}
 
 	public String activeSequenceName() {
@@ -654,31 +662,33 @@ public final class FastNoteblocksConfig {
 	}
 
 	public String previewInstrument() {
-		return activeTrack().instrument();
+		return previewInstrument;
 	}
 
 	public void setPreviewInstrument(String previewInstrument) {
-		updateActiveTrack(activeTrack().withInstrument(previewInstrument));
-		this.previewInstrument = activeTrack().instrument();
-	}
-
-	public List<SequenceTrack> tracks() {
-		return List.copyOf(tracks);
+		this.previewInstrument = previewInstrument == null || previewInstrument.isBlank()
+			? "HARP"
+			: previewInstrument;
 	}
 
 	/**
-	 * Replaces the build tracks. Deliberately leaves the composition alone.
+	 * The build sequence: the flat timeline of notes and repeaters this composition builds as.
 	 *
-	 * <p>This runs on every keystroke in the sequence editor. Rebuilding the composition from the
-	 * track text here meant any visit to the sequencer silently replaced it with a reconstruction:
-	 * tempo reset to the default, velocities flattened, note durations rounded, and every pitch
-	 * outside the note-block range dropped. The composition is the source of truth and only an
-	 * explicit publish writes tracks from it.</p>
+	 * <p>Derived, never stored. It is a pure function of the active composition and which of its
+	 * layers are included, so filling in a layer's dot changes it at once instead of leaving it
+	 * stale until a separate command is run. Include nothing and there is no sequence, rather than
+	 * whatever was last published lingering on.</p>
+	 *
+	 * <p>Cached on the project's identity, which is sound because ComposerProject is immutable:
+	 * every edit produces a new instance, so a stale cache cannot happen.</p>
 	 */
-	public void setTracks(List<SequenceTrack> tracks) {
-		this.tracks = normalizeTracks(tracks);
-		activeTrackIndex = clampTrackIndex(activeTrackIndex, this.tracks.size());
-		syncLegacyTrackFields();
+	public List<SequenceTrack> tracks() {
+		ComposerProject project = composerProject();
+		if (cachedSequenceProject != project || cachedSequence == null) {
+			cachedSequenceProject = project;
+			cachedSequence = project.toSequenceTracks(java.util.Set.of());
+		}
+		return cachedSequence;
 	}
 
 	public String activeSongId() {
@@ -726,45 +736,15 @@ public final class FastNoteblocksConfig {
 		songs.save(activeSongId, project);
 	}
 
-	/**
-	 * Projects the composition onto the build tracks, replacing whatever was there.
-	 *
-	 * <p>Lossy by nature -- the track text can only hold whole repeater delays and note-block
-	 * pitches -- which is exactly why it is an explicit action rather than a side effect of
-	 * leaving the composer.</p>
-	 */
-	public int publishComposerProject() {
-		return publishComposerProject(java.util.Set.of());
-	}
-
-	/**
-	 * Replaces the build sequence with a projection of the given layers.
-	 *
-	 * @param layerIndices layers to move across, or empty for every layer marked for building
-	 * @return how many tracks the sequence now holds
-	 */
-	public int publishComposerProject(java.util.Set<Integer> layerIndices) {
-		ComposerProject project = composerProject();
-		// Delays are written already divided by the composer speed, and nothing multiplies them
-		// back afterwards. Publishing at a sequence scale meant the two cancelled and the build
-		// always ran at the raw project tempo, however the composer was previewing it.
-		tracks = normalizeTracks(project.toSequenceTracks(layerIndices));
-		activeTrackIndex = 0;
-		syncLegacyTrackFields();
-		return tracks.size();
-	}
-
 	public int activeTrackIndex() {
-		return activeTrackIndex;
-	}
-
-	public void setActiveTrackIndex(int activeTrackIndex) {
-		this.activeTrackIndex = clampTrackIndex(activeTrackIndex, tracks.size());
-		syncLegacyTrackFields();
+		return clampTrackIndex(activeTrackIndex, tracks().size());
 	}
 
 	public SequenceTrack activeTrack() {
-		return tracks.get(clampTrackIndex(activeTrackIndex, tracks.size()));
+		List<SequenceTrack> sequence = tracks();
+		return sequence.isEmpty()
+			? new SequenceTrack("Track 1", "", previewInstrument, 0)
+			: sequence.get(clampTrackIndex(activeTrackIndex, sequence.size()));
 	}
 
 	/** Remembered layout for the next build. Stored by name so the enum can move. */
@@ -886,7 +866,7 @@ public final class FastNoteblocksConfig {
 		config.activeSequenceName = "Untitled sequence";
 		config.activeSequenceDelayScaleQuarters = DEFAULT_SEQUENCE_DELAY_SCALE_QUARTERS;
 		config.previewInstrument = "HARP";
-		config.tracks = List.of(new SequenceTrack("Track 1", "", "HARP", 0));
+		config.legacyTracks = List.of();
 		config.composerProject = ComposerProject.empty(config.activeSequenceName);
 		config.buildTrackFlagsInitialized = true;
 		config.activeTrackIndex = 0;
@@ -993,23 +973,6 @@ public final class FastNoteblocksConfig {
 		return Math.max(0, Math.min(Math.max(1, size) - 1, index));
 	}
 
-	private void updateActiveTrack(SequenceTrack track) {
-		List<SequenceTrack> updated = new ArrayList<>(tracks);
-		updated.set(clampTrackIndex(activeTrackIndex, updated.size()), track);
-		tracks = List.copyOf(updated);
-	}
-
-	/**
-	 * Keeps the preview instrument pointing at the active track.
-	 *
-	 * <p>Used to mirror the track's text and position into loose fields as well, which is how
-	 * typing a loop for the in-world overlay could edit a song: the two were literally the same
-	 * string. The track is now the only place either lives.</p>
-	 */
-	private void syncLegacyTrackFields() {
-		previewInstrument = activeTrack().instrument();
-	}
-
 	private static final class StoredConfig {
 		private Boolean modEnabled;
 		private OverlayMode overlayMode;
@@ -1076,11 +1039,12 @@ public final class FastNoteblocksConfig {
 			this.sequencingEditProtection = config.sequencingEditProtection;
 			this.autoSelectSequenceBlock = config.autoSelectSequenceBlock;
 			this.placementSequence = config.activeTrack().sequence();
-			this.placementSequencePosition = config.activeTrack().position();
+			this.placementSequencePosition = config.placementCursor;
 			this.activeSequenceName = config.activeSequenceName;
 			this.activeSequenceDelayScaleQuarters = config.activeSequenceDelayScaleQuarters;
 			this.previewInstrument = config.previewInstrument;
-			this.tracks = config.tracks;
+			// The sequence is derived from the composition, so there is nothing here to store.
+			this.tracks = null;
 			// Songs live in their own files now. Leaving these null keeps the settings file small
 			// and stops one bad composition from taking every setting down with it on load.
 			this.composerProject = null;

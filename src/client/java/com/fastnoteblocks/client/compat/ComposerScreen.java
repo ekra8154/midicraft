@@ -838,7 +838,7 @@ public final class ComposerScreen extends Screen {
 			// Not disabled on an unbuildable song: greying it out would hide the reason. The status
 			// bar already names the problem and the planner refuses with a specific one.
 			case PASTE_IN_WORLD -> projectStats().totalNotes() > 0 || project().endTick() > 0L;
-			case INCLUDE_SELECTED_AND_MOVE -> !selectionLayers().isEmpty();
+			case INCLUDE_SELECTED, SET_INCLUDED_TO_SELECTION -> !selectionLayers().isEmpty();
 			case BUILD_CANCEL -> CommandPasteSender.isRunning();
 			default -> true;
 		};
@@ -877,8 +877,8 @@ public final class ComposerScreen extends Screen {
 			case IMPORT -> importSong();
 			case OPEN_SONGS -> minecraft.gui.setScreen(new SongsScreen(parent, config));
 			case COPY_AS_TEXT -> copyActiveLayerAsText();
-			case MOVE_TO_SEQUENCE -> moveToBuildSequence();
-			case INCLUDE_SELECTED_AND_MOVE -> includeSelectedThenMove();
+			case INCLUDE_SELECTED -> setIncludedLayers(true);
+			case SET_INCLUDED_TO_SELECTION -> setIncludedLayers(false);
 			case PASTE_IN_WORLD -> pasteInWorld();
 			case BUILD_CANCEL -> CommandPasteSender.cancel(true);
 			case SAVE_COMPOSITION -> saveComposition();
@@ -969,9 +969,12 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private String toolbarRowLabel(ToolbarAction action) {
-		if (action == ToolbarAction.INCLUDE_SELECTED_AND_MOVE && !selectionLayers().isEmpty()) {
-			int count = selectionLayers().size();
-			return "Include only these " + count + " layers, then move";
+		int selected = selectionLayers().size();
+		if (selected > 0 && action == ToolbarAction.INCLUDE_SELECTED) {
+			return "Include these " + selected + (selected == 1 ? " layer" : " layers");
+		}
+		if (selected > 0 && action == ToolbarAction.SET_INCLUDED_TO_SELECTION) {
+			return "Include only these " + selected + (selected == 1 ? " layer" : " layers");
 		}
 		return action.label;
 	}
@@ -1562,9 +1565,16 @@ public final class ComposerScreen extends Screen {
 		segments.add("peak " + peakChord + "/" + SongAnalysis.MAX_SIMULTANEOUS_NOTES
 			+ (overloaded > 0 ? " (" + overloaded + " over)" : ""));
 		segments.add(stats.totalNotes() + " notes · " + project().layers().size() + " layers");
-		SongBuilder.BlockCounts blocks = SongBuilder.blockCounts(project());
-		segments.add(blocks.total() + " blocks (" + blocks.noteBlocks() + " note · "
-			+ blocks.repeaters() + " repeater)");
+		int included = (int)project().layers().stream()
+			.filter(layer -> layer.buildEnabled() && !layer.muted())
+			.count();
+		if (included == 0) {
+			segments.add("nothing included");
+		} else {
+			SongBuilder.BlockCounts blocks = SongBuilder.blockCounts(project());
+			segments.add(blocks.total() + " blocks (" + blocks.noteBlocks() + " note · "
+				+ blocks.repeaters() + " repeater)");
+		}
 		if (!selectedNotes.isEmpty()) {
 			segments.add(selectedNotes.size() + " selected");
 		}
@@ -1649,6 +1659,7 @@ public final class ComposerScreen extends Screen {
 			if (dotLayer >= 0) {
 				boolean next = !project().layers().get(dotLayer).buildEnabled();
 				updateLayers(dotLayer, target -> target.withBuildEnabled(next));
+				showResult(Component.literal(sequenceSummary()));
 				return true;
 			}
 		}
@@ -2275,45 +2286,17 @@ public final class ComposerScreen extends Screen {
 	}
 
 	/**
-	 * Projects layers into the build sequence -- the flat timeline of notes and repeaters you
-	 * then place, by hand in survival or with commands.
+	 * Fills in build dots from the current selection.
 	 *
-	 * <p>Replaces whatever was queued rather than adding to it, so the sequence is always a
-	 * snapshot of one moment. That is also what makes a transient selection a fine way to choose
-	 * layers: the sequence is the thing that remembers the decision, so nothing needs to persist
-	 * the choice that produced it.</p>
-	 */
-	private void moveToBuildSequence() {
-		saveProject();
-		int tracks = config.publishComposerProject(Set.of());
-		FastNoteblocksConfig.save();
-		if (tracks == 0) {
-			showResult(Component.literal(
-				"No layers are included. Fill in a layer's dot, or use Include only selected."));
-			return;
-		}
-		SongAnalysis stats = projectStats();
-		SongBuilder.BlockCounts blocks = SongBuilder.blockCounts(config.tracks());
-		String report = "Build sequence: " + tracks + (tracks == 1 ? " track" : " tracks")
-			+ ", " + blocks.noteBlocks() + " note blocks, " + blocks.repeaters() + " repeaters";
-		if (stats.outOfRange() > 0) {
-			report += "; " + stats.outOfRange() + " out-of-range notes left out";
-		}
-		if (!stats.crowded().isEmpty()) {
-			report += "; " + stats.crowded().size() + " timings too close to build";
-		}
-		showResult(Component.literal(report));
-	}
-
-	/**
-	 * Sets the included layers from the current selection, then moves them across.
-	 *
-	 * <p>The dot stays the one thing that decides what builds -- this writes the dots rather than
-	 * going around them, which is also the only way to change a lot of them at once. "Only" is
-	 * load-bearing: layers outside the selection are cleared, so this is a batch off as well as a
+	 * <p>The dot is the one thing that decides what builds, so this writes dots rather than going
+	 * around them -- which is also the only way to change a lot at once. Adding leaves layers
+	 * outside the selection alone; setting clears them, so that one is a batch off as well as a
 	 * batch on.</p>
+	 *
+	 * <p>Nothing needs moving afterwards. The sequence is derived from these dots, so it has
+	 * already changed by the time this returns.</p>
 	 */
-	private void includeSelectedThenMove() {
+	private void setIncludedLayers(boolean add) {
 		Set<Integer> chosen = new java.util.LinkedHashSet<>(selectionLayers());
 		if (chosen.isEmpty()) {
 			showResult(Component.literal("Select some layers first."));
@@ -2321,16 +2304,35 @@ public final class ComposerScreen extends Screen {
 		}
 		ComposerProject updated = project();
 		for (int index = 0; index < updated.layers().size(); index++) {
-			boolean include = chosen.contains(index);
+			boolean include = chosen.contains(index)
+				|| (add && updated.layers().get(index).buildEnabled());
 			if (updated.layers().get(index).buildEnabled() != include) {
 				updated = updated.withLayer(index, updated.layers().get(index).withBuildEnabled(include));
 			}
 		}
-		if (!updated.equals(project())) {
-			apply(updated);
-			rebuildLayerButtons();
+		if (updated.equals(project())) {
+			showResult(Component.literal("Those layers were already the included ones."));
+			return;
 		}
-		moveToBuildSequence();
+		apply(updated);
+		rebuildLayerButtons();
+		showResult(Component.literal(sequenceSummary()));
+	}
+
+	/** What the build sequence now holds, for confirming a dot change did what was expected. */
+	private String sequenceSummary() {
+		var sequence = config.tracks();
+		if (sequence.isEmpty()) {
+			return "No layers included - the build sequence is empty.";
+		}
+		SongBuilder.BlockCounts blocks = SongBuilder.blockCounts(sequence);
+		String report = "Sequence: " + sequence.size() + (sequence.size() == 1 ? " layer" : " layers")
+			+ ", " + blocks.noteBlocks() + " note blocks, " + blocks.repeaters() + " repeaters";
+		SongAnalysis stats = projectStats();
+		if (stats.outOfRange() > 0) {
+			report += "; " + stats.outOfRange() + " out-of-range notes left out";
+		}
+		return report;
 	}
 
 	/** Pastes the build sequence with commands, for when you have op and would rather not place it by hand. */
@@ -2907,8 +2909,8 @@ public final class ComposerScreen extends Screen {
 		QUANTIZE("Quantize to grid", true),
 		FIT_ALL_RANGE("Fit into range", true),
 		SNAP_TEMPO("Snap tempo (whole song)"),
-		MOVE_TO_SEQUENCE("Move included layers to sequence"),
-		INCLUDE_SELECTED_AND_MOVE("Include only selected layers, then move"),
+		INCLUDE_SELECTED("Include selected layers"),
+		SET_INCLUDED_TO_SELECTION("Set included layers to selection"),
 		PASTE_IN_WORLD("Paste current sequence in world (requires op)..."),
 		BUILD_CANCEL("Cancel paste"),
 		SNAP_END("Snap end to grid"),
@@ -2927,7 +2929,7 @@ public final class ComposerScreen extends Screen {
 			SNAP_END, TRIM_END
 		};
 		private static final ToolbarAction[] BUILD_ACTIONS = {
-			MOVE_TO_SEQUENCE, INCLUDE_SELECTED_AND_MOVE, PASTE_IN_WORLD, BUILD_CANCEL
+			INCLUDE_SELECTED, SET_INCLUDED_TO_SELECTION, PASTE_IN_WORLD, BUILD_CANCEL
 		};
 		private static final ToolbarAction[] SELECT_ACTIONS = {
 			SELECT_OFF_GRID, SELECT_TOO_FREQUENT, SELECT_OUT_OF_RANGE, SELECT_ALL_NOTES, SELECT_NONE
