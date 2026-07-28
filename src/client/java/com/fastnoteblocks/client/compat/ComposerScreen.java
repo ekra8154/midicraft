@@ -70,8 +70,8 @@ public final class ComposerScreen extends Screen {
 	private boolean playing;
 	private long playbackStartedAt;
 	private long playbackStartTick;
+	private int[] playbackIndices = new int[0];
 	private boolean draggingPlayhead;
-	private final Set<Long> playedNotes = new LinkedHashSet<>();
 	private long horizontalScroll;
 	private int topMidiNote = 91;
 	private double ticksPerPixel = 10.0;
@@ -97,6 +97,8 @@ public final class ComposerScreen extends Screen {
 	private boolean contextMenuOpen;
 	private int contextMenuX;
 	private int contextMenuY;
+	private ComposerProject cachedStatsProject;
+	private ProjectStats cachedStats;
 
 	public ComposerScreen(Screen parent, FastNoteblocksConfig config) {
 		this(parent, config, () -> {
@@ -138,9 +140,9 @@ public final class ComposerScreen extends Screen {
 			.tooltip(Tooltip.create(Component.literal("Return to the text sequence and settings screen")))
 			.build());
 		x += 90;
-		addRenderableWidget(Button.builder(Component.literal("Import MIDI"), button -> importMidi())
+		addRenderableWidget(Button.builder(Component.literal("Import..."), button -> importSong())
 			.bounds(x, 7, 82, 20)
-			.tooltip(Tooltip.create(Component.literal("Import MIDI into this composition")))
+			.tooltip(Tooltip.create(Component.literal("Import a MIDI or Note Block Studio song")))
 			.build());
 		x += 86;
 		snapButton = addRenderableWidget(Button.builder(snapLabel(), button -> cycleSnap())
@@ -415,51 +417,89 @@ public final class ComposerScreen extends Screen {
 		});
 	}
 
-	private void importMidi() {
+	private void importSong() {
 		boolean nonempty = project().layers().stream().anyMatch(layer -> !layer.notes().isEmpty());
 		if (!nonempty) {
-			chooseAndImportMidi();
+			chooseAndImportSong();
 			return;
 		}
 		minecraft.gui.setScreen(new ConfirmScreen(confirmed -> {
 			minecraft.gui.setScreen(this);
 			if (confirmed) {
-				chooseAndImportMidi();
+				chooseAndImportSong();
 			}
 		}, Component.literal("Replace this composition?"),
-			Component.literal("Importing MIDI replaces the current piano roll. You can still Undo afterward."),
+			Component.literal("Importing replaces the current piano roll. You can still Undo afterward."),
 			Component.literal("Import"), CommonComponents.GUI_CANCEL));
 	}
 
-	private void chooseAndImportMidi() {
+	private void chooseAndImportSong() {
 		String path;
 		try (MemoryStack stack = MemoryStack.stackPush()) {
-			PointerBuffer filters = stack.mallocPointer(2);
+			PointerBuffer filters = stack.mallocPointer(3);
 			filters.put(stack.UTF8("*.mid"));
 			filters.put(stack.UTF8("*.midi"));
+			filters.put(stack.UTF8("*.nbs"));
 			filters.flip();
-			path = TinyFileDialogs.tinyfd_openFileDialog("Import MIDI", "", filters, "MIDI files", false);
+			path = TinyFileDialogs.tinyfd_openFileDialog(
+				"Import MIDI or NBS", "", filters, "MIDI and Note Block Studio songs", false
+			);
 		}
 		if (path == null || path.isBlank()) {
 			return;
 		}
 		try {
-			MidiImporter.ProjectResult result = MidiImporter.importProject(path, config);
-			apply(result.project());
-			selectedNotes.clear();
-			horizontalScroll = 0L;
-			centerMinecraftRange();
-			rebuildLayerButtons();
-			rebuildMoveLayerButtons();
-			minecraft.gui.hud.setOverlayMessage(Component.literal(result.report()), true);
+			String lowerPath = path.toLowerCase(java.util.Locale.ROOT);
+			ComposerProject imported;
+			String report;
+			if (lowerPath.endsWith(".nbs")) {
+				NbsImporter.Inspection inspection = NbsImporter.inspect(path, config);
+				if (inspection.instruments().size() > ComposerProject.MAX_LAYERS) {
+					minecraft.gui.setScreen(new NbsInstrumentSelectionScreen(this, inspection,
+						selected -> importSelectedNbs(path, selected)));
+					return;
+				}
+				NbsImporter.ProjectResult result = NbsImporter.importProject(path, config);
+				imported = result.project();
+				report = result.report();
+			} else {
+				MidiImporter.ProjectResult result = MidiImporter.importProject(path, config);
+				imported = result.project();
+				report = result.report();
+			}
+			applyImportedProject(imported, report);
 		} catch (Exception exception) {
-			minecraft.gui.setScreen(new ConfirmScreen(confirmed -> minecraft.gui.setScreen(this),
-				Component.literal("MIDI import failed"),
-				Component.literal(exception.getMessage() == null
-					? exception.getClass().getSimpleName()
-					: exception.getMessage()),
-				CommonComponents.GUI_BACK, CommonComponents.GUI_CANCEL));
+			showImportFailure(exception);
 		}
+	}
+
+	private void importSelectedNbs(String path, Set<String> selectedInstruments) {
+		minecraft.gui.setScreen(this);
+		try {
+			NbsImporter.ProjectResult result = NbsImporter.importProject(path, config, selectedInstruments);
+			applyImportedProject(result.project(), result.report());
+		} catch (Exception exception) {
+			showImportFailure(exception);
+		}
+	}
+
+	private void applyImportedProject(ComposerProject imported, String report) {
+		apply(imported);
+		selectedNotes.clear();
+		horizontalScroll = 0L;
+		centerMinecraftRange();
+		rebuildLayerButtons();
+		rebuildMoveLayerButtons();
+		minecraft.gui.hud.setOverlayMessage(Component.literal(report), true);
+	}
+
+	private void showImportFailure(Exception exception) {
+		minecraft.gui.setScreen(new ConfirmScreen(confirmed -> minecraft.gui.setScreen(this),
+			Component.literal("Song import failed"),
+			Component.literal(exception.getMessage() == null
+				? exception.getClass().getSimpleName()
+				: exception.getMessage()),
+			CommonComponents.GUI_BACK, CommonComponents.GUI_CANCEL));
 	}
 
 	@Override
@@ -659,7 +699,7 @@ public final class ComposerScreen extends Screen {
 					x + 3, rollY + 2, 0xFFAAAAAA, false);
 			}
 		}
-		for (Map.Entry<Long, Integer> entry : buildChordCounts().entrySet()) {
+		for (Map.Entry<Long, Integer> entry : projectStats().chordCounts().entrySet()) {
 			if (entry.getValue() <= MAX_SIMULTANEOUS_NOTES) {
 				continue;
 			}
@@ -672,13 +712,21 @@ public final class ComposerScreen extends Screen {
 
 	private void extractNotes(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
 		ComposerProject shown = displayProject();
+		long firstVisibleTick = Math.max(0L, horizontalScroll - projectStats().maximumNoteDuration());
+		long lastVisibleTick = horizontalScroll + (long)Math.ceil(rollWidth * ticksPerPixel);
 		for (int layerIndex = 0; layerIndex < shown.layers().size(); layerIndex++) {
 			Layer layer = shown.layers().get(layerIndex);
 			if (!layer.visible()) {
 				continue;
 			}
 			boolean active = layerIndex == shown.activeLayerIndex();
-			for (NoteEvent note : layer.notes()) {
+			List<NoteEvent> notes = layer.notes();
+			for (int noteIndex = lowerBoundStart(notes, firstVisibleTick);
+					noteIndex < notes.size(); noteIndex++) {
+				NoteEvent note = notes.get(noteIndex);
+				if (note.startTick() > lastVisibleTick) {
+					break;
+				}
 				NoteRect rect = noteRect(note);
 				if (!rect.intersects(rollX, rollY, rollX + rollWidth, rollY + rollHeight)) {
 					continue;
@@ -711,15 +759,10 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private void extractStatus(GuiGraphicsExtractor graphics) {
-		int outOfRange = (int)project().layers().stream()
-			.flatMap(layer -> layer.notes().stream())
-			.filter(note -> !note.isBuildable())
-			.count();
-		Map<Long, Integer> chordCounts = buildChordCounts();
-		int peakChord = chordCounts.values().stream().mapToInt(Integer::intValue).max().orElse(0);
-		long overloaded = chordCounts.values().stream()
-			.filter(count -> count > MAX_SIMULTANEOUS_NOTES)
-			.count();
+		ProjectStats stats = projectStats();
+		int outOfRange = stats.outOfRange();
+		int peakChord = stats.peakChord();
+		long overloaded = stats.overloadedTicks();
 		String status = selectedNotes.size() + " selected"
 			+ (outOfRange > 0 ? "   " + outOfRange + " outside Minecraft range" : "")
 			+ "   Build peak " + peakChord + "/" + MAX_SIMULTANEOUS_NOTES
@@ -731,19 +774,29 @@ public final class ComposerScreen extends Screen {
 		graphics.text(font, status, rollX, height - 16, color, false);
 	}
 
-	private Map<Long, Integer> buildChordCounts() {
+	private ProjectStats projectStats() {
+		ComposerProject current = project();
+		if (cachedStatsProject == current && cachedStats != null) {
+			return cachedStats;
+		}
 		Map<Long, Integer> counts = new HashMap<>();
-		for (Layer layer : project().layers()) {
-			if (!layer.buildEnabled() || layer.muted()) {
-				continue;
-			}
+		int outOfRange = 0;
+		long maximumNoteDuration = 1L;
+		for (Layer layer : current.layers()) {
 			for (NoteEvent note : layer.notes()) {
-				if (note.isBuildable()) {
+				maximumNoteDuration = Math.max(maximumNoteDuration, note.durationTicks());
+				if (!note.isBuildable()) {
+					outOfRange++;
+				} else if (layer.buildEnabled() && !layer.muted()) {
 					counts.merge(note.startTick(), 1, Integer::sum);
 				}
 			}
 		}
-		return counts;
+		int peak = counts.values().stream().mapToInt(Integer::intValue).max().orElse(0);
+		long overloaded = counts.values().stream().filter(count -> count > MAX_SIMULTANEOUS_NOTES).count();
+		cachedStatsProject = current;
+		cachedStats = new ProjectStats(outOfRange, Map.copyOf(counts), peak, overloaded, maximumNoteDuration);
+		return cachedStats;
 	}
 
 	@Override
@@ -1099,7 +1152,7 @@ public final class ComposerScreen extends Screen {
 		} else {
 			playing = true;
 			playbackStartedAt = Util.getMillis();
-			playedNotes.clear();
+			resetPlaybackCursors();
 			playButton.setMessage(playLabel());
 		}
 	}
@@ -1108,7 +1161,7 @@ public final class ComposerScreen extends Screen {
 		playbackStartTick = Math.max(0L, Math.min(project().endTick(), snapTick(tick)));
 		if (playing) {
 			playbackStartedAt = Util.getMillis();
-			playedNotes.clear();
+			resetPlaybackCursors();
 		}
 		if (preview) {
 			minecraft.gui.hud.setOverlayMessage(Component.literal("Playback start: tick " + playbackStartTick), true);
@@ -1117,7 +1170,7 @@ public final class ComposerScreen extends Screen {
 
 	private void stopPlayback() {
 		playing = false;
-		playedNotes.clear();
+		playbackIndices = new int[0];
 		if (playButton != null) {
 			playButton.setMessage(playLabel());
 		}
@@ -1135,23 +1188,21 @@ public final class ComposerScreen extends Screen {
 			return;
 		}
 		long tick = playbackTick();
-		long elapsedMicros = Math.max(0L, Util.getMillis() - playbackStartedAt) * 1000L;
-		for (Layer layer : project().layers()) {
-			if (layer.muted()) {
-				continue;
-			}
+		if (playbackIndices.length != project().layers().size()) {
+			resetPlaybackCursors();
+		}
+		for (int layerIndex = 0; layerIndex < project().layers().size(); layerIndex++) {
+			Layer layer = project().layers().get(layerIndex);
 			PreviewInstrument instrument = PreviewInstrument.byId(layer.instrument());
-			for (NoteEvent note : layer.notes()) {
-				if (note.startTick() < playbackStartTick) {
-					continue;
-				}
-				long noteMicros = Math.round(
-					(note.startTick() - playbackStartTick) * project().tempoMicrosPerQuarter() / (double)project().ppq()
-				);
-				if (elapsedMicros >= noteMicros && playedNotes.add(note.id())) {
+			List<NoteEvent> notes = layer.notes();
+			int noteIndex = playbackIndices[layerIndex];
+			while (noteIndex < notes.size() && notes.get(noteIndex).startTick() <= tick) {
+				NoteEvent note = notes.get(noteIndex++);
+				if (!layer.muted() && note.startTick() >= playbackStartTick) {
 					instrument.play(note.midiNote() - ComposerProject.NOTE_BLOCK_BASE_MIDI_NOTE);
 				}
 			}
+			playbackIndices[layerIndex] = noteIndex;
 		}
 		if (tick > project().endTick()) {
 			stopPlayback();
@@ -1166,6 +1217,15 @@ public final class ComposerScreen extends Screen {
 	private long playbackTick() {
 		long elapsedMicros = Math.max(0L, Util.getMillis() - playbackStartedAt) * 1000L;
 		return playbackStartTick + Math.round(elapsedMicros * project().ppq() / (double)project().tempoMicrosPerQuarter());
+	}
+
+	private void resetPlaybackCursors() {
+		playbackIndices = new int[project().layers().size()];
+		for (int layerIndex = 0; layerIndex < project().layers().size(); layerIndex++) {
+			playbackIndices[layerIndex] = lowerBoundStart(
+				project().layers().get(layerIndex).notes(), playbackStartTick
+			);
+		}
 	}
 
 	private void undo() {
@@ -1191,6 +1251,10 @@ public final class ComposerScreen extends Screen {
 	private void apply(ComposerProject project) {
 		history.apply(project);
 		playbackStartTick = Math.min(playbackStartTick, project.endTick());
+		if (playing) {
+			playbackStartedAt = Util.getMillis();
+			resetPlaybackCursors();
+		}
 		saveProject();
 		updateButtonStates();
 	}
@@ -1371,6 +1435,20 @@ public final class ComposerScreen extends Screen {
 		return new NoteRect(left, top, left + width, top + ROW_HEIGHT - 2);
 	}
 
+	private static int lowerBoundStart(List<NoteEvent> notes, long tick) {
+		int low = 0;
+		int high = notes.size();
+		while (low < high) {
+			int middle = low + (high - low) / 2;
+			if (notes.get(middle).startTick() < tick) {
+				low = middle + 1;
+			} else {
+				high = middle;
+			}
+		}
+		return low;
+	}
+
 	private int tickX(long tick) {
 		return rollX + (int)Math.round((tick - horizontalScroll) / ticksPerPixel);
 	}
@@ -1491,6 +1569,15 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private record NoteHit(int layerIndex, NoteEvent note) {
+	}
+
+	private record ProjectStats(
+		int outOfRange,
+		Map<Long, Integer> chordCounts,
+		int peakChord,
+		long overloadedTicks,
+		long maximumNoteDuration
+	) {
 	}
 
 	private enum ContextAction {
