@@ -156,7 +156,7 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 		delayScaleSlider.setScale(saved.delayScaleQuarters());
 		List<SequenceTrack> savedTracks = saved.composerProject() == null
 			? saved.tracks()
-			: saved.composerProject().toSequenceTracks(saved.tracks(), saved.delayScaleQuarters());
+			: saved.composerProject().toSequenceTracks(saved.tracks());
 		setTracks(savedTracks, saved.activeTrackIndex());
 		syncConfig();
 		if (saved.composerProject() != null) {

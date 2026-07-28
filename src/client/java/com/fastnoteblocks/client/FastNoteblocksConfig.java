@@ -594,12 +594,12 @@ public final class FastNoteblocksConfig {
 		this.activeSequenceDelayScaleQuarters = clampSequenceDelayScale(activeSequenceDelayScaleQuarters);
 	}
 
+	/**
+	 * Speed the composer last used, kept only to migrate documents saved before compositions
+	 * carried their own. New saves take it from the composition and this stops being read.
+	 */
 	public int composerSpeedQuarters() {
 		return composerSpeedQuarters;
-	}
-
-	public void setComposerSpeedQuarters(int composerSpeedQuarters) {
-		this.composerSpeedQuarters = clampSequenceDelayScale(composerSpeedQuarters);
 	}
 
 	public String previewInstrument() {
@@ -634,7 +634,7 @@ public final class FastNoteblocksConfig {
 		if (composerProject == null) {
 			composerProject = ComposerProject.fromSequenceTracks(
 				activeSequenceName, tracks, activeTrackIndex, activeSequenceDelayScaleQuarters
-			);
+			).withSpeedQuarters(composerSpeedQuarters);
 		}
 		return composerProject;
 	}
@@ -662,7 +662,7 @@ public final class FastNoteblocksConfig {
 		// 1.00x so nothing multiplies them back. Publishing at the sequence scale meant the two
 		// cancelled and the build always ran at the raw project tempo, however the composer was
 		// previewing it.
-		tracks = normalizeTracks(project.toSequenceTracks(tracks, composerSpeedQuarters));
+		tracks = normalizeTracks(project.toSequenceTracks(tracks));
 		activeSequenceDelayScaleQuarters = DEFAULT_SEQUENCE_DELAY_SCALE_QUARTERS;
 		activeTrackIndex = clampTrackIndex(activeTrackIndex, tracks.size());
 		syncLegacyTrackFields();

@@ -5,19 +5,19 @@ import java.util.Deque;
 
 public final class ComposerHistory {
 	private static final int MAX_HISTORY = 100;
-	private final Deque<ComposerState> undo = new ArrayDeque<>();
-	private final Deque<ComposerState> redo = new ArrayDeque<>();
-	private ComposerState current;
+	private final Deque<ComposerProject> undo = new ArrayDeque<>();
+	private final Deque<ComposerProject> redo = new ArrayDeque<>();
+	private ComposerProject current;
 
-	public ComposerHistory(ComposerState initial) {
+	public ComposerHistory(ComposerProject initial) {
 		current = initial;
 	}
 
-	public ComposerState current() {
+	public ComposerProject current() {
 		return current;
 	}
 
-	public void apply(ComposerState next) {
+	public void apply(ComposerProject next) {
 		if (next == null || next.equals(current)) {
 			return;
 		}
@@ -36,7 +36,7 @@ public final class ComposerHistory {
 	 * step so undo has somewhere to land, and the rest replace it, leaving one entry for the whole
 	 * gesture instead of dozens that would evict real edits.</p>
 	 */
-	public void replaceCurrent(ComposerState next) {
+	public void replaceCurrent(ComposerProject next) {
 		if (next != null) {
 			current = next;
 		}
@@ -50,7 +50,7 @@ public final class ComposerHistory {
 		return !redo.isEmpty();
 	}
 
-	public ComposerState undo() {
+	public ComposerProject undo() {
 		if (!undo.isEmpty()) {
 			redo.addLast(current);
 			current = undo.removeLast();
@@ -58,7 +58,7 @@ public final class ComposerHistory {
 		return current;
 	}
 
-	public ComposerState redo() {
+	public ComposerProject redo() {
 		if (!redo.isEmpty()) {
 			undo.addLast(current);
 			current = redo.removeLast();

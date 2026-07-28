@@ -8,9 +8,9 @@ import com.fastnoteblocks.client.composer.ComposerProject.Layer;
 import com.fastnoteblocks.client.composer.ComposerProject.MinecraftConversion;
 import com.fastnoteblocks.client.composer.ComposerProject.NoteEvent;
 import com.fastnoteblocks.client.composer.ComposerProject.PasteResult;
-import com.fastnoteblocks.client.composer.ComposerState;
 import com.mojang.blaze3d.platform.InputConstants;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
@@ -101,6 +101,8 @@ public final class ComposerScreen extends Screen {
 	private List<PlaybackEvent> playbackEvents = List.of();
 	private int playbackEventIndex;
 	private boolean draggingPlayhead;
+	private boolean draggingEndMarker;
+	private long lastEndDragAt;
 	private long horizontalScroll;
 	private int topMidiNote = 91;
 	private double ticksPerPixel = 10.0;
@@ -148,8 +150,7 @@ public final class ComposerScreen extends Screen {
 		this.config = config;
 		this.onReturn = onReturn == null ? () -> {
 		} : onReturn;
-		this.history = new ComposerHistory(new ComposerState(
-			config.composerProject(), config.composerSpeedQuarters()));
+		this.history = new ComposerHistory(config.composerProject());
 	}
 
 	@Override
@@ -479,9 +480,9 @@ public final class ComposerScreen extends Screen {
 					Component.literal("This composition is already Minecraft-ready."));
 				return;
 			}
-			applyState(new ComposerState(conversion.project(),
-				FastNoteblocksConfig.DEFAULT_SEQUENCE_DELAY_SCALE_QUARTERS));
-			delayScaleSlider.setScale(FastNoteblocksConfig.DEFAULT_SEQUENCE_DELAY_SCALE_QUARTERS);
+			// Convert bakes the speed into the tempo, so the result plays at its own pace.
+			apply(conversion.project().withSpeedQuarters(ComposerProject.DEFAULT_SPEED_QUARTERS));
+			delayScaleSlider.setScale(ComposerProject.DEFAULT_SPEED_QUARTERS);
 			selectedNotes.clear();
 			instrumentMenuLayer = -1;
 			collapseAllButActive();
@@ -644,11 +645,10 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private void applyImportedProject(ComposerProject imported, String report) {
-		applyState(new ComposerState(imported,
-			FastNoteblocksConfig.DEFAULT_SEQUENCE_DELAY_SCALE_QUARTERS));
+		apply(imported.withSpeedQuarters(ComposerProject.DEFAULT_SPEED_QUARTERS));
 		selectedNotes.clear();
 		horizontalScroll = 0L;
-		delayScaleSlider.setScale(FastNoteblocksConfig.DEFAULT_SEQUENCE_DELAY_SCALE_QUARTERS);
+		delayScaleSlider.setScale(ComposerProject.DEFAULT_SPEED_QUARTERS);
 		collapseAllButActive();
 		centerMinecraftRange();
 		rebuildLayerButtons();
@@ -888,6 +888,9 @@ public final class ComposerScreen extends Screen {
 				project().withAllFittedToRange(selectedNotes));
 			case SNAP_TEMPO -> applyStep("Tempo snapped", project().withTempo(
 				project().repeaterAlignedTempoFor(minecraftConversionGridTicks(project()))));
+			case SNAP_END -> applyStep("End snapped", project().withEndTick(
+				snapEndToRepeaterGrid()));
+			case TRIM_END -> applyStep("Trimmed", project().trimmedToContent());
 			case SELECT_OFF_GRID -> selectNotesWhere("off grid",
 				note -> projectStats().timing().offGrid().contains(note.startTick()), true);
 			case SELECT_TOO_FREQUENT -> selectNotesWhere("too frequent",
@@ -1173,6 +1176,14 @@ public final class ComposerScreen extends Screen {
 				graphics.text(font, Long.toString(tick / measureTicks + 1L), x + 3, rulerY + 2, 0xFFBFC4CA, false);
 			}
 		}
+		int endX = tickX(project().endTick());
+		if (endX >= rollX && endX <= rollX + rollWidth) {
+			// Flag points back over the song, so the marker reads as the edge of something rather
+			// than the start of it. Red when the trailing gap is not a delay a build can place.
+			int endColor = endMarkerIssue() ? 0xFFFF6B6B : 0xFFE8C05A;
+			graphics.fill(endX, rulerY + 1, endX + 1, rollY, endColor);
+			graphics.fill(endX - 7, rulerY + 1, endX, rulerY + 6, endColor);
+		}
 		long markerTick = playing ? playbackTick() : playbackStartTick;
 		int markerX = tickX(markerTick);
 		if (markerX >= rollX && markerX <= rollX + rollWidth) {
@@ -1180,7 +1191,9 @@ public final class ComposerScreen extends Screen {
 			graphics.fill(markerX - 1, rulerY + 5, markerX + 2, rollY, 0xFFFF5555);
 		}
 		if (mouseX >= rollX && mouseX < rollX + rollWidth && mouseY >= rulerY && mouseY < rollY) {
-			graphics.setTooltipForNextFrame(Component.literal("Drag to set playback start"), mouseX, mouseY);
+			graphics.setTooltipForNextFrame(Component.literal(overEndMarker(mouseX, mouseY)
+				? "Drag to set where the song ends"
+				: "Drag to set playback start"), mouseX, mouseY);
 		}
 	}
 
@@ -1338,6 +1351,10 @@ public final class ComposerScreen extends Screen {
 					hoveredCandidateLayer = layerIndex;
 				}
 			}
+		}
+		int endX = tickX(project().endTick());
+		if (endX >= rollX && endX <= rollX + rollWidth) {
+			graphics.fill(endX, rollY, endX + 1, rollY + rollHeight, 0x66E8C05A);
 		}
 		extractHoveredNoteTooltip(graphics, hoveredCandidate, hoveredCandidateLayer,
 			crowded, offGrid, mouseX, mouseY);
@@ -1537,6 +1554,13 @@ public final class ComposerScreen extends Screen {
 		graphics.text(font, status.toString(), 8, height - 16, color, false);
 	}
 
+	/** True when the end marker's own trailing delay is not one a build can place. */
+	private boolean endMarkerIssue() {
+		ProjectStats stats = projectStats();
+		long end = project().endTick();
+		return stats.timing().offGrid().contains(end) || stats.timing().crowded().contains(end);
+	}
+
 	/** True when nothing left in the composition would misbuild or fail to build at all. */
 	private boolean buildable(ProjectStats stats) {
 		return stats.outOfRange() == 0
@@ -1592,7 +1616,14 @@ public final class ComposerScreen extends Screen {
 	 */
 	private TimingIssues timingIssues(ComposerProject project, Set<Long> eventTicks) {
 		double span = redstoneTickSpan(project);
-		List<Long> ordered = eventTicks.stream().sorted().toList();
+		// The gap from the last note to the end marker is a delay the build has to place like any
+		// other, so it is checked like any other. A marker sitting exactly on the last note adds no
+		// delay at all and is therefore always fine -- only trailing silence can be unbuildable.
+		Set<Long> checked = new LinkedHashSet<>(eventTicks);
+		if (!eventTicks.isEmpty() && project.endTick() > Collections.max(eventTicks)) {
+			checked.add(project.endTick());
+		}
+		List<Long> ordered = checked.stream().sorted().toList();
 		Set<Long> offGrid = new LinkedHashSet<>();
 		Set<Long> crowded = new LinkedHashSet<>();
 		Map<Long, Double> gaps = new HashMap<>();
@@ -1682,6 +1713,11 @@ public final class ComposerScreen extends Screen {
 				selectedNotes.clear();
 				return true;
 			}
+		}
+		if (event.button() == 0 && overEndMarker(event.x(), event.y())) {
+			draggingEndMarker = true;
+			lastEndDragAt = 0L;
+			return true;
 		}
 		if (event.button() == 0 && insideRuler(event.x(), event.y())) {
 			setPlaybackStart(mouseTick(event.x()), true);
@@ -1848,6 +1884,10 @@ public final class ComposerScreen extends Screen {
 	public boolean mouseDragged(MouseButtonEvent event, double dx, double dy) {
 		lastMouseX = event.x();
 		lastMouseY = event.y();
+		if (draggingEndMarker) {
+			setEndTick(snapTick(mouseTick(event.x())));
+			return true;
+		}
 		if (draggingPlayhead) {
 			setPlaybackStart(mouseTick(event.x()), false);
 			return true;
@@ -1872,6 +1912,10 @@ public final class ComposerScreen extends Screen {
 
 	@Override
 	public boolean mouseReleased(MouseButtonEvent event) {
+		if (draggingEndMarker) {
+			draggingEndMarker = false;
+			return true;
+		}
 		if (draggingPlayhead) {
 			draggingPlayhead = false;
 			return true;
@@ -2221,11 +2265,7 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private void apply(ComposerProject project) {
-		applyState(history.current().withProject(project));
-	}
-
-	private void applyState(ComposerState state) {
-		history.apply(state);
+		history.apply(project);
 		afterStateChange();
 	}
 
@@ -2264,7 +2304,6 @@ public final class ComposerScreen extends Screen {
 
 	private void saveProject() {
 		config.setComposerProject(project());
-		config.setComposerSpeedQuarters(delayScaleQuarters());
 		FastNoteblocksConfig.save();
 	}
 
@@ -2277,18 +2316,53 @@ public final class ComposerScreen extends Screen {
 		}
 		// The slider fires on every increment of a drag. Record one step for the gesture and fold
 		// the rest into it, or a single drag would push dozens of entries and evict real edits.
-		ComposerState next = history.current().withDelayScaleQuarters(scaleQuarters);
+		ComposerProject next = project().withSpeedQuarters(scaleQuarters);
 		long now = Util.getMillis();
 		if (now - lastScaleChangeAt < SCALE_COALESCE_MILLIS) {
 			history.replaceCurrent(next);
 			afterStateChange();
 		} else {
-			applyState(next);
+			apply(next);
 		}
 		lastScaleChangeAt = now;
 		if (playing) {
 			resetPlaybackSchedule();
 		}
+	}
+
+	/**
+	 * Moves the end marker, folding a whole drag into one history entry.
+	 *
+	 * <p>{@code withEndTick} refuses to go before the last note, so dragging left simply stops
+	 * there instead of silently cutting notes out of the build.</p>
+	 */
+	private void setEndTick(long tick) {
+		ComposerProject next = project().withEndTick(tick);
+		if (next.equals(project())) {
+			return;
+		}
+		long now = Util.getMillis();
+		if (now - lastEndDragAt < SCALE_COALESCE_MILLIS) {
+			history.replaceCurrent(next);
+			afterStateChange();
+		} else {
+			apply(next);
+		}
+		lastEndDragAt = now;
+	}
+
+	/**
+	 * The nearest end position whose trailing delay is a whole number of repeater ticks.
+	 *
+	 * <p>Quantizing cannot fix this the way it fixes a note: the marker's gap is measured from the
+	 * last note, wherever that landed, so it has to be snapped relative to that rather than to the
+	 * musical grid.</p>
+	 */
+	private long snapEndToRepeaterGrid() {
+		long content = project().contentEndTick();
+		double span = redstoneTickSpan(project());
+		long gap = Math.max(0L, project().endTick() - content);
+		return content + Math.round(Math.round(gap / span) * span);
 	}
 
 	private int layerHeaderAt(double x, double y) {
@@ -2450,11 +2524,11 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private ComposerProject project() {
-		return history.current().project();
+		return history.current();
 	}
 
 	private int delayScaleQuarters() {
-		return history.current().delayScaleQuarters();
+		return project().speedQuarters();
 	}
 
 	private ComposerProject displayProject() {
@@ -2594,6 +2668,11 @@ public final class ComposerScreen extends Screen {
 
 	private boolean insideRoll(double x, double y) {
 		return x >= rollX && x < rollX + rollWidth && y >= rollY && y < rollY + rollHeight;
+	}
+
+	/** The end marker's grab zone, a few pixels either side of it in the ruler. */
+	private boolean overEndMarker(double x, double y) {
+		return insideRuler(x, y) && Math.abs(x - tickX(project().endTick())) <= 4.0;
 	}
 
 	private boolean insideRuler(double x, double y) {
@@ -2744,6 +2823,8 @@ public final class ComposerScreen extends Screen {
 		QUANTIZE("Quantize to grid", true),
 		FIT_ALL_RANGE("Fit into range", true),
 		SNAP_TEMPO("Snap tempo (whole song)"),
+		SNAP_END("Snap end to grid"),
+		TRIM_END("Trim end to last note"),
 		SELECT_OFF_GRID("Off grid"),
 		SELECT_TOO_FREQUENT("Too frequent"),
 		SELECT_OUT_OF_RANGE("Out of range"),
@@ -2754,7 +2835,8 @@ public final class ComposerScreen extends Screen {
 			IMPORT, SAVE_TO_SEQUENCE, BACK_TO_SEQUENCES, CLOSE_TO_GAME
 		};
 		private static final ToolbarAction[] EDIT_ACTIONS = {
-			UNDO, REDO, CONVERT, MERGE_REPEATS, QUANTIZE, FIT_ALL_RANGE, SNAP_TEMPO
+			UNDO, REDO, CONVERT, MERGE_REPEATS, QUANTIZE, FIT_ALL_RANGE, SNAP_TEMPO,
+			SNAP_END, TRIM_END
 		};
 		private static final ToolbarAction[] SELECT_ACTIONS = {
 			SELECT_OFF_GRID, SELECT_TOO_FREQUENT, SELECT_OUT_OF_RANGE, SELECT_ALL_NOTES, SELECT_NONE

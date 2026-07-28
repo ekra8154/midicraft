@@ -25,7 +25,9 @@ public record ComposerProject(
 	int tempoMicrosPerQuarter,
 	List<Layer> layers,
 	int activeLayerIndex,
-	long nextNoteId
+	long nextNoteId,
+	long endTick,
+	int speedQuarters
 ) {
 	public static final int DEFAULT_PPQ = 480;
 	public static final int DEFAULT_TEMPO_MICROS_PER_QUARTER = 500_000;
@@ -38,6 +40,9 @@ public record ComposerProject(
 	public static final int NOTE_BLOCK_BASE_MIDI_NOTE = 54;
 	public static final int NOTE_BLOCK_MAX_MIDI_NOTE = NOTE_BLOCK_BASE_MIDI_NOTE + NotePitch.PITCH_COUNT - 1;
 	public static final long DEFAULT_NOTE_DURATION_TICKS = DEFAULT_PPQ / 4L;
+	public static final int MIN_SPEED_QUARTERS = 1;
+	public static final int MAX_SPEED_QUARTERS = 32;
+	public static final int DEFAULT_SPEED_QUARTERS = 4;
 
 	public ComposerProject {
 		name = name == null || name.isBlank() ? "Untitled sequence" : name.trim();
@@ -51,6 +56,31 @@ public record ComposerProject(
 			.max()
 			.orElse(0L);
 		nextNoteId = Math.max(highestId + 1L, nextNoteId);
+		speedQuarters = speedQuarters <= 0
+			? DEFAULT_SPEED_QUARTERS
+			: Math.max(MIN_SPEED_QUARTERS, Math.min(MAX_SPEED_QUARTERS, speedQuarters));
+		// The end marker can sit past the last note but never before it: placing a note beyond the
+		// end drags the end along, which is the whole invariant expressed in one line. Zero means a
+		// document saved before the marker existed, so it falls back to the content it describes.
+		long lastNoteStart = layers.stream()
+			.flatMap(layer -> layer.notes().stream())
+			.mapToLong(NoteEvent::startTick)
+			.max()
+			.orElse(-1L);
+		endTick = lastNoteStart < 0L
+			? (endTick > 0L ? endTick : ppq * 4L)
+			: Math.max(endTick, lastNoteStart);
+	}
+
+	/**
+	 * Rebuilds with new layers, keeping everything the caller did not mean to change.
+	 *
+	 * <p>Every edit funnels through here so the compact constructor's invariants -- the end marker
+	 * floor in particular -- apply to all of them without each method remembering to.</p>
+	 */
+	private ComposerProject with(List<Layer> updatedLayers, int active, long nextId) {
+		return new ComposerProject(name, ppq, tempoMicrosPerQuarter, updatedLayers, active, nextId,
+			endTick, speedQuarters);
 	}
 
 	public record NoteEvent(long id, int midiNote, long startTick, long durationTicks, int velocity) {
@@ -141,7 +171,8 @@ public record ComposerProject(
 
 	public static ComposerProject empty(String name) {
 		return new ComposerProject(name, DEFAULT_PPQ, DEFAULT_TEMPO_MICROS_PER_QUARTER,
-			List.of(new Layer("Track 1", "HARP", false, true, true, List.of())), 0, 1L);
+			List.of(new Layer("Track 1", "HARP", false, true, true, List.of())), 0, 1L,
+			DEFAULT_PPQ * 4L, DEFAULT_SPEED_QUARTERS);
 	}
 
 	public static ComposerProject fromSequenceTracks(
@@ -172,7 +203,7 @@ public record ComposerProject(
 				track.buildEnabled(), true, notes));
 		}
 		return new ComposerProject(name, DEFAULT_PPQ, DEFAULT_TEMPO_MICROS_PER_QUARTER,
-			layers, activeTrackIndex, nextId);
+			layers, activeTrackIndex, nextId, 0L, DEFAULT_SPEED_QUARTERS);
 	}
 
 	/**
@@ -194,7 +225,7 @@ public record ComposerProject(
 		}
 	}
 
-	public List<SequenceTrack> toSequenceTracks(List<SequenceTrack> previousTracks, int delayScaleQuarters) {
+	public List<SequenceTrack> toSequenceTracks(List<SequenceTrack> previousTracks) {
 		List<SequenceTrack> result = new ArrayList<>();
 		for (int index = 0; index < layers.size(); index++) {
 			Layer layer = layers.get(index);
@@ -203,7 +234,7 @@ public record ComposerProject(
 				: new SequenceTrack(layer.name(), "", layer.instrument(), 0, layer.buildEnabled());
 			result.add(new SequenceTrack(
 				layer.name(),
-				sequenceText(layer, delayScaleQuarters),
+				toText(layer),
 				layer.muted() ? "MUTE" : layer.instrument(),
 				previous.position(),
 				layer.buildEnabled()
@@ -215,11 +246,11 @@ public record ComposerProject(
 	public ComposerProject withLayer(int index, Layer layer) {
 		List<Layer> updated = new ArrayList<>(layers);
 		updated.set(Math.max(0, Math.min(updated.size() - 1, index)), layer);
-		return new ComposerProject(name, ppq, tempoMicrosPerQuarter, updated, activeLayerIndex, nextNoteId);
+		return with(updated, activeLayerIndex, nextNoteId);
 	}
 
 	public ComposerProject withActiveLayer(int index) {
-		return new ComposerProject(name, ppq, tempoMicrosPerQuarter, layers, index, nextNoteId);
+		return with(layers, index, nextNoteId);
 	}
 
 	public ComposerProject addLayer() {
@@ -229,7 +260,7 @@ public record ComposerProject(
 		List<Layer> updated = new ArrayList<>(layers);
 		int number = updated.size() + 1;
 		updated.add(new Layer("Layer " + number, "HARP", false, true, true, List.of()));
-		return new ComposerProject(name, ppq, tempoMicrosPerQuarter, updated, updated.size() - 1, nextNoteId);
+		return with(updated, updated.size() - 1, nextNoteId);
 	}
 
 	public ComposerProject moveNotesToLayer(Set<Long> ids, int targetLayer) {
@@ -251,7 +282,7 @@ public record ComposerProject(
 		List<NoteEvent> targetNotes = new ArrayList<>(updated.get(target).notes());
 		targetNotes.addAll(moving);
 		updated.set(target, updated.get(target).withNotes(targetNotes));
-		return new ComposerProject(name, ppq, tempoMicrosPerQuarter, updated, target, nextNoteId);
+		return with(updated, target, nextNoteId);
 	}
 
 	/**
@@ -285,7 +316,7 @@ public record ComposerProject(
 				updated.add(layers.get(index));
 			}
 		}
-		return new ComposerProject(name, ppq, tempoMicrosPerQuarter, updated, mergedIndex, nextNoteId);
+		return with(updated, mergedIndex, nextNoteId);
 	}
 
 	public ComposerProject moveLayer(int layerIndex, int direction) {
@@ -308,7 +339,7 @@ public record ComposerProject(
 		} else if (from > active && to <= active) {
 			active++;
 		}
-		return new ComposerProject(name, ppq, tempoMicrosPerQuarter, updated, active, nextNoteId);
+		return with(updated, active, nextNoteId);
 	}
 
 	/**
@@ -324,7 +355,7 @@ public record ComposerProject(
 		List<Layer> updated = layers.stream()
 			.map(layer -> layer.withNotes(mergeRepeats(layer.notes(), window, scope)))
 			.toList();
-		return new ComposerProject(name, ppq, tempoMicrosPerQuarter, updated, activeLayerIndex, nextNoteId);
+		return with(updated, activeLayerIndex, nextNoteId);
 	}
 
 	/** Snaps note starts onto the given grid, within {@code scope} or everywhere if it is empty. */
@@ -337,7 +368,7 @@ public record ComposerProject(
 					note.midiNote()))
 				.toList()))
 			.toList();
-		return new ComposerProject(name, ppq, tempoMicrosPerQuarter, updated, activeLayerIndex, nextNoteId);
+		return with(updated, activeLayerIndex, nextNoteId);
 	}
 
 	private static boolean inScope(NoteEvent note, Set<Long> scope) {
@@ -359,7 +390,7 @@ public record ComposerProject(
 						note.midiNote() + octaveShiftIntoNoteBlockRange(note.midiNote())))
 				.toList()))
 			.toList();
-		return new ComposerProject(name, ppq, tempoMicrosPerQuarter, updated, activeLayerIndex, nextNoteId);
+		return with(updated, activeLayerIndex, nextNoteId);
 	}
 
 	/** Tempo at which one grid step is a whole number of repeater ticks. */
@@ -372,11 +403,13 @@ public record ComposerProject(
 	}
 
 	public ComposerProject withTempo(int value) {
-		return new ComposerProject(name, ppq, value, layers, activeLayerIndex, nextNoteId);
+		return new ComposerProject(name, ppq, value, layers, activeLayerIndex, nextNoteId,
+			endTick, speedQuarters);
 	}
 
 	public ComposerProject withName(String value) {
-		return new ComposerProject(value, ppq, tempoMicrosPerQuarter, layers, activeLayerIndex, nextNoteId);
+		return new ComposerProject(value, ppq, tempoMicrosPerQuarter, layers, activeLayerIndex, nextNoteId,
+			endTick, speedQuarters);
 	}
 
 	public MinecraftConversion convertToMinecraft(int quantizeTicks, boolean snapTempo) {
@@ -452,7 +485,10 @@ public record ComposerProject(
 			convertedTempo,
 			convertedLayers,
 			convertedActiveLayer,
-			nextNoteId
+			nextNoteId,
+			// The marker is a musical position, so a tempo change moves it with the notes.
+			Math.round(endTick * (tempoMicrosPerQuarter / (double)convertedTempo)),
+			speedQuarters
 		);
 		return new MinecraftConversion(
 			converted,
@@ -489,7 +525,7 @@ public record ComposerProject(
 		notes.add(new NoteEvent(nextNoteId, midiNote, startTick, durationTicks, 96));
 		List<Layer> updated = new ArrayList<>(layers);
 		updated.set(target, layer.withNotes(notes));
-		return new ComposerProject(name, ppq, tempoMicrosPerQuarter, updated, target, nextNoteId + 1L);
+		return with(updated, target, nextNoteId + 1L);
 	}
 
 	public PasteResult pasteNotes(int layerIndex, List<ClipboardNote> clipboard, long startTick) {
@@ -510,7 +546,7 @@ public record ComposerProject(
 		List<Layer> updated = new ArrayList<>(layers);
 		updated.set(target, layer.withNotes(notes));
 		return new PasteResult(
-			new ComposerProject(name, ppq, tempoMicrosPerQuarter, updated, target, id),
+			with(updated, target, id),
 			Set.copyOf(addedIds)
 		);
 	}
@@ -525,7 +561,7 @@ public record ComposerProject(
 				.filter(note -> !selected.contains(note.id()))
 				.toList()))
 			.toList();
-		return new ComposerProject(name, ppq, tempoMicrosPerQuarter, updated, activeLayerIndex, nextNoteId);
+		return with(updated, activeLayerIndex, nextNoteId);
 	}
 
 	public ComposerProject moveNotes(Set<Long> ids, long tickDelta, int pitchDelta) {
@@ -541,39 +577,85 @@ public record ComposerProject(
 					: note)
 				.toList()))
 			.toList();
-		return new ComposerProject(name, ppq, tempoMicrosPerQuarter, updated, activeLayerIndex, nextNoteId);
+		return with(updated, activeLayerIndex, nextNoteId);
 	}
 
-	public long endTick() {
+	/** Where the notes actually stop, ignoring any trailing silence the marker adds. */
+	public long contentEndTick() {
 		return layers.stream()
 			.flatMap(layer -> layer.notes().stream())
-			.mapToLong(note -> note.startTick() + note.durationTicks())
+			.mapToLong(NoteEvent::startTick)
 			.max()
-			.orElse(ppq * 4L);
+			.orElse(0L);
 	}
 
-	private String sequenceText(Layer layer, int delayScaleQuarters) {
+	/** Pulls the end marker back to the last note, discarding deliberate trailing silence. */
+	public ComposerProject trimmedToContent() {
+		return withEndTick(contentEndTick());
+	}
+
+	/** Moves the end marker. Values before the last note are pulled forward to it. */
+	public ComposerProject withEndTick(long value) {
+		return new ComposerProject(name, ppq, tempoMicrosPerQuarter, layers, activeLayerIndex,
+			nextNoteId, Math.max(0L, value), speedQuarters);
+	}
+
+	public ComposerProject withSpeedQuarters(int value) {
+		return new ComposerProject(name, ppq, tempoMicrosPerQuarter, layers, activeLayerIndex,
+			nextNoteId, endTick, value);
+	}
+
+	/**
+	 * The build projection of one layer: exactly the steps the in-world builder places.
+	 *
+	 * <p>This, not text, is the build path. Track text is a human-facing rendering of the same
+	 * steps, so the two cannot disagree about what a composition builds as.</p>
+	 */
+	public List<Step> toSteps(Layer layer) {
 		List<NoteEvent> buildable = layer.notes().stream().filter(NoteEvent::isBuildable).toList();
-		List<String> tokens = new ArrayList<>();
+		List<Step> steps = new ArrayList<>();
 		long previousTick = 0L;
 		for (int index = 0; index < buildable.size();) {
 			long eventTick = buildable.get(index).startTick();
-			// Round once, after the timescale is applied. Rounding to whole repeater ticks first
-			// destroys any gap shorter than one tick, which makes the timescale slider inert on
-			// fast songs: 0.3125 ticks collapses to 0, and 0 stays 0 at every scale.
-			double physicalDelay = composerTicksToMinecraftTicks(
-				Math.max(0L, eventTick - previousTick), ppq, tempoMicrosPerQuarter
-			);
-			int rawDelay = (int)Math.max(0L,
-				Math.round(physicalDelay * 4.0 / Math.max(1, delayScaleQuarters)));
-			addDelayTokens(tokens, rawDelay);
+			NoteSequence.addDelaySteps(steps, buildDelayTicks(eventTick - previousTick));
 			while (index < buildable.size() && buildable.get(index).startTick() == eventTick) {
-				tokens.add(Integer.toString(buildable.get(index).noteBlockPitch()));
+				steps.add(Step.note(buildable.get(index).noteBlockPitch()));
 				index++;
 			}
 			previousTick = eventTick;
 		}
+		// Trailing silence, up to the end marker. It is what makes a loop come round evenly, and
+		// when a composition has no notes at all it is the entire build -- a bare repeater chain.
+		NoteSequence.addDelaySteps(steps, buildDelayTicks(endTick - previousTick));
+		return List.copyOf(steps);
+	}
+
+	/** The same projection rendered as sequence text, for export and for reading. */
+	public String toText(Layer layer) {
+		List<String> tokens = new ArrayList<>();
+		for (Step step : toSteps(layer)) {
+			if (step.type() != StepType.REPEATER) {
+				tokens.add(Integer.toString(step.value()));
+			} else if (step.delayIndex() == 0) {
+				// One token per delay, not per repeater: the group already knows its own total.
+				tokens.add(step.delayTotal() + "d");
+			}
+		}
 		return String.join(", ", tokens);
+	}
+
+	/**
+	 * A gap in composer ticks as the whole repeater ticks a build would use for it.
+	 *
+	 * <p>Rounds once, after the speed is applied. Rounding to whole repeater ticks first destroys
+	 * any gap shorter than one tick, which makes the speed control inert on fast songs: 0.3125
+	 * ticks collapses to 0, and 0 stays 0 at every speed.</p>
+	 */
+	private int buildDelayTicks(long composerTicks) {
+		double physical = composerTicksToMinecraftTicks(
+			Math.max(0L, composerTicks), ppq, tempoMicrosPerQuarter
+		);
+		return (int)Math.max(0L, Math.round(physical * 4.0 / Math.max(1, speedQuarters)));
 	}
 
 	private static List<Layer> normalizeLayers(List<Layer> source) {
@@ -683,15 +765,6 @@ public record ComposerProject(
 		}
 		int octaves = Math.abs(shift / 12);
 		return " (" + (shift > 0 ? "+" : "-") + octaves + " oct)";
-	}
-
-	private static void addDelayTokens(List<String> tokens, int delay) {
-		int remaining = delay;
-		while (remaining > 0) {
-			int chunk = Math.min(remaining, NoteSequence.MAX_GROUPED_DELAY);
-			tokens.add(chunk + "d");
-			remaining -= chunk;
-		}
 	}
 
 	public record ClipboardNote(long tickOffset, int midiNote, long durationTicks, int velocity) {

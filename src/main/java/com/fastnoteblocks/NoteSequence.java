@@ -66,14 +66,7 @@ public final class NoteSequence {
 				if (parsed < 1 || parsed > MAX_GROUPED_DELAY) {
 					throw new IllegalArgumentException("Repeater delays must be between 1d and 64d");
 				}
-				int scaled = Math.max(1, Math.round(parsed * scaleQuarters / 4.0F));
-				int repeaterCount = (scaled + 3) / 4;
-				int remaining = scaled;
-				for (int index = 0; index < repeaterCount; index++) {
-					int delay = Math.min(4, remaining);
-					steps.add(Step.groupedRepeater(delay, scaled, index, repeaterCount));
-					remaining -= delay;
-				}
+				addDelaySteps(steps, Math.max(1, Math.round(parsed * scaleQuarters / 4.0F)));
 			} else {
 				if (parsed < 0 || parsed >= NotePitch.PITCH_COUNT) {
 					throw new IllegalArgumentException("Note pitches must be between 0 and 24");
@@ -82,6 +75,30 @@ public final class NoteSequence {
 			}
 		}
 		return List.copyOf(steps);
+	}
+
+	/**
+	 * Appends the repeaters that reproduce a delay of {@code totalTicks} redstone ticks.
+	 *
+	 * <p>Two limits apply and they are different. A repeater tops out at 4 ticks, so a delay needs
+	 * {@code ceil(n/4)} of them; the steps of one delay carry grouping metadata so the overlay can
+	 * show "12d" once rather than three unexplained 4s. A single {@code Nd} token tops out at
+	 * {@link #MAX_GROUPED_DELAY}, so longer delays become several groups -- chunking here as well
+	 * keeps a projection's steps and its text identical rather than merely equivalent.</p>
+	 */
+	public static void addDelaySteps(List<Step> steps, int totalTicks) {
+		int outstanding = totalTicks;
+		while (outstanding > 0) {
+			int group = Math.min(outstanding, MAX_GROUPED_DELAY);
+			int repeaterCount = (group + 3) / 4;
+			int remaining = group;
+			for (int index = 0; index < repeaterCount; index++) {
+				int delay = Math.min(4, remaining);
+				steps.add(Step.groupedRepeater(delay, group, index, repeaterCount));
+				remaining -= delay;
+			}
+			outstanding -= group;
+		}
 	}
 
 	public static List<Token> tokens(String value) {
