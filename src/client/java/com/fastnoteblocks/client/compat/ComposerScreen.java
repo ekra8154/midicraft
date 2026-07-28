@@ -690,7 +690,7 @@ public final class ComposerScreen extends Screen {
 		}
 		LayerAction[] actions = LayerAction.values();
 		int menuHeight = actions.length * CONTEXT_MENU_ROW_HEIGHT + 4;
-		int menuWidth = LAYER_MENU_WIDTH;
+		int menuWidth = layerMenuWidth();
 		graphics.fill(layerMenuX, layerMenuY, layerMenuX + menuWidth, layerMenuY + menuHeight, 0xF0101115);
 		graphics.fill(layerMenuX, layerMenuY, layerMenuX + menuWidth, layerMenuY + 1, 0xFFAAAAAA);
 		for (int index = 0; index < actions.length; index++) {
@@ -702,24 +702,41 @@ public final class ComposerScreen extends Screen {
 				graphics.fill(layerMenuX + 2, rowY, layerMenuX + menuWidth - 2,
 					rowY + CONTEXT_MENU_ROW_HEIGHT, 0xFF356070);
 			}
-			String label = actions[index] == LayerAction.MERGE_SELECTED
-				? "Merge " + selectedLayers.size() + " layers"
-				: actions[index].label;
-			graphics.text(font, Component.literal(label), layerMenuX + 6, rowY + 4,
+			graphics.text(font, Component.literal(layerActionLabel(actions[index])), layerMenuX + 6, rowY + 4,
 				enabled ? 0xFFFFFFFF : 0xFF777777, false);
 		}
+	}
+
+	private String layerActionLabel(LayerAction action) {
+		int selected = selectedLayers.size();
+		return switch (action) {
+			case MERGE_SELECTED -> "Merge " + selected + " layers";
+			case INCLUDE_SELECTED -> "Include " + layerCountLabel(Math.max(1, selected)) + " in sequence";
+			case SET_INCLUDED_TO_SELECTION ->
+				"Include only " + layerCountLabel(Math.max(1, selected)) + " in sequence";
+			default -> action.label;
+		};
+	}
+
+	private int layerMenuWidth() {
+		int widest = LAYER_MENU_WIDTH;
+		for (LayerAction action : LayerAction.values()) {
+			widest = Math.max(widest, font.width(layerActionLabel(action)) + 14);
+		}
+		return widest;
 	}
 
 	private boolean layerActionEnabled(LayerAction action) {
 		return switch (action) {
 			case MERGE_SELECTED -> selectedLayers.size() >= 2;
+			case INCLUDE_SELECTED, SET_INCLUDED_TO_SELECTION -> !selectedLayers.isEmpty();
 			case SELECT_ALL, COLLAPSE_OTHERS -> true;
 		};
 	}
 
 	private boolean handleLayerMenuClick(double mouseX, double mouseY) {
 		LayerAction[] actions = LayerAction.values();
-		if (mouseX < layerMenuX || mouseX >= layerMenuX + LAYER_MENU_WIDTH) {
+		if (mouseX < layerMenuX || mouseX >= layerMenuX + layerMenuWidth()) {
 			return false;
 		}
 		int row = ((int)mouseY - layerMenuY - 2) / CONTEXT_MENU_ROW_HEIGHT;
@@ -733,6 +750,8 @@ public final class ComposerScreen extends Screen {
 		layerMenuOpen = false;
 		switch (action) {
 			case MERGE_SELECTED -> mergeSelectedLayers();
+			case INCLUDE_SELECTED -> setIncludedLayers(true);
+			case SET_INCLUDED_TO_SELECTION -> setIncludedLayers(false);
 			case SELECT_ALL -> {
 				selectedLayers.clear();
 				for (int index = 0; index < project().layers().size(); index++) {
@@ -775,8 +794,19 @@ public final class ComposerScreen extends Screen {
 		}
 	}
 
+	/**
+	 * Menu width from the widest row it holds.
+	 *
+	 * <p>Fixed widths were fine while every label was two words. Labels that count what they will
+	 * act on are not a fixed length, and were running past the edge of the panel they were drawn
+	 * in.</p>
+	 */
 	private int toolbarMenuWidth() {
-		return toolbarMenu == ToolbarMenu.IMPORT ? IMPORT_MENU_WIDTH : TOOLBAR_MENU_WIDTH;
+		int widest = toolbarMenu == ToolbarMenu.IMPORT ? IMPORT_MENU_WIDTH : TOOLBAR_MENU_WIDTH;
+		for (String row : toolbarRows()) {
+			widest = Math.max(widest, font.width(row) + 14);
+		}
+		return Math.min(widest, Math.max(60, width - toolbarMenuX - 4));
 	}
 
 	private List<String> toolbarRows() {
@@ -876,12 +906,13 @@ public final class ComposerScreen extends Screen {
 		switch (action) {
 			case IMPORT -> importSong();
 			case OPEN_SONGS -> minecraft.gui.setScreen(new SongsScreen(parent, config));
-			case COPY_AS_TEXT -> copyActiveLayerAsText();
+			case COPY_AS_TEXT -> copySequenceAsText();
 			case INCLUDE_SELECTED -> setIncludedLayers(true);
 			case SET_INCLUDED_TO_SELECTION -> setIncludedLayers(false);
 			case PASTE_IN_WORLD -> pasteInWorld();
 			case BUILD_CANCEL -> CommandPasteSender.cancel(true);
 			case SAVE_COMPOSITION -> saveComposition();
+			case SAVE_COMPOSITION_AS -> saveCompositionAs();
 			case BACK_TO_SEQUENCES -> onClose();
 			case CLOSE_TO_GAME -> closeToGame();
 			case UNDO -> undo();
@@ -971,12 +1002,17 @@ public final class ComposerScreen extends Screen {
 	private String toolbarRowLabel(ToolbarAction action) {
 		int selected = selectionLayers().size();
 		if (selected > 0 && action == ToolbarAction.INCLUDE_SELECTED) {
-			return "Include these " + selected + (selected == 1 ? " layer" : " layers");
+			return "Include " + layerCountLabel(selected) + " in sequence";
 		}
 		if (selected > 0 && action == ToolbarAction.SET_INCLUDED_TO_SELECTION) {
-			return "Include only these " + selected + (selected == 1 ? " layer" : " layers");
+			return "Include only " + layerCountLabel(selected) + " in sequence";
 		}
 		return action.label;
+	}
+
+	/** "this layer" reads better than "these 1 layer", and the count matters at any size. */
+	private static String layerCountLabel(int count) {
+		return count == 1 ? "this layer" : "these " + count + " layers";
 	}
 
 	private String importSettingLabel(ImportSetting setting) {
@@ -2262,30 +2298,6 @@ public final class ComposerScreen extends Screen {
 	}
 
 	/**
-	 * Puts the active layer's build projection on the clipboard.
-	 *
-	 * <p>Text leaves the composer, it never comes back in over a composition: the projection drops
-	 * out-of-range notes, rounds every gap to a whole repeater tick and bakes the tempo away, so
-	 * reading it back would silently discard all three. Import text as a new song instead.</p>
-	 */
-	private void copyActiveLayerAsText() {
-		Layer layer = project().layers().get(project().activeLayerIndex());
-		String text = project().toText(layer);
-		if (text.isBlank()) {
-			showResult(Component.literal("\"" + layer.name() + "\" has nothing buildable to copy."));
-			return;
-		}
-		minecraft.keyboardHandler.setClipboard(text);
-		long dropped = layer.notes().stream().filter(note -> !note.isBuildable()).count();
-		String report = "Copied \"" + layer.name() + "\" - " + text.length() + " characters at "
-			+ FastNoteblocksConfig.delayScaleLabel(delayScaleQuarters());
-		if (dropped > 0) {
-			report += ", " + dropped + " out-of-range notes left out";
-		}
-		showResult(Component.literal(report));
-	}
-
-	/**
 	 * Fills in build dots from the current selection.
 	 *
 	 * <p>The dot is the one thing that decides what builds, so this writes dots rather than going
@@ -2335,6 +2347,57 @@ public final class ComposerScreen extends Screen {
 		return report;
 	}
 
+	/**
+	 * Puts the build sequence on the clipboard, one line per included layer.
+	 *
+	 * <p>Text leaves the composer; it never comes back in over a composition. The projection drops
+	 * out-of-range notes, rounds every gap to a whole repeater tick and bakes the tempo away, so
+	 * reading it back would silently discard all three. Import text as a new composition instead.</p>
+	 */
+	private void copySequenceAsText() {
+		var sequence = config.tracks();
+		if (sequence.isEmpty()) {
+			showResult(Component.literal("Nothing is included, so there is no sequence to copy."));
+			return;
+		}
+		String text = sequence.stream()
+			.map(FastNoteblocksConfig.SequenceTrack::sequence)
+			.filter(line -> !line.isBlank())
+			.collect(java.util.stream.Collectors.joining(System.lineSeparator()));
+		if (text.isBlank()) {
+			showResult(Component.literal("The included layers have nothing buildable in them."));
+			return;
+		}
+		minecraft.keyboardHandler.setClipboard(text);
+		SongAnalysis stats = projectStats();
+		String report = "Copied the sequence - " + sequence.size()
+			+ (sequence.size() == 1 ? " layer, " : " layers, ") + text.length() + " characters at "
+			+ FastNoteblocksConfig.delayScaleLabel(delayScaleQuarters());
+		if (stats.outOfRange() > 0) {
+			report += ", " + stats.outOfRange() + " out-of-range notes left out";
+		}
+		showResult(Component.literal(report));
+	}
+
+	/**
+	 * Saves a copy under a new name and switches to it.
+	 *
+	 * <p>This is how a version gets held still. The sequence follows whichever composition is open,
+	 * so freezing a build means having a second composition rather than a frozen projection.</p>
+	 */
+	private void saveCompositionAs() {
+		minecraft.gui.setScreen(new NamePromptScreen(this, "Save composition as",
+			"Save a copy of \"" + project().name() + "\" under a new name",
+			project().name() + " copy", "Save copy", name -> {
+				ComposerProject copy = project().withName(name);
+				String id = FastNoteblocksConfig.songs().newId(name);
+				FastNoteblocksConfig.songs().save(id, copy);
+				config.setActiveSongId(id);
+				FastNoteblocksConfig.save();
+				minecraft.gui.setScreen(new ComposerScreen(parent, config));
+			}));
+	}
+
 	/** Pastes the build sequence with commands, for when you have op and would rather not place it by hand. */
 	private void pasteInWorld() {
 		if (CommandPasteSender.isRunning()) {
@@ -2347,7 +2410,7 @@ public final class ComposerScreen extends Screen {
 		}
 		if (config.tracks().stream().allMatch(track -> track.sequence().isBlank())) {
 			showResult(Component.literal(
-				"The build sequence is empty. Move some layers into it first."));
+				"The build sequence is empty. Include some layers first."));
 			return;
 		}
 		minecraft.gui.setScreen(new BuildOptionsScreen(this, project().name(), config.tracks(),
@@ -2897,9 +2960,10 @@ public final class ComposerScreen extends Screen {
 
 	private enum ToolbarAction {
 		IMPORT("Import MIDI / NBS..."),
-		OPEN_SONGS("Open song..."),
-		COPY_AS_TEXT("Copy layer as text"),
+		OPEN_SONGS("Open composition..."),
+		COPY_AS_TEXT("Copy sequence as text"),
 		SAVE_COMPOSITION("Save composition"),
+		SAVE_COMPOSITION_AS("Save composition as..."),
 		BACK_TO_SEQUENCES("Back"),
 		CLOSE_TO_GAME("Close to game"),
 		UNDO("Undo"),
@@ -2909,8 +2973,8 @@ public final class ComposerScreen extends Screen {
 		QUANTIZE("Quantize to grid", true),
 		FIT_ALL_RANGE("Fit into range", true),
 		SNAP_TEMPO("Snap tempo (whole song)"),
-		INCLUDE_SELECTED("Include selected layers"),
-		SET_INCLUDED_TO_SELECTION("Set included layers to selection"),
+		INCLUDE_SELECTED("Include selected layers in sequence"),
+		SET_INCLUDED_TO_SELECTION("Include only selected layers in sequence"),
 		PASTE_IN_WORLD("Paste current sequence in world (requires op)..."),
 		BUILD_CANCEL("Cancel paste"),
 		SNAP_END("Snap end to grid"),
@@ -2922,7 +2986,8 @@ public final class ComposerScreen extends Screen {
 		SELECT_NONE("Nothing");
 
 		private static final ToolbarAction[] FILE_ACTIONS = {
-			SAVE_COMPOSITION, OPEN_SONGS, IMPORT, COPY_AS_TEXT, BACK_TO_SEQUENCES, CLOSE_TO_GAME
+			SAVE_COMPOSITION, SAVE_COMPOSITION_AS, OPEN_SONGS, IMPORT, COPY_AS_TEXT,
+			BACK_TO_SEQUENCES, CLOSE_TO_GAME
 		};
 		private static final ToolbarAction[] EDIT_ACTIONS = {
 			UNDO, REDO, CONVERT, MERGE_REPEATS, QUANTIZE, FIT_ALL_RANGE, SNAP_TEMPO,
@@ -2951,6 +3016,8 @@ public final class ComposerScreen extends Screen {
 
 	private enum LayerAction {
 		MERGE_SELECTED("Merge selected"),
+		INCLUDE_SELECTED("Include selected layers in sequence"),
+		SET_INCLUDED_TO_SELECTION("Include only selected layers in sequence"),
 		SELECT_ALL("Select all layers"),
 		COLLAPSE_OTHERS("Collapse others");
 
