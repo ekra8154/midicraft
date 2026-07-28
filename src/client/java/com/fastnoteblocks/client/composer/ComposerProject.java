@@ -9,7 +9,9 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 
 /**
  * Persistent, MIDI-shaped representation of a composition.
@@ -112,6 +114,14 @@ public record ComposerProject(
 		public Layer withVisible(boolean value) {
 			return new Layer(name, instrument, muted, buildEnabled, value, notes);
 		}
+	}
+
+	public record MinecraftConversion(
+		ComposerProject project,
+		int shiftedNotes,
+		int addedLayers,
+		boolean tempoChanged
+	) {
 	}
 
 	public static ComposerProject empty(String name) {
@@ -235,6 +245,72 @@ public record ComposerProject(
 		return new ComposerProject(value, ppq, tempoMicrosPerQuarter, layers, activeLayerIndex, nextNoteId);
 	}
 
+	public MinecraftConversion convertToMinecraft(int quantizeTicks, boolean snapTempo) {
+		int grid = Math.max(1, quantizeTicks);
+		int convertedTempo = snapTempo ? repeaterAlignedTempo(grid) : tempoMicrosPerQuarter;
+		List<Layer> convertedLayers = new ArrayList<>();
+		int convertedActiveLayer = 0;
+		int shiftedNotes = 0;
+
+		Comparator<Integer> shiftsNearestFirst = Comparator
+			.comparingInt((Integer shift) -> Math.abs(shift))
+			.thenComparingInt(Integer::intValue);
+		for (int layerIndex = 0; layerIndex < layers.size(); layerIndex++) {
+			Layer source = layers.get(layerIndex);
+			Map<Integer, List<NoteEvent>> notesByShift = new TreeMap<>(shiftsNearestFirst);
+			if (source.notes().isEmpty()) {
+				notesByShift.put(0, List.of());
+			}
+			for (NoteEvent note : source.notes()) {
+				int shift = octaveShiftIntoNoteBlockRange(note.midiNote());
+				long quantizedStart = Math.max(0L, Math.round(note.startTick() / (double)grid) * (long)grid);
+				NoteEvent converted = note.movedTo(quantizedStart, note.midiNote() + shift);
+				notesByShift.computeIfAbsent(shift, ignored -> new ArrayList<>()).add(converted);
+				if (shift != 0) {
+					shiftedNotes++;
+				}
+			}
+			if (convertedLayers.size() + notesByShift.size() > MAX_LAYERS) {
+				throw new IllegalStateException(
+					"Conversion needs " + (convertedLayers.size() + notesByShift.size())
+						+ " layers, but Composer supports at most " + MAX_LAYERS + "."
+				);
+			}
+			if (layerIndex == activeLayerIndex) {
+				convertedActiveLayer = convertedLayers.size();
+			}
+			for (Map.Entry<Integer, List<NoteEvent>> entry : notesByShift.entrySet()) {
+				int shift = entry.getKey();
+				String convertedName = notesByShift.size() == 1 && shift == 0
+					? source.name()
+					: source.name() + octaveShiftSuffix(shift);
+				convertedLayers.add(new Layer(
+					convertedName,
+					source.instrument(),
+					source.muted(),
+					source.buildEnabled(),
+					source.visible(),
+					entry.getValue()
+				));
+			}
+		}
+
+		ComposerProject converted = new ComposerProject(
+			name,
+			ppq,
+			convertedTempo,
+			convertedLayers,
+			convertedActiveLayer,
+			nextNoteId
+		);
+		return new MinecraftConversion(
+			converted,
+			shiftedNotes,
+			Math.max(0, convertedLayers.size() - layers.size()),
+			convertedTempo != tempoMicrosPerQuarter
+		);
+	}
+
 	public ComposerProject addNote(int layerIndex, int midiNote, long startTick, long durationTicks) {
 		int target = Math.max(0, Math.min(layers.size() - 1, layerIndex));
 		Layer layer = layers.get(target);
@@ -347,6 +423,36 @@ public record ComposerProject(
 
 	private static int composerTicksToMinecraftTicks(long ticks, int ppq, int tempoMicrosPerQuarter) {
 		return Math.max(0, (int)Math.round(ticks * tempoMicrosPerQuarter / (double)ppq / 100_000.0));
+	}
+
+	private int repeaterAlignedTempo(int gridTicks) {
+		double gridRepeaterTicks = gridTicks * tempoMicrosPerQuarter / (double)ppq / 100_000.0;
+		int nearestRepeaterTicks = Math.max(1, (int)Math.round(gridRepeaterTicks));
+		return Math.max(1, (int)Math.round(
+			nearestRepeaterTicks * 100_000.0 * ppq / gridTicks
+		));
+	}
+
+	private static int octaveShiftIntoNoteBlockRange(int midiNote) {
+		int bestShift = 0;
+		int bestDistance = Integer.MAX_VALUE;
+		for (int shift = -120; shift <= 120; shift += 12) {
+			int shifted = midiNote + shift;
+			if (shifted >= NOTE_BLOCK_BASE_MIDI_NOTE && shifted <= NOTE_BLOCK_MAX_MIDI_NOTE
+					&& Math.abs(shift) < bestDistance) {
+				bestShift = shift;
+				bestDistance = Math.abs(shift);
+			}
+		}
+		return bestShift;
+	}
+
+	private static String octaveShiftSuffix(int shift) {
+		if (shift == 0) {
+			return " (in range)";
+		}
+		int octaves = Math.abs(shift / 12);
+		return " (" + (shift > 0 ? "+" : "-") + octaves + " oct)";
 	}
 
 	private static void addDelayTokens(List<String> tokens, int delay) {

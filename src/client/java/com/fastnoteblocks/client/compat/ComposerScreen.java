@@ -5,6 +5,7 @@ import com.fastnoteblocks.client.composer.ComposerHistory;
 import com.fastnoteblocks.client.composer.ComposerProject;
 import com.fastnoteblocks.client.composer.ComposerProject.ClipboardNote;
 import com.fastnoteblocks.client.composer.ComposerProject.Layer;
+import com.fastnoteblocks.client.composer.ComposerProject.MinecraftConversion;
 import com.fastnoteblocks.client.composer.ComposerProject.NoteEvent;
 import com.fastnoteblocks.client.composer.ComposerProject.PasteResult;
 import com.mojang.blaze3d.platform.InputConstants;
@@ -63,7 +64,6 @@ public final class ComposerScreen extends Screen {
 	private Button redoButton;
 	private Button playButton;
 	private Button snapButton;
-	private Button previewModeButton;
 	private DelayScaleSlider delayScaleSlider;
 	private Button addLayerButton;
 	private EditBox layerNameBox;
@@ -94,7 +94,6 @@ public final class ComposerScreen extends Screen {
 	private int instrumentMenuLayer = -1;
 	private int editingLayer = -1;
 	private int snapSubdivision = 4;
-	private boolean minecraftPreview;
 	private boolean contextMenuOpen;
 	private int contextMenuX;
 	private int contextMenuY;
@@ -149,13 +148,10 @@ public final class ComposerScreen extends Screen {
 			.tooltip(Tooltip.create(Component.literal("Grid used when adding or dragging notes")))
 			.build());
 		x += 82;
-		previewModeButton = addRenderableWidget(Button.builder(previewModeLabel(), button -> {
-			stopPlayback();
-			minecraftPreview = !minecraftPreview;
-			button.setMessage(previewModeLabel());
-		}).bounds(x, 7, 94, 20)
+		addRenderableWidget(Button.builder(Component.literal("Convert"), button -> convertToMinecraft())
+			.bounds(x, 7, 94, 20)
 			.tooltip(Tooltip.create(Component.literal(
-				"Source preserves MIDI timing and pitches; Minecraft snaps timing and skips out-of-range notes"
+				"Quantize timing, align tempo to repeaters, and split octave-shifted notes into editable layers"
 			)))
 			.build());
 		x += 98;
@@ -325,6 +321,79 @@ public final class ComposerScreen extends Screen {
 		transposeSelected(bestShift);
 	}
 
+	private void convertToMinecraft() {
+		stopPlayback();
+		int gridTicks = minecraftConversionGridTicks();
+		boolean snapTempo = config.midiTempoFit() == FastNoteblocksConfig.MidiTempoFit.SNAP_TO_REPEATERS;
+		try {
+			MinecraftConversion conversion = project().convertToMinecraft(gridTicks, snapTempo);
+			if (conversion.project().equals(project())) {
+				minecraft.gui.hud.setOverlayMessage(
+					Component.literal("This composition is already Minecraft-ready."), true
+				);
+				return;
+			}
+			apply(conversion.project());
+			selectedNotes.clear();
+			instrumentMenuLayer = -1;
+			centerMinecraftRange();
+			rebuildLayerButtons();
+			rebuildMoveLayerButtons();
+			String report = "Converted at " + conversionGridLabel(gridTicks)
+				+ ": " + conversion.shiftedNotes() + " pitch-shifted"
+				+ (conversion.addedLayers() > 0 ? ", +" + conversion.addedLayers() + " layers" : "")
+				+ (conversion.tempoChanged() ? ", tempo aligned to repeaters" : "");
+			minecraft.gui.hud.setOverlayMessage(Component.literal(report), true);
+		} catch (IllegalStateException exception) {
+			minecraft.gui.setScreen(new ConfirmScreen(confirmed -> minecraft.gui.setScreen(this),
+				Component.literal("Too many converted layers"),
+				Component.literal(exception.getMessage()),
+				CommonComponents.GUI_BACK, CommonComponents.GUI_CANCEL));
+		}
+	}
+
+	private int minecraftConversionGridTicks() {
+		return switch (config.midiQuantizeGrid()) {
+			case QUARTER -> project().ppq();
+			case EIGHTH -> Math.max(1, project().ppq() / 2);
+			case SIXTEENTH -> Math.max(1, project().ppq() / 4);
+			case AUTO -> automaticConversionGridTicks();
+		};
+	}
+
+	private int automaticConversionGridTicks() {
+		List<Long> starts = project().layers().stream()
+			.flatMap(layer -> layer.notes().stream())
+			.map(NoteEvent::startTick)
+			.distinct()
+			.sorted()
+			.toList();
+		long smallestGap = Long.MAX_VALUE;
+		for (int index = 1; index < starts.size(); index++) {
+			long gap = starts.get(index) - starts.get(index - 1);
+			if (gap > 0 && gap < smallestGap) {
+				smallestGap = gap;
+			}
+		}
+		if (smallestGap <= Math.max(1, project().ppq() * 3L / 8L)) {
+			return Math.max(1, project().ppq() / 4);
+		}
+		if (smallestGap <= Math.max(1, project().ppq() * 3L / 4L)) {
+			return Math.max(1, project().ppq() / 2);
+		}
+		return project().ppq();
+	}
+
+	private String conversionGridLabel(int gridTicks) {
+		if (gridTicks <= Math.max(1, project().ppq() / 4)) {
+			return "1/16";
+		}
+		if (gridTicks <= Math.max(1, project().ppq() / 2)) {
+			return "1/8";
+		}
+		return "1/4";
+	}
+
 	private void cycleSnap() {
 		snapSubdivision = switch (snapSubdivision) {
 			case 1 -> 2;
@@ -344,10 +413,6 @@ public final class ComposerScreen extends Screen {
 			case 8 -> "Snap 1/32";
 			default -> "Snap off";
 		});
-	}
-
-	private Component previewModeLabel() {
-		return Component.literal(minecraftPreview ? "Minecraft" : "Source MIDI");
 	}
 
 	private void importMidi() {
@@ -1083,11 +1148,7 @@ public final class ComposerScreen extends Screen {
 				long noteMicros = Math.round(
 					(note.startTick() - playbackStartTick) * project().tempoMicrosPerQuarter() / (double)project().ppq()
 				);
-				if (minecraftPreview) {
-					noteMicros = Math.round(noteMicros / 100_000.0) * 100_000L;
-				}
-				if (elapsedMicros >= noteMicros && (!minecraftPreview || note.isBuildable())
-						&& playedNotes.add(note.id())) {
+				if (elapsedMicros >= noteMicros && playedNotes.add(note.id())) {
 					instrument.play(note.midiNote() - ComposerProject.NOTE_BLOCK_BASE_MIDI_NOTE);
 				}
 			}
