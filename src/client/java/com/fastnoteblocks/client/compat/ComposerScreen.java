@@ -787,6 +787,13 @@ public final class ComposerScreen extends Screen {
 				graphics.fill(toolbarMenuX + 2, rowY, toolbarMenuX + menuWidth - 2,
 					rowY + TOOLBAR_MENU_ROW_HEIGHT, 0xFF356070);
 			}
+			if (toolbarMenu != ToolbarMenu.IMPORT && index < toolbarActions().length) {
+				String hint = toolbarShortcut(toolbarActions()[index]);
+				if (!hint.isEmpty()) {
+					graphics.text(font, Component.literal(hint),
+						toolbarMenuX + menuWidth - 6 - font.width(hint), rowY + 5, 0xFF6E7480, false);
+				}
+			}
 			graphics.text(font, Component.literal(rows.get(index)), toolbarMenuX + 6, rowY + 5,
 				enabled ? 0xFFFFFFFF : 0xFF777777, false);
 		}
@@ -805,8 +812,13 @@ public final class ComposerScreen extends Screen {
 	 */
 	private int toolbarMenuWidth() {
 		int widest = toolbarMenu == ToolbarMenu.IMPORT ? IMPORT_MENU_WIDTH : TOOLBAR_MENU_WIDTH;
-		for (String row : toolbarRows()) {
-			widest = Math.max(widest, font.width(row) + 14);
+		List<String> rows = toolbarRows();
+		ToolbarAction[] actions = toolbarActions();
+		for (int index = 0; index < rows.size(); index++) {
+			int hint = toolbarMenu == ToolbarMenu.IMPORT || index >= actions.length
+				? 0
+				: font.width(toolbarShortcut(actions[index]));
+			widest = Math.max(widest, font.width(rows.get(index)) + (hint == 0 ? 14 : hint + 30));
 		}
 		return Math.min(widest, Math.max(60, width - toolbarMenuX - 4));
 	}
@@ -999,6 +1011,20 @@ public final class ComposerScreen extends Screen {
 				+ (selectionLayers().size() == 1 ? " layer" : " layers");
 		showResult(Component.literal(
 			selectedNotes.size() + " notes " + label + scope));
+	}
+
+	/** Keyboard equivalent, shown beside a menu row so the shortcut can be discovered by using it. */
+	private static String toolbarShortcut(ToolbarAction action) {
+		return switch (action) {
+			case SAVE_COMPOSITION -> "Ctrl+S";
+			case SAVE_COMPOSITION_AS -> "Ctrl+Shift+S";
+			case OPEN_SONGS -> "Ctrl+O";
+			case IMPORT -> "Ctrl+I";
+			case COPY_AS_TEXT -> "Ctrl+Shift+C";
+			case UNDO -> "Ctrl+Z";
+			case REDO -> "Ctrl+Y";
+			default -> "";
+		};
 	}
 
 	private String toolbarRowLabel(ToolbarAction action) {
@@ -2050,6 +2076,34 @@ public final class ComposerScreen extends Screen {
 		if (event.hasControlDownWithQuirk() && event.key() == GLFW.GLFW_KEY_Y) {
 			redo();
 			return true;
+		}
+		if (event.hasControlDownWithQuirk() && layerNameBox == null) {
+			// Ctrl+C is already taken by copying notes, so copying the sequence takes the shifted
+			// one, the way editors usually shift a variant of an existing action.
+			switch (event.key()) {
+				case GLFW.GLFW_KEY_S -> {
+					if (event.hasShiftDown()) {
+						saveCompositionAs();
+					} else {
+						saveComposition();
+					}
+					return true;
+				}
+				case GLFW.GLFW_KEY_O -> {
+					minecraft.gui.setScreen(new SongsScreen(parent, config));
+					return true;
+				}
+				case GLFW.GLFW_KEY_I -> {
+					importSong();
+					return true;
+				}
+				default -> {
+					if (event.hasShiftDown() && event.key() == GLFW.GLFW_KEY_C) {
+						copySequenceAsText();
+						return true;
+					}
+				}
+			}
 		}
 		int digit = event.getDigit();
 		if (event.hasControlDownWithQuirk() && digit >= 0) {
