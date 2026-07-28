@@ -8,6 +8,7 @@ import com.fastnoteblocks.client.composer.ComposerProject.Layer;
 import com.fastnoteblocks.client.composer.ComposerProject.MinecraftConversion;
 import com.fastnoteblocks.client.composer.ComposerProject.NoteEvent;
 import com.fastnoteblocks.client.composer.ComposerProject.PasteResult;
+import com.fastnoteblocks.client.composer.ComposerState;
 import com.mojang.blaze3d.platform.InputConstants;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -61,6 +62,7 @@ public final class ComposerScreen extends Screen {
 	private static final double BOX_SCROLL_MAX_PIXELS = 22.0;
 	private static final double BOX_SCROLL_MAX_ROWS = 2.0;
 	private static final long TOOLTIP_DWELL_MILLIS = 260L;
+	private static final long SCALE_COALESCE_MILLIS = 400L;
 	private static final int SNAP_REPEATER = -1;
 	private static final long PREVIEW_BACKLOG_TOLERANCE_MICROS = 100_000L;
 	private static final int MIN_MIDI_NOTE = 0;
@@ -124,6 +126,7 @@ public final class ComposerScreen extends Screen {
 	private int contextMenuY;
 	private ToolbarMenu toolbarMenu = ToolbarMenu.NONE;
 	private int toolbarMenuX;
+	private long lastScaleChangeAt;
 	private long hoveredNoteId = -1L;
 	private long hoveredSince;
 	private ComposerProject cachedStatsProject;
@@ -141,7 +144,8 @@ public final class ComposerScreen extends Screen {
 		this.config = config;
 		this.onReturn = onReturn == null ? () -> {
 		} : onReturn;
-		this.history = new ComposerHistory(config.composerProject());
+		this.history = new ComposerHistory(new ComposerState(
+			config.composerProject(), config.activeSequenceDelayScaleQuarters()));
 	}
 
 	@Override
@@ -473,9 +477,9 @@ public final class ComposerScreen extends Screen {
 				);
 				return;
 			}
-			apply(conversion.project());
+			applyState(new ComposerState(conversion.project(),
+				FastNoteblocksConfig.DEFAULT_SEQUENCE_DELAY_SCALE_QUARTERS));
 			delayScaleSlider.setScale(FastNoteblocksConfig.DEFAULT_SEQUENCE_DELAY_SCALE_QUARTERS);
-			setDelayScale(FastNoteblocksConfig.DEFAULT_SEQUENCE_DELAY_SCALE_QUARTERS);
 			selectedNotes.clear();
 			instrumentMenuLayer = -1;
 			collapseAllButActive();
@@ -638,11 +642,11 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private void applyImportedProject(ComposerProject imported, String report) {
-		apply(imported);
+		applyState(new ComposerState(imported,
+			FastNoteblocksConfig.DEFAULT_SEQUENCE_DELAY_SCALE_QUARTERS));
 		selectedNotes.clear();
 		horizontalScroll = 0L;
 		delayScaleSlider.setScale(FastNoteblocksConfig.DEFAULT_SEQUENCE_DELAY_SCALE_QUARTERS);
-		setDelayScale(FastNoteblocksConfig.DEFAULT_SEQUENCE_DELAY_SCALE_QUARTERS);
 		collapseAllButActive();
 		centerMinecraftRange();
 		rebuildLayerButtons();
@@ -880,11 +884,12 @@ public final class ComposerScreen extends Screen {
 			case SNAP_TEMPO -> applyStep("Tempo snapped", project().withTempo(
 				project().repeaterAlignedTempoFor(minecraftConversionGridTicks(project()))));
 			case SELECT_OFF_GRID -> selectNotesWhere("off grid",
-				note -> projectStats().timing().offGrid().contains(note.startTick()));
+				note -> projectStats().timing().offGrid().contains(note.startTick()), true);
 			case SELECT_TOO_FREQUENT -> selectNotesWhere("too frequent",
-				note -> projectStats().timing().crowded().contains(note.startTick()));
-			case SELECT_OUT_OF_RANGE -> selectNotesWhere("out of range", note -> !note.isBuildable());
-			case SELECT_ALL_NOTES -> selectNotesWhere("selected", note -> true);
+				note -> projectStats().timing().crowded().contains(note.startTick()), true);
+			case SELECT_OUT_OF_RANGE -> selectNotesWhere("out of range",
+				note -> !note.isBuildable(), true);
+			case SELECT_ALL_NOTES -> selectNotesWhere("selected", note -> true, false);
 			case SELECT_NONE -> {
 				selectedNotes.clear();
 				updateButtonStates();
@@ -912,23 +917,39 @@ public final class ComposerScreen extends Screen {
 		minecraft.gui.hud.setOverlayMessage(Component.literal(report), true);
 	}
 
-	/** Selects every note in a visible layer matching a build problem, so it can be acted on. */
-	private void selectNotesWhere(String label, java.util.function.Predicate<NoteEvent> match) {
+	/**
+	 * Selects notes matching a build problem, within the selected layers.
+	 *
+	 * <p>When notes are already selected this narrows that set rather than replacing it, so box
+	 * selecting a passage and then picking a fault leaves only the faulty notes of that passage.
+	 * Selecting everything is the one action that widens, since it is how you start over.</p>
+	 */
+	private void selectNotesWhere(
+		String label,
+		java.util.function.Predicate<NoteEvent> match,
+		boolean narrowExisting
+	) {
+		Set<Long> previous = Set.copyOf(selectedNotes);
+		boolean narrowing = narrowExisting && !previous.isEmpty();
 		selectedNotes.clear();
-		for (Layer layer : project().layers()) {
+		for (int layerIndex : selectionLayers()) {
+			Layer layer = project().layers().get(layerIndex);
 			if (!layer.visible()) {
 				continue;
 			}
 			for (NoteEvent note : layer.notes()) {
-				if (match.test(note)) {
+				if (match.test(note) && (!narrowing || previous.contains(note.id()))) {
 					selectedNotes.add(note.id());
 				}
 			}
 		}
 		updateButtonStates();
+		String scope = narrowing
+			? " of " + previous.size() + " selected"
+			: " across " + selectionLayers().size()
+				+ (selectionLayers().size() == 1 ? " layer" : " layers");
 		minecraft.gui.hud.setOverlayMessage(Component.literal(
-			selectedNotes.size() + " notes " + label
-				+ (selectedNotes.isEmpty() ? "" : " - right-click the roll for actions")), true);
+			selectedNotes.size() + " notes " + label + scope), true);
 	}
 
 	private String importSettingLabel(ImportSetting setting) {
@@ -1462,7 +1483,7 @@ public final class ComposerScreen extends Screen {
 	private ProjectStats projectStats() {
 		ComposerProject current = project();
 		if (cachedStatsProject == current && cachedStats != null
-				&& cachedStatsScale == config.activeSequenceDelayScaleQuarters()) {
+				&& cachedStatsScale == delayScaleQuarters()) {
 			return cachedStats;
 		}
 		Map<Long, Integer> counts = new HashMap<>();
@@ -1483,7 +1504,7 @@ public final class ComposerScreen extends Screen {
 		int peak = counts.values().stream().mapToInt(Integer::intValue).max().orElse(0);
 		long overloaded = counts.values().stream().filter(count -> count > MAX_SIMULTANEOUS_NOTES).count();
 		cachedStatsProject = current;
-		cachedStatsScale = config.activeSequenceDelayScaleQuarters();
+		cachedStatsScale = delayScaleQuarters();
 		cachedStats = new ProjectStats(outOfRange, Map.copyOf(counts), peak, overloaded,
 			maximumNoteDuration, totalNotes, timingIssues(current, counts.keySet()));
 		return cachedStats;
@@ -2058,7 +2079,7 @@ public final class ComposerScreen extends Screen {
 	 * can actually play, which is useless if you cannot hear its effect.</p>
 	 */
 	private double timescaleFactor() {
-		return Math.max(1, config.activeSequenceDelayScaleQuarters())
+		return Math.max(1, delayScaleQuarters())
 			/ (double)FastNoteblocksConfig.DEFAULT_SEQUENCE_DELAY_SCALE_QUARTERS;
 	}
 
@@ -2112,18 +2133,22 @@ public final class ComposerScreen extends Screen {
 
 	private void undo() {
 		history.undo();
-		playbackStartTick = Math.min(playbackStartTick, project().endTick());
-		selectedNotes.clear();
-		saveProject();
-		rebuildLayerButtons();
-		rebuildMoveLayerButtons();
-		updateButtonStates();
+		afterHistoryMove();
 	}
 
 	private void redo() {
 		history.redo();
+		afterHistoryMove();
+	}
+
+	private void afterHistoryMove() {
 		playbackStartTick = Math.min(playbackStartTick, project().endTick());
 		selectedNotes.clear();
+		// setScale only moves the widget; it does not fire the listener, so this cannot loop back
+		// into another history entry.
+		if (delayScaleSlider != null) {
+			delayScaleSlider.setScale(delayScaleQuarters());
+		}
 		saveProject();
 		rebuildLayerButtons();
 		rebuildMoveLayerButtons();
@@ -2131,8 +2156,16 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private void apply(ComposerProject project) {
-		history.apply(project);
-		playbackStartTick = Math.min(playbackStartTick, project.endTick());
+		applyState(history.current().withProject(project));
+	}
+
+	private void applyState(ComposerState state) {
+		history.apply(state);
+		afterStateChange();
+	}
+
+	private void afterStateChange() {
+		playbackStartTick = Math.min(playbackStartTick, project().endTick());
 		if (playing) {
 			playbackStartedAt = Util.getMillis();
 			resetPlaybackSchedule();
@@ -2164,6 +2197,7 @@ public final class ComposerScreen extends Screen {
 
 	private void saveProject() {
 		config.setComposerProject(project());
+		config.setActiveSequenceDelayScaleQuarters(delayScaleQuarters());
 		FastNoteblocksConfig.save();
 	}
 
@@ -2174,9 +2208,17 @@ public final class ComposerScreen extends Screen {
 			playbackStartTick = Math.max(0L, Math.min(project().endTick(), playbackTick()));
 			playbackStartedAt = Util.getMillis();
 		}
-		config.setComposerProject(project());
-		config.setActiveSequenceDelayScaleQuarters(scaleQuarters);
-		FastNoteblocksConfig.save();
+		// The slider fires on every increment of a drag. Record one step for the gesture and fold
+		// the rest into it, or a single drag would push dozens of entries and evict real edits.
+		ComposerState next = history.current().withDelayScaleQuarters(scaleQuarters);
+		long now = Util.getMillis();
+		if (now - lastScaleChangeAt < SCALE_COALESCE_MILLIS) {
+			history.replaceCurrent(next);
+			afterStateChange();
+		} else {
+			applyState(next);
+		}
+		lastScaleChangeAt = now;
 		if (playing) {
 			resetPlaybackSchedule();
 		}
@@ -2341,7 +2383,11 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private ComposerProject project() {
-		return history.current();
+		return history.current().project();
+	}
+
+	private int delayScaleQuarters() {
+		return history.current().delayScaleQuarters();
 	}
 
 	private ComposerProject displayProject() {
