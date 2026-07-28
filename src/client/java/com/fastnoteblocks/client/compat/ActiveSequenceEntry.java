@@ -268,7 +268,6 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 		BlockPos origin = pasteOrigin(minecraft, forward);
 		return switch (mode) {
 			case COMPACT -> createCompactPastePlan(origin, forward, notes);
-			case COMPACT_LOOP -> createCompactLoopPastePlan(origin, forward, notes);
 			case STRAIGHT -> createStraightPastePlan(origin, forward, notes);
 		};
 	}
@@ -376,51 +375,6 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 		return placements.finish(PasteMode.COMPACT);
 	}
 
-	private PastePlan createCompactLoopPastePlan(BlockPos origin, Direction forward, List<EventNote> notes) {
-		List<EventGroup> events = eventGroups(notes);
-		IllegalArgumentException lastFailure = null;
-		for (LoopLayout layout : compactLoopLayouts(events)) {
-			try {
-				return buildCompactLoopPastePlan(origin, forward, events, layout);
-			} catch (IllegalArgumentException exception) {
-				lastFailure = exception;
-			}
-		}
-		throw lastFailure == null
-			? new IllegalArgumentException("Could not create a compact loop layout")
-			: lastFailure;
-	}
-
-	private PastePlan buildCompactLoopPastePlan(BlockPos origin, Direction forward, List<EventGroup> events,
-			LoopLayout layout) {
-		PlacementPlan placements = new PlacementPlan();
-		BlockPos cursor = origin;
-		Direction travel = forward;
-		Direction laneAxis = forward.getClockWise();
-		int row = 0;
-		int currentTime = 0;
-		for (int index = 0; index < events.size(); index++) {
-			EventGroup event = events.get(index);
-			int delay = event.time() - currentTime;
-			SpatialDelayTrigger trigger = addSpatialDelayBeforeEvent(placements, cursor, travel, delay);
-			cursor = addSpatialEventModule(placements, trigger.cursor(), travel, trigger.triggerDelay(), event.notes());
-			currentTime = event.time();
-			if (layout.breakAfter().contains(index + 1)) {
-				int laneDelta = layout.laneOrder().get(row + 1) - layout.laneOrder().get(row);
-				Direction shift = laneDelta > 0 ? laneAxis : laneAxis.getOpposite();
-				int turnDistance = Math.abs(laneDelta) * COMPACT_LANE_SPACING;
-				if (event.maxSafeTurnDistance() < turnDistance) {
-					throw new IllegalArgumentException("Chord at time " + event.time()
-						+ " cannot safely feed this compact loop turn");
-				}
-				cursor = addCompactTurn(placements, cursor, travel, shift, turnDistance);
-				travel = travel.getOpposite();
-				row++;
-			}
-		}
-		return placements.finish(PasteMode.COMPACT_LOOP);
-	}
-
 	private static List<EventGroup> eventGroups(List<EventNote> notes) {
 		List<EventGroup> result = new ArrayList<>();
 		int currentTime = 0;
@@ -457,25 +411,6 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 		return best == null ? new CompactLayout(Set.of(), totalLength, 3) : best;
 	}
 
-	private static List<LoopLayout> compactLoopLayouts(List<EventGroup> events) {
-		int totalLength = totalEventLength(events);
-		List<LoopLayout> layouts = new ArrayList<>();
-		for (int targetLength : compactTargetCandidates(events)) {
-			CompactLayout base = compactLayoutForTarget(events, targetLength);
-			List<Integer> laneOrder = pairedLaneOrder(base.breakAfter().size() + 1);
-			int endpointDistance = compactEndpointDistance(events, base.breakAfter())
-				+ Math.abs(laneOrder.getLast()) * COMPACT_LANE_SPACING;
-			layouts.add(new LoopLayout(base.breakAfter(), laneOrder, base.width(), base.depth(), endpointDistance));
-		}
-		if (layouts.isEmpty()) {
-			layouts.add(new LoopLayout(Set.of(), List.of(0), totalLength, 3, totalLength));
-		}
-		layouts.sort(Comparator.comparingInt(LoopLayout::squareSize)
-			.thenComparingInt(LoopLayout::endpointDistance)
-			.thenComparingInt(LoopLayout::area));
-		return List.copyOf(layouts);
-	}
-
 	private static int totalEventLength(List<EventGroup> events) {
 		return events.stream().mapToInt(EventGroup::length).sum();
 	}
@@ -490,35 +425,6 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 			candidates.add(Math.max(largestEvent, (totalLength + rows - 1) / rows));
 		}
 		return candidates;
-	}
-
-	private static List<Integer> pairedLaneOrder(int rows) {
-		if (rows <= 1) {
-			return List.of(0);
-		}
-		// Fill the even lanes outward, cross over once, then fill the skipped odd lanes inward.
-		// For six rows this is 0, 2, 4, 5, 3, 1, leaving the endpoint beside the start.
-		List<Integer> order = new ArrayList<>(rows);
-		for (int lane = 0; lane < rows; lane += 2) {
-			order.add(lane);
-		}
-		int lastOdd = rows % 2 == 0 ? rows - 1 : rows - 2;
-		for (int lane = lastOdd; lane >= 1; lane -= 2) {
-			order.add(lane);
-		}
-		return List.copyOf(order);
-	}
-
-	private static int compactEndpointDistance(List<EventGroup> events, Set<Integer> breaks) {
-		int cursor = 0;
-		int direction = 1;
-		for (int index = 0; index < events.size(); index++) {
-			cursor += direction * events.get(index).length();
-			if (breaks.contains(index + 1)) {
-				direction = -direction;
-			}
-		}
-		return Math.abs(cursor);
 	}
 
 	private static CompactLayout compactLayoutForTarget(List<EventGroup> events, int targetLength) {
@@ -1655,25 +1561,8 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 		}
 	}
 
-	private record LoopLayout(
-		Set<Integer> breakAfter,
-		List<Integer> laneOrder,
-		int width,
-		int depth,
-		int endpointDistance
-	) {
-		int squareSize() {
-			return Math.max(width, depth);
-		}
-
-		int area() {
-			return width * depth;
-		}
-	}
-
 	private enum PasteMode {
 		COMPACT("Compact"),
-		COMPACT_LOOP("Compact loop"),
 		STRAIGHT("Straight");
 
 		private final String label;
@@ -1749,20 +1638,17 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 			int centerX = width / 2;
 			int buttonY = height / 2 + 8;
 			addRenderableWidget(Button.builder(Component.literal("Compact"), button -> choose(PasteMode.COMPACT))
-				.bounds(centerX - 190, buttonY, 88, 20)
-				.tooltip(Tooltip.create(Component.literal("Snake the circuit into the smallest near-square footprint")))
-				.build());
-			addRenderableWidget(Button.builder(Component.literal("Compact loop"),
-					button -> choose(PasteMode.COMPACT_LOOP))
-				.bounds(centerX - 98, buttonY, 96, 20)
-				.tooltip(Tooltip.create(Component.literal("Fill paired lanes so the circuit finishes near its start")))
+				.bounds(centerX - 138, buttonY, 88, 20)
+				.tooltip(Tooltip.create(Component.literal(
+					"Fold one continuous signal path into a compact snake"
+				)))
 				.build());
 			addRenderableWidget(Button.builder(Component.literal("Straight"), button -> choose(PasteMode.STRAIGHT))
-				.bounds(centerX + 2, buttonY, 88, 20)
+				.bounds(centerX - 44, buttonY, 88, 20)
 				.tooltip(Tooltip.create(Component.literal("Keep the original straight playable line")))
 				.build());
 			addRenderableWidget(Button.builder(CommonComponents.GUI_CANCEL, button -> onClose())
-				.bounds(centerX + 94, buttonY, 88, 20)
+				.bounds(centerX + 50, buttonY, 88, 20)
 				.build());
 		}
 
@@ -1781,7 +1667,7 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 			super.extractRenderState(graphics, mouseX, mouseY, partialTick);
 			graphics.centeredText(font, title, width / 2, height / 2 - 34, 0xFFFFFFFF);
 			graphics.centeredText(font,
-				Component.literal("Compact loop returns near its start; compact minimizes the square footprint."),
+				Component.literal("Both layouts use one continuous, non-crossing redstone path."),
 				width / 2, height / 2 - 14, 0xFFBBBBBB);
 		}
 
