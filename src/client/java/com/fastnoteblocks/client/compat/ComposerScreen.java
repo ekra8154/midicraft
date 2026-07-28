@@ -42,6 +42,8 @@ public final class ComposerScreen extends Screen {
 	private static final int LAYER_ROW_HEIGHT = 42;
 	private static final int CONTEXT_MENU_WIDTH = 104;
 	private static final int CONTEXT_MENU_ROW_HEIGHT = 16;
+	private static final int TOOLBAR_MENU_WIDTH = 126;
+	private static final int TOOLBAR_MENU_ROW_HEIGHT = 18;
 	private static final int ROW_HEIGHT = 12;
 	private static final int MAX_SIMULTANEOUS_NOTES = 30;
 	private static final int CHORD_WARNING_THRESHOLD = 24;
@@ -60,8 +62,6 @@ public final class ComposerScreen extends Screen {
 	private final List<Button> layerButtons = new ArrayList<>();
 	private final List<Button> moveLayerButtons = new ArrayList<>();
 	private List<ClipboardNote> clipboard = List.of();
-	private Button undoButton;
-	private Button redoButton;
 	private Button playButton;
 	private Button snapButton;
 	private DelayScaleSlider delayScaleSlider;
@@ -97,6 +97,8 @@ public final class ComposerScreen extends Screen {
 	private boolean contextMenuOpen;
 	private int contextMenuX;
 	private int contextMenuY;
+	private ToolbarMenu toolbarMenu = ToolbarMenu.NONE;
+	private int toolbarMenuX;
 	private ComposerProject cachedStatsProject;
 	private ProjectStats cachedStats;
 
@@ -121,42 +123,22 @@ public final class ComposerScreen extends Screen {
 		rollHeight = Math.max(40, height - rollY - 24);
 		centerMinecraftRange();
 		int x = 8;
-		addRenderableWidget(Button.builder(Component.literal("Done"), button -> onClose())
+		addRenderableWidget(Button.builder(Component.literal("File"), button -> toggleToolbarMenu(ToolbarMenu.FILE, 8))
 			.bounds(x, 7, 54, 20).build());
 		x += 58;
-		undoButton = addRenderableWidget(Button.builder(Component.literal("Undo"), button -> undo())
-			.bounds(x, 7, 52, 20).build());
-		x += 56;
-		redoButton = addRenderableWidget(Button.builder(Component.literal("Redo"), button -> redo())
-			.bounds(x, 7, 52, 20).build());
-		x += 56;
+		addRenderableWidget(Button.builder(Component.literal("Edit"), button -> toggleToolbarMenu(ToolbarMenu.EDIT, 66))
+			.bounds(x, 7, 54, 20).build());
+		x += 58;
 		playButton = addRenderableWidget(Button.builder(playLabel(), button -> togglePlayback())
 			.bounds(x, 7, 54, 20)
 			.tooltip(Tooltip.create(Component.literal("Preview all unmuted layers")))
 			.build());
 		x += 58;
-		addRenderableWidget(Button.builder(Component.literal("Paste / Text"), button -> onClose())
-			.bounds(x, 7, 86, 20)
-			.tooltip(Tooltip.create(Component.literal("Return to the text sequence and settings screen")))
-			.build());
-		x += 90;
-		addRenderableWidget(Button.builder(Component.literal("Import..."), button -> importSong())
-			.bounds(x, 7, 82, 20)
-			.tooltip(Tooltip.create(Component.literal("Import a MIDI or Note Block Studio song")))
-			.build());
-		x += 86;
 		snapButton = addRenderableWidget(Button.builder(snapLabel(), button -> cycleSnap())
 			.bounds(x, 7, 78, 20)
 			.tooltip(Tooltip.create(Component.literal("Grid used when adding or dragging notes")))
 			.build());
 		x += 82;
-		addRenderableWidget(Button.builder(Component.literal("Convert"), button -> convertToMinecraft())
-			.bounds(x, 7, 94, 20)
-			.tooltip(Tooltip.create(Component.literal(
-				"Quantize timing, align tempo to repeaters, and split octave-shifted notes into editable layers"
-			)))
-			.build());
-		x += 98;
 		delayScaleSlider = addRenderableWidget(new DelayScaleSlider(
 			x, 7, 94, 20, config.activeSequenceDelayScaleQuarters(), this::setDelayScale
 		));
@@ -521,6 +503,94 @@ public final class ComposerScreen extends Screen {
 		super.extractRenderState(graphics, mouseX, mouseY, partialTick);
 		extractInstrumentMenu(graphics, mouseX, mouseY);
 		extractContextMenu(graphics, mouseX, mouseY);
+		extractToolbarMenu(graphics, mouseX, mouseY);
+	}
+
+	private void extractToolbarMenu(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
+		ToolbarAction[] actions = toolbarActions();
+		if (actions.length == 0) {
+			return;
+		}
+		int menuY = 28;
+		int menuHeight = actions.length * TOOLBAR_MENU_ROW_HEIGHT + 4;
+		graphics.fill(toolbarMenuX, menuY, toolbarMenuX + TOOLBAR_MENU_WIDTH, menuY + menuHeight, 0xF0101115);
+		graphics.fill(toolbarMenuX, menuY, toolbarMenuX + TOOLBAR_MENU_WIDTH, menuY + 1, 0xFFAAAAAA);
+		for (int index = 0; index < actions.length; index++) {
+			ToolbarAction action = actions[index];
+			int rowY = menuY + 2 + index * TOOLBAR_MENU_ROW_HEIGHT;
+			boolean enabled = toolbarActionEnabled(action);
+			boolean hovered = enabled && mouseX >= toolbarMenuX
+				&& mouseX < toolbarMenuX + TOOLBAR_MENU_WIDTH
+				&& mouseY >= rowY && mouseY < rowY + TOOLBAR_MENU_ROW_HEIGHT;
+			if (hovered) {
+				graphics.fill(toolbarMenuX + 2, rowY, toolbarMenuX + TOOLBAR_MENU_WIDTH - 2,
+					rowY + TOOLBAR_MENU_ROW_HEIGHT, 0xFF356070);
+			}
+			graphics.text(font, Component.literal(action.label), toolbarMenuX + 6, rowY + 5,
+				enabled ? 0xFFFFFFFF : 0xFF777777, false);
+		}
+	}
+
+	private void toggleToolbarMenu(ToolbarMenu menu, int x) {
+		if (toolbarMenu == menu) {
+			toolbarMenu = ToolbarMenu.NONE;
+			return;
+		}
+		toolbarMenu = menu;
+		toolbarMenuX = x;
+		contextMenuOpen = false;
+		instrumentMenuLayer = -1;
+	}
+
+	private ToolbarAction[] toolbarActions() {
+		return switch (toolbarMenu) {
+			case FILE -> ToolbarAction.FILE_ACTIONS;
+			case EDIT -> ToolbarAction.EDIT_ACTIONS;
+			case NONE -> new ToolbarAction[0];
+		};
+	}
+
+	private boolean toolbarActionEnabled(ToolbarAction action) {
+		return switch (action) {
+			case UNDO -> history.canUndo();
+			case REDO -> history.canRedo();
+			case CONVERT -> project().layers().stream().anyMatch(layer -> !layer.notes().isEmpty());
+			default -> true;
+		};
+	}
+
+	private boolean handleToolbarMenuClick(double mouseX, double mouseY) {
+		ToolbarAction[] actions = toolbarActions();
+		if (actions.length == 0 || mouseX < toolbarMenuX
+				|| mouseX >= toolbarMenuX + TOOLBAR_MENU_WIDTH) {
+			return false;
+		}
+		int row = ((int)mouseY - 30) / TOOLBAR_MENU_ROW_HEIGHT;
+		if (row < 0 || row >= actions.length) {
+			return false;
+		}
+		int rowY = 30 + row * TOOLBAR_MENU_ROW_HEIGHT;
+		if (mouseY < rowY || mouseY >= rowY + TOOLBAR_MENU_ROW_HEIGHT) {
+			return false;
+		}
+		ToolbarAction action = actions[row];
+		if (!toolbarActionEnabled(action)) {
+			return true;
+		}
+		toolbarMenu = ToolbarMenu.NONE;
+		performToolbarAction(action);
+		return true;
+	}
+
+	private void performToolbarAction(ToolbarAction action) {
+		switch (action) {
+			case IMPORT -> importSong();
+			case BACK_TO_SEQUENCES -> onClose();
+			case CLOSE_TO_GAME -> closeToGame();
+			case UNDO -> undo();
+			case REDO -> redo();
+			case CONVERT -> convertToMinecraft();
+		}
 	}
 
 	private void extractContextMenu(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
@@ -801,6 +871,12 @@ public final class ComposerScreen extends Screen {
 
 	@Override
 	public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
+		if (toolbarMenu != ToolbarMenu.NONE) {
+			if (handleToolbarMenuClick(event.x(), event.y())) {
+				return true;
+			}
+			toolbarMenu = ToolbarMenu.NONE;
+		}
 		if (contextMenuOpen) {
 			if (handleContextMenuClick(event.x(), event.y())) {
 				return true;
@@ -1058,6 +1134,10 @@ public final class ComposerScreen extends Screen {
 
 	@Override
 	public boolean keyPressed(KeyEvent event) {
+		if (toolbarMenu != ToolbarMenu.NONE && event.isEscape()) {
+			toolbarMenu = ToolbarMenu.NONE;
+			return true;
+		}
 		if (contextMenuOpen && event.isEscape()) {
 			contextMenuOpen = false;
 			return true;
@@ -1144,6 +1224,13 @@ public final class ComposerScreen extends Screen {
 		saveProject();
 		onReturn.run();
 		minecraft.gui.setScreen(parent);
+	}
+
+	private void closeToGame() {
+		stopPlayback();
+		saveProject();
+		onReturn.run();
+		minecraft.gui.setScreen(null);
 	}
 
 	private void togglePlayback() {
@@ -1359,12 +1446,6 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private void updateButtonStates() {
-		if (undoButton != null) {
-			undoButton.active = history.canUndo();
-		}
-		if (redoButton != null) {
-			redoButton.active = history.canRedo();
-		}
 		if (playButton != null) {
 			playButton.active = project().layers().stream().anyMatch(layer -> !layer.muted() && !layer.notes().isEmpty());
 			playButton.setMessage(playLabel());
@@ -1578,6 +1659,33 @@ public final class ComposerScreen extends Screen {
 		long overloadedTicks,
 		long maximumNoteDuration
 	) {
+	}
+
+	private enum ToolbarMenu {
+		NONE,
+		FILE,
+		EDIT
+	}
+
+	private enum ToolbarAction {
+		IMPORT("Import MIDI / NBS..."),
+		BACK_TO_SEQUENCES("Back to sequences"),
+		CLOSE_TO_GAME("Close to game"),
+		UNDO("Undo"),
+		REDO("Redo"),
+		CONVERT("Convert for Minecraft");
+
+		private static final ToolbarAction[] FILE_ACTIONS = {
+			IMPORT, BACK_TO_SEQUENCES, CLOSE_TO_GAME
+		};
+		private static final ToolbarAction[] EDIT_ACTIONS = {
+			UNDO, REDO, CONVERT
+		};
+		private final String label;
+
+		ToolbarAction(String label) {
+			this.label = label;
+		}
 	}
 
 	private enum ContextAction {

@@ -229,6 +229,7 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 			minecraft.gui.hud.setOverlayMessage(Component.literal(exception.getMessage()).withStyle(ChatFormatting.RED), true);
 			return;
 		}
+		syncAndSave();
 		Screen returnScreen = minecraft.gui.screen();
 		minecraft.gui.setScreen(new PasteModeScreen(returnScreen, mode -> {
 			minecraft.gui.setScreen(returnScreen);
@@ -246,9 +247,12 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 		}
 		minecraft.gui.setScreen(new ConfirmScreen(confirmed -> {
 			if (confirmed) {
+				syncAndSave();
 				CommandPasteSender.start(plan.commands());
+				minecraft.gui.setScreen(null);
+			} else {
+				minecraft.gui.setScreen(returnScreen);
 			}
-			minecraft.gui.setScreen(returnScreen);
 		}, Component.literal("Place active sequence tracks?"),
 			Component.literal(plan.mode().label() + ": " + plan.width() + " x " + plan.depth() + " x " + plan.height()
 				+ ", " + plan.commands().size() + " commands. Requires /setblock permission and overwrites blocks."),
