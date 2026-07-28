@@ -61,6 +61,9 @@ public final class ComposerScreen extends Screen {
 	private static final double BOX_SCROLL_FULL_SPEED_PIXELS = 140.0;
 	private static final double BOX_SCROLL_MAX_PIXELS = 22.0;
 	private static final double BOX_SCROLL_MAX_ROWS = 2.0;
+	/** How much faster holding at an edge eventually gets, and how long it takes to get there. */
+	private static final double BOX_SCROLL_HELD_BOOST = 4.0;
+	private static final double BOX_SCROLL_BOOST_MILLIS = 900.0;
 	private static final long TOOLTIP_DWELL_MILLIS = 260L;
 	private static final long SCALE_COALESCE_MILLIS = 400L;
 	private static final long TOAST_MILLIS = 4500L;
@@ -108,6 +111,15 @@ public final class ComposerScreen extends Screen {
 	 * while you work on it, not a property of the song, and it has no bearing on what builds.</p>
 	 */
 	private final Set<Integer> soloedLayers = new LinkedHashSet<>();
+	/**
+	 * What the menu row under the cursor does, drawn beneath the menu rather than as a tooltip.
+	 *
+	 * <p>A tooltip loses this fight. Menus draw over the layer panel, and the widget underneath
+	 * keeps its own tooltip registered, so hovering "Convert for Minecraft" showed the instrument
+	 * palette's description instead. Drawing it as part of the menu also means the explanation
+	 * cannot end up covering the thing it explains.</p>
+	 */
+	private String hoveredDescription = "";
 	private boolean draggingEndMarker;
 	private long lastEndDragAt;
 	private long horizontalScroll;
@@ -115,6 +127,8 @@ public final class ComposerScreen extends Screen {
 	private double ticksPerPixel = 10.0;
 	private boolean draggingNotes;
 	private boolean selectingBox;
+	private long horizontalEdgeSince;
+	private long verticalEdgeSince;
 	private double dragStartX;
 	private double dragStartY;
 	private double selectionEndX;
@@ -713,10 +727,31 @@ public final class ComposerScreen extends Screen {
 		extractStatus(graphics);
 		extractToast(graphics);
 		super.extractRenderState(graphics, mouseX, mouseY, partialTick);
+		hoveredDescription = "";
 		extractInstrumentMenu(graphics, mouseX, mouseY);
 		extractContextMenu(graphics, mouseX, mouseY);
 		extractLayerMenu(graphics, mouseX, mouseY);
 		extractToolbarMenu(graphics, mouseX, mouseY);
+		extractMenuDescription(graphics);
+	}
+
+	/** Draws the hovered menu row's explanation in a strip along the bottom of the screen. */
+	private void extractMenuDescription(GuiGraphicsExtractor graphics) {
+		if (hoveredDescription.isEmpty()) {
+			return;
+		}
+		int maxWidth = Math.max(160, width - 32);
+		List<net.minecraft.util.FormattedCharSequence> lines =
+			font.split(Component.literal(hoveredDescription), maxWidth);
+		int textWidth = lines.stream().mapToInt(font::width).max().orElse(0);
+		int height = lines.size() * (font.lineHeight + 2);
+		int top = this.height - 26 - height;
+		graphics.fill(6, top - 4, 14 + textWidth, top + height, 0xF0101115);
+		graphics.fill(6, top - 4, 14 + textWidth, top - 3, 0xFF8FD3FF);
+		for (int index = 0; index < lines.size(); index++) {
+			graphics.text(font, lines.get(index), 10, top + index * (font.lineHeight + 2),
+				0xFFD6D8DD, false);
+		}
 	}
 
 	private void extractLayerMenu(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
@@ -738,8 +773,7 @@ public final class ComposerScreen extends Screen {
 					rowY + CONTEXT_MENU_ROW_HEIGHT, 0xFF356070);
 			}
 			if (hovered) {
-				graphics.setTooltipForNextFrame(
-					Component.literal(layerActionTooltip(actions[index])), mouseX, mouseY);
+				hoveredDescription = layerActionTooltip(actions[index]);
 			}
 			graphics.text(font, Component.literal(layerActionLabel(actions[index])), layerMenuX + 6, rowY + 4,
 				enabled ? 0xFFFFFFFF : 0xFF777777, false);
@@ -832,16 +866,13 @@ public final class ComposerScreen extends Screen {
 				}
 			}
 			if (hovered) {
-				String describe = toolbarMenu == ToolbarMenu.IMPORT
+				hoveredDescription = toolbarMenu == ToolbarMenu.IMPORT
 					? (index < ImportSetting.values().length
 						? importSettingTooltip(ImportSetting.values()[index])
 						: "")
 					: (index < toolbarActions().length
 						? toolbarActionTooltip(toolbarActions()[index])
 						: "");
-				if (!describe.isEmpty()) {
-					graphics.setTooltipForNextFrame(Component.literal(describe), mouseX, mouseY);
-				}
 			}
 			graphics.text(font, Component.literal(rows.get(index)), toolbarMenuX + 6, rowY + 5,
 				enabled ? 0xFFFFFFFF : 0xFF777777, false);
@@ -1084,9 +1115,11 @@ public final class ComposerScreen extends Screen {
 			case CLOSE_TO_GAME -> "Close straight back to the game.";
 			case UNDO -> "Step back. History is kept for this visit only, not across sessions.";
 			case REDO -> "Step forward again.";
-			case CONVERT -> "Does the whole job at once: merge repeats, quantize, fit notes into "
-				+ "range, snap the tempo and the end marker. Slows the song if it is faster than "
-				+ "redstone can play.";
+			case CONVERT -> "Runs every fix in order: bake the speed into the tempo and reset the "
+				+ "slider to 1.00x; collapse same-pitch repeats closer than the merge window; "
+				+ "quantize note starts onto the chosen grid; octave-shift out-of-range notes in, "
+				+ "splitting a layer per shift it needs; snap the tempo so the grid lands on whole "
+				+ "repeater ticks; snap the end marker to match.";
 			case MERGE_REPEATS -> "Collapses a pitch that re-triggers faster than the repeat "
 				+ "window. Songs fake sustain this way, and note blocks cannot sustain.";
 			case QUANTIZE -> "Moves note starts onto the musical grid. Fixes notes between beats, "
@@ -1298,8 +1331,7 @@ public final class ComposerScreen extends Screen {
 					rowY + CONTEXT_MENU_ROW_HEIGHT, 0xFF356070);
 			}
 			if (hovered) {
-				graphics.setTooltipForNextFrame(
-					Component.literal(contextActionTooltip(actions[index])), mouseX, mouseY);
+				hoveredDescription = contextActionTooltip(actions[index]);
 			}
 			graphics.text(font, Component.literal(actions[index].label), contextMenuX + 6, rowY + 4,
 				0xFFFFFFFF, false);
@@ -2140,6 +2172,8 @@ public final class ComposerScreen extends Screen {
 		}
 		if (selectingBox) {
 			selectingBox = false;
+			horizontalEdgeSince = 0L;
+			verticalEdgeSince = 0L;
 			selectNotesInBox();
 			return true;
 		}
@@ -2304,6 +2338,20 @@ public final class ComposerScreen extends Screen {
 	 * cursor is. The drag anchor is moved by the same amount so the box stays pinned to the notes
 	 * it was started over rather than sliding across them.
 	 */
+	/**
+	 * Speed multiplier for a cursor {@code distance} past an edge with {@code runway} pixels of
+	 * screen beyond it.
+	 *
+	 * <p>Distance alone cannot work near a window edge, where there is nowhere left to move the
+	 * mouse. So the ramp is measured against the runway that edge actually has, and holding there
+	 * keeps accelerating -- which is the only control left once the cursor is against the glass.</p>
+	 */
+	private static double edgeRamp(double distance, double runway, long since) {
+		double ramp = Math.min(1.0, distance / Math.max(1.0, Math.min(BOX_SCROLL_FULL_SPEED_PIXELS, runway)));
+		double held = since == 0L ? 0.0 : (Util.getMillis() - since) / BOX_SCROLL_BOOST_MILLIS;
+		return ramp * (1.0 + Math.min(1.0, held) * (BOX_SCROLL_HELD_BOOST - 1.0));
+	}
+
 	private void updateBoxScroll() {
 		if (!selectingBox) {
 			return;
@@ -2314,9 +2362,15 @@ public final class ComposerScreen extends Screen {
 		double above = rollY - lastMouseY;
 
 		double horizontal = right > 0 ? right : left > 0 ? -left : 0.0;
+		horizontalEdgeSince = horizontal == 0.0 ? 0L
+			: horizontalEdgeSince == 0L ? Util.getMillis() : horizontalEdgeSince;
 		if (horizontal != 0.0) {
+			// Runway is what the window actually leaves beyond that edge. The roll ends eight
+			// pixels from the right, so ramping over a fixed 140 meant rightward scrolling could
+			// only ever reach six per cent of the speed leftward got from the layer panel's width.
+			double runway = right > 0 ? width - (rollX + rollWidth) : rollX;
 			double pixels = Math.signum(horizontal)
-				* Math.min(1.0, Math.abs(horizontal) / BOX_SCROLL_FULL_SPEED_PIXELS)
+				* edgeRamp(Math.abs(horizontal), runway, horizontalEdgeSince)
 				* BOX_SCROLL_MAX_PIXELS;
 			long previous = horizontalScroll;
 			horizontalScroll = Math.max(0L, horizontalScroll + Math.round(pixels * ticksPerPixel));
@@ -2324,9 +2378,12 @@ public final class ComposerScreen extends Screen {
 		}
 
 		double vertical = below > 0 ? below : above > 0 ? -above : 0.0;
+		verticalEdgeSince = vertical == 0.0 ? 0L
+			: verticalEdgeSince == 0L ? Util.getMillis() : verticalEdgeSince;
 		if (vertical != 0.0) {
+			double runway = below > 0 ? height - (rollY + rollHeight) : rollY;
 			double rows = Math.signum(vertical)
-				* Math.min(1.0, Math.abs(vertical) / BOX_SCROLL_FULL_SPEED_PIXELS)
+				* edgeRamp(Math.abs(vertical), runway, verticalEdgeSince)
 				* BOX_SCROLL_MAX_ROWS;
 			int previous = topMidiNote;
 			topMidiNote = Math.max(MIN_MIDI_NOTE, Math.min(MAX_MIDI_NOTE,
