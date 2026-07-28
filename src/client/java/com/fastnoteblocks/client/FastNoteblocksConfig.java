@@ -733,17 +733,25 @@ public final class FastNoteblocksConfig {
 	 * pitches -- which is exactly why it is an explicit action rather than a side effect of
 	 * leaving the composer.</p>
 	 */
-	public void publishComposerProject() {
+	public int publishComposerProject() {
+		return publishComposerProject(java.util.Set.of());
+	}
+
+	/**
+	 * Replaces the build sequence with a projection of the given layers.
+	 *
+	 * @param layerIndices layers to move across, or empty for every layer marked for building
+	 * @return how many tracks the sequence now holds
+	 */
+	public int publishComposerProject(java.util.Set<Integer> layerIndices) {
 		ComposerProject project = composerProject();
-		activeTrackIndex = project.activeLayerIndex();
-		// Write the delays already divided by the composer speed, then leave the sequence scale at
-		// 1.00x so nothing multiplies them back. Publishing at the sequence scale meant the two
-		// cancelled and the build always ran at the raw project tempo, however the composer was
-		// previewing it.
-		tracks = normalizeTracks(project.toSequenceTracks(tracks));
-		activeSequenceDelayScaleQuarters = DEFAULT_SEQUENCE_DELAY_SCALE_QUARTERS;
-		activeTrackIndex = clampTrackIndex(activeTrackIndex, tracks.size());
+		// Delays are written already divided by the composer speed, and nothing multiplies them
+		// back afterwards. Publishing at a sequence scale meant the two cancelled and the build
+		// always ran at the raw project tempo, however the composer was previewing it.
+		tracks = normalizeTracks(project.toSequenceTracks(layerIndices));
+		activeTrackIndex = 0;
 		syncLegacyTrackFields();
+		return tracks.size();
 	}
 
 	public int activeTrackIndex() {

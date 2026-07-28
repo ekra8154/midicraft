@@ -175,7 +175,8 @@ public final class ComposerScreen extends Screen {
 		x += 58;
 		addRenderableWidget(Button.builder(Component.literal("Build"), button -> toggleToolbarMenu(ToolbarMenu.BUILD, 240))
 			.bounds(x, 7, 54, 20)
-			.tooltip(Tooltip.create(Component.literal("Place this composition in the world")))
+			.tooltip(Tooltip.create(Component.literal(
+				"Move layers into the build sequence, or paste them with commands")))
 			.build());
 		x += 58;
 		playButton = addRenderableWidget(Button.builder(playLabel(), button -> togglePlayback())
@@ -227,17 +228,8 @@ public final class ComposerScreen extends Screen {
 					boolean next = !project().layers().get(layerIndex).muted();
 					updateLayers(layerIndex, target -> target.withMuted(next));
 				}
-			).bounds(14, y + 22, 24, 16)
+			).bounds(14, y + 22, 36, 16)
 				.tooltip(Tooltip.create(Component.literal(layer.muted() ? "Unmute layer" : "Mute layer")))
-				.build());
-			Button build = addRenderableWidget(Button.builder(
-				Component.literal(layer.buildEnabled() ? "B" : "-"),
-				button -> {
-					boolean next = !project().layers().get(layerIndex).buildEnabled();
-					updateLayers(layerIndex, target -> target.withBuildEnabled(next));
-				}
-			).bounds(40, y + 22, 24, 16)
-				.tooltip(Tooltip.create(Component.literal(layer.buildEnabled() ? "Included when building" : "Skipped when building")))
 				.build());
 			Button visible = addRenderableWidget(Button.builder(
 				Component.literal(layer.visible() ? "S" : "H"),
@@ -245,7 +237,7 @@ public final class ComposerScreen extends Screen {
 					boolean next = !project().layers().get(layerIndex).visible();
 					updateLayers(layerIndex, target -> target.withVisible(next));
 				}
-			).bounds(66, y + 22, 24, 16)
+			).bounds(54, y + 22, 36, 16)
 				.tooltip(Tooltip.create(Component.literal(layer.visible() ? "Shown in the editor" : "Hidden in the editor")))
 				.build());
 			Button instrument = addRenderableWidget(Button.builder(
@@ -266,7 +258,7 @@ public final class ComposerScreen extends Screen {
 				.build());
 			up.active = layerIndex > 0;
 			down.active = layerIndex < project.layers().size() - 1;
-			layerButtons.addAll(List.of(mute, build, visible, instrument, up, down));
+			layerButtons.addAll(List.of(mute, visible, instrument, up, down));
 		}
 	}
 
@@ -843,9 +835,10 @@ public final class ComposerScreen extends Screen {
 			case SELECT_TOO_FREQUENT -> !projectStats().crowded().isEmpty();
 			case SELECT_OUT_OF_RANGE -> projectStats().outOfRange() > 0;
 			case SELECT_NONE -> !selectedNotes.isEmpty();
-			// Refusing to build an unbuildable song here would only hide why. The status bar
-			// already says what is wrong, and the planner reports anything it cannot place.
-			case BUILD_IN_WORLD -> projectStats().totalNotes() > 0 || project().endTick() > 0L;
+			// Not disabled on an unbuildable song: greying it out would hide the reason. The status
+			// bar already names the problem and the planner refuses with a specific one.
+			case PASTE_IN_WORLD -> projectStats().totalNotes() > 0 || project().endTick() > 0L;
+			case MOVE_SELECTED_TO_SEQUENCE -> !selectionLayers().isEmpty();
 			case BUILD_CANCEL -> CommandPasteSender.isRunning();
 			default -> true;
 		};
@@ -874,11 +867,6 @@ public final class ComposerScreen extends Screen {
 			return true;
 		}
 		ToolbarAction action = toolbarActions()[row];
-		if (action == ToolbarAction.BUILD_MODE) {
-			// Stays open: the layout is picked by eye against the counts above it.
-			cyclePasteMode();
-			return true;
-		}
 		toolbarMenu = ToolbarMenu.NONE;
 		performToolbarAction(action);
 		return true;
@@ -889,10 +877,12 @@ public final class ComposerScreen extends Screen {
 			case IMPORT -> importSong();
 			case OPEN_SONGS -> minecraft.gui.setScreen(new SongsScreen(parent, config));
 			case COPY_AS_TEXT -> copyActiveLayerAsText();
-			case BUILD_IN_WORLD -> buildInWorld();
-			case BUILD_MODE -> cyclePasteMode();
+			case MOVE_TO_SEQUENCE -> moveToBuildSequence(Set.of(), "every layer marked for building");
+			case MOVE_SELECTED_TO_SEQUENCE -> moveToBuildSequence(
+				new java.util.LinkedHashSet<>(selectionLayers()), "the selected layers");
+			case PASTE_IN_WORLD -> pasteInWorld();
 			case BUILD_CANCEL -> CommandPasteSender.cancel(true);
-			case SAVE_TO_SEQUENCE -> saveToSequence();
+			case SAVE_COMPOSITION -> saveComposition();
 			case BACK_TO_SEQUENCES -> onClose();
 			case CLOSE_TO_GAME -> closeToGame();
 			case UNDO -> undo();
@@ -980,11 +970,11 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private String toolbarRowLabel(ToolbarAction action) {
-		return switch (action) {
-			case BUILD_MODE -> action.label + ": " + pasteMode().label();
-			case BUILD_IN_WORLD -> CommandPasteSender.isRunning() ? "Stop building" : action.label;
-			default -> action.label;
-		};
+		if (action == ToolbarAction.MOVE_SELECTED_TO_SEQUENCE && !selectionLayers().isEmpty()) {
+			int count = selectionLayers().size();
+			return "Move " + count + (count == 1 ? " layer" : " layers") + " to build sequence";
+		}
+		return action.label;
 	}
 
 	private String importSettingLabel(ImportSetting setting) {
@@ -1161,9 +1151,23 @@ public final class ComposerScreen extends Screen {
 			String mark = selected ? "✓ " : "";
 			graphics.text(font, Component.literal(mark + "L" + (index + 1) + "  " + layer.name() + summary),
 				26, y + 6, activeLayer ? 0xFFFFFFFF : selected ? 0xFFE8F4FF : 0xFFD6D8DD, false);
+			// Filled means this layer goes into the build sequence. Drawn on the header rather than
+			// in the button strip so it survives collapsing -- the point is telling at a glance what
+			// is in, and a row you cannot see cannot tell you anything.
+			graphics.text(font, Component.literal(layer.buildEnabled() ? "●" : "○"),
+				buildDotX(), y + 6, layer.buildEnabled() ? 0xFF5AD46A : 0xFF6A7078, false);
 		}
 		graphics.disableScissor();
 		extractLayerScrollbar(graphics);
+		// This panel draws without mouse coordinates, so the cached position is what there is.
+		int hoveredDot = buildDotAt(lastMouseX, lastMouseY);
+		if (hoveredDot >= 0) {
+			graphics.setTooltipForNextFrame(Component.literal(
+				project().layers().get(hoveredDot).buildEnabled()
+					? "In the build sequence - click to leave it out"
+					: "Left out of the build sequence - click to include it"),
+				(int)lastMouseX, (int)lastMouseY);
+		}
 	}
 
 	private void extractLayerScrollbar(GuiGraphicsExtractor graphics) {
@@ -1640,6 +1644,14 @@ public final class ComposerScreen extends Screen {
 		}
 		if (event.button() == 0 && handleInstrumentMenuClick(event.x(), event.y())) {
 			return true;
+		}
+		if (event.button() == 0) {
+			int dotLayer = buildDotAt(event.x(), event.y());
+			if (dotLayer >= 0) {
+				boolean next = !project().layers().get(dotLayer).buildEnabled();
+				updateLayers(dotLayer, target -> target.withBuildEnabled(next));
+				return true;
+			}
 		}
 		if (event.button() == 0) {
 			int layerIndex = layerHeaderAt(event.x(), event.y());
@@ -2223,21 +2235,20 @@ public final class ComposerScreen extends Screen {
 	 * <p>Explicit rather than automatic on close: the projection drops everything the track text
 	 * cannot express, so leaving the composer should never quietly rewrite a sequence.</p>
 	 */
-	private void saveToSequence() {
+	/**
+	 * Writes the composition to its own file and says so.
+	 *
+	 * <p>Editing already saves on every change, so this changes nothing on disk that was not
+	 * already there. It exists because autosave is invisible, and being able to press save and be
+	 * told it worked is worth more than the keystroke costs.</p>
+	 */
+	private void saveComposition() {
 		saveProject();
-		config.publishComposerProject();
-		FastNoteblocksConfig.save();
 		SongAnalysis stats = projectStats();
-		String report = String.format(java.util.Locale.ROOT,
-			"Composition written to active sequence - %d notes at %s",
-			stats.totalNotes(), FastNoteblocksConfig.delayScaleLabel(delayScaleQuarters()));
-		if (stats.outOfRange() > 0) {
-			report += ", " + stats.outOfRange() + " out of range dropped";
-		}
-		if (!stats.crowded().isEmpty()) {
-			report += ", " + stats.crowded().size() + " timings too close to build";
-		}
-		showResult(Component.literal(report));
+		showResult(Component.literal(String.format(java.util.Locale.ROOT,
+			"Saved \"%s\" - %d notes, %d layers, %s at %s",
+			project().name(), stats.totalNotes(), project().layers().size(),
+			stats.lengthLabel(), FastNoteblocksConfig.delayScaleLabel(delayScaleQuarters()))));
 	}
 
 	/**
@@ -2265,47 +2276,61 @@ public final class ComposerScreen extends Screen {
 	}
 
 	/**
-	 * Places the composition in the world.
+	 * Projects layers into the build sequence -- the flat timeline of notes and repeaters you
+	 * then place, by hand in survival or with commands.
 	 *
-	 * <p>Publishes first, so the in-world placement overlay is looking at the same thing that was
-	 * just built, then hands the plan to the command sender. The plan comes from the composition
-	 * itself -- no track text is consulted on the way.</p>
+	 * <p>Replaces whatever was queued rather than adding to it, so the sequence is always a
+	 * snapshot of one moment. That is also what makes a transient selection a fine way to choose
+	 * layers: the sequence is the thing that remembers the decision, so nothing needs to persist
+	 * the choice that produced it.</p>
 	 */
-	private void buildInWorld() {
+	private void moveToBuildSequence(Set<Integer> layerIndices, String description) {
+		saveProject();
+		int tracks = config.publishComposerProject(layerIndices);
+		FastNoteblocksConfig.save();
+		if (tracks == 0) {
+			showResult(Component.literal(layerIndices.isEmpty()
+				? "No layers are marked for building. Fill in a layer's build dot first."
+				: "Those layers have nothing buildable in them."));
+			return;
+		}
+		SongAnalysis stats = projectStats();
+		SongBuilder.BlockCounts blocks = SongBuilder.blockCounts(project());
+		String report = "Build sequence: " + tracks + (tracks == 1 ? " track" : " tracks")
+			+ " from " + description + " - " + blocks.noteBlocks() + " note blocks, "
+			+ blocks.repeaters() + " repeaters";
+		if (stats.outOfRange() > 0) {
+			report += "; " + stats.outOfRange() + " out-of-range notes left out";
+		}
+		if (!stats.crowded().isEmpty()) {
+			report += "; " + stats.crowded().size() + " timings too close to build";
+		}
+		showResult(Component.literal(report));
+	}
+
+	/** Builds the composition with commands, for when you have op and do not want to place it by hand. */
+	private void pasteInWorld() {
 		if (CommandPasteSender.isRunning()) {
 			CommandPasteSender.cancel(true);
 			return;
 		}
 		if (minecraft.player == null || minecraft.level == null) {
-			showResult(Component.literal("Join a world before building."));
+			showResult(Component.literal("Join a world before pasting."));
 			return;
 		}
-		SongBuilder.PastePlan plan;
-		try {
-			saveToSequence();
-			plan = SongBuilder.plan(minecraft, project(), pasteMode());
-		} catch (IllegalArgumentException refused) {
-			showResult(Component.literal(refused.getMessage())
-				.withStyle(net.minecraft.ChatFormatting.RED));
-			return;
-		}
-		double seconds = plan.commands().size() / (config.commandsPerTick() * 20.0);
-		minecraft.gui.setScreen(new ConfirmScreen(
-			confirmed -> {
-				if (confirmed) {
-					CommandPasteSender.start(plan.commands());
-					minecraft.gui.setScreen(null);
-				} else {
-					minecraft.gui.setScreen(this);
-				}
-			},
-			Component.literal("Build \"" + project().name() + "\" here?"),
-			Component.literal(String.format(java.util.Locale.ROOT,
-				"%s: %d x %d x %d, %d commands at %d/tick (%.1fs). Requires /setblock permission "
-					+ "and overwrites blocks. High rates can trip server command spam limits.",
-				plan.mode().label(), plan.width(), plan.depth(), plan.height(),
-				plan.commands().size(), config.commandsPerTick(), seconds)),
-			Component.literal("Build"), CommonComponents.GUI_CANCEL));
+		minecraft.gui.setScreen(new BuildOptionsScreen(this, project(), pasteMode(), mode -> {
+			SongBuilder.PastePlan plan;
+			try {
+				plan = SongBuilder.plan(minecraft, project(), mode);
+			} catch (IllegalArgumentException refused) {
+				minecraft.gui.setScreen(this);
+				showResult(Component.literal(refused.getMessage())
+					.withStyle(net.minecraft.ChatFormatting.RED));
+				return;
+			}
+			CommandPasteSender.start(plan.commands());
+			minecraft.gui.setScreen(null);
+		}));
 	}
 
 	private SongBuilder.PasteMode pasteMode() {
@@ -2314,14 +2339,6 @@ public final class ComposerScreen extends Screen {
 		} catch (IllegalArgumentException unknown) {
 			return SongBuilder.PasteMode.COMPACT_CUBE;
 		}
-	}
-
-	private void cyclePasteMode() {
-		SongBuilder.PasteMode[] modes = SongBuilder.PasteMode.values();
-		SongBuilder.PasteMode next = modes[(pasteMode().ordinal() + 1) % modes.length];
-		config.setPasteMode(next.name());
-		FastNoteblocksConfig.save();
-		showResult(Component.literal("Build layout: " + next.label()));
 	}
 
 	private void saveProject() {
@@ -2385,6 +2402,28 @@ public final class ComposerScreen extends Screen {
 		double span = SongAnalysis.redstoneTickSpan(project());
 		long gap = Math.max(0L, project().endTick() - content);
 		return content + Math.round(Math.round(gap / span) * span);
+	}
+
+	/** Left edge of the build dot, inset from the panel's right edge. */
+	private int buildDotX() {
+		return LAYER_PANEL_WIDTH - 24;
+	}
+
+	/** The build dot's clickable box, a little larger than the glyph so it is easy to hit. */
+	private int buildDotAt(double x, double y) {
+		if (x < buildDotX() - 4 || x > buildDotX() + 12) {
+			return -1;
+		}
+		for (int index = 0; index < project().layers().size(); index++) {
+			if (!layerRowVisible(index)) {
+				continue;
+			}
+			int top = layerY(index);
+			if (y >= top + 2 && y < top + 18) {
+				return index;
+			}
+		}
+		return -1;
 	}
 
 	private int layerHeaderAt(double x, double y) {
@@ -2827,7 +2866,7 @@ public final class ComposerScreen extends Screen {
 		IMPORT("Import MIDI / NBS..."),
 		OPEN_SONGS("Open song..."),
 		COPY_AS_TEXT("Copy layer as text"),
-		SAVE_TO_SEQUENCE("Save to sequence"),
+		SAVE_COMPOSITION("Save composition"),
 		BACK_TO_SEQUENCES("Back"),
 		CLOSE_TO_GAME("Close to game"),
 		UNDO("Undo"),
@@ -2837,9 +2876,10 @@ public final class ComposerScreen extends Screen {
 		QUANTIZE("Quantize to grid", true),
 		FIT_ALL_RANGE("Fit into range", true),
 		SNAP_TEMPO("Snap tempo (whole song)"),
-		BUILD_IN_WORLD("Build in world..."),
-		BUILD_MODE("Layout"),
-		BUILD_CANCEL("Cancel build"),
+		MOVE_TO_SEQUENCE("Move to build sequence"),
+		MOVE_SELECTED_TO_SEQUENCE("Move selected layers to build sequence"),
+		PASTE_IN_WORLD("Paste in world (requires op)..."),
+		BUILD_CANCEL("Cancel paste"),
 		SNAP_END("Snap end to grid"),
 		TRIM_END("Trim end to last note"),
 		SELECT_OFF_GRID("Off grid"),
@@ -2849,14 +2889,14 @@ public final class ComposerScreen extends Screen {
 		SELECT_NONE("Nothing");
 
 		private static final ToolbarAction[] FILE_ACTIONS = {
-			IMPORT, OPEN_SONGS, COPY_AS_TEXT, SAVE_TO_SEQUENCE, BACK_TO_SEQUENCES, CLOSE_TO_GAME
+			SAVE_COMPOSITION, OPEN_SONGS, IMPORT, COPY_AS_TEXT, BACK_TO_SEQUENCES, CLOSE_TO_GAME
 		};
 		private static final ToolbarAction[] EDIT_ACTIONS = {
 			UNDO, REDO, CONVERT, MERGE_REPEATS, QUANTIZE, FIT_ALL_RANGE, SNAP_TEMPO,
 			SNAP_END, TRIM_END
 		};
 		private static final ToolbarAction[] BUILD_ACTIONS = {
-			BUILD_IN_WORLD, BUILD_MODE, BUILD_CANCEL
+			MOVE_TO_SEQUENCE, MOVE_SELECTED_TO_SEQUENCE, PASTE_IN_WORLD, BUILD_CANCEL
 		};
 		private static final ToolbarAction[] SELECT_ACTIONS = {
 			SELECT_OFF_GRID, SELECT_TOO_FREQUENT, SELECT_OUT_OF_RANGE, SELECT_ALL_NOTES, SELECT_NONE

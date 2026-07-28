@@ -230,20 +230,28 @@ public record ComposerProject(
 		}
 	}
 
-	public List<SequenceTrack> toSequenceTracks(List<SequenceTrack> previousTracks) {
+	/**
+	 * Projects chosen layers into a build sequence: the flat timeline of notes and repeaters that
+	 * gets placed, whether by command or by hand.
+	 *
+	 * <p>Only the chosen layers appear at all, rather than appearing switched off. A sequence is a
+	 * decision that has already been taken, so it should not carry the layers you decided against.
+	 * Positions start at zero because each projection replaces the last -- the sequence is a
+	 * snapshot of one moment, not something accumulated across visits.</p>
+	 *
+	 * @param layerIndices layers to include, or empty for every layer marked for building
+	 */
+	public List<SequenceTrack> toSequenceTracks(Set<Integer> layerIndices) {
 		List<SequenceTrack> result = new ArrayList<>();
 		for (int index = 0; index < layers.size(); index++) {
 			Layer layer = layers.get(index);
-			SequenceTrack previous = previousTracks != null && index < previousTracks.size()
-				? previousTracks.get(index)
-				: new SequenceTrack(layer.name(), "", layer.instrument(), 0, layer.buildEnabled());
-			result.add(new SequenceTrack(
-				layer.name(),
-				toText(layer),
-				layer.muted() ? "MUTE" : layer.instrument(),
-				previous.position(),
-				layer.buildEnabled()
-			));
+			boolean chosen = layerIndices == null || layerIndices.isEmpty()
+				? layer.buildEnabled() && !layer.muted()
+				: layerIndices.contains(index);
+			if (!chosen) {
+				continue;
+			}
+			result.add(new SequenceTrack(layer.name(), toText(layer), layer.instrument(), 0, true));
 		}
 		return List.copyOf(result);
 	}
