@@ -1647,12 +1647,20 @@ public final class ComposerScreen extends Screen {
 			toast = null;
 			return;
 		}
-		int textWidth = font.width(toast);
+		// Wrapped, not centred on one line. Import reports list everything they left out and are
+		// routinely longer than the roll is wide, so the single line ran off the edge taking the
+		// most useful half of the message with it.
+		int maxWidth = Math.max(120, rollWidth - 32);
+		List<net.minecraft.util.FormattedCharSequence> lines = font.split(toast, maxWidth);
+		int textWidth = lines.stream().mapToInt(font::width).max().orElse(0);
 		int x = rollX + Math.max(4, (rollWidth - textWidth) / 2);
 		int y = rollY + 8;
-		graphics.fill(x - 6, y - 5, x + textWidth + 6, y + font.lineHeight + 4, 0xF01A1F26);
+		int height = lines.size() * font.lineHeight + (lines.size() - 1) * 2;
+		graphics.fill(x - 6, y - 5, x + textWidth + 6, y + height + 4, 0xF01A1F26);
 		graphics.fill(x - 6, y - 5, x + textWidth + 6, y - 4, 0xFF8FD3FF);
-		graphics.text(font, toast, x, y, 0xFFFFFFFF, false);
+		for (int index = 0; index < lines.size(); index++) {
+			graphics.text(font, lines.get(index), x, y + index * (font.lineHeight + 2), 0xFFFFFFFF, false);
+		}
 	}
 
 	private void extractStatus(GuiGraphicsExtractor graphics) {

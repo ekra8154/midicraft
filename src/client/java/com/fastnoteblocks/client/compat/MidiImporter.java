@@ -126,14 +126,22 @@ final class MidiImporter {
 		int outsideRange = 0;
 		int quiet = 0;
 		int velocityCutoff = config.midiVelocityCutoff();
+		int softest = 127;
+		int loudest = 0;
+		long firstKeptTick = Long.MAX_VALUE;
+		long firstDroppedTick = Long.MAX_VALUE;
 		for (int index = 0; index < parts.size(); index++) {
 			ExactPart part = parts.get(index);
 			List<NoteEvent> notes = new ArrayList<>();
 			for (ExactNote note : part.notes()) {
+				softest = Math.min(softest, note.velocity());
+				loudest = Math.max(loudest, note.velocity());
 				if (note.velocity() < velocityCutoff) {
 					quiet++;
+					firstDroppedTick = Math.min(firstDroppedTick, note.startTick());
 					continue;
 				}
+				firstKeptTick = Math.min(firstKeptTick, note.startTick());
 				NoteEvent event = new NoteEvent(nextId++, note.midiNote(), note.startTick(),
 					Math.max(1L, note.endTick() - note.startTick()), note.velocity());
 				if (!event.isBuildable()) {
@@ -165,7 +173,18 @@ final class MidiImporter {
 			report += "; " + outsideRange + " notes kept outside Minecraft's range";
 		}
 		if (quiet > 0) {
-			report += "; " + quiet + " notes below velocity " + velocityCutoff + " dropped";
+			report += "; " + quiet + " notes below velocity " + velocityCutoff + " dropped (this file "
+				+ "spans " + softest + "-" + loudest + ")";
+			// A cutoff inside the file's own range is the case that silently removes music rather
+			// than re-trigger noise, and a fade-in is the shape that gets hit worst: everything
+			// before the crescendo crosses the line goes, taking the opening with it.
+			if (firstDroppedTick < firstKeptTick && firstKeptTick != Long.MAX_VALUE) {
+				double secondsLost = (firstKeptTick - firstDroppedTick)
+					* (tempo / 1_000_000.0 / resolution);
+				report += String.format(java.util.Locale.ROOT,
+					"; the first %.1fs are all below the cutoff - lower Import > Velocity cutoff to keep them",
+					secondsLost);
+			}
 		}
 		if (droppedParts > 0) {
 			long droppedNotes = playable.stream()
