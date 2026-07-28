@@ -1,6 +1,9 @@
 package com.fastnoteblocks.client.compat;
 
 import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.resources.sounds.SimpleSoundInstance;
 import net.minecraft.core.Holder;
@@ -10,6 +13,8 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
 
 record PreviewInstrument(String id, String name, Item icon, Holder<SoundEvent> sound) {
+	private static final int MIN_CACHED_NOTE = -64;
+	private static final float[] CACHED_PITCHES = createPitchCache();
 	static final List<PreviewInstrument> VALUES = List.of(
 		new PreviewInstrument("MUTE", "Mute", Items.BARRIER, null),
 		new PreviewInstrument("HARP", "Harp", Items.GRASS_BLOCK, SoundEvents.NOTE_BLOCK_HARP),
@@ -33,9 +38,15 @@ record PreviewInstrument(String id, String name, Item icon, Holder<SoundEvent> s
 		new PreviewInstrument("TRUMPET_WEATHERED", "Weathered trumpet", Items.COPPER_BLOCK.weathering().weathered(), SoundEvents.NOTE_BLOCK_TRUMPET_WEATHERED),
 		new PreviewInstrument("TRUMPET_OXIDIZED", "Oxidized trumpet", Items.COPPER_BLOCK.weathering().oxidized(), SoundEvents.NOTE_BLOCK_TRUMPET_OXIDIZED)
 	);
+	private static final Map<String, PreviewInstrument> BY_ID = VALUES.stream()
+		.collect(Collectors.toUnmodifiableMap(PreviewInstrument::id, Function.identity()));
 
 	static PreviewInstrument byId(String id) {
-		return VALUES.stream().filter(value -> value.id.equals(id)).findFirst().orElse(VALUES.get(1));
+		return BY_ID.getOrDefault(id, VALUES.get(1));
+	}
+
+	boolean playable() {
+		return sound != null;
 	}
 
 	void play() {
@@ -46,11 +57,26 @@ record PreviewInstrument(String id, String name, Item icon, Holder<SoundEvent> s
 		if (sound == null) {
 			return;
 		}
-		float pitch = (float)Math.pow(2.0, (note - 12) / 12.0);
+		int cachedIndex = note - MIN_CACHED_NOTE;
+		float pitch = cachedIndex >= 0 && cachedIndex < CACHED_PITCHES.length
+			? CACHED_PITCHES[cachedIndex]
+			: pitch(note);
 		Minecraft.getInstance().getSoundManager().play(
 			pitch >= 0.5F && pitch <= 2.0F
 				? SimpleSoundInstance.forUI(sound.value(), pitch, 0.55F)
 				: ExtendedPitchSoundInstance.forUI(sound.value(), pitch, 0.55F)
 		);
+	}
+
+	private static float[] createPitchCache() {
+		float[] pitches = new float[192];
+		for (int index = 0; index < pitches.length; index++) {
+			pitches[index] = pitch(MIN_CACHED_NOTE + index);
+		}
+		return pitches;
+	}
+
+	private static float pitch(int note) {
+		return (float)Math.pow(2.0, (note - 12) / 12.0);
 	}
 }

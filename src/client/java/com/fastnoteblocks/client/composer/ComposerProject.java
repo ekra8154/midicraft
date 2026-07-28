@@ -29,7 +29,7 @@ public record ComposerProject(
 ) {
 	public static final int DEFAULT_PPQ = 480;
 	public static final int DEFAULT_TEMPO_MICROS_PER_QUARTER = 500_000;
-	public static final int MAX_LAYERS = 10;
+	public static final int MAX_LAYERS = 16;
 	public static final int NOTE_BLOCK_BASE_MIDI_NOTE = 54;
 	public static final int NOTE_BLOCK_MAX_MIDI_NOTE = NOTE_BLOCK_BASE_MIDI_NOTE + NotePitch.PITCH_COUNT - 1;
 	public static final long DEFAULT_NOTE_DURATION_TICKS = DEFAULT_PPQ / 4L;

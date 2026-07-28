@@ -1,5 +1,6 @@
 package com.fastnoteblocks.client.compat;
 
+import com.fastnoteblocks.client.composer.ComposerProject;
 import java.util.LinkedHashSet;
 import java.util.Set;
 import java.util.function.Consumer;
@@ -26,7 +27,7 @@ final class NbsInstrumentSelectionScreen extends Screen {
 		this.inspection = inspection;
 		this.selection = selection;
 		inspection.instruments().stream()
-			.limit(10)
+			.limit(ComposerProject.MAX_LAYERS)
 			.forEach(option -> selected.add(option.id()));
 	}
 
@@ -50,13 +51,13 @@ final class NbsInstrumentSelectionScreen extends Screen {
 					option.noteCount() + " notes using " + option.name()
 				)))
 				.build());
-			button.active = selected.contains(option.id()) || selected.size() < 10;
+			button.active = selected.contains(option.id()) || selected.size() < ComposerProject.MAX_LAYERS;
 		}
 		int actionsY = Math.min(height - 28, startY + rows * 22 + 12);
 		Button importButton = addRenderableWidget(Button.builder(Component.literal("Import selected"), button -> {
 			selection.accept(Set.copyOf(selected));
 		}).bounds(width / 2 - 104, actionsY, 100, 20).build());
-		importButton.active = !selected.isEmpty() && selected.size() <= 10;
+		importButton.active = !selected.isEmpty() && selected.size() <= ComposerProject.MAX_LAYERS;
 		addRenderableWidget(Button.builder(CommonComponents.GUI_CANCEL, button -> onClose())
 			.bounds(width / 2 + 4, actionsY, 100, 20)
 			.build());
@@ -68,7 +69,7 @@ final class NbsInstrumentSelectionScreen extends Screen {
 	}
 
 	private void toggle(String id) {
-		if (!selected.remove(id) && selected.size() < 10) {
+		if (!selected.remove(id) && selected.size() < ComposerProject.MAX_LAYERS) {
 			selected.add(id);
 		}
 		init();
@@ -85,8 +86,9 @@ final class NbsInstrumentSelectionScreen extends Screen {
 		super.extractRenderState(graphics, mouseX, mouseY, partialTick);
 		graphics.centeredText(font, title, width / 2, 18, 0xFFFFFFFF);
 		graphics.centeredText(font,
-			Component.literal("This song uses more than 10 instruments. Select which groups to import ("
-				+ selected.size() + "/10)."),
+			Component.literal("This song uses more than " + ComposerProject.MAX_LAYERS
+				+ " instruments. Select which groups to import ("
+				+ selected.size() + "/" + ComposerProject.MAX_LAYERS + ")."),
 			width / 2, 32, 0xFFBBBBBB);
 	}
 

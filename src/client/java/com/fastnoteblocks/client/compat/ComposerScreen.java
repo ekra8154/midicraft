@@ -47,6 +47,8 @@ public final class ComposerScreen extends Screen {
 	private static final int ROW_HEIGHT = 12;
 	private static final int MAX_SIMULTANEOUS_NOTES = 30;
 	private static final int CHORD_WARNING_THRESHOLD = 24;
+	private static final int MAX_PREVIEW_SOUNDS_PER_FRAME = 64;
+	private static final long PREVIEW_BACKLOG_TOLERANCE_MICROS = 100_000L;
 	private static final int MIN_MIDI_NOTE = 0;
 	private static final int MAX_MIDI_NOTE = 127;
 	private static final int[] LAYER_COLORS = {
@@ -70,7 +72,8 @@ public final class ComposerScreen extends Screen {
 	private boolean playing;
 	private long playbackStartedAt;
 	private long playbackStartTick;
-	private int[] playbackIndices = new int[0];
+	private List<PlaybackEvent> playbackEvents = List.of();
+	private int playbackEventIndex;
 	private boolean draggingPlayhead;
 	private long horizontalScroll;
 	private int topMidiNote = 91;
@@ -225,7 +228,8 @@ public final class ComposerScreen extends Screen {
 			}
 		}).bounds(8, y, LAYER_PANEL_WIDTH - 16, 18)
 			.tooltip(Tooltip.create(Component.literal(
-				"Add a layer and move the current selection into it (maximum 10)"
+				"Add a layer and move the current selection into it (maximum "
+					+ ComposerProject.MAX_LAYERS + ")"
 			)))
 			.build());
 		moveLayerButtons.add(addLayerButton);
@@ -492,6 +496,7 @@ public final class ComposerScreen extends Screen {
 
 	@Override
 	public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
+		updatePlayback();
 		rollX = LAYER_PANEL_WIDTH + PIANO_WIDTH;
 		rollY = TOOLBAR_HEIGHT + 14 + TIMELINE_RULER_HEIGHT;
 		rollWidth = Math.max(40, width - rollX - 8);
@@ -1239,7 +1244,7 @@ public final class ComposerScreen extends Screen {
 		} else {
 			playing = true;
 			playbackStartedAt = Util.getMillis();
-			resetPlaybackCursors();
+			resetPlaybackSchedule();
 			playButton.setMessage(playLabel());
 		}
 	}
@@ -1248,7 +1253,7 @@ public final class ComposerScreen extends Screen {
 		playbackStartTick = Math.max(0L, Math.min(project().endTick(), snapTick(tick)));
 		if (playing) {
 			playbackStartedAt = Util.getMillis();
-			resetPlaybackCursors();
+			resetPlaybackSchedule();
 		}
 		if (preview) {
 			minecraft.gui.hud.setOverlayMessage(Component.literal("Playback start: tick " + playbackStartTick), true);
@@ -1257,7 +1262,8 @@ public final class ComposerScreen extends Screen {
 
 	private void stopPlayback() {
 		playing = false;
-		playbackIndices = new int[0];
+		playbackEvents = List.of();
+		playbackEventIndex = 0;
 		if (playButton != null) {
 			playButton.setMessage(playLabel());
 		}
@@ -1275,21 +1281,15 @@ public final class ComposerScreen extends Screen {
 			return;
 		}
 		long tick = playbackTick();
-		if (playbackIndices.length != project().layers().size()) {
-			resetPlaybackCursors();
-		}
-		for (int layerIndex = 0; layerIndex < project().layers().size(); layerIndex++) {
-			Layer layer = project().layers().get(layerIndex);
-			PreviewInstrument instrument = PreviewInstrument.byId(layer.instrument());
-			List<NoteEvent> notes = layer.notes();
-			int noteIndex = playbackIndices[layerIndex];
-			while (noteIndex < notes.size() && notes.get(noteIndex).startTick() <= tick) {
-				NoteEvent note = notes.get(noteIndex++);
-				if (!layer.muted() && note.startTick() >= playbackStartTick) {
-					instrument.play(note.midiNote() - ComposerProject.NOTE_BLOCK_BASE_MIDI_NOTE);
-				}
+		long staleBefore = Math.max(playbackStartTick, tick - previewBacklogToleranceTicks());
+		int soundsPlayed = 0;
+		while (playbackEventIndex < playbackEvents.size()
+				&& playbackEvents.get(playbackEventIndex).tick() <= tick) {
+			PlaybackEvent event = playbackEvents.get(playbackEventIndex++);
+			if (event.tick() >= staleBefore && soundsPlayed < MAX_PREVIEW_SOUNDS_PER_FRAME) {
+				event.instrument().play(event.note());
+				soundsPlayed++;
 			}
-			playbackIndices[layerIndex] = noteIndex;
 		}
 		if (tick > project().endTick()) {
 			stopPlayback();
@@ -1306,13 +1306,46 @@ public final class ComposerScreen extends Screen {
 		return playbackStartTick + Math.round(elapsedMicros * project().ppq() / (double)project().tempoMicrosPerQuarter());
 	}
 
-	private void resetPlaybackCursors() {
-		playbackIndices = new int[project().layers().size()];
-		for (int layerIndex = 0; layerIndex < project().layers().size(); layerIndex++) {
-			playbackIndices[layerIndex] = lowerBoundStart(
-				project().layers().get(layerIndex).notes(), playbackStartTick
-			);
+	private long previewBacklogToleranceTicks() {
+		return Math.max(1L, (long)Math.ceil(
+			PREVIEW_BACKLOG_TOLERANCE_MICROS * project().ppq()
+				/ (double)project().tempoMicrosPerQuarter()
+		));
+	}
+
+	private void resetPlaybackSchedule() {
+		List<PlaybackEvent> events = new ArrayList<>();
+		for (Layer layer : project().layers()) {
+			if (layer.muted()) {
+				continue;
+			}
+			PreviewInstrument instrument = PreviewInstrument.byId(layer.instrument());
+			if (!instrument.playable()) {
+				continue;
+			}
+			List<NoteEvent> notes = layer.notes();
+			for (int index = lowerBoundStart(notes, playbackStartTick); index < notes.size(); index++) {
+				NoteEvent note = notes.get(index);
+				events.add(new PlaybackEvent(
+					note.startTick(),
+					instrument,
+					note.midiNote() - ComposerProject.NOTE_BLOCK_BASE_MIDI_NOTE
+				));
+			}
 		}
+		events.sort(Comparator.comparingLong(PlaybackEvent::tick)
+			.thenComparing(event -> event.instrument().id())
+			.thenComparingInt(PlaybackEvent::note));
+		List<PlaybackEvent> deduplicated = new ArrayList<>(events.size());
+		PlaybackEvent previous = null;
+		for (PlaybackEvent event : events) {
+			if (previous == null || !event.sameSound(previous)) {
+				deduplicated.add(event);
+				previous = event;
+			}
+		}
+		playbackEvents = List.copyOf(deduplicated);
+		playbackEventIndex = 0;
 	}
 
 	private void undo() {
@@ -1340,7 +1373,7 @@ public final class ComposerScreen extends Screen {
 		playbackStartTick = Math.min(playbackStartTick, project.endTick());
 		if (playing) {
 			playbackStartedAt = Util.getMillis();
-			resetPlaybackCursors();
+			resetPlaybackSchedule();
 		}
 		saveProject();
 		updateButtonStates();
@@ -1646,6 +1679,12 @@ public final class ComposerScreen extends Screen {
 
 		boolean intersects(int otherLeft, int otherTop, int otherRight, int otherBottom) {
 			return right > otherLeft && left < otherRight && bottom > otherTop && top < otherBottom;
+		}
+	}
+
+	private record PlaybackEvent(long tick, PreviewInstrument instrument, int note) {
+		private boolean sameSound(PlaybackEvent other) {
+			return tick == other.tick && note == other.note && instrument.equals(other.instrument);
 		}
 	}
 
