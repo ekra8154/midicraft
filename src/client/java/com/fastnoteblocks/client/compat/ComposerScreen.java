@@ -63,6 +63,7 @@ public final class ComposerScreen extends Screen {
 	private static final double BOX_SCROLL_MAX_ROWS = 2.0;
 	private static final long TOOLTIP_DWELL_MILLIS = 260L;
 	private static final long SCALE_COALESCE_MILLIS = 400L;
+	private static final int NOTE_TRIGGER_WIDTH = 7;
 	private static final int SNAP_REPEATER = -1;
 	private static final long PREVIEW_BACKLOG_TOLERANCE_MICROS = 100_000L;
 	private static final int MIN_MIDI_NOTE = 0;
@@ -1380,6 +1381,14 @@ public final class ComposerScreen extends Screen {
 		if (note.isBuildable()) {
 			lines.add(Component.literal("Note block pitch " + note.noteBlockPitch())
 				.withStyle(net.minecraft.ChatFormatting.GRAY));
+			long sustained = note.durationTicks();
+			if (sustained > project().ppq() / 4L) {
+				double seconds = sustained * project().tempoMicrosPerQuarter()
+					/ (double)project().ppq() / 1_000_000.0 / timescaleFactor();
+				lines.add(Component.literal(String.format(java.util.Locale.ROOT,
+						"Spans %.2fs - struck once, note blocks do not sustain", seconds))
+					.withStyle(net.minecraft.ChatFormatting.DARK_GRAY));
+			}
 		} else {
 			int shift = octaveShiftIntoRange(note.midiNote());
 			lines.add(Component.literal("Outside Minecraft range" + (shift == 0
@@ -2443,11 +2452,18 @@ public final class ComposerScreen extends Screen {
 		}
 	}
 
+	/**
+	 * Notes draw as fixed-width triggers rather than bars spanning their length.
+	 *
+	 * <p>Nothing downstream reads a note's duration: preview schedules one sound at its start and
+	 * the build places one note block there. A note block cannot sustain at all. Drawing a long bar
+	 * showed a note holding for a length that never sounds, which read as sustain that does not
+	 * exist -- most misleadingly after a repeat merge, where the absorbed span became a bar.</p>
+	 */
 	private NoteRect noteRect(NoteEvent note) {
 		int left = tickX(note.startTick());
-		int width = Math.max(7, (int)Math.round(note.durationTicks() / ticksPerPixel));
 		int top = noteY(note.midiNote()) + 1;
-		return new NoteRect(left, top, left + width, top + rowHeight - 2);
+		return new NoteRect(left, top, left + NOTE_TRIGGER_WIDTH, top + rowHeight - 2);
 	}
 
 	private static int lowerBoundStart(List<NoteEvent> notes, long tick) {
