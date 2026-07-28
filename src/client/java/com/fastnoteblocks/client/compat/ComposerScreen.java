@@ -146,7 +146,7 @@ public final class ComposerScreen extends Screen {
 		this.onReturn = onReturn == null ? () -> {
 		} : onReturn;
 		this.history = new ComposerHistory(new ComposerState(
-			config.composerProject(), config.activeSequenceDelayScaleQuarters()));
+			config.composerProject(), config.composerSpeedQuarters()));
 	}
 
 	@Override
@@ -186,8 +186,8 @@ public final class ComposerScreen extends Screen {
 			x, 7, 94, 20, config.activeSequenceDelayScaleQuarters(), this::setDelayScale
 		));
 		delayScaleSlider.setTooltip(Tooltip.create(Component.literal(
-			"Speed of both preview and the built result (0.25x to 8.00x). "
-				+ "Lower it until the unbuildable-timing outlines clear."
+			"Playback speed, 0.25x to 8.00x. Higher is faster. Saving to the sequence bakes this "
+				+ "into the delays, so the build runs at the speed you hear here."
 		)));
 		if (!layerViewInitialised) {
 			// Imports and conversions routinely produce dozens of layers; an all-expanded list
@@ -2220,7 +2220,9 @@ public final class ComposerScreen extends Screen {
 		config.publishComposerProject();
 		FastNoteblocksConfig.save();
 		ProjectStats stats = projectStats();
-		String report = "Saved to sequence: " + stats.totalNotes() + " notes";
+		String report = String.format(java.util.Locale.ROOT,
+			"Saved to sequence at %s: %d notes",
+			FastNoteblocksConfig.delayScaleLabel(delayScaleQuarters()), stats.totalNotes());
 		if (stats.outOfRange() > 0) {
 			report += ", " + stats.outOfRange() + " out of range dropped";
 		}
@@ -2232,7 +2234,7 @@ public final class ComposerScreen extends Screen {
 
 	private void saveProject() {
 		config.setComposerProject(project());
-		config.setActiveSequenceDelayScaleQuarters(delayScaleQuarters());
+		config.setComposerSpeedQuarters(delayScaleQuarters());
 		FastNoteblocksConfig.save();
 	}
 
@@ -2625,7 +2627,7 @@ public final class ComposerScreen extends Screen {
 
 		@Override
 		protected void updateMessage() {
-			setMessage(Component.literal("Time " + FastNoteblocksConfig.delayScaleLabel(scaleQuarters)));
+			setMessage(Component.literal("Speed " + FastNoteblocksConfig.delayScaleLabel(scaleQuarters)));
 		}
 
 		@Override

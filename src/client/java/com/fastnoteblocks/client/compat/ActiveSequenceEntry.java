@@ -1919,7 +1919,9 @@ final class ActiveSequenceEntry extends AbstractConfigListEntry<String> {
 
 		@Override
 		protected void updateMessage() {
-			setMessage(Component.literal("Scale " + FastNoteblocksConfig.delayScaleLabel(scaleQuarters)));
+			// Deliberately not called "speed": this multiplies every delay, so a higher value
+			// plays slower -- the opposite of the composer's speed slider.
+			setMessage(Component.literal("Delay x" + FastNoteblocksConfig.delayScaleLabel(scaleQuarters)));
 		}
 
 		@Override

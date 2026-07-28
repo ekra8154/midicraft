@@ -17,6 +17,13 @@ import net.minecraft.network.chat.Component;
 public final class FastNoteblocksConfig {
 	public static final int MAX_TRACKS = ComposerProject.MAX_LAYERS;
 	public static final int DEFAULT_SEQUENCE_DELAY_SCALE_QUARTERS = 4;
+	/**
+	 * Composer playback speed, kept separate from the sequence delay scale because the two mean
+	 * opposite things: raising the composer speed makes the song faster, while raising the sequence
+	 * scale lengthens each delay and makes it slower. Sharing one number made a composition preview
+	 * at one speed and build at another.
+	 */
+	public static final int DEFAULT_COMPOSER_SPEED_QUARTERS = 4;
 	public static final int MIN_SEQUENCE_DELAY_SCALE_QUARTERS = 1;
 	public static final int MAX_SEQUENCE_DELAY_SCALE_QUARTERS = 32;
 
@@ -232,6 +239,7 @@ public final class FastNoteblocksConfig {
 	private int placementSequencePosition;
 	private String activeSequenceName;
 	private int activeSequenceDelayScaleQuarters;
+	private int composerSpeedQuarters;
 	private String previewInstrument;
 	private List<SequenceTrack> tracks;
 	private ComposerProject composerProject;
@@ -306,7 +314,15 @@ public final class FastNoteblocksConfig {
 						? legacyTimescaleToQuarters(stored.activeSequenceTimescale)
 						: stored.activeSequenceDelayScaleQuarters
 				);
-				instance.previewInstrument = stored.previewInstrument == null ? "HARP" : stored.previewInstrument;
+					// Configs written before the two were separated only carry one number, and it
+					// was the composer's speed slider that last set it. Seed from there so an
+					// existing composition keeps the speed it was authored at.
+					instance.composerSpeedQuarters = clampSequenceDelayScale(
+						stored.composerSpeedQuarters == null
+							? instance.activeSequenceDelayScaleQuarters
+							: stored.composerSpeedQuarters
+					);
+					instance.previewInstrument = stored.previewInstrument == null ? "HARP" : stored.previewInstrument;
 				boolean buildTrackFlagsInitialized = Boolean.TRUE.equals(stored.buildTrackFlagsInitialized);
 				instance.tracks = stored.tracks == null || stored.tracks.isEmpty()
 					? List.of(new SequenceTrack("Track 1", instance.placementSequence,
@@ -578,6 +594,14 @@ public final class FastNoteblocksConfig {
 		this.activeSequenceDelayScaleQuarters = clampSequenceDelayScale(activeSequenceDelayScaleQuarters);
 	}
 
+	public int composerSpeedQuarters() {
+		return composerSpeedQuarters;
+	}
+
+	public void setComposerSpeedQuarters(int composerSpeedQuarters) {
+		this.composerSpeedQuarters = clampSequenceDelayScale(composerSpeedQuarters);
+	}
+
 	public String previewInstrument() {
 		return activeTrack().instrument();
 	}
@@ -634,7 +658,12 @@ public final class FastNoteblocksConfig {
 	public void publishComposerProject() {
 		ComposerProject project = composerProject();
 		activeTrackIndex = project.activeLayerIndex();
-		tracks = normalizeTracks(project.toSequenceTracks(tracks, activeSequenceDelayScaleQuarters));
+		// Write the delays already divided by the composer speed, then leave the sequence scale at
+		// 1.00x so nothing multiplies them back. Publishing at the sequence scale meant the two
+		// cancelled and the build always ran at the raw project tempo, however the composer was
+		// previewing it.
+		tracks = normalizeTracks(project.toSequenceTracks(tracks, composerSpeedQuarters));
+		activeSequenceDelayScaleQuarters = DEFAULT_SEQUENCE_DELAY_SCALE_QUARTERS;
 		activeTrackIndex = clampTrackIndex(activeTrackIndex, tracks.size());
 		syncLegacyTrackFields();
 	}
@@ -783,6 +812,7 @@ public final class FastNoteblocksConfig {
 		config.midiMaxImportedTracks = DEFAULT_MIDI_MAX_IMPORTED_TRACKS;
 		config.midiDefaultInstrument = "HARP";
 		config.midiTempoFit = MidiTempoFit.SNAP_TO_REPEATERS;
+		config.composerSpeedQuarters = DEFAULT_COMPOSER_SPEED_QUARTERS;
 		config.midiVelocityCutoff = DEFAULT_MIDI_VELOCITY_CUTOFF;
 		config.repeatMergeTicks = DEFAULT_REPEAT_MERGE_TICKS;
 		config.conversionGapPercentile = DEFAULT_CONVERSION_GAP_PERCENTILE;
@@ -928,6 +958,7 @@ public final class FastNoteblocksConfig {
 		private String midiDefaultInstrument;
 		private MidiTempoFit midiTempoFit;
 		private Integer midiVelocityCutoff;
+		private Integer composerSpeedQuarters;
 		private Integer repeatMergeTicks;
 		private Integer conversionGapPercentile;
 		private Integer commandsPerTick;
@@ -969,6 +1000,7 @@ public final class FastNoteblocksConfig {
 			this.midiDefaultInstrument = config.midiDefaultInstrument;
 			this.midiTempoFit = config.midiTempoFit;
 			this.midiVelocityCutoff = config.midiVelocityCutoff;
+			this.composerSpeedQuarters = config.composerSpeedQuarters;
 			this.repeatMergeTicks = config.repeatMergeTicks;
 			this.conversionGapPercentile = config.conversionGapPercentile;
 			this.commandsPerTick = config.commandsPerTick;
