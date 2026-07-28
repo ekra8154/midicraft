@@ -566,12 +566,15 @@ public final class FastNoteblocksConfig {
 		return activeSequenceDelayScaleQuarters;
 	}
 
+	/**
+	 * Sets the timescale. Build tracks keep whatever text they already had.
+	 *
+	 * <p>Rewriting them here made a drag of the slider republish the composition over the
+	 * sequence. Track delays are stored scale-normalised, so the existing text already changes
+	 * meaning with the scale without being regenerated.</p>
+	 */
 	public void setActiveSequenceDelayScaleQuarters(int activeSequenceDelayScaleQuarters) {
 		this.activeSequenceDelayScaleQuarters = clampSequenceDelayScale(activeSequenceDelayScaleQuarters);
-		if (composerProject != null) {
-			tracks = normalizeTracks(composerProject.toSequenceTracks(tracks, this.activeSequenceDelayScaleQuarters));
-			syncLegacyTrackFields();
-		}
 	}
 
 	public String previewInstrument() {
@@ -587,12 +590,18 @@ public final class FastNoteblocksConfig {
 		return List.copyOf(tracks);
 	}
 
+	/**
+	 * Replaces the build tracks. Deliberately leaves the composition alone.
+	 *
+	 * <p>This runs on every keystroke in the sequence editor. Rebuilding the composition from the
+	 * track text here meant any visit to the sequencer silently replaced it with a reconstruction:
+	 * tempo reset to the default, velocities flattened, note durations rounded, and every pitch
+	 * outside the note-block range dropped. The composition is the source of truth and only an
+	 * explicit publish writes tracks from it.</p>
+	 */
 	public void setTracks(List<SequenceTrack> tracks) {
 		this.tracks = normalizeTracks(tracks);
 		activeTrackIndex = clampTrackIndex(activeTrackIndex, this.tracks.size());
-		composerProject = ComposerProject.fromSequenceTracks(
-			activeSequenceName, this.tracks, activeTrackIndex, activeSequenceDelayScaleQuarters
-		);
 		syncLegacyTrackFields();
 	}
 
@@ -605,14 +614,26 @@ public final class FastNoteblocksConfig {
 		return composerProject;
 	}
 
+	/** Stores the composition. Build tracks are untouched until {@link #publishComposerProject}. */
 	public void setComposerProject(ComposerProject project) {
 		composerProject = project == null
 			? ComposerProject.fromSequenceTracks(activeSequenceName, tracks, activeTrackIndex,
 				activeSequenceDelayScaleQuarters)
 			: project;
 		activeSequenceName = composerProject.name();
-		activeTrackIndex = composerProject.activeLayerIndex();
-		tracks = normalizeTracks(composerProject.toSequenceTracks(tracks, activeSequenceDelayScaleQuarters));
+	}
+
+	/**
+	 * Projects the composition onto the build tracks, replacing whatever was there.
+	 *
+	 * <p>Lossy by nature -- the track text can only hold whole repeater delays and note-block
+	 * pitches -- which is exactly why it is an explicit action rather than a side effect of
+	 * leaving the composer.</p>
+	 */
+	public void publishComposerProject() {
+		ComposerProject project = composerProject();
+		activeTrackIndex = project.activeLayerIndex();
+		tracks = normalizeTracks(project.toSequenceTracks(tracks, activeSequenceDelayScaleQuarters));
 		activeTrackIndex = clampTrackIndex(activeTrackIndex, tracks.size());
 		syncLegacyTrackFields();
 	}

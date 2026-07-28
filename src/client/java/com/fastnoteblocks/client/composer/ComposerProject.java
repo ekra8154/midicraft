@@ -306,6 +306,58 @@ public record ComposerProject(
 		return new ComposerProject(name, ppq, tempoMicrosPerQuarter, updated, active, nextNoteId);
 	}
 
+	/** Collapses same-pitch repeats, the first of {@link #convertToMinecraft}'s steps, on its own. */
+	public ComposerProject withMergedRepeats(int repeatMergeTicks) {
+		if (repeatMergeTicks <= 0) {
+			return this;
+		}
+		double window = repeatMergeTicks * ppq * 100_000.0 / tempoMicrosPerQuarter;
+		List<Layer> updated = layers.stream()
+			.map(layer -> layer.withNotes(mergeRepeats(layer.notes(), window)))
+			.toList();
+		return new ComposerProject(name, ppq, tempoMicrosPerQuarter, updated, activeLayerIndex, nextNoteId);
+	}
+
+	/** Snaps every note start onto the given grid. */
+	public ComposerProject withQuantized(int gridTicks) {
+		int grid = Math.max(1, gridTicks);
+		List<Layer> updated = layers.stream()
+			.map(layer -> layer.withNotes(layer.notes().stream()
+				.map(note -> note.movedTo(
+					Math.max(0L, Math.round(note.startTick() / (double)grid) * (long)grid),
+					note.midiNote()))
+				.toList()))
+			.toList();
+		return new ComposerProject(name, ppq, tempoMicrosPerQuarter, updated, activeLayerIndex, nextNoteId);
+	}
+
+	/**
+	 * Octave-shifts every out-of-range note into the note-block range, in place.
+	 *
+	 * <p>Unlike {@link #convertToMinecraft} this does not split a layer whose notes need different
+	 * shifts, so intervals across such a layer change. It is the quick fix, not the faithful one.</p>
+	 */
+	public ComposerProject withAllFittedToRange() {
+		List<Layer> updated = layers.stream()
+			.map(layer -> layer.withNotes(layer.notes().stream()
+				.map(note -> note.isBuildable()
+					? note
+					: note.movedTo(note.startTick(),
+						note.midiNote() + octaveShiftIntoNoteBlockRange(note.midiNote())))
+				.toList()))
+			.toList();
+		return new ComposerProject(name, ppq, tempoMicrosPerQuarter, updated, activeLayerIndex, nextNoteId);
+	}
+
+	/** Tempo at which one grid step is a whole number of repeater ticks. */
+	public int repeaterAlignedTempoFor(int gridTicks) {
+		return repeaterAlignedTempo(Math.max(1, gridTicks));
+	}
+
+	public int noteCount() {
+		return layers.stream().mapToInt(layer -> layer.notes().size()).sum();
+	}
+
 	public ComposerProject withTempo(int value) {
 		return new ComposerProject(name, ppq, value, layers, activeLayerIndex, nextNoteId);
 	}

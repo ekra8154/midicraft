@@ -81,6 +81,7 @@ public final class ComposerScreen extends Screen {
 	private final Set<Integer> selectedLayers = new LinkedHashSet<>();
 	private int rowHeight = ROW_HEIGHT;
 	private int layerScroll;
+	private boolean layerViewInitialised;
 	private boolean layerMenuOpen;
 	private int layerMenuX;
 	private int layerMenuY;
@@ -161,6 +162,11 @@ public final class ComposerScreen extends Screen {
 			.tooltip(Tooltip.create(Component.literal("Settings applied when importing MIDI and NBS songs")))
 			.build());
 		x += 58;
+		addRenderableWidget(Button.builder(Component.literal("Select"), button -> toggleToolbarMenu(ToolbarMenu.SELECT, 182))
+			.bounds(x, 7, 54, 20)
+			.tooltip(Tooltip.create(Component.literal("Select every note with a given build problem")))
+			.build());
+		x += 58;
 		playButton = addRenderableWidget(Button.builder(playLabel(), button -> togglePlayback())
 			.bounds(x, 7, 54, 20)
 			.tooltip(Tooltip.create(Component.literal("Preview all unmuted layers")))
@@ -178,6 +184,12 @@ public final class ComposerScreen extends Screen {
 			"Speed of both preview and the built result (0.25x to 8.00x). "
 				+ "Lower it until the unbuildable-timing outlines clear."
 		)));
+		if (!layerViewInitialised) {
+			// Imports and conversions routinely produce dozens of layers; an all-expanded list
+			// buries the one being worked on before the user has done anything.
+			layerViewInitialised = true;
+			collapseAllButActive();
+		}
 		rebuildLayerButtons();
 		rebuildMoveLayerButtons();
 		updateButtonStates();
@@ -805,6 +817,7 @@ public final class ComposerScreen extends Screen {
 		return switch (toolbarMenu) {
 			case FILE -> ToolbarAction.FILE_ACTIONS;
 			case EDIT -> ToolbarAction.EDIT_ACTIONS;
+			case SELECT -> ToolbarAction.SELECT_ACTIONS;
 			case IMPORT, NONE -> new ToolbarAction[0];
 		};
 	}
@@ -813,7 +826,12 @@ public final class ComposerScreen extends Screen {
 		return switch (action) {
 			case UNDO -> history.canUndo();
 			case REDO -> history.canRedo();
-			case CONVERT -> project().layers().stream().anyMatch(layer -> !layer.notes().isEmpty());
+			case CONVERT, MERGE_REPEATS, QUANTIZE, FIT_ALL_RANGE, SNAP_TEMPO ->
+				project().layers().stream().anyMatch(layer -> !layer.notes().isEmpty());
+			case SELECT_OFF_GRID -> !projectStats().timing().offGrid().isEmpty();
+			case SELECT_TOO_FREQUENT -> !projectStats().timing().crowded().isEmpty();
+			case SELECT_OUT_OF_RANGE -> projectStats().outOfRange() > 0;
+			case SELECT_NONE -> !selectedNotes.isEmpty();
 			default -> true;
 		};
 	}
@@ -849,12 +867,68 @@ public final class ComposerScreen extends Screen {
 	private void performToolbarAction(ToolbarAction action) {
 		switch (action) {
 			case IMPORT -> importSong();
+			case SAVE_TO_SEQUENCE -> saveToSequence();
 			case BACK_TO_SEQUENCES -> onClose();
 			case CLOSE_TO_GAME -> closeToGame();
 			case UNDO -> undo();
 			case REDO -> redo();
 			case CONVERT -> convertToMinecraft();
+			case MERGE_REPEATS -> applyStep("Merged", project().withMergedRepeats(config.repeatMergeTicks()));
+			case QUANTIZE -> applyStep("Quantized",
+				project().withQuantized(minecraftConversionGridTicks(project())));
+			case FIT_ALL_RANGE -> applyStep("Fitted to range", project().withAllFittedToRange());
+			case SNAP_TEMPO -> applyStep("Tempo snapped", project().withTempo(
+				project().repeaterAlignedTempoFor(minecraftConversionGridTicks(project()))));
+			case SELECT_OFF_GRID -> selectNotesWhere("off grid",
+				note -> projectStats().timing().offGrid().contains(note.startTick()));
+			case SELECT_TOO_FREQUENT -> selectNotesWhere("too frequent",
+				note -> projectStats().timing().crowded().contains(note.startTick()));
+			case SELECT_OUT_OF_RANGE -> selectNotesWhere("out of range", note -> !note.isBuildable());
+			case SELECT_ALL_NOTES -> selectNotesWhere("selected", note -> true);
+			case SELECT_NONE -> {
+				selectedNotes.clear();
+				updateButtonStates();
+			}
 		}
+	}
+
+	/** Runs one conversion step on its own, so the preset does not have to be taken wholesale. */
+	private void applyStep(String label, ComposerProject updated) {
+		int before = project().noteCount();
+		int beforeTempo = project().tempoMicrosPerQuarter();
+		if (updated.equals(project())) {
+			minecraft.gui.hud.setOverlayMessage(Component.literal("Nothing to change."), true);
+			return;
+		}
+		apply(updated);
+		selectedNotes.clear();
+		rebuildLayerButtons();
+		int removed = before - updated.noteCount();
+		String report = label + (removed > 0 ? ": " + removed + " notes removed" : "");
+		if (updated.tempoMicrosPerQuarter() != beforeTempo) {
+			report += String.format(java.util.Locale.ROOT, ": tempo x%.2f",
+				beforeTempo / (double)updated.tempoMicrosPerQuarter());
+		}
+		minecraft.gui.hud.setOverlayMessage(Component.literal(report), true);
+	}
+
+	/** Selects every note in a visible layer matching a build problem, so it can be acted on. */
+	private void selectNotesWhere(String label, java.util.function.Predicate<NoteEvent> match) {
+		selectedNotes.clear();
+		for (Layer layer : project().layers()) {
+			if (!layer.visible()) {
+				continue;
+			}
+			for (NoteEvent note : layer.notes()) {
+				if (match.test(note)) {
+					selectedNotes.add(note.id());
+				}
+			}
+		}
+		updateButtonStates();
+		minecraft.gui.hud.setOverlayMessage(Component.literal(
+			selectedNotes.size() + " notes " + label
+				+ (selectedNotes.isEmpty() ? "" : " - right-click the roll for actions")), true);
 	}
 
 	private String importSettingLabel(ImportSetting setting) {
@@ -2067,6 +2141,27 @@ public final class ComposerScreen extends Screen {
 		updateButtonStates();
 	}
 
+	/**
+	 * Writes the composition onto the build tracks.
+	 *
+	 * <p>Explicit rather than automatic on close: the projection drops everything the track text
+	 * cannot express, so leaving the composer should never quietly rewrite a sequence.</p>
+	 */
+	private void saveToSequence() {
+		saveProject();
+		config.publishComposerProject();
+		FastNoteblocksConfig.save();
+		ProjectStats stats = projectStats();
+		String report = "Saved to sequence: " + stats.totalNotes() + " notes";
+		if (stats.outOfRange() > 0) {
+			report += ", " + stats.outOfRange() + " out of range dropped";
+		}
+		if (!stats.timing().crowded().isEmpty()) {
+			report += ", " + stats.timing().crowded().size() + " timings too close to build";
+		}
+		minecraft.gui.hud.setOverlayMessage(Component.literal(report), true);
+	}
+
 	private void saveProject() {
 		config.setComposerProject(project());
 		FastNoteblocksConfig.save();
@@ -2494,6 +2589,7 @@ public final class ComposerScreen extends Screen {
 		NONE,
 		FILE,
 		EDIT,
+		SELECT,
 		IMPORT
 	}
 
@@ -2518,17 +2614,30 @@ public final class ComposerScreen extends Screen {
 
 	private enum ToolbarAction {
 		IMPORT("Import MIDI / NBS..."),
+		SAVE_TO_SEQUENCE("Save to sequence"),
 		BACK_TO_SEQUENCES("Back to sequences"),
 		CLOSE_TO_GAME("Close to game"),
 		UNDO("Undo"),
 		REDO("Redo"),
-		CONVERT("Convert for Minecraft");
+		CONVERT("Convert for Minecraft"),
+		MERGE_REPEATS("Merge repeats"),
+		QUANTIZE("Quantize to grid"),
+		FIT_ALL_RANGE("Fit all into range"),
+		SNAP_TEMPO("Snap tempo to repeaters"),
+		SELECT_OFF_GRID("Off grid"),
+		SELECT_TOO_FREQUENT("Too frequent"),
+		SELECT_OUT_OF_RANGE("Out of range"),
+		SELECT_ALL_NOTES("Everything"),
+		SELECT_NONE("Nothing");
 
 		private static final ToolbarAction[] FILE_ACTIONS = {
-			IMPORT, BACK_TO_SEQUENCES, CLOSE_TO_GAME
+			IMPORT, SAVE_TO_SEQUENCE, BACK_TO_SEQUENCES, CLOSE_TO_GAME
 		};
 		private static final ToolbarAction[] EDIT_ACTIONS = {
-			UNDO, REDO, CONVERT
+			UNDO, REDO, CONVERT, MERGE_REPEATS, QUANTIZE, FIT_ALL_RANGE, SNAP_TEMPO
+		};
+		private static final ToolbarAction[] SELECT_ACTIONS = {
+			SELECT_OFF_GRID, SELECT_TOO_FREQUENT, SELECT_OUT_OF_RANGE, SELECT_ALL_NOTES, SELECT_NONE
 		};
 		private final String label;
 
