@@ -863,8 +863,8 @@ public final class ComposerScreen extends Screen {
 			case REDO -> history.canRedo();
 			case CONVERT, MERGE_REPEATS, QUANTIZE, FIT_ALL_RANGE, SNAP_TEMPO ->
 				project().layers().stream().anyMatch(layer -> !layer.notes().isEmpty());
-			case SELECT_OFF_GRID -> !projectStats().offGrid().isEmpty();
-			case SELECT_TOO_FREQUENT -> !projectStats().crowded().isEmpty();
+			case SELECT_OFF_GRID -> !projectStats().offGridNotes().isEmpty();
+			case SELECT_TOO_FREQUENT -> !projectStats().crowdedNotes().isEmpty();
 			case SELECT_OUT_OF_RANGE -> projectStats().outOfRange() > 0;
 			case SELECT_NONE -> !selectedNotes.isEmpty();
 			// Not disabled on an unbuildable song: greying it out would hide the reason. The status
@@ -1608,11 +1608,16 @@ public final class ComposerScreen extends Screen {
 		if (stats.outOfRange() > 0) {
 			segments.add(stats.outOfRange() + " out of range");
 		}
-		if (!stats.crowded().isEmpty()) {
-			segments.add(stats.crowded().size() + " too frequent");
+		if (!stats.crowdedNotes().isEmpty()) {
+			segments.add(stats.crowdedNotes().size() + " too frequent");
 		}
-		if (!stats.offGrid().isEmpty()) {
-			segments.add(stats.offGrid().size() + " off grid");
+		if (!stats.offGridNotes().isEmpty()) {
+			segments.add(stats.offGridNotes().size() + " off grid");
+		}
+		// Named rather than counted: it is one thing, it is not a note, and saying "1 too
+		// frequent" sent you looking for a note that does not exist.
+		if (!stats.endMarkerProblem().isEmpty()) {
+			segments.add(stats.endMarkerProblem() + " (Edit > Snap end to grid)");
 		}
 		segments.add("peak " + peakChord + "/" + SongAnalysis.MAX_SIMULTANEOUS_NOTES
 			+ (overloaded > 0 ? " (" + overloaded + " over)" : ""));

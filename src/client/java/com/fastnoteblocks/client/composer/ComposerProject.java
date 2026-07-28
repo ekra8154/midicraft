@@ -556,6 +556,22 @@ public record ComposerProject(
 			}
 		}
 
+		// The marker is a musical position, so a tempo change carries it along with the notes --
+		// and then its trailing gap has to land on the new repeater grid too. Converting the notes
+		// and leaving the marker behind is exactly how a song ends up reporting one problem that
+		// no note is responsible for.
+		long movedEnd = Math.round(endTick * (tempoMicrosPerQuarter / (double)convertedTempo));
+		long convertedContentEnd = convertedLayers.stream()
+			.flatMap(layer -> layer.notes().stream())
+			.mapToLong(NoteEvent::startTick)
+			.max()
+			.orElse(0L);
+		double convertedSpan = ppq * 100_000.0 / convertedTempo
+			* Math.max(1, speedQuarters) / 4.0;
+		long trailingGap = Math.max(0L, movedEnd - convertedContentEnd);
+		long snappedEnd = convertedContentEnd
+			+ Math.round(Math.round(trailingGap / convertedSpan) * convertedSpan);
+
 		ComposerProject converted = new ComposerProject(
 			name,
 			ppq,
@@ -563,8 +579,7 @@ public record ComposerProject(
 			convertedLayers,
 			convertedActiveLayer,
 			nextNoteId,
-			// The marker is a musical position, so a tempo change moves it with the notes.
-			Math.round(endTick * (tempoMicrosPerQuarter / (double)convertedTempo)),
+			snappedEnd,
 			speedQuarters
 		);
 		return new MinecraftConversion(

@@ -113,6 +113,43 @@ public record SongAnalysis(
 		return offGrid.contains(endTick) || crowded.contains(endTick);
 	}
 
+	/**
+	 * The problem ticks that actually have notes on them.
+	 *
+	 * <p>The end marker is checked alongside the notes but is not one, so counting the raw sets
+	 * reported problems that Select could then find nothing for -- "1 too frequent" with no note
+	 * anywhere to blame. Anything user-facing that counts notes, or offers to select them, has to
+	 * use these; the raw sets stay for the note highlighting, where a tick with no note simply
+	 * matches nothing.</p>
+	 */
+	public Set<Long> crowdedNotes() {
+		return withoutMarker(crowded);
+	}
+
+	public Set<Long> offGridNotes() {
+		return withoutMarker(offGrid);
+	}
+
+	private Set<Long> withoutMarker(Set<Long> ticks) {
+		if (!ticks.contains(endTick) || chordCounts.containsKey(endTick)) {
+			return ticks;
+		}
+		Set<Long> without = new LinkedHashSet<>(ticks);
+		without.remove(endTick);
+		return Set.copyOf(without);
+	}
+
+	/** How the end marker is at fault, or empty when it is not. */
+	public String endMarkerProblem() {
+		if (crowded.contains(endTick)) {
+			return "end marker under a tick past the last note";
+		}
+		if (offGrid.contains(endTick)) {
+			return "end marker off grid";
+		}
+		return "";
+	}
+
 	public String gapLabel(long tick) {
 		Double gap = gaps.get(tick);
 		return gap == null ? "?" : String.format(Locale.ROOT, "%.2f", gap);
@@ -130,11 +167,14 @@ public record SongAnalysis(
 		if (outOfRange > 0) {
 			problems.add(outOfRange + " out of range");
 		}
-		if (!crowded.isEmpty()) {
-			problems.add(crowded.size() + " too frequent");
+		if (!crowdedNotes().isEmpty()) {
+			problems.add(crowdedNotes().size() + " too frequent");
 		}
-		if (!offGrid.isEmpty()) {
-			problems.add(offGrid.size() + " off grid");
+		if (!offGridNotes().isEmpty()) {
+			problems.add(offGridNotes().size() + " off grid");
+		}
+		if (!endMarkerProblem().isEmpty()) {
+			problems.add(endMarkerProblem());
 		}
 		if (overloadedTicks > 0) {
 			problems.add(overloadedTicks + " chords over " + MAX_SIMULTANEOUS_NOTES);
