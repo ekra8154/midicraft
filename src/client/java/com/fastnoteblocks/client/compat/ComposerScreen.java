@@ -63,6 +63,7 @@ public final class ComposerScreen extends Screen {
 	private static final double BOX_SCROLL_MAX_ROWS = 2.0;
 	private static final long TOOLTIP_DWELL_MILLIS = 260L;
 	private static final long SCALE_COALESCE_MILLIS = 400L;
+	private static final long TOAST_MILLIS = 4500L;
 	private static final int NOTE_TRIGGER_WIDTH = 7;
 	private static final int SNAP_REPEATER = -1;
 	private static final long PREVIEW_BACKLOG_TOLERANCE_MICROS = 100_000L;
@@ -128,6 +129,8 @@ public final class ComposerScreen extends Screen {
 	private ToolbarMenu toolbarMenu = ToolbarMenu.NONE;
 	private int toolbarMenuX;
 	private long lastScaleChangeAt;
+	private Component toast;
+	private long toastShownAt;
 	private long hoveredNoteId = -1L;
 	private long hoveredSince;
 	private ComposerProject cachedStatsProject;
@@ -435,7 +438,7 @@ public final class ComposerScreen extends Screen {
 			.filter(note -> selectedNotes.contains(note.id()))
 			.toList();
 		if (selected.isEmpty()) {
-			minecraft.gui.hud.setOverlayMessage(Component.literal("Select notes to fit first."), true);
+			showResult(Component.literal("Select notes to fit first."));
 			return;
 		}
 		int minimum = selected.stream().mapToInt(NoteEvent::midiNote).min().orElse(0);
@@ -449,9 +452,8 @@ public final class ComposerScreen extends Screen {
 			}
 		}
 		if (bestShift == Integer.MAX_VALUE) {
-			minecraft.gui.hud.setOverlayMessage(
-				Component.literal("That selection spans more than Minecraft's 25-note range."), true
-			);
+			showResult(
+				Component.literal("That selection spans more than Minecraft's 25-note range."));
 			return;
 		}
 		transposeSelected(bestShift);
@@ -473,9 +475,8 @@ public final class ComposerScreen extends Screen {
 			MinecraftConversion conversion = source.convertToMinecraft(
 				gridTicks, snapTempo, config.repeatMergeTicks());
 			if (conversion.project().equals(project())) {
-				minecraft.gui.hud.setOverlayMessage(
-					Component.literal("This composition is already Minecraft-ready."), true
-				);
+				showResult(
+					Component.literal("This composition is already Minecraft-ready."));
 				return;
 			}
 			applyState(new ComposerState(conversion.project(),
@@ -499,7 +500,7 @@ public final class ComposerScreen extends Screen {
 			} else if (conversion.tempoChanged()) {
 				report += ", tempo aligned to repeaters";
 			}
-			minecraft.gui.hud.setOverlayMessage(Component.literal(report), true);
+			showResult(Component.literal(report));
 		} catch (IllegalStateException exception) {
 			minecraft.gui.setScreen(new ConfirmScreen(confirmed -> minecraft.gui.setScreen(this),
 				Component.literal("Too many converted layers"),
@@ -652,7 +653,7 @@ public final class ComposerScreen extends Screen {
 		centerMinecraftRange();
 		rebuildLayerButtons();
 		rebuildMoveLayerButtons();
-		minecraft.gui.hud.setOverlayMessage(Component.literal(report), true);
+		showResult(Component.literal(report));
 	}
 
 	private void showImportFailure(Exception exception) {
@@ -681,6 +682,7 @@ public final class ComposerScreen extends Screen {
 		extractTimeRuler(graphics, mouseX, mouseY);
 		extractPianoRoll(graphics, mouseX, mouseY);
 		extractStatus(graphics);
+		extractToast(graphics);
 		super.extractRenderState(graphics, mouseX, mouseY, partialTick);
 		extractInstrumentMenu(graphics, mouseX, mouseY);
 		extractContextMenu(graphics, mouseX, mouseY);
@@ -905,7 +907,7 @@ public final class ComposerScreen extends Screen {
 		int before = project().noteCount();
 		int beforeTempo = project().tempoMicrosPerQuarter();
 		if (updated.equals(project())) {
-			minecraft.gui.hud.setOverlayMessage(Component.literal("Nothing to change."), true);
+			showResult(Component.literal("Nothing to change."));
 			return;
 		}
 		int scoped = selectedNotes.size();
@@ -918,7 +920,7 @@ public final class ComposerScreen extends Screen {
 			report += String.format(java.util.Locale.ROOT, ": tempo x%.2f",
 				beforeTempo / (double)updated.tempoMicrosPerQuarter());
 		}
-		minecraft.gui.hud.setOverlayMessage(Component.literal(report), true);
+		showResult(Component.literal(report));
 	}
 
 	/**
@@ -952,8 +954,8 @@ public final class ComposerScreen extends Screen {
 			? " of " + previous.size() + " selected"
 			: " across " + selectionLayers().size()
 				+ (selectionLayers().size() == 1 ? " layer" : " layers");
-		minecraft.gui.hud.setOverlayMessage(Component.literal(
-			selectedNotes.size() + " notes " + label + scope), true);
+		showResult(Component.literal(
+			selectedNotes.size() + " notes " + label + scope));
 	}
 
 	private String importSettingLabel(ImportSetting setting) {
@@ -1463,6 +1465,34 @@ public final class ComposerScreen extends Screen {
 		if (x >= rollX && x <= rollX + rollWidth) {
 			graphics.fill(x, rollY, x + 2, rollY + rollHeight, 0xFFFF5555);
 		}
+	}
+
+	/**
+	 * Shows a result inside the composer.
+	 *
+	 * <p>These used to go to the HUD overlay message, which is drawn behind an open screen, so
+	 * every import report, conversion result and save confirmation was invisible until the composer
+	 * was closed -- by which point it had faded.</p>
+	 */
+	private void showResult(Component message) {
+		toast = message;
+		toastShownAt = Util.getMillis();
+	}
+
+	private void extractToast(GuiGraphicsExtractor graphics) {
+		if (toast == null) {
+			return;
+		}
+		if (Util.getMillis() - toastShownAt > TOAST_MILLIS) {
+			toast = null;
+			return;
+		}
+		int textWidth = font.width(toast);
+		int x = rollX + Math.max(4, (rollWidth - textWidth) / 2);
+		int y = rollY + 8;
+		graphics.fill(x - 6, y - 5, x + textWidth + 6, y + font.lineHeight + 4, 0xF01A1F26);
+		graphics.fill(x - 6, y - 5, x + textWidth + 6, y - 4, 0xFF8FD3FF);
+		graphics.text(font, toast, x, y, 0xFFFFFFFF, false);
 	}
 
 	private void extractStatus(GuiGraphicsExtractor graphics) {
@@ -2060,7 +2090,7 @@ public final class ComposerScreen extends Screen {
 			resetPlaybackSchedule();
 		}
 		if (preview) {
-			minecraft.gui.hud.setOverlayMessage(Component.literal("Playback start: tick " + playbackStartTick), true);
+			showResult(Component.literal("Playback start: tick " + playbackStartTick));
 		}
 	}
 
@@ -2221,15 +2251,15 @@ public final class ComposerScreen extends Screen {
 		FastNoteblocksConfig.save();
 		ProjectStats stats = projectStats();
 		String report = String.format(java.util.Locale.ROOT,
-			"Saved to sequence at %s: %d notes",
-			FastNoteblocksConfig.delayScaleLabel(delayScaleQuarters()), stats.totalNotes());
+			"Composition written to active sequence - %d notes at %s",
+			stats.totalNotes(), FastNoteblocksConfig.delayScaleLabel(delayScaleQuarters()));
 		if (stats.outOfRange() > 0) {
 			report += ", " + stats.outOfRange() + " out of range dropped";
 		}
 		if (!stats.timing().crowded().isEmpty()) {
 			report += ", " + stats.timing().crowded().size() + " timings too close to build";
 		}
-		minecraft.gui.hud.setOverlayMessage(Component.literal(report), true);
+		showResult(Component.literal(report));
 	}
 
 	private void saveProject() {
