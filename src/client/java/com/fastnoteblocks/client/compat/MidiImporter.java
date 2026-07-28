@@ -104,11 +104,18 @@ final class MidiImporter {
 		}
 		int resolution = Math.max(1, midi.getResolution());
 		int tempo = firstTempo(midi);
-		List<ExactPart> parts = collectExactParts(midi, config.midiIgnorePercussion(), resolution).stream()
+		List<ExactPart> playable = collectExactParts(midi, config.midiIgnorePercussion(), resolution)
+			.stream()
 			.filter(part -> !part.notes().isEmpty())
 			.sorted(Comparator.comparingInt((ExactPart part) -> part.notes().size()).reversed())
+			.toList();
+		// Busiest parts first, so the cut falls on the sparsest. A reasonable rule and a
+		// treacherous one: a quiet intro can be its own sparse part, so trimming by note count can
+		// remove a stretch of time rather than a bit of texture. Hence reporting what was cut.
+		List<ExactPart> parts = playable.stream()
 			.limit(config.midiMaxImportedTracks())
 			.toList();
+		int droppedParts = playable.size() - parts.size();
 		if (parts.isEmpty()) {
 			throw new IllegalArgumentException("No playable MIDI notes were found.");
 		}
@@ -159,6 +166,15 @@ final class MidiImporter {
 		}
 		if (quiet > 0) {
 			report += "; " + quiet + " notes below velocity " + velocityCutoff + " dropped";
+		}
+		if (droppedParts > 0) {
+			long droppedNotes = playable.stream()
+				.skip(parts.size())
+				.mapToLong(part -> part.notes().size())
+				.sum();
+			report += "; " + droppedParts + (droppedParts == 1 ? " sparser track" : " sparser tracks")
+				+ " (" + droppedNotes + " notes) left out by the "
+				+ config.midiMaxImportedTracks() + "-track limit - raise Import > Max tracks to keep them";
 		}
 		return new ProjectResult(project, report);
 	}
