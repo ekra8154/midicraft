@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.components.AbstractSliderButton;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.Tooltip;
@@ -63,6 +64,7 @@ public final class ComposerScreen extends Screen {
 	private Button playButton;
 	private Button snapButton;
 	private Button previewModeButton;
+	private DelayScaleSlider delayScaleSlider;
 	private Button addLayerButton;
 	private EditBox layerNameBox;
 	private boolean playing;
@@ -156,6 +158,13 @@ public final class ComposerScreen extends Screen {
 				"Source preserves MIDI timing and pitches; Minecraft snaps timing and skips out-of-range notes"
 			)))
 			.build());
+		x += 98;
+		delayScaleSlider = addRenderableWidget(new DelayScaleSlider(
+			x, 7, 94, 20, config.activeSequenceDelayScaleQuarters(), this::setDelayScale
+		));
+		delayScaleSlider.setTooltip(Tooltip.create(Component.literal(
+			"Timescale for exported repeater delays (0.25x to 8.00x)"
+		)));
 		rebuildLayerButtons();
 		rebuildMoveLayerButtons();
 		updateButtonStates();
@@ -650,7 +659,7 @@ public final class ComposerScreen extends Screen {
 			+ (outOfRange > 0 ? "   " + outOfRange + " outside Minecraft range" : "")
 			+ "   Build peak " + peakChord + "/" + MAX_SIMULTANEOUS_NOTES
 			+ (overloaded > 0 ? " (" + overloaded + " overloaded)" : "")
-			+ "   Double-click to add • drag to move • right-click selection for actions";
+			+ "   Double-click to add • drag to move • right-click deletes or opens selection actions";
 		int color = overloaded > 0 || outOfRange > 0
 			? 0xFFFF7777
 			: peakChord >= CHORD_WARNING_THRESHOLD ? 0xFFFFAA00 : 0xFFBBBBBB;
@@ -710,6 +719,10 @@ public final class ComposerScreen extends Screen {
 		if (event.button() == 1 && insideRoll(event.x(), event.y())) {
 			NoteHit hit = noteAt(event.x(), event.y());
 			if (hit != null) {
+				if (selectedNotes.isEmpty()) {
+					apply(project().deleteNotes(Set.of(hit.note().id())));
+					return true;
+				}
 				if (hit.layerIndex() != project().activeLayerIndex()) {
 					apply(project().withActiveLayer(hit.layerIndex()));
 					rebuildLayerButtons();
@@ -913,28 +926,6 @@ public final class ComposerScreen extends Screen {
 		if (!insideRoll(mouseX, mouseY)) {
 			return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
 		}
-		NoteHit hovered = noteAt(mouseX, mouseY);
-		if (hovered != null && shiftDown()) {
-			if (hovered.layerIndex() != project().activeLayerIndex()) {
-				selectedNotes.clear();
-				apply(project().withActiveLayer(hovered.layerIndex()));
-				rebuildLayerButtons();
-			}
-			NoteEvent hoveredNote = hovered.note();
-			if (!selectedNotes.contains(hoveredNote.id())) {
-				selectedNotes.clear();
-				selectedNotes.add(hoveredNote.id());
-			}
-			int delta = scrollY > 0 ? 1 : -1;
-			apply(project().moveNotes(selectedNotes, 0L, delta));
-			NoteEvent changed = findNote(hoveredNote.id());
-			if (changed != null) {
-				PreviewInstrument.byId(activeLayer().instrument()).play(
-					changed.midiNote() - ComposerProject.NOTE_BLOCK_BASE_MIDI_NOTE
-				);
-			}
-			return true;
-		}
 		if (controlDown()) {
 			long anchoredTick = mouseTick(mouseX);
 			ticksPerPixel = Math.max(1.5, Math.min(80.0,
@@ -962,6 +953,13 @@ public final class ComposerScreen extends Screen {
 				cancelLayerRename();
 				return true;
 			}
+		}
+		if (event.key() == GLFW.GLFW_KEY_SPACE && layerNameBox == null) {
+			if (playing || project().layers().stream()
+					.anyMatch(layer -> !layer.muted() && !layer.notes().isEmpty())) {
+				togglePlayback();
+			}
+			return true;
 		}
 		if (event.isSelectAll()) {
 			selectedNotes.clear();
@@ -1141,6 +1139,12 @@ public final class ComposerScreen extends Screen {
 		FastNoteblocksConfig.save();
 	}
 
+	private void setDelayScale(int scaleQuarters) {
+		config.setComposerProject(project());
+		config.setActiveSequenceDelayScaleQuarters(scaleQuarters);
+		FastNoteblocksConfig.save();
+	}
+
 	private int layerHeaderAt(double x, double y) {
 		if (x < 12 || x >= LAYER_PANEL_WIDTH - 10) {
 			return -1;
@@ -1258,10 +1262,6 @@ public final class ComposerScreen extends Screen {
 		return project().layers().get(project().activeLayerIndex());
 	}
 
-	private NoteEvent findNote(long id) {
-		return activeLayer().notes().stream().filter(note -> note.id() == id).findFirst().orElse(null);
-	}
-
 	private NoteHit noteAt(double mouseX, double mouseY) {
 		int activeLayerIndex = project().activeLayerIndex();
 		NoteEvent active = noteAt(project().layers().get(activeLayerIndex), mouseX, mouseY);
@@ -1350,11 +1350,6 @@ public final class ComposerScreen extends Screen {
 			&& y >= rollY - TIMELINE_RULER_HEIGHT && y < rollY;
 	}
 
-	private boolean shiftDown() {
-		return InputConstants.isKeyDown(minecraft.getWindow(), GLFW.GLFW_KEY_LEFT_SHIFT)
-			|| InputConstants.isKeyDown(minecraft.getWindow(), GLFW.GLFW_KEY_RIGHT_SHIFT);
-	}
-
 	private boolean controlDown() {
 		return InputConstants.isKeyDown(minecraft.getWindow(), GLFW.GLFW_KEY_LEFT_CONTROL)
 			|| InputConstants.isKeyDown(minecraft.getWindow(), GLFW.GLFW_KEY_RIGHT_CONTROL);
@@ -1377,6 +1372,51 @@ public final class ComposerScreen extends Screen {
 	private static String midiName(int midi) {
 		String[] names = {"C", "C♯", "D", "D♯", "E", "F", "F♯", "G", "G♯", "A", "A♯", "B"};
 		return names[Math.floorMod(midi, 12)] + (midi / 12 - 1);
+	}
+
+	private static final class DelayScaleSlider extends AbstractSliderButton {
+		private final java.util.function.IntConsumer listener;
+		private int scaleQuarters;
+
+		DelayScaleSlider(
+			int x,
+			int y,
+			int width,
+			int height,
+			int scaleQuarters,
+			java.util.function.IntConsumer listener
+		) {
+			super(x, y, width, height, Component.empty(), 0.0);
+			this.listener = listener;
+			setScale(scaleQuarters);
+		}
+
+		private void setScale(int scaleQuarters) {
+			this.scaleQuarters = FastNoteblocksConfig.clampSequenceDelayScale(scaleQuarters);
+			value = (this.scaleQuarters - FastNoteblocksConfig.MIN_SEQUENCE_DELAY_SCALE_QUARTERS)
+				/ (double)(FastNoteblocksConfig.MAX_SEQUENCE_DELAY_SCALE_QUARTERS
+					- FastNoteblocksConfig.MIN_SEQUENCE_DELAY_SCALE_QUARTERS);
+			updateMessage();
+		}
+
+		@Override
+		protected void updateMessage() {
+			setMessage(Component.literal("Time " + FastNoteblocksConfig.delayScaleLabel(scaleQuarters)));
+		}
+
+		@Override
+		protected void applyValue() {
+			int range = FastNoteblocksConfig.MAX_SEQUENCE_DELAY_SCALE_QUARTERS
+				- FastNoteblocksConfig.MIN_SEQUENCE_DELAY_SCALE_QUARTERS;
+			int updated = FastNoteblocksConfig.MIN_SEQUENCE_DELAY_SCALE_QUARTERS
+				+ Math.round((float)(value * range));
+			updated = FastNoteblocksConfig.clampSequenceDelayScale(updated);
+			if (updated != scaleQuarters) {
+				scaleQuarters = updated;
+				updateMessage();
+				listener.accept(scaleQuarters);
+			}
+		}
 	}
 
 	private record NoteRect(int left, int top, int right, int bottom) {
