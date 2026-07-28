@@ -186,6 +186,10 @@ public record ComposerProject(
 		}
 		List<Layer> layers = new ArrayList<>();
 		long nextId = 1L;
+		// Where each track's text runs out, trailing delays included. Text puts its delays between
+		// events, so a delay after the last note -- or a track that is nothing but delays, like
+		// "4d, 4d, 4d" -- has nowhere to live unless the end marker holds it.
+		long parsedEnd = 0L;
 		for (SequenceTrack track : tracks) {
 			List<NoteEvent> notes = new ArrayList<>();
 			long time = 0L;
@@ -199,11 +203,12 @@ public record ComposerProject(
 						DEFAULT_NOTE_DURATION_TICKS, 96));
 				}
 			}
+			parsedEnd = Math.max(parsedEnd, time);
 			layers.add(new Layer(track.name(), track.instrument(), "MUTE".equals(track.instrument()),
 				track.buildEnabled(), true, notes));
 		}
 		return new ComposerProject(name, DEFAULT_PPQ, DEFAULT_TEMPO_MICROS_PER_QUARTER,
-			layers, activeTrackIndex, nextId, 0L, DEFAULT_SPEED_QUARTERS);
+			layers, activeTrackIndex, nextId, parsedEnd, DEFAULT_SPEED_QUARTERS);
 	}
 
 	/**

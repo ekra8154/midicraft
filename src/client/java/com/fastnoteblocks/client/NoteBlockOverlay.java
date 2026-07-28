@@ -78,8 +78,10 @@ public final class NoteBlockOverlay {
 	private final KeyMapping placementSequenceKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
 		"key.fast-noteblocks.toggle_placement_sequence", InputConstants.Type.KEYSYM, -1, CATEGORY
 	));
+	// M, next to the overlay toggle on N. Bound by default because the composer is now the way in
+	// to every song, and an unbound key made it reachable only through Mod Menu.
 	private final KeyMapping composerKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
-		"key.fast-noteblocks.open_composer", InputConstants.Type.KEYSYM, -1, CATEGORY
+		"key.fast-noteblocks.open_composer", InputConstants.Type.KEYSYM, 77, CATEGORY
 	));
 
 	private int ticksUntilRescan;

@@ -3,6 +3,7 @@ package com.fastnoteblocks.client.compat;
 import com.fastnoteblocks.client.FastNoteblocksConfig;
 import com.fastnoteblocks.client.composer.ComposerHistory;
 import com.fastnoteblocks.client.composer.ComposerProject;
+import com.fastnoteblocks.client.composer.SongAnalysis;
 import com.fastnoteblocks.client.composer.ComposerProject.ClipboardNote;
 import com.fastnoteblocks.client.composer.ComposerProject.Layer;
 import com.fastnoteblocks.client.composer.ComposerProject.MinecraftConversion;
@@ -10,12 +11,10 @@ import com.fastnoteblocks.client.composer.ComposerProject.NoteEvent;
 import com.fastnoteblocks.client.composer.ComposerProject.PasteResult;
 import com.mojang.blaze3d.platform.InputConstants;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.LinkedHashSet;
-import java.util.List;
 import java.util.Map;
+import java.util.List;
 import java.util.Set;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.AbstractSliderButton;
@@ -53,8 +52,7 @@ public final class ComposerScreen extends Screen {
 	private static final int TOOLBAR_MENU_ROW_HEIGHT = 18;
 	private static final int VELOCITY_CUTOFF_STEP = 8;
 	private static final int ROW_HEIGHT = 12;
-	private static final int MAX_SIMULTANEOUS_NOTES = 30;
-	private static final int CHORD_WARNING_THRESHOLD = 24;
+		private static final int CHORD_WARNING_THRESHOLD = 24;
 	private static final int MAX_PREVIEW_SOUNDS_PER_FRAME = 64;
 	private static final int MIN_GRID_PIXEL_SPACING = 4;
 	private static final int MIN_LABEL_PIXEL_SPACING = 32;
@@ -136,8 +134,7 @@ public final class ComposerScreen extends Screen {
 	private long hoveredNoteId = -1L;
 	private long hoveredSince;
 	private ComposerProject cachedStatsProject;
-	private int cachedStatsScale = -1;
-	private ProjectStats cachedStats;
+	private SongAnalysis cachedStats;
 
 	public ComposerScreen(Screen parent, FastNoteblocksConfig config) {
 		this(parent, config, () -> {
@@ -835,8 +832,8 @@ public final class ComposerScreen extends Screen {
 			case REDO -> history.canRedo();
 			case CONVERT, MERGE_REPEATS, QUANTIZE, FIT_ALL_RANGE, SNAP_TEMPO ->
 				project().layers().stream().anyMatch(layer -> !layer.notes().isEmpty());
-			case SELECT_OFF_GRID -> !projectStats().timing().offGrid().isEmpty();
-			case SELECT_TOO_FREQUENT -> !projectStats().timing().crowded().isEmpty();
+			case SELECT_OFF_GRID -> !projectStats().offGrid().isEmpty();
+			case SELECT_TOO_FREQUENT -> !projectStats().crowded().isEmpty();
 			case SELECT_OUT_OF_RANGE -> projectStats().outOfRange() > 0;
 			case SELECT_NONE -> !selectedNotes.isEmpty();
 			default -> true;
@@ -874,6 +871,7 @@ public final class ComposerScreen extends Screen {
 	private void performToolbarAction(ToolbarAction action) {
 		switch (action) {
 			case IMPORT -> importSong();
+			case OPEN_SONGS -> minecraft.gui.setScreen(new SongsScreen(parent, config));
 			case SAVE_TO_SEQUENCE -> saveToSequence();
 			case BACK_TO_SEQUENCES -> onClose();
 			case CLOSE_TO_GAME -> closeToGame();
@@ -892,9 +890,9 @@ public final class ComposerScreen extends Screen {
 				snapEndToRepeaterGrid()));
 			case TRIM_END -> applyStep("Trimmed", project().trimmedToContent());
 			case SELECT_OFF_GRID -> selectNotesWhere("off grid",
-				note -> projectStats().timing().offGrid().contains(note.startTick()), true);
+				note -> projectStats().offGrid().contains(note.startTick()), true);
 			case SELECT_TOO_FREQUENT -> selectNotesWhere("too frequent",
-				note -> projectStats().timing().crowded().contains(note.startTick()), true);
+				note -> projectStats().crowded().contains(note.startTick()), true);
 			case SELECT_OUT_OF_RANGE -> selectNotesWhere("out of range",
 				note -> !note.isBuildable(), true);
 			case SELECT_ALL_NOTES -> selectNotesWhere("selected", note -> true, false);
@@ -1180,7 +1178,7 @@ public final class ComposerScreen extends Screen {
 		if (endX >= rollX && endX <= rollX + rollWidth) {
 			// Flag points back over the song, so the marker reads as the edge of something rather
 			// than the start of it. Red when the trailing gap is not a delay a build can place.
-			int endColor = endMarkerIssue() ? 0xFFFF6B6B : 0xFFE8C05A;
+			int endColor = projectStats().endMarkerIssue() ? 0xFFFF6B6B : 0xFFE8C05A;
 			graphics.fill(endX, rulerY + 1, endX + 1, rollY, endColor);
 			graphics.fill(endX - 7, rulerY + 1, endX, rulerY + 6, endColor);
 		}
@@ -1269,7 +1267,7 @@ public final class ComposerScreen extends Screen {
 			}
 		}
 		for (Map.Entry<Long, Integer> entry : projectStats().chordCounts().entrySet()) {
-			if (entry.getValue() <= MAX_SIMULTANEOUS_NOTES) {
+			if (entry.getValue() <= SongAnalysis.MAX_SIMULTANEOUS_NOTES) {
 				continue;
 			}
 			int x = tickX(entry.getKey());
@@ -1298,9 +1296,9 @@ public final class ComposerScreen extends Screen {
 
 	private void extractNotes(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
 		ComposerProject shown = displayProject();
-		ProjectStats stats = projectStats();
-		Set<Long> offGrid = stats.timing().offGrid();
-		Set<Long> crowded = stats.timing().crowded();
+		SongAnalysis stats = projectStats();
+		Set<Long> offGrid = stats.offGrid();
+		Set<Long> crowded = stats.crowded();
 		NoteEvent hoveredCandidate = null;
 		int hoveredCandidateLayer = -1;
 		long firstVisibleTick = Math.max(0L, horizontalScroll - stats.maximumNoteDuration());
@@ -1412,7 +1410,7 @@ public final class ComposerScreen extends Screen {
 					: " - shifts " + (shift > 0 ? "+" : "-") + Math.abs(shift / 12) + " oct on convert"))
 				.withStyle(net.minecraft.ChatFormatting.RED));
 		}
-		TimingIssues timing = projectStats().timing();
+		SongAnalysis timing = projectStats();
 		if (crowded.contains(note.startTick())) {
 			lines.add(Component.literal("Too frequent - only "
 					+ timing.gapLabel(note.startTick()) + " repeater ticks after the previous note")
@@ -1513,10 +1511,10 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private void extractStatus(GuiGraphicsExtractor graphics) {
-		ProjectStats stats = projectStats();
+		SongAnalysis stats = projectStats();
 		int peakChord = stats.peakChord();
 		long overloaded = stats.overloadedTicks();
-		boolean ready = buildable(stats);
+		boolean ready = stats.buildable();
 
 		// Most important first: the verdict, then whatever is blocking it, then context.
 		List<String> segments = new ArrayList<>();
@@ -1524,13 +1522,13 @@ public final class ComposerScreen extends Screen {
 		if (stats.outOfRange() > 0) {
 			segments.add(stats.outOfRange() + " out of range");
 		}
-		if (!stats.timing().crowded().isEmpty()) {
-			segments.add(stats.timing().crowded().size() + " too frequent");
+		if (!stats.crowded().isEmpty()) {
+			segments.add(stats.crowded().size() + " too frequent");
 		}
-		if (!stats.timing().offGrid().isEmpty()) {
-			segments.add(stats.timing().offGrid().size() + " off grid");
+		if (!stats.offGrid().isEmpty()) {
+			segments.add(stats.offGrid().size() + " off grid");
 		}
-		segments.add("peak " + peakChord + "/" + MAX_SIMULTANEOUS_NOTES
+		segments.add("peak " + peakChord + "/" + SongAnalysis.MAX_SIMULTANEOUS_NOTES
 			+ (overloaded > 0 ? " (" + overloaded + " over)" : ""));
 		segments.add(stats.totalNotes() + " notes · " + project().layers().size() + " layers");
 		if (!selectedNotes.isEmpty()) {
@@ -1554,105 +1552,15 @@ public final class ComposerScreen extends Screen {
 		graphics.text(font, status.toString(), 8, height - 16, color, false);
 	}
 
-	/** True when the end marker's own trailing delay is not one a build can place. */
-	private boolean endMarkerIssue() {
-		ProjectStats stats = projectStats();
-		long end = project().endTick();
-		return stats.timing().offGrid().contains(end) || stats.timing().crowded().contains(end);
-	}
-
-	/** True when nothing left in the composition would misbuild or fail to build at all. */
-	private boolean buildable(ProjectStats stats) {
-		return stats.outOfRange() == 0
-			&& stats.overloadedTicks() == 0
-			&& stats.timing().crowded().isEmpty()
-			&& stats.timing().offGrid().isEmpty();
-	}
-
-	private ProjectStats projectStats() {
+	private SongAnalysis projectStats() {
 		ComposerProject current = project();
-		if (cachedStatsProject == current && cachedStats != null
-				&& cachedStatsScale == delayScaleQuarters()) {
+		// The speed is part of the project now, so identity is the whole cache key.
+		if (cachedStatsProject == current && cachedStats != null) {
 			return cachedStats;
 		}
-		Map<Long, Integer> counts = new HashMap<>();
-		int outOfRange = 0;
-		int totalNotes = 0;
-		long maximumNoteDuration = 1L;
-		for (Layer layer : current.layers()) {
-			for (NoteEvent note : layer.notes()) {
-				totalNotes++;
-				maximumNoteDuration = Math.max(maximumNoteDuration, note.durationTicks());
-				if (!note.isBuildable()) {
-					outOfRange++;
-				} else if (layer.buildEnabled() && !layer.muted()) {
-					counts.merge(note.startTick(), 1, Integer::sum);
-				}
-			}
-		}
-		int peak = counts.values().stream().mapToInt(Integer::intValue).max().orElse(0);
-		long overloaded = counts.values().stream().filter(count -> count > MAX_SIMULTANEOUS_NOTES).count();
 		cachedStatsProject = current;
-		cachedStatsScale = delayScaleQuarters();
-		cachedStats = new ProjectStats(outOfRange, Map.copyOf(counts), peak, overloaded,
-			maximumNoteDuration, totalNotes, timingIssues(current, counts.keySet()));
+		cachedStats = SongAnalysis.of(current);
 		return cachedStats;
-	}
-
-	/**
-	 * Composer ticks per Minecraft repeater tick, after the timescale.
-	 *
-	 * <p>A repeater cannot delay less than one tick, so this is the finest spacing a build can
-	 * express. Raising the timescale shrinks it, which is how a too-fast song is made buildable.</p>
-	 */
-	private double redstoneTickSpan(ComposerProject project) {
-		double span = project.ppq() * 100_000.0 / project.tempoMicrosPerQuarter();
-		return Math.max(1.0e-6, span / timescaleFactor());
-	}
-
-	/**
-	 * Event times a redstone build cannot reproduce: either landing off the repeater grid, or
-	 * arriving less than one repeater tick after the previous event.
-	 */
-	private TimingIssues timingIssues(ComposerProject project, Set<Long> eventTicks) {
-		double span = redstoneTickSpan(project);
-		// The gap from the last note to the end marker is a delay the build has to place like any
-		// other, so it is checked like any other. A marker sitting exactly on the last note adds no
-		// delay at all and is therefore always fine -- only trailing silence can be unbuildable.
-		Set<Long> checked = new LinkedHashSet<>(eventTicks);
-		if (!eventTicks.isEmpty() && project.endTick() > Collections.max(eventTicks)) {
-			checked.add(project.endTick());
-		}
-		List<Long> ordered = checked.stream().sorted().toList();
-		Set<Long> offGrid = new LinkedHashSet<>();
-		Set<Long> crowded = new LinkedHashSet<>();
-		Map<Long, Double> gaps = new HashMap<>();
-		long previous = Long.MIN_VALUE;
-		for (long tick : ordered) {
-			if (previous != Long.MIN_VALUE) {
-				// A build is a chain of repeater delays, so only the gap between consecutive events
-				// has to be expressible. Where the song sits relative to time zero is irrelevant --
-				// an absolute-position test just flags every note when the musical grid and the
-				// repeater grid do not share a common multiple.
-				double gap = (tick - previous) / span;
-				gaps.put(tick, gap);
-				if (gap < 1.0 - 1.0e-6) {
-					crowded.add(tick);
-				} else if (Math.abs(gap - Math.round(gap)) > 0.02) {
-					offGrid.add(tick);
-				}
-			}
-			previous = tick;
-		}
-		return new TimingIssues(Set.copyOf(offGrid), Set.copyOf(crowded), Map.copyOf(gaps));
-	}
-
-	/** Off-grid gaps are not a whole repeater tick; crowded ones are under one tick entirely. */
-	private record TimingIssues(Set<Long> offGrid, Set<Long> crowded, Map<Long, Double> gaps) {
-		private String gapLabel(long tick) {
-			Double gap = gaps.get(tick);
-			return gap == null ? "?" : String.format(java.util.Locale.ROOT, "%.2f", gap);
-		}
 	}
 
 	@Override
@@ -2188,8 +2096,7 @@ public final class ComposerScreen extends Screen {
 	 * can actually play, which is useless if you cannot hear its effect.</p>
 	 */
 	private double timescaleFactor() {
-		return Math.max(1, delayScaleQuarters())
-			/ (double)FastNoteblocksConfig.DEFAULT_SEQUENCE_DELAY_SCALE_QUARTERS;
+		return Math.max(1, delayScaleQuarters()) / (double)ComposerProject.DEFAULT_SPEED_QUARTERS;
 	}
 
 	private long playbackTick() {
@@ -2289,15 +2196,15 @@ public final class ComposerScreen extends Screen {
 		saveProject();
 		config.publishComposerProject();
 		FastNoteblocksConfig.save();
-		ProjectStats stats = projectStats();
+		SongAnalysis stats = projectStats();
 		String report = String.format(java.util.Locale.ROOT,
 			"Composition written to active sequence - %d notes at %s",
 			stats.totalNotes(), FastNoteblocksConfig.delayScaleLabel(delayScaleQuarters()));
 		if (stats.outOfRange() > 0) {
 			report += ", " + stats.outOfRange() + " out of range dropped";
 		}
-		if (!stats.timing().crowded().isEmpty()) {
-			report += ", " + stats.timing().crowded().size() + " timings too close to build";
+		if (!stats.crowded().isEmpty()) {
+			report += ", " + stats.crowded().size() + " timings too close to build";
 		}
 		showResult(Component.literal(report));
 	}
@@ -2360,7 +2267,7 @@ public final class ComposerScreen extends Screen {
 	 */
 	private long snapEndToRepeaterGrid() {
 		long content = project().contentEndTick();
-		double span = redstoneTickSpan(project());
+		double span = SongAnalysis.redstoneTickSpan(project());
 		long gap = Math.max(0L, project().endTick() - content);
 		return content + Math.round(Math.round(gap / span) * span);
 	}
@@ -2651,7 +2558,7 @@ public final class ComposerScreen extends Screen {
 	 */
 	private long gridTicks() {
 		if (snapSubdivision == SNAP_REPEATER) {
-			return Math.max(1L, Math.round(redstoneTickSpan(project())));
+			return Math.max(1L, Math.round(SongAnalysis.redstoneTickSpan(project())));
 		}
 		return snapSubdivision == 0 ? 1L : Math.max(1L, project().ppq() / snapSubdivision);
 	}
@@ -2773,17 +2680,6 @@ public final class ComposerScreen extends Screen {
 	private record NoteHit(int layerIndex, NoteEvent note) {
 	}
 
-	private record ProjectStats(
-		int outOfRange,
-		Map<Long, Integer> chordCounts,
-		int peakChord,
-		long overloadedTicks,
-		long maximumNoteDuration,
-		int totalNotes,
-		TimingIssues timing
-	) {
-	}
-
 	private enum ToolbarMenu {
 		NONE,
 		FILE,
@@ -2813,8 +2709,9 @@ public final class ComposerScreen extends Screen {
 
 	private enum ToolbarAction {
 		IMPORT("Import MIDI / NBS..."),
+		OPEN_SONGS("Open song..."),
 		SAVE_TO_SEQUENCE("Save to sequence"),
-		BACK_TO_SEQUENCES("Back to sequences"),
+		BACK_TO_SEQUENCES("Back"),
 		CLOSE_TO_GAME("Close to game"),
 		UNDO("Undo"),
 		REDO("Redo"),
@@ -2832,7 +2729,7 @@ public final class ComposerScreen extends Screen {
 		SELECT_NONE("Nothing");
 
 		private static final ToolbarAction[] FILE_ACTIONS = {
-			IMPORT, SAVE_TO_SEQUENCE, BACK_TO_SEQUENCES, CLOSE_TO_GAME
+			IMPORT, OPEN_SONGS, SAVE_TO_SEQUENCE, BACK_TO_SEQUENCES, CLOSE_TO_GAME
 		};
 		private static final ToolbarAction[] EDIT_ACTIONS = {
 			UNDO, REDO, CONVERT, MERGE_REPEATS, QUANTIZE, FIT_ALL_RANGE, SNAP_TEMPO,
