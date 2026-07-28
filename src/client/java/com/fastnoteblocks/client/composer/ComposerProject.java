@@ -29,7 +29,12 @@ public record ComposerProject(
 ) {
 	public static final int DEFAULT_PPQ = 480;
 	public static final int DEFAULT_TEMPO_MICROS_PER_QUARTER = 500_000;
-	public static final int MAX_LAYERS = 30;
+	/**
+	 * Converting splits a layer once per distinct octave shift its notes need, so a wide-range
+	 * import can need many times its original layer count. The cap is a guard against a runaway
+	 * layout, not a design limit -- the layer list collapses and scrolls.
+	 */
+	public static final int MAX_LAYERS = 128;
 	public static final int NOTE_BLOCK_BASE_MIDI_NOTE = 54;
 	public static final int NOTE_BLOCK_MAX_MIDI_NOTE = NOTE_BLOCK_BASE_MIDI_NOTE + NotePitch.PITCH_COUNT - 1;
 	public static final long DEFAULT_NOTE_DURATION_TICKS = DEFAULT_PPQ / 4L;
@@ -417,7 +422,9 @@ public record ComposerProject(
 			if (convertedLayers.size() + notesByShift.size() > MAX_LAYERS) {
 				throw new IllegalStateException(
 					"Conversion needs " + (convertedLayers.size() + notesByShift.size())
-						+ " layers, but Composer supports at most " + MAX_LAYERS + "."
+						+ " layers but the limit is " + MAX_LAYERS
+						+ ". Run Edit > Fit into range first: notes already inside the note-block "
+						+ "range all take the same octave shift, so their layer stops splitting."
 				);
 			}
 			if (layerIndex == activeLayerIndex) {

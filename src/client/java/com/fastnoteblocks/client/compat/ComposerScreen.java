@@ -1467,25 +1467,44 @@ public final class ComposerScreen extends Screen {
 
 	private void extractStatus(GuiGraphicsExtractor graphics) {
 		ProjectStats stats = projectStats();
-		int outOfRange = stats.outOfRange();
 		int peakChord = stats.peakChord();
 		long overloaded = stats.overloadedTicks();
 		boolean ready = buildable(stats);
-		String verdict = ready ? "MINECRAFT READY" : "NOT BUILDABLE";
-		String status = verdict
-			+ "   " + stats.totalNotes() + " notes · " + project().layers().size() + " layers"
-			+ (selectedNotes.isEmpty() ? "" : " · " + selectedNotes.size() + " selected")
-			+ "   peak " + peakChord + "/" + MAX_SIMULTANEOUS_NOTES
-			+ (overloaded > 0 ? " (" + overloaded + " over)" : "")
-			+ (outOfRange > 0 ? "   " + outOfRange + " out of range" : "")
-			+ (stats.timing().crowded().isEmpty() ? ""
-				: "   " + stats.timing().crowded().size() + " too frequent")
-			+ (stats.timing().offGrid().isEmpty() ? ""
-				: "   " + stats.timing().offGrid().size() + " off grid");
+
+		// Most important first: the verdict, then whatever is blocking it, then context.
+		List<String> segments = new ArrayList<>();
+		segments.add(ready ? "MINECRAFT READY" : "NOT BUILDABLE");
+		if (stats.outOfRange() > 0) {
+			segments.add(stats.outOfRange() + " out of range");
+		}
+		if (!stats.timing().crowded().isEmpty()) {
+			segments.add(stats.timing().crowded().size() + " too frequent");
+		}
+		if (!stats.timing().offGrid().isEmpty()) {
+			segments.add(stats.timing().offGrid().size() + " off grid");
+		}
+		segments.add("peak " + peakChord + "/" + MAX_SIMULTANEOUS_NOTES
+			+ (overloaded > 0 ? " (" + overloaded + " over)" : ""));
+		segments.add(stats.totalNotes() + " notes · " + project().layers().size() + " layers");
+		if (!selectedNotes.isEmpty()) {
+			segments.add(selectedNotes.size() + " selected");
+		}
+
+		// Drop trailing detail instead of running off the edge.
+		int available = width - 16;
+		StringBuilder status = new StringBuilder();
+		for (String segment : segments) {
+			String candidate = status.isEmpty() ? segment : status + "   " + segment;
+			if (font.width(candidate) > available) {
+				break;
+			}
+			status.setLength(0);
+			status.append(candidate);
+		}
 		int color = ready
 			? 0xFF5AD46A
 			: peakChord >= CHORD_WARNING_THRESHOLD || overloaded > 0 ? 0xFFFF7777 : 0xFFFFAA00;
-		graphics.text(font, status, rollX, height - 16, color, false);
+		graphics.text(font, status.toString(), 8, height - 16, color, false);
 	}
 
 	/** True when nothing left in the composition would misbuild or fail to build at all. */
@@ -2285,7 +2304,7 @@ public final class ComposerScreen extends Screen {
 
 	/** Bottom of the scrollable layer list, leaving room for the pinned "+ Layer" row and footer. */
 	private int layerListBottom() {
-		return height - 30;
+		return height - 44;
 	}
 
 	private int layerContentHeight() {

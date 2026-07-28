@@ -174,7 +174,8 @@ public final class FastNoteblocksConfig {
 	public static final int DEFAULT_RADIAL_FOCUS_DELAY_TICKS = 5;
 	public static final int MIN_RADIAL_FOCUS_DELAY_TICKS = 0;
 	public static final int MAX_RADIAL_FOCUS_DELAY_TICKS = 20;
-	public static final int DEFAULT_MIDI_MAX_IMPORTED_TRACKS = ComposerProject.MAX_LAYERS;
+	/** Kept independent of the layer cap: importing 128 MIDI tracks by default helps nobody. */
+	public static final int DEFAULT_MIDI_MAX_IMPORTED_TRACKS = 16;
 	public static final int MIN_MIDI_MAX_IMPORTED_TRACKS = 1;
 	public static final int MAX_MIDI_MAX_IMPORTED_TRACKS = MAX_TRACKS;
 	/**
