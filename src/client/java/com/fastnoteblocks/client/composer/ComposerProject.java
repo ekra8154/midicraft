@@ -777,11 +777,23 @@ public record ComposerProject(
 		return Math.max(0.0, ticks * tempoMicrosPerQuarter / (double)ppq / 100_000.0);
 	}
 
+	/**
+	 * Tempo at which one grid step is a whole number of repeater ticks, at the current speed.
+	 *
+	 * <p>The speed has to be in here. A repeater tick covers {@code ppq * 100000 / tempo *
+	 * speed/4} composer ticks, so the alignment this is solving for moves when the speed does.
+	 * Without it the function aligned for 1.00x only, which meant that at any other speed it
+	 * returned the tempo already in use and Snap tempo reported nothing to change while the status
+	 * bar counted dozens of off-grid notes. Same shape of bug as an earlier one in the span
+	 * itself, and it hides in the same place: at 1.00x the factor is 1 and everything agrees.</p>
+	 */
 	private int repeaterAlignedTempo(int gridTicks) {
-		double gridRepeaterTicks = gridTicks * tempoMicrosPerQuarter / (double)ppq / 100_000.0;
+		double speedFactor = Math.max(1, speedQuarters) / 4.0;
+		double gridRepeaterTicks = gridTicks * tempoMicrosPerQuarter
+			/ (double)ppq / 100_000.0 / speedFactor;
 		int nearestRepeaterTicks = Math.max(1, (int)Math.round(gridRepeaterTicks));
 		return Math.max(1, (int)Math.round(
-			nearestRepeaterTicks * 100_000.0 * ppq / gridTicks
+			nearestRepeaterTicks * 100_000.0 * ppq * speedFactor / gridTicks
 		));
 	}
 
