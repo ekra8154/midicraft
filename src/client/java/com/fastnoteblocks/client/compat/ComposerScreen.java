@@ -794,7 +794,7 @@ public final class ComposerScreen extends Screen {
 		}
 		List<String> rows = new ArrayList<>(actions.length);
 		for (ToolbarAction action : actions) {
-			rows.add(action.label);
+			rows.add(action.label + (selectedNotes.isEmpty() || !action.scopeable ? "" : " (selection)"));
 		}
 		return rows;
 	}
@@ -878,10 +878,12 @@ public final class ComposerScreen extends Screen {
 			case UNDO -> undo();
 			case REDO -> redo();
 			case CONVERT -> convertToMinecraft();
-			case MERGE_REPEATS -> applyStep("Merged", project().withMergedRepeats(config.repeatMergeTicks()));
+			case MERGE_REPEATS -> applyStep("Merged",
+				project().withMergedRepeats(config.repeatMergeTicks(), selectedNotes));
 			case QUANTIZE -> applyStep("Quantized",
-				project().withQuantized(minecraftConversionGridTicks(project())));
-			case FIT_ALL_RANGE -> applyStep("Fitted to range", project().withAllFittedToRange());
+				project().withQuantized(minecraftConversionGridTicks(project()), selectedNotes));
+			case FIT_ALL_RANGE -> applyStep("Fitted to range",
+				project().withAllFittedToRange(selectedNotes));
 			case SNAP_TEMPO -> applyStep("Tempo snapped", project().withTempo(
 				project().repeaterAlignedTempoFor(minecraftConversionGridTicks(project()))));
 			case SELECT_OFF_GRID -> selectNotesWhere("off grid",
@@ -906,11 +908,12 @@ public final class ComposerScreen extends Screen {
 			minecraft.gui.hud.setOverlayMessage(Component.literal("Nothing to change."), true);
 			return;
 		}
+		int scoped = selectedNotes.size();
 		apply(updated);
-		selectedNotes.clear();
 		rebuildLayerButtons();
 		int removed = before - updated.noteCount();
-		String report = label + (removed > 0 ? ": " + removed + " notes removed" : "");
+		String report = label + (scoped > 0 ? " " + scoped + " selected notes" : " whole composition")
+			+ (removed > 0 ? ": " + removed + " removed" : "");
 		if (updated.tempoMicrosPerQuarter() != beforeTempo) {
 			report += String.format(java.util.Locale.ROOT, ": tempo x%.2f",
 				beforeTempo / (double)updated.tempoMicrosPerQuarter());
@@ -1130,12 +1133,6 @@ public final class ComposerScreen extends Screen {
 		}
 		graphics.disableScissor();
 		extractLayerScrollbar(graphics);
-		int active = project().activeLayerIndex();
-		String footer = "Layer " + (active + 1) + " of " + project().layers().size()
-			+ (selectedLayers.size() > 1 ? "   " + selectedLayers.size() + " selected" : "")
-			+ "   ctrl/shift-click";
-		graphics.text(font, Component.literal(footer), 8, height - 18,
-			LAYER_COLORS[active % LAYER_COLORS.length], false);
 	}
 
 	private void extractLayerScrollbar(GuiGraphicsExtractor graphics) {
@@ -1473,20 +1470,30 @@ public final class ComposerScreen extends Screen {
 		int outOfRange = stats.outOfRange();
 		int peakChord = stats.peakChord();
 		long overloaded = stats.overloadedTicks();
-		String status = stats.totalNotes() + " notes in " + project().layers().size() + " layers"
-			+ "   " + selectedNotes.size() + " selected"
-			+ (outOfRange > 0 ? "   " + outOfRange + " outside Minecraft range" : "")
+		boolean ready = buildable(stats);
+		String verdict = ready ? "MINECRAFT READY" : "NOT BUILDABLE";
+		String status = verdict
+			+ "   " + stats.totalNotes() + " notes · " + project().layers().size() + " layers"
+			+ (selectedNotes.isEmpty() ? "" : " · " + selectedNotes.size() + " selected")
+			+ "   peak " + peakChord + "/" + MAX_SIMULTANEOUS_NOTES
+			+ (overloaded > 0 ? " (" + overloaded + " over)" : "")
+			+ (outOfRange > 0 ? "   " + outOfRange + " out of range" : "")
 			+ (stats.timing().crowded().isEmpty() ? ""
 				: "   " + stats.timing().crowded().size() + " too frequent")
 			+ (stats.timing().offGrid().isEmpty() ? ""
-				: "   " + stats.timing().offGrid().size() + " off grid")
-			+ "   Build peak " + peakChord + "/" + MAX_SIMULTANEOUS_NOTES
-			+ (overloaded > 0 ? " (" + overloaded + " overloaded)" : "")
-			+ "   Double-click to add • drag to move • right-click deletes or opens selection actions";
-		int color = overloaded > 0 || outOfRange > 0
-			? 0xFFFF7777
-			: peakChord >= CHORD_WARNING_THRESHOLD ? 0xFFFFAA00 : 0xFFBBBBBB;
+				: "   " + stats.timing().offGrid().size() + " off grid");
+		int color = ready
+			? 0xFF5AD46A
+			: peakChord >= CHORD_WARNING_THRESHOLD || overloaded > 0 ? 0xFFFF7777 : 0xFFFFAA00;
 		graphics.text(font, status, rollX, height - 16, color, false);
+	}
+
+	/** True when nothing left in the composition would misbuild or fail to build at all. */
+	private boolean buildable(ProjectStats stats) {
+		return stats.outOfRange() == 0
+			&& stats.overloadedTicks() == 0
+			&& stats.timing().crowded().isEmpty()
+			&& stats.timing().offGrid().isEmpty();
 	}
 
 	private ProjectStats projectStats() {
@@ -2278,7 +2285,7 @@ public final class ComposerScreen extends Screen {
 
 	/** Bottom of the scrollable layer list, leaving room for the pinned "+ Layer" row and footer. */
 	private int layerListBottom() {
-		return height - 46;
+		return height - 30;
 	}
 
 	private int layerContentHeight() {
@@ -2682,10 +2689,10 @@ public final class ComposerScreen extends Screen {
 		UNDO("Undo"),
 		REDO("Redo"),
 		CONVERT("Convert for Minecraft"),
-		MERGE_REPEATS("Merge repeats"),
-		QUANTIZE("Quantize to grid"),
-		FIT_ALL_RANGE("Fit all into range"),
-		SNAP_TEMPO("Snap tempo to repeaters"),
+		MERGE_REPEATS("Merge repeats", true),
+		QUANTIZE("Quantize to grid", true),
+		FIT_ALL_RANGE("Fit into range", true),
+		SNAP_TEMPO("Snap tempo (whole song)"),
 		SELECT_OFF_GRID("Off grid"),
 		SELECT_TOO_FREQUENT("Too frequent"),
 		SELECT_OUT_OF_RANGE("Out of range"),
@@ -2702,9 +2709,17 @@ public final class ComposerScreen extends Screen {
 			SELECT_OFF_GRID, SELECT_TOO_FREQUENT, SELECT_OUT_OF_RANGE, SELECT_ALL_NOTES, SELECT_NONE
 		};
 		private final String label;
+		/** Whether the action can be limited to the selected notes. Tempo is a property of the
+		 * whole composition, so it can never be. */
+		private final boolean scopeable;
 
 		ToolbarAction(String label) {
+			this(label, false);
+		}
+
+		ToolbarAction(String label, boolean scopeable) {
 			this.label = label;
+			this.scopeable = scopeable;
 		}
 	}
 

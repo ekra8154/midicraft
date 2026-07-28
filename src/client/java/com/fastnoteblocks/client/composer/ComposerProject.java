@@ -306,29 +306,37 @@ public record ComposerProject(
 		return new ComposerProject(name, ppq, tempoMicrosPerQuarter, updated, active, nextNoteId);
 	}
 
-	/** Collapses same-pitch repeats, the first of {@link #convertToMinecraft}'s steps, on its own. */
-	public ComposerProject withMergedRepeats(int repeatMergeTicks) {
+	/**
+	 * Collapses same-pitch repeats, the first of {@link #convertToMinecraft}'s steps, on its own.
+	 *
+	 * @param scope note ids to act on, or empty for the whole composition
+	 */
+	public ComposerProject withMergedRepeats(int repeatMergeTicks, Set<Long> scope) {
 		if (repeatMergeTicks <= 0) {
 			return this;
 		}
 		double window = repeatMergeTicks * ppq * 100_000.0 / tempoMicrosPerQuarter;
 		List<Layer> updated = layers.stream()
-			.map(layer -> layer.withNotes(mergeRepeats(layer.notes(), window)))
+			.map(layer -> layer.withNotes(mergeRepeats(layer.notes(), window, scope)))
 			.toList();
 		return new ComposerProject(name, ppq, tempoMicrosPerQuarter, updated, activeLayerIndex, nextNoteId);
 	}
 
-	/** Snaps every note start onto the given grid. */
-	public ComposerProject withQuantized(int gridTicks) {
+	/** Snaps note starts onto the given grid, within {@code scope} or everywhere if it is empty. */
+	public ComposerProject withQuantized(int gridTicks, Set<Long> scope) {
 		int grid = Math.max(1, gridTicks);
 		List<Layer> updated = layers.stream()
 			.map(layer -> layer.withNotes(layer.notes().stream()
-				.map(note -> note.movedTo(
+				.map(note -> !inScope(note, scope) ? note : note.movedTo(
 					Math.max(0L, Math.round(note.startTick() / (double)grid) * (long)grid),
 					note.midiNote()))
 				.toList()))
 			.toList();
 		return new ComposerProject(name, ppq, tempoMicrosPerQuarter, updated, activeLayerIndex, nextNoteId);
+	}
+
+	private static boolean inScope(NoteEvent note, Set<Long> scope) {
+		return scope == null || scope.isEmpty() || scope.contains(note.id());
 	}
 
 	/**
@@ -337,10 +345,10 @@ public record ComposerProject(
 	 * <p>Unlike {@link #convertToMinecraft} this does not split a layer whose notes need different
 	 * shifts, so intervals across such a layer change. It is the quick fix, not the faithful one.</p>
 	 */
-	public ComposerProject withAllFittedToRange() {
+	public ComposerProject withAllFittedToRange(Set<Long> scope) {
 		List<Layer> updated = layers.stream()
 			.map(layer -> layer.withNotes(layer.notes().stream()
-				.map(note -> note.isBuildable()
+				.map(note -> note.isBuildable() || !inScope(note, scope)
 					? note
 					: note.movedTo(note.startTick(),
 						note.midiNote() + octaveShiftIntoNoteBlockRange(note.midiNote())))
@@ -602,13 +610,28 @@ public record ComposerProject(
 	 * started it, so an arbitrarily long decay ramp folds down to its attack.</p>
 	 */
 	private static List<NoteEvent> mergeRepeats(List<NoteEvent> notes, double windowTicks) {
+		return mergeRepeats(notes, windowTicks, Set.of());
+	}
+
+	private static List<NoteEvent> mergeRepeats(
+		List<NoteEvent> notes,
+		double windowTicks,
+		Set<Long> scope
+	) {
 		if (windowTicks <= 0.0 || notes.size() < 2) {
 			return notes;
 		}
-		List<NoteEvent> kept = new ArrayList<>(notes.size());
+		boolean everything = scope == null || scope.isEmpty();
+		List<NoteEvent> considered = everything
+			? notes
+			: notes.stream().filter(note -> scope.contains(note.id())).toList();
+		if (considered.size() < 2) {
+			return notes;
+		}
+		List<NoteEvent> kept = new ArrayList<>(considered.size());
 		Map<Integer, Integer> anchorIndex = new java.util.HashMap<>();
 		Map<Integer, Long> lastStart = new java.util.HashMap<>();
-		for (NoteEvent note : notes) {
+		for (NoteEvent note : considered) {
 			int pitch = note.midiNote();
 			Long previousStart = lastStart.get(pitch);
 			if (previousStart != null && note.startTick() - previousStart < windowTicks) {
@@ -625,7 +648,12 @@ public record ComposerProject(
 			lastStart.put(pitch, note.startTick());
 			kept.add(note);
 		}
-		return List.copyOf(kept);
+		if (everything) {
+			return List.copyOf(kept);
+		}
+		List<NoteEvent> result = new ArrayList<>(kept);
+		notes.stream().filter(note -> !scope.contains(note.id())).forEach(result::add);
+		return List.copyOf(result);
 	}
 
 	private static int octaveShiftIntoNoteBlockRange(int midiNote) {
