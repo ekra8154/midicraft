@@ -350,41 +350,45 @@ public final class SongBuilder {
 		int currentTime = 0;
 		int floor = 0;
 		int climb = 1;
+		boolean laneStarted = false;
 		LaneReach reach = laneReach(events, 0, events.size());
 		int slabStep = laneSpacing(reach, reach);
 		for (int index = 0; index < events.size(); index++) {
 			EventGroup event = events.get(index);
+			// Settled before the event is placed rather than after it. A turn hands back a cursor at
+			// the same point along the wall the last event reached, so an event that overshoots
+			// leaves the next lane starting outside the wall -- and nothing measured afterwards can
+			// help, because by then the overshoot is built. Asking first costs a lane its last event
+			// and keeps the wall a wall.
+			boolean canTurn = index > 0
+				&& events.get(index - 1).maxSafeTurnDistance() >= MAX_LANE_SPACING;
+			int landing = cursor.getX() + travel.getStepX() * event.length();
+			if (canTurn && laneStarted && (landing > farWall || landing < nearWall)) {
+				int above = floor + climb;
+				if (above >= 0 && above < floors) {
+					cursor = climb > 0
+						? addGlassClimb(placements, cursor, travel,
+							events.get(index - 1).notes().size() > 3, currentTime)
+						: addSpiralDescent(placements, cursor, travel, depth, currentTime);
+					floor = above;
+				} else {
+					// Out of floors: step the slab sideways once, and come back the way we climbed.
+					// Sized from the widest chord in the whole song rather than from the lane we
+					// happen to be leaving. A sideways step separates two slabs, and every floor of
+					// one sits beside the matching floor of the other -- so a quiet lane at the top
+					// is no promise about the chord four floors down that it would be answering for.
+					cursor = addCompactTurn(placements, cursor, travel, depth, slabStep, currentTime);
+					climb = -climb;
+				}
+				travel = travel.getOpposite();
+				laneStarted = false;
+			}
 			SpatialDelayTrigger trigger = addSpatialDelayBeforeEvent(placements, cursor, travel,
 				event.time() - currentTime);
 			currentTime = event.time();
-			int landing = cursor.getX() + travel.getStepX() * event.length();
-			int next = index + 1 < events.size()
-				? landing + travel.getStepX() * events.get(index + 1).length()
-				: landing;
-			boolean turnAfter = index + 1 < events.size()
-				&& event.maxSafeTurnDistance() >= MAX_LANE_SPACING
-				&& (next > farWall || next < nearWall);
 			cursor = addSpatialEventModule(placements, trigger.cursor(), travel, depth,
 				trigger.triggerDelay(), event.notes());
-			if (!turnAfter) {
-				continue;
-			}
-			int above = floor + climb;
-			if (above >= 0 && above < floors) {
-				cursor = climb > 0
-					? addGlassClimb(placements, cursor, travel, currentTime)
-					: addSpiralDescent(placements, cursor, travel, depth, currentTime);
-				floor = above;
-			} else {
-				// Out of floors: step the slab sideways once, and come back the way we climbed.
-				// Sized from the widest chord in the whole song rather than from the lane we happen
-				// to be leaving. A sideways step separates two slabs, and every floor of one sits
-				// beside the matching floor of the other -- so a quiet lane at the top is no promise
-				// about the chord four floors down that it would be answering for.
-				cursor = addCompactTurn(placements, cursor, travel, depth, slabStep, currentTime);
-				climb = -climb;
-			}
-			travel = travel.getOpposite();
+			laneStarted = true;
 		}
 	}
 
@@ -396,15 +400,23 @@ public final class SongBuilder {
 	 * the step to connect and solid enough to hold the next dust up. Alternating between two columns
 	 * keeps the whole turn two blocks deep.</p>
 	 *
+	 * <p>A lane that ends on a chord of four or more joins the climb two rungs in. That chord built
+	 * a bus -- stone at the note level with dust along the top of it -- so the live wire is already
+	 * a block up, and the first two rungs would only be rebuilding what is there. A lane ending on
+	 * a smaller chord ends on a note block instead, a block lower, and needs them.</p>
+	 *
+	 * @param fromBus whether the lane's last event was wide enough to have built a bus
 	 * @return the cursor for the next lane, which travels back the way this one came
 	 */
 	private static BlockPos addGlassClimb(PlacementPlan placements, BlockPos cursor,
-			Direction travel, int time) {
+			Direction travel, boolean fromBus, int time) {
 		BlockPos near = cursor;
 		BlockPos far = cursor.relative(travel);
-		placements.powered(near, "minecraft:stone", time);
-		set(placements, near.above(), "minecraft:redstone_wire");
-		for (int step = 1; step <= CUBE_FLOOR_HEIGHT; step++) {
+		if (!fromBus) {
+			placements.powered(near, "minecraft:stone", time);
+			set(placements, near.above(), "minecraft:redstone_wire");
+		}
+		for (int step = fromBus ? 2 : 1; step <= CUBE_FLOOR_HEIGHT; step++) {
 			BlockPos column = step % 2 == 1 ? far : near;
 			set(placements, column.above(step), "minecraft:glass");
 			set(placements, column.above(step + 1), "minecraft:redstone_wire");
