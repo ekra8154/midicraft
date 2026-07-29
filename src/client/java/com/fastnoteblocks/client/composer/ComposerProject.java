@@ -643,7 +643,6 @@ public record ComposerProject(
 			? 0.0
 			: repeatMergeTicks * ppq * 100_000.0 / tempoMicrosPerQuarter;
 		int mergedRepeats = 0;
-		int convertedTempo = snapTempo ? repeaterAlignedTempo(grid) : tempoMicrosPerQuarter;
 		List<Layer> convertedLayers = new ArrayList<>();
 		int convertedActiveLayer = 0;
 		int shiftedNotes = 0;
@@ -694,6 +693,19 @@ public record ComposerProject(
 				));
 			}
 		}
+
+		// The tempo comes from where the notes ended up, not from the grid they were quantized to.
+		// Those are different once quantizing has moved things: a song whose notes all land two
+		// grid steps apart needs a repeater tick every two steps, and forcing one per step slows it
+		// by half for nothing. That is exactly what converting an already-valid song did -- notes on
+		// a 1/8, grid set to 1/16, tempo doubled, song halved. Asking the notes cannot do that,
+		// because after quantizing their spacing is always a whole number of grid steps.
+		ComposerProject shaped = new ComposerProject(name, ppq, tempoMicrosPerQuarter, convertedLayers,
+			convertedActiveLayer, nextNoteId, endTick, speedQuarters);
+		NoteSpacing spacing = shaped.noteSpacing();
+		int convertedTempo = snapTempo && spacing.gridTicks() > 0L
+			? shaped.repeaterAlignedTempoFor((int)Math.min(Integer.MAX_VALUE, spacing.gridTicks()))
+			: tempoMicrosPerQuarter;
 
 		// The marker is a musical position, so a tempo change carries it along with the notes --
 		// and then its trailing gap has to land on the new repeater grid too. Converting the notes
