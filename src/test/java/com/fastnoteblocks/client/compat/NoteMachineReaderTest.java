@@ -383,6 +383,90 @@ class NoteMachineReaderTest {
 		return parse("minecraft:note_block[note=" + pitch + "]");
 	}
 
+	/**
+	 * A ring that feeds itself must finish being read, and must not be read twice.
+	 *
+	 * <p>The safety half of this matters more than the musical half: a walk that went round a loop
+	 * forever would hang the game on a scan, not merely misread it. It cannot, because time only
+	 * ever increases through a repeater and every position refuses a pulse that arrives no earlier
+	 * than one it has already had -- so the second lap is rejected at its first block. Pinned with a
+	 * deadline rather than a plain call, because a failure here is a hang and a hang is not a test
+	 * result.</p>
+	 */
+	@Test
+	void readsALoopOnceAndStops() {
+		Map<BlockPos, BlockState> world = ring();
+		world.put(new BlockPos(1, 66, 0), parse("minecraft:lever[face=floor,facing=north]"));
+
+		NoteMachineReader.Reading reading = org.junit.jupiter.api.Assertions.assertTimeoutPreemptively(
+			java.time.Duration.ofSeconds(10), () -> readAll(world, "Ring"));
+
+		assertEquals(1, reading.project().noteCount(),
+			"a loop should be read one lap round, not repeatedly");
+		assertEquals(0, reading.unreachedNotes());
+		assertTrue(reading.warnings().stream().anyMatch(text -> text.contains("loops back")),
+			"reading one lap of something built to repeat should be said out loud: "
+				+ reading.report());
+	}
+
+	/**
+	 * Converging is not looping, and must not be reported as it.
+	 *
+	 * <p>Two routes meeting at one repeater happens constantly in an ordinary build -- every chord
+	 * that rejoins the lane does it -- so a loop cannot be "a repeater reached twice". It has to be
+	 * the signal arriving back somewhere it has already been, which is a different question and is
+	 * why the check is a search for a back edge rather than a counter.</p>
+	 */
+	@Test
+	void doesNotCallAnOrdinaryBuildALoop() {
+		NoteMachineReader.Reading reading = readAll(placeInWorld(
+			SongBuilder.createPastePlan(new BlockPos(0, 64, 0), sampleSong(),
+				SongBuilder.PasteMode.COMPACT_LANE, LIMITS)), "Not a loop");
+
+		assertTrue(reading.warnings().stream().noneMatch(text -> text.contains("loops back")),
+			"a folded build converges everywhere and loops nowhere: " + reading.report());
+	}
+
+	/**
+	 * A ring with no way in is refused, because there is nothing to read it from.
+	 *
+	 * <p>Every repeater in a loop is fed by another one, so none of them is a beginning. A machine
+	 * like this is started by something -- a lever, a button, an observer -- and without that in the
+	 * selection there is no first note and so no song.</p>
+	 */
+	@Test
+	void refusesALoopWithNoWayIn() {
+		NoteMachineReader.UnreadableException refused =
+			org.junit.jupiter.api.Assertions.assertThrows(NoteMachineReader.UnreadableException.class,
+				() -> readAll(ring(), "Ring with no start"));
+		assertTrue(refused.getMessage().contains("clock or a loop"),
+			"the reason should name the shape: " + refused.getMessage());
+	}
+
+	/**
+	 * Repeaters wired nose to tail, with one note block on the ring.
+	 *
+	 * <p>Six repeaters round a rectangle, each reading the block the one before it powers, and the
+	 * last closing back onto the first's input.</p>
+	 */
+	private static Map<BlockPos, BlockState> ring() {
+		Map<BlockPos, BlockState> world = new HashMap<>();
+		int y = 65;
+		world.put(new BlockPos(0, y, 0), parse("minecraft:repeater[facing=west,delay=1]"));
+		world.put(new BlockPos(1, y, 0), note(7));
+		world.put(new BlockPos(2, y, 0), parse("minecraft:repeater[facing=west,delay=1]"));
+		world.put(new BlockPos(3, y, 0), Blocks.STONE.defaultBlockState());
+		world.put(new BlockPos(3, y, 1), parse("minecraft:repeater[facing=north,delay=1]"));
+		world.put(new BlockPos(3, y, 2), Blocks.STONE.defaultBlockState());
+		world.put(new BlockPos(2, y, 2), parse("minecraft:repeater[facing=east,delay=1]"));
+		world.put(new BlockPos(1, y, 2), Blocks.STONE.defaultBlockState());
+		world.put(new BlockPos(0, y, 2), parse("minecraft:repeater[facing=east,delay=1]"));
+		world.put(new BlockPos(-1, y, 2), Blocks.STONE.defaultBlockState());
+		world.put(new BlockPos(-1, y, 1), parse("minecraft:repeater[facing=south,delay=1]"));
+		world.put(new BlockPos(-1, y, 0), Blocks.STONE.defaultBlockState());
+		return world;
+	}
+
 	// ------------------------------------------------------------------ helpers
 
 	private static NoteMachineReader.Reading readAll(Map<BlockPos, BlockState> world, String name) {

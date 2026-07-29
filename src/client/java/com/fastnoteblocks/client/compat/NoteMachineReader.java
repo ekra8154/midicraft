@@ -190,7 +190,17 @@ public final class NoteMachineReader {
 	 * does not reach -- reading a machine as if every wire were infinite would connect two halves
 	 * that in the world are separate.</p>
 	 */
-	private record Pulse(int time, BlockPos position, int strength, boolean dust, BlockPos from) {
+	private record Pulse(int time, BlockPos position, int strength, boolean dust, BlockPos from,
+		BlockPos origin) {
+	}
+
+	/**
+	 * One walk out from a set of starts.
+	 *
+	 * @param looped whether the signal came back to a repeater it had already been through, which
+	 *     is a machine that repeats rather than one that ends
+	 */
+	private record Walk(Map<BlockPos, Integer> firedAt, boolean looped) {
 	}
 
 	/**
@@ -199,8 +209,7 @@ public final class NoteMachineReader {
 	 * <p>Earliest arrival wins, so this is a shortest-path walk rather than a flood: a note block
 	 * reached twice plays on the first pulse and is already powered when the second arrives.</p>
 	 */
-	private static Map<BlockPos, Integer> traceFrom(Region region, Survey survey,
-			List<BlockPos> starts) {
+	private static Walk traceFrom(Region region, Survey survey, List<BlockPos> starts) {
 		PriorityQueue<Pulse> queue = new PriorityQueue<>(
 			Comparator.comparingInt(Pulse::time).thenComparing(Comparator.comparingInt(Pulse::strength).reversed()));
 		for (BlockPos start : starts) {
@@ -210,10 +219,10 @@ public final class NoteMachineReader {
 				// machine arrives here, and the song begins when this repeater lets go.
 				queue.add(new Pulse(state.getValue(RepeaterBlock.DELAY),
 					start.relative(state.getValue(RepeaterBlock.FACING).getOpposite()), 15, false,
-					start));
+					start, start));
 			} else {
 				for (Direction direction : Direction.values()) {
-					queue.add(new Pulse(0, start.relative(direction), 15, false, start));
+					queue.add(new Pulse(0, start.relative(direction), 15, false, start, start));
 				}
 			}
 		}
@@ -223,6 +232,10 @@ public final class NoteMachineReader {
 		Map<BlockPos, Integer> dustStrength = new HashMap<>();
 		Map<BlockPos, Integer> repeaterInput = new HashMap<>();
 		Map<BlockPos, Integer> firedAt = new HashMap<>();
+		// What hands the signal to what, repeater by repeater. Recorded even for handoffs the walk
+		// then refuses, because the handoff that closes a loop is precisely the refused one: it
+		// arrives at a repeater that has already been through, which is what refusal means here.
+		Map<BlockPos, Set<BlockPos>> feeds = new LinkedHashMap<>();
 		Set<BlockPos> noteBlocks = new HashSet<>(survey.noteBlocks);
 
 		while (!queue.isEmpty()) {
@@ -241,17 +254,21 @@ public final class NoteMachineReader {
 				boolean better = seenTime == null || pulse.time() < seenTime
 					|| pulse.time() == seenTime && pulse.strength() > seenStrength;
 				if (!better) {
+					for (Direction direction : Direction.values()) {
+						recordFeed(region, position.relative(direction), position, pulse.origin(),
+							feeds);
+					}
 					continue;
 				}
 				dustTime.put(position, pulse.time());
 				dustStrength.put(position, pulse.strength());
 				spreadFromDust(region, queue, position, pulse.time(), pulse.strength(),
-					firedAt, noteBlocks, repeaterInput);
+					firedAt, noteBlocks, repeaterInput, pulse.origin(), feeds);
 				continue;
 			}
 			if (state.is(Blocks.REDSTONE_WIRE)) {
 				// Strong power lands on a wire as a full-strength pulse rather than as block power.
-				queue.add(new Pulse(pulse.time(), position, 15, true, pulse.from()));
+				queue.add(new Pulse(pulse.time(), position, 15, true, pulse.from(), pulse.origin()));
 				continue;
 			}
 			if (noteBlocks.contains(position)) {
@@ -260,19 +277,64 @@ public final class NoteMachineReader {
 			// A repeater pointed straight at another one, with no block in between. Every delay
 			// longer than a single repeater can hold is built that way, so missing this reads a
 			// machine as ending at its first long silence -- which is to say, almost at once.
-			feedRepeater(region, queue, position, pulse.from(), pulse.time(), repeaterInput);
+			feedRepeater(region, queue, position, pulse.from(), pulse.time(), repeaterInput,
+				pulse.origin(), feeds);
 			if (!isConductor(state)) {
 				continue;
 			}
 			Integer seen = strongAt.get(position);
 			if (seen != null && seen <= pulse.time()) {
+				// Nothing new to spread -- but the handoff still happened, and around a loop it is
+				// exactly this handoff that closes the ring. The signal comes back to a block it
+				// has already powered, so the walk rightly stops here; recording the edge anyway is
+				// the only way the shape is ever visible.
+				for (Direction direction : Direction.values()) {
+					recordFeed(region, position.relative(direction), position, pulse.origin(), feeds);
+				}
 				continue;
 			}
 			strongAt.put(position, pulse.time());
 			spreadFromPoweredBlock(region, queue, position, pulse.time(), pulse.strength() > 0,
-				firedAt, noteBlocks, repeaterInput);
+				firedAt, noteBlocks, repeaterInput, pulse.origin(), feeds);
 		}
-		return firedAt;
+		return new Walk(firedAt, hasCycle(feeds));
+	}
+
+	/**
+	 * Whether the signal can get back to a repeater it has already been through.
+	 *
+	 * <p>An ordinary depth-first search for a back edge: a repeater found again while it is still
+	 * being explored is one the path has come round to. Machines converge all the time -- two
+	 * routes meeting at one repeater is not a loop -- so it has to be this and not simply a repeater
+	 * reached twice.</p>
+	 */
+	private static boolean hasCycle(Map<BlockPos, Set<BlockPos>> feeds) {
+		Set<BlockPos> exploring = new HashSet<>();
+		Set<BlockPos> settled = new HashSet<>();
+		for (BlockPos node : feeds.keySet()) {
+			if (!settled.contains(node) && reachesItself(node, feeds, exploring, settled)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private static boolean reachesItself(BlockPos node, Map<BlockPos, Set<BlockPos>> feeds,
+			Set<BlockPos> exploring, Set<BlockPos> settled) {
+		if (exploring.contains(node)) {
+			return true;
+		}
+		if (!settled.add(node)) {
+			return false;
+		}
+		exploring.add(node);
+		for (BlockPos next : feeds.getOrDefault(node, Set.of())) {
+			if (reachesItself(next, feeds, exploring, settled)) {
+				return true;
+			}
+		}
+		exploring.remove(node);
+		return false;
 	}
 
 	/**
@@ -283,7 +345,8 @@ public final class NoteMachineReader {
 	 */
 	private static void spreadFromDust(Region region, PriorityQueue<Pulse> queue, BlockPos position,
 			int time, int strength, Map<BlockPos, Integer> firedAt, Set<BlockPos> noteBlocks,
-			Map<BlockPos, Integer> repeaterInput) {
+			Map<BlockPos, Integer> repeaterInput, BlockPos origin,
+			Map<BlockPos, Set<BlockPos>> feeds) {
 		// Dust powers the block it sits on, and any block it runs into. Those are the two ways a
 		// note block ever hears about it -- dust does not reach through a block to the far side.
 		BlockPos below = position.below();
@@ -294,12 +357,12 @@ public final class NoteMachineReader {
 		// re-power that wire to fifteen, which is a loop the game avoids by ignoring wires entirely
 		// while it works out what a wire is carrying.
 		if (isConductor(region.at(below))) {
-			queue.add(new Pulse(time, below, 0, false, position));
+			queue.add(new Pulse(time, below, 0, false, position, origin));
 		}
 		Set<Direction> pointsAt = pointsAt(region, position);
 		for (Direction direction : Direction.Plane.HORIZONTAL) {
 			for (BlockPos next : dustNeighbours(region, position, direction)) {
-				queue.add(new Pulse(time, next, strength - 1, true, position));
+				queue.add(new Pulse(time, next, strength - 1, true, position, origin));
 			}
 			if (!pointsAt.contains(direction)) {
 				continue;
@@ -310,12 +373,12 @@ public final class NoteMachineReader {
 			}
 			BlockState sideState = region.at(side);
 			if (isConductor(sideState) && !sideState.is(Blocks.NOTE_BLOCK)) {
-				queue.add(new Pulse(time, side, 0, false, position));
+				queue.add(new Pulse(time, side, 0, false, position, origin));
 			}
-			feedRepeater(region, queue, side, position, time, repeaterInput);
+			feedRepeater(region, queue, side, position, time, repeaterInput, origin, feeds);
 		}
-		feedRepeater(region, queue, position.above(), position, time, repeaterInput);
-		feedRepeater(region, queue, position.below(), position, time, repeaterInput);
+		feedRepeater(region, queue, position.above(), position, time, repeaterInput, origin, feeds);
+		feedRepeater(region, queue, position.below(), position, time, repeaterInput, origin, feeds);
 	}
 
 	/**
@@ -397,22 +460,24 @@ public final class NoteMachineReader {
 	 */
 	private static void spreadFromPoweredBlock(Region region, PriorityQueue<Pulse> queue,
 			BlockPos position, int time, boolean fromSource, Map<BlockPos, Integer> firedAt,
-			Set<BlockPos> noteBlocks, Map<BlockPos, Integer> repeaterInput) {
+			Set<BlockPos> noteBlocks, Map<BlockPos, Integer> repeaterInput, BlockPos origin,
+			Map<BlockPos, Set<BlockPos>> feeds) {
 		for (Direction direction : Direction.values()) {
 			BlockPos side = position.relative(direction);
 			if (noteBlocks.contains(side)) {
 				firedAt.merge(side, time, Math::min);
 			}
 			if (fromSource && region.at(side).is(Blocks.REDSTONE_WIRE)) {
-				queue.add(new Pulse(time, side, 15, true, position));
+				queue.add(new Pulse(time, side, 15, true, position, origin));
 			}
-			feedRepeater(region, queue, side, position, time, repeaterInput);
+			feedRepeater(region, queue, side, position, time, repeaterInput, origin, feeds);
 		}
 	}
 
 	/** Drives a repeater, if the block at {@code candidate} is one and {@code from} is its back. */
 	private static void feedRepeater(Region region, PriorityQueue<Pulse> queue, BlockPos candidate,
-			BlockPos from, int time, Map<BlockPos, Integer> repeaterInput) {
+			BlockPos from, int time, Map<BlockPos, Integer> repeaterInput, BlockPos origin,
+			Map<BlockPos, Set<BlockPos>> feeds) {
 		BlockState state = region.at(candidate);
 		if (!state.is(Blocks.REPEATER)) {
 			return;
@@ -421,6 +486,7 @@ public final class NoteMachineReader {
 		if (!candidate.relative(facing).equals(from)) {
 			return;
 		}
+		recordFeed(region, candidate, from, origin, feeds);
 		Integer seen = repeaterInput.get(candidate);
 		if (seen != null && seen <= time) {
 			return;
@@ -430,7 +496,7 @@ public final class NoteMachineReader {
 		// hold is the only thing in a machine that makes time pass, so the whole song's rhythm is
 		// this one addition, repeated.
 		queue.add(new Pulse(time + state.getValue(RepeaterBlock.DELAY),
-			candidate.relative(facing.getOpposite()), 15, false, candidate));
+			candidate.relative(facing.getOpposite()), 15, false, candidate, candidate));
 	}
 
 	/** How many ways in to follow one at a time before giving up and running them all together. */
@@ -445,7 +511,7 @@ public final class NoteMachineReader {
 	 *     between alternative readings of one machine and machines that merely stand side by side
 	 * @param subsumed ways in dropped for reaching only part of what another reaches
 	 */
-	private record Trace(List<Version> versions, boolean overlapping, int subsumed) {
+	private record Trace(List<Version> versions, boolean overlapping, int subsumed, boolean looped) {
 		Set<BlockPos> played() {
 			Set<BlockPos> all = new HashSet<>();
 			versions.forEach(version -> all.addAll(version.firedAt().keySet()));
@@ -478,13 +544,17 @@ public final class NoteMachineReader {
 	private static Trace trace(Region region, Survey survey) {
 		List<BlockPos> starts = startingPoints(region, survey);
 		if (starts.size() == 1 || starts.size() > MAX_TRACED_STARTS) {
-			return new Trace(List.of(new Version(starts.get(0),
-				traceFrom(region, survey, starts))), false, 0);
+			Walk walk = traceFrom(region, survey, starts);
+			return new Trace(List.of(new Version(starts.get(0), walk.firedAt())), false, 0,
+				walk.looped());
 		}
 
+		boolean looped = false;
 		List<Version> traced = new ArrayList<>(starts.size());
 		for (BlockPos start : starts) {
-			traced.add(new Version(start, traceFrom(region, survey, List.of(start))));
+			Walk walk = traceFrom(region, survey, List.of(start));
+			looped |= walk.looped();
+			traced.add(new Version(start, walk.firedAt()));
 		}
 
 		List<Version> kept = new ArrayList<>();
@@ -511,7 +581,18 @@ public final class NoteMachineReader {
 					kept.get(left).firedAt().keySet(), kept.get(right).firedAt().keySet());
 			}
 		}
-		return new Trace(List.copyOf(kept), overlapping, traced.size() - kept.size());
+		return new Trace(List.copyOf(kept), overlapping, traced.size() - kept.size(), looped);
+	}
+
+	/** Notes that {@code from} hands the signal to {@code candidate}, if it does. */
+	private static void recordFeed(Region region, BlockPos candidate, BlockPos from, BlockPos origin,
+			Map<BlockPos, Set<BlockPos>> feeds) {
+		BlockState state = region.at(candidate);
+		if (origin == null || !state.is(Blocks.REPEATER)
+				|| !candidate.relative(state.getValue(RepeaterBlock.FACING)).equals(from)) {
+			return;
+		}
+		feeds.computeIfAbsent(origin, ignored -> new LinkedHashSet<>()).add(candidate);
 	}
 
 	/**
@@ -619,6 +700,14 @@ public final class NoteMachineReader {
 			// apart that is, and nothing in the blocks says.
 			warnings.add(versions + " separate machines, split into numbered layers and read as "
 				+ "though started together");
+		}
+		if (trace.looped()) {
+			// Read one lap and stopped, because the walk refuses a pulse that arrives no later than
+			// one a block has already had -- which is also why it stops at all rather than going
+			// round forever. A bassline meant to repeat under the whole song therefore arrives
+			// having played once.
+			warnings.add("the signal loops back on itself, so anything that repeats -- a bassline "
+				+ "under the rest of the song, say -- was read once through rather than repeated");
 		}
 		if (trace.subsumed() > 0) {
 			warnings.add(trace.subsumed() + " other way"
