@@ -41,6 +41,20 @@ import net.minecraft.world.level.block.state.BlockState;
  * <p>What it does not understand is anything that generates or gates a signal rather than carrying
  * it: comparators, observers, pistons, droppers, clocks. Those are reported rather than guessed at,
  * because a machine read wrongly looks exactly like a machine read rightly until you play it.</p>
+ *
+ * <p>It follows rising edges and nothing else: a note block sounds once, at the first moment power
+ * reaches it, however many times power reaches it afterwards. That is what a note block does, and
+ * it is what makes the compact overlapping modules of community builds read correctly -- where the
+ * front note blocks of one module are the back note blocks of the next, the shared ones are still
+ * held high when the second module arrives, find no fresh edge, and stay silent. Keeping the
+ * earliest arrival reproduces that exactly, and credits the overlap to the module a listener hears
+ * it in.</p>
+ *
+ * <p>The assumption underneath is that power never <em>falls</em> between two arrivals, which holds
+ * while the gap is shorter than the pulse driving the machine -- forever for a lever, about ten
+ * repeater ticks for a button. A build that deliberately re-sounds one note block after its power
+ * has dropped is playing that block twice and this will report it once. Nothing here can tell the
+ * difference, because that answer lives in the length of a pulse nobody wrote down.</p>
  */
 public final class NoteMachineReader {
 	private NoteMachineReader() {

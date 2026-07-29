@@ -467,6 +467,54 @@ class NoteMachineReaderTest {
 		return world;
 	}
 
+	/**
+	 * A note block two modules both power sounds once, on the first of them.
+	 *
+	 * <p>The shape compact community builds are made of: modules overlap so that the note blocks at
+	 * the front of one are the note blocks at the back of the next, which is how a repeater ends up
+	 * driving six note blocks in the space of two. Fired in sequence the overlap does not sound
+	 * twice -- the shared blocks are still held high from the first module when the second arrives,
+	 * so there is no fresh edge for them to answer, and the second module sounds only the four that
+	 * were low.</p>
+	 *
+	 * <p>Keeping the earliest arrival per note block reproduces exactly that, because a note block
+	 * plays on the rising edge and the earliest arrival is the rising edge. The overlap is credited
+	 * to the module that got there first, which is also the module a listener hears it in.</p>
+	 */
+	@Test
+	void soundsASharedNoteBlockOnceAndWithTheEarlierModule() {
+		Map<BlockPos, BlockState> world = new HashMap<>();
+		int y = 65;
+		// Head repeater into the first module's block.
+		world.put(new BlockPos(-1, y, 0), parse("minecraft:repeater[facing=west,delay=1]"));
+		world.put(new BlockPos(0, y, 0), Blocks.STONE.defaultBlockState());
+		// The overlap: touching the first module's block and the second module's block both.
+		world.put(new BlockPos(0, y, 1), note(7));
+		world.put(new BlockPos(0, y, 2), Blocks.STONE.defaultBlockState());
+		// A note block only the second module reaches, so the second module is known to have fired.
+		world.put(new BlockPos(-1, y, 2), note(11));
+		// Three more repeaters carrying the signal round to the second module's block.
+		world.put(new BlockPos(1, y, 0), parse("minecraft:repeater[facing=west,delay=1]"));
+		world.put(new BlockPos(2, y, 0), Blocks.STONE.defaultBlockState());
+		world.put(new BlockPos(2, y, 1), parse("minecraft:repeater[facing=north,delay=1]"));
+		world.put(new BlockPos(2, y, 2), Blocks.STONE.defaultBlockState());
+		world.put(new BlockPos(1, y, 2), parse("minecraft:repeater[facing=east,delay=1]"));
+
+		NoteMachineReader.Reading reading = readAll(world, "Overlapping modules");
+
+		assertEquals(2, reading.noteBlocks(), "two note blocks stand in the world");
+		assertEquals(2, reading.project().noteCount(), "the shared one should not sound twice");
+		assertEquals(0, reading.unreachedNotes());
+		// The shared block with the first module at tick zero, the second module three repeater
+		// ticks later -- not the other way round, and not both.
+		assertEquals(List.of(0L, 3L * NoteMachineReader.TICKS_PER_REDSTONE_TICK),
+			reading.project().layers().stream()
+				.flatMap(layer -> layer.notes().stream())
+				.map(ComposerProject.NoteEvent::startTick)
+				.sorted()
+				.toList());
+	}
+
 	// ------------------------------------------------------------------ helpers
 
 	private static NoteMachineReader.Reading readAll(Map<BlockPos, BlockState> world, String name) {
