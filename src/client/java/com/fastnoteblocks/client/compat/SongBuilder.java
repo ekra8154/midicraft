@@ -379,7 +379,7 @@ public final class SongBuilder {
 		if (floors <= 1) {
 			walkFolded(events, origin, forward, laneWidth, Integer.MAX_VALUE, placements);
 		} else {
-			walkWall(events, origin, forward, laneWidth, floors, placements);
+			walkWall(events, origin, forward, laneWidth, floors, placements, layout);
 		}
 		return placements.finish(mode, origin);
 	}
@@ -400,11 +400,17 @@ public final class SongBuilder {
 	 * be sized to what the lanes hold.</p>
 	 */
 	private static void walkWall(List<EventGroup> events, BlockPos origin, Direction forward,
-			int laneWidth, int floors, PlacementPlan placements) {
+			int laneWidth, int floors, PlacementPlan placements, Layout layout) {
 		BlockPos cursor = origin;
 		Direction travel = forward;
 		// Where chords grow, and the direction the whole slab creeps once a sweep is done.
 		Direction depth = forward.getClockWise();
+		// A descent is the one thing in a build that steps a column off its own centre line, and
+		// it steps back the way the slabs came. The slab behind this one is climbing where this one
+		// descends -- they alternate -- and a climb keeps to the centre line, so that column is the
+		// one with nothing in it. Stepping the other way would put live stone against the notes of
+		// the slab not yet built.
+		Direction descentSide = layout.ultra() ? depth.getOpposite() : depth;
 		int nearWall = origin.getX();
 		int farWall = origin.getX() + laneWidth;
 		int currentTime = 0;
@@ -438,7 +444,7 @@ public final class SongBuilder {
 					cursor = climb > 0
 						? addGlassClimb(placements, cursor, travel, lastStyle == ChordStyle.BUS,
 							currentTime)
-						: addSpiralDescent(placements, cursor, travel, depth, currentTime);
+						: addSpiralDescent(placements, cursor, travel, descentSide, currentTime);
 					floor = above;
 				} else {
 					// Out of floors: step the slab sideways once, and come back the way we climbed.
