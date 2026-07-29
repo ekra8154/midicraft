@@ -315,12 +315,107 @@ public final class SongBuilder {
 		// single event, or an event too big to fit would turn on every attempt and never advance.
 		int longest = events.stream().mapToInt(EventGroup::length).max().orElse(1);
 		int laneWidth = Math.max(longest + 2, width - 2);
-		int corridor = floors <= 1
-			? Integer.MAX_VALUE
-			: foldedCorridor(events, origin, forward, laneWidth, floors);
 		PlacementPlan placements = new PlacementPlan();
-		walkFolded(events, origin, forward, laneWidth, corridor, placements);
+		if (floors <= 1) {
+			walkFolded(events, origin, forward, laneWidth, Integer.MAX_VALUE, placements);
+		} else {
+			walkWall(events, origin, forward, laneWidth, floors, placements);
+		}
 		return placements.finish(PasteMode.COMPACT_LANE, origin);
+	}
+
+	/**
+	 * Folds upward instead of sideways, so the build only ever grows one way.
+	 *
+	 * <p>The same walk as everywhere else with two of its axes swapped. Lanes still run across the
+	 * width, but a lane now steps <em>up</em> to the next one, and only when the floors are used up
+	 * does the whole thing move once into open ground and come back down. That makes the third axis
+	 * monotonic: the music sweeps up and down a slab that creeps steadily away from you, so you can
+	 * follow it in a straight line -- walk it, or lay a rail and ride it -- instead of doubling back
+	 * across a corridor for every lane.</p>
+	 *
+	 * <p>Chords grow along that third axis rather than with the lane step, because the lane step is
+	 * now vertical and a note block needs air directly above it to sound. That also fixes the floor
+	 * pitch at four with nothing to measure: only the sideways step, where the chords went, has to
+	 * be sized to what the lanes hold.</p>
+	 */
+	private static void walkWall(List<EventGroup> events, BlockPos origin, Direction forward,
+			int laneWidth, int floors, PlacementPlan placements) {
+		BlockPos cursor = origin;
+		Direction travel = forward;
+		// Where chords grow, and the direction the whole slab creeps once a sweep is done.
+		Direction depth = forward.getClockWise();
+		int nearWall = origin.getX();
+		int farWall = origin.getX() + laneWidth;
+		int currentTime = 0;
+		int floor = 0;
+		int climb = 1;
+		LaneReach reach = laneReach(events, 0, events.size());
+		int slabStep = laneSpacing(reach, reach);
+		for (int index = 0; index < events.size(); index++) {
+			EventGroup event = events.get(index);
+			SpatialDelayTrigger trigger = addSpatialDelayBeforeEvent(placements, cursor, travel,
+				event.time() - currentTime);
+			currentTime = event.time();
+			int landing = cursor.getX() + travel.getStepX() * event.length();
+			int next = index + 1 < events.size()
+				? landing + travel.getStepX() * events.get(index + 1).length()
+				: landing;
+			boolean turnAfter = index + 1 < events.size()
+				&& event.maxSafeTurnDistance() >= MAX_LANE_SPACING
+				&& (next > farWall || next < nearWall);
+			cursor = addSpatialEventModule(placements, trigger.cursor(), travel, depth,
+				trigger.triggerDelay(), event.notes());
+			if (!turnAfter) {
+				continue;
+			}
+			int above = floor + climb;
+			if (above >= 0 && above < floors) {
+				cursor = addVerticalTurn(placements, cursor, travel, climb, currentTime);
+				floor = above;
+			} else {
+				// Out of floors: step the slab sideways once, and come back the way we climbed.
+				// Sized from the widest chord in the whole song rather than from the lane we happen
+				// to be leaving. A sideways step separates two slabs, and every floor of one sits
+				// beside the matching floor of the other -- so a quiet lane at the top is no promise
+				// about the chord four floors down that it would be answering for.
+				cursor = addCompactTurn(placements, cursor, travel, depth, slabStep, currentTime);
+				climb = -climb;
+			}
+			travel = travel.getOpposite();
+		}
+	}
+
+	/**
+	 * Carries the signal one floor up or down at the end of a lane, and turns it around.
+	 *
+	 * <p>Dust climbs a block at a time, and each step needs the block that would otherwise sit
+	 * between the two dusts to be see-through -- so the staircase is glass, which is transparent
+	 * enough for the step to connect and solid enough to hold the next dust up. Alternating between
+	 * two columns keeps the whole turn two blocks deep whichever way it is going.</p>
+	 *
+	 * <p>Going down, the block that has to be see-through is the one holding up the dust two steps
+	 * above, which is why the first block of the staircase is glass rather than the stone the rest
+	 * of the build stands on. Up does not care, and shares the shape.</p>
+	 *
+	 * @param climb 1 to rise a floor, -1 to drop one
+	 * @return the cursor for the next lane, which travels back the way this one came
+	 */
+	private static BlockPos addVerticalTurn(PlacementPlan placements, BlockPos cursor,
+			Direction travel, int climb, int time) {
+		BlockPos near = cursor;
+		BlockPos far = cursor.relative(travel);
+		set(placements, near, "minecraft:glass");
+		set(placements, near.above(), "minecraft:redstone_wire");
+		for (int step = 1; step <= CUBE_FLOOR_HEIGHT; step++) {
+			BlockPos column = step % 2 == 1 ? far : near;
+			int level = 1 + step * climb;
+			set(placements, column.above(level - 1), "minecraft:glass");
+			set(placements, column.above(level), "minecraft:redstone_wire");
+		}
+		// The next repeater stands one back along the way we came and reads the top of the
+		// staircase, which is the block in front of it.
+		return cursor.relative(travel.getOpposite()).above(CUBE_FLOOR_HEIGHT * climb);
 	}
 
 	/**

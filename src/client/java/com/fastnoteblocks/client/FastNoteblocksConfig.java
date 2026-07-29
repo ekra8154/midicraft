@@ -219,7 +219,7 @@ public final class FastNoteblocksConfig {
 	 */
 	public static final int DEFAULT_BUILD_LANE_FLOORS = 1;
 	public static final int MIN_BUILD_LANE_FLOORS = 1;
-	public static final int MAX_BUILD_LANE_FLOORS = 3;
+	public static final int MAX_BUILD_LANE_FLOORS = 16;
 	/**
 	 * Commands sent per client tick when pasting a build. Singleplayer tolerates far more than the
 	 * original fixed rate of 2; servers may treat a high rate as command spam.

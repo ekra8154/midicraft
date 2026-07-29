@@ -131,15 +131,24 @@ final class BuildOptionsScreen extends Screen {
 		init();
 	}
 
+	private static String nth(int floors) {
+		return switch (floors) {
+			case 2 -> "half";
+			case 3 -> "third";
+			case 4 -> "quarter";
+			default -> floors + "th";
+		};
+	}
+
 	private static String describe(SongBuilder.PasteMode option) {
 		return switch (option) {
 			case COMPACT_CUBE -> "Folds onto stacked floors joined by a glass redstone riser. "
 				+ "Smallest footprint, and the only layout that keeps a long song inside earshot.";
 			case COMPACT -> "Folds back and forth on one level into a square. Compact, but a long "
 				+ "song still reaches past the 48-block range note blocks can be heard from.";
-			case COMPACT_LANE -> "Folds back and forth inside a width you set, growing away from you "
-				+ "rather than closing into a square. For building along a strip. Extra floors "
-				+ "retrace the one below, so three of them is a third of the length.";
+			case COMPACT_LANE -> "Folds up and down inside a width you set, and creeps away from you "
+				+ "one step at a time. The only layout you can follow in a straight line: walk it, "
+				+ "or lay a rail. More floors make it taller and shorter.";
 			case LANE -> "One straight line. Easiest to read and repair, largest footprint.";
 		};
 	}
@@ -159,9 +168,9 @@ final class BuildOptionsScreen extends Screen {
 			graphics.text(font, laneWidth + " blocks wide before it folds back",
 				left + 26, widthRow(top) + 6, 0xFFD6D8DD, false);
 			graphics.text(font, laneFloors == 1
-					? "1 floor, " + (4 * laneFloors) + " blocks tall"
-					: laneFloors + " floors, " + (4 * laneFloors) + " blocks tall - a "
-						+ (laneFloors == 2 ? "half" : "third") + " the length",
+					? "1 floor - flat, and folds sideways instead"
+					: laneFloors + " floors, " + (4 * laneFloors - 1) + " blocks tall - one "
+						+ nth(laneFloors) + " the length",
 				left + 26, floorRow(top) + 6, 0xFFD6D8DD, false);
 		}
 
