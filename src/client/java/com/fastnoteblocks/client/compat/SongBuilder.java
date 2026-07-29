@@ -301,7 +301,7 @@ public final class SongBuilder {
 			case COMPACT_LANE -> createLanePastePlan(origin, forward, notes, limits.laneWidth(),
 				limits.laneFloors(), Layout.STANDARD, PasteMode.COMPACT_LANE);
 			case ULTRA_COMPACT_LANE -> createLanePastePlan(origin, forward, notes, limits.laneWidth(),
-				limits.laneFloors(), Layout.ultra(limits.laneFloors()), PasteMode.ULTRA_COMPACT_LANE);
+				limits.laneFloors(), Layout.ultra(limits.laneFloors(), origin), PasteMode.ULTRA_COMPACT_LANE);
 			case LANE -> createStraightPastePlan(origin, forward, notes);
 		};
 	}
@@ -377,7 +377,7 @@ public final class SongBuilder {
 		int laneWidth = Math.max(longest + 2, width - 2);
 		PlacementPlan placements = new PlacementPlan();
 		if (floors <= 1) {
-			walkFolded(events, origin, forward, laneWidth, Integer.MAX_VALUE, placements);
+			walkFolded(events, origin, forward, laneWidth, Integer.MAX_VALUE, placements, layout);
 		} else {
 			walkWall(events, origin, forward, laneWidth, floors, placements, layout);
 		}
@@ -463,7 +463,8 @@ public final class SongBuilder {
 				event.time() - currentTime);
 			currentTime = event.time();
 			Placed placed = addChordModule(placements, trigger.cursor(), travel, depth,
-				trigger.triggerDelay(), event, !columnBehindBusy || !trigger.cursor().equals(cursor));
+				trigger.triggerDelay(), event, !columnBehindBusy || !trigger.cursor().equals(cursor),
+				layout);
 			cursor = placed.cursor();
 			columnBehindBusy = placed.stacked();
 			lastStyle = placed.style();
@@ -547,7 +548,7 @@ public final class SongBuilder {
 		int corridor = cubeCorridor(
 			List.copyOf(laneSpacings(events, cubeLanePartition(events, laneWidth)).values()), floors);
 		for (int attempt = 0; attempt < 12
-			&& walkFolded(events, origin, forward, laneWidth, corridor, PlacementPlan.dry()) > floors;
+			&& walkFolded(events, origin, forward, laneWidth, corridor, PlacementPlan.dry(), Layout.STANDARD) > floors;
 				attempt++) {
 			corridor += Math.max(MAX_LANE_SPACING, corridor / 8);
 		}
@@ -611,7 +612,7 @@ public final class SongBuilder {
 		// and a floor of wide ones hanging off the edge of it.
 		int corridor = foldedCorridor(events, origin, forward, laneWidth, floors);
 		PlacementPlan placements = new PlacementPlan();
-		walkFolded(events, origin, forward, laneWidth, corridor, placements);
+		walkFolded(events, origin, forward, laneWidth, corridor, placements, Layout.STANDARD);
 		return placements.finish(PasteMode.COMPACT_CUBE, origin);
 	}
 
@@ -624,7 +625,7 @@ public final class SongBuilder {
 	 * @return how many floors the stack ended up with
 	 */
 	private static int walkFolded(List<EventGroup> events, BlockPos origin, Direction forward,
-			int laneWidth, int corridor, PlacementPlan placements) {
+			int laneWidth, int corridor, PlacementPlan placements, Layout layout) {
 		int floorsUsed = 1;
 		BlockPos cursor = origin;
 		Direction travel = forward;
@@ -656,7 +657,7 @@ public final class SongBuilder {
 				&& (next > farWall || next < nearWall);
 			if (!turnAfter) {
 				Placed placed = addChordModule(placements, trigger.cursor(), travel, laneStep,
-					trigger.triggerDelay(), event, roomBehind);
+					trigger.triggerDelay(), event, roomBehind, layout);
 				cursor = placed.cursor();
 				columnBehindBusy = placed.stacked();
 				continue;
@@ -686,7 +687,7 @@ public final class SongBuilder {
 				continue;
 			}
 			cursor = addChordModule(placements, trigger.cursor(), travel, laneStep,
-				trigger.triggerDelay(), event, roomBehind).cursor();
+				trigger.triggerDelay(), event, roomBehind, layout).cursor();
 			// A turn or a riser is about to be built into the block the next module would stand
 			// behind, so whatever this one did, the next one cannot stack.
 			columnBehindBusy = true;
@@ -1154,7 +1155,7 @@ public final class SongBuilder {
 	 * pair taken drops to a bus, and a bus that finds a turn has freed the pair takes it.</p>
 	 */
 	private static Placed addChordModule(PlacementPlan placements, BlockPos cursor, Direction travel,
-			Direction across, int triggerDelay, EventGroup event, boolean roomBehind) {
+			Direction across, int triggerDelay, EventGroup event, boolean roomBehind, Layout layout) {
 		ChordStyle style = event.style();
 		if (style == ChordStyle.STACKED_FULL && !roomBehind) {
 			style = ChordStyle.BUS;
@@ -1164,7 +1165,7 @@ public final class SongBuilder {
 				event.notes()), style);
 		}
 		BlockPos start = cursor;
-		if (Math.floorMod(start.relative(travel).getX(), 2) != 0) {
+		if (Math.floorMod(start.relative(travel).getX(), 2) != layout.centreParity()) {
 			addParityPad(placements, start);
 			start = start.relative(travel);
 		}
@@ -1605,11 +1606,14 @@ public final class SongBuilder {
 	 * @param risers whether this build changes floors, which is what decides which way a descent
 	 *     steps off its own centre line
 	 */
-	private record Layout(boolean ultra, boolean risers) {
-		static final Layout STANDARD = new Layout(false, true);
+	private record Layout(boolean ultra, boolean risers, int centreParity) {
+		static final Layout STANDARD = new Layout(false, true, 0);
 
-		static Layout ultra(int floors) {
-			return new Layout(true, floors > 1);
+		static Layout ultra(int floors, BlockPos origin) {
+			// Counted from the origin and not from the world, so the same song pasted a block over
+			// is the same build. Anchored where the first module would land anyway, which is one
+			// past the origin, so a song that never drifts off the beat never pays for a pad.
+			return new Layout(true, floors > 1, Math.floorMod(origin.getX() + 1, 2));
 		}
 	}
 

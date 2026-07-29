@@ -166,13 +166,31 @@ class SongBuilderTest {
 	 */
 	@Test
 	void theCentreDustIsPlacedAsACrossAndNotLeftToTheGame() {
-		SongBuilder.PastePlan plan = build(song(5, chords(1, 4, BASS_DRUM)),
+		// A gap of four is the longest one repeater can hold, so the module lands on the beat the
+		// parity anchor is set to and no padding column comes with it. Every piece of dust in the
+		// build is then the module's own, and the module's own has to be a named cross.
+		SongBuilder.PastePlan plan = build(song(4, chords(1, 4, BASS_DRUM)),
 			SongBuilder.PasteMode.ULTRA_COMPACT_LANE);
 
 		assertEquals(1, plan.commands().stream().filter(command -> command.contains(CROSS)).count());
 		assertTrue(plan.commands().stream()
 				.noneMatch(command -> command.contains(" minecraft:redstone_wire ")),
 			"a stacked module has no dust in it whose shape was left unstated");
+	}
+
+	/**
+	 * A module that would land off the beat gets nudged onto it, and the nudge is a column of glass
+	 * with plain dust on it -- plain because it runs straight through, and glass because dust makes
+	 * the block under it live and the blocks either side of that one are where low notes hang.
+	 */
+	@Test
+	void aModuleThatWouldLandOffTheBeatIsNudgedOntoIt() {
+		SongBuilder.PastePlan plan = build(song(5, chords(1, 4, BASS_DRUM)),
+			SongBuilder.PasteMode.ULTRA_COMPACT_LANE);
+
+		assertEquals(1, plan.commands().stream().filter(command -> command.contains(CROSS)).count());
+		assertEquals(1, plan.commands().stream()
+			.filter(command -> command.contains(" minecraft:glass ")).count());
 	}
 
 	@Test
