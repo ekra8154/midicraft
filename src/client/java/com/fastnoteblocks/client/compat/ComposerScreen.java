@@ -728,6 +728,32 @@ public final class ComposerScreen extends Screen {
 			new RegionScanScreen(this, this::scanRegion)));
 	}
 
+	private void importSchematic() {
+		withUnsavedChangesChecked(() -> minecraft.gui.setScreen(new FileBrowserScreen(this,
+			"Import a schematic", java.nio.file.Path.of(config.importDirectory()),
+			SchematicReader.EXTENSIONS,
+			folder -> {
+				config.setImportDirectory(folder.toString());
+				FastNoteblocksConfig.save();
+			},
+			file -> readSchematic(file))));
+	}
+
+	private void readSchematic(java.nio.file.Path path) {
+		minecraft.gui.setScreen(this);
+		try {
+			SchematicReader.Schematic schematic = SchematicReader.load(path);
+			String name = path.getFileName().toString().replaceFirst("\\.[^.]+$", "");
+			NoteMachineReader.Reading reading = NoteMachineReader.read(name,
+				net.minecraft.core.BlockPos.ZERO, schematic.size().offset(-1, -1, -1),
+				schematic::at);
+			applyImportedProject(reading.project(),
+				schematic.format() + " - " + reading.report());
+		} catch (Exception failed) {
+			showImportFailure(failed);
+		}
+	}
+
 	private void scanRegion(net.minecraft.core.BlockPos from, net.minecraft.core.BlockPos to) {
 		minecraft.gui.setScreen(this);
 		try {
@@ -1113,6 +1139,7 @@ public final class ComposerScreen extends Screen {
 		switch (action) {
 			case IMPORT -> importSong();
 			case SCAN_WORLD -> scanWorldRegion();
+			case IMPORT_SCHEMATIC -> importSchematic();
 			case OPEN_SONGS -> openSongs();
 			case RENAME_COMPOSITION -> renameComposition();
 			case COPY_AS_TEXT -> copySequenceAsText();
@@ -1314,6 +1341,9 @@ public final class ComposerScreen extends Screen {
 			case SCAN_WORLD -> "Reads a note block machine standing in the world back into a song, "
 				+ "by following its redstone. Give two corners. Only chunks your client has "
 				+ "loaded can be read, so stand near the build.";
+			case IMPORT_SCHEMATIC -> "Reads a saved build back into a song by following its "
+				+ "redstone. Structure (.nbt), Sponge (.schem) and Litematica (.litematic) files; "
+				+ "the old MCEdit .schematic stores pre-1.13 numbered blocks and cannot be read.";
 			case OPEN_SONGS -> "The song library: open another composition, start one, or make a "
 				+ "copy.";
 			case COPY_AS_TEXT -> "Puts the build sequence on the clipboard, one line per included "
@@ -3980,6 +4010,7 @@ public final class ComposerScreen extends Screen {
 	private enum ToolbarAction {
 		IMPORT("Import MIDI / NBS as a new song..."),
 		SCAN_WORLD("Scan a build from the world as a new song..."),
+		IMPORT_SCHEMATIC("Import a schematic as a new song..."),
 		OPEN_SONGS("Open composition..."),
 		COPY_AS_TEXT("Copy sequence as text"),
 		SAVE_COMPOSITION("Save composition"),
@@ -4012,7 +4043,7 @@ public final class ComposerScreen extends Screen {
 
 		private static final ToolbarAction[] FILE_ACTIONS = {
 			SAVE_COMPOSITION, SAVE_COMPOSITION_AS, RENAME_COMPOSITION, OPEN_SONGS, IMPORT,
-			SCAN_WORLD, COPY_AS_TEXT, BACK_TO_SEQUENCES, CLOSE_TO_GAME
+			IMPORT_SCHEMATIC, SCAN_WORLD, COPY_AS_TEXT, BACK_TO_SEQUENCES, CLOSE_TO_GAME
 		};
 		private static final ToolbarAction[] EDIT_ACTIONS = {
 			UNDO, REDO, CONVERT, MERGE_REPEATS,
