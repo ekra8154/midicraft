@@ -240,7 +240,8 @@ public final class SongBuilder {
 			case COMPACT_CUBE -> createCubePastePlan(origin, forward, notes);
 			case COMPACT -> createCompactPastePlan(origin, forward, notes);
 			case COMPACT_LANE -> createLanePastePlan(origin, forward, notes,
-				FastNoteblocksConfig.get().buildLaneWidth());
+				FastNoteblocksConfig.get().buildLaneWidth(),
+				FastNoteblocksConfig.get().buildLaneFloors());
 			case LANE -> createStraightPastePlan(origin, forward, notes);
 		};
 	}
@@ -293,24 +294,53 @@ public final class SongBuilder {
 	}
 
 	/**
-	 * Folds back and forth inside a width you choose, growing away from you without end.
+	 * Folds back and forth inside a width you choose, growing away from you as far as it needs.
 	 *
-	 * <p>The same walk as a cube's floor, with nowhere to climb to. It has to be the walled walk and
-	 * not the square one: a lane that ends on a length budget stops wherever the budget runs out,
-	 * and those ragged ends wander, so a 32-wide fold came out anywhere from 34 to 72 blocks
-	 * across. A wall is a wall.</p>
+	 * <p>It has to be the walled walk and not the square one: a lane that ends on a length budget
+	 * stops wherever the budget runs out, and those ragged ends wander, so a 32-wide fold came out
+	 * anywhere from 34 to 72 blocks across. A wall is a wall.</p>
+	 *
+	 * <p>Extra floors shorten it rather than widen it. One floor fills forward, the next retraces it
+	 * backwards overhead, the third goes forward again, so three floors is a third of the length in
+	 * the same footprint. Three chains started together by a common riser would give the same three
+	 * floors, and cost more: each chain spans the whole song, so each one builds its own repeaters
+	 * for every silence in it. Measured over the songs in run/config that was 3% worse on the
+	 * densest and 64% worse on the sparsest, and it is the sparse ones that are already long.</p>
 	 */
 	private static PastePlan createLanePastePlan(BlockPos origin, Direction forward,
-			List<EventNote> notes, int width) {
+			List<EventNote> notes, int width, int floors) {
 		List<EventGroup> events = eventGroups(notes);
 		// Two blocks of the width go on the fold itself: the turn steps one past the end of a lane
 		// and a corner carrying notes reaches one past that. The wall still has to clear the longest
 		// single event, or an event too big to fit would turn on every attempt and never advance.
 		int longest = events.stream().mapToInt(EventGroup::length).max().orElse(1);
+		int laneWidth = Math.max(longest + 2, width - 2);
+		int corridor = floors <= 1
+			? Integer.MAX_VALUE
+			: foldedCorridor(events, origin, forward, laneWidth, floors);
 		PlacementPlan placements = new PlacementPlan();
-		walkFolded(events, origin, forward, Math.max(longest + 2, width - 2), Integer.MAX_VALUE,
-			placements);
+		walkFolded(events, origin, forward, laneWidth, corridor, placements);
 		return placements.finish(PasteMode.COMPACT_LANE, origin);
+	}
+
+	/**
+	 * The narrowest corridor that still folds this walk into {@code floors} floors or fewer.
+	 *
+	 * <p>Two steps because the cheap answer is close but not exact: the estimate reads a lane
+	 * partition and the walk decides its lanes as it goes, so they differ by a lane here and there
+	 * -- enough to spill one lane onto a floor of its own. Walking it dry costs nothing and settles
+	 * it.</p>
+	 */
+	private static int foldedCorridor(List<EventGroup> events, BlockPos origin, Direction forward,
+			int laneWidth, int floors) {
+		int corridor = cubeCorridor(
+			List.copyOf(laneSpacings(events, cubeLanePartition(events, laneWidth)).values()), floors);
+		for (int attempt = 0; attempt < 12
+			&& walkFolded(events, origin, forward, laneWidth, corridor, PlacementPlan.dry()) > floors;
+				attempt++) {
+			corridor += Math.max(MAX_LANE_SPACING, corridor / 8);
+		}
+		return corridor;
 	}
 
 	private static PastePlan createCompactPastePlan(BlockPos origin, Direction forward, List<EventNote> notes) {
@@ -367,16 +397,7 @@ public final class SongBuilder {
 		// was fine while every lane was four apart; now that a sparse lane pair sits two apart, a
 		// count leaves a floor of narrow lanes covering half the footprint of the floor under it --
 		// and a floor of wide ones hanging off the edge of it.
-		int corridor = cubeCorridor(
-			List.copyOf(laneSpacings(events, cubeLanePartition(events, laneWidth)).values()), floors);
-		// The estimate reads a lane partition, and the walk decides its lanes as it goes, so the two
-		// differ by a lane here and there -- enough to spill one lane onto a floor of its own. Walk
-		// it dry and widen until the stack really is the height it was sized for.
-		for (int attempt = 0; attempt < 8
-			&& walkFolded(events, origin, forward, laneWidth, corridor, PlacementPlan.dry()) > floors;
-				attempt++) {
-			corridor += MAX_LANE_SPACING;
-		}
+		int corridor = foldedCorridor(events, origin, forward, laneWidth, floors);
 		PlacementPlan placements = new PlacementPlan();
 		walkFolded(events, origin, forward, laneWidth, corridor, placements);
 		return placements.finish(PasteMode.COMPACT_CUBE, origin);

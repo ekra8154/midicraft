@@ -27,6 +27,7 @@ final class BuildOptionsScreen extends Screen {
 	private SongBuilder.PasteMode mode;
 	private int commandsPerTick;
 	private int laneWidth;
+	private int laneFloors;
 
 	BuildOptionsScreen(
 		Screen parent,
@@ -43,6 +44,7 @@ final class BuildOptionsScreen extends Screen {
 		this.mode = initialMode;
 		this.commandsPerTick = FastNoteblocksConfig.get().commandsPerTick();
 		this.laneWidth = FastNoteblocksConfig.get().buildLaneWidth();
+		this.laneFloors = FastNoteblocksConfig.get().buildLaneFloors();
 	}
 
 	/** Top of the width row, which only a Compact lane build has. */
@@ -50,8 +52,12 @@ final class BuildOptionsScreen extends Screen {
 		return top + 14 + SongBuilder.PasteMode.values().length * 22 + 6;
 	}
 
+	private int floorRow(int top) {
+		return widthRow(top) + 22;
+	}
+
 	private int rateRow(int top) {
-		return widthRow(top) + (mode == SongBuilder.PasteMode.COMPACT_LANE ? 26 : 0) + 10;
+		return widthRow(top) + (mode == SongBuilder.PasteMode.COMPACT_LANE ? 48 : 0) + 10;
 	}
 
 	@Override
@@ -82,6 +88,11 @@ final class BuildOptionsScreen extends Screen {
 				.bounds(left, widthY, 20, 20).build());
 			addRenderableWidget(Button.builder(Component.literal("+"), clicked -> changeWidth(4))
 				.bounds(left + width - 20, widthY, 20, 20).build());
+			int floorY = floorRow(top);
+			addRenderableWidget(Button.builder(Component.literal("-"), clicked -> changeFloors(-1))
+				.bounds(left, floorY, 20, 20).build());
+			addRenderableWidget(Button.builder(Component.literal("+"), clicked -> changeFloors(1))
+				.bounds(left + width - 20, floorY, 20, 20).build());
 		}
 
 		y = rateRow(top);
@@ -93,6 +104,7 @@ final class BuildOptionsScreen extends Screen {
 		addRenderableWidget(Button.builder(Component.literal("Paste"), clicked -> {
 			FastNoteblocksConfig.get().setCommandsPerTick(commandsPerTick);
 			FastNoteblocksConfig.get().setBuildLaneWidth(laneWidth);
+			FastNoteblocksConfig.get().setBuildLaneFloors(laneFloors);
 			FastNoteblocksConfig.get().setPasteMode(mode.name());
 			FastNoteblocksConfig.save();
 			confirm.accept(mode);
@@ -113,14 +125,21 @@ final class BuildOptionsScreen extends Screen {
 		init();
 	}
 
+	private void changeFloors(int delta) {
+		laneFloors = Math.max(FastNoteblocksConfig.MIN_BUILD_LANE_FLOORS,
+			Math.min(FastNoteblocksConfig.MAX_BUILD_LANE_FLOORS, laneFloors + delta));
+		init();
+	}
+
 	private static String describe(SongBuilder.PasteMode option) {
 		return switch (option) {
 			case COMPACT_CUBE -> "Folds onto stacked floors joined by a glass redstone riser. "
 				+ "Smallest footprint, and the only layout that keeps a long song inside earshot.";
 			case COMPACT -> "Folds back and forth on one level into a square. Compact, but a long "
 				+ "song still reaches past the 48-block range note blocks can be heard from.";
-			case COMPACT_LANE -> "Folds back and forth on one level inside a width you set, growing "
-				+ "away from you rather than closing into a square. For building along a strip.";
+			case COMPACT_LANE -> "Folds back and forth inside a width you set, growing away from you "
+				+ "rather than closing into a square. For building along a strip. Extra floors "
+				+ "retrace the one below, so three of them is a third of the length.";
 			case LANE -> "One straight line. Easiest to read and repair, largest footprint.";
 		};
 	}
@@ -139,6 +158,11 @@ final class BuildOptionsScreen extends Screen {
 		if (mode == SongBuilder.PasteMode.COMPACT_LANE) {
 			graphics.text(font, laneWidth + " blocks wide before it folds back",
 				left + 26, widthRow(top) + 6, 0xFFD6D8DD, false);
+			graphics.text(font, laneFloors == 1
+					? "1 floor, " + (4 * laneFloors) + " blocks tall"
+					: laneFloors + " floors, " + (4 * laneFloors) + " blocks tall - a "
+						+ (laneFloors == 2 ? "half" : "third") + " the length",
+				left + 26, floorRow(top) + 6, 0xFFD6D8DD, false);
 		}
 
 		int rateY = rateRow(top);

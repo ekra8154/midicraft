@@ -213,6 +213,14 @@ public final class FastNoteblocksConfig {
 	public static final int MIN_BUILD_LANE_WIDTH = 4;
 	public static final int MAX_BUILD_LANE_WIDTH = 128;
 	/**
+	 * Floors a Compact lane build folds onto. Each one retraces the one below it, so three floors is
+	 * a third of the length in the same footprint. Capped low on purpose: unlike a cube, which is
+	 * sized to be looked at from outside, a lane is something you stand next to.
+	 */
+	public static final int DEFAULT_BUILD_LANE_FLOORS = 1;
+	public static final int MIN_BUILD_LANE_FLOORS = 1;
+	public static final int MAX_BUILD_LANE_FLOORS = 3;
+	/**
 	 * Commands sent per client tick when pasting a build. Singleplayer tolerates far more than the
 	 * original fixed rate of 2; servers may treat a high rate as command spam.
 	 */
@@ -281,6 +289,7 @@ public final class FastNoteblocksConfig {
 	private int conversionGapPercentile;
 	private int commandsPerTick;
 	private int buildLaneWidth;
+	private int buildLaneFloors;
 	private String importDirectory;
 	private int maxBuildFloors;
 	private String pasteMode;
@@ -393,6 +402,9 @@ public final class FastNoteblocksConfig {
 				);
 				instance.buildLaneWidth = clampBuildLaneWidth(
 					stored.buildLaneWidth == null ? DEFAULT_BUILD_LANE_WIDTH : stored.buildLaneWidth
+				);
+				instance.buildLaneFloors = clampBuildLaneFloors(
+					stored.buildLaneFloors == null ? DEFAULT_BUILD_LANE_FLOORS : stored.buildLaneFloors
 				);
 				instance.importDirectory = stored.importDirectory;
 				instance.conversionGapPercentile = clampConversionGapPercentile(
@@ -876,6 +888,14 @@ public final class FastNoteblocksConfig {
 		this.buildLaneWidth = clampBuildLaneWidth(buildLaneWidth);
 	}
 
+	public int buildLaneFloors() {
+		return buildLaneFloors;
+	}
+
+	public void setBuildLaneFloors(int buildLaneFloors) {
+		this.buildLaneFloors = clampBuildLaneFloors(buildLaneFloors);
+	}
+
 	public int conversionGapPercentile() {
 		return conversionGapPercentile;
 	}
@@ -937,6 +957,7 @@ public final class FastNoteblocksConfig {
 		config.conversionGapPercentile = DEFAULT_CONVERSION_GAP_PERCENTILE;
 		config.commandsPerTick = DEFAULT_COMMANDS_PER_TICK;
 		config.buildLaneWidth = DEFAULT_BUILD_LANE_WIDTH;
+		config.buildLaneFloors = DEFAULT_BUILD_LANE_FLOORS;
 		config.maxBuildFloors = DEFAULT_MAX_BUILD_FLOORS;
 		config.pasteMode = "COMPACT_CUBE";
 		return config;
@@ -981,6 +1002,10 @@ public final class FastNoteblocksConfig {
 
 	private static int clampBuildLaneWidth(int blocks) {
 		return Math.max(MIN_BUILD_LANE_WIDTH, Math.min(MAX_BUILD_LANE_WIDTH, blocks));
+	}
+
+	private static int clampBuildLaneFloors(int floors) {
+		return Math.max(MIN_BUILD_LANE_FLOORS, Math.min(MAX_BUILD_LANE_FLOORS, floors));
 	}
 
 	private static int clampCommandsPerTick(int commands) {
@@ -1076,6 +1101,7 @@ public final class FastNoteblocksConfig {
 		private Integer conversionGapPercentile;
 		private Integer commandsPerTick;
 		private Integer buildLaneWidth;
+		private Integer buildLaneFloors;
 		private String importDirectory;
 		private Integer maxBuildFloors;
 		private String pasteMode;
@@ -1125,6 +1151,7 @@ public final class FastNoteblocksConfig {
 			this.conversionGapPercentile = config.conversionGapPercentile;
 			this.commandsPerTick = config.commandsPerTick;
 			this.buildLaneWidth = config.buildLaneWidth;
+			this.buildLaneFloors = config.buildLaneFloors;
 			this.importDirectory = config.importDirectory;
 			this.maxBuildFloors = config.maxBuildFloors;
 			this.pasteMode = config.pasteMode;
