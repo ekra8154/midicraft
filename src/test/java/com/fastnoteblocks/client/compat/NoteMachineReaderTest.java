@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fastnoteblocks.client.composer.ComposerProject;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -214,6 +215,84 @@ class NoteMachineReaderTest {
 		assertEquals(2, reading.sources(), "both chains should be found");
 		assertTrue(reading.report().contains("started together"),
 			"the report should say the two are only lined up on an assumption: " + reading.report());
+	}
+
+	/**
+	 * A second way into a machine is a second way to start it, not a second voice.
+	 *
+	 * <p>Adding an input partway along an existing chain gives the signal somewhere else to enter.
+	 * Followed together with the real beginning, every note from the join onwards takes the nearer
+	 * chain's timing and lands on top of the song's own opening -- every note still present, the
+	 * tune wrecked, and nothing about the result looking wrong. The way in reaching more of the
+	 * machine is the real one, and a start halfway along reaches strictly less of it, so preferring
+	 * the larger is what recovers the original.</p>
+	 */
+	@Test
+	void prefersTheWayInThatReachesMostOfTheMachine() {
+		List<SongBuilder.EventNote> notes = sampleSong();
+		SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0), notes,
+			SongBuilder.PasteMode.LANE, LIMITS);
+		Map<BlockPos, BlockState> world = new HashMap<>(placeInWorld(plan));
+		java.util.SortedMap<Sound, Integer> intended = sounds(readAll(world, "Before").project());
+		assertEquals("", difference(sounds(notes), intended), "sanity: the build should read clean");
+
+		// A repeater facing into a note block that already drives the next module. Powering that
+		// block is exactly what the module before it does, so this is a genuine second way in
+		// rather than a block stuck on the side.
+		BlockPos joint = midChainAnchor(world);
+		BlockPos tap = joint.north();
+		world.put(tap.below(), Blocks.STONE.defaultBlockState());
+		world.put(tap, parse("minecraft:repeater[facing=north,delay=1]"));
+
+		NoteMachineReader.Reading reading = readAll(world, "Two ways in");
+
+		assertEquals("", difference(intended, sounds(reading.project())),
+			"the song should read back as it did before the extra input was added");
+		assertEquals(1, reading.sources(), "the two chains are one machine, not two");
+		assertTrue(reading.warnings().stream().anyMatch(text -> text.contains("other way")),
+			"the ignored way in should be reported: " + reading.report());
+	}
+
+	/**
+	 * Two machines that share no note blocks stay separate, and say so.
+	 *
+	 * <p>The other half of the same judgement. Nothing joins them, so nothing says they are one
+	 * piece of music -- they are kept apart, given their own numbered layers, and the guess that
+	 * they start together is stated rather than buried.</p>
+	 */
+	@Test
+	void keepsMachinesThatShareNothingApart() {
+		Map<BlockPos, BlockState> world = new HashMap<>(placeInWorld(
+			SongBuilder.createPastePlan(new BlockPos(0, 64, 0), sampleSong(),
+				SongBuilder.PasteMode.LANE, LIMITS)));
+		Bounds bounds = Bounds.of(world.keySet());
+
+		// A second machine standing well clear of the first: repeater, note block, nothing shared.
+		BlockPos apart = new BlockPos(bounds.minX, bounds.maxY + 6, bounds.minZ);
+		world.put(apart, Blocks.STONE.defaultBlockState());
+		world.put(apart.above(), parse("minecraft:repeater[facing=west,delay=1]"));
+		world.put(apart.above().east(), Blocks.NOTE_BLOCK.defaultBlockState());
+
+		NoteMachineReader.Reading reading = readAll(world, "Two machines");
+
+		assertEquals(2, reading.sources(), "both machines should survive");
+		assertTrue(reading.warnings().stream().anyMatch(text -> text.contains("separate machines")),
+			"the guess that they start together should be stated: " + reading.report());
+		assertTrue(reading.project().layers().stream().anyMatch(layer -> layer.name().endsWith("2")),
+			"the second machine should get its own numbered layers: "
+				+ reading.project().layers().stream().map(ComposerProject.Layer::name).toList());
+	}
+
+	/** A note block partway along the chain that also drives whatever comes next. */
+	private static BlockPos midChainAnchor(Map<BlockPos, BlockState> world) {
+		List<BlockPos> anchors = world.entrySet().stream()
+			.filter(entry -> entry.getValue().is(Blocks.NOTE_BLOCK))
+			.map(Map.Entry::getKey)
+			.filter(position -> world.getOrDefault(position.east(),
+				Blocks.AIR.defaultBlockState()).is(Blocks.REPEATER))
+			.sorted(Comparator.comparingInt(BlockPos::getX))
+			.toList();
+		return anchors.get(anchors.size() / 2);
 	}
 
 	// ------------------------------------------------------------------ helpers

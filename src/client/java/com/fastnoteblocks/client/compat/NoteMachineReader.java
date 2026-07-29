@@ -123,8 +123,7 @@ public final class NoteMachineReader {
 			throw new UnreadableException("No note blocks in that region. Check the coordinates -- "
 				+ "both corners are inclusive, and the region is read as a box between them.");
 		}
-		Map<BlockPos, Integer> firedAt = trace(region, survey);
-		return assemble(name, region, survey, firedAt);
+		return assemble(name, region, survey, trace(region, survey));
 	}
 
 	// ------------------------------------------------------------------ what is in the region
@@ -195,8 +194,8 @@ public final class NoteMachineReader {
 	 * <p>Earliest arrival wins, so this is a shortest-path walk rather than a flood: a note block
 	 * reached twice plays on the first pulse and is already powered when the second arrives.</p>
 	 */
-	private static Map<BlockPos, Integer> trace(Region region, Survey survey) {
-		List<BlockPos> starts = startingPoints(region, survey);
+	private static Map<BlockPos, Integer> traceFrom(Region region, Survey survey,
+			List<BlockPos> starts) {
 		PriorityQueue<Pulse> queue = new PriorityQueue<>(
 			Comparator.comparingInt(Pulse::time).thenComparing(Comparator.comparingInt(Pulse::strength).reversed()));
 		for (BlockPos start : starts) {
@@ -429,6 +428,99 @@ public final class NoteMachineReader {
 			candidate.relative(facing.getOpposite()), 15, false, candidate));
 	}
 
+	/** How many ways in to follow one at a time before giving up and running them all together. */
+	private static final int MAX_TRACED_STARTS = 24;
+
+	/**
+	 * What the whole selection plays, and how many separate machines that turned out to be.
+	 *
+	 * @param machineOfNote which machine each note block belongs to, numbered from zero
+	 * @param alternativeEntries ways in that were left out because another way into the same
+	 *     machine reaches more of it
+	 */
+	private record Trace(
+		Map<BlockPos, Integer> firedAt,
+		Map<BlockPos, Integer> machineOfNote,
+		int machines,
+		int alternativeEntries
+	) {
+	}
+
+	/**
+	 * Follows each way in separately, then works out which of them are the same machine.
+	 *
+	 * <p>Running them all at once and keeping each note's earliest pulse -- which is what this used
+	 * to do -- is right only if every start really does fire together. Where two starts lead into
+	 * the same note blocks they emphatically do not: those are two ways to begin one piece of
+	 * music, and only one of them happens when a player throws a switch. Read together, the half of
+	 * a song reached by both takes the nearer chain's timing and lands on top of its own beginning
+	 * -- every note present, the tune ruined, and nothing about the result looking wrong.</p>
+	 *
+	 * <p>So: chains sharing note blocks are one machine, and the way in reaching most of it wins.
+	 * A start halfway along reaches a subset of what the real beginning reaches, which is exactly
+	 * what makes the beginning win. Chains sharing nothing are separate machines and are all kept,
+	 * because those plausibly are parallel voices off one lever.</p>
+	 */
+	private static Trace trace(Region region, Survey survey) {
+		List<BlockPos> starts = startingPoints(region, survey);
+		if (starts.size() == 1 || starts.size() > MAX_TRACED_STARTS) {
+			Map<BlockPos, Integer> firedAt = traceFrom(region, survey, starts);
+			Map<BlockPos, Integer> machineOfNote = new HashMap<>();
+			firedAt.keySet().forEach(position -> machineOfNote.put(position, 0));
+			return new Trace(firedAt, machineOfNote, 1, 0);
+		}
+
+		List<Map<BlockPos, Integer>> chains = new ArrayList<>(starts.size());
+		for (BlockPos start : starts) {
+			chains.add(traceFrom(region, survey, List.of(start)));
+		}
+
+		// Chains touching any note block in common are the same machine.
+		int[] group = new int[chains.size()];
+		for (int index = 0; index < group.length; index++) {
+			group[index] = index;
+		}
+		for (int left = 0; left < chains.size(); left++) {
+			for (int right = left + 1; right < chains.size(); right++) {
+				if (!java.util.Collections.disjoint(
+						chains.get(left).keySet(), chains.get(right).keySet())) {
+					int merged = Math.min(root(group, left), root(group, right));
+					group[root(group, left)] = merged;
+					group[root(group, right)] = merged;
+				}
+			}
+		}
+
+		Map<Integer, Integer> bestOfMachine = new LinkedHashMap<>();
+		for (int index = 0; index < chains.size(); index++) {
+			int machine = root(group, index);
+			Integer best = bestOfMachine.get(machine);
+			if (best == null || chains.get(index).size() > chains.get(best).size()) {
+				bestOfMachine.put(machine, index);
+			}
+		}
+
+		Map<BlockPos, Integer> firedAt = new HashMap<>();
+		Map<BlockPos, Integer> machineOfNote = new HashMap<>();
+		int number = 0;
+		for (int chosen : bestOfMachine.values()) {
+			for (Map.Entry<BlockPos, Integer> note : chains.get(chosen).entrySet()) {
+				firedAt.merge(note.getKey(), note.getValue(), Math::min);
+				machineOfNote.putIfAbsent(note.getKey(), number);
+			}
+			number++;
+		}
+		return new Trace(firedAt, machineOfNote, bestOfMachine.size(),
+			chains.size() - bestOfMachine.size());
+	}
+
+	private static int root(int[] group, int index) {
+		while (group[index] != index) {
+			index = group[index];
+		}
+		return index;
+	}
+
 	/**
 	 * Where the machine starts.
 	 *
@@ -466,10 +558,13 @@ public final class NoteMachineReader {
 
 	// ------------------------------------------------------------------ turning it into a song
 
-	private static Reading assemble(String name, Region region, Survey survey,
-			Map<BlockPos, Integer> firedAt) {
+	private static Reading assemble(String name, Region region, Survey survey, Trace trace) {
+		Map<BlockPos, Integer> firedAt = trace.firedAt();
 		int earliest = firedAt.values().stream().mapToInt(Integer::intValue).min().orElse(0);
 		// Instrument first, then pitch and time, so a layer's notes come out already in order.
+		// Split by machine as well when there is more than one: two machines sharing nothing are
+		// the one case where separate might really mean separate voices, and folding their harps
+		// into one layer would throw away the only handle for telling them apart again.
 		Map<String, List<NoteEvent>> byInstrument = new LinkedHashMap<>();
 		int headNotes = 0;
 		long nextId = 1L;
@@ -486,15 +581,23 @@ public final class NoteMachineReader {
 			}
 			int pitch = state.getValue(NoteBlock.NOTE);
 			long tick = (firedAt.get(position) - earliest) * (long)TICKS_PER_REDSTONE_TICK;
-			byInstrument.computeIfAbsent(instrument.id(), ignored -> new ArrayList<>())
+			String key = trace.machines() > 1
+				? trace.machineOfNote().getOrDefault(position, 0) + "/" + instrument.id()
+				: instrument.id();
+			byInstrument.computeIfAbsent(key, ignored -> new ArrayList<>())
 				.add(new NoteEvent(nextId++, ComposerProject.NOTE_BLOCK_BASE_MIDI_NOTE + pitch, tick,
 					ComposerProject.DEFAULT_NOTE_DURATION_TICKS, 96));
 		}
 
 		List<Layer> layers = new ArrayList<>();
 		for (Map.Entry<String, List<NoteEvent>> entry : byInstrument.entrySet()) {
-			layers.add(new Layer(PreviewInstrument.byId(entry.getKey()).name(), entry.getKey(),
-				false, true, true, List.copyOf(entry.getValue())));
+			int slash = entry.getKey().indexOf(47);
+			String id = slash < 0 ? entry.getKey() : entry.getKey().substring(slash + 1);
+			String label = PreviewInstrument.byId(id).name();
+			layers.add(new Layer(slash < 0
+					? label
+					: label + " " + (Integer.parseInt(entry.getKey().substring(0, slash)) + 1),
+				id, false, true, true, List.copyOf(entry.getValue())));
 		}
 		int span = firedAt.values().stream().mapToInt(Integer::intValue).max().orElse(0) - earliest;
 		ComposerProject project = new ComposerProject(name, ComposerProject.DEFAULT_PPQ,
@@ -502,20 +605,26 @@ public final class NoteMachineReader {
 			span * (long)TICKS_PER_REDSTONE_TICK, ComposerProject.DEFAULT_SPEED_QUARTERS);
 
 		List<String> warnings = new ArrayList<>();
-		int starts = startingPointCount(region, survey);
-		if (starts > 1) {
-			// Where a chain begins is readable; when it begins is not. Two chains are laid out as
-			// if a player throws one lever into both, which is how a machine plays more than one
-			// line at once -- but if they are really started apart, the parts are out by however
-			// far apart they start, and nothing in the blocks says which.
-			warnings.add(starts + " separate chains, read as though started together");
+		if (trace.machines() > 1) {
+			// Where a machine begins is readable; when it begins is not. Two that share nothing are
+			// laid out as if one lever starts both, which is how a build plays more than one line
+			// at once -- but if they are really started apart, the parts are out by however far
+			// apart that is, and nothing in the blocks says. Numbered into their own layers so the
+			// guess can at least be undone by hand.
+			warnings.add(trace.machines() + " separate machines, split into numbered layers and "
+				+ "read as though started together");
+		}
+		if (trace.alternativeEntries() > 0) {
+			warnings.add(trace.alternativeEntries() + " other way"
+				+ (trace.alternativeEntries() == 1 ? "" : "s") + " into the same machine ignored; "
+				+ "used the one reaching the most note blocks");
 		}
 		if (!survey.unsupported.isEmpty()) {
 			warnings.add("ignored " + String.join(" and ", survey.unsupported)
 				+ ", which carry timing this cannot follow");
 		}
 		return new Reading(project, survey.noteBlocks.size(),
-			survey.noteBlocks.size() - firedAt.size(), headNotes, span, starts,
+			survey.noteBlocks.size() - firedAt.size(), headNotes, span, trace.machines(),
 			List.copyOf(warnings));
 	}
 
