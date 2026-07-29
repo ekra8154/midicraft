@@ -49,12 +49,16 @@ public final class ComposerScreen extends Screen {
 	/** Layer names are drawn at this fraction of the font's one size. */
 	private static final float LAYER_TEXT_SCALE = 0.75f;
 	private static final int LAYER_STATE_X = 15;
+	/** Side of the square button carrying a layer's state letter. */
+	private static final int LAYER_CHIP = 12;
 	private static final int LAYER_INSTRUMENT_X = 26;
 	private static final int LAYER_NAME_X = 45;
 	private static final int LAYER_NAME_RIGHT = 156;
 	private static final int LAYER_LIST_TOP = 48;
 	private static final int MIN_ROW_HEIGHT = 4;
 	private static final int MAX_ROW_HEIGHT = 26;
+	private static final int INSTRUMENT_COLUMNS = 6;
+	private static final int INSTRUMENT_CELL = 28;
 	private static final int CONTEXT_MENU_WIDTH = 104;
 	private static final int CONTEXT_MENU_ROW_HEIGHT = 16;
 	private static final int LAYER_MENU_WIDTH = 120;
@@ -343,18 +347,21 @@ public final class ComposerScreen extends Screen {
 	 * in the way -- and hiding is only muting that also leaves the piano roll.</p>
 	 */
 	private enum LayerState {
-		SOLO("S", 0xFFFFD65A, "Heard alone. Listening only; it does not change what builds."),
-		HEARD("◉", 0xFFD6D8DD, "Played and drawn."),
-		MUTED("◌", 0xFF8A9098, "Silent, still drawn."),
-		HIDDEN("×", 0xFF62676E, "Silent and out of the piano roll.");
+		ACTIVE("A", 0xFFE8EAEE, 0xFF3A4048, "Played and drawn."),
+		MUTED("M", 0xFFFFB05A, 0xFF3E332A, "Silent, still drawn."),
+		SOLO("S", 0xFFFFD65A, 0xFF453D22,
+			"Heard alone. Listening only; it does not change what builds."),
+		HIDDEN("H", 0xFF787D85, 0xFF24272B, "Silent and out of the piano roll.");
 
-		private final String glyph;
+		private final String letter;
 		private final int color;
+		private final int chip;
 		private final String description;
 
-		LayerState(String glyph, int color, String description) {
-			this.glyph = glyph;
+		LayerState(String letter, int color, int chip, String description) {
+			this.letter = letter;
 			this.color = color;
+			this.chip = chip;
 			this.description = description;
 		}
 	}
@@ -367,14 +374,15 @@ public final class ComposerScreen extends Screen {
 		if (!layer.visible()) {
 			return LayerState.HIDDEN;
 		}
-		return layer.muted() ? LayerState.MUTED : LayerState.HEARD;
+		return layer.muted() ? LayerState.MUTED : LayerState.ACTIVE;
 	}
 
 	/**
 	 * Steps a layer's state along the dial.
 	 *
-	 * <p>One step each way from where a layer usually sits, so muting is one left-click and soloing
-	 * is one right-click. The same reversible cycling the import settings use.</p>
+	 * <p>Reversible, the way the import settings cycle: left-click walks A to M to S to H and right
+	 * -click walks back, which puts muting one click forward from where a layer usually sits and
+	 * hiding one click back.</p>
 	 */
 	private void cycleLayerState(int clickedIndex, int direction) {
 		LayerState[] dial = LayerState.values();
@@ -387,7 +395,7 @@ public final class ComposerScreen extends Screen {
 			}
 		}
 		updateLayers(clickedIndex, layer -> switch (next) {
-			case SOLO, HEARD -> layer.withMuted(false).withVisible(true);
+			case SOLO, ACTIVE -> layer.withMuted(false).withVisible(true);
 			case MUTED -> layer.withMuted(true).withVisible(true);
 			case HIDDEN -> layer.withMuted(true).withVisible(false);
 		});
@@ -1328,28 +1336,34 @@ public final class ComposerScreen extends Screen {
 		}
 	}
 
-	private void extractInstrumentMenu(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
+	/** The palette's box, shared by drawing, hit testing and "is the cursor over it". */
+	private NoteRect instrumentMenuRect() {
 		if (instrumentMenuLayer < 0 || instrumentMenuLayer >= project().layers().size()) {
+			return null;
+		}
+		int rows = (PreviewInstrument.VALUES.size() + INSTRUMENT_COLUMNS - 1) / INSTRUMENT_COLUMNS;
+		int menuWidth = INSTRUMENT_COLUMNS * INSTRUMENT_CELL + 6;
+		int menuHeight = rows * INSTRUMENT_CELL + 6;
+		int top = Math.max(TOOLBAR_HEIGHT + 4, Math.min(height - menuHeight - 24,
+			layerY(instrumentMenuLayer) + LAYER_ROW_HEIGHT));
+		return new NoteRect(8, top, 8 + menuWidth, top + menuHeight);
+	}
+
+	private void extractInstrumentMenu(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
+		NoteRect menu = instrumentMenuRect();
+		if (menu == null) {
 			return;
 		}
-		int columns = 6;
-		int cell = 28;
-		int menuWidth = columns * cell + 6;
-		int rows = (PreviewInstrument.VALUES.size() + columns - 1) / columns;
-		int menuHeight = rows * cell + 6;
-		int menuX = 8;
-		int requestedY = layerY(instrumentMenuLayer) + LAYER_ROW_HEIGHT;
-		int menuY = Math.max(TOOLBAR_HEIGHT + 4, Math.min(height - menuHeight - 24, requestedY));
-		graphics.fill(menuX, menuY, menuX + menuWidth, menuY + menuHeight, 0xF0101115);
-		graphics.fill(menuX, menuY, menuX + menuWidth, menuY + 1, 0xFFAAAAAA);
+		graphics.fill(menu.left(), menu.top(), menu.right(), menu.bottom(), 0xF0101115);
+		graphics.fill(menu.left(), menu.top(), menu.right(), menu.top() + 1, 0xFFAAAAAA);
 		PreviewInstrument selected = PreviewInstrument.byId(project().layers().get(instrumentMenuLayer).instrument());
 		for (int index = 0; index < PreviewInstrument.VALUES.size(); index++) {
 			PreviewInstrument value = PreviewInstrument.VALUES.get(index);
-			int cellX = menuX + 3 + index % columns * cell;
-			int cellY = menuY + 3 + index / columns * cell;
-			boolean hovered = mouseX >= cellX && mouseX < cellX + cell
-				&& mouseY >= cellY && mouseY < cellY + cell;
-			graphics.fill(cellX, cellY, cellX + cell - 2, cellY + cell - 2,
+			int cellX = menu.left() + 3 + index % INSTRUMENT_COLUMNS * INSTRUMENT_CELL;
+			int cellY = menu.top() + 3 + index / INSTRUMENT_COLUMNS * INSTRUMENT_CELL;
+			boolean hovered = mouseX >= cellX && mouseX < cellX + INSTRUMENT_CELL
+				&& mouseY >= cellY && mouseY < cellY + INSTRUMENT_CELL;
+			graphics.fill(cellX, cellY, cellX + INSTRUMENT_CELL - 2, cellY + INSTRUMENT_CELL - 2,
 				value.equals(selected) ? 0xFF356070 : hovered ? 0xFF44484F : 0xFF25282D);
 			graphics.item(new ItemStack(value.icon()), cellX + 5, cellY + 5);
 			if (hovered) {
@@ -1405,9 +1419,14 @@ public final class ComposerScreen extends Screen {
 				graphics.fill(12, y, LAYER_PANEL_WIDTH - 10, y + rowHeight - 4, 0x553D444D);
 			}
 			Layer layer = project().layers().get(index);
+			// Drawn as a bordered chip with a letter in it. Bare symbols read as decoration on a
+			// row that is mostly decoration already, and this one is the layer's only switch.
 			LayerState state = layerState(index);
-			graphics.text(font, Component.literal(state.glyph), LAYER_STATE_X, y + 4,
-				state.color, false);
+			int chipLeft = LAYER_STATE_X - 2;
+			graphics.fill(chipLeft, y + 2, chipLeft + LAYER_CHIP, y + 2 + LAYER_CHIP, 0x66FFFFFF);
+			graphics.fill(chipLeft + 1, y + 3, chipLeft + LAYER_CHIP - 1, y + 1 + LAYER_CHIP, state.chip);
+			graphics.text(font, Component.literal(state.letter),
+				chipLeft + (LAYER_CHIP - font.width(state.letter)) / 2, y + 4, state.color, false);
 			// The instrument as the block it sounds like, which is the same picture the palette uses
 			// and the only label short enough to leave the name any room.
 			graphics.item(new ItemStack(PreviewInstrument.byId(layer.instrument()).icon()),
@@ -1442,6 +1461,12 @@ public final class ComposerScreen extends Screen {
 	 * is what there is.</p>
 	 */
 	private void extractLayerTooltip(GuiGraphicsExtractor graphics) {
+		// A row under an open menu is not what the cursor is pointing at. The panel draws first, so
+		// its tooltip was the one that survived -- hovering the instrument palette explained the
+		// layer behind it instead of the instrument being hovered.
+		if (overOpenMenu(lastMouseX, lastMouseY)) {
+			return;
+		}
 		int x = (int)lastMouseX;
 		int y = (int)lastMouseY;
 		Component text = null;
@@ -1450,7 +1475,7 @@ public final class ComposerScreen extends Screen {
 		int dotLayer = buildDotAt(lastMouseX, lastMouseY);
 		if (stateLayer >= 0) {
 			text = Component.literal(layerState(stateLayer).description
-				+ "\nClick for quieter, right-click for louder: solo, heard, silent, hidden.");
+				+ "\nClick steps A - M - S - H, right-click steps back.");
 		} else if (instrumentLayer >= 0) {
 			text = Component.literal(
 				PreviewInstrument.byId(project().layers().get(instrumentLayer).instrument()).name()
@@ -1463,6 +1488,25 @@ public final class ComposerScreen extends Screen {
 		if (text != null) {
 			graphics.setTooltipForNextFrame(font, font.split(text, 200), x, y);
 		}
+	}
+
+	/** Whether a point lands on a menu drawn over the layer panel. */
+	private boolean overOpenMenu(double x, double y) {
+		NoteRect palette = instrumentMenuRect();
+		if (palette != null && palette.contains(x, y)) {
+			return true;
+		}
+		if (layerMenuOpen && x >= layerMenuX && x < layerMenuX + layerMenuWidth()
+				&& y >= layerMenuY
+				&& y < layerMenuY + LayerAction.values().length * CONTEXT_MENU_ROW_HEIGHT + 4) {
+			return true;
+		}
+		if (toolbarMenu == ToolbarMenu.NONE) {
+			return false;
+		}
+		List<String> toolbar = toolbarRows();
+		return !toolbar.isEmpty() && x >= toolbarMenuX && x < toolbarMenuX + toolbarMenuWidth()
+			&& y >= 28 && y < 28 + toolbar.size() * TOOLBAR_MENU_ROW_HEIGHT + 4;
 	}
 
 	/**
@@ -2046,6 +2090,22 @@ public final class ComposerScreen extends Screen {
 			}
 			contextMenuOpen = false;
 		}
+		NoteRect palette = instrumentMenuRect();
+		if (palette != null) {
+			if (event.button() == 0 && handleInstrumentMenuClick(event.x(), event.y())) {
+				return true;
+			}
+			if (palette.contains(event.x(), event.y())) {
+				return true;
+			}
+			// Anywhere else puts it away, including the icon that opened it -- which is consumed so
+			// the click does not fall through and open it straight back up.
+			boolean onOpener = layerInstrumentAt(event.x(), event.y()) == instrumentMenuLayer;
+			instrumentMenuLayer = -1;
+			if (onOpener) {
+				return true;
+			}
+		}
 		if (event.button() == 1) {
 			int stateLayer = layerStateAt(event.x(), event.y());
 			if (stateLayer >= 0) {
@@ -2073,9 +2133,6 @@ public final class ComposerScreen extends Screen {
 		}
 		if (layerNameBox != null && !layerNameBox.isMouseOver(event.x(), event.y())) {
 			commitLayerRename();
-		}
-		if (event.button() == 0 && handleInstrumentMenuClick(event.x(), event.y())) {
-			return true;
 		}
 		if (event.button() == 0) {
 			int dotLayer = buildDotAt(event.x(), event.y());
@@ -2204,28 +2261,27 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private boolean handleInstrumentMenuClick(double mouseX, double mouseY) {
-		if (instrumentMenuLayer < 0 || instrumentMenuLayer >= project().layers().size()) {
+		NoteRect menu = instrumentMenuRect();
+		if (menu == null) {
 			return false;
 		}
-		int columns = 6;
-		int cell = 28;
-		int rows = (PreviewInstrument.VALUES.size() + columns - 1) / columns;
-		int menuX = 8;
-		int requestedY = layerY(instrumentMenuLayer) + LAYER_ROW_HEIGHT;
-		int menuY = Math.max(TOOLBAR_HEIGHT + 4, Math.min(height - (rows * cell + 6) - 24, requestedY));
-		int column = (int)(mouseX - menuX - 3) / cell;
-		int row = (int)(mouseY - menuY - 3) / cell;
-		if (mouseX < menuX + 3 || mouseY < menuY + 3 || column < 0 || column >= columns || row < 0) {
+		int column = (int)(mouseX - menu.left() - 3) / INSTRUMENT_CELL;
+		int row = (int)(mouseY - menu.top() - 3) / INSTRUMENT_CELL;
+		if (mouseX < menu.left() + 3 || mouseY < menu.top() + 3
+				|| column < 0 || column >= INSTRUMENT_COLUMNS || row < 0) {
 			return false;
 		}
-		int index = row * columns + column;
+		int index = row * INSTRUMENT_COLUMNS + column;
 		if (index < 0 || index >= PreviewInstrument.VALUES.size()) {
 			return false;
 		}
 		PreviewInstrument value = PreviewInstrument.VALUES.get(index);
 		value.play(12);
-		updateLayers(instrumentMenuLayer,
-			target -> target.withInstrument(value.id()).withMuted("MUTE".equals(value.id())));
+		// Picking an instrument says nothing about whether the layer is heard. It used to, because
+		// silence was one of the instruments; the state letter answers that now.
+		// Left open on purpose: every pick plays its sound, so the palette is how you audition one
+		// instrument against another. Clicking away is what puts it down.
+		updateLayers(instrumentMenuLayer, target -> target.withInstrument(value.id()));
 		return true;
 	}
 

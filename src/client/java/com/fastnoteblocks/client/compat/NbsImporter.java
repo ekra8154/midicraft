@@ -252,9 +252,6 @@ final class NbsImporter {
 		if (custom != null) {
 			String searchable = normalize(custom.name() + " " + custom.soundFile());
 			for (PreviewInstrument instrument : PreviewInstrument.VALUES) {
-				if ("MUTE".equals(instrument.id())) {
-					continue;
-				}
 				String id = normalize(instrument.id());
 				String name = normalize(instrument.name());
 				if ((!name.isBlank() && searchable.contains(name))

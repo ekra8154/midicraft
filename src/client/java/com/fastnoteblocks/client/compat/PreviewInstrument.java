@@ -16,7 +16,6 @@ record PreviewInstrument(String id, String name, Item icon, Holder<SoundEvent> s
 	private static final int MIN_CACHED_NOTE = -64;
 	private static final float[] CACHED_PITCHES = createPitchCache();
 	static final List<PreviewInstrument> VALUES = List.of(
-		new PreviewInstrument("MUTE", "Mute", Items.BARRIER, null),
 		new PreviewInstrument("HARP", "Harp", Items.GRASS_BLOCK, SoundEvents.NOTE_BLOCK_HARP),
 		new PreviewInstrument("BASS", "Bass", Items.OAK_PLANKS, SoundEvents.NOTE_BLOCK_BASS),
 		new PreviewInstrument("BASEDRUM", "Bass drum", Items.STONE, SoundEvents.NOTE_BLOCK_BASEDRUM),
@@ -40,9 +39,17 @@ record PreviewInstrument(String id, String name, Item icon, Holder<SoundEvent> s
 	);
 	private static final Map<String, PreviewInstrument> BY_ID = VALUES.stream()
 		.collect(Collectors.toUnmodifiableMap(PreviewInstrument::id, Function.identity()));
+	/**
+	 * What an unknown instrument sounds like.
+	 *
+	 * <p>Named rather than an index into the list. It used to be {@code VALUES.get(1)}, which was
+	 * harp only because a Mute entry sat in front of it -- taking that entry out would silently have
+	 * made every unrecognised instrument a bass.</p>
+	 */
+	private static final PreviewInstrument FALLBACK = BY_ID.get("HARP");
 
 	static PreviewInstrument byId(String id) {
-		return BY_ID.getOrDefault(id, VALUES.get(1));
+		return BY_ID.getOrDefault(id, FALLBACK);
 	}
 
 	boolean playable() {

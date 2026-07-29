@@ -1037,10 +1037,13 @@ public final class SongBuilder {
 	}
 
 	private static String instrumentBlockId(String instrument) {
-		PreviewInstrument preview = PreviewInstrument.byId(instrument);
-		if ("MUTE".equals(preview.id())) {
+		// Tested against the stored string, not against a looked-up instrument. Mute is no longer one
+		// of the instruments, so a layer saved with it now looks up as harp -- and would build as
+		// harp rather than staying out of the machine.
+		if ("MUTE".equals(instrument)) {
 			return null;
 		}
+		PreviewInstrument preview = PreviewInstrument.byId(instrument);
 		if ("HARP".equals(preview.id())) {
 			// A note block over anything unrecognised already plays harp, so air is identical in
 			// sound and costs nothing. Placing grass would waste a block per piano note.
