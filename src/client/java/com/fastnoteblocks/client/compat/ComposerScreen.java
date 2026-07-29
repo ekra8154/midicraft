@@ -38,12 +38,20 @@ public final class ComposerScreen extends Screen {
 	private static final int LAYER_PANEL_WIDTH = 196;
 	private static final int PIANO_WIDTH = 48;
 	private static final int TIMELINE_RULER_HEIGHT = 16;
-	private static final int LAYER_ROW_HEIGHT = 42;
-	private static final int LAYER_COLLAPSED_ROW_HEIGHT = 16;
+	/**
+	 * One height for every layer row.
+	 *
+	 * <p>Rows used to open into a 42-pixel panel of buttons, which is how a converted song ended up
+	 * needing a collapse arrow on every line to stay navigable. Everything a row carries now fits on
+	 * the row, so there is nothing to open and nothing to collapse.</p>
+	 */
+	private static final int LAYER_ROW_HEIGHT = 18;
 	/** Layer names are drawn at this fraction of the font's one size. */
 	private static final float LAYER_TEXT_SCALE = 0.75f;
-	/** How tall a layer's header band is, whatever the rest of the row does. */
-	private static final int LAYER_HEADER_HEIGHT = 16;
+	private static final int LAYER_STATE_X = 15;
+	private static final int LAYER_INSTRUMENT_X = 26;
+	private static final int LAYER_NAME_X = 45;
+	private static final int LAYER_NAME_RIGHT = 156;
 	private static final int LAYER_LIST_TOP = 48;
 	private static final int MIN_ROW_HEIGHT = 4;
 	private static final int MAX_ROW_HEIGHT = 26;
@@ -83,9 +91,7 @@ public final class ComposerScreen extends Screen {
 	private final FastNoteblocksConfig config;
 	private final ComposerHistory history;
 	private final Set<Long> selectedNotes = new LinkedHashSet<>();
-	private final List<Button> layerButtons = new ArrayList<>();
 	private final List<Button> moveLayerButtons = new ArrayList<>();
-	private final Set<Integer> collapsedLayers = new LinkedHashSet<>();
 	private final Set<Integer> selectedLayers = new LinkedHashSet<>();
 	private int rowHeight = ROW_HEIGHT;
 	private int layerScroll;
@@ -241,95 +247,25 @@ public final class ComposerScreen extends Screen {
 				+ "into the delays, so the build runs at the speed you hear here."
 		)));
 		if (!layerViewInitialised) {
-			// Imports and conversions routinely produce dozens of layers; an all-expanded list
-			// buries the one being worked on before the user has done anything.
 			layerViewInitialised = true;
-			collapseAllButActive();
+			resetLayerView();
 		}
-		rebuildLayerButtons();
+		layersChanged();
 		rebuildMoveLayerButtons();
 		updateButtonStates();
 	}
 
-	private void rebuildLayerButtons() {
-		for (Button button : layerButtons) {
-			removeWidget(button);
-		}
-		layerButtons.clear();
-		ComposerProject project = project();
-		// Solo is held by index, so anything that adds, removes or reorders layers would leave it
-		// pointing at the wrong one. Dropping it is better than silencing something at random.
-		if (soloedLayers.removeIf(index -> index >= project.layers().size()) && playing) {
+	/**
+	 * Keeps view state that is held by layer index honest after layers move or disappear.
+	 *
+	 * <p>Solo is the one that matters: it is a set of positions rather than a flag on a layer, so a
+	 * reorder or a merge would leave it silencing something at random.</p>
+	 */
+	private void layersChanged() {
+		if (soloedLayers.removeIf(index -> index >= project().layers().size()) && playing) {
 			resetPlaybackSchedule();
 		}
-		for (int index = 0; index < project.layers().size(); index++) {
-			final int layerIndex = index;
-			Layer layer = project.layers().get(index);
-			int y = layerY(index);
-			// Collapsed rows show only their header, and rows scrolled outside the panel must not
-			// exist as widgets at all or they stay clickable over the piano roll.
-			if (collapsedLayers.contains(index) || !layerRowVisible(index)) {
-				continue;
-			}
-			Button mute = addRenderableWidget(Button.builder(
-				Component.literal(layer.muted() ? "X" : "M"),
-				button -> {
-					boolean next = !project().layers().get(layerIndex).muted();
-					updateLayers(layerIndex, target -> target.withMuted(next));
-				}
-			).bounds(14, y + 22, 22, 16)
-				.tooltip(Tooltip.create(Component.literal(layer.muted() ? "Unmute layer" : "Mute layer")))
-				.build());
-			boolean soloed = soloedLayers.contains(index);
-			Button solo = addRenderableWidget(Button.builder(
-				Component.literal("S").withStyle(soloed
-					? net.minecraft.ChatFormatting.YELLOW
-					: net.minecraft.ChatFormatting.GRAY),
-				button -> {
-					if (!soloedLayers.remove(layerIndex)) {
-						soloedLayers.add(layerIndex);
-					}
-					if (playing) {
-						resetPlaybackSchedule();
-					}
-					rebuildLayerButtons();
-				}
-			).bounds(38, y + 22, 22, 16)
-				.tooltip(Tooltip.create(Component.literal(soloed
-					? "Stop soloing - hear everything again"
-					: "Hear this layer alone. Listening only; it does not change what builds.")))
-				.build());
-			Button visible = addRenderableWidget(Button.builder(
-				// An eye rather than a letter, so S could go to solo. Same Geometric Shapes block
-				// as the arrows and dots already drawn here, so the font covers it.
-				Component.literal(layer.visible() ? "◉" : "◌"),
-				button -> {
-					boolean next = !project().layers().get(layerIndex).visible();
-					updateLayers(layerIndex, target -> target.withVisible(next));
-				}
-			).bounds(62, y + 22, 26, 16)
-				.tooltip(Tooltip.create(Component.literal(layer.visible() ? "Shown in the editor" : "Hidden in the editor")))
-				.build());
-			Button instrument = addRenderableWidget(Button.builder(
-				Component.literal(PreviewInstrument.byId(layer.instrument()).name()),
-				button -> instrumentMenuLayer = instrumentMenuLayer == layerIndex ? -1 : layerIndex
-			).bounds(92, y + 22, 56, 16)
-				.tooltip(Tooltip.create(Component.literal("Open the note-block instrument palette")))
-				.build());
-			Button up = addRenderableWidget(Button.builder(Component.literal("^"),
-				button -> moveLayer(layerIndex, -1))
-				.bounds(150, y + 22, 18, 16)
-				.tooltip(Tooltip.create(Component.literal("Move layer up")))
-				.build());
-			Button down = addRenderableWidget(Button.builder(Component.literal("v"),
-				button -> moveLayer(layerIndex, 1))
-				.bounds(170, y + 22, 18, 16)
-				.tooltip(Tooltip.create(Component.literal("Move layer down")))
-				.build());
-			up.active = layerIndex > 0;
-			down.active = layerIndex < project.layers().size() - 1;
-			layerButtons.addAll(List.of(mute, solo, visible, instrument, up, down));
-		}
+		layerScroll = Math.min(layerScroll, maxLayerScroll());
 	}
 
 	private void rebuildMoveLayerButtons() {
@@ -348,7 +284,7 @@ public final class ComposerScreen extends Screen {
 					added = added.moveNotesToLayer(selectedNotes, newLayer);
 				}
 				apply(added);
-				rebuildLayerButtons();
+				layersChanged();
 				rebuildMoveLayerButtons();
 			}
 		}).bounds(8, y, LAYER_PANEL_WIDTH - 16, 18)
@@ -372,41 +308,10 @@ public final class ComposerScreen extends Screen {
 		}
 	}
 
-	/** Keeps collapse state attached to the right rows, mirroring {@link ComposerProject#moveLayer}. */
-	private void remapCollapsedLayers(int layerIndex, int direction) {
-		int size = project().layers().size();
-		int from = Math.max(0, Math.min(size - 1, layerIndex));
-		int to = Math.max(0, Math.min(size - 1, from + direction));
-		if (from == to || collapsedLayers.isEmpty()) {
-			return;
-		}
-		Set<Integer> remapped = new LinkedHashSet<>();
-		for (int collapsed : collapsedLayers) {
-			if (collapsed == from) {
-				remapped.add(to);
-				continue;
-			}
-			int shifted = collapsed > from ? collapsed - 1 : collapsed;
-			remapped.add(shifted >= to ? shifted + 1 : shifted);
-		}
-		collapsedLayers.clear();
-		collapsedLayers.addAll(remapped);
-	}
-
-	/**
-	 * Collapses everything except the active layer. An import or a Minecraft conversion can produce
-	 * dozens of layers at once, and an all-expanded list buries the one being worked on.
-	 */
-	private void collapseAllButActive() {
-		collapsedLayers.clear();
-		int active = project().activeLayerIndex();
-		for (int index = 0; index < project().layers().size(); index++) {
-			if (index != active) {
-				collapsedLayers.add(index);
-			}
-		}
+	/** Back to one layer selected and the top of the list, after something replaced the song. */
+	private void resetLayerView() {
 		selectedLayers.clear();
-		selectedLayers.add(active);
+		selectedLayers.add(project().activeLayerIndex());
 		layerScroll = 0;
 		layerMenuOpen = false;
 	}
@@ -427,7 +332,69 @@ public final class ComposerScreen extends Screen {
 			}
 		}
 		apply(updated);
-		rebuildLayerButtons();
+		layersChanged();
+	}
+
+	/**
+	 * What one layer is doing, as a single dial from loudest to most out of the way.
+	 *
+	 * <p>Muting, hiding and soloing used to be three switches, which took three buttons on a row
+	 * that had to open to hold them. They are really one question -- how much do I want this layer
+	 * in the way -- and hiding is only muting that also leaves the piano roll.</p>
+	 */
+	private enum LayerState {
+		SOLO("S", 0xFFFFD65A, "Heard alone. Listening only; it does not change what builds."),
+		HEARD("◉", 0xFFD6D8DD, "Played and drawn."),
+		MUTED("◌", 0xFF8A9098, "Silent, still drawn."),
+		HIDDEN("×", 0xFF62676E, "Silent and out of the piano roll.");
+
+		private final String glyph;
+		private final int color;
+		private final String description;
+
+		LayerState(String glyph, int color, String description) {
+			this.glyph = glyph;
+			this.color = color;
+			this.description = description;
+		}
+	}
+
+	private LayerState layerState(int index) {
+		if (soloedLayers.contains(index)) {
+			return LayerState.SOLO;
+		}
+		Layer layer = project().layers().get(index);
+		if (!layer.visible()) {
+			return LayerState.HIDDEN;
+		}
+		return layer.muted() ? LayerState.MUTED : LayerState.HEARD;
+	}
+
+	/**
+	 * Steps a layer's state along the dial.
+	 *
+	 * <p>One step each way from where a layer usually sits, so muting is one left-click and soloing
+	 * is one right-click. The same reversible cycling the import settings use.</p>
+	 */
+	private void cycleLayerState(int clickedIndex, int direction) {
+		LayerState[] dial = LayerState.values();
+		LayerState next = dial[Math.floorMod(layerState(clickedIndex).ordinal() + direction, dial.length)];
+		for (int index : layersToEdit(clickedIndex)) {
+			if (next == LayerState.SOLO) {
+				soloedLayers.add(index);
+			} else {
+				soloedLayers.remove(index);
+			}
+		}
+		updateLayers(clickedIndex, layer -> switch (next) {
+			case SOLO, HEARD -> layer.withMuted(false).withVisible(true);
+			case MUTED -> layer.withMuted(true).withVisible(true);
+			case HIDDEN -> layer.withMuted(true).withVisible(false);
+		});
+		if (playing) {
+			resetPlaybackSchedule();
+		}
+		updateButtonStates();
 	}
 
 	private void selectLayer(int layerIndex, boolean toggle, boolean range) {
@@ -449,7 +416,7 @@ public final class ComposerScreen extends Screen {
 			selectedLayers.add(layerIndex);
 		}
 		apply(project().withActiveLayer(layerIndex));
-		rebuildLayerButtons();
+		layersChanged();
 	}
 
 	private void mergeSelectedLayers() {
@@ -457,14 +424,14 @@ public final class ComposerScreen extends Screen {
 			return;
 		}
 		apply(project().mergeLayers(Set.copyOf(selectedLayers)));
-		collapseAllButActive();
-		rebuildLayerButtons();
+		resetLayerView();
+		layersChanged();
 		rebuildMoveLayerButtons();
 	}
 
 	private void updateLayer(int index, Layer layer) {
 		apply(project().withLayer(index, layer));
-		rebuildLayerButtons();
+		layersChanged();
 	}
 
 	private void moveSelectionToLayer(int target) {
@@ -472,7 +439,7 @@ public final class ComposerScreen extends Screen {
 			return;
 		}
 		apply(project().moveNotesToLayer(selectedNotes, target));
-		rebuildLayerButtons();
+		layersChanged();
 		rebuildMoveLayerButtons();
 	}
 
@@ -482,9 +449,8 @@ public final class ComposerScreen extends Screen {
 		}
 		instrumentMenuLayer = -1;
 		cancelLayerRename();
-		remapCollapsedLayers(layerIndex, direction);
 		apply(project().moveLayer(layerIndex, direction));
-		rebuildLayerButtons();
+		layersChanged();
 	}
 
 	/**
@@ -555,9 +521,9 @@ public final class ComposerScreen extends Screen {
 			delayScaleSlider.setScale(ComposerProject.DEFAULT_SPEED_QUARTERS);
 			selectedNotes.clear();
 			instrumentMenuLayer = -1;
-			collapseAllButActive();
+			resetLayerView();
 			centerMinecraftRange();
-			rebuildLayerButtons();
+			layersChanged();
 			rebuildMoveLayerButtons();
 			String report = "Converted at " + conversionGridLabel(gridTicks)
 				+ ": " + conversion.shiftedNotes() + " pitch-shifted"
@@ -825,7 +791,7 @@ public final class ComposerScreen extends Screen {
 		return switch (action) {
 			case MERGE_SELECTED -> selectedLayers.size() >= 2;
 			case INCLUDE_SELECTED, SET_INCLUDED_TO_SELECTION -> !selectedLayers.isEmpty();
-			case RENAME, SELECT_ALL, COLLAPSE_OTHERS -> true;
+			case RENAME, SELECT_ALL -> true;
 		};
 	}
 
@@ -854,9 +820,8 @@ public final class ComposerScreen extends Screen {
 					selectedLayers.add(index);
 				}
 			}
-			case COLLAPSE_OTHERS -> collapseAllButActive();
 		}
-		rebuildLayerButtons();
+		layersChanged();
 		rebuildMoveLayerButtons();
 		return true;
 	}
@@ -1071,7 +1036,7 @@ public final class ComposerScreen extends Screen {
 		}
 		int scoped = selectedNotes.size();
 		apply(updated);
-		rebuildLayerButtons();
+		layersChanged();
 		int removed = before - updated.noteCount();
 		String report = label + (scoped > 0 ? " " + scoped + " selected notes" : " whole composition")
 			+ (removed > 0 ? ": " + removed + " removed" : "");
@@ -1185,8 +1150,6 @@ public final class ComposerScreen extends Screen {
 			case SET_INCLUDED_TO_SELECTION -> "Makes the selected layers the only included ones, "
 				+ "clearing the rest.";
 			case SELECT_ALL -> "Selects every layer.";
-			case COLLAPSE_OTHERS -> "Collapses every layer but the active one, to get a long list "
-				+ "out of the way.";
 		};
 	}
 
@@ -1418,14 +1381,13 @@ public final class ComposerScreen extends Screen {
 		graphics.enableScissor(0, LAYER_LIST_TOP - 2, LAYER_PANEL_WIDTH, layerListBottom());
 		for (int index = 0; index < project().layers().size(); index++) {
 			int y = layerY(index);
-			int rowHeight = layerRowHeight(index);
+			int rowHeight = LAYER_ROW_HEIGHT;
 			if (y + rowHeight < LAYER_LIST_TOP - 2 || y > layerListBottom()) {
 				continue;
 			}
 			int color = layerColor(index);
 			boolean activeLayer = index == project().activeLayerIndex();
 			boolean selected = selectedLayers.contains(index);
-			boolean collapsed = collapsedLayers.contains(index);
 			graphics.fill(8, y - 2, LAYER_PANEL_WIDTH - 8, y + rowHeight - 2,
 				activeLayer ? 0x88425A6B : selected ? 0x88344657 : 0x44252A31);
 			if (selected) {
@@ -1442,35 +1404,64 @@ public final class ComposerScreen extends Screen {
 			if (activeLayer) {
 				graphics.fill(12, y, LAYER_PANEL_WIDTH - 10, y + rowHeight - 4, 0x553D444D);
 			}
-			graphics.text(font, Component.literal(collapsed ? "▸" : "▾"), 15, y + 3,
-				activeLayer ? 0xFFFFFFFF : 0xFF9BA0A6, false);
 			Layer layer = project().layers().get(index);
-			String summary = collapsed ? "  (" + layer.notes().size() + ")" : "";
+			LayerState state = layerState(index);
+			graphics.text(font, Component.literal(state.glyph), LAYER_STATE_X, y + 4,
+				state.color, false);
+			// The instrument as the block it sounds like, which is the same picture the palette uses
+			// and the only label short enough to leave the name any room.
+			graphics.item(new ItemStack(PreviewInstrument.byId(layer.instrument()).icon()),
+				LAYER_INSTRUMENT_X, y - 1);
 			String mark = selected ? "✓ " : "";
-			smallText(graphics, mark + layer.name() + summary, 26, y + 4,
-				activeLayer ? 0xFFFFFFFF : selected ? 0xFFE8F4FF : 0xFFD6D8DD);
-			// Filled means this layer goes into the build sequence. Drawn on the header rather than
-			// in the button strip so it survives collapsing -- the point is telling at a glance what
-			// is in, and a row you cannot see cannot tell you anything.
+			String label = mark + layer.name() + "  (" + layer.notes().size() + ")";
+			smallText(graphics, smallFit(label, LAYER_NAME_RIGHT - LAYER_NAME_X), LAYER_NAME_X, y + 5,
+				state == LayerState.HIDDEN ? 0xFF80858C
+					: activeLayer ? 0xFFFFFFFF : selected ? 0xFFE8F4FF : 0xFFD6D8DD);
+			// Filled means this layer goes into the build sequence. Deliberately not the same control
+			// as the state icon beside it: what you hear while working and what gets built are
+			// different questions, and answering them with one switch is how a layer goes missing.
 			graphics.text(font, Component.literal(layer.buildEnabled() ? "●" : "○"),
-				buildDotX(), y + 3, layer.buildEnabled() ? 0xFF5AD46A : 0xFF6A7078, false);
+				buildDotX(), y + 4, layer.buildEnabled() ? 0xFF5AD46A : 0xFF6A7078, false);
 			// The row number is for pointing at a layer out loud, nothing more, so it sits out at the
 			// edge in the smallest thing that can still be read rather than in front of the name.
 			String ordinal = Integer.toString(index + 1);
 			smallText(graphics, ordinal,
-				LAYER_PANEL_WIDTH - 11 - smallTextWidth(ordinal), y + 4, 0xFF71767E);
+				LAYER_PANEL_WIDTH - 11 - smallTextWidth(ordinal), y + 5, 0xFF71767E);
 		}
 		extractLayerDropLine(graphics);
 		graphics.disableScissor();
 		extractLayerScrollbar(graphics);
-		// This panel draws without mouse coordinates, so the cached position is what there is.
-		int hoveredDot = buildDotAt(lastMouseX, lastMouseY);
-		if (hoveredDot >= 0) {
-			graphics.setTooltipForNextFrame(Component.literal(
-				project().layers().get(hoveredDot).buildEnabled()
-					? "In the build sequence - click to leave it out"
-					: "Left out of the build sequence - click to include it"),
-				(int)lastMouseX, (int)lastMouseY);
+		extractLayerTooltip(graphics);
+	}
+
+	/**
+	 * Explains whichever icon on a row the cursor is over.
+	 *
+	 * <p>The row's controls are drawn rather than built out of widgets, so none of them carry a
+	 * tooltip of their own. This panel also draws without mouse coordinates, so the cached position
+	 * is what there is.</p>
+	 */
+	private void extractLayerTooltip(GuiGraphicsExtractor graphics) {
+		int x = (int)lastMouseX;
+		int y = (int)lastMouseY;
+		Component text = null;
+		int stateLayer = layerStateAt(lastMouseX, lastMouseY);
+		int instrumentLayer = layerInstrumentAt(lastMouseX, lastMouseY);
+		int dotLayer = buildDotAt(lastMouseX, lastMouseY);
+		if (stateLayer >= 0) {
+			text = Component.literal(layerState(stateLayer).description
+				+ "\nClick for quieter, right-click for louder: solo, heard, silent, hidden.");
+		} else if (instrumentLayer >= 0) {
+			text = Component.literal(
+				PreviewInstrument.byId(project().layers().get(instrumentLayer).instrument()).name()
+					+ " - click to change the note-block instrument");
+		} else if (dotLayer >= 0) {
+			text = Component.literal(project().layers().get(dotLayer).buildEnabled()
+				? "In the build sequence - click to leave it out"
+				: "Left out of the build sequence - click to include it");
+		}
+		if (text != null) {
+			graphics.setTooltipForNextFrame(font, font.split(text, 200), x, y);
 		}
 	}
 
@@ -1491,6 +1482,15 @@ public final class ComposerScreen extends Screen {
 
 	private int smallTextWidth(String text) {
 		return Math.round(font.width(text) * LAYER_TEXT_SCALE);
+	}
+
+	/** Cuts small text down to a width in real pixels, since the font measures its own size. */
+	private String smallFit(String text, int pixels) {
+		int nominal = (int)(pixels / LAYER_TEXT_SCALE);
+		if (font.width(text) <= nominal) {
+			return text;
+		}
+		return font.plainSubstrByWidth(text, Math.max(0, nominal - font.width("..."))) + "...";
 	}
 
 	/**
@@ -1572,7 +1572,7 @@ public final class ComposerScreen extends Screen {
 			return;
 		}
 		int y = insertion >= project().layers().size()
-			? layerY(project().layers().size() - 1) + layerRowHeight(project().layers().size() - 1) - 2
+			? layerY(project().layers().size() - 1) + LAYER_ROW_HEIGHT - 2
 			: layerY(insertion) - 2;
 		graphics.fill(8, y - 1, LAYER_PANEL_WIDTH - 8, y + 1, 0xFF8FD3FF);
 	}
@@ -2047,6 +2047,11 @@ public final class ComposerScreen extends Screen {
 			contextMenuOpen = false;
 		}
 		if (event.button() == 1) {
+			int stateLayer = layerStateAt(event.x(), event.y());
+			if (stateLayer >= 0) {
+				cycleLayerState(stateLayer, -1);
+				return true;
+			}
 			int layerIndex = layerHeaderAt(event.x(), event.y());
 			if (layerIndex >= 0) {
 				if (!selectedLayers.contains(layerIndex)) {
@@ -2061,8 +2066,7 @@ public final class ComposerScreen extends Screen {
 		}
 		if (event.button() == 0 && doubleClick) {
 			int layerIndex = layerHeaderAt(event.x(), event.y());
-			if (layerIndex >= 0 && !isLayerCollapseArrow(event.x())
-					&& !controlDown() && !shiftDown()) {
+			if (layerIndex >= 0 && !controlDown() && !shiftDown()) {
 				beginLayerRename(layerIndex);
 				return true;
 			}
@@ -2081,13 +2085,19 @@ public final class ComposerScreen extends Screen {
 				showResult(Component.literal(sequenceSummary()));
 				return true;
 			}
+			int stateLayer = layerStateAt(event.x(), event.y());
+			if (stateLayer >= 0) {
+				cycleLayerState(stateLayer, 1);
+				return true;
+			}
+			int instrumentLayer = layerInstrumentAt(event.x(), event.y());
+			if (instrumentLayer >= 0) {
+				instrumentMenuLayer = instrumentMenuLayer == instrumentLayer ? -1 : instrumentLayer;
+				return true;
+			}
 		}
 		if (event.button() == 0) {
 			int layerIndex = layerHeaderAt(event.x(), event.y());
-			if (layerIndex >= 0 && isLayerCollapseArrow(event.x())) {
-				toggleLayerCollapsed(layerIndex);
-				return true;
-			}
 			if (layerIndex >= 0) {
 				selectLayer(layerIndex, controlDown(), shiftDown());
 				selectedNotes.clear();
@@ -2119,7 +2129,7 @@ public final class ComposerScreen extends Screen {
 				}
 				if (hit.layerIndex() != project().activeLayerIndex()) {
 					apply(project().withActiveLayer(hit.layerIndex()));
-					rebuildLayerButtons();
+					layersChanged();
 				}
 				if (!selectedNotes.contains(hit.note().id())) {
 					selectedNotes.clear();
@@ -2143,10 +2153,10 @@ public final class ComposerScreen extends Screen {
 				selectedLayers.clear();
 				selectedLayers.add(hit.layerIndex());
 				apply(project().withActiveLayer(hit.layerIndex()));
-				rebuildLayerButtons();
+				layersChanged();
 			} else if (hit.layerIndex() != project().activeLayerIndex()) {
 				apply(project().withActiveLayer(hit.layerIndex()));
-				rebuildLayerButtons();
+				layersChanged();
 			}
 			NoteEvent hitNote = hit.note();
 			if (!selectedNotes.contains(hitNote.id())) {
@@ -2347,7 +2357,7 @@ public final class ComposerScreen extends Screen {
 	@Override
 	public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
 		if (mouseX < LAYER_PANEL_WIDTH && mouseY >= LAYER_LIST_TOP - 2 && mouseY <= layerListBottom()) {
-			scrollLayers(scrollY > 0 ? -LAYER_COLLAPSED_ROW_HEIGHT : LAYER_COLLAPSED_ROW_HEIGHT);
+			scrollLayers(scrollY > 0 ? -LAYER_ROW_HEIGHT : LAYER_ROW_HEIGHT);
 			return true;
 		}
 		if (mouseX >= LAYER_PANEL_WIDTH && mouseX < rollX
@@ -2740,7 +2750,7 @@ public final class ComposerScreen extends Screen {
 			delayScaleSlider.setScale(delayScaleQuarters());
 		}
 		syncProject();
-		rebuildLayerButtons();
+		layersChanged();
 		rebuildMoveLayerButtons();
 		updateButtonStates();
 	}
@@ -2826,7 +2836,7 @@ public final class ComposerScreen extends Screen {
 			return;
 		}
 		apply(updated);
-		rebuildLayerButtons();
+		layersChanged();
 		showResult(Component.literal(sequenceSummary()));
 	}
 
@@ -3094,59 +3104,53 @@ public final class ComposerScreen extends Screen {
 		return LAYER_PANEL_WIDTH - 34;
 	}
 
-	/** The build dot's clickable box, a little larger than the glyph so it is easy to hit. */
-	private int buildDotAt(double x, double y) {
-		if (x < buildDotX() - 4 || x > buildDotX() + 10) {
-			return -1;
-		}
-		for (int index = 0; index < project().layers().size(); index++) {
-			if (!layerRowVisible(index)) {
-				continue;
-			}
-			int top = layerY(index);
-			if (y >= top - 2 && y < top + LAYER_HEADER_HEIGHT - 2) {
-				return index;
-			}
-		}
-		return -1;
-	}
-
-	private int layerHeaderAt(double x, double y) {
-		if (x < 12 || x >= LAYER_PANEL_WIDTH - 10
+	/** Which row a point is on, whatever part of the row it lands in. */
+	private int layerRowAt(double x, double y) {
+		if (x < 8 || x >= LAYER_PANEL_WIDTH - 8
 				|| y < LAYER_LIST_TOP - 2 || y > layerListBottom()) {
 			return -1;
 		}
-		for (int index = 0; index < project().layers().size(); index++) {
-			int top = layerY(index);
-			if (y >= top - 2 && y < top + LAYER_HEADER_HEIGHT - 2) {
-				return index;
-			}
-		}
-		return -1;
+		int index = (int)Math.floor((y - (LAYER_LIST_TOP - 2 - layerScroll)) / LAYER_ROW_HEIGHT);
+		return index >= 0 && index < project().layers().size() && layerRowVisible(index) ? index : -1;
+	}
+
+	/** The build dot's clickable box, a little larger than the glyph so it is easy to hit. */
+	private int buildDotAt(double x, double y) {
+		return x >= buildDotX() - 4 && x <= buildDotX() + 10 ? layerRowAt(x, y) : -1;
+	}
+
+	/** The one control that decides whether a layer is soloed, heard, silent or gone. */
+	private int layerStateAt(double x, double y) {
+		return x >= LAYER_STATE_X - 2 && x < LAYER_INSTRUMENT_X ? layerRowAt(x, y) : -1;
+	}
+
+	private int layerInstrumentAt(double x, double y) {
+		return x >= LAYER_INSTRUMENT_X && x < LAYER_INSTRUMENT_X + 17 ? layerRowAt(x, y) : -1;
+	}
+
+	/** The part of a row that selects and drags it: everything the two icons do not claim. */
+	private int layerHeaderAt(double x, double y) {
+		boolean onIcons = x >= LAYER_STATE_X - 2 && x < LAYER_NAME_X - 2;
+		return !onIcons && x < LAYER_PANEL_WIDTH - 10 ? layerRowAt(x, y) : -1;
 	}
 
 	/** Which gap between rows a dragged layer is hovering over, counted as an insertion point. */
 	private int layerDropIndex(double y) {
 		int size = project().layers().size();
 		for (int index = 0; index < size; index++) {
-			if (y < layerY(index) + layerRowHeight(index) / 2.0) {
+			if (y < layerY(index) + LAYER_ROW_HEIGHT / 2.0) {
 				return index;
 			}
 		}
 		return size;
 	}
 
-	/** The collapse arrow occupies the left edge of a layer header, before the name. */
-	private boolean isLayerCollapseArrow(double x) {
-		return x >= 12 && x < 26;
-	}
-
 	private void beginLayerRename(int layerIndex) {
 		cancelLayerRename();
 		editingLayer = layerIndex;
 		int y = layerY(layerIndex);
-		layerNameBox = new EditBox(font, 30, y - 2, LAYER_PANEL_WIDTH - 40, LAYER_HEADER_HEIGHT,
-			Component.literal("Layer name"));
+		layerNameBox = new EditBox(font, LAYER_NAME_X - 3, y - 2, LAYER_NAME_RIGHT - LAYER_NAME_X + 6,
+			LAYER_ROW_HEIGHT, Component.literal("Layer name"));
 		layerNameBox.setMaxLength(48);
 		layerNameBox.setValue(project().layers().get(layerIndex).name());
 		addRenderableWidget(layerNameBox);
@@ -3154,15 +3158,7 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private int layerY(int layerIndex) {
-		int y = LAYER_LIST_TOP - layerScroll;
-		for (int index = 0; index < layerIndex; index++) {
-			y += layerRowHeight(index);
-		}
-		return y;
-	}
-
-	private int layerRowHeight(int layerIndex) {
-		return collapsedLayers.contains(layerIndex) ? LAYER_COLLAPSED_ROW_HEIGHT : LAYER_ROW_HEIGHT;
+		return LAYER_LIST_TOP - layerScroll + layerIndex * LAYER_ROW_HEIGHT;
 	}
 
 	/** Bottom of the scrollable layer list, leaving room for the pinned "+ Layer" row and footer. */
@@ -3171,11 +3167,7 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private int layerContentHeight() {
-		int total = 0;
-		for (int index = 0; index < project().layers().size(); index++) {
-			total += layerRowHeight(index);
-		}
-		return total;
+		return project().layers().size() * LAYER_ROW_HEIGHT;
 	}
 
 	private int maxLayerScroll() {
@@ -3188,26 +3180,13 @@ public final class ComposerScreen extends Screen {
 			layerScroll = clamped;
 			cancelLayerRename();
 			instrumentMenuLayer = -1;
-			rebuildLayerButtons();
-			rebuildMoveLayerButtons();
 		}
-	}
-
-	private void toggleLayerCollapsed(int layerIndex) {
-		if (!collapsedLayers.remove(layerIndex)) {
-			collapsedLayers.add(layerIndex);
-		}
-		cancelLayerRename();
-		instrumentMenuLayer = -1;
-		layerScroll = Math.min(layerScroll, maxLayerScroll());
-		rebuildLayerButtons();
-		rebuildMoveLayerButtons();
 	}
 
 	/** True when a layer row is fully inside the scrollable viewport. */
 	private boolean layerRowVisible(int layerIndex) {
 		int top = layerY(layerIndex);
-		return top >= LAYER_LIST_TOP - 2 && top + layerRowHeight(layerIndex) <= layerListBottom() + 2;
+		return top >= LAYER_LIST_TOP - 2 && top + LAYER_ROW_HEIGHT <= layerListBottom() + 2;
 	}
 
 	private void commitLayerRename() {
@@ -3620,8 +3599,7 @@ public final class ComposerScreen extends Screen {
 		MERGE_SELECTED("Merge selected"),
 		INCLUDE_SELECTED("Include selected layers in sequence"),
 		SET_INCLUDED_TO_SELECTION("Include only selected layers in sequence"),
-		SELECT_ALL("Select all layers"),
-		COLLAPSE_OTHERS("Collapse others");
+		SELECT_ALL("Select all layers");
 
 		private final String label;
 
