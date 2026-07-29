@@ -377,9 +377,9 @@ public final class SongBuilder {
 		int laneWidth = Math.max(longest + 2, width - 2);
 		PlacementPlan placements = new PlacementPlan();
 		if (floors <= 1) {
-			walkFolded(events, origin, forward, laneWidth, Integer.MAX_VALUE, placements, layout);
+			walkFolded(events, origin, forward, laneWidth, Integer.MAX_VALUE, placements);
 		} else {
-			walkWall(events, origin, forward, laneWidth, floors, placements, layout);
+			walkWall(events, origin, forward, laneWidth, floors, placements);
 		}
 		return placements.finish(mode, origin);
 	}
@@ -400,7 +400,7 @@ public final class SongBuilder {
 	 * be sized to what the lanes hold.</p>
 	 */
 	private static void walkWall(List<EventGroup> events, BlockPos origin, Direction forward,
-			int laneWidth, int floors, PlacementPlan placements, Layout layout) {
+			int laneWidth, int floors, PlacementPlan placements) {
 		BlockPos cursor = origin;
 		Direction travel = forward;
 		// Where chords grow, and the direction the whole slab creeps once a sweep is done.
@@ -446,7 +446,7 @@ public final class SongBuilder {
 					// happen to be leaving. A sideways step separates two slabs, and every floor of
 					// one sits beside the matching floor of the other -- so a quiet lane at the top
 					// is no promise about the chord four floors down that it would be answering for.
-					cursor = addCompactTurn(placements, cursor, travel, depth, slabStep, currentTime, layout);
+					cursor = addCompactTurn(placements, cursor, travel, depth, slabStep, currentTime);
 					climb = -climb;
 				}
 				travel = travel.getOpposite();
@@ -541,7 +541,7 @@ public final class SongBuilder {
 		int corridor = cubeCorridor(
 			List.copyOf(laneSpacings(events, cubeLanePartition(events, laneWidth)).values()), floors);
 		for (int attempt = 0; attempt < 12
-			&& walkFolded(events, origin, forward, laneWidth, corridor, PlacementPlan.dry(), Layout.STANDARD) > floors;
+			&& walkFolded(events, origin, forward, laneWidth, corridor, PlacementPlan.dry()) > floors;
 				attempt++) {
 			corridor += Math.max(MAX_LANE_SPACING, corridor / 8);
 		}
@@ -571,7 +571,7 @@ public final class SongBuilder {
 			cursor = addSpatialEventModule(placements, trigger.cursor(), travel, laneStep,
 				trigger.triggerDelay(), event.notes());
 			if (spacing != null) {
-				cursor = addCompactTurn(placements, cursor, travel, laneStep, spacing, event.time(), Layout.STANDARD);
+				cursor = addCompactTurn(placements, cursor, travel, laneStep, spacing, event.time());
 				travel = travel.getOpposite();
 			}
 		}
@@ -605,7 +605,7 @@ public final class SongBuilder {
 		// and a floor of wide ones hanging off the edge of it.
 		int corridor = foldedCorridor(events, origin, forward, laneWidth, floors);
 		PlacementPlan placements = new PlacementPlan();
-		walkFolded(events, origin, forward, laneWidth, corridor, placements, Layout.STANDARD);
+		walkFolded(events, origin, forward, laneWidth, corridor, placements);
 		return placements.finish(PasteMode.COMPACT_CUBE, origin);
 	}
 
@@ -618,7 +618,7 @@ public final class SongBuilder {
 	 * @return how many floors the stack ended up with
 	 */
 	private static int walkFolded(List<EventGroup> events, BlockPos origin, Direction forward,
-			int laneWidth, int corridor, PlacementPlan placements, Layout layout) {
+			int laneWidth, int corridor, PlacementPlan placements) {
 		int floorsUsed = 1;
 		BlockPos cursor = origin;
 		Direction travel = forward;
@@ -695,7 +695,7 @@ public final class SongBuilder {
 				laneStep = laneStep.getOpposite();
 				floorsUsed++;
 			} else {
-				cursor = addCompactTurn(placements, cursor, travel, laneStep, spacing, currentTime, layout);
+				cursor = addCompactTurn(placements, cursor, travel, laneStep, spacing, currentTime);
 				travel = travel.getOpposite();
 			}
 		}
@@ -1059,36 +1059,30 @@ public final class SongBuilder {
 	/**
 	 * Carries the signal across to where the next lane starts, and turns it around.
 	 *
-	 * <p>Whether the run stands on stone or on glass is the difference between two lanes sitting
-	 * four apart and three. A turn crosses the whole gap at the level the lanes keep their notes at,
-	 * and dust makes the block it sits on live -- live at the tick of the lane it is <em>leaving</em>,
-	 * which is hundreds of ticks earlier than the lane it is arriving at. Land that beside an
-	 * incoming note and the note sounds a verse early. Glass cannot be powered at all, so a turn
-	 * built on it carries the signal and touches nothing, and the columns it crosses stop being a
-	 * reason to keep the lanes apart. The older modes stay on stone, where they have always been.</p>
+	 * <p>The run is live, at the tick of the lane it is <em>leaving</em>, and it crosses the whole
+	 * gap at the level the lanes keep their notes at. That looks like it ought to sound the incoming
+	 * lane's notes a verse early, and it does not: the only cell of the incoming lane it comes
+	 * alongside is the low slot behind that lane's first repeater, and a module is already barred
+	 * from reaching backwards into the block a turn was built through. So the run stays on stone,
+	 * and two lanes can still sit with their notes touching.</p>
 	 */
 	private static BlockPos addCompactTurn(PlacementPlan placements, BlockPos cursor, Direction travel,
-			Direction laneStep, int laneDistance, int time, Layout layout) {
+			Direction laneStep, int laneDistance, int time) {
 		if (laneDistance < 1 || laneDistance > 13) {
 			throw new IllegalArgumentException("Compact turn distance " + laneDistance
 				+ " exceeds the safe redstone range");
 		}
 		BlockPos outer = cursor.relative(travel);
-		layTurnFloor(placements, cursor, time, layout);
-		layTurnFloor(placements, outer, time, layout);
+		layTurnFloor(placements, cursor, time);
+		layTurnFloor(placements, outer, time);
 		for (int offset = 1; offset <= laneDistance; offset++) {
-			layTurnFloor(placements, outer.relative(laneStep, offset), time, layout);
+			layTurnFloor(placements, outer.relative(laneStep, offset), time);
 		}
 		return outer.relative(laneStep, laneDistance).relative(travel.getOpposite());
 	}
 
-	private static void layTurnFloor(PlacementPlan placements, BlockPos position, int time,
-			Layout layout) {
-		if (layout.ultra()) {
-			set(placements, position, "minecraft:glass");
-		} else {
-			placements.powered(position, "minecraft:stone", time);
-		}
+	private static void layTurnFloor(PlacementPlan placements, BlockPos position, int time) {
+		placements.powered(position, "minecraft:stone", time);
 		set(placements, position.above(), "minecraft:redstone_wire");
 	}
 
