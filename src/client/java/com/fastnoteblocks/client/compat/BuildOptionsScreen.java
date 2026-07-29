@@ -183,9 +183,9 @@ final class BuildOptionsScreen extends Screen {
 				+ "one step at a time. The only layout you can follow in a straight line: walk it, "
 				+ "or lay a rail. More floors make it taller and shorter.";
 			case ULTRA_COMPACT_LANE -> "The Compact lane, packed harder. A chord of four to seven "
-				+ "stacks around a single repeater wherever there is room for one, and lanes that "
-				+ "never power anything off their centre line sit three apart instead of four. "
-				+ "Same width and floor controls.";
+				+ "stacks around a single repeater instead of stringing out along a bus, and lanes "
+				+ "sit three apart rather than four wherever their notes can touch safely. Same "
+				+ "width and floor controls.";
 			case LANE -> "One straight line. Easiest to read and repair, largest footprint.";
 		};
 	}

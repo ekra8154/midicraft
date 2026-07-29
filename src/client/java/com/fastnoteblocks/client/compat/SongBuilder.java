@@ -161,41 +161,41 @@ public final class SongBuilder {
 	 * puts its second note the same way round, two neighbouring lanes can never both grow into the
 	 * gap between them, so a sparse pair can sit three apart instead of four.</p>
 	 *
-	 * <p>Two reaches and not one, because the two questions a gap has to answer are different.
-	 * Blocks may not overlap at all. Powered blocks may not come within one of a <em>foreign</em>
-	 * note block, since a note block beside a powered one sounds -- and at the neighbour's tick,
-	 * which is the wrong one. A note block touching a note block is harmless: block power never
-	 * crosses from one block to the next. So where a lane keeps everything it powers on its own
-	 * centre line, its notes may sit right against the next lane's notes.</p>
+	 * <p>Blocks may not overlap, which is the easy half. The other half is that nothing live may
+	 * come within one of a <em>foreign</em> note block. A note block touching a note block is
+	 * harmless -- block power never crosses from one block to the next -- and that is why an empty
+	 * column between two lanes is usually paying for nothing.</p>
 	 *
-	 * @param poweredBack how far back of the centre line a block that can set off a note reaches
-	 * @param poweredForward the same, forward. Set equal to the block reach where a module has not
-	 *     been measured for this, which asks for the extra empty column the older modes always had.
+	 * <p>Which leaves one case that does need it. Every layout but the stacked module keeps what it
+	 * powers on its own centre line, or a level above where the neighbour has only instrument
+	 * blocks. The stacked module is the one that hangs notes and live relays side by side on the
+	 * <em>same</em> low level, so two lanes that both use it, and only those, still need the gap.
+	 *
+	 * @param margin an empty column this lane insists on regardless, which is how the older modes
+	 *     keep the spacing every build made with them already has
+	 * @param lowLive whether this lane has live blocks out at the level a neighbour hangs low
+	 *     notes at
 	 */
-	private record LaneReach(int back, int forward, int poweredBack, int poweredForward) {
-		static final LaneReach NONE = new LaneReach(0, 0, 0, 0);
-
-		/** A reach that keeps the older modes' spacing: every block it occupies treated as live. */
-		static LaneReach cautious(int back, int forward) {
-			return new LaneReach(back, forward, back, forward);
-		}
-
-		static LaneReach ofSmallChord(int chordSize) {
-			if (chordSize <= 1) {
-				return NONE;
-			}
-			return chordSize <= 2 ? cautious(0, 1) : cautious(1, 1);
-		}
+	private record LaneReach(int back, int forward, int margin, boolean lowLive) {
+		static final LaneReach NONE = new LaneReach(0, 0, 0, false);
 
 		LaneReach widest(LaneReach other) {
 			return new LaneReach(Math.max(back, other.back), Math.max(forward, other.forward),
-				Math.max(poweredBack, other.poweredBack),
-				Math.max(poweredForward, other.poweredForward));
+				Math.max(margin, other.margin), lowLive || other.lowLive);
 		}
 
 		int width() {
 			return back + forward + 1;
 		}
+	}
+
+	/** How far a chord too small to need a bus reaches either side of its lane. */
+	private static LaneReach smallChordReach(int chordSize, int margin) {
+		if (chordSize <= 1) {
+			return new LaneReach(0, 0, margin, false);
+		}
+		return chordSize <= 2 ? new LaneReach(0, 1, margin, false)
+			: new LaneReach(1, 1, margin, false);
 	}
 
 	/** The reach of the widest chord in a run of events. */
@@ -208,17 +208,22 @@ public final class SongBuilder {
 	}
 
 	/**
-	 * Lane centres far enough apart that neither lane reaches into the other, and neither lane's
-	 * live blocks come within one of the other's note blocks.
+	 * Lane centres far enough apart that neither lane can reach into the other.
 	 *
-	 * <p>Three conditions, and the widest wins. Where both lanes report their whole reach as live
-	 * -- which is what every mode but the ultra one does -- all three collapse back to the empty
-	 * column this always used to leave.</p>
+	 * <p>Four conditions. The blocks must not overlap, plus whatever empty column the older modes
+	 * insist on. Neither lane's notes may come within one of the other's <em>centre line</em>,
+	 * which is live in every layout there is -- an anchor note block, a bus, the block a cross
+	 * hangs under. And two lanes that both hang notes out at the low level, which only the stacked
+	 * module does, need a column between them as well.</p>
 	 */
 	private static int laneSpacing(LaneReach lane, LaneReach next) {
-		return Math.max(2, Math.max(lane.forward() + next.back() + 1,
-			Math.max(lane.poweredForward() + next.back() + 2,
-				lane.forward() + next.poweredBack() + 2)));
+		int clear = Math.max(lane.forward() + next.back() + 1
+				+ Math.max(lane.margin(), next.margin()),
+			Math.max(lane.forward() + 2, next.back() + 2));
+		if (lane.lowLive() && next.lowLive()) {
+			clear = Math.max(clear, 4);
+		}
+		return Math.max(2, clear);
 	}
 
 	/**
@@ -662,7 +667,12 @@ public final class SongBuilder {
 			laneStart = index + 1;
 			int nextLane = cursor.getZ() + laneStep.getStepZ() * spacing - origin.getZ();
 			boolean riser = nextLane < 0 || nextLane > corridor;
-			if (!riser && cornerBuilt) {
+			// Asked once the corner's width is known, which is why it cannot be folded into the
+			// question above: how much of a corner is left depends on how far it reaches. A lane
+			// ending on a stacked module has taken a cell or two of its own corner already, and an
+			// event that no longer fits is laid out in the lane instead, with a plain turn after.
+			if (!riser && cornerBuilt && cornerSlots(placements, trigger.cursor(), travel, laneStep,
+					spacing).size() >= event.notes().size()) {
 				cursor = addTurnEventModule(placements, trigger.cursor(), travel, laneStep, spacing,
 					trigger.triggerDelay(), event.notes());
 				travel = travel.getOpposite();
@@ -865,7 +875,7 @@ public final class SongBuilder {
 			result.add(new EventGroup(time, List.copyOf(chord), delayRepeaters + eventLength,
 				maxSafeTurnDistance, style, laneReachOf(layout, style, chord.size())));
 			currentTime = time;
-			previousTookTheGap = style == ChordStyle.STACKED;
+			previousTookTheGap = style.stacked();
 		}
 		return List.copyOf(result);
 	}
@@ -873,22 +883,31 @@ public final class SongBuilder {
 	/**
 	 * How a chord is built, given what a lane may use and what came before it.
 	 *
-	 * <p>Two stacked modules cannot stand next to each other, and the reason is not the four low
-	 * slots they would share -- it is that a module's relay blocks are one step along from the low
-	 * slots of the module before it. So the second module's relays reach back into the first
-	 * module's own notes and sound them again a repeater late. Real machines built this way lean on
-	 * the pulse still being high for that second edge to land on nothing, which works and is how
-	 * hand-built note block songs get their density, but it makes the machine's correctness a
-	 * property of how long you hold the lever. Nothing else in any layout here does that.</p>
+	 * <p>Two stacked modules a repeater apart stand two blocks apart, which means the two low slots
+	 * ahead of one are the two low slots behind the other. The first module takes them, and takes
+	 * them for good: it sounds them at its own tick, and the second module's relays only reach them
+	 * again afterwards, adding no edge to a note already powered. So reaching forward is always
+	 * free and reaching back is what has to be asked for.</p>
+	 *
+	 * <p>A turn takes the pair behind as well. A turn is a run of powered stone at the level the
+	 * low notes hang at, live at the tick of the lane it is leaving -- which is <em>earlier</em>
+	 * than the module that follows it, and early is the one direction a note cannot be reached
+	 * from.</p>
 	 */
 	private static ChordStyle chooseStyle(Layout layout, List<EventNote> chord, boolean roomBehind) {
 		if (chord.size() <= 3) {
 			return ChordStyle.SMALL;
 		}
-		if (!layout.ultra() || !roomBehind) {
+		if (!layout.ultra()) {
 			return ChordStyle.BUS;
 		}
-		return ultraSlots(chord) == null ? ChordStyle.BUS : ChordStyle.STACKED;
+		if (ultraSlots(chord, false) != null) {
+			return ChordStyle.STACKED_FRONT;
+		}
+		if (roomBehind && ultraSlots(chord, true) != null) {
+			return ChordStyle.STACKED_FULL;
+		}
+		return ChordStyle.BUS;
 	}
 
 	/**
@@ -899,21 +918,15 @@ public final class SongBuilder {
 	 * anyone has already made with them -- exactly as it was.</p>
 	 */
 	private static LaneReach laneReachOf(Layout layout, ChordStyle style, int chordSize) {
-		if (!layout.ultra()) {
-			return style == ChordStyle.BUS ? LaneReach.cautious(1, 1)
-				: LaneReach.ofSmallChord(chordSize);
-		}
-		if (style == ChordStyle.STACKED) {
+		int margin = layout.ultra() ? 0 : 1;
+		if (style.stacked()) {
 			// The two blocks a cross hands its signal to sit one either side of the centre line,
-			// so this is the one module that really does reach out live. A chord measured as this
-			// and then dropped to a bus keeps the wider reach, which is the harmless direction.
-			return LaneReach.cautious(1, 1);
+			// at the same level as the four low notes. A chord measured as this and then dropped
+			// to a bus keeps the wider claim, which is the harmless direction to be wrong in.
+			return new LaneReach(1, 1, margin, true);
 		}
-		if (style == ChordStyle.BUS) {
-			return new LaneReach(1, 1, 0, 0);
-		}
-		LaneReach blocks = LaneReach.ofSmallChord(chordSize);
-		return new LaneReach(blocks.back(), blocks.forward(), 0, 0);
+		return style == ChordStyle.BUS ? new LaneReach(1, 1, margin, false)
+			: smallChordReach(chordSize, margin);
 	}
 
 	private static CompactLayout chooseCompactLayout(List<EventGroup> events) {
@@ -1003,22 +1016,44 @@ public final class SongBuilder {
 		// beside a block that is powered, and dust does not pass its signal sideways into a note
 		// block. Hung off the dust itself they would stay silent.
 		BlockPos corner = cursor.relative(travel).above();
-		List<BlockPos> slots = new ArrayList<>();
 		for (int offset = 0; offset <= laneDistance; offset++) {
 			BlockPos run = corner.relative(laneStep, offset);
 			placements.powered(run, "minecraft:stone", time);
 			set(placements, run.above(), "minecraft:redstone_wire");
-			slots.add(run.relative(travel));
-			// The near side of the first cell is the repeater driving it, and the near side of the
-			// last is where the next lane's repeater has to stand.
-			if (offset > 0 && offset < laneDistance) {
-				slots.add(run.relative(travel.getOpposite()));
-			}
 		}
+		List<BlockPos> slots = cornerSlots(placements, cursor, travel, laneStep, laneDistance);
 		for (int index = 0; index < chord.size(); index++) {
 			placeNote(placements, slots.get(index), chord.get(index));
 		}
 		return cursor.relative(laneStep, laneDistance);
+	}
+
+	/**
+	 * The places along a corner a note can still be hung, in the order they get used.
+	 *
+	 * <p>Filtered rather than simply counted off, because a corner's notes take the block under
+	 * them for their instrument, and that block is at the level the stacked module hangs its low
+	 * notes at. A lane that ends on one of those has already spoken for a cell or two of its own
+	 * corner. Asking first is what lets the walk lay the event out in the lane instead when what is
+	 * left will not hold it.</p>
+	 */
+	private static List<BlockPos> cornerSlots(PlacementPlan placements, BlockPos cursor,
+			Direction travel, Direction laneStep, int laneDistance) {
+		BlockPos corner = cursor.relative(travel).above();
+		List<BlockPos> slots = new ArrayList<>();
+		for (int offset = 0; offset <= laneDistance; offset++) {
+			BlockPos run = corner.relative(laneStep, offset);
+			if (placements.freeForNote(run.relative(travel))) {
+				slots.add(run.relative(travel));
+			}
+			// The near side of the first cell is the repeater driving it, and the near side of the
+			// last is where the next lane's repeater has to stand.
+			if (offset > 0 && offset < laneDistance
+					&& placements.freeForNote(run.relative(travel.getOpposite()))) {
+				slots.add(run.relative(travel.getOpposite()));
+			}
+		}
+		return slots;
 	}
 
 	private static BlockPos addCompactTurn(PlacementPlan placements, BlockPos cursor, Direction travel,
@@ -1104,15 +1139,15 @@ public final class SongBuilder {
 	private static Placed addChordModule(PlacementPlan placements, BlockPos cursor, Direction travel,
 			Direction across, int triggerDelay, EventGroup event, boolean roomBehind) {
 		ChordStyle style = event.style();
-		if (style == ChordStyle.STACKED && !roomBehind) {
+		if (style == ChordStyle.STACKED_FULL && !roomBehind) {
 			style = ChordStyle.BUS;
 		}
-		if (style != ChordStyle.STACKED) {
+		if (!style.stacked()) {
 			return new Placed(addSpatialEventModule(placements, cursor, travel, across, triggerDelay,
 				event.notes()), style);
 		}
 		return new Placed(addStackedEventModule(placements, cursor, travel, across, triggerDelay,
-			event.time(), ultraSlots(event.notes())), style);
+			event.time(), ultraSlots(event.notes(), style == ChordStyle.STACKED_FULL)), style);
 	}
 
 	/**
@@ -1124,7 +1159,7 @@ public final class SongBuilder {
 	 */
 	private record Placed(BlockPos cursor, ChordStyle style) {
 		boolean stacked() {
-			return style == ChordStyle.STACKED;
+			return style.stacked();
 		}
 	}
 
@@ -1206,8 +1241,8 @@ public final class SongBuilder {
 	 * is what settles the awkward chord of two harps and five instruments that do not conduct:
 	 * both harps become relays, and the centre goes unused.</p>
 	 */
-	private static UltraSlots ultraSlots(List<EventNote> chord) {
-		int hangers = 6;
+	private static UltraSlots ultraSlots(List<EventNote> chord, boolean reachingBack) {
+		int hangers = reachingBack ? 6 : 4;
 		if (chord.size() < 4 || chord.size() > hangers + 1) {
 			return null;
 		}
@@ -1531,10 +1566,16 @@ public final class SongBuilder {
 	private enum ChordStyle {
 		/** One note block driven straight off the repeater, with up to two hung either side. */
 		SMALL,
-		/** Up to seven note blocks packed around one repeater and the dust under its centre. */
-		STACKED,
+		/** The stacked module, reaching only forward: two relays, two low notes, and a centre. */
+		STACKED_FRONT,
+		/** The stacked module reaching both ways, which needs the two low slots behind it free. */
+		STACKED_FULL,
 		/** A run of powered stone with note blocks down both sides of it. */
-		BUS
+		BUS;
+
+		boolean stacked() {
+			return this == STACKED_FRONT || this == STACKED_FULL;
+		}
 	}
 
 	private record EventGroup(int time, List<EventNote> notes, int length, int maxSafeTurnDistance,
@@ -1635,6 +1676,20 @@ public final class SongBuilder {
 			}
 		}
 
+		/**
+		 * Whether a note block could still go here, with its instrument under it and air over it.
+		 *
+		 * <p>A plan that records nothing answers yes to everything, which is right: a dry walk is
+		 * measuring a shape, and the shape is the one the real walk would get if nothing were in
+		 * the way.</p>
+		 */
+		boolean freeForNote(BlockPos position) {
+			return !recording
+				|| !blocks.containsKey(position.immutable())
+					&& !blocks.containsKey(position.below().immutable())
+					&& !blocks.containsKey(position.above().immutable());
+		}
+
 		void note(BlockPos position, int time) {
 			if (recording) {
 				notes.put(position.immutable(), time);
@@ -1648,6 +1703,15 @@ public final class SongBuilder {
 		 * lanes away half a bar early. Both halves matter -- an untriggered note is a hole in the
 		 * song, and a note reached by a foreign event is a wrong note -- and between them they are
 		 * what makes it safe to pack lanes by measurement rather than by a constant.</p>
+		 *
+		 * <p>Being reached <em>later</em> is a different matter, and this is where a note block
+		 * differs from every other thing redstone drives: it sounds on the rising edge and on
+		 * nothing else. A whole chain is one travelling pulse from one lever, so every repeater it
+		 * has already passed is still holding its output high. A block going live beside a note
+		 * that is already powered therefore adds no edge and makes no sound, and two modules can
+		 * share a block, which is how a hand-built machine gets six notes out of one repeater. Only
+		 * within a repeater of each other, though: further apart and the first pulse may have ended
+		 * before the second arrives, which would be a second edge and a second note.</p>
 		 */
 		void verify() {
 			for (Map.Entry<BlockPos, Integer> note : notes.entrySet()) {
@@ -1659,13 +1723,23 @@ public final class SongBuilder {
 					if (neighbour == null) {
 						continue;
 					}
-					if (neighbour != time) {
+					if (neighbour == time) {
+						triggered = true;
+						continue;
+					}
+					if (neighbour < time) {
 						throw new IllegalArgumentException("Refusing to build a broken machine: the "
 							+ "note at " + describe(note.getKey()) + " belongs to tick " + time
-							+ " but would also sound at tick " + neighbour
+							+ " but would sound early, at tick " + neighbour
 							+ ". This is a bug in the layout, not in the song.");
 					}
-					triggered = true;
+					if (neighbour > time + SHARED_PULSE_TICKS) {
+						throw new IllegalArgumentException("Refusing to build a broken machine: the "
+							+ "note at " + describe(note.getKey()) + " belongs to tick " + time
+							+ " but would sound again at tick " + neighbour + ", too late for the "
+							+ "first pulse to still be covering it. This is a bug in the layout, "
+							+ "not in the song.");
+					}
 				}
 				if (!triggered) {
 					throw new IllegalArgumentException("Refusing to build a broken machine: the note "
@@ -1674,6 +1748,15 @@ public final class SongBuilder {
 				}
 			}
 		}
+
+		/**
+		 * How much later a block may go live beside a note without sounding it a second time.
+		 *
+		 * <p>One repeater at its longest. That is not a margin picked for comfort: it is exactly as
+		 * far apart as two modules can be and still touch at all, since anything longer puts a
+		 * repeater of its own between them and there is nothing left to share.</p>
+		 */
+		private static final int SHARED_PULSE_TICKS = 4;
 
 		private static String describe(BlockPos position) {
 			return position.getX() + " " + position.getY() + " " + position.getZ();
@@ -1687,7 +1770,8 @@ public final class SongBuilder {
 			String existing = blocks.putIfAbsent(key, block);
 			if (existing != null && !existing.equals(block)) {
 				throw new IllegalArgumentException("Placement layout collision at "
-					+ key.getX() + " " + key.getY() + " " + key.getZ());
+					+ describe(key) + ": " + existing + " is already there and " + block
+					+ " wants the same block");
 			}
 			if (!"minecraft:air".equals(block)) {
 				minimumX = Math.min(minimumX, key.getX());

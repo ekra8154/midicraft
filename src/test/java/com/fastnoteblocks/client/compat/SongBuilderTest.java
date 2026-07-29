@@ -50,18 +50,45 @@ class SongBuilderTest {
 	}
 
 	/**
-	 * Two stacked modules a single repeater apart stand two blocks apart, and each one's relays are
-	 * one step along from the other's low slots -- so the second would sound the first's notes
-	 * again, a repeater late. Whatever the chords are, they take turns.
+	 * A chord of four fills only the two low slots ahead of its own repeater. The next module's
+	 * relays do reach those blocks, but they reach them a repeater <em>later</em>, by which time
+	 * the note is already powered and there is no second edge for it to sound on. So four after
+	 * four after four is fine, and only a chord that has to reach backwards has to ask.
 	 */
 	@Test
-	void twoStackedModulesCannotStandNextToEachOther() {
+	void chordsOfFourStackOneAfterAnotherWithNothingBetweenThem() {
+		assertEquals(6, stackedModules(build(song(1, chords(6, 4, BASS_DRUM)),
+			SongBuilder.PasteMode.ULTRA_COMPACT_LANE)),
+			"every four should stack, back to back");
+	}
+
+	/**
+	 * Six needs the two low slots behind it, and those are the same two blocks the module before it
+	 * already hung notes on. Not a timing question but an occupancy one: they are taken.
+	 */
+	@Test
+	void aChordOfSixCannotHaveTheSlotsTheModuleBeforeItIsUsing() {
 		assertEquals(3, stackedModules(build(song(1, chords(6, 6, BASS_DRUM)),
 			SongBuilder.PasteMode.ULTRA_COMPACT_LANE)),
 			"back to back sixes should take turns");
-		assertEquals(3, stackedModules(build(song(1, chords(6, 4, BASS_DRUM)),
+	}
+
+	/**
+	 * Five fits ahead of the repeater only when one of its notes can ride the centre, and only a
+	 * harp can -- so the same chord of five is or is not free of the module before it depending on
+	 * whether there is a harp in it.
+	 */
+	@Test
+	void aHarpKeepsAChordOfFiveOutOfTheSlotsBehindIt() {
+		List<String> withHarp = new ArrayList<>(List.of(BASS_DRUM, BASS_DRUM, BASS_DRUM, BASS_DRUM));
+		withHarp.add(HARP);
+
+		assertEquals(6, stackedModules(build(song(1, repeat(6, withHarp)),
 			SongBuilder.PasteMode.ULTRA_COMPACT_LANE)),
-			"and so should fours -- the relays reach just as far either way");
+			"a five with a harp never reaches behind itself");
+		assertEquals(3, stackedModules(build(song(1, chords(6, 5, BASS_DRUM)),
+			SongBuilder.PasteMode.ULTRA_COMPACT_LANE)),
+			"a five without one does, so back to back fives take turns");
 	}
 
 	@Test
