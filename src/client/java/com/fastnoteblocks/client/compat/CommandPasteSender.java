@@ -26,11 +26,26 @@ public final class CommandPasteSender {
 	}
 
 	static void start(List<String> commands) {
+		start(commands, List.of());
+	}
+
+	/**
+	 * @param faults places the finished machine is known to be wrong at. Shown instead of the
+	 *     progress line, and kept on screen, because a build worth looking at is one you have to be
+	 *     told to look at -- it goes up, it looks right, and it plays one note in the wrong bar.
+	 */
+	static void start(List<String> commands, List<String> faults) {
 		cancel(false);
 		COMMANDS.addAll(commands);
 		total = COMMANDS.size();
 		sent = 0;
-		show(Component.literal("Placing sequence: 0/" + total));
+		if (faults.isEmpty()) {
+			show(Component.literal("Placing sequence: 0/" + total));
+			return;
+		}
+		show(Component.literal(faults.size() + " note" + (faults.size() == 1 ? "" : "s")
+				+ " will be wrong. First: " + faults.get(0))
+			.withStyle(net.minecraft.ChatFormatting.YELLOW));
 	}
 
 	static void cancel(boolean notify) {

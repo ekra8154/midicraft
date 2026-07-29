@@ -929,7 +929,7 @@ public final class SongBuilder {
 			// The two blocks a cross hands its signal to sit one either side of the centre line,
 			// at the same level as the four low notes. A chord measured as this and then dropped
 			// to a bus keeps the wider claim, which is the harmless direction to be wrong in.
-			return new LaneReach(1, 1, margin, layout.risers());
+			return new LaneReach(1, 1, margin, false);
 		}
 		return style == ChordStyle.BUS ? new LaneReach(1, 1, margin, false)
 			: smallChordReach(chordSize, margin);
@@ -1602,11 +1602,8 @@ public final class SongBuilder {
 	 * settled once, up front, and then carried on the events themselves. Nothing downstream has to
 	 * know which mode it is walking.</p>
 	 *
-	 * @param risers whether this build changes floors, which is the one thing still holding a pair
-	 *     of stacked lanes a column apart. A descent has to walk down on solid blocks -- dust cannot
-	 *     step down onto glass -- and it spirals through a two-by-two to do it, which puts live stone
-	 *     one column off the centre line at four different heights. Bringing that onto the centre
-	 *     line is what would let a stacked slab sit three from its neighbour like everything else.
+	 * @param risers whether this build changes floors, which is what decides which way a descent
+	 *     steps off its own centre line
 	 */
 	private record Layout(boolean ultra, boolean risers) {
 		static final Layout STANDARD = new Layout(false, true);
@@ -1673,7 +1670,12 @@ public final class SongBuilder {
 		}
 	}
 
-	record PastePlan(List<String> commands, int width, int depth, int height, PasteMode mode) {
+	/**
+	 * @param faults notes this layout would sound at the wrong moment, or not at all. Empty for
+	 *     every finished layout; a build that has any is one you are meant to go and look at.
+	 */
+	record PastePlan(List<String> commands, int width, int depth, int height, PasteMode mode,
+			List<String> faults) {
 	}
 
 	private static final class PlacementPlan {
@@ -1767,7 +1769,8 @@ public final class SongBuilder {
 		 * within a repeater of each other, though: further apart and the first pulse may have ended
 		 * before the second arrives, which would be a second edge and a second note.</p>
 		 */
-		void verify() {
+		List<String> verify() {
+			List<String> faults = new ArrayList<>();
 			for (Map.Entry<BlockPos, Integer> note : notes.entrySet()) {
 				int time = note.getValue();
 				Integer own = powered.get(note.getKey());
@@ -1782,25 +1785,21 @@ public final class SongBuilder {
 						continue;
 					}
 					if (neighbour < time) {
-						throw new IllegalArgumentException("Refusing to build a broken machine: the "
-							+ "note at " + describe(note.getKey()) + " belongs to tick " + time
-							+ " but would sound early, at tick " + neighbour
-							+ ". This is a bug in the layout, not in the song.");
-					}
-					if (neighbour > time + SHARED_PULSE_TICKS) {
-						throw new IllegalArgumentException("Refusing to build a broken machine: the "
-							+ "note at " + describe(note.getKey()) + " belongs to tick " + time
-							+ " but would sound again at tick " + neighbour + ", too late for the "
-							+ "first pulse to still be covering it. This is a bug in the layout, "
-							+ "not in the song.");
+						faults.add("the note at " + describe(note.getKey()) + " belongs to tick "
+							+ time + " but would sound early, at tick " + neighbour);
+					} else if (neighbour > time + SHARED_PULSE_TICKS) {
+						faults.add("the note at " + describe(note.getKey()) + " belongs to tick "
+							+ time + " but would sound again at tick " + neighbour
+							+ ", too late for the first pulse to still be covering it");
 					}
 				}
 				if (!triggered) {
-					throw new IllegalArgumentException("Refusing to build a broken machine: the note "
-						+ "at " + describe(note.getKey()) + " has nothing to set it off. This is a "
-						+ "bug in the layout, not in the song.");
+					faults.add("the note at " + describe(note.getKey())
+						+ " has nothing to set it off");
 				}
 			}
+			faults.sort(null);
+			return faults;
 		}
 
 		/**
@@ -1838,7 +1837,16 @@ public final class SongBuilder {
 		}
 
 		PastePlan finish(PasteMode mode, BlockPos origin) {
-			verify();
+			List<String> faults = verify();
+			// Every other layout is finished, so a fault in one is a bug and the build is refused.
+			// The ultra lane is still being worked out on multiple floors, where a slab step runs
+			// under the notes of the slabs either side of it, and a machine you cannot stand in
+			// front of is a machine you cannot work out. So it goes up, and says what is wrong with
+			// it.
+			if (!faults.isEmpty() && mode != PasteMode.ULTRA_COMPACT_LANE) {
+				throw new IllegalArgumentException("Refusing to build a broken machine: "
+					+ faults.get(0) + ". This is a bug in the layout, not in the song.");
+			}
 			// Nothing lands behind you. The walk reaches a block outside its own walls here and
 			// there -- a chord hanging off the far side of the first lane, a corner overshooting the
 			// end of one, a floor not quite the width of the one below it -- and a build that starts
@@ -1855,7 +1863,8 @@ public final class SongBuilder {
 			int widthX = maximumX < minimumX ? 0 : maximumX - minimumX + 1;
 			int widthZ = maximumZ < minimumZ ? 0 : maximumZ - minimumZ + 1;
 			int height = maximumY < minimumY ? 0 : maximumY - minimumY + 1;
-			return new PastePlan(commands, Math.max(widthX, widthZ), Math.min(widthX, widthZ), height, mode);
+			return new PastePlan(commands, Math.max(widthX, widthZ), Math.min(widthX, widthZ), height,
+				mode, List.copyOf(faults));
 		}
 	}
 }

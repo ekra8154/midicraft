@@ -209,6 +209,39 @@ class SongBuilderTest {
 			"ultra " + describe(ultra) + " should be narrower across the lanes than " + describe(lane));
 	}
 
+	/**
+	 * The flat build has to come out clean, and now has to be asked.
+	 *
+	 * <p>Every other layout is refused outright if it would sound a note at the wrong moment. This
+	 * one is not, because its multi-floor form is still being worked out and a machine you cannot
+	 * walk around is a machine you cannot work out. That makes this the only thing standing between
+	 * the flat form and a silent regression, so it uses the song that has actually caught things:
+	 * chords of four to seven end to end, over the instruments the module treats differently.</p>
+	 */
+	@Test
+	void aFlatBuildOfNothingButStackedChordsHasNothingWrongWithIt() {
+		List<List<String>> chords = new ArrayList<>();
+		String[] instruments = {HARP, SNARE, HAT, BASS_DRUM, "minecraft:glowstone"};
+		java.util.Random random = new java.util.Random(20260731L);
+		for (int index = 0; index < 220; index++) {
+			List<String> chord = new ArrayList<>();
+			for (int note = 0; note < 4 + index % 4; note++) {
+				chord.add(instruments[random.nextInt(instruments.length)]);
+			}
+			chords.add(chord);
+		}
+		List<SongBuilder.EventNote> song = song(2, chords);
+
+		for (int width : new int[] {12, 24, 48}) {
+			SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0), song,
+				SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+				new SongBuilder.BuildLimits(4, width, 1));
+
+			assertEquals(List.of(), plan.faults(),
+				"a flat build " + width + " wide should have nothing wrong with it");
+		}
+	}
+
 	// ------------------------------------------------------------------------------- fixtures
 
 	private static final String CROSS =

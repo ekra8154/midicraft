@@ -3332,7 +3332,7 @@ public final class ComposerScreen extends Screen {
 					.withStyle(net.minecraft.ChatFormatting.RED));
 				return;
 			}
-			CommandPasteSender.start(plan.commands());
+			CommandPasteSender.start(plan.commands(), plan.faults());
 			minecraft.gui.setScreen(null);
 		}));
 	}
