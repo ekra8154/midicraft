@@ -218,6 +218,19 @@ public final class SongBuilder {
 
 	private static PastePlan createPastePlan(Minecraft minecraft, List<EventNote> notes,
 			PasteMode mode) {
+		// Fixed world axes rather than the player's facing: travel runs +X and lanes step +Z, so a
+		// build always grows into positive coordinates and you know where it will land before you
+		// commit to it. Alternating floors double back inside that volume, never past the origin.
+		return createPastePlan(pasteOrigin(minecraft, Direction.EAST), notes, mode);
+	}
+
+	/**
+	 * Plans a build at a stated origin rather than at the player's feet.
+	 *
+	 * <p>Separated out so the plan can be made without a world to stand in, which is what lets a
+	 * build be planned and then read back in a test.</p>
+	 */
+	static PastePlan createPastePlan(BlockPos origin, List<EventNote> notes, PasteMode mode) {
 		if (notes.isEmpty()) {
 			throw new IllegalArgumentException(
 				"The build sequence is empty. Move some layers into it first.");
@@ -226,11 +239,7 @@ public final class SongBuilder {
 		if (stats.peak() > MAX_SIMULTANEOUS_NOTES) {
 			throw new IllegalArgumentException(overloadMessage(stats));
 		}
-		// Fixed world axes rather than the player's facing: travel runs +X and lanes step +Z, so a
-		// build always grows into positive coordinates and you know where it will land before you
-		// commit to it. Alternating floors double back inside that volume, never past the origin.
 		Direction forward = Direction.EAST;
-		BlockPos origin = pasteOrigin(minecraft, forward);
 		return switch (mode) {
 			case COMPACT_CUBE -> createCubePastePlan(origin, forward, notes);
 			case COMPACT -> createCompactPastePlan(origin, forward, notes);

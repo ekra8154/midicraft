@@ -38,6 +38,12 @@ dependencies {
 	testImplementation platform('org.junit:junit-bom:5.13.4')
 	testImplementation 'org.junit.jupiter:junit-jupiter'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+
+	// Tests reach into the client source set so the build planner and the machine reader can be
+	// run against each other. They are the only pair in the mod where one is supposed to undo the
+	// other exactly, and checking that by hand in a world is how a silent off-by-one survives.
+	testImplementation sourceSets.client.output
+	testImplementation sourceSets.client.compileClasspath
 }
 
 processResources {
