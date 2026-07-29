@@ -486,6 +486,23 @@ public record ComposerProject(
 			endTick, speedQuarters);
 	}
 
+	/**
+	 * The song at 1.00x, with whatever the speed slider was doing folded into the tempo.
+	 *
+	 * <p>The slider is a rehearsal control: it scales playback and the delays a build would place,
+	 * without touching a note. Anything that reasons about redstone timing has to fold it in first,
+	 * because every other calculation here reads the tempo and would otherwise be answering a
+	 * question about a speed the song is not being played at.</p>
+	 */
+	public ComposerProject withBakedSpeed() {
+		if (speedQuarters == DEFAULT_SPEED_QUARTERS) {
+			return this;
+		}
+		double factor = Math.max(1, speedQuarters) / (double)DEFAULT_SPEED_QUARTERS;
+		return withTempo(Math.max(1, (int)Math.round(tempoMicrosPerQuarter / factor)))
+			.withSpeedQuarters(DEFAULT_SPEED_QUARTERS);
+	}
+
 	public ComposerProject withName(String value) {
 		return new ComposerProject(value, ppq, tempoMicrosPerQuarter, layers, activeLayerIndex, nextNoteId,
 			endTick, speedQuarters);
