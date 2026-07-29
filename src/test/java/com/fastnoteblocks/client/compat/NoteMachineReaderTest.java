@@ -203,7 +203,7 @@ class NoteMachineReaderTest {
 			sampleSong(), SongBuilder.PasteMode.LANE, LIMITS);
 		Map<BlockPos, BlockState> world = new HashMap<>(placeInWorld(plan));
 		Bounds bounds = Bounds.of(world.keySet());
-		assertEquals(1, readAll(world, "One start").sources(), "the build should have one start");
+		assertEquals(1, readAll(world, "One start").versions(), "the build should have one start");
 
 		// A second chain, unconnected to the first, standing on its own.
 		BlockPos apart = new BlockPos(bounds.minX, bounds.maxY + 4, bounds.minZ);
@@ -212,7 +212,7 @@ class NoteMachineReaderTest {
 		world.put(apart.above().east(), Blocks.NOTE_BLOCK.defaultBlockState());
 
 		NoteMachineReader.Reading reading = readAll(world, "Two starts");
-		assertEquals(2, reading.sources(), "both chains should be found");
+		assertEquals(2, reading.versions(), "both chains should be found");
 		assertTrue(reading.report().contains("started together"),
 			"the report should say the two are only lined up on an assumption: " + reading.report());
 	}
@@ -248,7 +248,7 @@ class NoteMachineReaderTest {
 
 		assertEquals("", difference(intended, sounds(reading.project())),
 			"the song should read back as it did before the extra input was added");
-		assertEquals(1, reading.sources(), "the two chains are one machine, not two");
+		assertEquals(1, reading.versions(), "the two chains are one machine, not two");
 		assertTrue(reading.warnings().stream().anyMatch(text -> text.contains("other way")),
 			"the ignored way in should be reported: " + reading.report());
 	}
@@ -275,7 +275,7 @@ class NoteMachineReaderTest {
 
 		NoteMachineReader.Reading reading = readAll(world, "Two machines");
 
-		assertEquals(2, reading.sources(), "both machines should survive");
+		assertEquals(2, reading.versions(), "both machines should survive");
 		assertTrue(reading.warnings().stream().anyMatch(text -> text.contains("separate machines")),
 			"the guess that they start together should be stated: " + reading.report());
 		assertTrue(reading.project().layers().stream().anyMatch(layer -> layer.name().endsWith("2")),
@@ -296,42 +296,50 @@ class NoteMachineReaderTest {
 	}
 
 	/**
-	 * Two ways in that meet at a shared tail, each holding notes the other never reaches.
+	 * Two ways in that meet at a shared tail are two performances, and both are kept.
 	 *
-	 * <p>The shape the "prefer the bigger" rule cannot fully honour, and the reason it says so. Two
-	 * openings converging on one chorus are not a checkpoint and its run: pressing either button is
-	 * a real performance, they disagree about what comes first, and no single timeline holds both --
-	 * the tail sits a different distance from each opening, so there is no offset that makes the two
-	 * agree. One is chosen and the other's opening is left out, which is a loss worth naming rather
-	 * than folding into the general count of note blocks nothing triggered.</p>
+	 * <p>Neither contains the other -- each holds notes the other never reaches -- so there is no
+	 * "bigger" one to prefer, and the tail sits a different distance from each opening, so no single
+	 * timeline holds both. Choosing between them would drop real music on the strength of comparing
+	 * coordinates. Both are read instead, each timed from its own start, with the shared tail
+	 * appearing in both because both really do play it.</p>
 	 */
 	@Test
-	void namesTheMusicLostWhenTwoOpeningsShareATail() {
+	void keepsBothOpeningsWhenTwoShareATail() {
 		Map<BlockPos, BlockState> world = convergingBranches(0);
 
 		NoteMachineReader.Reading reading = readAll(world, "Two openings");
 
-		assertEquals(1, reading.sources(), "sharing a tail makes them one machine");
-		assertEquals(1, reading.unreachedNotes(), "the losing opening's note should be left out");
-		assertTrue(reading.warnings().stream()
-				.anyMatch(text -> text.contains("different versions")),
-			"losing real music should not read as a skipped checkpoint: " + reading.report());
+		assertEquals(2, reading.versions(), "both openings are performances in their own right");
+		assertEquals(0, reading.unreachedNotes(), "keeping both should strand nothing");
+		// Three note blocks in the world, four notes in the song: the tail belongs to both.
+		assertEquals(3, reading.noteBlocks(), "the world holds three note blocks");
+		assertEquals(4, reading.project().noteCount(), "the shared tail should appear in both");
+		assertTrue(reading.warnings().stream().anyMatch(text -> text.contains("alternatives")),
+			"they should be called alternatives rather than parts: " + reading.report());
+		assertEquals(List.of("Harp 1", "Harp 2"),
+			reading.project().layers().stream().map(ComposerProject.Layer::name).sorted().toList(),
+			"each version should be mutable on its own");
 	}
 
-	/** The same shape with one opening longer, where the longer one is the one that survives. */
+	/**
+	 * Each version begins at its own beginning, so silencing one leaves a song that starts at zero.
+	 *
+	 * <p>The point of splitting them. Timed from a common origin the later opening would start
+	 * however far along it happens to join, which is not what pressing its button does.</p>
+	 */
 	@Test
-	void prefersTheLongerOpeningWhenTwoShareATail() {
-		Map<BlockPos, BlockState> world = convergingBranches(2);
+	void timesEachVersionFromItsOwnStart() {
+		NoteMachineReader.Reading reading = readAll(convergingBranches(2), "Uneven openings");
 
-		NoteMachineReader.Reading reading = readAll(world, "Uneven openings");
-
-		assertEquals(1, reading.sources(), "still one machine");
-		// The long opening's three notes and the shared tail survive; the short one's single note
-		// is what gets left behind.
-		assertEquals(1, reading.unreachedNotes(), "only the short opening should be left out");
-		int kept = reading.project().layers().stream()
-			.mapToInt(layer -> layer.notes().size()).sum();
-		assertEquals(4, kept, "the longer opening plus the shared tail should be what is kept");
+		assertEquals(2, reading.versions());
+		assertEquals(0, reading.unreachedNotes(), "an uneven pair should still strand nothing");
+		// Long opening: three notes then the tail. Short opening: one note then the tail.
+		assertEquals(6, reading.project().noteCount());
+		for (ComposerProject.Layer layer : reading.project().layers()) {
+			assertEquals(0L, layer.notes().get(0).startTick(),
+				layer.name() + " should begin at the beginning");
+		}
 	}
 
 	/**
