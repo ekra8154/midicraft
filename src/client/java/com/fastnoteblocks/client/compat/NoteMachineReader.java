@@ -437,12 +437,15 @@ public final class NoteMachineReader {
 	 * @param machineOfNote which machine each note block belongs to, numbered from zero
 	 * @param alternativeEntries ways in that were left out because another way into the same
 	 *     machine reaches more of it
+	 * @param strandedByChoice note blocks only a rejected way in can reach, which is what tells a
+	 *     harmless checkpoint from a genuine second version of the music
 	 */
 	private record Trace(
 		Map<BlockPos, Integer> firedAt,
 		Map<BlockPos, Integer> machineOfNote,
 		int machines,
-		int alternativeEntries
+		int alternativeEntries,
+		int strandedByChoice
 	) {
 	}
 
@@ -467,7 +470,7 @@ public final class NoteMachineReader {
 			Map<BlockPos, Integer> firedAt = traceFrom(region, survey, starts);
 			Map<BlockPos, Integer> machineOfNote = new HashMap<>();
 			firedAt.keySet().forEach(position -> machineOfNote.put(position, 0));
-			return new Trace(firedAt, machineOfNote, 1, 0);
+			return new Trace(firedAt, machineOfNote, 1, 0, 0);
 		}
 
 		List<Map<BlockPos, Integer>> chains = new ArrayList<>(starts.size());
@@ -500,6 +503,24 @@ public final class NoteMachineReader {
 			}
 		}
 
+		// What choosing costs. A checkpoint reaches a subset of what the real beginning reaches and
+		// so strands nothing, which is why preferring the larger is free there. Two openings meeting
+		// at a shared chorus are not like that: each holds notes the other never touches, no single
+		// timeline covers both, and picking one genuinely drops the other's music. Same arithmetic,
+		// very different news, so the two are counted apart and reported apart.
+		Set<BlockPos> stranded = new HashSet<>();
+		for (int index = 0; index < chains.size(); index++) {
+			int chosen = bestOfMachine.get(root(group, index));
+			if (index == chosen) {
+				continue;
+			}
+			for (BlockPos note : chains.get(index).keySet()) {
+				if (!chains.get(chosen).containsKey(note)) {
+					stranded.add(note);
+				}
+			}
+		}
+
 		Map<BlockPos, Integer> firedAt = new HashMap<>();
 		Map<BlockPos, Integer> machineOfNote = new HashMap<>();
 		int number = 0;
@@ -511,7 +532,7 @@ public final class NoteMachineReader {
 			number++;
 		}
 		return new Trace(firedAt, machineOfNote, bestOfMachine.size(),
-			chains.size() - bestOfMachine.size());
+			chains.size() - bestOfMachine.size(), stranded.size());
 	}
 
 	private static int root(int[] group, int index) {
@@ -615,9 +636,13 @@ public final class NoteMachineReader {
 				+ "read as though started together");
 		}
 		if (trace.alternativeEntries() > 0) {
-			warnings.add(trace.alternativeEntries() + " other way"
-				+ (trace.alternativeEntries() == 1 ? "" : "s") + " into the same machine ignored; "
-				+ "used the one reaching the most note blocks");
+			String ways = trace.alternativeEntries() + " other way"
+				+ (trace.alternativeEntries() == 1 ? "" : "s") + " into the same machine";
+			warnings.add(trace.strandedByChoice() == 0
+				? ways + " ignored, each a way into part of this one"
+				: ways + " ignored, but " + trace.strandedByChoice() + " note blocks only they "
+					+ "reach -- these are different versions of the machine rather than checkpoints "
+					+ "into one, and no single reading holds both");
 		}
 		if (!survey.unsupported.isEmpty()) {
 			warnings.add("ignored " + String.join(" and ", survey.unsupported)

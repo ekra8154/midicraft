@@ -295,6 +295,86 @@ class NoteMachineReaderTest {
 		return anchors.get(anchors.size() / 2);
 	}
 
+	/**
+	 * Two ways in that meet at a shared tail, each holding notes the other never reaches.
+	 *
+	 * <p>The shape the "prefer the bigger" rule cannot fully honour, and the reason it says so. Two
+	 * openings converging on one chorus are not a checkpoint and its run: pressing either button is
+	 * a real performance, they disagree about what comes first, and no single timeline holds both --
+	 * the tail sits a different distance from each opening, so there is no offset that makes the two
+	 * agree. One is chosen and the other's opening is left out, which is a loss worth naming rather
+	 * than folding into the general count of note blocks nothing triggered.</p>
+	 */
+	@Test
+	void namesTheMusicLostWhenTwoOpeningsShareATail() {
+		Map<BlockPos, BlockState> world = convergingBranches(0);
+
+		NoteMachineReader.Reading reading = readAll(world, "Two openings");
+
+		assertEquals(1, reading.sources(), "sharing a tail makes them one machine");
+		assertEquals(1, reading.unreachedNotes(), "the losing opening's note should be left out");
+		assertTrue(reading.warnings().stream()
+				.anyMatch(text -> text.contains("different versions")),
+			"losing real music should not read as a skipped checkpoint: " + reading.report());
+	}
+
+	/** The same shape with one opening longer, where the longer one is the one that survives. */
+	@Test
+	void prefersTheLongerOpeningWhenTwoShareATail() {
+		Map<BlockPos, BlockState> world = convergingBranches(2);
+
+		NoteMachineReader.Reading reading = readAll(world, "Uneven openings");
+
+		assertEquals(1, reading.sources(), "still one machine");
+		// The long opening's three notes and the shared tail survive; the short one's single note
+		// is what gets left behind.
+		assertEquals(1, reading.unreachedNotes(), "only the short opening should be left out");
+		int kept = reading.project().layers().stream()
+			.mapToInt(layer -> layer.notes().size()).sum();
+		assertEquals(4, kept, "the longer opening plus the shared tail should be what is kept");
+	}
+
+	/**
+	 * Two chains into one tail: A along z=0, B along z=2, meeting at a note block.
+	 *
+	 * @param extraOnA how many more note blocks opening A has than opening B, to settle which wins
+	 */
+	private static Map<BlockPos, BlockState> convergingBranches(int extraOnA) {
+		Map<BlockPos, BlockState> world = new HashMap<>();
+		int y = 65;
+		// Opening A runs east along z=0, gaining a note block per extra step asked for.
+		int x = 0;
+		world.put(new BlockPos(x, y - 1, 0), Blocks.STONE.defaultBlockState());
+		world.put(new BlockPos(x, y, 0), parse("minecraft:repeater[facing=west,delay=1]"));
+		for (int step = 0; step <= extraOnA; step++) {
+			world.put(new BlockPos(++x, y, 0), note(step + 1));
+			world.put(new BlockPos(++x, y - 1, 0), Blocks.STONE.defaultBlockState());
+			world.put(new BlockPos(x, y, 0), parse("minecraft:repeater[facing=west,delay=1]"));
+		}
+		BlockPos shared = new BlockPos(++x, y, 0);
+		world.put(shared, note(20));
+
+		// Opening B runs east along z=2 and turns north into the same shared note block.
+		world.put(new BlockPos(0, y - 1, 2), Blocks.STONE.defaultBlockState());
+		world.put(new BlockPos(0, y, 2), parse("minecraft:repeater[facing=west,delay=1]"));
+		world.put(new BlockPos(1, y, 2), note(9));
+		world.put(new BlockPos(2, y - 1, 2), Blocks.STONE.defaultBlockState());
+		world.put(new BlockPos(2, y, 2), parse("minecraft:repeater[facing=west,delay=1]"));
+		// Dust, not a line of stone: stone carries nothing, so a stone run would leave B dead at
+		// its first block and turn the two openings into two unrelated machines.
+		for (int carry = 3; carry <= shared.getX(); carry++) {
+			world.put(new BlockPos(carry, y - 1, 2), Blocks.STONE.defaultBlockState());
+			world.put(new BlockPos(carry, y, 2), Blocks.REDSTONE_WIRE.defaultBlockState());
+		}
+		world.put(new BlockPos(shared.getX(), y - 1, 1), Blocks.STONE.defaultBlockState());
+		world.put(new BlockPos(shared.getX(), y, 1), parse("minecraft:repeater[facing=south,delay=1]"));
+		return world;
+	}
+
+	private static BlockState note(int pitch) {
+		return parse("minecraft:note_block[note=" + pitch + "]");
+	}
+
 	// ------------------------------------------------------------------ helpers
 
 	private static NoteMachineReader.Reading readAll(Map<BlockPos, BlockState> world, String name) {
