@@ -29,7 +29,8 @@ public record SongAnalysis(
 	Map<Long, Double> gaps,
 	long endTick,
 	double secondsLong,
-	int duplicateNotes
+	int duplicateNotes,
+	int buildNotes
 ) {
 	/** Two note blocks hang off each of redstone's 15 reachable bus blocks. */
 	public static final int MAX_SIMULTANEOUS_NOTES = 30;
@@ -69,6 +70,8 @@ public record SongAnalysis(
 			}
 		}
 		int peak = counts.values().stream().mapToInt(Integer::intValue).max().orElse(0);
+		// Exactly the note blocks a paste would place: included layers, in range, counted once.
+		int buildNotes = counts.values().stream().mapToInt(Integer::intValue).sum();
 		long overloaded = counts.values().stream().filter(count -> count > MAX_SIMULTANEOUS_NOTES).count();
 
 		double span = redstoneTickSpan(project);
@@ -101,7 +104,7 @@ public record SongAnalysis(
 		}
 		return new SongAnalysis(totalNotes, outOfRange, Map.copyOf(counts), peak, overloaded,
 			maximumNoteDuration, Set.copyOf(offGrid), Set.copyOf(crowded), Map.copyOf(gaps),
-			project.endTick(), project.endTick() / span / 10.0, duplicateNotes);
+			project.endTick(), project.endTick() / span / 10.0, duplicateNotes, buildNotes);
 	}
 
 	/**

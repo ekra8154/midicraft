@@ -2295,8 +2295,13 @@ public final class ComposerScreen extends Screen {
 		}
 		segments.add("peak " + peakChord + "/" + SongAnalysis.MAX_SIMULTANEOUS_NOTES
 			+ (overloaded > 0 ? " (" + overloaded + " over)" : ""));
-		segments.add(stats.totalNotes() + " notes"
-			+ (stats.duplicateNotes() > 0 ? " (" + stats.duplicateNotes() + " deduped)" : "")
+		// Leads with the number that will be standing in the world. "6354 notes (788 deduped)" was
+		// arithmetically fine and still misread -- a count in brackets after a count reads as the
+		// remainder, not as the difference, and nothing on the line was the 5566 that got placed.
+		segments.add((stats.buildNotes() == stats.totalNotes()
+				? stats.totalNotes() + " notes"
+				: stats.buildNotes() + " of " + stats.totalNotes() + " notes build"
+					+ (stats.duplicateNotes() > 0 ? " (" + stats.duplicateNotes() + " deduped)" : ""))
 			+ " · " + project().layers().size() + " layers");
 		int included = (int)project().layers().stream()
 			.filter(Layer::buildEnabled)
