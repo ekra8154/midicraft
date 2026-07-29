@@ -756,10 +756,15 @@ public final class FastNoteblocksConfig {
 	}
 
 	/**
-	 * Stores the composition, writing only its own file.
+	 * Holds the composition being edited, in memory only.
 	 *
-	 * <p>Build tracks are untouched until {@link #publishComposerProject}: the projection drops
-	 * everything track text cannot express, so it stays an explicit action.</p>
+	 * <p>Nothing reaches disk until {@link #saveComposerProject}. This used to write the song file
+	 * on every edit, which made an import land on top of whichever song happened to be open --
+	 * same file, raw unconverted notes, and the Minecraft-ready song that was there is gone. An
+	 * editor that only writes when told to cannot do that.</p>
+	 *
+	 * <p>The build sequence still follows this instantly, because it is a projection of whatever
+	 * is being edited rather than of whatever was last saved.</p>
 	 */
 	public void setComposerProject(ComposerProject project) {
 		if (project == null) {
@@ -767,10 +772,31 @@ public final class FastNoteblocksConfig {
 		}
 		composerProject = project;
 		activeSequenceName = project.name();
-		if (activeSongId == null) {
-			activeSongId = songs.newId(project.name());
+	}
+
+	/** Writes the composition being edited to its own file. */
+	public boolean saveComposerProject() {
+		if (composerProject == null) {
+			return false;
 		}
-		songs.save(activeSongId, project);
+		if (activeSongId == null) {
+			activeSongId = songs.newId(composerProject.name());
+		}
+		return songs.save(activeSongId, composerProject);
+	}
+
+	/** The active song as it currently stands on disk, which is what unsaved edits differ from. */
+	public ComposerProject savedComposerProject() {
+		return songs.song(activeSongId);
+	}
+
+	/** Throws away unsaved edits, so leaving without saving really does leave nothing behind. */
+	public void discardComposerEdits() {
+		ComposerProject saved = songs.song(activeSongId);
+		if (saved != null) {
+			composerProject = saved;
+			activeSequenceName = saved.name();
+		}
 	}
 
 	public int activeTrackIndex() {

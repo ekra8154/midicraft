@@ -39,7 +39,11 @@ public final class ComposerScreen extends Screen {
 	private static final int PIANO_WIDTH = 48;
 	private static final int TIMELINE_RULER_HEIGHT = 16;
 	private static final int LAYER_ROW_HEIGHT = 42;
-	private static final int LAYER_COLLAPSED_ROW_HEIGHT = 20;
+	private static final int LAYER_COLLAPSED_ROW_HEIGHT = 16;
+	/** Layer names are drawn at this fraction of the font's one size. */
+	private static final float LAYER_TEXT_SCALE = 0.75f;
+	/** How tall a layer's header band is, whatever the rest of the row does. */
+	private static final int LAYER_HEADER_HEIGHT = 16;
 	private static final int LAYER_LIST_TOP = 48;
 	private static final int MIN_ROW_HEIGHT = 4;
 	private static final int MAX_ROW_HEIGHT = 26;
@@ -155,6 +159,24 @@ public final class ComposerScreen extends Screen {
 	private long hoveredSince;
 	private ComposerProject cachedStatsProject;
 	private SongAnalysis cachedStats;
+	/**
+	 * The composition as it stands on disk, which is what "unsaved" is measured against.
+	 *
+	 * <p>Kept as a whole snapshot rather than a dirty flag so that undoing back to the saved state
+	 * counts as saved again, and so a change that cancels itself out does not leave the composer
+	 * insisting there is something to write.</p>
+	 */
+	private ComposerProject savedProject;
+	private ComposerProject unsavedCacheProject;
+	private ComposerProject unsavedCacheBaseline;
+	private boolean unsavedCacheResult;
+	private ComposerProject cachedColorProject;
+	private int[] cachedLayerColors;
+	/** The layer a press landed on, and whether it has moved far enough to be a reorder. */
+	private int layerDragIndex = -1;
+	private double layerDragStartY;
+	private double layerDragY;
+	private boolean layerDragActive;
 
 	public ComposerScreen(Screen parent, FastNoteblocksConfig config) {
 		this(parent, config, () -> {
@@ -168,6 +190,8 @@ public final class ComposerScreen extends Screen {
 		this.onReturn = onReturn == null ? () -> {
 		} : onReturn;
 		this.history = new ComposerHistory(config.composerProject());
+		ComposerProject onDisk = config.savedComposerProject();
+		this.savedProject = onDisk == null ? history.current() : onDisk;
 	}
 
 	@Override
@@ -438,11 +462,6 @@ public final class ComposerScreen extends Screen {
 		rebuildMoveLayerButtons();
 	}
 
-	private Component layerLabel(int index, Layer layer) {
-		String marker = index == project().activeLayerIndex() ? "▶ " : "  ";
-		return Component.literal(marker + "L" + (index + 1) + "  " + layer.name());
-	}
-
 	private void updateLayer(int index, Layer layer) {
 		apply(project().withLayer(index, layer));
 		rebuildLayerButtons();
@@ -458,13 +477,24 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private void moveLayer(int layerIndex, int direction) {
-		if (layerIndex < 0 || layerIndex >= project().layers().size()) {
+		if (layerIndex < 0 || layerIndex >= project().layers().size() || direction == 0) {
 			return;
 		}
 		instrumentMenuLayer = -1;
+		cancelLayerRename();
 		remapCollapsedLayers(layerIndex, direction);
 		apply(project().moveLayer(layerIndex, direction));
 		rebuildLayerButtons();
+	}
+
+	/**
+	 * Drops a dragged layer into a gap.
+	 *
+	 * <p>{@code insertion} counts gaps, not rows, so dropping below where the layer started lands
+	 * one row short of it once the layer itself is out of the list.</p>
+	 */
+	private void dropLayer(int from, int insertion) {
+		moveLayer(from, (insertion > from ? insertion - 1 : insertion) - from);
 	}
 
 	private void transposeSelected(int semitones) {
@@ -619,19 +649,11 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private void importSong() {
-		boolean nonempty = project().layers().stream().anyMatch(layer -> !layer.notes().isEmpty());
-		if (!nonempty) {
-			chooseAndImportSong();
-			return;
-		}
-		minecraft.gui.setScreen(new ConfirmScreen(confirmed -> {
-			minecraft.gui.setScreen(this);
-			if (confirmed) {
-				chooseAndImportSong();
-			}
-		}, Component.literal("Replace this composition?"),
-			Component.literal("Importing replaces the current piano roll. You can still Undo afterward."),
-			Component.literal("Import"), CommonComponents.GUI_CANCEL));
+		withUnsavedChangesChecked(this::chooseAndImportSong);
+	}
+
+	private void openSongs() {
+		withUnsavedChangesChecked(() -> minecraft.gui.setScreen(new SongsScreen(parent, config)));
 	}
 
 	private void chooseAndImportSong() {
@@ -680,16 +702,23 @@ public final class ComposerScreen extends Screen {
 		}
 	}
 
+	/**
+	 * Puts the imported song in the library as a song of its own and opens it.
+	 *
+	 * <p>Importing used to land on top of whichever song was open. With a name close enough to the
+	 * one it replaced you would not notice, and a Minecraft-ready composition would quietly be raw
+	 * MIDI again. An import is a new song; nothing you already have is touched.</p>
+	 */
 	private void applyImportedProject(ComposerProject imported, String report) {
-		apply(imported.withSpeedQuarters(ComposerProject.DEFAULT_SPEED_QUARTERS));
-		selectedNotes.clear();
-		horizontalScroll = 0L;
-		delayScaleSlider.setScale(ComposerProject.DEFAULT_SPEED_QUARTERS);
-		collapseAllButActive();
-		centerMinecraftRange();
-		rebuildLayerButtons();
-		rebuildMoveLayerButtons();
-		showResult(Component.literal(report));
+		String name = FastNoteblocksConfig.songs().uniqueName(imported.name());
+		String id = FastNoteblocksConfig.songs().newId(name);
+		FastNoteblocksConfig.songs().save(id,
+			imported.withName(name).withSpeedQuarters(ComposerProject.DEFAULT_SPEED_QUARTERS));
+		config.setActiveSongId(id);
+		FastNoteblocksConfig.save();
+		ComposerScreen opened = new ComposerScreen(parent, config, onReturn);
+		opened.showResult(Component.literal("Imported as \"" + name + "\" - " + report));
+		minecraft.gui.setScreen(opened);
 	}
 
 	private void showImportFailure(Exception exception) {
@@ -796,7 +825,7 @@ public final class ComposerScreen extends Screen {
 		return switch (action) {
 			case MERGE_SELECTED -> selectedLayers.size() >= 2;
 			case INCLUDE_SELECTED, SET_INCLUDED_TO_SELECTION -> !selectedLayers.isEmpty();
-			case SELECT_ALL, COLLAPSE_OTHERS -> true;
+			case RENAME, SELECT_ALL, COLLAPSE_OTHERS -> true;
 		};
 	}
 
@@ -815,6 +844,7 @@ public final class ComposerScreen extends Screen {
 		}
 		layerMenuOpen = false;
 		switch (action) {
+			case RENAME -> beginLayerRename(project().activeLayerIndex());
 			case MERGE_SELECTED -> mergeSelectedLayers();
 			case INCLUDE_SELECTED -> setIncludedLayers(true);
 			case SET_INCLUDED_TO_SELECTION -> setIncludedLayers(false);
@@ -992,7 +1022,8 @@ public final class ComposerScreen extends Screen {
 	private void performToolbarAction(ToolbarAction action) {
 		switch (action) {
 			case IMPORT -> importSong();
-			case OPEN_SONGS -> minecraft.gui.setScreen(new SongsScreen(parent, config));
+			case OPEN_SONGS -> openSongs();
+			case RENAME_COMPOSITION -> renameComposition();
 			case COPY_AS_TEXT -> copySequenceAsText();
 			case INCLUDE_SELECTED -> setIncludedLayers(true);
 			case SET_INCLUDED_TO_SELECTION -> setIncludedLayers(false);
@@ -1094,17 +1125,19 @@ public final class ComposerScreen extends Screen {
 	 */
 	private String toolbarActionTooltip(ToolbarAction action) {
 		return switch (action) {
-			case IMPORT -> "Replace this composition with a MIDI or NBS file. Settings below "
-				+ "control how it is read.";
+			case IMPORT -> "Reads a MIDI or NBS file in as a song of its own. Nothing you already "
+				+ "have is touched. Settings below control how it is read.";
 			case OPEN_SONGS -> "The song library: open another composition, start one, or make a "
 				+ "copy.";
 			case COPY_AS_TEXT -> "Puts the build sequence on the clipboard, one line per included "
 				+ "layer. Out-of-range notes and sub-tick timing do not survive the trip.";
-			case SAVE_COMPOSITION -> "Writes this composition to its own file. Editing already "
-				+ "saves on every change, so this only confirms it.";
-			case SAVE_COMPOSITION_AS -> "Saves a copy under a new name and opens it. How to keep a "
-				+ "version still while you carry on editing.";
-			case BACK_TO_SEQUENCES -> "Leave the composer. Nothing is lost; edits are already saved.";
+			case SAVE_COMPOSITION -> "Writes this composition to its own file. Nothing else does: "
+				+ "edits live in memory until you save them.";
+			case SAVE_COMPOSITION_AS -> "Saves a copy under a new name and opens it. Naming a song "
+				+ "that already exists offers to replace it.";
+			case RENAME_COMPOSITION -> "Renames this composition. The change is an edit like any "
+				+ "other, so it takes a save to keep.";
+			case BACK_TO_SEQUENCES -> "Leave the composer. Unsaved edits are asked about first.";
 			case CLOSE_TO_GAME -> "Close straight back to the game.";
 			case UNDO -> "Step back. History is kept for this visit only, not across sessions.";
 			case REDO -> "Step forward again.";
@@ -1144,6 +1177,7 @@ public final class ComposerScreen extends Screen {
 
 	private static String layerActionTooltip(LayerAction action) {
 		return switch (action) {
+			case RENAME -> "Renames this layer. Double-clicking its name does the same thing.";
 			case MERGE_SELECTED -> "Folds the selected layers into the lowest-numbered one, which "
 				+ "keeps its name and instrument.";
 			case INCLUDE_SELECTED -> "Fills in the build dot on the selected layers, adding them to "
@@ -1367,11 +1401,14 @@ public final class ComposerScreen extends Screen {
 		if (left > width - 40) {
 			return;
 		}
-		String name = project().name();
+		// A bullet rather than the usual asterisk, because the composer already spends asterisks on
+		// nothing and dots on the build flag -- and this one has to read at a glance from across the
+		// toolbar, which is where you look before deciding whether it is safe to leave.
+		String name = project().name() + (unsaved() ? "  • unsaved" : "");
 		String shown = font.width(name) <= width - left - 8
 			? name
 			: font.plainSubstrByWidth(name, width - left - 16) + "...";
-		graphics.text(font, shown, left, 13, 0xFFD6D8DD, false);
+		graphics.text(font, shown, left, 13, unsaved() ? 0xFFFFC864 : 0xFFD6D8DD, false);
 	}
 
 	private void extractPanels(GuiGraphicsExtractor graphics) {
@@ -1385,7 +1422,7 @@ public final class ComposerScreen extends Screen {
 			if (y + rowHeight < LAYER_LIST_TOP - 2 || y > layerListBottom()) {
 				continue;
 			}
-			int color = LAYER_COLORS[index % LAYER_COLORS.length];
+			int color = layerColor(index);
 			boolean activeLayer = index == project().activeLayerIndex();
 			boolean selected = selectedLayers.contains(index);
 			boolean collapsed = collapsedLayers.contains(index);
@@ -1403,21 +1440,27 @@ public final class ComposerScreen extends Screen {
 				activeLayer ? color : 0x88383D44);
 			graphics.fill(8, y - 2, 12, y + rowHeight - 2, color);
 			if (activeLayer) {
-				graphics.fill(12, y, LAYER_PANEL_WIDTH - 10, y + 20, 0x553D444D);
+				graphics.fill(12, y, LAYER_PANEL_WIDTH - 10, y + rowHeight - 4, 0x553D444D);
 			}
-			graphics.text(font, Component.literal(collapsed ? "▸" : "▾"), 15, y + 6,
+			graphics.text(font, Component.literal(collapsed ? "▸" : "▾"), 15, y + 3,
 				activeLayer ? 0xFFFFFFFF : 0xFF9BA0A6, false);
 			Layer layer = project().layers().get(index);
 			String summary = collapsed ? "  (" + layer.notes().size() + ")" : "";
 			String mark = selected ? "✓ " : "";
-			graphics.text(font, Component.literal(mark + "L" + (index + 1) + "  " + layer.name() + summary),
-				26, y + 6, activeLayer ? 0xFFFFFFFF : selected ? 0xFFE8F4FF : 0xFFD6D8DD, false);
+			smallText(graphics, mark + layer.name() + summary, 26, y + 4,
+				activeLayer ? 0xFFFFFFFF : selected ? 0xFFE8F4FF : 0xFFD6D8DD);
 			// Filled means this layer goes into the build sequence. Drawn on the header rather than
 			// in the button strip so it survives collapsing -- the point is telling at a glance what
 			// is in, and a row you cannot see cannot tell you anything.
 			graphics.text(font, Component.literal(layer.buildEnabled() ? "●" : "○"),
-				buildDotX(), y + 6, layer.buildEnabled() ? 0xFF5AD46A : 0xFF6A7078, false);
+				buildDotX(), y + 3, layer.buildEnabled() ? 0xFF5AD46A : 0xFF6A7078, false);
+			// The row number is for pointing at a layer out loud, nothing more, so it sits out at the
+			// edge in the smallest thing that can still be read rather than in front of the name.
+			String ordinal = Integer.toString(index + 1);
+			smallText(graphics, ordinal,
+				LAYER_PANEL_WIDTH - 11 - smallTextWidth(ordinal), y + 4, 0xFF71767E);
 		}
+		extractLayerDropLine(graphics);
 		graphics.disableScissor();
 		extractLayerScrollbar(graphics);
 		// This panel draws without mouse coordinates, so the cached position is what there is.
@@ -1429,6 +1472,109 @@ public final class ComposerScreen extends Screen {
 					: "Left out of the build sequence - click to include it"),
 				(int)lastMouseX, (int)lastMouseY);
 		}
+	}
+
+	/**
+	 * Draws text at three-quarter size.
+	 *
+	 * <p>Minecraft's font is one size, so smaller means scaling the matrix around it. Worth it in
+	 * the layer panel: a converted song is dozens of layers whose names differ only in a suffix,
+	 * and full-size text spent the panel's width on four of them at a time.</p>
+	 */
+	private void smallText(GuiGraphicsExtractor graphics, String text, int x, int y, int color) {
+		graphics.pose().pushMatrix();
+		graphics.pose().translate(x, y);
+		graphics.pose().scale(LAYER_TEXT_SCALE, LAYER_TEXT_SCALE);
+		graphics.text(font, text, 0, 0, color, false);
+		graphics.pose().popMatrix();
+	}
+
+	private int smallTextWidth(String text) {
+		return Math.round(font.width(text) * LAYER_TEXT_SCALE);
+	}
+
+	/**
+	 * One colour per layer, grouped so layers split off the same original share a hue.
+	 *
+	 * <p>Converting for Minecraft turns one layer into up to five, one per octave shift it needed.
+	 * Colouring by position gave those five unrelated colours, which is exactly backwards: the one
+	 * thing worth seeing in a converted song is which pieces used to be one part. Family comes from
+	 * the name, since that is what the split writes and what survives a save.</p>
+	 */
+	private int[] layerColors() {
+		ComposerProject current = project();
+		if (cachedColorProject == current && cachedLayerColors != null) {
+			return cachedLayerColors;
+		}
+		List<Layer> layers = current.layers();
+		Map<String, Integer> hues = new java.util.LinkedHashMap<>();
+		Map<String, Integer> members = new java.util.LinkedHashMap<>();
+		int[] colors = new int[layers.size()];
+		for (int index = 0; index < layers.size(); index++) {
+			String family = layerFamily(layers.get(index).name());
+			Integer hue = hues.get(family);
+			if (hue == null) {
+				hue = hues.size();
+				hues.put(family, hue);
+			}
+			int member = members.merge(family, 1, Integer::sum) - 1;
+			colors[index] = shade(LAYER_COLORS[hue % LAYER_COLORS.length], member);
+		}
+		cachedColorProject = current;
+		cachedLayerColors = colors;
+		return colors;
+	}
+
+	/** One layer's colour, safe to ask for while a drag preview is standing in for the project. */
+	private int layerColor(int index) {
+		int[] colors = layerColors();
+		return index >= 0 && index < colors.length
+			? colors[index]
+			: LAYER_COLORS[Math.floorMod(index, LAYER_COLORS.length)];
+	}
+
+	/** A layer's name with the suffix a Minecraft conversion added, if any, taken off. */
+	private static String layerFamily(String name) {
+		return name.replaceFirst("\\s*\\((in range|[+-]\\d+ oct)\\)$", "");
+	}
+
+	/**
+	 * Steps a colour away from its base so members of one family stay apart.
+	 *
+	 * <p>Alternating darker and lighter rather than only fading: the colour is a four-pixel strip on
+	 * a near-black panel, and four steps of darkening ends at something indistinguishable from the
+	 * background.</p>
+	 */
+	private static int shade(int color, int step) {
+		double[] steps = {0.0, -0.34, 0.42, -0.56, 0.68};
+		double amount = steps[Math.min(Math.max(step, 0), steps.length - 1)];
+		if (amount == 0.0) {
+			return color;
+		}
+		int shaded = color & 0xFF000000;
+		for (int shift = 16; shift >= 0; shift -= 8) {
+			int channel = (color >> shift) & 0xFF;
+			channel = amount < 0
+				? (int)Math.round(channel * (1.0 + amount))
+				: (int)Math.round(channel + (255 - channel) * amount);
+			shaded |= Math.max(0, Math.min(255, channel)) << shift;
+		}
+		return shaded;
+	}
+
+	/** Where a dragged layer would land, drawn as the gap it would drop into. */
+	private void extractLayerDropLine(GuiGraphicsExtractor graphics) {
+		if (!layerDragActive) {
+			return;
+		}
+		int insertion = layerDropIndex(layerDragY);
+		if (project().layers().isEmpty()) {
+			return;
+		}
+		int y = insertion >= project().layers().size()
+			? layerY(project().layers().size() - 1) + layerRowHeight(project().layers().size() - 1) - 2
+			: layerY(insertion) - 2;
+		graphics.fill(8, y - 1, LAYER_PANEL_WIDTH - 8, y + 1, 0xFF8FD3FF);
 	}
 
 	private void extractLayerScrollbar(GuiGraphicsExtractor graphics) {
@@ -1616,7 +1762,7 @@ public final class ComposerScreen extends Screen {
 					continue;
 				}
 				boolean selected = selectedNotes.contains(note.id());
-				int color = highlighted ? LAYER_COLORS[layerIndex % LAYER_COLORS.length] : 0xFF777A80;
+				int color = highlighted ? layerColor(layerIndex) : 0xFF777A80;
 				if (!note.isBuildable()) {
 					color = highlighted ? 0xFFFF6B6B : 0xFF755050;
 				}
@@ -1945,6 +2091,12 @@ public final class ComposerScreen extends Screen {
 			if (layerIndex >= 0) {
 				selectLayer(layerIndex, controlDown(), shiftDown());
 				selectedNotes.clear();
+				// Armed, not started. A press on a header is nearly always a plain selection, so the
+				// reorder only takes over once the cursor has actually left the row it started on.
+				layerDragIndex = layerIndex;
+				layerDragStartY = event.y();
+				layerDragY = event.y();
+				layerDragActive = false;
 				return true;
 			}
 		}
@@ -2118,6 +2270,15 @@ public final class ComposerScreen extends Screen {
 	public boolean mouseDragged(MouseButtonEvent event, double dx, double dy) {
 		lastMouseX = event.x();
 		lastMouseY = event.y();
+		if (layerDragIndex >= 0) {
+			layerDragY = event.y();
+			if (!layerDragActive && Math.abs(layerDragY - layerDragStartY) > 4) {
+				layerDragActive = true;
+				cancelLayerRename();
+				instrumentMenuLayer = -1;
+			}
+			return true;
+		}
 		if (draggingEndMarker) {
 			setEndTick(snapTick(mouseTick(event.x())));
 			return true;
@@ -2146,6 +2307,16 @@ public final class ComposerScreen extends Screen {
 
 	@Override
 	public boolean mouseReleased(MouseButtonEvent event) {
+		if (layerDragIndex >= 0) {
+			int from = layerDragIndex;
+			boolean reordering = layerDragActive;
+			layerDragIndex = -1;
+			layerDragActive = false;
+			if (reordering) {
+				dropLayer(from, layerDropIndex(event.y()));
+				return true;
+			}
+		}
 		if (draggingEndMarker) {
 			draggingEndMarker = false;
 			return true;
@@ -2281,7 +2452,7 @@ public final class ComposerScreen extends Screen {
 					return true;
 				}
 				case GLFW.GLFW_KEY_O -> {
-					minecraft.gui.setScreen(new SongsScreen(parent, config));
+					openSongs();
 					return true;
 				}
 				case GLFW.GLFW_KEY_I -> {
@@ -2389,17 +2560,21 @@ public final class ComposerScreen extends Screen {
 
 	@Override
 	public void onClose() {
-		stopPlayback();
-		saveProject();
-		onReturn.run();
-		minecraft.gui.setScreen(parent);
+		withUnsavedChangesChecked(() -> {
+			stopPlayback();
+			syncProject();
+			onReturn.run();
+			minecraft.gui.setScreen(parent);
+		});
 	}
 
 	private void closeToGame() {
-		stopPlayback();
-		saveProject();
-		onReturn.run();
-		minecraft.gui.setScreen(null);
+		withUnsavedChangesChecked(() -> {
+			stopPlayback();
+			syncProject();
+			onReturn.run();
+			minecraft.gui.setScreen(null);
+		});
 	}
 
 	private void togglePlayback() {
@@ -2564,7 +2739,7 @@ public final class ComposerScreen extends Screen {
 		if (delayScaleSlider != null) {
 			delayScaleSlider.setScale(delayScaleQuarters());
 		}
-		saveProject();
+		syncProject();
 		rebuildLayerButtons();
 		rebuildMoveLayerButtons();
 		updateButtonStates();
@@ -2581,30 +2756,44 @@ public final class ComposerScreen extends Screen {
 			playbackStartedAt = Util.getMillis();
 			resetPlaybackSchedule();
 		}
-		saveProject();
+		syncProject();
 		updateButtonStates();
 	}
 
 	/**
-	 * Writes the composition onto the build tracks.
-	 *
-	 * <p>Explicit rather than automatic on close: the projection drops everything the track text
-	 * cannot express, so leaving the composer should never quietly rewrite a sequence.</p>
-	 */
-	/**
 	 * Writes the composition to its own file and says so.
 	 *
-	 * <p>Editing already saves on every change, so this changes nothing on disk that was not
-	 * already there. It exists because autosave is invisible, and being able to press save and be
-	 * told it worked is worth more than the keystroke costs.</p>
+	 * <p>The only thing that writes a song, along with Save as. Editing used to write on every
+	 * change, which meant there was no such thing as an edit you could walk away from.</p>
 	 */
 	private void saveComposition() {
-		saveProject();
+		if (!writeProject()) {
+			showResult(Component.literal("Could not write the song file.")
+				.withStyle(net.minecraft.ChatFormatting.RED));
+			return;
+		}
 		SongAnalysis stats = projectStats();
 		showResult(Component.literal(String.format(java.util.Locale.ROOT,
 			"Saved \"%s\" - %d notes, %d layers, %s at %s",
 			project().name(), stats.totalNotes(), project().layers().size(),
 			stats.lengthLabel(), FastNoteblocksConfig.delayScaleLabel(delayScaleQuarters()))));
+	}
+
+	/**
+	 * Renames the composition in place.
+	 *
+	 * <p>The file keeps its name. Ids are only there to be unique, and renaming one would either
+	 * break every reference to it or need a second file to be written and the first deleted, which
+	 * is a lot of moving parts to hang off a typo correction.</p>
+	 */
+	private void renameComposition() {
+		minecraft.gui.setScreen(new NamePromptScreen(this, "Rename composition",
+			"A new name for \"" + project().name() + "\"",
+			project().name(), "Rename", name -> {
+				minecraft.gui.setScreen(this);
+				apply(project().withName(name.trim()));
+				showResult(Component.literal("Renamed to \"" + project().name() + "\"."));
+			}));
 	}
 
 	/**
@@ -2700,14 +2889,42 @@ public final class ComposerScreen extends Screen {
 		minecraft.gui.setScreen(new NamePromptScreen(this, "Save composition as",
 			"Save a copy of \"" + project().name() + "\" under a new name",
 			project().name() + " copy", "Save copy", name -> {
-				String unique = FastNoteblocksConfig.songs().uniqueName(name);
-				ComposerProject copy = project().withName(unique);
-				String id = FastNoteblocksConfig.songs().newId(unique);
-				FastNoteblocksConfig.songs().save(id, copy);
-				config.setActiveSongId(id);
-				FastNoteblocksConfig.save();
-				minecraft.gui.setScreen(new ComposerScreen(parent, config));
+				String wanted = name.trim();
+				String existing = songIdNamed(wanted);
+				if (existing == null) {
+					saveCopyAs(FastNoteblocksConfig.songs().newId(wanted), wanted);
+					return;
+				}
+				// A name already in the library used to be quietly numbered into "Foo (2)", which
+				// is a strange answer to someone who typed the name of the song they meant.
+				minecraft.gui.setScreen(new ConfirmScreen(confirmed -> {
+					if (confirmed) {
+						saveCopyAs(existing, wanted);
+					} else {
+						minecraft.gui.setScreen(this);
+					}
+				}, Component.literal("Replace \"" + wanted + "\"?"),
+					Component.literal("A song already goes by that name. Saving over it cannot be undone."),
+					Component.literal("Replace"), CommonComponents.GUI_CANCEL));
 			}));
+	}
+
+	/** The id of the song going by this exact name, or null if the name is free. */
+	private String songIdNamed(String name) {
+		for (String id : FastNoteblocksConfig.songs().ids()) {
+			ComposerProject song = FastNoteblocksConfig.songs().song(id);
+			if (song != null && song.name().equalsIgnoreCase(name)) {
+				return id;
+			}
+		}
+		return null;
+	}
+
+	private void saveCopyAs(String id, String name) {
+		FastNoteblocksConfig.songs().save(id, project().withName(name));
+		config.setActiveSongId(id);
+		FastNoteblocksConfig.save();
+		minecraft.gui.setScreen(new ComposerScreen(parent, config));
 	}
 
 	/** Pastes the build sequence with commands, for when you have op and would rather not place it by hand. */
@@ -2749,9 +2966,67 @@ public final class ComposerScreen extends Screen {
 		}
 	}
 
-	private void saveProject() {
+	/**
+	 * Hands the edit to the rest of the mod without writing anything.
+	 *
+	 * <p>The build sequence is a projection of the composition being edited, so it has to see every
+	 * change immediately. The song file is a different question, and is answered by Save.</p>
+	 */
+	private void syncProject() {
 		config.setComposerProject(project());
+	}
+
+	/**
+	 * Whether the composition differs from the copy on disk.
+	 *
+	 * <p>Cached on the identity of both sides, which is sound because compositions are immutable:
+	 * the comparison itself walks every note of every layer, and the toolbar asks once a frame.</p>
+	 */
+	private boolean unsaved() {
+		ComposerProject current = project();
+		if (unsavedCacheProject != current || unsavedCacheBaseline != savedProject) {
+			unsavedCacheProject = current;
+			unsavedCacheBaseline = savedProject;
+			unsavedCacheResult = !current.equals(savedProject);
+		}
+		return unsavedCacheResult;
+	}
+
+	/**
+	 * Asks about unsaved edits, then runs {@code leave}.
+	 *
+	 * <p>Every way out of the composer goes through here -- closing it, opening another song,
+	 * importing over this one. Each of those replaces what is in memory, so each is a last chance
+	 * to keep it.</p>
+	 */
+	private void withUnsavedChangesChecked(Runnable leave) {
+		if (!unsaved()) {
+			leave.run();
+			return;
+		}
+		stopPlayback();
+		minecraft.gui.setScreen(new UnsavedChangesScreen(this, project().name(),
+			() -> {
+				writeProject();
+				leave.run();
+			},
+			() -> {
+				// Back to what is on disk, or the sequence and the next visit here would both still
+				// be showing edits the user just said to throw away.
+				config.discardComposerEdits();
+				savedProject = config.composerProject();
+				leave.run();
+			}));
+	}
+
+	private boolean writeProject() {
+		syncProject();
+		if (!config.saveComposerProject()) {
+			return false;
+		}
+		savedProject = project();
 		FastNoteblocksConfig.save();
+		return true;
 	}
 
 	private void setDelayScale(int scaleQuarters) {
@@ -2814,12 +3089,14 @@ public final class ComposerScreen extends Screen {
 
 	/** Left edge of the build dot, inset from the panel's right edge. */
 	private int buildDotX() {
-		return LAYER_PANEL_WIDTH - 24;
+		// Left of where it used to sit, to leave the panel's right edge to the row number. The two
+		// were close enough that the dot's generous hit box swallowed clicks meant for the number.
+		return LAYER_PANEL_WIDTH - 34;
 	}
 
 	/** The build dot's clickable box, a little larger than the glyph so it is easy to hit. */
 	private int buildDotAt(double x, double y) {
-		if (x < buildDotX() - 4 || x > buildDotX() + 12) {
+		if (x < buildDotX() - 4 || x > buildDotX() + 10) {
 			return -1;
 		}
 		for (int index = 0; index < project().layers().size(); index++) {
@@ -2827,7 +3104,7 @@ public final class ComposerScreen extends Screen {
 				continue;
 			}
 			int top = layerY(index);
-			if (y >= top + 2 && y < top + 18) {
+			if (y >= top - 2 && y < top + LAYER_HEADER_HEIGHT - 2) {
 				return index;
 			}
 		}
@@ -2841,11 +3118,22 @@ public final class ComposerScreen extends Screen {
 		}
 		for (int index = 0; index < project().layers().size(); index++) {
 			int top = layerY(index);
-			if (y >= top && y < top + 21) {
+			if (y >= top - 2 && y < top + LAYER_HEADER_HEIGHT - 2) {
 				return index;
 			}
 		}
 		return -1;
+	}
+
+	/** Which gap between rows a dragged layer is hovering over, counted as an insertion point. */
+	private int layerDropIndex(double y) {
+		int size = project().layers().size();
+		for (int index = 0; index < size; index++) {
+			if (y < layerY(index) + layerRowHeight(index) / 2.0) {
+				return index;
+			}
+		}
+		return size;
 	}
 
 	/** The collapse arrow occupies the left edge of a layer header, before the name. */
@@ -2857,7 +3145,7 @@ public final class ComposerScreen extends Screen {
 		cancelLayerRename();
 		editingLayer = layerIndex;
 		int y = layerY(layerIndex);
-		layerNameBox = new EditBox(font, 32, y, LAYER_PANEL_WIDTH - 40, 20,
+		layerNameBox = new EditBox(font, 30, y - 2, LAYER_PANEL_WIDTH - 40, LAYER_HEADER_HEIGHT,
 			Component.literal("Layer name"));
 		layerNameBox.setMaxLength(48);
 		layerNameBox.setValue(project().layers().get(layerIndex).name());
@@ -3276,6 +3564,7 @@ public final class ComposerScreen extends Screen {
 		COPY_AS_TEXT("Copy sequence as text"),
 		SAVE_COMPOSITION("Save composition"),
 		SAVE_COMPOSITION_AS("Save composition as..."),
+		RENAME_COMPOSITION("Rename composition..."),
 		BACK_TO_SEQUENCES("Back"),
 		CLOSE_TO_GAME("Close to game"),
 		UNDO("Undo"),
@@ -3298,8 +3587,8 @@ public final class ComposerScreen extends Screen {
 		SELECT_NONE("Nothing");
 
 		private static final ToolbarAction[] FILE_ACTIONS = {
-			SAVE_COMPOSITION, SAVE_COMPOSITION_AS, OPEN_SONGS, IMPORT, COPY_AS_TEXT,
-			BACK_TO_SEQUENCES, CLOSE_TO_GAME
+			SAVE_COMPOSITION, SAVE_COMPOSITION_AS, RENAME_COMPOSITION, OPEN_SONGS, IMPORT,
+			COPY_AS_TEXT, BACK_TO_SEQUENCES, CLOSE_TO_GAME
 		};
 		private static final ToolbarAction[] EDIT_ACTIONS = {
 			UNDO, REDO, CONVERT, MERGE_REPEATS, QUANTIZE, FIT_ALL_RANGE, SNAP_TEMPO,
@@ -3327,6 +3616,7 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private enum LayerAction {
+		RENAME("Rename layer..."),
 		MERGE_SELECTED("Merge selected"),
 		INCLUDE_SELECTED("Include selected layers in sequence"),
 		SET_INCLUDED_TO_SELECTION("Include only selected layers in sequence"),
