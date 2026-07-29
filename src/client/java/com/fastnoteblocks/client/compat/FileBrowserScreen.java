@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
+import com.fastnoteblocks.client.composer.SongLibrary;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
@@ -131,11 +132,12 @@ final class FileBrowserScreen extends Screen {
 	/**
 	 * The few folders worth one click.
 	 *
-	 * <p>Downloads earns its place: a MIDI arrives there and is imported once, which is the whole
-	 * life of the file.</p>
+	 * <p>Ours first, since it is the one place a file is there on purpose. Downloads earns second:
+	 * a MIDI arrives there and is imported once, which is the whole life of the file.</p>
 	 */
 	private List<Shortcut> shortcuts() {
 		List<Shortcut> found = new ArrayList<>();
+		found.add(new Shortcut("Import folder", SongLibrary.importDirectory()));
 		Path home = Path.of(System.getProperty("user.home", "."));
 		for (String name : new String[] {"Downloads", "Desktop", "Documents", "Music"}) {
 			Path candidate = home.resolve(name);
@@ -365,7 +367,8 @@ final class FileBrowserScreen extends Screen {
 
 		if (visible.isEmpty() && status.isEmpty()) {
 			graphics.text(font, entries.isEmpty()
-					? "Nothing here to import. Extensions: " + String.join(", ", extensions)
+					? "No " + String.join(" or ", extensions) + " files here. Drop some in the "
+						+ "import folder, or browse to wherever they are."
 					: "Nothing matches that filter.",
 				14, LIST_TOP, 0xFF8A9098, false);
 		}

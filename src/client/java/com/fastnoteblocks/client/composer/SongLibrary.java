@@ -1,6 +1,7 @@
 package com.fastnoteblocks.client.composer;
 
 import com.google.gson.Gson;
+import java.io.IOException;
 import java.io.Reader;
 import java.io.Writer;
 import java.nio.file.Files;
@@ -38,6 +39,34 @@ public final class SongLibrary {
 
 	public static Path directory() {
 		return DIRECTORY;
+	}
+
+	/**
+	 * Where to drop MIDI and NBS files you want to import, next to the songs they become.
+	 *
+	 * <p>Created the first time anyone looks, with a note in it saying what it is for -- an empty
+	 * folder appearing in a config directory is otherwise just something odd you found.</p>
+	 */
+	public static Path importDirectory() {
+		Path folder = DIRECTORY.resolveSibling("import");
+		if (Files.isDirectory(folder)) {
+			return folder;
+		}
+		try {
+			Files.createDirectories(folder);
+			Files.writeString(folder.resolve("README.txt"),
+				"""
+				Put .mid, .midi and .nbs files here to import them into Fast Noteblocks.
+
+				The composer's Import opens this folder first. Nothing in here is read
+				automatically and nothing is ever written to or deleted from it -- importing
+				copies the music into a song of its own, next door in the songs folder.
+				""");
+		} catch (IOException | RuntimeException unwritable) {
+			// A read-only config directory is unusual but survivable: the browser falls back to the
+			// nearest folder that does exist, which is the one above this.
+		}
+		return folder;
 	}
 
 	/** Reads every song file, skipping and remembering any that will not parse. */

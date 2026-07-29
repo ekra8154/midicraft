@@ -852,10 +852,15 @@ public final class FastNoteblocksConfig {
 		this.commandsPerTick = clampCommandsPerTick(commandsPerTick);
 	}
 
-	/** Where the file browser last was. Blank means start in the user's home folder. */
+	/**
+	 * Where the file browser last was, or the mod's own import folder the first time.
+	 *
+	 * <p>Somewhere of ours rather than the home directory: a new player has nowhere obvious to put
+	 * a MIDI, and a folder that exists and says what it is for is an answer to that.</p>
+	 */
 	public String importDirectory() {
 		return importDirectory == null || importDirectory.isBlank()
-			? System.getProperty("user.home", ".")
+			? SongLibrary.importDirectory().toString()
 			: importDirectory;
 	}
 
