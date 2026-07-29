@@ -157,7 +157,9 @@ public record ComposerProject(
 		int addedLayers,
 		boolean tempoChanged,
 		double tempoFactor,
-		int mergedRepeats
+		int mergedRepeats,
+		int duplicateLayers,
+		int duplicateLayerNotes
 	) {
 		/**
 		 * How much slower the converted song plays. Greater than 1 means the source was faster than
@@ -672,6 +674,8 @@ public record ComposerProject(
 			? 0.0
 			: repeatMergeTicks * ppq * 100_000.0 / tempoMicrosPerQuarter;
 		int mergedRepeats = 0;
+		int duplicateLayers = 0;
+		int duplicateLayerNotes = 0;
 		List<Layer> convertedLayers = new ArrayList<>();
 		int convertedActiveLayer = 0;
 		int shiftedNotes = 0;
@@ -696,9 +700,36 @@ public record ComposerProject(
 					shiftedNotes++;
 				}
 			}
-			if (convertedLayers.size() + notesByShift.size() > MAX_LAYERS) {
+			// A split that adds nothing is not a split. Two source notes an octave apart land on
+			// the same pitch once both are pulled into range, so a bucket can come out as an exact
+			// copy of one already emitted -- a whole layer playing a sound that is already being
+			// played. Percussion does this constantly, where notes an octave apart are different
+			// drums that map to one note-block pitch: Hammer of Justice produced two 239-note snare
+			// layers, every note of both already covered by the in-range one.
+			//
+			// Buckets are visited nearest-shift first, so what survives is the least transposed
+			// copy. An empty bucket is kept: that is a source layer with no notes, not a duplicate.
+			List<Map.Entry<Integer, List<NoteEvent>>> distinct = new ArrayList<>();
+			Set<NoteSound> withinSplit = new java.util.HashSet<>();
+			for (Map.Entry<Integer, List<NoteEvent>> entry : notesByShift.entrySet()) {
+				boolean anythingNew = entry.getValue().isEmpty();
+				for (NoteEvent note : entry.getValue()) {
+					if (withinSplit.add(new NoteSound(
+							source.instrument(), note.midiNote(), note.startTick()))) {
+						anythingNew = true;
+					}
+				}
+				if (anythingNew) {
+					distinct.add(entry);
+				} else {
+					duplicateLayers++;
+					duplicateLayerNotes += entry.getValue().size();
+					shiftedNotes -= entry.getValue().size();
+				}
+			}
+			if (convertedLayers.size() + distinct.size() > MAX_LAYERS) {
 				throw new IllegalStateException(
-					"Conversion needs " + (convertedLayers.size() + notesByShift.size())
+					"Conversion needs " + (convertedLayers.size() + distinct.size())
 						+ " layers but the limit is " + MAX_LAYERS
 						+ ". Run Edit > Fit into range first: notes already inside the note-block "
 						+ "range all take the same octave shift, so their layer stops splitting."
@@ -707,9 +738,9 @@ public record ComposerProject(
 			if (layerIndex == activeLayerIndex) {
 				convertedActiveLayer = convertedLayers.size();
 			}
-			for (Map.Entry<Integer, List<NoteEvent>> entry : notesByShift.entrySet()) {
+			for (Map.Entry<Integer, List<NoteEvent>> entry : distinct) {
 				int shift = entry.getKey();
-				String convertedName = notesByShift.size() == 1 && shift == 0
+				String convertedName = distinct.size() == 1 && shift == 0
 					? source.name()
 					: source.name() + octaveShiftSuffix(shift);
 				convertedLayers.add(new Layer(
@@ -768,7 +799,9 @@ public record ComposerProject(
 			Math.max(0, convertedLayers.size() - layers.size()),
 			convertedTempo != tempoMicrosPerQuarter,
 			convertedTempo / (double)tempoMicrosPerQuarter,
-			mergedRepeats
+			mergedRepeats,
+			duplicateLayers,
+			duplicateLayerNotes
 		);
 	}
 

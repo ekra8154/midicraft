@@ -625,7 +625,10 @@ public final class ComposerScreen extends Screen {
 				+ ": " + conversion.shiftedNotes() + " pitch-shifted"
 				+ (conversion.addedLayers() > 0 ? ", +" + conversion.addedLayers() + " layers" : "")
 				+ (conversion.mergedRepeats() > 0
-					? ", " + conversion.mergedRepeats() + " repeats merged" : "");
+					? ", " + conversion.mergedRepeats() + " repeats merged" : "")
+				+ (conversion.duplicateLayers() > 0
+					? ", " + conversion.duplicateLayers() + " duplicate layers dropped ("
+						+ conversion.duplicateLayerNotes() + " notes)" : "");
 			if (conversion.slowedDown()) {
 				report += String.format(java.util.Locale.ROOT,
 					", SLOWED %.2fx - song is faster than redstone can play (max 10 notes/sec)",
