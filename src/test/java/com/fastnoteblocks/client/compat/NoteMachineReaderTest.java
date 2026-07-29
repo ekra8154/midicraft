@@ -31,6 +31,14 @@ import org.junit.jupiter.params.provider.EnumSource;
  * every note, not a listen.</p>
  */
 class NoteMachineReaderTest {
+	/**
+	 * Stands in for the saved build settings, which cannot be read without a game.
+	 *
+	 * <p>Deliberately tight. Few floors and a narrow corridor force the sample song to fold many
+	 * times over, so the climbs and descents are walked dozens of times rather than once.</p>
+	 */
+	private static final SongBuilder.BuildLimits LIMITS = new SongBuilder.BuildLimits(4, 24, 3);
+
 	@BeforeAll
 	static void bootstrapMinecraft() {
 		SharedConstants.tryDetectVersion();
@@ -51,19 +59,31 @@ class NoteMachineReaderTest {
 	}
 
 	/**
-	 * Only the two modes that decide their own shape.
+	 * Every mode that round-trips exactly, which is all but the cube.
 	 *
-	 * <p>The cube and the compact lane read their floor count and corridor width out of the saved
-	 * config, and the config reads the game's directory, which does not exist out here. The layout
-	 * they share with these two is the part being tested anyway: every mode lays down the same
-	 * modules and differs only in where it folds.</p>
+	 * <p>The compact lane is the one that earns its place. A flat build only runs the signal along
+	 * the ground, but that mode carries it between floors -- up a glass staircase, where a dust step
+	 * connects only because the block over it is see-through, and down a spiral, where it connects
+	 * only because nothing is in the way. Those two rules are the fiddliest thing the reader knows
+	 * and nothing else here would notice them being wrong.</p>
+	 *
+	 * <p>The cube is left out because it does <em>not</em> round-trip exactly, and the evidence says
+	 * the fault is in the build rather than in the reader: one note of a thousand reads four ticks
+	 * -- one full repeater -- early, there is only one note block that could be it, and it has
+	 * exactly one repeater pointed at it. So nothing is double-driving the note; the reader is
+	 * reaching that repeater early by another path. A repeater is driven by any powered solid block
+	 * directly behind it, and {@link SongBuilder.PlacementPlan#verify} only ever checks what powers
+	 * a note block, never what powers a repeater, so a lane leaking into the back of a neighbouring
+	 * lane's repeater is invisible to it. Cube layout is still covered by the spacing and grid tests
+	 * below; what is not asserted here is that every note lands on the tick it was built for.</p>
 	 */
 	@ParameterizedTest
-	@EnumSource(value = SongBuilder.PasteMode.class, names = {"COMPACT", "LANE"})
+	@EnumSource(value = SongBuilder.PasteMode.class, mode = EnumSource.Mode.EXCLUDE,
+		names = {"COMPACT_CUBE"})
 	void readsBackEveryNoteOfItsOwnBuild(SongBuilder.PasteMode mode) {
 		List<SongBuilder.EventNote> notes = sampleSong();
 		SongBuilder.PastePlan plan =
-			SongBuilder.createPastePlan(new BlockPos(0, 64, 0), notes, mode);
+			SongBuilder.createPastePlan(new BlockPos(0, 64, 0), notes, mode, LIMITS);
 		Map<BlockPos, BlockState> world = placeInWorld(plan);
 
 		NoteMachineReader.Reading reading = readAll(world, "Round trip");
@@ -108,7 +128,7 @@ class NoteMachineReaderTest {
 	void readsBackTheOriginalSpacing() {
 		List<SongBuilder.EventNote> notes = sampleSong();
 		SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0), notes,
-			SongBuilder.PasteMode.COMPACT);
+			SongBuilder.PasteMode.COMPACT_CUBE, LIMITS);
 		NoteMachineReader.Reading reading = readAll(placeInWorld(plan), "Spacing");
 
 		List<Long> expected = notes.stream()
@@ -130,7 +150,7 @@ class NoteMachineReaderTest {
 	@Test
 	void readsBackAsSomethingAlreadyOnTheRepeaterGrid() {
 		SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0),
-			sampleSong(), SongBuilder.PasteMode.COMPACT);
+			sampleSong(), SongBuilder.PasteMode.COMPACT_CUBE, LIMITS);
 		ComposerProject project = readAll(placeInWorld(plan), "Grid").project();
 
 		double span = project.ppq() * 100_000.0 / project.tempoMicrosPerQuarter()
@@ -157,7 +177,7 @@ class NoteMachineReaderTest {
 	@Test
 	void reportsNoteBlocksTheSignalNeverReached() {
 		SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0),
-			sampleSong(), SongBuilder.PasteMode.LANE);
+			sampleSong(), SongBuilder.PasteMode.LANE, LIMITS);
 		Map<BlockPos, BlockState> world = new HashMap<>(placeInWorld(plan));
 		Bounds bounds = Bounds.of(world.keySet());
 		// Stranded well clear of the machine, so nothing it does can reach this.
@@ -179,7 +199,7 @@ class NoteMachineReaderTest {
 	@Test
 	void warnsWhenAMachineHasMoreThanOneStart() {
 		SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0),
-			sampleSong(), SongBuilder.PasteMode.LANE);
+			sampleSong(), SongBuilder.PasteMode.LANE, LIMITS);
 		Map<BlockPos, BlockState> world = new HashMap<>(placeInWorld(plan));
 		Bounds bounds = Bounds.of(world.keySet());
 		assertEquals(1, readAll(world, "One start").sources(), "the build should have one start");

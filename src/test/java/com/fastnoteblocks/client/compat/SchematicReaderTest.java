@@ -117,7 +117,7 @@ class SchematicReaderTest {
 	/** The build laid out at the origin, as a dense box with air where nothing was placed. */
 	private static Map<BlockPos, BlockState> build() {
 		SongBuilder.PastePlan plan = SongBuilder.createPastePlan(BlockPos.ZERO, song(),
-			SongBuilder.PasteMode.COMPACT);
+			SongBuilder.PasteMode.COMPACT_CUBE, new SongBuilder.BuildLimits(3, 20, 2));
 		Map<BlockPos, BlockState> placed = new HashMap<>();
 		for (String command : plan.commands()) {
 			String[] parts = command.split(" ");

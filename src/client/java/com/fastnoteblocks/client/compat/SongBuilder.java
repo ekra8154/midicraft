@@ -225,12 +225,34 @@ public final class SongBuilder {
 	}
 
 	/**
+	 * How far a folding mode may grow before it has to double back.
+	 *
+	 * <p>Passed in rather than read from the config where the plan is made, so a build can be
+	 * planned without a game around it. The saved settings are still what a real build uses; this
+	 * only means the numbers arrive as arguments instead of being fetched, which is what lets every
+	 * mode -- not just the two that happen not to consult the config -- be planned and read back in
+	 * a test.</p>
+	 */
+	record BuildLimits(int maxFloors, int laneWidth, int laneFloors) {
+		static BuildLimits fromConfig() {
+			FastNoteblocksConfig config = FastNoteblocksConfig.get();
+			return new BuildLimits(config.maxBuildFloors(), config.buildLaneWidth(),
+				config.buildLaneFloors());
+		}
+	}
+
+	/**
 	 * Plans a build at a stated origin rather than at the player's feet.
 	 *
 	 * <p>Separated out so the plan can be made without a world to stand in, which is what lets a
 	 * build be planned and then read back in a test.</p>
 	 */
 	static PastePlan createPastePlan(BlockPos origin, List<EventNote> notes, PasteMode mode) {
+		return createPastePlan(origin, notes, mode, BuildLimits.fromConfig());
+	}
+
+	static PastePlan createPastePlan(BlockPos origin, List<EventNote> notes, PasteMode mode,
+			BuildLimits limits) {
 		if (notes.isEmpty()) {
 			throw new IllegalArgumentException(
 				"The build sequence is empty. Move some layers into it first.");
@@ -241,11 +263,10 @@ public final class SongBuilder {
 		}
 		Direction forward = Direction.EAST;
 		return switch (mode) {
-			case COMPACT_CUBE -> createCubePastePlan(origin, forward, notes);
+			case COMPACT_CUBE -> createCubePastePlan(origin, forward, notes, limits.maxFloors());
 			case COMPACT -> createCompactPastePlan(origin, forward, notes);
-			case COMPACT_LANE -> createLanePastePlan(origin, forward, notes,
-				FastNoteblocksConfig.get().buildLaneWidth(),
-				FastNoteblocksConfig.get().buildLaneFloors());
+			case COMPACT_LANE -> createLanePastePlan(origin, forward, notes, limits.laneWidth(),
+				limits.laneFloors());
 			case LANE -> createStraightPastePlan(origin, forward, notes);
 		};
 	}
@@ -518,10 +539,11 @@ public final class SongBuilder {
 	 * instrument block sits under a note. A conversion can easily produce dozens of layers, so
 	 * giving each one a floor would neither fit nor mean anything musically.</p>
 	 */
-	private static PastePlan createCubePastePlan(BlockPos origin, Direction forward, List<EventNote> notes) {
+	private static PastePlan createCubePastePlan(BlockPos origin, Direction forward,
+			List<EventNote> notes, int maxFloors) {
 		List<EventGroup> events = eventGroups(notes);
 		int totalLength = totalEventLength(events);
-		int floors = chooseCubeFloors(totalLength);
+		int floors = chooseCubeFloors(totalLength, maxFloors);
 		int perFloor = Math.max(1, (totalLength + floors - 1) / floors);
 		int lanesPerFloor = Math.max(1,
 			(int)Math.round(Math.sqrt(perFloor / (double)MAX_LANE_SPACING)));
@@ -700,11 +722,10 @@ public final class SongBuilder {
 	}
 
 	/** Picks the floor count whose largest dimension is smallest, i.e. the most cube-like. */
-	private static int chooseCubeFloors(int totalLength) {
+	private static int chooseCubeFloors(int totalLength, int maxFloors) {
 		int best = 1;
 		int bestSpan = Integer.MAX_VALUE;
-		int maximum = FastNoteblocksConfig.get().maxBuildFloors();
-		for (int floors = 1; floors <= maximum; floors++) {
+		for (int floors = 1; floors <= maxFloors; floors++) {
 			int perFloor = Math.max(1, (totalLength + floors - 1) / floors);
 			int side = (int)Math.ceil(2.0 * Math.sqrt(perFloor));
 			int height = floors * CUBE_FLOOR_HEIGHT;
