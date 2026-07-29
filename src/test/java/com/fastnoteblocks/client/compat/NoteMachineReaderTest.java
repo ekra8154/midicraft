@@ -94,6 +94,48 @@ class NoteMachineReaderTest {
 		assertEquals(0, reading.unreachedNotes(), mode + ": some note blocks were never triggered");
 	}
 
+	/**
+	 * The same round trip over a song made of nothing but the chord sizes that stack.
+	 *
+	 * <p>The mixed sample above reaches a stacked module now and then between everything else. This
+	 * one is wall to wall with them, which is what puts a module next to a module, next to a turn,
+	 * next to a riser, hundreds of times over. Those joins are where the whole design lives: the
+	 * module hangs four of its notes a level lower than any other layout ever has, right where the
+	 * runs of powered stone that turn a lane and climb a floor go.</p>
+	 */
+	@Test
+	void readsBackASongOfNothingButStackableChords() {
+		List<SongBuilder.EventNote> notes = stackableSong();
+		SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0), notes,
+			SongBuilder.PasteMode.ULTRA_COMPACT_LANE, LIMITS);
+
+		NoteMachineReader.Reading reading = readAll(placeInWorld(plan), "Stacked");
+
+		assertEquals("", difference(sounds(notes), sounds(reading.project())),
+			"a song of stacked chords did not read back as itself");
+		assertEquals(0, reading.unreachedNotes(), "some note blocks were never triggered");
+	}
+
+	/** Chords of four to seven throughout, over every instrument the module treats differently. */
+	private static List<SongBuilder.EventNote> stackableSong() {
+		List<SongBuilder.EventNote> notes = new ArrayList<>();
+		// Harp, which the module has to build as a solid block where it relays; sand, which cannot
+		// hang from the lower slots at all; glass and glowstone, which conduct nothing.
+		String[] instruments = {"minecraft:air", "minecraft:sand", "minecraft:glass",
+			"minecraft:glowstone", "minecraft:stone", "minecraft:gold_block"};
+		Random random = new Random(20260730L);
+		int time = 0;
+		for (int event = 0; event < 220; event++) {
+			time += 1 + random.nextInt(9);
+			int chord = 4 + event % 4;
+			for (int index = 0; index < chord; index++) {
+				notes.add(new SongBuilder.EventNote(time, 1 + index % 3, index,
+					random.nextInt(25), instruments[random.nextInt(instruments.length)]));
+			}
+		}
+		return List.copyOf(notes);
+	}
+
 	/** Only the notes the two disagree about, so a failure names the bug instead of the song. */
 	private static String difference(Map<Sound, Integer> expected, Map<Sound, Integer> actual) {
 		java.util.TreeSet<Sound> all = new java.util.TreeSet<>(expected.keySet());

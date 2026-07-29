@@ -25,6 +25,15 @@ final class BuildOptionsScreen extends Screen {
 	private final List<FastNoteblocksConfig.SequenceTrack> sequence;
 	private final Consumer<SongBuilder.PasteMode> confirm;
 	private SongBuilder.PasteMode mode;
+	/**
+	 * Whether the layout list is showing.
+	 *
+	 * <p>A list of every layout was fine while there were four of them. Since layouts are meant to
+	 * keep being added rather than replaced -- an old one still suits the song it was made for --
+	 * the list has to stop being the thing you look at first, so it folds away into the one line
+	 * that says which layout is chosen.</p>
+	 */
+	private boolean layoutsShowing;
 	private int commandsPerTick;
 	private int laneWidth;
 	private int laneFloors;
@@ -47,9 +56,14 @@ final class BuildOptionsScreen extends Screen {
 		this.laneFloors = FastNoteblocksConfig.get().buildLaneFloors();
 	}
 
-	/** Top of the width row, which only a Compact lane build has. */
+	/** Rows the layout control takes: the chosen one, plus every option while the list is open. */
+	private int layoutRows() {
+		return layoutsShowing ? 1 + SongBuilder.PasteMode.values().length : 1;
+	}
+
+	/** Top of the width row, which only a lane build has. */
 	private int widthRow(int top) {
-		return top + 14 + SongBuilder.PasteMode.values().length * 22 + 6;
+		return top + 14 + layoutRows() * 22 + 6;
 	}
 
 	private int floorRow(int top) {
@@ -57,7 +71,13 @@ final class BuildOptionsScreen extends Screen {
 	}
 
 	private int rateRow(int top) {
-		return widthRow(top) + (mode == SongBuilder.PasteMode.COMPACT_LANE ? 48 : 0) + 10;
+		return widthRow(top) + (hasLaneControls() ? 48 : 0) + 10;
+	}
+
+	/** Whether this layout folds inside a width you choose, and so has a width and a floor count. */
+	private boolean hasLaneControls() {
+		return mode == SongBuilder.PasteMode.COMPACT_LANE
+			|| mode == SongBuilder.PasteMode.ULTRA_COMPACT_LANE;
 	}
 
 	@Override
@@ -68,21 +88,34 @@ final class BuildOptionsScreen extends Screen {
 		int top = Math.max(40, height / 2 - 96);
 
 		int y = top + 14;
-		for (SongBuilder.PasteMode option : SongBuilder.PasteMode.values()) {
-			Button button = addRenderableWidget(Button.builder(
-					Component.literal((option == mode ? "> " : "  ") + option.label()),
-					clicked -> {
-						mode = option;
-						init();
-					})
-				.bounds(left, y, width, 20)
-				.tooltip(Tooltip.create(Component.literal(describe(option))))
-				.build());
-			button.active = option != mode;
-			y += 22;
+		addRenderableWidget(Button.builder(
+				Component.literal(mode.label() + (layoutsShowing ? "  ^" : "  v")),
+				clicked -> {
+					layoutsShowing = !layoutsShowing;
+					init();
+				})
+			.bounds(left, y, width, 20)
+			.tooltip(Tooltip.create(Component.literal(describe(mode))))
+			.build());
+		y += 22;
+		if (layoutsShowing) {
+			for (SongBuilder.PasteMode option : SongBuilder.PasteMode.values()) {
+				Button button = addRenderableWidget(Button.builder(
+						Component.literal((option == mode ? "> " : "  ") + option.label()),
+						clicked -> {
+							mode = option;
+							layoutsShowing = false;
+							init();
+						})
+					.bounds(left, y, width, 20)
+					.tooltip(Tooltip.create(Component.literal(describe(option))))
+					.build());
+				button.active = option != mode;
+				y += 22;
+			}
 		}
 
-		if (mode == SongBuilder.PasteMode.COMPACT_LANE) {
+		if (hasLaneControls()) {
 			int widthY = widthRow(top);
 			addRenderableWidget(Button.builder(Component.literal("-"), clicked -> changeWidth(-4))
 				.bounds(left, widthY, 20, 20).build());
@@ -149,6 +182,10 @@ final class BuildOptionsScreen extends Screen {
 			case COMPACT_LANE -> "Folds up and down inside a width you set, and creeps away from you "
 				+ "one step at a time. The only layout you can follow in a straight line: walk it, "
 				+ "or lay a rail. More floors make it taller and shorter.";
+			case ULTRA_COMPACT_LANE -> "The Compact lane, packed harder. A chord of four to seven "
+				+ "stacks around a single repeater wherever there is room for one, and lanes that "
+				+ "never power anything off their centre line sit three apart instead of four. "
+				+ "Same width and floor controls.";
 			case LANE -> "One straight line. Easiest to read and repair, largest footprint.";
 		};
 	}
@@ -164,7 +201,7 @@ final class BuildOptionsScreen extends Screen {
 			left, top - 14, 0xFFFFFFFF, false);
 		graphics.text(font, "Layout", left, top + 2, 0xFF8A9098, false);
 
-		if (mode == SongBuilder.PasteMode.COMPACT_LANE) {
+		if (hasLaneControls()) {
 			graphics.text(font, laneWidth + " blocks wide before it folds back",
 				left + 26, widthRow(top) + 6, 0xFFD6D8DD, false);
 			graphics.text(font, laneFloors == 1
