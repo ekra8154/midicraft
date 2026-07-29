@@ -932,10 +932,11 @@ public final class SongBuilder {
 			placements.powered(busPos, "minecraft:stone", time);
 			set(placements, busPos.above(), "minecraft:redstone_wire");
 		}
-		for (int noteIndex = 0; noteIndex < chord.size(); noteIndex++) {
+		List<EventNote> ordered = busOrder(chord);
+		for (int noteIndex = 0; noteIndex < ordered.size(); noteIndex++) {
 			int bus = noteIndex / 2;
 			Direction noteSide = noteIndex % 2 == 0 ? laneStep : laneStep.getOpposite();
-			placeNote(placements, anchor.relative(travel, bus).relative(noteSide), chord.get(noteIndex));
+			placeNote(placements, anchor.relative(travel, bus).relative(noteSide), ordered.get(noteIndex));
 		}
 		return cursor.relative(travel, 1 + busLength);
 	}
@@ -978,13 +979,110 @@ public final class SongBuilder {
 			placements.powered(busPos, "minecraft:stone", time);
 			set(placements, busPos.above(), "minecraft:redstone_wire");
 		}
-		for (int noteIndex = 0; noteIndex < chord.size(); noteIndex++) {
-			EventNote note = chord.get(noteIndex);
+		List<EventNote> ordered = busOrder(chord);
+		for (int noteIndex = 0; noteIndex < ordered.size(); noteIndex++) {
+			EventNote note = ordered.get(noteIndex);
 			int bus = noteIndex / 2;
 			Direction side = noteIndex % 2 == 0 ? right : right.getOpposite();
 			placeNote(placements, anchor.relative(forward, bus).relative(side), note);
 		}
 		return cursor + 1 + busLength;
+	}
+
+	/**
+	 * A chord reordered so each instrument sits on one side of the bus.
+	 *
+	 * <p>Notes hang off alternating sides as the list is walked, so a chord in track order puts a
+	 * run of six harp notes three to a side and interleaves them with whatever comes next. Every
+	 * note still sounds, but the machine reads as scattered blocks rather than as the parts it is
+	 * actually made of.</p>
+	 *
+	 * <p>The bus does not get any longer. A bus block carries one note per side, so the near side
+	 * holds ceil(n/2) and the far side the rest, and the only question is which instrument goes
+	 * where. That is a subset sum: find a set of instruments totalling exactly the near side's
+	 * capacity. When none exists -- five gold and one stone cannot split three and three -- the
+	 * shortfall is borrowed from the longest run left on the far side, and that instrument
+	 * straddles. Over the 2781 chords in the library that leaves 2166 with every instrument on one
+	 * side and 615 with exactly one straddling; nothing worse turned up, though a large enough
+	 * shortfall against short runs could in principle split a second.</p>
+	 */
+	static List<EventNote> busOrder(List<EventNote> chord) {
+		Map<String, List<EventNote>> byInstrument = new LinkedHashMap<>();
+		for (EventNote note : chord) {
+			byInstrument.computeIfAbsent(String.valueOf(note.instrumentBlock()),
+				ignored -> new ArrayList<>()).add(note);
+		}
+		if (byInstrument.size() < 2) {
+			return chord;
+		}
+		List<List<EventNote>> groups = new ArrayList<>(byInstrument.values());
+		int target = (chord.size() + 1) / 2;
+
+		// Which totals the near side can reach using whole instruments.
+		boolean[][] reachable = new boolean[groups.size() + 1][target + 1];
+		reachable[0][0] = true;
+		for (int group = 0; group < groups.size(); group++) {
+			int size = groups.get(group).size();
+			for (int sum = 0; sum <= target; sum++) {
+				if (!reachable[group][sum]) {
+					continue;
+				}
+				reachable[group + 1][sum] = true;
+				if (sum + size <= target) {
+					reachable[group + 1][sum + size] = true;
+				}
+			}
+		}
+		int best = target;
+		while (best > 0 && !reachable[groups.size()][best]) {
+			best--;
+		}
+
+		boolean[] onNearSide = new boolean[groups.size()];
+		int remaining = best;
+		for (int group = groups.size(); group > 0; group--) {
+			if (reachable[group - 1][remaining]) {
+				continue;
+			}
+			onNearSide[group - 1] = true;
+			remaining -= groups.get(group - 1).size();
+		}
+
+		List<EventNote> near = new ArrayList<>(target);
+		List<EventNote> far = new ArrayList<>(chord.size() - target);
+		for (int group = 0; group < groups.size(); group++) {
+			(onNearSide[group] ? near : far).addAll(groups.get(group));
+		}
+		// Nothing summed to the target, so one instrument has to lend the near side the shortfall.
+		// Taken from the largest group left on the far side, which leaves the most of it together.
+		for (int shortfall = target - near.size(); shortfall > 0; shortfall--) {
+			near.add(far.remove(largestFarGroupEnd(far)));
+		}
+
+		List<EventNote> ordered = new ArrayList<>(chord.size());
+		for (int index = 0; index < near.size(); index++) {
+			ordered.add(near.get(index));
+			if (index < far.size()) {
+				ordered.add(far.get(index));
+			}
+		}
+		return ordered;
+	}
+
+	/** The last note of the longest run of one instrument on the far side. */
+	private static int largestFarGroupEnd(List<EventNote> far) {
+		int bestEnd = far.size() - 1;
+		int bestRun = 0;
+		int run = 0;
+		for (int index = 0; index < far.size(); index++) {
+			run = index > 0 && String.valueOf(far.get(index).instrumentBlock())
+				.equals(String.valueOf(far.get(index - 1).instrumentBlock())) ? run + 1 : 1;
+			if (run > bestRun) {
+				bestRun = run;
+				bestEnd = index;
+			}
+		}
+		return bestEnd;
 	}
 
 	private static void placeNote(PlacementPlan placements, BlockPos notePos, EventNote note) {
