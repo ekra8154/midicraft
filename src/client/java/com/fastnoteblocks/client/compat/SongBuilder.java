@@ -239,7 +239,9 @@ public final class SongBuilder {
 		return switch (mode) {
 			case COMPACT_CUBE -> createCubePastePlan(origin, forward, notes);
 			case COMPACT -> createCompactPastePlan(origin, forward, notes);
-			case STRAIGHT -> createStraightPastePlan(origin, forward, notes);
+			case COMPACT_LANE -> createLanePastePlan(origin, forward, notes,
+				FastNoteblocksConfig.get().buildLaneWidth());
+			case LANE -> createStraightPastePlan(origin, forward, notes);
 		};
 	}
 
@@ -258,7 +260,7 @@ public final class SongBuilder {
 			cursor = addEventModule(placements, origin, forward, trigger.cursor(), trigger.triggerDelay(), chord);
 			currentTime = time;
 		}
-		return placements.finish(PasteMode.STRAIGHT, origin);
+		return placements.finish(PasteMode.LANE, origin);
 	}
 
 	private static ChordStats chordStats(List<EventNote> notes) {
@@ -288,6 +290,27 @@ public final class SongBuilder {
 
 	private static BlockPos pasteOrigin(Minecraft minecraft, Direction forward) {
 		return minecraft.player.blockPosition().relative(forward).immutable();
+	}
+
+	/**
+	 * Folds back and forth inside a width you choose, growing away from you without end.
+	 *
+	 * <p>The same walk as a cube's floor, with nowhere to climb to. It has to be the walled walk and
+	 * not the square one: a lane that ends on a length budget stops wherever the budget runs out,
+	 * and those ragged ends wander, so a 32-wide fold came out anywhere from 34 to 72 blocks
+	 * across. A wall is a wall.</p>
+	 */
+	private static PastePlan createLanePastePlan(BlockPos origin, Direction forward,
+			List<EventNote> notes, int width) {
+		List<EventGroup> events = eventGroups(notes);
+		// Two blocks of the width go on the fold itself: the turn steps one past the end of a lane
+		// and a corner carrying notes reaches one past that. The wall still has to clear the longest
+		// single event, or an event too big to fit would turn on every attempt and never advance.
+		int longest = events.stream().mapToInt(EventGroup::length).max().orElse(1);
+		PlacementPlan placements = new PlacementPlan();
+		walkFolded(events, origin, forward, Math.max(longest + 2, width - 2), Integer.MAX_VALUE,
+			placements);
+		return placements.finish(PasteMode.COMPACT_LANE, origin);
 	}
 
 	private static PastePlan createCompactPastePlan(BlockPos origin, Direction forward, List<EventNote> notes) {
@@ -350,22 +373,24 @@ public final class SongBuilder {
 		// differ by a lane here and there -- enough to spill one lane onto a floor of its own. Walk
 		// it dry and widen until the stack really is the height it was sized for.
 		for (int attempt = 0; attempt < 8
-			&& walkCube(events, origin, forward, laneWidth, corridor, PlacementPlan.dry()) > floors;
+			&& walkFolded(events, origin, forward, laneWidth, corridor, PlacementPlan.dry()) > floors;
 				attempt++) {
 			corridor += MAX_LANE_SPACING;
 		}
 		PlacementPlan placements = new PlacementPlan();
-		walkCube(events, origin, forward, laneWidth, corridor, placements);
+		walkFolded(events, origin, forward, laneWidth, corridor, placements);
 		return placements.finish(PasteMode.COMPACT_CUBE, origin);
 	}
 
 	/**
-	 * Walks the events through the stack of floors, placing as it goes.
+	 * Walks the events back and forth between two walls, placing as it goes and climbing a floor
+	 * whenever the fold reaches the far side of its corridor.
 	 *
-	 * @param corridor how far, across the lanes, a floor may reach from the edge it starts at
+	 * @param corridor how far, across the lanes, a floor may reach from the edge it starts at.
+	 *     {@link Integer#MAX_VALUE} means it never has to climb, which is the flat lane mode.
 	 * @return how many floors the stack ended up with
 	 */
-	private static int walkCube(List<EventGroup> events, BlockPos origin, Direction forward,
+	private static int walkFolded(List<EventGroup> events, BlockPos origin, Direction forward,
 			int laneWidth, int corridor, PlacementPlan placements) {
 		int floorsUsed = 1;
 		BlockPos cursor = origin;
@@ -899,7 +924,8 @@ public final class SongBuilder {
 	enum PasteMode {
 		COMPACT_CUBE("Compact cube"),
 		COMPACT("Compact square"),
-		STRAIGHT("Straight");
+		COMPACT_LANE("Compact lane"),
+		LANE("Lane");
 
 		private final String label;
 

@@ -206,6 +206,16 @@ public final class FastNoteblocksConfig {
 	 * Commands sent per client tick when pasting a build. Singleplayer tolerates far more than the
 	 * original fixed rate of 2; servers may treat a high rate as command spam.
 	 */
+	/**
+	 * How wide a Compact lane build is allowed to get before it folds back.
+	 *
+	 * <p>A build decision rather than a preference, but it belongs here because it is the one thing
+	 * about a paste you want to keep between pastes -- it is usually a property of the plot you are
+	 * building on, not of the song.</p>
+	 */
+	public static final int DEFAULT_BUILD_LANE_WIDTH = 32;
+	public static final int MIN_BUILD_LANE_WIDTH = 4;
+	public static final int MAX_BUILD_LANE_WIDTH = 128;
 	public static final int DEFAULT_COMMANDS_PER_TICK = 32;
 	public static final int MIN_COMMANDS_PER_TICK = 1;
 	public static final int MAX_COMMANDS_PER_TICK = 256;
@@ -270,6 +280,7 @@ public final class FastNoteblocksConfig {
 	private int repeatMergeTicks;
 	private int conversionGapPercentile;
 	private int commandsPerTick;
+	private int buildLaneWidth;
 	private int maxBuildFloors;
 	private String pasteMode;
 
@@ -378,6 +389,9 @@ public final class FastNoteblocksConfig {
 				);
 				instance.commandsPerTick = clampCommandsPerTick(
 					stored.commandsPerTick == null ? DEFAULT_COMMANDS_PER_TICK : stored.commandsPerTick
+				);
+				instance.buildLaneWidth = clampBuildLaneWidth(
+					stored.buildLaneWidth == null ? DEFAULT_BUILD_LANE_WIDTH : stored.buildLaneWidth
 				);
 				instance.conversionGapPercentile = clampConversionGapPercentile(
 					stored.conversionGapPercentile == null
@@ -758,7 +772,12 @@ public final class FastNoteblocksConfig {
 
 	/** Remembered layout for the next build. Stored by name so the enum can move. */
 	public String pasteMode() {
-		return pasteMode == null ? "COMPACT_CUBE" : pasteMode;
+		if (pasteMode == null) {
+			return "COMPACT_CUBE";
+		}
+		// The one straight line used to be called Straight, and is called Lane now that there is a
+		// folded version of it. Anyone who had it selected keeps it selected.
+		return "STRAIGHT".equals(pasteMode) ? "LANE" : pasteMode;
 	}
 
 	public void setPasteMode(String pasteMode) {
@@ -831,6 +850,14 @@ public final class FastNoteblocksConfig {
 		this.commandsPerTick = clampCommandsPerTick(commandsPerTick);
 	}
 
+	public int buildLaneWidth() {
+		return buildLaneWidth;
+	}
+
+	public void setBuildLaneWidth(int buildLaneWidth) {
+		this.buildLaneWidth = clampBuildLaneWidth(buildLaneWidth);
+	}
+
 	public int conversionGapPercentile() {
 		return conversionGapPercentile;
 	}
@@ -891,6 +918,7 @@ public final class FastNoteblocksConfig {
 		config.repeatMergeTicks = DEFAULT_REPEAT_MERGE_TICKS;
 		config.conversionGapPercentile = DEFAULT_CONVERSION_GAP_PERCENTILE;
 		config.commandsPerTick = DEFAULT_COMMANDS_PER_TICK;
+		config.buildLaneWidth = DEFAULT_BUILD_LANE_WIDTH;
 		config.maxBuildFloors = DEFAULT_MAX_BUILD_FLOORS;
 		config.pasteMode = "COMPACT_CUBE";
 		return config;
@@ -931,6 +959,10 @@ public final class FastNoteblocksConfig {
 
 	private static int clampMaxBuildFloors(int floors) {
 		return Math.max(MIN_MAX_BUILD_FLOORS, Math.min(MAX_MAX_BUILD_FLOORS, floors));
+	}
+
+	private static int clampBuildLaneWidth(int blocks) {
+		return Math.max(MIN_BUILD_LANE_WIDTH, Math.min(MAX_BUILD_LANE_WIDTH, blocks));
 	}
 
 	private static int clampCommandsPerTick(int commands) {
@@ -1025,6 +1057,7 @@ public final class FastNoteblocksConfig {
 		private Integer repeatMergeTicks;
 		private Integer conversionGapPercentile;
 		private Integer commandsPerTick;
+		private Integer buildLaneWidth;
 		private Integer maxBuildFloors;
 		private String pasteMode;
 
@@ -1072,6 +1105,7 @@ public final class FastNoteblocksConfig {
 			this.repeatMergeTicks = config.repeatMergeTicks;
 			this.conversionGapPercentile = config.conversionGapPercentile;
 			this.commandsPerTick = config.commandsPerTick;
+			this.buildLaneWidth = config.buildLaneWidth;
 			this.maxBuildFloors = config.maxBuildFloors;
 			this.pasteMode = config.pasteMode;
 		}
