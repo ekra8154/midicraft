@@ -1097,6 +1097,9 @@ public final class ComposerScreen extends Screen {
 			case TOGGLE_DEDUPE -> {
 				config.setDedupeIdenticalNotes(!config.dedupeIdenticalNotes());
 				FastNoteblocksConfig.save();
+				if (playing) {
+					resetPlaybackSchedule();
+				}
 				showResult(Component.literal(config.dedupeIdenticalNotes()
 					? "Identical simultaneous notes will be built once."
 					: "Identical simultaneous notes will each be built."));
@@ -3083,6 +3086,15 @@ public final class ComposerScreen extends Screen {
 		events.sort(Comparator.comparingLong(PlaybackEvent::tick)
 			.thenComparing(event -> event.instrument().id())
 			.thenComparingInt(PlaybackEvent::note));
+		// Collapsed only when the build would collapse it. Preview used to do this unconditionally,
+		// which was fine while it was the only behaviour -- but with the setting off the point is to
+		// hear a doubled note as louder, and a preview that quietly played it once would be
+		// describing a different machine from the one about to be pasted.
+		if (!config.dedupeIdenticalNotes()) {
+			playbackEvents = List.copyOf(events);
+			playbackEventIndex = 0;
+			return;
+		}
 		List<PlaybackEvent> deduplicated = new ArrayList<>(events.size());
 		PlaybackEvent previous = null;
 		for (PlaybackEvent event : events) {
