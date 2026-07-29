@@ -558,7 +558,6 @@ public final class NoteMachineReader {
 		private final int maxY;
 		private final int maxZ;
 		private final BlockLookup blocks;
-		private final Map<BlockPos, BlockState> cache = new HashMap<>();
 
 		Region(BlockPos from, BlockPos to, BlockLookup blocks) {
 			this.minX = Math.min(from.getX(), to.getX());
@@ -583,7 +582,10 @@ public final class NoteMachineReader {
 				// count of notes the signal never got to worth showing.
 				return Blocks.AIR.defaultBlockState();
 			}
-			return cache.computeIfAbsent(position.immutable(), blocks::at);
+			// Deliberately not cached. A selection is walked once to survey it and then only near
+			// the wiring, so a cache would buy little and would hold a block state for every
+			// position in a region the player is free to make enormous.
+			return blocks.at(position);
 		}
 	}
 

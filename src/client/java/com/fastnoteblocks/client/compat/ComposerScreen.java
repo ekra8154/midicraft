@@ -717,6 +717,28 @@ public final class ComposerScreen extends Screen {
 		withUnsavedChangesChecked(this::chooseAndImportSong);
 	}
 
+	/**
+	 * Reads a machine standing in the world back into a song of its own.
+	 *
+	 * <p>An import like any other: it lands in the library under its own name rather than on top of
+	 * whatever is open, because a scan is a new song and not an edit to this one.</p>
+	 */
+	private void scanWorldRegion() {
+		withUnsavedChangesChecked(() -> minecraft.gui.setScreen(
+			new RegionScanScreen(this, this::scanRegion)));
+	}
+
+	private void scanRegion(net.minecraft.core.BlockPos from, net.minecraft.core.BlockPos to) {
+		minecraft.gui.setScreen(this);
+		try {
+			NoteMachineReader.Reading reading = NoteMachineReader.read(
+				"World scan", from, to, minecraft.level::getBlockState);
+			applyImportedProject(reading.project(), reading.report());
+		} catch (Exception failed) {
+			showImportFailure(failed);
+		}
+	}
+
 	private void openSongs() {
 		withUnsavedChangesChecked(() -> minecraft.gui.setScreen(new SongsScreen(parent, config)));
 	}
@@ -1047,6 +1069,9 @@ public final class ComposerScreen extends Screen {
 			case SELECT_TOO_FREQUENT -> !projectStats().crowdedNotes().isEmpty();
 			case SELECT_OUT_OF_RANGE -> projectStats().outOfRange() > 0;
 			case SELECT_NONE -> !selectedNotes.isEmpty();
+			// Nothing to scan from the title screen, and the coordinate prompt would have no way
+			// to tell you that the region you typed reads as empty because there is no world.
+			case SCAN_WORLD -> minecraft.level != null;
 			// Not disabled on an unbuildable song: greying it out would hide the reason. The status
 			// bar already names the problem and the planner refuses with a specific one.
 			case PASTE_IN_WORLD -> projectStats().totalNotes() > 0 || project().endTick() > 0L;
@@ -1087,6 +1112,7 @@ public final class ComposerScreen extends Screen {
 	private void performToolbarAction(ToolbarAction action) {
 		switch (action) {
 			case IMPORT -> importSong();
+			case SCAN_WORLD -> scanWorldRegion();
 			case OPEN_SONGS -> openSongs();
 			case RENAME_COMPOSITION -> renameComposition();
 			case COPY_AS_TEXT -> copySequenceAsText();
@@ -1285,6 +1311,9 @@ public final class ComposerScreen extends Screen {
 		return switch (action) {
 			case IMPORT -> "Reads a MIDI or NBS file in as a song of its own. Nothing you already "
 				+ "have is touched. Settings below control how it is read.";
+			case SCAN_WORLD -> "Reads a note block machine standing in the world back into a song, "
+				+ "by following its redstone. Give two corners. Only chunks your client has "
+				+ "loaded can be read, so stand near the build.";
 			case OPEN_SONGS -> "The song library: open another composition, start one, or make a "
 				+ "copy.";
 			case COPY_AS_TEXT -> "Puts the build sequence on the clipboard, one line per included "
@@ -3950,6 +3979,7 @@ public final class ComposerScreen extends Screen {
 
 	private enum ToolbarAction {
 		IMPORT("Import MIDI / NBS as a new song..."),
+		SCAN_WORLD("Scan a build from the world as a new song..."),
 		OPEN_SONGS("Open composition..."),
 		COPY_AS_TEXT("Copy sequence as text"),
 		SAVE_COMPOSITION("Save composition"),
@@ -3982,7 +4012,7 @@ public final class ComposerScreen extends Screen {
 
 		private static final ToolbarAction[] FILE_ACTIONS = {
 			SAVE_COMPOSITION, SAVE_COMPOSITION_AS, RENAME_COMPOSITION, OPEN_SONGS, IMPORT,
-			COPY_AS_TEXT, BACK_TO_SEQUENCES, CLOSE_TO_GAME
+			SCAN_WORLD, COPY_AS_TEXT, BACK_TO_SEQUENCES, CLOSE_TO_GAME
 		};
 		private static final ToolbarAction[] EDIT_ACTIONS = {
 			UNDO, REDO, CONVERT, MERGE_REPEATS,
