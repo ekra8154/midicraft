@@ -203,10 +203,6 @@ public final class FastNoteblocksConfig {
 	public static final int MIN_MAX_BUILD_FLOORS = 1;
 	public static final int MAX_MAX_BUILD_FLOORS = 64;
 	/**
-	 * Commands sent per client tick when pasting a build. Singleplayer tolerates far more than the
-	 * original fixed rate of 2; servers may treat a high rate as command spam.
-	 */
-	/**
 	 * How wide a Compact lane build is allowed to get before it folds back.
 	 *
 	 * <p>A build decision rather than a preference, but it belongs here because it is the one thing
@@ -216,6 +212,10 @@ public final class FastNoteblocksConfig {
 	public static final int DEFAULT_BUILD_LANE_WIDTH = 32;
 	public static final int MIN_BUILD_LANE_WIDTH = 4;
 	public static final int MAX_BUILD_LANE_WIDTH = 128;
+	/**
+	 * Commands sent per client tick when pasting a build. Singleplayer tolerates far more than the
+	 * original fixed rate of 2; servers may treat a high rate as command spam.
+	 */
 	public static final int DEFAULT_COMMANDS_PER_TICK = 32;
 	public static final int MIN_COMMANDS_PER_TICK = 1;
 	public static final int MAX_COMMANDS_PER_TICK = 256;
@@ -281,6 +281,7 @@ public final class FastNoteblocksConfig {
 	private int conversionGapPercentile;
 	private int commandsPerTick;
 	private int buildLaneWidth;
+	private String importDirectory;
 	private int maxBuildFloors;
 	private String pasteMode;
 
@@ -393,6 +394,7 @@ public final class FastNoteblocksConfig {
 				instance.buildLaneWidth = clampBuildLaneWidth(
 					stored.buildLaneWidth == null ? DEFAULT_BUILD_LANE_WIDTH : stored.buildLaneWidth
 				);
+				instance.importDirectory = stored.importDirectory;
 				instance.conversionGapPercentile = clampConversionGapPercentile(
 					stored.conversionGapPercentile == null
 						? DEFAULT_CONVERSION_GAP_PERCENTILE
@@ -850,6 +852,17 @@ public final class FastNoteblocksConfig {
 		this.commandsPerTick = clampCommandsPerTick(commandsPerTick);
 	}
 
+	/** Where the file browser last was. Blank means start in the user's home folder. */
+	public String importDirectory() {
+		return importDirectory == null || importDirectory.isBlank()
+			? System.getProperty("user.home", ".")
+			: importDirectory;
+	}
+
+	public void setImportDirectory(String importDirectory) {
+		this.importDirectory = importDirectory;
+	}
+
 	public int buildLaneWidth() {
 		return buildLaneWidth;
 	}
@@ -1058,6 +1071,7 @@ public final class FastNoteblocksConfig {
 		private Integer conversionGapPercentile;
 		private Integer commandsPerTick;
 		private Integer buildLaneWidth;
+		private String importDirectory;
 		private Integer maxBuildFloors;
 		private String pasteMode;
 
@@ -1106,6 +1120,7 @@ public final class FastNoteblocksConfig {
 			this.conversionGapPercentile = config.conversionGapPercentile;
 			this.commandsPerTick = config.commandsPerTick;
 			this.buildLaneWidth = config.buildLaneWidth;
+			this.importDirectory = config.importDirectory;
 			this.maxBuildFloors = config.maxBuildFloors;
 			this.pasteMode = config.pasteMode;
 		}

@@ -10,7 +10,6 @@ import com.fastnoteblocks.client.composer.ComposerProject.MinecraftConversion;
 import com.fastnoteblocks.client.composer.ComposerProject.NoteEvent;
 import com.fastnoteblocks.client.composer.ComposerProject.PasteResult;
 import com.mojang.blaze3d.platform.InputConstants;
-import com.mojang.blaze3d.platform.Window;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashSet;
@@ -31,9 +30,6 @@ import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.util.Util;
 import net.minecraft.world.item.ItemStack;
 import org.lwjgl.glfw.GLFW;
-import org.lwjgl.PointerBuffer;
-import org.lwjgl.system.MemoryStack;
-import org.lwjgl.util.tinyfd.TinyFileDialogs;
 
 public final class ComposerScreen extends Screen {
 	private static final int TOOLBAR_HEIGHT = 34;
@@ -638,47 +634,17 @@ public final class ComposerScreen extends Screen {
 			Component.literal("Import"), CommonComponents.GUI_CANCEL));
 	}
 
-	/**
-	 * Asks the operating system for a file, in a window rather than in fullscreen.
-	 *
-	 * <p>The picker is a native dialog and it blocks the render thread until it is answered. Over an
-	 * exclusive-fullscreen window the compositor hides it outright: the dialog is alive and holding
-	 * the game hostage, but it cannot be seen, focused or alt-tabbed to, and the frozen game is
-	 * still covering the screen. There is no way out of that from inside the game. Dropping to a
-	 * window for as long as the dialog is up costs a flicker and is the whole fix.</p>
-	 *
-	 * <p>Toggling is not enough on its own -- {@code toggleFullScreen} only sets a flag that the
-	 * frame loop acts on, and the frame loop is what is about to stop.</p>
-	 */
-	private String chooseSongFile() {
-		Window window = minecraft.getWindow();
-		boolean wasFullscreen = window.isFullscreen();
-		if (wasFullscreen) {
-			window.toggleFullScreen();
-			window.updateFullscreenIfChanged();
-		}
-		try (MemoryStack stack = MemoryStack.stackPush()) {
-			PointerBuffer filters = stack.mallocPointer(3);
-			filters.put(stack.UTF8("*.mid"));
-			filters.put(stack.UTF8("*.midi"));
-			filters.put(stack.UTF8("*.nbs"));
-			filters.flip();
-			return TinyFileDialogs.tinyfd_openFileDialog(
-				"Import MIDI or NBS", "", filters, "MIDI and Note Block Studio songs", false
-			);
-		} finally {
-			if (wasFullscreen) {
-				window.toggleFullScreen();
-				window.updateFullscreenIfChanged();
-			}
-		}
+	private void chooseAndImportSong() {
+		minecraft.gui.setScreen(new FileBrowserScreen(this, "Import MIDI or NBS",
+			java.nio.file.Path.of(config.importDirectory()), List.of(".mid", ".midi", ".nbs"),
+			folder -> {
+				config.setImportDirectory(folder.toString());
+				FastNoteblocksConfig.save();
+			},
+			file -> importSongFile(file.toString())));
 	}
 
-	private void chooseAndImportSong() {
-		String path = chooseSongFile();
-		if (path == null || path.isBlank()) {
-			return;
-		}
+	private void importSongFile(String path) {
 		try {
 			String lowerPath = path.toLowerCase(java.util.Locale.ROOT);
 			ComposerProject imported;
