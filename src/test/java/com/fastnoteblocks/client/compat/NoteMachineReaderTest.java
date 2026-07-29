@@ -515,6 +515,71 @@ class NoteMachineReaderTest {
 				.toList());
 	}
 
+	/**
+	 * A block of redstone in the selection must not throw away the real beginning.
+	 *
+	 * <p>It used to. Anything making power on its own was treated as <em>the</em> way in, and the
+	 * head of the chain was then never considered -- so one block of redstone left over from a
+	 * piston contraption gutted the song around it. Both kinds of way in are offered now, and the
+	 * stray one falls out because what it reaches is contained in what the real beginning reaches.
+	 * </p>
+	 */
+	@Test
+	void aStrayBlockOfRedstoneDoesNotHijackTheReading() {
+		List<SongBuilder.EventNote> notes = sampleSong();
+		Map<BlockPos, BlockState> clean = placeInWorld(SongBuilder.createPastePlan(
+			new BlockPos(0, 64, 0), notes, SongBuilder.PasteMode.LANE, LIMITS));
+		java.util.SortedMap<Sound, Integer> intended = sounds(readAll(clean, "Clean").project());
+
+		// Touching the machine partway along, as a redstone block on a piston would when extended.
+		Map<BlockPos, BlockState> world = new HashMap<>(clean);
+		BlockPos joint = midChainAnchor(world);
+		world.put(joint.north(), Blocks.REDSTONE_BLOCK.defaultBlockState());
+
+		NoteMachineReader.Reading reading = readAll(world, "With a redstone block");
+
+		assertEquals("", difference(intended, sounds(reading.project())),
+			"the song should read as it does without the block of redstone");
+		assertEquals(0, reading.unreachedNotes());
+	}
+
+	/** An observer stops the signal, and the part after it is reported rather than invented. */
+	@Test
+	void reportsObserversAndWhatTheyCutOff() {
+		Map<BlockPos, BlockState> world = new HashMap<>(placeInWorld(SongBuilder.createPastePlan(
+			new BlockPos(0, 64, 0), sampleSong(), SongBuilder.PasteMode.LANE, LIMITS)));
+		// Replacing a repeater partway along breaks the chain exactly where the observer stands.
+		BlockPos repeater = world.entrySet().stream()
+			.filter(entry -> entry.getValue().is(Blocks.REPEATER))
+			.map(Map.Entry::getKey)
+			.sorted(Comparator.comparingInt(BlockPos::getX))
+			.toList()
+			.get(20);
+		world.put(repeater, Blocks.OBSERVER.defaultBlockState());
+
+		NoteMachineReader.Reading reading = readAll(world, "With an observer");
+
+		assertTrue(reading.warnings().stream().anyMatch(text -> text.contains("observers")),
+			"the observer should be named: " + reading.report());
+		assertTrue(reading.unreachedNotes() > 0,
+			"everything past it should be reported unreached rather than guessed at");
+	}
+
+	/** A torch is read as simply on, and says so, because inversion is not followed. */
+	@Test
+	void warnsThatTorchesAreReadAsAlwaysOn() {
+		Map<BlockPos, BlockState> world = new HashMap<>(placeInWorld(SongBuilder.createPastePlan(
+			new BlockPos(0, 64, 0), sampleSong(), SongBuilder.PasteMode.LANE, LIMITS)));
+		Bounds bounds = Bounds.of(world.keySet());
+		world.put(new BlockPos(bounds.maxX + 4, bounds.maxY + 4, bounds.maxZ + 4),
+			Blocks.REDSTONE_TORCH.defaultBlockState());
+
+		NoteMachineReader.Reading reading = readAll(world, "With a torch");
+
+		assertTrue(reading.warnings().stream().anyMatch(text -> text.contains("always on")),
+			"a torch should say how it was read: " + reading.report());
+	}
+
 	// ------------------------------------------------------------------ helpers
 
 	private static NoteMachineReader.Reading readAll(Map<BlockPos, BlockState> world, String name) {

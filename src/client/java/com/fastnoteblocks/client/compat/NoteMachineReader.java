@@ -154,6 +154,8 @@ public final class NoteMachineReader {
 		/** Blocks that make power on their own: levers, buttons, torches, blocks of redstone. */
 		final List<BlockPos> sources = new ArrayList<>();
 		final Set<String> unsupported = new LinkedHashSet<>();
+		/** Torches specifically, because what they usually mean is inversion, which is not read. */
+		int torches;
 	}
 
 	private static Survey survey(Region region) {
@@ -173,6 +175,9 @@ public final class NoteMachineReader {
 						survey.repeaters.add(position);
 					} else if (isSource(state)) {
 						survey.sources.add(position);
+						if (state.is(Blocks.REDSTONE_TORCH) || state.is(Blocks.REDSTONE_WALL_TORCH)) {
+							survey.torches++;
+						}
 					} else if (state.getBlock() instanceof ComparatorBlock) {
 						survey.unsupported.add("comparators");
 					} else if (state.is(Blocks.OBSERVER)) {
@@ -610,23 +615,29 @@ public final class NoteMachineReader {
 	}
 
 	/**
-	 * Where the machine starts.
+	 * Everywhere the signal could get in.
 	 *
-	 * <p>A lever or a button says so outright. Failing that the start is a repeater with nothing
-	 * behind it: every other repeater in a chain is fed by the one before, so the one that is fed
-	 * by nothing is the one a player pushes power into. Several of those means several chains
-	 * started together, which is how a machine plays more than one line at once.</p>
+	 * <p>Two kinds. A lever, a button or a block of redstone makes power on its own. A repeater with
+	 * nothing behind it is the other: every repeater in a chain is fed by the one before, so one fed
+	 * by nothing is where a player pushes power in.</p>
+	 *
+	 * <p>Both kinds, always -- not one kind when there is one. Preferring sources meant a single
+	 * block of redstone anywhere in the selection threw away the real head of the chain, and blocks
+	 * of redstone are exactly what a piston contraption is made of, so a build could be gutted by a
+	 * component that was not even part of its timing. Offering everything is safe now that a way in
+	 * contained by another is dropped: a stray source reaches a tail of what the real beginning
+	 * reaches, or nothing at all, and falls out on its own either way.</p>
 	 */
 	private static List<BlockPos> startingPoints(Region region, Survey survey) {
-		if (!survey.sources.isEmpty()) {
-			return survey.sources;
-		}
-		List<BlockPos> heads = new ArrayList<>();
+		List<BlockPos> heads = new ArrayList<>(survey.sources);
 		for (BlockPos repeater : survey.repeaters) {
 			BlockPos behind = repeater.relative(region.at(repeater).getValue(RepeaterBlock.FACING));
 			BlockState input = region.at(behind);
-			if (input.isAir() || !isConductor(input) && !input.is(Blocks.REDSTONE_WIRE)
-					&& !input.is(Blocks.REPEATER)) {
+			// A repeater fed by a lever is fed, and counting it as a beginning as well would offer
+			// the same chain twice under two names.
+			boolean fed = !input.isAir() && (isConductor(input) || input.is(Blocks.REDSTONE_WIRE)
+				|| input.is(Blocks.REPEATER) || isSource(input));
+			if (!fed) {
 				heads.add(repeater);
 			}
 		}
@@ -714,6 +725,15 @@ public final class NoteMachineReader {
 			// apart that is, and nothing in the blocks says.
 			warnings.add(versions + " separate machines, split into numbered layers and read as "
 				+ "though started together");
+		}
+		if (survey.torches > 0) {
+			// A torch is usually there to invert something, and inversion means a note sounds when
+			// power is taken away rather than given. Nothing here follows a falling edge, so a
+			// torch is read as simply being on, which is right for one used as a plain battery and
+			// wrong for one used as a gate.
+			warnings.add(survey.torches + " redstone torch"
+				+ (survey.torches == 1 ? "" : "es") + " read as always on; anything they invert is "
+				+ "read the wrong way round");
 		}
 		if (trace.looped()) {
 			// Read one lap and stopped, because the walk refuses a pulse that arrives no later than
