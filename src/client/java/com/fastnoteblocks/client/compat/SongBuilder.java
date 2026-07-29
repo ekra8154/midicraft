@@ -371,7 +371,9 @@ public final class SongBuilder {
 			}
 			int above = floor + climb;
 			if (above >= 0 && above < floors) {
-				cursor = addVerticalTurn(placements, cursor, travel, climb, currentTime);
+				cursor = climb > 0
+					? addGlassClimb(placements, cursor, travel, currentTime)
+					: addSpiralDescent(placements, cursor, travel, depth, currentTime);
 				floor = above;
 			} else {
 				// Out of floors: step the slab sideways once, and come back the way we climbed.
@@ -387,35 +389,58 @@ public final class SongBuilder {
 	}
 
 	/**
-	 * Carries the signal one floor up or down at the end of a lane, and turns it around.
+	 * Carries the signal one floor up at the end of a lane, and turns it around.
 	 *
-	 * <p>Dust climbs a block at a time, and each step needs the block that would otherwise sit
-	 * between the two dusts to be see-through -- so the staircase is glass, which is transparent
-	 * enough for the step to connect and solid enough to hold the next dust up. Alternating between
-	 * two columns keeps the whole turn two blocks deep whichever way it is going.</p>
+	 * <p>Dust climbs a block at a time, and a step up needs the block that would otherwise sit
+	 * between the two dusts to be see-through -- so the staircase is glass, transparent enough for
+	 * the step to connect and solid enough to hold the next dust up. Alternating between two columns
+	 * keeps the whole turn two blocks deep.</p>
 	 *
-	 * <p>Going down, the block that has to be see-through is the one holding up the dust two steps
-	 * above, which is why the first block of the staircase is glass rather than the stone the rest
-	 * of the build stands on. Up does not care, and shares the shape.</p>
-	 *
-	 * @param climb 1 to rise a floor, -1 to drop one
 	 * @return the cursor for the next lane, which travels back the way this one came
 	 */
-	private static BlockPos addVerticalTurn(PlacementPlan placements, BlockPos cursor,
-			Direction travel, int climb, int time) {
+	private static BlockPos addGlassClimb(PlacementPlan placements, BlockPos cursor,
+			Direction travel, int time) {
 		BlockPos near = cursor;
 		BlockPos far = cursor.relative(travel);
-		set(placements, near, "minecraft:glass");
+		placements.powered(near, "minecraft:stone", time);
 		set(placements, near.above(), "minecraft:redstone_wire");
 		for (int step = 1; step <= CUBE_FLOOR_HEIGHT; step++) {
 			BlockPos column = step % 2 == 1 ? far : near;
-			int level = 1 + step * climb;
-			set(placements, column.above(level - 1), "minecraft:glass");
-			set(placements, column.above(level), "minecraft:redstone_wire");
+			set(placements, column.above(step), "minecraft:glass");
+			set(placements, column.above(step + 1), "minecraft:redstone_wire");
 		}
-		// The next repeater stands one back along the way we came and reads the top of the
-		// staircase, which is the block in front of it.
-		return cursor.relative(travel.getOpposite()).above(CUBE_FLOOR_HEIGHT * climb);
+		// The next repeater stands one back the way we came and reads the top of the climb, which
+		// is the block in front of it.
+		return cursor.relative(travel.getOpposite()).above(CUBE_FLOOR_HEIGHT);
+	}
+
+	/**
+	 * Carries the signal one floor down at the end of a lane, and turns it around.
+	 *
+	 * <p>Not the climb upside down. Going up, the block between two dusts has to be see-through and
+	 * glass obliges. Going down, dust cannot step onto glass at all -- the staircase has to be
+	 * solid, and a solid staircase cannot alternate between two columns, because the block it would
+	 * step onto is the one already holding up the step two above it.</p>
+	 *
+	 * <p>So it spirals instead: four positions around a two-by-two column, a block down at each, so
+	 * no step ever lands directly beneath the one before last. That is why a descent comes out a
+	 * block further along than a climb, and a block to the side as well.</p>
+	 */
+	private static BlockPos addSpiralDescent(PlacementPlan placements, BlockPos cursor,
+			Direction travel, Direction depth, int time) {
+		placements.powered(cursor, "minecraft:stone", time);
+		set(placements, cursor.above(), "minecraft:redstone_wire");
+		List<BlockPos> ring = List.of(
+			cursor.relative(travel),
+			cursor.relative(travel).relative(depth),
+			cursor.relative(travel, 2).relative(depth),
+			cursor.relative(travel, 2));
+		for (int step = 1; step <= CUBE_FLOOR_HEIGHT; step++) {
+			BlockPos stone = ring.get((step - 1) % ring.size()).below(step);
+			placements.powered(stone, "minecraft:stone", time);
+			set(placements, stone.above(), "minecraft:redstone_wire");
+		}
+		return cursor.relative(travel).below(CUBE_FLOOR_HEIGHT);
 	}
 
 	/**
