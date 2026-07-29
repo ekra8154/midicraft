@@ -14,7 +14,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.Set;
-import java.util.TreeMap;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.level.EmptyBlockGetter;
@@ -69,8 +68,8 @@ public final class NoteMachineReader {
 	 * A machine read back, and everything worth saying about how the reading went.
 	 *
 	 * @param unreachedNotes note blocks the signal never got to, which are left out of the song
-	 * @param headNotes note blocks whose instrument the game decides from a block outside the
-	 *     region, so it could not be read
+	 * @param headNotes note blocks standing on a mob head, whose sound the composer has no layer
+	 *     for and which therefore come back as a harp
 	 * @param warnings circuitry that carries no timing this can follow
 	 */
 	public record Reading(
@@ -466,7 +465,6 @@ public final class NoteMachineReader {
 		int earliest = firedAt.values().stream().mapToInt(Integer::intValue).min().orElse(0);
 		// Instrument first, then pitch and time, so a layer's notes come out already in order.
 		Map<String, List<NoteEvent>> byInstrument = new LinkedHashMap<>();
-		Map<String, Integer> instrumentOrder = new TreeMap<>();
 		int headNotes = 0;
 		long nextId = 1L;
 		List<BlockPos> played = new ArrayList<>(firedAt.keySet());
@@ -485,7 +483,6 @@ public final class NoteMachineReader {
 			byInstrument.computeIfAbsent(instrument.id(), ignored -> new ArrayList<>())
 				.add(new NoteEvent(nextId++, ComposerProject.NOTE_BLOCK_BASE_MIDI_NOTE + pitch, tick,
 					ComposerProject.DEFAULT_NOTE_DURATION_TICKS, 96));
-			instrumentOrder.merge(instrument.id(), 0, Integer::sum);
 		}
 
 		List<Layer> layers = new ArrayList<>();
@@ -510,9 +507,6 @@ public final class NoteMachineReader {
 		if (!survey.unsupported.isEmpty()) {
 			warnings.add("ignored " + String.join(" and ", survey.unsupported)
 				+ ", which carry timing this cannot follow");
-		}
-		if (layers.size() > ComposerProject.MAX_LAYERS) {
-			warnings.add("more instruments than the layer limit");
 		}
 		return new Reading(project, survey.noteBlocks.size(),
 			survey.noteBlocks.size() - firedAt.size(), headNotes, span, starts,
