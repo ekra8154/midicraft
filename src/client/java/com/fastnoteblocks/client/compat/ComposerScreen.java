@@ -80,6 +80,17 @@ public final class ComposerScreen extends Screen {
 	private static final int MAX_PREVIEW_SOUNDS_PER_FRAME = 64;
 	private static final int MIN_GRID_PIXEL_SPACING = 4;
 	private static final int MIN_LABEL_PIXEL_SPACING = 32;
+	/** Room a ruler label needs: a bar number with a clock time under it, and air after them. */
+	private static final int RULER_LABEL_SPACING = 58;
+	/**
+	 * Bar counts the ruler is willing to count in.
+	 *
+	 * <p>It labels every nth bar for the smallest n here that leaves the labels far enough apart to
+	 * read, so zooming out thins the ruler instead of packing it. Round numbers rather than powers
+	 * of two: the ruler is for finding your way back to somewhere, and "bar 51" is easier to hold
+	 * on to than "bar 65".</p>
+	 */
+	private static final int[] RULER_BAR_STEPS = {1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000};
 	private static final double BOX_SCROLL_FULL_SPEED_PIXELS = 140.0;
 	private static final double BOX_SCROLL_MAX_PIXELS = 22.0;
 	private static final double BOX_SCROLL_MAX_ROWS = 2.0;
@@ -1811,26 +1822,39 @@ public final class ComposerScreen extends Screen {
 		graphics.fill(rollX, rulerY, rollX + rollWidth, rollY, 0xCC15181D);
 		graphics.fill(rollX, rollY - 1, rollX + rollWidth, rollY, 0xFF4A4F56);
 		long lastTick = horizontalScroll + (long)Math.ceil(rollWidth * ticksPerPixel);
-		long beatTicks = Math.max(1L, project().ppq());
-		long measureTicks = beatTicks * 4L;
-		long stepTicks = readableStep(beatTicks, measureTicks);
-		boolean showLabels = Math.max(stepTicks, measureTicks) / ticksPerPixel >= MIN_LABEL_PIXEL_SPACING;
-		for (long tick = Math.max(0L, horizontalScroll / stepTicks * stepTicks);
-				tick <= lastTick + stepTicks; tick += stepTicks) {
+		long measureTicks = Math.max(1L, project().ppq()) * 4L;
+		long labelStep = rulerLabelStep(measureTicks);
+		// Subdivisions of whatever is being labelled, not of a bar. Drawing a line per bar however
+		// far out you zoom is what turned this into a picket fence with no room left to say which
+		// bar any of them was.
+		//
+		// Still whole bars though, and a count that divides the label step: quartering a ten-bar
+		// step would put lines on half-bars, which are not anywhere.
+		long labelBars = labelStep / measureTicks;
+		long minorStep = labelBars > 1L
+			? largestProperDivisor(labelBars) * measureTicks
+			: measureTicks / 4L;
+		if (minorStep > 0L && minorStep / ticksPerPixel >= MIN_GRID_PIXEL_SPACING * 2) {
+			for (long tick = Math.max(0L, horizontalScroll / minorStep * minorStep);
+					tick <= lastTick + minorStep; tick += minorStep) {
+				int x = tickX(tick);
+				if (x >= rollX && x <= rollX + rollWidth && tick % labelStep != 0L) {
+					graphics.fill(x, rollY - 6, x + 1, rollY, 0xFF686D73);
+				}
+			}
+		}
+		for (long tick = Math.max(0L, horizontalScroll / labelStep * labelStep);
+				tick <= lastTick + labelStep; tick += labelStep) {
 			int x = tickX(tick);
 			if (x < rollX || x > rollX + rollWidth) {
 				continue;
 			}
-			boolean measure = tick % measureTicks == 0L;
-			graphics.fill(x, measure ? rulerY + 1 : rollY - 6, x + 1, rollY,
-				measure ? 0xFF9A9A9A : 0xFF686D73);
-			if (measure && showLabels) {
-				// Bar number over clock time. The bar is where you are in the music and the clock is
-				// how long you will be standing there, and the second one moves when the speed does.
-				graphics.text(font, Long.toString(tick / measureTicks + 1L), x + 3, rulerY + 2,
-					0xFFBFC4CA, false);
-				smallText(graphics, clockLabel(secondsAt(tick)), x + 3, rulerY + 13, 0xFF767C85);
-			}
+			graphics.fill(x, rulerY + 1, x + 1, rollY, 0xFF9A9A9A);
+			// Bar number over clock time. The bar is where you are in the music and the clock is
+			// how long you will be standing there, and the second one moves when the speed does.
+			graphics.text(font, Long.toString(tick / measureTicks + 1L), x + 3, rulerY + 2,
+				0xFFBFC4CA, false);
+			smallText(graphics, clockLabel(secondsAt(tick)), x + 3, rulerY + 13, 0xFF767C85);
 		}
 		int endX = tickX(project().endTick());
 		if (endX >= rollX && endX <= rollX + rollWidth) {
@@ -1856,6 +1880,31 @@ public final class ComposerScreen extends Screen {
 				? "Drag to set where the song ends"
 				: "Drag to set playback start"), mouseX, mouseY);
 		}
+	}
+
+	/** The biggest step that still divides {@code value} evenly, or 1 when it is prime. */
+	private static long largestProperDivisor(long value) {
+		for (long divisor = 2L; divisor * divisor <= value; divisor++) {
+			if (value % divisor == 0L) {
+				return value / divisor;
+			}
+		}
+		return 1L;
+	}
+
+	/**
+	 * How many ticks apart the ruler's labelled lines should be.
+	 *
+	 * <p>Always a whole number of bars, so the numbers stay musical, and always far enough apart
+	 * that a bar number and a clock time fit between them.</p>
+	 */
+	private long rulerLabelStep(long measureTicks) {
+		for (int bars : RULER_BAR_STEPS) {
+			if (bars * measureTicks / ticksPerPixel >= RULER_LABEL_SPACING) {
+				return bars * measureTicks;
+			}
+		}
+		return RULER_BAR_STEPS[RULER_BAR_STEPS.length - 1] * measureTicks;
 	}
 
 	/**
@@ -3857,7 +3906,7 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private enum ToolbarAction {
-		IMPORT("Import MIDI / NBS..."),
+		IMPORT("Import MIDI / NBS as a new song..."),
 		OPEN_SONGS("Open composition..."),
 		COPY_AS_TEXT("Copy sequence as text"),
 		SAVE_COMPOSITION("Save composition"),
