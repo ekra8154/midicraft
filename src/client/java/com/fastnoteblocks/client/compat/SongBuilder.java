@@ -1769,7 +1769,11 @@ public final class SongBuilder {
 		 * within a repeater of each other, though: further apart and the first pulse may have ended
 		 * before the second arrives, which would be a second edge and a second note.</p>
 		 */
-		List<String> verify() {
+		/**
+		 * @param shiftX how far the finished plan slides before it is built, so a fault names the
+		 *     block you can actually go and stand in front of rather than one in plan space
+		 */
+		List<String> verify(int shiftX, int shiftZ) {
 			List<String> faults = new ArrayList<>();
 			for (Map.Entry<BlockPos, Integer> note : notes.entrySet()) {
 				int time = note.getValue();
@@ -1785,16 +1789,17 @@ public final class SongBuilder {
 						continue;
 					}
 					if (neighbour < time) {
-						faults.add("the note at " + describe(note.getKey()) + " belongs to tick "
-							+ time + " but would sound early, at tick " + neighbour);
+						faults.add("the note at " + describe(note.getKey(), shiftX, shiftZ)
+							+ " belongs to tick " + time + " but would sound early, at tick "
+							+ neighbour);
 					} else if (neighbour > time + SHARED_PULSE_TICKS) {
-						faults.add("the note at " + describe(note.getKey()) + " belongs to tick "
-							+ time + " but would sound again at tick " + neighbour
-							+ ", too late for the first pulse to still be covering it");
+						faults.add("the note at " + describe(note.getKey(), shiftX, shiftZ)
+							+ " belongs to tick " + time + " but would sound again at tick "
+							+ neighbour + ", too late for the first pulse to still be covering it");
 					}
 				}
 				if (!triggered) {
-					faults.add("the note at " + describe(note.getKey())
+					faults.add("the note at " + describe(note.getKey(), shiftX, shiftZ)
 						+ " has nothing to set it off");
 				}
 			}
@@ -1812,7 +1817,12 @@ public final class SongBuilder {
 		private static final int SHARED_PULSE_TICKS = 4;
 
 		private static String describe(BlockPos position) {
-			return position.getX() + " " + position.getY() + " " + position.getZ();
+			return describe(position, 0, 0);
+		}
+
+		private static String describe(BlockPos position, int shiftX, int shiftZ) {
+			return (position.getX() + shiftX) + " " + position.getY() + " "
+				+ (position.getZ() + shiftZ);
 		}
 
 		void set(BlockPos position, String block) {
@@ -1837,24 +1847,25 @@ public final class SongBuilder {
 		}
 
 		PastePlan finish(PasteMode mode, BlockPos origin) {
-			List<String> faults = verify();
+			// Where the plan lands, worked out before anything is checked so that a fault can name a
+			// block you are able to go and stand in front of. Nothing lands behind you: the walk
+			// reaches outside its own walls here and there -- a chord hanging off the far side of the
+			// first lane, a corner overshooting the end of one, a floor not quite the width of the
+			// one below it -- and a build that starts a block behind where you were standing is a
+			// build you cannot line up from a corner. Sliding it is exact and costs nothing; the
+			// height is left alone, because that is measured from your feet and not from a wall.
+			int shiftX = minimumX == Integer.MAX_VALUE ? 0 : origin.getX() - minimumX;
+			int shiftZ = minimumZ == Integer.MAX_VALUE ? 0 : origin.getZ() - minimumZ;
+			List<String> faults = verify(shiftX, shiftZ);
 			// Every other layout is finished, so a fault in one is a bug and the build is refused.
-			// The ultra lane is still being worked out on multiple floors, where a slab step runs
-			// under the notes of the slabs either side of it, and a machine you cannot stand in
-			// front of is a machine you cannot work out. So it goes up, and says what is wrong with
-			// it.
+			// The ultra lane is still being worked out on multiple floors, where the run that carries
+			// the signal sideways passes under the notes of the corridors either side of it, and a
+			// machine you cannot stand in front of is a machine you cannot work out. So it goes up,
+			// and says what is wrong with it.
 			if (!faults.isEmpty() && mode != PasteMode.ULTRA_COMPACT_LANE) {
 				throw new IllegalArgumentException("Refusing to build a broken machine: "
 					+ faults.get(0) + ". This is a bug in the layout, not in the song.");
 			}
-			// Nothing lands behind you. The walk reaches a block outside its own walls here and
-			// there -- a chord hanging off the far side of the first lane, a corner overshooting the
-			// end of one, a floor not quite the width of the one below it -- and a build that starts
-			// a block behind where you were standing is a build you cannot line up from a corner.
-			// Sliding the finished plan is exact and costs nothing; the height is left alone,
-			// because that is measured from your feet and not from a wall.
-			int shiftX = minimumX == Integer.MAX_VALUE ? 0 : origin.getX() - minimumX;
-			int shiftZ = minimumZ == Integer.MAX_VALUE ? 0 : origin.getZ() - minimumZ;
 			List<String> commands = blocks.entrySet().stream()
 				.map(entry -> "setblock " + (entry.getKey().getX() + shiftX) + " "
 					+ entry.getKey().getY() + " " + (entry.getKey().getZ() + shiftZ) + " "
