@@ -437,6 +437,86 @@ public record ComposerProject(
 		return with(updated, activeLayerIndex, nextNoteId);
 	}
 
+	/**
+	 * A quantize onto the grid redstone counts in, and what that grid turned out to be.
+	 *
+	 * @param gridTicks composer ticks between adjacent positions
+	 * @param repeaterTicks how many repeater ticks that is -- 1 is the finest a build can express
+	 * @param tempoNudged whether the tempo had to move for a whole-tick grid to exist at all
+	 */
+	public record RepeaterQuantize(
+		ComposerProject project,
+		long gridTicks,
+		long repeaterTicks,
+		boolean tempoNudged
+	) {
+	}
+
+	/**
+	 * A grid coarser than this is not a quantize, it is a demolition.
+	 *
+	 * <p>Past four repeater ticks the song stops being recognisable, so rather than snap to it the
+	 * tempo moves instead -- which costs a fraction of a percent and buys a one-tick grid.</p>
+	 */
+	private static final long MAX_REPEATER_GRID = 4L;
+
+	/**
+	 * Note starts moved onto whole repeater ticks, at whatever speed the song is set to.
+	 *
+	 * <p>The musical grid and the repeater grid are different rulers, and only sometimes share
+	 * marks. Quantizing to 1/16 helps only when a 1/16 happens to be a whole number of repeater
+	 * ticks; when it is not, every note lands somewhere redstone cannot place and the song stays
+	 * flagged however many times you run it. This quantizes to the ruler that actually decides.</p>
+	 *
+	 * <p>Notes closer together than one repeater tick land on the same tick and become a chord.
+	 * That is the point rather than a side effect: a passage faster than ten notes a second cannot
+	 * be built as separate notes at all, and collapsing it is the only alternative to slowing the
+	 * whole song down to accommodate it.</p>
+	 *
+	 * <p>The grid comes from the span as an exact fraction. Composer ticks per repeater tick is
+	 * {@code ppq * 100000 * speed / (tempo * 4)}; in lowest terms its numerator is the smallest
+	 * whole number of composer ticks that is also a whole number of repeater ticks, and its
+	 * denominator is how many repeater ticks that is. Rounding the span instead would leave every
+	 * gap a fraction short and flag the lot as too frequent.</p>
+	 */
+	public RepeaterQuantize withQuantizedToRepeaters(Set<Long> scope) {
+		long numerator = ppq * 100_000L * Math.max(1, speedQuarters);
+		long denominator = tempoMicrosPerQuarter * 4L;
+		long divisor = greatestCommonDivisor(numerator, denominator);
+		long grid = Math.max(1L, numerator / divisor);
+		long repeaterTicks = Math.max(1L, denominator / divisor);
+		int tempo = tempoMicrosPerQuarter;
+		if (repeaterTicks > MAX_REPEATER_GRID) {
+			grid = Math.max(1L, Math.round(numerator / (double)denominator));
+			repeaterTicks = 1L;
+			// Rounded up, not to nearest. The tempo has to be an integer, so the span it produces
+			// lands either side of the grid -- and a span a hair wider than the grid makes every
+			// one-tick gap 0.999 of a tick, which reads as too frequent rather than as exact. Up
+			// puts the span just inside the grid instead, where the rounding is harmless.
+			tempo = Math.max(1, (int)Math.ceil(numerator / (4.0 * grid)));
+		}
+		ComposerProject quantized = withTempo(tempo).withQuantized((int)Math.min(Integer.MAX_VALUE, grid), scope);
+		if (scope == null || scope.isEmpty()) {
+			// The trailing gap is a delay a build has to place like any other, so it lands on the
+			// same grid. Left behind, it is the one problem no note can be blamed for.
+			long content = quantized.contentEndTick();
+			long gap = Math.max(0L, quantized.endTick() - content);
+			quantized = quantized.withEndTick(content + Math.round(gap / (double)grid) * grid);
+		}
+		return new RepeaterQuantize(quantized, grid, repeaterTicks, tempo != tempoMicrosPerQuarter);
+	}
+
+	private static long greatestCommonDivisor(long first, long second) {
+		long a = Math.abs(first);
+		long b = Math.abs(second);
+		while (b != 0L) {
+			long remainder = a % b;
+			a = b;
+			b = remainder;
+		}
+		return Math.max(1L, a);
+	}
+
 	/** Snaps note starts onto the given grid, within {@code scope} or everywhere if it is empty. */
 	public ComposerProject withQuantized(int gridTicks, Set<Long> scope) {
 		int grid = Math.max(1, gridTicks);

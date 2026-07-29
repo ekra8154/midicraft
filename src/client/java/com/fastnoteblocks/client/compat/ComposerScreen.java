@@ -950,7 +950,8 @@ public final class ComposerScreen extends Screen {
 		return switch (action) {
 			case UNDO -> history.canUndo();
 			case REDO -> history.canRedo();
-			case CONVERT, ALIGN_TIMING, MERGE_REPEATS, QUANTIZE, FIT_ALL_RANGE, SNAP_TEMPO ->
+			case CONVERT, MERGE_REPEATS, FIT_ALL_RANGE, SNAP_TEMPO,
+				QUANTIZE_QUARTER, QUANTIZE_EIGHTH, QUANTIZE_SIXTEENTH, QUANTIZE_REPEATERS ->
 				project().layers().stream().anyMatch(layer -> !layer.notes().isEmpty());
 			case SELECT_OFF_GRID -> !projectStats().offGridNotes().isEmpty();
 			case SELECT_TOO_FREQUENT -> !projectStats().crowdedNotes().isEmpty();
@@ -1012,12 +1013,13 @@ public final class ComposerScreen extends Screen {
 			case CONVERT -> convertToMinecraft();
 			case MERGE_REPEATS -> applyStep("Merged",
 				project().withMergedRepeats(config.repeatMergeTicks(), selectedNotes));
-			case QUANTIZE -> applyStep("Quantized",
-				project().withQuantized(minecraftConversionGridTicks(project()), selectedNotes));
+			case QUANTIZE_QUARTER -> quantizeTo(project().ppq());
+			case QUANTIZE_EIGHTH -> quantizeTo(Math.max(1, project().ppq() / 2));
+			case QUANTIZE_SIXTEENTH -> quantizeTo(Math.max(1, project().ppq() / 4));
+			case QUANTIZE_REPEATERS -> quantizeToRepeaters();
 			case FIT_ALL_RANGE -> applyStep("Fitted to range",
 				project().withAllFittedToRange(selectedNotes));
 			case SNAP_TEMPO -> applyTimingStep("Tempo snapped", snappedTempo(project().withBakedSpeed()));
-			case ALIGN_TIMING -> alignTiming();
 			case SNAP_END -> applyStep("End snapped", project().withEndTick(
 				snapEndToRepeaterGrid()));
 			case TRIM_END -> applyStep("Trimmed", project().trimmedToContent());
@@ -1046,26 +1048,40 @@ public final class ComposerScreen extends Screen {
 		return source.withTempo(source.repeaterAlignedTempoFor(minecraftConversionGridTicks(source)));
 	}
 
+	private void quantizeTo(int gridTicks) {
+		applyStep("Quantized", project().withQuantized(gridTicks, selectedNotes));
+	}
+
 	/**
-	 * Makes the whole song's timing buildable at the speed it is currently set to.
+	 * Puts note starts on the grid redstone counts in, and says which grid that was.
 	 *
-	 * <p>Both halves and the end marker, in the order they depend on each other: fold the speed
-	 * slider into the tempo, nudge that tempo until the grid is a whole number of repeater ticks,
-	 * put every note start on that grid, then land the trailing silence on it too. Running the
-	 * halves separately works and is still offered; this is the answer to having sped a converted
-	 * song up and watched it turn orange.</p>
+	 * <p>Worth reporting rather than doing quietly: the grid is whatever the tempo and speed make
+	 * it, so it is routinely something like 330 ticks that no musical grid would ever offer, and
+	 * how many notes it folded together is the thing to listen for afterwards.</p>
 	 */
-	private void alignTiming() {
-		ComposerProject snapped = snappedTempo(project().withBakedSpeed());
-		int grid = minecraftConversionGridTicks(snapped);
-		ComposerProject aligned = snapped.withQuantized(grid, Set.of());
-		// Against the musical grid rather than the repeater span: after the snap the grid is a whole
-		// number of repeater ticks and is itself a whole number of composer ticks, which the span
-		// need not be. Rounding to the span would leave the marker a fraction of a tick out.
-		long content = aligned.contentEndTick();
-		long gap = Math.max(0L, aligned.endTick() - content);
-		applyTimingStep("Aligned to redstone",
-			aligned.withEndTick(content + Math.round(gap / (double)grid) * (long)grid));
+	private void quantizeToRepeaters() {
+		ComposerProject.RepeaterQuantize result = project().withQuantizedToRepeaters(selectedNotes);
+		if (result.project().equals(project())) {
+			showResult(Component.literal("Already on the repeater grid."));
+			return;
+		}
+		int merged = distinctStartTicks(project()) - distinctStartTicks(result.project());
+		apply(result.project());
+		layersChanged();
+		String report = String.format(java.util.Locale.ROOT,
+			"Quantized to %d ticks (%d repeater tick%s)%s%s",
+			result.gridTicks(), result.repeaterTicks(), result.repeaterTicks() == 1 ? "" : "s",
+			merged > 0 ? ", " + merged + " notes folded into chords" : "",
+			result.tempoNudged() ? ", tempo nudged to fit" : "");
+		showResult(Component.literal(report));
+	}
+
+	private static int distinctStartTicks(ComposerProject project) {
+		return (int)project.layers().stream()
+			.flatMap(layer -> layer.notes().stream())
+			.mapToLong(ComposerProject.NoteEvent::startTick)
+			.distinct()
+			.count();
 	}
 
 	/** A step that may have folded the speed slider away, so the slider has to be told. */
@@ -1163,17 +1179,20 @@ public final class ComposerScreen extends Screen {
 				+ "repeater ticks; snap the end marker to match.";
 			case MERGE_REPEATS -> "Collapses a pitch that re-triggers faster than the repeat "
 				+ "window. Songs fake sustain this way, and note blocks cannot sustain.";
-			case QUANTIZE -> "Moves note starts onto the musical grid. Fixes notes between beats, "
-				+ "not a grid that disagrees with redstone -- that is Snap tempo, or Fix timing for "
-				+ "both at once.";
+			case QUANTIZE_QUARTER, QUANTIZE_EIGHTH, QUANTIZE_SIXTEENTH ->
+				"Moves note starts onto that musical grid. A coarser grid fixes more and changes "
+					+ "more. Whether it makes the song buildable depends on the tempo: a 1/16 only "
+					+ "helps if a 1/16 is a whole number of repeater ticks.";
+			case QUANTIZE_REPEATERS -> "Moves note starts onto whole repeater ticks -- the ruler "
+				+ "that actually decides, worked out from the tempo and the current speed, so it is "
+				+ "usually not a musical fraction at all. Notes closer than one tick land together "
+				+ "as a chord, which is how a passage faster than redstone becomes buildable without "
+				+ "slowing the whole song down. Moves the tempo by a fraction of a percent if no "
+				+ "small grid exists at the current one.";
 			case FIT_ALL_RANGE -> "Octave-shifts notes outside F#3-F#5 into it. Quick rather than "
 				+ "faithful: intervals across a layer can change.";
 			case SNAP_TEMPO -> "Nudges the tempo so the grid lands on whole repeater ticks, folding "
 				+ "the speed slider in first. The other half of quantize, and neither works alone.";
-			case ALIGN_TIMING -> "Both halves at once, on the whole song: bake the speed slider into "
-				+ "the tempo, snap that tempo to the repeater grid, put every note start on it and "
-				+ "land the end marker there too. What to reach for after speeding a converted song "
-				+ "up and watching it go orange. Pitches and layers are left alone.";
 			case SNAP_END -> "Moves the end marker so its trailing delay is a whole number of "
 				+ "repeater ticks.";
 			case TRIM_END -> "Pulls the end marker back to the last note, discarding trailing "
@@ -3669,10 +3688,12 @@ public final class ComposerScreen extends Screen {
 		REDO("Redo"),
 		CONVERT("Convert for Minecraft"),
 		MERGE_REPEATS("Merge repeats", true),
-		QUANTIZE("Quantize to grid", true),
+		QUANTIZE_QUARTER("Quantize to 1/4", true),
+		QUANTIZE_EIGHTH("Quantize to 1/8", true),
+		QUANTIZE_SIXTEENTH("Quantize to 1/16", true),
+		QUANTIZE_REPEATERS("Quantize to repeater ticks", true),
 		FIT_ALL_RANGE("Fit into range", true),
 		SNAP_TEMPO("Snap tempo (whole song)"),
-		ALIGN_TIMING("Fix timing for redstone"),
 		INCLUDE_SELECTED("Include selected layers in sequence"),
 		SET_INCLUDED_TO_SELECTION("Include only selected layers in sequence"),
 		PASTE_IN_WORLD("Paste current sequence in world (requires op)..."),
@@ -3690,8 +3711,9 @@ public final class ComposerScreen extends Screen {
 			COPY_AS_TEXT, BACK_TO_SEQUENCES, CLOSE_TO_GAME
 		};
 		private static final ToolbarAction[] EDIT_ACTIONS = {
-			UNDO, REDO, CONVERT, ALIGN_TIMING, MERGE_REPEATS, QUANTIZE, FIT_ALL_RANGE, SNAP_TEMPO,
-			SNAP_END, TRIM_END
+			UNDO, REDO, CONVERT, MERGE_REPEATS,
+			QUANTIZE_QUARTER, QUANTIZE_EIGHTH, QUANTIZE_SIXTEENTH, QUANTIZE_REPEATERS,
+			FIT_ALL_RANGE, SNAP_TEMPO, SNAP_END, TRIM_END
 		};
 		private static final ToolbarAction[] BUILD_ACTIONS = {
 			INCLUDE_SELECTED, SET_INCLUDED_TO_SELECTION, PASTE_IN_WORLD, BUILD_CANCEL
