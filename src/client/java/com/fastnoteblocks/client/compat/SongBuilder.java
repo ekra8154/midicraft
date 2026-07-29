@@ -301,7 +301,7 @@ public final class SongBuilder {
 			case COMPACT_LANE -> createLanePastePlan(origin, forward, notes, limits.laneWidth(),
 				limits.laneFloors(), Layout.STANDARD, PasteMode.COMPACT_LANE);
 			case ULTRA_COMPACT_LANE -> createLanePastePlan(origin, forward, notes, limits.laneWidth(),
-				limits.laneFloors(), Layout.ULTRA, PasteMode.ULTRA_COMPACT_LANE);
+				limits.laneFloors(), Layout.ultra(limits.laneFloors()), PasteMode.ULTRA_COMPACT_LANE);
 			case LANE -> createStraightPastePlan(origin, forward, notes);
 		};
 	}
@@ -377,9 +377,9 @@ public final class SongBuilder {
 		int laneWidth = Math.max(longest + 2, width - 2);
 		PlacementPlan placements = new PlacementPlan();
 		if (floors <= 1) {
-			walkFolded(events, origin, forward, laneWidth, Integer.MAX_VALUE, placements);
+			walkFolded(events, origin, forward, laneWidth, Integer.MAX_VALUE, placements, layout);
 		} else {
-			walkWall(events, origin, forward, laneWidth, floors, placements);
+			walkWall(events, origin, forward, laneWidth, floors, placements, layout);
 		}
 		return placements.finish(mode, origin);
 	}
@@ -400,7 +400,7 @@ public final class SongBuilder {
 	 * be sized to what the lanes hold.</p>
 	 */
 	private static void walkWall(List<EventGroup> events, BlockPos origin, Direction forward,
-			int laneWidth, int floors, PlacementPlan placements) {
+			int laneWidth, int floors, PlacementPlan placements, Layout layout) {
 		BlockPos cursor = origin;
 		Direction travel = forward;
 		// Where chords grow, and the direction the whole slab creeps once a sweep is done.
@@ -446,7 +446,7 @@ public final class SongBuilder {
 					// happen to be leaving. A sideways step separates two slabs, and every floor of
 					// one sits beside the matching floor of the other -- so a quiet lane at the top
 					// is no promise about the chord four floors down that it would be answering for.
-					cursor = addCompactTurn(placements, cursor, travel, depth, slabStep, currentTime);
+					cursor = addCompactTurn(placements, cursor, travel, depth, slabStep, currentTime, layout);
 					climb = -climb;
 				}
 				travel = travel.getOpposite();
@@ -541,7 +541,7 @@ public final class SongBuilder {
 		int corridor = cubeCorridor(
 			List.copyOf(laneSpacings(events, cubeLanePartition(events, laneWidth)).values()), floors);
 		for (int attempt = 0; attempt < 12
-			&& walkFolded(events, origin, forward, laneWidth, corridor, PlacementPlan.dry()) > floors;
+			&& walkFolded(events, origin, forward, laneWidth, corridor, PlacementPlan.dry(), Layout.STANDARD) > floors;
 				attempt++) {
 			corridor += Math.max(MAX_LANE_SPACING, corridor / 8);
 		}
@@ -571,7 +571,7 @@ public final class SongBuilder {
 			cursor = addSpatialEventModule(placements, trigger.cursor(), travel, laneStep,
 				trigger.triggerDelay(), event.notes());
 			if (spacing != null) {
-				cursor = addCompactTurn(placements, cursor, travel, laneStep, spacing, event.time());
+				cursor = addCompactTurn(placements, cursor, travel, laneStep, spacing, event.time(), Layout.STANDARD);
 				travel = travel.getOpposite();
 			}
 		}
@@ -605,7 +605,7 @@ public final class SongBuilder {
 		// and a floor of wide ones hanging off the edge of it.
 		int corridor = foldedCorridor(events, origin, forward, laneWidth, floors);
 		PlacementPlan placements = new PlacementPlan();
-		walkFolded(events, origin, forward, laneWidth, corridor, placements);
+		walkFolded(events, origin, forward, laneWidth, corridor, placements, Layout.STANDARD);
 		return placements.finish(PasteMode.COMPACT_CUBE, origin);
 	}
 
@@ -618,7 +618,7 @@ public final class SongBuilder {
 	 * @return how many floors the stack ended up with
 	 */
 	private static int walkFolded(List<EventGroup> events, BlockPos origin, Direction forward,
-			int laneWidth, int corridor, PlacementPlan placements) {
+			int laneWidth, int corridor, PlacementPlan placements, Layout layout) {
 		int floorsUsed = 1;
 		BlockPos cursor = origin;
 		Direction travel = forward;
@@ -695,7 +695,7 @@ public final class SongBuilder {
 				laneStep = laneStep.getOpposite();
 				floorsUsed++;
 			} else {
-				cursor = addCompactTurn(placements, cursor, travel, laneStep, spacing, currentTime);
+				cursor = addCompactTurn(placements, cursor, travel, laneStep, spacing, currentTime, layout);
 				travel = travel.getOpposite();
 			}
 		}
@@ -923,7 +923,7 @@ public final class SongBuilder {
 			// The two blocks a cross hands its signal to sit one either side of the centre line,
 			// at the same level as the four low notes. A chord measured as this and then dropped
 			// to a bus keeps the wider claim, which is the harmless direction to be wrong in.
-			return new LaneReach(1, 1, margin, true);
+			return new LaneReach(1, 1, margin, layout.risers());
 		}
 		return style == ChordStyle.BUS ? new LaneReach(1, 1, margin, false)
 			: smallChordReach(chordSize, margin);
@@ -1056,23 +1056,40 @@ public final class SongBuilder {
 		return slots;
 	}
 
+	/**
+	 * Carries the signal across to where the next lane starts, and turns it around.
+	 *
+	 * <p>Whether the run stands on stone or on glass is the difference between two lanes sitting
+	 * four apart and three. A turn crosses the whole gap at the level the lanes keep their notes at,
+	 * and dust makes the block it sits on live -- live at the tick of the lane it is <em>leaving</em>,
+	 * which is hundreds of ticks earlier than the lane it is arriving at. Land that beside an
+	 * incoming note and the note sounds a verse early. Glass cannot be powered at all, so a turn
+	 * built on it carries the signal and touches nothing, and the columns it crosses stop being a
+	 * reason to keep the lanes apart. The older modes stay on stone, where they have always been.</p>
+	 */
 	private static BlockPos addCompactTurn(PlacementPlan placements, BlockPos cursor, Direction travel,
-			Direction laneStep, int laneDistance, int time) {
+			Direction laneStep, int laneDistance, int time, Layout layout) {
 		if (laneDistance < 1 || laneDistance > 13) {
 			throw new IllegalArgumentException("Compact turn distance " + laneDistance
 				+ " exceeds the safe redstone range");
 		}
 		BlockPos outer = cursor.relative(travel);
-		placements.powered(cursor, "minecraft:stone", time);
-		set(placements, cursor.above(), "minecraft:redstone_wire");
-		placements.powered(outer, "minecraft:stone", time);
-		set(placements, outer.above(), "minecraft:redstone_wire");
+		layTurnFloor(placements, cursor, time, layout);
+		layTurnFloor(placements, outer, time, layout);
 		for (int offset = 1; offset <= laneDistance; offset++) {
-			BlockPos turn = outer.relative(laneStep, offset);
-			placements.powered(turn, "minecraft:stone", time);
-			set(placements, turn.above(), "minecraft:redstone_wire");
+			layTurnFloor(placements, outer.relative(laneStep, offset), time, layout);
 		}
 		return outer.relative(laneStep, laneDistance).relative(travel.getOpposite());
+	}
+
+	private static void layTurnFloor(PlacementPlan placements, BlockPos position, int time,
+			Layout layout) {
+		if (layout.ultra()) {
+			set(placements, position, "minecraft:glass");
+		} else {
+			placements.powered(position, "minecraft:stone", time);
+		}
+		set(placements, position.above(), "minecraft:redstone_wire");
 	}
 
 	private static SpatialDelayTrigger addSpatialDelayBeforeEvent(PlacementPlan placements, BlockPos cursor,
@@ -1146,8 +1163,36 @@ public final class SongBuilder {
 			return new Placed(addSpatialEventModule(placements, cursor, travel, across, triggerDelay,
 				event.notes()), style);
 		}
-		return new Placed(addStackedEventModule(placements, cursor, travel, across, triggerDelay,
+		BlockPos start = cursor;
+		if (Math.floorMod(start.relative(travel).getX(), 2) != 0) {
+			addParityPad(placements, start);
+			start = start.relative(travel);
+		}
+		return new Placed(addStackedEventModule(placements, start, travel, across, triggerDelay,
 			event.time(), ultraSlots(event.notes(), style == ChordStyle.STACKED_FULL)), style);
+	}
+
+	/**
+	 * A column of path that costs a block and no time, to put a module on the right footing.
+	 *
+	 * <p>A stacked module's outer column alternates strictly: the block a cross relays through sits
+	 * at the module's centre, and the two low notes sit either side of it. So along the lane it runs
+	 * live, note, live, note. Two lanes whose modules agree on which of those falls on an even
+	 * coordinate therefore meet live against live and note against note -- and a note block beside
+	 * a note block cannot be set off, because block power never crosses. That agreement is the whole
+	 * reason two lanes of stacked modules can sit three apart instead of four, and this is what buys
+	 * it: every module centre is put on an even coordinate, and a module that would have landed odd
+	 * is nudged one along first.</p>
+	 *
+	 * <p>Glass and not stone. Dust makes the block beneath it live, and the blocks either side of
+	 * that one are exactly where low notes hang -- notes belonging to a later chord, which an
+	 * earlier live block would sound before its time. Glass cannot be powered at all. The dust on
+	 * top has a solid block behind it and a repeater in front, so it takes the straight shape and
+	 * points along the lane only, never sideways into a note.</p>
+	 */
+	private static void addParityPad(PlacementPlan placements, BlockPos cursor) {
+		set(placements, cursor, "minecraft:glass");
+		set(placements, cursor.above(), "minecraft:redstone_wire");
 	}
 
 	/**
@@ -1550,16 +1595,25 @@ public final class SongBuilder {
 	}
 
 	/**
-	 * Which module shapes a build may reach for.
+	 * Which module shapes a build may reach for, and how tightly its lanes may sit.
 	 *
 	 * <p>A flag rather than a subclass because the two layouts differ in exactly two decisions --
 	 * what a chord is built out of, and how close two lanes may sit -- and both of those are
 	 * settled once, up front, and then carried on the events themselves. Nothing downstream has to
 	 * know which mode it is walking.</p>
+	 *
+	 * @param risers whether this build changes floors, which is the one thing still holding a pair
+	 *     of stacked lanes a column apart. A descent has to walk down on solid blocks -- dust cannot
+	 *     step down onto glass -- and it spirals through a two-by-two to do it, which puts live stone
+	 *     one column off the centre line at four different heights. Bringing that onto the centre
+	 *     line is what would let a stacked slab sit three from its neighbour like everything else.
 	 */
-	private record Layout(boolean ultra) {
-		static final Layout STANDARD = new Layout(false);
-		static final Layout ULTRA = new Layout(true);
+	private record Layout(boolean ultra, boolean risers) {
+		static final Layout STANDARD = new Layout(false, true);
+
+		static Layout ultra(int floors) {
+			return new Layout(true, floors > 1);
+		}
 	}
 
 	/** How a chord is laid out around the repeater that sets it off. */
