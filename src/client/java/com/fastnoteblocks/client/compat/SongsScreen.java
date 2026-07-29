@@ -58,7 +58,7 @@ public final class SongsScreen extends Screen {
 				ignored -> SongAnalysis.of(song, config.dedupeIdenticalNotes()));
 		}
 
-		int listBottom = height - 32;
+		int listBottom = height - 56;
 		int visible = Math.max(1, (listBottom - LIST_TOP) / ROW_HEIGHT);
 		scroll = Math.max(0, Math.min(scroll, Math.max(0, rows.size() - visible)));
 		for (int index = scroll; index < Math.min(rows.size(), scroll + visible); index++) {
@@ -91,12 +91,54 @@ public final class SongsScreen extends Screen {
 			.build());
 		addRenderableWidget(Button.builder(Component.literal("Done"), button -> onClose())
 			.bounds(width - 76, height - 26, 68, 20).build());
+
+		// Starting from an import belongs here as much as in the composer. Reaching it only from
+		// inside an open song meant having to open something you did not want in order to leave it.
+		// Shared out across whatever width there is, rather than three fixed sizes that run off the
+		// side of a narrow window or a large GUI scale.
+		int importWidth = Math.min(110, (width - 16 - 8) / 3);
+		int importY = height - 50;
+		addRenderableWidget(Button.builder(Component.literal("From MIDI / NBS"),
+				button -> SongImports.chooseMidiOrNbs(this, config, this::openImported))
+			.bounds(8, importY, importWidth, 20)
+			.tooltip(Tooltip.create(Component.literal(
+				"Read a MIDI or NBS file in as a new song.")))
+			.build());
+		addRenderableWidget(Button.builder(Component.literal("From schematic"),
+				button -> SongImports.chooseSchematic(this, config, this::openImported))
+			.bounds(12 + importWidth, importY, importWidth, 20)
+			.tooltip(Tooltip.create(Component.literal(
+				"Read a saved build back into a song by following its redstone. Structure (.nbt), "
+					+ "Sponge (.schem) and Litematica (.litematic).")))
+			.build());
+		Button scan = addRenderableWidget(Button.builder(Component.literal("From world"),
+				button -> SongImports.scanWorld(this, this::openImported))
+			.bounds(16 + importWidth * 2, importY, importWidth, 20)
+			.tooltip(Tooltip.create(Component.literal(
+				"Read a note block machine standing in the world back into a song. Only chunks "
+					+ "your client has loaded can be read, so stand near the build.")))
+			.build());
+		// Nothing to scan from the title screen, and the coordinate prompt could not tell you why
+		// the region you typed came back empty.
+		scan.active = minecraft.level != null;
 	}
 
 	private void open(String id) {
 		config.setActiveSongId(id);
 		FastNoteblocksConfig.save();
 		minecraft.gui.setScreen(new ComposerScreen(parent, config));
+	}
+
+	/**
+	 * Opens an import without adding it to the list.
+	 *
+	 * <p>It becomes a song here only when it is saved. Writing it straight in would put something
+	 * in the library that nobody has decided to keep yet, which is the state this screen exists to
+	 * show the truth about.</p>
+	 */
+	private void openImported(SongImports.Imported imported) {
+		SongImports.open(parent, config, () -> {
+		}, imported);
 	}
 
 	private void create() {
@@ -154,7 +196,7 @@ public final class SongsScreen extends Screen {
 		graphics.text(font, FastNoteblocksConfig.songs().ids().size() + " in "
 			+ SongLibrary.directory().getFileName(), 8, 28, 0xFF8A9098, false);
 
-		int listBottom = height - 32;
+		int listBottom = height - 56;
 		int visible = Math.max(1, (listBottom - LIST_TOP) / ROW_HEIGHT);
 		for (int index = scroll; index < Math.min(rows.size(), scroll + visible); index++) {
 			Row row = rows.get(index);

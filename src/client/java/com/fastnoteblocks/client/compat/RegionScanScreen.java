@@ -30,6 +30,16 @@ final class RegionScanScreen extends Screen {
 	 */
 	private static final long MAX_VOLUME = 8_000_000L;
 
+	/**
+	 * What was last typed in, remembered for the session.
+	 *
+	 * <p>Per box rather than per corner. Working out a region is fiddly -- you fly to one end, read
+	 * numbers off the debug screen, come back -- and losing them because you stepped out to check
+	 * something means doing all of it again. Static because the screen is built fresh every time it
+	 * opens, so the fields cannot carry anything themselves.</p>
+	 */
+	private static final String[] REMEMBERED = new String[6];
+
 	private final Screen parent;
 	private final BiConsumer<BlockPos, BlockPos> scan;
 	private final EditBox[] first = new EditBox[3];
@@ -45,11 +55,7 @@ final class RegionScanScreen extends Screen {
 
 	@Override
 	protected void init() {
-		String[] carried = new String[6];
-		for (int axis = 0; axis < 3; axis++) {
-			carried[axis] = first[axis] == null ? "" : first[axis].getValue();
-			carried[axis + 3] = second[axis] == null ? "" : second[axis].getValue();
-		}
+		remember();
 		clearWidgets();
 
 		int panel = Math.min(320, width - 40);
@@ -57,13 +63,19 @@ final class RegionScanScreen extends Screen {
 		int top = height / 2 - 60;
 		int cell = (panel - 2 * 6) / 3;
 
+		// All of the first corner, then all of the second. Adding them axis by axis -- x1, x2, y1,
+		// y2 -- is the order they were added in, and therefore the order Tab walked them, which put
+		// the second corner between a corner's own x and y.
 		for (int axis = 0; axis < 3; axis++) {
-			first[axis] = coordinateBox(left + axis * (cell + 6), top, cell, carried[axis]);
-			second[axis] = coordinateBox(left + axis * (cell + 6), top + 44, cell, carried[axis + 3]);
+			first[axis] = coordinateBox(left + axis * (cell + 6), top, cell, REMEMBERED[axis]);
 		}
-		// Both corners default to where you are standing, so the commonest case -- stand at one
-		// corner, read the other off F3 -- is two edits rather than six.
-		if (minecraft.player != null && carried[0].isEmpty()) {
+		for (int axis = 0; axis < 3; axis++) {
+			second[axis] = coordinateBox(left + axis * (cell + 6), top + 44, cell,
+				REMEMBERED[axis + 3]);
+		}
+		// Only the very first visit gets the player's position. After that whatever was last typed
+		// stands, including deliberately empty boxes.
+		if (minecraft.player != null && REMEMBERED[0] == null) {
 			fill(first, minecraft.player.blockPosition());
 			fill(second, minecraft.player.blockPosition());
 		}
@@ -83,12 +95,18 @@ final class RegionScanScreen extends Screen {
 
 	private EditBox coordinateBox(int x, int y, int cellWidth, String value) {
 		EditBox box = new EditBox(font, x, y, cellWidth, 18, Component.literal("0"));
-		box.setMaxLength(8);
-		box.setValue(value);
+		box.setMaxLength(12);
+		box.setValue(value == null ? "" : value);
 		box.setResponder(ignored -> refresh());
 		return addRenderableWidget(box);
 	}
 
+	/**
+	 * Fills a corner from where the player is standing, replacing whatever was there.
+	 *
+	 * <p>Unconditional. A button that only writes into empty boxes is a button that does nothing
+	 * the second time you press it, which is exactly when you want it.</p>
+	 */
 	private void setCorner(EditBox[] corner) {
 		if (minecraft.player != null) {
 			fill(corner, minecraft.player.blockPosition());
@@ -96,20 +114,90 @@ final class RegionScanScreen extends Screen {
 		}
 	}
 
-	private static void fill(EditBox[] corner, BlockPos position) {
+	private void fill(EditBox[] corner, BlockPos position) {
 		corner[0].setValue(Integer.toString(position.getX()));
 		corner[1].setValue(Integer.toString(position.getY()));
 		corner[2].setValue(Integer.toString(position.getZ()));
+		remember();
+	}
+
+	private void remember() {
+		for (int axis = 0; axis < 3; axis++) {
+			if (first[axis] != null) {
+				REMEMBERED[axis] = first[axis].getValue();
+			}
+			if (second[axis] != null) {
+				REMEMBERED[axis + 3] = second[axis].getValue();
+			}
+		}
 	}
 
 	private BlockPos corner(EditBox[] boxes) {
 		try {
-			return new BlockPos(Integer.parseInt(boxes[0].getValue()),
-				Integer.parseInt(boxes[1].getValue()), Integer.parseInt(boxes[2].getValue()));
+			return new BlockPos(Integer.parseInt(boxes[0].getValue().trim()),
+				Integer.parseInt(boxes[1].getValue().trim()),
+				Integer.parseInt(boxes[2].getValue().trim()));
 		} catch (NumberFormatException incomplete) {
 			return null;
 		}
 	}
+
+	// ------------------------------------------------------------------ pasting whole positions
+
+	/**
+	 * Takes a pasted position apart instead of dropping it all in one box.
+	 *
+	 * <p>Coordinates are never written down one number at a time. They come off the debug screen,
+	 * out of a WorldEdit message or out of somebody's post as {@code 118 71 -244}, and typing that
+	 * into three boxes by hand is three chances to transpose a digit. Three numbers fill the corner
+	 * you pasted into; six fill both, which is how a region gets quoted.</p>
+	 *
+	 * @return whether the paste was a position and has been dealt with
+	 */
+	private boolean pastePosition() {
+		String[] parts = minecraft.keyboardHandler.getClipboard()
+			.trim()
+			.replace(',', ' ')
+			.split("\\s+");
+		List<String> numbers = new ArrayList<>();
+		for (String part : parts) {
+			// Tolerates the decimals a player position is shown with: standing at 118.531 is
+			// standing in the block at 118, and refusing the paste over that would be pedantry.
+			String cleaned = part.replaceFirst("\\.\\d+$", "");
+			if (!cleaned.matches("-?\\d{1,7}")) {
+				return false;
+			}
+			numbers.add(cleaned);
+		}
+		if (numbers.size() == 6) {
+			for (int axis = 0; axis < 3; axis++) {
+				first[axis].setValue(numbers.get(axis));
+				second[axis].setValue(numbers.get(axis + 3));
+			}
+		} else if (numbers.size() == 3) {
+			EditBox[] corner = focusedCorner();
+			for (int axis = 0; axis < 3; axis++) {
+				corner[axis].setValue(numbers.get(axis));
+			}
+		} else {
+			return false;
+		}
+		remember();
+		refresh();
+		return true;
+	}
+
+	/** The corner the caret is in, defaulting to the first when the focus is somewhere else. */
+	private EditBox[] focusedCorner() {
+		for (EditBox box : second) {
+			if (getFocused() == box) {
+				return second;
+			}
+		}
+		return first;
+	}
+
+	// ------------------------------------------------------------------ what the selection is
 
 	/**
 	 * Says what the selection is and what is wrong with it, before anything is read.
@@ -125,6 +213,7 @@ final class RegionScanScreen extends Screen {
 		boolean ready = from != null && to != null && minecraft.level != null;
 		if (from == null || to == null) {
 			lines.add("Both corners need three whole numbers.");
+			lines.add("Pasting \"x y z\" fills a corner; six numbers fill both.");
 		} else {
 			long volume = NoteMachineReader.volume(from, to);
 			lines.add(String.format(Locale.ROOT, "%d x %d x %d, %,d blocks",
@@ -171,12 +260,19 @@ final class RegionScanScreen extends Screen {
 		BlockPos from = corner(first);
 		BlockPos to = corner(second);
 		if (from != null && to != null && scanButton.active) {
+			remember();
 			scan.accept(from, to);
 		}
 	}
 
 	@Override
 	public boolean keyPressed(net.minecraft.client.input.KeyEvent event) {
+		// Asked of the event rather than of the keyboard, so the platform's own idea of the paste
+		// chord is used. Falls through to the box's ordinary paste when the clipboard is not a
+		// position, which is what makes pasting a single number into a single box still work.
+		if (event.isPaste() && pastePosition()) {
+			return true;
+		}
 		if (event.key() == org.lwjgl.glfw.GLFW.GLFW_KEY_ENTER
 				|| event.key() == org.lwjgl.glfw.GLFW.GLFW_KEY_KP_ENTER) {
 			confirm();
@@ -205,6 +301,9 @@ final class RegionScanScreen extends Screen {
 
 	@Override
 	public void onClose() {
+		// Keep whatever is in the boxes, even half-typed. Leaving to go and look something up is
+		// the commonest reason to close this, not the rarest.
+		remember();
 		minecraft.gui.setScreen(parent);
 	}
 }

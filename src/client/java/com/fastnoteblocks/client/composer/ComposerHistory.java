@@ -42,6 +42,23 @@ public final class ComposerHistory {
 		}
 	}
 
+	/**
+	 * Throws the history away and starts again from {@code project}.
+	 *
+	 * <p>For discarding edits, which is not a step backwards but a statement that the steps never
+	 * happened. Leaving them on the undo stack would let Ctrl+Z bring back the very work the user
+	 * just said to drop, and would leave the screen showing a composition the rest of the mod had
+	 * already stopped believing in.</p>
+	 */
+	public void reset(ComposerProject project) {
+		if (project == null) {
+			return;
+		}
+		undo.clear();
+		redo.clear();
+		current = project;
+	}
+
 	public boolean canUndo() {
 		return !undo.isEmpty();
 	}

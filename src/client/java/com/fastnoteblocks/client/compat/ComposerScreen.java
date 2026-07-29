@@ -242,8 +242,26 @@ public final class ComposerScreen extends Screen {
 		this.onReturn = onReturn == null ? () -> {
 		} : onReturn;
 		this.history = new ComposerHistory(config.composerProject());
+		this.savedProject = baseline(config, history.current());
+	}
+
+	/**
+	 * What "unsaved" is measured against.
+	 *
+	 * <p>Three cases, and the difference between the last two is the whole point. A song with a
+	 * file is measured against the file. A document with no file that has nothing in it is measured
+	 * against itself, so a blank composition is not something you are nagged to save until you put
+	 * something in it. A document with no file that <em>does</em> have something in it -- an import,
+	 * a scan -- is measured against nothing at all, so all of it counts as unsaved and closing asks
+	 * before dropping it.</p>
+	 */
+	private static ComposerProject baseline(FastNoteblocksConfig config, ComposerProject current) {
 		ComposerProject onDisk = config.savedComposerProject();
-		this.savedProject = onDisk == null ? history.current() : onDisk;
+		if (onDisk != null) {
+			return onDisk;
+		}
+		boolean empty = current.layers().stream().allMatch(layer -> layer.notes().isEmpty());
+		return empty ? current : null;
 	}
 
 	@Override
@@ -714,133 +732,33 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private void importSong() {
-		withUnsavedChangesChecked(this::chooseAndImportSong);
+		withUnsavedChangesChecked(() ->
+			SongImports.chooseMidiOrNbs(this, config, this::applyImportedProject));
 	}
 
 	/**
-	 * Reads a machine standing in the world back into a song of its own.
+	 * Reads a machine standing in the world back into a song.
 	 *
-	 * <p>An import like any other: it lands in the library under its own name rather than on top of
-	 * whatever is open, because a scan is a new song and not an edit to this one.</p>
+	 * <p>An import like any other: it opens as a document of its own rather than editing this one,
+	 * because a scan is a new song and not a change to whatever happened to be open.</p>
 	 */
 	private void scanWorldRegion() {
-		withUnsavedChangesChecked(() -> minecraft.gui.setScreen(
-			new RegionScanScreen(this, this::scanRegion)));
+		withUnsavedChangesChecked(() ->
+			SongImports.scanWorld(this, this::applyImportedProject));
 	}
 
 	private void importSchematic() {
-		withUnsavedChangesChecked(() -> minecraft.gui.setScreen(new FileBrowserScreen(this,
-			"Import a schematic", java.nio.file.Path.of(config.importDirectory()),
-			SchematicReader.EXTENSIONS,
-			folder -> {
-				config.setImportDirectory(folder.toString());
-				FastNoteblocksConfig.save();
-			},
-			file -> readSchematic(file))));
-	}
-
-	private void readSchematic(java.nio.file.Path path) {
-		minecraft.gui.setScreen(this);
-		try {
-			SchematicReader.Schematic schematic = SchematicReader.load(path);
-			String name = path.getFileName().toString().replaceFirst("\\.[^.]+$", "");
-			NoteMachineReader.Reading reading = NoteMachineReader.read(name,
-				net.minecraft.core.BlockPos.ZERO, schematic.size().offset(-1, -1, -1),
-				schematic::at);
-			applyImportedProject(reading.project(),
-				schematic.format() + " - " + reading.report());
-		} catch (Exception failed) {
-			showImportFailure(failed);
-		}
-	}
-
-	private void scanRegion(net.minecraft.core.BlockPos from, net.minecraft.core.BlockPos to) {
-		minecraft.gui.setScreen(this);
-		try {
-			NoteMachineReader.Reading reading = NoteMachineReader.read(
-				"World scan", from, to, minecraft.level::getBlockState);
-			applyImportedProject(reading.project(), reading.report());
-		} catch (Exception failed) {
-			showImportFailure(failed);
-		}
+		withUnsavedChangesChecked(() ->
+			SongImports.chooseSchematic(this, config, this::applyImportedProject));
 	}
 
 	private void openSongs() {
 		withUnsavedChangesChecked(() -> minecraft.gui.setScreen(new SongsScreen(parent, config)));
 	}
 
-	private void chooseAndImportSong() {
-		minecraft.gui.setScreen(new FileBrowserScreen(this, "Import MIDI or NBS",
-			java.nio.file.Path.of(config.importDirectory()), List.of(".mid", ".midi", ".nbs"),
-			folder -> {
-				config.setImportDirectory(folder.toString());
-				FastNoteblocksConfig.save();
-			},
-			file -> importSongFile(file.toString())));
-	}
-
-	private void importSongFile(String path) {
-		try {
-			String lowerPath = path.toLowerCase(java.util.Locale.ROOT);
-			ComposerProject imported;
-			String report;
-			if (lowerPath.endsWith(".nbs")) {
-				NbsImporter.Inspection inspection = NbsImporter.inspect(path, config);
-				if (inspection.instruments().size() > ComposerProject.MAX_LAYERS) {
-					minecraft.gui.setScreen(new NbsInstrumentSelectionScreen(this, inspection,
-						selected -> importSelectedNbs(path, selected)));
-					return;
-				}
-				NbsImporter.ProjectResult result = NbsImporter.importProject(path, config);
-				imported = result.project();
-				report = result.report();
-			} else {
-				MidiImporter.ProjectResult result = MidiImporter.importProject(path, config);
-				imported = result.project();
-				report = result.report();
-			}
-			applyImportedProject(imported, report);
-		} catch (Exception exception) {
-			showImportFailure(exception);
-		}
-	}
-
-	private void importSelectedNbs(String path, Set<String> selectedInstruments) {
-		minecraft.gui.setScreen(this);
-		try {
-			NbsImporter.ProjectResult result = NbsImporter.importProject(path, config, selectedInstruments);
-			applyImportedProject(result.project(), result.report());
-		} catch (Exception exception) {
-			showImportFailure(exception);
-		}
-	}
-
-	/**
-	 * Puts the imported song in the library as a song of its own and opens it.
-	 *
-	 * <p>Importing used to land on top of whichever song was open. With a name close enough to the
-	 * one it replaced you would not notice, and a Minecraft-ready composition would quietly be raw
-	 * MIDI again. An import is a new song; nothing you already have is touched.</p>
-	 */
-	private void applyImportedProject(ComposerProject imported, String report) {
-		String name = FastNoteblocksConfig.songs().uniqueName(imported.name());
-		String id = FastNoteblocksConfig.songs().newId(name);
-		FastNoteblocksConfig.songs().save(id,
-			imported.withName(name).withSpeedQuarters(ComposerProject.DEFAULT_SPEED_QUARTERS));
-		config.setActiveSongId(id);
-		FastNoteblocksConfig.save();
-		ComposerScreen opened = new ComposerScreen(parent, config, onReturn);
-		opened.showResult(Component.literal("Imported as \"" + name + "\" - " + report));
-		minecraft.gui.setScreen(opened);
-	}
-
-	private void showImportFailure(Exception exception) {
-		minecraft.gui.setScreen(new ConfirmScreen(confirmed -> minecraft.gui.setScreen(this),
-			Component.literal("Song import failed"),
-			Component.literal(exception.getMessage() == null
-				? exception.getClass().getSimpleName()
-				: exception.getMessage()),
-			CommonComponents.GUI_BACK, CommonComponents.GUI_CANCEL));
+	/** Opens what was read as a document of its own. Nothing already saved is touched. */
+	private void applyImportedProject(SongImports.Imported imported) {
+		SongImports.open(parent, config, onReturn, imported);
 	}
 
 	@Override
@@ -2306,7 +2224,7 @@ public final class ComposerScreen extends Screen {
 	 * every import report, conversion result and save confirmation was invisible until the composer
 	 * was closed -- by which point it had faded.</p>
 	 */
-	private void showResult(Component message) {
+	void showResult(Component message) {
 		toast = message;
 		toastShownAt = Util.getMillis();
 	}
@@ -3472,12 +3390,25 @@ public final class ComposerScreen extends Screen {
 				leave.run();
 			},
 			() -> {
-				// Back to what is on disk, or the sequence and the next visit here would both still
-				// be showing edits the user just said to throw away.
-				config.discardComposerEdits();
-				savedProject = config.composerProject();
+				discardEdits();
 				leave.run();
 			}));
+	}
+
+	/**
+	 * Puts the composition back to what was last saved, or to nothing if it was never saved.
+	 *
+	 * <p>Has to reset this screen too, not just the config. Only updating the baseline left the
+	 * editor still holding the discarded composition, so it compared unequal all over again and
+	 * asked about the same edits every time -- discard, discard, discard, forever.</p>
+	 */
+	private void discardEdits() {
+		config.discardComposerEdits();
+		history.reset(config.composerProject());
+		savedProject = baseline(config, history.current());
+		afterStateChange();
+		layersChanged();
+		rebuildMoveLayerButtons();
 	}
 
 	private boolean writeProject() {

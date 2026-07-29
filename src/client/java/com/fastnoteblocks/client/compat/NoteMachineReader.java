@@ -451,9 +451,15 @@ public final class NoteMachineReader {
 			}
 		}
 		if (heads.isEmpty()) {
-			throw new UnreadableException("Found note blocks but no way in: every repeater is fed by "
-				+ "another one, so there is no start to follow. A machine driven by a clock or a "
-				+ "loop cannot be read this way -- include the lever or button that starts it.");
+			// Two quite different situations, and telling someone their machine is a loop when what
+			// they actually selected is a wall of bare note blocks helps nobody.
+			throw new UnreadableException(survey.repeaters.isEmpty()
+				? "Found " + survey.noteBlocks.size() + " note blocks but no redstone to play them. "
+					+ "A note block machine needs repeaters to carry its timing; without them there "
+					+ "is no order to read, only blocks."
+				: "Found note blocks but no way in: every repeater is fed by another one, so there "
+					+ "is no start to follow. A machine driven by a clock or a loop cannot be read "
+					+ "this way -- include the lever or button that starts it.");
 		}
 		return heads;
 	}

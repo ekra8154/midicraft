@@ -810,13 +810,42 @@ public final class FastNoteblocksConfig {
 		return songs.song(activeSongId);
 	}
 
+	/**
+	 * Opens a composition that has no file behind it yet.
+	 *
+	 * <p>What an import produces. It used to be written into the library the moment it was read,
+	 * which meant deciding not to keep it still left it there -- and a song you have to go and
+	 * delete is not a song you declined. Nothing reaches disk until Save, and because there is no
+	 * active id, Save writes a new file rather than over whatever was open before.</p>
+	 */
+	public void openWorkingCopy(ComposerProject project) {
+		if (project == null) {
+			return;
+		}
+		activeSongId = null;
+		composerProject = project;
+		activeSequenceName = project.name();
+	}
+
+	/** Whether what is being edited has a file behind it. */
+	public boolean hasSongFile() {
+		return activeSongId != null && songs.song(activeSongId) != null;
+	}
+
 	/** Throws away unsaved edits, so leaving without saving really does leave nothing behind. */
 	public void discardComposerEdits() {
 		ComposerProject saved = songs.song(activeSongId);
 		if (saved != null) {
 			composerProject = saved;
 			activeSequenceName = saved.name();
+			return;
 		}
+		// Nothing on disk to go back to, so go back to nothing. Discarding an import leaves an
+		// empty document rather than the import with its edits undone, which would still be the
+		// thing the user just declined to keep.
+		activeSongId = null;
+		composerProject = ComposerProject.empty("Untitled composition");
+		activeSequenceName = composerProject.name();
 	}
 
 	public int activeTrackIndex() {
