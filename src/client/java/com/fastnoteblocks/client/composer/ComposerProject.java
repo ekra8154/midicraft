@@ -557,6 +557,46 @@ public record ComposerProject(
 		return repeaterAlignedTempo(Math.max(1, gridTicks));
 	}
 
+	/**
+	 * The song's own spacing, as the notes actually sit.
+	 *
+	 * <p>What the tempo actually has to accommodate. A musical grid is a guess at this and usually
+	 * a wrong one: a song whose notes all sit two 1/16s apart is judged against the 1/16 and forced
+	 * to a tempo twice as slow as it needs, and a song whose notes have drifted off any grid at all
+	 * reports a spacing of a few ticks, which is the honest answer -- no tempo will save it.</p>
+	 *
+	 * <p>The gcd is right even when no gap is that size. Gaps of 330 and 495 both have to be whole
+	 * repeater ticks, so a repeater tick has to divide 165 whether or not anything is 165 apart.</p>
+	 */
+	public NoteSpacing noteSpacing() {
+		List<Long> starts = layers.stream()
+			.filter(Layer::buildEnabled)
+			.flatMap(layer -> layer.notes().stream())
+			.map(NoteEvent::startTick)
+			.distinct()
+			.sorted()
+			.toList();
+		long grid = 0L;
+		long smallest = Long.MAX_VALUE;
+		for (int index = 1; index < starts.size(); index++) {
+			long gap = starts.get(index) - starts.get(index - 1);
+			grid = greatestCommonDivisor(grid, gap);
+			smallest = Math.min(smallest, gap);
+		}
+		return new NoteSpacing(grid, grid == 0L ? 0L : smallest);
+	}
+
+	/**
+	 * How the song is spaced: the grid every gap is a multiple of, and the tightest gap it has.
+	 *
+	 * <p>Both, because the gap between them is the tell. When they agree, the grid is real and a
+	 * tempo built on it costs nothing beyond what the music demands. When the grid is far finer
+	 * than anything that actually occurs, a handful of strays have dragged it down and a tempo
+	 * built on it slows the whole song to accommodate spacing no note uses.</p>
+	 */
+	public record NoteSpacing(long gridTicks, long smallestGapTicks) {
+	}
+
 	public int noteCount() {
 		return layers.stream().mapToInt(layer -> layer.notes().size()).sum();
 	}
@@ -889,7 +929,13 @@ public record ComposerProject(
 		double gridRepeaterTicks = gridTicks * tempoMicrosPerQuarter
 			/ (double)ppq / 100_000.0 / speedFactor;
 		int nearestRepeaterTicks = Math.max(1, (int)Math.round(gridRepeaterTicks));
-		return Math.max(1, (int)Math.round(
+		// Rounded up, like the nudge in withQuantizedToRepeaters and for the same reason. The tempo
+		// is an integer, so the span it produces lands either side of the grid; one microsecond low
+		// makes the span a hair wider than the grid, and every gap that should be exactly one
+		// repeater tick comes out at 0.999 of one, which reads as too frequent. Up lands the span
+		// just inside the grid, where the error is harmless. Found by snapping a song that had just
+		// been quantized to repeater ticks and watching 369 gaps go red.
+		return Math.max(1, (int)Math.ceil(
 			nearestRepeaterTicks * 100_000.0 * ppq * speedFactor / gridTicks
 		));
 	}

@@ -80,6 +80,15 @@ public final class ComposerScreen extends Screen {
 	private static final long TOOLTIP_DWELL_MILLIS = 260L;
 	private static final long SCALE_COALESCE_MILLIS = 400L;
 	private static final long TOAST_MILLIS = 4500L;
+	/**
+	 * How much finer than the song's tightest gap its shared grid may be before Snap tempo declines.
+	 *
+	 * <p>They are equal in a song whose notes sit on a grid, and the tempo then costs nothing beyond
+	 * what the music demands. Far apart means a few strays have dragged the grid below anything the
+	 * song plays, and no tempo fixes that cheaply -- gaps of five and seven units force a span of
+	 * one whatever the tempo does, so the answer is to move the notes.</p>
+	 */
+	private static final long MAX_GRID_STRETCH = 4L;
 	private static final int NOTE_TRIGGER_WIDTH = 7;
 	private static final int SNAP_REPEATER = -1;
 	private static final long PREVIEW_BACKLOG_TOLERANCE_MICROS = 100_000L;
@@ -1019,7 +1028,7 @@ public final class ComposerScreen extends Screen {
 			case QUANTIZE_REPEATERS -> quantizeToRepeaters();
 			case FIT_ALL_RANGE -> applyStep("Fitted to range",
 				project().withAllFittedToRange(selectedNotes));
-			case SNAP_TEMPO -> applyTimingStep("Tempo snapped", snappedTempo(project().withBakedSpeed()));
+			case SNAP_TEMPO -> snapTempo();
 			case SNAP_END -> applyStep("End snapped", project().withEndTick(
 				snapEndToRepeaterGrid()));
 			case TRIM_END -> applyStep("Trimmed", project().trimmedToContent());
@@ -1038,14 +1047,41 @@ public final class ComposerScreen extends Screen {
 	}
 
 	/**
-	 * The tempo nudged so the musical grid lands on whole repeater ticks.
+	 * The nearest tempo at which the song's own spacing is a whole number of repeater ticks.
 	 *
-	 * <p>Half of what makes a song buildable. Quantize puts notes on the musical grid; this makes
-	 * that grid something redstone can count. Neither is any use without the other, which is why
-	 * quantizing a song whose tempo has drifted moves every note and fixes nothing.</p>
+	 * <p>Measured off the notes, not off a grid chosen elsewhere. It used to take the Import menu's
+	 * quantize setting and force one step of that to be at least one repeater tick, whether or not
+	 * any two notes in the song were ever that close -- so a song already sitting on the repeater
+	 * grid got slowed by up to nine times and came back with hundreds of gaps it did not have
+	 * before. On the same songs it is now a no-op, which is the right answer for something already
+	 * aligned.</p>
 	 */
-	private ComposerProject snappedTempo(ComposerProject source) {
-		return source.withTempo(source.repeaterAlignedTempoFor(minecraftConversionGridTicks(source)));
+	private void snapTempo() {
+		ComposerProject baked = project().withBakedSpeed();
+		ComposerProject.NoteSpacing spacing = baked.noteSpacing();
+		if (spacing.gridTicks() <= 0L) {
+			showResult(Component.literal("Not enough notes to work out a spacing."));
+			return;
+		}
+		int tempo = baked.repeaterAlignedTempoFor(
+			(int)Math.min(Integer.MAX_VALUE, spacing.gridTicks()));
+		ComposerProject snapped = baked.withTempo(tempo);
+		// Measured against the song's own tightest gap, not against a repeater tick. A slow song
+		// whose notes are naturally sixteen ticks apart is not a problem and its tempo does not
+		// move; a song whose grid is five times finer than anything it plays is one, because that
+		// grid came from a few strays and the tempo would follow them down.
+		if (spacing.smallestGapTicks() > spacing.gridTicks() * MAX_GRID_STRETCH) {
+			showResult(Component.literal(String.format(java.util.Locale.ROOT,
+				"The notes share no usable spacing: every gap is a multiple of %d ticks, but the "
+					+ "closest two are %d apart. No tempo fixes that without slowing the song %.2fx, "
+					+ "so nothing was changed. Quantize to repeater ticks moves the notes instead, "
+					+ "which is what this needs.",
+				spacing.gridTicks(), spacing.smallestGapTicks(),
+				tempo / (double)baked.tempoMicrosPerQuarter()))
+				.withStyle(net.minecraft.ChatFormatting.YELLOW));
+			return;
+		}
+		applyTimingStep("Tempo snapped", snapped);
 	}
 
 	private void quantizeTo(int gridTicks) {
@@ -1191,8 +1227,10 @@ public final class ComposerScreen extends Screen {
 				+ "small grid exists at the current one.";
 			case FIT_ALL_RANGE -> "Octave-shifts notes outside F#3-F#5 into it. Quick rather than "
 				+ "faithful: intervals across a layer can change.";
-			case SNAP_TEMPO -> "Nudges the tempo so the grid lands on whole repeater ticks, folding "
-				+ "the speed slider in first. The other half of quantize, and neither works alone.";
+			case SNAP_TEMPO -> "Moves the tempo as little as it can while making the spacing the "
+				+ "song already has land on whole repeater ticks, folding the speed slider in first. "
+				+ "Leaves every note where it is, so it does nothing for a song whose notes share no "
+				+ "usable grid -- it says so rather than dragging the tempo down to meet them.";
 			case SNAP_END -> "Moves the end marker so its trailing delay is a whole number of "
 				+ "repeater ticks.";
 			case TRIM_END -> "Pulls the end marker back to the last note, discarding trailing "
