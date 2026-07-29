@@ -37,7 +37,8 @@ public final class ComposerScreen extends Screen {
 	private static final int TOOLBAR_CONTROLS_RIGHT = 8 + 6 * 58 + 82 + 94;
 	private static final int LAYER_PANEL_WIDTH = 196;
 	private static final int PIANO_WIDTH = 48;
-	private static final int TIMELINE_RULER_HEIGHT = 16;
+	/** Tall enough for a bar number with the clock time under it. */
+	private static final int TIMELINE_RULER_HEIGHT = 24;
 	/**
 	 * One height for every layer row.
 	 *
@@ -66,7 +67,15 @@ public final class ComposerScreen extends Screen {
 	private static final int IMPORT_MENU_WIDTH = 196;
 	private static final int TOOLBAR_MENU_ROW_HEIGHT = 18;
 	private static final int VELOCITY_CUTOFF_STEP = 8;
-	private static final int ROW_HEIGHT = 12;
+	/**
+	 * Starting height of a piano-roll row, and below it the starting horizontal zoom.
+	 *
+	 * <p>Both deliberately wide. A composition arrives from an import as thousands of notes across
+	 * four octaves, and opening on a view that holds a bar and a half of it means the first thing
+	 * anyone does is zoom out. Ctrl and the wheel go back in.</p>
+	 */
+	private static final int ROW_HEIGHT = 8;
+	private static final double DEFAULT_TICKS_PER_PIXEL = 24.0;
 		private static final int CHORD_WARNING_THRESHOLD = 24;
 	private static final int MAX_PREVIEW_SOUNDS_PER_FRAME = 64;
 	private static final int MIN_GRID_PIXEL_SPACING = 4;
@@ -144,7 +153,7 @@ public final class ComposerScreen extends Screen {
 	private long lastEndDragAt;
 	private long horizontalScroll;
 	private int topMidiNote = 91;
-	private double ticksPerPixel = 10.0;
+	private double ticksPerPixel = DEFAULT_TICKS_PER_PIXEL;
 	private boolean draggingNotes;
 	private boolean selectingBox;
 	private long horizontalEdgeSince;
@@ -191,6 +200,18 @@ public final class ComposerScreen extends Screen {
 	private boolean unsavedCacheResult;
 	private ComposerProject cachedColorProject;
 	private int[] cachedLayerColors;
+	/**
+	 * A press that is setting the same thing on every row it is dragged across.
+	 *
+	 * <p>Whatever the first click produced is what the rest of the drag paints, rather than each row
+	 * being toggled or cycled in turn. Dragging over a row that already agreed would otherwise flip
+	 * it the wrong way, which makes the gesture useless for the thing it is for -- taking a run of
+	 * layers out of the build in one stroke.</p>
+	 */
+	private LayerPaint painting = LayerPaint.NONE;
+	private boolean paintBuildEnabled;
+	private LayerState paintState = LayerState.ACTIVE;
+	private final Set<Integer> paintedRows = new LinkedHashSet<>();
 	/** The layer a press landed on, and whether it has moved far enough to be a reorder. */
 	private int layerDragIndex = -1;
 	private double layerDragStartY;
@@ -393,25 +414,70 @@ public final class ComposerScreen extends Screen {
 	 * -click walks back, which puts muting one click forward from where a layer usually sits and
 	 * hiding one click back.</p>
 	 */
-	private void cycleLayerState(int clickedIndex, int direction) {
+	private LayerState cycleLayerState(int clickedIndex, int direction) {
 		LayerState[] dial = LayerState.values();
 		LayerState next = dial[Math.floorMod(layerState(clickedIndex).ordinal() + direction, dial.length)];
-		for (int index : layersToEdit(clickedIndex)) {
-			if (next == LayerState.SOLO) {
+		setLayerState(layersToEdit(clickedIndex), next);
+		return next;
+	}
+
+	private void setLayerState(List<Integer> indices, LayerState state) {
+		setLayerState(indices, state, false);
+	}
+
+	/**
+	 * @param coalesce fold this into the step already recorded, rather than adding one of its own.
+	 *     A drag across thirty layers is one thing the user did, and should be one press of undo.
+	 */
+	private void setLayerState(List<Integer> indices, LayerState state, boolean coalesce) {
+		ComposerProject updated = project();
+		for (int index : indices) {
+			if (index < 0 || index >= updated.layers().size()) {
+				continue;
+			}
+			if (state == LayerState.SOLO) {
 				soloedLayers.add(index);
 			} else {
 				soloedLayers.remove(index);
 			}
+			Layer layer = updated.layers().get(index);
+			updated = updated.withLayer(index, switch (state) {
+				case SOLO, ACTIVE -> layer.withMuted(false).withVisible(true);
+				case MUTED -> layer.withMuted(true).withVisible(true);
+				case HIDDEN -> layer.withMuted(true).withVisible(false);
+			});
 		}
-		updateLayers(clickedIndex, layer -> switch (next) {
-			case SOLO, ACTIVE -> layer.withMuted(false).withVisible(true);
-			case MUTED -> layer.withMuted(true).withVisible(true);
-			case HIDDEN -> layer.withMuted(true).withVisible(false);
-		});
+		applyMaybeCoalesced(updated, coalesce);
+		layersChanged();
 		if (playing) {
 			resetPlaybackSchedule();
 		}
 		updateButtonStates();
+	}
+
+	private void setLayerBuildEnabled(List<Integer> indices, boolean enabled) {
+		setLayerBuildEnabled(indices, enabled, false);
+	}
+
+	private void setLayerBuildEnabled(List<Integer> indices, boolean enabled, boolean coalesce) {
+		ComposerProject updated = project();
+		for (int index : indices) {
+			if (index >= 0 && index < updated.layers().size()) {
+				updated = updated.withLayer(index, updated.layers().get(index).withBuildEnabled(enabled));
+			}
+		}
+		applyMaybeCoalesced(updated, coalesce);
+		layersChanged();
+	}
+
+	private void applyMaybeCoalesced(ComposerProject updated, boolean coalesce) {
+		if (!coalesce) {
+			apply(updated);
+			return;
+		}
+		anchorPlayhead();
+		history.replaceCurrent(updated);
+		afterStateChange();
 	}
 
 	private void selectLayer(int layerIndex, boolean toggle, boolean range) {
@@ -1756,9 +1822,14 @@ public final class ComposerScreen extends Screen {
 				continue;
 			}
 			boolean measure = tick % measureTicks == 0L;
-			graphics.fill(x, rulerY + (measure ? 1 : 6), x + 1, rollY, measure ? 0xFF9A9A9A : 0xFF686D73);
+			graphics.fill(x, measure ? rulerY + 1 : rollY - 6, x + 1, rollY,
+				measure ? 0xFF9A9A9A : 0xFF686D73);
 			if (measure && showLabels) {
-				graphics.text(font, Long.toString(tick / measureTicks + 1L), x + 3, rulerY + 2, 0xFFBFC4CA, false);
+				// Bar number over clock time. The bar is where you are in the music and the clock is
+				// how long you will be standing there, and the second one moves when the speed does.
+				graphics.text(font, Long.toString(tick / measureTicks + 1L), x + 3, rulerY + 2,
+					0xFFBFC4CA, false);
+				smallText(graphics, clockLabel(secondsAt(tick)), x + 3, rulerY + 13, 0xFF767C85);
 			}
 		}
 		int endX = tickX(project().endTick());
@@ -1774,12 +1845,40 @@ public final class ComposerScreen extends Screen {
 		if (markerX >= rollX && markerX <= rollX + rollWidth) {
 			graphics.fill(markerX - 3, rulerY + 1, markerX + 4, rulerY + 5, 0xFFFF5555);
 			graphics.fill(markerX - 1, rulerY + 5, markerX + 2, rollY, 0xFFFF5555);
+			// Where the playhead is, to a tenth. Drawn last so it wins wherever it lands on top of a
+			// bar's own label -- while something is playing this is the number being read.
+			String at = preciseClockLabel(secondsAt(markerTick));
+			int labelX = Math.min(rollX + rollWidth - smallTextWidth(at) - 2, markerX + 5);
+			smallText(graphics, at, Math.max(rollX + 2, labelX), rulerY + 13, 0xFFFF8888);
 		}
 		if (mouseX >= rollX && mouseX < rollX + rollWidth && mouseY >= rulerY && mouseY < rollY) {
 			graphics.setTooltipForNextFrame(Component.literal(overEndMarker(mouseX, mouseY)
 				? "Drag to set where the song ends"
 				: "Drag to set playback start"), mouseX, mouseY);
 		}
+	}
+
+	/**
+	 * Where a tick falls in real seconds, at the speed the song is set to.
+	 *
+	 * <p>Follows the speed slider, because the slider is what decides how fast the song is actually
+	 * played and built. A clock that ignored it would be describing a performance nobody is giving.
+	 * Same arithmetic as the length the songs screen reports.</p>
+	 */
+	private double secondsAt(long tick) {
+		return tick * project().tempoMicrosPerQuarter()
+			/ (project().ppq() * 1_000_000.0 * timescaleFactor());
+	}
+
+	private static String clockLabel(double seconds) {
+		int whole = (int)Math.floor(Math.max(0.0, seconds));
+		return String.format(java.util.Locale.ROOT, "%d:%02d", whole / 60, whole % 60);
+	}
+
+	private static String preciseClockLabel(double seconds) {
+		double clamped = Math.max(0.0, seconds);
+		return String.format(java.util.Locale.ROOT, "%d:%04.1f",
+			(int)(clamped / 60.0), clamped % 60.0);
 	}
 
 	private void extractPianoRoll(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
@@ -2213,7 +2312,7 @@ public final class ComposerScreen extends Screen {
 		if (event.button() == 1) {
 			int stateLayer = layerStateAt(event.x(), event.y());
 			if (stateLayer >= 0) {
-				cycleLayerState(stateLayer, -1);
+				startPainting(LayerPaint.STATE, stateLayer, cycleLayerState(stateLayer, -1), false);
 				return true;
 			}
 			int layerIndex = layerHeaderAt(event.x(), event.y());
@@ -2242,13 +2341,14 @@ public final class ComposerScreen extends Screen {
 			int dotLayer = buildDotAt(event.x(), event.y());
 			if (dotLayer >= 0) {
 				boolean next = !project().layers().get(dotLayer).buildEnabled();
-				updateLayers(dotLayer, target -> target.withBuildEnabled(next));
+				setLayerBuildEnabled(layersToEdit(dotLayer), next);
 				showResult(Component.literal(sequenceSummary()));
+				startPainting(LayerPaint.BUILD_DOT, dotLayer, LayerState.ACTIVE, next);
 				return true;
 			}
 			int stateLayer = layerStateAt(event.x(), event.y());
 			if (stateLayer >= 0) {
-				cycleLayerState(stateLayer, 1);
+				startPainting(LayerPaint.STATE, stateLayer, cycleLayerState(stateLayer, 1), false);
 				return true;
 			}
 			int instrumentLayer = layerInstrumentAt(event.x(), event.y());
@@ -2440,6 +2540,19 @@ public final class ComposerScreen extends Screen {
 	public boolean mouseDragged(MouseButtonEvent event, double dx, double dy) {
 		lastMouseX = event.x();
 		lastMouseY = event.y();
+		if (painting != LayerPaint.NONE) {
+			// Only the row matters once the gesture is under way. Asking for the cursor to stay
+			// inside a twelve-pixel column while dragging down thirty layers is not a gesture.
+			int row = layerRowAtY(event.y());
+			if (row >= 0 && paintedRows.add(row)) {
+				if (painting == LayerPaint.BUILD_DOT) {
+					setLayerBuildEnabled(List.of(row), paintBuildEnabled, true);
+				} else {
+					setLayerState(List.of(row), paintState, true);
+				}
+			}
+			return true;
+		}
 		if (layerDragIndex >= 0) {
 			layerDragY = event.y();
 			if (!layerDragActive && Math.abs(layerDragY - layerDragStartY) > 4) {
@@ -2477,6 +2590,17 @@ public final class ComposerScreen extends Screen {
 
 	@Override
 	public boolean mouseReleased(MouseButtonEvent event) {
+		if (painting != LayerPaint.NONE) {
+			// The sequence summary is only news when the build dots moved; a run of mutes has not
+			// changed what would be built by a single block.
+			boolean report = painting == LayerPaint.BUILD_DOT && paintedRows.size() > 1;
+			painting = LayerPaint.NONE;
+			paintedRows.clear();
+			if (report) {
+				showResult(Component.literal(sequenceSummary()));
+				return true;
+			}
+		}
 		if (layerDragIndex >= 0) {
 			int from = layerDragIndex;
 			boolean reordering = layerDragActive;
@@ -3280,10 +3404,22 @@ public final class ComposerScreen extends Screen {
 		return LAYER_PANEL_WIDTH - 34;
 	}
 
+	private void startPainting(LayerPaint kind, int fromRow, LayerState state, boolean buildEnabled) {
+		painting = kind;
+		paintState = state;
+		paintBuildEnabled = buildEnabled;
+		paintedRows.clear();
+		paintedRows.addAll(layersToEdit(fromRow));
+	}
+
 	/** Which row a point is on, whatever part of the row it lands in. */
 	private int layerRowAt(double x, double y) {
-		if (x < 8 || x >= LAYER_PANEL_WIDTH - 8
-				|| y < LAYER_LIST_TOP - 2 || y > layerListBottom()) {
+		return x < 8 || x >= LAYER_PANEL_WIDTH - 8 ? -1 : layerRowAtY(y);
+	}
+
+	/** The row at a height, for gestures that have already decided which column they are in. */
+	private int layerRowAtY(double y) {
+		if (y < LAYER_LIST_TOP - 2 || y > layerListBottom()) {
 			return -1;
 		}
 		int index = (int)Math.floor((y - (LAYER_LIST_TOP - 2 - layerScroll)) / LAYER_ROW_HEIGHT);
@@ -3683,6 +3819,13 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private record NoteHit(int layerIndex, NoteEvent note) {
+	}
+
+	/** What a drag down the layer panel is setting on every row it crosses. */
+	private enum LayerPaint {
+		NONE,
+		BUILD_DOT,
+		STATE
 	}
 
 	private enum ToolbarMenu {
