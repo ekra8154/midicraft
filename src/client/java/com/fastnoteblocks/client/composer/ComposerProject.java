@@ -305,8 +305,26 @@ public record ComposerProject(
 	 *
 	 * @param layerIndices layers to include, or empty for every layer marked for building
 	 */
-	public List<SequenceTrack> toSequenceTracks(Set<Integer> layerIndices) {
+	/**
+	 * What a note sounds like and when, which is all a note block can express.
+	 *
+	 * <p>Velocity and duration are deliberately not part of it. A note block has no volume and no
+	 * sustain, so two notes agreeing on these three things build as one sound played twice.</p>
+	 */
+	public record NoteSound(String instrument, int midiNote, long startTick) {
+		public static NoteSound of(Layer layer, NoteEvent note) {
+			return new NoteSound(layer.instrument(), note.midiNote(), note.startTick());
+		}
+	}
+
+	/**
+	 * @param dedupeIdentical drop a note when an earlier layer already plays that sound at that
+	 *     instant. Nothing is deleted -- the note stays in the composition and comes back the
+	 *     moment the layers stop agreeing, which is what changing one layer's instrument does.
+	 */
+	public List<SequenceTrack> toSequenceTracks(Set<Integer> layerIndices, boolean dedupeIdentical) {
 		List<SequenceTrack> result = new ArrayList<>();
+		Set<NoteSound> heard = dedupeIdentical ? new java.util.HashSet<>() : null;
 		for (int index = 0; index < layers.size(); index++) {
 			Layer layer = layers.get(index);
 			// Mute is about listening, not building. Once solo exists, muting a layer to hear
@@ -317,9 +335,20 @@ public record ComposerProject(
 			if (!chosen) {
 				continue;
 			}
-			result.add(new SequenceTrack(layer.name(), toText(layer), layer.instrument(), 0, true));
+			Layer projected = heard == null ? layer : withoutAlreadyHeard(layer, heard);
+			result.add(new SequenceTrack(layer.name(), toText(projected), layer.instrument(), 0, true));
 		}
 		return List.copyOf(result);
+	}
+
+	private static Layer withoutAlreadyHeard(Layer layer, Set<NoteSound> heard) {
+		List<NoteEvent> kept = new ArrayList<>(layer.notes().size());
+		for (NoteEvent note : layer.notes()) {
+			if (heard.add(NoteSound.of(layer, note))) {
+				kept.add(note);
+			}
+		}
+		return kept.size() == layer.notes().size() ? layer : layer.withNotes(kept);
 	}
 
 	public ComposerProject withLayer(int index, Layer layer) {

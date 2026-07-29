@@ -198,6 +198,7 @@ public final class ComposerScreen extends Screen {
 	private long hoveredSince;
 	private ComposerProject cachedStatsProject;
 	private SongAnalysis cachedStats;
+	private boolean cachedStatsDedupe;
 	/**
 	 * The composition as it stands on disk, which is what "unsaved" is measured against.
 	 *
@@ -1090,6 +1091,13 @@ public final class ComposerScreen extends Screen {
 			case SET_INCLUDED_TO_SELECTION -> setIncludedLayers(false);
 			case PASTE_IN_WORLD -> pasteInWorld();
 			case BUILD_CANCEL -> CommandPasteSender.cancel(true);
+			case TOGGLE_DEDUPE -> {
+				config.setDedupeIdenticalNotes(!config.dedupeIdenticalNotes());
+				FastNoteblocksConfig.save();
+				showResult(Component.literal(config.dedupeIdenticalNotes()
+					? "Identical simultaneous notes will be built once."
+					: "Identical simultaneous notes will each be built."));
+			}
 			case SAVE_COMPOSITION -> saveComposition();
 			case SAVE_COMPOSITION_AS -> saveCompositionAs();
 			case BACK_TO_SEQUENCES -> onClose();
@@ -1319,6 +1327,11 @@ public final class ComposerScreen extends Screen {
 			case PASTE_IN_WORLD -> "Builds the sequence with /setblock. Needs permission, and "
 				+ "overwrites whatever is standing there.";
 			case BUILD_CANCEL -> "Stops a paste part-way. Blocks already placed stay put.";
+			case TOGGLE_DEDUPE -> "When two included layers ask for the same instrument and pitch at "
+				+ "the same tick, build it once. Preview has always collapsed these, so they are "
+				+ "inaudible either way, but each costs a note block and one of the thirty a tick "
+				+ "can carry. Nothing is deleted: give one of those layers a different instrument "
+				+ "and both notes come back.";
 			case SELECT_OFF_GRID -> "Selects notes whose gap from the previous one is not a whole "
 				+ "repeater tick.";
 			case SELECT_TOO_FREQUENT -> "Selects notes arriving less than one repeater tick after "
@@ -1399,6 +1412,9 @@ public final class ComposerScreen extends Screen {
 		}
 		if (selected > 0 && action == ToolbarAction.SET_INCLUDED_TO_SELECTION) {
 			return "Include only " + layerCountLabel(selected) + " in sequence";
+		}
+		if (action == ToolbarAction.TOGGLE_DEDUPE) {
+			return action.label + ": " + (config.dedupeIdenticalNotes() ? "On" : "Off");
 		}
 		return action.label;
 	}
@@ -2279,14 +2295,18 @@ public final class ComposerScreen extends Screen {
 		}
 		segments.add("peak " + peakChord + "/" + SongAnalysis.MAX_SIMULTANEOUS_NOTES
 			+ (overloaded > 0 ? " (" + overloaded + " over)" : ""));
-		segments.add(stats.totalNotes() + " notes · " + project().layers().size() + " layers");
+		segments.add(stats.totalNotes() + " notes"
+			+ (stats.duplicateNotes() > 0 ? " (" + stats.duplicateNotes() + " deduped)" : "")
+			+ " · " + project().layers().size() + " layers");
 		int included = (int)project().layers().stream()
 			.filter(Layer::buildEnabled)
 			.count();
 		if (included == 0) {
 			segments.add("nothing included");
 		} else {
-			SongBuilder.BlockCounts blocks = SongBuilder.blockCounts(project());
+			// Counted off the sequence rather than off the composition, so it agrees with what the
+			// paste would place -- including which notes deduplication left out of it.
+			SongBuilder.BlockCounts blocks = SongBuilder.blockCounts(config.tracks());
 			segments.add(blocks.total() + " blocks (" + blocks.noteBlocks() + " note · "
 				+ blocks.repeaters() + " repeater)");
 		}
@@ -2313,12 +2333,15 @@ public final class ComposerScreen extends Screen {
 
 	private SongAnalysis projectStats() {
 		ComposerProject current = project();
-		// The speed is part of the project now, so identity is the whole cache key.
-		if (cachedStatsProject == current && cachedStats != null) {
+		// The speed is part of the project, so identity covers everything the composition decides.
+		// Deduplication is a setting rather than part of the song, so it has to be checked too.
+		if (cachedStatsProject == current && cachedStats != null
+				&& cachedStatsDedupe == config.dedupeIdenticalNotes()) {
 			return cachedStats;
 		}
 		cachedStatsProject = current;
-		cachedStats = SongAnalysis.of(current);
+		cachedStatsDedupe = config.dedupeIdenticalNotes();
+		cachedStats = SongAnalysis.of(current, cachedStatsDedupe);
 		return cachedStats;
 	}
 
@@ -3928,6 +3951,7 @@ public final class ComposerScreen extends Screen {
 		SET_INCLUDED_TO_SELECTION("Include only selected layers in sequence"),
 		PASTE_IN_WORLD("Paste current sequence in world (requires op)..."),
 		BUILD_CANCEL("Cancel paste"),
+		TOGGLE_DEDUPE("Dedupe identical notes"),
 		SNAP_END("Snap end to grid"),
 		TRIM_END("Trim end to last note"),
 		SELECT_OFF_GRID("Off grid"),
@@ -3946,7 +3970,7 @@ public final class ComposerScreen extends Screen {
 			FIT_ALL_RANGE, SNAP_TEMPO, SNAP_END, TRIM_END
 		};
 		private static final ToolbarAction[] BUILD_ACTIONS = {
-			INCLUDE_SELECTED, SET_INCLUDED_TO_SELECTION, PASTE_IN_WORLD, BUILD_CANCEL
+			INCLUDE_SELECTED, SET_INCLUDED_TO_SELECTION, TOGGLE_DEDUPE, PASTE_IN_WORLD, BUILD_CANCEL
 		};
 		private static final ToolbarAction[] SELECT_ACTIONS = {
 			SELECT_OFF_GRID, SELECT_TOO_FREQUENT, SELECT_OUT_OF_RANGE, SELECT_ALL_NOTES, SELECT_NONE

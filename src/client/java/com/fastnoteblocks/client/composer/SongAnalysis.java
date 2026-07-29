@@ -28,15 +28,23 @@ public record SongAnalysis(
 	Set<Long> crowded,
 	Map<Long, Double> gaps,
 	long endTick,
-	double secondsLong
+	double secondsLong,
+	int duplicateNotes
 ) {
 	/** Two note blocks hang off each of redstone's 15 reachable bus blocks. */
 	public static final int MAX_SIMULTANEOUS_NOTES = 30;
 
-	public static SongAnalysis of(ComposerProject project) {
+	/**
+	 * @param dedupeIdentical judge the song the way the build will place it, with a sound that two
+	 *     layers play at the same instant counted once. Duplicates are otherwise counted against
+	 *     the thirty a tick can carry, which can call a chord unbuildable that would have fitted.
+	 */
+	public static SongAnalysis of(ComposerProject project, boolean dedupeIdentical) {
 		Map<Long, Integer> counts = new HashMap<>();
+		Set<ComposerProject.NoteSound> heard = dedupeIdentical ? new java.util.HashSet<>() : null;
 		int outOfRange = 0;
 		int totalNotes = 0;
+		int duplicateNotes = 0;
 		long maximumNoteDuration = 1L;
 		for (Layer layer : project.layers()) {
 			// Only included layers are judged. A layer left out of the sequence cannot stop a build
@@ -47,6 +55,10 @@ public record SongAnalysis(
 				totalNotes++;
 				maximumNoteDuration = Math.max(maximumNoteDuration, note.durationTicks());
 				if (!included) {
+					continue;
+				}
+				if (heard != null && !heard.add(ComposerProject.NoteSound.of(layer, note))) {
+					duplicateNotes++;
 					continue;
 				}
 				if (!note.isBuildable()) {
@@ -89,7 +101,7 @@ public record SongAnalysis(
 		}
 		return new SongAnalysis(totalNotes, outOfRange, Map.copyOf(counts), peak, overloaded,
 			maximumNoteDuration, Set.copyOf(offGrid), Set.copyOf(crowded), Map.copyOf(gaps),
-			project.endTick(), project.endTick() / span / 10.0);
+			project.endTick(), project.endTick() / span / 10.0, duplicateNotes);
 	}
 
 	/**

@@ -54,7 +54,8 @@ public final class SongsScreen extends Screen {
 		for (String id : library.ids()) {
 			ComposerProject song = library.song(id);
 			rows.add(new Row(id, song));
-			analyses.computeIfAbsent(id, ignored -> SongAnalysis.of(song));
+			analyses.computeIfAbsent(id,
+				ignored -> SongAnalysis.of(song, config.dedupeIdenticalNotes()));
 		}
 
 		int listBottom = height - 32;

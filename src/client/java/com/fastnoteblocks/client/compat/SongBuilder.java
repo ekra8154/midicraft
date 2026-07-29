@@ -97,11 +97,6 @@ public final class SongBuilder {
 		return countBlocks(eventNotes(tracks));
 	}
 
-	/** How many blocks of each kind the build would place, for the composer's status bar. */
-	static BlockCounts blockCounts(ComposerProject project) {
-		return countBlocks(eventNotes(project));
-	}
-
 	private static BlockCounts countBlocks(List<EventNote> notes) {
 		int noteBlocks = notes.size();
 		int repeaters = 0;

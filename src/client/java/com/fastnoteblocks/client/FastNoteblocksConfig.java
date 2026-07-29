@@ -264,6 +264,7 @@ public final class FastNoteblocksConfig {
 	private boolean placementSequenceEnabled;
 	private SequencingEditProtection sequencingEditProtection;
 	private boolean autoSelectSequenceBlock;
+	private boolean dedupeIdenticalNotes;
 	private String activeSequenceName;
 	private int activeSequenceDelayScaleQuarters;
 	private int composerSpeedQuarters;
@@ -338,6 +339,7 @@ public final class FastNoteblocksConfig {
 					? SequencingEditProtection.RADIALS_AND_INTERACTIONS
 					: stored.sequencingEditProtection;
 				instance.autoSelectSequenceBlock = stored.autoSelectSequenceBlock == null || stored.autoSelectSequenceBlock;
+				instance.dedupeIdenticalNotes = stored.dedupeIdenticalNotes == null || stored.dedupeIdenticalNotes;
 				instance.activeSequenceName = stored.activeSequenceName == null || stored.activeSequenceName.isBlank()
 					? "Untitled sequence"
 					: stored.activeSequenceName;
@@ -646,6 +648,24 @@ public final class FastNoteblocksConfig {
 		return autoSelectSequenceBlock;
 	}
 
+	/**
+	 * Whether the build plays a sound once when two layers ask for it at the same instant.
+	 *
+	 * <p>On by default. Preview has always collapsed these, so a duplicate is something you cannot
+	 * hear while composing but still pay for in blocks and in the thirty notes a tick can carry.
+	 * It is a setting rather than an edit because the layers only agree for now -- change one of
+	 * their instruments and they are two different sounds again, and a delete would have been
+	 * unrecoverable.</p>
+	 */
+	public boolean dedupeIdenticalNotes() {
+		return dedupeIdenticalNotes;
+	}
+
+	public void setDedupeIdenticalNotes(boolean dedupeIdenticalNotes) {
+		this.dedupeIdenticalNotes = dedupeIdenticalNotes;
+		cachedSequence = null;
+	}
+
 	public void setAutoSelectSequenceBlock(boolean autoSelectSequenceBlock) {
 		this.autoSelectSequenceBlock = autoSelectSequenceBlock;
 	}
@@ -723,7 +743,7 @@ public final class FastNoteblocksConfig {
 		ComposerProject project = composerProject();
 		if (cachedSequenceProject != project || cachedSequence == null) {
 			cachedSequenceProject = project;
-			cachedSequence = project.toSequenceTracks(java.util.Set.of());
+			cachedSequence = project.toSequenceTracks(java.util.Set.of(), dedupeIdenticalNotes);
 		}
 		return cachedSequence;
 	}
@@ -963,6 +983,7 @@ public final class FastNoteblocksConfig {
 		config.placementSequenceEnabled = false;
 		config.sequencingEditProtection = SequencingEditProtection.RADIALS_AND_INTERACTIONS;
 		config.autoSelectSequenceBlock = true;
+		config.dedupeIdenticalNotes = true;
 		config.activeSequenceName = "Untitled sequence";
 		config.activeSequenceDelayScaleQuarters = DEFAULT_SEQUENCE_DELAY_SCALE_QUARTERS;
 		config.previewInstrument = "HARP";
@@ -1103,6 +1124,7 @@ public final class FastNoteblocksConfig {
 		private Boolean placementSequenceEnabled;
 		private SequencingEditProtection sequencingEditProtection;
 		private Boolean autoSelectSequenceBlock;
+		private Boolean dedupeIdenticalNotes;
 		private String placementSequence;
 		private Integer placementSequencePosition;
 		private String activeSequenceName;
@@ -1151,6 +1173,7 @@ public final class FastNoteblocksConfig {
 			this.placementSequenceEnabled = config.placementSequenceEnabled;
 			this.sequencingEditProtection = config.sequencingEditProtection;
 			this.autoSelectSequenceBlock = config.autoSelectSequenceBlock;
+			this.dedupeIdenticalNotes = config.dedupeIdenticalNotes;
 			this.placementSequence = config.activeTrack().sequence();
 			this.placementSequencePosition = config.placementCursor;
 			this.activeSequenceName = config.activeSequenceName;
