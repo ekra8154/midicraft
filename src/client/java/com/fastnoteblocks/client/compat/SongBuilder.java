@@ -518,6 +518,13 @@ public final class SongBuilder {
 			// cannot go and look at. So a lane that will not reach its wall turns where it stands and
 			// says so, on the same overlay a wrong note would appear on, naming the chord that beat it
 			// and what it had left to work with. Every one of these is a thing to go and fix.
+			// Counted where the lane actually hands over, which is the only moment its final extent is
+			// known. A negative count is a lane that walked out past the wall its width was promised
+			// at -- so the paste covers ground the player was told it would not, and that is the half
+			// worth stopping to ask about rather than merely listing.
+			if (layout.ultra() && wantsTurn && canTurn && columns < 0) {
+				placements.breached(-columns);
+			}
 			if (layout.ultra() && wantsTurn && canTurn && !onWall && !split && !carried) {
 				placements.trouble("a lane turned " + columns + " columns short of its wall at tick "
 					+ event.time() + ", where a chord of " + event.notes().size()
@@ -802,7 +809,8 @@ public final class SongBuilder {
 	private static Map<Integer, Integer> planLane(List<EventGroup> events, int from, int startX,
 			int stepX, int wall, int startTime, int tip, boolean busy, int turnCells, int offBus,
 			int stepOff, Layout layout) {
-		Sweep bare = sweep(events, from, startX, stepX, wall, startTime, tip, busy, layout, Map.of());
+		Sweep bare = sweep(events, from, startX, stepX, wall, startTime, tip, busy, offBus, layout,
+			Map.of());
 		if (bare.last() < from
 			|| closes(events, bare, from, bare.last(), wall, stepX, turnCells, offBus, stepOff)) {
 			return Map.of();
@@ -812,20 +820,31 @@ public final class SongBuilder {
 		for (int last = bare.last(); last >= from; last--) {
 			Map<Integer, Integer> pads = new LinkedHashMap<>();
 			for (int attempt = 0; attempt < 8; attempt++) {
-				Sweep tried = sweep(events, from, startX, stepX, wall, startTime, tip, busy, layout,
+				Sweep tried = sweep(events, from, startX, stepX, wall, startTime, tip, busy, offBus, layout,
 					pads);
 				if (tried.last() < last) {
 					break;
 				}
 				int owing = (wall - tried.ends().get(last - from)) * stepX;
-				if (owing == 0) {
-					if (tried.tips().get(last - from)
-						>= (tried.styles().get(last - from) == ChordStyle.BUS ? offBus : turnCells)) {
-						return Map.copyOf(pads);
-					}
+				if (owing < 0) {
 					break;
 				}
-				if (owing < 0 || !book(pads, tried, from, last, owing)) {
+				// What the lane would lay behind this chord, asked the way the walk asks it. The lane
+				// does not have to land flush against the wall on the chord itself, and demanding that
+				// is what made the search give up on lanes it could have closed: a chord opens with a
+				// repeater, so the wire behind it is worth a full fifteen however little arrived, and
+				// the pad that spends it fills the last columns out to the wall. The chord that has to
+				// move only needs to move far enough that its own repeater can see the top of the
+				// staircase -- two columns on the lane this was found on, where landing it flush would
+				// have wanted twelve and there was room for three.
+				Pad end = closingPad(events, tried, from, last, owing, turnCells);
+				int need = end.cells().isEmpty()
+					&& tried.styles().get(last - from) == ChordStyle.BUS ? offBus : turnCells;
+				if (end.cells().size() == owing && end.signal() >= need) {
+					return Map.copyOf(pads);
+				}
+				if (owing - end.cells().size() <= 0
+					|| !book(pads, tried, from, last, owing - end.cells().size())) {
 					break;
 				}
 			}
@@ -842,7 +861,8 @@ public final class SongBuilder {
 	}
 
 	private static Sweep sweep(List<EventGroup> events, int from, int startX, int stepX, int wall,
-			int startTime, int tip, boolean busy, Layout layout, Map<Integer, Integer> pads) {
+			int startTime, int tip, boolean busy, int offBus, Layout layout,
+			Map<Integer, Integer> pads) {
 		List<Integer> ends = new ArrayList<>();
 		List<Integer> tips = new ArrayList<>();
 		List<ChordStyle> styles = new ArrayList<>();
@@ -856,7 +876,12 @@ public final class SongBuilder {
 			int pad = pads.getOrDefault(index, 0);
 			room.add(planPad(DUST_RANGE * 2, tip, 1, Math.max(0, wait - 1)).cells().size() - pad);
 			Landing landed = landingOf(cursor + stepX * pad, stepX, event, wait, busy, layout);
-			if ((landed.end() - wall) * stepX > 0) {
+			// Kept back the same column the walk keeps back. A bus that would leave the wire too weak
+			// to reach the top of the staircase is asked to stop one column short, so the pad has
+			// somewhere to stand the repeater that revives it. The walk has always done that and the
+			// sweep did not, so the planner counted chords into a lane the walk then refused to put
+			// there, and the two disagreed about which chords the lane even held.
+			if ((landed.end() + stepX * turnReserve(event, offBus, layout) - wall) * stepX > 0) {
 				break;
 			}
 			ends.add(landed.end());
@@ -871,7 +896,25 @@ public final class SongBuilder {
 		return new Sweep(ends, tips, styles, room, last);
 	}
 
-	/** Whether the lane can hand over after this event, either by landing on the wall or by a cut. */
+	/**
+	 * The pad a lane ending on this chord would lay behind it, worked out the way the walk does.
+	 *
+	 * <p>A lane does not have to land flush against its wall on the chord itself, and asking for
+	 * that is what made the search give up on lanes it could have closed. Every chord opens with a
+	 * repeater, so the wire behind one is worth a full fifteen however little arrived at it, and the
+	 * pad that spends it fills the last columns out to the wall. The chord that has to move only
+	 * needs to move far enough that its own repeater can see the top of the staircase -- two columns
+	 * in the lane this was found on, where landing it flush would have wanted twelve and there was
+	 * room for three.</p>
+	 */
+	private static Pad closingPad(List<EventGroup> events, Sweep sweep, int from, int last,
+			int owing, int turnCells) {
+		return planPad(owing, sweep.tips().get(last - from), turnCells,
+			last + 1 < events.size()
+				? Math.max(0, events.get(last + 1).time() - events.get(last).time() - 1) : 0);
+	}
+
+	/** Whether the lane can hand over after this event, either by filling it out or by a cut. */
 	private static boolean closes(List<EventGroup> events, Sweep sweep, int from, int last, int wall,
 			int stepX, int turnCells, int offBus, int stepOff) {
 		if (last + 1 >= events.size()) {
@@ -2348,7 +2391,24 @@ public final class SongBuilder {
 	 *     one. A folding build wants these in as few columns as it has walls.
 	 */
 	record PastePlan(List<String> commands, int width, int depth, int height, PasteMode mode,
-			List<String> faults, List<BlockPos> turns, List<Integer> moved) {
+			List<String> faults, List<BlockPos> turns, List<Integer> moved, List<Integer> breaches) {
+
+		/**
+		 * Notes the layout check says would be set off a second time, at a moment nobody wrote.
+		 *
+		 * <p>Worth telling the player about separately from a breach, because it is a different kind
+		 * of damage: an extra sounding is local to itself. A note block fires on a rising edge and
+		 * the chain is one travelling pulse, so a doubled note adds a sound and takes nothing away --
+		 * everything downstream of it plays exactly as written.</p>
+		 */
+		int wrongNotes() {
+			return (int)faults.stream().filter(fault -> fault.startsWith("the note")).count();
+		}
+
+		/** How far past the promised width the worst-behaved lane went, in blocks. */
+		int worstBreach() {
+			return breaches.stream().mapToInt(Integer::intValue).max().orElse(0);
+		}
 	}
 
 	private static final class PlacementPlan {
@@ -2379,6 +2439,15 @@ public final class SongBuilder {
 		private final List<Integer> moved = new ArrayList<>();
 		/** Lanes that could not be landed on their wall, and what defeated them. */
 		private final List<String> trouble = new ArrayList<>();
+		/**
+		 * Blocks by which a lane overstepped the wall its width was promised at, one per lane.
+		 *
+		 * <p>A different thing from a lane that stops short, and the reason to count them apart. A
+		 * lane that stops short stays inside the footprint the paste offered and risks only its own
+		 * staircase landing somewhere odd. A lane that oversteps puts blocks where the player was
+		 * told nothing would go, which is how a paste quietly eats something already built there.</p>
+		 */
+		private final List<Integer> breaches = new ArrayList<>();
 		private int minimumX = Integer.MAX_VALUE;
 		private int minimumY = Integer.MAX_VALUE;
 		private int minimumZ = Integer.MAX_VALUE;
@@ -2454,6 +2523,12 @@ public final class SongBuilder {
 		void trouble(String what) {
 			if (recording) {
 				trouble.add(what);
+			}
+		}
+
+		void breached(int blocks) {
+			if (recording && blocks > 0) {
+				breaches.add(blocks);
 			}
 		}
 
@@ -2583,7 +2658,7 @@ public final class SongBuilder {
 			return new PastePlan(commands, Math.max(widthX, widthZ), Math.min(widthX, widthZ), height,
 				mode, List.copyOf(faults),
 				turns.stream().map(turn -> turn.offset(shiftX, 0, shiftZ)).toList(),
-				List.copyOf(moved));
+				List.copyOf(moved), List.copyOf(breaches));
 		}
 	}
 }

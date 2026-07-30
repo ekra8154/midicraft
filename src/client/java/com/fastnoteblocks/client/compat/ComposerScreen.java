@@ -3332,6 +3332,17 @@ public final class ComposerScreen extends Screen {
 					.withStyle(net.minecraft.ChatFormatting.RED));
 				return;
 			}
+			// A build the layout could not place cleanly still goes up if the player says so -- but
+			// they are told first, because a breached footprint overwrites whatever was standing in
+			// the ground the paste promised to stay out of.
+			if (DenseBuildScreen.needsAsking(plan)) {
+				minecraft.gui.setScreen(new DenseBuildScreen(this, plan.wrongNotes(),
+					plan.breaches().size(), plan.worstBreach(), () -> {
+						CommandPasteSender.start(plan.commands(), plan.faults());
+						minecraft.gui.setScreen(null);
+					}));
+				return;
+			}
 			CommandPasteSender.start(plan.commands(), plan.faults());
 			minecraft.gui.setScreen(null);
 		}));
