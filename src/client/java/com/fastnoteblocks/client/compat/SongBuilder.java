@@ -427,6 +427,11 @@ public final class SongBuilder {
 		int tipSignal = DUST_RANGE;
 		LaneReach reach = laneReach(events, 0, events.size());
 		int slabStep = laneSpacing(reach, reach);
+		// Pad this lane has to lay before it reaches its last chord, settled when the lane starts.
+		// See planLane: by the time a lane finds out it cannot fill the gap in front of it, the
+		// chords that could have filled it are built.
+		Map<Integer, Integer> booked = Map.of();
+		boolean replan = layout.ultra();
 		for (int index = 0; index < events.size(); index++) {
 			EventGroup event = events.get(index);
 			// Settled before the event is placed rather than after it. A turn hands back a cursor at
@@ -447,6 +452,12 @@ public final class SongBuilder {
 			// down four levels its wire has to stand on five of them.
 			int offBus = above >= 0 && above < floors && climb > 0 ? turnCells - 2 : turnCells;
 			int wall = travel == forward ? farWall : nearWall;
+			int stepOffAhead = climb > 0 ? 0 : 1;
+			if (replan) {
+				booked = planLane(events, index, cursor.getX(), travel.getStepX(), wall, currentTime,
+					tipSignal, columnBehindBusy, turnCells, offBus, stepOffAhead, layout);
+				replan = false;
+			}
 			// A lane that ends flush with the wall on a wire too weak to reach the top of a staircase
 			// has nowhere left to stand the repeater that would revive it, and a lane that cannot turn
 			// runs on past the wall instead. So an event that would leave the wire that weak is asked
@@ -474,7 +485,7 @@ public final class SongBuilder {
 			int cells = (event.notes().size() + 1) / 2;
 			// A descent lands where it cannot be built on straight away and spends a block stepping
 			// off, which is a block the chord could have used.
-			int stepOff = climb > 0 ? 0 : 1;
+			int stepOff = stepOffAhead;
 			boolean split = layout.ultra() && wantsTurn && index > 0
 				&& above >= 0 && above < floors
 				&& room >= 2 && room - 1 < cells && cells + offBus + stepOff <= DUST_RANGE;
@@ -495,9 +506,15 @@ public final class SongBuilder {
 			// and ran on until one ending on a short chord came along -- which is most of why the
 			// staircases were scattered rather than merely off by a column. The pad can put a repeater
 			// in and make the range question go away; when it cannot, the lane still has to run on.
+			// And on the wall or not at all. A turn is the one thing in a build that steps off its own
+			// centre line, so a turn standing anywhere else stands beside whatever that column happens
+			// to hold. A lane that cannot reach its wall carries on to the next chord and tries again;
+			// the only turn allowed elsewhere is one on a lane already past its wall, where carrying on
+			// would never bring it back.
 			boolean canTurn = layout.ultra()
-				? index > 0 && pad.signal() >= (pad.cells().isEmpty() && lastStyle == ChordStyle.BUS
-					? offBus : turnCells)
+				? index > 0 && (booked == null || pad.cells().size() == columns || columns < 0)
+					&& pad.signal() >= (pad.cells().isEmpty() && lastStyle == ChordStyle.BUS
+						? offBus : turnCells)
 				: index > 0 && events.get(index - 1).maxSafeTurnDistance() >= MAX_LANE_SPACING;
 			int spentPadding = 0;
 			carried &= canTurn && !split;
@@ -522,6 +539,7 @@ public final class SongBuilder {
 				// alongside the run of powered stone the turn is made of.
 				columnBehindBusy = true;
 				laneStarted = true;
+				replan = layout.ultra();
 				continue;
 			}
 			if (canTurn && wantsTurn) {
@@ -554,6 +572,7 @@ public final class SongBuilder {
 				travel = travel.getOpposite();
 				laneStarted = false;
 				columnBehindBusy = true;
+				replan = layout.ultra();
 			}
 			if (carried) {
 				// The pad's repeater has already held this event's whole wait, and everything between
@@ -567,7 +586,17 @@ public final class SongBuilder {
 				// the turn's own run of powered stone does. Nothing behind the next module is free.
 				columnBehindBusy = true;
 				laneStarted = true;
+				replan = layout.ultra();
 				continue;
+			}
+			// Pad this lane was told to lay early rather than at its end, in front of the event's own
+			// repeater so that repeater stands between it and the wall.
+			int owing = index > 0 && booked != null ? booked.getOrDefault(index, 0) : 0;
+			if (owing > 0) {
+				Pad early = planPad(owing, tipSignal, 1, Math.max(0, wait - 1 - spentPadding));
+				cursor = emitPad(placements, cursor, travel, early);
+				spentPadding += early.delaySpent();
+				tipSignal = early.signal();
 			}
 			// One event of lookahead. If the next one will not fit after this one, this is the last
 			// event of its lane, and the pad that fills the lane out to the wall is better spent in
@@ -635,6 +664,153 @@ public final class SongBuilder {
 	private static int turnReserve(EventGroup event, int turnCells, Layout layout) {
 		return layout.ultra() && event.style() == ChordStyle.BUS
 			&& DUST_RANGE - (event.notes().size() + 1) / 2 < turnCells ? 1 : 0;
+	}
+
+	/**
+	 * Where an event leaves the cursor and what it leaves behind, worked out rather than built.
+	 *
+	 * <p>The one piece of arithmetic the planner and the walk both go through, so that a lane planned
+	 * to end on the wall is a lane that ends on the wall. Everything that decides an event's length is
+	 * in here: the repeaters the wait in front of it needs, the column a stacked module takes to land
+	 * on its beat, and the drop to a bus when the pair of slots behind it is already spoken for.</p>
+	 */
+	private record Landing(int end, int tip, boolean busy, ChordStyle style) {
+	}
+
+	private static Landing landingOf(int startX, int stepX, EventGroup event, int wait, boolean busy,
+			Layout layout) {
+		int delayColumns = Math.max(0, (wait - 1) / 4);
+		ChordStyle style = event.style() == ChordStyle.STACKED_FULL && busy && delayColumns == 0
+			? ChordStyle.BUS : event.style();
+		int cells = (event.notes().size() + 1) / 2;
+		int length;
+		if (style.stacked()) {
+			int centre = startX + stepX * (delayColumns + 1);
+			length = delayColumns + 2 + (Math.floorMod(centre, 2) == layout.centreParity() ? 0 : 1);
+		} else {
+			length = delayColumns + (style == ChordStyle.BUS ? 1 + cells : 2);
+		}
+		return new Landing(startX + stepX * length,
+			style == ChordStyle.BUS ? DUST_RANGE - cells : DUST_RANGE, style.stacked(), style);
+	}
+
+	/**
+	 * How much pad to lay in front of each of a lane's events, decided before any of it is built.
+	 *
+	 * <p>Everything else about a lane can be settled as it goes. This cannot, and the reason is worth
+	 * stating plainly: a lane takes chords until one will not fit and then has to close on whatever it
+	 * is holding. If that is a bus of twenty-two notes it is holding four blocks of wire and a twelve
+	 * column gap, and nothing fills twelve columns with four blocks of wire. The lane needed to stop a
+	 * chord earlier -- and by the time it finds that out, the chord is built.</p>
+	 *
+	 * <p>Most lanes need nothing from this. A lane whose next chord is small enough to cut closes by
+	 * cutting it, which fills the lane exactly with music that was going to be built anyway and costs
+	 * neither wire nor a tick. It is the chord too big to cut -- over twenty-two notes at a climb,
+	 * over eighteen at a descent -- that forces the lane to land on the wall under its own steam, and
+	 * that is what is planned here.</p>
+	 */
+	private static Map<Integer, Integer> planLane(List<EventGroup> events, int from, int startX,
+			int stepX, int wall, int startTime, int tip, boolean busy, int turnCells, int offBus,
+			int stepOff, Layout layout) {
+		Sweep bare = sweep(events, from, startX, stepX, wall, startTime, tip, busy, layout, Map.of());
+		if (bare.last() < from
+			|| closes(events, bare, from, bare.last(), wall, stepX, turnCells, offBus, stepOff)) {
+			return Map.of();
+		}
+		// The natural end cannot close. Try landing on the wall a chord at a time further back, since
+		// every chord given up is a chord the next lane has to carry instead.
+		for (int last = bare.last(); last >= from; last--) {
+			Map<Integer, Integer> pads = new LinkedHashMap<>();
+			for (int attempt = 0; attempt < 8; attempt++) {
+				Sweep tried = sweep(events, from, startX, stepX, wall, startTime, tip, busy, layout,
+					pads);
+				if (tried.last() < last) {
+					break;
+				}
+				int owing = (wall - tried.ends().get(last - from)) * stepX;
+				if (owing == 0) {
+					if (tried.tips().get(last - from)
+						>= (tried.styles().get(last - from) == ChordStyle.BUS ? offBus : turnCells)) {
+						return Map.copyOf(pads);
+					}
+					break;
+				}
+				if (owing < 0 || !book(pads, tried, from, last, owing)) {
+					break;
+				}
+			}
+		}
+		// Nothing lands this lane on its wall. Said so rather than pretending, because a lane that
+		// cannot be pinned is better turned where it stands than run on past its wall and turned out
+		// in the open, where the staircase has a whole corridor of somebody else's notes to land in.
+		return null;
+	}
+
+	/** A lane walked on paper: where each event ends, what it leaves, and what its gap could hold. */
+	private record Sweep(List<Integer> ends, List<Integer> tips, List<ChordStyle> styles,
+			List<Integer> room, int last) {
+	}
+
+	private static Sweep sweep(List<EventGroup> events, int from, int startX, int stepX, int wall,
+			int startTime, int tip, boolean busy, Layout layout, Map<Integer, Integer> pads) {
+		List<Integer> ends = new ArrayList<>();
+		List<Integer> tips = new ArrayList<>();
+		List<ChordStyle> styles = new ArrayList<>();
+		List<Integer> room = new ArrayList<>();
+		int cursor = startX;
+		int time = startTime;
+		int last = from - 1;
+		for (int index = from; index < events.size(); index++) {
+			EventGroup event = events.get(index);
+			int wait = event.time() - time;
+			int pad = pads.getOrDefault(index, 0);
+			room.add(planPad(DUST_RANGE * 2, tip, 1, Math.max(0, wait - 1)).cells().size() - pad);
+			Landing landed = landingOf(cursor + stepX * pad, stepX, event, wait, busy, layout);
+			if ((landed.end() - wall) * stepX > 0) {
+				break;
+			}
+			ends.add(landed.end());
+			tips.add(landed.tip());
+			styles.add(landed.style());
+			cursor = landed.end();
+			tip = landed.tip();
+			busy = landed.busy();
+			time = event.time();
+			last = index;
+		}
+		return new Sweep(ends, tips, styles, room, last);
+	}
+
+	/** Whether the lane can hand over after this event, either by landing on the wall or by a cut. */
+	private static boolean closes(List<EventGroup> events, Sweep sweep, int from, int last, int wall,
+			int stepX, int turnCells, int offBus, int stepOff) {
+		if (last + 1 >= events.size()) {
+			return true;
+		}
+		int room = (wall - sweep.ends().get(last - from)) * stepX;
+		if (room == 0) {
+			return sweep.tips().get(last - from)
+				>= (sweep.styles().get(last - from) == ChordStyle.BUS ? offBus : turnCells);
+		}
+		// Cut across the turn: as much of the next chord as reaches the wall, then the staircase, then
+		// the rest of it, all off the one repeater. It closes a lane wherever the lane has got to, and
+		// costs nothing, because the columns it fills are filled with music.
+		int cells = (events.get(last + 1).notes().size() + 1) / 2;
+		return room >= 2 && room - 1 < cells && cells + offBus + stepOff <= DUST_RANGE;
+	}
+
+	/** Books what the end of a lane cannot pay for into the latest gaps that can. */
+	private static boolean book(Map<Integer, Integer> pads, Sweep sweep, int from, int last,
+			int owing) {
+		for (int index = last; index >= from && owing > 0; index--) {
+			int free = sweep.room().get(index - from);
+			int take = Math.min(owing, free);
+			if (take > 0) {
+				pads.merge(index, take, Integer::sum);
+				owing -= take;
+			}
+		}
+		return owing == 0;
 	}
 
 	/** How far dust carries a signal before something has to repeat it. */

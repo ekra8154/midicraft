@@ -39,10 +39,12 @@ class UltraLaneFaultsTest {
 	/**
 	 * Builds with at least one wrong note, over the generated corpus at every width and floor count.
 	 *
-	 * <p>Ratchet down, never up. Last measured: 1 of 360 builds, holding one wrong note between
-	 * them.</p>
+	 * <p>Ratchet down, never up, and now at nought: no build in the corpus has a wrong note in it,
+	 * and neither does any build of any song in the library, at any width or floor count. It stays
+	 * asserted because that is what it is for -- this mode was written through a long run of changes
+	 * that each looked like an improvement and several of which quietly made the machines worse.</p>
 	 */
-	private static final int WORST_FAULTY_BUILDS = 1;
+	private static final int WORST_FAULTY_BUILDS = 0;
 
 	@Test
 	void reportsHowManyBuildsHaveAWrongNoteInThem() {
@@ -114,11 +116,11 @@ class UltraLaneFaultsTest {
 	 * Turns not standing in one of the two columns most of them stand in, over the whole corpus.
 	 *
 	 * <p>The sharper of the two numbers, and the one that only goes down when a turn that used to be
-	 * misplaced stops being. Ratchet down, never up. A hundred before the split was written and
-	 * sixty-six after, over the same corpus, while the distinct columns above went the other way --
-	 * which is the whole reason both are counted.</p>
+	 * misplaced stops being. Ratchet down, never up. A hundred before the split was written, sixty-six
+	 * after, and fifty-four once lanes were planned before they were built -- while the distinct
+	 * columns above went the other way at one point, which is the whole reason both are counted.</p>
 	 */
-	private static final int WORST_TURNS_OFF_THE_WALL = 66;
+	private static final int WORST_TURNS_OFF_THE_WALL = 54;
 
 	@Test
 	void reportsHowScatteredTheFloorChangesAre() {
