@@ -1,0 +1,1 @@
+[18:25:58] [Test worker/INFO]: [STDOUT]: 112 of 360 builds have a wrong note in them, 357 notes in all. Worst: mixed with long buses floors=5 width=12: 9 wrong, first is the note at 11 69 2 belongs to tick 9 but would sound again at tick 68, too late for the first pulse to still be covering it
