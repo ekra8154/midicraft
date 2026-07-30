@@ -524,13 +524,6 @@ public final class SongBuilder {
 				laneStarted = true;
 				continue;
 			}
-			if (layout.ultra() && wantsTurn && (pad.cells().size() < columns || !canTurn)) {
-				System.out.println("PROBE wall=" + wall + " cur=" + cursor.getX()
-					+ " cols=" + columns + " laid=" + pad.cells().size() + " tip=" + tipSignal
-					+ " wait=" + wait + " need=" + turnCells + " after=" + pad.signal()
-					+ " turn=" + canTurn + " last=" + lastStyle
-					+ " notes=" + event.notes().size() + " style=" + event.style());
-			}
 			if (canTurn && wantsTurn) {
 				cursor = emitPad(placements, cursor, travel, pad);
 				spentPadding = pad.delaySpent();
@@ -605,12 +598,6 @@ public final class SongBuilder {
 					// module may take between the pad and its own repeater to land on its beat.
 					Pad front = planPad(ahead, tipSignal, 1,
 						Math.max(0, wait - 1 - spentPadding));
-					if (ahead != 0 && front.cells().size() != ahead) {
-						System.out.println("PROBE front index=" + index + " want=" + ahead
-							+ " laid=" + front.cells().size() + " tip=" + tipSignal
-							+ " wait=" + wait + " spent=" + spentPadding
-							+ " cur=" + cursor.getX() + " wall=" + laneWall);
-					}
 					if (ahead > 0 && front.cells().size() == ahead) {
 						cursor = emitPad(placements, cursor, travel, front);
 						spentPadding += front.delaySpent();
