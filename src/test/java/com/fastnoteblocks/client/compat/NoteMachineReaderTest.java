@@ -558,6 +558,56 @@ class NoteMachineReaderTest {
 	}
 
 	/**
+	 * A chord's bus may turn a corner and still be one chord.
+	 *
+	 * <p>The thing a straight lane cannot do is end exactly where you want it to: a lane stops when
+	 * the next event will not fit, so a big chord either overshoots the wall or leaves the lane
+	 * short of it, and both of those are why the staircases in a folded build stand in a scatter
+	 * rather than in a column. A chord that can wrap the turn instead lets a lane fill to the wall
+	 * every time.</p>
+	 *
+	 * <p>It works because dust carries no delay. Every note touching the run sounds at the instant
+	 * the signal crosses it, so a bus bent through ninety degrees is still one tick -- and the note
+	 * on the inside of the bend, which touches the run on both arms, still sounds once, because both
+	 * arms are the same instant.</p>
+	 */
+	@Test
+	void aChordsBusMayTurnACornerAndStillBeOneChord() {
+		Map<BlockPos, BlockState> world = new HashMap<>();
+		int bus = 65;
+		world.put(new BlockPos(-1, bus, 0), parse("minecraft:repeater[facing=west,delay=1]"));
+		// The run: three along, then bent through a right angle for two more.
+		List<BlockPos> run = List.of(new BlockPos(0, bus, 0), new BlockPos(1, bus, 0),
+			new BlockPos(2, bus, 0), new BlockPos(2, bus, 1), new BlockPos(2, bus, 2));
+		for (BlockPos cell : run) {
+			world.put(cell, Blocks.STONE.defaultBlockState());
+			world.put(cell.above(), Blocks.REDSTONE_WIRE.defaultBlockState());
+		}
+		// Notes down the outside of both arms, one past the end, and one tucked into the bend where
+		// it touches both arms at once.
+		List<BlockPos> hung = List.of(new BlockPos(0, bus, -1), new BlockPos(1, bus, -1),
+			new BlockPos(2, bus, -1), new BlockPos(3, bus, 1), new BlockPos(3, bus, 2),
+			new BlockPos(2, bus, 3), new BlockPos(1, bus, 1));
+		int pitch = 0;
+		for (BlockPos slot : hung) {
+			world.put(slot.below(), Blocks.STONE.defaultBlockState());
+			world.put(slot, note(pitch++));
+		}
+
+		NoteMachineReader.Reading reading = readAll(world, "Bent bus");
+
+		assertEquals(hung.size(), reading.noteBlocks(), "every note block stands in the world");
+		assertEquals(hung.size(), reading.project().noteCount(), "and every one of them sounds");
+		assertEquals(0, reading.unreachedNotes(), "the bend carries the signal round");
+		assertEquals(1, reading.project().layers().stream()
+				.flatMap(layer -> layer.notes().stream())
+				.map(ComposerProject.NoteEvent::startTick)
+				.distinct()
+				.count(),
+			"a bent bus is still one chord: every note on the same tick");
+	}
+
+	/**
 	 * A block of redstone in the selection must not throw away the real beginning.
 	 *
 	 * <p>It used to. Anything making power on its own was treated as <em>the</em> way in, and the
