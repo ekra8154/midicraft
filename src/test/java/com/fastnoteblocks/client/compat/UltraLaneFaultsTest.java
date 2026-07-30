@@ -1,5 +1,6 @@
 package com.fastnoteblocks.client.compat;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
@@ -57,10 +58,15 @@ class UltraLaneFaultsTest {
 			for (int floors = 1; floors <= 6; floors++) {
 				for (int width = 12; width <= 48; width += 4) {
 					builds++;
-					SongBuilder.PastePlan plan = SongBuilder.createPastePlan(
-						new BlockPos(0, 64, 0), song.notes(),
-						SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
-						new SongBuilder.BuildLimits(4, width, floors));
+					SongBuilder.PastePlan plan;
+					try {
+						plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0), song.notes(),
+							SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+							new SongBuilder.BuildLimits(4, width, floors));
+					} catch (RuntimeException refusedForItsTurns) {
+						// Refused rather than built crooked; the other test counts those.
+						continue;
+					}
 					if (plan.faults().isEmpty()) {
 						continue;
 					}
@@ -86,80 +92,64 @@ class UltraLaneFaultsTest {
 	}
 
 	/**
-	 * How many columns the floor changes are spread across.
-	 *
-	 * <p>This is the thing the whole exercise is for. A staircase steps a column off its own centre
-	 * line, so where it stands decides whether it lands beside another corridor's notes -- and it
-	 * stands wherever the lane before it happened to stop. Pin every lane to end at the wall and
-	 * every staircase stands in the same two columns, one at each end, and the question stops
-	 * arising.</p>
-	 *
-	 * <p>Two is the target -- a lane going one way ends at the far wall, and the lane coming back ends
-	 * at the near one. The plan reports the block each lane handed over on rather than the test
-	 * hunting for a signature: every block a turn is made of is a block something else is made of
-	 * too. Ratchet down, never up.</p>
-	 *
-	 * <p>Standing at 7, and at 2 for every song here without a chord bigger than fourteen. What is
-	 * left is the narrowest builds of the song with chords of thirty in it, where a single event is
-	 * most of the lane. Two of those seven arrived with the split, which pins a great many more turns
-	 * than it misses -- the wrong notes went from seventeen builds to one over the same change --
-	 * but which also repacks the lanes, so the handful of turns it still cannot place land in
-	 * different columns than the handful it could not place before.</p>
-	 *
-	 * <p>Which is why the count below is not the only thing asserted. Distinct columns says how many
-	 * different places the misses landed in, and repacking moves that around on its own; how many
-	 * turns are not on a wall says how many misses there were.</p>
-	 */
-	private static final int WORST_CLIMB_COLUMNS = 7;
-
-	/**
 	 * Turns not standing in one of the two columns most of them stand in, over the whole corpus.
 	 *
 	 * <p>The sharper of the two numbers, and the one that only goes down when a turn that used to be
-	 * misplaced stops being. Ratchet down, never up. A hundred before the split was written, sixty-six
-	 * after, fifty-four once lanes were planned before they were built, and forty-five once the pad
-	 * stopped filling the gap the split was meant to fill -- while the distinct columns above went the
-	 * other way at one point, which is the whole reason both are counted.</p>
+	 * misplaced stops being. It is asserted at nought now and no longer ratcheted: the rule has no
+	 * exceptions left in it, so a turn off the wall is not a number to bring down but a bug.</p>
 	 */
-	private static final int WORST_TURNS_OFF_THE_WALL = 45;
+	private static final int WORST_TURNS_OFF_THE_WALL = 0;
+
+	/**
+	 * Builds refused because no arrangement of their lanes lands every one of them on a wall.
+	 *
+	 * <p>This is what keeping the rule costs, and the number that replaces the one above as the
+	 * thing to bring down. A build is refused when a chord too big to cut across a turn arrives
+	 * where the lane behind it cannot be filled either -- no wire left for a pad, and no spare tick
+	 * to buy a repeater with. Every one is a song someone cannot paste at that width, so: ratchet
+	 * down, never up.</p>
+	 */
+	private static final int WORST_REFUSED = 30;
 
 	@Test
-	void reportsHowScatteredTheFloorChangesAre() {
-		int worst = 0;
+	void everyFloorChangeStandsOnAWall() {
 		int offTheWall = 0;
+		int refused = 0;
 		String where = "";
 		for (Corpus song : corpus()) {
 			for (int floors = 2; floors <= 6; floors++) {
 				for (int width = 12; width <= 48; width += 4) {
-					SongBuilder.PastePlan plan = SongBuilder.createPastePlan(
-						new BlockPos(0, 64, 0), song.notes(),
-						SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
-						new SongBuilder.BuildLimits(4, width, floors));
-					java.util.TreeSet<Integer> columns = new java.util.TreeSet<>();
+					SongBuilder.PastePlan plan;
+					try {
+						plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0), song.notes(),
+							SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+							new SongBuilder.BuildLimits(4, width, floors));
+					} catch (RuntimeException wouldNotKeepTheRule) {
+						refused++;
+						continue;
+					}
 					Map<Integer, Long> byColumn = plan.turns().stream().map(BlockPos::getX)
 						.collect(Collectors.groupingBy(x -> x, Collectors.counting()));
-					columns.addAll(byColumn.keySet());
-					offTheWall += byColumn.entrySet().stream()
+					int stray = byColumn.entrySet().stream()
 						.sorted(Map.Entry.<Integer, Long>comparingByValue().reversed())
 						.skip(2)
 						.mapToInt(wall -> wall.getValue().intValue())
 						.sum();
-					if (columns.size() > worst) {
-						worst = columns.size();
+					offTheWall += stray;
+					if (stray > 0 && where.isEmpty()) {
 						where = song.name() + " floors=" + floors + " width=" + width + ": "
-							+ columns;
+							+ new java.util.TreeSet<>(byColumn.keySet());
 					}
 				}
 			}
 		}
 
-		String report = "floor changes are spread across up to " + worst + " columns, and "
-			+ offTheWall + " of them do not stand on a wall. Worst: " + where;
+		String report = offTheWall + " floor changes do not stand on a wall, and " + refused
+			+ " builds were refused for keeping the rule. " + where;
 		System.out.println(report);
-		assertTrue(offTheWall <= WORST_TURNS_OFF_THE_WALL,
-			"more floor changes are off the wall than were. " + report);
-		assertTrue(worst <= WORST_CLIMB_COLUMNS,
-			"the floor changes are more scattered than they were. " + report);
+		assertEquals(WORST_TURNS_OFF_THE_WALL, offTheWall,
+			"a turn stood somewhere other than a wall. " + report);
+		assertTrue(refused <= WORST_REFUSED, "more builds are refused than were. " + report);
 	}
 
 	/** One generated song and what it is meant to stress. */

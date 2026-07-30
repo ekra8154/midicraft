@@ -463,13 +463,17 @@ public final class SongBuilder {
 			// runs on past the wall instead. So an event that would leave the wire that weak is asked
 			// to fit a column short, and the pad puts a repeater in the column that buys.
 			int reserve = turnReserve(event, offBus, layout);
-			int landing = cursor.getX() + travel.getStepX()
-				* (placedLength(cursor, travel, event, currentTime, layout) + reserve);
+			int wait = event.time() - currentTime;
+			// Measured with the same arithmetic the planner uses, and not with a length taken from
+			// the shape the chord was measured in. A stacked chord that finds the pair of slots
+			// behind it spoken for is built as a bus instead, and a bus is longer -- so a lane could
+			// be told a chord fitted, build it, and land a column past its own wall.
+			int landing = landingOf(cursor.getX(), travel.getStepX(), event, wait, columnBehindBusy,
+				layout).end() + travel.getStepX() * reserve;
 			boolean wantsTurn = laneStarted && (landing > farWall || landing < nearWall);
 			// One tick has to be left for the next event's own repeater, which is the only thing that
 			// can drive the module it stands in front of.
 			int columns = (wall - cursor.getX()) * travel.getStepX();
-			int wait = event.time() - currentTime;
 			Pad pad = layout.ultra() && wantsTurn
 				? planPad(columns, tipSignal, turnCells, Math.max(0, wait - 1))
 				: Pad.none(tipSignal);
@@ -512,12 +516,27 @@ public final class SongBuilder {
 			// the only turn allowed elsewhere is one on a lane already past its wall, where carrying on
 			// would never bring it back.
 			boolean canTurn = layout.ultra()
-				? index > 0 && (booked == null || pad.cells().size() == columns || columns < 0)
+				? index > 0 && pad.cells().size() == columns
 					&& pad.signal() >= (pad.cells().isEmpty() && lastStyle == ChordStyle.BUS
 						? offBus : turnCells)
 				: index > 0 && events.get(index - 1).maxSafeTurnDistance() >= MAX_LANE_SPACING;
 			int spentPadding = 0;
 			carried &= canTurn && !split;
+			// On the wall or not at all, with nothing after the "or". A turn is the one thing in a
+			// build that steps out of its own lane, so a turn standing anywhere but the column every
+			// other lane turns in is a turn standing beside whatever that column happens to hold. There
+			// used to be two ways round this rule -- a lane the planner could not place, and a lane
+			// already past its wall -- and between them they were every off-wall turn there was. A
+			// machine that cannot keep the rule is refused rather than built crooked, and says which
+			// chord it could not place, because that is a thing to go and fix rather than to average.
+			if (layout.ultra() && wantsTurn && !split && !carried && !canTurn) {
+				throw new IllegalArgumentException("Cannot end a lane on its wall: the chord of "
+					+ event.notes().size() + " at tick " + event.time() + " leaves " + columns
+					+ " columns short of the wall, with " + tipSignal + " blocks of wire and "
+					+ (wait - 1) + " ticks to fill them, and it is too big to cut across the turn ("
+					+ cells + " blocks of bus, " + offBus + " for the turn, " + stepOff
+					+ " to clear it). Try a different width.");
+			}
 			if (split) {
 				SpatialDelayTrigger trigger = addSpatialDelayBeforeEvent(placements, cursor, travel,
 					event.time() - currentTime);

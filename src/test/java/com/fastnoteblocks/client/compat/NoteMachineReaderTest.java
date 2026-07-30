@@ -151,7 +151,7 @@ class NoteMachineReaderTest {
 		}
 		SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0),
 			List.copyOf(notes), SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
-			new SongBuilder.BuildLimits(4, 16, 3));
+			new SongBuilder.BuildLimits(4, 20, 3));
 
 		NoteMachineReader.Reading reading = readAll(placeInWorld(plan), "Padded");
 
@@ -190,7 +190,7 @@ class NoteMachineReaderTest {
 		}
 		SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0),
 			List.copyOf(notes), SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
-			new SongBuilder.BuildLimits(4, 28, 3));
+			new SongBuilder.BuildLimits(4, 32, 3));
 
 		NoteMachineReader.Reading reading = readAll(placeInWorld(plan), "Carried");
 
