@@ -487,7 +487,7 @@ public final class SongBuilder {
 			// off, which is a block the chord could have used.
 			int stepOff = stepOffAhead;
 			boolean split = layout.ultra() && wantsTurn && index > 0
-				&& above >= 0 && above < floors
+				&& above >= 0 && above < floors && climb > 0
 				&& room >= 2 && room - 1 < cells && cells + offBus + stepOff <= DUST_RANGE;
 			// Unless leaving that tick is what stops the pad reaching the wall. Then spend the whole
 			// wait on the pad and carry the event over the turn on the wire instead, which is the one
@@ -620,7 +620,18 @@ public final class SongBuilder {
 				int beyond = end.getX() + travel.getStepX()
 					* (placedLength(end, travel, next, event.time(), layout)
 						+ turnReserve(next, turnCells, layout));
-				if (beyond > farWall || beyond < nearWall) {
+				// Unless the chord that will not fit can be cut across the turn, in which case the gap
+				// is its to fill. A cut costs nothing and fills the columns with music; a pad fills the
+				// same columns with wire and then charges the staircase for it. Padding first left the
+				// lane flush against its wall with no gap left, so the cut had nothing to do and never
+				// happened -- two of it in a build of a hundred and forty-six turns.
+				int nextCells = (next.notes().size() + 1) / 2;
+				int gap = (laneWall - end.getX()) * travel.getStepX()
+					- Math.max(0, (next.time() - event.time() - 1) / 4);
+				boolean cuttable = above >= 0 && above < floors && climb > 0 && gap >= 2
+					&& gap - 1 < nextCells
+					&& nextCells + offBus + stepOffAhead <= DUST_RANGE;
+				if (!cuttable && (beyond > farWall || beyond < nearWall)) {
 					int ahead = prePad(cursor, travel, event, currentTime, layout, laneWall,
 						(laneWall - cursor.getX()) * travel.getStepX());
 					// Planned like the pad behind, and for the same reason: dust in front of an event

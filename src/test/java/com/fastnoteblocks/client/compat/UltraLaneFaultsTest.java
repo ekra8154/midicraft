@@ -117,10 +117,11 @@ class UltraLaneFaultsTest {
 	 *
 	 * <p>The sharper of the two numbers, and the one that only goes down when a turn that used to be
 	 * misplaced stops being. Ratchet down, never up. A hundred before the split was written, sixty-six
-	 * after, and fifty-four once lanes were planned before they were built -- while the distinct
-	 * columns above went the other way at one point, which is the whole reason both are counted.</p>
+	 * after, fifty-four once lanes were planned before they were built, and forty-five once the pad
+	 * stopped filling the gap the split was meant to fill -- while the distinct columns above went the
+	 * other way at one point, which is the whole reason both are counted.</p>
 	 */
-	private static final int WORST_TURNS_OFF_THE_WALL = 54;
+	private static final int WORST_TURNS_OFF_THE_WALL = 45;
 
 	@Test
 	void reportsHowScatteredTheFloorChangesAre() {
