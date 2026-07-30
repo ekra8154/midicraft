@@ -452,7 +452,7 @@ public final class SongBuilder {
 			// down four levels its wire has to stand on five of them.
 			int offBus = above >= 0 && above < floors && climb > 0 ? turnCells - 2 : turnCells;
 			int wall = travel == forward ? farWall : nearWall;
-			int stepOffAhead = climb > 0 ? 0 : 1;
+			int stepOffAhead = climb > 0 ? 0 : 2;
 			if (replan) {
 				booked = planLane(events, index, cursor.getX(), travel.getStepX(), wall, currentTime,
 					tipSignal, columnBehindBusy, turnCells, offBus, stepOffAhead, layout);
@@ -487,7 +487,7 @@ public final class SongBuilder {
 			// off, which is a block the chord could have used.
 			int stepOff = stepOffAhead;
 			boolean split = layout.ultra() && wantsTurn && index > 0
-				&& above >= 0 && above < floors && climb > 0
+				&& above >= 0 && above < floors
 				&& room >= 2 && room - 1 < cells && cells + offBus + stepOff <= DUST_RANGE;
 			// Unless leaving that tick is what stops the pad reaching the wall. Then spend the whole
 			// wait on the pad and carry the event over the turn on the wire instead, which is the one
@@ -532,7 +532,7 @@ public final class SongBuilder {
 				floor = above;
 				travel = travel.getOpposite();
 				cursor = addCarriedEventModule(placements, cursor, travel, depth,
-					chord.subList(near, chord.size()), stepOff > 0);
+					chord.subList(near, chord.size()), stepOff);
 				lastStyle = ChordStyle.BUS;
 				tipSignal = DUST_RANGE - cells - offBus - stepOff;
 				// The far half starts where the turn left off, so its first pair of notes stands
@@ -588,7 +588,7 @@ public final class SongBuilder {
 				// it and here is dust. Nothing left to time it with, and nothing needed.
 				currentTime = event.time();
 				cursor = addCarriedEventModule(placements, cursor, travel, depth, event.notes(),
-					stepOff > 0);
+					stepOff);
 				lastStyle = ChordStyle.BUS;
 				tipSignal = pad.signal() - turnCells - stepOff - (event.notes().size() + 1) / 2;
 				// A carried bus starts where the turn left off, so its first pair of notes stands where
@@ -634,8 +634,7 @@ public final class SongBuilder {
 				int nextCells = (next.notes().size() + 1) / 2;
 				int gap = (laneWall - end.getX()) * travel.getStepX()
 					- Math.max(0, (next.time() - event.time() - 1) / 4);
-				boolean cuttable = above >= 0 && above < floors && climb > 0 && gap >= 2
-					&& gap - 1 < nextCells
+				boolean cuttable = above >= 0 && above < floors && gap >= 2 && gap - 1 < nextCells
 					&& nextCells + offBus + stepOffAhead <= DUST_RANGE;
 				if (!cuttable && (beyond > farWall || beyond < nearWall)) {
 					int ahead = prePad(cursor, travel, event, currentTime, layout, laneWall,
@@ -1683,18 +1682,21 @@ public final class SongBuilder {
 	 * over it, so it does not need one.</p>
 	 */
 	/**
-	 * @param stepOff whether the bus starts a column along from where the turn left off, on a block
+	 * @param stepOff how many columns along from where the turn left off the bus starts, each of them
+	 *     glass with dust over it. Not nought after a descent, because a descent is three columns wide
+	 *     and steps one of them sideways into the corridor alongside -- so those columns are reserved
+	 *     for turns, in every corridor, and notes begin past them. That is what makes it impossible
+	 *     for one corridor's staircase to reach another corridor's notes: they are never at the same
+	 *     x. It used to be a flag meaning "clear the spiral", which cleared the spiral in front of it
+	 *     and left the notes in the column the neighbour's spiral comes down
 	 *     of glass with dust over it, rather than on that block itself. A descent needs it: the
 	 *     spiral comes back up through the column right in front of where it lands, and a note hung
 	 *     there would sit under live stone. A climb does not, and the column it saves is the
 	 *     difference between a chord of twenty-two straddling a turn and not.
 	 */
 	private static BlockPos addCarriedEventModule(PlacementPlan placements, BlockPos cursor,
-			Direction travel, Direction laneStep, List<EventNote> chord, boolean stepOff) {
-		if (stepOff) {
-			addParityPad(placements, cursor);
-			cursor = cursor.relative(travel);
-		}
+			Direction travel, Direction laneStep, List<EventNote> chord, int stepOff) {
+		cursor = emitDust(placements, cursor, travel, stepOff);
 		// The wire arrives level with the repeater that is not there, and climbs the side of the
 		// first stone onto the dust running over it.
 		return cursor.relative(travel,
