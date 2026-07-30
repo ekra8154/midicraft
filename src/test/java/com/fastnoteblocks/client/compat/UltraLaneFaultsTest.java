@@ -81,6 +81,57 @@ class UltraLaneFaultsTest {
 			"more builds are wrong than they were. " + report);
 	}
 
+	/**
+	 * How many columns the floor changes are spread across.
+	 *
+	 * <p>This is the thing the whole exercise is for. A staircase steps a column off its own centre
+	 * line, so where it stands decides whether it lands beside another corridor's notes -- and it
+	 * stands wherever the lane before it happened to stop. Pin every lane to end at the wall and
+	 * every staircase stands in the same two columns, one at each end, and the question stops
+	 * arising.</p>
+	 *
+	 * <p>Two per wall because a climb alternates between two neighbouring columns as it goes up. Glass
+	 * appears nowhere else in a build, so counting the columns holding it counts the ones the floor
+	 * changes are in. Four is the target -- two walls, two columns each. Ratchet down, never up.</p>
+	 *
+	 * <p>Standing at 61.</p>
+	 */
+	private static final int WORST_CLIMB_COLUMNS = 61;
+
+	@Test
+	void reportsHowScatteredTheFloorChangesAre() {
+		int worst = 0;
+		String where = "";
+		for (Corpus song : corpus()) {
+			for (int floors = 2; floors <= 6; floors++) {
+				for (int width = 12; width <= 48; width += 4) {
+					SongBuilder.PastePlan plan = SongBuilder.createPastePlan(
+						new BlockPos(0, 64, 0), song.notes(),
+						SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+						new SongBuilder.BuildLimits(4, width, floors));
+					java.util.TreeSet<Integer> columns = new java.util.TreeSet<>();
+					for (String command : plan.commands()) {
+						String[] parts = command.split(" ");
+						if (parts[4].equals("minecraft:glass")) {
+							columns.add(Integer.parseInt(parts[1]));
+						}
+					}
+					if (columns.size() > worst) {
+						worst = columns.size();
+						where = song.name() + " floors=" + floors + " width=" + width + ": "
+							+ columns;
+					}
+				}
+			}
+		}
+
+		String report = "floor changes are spread across up to " + worst + " columns. Worst: "
+			+ where;
+		System.out.println(report);
+		assertTrue(worst <= WORST_CLIMB_COLUMNS,
+			"the floor changes are more scattered than they were. " + report);
+	}
+
 	/** One generated song and what it is meant to stress. */
 	private record Corpus(String name, List<SongBuilder.EventNote> notes) {
 	}
