@@ -422,6 +422,9 @@ public final class SongBuilder {
 		// stone lies right alongside it at the same level.
 		boolean columnBehindBusy = false;
 		ChordStyle lastStyle = ChordStyle.SMALL;
+		// What the wire at the end of the lane is still worth. Every module opens with a repeater, so
+		// this only ever counts what the module just built spent: nothing, unless it was a bus.
+		int tipSignal = DUST_RANGE;
 		LaneReach reach = laneReach(events, 0, events.size());
 		int slabStep = laneSpacing(reach, reach);
 		for (int index = 0; index < events.size(); index++) {
@@ -431,20 +434,61 @@ public final class SongBuilder {
 			// leaves the next lane starting outside the wall -- and nothing measured afterwards can
 			// help, because by then the overshoot is built. Asking first costs a lane its last event
 			// and keeps the wall a wall.
-			boolean canTurn = index > 0
-				&& events.get(index - 1).maxSafeTurnDistance() >= MAX_LANE_SPACING;
-			int landing = cursor.getX()
-				+ travel.getStepX() * placedLength(cursor, travel, event, currentTime, layout);
-			if (canTurn && laneStarted && (landing > farWall || landing < nearWall)) {
-				int above = floor + climb;
+			int above = floor + climb;
+			// A staircase and a slab step spend different amounts of wire, and which one is coming has
+			// to be known before the pad is planned, since the pad is what has to leave enough.
+			int turnCells = above >= 0 && above < floors ? TURN_DUST_CELLS : slabStep + 2;
+			int wall = travel == forward ? farWall : nearWall;
+			// A lane that ends flush with the wall on a wire too weak to reach the top of a staircase
+			// has nowhere left to stand the repeater that would revive it, and a lane that cannot turn
+			// runs on past the wall instead. So an event that would leave the wire that weak is asked
+			// to fit a column short, and the pad puts a repeater in the column that buys.
+			int reserve = layout.ultra() && event.style() == ChordStyle.BUS
+				&& DUST_RANGE - (event.notes().size() + 1) / 2 < turnCells ? 1 : 0;
+			int landing = cursor.getX() + travel.getStepX()
+				* (placedLength(cursor, travel, event, currentTime, layout) + reserve);
+			boolean wantsTurn = laneStarted && (landing > farWall || landing < nearWall);
+			// One tick has to be left for the next event's own repeater, which is the only thing that
+			// can drive the module it stands in front of.
+			int columns = (wall - cursor.getX()) * travel.getStepX();
+			int wait = event.time() - currentTime;
+			Pad pad = layout.ultra() && wantsTurn
+				? planPad(columns, tipSignal, turnCells, Math.max(0, wait - 1))
+				: Pad.none(tipSignal);
+			// Unless leaving that tick is what stops the pad reaching the wall. Then spend the whole
+			// wait on the pad and carry the event over the turn on the wire instead, which is the one
+			// way a lane whose next event is a single tick away can still end where it is meant to.
+			boolean carried = false;
+			if (layout.ultra() && wantsTurn && pad.cells().size() < columns) {
+				Pad whole = spending(planPad(columns, tipSignal, turnCells, wait), wait);
+				if (whole != null && whole.cells().size() == columns
+					&& whole.signal() >= turnCells + 1 + (event.notes().size() + 1) / 2) {
+					pad = whole;
+					carried = true;
+				}
+			}
+			// The old rule asked the last event whether a turn would still be in range. It answers for
+			// the wire it laid and nothing else, so a lane ending on a long bus could not turn at all
+			// and ran on until one ending on a short chord came along -- which is most of why the
+			// staircases were scattered rather than merely off by a column. The pad can put a repeater
+			// in and make the range question go away; when it cannot, the lane still has to run on.
+			boolean canTurn = layout.ultra()
+				? index > 0 && pad.signal() >= turnCells
+				: index > 0 && events.get(index - 1).maxSafeTurnDistance() >= MAX_LANE_SPACING;
+			int spentPadding = 0;
+			carried &= canTurn;
+			if (canTurn && wantsTurn) {
+				cursor = emitPad(placements, cursor, travel, pad);
+				spentPadding = pad.delaySpent();
 				if (above >= 0 && above < floors) {
 					// Asked of the shape the lane actually ended on, not of how many notes it held.
 					// A big chord used to mean a bus and now may mean a stacked module, which ends
 					// on its centre block a level lower -- and a climb that skips the two rungs it
-					// needs starts a floor above the signal and never gets it.
+					// needs starts a floor above the signal and never gets it. A pad puts the wire
+					// back down on the path either way, so a padded lane never skips them.
 					cursor = climb > 0
-						? addGlassClimb(placements, cursor, travel, lastStyle == ChordStyle.BUS,
-							currentTime)
+						? addGlassClimb(placements, cursor, travel,
+							lastStyle == ChordStyle.BUS && pad.cells().isEmpty(), currentTime)
 						: addSpiralDescent(placements, cursor, travel, descentSide, currentTime);
 					floor = above;
 				} else {
@@ -460,8 +504,21 @@ public final class SongBuilder {
 				laneStarted = false;
 				columnBehindBusy = true;
 			}
+			if (carried) {
+				// The pad's repeater has already held this event's whole wait, and everything between
+				// it and here is dust. Nothing left to time it with, and nothing needed.
+				currentTime = event.time();
+				cursor = addCarriedEventModule(placements, cursor, travel, depth, event.notes());
+				lastStyle = ChordStyle.BUS;
+				tipSignal = pad.signal() - turnCells - 1 - (event.notes().size() + 1) / 2;
+				// A carried bus starts where the turn left off, so its first pair of notes stands where
+				// the turn's own run of powered stone does. Nothing behind the next module is free.
+				columnBehindBusy = true;
+				laneStarted = true;
+				continue;
+			}
 			SpatialDelayTrigger trigger = addSpatialDelayBeforeEvent(placements, cursor, travel,
-				event.time() - currentTime);
+				event.time() - currentTime - spentPadding);
 			currentTime = event.time();
 			Placed placed = addChordModule(placements, trigger.cursor(), travel, depth,
 				trigger.triggerDelay(), event, !columnBehindBusy || !trigger.cursor().equals(cursor),
@@ -469,8 +526,141 @@ public final class SongBuilder {
 			cursor = placed.cursor();
 			columnBehindBusy = placed.stacked();
 			lastStyle = placed.style();
+			// A bus is the one module that hands the next thing along a wire rather than a block: its
+			// stones are lit by the dust running over them, and that dust has been counting down since
+			// the repeater at the head of it. Everything else ends on a block a repeater drives
+			// directly, which is worth the full fifteen to whatever touches it.
+			tipSignal = placed.style() == ChordStyle.BUS
+				? DUST_RANGE - (event.notes().size() + 1) / 2 : DUST_RANGE;
 			laneStarted = true;
 		}
+	}
+
+	/** How far dust carries a signal before something has to repeat it. */
+	private static final int DUST_RANGE = 15;
+
+	/**
+	 * Dust cells a floor change spends before the next lane's first repeater reads it.
+	 *
+	 * <p>Five: the block the wire steps off, and one for each level of the staircase. A climb coming
+	 * straight off a bus skips the first of them, which is a block in hand and not a block short.</p>
+	 */
+	private static final int TURN_DUST_CELLS = 5;
+
+	/**
+	 * The cells that will fill the end of a lane, as a delay each: zero for dust, more for a repeater.
+	 *
+	 * <p>Planned before any of it is placed, because whether the wire survives the turn is what
+	 * decides whether the lane may turn at all -- and a pad written down and then not turned on would
+	 * be sitting in the next module's way.</p>
+	 *
+	 * @param signal what the wire is worth at the end of it, which the turn spends
+	 * @param delaySpent ticks taken from the wait before the next event, which its own repeater no
+	 *     longer has to hold
+	 */
+	private record Pad(List<Integer> cells, int signal, int delaySpent) {
+		static Pad none(int signal) {
+			return new Pad(List.of(), signal, 0);
+		}
+	}
+
+	/**
+	 * Works out how to fill a lane from where it stopped to the wall it is meant to turn at.
+	 *
+	 * <p>Dust for preference: it costs a block and no time, so an event keeps the tick it was written
+	 * for however far it is nudged. What dust cannot do is carry: fifteen blocks from the last
+	 * repeater the signal is gone, and a lane that has just laid a bus of fifteen has none of that
+	 * left. So where the wire would not reach the top of the staircase, one cell of the pad becomes a
+	 * repeater instead -- which costs a tick, taken out of the wait the next event was going to spend
+	 * on its own repeater anyway.</p>
+	 *
+	 * <p>When there is neither range nor a tick to spare the pad stops short, and the caller is meant
+	 * to read that and not turn: better a lane that runs long than a lane that hands the rest of the
+	 * song to a wire that fades out halfway up.</p>
+	 */
+	private static Pad planPad(int columns, int signal, int turnCells, int spareDelay) {
+		List<Integer> cells = new ArrayList<>();
+		int spent = 0;
+		int remaining = columns;
+		while (remaining > 0) {
+			if (signal >= remaining + turnCells) {
+				for (; remaining > 0; remaining--) {
+					cells.add(0);
+					signal--;
+				}
+				break;
+			}
+			if (spareDelay - spent < 1) {
+				// Nothing left to pay a repeater with. Get as near the wall as the wire alone
+				// reaches, keeping back what the turn will need, and leave the caller to read that
+				// the wall was not made and think again about turning at all.
+				while (remaining > 0 && signal > turnCells) {
+					cells.add(0);
+					signal--;
+					remaining--;
+				}
+				break;
+			}
+			// A repeater, placed as late as it can be: dust up to the last cell from which the rest
+			// still fits inside one run, or as far as this wire goes, whichever comes first. Placing
+			// them early instead spends the ticks on cells that did not need them and leaves the pad
+			// short of the wall with nothing to pay for the rest.
+			int before = Math.min(Math.max(0, remaining - 1 - (DUST_RANGE - turnCells)), signal);
+			for (int cell = 0; cell < before; cell++) {
+				cells.add(0);
+				signal--;
+				remaining--;
+			}
+			// A tick each, the least a repeater can hold. Taking the longest it can hold instead
+			// spends the whole wait on the first one and leaves the rest of the pad with nothing to
+			// buy a second with, which is how a pad that needed two came up short of the wall.
+			cells.add(1);
+			spent++;
+			signal = DUST_RANGE;
+			remaining--;
+		}
+		return new Pad(List.copyOf(cells), signal, spent);
+	}
+
+	/**
+	 * The same pad with its repeaters made to hold a stated total between them, or null if they
+	 * cannot: none to hold it, too few to reach it, or too many to add up to so little.
+	 *
+	 * <p>For a pad that has to account for the whole wait before the next event, because that event
+	 * is going to be carried over the turn without a repeater of its own.</p>
+	 */
+	private static Pad spending(Pad pad, int total) {
+		int repeaters = (int)pad.cells().stream().filter(delay -> delay > 0).count();
+		if (repeaters == 0 || total < repeaters || total > repeaters * MAX_LANE_SPACING) {
+			return null;
+		}
+		List<Integer> cells = new ArrayList<>(pad.cells());
+		int shared = total / repeaters;
+		int over = total % repeaters;
+		for (int index = 0; index < cells.size(); index++) {
+			if (cells.get(index) > 0) {
+				cells.set(index, shared + (over-- > 0 ? 1 : 0));
+			}
+		}
+		return new Pad(List.copyOf(cells), pad.signal(), total);
+	}
+
+	/** Lays a planned pad down, and hands back the block the turn now starts on. */
+	private static BlockPos emitPad(PlacementPlan placements, BlockPos cursor, Direction travel,
+			Pad pad) {
+		for (int delay : pad.cells()) {
+			if (delay == 0) {
+				addParityPad(placements, cursor);
+			} else {
+				// Stone rather than glass, because a repeater needs something to stand on -- and it is
+				// safe here where dust is not, since a repeater leaves the block under it alone.
+				set(placements, cursor, "minecraft:stone");
+				set(placements, cursor.above(),
+					"minecraft:repeater[facing=" + repeaterFacing(travel) + ",delay=" + delay + "]");
+			}
+			cursor = cursor.relative(travel);
+		}
+		return cursor;
 	}
 
 	/**
@@ -515,6 +705,7 @@ public final class SongBuilder {
 	 */
 	private static BlockPos addGlassClimb(PlacementPlan placements, BlockPos cursor,
 			Direction travel, boolean fromBus, int time) {
+		placements.turnedAt(cursor);
 		BlockPos near = cursor;
 		BlockPos far = cursor.relative(travel);
 		if (!fromBus) {
@@ -545,6 +736,7 @@ public final class SongBuilder {
 	 */
 	private static BlockPos addSpiralDescent(PlacementPlan placements, BlockPos cursor,
 			Direction travel, Direction depth, int time) {
+		placements.turnedAt(cursor);
 		placements.powered(cursor, "minecraft:stone", time);
 		set(placements, cursor.above(), "minecraft:redstone_wire");
 		List<BlockPos> ring = List.of(
@@ -846,6 +1038,7 @@ public final class SongBuilder {
 	 */
 	private static BlockPos addGlassRiser(PlacementPlan placements, BlockPos cursor, Direction travel,
 			Direction laneStep, int time) {
+		placements.turnedAt(cursor);
 		placements.powered(cursor, "minecraft:stone", time);
 		set(placements, cursor.above(), "minecraft:redstone_wire");
 		BlockPos columnA = cursor.relative(travel);
@@ -1104,6 +1297,7 @@ public final class SongBuilder {
 			throw new IllegalArgumentException("Compact turn distance " + laneDistance
 				+ " exceeds the safe redstone range");
 		}
+		placements.turnedAt(cursor);
 		BlockPos outer = cursor.relative(travel);
 		layTurnFloor(placements, cursor, time);
 		layTurnFloor(placements, outer, time);
@@ -1138,12 +1332,44 @@ public final class SongBuilder {
 	 */
 	private static BlockPos addSpatialEventModule(PlacementPlan placements, BlockPos cursor, Direction travel,
 			Direction laneStep, int triggerDelay, List<EventNote> chord) {
-		int time = chord.get(0).time();
 		set(placements, cursor, "minecraft:stone");
 		set(placements, cursor.above(),
 			"minecraft:repeater[facing=" + repeaterFacing(travel) + ",delay=" + triggerDelay + "]");
+		return layEventBody(placements, cursor, travel, laneStep, chord, false);
+	}
+
+	/**
+	 * The same chord, set off by the wire that arrives rather than by a repeater of its own.
+	 *
+	 * <p>For the event that has to cross a floor change. A lane ends where the wall says and not where
+	 * the music does, so now and then the wait before an event is a single tick -- the shortest there
+	 * is -- and the pad that fills the lane still needs a repeater to carry the wire up the staircase.
+	 * There is only one tick to go round, so the two become one: the pad's repeater holds the whole
+	 * wait, the staircase and the run into this module are dust, and dust takes no time at all. The
+	 * chord lands on the tick it was written for, one floor along from the repeater that sent it.</p>
+	 *
+	 * <p>Which is why it is always a bus. Every other module hangs its notes off a block a repeater
+	 * drives directly, and there is no repeater here; a bus lights its own stone from the dust running
+	 * over it, so it does not need one.</p>
+	 */
+	private static BlockPos addCarriedEventModule(PlacementPlan placements, BlockPos cursor,
+			Direction travel, Direction laneStep, List<EventNote> chord) {
+		// Glass and dust where the repeater would have stood, to bring the wire up onto the bus. The
+		// module starts a column further along than the turn leaves off for the same reason a repeated
+		// one does: a descent's spiral comes back up through the column right in front of it.
+		addParityPad(placements, cursor);
+		return layEventBody(placements, cursor, travel, laneStep, chord, true);
+	}
+
+	/**
+	 * @param carried whether the head of this module is dust rather than a repeater, which means a
+	 *     chord small enough to hang off one block has nothing to hang off and takes a bus instead
+	 */
+	private static BlockPos layEventBody(PlacementPlan placements, BlockPos cursor, Direction travel,
+			Direction laneStep, List<EventNote> chord, boolean carried) {
+		int time = chord.get(0).time();
 		BlockPos anchor = cursor.relative(travel).above();
-		if (chord.size() <= 3) {
+		if (!carried && chord.size() <= 3) {
 			placeNote(placements, anchor, chord.get(0));
 			// The repeater drives the anchor directly, and a note block is a full block, so the
 			// anchor passes that power on to whatever is beside it -- including the next repeater.
@@ -1702,9 +1928,11 @@ public final class SongBuilder {
 	/**
 	 * @param faults notes this layout would sound at the wrong moment, or not at all. Empty for
 	 *     every finished layout; a build that has any is one you are meant to go and look at.
+	 * @param turns the block each lane ended on, which is where it handed the signal to the next
+	 *     one. A folding build wants these in as few columns as it has walls.
 	 */
 	record PastePlan(List<String> commands, int width, int depth, int height, PasteMode mode,
-			List<String> faults) {
+			List<String> faults, List<BlockPos> turns) {
 	}
 
 	private static final class PlacementPlan {
@@ -1729,6 +1957,8 @@ public final class SongBuilder {
 		 * packed to within one empty column of each other.</p>
 		 */
 		private final Map<BlockPos, Integer> powered = new LinkedHashMap<>();
+		/** Where each lane handed over to the next one, in the order they were built. */
+		private final List<BlockPos> turns = new ArrayList<>();
 		private int minimumX = Integer.MAX_VALUE;
 		private int minimumY = Integer.MAX_VALUE;
 		private int minimumZ = Integer.MAX_VALUE;
@@ -1778,6 +2008,20 @@ public final class SongBuilder {
 		void note(BlockPos position, int time) {
 			if (recording) {
 				notes.put(position.immutable(), time);
+			}
+		}
+
+		/**
+		 * Records the block a lane ended on, which is where its turn begins.
+		 *
+		 * <p>Reported rather than inferred from the blocks. Every candidate signature is shared with
+		 * something else -- glass belongs to a climb and to a parity pad both, powered stone to a
+		 * descent and to every bus in the build -- so counting blocks answers a different question
+		 * than the one worth asking, which is whether the turns stand in the same columns.</p>
+		 */
+		void turnedAt(BlockPos position) {
+			if (recording) {
+				turns.add(position.immutable());
 			}
 		}
 
@@ -1904,7 +2148,8 @@ public final class SongBuilder {
 			int widthZ = maximumZ < minimumZ ? 0 : maximumZ - minimumZ + 1;
 			int height = maximumY < minimumY ? 0 : maximumY - minimumY + 1;
 			return new PastePlan(commands, Math.max(widthX, widthZ), Math.min(widthX, widthZ), height,
-				mode, List.copyOf(faults));
+				mode, List.copyOf(faults),
+				turns.stream().map(turn -> turn.offset(shiftX, 0, shiftZ)).toList());
 		}
 	}
 }

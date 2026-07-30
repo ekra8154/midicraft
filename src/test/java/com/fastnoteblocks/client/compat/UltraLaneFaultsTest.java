@@ -37,10 +37,10 @@ class UltraLaneFaultsTest {
 	/**
 	 * Builds with at least one wrong note, over the generated corpus at every width and floor count.
 	 *
-	 * <p>Ratchet down, never up. Last measured: 112 of 360 builds, 357 wrong notes, the worst single
-	 * build holding nine of them.</p>
+	 * <p>Ratchet down, never up. Last measured: 23 of 360 builds, 27 wrong notes, the worst single
+	 * build holding two of them.</p>
 	 */
-	private static final int WORST_FAULTY_BUILDS = 112;
+	private static final int WORST_FAULTY_BUILDS = 23;
 
 	@Test
 	void reportsHowManyBuildsHaveAWrongNoteInThem() {
@@ -90,13 +90,18 @@ class UltraLaneFaultsTest {
 	 * every staircase stands in the same two columns, one at each end, and the question stops
 	 * arising.</p>
 	 *
-	 * <p>Two per wall because a climb alternates between two neighbouring columns as it goes up. Glass
-	 * appears nowhere else in a build, so counting the columns holding it counts the ones the floor
-	 * changes are in. Four is the target -- two walls, two columns each. Ratchet down, never up.</p>
+	 * <p>Two is the target -- a lane going one way ends at the far wall, and the lane coming back ends
+	 * at the near one. The plan reports the block each lane handed over on rather than the test
+	 * hunting for a signature: every block a turn is made of is a block something else is made of
+	 * too. Ratchet down, never up.</p>
 	 *
-	 * <p>Standing at 61.</p>
+	 * <p>Standing at 7, and at 2 for every song here without a chord bigger than fourteen. What is
+	 * left is one shape: a lane that ends on a long bus has spent most of its wire on it, and if the
+	 * event that will not fit is also a single tick away there is neither range to pad the rest of
+	 * the way nor a tick to buy a repeater with, so the turn lands a column or two inside the
+	 * wall.</p>
 	 */
-	private static final int WORST_CLIMB_COLUMNS = 61;
+	private static final int WORST_CLIMB_COLUMNS = 7;
 
 	@Test
 	void reportsHowScatteredTheFloorChangesAre() {
@@ -110,11 +115,8 @@ class UltraLaneFaultsTest {
 						SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
 						new SongBuilder.BuildLimits(4, width, floors));
 					java.util.TreeSet<Integer> columns = new java.util.TreeSet<>();
-					for (String command : plan.commands()) {
-						String[] parts = command.split(" ");
-						if (parts[4].equals("minecraft:glass")) {
-							columns.add(Integer.parseInt(parts[1]));
-						}
+					for (BlockPos turn : plan.turns()) {
+						columns.add(turn.getX());
 					}
 					if (columns.size() > worst) {
 						worst = columns.size();
