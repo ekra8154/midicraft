@@ -452,7 +452,7 @@ public final class SongBuilder {
 			// down four levels its wire has to stand on five of them.
 			int offBus = above >= 0 && above < floors && climb > 0 ? turnCells - 2 : turnCells;
 			int wall = travel == forward ? farWall : nearWall;
-			int stepOffAhead = climb > 0 ? 0 : 2;
+			int stepOffAhead = above >= 0 && above < floors ? (climb > 0 ? 0 : 2) : 0;
 			if (replan) {
 				booked = planLane(events, index, cursor.getX(), travel.getStepX(), wall, currentTime,
 					tipSignal, columnBehindBusy, turnCells, offBus, stepOffAhead, layout);
@@ -491,7 +491,6 @@ public final class SongBuilder {
 			// off, which is a block the chord could have used.
 			int stepOff = stepOffAhead;
 			boolean split = layout.ultra() && wantsTurn && index > 0
-				&& above >= 0 && above < floors
 				&& room >= 2 && room - 1 < cells && cells + offBus + stepOff <= DUST_RANGE;
 			// Unless leaving that tick is what stops the pad reaching the wall. Then spend the whole
 			// wait on the pad and carry the event over the turn on the wire instead, which is the one
@@ -545,10 +544,15 @@ public final class SongBuilder {
 				int near = 2 * (room - 1);
 				cursor = addSplitEventModule(placements, trigger.cursor(), travel, depth,
 					trigger.triggerDelay(), chord.subList(0, near));
-				cursor = climb > 0
-					? addGlassClimb(placements, cursor, travel, true, currentTime)
-					: addSpiralDescent(placements, cursor, travel, descentSide, currentTime);
-				floor = above;
+				if (above >= 0 && above < floors) {
+					cursor = climb > 0
+						? addGlassClimb(placements, cursor, travel, true, currentTime)
+						: addSpiralDescent(placements, cursor, travel, descentSide, currentTime);
+					floor = above;
+				} else {
+					cursor = addCompactTurn(placements, cursor, travel, depth, slabStep, currentTime);
+					climb = -climb;
+				}
 				travel = travel.getOpposite();
 				cursor = addCarriedEventModule(placements, cursor, travel, depth,
 					chord.subList(near, chord.size()), stepOff);
@@ -653,7 +657,7 @@ public final class SongBuilder {
 				int nextCells = (next.notes().size() + 1) / 2;
 				int gap = (laneWall - end.getX()) * travel.getStepX()
 					- Math.max(0, (next.time() - event.time() - 1) / 4);
-				boolean cuttable = above >= 0 && above < floors && gap >= 2 && gap - 1 < nextCells
+				boolean cuttable = gap >= 2 && gap - 1 < nextCells
 					&& nextCells + offBus + stepOffAhead <= DUST_RANGE;
 				if (!cuttable && (beyond > farWall || beyond < nearWall)) {
 					int ahead = prePad(cursor, travel, event, currentTime, layout, laneWall,
