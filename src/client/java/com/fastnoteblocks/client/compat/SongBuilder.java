@@ -543,6 +543,12 @@ public final class SongBuilder {
 				continue;
 			}
 			if (canTurn && wantsTurn) {
+				// A chord carried whole to the next lane, where the lane it left had to be filled with
+				// wire instead. Reported because it is the thing worth being annoyed about: every one of
+				// these is a chord that could have filled those columns itself.
+				if (!pad.cells().isEmpty()) {
+					placements.moved(event.notes().size());
+				}
 				cursor = emitPad(placements, cursor, travel, pad);
 				spentPadding = pad.delaySpent();
 				if (above >= 0 && above < floors) {
@@ -2291,7 +2297,7 @@ public final class SongBuilder {
 	 *     one. A folding build wants these in as few columns as it has walls.
 	 */
 	record PastePlan(List<String> commands, int width, int depth, int height, PasteMode mode,
-			List<String> faults, List<BlockPos> turns) {
+			List<String> faults, List<BlockPos> turns, List<Integer> moved) {
 	}
 
 	private static final class PlacementPlan {
@@ -2318,6 +2324,8 @@ public final class SongBuilder {
 		private final Map<BlockPos, Integer> powered = new LinkedHashMap<>();
 		/** Where each lane handed over to the next one, in the order they were built. */
 		private final List<BlockPos> turns = new ArrayList<>();
+		/** How big each chord was that a lane gave up on and padded round instead of cutting. */
+		private final List<Integer> moved = new ArrayList<>();
 		private int minimumX = Integer.MAX_VALUE;
 		private int minimumY = Integer.MAX_VALUE;
 		private int minimumZ = Integer.MAX_VALUE;
@@ -2381,6 +2389,12 @@ public final class SongBuilder {
 		void turnedAt(BlockPos position) {
 			if (recording) {
 				turns.add(position.immutable());
+			}
+		}
+
+		void moved(int notes) {
+			if (recording) {
+				moved.add(notes);
 			}
 		}
 
@@ -2508,7 +2522,8 @@ public final class SongBuilder {
 			int height = maximumY < minimumY ? 0 : maximumY - minimumY + 1;
 			return new PastePlan(commands, Math.max(widthX, widthZ), Math.min(widthX, widthZ), height,
 				mode, List.copyOf(faults),
-				turns.stream().map(turn -> turn.offset(shiftX, 0, shiftZ)).toList());
+				turns.stream().map(turn -> turn.offset(shiftX, 0, shiftZ)).toList(),
+				List.copyOf(moved));
 		}
 	}
 }
