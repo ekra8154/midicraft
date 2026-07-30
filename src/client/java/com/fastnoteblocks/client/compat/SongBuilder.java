@@ -518,27 +518,23 @@ public final class SongBuilder {
 			// to hold. A lane that cannot reach its wall carries on to the next chord and tries again;
 			// the only turn allowed elsewhere is one on a lane already past its wall, where carrying on
 			// would never bring it back.
+			boolean onWall = pad.cells().size() == columns;
 			boolean canTurn = layout.ultra()
-				? index > 0 && pad.cells().size() == columns
-					&& pad.signal() >= (pad.cells().isEmpty() && lastStyle == ChordStyle.BUS
-						? offBus : turnCells)
+				? index > 0 && pad.signal() >= (pad.cells().isEmpty() && lastStyle == ChordStyle.BUS
+					? offBus : turnCells)
 				: index > 0 && events.get(index - 1).maxSafeTurnDistance() >= MAX_LANE_SPACING;
 			int spentPadding = 0;
 			carried &= canTurn && !split;
-			// On the wall or not at all, with nothing after the "or". A turn is the one thing in a
-			// build that steps out of its own lane, so a turn standing anywhere but the column every
-			// other lane turns in is a turn standing beside whatever that column happens to hold. There
-			// used to be two ways round this rule -- a lane the planner could not place, and a lane
-			// already past its wall -- and between them they were every off-wall turn there was. A
-			// machine that cannot keep the rule is refused rather than built crooked, and says which
-			// chord it could not place, because that is a thing to go and fix rather than to average.
-			if (layout.ultra() && wantsTurn && !split && !carried && !canTurn) {
-				throw new IllegalArgumentException("Cannot end a lane on its wall: the chord of "
-					+ event.notes().size() + " at tick " + event.time() + " leaves " + columns
-					+ " columns short of the wall, with " + tipSignal + " blocks of wire and "
-					+ (wait - 1) + " ticks to fill them, and it is too big to cut across the turn ("
-					+ cells + " blocks of bus, " + offBus + " for the turn, " + stepOff
-					+ " to clear it). Try a different width.");
+			// On the wall or not at all -- except that a machine you cannot paste is a machine you
+			// cannot go and look at. So a lane that will not reach its wall turns where it stands and
+			// says so, on the same overlay a wrong note would appear on, naming the chord that beat it
+			// and what it had left to work with. Every one of these is a thing to go and fix.
+			if (layout.ultra() && wantsTurn && canTurn && !onWall && !split && !carried) {
+				placements.trouble("a lane turned " + columns + " columns short of its wall at tick "
+					+ event.time() + ", where a chord of " + event.notes().size()
+					+ " would not fit: " + tipSignal + " blocks of wire and " + (wait - 1)
+					+ " spare ticks to fill them with, and " + cells + " blocks of bus plus "
+					+ offBus + " for the turn is too much to cut across it");
 			}
 			if (split) {
 				SpatialDelayTrigger trigger = addSpatialDelayBeforeEvent(placements, cursor, travel,
@@ -2355,6 +2351,8 @@ public final class SongBuilder {
 		private final List<BlockPos> turns = new ArrayList<>();
 		/** How big each chord was that a lane gave up on and padded round instead of cutting. */
 		private final List<Integer> moved = new ArrayList<>();
+		/** Lanes that could not be landed on their wall, and what defeated them. */
+		private final List<String> trouble = new ArrayList<>();
 		private int minimumX = Integer.MAX_VALUE;
 		private int minimumY = Integer.MAX_VALUE;
 		private int minimumZ = Integer.MAX_VALUE;
@@ -2424,6 +2422,12 @@ public final class SongBuilder {
 		void moved(int notes) {
 			if (recording) {
 				moved.add(notes);
+			}
+		}
+
+		void trouble(String what) {
+			if (recording) {
+				trouble.add(what);
 			}
 		}
 
@@ -2531,7 +2535,8 @@ public final class SongBuilder {
 			// height is left alone, because that is measured from your feet and not from a wall.
 			int shiftX = minimumX == Integer.MAX_VALUE ? 0 : origin.getX() - minimumX;
 			int shiftZ = minimumZ == Integer.MAX_VALUE ? 0 : origin.getZ() - minimumZ;
-			List<String> faults = verify(shiftX, shiftZ);
+			List<String> faults = new ArrayList<>(trouble);
+			faults.addAll(verify(shiftX, shiftZ));
 			// Every other layout is finished, so a fault in one is a bug and the build is refused.
 			// The ultra lane is still being worked out on multiple floors, where the run that carries
 			// the signal sideways passes under the notes of the corridors either side of it, and a

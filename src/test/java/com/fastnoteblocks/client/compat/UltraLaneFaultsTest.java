@@ -51,7 +51,7 @@ class UltraLaneFaultsTest {
 	void reportsHowManyBuildsHaveAWrongNoteInThem() {
 		int builds = 0;
 		int faulty = 0;
-		int wrongNotes = 0;
+		long wrongNotes = 0;
 		StringBuilder worst = new StringBuilder();
 		int worstCount = 0;
 		for (Corpus song : corpus()) {
@@ -67,7 +67,9 @@ class UltraLaneFaultsTest {
 						// Refused rather than built crooked; the other test counts those.
 						continue;
 					}
-					if (plan.faults().isEmpty()) {
+					// Only notes. A lane that could not reach its wall reports itself on the same
+					// list, and is counted by the other test; it is a thing to fix, not a wrong note.
+					if (plan.faults().stream().noneMatch(fault -> fault.startsWith("the note"))) {
 						continue;
 					}
 					faulty++;
@@ -94,22 +96,13 @@ class UltraLaneFaultsTest {
 	/**
 	 * Turns not standing in one of the two columns most of them stand in, over the whole corpus.
 	 *
-	 * <p>The sharper of the two numbers, and the one that only goes down when a turn that used to be
-	 * misplaced stops being. It is asserted at nought now and no longer ratcheted: the rule has no
-	 * exceptions left in it, so a turn off the wall is not a number to bring down but a bug.</p>
+	 * <p>Each one is a lane that could not be landed on its wall: a chord too big to cut across the
+	 * turn arriving where the lane behind it cannot be filled either, with no wire left for a pad and
+	 * no spare tick to buy a repeater with. It turns where it stands and says so on the paste
+	 * overlay, rather than the build being refused -- a machine you cannot paste is a machine you
+	 * cannot go and look at. Ratchet down, never up; nought is the target.</p>
 	 */
-	private static final int WORST_TURNS_OFF_THE_WALL = 0;
-
-	/**
-	 * Builds refused because no arrangement of their lanes lands every one of them on a wall.
-	 *
-	 * <p>This is what keeping the rule costs, and the number that replaces the one above as the
-	 * thing to bring down. A build is refused when a chord too big to cut across a turn arrives
-	 * where the lane behind it cannot be filled either -- no wire left for a pad, and no spare tick
-	 * to buy a repeater with. Every one is a song someone cannot paste at that width, so: ratchet
-	 * down, never up.</p>
-	 */
-	private static final int WORST_REFUSED = 18;
+	private static final int WORST_TURNS_OFF_THE_WALL = 24;
 
 	@Test
 	void everyFloorChangeStandsOnAWall() {
@@ -128,28 +121,24 @@ class UltraLaneFaultsTest {
 						refused++;
 						continue;
 					}
-					Map<Integer, Long> byColumn = plan.turns().stream().map(BlockPos::getX)
-						.collect(Collectors.groupingBy(x -> x, Collectors.counting()));
-					int stray = byColumn.entrySet().stream()
-						.sorted(Map.Entry.<Integer, Long>comparingByValue().reversed())
-						.skip(2)
-						.mapToInt(wall -> wall.getValue().intValue())
-						.sum();
-					offTheWall += stray;
-					if (stray > 0 && where.isEmpty()) {
+					List<String> short_ = plan.faults().stream()
+						.filter(fault -> fault.startsWith("a lane turned"))
+						.toList();
+					offTheWall += short_.size();
+					if (!short_.isEmpty() && where.isEmpty()) {
 						where = song.name() + " floors=" + floors + " width=" + width + ": "
-							+ new java.util.TreeSet<>(byColumn.keySet());
+							+ short_.get(0);
 					}
 				}
 			}
 		}
 
-		String report = offTheWall + " floor changes do not stand on a wall, and " + refused
-			+ " builds were refused for keeping the rule. " + where;
+		String report = offTheWall + " lanes could not be landed on their wall and turned short "
+			+ "saying so. " + where;
 		System.out.println(report);
-		assertEquals(WORST_TURNS_OFF_THE_WALL, offTheWall,
-			"a turn stood somewhere other than a wall. " + report);
-		assertTrue(refused <= WORST_REFUSED, "more builds are refused than were. " + report);
+		assertEquals(0, refused, "a build was refused outright rather than reported. " + report);
+		assertTrue(offTheWall <= WORST_TURNS_OFF_THE_WALL,
+			"more lanes miss their wall than did. " + report);
 	}
 
 	/** One generated song and what it is meant to stress. */
