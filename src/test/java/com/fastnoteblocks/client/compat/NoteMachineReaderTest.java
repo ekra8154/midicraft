@@ -116,6 +116,89 @@ class NoteMachineReaderTest {
 		assertEquals(0, reading.unreachedNotes(), "some note blocks were never triggered");
 	}
 
+	/**
+	 * The round trip over a folded build whose lanes are all filled out to the wall.
+	 *
+	 * <p>The pad that fills them is the one part of a build made of nothing but wire, and wire is the
+	 * one thing that runs out. Every other join hands over through a block a repeater drives, worth
+	 * the full fifteen; a pad hands over what is left of a count that started at the last repeater and
+	 * has already paid for a bus. So this is where a mistake in that arithmetic shows: too long a run
+	 * of dust and the wire dies somewhere up the staircase, taking the rest of the song with it.</p>
+	 *
+	 * <p>Read rather than reasoned about, because the reasoning is mine and the reading is the game's:
+	 * it follows the same diagonal steps and the same fade, and it will say a note went unreached
+	 * where {@link SongBuilder.PlacementPlan#verify} -- which only knows what the builder meant to
+	 * power -- would say nothing at all.</p>
+	 *
+	 * <p>Chords up to fourteen, so lanes end on buses long enough to need the pad repeated, and gaps
+	 * down to a single tick, so some of them have no tick to spare for one and the event has to be
+	 * carried over the turn instead.</p>
+	 */
+	@Test
+	void readsBackAFoldedSongWhoseLanesAreAllPaddedToTheWall() {
+		List<SongBuilder.EventNote> notes = new ArrayList<>();
+		String[] instruments = {"minecraft:air", "minecraft:stone", "minecraft:oak_planks",
+			"minecraft:gold_block", "minecraft:sand"};
+		Random random = new Random(44L);
+		int time = 0;
+		for (int event = 0; event < 120; event++) {
+			time += 1 + random.nextInt(9);
+			int chord = 1 + random.nextInt(14);
+			for (int index = 0; index < chord; index++) {
+				notes.add(new SongBuilder.EventNote(time, 1 + index % 3, index,
+					random.nextInt(25), instruments[random.nextInt(instruments.length)]));
+			}
+		}
+		SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0),
+			List.copyOf(notes), SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+			new SongBuilder.BuildLimits(4, 16, 3));
+
+		NoteMachineReader.Reading reading = readAll(placeInWorld(plan), "Padded");
+
+		assertEquals("", difference(sounds(notes), sounds(reading.project())),
+			"a folded song did not read back as itself");
+		assertEquals(0, reading.unreachedNotes(), "some note blocks were never triggered");
+	}
+
+	/**
+	 * A build holding the one module that has no repeater of its own.
+	 *
+	 * <p>When the event a lane cannot fit is a single tick away, there is no tick to buy the pad a
+	 * repeater with and still leave that event one -- so the pad's repeater holds the whole wait and
+	 * the event is carried over the turn on dust, which takes no time, and built as a bus, which
+	 * needs no repeater. Everything about it is unlike every other module: the wire arrives from a
+	 * staircase instead of from a repeater behind it, it has to climb the side of its own first stone
+	 * to get onto the bus, and what it is carrying by then is whatever the pad had left.</p>
+	 *
+	 * <p>It happens perhaps once in a hundred builds, which is exactly why it is pinned to a build it
+	 * is known to happen in rather than left to a sweep to stumble over.</p>
+	 */
+	@Test
+	void readsBackABuildWhereAnEventIsCarriedOverTheTurn() {
+		List<SongBuilder.EventNote> notes = new ArrayList<>();
+		String[] instruments = {"minecraft:air", "minecraft:stone", "minecraft:oak_planks",
+			"minecraft:gold_block", "minecraft:sand"};
+		Random random = new Random(55L);
+		int time = 0;
+		for (int event = 0; event < 120; event++) {
+			time += 1 + random.nextInt(9);
+			int chord = 1 + random.nextInt(30);
+			for (int index = 0; index < chord; index++) {
+				notes.add(new SongBuilder.EventNote(time, 1 + index % 3, index,
+					random.nextInt(25), instruments[random.nextInt(instruments.length)]));
+			}
+		}
+		SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0),
+			List.copyOf(notes), SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+			new SongBuilder.BuildLimits(4, 28, 3));
+
+		NoteMachineReader.Reading reading = readAll(placeInWorld(plan), "Carried");
+
+		assertEquals("", difference(sounds(notes), sounds(reading.project())),
+			"the carried chord did not read back on the tick it was written for");
+		assertEquals(0, reading.unreachedNotes(), "some note blocks were never triggered");
+	}
+
 	/** Chords of four to seven throughout, over every instrument the module treats differently. */
 	private static List<SongBuilder.EventNote> stackableSong() {
 		List<SongBuilder.EventNote> notes = new ArrayList<>();
