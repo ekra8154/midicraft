@@ -452,7 +452,11 @@ public final class SongBuilder {
 			// down four levels its wire has to stand on five of them.
 			int offBus = above >= 0 && above < floors && climb > 0 ? turnCells - 2 : turnCells;
 			int wall = travel == forward ? farWall : nearWall;
-			int stepOffAhead = above >= 0 && above < floors ? (climb > 0 ? 0 : 2) : 0;
+			// One column, not two. A descent's own spiral occupies the column in front of where it
+			// lands -- the builder refuses outright at nought, because the stone is already there -- but
+			// the second column was bought to answer three wrong notes that turned out to be a lane
+			// landing past its wall, and it has been paid for at every descent since.
+			int stepOffAhead = above >= 0 && above < floors && climb < 0 ? 1 : 0;
 			if (replan) {
 				booked = planLane(events, index, cursor.getX(), travel.getStepX(), wall, currentTime,
 					tipSignal, columnBehindBusy, turnCells, offBus, stepOffAhead, layout);

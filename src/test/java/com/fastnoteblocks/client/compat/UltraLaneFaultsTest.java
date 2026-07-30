@@ -109,7 +109,7 @@ class UltraLaneFaultsTest {
 	 * to buy a repeater with. Every one is a song someone cannot paste at that width, so: ratchet
 	 * down, never up.</p>
 	 */
-	private static final int WORST_REFUSED = 22;
+	private static final int WORST_REFUSED = 18;
 
 	@Test
 	void everyFloorChangeStandsOnAWall() {
