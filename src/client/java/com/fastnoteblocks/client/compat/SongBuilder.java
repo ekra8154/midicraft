@@ -439,24 +439,12 @@ public final class SongBuilder {
 			// leaves the next lane starting outside the wall -- and nothing measured afterwards can
 			// help, because by then the overshoot is built. Asking first costs a lane its last event
 			// and keeps the wall a wall.
-			int above = floor + climb;
-			// A staircase and a slab step spend different amounts of wire, and which one is coming has
-			// to be known before the pad is planned, since the pad is what has to leave enough.
-			int turnCells = above >= 0 && above < floors ? TURN_DUST_CELLS : slabStep + 2;
-			// A climb coming straight off a bus is two cells cheaper: a bus already carries its wire a
-			// block above the path, so the rung it would have stepped off and the first rung itself
-			// are both already there. Worth counting apart from the dearer turns rather than rounding
-			// up to them -- a lane ending on a bus is exactly the lane with no wire to spare, and
-			// those two cells are four notes of chord that can straddle the turn instead of stopping
-			// short of it. A descent is not the climb upside down and gets no such discount: to go
-			// down four levels its wire has to stand on five of them.
-			int offBus = above >= 0 && above < floors && climb > 0 ? turnCells - 2 : turnCells;
+			TurnCost turn = turnCost(floor, climb, floors, slabStep);
+			int above = turn.above();
+			int turnCells = turn.cells();
+			int offBus = turn.offBus();
 			int wall = travel == forward ? farWall : nearWall;
-			// One column, not two. A descent's own spiral occupies the column in front of where it
-			// lands -- the builder refuses outright at nought, because the stone is already there -- but
-			// the second column was bought to answer three wrong notes that turned out to be a lane
-			// landing past its wall, and it has been paid for at every descent since.
-			int stepOffAhead = above >= 0 && above < floors && climb < 0 ? 1 : 0;
+			int stepOffAhead = turn.stepOff();
 			if (replan) {
 				booked = planLane(events, index, cursor.getX(), travel.getStepX(), wall, currentTime,
 					tipSignal, columnBehindBusy, turnCells, offBus, stepOffAhead, layout);
@@ -472,8 +460,9 @@ public final class SongBuilder {
 			// the shape the chord was measured in. A stacked chord that finds the pair of slots
 			// behind it spoken for is built as a bus instead, and a bus is longer -- so a lane could
 			// be told a chord fitted, build it, and land a column past its own wall.
-			int landing = landingOf(cursor.getX(), travel.getStepX(), event, wait, columnBehindBusy,
-				layout).end() + travel.getStepX() * reserve;
+			Landing here = landingOf(cursor.getX(), travel.getStepX(), event, wait, columnBehindBusy,
+				layout);
+			int landing = here.end() + travel.getStepX() * reserve;
 			boolean wantsTurn = laneStarted && (landing > farWall || landing < nearWall);
 			// One tick has to be left for the next event's own repeater, which is the only thing that
 			// can drive the module it stands in front of.
@@ -604,7 +593,23 @@ public final class SongBuilder {
 				travel = travel.getOpposite();
 				laneStarted = false;
 				columnBehindBusy = true;
-				replan = layout.ultra();
+				// Planned here and not at the top of the next event, because this event is about to be
+				// built on the far side of the turn -- it is the new lane's first chord. Deferring the
+				// plan by one left every lane's opening chord outside its own plan's reach: the search
+				// could book a pad in front of any chord but that one, so a lane whose opening chord
+				// was the thing that had to move came back with nothing and turned wherever it stood.
+				// The turn ahead of the new lane is a different turn from the one just built -- the
+				// floor and the direction of climb have both moved on -- so it is asked again.
+				if (layout.ultra()) {
+					TurnCost next = turnCost(floor, climb, floors, slabStep);
+					// The pad before the turn has already held some of the wait this event was going to
+					// spend on its own repeater, so the plan is told the clock has moved on by that
+					// much. Otherwise it counts columns of delay the walk is not going to place.
+					booked = planLane(events, index, cursor.getX(), travel.getStepX(),
+						travel == forward ? farWall : nearWall, currentTime + spentPadding, tipSignal,
+						columnBehindBusy, next.cells(), next.offBus(), next.stepOff(), layout);
+					replan = false;
+				}
 			}
 			if (carried) {
 				// The pad's repeater has already held this event's whole wait, and everything between
@@ -643,24 +648,34 @@ public final class SongBuilder {
 			if (layout.ultra() && index > 0 && index + 1 < events.size()
 				&& (event.notes().size() + 1) / 2 + offBus <= DUST_RANGE) {
 				int laneWall = travel == forward ? farWall : nearWall;
-				BlockPos end = cursor.relative(travel,
-					placedLength(cursor, travel, event, currentTime, layout));
+				// Where this event really ends and what it really leaves. Asked of a second piece of
+				// arithmetic before, and that one measured every chord in the shape it was sorted into
+				// rather than the shape it gets built in -- so a stacked module the walk was about to
+				// drop to a bus was measured two columns long when it was going to be five, and the pad
+				// laid to land it on the wall landed the lane two columns past the wall instead.
+				// Asked here and not reused from the turn decision above, because the pad this lane was
+				// booked to lay early has moved the cursor since, and the ticks it spent have come off
+				// the wait -- so the event no longer starts where it did or carries the delay it did.
+				Landing reached = landingOf(cursor.getX(), travel.getStepX(), event,
+					wait - spentPadding, columnBehindBusy, layout);
+				int end = reached.end();
 				EventGroup next = events.get(index + 1);
-				int beyond = end.getX() + travel.getStepX()
-					* (placedLength(end, travel, next, event.time(), layout)
-						+ turnReserve(next, turnCells, layout));
+				int beyond = landingOf(end, travel.getStepX(), next, next.time() - event.time(),
+					reached.busy(), layout).end()
+					+ travel.getStepX() * turnReserve(next, turnCells, layout);
 				// Unless the chord that will not fit can be cut across the turn, in which case the gap
 				// is its to fill. A cut costs nothing and fills the columns with music; a pad fills the
 				// same columns with wire and then charges the staircase for it. Padding first left the
 				// lane flush against its wall with no gap left, so the cut had nothing to do and never
 				// happened -- two of it in a build of a hundred and forty-six turns.
 				int nextCells = (next.notes().size() + 1) / 2;
-				int gap = (laneWall - end.getX()) * travel.getStepX()
+				int gap = (laneWall - end) * travel.getStepX()
 					- Math.max(0, (next.time() - event.time() - 1) / 4);
 				boolean cuttable = gap >= 2 && gap - 1 < nextCells
 					&& nextCells + offBus + stepOffAhead <= DUST_RANGE;
 				if (!cuttable && (beyond > farWall || beyond < nearWall)) {
-					int ahead = prePad(cursor, travel, event, currentTime, layout, laneWall,
+					int ahead = prePad(cursor.getX(), travel.getStepX(), event, wait - spentPadding,
+						columnBehindBusy, layout, laneWall,
 						(laneWall - cursor.getX()) * travel.getStepX());
 					// Planned like the pad behind, and for the same reason: dust in front of an event
 					// spends the same wire dust behind it does, so a lane wanting a dozen columns off a
@@ -706,6 +721,39 @@ public final class SongBuilder {
 	private static int turnReserve(EventGroup event, int turnCells, Layout layout) {
 		return layout.ultra() && event.style() == ChordStyle.BUS
 			&& DUST_RANGE - (event.notes().size() + 1) / 2 < turnCells ? 1 : 0;
+	}
+
+	/**
+	 * What the turn at the end of the lane the walk is in will cost it, in cells and in columns.
+	 *
+	 * <p>Asked in two places now: at the top of each event, and again the moment a turn has been
+	 * built, because the lane on the far side of a staircase is a different lane with a different
+	 * turn ahead of it -- and its first chord is placed before the walk comes round again.</p>
+	 *
+	 * @param cells what the turn spends of the wire arriving at it. A staircase and a sideways slab
+	 *     step are not the same price, and which is coming has to be known before the pad is
+	 *     planned, since the pad is what has to leave enough.
+	 * @param offBus the same for a lane ending on a bus, which is two cells cheaper at a climb: a
+	 *     bus already carries its wire a block above the path, so the rung it would have stepped off
+	 *     and the first rung itself are both already there. Worth counting apart from the dearer
+	 *     turns rather than rounding up to them -- a lane ending on a bus is exactly the lane with no
+	 *     wire to spare, and those two cells are four notes of chord that can straddle the turn
+	 *     instead of stopping short of it. A descent is not the climb upside down and gets no such
+	 *     discount: to go down four levels its wire has to stand on five of them.
+	 * @param stepOff columns in front of a descent's landing that belong to its own spiral. One, not
+	 *     two: the builder refuses outright at nought because the stone is already there, but the
+	 *     second column was bought to answer three wrong notes that turned out to be a lane landing
+	 *     past its wall, and it had been paid for at every descent since.
+	 */
+	private record TurnCost(int above, int cells, int offBus, int stepOff) {
+	}
+
+	private static TurnCost turnCost(int floor, int climb, int floors, int slabStep) {
+		int above = floor + climb;
+		boolean staircase = above >= 0 && above < floors;
+		int cells = staircase ? TURN_DUST_CELLS : slabStep + 2;
+		return new TurnCost(above, cells, staircase && climb > 0 ? cells - 2 : cells,
+			staircase && climb < 0 ? 1 : 0);
 	}
 
 	/**
@@ -972,15 +1020,17 @@ public final class SongBuilder {
 	 * on where it starts -- which is what this is moving. So a pad of four can lengthen the event by
 	 * one and overshoot where a pad of three would have landed it.</p>
 	 *
+	 * @param busy whether the pair of slots behind the module is already spoken for, which is what
+	 *     drops a full stacked module to a bus. Passed in rather than assumed, because that drop is
+	 *     the difference between a module two columns long and one five columns long -- and a pad
+	 *     measured against the shorter one lands the lane past the wall it was meant to stop at.
 	 * @param limit how many blocks of dust the wire arriving here can afford
 	 * @return the pad, or -1 if no pad within the limit lands the event on the wall
 	 */
-	private static int prePad(BlockPos cursor, Direction travel, EventGroup event, int currentTime,
+	private static int prePad(int startX, int stepX, EventGroup event, int wait, boolean busy,
 			Layout layout, int wall, int limit) {
 		for (int pad = 0; pad <= limit; pad++) {
-			BlockPos from = cursor.relative(travel, pad);
-			if (from.getX() + travel.getStepX()
-				* placedLength(from, travel, event, currentTime, layout) == wall) {
+			if (landingOf(startX + stepX * pad, stepX, event, wait, busy, layout).end() == wall) {
 				return pad;
 			}
 		}
@@ -1013,30 +1063,6 @@ public final class SongBuilder {
 			cursor = cursor.relative(travel);
 		}
 		return cursor;
-	}
-
-	/**
-	 * How far along an event will really reach, counting the column a stacked module may be nudged
-	 * by to land on its beat.
-	 *
-	 * <p>{@link EventGroup#length} is measured before the walk starts, and cannot know: whether a
-	 * nudge is needed turns on where the cursor has got to, and where the cursor has got to turns on
-	 * every nudge before it. Left uncounted, a lane creeps a column past the wall for every module
-	 * that got one -- which is what leaves the staircases at the ends of the lanes standing in a
-	 * scatter rather than in a column.</p>
-	 *
-	 * <p>Erring high is harmless. The style asked for here is the one measured up front, and a module
-	 * the walk then drops to a bus takes no nudge, so such a lane ends a column short of the wall
-	 * rather than a column past it.</p>
-	 */
-	private static int placedLength(BlockPos cursor, Direction travel, EventGroup event,
-			int currentTime, Layout layout) {
-		if (!layout.ultra() || !event.style().stacked()) {
-			return event.length();
-		}
-		int delayColumns = Math.max(0, (event.time() - currentTime - 1) / 4);
-		int centre = cursor.getX() + travel.getStepX() * (delayColumns + 1);
-		return event.length() + (Math.floorMod(centre, 2) == layout.centreParity() ? 0 : 1);
 	}
 
 	/**

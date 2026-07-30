@@ -102,7 +102,7 @@ class UltraLaneFaultsTest {
 	 * overlay, rather than the build being refused -- a machine you cannot paste is a machine you
 	 * cannot go and look at. Ratchet down, never up; nought is the target.</p>
 	 */
-	private static final int WORST_TURNS_OFF_THE_WALL = 24;
+	private static final int WORST_TURNS_OFF_THE_WALL = 9;
 
 	@Test
 	void everyFloorChangeStandsOnAWall() {
