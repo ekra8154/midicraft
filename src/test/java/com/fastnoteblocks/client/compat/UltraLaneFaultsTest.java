@@ -37,10 +37,10 @@ class UltraLaneFaultsTest {
 	/**
 	 * Builds with at least one wrong note, over the generated corpus at every width and floor count.
 	 *
-	 * <p>Ratchet down, never up. Last measured: 23 of 360 builds, 27 wrong notes, the worst single
+	 * <p>Ratchet down, never up. Last measured: 17 of 360 builds, 21 wrong notes, the worst single
 	 * build holding two of them.</p>
 	 */
-	private static final int WORST_FAULTY_BUILDS = 23;
+	private static final int WORST_FAULTY_BUILDS = 17;
 
 	@Test
 	void reportsHowManyBuildsHaveAWrongNoteInThem() {
@@ -95,13 +95,12 @@ class UltraLaneFaultsTest {
 	 * hunting for a signature: every block a turn is made of is a block something else is made of
 	 * too. Ratchet down, never up.</p>
 	 *
-	 * <p>Standing at 7, and at 2 for every song here without a chord bigger than fourteen. What is
-	 * left is one shape: a lane that ends on a long bus has spent most of its wire on it, and if the
-	 * event that will not fit is also a single tick away there is neither range to pad the rest of
-	 * the way nor a tick to buy a repeater with, so the turn lands a column or two inside the
-	 * wall.</p>
+	 * <p>Standing at 5, and at 2 for every song here without a chord bigger than fourteen. What is
+	 * left is the narrowest builds of the song with chords of thirty in it, where a single event is
+	 * most of the lane: there is no room to pad in front of it, nothing left of the wire to pad
+	 * behind it, and an event that will not fit and cannot turn runs on past the wall instead.</p>
 	 */
-	private static final int WORST_CLIMB_COLUMNS = 7;
+	private static final int WORST_CLIMB_COLUMNS = 5;
 
 	@Test
 	void reportsHowScatteredTheFloorChangesAre() {

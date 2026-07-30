@@ -500,6 +500,10 @@ public final class SongBuilder {
 					cursor = addCompactTurn(placements, cursor, travel, depth, slabStep, currentTime);
 					climb = -climb;
 				}
+				// What the staircase leaves the next lane. It matters because the next lane may want
+				// to lay dust of its own before its first repeater, and a turn is the one handover in
+				// a build that spends wire without a repeater at either end of it.
+				tipSignal = pad.signal() - turnCells;
 				travel = travel.getOpposite();
 				laneStarted = false;
 				columnBehindBusy = true;
@@ -516,6 +520,34 @@ public final class SongBuilder {
 				columnBehindBusy = true;
 				laneStarted = true;
 				continue;
+			}
+			// One event of lookahead. If the next one will not fit after this one, this is the last
+			// event of its lane, and the pad that fills the lane out to the wall is better spent in
+			// front of it than behind it: in front, this event's own repeater stands between the pad
+			// and the staircase and hands it a full fifteen, where behind, the pad has to be paid for
+			// out of whatever the event left -- and a lane ending on a long bus has left almost
+			// nothing. It also costs no time at all, where a pad behind may have to buy a repeater
+			// with a tick borrowed from the wait.
+			// Never in front of the first event of all, which has no wire arriving to lay dust from:
+			// the head of a machine is a repeater with nothing behind it, and that is how you can tell
+			// where to put the lever -- and how the reader tells where the song starts.
+			if (layout.ultra() && index > 0 && index + 1 < events.size()
+				&& (event.notes().size() + 1) / 2 + turnCells <= DUST_RANGE) {
+				int laneWall = travel == forward ? farWall : nearWall;
+				BlockPos end = cursor.relative(travel,
+					placedLength(cursor, travel, event, currentTime, layout));
+				EventGroup next = events.get(index + 1);
+				int beyond = end.getX() + travel.getStepX()
+					* placedLength(end, travel, next, event.time(), layout);
+				if (beyond > farWall || beyond < nearWall) {
+					// One block of wire short of everything it has, because a stacked module may lay a
+					// column of its own between the pad and its repeater to land on its beat.
+					int ahead = prePad(cursor, travel, event, currentTime, layout, laneWall,
+						Math.min(tipSignal - 1, (laneWall - cursor.getX()) * travel.getStepX()));
+					if (ahead > 0) {
+						cursor = emitDust(placements, cursor, travel, ahead);
+					}
+				}
 			}
 			SpatialDelayTrigger trigger = addSpatialDelayBeforeEvent(placements, cursor, travel,
 				event.time() - currentTime - spentPadding);
@@ -643,6 +675,39 @@ public final class SongBuilder {
 			}
 		}
 		return new Pad(List.copyOf(cells), pad.signal(), total);
+	}
+
+	/**
+	 * How many columns of dust in front of an event put its far end exactly on the wall.
+	 *
+	 * <p>Asked by trying, because the answer is not the arithmetic it looks like: a stacked module
+	 * takes a column of its own now and then to land on the beat it needs, and whether it does turns
+	 * on where it starts -- which is what this is moving. So a pad of four can lengthen the event by
+	 * one and overshoot where a pad of three would have landed it.</p>
+	 *
+	 * @param limit how many blocks of dust the wire arriving here can afford
+	 * @return the pad, or -1 if no pad within the limit lands the event on the wall
+	 */
+	private static int prePad(BlockPos cursor, Direction travel, EventGroup event, int currentTime,
+			Layout layout, int wall, int limit) {
+		for (int pad = 0; pad <= limit; pad++) {
+			BlockPos from = cursor.relative(travel, pad);
+			if (from.getX() + travel.getStepX()
+				* placedLength(from, travel, event, currentTime, layout) == wall) {
+				return pad;
+			}
+		}
+		return -1;
+	}
+
+	/** Lays a run of dust, on glass so that nothing under it comes alive. */
+	private static BlockPos emitDust(PlacementPlan placements, BlockPos cursor, Direction travel,
+			int columns) {
+		for (int cell = 0; cell < columns; cell++) {
+			addParityPad(placements, cursor);
+			cursor = cursor.relative(travel);
+		}
+		return cursor;
 	}
 
 	/** Lays a planned pad down, and hands back the block the turn now starts on. */
