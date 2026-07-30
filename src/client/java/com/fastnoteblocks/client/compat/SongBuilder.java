@@ -567,8 +567,11 @@ public final class SongBuilder {
 				}
 				// What the staircase leaves the next lane. It matters because the next lane may want
 				// to lay dust of its own before its first repeater, and a turn is the one handover in
-				// a build that spends wire without a repeater at either end of it.
-				tipSignal = pad.signal() - turnCells;
+				// a build that spends wire without a repeater at either end of it. Charged at what this
+				// turn actually spends: a climb taken straight off a bus skips two rungs, and counting
+				// them anyway left every lane after one two blocks poorer than it was.
+				tipSignal = pad.signal() - (above >= 0 && above < floors && climb > 0
+					&& lastStyle == ChordStyle.BUS && pad.cells().isEmpty() ? offBus : turnCells);
 				travel = travel.getOpposite();
 				laneStarted = false;
 				columnBehindBusy = true;
