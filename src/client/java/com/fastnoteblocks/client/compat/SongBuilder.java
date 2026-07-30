@@ -433,7 +433,8 @@ public final class SongBuilder {
 			// and keeps the wall a wall.
 			boolean canTurn = index > 0
 				&& events.get(index - 1).maxSafeTurnDistance() >= MAX_LANE_SPACING;
-			int landing = cursor.getX() + travel.getStepX() * event.length();
+			int landing = cursor.getX()
+				+ travel.getStepX() * placedLength(cursor, travel, event, currentTime, layout);
 			if (canTurn && laneStarted && (landing > farWall || landing < nearWall)) {
 				int above = floor + climb;
 				if (above >= 0 && above < floors) {
@@ -470,6 +471,30 @@ public final class SongBuilder {
 			lastStyle = placed.style();
 			laneStarted = true;
 		}
+	}
+
+	/**
+	 * How far along an event will really reach, counting the column a stacked module may be nudged
+	 * by to land on its beat.
+	 *
+	 * <p>{@link EventGroup#length} is measured before the walk starts, and cannot know: whether a
+	 * nudge is needed turns on where the cursor has got to, and where the cursor has got to turns on
+	 * every nudge before it. Left uncounted, a lane creeps a column past the wall for every module
+	 * that got one -- which is what leaves the staircases at the ends of the lanes standing in a
+	 * scatter rather than in a column.</p>
+	 *
+	 * <p>Erring high is harmless. The style asked for here is the one measured up front, and a module
+	 * the walk then drops to a bus takes no nudge, so such a lane ends a column short of the wall
+	 * rather than a column past it.</p>
+	 */
+	private static int placedLength(BlockPos cursor, Direction travel, EventGroup event,
+			int currentTime, Layout layout) {
+		if (!layout.ultra() || !event.style().stacked()) {
+			return event.length();
+		}
+		int delayColumns = Math.max(0, (event.time() - currentTime - 1) / 4);
+		int centre = cursor.getX() + travel.getStepX() * (delayColumns + 1);
+		return event.length() + (Math.floorMod(centre, 2) == layout.centreParity() ? 0 : 1);
 	}
 
 	/**
