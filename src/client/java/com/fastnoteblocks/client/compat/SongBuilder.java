@@ -1081,13 +1081,12 @@ public final class SongBuilder {
 	}
 
 	/** Lays a run of dust, on glass so that nothing under it comes alive. */
-	private static BlockPos emitDust(PlacementPlan placements, BlockPos cursor, Direction travel,
-			int columns) {
+	private static Lane emitDust(PlacementPlan placements, Lane lane, int columns) {
 		for (int cell = 0; cell < columns; cell++) {
-			addParityPad(placements, cursor);
-			cursor = cursor.relative(travel);
+			addParityPad(placements, lane.pos());
+			lane = lane.ahead(1);
 		}
-		return cursor;
+		return lane;
 	}
 
 	/** Lays a planned pad down, and hands back the block the turn now starts on. */
@@ -1788,11 +1787,11 @@ public final class SongBuilder {
 	 */
 	private static BlockPos addCarriedEventModule(PlacementPlan placements, BlockPos cursor,
 			Direction travel, Direction laneStep, List<EventNote> chord, int stepOff) {
-		cursor = emitDust(placements, cursor, travel, stepOff);
+		cursor = emitDust(placements, new Lane(cursor, travel, laneStep), stepOff).pos();
 		// The wire arrives level with the repeater that is not there, and climbs the side of the
 		// first stone onto the dust running over it.
-		return cursor.relative(travel,
-			layBus(placements, cursor.above(), travel, laneStep, chord, chord.get(0).time()));
+		return cursor.relative(travel, layBus(placements,
+			new Lane(cursor.above(), travel, laneStep), chord, chord.get(0).time()));
 	}
 
 	/**
@@ -1809,8 +1808,41 @@ public final class SongBuilder {
 		set(placements, cursor, "minecraft:stone");
 		set(placements, cursor.above(),
 			"minecraft:repeater[facing=" + repeaterFacing(travel) + ",delay=" + triggerDelay + "]");
-		return cursor.relative(travel, 1 + layBus(placements, cursor.relative(travel).above(),
-			travel, laneStep, chord, chord.get(0).time()));
+		return cursor.relative(travel, 1 + layBus(placements,
+			new Lane(cursor.relative(travel).above(), travel, laneStep), chord,
+			chord.get(0).time()));
+	}
+
+	/**
+	 * The route a lane's blocks are laid along: where cell {@code n} is, and which way the wire is
+	 * running when it gets there.
+	 *
+	 * <p>Every position in a build used to be {@code cursor.relative(travel, n)}, which says a lane
+	 * is a straight line and says it in every placement function at once. That is why a turn has to
+	 * be a separate object with geometry of its own, and why a chord straddling one has to be carved
+	 * into a near half and a far half by hand. Asking the route instead leaves one place that knows
+	 * a lane can bend.</p>
+	 *
+	 * <p>Straight for now, and deliberately so: this hands back exactly what the arithmetic it
+	 * replaces did, which is what makes the change provable rather than merely plausible.</p>
+	 *
+	 * @param noteSide the way the first note of a pair hangs off the run. Pinned to the lane step
+	 *     rather than to travel -- which reverses every lane -- because that is what makes
+	 *     {@link LaneReach} predictable enough to pack lanes closer than four apart.
+	 */
+	private record Lane(BlockPos pos, Direction travel, Direction noteSide) {
+		Lane ahead(int cells) {
+			return new Lane(pos.relative(travel, cells), travel, noteSide);
+		}
+
+		Lane above() {
+			return new Lane(pos.above(), travel, noteSide);
+		}
+
+		/** Where the note on one side of this cell hangs. */
+		BlockPos note(boolean firstOfPair) {
+			return pos.relative(firstOfPair ? noteSide : noteSide.getOpposite());
+		}
 	}
 
 	/**
@@ -1818,18 +1850,17 @@ public final class SongBuilder {
 	 *
 	 * @return how many blocks of it there are, which is also how much wire it spends
 	 */
-	private static int layBus(PlacementPlan placements, BlockPos anchor, Direction travel,
-			Direction laneStep, List<EventNote> chord, int time) {
+	private static int layBus(PlacementPlan placements, Lane anchor, List<EventNote> chord,
+			int time) {
 		int busLength = (chord.size() + 1) / 2;
 		for (int bus = 0; bus < busLength; bus++) {
-			BlockPos busPos = anchor.relative(travel, bus);
+			BlockPos busPos = anchor.ahead(bus).pos();
 			placements.powered(busPos, "minecraft:stone", time);
 			set(placements, busPos.above(), "minecraft:redstone_wire");
 		}
 		List<EventNote> ordered = busOrder(chord);
 		for (int noteIndex = 0; noteIndex < ordered.size(); noteIndex++) {
-			placeNote(placements, anchor.relative(travel, noteIndex / 2)
-				.relative(noteIndex % 2 == 0 ? laneStep : laneStep.getOpposite()),
+			placeNote(placements, anchor.ahead(noteIndex / 2).note(noteIndex % 2 == 0),
 				ordered.get(noteIndex));
 		}
 		return busLength;
@@ -1853,7 +1884,7 @@ public final class SongBuilder {
 			return cursor.relative(travel, 2);
 		}
 		return cursor.relative(travel,
-			1 + layBus(placements, anchor, travel, laneStep, chord, time));
+			1 + layBus(placements, new Lane(anchor, travel, laneStep), chord, time));
 	}
 
 	/**
