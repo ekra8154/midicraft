@@ -941,6 +941,19 @@ public final class SongBuilder {
 			lane = placed.lane();
 			columnBehindBusy = placed.stacked();
 			lastStyle = placed.style();
+			// A nudge spends a column the plan was not told about, so everything the plan still owes
+			// this lane is owed from a column further along than it thinks. Left alone, the lane
+			// arrives carrying pad that was measured to close a gap the nudge has already closed --
+			// and lands past the wall by exactly the columns nudged. Ekran found it on Big Shot at
+			// thirty-six wide: a stacked chord of six nudged, four chords later a pad of one was laid
+			// for a shortfall that no longer existed, and the bus behind it came to rest a column out.
+			//
+			// Re-planning is the answer rather than predicting the nudge, because a nudge is decided
+			// against blocks already on the ground and the planner has only arithmetic. What it cannot
+			// foresee it can at least be told about afterwards.
+			if (placed.nudged()) {
+				replan = layout.ultra();
+			}
 			// A bus is the one module that hands the next thing along a wire rather than a block: its
 			// stones are lit by the dust running over them, and that dust has been counting down since
 			// the repeater at the head of it. A chord of three or fewer ends on a block the repeater
@@ -2866,7 +2879,7 @@ public final class SongBuilder {
 		if (!style.stacked()) {
 			Body body = addSpatialEventModule(placements, lane, triggerDelay, event.notes(),
 				style == ChordStyle.BUS);
-			return new Placed(body.lane(), style, body.busCells());
+			return new Placed(body.lane(), style, body.busCells(), false);
 		}
 		// The delay no longer walks off the corner for us -- the two-swap turn wants it -- so the one
 		// shape that cannot use it walks off it here.
@@ -2877,7 +2890,8 @@ public final class SongBuilder {
 			start = start.ahead(1);
 		}
 		return new Placed(addStackedEventModule(placements, start, triggerDelay,
-			event.time(), ultraSlots(event.notes(), style == ChordStyle.STACKED_FULL)), style, 0);
+			event.time(), ultraSlots(event.notes(), style == ChordStyle.STACKED_FULL)), style, 0,
+			nudge);
 	}
 
 	/**
@@ -2947,7 +2961,13 @@ public final class SongBuilder {
 	 * module its measurement gave up on, and what follows -- the pair of slots left free, the level
 	 * the signal ends on -- turns on what went down, not on what was planned.</p>
 	 */
-	private record Placed(Lane lane, ChordStyle style, int busCells) {
+	/**
+	 * @param nudged whether the module stepped a column sideways to agree with the lane behind it.
+	 *     Handed back because {@link #landingOf} cannot see it: a nudge is decided against blocks
+	 *     that are already placed, and the planner works from arithmetic alone. A lane whose plan
+	 *     was made without that column is a lane measured for a wall it no longer reaches.
+	 */
+	private record Placed(Lane lane, ChordStyle style, int busCells, boolean nudged) {
 		boolean stacked() {
 			return style.stacked();
 		}
