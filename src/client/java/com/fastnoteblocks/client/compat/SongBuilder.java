@@ -2302,7 +2302,17 @@ public final class SongBuilder {
 		// and answering it with a check that is deliberately cautious about what counts as free, which
 		// turned buses into longer buses all over builds that had nothing wrong with them.
 		boolean crowded = anchor.crowded();
-		while (placed < ordered.size() && cells < DUST_RANGE) {
+		// One cell shorter where the route bends, because a bus riding a bend does not hand the next
+		// repeater its own last block. It comes off the bend a level down -- a bus runs above the
+		// lane it stands on -- and that step is a cell of dust on this same run, so fifteen cells of
+		// bus round a corner is sixteen blocks of wire and the far end of sixteen is worth nothing.
+		// Two notes reported as having nowhere to hang is a far cheaper failure than a tail that
+		// never fires and takes the rest of the song with it.
+		//
+		// Only where the route bends. Down a straight lane the next repeater does stand on the bus's
+		// own last block, and giving up a cell there would cost a note pair for nothing.
+		int limit = DUST_RANGE;
+		while (placed < ordered.size() && cells < limit) {
 			Lane at = anchor.ahead(cells);
 			placements.powered(at.pos(), "minecraft:stone", time);
 			set(placements, at.pos().above(), "minecraft:redstone_wire");
@@ -2418,14 +2428,28 @@ public final class SongBuilder {
 	 * not the thing that has to carry the wire to it -- something else will stand a repeater in
 	 * between -- and charging it anyway is the padding this function exists to stop.</p>
 	 *
+	 * <p>And charged at whichever bend the bus stops in front of, not only the first. A chord that
+	 * rides the first corner and comes to rest one cell short of the second pays for the second in
+	 * exactly the same way, and every run of sixteen left in the library after the first version of
+	 * this was that case: fifteen cells of bus round one bend, then the cell that steps off it onto
+	 * the lane. Riding <em>both</em> corners is the one shape that pays nothing, because the route
+	 * comes out into the next lane and the repeater after the chord stands on the end of the bus.</p>
+	 *
 	 * @param columns how far the chord starts from the wall, which is where the first corner is
 	 */
 	private static boolean straddleFits(int notes, int columns, int slabStep) {
 		for (int corners = 0; corners <= 2; corners++) {
 			int cells = (notes + corners + 1) / 2;
 			int crossed = cells <= columns ? 0 : cells <= columns + slabStep ? 1 : 2;
-			int run = cells + (crossed == 0 && cells + CORNER_AHEAD >= columns
-				? CORNER_AHEAD : 0);
+			// The next corner this bus does not ride over, which is the one it has to pay a cell
+			// for. Riding both leaves none: the route comes out into the next lane and the repeater
+			// after the chord stands directly on the end of the bus.
+			int nextCorner = switch (crossed) {
+				case 0 -> columns;
+				case 1 -> columns + slabStep;
+				default -> Integer.MAX_VALUE;
+			};
+			int run = cells + (cells + CORNER_AHEAD >= nextCorner ? CORNER_AHEAD : 0);
 			if (run > DUST_RANGE) {
 				continue;
 			}
