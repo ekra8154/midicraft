@@ -442,6 +442,8 @@ public final class SongBuilder {
 		int floor = 0;
 		int climb = 1;
 		boolean laneStarted = false;
+		/** Whether a chord has been laid on the bend the walk is currently going round. */
+		boolean placedWhileTurning = false;
 		// Whether the column a stacked module would want behind it is already spoken for -- either
 		// by the module before it, whose relays reach into it, or by a turn, whose run of powered
 		// stone lies right alongside it at the same level.
@@ -469,7 +471,19 @@ public final class SongBuilder {
 				lane = lane.pinned(depth);
 				turning = false;
 				leavingTurn = true;
-				laneStarted = false;
+				// Unless the turn itself held music, in which case this lane has already started.
+				//
+				// The rule this clears is "a lane must hold something before it can end", and it is
+				// there so a turn landing short does not turn again at once. A walked turn *is* lane
+				// -- that is the whole of the flat-turn design -- so a bend that carried a chord has
+				// already satisfied it, and clearing the flag anyway exempts the event after the bend
+				// from ever noticing it does not fit. On Kick Back at twelve wide over three floors
+				// that is a chord of twenty-four landing flush against the wall with the column its
+				// own turn reserve asked for already spent, three blocks of wire left, and a
+				// staircase wanting five: the lane cannot turn, cannot cut, and runs seven columns
+				// out. Ekran found it in a vertical slice.
+				laneStarted = placedWhileTurning;
+				placedWhileTurning = false;
 				columnBehindBusy = true;
 				replan = layout.ultra();
 			}
@@ -943,6 +957,7 @@ public final class SongBuilder {
 				? DUST_RANGE - placed.busCells()
 				: placed.stacked() ? DUST_RANGE - STACKED_RELAY : DUST_RANGE;
 			laneStarted = true;
+			placedWhileTurning |= turning;
 		}
 	}
 
