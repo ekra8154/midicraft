@@ -571,16 +571,14 @@ public final class SongBuilder {
 			// will not fit before it is not cut in two: the walk takes the corner and carries on laying
 			// the same chord along the sideways run, which is the cut done by the ordinary machinery
 			// and without a near half and a far half to keep in step.
-			// Plus the one cell nobody was charging for. A carried module ends on a bus, and a bus
-			// runs a level above the lane it stands on, so the cursor it hands back is the cell
-			// *before* the next module's repeater rather than the repeater's own -- and that cell is
-			// dust. Every other module opens with a repeater and never notices; a split is the one
-			// shape whose whole run has to reach from one repeater, through both halves and the
-			// staircase between them, to the next. Charging it at fifteen let a run of sixteen
-			// through, and the far end of sixteen blocks of wire is worth nothing at all. Ekran
-			// found it as a dead line on Kick Back: one run in a build of nine thousand blocks was
-			// over, it was over by exactly one, and it cost the last three hundred and eighty-five
-			// notes of the song.
+			// The whole run and nothing more: both halves of the chord, and the staircase between
+			// them, reaching from the repeater this module opens with to the next one. There is no
+			// further cell to charge at the far end. A carried module hands back the cell after its
+			// last bus block, and the next module stands its repeater on that cell a level up --
+			// which puts the repeater against the bus, not a block short of it. This once carried a
+			// cell for that gap and the gap is not there; it cost 256 lanes their wall to buy
+			// nothing. Ekran built the descent by hand and counted the wire through it: eight cells
+			// of bus, six of staircase, one cell more, and the last of them still reads one.
 			// Asked of the overshoot and not of {@code wantsTurn}, which is the same question plus
 			// "and this lane already holds something". That extra clause is there to stop a lane
 			// turning the instant it opens, and it has no business here: a split *builds* -- it fills
@@ -593,7 +591,7 @@ public final class SongBuilder {
 			// build seven columns out.
 			boolean split = layout.ultra() && overshoots && index > 0 && above >= 0 && above < floors
 				&& room >= 2 && room - 1 < cells
-				&& cells + offBus + stepOff + HANDOVER_CELL <= DUST_RANGE;
+				&& cells + offBus + stepOff <= DUST_RANGE;
 			// Unless leaving that tick is what stops the pad reaching the wall. Then spend the whole
 			// wait on the pad and carry the event over the turn on the wire instead, which is the one
 			// way a lane whose next event is a single tick away can still end where it is meant to.
@@ -687,11 +685,13 @@ public final class SongBuilder {
 				lane = Lane.straight(cursor, travel, depth);
 				lastStyle = ChordStyle.BUS;
 				// The whole run, not the half of it past the staircase. Both halves are dust from the
-				// one repeater this module opened with -- the near half does not stop costing wire
-				// because a staircase comes after it -- and the handover off the carried bus costs its
-				// cell too. Counting only the far half reported three blocks left on a run that had
-				// already overspent by one.
-				tipSignal = DUST_RANGE - cells - offBus - stepOff - HANDOVER_CELL;
+				// one repeater this module opened with, and the near half does not stop costing wire
+				// because a staircase comes after it. Counting only the far half reported three
+				// blocks left on a run that had already overspent by one. The same sum {@link #closes}
+				// makes, which is the point: the planner closes a lane on the promise of a split, and
+				// a walk that charges the split more than the planner did refuses it and leaves the
+				// lane standing short of the wall it was measured for.
+				tipSignal = DUST_RANGE - cells - offBus - stepOff;
 				// The far half starts where the staircase left off, so its first pair of notes stands
 				// alongside the run of powered stone the turn is made of.
 				columnBehindBusy = true;
@@ -2552,15 +2552,6 @@ public final class SongBuilder {
 
 	/** Cells of lane a stacked module stands in: the repeater it opens with, and its centre. */
 	private static final int STACKED_CELLS = 2;
-
-	/**
-	 * The cell it costs to come off a carried bus and back onto the lane.
-	 *
-	 * <p>A bus runs a level above the lane it stands on, so the cursor a carried module hands back
-	 * is the cell before the next module's repeater and not the repeater's own. That cell is dust,
-	 * and it is on the same run as everything before it.</p>
-	 */
-	private static final int HANDOVER_CELL = 1;
 
 	/**
 	 * The cell of dust a stacked module leaves the wire standing on.
