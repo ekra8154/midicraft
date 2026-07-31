@@ -2362,6 +2362,14 @@ public final class SongBuilder {
 	private static final int STACKED_RELAY = 1;
 
 	/**
+	 * The cell a chord pays for the bend it stops in front of.
+	 *
+	 * <p>A repeater may not stand on a corner, so dust takes the corner and the repeater goes one
+	 * further along. That dust belongs to the run of whatever chord last put a repeater down.</p>
+	 */
+	private static final int CORNER_AHEAD = 1;
+
+	/**
 	 * What the wire must still be worth for a module to be nudged a cell along.
 	 *
 	 * <p>One, because that is exactly what the nudge spends: the dust goes where the repeater would
@@ -2396,15 +2404,31 @@ public final class SongBuilder {
 	 * out lanes in front of chords of twenty-nine and thirty that were never going to reach the
 	 * second bend in the first place.</p>
 	 *
+	 * <p>The first line of that table wants one more thing said, and it is the thing that was
+	 * missing. A chord that stops <em>in front of</em> a bend still pays a cell for it: a repeater
+	 * may not stand on a corner, so dust takes the corner and the repeater goes one further, and
+	 * that dust is on this chord's run. Where the bus rides <em>over</em> the bend the corner is a
+	 * bus block and is counted already -- which is why riding a corner is, oddly, cheaper than
+	 * stopping against one. Thirty notes is fifteen blocks, which is the whole of what a repeater
+	 * reaches, so a chord of thirty has nothing left to pay a corner with and may only end a run
+	 * where a repeater follows it directly. Ekran found it as two copper bulbs on a chord of thirty
+	 * a block short of the bend, on the one-floor build of {@code ultra-limit-two-thirties}.</p>
+	 *
+	 * <p>Charged only where the bus actually reaches the bend. A chord ending well short of one is
+	 * not the thing that has to carry the wire to it -- something else will stand a repeater in
+	 * between -- and charging it anyway is the padding this function exists to stop.</p>
+	 *
 	 * @param columns how far the chord starts from the wall, which is where the first corner is
 	 */
 	private static boolean straddleFits(int notes, int columns, int slabStep) {
 		for (int corners = 0; corners <= 2; corners++) {
 			int cells = (notes + corners + 1) / 2;
-			if (cells > DUST_RANGE) {
+			int crossed = cells <= columns ? 0 : cells <= columns + slabStep ? 1 : 2;
+			int run = cells + (crossed == 0 && cells + CORNER_AHEAD >= columns
+				? CORNER_AHEAD : 0);
+			if (run > DUST_RANGE) {
 				continue;
 			}
-			int crossed = cells <= columns ? 0 : cells <= columns + slabStep ? 1 : 2;
 			if (crossed <= corners) {
 				return true;
 			}
