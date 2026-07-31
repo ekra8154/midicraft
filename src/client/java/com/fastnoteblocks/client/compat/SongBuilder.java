@@ -528,8 +528,12 @@ public final class SongBuilder {
 			// and there is nothing to decide anyway, because the walk has already committed to the
 			// corner it is standing in. A turn ends when the route runs out of corners, not when some
 			// arithmetic about walls says so.
-			boolean wantsTurn = laneStarted && !turning
-				&& (landing > farWall || landing < nearWall);
+			// Whether this event will not fit before the wall, which is a different question from
+			// whether the lane may end here.
+			boolean overshoots = !turning && (landing > farWall || landing < nearWall);
+			// A lane has to hold something before it can end, or a turn that lands short would turn
+			// again at once and the walk would climb the whole build without laying a note.
+			boolean wantsTurn = laneStarted && overshoots;
 			// One tick has to be left for the next event's own repeater, which is the only thing that
 			// can drive the module it stands in front of.
 			int columns = (wall - lane.pos().getX()) * lane.travel().getStepX();
@@ -563,7 +567,17 @@ public final class SongBuilder {
 			// found it as a dead line on Kick Back: one run in a build of nine thousand blocks was
 			// over, it was over by exactly one, and it cost the last three hundred and eighty-five
 			// notes of the song.
-			boolean split = layout.ultra() && wantsTurn && index > 0 && above >= 0 && above < floors
+			// Asked of the overshoot and not of {@code wantsTurn}, which is the same question plus
+			// "and this lane already holds something". That extra clause is there to stop a lane
+			// turning the instant it opens, and it has no business here: a split *builds* -- it fills
+			// the columns to the wall with the near half of the chord before it turns -- so it always
+			// makes progress and can never loop. Charging it that clause meant the first event of a
+			// lane could not be cut, and the first event of a lane is exactly the one that lands
+			// wherever the staircase happened to put it. A chord needing eight columns opened on a
+			// lane with seven and was laid anyway, a column past the wall. Ekran found it as the
+			// second of two breaches on Kick Back, and it is the same exemption that put the old
+			// build seven columns out.
+			boolean split = layout.ultra() && overshoots && index > 0 && above >= 0 && above < floors
 				&& room >= 2 && room - 1 < cells
 				&& cells + offBus + stepOff + HANDOVER_CELL <= DUST_RANGE;
 			// Unless leaving that tick is what stops the pad reaching the wall. Then spend the whole
