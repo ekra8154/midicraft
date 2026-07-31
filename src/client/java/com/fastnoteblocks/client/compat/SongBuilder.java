@@ -533,8 +533,8 @@ public final class SongBuilder {
 					+ offBus + " for the turn is too much to cut across it");
 			}
 			if (split) {
-				SpatialDelayTrigger trigger = addSpatialDelayBeforeEvent(placements, cursor, travel,
-					event.time() - currentTime);
+				SpatialDelayTrigger trigger = addSpatialDelayBeforeEvent(placements,
+					new Lane(cursor, travel, depth), event.time() - currentTime);
 				currentTime = event.time();
 				List<EventNote> chord = busOrder(event.notes());
 				int near = 2 * (room - 1);
@@ -568,7 +568,7 @@ public final class SongBuilder {
 				if (!pad.cells().isEmpty()) {
 					placements.moved(event.notes().size());
 				}
-				cursor = emitPad(placements, cursor, travel, pad);
+				cursor = emitPad(placements, new Lane(cursor, travel, depth), pad).pos();
 				spentPadding = pad.delaySpent();
 				if (above >= 0 && above < floors) {
 					// Asked of the shape the lane actually ended on, not of how many notes it held.
@@ -638,7 +638,7 @@ public final class SongBuilder {
 			int owing = index > 0 && booked != null ? booked.getOrDefault(index, 0) : 0;
 			if (owing > 0) {
 				Pad early = planPad(owing, tipSignal, 1, Math.max(0, wait - 1 - spentPadding));
-				cursor = emitPad(placements, cursor, travel, early);
+				cursor = emitPad(placements, new Lane(cursor, travel, depth), early).pos();
 				spentPadding += early.delaySpent();
 				tipSignal = early.signal();
 			}
@@ -692,13 +692,13 @@ public final class SongBuilder {
 					Pad front = planPad(ahead, tipSignal, 1,
 						Math.max(0, wait - 1 - spentPadding));
 					if (ahead > 0 && front.cells().size() == ahead) {
-						cursor = emitPad(placements, cursor, travel, front);
+						cursor = emitPad(placements, new Lane(cursor, travel, depth), front).pos();
 						spentPadding += front.delaySpent();
 					}
 				}
 			}
-			SpatialDelayTrigger trigger = addSpatialDelayBeforeEvent(placements, cursor, travel,
-				event.time() - currentTime - spentPadding);
+			SpatialDelayTrigger trigger = addSpatialDelayBeforeEvent(placements,
+				new Lane(cursor, travel, depth), event.time() - currentTime - spentPadding);
 			currentTime = event.time();
 			Placed placed = addChordModule(placements, trigger.cursor(), travel, depth,
 				trigger.triggerDelay(), event, !columnBehindBusy || !trigger.cursor().equals(cursor),
@@ -1090,21 +1090,20 @@ public final class SongBuilder {
 	}
 
 	/** Lays a planned pad down, and hands back the block the turn now starts on. */
-	private static BlockPos emitPad(PlacementPlan placements, BlockPos cursor, Direction travel,
-			Pad pad) {
+	private static Lane emitPad(PlacementPlan placements, Lane lane, Pad pad) {
 		for (int delay : pad.cells()) {
 			if (delay == 0) {
-				addParityPad(placements, cursor);
+				addParityPad(placements, lane.pos());
 			} else {
 				// Stone rather than glass, because a repeater needs something to stand on -- and it is
 				// safe here where dust is not, since a repeater leaves the block under it alone.
-				set(placements, cursor, "minecraft:stone");
-				set(placements, cursor.above(),
-					"minecraft:repeater[facing=" + repeaterFacing(travel) + ",delay=" + delay + "]");
+				set(placements, lane.pos(), "minecraft:stone");
+				set(placements, lane.pos().above(), "minecraft:repeater[facing="
+					+ repeaterFacing(lane.travel()) + ",delay=" + delay + "]");
 			}
-			cursor = cursor.relative(travel);
+			lane = lane.ahead(1);
 		}
-		return cursor;
+		return lane;
 	}
 
 	/**
@@ -1203,7 +1202,8 @@ public final class SongBuilder {
 		for (int index = 0; index < events.size(); index++) {
 			EventGroup event = events.get(index);
 			int delay = event.time() - currentTime;
-			SpatialDelayTrigger trigger = addSpatialDelayBeforeEvent(placements, cursor, travel, delay);
+			SpatialDelayTrigger trigger = addSpatialDelayBeforeEvent(placements,
+				new Lane(cursor, travel, laneStep), delay);
 			currentTime = event.time();
 			Integer spacing = layout.spacingAt().get(index + 1);
 			if (spacing != null && fitsInCorner(event)) {
@@ -1212,8 +1212,8 @@ public final class SongBuilder {
 				travel = travel.getOpposite();
 				continue;
 			}
-			cursor = addSpatialEventModule(placements, trigger.cursor(), travel, laneStep,
-				trigger.triggerDelay(), event.notes());
+			cursor = addSpatialEventModule(placements,
+				new Lane(trigger.cursor(), travel, laneStep), trigger.triggerDelay(), event.notes());
 			if (spacing != null) {
 				cursor = addCompactTurn(placements, cursor, travel, laneStep, spacing, event.time());
 				travel = travel.getOpposite();
@@ -1279,7 +1279,8 @@ public final class SongBuilder {
 		for (int index = 0; index < events.size(); index++) {
 			EventGroup event = events.get(index);
 			int delay = event.time() - currentTime;
-			SpatialDelayTrigger trigger = addSpatialDelayBeforeEvent(placements, cursor, travel, delay);
+			SpatialDelayTrigger trigger = addSpatialDelayBeforeEvent(placements,
+				new Lane(cursor, travel, laneStep), delay);
 			boolean roomBehind = !columnBehindBusy || !trigger.cursor().equals(cursor);
 			currentTime = event.time();
 			// One event of lookahead. Whether this event is the last of its lane has to be settled
@@ -1732,17 +1733,17 @@ public final class SongBuilder {
 		set(placements, position.above(), "minecraft:redstone_wire");
 	}
 
-	private static SpatialDelayTrigger addSpatialDelayBeforeEvent(PlacementPlan placements, BlockPos cursor,
-			Direction travel, int delay) {
+	private static SpatialDelayTrigger addSpatialDelayBeforeEvent(PlacementPlan placements,
+			Lane lane, int delay) {
 		int remaining = delay;
 		while (remaining > 4) {
-			set(placements, cursor, "minecraft:stone");
-			set(placements, cursor.above(),
-				"minecraft:repeater[facing=" + repeaterFacing(travel) + ",delay=4]");
-			cursor = cursor.relative(travel);
+			set(placements, lane.pos(), "minecraft:stone");
+			set(placements, lane.pos().above(),
+				"minecraft:repeater[facing=" + repeaterFacing(lane.travel()) + ",delay=4]");
+			lane = lane.ahead(1);
 			remaining -= 4;
 		}
-		return new SpatialDelayTrigger(cursor, Math.max(1, remaining));
+		return new SpatialDelayTrigger(lane.pos(), Math.max(1, remaining));
 	}
 
 	/**
@@ -1750,12 +1751,12 @@ public final class SongBuilder {
 	 *     first. Pinning it to the lane step rather than to travel -- which reverses every lane --
 	 *     is what makes {@link LaneReach} predictable enough to pack lanes closer than four apart.
 	 */
-	private static BlockPos addSpatialEventModule(PlacementPlan placements, BlockPos cursor, Direction travel,
-			Direction laneStep, int triggerDelay, List<EventNote> chord) {
-		set(placements, cursor, "minecraft:stone");
-		set(placements, cursor.above(),
-			"minecraft:repeater[facing=" + repeaterFacing(travel) + ",delay=" + triggerDelay + "]");
-		return layEventBody(placements, cursor, travel, laneStep, chord);
+	private static BlockPos addSpatialEventModule(PlacementPlan placements, Lane lane,
+			int triggerDelay, List<EventNote> chord) {
+		set(placements, lane.pos(), "minecraft:stone");
+		set(placements, lane.pos().above(), "minecraft:repeater[facing="
+			+ repeaterFacing(lane.travel()) + ",delay=" + triggerDelay + "]");
+		return layEventBody(placements, lane, chord);
 	}
 
 	/**
@@ -1866,9 +1867,12 @@ public final class SongBuilder {
 		return busLength;
 	}
 
-	private static BlockPos layEventBody(PlacementPlan placements, BlockPos cursor, Direction travel,
-			Direction laneStep, List<EventNote> chord) {
+	private static BlockPos layEventBody(PlacementPlan placements, Lane lane,
+			List<EventNote> chord) {
 		int time = chord.get(0).time();
+		Direction travel = lane.travel();
+		Direction laneStep = lane.noteSide();
+		BlockPos cursor = lane.pos();
 		BlockPos anchor = cursor.relative(travel).above();
 		if (chord.size() <= 3) {
 			placeNote(placements, anchor, chord.get(0));
@@ -1884,7 +1888,7 @@ public final class SongBuilder {
 			return cursor.relative(travel, 2);
 		}
 		return cursor.relative(travel,
-			1 + layBus(placements, new Lane(anchor, travel, laneStep), chord, time));
+			1 + layBus(placements, lane.ahead(1).above(), chord, time));
 	}
 
 	/**
@@ -1902,8 +1906,8 @@ public final class SongBuilder {
 			style = ChordStyle.BUS;
 		}
 		if (!style.stacked()) {
-			return new Placed(addSpatialEventModule(placements, cursor, travel, across, triggerDelay,
-				event.notes()), style);
+			return new Placed(addSpatialEventModule(placements, new Lane(cursor, travel, across),
+				triggerDelay, event.notes()), style);
 		}
 		BlockPos start = cursor;
 		if (Math.floorMod(start.relative(travel).getX(), 2) != layout.centreParity()) {
