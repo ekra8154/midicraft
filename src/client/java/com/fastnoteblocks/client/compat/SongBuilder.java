@@ -512,7 +512,8 @@ public final class SongBuilder {
 			// meet the turn is what makes a run too long for the repeater at the end of it to clear,
 			// and it was buying nothing: the chord was going to cover that ground anyway.
 			boolean straddles = layout.ultra() && flatAhead
-				&& event.notes().size() <= MAX_STRADDLING_CHORD;
+				&& straddleFits(event.notes().size(),
+					(wall - lane.pos().getX()) * lane.travel().getStepX(), slabStep);
 			int reserve = turnReserve(event, offBus, layout);
 			int wait = event.time() - currentTime;
 			// Measured with the same arithmetic the planner uses, and not with a length taken from
@@ -520,7 +521,7 @@ public final class SongBuilder {
 			// behind it spoken for is built as a bus instead, and a bus is longer -- so a lane could
 			// be told a chord fitted, build it, and land a column past its own wall.
 			Landing here = landingOf(lane.pos().getX(), lane.travel().getStepX(), event, wait,
-				columnBehindBusy, layout);
+				columnBehindBusy, wall, layout);
 			int landing = here.end() + lane.travel().getStepX() * reserve;
 			// Never while the route is still bending. Inside a turn the wire runs across the corridor
 			// rather than along it, so every one of these measurements is taken down the wrong axis --
@@ -593,8 +594,14 @@ public final class SongBuilder {
 			// to, and a repeater hands out a fresh fifteen however dead the wire arriving was, so the
 			// only run that matters is the one inside the chord itself. Charging it for a staircase it
 			// is not going to cross is what made a lane give up with a usable corner in front of it.
+			// A flat turn may only be taken by a chord that can actually get across it. The straddle
+			// test used to decide only whether to pad, which left the chord itself free to be laid
+			// over both corners regardless -- and a chord of thirty cannot be: two corners cost it two
+			// slots, sixteen blocks of bus, and the last of them is past what its repeater reaches. It
+			// runs on instead and turns in front of a chord that fits, which breaches the footprint
+			// and says so, rather than building a tail that never fires and saying nothing.
 			boolean canTurn = layout.ultra()
-				? index > 0 && (straddles && pad.signal() >= 1 || pad.signal()
+				? index > 0 && (flatAhead ? straddles && pad.signal() >= 1 : pad.signal()
 					>= (pad.cells().isEmpty() && lastStyle == ChordStyle.BUS ? offBus : turnCells))
 				: index > 0 && events.get(index - 1).maxSafeTurnDistance() >= MAX_LANE_SPACING;
 			int spentPadding = 0;
@@ -805,11 +812,11 @@ public final class SongBuilder {
 				// booked to lay early has moved the cursor since, and the ticks it spent have come off
 				// the wait -- so the event no longer starts where it did or carries the delay it did.
 				Landing reached = landingOf(cursor.getX(), travel.getStepX(), event,
-					wait - spentPadding, columnBehindBusy, layout);
+					wait - spentPadding, columnBehindBusy, laneWall, layout);
 				int end = reached.end();
 				EventGroup next = events.get(index + 1);
 				int beyond = landingOf(end, travel.getStepX(), next, next.time() - event.time(),
-					reached.busy(), layout).end()
+					reached.busy(), laneWall, layout).end()
 					+ travel.getStepX() * turnReserve(next, turnCells, layout);
 				// Unless the chord that will not fit can be cut across the turn, in which case the gap
 				// is its to fill. A cut costs nothing and fills the columns with music; a pad fills the
@@ -823,8 +830,10 @@ public final class SongBuilder {
 					&& nextCells + offBus + stepOffAhead <= DUST_RANGE;
 				// And the next chord may simply lie across the turn, in which case the gap is its to
 				// fill and filling it with wire first is exactly the mistake this pad exists to avoid.
+				// Measured from where the chord in front of it ends, which is where it will start.
 				boolean nextStraddles = !(above >= 0 && above < floors)
-					&& next.notes().size() <= MAX_STRADDLING_CHORD;
+					&& straddleFits(next.notes().size(), (laneWall - end) * travel.getStepX(),
+						slabStep);
 				if (!cuttable && !nextStraddles && (beyond > farWall || beyond < nearWall)) {
 					int ahead = prePad(cursor.getX(), travel.getStepX(), event, wait - spentPadding,
 						columnBehindBusy, layout, laneWall,
@@ -858,7 +867,9 @@ public final class SongBuilder {
 			// is the one rule every repeater in the build obeys and so is applied where they are laid.
 			Lane opening = trigger.lane();
 			Placed placed = addChordModule(placements, opening, trigger.triggerDelay(), event,
-				!columnBehindBusy || !opening.pos().equals(before), turning || leavingTurn, layout);
+				!columnBehindBusy || !opening.pos().equals(before), turning || leavingTurn,
+				turning ? Integer.MAX_VALUE
+					: (wall - opening.pos().getX()) * opening.travel().getStepX(), tipSignal, layout);
 			leavingTurn = false;
 			lane = placed.lane();
 			columnBehindBusy = placed.stacked();
@@ -935,15 +946,23 @@ public final class SongBuilder {
 	}
 
 	private static Landing landingOf(int startX, int stepX, EventGroup event, int wait, boolean busy,
-			Layout layout) {
+			int wall, Layout layout) {
 		int delayColumns = Math.max(0, (wait - 1) / 4);
 		ChordStyle style = event.style() == ChordStyle.STACKED_FULL && busy && delayColumns == 0
 			? ChordStyle.BUS : event.style();
 		int cells = (event.notes().size() + 1) / 2;
+		// A stacked module too near the wall to be nudged is built as a bus instead, and a bus of the
+		// same chord is longer. Predicted here as well as decided there, because when only the walk
+		// knew, the lane was measured for two cells, got five, and came to rest three past its wall.
+		// Erring towards the bus is the safe way round: the walk may yet find the module needs no
+		// nudge and build it short, which lands the lane inside its wall rather than outside it.
+		if (style.stacked()
+				&& (wall - (startX + stepX * delayColumns)) * stepX < STACKED_CELLS + 1) {
+			style = ChordStyle.BUS;
+		}
 		int length;
 		if (style.stacked()) {
-			int centre = startX + stepX * (delayColumns + 1);
-			length = delayColumns + 2 + (Math.floorMod(centre, 2) == layout.centreParity() ? 0 : 1);
+			length = delayColumns + 2;
 		} else {
 			length = delayColumns + (style == ChordStyle.BUS ? 1 + cells : 2);
 		}
@@ -1035,7 +1054,7 @@ public final class SongBuilder {
 			int wait = event.time() - time;
 			int pad = pads.getOrDefault(index, 0);
 			room.add(planPad(DUST_RANGE * 2, tip, 1, Math.max(0, wait - 1)).cells().size() - pad);
-			Landing landed = landingOf(cursor + stepX * pad, stepX, event, wait, busy, layout);
+			Landing landed = landingOf(cursor + stepX * pad, stepX, event, wait, busy, wall, layout);
 			// Kept back the same column the walk keeps back. A bus that would leave the wire too weak
 			// to reach the top of the staircase is asked to stop one column short, so the pad has
 			// somewhere to stand the repeater that revives it. The walk has always done that and the
@@ -1233,7 +1252,7 @@ public final class SongBuilder {
 	private static int prePad(int startX, int stepX, EventGroup event, int wait, boolean busy,
 			Layout layout, int wall, int limit) {
 		for (int pad = 0; pad <= limit; pad++) {
-			if (landingOf(startX + stepX * pad, stepX, event, wait, busy, layout).end() == wall) {
+			if (landingOf(startX + stepX * pad, stepX, event, wait, busy, wall, layout).end() == wall) {
 				return pad;
 			}
 		}
@@ -1461,7 +1480,7 @@ public final class SongBuilder {
 			if (!turnAfter) {
 				Placed placed = addChordModule(placements,
 					Lane.straight(trigger.cursor(), travel, laneStep), trigger.triggerDelay(), event,
-					roomBehind, false, layout);
+					roomBehind, false, Integer.MAX_VALUE, DUST_RANGE, layout);
 				cursor = placed.lane().pos();
 				columnBehindBusy = placed.stacked();
 				continue;
@@ -1491,7 +1510,8 @@ public final class SongBuilder {
 				continue;
 			}
 			cursor = addChordModule(placements, Lane.straight(trigger.cursor(), travel, laneStep),
-				trigger.triggerDelay(), event, roomBehind, false, layout).lane().pos();
+				trigger.triggerDelay(), event, roomBehind, false, Integer.MAX_VALUE, DUST_RANGE,
+			layout).lane().pos();
 			// A turn or a riser is about to be built into the block the next module would stand
 			// behind, so whatever this one did, the next one cannot stack.
 			columnBehindBusy = true;
@@ -2156,6 +2176,35 @@ public final class SongBuilder {
 		BlockPos note(boolean firstOfPair) {
 			return pos.relative(firstOfPair ? noteSide : noteSide.getOpposite());
 		}
+
+		/**
+		 * Every cell a note could hang in off this one, in the order they should be filled.
+		 *
+		 * <p>Two down a straight run, and three at a corner. The extra one is the cell behind the
+		 * direction the wire leaves on, which is free for exactly the reason the corner exists: the
+		 * wire turned away from it. It is as good a place for a note as either of the others -- the
+		 * block it hangs on is the same powered stone -- and nothing was offering it, because the
+		 * pair either side of the run is worked out from the outgoing direction alone.</p>
+		 *
+		 * <p>That mattered more than it looks. A corner already loses one of its pair to the cell the
+		 * wire arrived from, so without this a turn costs a chord two note slots, and a bus that has
+		 * to grow two blocks to make them up can be pushed past the fifteen its repeater reaches --
+		 * at which point the far end of it never fires at all. Ekran found it as two copper bulbs
+		 * that never lit, on a chord of twenty-eight that should have fitted round the bend.</p>
+		 */
+		List<BlockPos> noteSlots() {
+			if (!onCorner) {
+				return List.of(note(true), note(false));
+			}
+			// Three at a corner. The pair either side of the run is worked out from the direction the
+			// wire *leaves* on, which makes the cell opposite that direction invisible -- and that
+			// cell is free for exactly the reason the corner exists, because the wire turned away
+			// from it. Traced on ekran's failing chord: at both corners the run's own stone took one
+			// of the pair, so a turn was costing the chord two slots and the bus grew two blocks to
+			// make them up. Sixteen blocks is past the fifteen a repeater reaches, so the tail of it
+			// never fired -- two copper bulbs that stayed lit on a chord of twenty-eight.
+			return List.of(note(true), note(false), pos.relative(travel.getOpposite()));
+		}
 	}
 
 	/**
@@ -2179,22 +2228,30 @@ public final class SongBuilder {
 		// and answering it with a check that is deliberately cautious about what counts as free, which
 		// turned buses into longer buses all over builds that had nothing wrong with them.
 		boolean crowded = anchor.crowded();
-		while (placed < ordered.size() && cells < MAX_BUS_CELLS) {
+		while (placed < ordered.size() && cells < DUST_RANGE) {
 			Lane at = anchor.ahead(cells);
 			placements.powered(at.pos(), "minecraft:stone", time);
 			set(placements, at.pos().above(), "minecraft:redstone_wire");
 			cells++;
-			for (boolean first : new boolean[] {true, false}) {
+			for (BlockPos slot : at.noteSlots()) {
+				if (TRACE) {
+					System.out.println("  BUS cell=" + (cells - 1) + " corner=" + at.cornerAt(0)
+						+ " slot=" + slot.getX() + "," + slot.getY() + "," + slot.getZ()
+						+ " free=" + placements.freeForNote(slot)
+						+ " [at=" + placements.describeBlock(slot)
+						+ " below=" + placements.describeBlock(slot.below())
+						+ " above=" + placements.describeBlock(slot.above()) + "]");
+				}
 				if (placed < ordered.size()
-						&& (!crowded || placements.freeForNote(at.note(first)))) {
-					placeNote(placements, at.note(first), ordered.get(placed++));
+						&& (!crowded || placements.freeForNote(slot))) {
+					placeNote(placements, slot, ordered.get(placed++));
 				}
 			}
 		}
 		if (placed < ordered.size()) {
 			placements.trouble((ordered.size() - placed) + " notes of a chord of " + ordered.size()
-				+ " at tick " + time + " had nowhere to hang: the bus ran " + cells
-				+ " blocks and still could not find slots for them");
+				+ " at tick " + time + " had nowhere to hang: a bus is fifteen blocks at the most, "
+				+ "and this one filled them without room for the rest");
 		}
 		return Math.max(1, cells);
 	}
@@ -2209,19 +2266,59 @@ public final class SongBuilder {
 	 */
 	private static final int MAX_BUS_CELLS = 32;
 
+	/** Cells of lane a stacked module stands in: the repeater it opens with, and its centre. */
+	private static final int STACKED_CELLS = 2;
+
+	/**
+	 * What the wire must still be worth for a module to be nudged a cell along.
+	 *
+	 * <p>One, because that is exactly what the nudge spends: the dust goes where the repeater would
+	 * have stood and the repeater goes one further, so the signal has one more block to travel. A
+	 * module built where it stands needs nothing, since the wire is already there.</p>
+	 */
+	private static final int NUDGE_REACH = 1;
+
 	/** Scratch: one line per chord placed, for finding the first one that goes wrong. */
 	static boolean TRACE = false;
 
 	/**
-	 * The largest chord that can simply be laid across a flat turn without any help.
+	 * Whether a chord can simply be laid across a flat turn, needing nothing done for it.
 	 *
-	 * <p>Ekran's number, from building them by hand. A bus is the sturdy shape: it needs nothing of
-	 * its surroundings but somewhere to put the next note, and a corner takes it as readily as a
-	 * straight lane does. So a chord this size or smaller meeting a flat turn is not a problem to be
-	 * solved -- the lane is not padded out to meet the turn, the chord is not cut in two, nothing is
-	 * planned. It is built where it stands and the turn lays whatever is left of it.</p>
+	 * <p>A bus is the sturdy shape: it wants nothing of its surroundings but somewhere to put the
+	 * next note, and a corner takes it as readily as a straight lane does. So a chord that fits is
+	 * not a problem to be solved -- the lane is not padded out to meet the turn, the chord is not cut
+	 * in two, nothing is planned. It is built where it stands and the turn lays the rest of it.</p>
+	 *
+	 * <p>What "fits" means is not a single number, which is what this used to be. Slots come two to a
+	 * block, less one at every corner the bus rides over, because there the run's own stone takes one
+	 * of the pair. And the whole run has to stay inside the fifteen blocks a repeater reaches, or its
+	 * tail never fires. So the limit depends on how many corners this chord will actually cross:</p>
+	 *
+	 * <pre>
+	 *   stops before the bend        15 blocks, no corner   -- up to 30 notes
+	 *   ends on the sideways run     15 blocks, one corner  -- up to 29
+	 *   comes out into the next lane 15 blocks, two corners -- up to 28
+	 * </pre>
+	 *
+	 * <p>Ekran's, and twenty-eight is only the worst of the three. Holding every chord to it padded
+	 * out lanes in front of chords of twenty-nine and thirty that were never going to reach the
+	 * second bend in the first place.</p>
+	 *
+	 * @param columns how far the chord starts from the wall, which is where the first corner is
 	 */
-	private static final int MAX_STRADDLING_CHORD = 28;
+	private static boolean straddleFits(int notes, int columns, int slabStep) {
+		for (int corners = 0; corners <= 2; corners++) {
+			int cells = (notes + corners + 1) / 2;
+			if (cells > DUST_RANGE) {
+				continue;
+			}
+			int crossed = cells <= columns ? 0 : cells <= columns + slabStep ? 1 : 2;
+			if (crossed <= corners) {
+				return true;
+			}
+		}
+		return false;
+	}
 
 	/**
 	 * What the wire must still be worth for a lane to take a flat turn.
@@ -2318,7 +2415,8 @@ public final class SongBuilder {
 	 * pair taken drops to a bus, and a bus that finds a turn has freed the pair takes it.</p>
 	 */
 	private static Placed addChordModule(PlacementPlan placements, Lane lane, int triggerDelay,
-			EventGroup event, boolean roomBehind, boolean inTurn, Layout layout) {
+			EventGroup event, boolean roomBehind, boolean inTurn, int roomAhead, int signal,
+			Layout layout) {
 		Direction travel = lane.travel();
 		ChordStyle style = event.style();
 		if (style == ChordStyle.STACKED_FULL && !roomBehind) {
@@ -2348,13 +2446,69 @@ public final class SongBuilder {
 				+ " bends=" + lane.bends() + " style=" + event.style() + "->" + style
 				+ " notes=" + event.notes().size());
 		}
+		// Nudged only when the lane behind actually disagrees, and given up on when both cells
+		// disagree.
+		//
+		// A stacked module's outer column reads live, note, live, note along the lane, so two lanes
+		// close enough to touch have to agree which cell is live or one sounds the other's notes at
+		// the wrong tick. Asked of both cells this module could stand in, because one may be no
+		// better than the other: two stacked modules in the lane behind at odd spacing put *both*
+		// parities in that lane, and then a nudge only swaps which of them this chord disagrees with.
+		// Ekran found exactly that in world, on two copper bulbs left lit.
+		//
+		// Boxed in like that, the chord gives up the stacked shape and is built as a bus, which has no
+		// alternating column to disagree with at all. That costs no pad, where nudging into a clash
+		// costs a column and still sounds wrong -- and it is cheaper than the other way round, which
+		// would be to forbid odd spacing everywhere and convert chords that nothing was ever going to
+		// sit above.
+		Lane start = lane;
+		boolean nudge = false;
+		if (style.stacked()) {
+			boolean clashesHere = stackedClashes(placements, start, event.time());
+			if (clashesHere && stackedClashes(placements, start.ahead(1), event.time())) {
+				style = ChordStyle.BUS;
+			} else {
+				nudge = clashesHere;
+			}
+		}
+		// A stacked module near the wall is built as a bus, whether or not it wanted a nudge.
+		//
+		// It is two cells, three if nudged, and what the lane was measured for is two -- so one nudged
+		// with only two columns left puts whatever comes next, a staircase or a turn, a block past the
+		// wall. Ekran found it as a single glass step outside the footprint.
+		//
+		// No condition on how much room the bus wants, because it does not want any: a stacked chord
+		// is seven notes at the most, so as a bus it is four blocks at the most, always small enough
+		// to lie across a staircase or a turn -- which the rigid shape cannot do. The one that has to
+		// fit before the wall is the stacked module.
+		//
+		// And asked of the room alone, not of whether a nudge is wanted, so that {@link #landingOf}
+		// can ask exactly the same question. When the walk converted here on a clash the planner could
+		// not see, the two disagreed about how long the chord was, and a lane measured for two cells
+		// that got five came to rest three past its wall.
+		if (style.stacked() && roomAhead < STACKED_CELLS + 1) {
+			placements.padded("busForRoom");
+			style = ChordStyle.BUS;
+			nudge = false;
+		}
+		// And a nudge has to be reachable. Moving the repeater a cell forward puts it a cell further
+		// down the wire, and the wire may not have a cell left to give -- after a chord has been cut
+		// down a staircase there is often nothing spare at all. Then the module is built as a bus with
+		// its repeater left where it stands, which is the one place the signal is known to reach.
+		//
+		// Ekran found it on Big Shot at 44 wide: a chord of eighteen split down a staircase powered
+		// perfectly, and the stacked chord after it was nudged one past the end of the wire.
+		if (nudge && signal < NUDGE_REACH) {
+			placements.padded("busForSignal");
+			style = ChordStyle.BUS;
+			nudge = false;
+		}
 		if (!style.stacked()) {
 			Body body = addSpatialEventModule(placements, lane, triggerDelay, event.notes(),
 				style == ChordStyle.BUS);
 			return new Placed(body.lane(), style, body.busCells());
 		}
-		Lane start = lane;
-		if (Math.floorMod(start.pos().relative(travel).getX(), 2) != layout.centreParity()) {
+		if (nudge) {
 			placements.padded("parity");
 			addParityPad(placements, start.pos());
 			start = start.ahead(1);
@@ -2364,16 +2518,53 @@ public final class SongBuilder {
 	}
 
 	/**
-	 * A column of path that costs a block and no time, to put a module on the right footing.
+	 * Whether a stacked module built here would meet the lane behind it live against note.
 	 *
-	 * <p>A stacked module's outer column alternates strictly: the block a cross relays through sits
-	 * at the module's centre, and the two low notes sit either side of it. So along the lane it runs
-	 * live, note, live, note. Two lanes whose modules agree on which of those falls on an even
-	 * coordinate therefore meet live against live and note against note -- and a note block beside
-	 * a note block cannot be set off, because block power never crosses. That agreement is the whole
-	 * reason two lanes of stacked modules can sit three apart instead of four, and this is what buys
-	 * it: every module centre is put on an even coordinate, and a module that would have landed odd
-	 * is nudged one along first.</p>
+	 * <p>A stacked module's outer column reads live, note, live, note along the lane: the two blocks
+	 * the dust cross relays through are live, and the low notes sit in front of and behind them. Two
+	 * lanes close enough to touch therefore have to agree which of those falls where, or one lane's
+	 * live block sits against the other's note and sounds it at the wrong tick. That much is real --
+	 * ekran's copper bulbs caught it the one time this was taken out altogether.</p>
+	 *
+	 * <p>What is <em>not</em> needed is the global convention it used to be enforced with, where
+	 * every module centre was pushed onto an even coordinate whether anything was beside it or not.
+	 * Lanes are built in order, so the lane behind is already down and can simply be asked. Only the
+	 * lane behind, too: the lane in front will ask the same question of this one when its turn
+	 * comes. So a song whose chords already line up pays nothing, which is most of them.</p>
+	 *
+	 * <p>Two cells out and not one, because one cell out is this module's own outer column. What
+	 * sits beyond that is the neighbour.</p>
+	 */
+	private static boolean stackedClashes(PlacementPlan placements, Lane lane, int time) {
+		BlockPos cross = lane.ahead(1).pos();
+		Direction travel = lane.travel();
+		for (Direction out : List.of(lane.noteSide(), lane.noteSide().getOpposite())) {
+			BlockPos beyond = cross.relative(out, 2);
+			// The block this module would relay through, against a note of the lane behind.
+			if (placements.noteAt(beyond, time)) {
+				return true;
+			}
+			// And this module's own low notes, against a live block of the lane behind.
+			if (placements.liveAt(beyond.relative(travel), time)
+					|| placements.liveAt(beyond.relative(travel.getOpposite()), time)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * A column of path that carries the wire along and costs no time: glass with dust over it.
+	 *
+	 * <p>What a pad is made of, and what a corner takes so that no repeater has to stand on one.</p>
+	 *
+	 * <p>It used to be laid for a third reason as well, and that reason was not real. Stacked
+	 * modules were nudged onto an even coordinate on the story that two lanes had to agree which
+	 * of their alternating outer cells was live, or they would set off each other's notes. They
+	 * cannot: lane centres are four apart, and a module is driven from its own centre, so nothing
+	 * of one lane ever reaches the notes of the next. Removed 2026-07-30 -- ekran, who did not
+	 * invent the stacked module but took it from a working world built by somebody else, and so
+	 * knew the constraint had never existed.</p>
 	 *
 	 * <p>Glass and not stone. Dust makes the block beneath it live, and the blocks either side of
 	 * that one are exactly where low notes hang -- notes belonging to a later chord, which an
@@ -2382,7 +2573,7 @@ public final class SongBuilder {
 	 * points along the lane only, never sideways into a note.</p>
 	 */
 	private static void addParityPad(PlacementPlan placements, BlockPos cursor) {
-		set(placements, cursor, "minecraft:glass");
+		set(placements, cursor, "minecraft:stone");
 		set(placements, cursor.above(), "minecraft:redstone_wire");
 	}
 
@@ -3013,6 +3204,23 @@ public final class SongBuilder {
 		 * measuring a shape, and the shape is the one the real walk would get if nothing were in
 		 * the way.</p>
 		 */
+		/** Whether a note belonging to another tick is already planned here. */
+		boolean noteAt(BlockPos position, int time) {
+			Integer when = notes.get(position.immutable());
+			return when != null && when != time;
+		}
+
+		/** Whether a block that goes live at another tick is already planned here. */
+		boolean liveAt(BlockPos position, int time) {
+			Integer when = powered.get(position.immutable());
+			return when != null && when != time;
+		}
+
+		/** Scratch: what is planned here, for working out why a slot was refused. */
+		String describeBlock(BlockPos position) {
+			return blocks.getOrDefault(position.immutable(), "-");
+		}
+
 		boolean freeForNote(BlockPos position) {
 			return !recording
 				|| !blocks.containsKey(position.immutable())
@@ -3095,9 +3303,14 @@ public final class SongBuilder {
 						continue;
 					}
 					if (neighbour < time) {
+						// Naming the block that does it, not just the note it happens to. Which side it
+						// comes from is the whole diagnosis: along the lane is one module reaching into
+						// the next, across the lane is the corridor alongside, and the two want opposite
+						// fixes. Without it there is nothing to do but guess, which is what happened.
 						faults.add("the note at " + describe(note.getKey(), shiftX, shiftZ)
 							+ " belongs to tick " + time + " but would sound early, at tick "
-							+ neighbour);
+							+ neighbour + ", from the " + direction + " at "
+							+ describe(note.getKey().relative(direction), shiftX, shiftZ));
 					} else if (neighbour > time + SHARED_PULSE_TICKS) {
 						faults.add("the note at " + describe(note.getKey(), shiftX, shiftZ)
 							+ " belongs to tick " + time + " but would sound again at tick "

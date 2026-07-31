@@ -179,18 +179,43 @@ class SongBuilderTest {
 	}
 
 	/**
-	 * A module that would land off the beat gets nudged onto it, and the nudge is a column of glass
-	 * with plain dust on it -- plain because it runs straight through, and glass because dust makes
-	 * the block under it live and the blocks either side of that one are where low notes hang.
+	 * A module with nothing beside it is not nudged, because there is nothing to disagree with.
+	 *
+	 * <p>Stacked modules do have to agree with the lane behind about which cell of their alternating
+	 * outer column is live, or one lane's live block sounds the other's notes. But that is a question
+	 * about a neighbour, and this module has none: it is the only chord in the song. It used to be
+	 * pushed onto an even coordinate anyway, by a global convention that spent a column of glass
+	 * whether or not anything was ever going to sit against it.</p>
 	 */
 	@Test
-	void aModuleThatWouldLandOffTheBeatIsNudgedOntoIt() {
+	void aLoneModuleIsNotNudgedBecauseNothingIsBesideIt() {
 		SongBuilder.PastePlan plan = build(song(5, chords(1, 4, BASS_DRUM)),
 			SongBuilder.PasteMode.ULTRA_COMPACT_LANE);
 
 		assertEquals(1, plan.commands().stream().filter(command -> command.contains(CROSS)).count());
-		assertEquals(1, plan.commands().stream()
-			.filter(command -> command.contains(" minecraft:glass ")).count());
+		assertEquals(0, plan.commands().stream()
+			.filter(command -> command.contains(" minecraft:glass ")).count(),
+			"a module with no neighbour should cost no nudge");
+	}
+
+	/**
+	 * A build of nothing but stacked chords sounds every note at the tick it was written for.
+	 *
+	 * <p>The check the nudge exists to satisfy, stated as the outcome rather than as the mechanism.
+	 * Whether a given module is nudged, built as a bus instead, or left where it stands is the
+	 * layout's business; what may never happen is one lane's live block sounding another's note.</p>
+	 */
+	@Test
+	void stackedLanesNeverSoundEachOthersNotes() {
+		for (int width : new int[] {12, 16, 20, 24, 28}) {
+			SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0),
+				song(2, chords(220, 6, BASS_DRUM)), SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+				new SongBuilder.BuildLimits(4, width, 1));
+
+			assertEquals(List.of(), plan.faults().stream()
+					.filter(fault -> fault.contains("would sound early")).toList(),
+				"stacked lanes " + width + " wide set off each other's notes");
+		}
 	}
 
 	@Test
