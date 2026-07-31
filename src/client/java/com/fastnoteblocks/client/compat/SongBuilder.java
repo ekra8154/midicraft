@@ -376,7 +376,14 @@ public final class SongBuilder {
 		int longest = events.stream().mapToInt(EventGroup::length).max().orElse(1);
 		int laneWidth = Math.max(longest + 2, width - 2);
 		PlacementPlan placements = new PlacementPlan();
-		if (floors <= 1) {
+		// One floor is not a different kind of build, it is a build whose every turn is flat -- and
+		// walkWall already says so: with one floor the step above is never inside it, so the walk
+		// takes the sideways slab step every time and the floor never moves. Sending it to the older
+		// serpentine instead meant the planner, the closing pad, the turn reserve and the footprint
+		// count were all switched off at exactly the setting where every turn is the flat one. The
+		// older lane mode keeps its own walk, because that mode is finished and this is not its
+		// change to carry.
+		if (floors <= 1 && !layout.ultra()) {
 			walkFolded(events, origin, forward, laneWidth, Integer.MAX_VALUE, placements, layout);
 		} else {
 			walkWall(events, origin, forward, laneWidth, floors, placements, layout);
