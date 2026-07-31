@@ -2719,13 +2719,32 @@ public final class SongBuilder {
 	 * bus it cannot be asked to grow past an obstruction, and asking first is the whole of what lets
 	 * the walk hand the chord to a bus instead of building it into something.</p>
 	 */
-	private static boolean smallChordFits(PlacementPlan placements, Lane lane, int notes) {
+	private static boolean smallChordFits(PlacementPlan placements, Lane lane, int notes, int time) {
 		Lane body = lane.ahead(1);
 		BlockPos anchor = body.pos().above();
-		return slotIsFree(placements, lane, anchor)
-			&& (notes < 2 || slotIsFree(placements, lane, anchor.relative(body.noteSide())))
+		return slotIsQuiet(placements, lane, anchor, time)
+			&& (notes < 2
+				|| slotIsQuiet(placements, lane, anchor.relative(body.noteSide()), time))
 			&& (notes < 3
-				|| slotIsFree(placements, lane, anchor.relative(body.noteSide().getOpposite())));
+				|| slotIsQuiet(placements, lane, anchor.relative(body.noteSide().getOpposite()),
+					time));
+	}
+
+	/**
+	 * Whether a note may hang here without being sounded by somebody else's tick.
+	 *
+	 * <p>Free was never enough. An empty slot can still sit against a block that goes live at a tick
+	 * this chord was not written for, and a note block fires on any rising edge that reaches it --
+	 * so it sounds twice, once where it belongs and once with the chord next door. The bus has asked
+	 * this since it started opening into the air gap beside another lane; the rigid shape never did,
+	 * and it is the shape that cannot grow out of the way, so it is the shape that was hit.</p>
+	 *
+	 * <p>Ekran found it at 3 65 6 of jojo-il-vento-d-oro at thirty-six wide: a chord of three hung a
+	 * note against the last bus block of the chord a tick earlier. Nothing looked wrong -- the blocks
+	 * are all correct and the bulb test passes, because the extra sounding takes nothing away.</p>
+	 */
+	private static boolean slotIsQuiet(PlacementPlan placements, Lane lane, BlockPos slot, int time) {
+		return slotIsFree(placements, lane, slot) && !soundedByAnother(placements, slot, time);
 	}
 
 	/**
@@ -2775,9 +2794,19 @@ public final class SongBuilder {
 		// shape insists on putting them -- which at a corner it will not, because one of the two side
 		// slots is the cell the wire came in from. A bus can put them anywhere down its length and
 		// grow until it has, so it is what every shape falls back to rather than a shape that fails.
+		//
+		// The stacked shape first and the bus only after it. Both leave the contested cell open, but
+		// the bus pays a column of lane to do it and the stacked module does not -- it is the denser
+		// shape, and a chord of three leaves one of its hangers empty rather than growing. Ekran built
+		// both by hand before choosing: bus-converting works and costs space, stacking works and does
+		// not. In a turn the stacked shape is unavailable whatever its size, and a chord with fewer
+		// than two notes that will pass power sideways has no relays to stand the module on, so the
+		// bus is still what is left when neither holds.
 		if (style == ChordStyle.SMALL && lane.crowded()
-				&& !smallChordFits(placements, lane, event.notes().size())) {
-			style = ChordStyle.BUS;
+				&& !smallChordFits(placements, lane, event.notes().size(), event.time())) {
+			style = !inTurn && ultraSlots(event.notes(), false) != null
+				? ChordStyle.STACKED_FRONT
+				: ChordStyle.BUS;
 		}
 		if (TRACE) {
 			System.out.println("CHORD t=" + event.time() + " at " + lane.pos().getX() + ","
@@ -3017,7 +3046,12 @@ public final class SongBuilder {
 	 */
 	private static UltraSlots ultraSlots(List<EventNote> chord, boolean reachingBack) {
 		int hangers = reachingBack ? 6 : 4;
-		if (chord.size() < 4 || chord.size() > hangers + 1) {
+		// No floor on the size. A chord of three or fewer is built as the small shape because that is
+		// cheaper, not because the stacked one could not hold it -- fewer notes than hangers simply
+		// leaves a hanger empty. {@link #chooseStyle} still answers SMALL for those before it ever
+		// asks here, so the only caller this opens the shape to is the one that has already found the
+		// small shape will not do: the chord whose rigid slots are free but not quiet.
+		if (chord.isEmpty() || chord.size() > hangers + 1) {
 			return null;
 		}
 		long snares = chord.stream().filter(note -> FALLING_INSTRUMENT_BLOCKS.contains(note.instrumentBlock()))
