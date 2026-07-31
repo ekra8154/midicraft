@@ -928,7 +928,7 @@ public final class SongBuilder {
 			}
 			BlockPos before = lane.pos();
 			SpatialDelayTrigger trigger = addSpatialDelayBeforeEvent(placements, lane,
-				event.time() - currentTime - spentPadding);
+				event.time() - currentTime - spentPadding, layout.ultra());
 			currentTime = event.time();
 			// Already clear of any corner: the delay hands back a cell a repeater may stand on, which
 			// is the one rule every repeater in the build obeys and so is applied where they are laid.
@@ -2019,6 +2019,18 @@ public final class SongBuilder {
 
 	private static SpatialDelayTrigger addSpatialDelayBeforeEvent(PlacementPlan placements,
 			Lane lane, int delay) {
+		return addSpatialDelayBeforeEvent(placements, lane, delay, false);
+	}
+
+	/**
+	 * @param keepCorner whether to hand back a route still standing on its corner. Normally the
+	 *     delay walks off one, because what it hands back is where a repeater goes and a repeater may
+	 *     not stand on a corner. The two-swap turn wants the corner intact: it has a use for that
+	 *     cell -- a note -- and walking off it first is precisely the cell of dust it exists to save.
+	 *     Callers that pass true must deal with the corner themselves.
+	 */
+	private static SpatialDelayTrigger addSpatialDelayBeforeEvent(PlacementPlan placements,
+			Lane lane, int delay, boolean keepCorner) {
 		int remaining = delay;
 		while (remaining > 4) {
 			lane = pastAnyCorner(placements, lane);
@@ -2028,7 +2040,8 @@ public final class SongBuilder {
 			lane = lane.ahead(1);
 			remaining -= 4;
 		}
-		return new SpatialDelayTrigger(pastAnyCorner(placements, lane), Math.max(1, remaining));
+		return new SpatialDelayTrigger(keepCorner ? lane : pastAnyCorner(placements, lane),
+			Math.max(1, remaining));
 	}
 
 	/**
@@ -2064,11 +2077,179 @@ public final class SongBuilder {
 	 */
 	private static Body addSpatialEventModule(PlacementPlan placements, Lane lane,
 			int triggerDelay, List<EventNote> chord, boolean forceBus) {
+		Body swapped = twoSwapTurn(placements, lane, triggerDelay, chord, forceBus);
+		if (swapped != null) {
+			return swapped;
+		}
 		lane = pastAnyCorner(placements, lane);
 		set(placements, lane.pos(), "minecraft:stone");
 		set(placements, lane.pos().above(), "minecraft:repeater[facing="
 			+ repeaterFacing(lane.travel()) + ",delay=" + triggerDelay + "]");
 		return layEventBody(placements, lane, chord, forceBus);
+	}
+
+	/**
+	 * The two-swap turn: a repeater that would land on a corner trades places with a note instead of
+	 * being padded past it (ekran, 2026-07-31, built by hand in world first).
+	 *
+	 * <p>A repeater may not stand on a corner, so until now dust took the corner and the repeater
+	 * moved one cell along. That cell carries nothing and costs a block of the fifteen a repeater
+	 * reaches, which is where every over-long run in the library comes from -- and it is not rare:
+	 * Hammer at twelve wide spends ninety-three cells on it.</p>
+	 *
+	 * <p>The trick is to notice that a corner is a perfectly good place for a <em>note</em>, and that
+	 * the chord already turning through the bend has notes to spare. Picture the repeater placed on
+	 * the corner illegally, before anything has been padded, and then make two trades:</p>
+	 *
+	 * <pre>
+	 *   swap 1   the corner repeater  &lt;-&gt;  the last note inside the bend
+	 *   swap 2   the note that repeater now faces  &lt;-&gt;  the next chord's first bus block
+	 * </pre>
+	 *
+	 * <p>After the first, the repeater stands on the inside diagonal of the corner, reading the last
+	 * block of the bus behind it, and the corner holds the note it displaced. After the second, what
+	 * the repeater drives is a bus block rather than a note, so the line lives. Four blocks change
+	 * places; nothing is added and nothing is lost, and the corner cell earns its keep.</p>
+	 *
+	 * <p>Both chords have to be buses. The next one is built here so that falls out; the one turning
+	 * through the bend has to have left a note on the inside diagonal, which is what the check for it
+	 * amounts to. Where either fails this returns null and the old dust-and-shuffle runs.</p>
+	 *
+	 * <p>Only at the bend a route ends on. A bend with another still to come is mid-turn, and the
+	 * cell the repeater would take is one the rest of the turn is about to want.</p>
+	 */
+	/** Whether a note here would be set off by something belonging to another tick. */
+	private static boolean soundedByAnother(PlacementPlan placements, BlockPos slot, int time) {
+		for (Direction direction : Direction.values()) {
+			if (placements.liveAt(slot.relative(direction), time)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/** The cells a route occupies, so a bus laid along it does not hang a note in its own way. */
+	private static Set<BlockPos> route(Lane along, int cells) {
+		Set<BlockPos> taken = new java.util.HashSet<>();
+		for (int cell = 0; cell < cells; cell++) {
+			taken.add(along.ahead(cell).pos().immutable());
+		}
+		return taken;
+	}
+
+	private static Body twoSwapTurn(PlacementPlan placements, Lane lane, int triggerDelay,
+			List<EventNote> chord, boolean forceBus) {
+		if (!lane.cornerAt(0)) {
+			return null;
+		}
+		placements.padded("swapSeen");
+		if (!(forceBus || chord.size() > 3)) {
+			placements.padded("swapNotBus");
+			return null;
+		}
+		// A bend still to come is carried onto the opening route below, one cell nearer, because the
+		// swap cuts a cell out of the path. One that would land on the opening's own first bend is a
+		// turn too tight to cut into.
+		for (Lane.Bend pending : lane.bends()) {
+			if (pending.after() < 3) {
+				placements.padded("swapBendTooNear");
+				return null;
+			}
+		}
+		BlockPos corner = lane.pos().above();
+		Direction travel = lane.travel();
+		// Which side the wire arrived from. At a corner it is one of the two perpendiculars, and the
+		// one that already holds a bus block is the one the chord came round.
+		Direction arrival = null;
+		for (Direction side : List.of(lane.noteSide(), lane.noteSide().getOpposite())) {
+			BlockPos behind = corner.relative(side);
+			if (placements.describeBlock(behind).startsWith("minecraft:stone")
+					&& placements.describeBlock(behind.above())
+						.startsWith("minecraft:redstone_wire")) {
+				arrival = side;
+			}
+		}
+		if (arrival == null) {
+			placements.padded("swapNoArrival");
+			return null;
+		}
+		// The inside diagonal of the bend: one back along the way the wire came, one on along the way
+		// it leaves. The last note the turning chord hung inside the corner sits here.
+		BlockPos inside = corner.relative(arrival).relative(travel);
+		String note = placements.describeBlock(inside);
+		Integer when = placements.noteTime(inside);
+		String instrument = placements.describeBlock(inside.below());
+		if (!note.startsWith("minecraft:note_block") || when == null
+				|| instrument.startsWith("minecraft:air") || "-".equals(instrument)) {
+			placements.padded("swapNoNote");
+			return null;
+		}
+		if (!placements.freeForNote(corner)) {
+			placements.padded("swapCornerBusy");
+			return null;
+		}
+		// The cell the repeater will drive is the one cell of the opening that is not on the route
+		// the turn reserved, so it is the one that can already be spoken for -- by a note of the lane
+		// alongside, most often. Asked before anything moves, because the swaps are not undoable:
+		// {@link PlacementPlan#set} refuses to overwrite and half a swap is a broken machine.
+		BlockPos opens = inside.relative(travel);
+		Direction step = arrival.getOpposite();
+		List<Lane.Bend> route = new ArrayList<>();
+		route.add(new Lane.Bend(1, step.getClockWise() == travel));
+		for (Lane.Bend pending : lane.bends()) {
+			route.add(new Lane.Bend(pending.after() - 1, pending.clockwise()));
+		}
+		Lane opening = Lane.straight(opens, step, travel).bending(route).crowding();
+		// Every cell the bus could stand on, before anything moves. The swaps are not undoable --
+		// {@link PlacementPlan#set} refuses to overwrite on purpose, and half a swap is a broken
+		// machine -- so the whole run has to be known clear first. The opening's own cell is the one
+		// off the reserved route, but a shifted bend puts the cells after it a column off too, and
+		// those are where a note of the lane alongside is already standing.
+		int wanted = Math.min(DUST_RANGE, (chord.size() + 1) / 2 + 2);
+		for (int cell = 0; cell < wanted; cell++) {
+			BlockPos at = opening.ahead(cell).pos();
+			if (!"-".equals(placements.describeBlock(at))
+					|| !"-".equals(placements.describeBlock(at.above()))) {
+				placements.padded("swapOpeningBusy");
+				return null;
+			}
+		}
+		placements.padded("swapDone");
+		if (TRACE) {
+			System.out.println("SWAP corner=" + corner.getX() + "," + corner.getY() + ","
+				+ corner.getZ() + " inside=" + inside.getX() + "," + inside.getY() + ","
+				+ inside.getZ() + " opens=" + opens.getX() + "," + opens.getY() + ","
+				+ opens.getZ() + " travel=" + travel + " arrival=" + arrival
+				+ " bends=" + lane.bends() + " notes=" + chord.size());
+		}
+		// Swap one. The note goes to the corner, which powers it just as well -- the bus block the
+		// wire arrived on is right beside it -- and the repeater takes the cell the note left.
+		placements.take(inside);
+		placements.take(inside.below());
+		set(placements, corner.below(), instrument);
+		set(placements, corner, note);
+		placements.note(corner, when);
+		set(placements, inside.below(), "minecraft:stone");
+		set(placements, inside, "minecraft:repeater[facing=" + repeaterFacing(travel)
+			+ ",delay=" + triggerDelay + "]");
+		// Swap two. What the repeater drives has to be a bus block, so the next chord opens one cell
+		// off the lane and steps onto it, rather than opening on the lane and being faced by a note.
+		//
+		// The opening steps sideways once and turns back onto the route, and every bend the turn had
+		// still to make comes with it a cell nearer -- the swap takes a cell out of the path, so what
+		// stood at offset n from the corner now stands at n minus one. Getting that wrong does not
+		// break the wire, it lays the rest of the turn down crooked, which is why it is arithmetic
+		// here rather than a route rebuilt from scratch.
+		// Reserved well past what this chord will use. The cells beyond the bus are not free either:
+		// they are where the walk carries on, and the next module stands its repeater on the first of
+		// them. A note hung there by this bus is a collision the walk finds two events later. Ekran's
+		// on Hammer at twelve wide: a chord of two, one cell of bus, a note on the cell the route
+		// bends into, and the repeater after it had nowhere to stand.
+		int cells = layBus(placements, opening, chord, chord.get(0).time(),
+			route(opening, DUST_RANGE + 2));
+		Lane landed = opening.ahead(cells);
+		return new Body(new Lane(landed.pos().below(), landed.travel(), landed.noteSide(),
+			landed.bends(), landed.cornerAt(0), lane.crowded()), cells);
 	}
 
 	/**
@@ -2288,6 +2469,18 @@ public final class SongBuilder {
 	 */
 	private static int layBus(PlacementPlan placements, Lane anchor, List<EventNote> chord,
 			int time) {
+		return layBus(placements, anchor, chord, time, Set.of());
+	}
+
+	/**
+	 * @param reserved cells the run itself is going to want later, which a note may not be hung in
+	 *     however free they look right now. A bus normally owns its own columns, so nothing needs
+	 *     saying; a bus laid round a cut corner doubles back past its own opening, and asking "is
+	 *     this block free" of a cell three cells of route away answers the wrong question. The
+	 *     collision it caused was a note from the first cell standing where the fourth wanted stone.
+	 */
+	private static int layBus(PlacementPlan placements, Lane anchor, List<EventNote> chord,
+			int time, Set<BlockPos> reserved) {
 		List<EventNote> ordered = busOrder(chord);
 		int placed = 0;
 		int cells = 0;
@@ -2326,8 +2519,15 @@ public final class SongBuilder {
 						+ " below=" + placements.describeBlock(slot.below())
 						+ " above=" + placements.describeBlock(slot.above()) + "]");
 				}
-				if (placed < ordered.size()
-						&& (!crowded || placements.freeForNote(slot))) {
+				// Free is not enough where lanes touch: a slot with nothing in it may still be beside
+				// a block that goes live on somebody else's tick, and a note hung there sounds with
+				// them instead of with its own chord. The two-swap turn made that common -- it opens
+				// the next chord's bus one cell into the air gap, and the air gap is where the lane
+				// beyond hangs its notes -- but the rule is not about the swap and belongs here, next
+				// to the other question about whether a slot will do.
+				if (placed < ordered.size() && !reserved.contains(slot)
+						&& (!crowded || placements.freeForNote(slot) && !soundedByAnother(
+							placements, slot, time))) {
 					placeNote(placements, slot, ordered.get(placed++));
 				}
 			}
@@ -2648,6 +2848,9 @@ public final class SongBuilder {
 				style == ChordStyle.BUS);
 			return new Placed(body.lane(), style, body.busCells());
 		}
+		// The delay no longer walks off the corner for us -- the two-swap turn wants it -- so the one
+		// shape that cannot use it walks off it here.
+		start = pastAnyCorner(placements, start);
 		if (nudge) {
 			placements.padded("parity");
 			addParityPad(placements, start.pos());
@@ -3372,6 +3575,32 @@ public final class SongBuilder {
 			if (recording) {
 				notes.put(position.immutable(), time);
 			}
+		}
+
+		/**
+		 * Lifts a block back out of the plan so it can be put down somewhere else.
+		 *
+		 * <p>The one place anything is un-placed. {@link #set} refuses to overwrite on purpose --
+		 * two things wanting the same block is a layout fault and should say so -- so a block that
+		 * genuinely moves has to be taken up first rather than written over. Used by the two-swap
+		 * turn, which trades a note and a repeater rather than adding either.</p>
+		 *
+		 * @return what was there, or {@code "-"} if nothing was
+		 */
+		String take(BlockPos position) {
+			if (!recording) {
+				return "-";
+			}
+			BlockPos key = position.immutable();
+			notes.remove(key);
+			powered.remove(key);
+			String was = blocks.remove(key);
+			return was == null ? "-" : was;
+		}
+
+		/** When the note that was here belonged, for putting it down again elsewhere. */
+		Integer noteTime(BlockPos position) {
+			return notes.get(position.immutable());
 		}
 
 		/**
