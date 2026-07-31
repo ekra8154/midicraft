@@ -541,7 +541,7 @@ public final class SongBuilder {
 			}
 			if (split) {
 				SpatialDelayTrigger trigger = addSpatialDelayBeforeEvent(placements,
-					new Lane(cursor, travel, depth), event.time() - currentTime);
+					Lane.straight(cursor, travel, depth), event.time() - currentTime);
 				currentTime = event.time();
 				List<EventNote> chord = busOrder(event.notes());
 				int near = 2 * (room - 1);
@@ -575,7 +575,7 @@ public final class SongBuilder {
 				if (!pad.cells().isEmpty()) {
 					placements.moved(event.notes().size());
 				}
-				cursor = emitPad(placements, new Lane(cursor, travel, depth), pad).pos();
+				cursor = emitPad(placements, Lane.straight(cursor, travel, depth), pad).pos();
 				spentPadding = pad.delaySpent();
 				if (above >= 0 && above < floors) {
 					// Asked of the shape the lane actually ended on, not of how many notes it held.
@@ -645,7 +645,7 @@ public final class SongBuilder {
 			int owing = index > 0 && booked != null ? booked.getOrDefault(index, 0) : 0;
 			if (owing > 0) {
 				Pad early = planPad(owing, tipSignal, 1, Math.max(0, wait - 1 - spentPadding));
-				cursor = emitPad(placements, new Lane(cursor, travel, depth), early).pos();
+				cursor = emitPad(placements, Lane.straight(cursor, travel, depth), early).pos();
 				spentPadding += early.delaySpent();
 				tipSignal = early.signal();
 			}
@@ -699,13 +699,13 @@ public final class SongBuilder {
 					Pad front = planPad(ahead, tipSignal, 1,
 						Math.max(0, wait - 1 - spentPadding));
 					if (ahead > 0 && front.cells().size() == ahead) {
-						cursor = emitPad(placements, new Lane(cursor, travel, depth), front).pos();
+						cursor = emitPad(placements, Lane.straight(cursor, travel, depth), front).pos();
 						spentPadding += front.delaySpent();
 					}
 				}
 			}
 			SpatialDelayTrigger trigger = addSpatialDelayBeforeEvent(placements,
-				new Lane(cursor, travel, depth), event.time() - currentTime - spentPadding);
+				Lane.straight(cursor, travel, depth), event.time() - currentTime - spentPadding);
 			currentTime = event.time();
 			Placed placed = addChordModule(placements, trigger.cursor(), travel, depth,
 				trigger.triggerDelay(), event, !columnBehindBusy || !trigger.cursor().equals(cursor),
@@ -1210,7 +1210,7 @@ public final class SongBuilder {
 			EventGroup event = events.get(index);
 			int delay = event.time() - currentTime;
 			SpatialDelayTrigger trigger = addSpatialDelayBeforeEvent(placements,
-				new Lane(cursor, travel, laneStep), delay);
+				Lane.straight(cursor, travel, laneStep), delay);
 			currentTime = event.time();
 			Integer spacing = layout.spacingAt().get(index + 1);
 			if (spacing != null && fitsInCorner(event)) {
@@ -1220,7 +1220,7 @@ public final class SongBuilder {
 				continue;
 			}
 			cursor = addSpatialEventModule(placements,
-				new Lane(trigger.cursor(), travel, laneStep), trigger.triggerDelay(), event.notes());
+				Lane.straight(trigger.cursor(), travel, laneStep), trigger.triggerDelay(), event.notes());
 			if (spacing != null) {
 				cursor = addCompactTurn(placements, cursor, travel, laneStep, spacing, event.time());
 				travel = travel.getOpposite();
@@ -1287,7 +1287,7 @@ public final class SongBuilder {
 			EventGroup event = events.get(index);
 			int delay = event.time() - currentTime;
 			SpatialDelayTrigger trigger = addSpatialDelayBeforeEvent(placements,
-				new Lane(cursor, travel, laneStep), delay);
+				Lane.straight(cursor, travel, laneStep), delay);
 			boolean roomBehind = !columnBehindBusy || !trigger.cursor().equals(cursor);
 			currentTime = event.time();
 			// One event of lookahead. Whether this event is the last of its lane has to be settled
@@ -1726,13 +1726,28 @@ public final class SongBuilder {
 				+ " exceeds the safe redstone range");
 		}
 		placements.turnedAt(cursor);
+		// The turn as a route rather than as a shape: one cell along, a corner, then the sideways
+		// run. Laid off the same Lane every module uses, so that when modules start being placed
+		// along here rather than plain wire, there is nothing left to teach them.
+		Lane route = turnRoute(cursor, travel, laneStep);
 		BlockPos outer = cursor.relative(travel);
-		layTurnFloor(placements, cursor, time);
-		layTurnFloor(placements, outer, time);
-		for (int offset = 1; offset <= laneDistance; offset++) {
-			layTurnFloor(placements, outer.relative(laneStep, offset), time);
+		for (int cell = 0; cell <= laneDistance + 1; cell++) {
+			layTurnFloor(placements, route.ahead(cell).pos(), time);
 		}
 		return outer.relative(laneStep, laneDistance).relative(travel.getOpposite());
+	}
+
+	/**
+	 * The route a flat turn's wire takes: one cell along travel, a corner, then the sideways run.
+	 *
+	 * <p>The note side is handed in as the way the sideways run goes, which is the direction a chord
+	 * riding the turn will find itself hanging off once the corner has rotated it -- so the corner
+	 * rotates the notes onto the travel axis, along the lane, ground this build already owns.</p>
+	 */
+	private static Lane turnRoute(BlockPos cursor, Direction travel, Direction laneStep) {
+		boolean clockwise = travel.getClockWise() == laneStep;
+		return Lane.straight(cursor, travel, laneStep)
+			.bending(List.of(new Lane.Bend(1, clockwise)));
 	}
 
 	private static void layTurnFloor(PlacementPlan placements, BlockPos position, int time) {
@@ -1795,11 +1810,11 @@ public final class SongBuilder {
 	 */
 	private static BlockPos addCarriedEventModule(PlacementPlan placements, BlockPos cursor,
 			Direction travel, Direction laneStep, List<EventNote> chord, int stepOff) {
-		cursor = emitDust(placements, new Lane(cursor, travel, laneStep), stepOff).pos();
+		cursor = emitDust(placements, Lane.straight(cursor, travel, laneStep), stepOff).pos();
 		// The wire arrives level with the repeater that is not there, and climbs the side of the
 		// first stone onto the dust running over it.
 		return cursor.relative(travel, layBus(placements,
-			new Lane(cursor.above(), travel, laneStep), chord, chord.get(0).time()));
+			Lane.straight(cursor.above(), travel, laneStep), chord, chord.get(0).time()));
 	}
 
 	/**
@@ -1817,7 +1832,7 @@ public final class SongBuilder {
 		set(placements, cursor.above(),
 			"minecraft:repeater[facing=" + repeaterFacing(travel) + ",delay=" + triggerDelay + "]");
 		return cursor.relative(travel, 1 + layBus(placements,
-			new Lane(cursor.relative(travel).above(), travel, laneStep), chord,
+			Lane.straight(cursor.relative(travel).above(), travel, laneStep), chord,
 			chord.get(0).time()));
 	}
 
@@ -1838,13 +1853,68 @@ public final class SongBuilder {
 	 *     rather than to travel -- which reverses every lane -- because that is what makes
 	 *     {@link LaneReach} predictable enough to pack lanes closer than four apart.
 	 */
-	private record Lane(BlockPos pos, Direction travel, Direction noteSide) {
+	private record Lane(BlockPos pos, Direction travel, Direction noteSide, List<Bend> bends) {
+
+		/**
+		 * A corner the route takes: after this many more cells, the wire turns to face a new way.
+		 *
+		 * @param clockwise which way it turns, so that a chord riding through it turns with it
+		 */
+		record Bend(int after, boolean clockwise) {
+		}
+
+		static Lane straight(BlockPos pos, Direction travel, Direction noteSide) {
+			return new Lane(pos, travel, noteSide, List.of());
+		}
+
+		/** The same route with corners ahead of it, at cell offsets counted from here. */
+		Lane bending(List<Bend> corners) {
+			return new Lane(pos, travel, noteSide, List.copyOf(corners));
+		}
+
+		/**
+		 * The cell this many further along, having taken any corner that falls in between.
+		 *
+		 * <p>The note side turns with the path and not with the world. A chord riding through a
+		 * corner comes out the far side lying the same way round relative to the wire it hangs on,
+		 * which is what makes a bend nothing more than more lane. Turning it with the world instead
+		 * would mirror every chord at every corner.</p>
+		 *
+		 * <p>Straight, this is exactly {@code pos.relative(travel, cells)} -- which is what it
+		 * replaced, and why nothing in a build without corners moves.</p>
+		 */
 		Lane ahead(int cells) {
-			return new Lane(pos.relative(travel, cells), travel, noteSide);
+			BlockPos where = pos;
+			Direction facing = travel;
+			Direction side = noteSide;
+			List<Bend> remaining = bends;
+			for (int step = 0; step < cells; step++) {
+				where = where.relative(facing);
+				List<Bend> next = new ArrayList<>();
+				for (Bend bend : remaining) {
+					if (bend.after() == step + 1) {
+						facing = bend.clockwise() ? facing.getClockWise() : facing.getCounterClockWise();
+						side = bend.clockwise() ? side.getClockWise() : side.getCounterClockWise();
+					} else {
+						next.add(bend);
+					}
+				}
+				remaining = next;
+			}
+			List<Bend> shifted = new ArrayList<>();
+			for (Bend bend : remaining) {
+				shifted.add(new Bend(bend.after() - cells, bend.clockwise()));
+			}
+			return new Lane(where, facing, side, List.copyOf(shifted));
 		}
 
 		Lane above() {
-			return new Lane(pos.above(), travel, noteSide);
+			return new Lane(pos.above(), travel, noteSide, bends);
+		}
+
+		/** Whether the wire changes direction at this cell, where no repeater may ever stand. */
+		boolean cornerAt(int cells) {
+			return bends.stream().anyMatch(bend -> bend.after() == cells);
 		}
 
 		/** Where the note on one side of this cell hangs. */
@@ -1913,7 +1983,7 @@ public final class SongBuilder {
 			style = ChordStyle.BUS;
 		}
 		if (!style.stacked()) {
-			return new Placed(addSpatialEventModule(placements, new Lane(cursor, travel, across),
+			return new Placed(addSpatialEventModule(placements, Lane.straight(cursor, travel, across),
 				triggerDelay, event.notes()), style);
 		}
 		BlockPos start = cursor;
