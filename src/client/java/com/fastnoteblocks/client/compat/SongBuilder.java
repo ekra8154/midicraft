@@ -408,10 +408,28 @@ public final class SongBuilder {
 	 */
 	private static void walkWall(List<EventGroup> events, BlockPos origin, Direction forward,
 			int laneWidth, int floors, PlacementPlan placements, Layout layout) {
-		BlockPos cursor = origin;
-		Direction travel = forward;
 		// Where chords grow, and the direction the whole slab creeps once a sweep is done.
 		Direction depth = forward.getClockWise();
+		// The walk's whole position: where it stands, which way the wire is running, and any corners
+		// still ahead of it. One object rather than a cursor and a heading, because a turn is now a
+		// stretch of this route with two bends in it -- the walk carries on through a corner the same
+		// way it carries on through anything else, and the route is what remembers that it bent.
+		// Marked crowded for ultra from the very first cell. Ultra is the mode that packs lanes until
+		// they touch, so no lane in one owns the ground its notes hang over: the cells beside it belong
+		// to the lane before, to the turn it came round, or to the corridor alongside. Every note it
+		// hangs is therefore offered rather than assumed, and a bus that finds a slot taken carries on
+		// a block further and hangs it there. The other modes leave a clear column and can assume.
+		Lane lane = layout.ultra()
+			? Lane.straight(origin, forward, depth).crowding()
+			: Lane.straight(origin, forward, depth);
+		// Whether those bends are the ones a turn put there, so that the walk knows to re-pin the
+		// note side and start a new lane the moment it comes out the far side.
+		boolean turning = false;
+		// And whether the chord about to be placed is the first one after coming out. A stacked module
+		// there is still perpendicular to the ones along the sideways run it has just left -- the
+		// corner is behind it, not under it, which is near enough to be the same problem. So the
+		// restriction outlasts the turn by exactly one chord.
+		boolean leavingTurn = false;
 		// A descent is the one thing in a build that steps a column off its own centre line, and
 		// it steps back the way the slabs came. The slab behind this one is climbing where this one
 		// descends -- they alternate -- and a climb keeps to the centre line, so that column is the
@@ -441,6 +459,20 @@ public final class SongBuilder {
 		boolean replan = layout.ultra();
 		for (int index = 0; index < events.size(); index++) {
 			EventGroup event = events.get(index);
+			// Out the far side of a turn. The route stops bending of its own accord once the walk has
+			// passed both corners, so there is nothing to count down and nothing to ask how long a turn
+			// was: the moment no corner is left, this is a new lane. Its note side is re-pinned to the
+			// slab's own depth, because a chord riding a corner turns with the path -- which is what
+			// makes a bend nothing but more lane -- while a lane's chords all grow the same way in the
+			// world, whichever way that lane happens to run.
+			if (turning && !lane.bending()) {
+				lane = lane.pinned(depth);
+				turning = false;
+				leavingTurn = true;
+				laneStarted = false;
+				columnBehindBusy = true;
+				replan = layout.ultra();
+			}
 			// Settled before the event is placed rather than after it. A turn hands back a cursor at
 			// the same point along the wall the last event reached, so an event that overshoots
 			// leaves the next lane starting outside the wall -- and nothing measured afterwards can
@@ -450,31 +482,57 @@ public final class SongBuilder {
 			int above = turn.above();
 			int turnCells = turn.cells();
 			int offBus = turn.offBus();
-			int wall = travel == forward ? farWall : nearWall;
+			int wall = lane.travel() == forward ? farWall : nearWall;
 			int stepOffAhead = turn.stepOff();
 			if (replan) {
-				booked = planLane(events, index, cursor.getX(), travel.getStepX(), wall, currentTime,
-					tipSignal, columnBehindBusy, turnCells, offBus, stepOffAhead, layout);
+				// Only worth doing ahead of a staircase. The plan's whole job is to work out how much
+				// pad each chord owes so the lane arrives flush at its wall, and a lane that ends in a
+				// flat turn does not need to arrive flush at anything -- the chord that meets the corner
+				// carries on across it. Planning one anyway is where most of the pad in a build came
+				// from: a song of nothing but chords of twenty-two, on one floor, has no staircase in it
+				// at all and should lay no pad anywhere.
+				booked = above >= 0 && above < floors
+					? planLane(events, index, lane.pos().getX(), lane.travel().getStepX(), wall,
+						currentTime, tipSignal, columnBehindBusy, turnCells, offBus, stepOffAhead,
+						layout)
+					: Map.of();
 				replan = false;
 			}
 			// A lane that ends flush with the wall on a wire too weak to reach the top of a staircase
 			// has nowhere left to stand the repeater that would revive it, and a lane that cannot turn
 			// runs on past the wall instead. So an event that would leave the wire that weak is asked
 			// to fit a column short, and the pad puts a repeater in the column that buys.
+			// Whether what lies ahead is a flat turn rather than a staircase, and so whether it is
+			// walked or crossed. A staircase is still a gap in the path that the lane must arrive flush
+			// at; a flat turn is more lane, and a chord meeting one simply carries on round it.
+			boolean flatAhead = !(above >= 0 && above < floors);
+			// A chord small enough to lie across a flat turn needs nothing done for it at all. It is
+			// built where it stands and runs on into the corner, and the turn lays whatever is left --
+			// which is the same columns filled with music instead of with wire. Padding the lane out to
+			// meet the turn is what makes a run too long for the repeater at the end of it to clear,
+			// and it was buying nothing: the chord was going to cover that ground anyway.
+			boolean straddles = layout.ultra() && flatAhead
+				&& event.notes().size() <= MAX_STRADDLING_CHORD;
 			int reserve = turnReserve(event, offBus, layout);
 			int wait = event.time() - currentTime;
 			// Measured with the same arithmetic the planner uses, and not with a length taken from
 			// the shape the chord was measured in. A stacked chord that finds the pair of slots
 			// behind it spoken for is built as a bus instead, and a bus is longer -- so a lane could
 			// be told a chord fitted, build it, and land a column past its own wall.
-			Landing here = landingOf(cursor.getX(), travel.getStepX(), event, wait, columnBehindBusy,
-				layout);
-			int landing = here.end() + travel.getStepX() * reserve;
-			boolean wantsTurn = laneStarted && (landing > farWall || landing < nearWall);
+			Landing here = landingOf(lane.pos().getX(), lane.travel().getStepX(), event, wait,
+				columnBehindBusy, layout);
+			int landing = here.end() + lane.travel().getStepX() * reserve;
+			// Never while the route is still bending. Inside a turn the wire runs across the corridor
+			// rather than along it, so every one of these measurements is taken down the wrong axis --
+			// and there is nothing to decide anyway, because the walk has already committed to the
+			// corner it is standing in. A turn ends when the route runs out of corners, not when some
+			// arithmetic about walls says so.
+			boolean wantsTurn = laneStarted && !turning
+				&& (landing > farWall || landing < nearWall);
 			// One tick has to be left for the next event's own repeater, which is the only thing that
 			// can drive the module it stands in front of.
-			int columns = (wall - cursor.getX()) * travel.getStepX();
-			Pad pad = layout.ultra() && wantsTurn
+			int columns = (wall - lane.pos().getX()) * lane.travel().getStepX();
+			Pad pad = layout.ultra() && wantsTurn && !straddles
 				? planPad(columns, tipSignal, turnCells, Math.max(0, wait - 1))
 				: Pad.none(tipSignal);
 			// A split comes before any of that. The event that will not fit is cut in two: as much of
@@ -490,13 +548,24 @@ public final class SongBuilder {
 			// A descent lands where it cannot be built on straight away and spends a block stepping
 			// off, which is a block the chord could have used.
 			int stepOff = stepOffAhead;
-			boolean split = layout.ultra() && wantsTurn && index > 0
+			// Only ahead of a staircase now. A flat turn is walked rather than crossed, so a chord that
+			// will not fit before it is not cut in two: the walk takes the corner and carries on laying
+			// the same chord along the sideways run, which is the cut done by the ordinary machinery
+			// and without a near half and a far half to keep in step.
+			boolean split = layout.ultra() && wantsTurn && index > 0 && above >= 0 && above < floors
 				&& room >= 2 && room - 1 < cells && cells + offBus + stepOff <= DUST_RANGE;
 			// Unless leaving that tick is what stops the pad reaching the wall. Then spend the whole
 			// wait on the pad and carry the event over the turn on the wire instead, which is the one
 			// way a lane whose next event is a single tick away can still end where it is meant to.
 			boolean carried = false;
-			if (layout.ultra() && wantsTurn && pad.cells().size() < columns) {
+			// Asked only when carrying is still on the table. This plans a pad that fills the lane to
+			// the wall so the next chord can be carried over a staircase without a repeater -- and it
+			// used to plan it whatever, then have the carry rejected further down for want of a
+			// staircase to cross. The carry went away and the pad stayed, which is a lane padded flush
+			// for a reason that no longer existed: four blocks of wire in front of a chord that was
+			// about to lie across the corner by itself.
+			if (layout.ultra() && wantsTurn && !straddles && above >= 0 && above < floors
+					&& pad.cells().size() < columns) {
 				Pad whole = spending(planPad(columns, tipSignal, turnCells, wait), wait);
 				if (whole != null && whole.cells().size() == columns
 					&& whole.signal() >= turnCells + stepOff + cells) {
@@ -515,12 +584,23 @@ public final class SongBuilder {
 			// the only turn allowed elsewhere is one on a lane already past its wall, where carrying on
 			// would never bring it back.
 			boolean onWall = pad.cells().size() == columns;
+			// What the wire must still be worth to take the turn. A staircase has to be crossed in one
+			// run and costs its whole length; a flat turn only has to be *reached*, because the chord
+			// standing on it opens with a repeater of its own that hands out a fresh fifteen. Charging
+			// a walked turn as though it were a staircase is what made lanes give up and run on while a
+			// perfectly good corner was two blocks away.
+			// A straddling chord has nothing to reach. Its repeater goes down where the lane has got
+			// to, and a repeater hands out a fresh fifteen however dead the wire arriving was, so the
+			// only run that matters is the one inside the chord itself. Charging it for a staircase it
+			// is not going to cross is what made a lane give up with a usable corner in front of it.
 			boolean canTurn = layout.ultra()
-				? index > 0 && pad.signal() >= (pad.cells().isEmpty() && lastStyle == ChordStyle.BUS
-					? offBus : turnCells)
+				? index > 0 && (straddles && pad.signal() >= 1 || pad.signal()
+					>= (pad.cells().isEmpty() && lastStyle == ChordStyle.BUS ? offBus : turnCells))
 				: index > 0 && events.get(index - 1).maxSafeTurnDistance() >= MAX_LANE_SPACING;
 			int spentPadding = 0;
-			carried &= canTurn && !split;
+			// Ahead of a staircase only, for the same reason a split is. A chord that would have been
+			// carried across a flat turn on bare wire is now simply built on the turn.
+			carried &= canTurn && !split && above >= 0 && above < floors;
 			// On the wall or not at all -- except that a machine you cannot paste is a machine you
 			// cannot go and look at. So a lane that will not reach its wall turns where it stands and
 			// says so, on the same overlay a wrong note would appear on, naming the chord that beat it
@@ -532,7 +612,8 @@ public final class SongBuilder {
 			if (layout.ultra() && wantsTurn && canTurn && columns < 0) {
 				placements.breached(-columns);
 			}
-			if (layout.ultra() && wantsTurn && canTurn && !onWall && !split && !carried) {
+			if (layout.ultra() && wantsTurn && canTurn && !onWall && !split && !carried
+					&& !straddles) {
 				placements.trouble("a lane turned " + columns + " columns short of its wall at tick "
 					+ event.time() + ", where a chord of " + event.notes().size()
 					+ " would not fit: " + tipSignal + " blocks of wire and " + (wait - 1)
@@ -540,28 +621,27 @@ public final class SongBuilder {
 					+ offBus + " for the turn is too much to cut across it");
 			}
 			if (split) {
-				SpatialDelayTrigger trigger = addSpatialDelayBeforeEvent(placements,
-					Lane.straight(cursor, travel, depth), event.time() - currentTime);
+				Direction travel = lane.travel();
+				SpatialDelayTrigger trigger = addSpatialDelayBeforeEvent(placements, lane,
+					event.time() - currentTime);
 				currentTime = event.time();
 				List<EventNote> chord = busOrder(event.notes());
 				int near = 2 * (room - 1);
-				cursor = addSplitEventModule(placements, trigger.cursor(), travel, depth,
+				BlockPos cursor = addSplitEventModule(placements, trigger.cursor(), travel, depth,
 					trigger.triggerDelay(), chord.subList(0, near));
-				if (above >= 0 && above < floors) {
-					cursor = climb > 0
-						? addGlassClimb(placements, cursor, travel, true, currentTime)
-						: addSpiralDescent(placements, cursor, travel, descentSide, currentTime);
-					floor = above;
-				} else {
-					cursor = addCompactTurn(placements, cursor, travel, depth, slabStep, currentTime);
-					climb = -climb;
-				}
+				cursor = climb > 0
+					? addGlassClimb(placements, cursor, travel, true, currentTime)
+					: addSpiralDescent(placements, cursor, travel, descentSide, currentTime);
+				floor = above;
 				travel = travel.getOpposite();
-				cursor = addCarriedEventModule(placements, cursor, travel, depth,
-					chord.subList(near, chord.size()), stepOff);
+				if (near < chord.size()) {
+					cursor = addCarriedEventModule(placements, cursor, travel, depth,
+						chord.subList(near, chord.size()), stepOff);
+				}
+				lane = Lane.straight(cursor, travel, depth);
 				lastStyle = ChordStyle.BUS;
-				tipSignal = DUST_RANGE - cells - offBus - stepOff;
-				// The far half starts where the turn left off, so its first pair of notes stands
+				tipSignal = DUST_RANGE - (cells - (near + 1) / 2) - offBus - stepOff;
+				// The far half starts where the staircase left off, so its first pair of notes stands
 				// alongside the run of powered stone the turn is made of.
 				columnBehindBusy = true;
 				laneStarted = true;
@@ -575,7 +655,7 @@ public final class SongBuilder {
 				if (!pad.cells().isEmpty()) {
 					placements.moved(event.notes().size());
 				}
-				cursor = emitPad(placements, Lane.straight(cursor, travel, depth), pad).pos();
+				lane = emitPad(placements, lane, pad);
 				spentPadding = pad.delaySpent();
 				if (above >= 0 && above < floors) {
 					// Asked of the shape the lane actually ended on, not of how many notes it held.
@@ -583,54 +663,105 @@ public final class SongBuilder {
 					// on its centre block a level lower -- and a climb that skips the two rungs it
 					// needs starts a floor above the signal and never gets it. A pad puts the wire
 					// back down on the path either way, so a padded lane never skips them.
-					cursor = climb > 0
-						? addGlassClimb(placements, cursor, travel,
+					Direction travel = lane.travel();
+					BlockPos landed = climb > 0
+						? addGlassClimb(placements, lane.pos(), travel,
 							lastStyle == ChordStyle.BUS && pad.cells().isEmpty(), currentTime)
-						: addSpiralDescent(placements, cursor, travel, descentSide, currentTime);
+						: addSpiralDescent(placements, lane.pos(), travel, descentSide, currentTime);
 					floor = above;
+					// What the staircase leaves the next lane. It matters because the next lane may
+					// want to lay dust of its own before its first repeater, and a staircase is the one
+					// handover in a build that spends wire without a repeater at either end of it.
+					// Charged at what it actually spends: a climb taken straight off a bus skips two
+					// rungs, and counting them anyway left every lane after one two blocks poorer.
+					tipSignal = pad.signal() - (climb > 0 && lastStyle == ChordStyle.BUS
+						&& pad.cells().isEmpty() ? offBus : turnCells);
+					lane = Lane.straight(landed, travel.getOpposite(), depth);
+					laneStarted = false;
+					columnBehindBusy = true;
+					// Planned here and not at the top of the next event, because this event is about to
+					// be built on the far side of the staircase -- it is the new lane's first chord.
+					// Deferring the plan by one left every lane's opening chord outside its own plan's
+					// reach: the search could book a pad in front of any chord but that one, so a lane
+					// whose opening chord was the thing that had to move came back with nothing and
+					// turned wherever it stood. The turn ahead of the new lane is a different turn from
+					// the one just built -- the floor and the direction of climb have both moved on --
+					// so it is asked again.
+					if (layout.ultra()) {
+						TurnCost next = turnCost(floor, climb, floors, slabStep);
+						// The pad before the staircase has already held some of the wait this event was
+						// going to spend on its own repeater, so the plan is told the clock has moved on
+						// by that much. Otherwise it counts columns of delay the walk will not place.
+						booked = planLane(events, index, lane.pos().getX(), lane.travel().getStepX(),
+							lane.travel() == forward ? farWall : nearWall, currentTime + spentPadding,
+							tipSignal, columnBehindBusy, next.cells(), next.offBus(), next.stepOff(),
+							layout);
+						replan = false;
+					}
 				} else {
 					// Out of floors: step the slab sideways once, and come back the way we climbed.
 					// Sized from the widest chord in the whole song rather than from the lane we
 					// happen to be leaving. A sideways step separates two slabs, and every floor of
 					// one sits beside the matching floor of the other -- so a quiet lane at the top
 					// is no promise about the chord four floors down that it would be answering for.
-					cursor = addCompactTurn(placements, cursor, travel, depth, slabStep, currentTime);
+					//
+					// And in ultra, no turn is built here at all. The route is given the two corners and
+					// the walk carries straight on into them, so this event -- and every one after it
+					// until the corners run out -- is laid along the turn by the ordinary machinery, as
+					// a chord in a lane that happens to bend. What used to be a run of dead wire paid
+					// for out of the lane's signal is now the lane, and it holds music.
+					//
+					// Ultra only, because the other lane modes are spaced on the promise that a turn is
+					// bare: their corridors sit as close as they do precisely because nothing hangs off
+					// the sideways run, and putting notes there reaches straight into the neighbour.
+					if (layout.ultra()) {
+						if (slabStep < 1 || slabStep > 13) {
+							throw new IllegalArgumentException("Compact turn distance " + slabStep
+								+ " exceeds the safe redstone range");
+						}
+						// The corner stands at the wall, however far short of it the lane has got. What
+						// fills the gap is the chord about to be built: it opens where the walk is
+						// standing, runs on into the corner and comes out the far side -- the same
+						// columns covered with music instead of with the wire a pad would have laid,
+						// and wire the next repeater would then have had to reach across.
+						//
+						// At the wall and not at the cursor. Turning where the lane happens to have got
+						// to is the version that does not work: every corridor's sideways run then sits
+						// at a different column, and the whole reason a turn can never reach a
+						// neighbouring corridor's notes is that turns occupy the same reserved columns
+						// in every corridor.
+						int toCorner = Math.max(1, columns + 1);
+						placements.turnedAt(lane.ahead(toCorner - 1).pos());
+						placements.corner(lane.ahead(toCorner).pos());
+						placements.corner(lane.ahead(toCorner + slabStep).pos());
+						boolean clockwise = lane.travel().getClockWise() == depth;
+						lane = lane.bending(List.of(new Lane.Bend(toCorner, clockwise),
+							new Lane.Bend(toCorner + slabStep, clockwise))).crowding();
+						turning = true;
+						// Nothing is spent on the corner itself: the wire crossing it is whatever the
+						// chords standing on it lay, and each of those opens with a repeater worth
+						// fifteen.
+						tipSignal = pad.signal();
+						// The plan belonged to the lane that has just ended. Inside the turn the walk
+						// places what it can where it stands, and the next lane is planned when it
+						// begins.
+						booked = Map.of();
+					} else {
+						lane = Lane.straight(addCompactTurn(placements, lane.pos(), lane.travel(), depth,
+							slabStep, currentTime), lane.travel().getOpposite(), depth);
+						tipSignal = pad.signal() - turnCells;
+						laneStarted = false;
+						columnBehindBusy = true;
+					}
 					climb = -climb;
-				}
-				// What the staircase leaves the next lane. It matters because the next lane may want
-				// to lay dust of its own before its first repeater, and a turn is the one handover in
-				// a build that spends wire without a repeater at either end of it. Charged at what this
-				// turn actually spends: a climb taken straight off a bus skips two rungs, and counting
-				// them anyway left every lane after one two blocks poorer than it was.
-				tipSignal = pad.signal() - (above >= 0 && above < floors && climb > 0
-					&& lastStyle == ChordStyle.BUS && pad.cells().isEmpty() ? offBus : turnCells);
-				travel = travel.getOpposite();
-				laneStarted = false;
-				columnBehindBusy = true;
-				// Planned here and not at the top of the next event, because this event is about to be
-				// built on the far side of the turn -- it is the new lane's first chord. Deferring the
-				// plan by one left every lane's opening chord outside its own plan's reach: the search
-				// could book a pad in front of any chord but that one, so a lane whose opening chord
-				// was the thing that had to move came back with nothing and turned wherever it stood.
-				// The turn ahead of the new lane is a different turn from the one just built -- the
-				// floor and the direction of climb have both moved on -- so it is asked again.
-				if (layout.ultra()) {
-					TurnCost next = turnCost(floor, climb, floors, slabStep);
-					// The pad before the turn has already held some of the wait this event was going to
-					// spend on its own repeater, so the plan is told the clock has moved on by that
-					// much. Otherwise it counts columns of delay the walk is not going to place.
-					booked = planLane(events, index, cursor.getX(), travel.getStepX(),
-						travel == forward ? farWall : nearWall, currentTime + spentPadding, tipSignal,
-						columnBehindBusy, next.cells(), next.offBus(), next.stepOff(), layout);
-					replan = false;
 				}
 			}
 			if (carried) {
 				// The pad's repeater has already held this event's whole wait, and everything between
 				// it and here is dust. Nothing left to time it with, and nothing needed.
 				currentTime = event.time();
-				cursor = addCarriedEventModule(placements, cursor, travel, depth, event.notes(),
-					stepOff);
+				lane = Lane.straight(addCarriedEventModule(placements, lane.pos(), lane.travel(), depth,
+					event.notes(), stepOff), lane.travel(), depth);
 				lastStyle = ChordStyle.BUS;
 				tipSignal = pad.signal() - turnCells - stepOff - (event.notes().size() + 1) / 2;
 				// A carried bus starts where the turn left off, so its first pair of notes stands where
@@ -645,7 +776,7 @@ public final class SongBuilder {
 			int owing = index > 0 && booked != null ? booked.getOrDefault(index, 0) : 0;
 			if (owing > 0) {
 				Pad early = planPad(owing, tipSignal, 1, Math.max(0, wait - 1 - spentPadding));
-				cursor = emitPad(placements, Lane.straight(cursor, travel, depth), early).pos();
+				lane = emitPad(placements, lane, early);
 				spentPadding += early.delaySpent();
 				tipSignal = early.signal();
 			}
@@ -659,8 +790,11 @@ public final class SongBuilder {
 			// Never in front of the first event of all, which has no wire arriving to lay dust from:
 			// the head of a machine is a repeater with nothing behind it, and that is how you can tell
 			// where to put the lever -- and how the reader tells where the song starts.
-			if (layout.ultra() && index > 0 && index + 1 < events.size()
+			// And never mid-turn, where the wire runs across the corridor and a wall means nothing.
+			if (layout.ultra() && !turning && index > 0 && index + 1 < events.size()
 				&& (event.notes().size() + 1) / 2 + offBus <= DUST_RANGE) {
+				Direction travel = lane.travel();
+				BlockPos cursor = lane.pos();
 				int laneWall = travel == forward ? farWall : nearWall;
 				// Where this event really ends and what it really leaves. Asked of a second piece of
 				// arithmetic before, and that one measured every chord in the shape it was sorted into
@@ -687,7 +821,11 @@ public final class SongBuilder {
 					- Math.max(0, (next.time() - event.time() - 1) / 4);
 				boolean cuttable = gap >= 2 && gap - 1 < nextCells
 					&& nextCells + offBus + stepOffAhead <= DUST_RANGE;
-				if (!cuttable && (beyond > farWall || beyond < nearWall)) {
+				// And the next chord may simply lie across the turn, in which case the gap is its to
+				// fill and filling it with wire first is exactly the mistake this pad exists to avoid.
+				boolean nextStraddles = !(above >= 0 && above < floors)
+					&& next.notes().size() <= MAX_STRADDLING_CHORD;
+				if (!cuttable && !nextStraddles && (beyond > farWall || beyond < nearWall)) {
 					int ahead = prePad(cursor.getX(), travel.getStepX(), event, wait - spentPadding,
 						columnBehindBusy, layout, laneWall,
 						(laneWall - cursor.getX()) * travel.getStepX());
@@ -699,26 +837,41 @@ public final class SongBuilder {
 					Pad front = planPad(ahead, tipSignal, 1,
 						Math.max(0, wait - 1 - spentPadding));
 					if (ahead > 0 && front.cells().size() == ahead) {
-						cursor = emitPad(placements, Lane.straight(cursor, travel, depth), front).pos();
+						lane = emitPad(placements, lane, front);
 						spentPadding += front.delaySpent();
 					}
 				}
 			}
-			SpatialDelayTrigger trigger = addSpatialDelayBeforeEvent(placements,
-				Lane.straight(cursor, travel, depth), event.time() - currentTime - spentPadding);
+			if (TRACE) {
+				System.out.println("WALK i=" + index + " t=" + event.time() + " n="
+					+ event.notes().size() + " x=" + lane.pos().getX() + " z=" + lane.pos().getZ()
+					+ " travel=" + lane.travel() + " wall=" + wall + " cols=" + columns
+					+ " wants=" + wantsTurn + " can=" + canTurn + " straddle=" + straddles
+					+ " pad=" + pad.cells().size() + " owing=" + owing + " turning=" + turning
+					+ " tip=" + tipSignal + " spent=" + spentPadding + " style=" + event.style());
+			}
+			BlockPos before = lane.pos();
+			SpatialDelayTrigger trigger = addSpatialDelayBeforeEvent(placements, lane,
+				event.time() - currentTime - spentPadding);
 			currentTime = event.time();
-			Placed placed = addChordModule(placements, trigger.cursor(), travel, depth,
-				trigger.triggerDelay(), event, !columnBehindBusy || !trigger.cursor().equals(cursor),
-				layout);
-			cursor = placed.cursor();
+			// Already clear of any corner: the delay hands back a cell a repeater may stand on, which
+			// is the one rule every repeater in the build obeys and so is applied where they are laid.
+			Lane opening = trigger.lane();
+			Placed placed = addChordModule(placements, opening, trigger.triggerDelay(), event,
+				!columnBehindBusy || !opening.pos().equals(before), turning || leavingTurn, layout);
+			leavingTurn = false;
+			lane = placed.lane();
 			columnBehindBusy = placed.stacked();
 			lastStyle = placed.style();
 			// A bus is the one module that hands the next thing along a wire rather than a block: its
 			// stones are lit by the dust running over them, and that dust has been counting down since
 			// the repeater at the head of it. Everything else ends on a block a repeater drives
 			// directly, which is worth the full fifteen to whatever touches it.
+			// Charged at the blocks the bus actually laid, not at the blocks its note count implies.
+			// A bus that had to skip slots is longer than that, and the difference is wire the next
+			// repeater never gets told about.
 			tipSignal = placed.style() == ChordStyle.BUS
-				? DUST_RANGE - (event.notes().size() + 1) / 2 : DUST_RANGE;
+				? DUST_RANGE - placed.busCells() : DUST_RANGE;
 			laneStarted = true;
 		}
 	}
@@ -1100,8 +1253,12 @@ public final class SongBuilder {
 	private static Lane emitPad(PlacementPlan placements, Lane lane, Pad pad) {
 		for (int delay : pad.cells()) {
 			if (delay == 0) {
+				placements.padded("pad");
 				addParityPad(placements, lane.pos());
 			} else {
+				placements.padded("padRepeater");
+				// A corner takes the dust and the repeater stands one along, here as everywhere else.
+				lane = pastAnyCorner(placements, lane);
 				// Stone rather than glass, because a repeater needs something to stand on -- and it is
 				// safe here where dust is not, since a repeater leaves the block under it alone.
 				set(placements, lane.pos(), "minecraft:stone");
@@ -1220,7 +1377,8 @@ public final class SongBuilder {
 				continue;
 			}
 			cursor = addSpatialEventModule(placements,
-				Lane.straight(trigger.cursor(), travel, laneStep), trigger.triggerDelay(), event.notes());
+				Lane.straight(trigger.cursor(), travel, laneStep), trigger.triggerDelay(),
+				event.notes(), false).lane().pos();
 			if (spacing != null) {
 				cursor = addCompactTurn(placements, cursor, travel, laneStep, spacing, event.time());
 				travel = travel.getOpposite();
@@ -1301,9 +1459,10 @@ public final class SongBuilder {
 				&& event.maxSafeTurnDistance() >= MAX_LANE_SPACING
 				&& (next > farWall || next < nearWall);
 			if (!turnAfter) {
-				Placed placed = addChordModule(placements, trigger.cursor(), travel, laneStep,
-					trigger.triggerDelay(), event, roomBehind, layout);
-				cursor = placed.cursor();
+				Placed placed = addChordModule(placements,
+					Lane.straight(trigger.cursor(), travel, laneStep), trigger.triggerDelay(), event,
+					roomBehind, false, layout);
+				cursor = placed.lane().pos();
 				columnBehindBusy = placed.stacked();
 				continue;
 			}
@@ -1331,8 +1490,8 @@ public final class SongBuilder {
 				columnBehindBusy = true;
 				continue;
 			}
-			cursor = addChordModule(placements, trigger.cursor(), travel, laneStep,
-				trigger.triggerDelay(), event, roomBehind, layout).cursor();
+			cursor = addChordModule(placements, Lane.straight(trigger.cursor(), travel, laneStep),
+				trigger.triggerDelay(), event, roomBehind, false, layout).lane().pos();
 			// A turn or a riser is about to be built into the block the next module would stand
 			// behind, so whatever this one did, the next one cannot stack.
 			columnBehindBusy = true;
@@ -1729,7 +1888,7 @@ public final class SongBuilder {
 		// The turn as a route rather than as a shape: one cell along, a corner, then the sideways
 		// run. Laid off the same Lane every module uses, so that when modules start being placed
 		// along here rather than plain wire, there is nothing left to teach them.
-		Lane route = turnRoute(cursor, travel, laneStep);
+		Lane route = turnRoute(cursor, travel, laneStep, laneDistance);
 		BlockPos outer = cursor.relative(travel);
 		for (int cell = 0; cell <= laneDistance + 1; cell++) {
 			layTurnFloor(placements, route.ahead(cell).pos(), time);
@@ -1743,11 +1902,20 @@ public final class SongBuilder {
 	 * <p>The note side is handed in as the way the sideways run goes, which is the direction a chord
 	 * riding the turn will find itself hanging off once the corner has rotated it -- so the corner
 	 * rotates the notes onto the travel axis, along the lane, ground this build already owns.</p>
+	 *
+	 * <p>Two corners and not one. The second is the one that used to be left implicit in the cursor
+	 * a turn handed back, and leaving it implicit is what made a turn a thing rather than a stretch
+	 * of route: with both of them stated, the route carries on past the turn into the next lane by
+	 * itself, and a chord that overruns the sideways run simply spills round the corner and keeps
+	 * going. Nothing has to know where the turn ends.</p>
 	 */
-	private static Lane turnRoute(BlockPos cursor, Direction travel, Direction laneStep) {
+	private static Lane turnRoute(BlockPos cursor, Direction travel, Direction laneStep,
+			int laneDistance) {
 		boolean clockwise = travel.getClockWise() == laneStep;
 		return Lane.straight(cursor, travel, laneStep)
-			.bending(List.of(new Lane.Bend(1, clockwise)));
+			.bending(List.of(new Lane.Bend(1, clockwise),
+				new Lane.Bend(1 + laneDistance, clockwise)))
+			.crowding();
 	}
 
 	private static void layTurnFloor(PlacementPlan placements, BlockPos position, int time) {
@@ -1759,13 +1927,40 @@ public final class SongBuilder {
 			Lane lane, int delay) {
 		int remaining = delay;
 		while (remaining > 4) {
+			lane = pastAnyCorner(placements, lane);
 			set(placements, lane.pos(), "minecraft:stone");
 			set(placements, lane.pos().above(),
 				"minecraft:repeater[facing=" + repeaterFacing(lane.travel()) + ",delay=4]");
 			lane = lane.ahead(1);
 			remaining -= 4;
 		}
-		return new SpatialDelayTrigger(lane.pos(), Math.max(1, remaining));
+		return new SpatialDelayTrigger(pastAnyCorner(placements, lane), Math.max(1, remaining));
+	}
+
+	/**
+	 * The route moved past a corner, laying the wire that carries the signal round it.
+	 *
+	 * <p>A repeater conveys power one way only: it reads the cell behind it and drives the cell in
+	 * front, both along the way it faces. A corner is the one cell where the wire arrives along one
+	 * axis and leaves along another, so a repeater standing there can only ever be fed from a
+	 * direction nothing is coming from, or drive a direction nothing is going. It is not a thing to
+	 * get right at corners -- it is a thing that must never happen at one.</p>
+	 *
+	 * <p>And it never has to. Dust turns a corner as readily as the wire does, so the corner takes
+	 * dust and the repeater goes one cell further along. Only its position moves; its delay, and so
+	 * the tick the music lands on, is untouched.</p>
+	 *
+	 * <p>Asked here, where every repeater in a walked lane is ultimately placed, rather than at each
+	 * call site. Putting it only in front of a chord's own repeater left the ones the delay lays --
+	 * one for every four ticks of silence -- free to land on a bend, which is most of the repeaters
+	 * in a slow passage.</p>
+	 */
+	private static Lane pastAnyCorner(PlacementPlan placements, Lane lane) {
+		while (lane.cornerAt(0)) {
+			placements.padded("corner");
+			lane = emitDust(placements, lane, 1);
+		}
+		return lane;
 	}
 
 	/**
@@ -1773,12 +1968,13 @@ public final class SongBuilder {
 	 *     first. Pinning it to the lane step rather than to travel -- which reverses every lane --
 	 *     is what makes {@link LaneReach} predictable enough to pack lanes closer than four apart.
 	 */
-	private static BlockPos addSpatialEventModule(PlacementPlan placements, Lane lane,
-			int triggerDelay, List<EventNote> chord) {
+	private static Body addSpatialEventModule(PlacementPlan placements, Lane lane,
+			int triggerDelay, List<EventNote> chord, boolean forceBus) {
+		lane = pastAnyCorner(placements, lane);
 		set(placements, lane.pos(), "minecraft:stone");
 		set(placements, lane.pos().above(), "minecraft:repeater[facing="
 			+ repeaterFacing(lane.travel()) + ",delay=" + triggerDelay + "]");
-		return layEventBody(placements, lane, chord);
+		return layEventBody(placements, lane, chord, forceBus);
 	}
 
 	/**
@@ -1810,6 +2006,9 @@ public final class SongBuilder {
 	 */
 	private static BlockPos addCarriedEventModule(PlacementPlan placements, BlockPos cursor,
 			Direction travel, Direction laneStep, List<EventNote> chord, int stepOff) {
+		for (int column = 0; column < stepOff; column++) {
+			placements.padded("stepOff");
+		}
 		cursor = emitDust(placements, Lane.straight(cursor, travel, laneStep), stepOff).pos();
 		// The wire arrives level with the repeater that is not there, and climbs the side of the
 		// first stone onto the dust running over it.
@@ -1853,7 +2052,8 @@ public final class SongBuilder {
 	 *     rather than to travel -- which reverses every lane -- because that is what makes
 	 *     {@link LaneReach} predictable enough to pack lanes closer than four apart.
 	 */
-	private record Lane(BlockPos pos, Direction travel, Direction noteSide, List<Bend> bends) {
+	private record Lane(BlockPos pos, Direction travel, Direction noteSide, List<Bend> bends,
+			boolean onCorner, boolean crowded) {
 
 		/**
 		 * A corner the route takes: after this many more cells, the wire turns to face a new way.
@@ -1864,12 +2064,12 @@ public final class SongBuilder {
 		}
 
 		static Lane straight(BlockPos pos, Direction travel, Direction noteSide) {
-			return new Lane(pos, travel, noteSide, List.of());
+			return new Lane(pos, travel, noteSide, List.of(), false, false);
 		}
 
 		/** The same route with corners ahead of it, at cell offsets counted from here. */
 		Lane bending(List<Bend> corners) {
-			return new Lane(pos, travel, noteSide, List.copyOf(corners));
+			return new Lane(pos, travel, noteSide, List.copyOf(corners), onCorner, crowded);
 		}
 
 		/**
@@ -1888,13 +2088,16 @@ public final class SongBuilder {
 			Direction facing = travel;
 			Direction side = noteSide;
 			List<Bend> remaining = bends;
+			boolean corner = cells == 0 && onCorner;
 			for (int step = 0; step < cells; step++) {
 				where = where.relative(facing);
+				corner = false;
 				List<Bend> next = new ArrayList<>();
 				for (Bend bend : remaining) {
 					if (bend.after() == step + 1) {
 						facing = bend.clockwise() ? facing.getClockWise() : facing.getCounterClockWise();
 						side = bend.clockwise() ? side.getClockWise() : side.getCounterClockWise();
+						corner = true;
 					} else {
 						next.add(bend);
 					}
@@ -1905,16 +2108,48 @@ public final class SongBuilder {
 			for (Bend bend : remaining) {
 				shifted.add(new Bend(bend.after() - cells, bend.clockwise()));
 			}
-			return new Lane(where, facing, side, List.copyOf(shifted));
+			return new Lane(where, facing, side, List.copyOf(shifted), corner, crowded);
 		}
 
 		Lane above() {
-			return new Lane(pos.above(), travel, noteSide, bends);
+			return new Lane(pos.above(), travel, noteSide, bends, onCorner, crowded);
 		}
 
 		/** Whether the wire changes direction at this cell, where no repeater may ever stand. */
 		boolean cornerAt(int cells) {
-			return bends.stream().anyMatch(bend -> bend.after() == cells);
+			return cells == 0 ? onCorner : bends.stream().anyMatch(bend -> bend.after() == cells);
+		}
+
+		/** Whether the route still has a corner ahead of it -- that is, whether it is mid-turn. */
+		boolean bending() {
+			return !bends.isEmpty();
+		}
+
+		/**
+		 * The same route, marked as running through ground the walk does not own outright.
+		 *
+		 * <p>Carried by every cell derived from it, and not merely by the ones with a corner still
+		 * ahead. A chord that starts on the last corner has no bend left in front of it and is very
+		 * much still in the corridor -- so asking {@link #bending()} said the coast was clear exactly
+		 * where it was not, which is a bus laying a note into a neighbour's repeater. The mark is
+		 * dropped by starting a fresh straight route, which is what the walk does when it comes out
+		 * the far side of a turn.</p>
+		 */
+		Lane crowding() {
+			return new Lane(pos, travel, noteSide, bends, onCorner, true);
+		}
+
+		/**
+		 * This same cell with its corners spent and the note side pinned back to a fixed direction.
+		 *
+		 * <p>For the moment a lane comes out of a turn. Rebuilding it with {@link #straight} instead
+		 * loses what this cell knows about itself -- and the one thing it knows is the thing that
+		 * matters here, because a route leaves a turn *standing on* the second corner. Throwing that
+		 * away put a repeater on that corner every time, which is the one place a repeater can never
+		 * go, and it did so at the exact cell the walk had just been told about.</p>
+		 */
+		Lane pinned(Direction side) {
+			return new Lane(pos, travel, side, List.of(), onCorner, crowded);
 		}
 
 		/** Where the note on one side of this cell hangs. */
@@ -1930,28 +2165,87 @@ public final class SongBuilder {
 	 */
 	private static int layBus(PlacementPlan placements, Lane anchor, List<EventNote> chord,
 			int time) {
-		int busLength = (chord.size() + 1) / 2;
-		for (int bus = 0; bus < busLength; bus++) {
-			BlockPos busPos = anchor.ahead(bus).pos();
-			placements.powered(busPos, "minecraft:stone", time);
-			set(placements, busPos.above(), "minecraft:redstone_wire");
-		}
 		List<EventNote> ordered = busOrder(chord);
-		for (int noteIndex = 0; noteIndex < ordered.size(); noteIndex++) {
-			placeNote(placements, anchor.ahead(noteIndex / 2).note(noteIndex % 2 == 0),
-				ordered.get(noteIndex));
+		int placed = 0;
+		int cells = 0;
+		// Two notes a block, unless the ground will not have one -- and then the run simply carries on
+		// a block further and hangs it there. That is what makes a bus the fallback every other shape
+		// drops to: it needs nothing of its surroundings except somewhere to put the next note, and
+		// where there is nowhere, it grows. A corner is the case that wants it. The inner slot of a
+		// bend is the cell the wire arrived from, so a bus riding round one has a slot missing, and
+		// counting the length up front is what used to make it place a note into its own wire.
+		// Asked only where the route bends. Down a straight lane the walk owns its own columns and
+		// both slots are free by construction, so asking there is answering a question nobody posed --
+		// and answering it with a check that is deliberately cautious about what counts as free, which
+		// turned buses into longer buses all over builds that had nothing wrong with them.
+		boolean crowded = anchor.crowded();
+		while (placed < ordered.size() && cells < MAX_BUS_CELLS) {
+			Lane at = anchor.ahead(cells);
+			placements.powered(at.pos(), "minecraft:stone", time);
+			set(placements, at.pos().above(), "minecraft:redstone_wire");
+			cells++;
+			for (boolean first : new boolean[] {true, false}) {
+				if (placed < ordered.size()
+						&& (!crowded || placements.freeForNote(at.note(first)))) {
+					placeNote(placements, at.note(first), ordered.get(placed++));
+				}
+			}
 		}
-		return busLength;
+		if (placed < ordered.size()) {
+			placements.trouble((ordered.size() - placed) + " notes of a chord of " + ordered.size()
+				+ " at tick " + time + " had nowhere to hang: the bus ran " + cells
+				+ " blocks and still could not find slots for them");
+		}
+		return Math.max(1, cells);
 	}
 
-	private static BlockPos layEventBody(PlacementPlan placements, Lane lane,
-			List<EventNote> chord) {
+	/**
+	 * How far a bus is allowed to grow looking for slots, which is well past what it can power.
+	 *
+	 * <p>A bus that skips slots is longer than the chord it carries, and long enough is unpowered at
+	 * the far end. The cap is not the redstone range, though: it is only there so that a bus with
+	 * nowhere at all to put its notes stops rather than runs for ever. Being past fifteen is a
+	 * complaint the layout check makes, and it should be allowed to make it.</p>
+	 */
+	private static final int MAX_BUS_CELLS = 32;
+
+	/** Scratch: one line per chord placed, for finding the first one that goes wrong. */
+	static boolean TRACE = false;
+
+	/**
+	 * The largest chord that can simply be laid across a flat turn without any help.
+	 *
+	 * <p>Ekran's number, from building them by hand. A bus is the sturdy shape: it needs nothing of
+	 * its surroundings but somewhere to put the next note, and a corner takes it as readily as a
+	 * straight lane does. So a chord this size or smaller meeting a flat turn is not a problem to be
+	 * solved -- the lane is not padded out to meet the turn, the chord is not cut in two, nothing is
+	 * planned. It is built where it stands and the turn lays whatever is left of it.</p>
+	 */
+	private static final int MAX_STRADDLING_CHORD = 28;
+
+	/**
+	 * What the wire must still be worth for a lane to take a flat turn.
+	 *
+	 * <p>A corner and the cell after it, because that is as far as the signal has to get: the chord
+	 * standing on the turn opens with a repeater, and a repeater hands out a fresh fifteen however
+	 * dead the wire arriving at it was. A staircase is charged its whole length because it must be
+	 * crossed in one unbroken run, and carrying that charge over to a turn the walk now simply walks
+	 * through is what had lanes giving up with a usable corner two blocks in front of them.</p>
+	 */
+	private static final int FLAT_TURN_REACH = 2;
+
+	private static Body layEventBody(PlacementPlan placements, Lane lane,
+			List<EventNote> chord, boolean forceBus) {
 		int time = chord.get(0).time();
-		Direction travel = lane.travel();
-		Direction laneStep = lane.noteSide();
-		BlockPos cursor = lane.pos();
-		BlockPos anchor = cursor.relative(travel).above();
-		if (chord.size() <= 3) {
+		// Asked of the route rather than worked out from the heading, so that a chord standing on a
+		// corner hangs its notes the way the wire leaves the cell and not the way it arrived.
+		Lane body = lane.ahead(1);
+		Direction laneStep = body.noteSide();
+		BlockPos anchor = body.pos().above();
+		// The shape the walk settled on, not the one the size implies. A chord of three that could
+		// not have its two side slots is handed here as a bus, and branching on the size alone built
+		// it in the shape that had just been rejected -- which is the note that lands in a neighbour.
+		if (chord.size() <= 3 && !forceBus) {
 			placeNote(placements, anchor, chord.get(0));
 			// The repeater drives the anchor directly, and a note block is a full block, so the
 			// anchor passes that power on to whatever is beside it -- including the next repeater.
@@ -1962,10 +2256,57 @@ public final class SongBuilder {
 			if (chord.size() >= 3) {
 				placeNote(placements, anchor.relative(laneStep.getOpposite()), chord.get(2));
 			}
-			return cursor.relative(travel, 2);
+			return new Body(lane.ahead(2), 0);
 		}
-		return cursor.relative(travel,
-			1 + layBus(placements, lane.ahead(1).above(), chord, time));
+		int cells = layBus(placements, lane.ahead(1).above(), chord, time);
+		return new Body(lane.ahead(1 + cells), cells);
+	}
+
+	/**
+	 * Where a module left the route, and how many blocks of bus it laid getting there.
+	 *
+	 * <p>The count matters because a bus is the one module whose length is not settled in advance.
+	 * It skips a slot the ground will not have and carries on a block further, so a chord of
+	 * twenty-six can end up seven blocks of wire poorer than the fourteen its note count implies --
+	 * and the wire it spends is charged against the fifteen a repeater hands out. Charging the
+	 * nominal length instead is a run that overshoots its next repeater and nothing notices.</p>
+	 */
+	private record Body(Lane lane, int busCells) {
+	}
+
+	/**
+	 * Whether a chord of three or fewer can be built where it stands.
+	 *
+	 * <p>The shape is rigid: the anchor is the block the repeater faces, and the second and third
+	 * notes hang off the two sides of it, at exactly those two places and nowhere else. So unlike a
+	 * bus it cannot be asked to grow past an obstruction, and asking first is the whole of what lets
+	 * the walk hand the chord to a bus instead of building it into something.</p>
+	 */
+	private static boolean smallChordFits(PlacementPlan placements, Lane lane, int notes) {
+		Lane body = lane.ahead(1);
+		BlockPos anchor = body.pos().above();
+		return slotIsFree(placements, lane, anchor)
+			&& (notes < 2 || slotIsFree(placements, lane, anchor.relative(body.noteSide())))
+			&& (notes < 3
+				|| slotIsFree(placements, lane, anchor.relative(body.noteSide().getOpposite())));
+	}
+
+	/**
+	 * Whether a note could hang here, counting the module's own repeater as something in the way.
+	 *
+	 * <p>Asked before the module is built, so the two blocks it is about to lay are not there to be
+	 * found yet. That matters at exactly one place and it is the place this is for: a chord whose
+	 * body lands on a corner has its side slots running back down the leg the wire came in on, and
+	 * the first cell of that leg is the repeater this very chord is about to stand on. The check
+	 * said the ground was clear, the module laid its repeater, and then hung a note through it.</p>
+	 *
+	 * <p>Which is the same mistake in miniature as asking whether a turn was free while the things
+	 * that fill it had not been placed: a checker answers about the world as it is, and what is
+	 * wanted is an answer about the world this module is in the middle of making.</p>
+	 */
+	private static boolean slotIsFree(PlacementPlan placements, Lane lane, BlockPos slot) {
+		return !slot.equals(lane.pos()) && !slot.equals(lane.pos().above())
+			&& placements.freeForNote(slot);
 	}
 
 	/**
@@ -1976,23 +2317,50 @@ public final class SongBuilder {
 	 * cut by only ever moving in the direction that shortens: a full stacked module that finds its
 	 * pair taken drops to a bus, and a bus that finds a turn has freed the pair takes it.</p>
 	 */
-	private static Placed addChordModule(PlacementPlan placements, BlockPos cursor, Direction travel,
-			Direction across, int triggerDelay, EventGroup event, boolean roomBehind, Layout layout) {
+	private static Placed addChordModule(PlacementPlan placements, Lane lane, int triggerDelay,
+			EventGroup event, boolean roomBehind, boolean inTurn, Layout layout) {
+		Direction travel = lane.travel();
 		ChordStyle style = event.style();
 		if (style == ChordStyle.STACKED_FULL && !roomBehind) {
 			style = ChordStyle.BUS;
 		}
+		// A stacked module may not sit perpendicular to another one, and the two modules either side
+		// of a corner are perpendicular by construction. So anywhere in a turn the stacked shape is
+		// given up and the chord is built as a bus, which minds nothing about which way its
+		// neighbours lie. The whole turn and not merely the corners, for now: which cells of a
+		// sideways run are far enough from both bends to be safe is worth working out, and worth
+		// working out after there is something to compare it against.
+		if (style.stacked() && inTurn) {
+			style = ChordStyle.BUS;
+		}
+		// And a chord of three or fewer drops too, if the ground will not take the notes where that
+		// shape insists on putting them -- which at a corner it will not, because one of the two side
+		// slots is the cell the wire came in from. A bus can put them anywhere down its length and
+		// grow until it has, so it is what every shape falls back to rather than a shape that fails.
+		if (style == ChordStyle.SMALL && lane.crowded()
+				&& !smallChordFits(placements, lane, event.notes().size())) {
+			style = ChordStyle.BUS;
+		}
+		if (TRACE) {
+			System.out.println("CHORD t=" + event.time() + " at " + lane.pos().getX() + ","
+				+ lane.pos().getY() + "," + lane.pos().getZ() + " travel=" + lane.travel()
+				+ " side=" + lane.noteSide() + " crowded=" + lane.crowded()
+				+ " bends=" + lane.bends() + " style=" + event.style() + "->" + style
+				+ " notes=" + event.notes().size());
+		}
 		if (!style.stacked()) {
-			return new Placed(addSpatialEventModule(placements, Lane.straight(cursor, travel, across),
-				triggerDelay, event.notes()), style);
+			Body body = addSpatialEventModule(placements, lane, triggerDelay, event.notes(),
+				style == ChordStyle.BUS);
+			return new Placed(body.lane(), style, body.busCells());
 		}
-		BlockPos start = cursor;
-		if (Math.floorMod(start.relative(travel).getX(), 2) != layout.centreParity()) {
-			addParityPad(placements, start);
-			start = start.relative(travel);
+		Lane start = lane;
+		if (Math.floorMod(start.pos().relative(travel).getX(), 2) != layout.centreParity()) {
+			placements.padded("parity");
+			addParityPad(placements, start.pos());
+			start = start.ahead(1);
 		}
-		return new Placed(addStackedEventModule(placements, start, travel, across, triggerDelay,
-			event.time(), ultraSlots(event.notes(), style == ChordStyle.STACKED_FULL)), style);
+		return new Placed(addStackedEventModule(placements, start, triggerDelay,
+			event.time(), ultraSlots(event.notes(), style == ChordStyle.STACKED_FULL)), style, 0);
 	}
 
 	/**
@@ -2025,7 +2393,7 @@ public final class SongBuilder {
 	 * module its measurement gave up on, and what follows -- the pair of slots left free, the level
 	 * the signal ends on -- turns on what went down, not on what was planned.</p>
 	 */
-	private record Placed(BlockPos cursor, ChordStyle style) {
+	private record Placed(Lane lane, ChordStyle style, int busCells) {
 		boolean stacked() {
 			return style.stacked();
 		}
@@ -2045,8 +2413,12 @@ public final class SongBuilder {
 	 * it is everywhere else. The four below cannot be snare, because sand needs propping and the
 	 * prop would land on the head of a note block one floor down and silence it.</p>
 	 */
-	private static BlockPos addStackedEventModule(PlacementPlan placements, BlockPos cursor,
-			Direction travel, Direction across, int triggerDelay, int time, UltraSlots slots) {
+	private static Lane addStackedEventModule(PlacementPlan placements, Lane lane,
+			int triggerDelay, int time, UltraSlots slots) {
+		lane = pastAnyCorner(placements, lane);
+		BlockPos cursor = lane.pos();
+		Direction travel = lane.travel();
+		Direction across = lane.noteSide();
 		set(placements, cursor, "minecraft:stone");
 		set(placements, cursor.above(),
 			"minecraft:repeater[facing=" + repeaterFacing(travel) + ",delay=" + triggerDelay + "]");
@@ -2079,7 +2451,7 @@ public final class SongBuilder {
 				placeNote(placements, instrument.relative(travel.getOpposite()), slots.back().get(side));
 			}
 		}
-		return cursor.relative(travel, 2);
+		return lane.ahead(2);
 	}
 
 	/**
@@ -2475,7 +2847,17 @@ public final class SongBuilder {
 	private record DelayTrigger(int cursor, int triggerDelay) {
 	}
 
-	private record SpatialDelayTrigger(BlockPos cursor, int triggerDelay) {
+	private record SpatialDelayTrigger(Lane lane, int triggerDelay) {
+
+		/**
+		 * Where the module that this delay drives begins.
+		 *
+		 * <p>The whole route and not just the point, because a delay laid inside a turn has to hand
+		 * on the corners still ahead of it: a chord placed from here bends where the wire does.</p>
+		 */
+		BlockPos cursor() {
+			return lane.pos();
+		}
 	}
 
 	enum PasteMode {
@@ -2503,7 +2885,22 @@ public final class SongBuilder {
 	 *     one. A folding build wants these in as few columns as it has walls.
 	 */
 	record PastePlan(List<String> commands, int width, int depth, int height, PasteMode mode,
-			List<String> faults, List<BlockPos> turns, List<Integer> moved, List<Integer> breaches) {
+			List<String> faults, List<BlockPos> turns, List<Integer> moved, List<Integer> breaches,
+			Map<String, Integer> padding) {
+
+		/**
+		 * Cells of lane filled with wire rather than with music, counted by what asked for them.
+		 *
+		 * <p>The number worth watching is everything that is not {@code corner}. A corner has to hold
+		 * dust because a repeater may not stand on one, so that much is the cost of turning at all.
+		 * Every other entry is a column a chord could have been standing in -- and for a song whose
+		 * every chord fits across a flat turn, built on one floor, the right total is nought.</p>
+		 */
+		int padCells() {
+			return padding.entrySet().stream()
+				.filter(entry -> !"corner".equals(entry.getKey()))
+				.mapToInt(Map.Entry::getValue).sum();
+		}
 
 		/**
 		 * Notes the layout check says would be set off a second time, at a moment nobody wrote.
@@ -2560,6 +2957,22 @@ public final class SongBuilder {
 		 * told nothing would go, which is how a paste quietly eats something already built there.</p>
 		 */
 		private final List<Integer> breaches = new ArrayList<>();
+		/** Why each cell of wire-instead-of-music was laid, so that the ones with no reason show up. */
+		private final Map<String, Integer> padding = new java.util.LinkedHashMap<>();
+		/** Route cells the wire changes direction on, where a repeater can never work. */
+		private final Set<BlockPos> corners = new java.util.HashSet<>();
+
+		void padded(String reason) {
+			if (recording) {
+				padding.merge(reason, 1, Integer::sum);
+			}
+		}
+
+		void corner(BlockPos position) {
+			if (recording) {
+				corners.add(position.immutable());
+			}
+		}
 		private int minimumX = Integer.MAX_VALUE;
 		private int minimumY = Integer.MAX_VALUE;
 		private int minimumZ = Integer.MAX_VALUE;
@@ -2579,6 +2992,7 @@ public final class SongBuilder {
 			}
 			set(position, block);
 		}
+
 
 		/** Places a block and records that the signal reaches it at {@code time}. */
 		void powered(BlockPos position, String block, int time) {
@@ -2721,6 +3135,12 @@ public final class SongBuilder {
 			if (!recording) {
 				return;
 			}
+			// Caught here rather than at each placement, because the whole point is to notice the one
+			// that got past the rule. A repeater cannot convey power round a right angle, so one
+			// standing on a corner is a broken machine however it came to be there.
+			if (block.startsWith("minecraft:repeater") && corners.contains(position.below())) {
+				padded("REPEATER-ON-CORNER");
+			}
 			BlockPos key = position.immutable();
 			String existing = blocks.putIfAbsent(key, block);
 			if (existing != null && !existing.equals(block)) {
@@ -2770,7 +3190,7 @@ public final class SongBuilder {
 			return new PastePlan(commands, Math.max(widthX, widthZ), Math.min(widthX, widthZ), height,
 				mode, List.copyOf(faults),
 				turns.stream().map(turn -> turn.offset(shiftX, 0, shiftZ)).toList(),
-				List.copyOf(moved), List.copyOf(breaches));
+				List.copyOf(moved), List.copyOf(breaches), Map.copyOf(padding));
 		}
 	}
 }
