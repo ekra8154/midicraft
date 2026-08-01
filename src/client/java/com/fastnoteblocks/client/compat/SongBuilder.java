@@ -781,8 +781,23 @@ public final class SongBuilder {
 					// short the lane has got, and the chords still to come fill the gap in between. A
 					// staircase set back from the wall stands in a column no other corridor's turn
 					// stands in, which is what reaches into the lane alongside.
-					placements.recessed(((travel == forward ? farWall : nearWall)
-						- lane.pos().getX()) * travel.getStepX());
+					int shortBy = ((travel == forward ? farWall : nearWall)
+						- lane.pos().getX()) * travel.getStepX();
+					placements.recessed(shortBy);
+					// Pinned: a descent is walked out to the wall whether the pad could afford it or
+					// not, so that every descent in the build stands in the same column as every
+					// other. What the pad would not pay for is laid as bare dust here, which is wire
+					// the signal has to cross with nothing to revive it -- so this is the experiment
+					// and the fallout is whatever the wire does about it.
+					int pinned = 0;
+					if (PIN_DESCENTS && climb < 0 && shortBy > 0
+						&& pad.signal() - shortBy - turnCells >= 0) {
+						pinned = shortBy;
+						for (int cell = 0; cell < pinned; cell++) {
+							placements.padded("padPinned");
+						}
+						lane = emitDust(placements, lane, pinned);
+					}
 					BlockPos landed = climb > 0
 						? addGlassClimb(placements, lane.pos(), travel,
 							lastStyle == ChordStyle.BUS && pad.cells().isEmpty(), currentTime)
@@ -793,7 +808,7 @@ public final class SongBuilder {
 					// handover in a build that spends wire without a repeater at either end of it.
 					// Charged at what it actually spends: a climb taken straight off a bus skips two
 					// rungs, and counting them anyway left every lane after one two blocks poorer.
-					tipSignal = pad.signal() - (climb > 0 && lastStyle == ChordStyle.BUS
+					tipSignal = pad.signal() - pinned - (climb > 0 && lastStyle == ChordStyle.BUS
 						&& pad.cells().isEmpty() ? offBus : turnCells);
 					lane = Lane.straight(landed, travel.getOpposite(), depth);
 					laneStarted = false;
@@ -2864,6 +2879,15 @@ public final class SongBuilder {
 
 	/** Scratch: one line per chord placed, for finding the first one that goes wrong. */
 	static boolean TRACE = false;
+
+	/**
+	 * Whether a descent is walked out to its wall rather than built where the lane stopped.
+	 *
+	 * <p>The experiment behind the {@code pinned-descents} branch. A recessed descent is the one
+	 * turn that stands in a column no other corridor's turn stands in, and ekran has traced wrong
+	 * notes to one twice. Pinning it costs whatever the wire cannot pay for.</p>
+	 */
+	static boolean PIN_DESCENTS = false;
 
 	/**
 	 * Whether a chord can simply be laid across a flat turn, needing nothing done for it.
