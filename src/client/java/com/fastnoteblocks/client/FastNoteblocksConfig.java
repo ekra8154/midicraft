@@ -285,6 +285,7 @@ public final class FastNoteblocksConfig {
 	private int midiMaxImportedTracks;
 	private String midiDefaultInstrument;
 	private MidiTempoFit midiTempoFit;
+	private boolean debugCommandsEnabled;
 	private int midiVelocityCutoff;
 	private int repeatMergeTicks;
 	private int conversionGapPercentile;
@@ -387,6 +388,7 @@ public final class FastNoteblocksConfig {
 				instance.midiQuantizeGrid = stored.midiQuantizeGrid == null ? MidiQuantizeGrid.AUTO : stored.midiQuantizeGrid;
 				instance.midiRangeFit = stored.midiRangeFit == null ? MidiRangeFit.OCTAVE_SHIFT : stored.midiRangeFit;
 				instance.midiIgnorePercussion = stored.midiIgnorePercussion == null || stored.midiIgnorePercussion;
+				instance.debugCommandsEnabled = Boolean.TRUE.equals(stored.debugCommandsEnabled);
 				instance.midiMaxImportedTracks = clampMidiMaxImportedTracks(
 					stored.midiMaxImportedTracks == null
 						? DEFAULT_MIDI_MAX_IMPORTED_TRACKS
@@ -897,6 +899,21 @@ public final class FastNoteblocksConfig {
 		this.midiIgnorePercussion = midiIgnorePercussion;
 	}
 
+	/**
+	 * Whether the debug commands are registered.
+	 *
+	 * <p>Off unless asked for, because what they exist to do is build a shape nobody wrote: a run of
+	 * chords of stated sizes, all one note, at a stated distance from the wall. That is how a fault
+	 * found in a real song gets cut down to the half dozen chords that actually cause it.</p>
+	 */
+	public boolean debugCommandsEnabled() {
+		return debugCommandsEnabled;
+	}
+
+	public void setDebugCommandsEnabled(boolean debugCommandsEnabled) {
+		this.debugCommandsEnabled = debugCommandsEnabled;
+	}
+
 	public int midiMaxImportedTracks() {
 		return midiMaxImportedTracks;
 	}
@@ -1024,6 +1041,7 @@ public final class FastNoteblocksConfig {
 		config.midiQuantizeGrid = MidiQuantizeGrid.AUTO;
 		config.midiRangeFit = MidiRangeFit.OCTAVE_SHIFT;
 		config.midiIgnorePercussion = true;
+		config.debugCommandsEnabled = false;
 		config.midiMaxImportedTracks = DEFAULT_MIDI_MAX_IMPORTED_TRACKS;
 		config.midiDefaultInstrument = "HARP";
 		config.midiTempoFit = MidiTempoFit.SNAP_TO_REPEATERS;
@@ -1169,6 +1187,7 @@ public final class FastNoteblocksConfig {
 		private MidiQuantizeGrid midiQuantizeGrid;
 		private MidiRangeFit midiRangeFit;
 		private Boolean midiIgnorePercussion;
+		private Boolean debugCommandsEnabled;
 		private Integer midiMaxImportedTracks;
 		private String midiDefaultInstrument;
 		private MidiTempoFit midiTempoFit;
@@ -1220,6 +1239,7 @@ public final class FastNoteblocksConfig {
 			this.midiQuantizeGrid = config.midiQuantizeGrid;
 			this.midiRangeFit = config.midiRangeFit;
 			this.midiIgnorePercussion = config.midiIgnorePercussion;
+			this.debugCommandsEnabled = config.debugCommandsEnabled;
 			this.midiMaxImportedTracks = config.midiMaxImportedTracks;
 			this.midiDefaultInstrument = config.midiDefaultInstrument;
 			this.midiTempoFit = config.midiTempoFit;

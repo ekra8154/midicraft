@@ -27,6 +27,8 @@
   "tooltip.fast-noteblocks.nearby_previews": "Shows all nearby enabled labels. When disabled, a label appears only while aiming at its position.",
   "option.fast-noteblocks.interactive_controls": "Interactive controls",
   "tooltip.fast-noteblocks.interactive_controls": "Enables scroll controls for note blocks and repeaters, including the note-selection radial.",
+  "option.fast-noteblocks.debug_commands": "Debug commands",
+  "tooltip.fast-noteblocks.debug_commands": "Adds /fastnoteblockpaste <width> <floors> [flat|up|down [turning] <columns to wall>] <chords>, which builds a run of chords you type out rather than a song. '/fastnoteblockpaste 12 1 6 2 18' builds chords of six, two and eighteen in a corridor twelve wide. A chord may be repeated with x, given its own gap with @, and given instruments with a colon: '30x4', '18@1', '7:7b'. The instrument letters are p harp (air), h hi-hat (glass, will not carry power), s snare (sand, falls) and b bell (gold), with harp for any note not named. Naming a wall shape starts the walk as though it had already climbed there, and adding 'turning' has it arrive with that wall's corners already on its route, so '36 1 flat turning 12' is a lane twelve columns short of a bend it is already committed to. Put 'dry' first to report the layout without placing anything. Every note is the same pitch.",
   "option.fast-noteblocks.radial_focus_delay": "Radial focus delay (ticks)",
   "tooltip.fast-noteblocks.radial_focus_delay": "Ticks the center label must stay under the crosshair before its radial opens and accepts scrolling. 0 opens immediately.",
   "option.fast-noteblocks.repeater_control_style": "Repeater control style",

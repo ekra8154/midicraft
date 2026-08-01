@@ -54,6 +54,13 @@ public final class FastNoteblocksConfigScreen {
 			.setTooltip(Component.translatable("tooltip.fast-noteblocks.interactive_controls"))
 			.setSaveConsumer(config::setInteractiveControlsEnabled)
 			.build());
+		general.addEntry(entries.startBooleanToggle(
+				Component.translatable("option.fast-noteblocks.debug_commands"),
+				config.debugCommandsEnabled())
+			.setDefaultValue(false)
+			.setTooltip(Component.translatable("tooltip.fast-noteblocks.debug_commands"))
+			.setSaveConsumer(config::setDebugCommandsEnabled)
+			.build());
 
 		SubCategoryBuilder controlTuning = entries.startSubCategory(
 				Component.translatable("category.fast-noteblocks.control_tuning"))
