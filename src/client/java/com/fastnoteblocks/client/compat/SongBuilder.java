@@ -696,7 +696,7 @@ public final class SongBuilder {
 			// not a tail that never fires, which does not.
 			int unpaid = Math.max(0, columns - pad.cells().size());
 			boolean reachesWall = !PIN_DESCENTS || flatAhead || climb > 0
-				|| pad.signal() - unpaid >= turnCells;
+					|| pad.signal() - unpaid >= turnCells;
 			boolean canTurn = layout.ultra()
 				? index > 0 && reachesWall && (flatAhead ? straddles && pad.signal() >= 1
 					: pad.signal()
@@ -795,7 +795,6 @@ public final class SongBuilder {
 					// stands in, which is what reaches into the lane alongside.
 					int shortBy = ((travel == forward ? farWall : nearWall)
 						- lane.pos().getX()) * travel.getStepX();
-					placements.recessed(shortBy);
 					// Pinned: a descent is walked out to the wall whether the pad could afford it or
 					// not, so that every descent in the build stands in the same column as every
 					// other. What the pad would not pay for is laid as bare dust here, which is wire
@@ -808,6 +807,14 @@ public final class SongBuilder {
 							placements.padded("padPinned");
 						}
 						lane = emitDust(placements, lane, pinned);
+					}
+					// Recorded after the pin and not before it, so this is where the staircase actually
+					// stands rather than where the lane would have left it. Told apart by direction as
+					// well: only descents are pinned, so a recessed climb is a real one and a recessed
+					// descent, on this branch, should not exist at all.
+					placements.recessed(shortBy - pinned);
+					if (shortBy - pinned > 0) {
+						placements.padded(climb > 0 ? "recessedClimb" : "recessedDescent");
 					}
 					BlockPos landed = climb > 0
 						? addGlassClimb(placements, lane.pos(), travel,
