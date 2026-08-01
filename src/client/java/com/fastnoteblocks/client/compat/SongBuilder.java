@@ -4147,6 +4147,10 @@ public final class SongBuilder {
 			// height is left alone, because that is measured from your feet and not from a wall.
 			int shiftX = minimumX == Integer.MAX_VALUE ? 0 : origin.getX() - minimumX;
 			int shiftZ = minimumZ == Integer.MAX_VALUE ? 0 : origin.getZ() - minimumZ;
+			if (TRACE) {
+				System.out.println("SHIFT x+" + shiftX + " z+" + shiftZ
+					+ " (add these to any position the walk trace prints)");
+			}
 			List<String> faults = new ArrayList<>(trouble);
 			faults.addAll(verify(shiftX, shiftZ));
 			// Every other layout is finished, so a fault in one is a bug and the build is refused.
