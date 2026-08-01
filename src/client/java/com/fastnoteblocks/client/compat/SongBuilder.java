@@ -686,9 +686,21 @@ public final class SongBuilder {
 			// slots, sixteen blocks of bus, and the last of them is past what its repeater reaches. It
 			// runs on instead and turns in front of a chord that fits, which breaches the footprint
 			// and says so, rather than building a tail that never fires and saying nothing.
+			// And where a descent is pinned, the wire has to reach the wall as well as the staircase.
+			// Pinning makes the turn absolute: the lane walks out to the wall whether the pad paid for
+			// those columns or not, so a lane allowed to hand over without the signal to cross them
+			// hands over onto dead wire. The rule the planner has always used is the one to match --
+			// {@link #closes} will only end a lane at its wall or by a cut, never on a pad that got
+			// most of the way -- and a lane refused here simply lays one more chord, whose repeater
+			// hands out a fresh fifteen, and turns after that. It costs footprint, which says so, and
+			// not a tail that never fires, which does not.
+			int unpaid = Math.max(0, columns - pad.cells().size());
+			boolean reachesWall = !PIN_DESCENTS || flatAhead || climb > 0
+				|| pad.signal() - unpaid >= turnCells;
 			boolean canTurn = layout.ultra()
-				? index > 0 && (flatAhead ? straddles && pad.signal() >= 1 : pad.signal()
-					>= (pad.cells().isEmpty() && lastStyle == ChordStyle.BUS ? offBus : turnCells))
+				? index > 0 && reachesWall && (flatAhead ? straddles && pad.signal() >= 1
+					: pad.signal()
+						>= (pad.cells().isEmpty() && lastStyle == ChordStyle.BUS ? offBus : turnCells))
 				: index > 0 && events.get(index - 1).maxSafeTurnDistance() >= MAX_LANE_SPACING;
 			int spentPadding = 0;
 			// Ahead of a staircase only, for the same reason a split is. A chord that would have been
@@ -790,8 +802,7 @@ public final class SongBuilder {
 					// the signal has to cross with nothing to revive it -- so this is the experiment
 					// and the fallout is whatever the wire does about it.
 					int pinned = 0;
-					if (PIN_DESCENTS && climb < 0 && shortBy > 0
-						&& pad.signal() - shortBy - turnCells >= 0) {
+					if (PIN_DESCENTS && climb < 0 && shortBy > 0) {
 						pinned = shortBy;
 						for (int cell = 0; cell < pinned; cell++) {
 							placements.padded("padPinned");
@@ -2887,7 +2898,7 @@ public final class SongBuilder {
 	 * turn that stands in a column no other corridor's turn stands in, and ekran has traced wrong
 	 * notes to one twice. Pinning it costs whatever the wire cannot pay for.</p>
 	 */
-	static boolean PIN_DESCENTS = false;
+	static boolean PIN_DESCENTS = true;
 
 	/**
 	 * Whether a chord can simply be laid across a flat turn, needing nothing done for it.

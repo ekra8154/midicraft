@@ -52,6 +52,8 @@ class BlitzSweepTest {
 		int realDead = 0;
 		int realWrong = 0;
 		int realBreach = 0;
+		int realBreachBlocks = 0;
+		int realWorstBreach = 0;
 		int realDropped = 0;
 		int recessLanes = 0;
 		long recessColumns = 0;
@@ -165,6 +167,8 @@ class BlitzSweepTest {
 					wrongNotes += wrongHere;
 					if (!stress && breachHere > 0) {
 						realBreach += breachHere;
+
+						for (int b : plan.breaches()) { realBreachBlocks += b; realWorstBreach = Math.max(realWorstBreach, b); }
 						breachBySong.merge(name, breachHere, Integer::sum);
 					}
 					if (!stress && wrongHere > 0) {
@@ -210,6 +214,7 @@ class BlitzSweepTest {
 		System.out.println("BLITZ cleanBuilds=" + buildsClean + " ofWhichWrong=" + buildsCleanWithWrong + " wrongNotes=" + wrongInClean);
 		System.out.println("BLITZ real: breaches=" + realBreach + " wrong=" + realWrong
 			+ " dead=" + realDead);
+		System.out.println("BLITZ realBreachBlocks=" + realBreachBlocks + " worst=" + realWorstBreach);
 		System.out.println("BLITZ padBy " + padBy);
 		System.out.println("BLITZ wrongBySong " + wrongBySong);
 		System.out.println("BLITZ wrongKind " + wrongKind + " real " + wrongKindReal);
