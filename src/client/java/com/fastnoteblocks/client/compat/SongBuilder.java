@@ -923,7 +923,28 @@ public final class SongBuilder {
 				boolean nextStraddles = !(above >= 0 && above < floors)
 					&& straddleFits(next.notes().size(), (laneWall - end) * travel.getStepX(),
 						slabStep);
-				if (!cuttable && !nextStraddles && (beyond > farWall || beyond < nearWall)) {
+				// And only when the pad behind could not have done it. Both pads fill the same gap
+				// with the same columns; the one in front is preferred because this event's own
+				// repeater then stands between the pad and the staircase and hands it a fresh
+				// fifteen, where the pad behind is paid for out of whatever the event left. That is
+				// a real reason, but it is only a reason where the event has left too little -- and
+				// the pad in front was taken whenever it was available rather than whenever it was
+				// needed.
+				//
+				// Which is not free, because a pad in front is not only wire. planPad buys a
+				// repeater when dust alone will not reach, and a repeater costs a tick out of the
+				// wait -- 1,071 of them over the library. Every one changes spentPadding, and so the
+				// next event's wait, and so where it lands. Ekran's reading: chord one pads, chord
+				// two sees the room that bought and pads in turn, and a preference cascades down the
+				// lane as though it were a requirement.
+				Pad behind = planPad((laneWall - end) * travel.getStepX(), reached.tip(),
+					reached.style() == ChordStyle.BUS ? offBus : turnCells,
+					Math.max(0, next.time() - event.time() - 1));
+				boolean behindReaches = (laneWall - end) * travel.getStepX() >= 0
+					&& behind.cells().size() == (laneWall - end) * travel.getStepX()
+					&& behind.signal() >= (reached.style() == ChordStyle.BUS ? offBus : turnCells);
+				if (!cuttable && !nextStraddles && !behindReaches
+						&& (beyond > farWall || beyond < nearWall)) {
 					int ahead = prePad(cursor.getX(), travel.getStepX(), event, wait - spentPadding,
 						columnBehindBusy, layout, laneWall,
 						(laneWall - cursor.getX()) * travel.getStepX());
