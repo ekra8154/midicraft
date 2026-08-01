@@ -180,6 +180,9 @@ class BlitzSweepTest {
 					for (String command : plan.commands()) {
 						String block = command.split(" ")[4];
 						if (block.startsWith("minecraft:redstone_wire")) {
+							// Not the stacked module's cross: it sits under the centre block, off the
+							// signal path, and counting it made 27 sound builds look dead.
+							if (block.startsWith("minecraft:redstone_wire[")) { continue; }
 							dust++;
 							continue;
 						}

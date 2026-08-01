@@ -7,14 +7,15 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Set;
+import java.util.TreeMap;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.Bootstrap;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
-/** Scratch probe: the run of sixteen the slot-order change put into fast-and-dense. */
-class FastDenseTraceTest {
+/** Scratch probe: the blocks of the lane that breaches in Do The Dance at 28 wide, 2 floors. */
+class IllitBreachMapTest {
 	@BeforeAll
 	static void bootstrapMinecraft() {
 		SharedConstants.tryDetectVersion();
@@ -22,7 +23,7 @@ class FastDenseTraceTest {
 	}
 
 	@Test
-	void traces() throws Exception {
+	void dumps() throws Exception {
 		Path file = Path.of("run", "config", "fast-noteblocks", "songs",
 			"illit-do-the-dance.json");
 		ComposerProject song;
@@ -34,28 +35,25 @@ class FastDenseTraceTest {
 		}
 		List<SongBuilder.EventNote> notes =
 			SongBuilder.eventNotes(song.toSequenceTracks(Set.of(), true));
-		SongBuilder.TRACE = true;
 		SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0), notes,
 			SongBuilder.PasteMode.ULTRA_COMPACT_LANE, new SongBuilder.BuildLimits(4, 28, 2));
-		SongBuilder.TRACE = false;
-		int dust = 0;
-		String from = "start";
-		for (String command : plan.commands()) {
-			String[] parts = command.split(" ");
-			String where = parts[1] + " " + parts[2] + " " + parts[3];
-			if (parts[4].startsWith("minecraft:redstone_wire")) {
-				dust++;
-				continue;
+		for (int y = 70; y >= 67; y--) {
+			System.out.println("ILLIT y=" + y + "   x=15..20");
+			for (int z = 105; z <= 107; z++) {
+				StringBuilder row = new StringBuilder("ILLIT  z=" + z + " ");
+				for (int x = 15; x <= 20; x++) {
+					String found = ".";
+					for (String command : plan.commands()) {
+						String[] parts = command.split(" ");
+						if (Integer.parseInt(parts[1]) == x && Integer.parseInt(parts[2]) == y
+								&& Integer.parseInt(parts[3]) == z) {
+							found = parts[4].replace("minecraft:", "");
+						}
+					}
+					row.append(String.format(" %-22s", found));
+				}
+				System.out.println(row);
 			}
-			if (!parts[4].startsWith("minecraft:repeater")) {
-				continue;
-			}
-			if (dust > 15) {
-				System.out.println("FD !!! run of " + dust + " from [" + from + "] to [" + where + "]");
-			}
-			dust = 0;
-			from = where;
 		}
-		System.out.println("FD padding=" + plan.padding());
 	}
 }

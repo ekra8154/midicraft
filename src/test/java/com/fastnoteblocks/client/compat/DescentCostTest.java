@@ -5,9 +5,9 @@ import com.google.gson.Gson;
 import java.io.Reader;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.stream.Stream;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
@@ -15,25 +15,25 @@ import net.minecraft.server.Bootstrap;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
-/** Scratch probe: every run of dust longer than fifteen, with the coordinates it runs between. */
-class DeadWireProbeTest {
+/** Scratch probe: how many blocks of wire a descent really spends, counted off the built blocks. */
+class DescentCostTest {
 	@BeforeAll
 	static void bootstrapMinecraft() {
 		SharedConstants.tryDetectVersion();
 		Bootstrap.bootStrap();
 	}
 
-	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
-
 	@Test
-	void findsDeadRuns() throws Exception {
+	void counts() throws Exception {
 		List<Path> files;
-		try (Stream<Path> listing = Files.list(SONGS)) {
+		try (Stream<Path> listing = Files.list(
+				Path.of("run", "config", "fast-noteblocks", "songs"))) {
 			files = listing.filter(path -> path.toString().endsWith(".json")).sorted().toList();
 		}
 		Gson gson = new Gson();
+		TreeMap<Integer, Integer> descents = new TreeMap<>();
+		TreeMap<Integer, Integer> climbs = new TreeMap<>();
 		for (Path file : files) {
-			String name = file.getFileName().toString().replace(".json", "");
 			ComposerProject song;
 			try (Reader reader = Files.newBufferedReader(file)) {
 				ComposerProject raw = gson.fromJson(reader, ComposerProject.class);
@@ -46,8 +46,9 @@ class DeadWireProbeTest {
 			if (notes.isEmpty()) {
 				continue;
 			}
-			for (int floors = 1; floors <= 6; floors++) {
-				for (int width = 12; width <= 48; width += 4) {
+			if (!file.getFileName().toString().startsWith("illit")) { continue; }
+			for (int floors = 2; floors <= 2; floors++) {
+				for (int width = 24; width <= 24; width += 8) {
 					SongBuilder.PastePlan plan;
 					try {
 						plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0), notes,
@@ -56,36 +57,36 @@ class DeadWireProbeTest {
 					} catch (RuntimeException refused) {
 						continue;
 					}
-					List<String> run = new ArrayList<>();
-					String from = "start";
+					int dust = 0;
+					int fromY = Integer.MIN_VALUE;
 					for (String command : plan.commands()) {
 						String[] parts = command.split(" ");
-						String block = parts[4];
-						String where = parts[1] + " " + parts[2] + " " + parts[3];
-						if (block.startsWith("minecraft:redstone_wire")) {
-							// Not the stacked module's cross: it sits under the centre block, off the
-							// signal path, and counting it made 27 sound builds look dead.
-							if (block.startsWith("minecraft:redstone_wire[")) { continue; }
-							run.add(where);
+						int y = Integer.parseInt(parts[2]);
+						if (parts[4].startsWith("minecraft:redstone_wire")) {
+							dust++;
 							continue;
 						}
-						if (!block.startsWith("minecraft:repeater")) {
+						if (!parts[4].startsWith("minecraft:repeater")) {
 							continue;
 						}
-						if (run.size() > 15) {
-							System.out.println("DEAD " + name + " floors=" + floors
-								+ " width=" + width + " dust=" + run.size()
-								+ " from=[" + from + "] to=[" + where + "]");
-							for (int step = 0; step < run.size(); step++) {
-								System.out.println("DEAD   " + (15 - step) + " at " + run.get(step));
+						if (fromY != Integer.MIN_VALUE && dust > 0) {
+							// Only runs that actually cross a floor, and only the shortest of them:
+							// the shortest is the one whose pad was nothing, which is the staircase
+							// on its own.
+							if (y - fromY <= -4) {
+								descents.merge(dust, 1, Integer::sum);
+								if (dust == 5) { System.out.println("COST 5-dust descent ending at repeater " + parts[1] + " " + parts[2] + " " + parts[3]); }
+							} else if (y - fromY >= 4) {
+								climbs.merge(dust, 1, Integer::sum);
 							}
 						}
-						run.clear();
-						from = where;
+						dust = 0;
+						fromY = y;
 					}
 				}
 			}
 		}
-		System.out.println("DEAD done");
+		System.out.println("COST descent runs by length " + descents);
+		System.out.println("COST climb runs by length " + climbs);
 	}
 }

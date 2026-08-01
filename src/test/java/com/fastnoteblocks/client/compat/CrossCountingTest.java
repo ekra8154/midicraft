@@ -5,7 +5,6 @@ import com.google.gson.Gson;
 import java.io.Reader;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Stream;
@@ -15,25 +14,36 @@ import net.minecraft.server.Bootstrap;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
-/** Scratch probe: every run of dust longer than fifteen, with the coordinates it runs between. */
-class DeadWireProbeTest {
+/**
+ * Scratch probe: does the dead-wire count change when the stacked module's cross is not counted?
+ *
+ * <p>The cross sits under the module's centre block, not on the signal path -- the path is repeater,
+ * note block, next cell. But it is a redstone_wire like any other, so a run measured by counting
+ * wire between repeaters counts it. If every "dead" run only reaches sixteen by including a cross,
+ * the runs are fine and the probe is wrong.</p>
+ */
+class CrossCountingTest {
 	@BeforeAll
 	static void bootstrapMinecraft() {
 		SharedConstants.tryDetectVersion();
 		Bootstrap.bootStrap();
 	}
 
-	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
+	private static boolean isCross(String block) {
+		return block.startsWith("minecraft:redstone_wire[");
+	}
 
 	@Test
-	void findsDeadRuns() throws Exception {
+	void counts() throws Exception {
 		List<Path> files;
-		try (Stream<Path> listing = Files.list(SONGS)) {
+		try (Stream<Path> listing = Files.list(
+				Path.of("run", "config", "fast-noteblocks", "songs"))) {
 			files = listing.filter(path -> path.toString().endsWith(".json")).sorted().toList();
 		}
 		Gson gson = new Gson();
+		int deadCounting = 0;
+		int deadIgnoringCross = 0;
 		for (Path file : files) {
-			String name = file.getFileName().toString().replace(".json", "");
 			ComposerProject song;
 			try (Reader reader = Files.newBufferedReader(file)) {
 				ComposerProject raw = gson.fromJson(reader, ComposerProject.class);
@@ -56,36 +66,37 @@ class DeadWireProbeTest {
 					} catch (RuntimeException refused) {
 						continue;
 					}
-					List<String> run = new ArrayList<>();
-					String from = "start";
+					int all = 0;
+					int noCross = 0;
+					boolean deadAll = false;
+					boolean deadNo = false;
 					for (String command : plan.commands()) {
-						String[] parts = command.split(" ");
-						String block = parts[4];
-						String where = parts[1] + " " + parts[2] + " " + parts[3];
+						String block = command.split(" ")[4];
 						if (block.startsWith("minecraft:redstone_wire")) {
-							// Not the stacked module's cross: it sits under the centre block, off the
-							// signal path, and counting it made 27 sound builds look dead.
-							if (block.startsWith("minecraft:redstone_wire[")) { continue; }
-							run.add(where);
+							all++;
+							if (!isCross(block)) {
+								noCross++;
+							}
 							continue;
 						}
 						if (!block.startsWith("minecraft:repeater")) {
 							continue;
 						}
-						if (run.size() > 15) {
-							System.out.println("DEAD " + name + " floors=" + floors
-								+ " width=" + width + " dust=" + run.size()
-								+ " from=[" + from + "] to=[" + where + "]");
-							for (int step = 0; step < run.size(); step++) {
-								System.out.println("DEAD   " + (15 - step) + " at " + run.get(step));
-							}
-						}
-						run.clear();
-						from = where;
+						deadAll |= all > 15;
+						deadNo |= noCross > 15;
+						all = 0;
+						noCross = 0;
+					}
+					if (deadAll) {
+						deadCounting++;
+					}
+					if (deadNo) {
+						deadIgnoringCross++;
 					}
 				}
 			}
 		}
-		System.out.println("DEAD done");
+		System.out.println("CROSS dead counting every wire   = " + deadCounting);
+		System.out.println("CROSS dead ignoring the cross    = " + deadIgnoringCross);
 	}
 }
