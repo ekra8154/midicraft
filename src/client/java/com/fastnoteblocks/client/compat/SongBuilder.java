@@ -1240,8 +1240,16 @@ public final class SongBuilder {
 		} else {
 			length = delayColumns + (style == ChordStyle.BUS ? 1 + cells : 2);
 		}
+		// The same three cases the walk charges, and for the same reasons. A stacked module ends on
+		// the cell of dust its outer column relays through, and that cell is the first of the fifteen
+		// rather than a free block in front of them -- which the walk has known since it was found on
+		// Do The Dance, and this has not. Planning against a wire one block stronger than the lane
+		// will really have is a pad that comes up one column short of the wall, and a lane that then
+		// cannot turn lays another chord and breaches instead.
 		return new Landing(startX + stepX * length,
-			style == ChordStyle.BUS ? DUST_RANGE - cells : DUST_RANGE, style.stacked(), style);
+			style == ChordStyle.BUS ? DUST_RANGE - cells
+				: style.stacked() ? DUST_RANGE - STACKED_RELAY : DUST_RANGE,
+			style.stacked(), style);
 	}
 
 	/**
