@@ -695,8 +695,10 @@ public final class SongBuilder {
 			// hands out a fresh fifteen, and turns after that. It costs footprint, which says so, and
 			// not a tail that never fires, which does not.
 			int unpaid = Math.max(0, columns - pad.cells().size());
-			boolean reachesWall = !PIN_DESCENTS || flatAhead || climb > 0
-					|| pad.signal() - unpaid >= turnCells;
+				int turnCost = pad.cells().isEmpty() && unpaid == 0 && lastStyle == ChordStyle.BUS
+					? offBus : turnCells;
+				boolean reachesWall = !PIN_DESCENTS || flatAhead
+					|| pad.signal() - unpaid >= turnCost;
 			boolean canTurn = layout.ultra()
 				? index > 0 && reachesWall && (flatAhead ? straddles && pad.signal() >= 1
 					: pad.signal()
@@ -801,7 +803,7 @@ public final class SongBuilder {
 					// the signal has to cross with nothing to revive it -- so this is the experiment
 					// and the fallout is whatever the wire does about it.
 					int pinned = 0;
-					if (PIN_DESCENTS && climb < 0 && shortBy > 0) {
+					if (PIN_DESCENTS && shortBy > 0) {
 						pinned = shortBy;
 						for (int cell = 0; cell < pinned; cell++) {
 							placements.padded("padPinned");
