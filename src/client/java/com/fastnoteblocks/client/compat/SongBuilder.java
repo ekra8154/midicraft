@@ -713,14 +713,6 @@ public final class SongBuilder {
 			// number of wasted columns and nothing like the same problem. Recorded here beside the
 			// breach for the reason the breach is recorded here: it is the moment the lane's extent
 			// stops changing.
-			// Once for the turn, not once for every event that still wants one. A lane goes on wanting
-			// to turn for as long as it is turning -- the walk carries straight on through both
-			// corners -- so counting where the wish is asked counts the same turn five or six times
-			// over. {@code !turning} is the edge: the moment a lane that was running becomes a lane
-			// that is bending.
-			if (layout.ultra() && wantsTurn && canTurn && !turning && columns > 0) {
-				placements.recessed(columns);
-			}
 			if (layout.ultra() && wantsTurn && canTurn && !onWall && !split && !carried
 					&& !straddles) {
 				placements.trouble("a lane turned " + columns + " columns short of its wall at tick "
@@ -738,6 +730,10 @@ public final class SongBuilder {
 				int near = 2 * (room - 1);
 				BlockPos cursor = addSplitEventModule(placements, trigger.cursor(), travel, depth,
 					trigger.triggerDelay(), chord.subList(0, near));
+				// Measured from where the staircase actually lands, which for a split is past the near
+				// half of the chord rather than where the lane stood when it decided to split.
+				placements.recessed(((travel == forward ? farWall : nearWall) - cursor.getX())
+					* travel.getStepX());
 				cursor = climb > 0
 					? addGlassClimb(placements, cursor, travel, true, currentTime)
 					: addSpiralDescent(placements, cursor, travel, descentSide, currentTime);
@@ -780,6 +776,13 @@ public final class SongBuilder {
 					// needs starts a floor above the signal and never gets it. A pad puts the wire
 					// back down on the path either way, so a padded lane never skips them.
 					Direction travel = lane.travel();
+					// A staircase is built where the walk is standing, so this is the one turn that can
+					// be recessed. A flat turn cannot: its corner is pinned to the wall however far
+					// short the lane has got, and the chords still to come fill the gap in between. A
+					// staircase set back from the wall stands in a column no other corridor's turn
+					// stands in, which is what reaches into the lane alongside.
+					placements.recessed(((travel == forward ? farWall : nearWall)
+						- lane.pos().getX()) * travel.getStepX());
 					BlockPos landed = climb > 0
 						? addGlassClimb(placements, lane.pos(), travel,
 							lastStyle == ChordStyle.BUS && pad.cells().isEmpty(), currentTime)
