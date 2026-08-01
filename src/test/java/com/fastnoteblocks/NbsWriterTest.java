@@ -69,6 +69,25 @@ class NbsWriterTest {
 			"and each tick's notes in layer order");
 	}
 
+	/**
+	 * The failure that shipped: two notes on one layer at one tick write a layer jump of nought,
+	 * and nought is the byte that ends the tick. The file does not come out wrong, it comes out
+	 * unreadable -- everything past that point is read as structure. Note Block Studio reported it
+	 * as reading past the end of its buffer; our own reader called it an unexpected end of file.
+	 */
+	@Test
+	void refusesTwoNotesOnOneLayerAtOneTick() {
+		NbsSong song = new NbsSong(header(0, 1), List.of(
+			new NbsSong.Note(0, 0, 0, 45, 100, 100, 0),
+			new NbsSong.Note(0, 0, 0, 49, 100, 100, 0)),
+			List.of(new NbsSong.Layer(0, "Lead", 0, 100, 100)), List.of());
+
+		IllegalArgumentException refused = org.junit.jupiter.api.Assertions.assertThrows(
+			IllegalArgumentException.class, () -> NbsWriter.toBytes(song));
+		assertTrue(refused.getMessage().contains("one note per layer per tick"),
+			"the refusal should say why: " + refused.getMessage());
+	}
+
 	@Test
 	void writesAnEmptySongThatStillReads() throws Exception {
 		NbsSong read = NbsReader.read(NbsWriter.toBytes(

@@ -43,8 +43,8 @@ final class NbsExporter {
 		int pastTheEnd = 0;
 		int remappedInstruments = 0;
 
-		for (int index = 0; index < project.layers().size(); index++) {
-			ComposerProject.Layer layer = project.layers().get(index);
+		int spilled = 0;
+		for (ComposerProject.Layer layer : project.layers()) {
 			int instrument = instrumentId(layer.instrument());
 			if (instrument < 0) {
 				// Beyond the sixteen Note Block Studio knows. Written as a piano so the file opens
@@ -52,21 +52,43 @@ final class NbsExporter {
 				instrument = 0;
 				remappedInstruments++;
 			}
-			layers.add(new NbsSong.Layer(index, layer.name(), 0, layer.muted() ? 0 : 100, 100));
+			// NBS holds one note per layer per tick, and a composer layer holds chords. So a layer
+			// here becomes as many layers there as its thickest chord has notes: the first voice in
+			// the layer proper, the rest in layers beside it. That is what Note Block Studio does
+			// with a chord too, which is why a song imported from it arrives spread the same way.
+			//
+			// Getting this wrong does not produce a wrong note, it produces an unreadable file: two
+			// notes on one tick in one layer write a layer jump of nought, and nought is the byte
+			// that means "no more notes on this tick". Everything after it is read as structure and
+			// the file dissolves. Ekran found it the moment a real song went through -- Note Block
+			// Studio read past the end of its buffer, and so did we.
+			int base = layers.size();
+			int voices = 0;
+			java.util.Map<Integer, Integer> takenAt = new java.util.HashMap<>();
 			for (ComposerProject.NoteEvent note : layer.notes()) {
 				long tick = note.startTick() / scale;
 				if (tick > NbsWriter.maxTick()) {
 					pastTheEnd++;
 					continue;
 				}
+				int voice = takenAt.merge((int)tick, 1, Integer::sum) - 1;
+				if (voice > 0) {
+					spilled++;
+				}
+				voices = Math.max(voices, voice + 1);
 				int key = note.midiNote() - NBS_LOWEST_MIDI_NOTE;
 				if (key < 0 || key > NBS_HIGHEST_KEY) {
 					outsideKeyRange++;
 				}
-				notes.add(new NbsSong.Note((int)tick, index, instrument,
+				notes.add(new NbsSong.Note((int)tick, base + voice, instrument,
 					Math.max(0, Math.min(255, key)),
 					Math.max(0, Math.min(100, Math.round(note.velocity() * 100.0f / 127.0f))),
 					100, 0));
+			}
+			for (int voice = 0; voice < Math.max(1, voices); voice++) {
+				layers.add(new NbsSong.Layer(base + voice,
+					voice == 0 ? layer.name() : layer.name() + " " + (voice + 1),
+					0, layer.muted() ? 0 : 100, 100));
 			}
 		}
 
@@ -100,6 +122,11 @@ final class NbsExporter {
 		if (pastTheEnd > 0) {
 			report.append("; ").append(pastTheEnd)
 				.append(" past tick ").append(NbsWriter.maxTick()).append(" and left out");
+		}
+		if (spilled > 0) {
+			report.append("; ").append(spilled)
+				.append(spilled == 1 ? " chord note" : " chord notes")
+				.append(" moved to layers alongside, which is how NBS holds a chord");
 		}
 		return new Result(path, report.toString());
 	}

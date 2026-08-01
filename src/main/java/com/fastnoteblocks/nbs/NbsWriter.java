@@ -77,6 +77,17 @@ public final class NbsWriter {
 			int lastLayer = -1;
 			while (index < notes.size() && notes.get(index).tick() == tick) {
 				NbsSong.Note note = notes.get(index);
+				// One note per layer per tick, and it is not a preference. A second note on the same
+				// layer and tick has a jump of nought to the one before it, and nought is the byte
+				// that ends the tick -- so the file does not come out wrong, it comes out
+				// unreadable, and everything after this point is read as structure. Refused here
+				// rather than written, because the caller can spread a chord across layers and the
+				// format cannot.
+				if (note.layer() == lastLayer) {
+					throw new IllegalArgumentException("Two notes on layer " + note.layer()
+						+ " at tick " + tick + ". NBS holds one note per layer per tick, so a "
+						+ "chord has to be spread across layers before it is written.");
+				}
 				out.shortValue(note.layer() - lastLayer);
 				lastLayer = note.layer();
 				out.byteValue(note.instrument());

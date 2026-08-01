@@ -97,6 +97,33 @@ class NbsExporterTest {
 			read.header().ticksPerSecond(), 0.001);
 	}
 
+	/**
+	 * A chord inside one composer layer, which is the shape that broke the first version.
+	 *
+	 * <p>NBS holds one note per layer per tick, so a layer here becomes as many layers there as its
+	 * thickest chord has notes. Getting it wrong did not write a wrong note -- it wrote a file
+	 * neither Note Block Studio nor our own reader could get through.</p>
+	 */
+	@Test
+	void spreadsAChordAcrossLayersAlongside(@TempDir Path folder) throws Exception {
+		ComposerProject source = project(List.of(new ComposerProject.Layer("Lead", "HARP",
+			false, true, true, List.of(note(1, 60, 0), note(2, 64, 0), note(3, 67, 0),
+				note(4, 72, 480)))));
+
+		NbsExporter.Result result = NbsExporter.export(source, folder.resolve("chord.nbs"));
+		NbsSong read = NbsReader.read(result.path());
+
+		assertEquals(4, read.notes().size(), "every note of the chord should survive");
+		assertEquals(List.of(0, 0, 0, 4), read.notes().stream().map(NbsSong.Note::tick).toList());
+		assertEquals(List.of(0, 1, 2, 0), read.notes().stream().map(NbsSong.Note::layer).toList(),
+			"the chord spreads sideways and the later note goes back to the first layer");
+		assertEquals(List.of(39, 43, 46, 51),
+			read.notes().stream().map(NbsSong.Note::key).toList());
+		assertEquals(3, read.layers().size(), "three voices means three layers");
+		assertTrue(result.report().contains("chord notes moved"),
+			"and the report should say so: " + result.report());
+	}
+
 	@Test
 	void marksAMutedLayerMuted(@TempDir Path folder) throws Exception {
 		ComposerProject source = project(List.of(
