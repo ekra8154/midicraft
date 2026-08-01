@@ -52,7 +52,7 @@ class BreachTraceTest {
 	}
 
 	@Test
-	void bigShotThreeTwelve() throws Exception {
-		trace("big-shot", 3, 12);
+	void illitSixTwenty() throws Exception {
+		trace("illit-do-the-dance", 6, 20);
 	}
 }
