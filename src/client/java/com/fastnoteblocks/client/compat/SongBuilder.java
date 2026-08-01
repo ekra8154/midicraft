@@ -705,6 +705,22 @@ public final class SongBuilder {
 			if (layout.ultra() && wantsTurn && canTurn && columns < 0) {
 				placements.breached(-columns);
 			}
+			// And the other side of the same measurement. A lane that hands over short of its wall
+			// leaves that many columns of corridor holding nothing, and puts its staircase or its
+			// sideways run somewhere no other lane's is -- which is the recessed turn that reaches
+			// into the neighbour it was never meant to touch. Counted in columns rather than in lanes,
+			// because one lane eleven columns short and eleven lanes one column short are the same
+			// number of wasted columns and nothing like the same problem. Recorded here beside the
+			// breach for the reason the breach is recorded here: it is the moment the lane's extent
+			// stops changing.
+			// Once for the turn, not once for every event that still wants one. A lane goes on wanting
+			// to turn for as long as it is turning -- the walk carries straight on through both
+			// corners -- so counting where the wish is asked counts the same turn five or six times
+			// over. {@code !turning} is the edge: the moment a lane that was running becomes a lane
+			// that is bending.
+			if (layout.ultra() && wantsTurn && canTurn && !turning && columns > 0) {
+				placements.recessed(columns);
+			}
 			if (layout.ultra() && wantsTurn && canTurn && !onWall && !split && !carried
 					&& !straddles) {
 				placements.trouble("a lane turned " + columns + " columns short of its wall at tick "
@@ -3716,7 +3732,7 @@ public final class SongBuilder {
 	 */
 	record PastePlan(List<String> commands, int width, int depth, int height, PasteMode mode,
 			List<String> faults, List<BlockPos> turns, List<Integer> moved, List<Integer> breaches,
-			Map<String, Integer> padding) {
+			List<Integer> recesses, Map<String, Integer> padding) {
 
 		/**
 		 * Cells of lane filled with wire rather than with music, counted by what asked for them.
@@ -3747,6 +3763,16 @@ public final class SongBuilder {
 		/** How far past the promised width the worst-behaved lane went, in blocks. */
 		int worstBreach() {
 			return breaches.stream().mapToInt(Integer::intValue).max().orElse(0);
+		}
+
+		/** Columns of corridor left empty by lanes that handed over before reaching their wall. */
+		int recessedColumns() {
+			return recesses.stream().mapToInt(Integer::intValue).sum();
+		}
+
+		/** How far inside its wall the worst-recessed lane turned, in columns. */
+		int worstRecess() {
+			return recesses.stream().mapToInt(Integer::intValue).max().orElse(0);
 		}
 	}
 
@@ -3787,6 +3813,17 @@ public final class SongBuilder {
 		 * told nothing would go, which is how a paste quietly eats something already built there.</p>
 		 */
 		private final List<Integer> breaches = new ArrayList<>();
+		/**
+		 * Columns by which a lane stopped short of its wall, one per lane that did.
+		 *
+		 * <p>The other half of a breach, and worth as much watching. A short lane wastes the columns
+		 * it never reached, but the expensive part is where it leaves the turn: a staircase that comes
+		 * down inside the corridor instead of at the wall stands where no other lane's does, and the
+		 * lane beside it hangs its notes into ground that is suddenly live. Ekran has traced two
+		 * separate wrong-note faults to exactly that and asked for the source treated rather than the
+		 * symptom, which needs the source counted first.</p>
+		 */
+		private final List<Integer> recesses = new ArrayList<>();
 		/** Why each cell of wire-instead-of-music was laid, so that the ones with no reason show up. */
 		private final Map<String, Integer> padding = new java.util.LinkedHashMap<>();
 		/** Route cells the wire changes direction on, where a repeater can never work. */
@@ -3928,6 +3965,12 @@ public final class SongBuilder {
 		void breached(int blocks) {
 			if (recording && blocks > 0) {
 				breaches.add(blocks);
+			}
+		}
+
+		void recessed(int columns) {
+			if (recording && columns > 0) {
+				recesses.add(columns);
 			}
 		}
 
@@ -4074,7 +4117,8 @@ public final class SongBuilder {
 			return new PastePlan(commands, Math.max(widthX, widthZ), Math.min(widthX, widthZ), height,
 				mode, List.copyOf(faults),
 				turns.stream().map(turn -> turn.offset(shiftX, 0, shiftZ)).toList(),
-				List.copyOf(moved), List.copyOf(breaches), Map.copyOf(padding));
+				List.copyOf(moved), List.copyOf(breaches), List.copyOf(recesses),
+				Map.copyOf(padding));
 		}
 	}
 }
