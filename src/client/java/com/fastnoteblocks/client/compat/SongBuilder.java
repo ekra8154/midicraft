@@ -557,7 +557,7 @@ public final class SongBuilder {
 				booked = above >= 0 && above < floors
 					? planLane(events, index, lane.pos().getX(), lane.travel().getStepX(), wall,
 						currentTime, tipSignal, columnBehindBusy, turnCells, offBus, stepOffAhead,
-						layout)
+						layout, turning || leavingTurn)
 					: Map.of();
 				replan = false;
 			}
@@ -584,7 +584,7 @@ public final class SongBuilder {
 			// behind it spoken for is built as a bus instead, and a bus is longer -- so a lane could
 			// be told a chord fitted, build it, and land a column past its own wall.
 			Landing here = landingOf(lane.pos().getX(), lane.travel().getStepX(), event, wait,
-				columnBehindBusy, wall, layout);
+				columnBehindBusy, wall, layout, turning || leavingTurn);
 			int landing = here.end() + lane.travel().getStepX() * reserve;
 			// Never while the route is still bending. Inside a turn the wire runs across the corridor
 			// rather than along it, so every one of these measurements is taken down the wrong axis --
@@ -854,7 +854,7 @@ public final class SongBuilder {
 						booked = planLane(events, index, lane.pos().getX(), lane.travel().getStepX(),
 							lane.travel() == forward ? farWall : nearWall, currentTime + spentPadding,
 							tipSignal, columnBehindBusy, next.cells(), next.offBus(), next.stepOff(),
-							layout);
+							layout, turning || leavingTurn);
 						replan = false;
 					}
 				} else {
@@ -941,11 +941,12 @@ public final class SongBuilder {
 			// against somebody else's tick. Measured both ways: clamping regardless cost 11 wrong
 			// notes to save 2 breaches.
 			if (owing > 0 && (landingOf(lane.pos().getX(), lane.travel().getStepX(), event,
-					wait - spentPadding, columnBehindBusy, wall, layout).end() - wall)
+					wait - spentPadding, columnBehindBusy, wall, layout, turning || leavingTurn).end() - wall)
 					* lane.travel().getStepX() <= 0) {
 				while (owing > 0 && (landingOf(lane.pos().getX() + lane.travel().getStepX() * owing,
 						lane.travel().getStepX(), event, wait - spentPadding, columnBehindBusy, wall,
-						layout).end() - wall) * lane.travel().getStepX() > 0) {
+						layout, turning || leavingTurn).end() - wall)
+						* lane.travel().getStepX() > 0) {
 					owing--;
 				}
 			}
@@ -1026,11 +1027,11 @@ public final class SongBuilder {
 				// booked to lay early has moved the cursor since, and the ticks it spent have come off
 				// the wait -- so the event no longer starts where it did or carries the delay it did.
 				Landing reached = landingOf(cursor.getX(), travel.getStepX(), event,
-					wait - spentPadding, columnBehindBusy, laneWall, layout);
+					wait - spentPadding, columnBehindBusy, laneWall, layout, turning || leavingTurn);
 				int end = reached.end();
 				EventGroup next = events.get(index + 1);
 				int beyond = landingOf(end, travel.getStepX(), next, next.time() - event.time(),
-					reached.busy(), laneWall, layout).end()
+					reached.busy(), laneWall, layout, false).end()
 					+ travel.getStepX() * turnReserve(next, turnCells, layout);
 				// Unless the chord that will not fit can be cut across the turn, in which case the gap
 				// is its to fill. A cut costs nothing and fills the columns with music; a pad fills the
@@ -1072,7 +1073,7 @@ public final class SongBuilder {
 						&& (beyond > farWall || beyond < nearWall)) {
 					int ahead = prePad(cursor.getX(), travel.getStepX(), event, wait - spentPadding,
 						columnBehindBusy, layout, laneWall,
-						(laneWall - cursor.getX()) * travel.getStepX());
+						(laneWall - cursor.getX()) * travel.getStepX(), turning || leavingTurn);
 					// Planned like the pad behind, and for the same reason: dust in front of an event
 					// spends the same wire dust behind it does, so a lane wanting a dozen columns off a
 					// wire worth eight laid what it could and stopped short of the wall anyway. What is
@@ -1225,10 +1226,21 @@ public final class SongBuilder {
 	}
 
 	private static Landing landingOf(int startX, int stepX, EventGroup event, int wait, boolean busy,
-			int wall, Layout layout) {
+			int wall, Layout layout, boolean inTurn) {
 		int delayColumns = Math.max(0, (wait - 1) / 4);
 		ChordStyle style = event.style() == ChordStyle.STACKED_FULL && busy && delayColumns == 0
 			? ChordStyle.BUS : event.style();
+		// And a chord being built in a turn, or stepping off the far side of one, is a bus whatever
+		// shape it was sorted into: a stacked module may not sit perpendicular to another, and the two
+		// modules either side of a corner are perpendicular by construction. {@link #addChordModule}
+		// has always known that and this did not, so the first chord of every lane leaving a flat
+		// corner was measured at two columns and built at four or five. Big Shot at twelve wide is a
+		// five-note chord measured for two, built as a bus over four, and a bus of nineteen behind it
+		// with one column too few -- the lane came to rest a column outside its wall having been
+		// planned to land flush on it.
+		if (style.stacked() && inTurn) {
+			style = ChordStyle.BUS;
+		}
 		int cells = (event.notes().size() + 1) / 2;
 		// A stacked module too near the wall to be nudged is built as a bus instead, and a bus of the
 		// same chord is longer. Predicted here as well as decided there, because when only the walk
@@ -1268,9 +1280,18 @@ public final class SongBuilder {
 	 */
 	private static Map<Integer, Integer> planLane(List<EventGroup> events, int from, int startX,
 			int stepX, int wall, int startTime, int tip, boolean busy, int turnCells, int offBus,
-			int stepOff, Layout layout) {
+			int stepOff, Layout layout, boolean leaving) {
 		Sweep bare = sweep(events, from, startX, stepX, wall, startTime, tip, busy, offBus, layout,
-			Map.of());
+			Map.of(), leaving);
+		if (TRACE) {
+			System.out.println("PLAN from=" + from + " x=" + startX + " step=" + stepX + " wall="
+				+ wall + " tip=" + tip + " busy=" + busy + " turnCells=" + turnCells + " offBus="
+				+ offBus + " stepOff=" + stepOff + " bareLast=" + bare.last() + " barePast="
+				+ bare.past() + " ends=" + bare.ends() + " tips=" + bare.tips() + " room="
+				+ bare.room() + " closes="
+				+ (bare.last() >= from && closes(events, bare, from, bare.last(), wall, stepX,
+					turnCells, offBus, stepOff)));
+		}
 		if (bare.last() < from
 			|| closes(events, bare, from, bare.last(), wall, stepX, turnCells, offBus, stepOff)) {
 			return Map.of();
@@ -1281,7 +1302,7 @@ public final class SongBuilder {
 			Map<Integer, Integer> pads = new LinkedHashMap<>();
 			for (int attempt = 0; attempt < 8; attempt++) {
 				Sweep tried = sweep(events, from, startX, stepX, wall, startTime, tip, busy, offBus, layout,
-					pads);
+					pads, leaving);
 				if (tried.last() < last) {
 					break;
 				}
@@ -1300,6 +1321,11 @@ public final class SongBuilder {
 				Pad end = closingPad(events, tried, from, last, owing, turnCells);
 				int need = end.cells().isEmpty()
 					&& tried.styles().get(last - from) == ChordStyle.BUS ? offBus : turnCells;
+				if (TRACE) {
+					System.out.println("  TRY last=" + last + " attempt=" + attempt + " pads=" + pads
+						+ " triedLast=" + tried.last() + " owing=" + owing + " padCells="
+						+ end.cells().size() + " padSignal=" + end.signal() + " need=" + need);
+				}
 				if (end.cells().size() == owing && end.signal() >= need) {
 					return Map.copyOf(pads);
 				}
@@ -1344,7 +1370,7 @@ public final class SongBuilder {
 			return Map.of();
 		}
 		Sweep padded = sweep(events, from, startX, stepX, wall, startTime, tip, busy, offBus, layout,
-			most);
+			most, leaving);
 		if (padded.last() < bare.last() || padded.past() > bare.past()) {
 			return Map.of();
 		}
@@ -1366,7 +1392,7 @@ public final class SongBuilder {
 
 	private static Sweep sweep(List<EventGroup> events, int from, int startX, int stepX, int wall,
 			int startTime, int tip, boolean busy, int offBus, Layout layout,
-			Map<Integer, Integer> pads) {
+			Map<Integer, Integer> pads, boolean leaving) {
 		List<Integer> ends = new ArrayList<>();
 		List<Integer> tips = new ArrayList<>();
 		List<ChordStyle> styles = new ArrayList<>();
@@ -1380,7 +1406,8 @@ public final class SongBuilder {
 			int wait = event.time() - time;
 			int pad = pads.getOrDefault(index, 0);
 			room.add(planPad(DUST_RANGE * 2, tip, 1, Math.max(0, wait - 1)).cells().size() - pad);
-			Landing landed = landingOf(cursor + stepX * pad, stepX, event, wait, busy, wall, layout);
+			Landing landed = landingOf(cursor + stepX * pad, stepX, event, wait, busy, wall, layout,
+				index == from && leaving);
 			// Kept back the same column the walk keeps back. A bus that would leave the wire too weak
 			// to reach the top of the staircase is asked to stop one column short, so the pad has
 			// somewhere to stand the repeater that revives it. The walk has always done that and the
@@ -1581,9 +1608,10 @@ public final class SongBuilder {
 	 * @return the pad, or -1 if no pad within the limit lands the event on the wall
 	 */
 	private static int prePad(int startX, int stepX, EventGroup event, int wait, boolean busy,
-			Layout layout, int wall, int limit) {
+			Layout layout, int wall, int limit, boolean inTurn) {
 		for (int pad = 0; pad <= limit; pad++) {
-			if (landingOf(startX + stepX * pad, stepX, event, wait, busy, wall, layout).end() == wall) {
+			if (landingOf(startX + stepX * pad, stepX, event, wait, busy, wall, layout, inTurn)
+					.end() == wall) {
 				return pad;
 			}
 		}
