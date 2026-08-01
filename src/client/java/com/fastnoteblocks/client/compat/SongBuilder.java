@@ -849,7 +849,7 @@ public final class SongBuilder {
 			}
 			if (owing > 0) {
 				Pad early = planPad(owing, tipSignal, 1, Math.max(0, wait - 1 - spentPadding));
-				lane = emitPad(placements, lane, early);
+				lane = emitPad(placements, lane, early, "padBooked");
 				spentPadding += early.delaySpent();
 				tipSignal = early.signal();
 			}
@@ -935,7 +935,7 @@ public final class SongBuilder {
 					Pad front = planPad(ahead, tipSignal, 1,
 						Math.max(0, wait - 1 - spentPadding));
 					if (ahead > 0 && front.cells().size() == ahead) {
-						lane = emitPad(placements, lane, front);
+						lane = emitPad(placements, lane, front, "padAhead");
 						spentPadding += front.delaySpent();
 					}
 				}
@@ -1407,12 +1407,21 @@ public final class SongBuilder {
 
 	/** Lays a planned pad down, and hands back the block the turn now starts on. */
 	private static Lane emitPad(PlacementPlan placements, Lane lane, Pad pad) {
+		return emitPad(placements, lane, pad, "padClosing");
+	}
+
+	/**
+	 * @param why which of the three pads this is. They are laid for quite different reasons and the
+	 *     census could not tell them apart, which made the one number that matters most for
+	 *     compactness -- how much lane is filled with wire rather than music -- impossible to aim at.
+	 */
+	private static Lane emitPad(PlacementPlan placements, Lane lane, Pad pad, String why) {
 		for (int delay : pad.cells()) {
 			if (delay == 0) {
-				placements.padded("pad");
+				placements.padded(why);
 				addParityPad(placements, lane.pos());
 			} else {
-				placements.padded("padRepeater");
+				placements.padded(why + "Repeater");
 				// A corner takes the dust and the repeater stands one along, here as everywhere else.
 				lane = pastAnyCorner(placements, lane);
 				// Stone rather than glass, because a repeater needs something to stand on -- and it is
