@@ -803,7 +803,12 @@ public final class SongBuilder {
 					// the signal has to cross with nothing to revive it -- so this is the experiment
 					// and the fallout is whatever the wire does about it.
 					int pinned = 0;
-					if (PIN_DESCENTS && shortBy > 0) {
+					// Ultra only. The other lane modes share this walk once they have more than one
+					// floor, and their corridors are spaced on the promise that a turn is bare -- so
+					// walking one out to the wall puts powered stone where a neighbour's notes are
+					// entitled to be. COMPACT_LANE read one of its own notes back wrong the moment
+					// this was let loose on it.
+					if (PIN_DESCENTS && layout.ultra() && shortBy > 0) {
 						pinned = shortBy;
 						for (int cell = 0; cell < pinned; cell++) {
 							placements.padded("padPinned");
