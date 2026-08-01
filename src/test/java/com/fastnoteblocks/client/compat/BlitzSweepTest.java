@@ -44,6 +44,8 @@ class BlitzSweepTest {
 		long padWasted = 0;
 		long corners = 0;
 		int breaches = 0;
+		int breachBlocks = 0;
+		int worstBreach = 0;
 		int shortLanes = 0;
 		int wrongNotes = 0;
 		int dropped = 0;
@@ -164,6 +166,14 @@ class BlitzSweepTest {
 					else { buildsClean++; wrongInClean += wrongHere; if (wrongHere > 0) { buildsCleanWithWrong++; } }
 
 					breaches += breachHere;
+					// Columns as well as lanes. A breach is measured in the ground it covers that the
+					// player was promised it would not, so one lane nine columns out and nine lanes one
+					// column out are the same count and nothing like the same problem -- the same reason
+					// recesses are counted in columns.
+					for (int b : plan.breaches()) {
+						breachBlocks += b;
+						worstBreach = Math.max(worstBreach, b);
+					}
 					wrongNotes += wrongHere;
 					if (!stress && breachHere > 0) {
 						realBreach += breachHere;
@@ -217,6 +227,7 @@ class BlitzSweepTest {
 		System.out.println("BLITZ cleanBuilds=" + buildsClean + " ofWhichWrong=" + buildsCleanWithWrong + " wrongNotes=" + wrongInClean);
 		System.out.println("BLITZ real: breaches=" + realBreach + " wrong=" + realWrong
 			+ " dead=" + realDead);
+		System.out.println("BLITZ breachBlocks=" + breachBlocks + " worst=" + worstBreach);
 		System.out.println("BLITZ realBreachBlocks=" + realBreachBlocks + " worst=" + realWorstBreach);
 		System.out.println("BLITZ padBy " + padBy);
 		System.out.println("BLITZ wrongBySong " + wrongBySong);

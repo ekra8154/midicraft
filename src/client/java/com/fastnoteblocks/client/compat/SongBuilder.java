@@ -1328,6 +1328,15 @@ public final class SongBuilder {
 		// past it. Booked blind that way it cost 39 breaches to save 3 dead runs. So the plan is swept
 		// again with the pad in it and kept only if the lane is genuinely better for it -- nearer its
 		// wall, still short of it, and still holding every chord it held before.
+		//
+		// And never at the cost of the chord that ends the lane. This is the branch where the lane
+		// does not close, and a lane that does not close still has to lay the chord that beat it --
+		// past its wall, because that is what "does not close" means. Pad moves that chord along with
+		// everything else, so a pad bought to bring the staircase a column nearer the wall pushes the
+		// breach a column further past it. Both halves of Do The Dance's worst breach were this: a
+		// single column booked in front of a five-note chord, and a bus of twenty two columns out
+		// instead of one. So the sweep is asked where that chord lands as well as where the lane
+		// stops, and a pad that costs the breach more than it saves the staircase is not taken.
 		int owed = (wall - bare.ends().get(bare.last() - from)) * stepX;
 		Map<Integer, Integer> most = new LinkedHashMap<>();
 		book(most, bare, from, bare.last(), owed);
@@ -1336,16 +1345,23 @@ public final class SongBuilder {
 		}
 		Sweep padded = sweep(events, from, startX, stepX, wall, startTime, tip, busy, offBus, layout,
 			most);
-		if (padded.last() < bare.last()) {
+		if (padded.last() < bare.last() || padded.past() > bare.past()) {
 			return Map.of();
 		}
 		int left = (wall - padded.ends().get(padded.last() - from)) * stepX;
 		return left >= 0 && left < owed ? Map.copyOf(most) : Map.of();
 	}
 
-	/** A lane walked on paper: where each event ends, what it leaves, and what its gap could hold. */
+	/**
+	 * A lane walked on paper: where each event ends, what it leaves, and what its gap could hold.
+	 *
+	 * <p>{@code past} is the one thing here that is not about the lane's own chords: it is how far
+	 * beyond the wall the first chord that would not fit comes to rest. That chord is the lane's
+	 * problem even though it is not the lane's chord -- when nothing closes the lane, the walk lays
+	 * it anyway and the columns it covers past the wall are the breach.</p>
+	 */
 	private record Sweep(List<Integer> ends, List<Integer> tips, List<ChordStyle> styles,
-			List<Integer> room, int last) {
+			List<Integer> room, int last, int past) {
 	}
 
 	private static Sweep sweep(List<EventGroup> events, int from, int startX, int stepX, int wall,
@@ -1358,6 +1374,7 @@ public final class SongBuilder {
 		int cursor = startX;
 		int time = startTime;
 		int last = from - 1;
+		int past = 0;
 		for (int index = from; index < events.size(); index++) {
 			EventGroup event = events.get(index);
 			int wait = event.time() - time;
@@ -1370,6 +1387,11 @@ public final class SongBuilder {
 			// sweep did not, so the planner counted chords into a lane the walk then refused to put
 			// there, and the two disagreed about which chords the lane even held.
 			if ((landed.end() + stepX * turnReserve(event, offBus, layout) - wall) * stepX > 0) {
+				// Where that chord would come to rest if it were laid regardless, which is what the walk
+				// does when nothing closes the lane. Measured from the chord's own end and not from its
+				// turn reserve: the reserve is room the lane wanted to keep, and a chord laid over it
+				// breaches by what it actually covers.
+				past = Math.max(0, (landed.end() - wall) * stepX);
 				break;
 			}
 			ends.add(landed.end());
@@ -1381,7 +1403,7 @@ public final class SongBuilder {
 			time = event.time();
 			last = index;
 		}
-		return new Sweep(ends, tips, styles, room, last);
+		return new Sweep(ends, tips, styles, room, last, past);
 	}
 
 	/**
