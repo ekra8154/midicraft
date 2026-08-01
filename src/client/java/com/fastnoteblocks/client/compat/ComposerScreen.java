@@ -10,6 +10,8 @@ import com.fastnoteblocks.client.composer.ComposerProject.MinecraftConversion;
 import com.fastnoteblocks.client.composer.ComposerProject.NoteEvent;
 import com.fastnoteblocks.client.composer.ComposerProject.PasteResult;
 import com.mojang.blaze3d.platform.InputConstants;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashSet;
@@ -756,6 +758,43 @@ public final class ComposerScreen extends Screen {
 		withUnsavedChangesChecked(() -> minecraft.gui.setScreen(new SongsScreen(parent, config)));
 	}
 
+	/**
+	 * Writes what is open out as a Note Block Studio file.
+	 *
+	 * <p>No unsaved-changes check, and deliberately: an export reads the composition and writes
+	 * somewhere else entirely, so there is nothing of yours it can lose. It exports what is on the
+	 * screen rather than what is on disk, which is the whole point of being able to do it before
+	 * saving.</p>
+	 *
+	 * <p>Written beside the files imports are read from, because that is the folder the player
+	 * already thinks of as where songs come from and go.</p>
+	 */
+	private void exportAsNbs() {
+		minecraft.gui.setScreen(new NamePromptScreen(this, "Export as .nbs",
+			"Write \"" + project().name() + "\" to " + config.importDirectory(),
+			project().name(), "Export", name -> {
+				String wanted = name.trim().isEmpty() ? project().name() : name.trim();
+				try {
+					Path folder = Path.of(config.importDirectory());
+					Files.createDirectories(folder);
+					NbsExporter.Result written = NbsExporter.export(project(),
+						folder.resolve(safeFileName(wanted) + ".nbs"));
+					showResult(Component.literal("Exported to " + written.path()
+						+ " - " + written.report()));
+				} catch (Exception failed) {
+					SongImports.showFailure(this, failed);
+					return;
+				}
+				minecraft.gui.setScreen(this);
+			}));
+	}
+
+	/** A name a filesystem will take, with the characters no filesystem takes turned into spaces. */
+	private static String safeFileName(String name) {
+		String cleaned = name.replaceAll("[\\\\/:*?\"<>|]", " ").replaceAll("\\s+", " ").trim();
+		return cleaned.isEmpty() ? "composition" : cleaned;
+	}
+
 	/** Opens what was read as a document of its own. Nothing already saved is touched. */
 	private void applyImportedProject(SongImports.Imported imported) {
 		SongImports.open(parent, config, onReturn, imported);
@@ -1060,6 +1099,7 @@ public final class ComposerScreen extends Screen {
 			case IMPORT_SCHEMATIC -> importSchematic();
 			case OPEN_SONGS -> openSongs();
 			case RENAME_COMPOSITION -> renameComposition();
+			case EXPORT_NBS -> exportAsNbs();
 			case COPY_AS_TEXT -> copySequenceAsText();
 			case INCLUDE_SELECTED -> setIncludedLayers(true);
 			case SET_INCLUDED_TO_SELECTION -> setIncludedLayers(false);
@@ -1264,6 +1304,10 @@ public final class ComposerScreen extends Screen {
 				+ "the old MCEdit .schematic stores pre-1.13 numbered blocks and cannot be read.";
 			case OPEN_SONGS -> "The song library: open another composition, start one, or make a "
 				+ "copy.";
+			case EXPORT_NBS -> "Writes this composition to a .nbs file that Note Block Studio and "
+				+ "other tools can open, in the same folder imports are read from. Exports what "
+				+ "is on screen, saved or not. Instruments outside NBS's sixteen are written as "
+				+ "harp, and the report says how many were.";
 			case COPY_AS_TEXT -> "Puts the build sequence on the clipboard, one line per included "
 				+ "layer. Out-of-range notes and sub-tick timing do not survive the trip.";
 			case SAVE_COMPOSITION -> "Writes this composition to its own file. Nothing else does: "
@@ -3954,6 +3998,7 @@ public final class ComposerScreen extends Screen {
 		SCAN_WORLD("Scan a build from the world as a new song..."),
 		IMPORT_SCHEMATIC("Import a schematic as a new song..."),
 		OPEN_SONGS("Open composition..."),
+		EXPORT_NBS("Export as .nbs..."),
 		COPY_AS_TEXT("Copy sequence as text"),
 		SAVE_COMPOSITION("Save composition"),
 		SAVE_COMPOSITION_AS("Save composition as..."),
@@ -3985,7 +4030,8 @@ public final class ComposerScreen extends Screen {
 
 		private static final ToolbarAction[] FILE_ACTIONS = {
 			SAVE_COMPOSITION, SAVE_COMPOSITION_AS, RENAME_COMPOSITION, OPEN_SONGS, IMPORT,
-			IMPORT_SCHEMATIC, SCAN_WORLD, COPY_AS_TEXT, BACK_TO_SEQUENCES, CLOSE_TO_GAME
+			IMPORT_SCHEMATIC, SCAN_WORLD, EXPORT_NBS, COPY_AS_TEXT, BACK_TO_SEQUENCES,
+			CLOSE_TO_GAME
 		};
 		private static final ToolbarAction[] EDIT_ACTIONS = {
 			UNDO, REDO, CONVERT, MERGE_REPEATS,

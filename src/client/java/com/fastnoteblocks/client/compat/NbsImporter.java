@@ -27,7 +27,12 @@ final class NbsImporter {
 	 * The tempo formula below cancels this factor out exactly, leaving playback speed unchanged.
 	 */
 	private static final int NBS_TICK_SCALE = ComposerProject.DEFAULT_PPQ / 4;
-	private static final String[] VANILLA_INSTRUMENTS = {
+	/**
+	 * Package-private rather than private so {@link NbsExporter} can read the same table backwards.
+	 * Two copies of this list is two lists that can disagree, and a disagreement here is a song that
+	 * exports as the wrong instrument and imports back as a third.
+	 */
+	static final String[] VANILLA_INSTRUMENTS = {
 		"HARP", "BASS", "BASEDRUM", "SNARE", "HAT", "GUITAR", "FLUTE", "BELL",
 		"CHIME", "XYLOPHONE", "IRON_XYLOPHONE", "COW_BELL", "DIDGERIDOO", "BIT", "BANJO", "PLING",
 		"TRUMPET", "TRUMPET_EXPOSED", "TRUMPET_WEATHERED", "TRUMPET_OXIDIZED"
