@@ -1134,9 +1134,14 @@ public final class SongBuilder {
 			// them. Handing on the whole fifteen let a lane lay fifteen more cells after it and land
 			// the last one at nought, which is the exact width of a dead line: sixteen blocks of wire
 			// where the budget said fifteen. Ekran found it on Do The Dance.
+			// A stacked module hands on the whole fifteen, exactly as a chord of three does. Its one
+			// cell of dust is the cross *underneath* the centre block, feeding the two side relays;
+			// the signal path over the top is repeater, centre block, next cell, and a centre block
+			// driven by a repeater is a solid block strongly powered, so the cell after it reads
+			// fifteen. Ekran measured it with lamps: fifteen lit from the module, in and out.
 			tipSignal = placed.style() == ChordStyle.BUS
 				? DUST_RANGE - placed.busCells()
-				: placed.stacked() ? DUST_RANGE - STACKED_RELAY : DUST_RANGE;
+				: DUST_RANGE;
 			laneStarted = true;
 			placedWhileTurning |= turning;
 		}
@@ -1240,16 +1245,10 @@ public final class SongBuilder {
 		} else {
 			length = delayColumns + (style == ChordStyle.BUS ? 1 + cells : 2);
 		}
-		// The same three cases the walk charges, and for the same reasons. A stacked module ends on
-		// the cell of dust its outer column relays through, and that cell is the first of the fifteen
-		// rather than a free block in front of them -- which the walk has known since it was found on
-		// Do The Dance, and this has not. Planning against a wire one block stronger than the lane
-		// will really have is a pad that comes up one column short of the wall, and a lane that then
-		// cannot turn lays another chord and breaches instead.
+		// The same two cases the walk charges: a bus spends a cell a note pair, and everything else
+		// hands on the whole fifteen.
 		return new Landing(startX + stepX * length,
-			style == ChordStyle.BUS ? DUST_RANGE - cells
-				: style.stacked() ? DUST_RANGE - STACKED_RELAY : DUST_RANGE,
-			style.stacked(), style);
+			style == ChordStyle.BUS ? DUST_RANGE - cells : DUST_RANGE, style.stacked(), style);
 	}
 
 	/**
@@ -2883,15 +2882,6 @@ public final class SongBuilder {
 
 	/** Cells of lane a stacked module stands in: the repeater it opens with, and its centre. */
 	private static final int STACKED_CELLS = 2;
-
-	/**
-	 * The cell of dust a stacked module leaves the wire standing on.
-	 *
-	 * <p>Its outer column relays through one block of dust rather than ending on a block a repeater
-	 * drives, so that block is the first of the fifteen a repeater hands out and not a free one in
-	 * front of them.</p>
-	 */
-	private static final int STACKED_RELAY = 1;
 
 	/**
 	 * The cell a chord pays for the bend it stops in front of.
