@@ -2389,8 +2389,12 @@ public final class SongBuilder {
 		String note = placements.describeBlock(inside);
 		Integer when = placements.noteTime(inside);
 		String instrument = placements.describeBlock(inside.below());
-		if (!note.startsWith("minecraft:note_block") || when == null
-				|| instrument.startsWith("minecraft:air") || "-".equals(instrument)) {
+		// Air under the note is not a reason to refuse. Air under a note block *is* harp -- the block
+		// below only names the instrument, and anything unrecognised already plays one, so harp is
+		// written as air and costs nothing. Reading that as "no instrument here" meant the swap could
+		// never take a harp note, which is to say it could never take the commonest note there is.
+		// Nothing recorded at all is still a refusal: that is a cell the plan has never heard of.
+		if (!note.startsWith("minecraft:note_block") || when == null || "-".equals(instrument)) {
 			if (TRACE) {
 				System.out.println("SWAPNO inside=" + inside.getX() + " " + inside.getY() + " "
 					+ inside.getZ() + " holds " + note + " over " + instrument + " when=" + when);
