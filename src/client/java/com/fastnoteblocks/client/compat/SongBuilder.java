@@ -266,6 +266,30 @@ public final class SongBuilder {
 	 * mode -- not just the two that happen not to consult the config -- be planned and read back in
 	 * a test.</p>
 	 */
+	/**
+	 * Where a wall walk begins, which is at the head of the song unless something says otherwise.
+	 *
+	 * <p>Exists for the debug command, and for one reason: the shape of the wall a chord meets is not
+	 * something a song can ask for. It falls out of how many floors there are and how far the walk has
+	 * already climbed -- a build starts on floor nought going up, so the first wall is a climb, and a
+	 * descent only happens once the floors run out and the direction flips. Reproducing a fault that
+	 * happens on a descent therefore meant building every lane in front of it first.</p>
+	 *
+	 * <p>Seeding those three numbers instead says "start as though you had". Nothing in a real paste
+	 * passes anything but {@link #HEAD}, and with {@link #HEAD} the walk is the walk it always was.</p>
+	 *
+	 * @param column how far along its first lane the walk starts. The walls are still measured from
+	 *     the origin, so this is what puts a chord a stated distance from one.
+	 * @param climb which way the next wall goes, +1 or -1
+	 */
+	record WalkStart(int column, int floor, int climb, boolean turning) {
+		static final WalkStart HEAD = new WalkStart(0, 0, 1, false);
+
+		WalkStart(int column, int floor, int climb) {
+			this(column, floor, climb, false);
+		}
+	}
+
 	record BuildLimits(int maxFloors, int laneWidth, int laneFloors) {
 		static BuildLimits fromConfig() {
 			FastNoteblocksConfig config = FastNoteblocksConfig.get();
@@ -286,6 +310,11 @@ public final class SongBuilder {
 
 	static PastePlan createPastePlan(BlockPos origin, List<EventNote> notes, PasteMode mode,
 			BuildLimits limits) {
+		return createPastePlan(origin, notes, mode, limits, WalkStart.HEAD);
+	}
+
+	static PastePlan createPastePlan(BlockPos origin, List<EventNote> notes, PasteMode mode,
+			BuildLimits limits, WalkStart start) {
 		if (notes.isEmpty()) {
 			throw new IllegalArgumentException(
 				"The build sequence is empty. Move some layers into it first.");
@@ -299,9 +328,10 @@ public final class SongBuilder {
 			case COMPACT_CUBE -> createCubePastePlan(origin, forward, notes, limits.maxFloors());
 			case COMPACT -> createCompactPastePlan(origin, forward, notes);
 			case COMPACT_LANE -> createLanePastePlan(origin, forward, notes, limits.laneWidth(),
-				limits.laneFloors(), Layout.STANDARD, PasteMode.COMPACT_LANE);
+				limits.laneFloors(), Layout.STANDARD, PasteMode.COMPACT_LANE, start);
 			case ULTRA_COMPACT_LANE -> createLanePastePlan(origin, forward, notes, limits.laneWidth(),
-				limits.laneFloors(), Layout.ultra(limits.laneFloors(), origin), PasteMode.ULTRA_COMPACT_LANE);
+				limits.laneFloors(), Layout.ultra(limits.laneFloors(), origin),
+				PasteMode.ULTRA_COMPACT_LANE, start);
 			case LANE -> createStraightPastePlan(origin, forward, notes);
 		};
 	}
@@ -368,7 +398,8 @@ public final class SongBuilder {
 	 * densest and 64% worse on the sparsest, and it is the sparse ones that are already long.</p>
 	 */
 	private static PastePlan createLanePastePlan(BlockPos origin, Direction forward,
-			List<EventNote> notes, int width, int floors, Layout layout, PasteMode mode) {
+			List<EventNote> notes, int width, int floors, Layout layout, PasteMode mode,
+			WalkStart start) {
 		List<EventGroup> events = eventGroups(notes, layout);
 		// Two blocks of the width go on the fold itself: the turn steps one past the end of a lane
 		// and a corner carrying notes reaches one past that. The wall still has to clear the longest
@@ -386,7 +417,7 @@ public final class SongBuilder {
 		if (floors <= 1 && !layout.ultra()) {
 			walkFolded(events, origin, forward, laneWidth, Integer.MAX_VALUE, placements, layout);
 		} else {
-			walkWall(events, origin, forward, laneWidth, floors, placements, layout);
+			walkWall(events, origin, forward, laneWidth, floors, placements, layout, start);
 		}
 		return placements.finish(mode, origin);
 	}
@@ -407,7 +438,7 @@ public final class SongBuilder {
 	 * be sized to what the lanes hold.</p>
 	 */
 	private static void walkWall(List<EventGroup> events, BlockPos origin, Direction forward,
-			int laneWidth, int floors, PlacementPlan placements, Layout layout) {
+			int laneWidth, int floors, PlacementPlan placements, Layout layout, WalkStart start) {
 		// Where chords grow, and the direction the whole slab creeps once a sweep is done.
 		Direction depth = forward.getClockWise();
 		// The walk's whole position: where it stands, which way the wire is running, and any corners
@@ -419,9 +450,13 @@ public final class SongBuilder {
 		// to the lane before, to the turn it came round, or to the corridor alongside. Every note it
 		// hangs is therefore offered rather than assumed, and a bus that finds a slot taken carries on
 		// a block further and hangs it there. The other modes leave a clear column and can assume.
+		// Started partway along the lane where a debug build asks for it, so a chord can be put a
+		// stated distance from the wall without a song in front of it to push it there. The walls
+		// below are measured from the origin and not from here, which is the whole point: the
+		// corridor is the width it would be, and the walk simply begins further down it.
 		Lane lane = layout.ultra()
-			? Lane.straight(origin, forward, depth).crowding()
-			: Lane.straight(origin, forward, depth);
+			? Lane.straight(origin.relative(forward, start.column()), forward, depth).crowding()
+			: Lane.straight(origin.relative(forward, start.column()), forward, depth);
 		// Whether those bends are the ones a turn put there, so that the walk knows to re-pin the
 		// note side and start a new lane the moment it comes out the far side.
 		boolean turning = false;
@@ -439,8 +474,12 @@ public final class SongBuilder {
 		int nearWall = origin.getX();
 		int farWall = origin.getX() + laneWidth;
 		int currentTime = 0;
-		int floor = 0;
-		int climb = 1;
+		// Which floor the walk believes it is on and which way it is going, which together decide
+		// whether the wall ahead is a climb, a descent or a flat turn. Nought and up at the head of a
+		// song; anything else is a debug build asking to start in the middle of one, because the
+		// shape of a wall is not a thing you can ask for directly -- you arrive at it.
+		int floor = start.floor();
+		int climb = start.climb();
 		boolean laneStarted = false;
 		/** Whether a chord has been laid on the bend the walk is currently going round. */
 		boolean placedWhileTurning = false;
@@ -454,6 +493,16 @@ public final class SongBuilder {
 		int tipSignal = DUST_RANGE;
 		LaneReach reach = laneReach(events, 0, events.size());
 		int slabStep = laneSpacing(reach, reach);
+		// A seeded walk may also start mid-turn, with the corners at the end of the lane already on
+		// its route. That is the ordinary state of a lane in the middle of a song and the one thing a
+		// run of chords cannot be written to produce: a lane arms its turn once, when it starts, and
+		// a spec can only choose what stands in it afterwards. Without this the seed can put a chord
+		// the right distance from a wall or in a bending lane, never both.
+		if (start.turning() && layout.ultra()) {
+			lane = armTurn(placements, lane, depth,
+				(farWall - lane.pos().getX()) * forward.getStepX(), slabStep);
+			turning = true;
+		}
 		// Pad this lane has to lay before it reaches its last chord, settled when the lane starts.
 		// See planLane: by the time a lane finds out it cannot fill the gap in front of it, the
 		// chords that could have filled it are built.
@@ -781,13 +830,7 @@ public final class SongBuilder {
 						// at a different column, and the whole reason a turn can never reach a
 						// neighbouring corridor's notes is that turns occupy the same reserved columns
 						// in every corridor.
-						int toCorner = Math.max(1, columns + 1);
-						placements.turnedAt(lane.ahead(toCorner - 1).pos());
-						placements.corner(lane.ahead(toCorner).pos());
-						placements.corner(lane.ahead(toCorner + slabStep).pos());
-						boolean clockwise = lane.travel().getClockWise() == depth;
-						lane = lane.bending(List.of(new Lane.Bend(toCorner, clockwise),
-							new Lane.Bend(toCorner + slabStep, clockwise))).crowding();
+						lane = armTurn(placements, lane, depth, columns, slabStep);
 						turning = true;
 						// Nothing is spent on the corner itself: the wire crossing it is whatever the
 						// chords standing on it lay, and each of those opens with a repeater worth
@@ -1077,6 +1120,25 @@ public final class SongBuilder {
 	 *     past its wall, and it had been paid for at every descent since.
 	 */
 	private record TurnCost(int above, int cells, int offBus, int stepOff) {
+	}
+
+	/**
+	 * Gives a route the two corners of the turn at the end of its lane, and marks them as corners.
+	 *
+	 * <p>Pulled out because the walk is no longer the only thing that arms a turn: a seeded walk has
+	 * to arm one exactly the way this does, or every chord in the lane is measured against a wall in
+	 * the wrong place. Two pieces of code deciding where a corner goes is the bug this file keeps
+	 * producing, so there is one.</p>
+	 */
+	private static Lane armTurn(PlacementPlan placements, Lane lane, Direction depth, int columns,
+			int slabStep) {
+		int toCorner = Math.max(1, columns + 1);
+		placements.turnedAt(lane.ahead(toCorner - 1).pos());
+		placements.corner(lane.ahead(toCorner).pos());
+		placements.corner(lane.ahead(toCorner + slabStep).pos());
+		boolean clockwise = lane.travel().getClockWise() == depth;
+		return lane.bending(List.of(new Lane.Bend(toCorner, clockwise),
+			new Lane.Bend(toCorner + slabStep, clockwise))).crowding();
 	}
 
 	private static TurnCost turnCost(int floor, int climb, int floors, int slabStep) {
