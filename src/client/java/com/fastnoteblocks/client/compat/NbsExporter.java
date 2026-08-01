@@ -99,6 +99,38 @@ final class NbsExporter {
 		int tempoHundredths = Math.max(1, Math.min(65_535, (int)Math.round(ticksPerSecond * 100.0)));
 		long endTick = Math.min(NbsWriter.maxTick(), project.endTick() / scale);
 
+		// And then written on the coarsest grid the music actually uses. The composer's resolution
+		// is its own business, and carrying it through means a song whose notes are four ticks apart
+		// is written as though a note could land on every one of them. That plays correctly -- the
+		// tempo and the spacing cancel -- but Note Block Studio reads the tempo field alone when it
+		// decides whether a song could be built in Minecraft, and a rate above ten a second is a
+		// rate redstone cannot keep. Ekran exported Hammer after baking its speed in and got forty a
+		// second flagged as incompatible with a game it had already been pasted into.
+		//
+		// So divide out whatever every note has in common. Same notes, same moments, same music, on
+		// a grid that says what the song is really doing -- and for anything written to redstone in
+		// the first place, that grid is ten a second or slower.
+		long common = endTick;
+		for (NbsSong.Note note : notes) {
+			common = gcd(common, note.tick());
+		}
+		// Nought means every note is on tick nought, so there is no grid to find and nothing to
+		// divide by. Without this the gcd of nothing is the tempo itself, and the song comes out at
+		// a hundredth of a tick a second.
+		int coarser = common > 0 ? (int)gcd(common, tempoHundredths) : 1;
+		if (coarser > 1) {
+			List<NbsSong.Note> onTheCoarserGrid = new ArrayList<>(notes.size());
+			for (NbsSong.Note note : notes) {
+				onTheCoarserGrid.add(new NbsSong.Note(note.tick() / coarser, note.layer(),
+					note.instrument(), note.key(), note.velocity(), note.panning(),
+					note.pitchCents()));
+			}
+			notes = onTheCoarserGrid;
+			endTick /= coarser;
+			tempoHundredths /= coarser;
+			ticksPerSecond /= coarser;
+		}
+
 		NbsSong.Header header = new NbsSong.Header(5, NbsWriter.VANILLA_INSTRUMENT_COUNT,
 			(int)endTick, layers.size(), project.name(), "", "",
 			"Exported from Fast Noteblocks", tempoHundredths, false, 0, 0);
@@ -129,6 +161,18 @@ final class NbsExporter {
 				.append(" moved to layers alongside, which is how NBS holds a chord");
 		}
 		return new Result(path, report.toString());
+	}
+
+	/** What every note's tick has in common, which is the coarsest grid they all sit on. */
+	private static long gcd(long one, long two) {
+		long left = Math.abs(one);
+		long right = Math.abs(two);
+		while (right != 0) {
+			long carry = left % right;
+			left = right;
+			right = carry;
+		}
+		return left;
 	}
 
 	/** Where this instrument sits in Note Block Studio's numbering, or -1 if it does not. */

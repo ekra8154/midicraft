@@ -114,7 +114,9 @@ class NbsExporterTest {
 		NbsSong read = NbsReader.read(result.path());
 
 		assertEquals(4, read.notes().size(), "every note of the chord should survive");
-		assertEquals(List.of(0, 0, 0, 4), read.notes().stream().map(NbsSong.Note::tick).toList());
+		// Tick one, not four: the only gap in the song is four ticks wide, so it is written on a
+		// grid four times coarser and the tempo divided to match.
+		assertEquals(List.of(0, 0, 0, 1), read.notes().stream().map(NbsSong.Note::tick).toList());
 		assertEquals(List.of(0, 1, 2, 0), read.notes().stream().map(NbsSong.Note::layer).toList(),
 			"the chord spreads sideways and the later note goes back to the first layer");
 		assertEquals(List.of(39, 43, 46, 51),
@@ -122,6 +124,42 @@ class NbsExporterTest {
 		assertEquals(3, read.layers().size(), "three voices means three layers");
 		assertTrue(result.report().contains("chord notes moved"),
 			"and the report should say so: " + result.report());
+	}
+
+	/**
+	 * The grid a song is written on, which is not the grid the composer happens to use.
+	 *
+	 * <p>Note Block Studio decides whether a song could be built in Minecraft from the tempo field
+	 * alone, so a song whose notes are four ticks apart written at forty a second reads as four
+	 * times faster than redstone can go -- even though the notes are exactly ten a second. Ekran hit
+	 * that on Hammer after baking its speed in: flagged incompatible with a game it had already been
+	 * pasted into.</p>
+	 */
+	@Test
+	void writesOnTheCoarsestGridTheNotesActuallyUse(@TempDir Path folder) throws Exception {
+		// Notes every 480 composer ticks: every fourth NBS tick at the default resolution.
+		ComposerProject source = project(List.of(new ComposerProject.Layer("Lead", "HARP",
+			false, true, true, List.of(note(1, 60, 0), note(2, 62, 480), note(3, 64, 960),
+				note(4, 65, 1440)))));
+
+		NbsSong read = NbsReader.read(NbsExporter.export(source, folder.resolve("g.nbs")).path());
+
+		assertEquals(List.of(0, 1, 2, 3), read.notes().stream().map(NbsSong.Note::tick).toList(),
+			"a note every fourth tick should be written as a note every tick");
+		assertEquals(200, read.header().tempoHundredths(),
+			"and the tempo divided to match, so the music is unchanged");
+	}
+
+	@Test
+	void leavesAGridItCannotCoarsenAlone(@TempDir Path folder) throws Exception {
+		// One note off the four-tick grid, so nothing can be divided out.
+		ComposerProject source = project(List.of(new ComposerProject.Layer("Lead", "HARP",
+			false, true, true, List.of(note(1, 60, 0), note(2, 62, 480), note(3, 64, 600)))));
+
+		NbsSong read = NbsReader.read(NbsExporter.export(source, folder.resolve("f.nbs")).path());
+
+		assertEquals(List.of(0, 4, 5), read.notes().stream().map(NbsSong.Note::tick).toList());
+		assertEquals(800, read.header().tempoHundredths());
 	}
 
 	@Test
