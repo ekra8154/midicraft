@@ -1115,10 +1115,38 @@ public final class SongBuilder {
 				}
 			}
 		}
-		// Nothing lands this lane on its wall. Said so rather than pretending, because a lane that
-		// cannot be pinned is better turned where it stands than run on past its wall and turned out
-		// in the open, where the staircase has a whole corridor of somebody else's notes to land in.
-		return null;
+		// Nothing lands this lane on its wall. It used to say so by handing back nothing at all, and
+		// nothing at all means no pad anywhere: a lane that could not be closed did not even spend the
+		// wire it was holding. So it turned where it stood with cells to spare, and the staircase came
+		// down in the middle of the corridor, against whatever the lane alongside had hung there.
+		//
+		// Spend it anyway, if spending it helps. Every column of pad is a column the turn happens
+		// further along, and the difference between a staircase that lands beside somebody's notes and
+		// one that does not is usually a column or two. {@link #book} already works backwards from the
+		// last chord through whatever room the ones before it have, so a chord arriving on a strong
+		// wire pays for the one arriving on a weak one. Ekran read it off the blocks on Do The Dance at
+		// twenty wide: a lane of one chord, fifteen columns of wall and three blocks of wire, padding
+		// nothing at all.
+		//
+		// And offered rather than imposed, which is the whole of what made the first attempt worse. A
+		// pad is not free: the walk lays it out of the same wire the turn has to be made on, so a lane
+		// that books more than it can pay for arrives at its wall with nothing left and runs straight
+		// past it. Booked blind that way it cost 39 breaches to save 3 dead runs. So the plan is swept
+		// again with the pad in it and kept only if the lane is genuinely better for it -- nearer its
+		// wall, still short of it, and still holding every chord it held before.
+		int owed = (wall - bare.ends().get(bare.last() - from)) * stepX;
+		Map<Integer, Integer> most = new LinkedHashMap<>();
+		book(most, bare, from, bare.last(), owed);
+		if (most.isEmpty()) {
+			return Map.of();
+		}
+		Sweep padded = sweep(events, from, startX, stepX, wall, startTime, tip, busy, offBus, layout,
+			most);
+		if (padded.last() < bare.last()) {
+			return Map.of();
+		}
+		int left = (wall - padded.ends().get(padded.last() - from)) * stepX;
+		return left >= 0 && left < owed ? Map.copyOf(most) : Map.of();
 	}
 
 	/** A lane walked on paper: where each event ends, what it leaves, and what its gap could hold. */
