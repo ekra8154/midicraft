@@ -1096,6 +1096,17 @@ public final class SongBuilder {
 					+ " tip=" + tipSignal + " spent=" + spentPadding + " style=" + event.style());
 			}
 			BlockPos before = lane.pos();
+			// What the planner would say this chord does, asked at the moment the walk is about to do
+			// it. Kept as a counter rather than a fault because a gap here is not wrong in itself --
+			// a nudge is decided against blocks on the ground and no arithmetic can foresee it -- but
+			// every one of these is a column the plan spent somewhere the walk did not, and the two
+			// disagreeing is the bug shape this file keeps producing. The corner-bus gap showed up
+			// here as two columns on the opening chord of every lane leaving a flat turn.
+			int foretold = layout.ultra() && !turning
+				? landingOf(before.getX(), lane.travel().getStepX(), event,
+					event.time() - currentTime - spentPadding, columnBehindBusy, wall, layout,
+					leavingTurn).end()
+				: Integer.MIN_VALUE;
 			SpatialDelayTrigger trigger = addSpatialDelayBeforeEvent(placements, lane,
 				event.time() - currentTime - spentPadding, layout.ultra());
 			currentTime = event.time();
@@ -1106,6 +1117,18 @@ public final class SongBuilder {
 				!columnBehindBusy || !opening.pos().equals(before), turning || leavingTurn,
 				turning ? Integer.MAX_VALUE
 					: (wall - opening.pos().getX()) * opening.travel().getStepX(), tipSignal, layout);
+			// Where the chord did not land where the plan said it would, and why, as far as the walk
+			// can tell. Almost all of it is the nudge, which already re-plans and which no arithmetic
+			// could have foreseen -- it is decided against blocks on the ground. What is left is a bus
+			// that had to skip an occupied slot and so came out a column or three longer than its note
+			// count implies. Re-planning after those as well was tried and changed nothing measurable,
+			// so this stays a counter: it is the cheapest way to notice the next time the two drift
+			// apart, which is the bug shape this file keeps producing.
+			if (foretold != Integer.MIN_VALUE && foretold != placed.lane().pos().getX()) {
+				int off = (placed.lane().pos().getX() - foretold) * lane.travel().getStepX();
+				placements.padded("plan" + (off > 0 ? "Short" : "Long") + Math.min(Math.abs(off), 4)
+					+ (placed.nudged() ? "Nudged" : "") + placed.style());
+			}
 			leavingTurn = false;
 			lane = placed.lane();
 			columnBehindBusy = placed.stacked();

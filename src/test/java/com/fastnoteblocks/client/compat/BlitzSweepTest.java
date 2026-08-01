@@ -124,7 +124,8 @@ class BlitzSweepTest {
 						padBy.merge(entry.getKey(), (long) entry.getValue(), Long::sum);
 						if (entry.getKey().equals("corner")) {
 							corners += entry.getValue();
-						} else if (!entry.getKey().startsWith("swap")) {
+						} else if (!entry.getKey().startsWith("swap")
+								&& !entry.getKey().startsWith("plan")) {
 							padWasted += entry.getValue();
 						}
 					}
