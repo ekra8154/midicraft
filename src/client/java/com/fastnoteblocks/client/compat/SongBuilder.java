@@ -885,10 +885,33 @@ public final class SongBuilder {
 				// as though it were not, and what was a breach becomes a run of sixteen. Measured both
 				// ways over the library -- nine breaches traded for nine dead builds, which is the
 				// wrong way round.
+				// Unless the wire cannot afford it and the two-swap turn can take the corner instead.
+				// That trade spends no column -- the corner ends up holding a note rather than dust --
+				// so where the cell walked off here is the one that runs the wire out, the swap is the
+				// difference between a lane that plays and a lane that does not. Ekran found it on the
+				// one-floor build of {@code ultra-limit-two-thirties}: a chord of thirty riding a
+				// turnaround, tip worth nought, and the cell spent here taking it to sixteen blocks of
+				// wire with the last at nothing.
+				//
+				// Asked only when the tip cannot pay, and that restraint is the whole of it. The swap
+				// is free in wire and not free in everything else: it moves a note onto a cell two
+				// lanes touch and rebuilds the chord after it as a bus. Offered wherever it would fit,
+				// it takes four and a half thousand corners the old route was walking off perfectly
+				// well and buys sixty-one wrong notes in real songs for three dead builds. Offered only
+				// where the alternative is dead wire, the library trades one corner net -- two taken
+				// here, two given back where the layout downstream moved -- and comes out the same
+				// size to the block.
+				//
+				// And only where the wire arrives without a repeater in front of it. The delay keeps
+				// the corner intact for the swap already, but a wait long enough to want a repeater of
+				// its own lays one on the way past, and then there is no corner left to trade.
 				BlockPos onCorner = lane.pos();
-				lane = pastAnyCorner(placements, lane);
-				tipSignal -= Math.abs(lane.pos().getX() - onCorner.getX())
-					+ Math.abs(lane.pos().getZ() - onCorner.getZ());
+				if (tipSignal > 0 || event.time() - currentTime - spentPadding > 4
+						|| planSwapTurn(placements, lane, event.notes(), false, false) == null) {
+					lane = pastAnyCorner(placements, lane);
+					tipSignal -= Math.abs(lane.pos().getX() - onCorner.getX())
+						+ Math.abs(lane.pos().getZ() - onCorner.getZ());
+				}
 				Direction travel = lane.travel();
 				BlockPos cursor = lane.pos();
 				int laneWall = travel == forward ? farWall : nearWall;
@@ -2230,23 +2253,56 @@ public final class SongBuilder {
 		return taken;
 	}
 
-	private static Body twoSwapTurn(PlacementPlan placements, Lane lane, int triggerDelay,
-			List<EventNote> chord, boolean forceBus) {
+	/** Where a two-swap turn's blocks would go: the corner, the note it displaces, the bus opening. */
+	private record SwapTurn(BlockPos corner, BlockPos inside, String note, int when,
+			String instrument, Lane opening) {
+	}
+
+	private static SwapTurn noSwap(PlacementPlan placements, boolean census, String why) {
+		if (census) {
+			placements.padded(why);
+		}
+		if (TRACE) {
+			System.out.println("SWAPNO " + why);
+		}
+		return null;
+	}
+
+	/**
+	 * The blocks a two-swap turn would trade, worked out before any of them moves.
+	 *
+	 * <p>Asked twice, and by the same function both times on purpose. The walk asks first, because
+	 * the column that stepping off a corner costs has to be known before anything is measured against
+	 * the wall -- and a corner a swap is going to take costs nothing. The turn asks again when it is
+	 * time to move the blocks. Answering that in two places is the shape of every long-lived bug in
+	 * this file, a planner and a walk disagreeing over a single cell, so there is one.</p>
+	 *
+	 * @param census whether a refusal is recorded in the padding count. The walk's question is
+	 *     speculative and would otherwise be counted twice.
+	 */
+	private static SwapTurn planSwapTurn(PlacementPlan placements, Lane lane, List<EventNote> chord,
+			boolean forceBus, boolean census) {
 		if (!lane.cornerAt(0)) {
 			return null;
 		}
-		placements.padded("swapSeen");
+		if (census) {
+			placements.padded("swapSeen");
+		}
+		if (TRACE) {
+			System.out.println("SWAPTRY at " + lane.pos().getX() + " " + lane.pos().getY() + " "
+				+ lane.pos().getZ() + " travel=" + lane.travel() + " side=" + lane.noteSide()
+				+ " bends=" + lane.bends() + " notes=" + chord.size() + " forceBus=" + forceBus
+				+ " census=" + census);
+		}
 		if (!(forceBus || chord.size() > 3)) {
-			placements.padded("swapNotBus");
-			return null;
+			return noSwap(placements, census, "swapNotBus");
 		}
 		// A bend still to come is carried onto the opening route below, one cell nearer, because the
 		// swap cuts a cell out of the path. One that would land on the opening's own first bend is a
 		// turn too tight to cut into.
 		for (Lane.Bend pending : lane.bends()) {
 			if (pending.after() < 3) {
-				placements.padded("swapBendTooNear");
-				return null;
+				return noSwap(placements, census, "swapBendTooNear");
 			}
 		}
 		BlockPos corner = lane.pos().above();
@@ -2263,8 +2319,7 @@ public final class SongBuilder {
 			}
 		}
 		if (arrival == null) {
-			placements.padded("swapNoArrival");
-			return null;
+			return noSwap(placements, census, "swapNoArrival");
 		}
 		// The inside diagonal of the bend: one back along the way the wire came, one on along the way
 		// it leaves. The last note the turning chord hung inside the corner sits here.
@@ -2274,12 +2329,18 @@ public final class SongBuilder {
 		String instrument = placements.describeBlock(inside.below());
 		if (!note.startsWith("minecraft:note_block") || when == null
 				|| instrument.startsWith("minecraft:air") || "-".equals(instrument)) {
-			placements.padded("swapNoNote");
-			return null;
+			if (TRACE) {
+				System.out.println("SWAPNO inside=" + inside.getX() + " " + inside.getY() + " "
+					+ inside.getZ() + " holds " + note + " over " + instrument + " when=" + when);
+			}
+			return noSwap(placements, census, "swapNoNote");
 		}
 		if (!placements.freeForNote(corner)) {
-			placements.padded("swapCornerBusy");
-			return null;
+			if (TRACE) {
+				System.out.println("SWAPNO corner=" + corner.getX() + " " + corner.getY() + " "
+					+ corner.getZ() + " holds " + placements.describeBlock(corner));
+			}
+			return noSwap(placements, census, "swapCornerBusy");
 		}
 		// The cell the repeater will drive is the one cell of the opening that is not on the route
 		// the turn reserved, so it is the one that can already be spoken for -- by a note of the lane
@@ -2303,16 +2364,37 @@ public final class SongBuilder {
 			BlockPos at = opening.ahead(cell).pos();
 			if (!"-".equals(placements.describeBlock(at))
 					|| !"-".equals(placements.describeBlock(at.above()))) {
-				placements.padded("swapOpeningBusy");
-				return null;
+				if (TRACE) {
+					System.out.println("SWAPNO opening cell " + cell + " of " + wanted + " at "
+						+ at.getX() + " " + at.getY() + " " + at.getZ() + " holds "
+						+ placements.describeBlock(at) + " under "
+						+ placements.describeBlock(at.above()));
+				}
+				return noSwap(placements, census, "swapOpeningBusy");
 			}
 		}
+		return new SwapTurn(corner, inside, note, when, instrument, opening);
+	}
+
+	private static Body twoSwapTurn(PlacementPlan placements, Lane lane, int triggerDelay,
+			List<EventNote> chord, boolean forceBus) {
+		SwapTurn swap = planSwapTurn(placements, lane, chord, forceBus, true);
+		if (swap == null) {
+			return null;
+		}
+		Direction travel = lane.travel();
+		BlockPos corner = swap.corner();
+		BlockPos inside = swap.inside();
+		String note = swap.note();
+		int when = swap.when();
+		String instrument = swap.instrument();
+		Lane opening = swap.opening();
 		placements.padded("swapDone");
 		if (TRACE) {
 			System.out.println("SWAP corner=" + corner.getX() + "," + corner.getY() + ","
 				+ corner.getZ() + " inside=" + inside.getX() + "," + inside.getY() + ","
-				+ inside.getZ() + " opens=" + opens.getX() + "," + opens.getY() + ","
-				+ opens.getZ() + " travel=" + travel + " arrival=" + arrival
+				+ inside.getZ() + " opens=" + opening.pos().getX() + "," + opening.pos().getY()
+				+ "," + opening.pos().getZ() + " travel=" + travel
 				+ " bends=" + lane.bends() + " notes=" + chord.size());
 		}
 		// Swap one. The note goes to the corner, which powers it just as well -- the bus block the
