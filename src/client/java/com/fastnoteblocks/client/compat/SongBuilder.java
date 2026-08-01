@@ -2751,7 +2751,30 @@ public final class SongBuilder {
 			placements.powered(at.pos(), "minecraft:stone", time);
 			set(placements, at.pos().above(), "minecraft:redstone_wire");
 			cells++;
-			for (BlockPos slot : at.noteSlots()) {
+			// Filled away from the next lane first. The note side is pinned to the lane step, so the
+			// first slot of the pair is the one facing ground the walk has not built yet -- and a
+			// slot whose far neighbour does not exist is a slot no check can clear. Taking the other
+			// one first puts each note where {@link #soundedByAnother} can actually see what it will
+			// be standing against.
+			// Only where every slot of the cell would be taken anyway, which is what keeps this from
+			// changing the length of the run. Reversed unconditionally it also reverses which slot
+			// gets skipped when one is blocked, and a bus that skips a different slot grows to a
+			// different length -- that put a run of sixteen into fast-and-dense at two floors.
+			// And never near a bend, because the two-swap turn wants a note on exactly the slot this
+			// would move away from. The inside diagonal of a corner is the note that turn trades for
+			// the corner cell, and a chord that fills the far side first leaves it empty -- which is
+			// a swap refused, a corner taken by dust, and a run of sixteen. The two changes want
+			// opposite things within two cells of a corner, and there the older one wins.
+			List<BlockPos> slots = at.noteSlots();
+			boolean nearBend = at.cornerAt(0)
+				|| at.bends().stream().anyMatch(bend -> bend.after() <= 2);
+			if (crowded && !nearBend && slots.stream().allMatch(slot -> !reserved.contains(slot)
+					&& placements.freeForNote(slot)
+					&& !soundedByAnother(placements, slot, time))) {
+				slots = new ArrayList<>(slots);
+				java.util.Collections.reverse(slots);
+			}
+			for (BlockPos slot : slots) {
 				if (TRACE) {
 					System.out.println("  BUS cell=" + (cells - 1) + " corner=" + at.cornerAt(0)
 						+ " slot=" + slot.getX() + "," + slot.getY() + "," + slot.getZ()
@@ -3954,9 +3977,15 @@ public final class SongBuilder {
 							+ neighbour + ", from the " + direction + " at "
 							+ describe(note.getKey().relative(direction), shiftX, shiftZ));
 					} else if (neighbour > time + SHARED_PULSE_TICKS) {
+						// Named the same way round as the early case. Which side a second sounding comes
+						// from is as much the diagnosis here as it is there -- along the lane is one
+						// module reaching into the next, across it is the corridor alongside -- and
+						// leaving it off meant every one of these had to be traced by hand.
 						faults.add("the note at " + describe(note.getKey(), shiftX, shiftZ)
 							+ " belongs to tick " + time + " but would sound again at tick "
-							+ neighbour + ", too late for the first pulse to still be covering it");
+							+ neighbour + ", from the " + direction + " at "
+							+ describe(note.getKey().relative(direction), shiftX, shiftZ)
+							+ ", too late for the first pulse to still be covering it");
 					}
 				}
 				if (!triggered) {
