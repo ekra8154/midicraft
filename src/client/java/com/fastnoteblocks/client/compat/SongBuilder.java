@@ -825,6 +825,28 @@ public final class SongBuilder {
 			// Pad this lane was told to lay early rather than at its end, in front of the event's own
 			// repeater so that repeater stands between it and the wall.
 			int owing = index > 0 && booked != null ? booked.getOrDefault(index, 0) : 0;
+			// Never past the wall, though. The pad is booked to land the lane flush on its wall, so a
+			// booking that would carry the chord over it is a booking that has already failed at its
+			// own job -- and the column it spends is the column the lane comes to rest outside by.
+			// Every breach of exactly one left in Do The Dance was this: a bus of twenty that fitted
+			// its eleven columns to the block, one column of pad booked in front of it, and the lane
+			// a column out. The plan is worked out ahead of the walk from an arithmetic that cannot
+			// see everything the walk does, so it is checked here against the one thing it must never
+			// do rather than trusted.
+			// Only where the pad is what carries it over. A chord that lands outside the wall with no
+			// pad at all is a chord with a different problem, and taking its pad away does not fix
+			// that one -- it just moves the lane, and a lane moved for no reason lands its notes
+			// against somebody else's tick. Measured both ways: clamping regardless cost 11 wrong
+			// notes to save 2 breaches.
+			if (owing > 0 && (landingOf(lane.pos().getX(), lane.travel().getStepX(), event,
+					wait - spentPadding, columnBehindBusy, wall, layout).end() - wall)
+					* lane.travel().getStepX() <= 0) {
+				while (owing > 0 && (landingOf(lane.pos().getX() + lane.travel().getStepX() * owing,
+						lane.travel().getStepX(), event, wait - spentPadding, columnBehindBusy, wall,
+						layout).end() - wall) * lane.travel().getStepX() > 0) {
+					owing--;
+				}
+			}
 			if (owing > 0) {
 				Pad early = planPad(owing, tipSignal, 1, Math.max(0, wait - 1 - spentPadding));
 				lane = emitPad(placements, lane, early);
