@@ -686,9 +686,23 @@ public final class SongBuilder {
 			// slots, sixteen blocks of bus, and the last of them is past what its repeater reaches. It
 			// runs on instead and turns in front of a chord that fits, which breaches the footprint
 			// and says so, rather than building a tail that never fires and saying nothing.
+			// And where a descent is pinned, the wire has to reach the wall as well as the staircase.
+			// Pinning makes the turn absolute: the lane walks out to the wall whether the pad paid for
+			// those columns or not, so a lane allowed to hand over without the signal to cross them
+			// hands over onto dead wire. The rule the planner has always used is the one to match --
+			// {@link #closes} will only end a lane at its wall or by a cut, never on a pad that got
+			// most of the way -- and a lane refused here simply lays one more chord, whose repeater
+			// hands out a fresh fifteen, and turns after that. It costs footprint, which says so, and
+			// not a tail that never fires, which does not.
+			int unpaid = Math.max(0, columns - pad.cells().size());
+				int turnCost = pad.cells().isEmpty() && unpaid == 0 && lastStyle == ChordStyle.BUS
+					? offBus : turnCells;
+				boolean reachesWall = !PIN_DESCENTS || flatAhead
+					|| pad.signal() - unpaid >= turnCost;
 			boolean canTurn = layout.ultra()
-				? index > 0 && (flatAhead ? straddles && pad.signal() >= 1 : pad.signal()
-					>= (pad.cells().isEmpty() && lastStyle == ChordStyle.BUS ? offBus : turnCells))
+				? index > 0 && reachesWall && (flatAhead ? straddles && pad.signal() >= 1
+					: pad.signal()
+						>= (pad.cells().isEmpty() && lastStyle == ChordStyle.BUS ? offBus : turnCells))
 				: index > 0 && events.get(index - 1).maxSafeTurnDistance() >= MAX_LANE_SPACING;
 			int spentPadding = 0;
 			// Ahead of a staircase only, for the same reason a split is. A chord that would have been
@@ -781,8 +795,34 @@ public final class SongBuilder {
 					// short the lane has got, and the chords still to come fill the gap in between. A
 					// staircase set back from the wall stands in a column no other corridor's turn
 					// stands in, which is what reaches into the lane alongside.
-					placements.recessed(((travel == forward ? farWall : nearWall)
-						- lane.pos().getX()) * travel.getStepX());
+					int shortBy = ((travel == forward ? farWall : nearWall)
+						- lane.pos().getX()) * travel.getStepX();
+					// Pinned: a descent is walked out to the wall whether the pad could afford it or
+					// not, so that every descent in the build stands in the same column as every
+					// other. What the pad would not pay for is laid as bare dust here, which is wire
+					// the signal has to cross with nothing to revive it -- so this is the experiment
+					// and the fallout is whatever the wire does about it.
+					int pinned = 0;
+					// Ultra only. The other lane modes share this walk once they have more than one
+					// floor, and their corridors are spaced on the promise that a turn is bare -- so
+					// walking one out to the wall puts powered stone where a neighbour's notes are
+					// entitled to be. COMPACT_LANE read one of its own notes back wrong the moment
+					// this was let loose on it.
+					if (PIN_DESCENTS && layout.ultra() && shortBy > 0) {
+						pinned = shortBy;
+						for (int cell = 0; cell < pinned; cell++) {
+							placements.padded("padPinned");
+						}
+						lane = emitDust(placements, lane, pinned);
+					}
+					// Recorded after the pin and not before it, so this is where the staircase actually
+					// stands rather than where the lane would have left it. Told apart by direction as
+					// well: only descents are pinned, so a recessed climb is a real one and a recessed
+					// descent, on this branch, should not exist at all.
+					placements.recessed(shortBy - pinned);
+					if (shortBy - pinned > 0) {
+						placements.padded(climb > 0 ? "recessedClimb" : "recessedDescent");
+					}
 					BlockPos landed = climb > 0
 						? addGlassClimb(placements, lane.pos(), travel,
 							lastStyle == ChordStyle.BUS && pad.cells().isEmpty(), currentTime)
@@ -793,7 +833,7 @@ public final class SongBuilder {
 					// handover in a build that spends wire without a repeater at either end of it.
 					// Charged at what it actually spends: a climb taken straight off a bus skips two
 					// rungs, and counting them anyway left every lane after one two blocks poorer.
-					tipSignal = pad.signal() - (climb > 0 && lastStyle == ChordStyle.BUS
+					tipSignal = pad.signal() - pinned - (climb > 0 && lastStyle == ChordStyle.BUS
 						&& pad.cells().isEmpty() ? offBus : turnCells);
 					lane = Lane.straight(landed, travel.getOpposite(), depth);
 					laneStarted = false;
@@ -2864,6 +2904,15 @@ public final class SongBuilder {
 
 	/** Scratch: one line per chord placed, for finding the first one that goes wrong. */
 	static boolean TRACE = false;
+
+	/**
+	 * Whether a descent is walked out to its wall rather than built where the lane stopped.
+	 *
+	 * <p>The experiment behind the {@code pinned-descents} branch. A recessed descent is the one
+	 * turn that stands in a column no other corridor's turn stands in, and ekran has traced wrong
+	 * notes to one twice. Pinning it costs whatever the wire cannot pay for.</p>
+	 */
+	static boolean PIN_DESCENTS = true;
 
 	/**
 	 * Whether a chord can simply be laid across a flat turn, needing nothing done for it.
