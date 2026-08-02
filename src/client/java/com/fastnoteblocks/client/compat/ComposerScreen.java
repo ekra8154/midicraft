@@ -881,7 +881,7 @@ public final class ComposerScreen extends Screen {
 		mark = phase(PHASE_RULER, mark);
 		mark = extractPianoRoll(graphics, mouseX, mouseY, mark);
 		extractStatus(graphics);
-		extractToast(graphics);
+		extractToast(graphics, mouseX, mouseY);
 		mark = phase(PHASE_STATUS, mark);
 		super.extractRenderState(graphics, mouseX, mouseY, partialTick);
 		mark = phase(PHASE_WIDGETS, mark);
@@ -2535,12 +2535,17 @@ public final class ComposerScreen extends Screen {
 		toastShownAt = Util.getMillis();
 	}
 
-	private void extractToast(GuiGraphicsExtractor graphics) {
+	/**
+	 * Shows the last result, and stops counting down while the cursor is on it.
+	 *
+	 * <p>These carry the only copy of things worth reading twice -- what an import left out, what a
+	 * thinning pass is about to delete -- and four and a half seconds is not long enough to read a
+	 * wrapped paragraph you were not expecting. Pointing at one holds it, and moving off starts the
+	 * time over rather than resuming with whatever was left, because a message that vanishes the
+	 * instant you stop reading it is the problem this is fixing.</p>
+	 */
+	private void extractToast(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
 		if (toast == null) {
-			return;
-		}
-		if (Util.getMillis() - toastShownAt > TOAST_MILLIS) {
-			toast = null;
 			return;
 		}
 		// Wrapped, not centred on one line. Import reports list everything they left out and are
@@ -2552,10 +2557,32 @@ public final class ComposerScreen extends Screen {
 		int x = rollX + Math.max(4, (rollWidth - textWidth) / 2);
 		int y = rollY + 8;
 		int height = lines.size() * font.lineHeight + (lines.size() - 1) * 2;
-		graphics.fill(x - 6, y - 5, x + textWidth + 6, y + height + 4, 0xF01A1F26);
-		graphics.fill(x - 6, y - 5, x + textWidth + 6, y - 4, 0xFF8FD3FF);
+		int left = x - 6;
+		int top = y - 5;
+		int right = x + textWidth + 6;
+		int bottom = y + height + 4;
+		boolean held = mouseX >= left && mouseX < right && mouseY >= top && mouseY < bottom;
+		if (held) {
+			toastShownAt = Util.getMillis();
+		} else if (Util.getMillis() - toastShownAt > TOAST_MILLIS) {
+			toast = null;
+			return;
+		}
+		graphics.fill(left, top, right, bottom, held ? 0xF8232A33 : 0xF01A1F26);
+		int accent = held ? 0xFFCDE9FF : 0xFF8FD3FF;
+		graphics.fill(left, top, right, top + 1, accent);
+		if (held) {
+			// The rest of the frame, so a held message reads as something being kept rather than
+			// something that has not gone yet. Same accent as the strip it already had.
+			graphics.fill(left, bottom - 1, right, bottom, accent);
+			graphics.fill(left, top, left + 1, bottom, accent);
+			graphics.fill(right - 1, top, right, bottom, accent);
+		}
 		for (int index = 0; index < lines.size(); index++) {
 			graphics.text(font, lines.get(index), x, y + index * (font.lineHeight + 2), 0xFFFFFFFF, false);
+		}
+		if (held) {
+			smallText(graphics, "held while hovered", left, bottom + 2, 0xFF8FD3FF);
 		}
 	}
 
