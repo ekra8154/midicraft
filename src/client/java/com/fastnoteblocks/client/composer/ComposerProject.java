@@ -429,6 +429,52 @@ public record ComposerProject(
 		return with(updated, mergedIndex, nextNoteId);
 	}
 
+	/**
+	 * Removes the given layers, leaving the selection on whatever slid up into the first gap.
+	 *
+	 * <p>Deleting everything leaves one empty layer rather than none, because a composition with no
+	 * layers has nowhere to put the next note -- the constructor would put one back anyway, and
+	 * doing it here means the active index is aimed at something that exists.</p>
+	 */
+	public ComposerProject deleteLayers(Set<Integer> layerIndices) {
+		if (layerIndices == null || layerIndices.isEmpty()) {
+			return this;
+		}
+		List<Layer> kept = new ArrayList<>();
+		for (int index = 0; index < layers.size(); index++) {
+			if (!layerIndices.contains(index)) {
+				kept.add(layers.get(index));
+			}
+		}
+		if (kept.size() == layers.size()) {
+			return this;
+		}
+		int lowest = layerIndices.stream().mapToInt(Integer::intValue).filter(index -> index >= 0).min()
+			.orElse(0);
+		return with(kept, Math.min(lowest, Math.max(0, kept.size() - 1)), nextNoteId);
+	}
+
+	/**
+	 * Whether two documents hold the same music, ignoring where the cursor happens to be.
+	 *
+	 * <p>{@code equals} cannot answer this: the record carries the active layer and the next note id
+	 * alongside the notes, so clicking a different layer produced a document that compared unequal
+	 * to the one on disk. Looking around the composer and leaving asked whether to save changes that
+	 * were never made.</p>
+	 *
+	 * <p>Note ids do count. Two documents with the same notes under different ids are two different
+	 * files, and the one on screen is the one that has not been written.</p>
+	 */
+	public boolean sameContentAs(ComposerProject other) {
+		return other != null
+			&& name.equals(other.name)
+			&& ppq == other.ppq
+			&& tempoMicrosPerQuarter == other.tempoMicrosPerQuarter
+			&& endTick == other.endTick
+			&& speedQuarters == other.speedQuarters
+			&& layers.equals(other.layers);
+	}
+
 	public ComposerProject moveLayer(int layerIndex, int direction) {
 		if (direction == 0 || layers.size() <= 1) {
 			return this;
@@ -859,27 +905,65 @@ public record ComposerProject(
 		return with(updated, target, nextNoteId + 1L);
 	}
 
+	/**
+	 * Pastes the clipboard, splitting it by instrument only where a layer cannot hold it.
+	 *
+	 * <p>A layer has one instrument, so what a copy can survive depends entirely on how many it
+	 * spans. One instrument flattens into the layer you aimed at however many layers it was copied
+	 * from, because those layers were splitting up a voice and not a sound -- and the notes take
+	 * that layer's instrument, which is how re-voicing a phrase by pasting it into another part has
+	 * always worked here. More than one and flattening would silence a whole instrument, so each
+	 * gets a layer: the one you aimed at if it is already that instrument, a new one otherwise.</p>
+	 *
+	 * <p>The exception is aiming at an empty layer whose instrument the copy does not contain. That
+	 * is a scratch layer -- nothing in it sounds, and its instrument cannot have been chosen for
+	 * this paste, since none of the paste is in it. It takes the first instrument rather than being
+	 * left empty beside the layers the paste had to make.</p>
+	 */
 	public PasteResult pasteNotes(int layerIndex, List<ClipboardNote> clipboard, long startTick) {
 		if (clipboard == null || clipboard.isEmpty()) {
-			return new PasteResult(this, Set.of());
+			return new PasteResult(this, Set.of(), 0);
 		}
 		int target = Math.max(0, Math.min(layers.size() - 1, layerIndex));
-		Layer layer = layers.get(target);
-		List<NoteEvent> notes = new ArrayList<>(layer.notes());
-		Set<Long> addedIds = new LinkedHashSet<>();
-		long id = nextNoteId;
+		Map<String, List<ClipboardNote>> byInstrument = new java.util.LinkedHashMap<>();
 		for (ClipboardNote copied : clipboard) {
-			NoteEvent added = new NoteEvent(id++, copied.midiNote(),
-				Math.max(0L, startTick + copied.tickOffset()), copied.durationTicks(), copied.velocity());
-			notes.add(added);
-			addedIds.add(added.id());
+			byInstrument.computeIfAbsent(copied.instrument(), key -> new ArrayList<>()).add(copied);
 		}
 		List<Layer> updated = new ArrayList<>(layers);
-		updated.set(target, layer.withNotes(notes));
-		return new PasteResult(
-			with(updated, target, id),
-			Set.copyOf(addedIds)
-		);
+		String adopted = byInstrument.size() < 2 || byInstrument.containsKey(layers.get(target).instrument())
+			? layers.get(target).instrument()
+			: layers.get(target).notes().isEmpty() ? byInstrument.keySet().iterator().next() : null;
+		if (adopted != null && !adopted.equals(layers.get(target).instrument())) {
+			updated.set(target, updated.get(target).withInstrument(adopted));
+		}
+		Set<Long> addedIds = new LinkedHashSet<>();
+		long id = nextNoteId;
+		int added = 0;
+		for (Map.Entry<String, List<ClipboardNote>> group : byInstrument.entrySet()) {
+			int home = target;
+			if (byInstrument.size() > 1 && !group.getKey().equals(adopted)) {
+				if (updated.size() >= MAX_LAYERS) {
+					// Out of layers. Better a paste that lands on the wrong instrument than one that
+					// silently drops the notes it had nowhere to put.
+					home = target;
+				} else {
+					updated.add(new Layer(group.getValue().getFirst().sourceLayer(), group.getKey(),
+						false, true, true, List.of()));
+					home = updated.size() - 1;
+					added++;
+				}
+			}
+			List<NoteEvent> notes = new ArrayList<>(updated.get(home).notes());
+			for (ClipboardNote copied : group.getValue()) {
+				NoteEvent note = new NoteEvent(id++, copied.midiNote(),
+					Math.max(0L, startTick + copied.tickOffset()), copied.durationTicks(),
+					copied.velocity());
+				notes.add(note);
+				addedIds.add(note.id());
+			}
+			updated.set(home, updated.get(home).withNotes(notes));
+		}
+		return new PasteResult(with(updated, target, id), Set.copyOf(addedIds), added);
 	}
 
 	public ComposerProject deleteNotes(Set<Long> ids) {
@@ -1116,15 +1200,33 @@ public record ComposerProject(
 		return " (" + (shift > 0 ? "+" : "-") + octaves + " oct)";
 	}
 
-	public record ClipboardNote(long tickOffset, int midiNote, long durationTicks, int velocity) {
+	/**
+	 * One copied note, with the voice it was copied from.
+	 *
+	 * <p>The instrument used to be dropped on the way in, so a copy spanning a piano part and a drum
+	 * part pasted back as one instrument and quietly stopped being drums. It travels with the note
+	 * because a layer has exactly one instrument, which makes it the one thing about a copy that
+	 * cannot be reconstructed at the far end.</p>
+	 *
+	 * <p>{@code sourceLayer} only names the layer a new one is made after, so it is a label rather
+	 * than a link -- the layer it came from may be gone by the time this is pasted.</p>
+	 */
+	public record ClipboardNote(long tickOffset, int midiNote, long durationTicks, int velocity,
+			String instrument, String sourceLayer) {
 		public ClipboardNote {
 			tickOffset = Math.max(0L, tickOffset);
 			midiNote = Math.max(0, Math.min(127, midiNote));
 			durationTicks = Math.max(1L, durationTicks);
 			velocity = Math.max(1, Math.min(127, velocity));
+			instrument = instrument == null || instrument.isBlank() ? "HARP" : instrument;
+			sourceLayer = sourceLayer == null || sourceLayer.isBlank() ? "Pasted" : sourceLayer;
 		}
 	}
 
-	public record PasteResult(ComposerProject project, Set<Long> noteIds) {
+	/**
+	 * @param addedLayers how many layers the paste had to make to keep its instruments apart, so
+	 *     the caller can say so rather than leave them to be noticed.
+	 */
+	public record PasteResult(ComposerProject project, Set<Long> noteIds, int addedLayers) {
 	}
 }

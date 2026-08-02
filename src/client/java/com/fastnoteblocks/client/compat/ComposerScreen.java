@@ -78,6 +78,9 @@ public final class ComposerScreen extends Screen {
 	private static final int LAYER_CHIP = 12;
 	private static final int LAYER_INSTRUMENT_X = 26;
 	private static final int LAYER_NAME_X = 45;
+	/** Filled means the layer goes into the build sequence, hollow means it is left out. */
+	private static final String BUILD_DOT_ON = "●";
+	private static final String BUILD_DOT_OFF = "○";
 	/**
 	 * The grab strip on the panel's edge, and the cursor that says it can be grabbed.
 	 *
@@ -158,6 +161,17 @@ public final class ComposerScreen extends Screen {
 		boolean dot = panel >= ROW_DOT_AT;
 		boolean name = panel >= ROW_NAME_AT;
 		int inset = chip ? 8 : 2;
+		// The number sits inside the row now. Out in the gutter it shared its pixels with the
+		// scrollbar, which drew over the top of it and left half a digit showing. Every row reserves
+		// the width of the largest number in the panel rather than its own, so the column does not
+		// jog left as you scroll past layer 9.
+		int ordinalRight = panel - inset - 3;
+		int ordinalLeft = ordinalRight
+			- smallTextWidth(Integer.toString(Math.max(1, project().layers().size())));
+		// And the build dot sits against the number. They answer the two questions you ask about a
+		// row at a glance -- which layer, and is it in the build -- so they read as one column.
+		int dotRight = ordinalLeft - 5;
+		int dotX = dotRight - Math.max(font.width(BUILD_DOT_ON), font.width(BUILD_DOT_OFF));
 		return new LayerRowLayout(
 			inset,
 			chip,
@@ -165,9 +179,11 @@ public final class ComposerScreen extends Screen {
 			name,
 			chip ? LAYER_INSTRUMENT_X : inset + 2,
 			LAYER_NAME_X,
-			dot ? panel - 40 : panel - 16,
-			panel - 34,
-			panel - 5);
+			(dot ? dotX : ordinalLeft) - 4,
+			dotX,
+			dotRight,
+			ordinalLeft,
+			ordinalRight);
 	}
 
 	/**
@@ -177,10 +193,16 @@ public final class ComposerScreen extends Screen {
 	 * want while it is out of the way -- they are how you find the layer you meant. Everything else
 	 * is what folding is for getting rid of.</p>
 	 */
-	private static final int COLLAPSED_LAYER_PANEL_WIDTH = 30;
+	private static final int COLLAPSED_LAYER_PANEL_WIDTH = 34;
 	/** Grab zone either side of the split, and how far left you must drag to fold it away. */
 	private static final int SPLITTER_GRAB = 3;
-	private static final int SPLITTER_COLLAPSE_AT = 34;
+	/**
+	 * How far left you must drag to fold it away, which is also how wide folded is.
+	 *
+	 * <p>The same number twice on purpose: folding is the narrow end of the drag, and a fold that
+	 * snapped to something narrower than you could drag to would be a second layout to get right.</p>
+	 */
+	private static final int SPLITTER_COLLAPSE_AT = COLLAPSED_LAYER_PANEL_WIDTH;
 	/** Widths at which a row stops having room for each of its parts, narrowest last. */
 	private static final int ROW_NAME_AT = 116;
 	private static final int ROW_DOT_AT = 96;
@@ -287,6 +309,8 @@ public final class ComposerScreen extends Screen {
 	private int layerMenuX;
 	private int layerMenuY;
 	private List<ClipboardNote> clipboard = List.of();
+	/** The tick the copy started on, which is where Ctrl+Shift+V puts it back. */
+	private long clipboardOriginTick;
 	private Button playButton;
 	private Button snapButton;
 	private DelayScaleSlider delayScaleSlider;
@@ -453,22 +477,21 @@ public final class ComposerScreen extends Screen {
 	}
 
 	/**
-	 * What "unsaved" is measured against.
+	 * What the document would go back to, and so what leaving it would throw away.
 	 *
-	 * <p>Three cases, and the difference between the last two is the whole point. A song with a
-	 * file is measured against the file. A document with no file that has nothing in it is measured
-	 * against itself, so a blank composition is not something you are nagged to save until you put
-	 * something in it. A document with no file that <em>does</em> have something in it -- an import,
-	 * a scan -- is measured against nothing at all, so all of it counts as unsaved and closing asks
-	 * before dropping it.</p>
+	 * <p>A song with a file goes back to the file. A document without one goes back to how it
+	 * arrived, which for an import is the import itself.</p>
+	 *
+	 * <p>An import used to be measured against nothing at all, so every note of it counted as
+	 * unsaved work and glancing at one before opening something else was asked about as though
+	 * edits were being dropped. Nothing was: an import is a function of a file that is still
+	 * sitting there, and re-reading it costs one trip through the picker. What cannot be got back
+	 * is the work done on top of it, which is exactly what measuring against the import asks
+	 * about.</p>
 	 */
 	private static ComposerProject baseline(FastNoteblocksConfig config, ComposerProject current) {
 		ComposerProject onDisk = config.savedComposerProject();
-		if (onDisk != null) {
-			return onDisk;
-		}
-		boolean empty = current.layers().stream().allMatch(layer -> layer.notes().isEmpty());
-		return empty ? current : null;
+		return onDisk != null ? onDisk : current;
 	}
 
 	@Override
@@ -611,22 +634,31 @@ public final class ComposerScreen extends Screen {
 	 * in the way -- and hiding is only muting that also leaves the piano roll.</p>
 	 */
 	private enum LayerState {
-		ACTIVE("A", 0xFFE8EAEE, 0xFF3A4048, "Played and drawn."),
-		MUTED("M", 0xFFFFB05A, 0xFF3E332A, "Silent, still drawn."),
-		SOLO("S", 0xFFFFD65A, 0xFF453D22,
-			"Heard alone. Listening only; it does not change what builds."),
-		HIDDEN("H", 0xFF787D85, 0xFF24272B, "Silent and out of the piano roll.");
+		ACTIVE("A", "Active", 0xFFE8EAEE, 0xFF3A4048,
+			"you hear it, and it is in the piano roll."),
+		MUTED("M", "Muted", 0xFFFFB05A, 0xFF3E332A,
+			"silent, but still in the roll and still editable. Its instrument wears a red slash."),
+		SOLO("S", "Solo", 0xFFFFD65A, 0xFF453D22,
+			"the only thing you hear. Every other layer is slashed out until you turn it off."),
+		HIDDEN("H", "Hidden", 0xFF787D85, 0xFF24272B,
+			"silent and out of the piano roll, so it is not in the way. Its row is greyed out.");
 
 		private final String letter;
+		private final String title;
 		private final int color;
 		private final int chip;
 		private final String description;
 
-		LayerState(String letter, int color, int chip, String description) {
+		LayerState(String letter, String title, int color, int chip, String description) {
 			this.letter = letter;
+			this.title = title;
 			this.color = color;
 			this.chip = chip;
 			this.description = description;
+		}
+
+		private String sentence() {
+			return title + " - " + description;
 		}
 	}
 
@@ -779,6 +811,47 @@ public final class ComposerScreen extends Screen {
 				+ " now; Ctrl+Z puts them back.";
 		}
 		showResult(Component.literal(summary));
+	}
+
+	/**
+	 * Removes the selected layers and says what went with them.
+	 *
+	 * <p>No confirmation, because Ctrl+Z is one and a better one -- a dialog asks before you can see
+	 * what you did, undo asks after. The count is reported for the same reason merging reports one:
+	 * the panel scrolls, and a selection made three screens up can be larger than it looks.</p>
+	 */
+	private void deleteSelectedLayers() {
+		List<Integer> deleting = selectedLayers.stream()
+			.filter(index -> index >= 0 && index < project().layers().size())
+			.sorted()
+			.toList();
+		if (deleting.isEmpty()) {
+			return;
+		}
+		int notes = deleting.stream().mapToInt(index -> project().layers().get(index).notes().size()).sum();
+		boolean all = deleting.size() == project().layers().size();
+		String only = deleting.size() == 1
+			? " \"" + project().layers().get(deleting.getFirst()).name() + "\""
+			: "";
+		apply(project().deleteLayers(Set.copyOf(deleting)));
+		// Solo is held by index, and every layer below a deleted one just moved up. Renumbering
+		// rather than clearing, so deleting a layer you were not listening to does not also stop
+		// you listening to the one you were.
+		List<Integer> stillSoloed = soloedLayers.stream()
+			.filter(index -> !deleting.contains(index))
+			.map(index -> index - (int)deleting.stream().filter(gone -> gone < index).count())
+			.toList();
+		soloedLayers.clear();
+		soloedLayers.addAll(stillSoloed);
+		instrumentMenuLayer = -1;
+		cancelLayerRename();
+		resetLayerView();
+		layersChanged();
+		rebuildMoveLayerButtons();
+		showResult(Component.literal("Deleted " + deleting.size()
+			+ (deleting.size() == 1 ? " layer" : " layers") + only + " and " + notes + " notes."
+			+ (all ? " That was all of them, so an empty layer is left to work in." : "")
+			+ " Ctrl+Z puts them back."));
 	}
 
 	private void updateLayer(int index, Layer layer) {
@@ -1186,6 +1259,7 @@ public final class ComposerScreen extends Screen {
 		int selected = selectedLayers.size();
 		return switch (action) {
 			case MERGE_SELECTED -> "Merge " + selected + " layers (Ctrl+E)";
+			case DELETE_SELECTED -> "Delete " + layerCountLabel(Math.max(1, selected));
 			case INCLUDE_SELECTED -> "Include " + layerCountLabel(Math.max(1, selected)) + " in sequence";
 			case SET_INCLUDED_TO_SELECTION ->
 				"Include only " + layerCountLabel(Math.max(1, selected)) + " in sequence";
@@ -1204,7 +1278,8 @@ public final class ComposerScreen extends Screen {
 	private boolean layerActionEnabled(LayerAction action) {
 		return switch (action) {
 			case MERGE_SELECTED -> selectedLayers.size() >= 2;
-			case INCLUDE_SELECTED, SET_INCLUDED_TO_SELECTION -> !selectedLayers.isEmpty();
+			case DELETE_SELECTED, INCLUDE_SELECTED, SET_INCLUDED_TO_SELECTION ->
+				!selectedLayers.isEmpty();
 			case RENAME, SELECT_ALL -> true;
 		};
 	}
@@ -1226,6 +1301,7 @@ public final class ComposerScreen extends Screen {
 		switch (action) {
 			case RENAME -> beginLayerRename(project().activeLayerIndex());
 			case MERGE_SELECTED -> mergeSelectedLayers();
+			case DELETE_SELECTED -> deleteSelectedLayers();
 			case INCLUDE_SELECTED -> setIncludedLayers(true);
 			case SET_INCLUDED_TO_SELECTION -> setIncludedLayers(false);
 			case SELECT_ALL -> {
@@ -1983,6 +2059,8 @@ public final class ComposerScreen extends Screen {
 			case MERGE_SELECTED -> "Folds the selected layers into the lowest-numbered one, which "
 				+ "keeps its name and instrument -- so merging across two instruments gives every "
 				+ "note the surviving one. Ctrl+E does the same thing.";
+			case DELETE_SELECTED -> "Removes the selected layers and every note on them. Deleting all "
+				+ "of them leaves one empty layer to work in. Ctrl+Z puts them back.";
 			case INCLUDE_SELECTED -> "Fills in the build dot on the selected layers, adding them to "
 				+ "the sequence.";
 			case SET_INCLUDED_TO_SELECTION -> "Makes the selected layers the only included ones, "
@@ -2292,19 +2370,42 @@ public final class ComposerScreen extends Screen {
 			// and the only label short enough to leave the name any room.
 			graphics.item(new ItemStack(PreviewInstrument.byId(layer.instrument()).icon()),
 				row.instrumentX(), y - 1);
+			// Whether you will hear this layer, marked on the thing that makes the sound -- and the
+			// one part of a row that survives every width, so a folded panel still answers it. A
+			// layer another layer's solo has quieted gets a fainter slash than one you muted
+			// yourself: the same answer to "will I hear it", a different answer to "who decided".
+			boolean soloElsewhere = state == LayerState.ACTIVE && !soloedLayers.isEmpty();
+			if (state == LayerState.MUTED || state == LayerState.HIDDEN || soloElsewhere) {
+				slashInstrument(graphics, row.instrumentX(), y - 1,
+					soloElsewhere ? 0x88E0544F : 0xFFE0544F);
+			}
 			if (row.name()) {
 				String mark = selected ? "✓ " : "";
 				String label = mark + layer.name() + "  (" + layer.notes().size() + ")";
 				smallText(graphics, smallFit(label, row.nameRight() - row.nameLeft()),
 					row.nameLeft(), y + 5,
-					state == LayerState.HIDDEN ? 0xFF80858C
-						: activeLayer ? 0xFFFFFFFF : selected ? 0xFFE8F4FF : 0xFFD6D8DD);
+					activeLayer ? 0xFFFFFFFF : selected ? 0xFFE8F4FF : 0xFFD6D8DD);
+			}
+			if (state == LayerState.HIDDEN) {
+				// Hidden is muted and also gone from the roll, so it gets the slash and then the row
+				// dimmed over it. Two marks for two facts, which is what makes them read together:
+				// slashed is silent, grey is not in the roll, and hidden is both.
+				//
+				// Stopping short of the build dot on purpose. Hiding a layer does not take it out of
+				// the build, and greying the one control that says so would claim that it had. The
+				// colour stripe survives for the same reason it survives every width -- once a layer
+				// is dim and nameless the stripe is what is left to recognise it by.
+				// Inside the row's own border, so that a hidden layer you have selected still shows
+				// the outline saying so.
+				graphics.fill(left + (row.chip() ? 4 : 2), y - 1,
+					row.dot() ? row.dotX() - 3 : row.ordinalLeft() - 2, y + rowHeight - 3, 0xAA0E1014);
 			}
 			if (row.dot()) {
 				// Filled means this layer goes into the build sequence. Deliberately not the same
 				// control as the state icon beside it: what you hear while working and what gets
 				// built are different questions, and one switch for both is how a layer goes missing.
-				graphics.text(font, Component.literal(layer.buildEnabled() ? "●" : "○"),
+				graphics.text(font,
+					Component.literal(layer.buildEnabled() ? BUILD_DOT_ON : BUILD_DOT_OFF),
 					row.dotX(), y + 4, layer.buildEnabled() ? 0xFF5AD46A : 0xFF6A7078, false);
 			}
 			// The row number is for pointing at a layer out loud, nothing more, so it sits out at the
@@ -2340,12 +2441,14 @@ public final class ComposerScreen extends Screen {
 		int instrumentLayer = layerInstrumentAt(lastMouseX, lastMouseY);
 		int dotLayer = buildDotAt(lastMouseX, lastMouseY);
 		if (stateLayer >= 0) {
-			text = Component.literal(layerState(stateLayer).description
-				+ "\nClick steps A - M - S - H, right-click steps back.");
+			text = Component.literal(layerStateTooltip(stateLayer));
 		} else if (instrumentLayer >= 0) {
+			// The slash is drawn on this icon, so this is where someone points to ask about it.
+			String silence = audibilityNote(instrumentLayer);
 			text = Component.literal(
 				PreviewInstrument.byId(project().layers().get(instrumentLayer).instrument()).name()
-					+ " - click to change the note-block instrument");
+					+ " - click to change the note-block instrument"
+					+ (silence == null ? "" : "\n" + silence));
 		} else if (dotLayer >= 0) {
 			text = Component.literal(project().layers().get(dotLayer).buildEnabled()
 				? "In the build sequence - click to leave it out"
@@ -2354,6 +2457,45 @@ public final class ComposerScreen extends Screen {
 		if (text != null) {
 			graphics.setTooltipForNextFrame(font, font.split(text, 200), x, y);
 		}
+	}
+
+	/**
+	 * What the state chip says, what the next click would make it, and what it will never touch.
+	 *
+	 * <p>It used to name the four letters and leave you to work out which way round they went. The
+	 * four are a dial, so the useful thing while pointing at one is where a click lands, not a list
+	 * of the other three. The last line is there because a row has two switches and mistaking them
+	 * is how a layer that sounded right in the composer goes missing from the build.</p>
+	 */
+	private String layerStateTooltip(int index) {
+		LayerState[] dial = LayerState.values();
+		LayerState state = layerState(index);
+		String silence = state == LayerState.ACTIVE ? audibilityNote(index) : null;
+		return state.sentence()
+			+ (silence == null ? "" : "\n" + silence)
+			+ "\n\nClick for " + dial[Math.floorMod(state.ordinal() + 1, dial.length)].title
+			+ ", right-click for " + dial[Math.floorMod(state.ordinal() - 1, dial.length)].title + "."
+			+ "\nNone of the four decide what gets built. That is the dot at the end of the row.";
+	}
+
+	/**
+	 * Why this layer is quiet, or null when it is not.
+	 *
+	 * <p>Includes the case the chip cannot show: a layer nobody muted, silent because something
+	 * else is soloed. That is the one a player is most likely to be confused by, since its own
+	 * letter still reads A.</p>
+	 */
+	private String audibilityNote(int index) {
+		LayerState state = layerState(index);
+		if (state == LayerState.MUTED || state == LayerState.HIDDEN) {
+			return state.sentence();
+		}
+		if (state != LayerState.ACTIVE || soloedLayers.isEmpty()) {
+			return null;
+		}
+		return soloedLayers.size() == 1
+			? "Silent right now: layer " + (soloedLayers.iterator().next() + 1) + " is soloed."
+			: "Silent right now: " + soloedLayers.size() + " layers are soloed.";
 	}
 
 	/** Whether a point lands on a menu drawn over the layer panel. */
@@ -2391,6 +2533,23 @@ public final class ComposerScreen extends Screen {
 	 * the layer panel: a converted song is dozens of layers whose names differ only in a suffix,
 	 * and full-size text spent the panel's width on four of them at a time.</p>
 	 */
+	/**
+	 * A red diagonal across a sixteen-pixel instrument icon: this layer is making no sound.
+	 *
+	 * <p>Stepped squares because there is no line to draw with here, and a dark square behind every
+	 * red one because an item icon is a picture and a bare red diagonal vanishes into the ones with
+	 * red in them. Fourteen quads a row, only for rows that are actually silent and only for rows
+	 * the list is showing.</p>
+	 */
+	private void slashInstrument(GuiGraphicsExtractor graphics, int x, int y, int color) {
+		for (int step = 0; step < 7; step++) {
+			int px = x + 1 + step * 2;
+			int py = y + 13 - step * 2;
+			graphics.fill(px, py + 1, px + 3, py + 4, 0xAA05070A);
+			graphics.fill(px, py, px + 3, py + 3, color);
+		}
+	}
+
 	private void smallText(GuiGraphicsExtractor graphics, String text, int x, int y, int color) {
 		graphics.pose().pushMatrix();
 		graphics.pose().translate(x, y);
@@ -3652,7 +3811,14 @@ public final class ComposerScreen extends Screen {
 			return true;
 		}
 		if (event.isPaste()) {
-			pasteClipboard();
+			pasteClipboard(false);
+			return true;
+		}
+		// isPaste is Ctrl+V with no shift, so the shifted one is free for the variant of it -- the
+		// same shift-a-variant convention Ctrl+Shift+S and Ctrl+Shift+C already follow here.
+		if (event.hasControlDownWithQuirk() && event.hasShiftDown()
+				&& event.key() == GLFW.GLFW_KEY_V) {
+			pasteClipboard(true);
 			return true;
 		}
 		if (event.hasControlDownWithQuirk() && event.key() == GLFW.GLFW_KEY_Z) {
@@ -4251,19 +4417,43 @@ public final class ComposerScreen extends Screen {
 	}
 
 	/**
-	 * Whether the composition differs from the copy on disk.
+	 * Whether there is work here that leaving would throw away.
+	 *
+	 * <p>Compares the music and not the whole document. The record carries the active layer along
+	 * with the notes, so clicking a different layer used to make the composition compare unequal to
+	 * the one it came from -- looking around the composer and leaving asked whether to save changes
+	 * nobody had made.</p>
 	 *
 	 * <p>Cached on the identity of both sides, which is sound because compositions are immutable:
 	 * the comparison itself walks every note of every layer, and the toolbar asks once a frame.</p>
 	 */
-	private boolean unsaved() {
+	private boolean unsavedEdits() {
 		ComposerProject current = project();
 		if (unsavedCacheProject != current || unsavedCacheBaseline != savedProject) {
 			unsavedCacheProject = current;
 			unsavedCacheBaseline = savedProject;
-			unsavedCacheResult = !current.equals(savedProject);
+			unsavedCacheResult = !current.sameContentAs(savedProject);
 		}
 		return unsavedCacheResult;
+	}
+
+	/**
+	 * Whether the composition differs from the copy on disk, which is what the title reports.
+	 *
+	 * <p>Wider than {@link #unsavedEdits} by one case, and the difference is the whole reason there
+	 * are two. An untouched import has no unsaved work in it, so leaving does not ask -- but it has
+	 * no file either, so the title says unsaved until Save gives it one. Warning about it and
+	 * stopping you over it are different bars.</p>
+	 *
+	 * <p>A blank document with no file is not called unsaved, because there is nothing in it to
+	 * save. It picks the mark up the moment it holds a note.</p>
+	 */
+	private boolean unsaved() {
+		return unsavedEdits() || (!config.hasSongFile() && !isBlank(project()));
+	}
+
+	private static boolean isBlank(ComposerProject song) {
+		return song.layers().stream().allMatch(layer -> layer.notes().isEmpty());
 	}
 
 	/**
@@ -4274,7 +4464,7 @@ public final class ComposerScreen extends Screen {
 	 * to keep it.</p>
 	 */
 	private void withUnsavedChangesChecked(Runnable leave) {
-		if (!unsaved()) {
+		if (!unsavedEdits()) {
 			leave.run();
 			return;
 		}
@@ -4298,7 +4488,14 @@ public final class ComposerScreen extends Screen {
 	 * asked about the same edits every time -- discard, discard, discard, forever.</p>
 	 */
 	private void discardEdits() {
-		config.discardComposerEdits();
+		if (config.hasSongFile()) {
+			config.discardComposerEdits();
+		} else {
+			// No file to go back to, but there is what the document was when it opened -- for an
+			// import, the import. Blanking it here would discard the file you picked as well as the
+			// edits you declined, and only one of those was offered.
+			config.setComposerProject(savedProject);
+		}
 		history.reset(config.composerProject());
 		savedProject = baseline(config, history.current());
 		afterStateChange();
@@ -4404,11 +4601,15 @@ public final class ComposerScreen extends Screen {
 		return index >= 0 && index < project().layers().size() && layerRowVisible(index) ? index : -1;
 	}
 
-	/** The build dot's clickable box, a little larger than the glyph so it is easy to hit. */
+	/**
+	 * The build dot's clickable box: the glyph and a little air, and no more than that.
+	 *
+	 * <p>It used to reach ten pixels past the glyph, which was harmless while the number was out at
+	 * the panel's edge and swallows clicks meant for the number now that the two sit together.</p>
+	 */
 	private int buildDotAt(double x, double y) {
-		return layerRowLayout().dot() && x >= buildDotX() - 4 && x <= buildDotX() + 10
-			? layerRowAt(x, y)
-			: -1;
+		LayerRowLayout row = layerRowLayout();
+		return row.dot() && x >= row.dotX() - 3 && x < row.dotRight() + 2 ? layerRowAt(x, y) : -1;
 	}
 
 	/** The one control that decides whether a layer is soloed, heard, silent or gone. */
@@ -4520,20 +4721,34 @@ public final class ComposerScreen extends Screen {
 		editingLayer = -1;
 	}
 
+	/**
+	 * Copies the selection, keeping which voice each note was in.
+	 *
+	 * <p>Gathered layer by layer rather than by flattening every note first, because the instrument
+	 * belongs to the layer and not the note -- flattening is where it used to get lost.</p>
+	 */
 	private void copySelection() {
-		List<NoteEvent> selected = project().layers().stream()
-			.flatMap(layer -> layer.notes().stream())
-			.filter(note -> selectedNotes.contains(note.id()))
-			.sorted(Comparator.comparingLong(NoteEvent::startTick)
-				.thenComparingInt(NoteEvent::midiNote))
-			.toList();
+		record Copied(Layer layer, NoteEvent note) {
+		}
+		List<Copied> selected = new ArrayList<>();
+		for (Layer layer : project().layers()) {
+			for (NoteEvent note : layer.notes()) {
+				if (selectedNotes.contains(note.id())) {
+					selected.add(new Copied(layer, note));
+				}
+			}
+		}
 		if (selected.isEmpty()) {
 			return;
 		}
-		long firstTick = selected.stream().mapToLong(NoteEvent::startTick).min().orElse(0L);
+		selected.sort(Comparator.comparingLong((Copied copied) -> copied.note().startTick())
+			.thenComparingInt(copied -> copied.note().midiNote()));
+		clipboardOriginTick = selected.stream().mapToLong(copied -> copied.note().startTick()).min()
+			.orElse(0L);
 		clipboard = selected.stream()
-			.map(note -> new ClipboardNote(note.startTick() - firstTick, note.midiNote(),
-				note.durationTicks(), note.velocity()))
+			.map(copied -> new ClipboardNote(copied.note().startTick() - clipboardOriginTick,
+				copied.note().midiNote(), copied.note().durationTicks(), copied.note().velocity(),
+				copied.layer().instrument(), copied.layer().name()))
 			.toList();
 	}
 
@@ -4544,17 +4759,37 @@ public final class ComposerScreen extends Screen {
 		}
 	}
 
-	private void pasteClipboard() {
+	/**
+	 * Pastes at the cursor, or where it was copied from.
+	 *
+	 * <p>In place is the one paste that has no aim to take: doubling a part onto another instrument
+	 * or moving it between layers means landing on the same beat it left, and finding that beat by
+	 * hand at the zoom the whole song fits in is not something a cursor can do.</p>
+	 */
+	private void pasteClipboard(boolean inPlace) {
 		if (clipboard.isEmpty()) {
 			return;
 		}
-		long startTick = insideRoll(lastMouseX, lastMouseY)
-			? snapTick(mouseTick(lastMouseX))
+		long startTick = inPlace ? clipboardOriginTick
+			: insideRoll(lastMouseX, lastMouseY) ? snapTick(mouseTick(lastMouseX))
 			: snapTick(horizontalScroll);
+		int before = project().layers().size();
 		PasteResult result = project().pasteNotes(project().activeLayerIndex(), clipboard, startTick);
 		apply(result.project());
 		selectedNotes.clear();
 		selectedNotes.addAll(result.noteIds());
+		layersChanged();
+		rebuildMoveLayerButtons();
+		// Said out loud only when the paste had to change the shape of the composition. A paste that
+		// lands where you pointed it needs no announcement; one that made three layers does.
+		if (result.addedLayers() > 0) {
+			long instruments = clipboard.stream().map(ClipboardNote::instrument).distinct().count();
+			showResult(Component.literal(result.noteIds().size() + " notes pasted. The copy spans "
+				+ instruments + " instruments and a layer holds one, so "
+				+ (project().layers().size() - before)
+				+ (result.addedLayers() == 1 ? " layer was" : " layers were")
+				+ " added to keep them apart."));
+		}
 	}
 
 	private void updateButtonStates() {
@@ -4870,7 +5105,8 @@ public final class ComposerScreen extends Screen {
 
 	/** Where each part of a layer row goes, and whether the panel is wide enough to have it. */
 	private record LayerRowLayout(int inset, boolean chip, boolean dot, boolean name,
-			int instrumentX, int nameLeft, int nameRight, int dotX, int ordinalRight) {
+			int instrumentX, int nameLeft, int nameRight, int dotX, int dotRight, int ordinalLeft,
+			int ordinalRight) {
 	}
 
 	/** One row of an open menu: a thing to do, a setting to cycle, or a submenu to open. */
@@ -5041,7 +5277,10 @@ public final class ComposerScreen extends Screen {
 		MERGE_SELECTED("Merge selected"),
 		INCLUDE_SELECTED("Include selected layers in sequence"),
 		SET_INCLUDED_TO_SELECTION("Include only selected layers in sequence"),
-		SELECT_ALL("Select all layers");
+		SELECT_ALL("Select all layers"),
+		// Last, and not next to Merge. The two read alike in a hurry and only one of them can be
+		// reached by a slip of the hand from a row you meant to rename.
+		DELETE_SELECTED("Delete selected");
 
 		private final String label;
 
