@@ -12,11 +12,15 @@ import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.commands.arguments.coordinates.BlockPosArgument;
+import net.minecraft.commands.arguments.coordinates.Coordinates;
+import net.minecraft.commands.arguments.coordinates.WorldCoordinates;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.HoverEvent;
+import net.minecraft.world.phys.Vec3;
 
 /**
  * Commands for building a stated run of chords, off unless the setting is on.
@@ -46,6 +50,18 @@ import net.minecraft.network.chat.HoverEvent;
  * <p>The dry form is the one that gets used most: it reports the faults, the size and where the
  * build would land without touching the world, so a dozen widths can be tried in as many seconds.
  * Both forms report the same line, so what you read in chat is what you would have got.</p>
+ *
+ * <p>And the other half of the same job, reading a build rather than making one:</p>
+ *
+ * <pre>
+ *   /asciidiagram 13 72 108 15 76 113 east    that box, sliced west to east
+ *   /asciidiagram ~-8 ~ ~-8 ~8 ~4 ~8          the ground around you, sliced downwards
+ * </pre>
+ *
+ * <p>Two corners and a point of view, the corners taken the way {@code /setblock} takes them -- so
+ * looking at one and pressing tab fills it in. Chat gets the size and two links; clicking either
+ * copies the diagram itself to the clipboard, since chat is too narrow to print one into and wraps
+ * without saying so, which reads as a broken build rather than a broken line.</p>
  */
 public final class DebugCommands {
 	private DebugCommands() {
@@ -61,30 +77,57 @@ public final class DebugCommands {
 				.then(literal("dry").then(wall(true))));
 			dispatcher.register(literal("asciidiagram")
 				.requires(source -> FastNoteblocksConfig.get().debugCommandsEnabled())
-				.then(corner("x1").then(corner("y1").then(corner("z1")
-					.then(corner("x2").then(corner("y2").then(views())))))));
+				.then(corner("from").then(views())));
 		});
 	}
 
-	private static RequiredArgumentBuilder<FabricClientCommandSource, Integer> corner(String name) {
-		return RequiredArgumentBuilder.argument(name, IntegerArgumentType.integer(-30_000_000,
-			30_000_000));
+	/**
+	 * A corner, as the same argument {@code /setblock} takes.
+	 *
+	 * <p>Which is worth it for the suggestions alone. Fabric mixes its client command source into
+	 * {@code ClientSuggestionProvider}, whose {@code getRelevantCoordinates} hands back whatever
+	 * block the crosshair is on -- so the corners of the box can be filled in by looking at them and
+	 * pressing tab, rather than read off the debug screen and typed. {@code ~} works for the same
+	 * reason. Absolute numbers parse exactly as they did when this took six of them.</p>
+	 */
+	private static RequiredArgumentBuilder<FabricClientCommandSource, Coordinates> corner(
+			String name) {
+		return RequiredArgumentBuilder.argument(name, BlockPosArgument.blockPos());
 	}
 
 	/**
-	 * The last corner, and then which way the reader is facing.
+	 * The far corner, and then which way the reader is facing.
 	 *
 	 * <p>Left off it is {@code top}, because that is the one anybody draws by hand and the one a
 	 * corridor is easiest to count columns along.</p>
 	 */
-	private static RequiredArgumentBuilder<FabricClientCommandSource, Integer> views() {
-		RequiredArgumentBuilder<FabricClientCommandSource, Integer> last = corner("z2")
+	private static RequiredArgumentBuilder<FabricClientCommandSource, Coordinates> views() {
+		RequiredArgumentBuilder<FabricClientCommandSource, Coordinates> last = corner("to")
 			.executes(context -> diagram(context, AsciiDiagram.View.TOP));
 		for (AsciiDiagram.View view : AsciiDiagram.View.values()) {
 			last = last.then(literal(view.name().toLowerCase(java.util.Locale.ROOT))
 				.executes(context -> diagram(context, view)));
 		}
 		return last;
+	}
+
+	/**
+	 * Where a corner actually is, resolved without a server.
+	 *
+	 * <p>{@code BlockPosArgument.getBlockPos} wants a {@code CommandSourceStack}, which a client
+	 * command has not got. It does not need one: the parsed value is a record of three coordinates
+	 * that are each either absolute or an offset, and the client knows where the player is standing.
+	 * Caret coordinates are the one form that also wants the anchor and the facing, and they are no
+	 * use for picking the corners of a box, so they are refused rather than half-supported.</p>
+	 */
+	private static BlockPos corner(FabricClientCommandSource source,
+			CommandContext<FabricClientCommandSource> context, String name) {
+		if (!(context.getArgument(name, Coordinates.class) instanceof WorldCoordinates corner)) {
+			return null;
+		}
+		Vec3 standing = source.getPosition();
+		return BlockPos.containing(corner.x().get(standing.x), corner.y().get(standing.y),
+			corner.z().get(standing.z));
 	}
 
 	/**
@@ -102,12 +145,13 @@ public final class DebugCommands {
 			source.sendError(Component.literal("No world loaded."));
 			return 0;
 		}
-		BlockPos from = new BlockPos(IntegerArgumentType.getInteger(context, "x1"),
-			IntegerArgumentType.getInteger(context, "y1"),
-			IntegerArgumentType.getInteger(context, "z1"));
-		BlockPos to = new BlockPos(IntegerArgumentType.getInteger(context, "x2"),
-			IntegerArgumentType.getInteger(context, "y2"),
-			IntegerArgumentType.getInteger(context, "z2"));
+		BlockPos from = corner(source, context, "from");
+		BlockPos to = corner(source, context, "to");
+		if (from == null || to == null) {
+			source.sendError(Component.literal("Caret coordinates (^) are not supported here. "
+				+ "Give numbers, or ~ offsets, or look at a corner and press tab."));
+			return 0;
+		}
 		int volume = AsciiDiagram.volume(from, to);
 		if (volume > AsciiDiagram.MAX_BLOCKS) {
 			source.sendError(Component.literal("That is " + volume + " blocks. "
