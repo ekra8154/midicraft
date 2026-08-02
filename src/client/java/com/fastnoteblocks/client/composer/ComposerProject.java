@@ -510,22 +510,48 @@ public record ComposerProject(
 	 * denominator is how many repeater ticks that is. Rounding the span instead would leave every
 	 * gap a fraction short and flag the lot as too frequent.</p>
 	 */
-	public RepeaterQuantize withQuantizedToRepeaters(Set<Long> scope) {
+	/**
+	 * The grid the repeater quantize will snap to, worked out without performing it.
+	 *
+	 * <p>Not the width of one repeater tick. It is the shortest span that is a whole number of song
+	 * ticks <em>and</em> a whole number of repeater ticks, which is what makes every gap on it a
+	 * delay a build can place. Where one repeater tick is not a whole number of song ticks the grid
+	 * is several of them wide, so it is routinely nothing a musician would name -- 144 ticks, 180,
+	 * 384 -- and it lands on a note value only by coincidence.</p>
+	 *
+	 * <p>Public because the menu prints it beside the note values, and printing a different number
+	 * from the one the operation uses is worse than printing none: it invites the reading that the
+	 * two are the same grid, which they almost never are.</p>
+	 */
+	public long repeaterGridTicks() {
+		return repeaterGrid().gridTicks();
+	}
+
+	private record RepeaterGrid(long gridTicks, long repeaterTicks, int tempo) {
+	}
+
+	private RepeaterGrid repeaterGrid() {
 		long numerator = ppq * 100_000L * Math.max(1, speedQuarters);
 		long denominator = tempoMicrosPerQuarter * 4L;
 		long divisor = greatestCommonDivisor(numerator, denominator);
 		long grid = Math.max(1L, numerator / divisor);
 		long repeaterTicks = Math.max(1L, denominator / divisor);
-		int tempo = tempoMicrosPerQuarter;
-		if (repeaterTicks > MAX_REPEATER_GRID) {
-			grid = Math.max(1L, Math.round(numerator / (double)denominator));
-			repeaterTicks = 1L;
-			// Rounded up, not to nearest. The tempo has to be an integer, so the span it produces
-			// lands either side of the grid -- and a span a hair wider than the grid makes every
-			// one-tick gap 0.999 of a tick, which reads as too frequent rather than as exact. Up
-			// puts the span just inside the grid instead, where the rounding is harmless.
-			tempo = Math.max(1, (int)Math.ceil(numerator / (4.0 * grid)));
+		if (repeaterTicks <= MAX_REPEATER_GRID) {
+			return new RepeaterGrid(grid, repeaterTicks, tempoMicrosPerQuarter);
 		}
+		grid = Math.max(1L, Math.round(numerator / (double)denominator));
+		// Rounded up, not to nearest. The tempo has to be an integer, so the span it produces
+		// lands either side of the grid -- and a span a hair wider than the grid makes every
+		// one-tick gap 0.999 of a tick, which reads as too frequent rather than as exact. Up
+		// puts the span just inside the grid instead, where the rounding is harmless.
+		return new RepeaterGrid(grid, 1L, Math.max(1, (int)Math.ceil(numerator / (4.0 * grid))));
+	}
+
+	public RepeaterQuantize withQuantizedToRepeaters(Set<Long> scope) {
+		RepeaterGrid target = repeaterGrid();
+		long grid = target.gridTicks();
+		long repeaterTicks = target.repeaterTicks();
+		int tempo = target.tempo();
 		ComposerProject quantized = withTempo(tempo).withQuantized((int)Math.min(Integer.MAX_VALUE, grid), scope);
 		if (scope == null || scope.isEmpty()) {
 			// The trailing gap is a delay a build has to place like any other, so it lands on the
