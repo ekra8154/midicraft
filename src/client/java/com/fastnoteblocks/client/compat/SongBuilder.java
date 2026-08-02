@@ -556,8 +556,9 @@ public final class SongBuilder {
 				// at all and should lay no pad anywhere.
 				booked = above >= 0 && above < floors
 					? planLane(events, index, lane.pos().getX(), lane.travel().getStepX(), wall,
+						lane.travel() == forward ? nearWall : farWall,
 						currentTime, tipSignal, columnBehindBusy, turnCells, offBus, stepOffAhead,
-						layout, turning || leavingTurn)
+						climb > 0, layout, turning || leavingTurn)
 					: Map.of();
 				replan = false;
 			}
@@ -640,7 +641,8 @@ public final class SongBuilder {
 			// build seven columns out.
 			boolean split = layout.ultra() && overshoots && index > 0 && above >= 0 && above < floors
 				&& room >= 2 && room - 1 < cells
-				&& cells + offBus + stepOff <= DUST_RANGE;
+				&& cells + offBus + stepOff <= DUST_RANGE
+				&& !(booked != null && booked.containsKey(NO_SPLIT - index));
 			// Unless leaving that tick is what stops the pad reaching the wall. Then spend the whole
 			// wait on the pad and carry the event over the turn on the wire instead, which is the one
 			// way a lane whose next event is a single tick away can still end where it is meant to.
@@ -863,9 +865,11 @@ public final class SongBuilder {
 						// going to spend on its own repeater, so the plan is told the clock has moved on
 						// by that much. Otherwise it counts columns of delay the walk will not place.
 						booked = planLane(events, index, lane.pos().getX(), lane.travel().getStepX(),
-							lane.travel() == forward ? farWall : nearWall, currentTime + spentPadding,
+							lane.travel() == forward ? farWall : nearWall,
+							lane.travel() == forward ? nearWall : farWall,
+							currentTime + spentPadding,
 							tipSignal, columnBehindBusy, next.cells(), next.offBus(), next.stepOff(),
-							layout, turning || leavingTurn);
+							climb > 0, layout, turning || leavingTurn);
 						replan = false;
 					}
 				} else {
@@ -1313,8 +1317,8 @@ public final class SongBuilder {
 	 * that is what is planned here.</p>
 	 */
 	private static Map<Integer, Integer> planLane(List<EventGroup> events, int from, int startX,
-			int stepX, int wall, int startTime, int tip, boolean busy, int turnCells, int offBus,
-			int stepOff, Layout layout, boolean leaving) {
+			int stepX, int wall, int otherWall, int startTime, int tip, boolean busy, int turnCells,
+			int offBus, int stepOff, boolean climbing, Layout layout, boolean leaving) {
 		Sweep bare = sweep(events, from, startX, stepX, wall, startTime, tip, busy, offBus, layout,
 			Map.of(), leaving);
 		if (TRACE) {
@@ -1326,10 +1330,24 @@ public final class SongBuilder {
 				+ (bare.last() >= from && closes(events, bare, from, bare.last(), wall, stepX,
 					turnCells, offBus, stepOff)));
 		}
-		if (bare.last() < from
-			|| closes(events, bare, from, bare.last(), wall, stepX, turnCells, offBus, stepOff)) {
+		if (bare.last() < from) {
+			// Nothing this lane can do for itself: its own opening chord will not fit, and a pad only
+			// pushes chords nearer the wall. The column has to come from the lane before, which is
+			// planned by its own call and asks {@link #strandsNext} the same question.
 			return Map.of();
 		}
+		boolean shuts = closes(events, bare, from, bare.last(), wall, stepX, turnCells, offBus,
+			stepOff);
+		int cut = carriedCells(events, bare, from, bare.last(), wall, stepX);
+		if (shuts && !strandsNext(events, from, bare.last(), wall, otherWall, stepX, turnCells,
+				offBus, stepOff, climbing, layout, cut)) {
+			return Map.of();
+		}
+		// The lane closes, but only by cutting a chord across the turn into a lane that then cannot
+		// lay its own first chord. So the cut has to go, and the walk has to be told -- it decides to
+		// split on its own arithmetic, so a plan that quietly closes a chord earlier is a plan the
+		// walk ignores. Recorded under a negative key, which no event index can collide with.
+		boolean vetoCut = shuts && cut > 0;
 		// The natural end cannot close. Try landing on the wall a chord at a time further back, since
 		// every chord given up is a chord the next lane has to carry instead.
 		for (int last = bare.last(); last >= from; last--) {
@@ -1360,7 +1378,12 @@ public final class SongBuilder {
 						+ " triedLast=" + tried.last() + " owing=" + owing + " padCells="
 						+ end.cells().size() + " padSignal=" + end.signal() + " need=" + need);
 				}
-				if (end.cells().size() == owing && end.signal() >= need) {
+				if (end.cells().size() == owing && end.signal() >= need
+					&& !strandsNext(events, from, last, wall, otherWall, stepX, turnCells, offBus,
+						stepOff, climbing, layout, 0)) {
+					if (vetoCut) {
+						pads.put(NO_SPLIT - (last + 1), 1);
+					}
 					return Map.copyOf(pads);
 				}
 				if (owing - end.cells().size() <= 0
@@ -1531,6 +1554,53 @@ public final class SongBuilder {
 			+ Math.min(Math.abs(off), 4) + how);
 	}
 
+	/**
+	 * How much of the next chord the turn carries, for a lane closing here.
+	 *
+	 * <p>Zero when the lane lands on its wall under its own steam, and the far half of the cut when
+	 * it closes by cutting the chord across the turn -- read off {@link #closes}, whose two branches
+	 * these are, and {@code near = 2 * (room - 1)} in the walk, which is where the split is built.</p>
+	 */
+	private static int carriedCells(List<EventGroup> events, Sweep sweep, int from, int last,
+			int wall, int stepX) {
+		int room = (wall - sweep.ends().get(last - from)) * stepX;
+		if (room == 0 || last + 1 >= events.size()) {
+			return 0;
+		}
+		int carried = events.get(last + 1).notes().size() - 2 * (room - 1);
+		return carried > 0 ? (carried + 1) / 2 : 0;
+	}
+
+	/**
+	 * Whether closing here leaves the lane after this one unable to lay its own first chord.
+	 *
+	 * <p>The one thing the planner has never been able to ask. A lane that closes perfectly well may
+	 * hand over into a lane whose opening chord does not fit the columns it was left -- and that lane
+	 * has no move of its own, because a pad pushes chords towards the wall and what it needs is to
+	 * start further from one. So it lays the chord anyway and breaches two chords later, which is
+	 * every breach left in the library.</p>
+	 *
+	 * <p>Asked one lane deep and no further. That is enough for the fault ekran found, and a search
+	 * that reached back further would be re-planning the song rather than closing a lane.</p>
+	 *
+	 * @param carriedCells cells of a cut chord laid after the staircase, zero for a plain close
+	 */
+	private static boolean strandsNext(List<EventGroup> events, int from, int last, int wall,
+			int otherWall, int stepX, int turnCells, int offBus, int stepOff, boolean climbing,
+			Layout layout, int carriedCells) {
+		// The cut chord belongs to the turn, so the lane after a cut opens on the chord past it.
+		int spent = carriedCells > 0 ? last + 1 : last;
+		int first = spent + 1;
+		if (first >= events.size()) {
+			return false;
+		}
+		Sweep after = sweep(events, first,
+			nextLaneStart(wall, stepX, carriedCells, climbing, stepOff), -stepX, otherWall,
+			events.get(spent).time(), DUST_RANGE - turnCells, true, offBus, layout, Map.of(),
+			false);
+		return after.last() < first;
+	}
+
 	/** Whether the lane can hand over after this event, either by filling it out or by a cut. */
 	private static boolean closes(List<EventGroup> events, Sweep sweep, int from, int last, int wall,
 			int stepX, int turnCells, int offBus, int stepOff) {
@@ -1566,6 +1636,14 @@ public final class SongBuilder {
 		}
 		return owing == 0;
 	}
+
+	/**
+	 * Key offset under which a plan says "do not cut the chord at this index across the turn".
+	 *
+	 * <p>Negative, so it cannot be mistaken for the pad owed by an event: every other key in a plan
+	 * is an index into the song.</p>
+	 */
+	private static final int NO_SPLIT = -1;
 
 	/** How far dust carries a signal before something has to repeat it. */
 	private static final int DUST_RANGE = 15;
