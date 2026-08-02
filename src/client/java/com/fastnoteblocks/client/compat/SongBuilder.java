@@ -640,6 +640,7 @@ public final class SongBuilder {
 			int offBus = turn.offBus();
 			int wall = lane.travel() == forward ? farWall : nearWall;
 			int stepOffAhead = turn.stepOff();
+			int splitCells = turn.splitCells();
 			if (replan) {
 				// Only worth doing ahead of a staircase. The plan's whole job is to work out how much
 				// pad each chord owes so the lane arrives flush at its wall, and a lane that ends in a
@@ -651,7 +652,7 @@ public final class SongBuilder {
 					? planLane(events, index, lane.pos().getX(), lane.travel().getStepX(), wall,
 						lane.travel() == forward ? nearWall : farWall,
 						currentTime, tipSignal, columnBehindBusy, turnCells, offBus, stepOffAhead,
-						climb > 0, layout, turning || leavingTurn)
+						splitCells, climb > 0, layout, turning || leavingTurn)
 					: Map.of();
 				replan = false;
 			}
@@ -732,9 +733,14 @@ public final class SongBuilder {
 			// lane with seven and was laid anyway, a column past the wall. Ekran found it as the
 			// second of two breaches on Kick Back, and it is the same exemption that put the old
 			// build seven columns out.
+			// Charged at what a split's own crossing costs, which is not the turn plus the step off
+			// any more. A split always arrives on a bus, and a descent that may assume that is four
+			// cells rather than six -- see {@link #addSplitBusDescent}. The same sum is made in
+			// {@link #closes}, and the two have to be the same sum: a lane the planner closes by a
+			// cut and the walk refuses to cut is a lane that runs on past its wall.
 			boolean couldSplit = layout.ultra() && overshoots && index > 0 && above >= 0
 				&& above < floors && room >= 2 && room - 1 < cells
-				&& cells + offBus + stepOff <= DUST_RANGE;
+				&& cells + splitCells <= DUST_RANGE;
 			// Counted where it bites rather than where it is decided. The planner books the veto on a
 			// lane it is only considering, and most of those plans are thrown away; what matters is how
 			// often a split the walk was about to build actually got stopped, because that is the number
@@ -853,14 +859,21 @@ public final class SongBuilder {
 				// half of the chord rather than where the lane stood when it decided to split.
 				placements.recessed(((travel == forward ? farWall : nearWall) - cursor.getX())
 					* travel.getStepX());
+				// The near half is a bus by construction, so the descent may take the short way down
+				// and there is nothing to step off onto: the far half opens on the column the spiral
+				// started from, which is exactly where the old landing plus its step off arrived.
+				int splitStepOff = climb > 0 || CHEAP_SPLIT_DESCENT ? stepOff : stepOff;
+				splitStepOff = climb > 0 ? stepOff : (CHEAP_SPLIT_DESCENT ? 0 : stepOff);
 				cursor = climb > 0
 					? addGlassClimb(placements, cursor, travel, true, currentTime)
-					: addSpiralDescent(placements, cursor, travel, descentSide, currentTime);
+					: CHEAP_SPLIT_DESCENT
+						? addSplitBusDescent(placements, cursor, travel, descentSide, currentTime)
+						: addSpiralDescent(placements, cursor, travel, descentSide, currentTime);
 				floor = above;
 				travel = travel.getOpposite();
 				if (near < chord.size()) {
 					cursor = addCarriedEventModule(placements, cursor, travel, depth,
-						chord.subList(near, chord.size()), stepOff);
+						chord.subList(near, chord.size()), splitStepOff);
 				}
 				lane = Lane.straight(cursor, travel, depth);
 				// Graded against where the lane actually opened, because every hand-derivation of this
@@ -868,7 +881,7 @@ public final class SongBuilder {
 				// prediction the planner is going to search backwards on has to be checked against the
 				// walk before it is trusted, not after.
 				gradeLaneStart(placements, wallLeft, stepLeft,
-					near < chord.size() ? (chord.size() - near + 1) / 2 : 0, climb > 0, stepOff,
+					near < chord.size() ? (chord.size() - near + 1) / 2 : 0, climb > 0, splitStepOff,
 					lane.pos().getX(), climb > 0 ? "SplitClimb" : "SplitDescent");
 				lastStyle = ChordStyle.BUS;
 				// The whole run, not the half of it past the staircase. Both halves are dust from the
@@ -878,7 +891,7 @@ public final class SongBuilder {
 				// makes, which is the point: the planner closes a lane on the promise of a split, and
 				// a walk that charges the split more than the planner did refuses it and leaves the
 				// lane standing short of the wall it was measured for.
-				tipSignal = DUST_RANGE - cells - offBus - stepOff;
+				tipSignal = DUST_RANGE - cells - splitCells;
 				gradeLaneTip(placements, turnCells, tipSignal,
 					climb > 0 ? "SplitClimb" : "SplitDescent");
 				// The far half starts where the staircase left off, so its first pair of notes stands
@@ -973,7 +986,7 @@ public final class SongBuilder {
 							lane.travel() == forward ? nearWall : farWall,
 							currentTime + spentPadding,
 							tipSignal, columnBehindBusy, next.cells(), next.offBus(), next.stepOff(),
-							climb > 0, layout, turning || leavingTurn);
+							next.splitCells(), climb > 0, layout, turning || leavingTurn);
 						replan = false;
 					}
 				} else {
@@ -1326,8 +1339,32 @@ public final class SongBuilder {
 	 *     second column was bought to answer three wrong notes that turned out to be a lane landing
 	 *     past its wall, and it had been paid for at every descent since.
 	 */
-	private record TurnCost(int above, int cells, int offBus, int stepOff) {
+	/**
+	 * What a split's staircase costs the one repeater both halves run off, turn and step off
+	 * together.
+	 *
+	 * <p>Counted apart from {@link #offBus} and {@link #stepOff} because a split is the one crossing
+	 * that always arrives on a bus, and a bus runs a level above its lane. A climb was already
+	 * getting the good of that -- it skips two rungs and steps off nowhere, so three. A descent was
+	 * not: it paid five and a step off, because {@link #addSpiralDescent} has to serve a lane
+	 * arriving on anything at all. {@link #addSplitBusDescent} is the version that may assume the
+	 * bus, and it is four.</p>
+	 */
+	private record TurnCost(int above, int cells, int offBus, int stepOff, int splitCells) {
 	}
+
+	/**
+	 * Cells a split spends crossing a descent, given the far half opens where it always did.
+	 *
+	 * <p>Four, and every one of them is a rung: the wire leaves the bus a level up, drops through
+	 * the four rungs of the spiral, and the far half's own bus meets the last of them level and
+	 * one across. Nothing is spent meeting the lane it came from or stepping off onto the one it
+	 * lands on, which is what the other two used to be.</p>
+	 */
+	private static final int SPLIT_DESCENT_CELLS = 4;
+
+	/** Off puts the old six-cell spiral back, so the two can be dumped side by side. */
+	static boolean CHEAP_SPLIT_DESCENT = true;
 
 	/**
 	 * Gives a route the two corners of the turn at the end of its lane, and marks them as corners.
@@ -1352,8 +1389,13 @@ public final class SongBuilder {
 		int above = floor + climb;
 		boolean staircase = above >= 0 && above < floors;
 		int cells = staircase ? TURN_DUST_CELLS : slabStep + 2;
-		return new TurnCost(above, cells, staircase && climb > 0 ? cells - 2 : cells,
-			staircase && climb < 0 ? 1 : 0);
+		int offBus = staircase && climb > 0 ? cells - 2 : cells;
+		int stepOff = staircase && climb < 0 ? 1 : 0;
+		// A climb's split already costs what a climb off a bus costs, because a climb off a bus is
+		// what it is. Only the descent has a cheaper form of itself to be told about.
+		return new TurnCost(above, cells, offBus, stepOff,
+			staircase && climb < 0 && CHEAP_SPLIT_DESCENT ? SPLIT_DESCENT_CELLS
+				: offBus + stepOff);
 	}
 
 	/**
@@ -1422,7 +1464,8 @@ public final class SongBuilder {
 	 */
 	private static Map<Integer, Integer> planLane(List<EventGroup> events, int from, int startX,
 			int stepX, int wall, int otherWall, int startTime, int tip, boolean busy, int turnCells,
-			int offBus, int stepOff, boolean climbing, Layout layout, boolean leaving) {
+			int offBus, int stepOff, int splitCells, boolean climbing, Layout layout,
+			boolean leaving) {
 		Sweep bare = sweep(events, from, startX, stepX, wall, startTime, tip, busy, offBus, layout,
 			Map.of(), leaving);
 		if (TRACE) {
@@ -1432,7 +1475,7 @@ public final class SongBuilder {
 				+ bare.past() + " ends=" + bare.ends() + " tips=" + bare.tips() + " room="
 				+ bare.room() + " closes="
 				+ (bare.last() >= from && closes(events, bare, from, bare.last(), wall, stepX,
-					turnCells, offBus, stepOff)));
+					turnCells, offBus, splitCells)));
 		}
 		if (bare.last() < from) {
 			// Nothing this lane can do for itself: its own opening chord will not fit, and a pad only
@@ -1441,7 +1484,7 @@ public final class SongBuilder {
 			return Map.of();
 		}
 		boolean shuts = closes(events, bare, from, bare.last(), wall, stepX, turnCells, offBus,
-			stepOff);
+			splitCells);
 		int cut = carriedCells(events, bare, from, bare.last(), wall, stepX);
 		if (shuts && !strandsNext(events, from, bare.last(), wall, otherWall, stepX, turnCells,
 				offBus, stepOff, climbing, layout, cut)) {
@@ -1729,7 +1772,7 @@ public final class SongBuilder {
 
 	/** Whether the lane can hand over after this event, either by filling it out or by a cut. */
 	private static boolean closes(List<EventGroup> events, Sweep sweep, int from, int last, int wall,
-			int stepX, int turnCells, int offBus, int stepOff) {
+			int stepX, int turnCells, int offBus, int splitCells) {
 		if (last + 1 >= events.size()) {
 			return true;
 		}
@@ -1742,7 +1785,9 @@ public final class SongBuilder {
 		// the rest of it, all off the one repeater. It closes a lane wherever the lane has got to, and
 		// costs nothing, because the columns it fills are filled with music.
 		int cells = (events.get(last + 1).notes().size() + 1) / 2;
-		return room >= 2 && room - 1 < cells && cells + offBus + stepOff <= DUST_RANGE;
+		// The walk makes this same sum in {@code couldSplit}. They are one rule in two places and a
+		// disagreement between them is a lane closed on a cut that never happens.
+		return room >= 2 && room - 1 < cells && cells + splitCells <= DUST_RANGE;
 	}
 
 	/** Books what the end of a lane cannot pay for into the latest gaps that can. */
@@ -1992,6 +2037,44 @@ public final class SongBuilder {
 	 * no step ever lands directly beneath the one before last. That is why a descent comes out a
 	 * block further along than a climb, and a block to the side as well.</p>
 	 */
+	/**
+	 * The same descent, four cells instead of six, for a lane arriving on a bus.
+	 *
+	 * <p>A bus runs a level above its lane. So the spiral does not need the cell the ordinary
+	 * descent spends standing on the lane's own level to meet it: anchored one column back, its
+	 * first rung's wire sits directly below the last block of bus and one across, which is a
+	 * step down and connects on its own. That is one cell saved.</p>
+	 *
+	 * <p>The other is the step off. The ordinary descent lands a column past its spiral and walks
+	 * back into it, which is a column of dust; this one lands on the column the spiral started from,
+	 * where the far half of the chord was going to open anyway. The far half does not move -- it is
+	 * built in exactly the spot the old landing plus its step off arrived at -- which is what makes
+	 * this safe to swap in: only the staircase between the two halves changes.</p>
+	 *
+	 * <p>Four cells rather than six is two more cells of bus each side, so a split over a descent
+	 * reaches {@code (15 - 4) * 2 = 22} notes where it used to reach eighteen.</p>
+	 */
+	private static BlockPos addSplitBusDescent(PlacementPlan placements, BlockPos cursor,
+			Direction travel, Direction depth, int time) {
+		placements.turnedAt(cursor);
+		List<BlockPos> ring = List.of(
+			cursor,
+			cursor.relative(depth),
+			cursor.relative(travel).relative(depth),
+			cursor.relative(travel));
+		// Starting level with the lane, not a step below it. The bus hands over from two levels up,
+		// so the four rungs' wire runs 65, 64, 63, 62 to a lane at 60 -- the last of them level with
+		// the far half's own bus, which is what lets the far half meet it head on instead of being
+		// stepped off onto. Anchored a step lower, the second rung stands in the air a note block
+		// needs above it and the build refuses outright, which is how this was found.
+		for (int step = 1; step <= CUBE_FLOOR_HEIGHT; step++) {
+			BlockPos stone = ring.get((step - 1) % ring.size()).below(step - 1);
+			placements.powered(stone, "minecraft:stone", time);
+			set(placements, stone.above(), "minecraft:redstone_wire");
+		}
+		return cursor.below(CUBE_FLOOR_HEIGHT);
+	}
+
 	private static BlockPos addSpiralDescent(PlacementPlan placements, BlockPos cursor,
 			Direction travel, Direction depth, int time) {
 		placements.turnedAt(cursor);
