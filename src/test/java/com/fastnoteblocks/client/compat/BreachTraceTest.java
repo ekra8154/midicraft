@@ -46,13 +46,59 @@ class BreachTraceTest {
 		}
 	}
 
+	/** Every breach left in a song somebody actually wrote, with the build it happens in. */
+	@Test
+	void listsTheRealBreachesLeft() throws Exception {
+		List<Path> files;
+		try (java.util.stream.Stream<Path> listing =
+				Files.list(Path.of("run", "config", "fast-noteblocks", "songs"))) {
+			files = listing.filter(path -> path.toString().endsWith(".json")).sorted().toList();
+		}
+		for (Path file : files) {
+			String name = file.getFileName().toString().replace(".json", "");
+			if (name.startsWith("ultra-")) {
+				continue;
+			}
+			ComposerProject song;
+			try (Reader reader = Files.newBufferedReader(file)) {
+				ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
+				song = new ComposerProject(raw.name(), raw.ppq(), raw.tempoMicrosPerQuarter(),
+					raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(), raw.endTick(),
+					raw.speedQuarters());
+			}
+			List<SongBuilder.EventNote> notes =
+				SongBuilder.eventNotes(song.toSequenceTracks(Set.of(), true));
+			if (notes.isEmpty()) {
+				continue;
+			}
+			for (int floors = 1; floors <= 6; floors++) {
+				for (int width = 12; width <= 48; width += 4) {
+					SongBuilder.PastePlan plan;
+					try {
+						plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0), notes,
+							SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+							new SongBuilder.BuildLimits(4, width, floors));
+					} catch (RuntimeException refused) {
+						continue;
+					}
+					for (String fault : plan.faults()) {
+						if (fault.startsWith("a lane turned -")) {
+							System.out.println("LEFT " + name + " f" + floors + " w" + width
+								+ " : " + fault);
+						}
+					}
+				}
+			}
+		}
+	}
+
 	@Test
 	void illitFourTwelve() throws Exception {
 		trace("illit-do-the-dance", 4, 12);
 	}
 
 	@Test
-	void illitSixTwenty() throws Exception {
-		trace("illit-do-the-dance", 6, 20);
+	void illitSixTwelve() throws Exception {
+		trace("illit-do-the-dance", 6, 12);
 	}
 }
