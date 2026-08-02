@@ -1450,36 +1450,34 @@ public final class ComposerScreen extends Screen {
 		selectedNotes.addAll(thinned.noteIds());
 		updateButtonStates();
 		int layerCount = project().layers().size();
+		// Scope first, before any number it qualifies. The likeliest way to be surprised by this is
+		// to run it on whichever layer happened to be active, get a fraction of the song, and read
+		// that as the song being done -- and a caveat at the end of a paragraph arrives too late to
+		// stop that. Everything after the colon is about the layers named before it.
 		String where = scope.size() == layerCount
-			? "all " + layerCount + " layers"
-			: scope.size() + " of " + layerCount + " layers";
+			? "Notes from all " + layerCount + " layers"
+			: "Notes from " + scope.size() + " of " + layerCount
+				+ " layers selected (select more layers to thin more at once)";
 		if (thinned.chordsOver() == 0) {
 			showResult(Component.literal("No chord is over " + target + " - nothing to thin."));
 			return;
 		}
 		if (thinned.isEmpty()) {
-			showResult(Component.literal(thinned.chordsOver() + " chords are over " + target
-				+ ", but nothing in " + where + " can be spared: every sound there is the last of "
-				+ "its pitch or the last of its instrument. Select more layers to give it room."));
+			showResult(Component.literal(where + ": nothing here can be spared, so all "
+				+ thinned.chordsOver() + " chords over " + target + " are untouched. Every sound "
+				+ "in these layers is the last of its pitch or the last of its instrument."));
 			return;
 		}
 		// Sounds and notes are different numbers whenever deduplication is on, and saying only one
 		// of them invites the obvious wrong conclusion -- that deleting the selection will take the
 		// count down by however many notes it holds.
-		StringBuilder summary = new StringBuilder(thinned.chordsThinned() + " of "
-			+ thinned.chordsOver() + " chords over " + target + " thinned from " + where + ": "
+		StringBuilder summary = new StringBuilder(where + ": " + thinned.chordsThinned() + " of "
+			+ thinned.chordsOver() + " chords over " + target + " thinned, "
 			+ thinned.soundsRemoved() + " sounds selected as " + thinned.noteIds().size()
 			+ " notes. Delete to commit, Escape to keep them.");
 		if (thinned.chordsStillOver() > 0) {
 			summary.append(' ').append(thinned.chordsStillOver()).append(" still over ")
 				.append(target).append('.');
-		}
-		// The likeliest way to be surprised by this: run it on the one layer that happened to be
-		// active, get a fraction of the song, and read that as the whole song being done.
-		if (scope.size() < layerCount) {
-			summary.append(" This was ").append(where)
-				.append(" - click the top layer and shift-click the bottom one to thin the whole "
-					+ "song at once.");
 		}
 		showResult(Component.literal(summary.toString()));
 	}
@@ -2580,9 +2578,6 @@ public final class ComposerScreen extends Screen {
 		}
 		for (int index = 0; index < lines.size(); index++) {
 			graphics.text(font, lines.get(index), x, y + index * (font.lineHeight + 2), 0xFFFFFFFF, false);
-		}
-		if (held) {
-			smallText(graphics, "held while hovered", left, bottom + 2, 0xFF8FD3FF);
 		}
 	}
 
