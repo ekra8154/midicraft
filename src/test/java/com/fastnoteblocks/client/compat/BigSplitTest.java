@@ -137,6 +137,41 @@ class BigSplitTest {
 		}
 	}
 
+	/**
+	 * The ceiling, measured rather than derived. A cut's budget is the transition cell, half the
+	 * tail, and the staircase; the head's seven notes cost the wire nothing, which is the whole
+	 * point of the shape. That predicts twenty-seven over a four-cell descent and twenty-nine over
+	 * a three-cell climb, and the arithmetic has been wrong before -- so sweep the chord size and
+	 * ask the builder which sizes it actually cuts with a head.
+	 */
+	@Test
+	void carriesTwentySevenDownAndTwentyNineUp() {
+		SongBuilder.STACKED_SPLIT_HEADS = true;
+		int biggestDescent = 0;
+		int biggestClimb = 0;
+		for (int chord = 20; chord <= 30; chord++) {
+			int descent = 0;
+			int climb = 0;
+			for (int floors = 2; floors <= 4; floors++) {
+				for (int width = 20; width <= 36; width += 8) {
+					Map<String, Integer> pad = build(hugeChordSong(chord, chord, 11L), width, floors)
+						.padding();
+					descent += pad.getOrDefault("planStackedSplitDescent", 0);
+					climb += pad.getOrDefault("planStackedSplitClimb", 0);
+				}
+			}
+			System.out.println("BIGSPLIT chord=" + chord + " descent=" + descent + " climb=" + climb);
+			if (descent > 0) {
+				biggestDescent = chord;
+			}
+			if (climb > 0) {
+				biggestClimb = chord;
+			}
+		}
+		assertEquals(27, biggestDescent, "biggest chord a headed cut carries down a staircase");
+		assertEquals(29, biggestClimb, "biggest chord a headed cut carries up a staircase");
+	}
+
 	private record Sound(int time, String instrument, int pitch) implements Comparable<Sound> {
 		@Override
 		public int compareTo(Sound other) {
