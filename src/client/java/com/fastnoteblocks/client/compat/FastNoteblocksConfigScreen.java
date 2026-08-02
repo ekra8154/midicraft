@@ -236,6 +236,15 @@ public final class FastNoteblocksConfigScreen {
 			.setTooltip(Component.translatable("tooltip.fast-noteblocks.midi_velocity_cutoff"))
 			.setSaveConsumer(config::setMidiVelocityCutoff)
 			.build());
+		midi.addEntry(entries.startIntSlider(
+				Component.translatable("option.fast-noteblocks.chord_thin_target"),
+				config.chordThinTarget(),
+				FastNoteblocksConfig.MIN_CHORD_THIN_TARGET,
+				FastNoteblocksConfig.MAX_CHORD_THIN_TARGET)
+			.setDefaultValue(FastNoteblocksConfig.DEFAULT_CHORD_THIN_TARGET)
+			.setTooltip(Component.translatable("tooltip.fast-noteblocks.chord_thin_target"))
+			.setSaveConsumer(config::setChordThinTarget)
+			.build());
 		midi.addEntry(entries.startBooleanToggle(
 				Component.translatable("option.fast-noteblocks.midi_ignore_percussion"),
 				config.midiIgnorePercussion())

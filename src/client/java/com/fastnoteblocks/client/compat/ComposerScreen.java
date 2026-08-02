@@ -1,6 +1,7 @@
 package com.fastnoteblocks.client.compat;
 
 import com.fastnoteblocks.client.FastNoteblocksConfig;
+import com.fastnoteblocks.client.composer.ChordThinner;
 import com.fastnoteblocks.client.composer.ComposerHistory;
 import com.fastnoteblocks.client.composer.ComposerProject;
 import com.fastnoteblocks.client.composer.SongAnalysis;
@@ -10,6 +11,7 @@ import com.fastnoteblocks.client.composer.ComposerProject.MinecraftConversion;
 import com.fastnoteblocks.client.composer.ComposerProject.NoteEvent;
 import com.fastnoteblocks.client.composer.ComposerProject.PasteResult;
 import com.mojang.blaze3d.platform.InputConstants;
+import com.mojang.logging.LogUtils;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -32,12 +34,32 @@ import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.util.Util;
 import net.minecraft.world.item.ItemStack;
 import org.lwjgl.glfw.GLFW;
+import org.slf4j.Logger;
 
 public final class ComposerScreen extends Screen {
-	private static final int TOOLBAR_HEIGHT = 34;
-	/** Right edge of the toolbar's buttons: File..Build, Play, Snap and the speed slider. */
-	private static final int TOOLBAR_CONTROLS_RIGHT = 8 + 6 * 58 + 82 + 94;
-	private static final int LAYER_PANEL_WIDTH = 196;
+	private static final int TOOLBAR_HEIGHT = 22;
+	/**
+	 * The menus, as a menu bar rather than a row of buttons.
+	 *
+	 * <p>Five framed buttons twenty pixels tall and fifty-eight apart is a lot of furniture for
+	 * five words, and a framed button that opens a nested menu is an odd object -- the frame says
+	 * "press me", the arrow says "there is more inside". Drawn titles with a hover highlight say
+	 * the second thing on their own, and give back twelve pixels of height to the roll.</p>
+	 */
+	private static final ToolbarMenu[] MENU_BAR = {
+		ToolbarMenu.FILE, ToolbarMenu.EDIT, ToolbarMenu.IMPORT, ToolbarMenu.SELECT, ToolbarMenu.BUILD
+	};
+	private static final int MENU_BAR_LEFT = 6;
+	private static final int MENU_BAR_TOP = 3;
+	private static final int MENU_BAR_ROW_HEIGHT = 16;
+	private static final int MENU_TITLE_PADDING = 8;
+	/** Where a menu's panel hangs from, just under the bar. */
+	private static final int MENU_PANEL_TOP = TOOLBAR_HEIGHT + 2;
+	private static final int CONTROL_HEIGHT = 14;
+	private static final int CONTROL_TOP = MENU_BAR_TOP + 1;
+	private static final int CONTROL_GAP = 4;
+	private static final int CONTROL_PADDING = 10;
+
 	private static final int PIANO_WIDTH = 48;
 	/** Tall enough for a bar number with the clock time under it. */
 	private static final int TIMELINE_RULER_HEIGHT = 24;
@@ -56,7 +78,135 @@ public final class ComposerScreen extends Screen {
 	private static final int LAYER_CHIP = 12;
 	private static final int LAYER_INSTRUMENT_X = 26;
 	private static final int LAYER_NAME_X = 45;
-	private static final int LAYER_NAME_RIGHT = 156;
+	/** Filled means the layer goes into the build sequence, hollow means it is left out. */
+	private static final String BUILD_DOT_ON = "●";
+	private static final String BUILD_DOT_OFF = "○";
+	/**
+	 * The grab strip on the panel's edge, and the cursor that says it can be grabbed.
+	 *
+	 * <p>The arrows are the whole affordance -- nothing about a flat edge suggests it is draggable,
+	 * and a strip three pixels wide is not going to be found by accident. GLFW's own resize cursor
+	 * rather than something drawn, so it matches every other window edge the player has ever
+	 * dragged.</p>
+	 */
+	private void extractSplitter(GuiGraphicsExtractor graphics) {
+		int edge = layerPanelWidth();
+		boolean hovered = overSplitter(lastMouseX, lastMouseY);
+		boolean lit = hovered || draggingSplitter;
+		graphics.fill(edge - 1, TOOLBAR_HEIGHT, edge, height, lit ? 0xFF8FD3FF : 0xFF2C333D);
+		if (lit) {
+			// Three notches, the usual shorthand for a handle you can take hold of.
+			int middle = TOOLBAR_HEIGHT + (height - TOOLBAR_HEIGHT) / 2;
+			for (int notch = -1; notch <= 1; notch++) {
+				graphics.fill(edge - 3, middle + notch * 5, edge + 2, middle + notch * 5 + 1,
+					0xFFCDE9FF);
+			}
+		}
+		setResizeCursor(lit);
+	}
+
+	private boolean overSplitter(double x, double y) {
+		int edge = layerPanelWidth();
+		return y >= TOOLBAR_HEIGHT && x >= edge - SPLITTER_GRAB && x <= edge + SPLITTER_GRAB;
+	}
+
+	/**
+	 * Swaps in the horizontal-resize cursor while the split is in reach.
+	 *
+	 * <p>Only on the change, and put back on the way out and again when the screen closes: a cursor
+	 * is process-wide state, so leaving it set would follow the player back into the world.</p>
+	 */
+	private void setResizeCursor(boolean wanted) {
+		if (wanted == resizeCursorShown || minecraft == null || minecraft.getWindow() == null) {
+			return;
+		}
+		resizeCursorShown = wanted;
+		long window = minecraft.getWindow().handle();
+		if (!wanted) {
+			GLFW.glfwSetCursor(window, 0L);
+			return;
+		}
+		if (RESIZE_CURSOR == 0L) {
+			RESIZE_CURSOR = GLFW.glfwCreateStandardCursor(GLFW.GLFW_HRESIZE_CURSOR);
+		}
+		if (RESIZE_CURSOR != 0L) {
+			GLFW.glfwSetCursor(window, RESIZE_CURSOR);
+		}
+	}
+
+	/** How wide the layer panel is drawing right now, folded or not. */
+	private int layerPanelWidth() {
+		return config.layerPanelCollapsed()
+			? COLLAPSED_LAYER_PANEL_WIDTH
+			: config.layerPanelWidth();
+	}
+
+	/** Widest a layer's name may draw, which is whatever the panel leaves after the row number. */
+	private int layerNameRight() {
+		return layerRowLayout().nameRight();
+	}
+
+	/**
+	 * What fits on a layer row at the panel's current width.
+	 *
+	 * <p>Parts drop off as it narrows -- the name first, then the build dot, then the state chip --
+	 * until only the instrument and the row number are left, which is also what a folded panel
+	 * shows. One description of the row shared by the drawing and by every hit test, because a
+	 * panel where the chip is painted in one place and clicked in another is worse than one that
+	 * never shrank.</p>
+	 */
+	private LayerRowLayout layerRowLayout() {
+		int panel = layerPanelWidth();
+		boolean chip = panel >= ROW_CHIP_AT;
+		boolean dot = panel >= ROW_DOT_AT;
+		boolean name = panel >= ROW_NAME_AT;
+		int inset = chip ? 8 : 2;
+		// The number sits inside the row now. Out in the gutter it shared its pixels with the
+		// scrollbar, which drew over the top of it and left half a digit showing. Every row reserves
+		// the width of the largest number in the panel rather than its own, so the column does not
+		// jog left as you scroll past layer 9.
+		int ordinalRight = panel - inset - 3;
+		int ordinalLeft = ordinalRight
+			- smallTextWidth(Integer.toString(Math.max(1, project().layers().size())));
+		// And the build dot sits against the number. They answer the two questions you ask about a
+		// row at a glance -- which layer, and is it in the build -- so they read as one column.
+		int dotRight = ordinalLeft - 5;
+		int dotX = dotRight - Math.max(font.width(BUILD_DOT_ON), font.width(BUILD_DOT_OFF));
+		return new LayerRowLayout(
+			inset,
+			chip,
+			dot,
+			name,
+			chip ? LAYER_INSTRUMENT_X : inset + 2,
+			LAYER_NAME_X,
+			(dot ? dotX : ordinalLeft) - 4,
+			dotX,
+			dotRight,
+			ordinalLeft,
+			ordinalRight);
+	}
+
+	/**
+	 * A folded panel is the narrow end of the same layout, not a blank strip.
+	 *
+	 * <p>Which instrument a layer is and where it sits in the order are the two things you still
+	 * want while it is out of the way -- they are how you find the layer you meant. Everything else
+	 * is what folding is for getting rid of.</p>
+	 */
+	private static final int COLLAPSED_LAYER_PANEL_WIDTH = 34;
+	/** Grab zone either side of the split, and how far left you must drag to fold it away. */
+	private static final int SPLITTER_GRAB = 3;
+	/**
+	 * How far left you must drag to fold it away, which is also how wide folded is.
+	 *
+	 * <p>The same number twice on purpose: folding is the narrow end of the drag, and a fold that
+	 * snapped to something narrower than you could drag to would be a second layout to get right.</p>
+	 */
+	private static final int SPLITTER_COLLAPSE_AT = COLLAPSED_LAYER_PANEL_WIDTH;
+	/** Widths at which a row stops having room for each of its parts, narrowest last. */
+	private static final int ROW_NAME_AT = 116;
+	private static final int ROW_DOT_AT = 96;
+	private static final int ROW_CHIP_AT = 76;
 	private static final int LAYER_LIST_TOP = 48;
 	private static final int MIN_ROW_HEIGHT = 4;
 	private static final int MAX_ROW_HEIGHT = 26;
@@ -121,6 +271,30 @@ public final class ComposerScreen extends Screen {
 		0xFF7CA7FF, 0xFFFFE66D, 0xFF8CE0C3, 0xFFFF8C5A, 0xFFC3F584
 	};
 
+	private static final Logger PERF = LogUtils.getLogger();
+	/**
+	 * The phases one composer frame is split into, in the order they are drawn.
+	 *
+	 * <p>Named rather than nested so a phase costs one array slot and one subtraction. The point of
+	 * the split is that "the composer is slow" is not actionable and "notes: 31ms of a 38ms frame"
+	 * is -- every optimisation in this screen was chosen by reading these numbers, not by guessing
+	 * which loop looked worst.</p>
+	 */
+	private static final String[] PHASES = {
+		"panels", "ruler", "keys", "grid", "notes", "playhead", "widgets", "status", "menus"
+	};
+	private static final int PHASE_PANELS = 0;
+	private static final int PHASE_RULER = 1;
+	private static final int PHASE_KEYS = 2;
+	private static final int PHASE_GRID = 3;
+	private static final int PHASE_NOTES = 4;
+	private static final int PHASE_PLAYHEAD = 5;
+	private static final int PHASE_WIDGETS = 6;
+	private static final int PHASE_STATUS = 7;
+	private static final int PHASE_MENUS = 8;
+	/** How long the profiler gathers before it reports, and clears, a window of frames. */
+	private static final long PROFILE_WINDOW_MILLIS = 1000L;
+
 	private final Screen parent;
 	private final Runnable onReturn;
 	private final FastNoteblocksConfig config;
@@ -135,6 +309,8 @@ public final class ComposerScreen extends Screen {
 	private int layerMenuX;
 	private int layerMenuY;
 	private List<ClipboardNote> clipboard = List.of();
+	/** The tick the copy started on, which is where Ctrl+Shift+V puts it back. */
+	private long clipboardOriginTick;
 	private Button playButton;
 	private Button snapButton;
 	private DelayScaleSlider delayScaleSlider;
@@ -193,6 +369,23 @@ public final class ComposerScreen extends Screen {
 	private int contextMenuY;
 	private ToolbarMenu toolbarMenu = ToolbarMenu.NONE;
 	private int toolbarMenuX;
+	/** The submenu standing open off a row of the current menu, and where it was drawn. */
+	private ToolbarSubmenu openSubmenu;
+	private int submenuLeft;
+	private int submenuTop;
+	private int submenuRight;
+	private int submenuBottom;
+	/**
+	 * The parent row the open submenu hangs off.
+	 *
+	 * <p>Kept apart from {@link #submenuTop}, which is where the panel actually landed after being
+	 * nudged to fit on screen. Feeding that back in as the anchor made the nudge compound: the
+	 * panel climbed two pixels every frame the cursor was inside it, walked out from under the
+	 * cursor, and vanished the moment it stopped being hovered.</p>
+	 */
+	private int submenuAnchorY;
+	/** Left edge of the bar's controls, which is where the composition name has to stop. */
+	private int toolbarControlsLeft = 320;
 	private long lastScaleChangeAt;
 	private Component toast;
 	private long toastShownAt;
@@ -201,6 +394,10 @@ public final class ComposerScreen extends Screen {
 	private ComposerProject cachedStatsProject;
 	private SongAnalysis cachedStats;
 	private boolean cachedStatsDedupe;
+	private List<FastNoteblocksConfig.SequenceTrack> cachedBlockTracks;
+	private SongBuilder.BlockCounts cachedBlockCounts;
+	private SongAnalysis cachedOverloadedStats;
+	private long[] cachedOverloadedTicks = new long[0];
 	/**
 	 * The composition as it stands on disk, which is what "unsaved" is measured against.
 	 *
@@ -226,8 +423,40 @@ public final class ComposerScreen extends Screen {
 	private boolean paintBuildEnabled;
 	private LayerState paintState = LayerState.ACTIVE;
 	private final Set<Integer> paintedRows = new LinkedHashSet<>();
+	/**
+	 * Frame timings, gathered only while F9 has the profiler switched on.
+	 *
+	 * <p>Off by default and free when off: the phase marks return without reading the clock, so a
+	 * player who never presses F9 pays nothing for any of this.</p>
+	 */
+	/** One frame's note quads, minus the ones a later note covers. Reused, never reallocated. */
+	private final NoteCellGrid cells = new NoteCellGrid();
+	/** The grid's way through to the frame's graphics, held so drawing does not allocate one. */
+	private final GraphicsQuads quads = new GraphicsQuads();
+	private boolean profiling;
+	private final long[] phaseNanos = new long[PHASES.length];
+	private long profileFrameNanos;
+	private int profileFrames;
+	private long profileWindowSince;
+	private int noteQuads;
+	private int notesConsidered;
+	private int notesDrawn;
+	/**
+	 * The notes phase split in two: working out where the notes go, and handing quads to the GUI.
+	 *
+	 * <p>Kept apart because they are fixed by different things — the first scales with how many
+	 * notes are on screen, the second with how many quads survive collapsing — and at full zoom-out
+	 * in both directions those two numbers differ by a factor of eight. Guessing which one the time
+	 * belonged to would have sent the next change to the wrong place.</p>
+	 */
+	private long notesLayoutNanos;
+	private long notesDrawNanos;
+	private String profileSummary = "";
 	/** The layer a press landed on, and whether it has moved far enough to be a reorder. */
 	private int layerDragIndex = -1;
+	/** Dragging the split between the layer panel and the roll, and whether the cursor says so. */
+	private boolean draggingSplitter;
+	private boolean resizeCursorShown;
 	private double layerDragStartY;
 	private double layerDragY;
 	private boolean layerDragActive;
@@ -248,22 +477,21 @@ public final class ComposerScreen extends Screen {
 	}
 
 	/**
-	 * What "unsaved" is measured against.
+	 * What the document would go back to, and so what leaving it would throw away.
 	 *
-	 * <p>Three cases, and the difference between the last two is the whole point. A song with a
-	 * file is measured against the file. A document with no file that has nothing in it is measured
-	 * against itself, so a blank composition is not something you are nagged to save until you put
-	 * something in it. A document with no file that <em>does</em> have something in it -- an import,
-	 * a scan -- is measured against nothing at all, so all of it counts as unsaved and closing asks
-	 * before dropping it.</p>
+	 * <p>A song with a file goes back to the file. A document without one goes back to how it
+	 * arrived, which for an import is the import itself.</p>
+	 *
+	 * <p>An import used to be measured against nothing at all, so every note of it counted as
+	 * unsaved work and glancing at one before opening something else was asked about as though
+	 * edits were being dropped. Nothing was: an import is a function of a file that is still
+	 * sitting there, and re-reading it costs one trip through the picker. What cannot be got back
+	 * is the work done on top of it, which is exactly what measuring against the import asks
+	 * about.</p>
 	 */
 	private static ComposerProject baseline(FastNoteblocksConfig config, ComposerProject current) {
 		ComposerProject onDisk = config.savedComposerProject();
-		if (onDisk != null) {
-			return onDisk;
-		}
-		boolean empty = current.layers().stream().allMatch(layer -> layer.notes().isEmpty());
-		return empty ? current : null;
+		return onDisk != null ? onDisk : current;
 	}
 
 	@Override
@@ -272,41 +500,32 @@ public final class ComposerScreen extends Screen {
 		rollY = TOOLBAR_HEIGHT + 14 + TIMELINE_RULER_HEIGHT;
 		rollHeight = Math.max(40, height - rollY - 24);
 		centerMinecraftRange();
-		int x = 8;
-		addRenderableWidget(Button.builder(Component.literal("File"), button -> toggleToolbarMenu(ToolbarMenu.FILE, 8))
-			.bounds(x, 7, 54, 20).build());
-		x += 58;
-		addRenderableWidget(Button.builder(Component.literal("Edit"), button -> toggleToolbarMenu(ToolbarMenu.EDIT, 66))
-			.bounds(x, 7, 54, 20).build());
-		x += 58;
-		addRenderableWidget(Button.builder(Component.literal("Import"), button -> toggleToolbarMenu(ToolbarMenu.IMPORT, 124))
-			.bounds(x, 7, 54, 20)
-			.tooltip(Tooltip.create(Component.literal("Settings applied when importing MIDI and NBS songs")))
-			.build());
-		x += 58;
-		addRenderableWidget(Button.builder(Component.literal("Select"), button -> toggleToolbarMenu(ToolbarMenu.SELECT, 182))
-			.bounds(x, 7, 54, 20)
-			.tooltip(Tooltip.create(Component.literal("Select every note with a given build problem")))
-			.build());
-		x += 58;
-		addRenderableWidget(Button.builder(Component.literal("Build"), button -> toggleToolbarMenu(ToolbarMenu.BUILD, 240))
-			.bounds(x, 7, 54, 20)
-			.tooltip(Tooltip.create(Component.literal(
-				"Move layers into the build sequence, or paste them with commands")))
-			.build());
-		x += 58;
+		// The menus are drawn, not built: see extractMenuBar. Only the three controls are widgets,
+		// because they carry state you read off them rather than opening anything.
+		//
+		// Pinned to the right edge and sized to their own widest label. The menus grow rightward as
+		// they are added to and the controls do not move; keeping the two apart means neither can
+		// push the other about. Each is measured against every caption it can ever show, so Snap
+		// does not jump a pixel when it reaches "repeater" or Speed when it reaches "0.25x".
+		int playWidth = widestLabel(CONTROL_PADDING, "Play", "Stop");
+		int snapWidth = widestLabel(CONTROL_PADDING, "Snap 1/4", "Snap 1/8", "Snap 1/16",
+			"Snap 1/32", "Snap repeater", "Snap off");
+		int speedWidth = widestLabel(CONTROL_PADDING + 8, "Speed 0.25x", "Speed 2.00x", "Speed 8.00x");
+		int speedX = width - 6 - speedWidth;
+		int snapX = speedX - CONTROL_GAP - snapWidth;
+		int playX = snapX - CONTROL_GAP - playWidth;
+		toolbarControlsLeft = playX;
 		playButton = addRenderableWidget(Button.builder(playLabel(), button -> togglePlayback())
-			.bounds(x, 7, 54, 20)
+			.bounds(playX, CONTROL_TOP, playWidth, CONTROL_HEIGHT)
 			.tooltip(Tooltip.create(Component.literal("Preview all unmuted layers")))
 			.build());
-		x += 58;
 		snapButton = addRenderableWidget(Button.builder(snapLabel(), button -> cycleSnap())
-			.bounds(x, 7, 78, 20)
+			.bounds(snapX, CONTROL_TOP, snapWidth, CONTROL_HEIGHT)
 			.tooltip(Tooltip.create(Component.literal("Grid used when adding or dragging notes")))
 			.build());
-		x += 82;
 		delayScaleSlider = addRenderableWidget(new DelayScaleSlider(
-			x, 7, 94, 20, project().speedQuarters(), this::setDelayScale
+			speedX, CONTROL_TOP, speedWidth, CONTROL_HEIGHT, project().speedQuarters(),
+			this::setDelayScale
 		));
 		delayScaleSlider.setTooltip(Tooltip.create(Component.literal(
 			"Playback speed, 0.25x to 8.00x. Higher is faster. Saving to the sequence bakes this "
@@ -339,6 +558,12 @@ public final class ComposerScreen extends Screen {
 			removeWidget(button);
 		}
 		moveLayerButtons.clear();
+		if (config.layerPanelCollapsed()) {
+			// Nothing to add a layer to while the panel is folded, and a button sixteen pixels wide
+			// would only be something to click by accident.
+			addLayerButton = null;
+			return;
+		}
 		// Pinned to the bottom of the panel: with up to MAX_LAYERS rows the list scrolls, so this
 		// must not ride along with the last row or it drifts off screen.
 		int y = layerListBottom() + 4;
@@ -353,7 +578,7 @@ public final class ComposerScreen extends Screen {
 				layersChanged();
 				rebuildMoveLayerButtons();
 			}
-		}).bounds(8, y, LAYER_PANEL_WIDTH - 16, 18)
+		}).bounds(8, y, layerPanelWidth() - 16, 18)
 			.tooltip(Tooltip.create(Component.literal(
 				"Add a layer and move the current selection into it (maximum "
 					+ ComposerProject.MAX_LAYERS + ")"
@@ -409,22 +634,31 @@ public final class ComposerScreen extends Screen {
 	 * in the way -- and hiding is only muting that also leaves the piano roll.</p>
 	 */
 	private enum LayerState {
-		ACTIVE("A", 0xFFE8EAEE, 0xFF3A4048, "Played and drawn."),
-		MUTED("M", 0xFFFFB05A, 0xFF3E332A, "Silent, still drawn."),
-		SOLO("S", 0xFFFFD65A, 0xFF453D22,
-			"Heard alone. Listening only; it does not change what builds."),
-		HIDDEN("H", 0xFF787D85, 0xFF24272B, "Silent and out of the piano roll.");
+		ACTIVE("A", "Active", 0xFFE8EAEE, 0xFF3A4048,
+			"you hear it, and it is in the piano roll."),
+		MUTED("M", "Muted", 0xFFFFB05A, 0xFF3E332A,
+			"silent, but still in the roll and still editable. Its instrument wears a red slash."),
+		SOLO("S", "Solo", 0xFFFFD65A, 0xFF453D22,
+			"the only thing you hear. Every other layer is slashed out until you turn it off."),
+		HIDDEN("H", "Hidden", 0xFF787D85, 0xFF24272B,
+			"silent and out of the piano roll, so it is not in the way. Its row is greyed out.");
 
 		private final String letter;
+		private final String title;
 		private final int color;
 		private final int chip;
 		private final String description;
 
-		LayerState(String letter, int color, int chip, String description) {
+		LayerState(String letter, String title, int color, int chip, String description) {
 			this.letter = letter;
+			this.title = title;
 			this.color = color;
 			this.chip = chip;
 			this.description = description;
+		}
+
+		private String sentence() {
+			return title + " - " + description;
 		}
 	}
 
@@ -534,14 +768,90 @@ public final class ComposerScreen extends Screen {
 		layersChanged();
 	}
 
+	/**
+	 * Folds the selected layers into the lowest-numbered one, and says what that cost.
+	 *
+	 * <p>Reported rather than done silently because the shortcut has no menu row to have read
+	 * first. Merging keeps one layer's instrument and gives it to every note that arrives, so a
+	 * merge across two instruments is not only a tidying-up -- and from the keyboard the only sign
+	 * of that is the sound changing.</p>
+	 */
+	/** Re-lays whatever the panel's width decides: the roll's left edge and the panel's buttons. */
+	private void resizeLayerPanel() {
+		rollX = layerPanelWidth() + PIANO_WIDTH;
+		rollWidth = Math.max(40, width - rollX - 8);
+		layerScroll = Math.min(layerScroll, maxLayerScroll());
+		rebuildMoveLayerButtons();
+	}
+
 	private void mergeSelectedLayers() {
-		if (selectedLayers.size() < 2) {
+		List<Integer> merging = selectedLayers.stream()
+			.filter(index -> index >= 0 && index < project().layers().size())
+			.sorted()
+			.toList();
+		if (merging.size() < 2) {
+			showResult(Component.literal("Merge needs two or more layers selected - click one in "
+				+ "the panel and shift-click another."));
 			return;
 		}
+		Layer into = project().layers().get(merging.getFirst());
+		int notes = merging.stream().mapToInt(index -> project().layers().get(index).notes().size()).sum();
+		long instruments = merging.stream()
+			.map(index -> project().layers().get(index).instrument())
+			.distinct()
+			.count();
 		apply(project().mergeLayers(Set.copyOf(selectedLayers)));
 		resetLayerView();
 		layersChanged();
 		rebuildMoveLayerButtons();
+		String summary = "Merged " + merging.size() + " layers into \"" + into.name() + "\" - "
+			+ notes + " notes.";
+		if (instruments > 1) {
+			summary += " They all play " + PreviewInstrument.byId(into.instrument()).name()
+				+ " now; Ctrl+Z puts them back.";
+		}
+		showResult(Component.literal(summary));
+	}
+
+	/**
+	 * Removes the selected layers and says what went with them.
+	 *
+	 * <p>No confirmation, because Ctrl+Z is one and a better one -- a dialog asks before you can see
+	 * what you did, undo asks after. The count is reported for the same reason merging reports one:
+	 * the panel scrolls, and a selection made three screens up can be larger than it looks.</p>
+	 */
+	private void deleteSelectedLayers() {
+		List<Integer> deleting = selectedLayers.stream()
+			.filter(index -> index >= 0 && index < project().layers().size())
+			.sorted()
+			.toList();
+		if (deleting.isEmpty()) {
+			return;
+		}
+		int notes = deleting.stream().mapToInt(index -> project().layers().get(index).notes().size()).sum();
+		boolean all = deleting.size() == project().layers().size();
+		String only = deleting.size() == 1
+			? " \"" + project().layers().get(deleting.getFirst()).name() + "\""
+			: "";
+		apply(project().deleteLayers(Set.copyOf(deleting)));
+		// Solo is held by index, and every layer below a deleted one just moved up. Renumbering
+		// rather than clearing, so deleting a layer you were not listening to does not also stop
+		// you listening to the one you were.
+		List<Integer> stillSoloed = soloedLayers.stream()
+			.filter(index -> !deleting.contains(index))
+			.map(index -> index - (int)deleting.stream().filter(gone -> gone < index).count())
+			.toList();
+		soloedLayers.clear();
+		soloedLayers.addAll(stillSoloed);
+		instrumentMenuLayer = -1;
+		cancelLayerRename();
+		resetLayerView();
+		layersChanged();
+		rebuildMoveLayerButtons();
+		showResult(Component.literal("Deleted " + deleting.size()
+			+ (deleting.size() == 1 ? " layer" : " layers") + only + " and " + notes + " notes."
+			+ (all ? " That was all of them, so an empty layer is left to work in." : "")
+			+ " Ctrl+Z puts them back."));
 	}
 
 	private void updateLayer(int index, Layer layer) {
@@ -808,23 +1118,96 @@ public final class ComposerScreen extends Screen {
 
 	@Override
 	public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
+		long frameStart = profiling ? System.nanoTime() : 0L;
 		updatePlayback();
-		rollX = LAYER_PANEL_WIDTH + PIANO_WIDTH;
+		rollX = layerPanelWidth() + PIANO_WIDTH;
 		rollY = TOOLBAR_HEIGHT + 14 + TIMELINE_RULER_HEIGHT;
 		rollWidth = Math.max(40, width - rollX - 8);
 		rollHeight = Math.max(40, height - rollY - 24);
+		long mark = frameStart;
 		extractPanels(graphics);
+		mark = phase(PHASE_PANELS, mark);
 		extractTimeRuler(graphics, mouseX, mouseY);
-		extractPianoRoll(graphics, mouseX, mouseY);
+		mark = phase(PHASE_RULER, mark);
+		mark = extractPianoRoll(graphics, mouseX, mouseY, mark);
 		extractStatus(graphics);
-		extractToast(graphics);
-		super.extractRenderState(graphics, mouseX, mouseY, partialTick);
+		extractToast(graphics, mouseX, mouseY);
+		mark = phase(PHASE_STATUS, mark);
 		hoveredDescription = "";
+		// The bar last of the backgrounds and first of the foregrounds: it has to cover the roll,
+		// and its own controls and the composition name have to sit on top of it.
+		extractMenuBar(graphics, mouseX, mouseY);
+		super.extractRenderState(graphics, mouseX, mouseY, partialTick);
+		mark = phase(PHASE_WIDGETS, mark);
 		extractInstrumentMenu(graphics, mouseX, mouseY);
 		extractContextMenu(graphics, mouseX, mouseY);
 		extractLayerMenu(graphics, mouseX, mouseY);
 		extractToolbarMenu(graphics, mouseX, mouseY);
 		extractMenuDescription(graphics);
+		phase(PHASE_MENUS, mark);
+		endProfiledFrame(graphics, frameStart);
+	}
+
+	/** Charges the time since {@code since} to a phase, and returns the mark for the next one. */
+	private long phase(int index, long since) {
+		if (!profiling) {
+			return 0L;
+		}
+		long now = System.nanoTime();
+		phaseNanos[index] += now - since;
+		return now;
+	}
+
+	/**
+	 * Closes a profiled frame: draws the overlay, and once a second logs and clears the window.
+	 *
+	 * <p>Reported as an average over the window rather than per frame, because a single frame's
+	 * numbers on this screen swing by a factor of three -- a garbage collection, a chunk build, a
+	 * sound starting. The averages are stable enough to tell a real change from noise.</p>
+	 */
+	private void endProfiledFrame(GuiGraphicsExtractor graphics, long frameStart) {
+		if (!profiling) {
+			return;
+		}
+		profileFrameNanos += System.nanoTime() - frameStart;
+		profileFrames++;
+		long now = Util.getMillis();
+		if (profileWindowSince == 0L) {
+			profileWindowSince = now;
+		} else if (now - profileWindowSince >= PROFILE_WINDOW_MILLIS && profileFrames > 0) {
+			StringBuilder line = new StringBuilder(String.format(java.util.Locale.ROOT,
+				"composer %.1f fps, %.2f ms/frame extracting", profileFrames * 1000.0 / (now - profileWindowSince),
+				profileFrameNanos / 1.0e6 / profileFrames));
+			for (int index = 0; index < PHASES.length; index++) {
+				line.append(String.format(java.util.Locale.ROOT, "  %s %.2f",
+					PHASES[index], phaseNanos[index] / 1.0e6 / profileFrames));
+			}
+			line.append(String.format(java.util.Locale.ROOT,
+				"  |  notes=layout %.2f + quads %.2f  |  %d seen, %d drawn, %d quads,"
+					+ " %.0f ticks/px, row %dpx, %d layers",
+				notesLayoutNanos / 1.0e6 / profileFrames, notesDrawNanos / 1.0e6 / profileFrames,
+				notesConsidered, notesDrawn, noteQuads, ticksPerPixel, rowHeight,
+				project().layers().size()));
+			profileSummary = line.toString();
+			PERF.info(profileSummary);
+			java.util.Arrays.fill(phaseNanos, 0L);
+			profileFrameNanos = 0L;
+			notesLayoutNanos = 0L;
+			notesDrawNanos = 0L;
+			profileFrames = 0;
+			profileWindowSince = now;
+		}
+		if (!profileSummary.isEmpty()) {
+			// Drawn last and unclipped, over everything, because it is a measuring instrument and
+			// not part of the screen. Two lines so it fits without shrinking the font.
+			int split = profileSummary.indexOf("  |  ");
+			String top = split < 0 ? profileSummary : profileSummary.substring(0, split);
+			String bottom = split < 0 ? "" : profileSummary.substring(split + 5);
+			graphics.fill(4, TOOLBAR_HEIGHT + 2, 10 + Math.max(smallTextWidth(top), smallTextWidth(bottom)),
+				TOOLBAR_HEIGHT + 22, 0xE0000000);
+			smallText(graphics, top, 7, TOOLBAR_HEIGHT + 5, 0xFF8FD3FF);
+			smallText(graphics, bottom, 7, TOOLBAR_HEIGHT + 13, 0xFF9BE564);
+		}
 	}
 
 	/** Draws the hovered menu row's explanation in a strip along the bottom of the screen. */
@@ -875,7 +1258,8 @@ public final class ComposerScreen extends Screen {
 	private String layerActionLabel(LayerAction action) {
 		int selected = selectedLayers.size();
 		return switch (action) {
-			case MERGE_SELECTED -> "Merge " + selected + " layers";
+			case MERGE_SELECTED -> "Merge " + selected + " layers (Ctrl+E)";
+			case DELETE_SELECTED -> "Delete " + layerCountLabel(Math.max(1, selected));
 			case INCLUDE_SELECTED -> "Include " + layerCountLabel(Math.max(1, selected)) + " in sequence";
 			case SET_INCLUDED_TO_SELECTION ->
 				"Include only " + layerCountLabel(Math.max(1, selected)) + " in sequence";
@@ -894,7 +1278,8 @@ public final class ComposerScreen extends Screen {
 	private boolean layerActionEnabled(LayerAction action) {
 		return switch (action) {
 			case MERGE_SELECTED -> selectedLayers.size() >= 2;
-			case INCLUDE_SELECTED, SET_INCLUDED_TO_SELECTION -> !selectedLayers.isEmpty();
+			case DELETE_SELECTED, INCLUDE_SELECTED, SET_INCLUDED_TO_SELECTION ->
+				!selectedLayers.isEmpty();
 			case RENAME, SELECT_ALL -> true;
 		};
 	}
@@ -916,6 +1301,7 @@ public final class ComposerScreen extends Screen {
 		switch (action) {
 			case RENAME -> beginLayerRename(project().activeLayerIndex());
 			case MERGE_SELECTED -> mergeSelectedLayers();
+			case DELETE_SELECTED -> deleteSelectedLayers();
 			case INCLUDE_SELECTED -> setIncludedLayers(true);
 			case SET_INCLUDED_TO_SELECTION -> setIncludedLayers(false);
 			case SELECT_ALL -> {
@@ -931,114 +1317,317 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private void extractToolbarMenu(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
-		List<String> rows = toolbarRows();
+		List<MenuRow> rows = menuRows(toolbarMenu);
 		if (rows.isEmpty()) {
+			openSubmenu = null;
 			return;
 		}
-		int menuWidth = toolbarMenuWidth();
-		int menuY = 28;
+		int menuWidth = menuWidth(rows, toolbarMenu == ToolbarMenu.IMPORT
+			? IMPORT_MENU_WIDTH : TOOLBAR_MENU_WIDTH, toolbarMenuX);
 		int menuHeight = rows.size() * TOOLBAR_MENU_ROW_HEIGHT + 4;
-		graphics.fill(toolbarMenuX, menuY, toolbarMenuX + menuWidth, menuY + menuHeight, 0xF0101115);
-		graphics.fill(toolbarMenuX, menuY, toolbarMenuX + menuWidth, menuY + 1, 0xFFAAAAAA);
+		// Whether the cursor is in the open submenu has to be settled before the parent rows get a
+		// say, or reaching across into the submenu would count as leaving the row that opened it.
+		boolean insideSubmenu = openSubmenu != null && mouseX >= submenuLeft && mouseX < submenuRight
+			&& mouseY >= submenuTop && mouseY < submenuBottom;
+		graphics.fill(toolbarMenuX, MENU_PANEL_TOP, toolbarMenuX + menuWidth,
+			MENU_PANEL_TOP + menuHeight, 0xF0101115);
+		graphics.fill(toolbarMenuX, MENU_PANEL_TOP, toolbarMenuX + menuWidth,
+			MENU_PANEL_TOP + 1, 0xFFAAAAAA);
+		ToolbarSubmenu wanted = insideSubmenu ? openSubmenu : null;
+		int wantedAnchorY = submenuAnchorY;
 		for (int index = 0; index < rows.size(); index++) {
-			int rowY = menuY + 2 + index * TOOLBAR_MENU_ROW_HEIGHT;
-			boolean enabled = toolbarRowEnabled(index);
-			boolean hovered = enabled && mouseX >= toolbarMenuX
-				&& mouseX < toolbarMenuX + menuWidth
+			MenuRow row = rows.get(index);
+			int rowY = MENU_PANEL_TOP + 2 + index * TOOLBAR_MENU_ROW_HEIGHT;
+			boolean enabled = rowEnabled(row);
+			boolean hovered = mouseX >= toolbarMenuX && mouseX < toolbarMenuX + menuWidth
 				&& mouseY >= rowY && mouseY < rowY + TOOLBAR_MENU_ROW_HEIGHT;
-			if (hovered) {
+			boolean held = row.submenu() != null && row.submenu() == openSubmenu;
+			if (hovered && enabled || held) {
 				graphics.fill(toolbarMenuX + 2, rowY, toolbarMenuX + menuWidth - 2,
-					rowY + TOOLBAR_MENU_ROW_HEIGHT, 0xFF356070);
+					rowY + TOOLBAR_MENU_ROW_HEIGHT, held && !hovered ? 0xFF24414C : 0xFF356070);
 			}
-			if (toolbarMenu != ToolbarMenu.IMPORT && index < toolbarActions().length) {
-				String hint = toolbarShortcut(toolbarActions()[index]);
+			if (hovered && enabled) {
+				hoveredDescription = rowDescription(row);
+				if (row.submenu() != null) {
+					// Opens on hover: the arrow is a promise that pointing at it is enough.
+					wanted = row.submenu();
+					wantedAnchorY = rowY;
+				}
+			}
+			if (row.submenu() != null) {
+				graphics.text(font, SUBMENU_ARROW, toolbarMenuX + menuWidth - 10, rowY + 5,
+					enabled ? 0xFFAAB2BD : 0xFF5A5F66, false);
+			} else if (row.action() != null) {
+				String hint = toolbarShortcut(row.action());
 				if (!hint.isEmpty()) {
 					graphics.text(font, Component.literal(hint),
 						toolbarMenuX + menuWidth - 6 - font.width(hint), rowY + 5, 0xFF6E7480, false);
 				}
 			}
-			if (hovered) {
-				hoveredDescription = toolbarMenu == ToolbarMenu.IMPORT
-					? (index < ImportSetting.values().length
-						? importSettingTooltip(ImportSetting.values()[index])
-						: "")
-					: (index < toolbarActions().length
-						? toolbarActionTooltip(toolbarActions()[index])
-						: "");
-			}
-			graphics.text(font, Component.literal(rows.get(index)), toolbarMenuX + 6, rowY + 5,
+			graphics.text(font, Component.literal(rowLabel(row)), toolbarMenuX + 6, rowY + 5,
 				enabled ? 0xFFFFFFFF : 0xFF777777, false);
 		}
 		if (toolbarMenu == ToolbarMenu.IMPORT) {
 			graphics.text(font, Component.literal("Left-click cycles, right-click reverses"),
-				toolbarMenuX + 6, menuY + menuHeight + 3, 0xFF888888, false);
+				toolbarMenuX + 6, MENU_PANEL_TOP + menuHeight + 3, 0xFF888888, false);
 		}
+		openSubmenu = wanted;
+		if (openSubmenu == null) {
+			submenuLeft = submenuRight = submenuTop = submenuBottom = 0;
+			return;
+		}
+		submenuAnchorY = wantedAnchorY;
+		extractSubmenu(graphics, mouseX, mouseY, toolbarMenuX + menuWidth - 2, submenuAnchorY);
+	}
+
+	/** Where a submenu row starts, which the divider's gap shifts everything after it by. */
+	private int submenuRowTop(int panelTop, int index) {
+		int gap = openSubmenu.dividerBefore >= 0 && index >= openSubmenu.dividerBefore
+			? SUBMENU_DIVIDER_GAP
+			: 0;
+		return panelTop + 2 + index * TOOLBAR_MENU_ROW_HEIGHT + gap;
+	}
+
+	/** The second panel, hanging off the row that opened it. */
+	private void extractSubmenu(GuiGraphicsExtractor graphics, int mouseX, int mouseY,
+			int left, int anchorY) {
+		List<MenuRow> rows = new ArrayList<>();
+		for (ToolbarAction action : openSubmenu.actions) {
+			rows.add(MenuRow.of(action));
+		}
+		int panelWidth = 78;
+		for (MenuRow row : rows) {
+			String detail = submenuRowDetail(row.action());
+			panelWidth = Math.max(panelWidth, font.width(openSubmenu.labelFor(row.action()))
+				+ (detail.isEmpty() ? 14 : font.width(detail) + 26));
+		}
+		panelWidth = Math.min(panelWidth, Math.max(60, width - left - 4));
+		// Flipped to the near side rather than run off the edge of the screen.
+		if (left + panelWidth > width - 4) {
+			left = Math.max(0, toolbarMenuX - panelWidth + 2);
+		}
+		int panelHeight = rows.size() * TOOLBAR_MENU_ROW_HEIGHT + 4
+			+ (openSubmenu.dividerBefore >= 0 ? SUBMENU_DIVIDER_GAP : 0);
+		// Always off the anchor, never off wherever the panel ended up last frame.
+		int top = Math.max(MENU_PANEL_TOP, Math.min(anchorY - 2, height - panelHeight - 4));
+		submenuLeft = left;
+		submenuTop = top;
+		submenuRight = left + panelWidth;
+		submenuBottom = top + panelHeight;
+		graphics.fill(left, top, left + panelWidth, top + panelHeight, 0xF0141A20);
+		graphics.fill(left, top, left + panelWidth, top + 1, 0xFFAAAAAA);
+		for (int index = 0; index < rows.size(); index++) {
+			MenuRow row = rows.get(index);
+			int rowY = submenuRowTop(top, index);
+			if (index == openSubmenu.dividerBefore) {
+				graphics.fill(left + 6, rowY - SUBMENU_DIVIDER_GAP / 2,
+					left + panelWidth - 6, rowY - SUBMENU_DIVIDER_GAP / 2 + 1, 0xFF3A424D);
+			}
+			boolean enabled = rowEnabled(row);
+			boolean hovered = enabled && mouseX >= left && mouseX < left + panelWidth
+				&& mouseY >= rowY && mouseY < rowY + TOOLBAR_MENU_ROW_HEIGHT;
+			if (hovered) {
+				graphics.fill(left + 2, rowY, left + panelWidth - 2,
+					rowY + TOOLBAR_MENU_ROW_HEIGHT, 0xFF356070);
+				hoveredDescription = rowDescription(row);
+			}
+			String detail = submenuRowDetail(row.action());
+			if (!detail.isEmpty()) {
+				graphics.text(font, Component.literal(detail),
+					left + panelWidth - 6 - font.width(detail), rowY + 5,
+					enabled ? 0xFF8A929E : 0xFF5A5F66, false);
+			}
+			graphics.text(font, Component.literal(openSubmenu.labelFor(row.action())),
+				left + 6, rowY + 5, enabled ? 0xFFFFFFFF : 0xFF777777, false);
+		}
+	}
+
+	/** Where each menu's title sits in the bar, measured off the font rather than a fixed pitch. */
+	private List<MenuTitle> menuTitles() {
+		List<MenuTitle> titles = new ArrayList<>(MENU_BAR.length);
+		int x = MENU_BAR_LEFT;
+		for (ToolbarMenu menu : MENU_BAR) {
+			String label = menuBarLabel(menu);
+			int wide = font.width(label) + 2 * MENU_TITLE_PADDING;
+			titles.add(new MenuTitle(menu, label, x, x + wide));
+			x += wide;
+		}
+		return titles;
+	}
+
+	/** The width a control needs to hold any caption it can ever show, plus its padding. */
+	private int widestLabel(int padding, String... labels) {
+		int widest = 0;
+		for (String label : labels) {
+			widest = Math.max(widest, font.width(label));
+		}
+		return widest + padding;
+	}
+
+	private static String menuBarLabel(ToolbarMenu menu) {
+		return switch (menu) {
+			case FILE -> "File";
+			case EDIT -> "Edit";
+			case IMPORT -> "Import";
+			case SELECT -> "Select";
+			case BUILD -> "Build";
+			case NONE -> "";
+		};
+	}
+
+	private void extractMenuBar(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
+		graphics.fill(0, 0, width, TOOLBAR_HEIGHT, 0xE0141821);
+		graphics.fill(0, TOOLBAR_HEIGHT - 1, width, TOOLBAR_HEIGHT, 0xFF2C333D);
+		for (MenuTitle title : menuTitles()) {
+			boolean open = toolbarMenu == title.menu();
+			boolean hovered = mouseY >= MENU_BAR_TOP && mouseY < MENU_BAR_TOP + MENU_BAR_ROW_HEIGHT
+				&& mouseX >= title.left() && mouseX < title.right();
+			if (open || hovered) {
+				graphics.fill(title.left(), MENU_BAR_TOP, title.right(),
+					MENU_BAR_TOP + MENU_BAR_ROW_HEIGHT, open ? 0xFF2B4C5A : 0x40FFFFFF);
+			}
+			graphics.text(font, title.label(), title.left() + MENU_TITLE_PADDING, MENU_BAR_TOP + 4,
+				open ? 0xFFCDE9FF : 0xFFD6D8DD, false);
+		}
+		extractCompositionName(graphics);
+	}
+
+	/** The menu a point in the bar would open, or null. */
+	private ToolbarMenu menuTitleAt(double x, double y) {
+		if (y < MENU_BAR_TOP || y >= MENU_BAR_TOP + MENU_BAR_ROW_HEIGHT) {
+			return null;
+		}
+		for (MenuTitle title : menuTitles()) {
+			if (x >= title.left() && x < title.right()) {
+				return title.menu();
+			}
+		}
+		return null;
+	}
+
+	/** Menu width from the widest row it holds, including its shortcut hint or submenu arrow. */
+	private int menuWidth(List<MenuRow> rows, int floor, int left) {
+		int widest = floor;
+		for (MenuRow row : rows) {
+			int tail = row.submenu() != null
+				? font.width(SUBMENU_ARROW) + 16
+				: row.action() != null && !toolbarShortcut(row.action()).isEmpty()
+					? font.width(toolbarShortcut(row.action())) + 30
+					: 14;
+			widest = Math.max(widest, font.width(rowLabel(row)) + tail);
+		}
+		return Math.min(widest, Math.max(60, width - left - 4));
 	}
 
 	/**
-	 * Menu width from the widest row it holds.
+	 * The rows of a menu, in order.
 	 *
-	 * <p>Fixed widths were fine while every label was two words. Labels that count what they will
-	 * act on are not a fixed length, and were running past the edge of the panel they were drawn
-	 * in.</p>
+	 * <p>Quantize and End are submenus because their members differ only in their last word, and a
+	 * list of four rows that all begin "Quantize to" is a list you have to read rather than scan.
+	 * Everything else stays where it is: a submenu costs a second movement to reach, which is only
+	 * worth paying where it buys the parent menu back four rows of height.</p>
 	 */
-	private int toolbarMenuWidth() {
-		int widest = toolbarMenu == ToolbarMenu.IMPORT ? IMPORT_MENU_WIDTH : TOOLBAR_MENU_WIDTH;
-		List<String> rows = toolbarRows();
-		ToolbarAction[] actions = toolbarActions();
-		for (int index = 0; index < rows.size(); index++) {
-			int hint = toolbarMenu == ToolbarMenu.IMPORT || index >= actions.length
-				? 0
-				: font.width(toolbarShortcut(actions[index]));
-			widest = Math.max(widest, font.width(rows.get(index)) + (hint == 0 ? 14 : hint + 30));
-		}
-		return Math.min(widest, Math.max(60, width - toolbarMenuX - 4));
-	}
-
-	private List<String> toolbarRows() {
-		ToolbarAction[] actions = toolbarActions();
-		if (toolbarMenu == ToolbarMenu.IMPORT) {
-			List<String> rows = new ArrayList<>();
-			for (ImportSetting setting : ImportSetting.values()) {
-				rows.add(importSettingLabel(setting));
+	private List<MenuRow> menuRows(ToolbarMenu menu) {
+		List<MenuRow> rows = new ArrayList<>();
+		switch (menu) {
+			case FILE -> addActionRows(rows, ToolbarAction.FILE_ACTIONS);
+			case EDIT -> {
+				addActionRows(rows, ToolbarAction.EDIT_ACTIONS);
+				rows.add(4, MenuRow.of(ToolbarSubmenu.QUANTIZE));
+				rows.add(MenuRow.of(ToolbarSubmenu.END));
 			}
-			return rows;
-		}
-		List<String> rows = new ArrayList<>(actions.length);
-		for (ToolbarAction action : actions) {
-			rows.add(toolbarRowLabel(action)
-				+ (selectedNotes.isEmpty() || !action.scopeable ? "" : " (selection)"));
+			case BUILD -> addActionRows(rows, ToolbarAction.BUILD_ACTIONS);
+			case SELECT -> addActionRows(rows, ToolbarAction.SELECT_ACTIONS);
+			case IMPORT -> {
+				for (ImportSetting setting : ImportSetting.values()) {
+					rows.add(MenuRow.of(setting));
+				}
+			}
+			case NONE -> {
+			}
 		}
 		return rows;
 	}
 
-	private boolean toolbarRowEnabled(int index) {
-		if (toolbarMenu == ToolbarMenu.IMPORT) {
+	private void addActionRows(List<MenuRow> rows, ToolbarAction[] actions) {
+		for (ToolbarAction action : actions) {
+			rows.add(MenuRow.of(action));
+		}
+	}
+
+	private String rowLabel(MenuRow row) {
+		if (row.submenu() != null) {
+			return row.submenu().label;
+		}
+		if (row.setting() != null) {
+			return importSettingLabel(row.setting());
+		}
+		return toolbarRowLabel(row.action())
+			+ (selectedNotes.isEmpty() || !row.action().scopeable ? "" : " (selection)");
+	}
+
+	private boolean rowEnabled(MenuRow row) {
+		if (row.setting() != null) {
 			return true;
 		}
-		ToolbarAction[] actions = toolbarActions();
-		return index >= 0 && index < actions.length && toolbarActionEnabled(actions[index]);
+		if (row.submenu() == null) {
+			return toolbarActionEnabled(row.action());
+		}
+		// A submenu is worth opening while any one thing inside it can be done.
+		for (ToolbarAction action : row.submenu().actions) {
+			if (toolbarActionEnabled(action)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * How wide a step each quantize row snaps to, in song ticks, for the column on the right.
+	 *
+	 * <p>The fractions are note values -- 1/4 is a quarter note, which at 480 ticks to the quarter
+	 * is 480 ticks and the <em>coarsest</em> row here, not the finest. Read as "a quarter of a
+	 * repeater tick" they say the opposite of what they mean, and the repeater row looks like it
+	 * ought to be the 1 they all divide. It is not a unit any of them divide: across this library
+	 * its grid runs from 48 ticks to 480, finer than a 1/16 on one song and a whole 1/4 on
+	 * another. Printing the tick counts settles all of it without anybody having to know the
+	 * convention -- the numbers are directly comparable and each is what that row will actually
+	 * snap to.</p>
+	 */
+	private String submenuRowDetail(ToolbarAction action) {
+		long ticks = switch (action) {
+			case QUANTIZE_QUARTER -> project().ppq();
+			case QUANTIZE_EIGHTH -> Math.max(1, project().ppq() / 2);
+			case QUANTIZE_SIXTEENTH -> Math.max(1, project().ppq() / 4);
+			// The grid the operation will really use, not the width of one repeater tick. Those
+			// differ whenever a repeater tick is not a whole number of song ticks, and quoting the
+			// second one here said 1/8 for a song whose repeater grid was nothing of the kind.
+			case QUANTIZE_REPEATERS -> project().repeaterGridTicks();
+			default -> 0L;
+		};
+		return ticks == 0L ? "" : Long.toString(ticks);
+	}
+
+	private String rowDescription(MenuRow row) {
+		if (row.submenu() != null) {
+			return row.submenu().description;
+		}
+		return row.setting() != null
+			? importSettingTooltip(row.setting())
+			: toolbarActionTooltip(row.action());
 	}
 
 	private void toggleToolbarMenu(ToolbarMenu menu, int x) {
 		if (toolbarMenu == menu) {
 			toolbarMenu = ToolbarMenu.NONE;
+			openSubmenu = null;
 			return;
 		}
 		toolbarMenu = menu;
 		toolbarMenuX = x;
+		openSubmenu = null;
 		contextMenuOpen = false;
 		instrumentMenuLayer = -1;
-	}
-
-	private ToolbarAction[] toolbarActions() {
-		return switch (toolbarMenu) {
-			case FILE -> ToolbarAction.FILE_ACTIONS;
-			case EDIT -> ToolbarAction.EDIT_ACTIONS;
-			case BUILD -> ToolbarAction.BUILD_ACTIONS;
-			case SELECT -> ToolbarAction.SELECT_ACTIONS;
-			case IMPORT, NONE -> new ToolbarAction[0];
-		};
 	}
 
 	private boolean toolbarActionEnabled(ToolbarAction action) {
@@ -1051,6 +1640,8 @@ public final class ComposerScreen extends Screen {
 			case SELECT_OFF_GRID -> !projectStats().offGridNotes().isEmpty();
 			case SELECT_TOO_FREQUENT -> !projectStats().crowdedNotes().isEmpty();
 			case SELECT_OUT_OF_RANGE -> projectStats().outOfRange() > 0;
+			case SELECT_OVERLOADED_CHORDS -> projectStats().overloadedTicks() > 0
+				|| projectStats().peakChord() > config.chordThinTarget();
 			case SELECT_NONE -> !selectedNotes.isEmpty();
 			// Nothing to scan from the title screen, and the coordinate prompt would have no way
 			// to tell you that the region you typed reads as empty because there is no world.
@@ -1065,30 +1656,52 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private boolean handleToolbarMenuClick(double mouseX, double mouseY, int button) {
-		List<String> rows = toolbarRows();
-		if (rows.isEmpty() || mouseX < toolbarMenuX
-				|| mouseX >= toolbarMenuX + toolbarMenuWidth()) {
-			return false;
-		}
-		int row = ((int)mouseY - 30) / TOOLBAR_MENU_ROW_HEIGHT;
-		if (row < 0 || row >= rows.size()) {
-			return false;
-		}
-		int rowY = 30 + row * TOOLBAR_MENU_ROW_HEIGHT;
-		if (mouseY < rowY || mouseY >= rowY + TOOLBAR_MENU_ROW_HEIGHT) {
-			return false;
-		}
-		if (!toolbarRowEnabled(row)) {
+		// The submenu is drawn over the parent panel, so it gets the click first wherever they meet.
+		if (openSubmenu != null && mouseX >= submenuLeft && mouseX < submenuRight
+				&& mouseY >= submenuTop && mouseY < submenuBottom) {
+			ToolbarAction action = null;
+			for (int index = 0; index < openSubmenu.actions.length; index++) {
+				int rowY = submenuRowTop(submenuTop, index);
+				if (mouseY >= rowY && mouseY < rowY + TOOLBAR_MENU_ROW_HEIGHT) {
+					action = openSubmenu.actions[index];
+					break;
+				}
+			}
+			if (action == null || !toolbarActionEnabled(action)) {
+				return true;
+			}
+			toolbarMenu = ToolbarMenu.NONE;
+			openSubmenu = null;
+			performToolbarAction(action);
 			return true;
 		}
-		if (toolbarMenu == ToolbarMenu.IMPORT) {
+		List<MenuRow> rows = menuRows(toolbarMenu);
+		int menuWidth = menuWidth(rows, toolbarMenu == ToolbarMenu.IMPORT
+			? IMPORT_MENU_WIDTH : TOOLBAR_MENU_WIDTH, toolbarMenuX);
+		if (rows.isEmpty() || mouseX < toolbarMenuX || mouseX >= toolbarMenuX + menuWidth) {
+			return false;
+		}
+		int row = ((int)mouseY - MENU_PANEL_TOP - 2) / TOOLBAR_MENU_ROW_HEIGHT;
+		if (row < 0 || row >= rows.size() || mouseY < MENU_PANEL_TOP + 2) {
+			return false;
+		}
+		MenuRow clicked = rows.get(row);
+		if (!rowEnabled(clicked)) {
+			return true;
+		}
+		if (clicked.submenu() != null) {
+			// Already opened by hovering; clicking it is neither a mistake nor a second thing.
+			openSubmenu = clicked.submenu();
+			return true;
+		}
+		if (clicked.setting() != null) {
 			// Settings stay open so several can be adjusted in one visit.
-			cycleImportSetting(ImportSetting.values()[row], button == 1 ? -1 : 1);
+			cycleImportSetting(clicked.setting(), button == 1 ? -1 : 1);
 			return true;
 		}
-		ToolbarAction action = toolbarActions()[row];
 		toolbarMenu = ToolbarMenu.NONE;
-		performToolbarAction(action);
+		openSubmenu = null;
+		performToolbarAction(clicked.action());
 		return true;
 	}
 
@@ -1140,6 +1753,7 @@ public final class ComposerScreen extends Screen {
 				note -> projectStats().crowded().contains(note.startTick()), true);
 			case SELECT_OUT_OF_RANGE -> selectNotesWhere("out of range",
 				note -> !note.isBuildable(), true);
+			case SELECT_OVERLOADED_CHORDS -> selectOverloadedChordNotes();
 			case SELECT_ALL_NOTES -> selectNotesWhere("selected", note -> true, false);
 			case SELECT_NONE -> {
 				selectedNotes.clear();
@@ -1287,6 +1901,69 @@ public final class ComposerScreen extends Screen {
 	}
 
 	/**
+	 * Selects what a chord could lose to fit, without deleting any of it.
+	 *
+	 * <p>Selecting rather than applying because this is the one edit here whose result has to be
+	 * listened to. Everything else in the Select menu names notes that are already wrong; this one
+	 * names notes that are merely the least missed, and the difference between those two is a
+	 * judgement the composer is in no position to make on its own. Delete commits it, Escape walks
+	 * away, and playback in between is the whole point.</p>
+	 *
+	 * <p>Not routed through {@link #selectNotesWhere}: that judges a note at a time and only looks
+	 * at the layers being edited, while what a chord can spare depends on the whole chord and the
+	 * limit applies to every layer that is going into the build.</p>
+	 */
+	private void selectOverloadedChordNotes() {
+		int target = config.chordThinTarget();
+		// Scoped to the layer selection like the rest of the Select menu, so thinning one part is
+		// possible at all. How big a chord is still comes from every layer in the build -- only
+		// where the notes may be taken from narrows. Select the whole panel for the whole song.
+		Set<Integer> scope = new LinkedHashSet<>();
+		for (int layerIndex : selectionLayers()) {
+			if (layerIndex >= 0 && layerIndex < project().layers().size()
+					&& project().layers().get(layerIndex).visible()) {
+				scope.add(layerIndex);
+			}
+		}
+		ChordThinner.Result thinned =
+			ChordThinner.thin(project(), target, config.dedupeIdenticalNotes(), scope);
+		selectedNotes.clear();
+		selectedNotes.addAll(thinned.noteIds());
+		updateButtonStates();
+		int layerCount = project().layers().size();
+		// Scope first, before any number it qualifies. The likeliest way to be surprised by this is
+		// to run it on whichever layer happened to be active, get a fraction of the song, and read
+		// that as the song being done -- and a caveat at the end of a paragraph arrives too late to
+		// stop that. Everything after the colon is about the layers named before it.
+		String where = scope.size() == layerCount
+			? "Notes from all " + layerCount + " layers"
+			: "Notes from " + scope.size() + " of " + layerCount
+				+ " layers selected (select more layers to thin more at once)";
+		if (thinned.chordsOver() == 0) {
+			showResult(Component.literal("No chord is over " + target + " - nothing to thin."));
+			return;
+		}
+		if (thinned.isEmpty()) {
+			showResult(Component.literal(where + ": nothing here can be spared, so all "
+				+ thinned.chordsOver() + " chords over " + target + " are untouched. Every sound "
+				+ "in these layers is the last of its pitch or the last of its instrument."));
+			return;
+		}
+		// Sounds and notes are different numbers whenever deduplication is on, and saying only one
+		// of them invites the obvious wrong conclusion -- that deleting the selection will take the
+		// count down by however many notes it holds.
+		StringBuilder summary = new StringBuilder(where + ": " + thinned.chordsThinned() + " of "
+			+ thinned.chordsOver() + " chords over " + target + " thinned, "
+			+ thinned.soundsRemoved() + " sounds selected as " + thinned.noteIds().size()
+			+ " notes. Delete to commit, Escape to keep them.");
+		if (thinned.chordsStillOver() > 0) {
+			summary.append(' ').append(thinned.chordsStillOver()).append(" still over ")
+				.append(target).append('.');
+		}
+		showResult(Component.literal(summary.toString()));
+	}
+
+	/**
 	 * What a menu row does, in a sentence.
 	 *
 	 * <p>Every row has one. Several of these actions are irreversible in the world or change the
@@ -1328,9 +2005,11 @@ public final class ComposerScreen extends Screen {
 			case MERGE_REPEATS -> "Collapses a pitch that re-triggers faster than the repeat "
 				+ "window. Songs fake sustain this way, and note blocks cannot sustain.";
 			case QUANTIZE_QUARTER, QUANTIZE_EIGHTH, QUANTIZE_SIXTEENTH ->
-				"Moves note starts onto that musical grid. A coarser grid fixes more and changes "
-					+ "more. Whether it makes the song buildable depends on the tempo: a 1/16 only "
-					+ "helps if a 1/16 is a whole number of repeater ticks.";
+				"Moves note starts onto that musical grid. These are note values, so 1/4 is a "
+					+ "quarter note and the coarsest of them -- the number beside each is its step "
+					+ "in song ticks. A coarser grid fixes more and changes more. Whether it makes "
+					+ "the song buildable depends on the tempo: a 1/16 only helps if a 1/16 is a "
+					+ "whole number of repeater ticks.";
 			case QUANTIZE_REPEATERS -> "Moves note starts onto whole repeater ticks -- the ruler "
 				+ "that actually decides, worked out from the tempo and the current speed, so it is "
 				+ "usually not a musical fraction at all. Notes closer than one tick land together "
@@ -1364,6 +2043,11 @@ public final class ComposerScreen extends Screen {
 			case SELECT_TOO_FREQUENT -> "Selects notes arriving less than one repeater tick after "
 				+ "the previous one -- faster than redstone can retrigger.";
 			case SELECT_OUT_OF_RANGE -> "Selects notes outside the note-block range of F#3-F#5.";
+			case SELECT_OVERLOADED_CHORDS -> "Selects the notes worth least in every chord bigger "
+				+ "than the thinning target, so you can hear the song without them before deleting. "
+				+ "Never the last of a pitch or the last of an instrument, so a chord keeps its "
+				+ "harmony and keeps its drum -- only how thickly they are scored changes. Takes "
+				+ "from the selected layers only; select them all to thin the whole song.";
 			case SELECT_ALL_NOTES -> "Selects every note on the active layers.";
 			case SELECT_NONE -> "Clears the selection.";
 		};
@@ -1373,7 +2057,10 @@ public final class ComposerScreen extends Screen {
 		return switch (action) {
 			case RENAME -> "Renames this layer. Double-clicking its name does the same thing.";
 			case MERGE_SELECTED -> "Folds the selected layers into the lowest-numbered one, which "
-				+ "keeps its name and instrument.";
+				+ "keeps its name and instrument -- so merging across two instruments gives every "
+				+ "note the surviving one. Ctrl+E does the same thing.";
+			case DELETE_SELECTED -> "Removes the selected layers and every note on them. Deleting all "
+				+ "of them leaves one empty layer to work in. Ctrl+Z puts them back.";
 			case INCLUDE_SELECTED -> "Fills in the build dot on the selected layers, adding them to "
 				+ "the sequence.";
 			case SET_INCLUDED_TO_SELECTION -> "Makes the selected layers the only included ones, "
@@ -1397,6 +2084,8 @@ public final class ComposerScreen extends Screen {
 			case VELOCITY_CUTOFF -> "Notes quieter than this are dropped, since note blocks have no "
 				+ "volume. Set it too high and a quiet passage disappears -- the import report says "
 				+ "what range the file uses.";
+			case CHORD_THIN_TARGET -> "How far Select > Overloaded chords cuts a chord back. Thirty "
+				+ "is the most a build can place at one instant; under that leaves the paste room.";
 			case IGNORE_PERCUSSION -> "Skip MIDI channel 10, which is drums. They rarely map onto "
 				+ "note-block pitches.";
 			case MAX_TRACKS -> "How many parts to keep. Busiest first, so a sparse intro can be "
@@ -1477,6 +2166,7 @@ public final class ComposerScreen extends Screen {
 			case VELOCITY_CUTOFF -> config.midiVelocityCutoff() <= FastNoteblocksConfig.MIN_MIDI_VELOCITY_CUTOFF
 				? "off (keep all)"
 				: Integer.toString(config.midiVelocityCutoff());
+			case CHORD_THIN_TARGET -> config.chordThinTarget() + " per chord";
 			case IGNORE_PERCUSSION -> config.midiIgnorePercussion() ? "ignored" : "imported";
 			case MAX_TRACKS -> Integer.toString(config.midiMaxImportedTracks());
 			case DEFAULT_INSTRUMENT -> PreviewInstrument.byId(config.midiDefaultInstrument()).name();
@@ -1492,6 +2182,7 @@ public final class ComposerScreen extends Screen {
 			case RANGE_FIT -> config.setMidiRangeFit(
 				cycle(FastNoteblocksConfig.MidiRangeFit.values(), config.midiRangeFit(), direction));
 			case VELOCITY_CUTOFF -> config.setMidiVelocityCutoff(cycleVelocityCutoff(direction));
+			case CHORD_THIN_TARGET -> config.setChordThinTarget(config.chordThinTarget() + direction);
 			case GRID_OUTLIERS -> {
 				int span = FastNoteblocksConfig.MAX_CONVERSION_GAP_PERCENTILE
 					- FastNoteblocksConfig.MIN_CONVERSION_GAP_PERCENTILE + 1;
@@ -1597,26 +2288,43 @@ public final class ComposerScreen extends Screen {
 	}
 
 	/** The composition being edited, so which one it is never has to be remembered. */
+	/**
+	 * The song's name, in the gap between the menus and the controls.
+	 *
+	 * <p>Right-aligned against the controls rather than left-aligned after the menus, so that a
+	 * long name runs back into the empty middle of the bar instead of into the Play button. The
+	 * controls themselves are pinned to the window edge, so nothing here can move them -- renaming
+	 * a song or picking up an unsaved dot leaves them exactly where your hand expects.</p>
+	 */
 	private void extractCompositionName(GuiGraphicsExtractor graphics) {
-		int left = TOOLBAR_CONTROLS_RIGHT + 12;
-		if (left > width - 40) {
+		int right = toolbarControlsLeft - 10;
+		int left = menuTitles().getLast().right() + 12;
+		if (right - left < 48) {
 			return;
 		}
 		// A bullet rather than the usual asterisk, because the composer already spends asterisks on
 		// nothing and dots on the build flag -- and this one has to read at a glance from across the
 		// toolbar, which is where you look before deciding whether it is safe to leave.
 		String name = project().name() + (unsaved() ? "  • unsaved" : "");
-		String shown = font.width(name) <= width - left - 8
+		String shown = font.width(name) <= right - left
 			? name
-			: font.plainSubstrByWidth(name, width - left - 16) + "...";
-		graphics.text(font, shown, left, 13, unsaved() ? 0xFFFFC864 : 0xFFD6D8DD, false);
+			: font.plainSubstrByWidth(name, right - left - 8) + "...";
+		graphics.text(font, shown, right - font.width(shown), MENU_BAR_TOP + 4,
+			unsaved() ? 0xFFFFC864 : 0xFFD6D8DD, false);
 	}
 
 	private void extractPanels(GuiGraphicsExtractor graphics) {
-		graphics.fill(0, TOOLBAR_HEIGHT, LAYER_PANEL_WIDTH, height, 0xB8101115);
-		graphics.fill(LAYER_PANEL_WIDTH, TOOLBAR_HEIGHT, width, height, 0x99101115);
-		graphics.text(font, "Layers", 8, TOOLBAR_HEIGHT + 4, 0xFF8A9098, false);
-		graphics.enableScissor(0, LAYER_LIST_TOP - 2, LAYER_PANEL_WIDTH, layerListBottom());
+		graphics.fill(0, TOOLBAR_HEIGHT, layerPanelWidth(), height, 0xB8101115);
+		graphics.fill(layerPanelWidth(), TOOLBAR_HEIGHT, width, height, 0x99101115);
+		extractSplitter(graphics);
+		LayerRowLayout row = layerRowLayout();
+		// The header doubles as the fold: an arrow pointing the way the panel would go.
+		graphics.text(font, Component.literal(config.layerPanelCollapsed() ? ">" : "<"),
+			row.inset(), TOOLBAR_HEIGHT + 4, 0xFF8A9098, false);
+		if (row.name()) {
+			graphics.text(font, "Layers", row.inset() + 10, TOOLBAR_HEIGHT + 4, 0xFF8A9098, false);
+		}
+		graphics.enableScissor(0, LAYER_LIST_TOP - 2, layerPanelWidth(), layerListBottom());
 		for (int index = 0; index < project().layers().size(); index++) {
 			int y = layerY(index);
 			int rowHeight = LAYER_ROW_HEIGHT;
@@ -1626,50 +2334,85 @@ public final class ComposerScreen extends Screen {
 			int color = layerColor(index);
 			boolean activeLayer = index == project().activeLayerIndex();
 			boolean selected = selectedLayers.contains(index);
-			graphics.fill(8, y - 2, LAYER_PANEL_WIDTH - 8, y + rowHeight - 2,
+			int left = row.inset();
+			int right = layerPanelWidth() - row.inset();
+			graphics.fill(left, y - 2, right, y + rowHeight - 2,
 				activeLayer ? 0x88425A6B : selected ? 0x88344657 : 0x44252A31);
 			if (selected) {
 				// Unmistakable outline: a tinted background alone reads as noise on a dark panel.
 				int edge = activeLayer ? 0xFF8FD3FF : 0xFF5C93B8;
-				graphics.fill(8, y - 2, LAYER_PANEL_WIDTH - 8, y - 1, edge);
-				graphics.fill(8, y + rowHeight - 3, LAYER_PANEL_WIDTH - 8, y + rowHeight - 2, edge);
-				graphics.fill(LAYER_PANEL_WIDTH - 9, y - 2, LAYER_PANEL_WIDTH - 8, y + rowHeight - 2, edge);
+				graphics.fill(left, y - 2, right, y - 1, edge);
+				graphics.fill(left, y + rowHeight - 3, right, y + rowHeight - 2, edge);
+				graphics.fill(right - 1, y - 2, right, y + rowHeight - 2, edge);
 			}
-			graphics.fill(8, y - 2, LAYER_PANEL_WIDTH - 8, y - 1, activeLayer ? color : 0x66383D44);
-			graphics.fill(8, y + rowHeight - 3, LAYER_PANEL_WIDTH - 8, y + rowHeight - 2,
+			graphics.fill(left, y - 2, right, y - 1, activeLayer ? color : 0x66383D44);
+			graphics.fill(left, y + rowHeight - 3, right, y + rowHeight - 2,
 				activeLayer ? color : 0x88383D44);
-			graphics.fill(8, y - 2, 12, y + rowHeight - 2, color);
+			// The colour stripe is how a layer is recognised once its name is gone, so it stays at
+			// every width -- narrowed to two pixels rather than dropped.
+			graphics.fill(left, y - 2, left + (row.chip() ? 4 : 2), y + rowHeight - 2, color);
 			if (activeLayer) {
-				graphics.fill(12, y, LAYER_PANEL_WIDTH - 10, y + rowHeight - 4, 0x553D444D);
+				graphics.fill(left + 4, y, right - 2, y + rowHeight - 4, 0x553D444D);
 			}
 			Layer layer = project().layers().get(index);
-			// Drawn as a bordered chip with a letter in it. Bare symbols read as decoration on a
-			// row that is mostly decoration already, and this one is the layer's only switch.
 			LayerState state = layerState(index);
-			int chipLeft = LAYER_STATE_X - 2;
-			graphics.fill(chipLeft, y + 2, chipLeft + LAYER_CHIP, y + 2 + LAYER_CHIP, 0x66FFFFFF);
-			graphics.fill(chipLeft + 1, y + 3, chipLeft + LAYER_CHIP - 1, y + 1 + LAYER_CHIP, state.chip);
-			graphics.text(font, Component.literal(state.letter),
-				chipLeft + (LAYER_CHIP - font.width(state.letter)) / 2, y + 4, state.color, false);
+			if (row.chip()) {
+				// Drawn as a bordered chip with a letter in it. Bare symbols read as decoration on a
+				// row that is mostly decoration already, and this one is the layer's only switch.
+				int chipLeft = LAYER_STATE_X - 2;
+				graphics.fill(chipLeft, y + 2, chipLeft + LAYER_CHIP, y + 2 + LAYER_CHIP, 0x66FFFFFF);
+				graphics.fill(chipLeft + 1, y + 3, chipLeft + LAYER_CHIP - 1, y + 1 + LAYER_CHIP,
+					state.chip);
+				graphics.text(font, Component.literal(state.letter),
+					chipLeft + (LAYER_CHIP - font.width(state.letter)) / 2, y + 4, state.color, false);
+			}
 			// The instrument as the block it sounds like, which is the same picture the palette uses
 			// and the only label short enough to leave the name any room.
 			graphics.item(new ItemStack(PreviewInstrument.byId(layer.instrument()).icon()),
-				LAYER_INSTRUMENT_X, y - 1);
-			String mark = selected ? "✓ " : "";
-			String label = mark + layer.name() + "  (" + layer.notes().size() + ")";
-			smallText(graphics, smallFit(label, LAYER_NAME_RIGHT - LAYER_NAME_X), LAYER_NAME_X, y + 5,
-				state == LayerState.HIDDEN ? 0xFF80858C
-					: activeLayer ? 0xFFFFFFFF : selected ? 0xFFE8F4FF : 0xFFD6D8DD);
-			// Filled means this layer goes into the build sequence. Deliberately not the same control
-			// as the state icon beside it: what you hear while working and what gets built are
-			// different questions, and answering them with one switch is how a layer goes missing.
-			graphics.text(font, Component.literal(layer.buildEnabled() ? "●" : "○"),
-				buildDotX(), y + 4, layer.buildEnabled() ? 0xFF5AD46A : 0xFF6A7078, false);
+				row.instrumentX(), y - 1);
+			// Whether you will hear this layer, marked on the thing that makes the sound -- and the
+			// one part of a row that survives every width, so a folded panel still answers it. A
+			// layer another layer's solo has quieted gets a fainter slash than one you muted
+			// yourself: the same answer to "will I hear it", a different answer to "who decided".
+			boolean soloElsewhere = state == LayerState.ACTIVE && !soloedLayers.isEmpty();
+			if (state == LayerState.MUTED || state == LayerState.HIDDEN || soloElsewhere) {
+				slashInstrument(graphics, row.instrumentX(), y - 1,
+					soloElsewhere ? 0x88E0544F : 0xFFE0544F);
+			}
+			if (row.name()) {
+				String mark = selected ? "✓ " : "";
+				String label = mark + layer.name() + "  (" + layer.notes().size() + ")";
+				smallText(graphics, smallFit(label, row.nameRight() - row.nameLeft()),
+					row.nameLeft(), y + 5,
+					activeLayer ? 0xFFFFFFFF : selected ? 0xFFE8F4FF : 0xFFD6D8DD);
+			}
+			if (state == LayerState.HIDDEN) {
+				// Hidden is muted and also gone from the roll, so it gets the slash and then the row
+				// dimmed over it. Two marks for two facts, which is what makes them read together:
+				// slashed is silent, grey is not in the roll, and hidden is both.
+				//
+				// Stopping short of the build dot on purpose. Hiding a layer does not take it out of
+				// the build, and greying the one control that says so would claim that it had. The
+				// colour stripe survives for the same reason it survives every width -- once a layer
+				// is dim and nameless the stripe is what is left to recognise it by.
+				// Inside the row's own border, so that a hidden layer you have selected still shows
+				// the outline saying so.
+				graphics.fill(left + (row.chip() ? 4 : 2), y - 1,
+					row.dot() ? row.dotX() - 3 : row.ordinalLeft() - 2, y + rowHeight - 3, 0xAA0E1014);
+			}
+			if (row.dot()) {
+				// Filled means this layer goes into the build sequence. Deliberately not the same
+				// control as the state icon beside it: what you hear while working and what gets
+				// built are different questions, and one switch for both is how a layer goes missing.
+				graphics.text(font,
+					Component.literal(layer.buildEnabled() ? BUILD_DOT_ON : BUILD_DOT_OFF),
+					row.dotX(), y + 4, layer.buildEnabled() ? 0xFF5AD46A : 0xFF6A7078, false);
+			}
 			// The row number is for pointing at a layer out loud, nothing more, so it sits out at the
 			// edge in the smallest thing that can still be read rather than in front of the name.
 			String ordinal = Integer.toString(index + 1);
-			smallText(graphics, ordinal,
-				LAYER_PANEL_WIDTH - 11 - smallTextWidth(ordinal), y + 5, 0xFF71767E);
+			smallText(graphics, ordinal, row.ordinalRight() - smallTextWidth(ordinal), y + 5,
+				0xFF71767E);
 		}
 		extractLayerDropLine(graphics);
 		graphics.disableScissor();
@@ -1698,12 +2441,14 @@ public final class ComposerScreen extends Screen {
 		int instrumentLayer = layerInstrumentAt(lastMouseX, lastMouseY);
 		int dotLayer = buildDotAt(lastMouseX, lastMouseY);
 		if (stateLayer >= 0) {
-			text = Component.literal(layerState(stateLayer).description
-				+ "\nClick steps A - M - S - H, right-click steps back.");
+			text = Component.literal(layerStateTooltip(stateLayer));
 		} else if (instrumentLayer >= 0) {
+			// The slash is drawn on this icon, so this is where someone points to ask about it.
+			String silence = audibilityNote(instrumentLayer);
 			text = Component.literal(
 				PreviewInstrument.byId(project().layers().get(instrumentLayer).instrument()).name()
-					+ " - click to change the note-block instrument");
+					+ " - click to change the note-block instrument"
+					+ (silence == null ? "" : "\n" + silence));
 		} else if (dotLayer >= 0) {
 			text = Component.literal(project().layers().get(dotLayer).buildEnabled()
 				? "In the build sequence - click to leave it out"
@@ -1712,6 +2457,45 @@ public final class ComposerScreen extends Screen {
 		if (text != null) {
 			graphics.setTooltipForNextFrame(font, font.split(text, 200), x, y);
 		}
+	}
+
+	/**
+	 * What the state chip says, what the next click would make it, and what it will never touch.
+	 *
+	 * <p>It used to name the four letters and leave you to work out which way round they went. The
+	 * four are a dial, so the useful thing while pointing at one is where a click lands, not a list
+	 * of the other three. The last line is there because a row has two switches and mistaking them
+	 * is how a layer that sounded right in the composer goes missing from the build.</p>
+	 */
+	private String layerStateTooltip(int index) {
+		LayerState[] dial = LayerState.values();
+		LayerState state = layerState(index);
+		String silence = state == LayerState.ACTIVE ? audibilityNote(index) : null;
+		return state.sentence()
+			+ (silence == null ? "" : "\n" + silence)
+			+ "\n\nClick for " + dial[Math.floorMod(state.ordinal() + 1, dial.length)].title
+			+ ", right-click for " + dial[Math.floorMod(state.ordinal() - 1, dial.length)].title + "."
+			+ "\nNone of the four decide what gets built. That is the dot at the end of the row.";
+	}
+
+	/**
+	 * Why this layer is quiet, or null when it is not.
+	 *
+	 * <p>Includes the case the chip cannot show: a layer nobody muted, silent because something
+	 * else is soloed. That is the one a player is most likely to be confused by, since its own
+	 * letter still reads A.</p>
+	 */
+	private String audibilityNote(int index) {
+		LayerState state = layerState(index);
+		if (state == LayerState.MUTED || state == LayerState.HIDDEN) {
+			return state.sentence();
+		}
+		if (state != LayerState.ACTIVE || soloedLayers.isEmpty()) {
+			return null;
+		}
+		return soloedLayers.size() == 1
+			? "Silent right now: layer " + (soloedLayers.iterator().next() + 1) + " is soloed."
+			: "Silent right now: " + soloedLayers.size() + " layers are soloed.";
 	}
 
 	/** Whether a point lands on a menu drawn over the layer panel. */
@@ -1725,12 +2509,21 @@ public final class ComposerScreen extends Screen {
 				&& y < layerMenuY + LayerAction.values().length * CONTEXT_MENU_ROW_HEIGHT + 4) {
 			return true;
 		}
+		if (y < TOOLBAR_HEIGHT) {
+			return true;
+		}
 		if (toolbarMenu == ToolbarMenu.NONE) {
 			return false;
 		}
-		List<String> toolbar = toolbarRows();
-		return !toolbar.isEmpty() && x >= toolbarMenuX && x < toolbarMenuX + toolbarMenuWidth()
-			&& y >= 28 && y < 28 + toolbar.size() * TOOLBAR_MENU_ROW_HEIGHT + 4;
+		if (openSubmenu != null && x >= submenuLeft && x < submenuRight
+				&& y >= submenuTop && y < submenuBottom) {
+			return true;
+		}
+		List<MenuRow> rows = menuRows(toolbarMenu);
+		int menuWidth = menuWidth(rows, toolbarMenu == ToolbarMenu.IMPORT
+			? IMPORT_MENU_WIDTH : TOOLBAR_MENU_WIDTH, toolbarMenuX);
+		return !rows.isEmpty() && x >= toolbarMenuX && x < toolbarMenuX + menuWidth
+			&& y >= MENU_PANEL_TOP && y < MENU_PANEL_TOP + rows.size() * TOOLBAR_MENU_ROW_HEIGHT + 4;
 	}
 
 	/**
@@ -1740,6 +2533,23 @@ public final class ComposerScreen extends Screen {
 	 * the layer panel: a converted song is dozens of layers whose names differ only in a suffix,
 	 * and full-size text spent the panel's width on four of them at a time.</p>
 	 */
+	/**
+	 * A red diagonal across a sixteen-pixel instrument icon: this layer is making no sound.
+	 *
+	 * <p>Stepped squares because there is no line to draw with here, and a dark square behind every
+	 * red one because an item icon is a picture and a bare red diagonal vanishes into the ones with
+	 * red in them. Fourteen quads a row, only for rows that are actually silent and only for rows
+	 * the list is showing.</p>
+	 */
+	private void slashInstrument(GuiGraphicsExtractor graphics, int x, int y, int color) {
+		for (int step = 0; step < 7; step++) {
+			int px = x + 1 + step * 2;
+			int py = y + 13 - step * 2;
+			graphics.fill(px, py + 1, px + 3, py + 4, 0xAA05070A);
+			graphics.fill(px, py, px + 3, py + 3, color);
+		}
+	}
+
 	private void smallText(GuiGraphicsExtractor graphics, String text, int x, int y, int color) {
 		graphics.pose().pushMatrix();
 		graphics.pose().translate(x, y);
@@ -1842,7 +2652,7 @@ public final class ComposerScreen extends Screen {
 		int y = insertion >= project().layers().size()
 			? layerY(project().layers().size() - 1) + LAYER_ROW_HEIGHT - 2
 			: layerY(insertion) - 2;
-		graphics.fill(8, y - 1, LAYER_PANEL_WIDTH - 8, y + 1, 0xFF8FD3FF);
+		graphics.fill(8, y - 1, layerPanelWidth() - 8, y + 1, 0xFF8FD3FF);
 	}
 
 	private void extractLayerScrollbar(GuiGraphicsExtractor graphics) {
@@ -1855,7 +2665,11 @@ public final class ComposerScreen extends Screen {
 		int contentHeight = layerContentHeight();
 		int thumbHeight = Math.max(16, trackHeight * trackHeight / Math.max(1, contentHeight));
 		int thumbTop = trackTop + (trackHeight - thumbHeight) * layerScroll / maximum;
-		int x = LAYER_PANEL_WIDTH - 6;
+		if (!layerRowLayout().dot()) {
+			// Narrow, the track would sit on top of the row numbers, which are the last thing left.
+			return;
+		}
+		int x = layerPanelWidth() - 6;
 		graphics.fill(x, trackTop, x + 3, trackTop + trackHeight, 0x40FFFFFF);
 		graphics.fill(x, thumbTop, x + 3, thumbTop + thumbHeight, 0xAAFFFFFF);
 	}
@@ -1899,7 +2713,7 @@ public final class ComposerScreen extends Screen {
 				0xFFBFC4CA, false);
 			smallText(graphics, clockLabel(secondsAt(tick)), x + 3, rulerY + 13, 0xFF767C85);
 		}
-		int endX = tickX(project().endTick());
+		int endX = endMarkerX();
 		if (endX >= rollX && endX <= rollX + rollWidth) {
 			// Flag points back over the song, so the marker reads as the edge of something rather
 			// than the start of it. Red when the trailing gap is not a delay a build can place.
@@ -1973,8 +2787,8 @@ public final class ComposerScreen extends Screen {
 			(int)(clamped / 60.0), clamped % 60.0);
 	}
 
-	private void extractPianoRoll(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
-		int pianoX = LAYER_PANEL_WIDTH;
+	private long extractPianoRoll(GuiGraphicsExtractor graphics, int mouseX, int mouseY, long mark) {
+		int pianoX = layerPanelWidth();
 		graphics.enableScissor(pianoX, rollY, rollX + rollWidth, rollY + rollHeight);
 		for (int midi = topMidiNote; midi >= MIN_MIDI_NOTE; midi--) {
 			int y = noteY(midi);
@@ -2002,8 +2816,11 @@ public final class ComposerScreen extends Screen {
 			}
 		}
 
+		mark = phase(PHASE_KEYS, mark);
 		extractTimeGrid(graphics);
+		mark = phase(PHASE_GRID, mark);
 		extractNotes(graphics, mouseX, mouseY);
+		mark = phase(PHASE_NOTES, mark);
 		extractPlayhead(graphics);
 		if (selectingBox) {
 			int left = (int)Math.min(dragStartX, selectionEndX);
@@ -2019,7 +2836,7 @@ public final class ComposerScreen extends Screen {
 		graphics.disableScissor();
 
 		graphics.text(font, "Minecraft F♯3–F♯5", rollX + 5, TOOLBAR_HEIGHT + 3, 0xFF65F4FF, false);
-		extractCompositionName(graphics);
+		return phase(PHASE_PLAYHEAD, mark);
 	}
 
 	private void extractTimeGrid(GuiGraphicsExtractor graphics) {
@@ -2045,15 +2862,32 @@ public final class ComposerScreen extends Screen {
 					x + 3, rollY + 2, 0xFFAAAAAA, false);
 			}
 		}
-		for (Map.Entry<Long, Integer> entry : projectStats().chordCounts().entrySet()) {
-			if (entry.getValue() <= SongAnalysis.MAX_SIMULTANEOUS_NOTES) {
-				continue;
-			}
-			int x = tickX(entry.getKey());
+		for (long overloaded : overloadedTicks()) {
+			int x = tickX(overloaded);
 			if (x >= rollX && x <= rollX + rollWidth) {
 				graphics.fill(x - 1, rollY, x + 2, rollY + rollHeight, 0x66FF3333);
 			}
 		}
+	}
+
+	/**
+	 * The ticks carrying more notes than a build can place, as a sorted array.
+	 *
+	 * <p>Sifted once per analysis rather than once per frame. The grid used to walk the whole chord
+	 * map looking for them, which boxes a Long for every distinct tick in the song -- fourteen
+	 * hundred of them on a dense import, to find the usual answer of none.</p>
+	 */
+	private long[] overloadedTicks() {
+		SongAnalysis stats = projectStats();
+		if (cachedOverloadedStats != stats) {
+			cachedOverloadedStats = stats;
+			cachedOverloadedTicks = stats.chordCounts().entrySet().stream()
+				.filter(entry -> entry.getValue() > SongAnalysis.MAX_SIMULTANEOUS_NOTES)
+				.mapToLong(Map.Entry::getKey)
+				.sorted()
+				.toArray();
+		}
+		return cachedOverloadedTicks;
 	}
 
 	/**
@@ -2073,15 +2907,38 @@ public final class ComposerScreen extends Screen {
 		return step;
 	}
 
+	/**
+	 * Works out where every visible note goes and hands the lot to {@link NoteCellGrid} to draw.
+	 *
+	 * <p>Nothing here draws directly. Zoomed all the way out a dense composition asks for thousands
+	 * of quads on a few hundred pixel columns, most of them behind another note or touching one of
+	 * the same colour, and the grid is what turns those into the few hundred that are actually
+	 * visible. The loop's own job is to be cheap: no rectangle object per note, no boxed lookup
+	 * where the answer is known to be no, and pitch culled on an int comparison.</p>
+	 */
 	private void extractNotes(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
 		ComposerProject shown = displayProject();
 		SongAnalysis stats = projectStats();
 		Set<Long> offGrid = stats.offGrid();
 		Set<Long> crowded = stats.crowded();
+		// Hoisted out of the per-note loop: a Set<Long> lookup boxes the tick, and on a clean song
+		// all three of these are empty, so nine thousand boxes a frame buy three known answers.
+		boolean anyCrowded = !crowded.isEmpty();
+		boolean anyOffGrid = !offGrid.isEmpty();
+		boolean anySelected = !selectedNotes.isEmpty();
 		NoteEvent hoveredCandidate = null;
 		int hoveredCandidateLayer = -1;
 		long firstVisibleTick = Math.max(0L, horizontalScroll - stats.maximumNoteDuration());
 		long lastVisibleTick = horizontalScroll + (long)Math.ceil(rollWidth * ticksPerPixel);
+		int rollRight = rollX + rollWidth;
+		int rollBottom = rollY + rollHeight;
+		// Pitch rows the roll can show, so a note above or below the window is rejected on an int
+		// comparison instead of on a rectangle built for it.
+		int lowestVisibleMidi = topMidiNote - rollHeight / rowHeight - 1;
+		notesConsidered = 0;
+		notesDrawn = 0;
+		long layoutStart = profiling ? System.nanoTime() : 0L;
+		cells.begin(rollX, rollWidth, NOTE_TRIGGER_WIDTH, rowHeight - 2);
 		for (int layerIndex : noteDrawOrder(shown)) {
 			Layer layer = shown.layers().get(layerIndex);
 			if (!layer.visible()) {
@@ -2089,6 +2946,8 @@ public final class ComposerScreen extends Screen {
 			}
 			boolean active = layerIndex == shown.activeLayerIndex();
 			boolean highlighted = active || selectedLayers.contains(layerIndex);
+			int liveColor = highlighted ? layerColor(layerIndex) : 0xFF777A80;
+			int deadColor = highlighted ? 0xFFFF6B6B : 0xFF755050;
 			List<NoteEvent> notes = layer.notes();
 			for (int noteIndex = lowerBoundStart(notes, firstVisibleTick);
 					noteIndex < notes.size(); noteIndex++) {
@@ -2096,40 +2955,49 @@ public final class ComposerScreen extends Screen {
 				if (note.startTick() > lastVisibleTick) {
 					break;
 				}
-				NoteRect rect = noteRect(note);
-				if (!rect.intersects(rollX, rollY, rollX + rollWidth, rollY + rollHeight)) {
+				notesConsidered++;
+				int midi = note.midiNote();
+				if (midi > topMidiNote || midi < lowestVisibleMidi) {
 					continue;
 				}
-				boolean selected = selectedNotes.contains(note.id());
-				int color = highlighted ? layerColor(layerIndex) : 0xFF777A80;
-				if (!note.isBuildable()) {
-					color = highlighted ? 0xFFFF6B6B : 0xFF755050;
+				int left = tickX(note.startTick());
+				int right = left + NOTE_TRIGGER_WIDTH;
+				if (right <= rollX || left >= rollRight) {
+					continue;
 				}
-				if (selected) {
-					graphics.fill(rect.left - 1, rect.top - 1, rect.right + 1, rect.bottom + 1, 0xFFFFFFFF);
+				int top = rollY + (topMidiNote - midi) * rowHeight + 1;
+				int bottom = top + rowHeight - 2;
+				if (bottom <= rollY || top >= rollBottom) {
+					continue;
 				}
-				graphics.fill(rect.left, rect.top, rect.right, rect.bottom, color);
-				boolean tooFrequent = crowded.contains(note.startTick());
-				if (tooFrequent || offGrid.contains(note.startTick())) {
-					// Outline rather than recolour: a layer colour may itself be orange.
-					// Orange means arrives-too-soon-to-build; yellow means lands-between-ticks.
-					int warn = tooFrequent
-						? (highlighted ? 0xFFFF9A2E : 0x55FF9A2E)
-						: (highlighted ? 0xFFFFE45C : 0x55FFE45C);
-					graphics.fill(rect.left, rect.top, rect.right, rect.top + 1, warn);
-					graphics.fill(rect.left, rect.bottom - 1, rect.right, rect.bottom, warn);
-					graphics.fill(rect.left, rect.top, rect.left + 1, rect.bottom, warn);
-					graphics.fill(rect.right - 1, rect.top, rect.right, rect.bottom, warn);
+				notesDrawn++;
+				int flags = highlighted ? NoteCellGrid.HIGHLIGHTED : 0;
+				if (anySelected && selectedNotes.contains(note.id())) {
+					flags |= NoteCellGrid.SELECTED;
 				}
-				if (mouseX >= rect.left && mouseX < rect.right
-						&& mouseY >= rect.top && mouseY < rect.bottom) {
+				if (anyCrowded && crowded.contains(note.startTick())) {
+					flags |= NoteCellGrid.CROWDED;
+				} else if (anyOffGrid && offGrid.contains(note.startTick())) {
+					flags |= NoteCellGrid.OFF_GRID;
+				}
+				cells.add(left, top, note.isBuildable() ? liveColor : deadColor, flags, midi);
+				if (mouseX >= left && mouseX < right && mouseY >= top && mouseY < bottom) {
 					// Topmost wins: draw order runs back to front, so a later hit overwrites.
 					hoveredCandidate = note;
 					hoveredCandidateLayer = layerIndex;
 				}
 			}
 		}
-		int endX = tickX(project().endTick());
+		long drawStart = profiling ? System.nanoTime() : 0L;
+		quads.graphics = graphics;
+		noteQuads = cells.draw(quads);
+		quads.graphics = null;
+		if (profiling) {
+			long now = System.nanoTime();
+			notesDrawNanos += now - drawStart;
+			notesLayoutNanos += drawStart - layoutStart;
+		}
+		int endX = endMarkerX();
 		if (endX >= rollX && endX <= rollX + rollWidth) {
 			graphics.fill(endX, rollY, endX + 1, rollY + rollHeight, 0x66E8C05A);
 		}
@@ -2273,12 +3141,17 @@ public final class ComposerScreen extends Screen {
 		toastShownAt = Util.getMillis();
 	}
 
-	private void extractToast(GuiGraphicsExtractor graphics) {
+	/**
+	 * Shows the last result, and stops counting down while the cursor is on it.
+	 *
+	 * <p>These carry the only copy of things worth reading twice -- what an import left out, what a
+	 * thinning pass is about to delete -- and four and a half seconds is not long enough to read a
+	 * wrapped paragraph you were not expecting. Pointing at one holds it, and moving off starts the
+	 * time over rather than resuming with whatever was left, because a message that vanishes the
+	 * instant you stop reading it is the problem this is fixing.</p>
+	 */
+	private void extractToast(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
 		if (toast == null) {
-			return;
-		}
-		if (Util.getMillis() - toastShownAt > TOAST_MILLIS) {
-			toast = null;
 			return;
 		}
 		// Wrapped, not centred on one line. Import reports list everything they left out and are
@@ -2290,8 +3163,27 @@ public final class ComposerScreen extends Screen {
 		int x = rollX + Math.max(4, (rollWidth - textWidth) / 2);
 		int y = rollY + 8;
 		int height = lines.size() * font.lineHeight + (lines.size() - 1) * 2;
-		graphics.fill(x - 6, y - 5, x + textWidth + 6, y + height + 4, 0xF01A1F26);
-		graphics.fill(x - 6, y - 5, x + textWidth + 6, y - 4, 0xFF8FD3FF);
+		int left = x - 6;
+		int top = y - 5;
+		int right = x + textWidth + 6;
+		int bottom = y + height + 4;
+		boolean held = mouseX >= left && mouseX < right && mouseY >= top && mouseY < bottom;
+		if (held) {
+			toastShownAt = Util.getMillis();
+		} else if (Util.getMillis() - toastShownAt > TOAST_MILLIS) {
+			toast = null;
+			return;
+		}
+		graphics.fill(left, top, right, bottom, held ? 0xF8232A33 : 0xF01A1F26);
+		int accent = held ? 0xFFCDE9FF : 0xFF8FD3FF;
+		graphics.fill(left, top, right, top + 1, accent);
+		if (held) {
+			// The rest of the frame, so a held message reads as something being kept rather than
+			// something that has not gone yet. Same accent as the strip it already had.
+			graphics.fill(left, bottom - 1, right, bottom, accent);
+			graphics.fill(left, top, left + 1, bottom, accent);
+			graphics.fill(right - 1, top, right, bottom, accent);
+		}
 		for (int index = 0; index < lines.size(); index++) {
 			graphics.text(font, lines.get(index), x, y + index * (font.lineHeight + 2), 0xFFFFFFFF, false);
 		}
@@ -2320,7 +3212,11 @@ public final class ComposerScreen extends Screen {
 		if (!stats.endMarkerProblem().isEmpty()) {
 			segments.add(stats.endMarkerProblem() + " (Edit > Snap end to grid)");
 		}
+		// The rule the peak was counted under, beside the number. Whether two layers playing the
+		// same sound at the same instant count once is a setting that lives in another screen
+		// entirely, and it silently re-judges every song -- so the number says which rule made it.
 		segments.add("peak " + peakChord + "/" + SongAnalysis.MAX_SIMULTANEOUS_NOTES
+			+ (config.dedupeIdenticalNotes() ? " merged" : " unmerged")
 			+ (overloaded > 0 ? " (" + overloaded + " over)" : ""));
 		// Leads with the number that will be standing in the world. "6354 notes (788 deduped)" was
 		// arithmetically fine and still misread -- a count in brackets after a count reads as the
@@ -2338,7 +3234,7 @@ public final class ComposerScreen extends Screen {
 		} else {
 			// Counted off the sequence rather than off the composition, so it agrees with what the
 			// paste would place -- including which notes deduplication left out of it.
-			SongBuilder.BlockCounts blocks = SongBuilder.blockCounts(config.tracks());
+			SongBuilder.BlockCounts blocks = blockCounts();
 			segments.add(blocks.total() + " blocks (" + blocks.noteBlocks() + " note · "
 				+ blocks.repeaters() + " repeater)");
 		}
@@ -2363,6 +3259,24 @@ public final class ComposerScreen extends Screen {
 		graphics.text(font, status.toString(), 8, height - 16, color, false);
 	}
 
+	/**
+	 * How many blocks the sequence would place, cached on the sequence it was counted from.
+	 *
+	 * <p>Counting re-parses every track's text, allocates an event per note and sorts the lot --
+	 * eight to ten milliseconds on a dense song, which the status line was paying <em>every
+	 * frame</em> for a number that only moves when the composition does. Same identity trick as
+	 * {@link #projectStats()}: {@code tracks()} hands back the same list until the project changes,
+	 * so a hit is a reference comparison.</p>
+	 */
+	private SongBuilder.BlockCounts blockCounts() {
+		List<FastNoteblocksConfig.SequenceTrack> tracks = config.tracks();
+		if (cachedBlockTracks != tracks || cachedBlockCounts == null) {
+			cachedBlockTracks = tracks;
+			cachedBlockCounts = SongBuilder.blockCounts(tracks);
+		}
+		return cachedBlockCounts;
+	}
+
 	private SongAnalysis projectStats() {
 		ComposerProject current = project();
 		// The speed is part of the project, so identity covers everything the composition decides.
@@ -2379,11 +3293,32 @@ public final class ComposerScreen extends Screen {
 
 	@Override
 	public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
+		ToolbarMenu title = menuTitleAt(event.x(), event.y());
+		if (title != null) {
+			for (MenuTitle bar : menuTitles()) {
+				if (bar.menu() == title) {
+					toggleToolbarMenu(title, bar.left());
+					break;
+				}
+			}
+			return true;
+		}
+		if (event.button() == 0 && overSplitter(event.x(), event.y())) {
+			draggingSplitter = true;
+			return true;
+		}
+		if (event.button() == 0 && overLayerPanelHeader(event.x(), event.y())) {
+			config.setLayerPanelCollapsed(!config.layerPanelCollapsed());
+			FastNoteblocksConfig.save();
+			resizeLayerPanel();
+			return true;
+		}
 		if (toolbarMenu != ToolbarMenu.NONE) {
 			if (handleToolbarMenuClick(event.x(), event.y(), event.button())) {
 				return true;
 			}
 			toolbarMenu = ToolbarMenu.NONE;
+			openSubmenu = null;
 		}
 		if (layerMenuOpen) {
 			if (handleLayerMenuClick(event.x(), event.y())) {
@@ -2637,6 +3572,19 @@ public final class ComposerScreen extends Screen {
 	public void mouseMoved(double x, double y) {
 		lastMouseX = x;
 		lastMouseY = y;
+		// With one menu already open, sliding along the bar opens the next, which is what a menu
+		// bar does everywhere else and what makes browsing five of them one gesture.
+		ToolbarMenu title = menuTitleAt(x, y);
+		if (toolbarMenu != ToolbarMenu.NONE && title != null && title != toolbarMenu) {
+			for (MenuTitle bar : menuTitles()) {
+				if (bar.menu() == title) {
+					toolbarMenu = title;
+					toolbarMenuX = bar.left();
+					openSubmenu = null;
+					break;
+				}
+			}
+		}
 		super.mouseMoved(x, y);
 	}
 
@@ -2644,6 +3592,18 @@ public final class ComposerScreen extends Screen {
 	public boolean mouseDragged(MouseButtonEvent event, double dx, double dy) {
 		lastMouseX = event.x();
 		lastMouseY = event.y();
+		if (draggingSplitter) {
+			// Past the fold point it snaps shut rather than shrinking to a width no row fits in.
+			// The width it had is left in the config, so unfolding puts it back where it was.
+			if (event.x() < SPLITTER_COLLAPSE_AT) {
+				config.setLayerPanelCollapsed(true);
+			} else {
+				config.setLayerPanelCollapsed(false);
+				config.setLayerPanelWidth((int)Math.round(event.x()));
+			}
+			resizeLayerPanel();
+			return true;
+		}
 		if (painting != LayerPaint.NONE) {
 			// Only the row matters once the gesture is under way. Asking for the cursor to stay
 			// inside a twelve-pixel column while dragging down thirty layers is not a gesture.
@@ -2667,7 +3627,7 @@ public final class ComposerScreen extends Screen {
 			return true;
 		}
 		if (draggingEndMarker) {
-			setEndTick(snapTick(mouseTick(event.x())));
+			setEndTick(snapTick(endMarkerTick(event.x())));
 			return true;
 		}
 		if (draggingPlayhead) {
@@ -2694,6 +3654,11 @@ public final class ComposerScreen extends Screen {
 
 	@Override
 	public boolean mouseReleased(MouseButtonEvent event) {
+		if (draggingSplitter) {
+			draggingSplitter = false;
+			FastNoteblocksConfig.save();
+			return true;
+		}
 		if (painting != LayerPaint.NONE) {
 			// The sequence summary is only news when the build dots moved; a run of mutes has not
 			// changed what would be built by a single block.
@@ -2744,11 +3709,11 @@ public final class ComposerScreen extends Screen {
 
 	@Override
 	public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
-		if (mouseX < LAYER_PANEL_WIDTH && mouseY >= LAYER_LIST_TOP - 2 && mouseY <= layerListBottom()) {
+		if (mouseX < layerPanelWidth() && mouseY >= LAYER_LIST_TOP - 2 && mouseY <= layerListBottom()) {
 			scrollLayers(scrollY > 0 ? -LAYER_ROW_HEIGHT : LAYER_ROW_HEIGHT);
 			return true;
 		}
-		if (mouseX >= LAYER_PANEL_WIDTH && mouseX < rollX
+		if (mouseX >= layerPanelWidth() && mouseX < rollX
 				&& mouseY >= rollY && mouseY < rollY + rollHeight) {
 			if (controlDown()) {
 				// Vertical zoom: shrink the rows to fit more of the pitch range on screen at once.
@@ -2774,6 +3739,15 @@ public final class ComposerScreen extends Screen {
 				anchoredTick - Math.round((mouseX - rollX) * ticksPerPixel));
 			return true;
 		}
+		if (shiftDown()) {
+			// Fast scroll: a quarter of whatever is on screen per notch, rather than a fixed number
+			// of beats. A beat a notch is fine when the roll holds a few bars and useless when it
+			// holds four hundred -- and the whole reason to reach for this is that you are zoomed
+			// out. Floored at a bar so it can never end up slower than the plain scroll it modifies.
+			long span = Math.max(project().ppq() * 4L, Math.round(rollWidth * ticksPerPixel / 4.0));
+			horizontalScroll = Math.max(0L, horizontalScroll - Math.round(scrollY * span));
+			return true;
+		}
 		horizontalScroll = Math.max(0L, horizontalScroll - Math.round(scrollY * project().ppq()));
 		return true;
 	}
@@ -2782,6 +3756,7 @@ public final class ComposerScreen extends Screen {
 	public boolean keyPressed(KeyEvent event) {
 		if (toolbarMenu != ToolbarMenu.NONE && event.isEscape()) {
 			toolbarMenu = ToolbarMenu.NONE;
+			openSubmenu = null;
 			return true;
 		}
 		if (contextMenuOpen && event.isEscape()) {
@@ -2797,6 +3772,20 @@ public final class ComposerScreen extends Screen {
 				cancelLayerRename();
 				return true;
 			}
+		}
+		if (event.key() == GLFW.GLFW_KEY_F9 && layerNameBox == null) {
+			profiling = !profiling;
+			java.util.Arrays.fill(phaseNanos, 0L);
+			profileFrameNanos = 0L;
+			notesLayoutNanos = 0L;
+			notesDrawNanos = 0L;
+			profileFrames = 0;
+			profileWindowSince = 0L;
+			profileSummary = "";
+			showResult(Component.literal(profiling
+				? "Frame profiler on - timings go to the log every second"
+				: "Frame profiler off"));
+			return true;
 		}
 		if (event.key() == GLFW.GLFW_KEY_SPACE && layerNameBox == null) {
 			if (playing || anythingAudible()) {
@@ -2822,7 +3811,14 @@ public final class ComposerScreen extends Screen {
 			return true;
 		}
 		if (event.isPaste()) {
-			pasteClipboard();
+			pasteClipboard(false);
+			return true;
+		}
+		// isPaste is Ctrl+V with no shift, so the shifted one is free for the variant of it -- the
+		// same shift-a-variant convention Ctrl+Shift+S and Ctrl+Shift+C already follow here.
+		if (event.hasControlDownWithQuirk() && event.hasShiftDown()
+				&& event.key() == GLFW.GLFW_KEY_V) {
+			pasteClipboard(true);
 			return true;
 		}
 		if (event.hasControlDownWithQuirk() && event.key() == GLFW.GLFW_KEY_Z) {
@@ -2851,6 +3847,10 @@ public final class ComposerScreen extends Screen {
 				}
 				case GLFW.GLFW_KEY_O -> {
 					openSongs();
+					return true;
+				}
+				case GLFW.GLFW_KEY_E -> {
+					mergeSelectedLayers();
 					return true;
 				}
 				case GLFW.GLFW_KEY_I -> {
@@ -2954,6 +3954,12 @@ public final class ComposerScreen extends Screen {
 		}
 		selectionEndX = lastMouseX;
 		selectionEndY = lastMouseY;
+	}
+
+	@Override
+	public void removed() {
+		setResizeCursor(false);
+		super.removed();
 	}
 
 	@Override
@@ -3411,19 +4417,43 @@ public final class ComposerScreen extends Screen {
 	}
 
 	/**
-	 * Whether the composition differs from the copy on disk.
+	 * Whether there is work here that leaving would throw away.
+	 *
+	 * <p>Compares the music and not the whole document. The record carries the active layer along
+	 * with the notes, so clicking a different layer used to make the composition compare unequal to
+	 * the one it came from -- looking around the composer and leaving asked whether to save changes
+	 * nobody had made.</p>
 	 *
 	 * <p>Cached on the identity of both sides, which is sound because compositions are immutable:
 	 * the comparison itself walks every note of every layer, and the toolbar asks once a frame.</p>
 	 */
-	private boolean unsaved() {
+	private boolean unsavedEdits() {
 		ComposerProject current = project();
 		if (unsavedCacheProject != current || unsavedCacheBaseline != savedProject) {
 			unsavedCacheProject = current;
 			unsavedCacheBaseline = savedProject;
-			unsavedCacheResult = !current.equals(savedProject);
+			unsavedCacheResult = !current.sameContentAs(savedProject);
 		}
 		return unsavedCacheResult;
+	}
+
+	/**
+	 * Whether the composition differs from the copy on disk, which is what the title reports.
+	 *
+	 * <p>Wider than {@link #unsavedEdits} by one case, and the difference is the whole reason there
+	 * are two. An untouched import has no unsaved work in it, so leaving does not ask -- but it has
+	 * no file either, so the title says unsaved until Save gives it one. Warning about it and
+	 * stopping you over it are different bars.</p>
+	 *
+	 * <p>A blank document with no file is not called unsaved, because there is nothing in it to
+	 * save. It picks the mark up the moment it holds a note.</p>
+	 */
+	private boolean unsaved() {
+		return unsavedEdits() || (!config.hasSongFile() && !isBlank(project()));
+	}
+
+	private static boolean isBlank(ComposerProject song) {
+		return song.layers().stream().allMatch(layer -> layer.notes().isEmpty());
 	}
 
 	/**
@@ -3434,7 +4464,7 @@ public final class ComposerScreen extends Screen {
 	 * to keep it.</p>
 	 */
 	private void withUnsavedChangesChecked(Runnable leave) {
-		if (!unsaved()) {
+		if (!unsavedEdits()) {
 			leave.run();
 			return;
 		}
@@ -3458,7 +4488,14 @@ public final class ComposerScreen extends Screen {
 	 * asked about the same edits every time -- discard, discard, discard, forever.</p>
 	 */
 	private void discardEdits() {
-		config.discardComposerEdits();
+		if (config.hasSongFile()) {
+			config.discardComposerEdits();
+		} else {
+			// No file to go back to, but there is what the document was when it opened -- for an
+			// import, the import. Blanking it here would discard the file you picked as well as the
+			// edits you declined, and only one of those was offered.
+			config.setComposerProject(savedProject);
+		}
 		history.reset(config.composerProject());
 		savedProject = baseline(config, history.current());
 		afterStateChange();
@@ -3538,7 +4575,7 @@ public final class ComposerScreen extends Screen {
 	private int buildDotX() {
 		// Left of where it used to sit, to leave the panel's right edge to the row number. The two
 		// were close enough that the dot's generous hit box swallowed clicks meant for the number.
-		return LAYER_PANEL_WIDTH - 34;
+		return layerRowLayout().dotX();
 	}
 
 	private void startPainting(LayerPaint kind, int fromRow, LayerState state, boolean buildEnabled) {
@@ -3551,7 +4588,8 @@ public final class ComposerScreen extends Screen {
 
 	/** Which row a point is on, whatever part of the row it lands in. */
 	private int layerRowAt(double x, double y) {
-		return x < 8 || x >= LAYER_PANEL_WIDTH - 8 ? -1 : layerRowAtY(y);
+		int inset = layerRowLayout().inset();
+		return x < inset || x >= layerPanelWidth() - inset ? -1 : layerRowAtY(y);
 	}
 
 	/** The row at a height, for gestures that have already decided which column they are in. */
@@ -3563,24 +4601,47 @@ public final class ComposerScreen extends Screen {
 		return index >= 0 && index < project().layers().size() && layerRowVisible(index) ? index : -1;
 	}
 
-	/** The build dot's clickable box, a little larger than the glyph so it is easy to hit. */
+	/**
+	 * The build dot's clickable box: the glyph and a little air, and no more than that.
+	 *
+	 * <p>It used to reach ten pixels past the glyph, which was harmless while the number was out at
+	 * the panel's edge and swallows clicks meant for the number now that the two sit together.</p>
+	 */
 	private int buildDotAt(double x, double y) {
-		return x >= buildDotX() - 4 && x <= buildDotX() + 10 ? layerRowAt(x, y) : -1;
+		LayerRowLayout row = layerRowLayout();
+		return row.dot() && x >= row.dotX() - 3 && x < row.dotRight() + 2 ? layerRowAt(x, y) : -1;
 	}
 
 	/** The one control that decides whether a layer is soloed, heard, silent or gone. */
 	private int layerStateAt(double x, double y) {
-		return x >= LAYER_STATE_X - 2 && x < LAYER_INSTRUMENT_X ? layerRowAt(x, y) : -1;
+		LayerRowLayout row = layerRowLayout();
+		return row.chip() && x >= LAYER_STATE_X - 2 && x < LAYER_INSTRUMENT_X
+			? layerRowAt(x, y)
+			: -1;
 	}
 
 	private int layerInstrumentAt(double x, double y) {
-		return x >= LAYER_INSTRUMENT_X && x < LAYER_INSTRUMENT_X + 17 ? layerRowAt(x, y) : -1;
+		LayerRowLayout row = layerRowLayout();
+		return x >= row.instrumentX() && x < row.instrumentX() + 17 ? layerRowAt(x, y) : -1;
 	}
 
-	/** The part of a row that selects and drags it: everything the two icons do not claim. */
+	/**
+	 * The part of a row that selects and drags it: everything the two icons do not claim.
+	 *
+	 * <p>Narrow, the instrument icon claims most of the row, so what is left is the row number at
+	 * the far edge -- still enough to pick a layer with, which is the point of keeping the number.</p>
+	 */
 	private int layerHeaderAt(double x, double y) {
-		boolean onIcons = x >= LAYER_STATE_X - 2 && x < LAYER_NAME_X - 2;
-		return !onIcons && x < LAYER_PANEL_WIDTH - 10 ? layerRowAt(x, y) : -1;
+		LayerRowLayout row = layerRowLayout();
+		int iconsFrom = row.chip() ? LAYER_STATE_X - 2 : row.instrumentX();
+		boolean onIcons = x >= iconsFrom && x < row.instrumentX() + 17;
+		return !onIcons && x < layerPanelWidth() - 2 ? layerRowAt(x, y) : -1;
+	}
+
+	/** The strip above the list, which folds the panel away and brings it back. */
+	private boolean overLayerPanelHeader(double x, double y) {
+		return x >= 0 && x < layerPanelWidth()
+			&& y >= TOOLBAR_HEIGHT && y < LAYER_LIST_TOP - 2;
 	}
 
 	/** Which gap between rows a dragged layer is hovering over, counted as an insertion point. */
@@ -3598,7 +4659,7 @@ public final class ComposerScreen extends Screen {
 		cancelLayerRename();
 		editingLayer = layerIndex;
 		int y = layerY(layerIndex);
-		layerNameBox = new EditBox(font, LAYER_NAME_X - 3, y - 2, LAYER_NAME_RIGHT - LAYER_NAME_X + 6,
+		layerNameBox = new EditBox(font, LAYER_NAME_X - 3, y - 2, layerNameRight() - LAYER_NAME_X + 6,
 			LAYER_ROW_HEIGHT, Component.literal("Layer name"));
 		layerNameBox.setMaxLength(48);
 		layerNameBox.setValue(project().layers().get(layerIndex).name());
@@ -3660,20 +4721,34 @@ public final class ComposerScreen extends Screen {
 		editingLayer = -1;
 	}
 
+	/**
+	 * Copies the selection, keeping which voice each note was in.
+	 *
+	 * <p>Gathered layer by layer rather than by flattening every note first, because the instrument
+	 * belongs to the layer and not the note -- flattening is where it used to get lost.</p>
+	 */
 	private void copySelection() {
-		List<NoteEvent> selected = project().layers().stream()
-			.flatMap(layer -> layer.notes().stream())
-			.filter(note -> selectedNotes.contains(note.id()))
-			.sorted(Comparator.comparingLong(NoteEvent::startTick)
-				.thenComparingInt(NoteEvent::midiNote))
-			.toList();
+		record Copied(Layer layer, NoteEvent note) {
+		}
+		List<Copied> selected = new ArrayList<>();
+		for (Layer layer : project().layers()) {
+			for (NoteEvent note : layer.notes()) {
+				if (selectedNotes.contains(note.id())) {
+					selected.add(new Copied(layer, note));
+				}
+			}
+		}
 		if (selected.isEmpty()) {
 			return;
 		}
-		long firstTick = selected.stream().mapToLong(NoteEvent::startTick).min().orElse(0L);
+		selected.sort(Comparator.comparingLong((Copied copied) -> copied.note().startTick())
+			.thenComparingInt(copied -> copied.note().midiNote()));
+		clipboardOriginTick = selected.stream().mapToLong(copied -> copied.note().startTick()).min()
+			.orElse(0L);
 		clipboard = selected.stream()
-			.map(note -> new ClipboardNote(note.startTick() - firstTick, note.midiNote(),
-				note.durationTicks(), note.velocity()))
+			.map(copied -> new ClipboardNote(copied.note().startTick() - clipboardOriginTick,
+				copied.note().midiNote(), copied.note().durationTicks(), copied.note().velocity(),
+				copied.layer().instrument(), copied.layer().name()))
 			.toList();
 	}
 
@@ -3684,17 +4759,37 @@ public final class ComposerScreen extends Screen {
 		}
 	}
 
-	private void pasteClipboard() {
+	/**
+	 * Pastes at the cursor, or where it was copied from.
+	 *
+	 * <p>In place is the one paste that has no aim to take: doubling a part onto another instrument
+	 * or moving it between layers means landing on the same beat it left, and finding that beat by
+	 * hand at the zoom the whole song fits in is not something a cursor can do.</p>
+	 */
+	private void pasteClipboard(boolean inPlace) {
 		if (clipboard.isEmpty()) {
 			return;
 		}
-		long startTick = insideRoll(lastMouseX, lastMouseY)
-			? snapTick(mouseTick(lastMouseX))
+		long startTick = inPlace ? clipboardOriginTick
+			: insideRoll(lastMouseX, lastMouseY) ? snapTick(mouseTick(lastMouseX))
 			: snapTick(horizontalScroll);
+		int before = project().layers().size();
 		PasteResult result = project().pasteNotes(project().activeLayerIndex(), clipboard, startTick);
 		apply(result.project());
 		selectedNotes.clear();
 		selectedNotes.addAll(result.noteIds());
+		layersChanged();
+		rebuildMoveLayerButtons();
+		// Said out loud only when the paste had to change the shape of the composition. A paste that
+		// lands where you pointed it needs no announcement; one that made three layers does.
+		if (result.addedLayers() > 0) {
+			long instruments = clipboard.stream().map(ClipboardNote::instrument).distinct().count();
+			showResult(Component.literal(result.noteIds().size() + " notes pasted. The copy spans "
+				+ instruments + " instruments and a layer holds one, so "
+				+ (project().layers().size() - before)
+				+ (result.addedLayers() == 1 ? " layer was" : " layers were")
+				+ " added to keep them apart."));
+		}
 	}
 
 	private void updateButtonStates() {
@@ -3855,9 +4950,32 @@ public final class ComposerScreen extends Screen {
 		return x >= rollX && x < rollX + rollWidth && y >= rollY && y < rollY + rollHeight;
 	}
 
+	/**
+	 * Where the end marker is drawn: the right-hand edge of a note standing on the end tick.
+	 *
+	 * <p>Not {@code tickX(endTick)}, which is where the tick itself falls. A note is drawn as a
+	 * fixed-width trigger anchored at its start, so a note <em>on</em> the end tick occupies the
+	 * seven pixels after it — and a marker at the bare tick therefore lands on that note's left
+	 * edge, with the note sticking out past it. Every song whose last note sits on the end marker
+	 * looked like it carried on after the end, most obviously zoomed out, where those seven pixels
+	 * are thousands of ticks. Anchoring the marker to the far edge of that trigger puts it after
+	 * everything that sounds, at every zoom.</p>
+	 *
+	 * <p>The offset is in glyph space, not tick space, so anything converting a cursor position
+	 * back into a tick has to take it off again — see {@link #endMarkerTick(double)}.</p>
+	 */
+	private int endMarkerX() {
+		return tickX(project().endTick()) + NOTE_TRIGGER_WIDTH;
+	}
+
+	/** The tick a cursor at {@code x} is pointing the end marker at, undoing the drawing offset. */
+	private long endMarkerTick(double x) {
+		return mouseTick(x - NOTE_TRIGGER_WIDTH);
+	}
+
 	/** The end marker's grab zone, a few pixels either side of it in the ruler. */
 	private boolean overEndMarker(double x, double y) {
-		return insideRuler(x, y) && Math.abs(x - tickX(project().endTick())) <= 4.0;
+		return insideRuler(x, y) && Math.abs(x - endMarkerX()) <= 4.0;
 	}
 
 	private boolean insideRuler(double x, double y) {
@@ -3939,6 +5057,16 @@ public final class ComposerScreen extends Screen {
 		}
 	}
 
+	/** The note grid's outlet onto whichever frame is being drawn. One instance, reused. */
+	private static final class GraphicsQuads implements NoteCellGrid.Quads {
+		private GuiGraphicsExtractor graphics;
+
+		@Override
+		public void fill(int left, int top, int right, int bottom, int color) {
+			graphics.fill(left, top, right, bottom, color);
+		}
+	}
+
 	private record NoteRect(int left, int top, int right, int bottom) {
 		boolean contains(double x, double y) {
 			return x >= left && x < right && y >= top && y < bottom;
@@ -3965,6 +5093,89 @@ public final class ComposerScreen extends Screen {
 		STATE
 	}
 
+	private static final String SUBMENU_ARROW = "▸";
+	/** Created once and kept: GLFW cursors are process-wide and there is no reason for two. */
+	private static long RESIZE_CURSOR;
+	/** Air around a submenu's rule, so the row after it does not sit on the line. */
+	private static final int SUBMENU_DIVIDER_GAP = 5;
+
+	/** A menu's title in the bar, and the span of it that reacts to the cursor. */
+	private record MenuTitle(ToolbarMenu menu, String label, int left, int right) {
+	}
+
+	/** Where each part of a layer row goes, and whether the panel is wide enough to have it. */
+	private record LayerRowLayout(int inset, boolean chip, boolean dot, boolean name,
+			int instrumentX, int nameLeft, int nameRight, int dotX, int dotRight, int ordinalLeft,
+			int ordinalRight) {
+	}
+
+	/** One row of an open menu: a thing to do, a setting to cycle, or a submenu to open. */
+	private record MenuRow(ToolbarAction action, ImportSetting setting, ToolbarSubmenu submenu) {
+		static MenuRow of(ToolbarAction action) {
+			return new MenuRow(action, null, null);
+		}
+
+		static MenuRow of(ImportSetting setting) {
+			return new MenuRow(null, setting, null);
+		}
+
+		static MenuRow of(ToolbarSubmenu submenu) {
+			return new MenuRow(null, null, submenu);
+		}
+	}
+
+	/**
+	 * A group of actions that differ only in their last word.
+	 *
+	 * <p>Rows inside carry the short label -- "1/8" rather than "Quantize to 1/8" -- because the
+	 * row that opened the submenu has already said the rest of it, and repeating it is what made
+	 * the flat list hard to scan in the first place.</p>
+	 */
+	private enum ToolbarSubmenu {
+		QUANTIZE("Quantize", "Snaps note starts onto a grid, so their gaps become whole repeater "
+				+ "delays instead of whatever the source file happened to hold.",
+			new ToolbarAction[] {
+				ToolbarAction.QUANTIZE_QUARTER, ToolbarAction.QUANTIZE_EIGHTH,
+				ToolbarAction.QUANTIZE_SIXTEENTH, ToolbarAction.QUANTIZE_REPEATERS
+			},
+			new String[] {"1/4 note", "1/8 note", "1/16 note", "Repeater ticks"}, 3),
+		END("End", "Where the song stops, which is a delay the build has to place like any other.",
+			new ToolbarAction[] {ToolbarAction.SNAP_END, ToolbarAction.TRIM_END},
+			new String[] {"Snap to grid", "Trim to last note"}, -1);
+
+		private final String label;
+		private final String description;
+		private final ToolbarAction[] actions;
+		private final String[] labels;
+		/**
+		 * Row to rule off above, or -1.
+		 *
+		 * <p>Repeater ticks is not a fourth note value and cannot be sorted among them: it is the
+		 * machine's grid, and it slides as the speed slider moves -- 240 ticks at 2.00x, which is
+		 * exactly a 1/8, and 120 at 1.00x, which is exactly a 1/16. Ordering it by coarseness would
+		 * be right at one speed and wrong at the next, so it is set apart instead.</p>
+		 */
+		private final int dividerBefore;
+
+		ToolbarSubmenu(String label, String description, ToolbarAction[] actions, String[] labels,
+				int dividerBefore) {
+			this.label = label;
+			this.description = description;
+			this.actions = actions;
+			this.labels = labels;
+			this.dividerBefore = dividerBefore;
+		}
+
+		String labelFor(ToolbarAction action) {
+			for (int index = 0; index < actions.length; index++) {
+				if (actions[index] == action) {
+					return labels[index];
+				}
+			}
+			return action.label;
+		}
+	}
+
 	private enum ToolbarMenu {
 		NONE,
 		BUILD,
@@ -3982,6 +5193,7 @@ public final class ComposerScreen extends Screen {
 		REPEAT_MERGE("Merge repeats"),
 		GRID_OUTLIERS("Grid outliers"),
 		VELOCITY_CUTOFF("Velocity cutoff"),
+		CHORD_THIN_TARGET("Thin chords to"),
 		IGNORE_PERCUSSION("Percussion"),
 		MAX_TRACKS("Max tracks"),
 		DEFAULT_INSTRUMENT("Instrument");
@@ -4025,6 +5237,7 @@ public final class ComposerScreen extends Screen {
 		SELECT_OFF_GRID("Off grid"),
 		SELECT_TOO_FREQUENT("Too frequent"),
 		SELECT_OUT_OF_RANGE("Out of range"),
+		SELECT_OVERLOADED_CHORDS("Overloaded chords"),
 		SELECT_ALL_NOTES("Everything"),
 		SELECT_NONE("Nothing");
 
@@ -4033,16 +5246,16 @@ public final class ComposerScreen extends Screen {
 			IMPORT_SCHEMATIC, SCAN_WORLD, EXPORT_NBS, COPY_AS_TEXT, BACK_TO_SEQUENCES,
 			CLOSE_TO_GAME
 		};
+		/** Quantize slots in at index 4 and End goes on the end; see {@link #menuRows}. */
 		private static final ToolbarAction[] EDIT_ACTIONS = {
-			UNDO, REDO, CONVERT, MERGE_REPEATS,
-			QUANTIZE_QUARTER, QUANTIZE_EIGHTH, QUANTIZE_SIXTEENTH, QUANTIZE_REPEATERS,
-			FIT_ALL_RANGE, SNAP_TEMPO, SNAP_END, TRIM_END
+			UNDO, REDO, CONVERT, MERGE_REPEATS, FIT_ALL_RANGE, SNAP_TEMPO
 		};
 		private static final ToolbarAction[] BUILD_ACTIONS = {
 			INCLUDE_SELECTED, SET_INCLUDED_TO_SELECTION, TOGGLE_DEDUPE, PASTE_IN_WORLD, BUILD_CANCEL
 		};
 		private static final ToolbarAction[] SELECT_ACTIONS = {
-			SELECT_OFF_GRID, SELECT_TOO_FREQUENT, SELECT_OUT_OF_RANGE, SELECT_ALL_NOTES, SELECT_NONE
+			SELECT_OFF_GRID, SELECT_TOO_FREQUENT, SELECT_OUT_OF_RANGE, SELECT_OVERLOADED_CHORDS,
+			SELECT_ALL_NOTES, SELECT_NONE
 		};
 		private final String label;
 		/** Whether the action can be limited to the selected notes. Tempo is a property of the
@@ -4064,7 +5277,10 @@ public final class ComposerScreen extends Screen {
 		MERGE_SELECTED("Merge selected"),
 		INCLUDE_SELECTED("Include selected layers in sequence"),
 		SET_INCLUDED_TO_SELECTION("Include only selected layers in sequence"),
-		SELECT_ALL("Select all layers");
+		SELECT_ALL("Select all layers"),
+		// Last, and not next to Merge. The two read alike in a hurry and only one of them can be
+		// reached by a slip of the hand from a row you meant to rename.
+		DELETE_SELECTED("Delete selected");
 
 		private final String label;
 

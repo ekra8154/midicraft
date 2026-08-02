@@ -80,6 +80,8 @@
   "tooltip.fast-noteblocks.repeat_merge_ticks": "When converting for Minecraft, collapses a repeat of the same pitch that arrives within this many repeater ticks into the note before it. Songs that fake a sustain by re-triggering a note every tick are otherwise unbuildable, and force the whole song to be slowed down to fit them. 0 keeps every repeat.",
   "option.fast-noteblocks.midi_velocity_cutoff": "Velocity cutoff",
   "tooltip.fast-noteblocks.midi_velocity_cutoff": "Drops imported notes quieter than this MIDI velocity. Note blocks have no volume, so quiet notes meant as decay tails or background detail would otherwise play at full volume and need their own blocks. 0 keeps every note.",
+  "option.fast-noteblocks.chord_thin_target": "Thin chords to",
+  "tooltip.fast-noteblocks.chord_thin_target": "How many sounds a chord is cut down to by Select > Overloaded chords. A build can place 30 at one instant and no more, so anything at or under 30 builds; below that leaves the world paste some room. Thinning never drops the last of a pitch or the last of an instrument in a chord, so the harmony comes out unchanged and so does the set of instruments playing -- a chord keeps its drum even where its pitch is covered many times over. Only how thickly each is scored changes.",
   "option.fast-noteblocks.midi_ignore_percussion": "Ignore percussion",
   "tooltip.fast-noteblocks.midi_ignore_percussion": "Skips MIDI channel 10, which is usually drums.",
   "option.fast-noteblocks.midi_max_imported_tracks": "Max imported tracks",

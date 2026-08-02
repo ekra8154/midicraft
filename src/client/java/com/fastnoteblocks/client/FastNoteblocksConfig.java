@@ -3,6 +3,7 @@ package com.fastnoteblocks.client;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.fastnoteblocks.NoteSequence;
+import com.fastnoteblocks.client.composer.ChordThinner;
 import com.fastnoteblocks.client.composer.ComposerProject;
 import com.fastnoteblocks.client.composer.SongLibrary;
 import java.io.Reader;
@@ -244,6 +245,30 @@ public final class FastNoteblocksConfig {
 	public static final int DEFAULT_MIDI_VELOCITY_CUTOFF = 8;
 	public static final int MIN_MIDI_VELOCITY_CUTOFF = 0;
 	public static final int MAX_MIDI_VELOCITY_CUTOFF = 127;
+	/**
+	 * How many sounds a chord is thinned down to when Select > Overloaded chords is used.
+	 *
+	 * <p>Thirty is the hard limit -- fifteen reachable bus blocks with two note blocks on each --
+	 * so anything at or under it builds. The default sits below rather than on it because a chord
+	 * exactly on the limit leaves the world paste nothing to work with.</p>
+	 */
+	/**
+	 * How wide the composer's layer panel is, and whether it is folded away entirely.
+	 *
+	 * <p>Kept here rather than in the screen because dragging it shut is a decision about how you
+	 * want to work, and having to make it again every time the composer opens would be a reason
+	 * not to bother.</p>
+	 */
+	public static final int DEFAULT_LAYER_PANEL_WIDTH = 196;
+	/**
+	 * Narrow enough to hold an instrument icon and a row number and nothing else, which is as far
+	 * as dragging goes before the panel folds instead.
+	 */
+	public static final int MIN_LAYER_PANEL_WIDTH = 34;
+	public static final int MAX_LAYER_PANEL_WIDTH = 420;
+	public static final int DEFAULT_CHORD_THIN_TARGET = ChordThinner.DEFAULT_TARGET;
+	public static final int MIN_CHORD_THIN_TARGET = ChordThinner.MIN_TARGET;
+	public static final int MAX_CHORD_THIN_TARGET = ChordThinner.MAX_TARGET;
 	private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 	private static final Path CONFIG_PATH = FabricLoader.getInstance().getConfigDir().resolve("fast-noteblocks.json");
 	private static SongLibrary songs = SongLibrary.load();
@@ -287,6 +312,9 @@ public final class FastNoteblocksConfig {
 	private MidiTempoFit midiTempoFit;
 	private boolean debugCommandsEnabled;
 	private int midiVelocityCutoff;
+	private int chordThinTarget;
+	private int layerPanelWidth;
+	private boolean layerPanelCollapsed;
 	private int repeatMergeTicks;
 	private int conversionGapPercentile;
 	private int commandsPerTick;
@@ -427,6 +455,17 @@ public final class FastNoteblocksConfig {
 						? DEFAULT_MIDI_VELOCITY_CUTOFF
 						: stored.midiVelocityCutoff
 				);
+				instance.chordThinTarget = clampChordThinTarget(
+					stored.chordThinTarget == null
+						? DEFAULT_CHORD_THIN_TARGET
+						: stored.chordThinTarget
+				);
+				instance.layerPanelWidth = clampLayerPanelWidth(
+					stored.layerPanelWidth == null
+						? DEFAULT_LAYER_PANEL_WIDTH
+						: stored.layerPanelWidth
+				);
+				instance.layerPanelCollapsed = Boolean.TRUE.equals(stored.layerPanelCollapsed);
 			}
 		} catch (Exception ignored) {
 			instance = defaults();
@@ -1012,6 +1051,30 @@ public final class FastNoteblocksConfig {
 		this.midiVelocityCutoff = clampMidiVelocityCutoff(midiVelocityCutoff);
 	}
 
+	public int chordThinTarget() {
+		return chordThinTarget;
+	}
+
+	public void setChordThinTarget(int chordThinTarget) {
+		this.chordThinTarget = clampChordThinTarget(chordThinTarget);
+	}
+
+	public int layerPanelWidth() {
+		return layerPanelWidth;
+	}
+
+	public void setLayerPanelWidth(int layerPanelWidth) {
+		this.layerPanelWidth = clampLayerPanelWidth(layerPanelWidth);
+	}
+
+	public boolean layerPanelCollapsed() {
+		return layerPanelCollapsed;
+	}
+
+	public void setLayerPanelCollapsed(boolean layerPanelCollapsed) {
+		this.layerPanelCollapsed = layerPanelCollapsed;
+	}
+
 	private static FastNoteblocksConfig defaults() {
 		FastNoteblocksConfig config = new FastNoteblocksConfig();
 		config.modEnabled = true;
@@ -1047,6 +1110,9 @@ public final class FastNoteblocksConfig {
 		config.midiTempoFit = MidiTempoFit.SNAP_TO_REPEATERS;
 		config.composerSpeedQuarters = DEFAULT_COMPOSER_SPEED_QUARTERS;
 		config.midiVelocityCutoff = DEFAULT_MIDI_VELOCITY_CUTOFF;
+		config.chordThinTarget = DEFAULT_CHORD_THIN_TARGET;
+		config.layerPanelWidth = DEFAULT_LAYER_PANEL_WIDTH;
+		config.layerPanelCollapsed = false;
 		config.repeatMergeTicks = DEFAULT_REPEAT_MERGE_TICKS;
 		config.conversionGapPercentile = DEFAULT_CONVERSION_GAP_PERCENTILE;
 		config.commandsPerTick = DEFAULT_COMMANDS_PER_TICK;
@@ -1117,6 +1183,14 @@ public final class FastNoteblocksConfig {
 
 	private static int clampMidiVelocityCutoff(int velocity) {
 		return Math.max(MIN_MIDI_VELOCITY_CUTOFF, Math.min(MAX_MIDI_VELOCITY_CUTOFF, velocity));
+	}
+
+	private static int clampChordThinTarget(int target) {
+		return Math.max(MIN_CHORD_THIN_TARGET, Math.min(MAX_CHORD_THIN_TARGET, target));
+	}
+
+	private static int clampLayerPanelWidth(int pixels) {
+		return Math.max(MIN_LAYER_PANEL_WIDTH, Math.min(MAX_LAYER_PANEL_WIDTH, pixels));
 	}
 
 	private static int legacyTimescaleToQuarters(Integer timescale) {
@@ -1192,6 +1266,9 @@ public final class FastNoteblocksConfig {
 		private String midiDefaultInstrument;
 		private MidiTempoFit midiTempoFit;
 		private Integer midiVelocityCutoff;
+		private Integer chordThinTarget;
+		private Integer layerPanelWidth;
+		private Boolean layerPanelCollapsed;
 		private Integer composerSpeedQuarters;
 		private Integer repeatMergeTicks;
 		private Integer conversionGapPercentile;
@@ -1244,6 +1321,9 @@ public final class FastNoteblocksConfig {
 			this.midiDefaultInstrument = config.midiDefaultInstrument;
 			this.midiTempoFit = config.midiTempoFit;
 			this.midiVelocityCutoff = config.midiVelocityCutoff;
+			this.chordThinTarget = config.chordThinTarget;
+			this.layerPanelWidth = config.layerPanelWidth;
+			this.layerPanelCollapsed = config.layerPanelCollapsed;
 			this.composerSpeedQuarters = config.composerSpeedQuarters;
 			this.repeatMergeTicks = config.repeatMergeTicks;
 			this.conversionGapPercentile = config.conversionGapPercentile;
