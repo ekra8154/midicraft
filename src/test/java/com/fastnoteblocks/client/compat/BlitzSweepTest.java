@@ -230,6 +230,21 @@ class BlitzSweepTest {
 			+ " dead=" + realDead);
 		System.out.println("BLITZ breachBlocks=" + breachBlocks + " worst=" + worstBreach);
 		System.out.println("BLITZ realBreachBlocks=" + realBreachBlocks + " worst=" + realWorstBreach);
+		// Where the planner's guess at the next lane's opening column landed. It is exact for every
+		// lane that reached its wall and wrong for exactly the ones that did not, which is why the
+		// miss count and the breach count are the same number: the guess is measured from the wall,
+		// and a breach is a lane that never got there.
+		long startRight = 0;
+		long startWrong = 0;
+		for (Map.Entry<String, Long> entry : padBy.entrySet()) {
+			if (entry.getKey().startsWith("planStartRight")) {
+				startRight += entry.getValue();
+			} else if (entry.getKey().startsWith("planStart")) {
+				startWrong += entry.getValue();
+			}
+		}
+		System.out.println("BLITZ laneStart right=" + startRight + " wrong=" + startWrong
+			+ " ofBreaches=" + breaches);
 		System.out.println("BLITZ padBy " + padBy);
 		System.out.println("BLITZ wrongBySong " + wrongBySong);
 		System.out.println("BLITZ wrongKind " + wrongKind + " real " + wrongKindReal);

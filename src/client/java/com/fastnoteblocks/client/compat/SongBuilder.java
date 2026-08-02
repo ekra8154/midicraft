@@ -737,6 +737,8 @@ public final class SongBuilder {
 			}
 			if (split) {
 				Direction travel = lane.travel();
+				int wallLeft = wall;
+				int stepLeft = travel.getStepX();
 				SpatialDelayTrigger trigger = addSpatialDelayBeforeEvent(placements, lane,
 					event.time() - currentTime);
 				currentTime = event.time();
@@ -758,6 +760,13 @@ public final class SongBuilder {
 						chord.subList(near, chord.size()), stepOff);
 				}
 				lane = Lane.straight(cursor, travel, depth);
+				// Graded against where the lane actually opened, because every hand-derivation of this
+				// arithmetic in the session that found it was off by one, in both directions. A
+				// prediction the planner is going to search backwards on has to be checked against the
+				// walk before it is trusted, not after.
+				gradeLaneStart(placements, wallLeft, stepLeft,
+					near < chord.size() ? (chord.size() - near + 1) / 2 : 0, climb > 0, stepOff,
+					lane.pos().getX(), climb > 0 ? "SplitClimb" : "SplitDescent");
 				lastStyle = ChordStyle.BUS;
 				// The whole run, not the half of it past the staircase. Both halves are dust from the
 				// one repeater this module opened with, and the near half does not stop costing wire
@@ -836,6 +845,8 @@ public final class SongBuilder {
 					tipSignal = pad.signal() - pinned - (climb > 0 && lastStyle == ChordStyle.BUS
 						&& pad.cells().isEmpty() ? offBus : turnCells);
 					lane = Lane.straight(landed, travel.getOpposite(), depth);
+					gradeLaneStart(placements, wall, travel.getStepX(), 0, climb > 0, stepOffAhead,
+						lane.pos().getX(), climb > 0 ? "Climb" : "Descent");
 					laneStarted = false;
 					columnBehindBusy = true;
 					// Planned here and not at the top of the next event, because this event is about to
@@ -1472,6 +1483,52 @@ public final class SongBuilder {
 		return planPad(owing, sweep.tips().get(last - from), turnCells,
 			last + 1 < events.size()
 				? Math.max(0, events.get(last + 1).time() - events.get(last).time() - 1) : 0);
+	}
+
+	/**
+	 * Which column the lane after this one opens in, given how this one hands over.
+	 *
+	 * <p>The planner needs this and has never had it. It plans one lane at a time from a start it is
+	 * handed, so a lane that cannot seat its own first chord has no way to say so to the lane whose
+	 * turn put it there -- and that is the whole of the breach ekran has been pointing at: the
+	 * planner is right that the chord will not fit, the walk lays it anyway, and the column that
+	 * would have fixed it is sitting unspent in the lane before.</p>
+	 *
+	 * <p>Two shapes, because there are two ways to hand over. A plain close walks out to the wall and
+	 * the staircase steps one column past it, which is where the next lane opens. A split lays as
+	 * much of the chord as reaches the wall, takes the staircase from there, and then lays the rest
+	 * back the other way -- so the next lane opens as far short of the wall as that carried half is
+	 * long.</p>
+	 *
+	 * @param carriedCells cells of a split chord laid after the staircase, or zero for a plain close
+	 */
+	private static int nextLaneStart(int wall, int stepX, int carriedCells, boolean climbing,
+			int stepOff) {
+		// A climb comes back two columns nearer the wall than a descent does. Not derived -- measured,
+		// by grading this against every handover in the library: the first version had descents right
+		// 33,178 times against 623 and climbs right not once, off by exactly two every time.
+		return carriedCells > 0
+			? wall - stepX * (carriedCells + (climbing ? 1 : 0))
+			: wall + stepX * (climbing ? -1 : 1);
+	}
+
+	/**
+	 * Records how far {@link #nextLaneStart} was out, counted the way the chord landings are.
+	 *
+	 * <p>Named with the {@code plan} prefix the sweep already knows to keep out of its wasted-pad
+	 * total: this is not pad anybody laid, it is the planner and the walk disagreeing, which is a
+	 * different thing to be annoyed about and wants its own column in the table.</p>
+	 */
+	private static void gradeLaneStart(PlacementPlan placements, int wall, int stepX,
+			int carriedCells, boolean climbing, int stepOff, int opened, String how) {
+		int foretold = nextLaneStart(wall, stepX, carriedCells, climbing, stepOff);
+		if (foretold == opened) {
+			placements.padded("planStartRight" + how);
+			return;
+		}
+		int off = (opened - foretold) * stepX;
+		placements.padded("planStart" + (off > 0 ? "Late" : "Early")
+			+ Math.min(Math.abs(off), 4) + how);
 	}
 
 	/** Whether the lane can hand over after this event, either by filling it out or by a cut. */
