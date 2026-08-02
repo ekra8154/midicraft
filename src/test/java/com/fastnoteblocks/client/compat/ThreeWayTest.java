@@ -44,6 +44,10 @@ class ThreeWayTest {
 		try (Stream<Path> listing = Files.list(SONGS)) {
 			files = listing.filter(f -> f.toString().endsWith(".json")).sorted().toList();
 		}
+		// 0 = guardian, 1 = other real songs, 2 = synthetic stress fixtures
+		long[][] catBreach = new long[3][3];
+		long[][] catBlocks = new long[3][3];
+		long[][] mismatch = new long[3][3];
 		long[] z = new long[3];
 		long[] breaches = new long[3];
 		long[] breachBlocks = new long[3];
@@ -52,9 +56,6 @@ class ThreeWayTest {
 		long[] wrong = new long[3];
 		for (Path file : files) {
 			String name = file.getFileName().toString().replace(".json", "");
-			if (name.startsWith("ultra-")) {
-				continue;
-			}
 			ComposerProject song;
 			try (Reader reader = Files.newBufferedReader(file)) {
 				ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
@@ -67,6 +68,8 @@ class ThreeWayTest {
 			if (notes.isEmpty()) {
 				continue;
 			}
+			int cat = name.startsWith("ultra-") ? 2
+				: name.equals("deltarune-ch-4-guardian") ? 0 : 1;
 			for (int mode = 0; mode < 3; mode++) {
 				SongBuilder.CHEAP_SPLIT_DESCENT = true;
 				SongBuilder.STACKED_SPLIT_HEADS = mode >= 1;
@@ -82,6 +85,17 @@ class ThreeWayTest {
 						for (int b : plan.breaches()) {
 							breaches[mode]++;
 							breachBlocks[mode] += b;
+							catBreach[mode][cat]++;
+							catBlocks[mode][cat] += b;
+						}
+						// Every place the walk built a shape the planner did not predict. If
+						// "everywhere" breaches more than "cuts only", this is where to look.
+						for (Map.Entry<String, Integer> e : plan.padding().entrySet()) {
+							String k = e.getKey();
+							if (k.startsWith("planShort") || k.equals("busForRoom")
+									|| k.equals("busForSignal") || k.equals("parity")) {
+								mismatch[mode][cat] += e.getValue();
+							}
 						}
 						for (Map.Entry<String, Integer> e : plan.padding().entrySet()) {
 							String k = e.getKey();
@@ -106,6 +120,18 @@ class ThreeWayTest {
 				+ " | pad " + pad[mode]
 				+ " | blocks " + blocks[mode]
 				+ " | wrong " + wrong[mode]);
+			System.out.println("THREEWAY " + NAMES[mode]
+				+ "   breaches  guardian " + catBreach[mode][0]
+				+ " | otherReal " + catBreach[mode][1]
+				+ " | synthetic " + catBreach[mode][2]);
+			System.out.println("THREEWAY " + NAMES[mode]
+				+ "   blocks    guardian " + catBlocks[mode][0]
+				+ " | otherReal " + catBlocks[mode][1]
+				+ " | synthetic " + catBlocks[mode][2]);
+			System.out.println("THREEWAY " + NAMES[mode]
+				+ "   surprises guardian " + mismatch[mode][0]
+				+ " | otherReal " + mismatch[mode][1]
+				+ " | synthetic " + mismatch[mode][2]);
 		}
 	}
 }

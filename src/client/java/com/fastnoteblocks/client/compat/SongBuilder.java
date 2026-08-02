@@ -601,6 +601,9 @@ public final class SongBuilder {
 		// chords that could have filled it are built.
 		Map<Integer, Integer> booked = Map.of();
 		boolean replan = layout.ultra();
+		// Anchored on the lane, not the cursor: ahead(n) from here reaches every column of
+		// this lane, and a lane's travel and depth do not change once it has begun.
+		ParityOracle parity = layout.ultra() ? parityOracle(placements, lane) : null;
 		for (int index = 0; index < events.size(); index++) {
 			EventGroup event = events.get(index);
 			// Out the far side of a turn. The route stops bending of its own accord once the walk has
@@ -642,6 +645,7 @@ public final class SongBuilder {
 			int stepOffAhead = turn.stepOff();
 			int splitCells = turn.splitCells();
 			if (replan) {
+				parity = layout.ultra() ? parityOracle(placements, lane) : null;
 				// Only worth doing ahead of a staircase. The plan's whole job is to work out how much
 				// pad each chord owes so the lane arrives flush at its wall, and a lane that ends in a
 				// flat turn does not need to arrive flush at anything -- the chord that meets the corner
@@ -652,7 +656,7 @@ public final class SongBuilder {
 					? planLane(events, index, lane.pos().getX(), lane.travel().getStepX(), wall,
 						lane.travel() == forward ? nearWall : farWall,
 						currentTime, tipSignal, columnBehindBusy, turnCells, offBus, stepOffAhead,
-						splitCells, climb > 0, layout, turning || leavingTurn)
+						splitCells, climb > 0, layout, turning || leavingTurn, parity)
 					: Map.of();
 				replan = false;
 			}
@@ -679,7 +683,7 @@ public final class SongBuilder {
 			// behind it spoken for is built as a bus instead, and a bus is longer -- so a lane could
 			// be told a chord fitted, build it, and land a column past its own wall.
 			Landing here = landingOf(lane.pos().getX(), lane.travel().getStepX(), event, wait,
-				columnBehindBusy, wall, layout, turning || leavingTurn);
+				columnBehindBusy, wall, layout, turning || leavingTurn, parity);
 			int landing = here.end() + lane.travel().getStepX() * reserve;
 			// Never while the route is still bending. Inside a turn the wire runs across the corridor
 			// rather than along it, so every one of these measurements is taken down the wrong axis --
@@ -1036,7 +1040,7 @@ public final class SongBuilder {
 							lane.travel() == forward ? nearWall : farWall,
 							currentTime + spentPadding,
 							tipSignal, columnBehindBusy, next.cells(), next.offBus(), next.stepOff(),
-							next.splitCells(), climb > 0, layout, turning || leavingTurn);
+							next.splitCells(), climb > 0, layout, turning || leavingTurn, parity);
 						replan = false;
 					}
 				} else {
@@ -1123,11 +1127,12 @@ public final class SongBuilder {
 			// against somebody else's tick. Measured both ways: clamping regardless cost 11 wrong
 			// notes to save 2 breaches.
 			if (owing > 0 && (landingOf(lane.pos().getX(), lane.travel().getStepX(), event,
-					wait - spentPadding, columnBehindBusy, wall, layout, turning || leavingTurn).end() - wall)
+					wait - spentPadding, columnBehindBusy, wall, layout, turning || leavingTurn,
+					parity).end() - wall)
 					* lane.travel().getStepX() <= 0) {
 				while (owing > 0 && (landingOf(lane.pos().getX() + lane.travel().getStepX() * owing,
 						lane.travel().getStepX(), event, wait - spentPadding, columnBehindBusy, wall,
-						layout, turning || leavingTurn).end() - wall)
+						layout, turning || leavingTurn, parity).end() - wall)
 						* lane.travel().getStepX() > 0) {
 					owing--;
 				}
@@ -1209,11 +1214,11 @@ public final class SongBuilder {
 				// booked to lay early has moved the cursor since, and the ticks it spent have come off
 				// the wait -- so the event no longer starts where it did or carries the delay it did.
 				Landing reached = landingOf(cursor.getX(), travel.getStepX(), event,
-					wait - spentPadding, columnBehindBusy, laneWall, layout, turning || leavingTurn);
+					wait - spentPadding, columnBehindBusy, laneWall, layout, turning || leavingTurn, parity);
 				int end = reached.end();
 				EventGroup next = events.get(index + 1);
 				int beyond = landingOf(end, travel.getStepX(), next, next.time() - event.time(),
-					reached.busy(), laneWall, layout, false).end()
+					reached.busy(), laneWall, layout, false, parity).end()
 					+ travel.getStepX() * turnReserve(next, turnCells, layout);
 				// Unless the chord that will not fit can be cut across the turn, in which case the gap
 				// is its to fill. A cut costs nothing and fills the columns with music; a pad fills the
@@ -1255,7 +1260,7 @@ public final class SongBuilder {
 						&& (beyond > farWall || beyond < nearWall)) {
 					int ahead = prePad(cursor.getX(), travel.getStepX(), event, wait - spentPadding,
 						columnBehindBusy, layout, laneWall,
-						(laneWall - cursor.getX()) * travel.getStepX(), turning || leavingTurn);
+						(laneWall - cursor.getX()) * travel.getStepX(), turning || leavingTurn, parity);
 					// Planned like the pad behind, and for the same reason: dust in front of an event
 					// spends the same wire dust behind it does, so a lane wanting a dozen columns off a
 					// wire worth eight laid what it could and stopped short of the wall anyway. What is
@@ -1287,7 +1292,7 @@ public final class SongBuilder {
 			int foretold = layout.ultra() && !turning
 				? landingOf(before.getX(), lane.travel().getStepX(), event,
 					event.time() - currentTime - spentPadding, columnBehindBusy, wall, layout,
-					leavingTurn).end()
+					leavingTurn, parity).end()
 				: Integer.MIN_VALUE;
 			// Columns of dust the wait in front of this chord is going to lay anyway. A module that
 			// has to shift a column to agree with the lane behind can slide inside those for
@@ -1482,8 +1487,46 @@ public final class SongBuilder {
 	private record Landing(int end, int tip, boolean busy, ChordStyle style) {
 	}
 
+	/**
+	 * What the walk will do to a stacked module standing at a given column.
+	 *
+	 * <p>The one thing the planner used to be unable to answer, and it turned out only to be
+	 * missing the blocks. A nudge is decided by looking at the lane behind, and lanes are built in
+	 * order, so by the time a lane is planned the lane behind it is already down and can simply be
+	 * asked. The planner was never blind to parity; nobody handed it the block map.</p>
+	 *
+	 * <p>It matters because a nudge makes a chord a column longer than the plan said, and a lane
+	 * measured to land flush on its wall drifts by exactly that much. Sixteen thousand of them is
+	 * how a shape that fits perfectly well ends up breaching.</p>
+	 */
+	private interface ParityOracle {
+		/** 1 to shift a column, -1 to give the shape up, 0 to build where it stands. */
+		int verdictAt(int x, int time);
+	}
+
+	/**
+	 * Asks the blocks, and remembers the answer.
+	 *
+	 * <p>Cached because the closing search sweeps the same lane many times over, and each ask is up
+	 * to six lookups into the placement map. Keyed on the column and the tick, which together name
+	 * the question.</p>
+	 */
+	private static ParityOracle parityOracle(PlacementPlan placements, Lane laneStart) {
+		int originX = laneStart.pos().getX();
+		int step = laneStart.travel().getStepX();
+		Map<Long, Integer> answered = new java.util.HashMap<>();
+		return (x, time) -> answered.computeIfAbsent(((long) x << 32) ^ (time & 0xffffffffL), key -> {
+			Lane at = laneStart.ahead((x - originX) * step);
+			if (!stackedClashes(placements, at, time)) {
+				return 0;
+			}
+			return stackedClashes(placements, at.ahead(1), time) ? -1 : 1;
+		});
+	}
+
 	private static Landing landingOf(int startX, int stepX, EventGroup event, int wait, boolean busy,
-			int wall, Layout layout, boolean inTurn) {
+			int wall, Layout layout, boolean inTurn,
+			ParityOracle parity) {
 		int delayColumns = Math.max(0, (wait - 1) / 4);
 		ChordStyle style = event.style().reachesBack() && busy && delayColumns == 0
 			? ChordStyle.BUS : event.style();
@@ -1527,6 +1570,18 @@ public final class SongBuilder {
 				}
 			}
 		}
+		// What the walk will do to this module when it meets the lane behind, asked of the blocks
+		// rather than guessed. A shift costs the chord a column; a module boxed in on both cells
+		// gives the shape up and is built as a bus. Both were surprises to the plan until now.
+		boolean nudged = false;
+		if (style.stacked() && parity != null) {
+			int verdict = parity.verdictAt(startX + stepX * delayColumns, event.time());
+			if (verdict < 0) {
+				style = ChordStyle.BUS;
+			} else {
+				nudged = verdict > 0;
+			}
+		}
 		int length;
 		if (style == ChordStyle.STACKED_BUS) {
 			length = delayColumns + STACKED_CELLS + STACKED_BUS_TRANSITION + tailCells;
@@ -1541,7 +1596,8 @@ public final class SongBuilder {
 			: style == ChordStyle.STACKED_BUS
 				? DUST_RANGE - STACKED_BUS_TRANSITION - tailCells
 				: DUST_RANGE;
-		return new Landing(startX + stepX * length, tip, style.stacked(), style);
+		return new Landing(startX + stepX * (length + (nudged ? 1 : 0)), tip, style.stacked(),
+			style);
 	}
 
 	/**
@@ -1562,9 +1618,9 @@ public final class SongBuilder {
 	private static Map<Integer, Integer> planLane(List<EventGroup> events, int from, int startX,
 			int stepX, int wall, int otherWall, int startTime, int tip, boolean busy, int turnCells,
 			int offBus, int stepOff, int splitCells, boolean climbing, Layout layout,
-			boolean leaving) {
+			boolean leaving, ParityOracle parity) {
 		Sweep bare = sweep(events, from, startX, stepX, wall, startTime, tip, busy, offBus, layout,
-			Map.of(), leaving);
+			Map.of(), leaving, parity);
 		if (TRACE) {
 			System.out.println("PLAN from=" + from + " x=" + startX + " step=" + stepX + " wall="
 				+ wall + " tip=" + tip + " busy=" + busy + " turnCells=" + turnCells + " offBus="
@@ -1598,7 +1654,7 @@ public final class SongBuilder {
 			Map<Integer, Integer> pads = new LinkedHashMap<>();
 			for (int attempt = 0; attempt < 8; attempt++) {
 				Sweep tried = sweep(events, from, startX, stepX, wall, startTime, tip, busy, offBus, layout,
-					pads, leaving);
+					pads, leaving, parity);
 				if (tried.last() < last) {
 					break;
 				}
@@ -1671,7 +1727,7 @@ public final class SongBuilder {
 			return Map.of();
 		}
 		Sweep padded = sweep(events, from, startX, stepX, wall, startTime, tip, busy, offBus, layout,
-			most, leaving);
+			most, leaving, parity);
 		if (padded.last() < bare.last() || padded.past() > bare.past()) {
 			return Map.of();
 		}
@@ -1693,7 +1749,7 @@ public final class SongBuilder {
 
 	private static Sweep sweep(List<EventGroup> events, int from, int startX, int stepX, int wall,
 			int startTime, int tip, boolean busy, int offBus, Layout layout,
-			Map<Integer, Integer> pads, boolean leaving) {
+			Map<Integer, Integer> pads, boolean leaving, ParityOracle parity) {
 		List<Integer> ends = new ArrayList<>();
 		List<Integer> tips = new ArrayList<>();
 		List<ChordStyle> styles = new ArrayList<>();
@@ -1708,7 +1764,7 @@ public final class SongBuilder {
 			int pad = pads.getOrDefault(index, 0);
 			room.add(planPad(DUST_RANGE * 2, tip, 0, Math.max(0, wait - 1)).cells().size() - pad);
 			Landing landed = landingOf(cursor + stepX * pad, stepX, event, wait, busy, wall, layout,
-				index == from && leaving);
+				index == from && leaving, parity);
 			// Kept back the same column the walk keeps back. A bus that would leave the wire too weak
 			// to reach the top of the staircase is asked to stop one column short, so the pad has
 			// somewhere to stand the repeater that revives it. The walk has always done that and the
@@ -1869,7 +1925,7 @@ public final class SongBuilder {
 		Sweep after = sweep(events, first,
 			nextLaneStart(wall, stepX, carriedCells, climbing, stepOff), -stepX, otherWall,
 			events.get(spent).time(), DUST_RANGE - turnCells, true, offBus, layout, Map.of(),
-			false);
+			false, null);
 		return after.last() < first;
 	}
 
@@ -2049,10 +2105,10 @@ public final class SongBuilder {
 	 * @return the pad, or -1 if no pad within the limit lands the event on the wall
 	 */
 	private static int prePad(int startX, int stepX, EventGroup event, int wait, boolean busy,
-			Layout layout, int wall, int limit, boolean inTurn) {
+			Layout layout, int wall, int limit, boolean inTurn, ParityOracle parity) {
 		for (int pad = 0; pad <= limit; pad++) {
-			if (landingOf(startX + stepX * pad, stepX, event, wait, busy, wall, layout, inTurn)
-					.end() == wall) {
+			if (landingOf(startX + stepX * pad, stepX, event, wait, busy, wall, layout, inTurn,
+					parity).end() == wall) {
 				return pad;
 			}
 		}
