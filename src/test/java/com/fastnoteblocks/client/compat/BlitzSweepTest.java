@@ -122,8 +122,15 @@ class BlitzSweepTest {
 						+ " " + plan.commands().size());
 					for (Map.Entry<String, Integer> entry : plan.padding().entrySet()) {
 						padBy.merge(entry.getKey(), (long) entry.getValue(), Long::sum);
-						if (entry.getKey().equals("corner")) {
-							corners += entry.getValue();
+						// Structural, not wasted. Pad waste means a column a chord could have been
+						// standing in; a corner has to hold dust because a repeater may not stand on
+						// one, and a stacked-bus's transition cell stands where that shape's repeater
+						// would have stood anyway. A chord of twenty is eleven columns as a plain bus
+						// and ten as a stacked-bus, transition included -- counting it as waste made
+						// a shape that saves a column look like one that spends 78,000 of them.
+						if (entry.getKey().equals("corner")
+								|| entry.getKey().equals("stackedBusTransition")) {
+							corners += entry.getKey().equals("corner") ? entry.getValue() : 0;
 						} else if (!entry.getKey().startsWith("swap")
 								&& !entry.getKey().startsWith("plan")) {
 							padWasted += entry.getValue();
