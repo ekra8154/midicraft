@@ -4,3 +4,7 @@ run/
 *.launch
 .idea/
 *.iml
+
+# Client and test logs. The test runtime pipes every System.out line from the probe
+# tests through log4j into here, which is how latest.log reached eighteen gigabytes.
+logs/

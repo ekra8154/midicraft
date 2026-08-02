@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+	Console only, for the test runtime.
+
+	The config Loom hands the game writes logs/latest.log through a rolling appender whose only
+	triggers are "a new day" and "startup". There is no size policy on it at all. That is fine for
+	a client someone is watching; it is not fine for the probe tests here, which print a line per
+	song per config and can put tens of thousands of lines through log4j in one sweep. Within a
+	single day none of it rolls, and latest.log reached eighteen gigabytes.
+
+	Nothing is lost by dropping the file appenders. Gradle already captures test output, and the
+	sweeps are read off stdout.
+
+	Note for anyone editing this: an XML comment may not contain two hyphens in a row, and log4j
+	fails the whole configuration if it cannot parse the file. It falls back to a default that
+	swallows stdout, so the symptom is a green build with no probe output at all.
+-->
+<Configuration status="WARN">
+	<Appenders>
+		<Console name="SysOut" target="SYSTEM_OUT">
+			<PatternLayout pattern="[%d{HH:mm:ss}] [%t/%level] (%logger{1}) %msg{nolookups}%n"/>
+		</Console>
+	</Appenders>
+	<Loggers>
+		<Logger level="${sys:fabric.log.level:-info}" name="net.minecraft"/>
+		<Root level="${sys:fabric.log.level:-info}">
+			<AppenderRef ref="SysOut"/>
+		</Root>
+	</Loggers>
+</Configuration>
