@@ -274,6 +274,16 @@ public final class ComposerScreen extends Screen {
 	private int noteQuads;
 	private int notesConsidered;
 	private int notesDrawn;
+	/**
+	 * The notes phase split in two: working out where the notes go, and handing quads to the GUI.
+	 *
+	 * <p>Kept apart because they are fixed by different things — the first scales with how many
+	 * notes are on screen, the second with how many quads survive collapsing — and at full zoom-out
+	 * in both directions those two numbers differ by a factor of eight. Guessing which one the time
+	 * belonged to would have sent the next change to the wrong place.</p>
+	 */
+	private long notesLayoutNanos;
+	private long notesDrawNanos;
 	private String profileSummary = "";
 	/** The layer a press landed on, and whether it has moved far enough to be a reorder. */
 	private int layerDragIndex = -1;
@@ -919,12 +929,17 @@ public final class ComposerScreen extends Screen {
 					PHASES[index], phaseNanos[index] / 1.0e6 / profileFrames));
 			}
 			line.append(String.format(java.util.Locale.ROOT,
-				"  |  %d notes seen, %d drawn, %d quads, %.0f ticks/px, %d layers",
-				notesConsidered, notesDrawn, noteQuads, ticksPerPixel, project().layers().size()));
+				"  |  notes=layout %.2f + quads %.2f  |  %d seen, %d drawn, %d quads,"
+					+ " %.0f ticks/px, row %dpx, %d layers",
+				notesLayoutNanos / 1.0e6 / profileFrames, notesDrawNanos / 1.0e6 / profileFrames,
+				notesConsidered, notesDrawn, noteQuads, ticksPerPixel, rowHeight,
+				project().layers().size()));
 			profileSummary = line.toString();
 			PERF.info(profileSummary);
 			java.util.Arrays.fill(phaseNanos, 0L);
 			profileFrameNanos = 0L;
+			notesLayoutNanos = 0L;
+			notesDrawNanos = 0L;
 			profileFrames = 0;
 			profileWindowSince = now;
 		}
@@ -2013,7 +2028,7 @@ public final class ComposerScreen extends Screen {
 				0xFFBFC4CA, false);
 			smallText(graphics, clockLabel(secondsAt(tick)), x + 3, rulerY + 13, 0xFF767C85);
 		}
-		int endX = tickX(project().endTick());
+		int endX = endMarkerX();
 		if (endX >= rollX && endX <= rollX + rollWidth) {
 			// Flag points back over the song, so the marker reads as the edge of something rather
 			// than the start of it. Red when the trailing gap is not a delay a build can place.
@@ -2238,6 +2253,7 @@ public final class ComposerScreen extends Screen {
 		int lowestVisibleMidi = topMidiNote - rollHeight / rowHeight - 1;
 		notesConsidered = 0;
 		notesDrawn = 0;
+		long layoutStart = profiling ? System.nanoTime() : 0L;
 		cells.begin(rollX, rollWidth, NOTE_TRIGGER_WIDTH, rowHeight - 2);
 		for (int layerIndex : noteDrawOrder(shown)) {
 			Layer layer = shown.layers().get(layerIndex);
@@ -2288,10 +2304,16 @@ public final class ComposerScreen extends Screen {
 				}
 			}
 		}
+		long drawStart = profiling ? System.nanoTime() : 0L;
 		quads.graphics = graphics;
 		noteQuads = cells.draw(quads);
 		quads.graphics = null;
-		int endX = tickX(project().endTick());
+		if (profiling) {
+			long now = System.nanoTime();
+			notesDrawNanos += now - drawStart;
+			notesLayoutNanos += drawStart - layoutStart;
+		}
+		int endX = endMarkerX();
 		if (endX >= rollX && endX <= rollX + rollWidth) {
 			graphics.fill(endX, rollY, endX + 1, rollY + rollHeight, 0x66E8C05A);
 		}
@@ -2847,7 +2869,7 @@ public final class ComposerScreen extends Screen {
 			return true;
 		}
 		if (draggingEndMarker) {
-			setEndTick(snapTick(mouseTick(event.x())));
+			setEndTick(snapTick(endMarkerTick(event.x())));
 			return true;
 		}
 		if (draggingPlayhead) {
@@ -2954,6 +2976,15 @@ public final class ComposerScreen extends Screen {
 				anchoredTick - Math.round((mouseX - rollX) * ticksPerPixel));
 			return true;
 		}
+		if (shiftDown()) {
+			// Fast scroll: a quarter of whatever is on screen per notch, rather than a fixed number
+			// of beats. A beat a notch is fine when the roll holds a few bars and useless when it
+			// holds four hundred -- and the whole reason to reach for this is that you are zoomed
+			// out. Floored at a bar so it can never end up slower than the plain scroll it modifies.
+			long span = Math.max(project().ppq() * 4L, Math.round(rollWidth * ticksPerPixel / 4.0));
+			horizontalScroll = Math.max(0L, horizontalScroll - Math.round(scrollY * span));
+			return true;
+		}
 		horizontalScroll = Math.max(0L, horizontalScroll - Math.round(scrollY * project().ppq()));
 		return true;
 	}
@@ -2982,6 +3013,8 @@ public final class ComposerScreen extends Screen {
 			profiling = !profiling;
 			java.util.Arrays.fill(phaseNanos, 0L);
 			profileFrameNanos = 0L;
+			notesLayoutNanos = 0L;
+			notesDrawNanos = 0L;
 			profileFrames = 0;
 			profileWindowSince = 0L;
 			profileSummary = "";
@@ -4047,9 +4080,32 @@ public final class ComposerScreen extends Screen {
 		return x >= rollX && x < rollX + rollWidth && y >= rollY && y < rollY + rollHeight;
 	}
 
+	/**
+	 * Where the end marker is drawn: the right-hand edge of a note standing on the end tick.
+	 *
+	 * <p>Not {@code tickX(endTick)}, which is where the tick itself falls. A note is drawn as a
+	 * fixed-width trigger anchored at its start, so a note <em>on</em> the end tick occupies the
+	 * seven pixels after it — and a marker at the bare tick therefore lands on that note's left
+	 * edge, with the note sticking out past it. Every song whose last note sits on the end marker
+	 * looked like it carried on after the end, most obviously zoomed out, where those seven pixels
+	 * are thousands of ticks. Anchoring the marker to the far edge of that trigger puts it after
+	 * everything that sounds, at every zoom.</p>
+	 *
+	 * <p>The offset is in glyph space, not tick space, so anything converting a cursor position
+	 * back into a tick has to take it off again — see {@link #endMarkerTick(double)}.</p>
+	 */
+	private int endMarkerX() {
+		return tickX(project().endTick()) + NOTE_TRIGGER_WIDTH;
+	}
+
+	/** The tick a cursor at {@code x} is pointing the end marker at, undoing the drawing offset. */
+	private long endMarkerTick(double x) {
+		return mouseTick(x - NOTE_TRIGGER_WIDTH);
+	}
+
 	/** The end marker's grab zone, a few pixels either side of it in the ruler. */
 	private boolean overEndMarker(double x, double y) {
-		return insideRuler(x, y) && Math.abs(x - tickX(project().endTick())) <= 4.0;
+		return insideRuler(x, y) && Math.abs(x - endMarkerX()) <= 4.0;
 	}
 
 	private boolean insideRuler(double x, double y) {

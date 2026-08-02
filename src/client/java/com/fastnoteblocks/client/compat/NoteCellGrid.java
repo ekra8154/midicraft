@@ -210,17 +210,30 @@ final class NoteCellGrid {
 	private int paint(Quads quads, int left, int top, int right, int color, int kind,
 			boolean highlighted) {
 		int bottom = top + noteHeight;
-		quads.fill(left, top, right, bottom, color);
 		if (kind == 0) {
+			quads.fill(left, top, right, bottom, color);
 			return 1;
 		}
 		int warn = (kind & CROWDED) != 0
 			? (highlighted ? 0xFFFF9A2E : 0x55FF9A2E)
 			: (highlighted ? 0xFFFFE45C : 0x55FFE45C);
-		quads.fill(left, top, right, top + 1, warn);
-		quads.fill(left, bottom - 1, right, bottom, warn);
-		quads.fill(left, top, left + 1, bottom, warn);
-		quads.fill(right - 1, top, right, bottom, warn);
-		return 5;
+		int issued = 0;
+		// A border of four edges over a fill paints the same pixels as one warn rectangle with the
+		// fill put back inside it -- and that is two quads rather than five. The body underneath is
+		// still needed when the warning colour is half transparent, because the border's colour is
+		// the warning blended over the note, not over the background behind it.
+		if ((warn >>> 24) != 0xFF) {
+			quads.fill(left, top, right, bottom, color);
+			issued++;
+		}
+		quads.fill(left, top, right, bottom, warn);
+		issued++;
+		// Zoomed out vertically a row is four pixels and a note is two, so the border is the whole
+		// note and there is no inside left to restore. That is the case this all has to be fast in.
+		if (right - left > 2 && bottom - top > 2) {
+			quads.fill(left + 1, top + 1, right - 1, bottom - 1, color);
+			issued++;
+		}
+		return issued;
 	}
 }

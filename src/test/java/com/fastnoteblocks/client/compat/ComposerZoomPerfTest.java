@@ -47,11 +47,30 @@ class ComposerZoomPerfTest {
 	private static final int TIMELINE_RULER_HEIGHT = 24;
 	private static final int ROW_HEIGHT = 8;
 	private static final int NOTE_TRIGGER_WIDTH = 7;
+	private static final int MIN_ROW_HEIGHT = 4;
 	private static final int MIN_GRID_PIXEL_SPACING = 4;
 	private static final int[] LAYER_COLORS = {
 		0xFF35D7E5, 0xFFFFB347, 0xFF9BE564, 0xFFD19BFF, 0xFFFF6B9A,
 		0xFF7CA7FF, 0xFFFFE66D, 0xFF8CE0C3, 0xFFFF8C5A, 0xFFC3F584
 	};
+
+	/**
+	 * The frame the composer is slowest on: zoomed out horizontally <em>and</em> vertically.
+	 *
+	 * <p>Vertical zoom-out is what the first pass missed. At four pixels a row the roll shows every
+	 * pitch at once, so nothing is culled by pitch and the notes spread over a hundred and eleven
+	 * rows instead of fifty-five — more rows means shorter runs and more quads, and the GUI charges
+	 * for quads quadratically.</p>
+	 */
+	@Test
+	void countsAFullyZoomedOutFrame() throws Exception {
+		for (String name : DENSE) {
+			if (!Files.isRegularFile(SONGS.resolve(name + ".json"))) {
+				continue;
+			}
+			frame(name + " [row 4px]", load(name), 960, 540, MIN_ROW_HEIGHT);
+		}
+	}
 
 	@Test
 	void countsAFrame() throws Exception {
@@ -65,11 +84,11 @@ class ComposerZoomPerfTest {
 			}
 			ComposerProject song = load(name);
 			// GUI scale 2 on a 1920x1080 window, which is what a full-screen composer looks like.
-			frame(name, song, 960, 540);
+			frame(name, song, 960, 540, ROW_HEIGHT);
 		}
 	}
 
-	private void frame(String name, ComposerProject song, int width, int height) {
+	private void frame(String name, ComposerProject song, int width, int height, int rowHeight) {
 		int rollX = LAYER_PANEL_WIDTH + PIANO_WIDTH;
 		int rollY = TOOLBAR_HEIGHT + 14 + TIMELINE_RULER_HEIGHT;
 		int rollWidth = Math.max(40, width - rollX - 8);
@@ -77,7 +96,6 @@ class ComposerZoomPerfTest {
 		double ticksPerPixel = Math.max(80.0, Math.max(1L, song.endTick()) * 1.2 / Math.max(1, rollWidth));
 		long horizontalScroll = 0L;
 		int topMidiNote = 91;
-		int rowHeight = ROW_HEIGHT;
 
 		long analysisStart = System.nanoTime();
 		SongAnalysis stats = SongAnalysis.of(song, true);
@@ -187,7 +205,7 @@ class ComposerZoomPerfTest {
 		long gridLines = (lastVisibleTick - horizontalScroll) / step + 2L;
 
 		System.out.println(String.format(Locale.ROOT,
-			"%-34s notes=%5d tpp=%7.1f  |  drawn=%5d quadsWas=%6d quadsNow=%5d (%.0f%% saved)"
+			"%-44s notes=%5d tpp=%7.1f  |  drawn=%5d quadsWas=%6d quadsNow=%5d (%.0f%% saved)"
 				+ " warned=%5d layout=%5.2fms chordTicks=%5d"
 				+ "  |  analysis=%5.2fms tracks=%5.2fms blockCounts=%5.2fms(warm %5.2fms) blocks=%d",
 			name, stats.totalNotes(), ticksPerPixel, drawn, fills, collapsed,
