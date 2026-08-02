@@ -51,6 +51,7 @@ class StartTopSweepTest {
 		long[] volume = new long[2];
 		long[] length = new long[2];
 		TreeMap<String, String> partedBySong = new TreeMap<>();
+		TreeMap<String, String> whoWins = new TreeMap<>();
 		for (Path file : files) {
 			String name = file.getFileName().toString().replace(".json", "");
 			ComposerProject song;
@@ -67,10 +68,14 @@ class StartTopSweepTest {
 			}
 			int parted = 0;
 			int configs = 0;
+			int[] songBreach = new int[2];
+			int topWon = 0;
+			int bottomWon = 0;
 			for (int floors = 1; floors <= 6; floors++) {
 				for (int width = 12; width <= 48; width += 4) {
 					configs++;
 					long[] blocks = new long[2];
+					int[] here = new int[2];
 					for (int top = 0; top <= 1; top++) {
 						SongBuilder.PastePlan plan;
 						try {
@@ -87,6 +92,7 @@ class StartTopSweepTest {
 						for (int breach : plan.breaches()) {
 							breaches[top]++;
 							breachBlocks[top] += breach;
+							here[top] += breach;
 							worst[top] = Math.max(worst[top], breach);
 						}
 						for (String fault : plan.faults()) {
@@ -100,9 +106,20 @@ class StartTopSweepTest {
 					if (blocks[0] != blocks[1]) {
 						parted++;
 					}
+					songBreach[0] += here[0];
+					songBreach[1] += here[1];
+					if (here[1] < here[0]) {
+						topWon++;
+					} else if (here[0] < here[1]) {
+						bottomWon++;
+					}
 				}
 			}
 			partedBySong.put(name, parted + "/" + configs);
+			if (songBreach[0] != 0 || songBreach[1] != 0) {
+				whoWins.put(name, "bottom=" + songBreach[0] + " top=" + songBreach[1]
+					+ " configsTopWon=" + topWon + " configsBottomWon=" + bottomWon);
+			}
 		}
 		for (int top = 0; top <= 1; top++) {
 			System.out.println("TOPSWEEP " + (top == 1 ? "top   " : "bottom")
@@ -112,5 +129,7 @@ class StartTopSweepTest {
 				+ " length=" + length[top]);
 		}
 		System.out.println("TOPSWEEP partedBySong " + partedBySong);
+		whoWins.forEach((song, line) ->
+			System.out.println("TOPWINS " + song + " " + line));
 	}
 }
