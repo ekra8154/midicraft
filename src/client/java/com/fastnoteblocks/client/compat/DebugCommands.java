@@ -10,9 +10,13 @@ import java.util.List;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
 import net.minecraft.ChatFormatting;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.HoverEvent;
 
 /**
  * Commands for building a stated run of chords, off unless the setting is on.
@@ -48,13 +52,85 @@ public final class DebugCommands {
 	}
 
 	public static void register() {
-		ClientCommandRegistrationCallback.EVENT.register((dispatcher, registry) ->
+		ClientCommandRegistrationCallback.EVENT.register((dispatcher, registry) -> {
 			dispatcher.register(literal("fastnoteblockpaste")
 				// Checked here rather than by skipping registration, so that turning the setting on
 				// takes effect where it is turned on rather than at the next launch.
 				.requires(source -> FastNoteblocksConfig.get().debugCommandsEnabled())
 				.then(wall(false))
-				.then(literal("dry").then(wall(true)))));
+				.then(literal("dry").then(wall(true))));
+			dispatcher.register(literal("asciidiagram")
+				.requires(source -> FastNoteblocksConfig.get().debugCommandsEnabled())
+				.then(corner("x1").then(corner("y1").then(corner("z1")
+					.then(corner("x2").then(corner("y2").then(views())))))));
+		});
+	}
+
+	private static RequiredArgumentBuilder<FabricClientCommandSource, Integer> corner(String name) {
+		return RequiredArgumentBuilder.argument(name, IntegerArgumentType.integer(-30_000_000,
+			30_000_000));
+	}
+
+	/**
+	 * The last corner, and then which way the reader is facing.
+	 *
+	 * <p>Left off it is {@code top}, because that is the one anybody draws by hand and the one a
+	 * corridor is easiest to count columns along.</p>
+	 */
+	private static RequiredArgumentBuilder<FabricClientCommandSource, Integer> views() {
+		RequiredArgumentBuilder<FabricClientCommandSource, Integer> last = corner("z2")
+			.executes(context -> diagram(context, AsciiDiagram.View.TOP));
+		for (AsciiDiagram.View view : AsciiDiagram.View.values()) {
+			last = last.then(literal(view.name().toLowerCase(java.util.Locale.ROOT))
+				.executes(context -> diagram(context, view)));
+		}
+		return last;
+	}
+
+	/**
+	 * Reads the box and offers it, rather than printing it.
+	 *
+	 * <p>Chat is sixty-odd characters wide and wraps without warning, so a diagram printed into it
+	 * is unreadable and, worse, unreadable in a way that looks like the build is wrong. What goes in
+	 * chat is the shape of the thing and two links; the diagram itself goes to the clipboard whole.</p>
+	 */
+	private static int diagram(CommandContext<FabricClientCommandSource> context,
+			AsciiDiagram.View view) {
+		FabricClientCommandSource source = context.getSource();
+		ClientLevel level = Minecraft.getInstance().level;
+		if (level == null) {
+			source.sendError(Component.literal("No world loaded."));
+			return 0;
+		}
+		BlockPos from = new BlockPos(IntegerArgumentType.getInteger(context, "x1"),
+			IntegerArgumentType.getInteger(context, "y1"),
+			IntegerArgumentType.getInteger(context, "z1"));
+		BlockPos to = new BlockPos(IntegerArgumentType.getInteger(context, "x2"),
+			IntegerArgumentType.getInteger(context, "y2"),
+			IntegerArgumentType.getInteger(context, "z2"));
+		int volume = AsciiDiagram.volume(from, to);
+		if (volume > AsciiDiagram.MAX_BLOCKS) {
+			source.sendError(Component.literal("That is " + volume + " blocks. "
+				+ AsciiDiagram.MAX_BLOCKS + " is as much as this will draw."));
+			return 0;
+		}
+		source.sendFeedback(Component.literal("asciidiagram " + volume + " blocks, looking "
+			+ view.name().toLowerCase(java.util.Locale.ROOT)).withStyle(ChatFormatting.GRAY)
+			.append(copy(level, from, to, view, AsciiDiagram.Shape.CODE, "  [code]"))
+			.append(copy(level, from, to, view, AsciiDiagram.Shape.TABLE, "  [table]")));
+		return 1;
+	}
+
+	/** One clickable offer of the box in one shape, rendered now so the click cannot fail. */
+	private static Component copy(ClientLevel level, BlockPos from, BlockPos to,
+			AsciiDiagram.View view, AsciiDiagram.Shape shape, String label) {
+		String drawn = AsciiDiagram.render(level::getBlockState, from, to, view, shape);
+		return Component.literal(label).withStyle(style -> style
+			.withColor(ChatFormatting.AQUA)
+			.withUnderlined(true)
+			.withClickEvent(new ClickEvent.CopyToClipboard(drawn))
+			.withHoverEvent(new HoverEvent.ShowText(Component.literal("Copy "
+				+ drawn.lines().count() + " lines to the clipboard"))));
 	}
 
 	private static LiteralArgumentBuilder<FabricClientCommandSource> literal(String name) {

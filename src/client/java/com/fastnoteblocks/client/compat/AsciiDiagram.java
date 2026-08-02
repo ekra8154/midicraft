@@ -1,0 +1,339 @@
+package com.fastnoteblocks.client.compat;
+
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.level.block.RedStoneWireBlock;
+import net.minecraft.world.level.block.RepeaterBlock;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.level.block.state.properties.SlabType;
+
+/**
+ * A box of world, written out as flat slices somebody can paste into a conversation.
+ *
+ * <p>What this is for is settling arguments about geometry. A build that does not fire is read by
+ * arguing from the plan about where the blocks must be, and the plan is the thing under suspicion --
+ * so the argument runs for hours and both sides are reasoning from the same possibly-wrong model.
+ * Slices of the actual world end that: whatever is there is there.</p>
+ *
+ * <p>Everything is oriented from a stated point of view, and every slice says which way is which,
+ * because a diagram whose handedness has to be guessed at is worse than none. Looking east, the
+ * slices advance away from you and south is on your right, the same as standing there.</p>
+ */
+public final class AsciiDiagram {
+	private AsciiDiagram() {
+	}
+
+	/** Which way the reader is looking. Slices advance away from them. */
+	public enum View {
+		NORTH, SOUTH, EAST, WEST, TOP;
+
+		public static View of(String name) {
+			return valueOf(name.toUpperCase(java.util.Locale.ROOT));
+		}
+	}
+
+	/** Aligned columns, or a markdown table. Both carry the same cells. */
+	public enum Shape {
+		CODE, TABLE
+	}
+
+	/** More than this and it is not a diagram, it is a data dump nobody will read. */
+	public static final int MAX_BLOCKS = 40_000;
+
+	/**
+	 * How the three world axes lie on the page.
+	 *
+	 * @param sliceAscends whether successive slices go up the axis. Slices always advance away from
+	 *     the reader, so this is what decides which end of the box is the front.
+	 * @param colAscends whether the column coordinate grows rightwards
+	 * @param rowAscends whether the row coordinate grows downwards, since rows run down the page
+	 */
+	private record Axes(Direction.Axis slice, boolean sliceAscends, Direction.Axis col,
+			boolean colAscends, Direction.Axis row, boolean rowAscends) {
+	}
+
+	private static Axes axesOf(View view) {
+		// Rows run down the page, so for anything seen from the side the row axis is y and it
+		// descends: the top of the diagram is the top of the build. Seen from above the rows are z
+		// and they ascend, which puts north at the top and matches every map ever drawn.
+		return switch (view) {
+			case NORTH -> new Axes(Direction.Axis.Z, false, Direction.Axis.X, true,
+				Direction.Axis.Y, false);
+			case SOUTH -> new Axes(Direction.Axis.Z, true, Direction.Axis.X, false,
+				Direction.Axis.Y, false);
+			case EAST -> new Axes(Direction.Axis.X, true, Direction.Axis.Z, true,
+				Direction.Axis.Y, false);
+			case WEST -> new Axes(Direction.Axis.X, false, Direction.Axis.Z, false,
+				Direction.Axis.Y, false);
+			case TOP -> new Axes(Direction.Axis.Y, false, Direction.Axis.X, true,
+				Direction.Axis.Z, true);
+		};
+	}
+
+	/** How many blocks the box holds, so a caller can refuse one before reading any of it. */
+	public static int volume(BlockPos from, BlockPos to) {
+		return (Math.abs(from.getX() - to.getX()) + 1) * (Math.abs(from.getY() - to.getY()) + 1)
+			* (Math.abs(from.getZ() - to.getZ()) + 1);
+	}
+
+	public static String render(Function<BlockPos, BlockState> world, BlockPos from, BlockPos to,
+			View view, Shape shape) {
+		Axes axes = axesOf(view);
+		int[] low = {Math.min(from.getX(), to.getX()), Math.min(from.getY(), to.getY()),
+			Math.min(from.getZ(), to.getZ())};
+		int[] high = {Math.max(from.getX(), to.getX()), Math.max(from.getY(), to.getY()),
+			Math.max(from.getZ(), to.getZ())};
+		// Symbol to what it stands for, filled in as the box is read rather than declared up front,
+		// so the legend names the blocks that are actually there and nothing else. Insertion ordered
+		// because a legend that reshuffles between two runs of the same build is hard to diff.
+		Map<String, String> legend = new LinkedHashMap<>();
+		StringBuilder out = new StringBuilder();
+		out.append("# ").append(low[0]).append(' ').append(low[1]).append(' ').append(low[2])
+			.append("  ..  ").append(high[0]).append(' ').append(high[1]).append(' ')
+			.append(high[2]).append(", looking ").append(view.name().toLowerCase(
+				java.util.Locale.ROOT)).append('\n');
+		out.append(orientation(axes)).append('\n');
+		out.append("arrows point the way the signal leaves; x = away from you, o = towards you\n");
+		int empty = 0;
+		for (int slice : run(low, high, axes.slice(), axes.sliceAscends())) {
+			List<Integer> cols = run(low, high, axes.col(), axes.colAscends());
+			List<Integer> rows = run(low, high, axes.row(), axes.rowAscends());
+			String[][] cells = new String[rows.size()][cols.size()];
+			boolean anything = false;
+			for (int row = 0; row < rows.size(); row++) {
+				for (int col = 0; col < cols.size(); col++) {
+					BlockState state = world.apply(at(axes, slice, cols.get(col), rows.get(row)));
+					cells[row][col] = symbol(state, axes, legend);
+					anything |= !state.isAir();
+				}
+			}
+			// A box drawn round a build catches air above and beside it, and a page of dots tells
+			// nobody anything. Counted rather than dropped silently, so the slices that are left
+			// cannot be mistaken for the whole box.
+			if (!anything) {
+				empty++;
+				continue;
+			}
+			out.append('\n').append(shape == Shape.TABLE ? "## " : "## ")
+				.append(axes.slice().getSerializedName()).append('=').append(slice).append('\n');
+			if (shape == Shape.TABLE) {
+				table(out, axes, cols, rows, cells);
+			} else {
+				code(out, axes, cols, rows, cells);
+			}
+		}
+		if (empty > 0) {
+			out.append("\n(").append(empty).append(empty == 1 ? " slice was" : " slices were")
+				.append(" all air, left out)\n");
+		}
+		out.append("\nlegend\n");
+		int keys = 0;
+		for (String key : legend.keySet()) {
+			keys = Math.max(keys, key.length());
+		}
+		for (Map.Entry<String, String> entry : legend.entrySet()) {
+			out.append("  ").append(pad(entry.getKey(), keys)).append("  ")
+				.append(entry.getValue()).append('\n');
+		}
+		return out.toString();
+	}
+
+	private static String orientation(Axes axes) {
+		return "slices advance " + (axes.sliceAscends() ? "+" : "-")
+			+ axes.slice().getSerializedName() + " (away from you); columns are "
+			+ axes.col().getSerializedName() + ", " + (axes.colAscends() ? "+" : "-")
+			+ axes.col().getSerializedName() + " to the right; rows are "
+			+ axes.row().getSerializedName() + ", " + (axes.rowAscends() ? "+" : "-")
+			+ axes.row().getSerializedName() + " downwards";
+	}
+
+	private static void code(StringBuilder out, Axes axes, List<Integer> cols, List<Integer> rows,
+			String[][] cells) {
+		int width = 2;
+		for (String[] line : cells) {
+			for (String cell : line) {
+				width = Math.max(width, cell.length());
+			}
+		}
+		for (int col : cols) {
+			width = Math.max(width, String.valueOf(col).length());
+		}
+		int gutter = 0;
+		for (int row : rows) {
+			gutter = Math.max(gutter, (axes.row().getSerializedName() + "=" + row).length());
+		}
+		// The column axis named on its own header row as well as in the orientation line above,
+		// because the header is what somebody reads while counting along a corridor and having to
+		// scroll back up to remember whether they are counting x or z is how a column gets lost.
+		out.append(pad(axes.col().getSerializedName(), gutter)).append("  ");
+		for (int col : cols) {
+			out.append(' ').append(pad(String.valueOf(col), width));
+		}
+		out.append('\n');
+		for (int row = 0; row < rows.size(); row++) {
+			out.append(pad(axes.row().getSerializedName() + "=" + rows.get(row), gutter))
+				.append("  ");
+			for (int col = 0; col < cols.size(); col++) {
+				out.append(' ').append(pad(cells[row][col], width));
+			}
+			out.append('\n');
+		}
+	}
+
+	private static void table(StringBuilder out, Axes axes, List<Integer> cols, List<Integer> rows,
+			String[][] cells) {
+		out.append("\n| ").append(axes.row().getSerializedName()).append(" \\ ")
+			.append(axes.col().getSerializedName()).append(" |");
+		for (int col : cols) {
+			out.append(' ').append(col).append(" |");
+		}
+		out.append("\n|---|");
+		for (int col = 0; col < cols.size(); col++) {
+			out.append("---|");
+		}
+		out.append('\n');
+		for (int row = 0; row < rows.size(); row++) {
+			out.append("| **").append(rows.get(row)).append("** |");
+			for (int col = 0; col < cols.size(); col++) {
+				out.append(' ').append(cells[row][col].replace("|", "\\|")).append(" |");
+			}
+			out.append('\n');
+		}
+	}
+
+	private static List<Integer> run(int[] low, int[] high, Direction.Axis axis, boolean ascends) {
+		int index = index(axis);
+		List<Integer> values = new ArrayList<>();
+		if (ascends) {
+			for (int value = low[index]; value <= high[index]; value++) {
+				values.add(value);
+			}
+		} else {
+			for (int value = high[index]; value >= low[index]; value--) {
+				values.add(value);
+			}
+		}
+		return values;
+	}
+
+	private static BlockPos at(Axes axes, int slice, int col, int row) {
+		int[] coords = new int[3];
+		coords[index(axes.slice())] = slice;
+		coords[index(axes.col())] = col;
+		coords[index(axes.row())] = row;
+		return new BlockPos(coords[0], coords[1], coords[2]);
+	}
+
+	private static int index(Direction.Axis axis) {
+		return switch (axis) {
+			case X -> 0;
+			case Y -> 1;
+			case Z -> 2;
+		};
+	}
+
+	private static String pad(String text, int width) {
+		return text.length() >= width ? text : " ".repeat(width - text.length()) + text;
+	}
+
+	/**
+	 * One block, in as few characters as say what it is.
+	 *
+	 * <p>The redstone is spelled out and everything else is abbreviated, because what these diagrams
+	 * get read for is which way a signal went and how much of it was left. Wire carries its power and
+	 * a repeater its delay and its heading; a slab says which half of the block it is, since that is
+	 * what a staircase is made of; a copper bulb says whether it is lit, since that is what a build
+	 * is judged by. The rest is two letters and a line in the legend.</p>
+	 */
+	private static String symbol(BlockState state, Axes axes, Map<String, String> legend) {
+		if (state.isAir()) {
+			legend.putIfAbsent(".", "air");
+			return ".";
+		}
+		String id = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
+		String path = id.substring(id.indexOf(':') + 1);
+		if (state.hasProperty(RedStoneWireBlock.POWER)) {
+			legend.putIfAbsent("w<n>", id + ", n = power, 0 to 15");
+			return "w" + state.getValue(RedStoneWireBlock.POWER);
+		}
+		if (state.hasProperty(RepeaterBlock.DELAY)) {
+			legend.putIfAbsent("<arrow><n>", id + ", n = delay in ticks, 1 to 4");
+			return arrow(signalOut(state), axes) + String.valueOf(state.getValue(RepeaterBlock.DELAY));
+		}
+		if (path.equals("comparator")) {
+			legend.putIfAbsent("c<arrow>", id);
+			return "c" + arrow(signalOut(state), axes);
+		}
+		if (state.hasProperty(BlockStateProperties.SLAB_TYPE)) {
+			SlabType half = state.getValue(BlockStateProperties.SLAB_TYPE);
+			String mark = switch (half) {
+				case TOP -> "s^";
+				case BOTTOM -> "s_";
+				case DOUBLE -> "s=";
+			};
+			legend.putIfAbsent(mark, id + ", " + half.getSerializedName() + " half");
+			return mark;
+		}
+		if (path.contains("copper_bulb")) {
+			boolean lit = state.hasProperty(BlockStateProperties.LIT)
+				&& state.getValue(BlockStateProperties.LIT);
+			legend.putIfAbsent(lit ? "B*" : "B-", id + (lit ? ", lit" : ", unlit"));
+			return lit ? "B*" : "B-";
+		}
+		if (path.equals("note_block")) {
+			legend.putIfAbsent("NB", id);
+			return "NB";
+		}
+		if (path.contains("glass")) {
+			legend.putIfAbsent("GL", id);
+			return "GL";
+		}
+		// Everything else gets the first two letters of its name, and a second, third or fourth
+		// block that wants the same two gets a digit after them. Nothing is ever left unexplained:
+		// whatever comes back, the legend says which block it was.
+		String base = (path.length() >= 2 ? path.substring(0, 2) : path + "_").toUpperCase(
+			java.util.Locale.ROOT);
+		for (int suffix = 0; suffix < 10; suffix++) {
+			String mark = suffix == 0 ? base : base.charAt(0) + String.valueOf(suffix);
+			String seen = legend.get(mark);
+			if (seen == null) {
+				legend.put(mark, id);
+				return mark;
+			}
+			if (seen.equals(id)) {
+				return mark;
+			}
+		}
+		return "??";
+	}
+
+	/**
+	 * The way a repeater or comparator sends its signal.
+	 *
+	 * <p>Which is the opposite of {@code FACING}: {@code DiodeBlock.getInputSignal} reads the block
+	 * at {@code pos.relative(FACING)}, so the property points at where the signal comes from. Drawn
+	 * the other way round every diagram would have its arrows reversed, which is the one mistake
+	 * that would make these worse than useless.</p>
+	 */
+	private static Direction signalOut(BlockState state) {
+		return state.getValue(BlockStateProperties.HORIZONTAL_FACING).getOpposite();
+	}
+
+	private static char arrow(Direction direction, Axes axes) {
+		boolean positive = direction.getAxisDirection() == Direction.AxisDirection.POSITIVE;
+		if (direction.getAxis() == axes.col()) {
+			return positive == axes.colAscends() ? '>' : '<';
+		}
+		if (direction.getAxis() == axes.row()) {
+			return positive == axes.rowAscends() ? 'v' : '^';
+		}
+		return positive == axes.sliceAscends() ? 'x' : 'o';
+	}
+}
