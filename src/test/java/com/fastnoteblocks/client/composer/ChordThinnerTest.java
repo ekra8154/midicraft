@@ -119,6 +119,62 @@ class ChordThinnerTest {
 			"the only snare in the chord was thinned away");
 	}
 
+	/** Given one layer to work with, it only ever deletes notes on that layer. */
+	@Test
+	void takesOnlyFromTheLayersItIsOffered() {
+		ComposerProject song = stacked(5L);
+		for (int layerIndex = 0; layerIndex < song.layers().size(); layerIndex++) {
+			ChordThinner.Result thinned =
+				ChordThinner.thin(song, 20, true, Set.of(layerIndex));
+			Set<Long> allowed = new HashSet<>();
+			for (NoteEvent note : song.layers().get(layerIndex).notes()) {
+				allowed.add(note.id());
+			}
+			assertTrue(allowed.containsAll(thinned.noteIds()),
+				"layer " + layerIndex + " was told to thin itself and touched something else");
+			assertPitchesSurvive(song, thinned.noteIds(), "layer " + layerIndex + " alone");
+		}
+	}
+
+	/**
+	 * A sound two layers play cannot go when only one of them is offered.
+	 *
+	 * <p>Deduplication means the count only moves when every copy of a sound goes, so taking this
+	 * one would have to delete a note on a layer nobody selected. It stays instead.</p>
+	 */
+	@Test
+	void willNotReachIntoAnUnofferedLayerToFinishASound() {
+		List<NoteEvent> shared = new ArrayList<>();
+		List<NoteEvent> alsoShared = new ArrayList<>();
+		for (int pitch = 60; pitch < 72; pitch++) {
+			shared.add(note(pitch, 0L, 100));
+			alsoShared.add(note(pitch, 0L, 100));
+		}
+		// Both layers carry the same instrument and pitches, so every sound has a copy in each.
+		ComposerProject song = songOf(List.of(
+			layer("A", "HARP", shared),
+			layer("B", "HARP", alsoShared)));
+		assertEquals(12, soundsPerTick(song).get(0L).size(), "the two layers fold into twelve");
+		ChordThinner.Result thinned = ChordThinner.thin(song, 8, true, Set.of(0));
+		assertTrue(thinned.isEmpty(),
+			"every sound has a copy on layer B, so none of them can be taken from A alone");
+		assertEquals(1, thinned.chordsOver());
+		assertEquals(0, thinned.chordsThinned());
+		assertEquals(1, thinned.chordsStillOver());
+	}
+
+	/** Offering every layer is the same as offering none in particular. */
+	@Test
+	void offeringEveryLayerMatchesTheWholeSong() {
+		ComposerProject song = stacked(9L);
+		Set<Integer> everything = new HashSet<>();
+		for (int index = 0; index < song.layers().size(); index++) {
+			everything.add(index);
+		}
+		assertEquals(ChordThinner.thin(song, 24, true).noteIds(),
+			ChordThinner.thin(song, 24, true, everything).noteIds());
+	}
+
 	/** A chord of unique pitches cannot be thinned at all, and says so rather than gutting it. */
 	@Test
 	void leavesAChordItCannotThinAlone() {
@@ -130,6 +186,7 @@ class ChordThinnerTest {
 		ChordThinner.Result thinned = ChordThinner.thin(song, 20, true);
 		assertTrue(thinned.isEmpty(), "nothing is doubled, so nothing can go");
 		assertEquals(1, thinned.chordsStillOver());
+		assertEquals(0, thinned.chordsThinned());
 	}
 
 	/** Layers left out of the build cannot overload a tick they are not part of. */

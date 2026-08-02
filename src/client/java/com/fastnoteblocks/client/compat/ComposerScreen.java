@@ -1434,27 +1434,54 @@ public final class ComposerScreen extends Screen {
 	 */
 	private void selectOverloadedChordNotes() {
 		int target = config.chordThinTarget();
+		// Scoped to the layer selection like the rest of the Select menu, so thinning one part is
+		// possible at all. How big a chord is still comes from every layer in the build -- only
+		// where the notes may be taken from narrows. Select the whole panel for the whole song.
+		Set<Integer> scope = new LinkedHashSet<>();
+		for (int layerIndex : selectionLayers()) {
+			if (layerIndex >= 0 && layerIndex < project().layers().size()
+					&& project().layers().get(layerIndex).visible()) {
+				scope.add(layerIndex);
+			}
+		}
 		ChordThinner.Result thinned =
-			ChordThinner.thin(project(), target, config.dedupeIdenticalNotes());
+			ChordThinner.thin(project(), target, config.dedupeIdenticalNotes(), scope);
 		selectedNotes.clear();
 		selectedNotes.addAll(thinned.noteIds());
 		updateButtonStates();
-		if (thinned.isEmpty()) {
+		int layerCount = project().layers().size();
+		String where = scope.size() == layerCount
+			? "all " + layerCount + " layers"
+			: scope.size() + " of " + layerCount + " layers";
+		if (thinned.chordsOver() == 0) {
 			showResult(Component.literal("No chord is over " + target + " - nothing to thin."));
+			return;
+		}
+		if (thinned.isEmpty()) {
+			showResult(Component.literal(thinned.chordsOver() + " chords are over " + target
+				+ ", but nothing in " + where + " can be spared: every sound there is the last of "
+				+ "its pitch or the last of its instrument. Select more layers to give it room."));
 			return;
 		}
 		// Sounds and notes are different numbers whenever deduplication is on, and saying only one
 		// of them invites the obvious wrong conclusion -- that deleting the selection will take the
 		// count down by however many notes it holds.
-		String summary = thinned.chordsThinned() + " chord"
-			+ (thinned.chordsThinned() == 1 ? "" : "s") + " over " + target + ": "
-			+ thinned.soundsRemoved() + " sounds selected as "
-			+ thinned.noteIds().size() + " notes. Delete to commit, Escape to keep them.";
+		StringBuilder summary = new StringBuilder(thinned.chordsThinned() + " of "
+			+ thinned.chordsOver() + " chords over " + target + " thinned from " + where + ": "
+			+ thinned.soundsRemoved() + " sounds selected as " + thinned.noteIds().size()
+			+ " notes. Delete to commit, Escape to keep them.");
 		if (thinned.chordsStillOver() > 0) {
-			summary += " " + thinned.chordsStillOver() + " cannot reach " + target
-				+ " without losing a pitch or an instrument nothing else plays, and were left alone.";
+			summary.append(' ').append(thinned.chordsStillOver()).append(" still over ")
+				.append(target).append('.');
 		}
-		showResult(Component.literal(summary));
+		// The likeliest way to be surprised by this: run it on the one layer that happened to be
+		// active, get a fraction of the song, and read that as the whole song being done.
+		if (scope.size() < layerCount) {
+			summary.append(" This was ").append(where)
+				.append(" - click the top layer and shift-click the bottom one to thin the whole "
+					+ "song at once.");
+		}
+		showResult(Component.literal(summary.toString()));
 	}
 
 	/**
@@ -1538,7 +1565,8 @@ public final class ComposerScreen extends Screen {
 			case SELECT_OVERLOADED_CHORDS -> "Selects the notes worth least in every chord bigger "
 				+ "than the thinning target, so you can hear the song without them before deleting. "
 				+ "Never the last of a pitch or the last of an instrument, so a chord keeps its "
-				+ "harmony and keeps its drum -- only how thickly they are scored changes.";
+				+ "harmony and keeps its drum -- only how thickly they are scored changes. Takes "
+				+ "from the selected layers only; select them all to thin the whole song.";
 			case SELECT_ALL_NOTES -> "Selects every note on the active layers.";
 			case SELECT_NONE -> "Clears the selection.";
 		};

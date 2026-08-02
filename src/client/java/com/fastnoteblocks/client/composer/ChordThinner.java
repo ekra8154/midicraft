@@ -5,6 +5,7 @@ import com.fastnoteblocks.client.composer.ComposerProject.NoteEvent;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -55,10 +56,13 @@ public final class ChordThinner {
 	 * @param noteIds every note to delete — all of them, not one per sound. With deduplication on,
 	 *     the sounds the limit counts are distinct instrument-and-pitch pairs, so deleting a single
 	 *     copy of a doubled sound removes a note and moves the count by nothing at all.
-	 * @param chordsStillOver chords that ran out of doubling before reaching the target
+	 * @param chordsOver how many chords are above the target at all
+	 * @param chordsThinned how many of those had something that could be taken
+	 * @param chordsStillOver chords that ran out of what they could spare before reaching the target
 	 */
 	public record Result(
 		Set<Long> noteIds,
+		int chordsOver,
 		int chordsThinned,
 		int soundsRemoved,
 		int chordsStillOver
@@ -79,15 +83,35 @@ public final class ChordThinner {
 	private record Voice(String instrument, int midiNote, long distinct) {
 	}
 
+	/** Thins using anything in the composition, which is what the whole song being fixed means. */
 	public static Result thin(ComposerProject project, int target, boolean dedupeIdentical) {
+		return thin(project, target, dedupeIdentical, null);
+	}
+
+	/**
+	 * @param fromLayers layer indices whose notes may be taken, or null for all of them. How big a
+	 *     chord is never depends on this — a chord is as big as every layer going into the build
+	 *     makes it, and so is what counts as its last pitch or its last instrument. All this
+	 *     narrows is where the notes to drop may come from, so that thinning obeys the layer
+	 *     selection the way the rest of the Select menu does.
+	 */
+	public static Result thin(ComposerProject project, int target, boolean dedupeIdentical,
+			Set<Integer> fromLayers) {
 		int cap = Math.max(MIN_TARGET, Math.min(MAX_TARGET, target));
 		Map<Long, Map<Voice, List<NoteEvent>>> byTick = new TreeMap<>();
+		// A sound with a copy in a layer that is not on offer cannot go: removing it would mean
+		// deleting that copy too, and reaching into layers nobody selected is not thinning, it is
+		// editing something else.
+		Map<Long, Set<Voice>> blocked = new HashMap<>();
+		int layerIndex = -1;
 		for (Layer layer : project.layers()) {
+			layerIndex++;
 			// Only what the build would place: a layer left out of the sequence cannot overload a
 			// tick it is not part of, and an out-of-range note is not placed at all.
 			if (!layer.buildEnabled()) {
 				continue;
 			}
+			boolean offered = fromLayers == null || fromLayers.contains(layerIndex);
 			for (NoteEvent note : layer.notes()) {
 				if (!note.isBuildable()) {
 					continue;
@@ -97,18 +121,24 @@ public final class ChordThinner {
 				byTick.computeIfAbsent(note.startTick(), tick -> new LinkedHashMap<>())
 					.computeIfAbsent(voice, key -> new ArrayList<>())
 					.add(note);
+				if (!offered) {
+					blocked.computeIfAbsent(note.startTick(), tick -> new HashSet<>()).add(voice);
+				}
 			}
 		}
 
 		Set<Long> doomed = new LinkedHashSet<>();
+		int chordsOver = 0;
 		int chordsThinned = 0;
 		int soundsRemoved = 0;
 		int chordsStillOver = 0;
-		for (Map<Voice, List<NoteEvent>> chord : byTick.values()) {
+		for (Map.Entry<Long, Map<Voice, List<NoteEvent>>> entry : byTick.entrySet()) {
+			Map<Voice, List<NoteEvent>> chord = entry.getValue();
 			if (chord.size() <= cap) {
 				continue;
 			}
-			chordsThinned++;
+			chordsOver++;
+			Set<Voice> offLimits = blocked.getOrDefault(entry.getKey(), Set.of());
 			Map<Integer, List<Voice>> byPitch = new HashMap<>();
 			Map<String, List<Voice>> byInstrument = new HashMap<>();
 			for (Voice voice : chord.keySet()) {
@@ -118,7 +148,7 @@ public final class ChordThinner {
 			int wanted = chord.size() - cap;
 			int taken = 0;
 			while (taken < wanted) {
-				Voice worst = leastMissed(byPitch, byInstrument, chord);
+				Voice worst = leastMissed(byPitch, byInstrument, chord, offLimits);
 				if (worst == null) {
 					break;
 				}
@@ -130,11 +160,15 @@ public final class ChordThinner {
 				soundsRemoved++;
 				taken++;
 			}
+			if (taken > 0) {
+				chordsThinned++;
+			}
 			if (taken < wanted) {
 				chordsStillOver++;
 			}
 		}
-		return new Result(Set.copyOf(doomed), chordsThinned, soundsRemoved, chordsStillOver);
+		return new Result(Set.copyOf(doomed), chordsOver, chordsThinned, soundsRemoved,
+			chordsStillOver);
 	}
 
 	/**
@@ -157,7 +191,8 @@ public final class ChordThinner {
 	 * notes.</p>
 	 */
 	private static Voice leastMissed(Map<Integer, List<Voice>> byPitch,
-			Map<String, List<Voice>> byInstrument, Map<Voice, List<NoteEvent>> chord) {
+			Map<String, List<Voice>> byInstrument, Map<Voice, List<NoteEvent>> chord,
+			Set<Voice> offLimits) {
 		Comparator<Voice> order = Comparator
 			.<Voice>comparingInt(voice -> -byPitch.get(voice.midiNote()).size())
 			.thenComparingInt(voice -> -byInstrument.get(voice.instrument()).size())
@@ -170,7 +205,7 @@ public final class ChordThinner {
 				continue;
 			}
 			for (Voice voice : onPitch) {
-				if (byInstrument.get(voice.instrument()).size() < 2) {
+				if (byInstrument.get(voice.instrument()).size() < 2 || offLimits.contains(voice)) {
 					continue;
 				}
 				if (best == null || order.compare(voice, best) < 0) {
