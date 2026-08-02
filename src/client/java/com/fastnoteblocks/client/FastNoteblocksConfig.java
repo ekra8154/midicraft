@@ -320,6 +320,7 @@ public final class FastNoteblocksConfig {
 	private int commandsPerTick;
 	private int buildLaneWidth;
 	private int buildLaneFloors;
+	private boolean ultraLaneStartTop;
 	private String importDirectory;
 	private int maxBuildFloors;
 	private String pasteMode;
@@ -438,6 +439,8 @@ public final class FastNoteblocksConfig {
 				instance.buildLaneFloors = clampBuildLaneFloors(
 					stored.buildLaneFloors == null ? DEFAULT_BUILD_LANE_FLOORS : stored.buildLaneFloors
 				);
+				instance.ultraLaneStartTop = stored.ultraLaneStartTop != null
+					&& stored.ultraLaneStartTop;
 				instance.importDirectory = stored.importDirectory;
 				instance.conversionGapPercentile = clampConversionGapPercentile(
 					stored.conversionGapPercentile == null
@@ -1023,6 +1026,21 @@ public final class FastNoteblocksConfig {
 		return buildLaneFloors;
 	}
 
+	/**
+	 * Whether an Ultra compact lane build starts on its top floor and works down.
+	 *
+	 * <p>Off by default, which is where every build made so far started. Remembered between
+	 * pastes like the lane width is, because it is a property of the plot rather than of the
+	 * song -- you start from the top when the ground under the origin is what you cannot dig.</p>
+	 */
+	public boolean ultraLaneStartTop() {
+		return ultraLaneStartTop;
+	}
+
+	public void setUltraLaneStartTop(boolean ultraLaneStartTop) {
+		this.ultraLaneStartTop = ultraLaneStartTop;
+	}
+
 	public void setBuildLaneFloors(int buildLaneFloors) {
 		this.buildLaneFloors = clampBuildLaneFloors(buildLaneFloors);
 	}
@@ -1118,6 +1136,7 @@ public final class FastNoteblocksConfig {
 		config.commandsPerTick = DEFAULT_COMMANDS_PER_TICK;
 		config.buildLaneWidth = DEFAULT_BUILD_LANE_WIDTH;
 		config.buildLaneFloors = DEFAULT_BUILD_LANE_FLOORS;
+		config.ultraLaneStartTop = false;
 		config.maxBuildFloors = DEFAULT_MAX_BUILD_FLOORS;
 		config.pasteMode = "COMPACT_CUBE";
 		return config;
@@ -1275,6 +1294,7 @@ public final class FastNoteblocksConfig {
 		private Integer commandsPerTick;
 		private Integer buildLaneWidth;
 		private Integer buildLaneFloors;
+		private Boolean ultraLaneStartTop;
 		private String importDirectory;
 		private Integer maxBuildFloors;
 		private String pasteMode;
@@ -1330,6 +1350,7 @@ public final class FastNoteblocksConfig {
 			this.commandsPerTick = config.commandsPerTick;
 			this.buildLaneWidth = config.buildLaneWidth;
 			this.buildLaneFloors = config.buildLaneFloors;
+			this.ultraLaneStartTop = config.ultraLaneStartTop;
 			this.importDirectory = config.importDirectory;
 			this.maxBuildFloors = config.maxBuildFloors;
 			this.pasteMode = config.pasteMode;

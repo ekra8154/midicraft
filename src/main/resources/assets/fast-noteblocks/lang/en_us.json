@@ -54,6 +54,8 @@
   "tooltip.fast-noteblocks.sequencing_edit_protection": "While a nonempty sequence is running, disables overlay editing and optionally blocks ordinary right-click changes to existing note blocks and repeaters. Sneak-placement and automatic tuning remain available.",
   "option.fast-noteblocks.auto_select_sequence_block": "Auto-select current step",
   "tooltip.fast-noteblocks.auto_select_sequence_block": "Selects a note block or repeater from your hotbar whenever the current sequence step changes, including manual scrolling.",
+  "option.fast-noteblocks.ultra_lane_start_top": "Ultra lane starts at the top",
+  "tooltip.fast-noteblocks.ultra_lane_start_top": "Where an Ultra compact lane build puts the snake down. Off, the default and what every build so far has done, starts on the bottom floor and climbs. On starts on the top floor and works down. It is the same snake either way -- only where it begins and which way the first wall goes -- but the two are not mirror images: a top start descends first, and a descent is the dearer turn, so a song can come out better one way round than the other. Worth trying when the ground under the origin is what you cannot dig.",
   "option.fast-noteblocks.max_build_floors": "Max cube floors",
   "tooltip.fast-noteblocks.max_build_floors": "Upper limit on how many floors a Compact cube build may stack. The layout picks whichever count comes out closest to a cube, so raising this shrinks the footprint of a long song and keeps more of it within earshot. Each floor is four blocks tall.",
   "option.fast-noteblocks.commands_per_tick": "Build commands per tick",

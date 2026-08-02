@@ -290,11 +290,22 @@ public final class SongBuilder {
 		}
 	}
 
-	record BuildLimits(int maxFloors, int laneWidth, int laneFloors) {
+	/**
+	 * @param startTop whether the serpentine starts on the top floor and works down, rather than on
+	 *     the bottom floor and up. The same snake either way -- it is where it is put down and which
+	 *     way the first wall goes, nothing else -- but the two are not mirror images: the first turn
+	 *     of a top start is a descent, and a descent is the dearer turn, so a song can come out
+	 *     better one way round than the other.
+	 */
+	record BuildLimits(int maxFloors, int laneWidth, int laneFloors, boolean startTop) {
+		BuildLimits(int maxFloors, int laneWidth, int laneFloors) {
+			this(maxFloors, laneWidth, laneFloors, false);
+		}
+
 		static BuildLimits fromConfig() {
 			FastNoteblocksConfig config = FastNoteblocksConfig.get();
 			return new BuildLimits(config.maxBuildFloors(), config.buildLaneWidth(),
-				config.buildLaneFloors());
+				config.buildLaneFloors(), config.ultraLaneStartTop());
 		}
 	}
 
@@ -351,10 +362,17 @@ public final class SongBuilder {
 	private static PastePlan bestUltraPlan(BlockPos origin, Direction forward,
 			List<EventNote> notes, BuildLimits limits, WalkStart start) {
 		Layout plain = Layout.ultra(limits.laneFloors(), origin);
+		// Where the snake is put down. Only when nobody has asked for somewhere in particular: a
+		// seeded walk is a debug build reproducing a fault at a stated floor, and it means it.
+		// The lookahead pair is built inside this rather than beside it, because plain against
+		// lookahead is the same snake either way -- the start decides which snake they both are.
+		WalkStart head = start == WalkStart.HEAD && limits.startTop()
+			? new WalkStart(0, limits.laneFloors() - 1, -1)
+			: start;
 		PastePlan without = createLanePastePlan(origin, forward, notes, limits.laneWidth(),
-			limits.laneFloors(), plain, PasteMode.ULTRA_COMPACT_LANE, start);
+			limits.laneFloors(), plain, PasteMode.ULTRA_COMPACT_LANE, head);
 		PastePlan with = createLanePastePlan(origin, forward, notes, limits.laneWidth(),
-			limits.laneFloors(), plain.withLookahead(), PasteMode.ULTRA_COMPACT_LANE, start);
+			limits.laneFloors(), plain.withLookahead(), PasteMode.ULTRA_COMPACT_LANE, head);
 		boolean won = beats(with, without);
 		if (won) {
 			LOOKAHEAD_WINS++;

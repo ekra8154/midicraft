@@ -157,6 +157,13 @@ public final class FastNoteblocksConfigScreen {
 			.setTooltip(Component.translatable("tooltip.fast-noteblocks.max_build_floors"))
 			.setSaveConsumer(config::setMaxBuildFloors)
 			.build());
+		placement.addEntry(entries.startBooleanToggle(
+				Component.translatable("option.fast-noteblocks.ultra_lane_start_top"),
+				config.ultraLaneStartTop())
+			.setDefaultValue(false)
+			.setTooltip(Component.translatable("tooltip.fast-noteblocks.ultra_lane_start_top"))
+			.setSaveConsumer(config::setUltraLaneStartTop)
+			.build());
 		placement.addEntry(entries.startIntSlider(
 				Component.translatable("option.fast-noteblocks.commands_per_tick"),
 				config.commandsPerTick(),
