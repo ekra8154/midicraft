@@ -59,7 +59,7 @@ public final class ComposerScreen extends Screen {
 	private static final int CONTROL_TOP = MENU_BAR_TOP + 1;
 	private static final int CONTROL_GAP = 4;
 	private static final int CONTROL_PADDING = 10;
-	private static final int LAYER_PANEL_WIDTH = 196;
+
 	private static final int PIANO_WIDTH = 48;
 	/** Tall enough for a bar number with the clock time under it. */
 	private static final int TIMELINE_RULER_HEIGHT = 24;
@@ -78,7 +78,113 @@ public final class ComposerScreen extends Screen {
 	private static final int LAYER_CHIP = 12;
 	private static final int LAYER_INSTRUMENT_X = 26;
 	private static final int LAYER_NAME_X = 45;
-	private static final int LAYER_NAME_RIGHT = 156;
+	/**
+	 * The grab strip on the panel's edge, and the cursor that says it can be grabbed.
+	 *
+	 * <p>The arrows are the whole affordance -- nothing about a flat edge suggests it is draggable,
+	 * and a strip three pixels wide is not going to be found by accident. GLFW's own resize cursor
+	 * rather than something drawn, so it matches every other window edge the player has ever
+	 * dragged.</p>
+	 */
+	private void extractSplitter(GuiGraphicsExtractor graphics) {
+		int edge = layerPanelWidth();
+		boolean hovered = overSplitter(lastMouseX, lastMouseY);
+		boolean lit = hovered || draggingSplitter;
+		graphics.fill(edge - 1, TOOLBAR_HEIGHT, edge, height, lit ? 0xFF8FD3FF : 0xFF2C333D);
+		if (lit) {
+			// Three notches, the usual shorthand for a handle you can take hold of.
+			int middle = TOOLBAR_HEIGHT + (height - TOOLBAR_HEIGHT) / 2;
+			for (int notch = -1; notch <= 1; notch++) {
+				graphics.fill(edge - 3, middle + notch * 5, edge + 2, middle + notch * 5 + 1,
+					0xFFCDE9FF);
+			}
+		}
+		setResizeCursor(lit);
+	}
+
+	private boolean overSplitter(double x, double y) {
+		int edge = layerPanelWidth();
+		return y >= TOOLBAR_HEIGHT && x >= edge - SPLITTER_GRAB && x <= edge + SPLITTER_GRAB;
+	}
+
+	/**
+	 * Swaps in the horizontal-resize cursor while the split is in reach.
+	 *
+	 * <p>Only on the change, and put back on the way out and again when the screen closes: a cursor
+	 * is process-wide state, so leaving it set would follow the player back into the world.</p>
+	 */
+	private void setResizeCursor(boolean wanted) {
+		if (wanted == resizeCursorShown || minecraft == null || minecraft.getWindow() == null) {
+			return;
+		}
+		resizeCursorShown = wanted;
+		long window = minecraft.getWindow().handle();
+		if (!wanted) {
+			GLFW.glfwSetCursor(window, 0L);
+			return;
+		}
+		if (RESIZE_CURSOR == 0L) {
+			RESIZE_CURSOR = GLFW.glfwCreateStandardCursor(GLFW.GLFW_HRESIZE_CURSOR);
+		}
+		if (RESIZE_CURSOR != 0L) {
+			GLFW.glfwSetCursor(window, RESIZE_CURSOR);
+		}
+	}
+
+	/** How wide the layer panel is drawing right now, folded or not. */
+	private int layerPanelWidth() {
+		return config.layerPanelCollapsed()
+			? COLLAPSED_LAYER_PANEL_WIDTH
+			: config.layerPanelWidth();
+	}
+
+	/** Widest a layer's name may draw, which is whatever the panel leaves after the row number. */
+	private int layerNameRight() {
+		return layerRowLayout().nameRight();
+	}
+
+	/**
+	 * What fits on a layer row at the panel's current width.
+	 *
+	 * <p>Parts drop off as it narrows -- the name first, then the build dot, then the state chip --
+	 * until only the instrument and the row number are left, which is also what a folded panel
+	 * shows. One description of the row shared by the drawing and by every hit test, because a
+	 * panel where the chip is painted in one place and clicked in another is worse than one that
+	 * never shrank.</p>
+	 */
+	private LayerRowLayout layerRowLayout() {
+		int panel = layerPanelWidth();
+		boolean chip = panel >= ROW_CHIP_AT;
+		boolean dot = panel >= ROW_DOT_AT;
+		boolean name = panel >= ROW_NAME_AT;
+		int inset = chip ? 8 : 2;
+		return new LayerRowLayout(
+			inset,
+			chip,
+			dot,
+			name,
+			chip ? LAYER_INSTRUMENT_X : inset + 2,
+			LAYER_NAME_X,
+			dot ? panel - 40 : panel - 16,
+			panel - 34,
+			panel - 5);
+	}
+
+	/**
+	 * A folded panel is the narrow end of the same layout, not a blank strip.
+	 *
+	 * <p>Which instrument a layer is and where it sits in the order are the two things you still
+	 * want while it is out of the way -- they are how you find the layer you meant. Everything else
+	 * is what folding is for getting rid of.</p>
+	 */
+	private static final int COLLAPSED_LAYER_PANEL_WIDTH = 30;
+	/** Grab zone either side of the split, and how far left you must drag to fold it away. */
+	private static final int SPLITTER_GRAB = 3;
+	private static final int SPLITTER_COLLAPSE_AT = 34;
+	/** Widths at which a row stops having room for each of its parts, narrowest last. */
+	private static final int ROW_NAME_AT = 116;
+	private static final int ROW_DOT_AT = 96;
+	private static final int ROW_CHIP_AT = 76;
 	private static final int LAYER_LIST_TOP = 48;
 	private static final int MIN_ROW_HEIGHT = 4;
 	private static final int MAX_ROW_HEIGHT = 26;
@@ -324,6 +430,9 @@ public final class ComposerScreen extends Screen {
 	private String profileSummary = "";
 	/** The layer a press landed on, and whether it has moved far enough to be a reorder. */
 	private int layerDragIndex = -1;
+	/** Dragging the split between the layer panel and the roll, and whether the cursor says so. */
+	private boolean draggingSplitter;
+	private boolean resizeCursorShown;
 	private double layerDragStartY;
 	private double layerDragY;
 	private boolean layerDragActive;
@@ -426,6 +535,12 @@ public final class ComposerScreen extends Screen {
 			removeWidget(button);
 		}
 		moveLayerButtons.clear();
+		if (config.layerPanelCollapsed()) {
+			// Nothing to add a layer to while the panel is folded, and a button sixteen pixels wide
+			// would only be something to click by accident.
+			addLayerButton = null;
+			return;
+		}
 		// Pinned to the bottom of the panel: with up to MAX_LAYERS rows the list scrolls, so this
 		// must not ride along with the last row or it drifts off screen.
 		int y = layerListBottom() + 4;
@@ -440,7 +555,7 @@ public final class ComposerScreen extends Screen {
 				layersChanged();
 				rebuildMoveLayerButtons();
 			}
-		}).bounds(8, y, LAYER_PANEL_WIDTH - 16, 18)
+		}).bounds(8, y, layerPanelWidth() - 16, 18)
 			.tooltip(Tooltip.create(Component.literal(
 				"Add a layer and move the current selection into it (maximum "
 					+ ComposerProject.MAX_LAYERS + ")"
@@ -629,6 +744,14 @@ public final class ComposerScreen extends Screen {
 	 * merge across two instruments is not only a tidying-up -- and from the keyboard the only sign
 	 * of that is the sound changing.</p>
 	 */
+	/** Re-lays whatever the panel's width decides: the roll's left edge and the panel's buttons. */
+	private void resizeLayerPanel() {
+		rollX = layerPanelWidth() + PIANO_WIDTH;
+		rollWidth = Math.max(40, width - rollX - 8);
+		layerScroll = Math.min(layerScroll, maxLayerScroll());
+		rebuildMoveLayerButtons();
+	}
+
 	private void mergeSelectedLayers() {
 		List<Integer> merging = selectedLayers.stream()
 			.filter(index -> index >= 0 && index < project().layers().size())
@@ -924,7 +1047,7 @@ public final class ComposerScreen extends Screen {
 	public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
 		long frameStart = profiling ? System.nanoTime() : 0L;
 		updatePlayback();
-		rollX = LAYER_PANEL_WIDTH + PIANO_WIDTH;
+		rollX = layerPanelWidth() + PIANO_WIDTH;
 		rollY = TOOLBAR_HEIGHT + 14 + TIMELINE_RULER_HEIGHT;
 		rollWidth = Math.max(40, width - rollX - 8);
 		rollHeight = Math.max(40, height - rollY - 24);
@@ -2113,10 +2236,17 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private void extractPanels(GuiGraphicsExtractor graphics) {
-		graphics.fill(0, TOOLBAR_HEIGHT, LAYER_PANEL_WIDTH, height, 0xB8101115);
-		graphics.fill(LAYER_PANEL_WIDTH, TOOLBAR_HEIGHT, width, height, 0x99101115);
-		graphics.text(font, "Layers", 8, TOOLBAR_HEIGHT + 4, 0xFF8A9098, false);
-		graphics.enableScissor(0, LAYER_LIST_TOP - 2, LAYER_PANEL_WIDTH, layerListBottom());
+		graphics.fill(0, TOOLBAR_HEIGHT, layerPanelWidth(), height, 0xB8101115);
+		graphics.fill(layerPanelWidth(), TOOLBAR_HEIGHT, width, height, 0x99101115);
+		extractSplitter(graphics);
+		LayerRowLayout row = layerRowLayout();
+		// The header doubles as the fold: an arrow pointing the way the panel would go.
+		graphics.text(font, Component.literal(config.layerPanelCollapsed() ? ">" : "<"),
+			row.inset(), TOOLBAR_HEIGHT + 4, 0xFF8A9098, false);
+		if (row.name()) {
+			graphics.text(font, "Layers", row.inset() + 10, TOOLBAR_HEIGHT + 4, 0xFF8A9098, false);
+		}
+		graphics.enableScissor(0, LAYER_LIST_TOP - 2, layerPanelWidth(), layerListBottom());
 		for (int index = 0; index < project().layers().size(); index++) {
 			int y = layerY(index);
 			int rowHeight = LAYER_ROW_HEIGHT;
@@ -2126,50 +2256,62 @@ public final class ComposerScreen extends Screen {
 			int color = layerColor(index);
 			boolean activeLayer = index == project().activeLayerIndex();
 			boolean selected = selectedLayers.contains(index);
-			graphics.fill(8, y - 2, LAYER_PANEL_WIDTH - 8, y + rowHeight - 2,
+			int left = row.inset();
+			int right = layerPanelWidth() - row.inset();
+			graphics.fill(left, y - 2, right, y + rowHeight - 2,
 				activeLayer ? 0x88425A6B : selected ? 0x88344657 : 0x44252A31);
 			if (selected) {
 				// Unmistakable outline: a tinted background alone reads as noise on a dark panel.
 				int edge = activeLayer ? 0xFF8FD3FF : 0xFF5C93B8;
-				graphics.fill(8, y - 2, LAYER_PANEL_WIDTH - 8, y - 1, edge);
-				graphics.fill(8, y + rowHeight - 3, LAYER_PANEL_WIDTH - 8, y + rowHeight - 2, edge);
-				graphics.fill(LAYER_PANEL_WIDTH - 9, y - 2, LAYER_PANEL_WIDTH - 8, y + rowHeight - 2, edge);
+				graphics.fill(left, y - 2, right, y - 1, edge);
+				graphics.fill(left, y + rowHeight - 3, right, y + rowHeight - 2, edge);
+				graphics.fill(right - 1, y - 2, right, y + rowHeight - 2, edge);
 			}
-			graphics.fill(8, y - 2, LAYER_PANEL_WIDTH - 8, y - 1, activeLayer ? color : 0x66383D44);
-			graphics.fill(8, y + rowHeight - 3, LAYER_PANEL_WIDTH - 8, y + rowHeight - 2,
+			graphics.fill(left, y - 2, right, y - 1, activeLayer ? color : 0x66383D44);
+			graphics.fill(left, y + rowHeight - 3, right, y + rowHeight - 2,
 				activeLayer ? color : 0x88383D44);
-			graphics.fill(8, y - 2, 12, y + rowHeight - 2, color);
+			// The colour stripe is how a layer is recognised once its name is gone, so it stays at
+			// every width -- narrowed to two pixels rather than dropped.
+			graphics.fill(left, y - 2, left + (row.chip() ? 4 : 2), y + rowHeight - 2, color);
 			if (activeLayer) {
-				graphics.fill(12, y, LAYER_PANEL_WIDTH - 10, y + rowHeight - 4, 0x553D444D);
+				graphics.fill(left + 4, y, right - 2, y + rowHeight - 4, 0x553D444D);
 			}
 			Layer layer = project().layers().get(index);
-			// Drawn as a bordered chip with a letter in it. Bare symbols read as decoration on a
-			// row that is mostly decoration already, and this one is the layer's only switch.
 			LayerState state = layerState(index);
-			int chipLeft = LAYER_STATE_X - 2;
-			graphics.fill(chipLeft, y + 2, chipLeft + LAYER_CHIP, y + 2 + LAYER_CHIP, 0x66FFFFFF);
-			graphics.fill(chipLeft + 1, y + 3, chipLeft + LAYER_CHIP - 1, y + 1 + LAYER_CHIP, state.chip);
-			graphics.text(font, Component.literal(state.letter),
-				chipLeft + (LAYER_CHIP - font.width(state.letter)) / 2, y + 4, state.color, false);
+			if (row.chip()) {
+				// Drawn as a bordered chip with a letter in it. Bare symbols read as decoration on a
+				// row that is mostly decoration already, and this one is the layer's only switch.
+				int chipLeft = LAYER_STATE_X - 2;
+				graphics.fill(chipLeft, y + 2, chipLeft + LAYER_CHIP, y + 2 + LAYER_CHIP, 0x66FFFFFF);
+				graphics.fill(chipLeft + 1, y + 3, chipLeft + LAYER_CHIP - 1, y + 1 + LAYER_CHIP,
+					state.chip);
+				graphics.text(font, Component.literal(state.letter),
+					chipLeft + (LAYER_CHIP - font.width(state.letter)) / 2, y + 4, state.color, false);
+			}
 			// The instrument as the block it sounds like, which is the same picture the palette uses
 			// and the only label short enough to leave the name any room.
 			graphics.item(new ItemStack(PreviewInstrument.byId(layer.instrument()).icon()),
-				LAYER_INSTRUMENT_X, y - 1);
-			String mark = selected ? "✓ " : "";
-			String label = mark + layer.name() + "  (" + layer.notes().size() + ")";
-			smallText(graphics, smallFit(label, LAYER_NAME_RIGHT - LAYER_NAME_X), LAYER_NAME_X, y + 5,
-				state == LayerState.HIDDEN ? 0xFF80858C
-					: activeLayer ? 0xFFFFFFFF : selected ? 0xFFE8F4FF : 0xFFD6D8DD);
-			// Filled means this layer goes into the build sequence. Deliberately not the same control
-			// as the state icon beside it: what you hear while working and what gets built are
-			// different questions, and answering them with one switch is how a layer goes missing.
-			graphics.text(font, Component.literal(layer.buildEnabled() ? "●" : "○"),
-				buildDotX(), y + 4, layer.buildEnabled() ? 0xFF5AD46A : 0xFF6A7078, false);
+				row.instrumentX(), y - 1);
+			if (row.name()) {
+				String mark = selected ? "✓ " : "";
+				String label = mark + layer.name() + "  (" + layer.notes().size() + ")";
+				smallText(graphics, smallFit(label, row.nameRight() - row.nameLeft()),
+					row.nameLeft(), y + 5,
+					state == LayerState.HIDDEN ? 0xFF80858C
+						: activeLayer ? 0xFFFFFFFF : selected ? 0xFFE8F4FF : 0xFFD6D8DD);
+			}
+			if (row.dot()) {
+				// Filled means this layer goes into the build sequence. Deliberately not the same
+				// control as the state icon beside it: what you hear while working and what gets
+				// built are different questions, and one switch for both is how a layer goes missing.
+				graphics.text(font, Component.literal(layer.buildEnabled() ? "●" : "○"),
+					row.dotX(), y + 4, layer.buildEnabled() ? 0xFF5AD46A : 0xFF6A7078, false);
+			}
 			// The row number is for pointing at a layer out loud, nothing more, so it sits out at the
 			// edge in the smallest thing that can still be read rather than in front of the name.
 			String ordinal = Integer.toString(index + 1);
-			smallText(graphics, ordinal,
-				LAYER_PANEL_WIDTH - 11 - smallTextWidth(ordinal), y + 5, 0xFF71767E);
+			smallText(graphics, ordinal, row.ordinalRight() - smallTextWidth(ordinal), y + 5,
+				0xFF71767E);
 		}
 		extractLayerDropLine(graphics);
 		graphics.disableScissor();
@@ -2351,7 +2493,7 @@ public final class ComposerScreen extends Screen {
 		int y = insertion >= project().layers().size()
 			? layerY(project().layers().size() - 1) + LAYER_ROW_HEIGHT - 2
 			: layerY(insertion) - 2;
-		graphics.fill(8, y - 1, LAYER_PANEL_WIDTH - 8, y + 1, 0xFF8FD3FF);
+		graphics.fill(8, y - 1, layerPanelWidth() - 8, y + 1, 0xFF8FD3FF);
 	}
 
 	private void extractLayerScrollbar(GuiGraphicsExtractor graphics) {
@@ -2364,7 +2506,11 @@ public final class ComposerScreen extends Screen {
 		int contentHeight = layerContentHeight();
 		int thumbHeight = Math.max(16, trackHeight * trackHeight / Math.max(1, contentHeight));
 		int thumbTop = trackTop + (trackHeight - thumbHeight) * layerScroll / maximum;
-		int x = LAYER_PANEL_WIDTH - 6;
+		if (!layerRowLayout().dot()) {
+			// Narrow, the track would sit on top of the row numbers, which are the last thing left.
+			return;
+		}
+		int x = layerPanelWidth() - 6;
 		graphics.fill(x, trackTop, x + 3, trackTop + trackHeight, 0x40FFFFFF);
 		graphics.fill(x, thumbTop, x + 3, thumbTop + thumbHeight, 0xAAFFFFFF);
 	}
@@ -2483,7 +2629,7 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private long extractPianoRoll(GuiGraphicsExtractor graphics, int mouseX, int mouseY, long mark) {
-		int pianoX = LAYER_PANEL_WIDTH;
+		int pianoX = layerPanelWidth();
 		graphics.enableScissor(pianoX, rollY, rollX + rollWidth, rollY + rollHeight);
 		for (int midi = topMidiNote; midi >= MIN_MIDI_NOTE; midi--) {
 			int y = noteY(midi);
@@ -2998,6 +3144,16 @@ public final class ComposerScreen extends Screen {
 			}
 			return true;
 		}
+		if (event.button() == 0 && overSplitter(event.x(), event.y())) {
+			draggingSplitter = true;
+			return true;
+		}
+		if (event.button() == 0 && overLayerPanelHeader(event.x(), event.y())) {
+			config.setLayerPanelCollapsed(!config.layerPanelCollapsed());
+			FastNoteblocksConfig.save();
+			resizeLayerPanel();
+			return true;
+		}
 		if (toolbarMenu != ToolbarMenu.NONE) {
 			if (handleToolbarMenuClick(event.x(), event.y(), event.button())) {
 				return true;
@@ -3277,6 +3433,18 @@ public final class ComposerScreen extends Screen {
 	public boolean mouseDragged(MouseButtonEvent event, double dx, double dy) {
 		lastMouseX = event.x();
 		lastMouseY = event.y();
+		if (draggingSplitter) {
+			// Past the fold point it snaps shut rather than shrinking to a width no row fits in.
+			// The width it had is left in the config, so unfolding puts it back where it was.
+			if (event.x() < SPLITTER_COLLAPSE_AT) {
+				config.setLayerPanelCollapsed(true);
+			} else {
+				config.setLayerPanelCollapsed(false);
+				config.setLayerPanelWidth((int)Math.round(event.x()));
+			}
+			resizeLayerPanel();
+			return true;
+		}
 		if (painting != LayerPaint.NONE) {
 			// Only the row matters once the gesture is under way. Asking for the cursor to stay
 			// inside a twelve-pixel column while dragging down thirty layers is not a gesture.
@@ -3327,6 +3495,11 @@ public final class ComposerScreen extends Screen {
 
 	@Override
 	public boolean mouseReleased(MouseButtonEvent event) {
+		if (draggingSplitter) {
+			draggingSplitter = false;
+			FastNoteblocksConfig.save();
+			return true;
+		}
 		if (painting != LayerPaint.NONE) {
 			// The sequence summary is only news when the build dots moved; a run of mutes has not
 			// changed what would be built by a single block.
@@ -3377,11 +3550,11 @@ public final class ComposerScreen extends Screen {
 
 	@Override
 	public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
-		if (mouseX < LAYER_PANEL_WIDTH && mouseY >= LAYER_LIST_TOP - 2 && mouseY <= layerListBottom()) {
+		if (mouseX < layerPanelWidth() && mouseY >= LAYER_LIST_TOP - 2 && mouseY <= layerListBottom()) {
 			scrollLayers(scrollY > 0 ? -LAYER_ROW_HEIGHT : LAYER_ROW_HEIGHT);
 			return true;
 		}
-		if (mouseX >= LAYER_PANEL_WIDTH && mouseX < rollX
+		if (mouseX >= layerPanelWidth() && mouseX < rollX
 				&& mouseY >= rollY && mouseY < rollY + rollHeight) {
 			if (controlDown()) {
 				// Vertical zoom: shrink the rows to fit more of the pitch range on screen at once.
@@ -3615,6 +3788,12 @@ public final class ComposerScreen extends Screen {
 		}
 		selectionEndX = lastMouseX;
 		selectionEndY = lastMouseY;
+	}
+
+	@Override
+	public void removed() {
+		setResizeCursor(false);
+		super.removed();
 	}
 
 	@Override
@@ -4199,7 +4378,7 @@ public final class ComposerScreen extends Screen {
 	private int buildDotX() {
 		// Left of where it used to sit, to leave the panel's right edge to the row number. The two
 		// were close enough that the dot's generous hit box swallowed clicks meant for the number.
-		return LAYER_PANEL_WIDTH - 34;
+		return layerRowLayout().dotX();
 	}
 
 	private void startPainting(LayerPaint kind, int fromRow, LayerState state, boolean buildEnabled) {
@@ -4212,7 +4391,8 @@ public final class ComposerScreen extends Screen {
 
 	/** Which row a point is on, whatever part of the row it lands in. */
 	private int layerRowAt(double x, double y) {
-		return x < 8 || x >= LAYER_PANEL_WIDTH - 8 ? -1 : layerRowAtY(y);
+		int inset = layerRowLayout().inset();
+		return x < inset || x >= layerPanelWidth() - inset ? -1 : layerRowAtY(y);
 	}
 
 	/** The row at a height, for gestures that have already decided which column they are in. */
@@ -4226,22 +4406,41 @@ public final class ComposerScreen extends Screen {
 
 	/** The build dot's clickable box, a little larger than the glyph so it is easy to hit. */
 	private int buildDotAt(double x, double y) {
-		return x >= buildDotX() - 4 && x <= buildDotX() + 10 ? layerRowAt(x, y) : -1;
+		return layerRowLayout().dot() && x >= buildDotX() - 4 && x <= buildDotX() + 10
+			? layerRowAt(x, y)
+			: -1;
 	}
 
 	/** The one control that decides whether a layer is soloed, heard, silent or gone. */
 	private int layerStateAt(double x, double y) {
-		return x >= LAYER_STATE_X - 2 && x < LAYER_INSTRUMENT_X ? layerRowAt(x, y) : -1;
+		LayerRowLayout row = layerRowLayout();
+		return row.chip() && x >= LAYER_STATE_X - 2 && x < LAYER_INSTRUMENT_X
+			? layerRowAt(x, y)
+			: -1;
 	}
 
 	private int layerInstrumentAt(double x, double y) {
-		return x >= LAYER_INSTRUMENT_X && x < LAYER_INSTRUMENT_X + 17 ? layerRowAt(x, y) : -1;
+		LayerRowLayout row = layerRowLayout();
+		return x >= row.instrumentX() && x < row.instrumentX() + 17 ? layerRowAt(x, y) : -1;
 	}
 
-	/** The part of a row that selects and drags it: everything the two icons do not claim. */
+	/**
+	 * The part of a row that selects and drags it: everything the two icons do not claim.
+	 *
+	 * <p>Narrow, the instrument icon claims most of the row, so what is left is the row number at
+	 * the far edge -- still enough to pick a layer with, which is the point of keeping the number.</p>
+	 */
 	private int layerHeaderAt(double x, double y) {
-		boolean onIcons = x >= LAYER_STATE_X - 2 && x < LAYER_NAME_X - 2;
-		return !onIcons && x < LAYER_PANEL_WIDTH - 10 ? layerRowAt(x, y) : -1;
+		LayerRowLayout row = layerRowLayout();
+		int iconsFrom = row.chip() ? LAYER_STATE_X - 2 : row.instrumentX();
+		boolean onIcons = x >= iconsFrom && x < row.instrumentX() + 17;
+		return !onIcons && x < layerPanelWidth() - 2 ? layerRowAt(x, y) : -1;
+	}
+
+	/** The strip above the list, which folds the panel away and brings it back. */
+	private boolean overLayerPanelHeader(double x, double y) {
+		return x >= 0 && x < layerPanelWidth()
+			&& y >= TOOLBAR_HEIGHT && y < LAYER_LIST_TOP - 2;
 	}
 
 	/** Which gap between rows a dragged layer is hovering over, counted as an insertion point. */
@@ -4259,7 +4458,7 @@ public final class ComposerScreen extends Screen {
 		cancelLayerRename();
 		editingLayer = layerIndex;
 		int y = layerY(layerIndex);
-		layerNameBox = new EditBox(font, LAYER_NAME_X - 3, y - 2, LAYER_NAME_RIGHT - LAYER_NAME_X + 6,
+		layerNameBox = new EditBox(font, LAYER_NAME_X - 3, y - 2, layerNameRight() - LAYER_NAME_X + 6,
 			LAYER_ROW_HEIGHT, Component.literal("Layer name"));
 		layerNameBox.setMaxLength(48);
 		layerNameBox.setValue(project().layers().get(layerIndex).name());
@@ -4660,11 +4859,18 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private static final String SUBMENU_ARROW = "▸";
+	/** Created once and kept: GLFW cursors are process-wide and there is no reason for two. */
+	private static long RESIZE_CURSOR;
 	/** Air around a submenu's rule, so the row after it does not sit on the line. */
 	private static final int SUBMENU_DIVIDER_GAP = 5;
 
 	/** A menu's title in the bar, and the span of it that reacts to the cursor. */
 	private record MenuTitle(ToolbarMenu menu, String label, int left, int right) {
+	}
+
+	/** Where each part of a layer row goes, and whether the panel is wide enough to have it. */
+	private record LayerRowLayout(int inset, boolean chip, boolean dot, boolean name,
+			int instrumentX, int nameLeft, int nameRight, int dotX, int ordinalRight) {
 	}
 
 	/** One row of an open menu: a thing to do, a setting to cycle, or a submenu to open. */
