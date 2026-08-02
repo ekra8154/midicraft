@@ -719,6 +719,14 @@ public final class SongBuilder {
 			if (layout.ultra() && wantsTurn && canTurn && columns < 0) {
 				placements.breached(-columns);
 			}
+			// Whether the chord this lane is ending on is a head. That is the one case the stacked
+			// head was added for -- a lane handing over on a bus of twenty-one is what strands it --
+			// so if this stays near zero the change is not reaching the problem at all.
+			if (layout.ultra() && wantsTurn && canTurn) {
+				placements.padded(endsOnBus(lastStyle)
+					? (lastStyle == ChordStyle.STACKED_HEAD ? "laneEndedOnHead" : "laneEndedOnBus")
+					: "laneEndedOnBlock");
+			}
 			// And the other side of the same measurement. A lane that hands over short of its wall
 			// leaves that many columns of corridor holding nothing, and puts its staircase or its
 			// sideways run somewhere no other lane's is -- which is the recessed turn that reaches
@@ -3349,9 +3357,13 @@ public final class SongBuilder {
 		// can ask exactly the same question. When the walk converted here on a clash the planner could
 		// not see, the two disagreed about how long the chord was, and a lane measured for two cells
 		// that got five came to rest three past its wall.
+		// Counted apart from the other room drops, because this is the question the whole experiment
+		// turns on: a head wants three columns before its bus even starts, and the lanes that breach
+		// are the ones short of room. If the head is being taken away exactly where it was meant to
+		// help, it is only reshuffling the packing everywhere else.
 		if (style == ChordStyle.STACKED_HEAD
 				&& roomAhead < stackedHeadLength(event.notes()) + 1) {
-			placements.padded("busForRoom");
+			placements.padded("headTooNearWall");
 			style = ChordStyle.BUS;
 		}
 		if (style.stacked() && roomAhead < STACKED_CELLS + 1) {

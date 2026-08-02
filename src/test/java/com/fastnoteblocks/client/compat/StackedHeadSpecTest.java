@@ -1,5 +1,6 @@
 package com.fastnoteblocks.client.compat;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
@@ -45,39 +46,49 @@ class StackedHeadSpecTest {
 			new SongBuilder.BuildLimits(4, width, floors), start);
 	}
 
+	/**
+	 * @param turns whether the spec is advertised as reaching a wall and turning. Asserted, because
+	 *     the first version of this file counted modules and nothing else -- and the spec sold as
+	 *     "a big chord walking into a descent" never reached its wall at all. ekran pasted it and
+	 *     read that off the blocks in about a second: no level change, and the only glass in it was
+	 *     the module's own carrying cell rather than a climb.
+	 */
 	private static void headsIn(String label, String spec, int width, int floors, String shape,
-			int columnsToWall) {
+			int columnsToWall, boolean turns) {
 		SongBuilder.PastePlan plan = build(spec, width, floors, shape, columnsToWall);
 		int modules = stackedModules(plan);
 		System.out.println("SPEC " + label + " :: " + modules + " stacked modules, "
-			+ plan.width() + " long, " + plan.commands().size() + " blocks");
+			+ plan.turns().size() + " turns, " + plan.width() + " long, "
+			+ plan.commands().size() + " blocks");
 		for (String fault : plan.faults()) {
 			System.out.println("  FAULT " + fault);
 		}
 		assertTrue(modules > 0, label + " was supposed to build a stacked head");
+		assertEquals(turns, !plan.turns().isEmpty(),
+			label + " was supposed to " + (turns ? "reach its wall and turn" : "stop short"));
 	}
 
 	/** One chord of ten, on its own, with nothing else to move it about. */
 	@Test
 	void oneChordOfTen() {
-		headsIn("24 2 flat 20 :: 10", "10", 24, 2, "flat", 20);
+		headsIn("24 2 flat 20 :: 10", "10", 24, 2, "flat", 20, false);
 	}
 
-	/** The shape the breaches are made of: a big chord walking into a descent. */
+	/** The shape the breaches are made of: a big chord walking into a descent it actually takes. */
 	@Test
 	void aBigChordIntoADescent() {
-		headsIn("24 3 down 20 :: 2 24", "2 24", 24, 3, "down", 20);
+		headsIn("16 3 down 10 :: 10 24", "10 24", 16, 3, "down", 10, true);
 	}
 
 	/** All four instruments, because an all-harp chord is not what a song holds. */
 	@Test
 	void withRealInstruments() {
-		headsIn("24 2 flat 20 :: 12:2b2s8p", "12:2b2s8p", 24, 2, "flat", 20);
+		headsIn("24 2 flat 20 :: 12:2b2s8p", "12:2b2s8p", 24, 2, "flat", 20, false);
 	}
 
 	/** A run of them, so the modules can be compared against each other down one lane. */
 	@Test
 	void aRunOfThem() {
-		headsIn("32 2 flat 28 :: 10x4@6", "10x4@6", 32, 2, "flat", 28);
+		headsIn("32 2 flat 28 :: 10x4@6", "10x4@6", 32, 2, "flat", 28, false);
 	}
 }
