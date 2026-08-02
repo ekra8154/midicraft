@@ -37,9 +37,24 @@ import org.lwjgl.glfw.GLFW;
 import org.slf4j.Logger;
 
 public final class ComposerScreen extends Screen {
-	private static final int TOOLBAR_HEIGHT = 34;
-	/** Right edge of the toolbar's buttons: File..Build, Play, Snap and the speed slider. */
-	private static final int TOOLBAR_CONTROLS_RIGHT = 8 + 6 * 58 + 82 + 94;
+	private static final int TOOLBAR_HEIGHT = 22;
+	/**
+	 * The menus, as a menu bar rather than a row of buttons.
+	 *
+	 * <p>Five framed buttons twenty pixels tall and fifty-eight apart is a lot of furniture for
+	 * five words, and a framed button that opens a nested menu is an odd object -- the frame says
+	 * "press me", the arrow says "there is more inside". Drawn titles with a hover highlight say
+	 * the second thing on their own, and give back twelve pixels of height to the roll.</p>
+	 */
+	private static final ToolbarMenu[] MENU_BAR = {
+		ToolbarMenu.FILE, ToolbarMenu.EDIT, ToolbarMenu.IMPORT, ToolbarMenu.SELECT, ToolbarMenu.BUILD
+	};
+	private static final int MENU_BAR_LEFT = 6;
+	private static final int MENU_BAR_TOP = 3;
+	private static final int MENU_BAR_ROW_HEIGHT = 16;
+	private static final int MENU_TITLE_PADDING = 8;
+	/** Where a menu's panel hangs from, just under the bar. */
+	private static final int MENU_PANEL_TOP = TOOLBAR_HEIGHT + 2;
 	private static final int LAYER_PANEL_WIDTH = 196;
 	private static final int PIANO_WIDTH = 48;
 	/** Tall enough for a bar number with the clock time under it. */
@@ -220,6 +235,23 @@ public final class ComposerScreen extends Screen {
 	private int contextMenuY;
 	private ToolbarMenu toolbarMenu = ToolbarMenu.NONE;
 	private int toolbarMenuX;
+	/** The submenu standing open off a row of the current menu, and where it was drawn. */
+	private ToolbarSubmenu openSubmenu;
+	private int submenuLeft;
+	private int submenuTop;
+	private int submenuRight;
+	private int submenuBottom;
+	/**
+	 * The parent row the open submenu hangs off.
+	 *
+	 * <p>Kept apart from {@link #submenuTop}, which is where the panel actually landed after being
+	 * nudged to fit on screen. Feeding that back in as the anchor made the nudge compound: the
+	 * panel climbed two pixels every frame the cursor was inside it, walked out from under the
+	 * cursor, and vanished the moment it stopped being hovered.</p>
+	 */
+	private int submenuAnchorY;
+	/** Right edge of the bar's controls, which is where the composition name starts. */
+	private int toolbarControlsRight = 320;
 	private long lastScaleChangeAt;
 	private Component toast;
 	private long toastShownAt;
@@ -332,42 +364,23 @@ public final class ComposerScreen extends Screen {
 		rollY = TOOLBAR_HEIGHT + 14 + TIMELINE_RULER_HEIGHT;
 		rollHeight = Math.max(40, height - rollY - 24);
 		centerMinecraftRange();
-		int x = 8;
-		addRenderableWidget(Button.builder(Component.literal("File"), button -> toggleToolbarMenu(ToolbarMenu.FILE, 8))
-			.bounds(x, 7, 54, 20).build());
-		x += 58;
-		addRenderableWidget(Button.builder(Component.literal("Edit"), button -> toggleToolbarMenu(ToolbarMenu.EDIT, 66))
-			.bounds(x, 7, 54, 20).build());
-		x += 58;
-		addRenderableWidget(Button.builder(Component.literal("Import"), button -> toggleToolbarMenu(ToolbarMenu.IMPORT, 124))
-			.bounds(x, 7, 54, 20)
-			.tooltip(Tooltip.create(Component.literal("Settings applied when importing MIDI and NBS songs")))
-			.build());
-		x += 58;
-		addRenderableWidget(Button.builder(Component.literal("Select"), button -> toggleToolbarMenu(ToolbarMenu.SELECT, 182))
-			.bounds(x, 7, 54, 20)
-			.tooltip(Tooltip.create(Component.literal("Select every note with a given build problem")))
-			.build());
-		x += 58;
-		addRenderableWidget(Button.builder(Component.literal("Build"), button -> toggleToolbarMenu(ToolbarMenu.BUILD, 240))
-			.bounds(x, 7, 54, 20)
-			.tooltip(Tooltip.create(Component.literal(
-				"Move layers into the build sequence, or paste them with commands")))
-			.build());
-		x += 58;
+		// The menus are drawn, not built: see extractMenuBar. Only the three controls are widgets,
+		// because they carry state you read off them rather than opening anything.
+		int x = menuTitles().getLast().right() + 10;
 		playButton = addRenderableWidget(Button.builder(playLabel(), button -> togglePlayback())
-			.bounds(x, 7, 54, 20)
+			.bounds(x, MENU_BAR_TOP, 44, MENU_BAR_ROW_HEIGHT)
 			.tooltip(Tooltip.create(Component.literal("Preview all unmuted layers")))
 			.build());
-		x += 58;
+		x += 48;
 		snapButton = addRenderableWidget(Button.builder(snapLabel(), button -> cycleSnap())
-			.bounds(x, 7, 78, 20)
+			.bounds(x, MENU_BAR_TOP, 68, MENU_BAR_ROW_HEIGHT)
 			.tooltip(Tooltip.create(Component.literal("Grid used when adding or dragging notes")))
 			.build());
-		x += 82;
+		x += 72;
 		delayScaleSlider = addRenderableWidget(new DelayScaleSlider(
-			x, 7, 94, 20, project().speedQuarters(), this::setDelayScale
+			x, MENU_BAR_TOP, 84, MENU_BAR_ROW_HEIGHT, project().speedQuarters(), this::setDelayScale
 		));
+		toolbarControlsRight = x + 84;
 		delayScaleSlider.setTooltip(Tooltip.create(Component.literal(
 			"Playback speed, 0.25x to 8.00x. Higher is faster. Saving to the sequence bakes this "
 				+ "into the delays, so the build runs at the speed you hear here."
@@ -910,9 +923,12 @@ public final class ComposerScreen extends Screen {
 		extractStatus(graphics);
 		extractToast(graphics, mouseX, mouseY);
 		mark = phase(PHASE_STATUS, mark);
+		hoveredDescription = "";
+		// The bar last of the backgrounds and first of the foregrounds: it has to cover the roll,
+		// and its own controls and the composition name have to sit on top of it.
+		extractMenuBar(graphics, mouseX, mouseY);
 		super.extractRenderState(graphics, mouseX, mouseY, partialTick);
 		mark = phase(PHASE_WIDGETS, mark);
-		hoveredDescription = "";
 		extractInstrumentMenu(graphics, mouseX, mouseY);
 		extractContextMenu(graphics, mouseX, mouseY);
 		extractLayerMenu(graphics, mouseX, mouseY);
@@ -1088,114 +1104,308 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private void extractToolbarMenu(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
-		List<String> rows = toolbarRows();
+		List<MenuRow> rows = menuRows(toolbarMenu);
 		if (rows.isEmpty()) {
+			openSubmenu = null;
 			return;
 		}
-		int menuWidth = toolbarMenuWidth();
-		int menuY = 28;
+		int menuWidth = menuWidth(rows, toolbarMenu == ToolbarMenu.IMPORT
+			? IMPORT_MENU_WIDTH : TOOLBAR_MENU_WIDTH, toolbarMenuX);
 		int menuHeight = rows.size() * TOOLBAR_MENU_ROW_HEIGHT + 4;
-		graphics.fill(toolbarMenuX, menuY, toolbarMenuX + menuWidth, menuY + menuHeight, 0xF0101115);
-		graphics.fill(toolbarMenuX, menuY, toolbarMenuX + menuWidth, menuY + 1, 0xFFAAAAAA);
+		// Whether the cursor is in the open submenu has to be settled before the parent rows get a
+		// say, or reaching across into the submenu would count as leaving the row that opened it.
+		boolean insideSubmenu = openSubmenu != null && mouseX >= submenuLeft && mouseX < submenuRight
+			&& mouseY >= submenuTop && mouseY < submenuBottom;
+		graphics.fill(toolbarMenuX, MENU_PANEL_TOP, toolbarMenuX + menuWidth,
+			MENU_PANEL_TOP + menuHeight, 0xF0101115);
+		graphics.fill(toolbarMenuX, MENU_PANEL_TOP, toolbarMenuX + menuWidth,
+			MENU_PANEL_TOP + 1, 0xFFAAAAAA);
+		ToolbarSubmenu wanted = insideSubmenu ? openSubmenu : null;
+		int wantedAnchorY = submenuAnchorY;
 		for (int index = 0; index < rows.size(); index++) {
-			int rowY = menuY + 2 + index * TOOLBAR_MENU_ROW_HEIGHT;
-			boolean enabled = toolbarRowEnabled(index);
-			boolean hovered = enabled && mouseX >= toolbarMenuX
-				&& mouseX < toolbarMenuX + menuWidth
+			MenuRow row = rows.get(index);
+			int rowY = MENU_PANEL_TOP + 2 + index * TOOLBAR_MENU_ROW_HEIGHT;
+			boolean enabled = rowEnabled(row);
+			boolean hovered = mouseX >= toolbarMenuX && mouseX < toolbarMenuX + menuWidth
 				&& mouseY >= rowY && mouseY < rowY + TOOLBAR_MENU_ROW_HEIGHT;
-			if (hovered) {
+			boolean held = row.submenu() != null && row.submenu() == openSubmenu;
+			if (hovered && enabled || held) {
 				graphics.fill(toolbarMenuX + 2, rowY, toolbarMenuX + menuWidth - 2,
-					rowY + TOOLBAR_MENU_ROW_HEIGHT, 0xFF356070);
+					rowY + TOOLBAR_MENU_ROW_HEIGHT, held && !hovered ? 0xFF24414C : 0xFF356070);
 			}
-			if (toolbarMenu != ToolbarMenu.IMPORT && index < toolbarActions().length) {
-				String hint = toolbarShortcut(toolbarActions()[index]);
+			if (hovered && enabled) {
+				hoveredDescription = rowDescription(row);
+				if (row.submenu() != null) {
+					// Opens on hover: the arrow is a promise that pointing at it is enough.
+					wanted = row.submenu();
+					wantedAnchorY = rowY;
+				}
+			}
+			if (row.submenu() != null) {
+				graphics.text(font, SUBMENU_ARROW, toolbarMenuX + menuWidth - 10, rowY + 5,
+					enabled ? 0xFFAAB2BD : 0xFF5A5F66, false);
+			} else if (row.action() != null) {
+				String hint = toolbarShortcut(row.action());
 				if (!hint.isEmpty()) {
 					graphics.text(font, Component.literal(hint),
 						toolbarMenuX + menuWidth - 6 - font.width(hint), rowY + 5, 0xFF6E7480, false);
 				}
 			}
-			if (hovered) {
-				hoveredDescription = toolbarMenu == ToolbarMenu.IMPORT
-					? (index < ImportSetting.values().length
-						? importSettingTooltip(ImportSetting.values()[index])
-						: "")
-					: (index < toolbarActions().length
-						? toolbarActionTooltip(toolbarActions()[index])
-						: "");
-			}
-			graphics.text(font, Component.literal(rows.get(index)), toolbarMenuX + 6, rowY + 5,
+			graphics.text(font, Component.literal(rowLabel(row)), toolbarMenuX + 6, rowY + 5,
 				enabled ? 0xFFFFFFFF : 0xFF777777, false);
 		}
 		if (toolbarMenu == ToolbarMenu.IMPORT) {
 			graphics.text(font, Component.literal("Left-click cycles, right-click reverses"),
-				toolbarMenuX + 6, menuY + menuHeight + 3, 0xFF888888, false);
+				toolbarMenuX + 6, MENU_PANEL_TOP + menuHeight + 3, 0xFF888888, false);
 		}
+		openSubmenu = wanted;
+		if (openSubmenu == null) {
+			submenuLeft = submenuRight = submenuTop = submenuBottom = 0;
+			return;
+		}
+		submenuAnchorY = wantedAnchorY;
+		extractSubmenu(graphics, mouseX, mouseY, toolbarMenuX + menuWidth - 2, submenuAnchorY);
+	}
+
+	/** Where a submenu row starts, which the divider's gap shifts everything after it by. */
+	private int submenuRowTop(int panelTop, int index) {
+		int gap = openSubmenu.dividerBefore >= 0 && index >= openSubmenu.dividerBefore
+			? SUBMENU_DIVIDER_GAP
+			: 0;
+		return panelTop + 2 + index * TOOLBAR_MENU_ROW_HEIGHT + gap;
+	}
+
+	/** The second panel, hanging off the row that opened it. */
+	private void extractSubmenu(GuiGraphicsExtractor graphics, int mouseX, int mouseY,
+			int left, int anchorY) {
+		List<MenuRow> rows = new ArrayList<>();
+		for (ToolbarAction action : openSubmenu.actions) {
+			rows.add(MenuRow.of(action));
+		}
+		int panelWidth = 78;
+		for (MenuRow row : rows) {
+			String detail = submenuRowDetail(row.action());
+			panelWidth = Math.max(panelWidth, font.width(openSubmenu.labelFor(row.action()))
+				+ (detail.isEmpty() ? 14 : font.width(detail) + 26));
+		}
+		panelWidth = Math.min(panelWidth, Math.max(60, width - left - 4));
+		// Flipped to the near side rather than run off the edge of the screen.
+		if (left + panelWidth > width - 4) {
+			left = Math.max(0, toolbarMenuX - panelWidth + 2);
+		}
+		int panelHeight = rows.size() * TOOLBAR_MENU_ROW_HEIGHT + 4
+			+ (openSubmenu.dividerBefore >= 0 ? SUBMENU_DIVIDER_GAP : 0);
+		// Always off the anchor, never off wherever the panel ended up last frame.
+		int top = Math.max(MENU_PANEL_TOP, Math.min(anchorY - 2, height - panelHeight - 4));
+		submenuLeft = left;
+		submenuTop = top;
+		submenuRight = left + panelWidth;
+		submenuBottom = top + panelHeight;
+		graphics.fill(left, top, left + panelWidth, top + panelHeight, 0xF0141A20);
+		graphics.fill(left, top, left + panelWidth, top + 1, 0xFFAAAAAA);
+		for (int index = 0; index < rows.size(); index++) {
+			MenuRow row = rows.get(index);
+			int rowY = submenuRowTop(top, index);
+			if (index == openSubmenu.dividerBefore) {
+				graphics.fill(left + 6, rowY - SUBMENU_DIVIDER_GAP / 2,
+					left + panelWidth - 6, rowY - SUBMENU_DIVIDER_GAP / 2 + 1, 0xFF3A424D);
+			}
+			boolean enabled = rowEnabled(row);
+			boolean hovered = enabled && mouseX >= left && mouseX < left + panelWidth
+				&& mouseY >= rowY && mouseY < rowY + TOOLBAR_MENU_ROW_HEIGHT;
+			if (hovered) {
+				graphics.fill(left + 2, rowY, left + panelWidth - 2,
+					rowY + TOOLBAR_MENU_ROW_HEIGHT, 0xFF356070);
+				hoveredDescription = rowDescription(row);
+			}
+			String detail = submenuRowDetail(row.action());
+			if (!detail.isEmpty()) {
+				graphics.text(font, Component.literal(detail),
+					left + panelWidth - 6 - font.width(detail), rowY + 5,
+					enabled ? 0xFF8A929E : 0xFF5A5F66, false);
+			}
+			graphics.text(font, Component.literal(openSubmenu.labelFor(row.action())),
+				left + 6, rowY + 5, enabled ? 0xFFFFFFFF : 0xFF777777, false);
+		}
+	}
+
+	/** Where each menu's title sits in the bar, measured off the font rather than a fixed pitch. */
+	private List<MenuTitle> menuTitles() {
+		List<MenuTitle> titles = new ArrayList<>(MENU_BAR.length);
+		int x = MENU_BAR_LEFT;
+		for (ToolbarMenu menu : MENU_BAR) {
+			String label = menuBarLabel(menu);
+			int wide = font.width(label) + 2 * MENU_TITLE_PADDING;
+			titles.add(new MenuTitle(menu, label, x, x + wide));
+			x += wide;
+		}
+		return titles;
+	}
+
+	private static String menuBarLabel(ToolbarMenu menu) {
+		return switch (menu) {
+			case FILE -> "File";
+			case EDIT -> "Edit";
+			case IMPORT -> "Import";
+			case SELECT -> "Select";
+			case BUILD -> "Build";
+			case NONE -> "";
+		};
+	}
+
+	private void extractMenuBar(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
+		graphics.fill(0, 0, width, TOOLBAR_HEIGHT, 0xE0141821);
+		graphics.fill(0, TOOLBAR_HEIGHT - 1, width, TOOLBAR_HEIGHT, 0xFF2C333D);
+		for (MenuTitle title : menuTitles()) {
+			boolean open = toolbarMenu == title.menu();
+			boolean hovered = mouseY >= MENU_BAR_TOP && mouseY < MENU_BAR_TOP + MENU_BAR_ROW_HEIGHT
+				&& mouseX >= title.left() && mouseX < title.right();
+			if (open || hovered) {
+				graphics.fill(title.left(), MENU_BAR_TOP, title.right(),
+					MENU_BAR_TOP + MENU_BAR_ROW_HEIGHT, open ? 0xFF2B4C5A : 0x40FFFFFF);
+			}
+			graphics.text(font, title.label(), title.left() + MENU_TITLE_PADDING, MENU_BAR_TOP + 4,
+				open ? 0xFFCDE9FF : 0xFFD6D8DD, false);
+		}
+		extractCompositionName(graphics);
+	}
+
+	/** The menu a point in the bar would open, or null. */
+	private ToolbarMenu menuTitleAt(double x, double y) {
+		if (y < MENU_BAR_TOP || y >= MENU_BAR_TOP + MENU_BAR_ROW_HEIGHT) {
+			return null;
+		}
+		for (MenuTitle title : menuTitles()) {
+			if (x >= title.left() && x < title.right()) {
+				return title.menu();
+			}
+		}
+		return null;
+	}
+
+	/** Menu width from the widest row it holds, including its shortcut hint or submenu arrow. */
+	private int menuWidth(List<MenuRow> rows, int floor, int left) {
+		int widest = floor;
+		for (MenuRow row : rows) {
+			int tail = row.submenu() != null
+				? font.width(SUBMENU_ARROW) + 16
+				: row.action() != null && !toolbarShortcut(row.action()).isEmpty()
+					? font.width(toolbarShortcut(row.action())) + 30
+					: 14;
+			widest = Math.max(widest, font.width(rowLabel(row)) + tail);
+		}
+		return Math.min(widest, Math.max(60, width - left - 4));
 	}
 
 	/**
-	 * Menu width from the widest row it holds.
+	 * The rows of a menu, in order.
 	 *
-	 * <p>Fixed widths were fine while every label was two words. Labels that count what they will
-	 * act on are not a fixed length, and were running past the edge of the panel they were drawn
-	 * in.</p>
+	 * <p>Quantize and End are submenus because their members differ only in their last word, and a
+	 * list of four rows that all begin "Quantize to" is a list you have to read rather than scan.
+	 * Everything else stays where it is: a submenu costs a second movement to reach, which is only
+	 * worth paying where it buys the parent menu back four rows of height.</p>
 	 */
-	private int toolbarMenuWidth() {
-		int widest = toolbarMenu == ToolbarMenu.IMPORT ? IMPORT_MENU_WIDTH : TOOLBAR_MENU_WIDTH;
-		List<String> rows = toolbarRows();
-		ToolbarAction[] actions = toolbarActions();
-		for (int index = 0; index < rows.size(); index++) {
-			int hint = toolbarMenu == ToolbarMenu.IMPORT || index >= actions.length
-				? 0
-				: font.width(toolbarShortcut(actions[index]));
-			widest = Math.max(widest, font.width(rows.get(index)) + (hint == 0 ? 14 : hint + 30));
-		}
-		return Math.min(widest, Math.max(60, width - toolbarMenuX - 4));
-	}
-
-	private List<String> toolbarRows() {
-		ToolbarAction[] actions = toolbarActions();
-		if (toolbarMenu == ToolbarMenu.IMPORT) {
-			List<String> rows = new ArrayList<>();
-			for (ImportSetting setting : ImportSetting.values()) {
-				rows.add(importSettingLabel(setting));
+	private List<MenuRow> menuRows(ToolbarMenu menu) {
+		List<MenuRow> rows = new ArrayList<>();
+		switch (menu) {
+			case FILE -> addActionRows(rows, ToolbarAction.FILE_ACTIONS);
+			case EDIT -> {
+				addActionRows(rows, ToolbarAction.EDIT_ACTIONS);
+				rows.add(4, MenuRow.of(ToolbarSubmenu.QUANTIZE));
+				rows.add(MenuRow.of(ToolbarSubmenu.END));
 			}
-			return rows;
-		}
-		List<String> rows = new ArrayList<>(actions.length);
-		for (ToolbarAction action : actions) {
-			rows.add(toolbarRowLabel(action)
-				+ (selectedNotes.isEmpty() || !action.scopeable ? "" : " (selection)"));
+			case BUILD -> addActionRows(rows, ToolbarAction.BUILD_ACTIONS);
+			case SELECT -> addActionRows(rows, ToolbarAction.SELECT_ACTIONS);
+			case IMPORT -> {
+				for (ImportSetting setting : ImportSetting.values()) {
+					rows.add(MenuRow.of(setting));
+				}
+			}
+			case NONE -> {
+			}
 		}
 		return rows;
 	}
 
-	private boolean toolbarRowEnabled(int index) {
-		if (toolbarMenu == ToolbarMenu.IMPORT) {
+	private void addActionRows(List<MenuRow> rows, ToolbarAction[] actions) {
+		for (ToolbarAction action : actions) {
+			rows.add(MenuRow.of(action));
+		}
+	}
+
+	private String rowLabel(MenuRow row) {
+		if (row.submenu() != null) {
+			return row.submenu().label;
+		}
+		if (row.setting() != null) {
+			return importSettingLabel(row.setting());
+		}
+		return toolbarRowLabel(row.action())
+			+ (selectedNotes.isEmpty() || !row.action().scopeable ? "" : " (selection)");
+	}
+
+	private boolean rowEnabled(MenuRow row) {
+		if (row.setting() != null) {
 			return true;
 		}
-		ToolbarAction[] actions = toolbarActions();
-		return index >= 0 && index < actions.length && toolbarActionEnabled(actions[index]);
+		if (row.submenu() == null) {
+			return toolbarActionEnabled(row.action());
+		}
+		// A submenu is worth opening while any one thing inside it can be done.
+		for (ToolbarAction action : row.submenu().actions) {
+			if (toolbarActionEnabled(action)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * How wide a step each quantize row snaps to, in song ticks, for the column on the right.
+	 *
+	 * <p>The fractions are note values -- 1/4 is a quarter note, which at 480 ticks to the quarter
+	 * is 480 ticks and the <em>coarsest</em> row here, not the finest. Read as "a quarter of a
+	 * repeater tick" they say the opposite of what they mean, and the repeater row looks like it
+	 * ought to be the 1 they all divide. It is not a unit any of them divide: across this library
+	 * its grid runs from 48 ticks to 480, finer than a 1/16 on one song and a whole 1/4 on
+	 * another. Printing the tick counts settles all of it without anybody having to know the
+	 * convention -- the numbers are directly comparable and each is what that row will actually
+	 * snap to.</p>
+	 */
+	private String submenuRowDetail(ToolbarAction action) {
+		long ticks = switch (action) {
+			case QUANTIZE_QUARTER -> project().ppq();
+			case QUANTIZE_EIGHTH -> Math.max(1, project().ppq() / 2);
+			case QUANTIZE_SIXTEENTH -> Math.max(1, project().ppq() / 4);
+			// The grid the operation will really use, not the width of one repeater tick. Those
+			// differ whenever a repeater tick is not a whole number of song ticks, and quoting the
+			// second one here said 1/8 for a song whose repeater grid was nothing of the kind.
+			case QUANTIZE_REPEATERS -> project().repeaterGridTicks();
+			default -> 0L;
+		};
+		return ticks == 0L ? "" : Long.toString(ticks);
+	}
+
+	private String rowDescription(MenuRow row) {
+		if (row.submenu() != null) {
+			return row.submenu().description;
+		}
+		return row.setting() != null
+			? importSettingTooltip(row.setting())
+			: toolbarActionTooltip(row.action());
 	}
 
 	private void toggleToolbarMenu(ToolbarMenu menu, int x) {
 		if (toolbarMenu == menu) {
 			toolbarMenu = ToolbarMenu.NONE;
+			openSubmenu = null;
 			return;
 		}
 		toolbarMenu = menu;
 		toolbarMenuX = x;
+		openSubmenu = null;
 		contextMenuOpen = false;
 		instrumentMenuLayer = -1;
-	}
-
-	private ToolbarAction[] toolbarActions() {
-		return switch (toolbarMenu) {
-			case FILE -> ToolbarAction.FILE_ACTIONS;
-			case EDIT -> ToolbarAction.EDIT_ACTIONS;
-			case BUILD -> ToolbarAction.BUILD_ACTIONS;
-			case SELECT -> ToolbarAction.SELECT_ACTIONS;
-			case IMPORT, NONE -> new ToolbarAction[0];
-		};
 	}
 
 	private boolean toolbarActionEnabled(ToolbarAction action) {
@@ -1224,30 +1434,52 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private boolean handleToolbarMenuClick(double mouseX, double mouseY, int button) {
-		List<String> rows = toolbarRows();
-		if (rows.isEmpty() || mouseX < toolbarMenuX
-				|| mouseX >= toolbarMenuX + toolbarMenuWidth()) {
-			return false;
-		}
-		int row = ((int)mouseY - 30) / TOOLBAR_MENU_ROW_HEIGHT;
-		if (row < 0 || row >= rows.size()) {
-			return false;
-		}
-		int rowY = 30 + row * TOOLBAR_MENU_ROW_HEIGHT;
-		if (mouseY < rowY || mouseY >= rowY + TOOLBAR_MENU_ROW_HEIGHT) {
-			return false;
-		}
-		if (!toolbarRowEnabled(row)) {
+		// The submenu is drawn over the parent panel, so it gets the click first wherever they meet.
+		if (openSubmenu != null && mouseX >= submenuLeft && mouseX < submenuRight
+				&& mouseY >= submenuTop && mouseY < submenuBottom) {
+			ToolbarAction action = null;
+			for (int index = 0; index < openSubmenu.actions.length; index++) {
+				int rowY = submenuRowTop(submenuTop, index);
+				if (mouseY >= rowY && mouseY < rowY + TOOLBAR_MENU_ROW_HEIGHT) {
+					action = openSubmenu.actions[index];
+					break;
+				}
+			}
+			if (action == null || !toolbarActionEnabled(action)) {
+				return true;
+			}
+			toolbarMenu = ToolbarMenu.NONE;
+			openSubmenu = null;
+			performToolbarAction(action);
 			return true;
 		}
-		if (toolbarMenu == ToolbarMenu.IMPORT) {
+		List<MenuRow> rows = menuRows(toolbarMenu);
+		int menuWidth = menuWidth(rows, toolbarMenu == ToolbarMenu.IMPORT
+			? IMPORT_MENU_WIDTH : TOOLBAR_MENU_WIDTH, toolbarMenuX);
+		if (rows.isEmpty() || mouseX < toolbarMenuX || mouseX >= toolbarMenuX + menuWidth) {
+			return false;
+		}
+		int row = ((int)mouseY - MENU_PANEL_TOP - 2) / TOOLBAR_MENU_ROW_HEIGHT;
+		if (row < 0 || row >= rows.size() || mouseY < MENU_PANEL_TOP + 2) {
+			return false;
+		}
+		MenuRow clicked = rows.get(row);
+		if (!rowEnabled(clicked)) {
+			return true;
+		}
+		if (clicked.submenu() != null) {
+			// Already opened by hovering; clicking it is neither a mistake nor a second thing.
+			openSubmenu = clicked.submenu();
+			return true;
+		}
+		if (clicked.setting() != null) {
 			// Settings stay open so several can be adjusted in one visit.
-			cycleImportSetting(ImportSetting.values()[row], button == 1 ? -1 : 1);
+			cycleImportSetting(clicked.setting(), button == 1 ? -1 : 1);
 			return true;
 		}
-		ToolbarAction action = toolbarActions()[row];
 		toolbarMenu = ToolbarMenu.NONE;
-		performToolbarAction(action);
+		openSubmenu = null;
+		performToolbarAction(clicked.action());
 		return true;
 	}
 
@@ -1551,9 +1783,11 @@ public final class ComposerScreen extends Screen {
 			case MERGE_REPEATS -> "Collapses a pitch that re-triggers faster than the repeat "
 				+ "window. Songs fake sustain this way, and note blocks cannot sustain.";
 			case QUANTIZE_QUARTER, QUANTIZE_EIGHTH, QUANTIZE_SIXTEENTH ->
-				"Moves note starts onto that musical grid. A coarser grid fixes more and changes "
-					+ "more. Whether it makes the song buildable depends on the tempo: a 1/16 only "
-					+ "helps if a 1/16 is a whole number of repeater ticks.";
+				"Moves note starts onto that musical grid. These are note values, so 1/4 is a "
+					+ "quarter note and the coarsest of them -- the number beside each is its step "
+					+ "in song ticks. A coarser grid fixes more and changes more. Whether it makes "
+					+ "the song buildable depends on the tempo: a 1/16 only helps if a 1/16 is a "
+					+ "whole number of repeater ticks.";
 			case QUANTIZE_REPEATERS -> "Moves note starts onto whole repeater ticks -- the ruler "
 				+ "that actually decides, worked out from the tempo and the current speed, so it is "
 				+ "usually not a musical fraction at all. Notes closer than one tick land together "
@@ -1831,7 +2065,7 @@ public final class ComposerScreen extends Screen {
 
 	/** The composition being edited, so which one it is never has to be remembered. */
 	private void extractCompositionName(GuiGraphicsExtractor graphics) {
-		int left = TOOLBAR_CONTROLS_RIGHT + 12;
+		int left = toolbarControlsRight + 12;
 		if (left > width - 40) {
 			return;
 		}
@@ -1842,7 +2076,7 @@ public final class ComposerScreen extends Screen {
 		String shown = font.width(name) <= width - left - 8
 			? name
 			: font.plainSubstrByWidth(name, width - left - 16) + "...";
-		graphics.text(font, shown, left, 13, unsaved() ? 0xFFFFC864 : 0xFFD6D8DD, false);
+		graphics.text(font, shown, left, MENU_BAR_TOP + 4, unsaved() ? 0xFFFFC864 : 0xFFD6D8DD, false);
 	}
 
 	private void extractPanels(GuiGraphicsExtractor graphics) {
@@ -1958,12 +2192,21 @@ public final class ComposerScreen extends Screen {
 				&& y < layerMenuY + LayerAction.values().length * CONTEXT_MENU_ROW_HEIGHT + 4) {
 			return true;
 		}
+		if (y < TOOLBAR_HEIGHT) {
+			return true;
+		}
 		if (toolbarMenu == ToolbarMenu.NONE) {
 			return false;
 		}
-		List<String> toolbar = toolbarRows();
-		return !toolbar.isEmpty() && x >= toolbarMenuX && x < toolbarMenuX + toolbarMenuWidth()
-			&& y >= 28 && y < 28 + toolbar.size() * TOOLBAR_MENU_ROW_HEIGHT + 4;
+		if (openSubmenu != null && x >= submenuLeft && x < submenuRight
+				&& y >= submenuTop && y < submenuBottom) {
+			return true;
+		}
+		List<MenuRow> rows = menuRows(toolbarMenu);
+		int menuWidth = menuWidth(rows, toolbarMenu == ToolbarMenu.IMPORT
+			? IMPORT_MENU_WIDTH : TOOLBAR_MENU_WIDTH, toolbarMenuX);
+		return !rows.isEmpty() && x >= toolbarMenuX && x < toolbarMenuX + menuWidth
+			&& y >= MENU_PANEL_TOP && y < MENU_PANEL_TOP + rows.size() * TOOLBAR_MENU_ROW_HEIGHT + 4;
 	}
 
 	/**
@@ -2255,7 +2498,6 @@ public final class ComposerScreen extends Screen {
 		graphics.disableScissor();
 
 		graphics.text(font, "Minecraft F♯3–F♯5", rollX + 5, TOOLBAR_HEIGHT + 3, 0xFF65F4FF, false);
-		extractCompositionName(graphics);
 		return phase(PHASE_PLAYHEAD, mark);
 	}
 
@@ -2713,11 +2955,22 @@ public final class ComposerScreen extends Screen {
 
 	@Override
 	public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
+		ToolbarMenu title = menuTitleAt(event.x(), event.y());
+		if (title != null) {
+			for (MenuTitle bar : menuTitles()) {
+				if (bar.menu() == title) {
+					toggleToolbarMenu(title, bar.left());
+					break;
+				}
+			}
+			return true;
+		}
 		if (toolbarMenu != ToolbarMenu.NONE) {
 			if (handleToolbarMenuClick(event.x(), event.y(), event.button())) {
 				return true;
 			}
 			toolbarMenu = ToolbarMenu.NONE;
+			openSubmenu = null;
 		}
 		if (layerMenuOpen) {
 			if (handleLayerMenuClick(event.x(), event.y())) {
@@ -2971,6 +3224,19 @@ public final class ComposerScreen extends Screen {
 	public void mouseMoved(double x, double y) {
 		lastMouseX = x;
 		lastMouseY = y;
+		// With one menu already open, sliding along the bar opens the next, which is what a menu
+		// bar does everywhere else and what makes browsing five of them one gesture.
+		ToolbarMenu title = menuTitleAt(x, y);
+		if (toolbarMenu != ToolbarMenu.NONE && title != null && title != toolbarMenu) {
+			for (MenuTitle bar : menuTitles()) {
+				if (bar.menu() == title) {
+					toolbarMenu = title;
+					toolbarMenuX = bar.left();
+					openSubmenu = null;
+					break;
+				}
+			}
+		}
 		super.mouseMoved(x, y);
 	}
 
@@ -3125,6 +3391,7 @@ public final class ComposerScreen extends Screen {
 	public boolean keyPressed(KeyEvent event) {
 		if (toolbarMenu != ToolbarMenu.NONE && event.isEscape()) {
 			toolbarMenu = ToolbarMenu.NONE;
+			openSubmenu = null;
 			return true;
 		}
 		if (contextMenuOpen && event.isEscape()) {
@@ -4359,6 +4626,81 @@ public final class ComposerScreen extends Screen {
 		STATE
 	}
 
+	private static final String SUBMENU_ARROW = "▸";
+	/** Air around a submenu's rule, so the row after it does not sit on the line. */
+	private static final int SUBMENU_DIVIDER_GAP = 5;
+
+	/** A menu's title in the bar, and the span of it that reacts to the cursor. */
+	private record MenuTitle(ToolbarMenu menu, String label, int left, int right) {
+	}
+
+	/** One row of an open menu: a thing to do, a setting to cycle, or a submenu to open. */
+	private record MenuRow(ToolbarAction action, ImportSetting setting, ToolbarSubmenu submenu) {
+		static MenuRow of(ToolbarAction action) {
+			return new MenuRow(action, null, null);
+		}
+
+		static MenuRow of(ImportSetting setting) {
+			return new MenuRow(null, setting, null);
+		}
+
+		static MenuRow of(ToolbarSubmenu submenu) {
+			return new MenuRow(null, null, submenu);
+		}
+	}
+
+	/**
+	 * A group of actions that differ only in their last word.
+	 *
+	 * <p>Rows inside carry the short label -- "1/8" rather than "Quantize to 1/8" -- because the
+	 * row that opened the submenu has already said the rest of it, and repeating it is what made
+	 * the flat list hard to scan in the first place.</p>
+	 */
+	private enum ToolbarSubmenu {
+		QUANTIZE("Quantize", "Snaps note starts onto a grid, so their gaps become whole repeater "
+				+ "delays instead of whatever the source file happened to hold.",
+			new ToolbarAction[] {
+				ToolbarAction.QUANTIZE_QUARTER, ToolbarAction.QUANTIZE_EIGHTH,
+				ToolbarAction.QUANTIZE_SIXTEENTH, ToolbarAction.QUANTIZE_REPEATERS
+			},
+			new String[] {"1/4 note", "1/8 note", "1/16 note", "Repeater ticks"}, 3),
+		END("End", "Where the song stops, which is a delay the build has to place like any other.",
+			new ToolbarAction[] {ToolbarAction.SNAP_END, ToolbarAction.TRIM_END},
+			new String[] {"Snap to grid", "Trim to last note"}, -1);
+
+		private final String label;
+		private final String description;
+		private final ToolbarAction[] actions;
+		private final String[] labels;
+		/**
+		 * Row to rule off above, or -1.
+		 *
+		 * <p>Repeater ticks is not a fourth note value and cannot be sorted among them: it is the
+		 * machine's grid, and it slides as the speed slider moves -- 240 ticks at 2.00x, which is
+		 * exactly a 1/8, and 120 at 1.00x, which is exactly a 1/16. Ordering it by coarseness would
+		 * be right at one speed and wrong at the next, so it is set apart instead.</p>
+		 */
+		private final int dividerBefore;
+
+		ToolbarSubmenu(String label, String description, ToolbarAction[] actions, String[] labels,
+				int dividerBefore) {
+			this.label = label;
+			this.description = description;
+			this.actions = actions;
+			this.labels = labels;
+			this.dividerBefore = dividerBefore;
+		}
+
+		String labelFor(ToolbarAction action) {
+			for (int index = 0; index < actions.length; index++) {
+				if (actions[index] == action) {
+					return labels[index];
+				}
+			}
+			return action.label;
+		}
+	}
+
 	private enum ToolbarMenu {
 		NONE,
 		BUILD,
@@ -4429,10 +4771,9 @@ public final class ComposerScreen extends Screen {
 			IMPORT_SCHEMATIC, SCAN_WORLD, EXPORT_NBS, COPY_AS_TEXT, BACK_TO_SEQUENCES,
 			CLOSE_TO_GAME
 		};
+		/** Quantize slots in at index 4 and End goes on the end; see {@link #menuRows}. */
 		private static final ToolbarAction[] EDIT_ACTIONS = {
-			UNDO, REDO, CONVERT, MERGE_REPEATS,
-			QUANTIZE_QUARTER, QUANTIZE_EIGHTH, QUANTIZE_SIXTEENTH, QUANTIZE_REPEATERS,
-			FIT_ALL_RANGE, SNAP_TEMPO, SNAP_END, TRIM_END
+			UNDO, REDO, CONVERT, MERGE_REPEATS, FIT_ALL_RANGE, SNAP_TEMPO
 		};
 		private static final ToolbarAction[] BUILD_ACTIONS = {
 			INCLUDE_SELECTED, SET_INCLUDED_TO_SELECTION, TOGGLE_DEDUPE, PASTE_IN_WORLD, BUILD_CANCEL
