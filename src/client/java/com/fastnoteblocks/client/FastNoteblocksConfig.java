@@ -3,6 +3,7 @@ package com.fastnoteblocks.client;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.fastnoteblocks.NoteSequence;
+import com.fastnoteblocks.client.composer.ChordThinner;
 import com.fastnoteblocks.client.composer.ComposerProject;
 import com.fastnoteblocks.client.composer.SongLibrary;
 import java.io.Reader;
@@ -244,6 +245,16 @@ public final class FastNoteblocksConfig {
 	public static final int DEFAULT_MIDI_VELOCITY_CUTOFF = 8;
 	public static final int MIN_MIDI_VELOCITY_CUTOFF = 0;
 	public static final int MAX_MIDI_VELOCITY_CUTOFF = 127;
+	/**
+	 * How many sounds a chord is thinned down to when Select > Overloaded chords is used.
+	 *
+	 * <p>Thirty is the hard limit -- fifteen reachable bus blocks with two note blocks on each --
+	 * so anything at or under it builds. The default sits below rather than on it because a chord
+	 * exactly on the limit leaves the world paste nothing to work with.</p>
+	 */
+	public static final int DEFAULT_CHORD_THIN_TARGET = ChordThinner.DEFAULT_TARGET;
+	public static final int MIN_CHORD_THIN_TARGET = ChordThinner.MIN_TARGET;
+	public static final int MAX_CHORD_THIN_TARGET = ChordThinner.MAX_TARGET;
 	private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 	private static final Path CONFIG_PATH = FabricLoader.getInstance().getConfigDir().resolve("fast-noteblocks.json");
 	private static SongLibrary songs = SongLibrary.load();
@@ -287,6 +298,7 @@ public final class FastNoteblocksConfig {
 	private MidiTempoFit midiTempoFit;
 	private boolean debugCommandsEnabled;
 	private int midiVelocityCutoff;
+	private int chordThinTarget;
 	private int repeatMergeTicks;
 	private int conversionGapPercentile;
 	private int commandsPerTick;
@@ -426,6 +438,11 @@ public final class FastNoteblocksConfig {
 					stored.midiVelocityCutoff == null
 						? DEFAULT_MIDI_VELOCITY_CUTOFF
 						: stored.midiVelocityCutoff
+				);
+				instance.chordThinTarget = clampChordThinTarget(
+					stored.chordThinTarget == null
+						? DEFAULT_CHORD_THIN_TARGET
+						: stored.chordThinTarget
 				);
 			}
 		} catch (Exception ignored) {
@@ -1012,6 +1029,14 @@ public final class FastNoteblocksConfig {
 		this.midiVelocityCutoff = clampMidiVelocityCutoff(midiVelocityCutoff);
 	}
 
+	public int chordThinTarget() {
+		return chordThinTarget;
+	}
+
+	public void setChordThinTarget(int chordThinTarget) {
+		this.chordThinTarget = clampChordThinTarget(chordThinTarget);
+	}
+
 	private static FastNoteblocksConfig defaults() {
 		FastNoteblocksConfig config = new FastNoteblocksConfig();
 		config.modEnabled = true;
@@ -1047,6 +1072,7 @@ public final class FastNoteblocksConfig {
 		config.midiTempoFit = MidiTempoFit.SNAP_TO_REPEATERS;
 		config.composerSpeedQuarters = DEFAULT_COMPOSER_SPEED_QUARTERS;
 		config.midiVelocityCutoff = DEFAULT_MIDI_VELOCITY_CUTOFF;
+		config.chordThinTarget = DEFAULT_CHORD_THIN_TARGET;
 		config.repeatMergeTicks = DEFAULT_REPEAT_MERGE_TICKS;
 		config.conversionGapPercentile = DEFAULT_CONVERSION_GAP_PERCENTILE;
 		config.commandsPerTick = DEFAULT_COMMANDS_PER_TICK;
@@ -1117,6 +1143,10 @@ public final class FastNoteblocksConfig {
 
 	private static int clampMidiVelocityCutoff(int velocity) {
 		return Math.max(MIN_MIDI_VELOCITY_CUTOFF, Math.min(MAX_MIDI_VELOCITY_CUTOFF, velocity));
+	}
+
+	private static int clampChordThinTarget(int target) {
+		return Math.max(MIN_CHORD_THIN_TARGET, Math.min(MAX_CHORD_THIN_TARGET, target));
 	}
 
 	private static int legacyTimescaleToQuarters(Integer timescale) {
@@ -1192,6 +1222,7 @@ public final class FastNoteblocksConfig {
 		private String midiDefaultInstrument;
 		private MidiTempoFit midiTempoFit;
 		private Integer midiVelocityCutoff;
+		private Integer chordThinTarget;
 		private Integer composerSpeedQuarters;
 		private Integer repeatMergeTicks;
 		private Integer conversionGapPercentile;
@@ -1244,6 +1275,7 @@ public final class FastNoteblocksConfig {
 			this.midiDefaultInstrument = config.midiDefaultInstrument;
 			this.midiTempoFit = config.midiTempoFit;
 			this.midiVelocityCutoff = config.midiVelocityCutoff;
+			this.chordThinTarget = config.chordThinTarget;
 			this.composerSpeedQuarters = config.composerSpeedQuarters;
 			this.repeatMergeTicks = config.repeatMergeTicks;
 			this.conversionGapPercentile = config.conversionGapPercentile;

@@ -1,6 +1,7 @@
 package com.fastnoteblocks.client.compat;
 
 import com.fastnoteblocks.client.FastNoteblocksConfig;
+import com.fastnoteblocks.client.composer.ChordThinner;
 import com.fastnoteblocks.client.composer.ComposerHistory;
 import com.fastnoteblocks.client.composer.ComposerProject;
 import com.fastnoteblocks.client.composer.SongAnalysis;
@@ -1180,6 +1181,8 @@ public final class ComposerScreen extends Screen {
 			case SELECT_OFF_GRID -> !projectStats().offGridNotes().isEmpty();
 			case SELECT_TOO_FREQUENT -> !projectStats().crowdedNotes().isEmpty();
 			case SELECT_OUT_OF_RANGE -> projectStats().outOfRange() > 0;
+			case SELECT_OVERLOADED_CHORDS -> projectStats().overloadedTicks() > 0
+				|| projectStats().peakChord() > config.chordThinTarget();
 			case SELECT_NONE -> !selectedNotes.isEmpty();
 			// Nothing to scan from the title screen, and the coordinate prompt would have no way
 			// to tell you that the region you typed reads as empty because there is no world.
@@ -1269,6 +1272,7 @@ public final class ComposerScreen extends Screen {
 				note -> projectStats().crowded().contains(note.startTick()), true);
 			case SELECT_OUT_OF_RANGE -> selectNotesWhere("out of range",
 				note -> !note.isBuildable(), true);
+			case SELECT_OVERLOADED_CHORDS -> selectOverloadedChordNotes();
 			case SELECT_ALL_NOTES -> selectNotesWhere("selected", note -> true, false);
 			case SELECT_NONE -> {
 				selectedNotes.clear();
@@ -1416,6 +1420,44 @@ public final class ComposerScreen extends Screen {
 	}
 
 	/**
+	 * Selects what a chord could lose to fit, without deleting any of it.
+	 *
+	 * <p>Selecting rather than applying because this is the one edit here whose result has to be
+	 * listened to. Everything else in the Select menu names notes that are already wrong; this one
+	 * names notes that are merely the least missed, and the difference between those two is a
+	 * judgement the composer is in no position to make on its own. Delete commits it, Escape walks
+	 * away, and playback in between is the whole point.</p>
+	 *
+	 * <p>Not routed through {@link #selectNotesWhere}: that judges a note at a time and only looks
+	 * at the layers being edited, while what a chord can spare depends on the whole chord and the
+	 * limit applies to every layer that is going into the build.</p>
+	 */
+	private void selectOverloadedChordNotes() {
+		int target = config.chordThinTarget();
+		ChordThinner.Result thinned =
+			ChordThinner.thin(project(), target, config.dedupeIdenticalNotes());
+		selectedNotes.clear();
+		selectedNotes.addAll(thinned.noteIds());
+		updateButtonStates();
+		if (thinned.isEmpty()) {
+			showResult(Component.literal("No chord is over " + target + " - nothing to thin."));
+			return;
+		}
+		// Sounds and notes are different numbers whenever deduplication is on, and saying only one
+		// of them invites the obvious wrong conclusion -- that deleting the selection will take the
+		// count down by however many notes it holds.
+		String summary = thinned.chordsThinned() + " chord"
+			+ (thinned.chordsThinned() == 1 ? "" : "s") + " over " + target + ": "
+			+ thinned.soundsRemoved() + " sounds selected as "
+			+ thinned.noteIds().size() + " notes. Delete to commit, Escape to keep them.";
+		if (thinned.chordsStillOver() > 0) {
+			summary += " " + thinned.chordsStillOver() + " cannot reach " + target
+				+ " without losing a pitch or an instrument nothing else plays, and were left alone.";
+		}
+		showResult(Component.literal(summary));
+	}
+
+	/**
 	 * What a menu row does, in a sentence.
 	 *
 	 * <p>Every row has one. Several of these actions are irreversible in the world or change the
@@ -1493,6 +1535,10 @@ public final class ComposerScreen extends Screen {
 			case SELECT_TOO_FREQUENT -> "Selects notes arriving less than one repeater tick after "
 				+ "the previous one -- faster than redstone can retrigger.";
 			case SELECT_OUT_OF_RANGE -> "Selects notes outside the note-block range of F#3-F#5.";
+			case SELECT_OVERLOADED_CHORDS -> "Selects the notes worth least in every chord bigger "
+				+ "than the thinning target, so you can hear the song without them before deleting. "
+				+ "Never the last of a pitch or the last of an instrument, so a chord keeps its "
+				+ "harmony and keeps its drum -- only how thickly they are scored changes.";
 			case SELECT_ALL_NOTES -> "Selects every note on the active layers.";
 			case SELECT_NONE -> "Clears the selection.";
 		};
@@ -1526,6 +1572,8 @@ public final class ComposerScreen extends Screen {
 			case VELOCITY_CUTOFF -> "Notes quieter than this are dropped, since note blocks have no "
 				+ "volume. Set it too high and a quiet passage disappears -- the import report says "
 				+ "what range the file uses.";
+			case CHORD_THIN_TARGET -> "How far Select > Overloaded chords cuts a chord back. Thirty "
+				+ "is the most a build can place at one instant; under that leaves the paste room.";
 			case IGNORE_PERCUSSION -> "Skip MIDI channel 10, which is drums. They rarely map onto "
 				+ "note-block pitches.";
 			case MAX_TRACKS -> "How many parts to keep. Busiest first, so a sparse intro can be "
@@ -1606,6 +1654,7 @@ public final class ComposerScreen extends Screen {
 			case VELOCITY_CUTOFF -> config.midiVelocityCutoff() <= FastNoteblocksConfig.MIN_MIDI_VELOCITY_CUTOFF
 				? "off (keep all)"
 				: Integer.toString(config.midiVelocityCutoff());
+			case CHORD_THIN_TARGET -> config.chordThinTarget() + " per chord";
 			case IGNORE_PERCUSSION -> config.midiIgnorePercussion() ? "ignored" : "imported";
 			case MAX_TRACKS -> Integer.toString(config.midiMaxImportedTracks());
 			case DEFAULT_INSTRUMENT -> PreviewInstrument.byId(config.midiDefaultInstrument()).name();
@@ -1621,6 +1670,7 @@ public final class ComposerScreen extends Screen {
 			case RANGE_FIT -> config.setMidiRangeFit(
 				cycle(FastNoteblocksConfig.MidiRangeFit.values(), config.midiRangeFit(), direction));
 			case VELOCITY_CUTOFF -> config.setMidiVelocityCutoff(cycleVelocityCutoff(direction));
+			case CHORD_THIN_TARGET -> config.setChordThinTarget(config.chordThinTarget() + direction);
 			case GRID_OUTLIERS -> {
 				int span = FastNoteblocksConfig.MAX_CONVERSION_GAP_PERCENTILE
 					- FastNoteblocksConfig.MIN_CONVERSION_GAP_PERCENTILE + 1;
@@ -2504,7 +2554,11 @@ public final class ComposerScreen extends Screen {
 		if (!stats.endMarkerProblem().isEmpty()) {
 			segments.add(stats.endMarkerProblem() + " (Edit > Snap end to grid)");
 		}
+		// The rule the peak was counted under, beside the number. Whether two layers playing the
+		// same sound at the same instant count once is a setting that lives in another screen
+		// entirely, and it silently re-judges every song -- so the number says which rule made it.
 		segments.add("peak " + peakChord + "/" + SongAnalysis.MAX_SIMULTANEOUS_NOTES
+			+ (config.dedupeIdenticalNotes() ? " merged" : " unmerged")
 			+ (overloaded > 0 ? " (" + overloaded + " over)" : ""));
 		// Leads with the number that will be standing in the world. "6354 notes (788 deduped)" was
 		// arithmetically fine and still misread -- a count in brackets after a count reads as the
@@ -4240,6 +4294,7 @@ public final class ComposerScreen extends Screen {
 		REPEAT_MERGE("Merge repeats"),
 		GRID_OUTLIERS("Grid outliers"),
 		VELOCITY_CUTOFF("Velocity cutoff"),
+		CHORD_THIN_TARGET("Thin chords to"),
 		IGNORE_PERCUSSION("Percussion"),
 		MAX_TRACKS("Max tracks"),
 		DEFAULT_INSTRUMENT("Instrument");
@@ -4283,6 +4338,7 @@ public final class ComposerScreen extends Screen {
 		SELECT_OFF_GRID("Off grid"),
 		SELECT_TOO_FREQUENT("Too frequent"),
 		SELECT_OUT_OF_RANGE("Out of range"),
+		SELECT_OVERLOADED_CHORDS("Overloaded chords"),
 		SELECT_ALL_NOTES("Everything"),
 		SELECT_NONE("Nothing");
 
@@ -4300,7 +4356,8 @@ public final class ComposerScreen extends Screen {
 			INCLUDE_SELECTED, SET_INCLUDED_TO_SELECTION, TOGGLE_DEDUPE, PASTE_IN_WORLD, BUILD_CANCEL
 		};
 		private static final ToolbarAction[] SELECT_ACTIONS = {
-			SELECT_OFF_GRID, SELECT_TOO_FREQUENT, SELECT_OUT_OF_RANGE, SELECT_ALL_NOTES, SELECT_NONE
+			SELECT_OFF_GRID, SELECT_TOO_FREQUENT, SELECT_OUT_OF_RANGE, SELECT_OVERLOADED_CHORDS,
+			SELECT_ALL_NOTES, SELECT_NONE
 		};
 		private final String label;
 		/** Whether the action can be limited to the selected notes. Tempo is a property of the
