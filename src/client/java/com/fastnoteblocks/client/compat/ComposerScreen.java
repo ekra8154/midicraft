@@ -10,6 +10,7 @@ import com.fastnoteblocks.client.composer.ComposerProject.MinecraftConversion;
 import com.fastnoteblocks.client.composer.ComposerProject.NoteEvent;
 import com.fastnoteblocks.client.composer.ComposerProject.PasteResult;
 import com.mojang.blaze3d.platform.InputConstants;
+import com.mojang.logging.LogUtils;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -32,6 +33,7 @@ import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.util.Util;
 import net.minecraft.world.item.ItemStack;
 import org.lwjgl.glfw.GLFW;
+import org.slf4j.Logger;
 
 public final class ComposerScreen extends Screen {
 	private static final int TOOLBAR_HEIGHT = 34;
@@ -121,6 +123,30 @@ public final class ComposerScreen extends Screen {
 		0xFF7CA7FF, 0xFFFFE66D, 0xFF8CE0C3, 0xFFFF8C5A, 0xFFC3F584
 	};
 
+	private static final Logger PERF = LogUtils.getLogger();
+	/**
+	 * The phases one composer frame is split into, in the order they are drawn.
+	 *
+	 * <p>Named rather than nested so a phase costs one array slot and one subtraction. The point of
+	 * the split is that "the composer is slow" is not actionable and "notes: 31ms of a 38ms frame"
+	 * is -- every optimisation in this screen was chosen by reading these numbers, not by guessing
+	 * which loop looked worst.</p>
+	 */
+	private static final String[] PHASES = {
+		"panels", "ruler", "keys", "grid", "notes", "playhead", "widgets", "status", "menus"
+	};
+	private static final int PHASE_PANELS = 0;
+	private static final int PHASE_RULER = 1;
+	private static final int PHASE_KEYS = 2;
+	private static final int PHASE_GRID = 3;
+	private static final int PHASE_NOTES = 4;
+	private static final int PHASE_PLAYHEAD = 5;
+	private static final int PHASE_WIDGETS = 6;
+	private static final int PHASE_STATUS = 7;
+	private static final int PHASE_MENUS = 8;
+	/** How long the profiler gathers before it reports, and clears, a window of frames. */
+	private static final long PROFILE_WINDOW_MILLIS = 1000L;
+
 	private final Screen parent;
 	private final Runnable onReturn;
 	private final FastNoteblocksConfig config;
@@ -201,6 +227,10 @@ public final class ComposerScreen extends Screen {
 	private ComposerProject cachedStatsProject;
 	private SongAnalysis cachedStats;
 	private boolean cachedStatsDedupe;
+	private List<FastNoteblocksConfig.SequenceTrack> cachedBlockTracks;
+	private SongBuilder.BlockCounts cachedBlockCounts;
+	private SongAnalysis cachedOverloadedStats;
+	private long[] cachedOverloadedTicks = new long[0];
 	/**
 	 * The composition as it stands on disk, which is what "unsaved" is measured against.
 	 *
@@ -226,6 +256,25 @@ public final class ComposerScreen extends Screen {
 	private boolean paintBuildEnabled;
 	private LayerState paintState = LayerState.ACTIVE;
 	private final Set<Integer> paintedRows = new LinkedHashSet<>();
+	/**
+	 * Frame timings, gathered only while F9 has the profiler switched on.
+	 *
+	 * <p>Off by default and free when off: the phase marks return without reading the clock, so a
+	 * player who never presses F9 pays nothing for any of this.</p>
+	 */
+	/** One frame's note quads, minus the ones a later note covers. Reused, never reallocated. */
+	private final NoteCellGrid cells = new NoteCellGrid();
+	/** The grid's way through to the frame's graphics, held so drawing does not allocate one. */
+	private final GraphicsQuads quads = new GraphicsQuads();
+	private boolean profiling;
+	private final long[] phaseNanos = new long[PHASES.length];
+	private long profileFrameNanos;
+	private int profileFrames;
+	private long profileWindowSince;
+	private int noteQuads;
+	private int notesConsidered;
+	private int notesDrawn;
+	private String profileSummary = "";
 	/** The layer a press landed on, and whether it has moved far enough to be a reorder. */
 	private int layerDragIndex = -1;
 	private double layerDragStartY;
@@ -808,23 +857,88 @@ public final class ComposerScreen extends Screen {
 
 	@Override
 	public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
+		long frameStart = profiling ? System.nanoTime() : 0L;
 		updatePlayback();
 		rollX = LAYER_PANEL_WIDTH + PIANO_WIDTH;
 		rollY = TOOLBAR_HEIGHT + 14 + TIMELINE_RULER_HEIGHT;
 		rollWidth = Math.max(40, width - rollX - 8);
 		rollHeight = Math.max(40, height - rollY - 24);
+		long mark = frameStart;
 		extractPanels(graphics);
+		mark = phase(PHASE_PANELS, mark);
 		extractTimeRuler(graphics, mouseX, mouseY);
-		extractPianoRoll(graphics, mouseX, mouseY);
+		mark = phase(PHASE_RULER, mark);
+		mark = extractPianoRoll(graphics, mouseX, mouseY, mark);
 		extractStatus(graphics);
 		extractToast(graphics);
+		mark = phase(PHASE_STATUS, mark);
 		super.extractRenderState(graphics, mouseX, mouseY, partialTick);
+		mark = phase(PHASE_WIDGETS, mark);
 		hoveredDescription = "";
 		extractInstrumentMenu(graphics, mouseX, mouseY);
 		extractContextMenu(graphics, mouseX, mouseY);
 		extractLayerMenu(graphics, mouseX, mouseY);
 		extractToolbarMenu(graphics, mouseX, mouseY);
 		extractMenuDescription(graphics);
+		phase(PHASE_MENUS, mark);
+		endProfiledFrame(graphics, frameStart);
+	}
+
+	/** Charges the time since {@code since} to a phase, and returns the mark for the next one. */
+	private long phase(int index, long since) {
+		if (!profiling) {
+			return 0L;
+		}
+		long now = System.nanoTime();
+		phaseNanos[index] += now - since;
+		return now;
+	}
+
+	/**
+	 * Closes a profiled frame: draws the overlay, and once a second logs and clears the window.
+	 *
+	 * <p>Reported as an average over the window rather than per frame, because a single frame's
+	 * numbers on this screen swing by a factor of three -- a garbage collection, a chunk build, a
+	 * sound starting. The averages are stable enough to tell a real change from noise.</p>
+	 */
+	private void endProfiledFrame(GuiGraphicsExtractor graphics, long frameStart) {
+		if (!profiling) {
+			return;
+		}
+		profileFrameNanos += System.nanoTime() - frameStart;
+		profileFrames++;
+		long now = Util.getMillis();
+		if (profileWindowSince == 0L) {
+			profileWindowSince = now;
+		} else if (now - profileWindowSince >= PROFILE_WINDOW_MILLIS && profileFrames > 0) {
+			StringBuilder line = new StringBuilder(String.format(java.util.Locale.ROOT,
+				"composer %.1f fps, %.2f ms/frame extracting", profileFrames * 1000.0 / (now - profileWindowSince),
+				profileFrameNanos / 1.0e6 / profileFrames));
+			for (int index = 0; index < PHASES.length; index++) {
+				line.append(String.format(java.util.Locale.ROOT, "  %s %.2f",
+					PHASES[index], phaseNanos[index] / 1.0e6 / profileFrames));
+			}
+			line.append(String.format(java.util.Locale.ROOT,
+				"  |  %d notes seen, %d drawn, %d quads, %.0f ticks/px, %d layers",
+				notesConsidered, notesDrawn, noteQuads, ticksPerPixel, project().layers().size()));
+			profileSummary = line.toString();
+			PERF.info(profileSummary);
+			java.util.Arrays.fill(phaseNanos, 0L);
+			profileFrameNanos = 0L;
+			profileFrames = 0;
+			profileWindowSince = now;
+		}
+		if (!profileSummary.isEmpty()) {
+			// Drawn last and unclipped, over everything, because it is a measuring instrument and
+			// not part of the screen. Two lines so it fits without shrinking the font.
+			int split = profileSummary.indexOf("  |  ");
+			String top = split < 0 ? profileSummary : profileSummary.substring(0, split);
+			String bottom = split < 0 ? "" : profileSummary.substring(split + 5);
+			graphics.fill(4, TOOLBAR_HEIGHT + 2, 10 + Math.max(smallTextWidth(top), smallTextWidth(bottom)),
+				TOOLBAR_HEIGHT + 22, 0xE0000000);
+			smallText(graphics, top, 7, TOOLBAR_HEIGHT + 5, 0xFF8FD3FF);
+			smallText(graphics, bottom, 7, TOOLBAR_HEIGHT + 13, 0xFF9BE564);
+		}
 	}
 
 	/** Draws the hovered menu row's explanation in a strip along the bottom of the screen. */
@@ -1973,7 +2087,7 @@ public final class ComposerScreen extends Screen {
 			(int)(clamped / 60.0), clamped % 60.0);
 	}
 
-	private void extractPianoRoll(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
+	private long extractPianoRoll(GuiGraphicsExtractor graphics, int mouseX, int mouseY, long mark) {
 		int pianoX = LAYER_PANEL_WIDTH;
 		graphics.enableScissor(pianoX, rollY, rollX + rollWidth, rollY + rollHeight);
 		for (int midi = topMidiNote; midi >= MIN_MIDI_NOTE; midi--) {
@@ -2002,8 +2116,11 @@ public final class ComposerScreen extends Screen {
 			}
 		}
 
+		mark = phase(PHASE_KEYS, mark);
 		extractTimeGrid(graphics);
+		mark = phase(PHASE_GRID, mark);
 		extractNotes(graphics, mouseX, mouseY);
+		mark = phase(PHASE_NOTES, mark);
 		extractPlayhead(graphics);
 		if (selectingBox) {
 			int left = (int)Math.min(dragStartX, selectionEndX);
@@ -2020,6 +2137,7 @@ public final class ComposerScreen extends Screen {
 
 		graphics.text(font, "Minecraft F♯3–F♯5", rollX + 5, TOOLBAR_HEIGHT + 3, 0xFF65F4FF, false);
 		extractCompositionName(graphics);
+		return phase(PHASE_PLAYHEAD, mark);
 	}
 
 	private void extractTimeGrid(GuiGraphicsExtractor graphics) {
@@ -2045,15 +2163,32 @@ public final class ComposerScreen extends Screen {
 					x + 3, rollY + 2, 0xFFAAAAAA, false);
 			}
 		}
-		for (Map.Entry<Long, Integer> entry : projectStats().chordCounts().entrySet()) {
-			if (entry.getValue() <= SongAnalysis.MAX_SIMULTANEOUS_NOTES) {
-				continue;
-			}
-			int x = tickX(entry.getKey());
+		for (long overloaded : overloadedTicks()) {
+			int x = tickX(overloaded);
 			if (x >= rollX && x <= rollX + rollWidth) {
 				graphics.fill(x - 1, rollY, x + 2, rollY + rollHeight, 0x66FF3333);
 			}
 		}
+	}
+
+	/**
+	 * The ticks carrying more notes than a build can place, as a sorted array.
+	 *
+	 * <p>Sifted once per analysis rather than once per frame. The grid used to walk the whole chord
+	 * map looking for them, which boxes a Long for every distinct tick in the song -- fourteen
+	 * hundred of them on a dense import, to find the usual answer of none.</p>
+	 */
+	private long[] overloadedTicks() {
+		SongAnalysis stats = projectStats();
+		if (cachedOverloadedStats != stats) {
+			cachedOverloadedStats = stats;
+			cachedOverloadedTicks = stats.chordCounts().entrySet().stream()
+				.filter(entry -> entry.getValue() > SongAnalysis.MAX_SIMULTANEOUS_NOTES)
+				.mapToLong(Map.Entry::getKey)
+				.sorted()
+				.toArray();
+		}
+		return cachedOverloadedTicks;
 	}
 
 	/**
@@ -2073,15 +2208,37 @@ public final class ComposerScreen extends Screen {
 		return step;
 	}
 
+	/**
+	 * Works out where every visible note goes and hands the lot to {@link NoteCellGrid} to draw.
+	 *
+	 * <p>Nothing here draws directly. Zoomed all the way out a dense composition asks for thousands
+	 * of quads on a few hundred pixel columns, most of them behind another note or touching one of
+	 * the same colour, and the grid is what turns those into the few hundred that are actually
+	 * visible. The loop's own job is to be cheap: no rectangle object per note, no boxed lookup
+	 * where the answer is known to be no, and pitch culled on an int comparison.</p>
+	 */
 	private void extractNotes(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
 		ComposerProject shown = displayProject();
 		SongAnalysis stats = projectStats();
 		Set<Long> offGrid = stats.offGrid();
 		Set<Long> crowded = stats.crowded();
+		// Hoisted out of the per-note loop: a Set<Long> lookup boxes the tick, and on a clean song
+		// all three of these are empty, so nine thousand boxes a frame buy three known answers.
+		boolean anyCrowded = !crowded.isEmpty();
+		boolean anyOffGrid = !offGrid.isEmpty();
+		boolean anySelected = !selectedNotes.isEmpty();
 		NoteEvent hoveredCandidate = null;
 		int hoveredCandidateLayer = -1;
 		long firstVisibleTick = Math.max(0L, horizontalScroll - stats.maximumNoteDuration());
 		long lastVisibleTick = horizontalScroll + (long)Math.ceil(rollWidth * ticksPerPixel);
+		int rollRight = rollX + rollWidth;
+		int rollBottom = rollY + rollHeight;
+		// Pitch rows the roll can show, so a note above or below the window is rejected on an int
+		// comparison instead of on a rectangle built for it.
+		int lowestVisibleMidi = topMidiNote - rollHeight / rowHeight - 1;
+		notesConsidered = 0;
+		notesDrawn = 0;
+		cells.begin(rollX, rollWidth, NOTE_TRIGGER_WIDTH, rowHeight - 2);
 		for (int layerIndex : noteDrawOrder(shown)) {
 			Layer layer = shown.layers().get(layerIndex);
 			if (!layer.visible()) {
@@ -2089,6 +2246,8 @@ public final class ComposerScreen extends Screen {
 			}
 			boolean active = layerIndex == shown.activeLayerIndex();
 			boolean highlighted = active || selectedLayers.contains(layerIndex);
+			int liveColor = highlighted ? layerColor(layerIndex) : 0xFF777A80;
+			int deadColor = highlighted ? 0xFFFF6B6B : 0xFF755050;
 			List<NoteEvent> notes = layer.notes();
 			for (int noteIndex = lowerBoundStart(notes, firstVisibleTick);
 					noteIndex < notes.size(); noteIndex++) {
@@ -2096,39 +2255,42 @@ public final class ComposerScreen extends Screen {
 				if (note.startTick() > lastVisibleTick) {
 					break;
 				}
-				NoteRect rect = noteRect(note);
-				if (!rect.intersects(rollX, rollY, rollX + rollWidth, rollY + rollHeight)) {
+				notesConsidered++;
+				int midi = note.midiNote();
+				if (midi > topMidiNote || midi < lowestVisibleMidi) {
 					continue;
 				}
-				boolean selected = selectedNotes.contains(note.id());
-				int color = highlighted ? layerColor(layerIndex) : 0xFF777A80;
-				if (!note.isBuildable()) {
-					color = highlighted ? 0xFFFF6B6B : 0xFF755050;
+				int left = tickX(note.startTick());
+				int right = left + NOTE_TRIGGER_WIDTH;
+				if (right <= rollX || left >= rollRight) {
+					continue;
 				}
-				if (selected) {
-					graphics.fill(rect.left - 1, rect.top - 1, rect.right + 1, rect.bottom + 1, 0xFFFFFFFF);
+				int top = rollY + (topMidiNote - midi) * rowHeight + 1;
+				int bottom = top + rowHeight - 2;
+				if (bottom <= rollY || top >= rollBottom) {
+					continue;
 				}
-				graphics.fill(rect.left, rect.top, rect.right, rect.bottom, color);
-				boolean tooFrequent = crowded.contains(note.startTick());
-				if (tooFrequent || offGrid.contains(note.startTick())) {
-					// Outline rather than recolour: a layer colour may itself be orange.
-					// Orange means arrives-too-soon-to-build; yellow means lands-between-ticks.
-					int warn = tooFrequent
-						? (highlighted ? 0xFFFF9A2E : 0x55FF9A2E)
-						: (highlighted ? 0xFFFFE45C : 0x55FFE45C);
-					graphics.fill(rect.left, rect.top, rect.right, rect.top + 1, warn);
-					graphics.fill(rect.left, rect.bottom - 1, rect.right, rect.bottom, warn);
-					graphics.fill(rect.left, rect.top, rect.left + 1, rect.bottom, warn);
-					graphics.fill(rect.right - 1, rect.top, rect.right, rect.bottom, warn);
+				notesDrawn++;
+				int flags = highlighted ? NoteCellGrid.HIGHLIGHTED : 0;
+				if (anySelected && selectedNotes.contains(note.id())) {
+					flags |= NoteCellGrid.SELECTED;
 				}
-				if (mouseX >= rect.left && mouseX < rect.right
-						&& mouseY >= rect.top && mouseY < rect.bottom) {
+				if (anyCrowded && crowded.contains(note.startTick())) {
+					flags |= NoteCellGrid.CROWDED;
+				} else if (anyOffGrid && offGrid.contains(note.startTick())) {
+					flags |= NoteCellGrid.OFF_GRID;
+				}
+				cells.add(left, top, note.isBuildable() ? liveColor : deadColor, flags, midi);
+				if (mouseX >= left && mouseX < right && mouseY >= top && mouseY < bottom) {
 					// Topmost wins: draw order runs back to front, so a later hit overwrites.
 					hoveredCandidate = note;
 					hoveredCandidateLayer = layerIndex;
 				}
 			}
 		}
+		quads.graphics = graphics;
+		noteQuads = cells.draw(quads);
+		quads.graphics = null;
 		int endX = tickX(project().endTick());
 		if (endX >= rollX && endX <= rollX + rollWidth) {
 			graphics.fill(endX, rollY, endX + 1, rollY + rollHeight, 0x66E8C05A);
@@ -2338,7 +2500,7 @@ public final class ComposerScreen extends Screen {
 		} else {
 			// Counted off the sequence rather than off the composition, so it agrees with what the
 			// paste would place -- including which notes deduplication left out of it.
-			SongBuilder.BlockCounts blocks = SongBuilder.blockCounts(config.tracks());
+			SongBuilder.BlockCounts blocks = blockCounts();
 			segments.add(blocks.total() + " blocks (" + blocks.noteBlocks() + " note · "
 				+ blocks.repeaters() + " repeater)");
 		}
@@ -2361,6 +2523,24 @@ public final class ComposerScreen extends Screen {
 			? 0xFF5AD46A
 			: peakChord >= CHORD_WARNING_THRESHOLD || overloaded > 0 ? 0xFFFF7777 : 0xFFFFAA00;
 		graphics.text(font, status.toString(), 8, height - 16, color, false);
+	}
+
+	/**
+	 * How many blocks the sequence would place, cached on the sequence it was counted from.
+	 *
+	 * <p>Counting re-parses every track's text, allocates an event per note and sorts the lot --
+	 * eight to ten milliseconds on a dense song, which the status line was paying <em>every
+	 * frame</em> for a number that only moves when the composition does. Same identity trick as
+	 * {@link #projectStats()}: {@code tracks()} hands back the same list until the project changes,
+	 * so a hit is a reference comparison.</p>
+	 */
+	private SongBuilder.BlockCounts blockCounts() {
+		List<FastNoteblocksConfig.SequenceTrack> tracks = config.tracks();
+		if (cachedBlockTracks != tracks || cachedBlockCounts == null) {
+			cachedBlockTracks = tracks;
+			cachedBlockCounts = SongBuilder.blockCounts(tracks);
+		}
+		return cachedBlockCounts;
 	}
 
 	private SongAnalysis projectStats() {
@@ -2797,6 +2977,18 @@ public final class ComposerScreen extends Screen {
 				cancelLayerRename();
 				return true;
 			}
+		}
+		if (event.key() == GLFW.GLFW_KEY_F9 && layerNameBox == null) {
+			profiling = !profiling;
+			java.util.Arrays.fill(phaseNanos, 0L);
+			profileFrameNanos = 0L;
+			profileFrames = 0;
+			profileWindowSince = 0L;
+			profileSummary = "";
+			showResult(Component.literal(profiling
+				? "Frame profiler on - timings go to the log every second"
+				: "Frame profiler off"));
+			return true;
 		}
 		if (event.key() == GLFW.GLFW_KEY_SPACE && layerNameBox == null) {
 			if (playing || anythingAudible()) {
@@ -3936,6 +4128,16 @@ public final class ComposerScreen extends Screen {
 				updateMessage();
 				listener.accept(scaleQuarters);
 			}
+		}
+	}
+
+	/** The note grid's outlet onto whichever frame is being drawn. One instance, reused. */
+	private static final class GraphicsQuads implements NoteCellGrid.Quads {
+		private GuiGraphicsExtractor graphics;
+
+		@Override
+		public void fill(int left, int top, int right, int bottom, int color) {
+			graphics.fill(left, top, right, bottom, color);
 		}
 	}
 
