@@ -419,7 +419,7 @@ public final class SongBuilder {
 		} else {
 			walkWall(events, origin, forward, laneWidth, floors, placements, layout, start);
 		}
-		return placements.finish(mode, origin);
+		return placements.finish(mode, origin, origin.getX(), origin.getX() + laneWidth);
 	}
 
 	/**
@@ -3853,9 +3853,18 @@ public final class SongBuilder {
 	 * @param turns the block each lane ended on, which is where it handed the signal to the next
 	 *     one. A folding build wants these in as few columns as it has walls.
 	 */
+	/**
+	 * @param nearWall world x of the wall a lane running back stops at, after the plan has slid
+	 * @param farWall world x of the wall a lane running forward stops at, after the plan has slid.
+	 *     Both are here so a debug build can say where the walls it was measured against actually
+	 *     came out: a breach is a lane past one of them, and reading that off blocks means knowing
+	 *     which column it was supposed to stop in. The slide is the reason it cannot be worked out
+	 *     by hand -- a plan moves after it is walked, so the wall the walk used is not the wall you
+	 *     are standing in front of.
+	 */
 	record PastePlan(List<String> commands, int width, int depth, int height, PasteMode mode,
 			List<String> faults, List<BlockPos> turns, List<Integer> moved, List<Integer> breaches,
-			List<Integer> recesses, Map<String, Integer> padding) {
+			List<Integer> recesses, Map<String, Integer> padding, int nearWall, int farWall) {
 
 		/**
 		 * Cells of lane filled with wire rather than with music, counted by what asked for them.
@@ -4209,6 +4218,10 @@ public final class SongBuilder {
 		}
 
 		PastePlan finish(PasteMode mode, BlockPos origin) {
+			return finish(mode, origin, origin.getX(), origin.getX());
+		}
+
+		PastePlan finish(PasteMode mode, BlockPos origin, int nearWall, int farWall) {
 			// Where the plan lands, worked out before anything is checked so that a fault can name a
 			// block you are able to go and stand in front of. Nothing lands behind you: the walk
 			// reaches outside its own walls here and there -- a chord hanging off the far side of the
@@ -4245,7 +4258,7 @@ public final class SongBuilder {
 				mode, List.copyOf(faults),
 				turns.stream().map(turn -> turn.offset(shiftX, 0, shiftZ)).toList(),
 				List.copyOf(moved), List.copyOf(breaches), List.copyOf(recesses),
-				Map.copyOf(padding));
+				Map.copyOf(padding), nearWall + shiftX, farWall + shiftX);
 		}
 	}
 }

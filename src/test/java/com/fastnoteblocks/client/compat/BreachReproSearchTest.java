@@ -1,5 +1,8 @@
 package com.fastnoteblocks.client.compat;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
 import java.util.ArrayList;
 import java.util.List;
 import net.minecraft.SharedConstants;
@@ -22,6 +25,44 @@ class BreachReproSearchTest {
 	}
 
 	private record Hit(String command, String fault, int blocks) {
+	}
+
+	/**
+	 * The walls the command reports are the walls the build was measured against.
+	 *
+	 * <p>Checked rather than trusted because the plan slides after it is walked, so the number is
+	 * not one anybody can work out from where they were standing -- which is the whole reason it is
+	 * worth printing. A breaching build is the case that proves it: the breach is blocks past the
+	 * far wall, so if the reported wall were wrong the overshoot would not line up with the fault.</p>
+	 */
+	@Test
+	void reportsTheWallsTheBuildWasMeasuredAgainst() {
+		SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0),
+			DebugChords.notes(DebugChords.parse("24@1 24@1 1@1 19@1 1@1", DebugChords.DEFAULT_GAP)),
+			SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+			new SongBuilder.BuildLimits(4, 28, 3), new SongBuilder.WalkStart(0, 2, -1, false));
+		int lowest = Integer.MAX_VALUE;
+		int highest = Integer.MIN_VALUE;
+		for (String command : plan.commands()) {
+			int x = Integer.parseInt(command.split(" ")[1]);
+			lowest = Math.min(lowest, x);
+			highest = Math.max(highest, x);
+		}
+		System.out.println("WALLS near=" + plan.nearWall() + " far=" + plan.farWall()
+			+ " blocks span x=" + lowest + ".." + highest);
+		assertEquals(26, plan.farWall() - plan.nearWall(), "twenty-eight wide is twenty-six columns");
+		assertEquals(lowest, plan.nearWall(), "the build starts on the near wall");
+		int overshoot = 0;
+		for (String fault : plan.faults()) {
+			if (fault.startsWith("a lane turned -")) {
+				overshoot = Math.max(overshoot, -Integer.parseInt(fault.split(" ")[3]));
+			}
+		}
+		System.out.println("WALLS worst breach " + overshoot + " columns, blocks reach "
+			+ (highest - plan.farWall()) + " past the far wall");
+		assertTrue(overshoot > 0, "this spec is supposed to breach");
+		assertTrue(highest > plan.farWall(),
+			"a breaching build has blocks past the far wall it reports");
 	}
 
 	@Test

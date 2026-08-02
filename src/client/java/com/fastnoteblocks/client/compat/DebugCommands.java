@@ -154,6 +154,14 @@ public final class DebugCommands {
 			+ plan.mode().label() + ", " + plan.width() + " long, " + plan.depth() + " deep, "
 			+ plan.height() + " high, " + plan.commands().size() + " blocks")
 			.withStyle(ChatFormatting.GRAY));
+		// Where the walls came out, in the world, which cannot be worked out from where you are
+		// standing: the plan slides after it is walked so that nothing lands behind you, and the
+		// wall the walk measured against moves with it. A breach is a lane past one of these, so
+		// reading one off the blocks means knowing which column it was meant to stop in.
+		source.sendFeedback(Component.literal("  walls at x=" + plan.nearWall() + " and x="
+			+ plan.farWall() + ", " + (plan.farWall() - plan.nearWall()) + " columns between; "
+			+ "first chord opens at x=" + firstChordX(plan))
+			.withStyle(ChatFormatting.GRAY));
 		// Every fault, not a count of them. There are never many for a spec small enough to be worth
 		// typing, and the whole point of building one is to read what it says.
 		for (String fault : plan.faults()) {
@@ -174,6 +182,20 @@ public final class DebugCommands {
 	}
 
 	/** Where a real paste would land, so a debug build stands where a song would. */
+	/**
+	 * The lowest x any block of the build stands in, which is where the first chord opens.
+	 *
+	 * <p>Read off the commands rather than tracked, because the interesting number is where the
+	 * build actually starts and not where the walk thought it would.</p>
+	 */
+	private static int firstChordX(SongBuilder.PastePlan plan) {
+		int lowest = Integer.MAX_VALUE;
+		for (String command : plan.commands()) {
+			lowest = Math.min(lowest, Integer.parseInt(command.split(" ")[1]));
+		}
+		return lowest == Integer.MAX_VALUE ? 0 : lowest;
+	}
+
 	private static BlockPos origin(FabricClientCommandSource source) {
 		return source.getPlayer().blockPosition().relative(Direction.EAST).immutable();
 	}
