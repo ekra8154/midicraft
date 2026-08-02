@@ -55,6 +55,10 @@ public final class ComposerScreen extends Screen {
 	private static final int MENU_TITLE_PADDING = 8;
 	/** Where a menu's panel hangs from, just under the bar. */
 	private static final int MENU_PANEL_TOP = TOOLBAR_HEIGHT + 2;
+	private static final int CONTROL_HEIGHT = 14;
+	private static final int CONTROL_TOP = MENU_BAR_TOP + 1;
+	private static final int CONTROL_GAP = 4;
+	private static final int CONTROL_PADDING = 10;
 	private static final int LAYER_PANEL_WIDTH = 196;
 	private static final int PIANO_WIDTH = 48;
 	/** Tall enough for a bar number with the clock time under it. */
@@ -250,8 +254,8 @@ public final class ComposerScreen extends Screen {
 	 * cursor, and vanished the moment it stopped being hovered.</p>
 	 */
 	private int submenuAnchorY;
-	/** Right edge of the bar's controls, which is where the composition name starts. */
-	private int toolbarControlsRight = 320;
+	/** Left edge of the bar's controls, which is where the composition name has to stop. */
+	private int toolbarControlsLeft = 320;
 	private long lastScaleChangeAt;
 	private Component toast;
 	private long toastShownAt;
@@ -366,21 +370,31 @@ public final class ComposerScreen extends Screen {
 		centerMinecraftRange();
 		// The menus are drawn, not built: see extractMenuBar. Only the three controls are widgets,
 		// because they carry state you read off them rather than opening anything.
-		int x = menuTitles().getLast().right() + 10;
+		//
+		// Pinned to the right edge and sized to their own widest label. The menus grow rightward as
+		// they are added to and the controls do not move; keeping the two apart means neither can
+		// push the other about. Each is measured against every caption it can ever show, so Snap
+		// does not jump a pixel when it reaches "repeater" or Speed when it reaches "0.25x".
+		int playWidth = widestLabel(CONTROL_PADDING, "Play", "Stop");
+		int snapWidth = widestLabel(CONTROL_PADDING, "Snap 1/4", "Snap 1/8", "Snap 1/16",
+			"Snap 1/32", "Snap repeater", "Snap off");
+		int speedWidth = widestLabel(CONTROL_PADDING + 8, "Speed 0.25x", "Speed 2.00x", "Speed 8.00x");
+		int speedX = width - 6 - speedWidth;
+		int snapX = speedX - CONTROL_GAP - snapWidth;
+		int playX = snapX - CONTROL_GAP - playWidth;
+		toolbarControlsLeft = playX;
 		playButton = addRenderableWidget(Button.builder(playLabel(), button -> togglePlayback())
-			.bounds(x, MENU_BAR_TOP, 44, MENU_BAR_ROW_HEIGHT)
+			.bounds(playX, CONTROL_TOP, playWidth, CONTROL_HEIGHT)
 			.tooltip(Tooltip.create(Component.literal("Preview all unmuted layers")))
 			.build());
-		x += 48;
 		snapButton = addRenderableWidget(Button.builder(snapLabel(), button -> cycleSnap())
-			.bounds(x, MENU_BAR_TOP, 68, MENU_BAR_ROW_HEIGHT)
+			.bounds(snapX, CONTROL_TOP, snapWidth, CONTROL_HEIGHT)
 			.tooltip(Tooltip.create(Component.literal("Grid used when adding or dragging notes")))
 			.build());
-		x += 72;
 		delayScaleSlider = addRenderableWidget(new DelayScaleSlider(
-			x, MENU_BAR_TOP, 84, MENU_BAR_ROW_HEIGHT, project().speedQuarters(), this::setDelayScale
+			speedX, CONTROL_TOP, speedWidth, CONTROL_HEIGHT, project().speedQuarters(),
+			this::setDelayScale
 		));
-		toolbarControlsRight = x + 84;
 		delayScaleSlider.setTooltip(Tooltip.create(Component.literal(
 			"Playback speed, 0.25x to 8.00x. Higher is faster. Saving to the sequence bakes this "
 				+ "into the delays, so the build runs at the speed you hear here."
@@ -1242,6 +1256,15 @@ public final class ComposerScreen extends Screen {
 		return titles;
 	}
 
+	/** The width a control needs to hold any caption it can ever show, plus its padding. */
+	private int widestLabel(int padding, String... labels) {
+		int widest = 0;
+		for (String label : labels) {
+			widest = Math.max(widest, font.width(label));
+		}
+		return widest + padding;
+	}
+
 	private static String menuBarLabel(ToolbarMenu menu) {
 		return switch (menu) {
 			case FILE -> "File";
@@ -2064,19 +2087,29 @@ public final class ComposerScreen extends Screen {
 	}
 
 	/** The composition being edited, so which one it is never has to be remembered. */
+	/**
+	 * The song's name, in the gap between the menus and the controls.
+	 *
+	 * <p>Right-aligned against the controls rather than left-aligned after the menus, so that a
+	 * long name runs back into the empty middle of the bar instead of into the Play button. The
+	 * controls themselves are pinned to the window edge, so nothing here can move them -- renaming
+	 * a song or picking up an unsaved dot leaves them exactly where your hand expects.</p>
+	 */
 	private void extractCompositionName(GuiGraphicsExtractor graphics) {
-		int left = toolbarControlsRight + 12;
-		if (left > width - 40) {
+		int right = toolbarControlsLeft - 10;
+		int left = menuTitles().getLast().right() + 12;
+		if (right - left < 48) {
 			return;
 		}
 		// A bullet rather than the usual asterisk, because the composer already spends asterisks on
 		// nothing and dots on the build flag -- and this one has to read at a glance from across the
 		// toolbar, which is where you look before deciding whether it is safe to leave.
 		String name = project().name() + (unsaved() ? "  • unsaved" : "");
-		String shown = font.width(name) <= width - left - 8
+		String shown = font.width(name) <= right - left
 			? name
-			: font.plainSubstrByWidth(name, width - left - 16) + "...";
-		graphics.text(font, shown, left, MENU_BAR_TOP + 4, unsaved() ? 0xFFFFC864 : 0xFFD6D8DD, false);
+			: font.plainSubstrByWidth(name, right - left - 8) + "...";
+		graphics.text(font, shown, right - font.width(shown), MENU_BAR_TOP + 4,
+			unsaved() ? 0xFFFFC864 : 0xFFD6D8DD, false);
 	}
 
 	private void extractPanels(GuiGraphicsExtractor graphics) {
