@@ -695,14 +695,14 @@ public final class SongBuilder {
 			// hands out a fresh fifteen, and turns after that. It costs footprint, which says so, and
 			// not a tail that never fires, which does not.
 			int unpaid = Math.max(0, columns - pad.cells().size());
-				int turnCost = pad.cells().isEmpty() && unpaid == 0 && lastStyle == ChordStyle.BUS
+				int turnCost = pad.cells().isEmpty() && unpaid == 0 && endsOnBus(lastStyle)
 					? offBus : turnCells;
 				boolean reachesWall = !PIN_DESCENTS || flatAhead
 					|| pad.signal() - unpaid >= turnCost;
 			boolean canTurn = layout.ultra()
 				? index > 0 && reachesWall && (flatAhead ? straddles && pad.signal() >= 1
 					: pad.signal()
-						>= (pad.cells().isEmpty() && lastStyle == ChordStyle.BUS ? offBus : turnCells))
+						>= (pad.cells().isEmpty() && endsOnBus(lastStyle) ? offBus : turnCells))
 				: index > 0 && events.get(index - 1).maxSafeTurnDistance() >= MAX_LANE_SPACING;
 			int spentPadding = 0;
 			// Ahead of a staircase only, for the same reason a split is. A chord that would have been
@@ -825,7 +825,7 @@ public final class SongBuilder {
 					}
 					BlockPos landed = climb > 0
 						? addGlassClimb(placements, lane.pos(), travel,
-							lastStyle == ChordStyle.BUS && pad.cells().isEmpty(), currentTime)
+							endsOnBus(lastStyle) && pad.cells().isEmpty(), currentTime)
 						: addSpiralDescent(placements, lane.pos(), travel, descentSide, currentTime);
 					floor = above;
 					// What the staircase leaves the next lane. It matters because the next lane may
@@ -833,7 +833,7 @@ public final class SongBuilder {
 					// handover in a build that spends wire without a repeater at either end of it.
 					// Charged at what it actually spends: a climb taken straight off a bus skips two
 					// rungs, and counting them anyway left every lane after one two blocks poorer.
-					tipSignal = pad.signal() - pinned - (climb > 0 && lastStyle == ChordStyle.BUS
+					tipSignal = pad.signal() - pinned - (climb > 0 && endsOnBus(lastStyle)
 						&& pad.cells().isEmpty() ? offBus : turnCells);
 					lane = Lane.straight(landed, travel.getOpposite(), depth);
 					laneStarted = false;
@@ -1064,11 +1064,11 @@ public final class SongBuilder {
 				// two sees the room that bought and pads in turn, and a preference cascades down the
 				// lane as though it were a requirement.
 				Pad behind = planPad((laneWall - end) * travel.getStepX(), reached.tip(),
-					reached.style() == ChordStyle.BUS ? offBus : turnCells,
+					endsOnBus(reached.style()) ? offBus : turnCells,
 					Math.max(0, next.time() - event.time() - 1));
 				boolean behindReaches = (laneWall - end) * travel.getStepX() >= 0
 					&& behind.cells().size() == (laneWall - end) * travel.getStepX()
-					&& behind.signal() >= (reached.style() == ChordStyle.BUS ? offBus : turnCells);
+					&& behind.signal() >= (endsOnBus(reached.style()) ? offBus : turnCells);
 				if (!cuttable && !nextStraddles && !behindReaches
 						&& (beyond > farWall || beyond < nearWall)) {
 					int ahead = prePad(cursor.getX(), travel.getStepX(), event, wait - spentPadding,
@@ -1163,7 +1163,11 @@ public final class SongBuilder {
 			// the signal path over the top is repeater, centre block, next cell, and a centre block
 			// driven by a repeater is a solid block strongly powered, so the cell after it reads
 			// fifteen. Ekran measured it with lamps: fifteen lit from the module, in and out.
+			// A stacked head reports the cells its tail actually laid, plus the one that carried the
+			// signal clear of its hangers -- so it is charged the same way a bus is, off a fifteen
+			// its own centre block re-issued.
 			tipSignal = placed.style() == ChordStyle.BUS
+					|| placed.style() == ChordStyle.STACKED_HEAD
 				? DUST_RANGE - placed.busCells()
 				: DUST_RANGE;
 			laneStarted = true;
@@ -1181,8 +1185,26 @@ public final class SongBuilder {
 	 * should have gone in front of the last event was never laid.</p>
 	 */
 	private static int turnReserve(EventGroup event, int turnCells, Layout layout) {
-		return layout.ultra() && event.style() == ChordStyle.BUS
-			&& DUST_RANGE - (event.notes().size() + 1) / 2 < turnCells ? 1 : 0;
+		return layout.ultra() && endsOnBus(event.style())
+			&& DUST_RANGE - busCellsOf(event) < turnCells ? 1 : 0;
+	}
+
+	/**
+	 * Whether the wire leaves this chord off the end of a bus rather than off a block.
+	 *
+	 * <p>The question every turn asks, and it is about the last thing the wire touches, not about
+	 * the shape the chord was sorted into. A stacked head is a stacked module with a bus running
+	 * out of the back of it, so the wire leaves it exactly as it leaves a bus -- weaker by a cell a
+	 * note pair, and off dust rather than off a strongly powered block.</p>
+	 */
+	private static boolean endsOnBus(ChordStyle style) {
+		return style == ChordStyle.BUS || style == ChordStyle.STACKED_HEAD;
+	}
+
+	/** Cells of dust this chord spends between its own repeater and the next thing to read it. */
+	private static int busCellsOf(EventGroup event) {
+		return event.style() == ChordStyle.STACKED_HEAD
+			? 1 + stackedHeadTailCells(event.notes()) : (event.notes().size() + 1) / 2;
 	}
 
 	/**
@@ -1271,19 +1293,28 @@ public final class SongBuilder {
 		// Erring towards the bus is the safe way round: the walk may yet find the module needs no
 		// nudge and build it short, which lands the lane inside its wall rather than outside it.
 		if (style.stacked()
-				&& (wall - (startX + stepX * delayColumns)) * stepX < STACKED_CELLS + 1) {
+				&& (wall - (startX + stepX * delayColumns)) * stepX
+					< (style == ChordStyle.STACKED_HEAD
+						? stackedHeadLength(event.notes()) + 1 : STACKED_CELLS + 1)) {
 			style = ChordStyle.BUS;
 		}
+		int tailCells = style == ChordStyle.STACKED_HEAD
+			? stackedHeadTailCells(event.notes()) : 0;
 		int length;
-		if (style.stacked()) {
+		if (style == ChordStyle.STACKED_HEAD) {
+			length = delayColumns + STACKED_HEAD_COLUMNS + tailCells;
+		} else if (style.stacked()) {
 			length = delayColumns + 2;
 		} else {
 			length = delayColumns + (style == ChordStyle.BUS ? 1 + cells : 2);
 		}
-		// The same two cases the walk charges: a bus spends a cell a note pair, and everything else
-		// hands on the whole fifteen.
+		// The three cases the walk charges: a bus spends a cell a note pair, a stacked head spends
+		// one for the cell that carries the signal clear of its hangers and then a cell a pair for
+		// what is left, and everything else hands on the whole fifteen.
 		return new Landing(startX + stepX * length,
-			style == ChordStyle.BUS ? DUST_RANGE - cells : DUST_RANGE, style.stacked(), style);
+			style == ChordStyle.BUS ? DUST_RANGE - cells
+				: style == ChordStyle.STACKED_HEAD ? DUST_RANGE - 1 - tailCells : DUST_RANGE,
+			style.stacked(), style);
 	}
 
 	/**
@@ -1343,7 +1374,7 @@ public final class SongBuilder {
 				// have wanted twelve and there was room for three.
 				Pad end = closingPad(events, tried, from, last, owing, turnCells);
 				int need = end.cells().isEmpty()
-					&& tried.styles().get(last - from) == ChordStyle.BUS ? offBus : turnCells;
+					&& endsOnBus(tried.styles().get(last - from)) ? offBus : turnCells;
 				if (TRACE) {
 					System.out.println("  TRY last=" + last + " attempt=" + attempt + " pads=" + pads
 						+ " triedLast=" + tried.last() + " owing=" + owing + " padCells="
@@ -1483,7 +1514,7 @@ public final class SongBuilder {
 		int room = (wall - sweep.ends().get(last - from)) * stepX;
 		if (room == 0) {
 			return sweep.tips().get(last - from)
-				>= (sweep.styles().get(last - from) == ChordStyle.BUS ? offBus : turnCells);
+				>= (endsOnBus(sweep.styles().get(last - from)) ? offBus : turnCells);
 		}
 		// Cut across the turn: as much of the next chord as reaches the wall, then the staircase, then
 		// the rest of it, all off the one repeater. It closes a lane wherever the lane has got to, and
@@ -2092,9 +2123,12 @@ public final class SongBuilder {
 			// are its own.
 			boolean roomBehind = delayRepeaters > 0 || !previousTookTheGap;
 			ChordStyle style = chooseStyle(layout, chord, roomBehind);
-			int busLength = (chord.size() + 1) / 2;
-			int eventLength = style == ChordStyle.BUS ? 1 + busLength : 2;
-			int maxSafeTurnDistance = style == ChordStyle.BUS ? Math.max(0, 13 - busLength) : 13;
+			int busLength = style == ChordStyle.STACKED_HEAD ? stackedHeadTailCells(chord)
+				: (chord.size() + 1) / 2;
+			int eventLength = style == ChordStyle.BUS ? 1 + busLength
+				: style == ChordStyle.STACKED_HEAD ? STACKED_HEAD_COLUMNS + busLength : 2;
+			int maxSafeTurnDistance = style == ChordStyle.BUS || style == ChordStyle.STACKED_HEAD
+				? Math.max(0, 13 - busLength) : 13;
 			result.add(new EventGroup(time, List.copyOf(chord), delayRepeaters + eventLength,
 				maxSafeTurnDistance, style, laneReachOf(layout, style, chord.size())));
 			currentTime = time;
@@ -2130,8 +2164,74 @@ public final class SongBuilder {
 		if (roomBehind && ultraSlots(chord, true) != null) {
 			return ChordStyle.STACKED_FULL;
 		}
+		// Too big for the shape, but not too big to open with it. Needs the room behind for the same
+		// reason STACKED_FULL does -- the head reaches back for two of its seven -- so a chord that
+		// cannot have it falls to the bus exactly as before.
+		if (STACKED_HEAD_TAILS && roomBehind && stackedHeadOf(chord) != null) {
+			return ChordStyle.STACKED_HEAD;
+		}
 		return ChordStyle.BUS;
 	}
+
+	/**
+	 * Whether a big chord may open with a stacked module and run the rest out on a bus.
+	 *
+	 * <p>The experiment. Every breach left in the library is a lane whose last chord is a bus of
+	 * twenty-one or more: a bus spends a cell a note pair, so eleven cells hand on four and a
+	 * descent wants five. Seven of those notes hung on a module instead cost no wire at all, which
+	 * is the whole of what the lane is short of.</p>
+	 */
+	static boolean STACKED_HEAD_TAILS = true;
+
+	/** How many notes the module at the head of a big chord may take. */
+	private static final int STACKED_HEAD_NOTES = 7;
+
+	/**
+	 * The notes a stacked head would take, or null where the chord cannot open with one.
+	 *
+	 * <p>Largest head first: every note on the module is a note off the bus, and the bus is what
+	 * costs wire. Never the whole chord -- a chord that fits the shape outright is one of the
+	 * stacked styles and never reaches here.</p>
+	 */
+	private static List<EventNote> stackedHeadOf(List<EventNote> chord) {
+		// Only where the shape could not have held the chord anyway. A chord of seven that fails
+		// {@link #ultraSlots} fails it for want of something to put in the centre, and a head of six
+		// with the seventh on a bus would slip past that rule rather than answer it. Those are a
+		// settled question with tests of their own; this is about the chord of twenty-four.
+		if (chord.size() <= STACKED_HEAD_NOTES) {
+			return null;
+		}
+		for (int size = Math.min(STACKED_HEAD_NOTES, chord.size() - 1); size >= 4; size--) {
+			// The carrying cell is on the same run as the bus behind it, and {@link #layBus} counts
+			// only its own cells against the fifteen. A tail allowed the whole fifteen is therefore
+			// sixteen blocks of wire, and the far end of sixteen is worth nothing -- one dead build
+			// in the library said so the first time this was measured.
+			if ((chord.size() - size + 1) / 2 > DUST_RANGE - 1) {
+				continue;
+			}
+			if (ultraSlots(chord.subList(0, size), true) != null) {
+				return chord.subList(0, size);
+			}
+		}
+		return null;
+	}
+
+	/** Cells of bus a stacked-head chord runs out behind its module, or -1 where it cannot have one. */
+	private static int stackedHeadTailCells(List<EventNote> chord) {
+		List<EventNote> head = stackedHeadOf(chord);
+		return head == null ? -1 : (chord.size() - head.size() + 1) / 2;
+	}
+
+	/**
+	 * Columns a stacked-head chord occupies: the repeater, the module, the cell that carries the
+	 * signal clear of the module's front hangers, and then the bus.
+	 */
+	private static int stackedHeadLength(List<EventNote> chord) {
+		return STACKED_HEAD_COLUMNS + stackedHeadTailCells(chord);
+	}
+
+	/** The repeater, the module, and the carrying cell behind it, before any bus. */
+	private static final int STACKED_HEAD_COLUMNS = 3;
 
 	/**
 	 * What a chord of this shape does to the lane it sits in.
@@ -3172,7 +3272,7 @@ public final class SongBuilder {
 			Layout layout) {
 		Direction travel = lane.travel();
 		ChordStyle style = event.style();
-		if (style == ChordStyle.STACKED_FULL && !roomBehind) {
+		if ((style == ChordStyle.STACKED_FULL || style == ChordStyle.STACKED_HEAD) && !roomBehind) {
 			style = ChordStyle.BUS;
 		}
 		// A stacked module may not sit perpendicular to another one, and the two modules either side
@@ -3249,6 +3349,11 @@ public final class SongBuilder {
 		// can ask exactly the same question. When the walk converted here on a clash the planner could
 		// not see, the two disagreed about how long the chord was, and a lane measured for two cells
 		// that got five came to rest three past its wall.
+		if (style == ChordStyle.STACKED_HEAD
+				&& roomAhead < stackedHeadLength(event.notes()) + 1) {
+			placements.padded("busForRoom");
+			style = ChordStyle.BUS;
+		}
 		if (style.stacked() && roomAhead < STACKED_CELLS + 1) {
 			placements.padded("busForRoom");
 			style = ChordStyle.BUS;
@@ -3278,6 +3383,29 @@ public final class SongBuilder {
 			placements.padded("parity");
 			addParityPad(placements, start.pos());
 			start = start.ahead(1);
+		}
+		if (style == ChordStyle.STACKED_HEAD) {
+			List<EventNote> head = stackedHeadOf(event.notes());
+			List<EventNote> tail = event.notes().subList(head.size(), event.notes().size());
+			Lane after = addStackedEventModule(placements, start, triggerDelay, event.time(),
+				ultraSlots(head, true));
+			// Glass, and this is the one cell in the module that has to be. The module's two front
+			// low notes hang either side of exactly this column, a level down, and a live block
+			// beside a note block sounds it. Stone here would sound them off the lane instead of off
+			// their own relay -- the hazard {@link #addParityPad} is written about. Glass cannot be
+			// powered at all, and the dust on top of it sits against the centre block, which the
+			// repeater strongly powers: it reads a fresh fifteen.
+			set(placements, after.pos(), "minecraft:glass");
+			set(placements, after.pos().above(), "minecraft:redstone_wire");
+			Lane carried = after.ahead(1);
+			// And the bus climbs onto the dust the way a cut chord's far half does, off the arriving
+			// wire rather than off a repeater of its own -- so every note here is still the one tick
+			// the chord is.
+			int cells = layBus(placements,
+				Lane.straight(carried.pos().above(), carried.travel(), carried.noteSide()), tail,
+				event.time());
+			return new Placed(Lane.straight(carried.pos().relative(carried.travel(), cells),
+				carried.travel(), carried.noteSide()), style, 1 + cells, nudge);
 		}
 		return new Placed(addStackedEventModule(placements, start, triggerDelay,
 			event.time(), ultraSlots(event.notes(), style == ChordStyle.STACKED_FULL)), style, 0,
@@ -3789,10 +3917,20 @@ public final class SongBuilder {
 		/** The stacked module reaching both ways, which needs the two low slots behind it free. */
 		STACKED_FULL,
 		/** A run of powered stone with note blocks down both sides of it. */
-		BUS;
+		BUS,
+		/**
+		 * A stacked module with a bus running out of the back of it, all off the one repeater.
+		 *
+		 * <p>The stacked shape holds seven notes for no wire at all -- its centre block is strongly
+		 * powered by the repeater, so the cell after it reads a fresh fifteen. A chord too big for
+		 * the shape used to give it up entirely and be laid as a bus over its whole length. This
+		 * hangs the first seven on the module and puts the rest on a bus fed from the centre, which
+		 * costs seven notes' worth of neither column nor wire.</p>
+		 */
+		STACKED_HEAD;
 
 		boolean stacked() {
-			return this == STACKED_FRONT || this == STACKED_FULL;
+			return this == STACKED_FRONT || this == STACKED_FULL || this == STACKED_HEAD;
 		}
 	}
 

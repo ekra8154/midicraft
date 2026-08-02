@@ -206,6 +206,7 @@ class BlitzSweepTest {
 						dust = 0;
 					}
 					if (dead) {
+						System.out.println("DEAD " + name + " f" + floors + " w" + width);
 						deadBuilds++;
 						if (!stress) {
 							realDead++;
