@@ -101,4 +101,32 @@ class BreachTraceTest {
 	void illitSixTwelve() throws Exception {
 		trace("illit-do-the-dance", 6, 12);
 	}
+
+	/** The breach the one-lane lookahead bought, and the shape all four left in the library share. */
+	@Test
+	void bigShotThreeTwelve() throws Exception {
+		trace("big-shot", 3, 12);
+	}
+
+	/**
+	 * The same build with the lookahead switched off, so the lane it changed can be read side by side.
+	 *
+	 * <p>Every hand-derivation of this arithmetic in the session that found it was off by one. The
+	 * cheapest honest way to find out what a change did to a lane is to build the lane both ways.</p>
+	 */
+	@Test
+	void bigShotThreeTwelveWithoutLookahead() throws Exception {
+		SongBuilder.LOOKAHEAD = false;
+		try {
+			trace("big-shot", 3, 12);
+		} finally {
+			SongBuilder.LOOKAHEAD = true;
+		}
+	}
+
+	/** The same shape in the song the lookahead was written for, now that its old one is gone. */
+	@Test
+	void illitTwoTwelve() throws Exception {
+		trace("illit-do-the-dance", 2, 12);
+	}
 }

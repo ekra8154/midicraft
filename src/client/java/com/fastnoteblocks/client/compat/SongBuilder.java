@@ -639,10 +639,18 @@ public final class SongBuilder {
 			// lane with seven and was laid anyway, a column past the wall. Ekran found it as the
 			// second of two breaches on Kick Back, and it is the same exemption that put the old
 			// build seven columns out.
-			boolean split = layout.ultra() && overshoots && index > 0 && above >= 0 && above < floors
-				&& room >= 2 && room - 1 < cells
-				&& cells + offBus + stepOff <= DUST_RANGE
-				&& !(booked != null && booked.containsKey(NO_SPLIT - index));
+			boolean couldSplit = layout.ultra() && overshoots && index > 0 && above >= 0
+				&& above < floors && room >= 2 && room - 1 < cells
+				&& cells + offBus + stepOff <= DUST_RANGE;
+			// Counted where it bites rather than where it is decided. The planner books the veto on a
+			// lane it is only considering, and most of those plans are thrown away; what matters is how
+			// often a split the walk was about to build actually got stopped, because that is the number
+			// the regression has to be paid for out of.
+			boolean vetoed = couldSplit && booked != null && booked.containsKey(NO_SPLIT - index);
+			if (vetoed) {
+				placements.padded("planVetoBit");
+			}
+			boolean split = couldSplit && !vetoed;
 			// Unless leaving that tick is what stops the pad reaching the wall. Then spend the whole
 			// wait on the pad and carry the event over the turn on the wire instead, which is the one
 			// way a lane whose next event is a single tick away can still end where it is meant to.
@@ -778,6 +786,8 @@ public final class SongBuilder {
 				// a walk that charges the split more than the planner did refuses it and leaves the
 				// lane standing short of the wall it was measured for.
 				tipSignal = DUST_RANGE - cells - offBus - stepOff;
+				gradeLaneTip(placements, turnCells, tipSignal,
+					climb > 0 ? "SplitClimb" : "SplitDescent");
 				// The far half starts where the staircase left off, so its first pair of notes stands
 				// alongside the run of powered stone the turn is made of.
 				columnBehindBusy = true;
@@ -849,6 +859,7 @@ public final class SongBuilder {
 					lane = Lane.straight(landed, travel.getOpposite(), depth);
 					gradeLaneStart(placements, wall, travel.getStepX(), 0, climb > 0, stepOffAhead,
 						lane.pos().getX(), climb > 0 ? "Climb" : "Descent");
+					gradeLaneTip(placements, turnCells, tipSignal, climb > 0 ? "Climb" : "Descent");
 					laneStarted = false;
 					columnBehindBusy = true;
 					// Planned here and not at the top of the next event, because this event is about to
@@ -1555,6 +1566,25 @@ public final class SongBuilder {
 	}
 
 	/**
+	 * Records how far the tip {@link #strandsNext} assumes was out, against the tip the walk handed on.
+	 *
+	 * <p>The lookahead sweeps the next lane on {@code DUST_RANGE - turnCells}, which is what a lane
+	 * arriving at its turn on a full fifteen leaves behind it. Lanes do not all arrive on a full
+	 * fifteen. Whether that matters is the open question behind the two breaches the veto bought, and
+	 * it is a question with a number, so here is the number rather than another argument about it.</p>
+	 */
+	private static void gradeLaneTip(PlacementPlan placements, int turnCells, int handedOn,
+			String how) {
+		int guessed = DUST_RANGE - turnCells;
+		if (guessed == handedOn) {
+			placements.padded("planTipRight" + how);
+			return;
+		}
+		int off = guessed - handedOn;
+		placements.padded("planTip" + (off > 0 ? "Rich" : "Poor") + Math.min(Math.abs(off), 6) + how);
+	}
+
+	/**
 	 * How much of the next chord the turn carries, for a lane closing here.
 	 *
 	 * <p>Zero when the lane lands on its wall under its own steam, and the far half of the cut when
@@ -1588,6 +1618,9 @@ public final class SongBuilder {
 	private static boolean strandsNext(List<EventGroup> events, int from, int last, int wall,
 			int otherWall, int stepX, int turnCells, int offBus, int stepOff, boolean climbing,
 			Layout layout, int carriedCells) {
+		if (!LOOKAHEAD) {
+			return false;
+		}
 		// The cut chord belongs to the turn, so the lane after a cut opens on the chord past it.
 		int spent = carriedCells > 0 ? last + 1 : last;
 		int first = spent + 1;
@@ -3114,6 +3147,9 @@ public final class SongBuilder {
 
 	/** Scratch: one line per chord placed, for finding the first one that goes wrong. */
 	static boolean TRACE = false;
+
+	/** Scratch: turn {@link #strandsNext} off, so a lane it changed can be diffed against itself. */
+	static boolean LOOKAHEAD = true;
 
 	/**
 	 * Whether a descent is walked out to its wall rather than built where the lane stopped.

@@ -245,6 +245,23 @@ class BlitzSweepTest {
 		}
 		System.out.println("BLITZ laneStart right=" + startRight + " wrong=" + startWrong
 			+ " ofBreaches=" + breaches);
+		// The other half of what the lookahead guesses. It sweeps the next lane on a full fifteen less
+		// the turn; a lane that really arrives poorer is being judged on signal it will not have, which
+		// is the standing suspicion about the two breaches the veto cost.
+		long tipRight = 0;
+		long tipRich = 0;
+		long tipPoor = 0;
+		for (Map.Entry<String, Long> entry : padBy.entrySet()) {
+			if (entry.getKey().startsWith("planTipRight")) {
+				tipRight += entry.getValue();
+			} else if (entry.getKey().startsWith("planTipRich")) {
+				tipRich += entry.getValue();
+			} else if (entry.getKey().startsWith("planTipPoor")) {
+				tipPoor += entry.getValue();
+			}
+		}
+		System.out.println("BLITZ laneTip right=" + tipRight + " guessedRich=" + tipRich
+			+ " guessedPoor=" + tipPoor);
 		System.out.println("BLITZ padBy " + padBy);
 		System.out.println("BLITZ wrongBySong " + wrongBySong);
 		System.out.println("BLITZ wrongKind " + wrongKind + " real " + wrongKindReal);
