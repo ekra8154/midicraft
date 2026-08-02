@@ -594,14 +594,41 @@ public final class ComposerScreen extends Screen {
 		layersChanged();
 	}
 
+	/**
+	 * Folds the selected layers into the lowest-numbered one, and says what that cost.
+	 *
+	 * <p>Reported rather than done silently because the shortcut has no menu row to have read
+	 * first. Merging keeps one layer's instrument and gives it to every note that arrives, so a
+	 * merge across two instruments is not only a tidying-up -- and from the keyboard the only sign
+	 * of that is the sound changing.</p>
+	 */
 	private void mergeSelectedLayers() {
-		if (selectedLayers.size() < 2) {
+		List<Integer> merging = selectedLayers.stream()
+			.filter(index -> index >= 0 && index < project().layers().size())
+			.sorted()
+			.toList();
+		if (merging.size() < 2) {
+			showResult(Component.literal("Merge needs two or more layers selected - click one in "
+				+ "the panel and shift-click another."));
 			return;
 		}
+		Layer into = project().layers().get(merging.getFirst());
+		int notes = merging.stream().mapToInt(index -> project().layers().get(index).notes().size()).sum();
+		long instruments = merging.stream()
+			.map(index -> project().layers().get(index).instrument())
+			.distinct()
+			.count();
 		apply(project().mergeLayers(Set.copyOf(selectedLayers)));
 		resetLayerView();
 		layersChanged();
 		rebuildMoveLayerButtons();
+		String summary = "Merged " + merging.size() + " layers into \"" + into.name() + "\" - "
+			+ notes + " notes.";
+		if (instruments > 1) {
+			summary += " They all play " + PreviewInstrument.byId(into.instrument()).name()
+				+ " now; Ctrl+Z puts them back.";
+		}
+		showResult(Component.literal(summary));
 	}
 
 	private void updateLayer(int index, Layer layer) {
@@ -1005,7 +1032,7 @@ public final class ComposerScreen extends Screen {
 	private String layerActionLabel(LayerAction action) {
 		int selected = selectedLayers.size();
 		return switch (action) {
-			case MERGE_SELECTED -> "Merge " + selected + " layers";
+			case MERGE_SELECTED -> "Merge " + selected + " layers (Ctrl+E)";
 			case INCLUDE_SELECTED -> "Include " + layerCountLabel(Math.max(1, selected)) + " in sequence";
 			case SET_INCLUDED_TO_SELECTION ->
 				"Include only " + layerCountLabel(Math.max(1, selected)) + " in sequence";
@@ -1574,7 +1601,8 @@ public final class ComposerScreen extends Screen {
 		return switch (action) {
 			case RENAME -> "Renames this layer. Double-clicking its name does the same thing.";
 			case MERGE_SELECTED -> "Folds the selected layers into the lowest-numbered one, which "
-				+ "keeps its name and instrument.";
+				+ "keeps its name and instrument -- so merging across two instruments gives every "
+				+ "note the surviving one. Ctrl+E does the same thing.";
 			case INCLUDE_SELECTED -> "Fills in the build dot on the selected layers, adding them to "
 				+ "the sequence.";
 			case SET_INCLUDED_TO_SELECTION -> "Makes the selected layers the only included ones, "
@@ -3180,6 +3208,10 @@ public final class ComposerScreen extends Screen {
 				}
 				case GLFW.GLFW_KEY_O -> {
 					openSongs();
+					return true;
+				}
+				case GLFW.GLFW_KEY_E -> {
+					mergeSelectedLayers();
 					return true;
 				}
 				case GLFW.GLFW_KEY_I -> {
