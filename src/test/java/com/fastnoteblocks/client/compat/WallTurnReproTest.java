@@ -57,6 +57,39 @@ class WallTurnReproTest {
 		}
 	}
 
+	/**
+	 * The same three chords, started a column at a time further from the wall.
+	 *
+	 * <p>ekran's fix moves the chord before the bus a single column along the lane, and everything
+	 * after it with them. Whether that is the column the lane needed is not worth another argument
+	 * from the plan: the walk will say. What is being read off is which way the lane has to slide,
+	 * since the arithmetic said one way and the blocks in the world said the other.</p>
+	 */
+	@Test
+	void slidesTheLaneAColumnAtATime() {
+		for (int cols = 4; cols <= 14; cols++) {
+			SongBuilder.PastePlan plan;
+			try {
+				plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0),
+					DebugChords.notes(DebugChords.parse("21@1 1@1 9@1", DebugChords.DEFAULT_GAP)),
+					SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+					new SongBuilder.BuildLimits(4, 12, 3),
+					new SongBuilder.WalkStart(Math.max(0, 12 - 2 - cols), 2, -1, false));
+			} catch (RuntimeException refused) {
+				System.out.println("SLIDE cols=" + cols + " refused: " + refused.getMessage());
+				continue;
+			}
+			String breach = "clean";
+			for (String fault : plan.faults()) {
+				if (fault.startsWith("a lane turned")) {
+					breach = fault.substring(0, fault.indexOf(", where"));
+				}
+			}
+			System.out.println("SLIDE cols=" + cols + " width=" + plan.width() + " blocks="
+				+ plan.commands().size() + " faults=" + plan.faults().size() + " : " + breach);
+		}
+	}
+
 	@Test
 	void findsTheWallTurnRepro() {
 		List<Hit> hits = new ArrayList<>();
