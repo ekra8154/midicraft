@@ -295,7 +295,9 @@ public final class SongBuilder {
 	 *     the bottom floor and up. The same snake either way -- it is where it is put down and which
 	 *     way the first wall goes, nothing else -- but the two are not mirror images: the first turn
 	 *     of a top start is a descent, and a descent is the dearer turn, so a song can come out
-	 *     better one way round than the other.
+	 *     better one way round than the other. Both start their first lane at the origin, so a
+	 *     top start grows downward from where you stand and wants clear ground below rather
+	 *     than above. At one floor the two are the same build: every turn is flat already.
 	 */
 	record BuildLimits(int maxFloors, int laneWidth, int laneFloors, boolean startTop) {
 		BuildLimits(int maxFloors, int laneWidth, int laneFloors) {
