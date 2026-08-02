@@ -926,7 +926,7 @@ public final class SongBuilder {
 			}
 			// Pad this lane was told to lay early rather than at its end, in front of the event's own
 			// repeater so that repeater stands between it and the wall.
-			int owing = index > 0 && booked != null ? booked.getOrDefault(index, 0) : 0;
+			int owing = booked != null ? booked.getOrDefault(index, 0) : 0;
 			// Never past the wall, though. The pad is booked to land the lane flush on its wall, so a
 			// booking that would carry the chord over it is a booking that has already failed at its
 			// own job -- and the column it spends is the column the lane comes to rest outside by.
