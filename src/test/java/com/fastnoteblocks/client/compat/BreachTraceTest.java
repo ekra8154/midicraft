@@ -46,9 +46,17 @@ class BreachTraceTest {
 		}
 	}
 
-	/** Every breach left in a song somebody actually wrote, with the build it happens in. */
+	/**
+	 * No song somebody actually wrote turns past its wall, at any width or any number of floors.
+	 *
+	 * <p>The goal itself rather than a number that moves with it. Stress songs are left out on
+	 * purpose: they exist to be impossible, and a build that has to drop notes to fit has already
+	 * lost the argument this is about. What is pinned here is the promise the mode makes to somebody
+	 * pasting their own music -- that the walls are where the walls are.</p>
+	 */
 	@Test
 	void listsTheRealBreachesLeft() throws Exception {
+		List<String> breaches = new java.util.ArrayList<>();
 		List<Path> files;
 		try (java.util.stream.Stream<Path> listing =
 				Files.list(Path.of("run", "config", "fast-noteblocks", "songs"))) {
@@ -85,11 +93,14 @@ class BreachTraceTest {
 						if (fault.startsWith("a lane turned -")) {
 							System.out.println("LEFT " + name + " f" + floors + " w" + width
 								+ " : " + fault);
+							breaches.add(name + " f" + floors + " w" + width + " : " + fault);
 						}
 					}
 				}
 			}
 		}
+		org.junit.jupiter.api.Assertions.assertEquals(List.of(), breaches,
+			"no song somebody wrote should turn past its wall");
 	}
 
 	@Test

@@ -329,11 +329,78 @@ public final class SongBuilder {
 			case COMPACT -> createCompactPastePlan(origin, forward, notes);
 			case COMPACT_LANE -> createLanePastePlan(origin, forward, notes, limits.laneWidth(),
 				limits.laneFloors(), Layout.STANDARD, PasteMode.COMPACT_LANE, start);
-			case ULTRA_COMPACT_LANE -> createLanePastePlan(origin, forward, notes, limits.laneWidth(),
-				limits.laneFloors(), Layout.ultra(limits.laneFloors(), origin),
-				PasteMode.ULTRA_COMPACT_LANE, start);
+			case ULTRA_COMPACT_LANE -> bestUltraPlan(origin, forward, notes, limits, start);
 			case LANE -> createStraightPastePlan(origin, forward, notes);
 		};
+	}
+
+	/**
+	 * The ultra build made both ways, keeping whichever of them came out better.
+	 *
+	 * <p>The lookahead cannot be judged where it fires. Big Shot at three floors and twelve wide was
+	 * built both ways and the two walks part company at lane 541, then breach at 551 -- five lanes
+	 * and four clean turns later. {@link #strandsNext} was not wrong about the lane it looked at. It
+	 * closed a lane differently, and every lane after it landed somewhere else. No check made where
+	 * the veto fires can see that, because the damage is not there.</p>
+	 *
+	 * <p>So it is not asked to be right. It is asked to win, against the same song built without it,
+	 * on the whole build -- which is the only place the question has an answer. A walk costs about
+	 * fifteen milliseconds, and this buys a guarantee for two of them: the lookahead can no longer
+	 * cost a build anything, because a build it makes worse is a build that gets thrown away.</p>
+	 */
+	private static PastePlan bestUltraPlan(BlockPos origin, Direction forward,
+			List<EventNote> notes, BuildLimits limits, WalkStart start) {
+		Layout plain = Layout.ultra(limits.laneFloors(), origin);
+		PastePlan without = createLanePastePlan(origin, forward, notes, limits.laneWidth(),
+			limits.laneFloors(), plain, PasteMode.ULTRA_COMPACT_LANE, start);
+		PastePlan with = createLanePastePlan(origin, forward, notes, limits.laneWidth(),
+			limits.laneFloors(), plain.withLookahead(), PasteMode.ULTRA_COMPACT_LANE, start);
+		return beats(with, without) ? with : without;
+	}
+
+	/**
+	 * Whether a build is worth having over the one it would replace, ties going to the incumbent.
+	 *
+	 * <p>Ranked the way the faults are worth caring about and not the way they are easy to count. A
+	 * wrong note is a song that plays wrong and outranks everything. Then breaches, in columns
+	 * rather than lanes, because the ground a lane covers that it promised not to is the thing
+	 * ekran finds in the world. Length last, and only as a tie-break: a shorter build that breaches
+	 * is not a better build.</p>
+	 *
+	 * <p>The tie going to the incumbent is the point rather than a detail. A move that has to be
+	 * strictly better to be taken cannot regress anything, which is what makes it safe to leave a
+	 * move switched on while it is still being worked out.</p>
+	 */
+	private static boolean beats(PastePlan challenger, PastePlan holder) {
+		int wrongThere = wrongNotes(holder);
+		int wrongHere = wrongNotes(challenger);
+		if (wrongHere != wrongThere) {
+			return wrongHere < wrongThere;
+		}
+		int breachedThere = breachedColumns(holder);
+		int breachedHere = breachedColumns(challenger);
+		if (breachedHere != breachedThere) {
+			return breachedHere < breachedThere;
+		}
+		return challenger.width() < holder.width();
+	}
+
+	private static int wrongNotes(PastePlan plan) {
+		int wrong = 0;
+		for (String fault : plan.faults()) {
+			if (fault.startsWith("the note")) {
+				wrong++;
+			}
+		}
+		return wrong;
+	}
+
+	private static int breachedColumns(PastePlan plan) {
+		int columns = 0;
+		for (int breach : plan.breaches()) {
+			columns += breach;
+		}
+		return columns;
 	}
 
 	private static PastePlan createStraightPastePlan(BlockPos origin, Direction forward, List<EventNote> notes) {
@@ -1618,7 +1685,7 @@ public final class SongBuilder {
 	private static boolean strandsNext(List<EventGroup> events, int from, int last, int wall,
 			int otherWall, int stepX, int turnCells, int offBus, int stepOff, boolean climbing,
 			Layout layout, int carriedCells) {
-		if (!LOOKAHEAD) {
+		if (!LOOKAHEAD || !layout.lookahead()) {
 			return false;
 		}
 		// The cut chord belongs to the turn, so the lane after a cut opens on the chord past it.
@@ -3944,14 +4011,18 @@ public final class SongBuilder {
 	 * @param risers whether this build changes floors, which is what decides which way a descent
 	 *     steps off its own centre line
 	 */
-	private record Layout(boolean ultra, boolean risers, int centreParity) {
-		static final Layout STANDARD = new Layout(false, true, 0);
+	private record Layout(boolean ultra, boolean risers, int centreParity, boolean lookahead) {
+		static final Layout STANDARD = new Layout(false, true, 0, false);
 
 		static Layout ultra(int floors, BlockPos origin) {
 			// Counted from the origin and not from the world, so the same song pasted a block over
 			// is the same build. Anchored where the first module would land anyway, which is one
 			// past the origin, so a song that never drifts off the beat never pays for a pad.
-			return new Layout(true, floors > 1, Math.floorMod(origin.getX() + 1, 2));
+			return new Layout(true, floors > 1, Math.floorMod(origin.getX() + 1, 2), false);
+		}
+
+		Layout withLookahead() {
+			return new Layout(ultra, risers, centreParity, true);
 		}
 	}
 
