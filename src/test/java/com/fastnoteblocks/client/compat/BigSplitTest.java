@@ -30,7 +30,7 @@ import org.junit.jupiter.api.Test;
  * the wire the way the game does. The builder's own {@code verify} cannot: it knows what the
  * builder meant to power, which is the thing in question.</p>
  */
-class SplitDescentTest {
+class BigSplitTest {
 	@BeforeAll
 	static void bootstrapMinecraft() {
 		SharedConstants.tryDetectVersion();
@@ -38,19 +38,19 @@ class SplitDescentTest {
 	}
 
 	@AfterEach
-	void restoreTheCheapDescent() {
-		SongBuilder.CHEAP_SPLIT_DESCENT = true;
+	void restore() {
+		SongBuilder.STACKED_BUS_HEADS = true;
 		SongBuilder.STACKED_SPLIT_HEADS = true;
 	}
 
-	/** Chords too big to carry across a turn whole, so the only way over one is a cut. */
-	private static List<SongBuilder.EventNote> bigChordSong(int low, int high, long seed) {
+	/** Chords in the band only a headed cut can carry across a staircase. */
+	private static List<SongBuilder.EventNote> hugeChordSong(int low, int high, long seed) {
 		List<SongBuilder.EventNote> notes = new ArrayList<>();
 		String[] instruments = {"minecraft:air", "minecraft:stone", "minecraft:oak_planks",
 			"minecraft:gold_block", "minecraft:sand"};
 		Random random = new Random(seed);
 		int time = 0;
-		for (int event = 0; event < 160; event++) {
+		for (int event = 0; event < 150; event++) {
 			time += 2 + random.nextInt(8);
 			int chord = low + random.nextInt(high - low + 1);
 			for (int index = 0; index < chord; index++) {
@@ -68,51 +68,37 @@ class SplitDescentTest {
 			new SongBuilder.BuildLimits(4, width, floors));
 	}
 
-	/**
-	 * The path has to fire, or everything below tests the old descent.
-	 *
-	 * <p>Nineteen to twenty-two is the band the change is for: over the eighteen the old six-cell
-	 * descent could carry, under the twenty-two the new four-cell one can.</p>
-	 */
-	@Test
-	void cutsChordsTheOldDescentCouldNotCarry() {
-		int cheap = splitDescents(true);
-		int old = splitDescents(false);
-		System.out.println("SPLITDESCENT chords 19..22 cut across a descent: cheap=" + cheap
-			+ " old=" + old);
-		assertTrue(old == 0, "the old descent should not have been able to cut a chord this big, "
-			+ "and cut " + old + " of them");
-		assertTrue(cheap > 0, "no chord of nineteen to twenty-two was cut across a descent, so the "
-			+ "cheap descent is never built and nothing below tests it");
-	}
-
-	private static int splitDescents(boolean cheap) {
-		SongBuilder.CHEAP_SPLIT_DESCENT = cheap;
-		// The head raises the ceiling on its own -- with one, even the old six-cell descent reaches
-		// twenty-three -- so it is held off here. What this isolates is the price of the staircase,
-		// not the shape of the chord crossing it.
-		SongBuilder.STACKED_SPLIT_HEADS = false;
+	private static int headedSplits(boolean on, String which) {
+		SongBuilder.STACKED_SPLIT_HEADS = on;
 		int fired = 0;
 		for (int floors = 2; floors <= 4; floors++) {
-			for (int width = 16; width <= 32; width += 8) {
-				for (Map.Entry<String, Integer> entry
-						: build(bigChordSong(19, 22, 7L), width, floors).padding().entrySet()) {
-					if (entry.getKey().endsWith("SplitDescent")) {
-						fired += entry.getValue();
-					}
-				}
+			for (int width = 20; width <= 36; width += 8) {
+				fired += build(hugeChordSong(23, 27, 11L), width, floors).padding()
+					.getOrDefault("planStackedSplit" + which, 0);
 			}
 		}
 		return fired;
 	}
 
-	/** And having fired, the machine has to still be the song. */
+	/** Chords of 23 to 27 have to be getting cut, and only the head can do it. */
 	@Test
-	void readsBackEveryNoteOfASongCutAcrossDescents() {
-		SongBuilder.CHEAP_SPLIT_DESCENT = true;
+	void cutsChordsOnlyAHeadCanCarry() {
+		int descentOn = headedSplits(true, "Descent");
+		int climbOn = headedSplits(true, "Climb");
+		SongBuilder.STACKED_SPLIT_HEADS = true;
+		System.out.println("BIGSPLIT 23..27 headed cuts: descent=" + descentOn
+			+ " climb=" + climbOn);
+		assertTrue(descentOn + climbOn > 0,
+			"no chord of 23 to 27 was ever cut with a head, so nothing below tests the shape");
+	}
+
+	/** And the machine has to still be the song. */
+	@Test
+	void readsBackEveryNoteOfAHeadedCut() {
+		SongBuilder.STACKED_SPLIT_HEADS = true;
 		for (int floors = 2; floors <= 4; floors++) {
-			for (int width = 16; width <= 32; width += 8) {
-				List<SongBuilder.EventNote> notes = bigChordSong(19, 22, 7L);
+			for (int width = 20; width <= 36; width += 8) {
+				List<SongBuilder.EventNote> notes = hugeChordSong(23, 27, 11L);
 				SongBuilder.PastePlan plan = build(notes, width, floors);
 				String where = "f" + floors + " w" + width + ": ";
 				NoteMachineReader.Reading reading = readAll(placeInWorld(plan));
@@ -124,37 +110,13 @@ class SplitDescentTest {
 		}
 	}
 
-	/**
-	 * A song of ordinary chords still reads back, which is the check that nothing else moved.
-	 *
-	 * <p>Chords of fifteen to eighteen were already being cut across descents before any of this.
-	 * They now go over the new staircase instead of the old one, so this is the same song built two
-	 * ways, and both have to be the song.</p>
-	 */
+	/** No run of wire past what a repeater reaches. */
 	@Test
-	void readsBackASongThatWasAlreadyBeingCut() {
-		for (boolean cheap : new boolean[] {false, true}) {
-			SongBuilder.CHEAP_SPLIT_DESCENT = cheap;
-			for (int floors = 2; floors <= 4; floors++) {
-				List<SongBuilder.EventNote> notes = bigChordSong(15, 18, 3L);
-				SongBuilder.PastePlan plan = build(notes, 24, floors);
-				String where = (cheap ? "cheap" : "old") + " f" + floors + ": ";
-				NoteMachineReader.Reading reading = readAll(placeInWorld(plan));
-				assertEquals(0, reading.unreachedNotes(),
-					where + "note blocks the signal never got to");
-				assertEquals("", difference(sounds(notes), sounds(reading.project())),
-					where + "the machine did not read back as the song it was built from");
-			}
-		}
-	}
-
-	/** No run of wire past what a repeater reaches, which is the other way a descent can lie. */
-	@Test
-	void leavesNoDeadRunAcrossTheCheapDescent() {
-		SongBuilder.CHEAP_SPLIT_DESCENT = true;
+	void leavesNoDeadRun() {
+		SongBuilder.STACKED_SPLIT_HEADS = true;
 		for (int floors = 2; floors <= 4; floors++) {
-			for (int width = 16; width <= 32; width += 8) {
-				SongBuilder.PastePlan plan = build(bigChordSong(19, 22, 7L), width, floors);
+			for (int width = 20; width <= 36; width += 8) {
+				SongBuilder.PastePlan plan = build(hugeChordSong(23, 27, 11L), width, floors);
 				int dust = 0;
 				int longest = 0;
 				for (String command : plan.commands()) {

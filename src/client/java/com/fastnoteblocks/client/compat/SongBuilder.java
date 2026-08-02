@@ -738,9 +738,41 @@ public final class SongBuilder {
 			// cells rather than six -- see {@link #addSplitBusDescent}. The same sum is made in
 			// {@link #closes}, and the two have to be the same sum: a lane the planner closes by a
 			// cut and the walk refuses to cut is a lane that runs on past its wall.
+			// The head carries seven for nothing, so a chord too big to cut as a plain bus may
+			// still be cuttable with one. Asked first, and the plain sum is what is left when the
+			// chord cannot take a head -- too many falling instruments, no harp for the centre, or
+			// no room for a head and a cell of bus before the wall.
+			StackedSplit headed = layout.ultra() && overshoots && index > 0 && above >= 0
+				&& above < floors
+				? stackedSplitOf(event.notes(), room, splitCells)
+				: null;
+			// A cut is built straight from the module rather than through {@link #addChordModule},
+			// so none of that method's guards are applied to it -- and the one that matters is the
+			// parity check. Without it a head can land its low notes against a live block of the
+			// lane behind, which sounds them at that lane's tick: one BELL of a hundred and fifty
+			// events read twenty-one ticks early, and nothing else in the build said a word.
+			//
+			// Refused rather than nudged. A nudge moves the module a column and the near half is
+			// measured to land on the wall exactly, so shifting it is how a cut ends up outside the
+			// footprint. Giving the head up falls back to the plain sum below, which is what the
+			// walk did before any of this and is always safe.
+			// Two guards, and both are ones {@link #addChordModule} applies that a cut never went
+			// through. The head hangs a pair of low notes in the column *behind* it, so it needs
+			// that column free -- the same rule {@link #landingOf} states as reachesBack and busy.
+			// Without it the head's instrument block lands in the air a note of the chord before it
+			// insists on, and the build refuses outright.
+			if (headed != null && columnBehindBusy && delayColumns == 0) {
+				placements.padded("planStackedSplitNoRoomBehind");
+				headed = null;
+			}
+			if (headed != null && stackedClashes(placements, lane.ahead(delayColumns),
+					event.time())) {
+				placements.padded("planStackedSplitClashed");
+				headed = null;
+			}
 			boolean couldSplit = layout.ultra() && overshoots && index > 0 && above >= 0
-				&& above < floors && room >= 2 && room - 1 < cells
-				&& cells + splitCells <= DUST_RANGE;
+				&& above < floors && (headed != null
+					|| (room >= 2 && room - 1 < cells && cells + splitCells <= DUST_RANGE));
 			// Counted where it bites rather than where it is decided. The planner books the veto on a
 			// lane it is only considering, and most of those plans are thrown away; what matters is how
 			// often a split the walk was about to build actually got stopped, because that is the number
@@ -853,8 +885,18 @@ public final class SongBuilder {
 				currentTime = event.time();
 				List<EventNote> chord = busOrder(event.notes());
 				int near = 2 * (room - 1);
-				BlockPos cursor = addSplitEventModule(placements, trigger.cursor(), travel, depth,
-					trigger.triggerDelay(), chord.subList(0, near));
+				List<EventNote> far;
+				BlockPos cursor;
+				if (headed != null) {
+					cursor = addStackedSplitModule(placements, trigger.cursor(), travel, depth,
+						trigger.triggerDelay(), headed, event.time());
+					far = headed.farTail();
+					placements.padded("planStackedSplit" + (climb > 0 ? "Climb" : "Descent"));
+				} else {
+					cursor = addSplitEventModule(placements, trigger.cursor(), travel, depth,
+						trigger.triggerDelay(), chord.subList(0, near));
+					far = near < chord.size() ? chord.subList(near, chord.size()) : List.of();
+				}
 				// Measured from where the staircase actually lands, which for a split is past the near
 				// half of the chord rather than where the lane stood when it decided to split.
 				placements.recessed(((travel == forward ? farWall : nearWall) - cursor.getX())
@@ -871,9 +913,9 @@ public final class SongBuilder {
 						: addSpiralDescent(placements, cursor, travel, descentSide, currentTime);
 				floor = above;
 				travel = travel.getOpposite();
-				if (near < chord.size()) {
-					cursor = addCarriedEventModule(placements, cursor, travel, depth,
-						chord.subList(near, chord.size()), splitStepOff);
+				if (!far.isEmpty()) {
+					cursor = addCarriedEventModule(placements, cursor, travel, depth, far,
+						splitStepOff);
 				}
 				lane = Lane.straight(cursor, travel, depth);
 				// Graded against where the lane actually opened, because every hand-derivation of this
@@ -881,7 +923,7 @@ public final class SongBuilder {
 				// prediction the planner is going to search backwards on has to be checked against the
 				// walk before it is trusted, not after.
 				gradeLaneStart(placements, wallLeft, stepLeft,
-					near < chord.size() ? (chord.size() - near + 1) / 2 : 0, climb > 0, splitStepOff,
+					far.isEmpty() ? 0 : (far.size() + 1) / 2, climb > 0, splitStepOff,
 					lane.pos().getX(), climb > 0 ? "SplitClimb" : "SplitDescent");
 				lastStyle = ChordStyle.BUS;
 				// The whole run, not the half of it past the staircase. Both halves are dust from the
@@ -891,7 +933,10 @@ public final class SongBuilder {
 				// makes, which is the point: the planner closes a lane on the promise of a split, and
 				// a walk that charges the split more than the planner did refuses it and leaves the
 				// lane standing short of the wall it was measured for.
-				tipSignal = DUST_RANGE - cells - splitCells;
+				tipSignal = headed != null
+					? DUST_RANGE - STACKED_BUS_TRANSITION
+						- (headed.nearTail().size() + headed.farTail().size() + 1) / 2 - splitCells
+					: DUST_RANGE - cells - splitCells;
 				gradeLaneTip(placements, turnCells, tipSignal,
 					climb > 0 ? "SplitClimb" : "SplitDescent");
 				// The far half starts where the staircase left off, so its first pair of notes stands
@@ -1537,7 +1582,7 @@ public final class SongBuilder {
 		}
 		boolean shuts = closes(events, bare, from, bare.last(), wall, stepX, turnCells, offBus,
 			splitCells);
-		int cut = carriedCells(events, bare, from, bare.last(), wall, stepX);
+		int cut = carriedCells(events, bare, from, bare.last(), wall, stepX, splitCells);
 		if (shuts && !strandsNext(events, from, bare.last(), wall, otherWall, stepX, turnCells,
 				offBus, stepOff, climbing, layout, cut)) {
 			return Map.of();
@@ -1780,10 +1825,16 @@ public final class SongBuilder {
 	 * these are, and {@code near = 2 * (room - 1)} in the walk, which is where the split is built.</p>
 	 */
 	private static int carriedCells(List<EventGroup> events, Sweep sweep, int from, int last,
-			int wall, int stepX) {
+			int wall, int stepX, int splitCells) {
 		int room = (wall - sweep.ends().get(last - from)) * stepX;
 		if (room == 0 || last + 1 >= events.size()) {
 			return 0;
+		}
+		// Read off the same split the walk will build. A headed cut carries what the head and the
+		// near bus between them could not take, which is not the same as what a plain bus leaves.
+		StackedSplit headed = stackedSplitOf(events.get(last + 1).notes(), room, splitCells);
+		if (headed != null) {
+			return (headed.farTail().size() + 1) / 2;
 		}
 		int carried = events.get(last + 1).notes().size() - 2 * (room - 1);
 		return carried > 0 ? (carried + 1) / 2 : 0;
@@ -1838,7 +1889,12 @@ public final class SongBuilder {
 		// costs nothing, because the columns it fills are filled with music.
 		int cells = (events.get(last + 1).notes().size() + 1) / 2;
 		// The walk makes this same sum in {@code couldSplit}. They are one rule in two places and a
-		// disagreement between them is a lane closed on a cut that never happens.
+		// disagreement between them is a lane closed on a cut that never happens -- so the head is
+		// offered here in the same order the walk offers it, and the plain sum is the fallback in
+		// both.
+		if (stackedSplitOf(events.get(last + 1).notes(), room, splitCells) != null) {
+			return true;
+		}
 		return room >= 2 && room - 1 < cells && cells + splitCells <= DUST_RANGE;
 	}
 
@@ -3864,6 +3920,61 @@ public final class SongBuilder {
 	 * been off a repeater. That single cell is the whole price of the head.</p>
 	 */
 	private static final int STACKED_BUS_TRANSITION = 1;
+
+	/** Whether a chord cut across a staircase may open with a stacked head. */
+	static boolean STACKED_SPLIT_HEADS = true;
+
+	/**
+	 * How a chord cut across a staircase divides when it opens with a stacked head.
+	 *
+	 * <p>Seven notes ride in the head for two columns, a cell carries the wire onto the bus, and
+	 * what is left runs out as bus either side of the staircase. So the wire spends one cell on the
+	 * transition, one a note pair, and the staircase -- and the seven in the head cost it nothing
+	 * at all. That is why the head raises the ceiling rather than merely shortening the chord: a
+	 * descent reaches {@code 7 + (15 - 1 - 4) * 2 = 27} notes and a climb, which keeps the off-bus
+	 * discount and so pays three, reaches 29.</p>
+	 *
+	 * @param nearTail notes of the bus before the staircase. Never empty: the near half has to end
+	 *     on a bus block for {@link #addSplitBusDescent} to be entitled to its short spiral, and a
+	 *     head with no bus behind it ends on the transition cell instead.
+	 */
+	private record StackedSplit(UltraSlots slots, List<EventNote> head, List<EventNote> nearTail,
+			List<EventNote> farTail) {
+	}
+
+	private static StackedSplit stackedSplitOf(List<EventNote> chord, int room, int splitCells) {
+		if (!STACKED_SPLIT_HEADS) {
+			return null;
+		}
+		StackedBusSplit split = stackedBusSplit(chord, true);
+		if (split == null) {
+			return null;
+		}
+		// Head, transition, and at least one cell of bus to end on.
+		int nearBusCells = room - STACKED_CELLS - STACKED_BUS_TRANSITION;
+		if (nearBusCells < 1) {
+			return null;
+		}
+		List<EventNote> tail = split.tail();
+		int nearNotes = Math.min(tail.size(), 2 * nearBusCells);
+		// Nothing to carry over the staircase means this was never a chord that had to be cut.
+		if (nearNotes >= tail.size()) {
+			return null;
+		}
+		if (STACKED_BUS_TRANSITION + (tail.size() + 1) / 2 + splitCells > DUST_RANGE) {
+			return null;
+		}
+		return new StackedSplit(split.slots(), split.head(), tail.subList(0, nearNotes),
+			tail.subList(nearNotes, tail.size()));
+	}
+
+	/** The near half of a cut chord, built as a stacked head with a bus behind it. */
+	private static BlockPos addStackedSplitModule(PlacementPlan placements, BlockPos cursor,
+			Direction travel, Direction laneStep, int triggerDelay, StackedSplit split, int time) {
+		Body body = addStackedBusModule(placements, Lane.straight(cursor, travel, laneStep),
+			triggerDelay, time, split.slots(), split.nearTail());
+		return body.lane().pos();
+	}
 
 	/** A stacked head and the notes left over for its bus. */
 	private record StackedBusSplit(UltraSlots slots, List<EventNote> head, List<EventNote> tail) {
