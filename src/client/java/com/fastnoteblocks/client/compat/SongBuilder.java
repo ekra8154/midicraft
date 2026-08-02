@@ -1239,6 +1239,11 @@ public final class SongBuilder {
 					event.time() - currentTime - spentPadding, columnBehindBusy, wall, layout,
 					leavingTurn).end()
 				: Integer.MIN_VALUE;
+			// Columns of dust the wait in front of this chord is going to lay anyway. A module that
+			// has to shift a column to agree with the lane behind can slide inside those for
+			// nothing; with none of them the shift is a fresh column. Counted so the difference
+			// between the two is known before anything is built on the guess that it matters.
+			int slackColumns = Math.max(0, (event.time() - currentTime - spentPadding - 1) / 4);
 			SpatialDelayTrigger trigger = addSpatialDelayBeforeEvent(placements, lane,
 				event.time() - currentTime - spentPadding, layout.ultra());
 			currentTime = event.time();
@@ -1246,6 +1251,7 @@ public final class SongBuilder {
 			// is the one rule every repeater in the build obeys and so is applied where they are laid.
 			Lane opening = trigger.lane();
 			Placed placed = addChordModule(placements, opening, trigger.triggerDelay(), event,
+				slackColumns,
 				!columnBehindBusy || !opening.pos().equals(before), turning || leavingTurn,
 				turning ? Integer.MAX_VALUE
 					: (wall - opening.pos().getX()) * opening.travel().getStepX(), tipSignal, layout);
@@ -2250,7 +2256,7 @@ public final class SongBuilder {
 			if (!turnAfter) {
 				Placed placed = addChordModule(placements,
 					Lane.straight(trigger.cursor(), travel, laneStep), trigger.triggerDelay(), event,
-					roomBehind, false, Integer.MAX_VALUE, DUST_RANGE, layout);
+					0, roomBehind, false, Integer.MAX_VALUE, DUST_RANGE, layout);
 				cursor = placed.lane().pos();
 				columnBehindBusy = placed.stacked();
 				continue;
@@ -2280,7 +2286,7 @@ public final class SongBuilder {
 				continue;
 			}
 			cursor = addChordModule(placements, Lane.straight(trigger.cursor(), travel, laneStep),
-				trigger.triggerDelay(), event, roomBehind, false, Integer.MAX_VALUE, DUST_RANGE,
+				trigger.triggerDelay(), event, 0, roomBehind, false, Integer.MAX_VALUE, DUST_RANGE,
 			layout).lane().pos();
 			// A turn or a riser is about to be built into the block the next module would stand
 			// behind, so whatever this one did, the next one cannot stack.
@@ -3559,8 +3565,8 @@ public final class SongBuilder {
 	 * pair taken drops to a bus, and a bus that finds a turn has freed the pair takes it.</p>
 	 */
 	private static Placed addChordModule(PlacementPlan placements, Lane lane, int triggerDelay,
-			EventGroup event, boolean roomBehind, boolean inTurn, int roomAhead, int signal,
-			Layout layout) {
+			EventGroup event, int slackColumns, boolean roomBehind, boolean inTurn, int roomAhead,
+			int signal, Layout layout) {
 		Direction travel = lane.travel();
 		ChordStyle style = event.style();
 		if (style.reachesBack() && !roomBehind) {
@@ -3620,9 +3626,14 @@ public final class SongBuilder {
 		if (style.stacked()) {
 			boolean clashesHere = stackedClashes(placements, start, event.time());
 			if (clashesHere && stackedClashes(placements, start.ahead(1), event.time())) {
+				placements.padded(slackColumns > 0 ? "planParityGaveUpSlack"
+					: "planParityGaveUpTight");
 				style = ChordStyle.BUS;
 			} else {
 				nudge = clashesHere;
+				if (nudge) {
+					placements.padded(slackColumns > 0 ? "planParityHadSlack" : "planParityTight");
+				}
 			}
 		}
 		// A stacked module near the wall is built as a bus, whether or not it wanted a nudge.
