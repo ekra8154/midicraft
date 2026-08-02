@@ -951,7 +951,7 @@ public final class SongBuilder {
 				}
 			}
 			if (owing > 0) {
-				Pad early = planPad(owing, tipSignal, 1, Math.max(0, wait - 1 - spentPadding));
+				Pad early = planPad(owing, tipSignal, 0, Math.max(0, wait - 1 - spentPadding));
 				lane = emitPad(placements, lane, early, "padBooked");
 				spentPadding += early.delaySpent();
 				tipSignal = early.signal();
@@ -1428,7 +1428,7 @@ public final class SongBuilder {
 			EventGroup event = events.get(index);
 			int wait = event.time() - time;
 			int pad = pads.getOrDefault(index, 0);
-			room.add(planPad(DUST_RANGE * 2, tip, 1, Math.max(0, wait - 1)).cells().size() - pad);
+			room.add(planPad(DUST_RANGE * 2, tip, 0, Math.max(0, wait - 1)).cells().size() - pad);
 			Landing landed = landingOf(cursor + stepX * pad, stepX, event, wait, busy, wall, layout,
 				index == from && leaving);
 			// Kept back the same column the walk keeps back. A bus that would leave the wire too weak
@@ -1495,6 +1495,10 @@ public final class SongBuilder {
 	/** Books what the end of a lane cannot pay for into the latest gaps that can. */
 	private static boolean book(Map<Integer, Integer> pads, Sweep sweep, int from, int last,
 			int owing) {
+		if (TRACE) {
+			System.out.println("    BOOK owing=" + owing + " from=" + from + " last=" + last
+				+ " room=" + sweep.room());
+		}
 		for (int index = last; index >= from && owing > 0; index--) {
 			int free = sweep.room().get(index - from);
 			int take = Math.min(owing, free);
