@@ -29,9 +29,9 @@ class BreachReproSearchTest {
 		SongBuilder.TRACE = true;
 		try {
 			SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0),
-				DebugChords.notes(DebugChords.parse("8 19@1 1@1", DebugChords.DEFAULT_GAP)),
+				DebugChords.notes(DebugChords.parse("24@1 24@1 1@1 19@1 1@1", DebugChords.DEFAULT_GAP)),
 				SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
-				new SongBuilder.BuildLimits(4, 16, 3),
+				new SongBuilder.BuildLimits(4, 28, 3),
 				new SongBuilder.WalkStart(0, 2, -1, false));
 			for (String fault : plan.faults()) {
 				System.out.println("FAULT " + fault);
@@ -44,26 +44,41 @@ class BreachReproSearchTest {
 	@Test
 	void findsTheSmallestSpecThatBreaches() {
 		List<Hit> hits = new ArrayList<>();
-		for (int first = 1; first <= 8 && hits.size() < 400; first++) {
-			for (int big = 17; big <= 24; big++) {
-				for (int after = 1; after <= 12; after++) {
-					String spec = first + " " + big + "@1 " + after + "@1";
-					for (int width = 12; width <= 28; width += 4) {
-						for (int cols = 6; cols <= width - 2; cols++) {
-							SongBuilder.PastePlan plan;
-							try {
-								plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0),
-									DebugChords.notes(DebugChords.parse(spec,
-										DebugChords.DEFAULT_GAP)),
-									SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
-									new SongBuilder.BuildLimits(4, width, 3),
-									new SongBuilder.WalkStart(Math.max(0, width - 2 - cols), 2, -1,
-										false));
-							} catch (RuntimeException refused) {
-								continue;
-							}
-							for (String fault : plan.faults()) {
-								if (fault.startsWith("a lane turned -")) {
+		// A prefix that fills a lane and turns, so the lane under test starts on a spent wire the
+		// way every failing lane in Do The Dance does. A seeded walk always opens on a full fifteen,
+		// which is why the short specs all came back clean.
+		for (String prefix : List.of("24@1 24@1", "23@1 23@1", "24@1 2@1 24@1", "20@1 20@1 20@1",
+				"24@1 24@1 24@1")) {
+			for (int lead = 1; lead <= 4 && hits.size() < 120; lead++) {
+				for (int big = 19; big <= 26; big++) {
+					for (int after = 1; after <= 12; after++) {
+						String spec = prefix + " " + lead + "@1 " + big + "@1 " + after + "@1";
+						for (int width = 12; width <= 28; width += 4) {
+							for (int cols = 6; cols <= width - 2; cols += 2) {
+								SongBuilder.PastePlan plan;
+								try {
+									plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0),
+										DebugChords.notes(DebugChords.parse(spec,
+											DebugChords.DEFAULT_GAP)),
+										SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+										new SongBuilder.BuildLimits(4, width, 3),
+										new SongBuilder.WalkStart(Math.max(0, width - 2 - cols), 2,
+											-1, false));
+								} catch (RuntimeException refused) {
+									continue;
+								}
+								for (String fault : plan.faults()) {
+									if (!fault.startsWith("a lane turned -")) {
+										continue;
+									}
+									// Only the small overshoots. A chord wider than the whole build
+									// breaches by fifteen columns and is not a layout fault at all,
+									// it is a build that was never going to fit -- and it drowns out
+									// the one column that is.
+									int over = -Integer.parseInt(fault.split(" ")[3]);
+									if (over > 3) {
+										continue;
+									}
 									hits.add(new Hit("/fastnoteblockpaste " + width + " 3 down "
 										+ cols + " " + spec, fault, plan.commands().size()));
 								}
