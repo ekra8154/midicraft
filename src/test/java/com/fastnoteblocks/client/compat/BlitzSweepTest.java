@@ -39,6 +39,10 @@ class BlitzSweepTest {
 		}
 		Gson gson = new Gson();
 		long volume = 0;
+		// Blocks across, which is the number you can pace out standing in front of a build. Volume
+		// in percent says how much machine there is; this says how much of the plot it takes.
+		long zFootprint = 0;
+		int worstZ = 0;
 		long length = 0;
 		long blocks = 0;
 		long padWasted = 0;
@@ -103,6 +107,8 @@ class BlitzSweepTest {
 						continue;
 					}
 					volume += (long) plan.width() * plan.height() * plan.depth();
+					zFootprint += plan.spanZ();
+					worstZ = Math.max(worstZ, plan.spanZ());
 					length += plan.width();
 					blocks += plan.commands().size();
 					allTurns += plan.turns().size();
@@ -221,6 +227,7 @@ class BlitzSweepTest {
 				}
 			}
 		}
+		System.out.println("BLITZ zFootprint=" + zFootprint + " worstZ=" + worstZ);
 		System.out.println("BLITZ length=" + length + " volume=" + volume + " blocks=" + blocks
 			+ " padWasted=" + padWasted + " corners=" + corners);
 		System.out.println("BLITZ breaches=" + breaches + " short=" + shortLanes

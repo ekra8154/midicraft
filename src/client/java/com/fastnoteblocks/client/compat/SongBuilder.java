@@ -804,14 +804,14 @@ public final class SongBuilder {
 			// hands out a fresh fifteen, and turns after that. It costs footprint, which says so, and
 			// not a tail that never fires, which does not.
 			int unpaid = Math.max(0, columns - pad.cells().size());
-				int turnCost = pad.cells().isEmpty() && unpaid == 0 && lastStyle == ChordStyle.BUS
+				int turnCost = pad.cells().isEmpty() && unpaid == 0 && lastStyle.buses()
 					? offBus : turnCells;
 				boolean reachesWall = !PIN_DESCENTS || flatAhead
 					|| pad.signal() - unpaid >= turnCost;
 			boolean canTurn = layout.ultra()
 				? index > 0 && reachesWall && (flatAhead ? straddles && pad.signal() >= 1
 					: pad.signal()
-						>= (pad.cells().isEmpty() && lastStyle == ChordStyle.BUS ? offBus : turnCells))
+						>= (pad.cells().isEmpty() && lastStyle.buses() ? offBus : turnCells))
 				: index > 0 && events.get(index - 1).maxSafeTurnDistance() >= MAX_LANE_SPACING;
 			int spentPadding = 0;
 			// Ahead of a staircase only, for the same reason a split is. A chord that would have been
@@ -902,6 +902,11 @@ public final class SongBuilder {
 				continue;
 			}
 			if (canTurn && wantsTurn) {
+				// The shape the lane actually came to rest on, against the wall it is turning at.
+				// This is the question ekran asked -- not what shapes a lane holds, but what shape
+				// is standing in front of the staircase when it turns.
+				placements.padded("planLaneEndedOn" + lastStyle
+					+ (above >= 0 && above < floors ? (climb > 0 ? "Climb" : "Descent") : "Flat"));
 				// A chord carried whole to the next lane, where the lane it left had to be filled with
 				// wire instead. Reported because it is the thing worth being annoyed about: every one of
 				// these is a chord that could have filled those columns itself.
@@ -952,7 +957,7 @@ public final class SongBuilder {
 					}
 					BlockPos landed = climb > 0
 						? addGlassClimb(placements, lane.pos(), travel,
-							lastStyle == ChordStyle.BUS && pad.cells().isEmpty(), currentTime)
+							lastStyle.buses() && pad.cells().isEmpty(), currentTime)
 						: addSpiralDescent(placements, lane.pos(), travel, descentSide, currentTime);
 					floor = above;
 					// What the staircase leaves the next lane. It matters because the next lane may
@@ -960,7 +965,7 @@ public final class SongBuilder {
 					// handover in a build that spends wire without a repeater at either end of it.
 					// Charged at what it actually spends: a climb taken straight off a bus skips two
 					// rungs, and counting them anyway left every lane after one two blocks poorer.
-					tipSignal = pad.signal() - pinned - (climb > 0 && lastStyle == ChordStyle.BUS
+					tipSignal = pad.signal() - pinned - (climb > 0 && lastStyle.buses()
 						&& pad.cells().isEmpty() ? offBus : turnCells);
 					lane = Lane.straight(landed, travel.getOpposite(), depth);
 					gradeLaneStart(placements, wall, travel.getStepX(), 0, climb > 0, stepOffAhead,
@@ -1196,11 +1201,11 @@ public final class SongBuilder {
 				// two sees the room that bought and pads in turn, and a preference cascades down the
 				// lane as though it were a requirement.
 				Pad behind = planPad((laneWall - end) * travel.getStepX(), reached.tip(),
-					reached.style() == ChordStyle.BUS ? offBus : turnCells,
+					reached.style().buses() ? offBus : turnCells,
 					Math.max(0, next.time() - event.time() - 1));
 				boolean behindReaches = (laneWall - end) * travel.getStepX() >= 0
 					&& behind.cells().size() == (laneWall - end) * travel.getStepX()
-					&& behind.signal() >= (reached.style() == ChordStyle.BUS ? offBus : turnCells);
+					&& behind.signal() >= (reached.style().buses() ? offBus : turnCells);
 				if (!cuttable && !nextStraddles && !behindReaches
 						&& (beyond > farWall || beyond < nearWall)) {
 					int ahead = prePad(cursor.getX(), travel.getStepX(), event, wait - spentPadding,
@@ -1250,11 +1255,21 @@ public final class SongBuilder {
 			// Already clear of any corner: the delay hands back a cell a repeater may stand on, which
 			// is the one rule every repeater in the build obeys and so is applied where they are laid.
 			Lane opening = trigger.lane();
+			// Which way the wall at the end of this lane goes, recorded against the shape the chord
+			// came out as. Ekran noticed heads seemed never to appear on a lane ending in a climb,
+			// and a shape that can only be built going one way is a shape half of whose value is
+			// missing -- so it is counted rather than argued about.
+			boolean climbingLane = climb > 0;
 			Placed placed = addChordModule(placements, opening, trigger.triggerDelay(), event,
 				slackColumns,
 				!columnBehindBusy || !opening.pos().equals(before), turning || leavingTurn,
 				turning ? Integer.MAX_VALUE
 					: (wall - opening.pos().getX()) * opening.travel().getStepX(), tipSignal, layout);
+			if (event.style() == ChordStyle.STACKED_BUS) {
+				placements.padded("planStackedBusWanted" + (climbingLane ? "Climb" : "Descent"));
+				placements.padded("planStackedBusGot" + placed.style()
+					+ (climbingLane ? "Climb" : "Descent"));
+			}
 			// Where the chord did not land where the plan said it would, and why, as far as the walk
 			// can tell. Almost all of it is the nudge, which already re-plans and which no arithmetic
 			// could have foreseen -- it is decided against blocks on the ground. What is left is a bus
@@ -1556,7 +1571,7 @@ public final class SongBuilder {
 				// have wanted twelve and there was room for three.
 				Pad end = closingPad(events, tried, from, last, owing, turnCells);
 				int need = end.cells().isEmpty()
-					&& tried.styles().get(last - from) == ChordStyle.BUS ? offBus : turnCells;
+					&& tried.styles().get(last - from).buses() ? offBus : turnCells;
 				if (TRACE) {
 					System.out.println("  TRY last=" + last + " attempt=" + attempt + " pads=" + pads
 						+ " triedLast=" + tried.last() + " owing=" + owing + " padCells="
@@ -1816,7 +1831,7 @@ public final class SongBuilder {
 		int room = (wall - sweep.ends().get(last - from)) * stepX;
 		if (room == 0) {
 			return sweep.tips().get(last - from)
-				>= (sweep.styles().get(last - from) == ChordStyle.BUS ? offBus : turnCells);
+				>= (sweep.styles().get(last - from).buses() ? offBus : turnCells);
 		}
 		// Cut across the turn: as much of the next chord as reaches the wall, then the staircase, then
 		// the rest of it, all off the one repeater. It closes a lane wherever the lane has got to, and
@@ -2478,8 +2493,23 @@ public final class SongBuilder {
 			boolean roomBehind = delayRepeaters > 0 || !previousTookTheGap;
 			ChordStyle style = chooseStyle(layout, chord, roomBehind);
 			int busLength = (chord.size() + 1) / 2;
-			int eventLength = style == ChordStyle.BUS ? 1 + busLength : 2;
-			int maxSafeTurnDistance = style == ChordStyle.BUS ? Math.max(0, 13 - busLength) : 13;
+			// A stacked-bus is neither of the two shapes this used to know about: it is a head, a
+			// transition and a bus of whatever the head could not take. Measured as a module it came
+			// out at two columns however long its tail was.
+			int tailCells = 0;
+			if (style == ChordStyle.STACKED_BUS) {
+				StackedBusSplit split = stackedBusSplit(chord, true);
+				tailCells = split == null ? 0 : (split.tail().size() + 1) / 2;
+			}
+			int eventLength = style == ChordStyle.BUS ? 1 + busLength
+				: style == ChordStyle.STACKED_BUS
+					? STACKED_CELLS + STACKED_BUS_TRANSITION + tailCells
+					: 2;
+			// And it ends on its tail, so what a turn may still cross is measured from the tail and
+			// not from the whole chord -- which is the point of the head.
+			int maxSafeTurnDistance = style == ChordStyle.BUS ? Math.max(0, 13 - busLength)
+				: style == ChordStyle.STACKED_BUS ? Math.max(0, 13 - tailCells)
+				: 13;
 			result.add(new EventGroup(time, List.copyOf(chord), delayRepeaters + eventLength,
 				maxSafeTurnDistance, style, laneReachOf(layout, style, chord.size())));
 			currentTime = time;
@@ -4426,9 +4456,21 @@ public final class SongBuilder {
 	 *     by hand -- a plan moves after it is walked, so the wall the walk used is not the wall you
 	 *     are standing in front of.
 	 */
-	record PastePlan(List<String> commands, int width, int depth, int height, PasteMode mode,
-			List<String> faults, List<BlockPos> turns, List<Integer> moved, List<Integer> breaches,
-			List<Integer> recesses, Map<String, Integer> padding, int nearWall, int farWall) {
+	/**
+	 * @param width the longer of the two ground spans, and {@code depth} the shorter. Which axis
+	 *     each is depends on the build: a folded song can easily run further across than along, and
+	 *     then {@code width} is the Z span. Use {@link #spanX} and {@link #spanZ} when the question
+	 *     is about a direction rather than about which side is longer.
+	 * @param spanX blocks the build covers along travel, the axis a lane runs down
+	 * @param spanZ blocks the build covers across, the axis lanes step along. This is the one you
+	 *     stand in front of and the one that grows when a turn goes flat or a slab steps sideways,
+	 *     so it is the number to quote when the question is how the build looks rather than how
+	 *     much of it there is.
+	 */
+	record PastePlan(List<String> commands, int width, int depth, int height, int spanX, int spanZ,
+			PasteMode mode, List<String> faults, List<BlockPos> turns, List<Integer> moved,
+			List<Integer> breaches, List<Integer> recesses, Map<String, Integer> padding,
+			int nearWall, int farWall) {
 
 		/**
 		 * Cells of lane filled with wire rather than with music, counted by what asked for them.
@@ -4819,6 +4861,7 @@ public final class SongBuilder {
 			int widthZ = maximumZ < minimumZ ? 0 : maximumZ - minimumZ + 1;
 			int height = maximumY < minimumY ? 0 : maximumY - minimumY + 1;
 			return new PastePlan(commands, Math.max(widthX, widthZ), Math.min(widthX, widthZ), height,
+				widthX, widthZ,
 				mode, List.copyOf(faults),
 				turns.stream().map(turn -> turn.offset(shiftX, 0, shiftZ)).toList(),
 				List.copyOf(moved), List.copyOf(breaches), List.copyOf(recesses),
