@@ -3629,6 +3629,17 @@ public final class SongBuilder {
 				placements.padded(slackColumns > 0 ? "planParityGaveUpSlack"
 					: "planParityGaveUpTight");
 				style = ChordStyle.BUS;
+			} else if (clashesHere && PARITY_PREFERS_BUS && style == ChordStyle.STACKED_BUS) {
+				// A stacked-bus that has to shift is worth about what the plain bus it came from is
+				// worth. Nudged, a chord of twenty is a pad, a head, a transition and seven cells --
+				// eleven columns, two of them holding no music. As a plain bus it is a repeater and
+				// ten cells, also eleven columns, and only the repeater holds no music. Same length,
+				// one less column of wire, so the shape is given up rather than shifted.
+				//
+				// Only the stacked-bus. A plain stacked module is two columns and three when nudged,
+				// where the same chord as a bus is five, so shifting it is much the better bargain.
+				placements.padded("planParityPreferredBus");
+				style = ChordStyle.BUS;
 			} else {
 				nudge = clashesHere;
 				if (nudge) {
@@ -3803,6 +3814,9 @@ public final class SongBuilder {
 	 */
 	/** Whether a long chord may open with a stacked head instead of being all bus. */
 	static boolean STACKED_BUS_HEADS = true;
+
+	/** Whether a stacked-bus that would have to shift a column gives up the head instead. */
+	static boolean PARITY_PREFERS_BUS = false;
 
 	/**
 	 * The most a stacked head can hold: two relays, four low notes and a centre.

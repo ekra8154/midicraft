@@ -198,6 +198,71 @@ class StackedBusCostTest {
 		System.out.println("LEDGER TOTAL " + off + " -> " + on + " (" + (on - off) + ")");
 	}
 
+
+	/** Nudge the head, or give it up: same chord, both ways, over the real library. */
+	@Test
+	void nudgeAgainstGivingUp() throws Exception {
+		List<Path> files;
+		try (Stream<Path> listing = Files.list(SONGS)) {
+			files = listing.filter(p -> p.toString().endsWith(".json")).sorted().toList();
+		}
+		long[] pad = new long[2];
+		long[] parity = new long[2];
+		long[] vol = new long[2];
+		long[] len = new long[2];
+		long[] blocks = new long[2];
+		long[] breaches = new long[2];
+		long[] breachBlocks = new long[2];
+		long[] wrong = new long[2];
+		for (Path file : files) {
+			String name = file.getFileName().toString().replace(".json", "");
+			if (name.startsWith("ultra-")) {
+				continue;
+			}
+			List<SongBuilder.EventNote> notes =
+				SongBuilder.eventNotes(load(file).toSequenceTracks(Set.of(), true));
+			if (notes.isEmpty()) {
+				continue;
+			}
+			for (int give = 0; give <= 1; give++) {
+				SongBuilder.STACKED_BUS_HEADS = true;
+				SongBuilder.PARITY_PREFERS_BUS = give == 1;
+				for (int floors = 1; floors <= 6; floors++) {
+					for (int width = 12; width <= 48; width += 4) {
+						SongBuilder.PastePlan plan = SongBuilder.createPastePlan(
+							new BlockPos(0, 64, 0), notes,
+							SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+							new SongBuilder.BuildLimits(4, width, floors));
+						pad[give] += waste(plan.padding(), null);
+						parity[give] += waste(plan.padding(), "parity");
+						vol[give] += (long) plan.width() * plan.depth() * plan.height();
+						len[give] += plan.width();
+						blocks[give] += plan.commands().size();
+						for (int b : plan.breaches()) {
+							breaches[give]++;
+							breachBlocks[give] += b;
+						}
+						for (String fault : plan.faults()) {
+							if (fault.startsWith("the note")) {
+								wrong[give]++;
+							}
+						}
+					}
+				}
+			}
+		}
+		SongBuilder.PARITY_PREFERS_BUS = false;
+		System.out.println("NUDGE  nudge -> giveUp");
+		System.out.println("NUDGE  pad         " + pad[0] + " -> " + pad[1]);
+		System.out.println("NUDGE  parity      " + parity[0] + " -> " + parity[1]);
+		System.out.println("NUDGE  length      " + len[0] + " -> " + len[1]);
+		System.out.println("NUDGE  volume      " + vol[0] + " -> " + vol[1]);
+		System.out.println("NUDGE  blocks      " + blocks[0] + " -> " + blocks[1]);
+		System.out.println("NUDGE  breaches    " + breaches[0] + " -> " + breaches[1]);
+		System.out.println("NUDGE  breachBlks  " + breachBlocks[0] + " -> " + breachBlocks[1]);
+		System.out.println("NUDGE  wrongNotes  " + wrong[0] + " -> " + wrong[1]);
+	}
+
 	private static double pct(long[] both) {
 		return both[0] == 0 ? 0.0 : 100.0 * (both[1] - both[0]) / both[0];
 	}
