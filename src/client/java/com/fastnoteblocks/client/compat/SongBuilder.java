@@ -355,7 +355,13 @@ public final class SongBuilder {
 			limits.laneFloors(), plain, PasteMode.ULTRA_COMPACT_LANE, start);
 		PastePlan with = createLanePastePlan(origin, forward, notes, limits.laneWidth(),
 			limits.laneFloors(), plain.withLookahead(), PasteMode.ULTRA_COMPACT_LANE, start);
-		return beats(with, without) ? with : without;
+		boolean won = beats(with, without);
+		if (won) {
+			LOOKAHEAD_WINS++;
+		} else {
+			LOOKAHEAD_LOSES++;
+		}
+		return won ? with : without;
 	}
 
 	/**
@@ -3217,6 +3223,10 @@ public final class SongBuilder {
 
 	/** Scratch: turn {@link #strandsNext} off, so a lane it changed can be diffed against itself. */
 	static boolean LOOKAHEAD = true;
+
+	/** Scratch: how often the lookahead walk was worth keeping, and how often it was thrown away. */
+	static int LOOKAHEAD_WINS = 0;
+	static int LOOKAHEAD_LOSES = 0;
 
 	/**
 	 * Whether a descent is walked out to its wall rather than built where the lane stopped.
