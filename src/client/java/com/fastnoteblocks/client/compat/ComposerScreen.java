@@ -357,6 +357,7 @@ public final class ComposerScreen extends Screen {
 	private ComposerProject dragPreview;
 	private long dragTickDelta;
 	private int dragPitchDelta;
+	private DragAxis dragAxis = DragAxis.UNDECIDED;
 	private int rollX;
 	private int rollY;
 	private int rollWidth;
@@ -2757,6 +2758,45 @@ public final class ComposerScreen extends Screen {
 		return mixed;
 	}
 
+	/**
+	 * Which way a Shift-held note drag has committed to going.
+	 *
+	 * <p>The two axes of a piano roll are not two directions, they are two different edits. Across
+	 * is when a note plays and down is what note it is, and "move this phrase a beat later" has
+	 * nothing to do with "move this phrase up a tone" -- the one thing you never mean is a little of
+	 * both. Unconstrained, that is exactly what a diagonal hand produces: you retime a run of notes
+	 * and one of them comes to rest a semitone off, in a song of nine thousand, silently.</p>
+	 */
+	enum DragAxis {
+		UNDECIDED,
+		TIME,
+		PITCH
+	}
+
+	/** How far the cursor must travel before a Shift-held drag will say which way it is going. */
+	private static final int DRAG_AXIS_THRESHOLD = 4;
+
+	/**
+	 * Which axis a Shift-held drag is locked to, given how far it has come.
+	 *
+	 * <p>Decided once and then kept, which is the only part of this with a choice in it. Re-deciding
+	 * every frame makes the lock flip back and forth for any drag that runs near the diagonal, and
+	 * it flips at the end of a long horizontal drag -- when the hand relaxes -- which is the worst
+	 * possible moment. So the first four pixels of travel choose, and the rest of the drag obeys.</p>
+	 *
+	 * <p>Measured in pixels rather than in ticks and semitones. The question being asked is which
+	 * way the hand went, and the hand does not know that a pixel across is four hundred ticks at
+	 * this zoom and a pixel down is half a row.</p>
+	 */
+	static DragAxis lockedAxis(DragAxis current, double acrossPixels, double downPixels) {
+		if (current != DragAxis.UNDECIDED
+				|| Math.max(acrossPixels, downPixels) <= DRAG_AXIS_THRESHOLD) {
+			return current;
+		}
+		// A tie goes to time, which is the edit people reach for a drag to make.
+		return acrossPixels >= downPixels ? DragAxis.TIME : DragAxis.PITCH;
+	}
+
 	/** Where a dragged layer would land, drawn as the gap it would drop into. */
 	private void extractLayerDropLine(GuiGraphicsExtractor graphics) {
 		if (!layerDragActive) {
@@ -2949,6 +2989,18 @@ public final class ComposerScreen extends Screen {
 			graphics.fill(left, bottom - 1, right, bottom, 0xFF55FFFF);
 			graphics.fill(left, top, left + 1, bottom, 0xFF55FFFF);
 			graphics.fill(right - 1, top, right, bottom, 0xFF55FFFF);
+		}
+		// A locked drag looks exactly like a drag you are being sloppy about until it says so. Drawn
+		// as a line through the notes rather than a label, because it is answering "which way can
+		// this go" and a line is that answer -- and it follows the cursor, which is where you are.
+		if (draggingNotes && dragAxis != DragAxis.UNDECIDED && shiftDown()) {
+			int guideY = (int)lastMouseY;
+			int guideX = (int)lastMouseX;
+			if (dragAxis == DragAxis.TIME) {
+				graphics.fill(rollX, guideY, rollX + rollWidth, guideY + 1, 0x8855FFFF);
+			} else {
+				graphics.fill(guideX, rollY, guideX + 1, rollY + rollHeight, 0x8855FFFF);
+			}
 		}
 		graphics.disableScissor();
 
@@ -3597,6 +3649,7 @@ public final class ComposerScreen extends Screen {
 				dragPreview = null;
 				dragTickDelta = 0L;
 				dragPitchDelta = 0;
+				dragAxis = DragAxis.UNDECIDED;
 				PreviewInstrument.byId(activeLayer().instrument()).play(hitNote.midiNote()
 					- ComposerProject.NOTE_BLOCK_BASE_MIDI_NOTE);
 			}
@@ -3759,6 +3812,17 @@ public final class ComposerScreen extends Screen {
 		if (draggingNotes) {
 			long tickDelta = snapDelta(Math.round((event.x() - dragStartX) * ticksPerPixel));
 			int pitchDelta = (int)Math.round((dragStartY - event.y()) / rowHeight);
+			// Held, not latched: letting go of Shift hands the other axis back mid-drag, while the
+			// axis it picked is remembered in case you take hold of it again.
+			if (shiftDown()) {
+				dragAxis = lockedAxis(dragAxis, Math.abs(event.x() - dragStartX),
+					Math.abs(event.y() - dragStartY));
+				if (dragAxis == DragAxis.TIME) {
+					pitchDelta = 0;
+				} else if (dragAxis == DragAxis.PITCH) {
+					tickDelta = 0L;
+				}
+			}
 			if (tickDelta != dragTickDelta || pitchDelta != dragPitchDelta) {
 				dragTickDelta = tickDelta;
 				dragPitchDelta = pitchDelta;
