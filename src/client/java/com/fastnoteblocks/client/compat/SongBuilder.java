@@ -993,6 +993,9 @@ public final class SongBuilder {
 						addParityPad(placements, opening);
 						opening = opening.relative(travel);
 					}
+					if (headed.head().size() < STACKED_HEAD_NOTES) {
+						SHORT_HEAD_CUT_AT = opening;
+					}
 					cursor = addStackedSplitModule(placements, opening, travel, depth,
 						trigger.triggerDelay(), headed, event.time());
 					far = headed.farTail();
@@ -4353,6 +4356,9 @@ public final class SongBuilder {
 
 	/** Where the last head-only cut handed over to its staircase, for the probe to dump around. */
 	static BlockPos HEAD_ONLY_AT = null;
+
+	/** Scratch: where the last cut opened with a head of five, so its blocks can be looked at. */
+	static BlockPos SHORT_HEAD_CUT_AT = null;
 
 	/**
 	 * Whether a cut's near half may be the head alone, with the whole tail past the staircase.
