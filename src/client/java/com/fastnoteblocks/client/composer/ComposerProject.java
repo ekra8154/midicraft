@@ -995,6 +995,55 @@ public record ComposerProject(
 		return with(updated, activeLayerIndex, nextNoteId);
 	}
 
+	/**
+	 * The first tick anything in the given layers plays on, or -1 if none of them holds a note.
+	 */
+	public long firstNoteTick(Set<Integer> layerIndices) {
+		long earliest = Long.MAX_VALUE;
+		for (int index = 0; index < layers.size(); index++) {
+			if (layerIndices != null && !layerIndices.contains(index)) {
+				continue;
+			}
+			for (NoteEvent note : layers.get(index).notes()) {
+				earliest = Math.min(earliest, note.startTick());
+			}
+		}
+		return earliest == Long.MAX_VALUE ? -1L : earliest;
+	}
+
+	/**
+	 * Pulls the given layers forward so the first of them starts at tick zero.
+	 *
+	 * <p>Every selected layer moves by the same amount -- the earliest note among them -- rather than
+	 * each one being flushed to zero on its own. Layers of one song are a single performance whose
+	 * parts do not all start together, and flushing them individually would put the bass on the
+	 * downbeat with the pickup that came before it, which is not a tidier version of the song but a
+	 * different one. Selecting a single layer is how you ask for that layer alone.</p>
+	 *
+	 * <p>The end marker comes back by the same amount, since the silence at the front is gone and
+	 * leaving the end where it was would only move it to the back. The constructor floors it at the
+	 * last note, so an unselected layer that still runs on holds it out.</p>
+	 */
+	public ComposerProject snappedToStart(Set<Integer> layerIndices) {
+		long earliest = firstNoteTick(layerIndices);
+		if (earliest <= 0L) {
+			return this;
+		}
+		List<Layer> updated = new ArrayList<>();
+		for (int index = 0; index < layers.size(); index++) {
+			Layer layer = layers.get(index);
+			if (layerIndices != null && !layerIndices.contains(index)) {
+				updated.add(layer);
+				continue;
+			}
+			updated.add(layer.withNotes(layer.notes().stream()
+				.map(note -> note.movedTo(note.startTick() - earliest, note.midiNote()))
+				.toList()));
+		}
+		return new ComposerProject(name, ppq, tempoMicrosPerQuarter, updated, activeLayerIndex,
+			nextNoteId, Math.max(1L, endTick - earliest), speedQuarters);
+	}
+
 	/** Where the notes actually stop, ignoring any trailing silence the marker adds. */
 	public long contentEndTick() {
 		return layers.stream()

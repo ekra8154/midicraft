@@ -816,6 +816,35 @@ public final class ComposerScreen extends Screen {
 	}
 
 	/**
+	 * Pulls the selected layers forward until the first of them plays on tick zero.
+	 *
+	 * <p>What an import nearly always needs: a MIDI written with a bar of count-in builds a bar of
+	 * silence into the world, and the only sign of it before the build is a gap at the left of the
+	 * roll that looks like part of the layout. Reported in bars as well as ticks because a tick
+	 * count is not a thing anyone has an opinion about, and "2 bars" is.</p>
+	 */
+	private void snapSelectedLayersToStart() {
+		Set<Integer> snapping = Set.copyOf(selectedLayers);
+		long moved = project().firstNoteTick(snapping);
+		if (moved <= 0L) {
+			showResult(Component.literal(moved == 0L
+				? "Already starts on tick zero."
+				: "Nothing to move - the selected layers have no notes."));
+			return;
+		}
+		apply(project().snappedToStart(snapping));
+		layersChanged();
+		showResult(Component.literal("Pulled " + layerCountLabel(snapping.size()) + " forward by "
+			+ moved + " ticks (" + String.format(java.util.Locale.ROOT, "%.2f", barsOf(moved))
+			+ " bars)."));
+	}
+
+	/** A tick count as 4/4 bars, which is the unit the ruler numbers are already counted in. */
+	private double barsOf(long ticks) {
+		return ticks / (project().ppq() * 4.0);
+	}
+
+	/**
 	 * Removes the selected layers and says what went with them.
 	 *
 	 * <p>No confirmation, because Ctrl+Z is one and a better one -- a dialog asks before you can see
@@ -1265,6 +1294,7 @@ public final class ComposerScreen extends Screen {
 			case INCLUDE_SELECTED -> "Include " + layerCountLabel(Math.max(1, selected)) + " in sequence";
 			case SET_INCLUDED_TO_SELECTION ->
 				"Include only " + layerCountLabel(Math.max(1, selected)) + " in sequence";
+			case SNAP_TO_START -> "Snap " + layerCountLabel(Math.max(1, selected)) + " to song start";
 			default -> action.label;
 		};
 	}
@@ -1282,6 +1312,9 @@ public final class ComposerScreen extends Screen {
 			case MERGE_SELECTED -> selectedLayers.size() >= 2;
 			case DELETE_SELECTED, INCLUDE_SELECTED, SET_INCLUDED_TO_SELECTION ->
 				!selectedLayers.isEmpty();
+			// Greyed out when the selection already starts at zero, so the menu answers "is there
+			// anything to pull forward" without having to click it and read the result.
+			case SNAP_TO_START -> project().firstNoteTick(Set.copyOf(selectedLayers)) > 0L;
 			case RENAME, SELECT_ALL -> true;
 		};
 	}
@@ -1303,6 +1336,7 @@ public final class ComposerScreen extends Screen {
 		switch (action) {
 			case RENAME -> beginLayerRename(project().activeLayerIndex());
 			case MERGE_SELECTED -> mergeSelectedLayers();
+			case SNAP_TO_START -> snapSelectedLayersToStart();
 			case DELETE_SELECTED -> deleteSelectedLayers();
 			case INCLUDE_SELECTED -> setIncludedLayers(true);
 			case SET_INCLUDED_TO_SELECTION -> setIncludedLayers(false);
@@ -2067,6 +2101,10 @@ public final class ComposerScreen extends Screen {
 				+ "the sequence.";
 			case SET_INCLUDED_TO_SELECTION -> "Makes the selected layers the only included ones, "
 				+ "clearing the rest.";
+			case SNAP_TO_START -> "Pulls the selected layers forward until the first of them plays "
+				+ "on tick zero, taking the silence an import left at the front off the build. They "
+				+ "all move by the same amount, so parts that did not start together still do not. "
+				+ "Select one layer to move that one alone.";
 			case SELECT_ALL -> "Selects every layer.";
 		};
 	}
@@ -5320,6 +5358,7 @@ public final class ComposerScreen extends Screen {
 	private enum LayerAction {
 		RENAME("Rename layer..."),
 		MERGE_SELECTED("Merge selected"),
+		SNAP_TO_START("Snap to song start"),
 		INCLUDE_SELECTED("Include selected layers in sequence"),
 		SET_INCLUDED_TO_SELECTION("Include only selected layers in sequence"),
 		SELECT_ALL("Select all layers"),
