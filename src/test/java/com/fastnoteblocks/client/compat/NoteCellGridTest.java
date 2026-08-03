@@ -12,11 +12,11 @@ import org.junit.jupiter.api.Test;
 /**
  * The collapsed note pass has to paint the same pixels as drawing every note did.
  *
- * <p>Both passes are rendered into a real ARGB buffer with real alpha blending — the warning
- * outlines are half transparent, so counting quads or comparing rectangles would not have caught a
- * difference in what actually reaches the screen. The naive pass here is written out longhand from
- * the code the screen used before {@link NoteCellGrid} existed, deliberately, so that it is an
- * independent answer and not the same routine called twice.</p>
+ * <p>Both passes are rendered into a real ARGB buffer with real alpha blending — the warning bars
+ * are half transparent on an unselected layer, so counting quads or comparing rectangles would not
+ * have caught a difference in what actually reaches the screen. The naive pass here is written out
+ * longhand, one note at a time with nothing collapsed, deliberately, so that it is an independent
+ * answer and not the same routine called twice.</p>
  */
 class NoteCellGridTest {
 	private static final int ORIGIN_X = 244;
@@ -25,10 +25,24 @@ class NoteCellGridTest {
 	private static final int ORIGIN_Y = 72;
 	private static final int NOTE_WIDTH = 7;
 	private static final int NOTE_HEIGHT = 6;
+	private static final int WARNING_BAR = 2;
+	private static final int WARNINGS =
+		NoteCellGrid.CROWDED | NoteCellGrid.OFF_GRID | NoteCellGrid.UNBUILDABLE;
 	private static final int[] LAYER_COLORS = {
 		0xFF35D7E5, 0xFFFFB347, 0xFF9BE564, 0xFFD19BFF, 0xFFFF6B9A,
 		0xFF7CA7FF, 0xFFFFE66D, 0xFF8CE0C3, 0xFFFF8C5A, 0xFFC3F584
 	};
+
+	/** The grid's warning colours, restated here so the test is an independent answer. */
+	private static int warningColor(int kind, boolean highlighted) {
+		if ((kind & NoteCellGrid.UNBUILDABLE) != 0) {
+			return highlighted ? 0xFFFF6B6B : 0x55FF6B6B;
+		}
+		if ((kind & NoteCellGrid.CROWDED) != 0) {
+			return highlighted ? 0xFFFF9A2E : 0x55FF9A2E;
+		}
+		return highlighted ? 0xFFFFE45C : 0x55FFE45C;
+	}
 
 	private record Note(int left, int top, int color, int flags, int midi) {
 	}
@@ -93,7 +107,7 @@ class NoteCellGridTest {
 				// whole note rather than round its edge.
 				boolean[] excused = new boolean[WIDTH * HEIGHT];
 				for (Note note : notes) {
-					if ((note.flags() & (NoteCellGrid.CROWDED | NoteCellGrid.OFF_GRID)) == 0) {
+					if ((note.flags() & WARNINGS) == 0) {
 						continue;
 					}
 					for (int y = Math.max(0, note.top() - ORIGIN_Y - 1);
@@ -143,27 +157,25 @@ class NoteCellGridTest {
 	}
 
 	/**
-	 * A warning is a one-pixel border of the warning colour over the note, and the note inside it.
+	 * A warning is a bar down the note's left edge, and the layer's own colour beside it.
 	 *
-	 * <p>Stated as pixels rather than as "the same as the old code", because it is deliberately
-	 * <em>not</em> the same. Drawing a border as four overlapping edge rectangles painted the left
-	 * and right columns twice — the vertical edges went over the horizontal ones — so with the
-	 * half-transparent warning colours those two columns came out darker than the top and bottom.
-	 * One warning rectangle with the note put back inside it is even all the way round, and costs
-	 * two quads instead of five. A note only two pixels tall is all border, with no inside left to
-	 * restore, which is the case at full vertical zoom-out and the one that had to get cheap.</p>
+	 * <p>Checked at every note height the roll can show, because height is what broke the border
+	 * this replaced: a row zoomed out is four pixels and a note is two, so a one-pixel border was
+	 * the whole note and the layer colour under it never reached the screen. The bar is the same two
+	 * columns at every height, and the five columns beside it are the layer's colour at every
+	 * height, which is the whole point of the change.</p>
 	 */
 	@Test
-	void aWarningIsAnEvenBorderOverTheNote() {
+	void aWarningIsABarDownTheNotesLeftEdge() {
 		int color = 0xFF35D7E5;
-		for (int kind : new int[] {NoteCellGrid.CROWDED, NoteCellGrid.OFF_GRID}) {
+		for (int kind : new int[] {
+			NoteCellGrid.CROWDED, NoteCellGrid.OFF_GRID, NoteCellGrid.UNBUILDABLE
+		}) {
 			for (boolean highlighted : new boolean[] {false, true}) {
 				for (int noteHeight : new int[] {2, 3, 6, 24}) {
 					int flags = kind | (highlighted ? NoteCellGrid.HIGHLIGHTED : 0);
-					int warn = kind == NoteCellGrid.CROWDED
-						? (highlighted ? 0xFFFF9A2E : 0x55FF9A2E)
-						: (highlighted ? 0xFFFFE45C : 0x55FFE45C);
-					int border = Canvas.blend(color, warn, warn >>> 24);
+					int warn = warningColor(kind, highlighted);
+					int bar = Canvas.blend(color, warn, warn >>> 24);
 
 					Canvas canvas = new Canvas();
 					NoteCellGrid grid = new NoteCellGrid();
@@ -173,12 +185,10 @@ class NoteCellGridTest {
 
 					String where = "kind " + kind + ", highlighted " + highlighted
 						+ ", " + noteHeight + "px tall";
-					assertTrue(issued < 5, where + " should cost fewer than five quads, was " + issued);
+					assertEquals(2, issued, where + " should cost a body and a bar");
 					for (int row = 0; row < noteHeight; row++) {
 						for (int column = 0; column < NOTE_WIDTH; column++) {
-							boolean edge = row == 0 || row == noteHeight - 1
-								|| column == 0 || column == NOTE_WIDTH - 1;
-							assertEquals(edge ? border : color,
+							assertEquals(column < WARNING_BAR ? bar : color,
 								canvas.pixels[(40 + row) * WIDTH + 40 + column],
 								where + " at " + column + "," + row);
 						}
@@ -191,9 +201,44 @@ class NoteCellGridTest {
 		}
 	}
 
-	/** A stretch of off-grid notes takes one border round the stretch, not one per note. */
+	/**
+	 * A note that is wrong twice over shows the worse of the two.
+	 *
+	 * <p>One bar, so there is an order: out of range beats too frequent beats off grid. Out of range
+	 * is the one a person acts on first — nothing about the timing of a note matters while its pitch
+	 * cannot be built at all.</p>
+	 */
 	@Test
-	void weldsFlaggedNeighboursUnderOneBorder() {
+	void showsTheWorstOfTwoWarnings() {
+		int color = 0xFF35D7E5;
+		record Case(int flags, int expected) {
+		}
+		List<Case> cases = List.of(
+			new Case(NoteCellGrid.UNBUILDABLE | NoteCellGrid.OFF_GRID, 0xFFFF6B6B),
+			new Case(NoteCellGrid.UNBUILDABLE | NoteCellGrid.CROWDED, 0xFFFF6B6B),
+			new Case(NoteCellGrid.CROWDED, 0xFFFF9A2E),
+			new Case(NoteCellGrid.OFF_GRID, 0xFFFFE45C));
+		for (Case each : cases) {
+			Canvas canvas = new Canvas();
+			NoteCellGrid grid = new NoteCellGrid();
+			grid.begin(ORIGIN_X, WIDTH, NOTE_WIDTH, NOTE_HEIGHT);
+			grid.add(ORIGIN_X, ORIGIN_Y, color, each.flags() | NoteCellGrid.HIGHLIGHTED, 60);
+			grid.draw(canvas);
+			assertEquals(each.expected(), canvas.pixels[0], "flags " + each.flags());
+			assertEquals(color, canvas.pixels[WARNING_BAR], "the layer colour beside it");
+		}
+	}
+
+	/**
+	 * A stretch of off-grid notes takes one bar at the front of the stretch, not one per note.
+	 *
+	 * <p>The cost of the weld, stated so that it is a decision and not a surprise: a run of one
+	 * repeated pitch is marked once however long it is. Runs break on a change of pitch, colour or
+	 * warning and on any gap wider than a note, so a phrase is marked many times over -- but a held
+	 * repeat is marked at its start and nowhere else.</p>
+	 */
+	@Test
+	void weldsFlaggedNeighboursUnderOneBar() {
 		NoteCellGrid grid = new NoteCellGrid();
 		grid.begin(ORIGIN_X, WIDTH, NOTE_WIDTH, NOTE_HEIGHT);
 		for (int index = 0; index < 12; index++) {
@@ -201,26 +246,23 @@ class NoteCellGridTest {
 				NoteCellGrid.OFF_GRID | NoteCellGrid.HIGHLIGHTED, 60);
 		}
 		Canvas canvas = new Canvas();
-		// Highlighted, so the warning colour is opaque: the border rectangle and the note put
-		// back inside it, and no separate body underneath.
-		assertEquals(2, grid.draw(canvas), "a border and its inside");
+		assertEquals(2, grid.draw(canvas), "the run's body and one bar");
 		int right = 11 * 5 + NOTE_WIDTH;
-		assertEquals(0xFFFFE45C, canvas.pixels[0], "the border starts at the run's left edge");
-		assertEquals(0xFFFFE45C, canvas.pixels[right - 1], "and reaches its right edge");
-		assertEquals(0xFF35D7E5, canvas.pixels[WIDTH + 4], "the note body survives inside it");
+		assertEquals(0xFFFFE45C, canvas.pixels[0], "the bar starts at the run's left edge");
+		assertEquals(0xFFFFE45C, canvas.pixels[WARNING_BAR - 1], "and is as wide as a bar");
+		assertEquals(0xFF35D7E5, canvas.pixels[WARNING_BAR], "the layer colour starts beside it");
+		assertEquals(0xFF35D7E5, canvas.pixels[right - 1], "and reaches the run's right edge");
 		assertEquals(0, canvas.pixels[right], "and nothing is painted past the last note");
 	}
 
-	/** Too frequent and off grid are different warnings, so they never share a border. */
+	/** Too frequent and off grid are different warnings, so they never share a bar. */
 	@Test
 	void willNotWeldTwoKindsOfWarningTogether() {
 		NoteCellGrid grid = new NoteCellGrid();
 		grid.begin(ORIGIN_X, WIDTH, NOTE_WIDTH, NOTE_HEIGHT);
 		grid.add(ORIGIN_X, ORIGIN_Y, 0xFF35D7E5, NoteCellGrid.CROWDED, 60);
 		grid.add(ORIGIN_X + 3, ORIGIN_Y, 0xFF35D7E5, NoteCellGrid.OFF_GRID, 60);
-		// Not highlighted, so each run is a body, a half-transparent border over it, and the
-		// body put back inside.
-		assertEquals(6, grid.draw(new Canvas()), "two runs of three");
+		assertEquals(4, grid.draw(new Canvas()), "two runs of a body and a bar");
 	}
 
 	/** A flagged note and a clean one are not the same thing and do not weld. */
@@ -230,7 +272,7 @@ class NoteCellGridTest {
 		grid.begin(ORIGIN_X, WIDTH, NOTE_WIDTH, NOTE_HEIGHT);
 		grid.add(ORIGIN_X, ORIGIN_Y, 0xFF35D7E5, NoteCellGrid.OFF_GRID, 60);
 		grid.add(ORIGIN_X + 3, ORIGIN_Y, 0xFF35D7E5, 0, 60);
-		assertEquals(4, grid.draw(new Canvas()), "a bordered run of three and a bare one");
+		assertEquals(3, grid.draw(new Canvas()), "a marked run of two and a bare one");
 	}
 
 	/** A gap wider than a note breaks the run rather than being painted over. */
@@ -349,17 +391,29 @@ class NoteCellGridTest {
 				} else if (warning == 1) {
 					flags |= NoteCellGrid.OFF_GRID;
 				}
-				boolean buildable = clean || random.nextInt(20) != 0;
-				int drawn = buildable
-					? (highlighted ? color : 0xFF777A80)
-					: (highlighted ? 0xFFFF6B6B : 0xFF755050);
-				notes.add(new Note(left, top, drawn, flags, midi));
+				if (!clean && random.nextInt(20) == 0) {
+					flags |= NoteCellGrid.UNBUILDABLE;
+				}
+				// An unselected layer keeps its own colour, muted -- so the frame carries as many
+				// distinct colours as a real one, which is what makes welding worth testing.
+				notes.add(new Note(left, top, highlighted ? color : muted(color), flags, midi));
 			}
 		}
 		return notes;
 	}
 
-	/** Exactly what {@code extractNotes} did before the grid: every note, in order, no collapsing. */
+	/** An unselected layer's colour: the same mix toward a neutral the screen makes. */
+	private static int muted(int color) {
+		int mixed = color & 0xFF000000;
+		for (int shift = 16; shift >= 0; shift -= 8) {
+			int from = color >> shift & 0xFF;
+			int to = 0x6E7176 >> shift & 0xFF;
+			mixed |= (int)Math.round(from + (to - from) * 0.62) << shift;
+		}
+		return mixed;
+	}
+
+	/** Every note, in the order it arrived, with nothing collapsed and nothing welded. */
 	private static void drawEveryNote(List<Note> notes, Canvas canvas) {
 		for (Note note : notes) {
 			int left = note.left();
@@ -370,17 +424,12 @@ class NoteCellGridTest {
 				canvas.fill(left - 1, top - 1, right + 1, bottom + 1, 0xFFFFFFFF);
 			}
 			canvas.fill(left, top, right, bottom, note.color());
-			if ((note.flags() & (NoteCellGrid.CROWDED | NoteCellGrid.OFF_GRID)) == 0) {
+			int kind = note.flags() & WARNINGS;
+			if (kind == 0) {
 				continue;
 			}
-			boolean highlighted = (note.flags() & NoteCellGrid.HIGHLIGHTED) != 0;
-			int warn = (note.flags() & NoteCellGrid.CROWDED) != 0
-				? (highlighted ? 0xFFFF9A2E : 0x55FF9A2E)
-				: (highlighted ? 0xFFFFE45C : 0x55FFE45C);
-			canvas.fill(left, top, right, top + 1, warn);
-			canvas.fill(left, bottom - 1, right, bottom, warn);
-			canvas.fill(left, top, left + 1, bottom, warn);
-			canvas.fill(right - 1, top, right, bottom, warn);
+			canvas.fill(left, top, left + WARNING_BAR, bottom,
+				warningColor(kind, (note.flags() & NoteCellGrid.HIGHLIGHTED) != 0));
 		}
 	}
 }

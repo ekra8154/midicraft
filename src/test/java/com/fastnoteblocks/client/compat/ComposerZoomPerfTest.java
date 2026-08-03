@@ -147,11 +147,11 @@ class ComposerZoomPerfTest {
 				int flags = 0;
 				if (crowded.contains(note.startTick())) {
 					flags |= NoteCellGrid.CROWDED;
-					fills += 4;
+					fills++;
 					warned++;
 				} else if (offGrid.contains(note.startTick())) {
 					flags |= NoteCellGrid.OFF_GRID;
-					fills += 4;
+					fills++;
 					warned++;
 				}
 				grid.add(left, top, LAYER_COLORS[layerIndex % LAYER_COLORS.length], flags,

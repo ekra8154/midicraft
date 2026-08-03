@@ -2986,8 +2986,10 @@ public final class ComposerScreen extends Screen {
 			}
 			boolean active = layerIndex == shown.activeLayerIndex();
 			boolean highlighted = active || selectedLayers.contains(layerIndex);
-			int liveColor = highlighted ? layerColor(layerIndex) : faded(layerColor(layerIndex));
-			int deadColor = highlighted ? 0xFFFF6B6B : 0xFF755050;
+			// One colour per layer whatever is wrong with the note. Out of range used to paint the
+			// whole note red, which on an unconverted song is most of them -- so the roll answered
+			// "this will not build", which you already knew, and stopped answering anything else.
+			int color = highlighted ? layerColor(layerIndex) : faded(layerColor(layerIndex));
 			List<NoteEvent> notes = layer.notes();
 			for (int noteIndex = lowerBoundStart(notes, firstVisibleTick);
 					noteIndex < notes.size(); noteIndex++) {
@@ -3020,7 +3022,10 @@ public final class ComposerScreen extends Screen {
 				} else if (anyOffGrid && offGrid.contains(note.startTick())) {
 					flags |= NoteCellGrid.OFF_GRID;
 				}
-				cells.add(left, top, note.isBuildable() ? liveColor : deadColor, flags, midi);
+				if (!note.isBuildable()) {
+					flags |= NoteCellGrid.UNBUILDABLE;
+				}
+				cells.add(left, top, color, flags, midi);
 				if (mouseX >= left && mouseX < right && mouseY >= top && mouseY < bottom) {
 					// Topmost wins: draw order runs back to front, so a later hit overwrites.
 					hoveredCandidate = note;

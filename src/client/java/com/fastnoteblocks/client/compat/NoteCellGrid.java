@@ -27,8 +27,12 @@ final class NoteCellGrid {
 	static final int HIGHLIGHTED = 2;
 	static final int CROWDED = 4;
 	static final int OFF_GRID = 8;
+	/** Out of the note block's range: this note cannot be built until the song is converted. */
+	static final int UNBUILDABLE = 32;
 	/** Set on a note once a later note has taken its cell. */
 	private static final int COVERED = 16;
+	/** How wide the warning bar down a flagged note's left edge is. */
+	private static final int WARNING_BAR = 2;
 	/** Columns of slack either side of the roll, for the notes that hang over its edges. */
 	private static final int MARGIN = 8;
 	/** One row per MIDI note, which is every row the roll can ever show. */
@@ -123,11 +127,11 @@ final class NoteCellGrid {
 	 * width of each other paint exactly the pixels one rectangle over them paints, and on a dense
 	 * song at full zoom-out that is most of what is left — four thousand quads down to nine
 	 * hundred. Matching means the same colour and the same warning, so a flagged run welds too and
-	 * takes one border round the whole stretch instead of one per note; on a raw import, where
-	 * almost every note is off grid, that is the difference between twenty-six thousand quads and a
-	 * few thousand. What the welded border loses is the vertical edge between two adjacent bad
-	 * notes, which at this zoom is inside a pixel. A selected note never welds: its halo is pinned
-	 * to its own edges, so it draws alone.</p>
+	 * takes one warning bar at the front of the whole stretch instead of one per note; on a raw
+	 * import, where almost every note is off grid, that is the difference between twenty-six
+	 * thousand quads and a few thousand. What the weld loses is the boundary between two adjacent
+	 * bad notes, which at this zoom is inside a pixel. A selected note never welds: its halo is
+	 * pinned to its own edges, so it draws alone.</p>
 	 *
 	 * <p>Rows never overlap — a note is two pixels shorter than its row, and a halo is one pixel
 	 * proud on each side — so a run may stay open across other rows' quads and only has to be
@@ -159,7 +163,7 @@ final class NoteCellGrid {
 			if ((noteFlags & COVERED) != 0) {
 				continue;
 			}
-			int kind = noteFlags & (CROWDED | OFF_GRID);
+			int kind = noteFlags & (CROWDED | OFF_GRID | UNBUILDABLE);
 			boolean highlighted = (noteFlags & HIGHLIGHTED) != 0;
 			// A selected note is the one thing that cannot weld: its halo is pinned to its own
 			// edges, so it draws alone and leaves the row closed behind it.
@@ -201,39 +205,45 @@ final class NoteCellGrid {
 	}
 
 	/**
-	 * Draws one welded stretch: its body, and a warning border round the whole stretch if the notes
-	 * in it were flagged.
+	 * Draws one welded stretch: its body, and a warning bar down its left edge if the notes in it
+	 * were flagged.
 	 *
-	 * <p>Outline rather than recolour: a layer colour may itself be orange. Orange means
-	 * arrives-too-soon-to-build; yellow means lands-between-ticks.</p>
+	 * <p>A bar rather than a border round the note, because a border is not a border at the zoom
+	 * this all exists for. A row zoomed out is four pixels and a note is two, so there was no inside
+	 * left to restore and the warning colour took the whole note -- which is the state an invalid
+	 * song spends all its time in, and in it every flagged note looked the same as every other one.
+	 * The thing that was lost is which layer the note belongs to, and that is the only reason to be
+	 * looking at a zoomed-out roll at all. A bar down the left edge is legible two pixels tall and
+	 * leaves five of the note's seven columns showing its layer's colour.</p>
+	 *
+	 * <p>Marked rather than recoloured, still, because a layer colour may itself be orange. Red
+	 * means out of the note block's range; orange means arrives-too-soon-to-build; yellow means
+	 * lands-between-ticks. One bar, so a note that is two of those at once shows the worst.</p>
+	 *
+	 * <p>The bar goes at the stretch's left edge, not at every note in it, since the notes welded
+	 * into it no longer exist separately by this point. A run of one repeated pitch therefore takes
+	 * one bar however long it is. That is the price of the weld, which is what keeps a raw import
+	 * from asking for twenty-six thousand quads a frame.</p>
 	 */
 	private int paint(Quads quads, int left, int top, int right, int color, int kind,
 			boolean highlighted) {
 		int bottom = top + noteHeight;
+		quads.fill(left, top, right, bottom, color);
 		if (kind == 0) {
-			quads.fill(left, top, right, bottom, color);
 			return 1;
 		}
-		int warn = (kind & CROWDED) != 0
-			? (highlighted ? 0xFFFF9A2E : 0x55FF9A2E)
-			: (highlighted ? 0xFFFFE45C : 0x55FFE45C);
-		int issued = 0;
-		// A border of four edges over a fill paints the same pixels as one warn rectangle with the
-		// fill put back inside it -- and that is two quads rather than five. The body underneath is
-		// still needed when the warning colour is half transparent, because the border's colour is
-		// the warning blended over the note, not over the background behind it.
-		if ((warn >>> 24) != 0xFF) {
-			quads.fill(left, top, right, bottom, color);
-			issued++;
+		quads.fill(left, top, Math.min(right, left + WARNING_BAR), bottom, warning(kind, highlighted));
+		return 2;
+	}
+
+	/** The worst of what is wrong with a note, in the colour that says which. */
+	private static int warning(int kind, boolean highlighted) {
+		if ((kind & UNBUILDABLE) != 0) {
+			return highlighted ? 0xFFFF6B6B : 0x55FF6B6B;
 		}
-		quads.fill(left, top, right, bottom, warn);
-		issued++;
-		// Zoomed out vertically a row is four pixels and a note is two, so the border is the whole
-		// note and there is no inside left to restore. That is the case this all has to be fast in.
-		if (right - left > 2 && bottom - top > 2) {
-			quads.fill(left + 1, top + 1, right - 1, bottom - 1, color);
-			issued++;
+		if ((kind & CROWDED) != 0) {
+			return highlighted ? 0xFFFF9A2E : 0x55FF9A2E;
 		}
-		return issued;
+		return highlighted ? 0xFFFFE45C : 0x55FFE45C;
 	}
 }
