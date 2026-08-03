@@ -778,7 +778,8 @@ public final class SongBuilder {
 			// no room for a head and a cell of bus before the wall.
 			StackedSplit headed = layout.ultra() && overshoots && index > 0 && above >= 0
 				&& above < floors
-				? stackedSplitOf(event.notes(), room, splitCells, climb > 0)
+				? stackedSplitOf(event.notes(), room, splitCells, climb > 0,
+					!columnBehindBusy || delayColumns > 0)
 				: null;
 			// A cut is built straight from the module rather than through {@link #addChordModule},
 			// so none of that method's guards are applied to it -- and the one that matters is the
@@ -795,9 +796,11 @@ public final class SongBuilder {
 			// that column free -- the same rule {@link #landingOf} states as reachesBack and busy.
 			// Without it the head's instrument block lands in the air a note of the chord before it
 			// insists on, and the build refuses outright.
+			// Counted, not refused. The cut is asked for above knowing whether the column behind is
+			// free, so what arrives here is already a head of five where it had to be -- and a chord
+			// that could not make even that has no headed cut at all.
 			if (headed != null && columnBehindBusy && delayColumns == 0) {
-				placements.padded("planStackedSplitNoRoomBehind");
-				headed = null;
+				placements.padded("planStackedSplitShortHead");
 			}
 			// A cut whose head lands on the wrong parity is moved a column, not given up.
 			//
@@ -821,7 +824,8 @@ public final class SongBuilder {
 				splitClashed = true;
 				StackedSplit shifted = !SPLIT_NUDGES
 					|| stackedClashes(placements, lane.ahead(delayColumns + 1), event.time())
-					? null : stackedSplitOf(event.notes(), room - 1, splitCells, climb > 0);
+					? null : stackedSplitOf(event.notes(), room - 1, splitCells, climb > 0,
+						!columnBehindBusy || delayColumns + 1 > 0);
 				if (shifted == null) {
 					// Both cells wrong, or nothing left to cut once a column is spent. Then the head
 					// goes, which is what this did in every case before.
@@ -1855,7 +1859,7 @@ public final class SongBuilder {
 	 * it anyway and the columns it covers past the wall are the breach.</p>
 	 */
 	private record Sweep(List<Integer> ends, List<Integer> tips, List<ChordStyle> styles,
-			List<Integer> room, int last, int past) {
+			List<Boolean> busy, List<Integer> room, int last, int past) {
 	}
 
 	private static Sweep sweep(List<EventGroup> events, int from, int startX, int stepX, int wall,
@@ -1864,6 +1868,10 @@ public final class SongBuilder {
 		List<Integer> ends = new ArrayList<>();
 		List<Integer> tips = new ArrayList<>();
 		List<ChordStyle> styles = new ArrayList<>();
+		// Whether each chord leaves the low slots behind the next one spoken for. Recorded because
+		// closes() and carriedCells() have to make the same sum the walk does, and a cut's head is
+		// seven notes or five depending on exactly this.
+		List<Boolean> busyAfter = new ArrayList<>();
 		List<Integer> room = new ArrayList<>();
 		int cursor = startX;
 		int time = startTime;
@@ -1892,13 +1900,14 @@ public final class SongBuilder {
 			ends.add(landed.end());
 			tips.add(landed.tip());
 			styles.add(landed.style());
+			busyAfter.add(landed.busy());
 			cursor = landed.end();
 			tip = landed.tip();
 			busy = landed.busy();
 			time = event.time();
 			last = index;
 		}
-		return new Sweep(ends, tips, styles, room, last, past);
+		return new Sweep(ends, tips, styles, busyAfter, room, last, past);
 	}
 
 	/**
@@ -1993,6 +2002,7 @@ public final class SongBuilder {
 	 */
 	private static int carriedCells(List<EventGroup> events, Sweep sweep, int from, int last,
 			int wall, int stepX, int splitCells, boolean climbing) {
+		boolean roomBehind = last < from || !sweep.busy().get(last - from);
 		int room = (wall - sweep.ends().get(last - from)) * stepX;
 		if (room == 0 || last + 1 >= events.size()) {
 			return 0;
@@ -2000,7 +2010,7 @@ public final class SongBuilder {
 		// Read off the same split the walk will build. A headed cut carries what the head and the
 		// near bus between them could not take, which is not the same as what a plain bus leaves.
 		StackedSplit headed = stackedSplitOf(events.get(last + 1).notes(), room, splitCells,
-			climbing);
+			climbing, roomBehind);
 		if (headed != null) {
 			return (headed.farTail().size() + 1) / 2;
 		}
@@ -2047,6 +2057,7 @@ public final class SongBuilder {
 		if (last + 1 >= events.size()) {
 			return true;
 		}
+		boolean roomBehind = last < from || !sweep.busy().get(last - from);
 		int room = (wall - sweep.ends().get(last - from)) * stepX;
 		if (room == 0) {
 			return sweep.tips().get(last - from)
@@ -2060,7 +2071,8 @@ public final class SongBuilder {
 		// disagreement between them is a lane closed on a cut that never happens -- so the head is
 		// offered here in the same order the walk offers it, and the plain sum is the fallback in
 		// both.
-		if (stackedSplitOf(events.get(last + 1).notes(), room, splitCells, climbing) != null) {
+		if (stackedSplitOf(events.get(last + 1).notes(), room, splitCells, climbing, roomBehind)
+				!= null) {
 			return true;
 		}
 		return room >= 2 && room - 1 < cells && cells + splitCells <= DUST_RANGE;
@@ -2782,6 +2794,9 @@ public final class SongBuilder {
 		return style.stacked()
 			&& !(GAP_ENDS_ON_BUS && style.busHeaded() && busCells >= 1);
 	}
+
+	/** Whether a chord cut across a staircase may open with a head of five when the back is taken. */
+	static boolean FRONT_ONLY_CUTS = true;
 
 	/** Whether a stacked-bus that ends on a bus lets the next chord keep its back slots. */
 	static boolean GAP_ENDS_ON_BUS = true;
@@ -4376,11 +4391,20 @@ public final class SongBuilder {
 	}
 
 	private static StackedSplit stackedSplitOf(List<EventNote> chord, int room, int splitCells,
-			boolean climbing) {
+			boolean climbing, boolean roomBehind) {
 		if (!STACKED_SPLIT_HEADS) {
 			return null;
 		}
-		StackedBusSplit split = stackedBusSplit(chord, true);
+		// The full head first, the head of five when the column behind is spoken for. This is the
+		// same fallback an ordinary chord has had since 1da9154 -- that commit taught chordStyle,
+		// landingOf and addChordModule to drop to a head of five rather than give the shape up, and
+		// left the cut asking for the back flanks unconditionally. So a chord that could have been
+		// cut with a short head was laid as a plain bus instead, and illit-do-the-dance at twelve
+		// wide lost its lane five columns past the wall for exactly that.
+		StackedBusSplit split = roomBehind ? stackedBusSplit(chord, true) : null;
+		if (split == null && FRONT_ONLY_HEADS && FRONT_ONLY_CUTS) {
+			split = stackedBusSplit(chord, false);
+		}
 		if (split == null) {
 			return null;
 		}

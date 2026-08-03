@@ -292,6 +292,39 @@ class TurnBanTest {
 		};
 	}
 
+	/** The seven that are left: doubled, from the south, across the lane rather than along it. */
+	@Test
+	void dumpsTheSouthSideDouble() throws Exception {
+		SongBuilder.TURN_BAN_BY_DISTANCE = true;
+		ComposerProject song;
+		try (Reader reader = Files.newBufferedReader(SONGS.resolve("deltarune-ch-4-guardian.json"))) {
+			ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
+			song = new ComposerProject(raw.name(), raw.ppq(), raw.tempoMicrosPerQuarter(),
+				raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(), raw.endTick(),
+				raw.speedQuarters());
+		}
+		List<SongBuilder.EventNote> notes =
+			SongBuilder.eventNotes(song.toSequenceTracks(Set.of(), true));
+		SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0), notes,
+			SongBuilder.PasteMode.ULTRA_COMPACT_LANE, new SongBuilder.BuildLimits(4, 32, 3));
+		for (String fault : plan.faults()) {
+			if (fault.startsWith("the note")) {
+				System.out.println("SOUTH fault: " + fault);
+			}
+		}
+		Map<BlockPos, BlockState> world = placeInWorld(plan);
+		for (int y = 67; y >= 63; y--) {
+			for (int z = 119; z <= 126; z++) {
+				StringBuilder row = new StringBuilder("SOUTH y=" + y + " z=" + z + " |");
+				for (int x = 49; x <= 57; x++) {
+					BlockState at = world.get(new BlockPos(x, y, z));
+					row.append(' ').append(x).append('=').append(at == null ? "." : shortName(at));
+				}
+				System.out.println(row);
+			}
+		}
+	}
+
 	private static BlockState parse(String blockState) {
 		try {
 			return BlockStateParser.parseForBlock(BuiltInRegistries.BLOCK, blockState, false)
