@@ -34,7 +34,10 @@ class ZFootprintTest {
 	@AfterEach
 	void restore() {
 		SongBuilder.CHEAP_SPLIT_DESCENT = true;
-		SongBuilder.STACKED_BUS_HEADS = false;
+		// The live default, not the one that was live when this probe was written. Restoring a stale
+		// value leaves every test that runs after this one building a different machine, and that is
+		// how the same code gave a green suite and a red suite on two consecutive runs.
+		SongBuilder.STACKED_BUS_HEADS = true;
 	}
 
 	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");

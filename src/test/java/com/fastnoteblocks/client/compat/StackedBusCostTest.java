@@ -27,7 +27,7 @@ class StackedBusCostTest {
 
 	@AfterEach
 	void restore() {
-		SongBuilder.STACKED_BUS_HEADS = false;
+		SongBuilder.STACKED_BUS_HEADS = true;
 	}
 
 	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");

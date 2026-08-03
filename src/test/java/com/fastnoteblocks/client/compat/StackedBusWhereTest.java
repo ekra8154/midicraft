@@ -76,7 +76,7 @@ class StackedBusWhereTest {
 				}
 			}
 		}
-		SongBuilder.STACKED_BUS_HEADS = false;
+		SongBuilder.STACKED_BUS_HEADS = true;
 		tally.forEach((k, v) -> System.out.println("WHERE " + k + " " + v));
 		System.out.println("WHERE zFootprintTotal " + zBefore + " -> " + zAfter);
 	}

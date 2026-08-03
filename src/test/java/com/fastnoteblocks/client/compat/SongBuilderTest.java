@@ -121,9 +121,13 @@ class SongBuilderTest {
 
 		assertEquals(1, stackedModules(build(song(5, repeat(1, withHarp)),
 			SongBuilder.PasteMode.ULTRA_COMPACT_LANE)));
-		assertEquals(0, stackedModules(build(song(5, chords(1, 7, BASS_DRUM)),
+		// Seven with nothing for the centre is a head of six and one note on the bus. The centre is
+		// the seventh slot and it does still want a harp -- what changed is that failing to fill it
+		// no longer costs the other six. Read back through NoteMachineReader in
+		// StackedBusRunTest.theSevensThatCannotFillTheCentreStillReadBack.
+		assertEquals(1, stackedModules(build(song(5, chords(1, 7, BASS_DRUM)),
 			SongBuilder.PasteMode.ULTRA_COMPACT_LANE)),
-			"seven with nothing to put in the centre is a bus");
+			"seven with nothing for the centre keeps a head of six");
 	}
 
 	/**
@@ -137,10 +141,13 @@ class SongBuilderTest {
 				List.of(SNARE, SNARE, BASS_DRUM, BASS_DRUM, BASS_DRUM, BASS_DRUM))),
 			SongBuilder.PasteMode.ULTRA_COMPACT_LANE)),
 			"two snares fit, in the two slots that can prop them");
-		assertEquals(0, stackedModules(build(song(5, List.of(
+		// The third snare still has nowhere to go in the head -- it goes on the bus instead, which
+		// will hang sand anywhere down its length. So the chord keeps a head of five and the snare
+		// rides behind it.
+		assertEquals(1, stackedModules(build(song(5, List.of(
 				List.of(SNARE, SNARE, SNARE, BASS_DRUM, BASS_DRUM, BASS_DRUM))),
 			SongBuilder.PasteMode.ULTRA_COMPACT_LANE)),
-			"a third snare has nowhere to go");
+			"a third snare goes on the bus rather than costing the head");
 	}
 
 	/**
@@ -153,10 +160,12 @@ class SongBuilderTest {
 				List.of(HARP, HARP, HAT, HAT, HAT, HAT))),
 			SongBuilder.PasteMode.ULTRA_COMPACT_LANE)),
 			"six fits: both harps relay, and the centre goes unused");
-		assertEquals(0, stackedModules(build(song(5, List.of(
+		// Still no third solid instrument for the centre, and still no centre. Six of the seven fit
+		// the hangers with both harps relaying, and the seventh goes on the bus.
+		assertEquals(1, stackedModules(build(song(5, List.of(
 				List.of(HARP, HARP, HAT, HAT, HAT, HAT, HAT))),
 			SongBuilder.PasteMode.ULTRA_COMPACT_LANE)),
-			"seven would need a third solid instrument to spare for the centre");
+			"seven keeps a head of six, with the centre still unused");
 	}
 
 	/**
