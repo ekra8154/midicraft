@@ -3712,6 +3712,8 @@ public final class SongBuilder {
 		Direction travel = lane.travel();
 		ChordStyle style = event.style();
 		if (style.reachesBack() && !roomBehind) {
+			placements.padded(style == ChordStyle.STACKED_BUS ? "planBusForBehindStackedBus"
+				: "planBusForBehind");
 			style = ChordStyle.BUS;
 		}
 		// A stacked module may not sit perpendicular to another one, and the two modules either side
@@ -3721,6 +3723,8 @@ public final class SongBuilder {
 		// sideways run are far enough from both bends to be safe is worth working out, and worth
 		// working out after there is something to compare it against.
 		if (style.stacked() && inTurn) {
+			placements.padded(style == ChordStyle.STACKED_BUS ? "planBusForTurnStackedBus"
+				: "planBusForTurn");
 			style = ChordStyle.BUS;
 		}
 		// And a chord of three or fewer drops too, if the ground will not take the notes where that
@@ -3811,7 +3815,7 @@ public final class SongBuilder {
 				: STACKED_CELLS + STACKED_BUS_TRANSITION + (measured.tail().size() + 1) / 2 + 1;
 		}
 		if (style.stacked() && roomAhead < stackedRoom) {
-			placements.padded("busForRoom");
+			placements.padded("planBusForRoom");
 			style = ChordStyle.BUS;
 			nudge = false;
 		}
@@ -3823,7 +3827,7 @@ public final class SongBuilder {
 		// Ekran found it on Big Shot at 44 wide: a chord of eighteen split down a staircase powered
 		// perfectly, and the stacked chord after it was nudged one past the end of the wire.
 		if (nudge && signal < NUDGE_REACH) {
-			placements.padded("busForSignal");
+			placements.padded("planBusForSignal");
 			style = ChordStyle.BUS;
 			nudge = false;
 		}

@@ -92,8 +92,8 @@ class ThreeWayTest {
 						// "everywhere" breaches more than "cuts only", this is where to look.
 						for (Map.Entry<String, Integer> e : plan.padding().entrySet()) {
 							String k = e.getKey();
-							if (k.startsWith("planShort") || k.equals("busForRoom")
-									|| k.equals("busForSignal") || k.equals("parity")) {
+							if (k.startsWith("planShort") || k.equals("planBusForRoom")
+									|| k.equals("planBusForSignal") || k.equals("parity")) {
 								mismatch[mode][cat] += e.getValue();
 							}
 						}
