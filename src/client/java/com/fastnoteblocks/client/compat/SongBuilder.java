@@ -758,7 +758,7 @@ public final class SongBuilder {
 			// no room for a head and a cell of bus before the wall.
 			StackedSplit headed = layout.ultra() && overshoots && index > 0 && above >= 0
 				&& above < floors
-				? stackedSplitOf(event.notes(), room, splitCells)
+				? stackedSplitOf(event.notes(), room, splitCells, climb > 0)
 				: null;
 			// A cut is built straight from the module rather than through {@link #addChordModule},
 			// so none of that method's guards are applied to it -- and the one that matters is the
@@ -799,7 +799,7 @@ public final class SongBuilder {
 					event.time())) {
 				StackedSplit shifted = !SPLIT_NUDGES
 					|| stackedClashes(placements, lane.ahead(delayColumns + 1), event.time())
-					? null : stackedSplitOf(event.notes(), room - 1, splitCells);
+					? null : stackedSplitOf(event.notes(), room - 1, splitCells, climb > 0);
 				if (shifted == null) {
 					// Both cells wrong, or nothing left to cut once a column is spent. Then the head
 					// goes, which is what this did in every case before.
@@ -1683,7 +1683,7 @@ public final class SongBuilder {
 				+ bare.past() + " ends=" + bare.ends() + " tips=" + bare.tips() + " room="
 				+ bare.room() + " closes="
 				+ (bare.last() >= from && closes(events, bare, from, bare.last(), wall, stepX,
-					turnCells, offBus, splitCells)));
+					turnCells, offBus, splitCells, climbing)));
 		}
 		if (bare.last() < from) {
 			// Nothing this lane can do for itself: its own opening chord will not fit, and a pad only
@@ -1692,8 +1692,8 @@ public final class SongBuilder {
 			return Map.of();
 		}
 		boolean shuts = closes(events, bare, from, bare.last(), wall, stepX, turnCells, offBus,
-			splitCells);
-		int cut = carriedCells(events, bare, from, bare.last(), wall, stepX, splitCells);
+			splitCells, climbing);
+		int cut = carriedCells(events, bare, from, bare.last(), wall, stepX, splitCells, climbing);
 		if (shuts && !strandsNext(events, from, bare.last(), wall, otherWall, stepX, turnCells,
 				offBus, stepOff, climbing, layout, cut)) {
 			return Map.of();
@@ -1936,14 +1936,15 @@ public final class SongBuilder {
 	 * these are, and {@code near = 2 * (room - 1)} in the walk, which is where the split is built.</p>
 	 */
 	private static int carriedCells(List<EventGroup> events, Sweep sweep, int from, int last,
-			int wall, int stepX, int splitCells) {
+			int wall, int stepX, int splitCells, boolean climbing) {
 		int room = (wall - sweep.ends().get(last - from)) * stepX;
 		if (room == 0 || last + 1 >= events.size()) {
 			return 0;
 		}
 		// Read off the same split the walk will build. A headed cut carries what the head and the
 		// near bus between them could not take, which is not the same as what a plain bus leaves.
-		StackedSplit headed = stackedSplitOf(events.get(last + 1).notes(), room, splitCells);
+		StackedSplit headed = stackedSplitOf(events.get(last + 1).notes(), room, splitCells,
+			climbing);
 		if (headed != null) {
 			return (headed.farTail().size() + 1) / 2;
 		}
@@ -1986,7 +1987,7 @@ public final class SongBuilder {
 
 	/** Whether the lane can hand over after this event, either by filling it out or by a cut. */
 	private static boolean closes(List<EventGroup> events, Sweep sweep, int from, int last, int wall,
-			int stepX, int turnCells, int offBus, int splitCells) {
+			int stepX, int turnCells, int offBus, int splitCells, boolean climbing) {
 		if (last + 1 >= events.size()) {
 			return true;
 		}
@@ -2003,7 +2004,7 @@ public final class SongBuilder {
 		// disagreement between them is a lane closed on a cut that never happens -- so the head is
 		// offered here in the same order the walk offers it, and the plain sum is the fallback in
 		// both.
-		if (stackedSplitOf(events.get(last + 1).notes(), room, splitCells) != null) {
+		if (stackedSplitOf(events.get(last + 1).notes(), room, splitCells, climbing) != null) {
 			return true;
 		}
 		return room >= 2 && room - 1 < cells && cells + splitCells <= DUST_RANGE;
@@ -4130,22 +4131,26 @@ public final class SongBuilder {
 	 * column, so the spiral is still four cells and the ceiling is unchanged: the handover spends
 	 * one, the descent four, and ten cells of bus past it carry twenty notes to the head's seven.</p>
 	 *
-	 * <p><b>On, and known broken, so that it can be looked at in a world.</b> Switched on, A Dark
-	 * Zone at twelve wide over two floors reads back 1,295 of its 3,510 notes; the same song and
-	 * settings with this off reads back all 3,510. So the head-only cut is what breaks it. But the
-	 * blocks look right: dumped and
-	 * compared cell for cell against a head-only descent ekran built by hand, the centre, the cross
-	 * wire, the handover beside the centre and all four rungs of the spiral land in the same places,
-	 * and the far half opens on the level the spiral finishes at. There is no run of wire past
-	 * fifteen -- the longest in that build is twelve -- and {@code faults()} and {@code breaches()}
-	 * are both empty, which is the layout check believing a machine the reader cannot get through.
+	 * <p><b>Descents only.</b> A descent works and is worth having: real library, eighty configs,
+	 * breaches 982 -> 854 and breach blocks 19,073 -> 16,500, with a third again as many headed cuts
+	 * and every build still reading back.
 	 *
-	 * <p>So the break is in propagation, somewhere three separate derivations from slices failed to
-	 * find. Left <em>on</em> deliberately: ekran can paste it and watch where the pulse stops, which
-	 * is faster than any of that and is how several of these have been found. It costs a red suite
-	 * in the read-back tests until it is fixed, and that is the cheaper half of the trade. The
-	 * window is worth the work: at twelve wide over two floors every one of that build's six
-	 * descents would be head-only.</p>
+	 * <p>A climb does not, and the reason is one ekran found by pasting it rather than by any amount
+	 * of reading. A climb leaves the near half by a glass staircase whose first rung is a level up
+	 * and a column over. After a bus that is fine -- the bus is already a level up. After a head the
+	 * handover sits beside the centre, on the module's own level, and there is simply nothing
+	 * bridging it to the glass: the staircase is disconnected. Three slice-by-slice derivations here
+	 * failed to see it because they were all made against a descent, which has no such gap.
+	 *
+	 * <p>Two ways out, both ekran's, both built by hand and neither yet coded:
+	 * <ul>
+	 *   <li>Spend a cell: a second glass block with dust on it, level with the last of the three
+	 *       bus-staircase rungs, plus dust on top of the head's high block. Costs one column.</li>
+	 *   <li>Or start the chord a column later, so the handover lands on top of the head's high block
+	 *       and reaches the glass by itself. Costs nothing, but the planner has to know the chord
+	 *       begins a column along -- which is the same kind of agreement the parity nudge needs, and
+	 *       is why it is the more interesting of the two.</li>
+	 * </ul>
 	 */
 	static boolean HEAD_ONLY_NEAR_HALF = true;
 
@@ -4167,7 +4172,8 @@ public final class SongBuilder {
 			List<EventNote> farTail) {
 	}
 
-	private static StackedSplit stackedSplitOf(List<EventNote> chord, int room, int splitCells) {
+	private static StackedSplit stackedSplitOf(List<EventNote> chord, int room, int splitCells,
+			boolean climbing) {
 		if (!STACKED_SPLIT_HEADS) {
 			return null;
 		}
@@ -4178,7 +4184,11 @@ public final class SongBuilder {
 		// Head, transition, and -- unless the near half is allowed to be the head alone -- at least
 		// one cell of bus to end on.
 		int nearBusCells = room - STACKED_CELLS - STACKED_BUS_TRANSITION;
-		if (nearBusCells < (HEAD_ONLY_NEAR_HALF ? 0 : 1)) {
+		// Descents only for now. A climb leaves the near half by a glass staircase whose first rung
+		// is a level up and a column over, and the handover -- which sits beside the centre on the
+		// module's own level -- has nothing bridging it to that rung. Ekran pasted one and found the
+		// glass simply disconnected. A descent has no such gap and works today.
+		if (nearBusCells < (HEAD_ONLY_NEAR_HALF && !climbing ? 0 : 1)) {
 			if (nearBusCells == 0 && !split.tail().isEmpty()
 					&& STACKED_BUS_TRANSITION + (split.tail().size() + 1) / 2 + splitCells
 						<= DUST_RANGE) {

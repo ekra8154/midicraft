@@ -23,6 +23,7 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -68,6 +69,7 @@ class HeadOnlyNearHalfTest {
 	 * these levels by hand in this file has been wrong.</p>
 	 */
 	@Test
+	@Tag("sweep")
 	void dumpsAHeadOnlyCutInBuildOrder() throws Exception {
 		SongBuilder.HEAD_ONLY_NEAR_HALF = true;
 		List<Path> files;
@@ -208,6 +210,7 @@ class HeadOnlyNearHalfTest {
 
 	/** And the real library still reads back, with the window measured against being shut. */
 	@Test
+	@Tag("sweep")
 	void pricesTheWindowAndReadsBack() throws Exception {
 		List<Path> files;
 		try (Stream<Path> listing = Files.list(SONGS)) {
@@ -281,16 +284,8 @@ class HeadOnlyNearHalfTest {
 				+ " breachBlocks=" + breachBlocks + " spanZ=" + spanZ + " cuts=" + cuts
 				+ " || readBuilds=" + readBuilds + " unreached=" + unreached
 				+ " mismatched=" + mismatched);
-			// Asserted only of the shape that ships. With the window open the machine stops
-			// sounding -- that is the finding, recorded here rather than turned into a standing
-			// red mark, and the numbers above say how badly.
-			if (on == 0) {
-				assertEquals(0, unreached, "note blocks the signal never got to");
-				assertEquals(0, mismatched, "builds that did not read back as their song");
-			} else {
-				assertTrue(mismatched > 0, "the head-only near half is recorded as broken here. "
-					+ "If this passes it has started working and the flag should be revisited");
-			}
+			assertEquals(0, unreached, "note blocks the signal never got to");
+			assertEquals(0, mismatched, "builds that did not read back as their song");
 		}
 	}
 
