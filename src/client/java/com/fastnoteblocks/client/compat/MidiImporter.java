@@ -70,7 +70,10 @@ final class MidiImporter {
 			clamped += converted.clamped();
 			quiet += converted.quiet();
 			if (!converted.sequence().isBlank()) {
-				tracks.add(new SequenceTrack(trackName(index, parts.get(index)), converted.sequence(), instrument, 0));
+				Part part = parts.get(index);
+				String chosen = MidiInstruments.choose(config.midiInstrumentSource(), part.program(),
+					part.channel(), part.name(), instrument);
+				tracks.add(new SequenceTrack(trackName(index, part), converted.sequence(), chosen, 0));
 			}
 		}
 		if (tracks.isEmpty()) {
@@ -152,8 +155,10 @@ final class MidiImporter {
 			if (notes.isEmpty()) {
 				continue;
 			}
-			layers.add(new Layer(trackName(index, new Part(part.name(), part.trackIndex(), part.channel(), List.of())),
-				defaultInstrument, false, true, true, notes));
+			layers.add(new Layer(
+				trackName(index, new Part(part.name(), part.trackIndex(), part.channel(),
+					part.program(), List.of())),
+				instrumentFor(part, config, defaultInstrument), false, true, true, notes));
 		}
 		if (layers.isEmpty()) {
 			throw new IllegalArgumentException(
@@ -169,6 +174,17 @@ final class MidiImporter {
 		);
 		String report = "Imported " + layers.size() + (layers.size() == 1 ? " layer" : " layers")
 			+ " at " + bpmLabel(tempo);
+		// Said out loud because it is the one import decision you cannot see by looking at the roll,
+		// and because a file that sent no program changes at all is worth knowing about before you
+		// go looking for why everything came in as a harp.
+		long readInstruments = layers.stream()
+			.filter(layer -> !layer.instrument().equals(defaultInstrument))
+			.count();
+		if (config.midiInstrumentSource() != FastNoteblocksConfig.MidiInstrumentSource.DEFAULT_ONLY) {
+			report += "; instruments read for " + readInstruments + " of " + layers.size()
+				+ (readInstruments == 0
+					? " layers - this file names none of them, so they took the default" : " layers");
+		}
 		if (outsideRange > 0) {
 			report += "; " + outsideRange + " notes kept outside Minecraft's range";
 		}
@@ -198,12 +214,41 @@ final class MidiImporter {
 		return new ProjectResult(project, report);
 	}
 
+	/**
+	 * The note block one part is played on, with drums resolved to the drum it mostly is.
+	 *
+	 * <p>A note block instrument belongs to a whole layer, and a drum kit is a different instrument
+	 * every note, so a percussion part has to pick one. It picks the one it plays most: a beat whose
+	 * kicks and snares all land on the same block is a drum machine with one drum, and losing the
+	 * hats off the top of a mostly-kick part still leaves something you can recognise the song by.
+	 * The part having been split by channel already means the kit is usually one part, not three --
+	 * this is the cost of that, and it is why percussion is worth its own pass one day.</p>
+	 */
+	private static String instrumentFor(ExactPart part, FastNoteblocksConfig config, String fallback) {
+		String chosen = MidiInstruments.choose(config.midiInstrumentSource(), part.program(),
+			part.channel(), part.name(), fallback);
+		if (part.channel() != MidiInstruments.PERCUSSION_CHANNEL
+				|| config.midiInstrumentSource() == FastNoteblocksConfig.MidiInstrumentSource.DEFAULT_ONLY
+				|| part.notes().isEmpty()) {
+			return chosen;
+		}
+		Map<String, Integer> counts = new HashMap<>();
+		for (ExactNote note : part.notes()) {
+			counts.merge(MidiInstruments.forDrumNote(note.midiNote()), 1, Integer::sum);
+		}
+		return counts.entrySet().stream()
+			.max(Map.Entry.comparingByValue())
+			.map(Map.Entry::getKey)
+			.orElse(chosen);
+	}
+
 	private static List<ExactPart> collectExactParts(
 		javax.sound.midi.Sequence midi,
 		boolean ignorePercussion,
 		int resolution
 	) {
 		Map<PartKey, MutableExactPart> parts = new HashMap<>();
+		Map<PartKey, Integer> programs = new HashMap<>();
 		Track[] tracks = midi.getTracks();
 		for (int trackIndex = 0; trackIndex < tracks.length; trackIndex++) {
 			int currentTrackIndex = trackIndex;
@@ -215,10 +260,16 @@ final class MidiImporter {
 					continue;
 				}
 				int channel = message.getChannel();
-				if (ignorePercussion && channel == 9) {
+				if (ignorePercussion && channel == MidiInstruments.PERCUSSION_CHANNEL) {
 					continue;
 				}
 				PartKey key = new PartKey(trackIndex, channel);
+				// The first program a part selects, not the last. A part that switches instrument
+				// part way through cannot be two note blocks, and what it opens on is what it is.
+				if (message.getCommand() == ShortMessage.PROGRAM_CHANGE) {
+					programs.putIfAbsent(key, message.getData1());
+					continue;
+				}
 				MutableExactPart part = parts.computeIfAbsent(key,
 					ignored -> new MutableExactPart(name, currentTrackIndex, channel));
 				int command = message.getCommand();
@@ -252,9 +303,10 @@ final class MidiImporter {
 				}
 			}
 		}
-		return parts.values().stream()
-			.map(part -> new ExactPart(part.name(), part.trackIndex(), part.channel(),
-				part.notes().stream()
+		return parts.entrySet().stream()
+			.map(entry -> new ExactPart(entry.getValue().name(), entry.getValue().trackIndex(),
+				entry.getValue().channel(), programs.getOrDefault(entry.getKey(), -1),
+				entry.getValue().notes().stream()
 					.sorted(Comparator.comparingLong(ExactNote::startTick)
 						.thenComparingInt(ExactNote::midiNote))
 					.toList()))
@@ -263,6 +315,7 @@ final class MidiImporter {
 
 	private static List<Part> collectParts(javax.sound.midi.Sequence midi, boolean ignorePercussion) {
 		Map<PartKey, MutablePart> parts = new HashMap<>();
+		Map<PartKey, Integer> programs = new HashMap<>();
 		Track[] midiTracks = midi.getTracks();
 		for (int trackIndex = 0; trackIndex < midiTracks.length; trackIndex++) {
 			int currentTrackIndex = trackIndex;
@@ -271,22 +324,28 @@ final class MidiImporter {
 			for (int eventIndex = 0; eventIndex < track.size(); eventIndex++) {
 				MidiEvent event = track.get(eventIndex);
 				MidiMessage message = event.getMessage();
-				if (message instanceof ShortMessage shortMessage
-						&& shortMessage.getCommand() == ShortMessage.NOTE_ON
+				if (!(message instanceof ShortMessage shortMessage)) {
+					continue;
+				}
+				int channel = shortMessage.getChannel();
+				if (ignorePercussion && channel == MidiInstruments.PERCUSSION_CHANNEL) {
+					continue;
+				}
+				PartKey key = new PartKey(currentTrackIndex, channel);
+				if (shortMessage.getCommand() == ShortMessage.PROGRAM_CHANGE) {
+					programs.putIfAbsent(key, shortMessage.getData1());
+				} else if (shortMessage.getCommand() == ShortMessage.NOTE_ON
 						&& shortMessage.getData2() > 0) {
-					int channel = shortMessage.getChannel();
-					if (ignorePercussion && channel == 9) {
-						continue;
-					}
-					PartKey key = new PartKey(currentTrackIndex, channel);
 					parts.computeIfAbsent(key, ignored -> new MutablePart(name, currentTrackIndex, channel))
 						.notes()
 						.add(new NoteStart(event.getTick(), shortMessage.getData1(), shortMessage.getData2()));
 				}
 			}
 		}
-		return parts.values().stream()
-			.map(part -> new Part(part.name(), part.trackIndex(), part.channel(), List.copyOf(part.notes())))
+		return parts.entrySet().stream()
+			.map(entry -> new Part(entry.getValue().name(), entry.getValue().trackIndex(),
+				entry.getValue().channel(), programs.getOrDefault(entry.getKey(), -1),
+				List.copyOf(entry.getValue().notes())))
 			.toList();
 	}
 
@@ -506,7 +565,8 @@ final class MidiImporter {
 		}
 	}
 
-	private record Part(String name, int trackIndex, int channel, List<NoteStart> notes) {
+	/** @param program the General MIDI program this part last selected, or -1 if it never said. */
+	private record Part(String name, int trackIndex, int channel, int program, List<NoteStart> notes) {
 	}
 
 	private record ConvertedPart(String sequence, int skipped, int clamped, int quiet) {
@@ -521,7 +581,9 @@ final class MidiImporter {
 	private record ExactNote(long startTick, long endTick, int midiNote, int velocity) {
 	}
 
-	private record ExactPart(String name, int trackIndex, int channel, List<ExactNote> notes) {
+	/** @param program the General MIDI program this part last selected, or -1 if it never said. */
+	private record ExactPart(String name, int trackIndex, int channel, int program,
+		List<ExactNote> notes) {
 	}
 
 	private record MutableExactPart(

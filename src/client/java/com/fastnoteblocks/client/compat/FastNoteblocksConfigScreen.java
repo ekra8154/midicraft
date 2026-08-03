@@ -1,6 +1,7 @@
 package com.fastnoteblocks.client.compat;
 
 import com.fastnoteblocks.client.FastNoteblocksConfig;
+import com.fastnoteblocks.client.FastNoteblocksConfig.MidiInstrumentSource;
 import com.fastnoteblocks.client.FastNoteblocksConfig.MidiQuantizeGrid;
 import com.fastnoteblocks.client.FastNoteblocksConfig.MidiRangeFit;
 import com.fastnoteblocks.client.FastNoteblocksConfig.MidiTempoFit;
@@ -204,6 +205,18 @@ public final class FastNoteblocksConfigScreen {
 			))
 			.setTooltip(Component.translatable("tooltip.fast-noteblocks.midi_tempo_fit"))
 			.setSaveConsumer(config::setMidiTempoFit)
+			.build());
+		midi.addEntry(entries.startEnumSelector(
+				Component.translatable("option.fast-noteblocks.midi_instrument_source"),
+				MidiInstrumentSource.class,
+				config.midiInstrumentSource())
+			.setDefaultValue(MidiInstrumentSource.FROM_FILE_THEN_NAME)
+			.setEnumNameProvider(value -> Component.translatable(
+				"option.fast-noteblocks.midi_instrument_source."
+					+ ((MidiInstrumentSource) value).name().toLowerCase()
+			))
+			.setTooltip(Component.translatable("tooltip.fast-noteblocks.midi_instrument_source"))
+			.setSaveConsumer(config::setMidiInstrumentSource)
 			.build());
 		midi.addEntry(entries.startEnumSelector(
 				Component.translatable("option.fast-noteblocks.midi_range_fit"),

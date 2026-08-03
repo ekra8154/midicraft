@@ -174,6 +174,20 @@ public final class FastNoteblocksConfig {
 		SNAP_TO_REPEATERS
 	}
 
+	/**
+	 * Where an imported track's note block instrument comes from.
+	 *
+	 * <p>{@code DEFAULT_ONLY} is what every import did before there was a choice: one instrument for
+	 * the whole file. The other two read what the file is carrying -- its General MIDI program
+	 * changes, and then its track names, which is where a file that never sent a program change
+	 * usually keeps the same information.</p>
+	 */
+	public enum MidiInstrumentSource {
+		DEFAULT_ONLY,
+		FROM_FILE,
+		FROM_FILE_THEN_NAME
+	}
+
 	public static final int DEFAULT_VIEW_DISTANCE = 10;
 	public static final int MIN_VIEW_DISTANCE = 1;
 	public static final int MAX_VIEW_DISTANCE = 32;
@@ -309,6 +323,7 @@ public final class FastNoteblocksConfig {
 	private boolean midiIgnorePercussion;
 	private int midiMaxImportedTracks;
 	private String midiDefaultInstrument;
+	private MidiInstrumentSource midiInstrumentSource;
 	private MidiTempoFit midiTempoFit;
 	private boolean debugCommandsEnabled;
 	private int midiVelocityCutoff;
@@ -427,6 +442,11 @@ public final class FastNoteblocksConfig {
 					? "HARP"
 					: stored.midiDefaultInstrument;
 				instance.midiTempoFit = stored.midiTempoFit == null ? MidiTempoFit.SNAP_TO_REPEATERS : stored.midiTempoFit;
+				// A config written before the setting existed is one that never asked for a single
+				// instrument -- it just never had the choice -- so it opens on reading the file.
+				instance.midiInstrumentSource = stored.midiInstrumentSource == null
+					? MidiInstrumentSource.FROM_FILE_THEN_NAME
+					: stored.midiInstrumentSource;
 				instance.maxBuildFloors = clampMaxBuildFloors(
 					stored.maxBuildFloors == null ? DEFAULT_MAX_BUILD_FLOORS : stored.maxBuildFloors
 				);
@@ -968,6 +988,16 @@ public final class FastNoteblocksConfig {
 		return midiDefaultInstrument;
 	}
 
+	public MidiInstrumentSource midiInstrumentSource() {
+		return midiInstrumentSource;
+	}
+
+	public void setMidiInstrumentSource(MidiInstrumentSource midiInstrumentSource) {
+		this.midiInstrumentSource = midiInstrumentSource == null
+			? MidiInstrumentSource.FROM_FILE_THEN_NAME
+			: midiInstrumentSource;
+	}
+
 	public void setMidiDefaultInstrument(String midiDefaultInstrument) {
 		this.midiDefaultInstrument = midiDefaultInstrument == null || midiDefaultInstrument.isBlank()
 			? "HARP"
@@ -1125,6 +1155,7 @@ public final class FastNoteblocksConfig {
 		config.debugCommandsEnabled = false;
 		config.midiMaxImportedTracks = DEFAULT_MIDI_MAX_IMPORTED_TRACKS;
 		config.midiDefaultInstrument = "HARP";
+		config.midiInstrumentSource = MidiInstrumentSource.FROM_FILE_THEN_NAME;
 		config.midiTempoFit = MidiTempoFit.SNAP_TO_REPEATERS;
 		config.composerSpeedQuarters = DEFAULT_COMPOSER_SPEED_QUARTERS;
 		config.midiVelocityCutoff = DEFAULT_MIDI_VELOCITY_CUTOFF;
@@ -1283,6 +1314,7 @@ public final class FastNoteblocksConfig {
 		private Boolean debugCommandsEnabled;
 		private Integer midiMaxImportedTracks;
 		private String midiDefaultInstrument;
+		private MidiInstrumentSource midiInstrumentSource;
 		private MidiTempoFit midiTempoFit;
 		private Integer midiVelocityCutoff;
 		private Integer chordThinTarget;
@@ -1339,6 +1371,7 @@ public final class FastNoteblocksConfig {
 			this.debugCommandsEnabled = config.debugCommandsEnabled;
 			this.midiMaxImportedTracks = config.midiMaxImportedTracks;
 			this.midiDefaultInstrument = config.midiDefaultInstrument;
+			this.midiInstrumentSource = config.midiInstrumentSource;
 			this.midiTempoFit = config.midiTempoFit;
 			this.midiVelocityCutoff = config.midiVelocityCutoff;
 			this.chordThinTarget = config.chordThinTarget;
