@@ -3866,6 +3866,27 @@ public final class SongBuilder {
 	}
 
 	/**
+	 * One line per chord placed: what the planner chose, what was built, and what changed it.
+	 *
+	 * <p>The reason is the part worth having. A lane past its wall is nearly always a chord measured
+	 * as one shape and built as another, and seven separate rules in {@link #addChordModule} can do
+	 * that -- so printing the shapes alone leaves the same reading of all seven that this is meant
+	 * to save.</p>
+	 */
+	private static void trace(EventGroup event, Lane lane, ChordStyle planned, ChordStyle built,
+			String gaveUp) {
+		if (!TRACE) {
+			return;
+		}
+		System.out.println("CHORD t=" + event.time() + " at " + lane.pos().getX() + ","
+			+ lane.pos().getY() + "," + lane.pos().getZ() + " travel=" + lane.travel()
+			+ " side=" + lane.noteSide() + " crowded=" + lane.crowded()
+			+ " bends=" + lane.bends() + " style=" + event.style() + "->" + built
+			+ " notes=" + event.notes().size()
+			+ (gaveUp == null ? "" : " gaveUp=" + gaveUp));
+	}
+
+	/**
 	 * Builds a chord in the shape chosen for it, settling the one thing the choice could not know.
 	 *
 	 * <p>Whether the pair of slots behind this module is free depends on where the lanes turned,
@@ -3878,7 +3899,12 @@ public final class SongBuilder {
 			int signal, Layout layout) {
 		Direction travel = lane.travel();
 		ChordStyle style = event.style();
+		// Which rule took the shape the planner chose, for {@link #TRACE}. A lane past its wall is
+		// usually a chord that was measured as one shape and built as another, and there are seven
+		// places that can happen -- naming the one that fired beats reading all seven.
+		String gaveUp = null;
 		if (style.reachesBack() && !roomBehind) {
+			gaveUp = "behindBusy";
 			placements.padded(style.busHeaded() ? "planBusForBehindStackedBus"
 				: "planBusForBehind");
 			// A head with a bus behind it keeps the head and drops to a head of five; only the rigid
@@ -3897,6 +3923,7 @@ public final class SongBuilder {
 		// sideways run are far enough from both bends to be safe is worth working out, and worth
 		// working out after there is something to compare it against.
 		if (style.stacked() && inTurn) {
+			gaveUp = "inTurn";
 			placements.padded(style.busHeaded() ? "planBusForTurnStackedBus"
 				: "planBusForTurn");
 			style = ChordStyle.BUS;
@@ -3919,13 +3946,6 @@ public final class SongBuilder {
 				? ChordStyle.STACKED_FRONT
 				: ChordStyle.BUS;
 		}
-		if (TRACE) {
-			System.out.println("CHORD t=" + event.time() + " at " + lane.pos().getX() + ","
-				+ lane.pos().getY() + "," + lane.pos().getZ() + " travel=" + lane.travel()
-				+ " side=" + lane.noteSide() + " crowded=" + lane.crowded()
-				+ " bends=" + lane.bends() + " style=" + event.style() + "->" + style
-				+ " notes=" + event.notes().size());
-		}
 		// Nudged only when the lane behind actually disagrees, and given up on when both cells
 		// disagree.
 		//
@@ -3946,6 +3966,7 @@ public final class SongBuilder {
 		if (style.stacked()) {
 			boolean clashesHere = stackedClashes(placements, start, event.time());
 			if (clashesHere && stackedClashes(placements, start.ahead(1), event.time())) {
+				gaveUp = "parityBothCells";
 				placements.padded(slackColumns > 0 ? "planParityGaveUpSlack"
 					: "planParityGaveUpTight");
 				style = ChordStyle.BUS;
@@ -3958,6 +3979,7 @@ public final class SongBuilder {
 				//
 				// Only the stacked-bus. A plain stacked module is two columns and three when nudged,
 				// where the same chord as a bus is five, so shifting it is much the better bargain.
+				gaveUp = "parityPreferredBus";
 				placements.padded("planParityPreferredBus");
 				style = ChordStyle.BUS;
 			} else {
@@ -3989,6 +4011,7 @@ public final class SongBuilder {
 				: STACKED_CELLS + STACKED_BUS_TRANSITION + (measured.tail().size() + 1) / 2 + 1;
 		}
 		if (style.stacked() && roomAhead < stackedRoom) {
+			gaveUp = "roomAhead" + roomAhead + "<" + stackedRoom;
 			placements.padded("planBusForRoom");
 			style = ChordStyle.BUS;
 			nudge = false;
@@ -4001,11 +4024,13 @@ public final class SongBuilder {
 		// Ekran found it on Big Shot at 44 wide: a chord of eighteen split down a staircase powered
 		// perfectly, and the stacked chord after it was nudged one past the end of the wire.
 		if (nudge && signal < NUDGE_REACH) {
+			gaveUp = "nudgeOutOfReach";
 			placements.padded("planBusForSignal");
 			style = ChordStyle.BUS;
 			nudge = false;
 		}
 		if (!style.stacked()) {
+			trace(event, lane, style, style, gaveUp);
 			Body body = addSpatialEventModule(placements, lane, triggerDelay, event.notes(),
 				style == ChordStyle.BUS);
 			return new Placed(body.lane(), style, body.busCells(), false);
@@ -4013,6 +4038,12 @@ public final class SongBuilder {
 		if (style.busHeaded()) {
 			StackedBusSplit split = splitFor(style, event.notes());
 			if (split == null) {
+				// Counted, where it used to be the one downgrade in this method that said nothing.
+				// The planner measured a head here; the chord could not make one, and the bus it
+				// gets instead is a cell longer. A silent disagreement is the expensive kind.
+				gaveUp = "noHeadPossible";
+				placements.padded("planBusForNoHead");
+				trace(event, lane, style, ChordStyle.BUS, gaveUp);
 				Body body = addSpatialEventModule(placements, lane, triggerDelay, event.notes(), true);
 				return new Placed(body.lane(), ChordStyle.BUS, body.busCells(), false);
 			}
@@ -4022,6 +4053,7 @@ public final class SongBuilder {
 				addParityPad(placements, start.pos());
 				start = start.ahead(1);
 			}
+			trace(event, lane, style, style, nudge ? "nudged" : gaveUp);
 			Body body = addStackedBusModule(placements, start, triggerDelay, event.time(),
 				split.slots(), split.tail());
 			return new Placed(body.lane(), style, body.busCells(), nudge);
@@ -4034,6 +4066,7 @@ public final class SongBuilder {
 			addParityPad(placements, start.pos());
 			start = start.ahead(1);
 		}
+		trace(event, lane, style, style, nudge ? "nudged" : gaveUp);
 		return new Placed(addStackedEventModule(placements, start, triggerDelay,
 			event.time(), ultraSlots(event.notes(), style == ChordStyle.STACKED_FULL)), style, 0,
 			nudge);
