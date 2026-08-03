@@ -563,10 +563,17 @@ public final class SongBuilder {
 		// Whether those bends are the ones a turn put there, so that the walk knows to re-pin the
 		// note side and start a new lane the moment it comes out the far side.
 		boolean turning = false;
-		// And whether the chord about to be placed is the first one after coming out. A stacked module
-		// there is still perpendicular to the ones along the sideways run it has just left -- the
-		// corner is behind it, not under it, which is near enough to be the same problem. So the
-		// restriction outlasts the turn by exactly one chord.
+		// And whether the chord about to be placed is the first one after coming out. The stated
+		// reason was that a stacked module there is still perpendicular to the ones along the
+		// sideways run it has just left -- the corner behind it rather than under it, near enough to
+		// be the same problem -- so the restriction outlasts the turn by exactly one chord.
+		//
+		// Ekran doubts that reason and the blocks are on their side. A turn's bus comes out of the
+		// second bend running the new lane's way, so by the time this chord is placed the cells
+		// behind it are collinear with it, not across it: Kick Back's turn at tick 340 is nine cells,
+		// bends after one and after four, so its last five run along x on the new z and the chord at
+		// tick 344 follows them in line. The sideways run is three cells further back. Gated by
+		// {@link #TURN_BAN_OUTLASTS} so the claim can be measured rather than argued.
 		boolean leavingTurn = false;
 		// A descent is the one thing in a build that steps a column off its own centre line, and
 		// it steps back the way the slabs came. The slab behind this one is climbing where this one
@@ -625,7 +632,7 @@ public final class SongBuilder {
 			if (turning && !lane.bending()) {
 				lane = lane.pinned(depth);
 				turning = false;
-				leavingTurn = true;
+				leavingTurn = TURN_BAN_OUTLASTS;
 				// Unless the turn itself held music, in which case this lane has already started.
 				//
 				// The rule this clears is "a lane must hold something before it can end", and it is
@@ -3659,6 +3666,41 @@ public final class SongBuilder {
 	 * module built where it stands needs nothing, since the wire is already there.</p>
 	 */
 	private static final int NUDGE_REACH = 1;
+
+	/**
+	 * Scratch: whether the no-stacked-shapes-in-a-turn rule outlasts the turn by one chord.
+	 *
+	 * <p>It costs more than any other refusal in a folded build -- 55 stacked buses on Kick Back at
+	 * twenty wide alone, against 41 for the column behind and 9 for room. And it is charged on a
+	 * chord that is in line with what it follows, not across it, because a turn's bus leaves its
+	 * second bend already running the new lane's way.</p>
+	 *
+	 * <p>The cost is not the refusal itself but what the longer shape leaves behind: a bus of
+	 * twenty-one hands on {@code 15 - 11 = 4} where a stacked bus hands on {@code 15 - 1 - 7 = 7},
+	 * and a descent wants five. So the lane reaches its wall unable to pay for the staircase.</p>
+	 *
+	 * <p><b>Measured, and it stays on.</b> The whole library, six floor counts, ten widths:</p>
+	 *
+	 * <pre>
+	 *   on    breaches 619   blocks 31,990,356   spanZ 228,460   wrong        0
+	 *   off   breaches 654   blocks 31,938,732   spanZ 227,057   wrong    1,903
+	 * </pre>
+	 *
+	 * <p>Off is a fifth of a percent smaller and sounds one thousand nine hundred notes at the wrong
+	 * tick. So the reason in the comment above is wrong about the geometry and right about the
+	 * conclusion: whatever the chord after a turn is perpendicular to, something is there, and the
+	 * collinear argument -- that a turn's bus leaves its second bend already running the new lane's
+	 * way, so the cells behind the chord are in line with it -- does not describe all of it.</p>
+	 *
+	 * <p>Breaches get <em>worse</em> off, too, which was not the expected direction and is the more
+	 * interesting half: the shape that saves a lane a column near a turn costs some other lane more
+	 * than it saved. Worth understanding before anyone tries a narrower version of this rule.</p>
+	 *
+	 * <p>Note for whoever measures the narrower version: reading the machines back did not catch
+	 * this. All 135 read builds came back with every note sounded and nothing unreached both ways,
+	 * because a note at the wrong tick still sounds. {@code wrongNotes()} is what caught it.</p>
+	 */
+	static boolean TURN_BAN_OUTLASTS = true;
 
 	/** Scratch: one line per chord placed, for finding the first one that goes wrong. */
 	static boolean TRACE = false;
