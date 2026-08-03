@@ -12,11 +12,14 @@ import java.util.Map;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.ConfirmScreen;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.KeyEvent;
 import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
+import org.lwjgl.glfw.GLFW;
 
 /**
  * The song library: pick one, or start a new one.
@@ -28,12 +31,15 @@ import net.minecraft.network.chat.Component;
  */
 public final class SongsScreen extends Screen {
 	private static final int ROW_HEIGHT = 34;
-	private static final int LIST_TOP = 44;
+	private static final int LIST_TOP = 62;
 
 	private final Screen parent;
 	private final FastNoteblocksConfig config;
 	private final List<Row> rows = new ArrayList<>();
+	private final List<Row> shown = new ArrayList<>();
+	private final List<Button> rowButtons = new ArrayList<>();
 	private final Map<String, SongAnalysis> analyses = new LinkedHashMap<>();
+	private EditBox searchBox;
 	private int scroll;
 	private String status = "";
 
@@ -49,6 +55,7 @@ public final class SongsScreen extends Screen {
 	@Override
 	protected void init() {
 		clearWidgets();
+		rowButtons.clear();
 		rows.clear();
 		SongLibrary library = FastNoteblocksConfig.songs();
 		for (String id : library.ids()) {
@@ -58,28 +65,18 @@ public final class SongsScreen extends Screen {
 				ignored -> SongAnalysis.of(song, config.dedupeIdenticalNotes()));
 		}
 
-		int listBottom = height - 56;
-		int visible = Math.max(1, (listBottom - LIST_TOP) / ROW_HEIGHT);
-		scroll = Math.max(0, Math.min(scroll, Math.max(0, rows.size() - visible)));
-		for (int index = scroll; index < Math.min(rows.size(), scroll + visible); index++) {
-			Row row = rows.get(index);
-			int y = LIST_TOP + (index - scroll) * ROW_HEIGHT;
-			boolean active = row.id().equals(config.activeSongId());
-			addRenderableWidget(Button.builder(
-					Component.literal(active ? "Resume" : "Open"), button -> open(row.id()))
-				.bounds(width - 152, y + 4, 52, 20)
-				.tooltip(Tooltip.create(Component.literal("Edit this song in the composer")))
-				.build());
-			addRenderableWidget(Button.builder(Component.literal("Copy"), button -> duplicate(row))
-				.bounds(width - 96, y + 4, 44, 20)
-				.tooltip(Tooltip.create(Component.literal("Duplicate this song")))
-				.build());
-			Button delete = addRenderableWidget(Button.builder(
-					Component.literal("×").withStyle(ChatFormatting.RED), button -> confirmDelete(row))
-				.bounds(width - 48, y + 4, 20, 20)
-				.build());
-			delete.active = rows.size() > 1;
-		}
+		// Rebuilt rather than kept, because init runs again on every resize -- but its text survives,
+		// so deleting or copying a song out of a filtered list does not throw the filter away.
+		String query = searchBox == null ? "" : searchBox.getValue();
+		searchBox = new EditBox(font, 8, 40, width - 16, 18, Component.literal("Search"));
+		searchBox.setMaxLength(120);
+		searchBox.setHint(Component.literal("Search by name").withStyle(EditBox.SEARCH_HINT_STYLE));
+		searchBox.setValue(query);
+		searchBox.setResponder(value -> {
+			scroll = 0;
+			rebuildRows();
+		});
+		addRenderableWidget(searchBox);
 
 		addRenderableWidget(Button.builder(Component.literal("+ New song"), button -> create())
 			.bounds(8, height - 26, 82, 20).build());
@@ -121,6 +118,96 @@ public final class SongsScreen extends Screen {
 		// Nothing to scan from the title screen, and the coordinate prompt could not tell you why
 		// the region you typed came back empty.
 		scan.active = minecraft.level != null;
+
+		rebuildRows();
+		// Typing goes to the search straight away. There is nothing else on this screen a keystroke
+		// could have meant, and a library you have to reach for the mouse to search is not searched.
+		setInitialFocus(searchBox);
+	}
+
+	private int visibleRows() {
+		return Math.max(1, (height - 56 - LIST_TOP) / ROW_HEIGHT);
+	}
+
+	/**
+	 * The songs the search leaves, in library order.
+	 *
+	 * <p>Every whitespace-separated word has to appear somewhere in the name, in any order, so
+	 * "brown gold" finds "Golden Brown" -- the point of a search here is to type the two words you
+	 * remember, not to reproduce the name you would otherwise have scrolled to.</p>
+	 */
+	private List<Row> matches() {
+		String query = searchBox == null ? "" : searchBox.getValue().trim().toLowerCase(Locale.ROOT);
+		if (query.isEmpty()) {
+			return List.copyOf(rows);
+		}
+		String[] words = query.split("\\s+");
+		return rows.stream().filter(row -> {
+			String name = row.song().name().toLowerCase(Locale.ROOT);
+			for (String word : words) {
+				if (!name.contains(word)) {
+					return false;
+				}
+			}
+			return true;
+		}).toList();
+	}
+
+	/**
+	 * Re-lays the list's buttons for the current search and scroll.
+	 *
+	 * <p>Separate from {@link #init()} because the search box calls it on every keystroke, and init
+	 * would replace the box being typed into.</p>
+	 */
+	private void rebuildRows() {
+		for (Button button : rowButtons) {
+			removeWidget(button);
+		}
+		rowButtons.clear();
+		shown.clear();
+		shown.addAll(matches());
+
+		int visible = visibleRows();
+		scroll = Math.max(0, Math.min(scroll, Math.max(0, shown.size() - visible)));
+		for (int index = scroll; index < Math.min(shown.size(), scroll + visible); index++) {
+			Row row = shown.get(index);
+			int y = LIST_TOP + (index - scroll) * ROW_HEIGHT;
+			boolean active = row.id().equals(config.activeSongId());
+			rowButtons.add(addRenderableWidget(Button.builder(
+					Component.literal(active ? "Resume" : "Open"), button -> open(row.id()))
+				.bounds(width - 152, y + 4, 52, 20)
+				.tooltip(Tooltip.create(Component.literal("Edit this song in the composer")))
+				.build()));
+			rowButtons.add(addRenderableWidget(
+				Button.builder(Component.literal("Copy"), button -> duplicate(row))
+					.bounds(width - 96, y + 4, 44, 20)
+					.tooltip(Tooltip.create(Component.literal("Duplicate this song")))
+					.build()));
+			Button delete = addRenderableWidget(Button.builder(
+					Component.literal("×").withStyle(ChatFormatting.RED), button -> confirmDelete(row))
+				.bounds(width - 48, y + 4, 20, 20)
+				.build());
+			// Against the whole library, not the search: hiding the last song from view is not the
+			// same as it being the last one there is.
+			delete.active = rows.size() > 1;
+			rowButtons.add(delete);
+		}
+	}
+
+	/**
+	 * Enter opens the top match, so a search can be answered without leaving the keyboard.
+	 *
+	 * <p>Only while something is actually typed. On an unsearched list Enter would be opening
+	 * whichever song happens to be first, which is not a thing anyone meant to ask for.</p>
+	 */
+	@Override
+	public boolean keyPressed(KeyEvent event) {
+		boolean enter = event.key() == GLFW.GLFW_KEY_ENTER || event.key() == GLFW.GLFW_KEY_KP_ENTER;
+		if (enter && searchBox != null && !searchBox.getValue().isBlank() && !shown.isEmpty()) {
+			open(shown.get(0).id());
+			return true;
+		}
+		return super.keyPressed(event);
 	}
 
 	private void open(String id) {
@@ -193,13 +280,15 @@ public final class SongsScreen extends Screen {
 	public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
 		super.extractRenderState(graphics, mouseX, mouseY, partialTick);
 		graphics.text(font, "Songs", 8, 16, 0xFFFFFFFF, false);
-		graphics.text(font, FastNoteblocksConfig.songs().ids().size() + " in "
-			+ SongLibrary.directory().getFileName(), 8, 28, 0xFF8A9098, false);
+		boolean searching = shown.size() != rows.size();
+		String count = searching
+			? shown.size() + " of " + rows.size() + " in " + SongLibrary.directory().getFileName()
+			: rows.size() + " in " + SongLibrary.directory().getFileName();
+		graphics.text(font, count, 8, 28, 0xFF8A9098, false);
 
-		int listBottom = height - 56;
-		int visible = Math.max(1, (listBottom - LIST_TOP) / ROW_HEIGHT);
-		for (int index = scroll; index < Math.min(rows.size(), scroll + visible); index++) {
-			Row row = rows.get(index);
+		int visible = visibleRows();
+		for (int index = scroll; index < Math.min(shown.size(), scroll + visible); index++) {
+			Row row = shown.get(index);
 			int y = LIST_TOP + (index - scroll) * ROW_HEIGHT;
 			boolean active = row.id().equals(config.activeSongId());
 			graphics.fill(8, y, width - 8, y + ROW_HEIGHT - 4, active ? 0x40FFFFFF : 0x25FFFFFF);
@@ -215,8 +304,10 @@ public final class SongsScreen extends Screen {
 					ready ? 0xFF5AD46A : 0xFFFFAA00, false);
 			}
 		}
-		if (rows.isEmpty()) {
-			graphics.text(font, "No songs yet. Start one, or import a MIDI or NBS file from the composer.",
+		if (shown.isEmpty()) {
+			graphics.text(font, rows.isEmpty()
+					? "No songs yet. Start one, or import a MIDI or NBS file from the composer."
+					: "No song's name has all of those words in it.",
 				14, LIST_TOP + 8, 0xFF8A9098, false);
 		}
 		List<String> failures = FastNoteblocksConfig.songs().failures();
@@ -230,12 +321,11 @@ public final class SongsScreen extends Screen {
 
 	@Override
 	public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
-		int visible = Math.max(1, (height - 32 - LIST_TOP) / ROW_HEIGHT);
-		int maximum = Math.max(0, rows.size() - visible);
+		int maximum = Math.max(0, shown.size() - visibleRows());
 		int updated = Math.max(0, Math.min(maximum, scroll - (int)Math.signum(scrollY)));
 		if (updated != scroll) {
 			scroll = updated;
-			init();
+			rebuildRows();
 			return true;
 		}
 		return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);

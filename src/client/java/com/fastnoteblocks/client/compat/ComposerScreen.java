@@ -212,6 +212,8 @@ public final class ComposerScreen extends Screen {
 	private static final int MAX_ROW_HEIGHT = 26;
 	private static final int INSTRUMENT_COLUMNS = 6;
 	private static final int INSTRUMENT_CELL = 28;
+	/** A strip under the palette's grid naming what a pick would land on. */
+	private static final int INSTRUMENT_FOOTER = 12;
 	private static final int CONTEXT_MENU_WIDTH = 104;
 	private static final int CONTEXT_MENU_ROW_HEIGHT = 16;
 	private static final int LAYER_MENU_WIDTH = 120;
@@ -2258,7 +2260,7 @@ public final class ComposerScreen extends Screen {
 		}
 		int rows = (PreviewInstrument.VALUES.size() + INSTRUMENT_COLUMNS - 1) / INSTRUMENT_COLUMNS;
 		int menuWidth = INSTRUMENT_COLUMNS * INSTRUMENT_CELL + 6;
-		int menuHeight = rows * INSTRUMENT_CELL + 6;
+		int menuHeight = rows * INSTRUMENT_CELL + 6 + INSTRUMENT_FOOTER;
 		int top = Math.max(TOOLBAR_HEIGHT + 4, Math.min(height - menuHeight - 24,
 			layerY(instrumentMenuLayer) + LAYER_ROW_HEIGHT));
 		return new NoteRect(8, top, 8 + menuWidth, top + menuHeight);
@@ -2285,6 +2287,16 @@ public final class ComposerScreen extends Screen {
 				graphics.setTooltipForNextFrame(Component.literal(value.name()), mouseX, mouseY);
 			}
 		}
+		// Whose instrument is about to change. Picking one has always landed on the whole selection,
+		// and nothing on screen said so -- from a palette that looks like it belongs to the one row
+		// it opened under, changing five layers at once is indistinguishable from a bug.
+		int landing = layersToEdit(instrumentMenuLayer).size();
+		graphics.text(font,
+			landing > 1
+				? "Sets all " + landing + " selected layers"
+				: "Sets layer " + (instrumentMenuLayer + 1),
+			menu.left() + 4, menu.bottom() - INSTRUMENT_FOOTER + 2,
+			landing > 1 ? 0xFF8FD3FF : 0xFF8A9098, false);
 	}
 
 	/** The composition being edited, so which one it is never has to be remembered. */
@@ -2445,9 +2457,11 @@ public final class ComposerScreen extends Screen {
 		} else if (instrumentLayer >= 0) {
 			// The slash is drawn on this icon, so this is where someone points to ask about it.
 			String silence = audibilityNote(instrumentLayer);
+			int landing = layersToEdit(instrumentLayer).size();
 			text = Component.literal(
 				PreviewInstrument.byId(project().layers().get(instrumentLayer).instrument()).name()
 					+ " - click to change the note-block instrument"
+					+ (landing > 1 ? "\nPicks land on all " + landing + " selected layers." : "")
 					+ (silence == null ? "" : "\n" + silence));
 		} else if (dotLayer >= 0) {
 			text = Component.literal(project().layers().get(dotLayer).buildEnabled()
@@ -2638,6 +2652,32 @@ public final class ComposerScreen extends Screen {
 			shaded |= Math.max(0, Math.min(255, channel)) << shift;
 		}
 		return shaded;
+	}
+
+	/**
+	 * A layer's colour as it reads when the layer is not selected: still its own, and out of the way.
+	 *
+	 * <p>Unselected layers used to be drawn in one flat grey, which answered "not this one" and threw
+	 * away the only thing that says <em>which</em> one -- on a song of twelve parts the whole
+	 * background became a single colour, so working on one layer meant losing track of where every
+	 * other one was. Mixed toward a neutral rather than dimmed, because dimming alone leaves the
+	 * bright hues (yellow, cyan) still reading as foreground while the dark ones vanish; a mix lands
+	 * every hue at the same weight, which is the point of a background.</p>
+	 */
+	private static int faded(int color) {
+		return mix(color, 0xFF6E7176, 0.62);
+	}
+
+	/** {@code amount} of {@code toward}, the rest of {@code color}. Alpha comes from {@code color}. */
+	private static int mix(int color, int toward, double amount) {
+		int mixed = color & 0xFF000000;
+		for (int shift = 16; shift >= 0; shift -= 8) {
+			int from = (color >> shift) & 0xFF;
+			int to = (toward >> shift) & 0xFF;
+			int channel = (int)Math.round(from + (to - from) * amount);
+			mixed |= Math.max(0, Math.min(255, channel)) << shift;
+		}
+		return mixed;
 	}
 
 	/** Where a dragged layer would land, drawn as the gap it would drop into. */
@@ -2946,7 +2986,7 @@ public final class ComposerScreen extends Screen {
 			}
 			boolean active = layerIndex == shown.activeLayerIndex();
 			boolean highlighted = active || selectedLayers.contains(layerIndex);
-			int liveColor = highlighted ? layerColor(layerIndex) : 0xFF777A80;
+			int liveColor = highlighted ? layerColor(layerIndex) : faded(layerColor(layerIndex));
 			int deadColor = highlighted ? 0xFFFF6B6B : 0xFF755050;
 			List<NoteEvent> notes = layer.notes();
 			for (int noteIndex = lowerBoundStart(notes, firstVisibleTick);
