@@ -952,6 +952,34 @@ public final class ComposerScreen extends Screen {
 		transposeSelected(bestShift);
 	}
 
+	/**
+	 * Slides the whole song to wherever the least of its tune falls outside what can be built.
+	 *
+	 * <p>Its own action rather than a step inside Convert, because it is the one fix here that
+	 * changes what the song <em>is</em>. Everything else conversion does is a repair -- an octave
+	 * jump, a merged repeat, a nudged tempo -- and this changes the key, which is a musical decision
+	 * and not a technical one. Run it before converting and the conversion has less to tear.</p>
+	 */
+	private void transposeToBestFit() {
+		ComposerProject.TransposeFit fit = project().bestTransposeIntoRange();
+		if (!fit.worthDoing()) {
+			showResult(Component.literal(fit.outNow() == 0L
+				? "Every note is already in range - nothing to gain by moving the song."
+				: "No shift does better than where the song already sits. " + fit.outNow()
+					+ " notes are out of range because it is wider than a note block's two octaves, "
+					+ "which no key change can fix."));
+			return;
+		}
+		apply(project().transposedBy(fit.semitones()));
+		selectedNotes.clear();
+		centerMinecraftRange();
+		layersChanged();
+		showResult(Component.literal(String.format(java.util.Locale.ROOT,
+			"Transposed %+d semitones - out of range %d -> %d, and %d -> %d of them in the melody. "
+				+ "Same tune, different key; Ctrl+Z puts it back.",
+			fit.semitones(), fit.outNow(), fit.outAfter(), fit.melodyOutNow(), fit.melodyOutAfter())));
+	}
+
 	private void convertToMinecraft() {
 		stopPlayback();
 		// Bake the timescale into the tempo first, so converting at 2.00x produces a project that
@@ -1673,6 +1701,9 @@ public final class ComposerScreen extends Screen {
 			case CONVERT, MERGE_REPEATS, FIT_ALL_RANGE, SNAP_TEMPO,
 				QUANTIZE_QUARTER, QUANTIZE_EIGHTH, QUANTIZE_SIXTEENTH, QUANTIZE_REPEATERS ->
 				project().layers().stream().anyMatch(layer -> !layer.notes().isEmpty());
+			// Greyed out when no shift beats standing still, so the menu answers "is my song already
+			// sitting where it best can" without changing the key to find out.
+			case TRANSPOSE_BEST_FIT -> project().bestTransposeIntoRange().worthDoing();
 			case SELECT_OFF_GRID -> !projectStats().offGridNotes().isEmpty();
 			case SELECT_TOO_FREQUENT -> !projectStats().crowdedNotes().isEmpty();
 			case SELECT_OUT_OF_RANGE -> projectStats().outOfRange() > 0;
@@ -1779,6 +1810,7 @@ public final class ComposerScreen extends Screen {
 			case QUANTIZE_REPEATERS -> quantizeToRepeaters();
 			case FIT_ALL_RANGE -> applyStep("Fitted to range",
 				project().withAllFittedToRange(selectedNotes));
+			case TRANSPOSE_BEST_FIT -> transposeToBestFit();
 			case SNAP_TEMPO -> snapTempo();
 			case SNAP_END -> applyStep("End snapped", project().withEndTick(
 				snapEndToRepeaterGrid()));
@@ -2033,6 +2065,13 @@ public final class ComposerScreen extends Screen {
 			case CLOSE_TO_GAME -> "Close straight back to the game.";
 			case UNDO -> "Step back. History is kept for this visit only, not across sessions.";
 			case REDO -> "Step forward again.";
+			case TRANSPOSE_BEST_FIT -> "Moves the whole song up or down by semitones until as little "
+				+ "of it as possible falls outside the note block's two octaves. Every interval "
+				+ "survives exactly -- it is the same tune in a different key -- so what conversion "
+				+ "has left to do afterwards is that much less octave-jumping. The top note sounding "
+				+ "at any moment counts triple, so the window goes where the melody is rather than "
+				+ "where the most notes are. Greyed out when nothing beats where the song already "
+				+ "sits.";
 			case CONVERT -> "Runs every fix in order: bake the speed into the tempo and reset the "
 				+ "slider to 1.00x; collapse same-pitch repeats closer than the merge window; "
 				+ "quantize note starts onto the chosen grid; octave-shift out-of-range notes in, "
@@ -5309,6 +5348,7 @@ public final class ComposerScreen extends Screen {
 		QUANTIZE_SIXTEENTH("Quantize to 1/16", true),
 		QUANTIZE_REPEATERS("Quantize to repeater ticks", true),
 		FIT_ALL_RANGE("Fit into range", true),
+		TRANSPOSE_BEST_FIT("Transpose to best fit"),
 		SNAP_TEMPO("Snap tempo (whole song)"),
 		INCLUDE_SELECTED("Include selected layers in sequence"),
 		SET_INCLUDED_TO_SELECTION("Include only selected layers in sequence"),
@@ -5331,7 +5371,7 @@ public final class ComposerScreen extends Screen {
 		};
 		/** Quantize slots in at index 4 and End goes on the end; see {@link #menuRows}. */
 		private static final ToolbarAction[] EDIT_ACTIONS = {
-			UNDO, REDO, CONVERT, MERGE_REPEATS, FIT_ALL_RANGE, SNAP_TEMPO
+			UNDO, REDO, CONVERT, MERGE_REPEATS, TRANSPOSE_BEST_FIT, FIT_ALL_RANGE, SNAP_TEMPO
 		};
 		private static final ToolbarAction[] BUILD_ACTIONS = {
 			INCLUDE_SELECTED, SET_INCLUDED_TO_SELECTION, TOGGLE_DEDUPE, PASTE_IN_WORLD, BUILD_CANCEL

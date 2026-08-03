@@ -47,12 +47,14 @@ class TransposeFitSweepTest {
 		long totalNotes = 0;
 		long totalShifted = 0;
 		long totalLeftOver = 0;
+		long totalMelodyNow = 0;
+		long totalMelodyAfter = 0;
 		int songsSeen = 0;
 		int songsWithShifts = 0;
 		int songsFullyFixed = 0;
 		int songsImproved = 0;
-		System.out.println(String.format(Locale.ROOT, "%-42s %7s %8s %5s %8s %6s",
-			"song", "notes", "shifted", "span", "leftOver", "trans"));
+		System.out.println(String.format(Locale.ROOT, "%-42s %7s %8s %5s %8s %6s %6s %6s",
+			"song", "notes", "shifted", "span", "leftOver", "trans", "melNow", "melAft"));
 		for (Path file : files) {
 			ComposerProject song;
 			try (Reader reader = Files.newBufferedReader(file)) {
@@ -61,14 +63,18 @@ class TransposeFitSweepTest {
 					raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(), raw.endTick(),
 					raw.speedQuarters());
 			}
-			// The pitches as they arrived, by undoing the shift conversion recorded in the name.
+			// The song as it arrived, by undoing the shift conversion recorded in each layer's name.
+			List<Layer> restored = new ArrayList<>();
 			List<Integer> original = new ArrayList<>();
 			long shifted = 0;
 			for (Layer layer : song.layers()) {
+				int applied = recordedShift(layer.name());
+				restored.add(layer.withNotes(layer.notes().stream()
+					.map(note -> note.movedTo(note.startTick(), note.midiNote() - applied))
+					.toList()));
 				if (!layer.buildEnabled()) {
 					continue;
 				}
-				int applied = recordedShift(layer.name());
 				for (NoteEvent note : layer.notes()) {
 					original.add(note.midiNote() - applied);
 				}
@@ -83,30 +89,30 @@ class TransposeFitSweepTest {
 			int lowest = original.stream().mapToInt(Integer::intValue).min().orElse(0);
 			int highest = original.stream().mapToInt(Integer::intValue).max().orElse(0);
 
-			// The best single transpose, and what it cannot save. Ties go to the smallest move.
-			int bestShift = 0;
-			long leftOver = countOut(original, 0);
-			for (int transpose = -48; transpose <= 48; transpose++) {
-				long out = countOut(original, transpose);
-				if (out < leftOver || out == leftOver && Math.abs(transpose) < Math.abs(bestShift)) {
-					leftOver = out;
-					bestShift = transpose;
-				}
-			}
+			// The shipped chooser, on the reconstructed import, so this measures the code and not a
+			// second opinion about it.
+			ComposerProject asImported = new ComposerProject(song.name(), song.ppq(),
+				song.tempoMicrosPerQuarter(), restored, 0, song.nextNoteId(), song.endTick(),
+				song.speedQuarters());
+			ComposerProject.TransposeFit fit = asImported.bestTransposeIntoRange();
+			long leftOver = fit.outAfter();
 			totalNotes += original.size();
 			totalShifted += shifted;
 			totalLeftOver += leftOver;
+			totalMelodyNow += fit.melodyOutNow();
+			totalMelodyAfter += fit.melodyOutAfter();
 			if (shifted > 0) {
 				songsWithShifts++;
 				if (leftOver == 0) {
 					songsFullyFixed++;
 				}
-				if (leftOver < shifted) {
+				if (leftOver < fit.outNow()) {
 					songsImproved++;
 				}
 			}
-			System.out.println(String.format(Locale.ROOT, "%-42s %7d %8d %5d %8d %6d",
-				trim(song.name()), original.size(), shifted, highest - lowest + 1, leftOver, bestShift));
+			System.out.println(String.format(Locale.ROOT, "%-42s %7d %8d %5d %8d %6d %6d %6d",
+				trim(song.name()), original.size(), shifted, highest - lowest + 1, leftOver,
+				fit.semitones(), fit.melodyOutNow(), fit.melodyOutAfter()));
 		}
 		System.out.println(String.format(Locale.ROOT,
 			"TOTAL songs=%d notes=%d octaveShifted=%d (%.1f%%)"
@@ -116,6 +122,10 @@ class TransposeFitSweepTest {
 		System.out.println(String.format(Locale.ROOT,
 			"TOTAL songsThatNeededShifting=%d transposeWouldImprove=%d transposeWouldRemoveAll=%d",
 			songsWithShifts, songsImproved, songsFullyFixed));
+		System.out.println(String.format(Locale.ROOT,
+			"TOTAL melodyOutOfRange now=%d after=%d (%.1f%% of it saved)",
+			totalMelodyNow, totalMelodyAfter,
+			100.0 * (totalMelodyNow - totalMelodyAfter) / Math.max(1, totalMelodyNow)));
 	}
 
 	/** The octave shift conversion put in a layer's name, in semitones. */
