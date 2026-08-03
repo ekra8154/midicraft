@@ -472,6 +472,16 @@ public final class SongBuilder {
 			+ " exceeds the build limit of " + MAX_SIMULTANEOUS_NOTES;
 	}
 
+	/**
+	 * Where a paste from this screen would land.
+	 *
+	 * <p>Reachable so the build options screen can forecast the very build its Paste button would
+	 * make, rather than one at a stand-in origin that is only probably the same.</p>
+	 */
+	static BlockPos pasteOrigin(Minecraft minecraft) {
+		return pasteOrigin(minecraft, Direction.EAST);
+	}
+
 	private static BlockPos pasteOrigin(Minecraft minecraft, Direction forward) {
 		return minecraft.player.blockPosition().relative(forward).immutable();
 	}

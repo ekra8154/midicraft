@@ -3,7 +3,11 @@ package com.fastnoteblocks.client.compat;
 import com.fastnoteblocks.client.FastNoteblocksConfig;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
+import net.minecraft.core.BlockPos;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.Tooltip;
@@ -37,6 +41,37 @@ final class BuildOptionsScreen extends Screen {
 	private int commandsPerTick;
 	private int laneWidth;
 	private int laneFloors;
+
+	/**
+	 * One background thread for forecasts, shared by every instance of this screen.
+	 *
+	 * <p>Planning a build is not a thing to do while a frame is being drawn -- Guardian at thirty-two
+	 * wide is twenty-two thousand blocks of arithmetic -- and it is not a thing to do once per frame
+	 * either. So it happens off the render thread, once per change of settings, and the answer is
+	 * picked up whenever it arrives.</p>
+	 */
+	private static final ExecutorService FORECASTER = Executors.newSingleThreadExecutor(job -> {
+		Thread thread = new Thread(job, "fast-noteblocks-forecast");
+		thread.setDaemon(true);
+		return thread;
+	});
+
+	/**
+	 * What the current settings would build, or why they would not.
+	 *
+	 * <p>{@code null} while a forecast is in flight, which is the state the screen opens in.</p>
+	 *
+	 * @param error the reason there is no build at all, or {@code null} when there is one
+	 */
+	private record Forecast(int spanZ, int breachingLanes, int worstBreach, int wrongNotes,
+			String error) {
+	}
+
+	private volatile Forecast forecast;
+	/** Which settings the forecast in flight is for, so a stale answer can be dropped. */
+	private final AtomicInteger forecastGeneration = new AtomicInteger();
+	/** The settings the last forecast was asked for, so redraws do not ask again. */
+	private String forecastKey;
 
 	BuildOptionsScreen(
 		Screen parent,
@@ -141,9 +176,97 @@ final class BuildOptionsScreen extends Screen {
 			FastNoteblocksConfig.get().setPasteMode(mode.name());
 			FastNoteblocksConfig.save();
 			confirm.accept(mode);
-		}).bounds(left, y + 34, width / 2 - 3, 20).build());
+		}).bounds(left, y + BUTTON_ROW, width / 2 - 3, 20).build());
 		addRenderableWidget(Button.builder(CommonComponents.GUI_CANCEL, clicked -> onClose())
-			.bounds(left + width / 2 + 3, y + 34, width / 2 - 3, 20).build());
+			.bounds(left + width / 2 + 3, y + BUTTON_ROW, width / 2 - 3, 20).build());
+		requestForecast();
+	}
+
+	/**
+	 * How far below the rate row the buttons sit.
+	 *
+	 * <p>Twelve lower than it used to be, for the forecast line. It goes above the buttons rather
+	 * than below them because it is part of the choice being made, not a footnote to it.</p>
+	 */
+	private static final int BUTTON_ROW = 46;
+
+	/**
+	 * Asks for a forecast of the settings as they stand, unless one was already asked for.
+	 *
+	 * <p>The rate is deliberately not part of the key: it changes how long the paste takes to run
+	 * and nothing at all about what gets built.</p>
+	 */
+	private void requestForecast() {
+		String key = mode.name() + " " + laneWidth + " " + laneFloors;
+		if (key.equals(forecastKey)) {
+			return;
+		}
+		forecastKey = key;
+		forecast = null;
+		int generation = forecastGeneration.incrementAndGet();
+		// Read on the render thread. The origin comes off the player, and the limits off the config,
+		// and neither is a thing to be touching from another thread.
+		BlockPos origin = SongBuilder.pasteOrigin(minecraft);
+		SongBuilder.PasteMode planned = mode;
+		SongBuilder.BuildLimits limits = new SongBuilder.BuildLimits(
+			FastNoteblocksConfig.get().maxBuildFloors(), laneWidth, laneFloors,
+			FastNoteblocksConfig.get().ultraLaneStartTop());
+		FORECASTER.execute(() -> {
+			Forecast result;
+			try {
+				SongBuilder.PastePlan plan = SongBuilder.createPastePlan(
+					origin, SongBuilder.eventNotes(sequence), planned, limits);
+				result = new Forecast(plan.spanZ(), plan.breaches().size(),
+					plan.worstBreach(), plan.wrongNotes(), null);
+			} catch (IllegalArgumentException refused) {
+				result = new Forecast(0, 0, 0, 0, refused.getMessage());
+			} catch (RuntimeException broken) {
+				// A forecast that throws must not take the paste down with it: the build itself may
+				// well be fine, and a screen that cannot tell you the depth is still a screen you
+				// can paste from.
+				result = new Forecast(0, 0, 0, 0, "could not work out the layout");
+			}
+			if (forecastGeneration.get() == generation) {
+				forecast = result;
+			}
+		});
+	}
+
+	/**
+	 * The one line that says what these settings come out as.
+	 *
+	 * <p>Depth first, because it is the only dimension of the three that is not already a setting on
+	 * this screen: the width is chosen above, the height falls out of the floor count, and how deep
+	 * it ends up is the builder's answer rather than the player's.</p>
+	 */
+	private static String forecastLine(Forecast predicted) {
+		if (predicted == null) {
+			return "measuring the build...";
+		}
+		if (predicted.error() != null) {
+			return predicted.error();
+		}
+		// Kept short on purpose: the dialog is three hundred pixels wide, and a line that runs off the
+		// end of it is worse than no line.
+		String verdict = predicted.breachingLanes() == 0
+			? "nothing outside the footprint"
+			: predicted.breachingLanes() + (predicted.breachingLanes() == 1 ? " lane" : " lanes")
+				+ " breach, worst " + predicted.worstBreach();
+		String wrong = predicted.wrongNotes() == 0 ? ""
+			: ", " + predicted.wrongNotes()
+				+ (predicted.wrongNotes() == 1 ? " note sounds twice" : " notes sound twice");
+		return predicted.spanZ() + " blocks deep - " + verdict + wrong;
+	}
+
+	/** Grey while it is being worked out, green when it is clean, and warm when it is not. */
+	private static int forecastColour(Forecast predicted) {
+		if (predicted == null) {
+			return 0xFF8A9098;
+		}
+		if (predicted.error() != null || predicted.wrongNotes() > 0) {
+			return 0xFFFF5555;
+		}
+		return predicted.breachingLanes() == 0 ? 0xFF7ACF7A : 0xFFFFAA00;
 	}
 
 	private void changeRate(int delta) {
@@ -220,11 +343,14 @@ final class BuildOptionsScreen extends Screen {
 		graphics.text(font, String.format(Locale.ROOT,
 				"about %d blocks, roughly %.1fs", commands, seconds),
 			left, rateY + 24, 0xFF8A9098, false);
+		Forecast predicted = forecast;
+		graphics.text(font, forecastLine(predicted), left, rateY + 36, forecastColour(predicted),
+			false);
 		graphics.text(font, "Needs /setblock permission. Overwrites whatever is there.",
-			left, rateY + 78, 0xFF8A9098, false);
+			left, rateY + BUTTON_ROW + 44, 0xFF8A9098, false);
 		if (commandsPerTick > 64) {
 			graphics.text(font, "High rates can trip server command spam limits.",
-				left, rateY + 90, 0xFFFFAA00, false);
+				left, rateY + BUTTON_ROW + 56, 0xFFFFAA00, false);
 		}
 	}
 
