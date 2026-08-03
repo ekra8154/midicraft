@@ -77,7 +77,7 @@ class StackedReachTest {
 					for (Map.Entry<String, Integer> e : plan.padding().entrySet()) {
 						if (REFUSALS.contains(e.getKey())
 								|| e.getKey().startsWith("planStackedSplit")
-								|| e.getKey().equals("stackedBusTransition")) {
+								|| e.getKey().equals("busHandover")) {
 							tally.merge(e.getKey(), (long) e.getValue(), Long::sum);
 						}
 					}

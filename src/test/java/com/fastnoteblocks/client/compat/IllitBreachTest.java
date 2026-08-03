@@ -56,6 +56,25 @@ class IllitBreachTest {
 		}
 	}
 
+	/** Ekran's second find: forty wide over eight floors, a chord of twenty-four that would not cut. */
+	@Test
+	void namesTheRuleAtFortyByEight() throws Exception {
+		List<SongBuilder.EventNote> notes = load("illit-do-the-dance");
+		SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0), notes,
+			SongBuilder.PasteMode.ULTRA_COMPACT_LANE, new SongBuilder.BuildLimits(4, 40, 8));
+		System.out.println("F408 " + plan.spanZ() + " deep, " + plan.breaches().size()
+			+ " breaching lanes, worst " + plan.worstBreach() + ", wrong " + plan.wrongNotes());
+		for (String fault : plan.faults()) {
+			System.out.println("F408 fault: " + fault);
+		}
+		plan.padding().forEach((key, value) -> {
+			if (key.startsWith("planStackedSplit") || key.startsWith("planParity")
+					|| key.startsWith("planBusFor")) {
+				System.out.println("F408 " + key + " " + value);
+			}
+		});
+	}
+
 	/** And the same count across the library, so the rule can be priced rather than anecdotal. */
 	@Test
 	void countsTheHeadsTheRuleCostsEverySong() throws Exception {
@@ -82,10 +101,9 @@ class IllitBreachTest {
 				}
 			}
 			total += SongBuilder.HEADLESS_FOR_ROOM_BEHIND;
-			if (SongBuilder.HEADLESS_FOR_ROOM_BEHIND > 0) {
-				System.out.println("HEADLESS " + name + " " + SongBuilder.HEADLESS_FOR_ROOM_BEHIND);
-			}
 		}
 		System.out.println("HEADLESS total " + total);
+		System.out.println("HEADONLY total " + SongBuilder.HEAD_ONLY_NEAR_HALVES
+			+ " cuts refused a head only because the near half would be the head alone");
 	}
 }

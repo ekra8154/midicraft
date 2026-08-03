@@ -75,7 +75,7 @@ class StackedBusTest {
 		for (int floors = 1; floors <= 3; floors++) {
 			for (int width = 24; width <= 40; width += 8) {
 				heads += build(longChordSong(10, 20, 5L), width, floors).padding()
-					.getOrDefault("stackedBusTransition", 0);
+					.getOrDefault("busHandover", 0);
 			}
 		}
 		System.out.println("STACKEDBUS heads built: " + heads);

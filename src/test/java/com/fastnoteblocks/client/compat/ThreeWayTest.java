@@ -99,7 +99,7 @@ class ThreeWayTest {
 						}
 						for (Map.Entry<String, Integer> e : plan.padding().entrySet()) {
 							String k = e.getKey();
-							if (!k.equals("corner") && !k.equals("stackedBusTransition")
+							if (!k.equals("corner") && !k.equals("busHandover")
 									&& !k.startsWith("swap") && !k.startsWith("plan")) {
 								pad[mode] += e.getValue();
 							}

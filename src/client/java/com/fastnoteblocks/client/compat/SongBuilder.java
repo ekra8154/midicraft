@@ -779,10 +779,37 @@ public final class SongBuilder {
 				placements.padded("planStackedSplitNoRoomBehind");
 				headed = null;
 			}
+			// A cut whose head lands on the wrong parity is moved a column, not given up.
+			//
+			// It used to be given up, on the grounds that a cut's near half is measured to land
+			// flush on the wall and shifting it a column puts it past. True of the shift alone --
+			// but the near half is not rigid. Cut it for one column less and the pad in front makes
+			// the difference up: one column of wire, a head, a transition and a bus one cell
+			// shorter is exactly the same total, so the lane still comes to rest on its wall and
+			// nothing the planner worked out has to change. The two notes that no longer fit the
+			// near half simply ride over the staircase with the rest of the far half, which is
+			// where they were always going anyway.
+			//
+			// A cut opens on a repeater and is handed the whole fifteen, so there is no question of
+			// the wire reaching -- which is the other thing that stops an ordinary chord nudging.
+			// Ekran found this on Do The Dance at forty wide over eight floors: a chord of
+			// twenty-four that would not cut, and a lane five columns past its wall for want of one.
+			boolean splitNudge = false;
 			if (headed != null && stackedClashes(placements, lane.ahead(delayColumns),
 					event.time())) {
-				placements.padded("planStackedSplitClashed");
-				headed = null;
+				StackedSplit shifted = !SPLIT_NUDGES
+					|| stackedClashes(placements, lane.ahead(delayColumns + 1), event.time())
+					? null : stackedSplitOf(event.notes(), room - 1, splitCells);
+				if (shifted == null) {
+					// Both cells wrong, or nothing left to cut once a column is spent. Then the head
+					// goes, which is what this did in every case before.
+					placements.padded("planStackedSplitClashed");
+					headed = null;
+				} else {
+					placements.padded("planStackedSplitNudged");
+					headed = shifted;
+					splitNudge = true;
+				}
 			}
 			boolean couldSplit = layout.ultra() && overshoots && index > 0 && above >= 0
 				&& above < floors && (headed != null
@@ -902,10 +929,23 @@ public final class SongBuilder {
 				List<EventNote> far;
 				BlockPos cursor;
 				if (headed != null) {
-					cursor = addStackedSplitModule(placements, trigger.cursor(), travel, depth,
+					BlockPos opening = trigger.cursor();
+					if (splitNudge) {
+						// The column the shortened cut gave back. Laid as the parity pad an ordinary
+						// chord uses, so the head starts one further along and meets the lane behind
+						// on the parity it wants.
+						placements.padded("parity");
+						addParityPad(placements, opening);
+						opening = opening.relative(travel);
+					}
+					cursor = addStackedSplitModule(placements, opening, travel, depth,
 						trigger.triggerDelay(), headed, event.time());
 					far = headed.farTail();
 					placements.padded("planStackedSplit" + (climb > 0 ? "Climb" : "Descent"));
+					if (headed.nearTail().isEmpty()) {
+						placements.padded("planStackedSplitHeadOnly");
+						HEAD_ONLY_AT = cursor;
+					}
 				} else {
 					cursor = addSplitEventModule(placements, trigger.cursor(), travel, depth,
 						trigger.triggerDelay(), chord.subList(0, near));
@@ -2695,6 +2735,9 @@ public final class SongBuilder {
 	/** Whether a head may hold four, five or six notes rather than only the most it could fill. */
 	static boolean VARIABLE_HEAD_NOTES = true;
 
+	/** Whether a headed cut on the wrong parity moves a column instead of giving up the head. */
+	static boolean SPLIT_NUDGES = true;
+
 	/**
 	 * The head and tail a chord of this shape opens with, or null if it cannot take a head.
 	 *
@@ -4071,6 +4114,41 @@ public final class SongBuilder {
 	/** Whether a chord cut across a staircase may open with a stacked head. */
 	static boolean STACKED_SPLIT_HEADS = true;
 
+	/** Cuts refused a head only because the near half would have been the head and nothing else. */
+	static int HEAD_ONLY_NEAR_HALVES = 0;
+
+	/** Where the last head-only cut handed over to its staircase, for the probe to dump around. */
+	static BlockPos HEAD_ONLY_AT = null;
+
+	/**
+	 * Whether a cut's near half may be the head alone, with the whole tail past the staircase.
+	 *
+	 * <p>The near half used to owe a cell of bus, so that the staircase was always entered from a
+	 * bus and {@link #addSplitBusDescent} could take its short way down. A head with nothing behind
+	 * it enters from the handover cell instead -- whose dust sits one level up and one column back,
+	 * which is precisely where the spiral's first rung puts its own wire. Same level, adjacent
+	 * column, so the spiral is still four cells and the ceiling is unchanged: the handover spends
+	 * one, the descent four, and ten cells of bus past it carry twenty notes to the head's seven.</p>
+	 *
+	 * <p><b>On, and known broken, so that it can be looked at in a world.</b> Switched on, A Dark
+	 * Zone at twelve wide over two floors reads back 1,295 of its 3,510 notes; the same song and
+	 * settings with this off reads back all 3,510. So the head-only cut is what breaks it. But the
+	 * blocks look right: dumped and
+	 * compared cell for cell against a head-only descent ekran built by hand, the centre, the cross
+	 * wire, the handover beside the centre and all four rungs of the spiral land in the same places,
+	 * and the far half opens on the level the spiral finishes at. There is no run of wire past
+	 * fifteen -- the longest in that build is twelve -- and {@code faults()} and {@code breaches()}
+	 * are both empty, which is the layout check believing a machine the reader cannot get through.
+	 *
+	 * <p>So the break is in propagation, somewhere three separate derivations from slices failed to
+	 * find. Left <em>on</em> deliberately: ekran can paste it and watch where the pulse stops, which
+	 * is faster than any of that and is how several of these have been found. It costs a red suite
+	 * in the read-back tests until it is fixed, and that is the cheaper half of the trade. The
+	 * window is worth the work: at twelve wide over two floors every one of that build's six
+	 * descents would be head-only.</p>
+	 */
+	static boolean HEAD_ONLY_NEAR_HALF = true;
+
 	/**
 	 * How a chord cut across a staircase divides when it opens with a stacked head.
 	 *
@@ -4097,9 +4175,15 @@ public final class SongBuilder {
 		if (split == null) {
 			return null;
 		}
-		// Head, transition, and at least one cell of bus to end on.
+		// Head, transition, and -- unless the near half is allowed to be the head alone -- at least
+		// one cell of bus to end on.
 		int nearBusCells = room - STACKED_CELLS - STACKED_BUS_TRANSITION;
-		if (nearBusCells < 1) {
+		if (nearBusCells < (HEAD_ONLY_NEAR_HALF ? 0 : 1)) {
+			if (nearBusCells == 0 && !split.tail().isEmpty()
+					&& STACKED_BUS_TRANSITION + (split.tail().size() + 1) / 2 + splitCells
+						<= DUST_RANGE) {
+				HEAD_ONLY_NEAR_HALVES++;
+			}
 			return null;
 		}
 		List<EventNote> tail = split.tail();
@@ -4214,7 +4298,13 @@ public final class SongBuilder {
 		// in -- beside the centre and level with it, never above, because above the centre is the
 		// air a note block there insists on.
 		addParityPad(placements, afterHead.pos());
-		placements.padded("stackedBusTransition");
+		// Counted as a hand-over and not as pad, which is what it used to be called. Pad is a column
+		// a chord could have been standing in; this cell stands where the shape's repeater would
+		// have stood, so a chord of twenty is eleven columns as a plain bus and ten as a stacked-bus
+		// with this included. Calling it pad made the shape that saves a column look like the one
+		// that spends seventy-eight thousand of them, and lumped it in with the parity pad -- which
+		// is a real column given up, and a different thing entirely.
+		placements.padded("busHandover");
 		if (tail.isEmpty()) {
 			return new Body(afterHead.ahead(1), 0);
 		}

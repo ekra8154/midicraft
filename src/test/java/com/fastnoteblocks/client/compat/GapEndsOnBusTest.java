@@ -94,7 +94,7 @@ class GapEndsOnBusTest {
 						spanZ += plan.spanZ();
 						length += plan.spanX();
 						stackedBuses += plan.padding()
-							.getOrDefault("stackedBusTransition", 0);
+							.getOrDefault("busHandover", 0);
 						parity += plan.padding().getOrDefault("parity", 0);
 						if (name.equals("deltarune-ch-4-guardian")) {
 							guardian += plan.breaches().size();

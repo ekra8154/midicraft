@@ -135,7 +135,7 @@ class BlitzSweepTest {
 						// and ten as a stacked-bus, transition included -- counting it as waste made
 						// a shape that saves a column look like one that spends 78,000 of them.
 						if (entry.getKey().equals("corner")
-								|| entry.getKey().equals("stackedBusTransition")) {
+								|| entry.getKey().equals("busHandover")) {
 							corners += entry.getKey().equals("corner") ? entry.getValue() : 0;
 						} else if (!entry.getKey().startsWith("swap")
 								&& !entry.getKey().startsWith("plan")) {

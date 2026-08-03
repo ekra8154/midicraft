@@ -46,7 +46,7 @@ class StackedBusCostTest {
 		long total = 0;
 		for (Map.Entry<String, Integer> entry : padding.entrySet()) {
 			String key = entry.getKey();
-			if (key.equals("corner") || key.equals("stackedBusTransition")
+			if (key.equals("corner") || key.equals("busHandover")
 					|| key.startsWith("swap") || key.startsWith("plan")) {
 				continue;
 			}
@@ -177,7 +177,7 @@ class StackedBusCostTest {
 								byKey.computeIfAbsent(k, ignored -> new long[2])[on] += e.getValue();
 								continue;
 							}
-							if (k.equals("corner") || k.equals("stackedBusTransition")
+							if (k.equals("corner") || k.equals("busHandover")
 									|| k.startsWith("swap") || k.startsWith("plan")) {
 								continue;
 							}

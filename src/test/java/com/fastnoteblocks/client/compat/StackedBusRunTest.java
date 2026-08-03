@@ -56,7 +56,7 @@ class StackedBusRunTest {
 	void aRunOfEightsIsARunOfStackedBuses() {
 		int count = 40;
 		SongBuilder.PastePlan plan = build(runOf(8, count));
-		int heads = plan.padding().getOrDefault("stackedBusTransition", 0);
+		int heads = plan.padding().getOrDefault("busHandover", 0);
 		System.out.println("RUN eights: " + heads + " stacked-buses out of " + count + " chords");
 		// Only the planBusFor* entries are refusals. A parity entry is a chord that kept its head
 		// and moved a column, which is a different and much cheaper thing.
@@ -84,7 +84,7 @@ class StackedBusRunTest {
 	@Test
 	void withNoTurnInTheWayEveryOneKeepsItsHead() {
 		int count = 10;
-		int heads = build(runOf(8, count)).padding().getOrDefault("stackedBusTransition", 0);
+		int heads = build(runOf(8, count)).padding().getOrDefault("busHandover", 0);
 		System.out.println("RUN eights on one lane: " + heads + " of " + count);
 		assertEquals(count, heads,
 			"nothing but one stacked-bus behind another, and one cell of bus is enough");
@@ -96,7 +96,7 @@ class StackedBusRunTest {
 		SongBuilder.GAP_ENDS_ON_BUS = false;
 		try {
 			int count = 40;
-			int heads = build(runOf(8, count)).padding().getOrDefault("stackedBusTransition", 0);
+			int heads = build(runOf(8, count)).padding().getOrDefault("busHandover", 0);
 			System.out.println("RUN eights under the old rule: " + heads + " of " + count);
 			assertTrue(heads < count, "the old rule was supposed to refuse some of these");
 		} finally {
@@ -203,7 +203,7 @@ class StackedBusRunTest {
 				sounded += layer.notes().size();
 			}
 			System.out.println("SEVENS " + one.getKey() + ": heads="
-				+ plan.padding().getOrDefault("stackedBusTransition", 0)
+				+ plan.padding().getOrDefault("busHandover", 0)
 				+ " unreached=" + reading.unreachedNotes() + " sounded=" + sounded);
 			assertEquals(0, reading.unreachedNotes(),
 				one.getKey() + ": note blocks the signal never got to");
