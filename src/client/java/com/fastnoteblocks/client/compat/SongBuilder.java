@@ -2795,8 +2795,23 @@ public final class SongBuilder {
 			&& !(GAP_ENDS_ON_BUS && style.busHeaded() && busCells >= 1);
 	}
 
-	/** Whether a chord cut across a staircase may open with a head of five when the back is taken. */
-	static boolean FRONT_ONLY_CUTS = true;
+	/**
+	 * Whether a chord cut across a staircase may open with a head of five when the back is taken.
+	 *
+	 * <p><b>Off, temporarily, and not because it is a bad idea.</b> It does exactly what it was
+	 * meant to -- breaches 588 to 519, breach blocks 11,082 to 8,865, and both breaches traced on
+	 * 2026-08-03 go to nought -- but the machines stop conducting: 3,353 note blocks the signal
+	 * never reaches across 145 read builds, against nought without it, and one build that no longer
+	 * reads back as its song.</p>
+	 *
+	 * <p>So the short head is landing somewhere the wire cannot follow, and main should not ship
+	 * machines that do not play while that is worked out. The code stays and so does the planner
+	 * agreement; only the default moved. Turn it on to look at one in a world.</p>
+	 *
+	 * <p>Where to look first: a head of five keeps its two low slots forward rather than behind, and
+	 * the cut measures its far half from a tail length that assumed the other shape.</p>
+	 */
+	static boolean FRONT_ONLY_CUTS = false;
 
 	/** Whether a stacked-bus that ends on a bus lets the next chord keep its back slots. */
 	static boolean GAP_ENDS_ON_BUS = true;
