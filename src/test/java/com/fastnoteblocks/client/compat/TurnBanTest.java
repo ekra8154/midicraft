@@ -44,6 +44,11 @@ class TurnBanTest {
 	@AfterEach
 	void restore() {
 		SongBuilder.TURN_BAN_OUTLASTS = true;
+		SongBuilder.TURN_BAN_BY_DISTANCE = true;
+	}
+
+	private static String label(int mode) {
+		return mode == 1 ? "outlastsByAChord" : mode == 0 ? "endsWithTheTurn" : "byDistance";
 	}
 
 	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
@@ -54,8 +59,11 @@ class TurnBanTest {
 		try (Stream<Path> listing = Files.list(SONGS)) {
 			files = listing.filter(f -> f.toString().endsWith(".json")).sorted().toList();
 		}
-		for (int outlasts = 1; outlasts >= 0; outlasts--) {
-			SongBuilder.TURN_BAN_OUTLASTS = outlasts == 1;
+		// 0 = ban ends with the turn, 1 = ban outlasts it by a chord, 2 = ekran's distance rule.
+		for (int mode = 1; mode >= -1; mode--) {
+			int outlasts = mode;
+			SongBuilder.TURN_BAN_BY_DISTANCE = mode == -1;
+			SongBuilder.TURN_BAN_OUTLASTS = mode == 1;
 			long breaches = 0;
 			long guardian = 0;
 			long other = 0;
@@ -64,6 +72,7 @@ class TurnBanTest {
 			long spanX = 0;
 			long blocks = 0;
 			long refusedForTurn = 0;
+			long refusals = 0;
 			long wrong = 0;
 			int unreached = 0;
 			int mismatched = 0;
@@ -87,10 +96,22 @@ class TurnBanTest {
 				}
 				for (int floors = 1; floors <= 6; floors++) {
 					for (int width = 12; width <= 48; width += 4) {
-						SongBuilder.PastePlan plan = SongBuilder.createPastePlan(
-							new BlockPos(0, 64, 0), notes,
-							SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
-							new SongBuilder.BuildLimits(4, width, floors));
+						SongBuilder.PastePlan plan;
+						try {
+							plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0), notes,
+								SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+								new SongBuilder.BuildLimits(4, width, floors));
+						} catch (RuntimeException refused) {
+							// A refusal is a result, not an interruption. The build that will not be
+							// built at all is worse than any breach, so it is counted and named rather
+							// than allowed to end the sweep on whichever song happened to be first.
+							refusals++;
+							if (refusals <= 8) {
+								System.out.println("TURNBAN refused " + label(outlasts) + " " + name
+									+ " w" + width + " f" + floors + " :: " + refused.getMessage());
+							}
+							continue;
+						}
 						breaches += plan.breaches().size();
 						breachBlocks += plan.breaches().stream().mapToInt(Integer::intValue).sum();
 						spanZ += plan.spanZ();
@@ -119,18 +140,19 @@ class TurnBanTest {
 								mismatched++;
 								System.out.println("TURNBAN mismatch " + name + " w" + width
 									+ " f" + floors + " sounded=" + sounded + " of " + notes.size()
-									+ " outlasts=" + (outlasts == 1));
+									+ " " + label(outlasts));
 							}
 						}
 					}
 				}
 			}
-			System.out.println("TURNBAN outlasts=" + (outlasts == 1)
+			System.out.println("TURNBAN " + label(outlasts)
 				+ " breaches=" + breaches + " (guardian=" + guardian + " other=" + other + ")"
 				+ " breachBlocks=" + breachBlocks
 				+ " spanZ=" + spanZ + " spanX=" + spanX + " blocks=" + blocks
-				+ " refusedForTurn=" + refusedForTurn + " wrong=" + wrong);
-			System.out.println("TURNBAN outlasts=" + (outlasts == 1)
+				+ " refusedForTurn=" + refusedForTurn + " wrong=" + wrong
+				+ " REFUSALS=" + refusals);
+			System.out.println("TURNBAN " + label(outlasts)
 				+ " readBuilds=" + readBuilds + " unreached=" + unreached
 				+ " mismatched=" + mismatched);
 		}
@@ -146,7 +168,7 @@ class TurnBanTest {
 	 */
 	@Test
 	void namesWhatTheWrongNotesTouch() throws Exception {
-		SongBuilder.TURN_BAN_OUTLASTS = false;
+		SongBuilder.TURN_BAN_BY_DISTANCE = true;
 		List<Path> files;
 		try (Stream<Path> listing = Files.list(SONGS)) {
 			files = listing.filter(f -> f.toString().endsWith(".json")).sorted().toList();
@@ -157,6 +179,7 @@ class TurnBanTest {
 		String smallest = null;
 		int smallestBlocks = Integer.MAX_VALUE;
 		String example = null;
+		int collisions = 0;
 		for (Path file : files) {
 			String name = file.getFileName().toString().replace(".json", "");
 			if (name.startsWith("ultra-")) {
@@ -180,6 +203,7 @@ class TurnBanTest {
 						new BlockPos(0, 64, 0), notes,
 						SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
 						new SongBuilder.BuildLimits(4, width, floors));
+					collisions += plan.padding().getOrDefault("planBusForCollision", 0);
 					int here = 0;
 					for (String fault : plan.faults()) {
 						if (!fault.startsWith("the note")) {
@@ -213,6 +237,7 @@ class TurnBanTest {
 		byKind.forEach((kind, count) -> System.out.println("WHERE kind " + kind + " " + count));
 		bySong.forEach((song, count) -> System.out.println("WHERE song "
 			+ String.format("%-46s", song) + count));
+		System.out.println("WHERE collisionFallbacks " + collisions);
 		System.out.println("WHERE smallest " + smallest);
 		System.out.println("WHERE example " + example);
 	}
@@ -239,6 +264,32 @@ class TurnBanTest {
 		for (String fault : plan.faults()) {
 			System.out.println("SMALL fault: " + fault);
 		}
+		// The blocks themselves, around the note that sounds early. Every mechanism proposed for
+		// this today has been an inference from a trace line, and inferring geometry from traces is
+		// what has been wrong twice already -- so read the box.
+		Map<BlockPos, BlockState> world = placeInWorld(plan);
+		for (int y = 66; y >= 63; y--) {
+			for (int z = 1; z <= 5; z++) {
+				StringBuilder row = new StringBuilder("SMALL y=" + y + " z=" + z + " |");
+				for (int x = 38; x <= 46; x++) {
+					BlockState at = world.get(new BlockPos(x, y, z));
+					row.append(' ').append(x).append('=')
+						.append(at == null ? "." : shortName(at));
+				}
+				System.out.println(row);
+			}
+		}
+	}
+
+	/** Enough of a block's name to tell wire from repeater from note block from instrument. */
+	private static String shortName(BlockState state) {
+		String name = BuiltInRegistries.BLOCK.getKey(state.getBlock()).getPath();
+		return switch (name) {
+			case "redstone_wire" -> "wire";
+			case "repeater" -> "rep";
+			case "note_block" -> "NOTE";
+			default -> name.length() > 9 ? name.substring(0, 9) : name;
+		};
 	}
 
 	private static BlockState parse(String blockState) {

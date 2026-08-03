@@ -575,6 +575,8 @@ public final class SongBuilder {
 		// tick 344 follows them in line. The sideways run is three cells further back. Gated by
 		// {@link #TURN_BAN_OUTLASTS} so the claim can be measured rather than argued.
 		boolean leavingTurn = false;
+		// The last corner the route took, for the distance form of the rule above.
+		BlockPos lastCorner = null;
 		// A descent is the one thing in a build that steps a column off its own centre line, and
 		// it steps back the way the slabs came. The slab behind this one is climbing where this one
 		// descends -- they alternate -- and a climb keeps to the centre line, so that column is the
@@ -623,6 +625,16 @@ public final class SongBuilder {
 		ParityOracle parity = layout.ultra() ? parityOracle(placements, lane) : null;
 		for (int index = 0; index < events.size(); index++) {
 			EventGroup event = events.get(index);
+			// Where the last corner is, in the world, kept while the route still carries the bend --
+			// once it is taken there is nothing left to ask. Bend offsets are relative and shift as
+			// the lane advances, so the position has to be read now rather than reconstructed later.
+			if (lane.bending()) {
+				int furthest = 0;
+				for (Lane.Bend bend : lane.bends()) {
+					furthest = Math.max(furthest, bend.after());
+				}
+				lastCorner = lane.ahead(furthest).pos();
+			}
 			// Out the far side of a turn. The route stops bending of its own accord once the walk has
 			// passed both corners, so there is nothing to count down and nothing to ask how long a turn
 			// was: the moment no corner is left, this is a new lane. Its note side is re-pinned to the
@@ -673,7 +685,7 @@ public final class SongBuilder {
 					? planLane(events, index, lane.pos().getX(), lane.travel().getStepX(), wall,
 						lane.travel() == forward ? nearWall : farWall,
 						currentTime, tipSignal, columnBehindBusy, turnCells, offBus, stepOffAhead,
-						splitCells, climb > 0, layout, turning || leavingTurn, parity)
+						splitCells, climb > 0, layout, inTurn(turning, leavingTurn, lane.pos(), lastCorner), parity)
 					: Map.of();
 				replan = false;
 			}
@@ -700,7 +712,8 @@ public final class SongBuilder {
 			// behind it spoken for is built as a bus instead, and a bus is longer -- so a lane could
 			// be told a chord fitted, build it, and land a column past its own wall.
 			Landing here = landingOf(lane.pos().getX(), lane.travel().getStepX(), event, wait,
-				columnBehindBusy, wall, layout, turning || leavingTurn, parity);
+				columnBehindBusy, wall, layout, inTurn(turning, leavingTurn, lane.pos(), lastCorner),
+				parity);
 			int landing = here.end() + lane.travel().getStepX() * reserve;
 			// Never while the route is still bending. Inside a turn the wire runs across the corridor
 			// rather than along it, so every one of these measurements is taken down the wrong axis --
@@ -1128,7 +1141,8 @@ public final class SongBuilder {
 							lane.travel() == forward ? nearWall : farWall,
 							currentTime + spentPadding,
 							tipSignal, columnBehindBusy, next.cells(), next.offBus(), next.stepOff(),
-							next.splitCells(), climb > 0, layout, turning || leavingTurn, parity);
+							next.splitCells(), climb > 0, layout,
+							inTurn(turning, leavingTurn, lane.pos(), lastCorner), parity);
 						replan = false;
 					}
 				} else {
@@ -1215,12 +1229,13 @@ public final class SongBuilder {
 			// against somebody else's tick. Measured both ways: clamping regardless cost 11 wrong
 			// notes to save 2 breaches.
 			if (owing > 0 && (landingOf(lane.pos().getX(), lane.travel().getStepX(), event,
-					wait - spentPadding, columnBehindBusy, wall, layout, turning || leavingTurn,
+					wait - spentPadding, columnBehindBusy, wall, layout,
+					inTurn(turning, leavingTurn, lane.pos(), lastCorner),
 					parity).end() - wall)
 					* lane.travel().getStepX() <= 0) {
 				while (owing > 0 && (landingOf(lane.pos().getX() + lane.travel().getStepX() * owing,
 						lane.travel().getStepX(), event, wait - spentPadding, columnBehindBusy, wall,
-						layout, turning || leavingTurn, parity).end() - wall)
+						layout, inTurn(turning, leavingTurn, lane.pos(), lastCorner), parity).end() - wall)
 						* lane.travel().getStepX() > 0) {
 					owing--;
 				}
@@ -1302,7 +1317,8 @@ public final class SongBuilder {
 				// booked to lay early has moved the cursor since, and the ticks it spent have come off
 				// the wait -- so the event no longer starts where it did or carries the delay it did.
 				Landing reached = landingOf(cursor.getX(), travel.getStepX(), event,
-					wait - spentPadding, columnBehindBusy, laneWall, layout, turning || leavingTurn, parity);
+					wait - spentPadding, columnBehindBusy, laneWall, layout,
+					inTurn(turning, leavingTurn, cursor, lastCorner), parity);
 				int end = reached.end();
 				EventGroup next = events.get(index + 1);
 				int beyond = landingOf(end, travel.getStepX(), next, next.time() - event.time(),
@@ -1348,7 +1364,8 @@ public final class SongBuilder {
 						&& (beyond > farWall || beyond < nearWall)) {
 					int ahead = prePad(cursor.getX(), travel.getStepX(), event, wait - spentPadding,
 						columnBehindBusy, layout, laneWall,
-						(laneWall - cursor.getX()) * travel.getStepX(), turning || leavingTurn, parity);
+						(laneWall - cursor.getX()) * travel.getStepX(),
+						inTurn(turning, leavingTurn, cursor, lastCorner), parity);
 					// Planned like the pad behind, and for the same reason: dust in front of an event
 					// spends the same wire dust behind it does, so a lane wanting a dozen columns off a
 					// wire worth eight laid what it could and stopped short of the wall anyway. What is
@@ -1400,7 +1417,8 @@ public final class SongBuilder {
 			boolean climbingLane = climb > 0;
 			Placed placed = addChordModule(placements, opening, trigger.triggerDelay(), event,
 				slackColumns,
-				!columnBehindBusy || !opening.pos().equals(before), turning || leavingTurn,
+				!columnBehindBusy || !opening.pos().equals(before),
+				inTurn(turning, leavingTurn, opening.pos(), lastCorner),
 				turning ? Integer.MAX_VALUE
 					: (wall - opening.pos().getX()) * opening.travel().getStepX(), tipSignal, layout);
 			if (event.style().busHeaded()) {
@@ -3668,6 +3686,48 @@ public final class SongBuilder {
 	private static final int NUDGE_REACH = 1;
 
 	/**
+	 * Whether a stacked shape is refused here for the turn.
+	 *
+	 * <p>Asked at the moment of use rather than once per event, which is not a style choice: the walk
+	 * takes its turn part way through an iteration, so {@code turning} means different things before
+	 * and after. Hoisting it into a local broke every mode at once and refused 1,528 builds.</p>
+	 *
+	 * <p>Two forms. The old one asks "is this the first chord after the turn", a count. ekran's asks
+	 * how far the repeater stands from the second corner, which is what the blocks care about --
+	 * Kick Back's chord of twenty-one was refused six columns clear of its corner while i-wonder's
+	 * was refused standing against the exit run, and a count cannot tell those apart.</p>
+	 */
+	private static boolean inTurn(boolean turning, boolean leavingTurn, BlockPos at,
+			BlockPos lastCorner) {
+		if (turning) {
+			return true;
+		}
+		if (!TURN_BAN_BY_DISTANCE) {
+			return leavingTurn;
+		}
+		return lastCorner != null
+			&& Math.abs(at.getX() - lastCorner.getX()) + Math.abs(at.getZ() - lastCorner.getZ())
+				< STACKED_CLEAR_OF_CORNER;
+	}
+
+	/**
+	 * Scratch: whether the turn ban is asked as a distance from the corner rather than a chord count.
+	 *
+	 * <p>{@link #TURN_BAN_OUTLASTS} asks "is this the first chord after the turn", which is not the
+	 * question the blocks care about. Kick Back's chord of twenty-one was refused six columns clear
+	 * of its corner -- the turn's own bus was filling those columns -- and i-wonder's was refused
+	 * standing directly against the exit run, which is the case that actually breaks. Both are "the
+	 * first chord after the turn".</p>
+	 *
+	 * <p>ekran's rule instead: the centre of a stacked chord is clear of a corner at four blocks, so
+	 * the repeater may stand at {@code corner + 3}.</p>
+	 */
+	static boolean TURN_BAN_BY_DISTANCE = true;
+
+	/** How far past a corner a stacked module's repeater may stand. */
+	private static final int STACKED_CLEAR_OF_CORNER = 3;
+
+	/**
 	 * Scratch: whether the no-stacked-shapes-in-a-turn rule outlasts the turn by one chord.
 	 *
 	 * <p>It costs more than any other refusal in a folded build -- 55 stacked buses on Kick Back at
@@ -4077,6 +4137,31 @@ public final class SongBuilder {
 				style == ChordStyle.BUS);
 			return new Placed(body.lane(), style, body.busCells(), false);
 		}
+		// A stacked shape that will not fit becomes a bus rather than ending the build. Every rule
+		// above tries to predict whether the ground is free, and this is what happens when one of
+		// them is wrong -- which used to mean a song that would not paste at all, on the first
+		// collision anywhere in it. A bus grows until it has somewhere for every note, so it is
+		// always available to fall back to.
+		//
+		// Counted as planBusForCollision, because a fallback nobody can see is a rule nobody fixes.
+		placements.beginTrial();
+		try {
+			Placed placed = addStackedShape(placements, lane, triggerDelay, event, style, nudge,
+				start, gaveUp);
+			placements.commitTrial();
+			return placed;
+		} catch (IllegalArgumentException collided) {
+			placements.rollbackTrial();
+			placements.padded("planBusForCollision");
+			trace(event, lane, style, ChordStyle.BUS, "collided");
+			Body body = addSpatialEventModule(placements, lane, triggerDelay, event.notes(), true);
+			return new Placed(body.lane(), ChordStyle.BUS, body.busCells(), false);
+		}
+	}
+
+	/** The stacked half of {@link #addChordModule}, apart so that a collision in it can be undone. */
+	private static Placed addStackedShape(PlacementPlan placements, Lane lane, int triggerDelay,
+			EventGroup event, ChordStyle style, boolean nudge, Lane start, String gaveUp) {
 		if (style.busHeaded()) {
 			StackedBusSplit split = splitFor(style, event.notes());
 			if (split == null) {
@@ -5084,6 +5169,27 @@ public final class SongBuilder {
 		/** Route cells the wire changes direction on, where a repeater can never work. */
 		private final Set<BlockPos> corners = new java.util.HashSet<>();
 
+		/**
+		 * A savepoint, so a shape that will not fit can be undone and a bus built instead.
+		 *
+		 * <p>The alternative is what this replaced: the first collision anywhere ends the whole
+		 * build with an exception, and a song that will not paste at all is worse than any breach.
+		 * A stacked module is the only shape that can be refused this way -- a bus grows until it
+		 * has somewhere to put every note, so it is always the safe thing to fall back to.</p>
+		 *
+		 * <p>Journals rather than a copy of the plan. A build is thirty million blocks and a trial is
+		 * opened per chord, so anything that walks the whole map per chord is not affordable; what a
+		 * module writes is a few dozen positions, and those are what get remembered.</p>
+		 */
+		private record Trial(List<BlockPos> blocksAdded, Map<BlockPos, Integer> notesBefore,
+				Map<BlockPos, Integer> poweredBefore, List<BlockPos> cornersAdded,
+				int turnCount, int movedCount, int troubleCount, int breachCount, int recessCount,
+				Map<String, Integer> padding,
+				int minX, int minY, int minZ, int maxX, int maxY, int maxZ) {
+		}
+
+		private Trial trial;
+
 		void padded(String reason) {
 			if (recording) {
 				padding.merge(reason, 1, Integer::sum);
@@ -5092,7 +5198,10 @@ public final class SongBuilder {
 
 		void corner(BlockPos position) {
 			if (recording) {
-				corners.add(position.immutable());
+				BlockPos key = position.immutable();
+				if (corners.add(key) && trial != null) {
+					trial.cornersAdded().add(key);
+				}
 			}
 		}
 		private int minimumX = Integer.MAX_VALUE;
@@ -5124,7 +5233,11 @@ public final class SongBuilder {
 
 		void powered(BlockPos position, int time) {
 			if (recording) {
-				powered.put(position.immutable(), time);
+				BlockPos key = position.immutable();
+				if (trial != null && !trial.poweredBefore().containsKey(key)) {
+					trial.poweredBefore().put(key, powered.get(key));
+				}
+				powered.put(key, time);
 			}
 		}
 
@@ -5161,7 +5274,11 @@ public final class SongBuilder {
 
 		void note(BlockPos position, int time) {
 			if (recording) {
-				notes.put(position.immutable(), time);
+				BlockPos key = position.immutable();
+				if (trial != null && !trial.notesBefore().containsKey(key)) {
+					trial.notesBefore().put(key, notes.get(key));
+				}
+				notes.put(key, time);
 			}
 		}
 
@@ -5325,6 +5442,9 @@ public final class SongBuilder {
 			}
 			BlockPos key = position.immutable();
 			String existing = blocks.putIfAbsent(key, block);
+			if (existing == null && trial != null) {
+				trial.blocksAdded().add(key);
+			}
 			if (existing != null && !existing.equals(block)) {
 				throw new IllegalArgumentException("Placement layout collision at "
 					+ describe(key) + ": " + existing + " is already there and " + block
@@ -5337,6 +5457,66 @@ public final class SongBuilder {
 				maximumX = Math.max(maximumX, key.getX());
 				maximumY = Math.max(maximumY, key.getY());
 				maximumZ = Math.max(maximumZ, key.getZ());
+			}
+		}
+
+		/** Opens a savepoint. Nested trials are not needed and not supported. */
+		void beginTrial() {
+			trial = new Trial(new ArrayList<>(), new LinkedHashMap<>(), new LinkedHashMap<>(),
+				new ArrayList<>(), turns.size(), moved.size(), trouble.size(), breaches.size(),
+				recesses.size(), new LinkedHashMap<>(padding),
+				minimumX, minimumY, minimumZ, maximumX, maximumY, maximumZ);
+		}
+
+		void commitTrial() {
+			trial = null;
+		}
+
+		/** Puts back everything written since {@link #beginTrial()}. */
+		void rollbackTrial() {
+			Trial undo = trial;
+			// Cleared first: putting the old values back goes through the same writers, and a trial
+			// still open would journal the undo as though it were more building.
+			trial = null;
+			if (undo == null) {
+				return;
+			}
+			for (BlockPos at : undo.blocksAdded()) {
+				blocks.remove(at);
+			}
+			undo.notesBefore().forEach((at, was) -> {
+				if (was == null) {
+					notes.remove(at);
+				} else {
+					notes.put(at, was);
+				}
+			});
+			undo.poweredBefore().forEach((at, was) -> {
+				if (was == null) {
+					powered.remove(at);
+				} else {
+					powered.put(at, was);
+				}
+			});
+			corners.removeAll(undo.cornersAdded());
+			trim(turns, undo.turnCount());
+			trim(moved, undo.movedCount());
+			trim(trouble, undo.troubleCount());
+			trim(breaches, undo.breachCount());
+			trim(recesses, undo.recessCount());
+			padding.clear();
+			padding.putAll(undo.padding());
+			minimumX = undo.minX();
+			minimumY = undo.minY();
+			minimumZ = undo.minZ();
+			maximumX = undo.maxX();
+			maximumY = undo.maxY();
+			maximumZ = undo.maxZ();
+		}
+
+		private static void trim(List<?> list, int to) {
+			while (list.size() > to) {
+				list.remove(list.size() - 1);
 			}
 		}
 
