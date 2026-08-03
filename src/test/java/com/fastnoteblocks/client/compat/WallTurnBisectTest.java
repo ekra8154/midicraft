@@ -101,6 +101,39 @@ class WallTurnBisectTest {
 	 * <p>A breach is footprint, so a shape that breaches further is only worse if the build is
 	 * bigger for it. The block count is identical either way, so the thing to read is the span.</p>
 	 */
+	/** Whether the shape changed the build at all, or only what the build was measured against. */
+	@Test
+	void saysWhetherTheBuildChanged() {
+		java.util.List<String> off;
+		java.util.List<String> on;
+		SongBuilder.STACKED_BUS_HEADS = false;
+		off = build().commands();
+		SongBuilder.STACKED_BUS_HEADS = true;
+		on = build().commands();
+		int differing = 0;
+		for (int i = 0; i < Math.min(off.size(), on.size()); i++) {
+			if (!off.get(i).equals(on.get(i))) {
+				if (differing < 6) {
+					System.out.println("DIFF [" + i + "] off " + off.get(i));
+					System.out.println("DIFF [" + i + "] on  " + on.get(i));
+				}
+				differing++;
+			}
+		}
+		System.out.println("DIFF commands off=" + off.size() + " on=" + on.size()
+			+ " differing=" + differing);
+		System.out.println("DIFF same set = " + new java.util.HashSet<>(off).equals(
+			new java.util.HashSet<>(on)));
+	}
+
+	private static SongBuilder.PastePlan build() {
+		return SongBuilder.createPastePlan(new BlockPos(0, 64, 0),
+			DebugChords.notes(DebugChords.parse("21@1 1@1 9@1", DebugChords.DEFAULT_GAP)),
+			SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+			new SongBuilder.BuildLimits(4, 12, 3),
+			new SongBuilder.WalkStart(2, 2, -1, false));
+	}
+
 	@Test
 	void pricesTheTwoColumns() {
 		for (boolean heads : new boolean[] {false, true}) {
@@ -116,6 +149,23 @@ class WallTurnBisectTest {
 				+ " blocks=" + plan.commands().size()
 				+ " breaches=" + plan.breaches() + " worst=" + plan.worstBreach()
 				+ " wrong=" + plan.wrongNotes());
+			System.out.println("PRICE   heads=" + heads
+				+ " nearWall=" + plan.nearWall() + " farWall=" + plan.farWall());
+			// Which columns the build actually occupies, per floor level, so the claim that the two
+			// builds stand in the same place is read off the blocks rather than off the trace.
+			Map<Integer, int[]> byLevel = new java.util.TreeMap<>();
+			for (String command : plan.commands()) {
+				String[] word = command.trim().split("\\s+");
+				// "/setblock x y z block"
+				int x = Integer.parseInt(word[1]);
+				int y = Integer.parseInt(word[2]);
+				int[] span = byLevel.computeIfAbsent(y,
+					level -> new int[] {Integer.MAX_VALUE, Integer.MIN_VALUE});
+				span[0] = Math.min(span[0], x);
+				span[1] = Math.max(span[1], x);
+			}
+			byLevel.forEach((y, span) -> System.out.println("PRICE   heads=" + heads
+				+ " y=" + y + " x " + span[0] + ".." + span[1]));
 			plan.padding().forEach((key, value) ->
 				System.out.println("PRICE   heads=" + heads + " pad " + key + "=" + value));
 		}
