@@ -270,34 +270,43 @@ public final class DebugCommands {
 			source.sendError(Component.literal(refused.getMessage()));
 			return 0;
 		}
-		source.sendFeedback(Component.literal(DebugChords.describe(chords) + " -> "
-			+ plan.mode().label() + ", " + plan.width() + " long, " + plan.depth() + " deep, "
-			+ plan.height() + " high, " + plan.commands().size() + " blocks")
-			.withStyle(ChatFormatting.GRAY));
-		// Where the walls came out, in the world, which cannot be worked out from where you are
-		// standing: the plan slides after it is walked so that nothing lands behind you, and the
-		// wall the walk measured against moves with it. A breach is a lane past one of these, so
-		// reading one off the blocks means knowing which column it was meant to stop in.
-		source.sendFeedback(Component.literal("  walls at x=" + plan.nearWall() + " and x="
-			+ plan.farWall() + ", " + (plan.farWall() - plan.nearWall()) + " columns between; "
-			+ "first chord opens at x=" + firstChordX(plan))
-			.withStyle(ChatFormatting.GRAY));
-		// Every fault, not a count of them. There are never many for a spec small enough to be worth
-		// typing, and the whole point of building one is to read what it says.
-		for (String fault : plan.faults()) {
-			source.sendFeedback(Component.literal("  " + fault).withStyle(ChatFormatting.YELLOW));
-		}
-		if (plan.faults().isEmpty()) {
-			source.sendFeedback(Component.literal("  no faults").withStyle(ChatFormatting.GREEN));
-		}
+		SongBuilder.PastePlan built = plan;
+		List<DebugChords.Chord> parsed = chords;
+		Runnable report = () -> {
+			source.sendFeedback(Component.literal(DebugChords.describe(parsed) + " -> "
+				+ built.mode().label() + ", " + built.width() + " long, " + built.depth() + " deep, "
+				+ built.height() + " high, " + built.commands().size() + " blocks")
+				.withStyle(ChatFormatting.GRAY));
+			// Where the walls came out, in the world, which cannot be worked out from where you are
+			// standing: the plan slides after it is walked so that nothing lands behind you, and the
+			// wall the walk measured against moves with it. A breach is a lane past one of these, so
+			// reading one off the blocks means knowing which column it was meant to stop in.
+			source.sendFeedback(Component.literal("  walls at x=" + built.nearWall() + " and x="
+				+ built.farWall() + ", " + (built.farWall() - built.nearWall())
+				+ " columns between; first chord opens at x=" + firstChordX(built))
+				.withStyle(ChatFormatting.GRAY));
+			// Every fault, not a count of them. There are never many for a spec small enough to be
+			// worth typing, and the whole point of building one is to read what it says.
+			for (String fault : built.faults()) {
+				source.sendFeedback(Component.literal("  " + fault)
+					.withStyle(ChatFormatting.YELLOW));
+			}
+			if (built.faults().isEmpty()) {
+				source.sendFeedback(Component.literal("  no faults")
+					.withStyle(ChatFormatting.GREEN));
+			}
+		};
 		if (dry) {
+			report.run();
 			return plan.faults().size() + 1;
 		}
 		if (CommandPasteSender.isRunning()) {
 			source.sendError(Component.literal("A paste is already running. Wait for it to finish."));
 			return 0;
 		}
-		CommandPasteSender.start(plan.commands(), List.of());
+		// After the blocks, not before them. Each command echoes itself into chat, so a report sent
+		// first is several hundred lines above the build it describes by the time the build is there.
+		CommandPasteSender.start(plan.commands(), List.of(), report);
 		return plan.faults().size() + 1;
 	}
 
