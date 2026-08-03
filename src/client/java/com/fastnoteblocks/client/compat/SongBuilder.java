@@ -795,8 +795,10 @@ public final class SongBuilder {
 			// Ekran found this on Do The Dance at forty wide over eight floors: a chord of
 			// twenty-four that would not cut, and a lane five columns past its wall for want of one.
 			boolean splitNudge = false;
+			boolean splitClashed = false;
 			if (headed != null && stackedClashes(placements, lane.ahead(delayColumns),
 					event.time())) {
+				splitClashed = true;
 				StackedSplit shifted = !SPLIT_NUDGES
 					|| stackedClashes(placements, lane.ahead(delayColumns + 1), event.time())
 					? null : stackedSplitOf(event.notes(), room - 1, splitCells, climb > 0);
@@ -900,6 +902,35 @@ public final class SongBuilder {
 			// worth stopping to ask about rather than merely listing.
 			if (layout.ultra() && wantsTurn && canTurn && columns < 0) {
 				placements.breached(-columns);
+			}
+			if (TRACE_TURNS && layout.ultra() && wantsTurn) {
+				// Why the head went, when it went. A cut is refused either because the chord cannot
+				// make a head at all or because the far half would be out of reach, and the two want
+				// completely different fixes.
+				StackedBusSplit why = stackedBusSplit(event.notes(), true);
+				String head = why == null ? "noHead"
+					: "head" + why.head().size() + "+tail" + why.tail().size()
+						+ "/run" + (STACKED_BUS_TRANSITION + (why.tail().size() + 1) / 2
+							+ splitCells);
+				// Coordinates space-separated, so the line can be pasted straight into /tp.
+				System.out.println("TURN t=" + event.time() + " notes=" + event.notes().size()
+					+ " at " + lane.pos().getX() + " " + lane.pos().getY() + " " + lane.pos().getZ()
+					+ " wall=" + wall + " columns=" + columns
+					+ " | flatAhead=" + flatAhead + " straddles=" + straddles
+					+ " canTurn=" + canTurn + " onWall=" + onWall + " split=" + split
+					+ " carried=" + carried
+					+ " | cells=" + cells + " tip=" + tipSignal + " wait=" + wait
+					+ " pad=" + pad.cells().size() + "c/" + pad.signal() + "s"
+					+ " turnCells=" + turnCells + " offBus=" + offBus
+					+ " last=" + lastStyle
+					+ " | room=" + room + " splitCells=" + splitCells
+					+ " headed=" + (headed == null ? "no"
+						: headed.nearTail().size() + "+" + headed.farTail().size())
+					+ " couldSplit=" + couldSplit + " vetoed=" + vetoed
+					+ " reachesWall=" + reachesWall + " unpaid=" + unpaid
+					+ " why=" + head + " clashed=" + splitClashed
+					+ " nudged=" + splitNudge + " behindBusy=" + columnBehindBusy
+					+ " delayColumns=" + delayColumns);
 			}
 			// And the other side of the same measurement. A lane that hands over short of its wall
 			// leaves that many columns of corridor holding nothing, and puts its staircase or its
@@ -3631,6 +3662,18 @@ public final class SongBuilder {
 
 	/** Scratch: one line per chord placed, for finding the first one that goes wrong. */
 	static boolean TRACE = false;
+
+	/**
+	 * Scratch: one line per turn decision, which {@link #TRACE} does not cover.
+	 *
+	 * <p>Separate because the two answer different questions and neither wants the other's volume.
+	 * {@code TRACE} follows a chord that landed somewhere wrong; this follows a lane that walked
+	 * past its wall, where every chord is placed correctly and the fault is that none of them was
+	 * allowed to turn. Reading that out of a plain build means guessing which of {@code straddles},
+	 * {@code canTurn}, {@code onWall} and the pad said no, and guessing is what this file's history
+	 * says not to do.</p>
+	 */
+	static boolean TRACE_TURNS = false;
 
 	/** Scratch: turn {@link #strandsNext} off, so a lane it changed can be diffed against itself. */
 	static boolean LOOKAHEAD = true;
