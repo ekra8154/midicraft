@@ -71,6 +71,7 @@ class TurnShortTest {
 	@Test
 	void tracesTheChainsawCase() throws Exception {
 		List<SongBuilder.EventNote> notes = load("chainsaw-man-op-kenshi-yonezu-kick-back");
+		SongBuilder.TRACE = true;
 		SongBuilder.TRACE_TURNS = true;
 		SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0), notes,
 			SongBuilder.PasteMode.ULTRA_COMPACT_LANE, new SongBuilder.BuildLimits(4, 20, 2));
@@ -81,5 +82,10 @@ class TurnShortTest {
 		for (String fault : plan.faults()) {
 			System.out.println("CHAIN fault: " + fault);
 		}
+		plan.padding().forEach((key, value) -> {
+			if (key.startsWith("plan")) {
+				System.out.println("CHAIN " + key + "=" + value);
+			}
+		});
 	}
 }
