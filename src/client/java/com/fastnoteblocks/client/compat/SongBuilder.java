@@ -1575,6 +1575,21 @@ public final class SongBuilder {
 	 */
 	static boolean UNIVERSAL_FOUR_DESCENT = true;
 
+	/**
+	 * Experimental: the descent's last rung stands beside the landing rather than below it.
+	 *
+	 * <p>ekran's reading of the two diagrams. The spiral currently drops until its dust is level with
+	 * the repeater and feeds it from behind; a repeater takes its input from the block behind it, and
+	 * dust on top of that block powers it just as well. So the last stone can sit at the landing's
+	 * own level with its dust one up.</p>
+	 *
+	 * <p>Worth trying against two separate faults at once. The four-cell descent does not conduct,
+	 * and the run that FRONT_ONLY_CUTS overspends does so by exactly one cell -- sixteen dust
+	 * reaching a repeater at Guardian w24 f5, 48 65 88. If that cell is this cell, one change
+	 * settles both.</p>
+	 */
+	static boolean LAST_RUNG_ON_THE_BLOCK = true;
+
 	/** Off puts the old six-cell spiral back, so the two can be dumped side by side. */
 	static boolean CHEAP_SPLIT_DESCENT = true;
 
@@ -2390,7 +2405,18 @@ public final class SongBuilder {
 		// stepped off onto. Anchored a step lower, the second rung stands in the air a note block
 		// needs above it and the build refuses outright, which is how this was found.
 		for (int step = 1; step <= CUBE_FLOOR_HEIGHT; step++) {
-			BlockPos stone = ring.get((step - 1) % ring.size()).below(step - 1);
+			// ekran, from the blocks: the last rung does not have to come down to the repeater's own
+			// level to feed it. A repeater reads the block behind it, and dust resting on top of that
+			// block is what powers it -- so the final stone stands beside the landing rather than
+			// under the dust that used to reach across to it, and the run is a cell shorter.
+			//
+			// Guardian at twenty-four wide over five floors laid the old shape as
+			//   y=65   w0 >1 ST      wire level with the repeater, behind it
+			// where ekran's hand-built descent is
+			//   y=129  w0            dust one level up ...
+			//   y=128  ST >1 NB      ... on the stone the repeater actually reads
+			int drop = LAST_RUNG_ON_THE_BLOCK && step == CUBE_FLOOR_HEIGHT ? step - 2 : step - 1;
+			BlockPos stone = ring.get((step - 1) % ring.size()).below(drop);
 			placements.powered(stone, "minecraft:stone", time);
 			set(placements, stone.above(), "minecraft:redstone_wire");
 		}
