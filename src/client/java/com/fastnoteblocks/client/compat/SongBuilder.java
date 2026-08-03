@@ -1112,7 +1112,11 @@ public final class SongBuilder {
 					BlockPos landed = climb > 0
 						? addGlassClimb(placements, lane.pos(), travel,
 							lastStyle.buses() && pad.cells().isEmpty(), currentTime)
-						: addSpiralDescent(placements, lane.pos(), travel, descentSide, currentTime);
+						: UNIVERSAL_FOUR_DESCENT
+								? addSplitBusDescent(placements, lane.pos(), travel, descentSide,
+									currentTime)
+								: addSpiralDescent(placements, lane.pos(), travel, descentSide,
+									currentTime);
 					floor = above;
 					// What the staircase leaves the next lane. It matters because the next lane may
 					// want to lay dust of its own before its first repeater, and a staircase is the one
@@ -1551,6 +1555,26 @@ public final class SongBuilder {
 	 */
 	private static final int SPLIT_DESCENT_CELLS = 4;
 
+	/**
+	 * Experimental: one descent cost everywhere, four cells, rather than four for a cut and five
+	 * plus a step off for an ordinary turn.
+	 *
+	 * <p>ekran's, and the reasoning is theirs: the two descents differ only in where the wire
+	 * arrives. {@link #addSplitBusDescent} may assume a bus, which runs a level above its lane, so
+	 * its first rung connects on its own and its landing is the column the spiral started from.
+	 * {@link #addSpiralDescent} serves a lane arriving at lane level, so it spends one cell standing
+	 * on that level to meet it and one more stepping back off the column it lands past.</p>
+	 *
+	 * <p>But the cheap spiral's first rung is a powered stone with wire on top of it, which is
+	 * exactly a cell of bus -- so putting the handover where a bus would start should let every
+	 * descent take the short way down. If that holds, the flush-chord problem that costs Kick Back
+	 * its wall stops existing rather than needing a special case.</p>
+	 *
+	 * <p>Untested against a world. Every derivation of descent geometry in this file that was not
+	 * built by hand has been wrong at least once.</p>
+	 */
+	static boolean UNIVERSAL_FOUR_DESCENT = true;
+
 	/** Off puts the old six-cell spiral back, so the two can be dumped side by side. */
 	static boolean CHEAP_SPLIT_DESCENT = true;
 
@@ -1579,6 +1603,16 @@ public final class SongBuilder {
 		int cells = staircase ? TURN_DUST_CELLS : slabStep + 2;
 		int offBus = staircase && climb > 0 ? cells - 2 : cells;
 		int stepOff = staircase && climb < 0 ? 1 : 0;
+		// ekran's: a descent is four everywhere, not four for a cut and five plus a step off for
+		// everyone else. The ordinary descent paid the extra cell to meet a lane arriving at lane
+		// level, and the step off to walk back into the spiral it landed past. Put the handover where
+		// a bus would start and neither is needed -- which is what addSplitBusDescent already builds,
+		// since its first rung is a powered stone with wire on top, and that is a cell of bus.
+		if (UNIVERSAL_FOUR_DESCENT && staircase && climb < 0) {
+			cells = SPLIT_DESCENT_CELLS;
+			offBus = SPLIT_DESCENT_CELLS;
+			stepOff = 0;
+		}
 		// A climb's split already costs what a climb off a bus costs, because a climb off a bus is
 		// what it is. Only the descent has a cheaper form of itself to be told about.
 		return new TurnCost(above, cells, offBus, stepOff,

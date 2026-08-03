@@ -45,10 +45,11 @@ class TurnBanTest {
 	void restore() {
 		SongBuilder.TURN_BAN_OUTLASTS = true;
 		SongBuilder.TURN_BAN_BY_DISTANCE = true;
+		SongBuilder.FRONT_ONLY_CUTS = true;
 	}
 
 	private static String label(int mode) {
-		return mode == 1 ? "outlastsByAChord" : mode == 0 ? "endsWithTheTurn" : "byDistance";
+		return mode == 1 ? "cutsWithoutShortHead" : "cutsWithShortHead" + mode;
 	}
 
 	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
@@ -60,10 +61,12 @@ class TurnBanTest {
 			files = listing.filter(f -> f.toString().endsWith(".json")).sorted().toList();
 		}
 		// 0 = ban ends with the turn, 1 = ban outlasts it by a chord, 2 = ekran's distance rule.
-		for (int mode = 1; mode >= -1; mode--) {
+		for (int mode = 1; mode >= 0; mode--) {
 			int outlasts = mode;
-			SongBuilder.TURN_BAN_BY_DISTANCE = mode == -1;
-			SongBuilder.TURN_BAN_OUTLASTS = mode == 1;
+			SongBuilder.TURN_BAN_BY_DISTANCE = true;
+			SongBuilder.TURN_BAN_OUTLASTS = true;
+			// Repurposed: the turn rule is settled, so this now prices the front-only cut.
+			SongBuilder.FRONT_ONLY_CUTS = mode != 1;
 			long breaches = 0;
 			long guardian = 0;
 			long other = 0;
