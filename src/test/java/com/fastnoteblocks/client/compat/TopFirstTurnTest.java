@@ -11,9 +11,11 @@ import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.Bootstrap;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /** Scratch probe: what the first turn of a top start actually is, and whether it wastes floors. */
+@Tag("sweep")
 class TopFirstTurnTest {
 	@BeforeAll
 	static void bootstrapMinecraft() {

@@ -13,9 +13,11 @@ import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.Bootstrap;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /** Scratch probe: every run of dust longer than fifteen, with the coordinates it runs between. */
+@Tag("sweep")
 class DeadWireProbeTest {
 	@BeforeAll
 	static void bootstrapMinecraft() {

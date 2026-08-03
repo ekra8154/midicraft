@@ -14,9 +14,11 @@ import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.Bootstrap;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /** Scratch probe: which way the lane was going when a stacked head was wanted, and what it got. */
+@Tag("sweep")
 class StackedBusWhereTest {
 	@BeforeAll
 	static void bootstrapMinecraft() {

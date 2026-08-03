@@ -5,9 +5,11 @@ import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.Bootstrap;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /** Scratch probe: one split across one descent, every block of it, in build order. */
+@Tag("sweep")
 class SplitDescentDumpTest {
 	@BeforeAll
 	static void bootstrapMinecraft() {

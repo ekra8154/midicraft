@@ -12,6 +12,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.Bootstrap;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -24,6 +25,7 @@ import org.junit.jupiter.api.Test;
  * flags gate every branch of their change, and with {@code STACKED_BUS_HEADS} off the later fixes
  * to that shape are inert -- they only ever branch on {@code STACKED_BUS}.</p>
  */
+@Tag("sweep")
 class ZFootprintTest {
 	@BeforeAll
 	static void bootstrapMinecraft() {

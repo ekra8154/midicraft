@@ -13,6 +13,7 @@ import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.Bootstrap;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -22,6 +23,7 @@ import org.junit.jupiter.api.Test;
  * a top start descends first, and a descent is the dearer turn -- and how far the two part company
  * when the same song is walked both ways.</p>
  */
+@Tag("sweep")
 class StartTopSweepTest {
 	@BeforeAll
 	static void bootstrapMinecraft() {

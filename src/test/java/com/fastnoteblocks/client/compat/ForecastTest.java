@@ -14,6 +14,7 @@ import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.Bootstrap;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -23,6 +24,7 @@ import org.junit.jupiter.api.Test;
  * decide whether "measuring the build..." is a flicker nobody sees or a state the screen sits in.
  * Worth knowing which before claiming the screen is live.</p>
  */
+@Tag("sweep")
 class ForecastTest {
 	@BeforeAll
 	static void bootstrapMinecraft() {

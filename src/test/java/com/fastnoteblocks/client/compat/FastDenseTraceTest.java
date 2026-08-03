@@ -11,9 +11,11 @@ import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.Bootstrap;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /** Scratch probe: the run of sixteen the slot-order change put into fast-and-dense. */
+@Tag("sweep")
 class FastDenseTraceTest {
 	@BeforeAll
 	static void bootstrapMinecraft() {

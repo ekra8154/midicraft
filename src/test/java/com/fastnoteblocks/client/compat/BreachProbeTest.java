@@ -12,9 +12,11 @@ import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.Bootstrap;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /** Scratch probe: every breach in a real song, with the chord and the wire that caused it. */
+@Tag("sweep")
 class BreachProbeTest {
 	@BeforeAll
 	static void bootstrapMinecraft() {

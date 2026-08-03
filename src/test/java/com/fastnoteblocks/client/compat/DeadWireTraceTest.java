@@ -11,9 +11,11 @@ import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.Bootstrap;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /** Scratch probe: the walk trace for the one build with a dead run, plus the run itself unshifted. */
+@Tag("sweep")
 class DeadWireTraceTest {
 	@BeforeAll
 	static void bootstrapMinecraft() {

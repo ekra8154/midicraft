@@ -12,6 +12,7 @@ import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.Bootstrap;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -22,6 +23,7 @@ import org.junit.jupiter.api.Test;
  * chord three columns forward is therefore one column too far. ekran moved it three in world and
  * it fired. One of those is wrong, and blocks settle it.</p>
  */
+@Tag("sweep")
 class LaneEntryWireProbeTest {
 	@BeforeAll
 	static void bootstrapMinecraft() {

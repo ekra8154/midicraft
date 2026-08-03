@@ -11,6 +11,7 @@ import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.Bootstrap;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -20,6 +21,7 @@ import org.junit.jupiter.api.Test;
  * The question is which rule took the head, and the answer has to come from the build rather than
  * from reading the shape off a slice.</p>
  */
+@Tag("sweep")
 class IllitBreachTest {
 	@BeforeAll
 	static void bootstrapMinecraft() {

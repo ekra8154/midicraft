@@ -14,6 +14,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.Bootstrap;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -22,6 +23,7 @@ import org.junit.jupiter.api.Test;
  * <p>All three keep the cheap descent, which is on main. What varies is where the head is offered:
  * nowhere, only to a chord being cut across a staircase, or to every long chord.</p>
  */
+@Tag("sweep")
 class ThreeWayTest {
 	@BeforeAll
 	static void bootstrapMinecraft() {

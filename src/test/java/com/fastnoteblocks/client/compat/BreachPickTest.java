@@ -13,6 +13,7 @@ import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.Bootstrap;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -21,6 +22,7 @@ import org.junit.jupiter.api.Test;
  * <p>Sorted small-first on purpose. A lane one column past its wall is the one whose cause fits in
  * a single slice; a lane forty-seven past has been going wrong for a while by the time it shows.</p>
  */
+@Tag("sweep")
 class BreachPickTest {
 	@BeforeAll
 	static void bootstrapMinecraft() {
@@ -63,7 +65,7 @@ class BreachPickTest {
 			if (notes.isEmpty()) {
 				continue;
 			}
-			for (int floors = 1; floors <= 6; floors++) {
+			for (int floors = 1; floors <= 8; floors++) {
 				for (int width = 12; width <= 48; width += 4) {
 					SongBuilder.PastePlan plan = SongBuilder.createPastePlan(
 						new BlockPos(0, 64, 0), notes, SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
@@ -80,10 +82,19 @@ class BreachPickTest {
 			}
 		}
 		cases.sort(null);
-		System.out.println("PICK " + cases.size() + " breaching builds across real songs");
+		long guardian = cases.stream()
+			.filter(one -> one.song().equals("deltarune-ch-4-guardian")).count();
+		System.out.println("PICK " + cases.size() + " breaching builds across real songs, "
+			+ guardian + " of them Guardian");
+		int shown = 0;
 		for (Case one : cases) {
-			if (one.song().equals("deltarune-ch-4-guardian") && one.worst() > 4) {
+			// Guardian breaches in bulk and drowns everything else out. The small ones from the
+			// other songs are the readable cases: one lane, a column or two, one slice to look at.
+			if (one.song().equals("deltarune-ch-4-guardian")) {
 				continue;
+			}
+			if (shown++ >= 25) {
+				break;
 			}
 			System.out.println("PICK " + one.song() + " w" + one.width() + " f" + one.floors()
 				+ " lanes=" + one.lanes() + " worst=" + one.worst() + " :: " + one.fault());

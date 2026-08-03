@@ -21,6 +21,7 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -29,6 +30,7 @@ import org.junit.jupiter.api.Test;
  * <p>The shifted cut is new geometry -- a pad, then a head, then a near half one cell shorter --
  * so the layout check is not enough on its own. Every build here is placed and read back.</p>
  */
+@Tag("sweep")
 class SplitNudgeTest {
 	@BeforeAll
 	static void bootstrapMinecraft() {

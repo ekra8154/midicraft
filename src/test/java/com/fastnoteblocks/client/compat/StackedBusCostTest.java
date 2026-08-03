@@ -15,9 +15,11 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.Bootstrap;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /** Scratch probe: what the stacked head costs and saves, per song and per config. */
+@Tag("sweep")
 class StackedBusCostTest {
 	@BeforeAll
 	static void bootstrapMinecraft() {

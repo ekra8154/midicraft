@@ -13,9 +13,11 @@ import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.Bootstrap;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /** Scratch probe: what stands around a note that gets sounded twice. */
+@Tag("sweep")
 class WrongNoteMapTest {
 	@BeforeAll
 	static void bootstrapMinecraft() {

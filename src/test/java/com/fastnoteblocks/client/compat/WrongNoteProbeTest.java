@@ -13,9 +13,11 @@ import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.Bootstrap;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /** Scratch probe: every wrong note in the library, with the gap that makes it one. */
+@Tag("sweep")
 class WrongNoteProbeTest {
 	@BeforeAll
 	static void bootstrapMinecraft() {

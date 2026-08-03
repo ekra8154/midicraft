@@ -12,9 +12,11 @@ import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.Bootstrap;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /** Scratch probe: the blocks of the lane that breaches in Do The Dance at 28 wide, 2 floors. */
+@Tag("sweep")
 class IllitBreachMapTest {
 	@BeforeAll
 	static void bootstrapMinecraft() {

@@ -13,6 +13,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Stream;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -23,6 +24,7 @@ import org.junit.jupiter.api.io.TempDir;
  * notes on one tick in one layer and every real song does. A synthetic song only contains what I
  * thought to put in it; the library contains what ekran actually writes.</p>
  */
+@Tag("sweep")
 class NbsExportLibraryTest {
 	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
 

@@ -14,6 +14,7 @@ import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.Bootstrap;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -24,6 +25,7 @@ import org.junit.jupiter.api.Test;
  * refuse it. This counts the refusals against the builds, so the claim can be checked rather than
  * repeated.</p>
  */
+@Tag("sweep")
 class StackedReachTest {
 	@BeforeAll
 	static void bootstrapMinecraft() {

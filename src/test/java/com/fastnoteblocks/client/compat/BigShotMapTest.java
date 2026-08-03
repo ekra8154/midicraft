@@ -13,9 +13,11 @@ import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.Bootstrap;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /** Scratch probe: the one wrong note in a real song, and what stands around it. */
+@Tag("sweep")
 class BigShotMapTest {
 	@BeforeAll
 	static void bootstrapMinecraft() {

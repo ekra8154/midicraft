@@ -6,9 +6,11 @@ import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.Bootstrap;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /** Scratch probe: a stacked module and what follows it, block by block, on a straight lane. */
+@Tag("sweep")
 class StackedDumpTest {
 	@BeforeAll
 	static void bootstrapMinecraft() {

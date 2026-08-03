@@ -9,6 +9,7 @@ import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.Bootstrap;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -18,6 +19,7 @@ import org.junit.jupiter.api.Test;
  * these check both ends: that the grammar reads the way it is documented, and that what comes out
  * of it goes through the builder and lands where it says.</p>
  */
+@Tag("sweep")
 class DebugChordsTest {
 	@BeforeAll
 	static void bootstrapMinecraft() {

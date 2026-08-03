@@ -4,9 +4,11 @@ import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.Bootstrap;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /** Scratch probe: with the lane already bending, which distance lands the bus on the second corner. */
+@Tag("sweep")
 class DeadLineReproTest {
 	@BeforeAll
 	static void bootstrapMinecraft() {

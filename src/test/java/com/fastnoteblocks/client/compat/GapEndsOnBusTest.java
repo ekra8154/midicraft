@@ -15,6 +15,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.Bootstrap;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -24,6 +25,7 @@ import org.junit.jupiter.api.Test;
  * That is true of two modules a repeater apart and false of a stacked-bus, whose head is back
  * behind its transition and its whole tail. Ekran read it off a slice; this prices it.</p>
  */
+@Tag("sweep")
 class GapEndsOnBusTest {
 	@BeforeAll
 	static void bootstrapMinecraft() {

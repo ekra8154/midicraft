@@ -64,13 +64,37 @@ java {
 	}
 }
 
+// Console only. The config Loom gives the game rolls latest.log on a new day or on startup and on
+// nothing else, so a day of sweeps that print a line per song per config simply grows it -- it
+// reached eighteen gigabytes that way. Gradle captures test output regardless, so the file appenders
+// were never what anyone read. The working directory stays the project root: every probe here reads
+// run/config/fast-noteblocks/songs by relative path.
+def consoleOnlyLogging = { Test task ->
+	task.systemProperty 'log4j2.configurationFile', file('gradle/log4j2-test.xml').toURI().toString()
+	task.systemProperty 'log4j.configurationFile', file('gradle/log4j2-test.xml').toURI().toString()
+}
+
 test {
-	useJUnitPlatform()
-	// Console only. The config Loom gives the game rolls latest.log on a new day or on startup and
-	// on nothing else, so a day of sweeps that print a line per song per config simply grows it --
-	// it reached eighteen gigabytes that way. Gradle captures test output regardless, so the file
-	// appenders were never what anyone read. The working directory stays the project root: every
-	// probe here reads run/config/fast-noteblocks/songs by relative path.
-	systemProperty 'log4j2.configurationFile', file('gradle/log4j2-test.xml').toURI().toString()
-	systemProperty 'log4j.configurationFile', file('gradle/log4j2-test.xml').toURI().toString()
+	// Regressions only. The library-wide probes are tagged 'sweep' and left out: they exist to price
+	// a change once, not to be re-run on every build, and each of them plans every song at every
+	// width and floor count -- several also read every build back through NoteMachineReader, which
+	// costs far more than planning it. Together they had taken the suite from ten minutes to
+	// forty-three, and a suite that long is one nobody runs.
+	useJUnitPlatform {
+		excludeTags 'sweep'
+	}
+	consoleOnlyLogging(it)
+}
+
+/** The tagged probes, for when a change needs pricing. Never up to date: the point is the output. */
+tasks.register('sweepTest', Test) {
+	group = 'verification'
+	description = 'Runs the library-wide measurement probes tagged "sweep".'
+	testClassesDirs = sourceSets.test.output.classesDirs
+	classpath = sourceSets.test.runtimeClasspath
+	useJUnitPlatform {
+		includeTags 'sweep'
+	}
+	consoleOnlyLogging(it)
+	outputs.upToDateWhen { false }
 }
