@@ -38,6 +38,150 @@ public final class NoteSequence {
 	public record Token(String text, int from, int to) {
 	}
 
+	/** One step of a flattened build order, carrying the time it sounds at and the track it came from. */
+	public record Placement(int time, int trackNumber, Step step) {
+	}
+
+	/** An inclusive run of placements. */
+	public record Span(int first, int last) {
+		public int size() {
+			return last - first + 1;
+		}
+	}
+
+	/** Whether two placements are notes of one chord, which is to say two notes at one tick. */
+	public static boolean sameChord(Placement left, Placement right) {
+		return left.step().type() == StepType.NOTE
+			&& right.step().type() == StepType.NOTE
+			&& left.time() == right.time();
+	}
+
+	/**
+	 * The run of notes the placement at {@code index} belongs to, or that placement on its own.
+	 *
+	 * <p>The one place that decides what a chord is. What the overlay brackets and what a jump key
+	 * covers are both read off this, so the shape you are shown and the distance you travel cannot
+	 * come apart.</p>
+	 */
+	public static Span chordSpan(List<Placement> placements, int index) {
+		if (placements.isEmpty()) {
+			return new Span(0, 0);
+		}
+		int at = Math.max(0, Math.min(placements.size() - 1, index));
+		int first = at;
+		int last = at;
+		while (first > 0 && sameChord(placements.get(first - 1), placements.get(first))) {
+			first--;
+		}
+		while (last + 1 < placements.size() && sameChord(placements.get(last), placements.get(last + 1))) {
+			last++;
+		}
+		return new Span(first, last);
+	}
+
+	/**
+	 * What one press of a jump covers: a whole chord, or the whole stretch of delay between two.
+	 *
+	 * <p>Delay is a unit of its own rather than part of the chord either side of it, because those
+	 * repeaters still have to be placed -- skipping a chord should leave you in front of them, not
+	 * past them.</p>
+	 */
+	public static Span placementUnit(List<Placement> placements, int index) {
+		if (placements.isEmpty()) {
+			return new Span(0, 0);
+		}
+		int at = Math.max(0, Math.min(placements.size() - 1, index));
+		if (placements.get(at).step().type() == StepType.NOTE) {
+			return chordSpan(placements, at);
+		}
+		int first = at;
+		int last = at;
+		while (first > 0 && placements.get(first - 1).step().type() == StepType.REPEATER) {
+			first--;
+		}
+		while (last + 1 < placements.size()
+			&& placements.get(last + 1).step().type() == StepType.REPEATER) {
+			last++;
+		}
+		return new Span(first, last);
+	}
+
+	/**
+	 * How far into its own tick a placement sits.
+	 *
+	 * <p>Half of what a cursor is in musical terms. The index itself means nothing across an edit --
+	 * inserting one note near the start moves every index after it -- but "the third thing at tick
+	 * 640" still names the same moment afterwards.</p>
+	 */
+	public static int momentOffset(List<Placement> placements, int index) {
+		if (placements.isEmpty()) {
+			return 0;
+		}
+		int at = Math.max(0, Math.min(placements.size() - 1, index));
+		int first = at;
+		while (first > 0 && placements.get(first - 1).time() == placements.get(at).time()) {
+			first--;
+		}
+		return at - first;
+	}
+
+	/**
+	 * The placement {@code offset} steps into tick {@code time}, or the first one after it.
+	 *
+	 * <p>Where a cursor goes when the composition under it changes. An edit can delete the moment
+	 * outright, so landing on the next one that still exists is the answer rather than giving up and
+	 * going back to the beginning. Times do not decrease down the list, which is what lets this
+	 * binary search rather than walk thirty thousand steps.</p>
+	 */
+	public static int indexOfMoment(List<Placement> placements, int time, int offset) {
+		if (placements.isEmpty()) {
+			return 0;
+		}
+		int low = 0;
+		int high = placements.size();
+		while (low < high) {
+			int mid = (low + high) >>> 1;
+			if (placements.get(mid).time() < time) {
+				low = mid + 1;
+			} else {
+				high = mid;
+			}
+		}
+		if (low >= placements.size()) {
+			return placements.size() - 1;
+		}
+		if (placements.get(low).time() != time) {
+			return low;
+		}
+		int last = low;
+		while (last + 1 < placements.size() && placements.get(last + 1).time() == time) {
+			last++;
+		}
+		return Math.min(low + Math.max(0, offset), last);
+	}
+
+	/**
+	 * Where a jump from {@code index} lands.
+	 *
+	 * <p>Backwards means the start of the unit you are standing in, and only the one before it once
+	 * you are already at that start -- what the previous-track button on anything else does, and the
+	 * reason restarting a chord needs no key of its own.</p>
+	 */
+	public static int jump(List<Placement> placements, int index, int direction) {
+		if (placements.isEmpty()) {
+			return 0;
+		}
+		int at = Math.max(0, Math.min(placements.size() - 1, index));
+		Span unit = placementUnit(placements, at);
+		if (direction > 0) {
+			return Math.min(placements.size() - 1, unit.last() + 1);
+		}
+		if (at > unit.first()) {
+			return unit.first();
+		}
+		return unit.first() > 0 ? placementUnit(placements, unit.first() - 1).first() : 0;
+	}
+
 	private NoteSequence() {
 	}
 

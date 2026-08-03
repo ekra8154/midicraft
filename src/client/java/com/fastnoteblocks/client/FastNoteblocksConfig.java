@@ -11,7 +11,9 @@ import java.io.Writer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.network.chat.Component;
@@ -308,8 +310,17 @@ public final class FastNoteblocksConfig {
 	private int activeSequenceDelayScaleQuarters;
 	private int composerSpeedQuarters;
 	private String previewInstrument;
-	/** How far along placing the sequence you are. The only build state that outlives an edit. */
+	/**
+	 * How far along placing you are, per song. The only build state that outlives an edit.
+	 *
+	 * <p>One number for the whole mod was right when there was one composition. A library of
+	 * thirty-six is thirty-six builds that can be in progress at once, and opening a song to check
+	 * something should not cost you your place in the one you were laying.</p>
+	 */
+	private Map<String, Integer> placementCursors = new LinkedHashMap<>();
+	/** The place in a composition with no file behind it yet, which has no id to be keyed by. */
 	private int placementCursor;
+	private transient int documentGeneration;
 	private transient ComposerProject cachedSequenceProject;
 	private transient List<SequenceTrack> cachedSequence;
 	private ComposerProject composerProject;
@@ -420,6 +431,17 @@ public final class FastNoteblocksConfig {
 					? null
 					: stored.composerProject.withSpeedQuarters(instance.composerSpeedQuarters);
 				instance.activeSongId = stored.activeSongId;
+				instance.placementCursors = stored.placementCursors == null
+					? new LinkedHashMap<>()
+					: new LinkedHashMap<>(stored.placementCursors);
+				// A settings file written before bookmarks carries one position, and it belonged to
+				// whichever song was open when it was written. Give it to that song rather than
+				// dropping it, so an existing build in progress survives the upgrade.
+				if (stored.placementCursors == null
+					&& instance.activeSongId != null
+					&& instance.placementCursor > 0) {
+					instance.placementCursors.put(instance.activeSongId, instance.placementCursor);
+				}
 				instance.savedSequences = stored.savedSequences == null
 					? new ArrayList<>()
 					: new ArrayList<>(stored.savedSequences);
@@ -739,11 +761,25 @@ public final class FastNoteblocksConfig {
 	}
 
 	public int placementSequencePosition() {
-		return Math.max(0, placementCursor);
+		return activeSongId == null
+			? Math.max(0, placementCursor)
+			: Math.max(0, placementCursors.getOrDefault(activeSongId, 0));
 	}
 
 	public void setPlacementSequencePosition(int placementSequencePosition) {
-		this.placementCursor = Math.max(0, placementSequencePosition);
+		int position = Math.max(0, placementSequencePosition);
+		if (activeSongId == null) {
+			placementCursor = position;
+		} else {
+			placementCursors.put(activeSongId, position);
+		}
+	}
+
+	/** Drops the bookmark of a song that is no longer there, so the file cannot grow without bound. */
+	public void forgetPlacementPosition(String songId) {
+		if (songId != null) {
+			placementCursors.remove(songId);
+		}
 	}
 
 	public String activeSequenceName() {
@@ -816,12 +852,24 @@ public final class FastNoteblocksConfig {
 		return activeSongId;
 	}
 
+	/**
+	 * Bumped whenever a different document is opened, as opposed to the open one being edited.
+	 *
+	 * <p>The song id cannot answer this on its own: an import has no id, so importing twice in a row
+	 * is null to null, and the placement cursor would carry from one song into a different one as
+	 * though it were an edit. Counting the openings says it plainly.</p>
+	 */
+	public int documentGeneration() {
+		return documentGeneration;
+	}
+
 	/** Opens a different song. The one being left is already on disk; nothing is carried over. */
 	public void setActiveSongId(String id) {
 		if (id == null || songs.song(id) == null) {
 			return;
 		}
 		activeSongId = id;
+		documentGeneration++;
 		composerProject = songs.song(id);
 		activeSequenceName = composerProject.name();
 	}
@@ -865,6 +913,12 @@ public final class FastNoteblocksConfig {
 		}
 		if (activeSongId == null) {
 			activeSongId = songs.newId(composerProject.name());
+			// However far placing an import had got follows it into the file it now has. Saving is
+			// not somewhere to lose your place.
+			if (placementCursor > 0) {
+				placementCursors.put(activeSongId, placementCursor);
+				placementCursor = 0;
+			}
 		}
 		return songs.save(activeSongId, composerProject);
 	}
@@ -887,6 +941,9 @@ public final class FastNoteblocksConfig {
 			return;
 		}
 		activeSongId = null;
+		documentGeneration++;
+		// A document with no file behind it has no history to resume from.
+		placementCursor = 0;
 		composerProject = project;
 		activeSequenceName = project.name();
 	}
@@ -908,6 +965,8 @@ public final class FastNoteblocksConfig {
 		// empty document rather than the import with its edits undone, which would still be the
 		// thing the user just declined to keep.
 		activeSongId = null;
+		documentGeneration++;
+		placementCursor = 0;
 		composerProject = ComposerProject.empty("Untitled composition");
 		activeSequenceName = composerProject.name();
 	}
@@ -1298,6 +1357,7 @@ public final class FastNoteblocksConfig {
 		private Boolean dedupeIdenticalNotes;
 		private String placementSequence;
 		private Integer placementSequencePosition;
+		private Map<String, Integer> placementCursors;
 		private String activeSequenceName;
 		private Integer activeSequenceDelayScaleQuarters;
 		private Integer activeSequenceTimescale;
@@ -1353,6 +1413,7 @@ public final class FastNoteblocksConfig {
 			this.dedupeIdenticalNotes = config.dedupeIdenticalNotes;
 			this.placementSequence = config.activeTrack().sequence();
 			this.placementSequencePosition = config.placementCursor;
+			this.placementCursors = new LinkedHashMap<>(config.placementCursors);
 			this.activeSequenceName = config.activeSequenceName;
 			this.activeSequenceDelayScaleQuarters = config.activeSequenceDelayScaleQuarters;
 			this.previewInstrument = config.previewInstrument;

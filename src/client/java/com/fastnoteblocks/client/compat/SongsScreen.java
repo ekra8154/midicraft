@@ -253,6 +253,7 @@ public final class SongsScreen extends Screen {
 			confirmed -> {
 				if (confirmed) {
 					FastNoteblocksConfig.songs().delete(row.id());
+					FastNoteblocksConfig.get().forgetPlacementPosition(row.id());
 					status = "Deleted " + row.song().name();
 				}
 				minecraft.gui.setScreen(this);
