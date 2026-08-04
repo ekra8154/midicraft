@@ -38,6 +38,7 @@ import net.minecraft.tags.ItemTags;
 import net.minecraft.util.LightCoordsUtil;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
+import net.minecraft.world.inventory.ContainerInput;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -147,6 +148,9 @@ public final class NoteBlockOverlay {
 	private boolean sequenceSecondTap;
 	/** Whether the current note is still waiting for the block that gives it its instrument. */
 	private boolean awaitingInstrument;
+	/** Ticks off each time the sequencer reaches for a hotbar slot, so least-recently-used has a clock. */
+	private long hotbarClock;
+	private final long[] hotbarUsedAt = new long[9];
 
 	private NoteBlockOverlay() {
 	}
@@ -798,6 +802,11 @@ public final class NoteBlockOverlay {
 		}
 		if (!instrument.isEmpty()) {
 			graphics.item(new ItemStack(PreviewInstrument.byId(instrument).icon()), iconX, iconY);
+			// Harp with its setting off is a block the sequencer will walk past. Saying so is better
+			// than showing grass the same way as a block you are about to be handed.
+			if (!needsInstrumentLaid(placement)) {
+				graphics.fill(iconX, iconY, iconX + ICON_SIZE, iconY + ICON_SIZE, 0xA8101010);
+			}
 		}
 		// A corner of the icon rather than a label of its own.
 		if (placement.trackNumber() > 0) {
@@ -1050,6 +1059,13 @@ public final class NoteBlockOverlay {
 	private void performNextClick(Minecraft minecraft) {
 		PendingClicks pending = clickQueue.peekFirst();
 		if (pending == null) {
+			return;
+		}
+		// Tuning is a right-click on the block, and a crouching right-click means place, not use --
+		// which the server judges for itself from your pose, so there is nothing to fake here. Left
+		// alone it does not merely fail to tune: with a note block in hand it lays another one. So the
+		// queue waits out the crouch rather than spending clicks that will land as something else.
+		if (minecraft.player.isSecondaryUseActive()) {
 			return;
 		}
 
@@ -1379,9 +1395,73 @@ public final class NoteBlockOverlay {
 		int hotbarSlot = awaitingInstrument
 			? findInstrumentSlot(minecraft.player, stepInstrument(current))
 			: findSequenceItemSlot(minecraft.player, current.step());
+		if (hotbarSlot < 0 && awaitingInstrument) {
+			hotbarSlot = fetchInstrumentToHotbar(minecraft, stepInstrument(current));
+		}
 		if (hotbarSlot >= 0) {
 			minecraft.player.getInventory().setSelectedSlot(hotbarSlot);
+			hotbarUsedAt[hotbarSlot] = ++hotbarClock;
 		}
+	}
+
+	/**
+	 * Brings the block a note needs down to the hotbar when it is only in the backpack.
+	 *
+	 * <p>A song with eight instruments does not fit in nine slots beside the note blocks and
+	 * repeaters, so the alternative is opening the inventory every few notes. It goes to an empty
+	 * slot if there is one, and otherwise takes the place of whichever instrument the sequencer has
+	 * gone longest without asking for -- a swap, so that one lands in the slot this came out of and
+	 * nothing is lost.</p>
+	 *
+	 * <p>Only ever displaces a block that is itself an instrument. A hotbar with no spare slot and
+	 * nothing but tools on it is left exactly as it is.</p>
+	 */
+	private int fetchInstrumentToHotbar(Minecraft minecraft, String instrument) {
+		LocalPlayer player = minecraft.player;
+		if (minecraft.gui.screen() != null || minecraft.gameMode == null) {
+			return -1;
+		}
+		int source = -1;
+		for (int slot = 9; slot < player.getInventory().getContainerSize() && source < 0; slot++) {
+			if (instrumentItemMatches(player.getInventory().getItem(slot), instrument)) {
+				source = slot;
+			}
+		}
+		if (source < 0) {
+			return -1;
+		}
+		int target = -1;
+		for (int slot = 0; slot < 9 && target < 0; slot++) {
+			if (player.getInventory().getItem(slot).isEmpty()) {
+				target = slot;
+			}
+		}
+		if (target < 0) {
+			long oldest = Long.MAX_VALUE;
+			for (int slot = 0; slot < 9; slot++) {
+				ItemStack stack = player.getInventory().getItem(slot);
+				boolean spare = PreviewInstrument.isInstrumentBlock(stack) || stack.is(Items.DIRT);
+				if (spare && hotbarUsedAt[slot] < oldest) {
+					oldest = hotbarUsedAt[slot];
+					target = slot;
+				}
+			}
+		}
+		if (target < 0) {
+			return -1;
+		}
+		// The same exchange as hovering the slot and pressing its number, which is why the displaced
+		// instrument ends up where this one was rather than anywhere loose.
+		minecraft.gameMode.handleContainerInput(
+			player.inventoryMenu.containerId, source, target, ContainerInput.SWAP, player);
+		return target;
+	}
+
+	/** Whether a stack is something this instrument would accept, dirt included for harp. */
+	private static boolean instrumentItemMatches(ItemStack stack, String instrument) {
+		return isHarp(instrument)
+			? stack.is(Items.GRASS_BLOCK) || stack.is(Items.DIRT)
+			: stack.is(PreviewInstrument.byId(instrument).icon());
 	}
 
 	/**

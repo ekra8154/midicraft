@@ -10,6 +10,7 @@ import net.minecraft.core.Holder;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 
 public record PreviewInstrument(String id, String name, Item icon, Holder<SoundEvent> sound) {
@@ -47,6 +48,16 @@ public record PreviewInstrument(String id, String name, Item icon, Holder<SoundE
 	 * made every unrecognised instrument a bass.</p>
 	 */
 	private static final PreviewInstrument FALLBACK = BY_ID.get("HARP");
+
+	/** Whether this is a block somebody is carrying because a note has to stand on it. */
+	public static boolean isInstrumentBlock(ItemStack stack) {
+		for (PreviewInstrument instrument : VALUES) {
+			if (stack.is(instrument.icon())) {
+				return true;
+			}
+		}
+		return false;
+	}
 
 	public static PreviewInstrument byId(String id) {
 		return BY_ID.getOrDefault(id, FALLBACK);
