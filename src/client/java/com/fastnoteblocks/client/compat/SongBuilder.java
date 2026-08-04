@@ -1112,11 +1112,7 @@ public final class SongBuilder {
 					BlockPos landed = climb > 0
 						? addGlassClimb(placements, lane.pos(), travel,
 							lastStyle.buses() && pad.cells().isEmpty(), currentTime)
-						: UNIVERSAL_FOUR_DESCENT
-								? addSplitBusDescent(placements, lane.pos(), travel, descentSide,
-									currentTime)
-								: addSpiralDescent(placements, lane.pos(), travel, descentSide,
-									currentTime);
+						: descend(placements, lane.pos(), travel, descentSide, currentTime);
 					floor = above;
 					// What the staircase leaves the next lane. It matters because the next lane may
 					// want to lay dust of its own before its first repeater, and a staircase is the one
@@ -2421,6 +2417,35 @@ public final class SongBuilder {
 			set(placements, stone.above(), "minecraft:redstone_wire");
 		}
 		return cursor.below(CUBE_FLOOR_HEIGHT);
+	}
+
+	/**
+	 * The short way down where it fits, the old way where it does not.
+	 *
+	 * <p>The four-cell spiral is a clear win -- a quarter fewer breaches, a tenth off the depth and
+	 * an eleventh off the blocks, and it conducts -- but it stands in different columns from the
+	 * six-cell one, and in 91 builds those columns already hold an instrument block. A chord that
+	 * collides falls back to a bus; a staircase had no such path and took the whole build down with
+	 * it, which is worse than any breach.</p>
+	 *
+	 * <p>So the short one is tried and the old spiral is what the walk gets when the ground is
+	 * spoken for. Both hand back a landing, so the caller does not need to know which it got.</p>
+	 */
+	private static BlockPos descend(PlacementPlan placements, BlockPos cursor, Direction travel,
+			Direction depth, int time) {
+		if (!UNIVERSAL_FOUR_DESCENT) {
+			return addSpiralDescent(placements, cursor, travel, depth, time);
+		}
+		placements.beginTrial();
+		try {
+			BlockPos landed = addSplitBusDescent(placements, cursor, travel, depth, time);
+			placements.commitTrial();
+			return landed;
+		} catch (IllegalArgumentException collided) {
+			placements.rollbackTrial();
+			placements.padded("planSpiralForCollision");
+			return addSpiralDescent(placements, cursor, travel, depth, time);
+		}
 	}
 
 	private static BlockPos addSpiralDescent(PlacementPlan placements, BlockPos cursor,
