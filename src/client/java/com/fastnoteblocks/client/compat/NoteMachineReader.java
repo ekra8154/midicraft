@@ -82,6 +82,10 @@ public final class NoteMachineReader {
 	 * A machine read back, and everything worth saying about how the reading went.
 	 *
 	 * @param unreachedNotes note blocks the signal never got to, which are left out of the song
+	 * @param unreachedAt where those note blocks are. Counting them says a machine is broken;
+	 *     only their positions say where, and every attempt to find that by counting redstone
+	 *     between repeaters has pointed at the wrong block -- a stacked module's cross is dust and
+	 *     is not on the path, so every run through one reads a cell too long.
 	 * @param headNotes note blocks standing on a mob head, whose sound the composer has no layer
 	 *     for and which therefore come back as a harp
 	 * @param versions complete performances found -- more than one when a machine has ways in that
@@ -92,6 +96,7 @@ public final class NoteMachineReader {
 		ComposerProject project,
 		int noteBlocks,
 		int unreachedNotes,
+		List<BlockPos> unreachedAt,
 		int headNotes,
 		int redstoneTicks,
 		int versions,
@@ -752,8 +757,14 @@ public final class NoteMachineReader {
 			warnings.add("ignored " + String.join(" and ", survey.unsupported)
 				+ ", which carry timing this cannot follow");
 		}
+		List<BlockPos> unreachedAt = new ArrayList<>();
+		for (BlockPos note : survey.noteBlocks) {
+			if (!trace.played().contains(note)) {
+				unreachedAt.add(note);
+			}
+		}
 		return new Reading(project, survey.noteBlocks.size(),
-			survey.noteBlocks.size() - trace.played().size(), headNotes,
+			survey.noteBlocks.size() - trace.played().size(), List.copyOf(unreachedAt), headNotes,
 			(int)(span / TICKS_PER_REDSTONE_TICK), versions, List.copyOf(warnings));
 	}
 
