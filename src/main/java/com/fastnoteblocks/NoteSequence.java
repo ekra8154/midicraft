@@ -107,6 +107,36 @@ public final class NoteSequence {
 	}
 
 	/**
+	 * Where a placement sits in the order a chord is walked.
+	 *
+	 * <p>A chord is built two notes to a block of bus, one hanging either side, and there are two
+	 * sane ways to lay that. Alternating crosses the bus at every note, which is the order the
+	 * placements are stored in. Two strips walks the whole of one side and then comes back along the
+	 * other, which is what a hand does when it is carrying one stack and walking a line.</p>
+	 *
+	 * <p>Only the walking order changes. Which pitch belongs to which side of which block is fixed by
+	 * the placement order itself and is the same either way -- so is the card you are shown.</p>
+	 */
+	public static int chordRank(Span chord, int index, boolean twoStrips) {
+		int local = Math.max(0, Math.min(chord.size() - 1, index - chord.first()));
+		if (!twoStrips) {
+			return local;
+		}
+		int nearSide = (chord.size() + 1) / 2;
+		return local % 2 == 0 ? local / 2 : nearSide + local / 2;
+	}
+
+	/** The placement standing at a given rank in that walk. The inverse of {@link #chordRank}. */
+	public static int chordAt(Span chord, int rank, boolean twoStrips) {
+		int at = Math.max(0, Math.min(chord.size() - 1, rank));
+		if (!twoStrips) {
+			return chord.first() + at;
+		}
+		int nearSide = (chord.size() + 1) / 2;
+		return chord.first() + (at < nearSide ? at * 2 : (at - nearSide) * 2 + 1);
+	}
+
+	/**
 	 * How far into its own tick a placement sits.
 	 *
 	 * <p>Half of what a cursor is in musical terms. The index itself means nothing across an edit --

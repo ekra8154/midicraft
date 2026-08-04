@@ -12,7 +12,7 @@ import net.minecraft.sounds.SoundEvents;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
 
-record PreviewInstrument(String id, String name, Item icon, Holder<SoundEvent> sound) {
+public record PreviewInstrument(String id, String name, Item icon, Holder<SoundEvent> sound) {
 	private static final int MIN_CACHED_NOTE = -64;
 	private static final float[] CACHED_PITCHES = createPitchCache();
 	static final List<PreviewInstrument> VALUES = List.of(
@@ -48,7 +48,7 @@ record PreviewInstrument(String id, String name, Item icon, Holder<SoundEvent> s
 	 */
 	private static final PreviewInstrument FALLBACK = BY_ID.get("HARP");
 
-	static PreviewInstrument byId(String id) {
+	public static PreviewInstrument byId(String id) {
 		return BY_ID.getOrDefault(id, FALLBACK);
 	}
 

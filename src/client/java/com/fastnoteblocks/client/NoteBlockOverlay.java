@@ -3,6 +3,7 @@ package com.fastnoteblocks.client;
 import com.fastnoteblocks.NotePitch;
 import com.fastnoteblocks.NoteSequence;
 import com.fastnoteblocks.client.compat.ComposerScreen;
+import com.fastnoteblocks.client.compat.PreviewInstrument;
 import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.blaze3d.vertex.PoseStack;
 import java.util.ArrayDeque;
@@ -37,6 +38,8 @@ import net.minecraft.tags.ItemTags;
 import net.minecraft.util.LightCoordsUtil;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
+import net.minecraft.world.item.BlockItem;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.level.ClipContext;
@@ -54,8 +57,33 @@ public final class NoteBlockOverlay {
 	private static final int INTERACTION_ACK_TIMEOUT_TICKS = 40;
 	private static final int SEQUENCE_HUD_TICKS = 50;
 	private static final int SEQUENCE_ADVANCE_HUD_TICKS = 32;
-	private static final int SEQUENCE_ADVANCE_ANIMATION_TICKS = 6;
-	private static final int SEQUENCE_HUD_RADIUS = 4;
+	/** One row of a chord card. Two of them make a card, as two notes make a block of bus. */
+	private static final int TILE_ROW_HEIGHT = 20;
+	private static final int CARD_GAP = 8;
+	/**
+	 * The block a note wants under it, drawn at full size and centred on its tile's top-left corner.
+	 *
+	 * <p>Sitting on the corner rather than inside the box is what lets it be the biggest thing on the
+	 * card without the pitch moving aside for it. It costs the tile both of its corners, though: half
+	 * an icon hangs into the tile to the left as well, so the pitch has to clear
+	 * {@link #ICON_SIZE}/2 at each end and the tile is sized for that.</p>
+	 */
+	private static final int ICON_SIZE = 16;
+	/**
+	 * How far the icon's top-left sits outside its tile's.
+	 *
+	 * <p>Sitting fully inside left no room for the pitch; centred on the corner took half the icon
+	 * into the tile before it and cost the pitch both ends of the tile. This is between the two.</p>
+	 */
+	private static final int ICON_OUT_X = 3;
+	private static final int ICON_OUT_Y = 6;
+	private static final float NOTE_SCALE = 0.65F;
+	/**
+	 * Small, but not below what the font can actually draw.
+	 *
+	 * <p>0.35 put a digit under three pixels tall and it came out as marks rather than numbers.</p>
+	 */
+	private static final float LAYER_SCALE = 0.5F;
 	private static final int SEQUENCE_DOUBLE_TAP_TICKS = 7;
 	private static final double LABEL_Y = 1.40;
 	private static final double REPEATER_LABEL_Y = LABEL_Y - 0.75;
@@ -101,6 +129,7 @@ public final class NoteBlockOverlay {
 	private boolean sequencePositionSavePending;
 	private boolean lastPlacementSequenceEnabled;
 	private boolean lastAutoSelectSequenceBlock;
+	private boolean lastSelectInstruments;
 	private int lastActiveTrackIndex;
 	private int lastDocumentGeneration;
 	private int lastSequenceDelayScaleQuarters;
@@ -112,12 +141,12 @@ public final class NoteBlockOverlay {
 	private int sequenceHudTicks;
 	private Component sequenceHudAction;
 	private SequenceHudMode sequenceHudMode = SequenceHudMode.FULL;
-	private int sequenceAdvanceFromIndex = -1;
-	private int sequenceAdvanceToIndex = -1;
 	private int sequenceTapWindowTicks;
 	private boolean sequenceControlKeyDown;
 	private boolean sequenceGestureConsumed;
 	private boolean sequenceSecondTap;
+	/** Whether the current note is still waiting for the block that gives it its instrument. */
+	private boolean awaitingInstrument;
 
 	private NoteBlockOverlay() {
 	}
@@ -126,6 +155,7 @@ public final class NoteBlockOverlay {
 		FastNoteblocksConfig config = FastNoteblocksConfig.get();
 		lastPlacementSequenceEnabled = config.placementSequenceEnabled();
 		lastAutoSelectSequenceBlock = config.autoSelectSequenceBlock();
+		lastSelectInstruments = config.selectInstruments();
 		lastActiveTrackIndex = config.activeTrackIndex();
 		lastDocumentGeneration = config.documentGeneration();
 		lastPlacementSequenceText = buildSequenceSignature(config);
@@ -232,7 +262,7 @@ public final class NoteBlockOverlay {
 		if (controlDown(minecraft)) {
 			movePlacementSequenceByUnit(amount);
 		} else {
-			movePlacementSequence(amount);
+			movePlacementSequenceStep(amount);
 		}
 		showSequenceHud(minecraft, null);
 		return true;
@@ -281,10 +311,13 @@ public final class NoteBlockOverlay {
 		if (!config.placementSequenceEnabled() && lastPlacementSequenceEnabled) {
 			cancelPlacementSequenceWork();
 		} else if (config.placementSequenceEnabled() && !lastPlacementSequenceEnabled) {
-			selectCurrentSequenceItem(minecraft);
+			beginPlacementStep(minecraft);
 		}
 		if (config.autoSelectSequenceBlock() && !lastAutoSelectSequenceBlock) {
-			selectCurrentSequenceItem(minecraft);
+			beginPlacementStep(minecraft);
+		}
+		if (config.selectInstruments() != lastSelectInstruments) {
+			beginPlacementStep(minecraft);
 		}
 		int generation = config.documentGeneration();
 		String sequenceSignature = buildSequenceSignature(config);
@@ -299,6 +332,7 @@ public final class NoteBlockOverlay {
 		}
 		lastPlacementSequenceEnabled = config.placementSequenceEnabled();
 		lastAutoSelectSequenceBlock = config.autoSelectSequenceBlock();
+		lastSelectInstruments = config.selectInstruments();
 		lastDocumentGeneration = generation;
 		lastActiveTrackIndex = config.activeTrackIndex();
 		lastPlacementSequenceText = sequenceSignature;
@@ -316,7 +350,7 @@ public final class NoteBlockOverlay {
 			repeaterBottomDelay = null;
 			clearRadialFocusCandidate();
 			ticksUntilRescan = 0;
-			selectCurrentSequenceItem(minecraft);
+			beginPlacementStep(minecraft);
 		}
 
 		if (!isReady(minecraft)) {
@@ -414,18 +448,96 @@ public final class NoteBlockOverlay {
 	}
 
 	private void movePlacementSequence(int amount) {
-		List<NoteSequence.Placement> sequence = configuredSequence();
-		cancelPlacementSequenceWork();
-		if (!sequence.isEmpty()) {
-			int previousIndex = placementSequenceIndex;
-			placementSequenceIndex = Math.max(0, Math.min(
-				sequence.size() - 1, placementSequenceIndex + amount
-			));
-			if (placementSequenceIndex != previousIndex) {
-				persistPlacementSequencePosition();
-				selectCurrentSequenceItem(Minecraft.getInstance());
-			}
+		if (!configuredSequence().isEmpty()) {
+			goToPlacement(placementSequenceIndex + amount, true);
 		}
+	}
+
+	/**
+	 * One notch of the wheel, which is half a step wherever the block underneath is a step of its own.
+	 *
+	 * <p>With instruments switched on a note is two placements, so going back one had no way to say
+	 * which of the two you meant and always landed on the instrument. Now the phase is part of what
+	 * the cursor moves through: forward off an instrument lands on its note, back off a note lands on
+	 * its instrument, and a step with nothing to lay underneath -- a repeater, or a harp note -- is
+	 * the single notch it always was.</p>
+	 */
+	private void movePlacementSequenceStep(int amount) {
+		List<NoteSequence.Placement> sequence = configuredSequence();
+		if (sequence.isEmpty()) {
+			return;
+		}
+		int index = Math.max(0, Math.min(sequence.size() - 1, placementSequenceIndex));
+		if (amount > 0) {
+			if (awaitingInstrument) {
+				goToPlacement(index, false);
+				return;
+			}
+			int next = steppedPlacement(sequence, index, 1);
+			if (next >= 0) {
+				goToPlacement(next, true);
+			}
+			return;
+		}
+		if (!awaitingInstrument && instrumentIsAStep(sequence.get(index))) {
+			goToPlacement(index, true);
+			return;
+		}
+		// Back into the step before means its note, not its instrument: the far side of it.
+		int previous = steppedPlacement(sequence, index, -1);
+		if (previous >= 0) {
+			goToPlacement(previous, false);
+		}
+	}
+
+	/**
+	 * The placement the walk reaches next, or -1 at the end.
+	 *
+	 * <p>Within a chord this is whichever note the chosen order visits next, which is not the next
+	 * one along unless the order is alternating. Leaving a chord backwards lands on the last note of
+	 * the one before -- the last one *visited*, which in two strips is not the last one stored.</p>
+	 */
+	private int steppedPlacement(List<NoteSequence.Placement> sequence, int index, int direction) {
+		boolean twoStrips = FastNoteblocksConfig.get().walksChordsInTwoStrips();
+		NoteSequence.Span chord = NoteSequence.chordSpan(sequence, index);
+		int rank = NoteSequence.chordRank(chord, index, twoStrips);
+		if (direction > 0) {
+			if (rank + 1 < chord.size()) {
+				return NoteSequence.chordAt(chord, rank + 1, twoStrips);
+			}
+			return chord.last() + 1 < sequence.size()
+				? NoteSequence.chordAt(NoteSequence.chordSpan(sequence, chord.last() + 1), 0, twoStrips)
+				: -1;
+		}
+		if (rank > 0) {
+			return NoteSequence.chordAt(chord, rank - 1, twoStrips);
+		}
+		if (chord.first() == 0) {
+			return -1;
+		}
+		NoteSequence.Span before = NoteSequence.chordSpan(sequence, chord.first() - 1);
+		return NoteSequence.chordAt(before, before.size() - 1, twoStrips);
+	}
+
+	/** Puts the cursor somewhere, and says which half of that step it is standing on. */
+	private void goToPlacement(int index, boolean instrumentPhase) {
+		cancelPlacementSequenceWork();
+		List<NoteSequence.Placement> sequence = configuredSequence();
+		if (sequence.isEmpty()) {
+			return;
+		}
+		int target = Math.max(0, Math.min(sequence.size() - 1, index));
+		boolean moved = target != placementSequenceIndex;
+		placementSequenceIndex = target;
+		awaitingInstrument = instrumentPhase && instrumentIsAStep(sequence.get(target));
+		if (moved) {
+			persistPlacementSequencePosition();
+		}
+		selectCurrentSequenceItem(Minecraft.getInstance());
+	}
+
+	private static boolean instrumentIsAStep(NoteSequence.Placement placement) {
+		return FastNoteblocksConfig.get().selectInstruments() && needsInstrumentLaid(placement);
 	}
 
 	/** Moves by a whole chord, or by a whole run of delay, rather than by one placement. */
@@ -447,14 +559,22 @@ public final class NoteBlockOverlay {
 		sequenceHudTicks = SEQUENCE_HUD_TICKS;
 	}
 
-	private void showSequenceAdvance(int placedIndex, int nextIndex) {
-		sequenceAdvanceFromIndex = placedIndex;
-		sequenceAdvanceToIndex = nextIndex;
+	/** The brief look at the strip after a placement, without having to hold the key. */
+	private void showSequenceAdvance() {
 		sequenceHudAction = null;
 		sequenceHudMode = SequenceHudMode.ADVANCE;
 		sequenceHudTicks = SEQUENCE_ADVANCE_HUD_TICKS;
 	}
 
+	/**
+	 * The strip: the placement order laid out left to right, centred on where you are.
+	 *
+	 * <p>A chord is one card of two rows, which is the shape it is about to be built in -- a bus
+	 * carries two notes a block, so a column here is a block of bus and the two rows are its two
+	 * sides. Reading down then right is the order the cursor walks and the order the notes go down.
+	 * Delay stands between the cards as a single token on the midline, so the strip never changes
+	 * shape under you as the cursor crosses out of a chord into the repeaters after it.</p>
+	 */
 	private void renderSequenceHud(GuiGraphicsExtractor graphics, DeltaTracker deltaTracker) {
 		Minecraft minecraft = Minecraft.getInstance();
 		boolean keyHeld = placementSequenceKey.isDown();
@@ -467,177 +587,229 @@ public final class NoteBlockOverlay {
 		List<NoteSequence.Placement> sequence = configuredSequence();
 		int centerX = graphics.guiWidth() / 2;
 		int y = graphics.guiHeight() / 2 + 28;
-		boolean showingAdvanceOnly = !keyHeld && sequenceHudMode == SequenceHudMode.ADVANCE
-			&& sequenceAdvanceFromIndex >= 0 && sequenceAdvanceToIndex >= 0;
 		if (sequence.isEmpty()) {
-			drawSequenceHudHeader(graphics, centerX, y, showingAdvanceOnly);
+			drawSequenceHudHeader(graphics, centerX, y);
 			graphics.centeredText(minecraft.font, Component.translatable(
 				"message.fast-noteblocks.sequence_hud_empty"
 			), centerX, y, 0xFFFF5555);
 			return;
 		}
+		y = Math.max(30, Math.min(y, graphics.guiHeight() - 2 * TILE_ROW_HEIGHT - 30));
 		List<SequenceHudItem> items = sequenceHudItems(sequence);
 		int index = Math.max(0, Math.min(sequence.size() - 1, placementSequenceIndex));
 		NoteSequence.Span chord = NoteSequence.chordSpan(sequence, index);
-		// A chord is shown whole, as a board that stands still while the cursor walks it. Sliding one
-		// token at a time is right for a run of delays and wrong for twenty-four notes at one tick:
-		// what you want then is to see how many are left and which instrument they want.
-		if (chord.size() >= 2) {
-			ChordBoard board = layOutChordBoard(graphics.guiWidth(), sequence, chord);
-			// The window sits below the middle of the screen, and thirty notes over four instruments
-			// is several rows, so a tall board is lifted until it fits rather than running off the
-			// bottom. The header above it is why the top stops at 42 rather than 0.
-			y = Math.max(42, Math.min(y, graphics.guiHeight() - board.height() - 26));
-			drawSequenceHudHeader(graphics, centerX, y, false);
-			int bottom = drawChordBoard(graphics, board, centerX, y, sequence, index);
-			drawSequencePosition(graphics, centerX, bottom, sequence, chord, index);
-			return;
-		}
-		drawSequenceHudHeader(graphics, centerX, y, showingAdvanceOnly);
-		if (showingAdvanceOnly) {
-			renderSequenceAdvance(graphics, deltaTracker, centerX, y, sequence, items);
-			drawSequencePosition(graphics, centerX, y, sequence, chord, index);
-			return;
-		}
-
-		int itemIndex = sequenceHudItemIndex(items, index);
-		SequenceHudToken current = sequenceHudToken(items.get(itemIndex), index);
-		int currentWidth = minecraft.font.width(current.text());
-		int currentX = centerX - currentWidth / 2;
-		drawSequenceHudToken(graphics, current, currentX, y, true,
-			itemIndex > 0 && chordAdjacent(items.get(itemIndex - 1), items.get(itemIndex)),
-			itemIndex + 1 < items.size() && chordAdjacent(items.get(itemIndex), items.get(itemIndex + 1)));
-
-		int leftX = currentX;
-		for (int offset = 1; offset <= SEQUENCE_HUD_RADIUS && itemIndex - offset >= 0; offset++) {
-			int leftItemIndex = itemIndex - offset;
-			SequenceHudItem leftItem = items.get(leftItemIndex);
-			SequenceHudToken token = sequenceHudToken(leftItem, -1);
-			int width = minecraft.font.width(token.text());
-			leftX -= sequenceHudItemGap(leftItem, items.get(leftItemIndex + 1)) + width;
-			drawSequenceHudToken(graphics, token, leftX, y, false, false, false);
-		}
-
-		int rightX = currentX + currentWidth;
-		for (int offset = 1; offset <= SEQUENCE_HUD_RADIUS && itemIndex + offset < items.size(); offset++) {
-			int rightItemIndex = itemIndex + offset;
-			SequenceHudItem rightItem = items.get(rightItemIndex);
-			rightX += sequenceHudItemGap(items.get(rightItemIndex - 1), rightItem);
-			SequenceHudToken token = sequenceHudToken(rightItem, -1);
-			drawSequenceHudToken(graphics, token, rightX, y, false, false, false);
-			rightX += minecraft.font.width(token.text());
-		}
-		drawSequencePosition(graphics, centerX, y, sequence, chord, index);
+		drawSequenceHudHeader(graphics, centerX, y);
+		drawSequenceStrip(graphics, centerX, y, items, hudCards(items), index, awaitingInstrument);
+		drawSequencePosition(graphics, centerX,
+			y + 2 * TILE_ROW_HEIGHT - minecraft.font.lineHeight, sequence, chord, index);
 	}
 
-	/** The track line above the window, and whatever the last control action was. */
-	private void drawSequenceHudHeader(GuiGraphicsExtractor graphics, int centerX, int y, boolean advanceOnly) {
-		Minecraft minecraft = Minecraft.getInstance();
-		if (!advanceOnly) {
-			graphics.centeredText(minecraft.font, buildTrackLabel(FastNoteblocksConfig.get()),
-				centerX, y - 14, 0xFFAAAAAA);
-		}
+	/**
+	 * Whatever the last control action was, and nothing else.
+	 *
+	 * <p>This used to head the window with the numbers of every build-enabled track. That reads as
+	 * "Build tracks: 1, 2" on the songs it was written for and as a row of counting numbers wider
+	 * than the screen, its own beginning cut off, on a song with forty layers. The strip says which
+	 * instruments are in play by showing them.</p>
+	 */
+	private void drawSequenceHudHeader(GuiGraphicsExtractor graphics, int centerX, int y) {
 		if (sequenceHudTicks > 0 && sequenceHudAction != null && sequenceHudMode == SequenceHudMode.FULL) {
-			graphics.centeredText(minecraft.font, sequenceHudAction, centerX, y - 25, 0xFFCCCCCC);
+			graphics.centeredText(Minecraft.getInstance().font, sequenceHudAction, centerX, y - 14, 0xFFCCCCCC);
+		}
+	}
+
+	/** The strip broken into what gets drawn as one thing: a chord, or a run of delay. */
+	private static List<HudCard> hudCards(List<SequenceHudItem> items) {
+		Minecraft minecraft = Minecraft.getInstance();
+		List<HudCard> cards = new ArrayList<>();
+		int index = 0;
+		while (index < items.size()) {
+			if (items.get(index).step().step().type() == NoteSequence.StepType.NOTE) {
+				int end = index;
+				while (end + 1 < items.size() && chordAdjacent(items.get(end), items.get(end + 1))) {
+					end++;
+				}
+				int tileWidth = 0;
+				for (int at = index; at <= end; at++) {
+					// What the icon leaves: it reaches ICON_SIZE - ICON_OUT_X into its own tile, and the
+					// next tile's icon reaches ICON_OUT_X back into this one.
+					tileWidth = Math.max(tileWidth, ICON_SIZE + ICON_OUT_X
+						+ Math.round(minecraft.font.width(noteText(items.get(at).step())) * NOTE_SCALE));
+				}
+				// Two notes to a column, because two notes go on one block of bus.
+				int columns = (end - index + 2) / 2;
+				cards.add(new HudCard(index, end, true, columns, tileWidth, columns * tileWidth));
+				index = end + 1;
+			} else {
+				int width = minecraft.font.width(delayText(items.get(index), -1)) + 8;
+				cards.add(new HudCard(index, index, false, 1, width, width));
+				index++;
+			}
+		}
+		return cards;
+	}
+
+	private static void drawSequenceStrip(
+		GuiGraphicsExtractor graphics,
+		int centerX,
+		int y,
+		List<SequenceHudItem> items,
+		List<HudCard> cards,
+		int activeIndex,
+		boolean instrumentFirst
+	) {
+		int activeCard = 0;
+		for (int at = 0; at < cards.size(); at++) {
+			if (activeIndex >= items.get(cards.get(at).firstItem()).startIndex()
+				&& activeIndex <= items.get(cards.get(at).lastItem()).endIndex()) {
+				activeCard = at;
+				break;
+			}
+		}
+		HudCard current = cards.get(activeCard);
+		int currentX;
+		if (current.width() <= graphics.guiWidth() - 8) {
+			currentX = centerX - current.width() / 2;
+		} else {
+			// Thirty notes is fifteen columns, which at a large GUI scale is wider than the screen.
+			// Centre the column you are on and let the rest of the card run off, rather than centring
+			// the card and losing both ends of it.
+			int column = 0;
+			for (int at = current.firstItem(); at <= current.lastItem(); at++) {
+				if (items.get(at).startIndex() == activeIndex) {
+					column = (at - current.firstItem()) / 2;
+					break;
+				}
+			}
+			currentX = centerX - column * current.tileWidth() - current.tileWidth() / 2;
+		}
+		drawHudCard(graphics, current, currentX, y, items, activeIndex, instrumentFirst);
+
+		// Neighbours fill outwards until the next one would not fit, rather than a fixed count: a
+		// card is as wide as its chord, so four either side is a handful of tokens or half a mile.
+		int leftEdge = currentX;
+		for (int at = activeCard - 1; at >= 0; at--) {
+			int x = leftEdge - CARD_GAP - cards.get(at).width();
+			if (x < 2) {
+				break;
+			}
+			drawHudCard(graphics, cards.get(at), x, y, items, activeIndex, instrumentFirst);
+			leftEdge = x;
+		}
+		int rightEdge = currentX + current.width();
+		for (int at = activeCard + 1; at < cards.size(); at++) {
+			int x = rightEdge + CARD_GAP;
+			if (x + cards.get(at).width() > graphics.guiWidth() - 2) {
+				break;
+			}
+			drawHudCard(graphics, cards.get(at), x, y, items, activeIndex, instrumentFirst);
+			rightEdge = x + cards.get(at).width();
+		}
+	}
+
+	private static void drawHudCard(
+		GuiGraphicsExtractor graphics,
+		HudCard card,
+		int x,
+		int y,
+		List<SequenceHudItem> items,
+		int activeIndex,
+		boolean instrumentFirst
+	) {
+		Minecraft minecraft = Minecraft.getInstance();
+		if (!card.chord()) {
+			SequenceHudItem item = items.get(card.firstItem());
+			boolean current = activeIndex >= item.startIndex() && activeIndex <= item.endIndex();
+			String text = delayText(item, activeIndex);
+			int width = minecraft.font.width(text);
+			int textX = x + (card.width() - width) / 2;
+			// On the midline between the two rows, so the cards either side of it stay put.
+			int textY = y + TILE_ROW_HEIGHT - minecraft.font.lineHeight / 2;
+			if (current) {
+				graphics.fill(textX - 4, textY - 3, textX + width + 4,
+					textY + minecraft.font.lineHeight + 3, 0xB8000000);
+			}
+			graphics.text(minecraft.font, text, textX, textY,
+				current ? 0xFFFFAA00 : 0xFF999999, true);
+			return;
+		}
+		// The tiles never move: a column is a block of bus and the two rows are its sides, whichever
+		// order the cursor walks them in. Only what counts as behind you changes.
+		NoteSequence.Span span = new NoteSequence.Span(items.get(card.firstItem()).startIndex(),
+			items.get(card.lastItem()).endIndex());
+		boolean twoStrips = FastNoteblocksConfig.get().walksChordsInTwoStrips();
+		boolean holdsCursor = activeIndex >= span.first() && activeIndex <= span.last();
+		int activeRank = holdsCursor ? NoteSequence.chordRank(span, activeIndex, twoStrips) : -1;
+		for (int at = card.firstItem(); at <= card.lastItem(); at++) {
+			int local = at - card.firstItem();
+			int index = items.get(at).startIndex();
+			boolean placed = holdsCursor
+				? NoteSequence.chordRank(span, index, twoStrips) < activeRank
+				: index < activeIndex;
+			drawChordTile(graphics, items.get(at), x + local / 2 * card.tileWidth(),
+				y + local % 2 * TILE_ROW_HEIGHT, card.tileWidth(), activeIndex, instrumentFirst, placed);
 		}
 	}
 
 	/**
-	 * Where every note of the current chord goes, worked out before anything is drawn.
+	 * One note of a chord: its pitch, with the block it wants underneath and its layer number.
 	 *
-	 * <p>The rows are the instruments, because that is the question the sequencer could not answer
-	 * before: a note block's instrument is the block underneath it, and knowing the next four notes
-	 * are all bass is what lets you lay four of the same block instead of checking each time. The
-	 * cursor walks the order {@link #configuredSequence} put the chord in, which is that same
-	 * grouping, so the board fills row by row and the row you are on is the material in your hand.</p>
-	 *
-	 * <p>Separate from the drawing so the caller can know how tall it came out and lift it clear of
-	 * the bottom of the screen first.</p>
+	 * <p>The badge sits where the layer number alone used to, because the number never answered the
+	 * question actually being asked -- what goes under this one. Placed, current and still to come
+	 * are three colours, so the eye finds where it is in a chord of thirty without counting.</p>
 	 */
-	private static ChordBoard layOutChordBoard(
-		int guiWidth,
-		List<NoteSequence.Placement> sequence,
-		NoteSequence.Span chord
-	) {
-		Minecraft minecraft = Minecraft.getInstance();
-		List<NoteSequence.Span> groups = instrumentGroups(sequence, chord);
-		int labelWidth = 0;
-		int cellWidth = 0;
-		for (NoteSequence.Span group : groups) {
-			labelWidth = Math.max(labelWidth,
-				minecraft.font.width(instrumentLabel(stepInstrument(sequence.get(group.first())))) + 8);
-			for (int index = group.first(); index <= group.last(); index++) {
-				cellWidth = Math.max(cellWidth, minecraft.font.width(noteText(sequence.get(index))) + 7);
-			}
-		}
-		int perRowLimit = Math.max(1, (int) (guiWidth * 0.72 - labelWidth) / Math.max(1, cellWidth));
-
-		List<int[]> rows = new ArrayList<>();
-		for (NoteSequence.Span group : groups) {
-			// Split evenly rather than filling the first row: a group of nine over a limit of eight
-			// reads better as five and four than as eight and a straggler.
-			int rowCount = (group.size() + perRowLimit - 1) / perRowLimit;
-			int perRow = (group.size() + rowCount - 1) / rowCount;
-			for (int start = group.first(); start <= group.last(); start += perRow) {
-				rows.add(new int[] {start, Math.min(start + perRow - 1, group.last()),
-					start == group.first() ? 1 : 0});
-			}
-		}
-		int widest = 0;
-		for (int[] row : rows) {
-			widest = Math.max(widest, (row[1] - row[0] + 1) * cellWidth);
-		}
-		return new ChordBoard(List.copyOf(rows), labelWidth, cellWidth, widest, minecraft.font.lineHeight + 5);
-	}
-
-	/** Draws a laid-out board and returns the y of its last row. */
-	private static int drawChordBoard(
+	private static void drawChordTile(
 		GuiGraphicsExtractor graphics,
-		ChordBoard board,
-		int centerX,
+		SequenceHudItem item,
+		int x,
 		int y,
-		List<NoteSequence.Placement> sequence,
-		int activeIndex
+		int tileWidth,
+		int activeIndex,
+		boolean instrumentFirst,
+		boolean placed
 	) {
 		Minecraft minecraft = Minecraft.getInstance();
-		int left = centerX - (board.labelWidth() + board.widest()) / 2;
-		int rowY = y;
-		for (int[] row : board.rows()) {
-			if (row[2] == 1) {
-				String label = instrumentLabel(stepInstrument(sequence.get(row[0])));
-				graphics.text(minecraft.font, label, left, rowY, 0xFF7A7A7A, true);
-			}
-			for (int index = row[0]; index <= row[1]; index++) {
-				String text = noteText(sequence.get(index));
-				int cellX = left + board.labelWidth() + (index - row[0]) * board.cellWidth();
-				int textX = cellX + (board.cellWidth() - minecraft.font.width(text)) / 2;
-				boolean current = index == activeIndex;
-				if (current) {
-					graphics.fill(textX - 3, rowY - 3, textX + minecraft.font.width(text) + 3,
-						rowY + minecraft.font.lineHeight + 3, 0xB8000000);
-				}
-				// Placed, current, still to come. Dimming what is behind you is the whole readout on a
-				// chord of thirty: the eye finds the boundary without counting.
-				int color = current ? 0xFFFFAA00 : index < activeIndex ? 0xFF4E4E4E : 0xFFFFFFFF;
-				graphics.text(minecraft.font, text, textX, rowY, color, true);
-			}
-			rowY += board.rowHeight();
-		}
-		return rowY - board.rowHeight();
-	}
+		NoteSequence.Placement placement = item.step();
+		int index = item.startIndex();
+		boolean current = index == activeIndex;
+		// With instruments switched on the block comes first, so the highlight is on the icon and the
+		// pitch waits its turn rather than both of them claiming to be next.
+		boolean onIcon = current && instrumentFirst;
+		graphics.fill(x + 1, y + 1, x + tileWidth - 1, y + TILE_ROW_HEIGHT - 1,
+			current ? 0xC8000000 : 0x78000000);
 
-	/** The chord split into runs of one instrument, which the placement order has already made contiguous. */
-	private static List<NoteSequence.Span> instrumentGroups(List<NoteSequence.Placement> sequence, NoteSequence.Span chord) {
-		List<NoteSequence.Span> groups = new ArrayList<>();
-		int start = chord.first();
-		for (int index = chord.first(); index <= chord.last(); index++) {
-			boolean last = index == chord.last();
-			if (last || !stepInstrument(sequence.get(index)).equals(stepInstrument(sequence.get(index + 1)))) {
-				groups.add(new NoteSequence.Span(start, index));
-				start = index + 1;
-			}
+		// The pitch, beside the icon rather than under it, and small: on a card you are reading the
+		// shape and the materials, and the exact note is the detail you go to last.
+		String text = noteText(placement);
+		int textWidth = Math.round(minecraft.font.width(text) * NOTE_SCALE);
+		int textHeight = Math.round(minecraft.font.lineHeight * NOTE_SCALE);
+		graphics.pose().pushMatrix();
+		graphics.pose().translate(x + ICON_SIZE - ICON_OUT_X, y + (TILE_ROW_HEIGHT - textHeight) / 2);
+		graphics.pose().scale(NOTE_SCALE, NOTE_SCALE);
+		graphics.text(minecraft.font, text, 0, 0,
+			current && !onIcon ? 0xFFFFAA00 : placed ? 0xFF4E4E4E : 0xFFFFFFFF, true);
+		graphics.pose().popMatrix();
+
+		String instrument = stepInstrument(placement);
+		int iconX = x - ICON_OUT_X;
+		int iconY = y - ICON_OUT_Y;
+		if (onIcon) {
+			graphics.fill(iconX - 1, iconY - 1, iconX + ICON_SIZE + 1, iconY + ICON_SIZE + 1, 0xC0FFAA00);
 		}
-		return groups;
+		if (!instrument.isEmpty()) {
+			graphics.item(new ItemStack(PreviewInstrument.byId(instrument).icon()), iconX, iconY);
+		}
+		// A corner of the icon rather than a label of its own.
+		if (placement.trackNumber() > 0) {
+			String layer = Integer.toString(placement.trackNumber());
+			graphics.pose().pushMatrix();
+			graphics.pose().translate(
+				iconX + ICON_SIZE - Math.round(minecraft.font.width(layer) * LAYER_SCALE) - 1,
+				iconY + ICON_SIZE - Math.round(minecraft.font.lineHeight * LAYER_SCALE) - 1);
+			graphics.pose().scale(LAYER_SCALE, LAYER_SCALE);
+			graphics.text(minecraft.font, layer, 0, 0, 0xFFFFFFFF, true);
+			graphics.pose().popMatrix();
+		}
 	}
 
 	private static String noteText(NoteSequence.Placement step) {
@@ -659,32 +831,6 @@ public final class NoteBlockOverlay {
 		return trackIndex >= 0 && trackIndex < tracks.size() ? trackInstrument(tracks.get(trackIndex)) : "";
 	}
 
-	private static String instrumentLabel(String id) {
-		if (id == null || id.isBlank()) {
-			return "Harp";
-		}
-		String[] words = id.toLowerCase(java.util.Locale.ROOT).split("_");
-		StringBuilder result = new StringBuilder();
-		for (String word : words) {
-			if (!result.isEmpty()) {
-				result.append(' ');
-			}
-			result.append(Character.toUpperCase(word.charAt(0))).append(word.substring(1));
-		}
-		return result.toString();
-	}
-
-	private static String buildTrackLabel(FastNoteblocksConfig config) {
-		List<FastNoteblocksConfig.SequenceTrack> tracks = config.tracks();
-		List<String> enabled = new ArrayList<>();
-		for (int index = 0; index < tracks.size(); index++) {
-			if (tracks.get(index).buildEnabled() && !tracks.get(index).sequence().isBlank()) {
-				enabled.add(Integer.toString(index + 1));
-			}
-		}
-		return enabled.isEmpty() ? "Build: no enabled tracks" : "Build tracks: " + String.join(", ", enabled);
-	}
-
 	/**
 	 * The counters under the window.
 	 *
@@ -704,7 +850,10 @@ public final class NoteBlockOverlay {
 		NoteSequence.Progress progress = buildProgress(sequence, placementSequenceIndex);
 		String overall = progress.position() + "/" + progress.total();
 		boolean inChord = chord.size() >= 2;
-		String headline = inChord ? (index - chord.first() + 1) + "/" + chord.size() + " in chord" : overall;
+		String headline = inChord
+			? NoteSequence.chordRank(chord, index, FastNoteblocksConfig.get().walksChordsInTwoStrips()) + 1
+				+ "/" + chord.size() + " in chord"
+			: overall;
 		int positionY = y + minecraft.font.lineHeight + 6;
 		graphics.centeredText(minecraft.font, headline, centerX, positionY, inChord ? 0xFFCCCCCC : 0xFF999999);
 
@@ -735,73 +884,6 @@ public final class NoteBlockOverlay {
 		return NoteSequence.progress(steps, currentIndex);
 	}
 
-	private void renderSequenceAdvance(
-		GuiGraphicsExtractor graphics,
-		DeltaTracker deltaTracker,
-		int centerX,
-		int y,
-		List<NoteSequence.Placement> sequence,
-		List<SequenceHudItem> items
-	) {
-		Minecraft minecraft = Minecraft.getInstance();
-		int placedIndex = Math.max(0, Math.min(sequence.size() - 1, sequenceAdvanceFromIndex));
-		int nextIndex = Math.max(0, Math.min(sequence.size() - 1, sequenceAdvanceToIndex));
-		int placedItemIndex = sequenceHudItemIndex(items, placedIndex);
-		int nextItemIndex = sequenceHudItemIndex(items, nextIndex);
-		SequenceHudItem placedItem = items.get(placedItemIndex);
-		SequenceHudItem nextItem = items.get(nextItemIndex);
-		float elapsed = SEQUENCE_ADVANCE_HUD_TICKS - sequenceHudTicks
-			+ deltaTracker.getGameTimeDeltaPartialTick(false);
-		float progress = Math.max(0.0F, Math.min(1.0F, elapsed / SEQUENCE_ADVANCE_ANIMATION_TICKS));
-		if (placedItem == nextItem) {
-			int activeIndex = progress < 0.5F ? placedIndex : nextIndex;
-			SequenceHudToken token = sequenceHudToken(nextItem, activeIndex);
-			int x = centerX - minecraft.font.width(token.text()) / 2;
-			drawSequenceHudToken(graphics, token, x, y, true,
-				nextItemIndex > 0 && chordAdjacent(items.get(nextItemIndex - 1), nextItem),
-				nextItemIndex + 1 < items.size() && chordAdjacent(nextItem, items.get(nextItemIndex + 1)));
-			return;
-		}
-		SequenceHudToken placed = sequenceHudToken(placedItem, placedIndex);
-		SequenceHudToken next = sequenceHudToken(nextItem, nextIndex);
-		int placedWidth = minecraft.font.width(placed.text());
-		int nextWidth = minecraft.font.width(next.text());
-		int placedStartX = centerX - placedWidth / 2;
-		int itemGap = nextItemIndex == placedItemIndex + 1
-			? sequenceHudItemGap(placedItem, nextItem)
-			: 7;
-		int nextStartX = placedStartX + placedWidth + itemGap;
-		int nextFinalX = centerX - nextWidth / 2;
-		int placedFinalX = nextFinalX - placedWidth - itemGap;
-		int placedX = Math.round(placedStartX + (placedFinalX - placedStartX) * progress);
-		int nextX = Math.round(nextStartX + (nextFinalX - nextStartX) * progress);
-		boolean sliding = progress < 1.0F;
-		if (sliding) {
-			drawSequenceHudToken(graphics, placed, placedX, y, false, false, false);
-		}
-
-		int upcomingLimit = sliding ? 3 : 4;
-		int upcomingX = nextX;
-		for (int offset = 0; offset < upcomingLimit && nextItemIndex + offset < items.size(); offset++) {
-			int upcomingItemIndex = nextItemIndex + offset;
-			SequenceHudItem upcomingItem = items.get(upcomingItemIndex);
-			if (offset > 0 && !chordAdjacent(items.get(upcomingItemIndex - 1), upcomingItem)) {
-				break;
-			}
-			SequenceHudToken upcomingToken = sequenceHudToken(upcomingItem, offset == 0 ? nextIndex : -1);
-			boolean current = offset == 0;
-			drawSequenceHudToken(graphics, upcomingToken, upcomingX, y, current,
-				current && upcomingItemIndex > 0 && chordAdjacent(items.get(upcomingItemIndex - 1), upcomingItem),
-				current && upcomingItemIndex + 1 < items.size()
-					&& chordAdjacent(upcomingItem, items.get(upcomingItemIndex + 1)));
-			upcomingX += minecraft.font.width(upcomingToken.text());
-			if (upcomingItemIndex + 1 < items.size()
-					&& chordAdjacent(upcomingItem, items.get(upcomingItemIndex + 1))) {
-				upcomingX += sequenceHudItemGap(upcomingItem, items.get(upcomingItemIndex + 1));
-			}
-		}
-	}
-
 	private static List<SequenceHudItem> sequenceHudItems(List<NoteSequence.Placement> sequence) {
 		List<SequenceHudItem> items = new ArrayList<>();
 		for (int index = 0; index < sequence.size();) {
@@ -826,24 +908,15 @@ public final class NoteBlockOverlay {
 		return items;
 	}
 
-	private static int sequenceHudItemIndex(List<SequenceHudItem> items, int physicalIndex) {
-		for (int index = 0; index < items.size(); index++) {
-			SequenceHudItem item = items.get(index);
-			if (physicalIndex >= item.startIndex() && physicalIndex <= item.endIndex()) {
-				return index;
-			}
-		}
-		return Math.max(0, items.size() - 1);
-	}
-
-	private static SequenceHudToken sequenceHudToken(SequenceHudItem item, int activePhysicalIndex) {
-		NoteSequence.Placement buildStep = item.step();
-		NoteSequence.Step step = buildStep.step();
-		if (step.type() == NoteSequence.StepType.NOTE) {
-			return new SequenceHudToken(NotePitch.name(step.value()) + step.value(), false, false, buildStep.trackNumber());
-		}
+	/**
+	 * What a run of delay reads as: the total, then a dot per repeater, filled in as they go down.
+	 *
+	 * <p>Only ever asked of delay now. A note is a tile on a card and says its pitch there.</p>
+	 */
+	private static String delayText(SequenceHudItem item, int activePhysicalIndex) {
+		NoteSequence.Step step = item.step().step();
 		if (step.delayCount() == 1 || item.startIndex() == item.endIndex()) {
-			return new SequenceHudToken(step.value() + "d", true, false, 0);
+			return step.value() + "d";
 		}
 		StringBuilder text = new StringBuilder().append(step.delayTotal()).append("d ");
 		for (int dot = 0; dot < step.delayCount(); dot++) {
@@ -852,51 +925,11 @@ public final class NoteBlockOverlay {
 			}
 			text.append(activePhysicalIndex == item.startIndex() + dot ? '\u2022' : '\u00b7');
 		}
-		return new SequenceHudToken(text.toString(), true, true, 0);
-	}
-
-	private static int sequenceHudTokenGap(SequenceHudToken token) {
-		return token.repeater() && !token.grouped() ? 4 : 7;
-	}
-
-	private static int sequenceHudItemGap(SequenceHudItem left, SequenceHudItem right) {
-		if (chordAdjacent(left, right)) {
-			return 5;
-		}
-		return sequenceHudTokenGap(sequenceHudToken(left, -1));
+		return text.toString();
 	}
 
 	private static boolean chordAdjacent(SequenceHudItem left, SequenceHudItem right) {
 		return NoteSequence.sameChord(left.step(), right.step());
-	}
-
-	private static void drawSequenceHudToken(
-		GuiGraphicsExtractor graphics,
-		SequenceHudToken token,
-		int x,
-		int y,
-		boolean current,
-		boolean chordOnLeft,
-		boolean chordOnRight
-	) {
-		Minecraft minecraft = Minecraft.getInstance();
-		int width = minecraft.font.width(token.text());
-		if (current) {
-			int leftPadding = chordOnLeft ? 2 : 4;
-			int rightPadding = chordOnRight ? 2 : 4;
-			graphics.fill(x - leftPadding, y - 3, x + width + rightPadding, y + minecraft.font.lineHeight + 3, 0xB8000000);
-		} else if (!token.repeater() || token.grouped()) {
-			graphics.fill(x - 2, y - 2, x + width + 2, y + minecraft.font.lineHeight + 2, 0x78000000);
-		}
-		int color = current ? 0xFFFFAA00 : token.repeater() ? 0xFF999999 : 0xFFFFFFFF;
-		graphics.text(minecraft.font, token.text(), x, y, color, true);
-		if (!token.repeater() && token.trackNumber() > 0) {
-			graphics.pose().pushMatrix();
-			graphics.pose().translate(x - 4, y - 6);
-			graphics.pose().scale(0.55F, 0.55F);
-			graphics.text(minecraft.font, Integer.toString(token.trackNumber()), 0, 0, 0xFF55FFFF, true);
-			graphics.pose().popMatrix();
-		}
 	}
 
 	/**
@@ -1137,6 +1170,35 @@ public final class NoteBlockOverlay {
 		});
 	}
 
+	/**
+	 * Whether a note block standing on this would play what the step asked for.
+	 *
+	 * <p>Asked of the block, not of the item that placed it: any wood is a bass and any wool is a
+	 * guitar, so a named block would refuse three quarters of the right answers. The item is still
+	 * compared first, in case an instrument this mod knows is one the game does not name the same
+	 * way.</p>
+	 *
+	 * <p>Harp is named instead of asked. It is not an instrument so much as the absence of one: the
+	 * game answers HARP for everything it does not recognise, down to redstone dust, a torch or a
+	 * rail, so the question accepts almost anything you could be holding. Grass or the dirt under it
+	 * is what a harp note wants, and saying so is both stricter and easier to predict than any test
+	 * of what a block is.</p>
+	 */
+	private static boolean givesInstrument(BlockState state, String instrument) {
+		if (state.isAir()) {
+			return false;
+		}
+		if (isHarp(instrument)) {
+			return state.is(Blocks.GRASS_BLOCK) || state.is(Blocks.DIRT);
+		}
+		return state.instrument().name().equalsIgnoreCase(instrument)
+			|| state.getBlock().asItem() == PreviewInstrument.byId(instrument).icon();
+	}
+
+	private static boolean isHarp(String instrument) {
+		return "HARP".equals(PreviewInstrument.byId(instrument).id());
+	}
+
 	private static boolean matchesStepBlock(BlockState state, NoteSequence.Step step) {
 		return step.type() == NoteSequence.StepType.NOTE
 			? state.is(Blocks.NOTE_BLOCK)
@@ -1202,17 +1264,36 @@ public final class NoteBlockOverlay {
 			return InteractionResult.PASS;
 		}
 		NoteSequence.Step expected = sequence.get(Math.floorMod(placementSequenceIndex, sequence.size())).step();
+		ItemStack held = player.getItemInHand(hand);
+		if (awaitingInstrument) {
+			if (!held.is(Items.NOTE_BLOCK) && !held.is(Items.REPEATER)
+				&& held.getItem() instanceof BlockItem blockItem) {
+				BlockPos under = new BlockPlaceContext(player, hand, held, hitResult)
+					.getClickedPos().immutable();
+				String wanted = stepInstrument(
+					sequence.get(Math.floorMod(placementSequenceIndex, sequence.size())));
+				// Judged on what is in your hand, so a block that was never going to count does not sit
+				// there being waited for. The same question is asked again of what actually lands.
+				if (level.getBlockState(under).isAir()
+					&& givesInstrument(blockItem.getBlock().defaultBlockState(), wanted)) {
+					placementWatches.put(under, new PlacementWatch(expected, PLACEMENT_WATCH_TICKS, wanted));
+				}
+				return InteractionResult.PASS;
+			}
+			// Reaching for the note block itself is how you say this one needs no instrument laid.
+			awaitingInstrument = false;
+		}
 		boolean matchingItem = expected.type() == NoteSequence.StepType.NOTE
-			? player.getItemInHand(hand).is(Items.NOTE_BLOCK)
-			: player.getItemInHand(hand).is(Items.REPEATER);
+			? held.is(Items.NOTE_BLOCK)
+			: held.is(Items.REPEATER);
 		if (!matchingItem) {
 			return InteractionResult.PASS;
 		}
 
-		BlockPlaceContext context = new BlockPlaceContext(player, hand, player.getItemInHand(hand), hitResult);
+		BlockPlaceContext context = new BlockPlaceContext(player, hand, held, hitResult);
 		BlockPos placementPos = context.getClickedPos().immutable();
 		if (!matchesStepBlock(level.getBlockState(placementPos), expected)) {
-			placementWatches.put(placementPos, new PlacementWatch(expected, PLACEMENT_WATCH_TICKS));
+			placementWatches.put(placementPos, new PlacementWatch(expected, PLACEMENT_WATCH_TICKS, ""));
 		}
 		return InteractionResult.PASS;
 	}
@@ -1229,6 +1310,25 @@ public final class NoteBlockOverlay {
 
 		placementWatches.entrySet().removeIf(entry -> {
 			PlacementWatch watch = entry.getValue();
+			if (watch.forInstrument()) {
+				// Held to the same standard as the note itself: the step only opens once the block
+				// under it would actually sound right. A wrong block waits here rather than counting.
+				if (givesInstrument(minecraft.level.getBlockState(entry.getKey()), watch.instrument())) {
+					awaitingInstrument = false;
+					// Half a step is still a step: the window comes up for it the same way it does when a
+					// note lands, rather than the instrument being the one placement that passes in
+					// silence.
+					showSequenceAdvance();
+					selectCurrentSequenceItem(minecraft);
+					return true;
+				}
+				int left = watch.ticksRemaining() - 1;
+				if (left <= 0) {
+					return true;
+				}
+				entry.setValue(new PlacementWatch(watch.step(), left, watch.instrument()));
+				return false;
+			}
 			if (matchesStepBlock(minecraft.level.getBlockState(entry.getKey()), watch.step())) {
 				applyPlacementStep(minecraft, entry.getKey(), watch.step());
 				return true;
@@ -1237,7 +1337,7 @@ public final class NoteBlockOverlay {
 			if (remaining <= 0) {
 				return true;
 			}
-			entry.setValue(new PlacementWatch(watch.step(), remaining));
+			entry.setValue(new PlacementWatch(watch.step(), remaining, ""));
 			return false;
 		});
 	}
@@ -1258,10 +1358,11 @@ public final class NoteBlockOverlay {
 		List<NoteSequence.Placement> sequence = configuredSequence();
 		if (!sequence.isEmpty()) {
 			int previousIndex = Math.floorMod(placementSequenceIndex, sequence.size());
-			placementSequenceIndex = (previousIndex + 1) % sequence.size();
+			int next = steppedPlacement(sequence, previousIndex, 1);
+			placementSequenceIndex = next >= 0 ? next : 0;
 			persistPlacementSequencePosition();
-			showSequenceAdvance(previousIndex, placementSequenceIndex);
-			selectCurrentSequenceItem(Minecraft.getInstance());
+			showSequenceAdvance();
+			beginPlacementStep(Minecraft.getInstance());
 		}
 	}
 
@@ -1274,11 +1375,61 @@ public final class NoteBlockOverlay {
 			|| sequence.isEmpty()) {
 			return;
 		}
-		NoteSequence.Step current = sequence.get(Math.floorMod(placementSequenceIndex, sequence.size())).step();
-		int hotbarSlot = findSequenceItemSlot(minecraft.player, current);
+		NoteSequence.Placement current = sequence.get(Math.floorMod(placementSequenceIndex, sequence.size()));
+		int hotbarSlot = awaitingInstrument
+			? findInstrumentSlot(minecraft.player, stepInstrument(current))
+			: findSequenceItemSlot(minecraft.player, current.step());
 		if (hotbarSlot >= 0) {
 			minecraft.player.getInventory().setSelectedSlot(hotbarSlot);
 		}
+	}
+
+	/**
+	 * Opens a step: the block underneath first, when instruments are switched on, and then the note.
+	 *
+	 * <p>Called wherever the cursor lands rather than wherever it is read, so a jump, a placement and
+	 * a reload all start the step the same way.</p>
+	 */
+	private void beginPlacementStep(Minecraft minecraft) {
+		List<NoteSequence.Placement> sequence = configuredSequence();
+		awaitingInstrument = !sequence.isEmpty()
+			&& instrumentIsAStep(sequence.get(Math.floorMod(placementSequenceIndex, sequence.size())));
+		selectCurrentSequenceItem(minecraft);
+	}
+
+	/**
+	 * Whether this step wants a block underneath at all.
+	 *
+	 * <p>Harp does not: a note block over anything the game does not recognise already plays harp, so
+	 * {@code SongBuilder} lays air for it rather than wasting a block a note. Stopping to ask for a
+	 * block that the build itself would not place would be a step you could never satisfy.</p>
+	 */
+	private static boolean needsInstrumentLaid(NoteSequence.Placement placement) {
+		if (placement.step().type() != NoteSequence.StepType.NOTE) {
+			return false;
+		}
+		return !isHarp(stepInstrument(placement)) || FastNoteblocksConfig.get().selectHarpBlocks();
+	}
+
+	/** A hotbar slot holding something this instrument will take, preferring the block on the tile. */
+	private static int findInstrumentSlot(LocalPlayer player, String instrument) {
+		if (isHarp(instrument)) {
+			int grass = findHotbarSlot(player, Items.GRASS_BLOCK);
+			return grass >= 0 ? grass : findHotbarSlot(player, Items.DIRT);
+		}
+		return findHotbarSlot(player, PreviewInstrument.byId(instrument).icon());
+	}
+
+	private static int findHotbarSlot(LocalPlayer player, net.minecraft.world.item.Item item) {
+		if (player.getInventory().getItem(player.getInventory().getSelectedSlot()).is(item)) {
+			return player.getInventory().getSelectedSlot();
+		}
+		for (int slot = 0; slot < 9; slot++) {
+			if (player.getInventory().getItem(slot).is(item)) {
+				return slot;
+			}
+		}
+		return -1;
 	}
 
 	/**
@@ -1299,7 +1450,7 @@ public final class NoteBlockOverlay {
 			: NoteSequence.indexOfMoment(sequence, anchorTime, anchorOffset);
 		persistPlacementSequencePosition();
 		placementWatches.clear();
-		selectCurrentSequenceItem(minecraft);
+		beginPlacementStep(minecraft);
 	}
 
 	/** Takes up whatever bookmark the song now open was left at. */
@@ -1315,7 +1466,7 @@ public final class NoteBlockOverlay {
 		}
 		rememberPlacementMoment();
 		placementWatches.clear();
-		selectCurrentSequenceItem(minecraft);
+		beginPlacementStep(minecraft);
 		showSequenceHud(minecraft, null);
 	}
 
@@ -1851,7 +2002,10 @@ public final class NoteBlockOverlay {
 	private record ExpectedStep(NoteSequence.Step step, int ticksRemaining, boolean placementSequence) {
 	}
 
-	private record PlacementWatch(NoteSequence.Step step, int ticksRemaining) {
+	private record PlacementWatch(NoteSequence.Step step, int ticksRemaining, String instrument) {
+		boolean forInstrument() {
+			return !instrument.isEmpty();
+		}
 	}
 
 	private record HoveredLabel(BlockPos blockPos, Character family, int repeaterDelay) {
@@ -1869,17 +2023,12 @@ public final class NoteBlockOverlay {
 	private record NoteEvent(int time, int instrumentRank, int trackNumber, int localIndex, NoteSequence.Step step) {
 	}
 
-	private record SequenceHudToken(String text, boolean repeater, boolean grouped, int trackNumber) {
-	}
-
 	private record SequenceHudItem(int startIndex, int endIndex, NoteSequence.Placement step) {
 	}
 
 	/** A chord laid out for drawing. Each row is {first, last, 1 if it opens an instrument}. */
-	private record ChordBoard(List<int[]> rows, int labelWidth, int cellWidth, int widest, int rowHeight) {
-		int height() {
-			return rows.size() * rowHeight;
-		}
+	/** One thing on the strip: a chord as a two-row card, or a run of delay as a single token. */
+	private record HudCard(int firstItem, int lastItem, boolean chord, int columns, int tileWidth, int width) {
 	}
 
 	private enum SequenceHudMode {

@@ -181,6 +181,32 @@ public final class FastNoteblocksConfigScreen {
 			.setTooltip(Component.translatable("tooltip.fast-noteblocks.auto_select_sequence_block"))
 			.setSaveConsumer(config::setAutoSelectSequenceBlock)
 			.build());
+		placement.addEntry(entries.startEnumSelector(
+				Component.translatable("option.fast-noteblocks.chord_place_order"),
+				FastNoteblocksConfig.ChordPlaceOrder.class,
+				config.chordPlaceOrder())
+			.setDefaultValue(FastNoteblocksConfig.ChordPlaceOrder.TWO_STRIPS)
+			.setEnumNameProvider(value -> Component.translatable(
+				"option.fast-noteblocks.chord_place_order."
+					+ ((FastNoteblocksConfig.ChordPlaceOrder) value).name().toLowerCase()
+			))
+			.setTooltip(Component.translatable("tooltip.fast-noteblocks.chord_place_order"))
+			.setSaveConsumer(config::setChordPlaceOrder)
+			.build());
+		placement.addEntry(entries.startBooleanToggle(
+				Component.translatable("option.fast-noteblocks.select_instruments"),
+				config.selectInstruments())
+			.setDefaultValue(false)
+			.setTooltip(Component.translatable("tooltip.fast-noteblocks.select_instruments"))
+			.setSaveConsumer(config::setSelectInstruments)
+			.build());
+		placement.addEntry(entries.startBooleanToggle(
+				Component.translatable("option.fast-noteblocks.select_harp_blocks"),
+				config.selectHarpBlocks())
+			.setDefaultValue(true)
+			.setTooltip(Component.translatable("tooltip.fast-noteblocks.select_harp_blocks"))
+			.setSaveConsumer(config::setSelectHarpBlocks)
+			.build());
 
 
 		ConfigCategory midi = builder.getOrCreateCategory(Component.translatable("category.fast-noteblocks.midi"));

@@ -164,6 +164,51 @@ class NoteSequenceTest {
 	}
 
 	@Test
+	void alternatingWalksAChordInTheOrderItIsStoredIn() {
+		NoteSequence.Span chord = new NoteSequence.Span(10, 15);
+		for (int index = 10; index <= 15; index++) {
+			assertEquals(index - 10, NoteSequence.chordRank(chord, index, false));
+			assertEquals(index, NoteSequence.chordAt(chord, index - 10, false));
+		}
+	}
+
+	@Test
+	void twoStripsWalksOneSideOfTheBusAndThenTheOther() {
+		// Six notes: three blocks of bus, one note either side of each.
+		NoteSequence.Span chord = new NoteSequence.Span(0, 5);
+		// The near side is the even placements, in order, and then the far side is the odd ones.
+		assertEquals(List.of(0, 2, 4, 1, 3, 5), List.of(
+			NoteSequence.chordAt(chord, 0, true), NoteSequence.chordAt(chord, 1, true),
+			NoteSequence.chordAt(chord, 2, true), NoteSequence.chordAt(chord, 3, true),
+			NoteSequence.chordAt(chord, 4, true), NoteSequence.chordAt(chord, 5, true)));
+	}
+
+	@Test
+	void anOddChordLeavesTheLastBlockOfBusWithOneNote() {
+		NoteSequence.Span chord = new NoteSequence.Span(0, 4);
+		assertEquals(List.of(0, 2, 4, 1, 3), List.of(
+			NoteSequence.chordAt(chord, 0, true), NoteSequence.chordAt(chord, 1, true),
+			NoteSequence.chordAt(chord, 2, true), NoteSequence.chordAt(chord, 3, true),
+			NoteSequence.chordAt(chord, 4, true)));
+	}
+
+	@Test
+	void everyWalkVisitsEveryNoteExactlyOnce() {
+		for (boolean twoStrips : List.of(false, true)) {
+			for (int size = 1; size <= 30; size++) {
+				NoteSequence.Span chord = new NoteSequence.Span(7, 7 + size - 1);
+				java.util.Set<Integer> seen = new java.util.HashSet<>();
+				for (int rank = 0; rank < size; rank++) {
+					int index = NoteSequence.chordAt(chord, rank, twoStrips);
+					assertEquals(rank, NoteSequence.chordRank(chord, index, twoStrips));
+					seen.add(index);
+				}
+				assertEquals(size, seen.size(), "size " + size + " twoStrips " + twoStrips);
+			}
+		}
+	}
+
+	@Test
 	void aMomentIsTheTickAndHowFarIntoIt() {
 		List<NoteSequence.Placement> placements = chordsAcrossADelay();
 		assertEquals(0, NoteSequence.momentOffset(placements, 0));

@@ -135,6 +135,12 @@ public final class FastNoteblocksConfig {
 		SCROLL
 	}
 
+	/** How the sequencer walks the notes of one chord. See {@link #chordPlaceOrder()}. */
+	public enum ChordPlaceOrder {
+		TWO_STRIPS,
+		ALTERNATING
+	}
+
 	public enum SequencingEditProtection {
 		RADIALS_ONLY(true, false),
 		RADIALS_AND_INTERACTIONS(true, true),
@@ -305,6 +311,9 @@ public final class FastNoteblocksConfig {
 	private boolean placementSequenceEnabled;
 	private SequencingEditProtection sequencingEditProtection;
 	private boolean autoSelectSequenceBlock;
+	private boolean selectInstruments;
+	private ChordPlaceOrder chordPlaceOrder;
+	private boolean selectHarpBlocks;
 	private boolean dedupeIdenticalNotes;
 	private String activeSequenceName;
 	private int activeSequenceDelayScaleQuarters;
@@ -395,6 +404,11 @@ public final class FastNoteblocksConfig {
 					? SequencingEditProtection.RADIALS_AND_INTERACTIONS
 					: stored.sequencingEditProtection;
 				instance.autoSelectSequenceBlock = stored.autoSelectSequenceBlock == null || stored.autoSelectSequenceBlock;
+				instance.selectInstruments = Boolean.TRUE.equals(stored.selectInstruments);
+				instance.chordPlaceOrder = stored.chordPlaceOrder == null
+					? ChordPlaceOrder.TWO_STRIPS
+					: stored.chordPlaceOrder;
+				instance.selectHarpBlocks = stored.selectHarpBlocks == null || stored.selectHarpBlocks;
 				instance.dedupeIdenticalNotes = stored.dedupeIdenticalNotes == null || stored.dedupeIdenticalNotes;
 				instance.activeSequenceName = stored.activeSequenceName == null || stored.activeSequenceName.isBlank()
 					? "Untitled sequence"
@@ -728,6 +742,61 @@ public final class FastNoteblocksConfig {
 		this.sequencingEditProtection = sequencingEditProtection == null
 			? SequencingEditProtection.RADIALS_AND_INTERACTIONS
 			: sequencingEditProtection;
+	}
+
+	/**
+	 * Whether harp notes stop for a block of their own too.
+	 *
+	 * <p>Harp is the instrument a note block plays over anything the game does not recognise, so
+	 * {@code SongBuilder} lays air for it and saves a block a note. Building by hand is not the same
+	 * job: the ground under a hand-laid machine is usually there anyway, and a harp note that walks
+	 * past without asking for anything reads as a step the sequencer forgot. On, harp asks for its
+	 * block like everything else -- grass by default, though anything the game leaves unrecognised
+	 * sounds the same and counts.</p>
+	 */
+	public boolean selectHarpBlocks() {
+		return selectHarpBlocks;
+	}
+
+	public void setSelectHarpBlocks(boolean selectHarpBlocks) {
+		this.selectHarpBlocks = selectHarpBlocks;
+	}
+
+	/**
+	 * The order the sequencer walks the notes of one chord.
+	 *
+	 * <p>A chord is built two notes to a block of bus, one either side. Two strips walks the whole of
+	 * one side and comes back along the other, which is what a hand carrying one stack does.
+	 * Alternating crosses the bus at every note, which is the order the placements are stored in.
+	 * Neither moves a note: which pitch belongs to which side of which block is the same either
+	 * way, and so is the card on screen.</p>
+	 */
+	public ChordPlaceOrder chordPlaceOrder() {
+		return chordPlaceOrder == null ? ChordPlaceOrder.TWO_STRIPS : chordPlaceOrder;
+	}
+
+	public void setChordPlaceOrder(ChordPlaceOrder chordPlaceOrder) {
+		this.chordPlaceOrder = chordPlaceOrder;
+	}
+
+	public boolean walksChordsInTwoStrips() {
+		return chordPlaceOrder() == ChordPlaceOrder.TWO_STRIPS;
+	}
+
+	/**
+	 * Whether the block under a note is a step of its own.
+	 *
+	 * <p>A note block's instrument is the block beneath it, so building by hand is really two
+	 * placements a note and the sequencer only ever counted one. Switched on, each note waits for its
+	 * instrument first: the icon lights, the hotbar picks that block up, and the note follows once
+	 * something is down.</p>
+	 */
+	public boolean selectInstruments() {
+		return selectInstruments;
+	}
+
+	public void setSelectInstruments(boolean selectInstruments) {
+		this.selectInstruments = selectInstruments;
 	}
 
 	public boolean autoSelectSequenceBlock() {
@@ -1354,6 +1423,9 @@ public final class FastNoteblocksConfig {
 		private Boolean placementSequenceEnabled;
 		private SequencingEditProtection sequencingEditProtection;
 		private Boolean autoSelectSequenceBlock;
+		private Boolean selectInstruments;
+		private ChordPlaceOrder chordPlaceOrder;
+		private Boolean selectHarpBlocks;
 		private Boolean dedupeIdenticalNotes;
 		private String placementSequence;
 		private Integer placementSequencePosition;
@@ -1410,6 +1482,9 @@ public final class FastNoteblocksConfig {
 			this.placementSequenceEnabled = config.placementSequenceEnabled;
 			this.sequencingEditProtection = config.sequencingEditProtection;
 			this.autoSelectSequenceBlock = config.autoSelectSequenceBlock;
+			this.selectInstruments = config.selectInstruments;
+			this.chordPlaceOrder = config.chordPlaceOrder;
+			this.selectHarpBlocks = config.selectHarpBlocks;
 			this.dedupeIdenticalNotes = config.dedupeIdenticalNotes;
 			this.placementSequence = config.activeTrack().sequence();
 			this.placementSequencePosition = config.placementCursor;
