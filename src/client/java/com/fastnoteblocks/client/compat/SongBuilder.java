@@ -2422,30 +2422,21 @@ public final class SongBuilder {
 	/**
 	 * The short way down where it fits, the old way where it does not.
 	 *
-	 * <p>The four-cell spiral is a clear win -- a quarter fewer breaches, a tenth off the depth and
-	 * an eleventh off the blocks, and it conducts -- but it stands in different columns from the
-	 * six-cell one, and in 91 builds those columns already hold an instrument block. A chord that
-	 * collides falls back to a bus; a staircase had no such path and took the whole build down with
-	 * it, which is worse than any breach.</p>
+	 * <p>Falling back to the six-cell spiral on a collision was tried and is not kept. It cured the
+	 * 91 refusals and made everything else worse: {@link #turnCost} charges every descent four, so a
+	 * build that quietly spends six leaves the planner and the walk disagreeing by two cells, and
+	 * the depth came out worse than not taking the short descent at all. A charge that does not know
+	 * which spiral it got is the bug this file keeps producing.</p>
 	 *
-	 * <p>So the short one is tried and the old spiral is what the walk gets when the ground is
-	 * spoken for. Both hand back a landing, so the caller does not need to know which it got.</p>
+	 * <p>So the collisions stand as refusals until the columns the short spiral wants can be asked
+	 * about before the plan is made, rather than discovered while building.</p>
 	 */
 	private static BlockPos descend(PlacementPlan placements, BlockPos cursor, Direction travel,
 			Direction depth, int time) {
 		if (!UNIVERSAL_FOUR_DESCENT) {
 			return addSpiralDescent(placements, cursor, travel, depth, time);
 		}
-		placements.beginTrial();
-		try {
-			BlockPos landed = addSplitBusDescent(placements, cursor, travel, depth, time);
-			placements.commitTrial();
-			return landed;
-		} catch (IllegalArgumentException collided) {
-			placements.rollbackTrial();
-			placements.padded("planSpiralForCollision");
-			return addSpiralDescent(placements, cursor, travel, depth, time);
-		}
+		return addSplitBusDescent(placements, cursor, travel, depth, time);
 	}
 
 	private static BlockPos addSpiralDescent(PlacementPlan placements, BlockPos cursor,
