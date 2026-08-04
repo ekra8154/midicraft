@@ -2415,7 +2415,7 @@ public final class SongBuilder {
 			// where ekran's hand-built descent is
 			//   y=129  w0            dust one level up ...
 			//   y=128  ST >1 NB      ... on the stone the repeater actually reads
-			int drop = LAST_RUNG_ON_THE_BLOCK && step == CUBE_FLOOR_HEIGHT ? step - 2 : step - 1;
+			int drop = step - 1;
 			BlockPos stone = ring.get((step - 1) % ring.size()).below(drop);
 			placements.powered(stone, "minecraft:stone", time);
 			set(placements, stone.above(), "minecraft:redstone_wire");
