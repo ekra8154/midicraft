@@ -56,6 +56,9 @@ class UniversalDescentTest {
 		}
 		for (int on = 0; on <= 1; on++) {
 			SongBuilder.UNIVERSAL_FOUR_DESCENT = on == 1;
+			// The descent alone. This branch still defaults the front-only cut on, so every earlier
+			// run of this test priced the two changes together and blamed the descent for both.
+			SongBuilder.FRONT_ONLY_CUTS = false;
 			long breaches = 0;
 			long guardian = 0;
 			long other = 0;
