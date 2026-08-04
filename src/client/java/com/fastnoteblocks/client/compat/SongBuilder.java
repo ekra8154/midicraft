@@ -1115,7 +1115,7 @@ public final class SongBuilder {
 					BlockPos landed = climb > 0
 						? addGlassClimb(placements, lane.pos(), travel,
 							lastStyle.buses() && pad.cells().isEmpty(), currentTime)
-						: addSpiralDescent(placements, lane.pos(), travel, descentSide, currentTime);
+						: descend(placements, lane.pos(), travel, descentSide, currentTime);
 					floor = above;
 					// What the staircase leaves the next lane. It matters because the next lane may
 					// want to lay dust of its own before its first repeater, and a staircase is the one
@@ -1554,6 +1554,41 @@ public final class SongBuilder {
 	 */
 	private static final int SPLIT_DESCENT_CELLS = 4;
 
+	/**
+	 * Experimental: one descent cost everywhere, four cells, rather than four for a cut and five
+	 * plus a step off for an ordinary turn.
+	 *
+	 * <p>ekran's, and the reasoning is theirs: the two descents differ only in where the wire
+	 * arrives. {@link #addSplitBusDescent} may assume a bus, which runs a level above its lane, so
+	 * its first rung connects on its own and its landing is the column the spiral started from.
+	 * {@link #addSpiralDescent} serves a lane arriving at lane level, so it spends one cell standing
+	 * on that level to meet it and one more stepping back off the column it lands past.</p>
+	 *
+	 * <p>But the cheap spiral's first rung is a powered stone with wire on top of it, which is
+	 * exactly a cell of bus -- so putting the handover where a bus would start should let every
+	 * descent take the short way down. If that holds, the flush-chord problem that costs Kick Back
+	 * its wall stops existing rather than needing a special case.</p>
+	 *
+	 * <p>Untested against a world. Every derivation of descent geometry in this file that was not
+	 * built by hand has been wrong at least once.</p>
+	 */
+	static boolean UNIVERSAL_FOUR_DESCENT = true;
+
+	/**
+	 * Experimental: the descent's last rung stands beside the landing rather than below it.
+	 *
+	 * <p>ekran's reading of the two diagrams. The spiral currently drops until its dust is level with
+	 * the repeater and feeds it from behind; a repeater takes its input from the block behind it, and
+	 * dust on top of that block powers it just as well. So the last stone can sit at the landing's
+	 * own level with its dust one up.</p>
+	 *
+	 * <p>Worth trying against two separate faults at once. The four-cell descent does not conduct,
+	 * and the run that FRONT_ONLY_CUTS overspends does so by exactly one cell -- sixteen dust
+	 * reaching a repeater at Guardian w24 f5, 48 65 88. If that cell is this cell, one change
+	 * settles both.</p>
+	 */
+	static boolean LAST_RUNG_ON_THE_BLOCK = true;
+
 	/** Off puts the old six-cell spiral back, so the two can be dumped side by side. */
 	static boolean CHEAP_SPLIT_DESCENT = true;
 
@@ -1582,6 +1617,16 @@ public final class SongBuilder {
 		int cells = staircase ? TURN_DUST_CELLS : slabStep + 2;
 		int offBus = staircase && climb > 0 ? cells - 2 : cells;
 		int stepOff = staircase && climb < 0 ? 1 : 0;
+		// ekran's: a descent is four everywhere, not four for a cut and five plus a step off for
+		// everyone else. The ordinary descent paid the extra cell to meet a lane arriving at lane
+		// level, and the step off to walk back into the spiral it landed past. Put the handover where
+		// a bus would start and neither is needed -- which is what addSplitBusDescent already builds,
+		// since its first rung is a powered stone with wire on top, and that is a cell of bus.
+		if (UNIVERSAL_FOUR_DESCENT && staircase && climb < 0) {
+			cells = SPLIT_DESCENT_CELLS;
+			offBus = SPLIT_DESCENT_CELLS;
+			stepOff = 0;
+		}
 		// A climb's split already costs what a climb off a bus costs, because a climb off a bus is
 		// what it is. Only the descent has a cheaper form of itself to be told about.
 		return new TurnCost(above, cells, offBus, stepOff,
@@ -2359,11 +2404,42 @@ public final class SongBuilder {
 		// stepped off onto. Anchored a step lower, the second rung stands in the air a note block
 		// needs above it and the build refuses outright, which is how this was found.
 		for (int step = 1; step <= CUBE_FLOOR_HEIGHT; step++) {
-			BlockPos stone = ring.get((step - 1) % ring.size()).below(step - 1);
+			// ekran, from the blocks: the last rung does not have to come down to the repeater's own
+			// level to feed it. A repeater reads the block behind it, and dust resting on top of that
+			// block is what powers it -- so the final stone stands beside the landing rather than
+			// under the dust that used to reach across to it, and the run is a cell shorter.
+			//
+			// Guardian at twenty-four wide over five floors laid the old shape as
+			//   y=65   w0 >1 ST      wire level with the repeater, behind it
+			// where ekran's hand-built descent is
+			//   y=129  w0            dust one level up ...
+			//   y=128  ST >1 NB      ... on the stone the repeater actually reads
+			int drop = step - 1;
+			BlockPos stone = ring.get((step - 1) % ring.size()).below(drop);
 			placements.powered(stone, "minecraft:stone", time);
 			set(placements, stone.above(), "minecraft:redstone_wire");
 		}
 		return cursor.below(CUBE_FLOOR_HEIGHT);
+	}
+
+	/**
+	 * The short way down where it fits, the old way where it does not.
+	 *
+	 * <p>Falling back to the six-cell spiral on a collision was tried and is not kept. It cured the
+	 * 91 refusals and made everything else worse: {@link #turnCost} charges every descent four, so a
+	 * build that quietly spends six leaves the planner and the walk disagreeing by two cells, and
+	 * the depth came out worse than not taking the short descent at all. A charge that does not know
+	 * which spiral it got is the bug this file keeps producing.</p>
+	 *
+	 * <p>So the collisions stand as refusals until the columns the short spiral wants can be asked
+	 * about before the plan is made, rather than discovered while building.</p>
+	 */
+	private static BlockPos descend(PlacementPlan placements, BlockPos cursor, Direction travel,
+			Direction depth, int time) {
+		if (!UNIVERSAL_FOUR_DESCENT) {
+			return addSpiralDescent(placements, cursor, travel, depth, time);
+		}
+		return addSplitBusDescent(placements, cursor, travel, depth, time);
 	}
 
 	private static BlockPos addSpiralDescent(PlacementPlan placements, BlockPos cursor,
@@ -2801,20 +2877,23 @@ public final class SongBuilder {
 	/**
 	 * Whether a chord cut across a staircase may open with a head of five when the back is taken.
 	 *
-	 * <p><b>Off, temporarily, and not because it is a bad idea.</b> It does exactly what it was
-	 * meant to -- breaches 588 to 519, breach blocks 11,082 to 8,865, and both breaches traced on
-	 * 2026-08-03 go to nought -- but the machines stop conducting: 3,353 note blocks the signal
-	 * never reaches across 145 read builds, against nought without it, and one build that no longer
-	 * reads back as its song.</p>
+	 * <p>An ordinary chord has had this since 1da9154; the cut asked for the back flanks
+	 * unconditionally, so a chord that could have been cut with a short head was laid as a plain bus
+	 * instead. Turning it on fixes both breaches traced on 2026-08-03 and takes library breaches from
+	 * 588 to 519 with breach blocks from 11,082 to 8,865.</p>
 	 *
-	 * <p>So the short head is landing somewhere the wire cannot follow, and main should not ship
-	 * machines that do not play while that is worked out. The code stays and so does the planner
-	 * agreement; only the default moved. Turn it on to look at one in a world.</p>
+	 * <p><b>On, and known to lose notes.</b> 3,353 note blocks the signal never reaches over 145 read
+	 * builds, and one build that does not read back as its song. Located: Guardian at twenty-four
+	 * wide over five floors, the first silent note at {@code 32 77 247}, and the six earliest are all
+	 * one stacked module -- so the signal reaches the repeater on {@code 33 77 247} and stops there
+	 * rather than failing in scattered places.</p>
 	 *
-	 * <p>Where to look first: a head of five keeps its two low slots forward rather than behind, and
-	 * the cut measures its far half from a tail length that assumed the other shape.</p>
+	 * <p>It is on because ekran asked for it and because a build that pastes is a build that can be
+	 * stood in front of. It was switched off once without being asked and that was mine to undo.
+	 * Where to look: a head of five keeps its two low slots forward rather than behind, and the cut
+	 * measures its far half from a tail length that assumed the other shape.</p>
 	 */
-	static boolean FRONT_ONLY_CUTS = false;
+	static boolean FRONT_ONLY_CUTS = true;
 
 	/** Whether a stacked-bus that ends on a bus lets the next chord keep its back slots. */
 	static boolean GAP_ENDS_ON_BUS = true;

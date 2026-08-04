@@ -17,51 +17,39 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * Where a machine actually goes quiet, taken from the propagation rather than from counting wire.
+ * One of the 319 notes the four-cell descent still misses, drawn rather than described.
  *
- * <p>Counting redstone between repeaters answers a question about lengths and was asked three times
- * today about conduction, which it cannot answer: the stacked module's cross is dust off the signal
- * path, so every run through one reads a cell long. It pointed at blocks where nothing was wrong
- * while the real fault sat elsewhere.</p>
- *
- * <p>{@link NoteMachineReader} already walks the signal. Asking it which note blocks it never
- * reached, and drawing the earliest of them, is the answer the counting was standing in for.</p>
+ * <p>The last-rung fix took the unreached count from 10,829 to 319. What is left is either a
+ * different fault or the same one in a case the fix does not cover, and the way to tell is to look
+ * at one -- so this finds the smallest build that still loses notes, walks the commands in build
+ * order to the cell where the run passes fifteen, and renders that box.</p>
  */
 @Tag("sweep")
-class UnreachedLocatorTest {
+class FourDescentDiagramTest {
 	@BeforeAll
 	static void bootstrapMinecraft() {
 		SharedConstants.tryDetectVersion();
 		Bootstrap.bootStrap();
 	}
 
-	@AfterEach
-	void restore() {
-		SongBuilder.FRONT_ONLY_CUTS = false;
-		SongBuilder.UNIVERSAL_FOUR_DESCENT = true;
-	}
-
 	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
 
 	@Test
-	void locatesWhatTheFourCellDescentLoses() throws Exception {
-		// The descent, not the cut: the cut is off on main and is a different fault.
-		SongBuilder.FRONT_ONLY_CUTS = false;
-		SongBuilder.UNIVERSAL_FOUR_DESCENT = true;
-		String worst = null;
-		int bestWidth = 0;
-		int bestFloors = 0;
-		int smallest = Integer.MAX_VALUE;
+	void drawsWhatIsLeft() throws Exception {
 		List<Path> files;
 		try (Stream<Path> listing = Files.list(SONGS)) {
 			files = listing.filter(f -> f.toString().endsWith(".json")).sorted().toList();
 		}
+		String best = null;
+		int bestWidth = 0;
+		int bestFloors = 0;
+		int smallest = Integer.MAX_VALUE;
+		int bestUnreached = 0;
 		for (Path file : files) {
 			String name = file.getFileName().toString().replace(".json", "");
 			if (name.startsWith("ultra-")) {
@@ -71,10 +59,8 @@ class UnreachedLocatorTest {
 			if (notes.isEmpty()) {
 				continue;
 			}
-			// Width twenty-four only, which is where the library sweep read back and so where the
-			// 10,829 were counted. Widening it costs a read-back per build and found nothing.
 			for (int floors = 2; floors <= 6; floors++) {
-				for (int width = 24; width <= 24; width += 4) {
+				for (int width = 12; width <= 32; width += 4) {
 					SongBuilder.PastePlan plan;
 					try {
 						plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0), notes,
@@ -83,55 +69,83 @@ class UnreachedLocatorTest {
 					} catch (RuntimeException refused) {
 						continue;
 					}
-					if (plan.commands().size() >= smallest) {
+					if (plan.commands().size() >= smallest || deadRun(plan) == null) {
 						continue;
 					}
-					if (readAll(placeInWorld(plan)).unreachedNotes() == 0) {
+					int unreached = readAll(placeInWorld(plan)).unreachedNotes();
+					if (unreached == 0) {
 						continue;
 					}
 					smallest = plan.commands().size();
-					worst = name;
+					best = name;
 					bestWidth = width;
 					bestFloors = floors;
+					bestUnreached = unreached;
 				}
 			}
 		}
-		if (worst == null) {
-			System.out.println("QUIET nothing loses notes at these settings");
+		if (best == null) {
+			System.out.println("LEFT nothing both loses notes and overruns");
 			return;
 		}
-		SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0),
-			load(worst), SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+		List<SongBuilder.EventNote> notes = load(best);
+		SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0), notes,
+			SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
 			new SongBuilder.BuildLimits(4, bestWidth, bestFloors));
-		Map<BlockPos, BlockState> world = placeInWorld(plan);
-		NoteMachineReader.Reading reading = readAll(world);
-		List<BlockPos> quiet = reading.unreachedAt();
-		System.out.println("QUIET " + worst + " w" + bestWidth + " f" + bestFloors
-			+ " (" + plan.commands().size() + " blocks): " + reading.unreachedNotes()
-			+ " of " + reading.noteBlocks() + " note blocks never reached");
-		// The earliest one along the build, which is the one whose cause is not somebody else's
-		// silence. Sorted by where the commands put them, since the commands are in build order.
-		Map<BlockPos, Integer> order = new HashMap<>();
-		int index = 0;
+		BlockPos at = deadRun(plan);
+		System.out.println("LEFT " + best + " w" + bestWidth + " f" + bestFloors
+			+ " (" + smallest + " blocks, " + bestUnreached + " unreached) dies at "
+			+ at.getX() + " " + at.getY() + " " + at.getZ());
+		// What the sixteen cells are made of. A run is only ever too long for one of two reasons --
+		// too many cells of bus, or a staircase that spends more than it was charged -- and the
+		// y of each cell tells them apart: a bus holds its level, a spiral drops one a rung.
+		int dust = 0;
+		String openedAt = "?";
+		java.util.List<String> run = new java.util.ArrayList<>();
 		for (String command : plan.commands()) {
 			String[] parts = command.split(" ");
-			order.putIfAbsent(new BlockPos(Integer.parseInt(parts[1]),
-				Integer.parseInt(parts[2]), Integer.parseInt(parts[3])), index++);
+			String block = parts[4];
+			if (block.startsWith("minecraft:redstone_wire")) {
+				dust++;
+				run.add(dust + ":" + parts[1] + "," + parts[2] + "," + parts[3]
+					+ (block.contains("north=side") || block.contains("east=side") ? "" : ""));
+				if (dust == 16) {
+					break;
+				}
+			} else if (block.startsWith("minecraft:repeater")) {
+				openedAt = parts[1] + " " + parts[2] + " " + parts[3];
+				dust = 0;
+				run.clear();
+			}
 		}
-		List<BlockPos> sorted = new java.util.ArrayList<>(quiet);
-		sorted.sort((a, b) -> Integer.compare(order.getOrDefault(a, Integer.MAX_VALUE),
-			order.getOrDefault(b, Integer.MAX_VALUE)));
-		for (int i = 0; i < Math.min(6, sorted.size()); i++) {
-			BlockPos at = sorted.get(i);
-			System.out.println("QUIET   silent note at " + at.getX() + " " + at.getY() + " "
-				+ at.getZ());
+		System.out.println("LEFT run opened at repeater " + openedAt);
+		for (String cell : run) {
+			System.out.println("LEFT   " + cell);
 		}
-		BlockPos first = sorted.get(0);
-		System.out.println("QUIET ---- around the first silent note ----");
+		Map<BlockPos, BlockState> world = placeInWorld(plan);
 		System.out.println(AsciiDiagram.render(
 			position -> world.getOrDefault(position, Blocks.AIR.defaultBlockState()),
-			first.offset(-7, -4, -3), first.offset(5, 3, 3),
+			at.offset(-6, -4, -4), at.offset(6, 3, 4),
 			AsciiDiagram.View.SOUTH, AsciiDiagram.Shape.CODE));
+	}
+
+	/** The first cell whose run from the last repeater passes fifteen. */
+	private static BlockPos deadRun(SongBuilder.PastePlan plan) {
+		int dust = 0;
+		for (String command : plan.commands()) {
+			String[] parts = command.split(" ");
+			String block = parts[4];
+			if (block.startsWith("minecraft:redstone_wire")) {
+				dust++;
+				if (dust == 16) {
+					return new BlockPos(Integer.parseInt(parts[1]), Integer.parseInt(parts[2]),
+						Integer.parseInt(parts[3]));
+				}
+			} else if (block.startsWith("minecraft:repeater")) {
+				dust = 0;
+			}
+		}
+		return null;
 	}
 
 	private static List<SongBuilder.EventNote> load(String name) throws Exception {
@@ -178,7 +192,7 @@ class UnreachedLocatorTest {
 			maxY = Math.max(maxY, at.getY());
 			maxZ = Math.max(maxZ, at.getZ());
 		}
-		return NoteMachineReader.read("Unreached", new BlockPos(minX, minY, minZ),
+		return NoteMachineReader.read("Four descent", new BlockPos(minX, minY, minZ),
 			new BlockPos(maxX, maxY, maxZ),
 			position -> world.getOrDefault(position, Blocks.AIR.defaultBlockState()));
 	}
