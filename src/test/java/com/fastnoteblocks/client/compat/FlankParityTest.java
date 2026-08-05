@@ -47,6 +47,8 @@ class FlankParityTest {
 	void restore() {
 		SongBuilder.FLANK_AWARE_PARITY = true;
 		SongBuilder.SHEDS_BACK_FLANK = true;
+		SongBuilder.FRONT_HEAD_WHEN_BEHIND_BUSY = true;
+		SongBuilder.REPLAN_ON_DRIFT = true;
 	}
 
 	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
@@ -212,6 +214,64 @@ class FlankParityTest {
 			+ " onlyNudging=" + onlyOff + " shedsTaken=" + sheds);
 		System.out.println(off.line("nudgeOnly "));
 		System.out.println(on.line("shedsFlank"));
+	}
+
+	/**
+	 * The front-only fallback, and re-planning when a chord lands off-plan, against neither.
+	 *
+	 * <p>A rigid stacked chord that loses the pair beside its opening used to fall all the way to a
+	 * plain bus. The shape it should fall to already existed and is never longer. Paired, because
+	 * the fallback changes which builds are possible.</p>
+	 */
+	@Test
+	void pricesTheFrontOnlyFallback() throws Exception {
+		List<Path> files;
+		try (Stream<Path> listing = Files.list(SONGS)) {
+			files = listing.filter(f -> f.toString().endsWith(".json")).sorted().toList();
+		}
+		Totals off = new Totals();
+		Totals on = new Totals();
+		int both = 0;
+		int onlyOn = 0;
+		int onlyOff = 0;
+		for (Path file : files) {
+			String name = file.getFileName().toString().replace(".json", "");
+			if (name.startsWith("ultra-")) {
+				continue;
+			}
+			List<SongBuilder.EventNote> notes = load(name);
+			if (notes.isEmpty()) {
+				continue;
+			}
+			for (int floors = 2; floors <= 6; floors++) {
+				for (int width = 12; width <= 48; width += 4) {
+					SongBuilder.FRONT_HEAD_WHEN_BEHIND_BUSY = false;
+					SongBuilder.REPLAN_ON_DRIFT = false;
+					SongBuilder.PastePlan without = build(notes, width, floors);
+					SongBuilder.FRONT_HEAD_WHEN_BEHIND_BUSY = true;
+					SongBuilder.REPLAN_ON_DRIFT = true;
+					SongBuilder.PastePlan with = build(notes, width, floors);
+					if (without == null && with == null) {
+						continue;
+					}
+					if (without == null) {
+						onlyOn++;
+						continue;
+					}
+					if (with == null) {
+						onlyOff++;
+						continue;
+					}
+					both++;
+					off.add(without, name, width == 24);
+					on.add(with, name, width == 24);
+				}
+			}
+		}
+		System.out.println("FRONTHEAD builds: both=" + both + " onlyFallback=" + onlyOn
+			+ " onlyPlainBus=" + onlyOff);
+		System.out.println(off.line("plainBus  "));
+		System.out.println(on.line("frontHead "));
 	}
 
 	private static SongBuilder.PastePlan build(List<SongBuilder.EventNote> notes, int width,

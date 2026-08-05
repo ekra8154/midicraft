@@ -1445,6 +1445,19 @@ public final class SongBuilder {
 				int off = (placed.lane().pos().getX() - foretold) * lane.travel().getStepX();
 				placements.padded("plan" + (off > 0 ? "Short" : "Long") + Math.min(Math.abs(off), 4)
 					+ (placed.nudged() ? "Nudged" : "") + placed.style());
+				// And re-plan on it, not only count it. Everything the plan still owes this lane is
+				// owed from the column the chord actually ended in, and a plan that keeps handing out
+				// pad measured from a column three back spends wire the next repeater is never told
+				// about -- which is a run of sixteen and a lane that stops.
+				//
+				// This was tried once before and reported as changing nothing measurable. It was
+				// true then: the only thing that drifted was the nudge, which already re-plans here.
+				// What drifts now is the shape, because whether the pair beside a module is free is
+				// answered from blocks and predicted from arithmetic, and shedding a back flank moves
+				// the answer without moving the arithmetic.
+				if (REPLAN_ON_DRIFT) {
+					replan = layout.ultra();
+				}
 			}
 			leavingTurn = false;
 			lane = placed.lane();
@@ -1694,7 +1707,14 @@ public final class SongBuilder {
 		if (style.reachesBack() && busy && delayColumns == 0) {
 			// The same substitution the walk makes: a head with a bus behind it keeps a head of
 			// five, and only the rigid shape falls all the way to a bus.
-			style = FRONT_ONLY_HEADS && style.busHeaded()
+			// The rigid shape falls to a head of five with a bus behind it too, not all the way to a
+			// plain bus. ekran, reading one in game: there was no stacked chord anywhere near it to
+			// justify a plain bus, and a front-only head fits. A chord of seven is a repeater and
+			// four cells as a bus -- five columns -- against two, a handover and one cell as a head
+			// of five with a tail of two, which is four. A chord of six is four either way, so this
+			// never loses; and where the chord cannot make a head of five at all, addStackedShape
+			// still drops it to a bus and counts it.
+			style = FRONT_HEAD_WHEN_BEHIND_BUSY || (FRONT_ONLY_HEADS && style.busHeaded())
 				? ChordStyle.STACKED_BUS_FRONT : ChordStyle.BUS;
 		}
 		// And a chord being built in a turn, or stepping off the far side of one, is a bus whatever
@@ -4155,7 +4175,14 @@ public final class SongBuilder {
 			// the walk builds -- and shortening is the safe direction to surprise the plan in.
 			// {@link #landingOf} makes the same substitution, so most of the time it is not a
 			// surprise at all.
-			style = FRONT_ONLY_HEADS && style.busHeaded()
+			// The rigid shape falls to a head of five with a bus behind it too, not all the way to a
+			// plain bus. ekran, reading one in game: there was no stacked chord anywhere near it to
+			// justify a plain bus, and a front-only head fits. A chord of seven is a repeater and
+			// four cells as a bus -- five columns -- against two, a handover and one cell as a head
+			// of five with a tail of two, which is four. A chord of six is four either way, so this
+			// never loses; and where the chord cannot make a head of five at all, addStackedShape
+			// still drops it to a bus and counts it.
+			style = FRONT_HEAD_WHEN_BEHIND_BUSY || (FRONT_ONLY_HEADS && style.busHeaded())
 				? ChordStyle.STACKED_BUS_FRONT : ChordStyle.BUS;
 		}
 		// A stacked module may not sit perpendicular to another one, and the two modules either side
@@ -4466,6 +4493,33 @@ public final class SongBuilder {
 	 * for that lesson once.</p>
 	 */
 	static boolean SHEDS_BACK_FLANK = true;
+
+	/**
+	 * Whether a rigid stacked chord that loses the pair beside its opening keeps a head of five.
+	 *
+	 * <p>Off, only a stacked-bus kept its head and the plain stacked shape fell to a bus. The shape
+	 * it should have fallen to already existed -- a head of five with the rest on a short bus -- and
+	 * is never longer than the plain bus, so this can only shorten what the walk builds. Set in both
+	 * {@link #landingOf} and {@link #addChordModule}, which have to make the same substitution or
+	 * the lane is measured for one shape and built as another.</p>
+	 *
+	 * <p>Measured and not kept on. Paired over the 1,408 builds both ways can make it is a wash --
+	 * 4,640 blocks and 63 breach blocks saved against 9 more breaches, 20 blocks more depth and 2,381
+	 * more nudges -- and it refuses 20 builds that the plain bus manages, gaining 5. The per-chord
+	 * arithmetic is still right; what it buys back one lane, it spends in another. One word from
+	 * being measured again.</p>
+	 */
+	static boolean FRONT_HEAD_WHEN_BEHIND_BUSY = false;
+
+	/**
+	 * Whether a chord landing anywhere but where it was foretold re-plans the rest of its lane.
+	 *
+	 * <p>Off, because it does nothing: Guardian at 24 wide over five floors comes out byte for byte
+	 * the same with it on, which is what the counter beside it already said the last time somebody
+	 * tried this. Kept because the reasoning for it is still sound and the next drift may not be
+	 * this one.</p>
+	 */
+	static boolean REPLAN_ON_DRIFT = false;
 
 	/** Which side's back flank, left off, would clear the clash -- or -1 if neither does. */
 	private static int shedSide(PlacementPlan placements, Lane at, int time, UltraSlots slots) {
