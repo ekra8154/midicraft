@@ -1717,7 +1717,14 @@ public final class SongBuilder {
 			ParityOracle parity) {
 		int delayColumns = Math.max(0, (wait - 1) / 4);
 		ChordStyle style = event.style();
-		if (style.reachesBack() && busy && delayColumns == 0) {
+		// A column stood off the lane behind, so that the pair of low slots between the two modules
+		// is nobody's but this one's. The same thing a wait already does, which is why the rule below
+		// only fires at delayColumns == 0, and why one column of pad is all it takes.
+		int behindShift = 0;
+		if (style.reachesBack() && busy && delayColumns == 0
+				&& NUDGE_WHEN_BEHIND_BUSY && losesTheHeadWithoutTheBackPair(style, event.notes())) {
+			behindShift = 1;
+		} else if (style.reachesBack() && busy && delayColumns == 0) {
 			// The same substitution the walk makes: a head with a bus behind it keeps a head of
 			// five, and only the rigid shape falls all the way to a bus.
 			// The rigid shape falls to a head of five with a bus behind it too, not all the way to a
@@ -1740,6 +1747,7 @@ public final class SongBuilder {
 		// planned to land flush on it.
 		if (style.stacked() && inTurn) {
 			style = ChordStyle.BUS;
+			behindShift = 0;
 		}
 		int cells = (event.notes().size() + 1) / 2;
 		// A stacked module too near the wall to be nudged is built as a bus instead, and a bus of the
@@ -1748,8 +1756,10 @@ public final class SongBuilder {
 		// Erring towards the bus is the safe way round: the walk may yet find the module needs no
 		// nudge and build it short, which lands the lane inside its wall rather than outside it.
 		if (style.stacked()
-				&& (wall - (startX + stepX * delayColumns)) * stepX < STACKED_CELLS + 1) {
+				&& (wall - (startX + stepX * (delayColumns + behindShift))) * stepX
+					< STACKED_CELLS + 1) {
 			style = ChordStyle.BUS;
+			behindShift = 0;
 		}
 		// The stacked-bus is measured from the same split the walk will build, not from an
 		// arithmetic that happens to agree with it. Its head is seven notes only when the chord has
@@ -1760,13 +1770,15 @@ public final class SongBuilder {
 			StackedBusSplit split = splitFor(style, event.notes());
 			if (split == null) {
 				style = ChordStyle.BUS;
+				behindShift = 0;
 			} else {
 				tailCells = (split.tail().size() + 1) / 2;
 				// Head, transition and bus all have to be inside the wall, where a plain stacked
 				// module only ever had to fit its two columns.
-				if ((wall - (startX + stepX * delayColumns)) * stepX
+				if ((wall - (startX + stepX * (delayColumns + behindShift))) * stepX
 						< STACKED_CELLS + STACKED_BUS_TRANSITION + tailCells + 1) {
 					style = ChordStyle.BUS;
+					behindShift = 0;
 				}
 			}
 		}
@@ -1775,10 +1787,16 @@ public final class SongBuilder {
 		// gives the shape up and is built as a bus. Both were surprises to the plan until now.
 		boolean nudged = false;
 		if (style.stacked() && parity != null) {
-			int verdict = parity.verdictAt(startX + stepX * delayColumns, event.time(),
-				slotsFor(style, event.notes()), relocationRoom(style, event.notes()));
-			if (verdict < 0) {
+			int verdict = parity.verdictAt(startX + stepX * (delayColumns + behindShift),
+				event.time(), slotsFor(style, event.notes()),
+				relocationRoom(style, event.notes()));
+			// One column is what this shape can express. A module already stood off the lane behind
+			// and then asked for a second column gives the head up after all, which is exactly what
+			// it would have done without the shift -- and a plain bus, because the reason it was
+			// shifted rather than shortened is that the short head was never available.
+			if (verdict < 0 || behindShift > 0 && verdict == 1) {
 				style = ChordStyle.BUS;
+				behindShift = 0;
 			} else {
 				// A relocation costs nothing in columns -- that is the condition it is offered under
 				// -- so only a shift lengthens the chord.
@@ -1787,9 +1805,9 @@ public final class SongBuilder {
 		}
 		int length;
 		if (style.busHeaded()) {
-			length = delayColumns + STACKED_CELLS + STACKED_BUS_TRANSITION + tailCells;
+			length = delayColumns + behindShift + STACKED_CELLS + STACKED_BUS_TRANSITION + tailCells;
 		} else if (style.stacked()) {
-			length = delayColumns + 2;
+			length = delayColumns + behindShift + 2;
 		} else {
 			length = delayColumns + (style == ChordStyle.BUS ? 1 + cells : 2);
 		}
@@ -4178,7 +4196,26 @@ public final class SongBuilder {
 		// usually a chord that was measured as one shape and built as another, and there are seven
 		// places that can happen -- naming the one that fired beats reading all seven.
 		String gaveUp = null;
-		if (style.reachesBack() && !roomBehind) {
+		boolean behindShift = false;
+		if (style.reachesBack() && !roomBehind
+				&& NUDGE_WHEN_BEHIND_BUSY && losesTheHeadWithoutTheBackPair(style, event.notes())) {
+			// The pair of low slots between two modules a repeater apart belongs to whichever went
+			// down first. A column of pad stands this one three columns off instead of two, and then
+			// the pair is nobody's but its own -- the same thing any wait already does for it, which
+			// is why the rule this replaces only fired with no wait at all.
+			//
+			// Only where the shape would otherwise lose its head altogether, because that is the only
+			// place the column is cheap. Giving up the back pair costs a head of seven a head of five,
+			// which is one cell of bus -- the same column the shift costs, so neither wins. Where the
+			// short head cannot be made at all the chord falls to a plain bus instead, and for a chord
+			// of fifteen that is nine columns against the eight a shifted head takes.
+			//
+			// ekran found it by pasting the chord in the air: the shape was there all along.
+			behindShift = true;
+			gaveUp = "behindBusyShifted";
+			placements.padded(style.busHeaded() ? "planShiftForBehindStackedBus"
+				: "planShiftForBehind");
+		} else if (style.reachesBack() && !roomBehind) {
 			gaveUp = "behindBusy";
 			placements.padded(style.busHeaded() ? "planBusForBehindStackedBus"
 				: "planBusForBehind");
@@ -4206,6 +4243,7 @@ public final class SongBuilder {
 		// working out after there is something to compare it against.
 		if (style.stacked() && inTurn) {
 			gaveUp = "inTurn";
+			behindShift = false;
 			placements.padded(style.busHeaded() ? "planBusForTurnStackedBus"
 				: "planBusForTurn");
 			style = ChordStyle.BUS;
@@ -4249,13 +4287,25 @@ public final class SongBuilder {
 		if (style.stacked()) {
 			UltraSlots slots = slotsFor(style, event.notes());
 			RelocationRoom room = relocationRoom(style, event.notes());
-			int verdict = parityVerdict(placements, start, event.time(), slots, room);
+			// A module already stood a column off the lane behind asks about the column it will
+			// actually stand in, not the one it would have stood in.
+			Lane asking = behindShift ? start.ahead(1) : start;
+			int verdict = parityVerdict(placements, asking, event.time(), slots, room);
 			if (verdict == 2) {
-				moved = relocate(placements, start, event.time(), style, event.notes(), slots, room);
+				moved = relocate(placements, asking, event.time(), style, event.notes(), slots, room);
 				placements.padded("planRelocateTo" + moved.where());
 			}
 			boolean clashesHere = verdict == 1 || verdict < 0;
-			if (verdict < 0) {
+			if (behindShift && clashesHere) {
+				// One column is what this shape can express, and it has spent it. Asked for a second
+				// it gives the head up after all -- straight to a bus, because the short head it
+				// would otherwise have fallen to was never available; that is why it shifted.
+				gaveUp = "behindBusyAndParity";
+				placements.padded("planBusForBehindAndParity");
+				behindShift = false;
+				moved = null;
+				style = ChordStyle.BUS;
+			} else if (verdict < 0) {
 				gaveUp = "parityBothCells";
 				placements.padded(slackColumns > 0 ? "planParityGaveUpSlack"
 					: "planParityGaveUpTight");
@@ -4273,8 +4323,12 @@ public final class SongBuilder {
 				placements.padded("planParityPreferredBus");
 				style = ChordStyle.BUS;
 			} else {
-				nudge = clashesHere;
-				if (nudge) {
+				// One column covers both errands. A module stood off the lane behind is already a
+				// column along, which is the same column a parity shift would have asked for -- and
+				// the verdict above was taken at that column, so it is the shifted position that came
+				// back clean.
+				nudge = behindShift || clashesHere;
+				if (clashesHere) {
 					placements.padded(slackColumns > 0 ? "planParityHadSlack" : "planParityTight");
 				}
 			}
@@ -4581,6 +4635,42 @@ public final class SongBuilder {
 	 * being measured again.</p>
 	 */
 	static boolean FRONT_HEAD_WHEN_BEHIND_BUSY = false;
+
+	/**
+	 * Whether a module whose back pair the lane behind took stands a column off instead of shrinking.
+	 *
+	 * <p>The pair of low slots between two modules a repeater apart belongs to whichever went down
+	 * first. One column of pad stands this one three columns off instead of two and the pair is its
+	 * own again -- the same thing any wait already does for it, which is why the rule only ever fired
+	 * with no wait at all.</p>
+	 *
+	 * <p>Only where the shape would otherwise lose its head altogether, because that is the only
+	 * place the column is cheap. See {@link #losesTheHeadWithoutTheBackPair}.</p>
+	 */
+	static boolean NUDGE_WHEN_BEHIND_BUSY = true;
+
+	/**
+	 * Whether losing the pair of low slots behind would cost this chord its head altogether.
+	 *
+	 * <p>The substitution for a module whose back pair is taken is a head of five with the notes that
+	 * would have hung there on the bus instead. That costs one cell, which is the same column a shift
+	 * costs, so where the short head can be made neither move wins and the shorter one is kept.</p>
+	 *
+	 * <p>Where it cannot -- four hangers is two fewer places to put a note that will not conduct, and
+	 * a head of five wants the centre, so a chord with no harp to spare cannot make one -- the chord
+	 * falls all the way to a plain bus. A chord of fifteen is then nine columns where a shifted head
+	 * of seven is eight, and that is the case the shift is for. On Hammer of Justice at twenty-four
+	 * wide over four floors this is 74 chords of the 89 that lose the pair.</p>
+	 *
+	 * <p>Mirrors the substitution in {@link #landingOf} and {@link #addChordModule} rather than
+	 * restating it: what it asks is whether that expression would land on a bus.</p>
+	 */
+	private static boolean losesTheHeadWithoutTheBackPair(ChordStyle style, List<EventNote> chord) {
+		if (!(FRONT_HEAD_WHEN_BEHIND_BUSY || FRONT_ONLY_HEADS && style.busHeaded())) {
+			return true;
+		}
+		return stackedBusSplit(chord, false) == null;
+	}
 
 	/**
 	 * Whether a chord landing anywhere but where it was foretold re-plans the rest of its lane.
