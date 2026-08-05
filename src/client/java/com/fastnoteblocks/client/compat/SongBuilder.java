@@ -4301,9 +4301,18 @@ public final class SongBuilder {
 		//
 		// Ekran found it on Big Shot at 44 wide: a chord of eighteen split down a staircase powered
 		// perfectly, and the stacked chord after it was nudged one past the end of the wire.
-		if (nudge && signal < NUDGE_REACH) {
-			gaveUp = "nudgeOutOfReach";
-			placements.padded("planBusForSignal");
+		//
+		// Asked of the wire and not of the budget. `signal` is the tip carried down the lane by
+		// arithmetic, and it only ever refused a nudge at nought -- "is there any wire left", where
+		// the question is "does the wire still reach after I add a cell". The plan is holding the run
+		// itself, so it can be asked: the nudge lays one cell of dust where the repeater would have
+		// stood, so it is affordable exactly when the run plus that cell is within a repeater's
+		// reach. The bus needs nothing, because its repeater stands where the wire already is.
+		boolean outOfWire = MEASURED_NUDGE_REACH
+			&& placements.runSinceRepeater() + 1 > DUST_RANGE;
+		if (nudge && (signal < NUDGE_REACH || outOfWire)) {
+			gaveUp = outOfWire ? "nudgePastTheWire" : "nudgeOutOfReach";
+			placements.padded(outOfWire ? "planBusForRunMeasured" : "planBusForSignal");
 			style = ChordStyle.BUS;
 			nudge = false;
 		}
@@ -4520,6 +4529,15 @@ public final class SongBuilder {
 	 * this one.</p>
 	 */
 	static boolean REPLAN_ON_DRIFT = false;
+
+	/**
+	 * Whether a nudge is refused by measuring the run rather than by trusting the lane's budget.
+	 *
+	 * <p>ekran: nudge when it can, and fall back to a bus when nudging would leave a dead wire. The
+	 * rule for that already existed and could not fire -- it refused only when the tip had reached
+	 * nought, which is a different question from whether the wire reaches one cell further.</p>
+	 */
+	static boolean MEASURED_NUDGE_REACH = true;
 
 	/** Which side's back flank, left off, would clear the clash -- or -1 if neither does. */
 	private static int shedSide(PlacementPlan placements, Lane at, int time, UltraSlots slots) {
@@ -5560,6 +5578,24 @@ public final class SongBuilder {
 		 */
 		private String placing = "?";
 		private final Map<BlockPos, String> placedBy = new LinkedHashMap<>();
+		/**
+		 * Cells of dust laid since the last repeater went down, counted rather than predicted.
+		 *
+		 * <p>Every other answer to "will the wire reach" in this file is arithmetic carried down the
+		 * lane, and the counters beside it exist because that arithmetic drifts. This is the run
+		 * itself: blocks are laid in the order the signal travels them, so the length of the current
+		 * run is something the plan is holding rather than something it is predicting.</p>
+		 *
+		 * <p>The stacked cross does not count. It is dust the centre block lights, off to the side of
+		 * the path, and counting it reads every run through a stacked module a cell long -- a mistake
+		 * this file has made twice and spent an afternoon on both times.</p>
+		 */
+		private int runSinceRepeater;
+		private int trialRun;
+
+		int runSinceRepeater() {
+			return runSinceRepeater;
+		}
 		/** Note block positions and the event tick each one belongs to. */
 		private final Map<BlockPos, Integer> notes = new LinkedHashMap<>();
 		/**
@@ -5887,6 +5923,13 @@ public final class SongBuilder {
 			if (MARK_COLLISIONS && existing == null) {
 				placedBy.put(key, placing);
 			}
+			if (existing == null) {
+				if (block.startsWith("minecraft:repeater")) {
+					runSinceRepeater = 0;
+				} else if ("minecraft:redstone_wire".equals(block)) {
+					runSinceRepeater++;
+				}
+			}
 			if (existing != null && !existing.equals(block)) {
 				if (!MARK_COLLISIONS) {
 					throw new IllegalArgumentException("Placement layout collision at "
@@ -5911,6 +5954,7 @@ public final class SongBuilder {
 
 		/** Opens a savepoint. Nested trials are not needed and not supported. */
 		void beginTrial() {
+			trialRun = runSinceRepeater;
 			trial = new Trial(new ArrayList<>(), new LinkedHashMap<>(), new LinkedHashMap<>(),
 				new ArrayList<>(), turns.size(), moved.size(), trouble.size(), breaches.size(),
 				recesses.size(), new LinkedHashMap<>(padding),
@@ -5923,6 +5967,7 @@ public final class SongBuilder {
 
 		/** Puts back everything written since {@link #beginTrial()}. */
 		void rollbackTrial() {
+			runSinceRepeater = trialRun;
 			Trial undo = trial;
 			// Cleared first: putting the old values back goes through the same writers, and a trial
 			// still open would journal the undo as though it were more building.

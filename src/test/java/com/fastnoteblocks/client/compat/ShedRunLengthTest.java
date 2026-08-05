@@ -104,20 +104,28 @@ class ShedRunLengthTest {
 					+ " " + parts[3], "nothing");
 				run.add(run.size() + 1 + ": " + parts[1] + " " + parts[2] + " " + parts[3]
 					+ " on " + floor.replace("minecraft:", ""));
-				if (run.size() == 16) {
-					break;
-				}
 			} else if (block.startsWith("minecraft:repeater")) {
+				// Only the run that overruns, and all of it: where it stops is the question, and
+				// stopping the dump at sixteen answers a different one. What closes it matters too --
+				// a repeater standing on the bus's own last block is the case the exemption assumes.
+				if (run.size() > 15) {
+					String stands = under.getOrDefault(parts[1] + " "
+						+ (Integer.parseInt(parts[2]) - 1) + " " + parts[3], "nothing");
+					System.out.println("DUMP the run of " + run.size() + " opened at " + openedNow);
+					for (String cell : run) {
+						System.out.println("DUMP   " + cell);
+					}
+					System.out.println("DUMP closed by " + parts[1] + " " + parts[2] + " " + parts[3]
+						+ " " + block + " standing on " + stands.replace("minecraft:", ""));
+					return;
+				}
 				run.clear();
 				opened = openedNow;
 				openedNow = parts[1] + " " + parts[2] + " " + parts[3] + " " + block;
 			}
 		}
-		System.out.println("DUMP the run of " + run.size() + " opened at " + openedNow
-			+ " (previous repeater " + opened + ")");
-		for (String cell : run) {
-			System.out.println("DUMP   " + cell);
-		}
+		System.out.println("DUMP no run over fifteen; last opened at " + openedNow
+			+ " after " + opened);
 	}
 
 	@Test
@@ -160,7 +168,11 @@ class ShedRunLengthTest {
 				+ " runsPastFifteen=" + over + " sheds="
 				+ plan.padding().getOrDefault("planShedBackFlank", 0)
 				+ " blocks=" + plan.commands().size() + " spanZ=" + plan.spanZ()
-				+ " lastOpened=" + opened);
+				+ " lastOpened=" + opened
+				+ " busForRunMeasured=" + plan.padding().getOrDefault("planBusForRunMeasured", 0)
+				+ " busForSignal=" + plan.padding().getOrDefault("planBusForSignal", 0)
+				+ " nudges=" + (plan.padding().getOrDefault("planParityTight", 0)
+					+ plan.padding().getOrDefault("planParityHadSlack", 0)));
 			System.out.println("RUN shed=" + (shed == 1) + " firstOverAt=" + firstOver);
 		}
 	}
