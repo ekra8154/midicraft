@@ -1144,7 +1144,19 @@ public final class SongBuilder {
 						lane.pos().getX(), climb > 0 ? "Climb" : "Descent");
 					gradeLaneTip(placements, turnCells, tipSignal, climb > 0 ? "Climb" : "Descent");
 					laneStarted = false;
-					columnBehindBusy = true;
+					// A climb leaves the pair beside the landing free, and a descent does not.
+					//
+					// {@link #addGlassClimb} is two columns of the lane's own centre line and nothing
+					// else: glass on one, dust above it, alternating, and the landing is one back from
+					// where it started. So the cells one either side of the first module's opening --
+					// which is all the back pair is -- are untouched by it, and the live dust at the
+					// top of the climb stands in front of that module on the centre line, not beside
+					// it. A descent is not the climb upside down: it spirals round a two-by-two
+					// column, so it does put something in a cell off the centre, and it keeps the rule.
+					//
+					// ekran, reading a stacked-bus that landed off an ascent with both back cells plain
+					// air and a head of five anyway, and the bus a cell longer than it needed to be.
+					columnBehindBusy = !(BACK_PAIR_FREE_AFTER_CLIMB && climb > 0);
 					// Planned here and not at the top of the next event, because this event is about to
 					// be built on the far side of the staircase -- it is the new lane's first chord.
 					// Deferring the plan by one left every lane's opening chord outside its own plan's
@@ -4728,9 +4740,41 @@ public final class SongBuilder {
 			split != null && split.tail().size() % 2 == 1);
 	}
 
-	/** Whether this particular note has somewhere free to go. */
-	private static boolean roomFor(RelocationRoom room, EventNote note) {
-		return room.tail() || room.centre() && isHarpNote(note);
+	/**
+	 * Whether the note in this particular slot has somewhere free to go.
+	 *
+	 * <p>The centre only sounds as a harp, so a note that is not one cannot simply move there. It can
+	 * still be got out of the way where some <em>other</em> low slot holds a harp: that harp takes the
+	 * centre and this note takes the slot it left. Two notes move and one slot ends up empty, which is
+	 * the slot that was in contention -- and the module is the same size, in the same two columns,
+	 * with the same notes in it.</p>
+	 *
+	 * <p>ekran found the case: a chord of six with the centre standing as plain stone, a harp
+	 * somewhere in it, and the module padded a column forward anyway -- into a staircase, which is
+	 * what turned it into a collision rather than merely a wasted column.</p>
+	 */
+	private static boolean roomFor(UltraSlots slots, RelocationRoom room, int slot) {
+		if (room.tail()) {
+			return true;
+		}
+		if (!room.centre()) {
+			return false;
+		}
+		return isHarpNote(slots.slot(slot))
+			|| CENTRE_TAKES_A_SPARE_HARP && spareHarpFlank(slots, slot) >= 0;
+	}
+
+	/** Whether a note that is not a harp may still take the centre, by trading with one that is. */
+	static boolean CENTRE_TAKES_A_SPARE_HARP = true;
+
+	/** A low slot other than this one holding a harp, which could take the centre in its place. */
+	private static int spareHarpFlank(UltraSlots slots, int slot) {
+		for (int index = 0; index < 4; index++) {
+			if (index != slot && slots.slot(index) != null && isHarpNote(slots.slot(index))) {
+				return index;
+			}
+		}
+		return -1;
 	}
 
 	/**
@@ -4754,8 +4798,7 @@ public final class SongBuilder {
 		// answered wherever the other two slots change nothing.
 		int[] order = RELOCATES_ANY_CORNER ? new int[] {2, 3, 0, 1} : new int[] {2, 3};
 		for (int slot : order) {
-			EventNote note = slots.slot(slot);
-			if (note != null && roomFor(room, note)
+			if (slots.slot(slot) != null && roomFor(slots, room, slot)
 					&& !stackedClashes(placements, at, time, slots.without(slot))) {
 				return slot;
 			}
@@ -4805,6 +4848,17 @@ public final class SongBuilder {
 			UltraSlots moved = emptied.withCentre(note);
 			return new Relocation(moved, split == null ? null
 				: new StackedBusSplit(moved, split.head(), split.tail()), "Centre");
+		}
+		// Or the note trades places with a harp the module was hanging somewhere it does not mind
+		// losing: the harp takes the centre, this note takes the harp's slot, and the contested one
+		// is left empty. Same notes, same slots filled bar the one that had to go, same two columns --
+		// so nothing downstream can tell the difference, and stackedClashes was asked about exactly
+		// this arrangement.
+		int harp = room.centre() ? spareHarpFlank(slots, slot) : -1;
+		if (harp >= 0) {
+			UltraSlots moved = emptied.with(harp, note).withCentre(slots.slot(harp));
+			return new Relocation(moved, split == null ? null
+				: new StackedBusSplit(moved, split.head(), split.tail()), "CentreSwap");
 		}
 		List<EventNote> tail = new ArrayList<>(split.tail());
 		tail.add(note);
@@ -5241,6 +5295,18 @@ public final class SongBuilder {
 			return new UltraSlots(note, sides, front, back);
 		}
 
+		/** The same module with one low slot holding a different note. */
+		UltraSlots with(int index, EventNote note) {
+			return new UltraSlots(centre, sides,
+				index < 2 ? holding(front, index, note) : front,
+				index < 2 ? back : holding(back, index - 2, note));
+		}
+
+		private static List<EventNote> holding(List<EventNote> pair, int side, EventNote note) {
+			return java.util.Collections.unmodifiableList(java.util.Arrays.asList(
+				side == 0 ? note : pair.get(0), side == 1 ? note : pair.get(1)));
+		}
+
 		private static List<EventNote> leaving(List<EventNote> pair, int side) {
 			return java.util.Collections.unmodifiableList(java.util.Arrays.asList(
 				side == 0 ? null : pair.get(0), side == 1 ? null : pair.get(1)));
@@ -5278,6 +5344,16 @@ public final class SongBuilder {
 
 	/** Whether a lone back flank hangs away from the lane the walk has not built yet. */
 	static boolean BACK_FLANK_AWAY_FROM_NEXT_LANE = true;
+
+	/**
+	 * Whether the first module of a lane that landed off a climb may use the pair behind it.
+	 *
+	 * <p>A staircase used to be treated like a turn, which claims the pair because a turn is a run of
+	 * powered stone at the level the low notes hang at. A climb is not that: it is glass and dust up
+	 * two columns of the lane's own centre line, so the cells either side of the landing are air.
+	 * A descent spirals round a two-by-two column and does claim one, so it is unchanged.</p>
+	 */
+	static boolean BACK_PAIR_FREE_AFTER_CLIMB = true;
 
 	/**
 	 * Which note goes where in a stacked module, or {@code null} if this chord cannot use one.
