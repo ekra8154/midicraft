@@ -38,7 +38,7 @@ class ShedRunLengthTest {
 
 	@AfterEach
 	void restore() {
-		SongBuilder.SHEDS_BACK_FLANK = true;
+		SongBuilder.RELOCATES_CONTESTED_NOTE = true;
 		SongBuilder.MARK_COLLISIONS = false;
 	}
 
@@ -53,9 +53,9 @@ class ShedRunLengthTest {
 	@Test
 	void diffsTheDecisionsTheShedChanges() throws Exception {
 		List<SongBuilder.EventNote> notes = load("deltarune-ch-4-guardian");
-		SongBuilder.SHEDS_BACK_FLANK = true;
+		SongBuilder.RELOCATES_CONTESTED_NOTE = true;
 		java.util.Map<String, Integer> with = build(notes).padding();
-		SongBuilder.SHEDS_BACK_FLANK = false;
+		SongBuilder.RELOCATES_CONTESTED_NOTE = false;
 		java.util.Map<String, Integer> without = build(notes).padding();
 		java.util.TreeSet<String> keys = new java.util.TreeSet<>(with.keySet());
 		keys.addAll(without.keySet());
@@ -67,6 +67,13 @@ class ShedRunLengthTest {
 					+ " (" + (b - a > 0 ? "+" : "") + (b - a) + ")");
 			}
 		}
+	}
+
+	/** Every relocation the plan took, whichever slot it freed and wherever the note went. */
+	private static int moves(java.util.Map<String, Integer> padding) {
+		return padding.entrySet().stream()
+			.filter(pad -> pad.getKey().startsWith("planRelocateTo"))
+			.mapToInt(java.util.Map.Entry::getValue).sum();
 	}
 
 	private static SongBuilder.PastePlan build(List<SongBuilder.EventNote> notes) {
@@ -84,7 +91,7 @@ class ShedRunLengthTest {
 	 */
 	@Test
 	void dumpsTheRunThatOverruns() throws Exception {
-		SongBuilder.SHEDS_BACK_FLANK = true;
+		SongBuilder.RELOCATES_CONTESTED_NOTE = true;
 		SongBuilder.MARK_COLLISIONS = true;
 		SongBuilder.PastePlan plan = build(load("deltarune-ch-4-guardian"));
 		plan.padding().forEach((key, count) -> {
@@ -144,7 +151,7 @@ class ShedRunLengthTest {
 	void measuresTheRunsGuardianEndsUpWith() throws Exception {
 		List<SongBuilder.EventNote> notes = load("deltarune-ch-4-guardian");
 		for (int shed = 1; shed >= 0; shed--) {
-			SongBuilder.SHEDS_BACK_FLANK = shed == 1;
+			SongBuilder.RELOCATES_CONTESTED_NOTE = shed == 1;
 			SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0), notes,
 				SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
 				new SongBuilder.BuildLimits(4, 24, 5));
@@ -178,7 +185,7 @@ class ShedRunLengthTest {
 			}
 			System.out.println("RUN shed=" + (shed == 1) + " longestRun=" + longest
 				+ " runsPastFifteen=" + over + " sheds="
-				+ plan.padding().getOrDefault("planShedBackFlank", 0)
+				+ moves(plan.padding())
 				+ " blocks=" + plan.commands().size() + " spanZ=" + plan.spanZ()
 				+ " lastOpened=" + opened
 				+ " busForRunMeasured=" + plan.padding().getOrDefault("planBusForRunMeasured", 0)

@@ -1687,8 +1687,8 @@ public final class SongBuilder {
 	 * how a shape that fits perfectly well ends up breaching.</p>
 	 */
 	private interface ParityOracle {
-		/** 1 to shift a column, -1 to give the shape up, 0 to build where it stands. */
-		int verdictAt(int x, int time, UltraSlots slots, boolean mayShed);
+		/** 1 to shift a column, -1 to give the shape up, 2 to move a note, 0 to build as it stands. */
+		int verdictAt(int x, int time, UltraSlots slots, RelocationRoom room);
 	}
 
 	/**
@@ -1705,12 +1705,11 @@ public final class SongBuilder {
 		// place no longer get the same answer: one that hangs four low notes can clash where one that
 		// hangs two does not.
 		Map<Integer, Map<Long, Integer>> answered = new java.util.HashMap<>();
-		return (x, time, slots, mayShed) -> answered
-			.computeIfAbsent(flankMask(slots) * 2 + (mayShed ? 1 : 0),
-				mask -> new java.util.HashMap<>())
+		return (x, time, slots, room) -> answered
+			.computeIfAbsent(flankMask(slots) * 4 + room.key(), mask -> new java.util.HashMap<>())
 			.computeIfAbsent(((long) x << 32) ^ (time & 0xffffffffL), key ->
 				parityVerdict(placements, laneStart.ahead((x - originX) * step), time, slots,
-					mayShed));
+					room));
 	}
 
 	private static Landing landingOf(int startX, int stepX, EventGroup event, int wait, boolean busy,
@@ -1777,12 +1776,12 @@ public final class SongBuilder {
 		boolean nudged = false;
 		if (style.stacked() && parity != null) {
 			int verdict = parity.verdictAt(startX + stepX * delayColumns, event.time(),
-				slotsFor(style, event.notes()), mayShed(style, event.notes()));
+				slotsFor(style, event.notes()), relocationRoom(style, event.notes()));
 			if (verdict < 0) {
 				style = ChordStyle.BUS;
 			} else {
-				// A shed costs nothing in columns -- that is the condition it is offered under -- so
-				// only a shift lengthens the chord.
+				// A relocation costs nothing in columns -- that is the condition it is offered under
+				// -- so only a shift lengthens the chord.
 				nudged = verdict == 1;
 			}
 		}
@@ -4246,15 +4245,14 @@ public final class SongBuilder {
 		// sit above.
 		Lane start = lane;
 		boolean nudge = false;
-		StackedBusSplit shed = null;
+		Relocation moved = null;
 		if (style.stacked()) {
 			UltraSlots slots = slotsFor(style, event.notes());
-			boolean canShed = mayShed(style, event.notes());
-			int verdict = parityVerdict(placements, start, event.time(), slots, canShed);
+			RelocationRoom room = relocationRoom(style, event.notes());
+			int verdict = parityVerdict(placements, start, event.time(), slots, room);
 			if (verdict == 2) {
-				shed = shedBackFlank(splitFor(style, event.notes()),
-					shedSide(placements, start, event.time(), slots));
-				placements.padded("planShedBackFlank");
+				moved = relocate(placements, start, event.time(), style, event.notes(), slots, room);
+				placements.padded("planRelocateTo" + moved.where());
 			}
 			boolean clashesHere = verdict == 1 || verdict < 0;
 			if (verdict < 0) {
@@ -4349,27 +4347,32 @@ public final class SongBuilder {
 		// always available to fall back to.
 		//
 		// Counted as planBusForCollision, because a fallback nobody can see is a rule nobody fixes.
-		// Shed, then check. A bus is not always half its notes: where the ground will not take one
+		// Move it, then check. A bus is not always half its notes: where the ground will not take one
 		// layBus carries the run on a block further, and then the note the head gave away costs a
 		// cell after all -- the module comes out a column longer than the plan paid for and the next
-		// repeater stands sixteen dust away. So the shed is built, measured against the same module
+		// repeater stands sixteen dust away. So the move is built, measured against the same module
 		// without it, and kept only if the bus really did have the cell spare.
 		//
 		// Where it did not, the chord takes the shift it would have taken before, and hands back
 		// nudged so that the lane's plan learns about the column. That is what Placed.nudged is for.
-		if (shed != null) {
-			int spent = trialCells(placements, lane, triggerDelay, event, style, start, gaveUp, shed);
+		//
+		// Only the ones that go to the bus. A note moved to the centre touches no cell of run at all:
+		// the centre block was going to be placed either way, as stone if nothing sounded there, and
+		// the slot it came from is simply left empty. Nothing about the length can have changed, so
+		// there is nothing to measure -- and two trial builds a chord is not free.
+		if (moved != null && "Tail".equals(moved.where())) {
+			int spent = trialCells(placements, lane, triggerDelay, event, style, start, gaveUp, moved);
 			int plain = trialCells(placements, lane, triggerDelay, event, style, start, gaveUp, null);
 			if (spent < 0 || plain < 0 || spent > plain) {
-				placements.padded("planShedWouldGrowTheBus");
-				shed = null;
+				placements.padded("planRelocationWouldGrowTheBus");
+				moved = null;
 				nudge = true;
 			}
 		}
 		placements.beginTrial();
 		try {
 			Placed placed = addStackedShape(placements, lane, triggerDelay, event, style, nudge,
-				start, gaveUp, shed);
+				start, gaveUp, moved);
 			placements.commitTrial();
 			return placed;
 		} catch (IllegalArgumentException collided) {
@@ -4388,11 +4391,11 @@ public final class SongBuilder {
 	 * shed is not worth taking if the thing it produces cannot be placed.</p>
 	 */
 	private static int trialCells(PlacementPlan placements, Lane lane, int triggerDelay,
-			EventGroup event, ChordStyle style, Lane start, String gaveUp, StackedBusSplit shed) {
+			EventGroup event, ChordStyle style, Lane start, String gaveUp, Relocation moved) {
 		placements.beginTrial();
 		try {
 			return addStackedShape(placements, lane, triggerDelay, event, style, false, start,
-				gaveUp, shed).busCells();
+				gaveUp, moved).busCells();
 		} catch (IllegalArgumentException collided) {
 			return -1;
 		} finally {
@@ -4403,11 +4406,11 @@ public final class SongBuilder {
 	/** The stacked half of {@link #addChordModule}, apart so that a collision in it can be undone. */
 	private static Placed addStackedShape(PlacementPlan placements, Lane lane, int triggerDelay,
 			EventGroup event, ChordStyle style, boolean nudge, Lane start, String gaveUp,
-			StackedBusSplit shed) {
+			Relocation moved) {
 		if (style.busHeaded()) {
-			// The shed split when the lane behind wanted one flank left off, and the chord's own
-			// otherwise. Same notes either way: what moves is which of them the bus carries.
-			StackedBusSplit split = shed != null ? shed : splitFor(style, event.notes());
+			// The moved split when the lane behind wanted one slot left empty, and the chord's own
+			// otherwise. Same notes either way: what changes is which slot holds which of them.
+			StackedBusSplit split = moved != null ? moved.split() : splitFor(style, event.notes());
 			if (split == null) {
 				// Counted, where it used to be the one downgrade in this method that said nothing.
 				// The planner measured a head here; the chord could not make one, and the bus it
@@ -4441,10 +4444,13 @@ public final class SongBuilder {
 			start = start.ahead(1);
 		}
 		trace(event, lane, style, style, nudge ? "nudged" : gaveUp);
-		placements.placing("chord:" + style + (nudge ? "+nudge" : ""));
-		return new Placed(addStackedEventModule(placements, start, triggerDelay,
-			event.time(), ultraSlots(event.notes(), style == ChordStyle.STACKED_FULL)), style, 0,
-			nudge);
+		placements.placing("chord:" + style + (nudge ? "+nudge" : "")
+			+ (moved == null ? "" : " moved" + moved.where()));
+		// The rigid shape has no bus to hand a note to, so until the centre became a target it had
+		// no third option at all: it shifted or it fell to a bus.
+		return new Placed(addStackedEventModule(placements, start, triggerDelay, event.time(),
+			moved != null ? moved.slots()
+				: ultraSlots(event.notes(), style == ChordStyle.STACKED_FULL)), style, 0, nudge);
 	}
 
 	/**
@@ -4509,19 +4515,55 @@ public final class SongBuilder {
 	static boolean FLANK_AWARE_PARITY = true;
 
 	/**
-	 * Whether a stacked-bus may drop the back flank the lane behind minds, instead of shifting.
+	 * Whether a contested low note moves out of its slot instead of the module moving a column.
 	 *
-	 * <p>ekran: fill every slot that can still be filled and leave only the contested one open. The
-	 * dropped note is not lost -- it goes on the bus this head already has behind it -- so a head of
-	 * seven becomes one of six and the chord is whole either way.</p>
+	 * <p>ekran's third option, against the two this file had: a stacked chord that disagrees with the
+	 * lane behind used to either shift a column or give the shape up. It can also simply not hang the
+	 * one note that is in contention, and hang it somewhere else in the same module.</p>
 	 *
-	 * <p>Only when the bus has room for it in a cell it already paid for, which is when the tail
-	 * holds an odd number of notes: a bus carries two a cell, so an odd tail has half a cell going
-	 * spare and an even one would have to grow. A shed that lengthens the module is a shed the
-	 * planner budgeted two columns for and the walk spends three on, and this file has already paid
-	 * for that lesson once.</p>
+	 * <p>It is available exactly when the clash is <em>ours</em>. A stacked module's outer column
+	 * reads note, live, note along the lane, so two columns that disagree disagree in two ways at
+	 * once: their note against our relay, and their relay against our note. The second is a note of
+	 * ours and can be moved. The first is a note of theirs, already built, and nothing this chord
+	 * does to its own slots will save it -- so that one is still a shift or a bus. Both fall out of
+	 * one question rather than two: take the note out and ask {@link #stackedClashes} again, and a
+	 * clash that was never ours does not clear.</p>
+	 *
+	 * <p>And only where the note has somewhere free to go, because a relocation that lengthens the
+	 * module is one the planner budgeted two columns for and the walk spends three on, and this file
+	 * has already paid for that lesson once. Free means the centre, which costs nothing at all, or a
+	 * bus cell the tail had spare.</p>
 	 */
-	static boolean SHEDS_BACK_FLANK = true;
+	static boolean RELOCATES_CONTESTED_NOTE = true;
+
+	/**
+	 * Whether a relocated note may take a free centre.
+	 *
+	 * <p>The half of this that is new. The old rule could only push a note onto a bus, so it only
+	 * ever helped a stacked-bus; the centre belongs to every stacked shape, so a plain stacked chord
+	 * -- which had no third option at all -- gets one. It costs no cell either, where an even tail
+	 * costs one, so it is tried first.</p>
+	 *
+	 * <p>Harps only, and not as a preference. The centre note block stands directly on the dust
+	 * cross with no instrument block of its own, so whatever is written on it sounds as a harp.</p>
+	 */
+	static boolean RELOCATES_TO_CENTRE = true;
+
+	/**
+	 * Whether any of the four low slots may be the one that moves, or only the back pair.
+	 *
+	 * <p>The back pair is where nearly every contention is, and that is geometry rather than luck.
+	 * Touching lanes run opposite ways, so a neighbour whose relay lands on this module's back flank
+	 * has its own <em>back</em> flank against this module's relay -- and back flanks fill last, so
+	 * that one is often not there and the clash is ours alone. The neighbour a column the other way
+	 * puts its <em>front</em> flank against our relay, and the front pair fills first, so that clash
+	 * is nearly always theirs and no relocation will clear it.</p>
+	 *
+	 * <p>So the front pair is here for completeness and for the cases the neighbour is not a plain
+	 * module at all, and it should fire rarely. If it fires often, the table above is wrong about
+	 * something and the thing to do is find out what.</p>
+	 */
+	static boolean RELOCATES_ANY_CORNER = true;
 
 	/**
 	 * Whether a rigid stacked chord that loses the pair beside its opening keeps a head of five.
@@ -4562,15 +4604,70 @@ public final class SongBuilder {
 	/** Scratch: one line per nudge decision, with the run the wire has actually laid. */
 	static boolean TRACE_NUDGE = false;
 
-	/** Which side's back flank, left off, would clear the clash -- or -1 if neither does. */
-	private static int shedSide(PlacementPlan placements, Lane at, int time, UltraSlots slots) {
-		if (slots == null || slots.backFlanks() == 0) {
+	/**
+	 * Somewhere a contested note can go without the module growing a column.
+	 *
+	 * <p>Both halves are facts about the chord alone, not about the ground, which is what lets the
+	 * planner work them out as readily as the walk. The centre is free when the chord did not need it
+	 * to hold its notes; the bus has a cell spare when its tail is odd, because a bus carries two
+	 * notes a cell and an odd tail is half a cell short of using its last one.</p>
+	 */
+	private record RelocationRoom(boolean centre, boolean tail) {
+		static final RelocationRoom NONE = new RelocationRoom(false, false);
+
+		boolean any() {
+			return centre || tail;
+		}
+
+		/** Part of the oracle's key: two chords in the same place get different answers. */
+		int key() {
+			return (centre ? 1 : 0) + (tail ? 2 : 0);
+		}
+	}
+
+	private static RelocationRoom relocationRoom(ChordStyle style, List<EventNote> chord) {
+		if (!RELOCATES_CONTESTED_NOTE || !style.stacked()) {
+			return RelocationRoom.NONE;
+		}
+		UltraSlots slots = slotsFor(style, chord);
+		if (slots == null) {
+			return RelocationRoom.NONE;
+		}
+		StackedBusSplit split = splitFor(style, chord);
+		return new RelocationRoom(RELOCATES_TO_CENTRE && slots.centre() == null,
+			split != null && split.tail().size() % 2 == 1);
+	}
+
+	/** Whether this particular note has somewhere free to go. */
+	private static boolean roomFor(RelocationRoom room, EventNote note) {
+		return room.tail() || room.centre() && isHarpNote(note);
+	}
+
+	/**
+	 * Which low slot, emptied, would clear the clash -- or -1 if moving one note cannot.
+	 *
+	 * <p>Asked by taking the note out and putting the same question to {@link #stackedClashes} again,
+	 * rather than by working out from the geometry which corner must be the guilty one. Deciding that
+	 * by hand is the easy thing to get wrong, and getting it wrong is silent: the module builds, the
+	 * note count comes out right, and one note sounds on somebody else's tick. Asked this way a
+	 * wrong guess simply does not clear the check and the chord takes the shift it would have taken.
+	 * It also settles the case the geometry cannot, where what is across the way is a turn or a bus
+	 * rather than a module and more than one of the four is in contention.</p>
+	 */
+	private static int relocatableSlot(PlacementPlan placements, Lane at, int time, UltraSlots slots,
+			RelocationRoom room) {
+		if (slots == null || !room.any()) {
 			return -1;
 		}
-		for (int side = 0; side < 2; side++) {
-			if (slots.back(side) != null
-					&& !stackedClashes(placements, at, time, slots.withoutBack(side))) {
-				return side;
+		// Back pair first. Not a preference so much as an order: it is where nearly every real
+		// contention is, and trying it first leaves this answering what the back-flank rule before it
+		// answered wherever the other two slots change nothing.
+		int[] order = RELOCATES_ANY_CORNER ? new int[] {2, 3, 0, 1} : new int[] {2, 3};
+		for (int slot : order) {
+			EventNote note = slots.slot(slot);
+			if (note != null && roomFor(room, note)
+					&& !stackedClashes(placements, at, time, slots.without(slot))) {
+				return slot;
 			}
 		}
 		return -1;
@@ -4579,38 +4676,51 @@ public final class SongBuilder {
 	/**
 	 * What a stacked module standing here has to do about the lane behind it.
 	 *
-	 * <p>0 to build where it stands, 2 to drop one back flank onto its bus, 1 to shift a column, -1
+	 * <p>0 to build where it stands, 2 to move one low note somewhere free, 1 to shift a column, -1
 	 * to give the shape up. Asked in that order, and asked by the planner and the walk through this
 	 * one method so that neither can answer it differently from the other.</p>
 	 */
 	private static int parityVerdict(PlacementPlan placements, Lane at, int time, UltraSlots slots,
-			boolean mayShed) {
+			RelocationRoom room) {
 		if (!stackedClashes(placements, at, time, slots)) {
 			return 0;
 		}
-		if (mayShed && shedSide(placements, at, time, slots) >= 0) {
+		if (relocatableSlot(placements, at, time, slots, room) >= 0) {
 			return 2;
 		}
 		return stackedClashes(placements, at.ahead(1), time, slots) ? -1 : 1;
 	}
 
-	/** Whether this chord's bus has a cell already paid for that a shed note could go in. */
-	private static boolean mayShed(ChordStyle style, List<EventNote> chord) {
-		if (!SHEDS_BACK_FLANK || !style.busHeaded()) {
-			return false;
-		}
-		StackedBusSplit split = splitFor(style, chord);
-		return split != null && split.tail().size() % 2 == 1;
+	/** A contested low note lifted out of its slot, and the module that results. */
+	private record Relocation(UltraSlots slots, StackedBusSplit split, String where) {
 	}
 
-	/** The split with one back flank moved onto the bus, for the side that was in the way. */
-	private static StackedBusSplit shedBackFlank(StackedBusSplit split, int side) {
-		UltraSlots slots = split.slots();
+	/**
+	 * The module with its one contested note moved, or {@code null} if none of them can be.
+	 *
+	 * <p>The centre wherever it is free and the note can sound there, because it costs nothing and is
+	 * the only target a plain stacked chord has. Otherwise the bus, which is the old rule: the note
+	 * joins the tail, a head of seven becomes one of six, and the chord is whole either way.</p>
+	 */
+	private static Relocation relocate(PlacementPlan placements, Lane at, int time, ChordStyle style,
+			List<EventNote> chord, UltraSlots slots, RelocationRoom room) {
+		int slot = relocatableSlot(placements, at, time, slots, room);
+		if (slot < 0) {
+			return null;
+		}
+		EventNote note = slots.slot(slot);
+		UltraSlots emptied = slots.without(slot);
+		StackedBusSplit split = splitFor(style, chord);
+		if (room.centre() && isHarpNote(note)) {
+			UltraSlots moved = emptied.withCentre(note);
+			return new Relocation(moved, split == null ? null
+				: new StackedBusSplit(moved, split.head(), split.tail()), "Centre");
+		}
 		List<EventNote> tail = new ArrayList<>(split.tail());
-		tail.add(slots.back(side));
+		tail.add(note);
 		List<EventNote> head = new ArrayList<>(split.head());
-		head.remove(slots.back(side));
-		return new StackedBusSplit(slots.withoutBack(side), head, tail);
+		head.remove(note);
+		return new Relocation(emptied, new StackedBusSplit(emptied, head, tail), "Tail");
 	}
 
 	/** Which of the four low-note slots a chord fills, as one number, for keying the oracle. */
@@ -5016,11 +5126,34 @@ public final class SongBuilder {
 			return (back.get(0) == null ? 0 : 1) + (back.get(1) == null ? 0 : 1);
 		}
 
-		/** The same module with the back flank on one side left off, for the caller to rehome. */
-		UltraSlots withoutBack(int side) {
-			return new UltraSlots(centre, sides, front,
-				java.util.Collections.unmodifiableList(java.util.Arrays.asList(
-					side == 0 ? null : back.get(0), side == 1 ? null : back.get(1))));
+		/**
+		 * The four low slots under one numbering: 0 and 1 the front pair, 2 and 3 the back.
+		 *
+		 * <p>A number rather than a description because the planner and the walk both have to name
+		 * the same slot, and a number is the one thing they cannot say differently. Which one is in
+		 * contention is never more than one of the four: the lane behind has exactly one live cell in
+		 * the column that touches this one -- its own relay -- so it can line up with this module's
+		 * front pair or its back pair, and never with both.</p>
+		 */
+		EventNote slot(int index) {
+			return index < 2 ? front.get(index) : back.get(index - 2);
+		}
+
+		/** The same module with one low slot left empty, for the caller to rehome its note. */
+		UltraSlots without(int index) {
+			return new UltraSlots(centre, sides,
+				index < 2 ? leaving(front, index) : front,
+				index < 2 ? back : leaving(back, index - 2));
+		}
+
+		/** The same module with a note in the centre, which is where a rehomed harp goes for free. */
+		UltraSlots withCentre(EventNote note) {
+			return new UltraSlots(note, sides, front, back);
+		}
+
+		private static List<EventNote> leaving(List<EventNote> pair, int side) {
+			return java.util.Collections.unmodifiableList(java.util.Arrays.asList(
+				side == 0 ? null : pair.get(0), side == 1 ? null : pair.get(1)));
 		}
 	}
 

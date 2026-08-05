@@ -40,7 +40,7 @@ class ShedUnreachedTest {
 
 	@AfterEach
 	void restore() {
-		SongBuilder.SHEDS_BACK_FLANK = true;
+		SongBuilder.RELOCATES_CONTESTED_NOTE = true;
 	}
 
 	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
@@ -64,9 +64,9 @@ class ShedUnreachedTest {
 				continue;
 			}
 			for (int floors = 2; floors <= 6; floors++) {
-				SongBuilder.SHEDS_BACK_FLANK = true;
+				SongBuilder.RELOCATES_CONTESTED_NOTE = true;
 				SongBuilder.PastePlan with = build(notes, floors);
-				SongBuilder.SHEDS_BACK_FLANK = false;
+				SongBuilder.RELOCATES_CONTESTED_NOTE = false;
 				SongBuilder.PastePlan without = build(notes, floors);
 				if (with == null) {
 					continue;
@@ -78,7 +78,7 @@ class ShedUnreachedTest {
 				int wasQuiet = without == null ? -1 : readAll(placeInWorld(without)).unreachedNotes();
 				System.out.println("SHEDQUIET " + name + " w24 f" + floors + ": " + quiet
 					+ " silent with the shed, " + wasQuiet + " without, sheds="
-					+ with.padding().getOrDefault("planShedBackFlank", 0)
+					+ moves(with.padding())
 					+ ", " + with.commands().size() + " blocks");
 				if (with.commands().size() < smallest) {
 					smallest = with.commands().size();
@@ -91,7 +91,7 @@ class ShedUnreachedTest {
 			System.out.println("SHEDQUIET nothing is silenced at width twenty-four");
 			return;
 		}
-		SongBuilder.SHEDS_BACK_FLANK = true;
+		SongBuilder.RELOCATES_CONTESTED_NOTE = true;
 		SongBuilder.PastePlan plan = build(load(worst), worstFloors);
 		Map<BlockPos, BlockState> world = placeInWorld(plan);
 		NoteMachineReader.Reading reading = readAll(world);
@@ -117,6 +117,13 @@ class ShedUnreachedTest {
 			position -> world.getOrDefault(position, Blocks.AIR.defaultBlockState()),
 			first.offset(-8, -4, -4), first.offset(6, 3, 4),
 			AsciiDiagram.View.SOUTH, AsciiDiagram.Shape.CODE));
+	}
+
+	/** Every relocation the plan took, whichever slot it freed and wherever the note went. */
+	private static int moves(java.util.Map<String, Integer> padding) {
+		return padding.entrySet().stream()
+			.filter(pad -> pad.getKey().startsWith("planRelocateTo"))
+			.mapToInt(java.util.Map.Entry::getValue).sum();
 	}
 
 	private static SongBuilder.PastePlan build(List<SongBuilder.EventNote> notes, int floors) {

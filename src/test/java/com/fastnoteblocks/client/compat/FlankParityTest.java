@@ -46,7 +46,7 @@ class FlankParityTest {
 	@AfterEach
 	void restore() {
 		SongBuilder.FLANK_AWARE_PARITY = true;
-		SongBuilder.SHEDS_BACK_FLANK = true;
+		SongBuilder.RELOCATES_CONTESTED_NOTE = true;
 		SongBuilder.FRONT_HEAD_WHEN_BEHIND_BUSY = true;
 		SongBuilder.REPLAN_ON_DRIFT = true;
 	}
@@ -188,9 +188,9 @@ class FlankParityTest {
 			}
 			for (int floors = 2; floors <= 6; floors++) {
 				for (int width = 12; width <= 48; width += 4) {
-					SongBuilder.SHEDS_BACK_FLANK = false;
+					SongBuilder.RELOCATES_CONTESTED_NOTE = false;
 					SongBuilder.PastePlan without = build(notes, width, floors);
-					SongBuilder.SHEDS_BACK_FLANK = true;
+					SongBuilder.RELOCATES_CONTESTED_NOTE = true;
 					SongBuilder.PastePlan with = build(notes, width, floors);
 					if (without == null && with == null) {
 						continue;
@@ -204,7 +204,7 @@ class FlankParityTest {
 						continue;
 					}
 					both++;
-					sheds += with.padding().getOrDefault("planShedBackFlank", 0);
+					sheds += moves(with.padding());
 					off.add(without, name, width == 24);
 					on.add(with, name, width == 24);
 				}
@@ -272,6 +272,13 @@ class FlankParityTest {
 			+ " onlyPlainBus=" + onlyOff);
 		System.out.println(off.line("plainBus  "));
 		System.out.println(on.line("frontHead "));
+	}
+
+	/** Every relocation the plan took, whichever slot it freed and wherever the note went. */
+	private static int moves(java.util.Map<String, Integer> padding) {
+		return padding.entrySet().stream()
+			.filter(pad -> pad.getKey().startsWith("planRelocateTo"))
+			.mapToInt(java.util.Map.Entry::getValue).sum();
 	}
 
 	private static SongBuilder.PastePlan build(List<SongBuilder.EventNote> notes, int width,
