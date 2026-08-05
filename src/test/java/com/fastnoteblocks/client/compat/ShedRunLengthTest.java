@@ -39,6 +39,7 @@ class ShedRunLengthTest {
 	@AfterEach
 	void restore() {
 		SongBuilder.SHEDS_BACK_FLANK = true;
+		SongBuilder.MARK_COLLISIONS = false;
 	}
 
 	/**
@@ -84,7 +85,13 @@ class ShedRunLengthTest {
 	@Test
 	void dumpsTheRunThatOverruns() throws Exception {
 		SongBuilder.SHEDS_BACK_FLANK = true;
+		SongBuilder.MARK_COLLISIONS = true;
 		SongBuilder.PastePlan plan = build(load("deltarune-ch-4-guardian"));
+		plan.padding().forEach((key, count) -> {
+			if (key.startsWith("overran ")) {
+				System.out.println("DUMP " + count + "x " + key);
+			}
+		});
 		java.util.Map<String, String> under = new java.util.HashMap<>();
 		for (String command : plan.commands()) {
 			String[] parts = command.split(" ");
@@ -124,6 +131,11 @@ class ShedRunLengthTest {
 				openedNow = parts[1] + " " + parts[2] + " " + parts[3] + " " + block;
 			}
 		}
+		plan.padding().forEach((key, count) -> {
+			if (key.startsWith("overran ")) {
+				System.out.println("DUMP " + count + "x " + key);
+			}
+		});
 		System.out.println("DUMP no run over fifteen; last opened at " + openedNow
 			+ " after " + opened);
 	}

@@ -822,7 +822,21 @@ public final class SongBuilder {
 			if (headed != null && stackedClashes(placements, lane.ahead(delayColumns),
 					event.time(), headed.slots())) {
 				splitClashed = true;
-				StackedSplit shifted = !SPLIT_NUDGES
+				// And the same question the chord nudge is asked: does the wire still reach. This
+				// nudge lays a cell of dust where the head's repeater would have stood, on top of the
+				// delay about to be laid in front of it -- so what has to fit is the run so far, the
+				// delay, and the pad. ekran found this one from the blocks: the module really did
+				// have to move, and moving it put its repeater a cell past the wire.
+				//
+				// Asked before the delay exists, so the delay is added by hand. Where a repeater
+				// falls inside that delay the run resets and this is too careful by however much it
+				// reset, which is the safe way to be wrong about a nudge.
+				boolean splitOutOfWire = MEASURED_NUDGE_REACH
+					&& placements.runSinceRepeater() + delayColumns + 1 > DUST_RANGE;
+				if (splitOutOfWire) {
+					placements.padded("planSplitNudgePastTheWire");
+				}
+				StackedSplit shifted = !SPLIT_NUDGES || splitOutOfWire
 					|| stackedClashes(placements, lane.ahead(delayColumns + 1), event.time(),
 						headed.slots())
 					? null : stackedSplitOf(event.notes(), room - 1, splitCells, climb > 0,
@@ -4310,6 +4324,12 @@ public final class SongBuilder {
 		// reach. The bus needs nothing, because its repeater stands where the wire already is.
 		boolean outOfWire = MEASURED_NUDGE_REACH
 			&& placements.runSinceRepeater() + 1 > DUST_RANGE;
+		if (TRACE_NUDGE && nudge) {
+			System.out.println("NUDGE at " + lane.pos().getX() + " " + lane.pos().getY() + " "
+				+ lane.pos().getZ() + " run=" + placements.runSinceRepeater()
+				+ " signal=" + signal + " style=" + style + " notes=" + event.notes().size()
+				+ " outOfWire=" + outOfWire);
+		}
 		if (nudge && (signal < NUDGE_REACH || outOfWire)) {
 			gaveUp = outOfWire ? "nudgePastTheWire" : "nudgeOutOfReach";
 			placements.padded(outOfWire ? "planBusForRunMeasured" : "planBusForSignal");
@@ -4538,6 +4558,9 @@ public final class SongBuilder {
 	 * nought, which is a different question from whether the wire reaches one cell further.</p>
 	 */
 	static boolean MEASURED_NUDGE_REACH = true;
+
+	/** Scratch: one line per nudge decision, with the run the wire has actually laid. */
+	static boolean TRACE_NUDGE = false;
 
 	/** Which side's back flank, left off, would clear the clash -- or -1 if neither does. */
 	private static int shedSide(PlacementPlan placements, Lane at, int time, UltraSlots slots) {
@@ -5928,6 +5951,12 @@ public final class SongBuilder {
 					runSinceRepeater = 0;
 				} else if ("minecraft:redstone_wire".equals(block)) {
 					runSinceRepeater++;
+					// The cell that puts a run past what a repeater reaches, and the shape that laid
+					// it. Every guard in this file asks before building; this one notices after, which
+					// is the only way to catch the shape nobody thought to guard.
+					if (runSinceRepeater > DUST_RANGE) {
+						padded("overran " + placing);
+					}
 				}
 			}
 			if (existing != null && !existing.equals(block)) {
