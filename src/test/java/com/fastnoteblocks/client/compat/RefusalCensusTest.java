@@ -37,6 +37,70 @@ class RefusalCensusTest {
 
 	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
 
+	/**
+	 * The same census again, but naming the two shapes rather than the two blocks.
+	 *
+	 * <p>Three sampled refusals were all a nudged stacked chord against the four-cell descent. Three
+	 * is a sample; this is the census, and the point of it is the count that is <em>not</em> that --
+	 * a refusal with some other pair of shapes in it is a second fault and would need its own fix.</p>
+	 */
+	@Test
+	void countsEveryRefusalByWhichShapesCollided() throws Exception {
+		SongBuilder.MARK_COLLISIONS = true;
+		try {
+			Map<String, Integer> byShapes = new TreeMap<>();
+			int marked = 0;
+			int cells = 0;
+			for (Path file : songs()) {
+				String name = file.getFileName().toString().replace(".json", "");
+				if (name.startsWith("ultra-")) {
+					continue;
+				}
+				List<SongBuilder.EventNote> notes = load(name);
+				if (notes.isEmpty()) {
+					continue;
+				}
+				for (int floors = 2; floors <= 6; floors++) {
+					for (int width = 12; width <= 48; width += 4) {
+						SongBuilder.PastePlan plan;
+						try {
+							plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0), notes,
+								SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+								new SongBuilder.BuildLimits(4, width, floors));
+						} catch (RuntimeException stillRefused) {
+							byShapes.merge("REFUSED ANYWAY: " + stillRefused.getMessage()
+								.replaceAll("-?\\d+", "#"), 1, Integer::sum);
+							continue;
+						}
+						if (plan.collisions().isEmpty()) {
+							continue;
+						}
+						marked++;
+						cells += plan.collisions().size();
+						for (String what : plan.collisions().values()) {
+							// The blocks differ from song to song and the shapes do not, so only the two
+							// bracketed names are kept.
+							byShapes.merge(what.replaceAll("minecraft:\\S+ ", ""), 1, Integer::sum);
+						}
+					}
+				}
+			}
+			System.out.println("SHAPES " + marked + " builds collided, " + cells + " cells");
+			byShapes.entrySet().stream()
+				.sorted((a, b) -> Integer.compare(b.getValue(), a.getValue()))
+				.forEach(pair -> System.out.println("SHAPES  " + pair.getValue() + "x  "
+					+ pair.getKey()));
+		} finally {
+			SongBuilder.MARK_COLLISIONS = false;
+		}
+	}
+
+	private static List<Path> songs() throws Exception {
+		try (Stream<Path> listing = Files.list(SONGS)) {
+			return listing.filter(f -> f.toString().endsWith(".json")).sorted().toList();
+		}
+	}
+
 	@Test
 	void countsEveryRefusalByWhatCollided() throws Exception {
 		List<Path> files;
