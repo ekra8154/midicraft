@@ -4634,34 +4634,13 @@ public final class SongBuilder {
 			} else {
 				addStackedBusModule(placements, at, 1, time, slots, tail);
 			}
-			List<BlockPos> wrong = placements.mispoweredInTrial();
-			if (TRACE_PARITY && !wrong.isEmpty() && PARITY_SHOWN++ < 12) {
-				System.out.println("PARITY " + wrong.size() + " wrong placing at "
-					+ at.pos().getX() + " " + at.pos().getY() + " " + at.pos().getZ()
-					+ " tick=" + time + " tail=" + (tail == null ? "none" : tail.size()));
-				for (int i = 0; i < Math.min(3, wrong.size()); i++) {
-					System.out.println("PARITY   " + placements.explain(wrong.get(i)));
-				}
-			}
-			return !wrong.isEmpty();
+			return !placements.mispoweredInTrial().isEmpty();
 		} catch (IllegalArgumentException collided) {
-			// Not a parity answer. A module that will not fit is a different problem with a fallback
-			// of its own -- addChordModule builds it as a bus and counts planBusForCollision -- and
-			// the rule this replaces never refused on one either. Reported as mispowering, every
-			// chord that merely overlapped something gave up its shape: 409,143 of them against the
-			// old rule's 258, and the whole library ten percent deeper.
-			if (TRACE_PARITY && PARITY_SHOWN++ < 12) {
-				System.out.println("PARITY collided: " + collided.getMessage());
-			}
-			return false;
+			return true;
 		} finally {
 			placements.rollbackTrial();
 		}
 	}
-
-	/** Scratch: why a module was refused where it stood, for the first few refusals. */
-	static boolean TRACE_PARITY = false;
-	static int PARITY_SHOWN = 0;
 
 	/** The first corner that, moved somewhere free, leaves nothing sounding wrongly. */
 	private static Relocated relocationFor(PlacementPlan placements, Lane at, int time,
@@ -6119,25 +6098,6 @@ public final class SongBuilder {
 			if (!triggered && mine.contains(at)) {
 				wrong.add(at);
 			}
-		}
-
-		/** A note, its tick, and every powered neighbour with theirs -- for reading a refusal. */
-		String explain(BlockPos note) {
-			StringBuilder said = new StringBuilder(note.getX() + " " + note.getY() + " "
-				+ note.getZ() + " tick=" + notes.get(note) + " is=" + blocks.get(note));
-			Integer own = powered.get(note);
-			if (own != null) {
-				said.append(" selfPowered=").append(own);
-			}
-			for (Direction direction : Direction.values()) {
-				BlockPos at = note.relative(direction);
-				Integer when = powered.get(at);
-				if (when != null) {
-					said.append(" | ").append(direction).append(" ").append(blocks.get(at))
-						.append(" powered=").append(when);
-				}
-			}
-			return said.toString();
 		}
 
 		/** What the blocks laid since the trial opened would sound wrongly, if anything. */
