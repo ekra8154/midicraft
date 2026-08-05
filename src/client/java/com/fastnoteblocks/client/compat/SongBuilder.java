@@ -820,10 +820,11 @@ public final class SongBuilder {
 			boolean splitNudge = false;
 			boolean splitClashed = false;
 			if (headed != null && stackedClashes(placements, lane.ahead(delayColumns),
-					event.time())) {
+					event.time(), headed.slots())) {
 				splitClashed = true;
 				StackedSplit shifted = !SPLIT_NUDGES
-					|| stackedClashes(placements, lane.ahead(delayColumns + 1), event.time())
+					|| stackedClashes(placements, lane.ahead(delayColumns + 1), event.time(),
+						headed.slots())
 					? null : stackedSplitOf(event.notes(), room - 1, splitCells, climb > 0,
 						!columnBehindBusy || delayColumns + 1 > 0);
 				if (shifted == null) {
@@ -1660,7 +1661,7 @@ public final class SongBuilder {
 	 */
 	private interface ParityOracle {
 		/** 1 to shift a column, -1 to give the shape up, 0 to build where it stands. */
-		int verdictAt(int x, int time);
+		int verdictAt(int x, int time, UltraSlots slots);
 	}
 
 	/**
@@ -1673,14 +1674,19 @@ public final class SongBuilder {
 	private static ParityOracle parityOracle(PlacementPlan placements, Lane laneStart) {
 		int originX = laneStart.pos().getX();
 		int step = laneStart.travel().getStepX();
-		Map<Long, Integer> answered = new java.util.HashMap<>();
-		return (x, time) -> answered.computeIfAbsent(((long) x << 32) ^ (time & 0xffffffffL), key -> {
-			Lane at = laneStart.ahead((x - originX) * step);
-			if (!stackedClashes(placements, at, time)) {
-				return 0;
-			}
-			return stackedClashes(placements, at.ahead(1), time) ? -1 : 1;
-		});
+		// Keyed on the flanks as well as on the column now, because two chords standing in the same
+		// place no longer get the same answer: one that hangs four low notes can clash where one that
+		// hangs two does not.
+		Map<Integer, Map<Long, Integer>> answered = new java.util.HashMap<>();
+		return (x, time, slots) -> answered
+			.computeIfAbsent(flankMask(slots), mask -> new java.util.HashMap<>())
+			.computeIfAbsent(((long) x << 32) ^ (time & 0xffffffffL), key -> {
+				Lane at = laneStart.ahead((x - originX) * step);
+				if (!stackedClashes(placements, at, time, slots)) {
+					return 0;
+				}
+				return stackedClashes(placements, at.ahead(1), time, slots) ? -1 : 1;
+			});
 	}
 
 	private static Landing landingOf(int startX, int stepX, EventGroup event, int wait, boolean busy,
@@ -1739,7 +1745,8 @@ public final class SongBuilder {
 		// gives the shape up and is built as a bus. Both were surprises to the plan until now.
 		boolean nudged = false;
 		if (style.stacked() && parity != null) {
-			int verdict = parity.verdictAt(startX + stepX * delayColumns, event.time());
+			int verdict = parity.verdictAt(startX + stepX * delayColumns, event.time(),
+				slotsFor(style, event.notes()));
 			if (verdict < 0) {
 				style = ChordStyle.BUS;
 			} else {
@@ -4200,8 +4207,9 @@ public final class SongBuilder {
 		Lane start = lane;
 		boolean nudge = false;
 		if (style.stacked()) {
-			boolean clashesHere = stackedClashes(placements, start, event.time());
-			if (clashesHere && stackedClashes(placements, start.ahead(1), event.time())) {
+			UltraSlots slots = slotsFor(style, event.notes());
+			boolean clashesHere = stackedClashes(placements, start, event.time(), slots);
+			if (clashesHere && stackedClashes(placements, start.ahead(1), event.time(), slots)) {
 				gaveUp = "parityBothCells";
 				placements.padded(slackColumns > 0 ? "planParityGaveUpSlack"
 					: "planParityGaveUpTight");
@@ -4355,22 +4363,69 @@ public final class SongBuilder {
 	 * <p>Two cells out and not one, because one cell out is this module's own outer column. What
 	 * sits beyond that is the neighbour.</p>
 	 */
-	private static boolean stackedClashes(PlacementPlan placements, Lane lane, int time) {
+	private static boolean stackedClashes(PlacementPlan placements, Lane lane, int time,
+			UltraSlots slots) {
 		BlockPos cross = lane.ahead(1).pos();
 		Direction travel = lane.travel();
-		for (Direction out : List.of(lane.noteSide(), lane.noteSide().getOpposite())) {
+		List<Direction> outward = List.of(lane.noteSide(), lane.noteSide().getOpposite());
+		for (int side = 0; side < outward.size(); side++) {
+			Direction out = outward.get(side);
 			BlockPos beyond = cross.relative(out, 2);
-			// The block this module would relay through, against a note of the lane behind.
+			// The block this module would relay through, against a note of the lane behind. Always
+			// asked: both relays are built whatever the chord holds, and both are live.
 			if (placements.noteAt(beyond, time)) {
 				return true;
 			}
-			// And this module's own low notes, against a live block of the lane behind.
-			if (placements.liveAt(beyond.relative(travel), time)
-					|| placements.liveAt(beyond.relative(travel.getOpposite()), time)) {
+			// And this module's own low notes, against a live block of the lane behind -- but only the
+			// ones it is actually going to hang. ekran, from the collision that started this: the two
+			// modules in it use four hangers each and would not have powered one another, so the nudge
+			// bought nothing and cost the column the staircase needed.
+			//
+			// Which flank falls where is the whole of it. Touching lanes run opposite ways, so this
+			// module's back flank stands against the neighbour's front and vice versa, and the slots
+			// fill front-first. A chord of five therefore has no back flank on either side, and two of
+			// them a column apart never meet at all.
+			boolean hasFront = !FLANK_AWARE_PARITY || slots == null || side < slots.front().size();
+			boolean hasBack = !FLANK_AWARE_PARITY || slots == null || side < slots.back().size();
+			if (hasFront && placements.liveAt(beyond.relative(travel), time)) {
+				return true;
+			}
+			if (hasBack && placements.liveAt(beyond.relative(travel.getOpposite()), time)) {
 				return true;
 			}
 		}
 		return false;
+	}
+
+	/**
+	 * Whether the parity check asks about flanks this chord has, rather than about every flank.
+	 *
+	 * <p>Off, this is the rule as it stood: a stacked module is assumed to hang all four low notes,
+	 * so any live block in the lane behind at either end of its outer column is a clash. On, it is
+	 * asked of the slots the chord actually fills.</p>
+	 */
+	static boolean FLANK_AWARE_PARITY = true;
+
+	/** Which of the four low-note slots a chord fills, as one number, for keying the oracle. */
+	private static int flankMask(UltraSlots slots) {
+		if (slots == null) {
+			return 15;
+		}
+		int mask = 0;
+		for (int side = 0; side < 2; side++) {
+			mask |= side < slots.front().size() ? 1 << side : 0;
+			mask |= side < slots.back().size() ? 4 << side : 0;
+		}
+		return mask;
+	}
+
+	/** The slots a chord of this style would fill, for asking which flanks it hangs. */
+	private static UltraSlots slotsFor(ChordStyle style, List<EventNote> chord) {
+		if (style.busHeaded()) {
+			StackedBusSplit split = splitFor(style, chord);
+			return split == null ? null : split.slots();
+		}
+		return ultraSlots(chord, style == ChordStyle.STACKED_FULL);
 	}
 
 	/**
