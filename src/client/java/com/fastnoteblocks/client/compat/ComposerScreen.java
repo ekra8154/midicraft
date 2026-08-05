@@ -4574,12 +4574,12 @@ public final class ComposerScreen extends Screen {
 			if (DenseBuildScreen.needsAsking(plan)) {
 				minecraft.gui.setScreen(new DenseBuildScreen(this, plan.wrongNotes(),
 					plan.breaches().size(), plan.worstBreach(), () -> {
-						CommandPasteSender.start(plan.commands(), plan.faults());
+						CommandPasteSender.start(plan.commands(), plan.report());
 						minecraft.gui.setScreen(null);
 					}));
 				return;
 			}
-			CommandPasteSender.start(plan.commands(), plan.faults());
+			CommandPasteSender.start(plan.commands(), plan.report());
 			minecraft.gui.setScreen(null);
 		}));
 	}

@@ -3889,6 +3889,20 @@ public final class SongBuilder {
 	 */
 	static boolean TRACE_TURNS = false;
 
+	/**
+	 * Scratch: build through a collision instead of refusing, and light the cell up in sea lantern.
+	 *
+	 * <p>Ninety-five builds in the library will not paste, and every one of them is two shapes
+	 * wanting the same block. The message says which two and where, which is enough to know the rung
+	 * lands at instrument height and not enough to know whose column it lands in -- the chord going
+	 * into the turn, or the one coming out of it, or a lane on another floor entirely.</p>
+	 *
+	 * <p>So: keep whatever was standing, remember the cell, and after everything else is placed go
+	 * back over the list with sea lantern. The build is then wrong on purpose and glowing where it is
+	 * wrong, which can be walked round and looked at. Never leave this on for a real build.</p>
+	 */
+	static boolean MARK_COLLISIONS = false;
+
 	/** Scratch: turn {@link #strandsNext} off, so a lane it changed can be diffed against itself. */
 	static boolean LOOKAHEAD = true;
 
@@ -5196,7 +5210,7 @@ public final class SongBuilder {
 	record PastePlan(List<String> commands, int width, int depth, int height, int spanX, int spanZ,
 			PasteMode mode, List<String> faults, List<BlockPos> turns, List<Integer> moved,
 			List<Integer> breaches, List<Integer> recesses, Map<String, Integer> padding,
-			int nearWall, int farWall) {
+			int nearWall, int farWall, Map<BlockPos, String> collisions) {
 
 		/**
 		 * Cells of lane filled with wire rather than with music, counted by what asked for them.
@@ -5222,6 +5236,22 @@ public final class SongBuilder {
 		 */
 		int wrongNotes() {
 			return (int)faults.stream().filter(fault -> fault.startsWith("the note")).count();
+		}
+
+		/**
+		 * The faults, with every marked collision after them, for the paste to print when it is done.
+		 *
+		 * <p>Coordinates space-separated, so a line can be dragged into {@code /tp} as it stands.</p>
+		 */
+		List<String> report() {
+			if (collisions.isEmpty()) {
+				return faults;
+			}
+			List<String> lines = new ArrayList<>(faults);
+			lines.add(collisions.size() + " collisions, marked with sea lantern:");
+			collisions.forEach((at, what) -> lines.add("  " + at.getX() + " " + at.getY() + " "
+				+ at.getZ() + "  " + what));
+			return lines;
 		}
 
 		/** How far past the promised width the worst-behaved lane went, in blocks. */
@@ -5250,6 +5280,8 @@ public final class SongBuilder {
 
 		private boolean recording = true;
 		private final Map<BlockPos, String> blocks = new LinkedHashMap<>();
+		/** Cells two shapes both wanted, and what each pair was, when {@link #MARK_COLLISIONS}. */
+		private final Map<BlockPos, String> collisions = new LinkedHashMap<>();
 		/** Note block positions and the event tick each one belongs to. */
 		private final Map<BlockPos, Integer> notes = new LinkedHashMap<>();
 		/**
@@ -5570,9 +5602,15 @@ public final class SongBuilder {
 				trial.blocksAdded().add(key);
 			}
 			if (existing != null && !existing.equals(block)) {
-				throw new IllegalArgumentException("Placement layout collision at "
-					+ describe(key) + ": " + existing + " is already there and " + block
-					+ " wants the same block");
+				if (!MARK_COLLISIONS) {
+					throw new IllegalArgumentException("Placement layout collision at "
+						+ describe(key) + ": " + existing + " is already there and " + block
+						+ " wants the same block");
+				}
+				// What was standing wins, so the rest of the walk carries on over the layout it would
+				// have had anyway. Only the first claim on a cell is remembered: a column that gets
+				// wanted three times is still one place to go and stand.
+				collisions.putIfAbsent(key, existing + " held off " + block);
 			}
 			if (!"minecraft:air".equals(block)) {
 				minimumX = Math.min(minimumX, key.getX());
@@ -5673,11 +5711,20 @@ public final class SongBuilder {
 				throw new IllegalArgumentException("Refusing to build a broken machine: "
 					+ faults.get(0) + ". This is a bug in the layout, not in the song.");
 			}
-			List<String> commands = blocks.entrySet().stream()
+			List<String> commands = new ArrayList<>(blocks.entrySet().stream()
 				.map(entry -> "setblock " + (entry.getKey().getX() + shiftX) + " "
 					+ entry.getKey().getY() + " " + (entry.getKey().getZ() + shiftZ) + " "
 					+ entry.getValue() + " replace")
-				.toList();
+				.toList());
+			// The marking pass, last so that it wins: every other claim on the cell has been made by
+			// now, and a lantern placed halfway through would be quietly built over by the next chord.
+			Map<BlockPos, String> marked = new LinkedHashMap<>();
+			for (Map.Entry<BlockPos, String> clash : collisions.entrySet()) {
+				BlockPos at = clash.getKey().offset(shiftX, 0, shiftZ);
+				marked.put(at, clash.getValue());
+				commands.add("setblock " + at.getX() + " " + at.getY() + " " + at.getZ()
+					+ " minecraft:sea_lantern replace");
+			}
 			int widthX = maximumX < minimumX ? 0 : maximumX - minimumX + 1;
 			int widthZ = maximumZ < minimumZ ? 0 : maximumZ - minimumZ + 1;
 			int height = maximumY < minimumY ? 0 : maximumY - minimumY + 1;
@@ -5686,7 +5733,7 @@ public final class SongBuilder {
 				mode, List.copyOf(faults),
 				turns.stream().map(turn -> turn.offset(shiftX, 0, shiftZ)).toList(),
 				List.copyOf(moved), List.copyOf(breaches), List.copyOf(recesses),
-				Map.copyOf(padding), nearWall + shiftX, farWall + shiftX);
+				Map.copyOf(padding), nearWall + shiftX, farWall + shiftX, Map.copyOf(marked));
 		}
 	}
 }

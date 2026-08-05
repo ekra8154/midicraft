@@ -7,6 +7,7 @@ import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.builder.RequiredArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
 import java.util.List;
+import java.util.Map;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
 import net.minecraft.ChatFormatting;
@@ -78,6 +79,14 @@ public final class DebugCommands {
 			dispatcher.register(literal("asciidiagram")
 				.requires(source -> FastNoteblocksConfig.get().debugCommandsEnabled())
 				.then(corner("from").then(views())));
+			// A toggle rather than an argument to the paste, because the builds worth looking at this
+			// way are songs pasted from the build screen, which takes no arguments.
+			dispatcher.register(literal("fastnoteblockcollisions")
+				.requires(source -> FastNoteblocksConfig.get().debugCommandsEnabled())
+				.executes(context -> markCollisions(context.getSource(),
+					!SongBuilder.MARK_COLLISIONS))
+				.then(literal("on").executes(context -> markCollisions(context.getSource(), true)))
+				.then(literal("off").executes(context -> markCollisions(context.getSource(), false))));
 		});
 	}
 
@@ -295,6 +304,7 @@ public final class DebugCommands {
 				source.sendFeedback(Component.literal("  no faults")
 					.withStyle(ChatFormatting.GREEN));
 			}
+			reportCollisions(source, built);
 		};
 		if (dry) {
 			report.run();
@@ -308,6 +318,43 @@ public final class DebugCommands {
 		// first is several hundred lines above the build it describes by the time the build is there.
 		CommandPasteSender.start(plan.commands(), List.of(), report);
 		return plan.faults().size() + 1;
+	}
+
+	/**
+	 * Build through collisions and light them up, or stop doing that.
+	 *
+	 * <p>What comes back is a machine that is wrong on purpose: the block that got there first is
+	 * kept, whatever wanted it second is dropped, and the cell is a sea lantern. So the song will not
+	 * play properly and is not meant to -- it is meant to be walked round, to see whose column the
+	 * lantern is standing in.</p>
+	 */
+	/**
+	 * Every marked cell, as coordinates that can be pasted straight into {@code /tp}.
+	 *
+	 * <p>All of them rather than a count: there are never many, and the pair of blocks differs from
+	 * one to the next -- which is the thing worth reading, since it says what wanted the cell.</p>
+	 */
+	static void reportCollisions(FabricClientCommandSource source, SongBuilder.PastePlan plan) {
+		if (plan.collisions().isEmpty()) {
+			return;
+		}
+		source.sendFeedback(Component.literal("  " + plan.collisions().size()
+			+ " collisions, marked with sea lantern:").withStyle(ChatFormatting.YELLOW));
+		for (Map.Entry<BlockPos, String> clash : plan.collisions().entrySet()) {
+			BlockPos at = clash.getKey();
+			source.sendFeedback(Component.literal("    " + at.getX() + " " + at.getY() + " "
+				+ at.getZ() + "  " + clash.getValue()).withStyle(ChatFormatting.YELLOW));
+		}
+	}
+
+	private static int markCollisions(FabricClientCommandSource source, boolean on) {
+		SongBuilder.MARK_COLLISIONS = on;
+		source.sendFeedback(Component.literal(on
+			? "Collisions will be built through and marked with sea lantern. Builds made this way "
+				+ "are broken on purpose -- turn this off before building anything you want to hear."
+			: "Collisions refuse the build again.")
+			.withStyle(on ? ChatFormatting.YELLOW : ChatFormatting.GRAY));
+		return 1;
 	}
 
 	/** Where a real paste would land, so a debug build stands where a song would. */
