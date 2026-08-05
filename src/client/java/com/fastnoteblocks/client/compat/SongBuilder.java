@@ -942,6 +942,20 @@ public final class SongBuilder {
 			if (layout.ultra() && wantsTurn && canTurn && columns < 0) {
 				placements.breached(-columns);
 			}
+			// Every chord standing outside the footprint, not only the ones that asked to turn.
+			// A chord that does not overshoot prints nothing on the old condition, and a lane already
+			// past its wall can lay several of those in a row -- which is exactly the run ekran has
+			// been reading in game and the old trace could not see.
+			if (TRACE_TURNS && layout.ultra() && (wantsTurn || columns < 0)) {
+				System.out.println("PAST t=" + event.time() + " notes=" + event.notes().size()
+					+ " columns=" + columns + " overshoots=" + overshoots
+					+ " wantsTurn=" + wantsTurn + " canTurn=" + canTurn + " turning=" + turning
+					+ " laneStarted=" + laneStarted + " straddles=" + straddles
+					+ " split=" + split + " carried=" + carried + " tip=" + tipSignal
+					+ " flatAhead=" + flatAhead + " reachesWall=" + reachesWall
+					+ " at " + lane.pos().getX() + " " + lane.pos().getY() + " "
+					+ lane.pos().getZ());
+			}
 			if (TRACE_TURNS && layout.ultra() && wantsTurn) {
 				// Why the head went, when it went. A cut is refused either because the chord cannot
 				// make a head at all or because the far half would be out of reach, and the two want
@@ -1781,8 +1795,15 @@ public final class SongBuilder {
 				tailCells = (split.tail().size() + 1) / 2;
 				// Head, transition and bus all have to be inside the wall, where a plain stacked
 				// module only ever had to fit its two columns.
+				//
+				// Unless the bus it would fall to is longer than the head it is giving up, which for
+				// any chord the head takes seven from it is: see {@link #addChordModule}, which has
+				// to make this same substitution or the lane is measured for one shape and built as
+				// another.
 				if ((wall - (startX + stepX * (delayColumns + behindShift))) * stepX
-						< STACKED_CELLS + STACKED_BUS_TRANSITION + tailCells + 1) {
+						< STACKED_CELLS + STACKED_BUS_TRANSITION + tailCells + 1
+						&& !(KEEPS_HEAD_WHEN_THE_BUS_IS_LONGER && 1 + cells
+							> STACKED_CELLS + STACKED_BUS_TRANSITION + tailCells)) {
 					style = ChordStyle.BUS;
 					behindShift = 0;
 				}
@@ -4360,11 +4381,30 @@ public final class SongBuilder {
 			stackedRoom = measured == null ? STACKED_CELLS + 1
 				: STACKED_CELLS + STACKED_BUS_TRANSITION + (measured.tail().size() + 1) / 2 + 1;
 		}
-		if (style.stacked() && roomAhead < stackedRoom) {
+		// A fallback has to be shorter than the shape it replaces, or it is not a fallback.
+		//
+		// A stacked-bus of twenty-four is a head, a transition and nine cells: twelve columns. It is
+		// refused here at twelve, because a shift would want a thirteenth. The plain bus it drops to
+		// is a repeater and twelve cells, which is thirteen columns for certain -- so a chord one
+		// column short of its head is handed a shape a column longer than the head, and lands past
+		// the wall it was being kept inside.
+		//
+		// And then it cannot cut its way out either, which is the expensive half. A headed cut of
+		// twenty-four is a transition, nine cells and the staircase -- fourteen blocks of wire, well
+		// inside the fifteen a repeater reaches. Unheaded it is twelve cells and the staircase,
+		// which is sixteen, so `couldSplit` says no. The lane runs on, and every chord of that size
+		// after it hands on 15 - 12 = 3 blocks of wire where the staircase wants four, so it cannot
+		// turn either. That is where ekran's long breaches start, and it starts here.
+		int busColumns = 1 + (event.notes().size() + 1) / 2;
+		boolean busIsLonger = KEEPS_HEAD_WHEN_THE_BUS_IS_LONGER && style.busHeaded()
+			&& busColumns > stackedRoom - 1;
+		if (style.stacked() && roomAhead < stackedRoom && !busIsLonger) {
 			gaveUp = "roomAhead" + roomAhead + "<" + stackedRoom;
 			placements.padded("planBusForRoom");
 			style = ChordStyle.BUS;
 			nudge = false;
+		} else if (busIsLonger && roomAhead < stackedRoom) {
+			placements.padded("planKeptHeadBusWasLonger");
 		}
 		// And a nudge has to be reachable. Moving the repeater a cell forward puts it a cell further
 		// down the wire, and the wire may not have a cell left to give -- after a chord has been cut
@@ -5338,6 +5378,25 @@ public final class SongBuilder {
 
 	/** Whether a lone back flank hangs away from the lane the walk has not built yet. */
 	static boolean BACK_FLANK_AWAY_FROM_NEXT_LANE = true;
+
+	/**
+	 * Whether a stacked-bus too near the wall keeps its head when the plain bus is longer still.
+	 *
+	 * <p>The room check allows the shape a column to shift into, so it refuses at the length the
+	 * shape actually is. For the rigid module that is fine -- as a bus it is four blocks at the most
+	 * and fits anywhere. For a stacked-bus it is not: the head carries seven notes in two columns
+	 * that the bus spends four cells on, so the bus is always the longer of the two, and refusing the
+	 * head for want of one column hands the chord a shape that wants one more.</p>
+	 *
+	 * <p>What it costs is not the column. A headed cut of twenty-four spends a transition, nine cells
+	 * and a staircase -- fourteen of the fifteen a repeater reaches -- and an unheaded one spends
+	 * sixteen, so the chord that lost its head can no longer be cut across the descent either. It is
+	 * laid whole, past the wall, and hands on {@code 15 - 12 = 3} blocks of wire where the staircase
+	 * wants four. Every chord of that size after it does the same, so the lane cannot turn until a
+	 * smaller chord comes along. ekran: the code is already supposed to be able to split a chord of
+	 * twenty-seven, and all of these are below that.</p>
+	 */
+	static boolean KEEPS_HEAD_WHEN_THE_BUS_IS_LONGER = true;
 
 	/**
 	 * Whether the first module of a lane that landed off a staircase may use the pair behind it.

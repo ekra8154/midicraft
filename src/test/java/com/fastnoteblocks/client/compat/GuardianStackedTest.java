@@ -109,6 +109,24 @@ class GuardianStackedTest {
 		}
 	}
 
+	/** And the same on the rules as they stood before any of this week's changes. */
+	@Test
+	void tracesEveryTurnItWantedOnTheOldRules() throws Exception {
+		SongBuilder.RELOCATES_CONTESTED_NOTE = false;
+		SongBuilder.BACK_FLANK_AWAY_FROM_NEXT_LANE = false;
+		SongBuilder.NUDGE_WHEN_BEHIND_BUSY = false;
+		SongBuilder.BACK_PAIR_FREE_AFTER_A_STAIRCASE = false;
+		SongBuilder.TRACE_TURNS = true;
+		try {
+			build(load("deltarune-ch-4-guardian"));
+		} finally {
+			SongBuilder.TRACE_TURNS = false;
+			SongBuilder.RELOCATES_CONTESTED_NOTE = true;
+			SongBuilder.BACK_FLANK_AWAY_FROM_NEXT_LANE = true;
+			SongBuilder.NUDGE_WHEN_BEHIND_BUSY = true;
+		}
+	}
+
 	private static String describe(SongBuilder.PastePlan plan) {
 		return "blocks=" + plan.commands().size() + " spanZ=" + plan.spanZ()
 			+ " breaches=" + plan.breaches().size()
