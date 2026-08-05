@@ -35,7 +35,7 @@ class GuardianStackedTest {
 	@AfterEach
 	void restore() {
 		SongBuilder.CENTRE_TAKES_A_SPARE_HARP = true;
-		SongBuilder.BACK_PAIR_FREE_AFTER_CLIMB = true;
+		SongBuilder.BACK_PAIR_FREE_AFTER_A_STAIRCASE = true;
 	}
 
 	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
@@ -51,9 +51,9 @@ class GuardianStackedTest {
 		List<SongBuilder.EventNote> notes = load("deltarune-ch-4-guardian");
 		for (boolean climb : new boolean[] {false, true}) {
 			for (boolean swap : new boolean[] {false, true}) {
-				SongBuilder.BACK_PAIR_FREE_AFTER_CLIMB = climb;
+				SongBuilder.BACK_PAIR_FREE_AFTER_A_STAIRCASE = climb;
 				SongBuilder.CENTRE_TAKES_A_SPARE_HARP = swap;
-				String arm = "climbPair=" + (climb ? "on " : "off") + " swap=" + (swap ? "on " : "off");
+				String arm = "stairPair=" + (climb ? "on " : "off") + " swap=" + (swap ? "on " : "off");
 				try {
 					System.out.println("GUARDIAN " + arm + " " + describe(build(notes)));
 				} catch (RuntimeException refused) {
@@ -71,10 +71,10 @@ class GuardianStackedTest {
 		try {
 			for (boolean climb : new boolean[] {false, true}) {
 				for (boolean swap : new boolean[] {false, true}) {
-					SongBuilder.BACK_PAIR_FREE_AFTER_CLIMB = climb;
+					SongBuilder.BACK_PAIR_FREE_AFTER_A_STAIRCASE = climb;
 					SongBuilder.CENTRE_TAKES_A_SPARE_HARP = swap;
 					SongBuilder.PastePlan plan = build(notes);
-					System.out.println("GUARDIAN marks climbPair=" + (climb ? "on " : "off")
+					System.out.println("GUARDIAN marks stairPair=" + (climb ? "on " : "off")
 						+ " swap=" + (swap ? "on " : "off")
 						+ " collisions=" + plan.collisions().size() + " " + describe(plan));
 					plan.collisions().entrySet().stream().limit(4)

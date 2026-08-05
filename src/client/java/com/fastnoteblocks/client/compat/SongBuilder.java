@@ -1144,19 +1144,13 @@ public final class SongBuilder {
 						lane.pos().getX(), climb > 0 ? "Climb" : "Descent");
 					gradeLaneTip(placements, turnCells, tipSignal, climb > 0 ? "Climb" : "Descent");
 					laneStarted = false;
-					// A climb leaves the pair beside the landing free, and a descent does not.
-					//
-					// {@link #addGlassClimb} is two columns of the lane's own centre line and nothing
-					// else: glass on one, dust above it, alternating, and the landing is one back from
-					// where it started. So the cells one either side of the first module's opening --
-					// which is all the back pair is -- are untouched by it, and the live dust at the
-					// top of the climb stands in front of that module on the centre line, not beside
-					// it. A descent is not the climb upside down: it spirals round a two-by-two
-					// column, so it does put something in a cell off the centre, and it keeps the rule.
-					//
-					// ekran, reading a stacked-bus that landed off an ascent with both back cells plain
-					// air and a head of five anyway, and the bus a cell longer than it needed to be.
-					columnBehindBusy = !(BACK_PAIR_FREE_AFTER_CLIMB && climb > 0);
+					// A staircase leaves the pair beside the landing free. Only a flat turn takes it,
+					// and what makes a turn take it is that it hangs notes along its own run of
+					// powered stone -- not that it bends. A climb is glass and dust up two columns of
+					// the lane's own centre line; a descent spirals round a two-by-two column. Both
+					// carry the signal and neither hangs a note, so there is nothing there to be in
+					// the way. ekran, who has read both in game.
+					columnBehindBusy = !BACK_PAIR_FREE_AFTER_A_STAIRCASE;
 					// Planned here and not at the top of the next event, because this event is about to
 					// be built on the far side of the staircase -- it is the new lane's first chord.
 					// Deferring the plan by one left every lane's opening chord outside its own plan's
@@ -5346,14 +5340,24 @@ public final class SongBuilder {
 	static boolean BACK_FLANK_AWAY_FROM_NEXT_LANE = true;
 
 	/**
-	 * Whether the first module of a lane that landed off a climb may use the pair behind it.
+	 * Whether the first module of a lane that landed off a staircase may use the pair behind it.
 	 *
-	 * <p>A staircase used to be treated like a turn, which claims the pair because a turn is a run of
-	 * powered stone at the level the low notes hang at. A climb is not that: it is glass and dust up
-	 * two columns of the lane's own centre line, so the cells either side of the landing are air.
-	 * A descent spirals round a two-by-two column and does claim one, so it is unchanged.</p>
+	 * <p>A staircase used to be treated like a turn. What makes a turn claim the pair is not that it
+	 * bends: it is that a turn is a run of powered stone at the level the low notes hang at, live at
+	 * the tick of the lane it is leaving, and <em>with notes hung along it</em> -- so the cells behind
+	 * the next module are already spoken for. Neither staircase is that. A climb is glass and dust up
+	 * two columns of the lane's own centre line; a descent spirals round a two-by-two column. Both
+	 * carry the signal and neither hangs a note, so the pair beside the landing is nobody's.</p>
+	 *
+	 * <p>ekran, who has read both in game: only the flat turn should have the rule, and a stacked-bus
+	 * should be able to stand immediately either side of a descent. The climb half of this was theirs
+	 * too, from a stacked-bus that landed off an ascent with both back cells plain air.</p>
+	 *
+	 * <p>What still guards the descent, so this is not the only thing standing between a spiral and a
+	 * module: a shape whose blocks actually overlap something is built in a trial and rolled back to a
+	 * bus, and the lane alongside is still asked about by {@link #stackedClashes}.</p>
 	 */
-	static boolean BACK_PAIR_FREE_AFTER_CLIMB = true;
+	static boolean BACK_PAIR_FREE_AFTER_A_STAIRCASE = true;
 
 	/**
 	 * Which note goes where in a stacked module, or {@code null} if this chord cannot use one.
