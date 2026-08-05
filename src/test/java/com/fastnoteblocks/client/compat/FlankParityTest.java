@@ -48,7 +48,8 @@ class FlankParityTest {
 		SongBuilder.FLANK_AWARE_PARITY = true;
 		SongBuilder.SHEDS_BACK_FLANK = true;
 		SongBuilder.FRONT_HEAD_WHEN_BEHIND_BUSY = true;
-		SongBuilder.REPLAN_ON_DRIFT = true;
+		SongBuilder.REPLAN_ON_DRIFT = false;
+		SongBuilder.SIMULATED_PARITY = true;
 	}
 
 	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
@@ -272,6 +273,69 @@ class FlankParityTest {
 			+ " onlyPlainBus=" + onlyOff);
 		System.out.println(off.line("plainBus  "));
 		System.out.println(on.line("frontHead "));
+	}
+
+	/**
+	 * Parity settled by placing the module and reading the map, against the rule that guessed it.
+	 *
+	 * <p>The rule is an approximation of what {@link SongBuilder}'s own verify already asks
+	 * properly. What to watch is both directions at once: {@code nudges} and {@code gaveUpToBus}
+	 * falling is the rule having been too strict -- ekran's holes -- and {@code wrong} falling is it
+	 * having been too loose.</p>
+	 */
+	@Test
+	void pricesSimulatedParityAgainstTheRule() throws Exception {
+		List<Path> files;
+		try (Stream<Path> listing = Files.list(SONGS)) {
+			files = listing.filter(f -> f.toString().endsWith(".json")).sorted().toList();
+		}
+		Totals off = new Totals();
+		Totals on = new Totals();
+		int both = 0;
+		int onlyOn = 0;
+		int onlyOff = 0;
+		long relocations = 0;
+		for (Path file : files) {
+			String name = file.getFileName().toString().replace(".json", "");
+			if (name.startsWith("ultra-")) {
+				continue;
+			}
+			List<SongBuilder.EventNote> notes = load(name);
+			if (notes.isEmpty()) {
+				continue;
+			}
+			for (int floors = 2; floors <= 6; floors++) {
+				for (int width = 12; width <= 48; width += 4) {
+					SongBuilder.SIMULATED_PARITY = false;
+					SongBuilder.PastePlan without = build(notes, width, floors);
+					SongBuilder.SIMULATED_PARITY = true;
+					SongBuilder.PastePlan with = build(notes, width, floors);
+					if (without == null && with == null) {
+						continue;
+					}
+					if (without == null) {
+						onlyOn++;
+						continue;
+					}
+					if (with == null) {
+						onlyOff++;
+						continue;
+					}
+					both++;
+					for (Map.Entry<String, Integer> pad : with.padding().entrySet()) {
+						if (pad.getKey().startsWith("planRelocated")) {
+							relocations += pad.getValue();
+						}
+					}
+					off.add(without, name, width == 24);
+					on.add(with, name, width == 24);
+				}
+			}
+		}
+		System.out.println("SIM builds: both=" + both + " onlySimulated=" + onlyOn
+			+ " onlyRule=" + onlyOff + " relocations=" + relocations);
+		System.out.println(off.line("rule      "));
+		System.out.println(on.line("simulated "));
 	}
 
 	private static SongBuilder.PastePlan build(List<SongBuilder.EventNote> notes, int width,

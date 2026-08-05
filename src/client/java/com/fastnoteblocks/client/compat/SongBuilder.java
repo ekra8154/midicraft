@@ -1688,7 +1688,7 @@ public final class SongBuilder {
 	 */
 	private interface ParityOracle {
 		/** 1 to shift a column, -1 to give the shape up, 0 to build where it stands. */
-		int verdictAt(int x, int time, UltraSlots slots, boolean mayShed);
+		int verdictAt(int x, int time, UltraSlots slots, List<EventNote> tail, boolean mayShed);
 	}
 
 	/**
@@ -1705,11 +1705,12 @@ public final class SongBuilder {
 		// place no longer get the same answer: one that hangs four low notes can clash where one that
 		// hangs two does not.
 		Map<Integer, Map<Long, Integer>> answered = new java.util.HashMap<>();
-		return (x, time, slots, mayShed) -> answered
-			.computeIfAbsent(flankMask(slots) * 2 + (mayShed ? 1 : 0),
+		return (x, time, slots, tail, mayShed) -> answered
+			.computeIfAbsent(flankMask(slots) * 128 + Math.min(tail == null ? 0 : tail.size() + 1, 63)
+					* 2 + (mayShed ? 1 : 0),
 				mask -> new java.util.HashMap<>())
 			.computeIfAbsent(((long) x << 32) ^ (time & 0xffffffffL), key ->
-				parityVerdict(placements, laneStart.ahead((x - originX) * step), time, slots,
+				parityVerdict(placements, laneStart.ahead((x - originX) * step), time, slots, tail,
 					mayShed));
 	}
 
@@ -1777,7 +1778,8 @@ public final class SongBuilder {
 		boolean nudged = false;
 		if (style.stacked() && parity != null) {
 			int verdict = parity.verdictAt(startX + stepX * delayColumns, event.time(),
-				slotsFor(style, event.notes()), mayShed(style, event.notes()));
+				slotsFor(style, event.notes()), tailFor(style, event.notes()),
+				mayShed(style, event.notes()));
 			if (verdict < 0) {
 				style = ChordStyle.BUS;
 			} else {
@@ -3317,7 +3319,7 @@ public final class SongBuilder {
 
 	/** The cells a route occupies, so a bus laid along it does not hang a note in its own way. */
 	private static Set<BlockPos> route(Lane along, int cells) {
-		Set<BlockPos> taken = new java.util.HashSet<>();
+		Set<BlockPos> taken = new HashSet<>();
 		for (int cell = 0; cell < cells; cell++) {
 			taken.add(along.ahead(cell).pos().immutable());
 		}
@@ -4246,15 +4248,23 @@ public final class SongBuilder {
 		// sit above.
 		Lane start = lane;
 		boolean nudge = false;
-		StackedBusSplit shed = null;
+		Relocated shed = null;
 		if (style.stacked()) {
 			UltraSlots slots = slotsFor(style, event.notes());
+			List<EventNote> tail = tailFor(style, event.notes());
 			boolean canShed = mayShed(style, event.notes());
-			int verdict = parityVerdict(placements, start, event.time(), slots, canShed);
+			int verdict = parityVerdict(placements, start, event.time(), slots, tail, canShed);
 			if (verdict == 2) {
-				shed = shedBackFlank(splitFor(style, event.notes()),
-					shedSide(placements, start, event.time(), slots));
-				placements.padded("planShedBackFlank");
+				if (SIMULATED_PARITY) {
+					shed = relocationFor(placements, start, event.time(), slots, tail);
+					placements.padded(shed == null ? "planRelocateVanished"
+						: "planRelocatedToThe" + shed.how());
+				} else {
+					StackedBusSplit lighter = shedBackFlank(splitFor(style, event.notes()),
+						shedSide(placements, start, event.time(), slots));
+					shed = new Relocated(lighter.slots(), lighter.tail(), "shed");
+					placements.padded("planShedBackFlank");
+				}
 			}
 			boolean clashesHere = verdict == 1 || verdict < 0;
 			if (verdict < 0) {
@@ -4388,7 +4398,7 @@ public final class SongBuilder {
 	 * shed is not worth taking if the thing it produces cannot be placed.</p>
 	 */
 	private static int trialCells(PlacementPlan placements, Lane lane, int triggerDelay,
-			EventGroup event, ChordStyle style, Lane start, String gaveUp, StackedBusSplit shed) {
+			EventGroup event, ChordStyle style, Lane start, String gaveUp, Relocated shed) {
 		placements.beginTrial();
 		try {
 			return addStackedShape(placements, lane, triggerDelay, event, style, false, start,
@@ -4403,11 +4413,13 @@ public final class SongBuilder {
 	/** The stacked half of {@link #addChordModule}, apart so that a collision in it can be undone. */
 	private static Placed addStackedShape(PlacementPlan placements, Lane lane, int triggerDelay,
 			EventGroup event, ChordStyle style, boolean nudge, Lane start, String gaveUp,
-			StackedBusSplit shed) {
+			Relocated shed) {
 		if (style.busHeaded()) {
-			// The shed split when the lane behind wanted one flank left off, and the chord's own
+			// The relocated slots when the lane behind wanted a corner left off, and the chord's own
 			// otherwise. Same notes either way: what moves is which of them the bus carries.
-			StackedBusSplit split = shed != null ? shed : splitFor(style, event.notes());
+			StackedBusSplit natural = splitFor(style, event.notes());
+			StackedBusSplit split = shed == null || natural == null ? natural
+				: new StackedBusSplit(shed.slots(), natural.head(), shed.tail());
 			if (split == null) {
 				// Counted, where it used to be the one downgrade in this method that said nothing.
 				// The planner measured a head here; the chord could not make one, and the bus it
@@ -4442,8 +4454,9 @@ public final class SongBuilder {
 		}
 		trace(event, lane, style, style, nudge ? "nudged" : gaveUp);
 		placements.placing("chord:" + style + (nudge ? "+nudge" : ""));
-		return new Placed(addStackedEventModule(placements, start, triggerDelay,
-			event.time(), ultraSlots(event.notes(), style == ChordStyle.STACKED_FULL)), style, 0,
+		return new Placed(addStackedEventModule(placements, start, triggerDelay, event.time(),
+			shed != null ? shed.slots()
+				: ultraSlots(event.notes(), style == ChordStyle.STACKED_FULL)), style, 0,
 			nudge);
 	}
 
@@ -4562,6 +4575,103 @@ public final class SongBuilder {
 	/** Scratch: one line per nudge decision, with the run the wire has actually laid. */
 	static boolean TRACE_NUDGE = false;
 
+	/**
+	 * A corner moved somewhere it cannot sound anything, keeping every note the chord had.
+	 *
+	 * <p>Two places to put it, cheapest first. The centre costs nothing at all -- it is a slot the
+	 * module already has and does not use, so the shape does not change length -- but only a harp
+	 * may take it, because what a note block sits on there is the dust cross and dust plays harp.
+	 * The bus behind the head takes anything, and costs a cell unless the tail holds an odd number
+	 * of notes and so has half a cell going spare.</p>
+	 *
+	 * <p>Null where the note has nowhere free to go, and the caller falls on to a nudge.</p>
+	 */
+	private record Relocated(UltraSlots slots, List<EventNote> tail, String how) {
+	}
+
+	private static Relocated relocate(UltraSlots slots, List<EventNote> tail, int slot) {
+		EventNote note = slots.corner(slot);
+		if (note == null) {
+			return null;
+		}
+		if (slots.centre() == null && isHarpNote(note)) {
+			return new Relocated(slots.without(slot).withCentre(note), tail, "centre");
+		}
+		if (tail != null && (tail.size() % 2 == 1 || !RELOCATION_MUST_BE_FREE)) {
+			List<EventNote> longer = new ArrayList<>(tail);
+			longer.add(note);
+			return new Relocated(slots.without(slot), longer, "tail");
+		}
+		return null;
+	}
+
+	/**
+	 * Whether a relocation may only be taken when it costs the module no columns.
+	 *
+	 * <p>On, which keeps the planner's budget right without the planner having to know: the centre
+	 * is always free and a bus cell is free only when the tail is odd. Off, a relocation may lengthen
+	 * the module, which is the thing this file keeps being bitten by.</p>
+	 */
+	static boolean RELOCATION_MUST_BE_FREE = true;
+
+	/**
+	 * Whether this module, built here, would sound anything at a tick nobody wrote.
+	 *
+	 * <p>Built and undone, which is the only honest way to ask. Every earlier answer to this was a
+	 * rule about where flanks fall, written from one case and wrong about the next; this one places
+	 * the blocks and reads the map. A collision counts as mispowering because the effect is the same
+	 * for the caller: the module cannot stand here.</p>
+	 *
+	 * <p>The trigger delay is not part of the question. It sets a number on a repeater and changes
+	 * nothing about what is powered or when, so anything will do.</p>
+	 */
+	private static boolean mispowers(PlacementPlan placements, Lane at, int time, UltraSlots slots,
+			List<EventNote> tail) {
+		placements.beginTrial();
+		try {
+			if (tail == null) {
+				addStackedEventModule(placements, at, 1, time, slots);
+			} else {
+				addStackedBusModule(placements, at, 1, time, slots, tail);
+			}
+			return !placements.mispoweredInTrial().isEmpty();
+		} catch (IllegalArgumentException collided) {
+			return true;
+		} finally {
+			placements.rollbackTrial();
+		}
+	}
+
+	/** The first corner that, moved somewhere free, leaves nothing sounding wrongly. */
+	private static Relocated relocationFor(PlacementPlan placements, Lane at, int time,
+			UltraSlots slots, List<EventNote> tail) {
+		if (!RELOCATES_A_CORNER) {
+			return null;
+		}
+		for (int slot = 0; slot < 4; slot++) {
+			Relocated moved = relocate(slots, tail, slot);
+			if (moved != null && !mispowers(placements, at, time, moved.slots(), moved.tail())) {
+				return moved;
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Whether parity is settled by placing the module and reading the map, rather than by rule.
+	 *
+	 * <p>Off, {@link #stackedClashes} answers it: a hand-written approximation of what
+	 * {@link PlacementPlan#verify} already asks properly, too strict in some places -- the holes
+	 * ekran keeps finding in stacked buses standing beside nothing -- and too loose in others.</p>
+	 */
+	static boolean SIMULATED_PARITY = true;
+
+	/** Whether a corner in the way may be moved to the centre or the bus instead of the shape shifting. */
+	static boolean RELOCATES_A_CORNER = true;
+
+	/** How far a module can reach, for asking whether anything is near enough to care. */
+	private static final int PARITY_REACH = 3;
+
 	/** Which side's back flank, left off, would clear the clash -- or -1 if neither does. */
 	private static int shedSide(PlacementPlan placements, Lane at, int time, UltraSlots slots) {
 		if (slots == null || slots.backFlanks() == 0) {
@@ -4585,6 +4695,26 @@ public final class SongBuilder {
 	 */
 	private static int parityVerdict(PlacementPlan placements, Lane at, int time, UltraSlots slots,
 			boolean mayShed) {
+		return parityVerdict(placements, at, time, slots, null, mayShed);
+	}
+
+	private static int parityVerdict(PlacementPlan placements, Lane at, int time, UltraSlots slots,
+			List<EventNote> tail, boolean mayShed) {
+		if (SIMULATED_PARITY && slots != null) {
+			// Nothing within reach means no arrangement of any module could sound anything, and no
+			// module need be built to find that out. Lanes go down in order and only the lane behind
+			// exists, so most chords in most songs stop here.
+			if (placements.nothingNear(at.ahead(1).pos(), PARITY_REACH)) {
+				return 0;
+			}
+			if (!mispowers(placements, at, time, slots, tail)) {
+				return 0;
+			}
+			if (relocationFor(placements, at, time, slots, tail) != null) {
+				return 2;
+			}
+			return mispowers(placements, at.ahead(1), time, slots, tail) ? -1 : 1;
+		}
 		if (!stackedClashes(placements, at, time, slots)) {
 			return 0;
 		}
@@ -4624,6 +4754,15 @@ public final class SongBuilder {
 			mask |= slots.back(side) != null ? 4 << side : 0;
 		}
 		return mask;
+	}
+
+	/** The notes a chord of this style would put on its bus, or null where it has no bus. */
+	private static List<EventNote> tailFor(ChordStyle style, List<EventNote> chord) {
+		if (!style.busHeaded()) {
+			return null;
+		}
+		StackedBusSplit split = splitFor(style, chord);
+		return split == null ? null : split.tail();
 	}
 
 	/** The slots a chord of this style would fill, for asking which flanks it hangs. */
@@ -5014,6 +5153,31 @@ public final class SongBuilder {
 
 		int backFlanks() {
 			return (back.get(0) == null ? 0 : 1) + (back.get(1) == null ? 0 : 1);
+		}
+
+		/**
+		 * The four low slots as one list -- front on the note side, front on the other, then back.
+		 *
+		 * <p>Numbered rather than named because which corner is in the way is a fact about the lane
+		 * behind, not about the shape. The first version of this could only drop a back flank, which
+		 * was the geometry the parity rule happened to be written from; ekran's case wanted the front
+		 * one on the far side.</p>
+		 */
+		EventNote corner(int slot) {
+			return slot < 2 ? front.get(slot) : back.get(slot - 2);
+		}
+
+		UltraSlots without(int slot) {
+			return slot < 2
+				? new UltraSlots(centre, sides,
+					java.util.Collections.unmodifiableList(java.util.Arrays.asList(
+						slot == 0 ? null : front.get(0), slot == 1 ? null : front.get(1))), back)
+				: withoutBack(slot - 2);
+		}
+
+		/** The same module with a note in the centre, which only a harp may take. */
+		UltraSlots withCentre(EventNote note) {
+			return new UltraSlots(note, sides, front, back);
 		}
 
 		/** The same module with the back flank on one side left off, for the caller to rehome. */
@@ -5660,7 +5824,7 @@ public final class SongBuilder {
 		/** Why each cell of wire-instead-of-music was laid, so that the ones with no reason show up. */
 		private final Map<String, Integer> padding = new java.util.LinkedHashMap<>();
 		/** Route cells the wire changes direction on, where a repeater can never work. */
-		private final Set<BlockPos> corners = new java.util.HashSet<>();
+		private final Set<BlockPos> corners = new HashSet<>();
 
 		/**
 		 * A savepoint, so a shape that will not fit can be undone and a bus built instead.
@@ -5860,6 +6024,87 @@ public final class SongBuilder {
 		 * @param shiftX how far the finished plan slides before it is built, so a fault names the
 		 *     block you can actually go and stand in front of rather than one in plan space
 		 */
+		/**
+		 * Whether anything at all stands near enough to this cell to have an opinion about parity.
+		 *
+		 * <p>The pre-filter, and safe in the way {@link #stackedClashes} is not: it asks whether there
+		 * is any note or any powered block within reach, so a clear answer means no arrangement of any
+		 * module could sound anything. Lanes are built in order and only the lane behind exists, so
+		 * most chords in most songs never get past this.</p>
+		 */
+		boolean nothingNear(BlockPos cell, int reach) {
+			for (int x = -reach; x <= reach; x++) {
+				for (int y = -1; y <= 2; y++) {
+					for (int z = -reach; z <= reach; z++) {
+						BlockPos at = cell.offset(x, y, z);
+						if (notes.containsKey(at) || powered.containsKey(at)) {
+							return false;
+						}
+					}
+				}
+			}
+			return true;
+		}
+
+		/**
+		 * Every note in and beside these cells that would sound at a tick nobody wrote.
+		 *
+		 * <p>The same question {@link #verify} asks of the finished build, asked of one module while
+		 * it is still undoable. That is the whole of the parity rule done properly: a note sounds when
+		 * a neighbour is directly powered, so a note whose neighbour is powered at another tick is a
+		 * note in the wrong place -- and it does not matter whether the offender is this module or the
+		 * lane behind it, because both are on the map by now.</p>
+		 *
+		 * <p>Scoped by the cells the trial added and their six neighbours, which is what makes it
+		 * cheap: the answer never depends on a note that is not touching something new.</p>
+		 *
+		 * <p>A note nothing sets off counts only when this module placed it. A neighbour's note may
+		 * have been waiting for a repeater that has not been built yet, and calling that our fault
+		 * would refuse every module ever built next to one.</p>
+		 */
+		List<BlockPos> mispowered(java.util.Collection<BlockPos> added) {
+			Set<BlockPos> mine = new HashSet<>(added);
+			Set<BlockPos> asked = new HashSet<>();
+			List<BlockPos> wrong = new ArrayList<>();
+			for (BlockPos cell : added) {
+				for (Direction side : Direction.values()) {
+					collectMispowered(cell.relative(side), mine, asked, wrong);
+				}
+				collectMispowered(cell, mine, asked, wrong);
+			}
+			return wrong;
+		}
+
+		private void collectMispowered(BlockPos at, Set<BlockPos> mine,
+				Set<BlockPos> asked, List<BlockPos> wrong) {
+			Integer time = notes.get(at);
+			if (time == null || !asked.add(at)) {
+				return;
+			}
+			Integer own = powered.get(at);
+			boolean triggered = own != null && own == time;
+			for (Direction direction : Direction.values()) {
+				Integer neighbour = powered.get(at.relative(direction));
+				if (neighbour == null) {
+					continue;
+				}
+				if (neighbour == time) {
+					triggered = true;
+				} else if (neighbour < time || neighbour > time + SHARED_PULSE_TICKS) {
+					wrong.add(at);
+					return;
+				}
+			}
+			if (!triggered && mine.contains(at)) {
+				wrong.add(at);
+			}
+		}
+
+		/** What the blocks laid since the trial opened would sound wrongly, if anything. */
+		List<BlockPos> mispoweredInTrial() {
+			return trial == null ? List.of() : mispowered(trial.blocksAdded());
+		}
+
 		List<String> verify(int shiftX, int shiftZ) {
 			List<String> faults = new ArrayList<>();
 			for (Map.Entry<BlockPos, Integer> note : notes.entrySet()) {
