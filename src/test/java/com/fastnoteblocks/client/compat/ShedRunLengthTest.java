@@ -73,6 +73,53 @@ class ShedRunLengthTest {
 			SongBuilder.PasteMode.ULTRA_COMPACT_LANE, new SongBuilder.BuildLimits(4, 24, 5));
 	}
 
+	/**
+	 * The sixteen cells themselves, and what each one is standing on.
+	 *
+	 * <p>Which answers the question the length alone cannot: a pad is glass with dust over it and a
+	 * bus is powered stone, so the run says outright how much of itself is music and how much is
+	 * wire laid to wait. ekran, reading it in game: a standard bus that dies because the chord after
+	 * it was given a block of padding, with nothing stacked on either side to want one.</p>
+	 */
+	@Test
+	void dumpsTheRunThatOverruns() throws Exception {
+		SongBuilder.SHEDS_BACK_FLANK = true;
+		SongBuilder.PastePlan plan = build(load("deltarune-ch-4-guardian"));
+		java.util.Map<String, String> under = new java.util.HashMap<>();
+		for (String command : plan.commands()) {
+			String[] parts = command.split(" ");
+			under.put(parts[1] + " " + parts[2] + " " + parts[3], parts[4]);
+		}
+		List<String> run = new java.util.ArrayList<>();
+		String opened = "?";
+		String openedNow = "?";
+		for (String command : plan.commands()) {
+			String[] parts = command.split(" ");
+			String block = parts[4];
+			if (block.startsWith("minecraft:redstone_wire[")) {
+				continue;
+			}
+			if (block.startsWith("minecraft:redstone_wire")) {
+				String floor = under.getOrDefault(parts[1] + " " + (Integer.parseInt(parts[2]) - 1)
+					+ " " + parts[3], "nothing");
+				run.add(run.size() + 1 + ": " + parts[1] + " " + parts[2] + " " + parts[3]
+					+ " on " + floor.replace("minecraft:", ""));
+				if (run.size() == 16) {
+					break;
+				}
+			} else if (block.startsWith("minecraft:repeater")) {
+				run.clear();
+				opened = openedNow;
+				openedNow = parts[1] + " " + parts[2] + " " + parts[3] + " " + block;
+			}
+		}
+		System.out.println("DUMP the run of " + run.size() + " opened at " + openedNow
+			+ " (previous repeater " + opened + ")");
+		for (String cell : run) {
+			System.out.println("DUMP   " + cell);
+		}
+	}
+
 	@Test
 	void measuresTheRunsGuardianEndsUpWith() throws Exception {
 		List<SongBuilder.EventNote> notes = load("deltarune-ch-4-guardian");
