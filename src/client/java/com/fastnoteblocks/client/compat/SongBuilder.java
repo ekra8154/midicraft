@@ -1661,7 +1661,7 @@ public final class SongBuilder {
 	 */
 	private interface ParityOracle {
 		/** 1 to shift a column, -1 to give the shape up, 0 to build where it stands. */
-		int verdictAt(int x, int time, UltraSlots slots);
+		int verdictAt(int x, int time, UltraSlots slots, boolean mayShed);
 	}
 
 	/**
@@ -1678,15 +1678,12 @@ public final class SongBuilder {
 		// place no longer get the same answer: one that hangs four low notes can clash where one that
 		// hangs two does not.
 		Map<Integer, Map<Long, Integer>> answered = new java.util.HashMap<>();
-		return (x, time, slots) -> answered
-			.computeIfAbsent(flankMask(slots), mask -> new java.util.HashMap<>())
-			.computeIfAbsent(((long) x << 32) ^ (time & 0xffffffffL), key -> {
-				Lane at = laneStart.ahead((x - originX) * step);
-				if (!stackedClashes(placements, at, time, slots)) {
-					return 0;
-				}
-				return stackedClashes(placements, at.ahead(1), time, slots) ? -1 : 1;
-			});
+		return (x, time, slots, mayShed) -> answered
+			.computeIfAbsent(flankMask(slots) * 2 + (mayShed ? 1 : 0),
+				mask -> new java.util.HashMap<>())
+			.computeIfAbsent(((long) x << 32) ^ (time & 0xffffffffL), key ->
+				parityVerdict(placements, laneStart.ahead((x - originX) * step), time, slots,
+					mayShed));
 	}
 
 	private static Landing landingOf(int startX, int stepX, EventGroup event, int wait, boolean busy,
@@ -1746,11 +1743,13 @@ public final class SongBuilder {
 		boolean nudged = false;
 		if (style.stacked() && parity != null) {
 			int verdict = parity.verdictAt(startX + stepX * delayColumns, event.time(),
-				slotsFor(style, event.notes()));
+				slotsFor(style, event.notes()), mayShed(style, event.notes()));
 			if (verdict < 0) {
 				style = ChordStyle.BUS;
 			} else {
-				nudged = verdict > 0;
+				// A shed costs nothing in columns -- that is the condition it is offered under -- so
+				// only a shift lengthens the chord.
+				nudged = verdict == 1;
 			}
 		}
 		int length;
@@ -4206,10 +4205,18 @@ public final class SongBuilder {
 		// sit above.
 		Lane start = lane;
 		boolean nudge = false;
+		StackedBusSplit shed = null;
 		if (style.stacked()) {
 			UltraSlots slots = slotsFor(style, event.notes());
-			boolean clashesHere = stackedClashes(placements, start, event.time(), slots);
-			if (clashesHere && stackedClashes(placements, start.ahead(1), event.time(), slots)) {
+			boolean canShed = mayShed(style, event.notes());
+			int verdict = parityVerdict(placements, start, event.time(), slots, canShed);
+			if (verdict == 2) {
+				shed = shedBackFlank(splitFor(style, event.notes()),
+					shedSide(placements, start, event.time(), slots));
+				placements.padded("planShedBackFlank");
+			}
+			boolean clashesHere = verdict == 1 || verdict < 0;
+			if (verdict < 0) {
 				gaveUp = "parityBothCells";
 				placements.padded(slackColumns > 0 ? "planParityGaveUpSlack"
 					: "planParityGaveUpTight");
@@ -4289,7 +4296,7 @@ public final class SongBuilder {
 		placements.beginTrial();
 		try {
 			Placed placed = addStackedShape(placements, lane, triggerDelay, event, style, nudge,
-				start, gaveUp);
+				start, gaveUp, shed);
 			placements.commitTrial();
 			return placed;
 		} catch (IllegalArgumentException collided) {
@@ -4303,9 +4310,12 @@ public final class SongBuilder {
 
 	/** The stacked half of {@link #addChordModule}, apart so that a collision in it can be undone. */
 	private static Placed addStackedShape(PlacementPlan placements, Lane lane, int triggerDelay,
-			EventGroup event, ChordStyle style, boolean nudge, Lane start, String gaveUp) {
+			EventGroup event, ChordStyle style, boolean nudge, Lane start, String gaveUp,
+			StackedBusSplit shed) {
 		if (style.busHeaded()) {
-			StackedBusSplit split = splitFor(style, event.notes());
+			// The shed split when the lane behind wanted one flank left off, and the chord's own
+			// otherwise. Same notes either way: what moves is which of them the bus carries.
+			StackedBusSplit split = shed != null ? shed : splitFor(style, event.notes());
 			if (split == null) {
 				// Counted, where it used to be the one downgrade in this method that said nothing.
 				// The planner measured a head here; the chord could not make one, and the bus it
@@ -4325,7 +4335,7 @@ public final class SongBuilder {
 			trace(event, lane, style, style, nudge ? "nudged" : gaveUp);
 			placements.placing("chord:" + style + (nudge ? "+nudge" : "")
 				+ " head" + split.head().size() + "/tail" + split.tail().size()
-				+ (split.slots().back().isEmpty() ? " frontOnly" : " reachesBack"));
+				+ (split.slots().backFlanks() == 0 ? " frontOnly" : " reachesBack"));
 			Body body = addStackedBusModule(placements, start, triggerDelay, event.time(),
 				split.slots(), split.tail());
 			return new Placed(body.lane(), style, body.busCells(), nudge);
@@ -4385,8 +4395,8 @@ public final class SongBuilder {
 			// module's back flank stands against the neighbour's front and vice versa, and the slots
 			// fill front-first. A chord of five therefore has no back flank on either side, and two of
 			// them a column apart never meet at all.
-			boolean hasFront = !FLANK_AWARE_PARITY || slots == null || side < slots.front().size();
-			boolean hasBack = !FLANK_AWARE_PARITY || slots == null || side < slots.back().size();
+			boolean hasFront = !FLANK_AWARE_PARITY || slots == null || slots.front(side) != null;
+			boolean hasBack = !FLANK_AWARE_PARITY || slots == null || slots.back(side) != null;
 			if (hasFront && placements.liveAt(beyond.relative(travel), time)) {
 				return true;
 			}
@@ -4406,6 +4416,72 @@ public final class SongBuilder {
 	 */
 	static boolean FLANK_AWARE_PARITY = true;
 
+	/**
+	 * Whether a stacked-bus may drop the back flank the lane behind minds, instead of shifting.
+	 *
+	 * <p>ekran: fill every slot that can still be filled and leave only the contested one open. The
+	 * dropped note is not lost -- it goes on the bus this head already has behind it -- so a head of
+	 * seven becomes one of six and the chord is whole either way.</p>
+	 *
+	 * <p>Only when the bus has room for it in a cell it already paid for, which is when the tail
+	 * holds an odd number of notes: a bus carries two a cell, so an odd tail has half a cell going
+	 * spare and an even one would have to grow. A shed that lengthens the module is a shed the
+	 * planner budgeted two columns for and the walk spends three on, and this file has already paid
+	 * for that lesson once.</p>
+	 */
+	static boolean SHEDS_BACK_FLANK = true;
+
+	/** Which side's back flank, left off, would clear the clash -- or -1 if neither does. */
+	private static int shedSide(PlacementPlan placements, Lane at, int time, UltraSlots slots) {
+		if (slots == null || slots.backFlanks() == 0) {
+			return -1;
+		}
+		for (int side = 0; side < 2; side++) {
+			if (slots.back(side) != null
+					&& !stackedClashes(placements, at, time, slots.withoutBack(side))) {
+				return side;
+			}
+		}
+		return -1;
+	}
+
+	/**
+	 * What a stacked module standing here has to do about the lane behind it.
+	 *
+	 * <p>0 to build where it stands, 2 to drop one back flank onto its bus, 1 to shift a column, -1
+	 * to give the shape up. Asked in that order, and asked by the planner and the walk through this
+	 * one method so that neither can answer it differently from the other.</p>
+	 */
+	private static int parityVerdict(PlacementPlan placements, Lane at, int time, UltraSlots slots,
+			boolean mayShed) {
+		if (!stackedClashes(placements, at, time, slots)) {
+			return 0;
+		}
+		if (mayShed && shedSide(placements, at, time, slots) >= 0) {
+			return 2;
+		}
+		return stackedClashes(placements, at.ahead(1), time, slots) ? -1 : 1;
+	}
+
+	/** Whether this chord's bus has a cell already paid for that a shed note could go in. */
+	private static boolean mayShed(ChordStyle style, List<EventNote> chord) {
+		if (!SHEDS_BACK_FLANK || !style.busHeaded()) {
+			return false;
+		}
+		StackedBusSplit split = splitFor(style, chord);
+		return split != null && split.tail().size() % 2 == 1;
+	}
+
+	/** The split with one back flank moved onto the bus, for the side that was in the way. */
+	private static StackedBusSplit shedBackFlank(StackedBusSplit split, int side) {
+		UltraSlots slots = split.slots();
+		List<EventNote> tail = new ArrayList<>(split.tail());
+		tail.add(slots.back(side));
+		List<EventNote> head = new ArrayList<>(split.head());
+		head.remove(slots.back(side));
+		return new StackedBusSplit(slots.withoutBack(side), head, tail);
+	}
+
 	/** Which of the four low-note slots a chord fills, as one number, for keying the oracle. */
 	private static int flankMask(UltraSlots slots) {
 		if (slots == null) {
@@ -4413,8 +4489,8 @@ public final class SongBuilder {
 		}
 		int mask = 0;
 		for (int side = 0; side < 2; side++) {
-			mask |= side < slots.front().size() ? 1 << side : 0;
-			mask |= side < slots.back().size() ? 4 << side : 0;
+			mask |= slots.front(side) != null ? 1 << side : 0;
+			mask |= slots.back(side) != null ? 4 << side : 0;
 		}
 		return mask;
 	}
@@ -4622,7 +4698,7 @@ public final class SongBuilder {
 			Direction travel, Direction laneStep, int triggerDelay, StackedSplit split, int time) {
 		placements.placing("cutHead" + split.head().size()
 			+ "/near" + split.nearTail().size() + "/far" + split.farTail().size()
-			+ (split.slots().back().isEmpty() ? " frontOnly" : " reachesBack"));
+			+ (split.slots().backFlanks() == 0 ? " frontOnly" : " reachesBack"));
 		Body body = addStackedBusModule(placements, Lane.straight(cursor, travel, laneStep),
 			triggerDelay, time, split.slots(), split.nearTail());
 		return body.lane().pos();
@@ -4764,11 +4840,11 @@ public final class SongBuilder {
 				placements.support(instrument.below(), "minecraft:stone");
 			}
 			placeNoteBlock(placements, centre.relative(out), relay);
-			if (side < slots.front().size()) {
-				placeNote(placements, instrument.relative(travel), slots.front().get(side));
+			if (slots.front(side) != null) {
+				placeNote(placements, instrument.relative(travel), slots.front(side));
 			}
-			if (side < slots.back().size()) {
-				placeNote(placements, instrument.relative(travel.getOpposite()), slots.back().get(side));
+			if (slots.back(side) != null) {
+				placeNote(placements, instrument.relative(travel.getOpposite()), slots.back(side));
 			}
 		}
 		return lane.ahead(2);
@@ -4790,6 +4866,38 @@ public final class SongBuilder {
 	/** The note in each slot of a stacked module; {@code centre} is null when the chord fits without it. */
 	private record UltraSlots(EventNote centre, List<EventNote> sides, List<EventNote> front,
 			List<EventNote> back) {
+		/**
+		 * The low note hanging at the far end of the outer column on this side, or {@code null}.
+		 *
+		 * <p>Both lists are always two long and may hold nulls, because which side a flank falls on
+		 * is now a decision rather than a count. A module may keep the flank the lane behind does not
+		 * mind and drop only the one it does, which a dense list cannot say.</p>
+		 */
+		EventNote front(int side) {
+			return front.get(side);
+		}
+
+		EventNote back(int side) {
+			return back.get(side);
+		}
+
+		int backFlanks() {
+			return (back.get(0) == null ? 0 : 1) + (back.get(1) == null ? 0 : 1);
+		}
+
+		/** The same module with the back flank on one side left off, for the caller to rehome. */
+		UltraSlots withoutBack(int side) {
+			return new UltraSlots(centre, sides, front,
+				java.util.Collections.unmodifiableList(java.util.Arrays.asList(
+					side == 0 ? null : back.get(0), side == 1 ? null : back.get(1))));
+		}
+	}
+
+	/** Two slots, either of which may be empty, from however many notes are left to hang. */
+	private static List<EventNote> pair(List<EventNote> notes) {
+		return java.util.Collections.unmodifiableList(java.util.Arrays.asList(
+			notes.size() > 0 ? notes.get(0) : null,
+			notes.size() > 1 ? notes.get(1) : null));
 	}
 
 	/**
@@ -4863,8 +4971,8 @@ public final class SongBuilder {
 			}
 		}
 		return new UltraSlots(centre, List.copyOf(sides),
-			List.copyOf(hanging.subList(0, Math.min(2, hanging.size()))),
-			List.copyOf(hanging.subList(Math.min(2, hanging.size()), hanging.size())));
+			pair(hanging.subList(0, Math.min(2, hanging.size()))),
+			pair(hanging.subList(Math.min(2, hanging.size()), hanging.size())));
 	}
 
 	private static boolean isHarpNote(EventNote note) {

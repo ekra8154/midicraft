@@ -46,6 +46,7 @@ class FlankParityTest {
 	@AfterEach
 	void restore() {
 		SongBuilder.FLANK_AWARE_PARITY = true;
+		SongBuilder.SHEDS_BACK_FLANK = true;
 	}
 
 	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
@@ -153,6 +154,64 @@ class FlankParityTest {
 			+ " onlyOldRule=" + onlyOff + " neither=" + neither);
 		System.out.println(off.line("oldRule "));
 		System.out.println(on.line("flankAware"));
+	}
+
+	/**
+	 * And the same for shedding: a contested back flank given to the bus instead of a nudge.
+	 *
+	 * <p>Paired the same way and for the same reason. What to watch is {@code wrong} -- the shed
+	 * note moves to a cell the bus already had, so if the arithmetic is off it is off by a column and
+	 * shows up as a breach, but if the <em>parity</em> reasoning is off it shows up here.</p>
+	 */
+	@Test
+	void pricesSheddingABackFlankAgainstNudging() throws Exception {
+		List<Path> files;
+		try (Stream<Path> listing = Files.list(SONGS)) {
+			files = listing.filter(f -> f.toString().endsWith(".json")).sorted().toList();
+		}
+		Totals off = new Totals();
+		Totals on = new Totals();
+		int both = 0;
+		int onlyOn = 0;
+		int onlyOff = 0;
+		long sheds = 0;
+		for (Path file : files) {
+			String name = file.getFileName().toString().replace(".json", "");
+			if (name.startsWith("ultra-")) {
+				continue;
+			}
+			List<SongBuilder.EventNote> notes = load(name);
+			if (notes.isEmpty()) {
+				continue;
+			}
+			for (int floors = 2; floors <= 6; floors++) {
+				for (int width = 12; width <= 48; width += 4) {
+					SongBuilder.SHEDS_BACK_FLANK = false;
+					SongBuilder.PastePlan without = build(notes, width, floors);
+					SongBuilder.SHEDS_BACK_FLANK = true;
+					SongBuilder.PastePlan with = build(notes, width, floors);
+					if (without == null && with == null) {
+						continue;
+					}
+					if (without == null) {
+						onlyOn++;
+						continue;
+					}
+					if (with == null) {
+						onlyOff++;
+						continue;
+					}
+					both++;
+					sheds += with.padding().getOrDefault("planShedBackFlank", 0);
+					off.add(without, name, width == 24);
+					on.add(with, name, width == 24);
+				}
+			}
+		}
+		System.out.println("SHED builds: both=" + both + " onlyShedding=" + onlyOn
+			+ " onlyNudging=" + onlyOff + " shedsTaken=" + sheds);
+		System.out.println(off.line("nudgeOnly "));
+		System.out.println(on.line("shedsFlank"));
 	}
 
 	private static SongBuilder.PastePlan build(List<SongBuilder.EventNote> notes, int width,
