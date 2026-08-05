@@ -4293,6 +4293,23 @@ public final class SongBuilder {
 		// always available to fall back to.
 		//
 		// Counted as planBusForCollision, because a fallback nobody can see is a rule nobody fixes.
+		// Shed, then check. A bus is not always half its notes: where the ground will not take one
+		// layBus carries the run on a block further, and then the note the head gave away costs a
+		// cell after all -- the module comes out a column longer than the plan paid for and the next
+		// repeater stands sixteen dust away. So the shed is built, measured against the same module
+		// without it, and kept only if the bus really did have the cell spare.
+		//
+		// Where it did not, the chord takes the shift it would have taken before, and hands back
+		// nudged so that the lane's plan learns about the column. That is what Placed.nudged is for.
+		if (shed != null) {
+			int spent = trialCells(placements, lane, triggerDelay, event, style, start, gaveUp, shed);
+			int plain = trialCells(placements, lane, triggerDelay, event, style, start, gaveUp, null);
+			if (spent < 0 || plain < 0 || spent > plain) {
+				placements.padded("planShedWouldGrowTheBus");
+				shed = null;
+				nudge = true;
+			}
+		}
 		placements.beginTrial();
 		try {
 			Placed placed = addStackedShape(placements, lane, triggerDelay, event, style, nudge,
@@ -4305,6 +4322,25 @@ public final class SongBuilder {
 			trace(event, lane, style, ChordStyle.BUS, "collided");
 			Body body = addSpatialEventModule(placements, lane, triggerDelay, event.notes(), true);
 			return new Placed(body.lane(), ChordStyle.BUS, body.busCells(), false);
+		}
+	}
+
+	/**
+	 * How many cells of bus this module would actually spend, built and then undone.
+	 *
+	 * <p>-1 where it will not build at all, which the caller reads the same way as too many: the
+	 * shed is not worth taking if the thing it produces cannot be placed.</p>
+	 */
+	private static int trialCells(PlacementPlan placements, Lane lane, int triggerDelay,
+			EventGroup event, ChordStyle style, Lane start, String gaveUp, StackedBusSplit shed) {
+		placements.beginTrial();
+		try {
+			return addStackedShape(placements, lane, triggerDelay, event, style, false, start,
+				gaveUp, shed).busCells();
+		} catch (IllegalArgumentException collided) {
+			return -1;
+		} finally {
+			placements.rollbackTrial();
 		}
 	}
 

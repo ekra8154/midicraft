@@ -41,6 +41,38 @@ class ShedRunLengthTest {
 		SongBuilder.SHEDS_BACK_FLANK = true;
 	}
 
+	/**
+	 * Which decisions moved, rather than which blocks did.
+	 *
+	 * <p>The shed itself measured clean -- every one of the eleven spent the cells the module would
+	 * have spent anyway -- so whatever lengthens the run is downstream of it. Removing a back flank
+	 * changes what the <em>next</em> lane finds when it asks about the ground, so a shed here can
+	 * turn a decision over there, and the padding map is the record of every decision made.</p>
+	 */
+	@Test
+	void diffsTheDecisionsTheShedChanges() throws Exception {
+		List<SongBuilder.EventNote> notes = load("deltarune-ch-4-guardian");
+		SongBuilder.SHEDS_BACK_FLANK = true;
+		java.util.Map<String, Integer> with = build(notes).padding();
+		SongBuilder.SHEDS_BACK_FLANK = false;
+		java.util.Map<String, Integer> without = build(notes).padding();
+		java.util.TreeSet<String> keys = new java.util.TreeSet<>(with.keySet());
+		keys.addAll(without.keySet());
+		for (String key : keys) {
+			int a = without.getOrDefault(key, 0);
+			int b = with.getOrDefault(key, 0);
+			if (a != b) {
+				System.out.println("DIFF " + key + ": " + a + " -> " + b
+					+ " (" + (b - a > 0 ? "+" : "") + (b - a) + ")");
+			}
+		}
+	}
+
+	private static SongBuilder.PastePlan build(List<SongBuilder.EventNote> notes) {
+		return SongBuilder.createPastePlan(new BlockPos(0, 64, 0), notes,
+			SongBuilder.PasteMode.ULTRA_COMPACT_LANE, new SongBuilder.BuildLimits(4, 24, 5));
+	}
+
 	@Test
 	void measuresTheRunsGuardianEndsUpWith() throws Exception {
 		List<SongBuilder.EventNote> notes = load("deltarune-ch-4-guardian");
