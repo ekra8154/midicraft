@@ -36,6 +36,10 @@ class GuardianStackedTest {
 	void restore() {
 		SongBuilder.CENTRE_TAKES_A_SPARE_HARP = true;
 		SongBuilder.BACK_PAIR_FREE_AFTER_A_STAIRCASE = true;
+		SongBuilder.KEEPS_HEAD_WHEN_THE_BUS_IS_LONGER = true;
+		SongBuilder.RELOCATES_CONTESTED_NOTE = true;
+		SongBuilder.BACK_FLANK_AWAY_FROM_NEXT_LANE = true;
+		SongBuilder.NUDGE_WHEN_BEHIND_BUSY = true;
 	}
 
 	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
@@ -93,7 +97,7 @@ class GuardianStackedTest {
 		System.out.println("GUARDIAN " + describe(plan));
 		plan.padding().entrySet().stream()
 			.filter(pad -> pad.getKey().startsWith("planBus") || pad.getKey().startsWith("planParity")
-				|| pad.getKey().startsWith("planRelocate") || pad.getKey().startsWith("planShift"))
+				|| pad.getKey().startsWith("planRelocate") || pad.getKey().startsWith("planShift") || pad.getKey().startsWith("planKept"))
 			.sorted(java.util.Map.Entry.comparingByKey())
 			.forEach(pad -> System.out.println("GUARDIAN pad " + pad.getKey() + " = " + pad.getValue()));
 	}
@@ -124,6 +128,51 @@ class GuardianStackedTest {
 			SongBuilder.RELOCATES_CONTESTED_NOTE = true;
 			SongBuilder.BACK_FLANK_AWAY_FROM_NEXT_LANE = true;
 			SongBuilder.NUDGE_WHEN_BEHIND_BUSY = true;
+		}
+	}
+
+	/** Guardian across every width and floor count, this week's rules against last week's. */
+	@Test
+	void sweepsGuardianEveryWidthAndFloor() throws Exception {
+		List<SongBuilder.EventNote> notes = load("deltarune-ch-4-guardian");
+		for (boolean now : new boolean[] {false, true}) {
+			SongBuilder.RELOCATES_CONTESTED_NOTE = now;
+			SongBuilder.BACK_FLANK_AWAY_FROM_NEXT_LANE = now;
+			SongBuilder.NUDGE_WHEN_BEHIND_BUSY = now;
+			SongBuilder.BACK_PAIR_FREE_AFTER_A_STAIRCASE = now;
+			SongBuilder.KEEPS_HEAD_WHEN_THE_BUS_IS_LONGER = now;
+			int built = 0;
+			int refused = 0;
+			int breaches = 0;
+			int breachBlocks = 0;
+			int worst = 0;
+			int clean = 0;
+			long blocks = 0;
+			long span = 0;
+			for (int floors = 2; floors <= 6; floors++) {
+				for (int width = 12; width <= 48; width += 4) {
+					try {
+						SongBuilder.PastePlan plan = SongBuilder.createPastePlan(
+							new BlockPos(0, 64, 0), notes, SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+							new SongBuilder.BuildLimits(4, width, floors));
+						built++;
+						breaches += plan.breaches().size();
+						clean += plan.breaches().isEmpty() ? 1 : 0;
+						for (int breach : plan.breaches()) {
+							breachBlocks += breach;
+							worst = Math.max(worst, breach);
+						}
+						blocks += plan.commands().size();
+						span += plan.spanZ();
+					} catch (RuntimeException no) {
+						refused++;
+					}
+				}
+			}
+			System.out.println("GUARDIAN sweep " + (now ? "thisWeek" : "lastWeek")
+				+ " built=" + built + " refused=" + refused + " cleanBuilds=" + clean
+				+ " breaches=" + breaches + " breachBlocks=" + breachBlocks + " worst=" + worst
+				+ " blocks=" + blocks + " spanZ=" + span);
 		}
 	}
 
