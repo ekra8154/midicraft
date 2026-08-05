@@ -5165,6 +5165,31 @@ public final class SongBuilder {
 	}
 
 	/**
+	 * The back pair, filled from the side the walk has already been.
+	 *
+	 * <p>Side 0 is pinned to the lane step, so it is the side facing ground the walk has not laid
+	 * yet -- {@link #layBus} says the same thing about its own slots. A back flank hung there is a
+	 * note block in the column the <em>next</em> lane will stand its module against, and a note of
+	 * ours against a relay of theirs is the one clash that lane cannot relocate its way out of: the
+	 * note is already built, and nothing it does to its own slots reaches it. Hung on the far side
+	 * instead it costs that lane nothing, and the module here is identical either way.</p>
+	 *
+	 * <p>ekran, reading a module with one back flank and asking for it the other way round. Only the
+	 * back pair, because the front pair is full whenever the back has anything in it at all.</p>
+	 */
+	private static List<EventNote> backPair(List<EventNote> notes) {
+		if (!BACK_FLANK_AWAY_FROM_NEXT_LANE) {
+			return pair(notes);
+		}
+		return java.util.Collections.unmodifiableList(java.util.Arrays.asList(
+			notes.size() > 1 ? notes.get(1) : null,
+			notes.size() > 0 ? notes.get(0) : null));
+	}
+
+	/** Whether a lone back flank hangs away from the lane the walk has not built yet. */
+	static boolean BACK_FLANK_AWAY_FROM_NEXT_LANE = true;
+
+	/**
 	 * Which note goes where in a stacked module, or {@code null} if this chord cannot use one.
 	 *
 	 * <p>The order the slots are filled in is the whole of it. Snare can only be one of the two
@@ -5236,7 +5261,7 @@ public final class SongBuilder {
 		}
 		return new UltraSlots(centre, List.copyOf(sides),
 			pair(hanging.subList(0, Math.min(2, hanging.size()))),
-			pair(hanging.subList(Math.min(2, hanging.size()), hanging.size())));
+			backPair(hanging.subList(Math.min(2, hanging.size()), hanging.size())));
 	}
 
 	private static boolean isHarpNote(EventNote note) {
