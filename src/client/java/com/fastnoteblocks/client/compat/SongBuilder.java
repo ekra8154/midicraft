@@ -1602,6 +1602,7 @@ public final class SongBuilder {
 	 */
 	private static Lane armTurn(PlacementPlan placements, Lane lane, Direction depth, int columns,
 			int slabStep) {
+		placements.placing("corner");
 		int toCorner = Math.max(1, columns + 1);
 		placements.turnedAt(lane.ahead(toCorner - 1).pos());
 		placements.corner(lane.ahead(toCorner).pos());
@@ -2289,6 +2290,7 @@ public final class SongBuilder {
 
 	/** Lays a run of dust, on glass so that nothing under it comes alive. */
 	private static Lane emitDust(PlacementPlan placements, Lane lane, int columns) {
+		placements.placing("pad");
 		for (int cell = 0; cell < columns; cell++) {
 			addParityPad(placements, lane.pos());
 			lane = lane.ahead(1);
@@ -2344,6 +2346,7 @@ public final class SongBuilder {
 	 */
 	private static BlockPos addGlassClimb(PlacementPlan placements, BlockPos cursor,
 			Direction travel, boolean fromBus, int time) {
+		placements.placing("climb");
 		placements.turnedAt(cursor);
 		BlockPos near = cursor;
 		BlockPos far = cursor.relative(travel);
@@ -2392,6 +2395,7 @@ public final class SongBuilder {
 	 */
 	private static BlockPos addSplitBusDescent(PlacementPlan placements, BlockPos cursor,
 			Direction travel, Direction depth, int time) {
+		placements.placing("descent4");
 		placements.turnedAt(cursor);
 		List<BlockPos> ring = List.of(
 			cursor,
@@ -2444,6 +2448,7 @@ public final class SongBuilder {
 
 	private static BlockPos addSpiralDescent(PlacementPlan placements, BlockPos cursor,
 			Direction travel, Direction depth, int time) {
+		placements.placing("descent6");
 		placements.turnedAt(cursor);
 		placements.powered(cursor, "minecraft:stone", time);
 		set(placements, cursor.above(), "minecraft:redstone_wire");
@@ -3218,6 +3223,7 @@ public final class SongBuilder {
 	 */
 	private static Body addSpatialEventModule(PlacementPlan placements, Lane lane,
 			int triggerDelay, List<EventNote> chord, boolean forceBus) {
+		placements.placing("chord:" + (forceBus ? "BUS" : "SMALL") + " notes" + chord.size());
 		Body swapped = twoSwapTurn(placements, lane, triggerDelay, chord, forceBus);
 		if (swapped != null) {
 			return swapped;
@@ -3485,6 +3491,7 @@ public final class SongBuilder {
 	 */
 	private static BlockPos addCarriedEventModule(PlacementPlan placements, BlockPos cursor,
 			Direction travel, Direction laneStep, List<EventNote> chord, int stepOff) {
+		placements.placing("farHalf");
 		for (int column = 0; column < stepOff; column++) {
 			placements.padded("stepOff");
 		}
@@ -3506,6 +3513,7 @@ public final class SongBuilder {
 	 */
 	private static BlockPos addSplitEventModule(PlacementPlan placements, BlockPos cursor,
 			Direction travel, Direction laneStep, int triggerDelay, List<EventNote> chord) {
+		placements.placing("nearHalf");
 		set(placements, cursor, "minecraft:stone");
 		set(placements, cursor.above(),
 			"minecraft:repeater[facing=" + repeaterFacing(travel) + ",delay=" + triggerDelay + "]");
@@ -4307,6 +4315,9 @@ public final class SongBuilder {
 				start = start.ahead(1);
 			}
 			trace(event, lane, style, style, nudge ? "nudged" : gaveUp);
+			placements.placing("chord:" + style + (nudge ? "+nudge" : "")
+				+ " head" + split.head().size() + "/tail" + split.tail().size()
+				+ (split.slots().back().isEmpty() ? " frontOnly" : " reachesBack"));
 			Body body = addStackedBusModule(placements, start, triggerDelay, event.time(),
 				split.slots(), split.tail());
 			return new Placed(body.lane(), style, body.busCells(), nudge);
@@ -4320,6 +4331,7 @@ public final class SongBuilder {
 			start = start.ahead(1);
 		}
 		trace(event, lane, style, style, nudge ? "nudged" : gaveUp);
+		placements.placing("chord:" + style + (nudge ? "+nudge" : ""));
 		return new Placed(addStackedEventModule(placements, start, triggerDelay,
 			event.time(), ultraSlots(event.notes(), style == ChordStyle.STACKED_FULL)), style, 0,
 			nudge);
@@ -4553,6 +4565,9 @@ public final class SongBuilder {
 	/** The near half of a cut chord, built as a stacked head with a bus behind it. */
 	private static BlockPos addStackedSplitModule(PlacementPlan placements, BlockPos cursor,
 			Direction travel, Direction laneStep, int triggerDelay, StackedSplit split, int time) {
+		placements.placing("cutHead" + split.head().size()
+			+ "/near" + split.nearTail().size() + "/far" + split.farTail().size()
+			+ (split.slots().back().isEmpty() ? " frontOnly" : " reachesBack"));
 		Body body = addStackedBusModule(placements, Lane.straight(cursor, travel, laneStep),
 			triggerDelay, time, split.slots(), split.nearTail());
 		return body.lane().pos();
@@ -5282,6 +5297,16 @@ public final class SongBuilder {
 		private final Map<BlockPos, String> blocks = new LinkedHashMap<>();
 		/** Cells two shapes both wanted, and what each pair was, when {@link #MARK_COLLISIONS}. */
 		private final Map<BlockPos, String> collisions = new LinkedHashMap<>();
+		/**
+		 * What is being built right now, and what built each cell, when {@link #MARK_COLLISIONS}.
+		 *
+		 * <p>The pair of blocks in a collision message says a note block met a staircase, which is one
+		 * question short: a note block belongs to a chord, and which chord -- the one the lane ended
+		 * on, the one across the turn, the head of a cut -- is what decides whose column has to move.
+		 * Kept only while marking, because it is a string per block otherwise.</p>
+		 */
+		private String placing = "?";
+		private final Map<BlockPos, String> placedBy = new LinkedHashMap<>();
 		/** Note block positions and the event tick each one belongs to. */
 		private final Map<BlockPos, Integer> notes = new LinkedHashMap<>();
 		/**
@@ -5586,6 +5611,11 @@ public final class SongBuilder {
 				+ (position.getZ() + shiftZ);
 		}
 
+		/** Names the shape about to be built, so a collision can say whose column it is. */
+		void placing(String what) {
+			placing = what;
+		}
+
 		void set(BlockPos position, String block) {
 			if (!recording) {
 				return;
@@ -5601,6 +5631,9 @@ public final class SongBuilder {
 			if (existing == null && trial != null) {
 				trial.blocksAdded().add(key);
 			}
+			if (MARK_COLLISIONS && existing == null) {
+				placedBy.put(key, placing);
+			}
 			if (existing != null && !existing.equals(block)) {
 				if (!MARK_COLLISIONS) {
 					throw new IllegalArgumentException("Placement layout collision at "
@@ -5610,7 +5643,8 @@ public final class SongBuilder {
 				// What was standing wins, so the rest of the walk carries on over the layout it would
 				// have had anyway. Only the first claim on a cell is remembered: a column that gets
 				// wanted three times is still one place to go and stand.
-				collisions.putIfAbsent(key, existing + " held off " + block);
+				collisions.putIfAbsent(key, existing + " (" + placedBy.getOrDefault(key, "?")
+					+ ") held off " + block + " (" + placing + ")");
 			}
 			if (!"minecraft:air".equals(block)) {
 				minimumX = Math.min(minimumX, key.getX());
