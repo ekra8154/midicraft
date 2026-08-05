@@ -98,6 +98,17 @@ class GuardianStackedTest {
 			.forEach(pad -> System.out.println("GUARDIAN pad " + pad.getKey() + " = " + pad.getValue()));
 	}
 
+	/** Every event that wanted to turn, so a lane's run past its wall can be read chord by chord. */
+	@Test
+	void tracesEveryTurnItWanted() throws Exception {
+		SongBuilder.TRACE_TURNS = true;
+		try {
+			build(load("deltarune-ch-4-guardian"));
+		} finally {
+			SongBuilder.TRACE_TURNS = false;
+		}
+	}
+
 	private static String describe(SongBuilder.PastePlan plan) {
 		return "blocks=" + plan.commands().size() + " spanZ=" + plan.spanZ()
 			+ " breaches=" + plan.breaches().size()
