@@ -40,6 +40,7 @@ class GuardianStackedTest {
 		SongBuilder.RELOCATES_CONTESTED_NOTE = true;
 		SongBuilder.BACK_FLANK_AWAY_FROM_NEXT_LANE = true;
 		SongBuilder.NUDGE_WHEN_BEHIND_BUSY = true;
+		SongBuilder.BACK_PAIR_FREE_AFTER_A_TURN = false;
 	}
 
 	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
@@ -128,6 +129,7 @@ class GuardianStackedTest {
 			SongBuilder.RELOCATES_CONTESTED_NOTE = true;
 			SongBuilder.BACK_FLANK_AWAY_FROM_NEXT_LANE = true;
 			SongBuilder.NUDGE_WHEN_BEHIND_BUSY = true;
+		SongBuilder.BACK_PAIR_FREE_AFTER_A_TURN = false;
 		}
 	}
 
@@ -189,15 +191,27 @@ class GuardianStackedTest {
 		}
 	}
 
-	/** ekran's chord of twelve at 40 73 16, Guardian 44 wide over three floors from 0 64 0. */
+	/** Letting the first chord out of a bend keep its back pair, priced on ekran's own build. */
 	@Test
-	void tracesFortyFourByThree() throws Exception {
-		SongBuilder.TRACE = true;
-		try {
-			SongBuilder.createPastePlan(new BlockPos(0, 64, 0), load("deltarune-ch-4-guardian"),
-				SongBuilder.PasteMode.ULTRA_COMPACT_LANE, new SongBuilder.BuildLimits(4, 44, 3));
-		} finally {
-			SongBuilder.TRACE = false;
+	void pricesTheBackPairAfterATurn() throws Exception {
+		List<SongBuilder.EventNote> notes = load("deltarune-ch-4-guardian");
+		for (boolean free : new boolean[] {false, true}) {
+			SongBuilder.BACK_PAIR_FREE_AFTER_A_TURN = free;
+			SongBuilder.MARK_COLLISIONS = true;
+			try {
+				SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0),
+					notes, SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+					new SongBuilder.BuildLimits(16, 44, 3));
+				System.out.println("TURNPAIR free=" + (free ? "on " : "off")
+					+ " marks=" + plan.collisions().size() + " " + describe(plan));
+				plan.collisions().entrySet().stream().limit(6)
+					.forEach(mark -> System.out.println("TURNPAIR   " + mark));
+			} catch (RuntimeException refused) {
+				System.out.println("TURNPAIR free=" + (free ? "on " : "off") + " REFUSED: "
+					+ refused.getMessage());
+			} finally {
+				SongBuilder.MARK_COLLISIONS = false;
+			}
 		}
 	}
 
