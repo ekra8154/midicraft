@@ -1295,6 +1295,33 @@ public final class SongBuilder {
 					owing--;
 				}
 			}
+			// And up, where the plan asked for a pad and the walk still lands the chord short.
+			//
+			// The sweep and the walk do not always agree about where a chord ends -- the walk spends
+			// columns on things the arithmetic did not model -- so a pad booked to land a lane flush
+			// can arrive a column or two short of doing it. One column short is not a small miss here:
+			// a climb taken straight off a bus skips two rungs, and what decides "off a bus" is whether
+			// anything stands between the bus and the staircase. Land flush and the climb costs offBus;
+			// stop one short and the lane has to cover that column with dust, which costs the column
+			// *and* the discount -- turnCells instead of offBus, two blocks more than it just spent one
+			// to lose. A lane that could have afforded the first cannot afford the second, so it does
+			// not turn at all, lays the chord that beat it whole, and comes to rest past its wall.
+			//
+			// ekran read exactly that as a breach of eleven: one column short with five blocks of wire,
+			// wanting one and five where landing flush wants one and three.
+			//
+			// Only upward from a pad the plan already asked for, and only while the wire covers it, so
+			// this can move a lane onto its wall and never off it.
+			while (PREPADS_FOR_THE_OFF_BUS_DISCOUNT && owing > 0 && tipSignal >= owing + 1
+					&& (landingOf(lane.pos().getX() + lane.travel().getStepX() * owing,
+						lane.travel().getStepX(), event, wait - spentPadding, columnBehindBusy, wall,
+						layout, inTurn(turning, leavingTurn, lane.pos(), lastCorner), parity).end() - wall)
+						* lane.travel().getStepX() < 0) {
+				owing++;
+			}
+			if (TRACE && booked != null && booked.getOrDefault(index, 0) > 0) {
+				System.out.println("  PADBOOK index=" + index + " booked=" + booked.get(index) + " owing=" + owing + " tip=" + tipSignal + " at " + lane.pos().getX());
+			}
 			if (owing > 0) {
 				Pad early = planPad(owing, tipSignal, 0, Math.max(0, wait - 1 - spentPadding));
 				lane = emitPad(placements, lane, early, "padBooked");
@@ -1944,7 +1971,8 @@ public final class SongBuilder {
 				if (TRACE) {
 					System.out.println("  TRY last=" + last + " attempt=" + attempt + " pads=" + pads
 						+ " triedLast=" + tried.last() + " owing=" + owing + " padCells="
-						+ end.cells().size() + " padSignal=" + end.signal() + " need=" + need);
+						+ end.cells().size() + " padSignal=" + end.signal() + " need=" + need
+						+ " strands=" + strandsNext(events, from, last, wall, otherWall, stepX, turnCells, offBus, stepOff, climbing, layout, 0));
 				}
 				if (end.cells().size() == owing && end.signal() >= need
 					&& !strandsNext(events, from, last, wall, otherWall, stepX, turnCells, offBus,
@@ -1954,8 +1982,8 @@ public final class SongBuilder {
 					}
 					return Map.copyOf(pads);
 				}
-				if (owing - end.cells().size() <= 0
-					|| !book(pads, tried, from, last, owing - end.cells().size())) {
+				int shortfall = owing - end.cells().size();
+				if (shortfall <= 0 || !book(pads, tried, from, last, shortfall)) {
 					break;
 				}
 			}
@@ -5428,6 +5456,27 @@ public final class SongBuilder {
 			notes.size() > 1 ? notes.get(1) : null,
 			notes.size() > 0 ? notes.get(0) : null));
 	}
+
+	/**
+	 * Whether a lane may pad a chord forward so its own bus lands on the wall.
+	 *
+	 * <p>The closing search already pads a lane out to its wall, but it pads at the <em>end</em> --
+	 * dust laid after the last chord, filling the columns the chord did not reach. That works for the
+	 * wall and breaks the staircase: a climb taken straight off a bus skips two rungs, and a single
+	 * cell of dust between the bus and the staircase is enough to stop it being off a bus at all. So
+	 * a lane one column short is offered a pad that costs it two blocks of wire it has not got, and
+	 * gives up -- then lays the chord that beat it whole and past the wall.</p>
+	 *
+	 * <p>On, the same columns are booked in front of the chord instead. The chord moves out to the
+	 * wall itself, its bus ends there, the staircase starts on it and costs {@code offBus}. Nothing
+	 * about what the chord hands on changes, because it opens with its own repeater however little
+	 * wire arrives -- so the test is the tip the sweep already recorded.</p>
+	 *
+	 * <p>ekran's, from a breach of eleven on Guardian at 44 wide over three floors: a lane one column
+	 * short of its wall with five blocks of wire, wanting one for the column and five for the climb,
+	 * where moving the chord makes it one and three.</p>
+	 */
+	static boolean PREPADS_FOR_THE_OFF_BUS_DISCOUNT = true;
 
 	/** Whether a lone back flank hangs away from the lane the walk has not built yet. */
 	static boolean BACK_FLANK_AWAY_FROM_NEXT_LANE = true;

@@ -41,6 +41,7 @@ class GuardianStackedTest {
 		SongBuilder.BACK_FLANK_AWAY_FROM_NEXT_LANE = true;
 		SongBuilder.NUDGE_WHEN_BEHIND_BUSY = true;
 		SongBuilder.BACK_PAIR_ASKS_THE_BLOCKS = true;
+		SongBuilder.PREPADS_FOR_THE_OFF_BUS_DISCOUNT = true;
 	}
 
 	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
@@ -224,6 +225,69 @@ class GuardianStackedTest {
 				SongBuilder.PasteMode.ULTRA_COMPACT_LANE, new SongBuilder.BuildLimits(16, 44, 3));
 		} finally {
 			SongBuilder.TRACE_TURNS = false;
+		}
+	}
+
+	/** ekran's breach of eleven: the lane one column short of its wall with five blocks of wire. */
+	@Test
+	void pricesPrepaddingForTheOffBusDiscount() throws Exception {
+		List<SongBuilder.EventNote> notes = load("deltarune-ch-4-guardian");
+		for (boolean on : new boolean[] {false, true}) {
+			SongBuilder.PREPADS_FOR_THE_OFF_BUS_DISCOUNT = on;
+			try {
+				SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0),
+					notes, SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+					new SongBuilder.BuildLimits(16, 44, 3));
+				int worst = plan.breaches().stream().mapToInt(Integer::intValue).max().orElse(0);
+				System.out.println("PREPAD on=" + (on ? "yes" : "no ") + " worst=" + worst
+					+ " " + describe(plan));
+			} catch (RuntimeException refused) {
+				System.out.println("PREPAD on=" + (on ? "yes" : "no ") + " REFUSED: "
+					+ refused.getMessage());
+			}
+		}
+	}
+
+	/** The pre-pad alone, across every width and floor count. */
+	@Test
+	void sweepsPrepaddingEveryWidthAndFloor() throws Exception {
+		List<SongBuilder.EventNote> notes = load("deltarune-ch-4-guardian");
+		for (boolean on : new boolean[] {false, true}) {
+			SongBuilder.PREPADS_FOR_THE_OFF_BUS_DISCOUNT = on;
+			int built = 0;
+			int refused = 0;
+			int breaches = 0;
+			int breachBlocks = 0;
+			int worst = 0;
+			int clean = 0;
+			long blocks = 0;
+			long span = 0;
+			long wrong = 0;
+			for (int floors = 2; floors <= 6; floors++) {
+				for (int width = 12; width <= 48; width += 4) {
+					try {
+						SongBuilder.PastePlan plan = SongBuilder.createPastePlan(
+							new BlockPos(0, 64, 0), notes, SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+							new SongBuilder.BuildLimits(4, width, floors));
+						built++;
+						breaches += plan.breaches().size();
+						clean += plan.breaches().isEmpty() ? 1 : 0;
+						for (int breach : plan.breaches()) {
+							breachBlocks += breach;
+							worst = Math.max(worst, breach);
+						}
+						blocks += plan.commands().size();
+						span += plan.spanZ();
+						wrong += plan.wrongNotes();
+					} catch (RuntimeException no) {
+						refused++;
+					}
+				}
+			}
+			System.out.println("PREPADSWEEP " + (on ? "on " : "off")
+				+ " built=" + built + " refused=" + refused + " clean=" + clean
+				+ " breaches=" + breaches + " breachBlocks=" + breachBlocks + " worst=" + worst
+				+ " wrong=" + wrong + " blocks=" + blocks + " spanZ=" + span);
 		}
 	}
 
