@@ -1848,7 +1848,7 @@ public final class SongBuilder {
 		// Erring towards the bus is the safe way round: the walk may yet find the module needs no
 		// nudge and build it short, which lands the lane inside its wall rather than outside it.
 		if (style.stacked()
-				&& (wall - (startX + stepX * (delayColumns + behindShift))) * stepX
+				&& (wall - (startX + stepX * (delayColumns + behindShift))) * stepX - handoverReserve(layout)
 					< STACKED_CELLS + 1) {
 			style = ChordStyle.BUS;
 			behindShift = 0;
@@ -1872,7 +1872,7 @@ public final class SongBuilder {
 				// any chord the head takes seven from it is: see {@link #addChordModule}, which has
 				// to make this same substitution or the lane is measured for one shape and built as
 				// another.
-				if ((wall - (startX + stepX * (delayColumns + behindShift))) * stepX
+				if ((wall - (startX + stepX * (delayColumns + behindShift))) * stepX - handoverReserve(layout)
 						< STACKED_CELLS + STACKED_BUS_TRANSITION + tailCells + 1
 						&& !(KEEPS_HEAD_WHEN_THE_BUS_IS_LONGER && 1 + cells
 							> STACKED_CELLS + STACKED_BUS_TRANSITION + tailCells)) {
@@ -4507,6 +4507,13 @@ public final class SongBuilder {
 		// can ask exactly the same question. When the walk converted here on a clash the planner could
 		// not see, the two disagreed about how long the chord was, and a lane measured for two cells
 		// that got five came to rest three past its wall.
+		// Less the column the lane hands over into, which is the fifth site of the same rule and the
+		// one that made the readback test refuse to build. The guard below exists so a nudge cannot
+		// push the staircase past the wall -- but it measures the room a lane had before that column
+		// was reserved, so with the reserve on it let a module be nudged into the descent'''s own
+		// steps. ekran'''s sample song at 24 wide over three floors, read off MARK_COLLISIONS: a
+		// STACKED_FRONT+nudge holding off descent4 for a note block and its oak planks.
+		int roomToWall = roomAhead - handoverReserve(layout);
 		int stackedRoom = STACKED_CELLS + 1;
 		if (style.busHeaded()) {
 			StackedBusSplit measured = splitFor(style, event.notes());
@@ -4530,12 +4537,12 @@ public final class SongBuilder {
 		int busColumns = 1 + (event.notes().size() + 1) / 2;
 		boolean busIsLonger = KEEPS_HEAD_WHEN_THE_BUS_IS_LONGER && style.busHeaded()
 			&& busColumns > stackedRoom - 1;
-		if (style.stacked() && roomAhead < stackedRoom && !busIsLonger) {
-			gaveUp = "roomAhead" + roomAhead + "<" + stackedRoom;
+		if (style.stacked() && roomToWall < stackedRoom && !busIsLonger) {
+			gaveUp = "roomAhead" + roomToWall + "<" + stackedRoom;
 			placements.padded("planBusForRoom");
 			style = ChordStyle.BUS;
 			nudge = false;
-		} else if (busIsLonger && roomAhead < stackedRoom) {
+		} else if (busIsLonger && roomToWall < stackedRoom) {
 			placements.padded("planKeptHeadBusWasLonger");
 		}
 		// And a nudge has to be reachable. Moving the repeater a cell forward puts it a cell further
