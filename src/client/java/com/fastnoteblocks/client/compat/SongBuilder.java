@@ -1270,6 +1270,12 @@ public final class SongBuilder {
 			// Pad this lane was told to lay early rather than at its end, in front of the event's own
 			// repeater so that repeater stands between it and the wall.
 			int owing = booked != null ? booked.getOrDefault(index, 0) : 0;
+			// Both clamps below aim the chord's far end at the wall. That is a column too far: the
+			// column after the far end is where the lane hands over, so a chord landing flush leaves
+			// the staircase outside the footprint. They aim a column short of it instead -- which is
+			// the same place for the off-bus discount, since what earns that is nothing standing
+			// between the bus and the staircase, and the staircase simply moves back with the bus.
+			int padWall = wall - lane.travel().getStepX() * handoverReserve(layout);
 			// Never past the wall, though. The pad is booked to land the lane flush on its wall, so a
 			// booking that would carry the chord over it is a booking that has already failed at its
 			// own job -- and the column it spends is the column the lane comes to rest outside by.
@@ -1286,11 +1292,11 @@ public final class SongBuilder {
 			if (owing > 0 && (landingOf(lane.pos().getX(), lane.travel().getStepX(), event,
 					wait - spentPadding, columnBehindBusy, wall, layout,
 					inTurn(turning, leavingTurn, lane.pos(), lastCorner),
-					parity).end() - wall)
+					parity).end() - padWall)
 					* lane.travel().getStepX() <= 0) {
 				while (owing > 0 && (landingOf(lane.pos().getX() + lane.travel().getStepX() * owing,
 						lane.travel().getStepX(), event, wait - spentPadding, columnBehindBusy, wall,
-						layout, inTurn(turning, leavingTurn, lane.pos(), lastCorner), parity).end() - wall)
+						layout, inTurn(turning, leavingTurn, lane.pos(), lastCorner), parity).end() - padWall)
 						* lane.travel().getStepX() > 0) {
 					owing--;
 				}
@@ -1315,7 +1321,7 @@ public final class SongBuilder {
 			while (PREPADS_FOR_THE_OFF_BUS_DISCOUNT && owing > 0 && tipSignal >= owing + 1
 					&& (landingOf(lane.pos().getX() + lane.travel().getStepX() * owing,
 						lane.travel().getStepX(), event, wait - spentPadding, columnBehindBusy, wall,
-						layout, inTurn(turning, leavingTurn, lane.pos(), lastCorner), parity).end() - wall)
+						layout, inTurn(turning, leavingTurn, lane.pos(), lastCorner), parity).end() - padWall)
 						* lane.travel().getStepX() < 0) {
 				owing++;
 			}
@@ -1599,8 +1605,27 @@ public final class SongBuilder {
 	 * should have gone in front of the last event was never laid.</p>
 	 */
 	private static int turnReserve(EventGroup event, int turnCells, Layout layout) {
+		// The handover column, which every chord needs and only a dead-wire bus was ever charged for.
+		// A chord whose last cell lands on the wall exactly has fitted by this method's old answer and
+		// left the lane standing a column outside it, which is a breach nothing asked about.
+		if (handoverReserve(layout) > 0) {
+			return 1;
+		}
 		return layout.ultra() && event.style() == ChordStyle.BUS
 			&& DUST_RANGE - (event.notes().size() + 1) / 2 < turnCells ? 1 : 0;
+	}
+
+	/**
+	 * The column a lane hands over into, owed by every chord whatever its wire is worth.
+	 *
+	 * <p>Read in the three places that decide where a chord ends: the fit test through
+	 * {@link #turnReserve}, and the two pads that aim a chord at the wall on purpose --
+	 * {@link #prePad} and the booked-pad clamps. They are one rule, and a build that closed only some
+	 * of those doors was measurably worse than closing none: see {@link #RESERVES_THE_HANDOVER_COLUMN}.
+	 * </p>
+	 */
+	private static int handoverReserve(Layout layout) {
+		return RESERVES_THE_HANDOVER_COLUMN && layout.ultra() ? 1 : 0;
 	}
 
 	/**
@@ -2447,9 +2472,12 @@ public final class SongBuilder {
 	 */
 	private static int prePad(int startX, int stepX, EventGroup event, int wait, boolean busy,
 			Layout layout, int wall, int limit, boolean inTurn, ParityOracle parity) {
+		// The far end lands a column short of the wall, because landing it *on* the wall is landing
+		// the handover one past it -- see {@link #handoverReserve}.
+		int target = wall - stepX * handoverReserve(layout);
 		for (int pad = 0; pad <= limit; pad++) {
 			if (landingOf(startX + stepX * pad, stepX, event, wait, busy, wall, layout, inTurn,
-					parity).end() == wall) {
+					parity).end() == target) {
 				return pad;
 			}
 		}
@@ -3912,6 +3940,26 @@ public final class SongBuilder {
 					&& !soundedByAnother(placements, slot, time))) {
 				slots = new ArrayList<>(slots);
 				java.util.Collections.reverse(slots);
+			}
+			// And the chord's last note, wherever it falls, goes to the low-z slot of the pair.
+			//
+			// The rule above is the same idea and does most of the work, but it is all-or-nothing per
+			// cell and it stands down near a bend, which is exactly where the odd note lands when a
+			// chord rides a corner. A cell holding one note has two slots and one note to put in them,
+			// so which it takes cannot change the length of the run -- only which lane the note ends
+			// up beside, and the high-z slot is beside the lane the walk has not built yet.
+			//
+			// ekran's, off the corner at 32 wide over two floors: a bus of five with both slots of its
+			// last cell free took the one facing the next lane, and the corner cell of that lane came
+			// down against it. Not free, though -- the bend exception it overrides is there because the
+			// two-swap turn wants a note on the inside diagonal, so this can cost a swap where the odd
+			// note is that diagonal. Measured either way; see {@link #BUS_ODD_NOTE_AWAY_FROM_NEXT_LANE}.
+			if (BUS_ODD_NOTE_AWAY_FROM_NEXT_LANE && ordered.size() - placed == 1 && slots.size() >= 2
+					&& slots.get(1).getZ() < slots.get(0).getZ()) {
+				List<BlockPos> lowFirst = new ArrayList<>(slots);
+				lowFirst.set(0, slots.get(1));
+				lowFirst.set(1, slots.get(0));
+				slots = lowFirst;
 			}
 			for (BlockPos slot : slots) {
 				if (TRACE) {
@@ -5550,6 +5598,93 @@ public final class SongBuilder {
 	 */
 	static int CUT_PAD_COLUMNS = 2;
 
+	/**
+	 * Whether every chord is charged the column its lane hands over into.
+	 *
+	 * <p>The fifth appearance of one sentence: fitting is not the same as being able to leave. The
+	 * other four were a decision that asked the wrong question and refused. This one never asked. A
+	 * chord whose last cell lands on the wall exactly reads as fitting -- {@code landing > farWall} is
+	 * false when {@code landing == farWall} -- so {@code overshoots} is false, so {@code wantsTurn} is
+	 * false, and every turn decision in the walk sits behind that gate. The pad, the cut, the
+	 * lookahead and {@link #closes} are all skipped, and the lane comes to rest on the column after
+	 * the wall with nothing having objected.</p>
+	 *
+	 * <p>ekran's, from the last breaches on Guardian at 44 wide over three floors, both the same
+	 * shape: a stacked bus of twenty-four ending on the wall at {@code 34 69 208} and the lane handing
+	 * over at {@code 43}. {@link #turnReserve} already kept this column back, but only for a plain bus
+	 * whose wire was too dead to turn -- a wire reserve that happened to be a column. The column is
+	 * owed whatever the wire says and whatever the shape is.</p>
+	 *
+	 * <p>There are three doors to the same breach and they only work shut together. The fit test is
+	 * one. The other two are pads that aim a chord's far end at the wall <em>on purpose</em>:
+	 * {@link #prePad}, whose whole job is stated that way, and the two clamps on a booked pad -- one
+	 * of which is {@link #PREPADS_FOR_THE_OFF_BUS_DISCOUNT}, added this week, which counts a pad
+	 * <em>up</em> until the chord lands flush. Shutting the fit test alone made the build worse, not
+	 * better, because it drove more traffic through the pads. On Guardian at 44 wide over three
+	 * floors:</p>
+	 *
+	 * <pre>
+	 *   off                    breaches 2  worst  1  breachBlocks  2  blocks 84,806  spanZ 255
+	 *   fit test only          breaches 10 worst 11  breachBlocks 40  blocks 85,098  spanZ 255
+	 *   all three doors        breaches 1  worst 10  breachBlocks 10  blocks 85,133  spanZ 258
+	 * </pre>
+	 *
+	 * <p>And across fifty configurations of Guardian, floors two to six and widths twelve to
+	 * forty-eight, where {@code ofOne} counts breaches of exactly one column -- the signature of this
+	 * class, a lane at rest one past its wall:</p>
+	 *
+	 * <pre>
+	 *   off  built 38  refused 12  clean 4  breaches 224  ofOne 104  breachBlocks   987  worst 13
+	 *   on   built 41  refused  9  clean 9  breaches 196  ofOne  22  breachBlocks 1,283  worst 12
+	 *                                                     wrong 0 -> 2, blocks +8.5%, spanZ +11.6%
+	 * </pre>
+	 *
+	 * <p>The class really does mostly die -- {@code ofOne} down 79% -- and three more builds paste
+	 * and five more come out clean, which is the count this file has ranked first all week. But the
+	 * breaches that remain are bigger, not fewer in blocks: 987 becomes 1,283, because a lane that no
+	 * longer stops one column out stops ten. And two wrong notes appear where there were none, which
+	 * by this file's own {@code betterThan} ordering outranks every breach number on the page. That
+	 * is what holds it off, not the columns.</p>
+	 *
+	 * <p>Both wrong notes are one fault in two configurations, and it is not this rule's: it is a
+	 * corner. At 32 wide over two floors, plan space, shift {@code x+2 z+1}: the chord at tick 536 is
+	 * a plain bus of five walked round the bend, and its cell two hangs a note block at
+	 * {@code 1,69,139} -- the south flank, in the ground between the lane at {@code z=138} and the
+	 * lane at {@code z=141}. Four ticks later than the pulse can cover, the opening chord of that next
+	 * lane lays its <em>corner</em> cell at {@code 1,69,140}: stone with wire on top, directly south
+	 * of the note, live at tick 544. Neither shape ever asked the other's question, because they do
+	 * not collide -- they are merely adjacent, and adjacency across a corner is what nothing checks.
+	 * The parity machinery asks about a lane's own columns; the lane the walk has just left is not one
+	 * of them. Turning this flag on does not create that gap, it walks a lane into it.</p>
+	 *
+	 * <p><b>Off, and not because the diagnosis was wrong.</b> With all three shut the flush-landing
+	 * class is gone outright -- every {@code columns=-1} in the build, including both of ekran's --
+	 * and what is left is one lane ten columns out at {@code -10 72 243}. That lane is a different
+	 * fault wearing this one's clothes: at {@code t=1546} it has three columns left, five of wire and
+	 * a chord of twenty-four, its head is refused by a parity clash and its plain cut by one block of
+	 * wire ({@code cells 12 + splitCells 4} against fifteen), so it cannot turn and lays the chord
+	 * whole. Ten blocks of breach against two is worse by the count that matters, so this waits on
+	 * that cut being affordable -- which is {@code CUTS_A_CHORD_THAT_FITS} and the turn ban, not this.
+	 * </p>
+	 *
+	 * <p><b>On.</b> It shipped off first, on the two wrong notes above -- and those turned out to be
+	 * phantoms of {@code SHARED_PULSE_TICKS} being tighter than the button that starts the machine,
+	 * so the one number that outranked everything else here was never real. What is left against it is
+	 * one named test, {@code NoteMachineReaderTest.readsBackEveryNoteOfItsOwnBuild[3]}, which is a bug
+	 * with an address rather than a verdict. ekran asked for this one, so it stays on and red until
+	 * that readback is understood.</p>
+	 */
+	static boolean RESERVES_THE_HANDOVER_COLUMN = true;
+
+	/**
+	 * Whether a bus puts its last unpaired note in the low-z slot of the cell.
+	 *
+	 * <p>ekran's, and the same instinct as {@link #BACK_FLANK_AWAY_FROM_NEXT_LANE}: the build grows
+	 * towards +z, so the high-z slot of every pair faces the lane the walk has not laid yet, and a
+	 * note left there is a note whose neighbour does not exist to be checked against.</p>
+	 */
+	static boolean BUS_ODD_NOTE_AWAY_FROM_NEXT_LANE = true;
+
 	/** Whether a lone back flank hangs away from the lane the walk has not built yet. */
 	static boolean BACK_FLANK_AWAY_FROM_NEXT_LANE = true;
 
@@ -6509,11 +6644,24 @@ public final class SongBuilder {
 		/**
 		 * How much later a block may go live beside a note without sounding it a second time.
 		 *
-		 * <p>One repeater at its longest. That is not a margin picked for comfort: it is exactly as
-		 * far apart as two modules can be and still touch at all, since anything longer puts a
-		 * repeater of its own between them and there is nothing left to share.</p>
+		 * <p>The length of a stone button press, which is what the machine is actually started with.
+		 * What decides whether a second block adds an edge is how long the first pulse is still
+		 * holding the note high, and that is a property of the source, not of the distance between
+		 * two modules.</p>
+		 *
+		 * <p>It was four -- one repeater at its longest, on the reasoning that anything further apart
+		 * has a repeater of its own between it and nothing left to share. That reasoning is about
+		 * whether two modules can touch, which is a different question from whether the pulse has
+		 * ended, and being wrong about it costs more than being cautious usually does: {@code
+		 * wrongNotes()} is built on this, and by {@code betterThan} a wrong note outranks every
+		 * breach number in the file. So a phantom here can veto a real improvement, and did.</p>
+		 *
+		 * <p>ekran found it from the world, which is the only place it could have been found. The
+		 * layout check called a note at {@code 3 69 140} doubled -- eight ticks between its own pulse
+		 * and the corner cell laid beside it -- and playing the build showed it sounding once, because
+		 * the button was still holding the first pulse high when the second arrived.</p>
 		 */
-		private static final int SHARED_PULSE_TICKS = 4;
+		private static final int SHARED_PULSE_TICKS = 10;
 
 		private static String describe(BlockPos position) {
 			return describe(position, 0, 0);
