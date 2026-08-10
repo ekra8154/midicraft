@@ -233,7 +233,7 @@ class GuardianStackedTest {
 	void pricesPrepaddingForTheOffBusDiscount() throws Exception {
 		List<SongBuilder.EventNote> notes = load("deltarune-ch-4-guardian");
 		for (boolean on : new boolean[] {false, true}) {
-			SongBuilder.PREPADS_FOR_THE_OFF_BUS_DISCOUNT = on;
+			SongBuilder.PADS_UNTIL_THE_NEXT_CHORD_CUTS = on;
 			try {
 				SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0),
 					notes, SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
@@ -253,7 +253,7 @@ class GuardianStackedTest {
 	void sweepsPrepaddingEveryWidthAndFloor() throws Exception {
 		List<SongBuilder.EventNote> notes = load("deltarune-ch-4-guardian");
 		for (boolean on : new boolean[] {false, true}) {
-			SongBuilder.PREPADS_FOR_THE_OFF_BUS_DISCOUNT = on;
+			SongBuilder.PADS_UNTIL_THE_NEXT_CHORD_CUTS = on;
 			int built = 0;
 			int refused = 0;
 			int breaches = 0;

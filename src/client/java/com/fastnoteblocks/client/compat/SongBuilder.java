@@ -1946,6 +1946,42 @@ public final class SongBuilder {
 		// The natural end cannot close. Try landing on the wall a chord at a time further back, since
 		// every chord given up is a chord the next lane has to carry instead.
 		for (int last = bare.last(); last >= from; last--) {
+			// The smallest pad that makes the next chord cut, before the pad that fills the lane.
+			//
+			// Filling out to the wall is one way to close a lane and the expensive one: every column
+			// has to be paid for in wire, and a lane arriving on a long bus has none. A cut wants no
+			// wire at all -- the columns are filled with the chord's own music -- but it is only
+			// offered where the chord does not fit, and a chord that fits by a column or two is laid
+			// whole. The lane then has nothing left to climb with, cannot turn, and runs on.
+			//
+			// So try the smallest pad that makes it not fit. ekran: move the start of the chord forward
+			// a couple of blocks so that it cuts the stacked bus. On Guardian at 44 wide over three
+			// floors that is two columns in front of a chord of twenty-four, which turns a run of
+			// eleven columns past the wall into a lane that ends on it.
+			if (PADS_UNTIL_THE_NEXT_CHORD_CUTS && last + 1 < events.size()) {
+				Map<Integer, Integer> cutting = new LinkedHashMap<>();
+				for (int column = 1; column <= CUT_PAD_COLUMNS; column++) {
+					if (!book(cutting, bare, from, last, 1)) {
+						break;
+					}
+					Sweep shorter = sweep(events, from, startX, stepX, wall, startTime, tip, busy, offBus,
+						layout, cutting, leaving, parity);
+					if (shorter.last() < last) {
+						break;
+					}
+					if (closes(events, shorter, from, last, wall, stepX, turnCells, offBus, splitCells,
+							climbing)
+						&& !strandsNext(events, from, last, wall, otherWall, stepX, turnCells, offBus,
+							stepOff, climbing, layout, carriedCells(events, shorter, from, last, wall, stepX,
+								splitCells, climbing))) {
+						if (TRACE) {
+							System.out.println("  CUTPAD last=" + last + " columns=" + column
+								+ " pads=" + cutting);
+						}
+						return Map.copyOf(cutting);
+					}
+				}
+			}
 			Map<Integer, Integer> pads = new LinkedHashMap<>();
 			for (int attempt = 0; attempt < 8; attempt++) {
 				Sweep tried = sweep(events, from, startX, stepX, wall, startTime, tip, busy, offBus, layout,
@@ -5477,6 +5513,23 @@ public final class SongBuilder {
 	 * where moving the chord makes it one and three.</p>
 	 */
 	static boolean PREPADS_FOR_THE_OFF_BUS_DISCOUNT = true;
+
+	/**
+	 * Whether a lane may pad a chord forward only as far as it takes to make the next one cut.
+	 *
+	 * <p>The closing search has one target: fill the lane out to its wall. That is the expensive way
+	 * to close a lane -- every column is paid for in wire, and a lane arriving on a long bus has none
+	 * to pay with. A cut costs no wire at all, because the columns are filled with the chord's own
+	 * music, but it is only offered where the chord does not fit. A chord that fits by a column or
+	 * two is therefore laid whole, and the lane is left with nothing to climb with.</p>
+	 *
+	 * <p>ekran: move the start of the chord forward a couple of blocks so that it cuts the stacked
+	 * bus. That is what this tries -- one column at a time, keeping the first that closes the lane.</p>
+	 */
+	static boolean PADS_UNTIL_THE_NEXT_CHORD_CUTS = true;
+
+	/** How far a lane will pad looking for a cut. Two on ekran's case; four leaves room to be wrong. */
+	static int CUT_PAD_COLUMNS = 2;
 
 	/** Whether a lone back flank hangs away from the lane the walk has not built yet. */
 	static boolean BACK_FLANK_AWAY_FROM_NEXT_LANE = true;
