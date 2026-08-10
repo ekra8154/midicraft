@@ -658,13 +658,20 @@ public final class SongBuilder {
 				// out. Ekran found it in a vertical slice.
 				laneStarted = placedWhileTurning;
 				placedWhileTurning = false;
-				// ekran, reading Guardian at 44 wide over three floors: the first chord of a lane
-				// coming out of a bend takes a head of five with both back cells standing empty, and
-				// it is the only chord in the lane that does. Whether the turn's run really reaches
-				// them is the question -- it is a run of powered stone at the level the low notes hang
-				// at, live at the tick of the lane it is leaving, but it lies perpendicular and the
-				// back pair sits one either side of the new lane's opening column.
-				columnBehindBusy = !BACK_PAIR_FREE_AFTER_A_TURN;
+				// How far from the corner, not whether the last chord was in the bend.
+				//
+				// What fills the pair behind the first chord of a new lane is not the turn's own run,
+				// which lies perpendicular to it. It is the chord standing *on* the turn -- the one
+				// inTurn converts to a plain bus -- hanging its notes along the corner. So how far
+				// that reaches is a distance, and asking "did the route just stop bending" answers a
+				// question about the route rather than about the blocks. ekran: this chord is already
+				// well out of the bend, and four blocks clear of a flat corner is enough for any chord
+				// to stand without collisions.
+				//
+				// The same shape as the turn ban's own STACKED_CLEAR_OF_CORNER test, and set on the
+				// one variable both the planner and the walk read, so neither can answer it
+				// differently from the other.
+				columnBehindBusy = true;
 				replan = layout.ultra();
 			}
 			// Settled before the event is placed rather than after it. A turn hands back a cursor at
@@ -5388,20 +5395,6 @@ public final class SongBuilder {
 			notes.size() > 1 ? notes.get(1) : null,
 			notes.size() > 0 ? notes.get(0) : null));
 	}
-
-	/**
-	 * Whether the first chord out of a flat turn may use the pair of low slots behind it.
-	 *
-	 * <p>Off is the rule as it stood. A turn claims the pair on the grounds that it is a run of
-	 * powered stone at the level the low notes hang at, live at the tick of the lane it is leaving --
-	 * and early is the one direction a note cannot be reached from. Unlike a staircase, that run does
-	 * hang notes of its own, so the claim is not obviously wrong the way the staircase's was.</p>
-	 *
-	 * <p>What is not obvious is the reach. The run lies perpendicular to the new lane, and the back
-	 * pair sits one either side of that lane's opening column, so whether the two actually touch is a
-	 * question about the corner's geometry rather than about the rule. Measured rather than argued.</p>
-	 */
-	static boolean BACK_PAIR_FREE_AFTER_A_TURN = false;
 
 	/** Whether a lone back flank hangs away from the lane the walk has not built yet. */
 	static boolean BACK_FLANK_AWAY_FROM_NEXT_LANE = true;

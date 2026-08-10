@@ -40,7 +40,7 @@ class GuardianStackedTest {
 		SongBuilder.RELOCATES_CONTESTED_NOTE = true;
 		SongBuilder.BACK_FLANK_AWAY_FROM_NEXT_LANE = true;
 		SongBuilder.NUDGE_WHEN_BEHIND_BUSY = true;
-		SongBuilder.BACK_PAIR_FREE_AFTER_A_TURN = false;
+		SongBuilder.BACK_PAIR_ASKS_THE_BLOCKS = true;
 	}
 
 	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
@@ -129,7 +129,7 @@ class GuardianStackedTest {
 			SongBuilder.RELOCATES_CONTESTED_NOTE = true;
 			SongBuilder.BACK_FLANK_AWAY_FROM_NEXT_LANE = true;
 			SongBuilder.NUDGE_WHEN_BEHIND_BUSY = true;
-		SongBuilder.BACK_PAIR_FREE_AFTER_A_TURN = false;
+		SongBuilder.BACK_PAIR_ASKS_THE_BLOCKS = true;
 		}
 	}
 
@@ -195,19 +195,19 @@ class GuardianStackedTest {
 	@Test
 	void pricesTheBackPairAfterATurn() throws Exception {
 		List<SongBuilder.EventNote> notes = load("deltarune-ch-4-guardian");
-		for (boolean free : new boolean[] {false, true}) {
-			SongBuilder.BACK_PAIR_FREE_AFTER_A_TURN = free;
+		for (boolean ask : new boolean[] {false, true}) {
+			SongBuilder.BACK_PAIR_ASKS_THE_BLOCKS = ask;
 			SongBuilder.MARK_COLLISIONS = true;
 			try {
 				SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0),
 					notes, SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
 					new SongBuilder.BuildLimits(16, 44, 3));
-				System.out.println("TURNPAIR free=" + (free ? "on " : "off")
+				System.out.println("TURNPAIR asks=" + ask
 					+ " marks=" + plan.collisions().size() + " " + describe(plan));
 				plan.collisions().entrySet().stream().limit(6)
 					.forEach(mark -> System.out.println("TURNPAIR   " + mark));
 			} catch (RuntimeException refused) {
-				System.out.println("TURNPAIR free=" + (free ? "on " : "off") + " REFUSED: "
+				System.out.println("TURNPAIR asks=" + ask + " REFUSED: "
 					+ refused.getMessage());
 			} finally {
 				SongBuilder.MARK_COLLISIONS = false;
