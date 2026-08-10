@@ -1,6 +1,9 @@
 # Handoff — stacked chords, parity and breaches
 
-State at `cda0cc9`. Everything below was measured on ekran's own library, not derived.
+State at `9c8d23a`. Everything below was measured on ekran's own library, not derived.
+
+**Start with open item 1.** It is ekran's own words, verbatim, and it is the fourth appearance of
+the one rule this whole session has been circling.
 
 ## The rule this file keeps breaking
 
@@ -10,11 +13,17 @@ place that asks "does it fit" while meaning "can the lane still get out" produce
 looks unrelated to the shape that caused it.
 
 - `roomAhead < stackedRoom` refused a stacked-bus at 12 columns and handed it a plain bus that
-  wants 13. Fixed by `KEEPS_HEAD_WHEN_THE_BUS_IS_LONGER`.
-- `reachesWall` refused the turn for one block of wire, and the only way to get more wire is to
-  lay a whole chord. Diagnosed, not fixed — see open item 1.
-- `stackedSplitOf` refused the cut whenever the tail fitted before the wall, though it is only
-  ever asked where the chord overshoots *including* the turn reserve. Half-fixed, off — item 1.
+  wants 13. **Fixed** — `KEEPS_HEAD_WHEN_THE_BUS_IS_LONGER`.
+- `reachesWall` refused the turn for one block of wire, because covering the last column with dust
+  costs the off-bus discount too. **Fixed** — `PREPADS_FOR_THE_OFF_BUS_DISCOUNT`.
+- `stackedSplitOf` refused the cut whenever the chord fitted before the wall, so the lane was left
+  with nothing to climb with. **Fixed** — `PADS_UNTIL_THE_NEXT_CHORD_CUTS`.
+- And now: cutting is not the same as being able to leave either. **Open — item 1.**
+
+Every one of those was fixed by teaching one more decision site to pad instead of giving up, and
+each got its own flag. Four times is a pattern, not four coincidences. The rule wants stating once:
+**before giving up, ask what pad would make this work, and take the smallest that does.** Try that
+generalisation before adding a fifth flag — it may well subsume the three flags above.
 
 The second rule, older and just as expensive: **the planner and the walk must make the same
 substitution.** `landingOf` and `addChordModule` are the pair. Every disagreement between them
@@ -32,7 +41,12 @@ through one method rather than to restate the arithmetic in each.
 | `dc25226` | A descent is not a turn either. |
 | `f5ae473` | `KEEPS_HEAD_WHEN_THE_BUS_IS_LONGER` — the fallback has to be shorter than the shape it replaces. |
 | `45df00b` | The post-turn back pair asks the two cells instead of assuming. |
-| `cda0cc9` | `CUTS_A_CHORD_THAT_FITS` — half a fix, off, see item 1. |
+| `cda0cc9` | `CUTS_A_CHORD_THAT_FITS` — half a fix, off. |
+| `af5a019` | `PREPADS_FOR_THE_OFF_BUS_DISCOUNT` — the walk's pad clamp counts up as well as down. |
+| `e19b407` | `PADS_UNTIL_THE_NEXT_CHORD_CUTS` — pad only as far as it takes to force a cut. |
+| `01211e0` | `CUT_PAD_COLUMNS` = 2, not 4: reaching further lost four builds. |
+
+Guardian 44×3, ekran's own build, across this session: **worst breach 11 → 1.**
 
 Guardian, 50 configs (floors 2–6, widths 12–48), before this week vs after:
 
@@ -45,7 +59,30 @@ Cost: blocks +6%, spanZ +7.5%.
 
 ## Open, in priority order
 
-**1. ~~The breach of eleven~~ — FIXED.** `PREPADS_FOR_THE_OFF_BUS_DISCOUNT`. A climb straight off a
+**1. ekran's next one, in their words.** Paste-in, verbatim:
+
+> nice its fixed! now looking at the single breach on the same build (44 wide 3 floors) at the
+> chord starting at 34 69 208 is the next breach chord, only of 1. i see exactly what happened. the
+> chord is long and didn't fit by 1 cell. if it had cut, the power wouldn't have been abnle to reach
+> the chord after it.
+>
+> this is literally the exact same issue. idk how many times we need to fix the same thing in
+> slightly different scenarios. if it had padded forward literally 1 or 2 blocks if would have been
+> able to cut and then place the repeater afterwards just fine. and it had enough power from the
+> previous chord to do so. i counted 7 cells + 1 handover from the chord before the breach, so our
+> breached chord could have easily padded forward and we would have no breach.
+
+Repro: `GuardianStackedTest.tracesTurnsFortyFourByThree`, the `columns=-1 at 43 68 207` hand-over.
+
+Start: the cut refusal is either `stackedSplitOf`'s wire check
+(`STACKED_BUS_TRANSITION + (tail + 1) / 2 + splitCells > DUST_RANGE`) or `strandsNext`, which asks
+whether the next lane can lay its first chord and **always assumes `turnCells` rather than
+`offBus`** — a live suspect, given how much that discount has explained this session. Confirm which
+before building anything.
+
+See the note above about making this one rule rather than a fifth flag.
+
+**2. ~~The breach of eleven~~ — FIXED.** `PREPADS_FOR_THE_OFF_BUS_DISCOUNT`. A climb straight off a
 bus skips two rungs (`offBus` 3 against `turnCells` 5), and what decides "off a bus" is whether
 anything stands between the bus and the staircase. A lane stopping one column short had to cover it
 with dust, which cost the column *and* the discount — one-and-three became one-and-five, which it
@@ -60,27 +97,6 @@ the chord still lands short and the wire covers the pad.
 Guardian, 50 configs, this flag alone: breaches 267 → 246, breach blocks **1,539 → 1,160**, worst
 **17 → 12**, wrong notes 0 either way, blocks +180 and spanZ +13 across 37 builds. Repro
 `GuardianStackedTest.tracesTurnsFortyFourByThree`, breach at `-11 68 84`, now gone.
-
-**2. The same rule again, a fourth time: pad so the cut leaves wire for the chord after it.**
-Guardian 44x3, the chord at `34 69 208` — the `columns=-1 at 43 68 207` hand-over in
-`tracesTurnsFortyFourByThree`. ekran, reading it in game: the chord is long and misses fitting by
-one cell. A cut is available, but after cutting, the wire would not reach the repeater of the chord
-*after* it — so the cut is refused and the chord is laid whole, one column past the wall. Padding it
-forward one or two columns would let it cut *and* leave the repeater reachable, and there is power
-for the pad: ekran counted seven cells plus a handover spare on the chord before it.
-
-**This is the same sentence as the other three** — fitting is not the same as being able to leave,
-and now: cutting is not the same as being able to leave either. Each fix so far has taught one
-decision site to pad rather than give up (`PREPADS_FOR_THE_OFF_BUS_DISCOUNT` for the off-bus
-discount, `PADS_UNTIL_THE_NEXT_CHORD_CUTS` for the cut). This one wants the same move for a third
-reason, which is a strong hint the right fix is one rule — *before giving up, ask what pad would
-make this work, and take the smallest that does* — rather than a fourth flag. Worth trying that
-generalisation before adding another special case.
-
-Start: the cut refusal is in `stackedSplitOf`'s wire check
-(`STACKED_BUS_TRANSITION + (tail + 1) / 2 + splitCells > DUST_RANGE`) or in `strandsNext`, which
-asks whether the next lane can lay its first chord and always assumes `turnCells` rather than
-`offBus`. Confirm which before building.
 
 **3. `CUTS_A_CHORD_THAT_FITS` needs its other half.** `SongBuilder.java` → `stackedSplitOf`.
 The cut is written and works; the near half is then however long the chord happened to be rather
@@ -110,7 +126,7 @@ physical, and this is a second and much larger cost than the columns it was bein
 ## Traps
 
 - **`main` is red and was already red.** Baseline at `d9f84d5` is **7 failing tests**. Diff names,
-  never counts. New since: `BigSplitTest` ×2 (item 3).
+  never counts. New since: `BigSplitTest` ×2 (item 5).
 - **`BlitzSweepTest` only builds `ULTRA_COMPACT_LANE`.** A green sweep says nothing about the other
   four paste modes, and `walkWall` is shared. Run `gradlew cleanTest test` before committing;
   `gradlew sweepTest` is the measurement, not the test.
