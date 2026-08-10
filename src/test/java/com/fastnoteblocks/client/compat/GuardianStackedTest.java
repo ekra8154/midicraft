@@ -176,6 +176,31 @@ class GuardianStackedTest {
 		}
 	}
 
+	/** ekran's chord at 40 61 16, Guardian 44 wide over three floors, and the one before it. */
+	@Test
+	void tracesGuardianFortyFourByThree() throws Exception {
+		List<SongBuilder.EventNote> notes = load("deltarune-ch-4-guardian");
+		SongBuilder.TRACE = true;
+		try {
+			SongBuilder.createPastePlan(new BlockPos(0, 64, 0), notes,
+				SongBuilder.PasteMode.ULTRA_COMPACT_LANE, new SongBuilder.BuildLimits(16, 44, 3));
+		} finally {
+			SongBuilder.TRACE = false;
+		}
+	}
+
+	/** ekran's chord of twelve at 40 73 16, Guardian 44 wide over three floors from 0 64 0. */
+	@Test
+	void tracesFortyFourByThree() throws Exception {
+		SongBuilder.TRACE = true;
+		try {
+			SongBuilder.createPastePlan(new BlockPos(0, 64, 0), load("deltarune-ch-4-guardian"),
+				SongBuilder.PasteMode.ULTRA_COMPACT_LANE, new SongBuilder.BuildLimits(4, 44, 3));
+		} finally {
+			SongBuilder.TRACE = false;
+		}
+	}
+
 	private static String describe(SongBuilder.PastePlan plan) {
 		return "blocks=" + plan.commands().size() + " spanZ=" + plan.spanZ()
 			+ " breaches=" + plan.breaches().size()

@@ -1436,9 +1436,15 @@ public final class SongBuilder {
 			// every one of these is a column the plan spent somewhere the walk did not, and the two
 			// disagreeing is the bug shape this file keeps producing. The corner-bus gap showed up
 			// here as two columns on the opening chord of every lane leaving a flat turn.
+			// Asked the same way the walk is about to ask it, or this counter reports a gap it made
+			// up itself. Where a pad moves the opening the walk answers free by the other clause and
+			// the cells here are not the ones it will use -- but then the pad has already made the
+			// answer yes, so the two still agree.
+			boolean foretoldBusy = columnBehindBusy
+				&& !backPairIsFree(placements, lane, event.time());
 			int foretold = layout.ultra() && !turning
 				? landingOf(before.getX(), lane.travel().getStepX(), event,
-					event.time() - currentTime - spentPadding, columnBehindBusy, wall, layout,
+					event.time() - currentTime - spentPadding, foretoldBusy, wall, layout,
 					leavingTurn, parity).end()
 				: Integer.MIN_VALUE;
 			// Columns of dust the wait in front of this chord is going to lay anyway. A module that
@@ -1459,7 +1465,8 @@ public final class SongBuilder {
 			boolean climbingLane = climb > 0;
 			Placed placed = addChordModule(placements, opening, trigger.triggerDelay(), event,
 				slackColumns,
-				!columnBehindBusy || !opening.pos().equals(before),
+				!columnBehindBusy || !opening.pos().equals(before)
+					|| backPairIsFree(placements, opening, event.time()),
 				inTurn(turning, leavingTurn, opening.pos(), lastCorner),
 				turning ? Integer.MAX_VALUE
 					: (wall - opening.pos().getX()) * opening.travel().getStepX(), tipSignal, layout);
@@ -5378,6 +5385,46 @@ public final class SongBuilder {
 
 	/** Whether a lone back flank hangs away from the lane the walk has not built yet. */
 	static boolean BACK_FLANK_AWAY_FROM_NEXT_LANE = true;
+
+	/**
+	 * Whether the pair of low slots behind a module is asked of the blocks rather than of a flag.
+	 *
+	 * <p>{@code columnBehindBusy} is a promise made by whatever went down last, and the promise a
+	 * turn makes is far bigger than what it does. A turn claims the pair because its run of powered
+	 * stone lies at the level the low notes hang at and is live at the tick of the lane it is
+	 * leaving -- true of the cells beside the corner, and nothing to do with a module standing five
+	 * columns further along. ekran, on Guardian at 44 wide over three floors: a chord of twelve at
+	 * {@code 38 72 15}, first of the lane after a flat turn, that lost its head of seven for a head
+	 * of five and a cell of bus with both cells behind it plain air.</p>
+	 *
+	 * <p>So the flag stays as the cheap first answer and this is the appeal: the two cells the back
+	 * flanks would hang in are asked whether a note may go there at all, and whether anything beside
+	 * them goes live on somebody else's tick. That second question is the one that matters and it is
+	 * the same one {@link #layBus} asks of its own slots -- an empty cell next to a foreign live
+	 * block is a cell that would sound its note at the wrong time.</p>
+	 */
+	static boolean BACK_PAIR_ASKS_THE_BLOCKS = true;
+
+	/**
+	 * Whether both cells a module's back flanks would hang in are free and quiet.
+	 *
+	 * <p>They sit one either side of the module's <em>opening</em> column, level with its repeater --
+	 * not behind the module, which is what makes them the pair a shape two columns back would have
+	 * taken.</p>
+	 */
+	private static boolean backPairIsFree(PlacementPlan placements, Lane opening, int time) {
+		if (!BACK_PAIR_ASKS_THE_BLOCKS) {
+			return false;
+		}
+		BlockPos cursor = opening.pos();
+		for (Direction out : List.of(opening.noteSide(), opening.noteSide().getOpposite())) {
+			BlockPos flank = cursor.relative(out);
+			if (!placements.freeForNote(flank) || soundedByAnother(placements, flank, time)) {
+				return false;
+			}
+		}
+		return true;
+	}
 
 	/**
 	 * Whether a stacked-bus too near the wall keeps its head when the plain bus is longer still.
