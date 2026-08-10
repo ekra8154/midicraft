@@ -45,7 +45,38 @@ Cost: blocks +6%, spanZ +7.5%.
 
 ## Open, in priority order
 
-**1. `CUTS_A_CHORD_THAT_FITS` needs its other half.** `SongBuilder.java` → `stackedSplitOf`.
+**1. The breach of eleven: pre-pad chord 0 so its bus lands on the wall.** Fully diagnosed, not
+built. Repro is `GuardianStackedTest.tracesTurnsFortyFourByThree` — Guardian 44x3 from `0 64 0`,
+worst breach 11 at `1 68 84`:
+
+```
+t=628 notes=24 columns=1  tip=5 wait=1 pad=0c/5s turnCells=5 offBus=3
+      room=1 couldSplit=false reachesWall=false canTurn=false
+t=629 notes=11 columns=-11 tip=5                 reachesWall=true  -> turns
+```
+
+The lane stands one column short of the wall with five blocks of wire, needing one for the column
+and five for the climb. No cut is available at `room=1` (a head is two columns and a transition;
+even the unheaded form wants `room >= 2`), and `planPad` lays nothing because its dust-only fallback
+runs `while (signal > turnCells)` and five is not more than five. A repeater would refresh the run,
+but a repeater costs a tick and `wait = 1` leaves none. So the chord of 24 is laid whole, twelve
+columns, and that is the breach.
+
+**ekran's fix, and it is exact.** The chord *before* this one — chord 0 — ends one column short of
+the wall. Pad one column in *front of chord 0* and its bus ends flush on the wall instead. Chord 0
+opens with its own repeater, so its tip is unchanged; what changes is that the climb now starts
+straight off a bus. `turnCost` drops from `turnCells = 5` to `offBus = 3`, `unpaid` becomes 0, and
+`reachesWall` is `5 >= 3`. The lane turns on its wall with wire to spare and the breach is gone.
+The column spent on the pad is paid back many times over by the eleven not breached.
+
+So the planner must be willing to pad a chord that **already fits**, when landing flush is what buys
+the discount. Where to look: `closes` already models the discount in its `room == 0` branch
+(`tip >= (buses ? offBus : turnCells)`) but its `room != 0` branch only asks whether the *next* chord
+can cut — it never asks whether a column of pad would make `room == 0` and close the lane that way.
+`book` distributes owed columns into `sweep.room()`, so the machinery to pay for it exists; what is
+missing is `closes` offering the option at all.
+
+**6. `CUTS_A_CHORD_THAT_FITS` needs its other half.** `SongBuilder.java` → `stackedSplitOf`.
 The cut is written and works; the near half is then however long the chord happened to be rather
 than long enough to reach the wall, so the lane hands over short and its staircase stands where no
 other lane's does. ekran's missing piece: **pad the near half out to the wall first, then cut.**
