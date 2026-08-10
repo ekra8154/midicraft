@@ -5528,7 +5528,26 @@ public final class SongBuilder {
 	 */
 	static boolean PADS_UNTIL_THE_NEXT_CHORD_CUTS = true;
 
-	/** How far a lane will pad looking for a cut. Two on ekran's case; four leaves room to be wrong. */
+	/**
+	 * How far a lane will pad looking for a cut.
+	 *
+	 * <p>Two, and reaching further costs builds. Over fifty configurations of Guardian, with the
+	 * off-bus pre-pad on in every arm:</p>
+	 *
+	 * <pre>
+	 *   rule off      built 37  clean 1  breaches 246  breachBlocks 1,160  worst 12
+	 *   four columns  built 33  clean 4  breaches 159  breachBlocks   625  worst 12
+	 *   two columns   built 38  clean 4  breaches 224  breachBlocks   987  worst 13
+	 * </pre>
+	 *
+	 * <p>Four buys the most breach and loses four builds that used to paste. Two builds one more
+	 * than having the rule off at all, keeps every one of the four clean builds, and still takes
+	 * breach blocks down 15% -- for one column on the worst breach. A build that will not paste is a
+	 * build nobody can go and stand in front of, which outranks the column it was bought with.</p>
+	 *
+	 * <p>Two is also what ekran counted off the lane: room thirteen holds the whole tail of a chord
+	 * of twenty-four and room eleven does not.</p>
+	 */
 	static int CUT_PAD_COLUMNS = 2;
 
 	/** Whether a lone back flank hangs away from the lane the walk has not built yet. */
