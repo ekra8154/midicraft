@@ -61,28 +61,49 @@ Guardian, 50 configs, this flag alone: breaches 267 → 246, breach blocks **1,5
 **17 → 12**, wrong notes 0 either way, blocks +180 and spanZ +13 across 37 builds. Repro
 `GuardianStackedTest.tracesTurnsFortyFourByThree`, breach at `-11 68 84`, now gone.
 
-**2. `CUTS_A_CHORD_THAT_FITS` needs its other half.** `SongBuilder.java` → `stackedSplitOf`.
+**2. The same rule again, a fourth time: pad so the cut leaves wire for the chord after it.**
+Guardian 44x3, the chord at `34 69 208` — the `columns=-1 at 43 68 207` hand-over in
+`tracesTurnsFortyFourByThree`. ekran, reading it in game: the chord is long and misses fitting by
+one cell. A cut is available, but after cutting, the wire would not reach the repeater of the chord
+*after* it — so the cut is refused and the chord is laid whole, one column past the wall. Padding it
+forward one or two columns would let it cut *and* leave the repeater reachable, and there is power
+for the pad: ekran counted seven cells plus a handover spare on the chord before it.
+
+**This is the same sentence as the other three** — fitting is not the same as being able to leave,
+and now: cutting is not the same as being able to leave either. Each fix so far has taught one
+decision site to pad rather than give up (`PREPADS_FOR_THE_OFF_BUS_DISCOUNT` for the off-bus
+discount, `PADS_UNTIL_THE_NEXT_CHORD_CUTS` for the cut). This one wants the same move for a third
+reason, which is a strong hint the right fix is one rule — *before giving up, ask what pad would
+make this work, and take the smallest that does* — rather than a fourth flag. Worth trying that
+generalisation before adding another special case.
+
+Start: the cut refusal is in `stackedSplitOf`'s wire check
+(`STACKED_BUS_TRANSITION + (tail + 1) / 2 + splitCells > DUST_RANGE`) or in `strandsNext`, which
+asks whether the next lane can lay its first chord and always assumes `turnCells` rather than
+`offBus`. Confirm which before building.
+
+**3. `CUTS_A_CHORD_THAT_FITS` needs its other half.** `SongBuilder.java` → `stackedSplitOf`.
 The cut is written and works; the near half is then however long the chord happened to be rather
 than long enough to reach the wall, so the lane hands over short and its staircase stands where no
 other lane's does. ekran's missing piece: **pad the near half out to the wall first, then cut.**
 `planPad` is the other side. On Guardian 44×3 the cut alone is breaches 3 → 5. The two are worth
 nothing apart.
 
-**3. Four wrong notes.** `UltraLaneFaultsTest.reportsHowManyBuildsHaveAWrongNoteInThem` went
+**4. Four wrong notes.** `UltraLaneFaultsTest.reportsHowManyBuildsHaveAWrongNoteInThem` went
 0 → 4 of 360 builds when `KEEPS_HEAD_WHEN_THE_BUS_IS_LONGER` went in. Worst is a note belonging to
 tick 418 that would sound again at 425 from the block south of it. Keeping more heads means more
 stacked modules and more parity contention; something in that is not being asked. **By this file's
 own `betterThan` ordering a wrong note outranks every breach number above.** ekran's call was to
 fix it without taking the behaviour away.
 
-**4. `BigSplitTest` dead run.** A run of 16 dust and 1,287 unreached notes at f2 w20, caused by
+**5. `BigSplitTest` dead run.** A run of 16 dust and 1,287 unreached notes at f2 w20, caused by
 `NUDGE_WHEN_BEHIND_BUSY`. The shift's pad is a cell of dust *before* the module's repeater, so it
 spends the incoming signal — and `landingOf` is not handed the signal, so the planner cannot refuse
 the shift the way the walk's `outOfWire` test does. Threading the signal into `landingOf` is the fix.
 
-**5. The library A/B has never been run.** `RelocationTest` is written and waiting.
+**6. The library A/B has never been run.** `RelocationTest` is written and waiting.
 
-**6. The turn ban.** 122 stacked-buses become plain buses on Guardian because they are near a
+**7. The turn ban.** 122 stacked-buses become plain buses on Guardian because they are near a
 corner, each handing on two blocks less wire than the head would. The rule is deferred rather than
 physical, and this is a second and much larger cost than the columns it was being judged on.
 
