@@ -215,6 +215,18 @@ class GuardianStackedTest {
 		}
 	}
 
+	/** Every chord standing outside the footprint on ekran's own 44 x 3, with the wire it has. */
+	@Test
+	void tracesTurnsFortyFourByThree() throws Exception {
+		SongBuilder.TRACE_TURNS = true;
+		try {
+			SongBuilder.createPastePlan(new BlockPos(0, 64, 0), load("deltarune-ch-4-guardian"),
+				SongBuilder.PasteMode.ULTRA_COMPACT_LANE, new SongBuilder.BuildLimits(16, 44, 3));
+		} finally {
+			SongBuilder.TRACE_TURNS = false;
+		}
+	}
+
 	private static String describe(SongBuilder.PastePlan plan) {
 		return "blocks=" + plan.commands().size() + " spanZ=" + plan.spanZ()
 			+ " breaches=" + plan.breaches().size()
