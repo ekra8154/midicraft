@@ -5086,6 +5086,23 @@ public final class SongBuilder {
 			List<EventNote> farTail) {
 	}
 
+	/**
+	 * Whether a chord that fits before the wall may still be cut across the staircase.
+	 *
+	 * <p>Asked only where the chord overshoots, and overshooting already counts the turn reserve --
+	 * so this is the chord that fits but leaves the lane nothing to climb with. Every caller of
+	 * {@link #stackedSplitOf} is behind that same guard, which is why the cut can be widened here
+	 * without the planner and the walk parting company over it.</p>
+	 * <p><b>Off, and not because the diagnosis was wrong.</b> Forcing the cut puts the last pair
+	 * over the staircase, but the near half is then however long the chord happened to be rather
+	 * than long enough to reach the wall -- so the lane hands over short and the staircase stands
+	 * somewhere no other lane's does. On Guardian at 44 wide over three floors that is breaches
+	 * 3 -> 5 and breach blocks 32 -> 42 with nothing else moving. The missing half is ekran's:
+	 * pad the near half out to the wall first, then cut. This flag is the cut; the pad is not
+	 * written yet, and the two are worth nothing apart.</p>
+	 */
+	static boolean CUTS_A_CHORD_THAT_FITS = false;
+
 	private static StackedSplit stackedSplitOf(List<EventNote> chord, int room, int splitCells,
 			boolean climbing, boolean roomBehind) {
 		if (!STACKED_SPLIT_HEADS) {
@@ -5121,9 +5138,25 @@ public final class SongBuilder {
 		}
 		List<EventNote> tail = split.tail();
 		int nearNotes = Math.min(tail.size(), 2 * nearBusCells);
-		// Nothing to carry over the staircase means this was never a chord that had to be cut.
+		// Fitting before the wall is not the same as being able to leave.
+		//
+		// This used to read "nothing to carry over the staircase means this was never a chord that
+		// had to be cut", and it is asked only where the chord already overshoots -- and overshooting
+		// counts the turn reserve, so the chord that reaches this line does not fit *with its
+		// staircase*, however comfortably it fits without one. Refusing the cut there lays it whole,
+		// and the lane then discovers it has no wire left to climb with and runs on. ekran read one
+		// as a breach of eleven: a stacked-bus that ended without the power to reach the top.
+		//
+		// So the last pair goes over the staircase deliberately. A cut spends one repeater on the
+		// whole chord -- transition, near cells, the staircase and the far cells, which the wire
+		// check below still holds to fifteen -- and the far half opens past the climb with a fresh
+		// fifteen behind it. That is the difference between a lane that ends on its wall and a lane
+		// that cannot turn at all.
 		if (nearNotes >= tail.size()) {
-			return null;
+			if (!CUTS_A_CHORD_THAT_FITS || tail.size() < 2) {
+				return null;
+			}
+			nearNotes = tail.size() - 1;
 		}
 		if (STACKED_BUS_TRANSITION + (tail.size() + 1) / 2 + splitCells > DUST_RANGE) {
 			return null;

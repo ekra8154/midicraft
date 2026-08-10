@@ -196,18 +196,18 @@ class GuardianStackedTest {
 	void pricesTheBackPairAfterATurn() throws Exception {
 		List<SongBuilder.EventNote> notes = load("deltarune-ch-4-guardian");
 		for (boolean ask : new boolean[] {false, true}) {
-			SongBuilder.BACK_PAIR_ASKS_THE_BLOCKS = ask;
+			SongBuilder.CUTS_A_CHORD_THAT_FITS = ask;
 			SongBuilder.MARK_COLLISIONS = true;
 			try {
 				SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0),
 					notes, SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
 					new SongBuilder.BuildLimits(16, 44, 3));
-				System.out.println("TURNPAIR asks=" + ask
+				System.out.println("CUTFITS on=" + ask
 					+ " marks=" + plan.collisions().size() + " " + describe(plan));
 				plan.collisions().entrySet().stream().limit(6)
-					.forEach(mark -> System.out.println("TURNPAIR   " + mark));
+					.forEach(mark -> System.out.println("CUTFITS   " + mark));
 			} catch (RuntimeException refused) {
-				System.out.println("TURNPAIR asks=" + ask + " REFUSED: "
+				System.out.println("CUTFITS on=" + ask + " REFUSED: "
 					+ refused.getMessage());
 			} finally {
 				SongBuilder.MARK_COLLISIONS = false;
