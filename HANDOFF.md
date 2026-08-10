@@ -45,59 +45,44 @@ Cost: blocks +6%, spanZ +7.5%.
 
 ## Open, in priority order
 
-**1. The breach of eleven: pre-pad chord 0 so its bus lands on the wall.** Fully diagnosed, not
-built. Repro is `GuardianStackedTest.tracesTurnsFortyFourByThree` — Guardian 44x3 from `0 64 0`,
-worst breach 11 at `1 68 84`:
+**1. ~~The breach of eleven~~ — FIXED.** `PREPADS_FOR_THE_OFF_BUS_DISCOUNT`. A climb straight off a
+bus skips two rungs (`offBus` 3 against `turnCells` 5), and what decides "off a bus" is whether
+anything stands between the bus and the staircase. A lane stopping one column short had to cover it
+with dust, which cost the column *and* the discount — one-and-three became one-and-five, which it
+could not afford, so it never turned and laid the chord that beat it eleven columns past the wall.
 
-```
-t=628 notes=24 columns=1  tip=5 wait=1 pad=0c/5s turnCells=5 offBus=3
-      room=1 couldSplit=false reachesWall=false canTurn=false
-t=629 notes=11 columns=-11 tip=5                 reachesWall=true  -> turns
-```
+The plan already booked a pad to land it flush and `closes` already prices the discount in its
+`room == 0` branch. What was missing was in the walk: its clamp on a booked pad only ever counted
+*down*, and the sweep and the walk disagreed about where the chord ended, so two booked columns
+landed it one short with nothing to take it the last step. The clamp now counts up as well, while
+the chord still lands short and the wire covers the pad.
 
-The lane stands one column short of the wall with five blocks of wire, needing one for the column
-and five for the climb. No cut is available at `room=1` (a head is two columns and a transition;
-even the unheaded form wants `room >= 2`), and `planPad` lays nothing because its dust-only fallback
-runs `while (signal > turnCells)` and five is not more than five. A repeater would refresh the run,
-but a repeater costs a tick and `wait = 1` leaves none. So the chord of 24 is laid whole, twelve
-columns, and that is the breach.
+Guardian, 50 configs, this flag alone: breaches 267 → 246, breach blocks **1,539 → 1,160**, worst
+**17 → 12**, wrong notes 0 either way, blocks +180 and spanZ +13 across 37 builds. Repro
+`GuardianStackedTest.tracesTurnsFortyFourByThree`, breach at `-11 68 84`, now gone.
 
-**ekran's fix, and it is exact.** The chord *before* this one — chord 0 — ends one column short of
-the wall. Pad one column in *front of chord 0* and its bus ends flush on the wall instead. Chord 0
-opens with its own repeater, so its tip is unchanged; what changes is that the climb now starts
-straight off a bus. `turnCost` drops from `turnCells = 5` to `offBus = 3`, `unpaid` becomes 0, and
-`reachesWall` is `5 >= 3`. The lane turns on its wall with wire to spare and the breach is gone.
-The column spent on the pad is paid back many times over by the eleven not breached.
-
-So the planner must be willing to pad a chord that **already fits**, when landing flush is what buys
-the discount. Where to look: `closes` already models the discount in its `room == 0` branch
-(`tip >= (buses ? offBus : turnCells)`) but its `room != 0` branch only asks whether the *next* chord
-can cut — it never asks whether a column of pad would make `room == 0` and close the lane that way.
-`book` distributes owed columns into `sweep.room()`, so the machinery to pay for it exists; what is
-missing is `closes` offering the option at all.
-
-**6. `CUTS_A_CHORD_THAT_FITS` needs its other half.** `SongBuilder.java` → `stackedSplitOf`.
+**2. `CUTS_A_CHORD_THAT_FITS` needs its other half.** `SongBuilder.java` → `stackedSplitOf`.
 The cut is written and works; the near half is then however long the chord happened to be rather
 than long enough to reach the wall, so the lane hands over short and its staircase stands where no
 other lane's does. ekran's missing piece: **pad the near half out to the wall first, then cut.**
 `planPad` is the other side. On Guardian 44×3 the cut alone is breaches 3 → 5. The two are worth
 nothing apart.
 
-**2. Four wrong notes.** `UltraLaneFaultsTest.reportsHowManyBuildsHaveAWrongNoteInThem` went
+**3. Four wrong notes.** `UltraLaneFaultsTest.reportsHowManyBuildsHaveAWrongNoteInThem` went
 0 → 4 of 360 builds when `KEEPS_HEAD_WHEN_THE_BUS_IS_LONGER` went in. Worst is a note belonging to
 tick 418 that would sound again at 425 from the block south of it. Keeping more heads means more
 stacked modules and more parity contention; something in that is not being asked. **By this file's
 own `betterThan` ordering a wrong note outranks every breach number above.** ekran's call was to
 fix it without taking the behaviour away.
 
-**3. `BigSplitTest` dead run.** A run of 16 dust and 1,287 unreached notes at f2 w20, caused by
+**4. `BigSplitTest` dead run.** A run of 16 dust and 1,287 unreached notes at f2 w20, caused by
 `NUDGE_WHEN_BEHIND_BUSY`. The shift's pad is a cell of dust *before* the module's repeater, so it
 spends the incoming signal — and `landingOf` is not handed the signal, so the planner cannot refuse
 the shift the way the walk's `outOfWire` test does. Threading the signal into `landingOf` is the fix.
 
-**4. The library A/B has never been run.** `RelocationTest` is written and waiting.
+**5. The library A/B has never been run.** `RelocationTest` is written and waiting.
 
-**5. The turn ban.** 122 stacked-buses become plain buses on Guardian because they are near a
+**6. The turn ban.** 122 stacked-buses become plain buses on Guardian because they are near a
 corner, each handing on two blocks less wire than the head would. The rule is deferred rather than
 physical, and this is a second and much larger cost than the columns it was being judged on.
 
