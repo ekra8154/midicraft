@@ -1,150 +1,139 @@
-# Handoff — stacked chords, parity and breaches
+# Handoff — the handover column, heads that look, and one collision nobody has explained
 
-State at `9c8d23a`. Everything below was measured on ekran's own library, not derived.
+State at `76a3d87`. Everything below was measured on ekran's own library, not derived.
 
-**Start with open item 1.** It is ekran's own words, verbatim, and it is the fourth appearance of
-the one rule this whole session has been circling.
+**Start with open item 1.** It is the only thing in this file that stops a build from pasting, it
+has a one-flag repro, and five explanations for it have already been spent. Four of them were mine
+and all four were wrong; they are listed so the sixth is not the same as the fifth.
 
-## The rule this file keeps breaking
+## The two rules this file keeps breaking
 
-Three separate bugs this week were the same sentence: **fitting is not the same as being able
-to leave.** A chord that fits before the wall can still leave the lane unable to turn, and every
-place that asks "does it fit" while meaning "can the lane still get out" produces a breach that
-looks unrelated to the shape that caused it.
+**One: fitting is not the same as being able to leave.** A chord that fits before the wall can still
+leave the lane unable to turn. Five sites now, and the fifth was the interesting one because it was
+never *asked* rather than asked wrongly: `overshoots` compared `landing > farWall`, which is false
+when they are equal, so a chord whose last cell landed exactly on the wall read as fitting and the
+lane handed over one column outside. Closed by `RESERVES_THE_HANDOVER_COLUMN`, which had to shut
+three doors together — the fit test and the two pads that aim a chord at the wall on purpose. Shutting
+only the fit test made the build *worse* than shutting none.
 
-- `roomAhead < stackedRoom` refused a stacked-bus at 12 columns and handed it a plain bus that
-  wants 13. **Fixed** — `KEEPS_HEAD_WHEN_THE_BUS_IS_LONGER`.
-- `reachesWall` refused the turn for one block of wire, because covering the last column with dust
-  costs the off-bus discount too. **Fixed** — `PREPADS_FOR_THE_OFF_BUS_DISCOUNT`.
-- `stackedSplitOf` refused the cut whenever the chord fitted before the wall, so the lane was left
-  with nothing to climb with. **Fixed** — `PADS_UNTIL_THE_NEXT_CHORD_CUTS`.
-- And now: cutting is not the same as being able to leave either. **Open — item 1.**
+**Two: the planner and the walk must ask the same question of the same thing.** Three separate bugs
+this session, all the same sentence: **the plan asked arithmetic where the walk asks blocks.**
 
-Every one of those was fixed by teaching one more decision site to pad instead of giving up, and
-each got its own flag. Four times is a pattern, not four coincidences. The rule wants stating once:
-**before giving up, ask what pad would make this work, and take the smallest that does.** Try that
-generalisation before adding a fifth flag — it may well subsume the three flags above.
+- `planLane` was handed the coarse `columnBehindBusy` and charged a stand-off column on the first
+  chord of a lane that the walk then did not build — carried through every event after it. That one
+  column was the whole of ekran's breach of ten. **Fixed** — `PLAN_ASKS_THE_BLOCKS_BEHIND`.
+- The nudge guard measured the room a lane had *before* the handover column was reserved. **Fixed.**
+- A cut decided whether it could open with a full head from `columnBehindBusy` alone and never asked
+  `backPairIsFree`, so where the flag said busy the full head was never attempted at all and the whole
+  cut fell to a plain bus. **Fixed** — `CUT_ASKS_THE_BLOCKS_BEHIND`.
 
-The second rule, older and just as expensive: **the planner and the walk must make the same
-substitution.** `landingOf` and `addChordModule` are the pair. Every disagreement between them
-has shown up as a lane coming to rest outside its wall, and the fix is always to route both
-through one method rather than to restate the arithmetic in each.
+And its consequence, which is item 1: the walk can now see things the plan cannot, so **they can
+disagree**. `REPLAN_WHEN_BLOCKS_DISAGREE` tells the plan when the ground answered what it guessed.
+That is the design ekran chose over making the walk stop looking.
 
-## What changed this week
+## What changed
 
 | commit | what |
 |---|---|
-| `6add997` | Relocation: a contested note moves, not the module. build → relocate → nudge → bus. |
-| `39588a1` | A lone back flank hangs on the side the walk has *been*, leaving the next lane something to relocate. |
-| `5dd6b6f` | `NUDGE_WHEN_BEHIND_BUSY` — stand a column off rather than lose the head entirely. |
-| `54a7e7d` | Harp trade for the centre; a climb leaves the pair behind free. |
-| `dc25226` | A descent is not a turn either. |
-| `f5ae473` | `KEEPS_HEAD_WHEN_THE_BUS_IS_LONGER` — the fallback has to be shorter than the shape it replaces. |
-| `45df00b` | The post-turn back pair asks the two cells instead of assuming. |
-| `cda0cc9` | `CUTS_A_CHORD_THAT_FITS` — half a fix, off. |
-| `af5a019` | `PREPADS_FOR_THE_OFF_BUS_DISCOUNT` — the walk's pad clamp counts up as well as down. |
-| `e19b407` | `PADS_UNTIL_THE_NEXT_CHORD_CUTS` — pad only as far as it takes to force a cut. |
-| `01211e0` | `CUT_PAD_COLUMNS` = 2, not 4: reaching further lost four builds. |
+| `8d4b360` | Charge every chord the column its lane hands over into. Three doors, shut together. |
+| `b3fa8c3` | Charge it where a nudge is decided too — the guard was measuring a stale room. |
+| `7acdc81` | The cut-pad search says why it gave up, not just that it did. |
+| `5095145` | The plan asks the blocks behind. ekran's breach of ten, gone. |
+| `9bc9df0` | A head gives up one flank behind, not both. `STACKED_BUS_HALF`. |
+| `38e648c` | Say which of the two candidate builds the trace is showing. |
+| `bc61494` | A cut asks the blocks behind, and a cut says what it built. |
+| `a6812d1` | Redo the plan when the ground answers what it guessed. |
+| `ecb6131` | Resolve a head's free flank by looking — at every site that builds one. |
+| `f3ef7e7` | One rule for how many flanks a head keeps, and it does not mention cutting. |
+| `76a3d87` | Ask all four low slots, not the back pair and a guess for the front. |
 
-Guardian 44×3, ekran's own build, across this session: **worst breach 11 → 1.**
+Guardian at 44 wide over three floors, ekran's own build: **`[1, 10]` → clean.**
 
-Guardian, 50 configs (floors 2–6, widths 12–48), before this week vs after:
+Guardian, the 45 configurations from 16 wide up, start of session against end:
 
 ```
-breach blocks   5,376 -> 1,808      worst breach   63 -> 19
-builds pasting     45 -> 48         clean builds    5 -> 11
+breaches      213 -> 144      breachBlocks  985 -> 729
+clean           4 ->  10      worst          24 ->  12
+wrong notes     0 either way  builds        45 of 45, none refused
 ```
 
-Cost: blocks +6%, spanZ +7.5%.
+Suite: **11 failing → 7**, a strict subset. Nothing was broken; four were fixed.
 
 ## Open, in priority order
 
-**1. ekran's next one, in their words.** Paste-in, verbatim:
+**1. The cut collision. Nobody has explained it, and five tries are gone.**
 
-> nice its fixed! now looking at the single breach on the same build (44 wide 3 floors) at the
-> chord starting at 34 69 208 is the next breach chord, only of 1. i see exactly what happened. the
-> chord is long and didn't fit by 1 cell. if it had cut, the power wouldn't have been abnle to reach
-> the chord after it.
->
-> this is literally the exact same issue. idk how many times we need to fix the same thing in
-> slightly different scenarios. if it had padded forward literally 1 or 2 blocks if would have been
-> able to cut and then place the repeater afterwards just fine. and it had enough power from the
-> previous chord to do so. i counted 7 cells + 1 handover from the chord before the breach, so our
-> breached chord could have easily padded forward and we would have no breach.
+Clear `CUT_ONE_FLANK_COLLIDES` and every one of the 45 Guardian configurations refuses to build:
+96 collisions, 35 wrong notes, first at `3 71 56`. That flag is named as the defect it is rather than
+as an option — the rule it suppresses (`HEAD_KEEPS_ONE_BACK_FLANK`) says nothing about cutting,
+because how many slots behind a head can use is a question about the ground beside it.
 
-Repro: `GuardianStackedTest.tracesTurnsFortyFourByThree`, the `columns=-1 at 43 68 207` hand-over.
+Repro: `HandoverCollisionProbe.marksTheCutCollision`. One flag.
 
-Start: the cut refusal is either `stackedSplitOf`'s wire check
-(`STACKED_BUS_TRANSITION + (tail + 1) / 2 + splitCells > DUST_RANGE`) or `strandsNext`, which asks
-whether the next lane can lay its first chord and **always assumes `turnCells` rather than
-`offBus`** — a live suspect, given how much that discount has explained this session. Confirm which
-before building anything.
+**Ruled out, with the reason, so the day is not spent again:**
 
-See the note above about making this one rule rather than a fifth flag.
+- *`closes` and `carriedCells` restate head size.* They do not; both call the same `stackedSplitOf`.
+- *The planner cannot see those cells.* It models them — `sweep.busy()` is exactly that model.
+- *The head takes the occupied side.* Looking changed nothing: same numbers to the block.
+- *`depth` was the wrong direction at the cut's build site.* It is `laneStep`, which is what the
+  note side is derived from, so the check was reading the right cells all along.
+- *Slot choice generally.* Asking all four low slots instead of two found the identical 1,682 cases
+  and left the collision untouched.
 
-**2. ~~The breach of eleven~~ — FIXED.** `PREPADS_FOR_THE_OFF_BUS_DISCOUNT`. A climb straight off a
-bus skips two rungs (`offBus` 3 against `turnCells` 5), and what decides "off a bus" is whether
-anything stands between the bus and the staircase. A lane stopping one column short had to cover it
-with dust, which cost the column *and* the discount — one-and-three became one-and-five, which it
-could not afford, so it never turned and laid the chord that beat it eleven columns past the wall.
+**Read it off `MARK_COLLISIONS` rather than reasoning about it.** That named every other fault this
+week in one run, and each of the five above came from reading code instead. The marks say which
+shape laid each block: `cutHead6/near4/far2 reachesBack` against `chord:STACKED_FRONT`.
 
-The plan already booked a pad to land it flush and `closes` already prices the discount in its
-`room == 0` branch. What was missing was in the walk: its clamp on a booked pad only ever counted
-*down*, and the sweep and the walk disagreed about where the chord ended, so two booked columns
-landed it one short with nothing to take it the last step. The clamp now counts up as well, while
-the chord still lands short and the wire covers the pad.
+**2. `HeldOutWidthTest.noRealSongBreachesAtAWidthNobodyTunedOn` is still red.** It has been red all
+week. It is the held-out check on whether hammering Guardian generalises, and it is currently
+answering no. Worth more than another Guardian config.
 
-Guardian, 50 configs, this flag alone: breaches 267 → 246, breach blocks **1,539 → 1,160**, worst
-**17 → 12**, wrong notes 0 either way, blocks +180 and spanZ +13 across 37 builds. Repro
-`GuardianStackedTest.tracesTurnsFortyFourByThree`, breach at `-11 68 84`, now gone.
+**3. Twelve wide and sixteen wide are the same build.** Byte-identical command lists, same 22
+breaches, `nearWall=11 farWall=26` either way — a 16-column corridor for both. Something floors the
+width at 16, so every sweep this week has been 45 configurations reported as 50, with nothing at all
+testing the narrow end.
 
-**3. `CUTS_A_CHORD_THAT_FITS` needs its other half.** `SongBuilder.java` → `stackedSplitOf`.
-The cut is written and works; the near half is then however long the chord happened to be rather
-than long enough to reach the wall, so the lane hands over short and its staircase stands where no
-other lane's does. ekran's missing piece: **pad the near half out to the wall first, then cut.**
-`planPad` is the other side. On Guardian 44×3 the cut alone is breaches 3 → 5. The two are worth
-nothing apart.
+**4. `worst 16` came from the replan trigger and went away again.** `REPLAN_WHEN_BLOCKS_DISAGREE`
+took worst from 12 to 16; looking at the free slots took it back to 12. Neither is understood, and
+the pair of them cancelling is luck rather than design.
 
-**4. Four wrong notes.** `UltraLaneFaultsTest.reportsHowManyBuildsHaveAWrongNoteInThem` went
-0 → 4 of 360 builds when `KEEPS_HEAD_WHEN_THE_BUS_IS_LONGER` went in. Worst is a note belonging to
-tick 418 that would sound again at 425 from the block south of it. Keeping more heads means more
-stacked modules and more parity contention; something in that is not being asked. **By this file's
-own `betterThan` ordering a wrong note outranks every breach number above.** ekran's call was to
-fix it without taking the behaviour away.
-
-**5. `BigSplitTest` dead run.** A run of 16 dust and 1,287 unreached notes at f2 w20, caused by
-`NUDGE_WHEN_BEHIND_BUSY`. The shift's pad is a cell of dust *before* the module's repeater, so it
-spends the incoming signal — and `landingOf` is not handed the signal, so the planner cannot refuse
-the shift the way the walk's `outOfWire` test does. Threading the signal into `landingOf` is the fix.
-
-**6. The library A/B has never been run.** `RelocationTest` is written and waiting.
-
-**7. The turn ban.** 122 stacked-buses become plain buses on Guardian because they are near a
-corner, each handing on two blocks less wire than the head would. The rule is deferred rather than
-physical, and this is a second and much larger cost than the columns it was being judged on.
+**5. The front slot case is correct and unexercised.** `onTheFreeSlots` handles a contested *front*
+slot because the geometry allows one. Guardian never produces it — 1,682 swaps, every one a back
+slot. Do not spend a day on the front case without first finding a song that reaches it.
 
 ## Traps
 
-- **`main` is red and was already red.** Baseline at `d9f84d5` is **7 failing tests**. Diff names,
-  never counts. New since: `BigSplitTest` ×2 (item 5).
-- **`BlitzSweepTest` only builds `ULTRA_COMPACT_LANE`.** A green sweep says nothing about the other
-  four paste modes, and `walkWall` is shared. Run `gradlew cleanTest test` before committing;
-  `gradlew sweepTest` is the measurement, not the test.
+- **`main` is red and was already red.** Baseline is **7 failing tests**, named in the table above.
+  Diff names, never counts. The old note in this file said 7 with `BigSplitTest` among them; that was
+  stale, `BigSplitTest` passes.
+- **`createPastePlan` builds the song twice** — once without lookahead, once with — and keeps whichever
+  `beats` the other. Both walks go past the trace. `PLANRUN` lines now say which is which and which
+  won; before they existed, two chords were misidentified in one afternoon by reading the wrong half.
+- **The two candidates disagree about which floor a lane sits on and about the paste shift.** A chord
+  looked up by coordinate can be found in the plan that lost. Prefer `plan.commands()`, which is the
+  winning plan in paste coordinates, over arithmetic on the trace.
+- **`verify()` reports faults that do not happen.** `SHARED_PULSE_TICKS` was 4, which is shorter than
+  the button that starts the machine, so a note re-powered 8 ticks later was called doubled. ekran
+  played it: it sounds once. It is 10 now. This matters because `wrongNotes()` outranks every other
+  number by `betterThan`, so a phantom here can veto real work — and did, for most of a day.
+- **A cut is built by its own path, not by `addChordModule`.** It gets none of that method's guards
+  and, until `bc61494`, none of its trace either. If a chord cannot be found in the trace, look for a
+  `SPLIT` line before concluding anything about it.
+- **`BlitzSweepTest` only builds `ULTRA_COMPACT_LANE`.** Run `gradlew cleanTest test` before
+  committing; `gradlew sweepTest` is the measurement, not the test.
 - **Measure the built song, not the layers.** ekran has dedupe on, so
-  `SongBuilder.eventNotes(project.toSequenceTracks(Set.of(), true))` is the right call — builds are
-  up to 16% smaller than the layers suggest.
+  `SongBuilder.eventNotes(project.toSequenceTracks(Set.of(), true))` is the right call.
 - **`run/` is not in the repo.** The song library every probe reads is local only.
-- **Don't revert a red change.** ekran diagnoses in world, and reverting breaks that loop.
-  Leave it flagged with the numbers instead.
-- **`backPairIsFree` / `BACK_PAIR_ASKS_THE_BLOCKS`** appeared in `SongBuilder.java` mid-session and
-  I did not write them. They do the right thing and are wired into both call sites, so I built on
-  them — but they are worth a read rather than an assumption.
+- **Only ekran ends what ekran asked for.** Shipping a flag off is disabling it. If a measurement
+  argues against something they asked for, that is the start of the investigation and not a verdict.
 
 ## Probes worth knowing
 
-- `GuardianStackedTest` — decision census, collision marks, the 44×3 chord trace, the width/floor sweep.
-- `HammerBusTest` — every reason a stacked shape was given up, per build.
+- `HandoverCollisionProbe` — the cut collision repro, the per-size Guardian table, the side-swap
+  count, and a region dump that prints any box of the winning plan in paste coordinates.
+- `MARK_COLLISIONS` — builds through a collision and lights it up, naming the shape that laid each
+  block. **Use this first.** It is the only tool this week that has never been wrong.
 - `TRACE_TURNS` — one line per chord standing outside the footprint, with the wire it has.
-  This is what found the long-breach mechanism after three sessions of reading the code had not.
-- `MARK_COLLISIONS` — builds through a collision and lights it up in sea lantern, with the shape
-  that laid each block. Ground truth for anything about occupancy.
+- `TRACE` — the full walk, plus `SPLIT` for cut chords, `CUTTRY` for every refused closing pad, and
+  `DRIFT` where a chord did not land where `landingOf` said.
+- `GuardianStackedTest` — decision census, the 44×3 chord trace, the width/floor sweep.
