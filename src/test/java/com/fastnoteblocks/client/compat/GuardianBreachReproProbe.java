@@ -472,6 +472,46 @@ class GuardianBreachReproProbe {
 		}
 	}
 
+	/** Where a raised pad actually is, so it can be stood in front of rather than reasoned about. */
+	@Test
+	void findsARaisedPadToStandAt() throws Exception {
+		List<SongBuilder.EventNote> notes = guardian();
+		for (int[] config : new int[][] {{44, 3}, {16, 3}, {24, 3}, {32, 4}}) {
+			SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0), notes,
+				SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+				new SongBuilder.BuildLimits(4, config[0], config[1]));
+			int raised = plan.padding().getOrDefault("padClosingRaised", 0)
+				+ plan.padding().getOrDefault("padPinnedRaised", 0);
+			// A raised pad is the one place in an ultra build where stone stands with nothing at all
+			// underneath it: every other floor block sits on the lane. So look for stone with dust
+			// over it and air below, which no other shape lays.
+			Map<String, String> block = new java.util.HashMap<>();
+			for (String command : plan.commands()) {
+				String[] word = command.split(" ");
+				block.put(word[1] + " " + word[2] + " " + word[3], word[4]);
+			}
+			List<String> found = new ArrayList<>();
+			for (Map.Entry<String, String> cell : block.entrySet()) {
+				if (!"minecraft:stone".equals(cell.getValue())) {
+					continue;
+				}
+				String[] at = cell.getKey().split(" ");
+				int x = Integer.parseInt(at[0]);
+				int y = Integer.parseInt(at[1]);
+				int z = Integer.parseInt(at[2]);
+				if ("minecraft:redstone_wire".equals(block.get(x + " " + (y + 1) + " " + z))
+						&& !block.containsKey(x + " " + (y - 1) + " " + z)
+						&& !block.containsKey(x + " " + (y - 2) + " " + z)) {
+					found.add(x + " " + (y + 1) + " " + z);
+				}
+			}
+			found.sort(null);
+			System.out.println("RAISEDAT " + config[0] + "w x " + config[1] + "f  booked=" + raised
+				+ " floatingStone=" + found.size()
+				+ (found.isEmpty() ? "" : "  first: tp " + found.get(0)));
+		}
+	}
+
 	/** The same build, walked, so the chord that went out and the one behind it can be read. */
 	@Test
 	void tracesTheWorstBreach() throws Exception {
