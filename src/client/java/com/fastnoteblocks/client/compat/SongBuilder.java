@@ -1064,7 +1064,8 @@ public final class SongBuilder {
 						SHORT_HEAD_CUT_AT = opening;
 					}
 					headed = new StackedSplit(
-						onTheFreeBackSide(placements, opening, depth, event.time(), headed.slots()),
+						onTheFreeSlots(placements, opening, travel, depth, event.time(),
+							headed.slots()),
 						headed.head(), headed.nearTail(), headed.farTail());
 					cursor = addStackedSplitModule(placements, opening, travel, depth,
 						trigger.triggerDelay(), headed, event.time());
@@ -4793,8 +4794,8 @@ public final class SongBuilder {
 				+ " head" + split.head().size() + "/tail" + split.tail().size()
 				+ (split.slots().backFlanks() == 0 ? " frontOnly" : " reachesBack"));
 			Body body = addStackedBusModule(placements, start, triggerDelay, event.time(),
-				onTheFreeBackSide(placements, start.pos(), start.noteSide(), event.time(),
-					split.slots()),
+				onTheFreeSlots(placements, start.pos(), start.travel(), start.noteSide(),
+					event.time(), split.slots()),
 				split.tail());
 			return new Placed(body.lane(), style, body.busCells(), nudge);
 		}
@@ -4812,7 +4813,7 @@ public final class SongBuilder {
 		// The rigid shape has no bus to hand a note to, so until the centre became a target it had
 		// no third option at all: it shifted or it fell to a bus.
 		return new Placed(addStackedEventModule(placements, start, triggerDelay, event.time(),
-			onTheFreeBackSide(placements, start.pos(), start.noteSide(), event.time(),
+			onTheFreeSlots(placements, start.pos(), start.travel(), start.noteSide(), event.time(),
 				moved != null ? moved.slots()
 					: ultraSlots(event.notes(), style == ChordStyle.STACKED_FULL))),
 			style, 0, nudge);
@@ -5962,28 +5963,79 @@ public final class SongBuilder {
 	 * <p>ekran: look instead of guess. Applies to any stacked shape carrying exactly one back note,
 	 * not to the head of six alone.</p>
 	 */
-	private static UltraSlots onTheFreeBackSide(PlacementPlan placements, BlockPos opening,
+	/**
+	 * The same module with its low notes on whichever of the four slots are actually free.
+	 *
+	 * <p>A head hangs up to four low notes: a front and a back slot on each side of its centre. At
+	 * most one of the four is ever in contention -- {@link UltraSlots#slot} says why, the lane
+	 * alongside has a single live cell in the column that touches this one, so it lines up with the
+	 * front pair or the back pair and never with both. Which one it is was never asked. The front
+	 * pair filled in order and the back pair was guessed at by {@link #backPair}, which hangs a lone
+	 * flank away from the lane the walk has not laid yet -- a good rule that never once looks.</p>
+	 *
+	 * <p>So it looks, at all four, and rehomes the notes onto the free ones. Same notes, same count,
+	 * same head, same columns: only which cell each note hangs in changes, so the plan does not need
+	 * to know and the two cannot part company over it. Where there are not enough free slots to hold
+	 * them the module is handed back untouched, and the caller's own fallback takes over.</p>
+	 *
+	 * <p>ekran: look at both, not just guess for the front and actually look for the back. Either of
+	 * the two flanks on the contested side may be the one given up, and it could be the front.</p>
+	 */
+	private static UltraSlots onTheFreeSlots(PlacementPlan placements, BlockPos pos, Direction travel,
 			Direction noteSide, int time, UltraSlots slots) {
-		if (!HEAD_LOOKS_FOR_ITS_FREE_SIDE || slots == null || slots.backFlanks() != 1) {
+		if (!HEAD_LOOKS_FOR_ITS_FREE_SIDE || slots == null) {
 			return slots;
 		}
-		Direction out = slots.back(0) != null ? noteSide : noteSide.getOpposite();
-		if (quietAndFree(placements, opening.relative(out), time)
-				|| !quietAndFree(placements, opening.relative(out.getOpposite()), time)) {
+		BlockPos cross = pos.relative(travel);
+		// Slot order is the record's own: 0 and 1 the front pair, 2 and 3 the back.
+		BlockPos[] cell = new BlockPos[4];
+		for (int side = 0; side < 2; side++) {
+			BlockPos instrument = cross.relative(side == 0 ? noteSide : noteSide.getOpposite());
+			cell[side] = instrument.relative(travel);
+			cell[2 + side] = instrument.relative(travel.getOpposite());
+		}
+		List<EventNote> hanging = new ArrayList<>(4);
+		boolean settled = true;
+		for (int slot = 0; slot < 4; slot++) {
+			EventNote note = slots.slot(slot);
+			if (note == null) {
+				continue;
+			}
+			hanging.add(note);
+			settled &= quietAndFree(placements, cell[slot], time);
+		}
+		if (settled || hanging.isEmpty()) {
+			return slots;
+		}
+		// Front pair first and the far side of the back pair before the near one, which is the order
+		// the shape filled in before anybody looked -- so a module whose slots are all free comes out
+		// of here exactly as it went in.
+		EventNote[] placed = new EventNote[4];
+		int next = 0;
+		for (int slot : new int[] {0, 1, 3, 2}) {
+			if (next < hanging.size() && quietAndFree(placements, cell[slot], time)) {
+				placed[slot] = hanging.get(next++);
+			}
+		}
+		if (next < hanging.size()) {
 			return slots;
 		}
 		HEAD_SIDES_SWAPPED++;
-		return slots.mirroredBack();
+		return new UltraSlots(slots.centre(), slots.sides(),
+			java.util.Collections.unmodifiableList(
+				java.util.Arrays.asList(placed[0], placed[1])),
+			java.util.Collections.unmodifiableList(
+				java.util.Arrays.asList(placed[2], placed[3])));
 	}
 
 	private static boolean quietAndFree(PlacementPlan placements, BlockPos cell, int time) {
 		return placements.freeForNote(cell) && !soundedByAnother(placements, cell, time);
 	}
 
-	/** How often looking found the guess had picked the occupied side. */
+	/** How often looking found a low note on a cell something else already owned. */
 	static int HEAD_SIDES_SWAPPED;
 
-	/** Whether a stacked shape with one back note checks which side is free instead of assuming. */
+	/** Whether a stacked shape puts its low notes on the free slots instead of assuming. */
 	static boolean HEAD_LOOKS_FOR_ITS_FREE_SIDE = true;
 
 	private static boolean backPairIsFree(PlacementPlan placements, Lane opening, int time) {
