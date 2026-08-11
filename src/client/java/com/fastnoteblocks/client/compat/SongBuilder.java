@@ -815,7 +815,8 @@ public final class SongBuilder {
 				? stackedSplitOf(event.notes(), room, splitCells, climb > 0,
 					!columnBehindBusy || delayColumns > 0
 						|| CUT_ASKS_THE_BLOCKS_BEHIND
-							&& backPairIsFree(placements, lane.ahead(delayColumns), event.time()))
+							&& backPairIsFree(placements, lane.ahead(delayColumns), event.time()),
+					columnBehindBusy)
 				: null;
 			// A cut is built straight from the module rather than through {@link #addChordModule},
 			// so none of that method's guards are applied to it -- and the one that matters is the
@@ -878,7 +879,8 @@ public final class SongBuilder {
 					? null : stackedSplitOf(event.notes(), room - 1, splitCells, climb > 0,
 						!columnBehindBusy || delayColumns + 1 > 0
 							|| CUT_ASKS_THE_BLOCKS_BEHIND
-								&& backPairIsFree(placements, lane.ahead(delayColumns + 1), event.time()));
+								&& backPairIsFree(placements, lane.ahead(delayColumns + 1), event.time()),
+						columnBehindBusy);
 				if (shifted == null) {
 					// Both cells wrong, or nothing left to cut once a column is spent. Then the head
 					// goes, which is what this did in every case before.
@@ -2362,7 +2364,7 @@ public final class SongBuilder {
 		// Read off the same split the walk will build. A headed cut carries what the head and the
 		// near bus between them could not take, which is not the same as what a plain bus leaves.
 		StackedSplit headed = stackedSplitOf(events.get(last + 1).notes(), room, splitCells,
-			climbing, roomBehind);
+			climbing, roomBehind, !roomBehind);
 		if (headed != null) {
 			return (headed.farTail().size() + 1) / 2;
 		}
@@ -2423,7 +2425,8 @@ public final class SongBuilder {
 		// disagreement between them is a lane closed on a cut that never happens -- so the head is
 		// offered here in the same order the walk offers it, and the plain sum is the fallback in
 		// both.
-		if (stackedSplitOf(events.get(last + 1).notes(), room, splitCells, climbing, roomBehind)
+		if (stackedSplitOf(events.get(last + 1).notes(), room, splitCells, climbing, roomBehind,
+				!roomBehind)
 				!= null) {
 			return true;
 		}
@@ -5351,6 +5354,18 @@ public final class SongBuilder {
 
 	private static StackedSplit stackedSplitOf(List<EventNote> chord, int room, int splitCells,
 			boolean climbing, boolean roomBehind) {
+		return stackedSplitOf(chord, room, splitCells, climbing, roomBehind, true);
+	}
+
+	/**
+	 * @param stackedBehind whether what stands behind is another stacked module's centre. Then both
+	 *     slots behind are gone rather than one, and a head that keeps one of them is not a smaller
+	 *     head -- it is a head with a note in somebody else's cell. ekran, standing at {@code 6 72 51}:
+	 *     the first rule of stacked chords is that if the block behind is the centre of another
+	 *     stacked chord you cannot place back flanks at all, because that chord would sound them.
+	 */
+	private static StackedSplit stackedSplitOf(List<EventNote> chord, int room, int splitCells,
+			boolean climbing, boolean roomBehind, boolean stackedBehind) {
 		if (!STACKED_SPLIT_HEADS) {
 			return null;
 		}
@@ -5369,7 +5384,11 @@ public final class SongBuilder {
 		// split across a staircase -- gating it on the cut is telling the builder not to optimise in
 		// the one case it most needs to. ekran said so; it was two flags because it was bolted onto
 		// two code paths separately, which is the mistake this file keeps making.
-		if (split == null && HEAD_KEEPS_ONE_BACK_FLANK && !CUT_ONE_FLANK_COLLIDES) {
+		// Keeping one of the two is only a shape at all where only one of the two is spoken for. The
+		// file's own invariant says that is the usual case -- the lane alongside has a single live cell
+		// in the column that touches this one, so it lines up with one slot and never with both -- but
+		// a stacked centre behind is the exception, and there the fallback from a full head is five.
+		if (split == null && HEAD_KEEPS_ONE_BACK_FLANK && !stackedBehind) {
 			split = stackedBusSplit(chord, 1);
 		}
 		if (split == null && FRONT_ONLY_HEADS && FRONT_ONLY_CUTS) {
@@ -5887,25 +5906,6 @@ public final class SongBuilder {
 	 * seven and no parity trouble at all.</p>
 	 */
 	static boolean CUT_ASKS_THE_BLOCKS_BEHIND = true;
-
-	/**
-	 * A defect, not an option: the one-flank head collides when a cut builds it.
-	 *
-	 * <p>{@link #HEAD_KEEPS_ONE_BACK_FLANK} is the rule and it does not mention cutting, because how
-	 * many slots behind a head can use is a question about the ground beside it. This suppresses the
-	 * rule in the cut path alone, and it is here because that path is broken rather than because
-	 * anybody wants the choice: with it cleared, all forty-five configurations of Guardian refuse,
-	 * ninety-six collisions and thirty-five wrong notes.</p>
-	 *
-	 * <p>Four explanations have been offered for that and all four were wrong -- that {@code closes}
-	 * and {@code carriedCells} price a head at seven-or-five (they call the same {@code
-	 * stackedSplitOf}); that the planner cannot see the blocks (it models them); that the head picks
-	 * the occupied side (looking made no difference); that {@code depth} was the wrong direction
-	 * (it is {@code laneStep}, which is what the note side is derived from). Repro:
-	 * {@code HandoverCollisionProbe.marksTheCutCollision}. Read it off the marks rather than
-	 * reasoning about it -- that is what named every other fault this week.</p>
-	 */
-	static boolean CUT_ONE_FLANK_COLLIDES = true;
 
 	/**
 	 * Whether the plan is redone when the blocks answer what it had to guess.

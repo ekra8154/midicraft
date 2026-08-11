@@ -534,4 +534,22 @@ class HandoverCollisionProbe {
 				+ " breachBlocks=" + breachBlocks + " worst=" + worst + " wrong=" + wrong);
 		}
 	}
+
+	/** ekran's own 44 by 3, with the cut head of six on and collisions marked. */
+	@Test
+	void marksTheCutCollisionOnEkransBuild() throws Exception {
+		SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0), guardian(),
+			SongBuilder.PasteMode.ULTRA_COMPACT_LANE, new SongBuilder.BuildLimits(16, 44, 3));
+		System.out.println("EKRAN44 collisions=" + plan.collisions().size()
+			+ " breaches=" + plan.breaches().size() + " wrong=" + plan.wrongNotes()
+			+ " nearWall=" + plan.nearWall() + " farWall=" + plan.farWall());
+		int shown = 0;
+		for (Map.Entry<net.minecraft.core.BlockPos, String> mark : plan.collisions().entrySet()) {
+			if (shown++ >= 40) {
+				break;
+			}
+			System.out.println("    " + mark.getKey().getX() + " " + mark.getKey().getY() + " "
+				+ mark.getKey().getZ() + "  " + mark.getValue());
+		}
+	}
 }
