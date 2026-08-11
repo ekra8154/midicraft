@@ -697,7 +697,11 @@ public final class SongBuilder {
 				booked = above >= 0 && above < floors
 					? planLane(events, index, lane.pos().getX(), lane.travel().getStepX(), wall,
 						lane.travel() == forward ? nearWall : farWall,
-						currentTime, tipSignal, columnBehindBusy, turnCells, offBus, stepOffAhead,
+						currentTime, tipSignal,
+						PLAN_ASKS_THE_BLOCKS_BEHIND
+							? columnBehindBusy && !backPairIsFree(placements, lane, event.time())
+							: columnBehindBusy,
+						turnCells, offBus, stepOffAhead,
 						splitCells, climb > 0, layout, inTurn(turning, leavingTurn, lane.pos(), lastCorner), parity)
 					: Map.of();
 				replan = false;
@@ -1530,6 +1534,13 @@ public final class SongBuilder {
 			// apart, which is the bug shape this file keeps producing.
 			if (foretold != Integer.MIN_VALUE && foretold != placed.lane().pos().getX()) {
 				int off = (placed.lane().pos().getX() - foretold) * lane.travel().getStepX();
+				if (TRACE) {
+					System.out.println("  DRIFT t=" + event.time() + " n=" + event.notes().size()
+						+ " from=" + before.getX() + " foretold=" + foretold
+						+ " landed=" + placed.lane().pos().getX() + " off=" + off
+						+ " style=" + placed.style() + " nudged=" + placed.nudged()
+						+ " foretoldBusy=" + foretoldBusy + " busy=" + columnBehindBusy);
+				}
 				placements.padded("plan" + (off > 0 ? "Short" : "Long") + Math.min(Math.abs(off), 4)
 					+ (placed.nudged() ? "Nudged" : "") + placed.style());
 				// And re-plan on it, not only count it. Everything the plan still owes this lane is
@@ -5724,6 +5735,29 @@ public final class SongBuilder {
 	 * note left there is a note whose neighbour does not exist to be checked against.</p>
 	 */
 	static boolean BUS_ODD_NOTE_AWAY_FROM_NEXT_LANE = true;
+
+	/**
+	 * Whether the plan asks the blocks behind a chord the way the walk does.
+	 *
+	 * <p>A stacked module whose pair of slots behind is spoken for stands a column off the lane
+	 * behind. The walk decides that from the ground -- {@code backPairIsFree}, which looks at what is
+	 * actually there -- and the plan was deciding it from {@code columnBehindBusy} alone, which is the
+	 * coarse arithmetic answer and says busy far more often. So the sweep charged a stand-off column
+	 * the walk then did not build, on the <em>first</em> chord of a lane, and carried the error through
+	 * every event after it.</p>
+	 *
+	 * <p>It costs a lane its turn at the far end. ekran's breach of ten on Guardian at 44 wide over
+	 * three floors: the plan had the lane owing one column at the wall and exactly enough wire for a
+	 * one-column pad, and the walk arrived owing two. One column it could not pay for, so
+	 * {@code reachesWall} went false, so it never turned, so it laid a chord of twenty-four whole and
+	 * came to rest ten columns outside.</p>
+	 *
+	 * <p>Nothing caught it because there was nothing to catch: the walk's own drift counter compares
+	 * {@link #landingOf} against the blocks and those two agree exactly -- zero drift over the whole
+	 * lane. The disagreement was only ever between the sweep's call and the walk's, and the single
+	 * argument between them was this one.</p>
+	 */
+	static boolean PLAN_ASKS_THE_BLOCKS_BEHIND = true;
 
 	/** Whether a lone back flank hangs away from the lane the walk has not built yet. */
 	static boolean BACK_FLANK_AWAY_FROM_NEXT_LANE = true;

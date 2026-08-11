@@ -266,4 +266,94 @@ class HandoverCollisionProbe {
 			}
 		}
 	}
+
+	/** ekran's breach of ten: does the plan asking the blocks close that lane? */
+	@Test
+	void pricesAskingTheBlocksBehind() throws Exception {
+		List<SongBuilder.EventNote> notes = guardian();
+		for (boolean asks : new boolean[] {false, true}) {
+			SongBuilder.PLAN_ASKS_THE_BLOCKS_BEHIND = asks;
+			try {
+				SongBuilder.PastePlan real = SongBuilder.createPastePlan(new BlockPos(0, 64, 0), notes,
+					SongBuilder.PasteMode.ULTRA_COMPACT_LANE, new SongBuilder.BuildLimits(16, 44, 3));
+				System.out.println("ASKS44 asks=" + asks + " breaches=" + real.breaches()
+					+ " wrong=" + real.wrongNotes() + " blocks=" + real.commands().size()
+					+ " spanZ=" + real.spanZ());
+			} catch (RuntimeException no) {
+				System.out.println("ASKS44 asks=" + asks + " REFUSED: " + no.getMessage());
+			}
+			int built = 0;
+			int refused = 0;
+			int clean = 0;
+			int breaches = 0;
+			int breachBlocks = 0;
+			int worst = 0;
+			long wrong = 0;
+			long blocks = 0;
+			try {
+				for (int floors = 2; floors <= 6; floors++) {
+					for (int width = 12; width <= 48; width += 4) {
+						try {
+							SongBuilder.PastePlan plan = SongBuilder.createPastePlan(
+								new BlockPos(0, 64, 0), notes, SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+								new SongBuilder.BuildLimits(4, width, floors));
+							built++;
+							clean += plan.breaches().isEmpty() ? 1 : 0;
+							breaches += plan.breaches().size();
+							for (int breach : plan.breaches()) {
+								breachBlocks += breach;
+								worst = Math.max(worst, breach);
+							}
+							wrong += plan.wrongNotes();
+							blocks += plan.commands().size();
+						} catch (RuntimeException no) {
+							refused++;
+						}
+					}
+				}
+			} finally {
+				SongBuilder.PLAN_ASKS_THE_BLOCKS_BEHIND = true;
+			}
+			System.out.println("ASKSSWEEP asks=" + asks + " built=" + built + " refused=" + refused
+				+ " clean=" + clean + " breaches=" + breaches + " breachBlocks=" + breachBlocks
+				+ " worst=" + worst + " wrong=" + wrong + " blocks=" + blocks);
+		}
+	}
+
+	/** Guardian at every width and floor count, one line each, the plan's question both ways. */
+	@Test
+	void tabulatesEveryGuardianSize() throws Exception {
+		List<SongBuilder.EventNote> notes = guardian();
+		Map<String, String> off = new LinkedHashMap<>();
+		for (boolean asks : new boolean[] {false, true}) {
+			SongBuilder.PLAN_ASKS_THE_BLOCKS_BEHIND = asks;
+			try {
+				for (int floors = 2; floors <= 6; floors++) {
+					for (int width = 12; width <= 48; width += 4) {
+						String key = String.format("%2dw x %df", width, floors);
+						String value;
+						try {
+							SongBuilder.PastePlan plan = SongBuilder.createPastePlan(
+								new BlockPos(0, 64, 0), notes, SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+								new SongBuilder.BuildLimits(4, width, floors));
+							value = String.format("%3d breaches %4d blocks worst %2d",
+								plan.breaches().size(),
+								plan.breaches().stream().mapToInt(Integer::intValue).sum(),
+								plan.breaches().stream().mapToInt(Integer::intValue).max().orElse(0));
+						} catch (RuntimeException no) {
+							value = "REFUSED";
+						}
+						if (asks) {
+							System.out.println("SIZE " + key + "  off: " + off.get(key)
+								+ "   |  on: " + value);
+						} else {
+							off.put(key, value);
+						}
+					}
+				}
+			} finally {
+				SongBuilder.PLAN_ASKS_THE_BLOCKS_BEHIND = true;
+			}
+		}
+	}
 }
