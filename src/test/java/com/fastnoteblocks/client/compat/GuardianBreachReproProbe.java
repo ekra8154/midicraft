@@ -659,6 +659,82 @@ class GuardianBreachReproProbe {
 		}
 	}
 
+	/** Which configurations pay for the raised ascent, so one of them can be traced. */
+	@Test
+	void findsWhichConfigsPayForTheRaisedAscent() throws Exception {
+		List<SongBuilder.EventNote> notes = guardian();
+		Map<String, int[]> byConfig = new LinkedHashMap<>();
+		for (int arm = 0; arm < 2; arm++) {
+			SongBuilder.PADS_AT_BUS_HEIGHT_INTO_A_CLIMB = arm == 1;
+			try {
+				for (int floors = 2; floors <= 6; floors++) {
+					for (int width = 12; width <= 48; width += 4) {
+						SongBuilder.PastePlan plan = SongBuilder.createPastePlan(
+							new BlockPos(0, 64, 0), notes,
+							SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+							new SongBuilder.BuildLimits(4, width, floors));
+						byConfig.computeIfAbsent(width + "w x " + floors + "f",
+							key -> new int[2])[arm] = plan.breaches().size();
+					}
+				}
+			} finally {
+				SongBuilder.PADS_AT_BUS_HEIGHT_INTO_A_CLIMB = true;
+			}
+		}
+		byConfig.entrySet().stream()
+			.sorted((a, b) -> Integer.compare(b.getValue()[1] - b.getValue()[0],
+				a.getValue()[1] - a.getValue()[0]))
+			.limit(10)
+			.forEach(entry -> System.out.println("PAYS " + entry.getKey() + "  "
+				+ entry.getValue()[0] + " -> " + entry.getValue()[1]
+				+ "   (" + (entry.getValue()[1] - entry.getValue()[0] > 0 ? "+" : "")
+				+ (entry.getValue()[1] - entry.getValue()[0]) + ")"));
+	}
+
+	/** The first turn the two builds put in different places, at the config that pays most. */
+	@Test
+	void findsWhereTheTwoBuildsFirstDiverge() throws Exception {
+		List<SongBuilder.EventNote> notes = guardian();
+		List<net.minecraft.core.BlockPos>[] turns = new List[2];
+		List<String>[] commands = new List[2];
+		for (int arm = 0; arm < 2; arm++) {
+			SongBuilder.PADS_AT_BUS_HEIGHT_INTO_A_CLIMB = arm == 1;
+			SongBuilder.TRACE_TURNS = true;
+			System.out.println("ARMSTART " + arm);
+			try {
+				SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0),
+					notes, SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+					new SongBuilder.BuildLimits(4, 20, 3));
+				SongBuilder.TRACE_TURNS = false;
+				turns[arm] = plan.turns();
+				commands[arm] = plan.commands();
+				System.out.println("DIVERGE arm=" + arm + " turns=" + plan.turns().size()
+					+ " breaches=" + plan.breaches() + " cmds=" + plan.commands().size());
+			} finally {
+				SongBuilder.PADS_AT_BUS_HEIGHT_INTO_A_CLIMB = true;
+			}
+		}
+		for (int index = 0; index < Math.min(turns[0].size(), turns[1].size()); index++) {
+			net.minecraft.core.BlockPos off = turns[0].get(index);
+			net.minecraft.core.BlockPos on = turns[1].get(index);
+			if (!off.equals(on)) {
+				System.out.println("DIVERGE first differing turn #" + index
+					+ "  off: " + off.getX() + " " + off.getY() + " " + off.getZ()
+					+ "   on: " + on.getX() + " " + on.getY() + " " + on.getZ());
+				for (int back = Math.max(0, index - 3); back <= index; back++) {
+					System.out.println("    turn #" + back
+						+ "  off " + turns[0].get(back).getX() + " " + turns[0].get(back).getY()
+						+ " " + turns[0].get(back).getZ()
+						+ "   on " + turns[1].get(back).getX() + " " + turns[1].get(back).getY()
+						+ " " + turns[1].get(back).getZ());
+				}
+				return;
+			}
+		}
+		System.out.println("DIVERGE turns identical up to " + Math.min(turns[0].size(),
+			turns[1].size()));
+	}
+
 	/** The same build, walked, so the chord that went out and the one behind it can be read. */
 	@Test
 	void tracesTheWorstBreach() throws Exception {

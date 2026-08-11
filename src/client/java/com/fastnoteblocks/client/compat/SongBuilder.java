@@ -2372,6 +2372,11 @@ public final class SongBuilder {
 	private static void gradeLaneStart(PlacementPlan placements, int wall, int stepX,
 			int carriedCells, boolean climbing, int stepOff, int opened, String how) {
 		int foretold = nextLaneStart(wall, stepX, carriedCells, climbing, stepOff);
+		if (TRACE_TURNS && foretold != opened) {
+			System.out.println("STARTOFF " + how + " wall=" + wall + " stepX=" + stepX
+				+ " carried=" + carriedCells + " climbing=" + climbing + " stepOff=" + stepOff
+				+ " foretold=" + foretold + " opened=" + opened + " off=" + (foretold - opened));
+		}
 		if (foretold == opened) {
 			placements.padded("planStartRight" + how);
 			return;
@@ -7299,6 +7304,13 @@ public final class SongBuilder {
 		 */
 		void turnedAt(BlockPos position) {
 			if (recording) {
+				if (TRACE_TURNS) {
+					// Which shape laid it, not just where. A turn is recorded by four different
+					// shapes and the trace above only prints the one that asked to turn, so a turn
+					// that moves between two builds cannot otherwise be attributed to anything.
+					System.out.println("TURNEDAT " + position.getX() + " " + position.getY() + " "
+						+ position.getZ() + "  " + placing);
+				}
 				turns.add(position.immutable());
 			}
 		}
