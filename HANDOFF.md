@@ -28,8 +28,7 @@ this session, all the same sentence: **the plan asked arithmetic where the walk 
   `backPairIsFree`, so where the flag said busy the full head was never attempted at all and the whole
   cut fell to a plain bus. **Fixed** — `CUT_ASKS_THE_BLOCKS_BEHIND`.
 
-And its consequence, which is item 1: the walk can now see things the plan cannot, so **they can
-disagree**. `REPLAN_WHEN_BLOCKS_DISAGREE` tells the plan when the ground answered what it guessed.
+And its consequence: the walk can now see things the plan cannot, so **they can disagree**. `REPLAN_WHEN_BLOCKS_DISAGREE` tells the plan when the ground answered what it guessed.
 That is the design ekran chose over making the walk stop looking.
 
 ## What changed
