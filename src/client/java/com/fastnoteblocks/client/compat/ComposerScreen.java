@@ -259,6 +259,8 @@ public final class ComposerScreen extends Screen {
 	/** How much faster holding at an edge eventually gets, and how long it takes to get there. */
 	private static final double BOX_SCROLL_HELD_BOOST = 4.0;
 	private static final double BOX_SCROLL_BOOST_MILLIS = 900.0;
+	/** How long a key stays lit after it sounds, which is about how long a note block rings for. */
+	private static final long KEY_LIGHT_MILLIS = 260L;
 	private static final long TOOLTIP_DWELL_MILLIS = 260L;
 	private static final long SCALE_COALESCE_MILLIS = 400L;
 	private static final long TOAST_MILLIS = 4500L;
@@ -345,6 +347,18 @@ public final class ComposerScreen extends Screen {
 	private long playbackReturnTick;
 	private List<PlaybackEvent> playbackEvents = List.of();
 	private int playbackEventIndex;
+	/**
+	 * When each key last sounded, and in what colour, so the keyboard shows what is playing.
+	 *
+	 * <p>Two flat arrays over the whole MIDI range rather than a list of live lights: a key is an
+	 * index, the roll already walks the keys it can see, and the answer to "is this one lit" has to
+	 * be one subtraction. A chord of thirty on a dense song fires thirty of these in a frame, and
+	 * anything that allocated per note would be paying for it every frame it decays over.</p>
+	 *
+	 * <p>No clearing pass and no tick work: a light is a timestamp, so it goes out by being old.</p>
+	 */
+	private final long[] keyLitAt = new long[MAX_MIDI_NOTE + 1];
+	private final int[] keyLitColor = new int[MAX_MIDI_NOTE + 1];
 	private boolean draggingPlayhead;
 	/**
 	 * Layers being listened to alone.
@@ -630,10 +644,16 @@ public final class ComposerScreen extends Screen {
 		}
 	}
 
-	/** Back to one layer selected and the top of the list, after something replaced the song. */
+	/**
+	 * Back to no layer selected and the top of the list, after something replaced the song.
+	 *
+	 * <p>A song arrives as a whole, not as one voice with the rest behind it, and which layer the
+	 * file happened to be saved pointing at says nothing about which one you are about to work on.
+	 * So opening one selects nothing: the roll shows every part at full strength, a box takes notes
+	 * from all of them, and clicking one is how you say where you want to be.</p>
+	 */
 	private void resetLayerView() {
 		selectedLayers.clear();
-		selectedLayers.add(project().activeLayerIndex());
 		layerScroll = 0;
 		layerMenuOpen = false;
 	}
@@ -804,7 +824,6 @@ public final class ComposerScreen extends Screen {
 			selectedLayers.add(layerIndex);
 		}
 		if (noLayerSelected()) {
-			selectedNotes.clear();
 			layersChanged();
 			return;
 		}
@@ -846,6 +865,9 @@ public final class ComposerScreen extends Screen {
 			.count();
 		apply("merge " + merging.size() + " layers", project().mergeLayers(Set.copyOf(selectedLayers)));
 		resetLayerView();
+		// The one thing a merge leaves you wanting to look at is what came out of it, so this is the
+		// exception to opening on nothing selected.
+		selectOnlyLayer(merging.getFirst());
 		layersChanged();
 		rebuildMoveLayerButtons();
 		String summary = "Merged " + merging.size() + " layers into \"" + into.name() + "\" - "
@@ -1765,7 +1787,7 @@ public final class ComposerScreen extends Screen {
 			// Not disabled on an unbuildable song: greying it out would hide the reason. The status
 			// bar already names the problem and the planner refuses with a specific one.
 			case PASTE_IN_WORLD -> projectStats().totalNotes() > 0 || project().endTick() > 0L;
-			case INCLUDE_SELECTED, SET_INCLUDED_TO_SELECTION -> !selectionLayers().isEmpty();
+			case INCLUDE_SELECTED, SET_INCLUDED_TO_SELECTION -> !selectedLayers.isEmpty();
 			case BUILD_CANCEL -> CommandPasteSender.isRunning();
 			default -> true;
 		};
@@ -2271,7 +2293,7 @@ public final class ComposerScreen extends Screen {
 			String step = action == ToolbarAction.UNDO ? history.undoLabel() : history.redoLabel();
 			return step == null ? action.label : action.label + " " + clipped(step, 16);
 		}
-		int selected = selectionLayers().size();
+		int selected = selectedLayers.size();
 		if (selected > 0 && action == ToolbarAction.INCLUDE_SELECTED) {
 			return "Include " + layerCountLabel(selected) + " in sequence";
 		}
@@ -3047,6 +3069,7 @@ public final class ComposerScreen extends Screen {
 
 	private long extractPianoRoll(GuiGraphicsExtractor graphics, int mouseX, int mouseY, long mark) {
 		int pianoX = layerPanelWidth();
+		long now = Util.getMillis();
 		graphics.enableScissor(pianoX, rollY, rollX + rollWidth, rollY + rollHeight);
 		for (int midi = topMidiNote; midi >= MIN_MIDI_NOTE; midi--) {
 			int y = noteY(midi);
@@ -3066,6 +3089,17 @@ public final class ComposerScreen extends Screen {
 			graphics.fill(pianoX, y, rollX, y + rowHeight - 1, 0xFFE7E7E7);
 			if (black) {
 				graphics.fill(pianoX, y, pianoX + PIANO_WIDTH * 2 / 3, y + rowHeight - 1, 0xFF303238);
+			}
+			// A key that has just sounded, fading out over a quarter of a second. Over the whole key
+			// rather than part of it, black ones included: the question it answers is "which row was
+			// that", and at four pixels a row there is no part of a key to be subtle in. One quad,
+			// and only for the keys actually lit -- the arithmetic below runs for every visible row
+			// and is a subtraction against a timestamp that is almost always long past.
+			long litFor = now - keyLitAt[midi];
+			if (litFor >= 0L && litFor < KEY_LIGHT_MILLIS) {
+				int alpha = (int)Math.round(255.0 * (1.0 - litFor / (double)KEY_LIGHT_MILLIS));
+				graphics.fill(pianoX, y, rollX, y + rowHeight - 1,
+					alpha << 24 | keyLitColor[midi] & 0xFFFFFF);
 			}
 			graphics.fill(pianoX, y + rowHeight - 1, rollX, y + rowHeight, 0xFF55575C);
 			graphics.fill(rollX, y, rollX + rollWidth, y + rowHeight - 1, gridColor);
@@ -3437,13 +3471,19 @@ public final class ComposerScreen extends Screen {
 		}
 	}
 
-	/** Steps out of every layer, leaving the whole song in the foreground and none of it armed. */
+	/**
+	 * Steps out of every layer, leaving the whole song in the foreground.
+	 *
+	 * <p>Which notes are selected is a separate question and is left alone. It was not, at first,
+	 * and throwing the notes away on the way into the mode took the right-click menu with them --
+	 * that menu only opens on a selection, so after a click on blank panel a right-click on a note
+	 * deleted it instead of offering anything.</p>
+	 */
 	private void clearLayerSelection() {
 		if (noLayerSelected()) {
 			return;
 		}
 		selectedLayers.clear();
-		selectedNotes.clear();
 		instrumentMenuLayer = -1;
 		cancelLayerRename();
 		showResult(Component.literal("No layer selected. Clicking a note now picks its layer, and "
@@ -3455,6 +3495,32 @@ public final class ComposerScreen extends Screen {
 		return noLayerSelected()
 			? PreviewInstrument.byId("HARP")
 			: PreviewInstrument.byId(activeLayer().instrument());
+	}
+
+	/** What colour that click lights its key in: the layer's, or a plain grey with no layer. */
+	private int previewColor() {
+		return noLayerSelected() ? 0xFFBCC3CC : vivid(layerColor(project().activeLayerIndex()));
+	}
+
+	/**
+	 * Plays one note and lights the key it landed on.
+	 *
+	 * <p>The two together because they are one event -- a preview that sounds without marking the
+	 * keyboard leaves you working out which of two octaves you just heard.</p>
+	 *
+	 * @param midi the note in MIDI numbering, not the note block's 0-24
+	 */
+	private void soundNote(int midi, PreviewInstrument instrument, int color) {
+		instrument.play(midi - ComposerProject.NOTE_BLOCK_BASE_MIDI_NOTE);
+		lightKey(midi, color);
+	}
+
+	/** Marks a key as having just sounded. It goes out on its own; see {@link #keyLitAt}. */
+	private void lightKey(int midi, int color) {
+		if (midi >= MIN_MIDI_NOTE && midi <= MAX_MIDI_NOTE) {
+			keyLitAt[midi] = Util.getMillis();
+			keyLitColor[midi] = color;
+		}
 	}
 
 	private void extractPlayhead(GuiGraphicsExtractor graphics) {
@@ -3643,7 +3709,7 @@ public final class ComposerScreen extends Screen {
 			draggingSplitter = true;
 			return true;
 		}
-		if (event.button() == 0 && overLayerPanelHeader(event.x(), event.y())) {
+		if (event.button() == 0 && overLayerPanelFold(event.x(), event.y())) {
 			config.setLayerPanelCollapsed(!config.layerPanelCollapsed());
 			FastNoteblocksConfig.save();
 			resizeLayerPanel();
@@ -3746,12 +3812,12 @@ public final class ComposerScreen extends Screen {
 				return true;
 			}
 		}
-		if (event.button() == 0 && overLayerListBlank(event.x(), event.y())) {
+		if (event.button() == 0 && overLayerPanelBlank(event.x(), event.y())) {
 			clearLayerSelection();
 			return true;
 		}
 		if (event.button() == 0 && overPianoKeys(event.x(), event.y())) {
-			previewInstrument().play(mouseMidi(event.y()) - ComposerProject.NOTE_BLOCK_BASE_MIDI_NOTE);
+			soundNote(mouseMidi(event.y()), previewInstrument(), previewColor());
 			return true;
 		}
 		if (event.button() == 0 && overEndMarker(event.x(), event.y())) {
@@ -3791,16 +3857,20 @@ public final class ComposerScreen extends Screen {
 		}
 		NoteHit hit = noteAt(event.x(), event.y());
 		if (hit != null) {
+			NoteEvent hitNote = hit.note();
 			// Which layer you are on is the panel's business now, not the roll's. Clicking a note
 			// used to jump to its layer, which meant there was no way to put a note on top of one
 			// that already existed: the click that should have started the placement moved you to
 			// the other voice instead. The one exception is no-layer mode, where picking a note is
 			// exactly how you say which voice you meant -- see noLayerSelected().
-			if (noLayerSelected()) {
+			//
+			// Except when that note is already selected, which is not a pick but the start of a
+			// drag. Taking the layer there collapsed a selection that spanned the whole song down to
+			// the one note under the cursor, so a box select across four parts could only move one.
+			if (noLayerSelected() && !selectedNotes.contains(hitNote.id())) {
 				selectedNotes.clear();
 				selectLayer(hit.layerIndex(), false, false);
 			}
-			NoteEvent hitNote = hit.note();
 			if (!selectedNotes.contains(hitNote.id())) {
 				if (!event.hasControlDownWithQuirk()) {
 					selectedNotes.clear();
@@ -3818,8 +3888,9 @@ public final class ComposerScreen extends Screen {
 				dragTickDelta = 0L;
 				dragPitchDelta = 0;
 				dragAxis = DragAxis.UNDECIDED;
-				PreviewInstrument.byId(project().layers().get(hit.layerIndex()).instrument())
-					.play(hitNote.midiNote() - ComposerProject.NOTE_BLOCK_BASE_MIDI_NOTE);
+				soundNote(hitNote.midiNote(),
+					PreviewInstrument.byId(project().layers().get(hit.layerIndex()).instrument()),
+					vivid(layerColor(hit.layerIndex())));
 			}
 			return true;
 		}
@@ -3865,7 +3936,7 @@ public final class ComposerScreen extends Screen {
 		selectedNotes.clear();
 		if (added != null) {
 			selectedNotes.add(added.id());
-			previewInstrument().play(added.midiNote() - ComposerProject.NOTE_BLOCK_BASE_MIDI_NOTE);
+			soundNote(added.midiNote(), previewInstrument(), previewColor());
 		}
 	}
 
@@ -4141,6 +4212,14 @@ public final class ComposerScreen extends Screen {
 			contextMenuOpen = false;
 			return true;
 		}
+		// A focused text box owns the keyboard. Enter and Escape are the two keys that are about the
+		// box rather than in it; everything else goes to the box and stops there.
+		//
+		// It used to fall through to the roll's shortcuts, which quietly aimed them at the song
+		// behind the name being typed: Ctrl+A selected every note instead of the text, Backspace
+		// deleted the selected notes instead of a character, the arrow keys retimed and transposed
+		// them, and Ctrl+V pasted a phrase into the composition. None of that was visible, because
+		// what you were looking at was a text box.
 		if (layerNameBox != null) {
 			if (event.isConfirmation()) {
 				commitLayerRename();
@@ -4150,8 +4229,9 @@ public final class ComposerScreen extends Screen {
 				cancelLayerRename();
 				return true;
 			}
+			return super.keyPressed(event);
 		}
-		if (event.key() == GLFW.GLFW_KEY_F9 && layerNameBox == null) {
+		if (event.key() == GLFW.GLFW_KEY_F9) {
 			profiling = !profiling;
 			java.util.Arrays.fill(phaseNanos, 0L);
 			profileFrameNanos = 0L;
@@ -4165,7 +4245,7 @@ public final class ComposerScreen extends Screen {
 				: "Frame profiler off"));
 			return true;
 		}
-		if (event.key() == GLFW.GLFW_KEY_SPACE && layerNameBox == null) {
+		if (event.key() == GLFW.GLFW_KEY_SPACE) {
 			if (playing || anythingAudible()) {
 				togglePlayback();
 			}
@@ -4175,8 +4255,7 @@ public final class ComposerScreen extends Screen {
 		// every sequencer has. Claimed here rather than left to fall through, because falling through
 		// pressed whichever button had the focus, which in this screen is "+ Layer": hitting Enter to
 		// hear the song from the start added an empty layer to it instead.
-		if ((event.key() == GLFW.GLFW_KEY_ENTER || event.key() == GLFW.GLFW_KEY_KP_ENTER)
-				&& layerNameBox == null) {
+		if (event.key() == GLFW.GLFW_KEY_ENTER || event.key() == GLFW.GLFW_KEY_KP_ENTER) {
 			playFromStart();
 			return true;
 		}
@@ -4220,7 +4299,7 @@ public final class ComposerScreen extends Screen {
 			redo();
 			return true;
 		}
-		if (event.hasControlDownWithQuirk() && layerNameBox == null) {
+		if (event.hasControlDownWithQuirk()) {
 			// Ctrl+C is already taken by copying notes, so copying the sequence takes the shifted
 			// one, the way editors usually shift a variant of an existing action.
 			switch (event.key()) {
@@ -4432,6 +4511,7 @@ public final class ComposerScreen extends Screen {
 			PlaybackEvent event = playbackEvents.get(playbackEventIndex++);
 			if (event.tick() >= staleBefore && soundsPlayed < MAX_PREVIEW_SOUNDS_PER_FRAME) {
 				event.instrument().play(event.note());
+				lightKey(event.note() + ComposerProject.NOTE_BLOCK_BASE_MIDI_NOTE, event.color());
 				soundsPlayed++;
 			}
 		}
@@ -4501,13 +4581,15 @@ public final class ComposerScreen extends Screen {
 			if (!instrument.playable()) {
 				continue;
 			}
+			int color = vivid(layerColor(layerIndex));
 			List<NoteEvent> notes = layer.notes();
 			for (int index = lowerBoundStart(notes, playbackStartTick); index < notes.size(); index++) {
 				NoteEvent note = notes.get(index);
 				events.add(new PlaybackEvent(
 					note.startTick(),
 					instrument,
-					note.midiNote() - ComposerProject.NOTE_BLOCK_BASE_MIDI_NOTE
+					note.midiNote() - ComposerProject.NOTE_BLOCK_BASE_MIDI_NOTE,
+					color
 				));
 			}
 		}
@@ -4667,7 +4749,7 @@ public final class ComposerScreen extends Screen {
 	 * already changed by the time this returns.</p>
 	 */
 	private void setIncludedLayers(boolean add) {
-		Set<Integer> chosen = new java.util.LinkedHashSet<>(selectionLayers());
+		Set<Integer> chosen = new java.util.LinkedHashSet<>(selectedLayers);
 		if (chosen.isEmpty()) {
 			showResult(Component.literal("Select some layers first."));
 			return;
@@ -5069,15 +5151,23 @@ public final class ComposerScreen extends Screen {
 	}
 
 	/**
-	 * The empty run under the last row, which is the way into no-layer mode.
+	 * Panel that belongs to no layer, which is the way into no-layer mode.
 	 *
-	 * <p>{@link #maxLayerScroll()} keeps a row of it in reach however many layers there are, because
-	 * a mode you can only enter when the list happens not to be full is not a mode.</p>
+	 * <p>Three places, and they are all the same place as far as the eye is concerned: the run under
+	 * the last row, the gutter either side of every row, and the header strip beside its fold
+	 * control. {@link #maxLayerScroll()} keeps a row of the first in reach however many layers there
+	 * are, because a mode you can only enter when the list happens not to be full is not a mode.</p>
 	 */
-	private boolean overLayerListBlank(double x, double y) {
-		return x >= 0 && x < layerPanelWidth()
-			&& y >= LAYER_LIST_TOP - 2 && y < layerListBottom()
-			&& layerRowAtY(y) < 0;
+	private boolean overLayerPanelBlank(double x, double y) {
+		if (x < 0 || x >= layerPanelWidth()) {
+			return false;
+		}
+		if (y >= TOOLBAR_HEIGHT && y < LAYER_LIST_TOP - 2) {
+			return !overLayerPanelFold(x, y) && !overOpenMenu(x, y);
+		}
+		// layerRowAt, not layerRowAtY: it is the one that knows about the gutters, which are panel
+		// that no row is drawn on and so read as empty however close to a row they sit.
+		return y >= LAYER_LIST_TOP - 2 && y < layerListBottom() && layerRowAt(x, y) < 0;
 	}
 
 	/** The white-and-black key strip down the roll's left edge, which plays what you point at. */
@@ -5086,14 +5176,20 @@ public final class ComposerScreen extends Screen {
 	}
 
 	/**
-	 * The strip above the list, which folds the panel away and brings it back.
+	 * The fold control in the strip above the list: the arrow and the word beside it, and no more.
 	 *
-	 * <p>Not while a menu is standing over it: the instrument palette opens as high as four pixels
-	 * under the toolbar, so its top row sits on this strip and picking an instrument from there
-	 * folded the whole panel instead.</p>
+	 * <p>It used to be the whole strip, which spent the panel's widest piece of empty space on an
+	 * action that has a perfectly good two-character target. That space is worth more as somewhere
+	 * to click for no layer at all -- see {@link #overLayerPanelBlank}.</p>
+	 *
+	 * <p>Not while a menu is standing over it either: the instrument palette opens as high as four
+	 * pixels under the toolbar, so its top row sits on this strip and picking an instrument from
+	 * there folded the whole panel instead.</p>
 	 */
-	private boolean overLayerPanelHeader(double x, double y) {
-		return x >= 0 && x < layerPanelWidth()
+	private boolean overLayerPanelFold(double x, double y) {
+		LayerRowLayout row = layerRowLayout();
+		int right = row.inset() + (row.name() ? 10 + font.width("Layers") : font.width(">")) + 3;
+		return x >= 0 && x < Math.min(right, layerPanelWidth())
 			&& y >= TOOLBAR_HEIGHT && y < LAYER_LIST_TOP - 2
 			&& !overOpenMenu(x, y);
 	}
@@ -5555,7 +5651,14 @@ public final class ComposerScreen extends Screen {
 		}
 	}
 
-	private record PlaybackEvent(long tick, PreviewInstrument instrument, int note) {
+	/**
+	 * One scheduled preview sound, and the colour of the layer it came from.
+	 *
+	 * <p>The colour is resolved here, while the layer is still in hand, rather than looked up when
+	 * the event fires -- by then all that is left is a pitch. It takes no part in {@code sameSound},
+	 * which asks whether the build would collapse the two, and the build has no colours.</p>
+	 */
+	private record PlaybackEvent(long tick, PreviewInstrument instrument, int note, int color) {
 		private boolean sameSound(PlaybackEvent other) {
 			return tick == other.tick && note == other.note && instrument.equals(other.instrument);
 		}
