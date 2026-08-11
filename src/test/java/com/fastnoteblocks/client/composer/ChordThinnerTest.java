@@ -72,13 +72,18 @@ class ChordThinnerTest {
 	/** With deduplication off every note counts for itself, so thinning has to count that way too. */
 	@Test
 	void countsUnmergedWhenTheBuildWould() {
-		List<NoteEvent> notes = new ArrayList<>();
-		for (int index = 0; index < 40; index++) {
-			notes.add(note(60, 0L, 100));
-		}
 		// Forty notes of one sound: merged that is one sound and nothing to do, unmerged it is
 		// forty and thirty-two have to go.
-		ComposerProject song = songOf(List.of(layer("Harp", "HARP", notes)));
+		//
+		// A layer each, because one layer cannot hold the same pitch twice at the same tick. Forty
+		// harp layers is what deliberately doubling a note forty times over now costs, and saying so
+		// is the point: the doubling is what is being counted.
+		List<Layer> layers = new ArrayList<>();
+		for (int index = 0; index < 40; index++) {
+			layers.add(layer("Harp " + (index + 1), "HARP", List.of(note(60, 0L, 100))));
+		}
+		ComposerProject song = songOf(layers);
+		assertEquals(40, song.noteCount(), "every one of them survived being put in its own layer");
 		assertTrue(ChordThinner.thin(song, 8, true).isEmpty());
 		assertEquals(32, ChordThinner.thin(song, 8, false).noteIds().size());
 	}
@@ -343,6 +348,13 @@ class ChordThinnerTest {
 	 * A song shaped like a transcription: a handful of pitches per chord, each played by a pile of
 	 * instruments. That doubling is the thing being thinned, so a generator without it would test
 	 * nothing.
+	 *
+	 * <p>Each instrument gets {@link #VOICES_PER_INSTRUMENT} layers and its nth simultaneous note
+	 * goes to the nth of them. A doubled sound is one instrument playing one pitch twice at once, and
+	 * a layer holds at most one note per pitch per tick -- so a doubled sound <em>is</em> two layers
+	 * of one instrument, and a generator that put them in one layer produced a song with no doubling
+	 * left in it once the constructor had had its say. Which is also what a converted song looks
+	 * like: layers group by instrument and one instrument spans several of them.</p>
 	 */
 	private static ComposerProject stacked(long seed) {
 		java.util.Random random = new java.util.Random(seed);
@@ -350,9 +362,11 @@ class ChordThinnerTest {
 			"HARP", "FLUTE", "BELL", "CHIME", "GUITAR", "BASS", "BANJO", "PLING", "BIT",
 			"XYLOPHONE", "COW_BELL", "DIDGERIDOO", "IRON_XYLOPHONE", "TRUMPET"
 		};
-		Map<String, List<NoteEvent>> byInstrument = new java.util.LinkedHashMap<>();
+		Map<String, List<NoteEvent>> byLayer = new java.util.LinkedHashMap<>();
 		for (String instrument : instruments) {
-			byInstrument.put(instrument, new ArrayList<>());
+			for (int voice = 0; voice < VOICES_PER_INSTRUMENT; voice++) {
+				byLayer.put(instrument + " " + (voice + 1), new ArrayList<>());
+			}
 		}
 		for (long tick = 0L; tick < 12L; tick++) {
 			int voices = 4 + random.nextInt(8);
@@ -361,17 +375,21 @@ class ChordThinnerTest {
 				pitches[index] = 54 + random.nextInt(25);
 			}
 			for (String instrument : instruments) {
-				int plays = 1 + random.nextInt(4);
+				int plays = 1 + random.nextInt(VOICES_PER_INSTRUMENT);
 				for (int index = 0; index < plays; index++) {
-					byInstrument.get(instrument)
+					byLayer.get(instrument + " " + (index + 1))
 						.add(note(pitches[random.nextInt(voices)], tick, 1 + random.nextInt(127)));
 				}
 			}
 		}
 		List<Layer> layers = new ArrayList<>();
-		byInstrument.forEach((instrument, notes) -> layers.add(layer(instrument, instrument, notes)));
+		byLayer.forEach((name, notes) ->
+			layers.add(layer(name, name.substring(0, name.lastIndexOf(' ')), notes)));
 		return songOf(layers);
 	}
+
+	/** How many layers an instrument is spread over, and so how often it may double a pitch. */
+	private static final int VOICES_PER_INSTRUMENT = 4;
 
 	private static Layer layer(String name, String instrument, List<NoteEvent> notes) {
 		List<NoteEvent> sorted = new ArrayList<>(notes);

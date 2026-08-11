@@ -131,14 +131,46 @@ public record ComposerProject(
 		public Layer {
 			name = name == null || name.isBlank() ? "Layer" : name.trim();
 			instrument = instrument == null || instrument.isBlank() ? "HARP" : instrument;
-			notes = notes == null
-				? List.of()
-				: notes.stream()
-					.filter(java.util.Objects::nonNull)
-					.sorted(Comparator.comparingLong(NoteEvent::startTick)
-						.thenComparingInt(NoteEvent::midiNote)
-						.thenComparingLong(NoteEvent::id))
-					.toList();
+			notes = notes == null ? List.of() : oneNotePerCell(notes);
+		}
+
+		/**
+		 * A layer's notes in order, with at most one on any pitch at any tick.
+		 *
+		 * <p>A layer has one instrument, so two notes on the same pitch at the same tick are the same
+		 * sound twice. The build already collapsed them and preview already played them once; keeping
+		 * them in the document only meant the roll had a cell you could put notes into forever, with
+		 * nothing to show that you had. Wanting a doubled note is a real thing to want -- it is how
+		 * you make one louder -- and it is two layers, which says so.</p>
+		 *
+		 * <p>Enforced here, in the constructor, rather than at the places that add notes. Every edit
+		 * in this file goes through {@code with}, and a rule about what a layer <em>is</em> cannot be
+		 * left to each caller to remember: quantizing two neighbours onto one tick, transposing two
+		 * pitches onto one, pasting, merging layers and importing a MIDI whose track doubles a note
+		 * all arrive at the same cell by different roads.</p>
+		 *
+		 * <p>The survivor is the lowest id, which is the one that was there first. Deliberately not
+		 * the newest: a phrase dragged across an existing note would otherwise lose one of its own
+		 * notes to every note it passed, and a drag is rebuilt from its starting point each frame, so
+		 * only where it comes to rest can cost anything.</p>
+		 */
+		private static List<NoteEvent> oneNotePerCell(List<NoteEvent> notes) {
+			List<NoteEvent> sorted = notes.stream()
+				.filter(java.util.Objects::nonNull)
+				.sorted(Comparator.comparingLong(NoteEvent::startTick)
+					.thenComparingInt(NoteEvent::midiNote)
+					.thenComparingLong(NoteEvent::id))
+				.toList();
+			// Sorted by tick then pitch, so anything sharing a cell is adjacent and one pass finds it.
+			List<NoteEvent> kept = new ArrayList<>(sorted.size());
+			for (NoteEvent note : sorted) {
+				NoteEvent last = kept.isEmpty() ? null : kept.getLast();
+				if (last == null || last.startTick() != note.startTick()
+						|| last.midiNote() != note.midiNote()) {
+					kept.add(note);
+				}
+			}
+			return kept.size() == sorted.size() ? sorted : List.copyOf(kept);
 		}
 
 		public Layer withNotes(List<NoteEvent> value) {
@@ -1031,9 +1063,28 @@ public record ComposerProject(
 			.toList();
 	}
 
+	/**
+	 * Adds one note, or hands back the same composition if that cell is already taken.
+	 *
+	 * <p>The constructor would drop the duplicate either way -- see {@link Layer#oneNotePerCell} --
+	 * but going through it would still spend an id and hand back a record that differs, which is an
+	 * undo step for an edit that changed nothing. Refusing here is what makes clicking an occupied
+	 * cell a no-op rather than something Ctrl+Z has to be pressed to get past.</p>
+	 */
 	public ComposerProject addNote(int layerIndex, int midiNote, long startTick, long durationTicks) {
 		int target = Math.max(0, Math.min(layers.size() - 1, layerIndex));
 		Layer layer = layers.get(target);
+		int clampedNote = Math.max(0, Math.min(127, midiNote));
+		long clampedTick = Math.max(0L, startTick);
+		for (NoteEvent existing : layer.notes()) {
+			if (existing.startTick() == clampedTick && existing.midiNote() == clampedNote) {
+				return this;
+			}
+			if (existing.startTick() > clampedTick) {
+				// Sorted by tick, so nothing further along can be in this cell.
+				break;
+			}
+		}
 		List<NoteEvent> notes = new ArrayList<>(layer.notes());
 		notes.add(new NoteEvent(nextNoteId, midiNote, startTick, durationTicks, 96));
 		List<Layer> updated = new ArrayList<>(layers);

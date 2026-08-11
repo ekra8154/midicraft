@@ -4052,7 +4052,7 @@ public final class ComposerScreen extends Screen {
 			return true;
 		}
 		if (doubleClick) {
-			placeNote(mouseMidi(event.y()), snapTick(mouseTick(event.x())));
+			placeNote(mouseMidi(event.y()), snapTickInto(mouseTick(event.x())));
 			return true;
 		}
 		// Not decided here. A press on empty roll is the start of a box select and also, if the hand
@@ -4399,7 +4399,7 @@ public final class ComposerScreen extends Screen {
 			// so a click there stays what it was.
 			if (!boxAdditive && !boxDroppedSelection && !noLayerSelected()
 					&& !travelled(event.x(), event.y())) {
-				placeNote(mouseMidi(dragStartY), snapTick(mouseTick(dragStartX)));
+				placeNote(mouseMidi(dragStartY), snapTickInto(mouseTick(dragStartX)));
 				return true;
 			}
 			selectNotesInBox();
@@ -5769,9 +5769,32 @@ public final class ComposerScreen extends Screen {
 		return snapSubdivision == 0 ? 1L : Math.max(1L, project().ppq() / snapSubdivision);
 	}
 
+	/** The nearest grid line to a tick, for the things that are pointing at a line. */
 	private long snapTick(long tick) {
-		long grid = gridTicks();
+		return nearestGridLine(tick, gridTicks());
+	}
+
+	static long nearestGridLine(long tick, long grid) {
 		return Math.max(0L, Math.round(tick / (double)grid) * grid);
+	}
+
+	static long gridCellStart(long tick, long grid) {
+		return Math.floorDiv(Math.max(0L, tick), grid) * grid;
+	}
+
+	/**
+	 * The start of the grid cell a tick falls inside, for the things that are pointing at a cell.
+	 *
+	 * <p>Drawing a note is one of those, and it used to take the nearest line instead -- so a click
+	 * on the right-hand half of a cell put the note in the cell after it, which reads as the editor
+	 * being imprecise rather than as a rule. The other axis has always worked this way: mouseMidi
+	 * floors, so a click anywhere in a row gives that row. This is the same sentence about time.</p>
+	 *
+	 * <p>The playhead and the end marker keep {@link #snapTick}. Those really are lines -- a marker
+	 * sits between two cells rather than in one -- and nearest is what pointing at a line means.</p>
+	 */
+	private long snapTickInto(long tick) {
+		return gridCellStart(tick, gridTicks());
 	}
 
 	private long snapDelta(long tickDelta) {

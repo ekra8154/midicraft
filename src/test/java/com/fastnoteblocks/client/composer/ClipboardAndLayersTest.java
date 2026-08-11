@@ -250,6 +250,65 @@ class ClipboardAndLayersTest {
 		assertEquals(song, song.duplicateLayer(7));
 	}
 
+	/**
+	 * A layer holds at most one note on a pitch at a tick, whichever road arrives at the cell.
+	 *
+	 * <p>Asserted through the operations rather than on the constructor alone, because the point of
+	 * putting the rule in the constructor is that no caller has to remember it -- and the way that
+	 * claim fails is a new operation building its layers some other way.</p>
+	 */
+	@Test
+	void aLayerNeverHoldsTwoNotesInOneCell() {
+		ComposerProject song = songOf(new Layer("One", "HARP", false, true, true,
+			List.of(note(60, 0L), note(60, 0L), note(60, 0L), note(64, 0L))));
+		assertEquals(2, song.layers().getFirst().notes().size(),
+			"three notes on one pitch at one tick are one note; the other pitch survives");
+
+		ComposerProject placed = song.addNote(0, 60, 0L, 120L);
+		assertEquals(song, placed, "placing into a taken cell changes nothing at all, not even an id");
+
+		ComposerProject free = song.addNote(0, 62, 0L, 120L);
+		assertEquals(3, free.layers().getFirst().notes().size(), "an empty cell still takes a note");
+
+		// Dragged on top of each other: one gesture, and the note that was there first survives.
+		ComposerProject spread = songOf(layer("One", "HARP", 60, 60));
+		assertEquals(List.of(0L, 240L), startTicks(spread.layers().getFirst()));
+		long later = spread.layers().getFirst().notes().get(1).id();
+		ComposerProject collided = spread.moveNotes(Set.of(later), -240L, 0);
+		assertEquals(1, collided.layers().getFirst().notes().size(),
+			"dragging one onto the other leaves one note");
+		assertTrue(collided.layers().getFirst().notes().getFirst().id() < later,
+			"and it is the one that was already there");
+
+		// Transposed onto each other: two pitches a tone apart, moved a tone.
+		ComposerProject chord = songOf(new Layer("Chord", "HARP", false, true, true,
+			List.of(note(60, 0L), note(62, 0L))));
+		long lower = chord.layers().getFirst().notes().getFirst().id();
+		assertEquals(1, chord.moveNotes(Set.of(lower), 0L, 2).layers().getFirst().notes().size(),
+			"transposing one onto the other leaves one note");
+
+		// Quantized onto each other: two neighbours inside one grid cell.
+		ComposerProject offGrid = songOf(new Layer("One", "HARP", false, true, true,
+			List.of(note(60, 0L), note(60, 30L))));
+		assertEquals(2, offGrid.layers().getFirst().notes().size(), "30 ticks apart they are two");
+		assertEquals(1, offGrid.withQuantized(480, Set.of()).layers().getFirst().notes().size(),
+			"quantized to a quarter they are one");
+	}
+
+	/** Merging two layers that play the same note at the same time gives one note, not two. */
+	@Test
+	void mergingCollapsesWhatWouldHaveBeenADoubledNote() {
+		ComposerProject song = songOf(
+			new Layer("One", "HARP", false, true, true, List.of(note(60, 0L), note(64, 240L))),
+			new Layer("Two", "HARP", false, true, true, List.of(note(60, 0L), note(67, 480L))));
+
+		ComposerProject merged = song.mergeLayers(Set.of(0, 1));
+
+		assertEquals(1, merged.layers().size());
+		assertEquals(3, merged.layers().getFirst().notes().size(),
+			"the shared note is one note; the two that differ are their own");
+	}
+
 	private static Set<String> instrumentsHolding(PasteResult pasted, Set<Long> ids) {
 		return pasted.project().layers().stream()
 			.filter(layer -> layer.notes().stream().anyMatch(note -> ids.contains(note.id())))
