@@ -813,7 +813,9 @@ public final class SongBuilder {
 			StackedSplit headed = layout.ultra() && overshoots && index > 0 && above >= 0
 				&& above < floors
 				? stackedSplitOf(event.notes(), room, splitCells, climb > 0,
-					!columnBehindBusy || delayColumns > 0)
+					!columnBehindBusy || delayColumns > 0
+						|| CUT_ASKS_THE_BLOCKS_BEHIND
+							&& backPairIsFree(placements, lane.ahead(delayColumns), event.time()))
 				: null;
 			// A cut is built straight from the module rather than through {@link #addChordModule},
 			// so none of that method's guards are applied to it -- and the one that matters is the
@@ -874,7 +876,9 @@ public final class SongBuilder {
 					|| stackedClashes(placements, lane.ahead(delayColumns + 1), event.time(),
 						headed.slots())
 					? null : stackedSplitOf(event.notes(), room - 1, splitCells, climb > 0,
-						!columnBehindBusy || delayColumns + 1 > 0);
+						!columnBehindBusy || delayColumns + 1 > 0
+							|| CUT_ASKS_THE_BLOCKS_BEHIND
+								&& backPairIsFree(placements, lane.ahead(delayColumns + 1), event.time()));
 				if (shifted == null) {
 					// Both cells wrong, or nothing left to cut once a column is spent. Then the head
 					// goes, which is what this did in every case before.
@@ -1071,6 +1075,23 @@ public final class SongBuilder {
 					cursor = addSplitEventModule(placements, trigger.cursor(), travel, depth,
 						trigger.triggerDelay(), chord.subList(0, near));
 					far = near < chord.size() ? chord.subList(near, chord.size()) : List.of();
+				}
+				// A cut chord is built here and not by {@link #addChordModule}, so none of it ever reached
+				// the CHORD line -- the one place the trace says what a chord was planned as, what it came
+				// out as, and why it gave the shape up. Every chord laid across a staircase was therefore
+				// invisible, which is a whole class of the build: the shape that carries ten cells on one
+				// floor and one on the next is exactly the shape a lane closes on. ekran pointed at one and
+				// it could not be found at all, through three separate readings of the trace.
+				if (TRACE) {
+					System.out.println("SPLIT t=" + event.time() + " at " + trigger.cursor().getX() + ","
+						+ trigger.cursor().getY() + "," + trigger.cursor().getZ() + " travel=" + travel
+						+ " notes=" + chord.size() + " near=" + near + " far=" + far.size()
+						+ " headed=" + (headed == null ? "no"
+							: headed.head().size() + "+" + headed.nearTail().size()
+								+ "/" + headed.farTail().size())
+						+ " planned=" + event.style()
+						+ " built=" + (headed == null ? "BUS" : "head" + headed.head().size())
+						+ " depth=" + depth);
 				}
 				// Measured from where the staircase actually lands, which for a split is past the near
 				// half of the chord rather than where the lane stood when it decided to split.
@@ -5310,9 +5331,15 @@ public final class SongBuilder {
 		// left the cut asking for the back flanks unconditionally. So a chord that could have been
 		// cut with a short head was laid as a plain bus instead, and illit-do-the-dance at twelve
 		// wide lost its lane five columns past the wall for exactly that.
-		StackedBusSplit split = roomBehind ? stackedBusSplit(chord, true) : null;
+		StackedBusSplit split = roomBehind ? stackedBusSplit(chord, 2) : null;
+		// One slot behind before none, here as in {@link #addChordModule}: the lane behind has a
+		// single live cell in the column that touches this one, so the most it can ever contest is
+		// one, and a head of six keeps two more notes out of the bus than a head of five.
+		if (split == null && CUT_KEEPS_ONE_BACK_FLANK) {
+			split = stackedBusSplit(chord, 1);
+		}
 		if (split == null && FRONT_ONLY_HEADS && FRONT_ONLY_CUTS) {
-			split = stackedBusSplit(chord, false);
+			split = stackedBusSplit(chord, 0);
 		}
 		if (split == null) {
 			return null;
@@ -5805,6 +5832,32 @@ public final class SongBuilder {
 	 * is one.</p>
 	 */
 	static boolean HEAD_KEEPS_ONE_BACK_FLANK = true;
+
+	/**
+	 * Whether a cut across a staircase asks the blocks behind rather than the coarse flag.
+	 *
+	 * <p>The same gap as {@link #PLAN_ASKS_THE_BLOCKS_BEHIND}, one path over. A cut asked
+	 * {@code columnBehindBusy}, which is the arithmetic answer and says busy far more often than the
+	 * ground does -- so a chord whose back pair was actually free was never offered a full head, and
+	 * the whole cut fell to a plain bus.</p>
+	 *
+	 * <p>ekran's, from the breach at 16 wide over six floors: a chord of twenty-two cut ten cells on
+	 * one floor and one on the next, {@code headed=no}, which they rebuilt by hand with a full head of
+	 * seven and no parity trouble at all.</p>
+	 */
+	static boolean CUT_ASKS_THE_BLOCKS_BEHIND = true;
+
+	/**
+	 * Whether a cut across a staircase may open with a head of six.
+	 *
+	 * <p><b>Off, and it is mine rather than ekran's.</b> The head of six is theirs and works in
+	 * {@link #addChordModule}; extending it to the cut was my step and it refuses every build in the
+	 * sweep -- forty-five of forty-five, collision at {@code 3 71 56}. A cut's near half is measured
+	 * by {@code closes} and {@code carriedCells} as well as built by the walk, and those still price a
+	 * head at seven or at five, so a near half of six is laid where nothing reserved room for it.
+	 * Three places make that sum and only one of them was taught the third size.</p>
+	 */
+	static boolean CUT_KEEPS_ONE_BACK_FLANK = false;
 
 	/** Whether a lone back flank hangs away from the lane the walk has not built yet. */
 	static boolean BACK_FLANK_AWAY_FROM_NEXT_LANE = true;

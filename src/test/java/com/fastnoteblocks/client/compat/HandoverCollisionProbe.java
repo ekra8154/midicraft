@@ -380,11 +380,13 @@ class HandoverCollisionProbe {
 	@Test
 	void findsTheWorstBreachAtSixteenBySix() throws Exception {
 		SongBuilder.TRACE = true;
+		SongBuilder.HEAD_KEEPS_ONE_BACK_FLANK = false;
 		try {
 			SongBuilder.createPastePlan(new BlockPos(0, 64, 0), guardian(),
 				SongBuilder.PasteMode.ULTRA_COMPACT_LANE, new SongBuilder.BuildLimits(4, 16, 6));
 		} finally {
 			SongBuilder.TRACE = false;
+			SongBuilder.HEAD_KEEPS_ONE_BACK_FLANK = true;
 		}
 	}
 
