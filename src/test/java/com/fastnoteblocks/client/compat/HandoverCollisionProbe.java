@@ -157,4 +157,113 @@ class HandoverCollisionProbe {
 		}
 		return List.copyOf(notes);
 	}
+
+	/** ekran's: pad the chord that fits forward until it cuts. Both flags, every way round. */
+	@Test
+	void pricesCuttingAChordThatFits() throws Exception {
+		List<SongBuilder.EventNote> notes = guardian();
+		for (boolean cuts : new boolean[] {false, true}) {
+			for (int pad : new int[] {2, 4}) {
+				SongBuilder.CUTS_A_CHORD_THAT_FITS = cuts;
+				SongBuilder.CUT_PAD_COLUMNS = pad;
+				int built = 0;
+				int refused = 0;
+				int clean = 0;
+				int breaches = 0;
+				int breachBlocks = 0;
+				int worst = 0;
+				long wrong = 0;
+				long blocks = 0;
+				try {
+					for (int floors = 2; floors <= 6; floors++) {
+						for (int width = 12; width <= 48; width += 4) {
+							try {
+								SongBuilder.PastePlan plan = SongBuilder.createPastePlan(
+									new BlockPos(0, 64, 0), notes,
+									SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+									new SongBuilder.BuildLimits(4, width, floors));
+								built++;
+								clean += plan.breaches().isEmpty() ? 1 : 0;
+								breaches += plan.breaches().size();
+								for (int breach : plan.breaches()) {
+									breachBlocks += breach;
+									worst = Math.max(worst, breach);
+								}
+								wrong += plan.wrongNotes();
+								blocks += plan.commands().size();
+							} catch (RuntimeException no) {
+								refused++;
+							}
+						}
+					}
+				} finally {
+					SongBuilder.CUTS_A_CHORD_THAT_FITS = false;
+					SongBuilder.CUT_PAD_COLUMNS = 2;
+				}
+				System.out.println("CUTFITS cuts=" + (cuts ? "on " : "off") + " cutPad=" + pad
+					+ " built=" + built + " refused=" + refused + " clean=" + clean
+					+ " breaches=" + breaches + " breachBlocks=" + breachBlocks
+					+ " worst=" + worst + " wrong=" + wrong + " blocks=" + blocks);
+			}
+		}
+	}
+
+	/** And the same on ekran's own 44 by 3, where the breach of ten is. */
+	@Test
+	void pricesItOnTheRealBuild() throws Exception {
+		List<SongBuilder.EventNote> notes = guardian();
+		for (boolean cuts : new boolean[] {false, true}) {
+			SongBuilder.CUTS_A_CHORD_THAT_FITS = cuts;
+			try {
+				SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0),
+					notes, SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+					new SongBuilder.BuildLimits(16, 44, 3));
+				System.out.println("CUTFITS44 cuts=" + (cuts ? "on " : "off")
+					+ " breaches=" + plan.breaches() + " wrong=" + plan.wrongNotes()
+					+ " blocks=" + plan.commands().size() + " spanZ=" + plan.spanZ());
+			} catch (RuntimeException no) {
+				System.out.println("CUTFITS44 cuts=" + (cuts ? "on " : "off") + " REFUSED: "
+					+ no.getMessage());
+			} finally {
+				SongBuilder.CUTS_A_CHORD_THAT_FITS = false;
+			}
+		}
+	}
+
+	/** What the cut actually does at the breach of ten, rather than what it ought to. */
+	@Test
+	void tracesTheCutAtTheBreachOfTen() throws Exception {
+		List<SongBuilder.EventNote> notes = guardian();
+		for (boolean cuts : new boolean[] {false, true}) {
+			SongBuilder.CUTS_A_CHORD_THAT_FITS = cuts;
+			System.out.println("ARM cuts=" + cuts);
+			SongBuilder.TRACE_TURNS = true;
+			try {
+				SongBuilder.createPastePlan(new BlockPos(0, 64, 0), notes,
+					SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+					new SongBuilder.BuildLimits(16, 44, 3));
+			} finally {
+				SongBuilder.TRACE_TURNS = false;
+				SongBuilder.CUTS_A_CHORD_THAT_FITS = false;
+			}
+		}
+	}
+
+	/** The breach of ten on ekran's own build, in the coordinates a paste at 0 64 0 lands on. */
+	@Test
+	void dumpsTheBreachOfTen() throws Exception {
+		SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0), guardian(),
+			SongBuilder.PasteMode.ULTRA_COMPACT_LANE, new SongBuilder.BuildLimits(16, 44, 3));
+		System.out.println("PLAN breaches=" + plan.breaches() + " spanX=" + plan.spanX()
+			+ " nearWall=" + plan.nearWall() + " farWall=" + plan.farWall());
+		for (String command : plan.commands()) {
+			String[] word = command.split(" ");
+			int x = Integer.parseInt(word[1]);
+			int y = Integer.parseInt(word[2]);
+			int z = Integer.parseInt(word[3]);
+			if (x >= 40 && y >= 68 && y <= 70 && z >= 225 && z <= 227) {
+				System.out.println("    " + x + " " + y + " " + z + "  " + word[4]);
+			}
+		}
+	}
 }

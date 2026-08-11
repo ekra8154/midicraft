@@ -1987,15 +1987,48 @@ public final class SongBuilder {
 				Map<Integer, Integer> cutting = new LinkedHashMap<>();
 				for (int column = 1; column <= CUT_PAD_COLUMNS; column++) {
 					if (!book(cutting, bare, from, last, 1)) {
+						// Nowhere left to charge the column to: every gap back to the start of the lane is
+						// already spent, so this chord cannot be moved at all.
+						if (TRACE) {
+							System.out.println("  CUTTRY last=" + last + " column=" + column
+								+ " refused=noRoomToBook pads=" + cutting);
+						}
 						break;
 					}
 					Sweep shorter = sweep(events, from, startX, stepX, wall, startTime, tip, busy, offBus,
 						layout, cutting, leaving, parity);
 					if (shorter.last() < last) {
+						// The pad pushed the lane far enough that it no longer reaches this chord.
+						if (TRACE) {
+							System.out.println("  CUTTRY last=" + last + " column=" + column
+								+ " refused=sweepStopsShort shorterLast=" + shorter.last() + " pads=" + cutting);
+						}
 						break;
 					}
-					if (closes(events, shorter, from, last, wall, stepX, turnCells, offBus, splitCells,
-							climbing)
+					boolean shut = closes(events, shorter, from, last, wall, stepX, turnCells, offBus,
+						splitCells, climbing);
+					// Which of the two refused, and what the cut was being asked about. A search that only
+					// says no leaves the reason to be inferred, and the reasons want opposite fixes: a chord
+					// that still fits wants more pad, one whose cut is out of wire wants none at all, and a
+					// lane stranded past it wants the chord before this one to move instead.
+					if (TRACE) {
+						int end = shorter.ends().get(last - from);
+						List<EventNote> next = events.get(last + 1).notes();
+						int nextCells = (next.size() + 1) / 2;
+						int roomAfter = (wall - end) * stepX;
+						boolean roomBehind = last < from || !shorter.busy().get(last - from);
+						System.out.println("  CUTTRY last=" + last + " column=" + column
+							+ " end=" + end + " room=" + roomAfter + " nextNotes=" + next.size()
+							+ " nextCells=" + nextCells + " fits=" + (roomAfter - 1 >= nextCells)
+							+ " headed=" + (stackedSplitOf(next, roomAfter, splitCells, climbing, roomBehind)
+								!= null)
+							+ " plainWire=" + (nextCells + splitCells) + "/" + DUST_RANGE
+							+ " closes=" + shut + " strands=" + strandsNext(events, from, last, wall, otherWall,
+								stepX, turnCells, offBus, stepOff, climbing, layout,
+								carriedCells(events, shorter, from, last, wall, stepX, splitCells, climbing))
+							+ " pads=" + cutting);
+					}
+					if (shut
 						&& !strandsNext(events, from, last, wall, otherWall, stepX, turnCells, offBus,
 							stepOff, climbing, layout, carriedCells(events, shorter, from, last, wall, stepX,
 								splitCells, climbing))) {
