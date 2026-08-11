@@ -472,4 +472,22 @@ class HandoverCollisionProbe {
 				+ " worst=" + worst + " wrong=" + wrong + " blocks=" + blocks);
 		}
 	}
+
+	/** The next worst breach at sixteen by six: its blocks, and the run that leads into it. */
+	@Test
+	void dumpsTheNextBreach() throws Exception {
+		SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0), guardian(),
+			SongBuilder.PasteMode.ULTRA_COMPACT_LANE, new SongBuilder.BuildLimits(4, 16, 6));
+		System.out.println("WALLS near=" + plan.nearWall() + " far=" + plan.farWall()
+			+ " breaches=" + plan.breaches());
+		for (String command : plan.commands()) {
+			String[] word = command.split(" ");
+			int x = Integer.parseInt(word[1]);
+			int y = Integer.parseInt(word[2]);
+			int z = Integer.parseInt(word[3]);
+			if (y >= 80 && y <= 82 && z >= 122 && z <= 125) {
+				System.out.println("    " + x + " " + y + " " + z + "  " + word[4]);
+			}
+		}
+	}
 }
