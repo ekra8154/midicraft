@@ -492,4 +492,46 @@ class HandoverCollisionProbe {
 			}
 		}
 	}
+
+	/** Does looking for the free side ever fire, and does it change anything? */
+	@Test
+	void countsTheSideSwaps() throws Exception {
+		List<SongBuilder.EventNote> notes = guardian();
+		for (boolean look : new boolean[] {false, true}) {
+			SongBuilder.HEAD_LOOKS_FOR_ITS_FREE_SIDE = look;
+			SongBuilder.HEAD_SIDES_SWAPPED = 0;
+			int built = 0;
+			int clean = 0;
+			int breaches = 0;
+			int breachBlocks = 0;
+			int worst = 0;
+			long wrong = 0;
+			try {
+				for (int floors = 2; floors <= 6; floors++) {
+					for (int width = 16; width <= 48; width += 4) {
+						try {
+							SongBuilder.PastePlan plan = SongBuilder.createPastePlan(
+								new BlockPos(0, 64, 0), notes, SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+								new SongBuilder.BuildLimits(4, width, floors));
+							built++;
+							clean += plan.breaches().isEmpty() ? 1 : 0;
+							breaches += plan.breaches().size();
+							for (int breach : plan.breaches()) {
+								breachBlocks += breach;
+								worst = Math.max(worst, breach);
+							}
+							wrong += plan.wrongNotes();
+						} catch (RuntimeException no) {
+							// counted by built
+						}
+					}
+				}
+			} finally {
+				SongBuilder.HEAD_LOOKS_FOR_ITS_FREE_SIDE = true;
+			}
+			System.out.println("SIDES look=" + look + " swapped=" + SongBuilder.HEAD_SIDES_SWAPPED
+				+ " built=" + built + " clean=" + clean + " breaches=" + breaches
+				+ " breachBlocks=" + breachBlocks + " worst=" + worst + " wrong=" + wrong);
+		}
+	}
 }

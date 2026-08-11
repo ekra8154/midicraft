@@ -4793,7 +4793,9 @@ public final class SongBuilder {
 				+ " head" + split.head().size() + "/tail" + split.tail().size()
 				+ (split.slots().backFlanks() == 0 ? " frontOnly" : " reachesBack"));
 			Body body = addStackedBusModule(placements, start, triggerDelay, event.time(),
-				split.slots(), split.tail());
+				onTheFreeBackSide(placements, start.pos(), start.noteSide(), event.time(),
+					split.slots()),
+				split.tail());
 			return new Placed(body.lane(), style, body.busCells(), nudge);
 		}
 		// The delay no longer walks off the corner for us -- the two-swap turn wants it -- so the one
@@ -4810,8 +4812,10 @@ public final class SongBuilder {
 		// The rigid shape has no bus to hand a note to, so until the centre became a target it had
 		// no third option at all: it shifted or it fell to a bus.
 		return new Placed(addStackedEventModule(placements, start, triggerDelay, event.time(),
-			moved != null ? moved.slots()
-				: ultraSlots(event.notes(), style == ChordStyle.STACKED_FULL)), style, 0, nudge);
+			onTheFreeBackSide(placements, start.pos(), start.noteSide(), event.time(),
+				moved != null ? moved.slots()
+					: ultraSlots(event.notes(), style == ChordStyle.STACKED_FULL))),
+			style, 0, nudge);
 	}
 
 	/**
