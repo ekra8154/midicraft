@@ -1837,8 +1837,11 @@ public final class SongBuilder {
 			// of five with a tail of two, which is four. A chord of six is four either way, so this
 			// never loses; and where the chord cannot make a head of five at all, addStackedShape
 			// still drops it to a bus and counts it.
-			style = FRONT_HEAD_WHEN_BEHIND_BUSY || (FRONT_ONLY_HEADS && style.busHeaded())
-				? ChordStyle.STACKED_BUS_FRONT : ChordStyle.BUS;
+			style = HEAD_KEEPS_ONE_BACK_FLANK && style.busHeaded()
+					&& stackedBusSplit(event.notes(), 1) != null
+				? ChordStyle.STACKED_BUS_HALF
+				: FRONT_HEAD_WHEN_BEHIND_BUSY || (FRONT_ONLY_HEADS && style.busHeaded())
+					? ChordStyle.STACKED_BUS_FRONT : ChordStyle.BUS;
 		}
 		// And a chord being built in a turn, or stepping off the far side of one, is a bus whatever
 		// shape it was sorted into: a stacked module may not sit perpendicular to another, and the two
@@ -3160,7 +3163,17 @@ public final class SongBuilder {
 	 * three sums disagree by a column is a lane that comes to rest outside its wall.</p>
 	 */
 	private static StackedBusSplit splitFor(ChordStyle style, List<EventNote> chord) {
-		return style.busHeaded() ? stackedBusSplit(chord, style == ChordStyle.STACKED_BUS) : null;
+		return style.busHeaded() ? stackedBusSplit(chord, backFlanksOf(style)) : null;
+	}
+
+	/**
+	 * How many of the two slots behind a headed shape keeps: two, one, or none.
+	 *
+	 * <p>The one place that says it. Head size decides the tail, the tail decides the length, and
+	 * three separate places make that sum -- so they read the style and the style is read here.</p>
+	 */
+	private static int backFlanksOf(ChordStyle style) {
+		return style == ChordStyle.STACKED_BUS ? 2 : style == ChordStyle.STACKED_BUS_HALF ? 1 : 0;
 	}
 
 	/**
@@ -4435,8 +4448,11 @@ public final class SongBuilder {
 			// of five with a tail of two, which is four. A chord of six is four either way, so this
 			// never loses; and where the chord cannot make a head of five at all, addStackedShape
 			// still drops it to a bus and counts it.
-			style = FRONT_HEAD_WHEN_BEHIND_BUSY || (FRONT_ONLY_HEADS && style.busHeaded())
-				? ChordStyle.STACKED_BUS_FRONT : ChordStyle.BUS;
+			style = HEAD_KEEPS_ONE_BACK_FLANK && style.busHeaded()
+					&& stackedBusSplit(event.notes(), 1) != null
+				? ChordStyle.STACKED_BUS_HALF
+				: FRONT_HEAD_WHEN_BEHIND_BUSY || (FRONT_ONLY_HEADS && style.busHeaded())
+					? ChordStyle.STACKED_BUS_FRONT : ChordStyle.BUS;
 		}
 		// A stacked module may not sit perpendicular to another one, and the two modules either side
 		// of a corner are perpendicular by construction. So anywhere in a turn the stacked shape is
@@ -5356,7 +5372,11 @@ public final class SongBuilder {
 	 * the centre, and the centre is the seventh note.</p>
 	 */
 	private static StackedBusSplit stackedBusSplit(List<EventNote> chord, boolean reachingBack) {
-		int hangers = reachingBack ? 6 : 4;
+		return stackedBusSplit(chord, reachingBack ? 2 : 0);
+	}
+
+	private static StackedBusSplit stackedBusSplit(List<EventNote> chord, int backFlanks) {
+		int hangers = 4 + backFlanks;
 		int largest = Math.min(STACKED_HEAD_NOTES, hangers + 1);
 		// Harps and sideways conductors first, because those are the slots that can go unfilled.
 		List<EventNote> preferred = new ArrayList<>(chord);
@@ -5368,11 +5388,11 @@ public final class SongBuilder {
 		// reach back has no reason to give up the front.
 		int smallest = VARIABLE_HEAD_NOTES ? MIN_STACKED_HEAD_NOTES : largest;
 		for (int headSize = largest; headSize >= smallest; headSize--) {
-			StackedBusSplit straight = splitAt(chord, headSize, reachingBack);
+			StackedBusSplit straight = splitAt(chord, headSize, backFlanks);
 			if (straight != null) {
 				return straight;
 			}
-			StackedBusSplit sorted = splitAt(preferred, headSize, reachingBack);
+			StackedBusSplit sorted = splitAt(preferred, headSize, backFlanks);
 			if (sorted != null) {
 				return sorted;
 			}
@@ -5394,8 +5414,7 @@ public final class SongBuilder {
 	 */
 	private static final int MIN_STACKED_HEAD_NOTES = 5;
 
-	private static StackedBusSplit splitAt(List<EventNote> chord, int headSize,
-			boolean reachingBack) {
+	private static StackedBusSplit splitAt(List<EventNote> chord, int headSize, int backFlanks) {
 		List<EventNote> head = new ArrayList<>();
 		List<EventNote> tail = new ArrayList<>();
 		int falling = 0;
@@ -5410,7 +5429,7 @@ public final class SongBuilder {
 				tail.add(note);
 			}
 		}
-		UltraSlots slots = ultraSlots(head, reachingBack);
+		UltraSlots slots = ultraSlots(head, backFlanks);
 		return slots == null || tail.isEmpty() ? null : new StackedBusSplit(slots, head, tail);
 	}
 
@@ -5759,6 +5778,17 @@ public final class SongBuilder {
 	 */
 	static boolean PLAN_ASKS_THE_BLOCKS_BEHIND = true;
 
+	/**
+	 * Whether a head may keep the one slot behind it that nothing else wants.
+	 *
+	 * <p>ekran's, rebuilt by hand at the breach on Guardian at 16 wide over six floors. The pair of
+	 * slots behind a head was one thing, available or not, so a module whose neighbour reached into
+	 * one of them gave up both. The lane behind has exactly one live cell in the column that touches
+	 * this one -- {@link UltraSlots#slot} says so in as many words -- so the most it can ever contest
+	 * is one.</p>
+	 */
+	static boolean HEAD_KEEPS_ONE_BACK_FLANK = true;
+
 	/** Whether a lone back flank hangs away from the lane the walk has not built yet. */
 	static boolean BACK_FLANK_AWAY_FROM_NEXT_LANE = true;
 
@@ -5851,7 +5881,11 @@ public final class SongBuilder {
 	 * both harps become relays, and the centre goes unused.</p>
 	 */
 	private static UltraSlots ultraSlots(List<EventNote> chord, boolean reachingBack) {
-		int hangers = reachingBack ? 6 : 4;
+		return ultraSlots(chord, reachingBack ? 2 : 0);
+	}
+
+	private static UltraSlots ultraSlots(List<EventNote> chord, int backFlanks) {
+		int hangers = 4 + backFlanks;
 		// No floor on the size. A chord of three or fewer is built as the small shape because that is
 		// cheaper, not because the stacked one could not hold it -- fewer notes than hangers simply
 		// leaves a hanger empty. {@link #chooseStyle} still answers SMALL for those before it ever
@@ -6227,7 +6261,22 @@ public final class SongBuilder {
 		 * make that sum the same way. A style they all already read is the one thing they cannot
 		 * disagree about.</p>
 		 */
-		STACKED_BUS_FRONT;
+		STACKED_BUS_FRONT,
+		/**
+		 * The same shape with a head of six, for when only one of the two slots behind is spoken for.
+		 *
+		 * <p>The pair behind was one thing that was either available or not, so a module whose
+		 * neighbour reached into one of its back slots gave up both -- a head of five, two notes pushed
+		 * onto the bus, a cell longer than it had to be. The lane behind has exactly one live cell in
+		 * the column that touches this one, so the most it can ever contest is one slot.</p>
+		 *
+		 * <p>ekran built it by hand at the breach on Guardian at 16 wide over six floors: a chord of
+		 * twenty-three laid as a plain bus, rebuilt with one note in the centre and one in the free
+		 * back flank, exactly one cell shorter. That cell is the whole difference between a bus of
+		 * twelve cells, which wants sixteen blocks of wire to cut across a staircase, and eleven, which
+		 * wants fifteen and has them.</p>
+		 */
+		STACKED_BUS_HALF;
 
 		boolean stacked() {
 			return this == STACKED_FRONT || this == STACKED_FULL || busHeaded();
@@ -6240,12 +6289,12 @@ public final class SongBuilder {
 
 		/** Whether the shape needs the pair of low slots behind it free. */
 		boolean reachesBack() {
-			return this == STACKED_FULL || this == STACKED_BUS;
+			return this == STACKED_FULL || this == STACKED_BUS || this == STACKED_BUS_HALF;
 		}
 
 		/** Whether the shape is a head with a bus behind it, reaching back or not. */
 		boolean busHeaded() {
-			return this == STACKED_BUS || this == STACKED_BUS_FRONT;
+			return this == STACKED_BUS || this == STACKED_BUS_FRONT || this == STACKED_BUS_HALF;
 		}
 	}
 

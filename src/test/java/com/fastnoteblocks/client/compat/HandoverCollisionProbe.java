@@ -356,4 +356,120 @@ class HandoverCollisionProbe {
 			}
 		}
 	}
+
+	/** Are twelve and sixteen wide the same build, or only the same numbers? */
+	@Test
+	void comparesTwelveAndSixteenWide() throws Exception {
+		List<SongBuilder.EventNote> notes = guardian();
+		SongBuilder.PastePlan twelve = SongBuilder.createPastePlan(new BlockPos(0, 64, 0), notes,
+			SongBuilder.PasteMode.ULTRA_COMPACT_LANE, new SongBuilder.BuildLimits(4, 12, 6));
+		SongBuilder.PastePlan sixteen = SongBuilder.createPastePlan(new BlockPos(0, 64, 0), notes,
+			SongBuilder.PasteMode.ULTRA_COMPACT_LANE, new SongBuilder.BuildLimits(4, 16, 6));
+		System.out.println("WIDTH 12: cmds=" + twelve.commands().size() + " spanX=" + twelve.spanX()
+			+ " spanZ=" + twelve.spanZ() + " width=" + twelve.width()
+			+ " nearWall=" + twelve.nearWall() + " farWall=" + twelve.farWall()
+			+ " breaches=" + twelve.breaches());
+		System.out.println("WIDTH 16: cmds=" + sixteen.commands().size() + " spanX=" + sixteen.spanX()
+			+ " spanZ=" + sixteen.spanZ() + " width=" + sixteen.width()
+			+ " nearWall=" + sixteen.nearWall() + " farWall=" + sixteen.farWall()
+			+ " breaches=" + sixteen.breaches());
+		System.out.println("WIDTH identical=" + twelve.commands().equals(sixteen.commands()));
+	}
+
+	/** The worst breach at sixteen wide over six floors, in paste coordinates. */
+	@Test
+	void findsTheWorstBreachAtSixteenBySix() throws Exception {
+		SongBuilder.TRACE = true;
+		try {
+			SongBuilder.createPastePlan(new BlockPos(0, 64, 0), guardian(),
+				SongBuilder.PasteMode.ULTRA_COMPACT_LANE, new SongBuilder.BuildLimits(4, 16, 6));
+		} finally {
+			SongBuilder.TRACE = false;
+		}
+	}
+
+	/** Every block outside the walls at sixteen wide over six floors, worst runs first. */
+	@Test
+	void findsTheOutsideBlocks() throws Exception {
+		SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0), guardian(),
+			SongBuilder.PasteMode.ULTRA_COMPACT_LANE, new SongBuilder.BuildLimits(4, 16, 6));
+		System.out.println("WALLS near=" + plan.nearWall() + " far=" + plan.farWall()
+			+ " breaches=" + plan.breaches());
+		Map<String, int[]> worst = new LinkedHashMap<>();
+		for (String command : plan.commands()) {
+			String[] word = command.split(" ");
+			int x = Integer.parseInt(word[1]);
+			int y = Integer.parseInt(word[2]);
+			int z = Integer.parseInt(word[3]);
+			int out = x < plan.nearWall() ? plan.nearWall() - x
+				: x > plan.farWall() ? x - plan.farWall() : 0;
+			if (out == 0) {
+				continue;
+			}
+			String key = y + " " + z;
+			int[] seen = worst.get(key);
+			if (seen == null || out > seen[0]) {
+				worst.put(key, new int[] {out, x, y, z});
+			}
+		}
+		worst.values().stream()
+			.sorted((a, b) -> Integer.compare(b[0], a[0]))
+			.limit(8)
+			.forEach(run -> System.out.println("    out=" + run[0] + "  at " + run[1] + " " + run[2]
+				+ " " + run[3]));
+	}
+
+	/** ekran's head of six: 16 by 6 where they built it, then every Guardian size. */
+	@Test
+	void pricesTheHalfHead() throws Exception {
+		List<SongBuilder.EventNote> notes = guardian();
+		for (boolean half : new boolean[] {false, true}) {
+			SongBuilder.HEAD_KEEPS_ONE_BACK_FLANK = half;
+			try {
+				SongBuilder.PastePlan one = SongBuilder.createPastePlan(new BlockPos(0, 64, 0), notes,
+					SongBuilder.PasteMode.ULTRA_COMPACT_LANE, new SongBuilder.BuildLimits(4, 16, 6));
+				System.out.println("HALF16x6 half=" + half + " breaches=" + one.breaches().size()
+					+ " blocks=" + one.breaches().stream().mapToInt(Integer::intValue).sum()
+					+ " worst=" + one.breaches().stream().mapToInt(Integer::intValue).max().orElse(0)
+					+ " wrong=" + one.wrongNotes() + " cmds=" + one.commands().size());
+			} catch (RuntimeException no) {
+				System.out.println("HALF16x6 half=" + half + " REFUSED: " + no.getMessage());
+			}
+			int built = 0;
+			int refused = 0;
+			int clean = 0;
+			int breaches = 0;
+			int breachBlocks = 0;
+			int worst = 0;
+			long wrong = 0;
+			long blocks = 0;
+			try {
+				for (int floors = 2; floors <= 6; floors++) {
+					for (int width = 16; width <= 48; width += 4) {
+						try {
+							SongBuilder.PastePlan plan = SongBuilder.createPastePlan(
+								new BlockPos(0, 64, 0), notes, SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+								new SongBuilder.BuildLimits(4, width, floors));
+							built++;
+							clean += plan.breaches().isEmpty() ? 1 : 0;
+							breaches += plan.breaches().size();
+							for (int breach : plan.breaches()) {
+								breachBlocks += breach;
+								worst = Math.max(worst, breach);
+							}
+							wrong += plan.wrongNotes();
+							blocks += plan.commands().size();
+						} catch (RuntimeException no) {
+							refused++;
+						}
+					}
+				}
+			} finally {
+				SongBuilder.HEAD_KEEPS_ONE_BACK_FLANK = true;
+			}
+			System.out.println("HALFSWEEP half=" + half + " built=" + built + " refused=" + refused
+				+ " clean=" + clean + " breaches=" + breaches + " breachBlocks=" + breachBlocks
+				+ " worst=" + worst + " wrong=" + wrong + " blocks=" + blocks);
+		}
+	}
 }
