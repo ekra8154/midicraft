@@ -599,6 +599,66 @@ class GuardianBreachReproProbe {
 		}
 	}
 
+	/**
+	 * What the walk did differently, key by key, with the raised ascent off and on.
+	 *
+	 * <p>The geometry is proven free and the two halves are proven to agree, so whatever costs 162
+	 * breaches is a decision the walk makes differently -- and every decision it makes is booked
+	 * under some {@code padding} key. Diffing the census names it without a theory.</p>
+	 */
+	@Test
+	void diffsTheCensusAcrossTheRaisedAscent() throws Exception {
+		List<SongBuilder.EventNote> notes = guardian();
+		Map<String, Integer>[] arms = new Map[2];
+		int[] turns = new int[2];
+		int[] breaches = new int[2];
+		for (int arm = 0; arm < 2; arm++) {
+			SongBuilder.PADS_AT_BUS_HEIGHT_INTO_A_CLIMB = arm == 1;
+			try {
+				Map<String, Integer> total = new java.util.TreeMap<>();
+				for (int floors = 2; floors <= 6; floors++) {
+					for (int width = 12; width <= 48; width += 4) {
+						SongBuilder.PastePlan plan = SongBuilder.createPastePlan(
+							new BlockPos(0, 64, 0), notes,
+							SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+							new SongBuilder.BuildLimits(4, width, floors));
+						plan.padding().forEach((key, count) -> total.merge(key, count, Integer::sum));
+						turns[arm] += plan.turns().size();
+						breaches[arm] += plan.breaches().size();
+					}
+				}
+				arms[arm] = total;
+			} finally {
+				SongBuilder.PADS_AT_BUS_HEIGHT_INTO_A_CLIMB = true;
+			}
+		}
+		System.out.println("CENSUS turns " + turns[0] + " -> " + turns[1]
+			+ "   breaches " + breaches[0] + " -> " + breaches[1]);
+		java.util.TreeSet<String> keys = new java.util.TreeSet<>(arms[0].keySet());
+		keys.addAll(arms[1].keySet());
+		List<String> moved = new ArrayList<>();
+		for (String key : keys) {
+			int off = arms[0].getOrDefault(key, 0);
+			int on = arms[1].getOrDefault(key, 0);
+			if (off != on) {
+				moved.add(String.format("%+7d  %-42s %d -> %d", on - off, key, off, on));
+			}
+		}
+		moved.sort((a, b) -> Integer.compare(
+			Math.abs(Integer.parseInt(b.substring(0, 7).trim())),
+			Math.abs(Integer.parseInt(a.substring(0, 7).trim()))));
+		moved.stream().limit(10).forEach(line -> System.out.println("CENSUS " + line));
+		// The keys that say where the staircase actually stood, whether they moved or not: a climb
+		// set back from its wall is the one thing that puts the next lane somewhere nobody predicted.
+		for (String key : keys) {
+			if (key.startsWith("padPinned") || key.startsWith("recessed")
+					|| key.startsWith("planStart") && key.endsWith("Climb")) {
+				System.out.println("WHERE " + String.format("%-40s %6d -> %6d", key,
+					arms[0].getOrDefault(key, 0), arms[1].getOrDefault(key, 0)));
+			}
+		}
+	}
+
 	/** The same build, walked, so the chord that went out and the one behind it can be read. */
 	@Test
 	void tracesTheWorstBreach() throws Exception {
