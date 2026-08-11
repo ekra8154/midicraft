@@ -1,10 +1,11 @@
-# Handoff — the handover column, heads that look, and one collision nobody has explained
+# Handoff — the handover column, and heads that look instead of guessing
 
-State at `76a3d87`. Everything below was measured on ekran's own library, not derived.
+State at `d0ebf59`. Everything below was measured on ekran's own library, not derived.
 
-**Start with open item 1.** It is the only thing in this file that stops a build from pasting, it
-has a one-flag repro, and five explanations for it have already been spent. Four of them were mine
-and all four were wrong; they are listed so the sixth is not the same as the fifth.
+**Read the collision marks before reasoning about the code.** That is the lesson of the session and
+it is not a style note. The last fault of the night got six explanations out of me, every one from
+reading source, every one wrong. ekran pasted the broken build, looked at one sea lantern, and named
+it in a sentence. `MARK_COLLISIONS` had been printing the answer for hours.
 
 ## The two rules this file keeps breaking
 
@@ -46,6 +47,7 @@ That is the design ekran chose over making the walk stop looking.
 | `ecb6131` | Resolve a head's free flank by looking — at every site that builds one. |
 | `f3ef7e7` | One rule for how many flanks a head keeps, and it does not mention cutting. |
 | `76a3d87` | Ask all four low slots, not the back pair and a guess for the front. |
+| `d0ebf59` | A head keeps one flank behind only where only one is spoken for. |
 
 Guardian at 44 wide over three floors, ekran's own build: **`[1, 10]` → clean.**
 
@@ -57,47 +59,28 @@ clean           4 ->  10      worst          24 ->  12
 wrong notes     0 either way  builds        45 of 45, none refused
 ```
 
+A cut may now open with a head of seven, six or five, chosen by a rule both halves of the builder
+agree on. That was the last thing outstanding and it is closed.
+
 Suite: **11 failing → 7**, a strict subset. Nothing was broken; four were fixed.
 
 ## Open, in priority order
 
-**1. The cut collision. Nobody has explained it, and five tries are gone.**
+**1. `HeldOutWidthTest.noRealSongBreachesAtAWidthNobodyTunedOn` is red, and has been all week.**
+It is the held-out check on whether hammering Guardian generalises, and it is currently answering
+no. Worth more than another Guardian config: every number in this file is Guardian, and this is the
+one test that is not.
 
-Clear `CUT_ONE_FLANK_COLLIDES` and every one of the 45 Guardian configurations refuses to build:
-96 collisions, 35 wrong notes, first at `3 71 56`. That flag is named as the defect it is rather than
-as an option — the rule it suppresses (`HEAD_KEEPS_ONE_BACK_FLANK`) says nothing about cutting,
-because how many slots behind a head can use is a question about the ground beside it.
-
-Repro: `HandoverCollisionProbe.marksTheCutCollision`. One flag.
-
-**Ruled out, with the reason, so the day is not spent again:**
-
-- *`closes` and `carriedCells` restate head size.* They do not; both call the same `stackedSplitOf`.
-- *The planner cannot see those cells.* It models them — `sweep.busy()` is exactly that model.
-- *The head takes the occupied side.* Looking changed nothing: same numbers to the block.
-- *`depth` was the wrong direction at the cut's build site.* It is `laneStep`, which is what the
-  note side is derived from, so the check was reading the right cells all along.
-- *Slot choice generally.* Asking all four low slots instead of two found the identical 1,682 cases
-  and left the collision untouched.
-
-**Read it off `MARK_COLLISIONS` rather than reasoning about it.** That named every other fault this
-week in one run, and each of the five above came from reading code instead. The marks say which
-shape laid each block: `cutHead6/near4/far2 reachesBack` against `chord:STACKED_FRONT`.
-
-**2. `HeldOutWidthTest.noRealSongBreachesAtAWidthNobodyTunedOn` is still red.** It has been red all
-week. It is the held-out check on whether hammering Guardian generalises, and it is currently
-answering no. Worth more than another Guardian config.
-
-**3. Twelve wide and sixteen wide are the same build.** Byte-identical command lists, same 22
+**2. Twelve wide and sixteen wide are the same build.** Byte-identical command lists, same 22
 breaches, `nearWall=11 farWall=26` either way — a 16-column corridor for both. Something floors the
 width at 16, so every sweep this week has been 45 configurations reported as 50, with nothing at all
 testing the narrow end.
 
-**4. `worst 16` came from the replan trigger and went away again.** `REPLAN_WHEN_BLOCKS_DISAGREE`
+**3. `worst 16` came from the replan trigger and went away again.** `REPLAN_WHEN_BLOCKS_DISAGREE`
 took worst from 12 to 16; looking at the free slots took it back to 12. Neither is understood, and
 the pair of them cancelling is luck rather than design.
 
-**5. The front slot case is correct and unexercised.** `onTheFreeSlots` handles a contested *front*
+**4. The front slot case is correct and unexercised.** `onTheFreeSlots` handles a contested *front*
 slot because the geometry allows one. Guardian never produces it — 1,682 swaps, every one a back
 slot. Do not spend a day on the front case without first finding a song that reaches it.
 
@@ -116,6 +99,12 @@ slot. Do not spend a day on the front case without first finding a song that rea
   the button that starts the machine, so a note re-powered 8 ticks later was called doubled. ekran
   played it: it sounds once. It is 10 now. This matters because `wrongNotes()` outranks every other
   number by `betterThan`, so a phantom here can veto real work — and did, for most of a day.
+- **The invariant in `UltraSlots.slot` has an exception.** It says the lane alongside contests at
+  most one of the four low slots, so a head may always give up one and keep the other. That is false
+  when what stands behind is another stacked module's centre: then both slots behind are gone, and a
+  head that keeps one has a note in somebody else's cell. `stackedSplitOf` takes `stackedBehind` for
+  exactly this, read from `columnBehindBusy` in the walk and `sweep.busy()` in the planner so neither
+  has to guess. ekran's words: *the first rule of stacked chords.*
 - **A cut is built by its own path, not by `addChordModule`.** It gets none of that method's guards
   and, until `bc61494`, none of its trace either. If a chord cannot be found in the trace, look for a
   `SPLIT` line before concluding anything about it.
