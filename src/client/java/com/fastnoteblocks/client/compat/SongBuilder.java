@@ -1238,8 +1238,10 @@ public final class SongBuilder {
 					// handover in a build that spends wire without a repeater at either end of it.
 					// Charged at what it actually spends: a climb taken straight off a bus skips two
 					// rungs, and counting them anyway left every lane after one two blocks poorer.
-					tipSignal = pad.signal() - pinned - (climb > 0 && (raisedPad
-						|| lastStyle.buses() && pad.cells().isEmpty()) ? offBus : turnCells);
+					// Through the same one place canTurn asked, so the wire this lane books itself and
+					// the wire it demanded before turning cannot be two different sums.
+					tipSignal = pad.signal() - pinned - turnPrice(pad, climb > 0,
+						above >= 0 && above < floors, lastStyle.buses(), turnCells, offBus);
 					lane = Lane.straight(landed, travel.getOpposite(), depth);
 					gradeLaneStart(placements, wall, travel.getStepX(), 0, climb > 0, stepOffAhead,
 						lane.pos().getX(), climb > 0 ? "Climb" : "Descent");
@@ -5529,11 +5531,23 @@ public final class SongBuilder {
 		return planPad(columns, signal, turnCells, spareDelay);
 	}
 
+	/**
+	 * Whether the walk charges itself the three cells a raised pad actually spends.
+	 *
+	 * <p>Split from building them so there is an arm where the raise changes nothing anybody decides
+	 * on. Off, the walk lays raised pads and then books the dear price for them: {@code canTurn}
+	 * still wants five in hand and {@code tipSignal} still hands the next lane five fewer, so every
+	 * lane turns exactly where it turned before and the only difference in the whole build is two
+	 * blocks of wire the lane really has and does not know about. That arm cannot make a build worse
+	 * by any argument, so if it does, the fault is in this code and not in the trade.</p>
+	 */
+	static boolean PRICES_THE_RAISED_PAD = true;
+
 	/** What the turn after this pad costs the wire arriving at it, raise included. */
 	private static int turnPrice(Pad pad, boolean climbing, boolean staircase, boolean fromBus,
 			int turnCells, int offBus) {
 		return climbing && staircase
-			&& (padRaises(pad, climbing, staircase, fromBus)
+			&& (PRICES_THE_RAISED_PAD && padRaises(pad, climbing, staircase, fromBus)
 				|| fromBus && pad.cells().isEmpty())
 			? offBus : turnCells;
 	}

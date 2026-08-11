@@ -512,6 +512,93 @@ class GuardianBreachReproProbe {
 		}
 	}
 
+	/**
+	 * The raised pad against no raised pad, over Guardian and over the library, three arms.
+	 *
+	 * <p>Measured after the machine was made to conduct, so unlike everything quoted before
+	 * {@code ae8c942} these are numbers about layout rather than about a dead staircase.</p>
+	 */
+	@Test
+	void pricesTheRaisedPadThreeWays() throws Exception {
+		List<java.nio.file.Path> files;
+		try (java.util.stream.Stream<java.nio.file.Path> listing = java.nio.file.Files.list(
+				java.nio.file.Path.of("run", "config", "fast-noteblocks", "songs"))) {
+			files = listing.filter(path -> path.toString().endsWith(".json")).sorted().toList();
+		}
+		String[] names = {"off                    ", "build only             ",
+			"build + price          ", "build + price + plan   "};
+		boolean[][] arms = {{false, false, false}, {true, false, false}, {true, true, false},
+			{true, true, true}};
+		for (int arm = 0; arm < arms.length; arm++) {
+			SongBuilder.PADS_AT_BUS_HEIGHT_INTO_A_CLIMB = arms[arm][0];
+			SongBuilder.PRICES_THE_RAISED_PAD = arms[arm][1];
+			SongBuilder.PLANS_THE_RAISED_PAD = arms[arm][2];
+			try {
+				int gBreaches = 0;
+				int gBlocks = 0;
+				int gWorst = 0;
+				List<SongBuilder.EventNote> guardian = guardian();
+				for (int floors = 2; floors <= 6; floors++) {
+					for (int width = 12; width <= 48; width += 4) {
+						SongBuilder.PastePlan plan = SongBuilder.createPastePlan(
+							new BlockPos(0, 64, 0), guardian,
+							SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+							new SongBuilder.BuildLimits(4, width, floors));
+						gBreaches += plan.breaches().size();
+						for (int breach : plan.breaches()) {
+							gBlocks += breach;
+							gWorst = Math.max(gWorst, breach);
+						}
+					}
+				}
+				int lBreaches = 0;
+				int lBlocks = 0;
+				int lClean = 0;
+				int lBuilt = 0;
+				int lRefused = 0;
+				long lWrong = 0;
+				for (java.nio.file.Path file : files) {
+					String name = file.getFileName().toString().replace(".json", "");
+					if (name.startsWith("ultra-")) {
+						continue;
+					}
+					List<SongBuilder.EventNote> notes = songAt(file);
+					if (notes.isEmpty()) {
+						continue;
+					}
+					for (int floors = 1; floors <= 6; floors++) {
+						for (int width = 12; width <= 48; width += 4) {
+							try {
+								SongBuilder.PastePlan plan = SongBuilder.createPastePlan(
+									new BlockPos(0, 64, 0), notes,
+									SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+									new SongBuilder.BuildLimits(4, width, floors));
+								lBuilt++;
+								lClean += plan.breaches().isEmpty() ? 1 : 0;
+								lBreaches += plan.breaches().size();
+								lBlocks += plan.breaches().stream()
+									.mapToInt(Integer::intValue).sum();
+								lWrong += plan.wrongNotes();
+							} catch (RuntimeException refused) {
+								lRefused++;
+							}
+						}
+					}
+				}
+				System.out.println("ARM " + names[arm]
+					+ " | guardian breaches " + gBreaches + " blocks " + gBlocks
+					+ " worst " + gWorst
+					+ " | library breaches " + lBreaches + " blocks " + lBlocks
+					+ " clean " + lClean + "/" + lBuilt + " refused " + lRefused
+					+ " wrong " + lWrong);
+			} finally {
+				SongBuilder.PADS_AT_BUS_HEIGHT_INTO_A_CLIMB = true;
+				SongBuilder.PRICES_THE_RAISED_PAD = true;
+				SongBuilder.PLANS_THE_RAISED_PAD = true;
+			}
+		}
+	}
+
 	/** The same build, walked, so the chord that went out and the one behind it can be read. */
 	@Test
 	void tracesTheWorstBreach() throws Exception {
