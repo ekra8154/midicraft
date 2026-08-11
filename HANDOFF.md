@@ -1,6 +1,6 @@
 # Handoff — the handover column, and heads that look instead of guessing
 
-State at `d0ebf59`. Everything below was measured on ekran's own library, not derived.
+State at `5733673`. Everything below was measured on ekran's own library, not derived.
 
 **Read the collision marks before reasoning about the code.** That is the lesson of the session and
 it is not a style note. The last fault of the night got six explanations out of me, every one from
@@ -61,7 +61,18 @@ wrong notes     0 either way  builds        45 of 45, none refused
 A cut may now open with a head of seven, six or five, chosen by a rule both halves of the builder
 agree on. That was the last thing outstanding and it is closed.
 
-Suite: **11 failing → 7**, a strict subset. Nothing was broken; four were fixed.
+Suite: **11 failing → 7**, a strict subset. Nothing was broken; four were fixed. The seven, which
+are the baseline to diff against and were all red before this session too:
+
+```
+BreachReproSearchTest  > reportsTheWallsTheBuildWasMeasuredAgainst
+BreachTraceTest        > listsTheRealBreachesLeft
+HeldOutWidthTest       > noRealSongBreachesAtAWidthNobodyTunedOn
+SplitDescentTest       > cutsChordsTheOldDescentCouldNotCarry
+SplitDescentTest       > readsBackASongThatWasAlreadyBeingCut
+UltraLaneFaultsTest    > everyFloorChangeStandsOnAWall
+WallTurnReproTest      > tracesTheChosenRepro
+```
 
 ## Open, in priority order
 
@@ -85,9 +96,9 @@ slot. Do not spend a day on the front case without first finding a song that rea
 
 ## Traps
 
-- **`main` is red and was already red.** Baseline is **7 failing tests**, named in the table above.
-  Diff names, never counts. The old note in this file said 7 with `BigSplitTest` among them; that was
-  stale, `BigSplitTest` passes.
+- **`main` is red and was already red.** Baseline is the **7 failing tests** listed above. Diff
+  names, never counts. The previous version of this file said 7 with `BigSplitTest` among them; that
+  was stale, `BigSplitTest` passes. Expect this list to go stale again -- check it, do not trust it.
 - **`createPastePlan` builds the song twice** — once without lookahead, once with — and keeps whichever
   `beats` the other. Both walks go past the trace. `PLANRUN` lines now say which is which and which
   won; before they existed, two chords were misidentified in one afternoon by reading the wrong half.
@@ -117,8 +128,12 @@ slot. Do not spend a day on the front case without first finding a song that rea
 
 ## Probes worth knowing
 
-- `HandoverCollisionProbe` — the cut collision repro, the per-size Guardian table, the side-swap
-  count, and a region dump that prints any box of the winning plan in paste coordinates.
+- `HandoverCollisionProbe` — the per-size Guardian table, the side-swap count, a region dump that
+  prints any box of the winning plan in paste coordinates, and `marksTheCutCollision`, which no
+  longer reproduces anything now that `d0ebf59` is in but is the shape to copy when the next
+  collision turns up.
+- `BreachOfOneProbe` — the handover column on and off, per width and floor, with breaches of exactly
+  one counted apart; and a full-`TRACE` walk of ekran's 44×3.
 - `MARK_COLLISIONS` — builds through a collision and lights it up, naming the shape that laid each
   block. **Use this first.** It is the only tool this week that has never been wrong.
 - `TRACE_TURNS` — one line per chord standing outside the footprint, with the wire it has.
