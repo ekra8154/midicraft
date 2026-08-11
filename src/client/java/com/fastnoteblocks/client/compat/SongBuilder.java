@@ -371,11 +371,28 @@ public final class SongBuilder {
 		WalkStart head = start == WalkStart.HEAD && limits.startTop()
 			? new WalkStart(0, limits.laneFloors() - 1, -1)
 			: start;
+		// Two whole builds go past the trace, one after the other, and for a long time nothing said
+		// which was which. Every coordinate read out of that file was a coin flip: the two disagree
+		// about which floor a lane sits on and about where the finished build slides to, so a chord
+		// looked up by position could be found in the plan that lost. Two chords were misidentified
+		// that way in one afternoon before anybody suspected the trace rather than the build.
+		if (TRACE || TRACE_TURNS) {
+			System.out.println("PLANRUN lookahead=no");
+		}
 		PastePlan without = createLanePastePlan(origin, forward, notes, limits.laneWidth(),
 			limits.laneFloors(), plain, PasteMode.ULTRA_COMPACT_LANE, head);
+		if (TRACE || TRACE_TURNS) {
+			System.out.println("PLANRUN lookahead=yes");
+		}
 		PastePlan with = createLanePastePlan(origin, forward, notes, limits.laneWidth(),
 			limits.laneFloors(), plain.withLookahead(), PasteMode.ULTRA_COMPACT_LANE, head);
 		boolean won = beats(with, without);
+		if (TRACE || TRACE_TURNS) {
+			System.out.println("PLANRUN won=" + (won ? "lookahead=yes" : "lookahead=no")
+				+ " wrong=" + wrongNotes(with) + "/" + wrongNotes(without)
+				+ " breached=" + breachedColumns(with) + "/" + breachedColumns(without)
+				+ " width=" + with.width() + "/" + without.width());
+		}
 		if (won) {
 			LOOKAHEAD_WINS++;
 		} else {
