@@ -764,7 +764,9 @@ public final class SongBuilder {
 			// can drive the module it stands in front of.
 			int columns = (wall - lane.pos().getX()) * lane.travel().getStepX();
 			Pad pad = layout.ultra() && wantsTurn && !straddles
-				? planPad(columns, tipSignal, turnCells, Math.max(0, wait - 1))
+				? planTurnPad(columns, tipSignal, turnCells, offBus, Math.max(0, wait - 1),
+					climb > 0, above >= 0 && above < floors,
+					lastStyle.buses())
 				: Pad.none(tipSignal);
 			// A split comes before any of that. The event that will not fit is cut in two: as much of
 			// it as reaches the wall, then the staircase, then the rest -- one repeater, one tick, one
@@ -962,10 +964,18 @@ public final class SongBuilder {
 					? offBus : turnCells;
 				boolean reachesWall = !PIN_DESCENTS || flatAhead
 					|| pad.signal() - unpaid >= turnCost;
+			// Priced through the one place that knows whether the pad can be lifted onto the climb.
+			// A lane that could not afford five may well afford three, and this is the test that
+			// decides whether it turns here at all -- so it has to ask the same question the pad was
+			// planned with and the same one the walk will charge itself when it builds the staircase.
+			// Ungated, and it has to be: this prices the staircase the walk is about to build, and the
+			// walk builds a raised pad whether or not the search was allowed to plan for one. Gating
+			// it here also took the empty-pad bus discount out with it, which predates all of this.
+			int turnPrice = turnPrice(pad, climb > 0, above >= 0 && above < floors,
+				lastStyle.buses(), turnCells, offBus);
 			boolean canTurn = layout.ultra()
 				? index > 0 && reachesWall && (flatAhead ? straddles && pad.signal() >= 1
-					: pad.signal()
-						>= (pad.cells().isEmpty() && lastStyle.buses() ? offBus : turnCells))
+					: pad.signal() >= turnPrice)
 				: index > 0 && events.get(index - 1).maxSafeTurnDistance() >= MAX_LANE_SPACING;
 			int spentPadding = 0;
 			// Ahead of a staircase only, for the same reason a split is. A chord that would have been
@@ -1067,8 +1077,8 @@ public final class SongBuilder {
 					}
 					headed = new StackedSplit(
 						onTheFreeSlots(placements, opening, travel, depth, event.time(),
-							headed.slots()),
-						headed.head(), headed.nearTail(), headed.farTail());
+							headed.slots(), headed.shed() ? DESCENT_FLANK_SLOT : -1),
+						headed.head(), headed.nearTail(), headed.farTail(), headed.shed());
 					cursor = addStackedSplitModule(placements, opening, travel, depth,
 						trigger.triggerDelay(), headed, event.time());
 					far = headed.farTail();
@@ -1136,8 +1146,7 @@ public final class SongBuilder {
 				// a walk that charges the split more than the planner did refuses it and leaves the
 				// lane standing short of the wall it was measured for.
 				tipSignal = headed != null
-					? DUST_RANGE - STACKED_BUS_TRANSITION
-						- (headed.nearTail().size() + headed.farTail().size() + 1) / 2 - splitCells
+					? DUST_RANGE - headed.runCells(splitCells)
 					: DUST_RANGE - cells - splitCells;
 				gradeLaneTip(placements, turnCells, tipSignal,
 					climb > 0 ? "SplitClimb" : "SplitDescent");
@@ -1160,7 +1169,15 @@ public final class SongBuilder {
 				if (!pad.cells().isEmpty()) {
 					placements.moved(event.notes().size());
 				}
-				lane = emitPad(placements, lane, pad);
+				// ekran's: where the rest of the lane is nothing but wire up to the wall and then a
+				// climb, run that wire at bus height. It costs the same columns and the staircase then
+				// starts off a bus, which is two cells cheaper. Off a bus the run simply stays up; off
+				// anything else the first cell has to hold the path so the rest has a live wire to
+				// climb from, and a pad of one column has no cell to spare for that.
+				int liftAfter = raiseAfter(pad, climb > 0, above >= 0 && above < floors,
+					lastStyle.buses());
+				boolean raisedPad = liftAfter >= 0;
+				lane = emitPad(placements, lane, pad, "padClosing", liftAfter);
 				spentPadding = pad.delaySpent();
 				if (above >= 0 && above < floors) {
 					// Asked of the shape the lane actually ended on, not of how many notes it held.
@@ -1190,9 +1207,14 @@ public final class SongBuilder {
 					if (PIN_DESCENTS && layout.ultra() && shortBy > 0) {
 						pinned = shortBy;
 						for (int cell = 0; cell < pinned; cell++) {
-							placements.padded("padPinned");
+							placements.padded("padPinned" + (raisedPad ? "Raised" : ""));
 						}
-						lane = emitDust(placements, lane, pinned);
+						// At the height the pad in front of it is running at. This block is not gated
+						// on the direction of the turn -- the comment below says only descents are
+						// pinned and the condition does not say so -- so a climb reaches here too, and
+						// a pin that came back down to the path while the staircase had been told it
+						// was starting off a bus is a staircase with nothing under its first rung.
+						lane = emitDust(placements, lane, pinned, raisedPad);
 					}
 					// Recorded after the pin and not before it, so this is where the staircase actually
 					// stands rather than where the lane would have left it. Told apart by direction as
@@ -1202,9 +1224,13 @@ public final class SongBuilder {
 					if (shortBy - pinned > 0) {
 						placements.padded(climb > 0 ? "recessedClimb" : "recessedDescent");
 					}
+					// A raised pad leaves exactly what a bus leaves -- stone at path+1 with dust on top,
+					// one column back from here -- so the staircase joins it two rungs in just the same.
+					// And a lane that ended on a bus keeps its discount through a raised pad, which it
+					// never could through a pad laid on the path.
 					BlockPos landed = climb > 0
 						? addGlassClimb(placements, lane.pos(), travel,
-							lastStyle.buses() && pad.cells().isEmpty(), currentTime)
+							raisedPad || lastStyle.buses() && pad.cells().isEmpty(), currentTime)
 						: descend(placements, lane.pos(), travel, descentSide, currentTime);
 					floor = above;
 					// What the staircase leaves the next lane. It matters because the next lane may
@@ -1212,8 +1238,10 @@ public final class SongBuilder {
 					// handover in a build that spends wire without a repeater at either end of it.
 					// Charged at what it actually spends: a climb taken straight off a bus skips two
 					// rungs, and counting them anyway left every lane after one two blocks poorer.
-					tipSignal = pad.signal() - pinned - (climb > 0 && lastStyle.buses()
-						&& pad.cells().isEmpty() ? offBus : turnCells);
+					// Through the same one place canTurn asked, so the wire this lane books itself and
+					// the wire it demanded before turning cannot be two different sums.
+					tipSignal = pad.signal() - pinned - turnPrice(pad, climb > 0,
+						above >= 0 && above < floors, lastStyle.buses(), turnCells, offBus);
 					lane = Lane.straight(landed, travel.getOpposite(), depth);
 					gradeLaneStart(placements, wall, travel.getStepX(), 0, climb > 0, stepOffAhead,
 						lane.pos().getX(), climb > 0 ? "Climb" : "Descent");
@@ -2138,18 +2166,28 @@ public final class SongBuilder {
 				// move only needs to move far enough that its own repeater can see the top of the
 				// staircase -- two columns on the lane this was found on, where landing it flush would
 				// have wanted twelve and there was room for three.
-				Pad end = closingPad(events, tried, from, last, owing, turnCells);
-				int need = end.cells().isEmpty()
-					&& tried.styles().get(last - from).buses() ? offBus : turnCells;
+				// A climb staircase is the only turn that discounts an off-bus start -- a descent costs
+				// four whichever way it is met and a flat turn costs what it costs -- so offBus being
+				// the cheaper of the two is exactly the condition, and the planner can read it off the
+				// prices it was handed rather than being told the direction separately.
+				boolean discounts = offBus < turnCells;
+				Pad end = closingPad(events, tried, from, last, owing, turnCells, offBus,
+					discounts, discounts);
+				int need = turnPrice(end, discounts, discounts,
+					tried.styles().get(last - from).buses(), turnCells, offBus);
 				if (TRACE) {
 					System.out.println("  TRY last=" + last + " attempt=" + attempt + " pads=" + pads
 						+ " triedLast=" + tried.last() + " owing=" + owing + " padCells="
 						+ end.cells().size() + " padSignal=" + end.signal() + " need=" + need
 						+ " strands=" + strandsNext(events, from, last, wall, otherWall, stepX, turnCells, offBus, stepOff, climbing, layout, 0));
 				}
+				// The wire this turn really leaves, which this is the one place that knows: the pad
+				// has been planned and the staircase priced, so what the next lane opens on is what
+				// the pad had left minus what the turn takes. Handing the constant instead credits
+				// the next lane with wire this lane never had.
 				if (end.cells().size() == owing && end.signal() >= need
 					&& !strandsNext(events, from, last, wall, otherWall, stepX, turnCells, offBus,
-						stepOff, climbing, layout, 0)) {
+						stepOff, climbing, layout, 0, end.signal() - need)) {
 					if (vetoCut) {
 						pads.put(NO_SPLIT - (last + 1), 1);
 					}
@@ -2277,9 +2315,24 @@ public final class SongBuilder {
 	 */
 	private static Pad closingPad(List<EventGroup> events, Sweep sweep, int from, int last,
 			int owing, int turnCells) {
-		return planPad(owing, sweep.tips().get(last - from), turnCells,
+		return closingPad(events, sweep, from, last, owing, turnCells, turnCells, false, false);
+	}
+
+	/**
+	 * @param climbing and {@code staircase} so the planner prices a raised pad the way the walk
+	 *     builds one. Without them the plan books five cells for a climb the walk spends three on,
+	 *     and every lane it closes is closed against a wall it did not have to reach.
+	 */
+	private static Pad closingPad(List<EventGroup> events, Sweep sweep, int from, int last,
+			int owing, int turnCells, int offBus, boolean climbing, boolean staircase) {
+		// The shape the lane comes to rest on, which is what decides whether the pad may start up at
+		// bus height or has to spend its first cell on the path getting there. The sweep records it
+		// for exactly this kind of question, and it is the same thing the walk calls lastStyle.
+		boolean fromBus = sweep.styles().get(last - from).buses();
+		return planTurnPad(owing, sweep.tips().get(last - from), turnCells, offBus,
 			last + 1 < events.size()
-				? Math.max(0, events.get(last + 1).time() - events.get(last).time() - 1) : 0);
+				? Math.max(0, events.get(last + 1).time() - events.get(last).time() - 1) : 0,
+			climbing, staircase, fromBus);
 	}
 
 	/**
@@ -2319,6 +2372,11 @@ public final class SongBuilder {
 	private static void gradeLaneStart(PlacementPlan placements, int wall, int stepX,
 			int carriedCells, boolean climbing, int stepOff, int opened, String how) {
 		int foretold = nextLaneStart(wall, stepX, carriedCells, climbing, stepOff);
+		if (TRACE_TURNS && foretold != opened) {
+			System.out.println("STARTOFF " + how + " wall=" + wall + " stepX=" + stepX
+				+ " carried=" + carriedCells + " climbing=" + climbing + " stepOff=" + stepOff
+				+ " foretold=" + foretold + " opened=" + opened + " off=" + (foretold - opened));
+		}
 		if (foretold == opened) {
 			placements.padded("planStartRight" + how);
 			return;
@@ -2389,6 +2447,22 @@ public final class SongBuilder {
 	private static boolean strandsNext(List<EventGroup> events, int from, int last, int wall,
 			int otherWall, int stepX, int turnCells, int offBus, int stepOff, boolean climbing,
 			Layout layout, int carriedCells) {
+		return strandsNext(events, from, last, wall, otherWall, stepX, turnCells, offBus, stepOff,
+			climbing, layout, carriedCells, DUST_RANGE - turnCells);
+	}
+
+	/**
+	 * @param handedOn the wire the turn actually leaves the next lane, where the caller knows it.
+	 *     It used to be {@code DUST_RANGE - turnCells} everywhere, which is what a lane hands on
+	 *     only when it arrived at its turn on a full fifteen -- and {@code gradeLaneTip} says that
+	 *     is true about one time in seventy. Every other time the guess is <em>rich</em>: the plan
+	 *     credits the next lane with wire the turn did not leave it, so a lane that will strand its
+	 *     neighbour reads as closing cleanly. Making turns cheaper makes that worse rather than
+	 *     better, because a cheaper turn is one a lane may take with less in hand.
+	 */
+	private static boolean strandsNext(List<EventGroup> events, int from, int last, int wall,
+			int otherWall, int stepX, int turnCells, int offBus, int stepOff, boolean climbing,
+			Layout layout, int carriedCells, int handedOn) {
 		if (!LOOKAHEAD || !layout.lookahead()) {
 			return false;
 		}
@@ -2400,7 +2474,7 @@ public final class SongBuilder {
 		}
 		Sweep after = sweep(events, first,
 			nextLaneStart(wall, stepX, carriedCells, climbing, stepOff), -stepX, otherWall,
-			events.get(spent).time(), DUST_RANGE - turnCells, true, offBus, layout, Map.of(),
+			events.get(spent).time(), Math.max(0, handedOn), true, offBus, layout, Map.of(),
 			false, null);
 		return after.last() < first;
 	}
@@ -2599,9 +2673,23 @@ public final class SongBuilder {
 
 	/** Lays a run of dust, on glass so that nothing under it comes alive. */
 	private static Lane emitDust(PlacementPlan placements, Lane lane, int columns) {
-		placements.placing("pad");
+		return emitDust(placements, lane, columns, false);
+	}
+
+	/**
+	 * @param raised whether this run continues at bus height. It has to when the pad in front of it
+	 *     was raised: the pin is laid after the pad and before the staircase, so a pin that drops
+	 *     back to the path leaves the climb starting two rungs above a wire that is no longer there.
+	 *     That is a staircase which builds cleanly and conducts nothing.
+	 */
+	private static Lane emitDust(PlacementPlan placements, Lane lane, int columns, boolean raised) {
+		placements.placing(raised ? "padRaised" : "pad");
 		for (int cell = 0; cell < columns; cell++) {
-			addParityPad(placements, lane.pos());
+			if (raised) {
+				addRaisedPad(placements, lane.pos());
+			} else {
+				addParityPad(placements, lane.pos());
+			}
 			lane = lane.ahead(1);
 		}
 		return lane;
@@ -2618,10 +2706,28 @@ public final class SongBuilder {
 	 *     compactness -- how much lane is filled with wire rather than music -- impossible to aim at.
 	 */
 	private static Lane emitPad(PlacementPlan placements, Lane lane, Pad pad, String why) {
+		return emitPad(placements, lane, pad, why, -1);
+	}
+
+	/**
+	 * @param raiseAfter how many cells stay on the path before the rest run at bus height, or -1 to
+	 *     lay the whole pad on the path -- see {@link #raiseAfter}. Zero off a bus, where the wire is
+	 *     already up; one off anything else, because a lane ending on a note block has nothing at bus
+	 *     height to step off and that first cell is what gives it one.
+	 */
+	private static Lane emitPad(PlacementPlan placements, Lane lane, Pad pad, String why,
+			int raiseAfter) {
+		int cell = -1;
 		for (int delay : pad.cells()) {
+			cell++;
+			boolean raised = raiseAfter >= 0 && cell >= raiseAfter;
 			if (delay == 0) {
-				placements.padded(why);
-				addParityPad(placements, lane.pos());
+				placements.padded(why + (raised ? "Raised" : ""));
+				if (raised) {
+					addRaisedPad(placements, lane.pos());
+				} else {
+					addParityPad(placements, lane.pos());
+				}
 			} else {
 				placements.padded(why + "Repeater");
 				// A corner takes the dust and the repeater stands one along, here as everywhere else.
@@ -5170,6 +5276,94 @@ public final class SongBuilder {
 		return new Relocation(emptied, new StackedBusSplit(emptied, head, tail), "Tail");
 	}
 
+	/**
+	 * Whether a stacked head in front of a descent gives up the one flank the staircase wants.
+	 *
+	 * <p>ekran's, read off the breach at forty wide over five floors. A head is three columns --
+	 * repeater, centre, front flanks -- and it hands over on a transition cell, which is stone with
+	 * dust on it. A descent's first rung is stone with dust on it, in the same place, at the same
+	 * level: {@link #addParityPad} and the first step of {@link #addSplitBusDescent} lay the same two
+	 * blocks. So the two can share a column. The staircase begins where the transition would have
+	 * been, the centre lights its first rung exactly as it lit the pad, and the head needs one column
+	 * fewer to close a lane -- which is the column the lane was breaching for.</p>
+	 *
+	 * <p>Exactly one block is in the way. The spiral steps off its centre line towards
+	 * {@code descentSide}, so its second rung's dust lands in that same column, on that side, at the
+	 * height the front flanks hang at. The front flank on the descent side is in it. The other one is
+	 * not, and never can be: the spiral only ever steps one way.</p>
+	 *
+	 * <p>So this is a relocation rather than a smaller head, which is what makes it cheap. The note
+	 * comes out of that slot and goes somewhere else in the same module for nothing -- a free centre,
+	 * a spare harp's slot, a low slot the chord did not fill -- or, where the chord has a bus, over
+	 * the staircase with the rest of the far half. A head with nowhere to put it does not shed, and
+	 * the lane does what it does today.</p>
+	 */
+	static boolean SHEDS_THE_FLANK_THE_DESCENT_WANTS = true;
+
+	/**
+	 * The low slot a descent's second rung stands in.
+	 *
+	 * <p>Side 1 is {@code descentSide}, and it is that for the whole build rather than for one lane:
+	 * {@code depth} is fixed once at the head of the walk, {@code descentSide} is its opposite, and
+	 * {@link #addStackedEventModule} numbers its sides {@code [depth, depth.getOpposite()]}. So side
+	 * 1 is the side every spiral in the build steps towards, whichever way the lane holding it
+	 * travels. Front rather than back because the staircase is always ahead of the module.</p>
+	 */
+	private static final int DESCENT_FLANK_SLOT = 1;
+
+	/** A head with the descent's flank rehomed, and the note the bus must take if no slot could. */
+	private record ShedFlank(UltraSlots slots, EventNote toBus) {
+	}
+
+	/**
+	 * The same head with nothing hanging where the staircase's second rung goes, or {@code null}.
+	 *
+	 * <p>Ordered by what it costs, which is the order {@link #relocate} uses and for the same reason:
+	 * the centre and a spare slot cost no cell at all, and the bus costs one wherever the tail was
+	 * even. A head that can only shed onto the bus still sheds -- the column at the wall is worth
+	 * more than the cell -- but it is tried last so that the chords which can do it for free do.</p>
+	 *
+	 * @param granted how many of the back pair this head was allowed. A back slot standing empty
+	 *     because the lane behind owns it is not one this chord may fill, and the two look identical
+	 *     from the slots alone. Getting that wrong hangs a note in somebody else's cell, which is
+	 *     the one kind of mistake in this file that builds cleanly and plays wrong.
+	 * @param hasBus whether there is a tail to take the note when no slot can
+	 */
+	private static ShedFlank shedDescentFlank(UltraSlots slots, int granted, boolean hasBus) {
+		if (slots == null) {
+			return null;
+		}
+		EventNote note = slots.slot(DESCENT_FLANK_SLOT);
+		if (note == null) {
+			// Nothing hangs there, so this head already stands alongside a staircase quite happily.
+			return new ShedFlank(slots, null);
+		}
+		UltraSlots emptied = slots.without(DESCENT_FLANK_SLOT);
+		if (slots.centre() == null) {
+			if (isHarpNote(note)) {
+				return new ShedFlank(emptied.withCentre(note), null);
+			}
+			// Or it trades with a harp the module is hanging somewhere it does not mind losing: the
+			// harp takes the centre, this note takes the harp's slot, and the contested one empties.
+			int harp = CENTRE_TAKES_A_SPARE_HARP ? spareHarpFlank(slots, DESCENT_FLANK_SLOT) : -1;
+			if (harp >= 0) {
+				return new ShedFlank(emptied.with(harp, note).withCentre(slots.slot(harp)), null);
+			}
+		}
+		// Then a low slot the chord did not fill. The front slot on the other side is always this
+		// module's to use. A back slot only where the head was granted it, and {@link #backPair}
+		// fills the far side first, so a grant of one means slot three and not slot two.
+		int[] spare = granted >= 2 ? new int[] {0, 3, 2}
+			: granted == 1 ? new int[] {0, 3}
+			: new int[] {0};
+		for (int slot : spare) {
+			if (slots.slot(slot) == null) {
+				return new ShedFlank(emptied.with(slot, note), null);
+			}
+		}
+		return hasBus ? new ShedFlank(emptied, note) : null;
+	}
+
 	/** Which of the four low-note slots a chord fills, as one number, for keying the oracle. */
 	private static int flankMask(UltraSlots slots) {
 		if (slots == null) {
@@ -5214,6 +5408,153 @@ public final class SongBuilder {
 	private static void addParityPad(PlacementPlan placements, BlockPos cursor) {
 		set(placements, cursor, "minecraft:stone");
 		set(placements, cursor.above(), "minecraft:redstone_wire");
+	}
+
+	/**
+	 * Whether a pad that runs into a climb is laid at bus height rather than on the path.
+	 *
+	 * <p>ekran's. A climb off a bus costs three cells and a climb off the path costs five, and the
+	 * only difference between them is one level: a bus is stone at path+1 with dust at path+2, a pad
+	 * is stone on the path with dust at path+1, and {@link #addGlassClimb} skips its first two rungs
+	 * exactly when the live wire is already a block up. So a pad laid one level higher is a bus as
+	 * far as the staircase is concerned, and the two cells come back.</p>
+	 *
+	 * <p>It costs nothing in columns. A pad is one cell of dust a column whatever height it runs at,
+	 * and dust steps up a level of its own accord as long as the block above the lower dust is clear
+	 * -- which it is, because nothing else is built over a pad.</p>
+	 *
+	 * <p>And the "or stay at it" half is the sharper one. {@link #PREPADS_FOR_THE_OFF_BUS_DISCOUNT}
+	 * exists only because a single cell of dust between a bus and a staircase drops the staircase
+	 * back to the dear form -- the pad came down to the path and took the discount with it. A pad
+	 * that stays up does not, so a lane ending on a bus keeps its discount however many columns of
+	 * pad stand between it and the wall.</p>
+	 */
+	static boolean PADS_AT_BUS_HEIGHT_INTO_A_CLIMB = true;
+
+	/**
+	 * Whether the closing search prices a climb at the raised pad's three cells rather than five.
+	 *
+	 * <p>Separate from the rule itself so the two can be told apart, because they do not move the
+	 * same way. The walk building raised pads takes Guardian's worst breach from twelve to nine; the
+	 * planner then booking them as well takes breaches from 184 to 339. Both are measurements, not
+	 * predictions.</p>
+	 *
+	 * <p>Which is the interesting result, and the reason this is a flag rather than a fix. The plan
+	 * spending the discount is not wrong in itself -- it is the same discount the walk spends -- but
+	 * a cheaper reserve makes {@link #planPad} fill more columns before it gives up, so the search
+	 * closes lanes it used to leave open. Where those two agree the lane is better off; where they
+	 * do not, the plan has closed a lane on a pad the walk builds differently, and the gap between
+	 * {@code sweep.tips()} and the walk's own {@code tipSignal} is exactly the ground that disagrees.
+	 * That gap is already counted under the {@code plan*} keys and is not new here -- this change
+	 * only makes it expensive.</p>
+	 */
+	static boolean PLANS_THE_RAISED_PAD = true;
+
+	/**
+	 * The same pad one level up, which is where a bus runs and where a climb wants to start.
+	 *
+	 * <p>Glass, and that is the whole of it. The lane arrives with its dust on the path and this run
+	 * carries it a block higher, which is a step up -- and {@link #addGlassClimb} says in writing why
+	 * a step up is glass: the block that would otherwise sit between the two dusts has to be
+	 * see-through or they do not connect at all. Built with stone this laid perfectly, refused
+	 * nothing, reported no wrong notes and no dead wire, and conducted nothing: eight hundred and
+	 * forty-three note blocks the signal never reached, on a machine that looked right in every
+	 * number a {@code PastePlan} carries. Only {@link NoteMachineReader#read} could see it.</p>
+	 *
+	 * <p><b>Stone, on ekran's say-so, and the glass above is my inference rather than a reading.</b>
+	 * A floor of stone under a run of dust is what every other pad in this build is, and the step up
+	 * onto it is one block -- so if that will not conduct, the current is being cut somewhere else
+	 * and glass here would only paper over it. Left as stone so the fault is the one being looked at.
+	 * {@link NoteMachineReader} agrees something is wrong; it does not say what, and it is a model
+	 * rather than the game.</p>
+	 */
+	private static void addRaisedPad(PlacementPlan placements, BlockPos cursor) {
+		set(placements, cursor.above(), "minecraft:stone");
+		set(placements, cursor.above(2), "minecraft:redstone_wire");
+	}
+
+	/**
+	 * Whether this pad, standing where it does, is one the climb after it can be lifted onto.
+	 *
+	 * <p>All dust and not empty. A repeater has to stand on the path with its own block under it, so
+	 * a pad holding one cannot be lifted wholesale; and an empty pad has nothing to lift, which is
+	 * the case {@code lastStyle.buses()} already answers.</p>
+	 */
+	private static boolean padRaises(Pad pad, boolean climbing, boolean staircase, boolean fromBus) {
+		return raiseAfter(pad, climbing, staircase, fromBus) >= 0;
+	}
+
+	/**
+	 * How many cells of pad stay on the path before the rest is lifted, or -1 for no lift at all.
+	 *
+	 * <p>ekran, reading a dead wire at {@code 453 92 -52}: a lane that ends on a bus already has its
+	 * wire a block up and the pad simply stays there, but a lane that ends on a note block has
+	 * nothing up there to step off. A note block is a full block and the repeater drives it, but a
+	 * driven block does not pass power on to its neighbour -- so the lifted stone beside it is fed by
+	 * nothing and the dust on top reads {@code w0}. One cell of pad on the path gives the run a live
+	 * wire to climb from, and then it can go up.</p>
+	 *
+	 * <p>Which means a pad of one column cannot do it at all: its single cell is the one that has to
+	 * stay down, and there is nothing left to lift. That lane takes the five-cell ascent, and the
+	 * planner has to know it -- a lane budgeted three that builds five is a lane two blocks short of
+	 * the top of its own staircase.</p>
+	 */
+	private static int raiseAfter(Pad pad, boolean climbing, boolean staircase, boolean fromBus) {
+		if (!PADS_AT_BUS_HEIGHT_INTO_A_CLIMB || !climbing || !staircase
+				|| pad.cells().isEmpty()
+				|| !pad.cells().stream().allMatch(cell -> cell == 0)) {
+			return -1;
+		}
+		if (fromBus) {
+			return 0;
+		}
+		return pad.cells().size() >= 2 ? 1 : -1;
+	}
+
+	/**
+	 * The pad a lane closes on, priced at what the staircase after it is actually going to cost.
+	 *
+	 * <p>The price and the pad have to be decided together, because each depends on the other: a pad
+	 * planned at the dear price may buy a repeater it would not have needed at the cheap one, and a
+	 * pad with a repeater in it cannot be lifted, so it does not get the cheap one. Asked here, once,
+	 * by both the planner and the walk -- try the cheap price, keep it only if what comes back is a
+	 * pad that can actually be raised, and fall back to the dear price otherwise.</p>
+	 *
+	 * <p>Two code paths deciding this separately is the bug this file keeps producing, and it is
+	 * worse here than usual: a plan that closes a lane on three cells the walk spends five on is a
+	 * lane that hands over two blocks of wire short of the top of its own staircase.</p>
+	 */
+	private static Pad planTurnPad(int columns, int signal, int turnCells, int offBus,
+			int spareDelay, boolean climbing, boolean staircase, boolean fromBus) {
+		if (PADS_AT_BUS_HEIGHT_INTO_A_CLIMB && climbing && staircase && columns > 0
+				&& offBus < turnCells) {
+			Pad cheap = planPad(columns, signal, offBus, spareDelay);
+			if (padRaises(cheap, climbing, staircase, fromBus)) {
+				return cheap;
+			}
+		}
+		return planPad(columns, signal, turnCells, spareDelay);
+	}
+
+	/**
+	 * Whether the walk charges itself the three cells a raised pad actually spends.
+	 *
+	 * <p>Split from building them so there is an arm where the raise changes nothing anybody decides
+	 * on. Off, the walk lays raised pads and then books the dear price for them: {@code canTurn}
+	 * still wants five in hand and {@code tipSignal} still hands the next lane five fewer, so every
+	 * lane turns exactly where it turned before and the only difference in the whole build is two
+	 * blocks of wire the lane really has and does not know about. That arm cannot make a build worse
+	 * by any argument, so if it does, the fault is in this code and not in the trade.</p>
+	 */
+	static boolean PRICES_THE_RAISED_PAD = true;
+
+	/** What the turn after this pad costs the wire arriving at it, raise included. */
+	private static int turnPrice(Pad pad, boolean climbing, boolean staircase, boolean fromBus,
+			int turnCells, int offBus) {
+		return climbing && staircase
+			&& (padRaises(pad, climbing, staircase, fromBus)
+				|| fromBus && pad.cells().isEmpty())
+			? offBus : turnCells;
 	}
 
 	/**
@@ -5330,9 +5671,19 @@ public final class SongBuilder {
 	 * @param nearTail notes of the bus before the staircase. Never empty: the near half has to end
 	 *     on a bus block for {@link #addSplitBusDescent} to be entitled to its short spiral, and a
 	 *     head with no bus behind it ends on the transition cell instead.
+	 * @param shed whether the near half is a head that gave up the flank the staircase wants and so
+	 *     hands over on the staircase's own first rung instead of on a transition cell of its own.
+	 *     One column shorter and one cell of wire cheaper than the same head without it -- see
+	 *     {@link #SHEDS_THE_FLANK_THE_DESCENT_WANTS}. Carried on the record because the walk has to
+	 *     build the shape the planner priced, and the two read this from the one oracle.
 	 */
 	private record StackedSplit(UltraSlots slots, List<EventNote> head, List<EventNote> nearTail,
-			List<EventNote> farTail) {
+			List<EventNote> farTail, boolean shed) {
+		/** Cells of wire from the head's repeater to the far half, staircase included. */
+		int runCells(int splitCells) {
+			return (shed ? 0 : STACKED_BUS_TRANSITION)
+				+ (nearTail.size() + farTail.size() + 1) / 2 + splitCells;
+		}
 	}
 
 	/**
@@ -5376,6 +5727,10 @@ public final class SongBuilder {
 		// cut with a short head was laid as a plain bus instead, and illit-do-the-dance at twelve
 		// wide lost its lane five columns past the wall for exactly that.
 		StackedBusSplit split = roomBehind ? stackedBusSplit(chord, 2) : null;
+		// How many of the back pair the head that came back was granted, which is not the same as how
+		// many it filled. {@link #shedDescentFlank} needs the grant: a back slot empty because the
+		// lane behind owns it is not a slot this chord may rehome a note into.
+		int granted = split == null ? 0 : 2;
 		// One slot behind before none, here as in {@link #addChordModule}: the lane behind has a
 		// single live cell in the column that touches this one, so the most it can ever contest is
 		// one, and a head of six keeps two more notes out of the bus than a head of five.
@@ -5390,9 +5745,11 @@ public final class SongBuilder {
 		// a stacked centre behind is the exception, and there the fallback from a full head is five.
 		if (split == null && HEAD_KEEPS_ONE_BACK_FLANK && !stackedBehind) {
 			split = stackedBusSplit(chord, 1);
+			granted = split == null ? 0 : 1;
 		}
 		if (split == null && FRONT_ONLY_HEADS && FRONT_ONLY_CUTS) {
 			split = stackedBusSplit(chord, 0);
+			granted = 0;
 		}
 		if (split == null) {
 			return null;
@@ -5400,11 +5757,39 @@ public final class SongBuilder {
 		// Head, transition, and -- unless the near half is allowed to be the head alone -- at least
 		// one cell of bus to end on.
 		int nearBusCells = room - STACKED_CELLS - STACKED_BUS_TRANSITION;
+		int floorCells = HEAD_ONLY_NEAR_HALF && !climbing ? 0 : 1;
+		// One column short of a head-only near half, and going down: then the head may hand over onto
+		// the staircase's own first rung rather than onto a transition cell of its own, which is the
+		// same two blocks in the same place. It costs the flank the second rung wants -- rehomed, not
+		// dropped -- and it buys the column the lane could not otherwise reach its wall in.
+		//
+		// Descents only, and not merely because a climb's staircase is shaped differently. A climb
+		// leaves by glass a level up and a column over, so there is no rung standing where the
+		// transition stands and nothing for the centre to light. That is the same gap that keeps
+		// {@link #HEAD_ONLY_NEAR_HALF} to descents, and it is the same reason.
+		boolean shed = false;
+		if (SHEDS_THE_FLANK_THE_DESCENT_WANTS && !climbing && HEAD_ONLY_NEAR_HALF
+				&& nearBusCells == floorCells - 1) {
+			ShedFlank rehomed = shedDescentFlank(split.slots(), granted, !split.tail().isEmpty());
+			if (rehomed != null) {
+				List<EventNote> head = split.head();
+				List<EventNote> tail = split.tail();
+				if (rehomed.toBus() != null) {
+					head = new ArrayList<>(head);
+					head.remove(rehomed.toBus());
+					tail = new ArrayList<>(tail);
+					tail.add(rehomed.toBus());
+				}
+				split = new StackedBusSplit(rehomed.slots(), head, tail);
+				nearBusCells = floorCells;
+				shed = true;
+			}
+		}
 		// Descents only for now. A climb leaves the near half by a glass staircase whose first rung
 		// is a level up and a column over, and the handover -- which sits beside the centre on the
 		// module's own level -- has nothing bridging it to that rung. Ekran pasted one and found the
 		// glass simply disconnected. A descent has no such gap and works today.
-		if (nearBusCells < (HEAD_ONLY_NEAR_HALF && !climbing ? 0 : 1)) {
+		if (nearBusCells < floorCells) {
 			if (nearBusCells == 0 && !split.tail().isEmpty()
 					&& STACKED_BUS_TRANSITION + (split.tail().size() + 1) / 2 + splitCells
 						<= DUST_RANGE) {
@@ -5434,11 +5819,17 @@ public final class SongBuilder {
 			}
 			nearNotes = tail.size() - 1;
 		}
-		if (STACKED_BUS_TRANSITION + (tail.size() + 1) / 2 + splitCells > DUST_RANGE) {
+		// The transition cell drops out of the run as well as out of the columns when the head hands
+		// over onto the staircase, because the cell it would have laid is a rung the staircase lays
+		// anyway and {@code splitCells} already counts every rung. So a shed cut reaches one cell
+		// further than the same cut without it. Stated through the record rather than here, because
+		// the walk makes this same sum for {@code tipSignal} and the two must not drift apart.
+		StackedSplit cut = new StackedSplit(split.slots(), split.head(), tail.subList(0, nearNotes),
+			tail.subList(nearNotes, tail.size()), shed);
+		if (cut.runCells(splitCells) > DUST_RANGE) {
 			return null;
 		}
-		return new StackedSplit(split.slots(), split.head(), tail.subList(0, nearNotes),
-			tail.subList(nearNotes, tail.size()));
+		return cut;
 	}
 
 	/** The near half of a cut chord, built as a stacked head with a bus behind it. */
@@ -5446,7 +5837,17 @@ public final class SongBuilder {
 			Direction travel, Direction laneStep, int triggerDelay, StackedSplit split, int time) {
 		placements.placing("cutHead" + split.head().size()
 			+ "/near" + split.nearTail().size() + "/far" + split.farTail().size()
-			+ (split.slots().backFlanks() == 0 ? " frontOnly" : " reachesBack"));
+			+ (split.slots().backFlanks() == 0 ? " frontOnly" : " reachesBack")
+			+ (split.shed() ? " shedFlank" : ""));
+		if (split.shed()) {
+			// No transition cell and no column for it. The head is laid and handed straight back at
+			// the column it came to rest in, which is the column the staircase starts in -- and the
+			// staircase's own first rung is the two blocks the transition would have been.
+			Lane afterHead = addStackedEventModule(placements,
+				Lane.straight(cursor, travel, laneStep), triggerDelay, time, split.slots());
+			placements.padded("busHandoverShed");
+			return afterHead.pos();
+		}
 		Body body = addStackedBusModule(placements, Lane.straight(cursor, travel, laneStep),
 			triggerDelay, time, split.slots(), split.nearTail());
 		return body.lane().pos();
@@ -5983,6 +6384,18 @@ public final class SongBuilder {
 	 */
 	private static UltraSlots onTheFreeSlots(PlacementPlan placements, BlockPos pos, Direction travel,
 			Direction noteSide, int time, UltraSlots slots) {
+		return onTheFreeSlots(placements, pos, travel, noteSide, time, slots, -1);
+	}
+
+	/**
+	 * @param banned a slot this module may not hang a note in whatever the ground says, or -1.
+	 *     A head that shed the flank the staircase wants has an empty slot that reads perfectly free
+	 *     -- the staircase is not built yet -- and this would fill it straight back in, silently
+	 *     undoing the one thing the shape was measured on. The ground cannot answer for a block that
+	 *     is not there, so the shape has to say so.
+	 */
+	private static UltraSlots onTheFreeSlots(PlacementPlan placements, BlockPos pos, Direction travel,
+			Direction noteSide, int time, UltraSlots slots, int banned) {
 		if (!HEAD_LOOKS_FOR_ITS_FREE_SIDE || slots == null) {
 			return slots;
 		}
@@ -6013,7 +6426,8 @@ public final class SongBuilder {
 		EventNote[] placed = new EventNote[4];
 		int next = 0;
 		for (int slot : new int[] {0, 1, 3, 2}) {
-			if (next < hanging.size() && quietAndFree(placements, cell[slot], time)) {
+			if (slot != banned && next < hanging.size()
+					&& quietAndFree(placements, cell[slot], time)) {
 				placed[slot] = hanging.get(next++);
 			}
 		}
@@ -6890,6 +7304,13 @@ public final class SongBuilder {
 		 */
 		void turnedAt(BlockPos position) {
 			if (recording) {
+				if (TRACE_TURNS) {
+					// Which shape laid it, not just where. A turn is recorded by four different
+					// shapes and the trace above only prints the one that asked to turn, so a turn
+					// that moves between two builds cannot otherwise be attributed to anything.
+					System.out.println("TURNEDAT " + position.getX() + " " + position.getY() + " "
+						+ position.getZ() + "  " + placing);
+				}
 				turns.add(position.immutable());
 			}
 		}

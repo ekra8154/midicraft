@@ -143,9 +143,18 @@ class BigSplitTest {
 	 * point of the shape. That predicts twenty-seven over a four-cell descent and twenty-nine over
 	 * a three-cell climb, and the arithmetic has been wrong before -- so sweep the chord size and
 	 * ask the builder which sizes it actually cuts with a head.
+	 *
+	 * <p>The descent reaches one further than that since
+	 * {@link SongBuilder#SHEDS_THE_FLANK_THE_DESCENT_WANTS}. A shed cut hands over onto the
+	 * staircase's own first rung instead of onto a transition cell of its own, so the transition
+	 * drops out of the run as well as out of the columns: {@code ceil(tail / 2) + 4 <= 15} leaves
+	 * a tail of twenty-two rather than twenty. The head is six and not seven because the flank the
+	 * staircase wanted rode the bus, so the total is twenty-eight. The climb is untouched -- a
+	 * climb has no rung standing where the transition stands, which is the same reason the shed is
+	 * descents-only.</p>
 	 */
 	@Test
-	void carriesTwentySevenDownAndTwentyNineUp() {
+	void carriesTwentyEightDownAndTwentyNineUp() {
 		SongBuilder.STACKED_SPLIT_HEADS = true;
 		int biggestDescent = 0;
 		int biggestClimb = 0;
@@ -168,7 +177,7 @@ class BigSplitTest {
 				biggestClimb = chord;
 			}
 		}
-		assertEquals(27, biggestDescent, "biggest chord a headed cut carries down a staircase");
+		assertEquals(28, biggestDescent, "biggest chord a headed cut carries down a staircase");
 		assertEquals(29, biggestClimb, "biggest chord a headed cut carries up a staircase");
 	}
 
