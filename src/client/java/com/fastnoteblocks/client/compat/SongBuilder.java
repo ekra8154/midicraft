@@ -5363,7 +5363,12 @@ public final class SongBuilder {
 		// One slot behind before none, here as in {@link #addChordModule}: the lane behind has a
 		// single live cell in the column that touches this one, so the most it can ever contest is
 		// one, and a head of six keeps two more notes out of the bus than a head of five.
-		if (split == null && CUT_KEEPS_ONE_BACK_FLANK) {
+		// One rule, and it is not about cutting. How many slots behind a head can use is a question
+		// about the ground beside it, so the answer cannot depend on whether the chord is going to be
+		// split across a staircase -- gating it on the cut is telling the builder not to optimise in
+		// the one case it most needs to. ekran said so; it was two flags because it was bolted onto
+		// two code paths separately, which is the mistake this file keeps making.
+		if (split == null && HEAD_KEEPS_ONE_BACK_FLANK && !CUT_ONE_FLANK_COLLIDES) {
 			split = stackedBusSplit(chord, 1);
 		}
 		if (split == null && FRONT_ONLY_HEADS && FRONT_ONLY_CUTS) {
@@ -5883,16 +5888,23 @@ public final class SongBuilder {
 	static boolean CUT_ASKS_THE_BLOCKS_BEHIND = true;
 
 	/**
-	 * Whether a cut across a staircase may open with a head of six.
+	 * A defect, not an option: the one-flank head collides when a cut builds it.
 	 *
-	 * <p><b>Off, and it is mine rather than ekran's.</b> The head of six is theirs and works in
-	 * {@link #addChordModule}; extending it to the cut was my step and it refuses every build in the
-	 * sweep -- forty-five of forty-five, collision at {@code 3 71 56}. A cut's near half is measured
-	 * by {@code closes} and {@code carriedCells} as well as built by the walk, and those still price a
-	 * head at seven or at five, so a near half of six is laid where nothing reserved room for it.
-	 * Three places make that sum and only one of them was taught the third size.</p>
+	 * <p>{@link #HEAD_KEEPS_ONE_BACK_FLANK} is the rule and it does not mention cutting, because how
+	 * many slots behind a head can use is a question about the ground beside it. This suppresses the
+	 * rule in the cut path alone, and it is here because that path is broken rather than because
+	 * anybody wants the choice: with it cleared, all forty-five configurations of Guardian refuse,
+	 * ninety-six collisions and thirty-five wrong notes.</p>
+	 *
+	 * <p>Four explanations have been offered for that and all four were wrong -- that {@code closes}
+	 * and {@code carriedCells} price a head at seven-or-five (they call the same {@code
+	 * stackedSplitOf}); that the planner cannot see the blocks (it models them); that the head picks
+	 * the occupied side (looking made no difference); that {@code depth} was the wrong direction
+	 * (it is {@code laneStep}, which is what the note side is derived from). Repro:
+	 * {@code HandoverCollisionProbe.marksTheCutCollision}. Read it off the marks rather than
+	 * reasoning about it -- that is what named every other fault this week.</p>
 	 */
-	static boolean CUT_KEEPS_ONE_BACK_FLANK = false;
+	static boolean CUT_ONE_FLANK_COLLIDES = true;
 
 	/**
 	 * Whether the plan is redone when the blocks answer what it had to guess.
