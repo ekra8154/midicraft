@@ -765,7 +765,7 @@ public final class SongBuilder {
 			int columns = (wall - lane.pos().getX()) * lane.travel().getStepX();
 			Pad pad = layout.ultra() && wantsTurn && !straddles
 				? planTurnPad(columns, tipSignal, turnCells, offBus, Math.max(0, wait - 1),
-					PLANS_THE_RAISED_PAD && climb > 0, above >= 0 && above < floors,
+					climb > 0, above >= 0 && above < floors,
 					lastStyle.buses())
 				: Pad.none(tipSignal);
 			// A split comes before any of that. The event that will not fit is cut in two: as much of
@@ -2170,7 +2170,7 @@ public final class SongBuilder {
 				// four whichever way it is met and a flat turn costs what it costs -- so offBus being
 				// the cheaper of the two is exactly the condition, and the planner can read it off the
 				// prices it was handed rather than being told the direction separately.
-				boolean discounts = PLANS_THE_RAISED_PAD && offBus < turnCells;
+				boolean discounts = offBus < turnCells;
 				Pad end = closingPad(events, tried, from, last, owing, turnCells, offBus,
 					discounts, discounts);
 				int need = turnPrice(end, discounts, discounts,
@@ -5547,7 +5547,7 @@ public final class SongBuilder {
 	private static int turnPrice(Pad pad, boolean climbing, boolean staircase, boolean fromBus,
 			int turnCells, int offBus) {
 		return climbing && staircase
-			&& (PRICES_THE_RAISED_PAD && padRaises(pad, climbing, staircase, fromBus)
+			&& (padRaises(pad, climbing, staircase, fromBus)
 				|| fromBus && pad.cells().isEmpty())
 			? offBus : turnCells;
 	}
