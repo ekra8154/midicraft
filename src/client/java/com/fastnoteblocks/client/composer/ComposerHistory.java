@@ -5,8 +5,20 @@ import java.util.Deque;
 
 public final class ComposerHistory {
 	private static final int MAX_HISTORY = 100;
-	private final Deque<ComposerProject> undo = new ArrayDeque<>();
-	private final Deque<ComposerProject> redo = new ArrayDeque<>();
+	/** What a step is called when whoever recorded it did not say. */
+	public static final String UNNAMED_STEP = "edit";
+	/**
+	 * One recorded state, and the name of the edit that led away from it.
+	 *
+	 * <p>The name travels with the state it undoes <em>to</em> rather than with the state it
+	 * produced, because that is the pairing both stacks need: the top of the undo stack is where
+	 * Ctrl+Z would land and its label is what Ctrl+Z would take back.</p>
+	 */
+	private record Step(ComposerProject project, String label) {
+	}
+
+	private final Deque<Step> undo = new ArrayDeque<>();
+	private final Deque<Step> redo = new ArrayDeque<>();
 	private ComposerProject current;
 
 	public ComposerHistory(ComposerProject initial) {
@@ -18,10 +30,19 @@ public final class ComposerHistory {
 	}
 
 	public void apply(ComposerProject next) {
+		apply(UNNAMED_STEP, next);
+	}
+
+	/**
+	 * Records a step under a name, so undo can say what it is about to take back.
+	 *
+	 * @param label a short verb phrase for what this edit did, as it would read after "Undo"
+	 */
+	public void apply(String label, ComposerProject next) {
 		if (next == null || next.equals(current)) {
 			return;
 		}
-		undo.addLast(current);
+		undo.addLast(new Step(current, label == null || label.isBlank() ? UNNAMED_STEP : label));
 		while (undo.size() > MAX_HISTORY) {
 			undo.removeFirst();
 		}
@@ -67,18 +88,30 @@ public final class ComposerHistory {
 		return !redo.isEmpty();
 	}
 
+	/** What Ctrl+Z would take back, or null when there is nothing to take back. */
+	public String undoLabel() {
+		return undo.isEmpty() ? null : undo.peekLast().label();
+	}
+
+	/** What Ctrl+Y would put back, or null when there is nothing to put back. */
+	public String redoLabel() {
+		return redo.isEmpty() ? null : redo.peekLast().label();
+	}
+
 	public ComposerProject undo() {
 		if (!undo.isEmpty()) {
-			redo.addLast(current);
-			current = undo.removeLast();
+			Step step = undo.removeLast();
+			redo.addLast(new Step(current, step.label()));
+			current = step.project();
 		}
 		return current;
 	}
 
 	public ComposerProject redo() {
 		if (!redo.isEmpty()) {
-			undo.addLast(current);
-			current = redo.removeLast();
+			Step step = redo.removeLast();
+			undo.addLast(new Step(current, step.label()));
+			current = step.project();
 		}
 		return current;
 	}
