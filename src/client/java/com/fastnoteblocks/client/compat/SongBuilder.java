@@ -1063,6 +1063,9 @@ public final class SongBuilder {
 					if (headed.head().size() < STACKED_HEAD_NOTES) {
 						SHORT_HEAD_CUT_AT = opening;
 					}
+					headed = new StackedSplit(
+						onTheFreeBackSide(placements, opening, depth, event.time(), headed.slots()),
+						headed.head(), headed.nearTail(), headed.farTail());
 					cursor = addStackedSplitModule(placements, opening, travel, depth,
 						trigger.triggerDelay(), headed, event.time());
 					far = headed.farTail();
@@ -5624,6 +5627,13 @@ public final class SongBuilder {
 				index < 2 ? back : leaving(back, index - 2));
 		}
 
+		/** The same module with its back pair the other way round. Same size, same columns. */
+		UltraSlots mirroredBack() {
+			return new UltraSlots(centre, sides, front,
+				java.util.Collections.unmodifiableList(
+					java.util.Arrays.asList(back.get(1), back.get(0))));
+		}
+
 		/** The same module with a note in the centre, which is where a rehomed harp goes for free. */
 		UltraSlots withCentre(EventNote note) {
 			return new UltraSlots(note, sides, front, back);
@@ -5918,6 +5928,48 @@ public final class SongBuilder {
 	 * not behind the module, which is what makes them the pair a shape two columns back would have
 	 * taken.</p>
 	 */
+	/**
+	 * The same module with its one back note on whichever side is actually free.
+	 *
+	 * <p>A head that keeps one of the two slots behind it has to choose a side, and until now that
+	 * was a guess: {@link #backPair} hangs it away from the lane the walk has not laid yet, which is
+	 * a good rule and never once looks. For an ordinary chord the guess is right often enough to
+	 * cost nothing. For a cut it is wrong all over -- a cut stands at the end of a lane against a
+	 * staircase, where the ground is not the ground the guess was written for -- and the note lands
+	 * in a cell some other module already owns.</p>
+	 *
+	 * <p>So it looks. Both cells are asked the two questions {@link #backPairIsFree} asks of them,
+	 * and if the chosen side fails while the other passes, the pair is mirrored. Nothing about the
+	 * shape changes: same head, same size, same columns, same tail -- so the plan does not need to
+	 * know, and the planner and the walk cannot part company over it.</p>
+	 *
+	 * <p>ekran: look instead of guess. Applies to any stacked shape carrying exactly one back note,
+	 * not to the head of six alone.</p>
+	 */
+	private static UltraSlots onTheFreeBackSide(PlacementPlan placements, BlockPos opening,
+			Direction noteSide, int time, UltraSlots slots) {
+		if (!HEAD_LOOKS_FOR_ITS_FREE_SIDE || slots == null || slots.backFlanks() != 1) {
+			return slots;
+		}
+		Direction out = slots.back(0) != null ? noteSide : noteSide.getOpposite();
+		if (quietAndFree(placements, opening.relative(out), time)
+				|| !quietAndFree(placements, opening.relative(out.getOpposite()), time)) {
+			return slots;
+		}
+		HEAD_SIDES_SWAPPED++;
+		return slots.mirroredBack();
+	}
+
+	private static boolean quietAndFree(PlacementPlan placements, BlockPos cell, int time) {
+		return placements.freeForNote(cell) && !soundedByAnother(placements, cell, time);
+	}
+
+	/** How often looking found the guess had picked the occupied side. */
+	static int HEAD_SIDES_SWAPPED;
+
+	/** Whether a stacked shape with one back note checks which side is free instead of assuming. */
+	static boolean HEAD_LOOKS_FOR_ITS_FREE_SIDE = true;
+
 	private static boolean backPairIsFree(PlacementPlan placements, Lane opening, int time) {
 		if (!BACK_PAIR_ASKS_THE_BLOCKS) {
 			return false;
