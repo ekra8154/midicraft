@@ -700,14 +700,41 @@ public final class NoteMachineReader {
 		}
 
 		List<Layer> layers = new ArrayList<>();
+		// Notes arrive in fired order, so a cell collision can only be with the tail of a voice.
+		// Worth saying because the alternative is a scan of every voice per note, and a folded build
+		// reads back tens of thousands of them.
 		for (Map.Entry<String, List<NoteEvent>> entry : byInstrument.entrySet()) {
 			int slash = entry.getKey().indexOf(47);
 			String id = slash < 0 ? entry.getKey() : entry.getKey().substring(slash + 1);
 			String label = PreviewInstrument.byId(id).name();
-			layers.add(new Layer(slash < 0
-					? label
-					: label + " " + (Integer.parseInt(entry.getKey().substring(0, slash)) + 1),
-				id, false, true, true, List.copyOf(entry.getValue())));
+			String layerName = slash < 0
+				? label
+				: label + " " + (Integer.parseInt(entry.getKey().substring(0, slash)) + 1);
+			// One layer per voice, not one per instrument. A layer holds at most one note per pitch
+			// per tick, so a machine that really does stand two note blocks of one instrument on one
+			// pitch and fire them together -- which is how a build makes a note louder, and what
+			// dedupe being off leaves in -- cannot be described by a single layer. Reading it into
+			// one silently dropped the second, and this is the path everything else is checked
+			// against: a lossy reader reports a machine as missing notes it is actually playing.
+			List<List<NoteEvent>> voices = new ArrayList<>();
+			for (NoteEvent note : entry.getValue()) {
+				List<NoteEvent> voice = null;
+				for (List<NoteEvent> candidate : voices) {
+					if (!holdsCell(candidate, note)) {
+						voice = candidate;
+						break;
+					}
+				}
+				if (voice == null) {
+					voice = new ArrayList<>();
+					voices.add(voice);
+				}
+				voice.add(note);
+			}
+			for (int index = 0; index < voices.size(); index++) {
+				layers.add(new Layer(voices.size() == 1 ? layerName : layerName + " (" + (index + 1) + ")",
+					id, false, true, true, List.copyOf(voices.get(index))));
+			}
 		}
 		ComposerProject project = new ComposerProject(name, ComposerProject.DEFAULT_PPQ,
 			TEMPO_MICROS_PER_QUARTER, layers, 0, nextId, span,
@@ -790,6 +817,27 @@ public final class NoteMachineReader {
 	 * next to it changes and so can be stale in a file that was saved mid-edit. The block below is
 	 * what a player would hear.</p>
 	 */
+	/**
+	 * Whether a voice already holds a note on this pitch at this tick.
+	 *
+	 * <p>Walks back from the end and stops at the first earlier tick. Notes are appended in the order
+	 * they fired, so everything sharing a tick with this one is at the tail -- which turns what would
+	 * be a scan of the whole voice per note into a handful of comparisons. A folded build reads back
+	 * tens of thousands of notes and this runs once for each of them, per voice tried.</p>
+	 */
+	private static boolean holdsCell(List<NoteEvent> voice, NoteEvent note) {
+		for (int index = voice.size() - 1; index >= 0; index--) {
+			NoteEvent existing = voice.get(index);
+			if (existing.startTick() != note.startTick()) {
+				return false;
+			}
+			if (existing.midiNote() == note.midiNote()) {
+				return true;
+			}
+		}
+		return false;
+	}
+
 	private static Instrument instrumentAt(Region region, BlockPos position) {
 		String id = region.at(position.below()).instrument().name().toUpperCase(Locale.ROOT);
 		boolean known = PreviewInstrument.VALUES.stream().anyMatch(value -> value.id().equals(id));
