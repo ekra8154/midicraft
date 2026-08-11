@@ -1612,6 +1612,27 @@ public final class SongBuilder {
 			if (placed.nudged()) {
 				replan = layout.ultra();
 			}
+			// And whenever the ground answered a question the plan had to guess at.
+			//
+			// Whether the pair of slots behind a module is free is answered from blocks by the walk and
+			// predicted from arithmetic by the plan, and the arithmetic is pessimistic: it says busy far
+			// more often than the ground does. Where the two differ the walk builds a shape the plan did
+			// not price -- a head of seven where a plain bus was booked -- and every column the plan still
+			// owes this lane is owed against the wrong length.
+			//
+			// The drift counter above cannot see it. That compares where a chord landed against where
+			// {@link #landingOf} said it would, and the walk asks landingOf with the same blocks-based
+			// answer it built with, so the two agree exactly and nothing is reported. What went stale is
+			// the sweep, which ran before any of this was on the ground, and nothing compares against
+			// that.
+			//
+			// So the trigger is the disagreement itself rather than its consequences: the guess said
+			// busy, the blocks said free, and from here the plan is answering about a lane that no longer
+			// exists.
+			if (REPLAN_WHEN_BLOCKS_DISAGREE && columnBehindBusy && !foretoldBusy) {
+				placements.padded("planReplanBlocksDisagreed");
+				replan = layout.ultra();
+			}
 			// A bus is the one module that hands the next thing along a wire rather than a block: its
 			// stones are lit by the dust running over them, and that dust has been counting down since
 			// the repeater at the head of it. A chord of three or fewer ends on a block the repeater
@@ -5858,6 +5879,15 @@ public final class SongBuilder {
 	 * Three places make that sum and only one of them was taught the third size.</p>
 	 */
 	static boolean CUT_KEEPS_ONE_BACK_FLANK = false;
+
+	/**
+	 * Whether the plan is redone when the blocks answer what it had to guess.
+	 *
+	 * <p>ekran: be more intelligent whenever possible. The walk can see things the plan cannot -- the
+	 * plan runs before any of the lane exists -- so the choice when they disagree is either to make
+	 * the walk stop looking, or to let it look and tell the plan. This is the second.</p>
+	 */
+	static boolean REPLAN_WHEN_BLOCKS_DISAGREE = true;
 
 	/** Whether a lone back flank hangs away from the lane the walk has not built yet. */
 	static boolean BACK_FLANK_AWAY_FROM_NEXT_LANE = true;
