@@ -1067,8 +1067,8 @@ public final class SongBuilder {
 					}
 					headed = new StackedSplit(
 						onTheFreeSlots(placements, opening, travel, depth, event.time(),
-							headed.slots()),
-						headed.head(), headed.nearTail(), headed.farTail());
+							headed.slots(), headed.shed() ? DESCENT_FLANK_SLOT : -1),
+						headed.head(), headed.nearTail(), headed.farTail(), headed.shed());
 					cursor = addStackedSplitModule(placements, opening, travel, depth,
 						trigger.triggerDelay(), headed, event.time());
 					far = headed.farTail();
@@ -1136,8 +1136,7 @@ public final class SongBuilder {
 				// a walk that charges the split more than the planner did refuses it and leaves the
 				// lane standing short of the wall it was measured for.
 				tipSignal = headed != null
-					? DUST_RANGE - STACKED_BUS_TRANSITION
-						- (headed.nearTail().size() + headed.farTail().size() + 1) / 2 - splitCells
+					? DUST_RANGE - headed.runCells(splitCells)
 					: DUST_RANGE - cells - splitCells;
 				gradeLaneTip(placements, turnCells, tipSignal,
 					climb > 0 ? "SplitClimb" : "SplitDescent");
@@ -5170,6 +5169,94 @@ public final class SongBuilder {
 		return new Relocation(emptied, new StackedBusSplit(emptied, head, tail), "Tail");
 	}
 
+	/**
+	 * Whether a stacked head in front of a descent gives up the one flank the staircase wants.
+	 *
+	 * <p>ekran's, read off the breach at forty wide over five floors. A head is three columns --
+	 * repeater, centre, front flanks -- and it hands over on a transition cell, which is stone with
+	 * dust on it. A descent's first rung is stone with dust on it, in the same place, at the same
+	 * level: {@link #addParityPad} and the first step of {@link #addSplitBusDescent} lay the same two
+	 * blocks. So the two can share a column. The staircase begins where the transition would have
+	 * been, the centre lights its first rung exactly as it lit the pad, and the head needs one column
+	 * fewer to close a lane -- which is the column the lane was breaching for.</p>
+	 *
+	 * <p>Exactly one block is in the way. The spiral steps off its centre line towards
+	 * {@code descentSide}, so its second rung's dust lands in that same column, on that side, at the
+	 * height the front flanks hang at. The front flank on the descent side is in it. The other one is
+	 * not, and never can be: the spiral only ever steps one way.</p>
+	 *
+	 * <p>So this is a relocation rather than a smaller head, which is what makes it cheap. The note
+	 * comes out of that slot and goes somewhere else in the same module for nothing -- a free centre,
+	 * a spare harp's slot, a low slot the chord did not fill -- or, where the chord has a bus, over
+	 * the staircase with the rest of the far half. A head with nowhere to put it does not shed, and
+	 * the lane does what it does today.</p>
+	 */
+	static boolean SHEDS_THE_FLANK_THE_DESCENT_WANTS = true;
+
+	/**
+	 * The low slot a descent's second rung stands in.
+	 *
+	 * <p>Side 1 is {@code descentSide}, and it is that for the whole build rather than for one lane:
+	 * {@code depth} is fixed once at the head of the walk, {@code descentSide} is its opposite, and
+	 * {@link #addStackedEventModule} numbers its sides {@code [depth, depth.getOpposite()]}. So side
+	 * 1 is the side every spiral in the build steps towards, whichever way the lane holding it
+	 * travels. Front rather than back because the staircase is always ahead of the module.</p>
+	 */
+	private static final int DESCENT_FLANK_SLOT = 1;
+
+	/** A head with the descent's flank rehomed, and the note the bus must take if no slot could. */
+	private record ShedFlank(UltraSlots slots, EventNote toBus) {
+	}
+
+	/**
+	 * The same head with nothing hanging where the staircase's second rung goes, or {@code null}.
+	 *
+	 * <p>Ordered by what it costs, which is the order {@link #relocate} uses and for the same reason:
+	 * the centre and a spare slot cost no cell at all, and the bus costs one wherever the tail was
+	 * even. A head that can only shed onto the bus still sheds -- the column at the wall is worth
+	 * more than the cell -- but it is tried last so that the chords which can do it for free do.</p>
+	 *
+	 * @param granted how many of the back pair this head was allowed. A back slot standing empty
+	 *     because the lane behind owns it is not one this chord may fill, and the two look identical
+	 *     from the slots alone. Getting that wrong hangs a note in somebody else's cell, which is
+	 *     the one kind of mistake in this file that builds cleanly and plays wrong.
+	 * @param hasBus whether there is a tail to take the note when no slot can
+	 */
+	private static ShedFlank shedDescentFlank(UltraSlots slots, int granted, boolean hasBus) {
+		if (slots == null) {
+			return null;
+		}
+		EventNote note = slots.slot(DESCENT_FLANK_SLOT);
+		if (note == null) {
+			// Nothing hangs there, so this head already stands alongside a staircase quite happily.
+			return new ShedFlank(slots, null);
+		}
+		UltraSlots emptied = slots.without(DESCENT_FLANK_SLOT);
+		if (slots.centre() == null) {
+			if (isHarpNote(note)) {
+				return new ShedFlank(emptied.withCentre(note), null);
+			}
+			// Or it trades with a harp the module is hanging somewhere it does not mind losing: the
+			// harp takes the centre, this note takes the harp's slot, and the contested one empties.
+			int harp = CENTRE_TAKES_A_SPARE_HARP ? spareHarpFlank(slots, DESCENT_FLANK_SLOT) : -1;
+			if (harp >= 0) {
+				return new ShedFlank(emptied.with(harp, note).withCentre(slots.slot(harp)), null);
+			}
+		}
+		// Then a low slot the chord did not fill. The front slot on the other side is always this
+		// module's to use. A back slot only where the head was granted it, and {@link #backPair}
+		// fills the far side first, so a grant of one means slot three and not slot two.
+		int[] spare = granted >= 2 ? new int[] {0, 3, 2}
+			: granted == 1 ? new int[] {0, 3}
+			: new int[] {0};
+		for (int slot : spare) {
+			if (slots.slot(slot) == null) {
+				return new ShedFlank(emptied.with(slot, note), null);
+			}
+		}
+		return hasBus ? new ShedFlank(emptied, note) : null;
+	}
+
 	/** Which of the four low-note slots a chord fills, as one number, for keying the oracle. */
 	private static int flankMask(UltraSlots slots) {
 		if (slots == null) {
@@ -5330,9 +5417,19 @@ public final class SongBuilder {
 	 * @param nearTail notes of the bus before the staircase. Never empty: the near half has to end
 	 *     on a bus block for {@link #addSplitBusDescent} to be entitled to its short spiral, and a
 	 *     head with no bus behind it ends on the transition cell instead.
+	 * @param shed whether the near half is a head that gave up the flank the staircase wants and so
+	 *     hands over on the staircase's own first rung instead of on a transition cell of its own.
+	 *     One column shorter and one cell of wire cheaper than the same head without it -- see
+	 *     {@link #SHEDS_THE_FLANK_THE_DESCENT_WANTS}. Carried on the record because the walk has to
+	 *     build the shape the planner priced, and the two read this from the one oracle.
 	 */
 	private record StackedSplit(UltraSlots slots, List<EventNote> head, List<EventNote> nearTail,
-			List<EventNote> farTail) {
+			List<EventNote> farTail, boolean shed) {
+		/** Cells of wire from the head's repeater to the far half, staircase included. */
+		int runCells(int splitCells) {
+			return (shed ? 0 : STACKED_BUS_TRANSITION)
+				+ (nearTail.size() + farTail.size() + 1) / 2 + splitCells;
+		}
 	}
 
 	/**
@@ -5376,6 +5473,10 @@ public final class SongBuilder {
 		// cut with a short head was laid as a plain bus instead, and illit-do-the-dance at twelve
 		// wide lost its lane five columns past the wall for exactly that.
 		StackedBusSplit split = roomBehind ? stackedBusSplit(chord, 2) : null;
+		// How many of the back pair the head that came back was granted, which is not the same as how
+		// many it filled. {@link #shedDescentFlank} needs the grant: a back slot empty because the
+		// lane behind owns it is not a slot this chord may rehome a note into.
+		int granted = split == null ? 0 : 2;
 		// One slot behind before none, here as in {@link #addChordModule}: the lane behind has a
 		// single live cell in the column that touches this one, so the most it can ever contest is
 		// one, and a head of six keeps two more notes out of the bus than a head of five.
@@ -5390,9 +5491,11 @@ public final class SongBuilder {
 		// a stacked centre behind is the exception, and there the fallback from a full head is five.
 		if (split == null && HEAD_KEEPS_ONE_BACK_FLANK && !stackedBehind) {
 			split = stackedBusSplit(chord, 1);
+			granted = split == null ? 0 : 1;
 		}
 		if (split == null && FRONT_ONLY_HEADS && FRONT_ONLY_CUTS) {
 			split = stackedBusSplit(chord, 0);
+			granted = 0;
 		}
 		if (split == null) {
 			return null;
@@ -5400,11 +5503,39 @@ public final class SongBuilder {
 		// Head, transition, and -- unless the near half is allowed to be the head alone -- at least
 		// one cell of bus to end on.
 		int nearBusCells = room - STACKED_CELLS - STACKED_BUS_TRANSITION;
+		int floorCells = HEAD_ONLY_NEAR_HALF && !climbing ? 0 : 1;
+		// One column short of a head-only near half, and going down: then the head may hand over onto
+		// the staircase's own first rung rather than onto a transition cell of its own, which is the
+		// same two blocks in the same place. It costs the flank the second rung wants -- rehomed, not
+		// dropped -- and it buys the column the lane could not otherwise reach its wall in.
+		//
+		// Descents only, and not merely because a climb's staircase is shaped differently. A climb
+		// leaves by glass a level up and a column over, so there is no rung standing where the
+		// transition stands and nothing for the centre to light. That is the same gap that keeps
+		// {@link #HEAD_ONLY_NEAR_HALF} to descents, and it is the same reason.
+		boolean shed = false;
+		if (SHEDS_THE_FLANK_THE_DESCENT_WANTS && !climbing && HEAD_ONLY_NEAR_HALF
+				&& nearBusCells == floorCells - 1) {
+			ShedFlank rehomed = shedDescentFlank(split.slots(), granted, !split.tail().isEmpty());
+			if (rehomed != null) {
+				List<EventNote> head = split.head();
+				List<EventNote> tail = split.tail();
+				if (rehomed.toBus() != null) {
+					head = new ArrayList<>(head);
+					head.remove(rehomed.toBus());
+					tail = new ArrayList<>(tail);
+					tail.add(rehomed.toBus());
+				}
+				split = new StackedBusSplit(rehomed.slots(), head, tail);
+				nearBusCells = floorCells;
+				shed = true;
+			}
+		}
 		// Descents only for now. A climb leaves the near half by a glass staircase whose first rung
 		// is a level up and a column over, and the handover -- which sits beside the centre on the
 		// module's own level -- has nothing bridging it to that rung. Ekran pasted one and found the
 		// glass simply disconnected. A descent has no such gap and works today.
-		if (nearBusCells < (HEAD_ONLY_NEAR_HALF && !climbing ? 0 : 1)) {
+		if (nearBusCells < floorCells) {
 			if (nearBusCells == 0 && !split.tail().isEmpty()
 					&& STACKED_BUS_TRANSITION + (split.tail().size() + 1) / 2 + splitCells
 						<= DUST_RANGE) {
@@ -5434,11 +5565,17 @@ public final class SongBuilder {
 			}
 			nearNotes = tail.size() - 1;
 		}
-		if (STACKED_BUS_TRANSITION + (tail.size() + 1) / 2 + splitCells > DUST_RANGE) {
+		// The transition cell drops out of the run as well as out of the columns when the head hands
+		// over onto the staircase, because the cell it would have laid is a rung the staircase lays
+		// anyway and {@code splitCells} already counts every rung. So a shed cut reaches one cell
+		// further than the same cut without it. Stated through the record rather than here, because
+		// the walk makes this same sum for {@code tipSignal} and the two must not drift apart.
+		StackedSplit cut = new StackedSplit(split.slots(), split.head(), tail.subList(0, nearNotes),
+			tail.subList(nearNotes, tail.size()), shed);
+		if (cut.runCells(splitCells) > DUST_RANGE) {
 			return null;
 		}
-		return new StackedSplit(split.slots(), split.head(), tail.subList(0, nearNotes),
-			tail.subList(nearNotes, tail.size()));
+		return cut;
 	}
 
 	/** The near half of a cut chord, built as a stacked head with a bus behind it. */
@@ -5446,7 +5583,17 @@ public final class SongBuilder {
 			Direction travel, Direction laneStep, int triggerDelay, StackedSplit split, int time) {
 		placements.placing("cutHead" + split.head().size()
 			+ "/near" + split.nearTail().size() + "/far" + split.farTail().size()
-			+ (split.slots().backFlanks() == 0 ? " frontOnly" : " reachesBack"));
+			+ (split.slots().backFlanks() == 0 ? " frontOnly" : " reachesBack")
+			+ (split.shed() ? " shedFlank" : ""));
+		if (split.shed()) {
+			// No transition cell and no column for it. The head is laid and handed straight back at
+			// the column it came to rest in, which is the column the staircase starts in -- and the
+			// staircase's own first rung is the two blocks the transition would have been.
+			Lane afterHead = addStackedEventModule(placements,
+				Lane.straight(cursor, travel, laneStep), triggerDelay, time, split.slots());
+			placements.padded("busHandoverShed");
+			return afterHead.pos();
+		}
 		Body body = addStackedBusModule(placements, Lane.straight(cursor, travel, laneStep),
 			triggerDelay, time, split.slots(), split.nearTail());
 		return body.lane().pos();
@@ -5983,6 +6130,18 @@ public final class SongBuilder {
 	 */
 	private static UltraSlots onTheFreeSlots(PlacementPlan placements, BlockPos pos, Direction travel,
 			Direction noteSide, int time, UltraSlots slots) {
+		return onTheFreeSlots(placements, pos, travel, noteSide, time, slots, -1);
+	}
+
+	/**
+	 * @param banned a slot this module may not hang a note in whatever the ground says, or -1.
+	 *     A head that shed the flank the staircase wants has an empty slot that reads perfectly free
+	 *     -- the staircase is not built yet -- and this would fill it straight back in, silently
+	 *     undoing the one thing the shape was measured on. The ground cannot answer for a block that
+	 *     is not there, so the shape has to say so.
+	 */
+	private static UltraSlots onTheFreeSlots(PlacementPlan placements, BlockPos pos, Direction travel,
+			Direction noteSide, int time, UltraSlots slots, int banned) {
 		if (!HEAD_LOOKS_FOR_ITS_FREE_SIDE || slots == null) {
 			return slots;
 		}
@@ -6013,7 +6172,8 @@ public final class SongBuilder {
 		EventNote[] placed = new EventNote[4];
 		int next = 0;
 		for (int slot : new int[] {0, 1, 3, 2}) {
-			if (next < hanging.size() && quietAndFree(placements, cell[slot], time)) {
+			if (slot != banned && next < hanging.size()
+					&& quietAndFree(placements, cell[slot], time)) {
 				placed[slot] = hanging.get(next++);
 			}
 		}
