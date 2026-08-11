@@ -167,6 +167,89 @@ class ClipboardAndLayersTest {
 		assertFalse(song.sameContentAs(null));
 	}
 
+	/**
+	 * A phrase dragged into the start of the song keeps its shape.
+	 *
+	 * <p>Clamping note by note stops the ones that have arrived at tick zero while the ones behind
+	 * them keep coming, so every gap in the phrase closes up: three notes a beat apart, dragged far
+	 * enough left, used to arrive as a chord. Nothing on screen says that happened -- the notes are
+	 * where you dropped them -- and undo is the only way back.</p>
+	 */
+	@Test
+	void aPhraseStopsAtTheStartWithoutFoldingUp() {
+		ComposerProject song = songOf(layer("Melody", "HARP", 60, 62, 64));
+		Set<Long> all = song.layers().getFirst().notes().stream()
+			.map(NoteEvent::id)
+			.collect(Collectors.toCollection(LinkedHashSet::new));
+		assertEquals(List.of(0L, 240L, 480L), startTicks(song.layers().getFirst()));
+
+		ComposerProject dragged = song.moveNotes(all, -10_000L, 0);
+
+		assertEquals(List.of(0L, 240L, 480L), startTicks(dragged.layers().getFirst()),
+			"the phrase was already against the start, so nothing should have moved at all");
+
+		ComposerProject fromLater = song.moveNotes(all, 960L, 0).moveNotes(all, -10_000L, 0);
+		assertEquals(List.of(0L, 240L, 480L), startTicks(fromLater.layers().getFirst()),
+			"dragged in from later it should stop with its first note on zero, still a beat apart");
+	}
+
+	/** The same for pitch, where losing the intervals is not an early phrase but a wrong chord. */
+	@Test
+	void aChordStopsAtTheEdgeOfTheRangeWithoutCollapsing() {
+		ComposerProject song = songOf(layer("Chord", "HARP", 120, 124, 127));
+		Set<Long> all = song.layers().getFirst().notes().stream()
+			.map(NoteEvent::id)
+			.collect(Collectors.toCollection(LinkedHashSet::new));
+
+		ComposerProject up = song.moveNotes(all, 0L, 40);
+
+		assertEquals(List.of(120, 124, 127), up.layers().getFirst().notes().stream()
+			.map(NoteEvent::midiNote).toList(),
+			"the top note is already on 127, so the chord cannot rise at all");
+
+		ComposerProject down = song.moveNotes(all, 0L, -200);
+		assertEquals(List.of(0, 4, 7), down.layers().getFirst().notes().stream()
+			.map(NoteEvent::midiNote).toList(),
+			"pushed down it should keep every interval and stop with its lowest note on zero");
+	}
+
+	/**
+	 * A duplicate lands next to its source, carries the notes, and shares none of their identity.
+	 *
+	 * <p>Fresh ids are the whole of it: the two layers are selected, moved and deleted by note id,
+	 * so a copy that reused them would be a second view of the first layer rather than a new one.</p>
+	 */
+	@Test
+	void duplicatingALayerCopiesItsNotesUnderNewIds() {
+		ComposerProject song = songOf(
+			layer("Lead", "HARP", 60, 62),
+			layer("Bass", "BASS", 40));
+
+		ComposerProject copied = song.duplicateLayer(0);
+
+		assertEquals(3, copied.layers().size());
+		assertEquals("Lead copy", copied.layers().get(1).name(), "next to its source, not at the end");
+		assertEquals("Bass", copied.layers().get(2).name(), "and the rest moved down");
+		assertEquals(1, copied.activeLayerIndex(), "a duplicate is made in order to change it");
+		assertEquals(startTicks(song.layers().getFirst()), startTicks(copied.layers().get(1)));
+
+		Set<Long> sourceIds = song.layers().getFirst().notes().stream()
+			.map(NoteEvent::id)
+			.collect(Collectors.toCollection(LinkedHashSet::new));
+		assertTrue(copied.layers().get(1).notes().stream().noneMatch(note -> sourceIds.contains(note.id())),
+			"the copy's notes must not answer to the original's ids");
+		assertEquals("HARP", copied.layers().get(1).instrument());
+	}
+
+	/** Nothing to duplicate is not an error, it is nothing to do. */
+	@Test
+	void duplicatingALayerThatIsNotThereChangesNothing() {
+		ComposerProject song = songOf(layer("Lead", "HARP", 60));
+
+		assertEquals(song, song.duplicateLayer(-1));
+		assertEquals(song, song.duplicateLayer(7));
+	}
+
 	private static Set<String> instrumentsHolding(PasteResult pasted, Set<Long> ids) {
 		return pasted.project().layers().stream()
 			.filter(layer -> layer.notes().stream().anyMatch(note -> ids.contains(note.id())))

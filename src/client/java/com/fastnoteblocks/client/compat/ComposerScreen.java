@@ -320,6 +320,14 @@ public final class ComposerScreen extends Screen {
 	private boolean layerMenuOpen;
 	private int layerMenuX;
 	private int layerMenuY;
+	/**
+	 * The row the layer menu was opened on, which is not always the active layer.
+	 *
+	 * <p>Right-clicking a row that is already part of a multi-layer selection leaves the active
+	 * layer where it was, so the actions that work on one layer -- rename, duplicate -- were working
+	 * on whichever row happened to be active rather than on the one under the cursor.</p>
+	 */
+	private int layerMenuRow = -1;
 	private List<ClipboardNote> clipboard = List.of();
 	/** The tick the copy started on, which is where Ctrl+Shift+V puts it back. */
 	private long clipboardOriginTick;
@@ -461,6 +469,8 @@ public final class ComposerScreen extends Screen {
 	private LayerPaint painting = LayerPaint.NONE;
 	private boolean paintBuildEnabled;
 	private LayerState paintState = LayerState.ACTIVE;
+	/** Whether the box being dragged was started with Ctrl, which makes it add rather than replace. */
+	private boolean boxAdditive;
 	private final Set<Integer> paintedRows = new LinkedHashSet<>();
 	/**
 	 * Frame timings, gathered only while F9 has the profiler switched on.
@@ -845,6 +855,30 @@ public final class ComposerScreen extends Screen {
 		rollWidth = Math.max(40, width - rollX - 8);
 		layerScroll = Math.min(layerScroll, maxLayerScroll());
 		rebuildMoveLayerButtons();
+	}
+
+	/** The row the layer menu belongs to, falling back to the active layer if it has gone. */
+	private int menuRow() {
+		return layerMenuRow >= 0 && layerMenuRow < project().layers().size()
+			? layerMenuRow
+			: project().activeLayerIndex();
+	}
+
+	/** Copies the layer the menu was opened on, and moves onto the copy. */
+	private void duplicateLayer(int source) {
+		ComposerProject copied = project().duplicateLayer(source);
+		if (copied.equals(project())) {
+			showResult(Component.literal("No room for another layer - "
+				+ ComposerProject.MAX_LAYERS + " is the limit."));
+			return;
+		}
+		apply("duplicate layer " + (source + 1), copied);
+		// Onto the copy, not the original: a duplicate is made in order to change it.
+		selectOnlyLayer(source + 1);
+		layersChanged();
+		rebuildMoveLayerButtons();
+		showResult(Component.literal("Duplicated \"" + project().layers().get(source).name() + "\" - "
+			+ project().layers().get(source + 1).notes().size() + " notes. The copy is selected."));
 	}
 
 	private void mergeSelectedLayers() {
@@ -1415,6 +1449,7 @@ public final class ComposerScreen extends Screen {
 			// anything to pull forward" without having to click it and read the result.
 			case SNAP_TO_START -> project().firstNoteTick(Set.copyOf(selectedLayers)) > 0L;
 			case RENAME, SELECT_ALL -> true;
+			case DUPLICATE -> project().layers().size() < ComposerProject.MAX_LAYERS;
 		};
 	}
 
@@ -1433,7 +1468,8 @@ public final class ComposerScreen extends Screen {
 		}
 		layerMenuOpen = false;
 		switch (action) {
-			case RENAME -> beginLayerRename(project().activeLayerIndex());
+			case RENAME -> beginLayerRename(menuRow());
+			case DUPLICATE -> duplicateLayer(menuRow());
 			case MERGE_SELECTED -> mergeSelectedLayers();
 			case SNAP_TO_START -> snapSelectedLayersToStart();
 			case DELETE_SELECTED -> deleteSelectedLayers();
@@ -2214,6 +2250,9 @@ public final class ComposerScreen extends Screen {
 	private static String layerActionTooltip(LayerAction action) {
 		return switch (action) {
 			case RENAME -> "Renames this layer. Double-clicking its name does the same thing.";
+			case DUPLICATE -> "Copies this layer, notes and all, into a new one directly below it, "
+				+ "and selects the copy. The usual reason is to double a part on a second instrument, "
+				+ "so the copy is where the change goes.";
 			case MERGE_SELECTED -> "Folds the selected layers into the lowest-numbered one, which "
 				+ "keeps its name and instrument -- so merging across two instruments gives every "
 				+ "note the surviving one. Ctrl+E does the same thing.";
@@ -2507,10 +2546,22 @@ public final class ComposerScreen extends Screen {
 		// The header doubles as the fold: an arrow pointing the way the panel would go.
 		graphics.text(font, Component.literal(config.layerPanelCollapsed() ? ">" : "<"),
 			row.inset(), TOOLBAR_HEIGHT + 4, 0xFF8A9098, false);
+		// Where the blank run under the last row would be drawn, which decides whether it can say the
+		// mode itself. Settled before anything is drawn because the header is drawn first and only
+		// stands in when the run is out of sight.
+		int blankY = layerY(project().layers().size()) + 3;
+		boolean blankRunVisible = row.name()
+			&& blankY >= LAYER_LIST_TOP && blankY < layerListBottom() - 6;
 		if (row.name()) {
-			graphics.text(font, noLayerSelected() ? "Layers - none" : "Layers",
-				row.inset() + 10, TOOLBAR_HEIGHT + 4,
-				noLayerSelected() ? 0xFF8FD3FF : 0xFF8A9098, false);
+			graphics.text(font, "Layers", row.inset() + 10, TOOLBAR_HEIGHT + 4, 0xFF8A9098, false);
+			// "Layers - none" read as "this song has no layers", which is a different and much more
+			// alarming sentence. The mode gets a line of its own, and only when the run at the
+			// bottom is scrolled out of reach and cannot carry it.
+			if (noLayerSelected() && !blankRunVisible) {
+				int from = row.inset() + 14 + font.width("Layers");
+				smallText(graphics, smallFit("no layer selected", layerPanelWidth() - from - 4),
+					from, TOOLBAR_HEIGHT + 5, 0xFF7FB6D8);
+			}
 		}
 		graphics.enableScissor(0, LAYER_LIST_TOP - 2, layerPanelWidth(), layerListBottom());
 		for (int index = 0; index < project().layers().size(); index++) {
@@ -2607,14 +2658,11 @@ public final class ComposerScreen extends Screen {
 		}
 		// The empty run under the last row is a control, and empty panel does not look like one. So
 		// it is labelled, quietly, exactly where the click that uses it lands.
-		if (row.name()) {
-			int blankY = layerY(project().layers().size()) + 3;
-			if (blankY >= LAYER_LIST_TOP && blankY < layerListBottom() - 6) {
-				smallText(graphics,
-					smallFit(noLayerSelected() ? "no layer selected" : "click here: no layer",
-						layerPanelWidth() - 2 * row.inset() - 4),
-					row.inset() + 3, blankY, noLayerSelected() ? 0xFF7FB6D8 : 0xFF565B63);
-			}
+		if (blankRunVisible) {
+			smallText(graphics,
+				smallFit(noLayerSelected() ? "no layer selected" : "click here: no layer",
+					layerPanelWidth() - 2 * row.inset() - 4),
+				row.inset() + 3, blankY, noLayerSelected() ? 0xFF7FB6D8 : 0xFF565B63);
 		}
 		extractLayerDropLine(graphics);
 		graphics.disableScissor();
@@ -2900,6 +2948,20 @@ public final class ComposerScreen extends Screen {
 	private static final int DRAG_AXIS_THRESHOLD = 4;
 
 	/**
+	 * How far a press may wander and still count as a click rather than a drag.
+	 *
+	 * <p>Generous, because it is deciding between drawing a note and selecting nothing: a box three
+	 * pixels across catches nothing anyway, so nothing is lost by reading it as a click, while a
+	 * hand that shifted two pixels on the way down and got no note is a broken editor.</p>
+	 */
+	private static final int CLICK_SLOP = 3;
+
+	/** Whether the cursor has left the click's slop since the button went down. */
+	private boolean travelled(double x, double y) {
+		return Math.abs(x - dragStartX) > CLICK_SLOP || Math.abs(y - dragStartY) > CLICK_SLOP;
+	}
+
+	/**
 	 * Which axis a Shift-held drag is locked to, given how far it has come.
 	 *
 	 * <p>Decided once and then kept, which is the only part of this with a choice in it. Re-deciding
@@ -3127,13 +3189,18 @@ public final class ComposerScreen extends Screen {
 		}
 		// A locked drag looks exactly like a drag you are being sloppy about until it says so. Drawn
 		// as a line through the notes rather than a label, because it is answering "which way can
-		// this go" and a line is that answer -- and it follows the cursor, which is where you are.
+		// this go" and a line is that answer.
+		//
+		// Pinned where the drag began, not to the cursor. Following the cursor meant the horizontal
+		// guide slid up and down the roll while claiming the drag could not move up or down -- the
+		// one thing it exists to say. Standing still on the rail the notes are travelling along says
+		// it without having to be read.
 		if (draggingNotes && dragAxis != DragAxis.UNDECIDED && shiftDown()) {
-			int guideY = (int)lastMouseY;
-			int guideX = (int)lastMouseX;
 			if (dragAxis == DragAxis.TIME) {
+				int guideY = (int)dragStartY;
 				graphics.fill(rollX, guideY, rollX + rollWidth, guideY + 1, 0x8855FFFF);
 			} else {
+				int guideX = (int)dragStartX;
 				graphics.fill(guideX, rollY, guideX + 1, rollY + rollHeight, 0x8855FFFF);
 			}
 		}
@@ -3742,13 +3809,12 @@ public final class ComposerScreen extends Screen {
 			if (palette.contains(event.x(), event.y())) {
 				return true;
 			}
-			// Anywhere else puts it away, including the icon that opened it -- which is consumed so
-			// the click does not fall through and open it straight back up.
-			boolean onOpener = layerInstrumentAt(event.x(), event.y()) == instrumentMenuLayer;
+			// Anywhere else puts it away, and does nothing else. A click that dismisses a menu is
+			// spent on dismissing it: it used to fall through, so putting the palette down landed on
+			// whatever happened to be under it and picked a different layer, or sounded a piano key.
+			// That includes the icon that opened it, which would otherwise open it straight back up.
 			instrumentMenuLayer = -1;
-			if (onOpener) {
-				return true;
-			}
+			return true;
 		}
 		if (event.button() == 1) {
 			int stateLayer = layerStateAt(event.x(), event.y());
@@ -3762,6 +3828,7 @@ public final class ComposerScreen extends Screen {
 					selectLayer(layerIndex, false, false);
 				}
 				layerMenuOpen = true;
+				layerMenuRow = layerIndex;
 				layerMenuX = (int)event.x();
 				layerMenuY = (int)event.y();
 				contextMenuOpen = false;
@@ -3833,8 +3900,15 @@ public final class ComposerScreen extends Screen {
 		if (event.button() == 1 && insideRoll(event.x(), event.y())) {
 			NoteHit hit = noteAt(event.x(), event.y());
 			if (hit != null) {
-				if (selectedNotes.isEmpty()) {
+				// Right-clicking a note deletes it, and a note you have just drawn is selected -- so
+				// the one note in the selection, under the cursor, is still just that note. Opening a
+				// menu over it instead made undoing a stray click a two-step job, which is the job
+				// the plain right-click exists to be. A wider selection is a different thing to be
+				// pointing at and gets the menu.
+				if (selectedNotes.isEmpty()
+						|| selectedNotes.size() == 1 && selectedNotes.contains(hit.note().id())) {
 					apply("delete note", project().deleteNotes(Set.of(hit.note().id())));
+					selectedNotes.clear();
 					return true;
 				}
 				if (noLayerSelected()) {
@@ -3898,10 +3972,14 @@ public final class ComposerScreen extends Screen {
 			placeNote(mouseMidi(event.y()), snapTick(mouseTick(event.x())));
 			return true;
 		}
+		// Not decided here. A press on empty roll is the start of a box select and also, if the hand
+		// never moves, a note being drawn -- and which one it was is not known until the button comes
+		// back up. See mouseReleased.
 		selectingBox = true;
+		boxAdditive = event.hasControlDownWithQuirk();
 		dragStartX = selectionEndX = event.x();
 		dragStartY = selectionEndY = event.y();
-		if (!event.hasControlDownWithQuirk()) {
+		if (!boxAdditive) {
 			selectedNotes.clear();
 		}
 		return true;
@@ -4150,6 +4228,18 @@ public final class ComposerScreen extends Screen {
 			selectingBox = false;
 			horizontalEdgeSince = 0L;
 			verticalEdgeSince = 0L;
+			// A press that never travelled is a click, and with a layer selected a click on empty
+			// roll draws a note there. Selecting a layer is how you say "this is the part I am
+			// writing", so the plain gesture in that state is writing rather than selecting -- and
+			// the box is still there the moment the hand moves, which is what tells them apart.
+			//
+			// Ctrl is the exception: it means "add to what is selected", which is a selection
+			// gesture whether or not it moved. With no layer selected there is nothing to draw into,
+			// so a click there stays what it was.
+			if (!boxAdditive && !noLayerSelected() && !travelled(event.x(), event.y())) {
+				placeNote(mouseMidi(dragStartY), snapTick(mouseTick(dragStartX)));
+				return true;
+			}
 			selectNotesInBox();
 			return true;
 		}
@@ -4342,6 +4432,13 @@ public final class ComposerScreen extends Screen {
 		if ((event.key() == GLFW.GLFW_KEY_DELETE || event.key() == GLFW.GLFW_KEY_BACKSPACE)
 				&& !selectedNotes.isEmpty()) {
 			deleteSelectedNotes();
+			return true;
+		}
+		// With no notes selected, the selection is the layers, so that is what Delete is pointing at.
+		// Delete only, not Backspace: the notes case has two keys because deleting a note is small
+		// and constant, and taking out four layers of a song is neither.
+		if (event.key() == GLFW.GLFW_KEY_DELETE && !selectedLayers.isEmpty()) {
+			deleteSelectedLayers();
 			return true;
 		}
 		if (!selectedNotes.isEmpty() && (event.isLeft() || event.isRight() || event.isUp() || event.isDown())) {
@@ -5856,6 +5953,7 @@ public final class ComposerScreen extends Screen {
 
 	private enum LayerAction {
 		RENAME("Rename layer..."),
+		DUPLICATE("Duplicate layer"),
 		MERGE_SELECTED("Merge selected"),
 		SNAP_TO_START("Snap to song start"),
 		INCLUDE_SELECTED("Include selected layers in sequence"),

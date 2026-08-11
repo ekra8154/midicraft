@@ -1115,20 +1115,75 @@ public record ComposerProject(
 		return with(updated, activeLayerIndex, nextNoteId);
 	}
 
+	/**
+	 * Moves a set of notes, keeping its shape when it runs into an edge.
+	 *
+	 * <p>The limits are applied to the move, once, rather than to each note as it arrives at one.
+	 * Clamping note by note squashes a phrase against the start of the song: the notes that have
+	 * reached tick zero stop while the ones behind them keep coming, and every interval in the
+	 * phrase is quietly lost -- a chord dragged into the wall arrives as a single note. A drag is
+	 * one gesture over one shape, so the shape stops when its leading edge does.</p>
+	 *
+	 * <p>The same for pitch, against 0 and 127, where losing the intervals would be worse still:
+	 * that is not a phrase arriving early, it is a different chord.</p>
+	 */
 	public ComposerProject moveNotes(Set<Long> ids, long tickDelta, int pitchDelta) {
 		if (ids == null || ids.isEmpty() || tickDelta == 0L && pitchDelta == 0) {
 			return this;
 		}
 		Set<Long> selected = new LinkedHashSet<>(ids);
+		long earliest = Long.MAX_VALUE;
+		int lowest = Integer.MAX_VALUE;
+		int highest = Integer.MIN_VALUE;
+		for (Layer layer : layers) {
+			for (NoteEvent note : layer.notes()) {
+				if (selected.contains(note.id())) {
+					earliest = Math.min(earliest, note.startTick());
+					lowest = Math.min(lowest, note.midiNote());
+					highest = Math.max(highest, note.midiNote());
+				}
+			}
+		}
+		if (earliest == Long.MAX_VALUE) {
+			return this;
+		}
+		long tickShift = Math.max(tickDelta, -earliest);
+		int pitchShift = Math.max(Math.min(pitchDelta, 127 - highest), -lowest);
+		if (tickShift == 0L && pitchShift == 0) {
+			return this;
+		}
 		List<Layer> updated = layers.stream()
 			.map(layer -> layer.withNotes(layer.notes().stream()
 				.map(note -> selected.contains(note.id())
-					? note.movedTo(Math.max(0L, note.startTick() + tickDelta),
-						Math.max(0, Math.min(127, note.midiNote() + pitchDelta)))
+					? note.movedTo(note.startTick() + tickShift, note.midiNote() + pitchShift)
 					: note)
 				.toList()))
 			.toList();
 		return with(updated, activeLayerIndex, nextNoteId);
+	}
+
+	/**
+	 * Copies a layer, putting the copy directly after the one it came from.
+	 *
+	 * <p>Next to its source rather than at the end of the list, because a duplicate is a variation
+	 * on the layer above it -- the same part on a second instrument, or a line about to be altered
+	 * against the one it started as -- and reading the two together is the whole point of making
+	 * one. The notes are copied with fresh ids so the two layers move independently.</p>
+	 */
+	public ComposerProject duplicateLayer(int index) {
+		if (index < 0 || index >= layers.size() || layers.size() >= MAX_LAYERS) {
+			return this;
+		}
+		Layer source = layers.get(index);
+		long nextId = nextNoteId;
+		List<NoteEvent> copied = new ArrayList<>(source.notes().size());
+		for (NoteEvent note : source.notes()) {
+			copied.add(new NoteEvent(nextId++, note.midiNote(), note.startTick(), note.durationTicks(),
+				note.velocity()));
+		}
+		List<Layer> updated = new ArrayList<>(layers);
+		updated.add(index + 1, source.withName(source.name() + " copy").withNotes(copied));
+		return with(updated, index + 1, nextId);
 	}
 
 	/**
