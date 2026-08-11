@@ -471,6 +471,8 @@ public final class ComposerScreen extends Screen {
 	private LayerState paintState = LayerState.ACTIVE;
 	/** Whether the box being dragged was started with Ctrl, which makes it add rather than replace. */
 	private boolean boxAdditive;
+	/** Whether the press that started it had a selection to put down, which a plain click does. */
+	private boolean boxDroppedSelection;
 	/** A right-button sweep across the roll, deleting what it passes over. */
 	private boolean erasing;
 	private int erased;
@@ -3277,11 +3279,9 @@ public final class ComposerScreen extends Screen {
 		}
 		graphics.disableScissor();
 
-		// The legend follows the marking. It named the good range while the good range was the tinted
-		// one; now that the tint is on the rows that cannot build, saying so in the colour they are
-		// tinted is what makes the shape on the roll readable without being told twice.
-		graphics.text(font, "Red rows are outside F♯3–F♯5", rollX + 5, TOOLBAR_HEIGHT + 3,
-			0xFFE2867F, false);
+		// No legend. It named the good range back when the good range was the tinted one, and a
+		// caption explaining that the red rows are the bad ones is telling you what the red already
+		// said -- in the corner of a roll whose whole width is worth more as roll.
 		return phase(PHASE_PLAYHEAD, mark);
 	}
 
@@ -4060,6 +4060,7 @@ public final class ComposerScreen extends Screen {
 		// back up. See mouseReleased.
 		selectingBox = true;
 		boxAdditive = event.hasControlDownWithQuirk();
+		boxDroppedSelection = !boxAdditive && !selectedNotes.isEmpty();
 		dragStartX = selectionEndX = event.x();
 		dragStartY = selectionEndY = event.y();
 		if (!boxAdditive) {
@@ -4388,10 +4389,16 @@ public final class ComposerScreen extends Screen {
 			// writing", so the plain gesture in that state is writing rather than selecting -- and
 			// the box is still there the moment the hand moves, which is what tells them apart.
 			//
-			// Ctrl is the exception: it means "add to what is selected", which is a selection
+			// Unless there was a selection, which this click has just dropped. Clicking off a thing
+			// is how anyone puts it down, and a click that both put the selection down and left a
+			// note behind meant you could not stop having a selection without making an edit. The
+			// next click, with nothing left to drop, draws.
+			//
+			// Ctrl is the other exception: it means "add to what is selected", which is a selection
 			// gesture whether or not it moved. With no layer selected there is nothing to draw into,
 			// so a click there stays what it was.
-			if (!boxAdditive && !noLayerSelected() && !travelled(event.x(), event.y())) {
+			if (!boxAdditive && !boxDroppedSelection && !noLayerSelected()
+					&& !travelled(event.x(), event.y())) {
 				placeNote(mouseMidi(dragStartY), snapTick(mouseTick(dragStartX)));
 				return true;
 			}
