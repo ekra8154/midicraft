@@ -81,12 +81,12 @@ class GuardianBreachReproProbe {
 	 * <p>Set the two constants from the top line of {@link #ranksEveryGuardianSizeByItsWorstBreach}.
 	 * Paste at {@code 0 64 0} and every coordinate printed here is the coordinate in the world.</p>
 	 */
-	private static final int REPRO_WIDTH = 40;
-	private static final int REPRO_FLOORS = 5;
+	private static final int REPRO_WIDTH = 28;
+	private static final int REPRO_FLOORS = 3;
 
 	@Test
 	void dumpsTheWorstBreachInCoordinates() throws Exception {
-		for (int[] config : new int[][] {{36, 5}, {36, 2}, {40, 5}, {24, 3}}) {
+		for (int[] config : new int[][] {{28, 3}, {24, 5}}) {
 			dump(config[0], config[1]);
 		}
 	}
@@ -104,17 +104,21 @@ class GuardianBreachReproProbe {
 				System.out.println("REPRO fault " + fault);
 			}
 		}
-		// Every block past the far wall, gathered into the lane it belongs to. A lane is one y and
+		// Every block outside either wall, gathered into the lane it belongs to. A lane is one y and
 		// one z, so that pair names the run, and the furthest block in it is how far the lane got.
-		// Only the far side: the machine's read line stands off the near wall by design and would
-		// otherwise drown the one run that is actually a fault.
+		//
+		// Both sides. A lane travels each way in turn, so a breach is as likely to run out past the
+		// near wall as the far one -- and where the plan slides, the near side is where it lands. A
+		// column of sixteen blocks a long way outside is a lane, not the machine's head: the head is
+		// a fixed structure a few columns wide and it does not run for eleven of them.
 		Map<String, int[]> runs = new LinkedHashMap<>();
 		for (String command : plan.commands()) {
 			String[] word = command.split(" ");
 			int x = Integer.parseInt(word[1]);
 			int y = Integer.parseInt(word[2]);
 			int z = Integer.parseInt(word[3]);
-			int out = x > plan.farWall() ? x - plan.farWall() : 0;
+			int out = x < plan.nearWall() ? plan.nearWall() - x
+				: x > plan.farWall() ? x - plan.farWall() : 0;
 			if (out == 0) {
 				continue;
 			}
@@ -430,6 +434,44 @@ class GuardianBreachReproProbe {
 		}
 	}
 
+	/**
+	 * Does the plan predict the tip the walk ends a climb with, once the pad is raised?
+	 *
+	 * <p>{@code gradeLaneTip} already books the answer: it compares {@code DUST_RANGE - turnCells}
+	 * against what the walk actually handed on and files the difference under
+	 * {@code planTipRich}/{@code planTipPoor}. A raised pad hands on two more than the old sum, so
+	 * if the planner has not understood the change these counts move to Rich by exactly two -- and
+	 * that is the plan promising a lane less wire than it gets, which moves every close decision.</p>
+	 */
+	@Test
+	void checksThePlanPredictsTheRaisedTip() throws Exception {
+		List<SongBuilder.EventNote> notes = guardian();
+		for (boolean plans : new boolean[] {false, true}) {
+			SongBuilder.PLANS_THE_RAISED_PAD = plans;
+			try {
+				Map<String, Integer> total = new java.util.TreeMap<>();
+				for (int floors = 2; floors <= 6; floors++) {
+					for (int width = 12; width <= 48; width += 4) {
+						SongBuilder.PastePlan plan = SongBuilder.createPastePlan(
+							new BlockPos(0, 64, 0), notes,
+							SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+							new SongBuilder.BuildLimits(4, width, floors));
+						plan.padding().forEach((key, count) -> {
+							if (key.startsWith("planTip") && key.endsWith("Climb")
+									|| key.startsWith("padClosingRaised")
+									|| key.startsWith("padPinnedRaised")) {
+								total.merge(key, count, Integer::sum);
+							}
+						});
+					}
+				}
+				System.out.println("TIP plans=" + plans + "  " + total);
+			} finally {
+				SongBuilder.PLANS_THE_RAISED_PAD = true;
+			}
+		}
+	}
+
 	/** The same build, walked, so the chord that went out and the one behind it can be read. */
 	@Test
 	void tracesTheWorstBreach() throws Exception {
@@ -453,7 +495,7 @@ class GuardianBreachReproProbe {
 	 */
 	@Test
 	void histogramsTheColumns() throws Exception {
-		for (int[] config : new int[][] {{40, 5}, {36, 2}, {36, 5}, {24, 3}}) {
+		for (int[] config : new int[][] {{24, 5}, {28, 3}}) {
 			SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0),
 				guardian(), SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
 				new SongBuilder.BuildLimits(4, config[0], config[1]));
@@ -472,7 +514,7 @@ class GuardianBreachReproProbe {
 	/** Every block of the box around a breach, so the shape that walked out can be named. */
 	@Test
 	void dumpsTheBoxAroundTheBreach() throws Exception {
-		box(40, 5, 39, 52, 74, 80, 74, 78);
+		box(24, 5, 23, 38, 62, 70, 130, 135);
 	}
 
 	private static void box(int width, int floors, int lowX, int highX, int lowY, int highY,
