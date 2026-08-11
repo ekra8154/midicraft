@@ -278,7 +278,7 @@ public final class ComposerScreen extends Screen {
 	private static final long PREVIEW_BACKLOG_TOLERANCE_MICROS = 100_000L;
 	private static final int MIN_MIDI_NOTE = 0;
 	private static final int MAX_MIDI_NOTE = 127;
-	private static final int[] LAYER_COLORS = {
+	static final int[] LAYER_COLORS = {
 		0xFF35D7E5, 0xFFFFB347, 0xFF9BE564, 0xFFD19BFF, 0xFFFF6B9A,
 		0xFF7CA7FF, 0xFFFFE66D, 0xFF8CE0C3, 0xFFFF8C5A, 0xFFC3F584
 	};
@@ -471,6 +471,11 @@ public final class ComposerScreen extends Screen {
 	private LayerState paintState = LayerState.ACTIVE;
 	/** Whether the box being dragged was started with Ctrl, which makes it add rather than replace. */
 	private boolean boxAdditive;
+	/** A right-button sweep across the roll, deleting what it passes over. */
+	private boolean erasing;
+	private int erased;
+	private double lastEraseX;
+	private double lastEraseY;
 	private final Set<Integer> paintedRows = new LinkedHashSet<>();
 	/**
 	 * Frame timings, gathered only while F9 has the profiler switched on.
@@ -2574,8 +2579,8 @@ public final class ComposerScreen extends Screen {
 			boolean selected = selectedLayers.contains(index);
 			// The stripe carries the same answer the roll's notes carry, so the panel and the roll
 			// agree about which colours are yours -- a layer whose notes are dimmed out there should
-			// not be flying a full-strength flag in here.
-			int color = selected ? vivid(layerColor(index)) : faded(layerColor(index));
+			// not be flying a full-strength flag in here, and one lit out there should not be dim.
+			int color = layerLit(index) ? vivid(layerColor(index)) : faded(layerColor(index));
 			int left = row.inset();
 			int right = layerPanelWidth() - row.inset();
 			graphics.fill(left, y - 2, right, y + rowHeight - 2,
@@ -2875,7 +2880,7 @@ public final class ComposerScreen extends Screen {
 	 * a near-black panel, and four steps of darkening ends at something indistinguishable from the
 	 * background.</p>
 	 */
-	private static int shade(int color, int step) {
+	static int shade(int color, int step) {
 		double[] steps = {0.0, -0.34, 0.42, -0.56, 0.68};
 		double amount = steps[Math.min(Math.max(step, 0), steps.length - 1)];
 		if (amount == 0.0) {
@@ -2907,14 +2912,57 @@ public final class ComposerScreen extends Screen {
 	 * mixed 62% toward a lighter grey, which was legible as a distinction when you went looking for
 	 * it and not at a glance -- so this goes further and darker, and the selected side goes the
 	 * other way, rather than asking one end to carry the whole difference.</p>
+	 *
+	 * <p>Then held under a ceiling, which is the part that makes it a guarantee rather than a
+	 * tendency. {@link #shade} tells family members apart by lightness and this tells selected from
+	 * unselected by lightness, and two meanings on one channel collide: on a converted song a family
+	 * of four reaches shade's -56% step, and that layer <em>selected</em> came out dimmer than a
+	 * pale layer sitting in the background. Measured over the whole palette, six of fifty selected
+	 * variants lost to the brightest unselected one. Banding the two ranges cannot regress.</p>
 	 */
-	private static int faded(int color) {
-		return mix(color, 0xFF4E525A, 0.76);
+	static int faded(int color) {
+		int dimmed = mix(color, 0xFF4E525A, 0.76);
+		double bright = luma(dimmed);
+		return bright <= UNSELECTED_LUMA_CEILING
+			? dimmed
+			: scaled(dimmed, UNSELECTED_LUMA_CEILING / bright);
 	}
 
-	/** A layer's colour as it reads when the layer is selected: the same hue, lifted off the dim. */
-	private static int vivid(int color) {
-		return mix(color, 0xFFFFFFFF, 0.22);
+	/**
+	 * A layer's colour as it reads when the layer is selected: the same hue, lifted clear of the dim.
+	 *
+	 * <p>Lifted by scaling the channels rather than by mixing toward white, which is what keeps the
+	 * hue. A darkened family member dragged up to the floor by mixing arrives as a pale grey with a
+	 * tint -- cyan lost two thirds of its saturation getting there, and telling layers apart is the
+	 * only reason they have colours. Scaling holds the ratios, so it brightens along the hue and only
+	 * falls back to mixing once a channel has run out of room at 255.</p>
+	 */
+	static int vivid(int color) {
+		int lifted = mix(color, 0xFFFFFFFF, 0.18);
+		double bright = luma(lifted);
+		if (bright >= SELECTED_LUMA_FLOOR) {
+			return lifted;
+		}
+		lifted = scaled(lifted, SELECTED_LUMA_FLOOR / Math.max(1.0, bright));
+		bright = luma(lifted);
+		return bright >= SELECTED_LUMA_FLOOR
+			? lifted
+			: mix(lifted, 0xFFFFFFFF, Math.min(1.0, (SELECTED_LUMA_FLOOR - bright) / (255.0 - bright)));
+	}
+
+	/** Perceived brightness, the thing both {@link #faded} and {@link #vivid} are really about. */
+	static double luma(int color) {
+		return 0.2126 * (color >> 16 & 0xFF) + 0.7152 * (color >> 8 & 0xFF) + 0.0722 * (color & 0xFF);
+	}
+
+	/** Every channel multiplied by {@code factor}, which brightens along the hue instead of across it. */
+	private static int scaled(int color, double factor) {
+		int out = color & 0xFF000000;
+		for (int shift = 16; shift >= 0; shift -= 8) {
+			int channel = (int)Math.round((color >> shift & 0xFF) * factor);
+			out |= Math.max(0, Math.min(255, channel)) << shift;
+		}
+		return out;
 	}
 
 	/** {@code amount} of {@code toward}, the rest of {@code color}. Alpha comes from {@code color}. */
@@ -2943,6 +2991,20 @@ public final class ComposerScreen extends Screen {
 		TIME,
 		PITCH
 	}
+
+	/**
+	 * The two bands a layer's colour must fall into, so the answer to "is that note mine" is not a
+	 * matter of which family member it happens to be.
+	 *
+	 * <p>Forty-one points of luminance apart, on a scale where the roll's own background sits around
+	 * thirty. Both are floors on a whole palette rather than tuned to one colour: see
+	 * {@link #faded(int)} for the collision they exist to rule out.</p>
+	 */
+	static final double SELECTED_LUMA_FLOOR = 150.0;
+	static final double UNSELECTED_LUMA_CEILING = 108.0;
+
+	/** How finely an eraser sweep is sampled along its path, in pixels. Under a note's width. */
+	private static final double ERASE_STEP_PIXELS = 3.0;
 
 	/** How far the cursor must travel before a Shift-held drag will say which way it is going. */
 	private static final int DRAG_AXIS_THRESHOLD = 4;
@@ -3144,13 +3206,22 @@ public final class ComposerScreen extends Screen {
 			boolean black = isBlackKey(midi);
 			boolean buildable = midi >= ComposerProject.NOTE_BLOCK_BASE_MIDI_NOTE
 				&& midi <= ComposerProject.NOTE_BLOCK_MAX_MIDI_NOTE;
+			// The two octaves a note block can play used to be tinted blue, which marked the part of
+			// the roll where nothing is wrong -- and on a converted song that is all of it, so the
+			// mark was on every row and said nothing. Inverted: the buildable rows are plain and the
+			// ones outside carry a red wash. A raw import opens with the reason it will not build
+			// visible as a shape, and a song that has been fixed has a clean roll to show for it.
 			int gridColor = black ? 0xB9181A20 : 0xB91D2026;
-			if (buildable) {
-				gridColor = black ? 0xC31C3B42 : 0xC322454C;
+			if (!buildable) {
+				gridColor = black ? 0xC62B1519 : 0xC6361A1F;
 			}
-			graphics.fill(pianoX, y, rollX, y + rowHeight - 1, 0xFFE7E7E7);
+			// The keys carry the same answer as the rows beside them. Without it the red stopped dead
+			// at the roll's edge and the keyboard went on claiming every note was available, which is
+			// the one place you look to ask what a row is.
+			graphics.fill(pianoX, y, rollX, y + rowHeight - 1, buildable ? 0xFFE7E7E7 : 0xFFEAC6C6);
 			if (black) {
-				graphics.fill(pianoX, y, pianoX + PIANO_WIDTH * 2 / 3, y + rowHeight - 1, 0xFF303238);
+				graphics.fill(pianoX, y, pianoX + PIANO_WIDTH * 2 / 3, y + rowHeight - 1,
+					buildable ? 0xFF303238 : 0xFF45272B);
 			}
 			// A key that has just sounded, fading out over a quarter of a second. Over the whole key
 			// rather than part of it, black ones included: the question it answers is "which row was
@@ -3206,7 +3277,11 @@ public final class ComposerScreen extends Screen {
 		}
 		graphics.disableScissor();
 
-		graphics.text(font, "Minecraft F♯3–F♯5", rollX + 5, TOOLBAR_HEIGHT + 3, 0xFF65F4FF, false);
+		// The legend follows the marking. It named the good range while the good range was the tinted
+		// one; now that the tint is on the rows that cannot build, saying so in the colour they are
+		// tinted is what makes the shape on the roll readable without being told twice.
+		graphics.text(font, "Red rows are outside F♯3–F♯5", rollX + 5, TOOLBAR_HEIGHT + 3,
+			0xFFE2867F, false);
 		return phase(PHASE_PLAYHEAD, mark);
 	}
 
@@ -3315,7 +3390,7 @@ public final class ComposerScreen extends Screen {
 			if (!layer.visible()) {
 				continue;
 			}
-			boolean highlighted = noLayerSelected() || selectedLayers.contains(layerIndex);
+			boolean highlighted = layerLit(layerIndex);
 			// One colour per layer whatever is wrong with the note. Out of range used to paint the
 			// whole note red, which on an unconverted song is most of them -- so the roll answered
 			// "this will not build", which you already knew, and stopped answering anything else.
@@ -3521,6 +3596,18 @@ public final class ComposerScreen extends Screen {
 	/** The layer an edit lands in, or -1 while none is selected. */
 	private int editingLayerIndex() {
 		return noLayerSelected() ? -1 : project().activeLayerIndex();
+	}
+
+	/**
+	 * Whether a layer is in the foreground: one you selected, or all of them while none is.
+	 *
+	 * <p>Asked in one place because two places had already disagreed. The roll read no-layer mode as
+	 * "every part is yours" and lit all of them; the panel read it as "none of these is selected"
+	 * and dimmed every colour stripe -- both defensible sentences, and side by side they say the
+	 * panel and the roll are describing different songs.</p>
+	 */
+	private boolean layerLit(int index) {
+		return noLayerSelected() || selectedLayers.contains(index);
 	}
 
 	/**
@@ -3898,19 +3985,19 @@ public final class ComposerScreen extends Screen {
 			return true;
 		}
 		if (event.button() == 1 && insideRoll(event.x(), event.y())) {
+			// Nothing selected: right-click is the eraser. It takes the note it lands on and every
+			// note the drag then passes over, which is the gesture for clearing a passage you do not
+			// want -- box-selecting it first and pressing Delete is three moves for one intention.
+			//
+			// Something selected: right-click is the menu, because the selection is what you are
+			// pointing at. Nothing is deleted outright in that state, and nothing needs to be: a
+			// note is only ever in the selection because you put it there.
+			if (selectedNotes.isEmpty()) {
+				beginErasing(event.x(), event.y());
+				return true;
+			}
 			NoteHit hit = noteAt(event.x(), event.y());
 			if (hit != null) {
-				// Right-clicking a note deletes it, and a note you have just drawn is selected -- so
-				// the one note in the selection, under the cursor, is still just that note. Opening a
-				// menu over it instead made undoing a stray click a two-step job, which is the job
-				// the plain right-click exists to be. A wider selection is a different thing to be
-				// pointing at and gets the menu.
-				if (selectedNotes.isEmpty()
-						|| selectedNotes.size() == 1 && selectedNotes.contains(hit.note().id())) {
-					apply("delete note", project().deleteNotes(Set.of(hit.note().id())));
-					selectedNotes.clear();
-					return true;
-				}
 				if (noLayerSelected()) {
 					selectLayer(hit.layerIndex(), false, false);
 				}
@@ -3918,13 +4005,9 @@ public final class ComposerScreen extends Screen {
 					selectedNotes.clear();
 					selectedNotes.add(hit.note().id());
 				}
-				openContextMenu(event.x(), event.y());
-				return true;
 			}
-			if (!selectedNotes.isEmpty()) {
-				openContextMenu(event.x(), event.y());
-				return true;
-			}
+			openContextMenu(event.x(), event.y());
+			return true;
 		}
 		if (event.button() != 0 || !insideRoll(event.x(), event.y())) {
 			return super.mouseClicked(event, doubleClick);
@@ -3986,10 +4069,72 @@ public final class ComposerScreen extends Screen {
 	}
 
 	/**
+	 * Starts an eraser sweep, taking whatever the press landed on.
+	 *
+	 * <p>The whole sweep is one undo step, the way a drag across thirty layer switches is. Twenty
+	 * separate entries for one movement of the hand would be twenty presses of Ctrl+Z to undo one
+	 * mistake, and would evict twenty real edits from a history a hundred deep.</p>
+	 */
+	private void beginErasing(double x, double y) {
+		// Not while another button is already dragging something. Two live drags share one release,
+		// and whichever branch answers it first leaves the other one latched -- a right-click during
+		// a box select used to be enough to strand the box on screen.
+		if (selectingBox || draggingNotes || draggingSplitter || draggingEndMarker || draggingPlayhead
+				|| layerDragIndex >= 0 || painting != LayerPaint.NONE) {
+			return;
+		}
+		erasing = true;
+		erased = 0;
+		lastEraseX = x;
+		lastEraseY = y;
+		eraseAt(x, y);
+	}
+
+	/**
+	 * Erases along the path the cursor took, not only where it ended up.
+	 *
+	 * <p>A drag arrives as one event per frame, and a hand moving at any speed covers more than a
+	 * note's seven pixels between two of them -- so sampling only the endpoints leaves a dotted line
+	 * of survivors through the middle of the sweep. Stepping along the segment costs a few hit tests
+	 * on a gesture that is already deleting things.</p>
+	 */
+	private void eraseAlong(double toX, double toY) {
+		double dx = toX - lastEraseX;
+		double dy = toY - lastEraseY;
+		int steps = Math.max(1, (int)Math.ceil(
+			Math.max(Math.abs(dx), Math.abs(dy)) / ERASE_STEP_PIXELS));
+		for (int step = 1; step <= steps; step++) {
+			double at = step / (double)steps;
+			eraseAt(lastEraseX + dx * at, lastEraseY + dy * at);
+		}
+		lastEraseX = toX;
+		lastEraseY = toY;
+	}
+
+	/** Takes the topmost reachable note under one point, if there is one. */
+	private void eraseAt(double x, double y) {
+		if (!insideRoll(x, y)) {
+			return;
+		}
+		NoteHit hit = noteAt(x, y);
+		if (hit == null) {
+			return;
+		}
+		applyMaybeCoalesced("erase notes", project().deleteNotes(Set.of(hit.note().id())), erased > 0);
+		erased++;
+	}
+
+	/**
 	 * Puts a note where you pointed, in the voice you are working in.
 	 *
 	 * <p>With no layer selected there is no voice for it to join, so it starts one. That is not a
 	 * fallback so much as the quickest way to begin a part: click the empty panel, then the roll.</p>
+	 *
+	 * <p>The new note is <em>not</em> selected, and the selection is cleared instead. Selecting it
+	 * read as helpful and made the note before it unreachable: right-click deletes what it points at
+	 * only while the selection is empty or is that same note, so with the newest note always sitting
+	 * in the selection, right-clicking anything else opened a menu. Drawing four notes and wanting
+	 * the second one back is the ordinary case, not an unusual one.</p>
 	 */
 	private void placeNote(int midi, long tick) {
 		ComposerProject before = project();
@@ -4009,13 +4154,10 @@ public final class ComposerScreen extends Screen {
 		} else {
 			apply("add note", before.addNote(before.activeLayerIndex(), midi, tick, before.ppq() / 4L));
 		}
-		NoteEvent added = activeLayer().notes().stream()
-			.max(Comparator.comparingLong(NoteEvent::id)).orElse(null);
 		selectedNotes.clear();
-		if (added != null) {
-			selectedNotes.add(added.id());
-			soundNote(added.midiNote(), previewInstrument(), previewColor());
-		}
+		// The pitch is the one that was asked for: mouseMidi and NoteEvent clamp to the same range,
+		// so there is nothing to learn by going back to the layer to find what landed.
+		soundNote(midi, previewInstrument(), previewColor());
 	}
 
 	private boolean handleInstrumentMenuClick(double mouseX, double mouseY) {
@@ -4108,6 +4250,10 @@ public final class ComposerScreen extends Screen {
 	public boolean mouseDragged(MouseButtonEvent event, double dx, double dy) {
 		lastMouseX = event.x();
 		lastMouseY = event.y();
+		if (erasing) {
+			eraseAlong(event.x(), event.y());
+			return true;
+		}
 		if (draggingSplitter) {
 			// Past the fold point it snaps shut rather than shrinking to a width no row fits in.
 			// The width it had is left in the config, so unfolding puts it back where it was.
@@ -4181,6 +4327,15 @@ public final class ComposerScreen extends Screen {
 
 	@Override
 	public boolean mouseReleased(MouseButtonEvent event) {
+		if (erasing) {
+			erasing = false;
+			// Reported only for a sweep. Taking one note is a click whose result you are looking at;
+			// taking nineteen off the far end of a passage is worth a number and a way back.
+			if (erased > 1) {
+				showResult(Component.literal("Erased " + erased + " notes. Ctrl+Z puts them back."));
+			}
+			return true;
+		}
 		if (draggingSplitter) {
 			draggingSplitter = false;
 			FastNoteblocksConfig.save();
