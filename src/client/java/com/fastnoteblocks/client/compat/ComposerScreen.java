@@ -259,6 +259,41 @@ public final class ComposerScreen extends Screen {
 	/** How much faster holding at an edge eventually gets, and how long it takes to get there. */
 	private static final double BOX_SCROLL_HELD_BOOST = 4.0;
 	private static final double BOX_SCROLL_BOOST_MILLIS = 900.0;
+	/**
+	 * How much room a take is given past the end of the song, in bars.
+	 *
+	 * <p>Enough that nobody hits the end of it by accident -- four minutes at the default tempo --
+	 * and it costs nothing, because stopping puts the marker back where it was unless the take went
+	 * further. Playback stops at the end marker and a new song's marker is four beats out, so
+	 * without room a take would end before the count-in had finished.</p>
+	 */
+	private static final long RECORD_HEADROOM_BARS = 64L;
+
+	/**
+	 * How long the count-in lasts, in beats, and how many of them each number is held for.
+	 *
+	 * <p>Six beats over three numbers. One beat per number went by in a second and a half at an
+	 * ordinary tempo -- long enough to see and not long enough to come in on. Holding each number for
+	 * two beats buys the time without asking anyone to read six numbers, and the click stays on the
+	 * numbers themselves: a tick on the halfway beats as well reads as a faster tempo than the one
+	 * about to play.</p>
+	 */
+	private static final int COUNT_IN_BEATS = 6;
+	private static final int BEATS_PER_COUNT = 2;
+	/** Slowest a count-in beat may get, so a fast song still gets a countable one. */
+	private static final long COUNT_IN_MIN_BEAT_MILLIS = 260L;
+	/**
+	 * How late a played note reaches the clock, in milliseconds, and so how far back to put it.
+	 *
+	 * <p>Sixty, and the number is derived rather than picked: flooring compensated by half a cell and
+	 * felt right at the repeater snap on a default-tempo song, where half a cell is 60ms. So that is
+	 * the amount of lateness being observed, and unlike floor it stays 60ms when the tempo changes.
+	 * Worth re-deriving on other hardware -- it is mostly the sound engine's output latency, which is
+	 * not the same on every machine -- and the way to tell is a take against a steady part: too small
+	 * and everything lands late, too large and it lands early.</p>
+	 */
+	private static final long RECORD_LATENCY_MILLIS = 60L;
+
 	/** How long a key stays lit after it sounds, which is about how long a note block rings for. */
 	private static final long KEY_LIGHT_MILLIS = 260L;
 	private static final long TOOLTIP_DWELL_MILLIS = 260L;
@@ -332,6 +367,30 @@ public final class ComposerScreen extends Screen {
 	/** The tick the copy started on, which is where Ctrl+Shift+V puts it back. */
 	private long clipboardOriginTick;
 	private Button playButton;
+	private Button recordButton;
+	/**
+	 * Record mode, its count-in, and how much the take has written.
+	 *
+	 * <p>{@code countingInSince} is zero once the count is over, which is what separates armed from
+	 * running -- see {@link #takingNotes()}. Recording without playing is the count-in and nothing
+	 * else, so the two flags are not the same question.</p>
+	 */
+	private boolean recording;
+	private long countingInSince;
+	private int countedIn;
+	private int recorded;
+	/** Where the end marker was before a take pushed it out, so it can be put back. */
+	private long endBeforeTake;
+	/**
+	 * Notes this take has written, which the take itself must not play back at you.
+	 *
+	 * <p>You already heard them: the key press sounds the note the instant it is pressed, which is
+	 * what makes it feel like an instrument. Quantizing then moves the written note to the nearest
+	 * grid line, which is often a little ahead of where it was played -- so the rebuilt schedule
+	 * reached it a moment later and sounded it a second time. Two notes a fraction apart, and the
+	 * second one is what reads as latency.</p>
+	 */
+	private final Set<Long> takeNotes = new LinkedHashSet<>();
 	private Button snapButton;
 	private DelayScaleSlider delayScaleSlider;
 	private Button addLayerButton;
@@ -410,7 +469,15 @@ public final class ComposerScreen extends Screen {
 	private double lastMouseY;
 	private int instrumentMenuLayer = -1;
 	private int editingLayer = -1;
-	private int snapSubdivision = 4;
+	/**
+	 * The grid new notes land on, defaulting to the repeater tick.
+	 *
+	 * <p>It used to open on a sixteenth, which is a grid from the notation the music arrived in
+	 * rather than from the machine it is going into. A repeater tick is the only spacing a note block
+	 * build can actually hold: anything finer is off grid and the status line says so. Opening on the
+	 * one grid that is always buildable means a note drawn by hand needs no correcting afterwards.</p>
+	 */
+	private int snapSubdivision = SNAP_REPEATER;
 	private boolean contextMenuOpen;
 	private int contextMenuX;
 	private int contextMenuY;
@@ -563,6 +630,7 @@ public final class ComposerScreen extends Screen {
 		// they are added to and the controls do not move; keeping the two apart means neither can
 		// push the other about. Each is measured against every caption it can ever show, so Snap
 		// does not jump a pixel when it reaches "repeater" or Speed when it reaches "0.25x".
+		int recordWidth = widestLabel(CONTROL_PADDING, "Record", "Recording");
 		int playWidth = widestLabel(CONTROL_PADDING, "Play", "Stop");
 		int snapWidth = widestLabel(CONTROL_PADDING, "Snap 1/4", "Snap 1/8", "Snap 1/16",
 			"Snap 1/32", "Snap repeater", "Snap off");
@@ -570,7 +638,17 @@ public final class ComposerScreen extends Screen {
 		int speedX = width - 6 - speedWidth;
 		int snapX = speedX - CONTROL_GAP - snapWidth;
 		int playX = snapX - CONTROL_GAP - playWidth;
-		toolbarControlsLeft = playX;
+		int recordX = playX - CONTROL_GAP - recordWidth;
+		toolbarControlsLeft = recordX;
+		recordButton = addRenderableWidget(Button.builder(recordLabel(), button -> toggleRecording())
+			.bounds(recordX, CONTROL_TOP, recordWidth, CONTROL_HEIGHT)
+			.tooltip(Tooltip.create(Component.literal(
+				"Record. The marker runs on its own, and every piano key you click is written in at "
+					+ "the marker, snapped to the grid Snap is set to. Counts you in 3, 2, 1 first.\n"
+					+ "Notes go into the selected layer; with none selected it starts one for the take, "
+					+ "and the end marker is pushed out to leave room to play into.\n"
+					+ "R or Escape stops it, and R starts it.")))
+			.build());
 		playButton = addRenderableWidget(Button.builder(playLabel(), button -> togglePlayback())
 			.bounds(playX, CONTROL_TOP, playWidth, CONTROL_HEIGHT)
 			.tooltip(Tooltip.create(Component.literal(
@@ -3279,10 +3357,46 @@ public final class ComposerScreen extends Screen {
 		}
 		graphics.disableScissor();
 
-		// No legend. It named the good range back when the good range was the tinted one, and a
-		// caption explaining that the red rows are the bad ones is telling you what the red already
-		// said -- in the corner of a roll whose whole width is worth more as roll.
+		// No legend for the range. It named the good range back when the good range was the tinted
+		// one, and a caption explaining that the red rows are the bad ones is telling you what the
+		// red already said -- in the corner of a roll whose whole width is worth more as roll.
+		//
+		// What does go there is whether the keys are writing into the song, which is not something
+		// the roll otherwise shows and is the difference between a preview and an edit.
+		if (recording) {
+			extractRecordState(graphics);
+		}
 		return phase(PHASE_PLAYHEAD, mark);
+	}
+
+	/**
+	 * Says that the keys are writing, and counts you in before they are.
+	 *
+	 * <p>Two states and they must not be confused, because in one of them pressing a key changes the
+	 * song and in the other it does not. The count is drawn over the middle of the roll rather than
+	 * in the corner: it is the one thing on screen worth looking at for the second it exists, and
+	 * three beats is not long enough to go looking for it.</p>
+	 */
+	private void extractRecordState(GuiGraphicsExtractor graphics) {
+		int number = countInNumber();
+		if (number > 0) {
+			String count = Integer.toString(number);
+			int centreX = rollX + rollWidth / 2;
+			int centreY = rollY + rollHeight / 2;
+			// Four passes offset by a pixel, which is the only bold this font has.
+			for (int offset = 0; offset < 4; offset++) {
+				graphics.text(font, count, centreX - font.width(count) / 2 + offset % 2,
+					centreY - 4 + offset / 2, 0xFFFF6B6B, false);
+			}
+			graphics.text(font, "get ready", centreX - font.width("get ready") / 2, centreY + 8,
+				0xFFCDA0A0, false);
+			return;
+		}
+		// A filled dot rather than the word alone: it is the shorthand, and it is legible at the edge
+		// of vision while you are watching the marker rather than the corner.
+		graphics.fill(rollX + 5, TOOLBAR_HEIGHT + 4, rollX + 10, TOOLBAR_HEIGHT + 9, 0xFFFF4040);
+		graphics.text(font, "REC  " + recorded + (recorded == 1 ? " note" : " notes"),
+			rollX + 14, TOOLBAR_HEIGHT + 3, 0xFFFF8A8A, false);
 	}
 
 	private void extractTimeGrid(GuiGraphicsExtractor graphics) {
@@ -3971,7 +4085,29 @@ public final class ComposerScreen extends Screen {
 			return true;
 		}
 		if (event.button() == 0 && overPianoKeys(event.x(), event.y())) {
-			soundNote(mouseMidi(event.y()), previewInstrument(), previewColor());
+			// Where the marker is, is the cell -- but snapped to the nearest grid line rather than
+			// into the cell the marker is inside, which is the opposite of what a click on the roll
+			// wants. A click points at a cell and belongs in it. A note played by hand lands *near* a
+			// beat, on either side of it, and quantizing a performance means moving it to the beat it
+			// was aiming at.
+			//
+			// Flooring made that impossible to play against: it takes anything even a millisecond
+			// early and throws it back a whole cell, so the only notes that landed where they were
+			// meant were the late ones. A cell is 25ms of real time on the fastest song in this
+			// library and 200ms on the slowest, and the slow ones were worse, because the cell being
+			// thrown across is bigger. Nearest tolerates half a cell either side, which is what makes
+			// it feel like it is listening.
+			if (takingNotes()) {
+				int before = project().noteCount();
+				placeNote(mouseMidi(event.y()), snapTick(recordTick()));
+				int added = project().noteCount() - before;
+				recorded += added;
+				if (added > 0) {
+					takeNotes.add(newestNoteId());
+				}
+			} else {
+				soundNote(mouseMidi(event.y()), previewInstrument(), previewColor());
+			}
 			return true;
 		}
 		if (event.button() == 0 && overEndMarker(event.x(), event.y())) {
@@ -4139,12 +4275,19 @@ public final class ComposerScreen extends Screen {
 	 */
 	private void placeNote(int midi, long tick) {
 		ComposerProject before = project();
+		if (noLayerSelected() && before.layers().size() >= ComposerProject.MAX_LAYERS) {
+			showResult(Component.literal("No layer is selected and there is no room for another - "
+				+ ComposerProject.MAX_LAYERS + " is the limit. Click a layer to draw into it."));
+			return;
+		}
+		// Sounded first, before a single thing is edited. What follows is a deep comparison of the
+		// composition against itself and, mid-playback, a rebuild and re-sort of every scheduled
+		// event -- tens of milliseconds on a song of nine thousand notes, all of it between the key
+		// going down and anything being audible. Nothing here needs the edit to have happened: the
+		// pitch is the one that was asked for, since mouseMidi and NoteEvent clamp to the same range,
+		// and the voice is the selected layer's, which is what a new layer would take anyway.
+		soundNote(midi, previewInstrument(), previewColor());
 		if (noLayerSelected()) {
-			if (before.layers().size() >= ComposerProject.MAX_LAYERS) {
-				showResult(Component.literal("No layer is selected and there is no room for another - "
-					+ ComposerProject.MAX_LAYERS + " is the limit. Click a layer to draw into it."));
-				return;
-			}
 			ComposerProject started = before.addLayer();
 			int layer = started.layers().size() - 1;
 			apply("start layer " + (layer + 1) + " with a note",
@@ -4156,9 +4299,6 @@ public final class ComposerScreen extends Screen {
 			apply("add note", before.addNote(before.activeLayerIndex(), midi, tick, before.ppq() / 4L));
 		}
 		selectedNotes.clear();
-		// The pitch is the one that was asked for: mouseMidi and NoteEvent clamp to the same range,
-		// so there is nothing to learn by going back to the layer to find what landed.
-		soundNote(midi, previewInstrument(), previewColor());
 	}
 
 	private boolean handleInstrumentMenuClick(double mouseX, double mouseY) {
@@ -4464,6 +4604,12 @@ public final class ComposerScreen extends Screen {
 			contextMenuOpen = false;
 			return true;
 		}
+		// Ahead of the screen's own Escape, which closes the composer. Stopping a take is what you
+		// mean by it while one is running, and leaving the screen mid-record is not.
+		if (recording && event.isEscape()) {
+			stopRecording("Stopped");
+			return true;
+		}
 		// A focused text box owns the keyboard. Enter and Escape are the two keys that are about the
 		// box rather than in it; everything else goes to the box and stops there.
 		//
@@ -4509,6 +4655,13 @@ public final class ComposerScreen extends Screen {
 		// hear the song from the start added an empty layer to it instead.
 		if (event.key() == GLFW.GLFW_KEY_ENTER || event.key() == GLFW.GLFW_KEY_KP_ENTER) {
 			playFromStart();
+			return true;
+		}
+		// Beside Space and Enter because it is the third transport key. Bare R, so Ctrl+R is left to
+		// mean whatever it comes to mean.
+		if (event.key() == GLFW.GLFW_KEY_R && !event.hasControlDownWithQuirk()
+				&& !event.hasShiftDown()) {
+			toggleRecording();
 			return true;
 		}
 		if (event.isSelectAll()) {
@@ -4616,7 +4769,13 @@ public final class ComposerScreen extends Screen {
 
 	@Override
 	public void tick() {
+		updateCountIn();
 		updatePlayback();
+		// The marker running is the whole of record mode, so the take ends when it stops -- at the end
+		// marker, or because Stop was pressed.
+		if (recording && countingInSince == 0L && !playing) {
+			stopRecording("Finished");
+		}
 		updateBoxScroll();
 		updateButtonStates();
 	}
@@ -4718,6 +4877,176 @@ public final class ComposerScreen extends Screen {
 			resetPlaybackSchedule();
 			playButton.setMessage(playLabel());
 		}
+	}
+
+	/**
+	 * Record mode: the marker runs and the piano keys write into the song.
+	 *
+	 * <p>The composer could already place a note at a tick and play a song from a tick, and had no
+	 * way to do both at once -- so writing a part meant working out which cell each note belonged in
+	 * and clicking there, which is transcription rather than playing. This is the same two things
+	 * with the clock left running: where the marker is <em>is</em> the cell.</p>
+	 *
+	 * <p>It counts in first because the alternative is that the first note of a take is always late.
+	 * Three beats of the song's own tempo rather than three seconds, so the count is the tempo you
+	 * are about to play against, and each one clicks so you can hear it without watching it.</p>
+	 */
+	private void toggleRecording() {
+		if (recording) {
+			stopRecording("Stopped");
+			return;
+		}
+		// Somewhere for the notes to go, decided before the count rather than at the first keypress:
+		// with no layer selected every note would otherwise start a layer of its own.
+		ComposerProject prepared = project();
+		int newLayer = -1;
+		if (noLayerSelected()) {
+			if (prepared.layers().size() >= ComposerProject.MAX_LAYERS) {
+				showResult(Component.literal("No layer is selected and there is no room for another - "
+					+ ComposerProject.MAX_LAYERS + " is the limit. Select a layer to record into."));
+				return;
+			}
+			prepared = prepared.addLayer();
+			newLayer = prepared.layers().size() - 1;
+		}
+		// And room to play into. Playback stops at the end marker, and a new song's marker is four
+		// beats out -- so without this a take ends before it has started. Pushed out for the take and
+		// pulled back to whichever is longer of where it was and what got recorded, so a take that
+		// runs short does not leave four minutes of silence on the end of the song.
+		endBeforeTake = prepared.endTick();
+		prepared = prepared.withEndTick(
+			endBeforeTake + RECORD_HEADROOM_BARS * prepared.ppq() * 4L);
+		apply(newLayer < 0 ? "make room for a take" : "add a layer and room for a take", prepared);
+		if (newLayer >= 0) {
+			selectOnlyLayer(newLayer);
+			layersChanged();
+			rebuildMoveLayerButtons();
+		}
+		recording = true;
+		recorded = 0;
+		takeNotes.clear();
+		countingInSince = Util.getMillis();
+		countedIn = 0;
+		stopPlayback();
+		updateButtonStates();
+	}
+
+	/**
+	 * Where a note played just now belongs, allowing for how late "just now" already is.
+	 *
+	 * <p>A played note reaches this clock later than the beat it was aimed at, by the sound engine's
+	 * output latency -- you hear the song late, so you play late by the same amount and are in time
+	 * with what you heard -- plus whatever the hand adds. Taking that off before snapping is what
+	 * makes the beat you meant the beat you get.</p>
+	 *
+	 * <p>Flooring instead of snapping to the nearest line does the same job by accident: floor is
+	 * nearest shifted half a cell earlier. It was better than plain nearest for exactly this reason,
+	 * and it is still the wrong shape, because half a cell is 12ms on the fastest song in this
+	 * library and 100ms on the slowest -- it under-corrects fast songs and over-corrects slow ones,
+	 * while the thing being corrected for does not change with tempo at all. A constant in
+	 * milliseconds does not have that fault, and it has no cliff: playing earlier than usual lands
+	 * nearer the beat rather than a whole cell before it.</p>
+	 */
+	private long recordTick() {
+		long micros = RECORD_LATENCY_MILLIS * 1000L;
+		long late = Math.round(micros * project().ppq() * timescaleFactor()
+			/ (double)project().tempoMicrosPerQuarter());
+		return Math.max(0L, playbackTick() - late);
+	}
+
+	/** The id of the note most recently added, which is the highest one the project has issued. */
+	private long newestNoteId() {
+		return project().nextNoteId() - 1L;
+	}
+
+	/** How long the count-in has left, or 0 once it is over. */
+	private long countInRemaining() {
+		if (countingInSince == 0L) {
+			return 0L;
+		}
+		return Math.max(0L,
+			countingInSince + COUNT_IN_BEATS * countInBeatMillis() - Util.getMillis());
+	}
+
+	/**
+	 * One beat of the song at the speed it will play back at, which is what to count against.
+	 *
+	 * <p>Floored, because a count-in faster than the hand can move is a flourish rather than a
+	 * count -- on a fast song three beats went by in under a second.</p>
+	 */
+	private long countInBeatMillis() {
+		return Math.max(COUNT_IN_MIN_BEAT_MILLIS, Math.round(
+			project().tempoMicrosPerQuarter() / 1000.0 / timescaleFactor()));
+	}
+
+	/** Which number the count is showing, 3 down to 1, or 0 when it is not counting. */
+	private int countInNumber() {
+		long left = countInRemaining();
+		if (left <= 0L) {
+			return 0;
+		}
+		return Math.max(1, Math.min(COUNT_IN_BEATS / BEATS_PER_COUNT,
+			(int)Math.ceil(left / (double)(BEATS_PER_COUNT * countInBeatMillis()))));
+	}
+
+	/**
+	 * Advances the count-in, clicking once a beat, and starts the take when it runs out.
+	 *
+	 * <p>Driven from {@code tick} rather than from drawing, so it counts at the same rate whatever
+	 * the frame rate is doing -- and a count-in that drifts with the frame rate is worse than none.</p>
+	 */
+	private void updateCountIn() {
+		if (!recording || countingInSince == 0L) {
+			return;
+		}
+		long beat = countInBeatMillis();
+		long elapsed = Util.getMillis() - countingInSince;
+		// Six beats long, so there is time to get ready, but a click only where a number lands: three
+		// of them, on the beats you would say "three, two, one" on. Clicking the halfway beats as well
+		// filled the gap with ticks that were not the count and read as a faster tempo than the one
+		// about to play.
+		int beats = Math.min(COUNT_IN_BEATS, (int)(elapsed / beat) + 1);
+		if (beats > countedIn) {
+			countedIn = beats;
+			if ((beats - 1) % BEATS_PER_COUNT == 0) {
+				PreviewInstrument.byId("HAT").play(18);
+			}
+		}
+		if (elapsed >= COUNT_IN_BEATS * beat) {
+			countingInSince = 0L;
+			if (!playing) {
+				togglePlayback();
+			}
+		}
+	}
+
+	/** Whether a keypress would land in the song right now, as opposed to only being heard. */
+	private boolean takingNotes() {
+		return recording && countingInSince == 0L && playing;
+	}
+
+	private void stopRecording(String why) {
+		if (!recording) {
+			return;
+		}
+		String into = activeLayer().name();
+		recording = false;
+		countingInSince = 0L;
+		takeNotes.clear();
+		stopPlayback();
+		// The end marker goes back to whichever is longer: where it was, or the last note recorded.
+		// withEndTick floors at the last note on its own, so one call says both. Folded into the step
+		// the last note made rather than taking one of its own -- putting the room back is part of
+		// the take, not an edit you would want to undo separately from it.
+		applyMaybeCoalesced("record a take", project().withEndTick(endBeforeTake), true);
+		updateButtonStates();
+		showResult(Component.literal(why + " recording - " + recorded
+			+ (recorded == 1 ? " note" : " notes")
+			+ (recorded > 0 ? " into \"" + into + "\". Ctrl+Z takes them back." : " written.")));
+	}
+
+	private Component recordLabel() {
+		return Component.literal(recording ? "Recording" : "Record");
 	}
 
 	/** Plays from the top, which is the one place worth a key of its own. */
@@ -4844,6 +5173,9 @@ public final class ComposerScreen extends Screen {
 			List<NoteEvent> notes = layer.notes();
 			for (int index = lowerBoundStart(notes, playbackStartTick); index < notes.size(); index++) {
 				NoteEvent note = notes.get(index);
+				if (!takeNotes.isEmpty() && takeNotes.contains(note.id())) {
+					continue;
+				}
 				events.add(new PlaybackEvent(
 					note.startTick(),
 					instrument,
@@ -4953,7 +5285,11 @@ public final class ComposerScreen extends Screen {
 
 	private void afterStateChange() {
 		clampPlaybackToEnd();
-		if (playing) {
+		// Not during a take. A take's own notes are kept out of its schedule, so nothing it writes
+		// can change what is left to play -- and rebuilding meant sorting every event in the song
+		// again on every key press, which is the one moment in this screen where a millisecond of
+		// delay is something you can hear.
+		if (playing && !takingNotes()) {
 			resetPlaybackSchedule();
 		}
 		syncProject();
@@ -5614,6 +5950,9 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private void updateButtonStates() {
+		if (recordButton != null) {
+			recordButton.setMessage(recordLabel());
+		}
 		if (playButton != null) {
 			playButton.active = anythingAudible();
 			playButton.setMessage(playLabel());
