@@ -2761,8 +2761,13 @@ public final class SongBuilder {
 	 *
 	 * <p>Parity pads stay. They are not this kind of padding -- they move a module a column so its
 	 * slots land on a parity that works, and nothing about cutting makes that unnecessary.</p>
+	 *
+	 * <p><b>On, on this branch.</b> It loses on Guardian -- 86 breach blocks to 273 on its own, 97
+	 * with the earlier cut alongside it -- and wins on the song that isolates what it claims, ekran's
+	 * chords of twenty-five at a gap of one, 164 blocks to 36. It is on so that it can be pasted and
+	 * looked at, which is the point of the branch. It is not ready for main.</p>
 	 */
-	static boolean CUT_ONLY_LANES = false;
+	static boolean CUT_ONLY_LANES = true;
 
 	/**
 	 * v2: cut the chord that <em>reaches</em> the wall, rather than the one that fails to fit.
@@ -2777,8 +2782,13 @@ public final class SongBuilder {
 	 * empty, so the lane always has a cut available and never has to fund a turn. The chord being cut
 	 * may be one that would have fitted whole, which {@link #CUTS_A_CHORD_THAT_FITS} already knows how
 	 * to divide.</p>
+	 *
+	 * <p><b>On, on this branch, and it stands on its own.</b> Measured with the planner left alone it
+	 * takes Guardian from 86 breach blocks to 68 over the same 21 lanes, for 1.7% more length, with
+	 * ekran's 40 wide over five floors still clean. That is the one part of v2 that is ready to go to
+	 * main by itself.</p>
 	 */
-	static boolean CUTS_THE_CHORD_THAT_REACHES = false;
+	static boolean CUTS_THE_CHORD_THAT_REACHES = true;
 
 	/**
 	 * v2: two stacked centres are never left two columns apart; a pad makes it three.
