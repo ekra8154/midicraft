@@ -1578,7 +1578,11 @@ public final class SongBuilder {
 					if (ahead == 0) {
 						placements.padded("padAheadAskedForNothing");
 					} else if (front.cells().size() != ahead) {
-						placements.padded("padAheadWireShort" + Math.min(ahead - front.cells().size(), 6));
+						// Not "one column too long", which is what this said before planPad was read:
+						// planPad never returns more cells than it is asked for, so a negative
+						// difference is prePad handing back -1 for want of an exact landing.
+						placements.padded(ahead < 0 ? "padAheadNoExactFit"
+							: "padAheadWireShort" + Math.min(ahead - front.cells().size(), 6));
 					}
 					if (ahead > 0 && front.cells().size() == ahead) {
 						lane = emitPad(placements, lane, front, "padAhead");
@@ -2748,14 +2752,45 @@ public final class SongBuilder {
 		// The far end lands a column short of the wall, because landing it *on* the wall is landing
 		// the handover one past it -- see {@link #handoverReserve}.
 		int target = wall - stepX * handoverReserve(layout);
+		// The best pad that does not carry the chord past the target, for when none lands on it.
+		//
+		// An exact hit is not always available: a stacked module that nudges, or one whose shape the
+		// walk changes under it, moves its own end by a column, so the search can step from short of
+		// the target to past it without ever standing on it. Returning -1 there throws the whole pad
+		// away and the lane keeps every column of its gap -- which is the gap the run then has to
+		// cover, and dying on the staircase is exactly what the pad exists to prevent.
+		//
+		// Measured: 183 of 837 wanted pads came back -1, better than a fifth of them.
+		int nearest = -1;
 		for (int pad = 0; pad <= limit; pad++) {
-			if (landingOf(startX + stepX * pad, stepX, event, wait, busy, wall, layout, inTurn,
-					parity).end() == target) {
+			int end = landingOf(startX + stepX * pad, stepX, event, wait, busy, wall, layout, inTurn,
+				parity).end();
+			if (end == target) {
 				return pad;
 			}
+			// Still short of where it is aimed, so this much pad is safe and more may yet be better.
+			if ((target - end) * stepX > 0) {
+				nearest = pad;
+			}
 		}
-		return -1;
+		return PREPAD_TAKES_THE_NEAREST ? nearest : -1;
 	}
+
+	/**
+	 * Whether the pad in front of a lane's last chord may take the nearest fit when none is exact.
+	 *
+	 * <p>{@link #prePad} walks pad sizes until the chord's end lands exactly on the column the
+	 * handover wants, and returns -1 if none does. An exact hit is not always there: a stacked module
+	 * that nudges moves its own end by a column, so the search can step from short of the target to
+	 * past it without ever standing on it. Refusing there keeps the whole gap, and the gap is what the
+	 * run has to cover to reach the staircase -- which is the death the pad exists to prevent.</p>
+	 *
+	 * <p>Measured over eight songs at sixty configs each, before this: the pad in front is wanted 837
+	 * times and laid 135. Of the 702 it gives up on, <b>183 are this</b> -- {@code ahead} came back
+	 * -1. The rest asked for more columns than the arriving wire could lay and were abandoned rather
+	 * than laying what they could, which is a separate question and a larger one.</p>
+	 */
+	static boolean PREPAD_TAKES_THE_NEAREST = true;
 
 	/** Lays a run of dust, on glass so that nothing under it comes alive. */
 	private static Lane emitDust(PlacementPlan placements, Lane lane, int columns) {
