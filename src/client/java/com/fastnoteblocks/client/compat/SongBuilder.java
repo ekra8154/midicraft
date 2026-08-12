@@ -1401,11 +1401,34 @@ public final class SongBuilder {
 			//
 			// Only upward from a pad the plan already asked for, and only while the wire covers it, so
 			// this can move a lane onto its wall and never off it.
+			// How far this loop is allowed to run past what the plan actually booked, and how much
+			// wire it must leave behind it. Both were unbounded: the only brakes were the plan's own
+			// landing arithmetic and "can the wire pay for one more column", so a lane standing on
+			// eleven blocks of wire could spend ten of them on bare dust to buy a two-cell discount.
+			// See {@link #PREPAD_GROWTH_CAP}.
+			int grownFrom = owing;
+			// Whether the event after this one still has somewhere to go at the booking as it stands.
+			// If it is already stranded there, the growth below is not what stranded it.
+			boolean strandedAlready = PREPAD_NEVER_STRANDS_THE_NEXT
+				&& strandsTheEventAfter(events, index, event, owing, lane, wait - spentPadding,
+					columnBehindBusy, wall, layout,
+					inTurn(turning, leavingTurn, lane.pos(), lastCorner), parity, splitCells);
 			while (PREPADS_FOR_THE_OFF_BUS_DISCOUNT && owing > 0 && tipSignal >= owing + 1
+					&& owing - grownFrom < PREPAD_GROWTH_CAP
+					&& tipSignal - owing >= PREPAD_LEAVES_WIRE
 					&& (landingOf(lane.pos().getX() + lane.travel().getStepX() * owing,
 						lane.travel().getStepX(), event, wait - spentPadding, columnBehindBusy, wall,
 						layout, inTurn(turning, leavingTurn, lane.pos(), lastCorner), parity).end() - padWall)
 						* lane.travel().getStepX() < 0) {
+				// One column further is one column the next chord has not got. Taken only where the
+				// next chord can still do something with what is left.
+				if (PREPAD_NEVER_STRANDS_THE_NEXT && !strandedAlready
+						&& strandsTheEventAfter(events, index, event, owing + 1, lane,
+							wait - spentPadding, columnBehindBusy, wall, layout,
+							inTurn(turning, leavingTurn, lane.pos(), lastCorner), parity, splitCells)) {
+					placements.padded("prepadWouldStrandTheNext");
+					break;
+				}
 				owing++;
 			}
 			if (TRACE && booked != null && booked.getOrDefault(index, 0) > 0) {
@@ -1875,6 +1898,49 @@ public final class SongBuilder {
 	 * on its beat, and the drop to a bus when the pair of slots behind it is already spoken for.</p>
 	 */
 	private record Landing(int end, int tip, boolean busy, ChordStyle style) {
+	}
+
+	/**
+	 * Whether padding this chord forward by so many columns leaves the next one with nowhere to go.
+	 *
+	 * <p>A pad in front of a chord moves everything behind it along, and the event after is the one
+	 * that pays: it starts that many columns nearer its wall. There are two ways it can still be all
+	 * right -- it fits in what is left, or it is big enough to be cut across the turn and the cut
+	 * reaches -- and if neither holds, the pad has spent the lane's last room on a discount and the
+	 * chord comes to rest outside. That is the illit lane exactly: a chord of eighteen with nine
+	 * columns in front of it would have been cut, and ten columns of prepad left it {@code room=-2},
+	 * where a cut is not offered at all.</p>
+	 *
+	 * <p>Asked as a difference rather than as an absolute. A chord already doomed at the booking the
+	 * plan made is not doomed <em>by</em> the growth, and refusing to grow does not save it -- it only
+	 * moves the lane, and a lane moved for no reason lands its notes against somebody else's tick.
+	 * The same reasoning, and the same measurement, as the down-clamp above.</p>
+	 */
+	private static boolean strandsTheEventAfter(List<EventGroup> events, int index, EventGroup event,
+			int columnsAhead, Lane lane, int wait, boolean busy, int wall, Layout layout,
+			boolean inTurn, ParityOracle parity, int splitCells) {
+		if (index + 1 >= events.size()) {
+			return false;
+		}
+		int step = lane.travel().getStepX();
+		Landing here = landingOf(lane.pos().getX() + step * columnsAhead, step, event, wait, busy,
+			wall, layout, inTurn, parity);
+		// Where the next chord opens is the column after this one's last, and what it has to work
+		// with is whatever stands between there and the wall.
+		int room = (wall - (here.end() + step)) * step;
+		int cells = (events.get(index + 1).notes().size() + 1) / 2;
+		boolean fits = cells <= room - 1;
+		// The same sum {@code couldSplit} makes in the walk. Two places, one rule -- see the note on
+		// {@link #closes}.
+		//
+		// Necessary and nothing like sufficient, which is what the first version of this got wrong.
+		// A cut is offered right down to {@code room == 2}, where the near half is
+		// {@code 2 * (room - 1)} = two notes and the whole rest of the chord has to land in the next
+		// lane -- so "it can be cut" was true for every column the growth wanted to take, and the
+		// guard let it take them. Measured at 357 breached lanes against 63 for not growing at all.
+		boolean cuts = !PREPAD_NEXT_MUST_FIT
+			&& room >= 2 && room - 1 < cells && cells + splitCells <= DUST_RANGE;
+		return !fits && !cuts;
 	}
 
 	/**
@@ -6162,8 +6228,79 @@ public final class SongBuilder {
 	 * <p>ekran's, from a breach of eleven on Guardian at 44 wide over three floors: a lane one column
 	 * short of its wall with five blocks of wire, wanting one for the column and five for the climb,
 	 * where moving the chord makes it one and three.</p>
+	 *
+	 * <p><b>Off since 2026-08-11, on ekran's instruction, and the idea is not dead.</b> It was added
+	 * (af5a019) a day before {@link #PADS_AT_BUS_HEIGHT_INTO_A_CLIMB}, and the two are competing
+	 * answers to one question -- how to keep a climb starting on a bus so it costs three. This one
+	 * moves the chord to the wall; the raise leaves the pad up so the contact is never broken. The
+	 * raise wins because it costs no columns.</p>
+	 *
+	 * <p>And this one costs a great many. Measured over eight songs at sixty configs each, it is worth
+	 * <b>772 breached lanes with the raise off and 773 with it on</b> -- the damage is its own and has
+	 * nothing to do with the raise. It was only ever measured against Guardian, 37 builds, where it
+	 * did win: 267 lanes to 246, 1,539 breach blocks to 1,160, worst 17 to 12.</p>
+	 *
+	 * <p><b>What a better version has to do</b>, in ekran's words: pad only where it stops a breach,
+	 * pad the fewest columns that does it, and never be the cause of one. The controls below are left
+	 * in for that, and one of them is already known not to be enough --
+	 * {@link #PREPAD_NEVER_STRANDS_THE_NEXT} looks one event ahead and scored 357 breached lanes
+	 * against 63 for simply not growing. One event of lookahead cannot see the harm; the planner's can,
+	 * which is where a rewrite should start.</p>
 	 */
-	static boolean PREPADS_FOR_THE_OFF_BUS_DISCOUNT = true;
+	static boolean PREPADS_FOR_THE_OFF_BUS_DISCOUNT = false;
+
+	/**
+	 * How many columns past the plan's own booking the off-bus prepad may grow, and what it must
+	 * leave in the wire when it stops.
+	 *
+	 * <p>The loop had neither brake. It stopped when the chord it is padding lands flush on the wall
+	 * or when the wire could not buy one more column -- and nothing in either test asks what the pad
+	 * costs the lane. ekran read the result off illit at 32 wide over two floors: the lane stood at
+	 * {@code x=17} with eleven blocks of wire and thirteen columns to its wall, the plan booked
+	 * <b>two</b> columns of prepad, and this loop grew them to <b>ten</b>. That left {@code tip=1}, so
+	 * the chord of seven it was padding gave up its stacked shape and was laid as a wider plain bus,
+	 * and the chord of eighteen behind it arrived at {@code x=32} -- two columns outside a wall at
+	 * thirty, where {@code room} is negative and so {@code couldSplit} is false. Unpadded that chord
+	 * had nine columns to work with and would simply have been cut.</p>
+	 *
+	 * <p>Ten columns of wire to buy a discount worth two. The trade is the whole objection.</p>
+	 *
+	 * <p>And it is a trade the raised ascent has largely already won: this loop exists because a cell
+	 * of dust between a bus and a staircase drops the staircase back to the dear form, and a pad that
+	 * stays at bus height does not -- so where {@link #PADS_AT_BUS_HEIGHT_INTO_A_CLIMB} applies, the
+	 * lane keeps its discount however many columns of pad stand before the wall and has no reason to
+	 * chase the wall at all.</p>
+	 */
+	static int PREPAD_GROWTH_CAP = Integer.MAX_VALUE;
+
+	/** @see #PREPAD_GROWTH_CAP */
+	static int PREPAD_LEAVES_WIRE = 0;
+
+	/**
+	 * Whether the off-bus prepad may take the last room the chord behind it had.
+	 *
+	 * <p>ekran's rule, and the sharper statement of the whole thing: a pad is worth laying where a
+	 * dense chord would not otherwise place, it should be the smallest number of columns that does
+	 * the job, and <b>it must never be the reason something breaches</b>. The growth loop had no way
+	 * to know it was the reason -- it looks only at the chord it is padding.</p>
+	 *
+	 * <p>So each column is offered to {@link #strandsTheEventAfter} before it is taken, and refused
+	 * where it would leave the next chord unable either to fit or to be cut. Counted as
+	 * {@code prepadWouldStrandTheNext} so the number of times it bites is visible beside every other
+	 * reason a column gets spent.</p>
+	 */
+	static boolean PREPAD_NEVER_STRANDS_THE_NEXT = true;
+
+	/**
+	 * Whether the chord after a prepad has to actually fit, or merely to be cuttable.
+	 *
+	 * <p>The looser reading was measured first and is not enough: {@code couldSplit} stays true down
+	 * to two columns of room, so "the next one can still be cut" permitted almost every column the
+	 * growth asked for. This requires the next chord to fit in what is left of the lane, which is the
+	 * strict reading of ekran's rule -- the pad may not be the reason anything has to be cut, never
+	 * mind the reason anything breaches.</p>
+	 */
+	static boolean PREPAD_NEXT_MUST_FIT = true;
 
 	/**
 	 * Whether a lane may pad a chord forward only as far as it takes to make the next one cut.
