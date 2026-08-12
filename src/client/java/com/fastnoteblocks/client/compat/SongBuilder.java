@@ -1584,7 +1584,19 @@ public final class SongBuilder {
 						placements.padded(ahead < 0 ? "padAheadNoExactFit"
 							: "padAheadWireShort" + Math.min(ahead - front.cells().size(), 6));
 					}
-					if (ahead > 0 && front.cells().size() == ahead) {
+					// All of it, or as much of it as the wire reaches.
+					//
+					// The pad behind already lays what it can -- {@link #planPad} stops where the wire
+					// stops and hands back a short pad rather than none, and the comment above says why.
+					// The pad in front demanded the whole thing and dropped it otherwise, which is 633
+					// of 817 wanted pads over the library. Both faults are the same one: a perfect pad
+					// or nothing, where a partial pad still moves the chord towards its wall and still
+					// takes those columns off the run that has to cross the staircase.
+					if (ahead > 0 && (front.cells().size() == ahead
+							|| PREPAD_LAYS_WHAT_IT_CAN && !front.cells().isEmpty())) {
+						if (front.cells().size() < ahead) {
+							placements.padded("padAheadPartial");
+						}
 						lane = emitPad(placements, lane, front, "padAhead");
 						spentPadding += front.delaySpent();
 					}
@@ -2801,6 +2813,36 @@ public final class SongBuilder {
 	 * next.</p>
 	 */
 	static boolean PREPAD_TAKES_THE_NEAREST = false;
+
+	/**
+	 * Whether the pad in front lays as much as the wire reaches rather than all of it or none.
+	 *
+	 * <p>The pad behind already works this way: {@link #planPad} stops where the wire stops and hands
+	 * back a short pad, and the comment beside it says a lane wanting a dozen columns off a wire worth
+	 * eight lays what it can. The pad in front asked for the whole thing and dropped it otherwise --
+	 * <b>633 of 817</b> wanted pads over the library, four fifths of every one it gives up on.</p>
+	 *
+	 * <p>Worth trying with {@link #PREPAD_TAKES_THE_NEAREST} rather than against it. They are the same
+	 * mistake at two sizes -- a perfect pad or nothing -- and neither is likely to show its worth
+	 * alone, because a pad that gets the chord closer without getting it there pays the columns and
+	 * collects none of the benefit.</p>
+	 *
+	 * <p><b>Worse together, which refuted that.</b> Eight songs at sixty configs each:</p>
+	 *
+	 * <pre>
+	 * nearest off  laysWhatItCan off   29 lanes / 138 blocks / worst 11
+	 * nearest on   laysWhatItCan off   33 lanes / 142 blocks / worst 10
+	 * nearest off  laysWhatItCan on    26 lanes / 166 blocks / worst 12
+	 * nearest on   laysWhatItCan on    45 lanes / 264 blocks / worst 11
+	 * </pre>
+	 *
+	 * <p>Not two halves of one fix -- two ways of laying an imperfect pad, and doing both compounds
+	 * the imprecision. Alone this one is a trade rather than a loss: <b>three fewer lanes breach</b>
+	 * and the ones that do go deeper, which is what a pad that moves a chord towards its wall without
+	 * landing it there would be expected to do. Off because it is not a win, not because it is
+	 * wrong.</p>
+	 */
+	static boolean PREPAD_LAYS_WHAT_IT_CAN = false;
 
 	/** Lays a run of dust, on glass so that nothing under it comes alive. */
 	private static Lane emitDust(PlacementPlan placements, Lane lane, int columns) {

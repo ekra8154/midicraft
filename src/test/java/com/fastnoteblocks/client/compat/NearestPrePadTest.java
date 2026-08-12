@@ -82,8 +82,9 @@ class NearestPrePadTest {
 		}
 		System.out.println();
 		System.out.println("==== the pad in front takes the nearest fit ====");
-		for (boolean nearest : new boolean[] {false, true}) {
-			SongBuilder.PREPAD_TAKES_THE_NEAREST = nearest;
+		for (int arm = 0; arm < 4; arm++) {
+			SongBuilder.PREPAD_TAKES_THE_NEAREST = (arm & 1) != 0;
+			SongBuilder.PREPAD_LAYS_WHAT_IT_CAN = (arm & 2) != 0;
 			int lanes = 0;
 			int blocks = 0;
 			int worst = 0;
@@ -105,7 +106,8 @@ class NearestPrePadTest {
 					}
 				}
 			}
-			System.out.println("   nearest=" + (nearest ? "on " : "off") + "   lanes=" + lanes
+			System.out.println("   nearest=" + ((arm & 1) != 0 ? "on " : "off")
+				+ " laysWhatItCan=" + ((arm & 2) != 0 ? "on " : "off") + "   lanes=" + lanes
 				+ " blocks=" + blocks + " worst=" + worst + " wrong=" + wrong + " length=" + length
 				+ " volume=" + volume);
 		}
