@@ -161,8 +161,8 @@ class AllTwentyFivesTest {
 					+ " at a gap of " + GAP, song);
 			}
 		} finally {
-			SongBuilder.CUT_ONLY_LANES = true;
-			SongBuilder.CUTS_THE_CHORD_THAT_REACHES = true;
+			SongBuilder.CUT_ONLY_LANES = false;
+			SongBuilder.CUTS_THE_CHORD_THAT_REACHES = false;
 		}
 	}
 
@@ -213,8 +213,8 @@ class AllTwentyFivesTest {
 					+ " unreached=" + BreachView.readBack("Guardian", mine).unreachedNotes());
 			}
 		} finally {
-			SongBuilder.CUT_ONLY_LANES = true;
-			SongBuilder.CUTS_THE_CHORD_THAT_REACHES = true;
+			SongBuilder.CUT_ONLY_LANES = false;
+			SongBuilder.CUTS_THE_CHORD_THAT_REACHES = false;
 		}
 	}
 

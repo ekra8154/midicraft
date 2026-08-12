@@ -2767,7 +2767,7 @@ public final class SongBuilder {
 	 * chords of twenty-five at a gap of one, 164 blocks to 36. It is on so that it can be pasted and
 	 * looked at, which is the point of the branch. It is not ready for main.</p>
 	 */
-	static boolean CUT_ONLY_LANES = true;
+	static boolean CUT_ONLY_LANES = false;
 
 	/**
 	 * v2: cut the chord that <em>reaches</em> the wall, rather than the one that fails to fit.
@@ -2788,7 +2788,7 @@ public final class SongBuilder {
 	 * ekran's 40 wide over five floors still clean. That is the one part of v2 that is ready to go to
 	 * main by itself.</p>
 	 */
-	static boolean CUTS_THE_CHORD_THAT_REACHES = true;
+	static boolean CUTS_THE_CHORD_THAT_REACHES = false;
 
 	/**
 	 * v2: two stacked centres are never left two columns apart; a pad makes it three.
@@ -2809,6 +2809,27 @@ public final class SongBuilder {
 	 * was none are counted under {@code parityGapNoTick} rather than passed over.</p>
 	 */
 	static boolean NEVER_TWO_APART = false;
+
+	/**
+	 * Whether a small chord that will not fit its crowded lane may stack while inside a turn.
+	 *
+	 * <p>ekran, from the blocks: small chords come out bus-shaped <em>"with no explanation,
+	 * especially on flat turns"</em>. One line does it, and the census says it does nothing else --
+	 * over 240 builds of eight songs, a small chord that fell back and had slots available was refused
+	 * the stacked shape by the turn clause <b>1,733 times out of 1,733</b>. The other branch never
+	 * fires at all: a small chord only ever fails to fit when it is in a turn, so in practice the
+	 * fallback is always a bus, and 1,733 of the 2,264 buses laid had a denser shape available.</p>
+	 *
+	 * <p>The stated reason is that a stacked module in a turn stands across the run rather than along
+	 * it. That is the same claim {@link #TURN_BAN_OUTLASTS} makes about the chord <em>after</em> a
+	 * turn, which ekran has already read off the blocks and doubted -- a turn's bus comes out of its
+	 * second bend running the new lane's way, so the cells behind are collinear with the chord.</p>
+	 *
+	 * <p>Whether it is physical or deferred is a question the machine can answer: allow it and read
+	 * every build back. A rule that is really about geometry shows up as a wrong note or a dead line;
+	 * one that is not shows up as nothing at all.</p>
+	 */
+	static boolean SMALL_MAY_STACK_IN_A_TURN = false;
 
 	/**
 	 * Whether a chord the next lane cannot lay whole counts as stranding it, or as a chord to be cut.
@@ -5069,7 +5090,15 @@ public final class SongBuilder {
 		// bus is still what is left when neither holds.
 		if (style == ChordStyle.SMALL && lane.crowded()
 				&& !smallChordFits(placements, lane, event.notes().size(), event.time())) {
-			style = !inTurn && ultraSlots(event.notes(), false) != null
+			// Counted three ways, because ekran reads small chords coming out bus-shaped in game "with
+			// no explanation, especially on flat turns" and this is the only line that can do it. The
+			// one worth knowing is the middle: a chord the stacked shape would have taken, refused it
+			// for the turn rule alone and given a column of lane to a bus instead.
+			boolean stackable = ultraSlots(event.notes(), false) != null;
+			placements.padded(stackable
+				? inTurn ? "smallBusForTheTurnRule" : "smallBecameStacked"
+				: "smallBusNoSlots");
+			style = (SMALL_MAY_STACK_IN_A_TURN || !inTurn) && stackable
 				? ChordStyle.STACKED_FRONT
 				: ChordStyle.BUS;
 		}
