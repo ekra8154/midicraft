@@ -260,6 +260,111 @@ class GuardianBlitzTest {
 		SongBuilder.SHED_BUYS_THE_LAST_CELL = false;
 	}
 
+	/**
+	 * Padding a chord forward until it cuts, against telling the cutter to cut anyway.
+	 *
+	 * <p>They are two answers to one problem, and ekran's is the honest one: move the chord forward so
+	 * it really does overshoot, and the ordinary cut applies with the near half filling to the wall.
+	 * {@link SongBuilder#CUTS_A_CHORD_THAT_FITS} is the shortcut -- it skips the padding and forces the
+	 * division instead, which is why its near half ends wherever the chord ended.</p>
+	 *
+	 * <p>So: does a deeper search let the shortcut go? {@link SongBuilder#CUT_PAD_COLUMNS} is 2, and a
+	 * chord smaller than its room can be short by a great deal more than two.</p>
+	 */
+	@Test
+	void weighsPaddingForwardAgainstForcingTheCut() throws Exception {
+		java.util.List<java.util.List<SongBuilder.EventNote>> songs = new java.util.ArrayList<>();
+		for (String name : PICKED) {
+			songs.add(BreachView.song(name));
+		}
+		System.out.println();
+		System.out.println("==== pad until it cuts, against cutting what fits ====");
+		for (int columns : new int[] {2, 4, 8, 14}) {
+			for (boolean force : new boolean[] {false, true}) {
+				SongBuilder.CUT_PAD_COLUMNS = columns;
+				SongBuilder.CUTS_A_CHORD_THAT_FITS = force;
+				int lanes = 0;
+				int blocks = 0;
+				int worst = 0;
+				int wrong = 0;
+				long length = 0;
+				long volume = 0;
+				for (java.util.List<SongBuilder.EventNote> notes : songs) {
+					for (int floors = 1; floors <= 6; floors++) {
+						for (int width = 12; width <= 48; width += 4) {
+							SongBuilder.PastePlan plan = SongBuilder.createPastePlan(
+								new net.minecraft.core.BlockPos(0, 64, 0), notes,
+								SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+								new SongBuilder.BuildLimits(4, width, floors));
+							lanes += plan.breaches().size();
+							blocks += plan.breaches().stream().mapToInt(Integer::intValue).sum();
+							worst = Math.max(worst, plan.worstBreach());
+							wrong += plan.wrongNotes();
+							length += plan.width();
+							volume += plan.commands().size();
+						}
+					}
+				}
+				System.out.println(String.format(
+					"   cutPadColumns=%-2d forceTheCut=%-5s   lanes=%3d blocks=%4d worst=%2d wrong=%d"
+						+ " length=%d volume=%d",
+					columns, force, lanes, blocks, worst, wrong, length, volume));
+			}
+		}
+		SongBuilder.CUT_PAD_COLUMNS = 2;
+		SongBuilder.CUTS_A_CHORD_THAT_FITS = true;
+	}
+
+	/**
+	 * Why the search that pads a chord forward until it cuts gives up, counted.
+	 *
+	 * <p>Deepening it does nothing -- 2, 4, 8 and 14 columns all land within twenty blocks of each
+	 * other -- so it is not running out of columns. It has two other ways to stop: nowhere left to
+	 * charge a column to, and a pad that pushes the lane so far it no longer reaches the chord at all.
+	 * Both are trace lines rather than census keys, so this counts them off the trace.</p>
+	 */
+	@Test
+	void saysWhyThePadUntilItCutsSearchGivesUp() throws Exception {
+		List<SongBuilder.EventNote> guardian = BreachView.song("deltarune-ch-4-guardian");
+		for (int columns : new int[] {2, 14}) {
+			SongBuilder.CUT_PAD_COLUMNS = columns;
+			int noRoom = 0;
+			int stopsShort = 0;
+			int tried = 0;
+			for (int[] size : new int[][] {{20, 3}, {40, 4}, {16, 3}}) {
+				java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream();
+				java.io.PrintStream saved = System.out;
+				try {
+					System.setOut(new java.io.PrintStream(buffer, true,
+						java.nio.charset.StandardCharsets.UTF_8));
+					SongBuilder.TRACE = true;
+					SongBuilder.createPastePlan(new net.minecraft.core.BlockPos(0, 64, 0), guardian,
+						SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+						new SongBuilder.BuildLimits(4, size[0], size[1]));
+				} finally {
+					SongBuilder.TRACE = false;
+					System.setOut(saved);
+				}
+				for (String line : buffer.toString(java.nio.charset.StandardCharsets.UTF_8)
+						.lines().toList()) {
+					if (!line.contains("CUTTRY")) {
+						continue;
+					}
+					tried++;
+					if (line.contains("refused=noRoomToBook")) {
+						noRoom++;
+					} else if (line.contains("refused=sweepStopsShort")) {
+						stopsShort++;
+					}
+				}
+			}
+			System.out.println("   cutPadColumns=" + columns + "  CUTTRY lines=" + tried
+				+ "  noRoomToBook=" + noRoom + "  sweepStopsShort=" + stopsShort
+				+ "  gotAsFarAsAsking=" + (tried - noRoom - stopsShort));
+		}
+		SongBuilder.CUT_PAD_COLUMNS = 2;
+	}
+
 	private static java.util.Map<net.minecraft.core.BlockPos,
 			net.minecraft.world.level.block.state.BlockState> placeInWorld(
 			SongBuilder.PastePlan plan) {
