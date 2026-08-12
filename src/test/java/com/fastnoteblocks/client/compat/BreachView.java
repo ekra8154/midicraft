@@ -207,6 +207,40 @@ final class BreachView {
 		return lines;
 	}
 
+	/**
+	 * The plan stood up as blocks and read back as a machine.
+	 *
+	 * <p>The only thing that can answer whether a build plays. {@code plan.breaches()} counts what the
+	 * planner meant to do and reads nought over a machine whose wire is severed, so any change that
+	 * moves which half of a chord lands on which side of a staircase has to come through here before
+	 * it is believed.</p>
+	 */
+	static NoteMachineReader.Reading readBack(String name, SongBuilder.PastePlan plan) {
+		Map<BlockPos, BlockState> world = new LinkedHashMap<>();
+		for (String command : plan.commands()) {
+			String[] word = command.split(" ");
+			world.put(new BlockPos(Integer.parseInt(word[1]), Integer.parseInt(word[2]),
+				Integer.parseInt(word[3])), parse(word[4]));
+		}
+		int minX = Integer.MAX_VALUE;
+		int minY = Integer.MAX_VALUE;
+		int minZ = Integer.MAX_VALUE;
+		int maxX = Integer.MIN_VALUE;
+		int maxY = Integer.MIN_VALUE;
+		int maxZ = Integer.MIN_VALUE;
+		for (BlockPos at : world.keySet()) {
+			minX = Math.min(minX, at.getX());
+			minY = Math.min(minY, at.getY());
+			minZ = Math.min(minZ, at.getZ());
+			maxX = Math.max(maxX, at.getX());
+			maxY = Math.max(maxY, at.getY());
+			maxZ = Math.max(maxZ, at.getZ());
+		}
+		return NoteMachineReader.read(name, new BlockPos(minX, minY, minZ),
+			new BlockPos(maxX, maxY, maxZ),
+			at -> world.getOrDefault(at, Blocks.AIR.defaultBlockState()));
+	}
+
 	static BlockState parse(String blockState) {
 		try {
 			return BlockStateParser.parseForBlock(BuiltInRegistries.BLOCK, blockState, false)
