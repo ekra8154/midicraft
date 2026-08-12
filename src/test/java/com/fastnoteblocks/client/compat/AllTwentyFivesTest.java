@@ -166,6 +166,58 @@ class AllTwentyFivesTest {
 		}
 	}
 
+	/** The same two arms on the song this is all for. */
+	@Test
+	void weighsCutOnlyLanesOnGuardian() throws Exception {
+		List<SongBuilder.EventNote> guardian = BreachView.song("deltarune-ch-4-guardian");
+		System.out.println();
+		System.out.println("==== Guardian, every size ====");
+		try {
+			// Four arms, because the two changes are independent and lumping them cost the first read
+			// of this table its meaning: dropping the planner and cutting a column earlier are separate
+			// claims, and one of them may be carrying the other.
+			String[] named = {"v1: planner, cut on overshoot", "planner off only          ",
+				"earlier cut only          ", "v2: both                  "};
+			for (int arm = 0; arm < 4; arm++) {
+				SongBuilder.CUT_ONLY_LANES = (arm & 1) != 0;
+				SongBuilder.CUTS_THE_CHORD_THAT_REACHES = (arm & 2) != 0;
+				int lanes = 0;
+				int blocks = 0;
+				int wrong = 0;
+				int dirty = 0;
+				long length = 0;
+
+				for (int floors = 1; floors <= 6; floors++) {
+					for (int width = 16; width <= 48; width += 4) {
+						SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0),
+							guardian, SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+							new SongBuilder.BuildLimits(4, width, floors));
+						int sum = plan.breaches().stream().mapToInt(Integer::intValue).sum();
+						lanes += plan.breaches().size();
+						blocks += sum;
+						wrong += plan.wrongNotes();
+						length += plan.width();
+						if (sum > 0) {
+							dirty++;
+						}
+					}
+				}
+				System.out.println("   " + named[arm]
+					+ "   lanes=" + lanes + " blocks=" + blocks + " wrong=" + wrong
+					+ " dirtyConfigs=" + dirty + " length=" + length);
+				// ekran's own size, and the machine rather than the plan.
+				SongBuilder.PastePlan mine = SongBuilder.createPastePlan(new BlockPos(0, 64, 0),
+					guardian, SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+					new SongBuilder.BuildLimits(16, 40, 5));
+				System.out.println("      40w x 5f (ekran's)  breaches=" + mine.breaches()
+					+ " unreached=" + BreachView.readBack("Guardian", mine).unreachedNotes());
+			}
+		} finally {
+			SongBuilder.CUT_ONLY_LANES = false;
+			SongBuilder.CUTS_THE_CHORD_THAT_REACHES = false;
+		}
+	}
+
 	/**
 	 * What Guardian is made of, against what the synthetic songs above are made of.
 	 *
