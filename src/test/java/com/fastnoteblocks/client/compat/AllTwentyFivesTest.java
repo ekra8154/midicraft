@@ -141,6 +141,32 @@ class AllTwentyFivesTest {
 	}
 
 	/**
+	 * The target song under the old builder and the new one, side by side.
+	 *
+	 * <p>v2 is the same walk with the booking layer switched off and one rule changed: a cut is
+	 * offered on the chord that <em>reaches</em> the wall rather than the one that overshoots it, so
+	 * the near half is never empty and a lane never has to fund its own turn. Everything that knows
+	 * about blocks -- the raised pad into a climb, the four-cell descent, the head-only cut, the shed,
+	 * relocation, parity -- is the same code in both arms, which is the point of doing it this way
+	 * rather than beside it.</p>
+	 */
+	@Test
+	void weighsCutOnlyLanesAgainstThePlanner() {
+		List<SongBuilder.EventNote> song = allTwentyFives();
+		try {
+			for (int arm = 0; arm < 2; arm++) {
+				SongBuilder.CUT_ONLY_LANES = arm == 1;
+				SongBuilder.CUTS_THE_CHORD_THAT_REACHES = arm == 1;
+				table((arm == 0 ? "v1, the planner" : "v2, cuts only") + " -- chords of " + CHORD
+					+ " at a gap of " + GAP, song);
+			}
+		} finally {
+			SongBuilder.CUT_ONLY_LANES = false;
+			SongBuilder.CUTS_THE_CHORD_THAT_REACHES = false;
+		}
+	}
+
+	/**
 	 * What Guardian is made of, against what the synthetic songs above are made of.
 	 *
 	 * <p>Asked because none of them breach. Six shapes and ninety-six builds, chords from one note to

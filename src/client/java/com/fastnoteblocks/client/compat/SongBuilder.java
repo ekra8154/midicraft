@@ -711,7 +711,9 @@ public final class SongBuilder {
 				// carries on across it. Planning one anyway is where most of the pad in a build came
 				// from: a song of nothing but chords of twenty-two, on one floor, has no staircase in it
 				// at all and should lay no pad anywhere.
-				booked = above >= 0 && above < floors
+				// v2 books nothing at all. A lane that can always cut never has to be walked out to its
+				// wall, so there is nothing for the pad search to buy -- see {@link #CUT_ONLY_LANES}.
+				booked = above >= 0 && above < floors && !CUT_ONLY_LANES
 					? planLane(events, index, lane.pos().getX(), lane.travel().getStepX(), wall,
 						lane.travel() == forward ? nearWall : farWall,
 						currentTime, tipSignal,
@@ -757,9 +759,18 @@ public final class SongBuilder {
 			// Whether this event will not fit before the wall, which is a different question from
 			// whether the lane may end here.
 			boolean overshoots = !turning && (landing > farWall || landing < nearWall);
+			// And whether it merely gets there. A chord ending on the wall, or one column short of
+			// it, has not overshot and so was never offered a cut -- which leaves the lane holding a
+			// long bus, no near half to cut, and a turn to pay for out of the two cells that bus left
+			// it. That is the case the whole pad layer was built around. See
+			// {@link #CUTS_THE_CHORD_THAT_REACHES}.
+			boolean reaches = !turning
+				&& (wall - landing) * lane.travel().getStepX() <= 1;
 			// A lane has to hold something before it can end, or a turn that lands short would turn
 			// again at once and the walk would climb the whole build without laying a note.
 			boolean wantsTurn = laneStarted && overshoots;
+			// What the cut is offered on. The same question in v1, one column earlier in v2.
+			boolean cutOffered = overshoots || CUTS_THE_CHORD_THAT_REACHES && reaches;
 			// One tick has to be left for the next event's own repeater, which is the only thing that
 			// can drive the module it stands in front of.
 			int columns = (wall - lane.pos().getX()) * lane.travel().getStepX();
@@ -812,7 +823,7 @@ public final class SongBuilder {
 			// still be cuttable with one. Asked first, and the plain sum is what is left when the
 			// chord cannot take a head -- too many falling instruments, no harp for the centre, or
 			// no room for a head and a cell of bus before the wall.
-			StackedSplit headed = layout.ultra() && overshoots && index > 0 && above >= 0
+			StackedSplit headed = layout.ultra() && cutOffered && index > 0 && above >= 0
 				&& above < floors
 				? stackedSplitOf(event.notes(), room, splitCells, climb > 0,
 					!columnBehindBusy || delayColumns > 0
@@ -894,7 +905,7 @@ public final class SongBuilder {
 					splitNudge = true;
 				}
 			}
-			boolean couldSplit = layout.ultra() && overshoots && index > 0 && above >= 0
+			boolean couldSplit = layout.ultra() && cutOffered && index > 0 && above >= 0
 				&& above < floors && (headed != null
 					|| (room >= 2 && room - 1 < cells && cells + splitCells <= DUST_RANGE));
 			// Counted where it bites rather than where it is decided. The planner books the veto on a
@@ -2731,6 +2742,63 @@ public final class SongBuilder {
 	 * that {@code reachesWall} refuses. The cut was there and already shed. Ten columns outside.</p>
 	 */
 	static boolean CUTS_WHEN_THE_VETOED_LANE_CANNOT_TURN = true;
+
+	/**
+	 * v2: the planner is not consulted, and a lane closes on a cut or not at all.
+	 *
+	 * <p>ekran's, and the argument is arithmetic rather than taste. A cut costs a transition cell,
+	 * the two halves of the chord, and the staircase, all off the repeater the chord opens with:
+	 * {@code 1 + ⌈near/2⌉ + ⌈far/2⌉ + splitCells ≤ 15}. Plain that reaches 22 notes descending and 24
+	 * climbing; with a head it reaches 27 and 29. So on a song whose chords stop at twenty-four --
+	 * Guardian does -- very nearly every chord can be cut wherever it happens to be standing, and a
+	 * lane that can always cut never needs to be walked out to its wall on wire it has to pay for.</p>
+	 *
+	 * <p>Which is what {@link #planLane} and everything hanging off it exist to do. Its own docstring
+	 * justifies itself with a bus of twenty-two holding four blocks of wire and a twelve column gap --
+	 * and a bus of twenty-two is precisely the chord that cuts plain, anywhere, for nothing. So the
+	 * whole booking layer is switched off here rather than tuned: no pads booked, no
+	 * {@link #strandsNext}, no veto.</p>
+	 *
+	 * <p>Parity pads stay. They are not this kind of padding -- they move a module a column so its
+	 * slots land on a parity that works, and nothing about cutting makes that unnecessary.</p>
+	 */
+	static boolean CUT_ONLY_LANES = false;
+
+	/**
+	 * v2: cut the chord that <em>reaches</em> the wall, rather than the one that fails to fit.
+	 *
+	 * <p>The one rule that has to change with {@link #CUT_ONLY_LANES}, and the hole it fills is the
+	 * hole the pad machinery was built around. A chord that lands flush leaves {@code room == 0}:
+	 * there is no near half, so there is nothing to cut, and the lane has to pay for its own turn out
+	 * of whatever wire a long bus left it -- which for a chord of twenty-five is two cells against a
+	 * staircase that costs four. That is the case a pad used to be booked for.</p>
+	 *
+	 * <p>Take the chord that ends at or past {@code wall - 1} instead and the near half is never
+	 * empty, so the lane always has a cut available and never has to fund a turn. The chord being cut
+	 * may be one that would have fitted whole, which {@link #CUTS_A_CHORD_THAT_FITS} already knows how
+	 * to divide.</p>
+	 */
+	static boolean CUTS_THE_CHORD_THAT_REACHES = false;
+
+	/**
+	 * v2: two stacked centres are never left two columns apart; a pad makes it three.
+	 *
+	 * <p>ekran's, and it replaces a fallback with a guarantee. Two stacked modules whose centres sit
+	 * two apart contend for the same slots, and the answer until now was to give the second one up and
+	 * build it as a bus. A bus is wider and carries half as much, so the fallback costs the lane the
+	 * columns it was trying to save.</p>
+	 *
+	 * <p>Spend one column instead. At three apart the next module's parity pad has somewhere to stand,
+	 * so it can be placed as a stacked chord -- with relocation if it needs it -- rather than refused.
+	 * One column bought, a module's worth of width saved.</p>
+	 *
+	 * <p>It can only fire where there is a tick to spend: a pad column is a column of the gap in front
+	 * of the chord, and at a gap of one redstone tick that gap is empty. On the all-twenty-fives song
+	 * it therefore never fires at all, and every chord is thirteen cells so no two centres are ever
+	 * two apart anyway. Guardian is where it earns its keep. The times it wanted a column and there
+	 * was none are counted under {@code parityGapNoTick} rather than passed over.</p>
+	 */
+	static boolean NEVER_TWO_APART = false;
 
 	/**
 	 * Whether a chord the next lane cannot lay whole counts as stranding it, or as a chord to be cut.
