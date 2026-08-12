@@ -19,9 +19,21 @@ import org.junit.jupiter.api.Test;
  *
  * <p>The ceilings in this file are quoted as arithmetic -- 22 notes for a plain cut at a descent, 27
  * for a headed one, 29 climbing -- and arithmetic is what the wire check makes, not what the builder
- * lays. ekran asked whether 22 still splits and whether 27 still cuts, and the honest answer is a
- * build of nothing but chords of that size, read through {@link NoteMachineReader}, with the longest
- * run counted off the commands. One size a line.</p>
+ * lays. So: a build of nothing but chords of that size, read through {@link NoteMachineReader}, with
+ * the longest run counted off the commands. One size a line.</p>
+ *
+ * <p><b>Climbs and descents are counted apart, on ekran's point, and it is the whole value of the
+ * table.</b> They are different ceilings -- {@code turnCost} gives a climb {@code splitCells} 3 and a
+ * descent 4, so {@code runCells = 1 + tail / 2 + splitCells <= 15} reaches 29 notes climbing and 27
+ * descending -- and a column that sums them says nothing about either. Measured, descents cut 43
+ * chords of 27, five of 28 and <b>none</b> of 29; climbs cut 45 of 28, seven of 29 and none of 30.
+ * The five descents at 28 are the shed form, which drops the transition cell and so makes 15 of a
+ * sum that is otherwise 16.</p>
+ *
+ * <p><b>Flat turns are not in here at all</b>, and could not be: {@code headed} is only asked where
+ * there is a staircase. A flat turn is walked rather than crossed -- the chord takes the corner and
+ * carries on through the ordinary chord machinery, with no near half and far half to keep in step --
+ * so it has no cut ceiling to measure and carries chords the other two cannot.</p>
  */
 @Tag("sweep")
 class CutCeilingTest {
@@ -77,13 +89,14 @@ class CutCeilingTest {
 	void saysWhichChordSizesStillCut() throws Exception {
 		System.out.println();
 		System.out.println("==== one chord size a line, 3 configs each, read back ====");
-		System.out.println("   arm  size  cutHeads  lanesOut   unreached  wrong  longestRun"
+		System.out.println("   arm  size  climbCuts  descentCuts   unreached  wrong  longestRun"
 			+ "  breachBlocks");
 		for (int size = 18; size <= 30; size++) {
 		 for (boolean cuts : new boolean[] {false, true}) {
 			SongBuilder.CUTS_A_CHORD_THAT_FITS = cuts;
 			List<SongBuilder.EventNote> notes = song(size, 7L);
-			int heads = 0;
+			int climbs = 0;
+			int descents = 0;
 			int whole = 0;
 			int unreached = 0;
 			int wrong = 0;
@@ -95,12 +108,17 @@ class CutCeilingTest {
 					SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0),
 						notes, SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
 						new SongBuilder.BuildLimits(4, config[0], config[1]));
-					// What the walk says it built, counted off the padding census rather than guessed.
-					for (Map.Entry<String, Integer> entry : plan.padding().entrySet()) {
-						if (entry.getKey().startsWith("planStackedSplit")) {
-							heads += entry.getValue();
-						}
-					}
+					// Climbs and descents apart, because they are different ceilings and mixing them
+					// makes every number above 27 unreadable. turnCost gives a climb splitCells 3 and a
+					// descent 4, so runCells = 1 + tail/2 + splitCells <= 15 puts the headed cut at 29
+					// notes climbing and 27 descending. A flat turn is not in here at all: `headed` is
+					// only asked where there is a staircase, and a flat turn is walked rather than
+					// crossed -- the chord carries on round the corner and is never cut in two.
+					//
+					// Only the two keys that name the kind. The others -- HeadOnly, Clashed, Nudged,
+					// ShortHead -- are logged beside them and summing everything counts a cut twice.
+					climbs += plan.padding().getOrDefault("planStackedSplitClimb", 0);
+					descents += plan.padding().getOrDefault("planStackedSplitDescent", 0);
 					// Chords laid whole where a cut was wanted. Counted off the fault the walk writes
 					// when a lane hands over outside its wall, which is what laying one whole costs --
 					// not off a padding key, because none of them means "this chord was not cut".
@@ -118,8 +136,8 @@ class CutCeilingTest {
 				}
 			}
 			System.out.println(String.format(
-				"   %3s  %4d  %8d  %8d  %9d  %5d  %10d  %12d%s",
-				cuts ? "on" : "off", size, heads, whole, unreached, wrong, longest, breachBlocks,
+				"   %3s  %4d  %9d  %11d  %9d  %5d  %10d  %12d%s",
+				cuts ? "on" : "off", size, climbs, descents, unreached, wrong, longest, breachBlocks,
 				refused > 0 ? "   REFUSED " + refused : "")
 				+ (unreached > 0 || longest > 15 ? "   <-- DEAD WIRE" : ""));
 		 }
