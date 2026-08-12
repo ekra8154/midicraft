@@ -1567,6 +1567,19 @@ public final class SongBuilder {
 					// module may take between the pad and its own repeater to land on its beat.
 					Pad front = planPad(ahead, tipSignal, 1,
 						Math.max(0, wait - 1 - spentPadding));
+					// Counted three ways, because the guard above has already decided a front pad is
+					// wanted and the two ways it can still not happen want opposite fixes. Asked for
+					// nothing at all means {@link #prePad} and the run disagree about how many columns
+					// short the wire is; asked for more than the wire could lay means the pad is
+					// abandoned wholesale where laying what it can would still have moved the chord.
+					// ekran has watched a lane die on a staircase with a gap in front of it, and this
+					// says which of the two was standing in the way.
+					placements.padded("padAheadWanted");
+					if (ahead == 0) {
+						placements.padded("padAheadAskedForNothing");
+					} else if (front.cells().size() != ahead) {
+						placements.padded("padAheadWireShort" + Math.min(ahead - front.cells().size(), 6));
+					}
 					if (ahead > 0 && front.cells().size() == ahead) {
 						lane = emitPad(placements, lane, front, "padAhead");
 						spentPadding += front.delaySpent();

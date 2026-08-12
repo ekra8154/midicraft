@@ -365,6 +365,41 @@ class GuardianBlitzTest {
 		SongBuilder.CUT_PAD_COLUMNS = 2;
 	}
 
+	/**
+	 * How often the pad in front of a lane's last chord is wanted, and how often it happens.
+	 *
+	 * <p>The mechanism ekran drew is already in the walk: where the wire would die crossing the
+	 * staircase, the columns that would have gone behind the chord go in front of it instead, so the
+	 * chord's own repeater stands between them and the turn. It is guarded on {@code !behindReaches},
+	 * which is exactly "only when the wire would die". So a lane that still dies with a gap in front
+	 * of it is a lane where the pad was wanted and did not happen, and there are only two ways that
+	 * can be: it asked for no columns, or it asked for more than the arriving wire could lay and was
+	 * abandoned rather than laying what it could.</p>
+	 */
+	@Test
+	void saysWhyThePadInFrontDoesNotHappen() throws Exception {
+		java.util.TreeMap<String, Integer> total = new java.util.TreeMap<>();
+		for (String name : PICKED) {
+			List<SongBuilder.EventNote> notes = BreachView.song(name);
+			for (int floors = 1; floors <= 6; floors++) {
+				for (int width = 12; width <= 48; width += 4) {
+					SongBuilder.PastePlan plan = SongBuilder.createPastePlan(
+						new net.minecraft.core.BlockPos(0, 64, 0), notes,
+						SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+						new SongBuilder.BuildLimits(4, width, floors));
+					plan.padding().forEach((key, count) -> {
+						if (key.startsWith("padAhead")) {
+							total.merge(key, count, Integer::sum);
+						}
+					});
+				}
+			}
+		}
+		System.out.println();
+		System.out.println("==== the pad in front, over eight songs x 60 configs ====");
+		total.forEach((key, count) -> System.out.println("   " + key + " " + count));
+	}
+
 	private static java.util.Map<net.minecraft.core.BlockPos,
 			net.minecraft.world.level.block.state.BlockState> placeInWorld(
 			SongBuilder.PastePlan plan) {
