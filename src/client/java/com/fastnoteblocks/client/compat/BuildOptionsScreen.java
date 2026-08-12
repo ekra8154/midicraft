@@ -112,7 +112,8 @@ final class BuildOptionsScreen extends Screen {
 	/** Whether this layout folds inside a width you choose, and so has a width and a floor count. */
 	private boolean hasLaneControls() {
 		return mode == SongBuilder.PasteMode.COMPACT_LANE
-			|| mode == SongBuilder.PasteMode.ULTRA_COMPACT_LANE;
+			|| mode == SongBuilder.PasteMode.ULTRA_COMPACT_LANE
+			|| mode == SongBuilder.PasteMode.ULTRA_COMPACT_LANE_V2;
 	}
 
 	@Override
@@ -309,6 +310,10 @@ final class BuildOptionsScreen extends Screen {
 				+ "stacks around a single repeater instead of stringing out along a bus, and lanes "
 				+ "sit three apart rather than four wherever their notes can touch safely. Same "
 				+ "width and floor controls.";
+			case ULTRA_COMPACT_LANE_V2 -> "The same shapes, decided again from scratch. Every lane "
+				+ "ends by cutting whichever chord reaches its wall, so nothing is padded out to get "
+				+ "there. Chords above 25 notes are not built. Experimental: try it against the "
+				+ "layout above rather than instead of it.";
 			case LANE -> "One straight line. Easiest to read and repair, largest footprint.";
 		};
 	}

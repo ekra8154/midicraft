@@ -343,6 +343,7 @@ public final class SongBuilder {
 			case COMPACT_LANE -> createLanePastePlan(origin, forward, notes, limits.laneWidth(),
 				limits.laneFloors(), Layout.STANDARD, PasteMode.COMPACT_LANE, start);
 			case ULTRA_COMPACT_LANE -> bestUltraPlan(origin, forward, notes, limits, start);
+			case ULTRA_COMPACT_LANE_V2 -> UltraLaneV2.plan(origin, forward, notes, limits, start);
 			case LANE -> createStraightPastePlan(origin, forward, notes);
 		};
 	}
@@ -361,7 +362,7 @@ public final class SongBuilder {
 	 * fifteen milliseconds, and this buys a guarantee for two of them: the lookahead can no longer
 	 * cost a build anything, because a build it makes worse is a build that gets thrown away.</p>
 	 */
-	private static PastePlan bestUltraPlan(BlockPos origin, Direction forward,
+	static PastePlan bestUltraPlan(BlockPos origin, Direction forward,
 			List<EventNote> notes, BuildLimits limits, WalkStart start) {
 		Layout plain = Layout.ultra(limits.laneFloors(), origin);
 		// Where the snake is put down. Only when nobody has asked for somewhere in particular: a
@@ -7662,6 +7663,14 @@ public final class SongBuilder {
 		COMPACT("Compact square"),
 		COMPACT_LANE("Compact lane"),
 		ULTRA_COMPACT_LANE("Ultra compact lane"),
+		/**
+		 * The same shapes, decided again from scratch. See {@link UltraLaneV2}.
+		 *
+		 * <p>Beside the mode above rather than replacing it, because that one builds every song in
+		 * run/config today and this one has to earn its way past it on the numbers before anybody's
+		 * world depends on it.</p>
+		 */
+		ULTRA_COMPACT_LANE_V2("Ultra compact lane v2"),
 		LANE("Lane");
 
 		private final String label;
