@@ -1176,9 +1176,27 @@ public final class SongBuilder {
 					: DUST_RANGE - cells - splitCells;
 				gradeLaneTip(placements, turnCells, tipSignal,
 					climb > 0 ? "SplitClimb" : "SplitDescent");
-				// The far half starts where the staircase left off, so its first pair of notes stands
-				// alongside the run of powered stone the turn is made of.
-				columnBehindBusy = true;
+				// What the far half leaves behind it, asked of the shape it was built in rather than
+				// asserted.
+				//
+				// This said {@code true} unconditionally, on the grounds that the far half's first
+				// pair of notes stands alongside the staircase's powered stone. That is a fact about
+				// the far half's own position; {@code columnBehindBusy} is read by the chord *after*
+				// it, and asks a different question -- whether that chord may hang notes in the pair
+				// of slots behind its own repeater.
+				//
+				// ekran: after a cut the first chord's back flanks are always free, because a stacked
+				// head is never placed at the bottom of a cut. The code agrees with them everywhere
+				// else -- {@link #takesTheGapBehind} is {@code style.stacked() && ...} and the far half
+				// is laid as {@link ChordStyle#BUS} four lines above -- so every other site would
+				// answer false here. Two places deciding one thing, which is the bug this file keeps
+				// producing.
+				//
+				// An empty far half is the exception and stays busy: nothing was laid after the
+				// staircase, so what stands behind the next chord is the landing itself.
+				columnBehindBusy = far.isEmpty()
+					|| !CUT_FAR_HALF_FREES_THE_GAP && true
+					|| takesTheGapBehind(ChordStyle.BUS, (far.size() + 1) / 2);
 				laneStarted = true;
 				replan = layout.ultra();
 				continue;
@@ -2750,6 +2768,37 @@ public final class SongBuilder {
 	 * exist at all.</p>
 	 */
 	static boolean STRANDED_CHORD_MAY_STILL_CUT = false;
+
+	/**
+	 * Whether the chord after a cut may use the pair of slots behind it.
+	 *
+	 * <p>The walk set {@code columnBehindBusy = true} after every split, because the far half's first
+	 * pair of notes stands alongside the staircase's powered stone. True about the far half, and not
+	 * the question: {@code columnBehindBusy} is read by the chord <em>after</em> it and asks whether
+	 * that chord may hang notes in the two slots behind its own repeater.</p>
+	 *
+	 * <p>ekran: <em>"there's no reason behind-busy should be true. after a cut, if it's the first
+	 * chord, they always can -- we don't place stacked heads at the bottom of a cut."</em> The file
+	 * agrees with them everywhere else. {@link #takesTheGapBehind} is {@code style.stacked() && ...},
+	 * the far half is laid as {@link ChordStyle#BUS}, and a bus keeps its notes beside its stone with
+	 * the instrument blocks under those -- a column further back than the slots in question. Every
+	 * other site that tracks the gap would answer false.</p>
+	 *
+	 * <p>An empty far half stays busy: nothing was laid after the staircase, so what stands behind the
+	 * next chord is the landing itself.</p>
+	 *
+	 * <p><b>Off, and the reasoning is not what is wrong with it.</b> The machine plays either way --
+	 * {@code unreached=0 readWrong=0} in both arms, read back with {@link NoteMachineReader} over
+	 * eight songs -- so nothing here is asserting something false any more. But the slots it frees get
+	 * used, and a chord that uses them packs tighter: the library goes from 29 breached lanes and 135
+	 * blocks to 31 and 176, against builds 11 columns shorter over 336 configs. Guardian is mixed,
+	 * fewer dirty configs and lanes for more blocks.</p>
+	 *
+	 * <p>So it is a compaction trade wearing a correctness argument's clothes, and ekran's rule is
+	 * that a breach is the last resort even where it costs space. One word to flip if the shorter
+	 * builds are ever worth more than the forty blocks.</p>
+	 */
+	static boolean CUT_FAR_HALF_FREES_THE_GAP = false;
 
 	/** How far dust carries a signal before something has to repeat it. */
 	private static final int DUST_RANGE = 15;
