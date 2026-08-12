@@ -5374,6 +5374,50 @@ public final class SongBuilder {
 	static boolean SHEDS_THE_FLANK_THE_DESCENT_WANTS = true;
 
 	/**
+	 * Whether a cut one cell too long may shed the descent's flank to buy that cell.
+	 *
+	 * <p>{@link #SHEDS_THE_FLANK_THE_DESCENT_WANTS} already sheds, but only where
+	 * {@code nearBusCells == floorCells - 1}, which for a descent is {@code room == 2} exactly -- the
+	 * shed as a saving of <em>columns</em>, for a corridor too tight to hold the near half. This is
+	 * the same shed as a saving of <em>wire</em>, for a corridor with room to spare where the fifteen
+	 * is what ran out. The two want it at opposite ends and neither covers the other.</p>
+	 *
+	 * <p>ekran's, and their arithmetic for a chord of 28 going down: six in the head once the flank is
+	 * shed, twenty-two left for the bus at eleven cells, no transition cell because the head hands
+	 * over onto the staircase's own first rung, and a staircase of four. Fifteen exactly.</p>
+	 *
+	 * <p>The note the head gives up is not dropped -- {@link #shedDescentFlank} rehomes it, to the
+	 * centre, to a spare harp's slot, to an unfilled low slot, or failing all of those to the bus,
+	 * where it pairs into whichever half was ending on a half-empty cell.</p>
+	 *
+	 * <p><b>Off, and it works -- that is not the problem.</b> A chord of 28 goes from 5 descent cuts
+	 * to 25 and that config's breaches from 30 blocks to 19, {@code BigSplitTest} reads every note
+	 * back, and over the library it fires 68 times for three columns and seventy blocks less. What it
+	 * costs is the wall: a shed cut's near half is the head and nothing else, two columns, so the lane
+	 * hands over almost where it started. {@link UltraLaneFaultsTest} counts <b>31 lanes that could
+	 * not be landed on their wall</b> and goes red on it.</p>
+	 *
+	 * <p>Which is the same debt as {@link #CUTS_A_CHORD_THAT_FITS}, and it wants the same payment:
+	 * <b>pad the near half out to the wall</b>. Until that exists this buys a cut by giving up the
+	 * handover, and a lane that hands over short puts its staircase where no other lane's is.</p>
+	 */
+	static boolean SHED_BUYS_THE_LAST_CELL = false;
+
+	/** How often shedding the flank turned a cut that was one cell over into one that fits. */
+	static int SHED_BOUGHT_THE_CELL;
+
+	/**
+	 * The chord sizes that needed it, so over-use is visible rather than argued about.
+	 *
+	 * <p>ekran's worry, and the right one: a head-only near half is the dear shape, and it should be
+	 * reached for only where nothing else will do. The gate says it cannot be reached for otherwise --
+	 * it fires at {@code runCells == 16} exactly, which is one over, and a cut that already fits
+	 * returns before it. On a descent that arithmetic is {@code 1 + 11 + 4}, so the tail is 21 or 22
+	 * and the chord is 28 or 29. This says whether the build agrees.</p>
+	 */
+	static final java.util.TreeMap<Integer, Integer> SHED_BOUGHT_BY_SIZE = new java.util.TreeMap<>();
+
+	/**
 	 * The low slot a descent's second rung stands in.
 	 *
 	 * <p>Side 1 is {@code descentSide}, and it is that for the whole build rather than for one lane:
@@ -5961,6 +6005,19 @@ public final class SongBuilder {
 			if (!CUTS_A_CHORD_THAT_FITS || tail.size() < 2) {
 				return null;
 			}
+			// One note over the staircase, and not two.
+			//
+			// Two is arithmetically better and does not work. A tail of twenty divided 19/1 leaves
+			// both halves odd, so each ends on a half-empty cell and the run is
+			// 1 + 10 + 1 + 4 = 16 -- refused. Divided 18/2 both halves are even and it is fifteen, so
+			// every chord of 27 would cut instead of falling through to the shed, and on a song of
+			// nothing but 27s the breaches did go from 54 blocks to none.
+			//
+			// And the machine died: 5,064 note blocks the signal never reached at 40w x 5f, where the
+			// same build with one note over reads nought. Breach counts cannot see that, which is why
+			// the change looked like a fix. Whatever the far half's first cell shares with the
+			// staircase's last rung, it is not what {@code runCells} models, and until that is read off
+			// the blocks a second note over the staircase is not safe to lay.
 			nearNotes = tail.size() - 1;
 		}
 		// The transition cell drops out of the run as well as out of the columns when the head hands
@@ -5970,6 +6027,54 @@ public final class SongBuilder {
 		// the walk makes this same sum for {@code tipSignal} and the two must not drift apart.
 		StackedSplit cut = new StackedSplit(split.slots(), split.head(), tail.subList(0, nearNotes),
 			tail.subList(nearNotes, tail.size()), shed);
+		// One cell over, and the head still has a flank the staircase wants: then shedding it is worth
+		// the whole cut. The shed hands over on the staircase's own first rung instead of on a
+		// transition cell, so it gives the run that cell back -- and the note it displaces goes to the
+		// bus, where it pairs into whichever half was ending on a half-empty cell.
+		//
+		// The block above sheds too, but only where {@code nearBusCells == floorCells - 1}, which for
+		// a descent is {@code room == 2} exactly. That is the shed as a *room* saving. This is the same
+		// shed as a *wire* saving, and it is worth its own attempt because the two want it at opposite
+		// ends: one where the corridor is too tight to hold the near half, the other where the corridor
+		// is roomy and the fifteen is what ran out.
+		//
+		// ekran's arithmetic, for a chord of 28 going down: six in the head once the flank is shed,
+		// twenty-two left for the bus at eleven cells, no transition, and a staircase of four -- which
+		// is fifteen exactly. Measured before this, descents cut 43 chords of 27 and only 5 of 28.
+		if (SHED_BUYS_THE_LAST_CELL && !shed && !climbing && HEAD_ONLY_NEAR_HALF
+				&& cut.runCells(splitCells) == DUST_RANGE + STACKED_BUS_TRANSITION) {
+			ShedFlank rehomed = shedDescentFlank(split.slots(), granted, !tail.isEmpty());
+			if (rehomed != null) {
+				List<EventNote> shedHead = split.head();
+				List<EventNote> shedTail = tail;
+				if (rehomed.toBus() != null) {
+					shedHead = new ArrayList<>(shedHead);
+					shedHead.remove(rehomed.toBus());
+					shedTail = new ArrayList<>(shedTail);
+					shedTail.add(rehomed.toBus());
+				}
+				// Head only, and the whole bus below the staircase. Not a choice: a shed cut is built
+				// by {@link #addStackedSplitModule} as the head and nothing else -- it lays the module,
+				// counts the handover and returns -- so a near half with notes in it is a near half
+				// whose notes are planned and never placed. Two snares went missing at {@code f2 w36}
+				// that way, built 1 and read 0, before this line said nought.
+				//
+				// It is also what the arithmetic wanted. ekran, for a chord of 28: six in the head once
+				// the flank is shed and twenty-two left "at the bottom" -- below the descent, not before
+				// it -- which is eleven cells, no transition, and a staircase of four. Fifteen.
+				int shedNear = 0;
+				if (!shedTail.isEmpty()) {
+					StackedSplit shedCut = new StackedSplit(rehomed.slots(), shedHead,
+						shedTail.subList(0, shedNear), shedTail.subList(shedNear, shedTail.size()),
+						true);
+					if (shedCut.runCells(splitCells) <= DUST_RANGE) {
+						SHED_BOUGHT_THE_CELL++;
+						SHED_BOUGHT_BY_SIZE.merge(chord.size(), 1, Integer::sum);
+						return shedCut;
+					}
+				}
+			}
+		}
 		if (cut.runCells(splitCells) > DUST_RANGE) {
 			return null;
 		}

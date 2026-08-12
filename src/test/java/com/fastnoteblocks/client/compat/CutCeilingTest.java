@@ -145,6 +145,40 @@ class CutCeilingTest {
 		SongBuilder.CUTS_A_CHORD_THAT_FITS = true;
 	}
 
+	/**
+	 * Why more cuts makes more breaches, read off the lane rather than argued about.
+	 *
+	 * <p>Shedding the flank buys a cut that was one cell over, so a chord of 28 can cross a descent
+	 * that it could not before -- and on a song of nothing but 28s that takes breaches from 30 blocks
+	 * to 116. A capability that costs is worth understanding before it is kept, so this prints the
+	 * lanes that end up outside on both arms with the walk's own decisions above them.</p>
+	 */
+	@Test
+	void showsWhatTheExtraCutsCost() throws Exception {
+		List<SongBuilder.EventNote> notes = song(28, 7L);
+		for (boolean shed : new boolean[] {false, true}) {
+			SongBuilder.SHED_BUYS_THE_LAST_CELL = shed;
+			SongBuilder.SHED_BOUGHT_THE_CELL = 0;
+			BreachView.Traced traced = BreachView.build(notes, 20, 3, 4);
+			List<BreachView.Overrun> out = BreachView.overruns(traced.plan());
+			System.out.println();
+			System.out.println("######## shed=" + shed + "  breaches=" + traced.plan().breaches()
+				+ "  boughtTheCell=" + SongBuilder.SHED_BOUGHT_THE_CELL
+				+ "  lanesOutside=" + out.size());
+			// Only the turn lines, and only the worst lane. The blocks are the same shape on both arms
+			// and it is the decisions that differ.
+			if (!out.isEmpty()) {
+				BreachView.Overrun worst = out.get(0);
+				System.out.println("   worst " + worst);
+				BreachView.laneTrace(traced.trace(), worst.z(), 1).stream()
+					.filter(line -> line.startsWith("TURN "))
+					.limit(8)
+					.forEach(line -> System.out.println("   " + line));
+			}
+		}
+		SongBuilder.SHED_BUYS_THE_LAST_CELL = false;
+	}
+
 	private static Map<BlockPos, BlockState> placeInWorld(SongBuilder.PastePlan plan) {
 		Map<BlockPos, BlockState> world = new HashMap<>();
 		for (String command : plan.commands()) {

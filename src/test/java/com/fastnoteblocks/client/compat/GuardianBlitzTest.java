@@ -198,6 +198,68 @@ class GuardianBlitzTest {
 		SongBuilder.CUTS_A_CHORD_THAT_FITS = true;
 	}
 
+	/**
+	 * The shed bought as a cell of wire rather than as a column, across the library.
+	 *
+	 * <p>ekran's arithmetic says a chord of 28 can cut a descent if the head sheds its flank: six in
+	 * the head, twenty-two on the bus at eleven cells, no transition, staircase of four -- fifteen. It
+	 * can, and on a song of nothing but 28s the cuts go from five to forty-eight. Whether that is
+	 * <em>worth</em> anything is a different question, and it is this one.</p>
+	 */
+	@Test
+	void weighsShedBuyingTheLastCell() throws Exception {
+		java.util.List<java.util.List<SongBuilder.EventNote>> songs = new java.util.ArrayList<>();
+		for (String name : PICKED) {
+			songs.add(BreachView.song(name));
+		}
+		System.out.println();
+		System.out.println("==== shed buys the last cell, eight songs x 60 configs ====");
+		for (boolean shed : new boolean[] {false, true}) {
+			SongBuilder.SHED_BUYS_THE_LAST_CELL = shed;
+			SongBuilder.SHED_BOUGHT_THE_CELL = 0;
+			int lanes = 0;
+			int blocks = 0;
+			int worst = 0;
+			int wrong = 0;
+			long length = 0;
+			long volume = 0;
+			for (java.util.List<SongBuilder.EventNote> notes : songs) {
+				for (int floors = 1; floors <= 6; floors++) {
+					for (int width = 12; width <= 48; width += 4) {
+						SongBuilder.PastePlan plan = SongBuilder.createPastePlan(
+							new net.minecraft.core.BlockPos(0, 64, 0), notes,
+							SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+							new SongBuilder.BuildLimits(4, width, floors));
+						lanes += plan.breaches().size();
+						blocks += plan.breaches().stream().mapToInt(Integer::intValue).sum();
+						worst = Math.max(worst, plan.worstBreach());
+						wrong += plan.wrongNotes();
+						length += plan.width();
+						volume += plan.commands().size();
+					}
+				}
+			}
+			System.out.println("   shedBuysTheCell=" + (shed ? "on " : "off") + "   lanes=" + lanes
+				+ " blocks=" + blocks + " worst=" + worst + " wrong=" + wrong + " length=" + length
+				+ " volume=" + volume + " boughtTheCell=" + SongBuilder.SHED_BOUGHT_THE_CELL);
+		}
+		System.out.println("   -- read back at 40w x 5f --");
+		for (boolean shed : new boolean[] {false, true}) {
+			SongBuilder.SHED_BUYS_THE_LAST_CELL = shed;
+			int unreached = 0;
+			for (String name : PICKED) {
+				SongBuilder.PastePlan plan = SongBuilder.createPastePlan(
+					new net.minecraft.core.BlockPos(0, 64, 0), BreachView.song(name),
+					SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+					new SongBuilder.BuildLimits(16, 40, 5));
+				unreached += readAll(placeInWorld(plan)).unreachedNotes();
+			}
+			System.out.println("   shedBuysTheCell=" + (shed ? "on " : "off")
+				+ "   unreached=" + unreached);
+		}
+		SongBuilder.SHED_BUYS_THE_LAST_CELL = false;
+	}
+
 	private static java.util.Map<net.minecraft.core.BlockPos,
 			net.minecraft.world.level.block.state.BlockState> placeInWorld(
 			SongBuilder.PastePlan plan) {
