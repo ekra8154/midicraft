@@ -154,7 +154,7 @@ class NearestPrePadTest {
 		 }
 		}
 		SongBuilder.CUTS_A_CHORD_THAT_FITS = true;
-		SongBuilder.PREPAD_TAKES_THE_NEAREST = true;
+		SongBuilder.PREPAD_TAKES_THE_NEAREST = false;
 	}
 
 	private static Map<BlockPos, BlockState> placeInWorld(SongBuilder.PastePlan plan) {

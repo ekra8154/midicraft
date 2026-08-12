@@ -2789,8 +2789,18 @@ public final class SongBuilder {
 	 * times and laid 135. Of the 702 it gives up on, <b>183 are this</b> -- {@code ahead} came back
 	 * -1. The rest asked for more columns than the arriving wire could lay and were abandoned rather
 	 * than laying what they could, which is a separate question and a larger one.</p>
+	 *
+	 * <p><b>Off: it does what it says and does not pay.</b> The abandonments go from 183 to 3 and the
+	 * pads actually laid from 135 to 165, and the library reads 29 lanes / 138 blocks against
+	 * 33 / 142 -- four more breached lanes for one column off the worst breach and eighteen off the
+	 * total length. Conduction is unchanged either way.</p>
+	 *
+	 * <p>So the exact-match search is not what holds this pad back; the wire is. Of 817 wanted pads,
+	 * <b>633 ask for more columns than the arriving wire can lay</b> and are dropped whole rather than
+	 * laying what they can -- which is what the pad behind already does. That is the one worth trying
+	 * next.</p>
 	 */
-	static boolean PREPAD_TAKES_THE_NEAREST = true;
+	static boolean PREPAD_TAKES_THE_NEAREST = false;
 
 	/** Lays a run of dust, on glass so that nothing under it comes alive. */
 	private static Lane emitDust(PlacementPlan placements, Lane lane, int columns) {
