@@ -960,10 +960,6 @@ public final class SongBuilder {
 			// hands out a fresh fifteen, and turns after that. It costs footprint, which says so, and
 			// not a tail that never fires, which does not.
 			int unpaid = Math.max(0, columns - pad.cells().size());
-				int turnCost = pad.cells().isEmpty() && unpaid == 0 && lastStyle.buses()
-					? offBus : turnCells;
-				boolean reachesWall = !PIN_DESCENTS || flatAhead
-					|| pad.signal() - unpaid >= turnCost;
 			// Priced through the one place that knows whether the pad can be lifted onto the climb.
 			// A lane that could not afford five may well afford three, and this is the test that
 			// decides whether it turns here at all -- so it has to ask the same question the pad was
@@ -973,6 +969,17 @@ public final class SongBuilder {
 			// it here also took the empty-pad bus discount out with it, which predates all of this.
 			int turnPrice = turnPrice(pad, climb > 0, above >= 0 && above < floors,
 				lastStyle.buses(), turnCells, offBus);
+			// Priced after the line above, because this is the second place the same turn is priced
+			// and the two were answering differently. {@link #turnPrice} knows a pad standing on a bus
+			// can be lifted onto the climb and charges three; this knew only the older discount, for a
+			// pad with no cells at all, and charged five for everything else -- so a lane holding four
+			// and needing three was refused its turn by the arm that had not been told.
+			int turnCost = unpaid == 0
+				? Math.min(WALL_REACH_PRICES_THE_RAISED_PAD ? turnPrice : turnCells,
+					pad.cells().isEmpty() && lastStyle.buses() ? offBus : turnCells)
+				: turnCells;
+			boolean reachesWall = !PIN_DESCENTS || flatAhead
+				|| pad.signal() - unpaid >= turnCost;
 			boolean canTurn = layout.ultra()
 				? index > 0 && reachesWall && (flatAhead ? straddles && pad.signal() >= 1
 					: pad.signal() >= turnPrice)
@@ -5547,6 +5554,27 @@ public final class SongBuilder {
 	 * by any argument, so if it does, the fault is in this code and not in the trade.</p>
 	 */
 	static boolean PRICES_THE_RAISED_PAD = true;
+
+	/**
+	 * Whether {@code reachesWall} charges the raised ascent's three cells the way {@code canTurn} does.
+	 *
+	 * <p>The turn is priced in two places in the same block. {@link #turnPrice} asks whether the pad
+	 * can be lifted onto the climb; {@code turnCost} knew only the older discount, which needs a pad
+	 * with no cells at all, and charged the dear price for everything else. A lane arriving with four
+	 * blocks of wire on a one-cell pad off a stacked bus therefore turned on one arm's arithmetic and
+	 * was refused by the other's -- and being refused, it laid its chord whole and walked out past its
+	 * wall.</p>
+	 *
+	 * <p>ekran found it at illit, 32 wide over four floors: tick 1311, a chord of four standing one
+	 * column short of the wall with a pad of one cell and four blocks of wire. {@code turnPrice} said
+	 * three, {@code turnCost} said five, {@code reachesWall} went false, and the chord was laid whole
+	 * two columns outside. The next chord then arrived already past the wall with nothing it could do
+	 * about it.</p>
+	 *
+	 * <p>Kept as {@code min} of the two rather than replacing one with the other, so the empty-pad
+	 * discount that predates all of this cannot be lost on a descent by the change.</p>
+	 */
+	static boolean WALL_REACH_PRICES_THE_RAISED_PAD = true;
 
 	/** What the turn after this pad costs the wire arriving at it, raise included. */
 	private static int turnPrice(Pad pad, boolean climbing, boolean staircase, boolean fromBus,
