@@ -62,6 +62,177 @@ class GuardianBlitzTest {
 		}
 	}
 
+	/**
+	 * The cut that is refused because the chord fits, measured again now the prepad is gone.
+	 *
+	 * <p>{@link SongBuilder#CUTS_A_CHORD_THAT_FITS} is the whole of the blitz in one flag: a chord of
+	 * 24 is twelve cells, a plain cut of it wants sixteen of a possible fifteen, so its only cut is a
+	 * headed one -- and {@code stackedSplitOf} refuses the headed cut whenever the chord happens to
+	 * fit before the wall without it. It was measured off against the old build and lost, 3 breaches
+	 * to 5 on Guardian 44x3, for a reason the flag states: the near half ends wherever the chord ended
+	 * rather than on the wall. Both halves of that measurement have moved since, so it is worth the
+	 * two minutes to ask again.</p>
+	 */
+	@Test
+	void weighsCuttingAChordThatFits() throws Exception {
+		List<SongBuilder.EventNote> guardian = BreachView.song("deltarune-ch-4-guardian");
+		System.out.println();
+		System.out.println("==== Guardian, cutting a chord that fits ====");
+		for (boolean cuts : new boolean[] {false, true}) {
+			SongBuilder.CUTS_A_CHORD_THAT_FITS = cuts;
+			int lanes = 0;
+			int blocks = 0;
+			int worst = 0;
+			int wrong = 0;
+			int dirty = 0;
+			long length = 0;
+			StringBuilder moved = new StringBuilder();
+			for (int floors = 1; floors <= 6; floors++) {
+				for (int width = 16; width <= 48; width += 4) {
+					SongBuilder.PastePlan plan = SongBuilder.createPastePlan(
+						new net.minecraft.core.BlockPos(0, 64, 0), guardian,
+						SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+						new SongBuilder.BuildLimits(4, width, floors));
+					int sum = plan.breaches().stream().mapToInt(Integer::intValue).sum();
+					lanes += plan.breaches().size();
+					blocks += sum;
+					worst = Math.max(worst, plan.worstBreach());
+					wrong += plan.wrongNotes();
+					length += plan.width();
+					if (sum > 0) {
+						dirty++;
+						moved.append("      ").append(width).append("w x ").append(floors)
+							.append("f  ").append(sum).append(" blocks in ")
+							.append(plan.breaches().size()).append(" lanes\n");
+					}
+				}
+			}
+			System.out.println("   cutsAChordThatFits=" + (cuts ? "on " : "off")
+				+ "   lanes=" + lanes + " blocks=" + blocks + " worst=" + worst + " wrong=" + wrong
+				+ " dirtyConfigs=" + dirty + " length=" + length);
+			System.out.print(moved);
+		}
+		SongBuilder.CUTS_A_CHORD_THAT_FITS = true;
+	}
+
+	private static final List<String> PICKED = List.of(
+		"deltarune-ch-4-guardian", "illit-do-the-dance", "big-shot", "hopes-and-dreams",
+		"golden-brown-2xspeed", "adventure-of-a-lifetime", "michael-jackson-thriller",
+		"aria-math-c418");
+
+	/**
+	 * The same flag across the library, and read back, because a cut moves notes.
+	 *
+	 * <p>Guardian saying yes is not the answer -- Guardian said yes to the off-bus prepad too, and
+	 * that cost seven other songs 772 lanes between them. And a cut that changes which half of a chord
+	 * lands on which side of a staircase is exactly the change that puts a note on somebody else's
+	 * tick, so nothing here is quotable until {@link NoteMachineReader} has read it.</p>
+	 */
+	@Test
+	void weighsCuttingAChordThatFitsAcrossTheLibrary() throws Exception {
+		java.util.List<java.util.List<SongBuilder.EventNote>> songs = new java.util.ArrayList<>();
+		for (String name : PICKED) {
+			songs.add(BreachView.song(name));
+		}
+		System.out.println();
+		System.out.println("==== cutting a chord that fits, eight songs x 60 configs ====");
+		for (boolean cuts : new boolean[] {false, true}) {
+			SongBuilder.CUTS_A_CHORD_THAT_FITS = cuts;
+			int lanes = 0;
+			int blocks = 0;
+			int worst = 0;
+			int wrong = 0;
+			int refused = 0;
+			long length = 0;
+			long volume = 0;
+			for (java.util.List<SongBuilder.EventNote> notes : songs) {
+				for (int floors = 1; floors <= 6; floors++) {
+					for (int width = 12; width <= 48; width += 4) {
+						try {
+							SongBuilder.PastePlan plan = SongBuilder.createPastePlan(
+								new net.minecraft.core.BlockPos(0, 64, 0), notes,
+								SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+								new SongBuilder.BuildLimits(4, width, floors));
+							lanes += plan.breaches().size();
+							blocks += plan.breaches().stream().mapToInt(Integer::intValue).sum();
+							worst = Math.max(worst, plan.worstBreach());
+							wrong += plan.wrongNotes();
+							length += plan.width();
+							volume += plan.commands().size();
+						} catch (RuntimeException refusedHere) {
+							refused++;
+						}
+					}
+				}
+			}
+			System.out.println("   cutsAChordThatFits=" + (cuts ? "on " : "off") + "   lanes=" + lanes
+				+ " blocks=" + blocks + " worst=" + worst + " wrong=" + wrong + " refused=" + refused
+				+ " length=" + length + " volume=" + volume);
+		}
+		// And the machine, at ekran's own size and at the two Guardian configs the flag changes most.
+		System.out.println("   -- read back --");
+		for (boolean cuts : new boolean[] {false, true}) {
+			SongBuilder.CUTS_A_CHORD_THAT_FITS = cuts;
+			int unreached = 0;
+			int wrong = 0;
+			for (String name : PICKED) {
+				SongBuilder.PastePlan plan = SongBuilder.createPastePlan(
+					new net.minecraft.core.BlockPos(0, 64, 0), BreachView.song(name),
+					SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+					new SongBuilder.BuildLimits(16, 40, 5));
+				unreached += readAll(placeInWorld(plan)).unreachedNotes();
+				wrong += plan.wrongNotes();
+			}
+			List<SongBuilder.EventNote> guardian = BreachView.song("deltarune-ch-4-guardian");
+			for (int[] size : new int[][] {{40, 4}, {16, 3}, {20, 4}, {24, 5}}) {
+				SongBuilder.PastePlan plan = SongBuilder.createPastePlan(
+					new net.minecraft.core.BlockPos(0, 64, 0), guardian,
+					SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+					new SongBuilder.BuildLimits(4, size[0], size[1]));
+				unreached += readAll(placeInWorld(plan)).unreachedNotes();
+				wrong += plan.wrongNotes();
+			}
+			System.out.println("   cutsAChordThatFits=" + (cuts ? "on " : "off")
+				+ "   unreached=" + unreached + " wrong=" + wrong);
+		}
+		SongBuilder.CUTS_A_CHORD_THAT_FITS = true;
+	}
+
+	private static java.util.Map<net.minecraft.core.BlockPos,
+			net.minecraft.world.level.block.state.BlockState> placeInWorld(
+			SongBuilder.PastePlan plan) {
+		java.util.Map<net.minecraft.core.BlockPos,
+			net.minecraft.world.level.block.state.BlockState> world = new java.util.HashMap<>();
+		for (String command : plan.commands()) {
+			String[] word = command.split(" ");
+			world.put(new net.minecraft.core.BlockPos(Integer.parseInt(word[1]),
+				Integer.parseInt(word[2]), Integer.parseInt(word[3])), BreachView.parse(word[4]));
+		}
+		return world;
+	}
+
+	private static NoteMachineReader.Reading readAll(java.util.Map<net.minecraft.core.BlockPos,
+			net.minecraft.world.level.block.state.BlockState> world) {
+		int minX = Integer.MAX_VALUE;
+		int minY = Integer.MAX_VALUE;
+		int minZ = Integer.MAX_VALUE;
+		int maxX = Integer.MIN_VALUE;
+		int maxY = Integer.MIN_VALUE;
+		int maxZ = Integer.MIN_VALUE;
+		for (net.minecraft.core.BlockPos at : world.keySet()) {
+			minX = Math.min(minX, at.getX());
+			minY = Math.min(minY, at.getY());
+			minZ = Math.min(minZ, at.getZ());
+			maxX = Math.max(maxX, at.getX());
+			maxY = Math.max(maxY, at.getY());
+			maxZ = Math.max(maxZ, at.getZ());
+		}
+		return NoteMachineReader.read("Blitz", new net.minecraft.core.BlockPos(minX, minY, minZ),
+			new net.minecraft.core.BlockPos(maxX, maxY, maxZ),
+			at -> world.getOrDefault(at, net.minecraft.world.level.block.Blocks.AIR
+				.defaultBlockState()));
+	}
+
 	@Test
 	void drawsEveryGuardianBreach() throws Exception {
 		List<SongBuilder.EventNote> guardian = BreachView.song("deltarune-ch-4-guardian");

@@ -5773,10 +5773,26 @@ public final class SongBuilder {
 	 */
 	private record StackedSplit(UltraSlots slots, List<EventNote> head, List<EventNote> nearTail,
 			List<EventNote> farTail, boolean shed) {
-		/** Cells of wire from the head's repeater to the far half, staircase included. */
+		/**
+		 * Cells of wire from the head's repeater to the far half, staircase included.
+		 *
+		 * <p>The two halves are counted <b>separately</b>, because they are built separately: each
+		 * ends its own last cell, and a half holding an odd number of notes leaves that cell half
+		 * empty rather than borrowing the other half's first note. Counting
+		 * {@code (near + far + 1) / 2} is the same number whenever the near half fills whole cells,
+		 * which every cut does except the one {@link #CUTS_A_CHORD_THAT_FITS} forces -- that one puts
+		 * a single note in the far half deliberately, so both halves are odd and the sum is short by
+		 * exactly one.</p>
+		 *
+		 * <p>One cell, and it is the difference between a machine and a wall. {@link BigSplitTest}
+		 * at {@code f3 w20}: a run of <b>sixteen</b> from {@code 9 69 4} to {@code 20 66 4} and
+		 * <b>3,606</b> note blocks the signal never reached, on a build whose every number read
+		 * nought. Both the planner and the walk price a cut through this one method, so both were
+		 * wrong by the same cell and neither could see it.</p>
+		 */
 		int runCells(int splitCells) {
 			return (shed ? 0 : STACKED_BUS_TRANSITION)
-				+ (nearTail.size() + farTail.size() + 1) / 2 + splitCells;
+				+ (nearTail.size() + 1) / 2 + (farTail.size() + 1) / 2 + splitCells;
 		}
 	}
 
@@ -5787,15 +5803,49 @@ public final class SongBuilder {
 	 * so this is the chord that fits but leaves the lane nothing to climb with. Every caller of
 	 * {@link #stackedSplitOf} is behind that same guard, which is why the cut can be widened here
 	 * without the planner and the walk parting company over it.</p>
-	 * <p><b>Off, and not because the diagnosis was wrong.</b> Forcing the cut puts the last pair
-	 * over the staircase, but the near half is then however long the chord happened to be rather
-	 * than long enough to reach the wall -- so the lane hands over short and the staircase stands
-	 * somewhere no other lane's does. On Guardian at 44 wide over three floors that is breaches
-	 * 3 -> 5 and breach blocks 32 -> 42 with nothing else moving. The missing half is ekran's:
-	 * pad the near half out to the wall first, then cut. This flag is the cut; the pad is not
-	 * written yet, and the two are worth nothing apart.</p>
+	 * <p><b>On since 2026-08-11.</b> It was off, and the reason given was sound at the time: forcing
+	 * the cut puts the last pair over the staircase, but the near half is then however long the chord
+	 * happened to be rather than long enough to reach the wall, so the lane hands over short. Measured
+	 * then at Guardian 44x3 breaches 3 -> 5. Both halves of that measurement have since moved -- the
+	 * wall reach is priced through {@link #turnPrice} now
+	 * ({@link #WALL_REACH_PRICES_THE_RAISED_PAD}) and {@link #PREPADS_FOR_THE_OFF_BUS_DISCOUNT} is
+	 * gone -- so it was asked again:</p>
+	 *
+	 * <pre>
+	 * eight songs x 60 configs   off  63 lanes / 369 blocks / worst 12   volume 17,279,975
+	 *                            on   29 lanes / 138 blocks / worst 11   volume 17,272,603
+	 * </pre>
+	 *
+	 * <p>Guardian alone 43 lanes / 229 blocks -> 20 / 86, and 40x4, 32x5, 24x4, 24x3, 20x2 and 16x2
+	 * go to nought. {@code wrong=0} and {@code refused=0} both ways, {@code unreached=0} read back
+	 * through {@link NoteMachineReader} at ekran's 40x5 across all eight songs and at the four
+	 * Guardian configs this moves most. Builds are 101 columns longer over 480 of them and 7,372
+	 * blocks smaller.</p>
+	 *
+	 * <p><b>Why it matters so much:</b> a chord of 24 is twelve cells, and a plain cut of it wants
+	 * {@code 12 + splitCells} -- sixteen of a possible fifteen. Its only cut is a headed one. Refusing
+	 * that cut because the chord fits without it means laying twelve cells whole, thirteen columns
+	 * with the repeater, and any lane holding fewer than thirteen runs outside.</p>
+	 *
+	 * <p><b>Back off, and the breach numbers above are not the reason.</b> {@link BigSplitTest} reads
+	 * the machine at {@code f3 w20} and finds <b>3,606 note blocks the signal never reaches</b> and a
+	 * run of <b>sixteen</b> blocks of wire. The readback that said this was safe covered eight songs at
+	 * 40x5 and four Guardian sizes; it did not cover the one config that builds nothing but chords too
+	 * big to cut plain. {@code runCells} cannot see the fault, because the wire it counts is the
+	 * transition, the pairs and the staircase -- and the columns between where the near half ends and
+	 * where the staircase starts are covered with dust that nobody charged for.</p>
+	 *
+	 * <p><b>And the dead machine was not the near half at all.</b> It was one cell of arithmetic:
+	 * {@code runCells} counted {@code (near + far + 1) / 2}, which is right whenever the near half
+	 * fills whole cells and short by one when it does not -- and this flag is the only thing that ever
+	 * leaves it half empty, because it puts a single note in the far half on purpose. Counting the two
+	 * halves separately fixes it; see {@link StackedSplit#runCells}. The run at {@code f3 w20} goes
+	 * back to fifteen.</p>
+	 *
+	 * <p>Still owed, and still ekran's, but now a question of footprint rather than of conduction: pad
+	 * the near half out to the wall so its staircase stands where every other lane's does.</p>
 	 */
-	static boolean CUTS_A_CHORD_THAT_FITS = false;
+	static boolean CUTS_A_CHORD_THAT_FITS = true;
 
 	private static StackedSplit stackedSplitOf(List<EventNote> chord, int room, int splitCells,
 			boolean climbing, boolean roomBehind) {
