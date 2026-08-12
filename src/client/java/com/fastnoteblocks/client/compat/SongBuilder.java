@@ -984,6 +984,25 @@ public final class SongBuilder {
 				? index > 0 && reachesWall && (flatAhead ? straddles && pad.signal() >= 1
 					: pad.signal() >= turnPrice)
 				: index > 0 && events.get(index - 1).maxSafeTurnDistance() >= MAX_LANE_SPACING;
+			// A veto is a preference, not a prohibition.
+			//
+			// The plan forbids a cut where it has found a way to close the lane on a pad instead, so
+			// that the walk -- which decides to split on its own arithmetic -- does not quietly close a
+			// chord earlier than the plan did. That is the right instinct where the pad close works.
+			// Where it does not, the lane has been told it may not cut *and* cannot turn, so it does
+			// neither and walks out past its wall carrying the chord whole.
+			//
+			// ekran found one at Guardian 16 wide over four floors, {@code 20 77 148}: a chord of 24
+			// at {@code x=13} with the wall at 15, {@code headed=0+18} and {@code couldSplit=true} --
+			// the cut was there, already shed, and the veto threw it away for a pad of one cell with
+			// four blocks of wire, which {@code reachesWall} then refused. Ten columns outside.
+			//
+			// Asked here rather than where {@code split} is first worked out, because this is the
+			// first line at which the walk knows whether the plan's alternative is open to it.
+			if (CUTS_WHEN_THE_VETOED_LANE_CANNOT_TURN && vetoed && couldSplit && !canTurn) {
+				placements.padded("planVetoTakenBack");
+				split = true;
+			}
 			int spentPadding = 0;
 			// Ahead of a staircase only, for the same reason a split is. A chord that would have been
 			// carried across a flat turn on bare wire is now simply built on the turn.
@@ -2176,7 +2195,21 @@ public final class SongBuilder {
 		// lay its own first chord. So the cut has to go, and the walk has to be told -- it decides to
 		// split on its own arithmetic, so a plan that quietly closes a chord earlier is a plan the
 		// walk ignores. Recorded under a negative key, which no event index can collide with.
-		boolean vetoCut = shuts && cut > 0;
+		// Unless the chord it is said to strand can simply be cut in its own turn.
+		//
+		// ekran: "it's fine if the next chord can't fit entirely inside the next lane -- that's why we
+		// have cuts." {@link #strandsNext} sweeps that lane and a sweep only asks whether a chord
+		// *fits*; a chord that does not fit is precisely the chord that gets cut, and the walk cuts a
+		// lane's first event on purpose. So a lane reported stranded may be one that closes perfectly
+		// well by cutting.
+		//
+		// Asked here rather than inside strandsNext, because that answer is also read as "this lane
+		// closes cleanly, book nothing" -- relaxing it there stops the planner laying pads that other
+		// lanes rely on, and takes Guardian from 20 breached lanes and 86 blocks to 48 and 202. Here
+		// it decides only whether to forbid a cut, which is the decision the point is about.
+		boolean vetoCut = shuts && cut > 0
+			&& !(STRANDED_CHORD_MAY_STILL_CUT && nextChordCanBeCut(events, bare.last(), wall,
+				otherWall, stepX, cut, climbing, stepOff));
 		// The natural end cannot close. Try landing on the wall a chord at a time further back, since
 		// every chord given up is a chord the next lane has to carry instead.
 		for (int last = bare.last(); last >= from; last--) {
@@ -2546,6 +2579,29 @@ public final class SongBuilder {
 	 *
 	 * @param carriedCells cells of a cut chord laid after the staircase, zero for a plain close
 	 */
+	/**
+	 * Whether the chord said to strand the next lane could just be cut across that lane's own turn.
+	 *
+	 * <p>Priced at the dearest a crossing can be, because the next lane turns the other way and its
+	 * cost is not known here. Strict, and still generous enough for the case that prompted it: a
+	 * headed cut of twenty-four is a transition, nine cells and a staircase -- {@code 1 + 9 + 5 = 15}
+	 * even at the dear price, so on a song whose chords stop at twenty-four very nearly all of them
+	 * can be cut wherever they land.</p>
+	 */
+	private static boolean nextChordCanBeCut(List<EventGroup> events, int last, int wall,
+			int otherWall, int stepX, int carriedCells, boolean climbing, int stepOff) {
+		int first = (carriedCells > 0 ? last + 1 : last) + 1;
+		if (first >= events.size()) {
+			return false;
+		}
+		List<EventNote> stuck = events.get(first).notes();
+		int room = Math.abs(otherWall
+			- nextLaneStart(wall, stepX, carriedCells, climbing, stepOff));
+		int cells = (stuck.size() + 1) / 2;
+		return room >= 2 && room - 1 < cells && cells + TURN_DUST_CELLS <= DUST_RANGE
+			|| stackedSplitOf(stuck, room, TURN_DUST_CELLS, !climbing, true) != null;
+	}
+
 	private static boolean strandsNext(List<EventGroup> events, int from, int last, int wall,
 			int otherWall, int stepX, int turnCells, int offBus, int stepOff, boolean climbing,
 			Layout layout, int carriedCells) {
@@ -2574,10 +2630,17 @@ public final class SongBuilder {
 		if (first >= events.size()) {
 			return false;
 		}
-		Sweep after = sweep(events, first,
-			nextLaneStart(wall, stepX, carriedCells, climbing, stepOff), -stepX, otherWall,
+		int start = nextLaneStart(wall, stepX, carriedCells, climbing, stepOff);
+		Sweep after = sweep(events, first, start, -stepX, otherWall,
 			events.get(spent).time(), Math.max(0, handedOn), true, offBus, layout, Map.of(),
 			false, null);
+		// Left alone deliberately. ekran's point is right -- a chord the next lane cannot lay whole is
+		// the chord that gets cut, not a stranded lane -- but this answer is not only used to veto a
+		// cut. `planLane` reads a false here as "this lane closes cleanly, book nothing", so relaxing
+		// it stops the planner laying pads that lanes were relying on: Guardian goes from 20 breached
+		// lanes and 86 blocks to 48 and 202. The over-conservative answer was buying real bookings by
+		// accident. The insight belongs at the veto instead, where {@link #nextChordCanBeCut} applies
+		// it without touching what the planner books.
 		return after.last() < first;
 	}
 
@@ -2634,6 +2697,59 @@ public final class SongBuilder {
 	 * is an index into the song.</p>
 	 */
 	private static final int NO_SPLIT = -1;
+
+	/**
+	 * Whether a lane that has been refused its cut may take it back when it cannot turn either.
+	 *
+	 * <p>{@code planLane} books a {@link #NO_SPLIT} bit where it has found a way to close the lane on
+	 * a pad, so that the walk does not cut a chord earlier than the plan did and leave the next lane
+	 * unable to lay its own first one. Sound where the pad close works. Where it does not, the lane is
+	 * told it may not cut and finds it cannot turn, so it does neither: the chord is laid whole and
+	 * the lane comes to rest outside its wall.</p>
+	 *
+	 * <p>ekran's, off the blocks at Guardian 16 wide over four floors, {@code 20 77 148}. Tick 548, a
+	 * chord of 24 standing at {@code x=13} with its wall at 15: {@code headed=0+18},
+	 * {@code couldSplit=true}, {@code vetoed=true}, and a pad of one cell holding four blocks of wire
+	 * that {@code reachesWall} refuses. The cut was there and already shed. Ten columns outside.</p>
+	 */
+	static boolean CUTS_WHEN_THE_VETOED_LANE_CANNOT_TURN = true;
+
+	/**
+	 * Whether a chord the next lane cannot lay whole counts as stranding it, or as a chord to be cut.
+	 *
+	 * <p>ekran's, and it is a gap rather than a tuning: <em>"it's fine if the next chord can't fit
+	 * entirely inside the next lane -- that's why we have cuts."</em> {@link #strandsNext} sweeps the
+	 * following lane and calls it stranded when the sweep does not reach its first event, and a sweep
+	 * only asks whether a chord <b>fits</b>. A chord that will not fit is precisely the chord that
+	 * gets cut, and the walk cuts a lane's first event on purpose -- {@code couldSplit} carries an
+	 * exemption for it, because the first event of a lane is the one that lands wherever the staircase
+	 * happened to put it.</p>
+	 *
+	 * <p>What it costs to have it wrong: the lane before is told its cut would strand its neighbour,
+	 * so the cut is vetoed, so it looks for a pad close instead, and where the walk cannot afford that
+	 * pad the chord is laid whole and the lane comes to rest outside its wall. ekran read one at
+	 * Guardian 16 wide over four floors -- and the lane it was protecting turns on its own wall with
+	 * room to spare.</p>
+	 *
+	 * <p>On Guardian nothing exceeds twenty-four notes, and a headed cut of twenty-four is a
+	 * transition, nine cells and a staircase. Inside fifteen at every kind of turn. So very nearly
+	 * every chord in that song can be cut wherever it lands, and reading them as stranded vetoes cuts
+	 * that were never in danger.</p>
+	 *
+	 * <p><b>Off, and the reasoning is not what is wrong with it.</b> Measured on Guardian, every size:
+	 * letting those cuts through takes 20 breached lanes and 86 blocks to <b>37 and 157</b>. Applied
+	 * inside {@link #strandsNext} instead -- where a false is also read as "this lane closes cleanly,
+	 * book nothing" -- it is worse still, 48 and 202, because it stops the planner laying pads other
+	 * lanes rely on.</p>
+	 *
+	 * <p>So the veto is earning its keep by an argument better than the one it states. The cuts it
+	 * forbids really can be made; making them costs more than it saves, and what that cost is has not
+	 * been read off a lane yet. Until it has, this stays off and
+	 * {@link #CUTS_WHEN_THE_VETOED_LANE_CANNOT_TURN} handles the narrower case -- a lane that has been
+	 * refused its cut <em>and</em> cannot turn, which is the one where the veto's alternative does not
+	 * exist at all.</p>
+	 */
+	static boolean STRANDED_CHORD_MAY_STILL_CUT = false;
 
 	/** How far dust carries a signal before something has to repeat it. */
 	private static final int DUST_RANGE = 15;
