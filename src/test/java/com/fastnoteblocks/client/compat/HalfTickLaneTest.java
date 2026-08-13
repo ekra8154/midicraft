@@ -228,6 +228,41 @@ class HalfTickLaneTest {
 		}
 	}
 
+	/**
+	 * The two lanes are built alongside each other, not one after the other.
+	 *
+	 * <p>Not a nicety. A paste is a stream of commands the player walks beside, and blocks only land
+	 * in chunks that are loaded -- so a build that finishes one lane before starting the other lays
+	 * its second lane thousands of blocks behind whoever is watching, into chunks that have long
+	 * since unloaded, and none of it arrives. ekran hit exactly that in the world.</p>
+	 *
+	 * <p>What is asserted is the property that fixes it: the paste front never drops far back down
+	 * the build. It steps back a little constantly, because the lane that is behind is the one that
+	 * goes next and a module is several columns long -- but a little is a module, not a song.</p>
+	 */
+	@Test
+	void buildsBothLanesAlongsideEachOther() {
+		List<SongBuilder.EventNote> song = new ArrayList<>();
+		// Long enough that one-lane-then-the-other would be a jump of hundreds of columns.
+		for (int event = 0; event < 400; event++) {
+			song.add(note(event * 3, event % 25));
+		}
+		SongBuilder.PastePlan plan = build(song);
+
+		int furthestBack = 0;
+		int previousX = Integer.MIN_VALUE;
+		for (Placed block : placed(plan)) {
+			if (previousX != Integer.MIN_VALUE) {
+				furthestBack = Math.max(furthestBack, previousX - block.x());
+			}
+			previousX = block.x();
+		}
+		int spanX = plan.spanX();
+		assertTrue(furthestBack < 32,
+			"the paste front stepped " + furthestBack + " blocks back down a build " + spanX
+				+ " long; the two lanes are not being laid alongside each other");
+	}
+
 	// ----------------------------------------------------------------- reading it off the blocks
 
 	private static final Pattern SETBLOCK = Pattern.compile(

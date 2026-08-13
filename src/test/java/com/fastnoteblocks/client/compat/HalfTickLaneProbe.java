@@ -74,6 +74,20 @@ class HalfTickLaneProbe {
 				System.out.println("blocks " + plan.commands().size() + ", spanX " + plan.spanX()
 					+ ", spanZ " + plan.spanZ() + ", height " + plan.height()
 					+ ", wrongNotes " + plan.wrongNotes());
+				// How far the paste front ever drops back down the build, which is what decides
+				// whether the blocks land at all: anything behind the player's loaded chunks is a
+				// command sent into ground that is not there.
+				int furthestBack = 0;
+				int previousX = Integer.MIN_VALUE;
+				for (String command : plan.commands()) {
+					int x = Integer.parseInt(command.split(" ")[1]);
+					if (previousX != Integer.MIN_VALUE) {
+						furthestBack = Math.max(furthestBack, previousX - x);
+					}
+					previousX = x;
+				}
+				System.out.println("  paste front steps back at most " + furthestBack
+					+ " blocks (build is " + plan.spanX() + " long)");
 				report(plan, guardian);
 			}
 		} finally {

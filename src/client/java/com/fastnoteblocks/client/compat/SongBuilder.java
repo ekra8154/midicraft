@@ -576,9 +576,24 @@ public final class SongBuilder {
 		// Note times are game ticks here, so two blocks live beside each other for half as long as
 		// the check assumes. The button that starts the machine has not changed length.
 		placements.pulseWindow(2 * PlacementPlan.SHARED_PULSE_TICKS);
-		walkHalfTickLane(placements, origin, forward, parity(notes, 0));
-		walkHalfTickLane(placements, origin.relative(forward.getCounterClockWise(),
-			HALF_TICK_LANE_GAP), forward, parity(notes, 1));
+		HalfTickLane right = new HalfTickLane(origin, parity(notes, 0));
+		HalfTickLane left = new HalfTickLane(
+			origin.relative(forward.getCounterClockWise(), HALF_TICK_LANE_GAP), parity(notes, 1));
+		// Laid a column at a time down both lanes together, rather than one lane and then the other.
+		// A paste is a stream of commands and the player walks alongside it; finishing one lane first
+		// means the second one starts seven thousand blocks behind them, in chunks that are no longer
+		// loaded, and the blocks never land. So whichever lane is furthest back goes next, which
+		// keeps the two fronts within one module of each other the whole way down.
+		//
+		// Only the order changes. Each lane's own arithmetic is untouched -- it does not know the
+		// other exists -- and the two write to columns that never meet, so the finished block map is
+		// the same one either way.
+		while (right.hasMore() || left.hasMore()) {
+			HalfTickLane behind = !left.hasMore() || right.hasMore() && right.cursor() <= left.cursor()
+				? right
+				: left;
+			behind.placeNextEvent(placements, forward);
+		}
 		return placements.finish(PasteMode.HALF_TICK_LANE, origin);
 	}
 
@@ -587,7 +602,12 @@ public final class SongBuilder {
 	}
 
 	/**
-	 * One parity's worth of the song, laid out as an ordinary straight lane.
+	 * One parity's worth of the song, laid out as an ordinary straight lane, an event at a time.
+	 *
+	 * <p>Held as a thing rather than run as a loop so the two lanes can be advanced alternately: a
+	 * paste is watched by a player walking beside it, and a lane built to its end before the other
+	 * one starts puts half the build outside the chunks they have loaded. Keeping the state here
+	 * lets the caller ask which lane is furthest back and build that one next.</p>
 	 *
 	 * <p>Two events on one lane are always an even number of game ticks apart, because they share a
 	 * parity -- so the gap between them is a whole repeater tick every time and no lane ever has to
@@ -604,18 +624,37 @@ public final class SongBuilder {
 	 * one lane include the lane alongside -- so the two lanes have to be counted on one clock, or
 	 * two notes a single game tick apart would read as simultaneous and the check would pass them.</p>
 	 */
-	private static void walkHalfTickLane(PlacementPlan placements, BlockPos origin,
-			Direction forward, List<EventNote> notes) {
-		int cursor = 0;
-		// Both lanes start one repeater tick before their own first event, and the tick is the
-		// point. A repeater cannot delay by less than one, so a first event wanting no delay at all
-		// gets one anyway -- harmless on a single chain, where it moves the whole song a tick later
-		// and nothing is left behind to notice. Here the other lane is left behind to notice: clamp
-		// one lane and not the other and the two run a repeater tick apart for the rest of the song,
-		// which is the one thing this layout may not do. Biasing both by the same tick costs the
-		// build one cell and keeps them in step whatever the song opens on.
-		int currentTime = -1;
-		for (int index = 0; index < notes.size();) {
+	private static final class HalfTickLane {
+		private final BlockPos origin;
+		private final List<EventNote> notes;
+		private int index;
+		private int cursor;
+		/**
+		 * Both lanes start one repeater tick before their own first event, and the tick is the
+		 * point. A repeater cannot delay by less than one, so a first event wanting no delay at all
+		 * gets one anyway -- harmless on a single chain, where it moves the whole song a tick later
+		 * and nothing is left behind to notice. Here the other lane is left behind to notice: clamp
+		 * one lane and not the other and the two run a repeater tick apart for the rest of the song,
+		 * which is the one thing this layout may not do. Biasing both by the same tick costs the
+		 * build one cell and keeps them in step whatever the song opens on.
+		 */
+		private int currentTime = -1;
+
+		HalfTickLane(BlockPos origin, List<EventNote> notes) {
+			this.origin = origin;
+			this.notes = notes;
+		}
+
+		boolean hasMore() {
+			return index < notes.size();
+		}
+
+		/** How far down the lane it has been built, which is what decides who goes next. */
+		int cursor() {
+			return cursor;
+		}
+
+		void placeNextEvent(PlacementPlan placements, Direction forward) {
 			int time = notes.get(index).time();
 			int laneTime = Math.floorDiv(time, 2);
 			int delay = laneTime - currentTime;
