@@ -622,6 +622,10 @@ public final class SongBuilder {
 		// a level below the path and there is nothing to bring the wire back up -- so this only ever
 		// returns to -1 from 0. See {@link #addRailNote}.
 		int railPhase = -1;
+		// When each rail's last anchor went live, indexed the same way. Every repeater a run lays is
+		// measured from one of these rather than from an event two back, because a blank column
+		// swaps the rails over and after that the two no longer line up with the event order.
+		int[] railLive = new int[2];
 		// What the wire at the end of the lane is still worth. Every module opens with a repeater, so
 		// this only ever counts what the module just built spent: nothing, unless it was a bus.
 		int tipSignal = DUST_RANGE;
@@ -758,7 +762,10 @@ public final class SongBuilder {
 			// because whether a run is under way is a fact about the walk rather than about the
 			// chord: the same event opens a run in one lane and continues one in the next.
 			boolean railContinues = railPhase >= 0;
-			int railColumns = railContinues ? 1
+			// Two where a chord of three has landed on the floor rail, which has no centre to give it:
+			// the blank column that gets it onto the path rail, and then its own.
+			int railColumns = railContinues
+				? railPhase == 1 && !railHolds(event, false) ? 2 : 1
 				: railOpens(events, index, lane, wall, layout, turning) ? RAIL_HEAD_COLUMNS + 1 : 0;
 			int landing = railColumns > 0
 				? lane.pos().getX() + lane.travel().getStepX() * (railColumns + reserve)
@@ -770,19 +777,23 @@ public final class SongBuilder {
 			// arithmetic about walls says so.
 			// Whether this event will not fit before the wall, which is a different question from
 			// whether the lane may end here.
-			boolean overshoots = !turning && (landing > farWall || landing < nearWall);
+			// Never while a run owes its next column. A run that has laid a repeater has promised the
+			// column in front of it a note, and every way a lane can be interrupted takes that column
+			// away: the note ends up on the far side of a staircase, a floor down and running the
+			// other way, while the repeater meant to drive it stays at the wall driving the staircase.
+			//
+			// Said here, on the overshoot, rather than on {@code wantsTurn}. The cut is deliberately
+			// asked of the overshoot and not of the turn -- see the split below -- so a guard on the
+			// turn alone left the cut free to take the column, which is exactly what it did.
+			//
+			// Safe to refuse because a run only extends where the pair it commits to fits before the
+			// wall with the turn's column still to spare, asked column by column as it goes. The run
+			// always ends first, and then the lane turns.
+			boolean overshoots = !turning && railPhase < 0
+				&& (landing > farWall || landing < nearWall);
 			// A lane has to hold something before it can end, or a turn that lands short would turn
 			// again at once and the walk would climb the whole build without laying a note.
-			// Never while a run is under way. A run that has laid a repeater has promised the next
-			// column a note, and a turn takes that column away: the note is built on the far side of
-			// the staircase, a floor down and running the other way, while the repeater meant to
-			// drive it stands at the wall driving the staircase instead. That is a note two ticks
-			// early and a chain broken across every floor change.
-			//
-			// Safe to refuse because a run only ever extends where the pair it is committing to fits
-			// before the wall with the turn's own column still to spare, which is asked column by
-			// column as it goes. So the run always ends first, and then the lane turns.
-			boolean wantsTurn = laneStarted && overshoots && railPhase < 0;
+			boolean wantsTurn = laneStarted && overshoots;
 			// One tick has to be left for the next event's own repeater, which is the only thing that
 			// can drive the module it stands in front of.
 			int columns = (wall - lane.pos().getX()) * lane.travel().getStepX();
@@ -1689,17 +1700,28 @@ public final class SongBuilder {
 				if (opening) {
 					lane = addRailHead(placements, lane, Math.max(1, Math.min(4, wait)), event.time());
 					railPhase = 0;
+					// The head's own stone and the stone under its dust both go live with this chord,
+					// so both rails are timed from here.
+					railLive[0] = event.time();
+					railLive[1] = event.time();
+				} else if (railPhase == 1 && !railHolds(event, false)) {
+					// A chord of three that has landed on the floor rail, which has no centre for it.
+					// The column is laid empty and the chord takes the path column after it; the two
+					// rails come out of it swapped over and carry on.
+					lane = addRailBlank(placements, lane, event.time(),
+						railDelay(railLive[0], event.time()));
+					railLive[1] = event.time();
+					railPhase = 0;
 				}
-				// What the repeater this column holds is measured from. At the head it is the stone
-				// under the opening dust, which goes live with this note; after that it is the note
-				// two events back, which is what stands in the column behind on the same rail.
-				int behind = opening ? event.time() : events.get(index - 1).time();
-				int nextDelay = railNextDelay(events, index, behind);
+				// Every repeater a run lays is measured from the other rail's last anchor: the note
+				// two events back down a plain run, the stone under the dust at the head, and the
+				// blank itself where one has just been laid.
+				int nextDelay = railNextDelay(events, index, railLive[1 - railPhase]);
 				// The path rail is the only place a run may end, so a column here only extends it when
 				// the pair after it will fit as well -- both its columns, and whatever the lane keeps
 				// back for its turn. Measured against the wall rather than against the turn's cells:
 				// those are a wire budget, and every column of a run holds a repeater.
-				if (railPhase == 0 && (railNextDelay(events, index + 1, event.time()) == 0
+				if (railPhase == 0 && (!railExtends(events, index, railLive[1])
 						|| railRoom(lane, laneWall) < 2 + reserve)) {
 					nextDelay = 0;
 				}
@@ -1712,6 +1734,7 @@ public final class SongBuilder {
 				}
 				lane = addRailNote(placements, lane, railPhase, event.notes(), event.time(),
 					nextDelay, opening);
+				railLive[railPhase] = event.time();
 				railPhase = nextDelay > 0 ? 1 - railPhase : -1;
 				currentTime = event.time();
 				// Every column of a run holds a repeater, so the wire never runs: whatever touches the
@@ -4111,44 +4134,91 @@ public final class SongBuilder {
 	 */
 	static boolean TWO_RAIL_RUNS = true;
 
+	/** A path column's cells: a centre and a side each way. Only a harp note can take the centre. */
+	private static final int RAIL_PATH_SLOTS = 3;
+
 	/**
-	 * The largest chord a column of a run can hold.
+	 * A floor column's cells: the two sides and no centre.
 	 *
-	 * <p>Two, and the floor rail is what caps it. The path rail has three cells -- a centre and a
-	 * side each way -- but the floor rail has only the two sides, because the path rail's repeater
-	 * stands directly over its centre and a note block plays only with air above it. A run
-	 * alternates, so what a run can carry is what the narrower of the two can carry.</p>
+	 * <p>The path rail's repeater stands directly over a floor column's centre, and a note block
+	 * plays only with air above it. So the floor rail is the narrower of the two, and a chord of
+	 * three landing on it is what {@link #addRailBlank} exists for.</p>
 	 */
-	static int RAIL_MAX_NOTES = 2;
+	private static final int RAIL_FLOOR_SLOTS = 2;
+
+	/** The largest chord any column of a run can hold, which is a path column with a harp note. */
+	static int RAIL_MAX_NOTES = RAIL_PATH_SLOTS;
+
+	/**
+	 * Whether a column of this rail could hold this chord.
+	 *
+	 * @param path whether the column is a path column, which has a centre where a floor column has
+	 *     none -- and the centre is the cell the wire runs through, so only a harp note can take it
+	 */
+	private static boolean railHolds(EventGroup event, boolean path) {
+		if (!path && event.notes().stream()
+				.anyMatch(note -> FALLING_INSTRUMENT_BLOCKS.contains(note.instrumentBlock()))) {
+			// A floor column is the one shape in this build that hangs a note at the lane's own floor
+			// level, so its instrument block sits a level below that and sand wants holding up from
+			// the level below *that* -- which is the cell the floor underneath needs left empty over
+			// its own path notes. Floors are four apart and a rail's side column already uses all
+			// four, so there is nowhere for that stone to go. The path rail sits a level higher and
+			// has the room, so a chord carrying sand goes there instead.
+			return false;
+		}
+		int notes = event.notes().size();
+		return notes <= RAIL_FLOOR_SLOTS
+			|| path && notes <= RAIL_PATH_SLOTS
+				&& event.notes().stream().anyMatch(SongBuilder::isHarpNote);
+	}
 
 	/** The repeater and the dust in front of it, laid before the first note of a run. */
 	private static final int RAIL_HEAD_COLUMNS = 2;
 
-	/** Whether this event could stand in a rail run at all, leaving aside where its neighbours are. */
+	/**
+	 * Whether this event could stand in a rail run at all, leaving aside where its neighbours are.
+	 *
+	 * <p>Asked of the path rail, which is the wider of the two. A chord of three that lands on the
+	 * floor rail is not turned away for it -- {@link #addRailBlank} lays that column empty and the
+	 * chord takes the path column after it.</p>
+	 */
 	private static boolean railFits(EventGroup event) {
-		return event.notes().size() <= RAIL_MAX_NOTES;
+		return railHolds(event, RAIL_BLANKS);
+	}
+
+	/** Off, a run refuses any chord the floor rail cannot hold rather than blanking a column for it. */
+	static boolean RAIL_BLANKS = true;
+
+	/** A repeater's delay, or nought where it is not one a repeater can hold. */
+	private static int railDelay(int from, int to) {
+		return to - from >= 1 && to - from <= 4 ? to - from : 0;
 	}
 
 	/**
 	 * The delay of the repeater this column holds for the next note, or nought if the run ends here.
 	 *
-	 * @param behindTime the tick the block behind that repeater goes live -- the note two events
-	 *     back, or, at the head where the block behind is the stone under the opening dust, this one
+	 * @param behindTime the tick the block behind that repeater goes live, which is whenever the
+	 *     other rail's last anchor did -- normally the note two events back, at the head the stone
+	 *     under the opening dust, and after a blank the blank itself
 	 */
 	private static int railNextDelay(List<EventGroup> events, int index, int behindTime) {
-		if (index + 1 >= events.size() || !railFits(events.get(index + 1))) {
-			return 0;
-		}
-		int delay = events.get(index + 1).time() - behindTime;
-		return delay >= 1 && delay <= 4 ? delay : 0;
+		return index + 1 >= events.size() || !railFits(events.get(index + 1)) ? 0
+			: railDelay(behindTime, events.get(index + 1).time());
 	}
 
 	/**
-	 * Whether a run may open here: three events that fit, and both of the repeaters the first two
-	 * columns will have to hold.
+	 * Whether a run may open here: three events that fit their natural rails, and both of the
+	 * repeaters the first two columns will have to hold.
+	 *
+	 * <p>Asked without blanks. A run can swap its rails over mid-way to get a chord of three onto the
+	 * path rail, but the head is the one column that has no centre at all -- its stone has to relay
+	 * the dust -- so opening one is the place to be plain about what fits.</p>
 	 */
 	private static boolean railMayStart(List<EventGroup> events, int index) {
-		return TWO_RAIL_RUNS && railFits(events.get(index))
+		return TWO_RAIL_RUNS && index + 2 < events.size()
+			&& events.get(index).notes().size() <= RAIL_FLOOR_SLOTS
+			&& railHolds(events.get(index + 1), false)
+			&& railHolds(events.get(index + 2), true)
 			&& railNextDelay(events, index, events.get(index).time()) > 0
 			&& railNextDelay(events, index + 1, events.get(index).time()) > 0;
 	}
@@ -4173,6 +4243,59 @@ public final class SongBuilder {
 		return TWO_RAIL_RUNS && layout.ultra() && !turning && !lane.bending()
 			&& railMayStart(events, index)
 			&& railRoom(lane, wall) >= RAIL_HEAD_COLUMNS + 3;
+	}
+
+	/**
+	 * A floor column carrying no notes, so that the chord which wanted it goes on the path rail.
+	 *
+	 * <p>A chord of three cannot stand on the floor rail, which has no centre. Rather than end the
+	 * run for it -- a run pays two columns of head to start again, and an odd three in the middle of
+	 * a long sequence is not worth that -- the floor column is laid empty and the chord takes the
+	 * path column after it. The two rails come out of it swapped over and carry on (ekran).</p>
+	 *
+	 * <p>A blank is exactly an ordinary floor column with its notes left off, and that is what makes
+	 * it cheap: the floor repeater driving it keeps the delay it would have had anyway, two gaps, so
+	 * the blank goes live on the very tick the chord would have. The one thing that changes is the
+	 * path repeater standing here -- one gap instead of two -- so the path rail's next anchor comes
+	 * round in time to take the chord.</p>
+	 *
+	 * @param pathDelay one gap: from the path rail's last anchor to the chord this makes room for
+	 */
+	private static Lane addRailBlank(PlacementPlan placements, Lane at, int time, int pathDelay) {
+		placements.placing("rail:BLANK");
+		placements.padded("railBlankForOddThree");
+		placements.powered(at.pos(), "minecraft:stone", time);
+		set(placements, at.pos().above(), "minecraft:repeater[facing="
+			+ repeaterFacing(at.travel()) + ",delay=" + pathDelay + "]");
+		return at.ahead(1);
+	}
+
+	/**
+	 * Whether this column, which is a path column, should drive another pair after it.
+	 *
+	 * <p>A run may only end on a path column -- the floor rail's notes sit a level below the path and
+	 * nothing brings the wire back up -- so extending is a commitment to two more columns, and both
+	 * of the ways those two can go have to be checked here rather than discovered halfway.</p>
+	 *
+	 * @param floorLive when the floor rail's last anchor went live, which the first of the pair is
+	 *     timed from
+	 */
+	private static boolean railExtends(List<EventGroup> events, int index, int floorLive) {
+		if (index + 1 >= events.size() || railNextDelay(events, index, floorLive) == 0) {
+			return false;
+		}
+		EventGroup here = events.get(index);
+		EventGroup next = events.get(index + 1);
+		if (!railHolds(next, false)) {
+			// The pair is a blank and then the chord itself, which lands on the path column and so
+			// leaves the run somewhere it may end.
+			return railHolds(next, true) && railDelay(here.time(), next.time()) > 0;
+		}
+		// Otherwise the pair is the next chord on the floor and the one after it on the path, and it
+		// is that second one which has to fit -- a run that stopped on the floor column would leave
+		// the lane's wire a level down.
+		return index + 2 < events.size() && railHolds(events.get(index + 2), true)
+			&& railDelay(here.time(), events.get(index + 2).time()) > 0;
 	}
 
 	/** The two columns a run opens with: its own repeater, then the dust that starts the floor rail. */

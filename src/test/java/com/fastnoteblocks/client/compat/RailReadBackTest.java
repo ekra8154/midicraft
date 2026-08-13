@@ -42,7 +42,7 @@ class RailReadBackTest {
 
 	@Test
 	void readsBackEveryOneNoteSongAsItself() throws Exception {
-		for (String name : List.of("ultra-ones-gap2", "ultra-ones-gap1", "ultra-ones-mixed", "ultra-twos-mixed")) {
+		for (String name : List.of("ultra-ones-gap2", "ultra-ones-mixed", "ultra-twos-mixed", "ultra-threes-mixed")) {
 			List<SongBuilder.EventNote> notes = load(name);
 			for (int[] size : new int[][] {{16, 2}, {24, 5}, {40, 2}}) {
 				SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0),
