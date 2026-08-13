@@ -44,19 +44,28 @@ class WriteOneNoteSongsTest {
 	void writesTheOneNoteScales() throws Exception {
 		write("ultra-ones-gap2", 2, 600);
 		write("ultra-ones-gap1", 1, 600);
+		// The one that actually exercises the arithmetic. A rail's repeater carries t(k+1) - t(k-1),
+		// so a uniform gap only ever asks it for the same number twice; mixing ones and twos walks
+		// every sum from two to four, and the head, which is measured from t(k) instead, differs
+		// from the columns after it.
+		write("ultra-ones-mixed", 0, 600);
 	}
 
+	/** @param gap the gap in redstone ticks, or nought for a random mix of one and two */
 	private static void write(String name, int gap, int events) throws Exception {
+		java.util.Random random = new java.util.Random(20260813L);
 		List<ComposerProject.NoteEvent> notes = new ArrayList<>();
+		long tick = 0;
 		for (int index = 0; index < events; index++) {
 			notes.add(new ComposerProject.NoteEvent(index + 1L,
 				ComposerProject.NOTE_BLOCK_BASE_MIDI_NOTE + upAndDown(index),
-				index * (long) gap * TICK, TICK, 96));
+				tick * TICK, TICK, 96));
+			tick += gap > 0 ? gap : 1 + random.nextInt(2);
 		}
 		ComposerProject song = new ComposerProject(name.replace('-', ' '),
 			ComposerProject.DEFAULT_PPQ, ComposerProject.DEFAULT_TEMPO_MICROS_PER_QUARTER,
 			List.of(new ComposerProject.Layer("scale", "HARP", false, true, true, notes)),
-			0, events + 1L, (events + 1L) * gap * TICK, ComposerProject.DEFAULT_SPEED_QUARTERS);
+			0, events + 1L, (tick + 1) * TICK, ComposerProject.DEFAULT_SPEED_QUARTERS);
 		Files.writeString(SONGS.resolve(name + ".json"), new Gson().toJson(song));
 		List<SongBuilder.EventNote> built =
 			SongBuilder.eventNotes(song.toSequenceTracks(Set.of(), true));

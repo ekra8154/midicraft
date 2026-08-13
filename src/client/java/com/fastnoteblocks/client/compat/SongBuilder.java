@@ -1690,7 +1690,7 @@ public final class SongBuilder {
 					nextDelay = 0;
 				}
 				lane = addRailNote(placements, lane, railPhase, event.notes().get(0), event.time(),
-					nextDelay);
+					nextDelay, railStarts);
 				railPhase = nextDelay > 0 ? 1 - railPhase : -1;
 				currentTime = event.time();
 				// Every column of a run holds a repeater, so the wire never runs: whatever touches the
@@ -4054,10 +4054,18 @@ public final class SongBuilder {
 	 * alternate between the two levels:</p>
 	 *
 	 * <pre>
-	 *   path    r2  w   A   r4  C   r4  E   r4  G
+	 *   path    r2  w   sA  r4  C   r4  E   r4  G
 	 *   floor   s   s   r2  sB  r4  sD  r4  sF
 	 *   below           s       s       s
 	 * </pre>
+	 *
+	 * <p>{@code sX} is a stone with the note hung off the side of it. The floor rail is always that,
+	 * because a note block there would have the path rail's repeater directly over it and a note
+	 * block plays only with air above. The path rail needs it once, at the head, and the reason is
+	 * the one thing about this shape that had to be measured rather than reasoned about: a note block
+	 * relays to the repeater in front of it when a <em>repeater</em> drives it, and does not when
+	 * <em>dust</em> points into it. Stone relays either way. So every path note but the first is a
+	 * bare note block on the path -- and plays harp, because what is under it is the rail below.</p>
 	 *
 	 * <p>The dust is what makes it start, and it is why the run opens with its repeater a column back
 	 * rather than facing the first note: dust powers the stone it sits on, and that stone is what the
@@ -4130,16 +4138,33 @@ public final class SongBuilder {
 	 *
 	 * @param phase 0 for the path rail, 1 for the floor rail
 	 * @param nextDelay the delay of that repeater, or nought to end the run at this column
+	 * @param fromDust whether what drives this note is the head's dust rather than a repeater, which
+	 *     is the one case where a note block on the path would sound and then carry nothing
 	 */
 	private static Lane addRailNote(PlacementPlan placements, Lane at, int phase, EventNote note,
-			int time, int nextDelay) {
-		placements.placing("rail:" + (phase == 0 ? "PATH" : "FLOOR") + " notes1");
+			int time, int nextDelay, boolean fromDust) {
+		// A note block plays the instrument of whatever it stands on, and in the middle of a run what
+		// it stands on is the other rail's repeater -- harp, and no block of its own. At either end
+		// of a run there is no repeater under it: at the head because the dust drives it, and at the
+		// tail because the run stops laying them. So the ends hang their note off a stone instead.
+		//
+		// Both ends, and the tail is the one that had to be measured. A note left standing on the
+		// stone that fills the floor there reads back basedrum: sixty-two of six hundred, one per
+		// run, every tick right and every instrument wrong.
+		boolean offAStone = phase == 0 && (fromDust || nextDelay == 0);
+		placements.placing("rail:" + (phase == 0 ? offAStone ? "END" : "PATH" : "FLOOR") + " notes1");
 		String facing = repeaterFacing(at.travel());
 		if (phase == 0) {
-			// No instrument block of its own: what is under it is the other rail. Same arrangement as
-			// a stacked module's centre, and the same consequence -- it plays harp.
-			placeNoteBlock(placements, at.pos().above(), note);
-			placements.powered(at.pos().above(), time);
+			if (offAStone) {
+				// And dust hands a stone on to the repeater in front of it where it would not hand on
+				// a note block, which is what the head needs of this as well as the instrument.
+				// Measured on a machine of five blocks; see RailLinkProbeTest.
+				placements.powered(at.pos().above(), "minecraft:stone", time);
+				placeNote(placements, at.pos().above().relative(at.noteSide()), note);
+			} else {
+				placeNoteBlock(placements, at.pos().above(), note);
+				placements.powered(at.pos().above(), time);
+			}
 			set(placements, at.pos(), nextDelay > 0
 				? "minecraft:repeater[facing=" + facing + ",delay=" + nextDelay + "]"
 				: "minecraft:stone");
