@@ -542,6 +542,19 @@ public final class SongBuilder {
 	static int HALF_TICK_LANE_GAP = 3;
 
 	/**
+	 * How far apart the two lanes' pulses may drift before the lagging one is padded, in blocks.
+	 *
+	 * <p>A note block is audible for 48 blocks, so the number that matters is whether a listener
+	 * standing by one pulse can hear the other. Sixteen leaves room to spare, which it needs: a
+	 * lane closes a gap a module at a time and only with what its dust run has left over, so the
+	 * tolerance is where the padding starts rather than where the drift stops.</p>
+	 *
+	 * <p>ekran's number, and the trade it buys is length: every padded column is a column the build
+	 * grows by and no note sounds from.</p>
+	 */
+	static int HALF_TICK_LANE_TOLERANCE = 16;
+
+	/**
 	 * Two straight lanes running side by side, one for each parity of the game tick.
 	 *
 	 * <p>Redstone's floor is one repeater tick, which is two game ticks, and that is what caps a
@@ -579,21 +592,46 @@ public final class SongBuilder {
 		HalfTickLane right = new HalfTickLane(origin, parity(notes, 0));
 		HalfTickLane left = new HalfTickLane(
 			origin.relative(forward.getCounterClockWise(), HALF_TICK_LANE_GAP), parity(notes, 1));
-		// Laid a column at a time down both lanes together, rather than one lane and then the other.
-		// A paste is a stream of commands and the player walks alongside it; finishing one lane first
-		// means the second one starts seven thousand blocks behind them, in chunks that are no longer
-		// loaded, and the blocks never land. So whichever lane is furthest back goes next, which
-		// keeps the two fronts within one module of each other the whole way down.
+		int padded = 0;
+		int short_ = 0;
+		// Walked in step by the clock, and padded to stay in step by the ruler. The two are the same
+		// requirement seen twice, and both were got wrong once before arriving here.
 		//
-		// Only the order changes. Each lane's own arithmetic is untouched -- it does not know the
-		// other exists -- and the two write to columns that never meet, so the finished block map is
-		// the same one either way.
+		// A lane spends columns on the chords it happens to carry, so two lanes covering the same
+		// stretch of song reach different columns: Guardian's even ticks average sixteen notes to
+		// its odd ticks' ten, and its two pulses finished 2,351 blocks apart. Every note fires at
+		// exactly the right moment and half of them from outside earshot, which no read-back can
+		// see -- a read-back asks when a note sounds, and this is about where it sounds from.
+		//
+		// So the lane whose next event comes first goes next, which keeps them together in time;
+		// and whichever has fallen behind in columns is padded, which keeps them together in space.
+		// With both, the two are the same thing: equal time means equal column, so the paste front
+		// stays together as well and the fix that put it there is subsumed by this one.
 		while (right.hasMore() || left.hasMore()) {
-			HalfTickLane behind = !left.hasMore() || right.hasMore() && right.cursor() <= left.cursor()
+			HalfTickLane next = !left.hasMore() || right.hasMore() && right.nextTime() <= left.nextTime()
 				? right
 				: left;
-			behind.placeNextEvent(placements, forward);
+			HalfTickLane other = next == right ? left : right;
+			// Only while both are still playing. Once one has run out there is no second pulse to
+			// keep up with, and padding the survivor would buy nothing and cost columns.
+			int wanted = other.hasMore() || next.hasMore() && other.cursor() > next.cursor()
+				? other.cursor() - next.cursor() - HALF_TICK_LANE_TOLERANCE
+				: 0;
+			int given = next.placeNextEvent(placements, forward, Math.max(0, wanted));
+			if (wanted > 0) {
+				padded++;
+				if (given < wanted) {
+					// Asked for more room than the run had left. A bus is one dust line from its
+					// repeater and dies at fifteen, so a lane behind a partner carrying big chords
+					// cannot always catch up in one module -- it closes what it can and tries again
+					// at the next. Counted because a build where this is common is one whose lanes
+					// may still drift, and the number is the only warning of it.
+					short_++;
+				}
+			}
 		}
+		placements.padded("halfTickCatchUp", padded);
+		placements.padded("halfTickCatchUpShort", short_);
 		return placements.finish(PasteMode.HALF_TICK_LANE, origin);
 	}
 
@@ -649,12 +687,22 @@ public final class SongBuilder {
 			return index < notes.size();
 		}
 
+		/** The game tick this lane speaks next, which is what decides who goes next. */
+		int nextTime() {
+			return hasMore() ? notes.get(index).time() : Integer.MAX_VALUE;
+		}
+
 		/** How far down the lane it has been built, which is what decides who goes next. */
 		int cursor() {
 			return cursor;
 		}
 
-		void placeNextEvent(PlacementPlan placements, Direction forward) {
+		/**
+		 * @param wantedPad columns this lane would like to gain on the other one
+		 * @return columns it actually gained, which is less when the chord's own bus has already
+		 *     used most of the fifteen a dust run reaches
+		 */
+		int placeNextEvent(PlacementPlan placements, Direction forward, int wantedPad) {
 			int time = notes.get(index).time();
 			int laneTime = Math.floorDiv(time, 2);
 			int delay = laneTime - currentTime;
@@ -662,10 +710,16 @@ public final class SongBuilder {
 			while (index < notes.size() && notes.get(index).time() == time) {
 				chord.add(notes.get(index++));
 			}
+			// Whatever is left of the run after the chord has taken its share. Overrunning it is
+			// not a slightly longer build, it is a dead one: the dust fades to nothing partway and
+			// the repeater at the far end never sees a signal, so the song stops there.
+			int room = Math.max(0, MAX_BUS_LENGTH - (chord.size() + 1) / 2);
+			int pad = Math.min(Math.max(0, wantedPad), room);
 			DelayTrigger trigger = addDelayBeforeEvent(placements, origin, forward, cursor, delay);
 			cursor = addEventModule(placements, origin, forward, trigger.cursor(),
-				trigger.triggerDelay(), chord);
+				trigger.triggerDelay(), chord, pad);
 			currentTime = laneTime;
+			return pad;
 		}
 	}
 
@@ -7419,13 +7473,35 @@ public final class SongBuilder {
 
 	private static int addEventModule(PlacementPlan placements, BlockPos origin, Direction forward,
 			int cursor, int triggerDelay, List<EventNote> chord) {
+		return addEventModule(placements, origin, forward, cursor, triggerDelay, chord, 0);
+	}
+
+	/**
+	 * The longest a bus may be, which is how far dust carries before it fades to nothing.
+	 *
+	 * <p>Two note blocks hang off each bus block, so this is also where the thirty-note chord limit
+	 * comes from -- the same fifteen, counted in slots instead of columns.</p>
+	 */
+	private static final int MAX_BUS_LENGTH = 15;
+
+	/**
+	 * @param extraColumns bus blocks beyond what the chord needs, for a lane catching up with the
+	 *     one beside it. A bus is stone under dust and dust has no delay, so a longer one moves the
+	 *     lane further along without moving the music at all -- which is the only kind of padding
+	 *     the half-tick lane can use, since anything with a repeater in it would put the two lanes
+	 *     out of step, and staying in step is the entire point of padding them.
+	 */
+	private static int addEventModule(PlacementPlan placements, BlockPos origin, Direction forward,
+			int cursor, int triggerDelay, List<EventNote> chord, int extraColumns) {
 		Direction right = forward.getClockWise();
 		BlockPos triggerPos = at(origin, forward, cursor, 0, 0);
 		set(placements, triggerPos, "minecraft:stone");
 		set(placements, triggerPos.above(), "minecraft:repeater[facing=" + repeaterFacing(forward) + ",delay=" + triggerDelay + "]");
 		BlockPos anchor = at(origin, forward, cursor + 1, 1, 0);
 		int time = chord.get(0).time();
-		if (chord.size() <= 3) {
+		// A small chord normally skips the bus and hangs its notes straight off the anchor, which
+		// is a cell shorter. A padded one cannot: the padding *is* bus, so it takes the bus shape.
+		if (chord.size() <= 3 && extraColumns <= 0) {
 			placeNote(placements, anchor, chord.get(0));
 			placements.powered(anchor, time);
 			if (chord.size() >= 2) {
@@ -7436,7 +7512,8 @@ public final class SongBuilder {
 			}
 			return cursor + 2;
 		}
-		int busLength = (chord.size() + 1) / 2;
+		int busLength = Math.min(MAX_BUS_LENGTH,
+			(chord.size() + 1) / 2 + Math.max(0, extraColumns));
 		for (int bus = 0; bus < busLength; bus++) {
 			BlockPos busPos = anchor.relative(forward, bus);
 			placements.powered(busPos, "minecraft:stone", time);
@@ -7968,8 +8045,12 @@ public final class SongBuilder {
 		private Trial trial;
 
 		void padded(String reason) {
-			if (recording) {
-				padding.merge(reason, 1, Integer::sum);
+			padded(reason, 1);
+		}
+
+		void padded(String reason, int cells) {
+			if (recording && cells != 0) {
+				padding.merge(reason, cells, Integer::sum);
 			}
 		}
 

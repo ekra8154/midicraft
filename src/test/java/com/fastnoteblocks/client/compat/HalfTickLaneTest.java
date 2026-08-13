@@ -263,6 +263,50 @@ class HalfTickLaneTest {
 				+ " long; the two lanes are not being laid alongside each other");
 	}
 
+	/**
+	 * A song whose two halves carry very different chords still keeps its pulses together.
+	 *
+	 * <p>The failure this exists for is the one ekran asked about and none of the checks above can
+	 * see. A lane spends columns on the chords it carries, so a song with big chords on its even
+	 * ticks and small ones on its odd ticks runs one pulse steadily ahead of the other -- every note
+	 * on the beat, half of them sounding from outside the 48 blocks a note block carries. Timing is
+	 * perfect and the song is unlistenable.</p>
+	 *
+	 * <p>Sixteen notes against two is a wider split than any real song, chosen so the drift would be
+	 * unmissable without it: unpadded, this walks the two lanes about seven columns further apart
+	 * per event, for hundreds of events.</p>
+	 */
+	@Test
+	void keepsTheTwoPulsesWithinEarshotWhenTheChordsAreLopsided() {
+		List<SongBuilder.EventNote> song = new ArrayList<>();
+		for (int event = 0; event < 300; event++) {
+			int gameTick = event * 2;
+			// Even ticks: a big chord, which eats columns. Odd ticks: two notes, which barely do.
+			for (int index = 0; index < 16; index++) {
+				song.add(new SongBuilder.EventNote(gameTick, 1, index, index % 25,
+					"minecraft:gold_block"));
+			}
+			for (int index = 0; index < 2; index++) {
+				song.add(new SongBuilder.EventNote(gameTick + 1, 1, index, index % 25,
+					"minecraft:gold_block"));
+			}
+		}
+		SongBuilder.PastePlan plan = build(song);
+
+		double split = laneSplit(plan);
+		int rightEnd = noteBlocks(plan).stream().filter(block -> block.z() > split)
+			.mapToInt(Placed::x).max().orElseThrow();
+		int leftEnd = noteBlocks(plan).stream().filter(block -> block.z() < split)
+			.mapToInt(Placed::x).max().orElseThrow();
+
+		// Both lanes cover the same span of song, so where they finish is where their last pulses
+		// stood at the same moment -- the drift, measured at the one point it is always largest.
+		int drift = Math.abs(rightEnd - leftEnd);
+		assertTrue(drift <= 48, "the two lanes ended " + drift
+			+ " blocks apart, which is further than a note block can be heard; a listener by one "
+			+ "pulse would not hear the other");
+	}
+
 	// ----------------------------------------------------------------- reading it off the blocks
 
 	private static final Pattern SETBLOCK = Pattern.compile(
