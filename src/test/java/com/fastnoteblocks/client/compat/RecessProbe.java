@@ -144,6 +144,28 @@ class RecessProbe {
 		}
 	}
 
+	/**
+	 * The pair behind, looked at rather than remembered.
+	 *
+	 * <p>Two rules answer one question and the guessing one runs first, so a chord whose back pair is
+	 * free can still be handed a shorter head. This is the arm that says what the looking is worth.</p>
+	 */
+	@Test
+	void whatAskingBehindIsWorth() throws Exception {
+		System.out.println();
+		System.out.println("==== v2 with the pair behind asked, and remembered ====");
+		try {
+			for (boolean asked : new boolean[] {false, true}) {
+				SongBuilder.BEHIND_IS_ASKED_NOT_CARRIED = asked;
+				System.out.println("   -- BEHIND_IS_ASKED_NOT_CARRIED = " + asked);
+				weigh("all-25 at a gap of 1", AllTwentyFivesTest.allTwentyFives());
+				weigh("guardian", BreachView.song("deltarune-ch-4-guardian"));
+			}
+		} finally {
+			SongBuilder.BEHIND_IS_ASKED_NOT_CARRIED = true;
+		}
+	}
+
 	private static void weigh(String name, List<SongBuilder.EventNote> song) {
 		int lanes = 0;
 		int blocks = 0;

@@ -3519,10 +3519,26 @@ public final class SongBuilder {
 		// is nobody's but this one's. The same thing a wait already does, which is why the rule below
 		// only fires at delayColumns == 0, and why one column of pad is all it takes.
 		int behindShift = 0;
-		if (style.reachesBack() && busy && delayColumns == 0
+		// Whether the pair behind is still answered from memory, or left to the oracle below.
+		//
+		// ekran's merge, and the two rules are these. This one asserts: the walk sets columnBehindBusy
+		// after a flat turn and after a carried bus, carries it down the lane, and every chord until
+		// something sets it again reads that. The one below looks -- {@link #parityVerdict} asks the
+		// cells the module's own slots want, tries {@link #relocate} on the note in contention, then a
+		// shift, then gives the shape up.
+		//
+		// They answer the same question, and the asserting one wins because it runs first: by the time
+		// the looking one is reached the shape has already been downgraded. So a chord whose back pair
+		// is free is handed a head of five, a front-only head or a plain bus, and the oracle is asked
+		// about a shape that was never in contention.
+		//
+		// v2 only, and only where there is an oracle to answer instead: without one this clause is the
+		// only thing here that knows about the lane behind at all.
+		boolean guessesBehind = !(BEHIND_IS_ASKED_NOT_CARRIED && layout.v2() && parity != null);
+		if (guessesBehind && style.reachesBack() && busy && delayColumns == 0
 				&& NUDGE_WHEN_BEHIND_BUSY && losesTheHeadWithoutTheBackPair(style, event.notes())) {
 			behindShift = 1;
-		} else if (style.reachesBack() && busy && delayColumns == 0) {
+		} else if (guessesBehind && style.reachesBack() && busy && delayColumns == 0) {
 			// The same substitution the walk makes: a head with a bus behind it keeps a head of
 			// five, and only the rigid shape falls all the way to a bus.
 			// The rigid shape falls to a head of five with a bus behind it too, not all the way to a
@@ -7996,6 +8012,42 @@ public final class SongBuilder {
 	 * done.</p>
 	 */
 	static boolean STACKED_KEEPS_OFF_THE_ROUTE = true;
+
+	/**
+	 * v2: whether the pair of cells behind a module is looked at rather than remembered.
+	 *
+	 * <p>ekran's, and it is a merge rather than a new rule. Two things in this file answer "is the
+	 * ground behind this module spoken for". One of them looks: {@link #parityVerdict} asks the cells
+	 * the module's own slots want, tries {@link #relocate} on the note in contention, then a shift,
+	 * then gives the shape up. The other asserts: {@code columnBehindBusy} is set {@code true} after a
+	 * flat turn and after a carried bus, and carried down the lane until something sets it again.</p>
+	 *
+	 * <p>The asserting one wins, because it runs first. {@link #landingOf} reads it and downgrades the
+	 * shape -- a head of five, a front-only head, or a plain bus -- before the module is ever built, so
+	 * the oracle never gets the chance to look at a back pair that was free all along.</p>
+	 *
+	 * <p>So with this on the guessing clause stands down in v2 wherever there is an oracle to answer
+	 * instead, and {@link #landingOf} predicts what {@link #parityVerdict} will actually do.</p>
+	 *
+	 * <p><b>Off, because it measures worse, and the reason is the useful part.</b> The all-25 song
+	 * goes 56 breach blocks to 181 and Guardian 31 to 53 -- while both builds come out
+	 * <em>shorter</em> (960 to 935, 6561 to 6558) and Guardian's wrong notes drop from 9 to 5. Denser
+	 * and more correct, and further outside its walls, which is the signature of a prediction and a
+	 * build that have stopped agreeing rather than of a worse shape.</p>
+	 *
+	 * <p>They stop agreeing because this is not two rules. It is three, and the third is upstream of
+	 * both: {@link #chooseStyle} picks every event's shape in {@code eventGroups}, before the walk
+	 * runs and before a single block exists, from {@code roomBehind = delayRepeaters > 0 ||
+	 * !previousTookTheGap} -- a guess about what the chord before took. Standing the second one down
+	 * leaves the prediction optimistic and the shape already chosen pessimistically, and a lane
+	 * measured for one shape and built as another lands outside its wall.</p>
+	 *
+	 * <p>Finishing this means choosing the style in the walk, where the blocks exist, rather than at
+	 * grouping time. That is the merge ekran asked for, and it is a real piece of work rather than a
+	 * clause standing down. The measurement above is what it is worth: shorter builds and half the
+	 * wrong notes, once the third rule goes too.</p>
+	 */
+	static boolean BEHIND_IS_ASKED_NOT_CARRIED = false;
 
 	/**
 	 * How far down the route a module is asked to keep off, in columns.
