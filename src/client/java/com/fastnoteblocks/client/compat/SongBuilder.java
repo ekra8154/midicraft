@@ -6081,7 +6081,7 @@ public final class SongBuilder {
 	 * {@code < 3}, so three is allowed. All this does is let the test be reached, and measure it
 	 * against every corner on the level rather than the last one recorded, because a bend has two.</p>
 	 */
-	static boolean STACKED_MAY_WRAP_A_BEND = true;
+	static boolean STACKED_MAY_WRAP_A_BEND = false;
 
 	/** How far past a corner a stacked module's repeater may stand. */
 	private static final int STACKED_CLEAR_OF_CORNER = 3;

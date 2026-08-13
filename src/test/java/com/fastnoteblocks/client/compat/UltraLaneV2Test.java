@@ -42,9 +42,24 @@ class UltraLaneV2Test {
 		assertEquals(0, BreachView.readBack("v2", plan).unreachedNotes(), "no dead line");
 	}
 
-	/** And it leaves the layout it stands beside exactly as it was. */
+	/**
+	 * And it leaves the layout it stands beside exactly as it was.
+	 *
+	 * <p>The flags are pinned first, and that is not belt and braces. Every switch in this file is a
+	 * static, the probes set them to measure a change, and a probe that throws or that forgets its
+	 * {@code finally} leaves the next class to run building something else. This assertion passed on
+	 * its own and failed in the suite for exactly that reason -- {@link SongBuilder#MARK_COLLISIONS}
+	 * left on by another class marks collisions instead of refusing them, which changes what v1
+	 * builds. An exact number is only worth asserting if what it depends on is stated.</p>
+	 */
 	@Test
 	void doesNotDisturbTheFirstLayout() {
+		SongBuilder.MARK_COLLISIONS = false;
+		SongBuilder.CUT_ONLY_LANES = false;
+		SongBuilder.CUTS_THE_CHORD_THAT_REACHES = false;
+		SongBuilder.SMALL_MAY_STACK_IN_A_TURN = false;
+		SongBuilder.STRANDED_CHORD_MAY_STILL_CUT = false;
+		SongBuilder.CUT_FAR_HALF_FREES_THE_GAP = false;
 		List<SongBuilder.EventNote> song = AllTwentyFivesTest.allTwentyFives();
 		SongBuilder.PastePlan v1 = build(song, SongBuilder.PasteMode.ULTRA_COMPACT_LANE, 40, 2);
 		// 40 wide over two floors is where v1 breaches this song hardest, 88 blocks in 8 lanes. If
