@@ -5,6 +5,8 @@ import com.google.gson.Gson;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.List;
 import java.util.Set;
 import net.minecraft.SharedConstants;
@@ -49,6 +51,62 @@ class WriteOneNoteSongsTest {
 		// every sum from two to four, and the head, which is measured from t(k) instead, differs
 		// from the columns after it.
 		write("ultra-ones-mixed", 0, 600);
+		writePairs("ultra-twos-mixed", 600);
+	}
+
+	/** Instruments a rail note may carry. Snare is sand, which is the one that needs holding up. */
+	private static final List<String> INSTRUMENTS =
+		List.of("BASS", "BASEDRUM", "SNARE", "BELL", "FLUTE", "CHIME", "XYLOPHONE", "GUITAR");
+
+	/**
+	 * The same scale, with chords of one or two and instruments other than harp.
+	 *
+	 * <p>Only the centre of a rail column can be harp and only the path rail has one, so what this
+	 * has to walk is every combination of those: a chord with a harp note and one without, on the
+	 * rail that has a centre and the rail that does not.</p>
+	 */
+	private static void writePairs(String name, int events) throws Exception {
+		java.util.Random random = new java.util.Random(20260814L);
+		Map<String, List<ComposerProject.NoteEvent>> byInstrument = new LinkedHashMap<>();
+		long tick = 0;
+		long id = 1;
+		for (int index = 0; index < events; index++) {
+			int notes = 1 + random.nextInt(2);
+			// Nought, one or two of them on something other than harp, so a chord may be all harp,
+			// part harp, or hold no harp note at all -- which is the case that has to give the centre
+			// up and put both notes out to the sides.
+			int coloured = Math.min(notes, random.nextInt(3));
+			for (int note = 0; note < notes; note++) {
+				String instrument = note < coloured
+					? INSTRUMENTS.get(random.nextInt(INSTRUMENTS.size())) : "HARP";
+				byInstrument.computeIfAbsent(instrument, key -> new ArrayList<>())
+					.add(new ComposerProject.NoteEvent(id++,
+						ComposerProject.NOTE_BLOCK_BASE_MIDI_NOTE + upAndDown(index * 2 + note),
+						tick * TICK, TICK, 96));
+			}
+			tick += 1 + random.nextInt(2);
+		}
+		List<ComposerProject.Layer> layers = new ArrayList<>();
+		byInstrument.forEach((instrument, notes) ->
+			layers.add(new ComposerProject.Layer(instrument, instrument, false, true, true, notes)));
+		ComposerProject song = new ComposerProject(name.replace('-', ' '),
+			ComposerProject.DEFAULT_PPQ, ComposerProject.DEFAULT_TEMPO_MICROS_PER_QUARTER,
+			layers, 0, id, (tick + 1) * TICK, ComposerProject.DEFAULT_SPEED_QUARTERS);
+		Files.writeString(SONGS.resolve(name + ".json"), new Gson().toJson(song));
+		List<SongBuilder.EventNote> built =
+			SongBuilder.eventNotes(song.toSequenceTracks(Set.of(), true));
+		Map<Integer, Integer> perTick = new java.util.TreeMap<>();
+		for (SongBuilder.EventNote note : built) {
+			perTick.merge(note.time(), 1, Integer::sum);
+		}
+		Map<String, Integer> instruments = new java.util.TreeMap<>();
+		for (SongBuilder.EventNote note : built) {
+			instruments.merge(String.valueOf(note.instrumentBlock()), 1, Integer::sum);
+		}
+		System.out.println("WROTE " + name + " notes=" + built.size()
+			+ " chords=" + perTick.size()
+			+ " largestChord=" + perTick.values().stream().mapToInt(Integer::intValue).max().orElse(0)
+			+ " instruments=" + instruments);
 	}
 
 	/** @param gap the gap in redstone ticks, or nought for a random mix of one and two */

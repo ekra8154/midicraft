@@ -87,8 +87,8 @@ class RailUnderNoteProbeTest {
 	@Test
 	void countsWhatEveryNoteStandsOn() throws Exception {
 		SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0),
-			load("ultra-ones-gap2"), SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
-			new SongBuilder.BuildLimits(16, 16, 2));
+			load("ultra-twos-mixed"), SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+			new SongBuilder.BuildLimits(16, 24, 2));
 		Map<BlockPos, String> world = new HashMap<>();
 		for (String command : plan.commands()) {
 			String[] parts = command.split(" ");

@@ -1710,7 +1710,7 @@ public final class SongBuilder {
 						+ " wall=" + laneWall + " room=" + railRoom(lane, laneWall)
 						+ " travel=" + lane.travel());
 				}
-				lane = addRailNote(placements, lane, railPhase, event.notes().get(0), event.time(),
+				lane = addRailNote(placements, lane, railPhase, event.notes(), event.time(),
 					nextDelay, opening);
 				railPhase = nextDelay > 0 ? 1 - railPhase : -1;
 				currentTime = event.time();
@@ -3820,13 +3820,17 @@ public final class SongBuilder {
 		}
 		LaneReach small = smallChordReach(chordSize, margin);
 		// A run of single notes used to be the one lane that reached nowhere at all -- its whole
-		// module is the anchor on its own centre line -- so lanes of them packed two apart. The floor
-		// rail hangs its note out to the side, which makes that untrue, and a lane spaced for the old
-		// answer meets its neighbour's live centre line one block from that note. Claimed of every
-		// chord small enough for a run rather than of the ones that end up in one, because whether a
-		// run is under way is a fact about the walk and this is asked of the chord.
+		// module is the anchor on its own centre line -- so lanes of them packed two apart. A rail
+		// column hangs its notes out to the sides, which makes that untrue, and a lane spaced for the
+		// old answer meets its neighbour's live centre line one block from that note. Claimed of
+		// every chord small enough for a run rather than of the ones that end up in one, because
+		// whether a run is under way is a fact about the walk and this is asked of the chord.
+		//
+		// Both sides, because the floor rail has no centre and a chord of two there fills each of
+		// them. It costs nothing over claiming one: a lane reaching one way already spaces at three,
+		// which is what {@link #laneSpacing} answers for either.
 		return TWO_RAIL_RUNS && layout.ultra() && chordSize <= RAIL_MAX_NOTES
-			? new LaneReach(small.back(), Math.max(1, small.forward()), margin, small.lowLive())
+			? new LaneReach(1, 1, margin, small.lowLive())
 			: small;
 	}
 
@@ -4080,13 +4084,25 @@ public final class SongBuilder {
 	 *   below           s       s       s
 	 * </pre>
 	 *
-	 * <p>{@code sX} is a stone with the note hung off the side of it. The floor rail is always that,
-	 * because a note block there would have the path rail's repeater directly over it and a note
-	 * block plays only with air above. The path rail needs it once, at the head, and the reason is
-	 * the one thing about this shape that had to be measured rather than reasoned about: a note block
-	 * relays to the repeater in front of it when a <em>repeater</em> drives it, and does not when
-	 * <em>dust</em> points into it. Stone relays either way. So every path note but the first is a
-	 * bare note block on the path -- and plays harp, because what is under it is the rail below.</p>
+	 * <p>{@code sX} is the cell the wire runs through with a note hung off the side of it. Each column
+	 * offers its slots in one order -- the centre, then the near side, then the far one -- and what
+	 * decides how many it needs is which of them the chord can use:</p>
+	 *
+	 * <ul>
+	 *   <li>The <b>centre</b> is the wire itself, so a note there has no instrument block of its own
+	 *       and plays harp whatever was meant. It is offered to a harp note of the chord and to
+	 *       nothing else.</li>
+	 *   <li>The <b>floor rail has no centre at all</b>: the path rail's repeater stands directly over
+	 *       it, and a note block plays only with air above. Both its notes go to the sides, which is
+	 *       what caps a run at chords of two.</li>
+	 *   <li>The <b>head's centre</b> can never hold a note, and that is the one thing here that had to
+	 *       be measured rather than reasoned about: a note block relays to the repeater in front of it
+	 *       when a <em>repeater</em> drives it and does not when <em>dust</em> points into it, while
+	 *       stone relays either way.</li>
+	 * </ul>
+	 *
+	 * <p>The sides hang off the centre with a block each of their own, so they keep any instrument
+	 * there is.</p>
 	 *
 	 * <p>The dust is what makes it start, and it is why the run opens with its repeater a column back
 	 * rather than facing the first note: dust powers the stone it sits on, and that stone is what the
@@ -4096,21 +4112,21 @@ public final class SongBuilder {
 	static boolean TWO_RAIL_RUNS = true;
 
 	/**
-	 * The base case: one note an event. Two and three hang off the same anchors -- a rail's note
-	 * blocks have free cells either side of them -- but that is a shape of its own and is not built.
+	 * The largest chord a column of a run can hold.
+	 *
+	 * <p>Two, and the floor rail is what caps it. The path rail has three cells -- a centre and a
+	 * side each way -- but the floor rail has only the two sides, because the path rail's repeater
+	 * stands directly over its centre and a note block plays only with air above it. A run
+	 * alternates, so what a run can carry is what the narrower of the two can carry.</p>
 	 */
-	static int RAIL_MAX_NOTES = 1;
+	static int RAIL_MAX_NOTES = 2;
 
 	/** The repeater and the dust in front of it, laid before the first note of a run. */
 	private static final int RAIL_HEAD_COLUMNS = 2;
 
 	/** Whether this event could stand in a rail run at all, leaving aside where its neighbours are. */
 	private static boolean railFits(EventGroup event) {
-		return event.notes().size() <= RAIL_MAX_NOTES
-			// A note on the path rail stands on the floor rail's repeater, and a note block over a
-			// repeater plays harp whatever was meant. Half of a run lands there and which half is not
-			// known until the run is walked, so for now the whole of it has to be harp.
-			&& event.notes().stream().allMatch(SongBuilder::isHarpNote);
+		return event.notes().size() <= RAIL_MAX_NOTES;
 	}
 
 	/**
@@ -4179,52 +4195,84 @@ public final class SongBuilder {
 	 * One column of a run: this event's note on the rail it falls on and, unless the run ends here,
 	 * the repeater that drives the next note on the other rail.
 	 *
+	 * <p>Slots go in one order, ekran's: the centre, then the near side, then the far one. The centre
+	 * is the cell the wire runs through, so a note there has no instrument block of its own and plays
+	 * harp whatever was meant -- it is offered to a harp note of the chord and to nothing else. The
+	 * sides hang off it with a block each of their own and keep any instrument there is.</p>
+	 *
 	 * @param phase 0 for the path rail, 1 for the floor rail
 	 * @param nextDelay the delay of that repeater, or nought to end the run at this column
-	 * @param fromDust whether what drives this note is the head's dust rather than a repeater, which
-	 *     is the one case where a note block on the path would sound and then carry nothing
+	 * @param fromDust whether what drives this column is the head's dust rather than a repeater, in
+	 *     which case the centre cannot be a note at all: dust hands a stone on to the repeater in
+	 *     front of it and does not hand on a note block. Measured; see RailLinkProbeTest.
 	 */
-	private static Lane addRailNote(PlacementPlan placements, Lane at, int phase, EventNote note,
-			int time, int nextDelay, boolean fromDust) {
-		// A note block plays the instrument of whatever it stands on, and in the middle of a run what
-		// it stands on is the other rail's repeater -- harp, and no block of its own. At either end
-		// of a run there is no repeater under it: at the head because the dust drives it, and at the
-		// tail because the run stops laying them. So the ends hang their note off a stone instead.
-		//
-		// Both ends, and the tail is the one that had to be measured. A note left standing on the
-		// stone that fills the floor there reads back basedrum: sixty-two of six hundred, one per
-		// run, every tick right and every instrument wrong.
-		boolean offAStone = phase == 0 && (fromDust || nextDelay == 0);
-		placements.placing("rail:" + (phase == 0 ? offAStone ? "END" : "PATH" : "FLOOR") + " notes1");
+	private static Lane addRailNote(PlacementPlan placements, Lane at, int phase,
+			List<EventNote> chord, int time, int nextDelay, boolean fromDust) {
 		String facing = repeaterFacing(at.travel());
+		List<EventNote> hanging = new ArrayList<>(chord);
 		if (phase == 0) {
-			if (offAStone) {
-				// And dust hands a stone on to the repeater in front of it where it would not hand on
-				// a note block, which is what the head needs of this as well as the instrument.
-				// Measured on a machine of five blocks; see RailLinkProbeTest.
-				placements.powered(at.pos().above(), "minecraft:stone", time);
-				placeNote(placements, at.pos().above().relative(at.noteSide()), note);
+			BlockPos centre = at.pos().above();
+			EventNote harp = fromDust ? null : takeHarpNote(hanging);
+			placements.placing("rail:PATH notes" + chord.size()
+				+ (harp == null ? " sidesOnly" : " centred") + (fromDust ? " head" : ""));
+			if (harp == null) {
+				placements.powered(centre, "minecraft:stone", time);
 			} else {
-				placeNoteBlock(placements, at.pos().above(), note);
-				placements.powered(at.pos().above(), time);
+				placeNoteBlock(placements, centre, harp);
+				placements.powered(centre, time);
 			}
-			set(placements, at.pos(), nextDelay > 0
-				? "minecraft:repeater[facing=" + facing + ",delay=" + nextDelay + "]"
-				: "minecraft:stone");
+			hangRailNotes(placements, centre, at.noteSide(), hanging, time);
 			if (nextDelay > 0) {
+				set(placements, at.pos(),
+					"minecraft:repeater[facing=" + facing + ",delay=" + nextDelay + "]");
 				set(placements, at.pos().below(), "minecraft:stone");
+			} else if (harp == null) {
+				// The floor under a centre the run has stopped driving. Only where that centre is a
+				// stone: a note block plays what it stands on, and filling the floor under one read
+				// back basedrum sixty-two times over -- every tick right and every instrument wrong.
+				set(placements, at.pos(), "minecraft:stone");
 			}
 			return at.ahead(1);
 		}
-		// The floor rail hangs its note out to the side instead, so it keeps its instrument: what
-		// goes under that note is a block of the lane's own rather than part of either rail.
+		// The floor rail has no centre to offer. The path rail's repeater stands directly over it and
+		// a note block plays only with air above, so both notes go out to the sides.
+		placements.placing("rail:FLOOR notes" + chord.size());
 		placements.powered(at.pos(), "minecraft:stone", time);
-		placeNote(placements, at.pos().relative(at.noteSide()), note);
+		hangRailNotes(placements, at.pos(), at.noteSide(), hanging, time);
 		if (nextDelay > 0) {
 			set(placements, at.pos().above(),
 				"minecraft:repeater[facing=" + facing + ",delay=" + nextDelay + "]");
 		}
 		return at.ahead(1);
+	}
+
+	/**
+	 * The chord's first harp note, taken out of it, or {@code null} where the chord holds none.
+	 *
+	 * <p>Only a harp note can take a centre, so a chord that has one spends a side fewer than a chord
+	 * that has not -- which is the whole of why the order is centre first.</p>
+	 */
+	private static EventNote takeHarpNote(List<EventNote> chord) {
+		for (int index = 0; index < chord.size(); index++) {
+			if (isHarpNote(chord.get(index))) {
+				return chord.remove(index);
+			}
+		}
+		return null;
+	}
+
+	/** What is left of a chord, hung either side of the cell that drives it, near side first. */
+	private static void hangRailNotes(PlacementPlan placements, BlockPos anchor, Direction near,
+			List<EventNote> notes, int time) {
+		List<Direction> sides = List.of(near, near.getOpposite());
+		for (int index = 0; index < notes.size(); index++) {
+			if (index >= sides.size()) {
+				placements.trouble((notes.size() - index) + " notes of a chord at tick " + time
+					+ " had nowhere to hang: a rail column has a centre and two sides");
+				return;
+			}
+			placeNote(placements, anchor.relative(sides.get(index)), notes.get(index));
+		}
 	}
 
 	/**

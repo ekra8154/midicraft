@@ -34,7 +34,7 @@ class RailGridTest {
 
 	@Test
 	void reportsEverySizeThatFails() throws Exception {
-		for (String name : List.of("ultra-ones-gap2", "ultra-ones-gap1", "ultra-ones-mixed")) {
+		for (String name : List.of("ultra-ones-gap2", "ultra-ones-gap1", "ultra-ones-mixed", "ultra-twos-mixed")) {
 			List<SongBuilder.EventNote> notes = load(name);
 			int sizes = 0;
 			int trouble = 0;
@@ -68,7 +68,7 @@ class RailGridTest {
 	 */
 	@Test
 	void readsBackEverySizeOfTheGrid() throws Exception {
-		for (String name : List.of("ultra-ones-gap2", "ultra-ones-gap1", "ultra-ones-mixed")) {
+		for (String name : List.of("ultra-ones-gap2", "ultra-ones-gap1", "ultra-ones-mixed", "ultra-twos-mixed")) {
 			List<SongBuilder.EventNote> notes = load(name);
 			int sizes = 0;
 			int broken = 0;
