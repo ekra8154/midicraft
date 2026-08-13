@@ -3,11 +3,15 @@ package com.fastnoteblocks.client.compat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.fastnoteblocks.client.FastNoteblocksConfig;
 import com.fastnoteblocks.client.composer.ComposerProject;
 import com.fastnoteblocks.client.composer.SongAnalysis;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import net.minecraft.SharedConstants;
+import net.minecraft.server.Bootstrap;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -22,6 +26,16 @@ import org.junit.jupiter.api.Test;
  * lost somewhere between the menu and the arithmetic.</p>
  */
 class GameTickGridTest {
+	/**
+	 * Needed only by the routing test, which is the only one here that reaches {@link SongBuilder}
+	 * -- whose static state maps instruments to blocks and so wants the registries up.
+	 */
+	@BeforeAll
+	static void bootstrapMinecraft() {
+		SharedConstants.tryDetectVersion();
+		Bootstrap.bootStrap();
+	}
+
 	/**
 	 * A song at 480 ppq and 400000 us per quarter, which puts a repeater tick at 120 song ticks
 	 * and a game tick at 60. Notes are spaced in song ticks, so a spacing of 300 is 2.5 repeater
@@ -137,6 +151,51 @@ class GameTickGridTest {
 		assertTrue(Math.abs(lostSpeed - 1.0) > 0.1,
 			"and the repeater conversion has to move it, which it did by "
 				+ String.format("%.0f%%", Math.abs(lostSpeed - 1.0) * 100));
+	}
+
+	/**
+	 * Every layout timed in game ticks is built from the composition, and every other one is not.
+	 *
+	 * <p>The bug this exists for cost a whole layout and was invisible to every check in the file.
+	 * The paste and the forecast each asked "is this mode the half-tick lane?" by name, so when a
+	 * second game-tick layout arrived it took the sequence instead -- and a sequence delay is
+	 * repeater ticks. The build then halved times that were already halved, playing at double
+	 * speed, and split the song by the parity of a repeater-tick index, which means nothing.
+	 * Everything downstream was correct; it was reading the wrong song.</p>
+	 *
+	 * <p>So the assertion is over the modes rather than over one of them: whatever is added next
+	 * gets asked the same question, and answering it wrongly fails here rather than in the world.</p>
+	 */
+	@Test
+	void buildsEveryGameTickLayoutFromTheCompositionAndTheRestFromTheSequence() {
+		ComposerProject song = song(300L, 8);
+		List<FastNoteblocksConfig.SequenceTrack> sequence = song.toSequenceTracks(Set.of(), true);
+		List<SongBuilder.EventNote> fromComposition = SongBuilder.gameTickEventNotes(song, true);
+		List<SongBuilder.EventNote> fromSequence = SongBuilder.eventNotes(sequence);
+		// The song exists to tell the two apart: spaced 2.5 repeater ticks, so the sequence has to
+		// round it and the composition does not. If these ever match, the test proves nothing.
+		assertTrue(!times(fromComposition).equals(times(fromSequence)),
+			"the fixture must distinguish the two projections, and did not");
+
+		for (SongBuilder.PasteMode mode : SongBuilder.PasteMode.values()) {
+			List<SongBuilder.EventNote> used = SongBuilder.notesFor(mode, sequence, song, true);
+			assertEquals(mode.gameTicks() ? times(fromComposition) : times(fromSequence),
+				times(used), mode + " was planned from the wrong source");
+		}
+	}
+
+	/** And the two half-tick layouts are the ones that say so. */
+	@Test
+	void countsInGameTicksOnEveryHalfTickLayout() {
+		assertTrue(SongBuilder.PasteMode.HALF_TICK_LANE.gameTicks(), "the straight pair");
+		assertTrue(SongBuilder.PasteMode.ULTRA_HALF_TICK_LANE.gameTicks(), "the folded pair");
+		assertTrue(!SongBuilder.PasteMode.ULTRA_COMPACT_LANE.gameTicks(),
+			"and the single-chain layouts do not");
+		assertTrue(!SongBuilder.PasteMode.LANE.gameTicks(), "including the straight one");
+	}
+
+	private static List<Integer> times(List<SongBuilder.EventNote> notes) {
+		return notes.stream().map(SongBuilder.EventNote::time).toList();
 	}
 
 	private static List<Long> starts(ComposerProject project) {

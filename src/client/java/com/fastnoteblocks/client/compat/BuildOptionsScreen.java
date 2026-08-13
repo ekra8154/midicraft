@@ -232,9 +232,7 @@ final class BuildOptionsScreen extends Screen {
 				// means the composition rather than the sequence -- forecasting the sequence there
 				// would predict a build at twice the speed of the one it is about to make.
 				SongBuilder.PastePlan plan = SongBuilder.createPastePlan(origin,
-					planned == SongBuilder.PasteMode.HALF_TICK_LANE && project != null
-						? SongBuilder.gameTickEventNotes(project, dedupeIdenticalNotes)
-						: SongBuilder.eventNotes(sequence),
+					SongBuilder.notesFor(planned, sequence, project, dedupeIdenticalNotes),
 					planned, limits);
 				result = new Forecast(plan.spanZ(), plan.breaches().size(),
 					plan.worstBreach(), plan.wrongNotes(), null);

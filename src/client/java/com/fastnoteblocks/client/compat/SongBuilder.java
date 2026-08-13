@@ -177,10 +177,23 @@ public final class SongBuilder {
 	 */
 	static PastePlan plan(Minecraft minecraft, List<FastNoteblocksConfig.SequenceTrack> tracks,
 			PasteMode mode, ComposerProject project, boolean dedupeIdentical) {
-		if (mode != PasteMode.HALF_TICK_LANE || project == null) {
-			return plan(minecraft, tracks, mode);
-		}
-		return createPastePlan(minecraft, gameTickEventNotes(project, dedupeIdentical), mode);
+		return createPastePlan(minecraft, notesFor(mode, tracks, project, dedupeIdentical), mode);
+	}
+
+	/**
+	 * The events a mode should be built from: the composition where it counts in game ticks, the
+	 * sequence everywhere else.
+	 *
+	 * <p>One place, because there are two callers -- the paste, and the forecast whose whole job is
+	 * to promise what the paste will do -- and the two disagreeing is worse than either being wrong.
+	 * They did disagree once, then agreed on the wrong answer, and a whole layout came out at double
+	 * speed with its halves swapped.</p>
+	 */
+	static List<EventNote> notesFor(PasteMode mode, List<FastNoteblocksConfig.SequenceTrack> tracks,
+			ComposerProject project, boolean dedupeIdentical) {
+		return mode.gameTicks() && project != null
+			? gameTickEventNotes(project, dedupeIdentical)
+			: eventNotes(tracks);
 	}
 
 	static final int MAX_SIMULTANEOUS_NOTES = 30;
@@ -7916,17 +7929,40 @@ public final class SongBuilder {
 		COMPACT_LANE("Compact lane"),
 		ULTRA_COMPACT_LANE("Ultra compact lane"),
 		LANE("Lane"),
-		HALF_TICK_LANE("Half-tick lane"),
-		ULTRA_HALF_TICK_LANE("Ultra half-tick lane");
+		HALF_TICK_LANE("Half-tick lane", true),
+		ULTRA_HALF_TICK_LANE("Ultra half-tick lane", true);
 
 		private final String label;
+		/**
+		 * Whether this layout is timed in game ticks rather than repeater ticks.
+		 *
+		 * <p>Carried on the mode because the alternative was asking for it by name, and that is
+		 * exactly how the second of these layouts shipped broken. The paste and the forecast both
+		 * tested {@code == HALF_TICK_LANE}, so the folded pair quietly took the sequence instead of
+		 * the composition -- and a sequence delay is repeater ticks. Its notes were then halved, so
+		 * the song played at double speed, and split by the parity of a repeater-tick index, which
+		 * is not a property of the music at all. ekran heard all of it in about a minute: "twice as
+		 * fast", "a chaotic mess", "way more notes". A flag on the mode cannot be forgotten by the
+		 * next layout that needs it.</p>
+		 */
+		private final boolean gameTicks;
 
 		PasteMode(String label) {
+			this(label, false);
+		}
+
+		PasteMode(String label, boolean gameTicks) {
 			this.label = label;
+			this.gameTicks = gameTicks;
 		}
 
 		String label() {
 			return label;
+		}
+
+		/** Whether a build of this mode has to be planned from the composition, not the sequence. */
+		boolean gameTicks() {
+			return gameTicks;
 		}
 	}
 
