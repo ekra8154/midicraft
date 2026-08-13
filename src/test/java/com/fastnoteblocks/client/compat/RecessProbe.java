@@ -166,6 +166,27 @@ class RecessProbe {
 		}
 	}
 
+	/**
+	 * The bus as the last resort rather than the third: relocation asked again past the shift.
+	 */
+	@Test
+	void whatTheSecondRelocationIsWorth() throws Exception {
+		System.out.println();
+		System.out.println("==== v2 with relocation offered past the shift ====");
+		try {
+			for (boolean again : new boolean[] {false, true}) {
+				SongBuilder.RELOCATES_AFTER_THE_SHIFT = again;
+				SongBuilder.HEAD_PADS_CLEAR_OF_A_CORNER = again;
+				System.out.println("   -- bus last (second relocation + corner clearance) = " + again);
+				weigh("all-25 at a gap of 1", AllTwentyFivesTest.allTwentyFives());
+				weigh("guardian", BreachView.song("deltarune-ch-4-guardian"));
+			}
+		} finally {
+			SongBuilder.RELOCATES_AFTER_THE_SHIFT = true;
+			SongBuilder.HEAD_PADS_CLEAR_OF_A_CORNER = true;
+		}
+	}
+
 	private static void weigh(String name, List<SongBuilder.EventNote> song) {
 		int lanes = 0;
 		int blocks = 0;
@@ -174,6 +195,7 @@ class RecessProbe {
 		int wrong = 0;
 		long length = 0;
 		List<String> sizes = new java.util.ArrayList<>();
+		Map<String, Integer> census = new TreeMap<>();
 		for (int floors = 2; floors <= 5; floors++) {
 			for (int width : new int[] {20, 24, 32, 40}) {
 				SongBuilder.PastePlan plan;
@@ -197,11 +219,21 @@ class RecessProbe {
 					sizes.add(String.format("         %2dw x %df  breaches %s", width, floors,
 						plan.breaches()));
 				}
+				plan.padding().forEach((key, value) -> census.merge(key, value, Integer::sum));
 			}
 		}
 		System.out.println(String.format(
 			"      %-22s lanes=%-4d blocks=%-5d dirty=%-2d refused=%-2d wrong=%-3d length=%d",
 			name, lanes, blocks, dirty, refused, wrong, length));
+		// The shape decisions this arm turns on, so a table that does not move can say whether the
+		// thing being measured ever happened.
+		census.entrySet().stream()
+			.filter(entry -> entry.getKey().startsWith("planRelocate")
+				|| entry.getKey().startsWith("planShiftAndRelocate")
+				|| entry.getKey().startsWith("planParityGaveUp")
+				|| entry.getKey().startsWith("planBusFor"))
+			.forEach(entry -> System.out.println("         " + entry.getKey() + " = "
+				+ entry.getValue()));
 		sizes.forEach(System.out::println);
 	}
 

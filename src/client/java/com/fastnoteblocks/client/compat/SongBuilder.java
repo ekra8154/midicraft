@@ -1992,6 +1992,31 @@ public final class SongBuilder {
 				columnBehindBusy = true;
 				replan = layout.ultra();
 			}
+			// A head too near a corner is offered a column before it is offered a bus.
+			//
+			// ekran's ordering: the fallback is the last thing tried, not the third. A stacked shape whose
+			// centre stands within STACKED_CLEAR_OF_CORNER of a bend is refused -- rightly, it is the rule
+			// that keeps two modules from sitting perpendicular -- and then handed straight to a plain bus,
+			// which for a chord of twenty is eleven columns against the head's ten. Nobody asks whether one
+			// column of pad would have put it clear. On Guardian that refusal fires 1,136 times.
+			//
+			// Laid here, before anything measures, rather than inside addChordModule. The shape's own shift
+			// is one column and is spent on parity; this is a different column spent on a different thing,
+			// and the two have to be able to happen together. Moving the cursor first is also what keeps
+			// {@link #landingOf} and the build agreeing -- both see a lane that simply starts a column
+			// further along, which is the one kind of surprise this file has never had trouble with.
+			//
+			// The wire has to reach, as it does for any pad laid in front of a repeater.
+			if (HEAD_PADS_CLEAR_OF_A_CORNER && event.style().stacked()
+					&& inTurn(placements, turning, leavingTurn, lane.pos(), lastCorner)
+					&& !inTurn(placements, turning, leavingTurn, lane.ahead(1).pos(), lastCorner)
+					&& placements.runSinceRepeater() + 1 <= DUST_RANGE) {
+				placements.placing("cornerClearance");
+				placements.padded("parity");
+				placements.padded("planPadToClearACorner");
+				addParityPad(placements, lane.pos());
+				lane = lane.ahead(1);
+			}
 			// Settled before the event is placed rather than after it. A turn hands back a cursor at
 			// the same point along the wall the last event reached, so an event that overshoots
 			// leaves the next lane starting outside the wall -- and nothing measured afterwards can
@@ -3618,13 +3643,14 @@ public final class SongBuilder {
 			// and then asked for a second column gives the head up after all, which is exactly what
 			// it would have done without the shift -- and a plain bus, because the reason it was
 			// shifted rather than shortened is that the short head was never available.
-			if (verdict < 0 || behindShift > 0 && verdict == 1) {
+			if (verdict < 0 || behindShift > 0 && (verdict == 1 || verdict == 3)) {
 				style = ChordStyle.BUS;
 				behindShift = 0;
 			} else {
 				// A relocation costs nothing in columns -- that is the condition it is offered under
-				// -- so only a shift lengthens the chord.
-				nudged = verdict == 1;
+				// -- so only a shift lengthens the chord. Three is a shift with a relocation on the
+				// far side of it, and costs exactly what the shift costs.
+				nudged = verdict == 1 || verdict == 3;
 			}
 		}
 		int length;
@@ -6658,7 +6684,16 @@ public final class SongBuilder {
 				moved = relocate(placements, asking, event.time(), style, event.notes(), slots, room);
 				placements.padded("planRelocateTo" + moved.where());
 			}
-			boolean clashesHere = verdict == 1 || verdict < 0;
+			// A shift and a relocation together, which is the shape that used to go to a bus. The note
+			// is lifted out at the column the pad puts the module in, not at the one it is standing in
+			// -- a different neighbour, and so a different slot in contention. That is the whole reason
+			// the second ask is worth making.
+			if (verdict == 3) {
+				moved = relocate(placements, asking.ahead(1), event.time(), style, event.notes(), slots,
+					room);
+				placements.padded("planShiftAndRelocateTo" + moved.where());
+			}
+			boolean clashesHere = verdict == 1 || verdict == 3 || verdict < 0;
 			if (behindShift && clashesHere) {
 				// One column is what this shape can express, and it has spent it. Asked for a second
 				// it gives the head up after all -- straight to a bus, because the short head it
@@ -7277,9 +7312,14 @@ public final class SongBuilder {
 	/**
 	 * What a stacked module standing here has to do about the lane behind it.
 	 *
-	 * <p>0 to build where it stands, 2 to move one low note somewhere free, 1 to shift a column, -1
-	 * to give the shape up. Asked in that order, and asked by the planner and the walk through this
-	 * one method so that neither can answer it differently from the other.</p>
+	 * <p>0 to build where it stands, 2 to move one low note somewhere free, 1 to shift a column, 3 to
+	 * shift a column <em>and</em> move a note there, -1 to give the shape up. Asked in that order, and
+	 * asked by the planner and the walk through this one method so that neither can answer it
+	 * differently from the other.</p>
+	 *
+	 * <p>The order is ekran's, and the point of it is that the bus is last. Every one of these keeps
+	 * the shape; the fallback throws it away for four cells of lane, so it is what is left when the
+	 * others have all been tried rather than the third thing reached for.</p>
 	 */
 	private static int parityVerdict(PlacementPlan placements, Lane at, int time, UltraSlots slots,
 			RelocationRoom room) {
@@ -7289,7 +7329,22 @@ public final class SongBuilder {
 		if (relocatableSlot(placements, at, time, slots, room) >= 0) {
 			return 2;
 		}
-		return stackedClashes(placements, at.ahead(1), time, slots) ? -1 : 1;
+		if (!stackedClashes(placements, at.ahead(1), time, slots)) {
+			return 1;
+		}
+		// Asked again from the column the pad would put it in, before the shape is given up.
+		//
+		// ekran's ordering, and the bus is meant to be the last thing tried rather than the third.
+		// Relocation is offered where the module stands and a shift is offered after it, but the two
+		// were never combined: a module that clashes in both columns went straight to a bus, even
+		// where one note moved out of one slot would have settled the shifted column. And the pad is
+		// exactly what makes that likely -- it walks the module into a different neighbour, so the
+		// slot in contention is a different slot.
+		if (RELOCATES_AFTER_THE_SHIFT
+				&& relocatableSlot(placements, at.ahead(1), time, slots, room) >= 0) {
+			return 3;
+		}
+		return -1;
 	}
 
 	/** A contested low note lifted out of its slot, and the module that results. */
@@ -8048,6 +8103,54 @@ public final class SongBuilder {
 	 * wrong notes, once the third rule goes too.</p>
 	 */
 	static boolean BEHIND_IS_ASKED_NOT_CARRIED = false;
+
+	/**
+	 * Whether a module that clashes in both columns is offered a relocation in the second one.
+	 *
+	 * <p>ekran's ordering, and what it fixes is that the bus was the third thing tried rather than the
+	 * last. {@link #parityVerdict} offers a relocation where the module stands, then a shift into the
+	 * next column -- and if the shifted column clashes too, it gives the shape up. It never asks
+	 * whether the shifted column could be settled by moving a note, though moving into a column is
+	 * exactly what makes that likely: a different neighbour is alongside, so a different slot is in
+	 * contention.</p>
+	 *
+	 * <p>Every verdict but the last keeps the shape. The fallback throws it away and spends four cells
+	 * of lane on the bus that replaces it, so it is what is left when everything else has been tried.
+	 * This is one of the things that was missing between "everything else" and "the bus".</p>
+	 */
+	static boolean RELOCATES_AFTER_THE_SHIFT = true;
+
+	/**
+	 * v2: a stacked head too near a corner is offered a column of pad before it is offered a bus.
+	 *
+	 * <p>The turn ban is right about what it forbids -- two stacked modules may not sit perpendicular,
+	 * and either side of a corner they are perpendicular by construction. What it does next is the
+	 * problem: it hands the chord straight to a plain bus, which for a chord of twenty is eleven
+	 * columns against the ten a head takes. Nobody asks whether one column of pad would put the centre
+	 * clear of the corner, and on Guardian that refusal fires <b>1,136</b> times.</p>
+	 *
+	 * <p>Laid in the walk, before anything measures, rather than inside {@link #addChordModule}. The
+	 * shape's own shift is one column and is spent on parity; this is a different column spent on a
+	 * different thing and the two have to be able to happen together. Moving the cursor first is also
+	 * what keeps {@link #landingOf} and the build agreeing -- both then see a lane that starts a column
+	 * further along, which is the one kind of surprise this file has never had trouble with.</p>
+	 *
+	 * <p><b>Off. It buys the heads and the notes sound wrong.</b> Guardian keeps 220 of them -- the
+	 * turn refusal goes 1,136 to 916 -- and pays 31 breach blocks to 47 and, far worse,
+	 * <b>9 wrong notes to 66</b>. The all-25 song does not move at all.</p>
+	 *
+	 * <p>Which says the distance is not what makes a head near a corner unsafe. A module padded out to
+	 * exactly {@code STACKED_CLEAR_OF_CORNER} satisfies the rule and is still sounded by something:
+	 * the turn's own run of powered stone is live at the tick of the lane it is leaving, and the
+	 * parity oracle does not model it, because parity is about the lane behind rather than about the
+	 * corner. So the padded module is judged safe by both tests and is neither.</p>
+	 *
+	 * <p>The way to have this is the way everything else here was had: pad, build it in a trial, and
+	 * ask the blocks whether anything is going to sound it -- {@link #soundedByAnother} over the
+	 * module's own cells at the ticks the turn is live. Until that is asked, the distance ban is
+	 * standing in for a measurement nobody has taken, and it is the cheaper of the two mistakes.</p>
+	 */
+	static boolean HEAD_PADS_CLEAR_OF_A_CORNER = false;
 
 	/**
 	 * How far down the route a module is asked to keep off, in columns.
