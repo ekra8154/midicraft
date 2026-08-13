@@ -84,13 +84,17 @@ class TimescaleCeilingProbe {
 			if (better) {
 				gained++;
 			}
-			System.out.println(String.format("%-40s %8.2f %10.2f %10.2f %8s",
+			// A ceiling of nought means no speed at or above the saved one builds that way at all,
+			// which is a different statement from "builds at 0.00x" and has to read as one. It is
+			// also the case that made the gain column print Infinity, by dividing by it.
+			System.out.println(String.format("%-40s %8.2f %10s %10s %8s",
 				song.name().length() > 39 ? song.name().substring(0, 39) : song.name(),
 				song.speedQuarters() / 4.0,
-				one.speedQuarters() / 4.0,
-				two.speedQuarters() / 4.0,
-				better ? String.format("%.2fx", two.speedQuarters() / (double)one.speedQuarters())
-					: "-"));
+				one.speedQuarters() == 0 ? "none" : String.format("%.2f", one.speedQuarters() / 4.0),
+				two.speedQuarters() == 0 ? "none" : String.format("%.2f", two.speedQuarters() / 4.0),
+				!better ? "-"
+					: one.speedQuarters() == 0 ? "only on two"
+					: String.format("%.2fx", two.speedQuarters() / (double)one.speedQuarters())));
 		}
 		System.out.println();
 		System.out.println(gained + " of " + songs.size()
