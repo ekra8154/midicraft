@@ -61,6 +61,45 @@ public final class SongBuilder {
 	}
 
 	/**
+	 * The composition flattened into events timed in <b>game</b> ticks, for a half-tick build.
+	 *
+	 * <p>Read from the composition rather than from the sequence, and that is not a departure from
+	 * the usual rule so much as forced by it. Sequence text is denominated in repeater ticks -- a
+	 * {@code 4d} is four of them, always, and nothing may quietly mean otherwise -- so it cannot
+	 * carry a note that falls between two. The half tick has to be taken from the composition,
+	 * where the note's real moment still exists, or it does not survive to the build at all.</p>
+	 *
+	 * <p>Everything else is kept identical to what the sequence would have said: the same layers,
+	 * the same deduplication, the same one-rounding-per-gap. Only the unit is finer.</p>
+	 */
+	static List<EventNote> gameTickEventNotes(ComposerProject project, boolean dedupeIdentical) {
+		List<EventNote> notes = new ArrayList<>();
+		List<ComposerProject.Layer> layers = project.buildLayers(dedupeIdentical);
+		for (int layerIndex = 0; layerIndex < layers.size(); layerIndex++) {
+			ComposerProject.Layer layer = layers.get(layerIndex);
+			String instrumentBlock = instrumentBlockId(layer.instrument());
+			List<ComposerProject.NoteEvent> buildable = layer.notes().stream()
+				.filter(ComposerProject.NoteEvent::isBuildable).toList();
+			long previousTick = 0L;
+			int time = 0;
+			int order = 0;
+			for (int index = 0; index < buildable.size();) {
+				long eventTick = buildable.get(index).startTick();
+				time += project.buildDelayGameTicks(eventTick - previousTick);
+				while (index < buildable.size() && buildable.get(index).startTick() == eventTick) {
+					notes.add(new EventNote(time, layerIndex + 1, order++,
+						buildable.get(index++).noteBlockPitch(), instrumentBlock));
+				}
+				previousTick = eventTick;
+			}
+		}
+		notes.sort(Comparator.comparingInt(EventNote::time)
+			.thenComparingInt(EventNote::trackNumber)
+			.thenComparingInt(EventNote::order));
+		return List.copyOf(notes);
+	}
+
+	/**
 	 * The build sequence flattened into events.
 	 *
 	 * <p>The sequence is what actually gets placed, whether by hand in survival or by command, so
@@ -125,6 +164,23 @@ public final class SongBuilder {
 	static PastePlan plan(Minecraft minecraft, List<FastNoteblocksConfig.SequenceTrack> tracks,
 			PasteMode mode) {
 		return createPastePlan(minecraft, eventNotes(tracks), mode);
+	}
+
+	/**
+	 * The same, for a mode whose timing is finer than the sequence can write down.
+	 *
+	 * <p>The half-tick lane is the one layout that cannot be planned from the sequence: its notes
+	 * are timed in game ticks and a sequence delay means repeater ticks. So it reads the
+	 * composition, at the same speed and with the same layers and deduplication the sequence was
+	 * made with. Every other mode is handed the sequence exactly as before -- the composition is
+	 * consulted for the one thing the projection to repeater ticks has already thrown away.</p>
+	 */
+	static PastePlan plan(Minecraft minecraft, List<FastNoteblocksConfig.SequenceTrack> tracks,
+			PasteMode mode, ComposerProject project, boolean dedupeIdentical) {
+		if (mode != PasteMode.HALF_TICK_LANE || project == null) {
+			return plan(minecraft, tracks, mode);
+		}
+		return createPastePlan(minecraft, gameTickEventNotes(project, dedupeIdentical), mode);
 	}
 
 	static final int MAX_SIMULTANEOUS_NOTES = 30;
@@ -344,6 +400,7 @@ public final class SongBuilder {
 				limits.laneFloors(), Layout.STANDARD, PasteMode.COMPACT_LANE, start);
 			case ULTRA_COMPACT_LANE -> bestUltraPlan(origin, forward, notes, limits, start);
 			case LANE -> createStraightPastePlan(origin, forward, notes);
+			case HALF_TICK_LANE -> createHalfTickPastePlan(origin, forward, notes);
 		};
 	}
 
@@ -462,6 +519,115 @@ public final class SongBuilder {
 			currentTime = time;
 		}
 		return placements.finish(PasteMode.LANE, origin);
+	}
+
+	/**
+	 * Blocks between the two half-tick lane centres.
+	 *
+	 * <p>A lane is three columns wide -- a bus down the middle with a note hanging either side -- so
+	 * three sets the two of them touching, and two would have them share a column, which is not a
+	 * gap but a collision. Three it is, measured: Guardian builds and reads back as the song at
+	 * three, four and five alike, so the wider settings buy nothing.</p>
+	 *
+	 * <p>Touching is safe here for the reason two lanes may ever touch -- a note block fires from a
+	 * neighbour that is <em>directly</em> powered, and what meets across the join is note blocks and
+	 * the instrument blocks under them, which are neither powered nor able to pass power on. The
+	 * live cells of a lane are its bus, and the bus is the middle column. That is a different
+	 * situation from the stacked module of the ultra lane, whose outer columns <em>are</em> live
+	 * every other cell, and it is why that layout has a rule about parity and this one does not.</p>
+	 *
+	 * <p>Not final so a probe can sweep it, and so it is one number to change if the world says
+	 * otherwise. Copper bulbs outrank everything measured here.</p>
+	 */
+	static int HALF_TICK_LANE_GAP = 3;
+
+	/**
+	 * Two straight lanes running side by side, one for each parity of the game tick.
+	 *
+	 * <p>Redstone's floor is one repeater tick, which is two game ticks, and that is what caps a
+	 * build at ten notes a second and forces every import to be quantised until it stops sounding
+	 * like the song. A piston moving a redstone block takes three game ticks -- the one delay in
+	 * redstone that is not a whole repeater tick -- so a second chain tapped off that piston runs
+	 * permanently on the opposite parity, and between them the two chains can put a note on any game
+	 * tick at all.</p>
+	 *
+	 * <p>So the times here are read as <b>game</b> ticks rather than repeater ticks. Note times
+	 * arrive as whole repeater ticks, and reading those same numbers as game ticks is exactly the
+	 * song at double speed with nothing rounded -- which is what makes this testable on music that
+	 * already builds, Guardian included.</p>
+	 *
+	 * <p>The split is by parity and nothing else: a chord is every note at one game tick, and it
+	 * goes to one lane whole. Nothing here touches how big a chord may be.</p>
+	 *
+	 * <p>Right lane -- the one on your right as you face the build -- takes the even ticks, left
+	 * takes the odd, and game tick nought is on the right. Which is which is arbitrary in the world,
+	 * since nothing aligns a redstone clock to anything; naming them by the composer's own count is
+	 * what makes the two halves of the build agree.</p>
+	 *
+	 * <p><b>The contract this plan is built against:</b> the left lane's trigger fires exactly one
+	 * game tick after the right lane's. The piston's three game ticks are not in here, deliberately
+	 * -- feeding the right lane through one extra repeater tick and the left through the piston is
+	 * the same one-tick offset, and doing it that way keeps a number that has to be measured in the
+	 * world out of a plan that cannot measure it.</p>
+	 */
+	private static PastePlan createHalfTickPastePlan(BlockPos origin, Direction forward,
+			List<EventNote> notes) {
+		PlacementPlan placements = new PlacementPlan();
+		// Note times are game ticks here, so two blocks live beside each other for half as long as
+		// the check assumes. The button that starts the machine has not changed length.
+		placements.pulseWindow(2 * PlacementPlan.SHARED_PULSE_TICKS);
+		walkHalfTickLane(placements, origin, forward, parity(notes, 0));
+		walkHalfTickLane(placements, origin.relative(forward.getCounterClockWise(),
+			HALF_TICK_LANE_GAP), forward, parity(notes, 1));
+		return placements.finish(PasteMode.HALF_TICK_LANE, origin);
+	}
+
+	private static List<EventNote> parity(List<EventNote> notes, int odd) {
+		return notes.stream().filter(note -> Math.floorMod(note.time(), 2) == odd).toList();
+	}
+
+	/**
+	 * One parity's worth of the song, laid out as an ordinary straight lane.
+	 *
+	 * <p>Two events on one lane are always an even number of game ticks apart, because they share a
+	 * parity -- so the gap between them is a whole repeater tick every time and no lane ever has to
+	 * hold half of one. That is the whole trick, and it is why this is the straight walk with one
+	 * expression changed.</p>
+	 *
+	 * <p>{@code time / 2} is that expression, and it is the same on both lanes: on the right it is
+	 * the tick halved, and on the left it rounds the odd tick down, which is the left lane's own
+	 * clock starting one game tick after the right's. Nothing else has to know which lane it is
+	 * walking.</p>
+	 *
+	 * <p>What the modules record is left in game ticks all the same. The layout check compares a
+	 * note's tick against the tick of every powered block beside it, and the blocks beside a note on
+	 * one lane include the lane alongside -- so the two lanes have to be counted on one clock, or
+	 * two notes a single game tick apart would read as simultaneous and the check would pass them.</p>
+	 */
+	private static void walkHalfTickLane(PlacementPlan placements, BlockPos origin,
+			Direction forward, List<EventNote> notes) {
+		int cursor = 0;
+		// Both lanes start one repeater tick before their own first event, and the tick is the
+		// point. A repeater cannot delay by less than one, so a first event wanting no delay at all
+		// gets one anyway -- harmless on a single chain, where it moves the whole song a tick later
+		// and nothing is left behind to notice. Here the other lane is left behind to notice: clamp
+		// one lane and not the other and the two run a repeater tick apart for the rest of the song,
+		// which is the one thing this layout may not do. Biasing both by the same tick costs the
+		// build one cell and keeps them in step whatever the song opens on.
+		int currentTime = -1;
+		for (int index = 0; index < notes.size();) {
+			int time = notes.get(index).time();
+			int laneTime = Math.floorDiv(time, 2);
+			int delay = laneTime - currentTime;
+			List<EventNote> chord = new ArrayList<>();
+			while (index < notes.size() && notes.get(index).time() == time) {
+				chord.add(notes.get(index++));
+			}
+			DelayTrigger trigger = addDelayBeforeEvent(placements, origin, forward, cursor, delay);
+			cursor = addEventModule(placements, origin, forward, trigger.cursor(),
+				trigger.triggerDelay(), chord);
+			currentTime = laneTime;
+		}
 	}
 
 	private static ChordStats chordStats(List<EventNote> notes) {
@@ -7555,7 +7721,8 @@ public final class SongBuilder {
 		COMPACT("Compact square"),
 		COMPACT_LANE("Compact lane"),
 		ULTRA_COMPACT_LANE("Ultra compact lane"),
-		LANE("Lane");
+		LANE("Lane"),
+		HALF_TICK_LANE("Half-tick lane");
 
 		private final String label;
 
@@ -7969,7 +8136,7 @@ public final class SongBuilder {
 							+ " belongs to tick " + time + " but would sound early, at tick "
 							+ neighbour + ", from the " + direction + " at "
 							+ describe(note.getKey().relative(direction), shiftX, shiftZ));
-					} else if (neighbour > time + SHARED_PULSE_TICKS) {
+					} else if (neighbour > time + pulseWindow) {
 						// Named the same way round as the early case. Which side a second sounding comes
 						// from is as much the diagnosis here as it is there -- along the lane is one
 						// module reaching into the next, across it is the corridor alongside -- and
@@ -8011,6 +8178,20 @@ public final class SongBuilder {
 		 * the button was still holding the first pulse high when the second arrived.</p>
 		 */
 		private static final int SHARED_PULSE_TICKS = 10;
+
+		/**
+		 * The same window, in whatever unit this plan counts its ticks in.
+		 *
+		 * <p>Every layout but one records event times in repeater ticks and leaves this alone. The
+		 * half-tick lane counts game ticks, because its two lanes have to share one clock to be
+		 * comparable at all, and a button holds a note high for the same length of time either way --
+		 * so the number, not the button, is what has to double.</p>
+		 */
+		private int pulseWindow = SHARED_PULSE_TICKS;
+
+		void pulseWindow(int ticks) {
+			pulseWindow = ticks;
+		}
 
 		private static String describe(BlockPos position) {
 			return describe(position, 0, 0);

@@ -27,6 +27,15 @@ final class BuildOptionsScreen extends Screen {
 	private final Screen parent;
 	private final String songName;
 	private final List<FastNoteblocksConfig.SequenceTrack> sequence;
+	/**
+	 * The composition behind that sequence, for the one layout that has to read it.
+	 *
+	 * <p>Only the half-tick lane looks at this, and only because a sequence delay is denominated in
+	 * repeater ticks and its notes are not. Everything else forecasts from the sequence, which is
+	 * still the thing that gets built.</p>
+	 */
+	private final com.fastnoteblocks.client.composer.ComposerProject project;
+	private final boolean dedupeIdenticalNotes;
 	private final Consumer<SongBuilder.PasteMode> confirm;
 	private SongBuilder.PasteMode mode;
 	/**
@@ -77,6 +86,8 @@ final class BuildOptionsScreen extends Screen {
 		Screen parent,
 		String songName,
 		List<FastNoteblocksConfig.SequenceTrack> sequence,
+		com.fastnoteblocks.client.composer.ComposerProject project,
+		boolean dedupeIdenticalNotes,
 		SongBuilder.PasteMode initialMode,
 		Consumer<SongBuilder.PasteMode> confirm
 	) {
@@ -84,6 +95,8 @@ final class BuildOptionsScreen extends Screen {
 		this.parent = parent;
 		this.songName = songName;
 		this.sequence = sequence;
+		this.project = project;
+		this.dedupeIdenticalNotes = dedupeIdenticalNotes;
 		this.confirm = confirm;
 		this.mode = initialMode;
 		this.commandsPerTick = FastNoteblocksConfig.get().commandsPerTick();
@@ -214,8 +227,14 @@ final class BuildOptionsScreen extends Screen {
 		FORECASTER.execute(() -> {
 			Forecast result;
 			try {
-				SongBuilder.PastePlan plan = SongBuilder.createPastePlan(
-					origin, SongBuilder.eventNotes(sequence), planned, limits);
+				// The same events the Paste button would build from, which for the half-tick lane
+				// means the composition rather than the sequence -- forecasting the sequence there
+				// would predict a build at twice the speed of the one it is about to make.
+				SongBuilder.PastePlan plan = SongBuilder.createPastePlan(origin,
+					planned == SongBuilder.PasteMode.HALF_TICK_LANE && project != null
+						? SongBuilder.gameTickEventNotes(project, dedupeIdenticalNotes)
+						: SongBuilder.eventNotes(sequence),
+					planned, limits);
 				result = new Forecast(plan.spanZ(), plan.breaches().size(),
 					plan.worstBreach(), plan.wrongNotes(), null);
 			} catch (IllegalArgumentException refused) {
@@ -310,6 +329,10 @@ final class BuildOptionsScreen extends Screen {
 				+ "sit three apart rather than four wherever their notes can touch safely. Same "
 				+ "width and floor controls.";
 			case LANE -> "One straight line. Easiest to read and repair, largest footprint.";
+			case HALF_TICK_LANE -> "Two straight lines, the right one playing the even game ticks "
+				+ "and the left the odd. Plays the song at double speed and twice the timing "
+				+ "precision. You wire the head yourself: the left lane must start exactly one game "
+				+ "tick after the right.";
 		};
 	}
 

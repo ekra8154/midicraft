@@ -78,9 +78,20 @@ class NoteMachineReaderTest {
 	 * lane's repeater is invisible to it. Cube layout is still covered by the spacing and grid tests
 	 * below; what is not asserted here is that every note lands on the tick it was built for.</p>
 	 */
+	/*
+	 * The half-tick lane is left out for a reason that is about this test rather than about that
+	 * mode, and {@link #readsBackBothLanesOfAHalfTickBuild} is the same question asked in terms it
+	 * can answer. Everything here rests on one machine keeping one clock: {@code sounds} reads the
+	 * song's times as repeater ticks and the reader hands back repeater ticks, so the two line up.
+	 * A half-tick build is two machines, deliberately unconnected, whose times are game ticks -- the
+	 * reader times each of them from its own first note, which is right for two machines and cannot
+	 * be compared against one song's clock. Its notes duly read back at half their tick and each
+	 * lane from nought. That is the mode working, and there is no version of this assertion that
+	 * says so.
+	 */
 	@ParameterizedTest
 	@EnumSource(value = SongBuilder.PasteMode.class, mode = EnumSource.Mode.EXCLUDE,
-		names = {"COMPACT_CUBE"})
+		names = {"COMPACT_CUBE", "HALF_TICK_LANE"})
 	void readsBackEveryNoteOfItsOwnBuild(SongBuilder.PasteMode mode) {
 		List<SongBuilder.EventNote> notes = sampleSong();
 		SongBuilder.PastePlan plan =
@@ -92,6 +103,32 @@ class NoteMachineReaderTest {
 		assertEquals("", difference(sounds(notes), sounds(reading.project())),
 			mode + ": the machine did not read back as the song it was built from");
 		assertEquals(0, reading.unreachedNotes(), mode + ": some note blocks were never triggered");
+	}
+
+	/**
+	 * What the round trip above can still ask of a half-tick build, on the same sample song.
+	 *
+	 * <p>Two things, and they are the two that do not depend on a shared clock. Every note block has
+	 * to be reachable, which is the check no plan can make for itself. And the two lanes have to
+	 * read as <em>two</em> machines: the reader keeps a way in only when it reaches something no
+	 * other way in does, so a lane whose signal got into the other's note blocks would swallow it
+	 * and come back as one. That is this file's version of asking whether lanes a single column
+	 * apart leave each other alone.</p>
+	 *
+	 * <p>Where every note lands is asserted in {@code HalfTickLaneTest}, which puts the two lanes
+	 * back on one clock the only way that is meaningful -- by counting each lane's lead-in off the
+	 * blocks and offsetting the odd lane by the game tick its wiring owes it.</p>
+	 */
+	@Test
+	void readsBackBothLanesOfAHalfTickBuild() {
+		SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0),
+			sampleSong(), SongBuilder.PasteMode.HALF_TICK_LANE, LIMITS);
+
+		NoteMachineReader.Reading reading = readAll(placeInWorld(plan), "Half-tick");
+
+		assertEquals(0, reading.unreachedNotes(), "some note blocks were never triggered");
+		assertEquals(2, reading.versions(),
+			"the two lanes must share nothing, or one is setting off the other's notes");
 	}
 
 	/**
