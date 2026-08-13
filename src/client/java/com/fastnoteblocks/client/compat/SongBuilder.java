@@ -6799,6 +6799,25 @@ public final class SongBuilder {
 		try {
 			Placed placed = addStackedShape(placements, lane, triggerDelay, event, style, nudge,
 				start, gaveUp, moved);
+			// And then the shape is asked where it landed, which is a different question from whether
+			// it fitted. A stacked module hangs notes to the side of the path, and to the side of the
+			// path is a safe place to hang them only while the path is straight. Through a bend the
+			// route comes back along the other arm, so a cell that was beside the module when it was
+			// placed is a cell the lane walks down afterwards -- and the wire arrives at a note block
+			// with nowhere to go. That is not a collision the module can see: it is a collision with a
+			// corridor that does not exist yet.
+			//
+			// Which is why {@code inTurn} bans stacked shapes near corners at all, and why relaxing
+			// that ban by distance was not enough: three columns from a corner is far enough for the
+			// shape and not far enough for what the route does next. Asked here instead of guessed at,
+			// against the cells the route will actually occupy, built and then read back.
+			if (layout.v2() && STACKED_KEEPS_OFF_THE_ROUTE
+					&& placements.trialTouches(routeAhead(placed.lane(), ROUTE_LOOKS_AHEAD))) {
+				placements.rollbackTrial();
+				placements.padded("planBusForStandingOnTheRoute");
+				trace(event, lane, style, ChordStyle.BUS, "onTheRoute");
+				return layBus(placements, lane, triggerDelay, event, ChordStyle.BUS, true, layout);
+			}
 			placements.commitTrial();
 			return placed;
 		} catch (IllegalArgumentException collided) {
@@ -6862,6 +6881,12 @@ public final class SongBuilder {
 				return new Placed(body.lane(), style, body.busCells(), shifted > 0);
 			} catch (IllegalArgumentException collided) {
 				placements.rollbackTrial();
+				if (TRACE_BUS_MOVE) {
+					System.out.println("BUSMOVE shifted=" + shifted + " from "
+						+ lane.pos().getX() + " " + lane.pos().getY() + " " + lane.pos().getZ()
+						+ " travel=" + lane.travel() + " notes=" + event.notes().size()
+						+ " : " + collided.getMessage());
+				}
 				if (shifted >= BUS_MOVES_AT_MOST) {
 					placements.padded("planBusStuckAfter" + shifted);
 					throw collided;
@@ -7945,6 +7970,60 @@ public final class SongBuilder {
 
 	/** How many columns a colliding bus may walk before the build gives up on it. */
 	private static final int BUS_MOVES_AT_MOST = 3;
+
+	/** Scratch: every column a colliding bus tried, and what it met there. */
+	static boolean TRACE_BUS_MOVE = false;
+
+	/**
+	 * v2: a stacked module may not stand where its own lane is going to walk.
+	 *
+	 * <p>A stacked module hangs notes to the side of the path. Beside the path is a safe place for
+	 * them only while the path is straight: through a bend the route comes back along the other arm,
+	 * so a cell that was beside the module when it was placed is a cell the lane runs down afterwards.
+	 * The wire then arrives at a note block with nowhere to go, and the build refuses -- Guardian
+	 * twenty wide over four floors, a chord of three meeting a {@code STACKED_FULL+nudge} at
+	 * {@code -1 76 73}, on a build whose every other number reads clean.</p>
+	 *
+	 * <p>It cannot be moved out of the way afterwards. The obstruction stands <em>in</em> the corridor
+	 * rather than beside it, so every column the following chord tries is refused at the same cell --
+	 * measured, four attempts, all four at {@code -1 76 73}. The shape has to not go there.</p>
+	 *
+	 * <p>This is what {@code inTurn} is standing in for, and why relaxing it by distance was not
+	 * enough: three columns from a corner is far enough for the module and not far enough for what the
+	 * route does next. Asked rather than guessed -- the module is built in the trial it was already
+	 * being built in, and then asked whether anything it wrote landed on the route ahead. A shape that
+	 * did gives the head up and is laid as a bus, which is what a refused stacked shape has always
+	 * done.</p>
+	 */
+	static boolean STACKED_KEEPS_OFF_THE_ROUTE = true;
+
+	/**
+	 * How far down the route a module is asked to keep off, in columns.
+	 *
+	 * <p>Fifteen, which is what a repeater reaches and so as far as the lane can get before something
+	 * stands in it anyway. Counted from where this module hands over, so the module's own cells are
+	 * never in the set -- a module occupies the path it stands on by definition, and asking it to keep
+	 * off that would refuse every shape in the build.</p>
+	 */
+	private static final int ROUTE_LOOKS_AHEAD = DUST_RANGE;
+
+	/**
+	 * The cells the route runs through from here, both the path and the wire above it.
+	 *
+	 * <p>Read off the lane rather than worked out, so it follows the bends the turn armed. That is the
+	 * whole point: on a straight lane this is a line, and through a turn it is the shape that makes a
+	 * module beside the path a module in the way.</p>
+	 */
+	private static Set<BlockPos> routeAhead(Lane lane, int columns) {
+		Set<BlockPos> cells = new HashSet<>();
+		Lane at = lane;
+		for (int column = 0; column <= columns; column++) {
+			cells.add(at.pos().immutable());
+			cells.add(at.pos().above().immutable());
+			at = at.ahead(1);
+		}
+		return cells;
+	}
 
 	private static StackedSplit stackedSplitOf(List<EventNote> chord, int room, int splitCells,
 			boolean climbing, boolean roomBehind) {
@@ -9913,6 +9992,26 @@ public final class SongBuilder {
 				maximumY = Math.max(maximumY, key.getY());
 				maximumZ = Math.max(maximumZ, key.getZ());
 			}
+		}
+
+		/**
+		 * Whether anything written since the savepoint stands in one of these cells.
+		 *
+		 * <p>The occupancy question asked the other way round. Everywhere else in this file a shape
+		 * asks whether the ground is free before it builds; this asks, once it is built, whether it
+		 * has landed anywhere it should not have -- which is the only form of the question that can
+		 * be put to a shape whose footprint nobody has written down.</p>
+		 */
+		boolean trialTouches(Set<BlockPos> cells) {
+			if (trial == null) {
+				return false;
+			}
+			for (BlockPos at : trial.blocksAdded()) {
+				if (cells.contains(at)) {
+					return true;
+				}
+			}
+			return false;
 		}
 
 		/** Opens a savepoint. Nested trials are not needed and not supported. */

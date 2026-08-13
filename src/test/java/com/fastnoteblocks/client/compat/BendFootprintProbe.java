@@ -70,6 +70,7 @@ class BendFootprintProbe {
 		// And the same build with the marker off, which is the one that throws. The marker cannot show
 		// this: with it on nothing throws at all, so the fallback that was supposed to catch the throw
 		// is never reached and never counted. The stack names the call site outright.
+		SongBuilder.TRACE_BUS_MOVE = true;
 		try {
 			SongBuilder.createPastePlan(new BlockPos(0, 64, 0), guardian,
 				SongBuilder.PasteMode.ULTRA_COMPACT_LANE_V2, new SongBuilder.BuildLimits(4, 20, 4));
@@ -81,6 +82,8 @@ class BendFootprintProbe {
 					System.out.println("      at " + frame.getMethodName() + ":" + frame.getLineNumber());
 				}
 			}
+		} finally {
+			SongBuilder.TRACE_BUS_MOVE = false;
 		}
 	}
 }
