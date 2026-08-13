@@ -11,6 +11,10 @@ import org.junit.jupiter.api.Test;
 /** ekran's flat-turn breach: Guardian 15 wide over six floors, the lane through 15 81 379. */
 @Tag("sweep")
 class BendCollisionTest {
+	/** ekran's, at {@code 15 81 379}. Sixteen wide over five floors. */
+	private static final int WIDE = Integer.getInteger("bend.w", 16);
+	private static final int TALL = Integer.getInteger("bend.f", 5);
+
 	@BeforeAll
 	static void bootstrapMinecraft() {
 		SharedConstants.tryDetectVersion();
@@ -24,9 +28,9 @@ class BendCollisionTest {
 			SongBuilder.STACKED_MAY_WRAP_A_BEND = wrap;
 			SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0),
 				guardian, SongBuilder.PasteMode.ULTRA_COMPACT_LANE_V2,
-				new SongBuilder.BuildLimits(4, 15, 6));
+				new SongBuilder.BuildLimits(4, WIDE, TALL));
 			System.out.println();
-			System.out.println("==== guardian 15w x 6f, wrapABend=" + (wrap ? "on" : "off") + " ====");
+			System.out.println("==== guardian " + WIDE + "w x " + TALL + "f, wrapABend=" + (wrap ? "on" : "off") + " ====");
 			System.out.println("   breaches=" + plan.breaches() + " wrong=" + plan.wrongNotes()
 				+ " unreached=" + BreachView.readBack("bend", plan).unreachedNotes()
 				+ " nearWall=" + plan.nearWall() + " farWall=" + plan.farWall());
