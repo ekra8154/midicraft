@@ -91,7 +91,7 @@ class NoteMachineReaderTest {
 	 */
 	@ParameterizedTest
 	@EnumSource(value = SongBuilder.PasteMode.class, mode = EnumSource.Mode.EXCLUDE,
-		names = {"COMPACT_CUBE", "HALF_TICK_LANE"})
+		names = {"COMPACT_CUBE", "HALF_TICK_LANE", "ULTRA_HALF_TICK_LANE"})
 	void readsBackEveryNoteOfItsOwnBuild(SongBuilder.PasteMode mode) {
 		List<SongBuilder.EventNote> notes = sampleSong();
 		SongBuilder.PastePlan plan =
@@ -129,6 +129,19 @@ class NoteMachineReaderTest {
 		assertEquals(0, reading.unreachedNotes(), "some note blocks were never triggered");
 		assertEquals(2, reading.versions(),
 			"the two lanes must share nothing, or one is setting off the other's notes");
+	}
+
+	/** And the folded pair, which is the same two questions asked of two whole corridors. */
+	@Test
+	void readsBackBothSnakesOfAFoldedHalfTickBuild() {
+		SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0),
+			sampleSong(), SongBuilder.PasteMode.ULTRA_HALF_TICK_LANE, LIMITS);
+
+		NoteMachineReader.Reading reading = readAll(placeInWorld(plan), "Ultra half-tick");
+
+		assertEquals(0, reading.unreachedNotes(), "some note blocks were never triggered");
+		assertEquals(2, reading.versions(),
+			"the two corridors must share nothing, four blocks apart or not");
 	}
 
 	/**
