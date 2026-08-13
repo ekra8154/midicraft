@@ -2991,13 +2991,35 @@ public final class SongBuilder {
 			// and a shape that can only be built going one way is a shape half of whose value is
 			// missing -- so it is counted rather than argued about.
 			boolean climbingLane = climb > 0;
-			Placed placed = addChordModule(placements, opening, trigger.triggerDelay(), event,
-				slackColumns,
-				!columnBehindBusy || !opening.pos().equals(before)
-					|| backPairIsFree(placements, opening, event.time()),
-				inTurn(placements, turning, leavingTurn, opening.pos(), lastCorner),
-				turning ? Integer.MAX_VALUE
-					: (wall - opening.pos().getX()) * opening.travel().getStepX(), tipSignal, layout);
+			// Placed against the blocks, not against a rule about where the walk is.
+			//
+			// v2 asks the permissive question first -- may this chord take the denser shape here --
+			// and lets the world answer. A shape whose blocks overlap something throws, and a throw
+			// here is not a broken build: it is the answer. The trial is rolled back and the chord is
+			// laid again with the conservative answer, exactly as if the ban had been in force.
+			//
+			// This is the piece both of today's bans were standing in for. The small-chord turn ban
+			// refuses 1,733 chords out of 1,733 that had a denser shape available, and the bend ban
+			// refuses a stacked bus the room to wrap a corner it fits round -- and neither can simply
+			// be deleted, because deleting them collides. Asking is what makes deleting them safe.
+			int slack = slackColumns;
+			boolean behind = !columnBehindBusy || !opening.pos().equals(before)
+				|| backPairIsFree(placements, opening, event.time());
+			int ahead = turning ? Integer.MAX_VALUE
+				: (wall - opening.pos().getX()) * opening.travel().getStepX();
+			Placed placed;
+			placements.beginTrial();
+			try {
+				placed = addChordModule(placements, opening, trigger.triggerDelay(), event, slack,
+					behind, inTurn(placements, turning, leavingTurn, opening.pos(), lastCorner),
+					ahead, tipSignal, layout);
+				placements.commitTrial();
+			} catch (IllegalArgumentException collided) {
+				placements.rollbackTrial();
+				placements.padded("v2ShapeCollidedFellBack");
+				placed = addChordModule(placements, opening, trigger.triggerDelay(), event, slack,
+					behind, true, ahead, tipSignal, layout);
+			}
 			if (event.style().busHeaded()) {
 				placements.padded("planStackedBusWanted" + (climbingLane ? "Climb" : "Descent"));
 				placements.padded("planStackedBusGot" + placed.style()
