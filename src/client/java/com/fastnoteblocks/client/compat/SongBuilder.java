@@ -758,11 +758,8 @@ public final class SongBuilder {
 			// because whether a run is under way is a fact about the walk rather than about the
 			// chord: the same event opens a run in one lane and continues one in the next.
 			boolean railContinues = railPhase >= 0;
-			boolean railStarts = !railContinues && layout.ultra() && !turning && !lane.bending()
-				&& railMayStart(events, index)
-				&& (wall - lane.pos().getX()) * lane.travel().getStepX()
-					>= RAIL_HEAD_COLUMNS + 3 + turnCells;
-			int railColumns = railContinues ? 1 : railStarts ? RAIL_HEAD_COLUMNS + 1 : 0;
+			int railColumns = railContinues ? 1
+				: railOpens(events, index, lane, wall, layout, turning) ? RAIL_HEAD_COLUMNS + 1 : 0;
 			int landing = railColumns > 0
 				? lane.pos().getX() + lane.travel().getStepX() * (railColumns + reserve)
 				: here.end() + lane.travel().getStepX() * reserve;
@@ -776,10 +773,16 @@ public final class SongBuilder {
 			boolean overshoots = !turning && (landing > farWall || landing < nearWall);
 			// A lane has to hold something before it can end, or a turn that lands short would turn
 			// again at once and the walk would climb the whole build without laying a note.
-			// Never on the floor rail. A run reserves the columns for the pair before it commits to
-			// one, so a lane standing there has room; and it has to take it, because a note on the
-			// floor rail is a level below the path and nothing brings the wire back up.
-			boolean wantsTurn = laneStarted && overshoots && railPhase != 1;
+			// Never while a run is under way. A run that has laid a repeater has promised the next
+			// column a note, and a turn takes that column away: the note is built on the far side of
+			// the staircase, a floor down and running the other way, while the repeater meant to
+			// drive it stands at the wall driving the staircase instead. That is a note two ticks
+			// early and a chain broken across every floor change.
+			//
+			// Safe to refuse because a run only ever extends where the pair it is committing to fits
+			// before the wall with the turn's own column still to spare, which is asked column by
+			// column as it goes. So the run always ends first, and then the lane turns.
+			boolean wantsTurn = laneStarted && overshoots && railPhase < 0;
 			// One tick has to be left for the next event's own repeater, which is the only thing that
 			// can drive the module it stands in front of.
 			int columns = (wall - lane.pos().getX()) * lane.travel().getStepX();
@@ -1671,26 +1674,44 @@ public final class SongBuilder {
 			// A turn ends a run: the far side of a staircase is a fresh lane and wants a head of its
 			// own. Only ever reached from the path rail, because the floor rail refuses to turn, so
 			// the wire is already at path level and there is nothing to undo.
+			// Asked again here rather than taken from the top of the event, because by this point a
+			// staircase may already have been built: the lane stands somewhere else, running the
+			// other way, with the other wall in front of it. The answer from before the turn is
+			// about a lane that no longer exists, and measured against the old wall it is always no
+			// -- which is why a run used to take several chords to come back after a floor change,
+			// when it can open on the very first one. Only a flat turn is a reason to wait, and that
+			// is the bending test: its sideways run lies across the way both rails go.
+			int laneWall = lane.travel() == forward ? farWall : nearWall;
 			if (turning || lane.bending()) {
 				railPhase = -1;
-			} else if (railColumns > 0) {
-				if (railPhase < 0) {
+			} else if (railPhase >= 0 || railOpens(events, index, lane, laneWall, layout, false)) {
+				boolean opening = railPhase < 0;
+				if (opening) {
 					lane = addRailHead(placements, lane, Math.max(1, Math.min(4, wait)), event.time());
 					railPhase = 0;
 				}
 				// What the repeater this column holds is measured from. At the head it is the stone
 				// under the opening dust, which goes live with this note; after that it is the note
 				// two events back, which is what stands in the column behind on the same rail.
-				int behind = railStarts ? event.time() : events.get(index - 1).time();
+				int behind = opening ? event.time() : events.get(index - 1).time();
 				int nextDelay = railNextDelay(events, index, behind);
-				// The path rail is the only place a run may end, so a column here only extends it
-				// when the pair after it will fit too and the turn still has its columns.
+				// The path rail is the only place a run may end, so a column here only extends it when
+				// the pair after it will fit as well -- both its columns, and whatever the lane keeps
+				// back for its turn. Measured against the wall rather than against the turn's cells:
+				// those are a wire budget, and every column of a run holds a repeater.
 				if (railPhase == 0 && (railNextDelay(events, index + 1, event.time()) == 0
-						|| (wall - lane.pos().getX()) * lane.travel().getStepX() < 2 + turnCells)) {
+						|| railRoom(lane, laneWall) < 2 + reserve)) {
 					nextDelay = 0;
 				}
+				if (TRACE) {
+					System.out.println("RAIL t=" + event.time() + " at " + lane.pos().getX() + ","
+						+ lane.pos().getY() + "," + lane.pos().getZ() + " phase=" + railPhase
+						+ " opening=" + opening + " nextDelay=" + nextDelay
+						+ " wall=" + laneWall + " room=" + railRoom(lane, laneWall)
+						+ " travel=" + lane.travel());
+				}
 				lane = addRailNote(placements, lane, railPhase, event.notes().get(0), event.time(),
-					nextDelay, railStarts);
+					nextDelay, opening);
 				railPhase = nextDelay > 0 ? 1 - railPhase : -1;
 				currentTime = event.time();
 				// Every column of a run holds a repeater, so the wire never runs: whatever touches the
@@ -4114,6 +4135,28 @@ public final class SongBuilder {
 		return TWO_RAIL_RUNS && railFits(events.get(index))
 			&& railNextDelay(events, index, events.get(index).time()) > 0
 			&& railNextDelay(events, index + 1, events.get(index).time()) > 0;
+	}
+
+	/** Columns between this cell and the wall the lane is running at. */
+	private static int railRoom(Lane lane, int wall) {
+		return (wall - lane.pos().getX()) * lane.travel().getStepX();
+	}
+
+	/**
+	 * Whether a run may open at this cell of this lane.
+	 *
+	 * <p>The room asked for is the room a run occupies and nothing else: two columns of head and the
+	 * three notes that are the shortest run worth opening. It used to keep the turn's cells back as
+	 * well, which stood a run several columns off every wall for nothing -- those cells are a
+	 * <em>wire</em> budget, and every column of a run holds a repeater, so a run hands the staircase
+	 * in front of it a full fifteen from the cell it stops in. ekran, who noticed the gap in game.
+	 * What a run does have to keep back is the pair, and that is asked column by column as it goes.</p>
+	 */
+	private static boolean railOpens(List<EventGroup> events, int index, Lane lane, int wall,
+			Layout layout, boolean turning) {
+		return TWO_RAIL_RUNS && layout.ultra() && !turning && !lane.bending()
+			&& railMayStart(events, index)
+			&& railRoom(lane, wall) >= RAIL_HEAD_COLUMNS + 3;
 	}
 
 	/** The two columns a run opens with: its own repeater, then the dust that starts the floor rail. */

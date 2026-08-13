@@ -28,6 +28,62 @@ class RailUnderNoteProbeTest {
 
 	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
 
+	/** The blocks either side of the first fault, so the two shapes that met can be named. */
+	@Test
+	void dumpsTheGroundAroundAFault() throws Exception {
+		// SongBuilder.TRACE prints a RAIL line per column beside this, which is what named the run
+		// that walked through a staircase. Left off: it is a thousand lines on this song.
+		SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0),
+			load("ultra-ones-gap2"), SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+			new SongBuilder.BuildLimits(16, 40, 2));
+		Map<BlockPos, String> world = new HashMap<>();
+		for (String command : plan.commands()) {
+			String[] parts = command.split(" ");
+			world.put(new BlockPos(Integer.parseInt(parts[1]), Integer.parseInt(parts[2]),
+				Integer.parseInt(parts[3])), parts[4]);
+		}
+		for (int y = 67; y >= 62; y--) {
+			for (int z = 14; z <= 17; z++) {
+				StringBuilder row = new StringBuilder(String.format("DUMP y=%d z=%2d ", y, z));
+				for (int x = 35; x <= 43; x++) {
+					row.append(String.format(" %-9s", shorten(world.get(new BlockPos(x, y, z)))));
+				}
+				if (!row.toString().isBlank() && row.toString().contains("minecraft") || true) {
+					System.out.println(row);
+				}
+			}
+		}
+	}
+
+	private static String shorten(String block) {
+		if (block == null) {
+			return ".";
+		}
+		String name = block.replace("minecraft:", "");
+		if (name.startsWith("repeater")) {
+			return "r" + name.replaceAll(".*delay=(\\d+).*", "$1")
+				+ name.replaceAll(".*facing=(\\w)\\w*.*", "$1");
+		}
+		if (name.startsWith("note_block")) {
+			return "NOTE";
+		}
+		return name.startsWith("redstone_wire") ? "dust" : name;
+	}
+
+	/** The faults themselves, which name the two cells and so the two shapes that met. */
+	@Test
+	void namesEveryFault() throws Exception {
+		for (int[] size : new int[][] {{40, 2}, {16, 2}, {16, 5}}) {
+			SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0),
+				load("ultra-ones-gap2"), SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+				new SongBuilder.BuildLimits(16, size[0], size[1]));
+			System.out.println("FAULT " + size[0] + " wide over " + size[1] + " floors: "
+				+ plan.faults().size());
+			plan.faults().stream().limit(4)
+				.forEach(fault -> System.out.println("FAULT   " + fault));
+		}
+	}
+
 	@Test
 	void countsWhatEveryNoteStandsOn() throws Exception {
 		SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0),
