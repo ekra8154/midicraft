@@ -6148,7 +6148,7 @@ public final class SongBuilder {
 	 * back over the list with sea lantern. The build is then wrong on purpose and glowing where it is
 	 * wrong, which can be walked round and looked at. Never leave this on for a real build.</p>
 	 */
-	static boolean MARK_COLLISIONS = true;
+	static boolean MARK_COLLISIONS = false;
 
 	/** Scratch: turn {@link #strandsNext} off, so a lane it changed can be diffed against itself. */
 	static boolean LOOKAHEAD = true;
