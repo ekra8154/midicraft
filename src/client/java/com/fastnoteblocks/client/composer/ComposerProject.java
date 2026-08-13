@@ -1364,6 +1364,45 @@ public record ComposerProject(
 		return (int)Math.max(0L, Math.round(physical * 4.0 / Math.max(1, speedQuarters)));
 	}
 
+	/**
+	 * The same gap in game ticks, which is twice as fine as a repeater can place on its own.
+	 *
+	 * <p>Two lanes started a game tick apart reach between the repeater ticks, so a build made of
+	 * them is quantised at 50 ms rather than 100 -- and the rounding has to happen at that
+	 * resolution to be worth anything. Rounding to repeater ticks first and doubling afterwards
+	 * lands on precisely the same moments as before and buys nothing at all, which is the whole
+	 * distinction between this and {@link #buildDelayTicks}.</p>
+	 *
+	 * <p>Rounds once, from the real duration, for the reason the method beside it does: rounding
+	 * twice destroys anything shorter than the coarser unit.</p>
+	 */
+	public int buildDelayGameTicks(long composerTicks) {
+		double physical = composerTicksToMinecraftTicks(
+			Math.max(0L, composerTicks), ppq, tempoMicrosPerQuarter
+		);
+		return (int)Math.max(0L, Math.round(physical * 2.0 * 4.0 / Math.max(1, speedQuarters)));
+	}
+
+	/**
+	 * The layers a build would place, with anything already heard removed.
+	 *
+	 * <p>The deduplication {@code toSequenceTracks} does, reachable on its own so that a build
+	 * reading the composition at a different resolution drops exactly the same notes. Doing it
+	 * afterwards instead would not be the same: gaps are rounded one at a time, and a gap that
+	 * swallows a wholly deduplicated event rounds differently from the two it replaces.</p>
+	 */
+	public List<Layer> buildLayers(boolean dedupeIdentical) {
+		List<Layer> chosen = new ArrayList<>();
+		Set<NoteSound> heard = dedupeIdentical ? new java.util.HashSet<>() : null;
+		for (Layer layer : layers) {
+			if (!layer.buildEnabled()) {
+				continue;
+			}
+			chosen.add(heard == null ? layer : withoutAlreadyHeard(layer, heard));
+		}
+		return List.copyOf(chosen);
+	}
+
 	private static List<Layer> normalizeLayers(List<Layer> source) {
 		List<Layer> normalized = new ArrayList<>();
 		if (source != null) {

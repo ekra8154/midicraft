@@ -3867,7 +3867,13 @@ public final class ComposerScreen extends Screen {
 
 		// Most important first: the verdict, then whatever is blocking it, then context.
 		List<String> segments = new ArrayList<>();
-		segments.add(ready ? "MINECRAFT READY" : "NOT BUILDABLE");
+		// The lane count belongs on the verdict rather than beside it: it is not a caveat on being
+		// buildable, it is what being buildable means for this song. One lane is a plain chain of
+		// repeaters; two is that chain and a second one started half a tick later off a piston.
+		segments.add(ready
+			? "MINECRAFT READY - " + stats.lanesNeeded() + " lane"
+				+ (stats.lanesNeeded() == 1 ? "" : "s") + " needed"
+			: "NOT BUILDABLE");
 		if (stats.outOfRange() > 0) {
 			segments.add(stats.outOfRange() + " out of range");
 		}
@@ -3927,6 +3933,18 @@ public final class ComposerScreen extends Screen {
 			? 0xFF5AD46A
 			: peakChord >= CHORD_WARNING_THRESHOLD || overloaded > 0 ? 0xFFFF7777 : 0xFFFFAA00;
 		graphics.text(font, status.toString(), 8, height - 16, color, false);
+		// Amber after the green, in its own draw, because it is neither a problem nor part of the
+		// verdict: the song builds, and it builds as two machines rather than one. A reader who
+		// takes in only the colour should come away with "fine, but there is something to know",
+		// which is exactly what a second colour after a green one says.
+		if (ready && !stats.halfTickedNotes().isEmpty()) {
+			String note = "   half-ticked: " + stats.halfTickedNotes().size()
+				+ " notes land between repeater ticks, so the build uses 2 lanes";
+			int after = 8 + font.width(status.toString());
+			if (after + font.width(note) <= width - 8) {
+				graphics.text(font, note, after, height - 16, 0xFFFFAA00, false);
+			}
+		}
 	}
 
 	/**
@@ -5479,10 +5497,11 @@ public final class ComposerScreen extends Screen {
 			return;
 		}
 		minecraft.gui.setScreen(new BuildOptionsScreen(this, project().name(), config.tracks(),
-				pasteMode(), mode -> {
+				project(), config.dedupeIdenticalNotes(), pasteMode(), mode -> {
 			SongBuilder.PastePlan plan;
 			try {
-				plan = SongBuilder.plan(minecraft, config.tracks(), mode);
+				plan = SongBuilder.plan(minecraft, config.tracks(), mode, project(),
+					config.dedupeIdenticalNotes());
 			} catch (IllegalArgumentException refused) {
 				minecraft.gui.setScreen(this);
 				showResult(Component.literal(refused.getMessage())
