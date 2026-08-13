@@ -37,9 +37,19 @@ class StackedBusTest {
 		Bootstrap.bootStrap();
 	}
 
+	/**
+	 * Back to the default, which is on.
+	 *
+	 * <p>This said {@code false}, which is not putting anything back: every test in this class turns
+	 * the heads on for itself, so the tidy-up left {@link SongBuilder#STACKED_BUS_HEADS} off for every
+	 * class that ran afterwards. It is the leak {@link UltraLaneV2Test#doesNotDisturbTheFirstLayout}
+	 * was written to catch -- v1 builds the all-25 song at 40x2 for 88 breach blocks with the heads on
+	 * and none at all with them off -- and that guard passes on its own and failed in the suite for
+	 * exactly this. Both of the other classes that turn the flag off restore it to {@code true}.</p>
+	 */
 	@AfterEach
 	void putTheHeadsBack() {
-		SongBuilder.STACKED_BUS_HEADS = false;
+		SongBuilder.STACKED_BUS_HEADS = true;
 	}
 
 	/** Chords long enough to want a bus, with the instrument mix a stacked head needs. */
