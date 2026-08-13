@@ -9580,7 +9580,11 @@ public final class SongBuilder {
 			// the signal sideways passes under the notes of the corridors either side of it, and a
 			// machine you cannot stand in front of is a machine you cannot work out. So it goes up,
 			// and says what is wrong with it.
-			if (!faults.isEmpty() && mode != PasteMode.ULTRA_COMPACT_LANE) {
+			// And v2 for the same reason, more so: it is the one being worked out now, and refusing to
+			// paste it is refusing ekran the only view of it that has ever settled an argument here.
+			// A broken v2 build goes up and says what is wrong with it, in the faults overlay.
+			if (!faults.isEmpty() && mode != PasteMode.ULTRA_COMPACT_LANE
+					&& mode != PasteMode.ULTRA_COMPACT_LANE_V2) {
 				throw new IllegalArgumentException("Refusing to build a broken machine: "
 					+ faults.get(0) + ". This is a bug in the layout, not in the song.");
 			}
