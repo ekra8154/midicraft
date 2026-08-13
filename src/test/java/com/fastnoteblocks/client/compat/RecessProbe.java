@@ -121,6 +121,29 @@ class RecessProbe {
 		}
 	}
 
+	/**
+	 * What letting a chord wrap a bend is worth, asked again now the cut lands on its wall.
+	 *
+	 * <p>It was measured as a loss and left on so ekran could stand in it. Both of the things it was
+	 * measured against have since moved -- the cut pins its staircase and the pad search is gone --
+	 * so the number is not the number any more.</p>
+	 */
+	@Test
+	void whatTheBendRuleIsWorth() throws Exception {
+		System.out.println();
+		System.out.println("==== v2 with and without wrapping a bend ====");
+		try {
+			for (boolean bend : new boolean[] {false, true}) {
+				SongBuilder.STACKED_MAY_WRAP_A_BEND = bend;
+				System.out.println("   -- STACKED_MAY_WRAP_A_BEND = " + bend);
+				weigh("all-25 at a gap of 1", AllTwentyFivesTest.allTwentyFives());
+				weigh("guardian", BreachView.song("deltarune-ch-4-guardian"));
+			}
+		} finally {
+			SongBuilder.STACKED_MAY_WRAP_A_BEND = true;
+		}
+	}
+
 	private static void weigh(String name, List<SongBuilder.EventNote> song) {
 		int lanes = 0;
 		int blocks = 0;
@@ -138,6 +161,8 @@ class RecessProbe {
 						new SongBuilder.BuildLimits(4, width, floors));
 				} catch (IllegalArgumentException refusal) {
 					refused++;
+					sizes.add(String.format("         %2dw x %df  refused: %s", width, floors,
+						refusal.getMessage()));
 					continue;
 				}
 				int sum = plan.breaches().stream().mapToInt(Integer::intValue).sum();

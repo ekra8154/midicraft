@@ -558,7 +558,7 @@ public final class SongBuilder {
 		// the obvious fix for Guardian. It is not: with it on, the all-25 song breaks too, a lane
 		// twenty-five columns past its wall on the first chord it meets. The lookahead books pads for
 		// a lane that closes on overshoot, and v2's lanes close a column earlier.
-		Layout layout = Layout.ultra(floors, origin);
+		Layout layout = Layout.ultra(floors, origin).asV2();
 		List<EventGroup> events = eventGroups(notes, layout);
 		int longest = events.stream().mapToInt(EventGroup::length).max().orElse(1);
 		int laneWidth = Math.max(longest + 2, width - 2);
@@ -2491,6 +2491,9 @@ public final class SongBuilder {
 					// The columns that carry the module out to its wall. Laid as the parity pad an ordinary
 					// chord uses -- plain dust on the path, before the head's own repeater -- so the near
 					// half ends flush and the staircase stands where every other lane's does.
+					if (splitPin > 0) {
+						placements.placing("cutPin");
+					}
 					for (int cell = 0; cell < splitPin; cell++) {
 						placements.padded("cutPin");
 						addParityPad(placements, opening);
@@ -2548,7 +2551,7 @@ public final class SongBuilder {
 						placements.padded("cutPinBehind");
 					}
 					cursor = emitDust(placements, Lane.straight(cursor, travel, depth), splitPinBehind,
-						true).pos();
+						true, "cutPinBehind").pos();
 				}
 				// Measured from where the staircase actually lands, which for a split is past the near
 				// half of the chord rather than where the lane stood when it decided to split.
@@ -2691,7 +2694,8 @@ public final class SongBuilder {
 						// pinned and the condition does not say so -- so a climb reaches here too, and
 						// a pin that came back down to the path while the staircase had been told it
 						// was starting off a bus is a staircase with nothing under its first rung.
-						lane = emitDust(placements, lane, pinned, raisedPad);
+						lane = emitDust(placements, lane, pinned, raisedPad,
+							raisedPad ? "pinToWallRaised" : "pinToWall");
 					}
 					// Recorded after the pin and not before it, so this is where the staircase actually
 					// stands rather than where the lane would have left it. Told apart by direction as
@@ -4568,7 +4572,17 @@ public final class SongBuilder {
 	 *     That is a staircase which builds cleanly and conducts nothing.
 	 */
 	private static Lane emitDust(PlacementPlan placements, Lane lane, int columns, boolean raised) {
-		placements.placing(raised ? "padRaised" : "pad");
+		return emitDust(placements, lane, columns, raised, raised ? "padRaised" : "pad");
+	}
+
+	/**
+	 * @param why which run of dust this is, for the collision marker to name. Four call sites lay
+	 *     dust and they all reported {@code pad}, so a marked cell said only that some pad somewhere
+	 *     had wanted it -- which is the question, not the answer.
+	 */
+	private static Lane emitDust(PlacementPlan placements, Lane lane, int columns, boolean raised,
+			String why) {
+		placements.placing(why);
 		for (int cell = 0; cell < columns; cell++) {
 			if (raised) {
 				addRaisedPad(placements, lane.pos());
@@ -4602,6 +4616,10 @@ public final class SongBuilder {
 	 */
 	private static Lane emitPad(PlacementPlan placements, Lane lane, Pad pad, String why,
 			int raiseAfter) {
+		// Named for the collision marker, which otherwise reports whatever the last shape to lay a
+		// block called itself. A pad's cells were coming out as "pad" -- the label a run of dust sets
+		// -- so a marked cell said a pad had wanted it and could not say which pad or from where.
+		placements.placing(why);
 		int cell = -1;
 		for (int delay : pad.cells()) {
 			cell++;
@@ -5488,6 +5506,7 @@ public final class SongBuilder {
 	private static SpatialDelayTrigger addSpatialDelayBeforeEvent(PlacementPlan placements,
 			Lane lane, int delay, boolean keepCorner) {
 		int remaining = delay;
+		placements.placing("delayBeforeChord");
 		while (remaining > 4) {
 			lane = pastAnyCorner(placements, lane);
 			set(placements, lane.pos(), "minecraft:stone");
@@ -5519,10 +5538,17 @@ public final class SongBuilder {
 	 * in a slow passage.</p>
 	 */
 	private static Lane pastAnyCorner(PlacementPlan placements, Lane lane) {
+		// The label is put back afterwards, and that is not tidiness. Walking a corner lays a cell of
+		// dust, which named itself "pad" and left every block the caller placed next wearing that name
+		// -- so a repeater column laid after a corner reported itself as a pad in the collision
+		// marker. Six explanations of one bend collision were argued in front of a marker that was
+		// naming the wrong shape.
+		String was = placements.placing();
 		while (lane.cornerAt(0)) {
 			placements.padded("corner");
-			lane = emitDust(placements, lane, 1);
+			lane = emitDust(placements, lane, 1, false, "corner");
 		}
+		placements.placing(was);
 		return lane;
 	}
 
@@ -5805,7 +5831,8 @@ public final class SongBuilder {
 		for (int column = 0; column < stepOff; column++) {
 			placements.padded("stepOff");
 		}
-		cursor = emitDust(placements, Lane.straight(cursor, travel, laneStep), stepOff).pos();
+		cursor = emitDust(placements, Lane.straight(cursor, travel, laneStep), stepOff,
+			false, "farHalfStepOff").pos();
 		// The wire arrives level with the repeater that is not there, and climbs the side of the
 		// first stone onto the dust running over it.
 		return cursor.relative(travel, layBus(placements,
@@ -6736,9 +6763,8 @@ public final class SongBuilder {
 		}
 		if (!style.stacked()) {
 			trace(event, lane, style, style, gaveUp);
-			Body body = addSpatialEventModule(placements, lane, triggerDelay, event.notes(),
-				style == ChordStyle.BUS);
-			return new Placed(body.lane(), style, body.busCells(), false);
+			return layBus(placements, lane, triggerDelay, event, style,
+				style == ChordStyle.BUS, layout);
 		}
 		// A stacked shape that will not fit becomes a bus rather than ending the build. Every rule
 		// above tries to predict whether the ground is free, and this is what happens when one of
@@ -6779,8 +6805,68 @@ public final class SongBuilder {
 			placements.rollbackTrial();
 			placements.padded("planBusForCollision");
 			trace(event, lane, style, ChordStyle.BUS, "collided");
-			Body body = addSpatialEventModule(placements, lane, triggerDelay, event.notes(), true);
-			return new Placed(body.lane(), ChordStyle.BUS, body.busCells(), false);
+			// Through the same move as every other bus, and this is the site that mattered: the shape
+			// collided, dropped to a bus, and the bus landed in the same occupied ground with nothing
+			// left to try. That is what ended the build rather than the first collision.
+			return layBus(placements, lane, triggerDelay, event, ChordStyle.BUS, true, layout);
+		}
+	}
+
+	/**
+	 * A bus, moved along a column at a time until the ground will take it.
+	 *
+	 * <p>A shape that is already the fallback has nothing to fall back to. Every stacked shape is
+	 * built in a trial and drops to a bus when it collides; a bus that collides ends the build, and
+	 * the song does not paste at all. That is v2's last refusal -- Guardian twenty wide over four
+	 * floors, where a chord of three laid as a bus wants the column a stacked module standing across
+	 * the bend has already taken, on a build whose every other number reads clean, breaches
+	 * included.</p>
+	 *
+	 * <p>What took the cell is a shape of finite width standing in front of this one, not a wall, so
+	 * the column after it is free. The chord is offered the next column, and the one after, for a cell
+	 * of dust each -- the parity pad an ordinary chord uses, which spends no ticks and so cannot move
+	 * a note off its beat. The move is handed back as a nudge, because a chord that quietly grew by
+	 * two columns is a lane two columns past its wall.</p>
+	 *
+	 * <p>Each attempt is the pads <em>and</em> the module in one trial from where the chord actually
+	 * stands. Wrapping only the module is the version that does not work: the cell the module was
+	 * refused is often the cell the next pad wants, and that throw goes straight past the catch that
+	 * was meant to handle it.</p>
+	 *
+	 * <p>v2 only, and asked of the layout rather than of a static, because this is shared with the
+	 * first layout and a chord that moves is a chord that lands somewhere else.</p>
+	 */
+	private static Placed layBus(PlacementPlan placements, Lane lane, int triggerDelay,
+			EventGroup event, ChordStyle style, boolean forceBus, Layout layout) {
+		if (!layout.v2() || !BUS_MOVES_OFF_A_COLLISION) {
+			Body body = addSpatialEventModule(placements, lane, triggerDelay, event.notes(), forceBus);
+			return new Placed(body.lane(), style, body.busCells(), false);
+		}
+		for (int shifted = 0; ; shifted++) {
+			placements.beginTrial();
+			try {
+				Lane at = lane;
+				for (int cell = 0; cell < shifted; cell++) {
+					placements.placing("busMove");
+					addParityPad(placements, at.pos());
+					at = at.ahead(1);
+				}
+				Body body = addSpatialEventModule(placements, at, triggerDelay, event.notes(), forceBus);
+				placements.commitTrial();
+				for (int cell = 0; cell < shifted; cell++) {
+					placements.padded("parity");
+				}
+				if (shifted > 0) {
+					placements.padded("planBusMoved" + shifted);
+				}
+				return new Placed(body.lane(), style, body.busCells(), shifted > 0);
+			} catch (IllegalArgumentException collided) {
+				placements.rollbackTrial();
+				if (shifted >= BUS_MOVES_AT_MOST) {
+					placements.padded("planBusStuckAfter" + shifted);
+					throw collided;
+				}
+			}
 		}
 	}
 
@@ -6818,6 +6904,9 @@ public final class SongBuilder {
 				gaveUp = "noHeadPossible";
 				placements.padded("planBusForNoHead");
 				trace(event, lane, style, ChordStyle.BUS, gaveUp);
+				// Plainly, and deliberately: this runs inside the caller's trial, so a collision here
+				// is rolled back and re-laid through {@link #layBus} by the catch that owns it. Moving
+				// a chord inside a trial that is about to be undone moves nothing.
 				Body body = addSpatialEventModule(placements, lane, triggerDelay, event.notes(), true);
 				return new Placed(body.lane(), ChordStyle.BUS, body.busCells(), false);
 			}
@@ -7826,6 +7915,36 @@ public final class SongBuilder {
 	 * where it belongs, and the booking has nothing left to do.</p>
 	 */
 	static boolean V2_BOOKS_PADS = false;
+
+	/**
+	 * v2: a chord that collides as a bus takes the next column rather than ending the build.
+	 *
+	 * <p>The other half of "one occupancy answer". A stacked shape is built in a trial and drops to a
+	 * bus when it collides; a bus is where that road ends, so a bus that collides throws and the song
+	 * will not paste at all. That is v2's last refusal -- Guardian twenty wide over four floors, a
+	 * chord of three wanting a column a stacked module across the bend had taken, on a build whose
+	 * every other number reads clean.</p>
+	 *
+	 * <p>What took the cell is a shape standing in front of this one, not a wall, so the column after
+	 * it is free. Moving costs a cell of dust and no ticks, and the move is handed back as a nudge so
+	 * the lane's arithmetic hears about the column it spent.</p>
+	 *
+	 * <p><b>It does not fix that refusal, and the reason is worth keeping.</b> The move fires -- three
+	 * attempts, all three refused -- and it is the <em>pad</em> that is refused, not the module: the
+	 * shape in the way is a stacked module that wrapped the bend, and it occupies the lane's own path
+	 * on the arm coming out of the corner. Walking forward through an obstruction that is standing in
+	 * the corridor cannot get round it. What that build needs is for the wrapped module's footprint on
+	 * the outgoing arm to be somewhere the lane does not then walk, which is a rule about the bend and
+	 * not about the bus.</p>
+	 *
+	 * <p>On because it is the right answer to the case it was written for -- a bus is the one shape
+	 * with nothing to fall back to -- and because it costs nothing where it does not fire. It moved
+	 * no build on either song, in either direction.</p>
+	 */
+	static boolean BUS_MOVES_OFF_A_COLLISION = true;
+
+	/** How many columns a colliding bus may walk before the build gives up on it. */
+	private static final int BUS_MOVES_AT_MOST = 3;
 
 	private static StackedSplit stackedSplitOf(List<EventNote> chord, int room, int splitCells,
 			boolean climbing, boolean roomBehind) {
@@ -9098,18 +9217,30 @@ public final class SongBuilder {
 	 * @param risers whether this build changes floors, which is what decides which way a descent
 	 *     steps off its own centre line
 	 */
-	private record Layout(boolean ultra, boolean risers, int centreParity, boolean lookahead) {
-		static final Layout STANDARD = new Layout(false, true, 0, false);
+	/**
+	 * @param v2 whether this is the second layout. Carried on the layout rather than read off a
+	 *     static, because the pieces below the walk -- {@link #addChordModule} and everything it
+	 *     calls -- are shared by both and are where v2's rules have to differ without v1 moving. The
+	 *     walk itself does not need it: {@code walkV2} is its own method and simply does the other
+	 *     thing.
+	 */
+	private record Layout(boolean ultra, boolean risers, int centreParity, boolean lookahead,
+			boolean v2) {
+		static final Layout STANDARD = new Layout(false, true, 0, false, false);
 
 		static Layout ultra(int floors, BlockPos origin) {
 			// Counted from the origin and not from the world, so the same song pasted a block over
 			// is the same build. Anchored where the first module would land anyway, which is one
 			// past the origin, so a song that never drifts off the beat never pays for a pad.
-			return new Layout(true, floors > 1, Math.floorMod(origin.getX() + 1, 2), false);
+			return new Layout(true, floors > 1, Math.floorMod(origin.getX() + 1, 2), false, false);
 		}
 
 		Layout withLookahead() {
-			return new Layout(ultra, risers, centreParity, true);
+			return new Layout(ultra, risers, centreParity, true, v2);
+		}
+
+		Layout asV2() {
+			return new Layout(ultra, risers, centreParity, lookahead, true);
 		}
 	}
 
@@ -9724,6 +9855,11 @@ public final class SongBuilder {
 		/** Names the shape about to be built, so a collision can say whose column it is. */
 		void placing(String what) {
 			placing = what;
+		}
+
+		/** What it is called at the moment, for a helper that has to name itself and put it back. */
+		String placing() {
+			return placing;
 		}
 
 		void set(BlockPos position, String block) {
