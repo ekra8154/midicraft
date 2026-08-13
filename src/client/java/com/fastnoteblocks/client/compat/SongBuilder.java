@@ -2024,7 +2024,7 @@ public final class SongBuilder {
 				// So it stays until head refusal is fixed rather than caught, which is what the occupancy
 				// model is for. What has gone from v2 is the veto -- the plan no longer forbids a cut it
 				// would rather close differently -- and the lookahead pair above it.
-				booked = above >= 0 && above < floors
+				booked = V2_BOOKS_PADS && above >= 0 && above < floors
 					? planLane(events, index, lane.pos().getX(), lane.travel().getStepX(), wall,
 						lane.travel() == forward ? nearWall : farWall,
 						currentTime, tipSignal,
@@ -2746,13 +2746,15 @@ public final class SongBuilder {
 						// by that much. Otherwise it counts columns of delay the walk will not place.
 						// going to spend on its own repeater, so the plan is told the clock has moved on
 						// by that much. Otherwise it counts columns of delay the walk will not place.
-						booked = planLane(events, index, lane.pos().getX(), lane.travel().getStepX(),
-							lane.travel() == forward ? farWall : nearWall,
-							lane.travel() == forward ? nearWall : farWall,
-							currentTime + spentPadding,
-							tipSignal, columnBehindBusy, next.cells(), next.offBus(), next.stepOff(),
-							next.splitCells(), climb > 0, layout,
-							inTurn(placements, turning, leavingTurn, lane.pos(), lastCorner), parity);
+						booked = V2_BOOKS_PADS
+							? planLane(events, index, lane.pos().getX(), lane.travel().getStepX(),
+								lane.travel() == forward ? farWall : nearWall,
+								lane.travel() == forward ? nearWall : farWall,
+								currentTime + spentPadding,
+								tipSignal, columnBehindBusy, next.cells(), next.offBus(), next.stepOff(),
+								next.splitCells(), climb > 0, layout,
+								inTurn(placements, turning, leavingTurn, lane.pos(), lastCorner), parity)
+							: Map.of();
 						replan = false;
 					}
 				} else {
@@ -7801,6 +7803,19 @@ public final class SongBuilder {
 	 * one the lane in front is nearly spent, and on a cut of that size the fifteen is too.</p>
 	 */
 	static boolean CUT_PINS_BEHIND = true;
+
+	/**
+	 * Whether v2's walk still books pads ahead of itself, which is the last of the planner it kept.
+	 *
+	 * <p>v2 was opened on the claim that a lane which can always cut never has to be walked out to its
+	 * wall, so there is nothing for a pad search to buy. The booking survived anyway, as a last resort:
+	 * a cut is arithmetically always available under the 25-note cap, but the <em>head</em> it needs is
+	 * not, and a refused head used to walk a lane nine columns past its wall.</p>
+	 *
+	 * <p>Here so the claim can be asked rather than assumed. The veto and the lookahead pair are
+	 * already gone from v2; this is what is left of {@code planLane}.</p>
+	 */
+	static boolean V2_BOOKS_PADS = true;
 
 	private static StackedSplit stackedSplitOf(List<EventNote> chord, int room, int splitCells,
 			boolean climbing, boolean roomBehind) {

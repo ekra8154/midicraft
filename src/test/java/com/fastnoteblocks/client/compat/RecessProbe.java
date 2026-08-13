@@ -98,6 +98,66 @@ class RecessProbe {
 		}
 	}
 
+	/**
+	 * What is left of the planner in v2, asked rather than assumed.
+	 *
+	 * <p>v2 was opened on the claim that a lane which can always cut never needs a pad booked in front
+	 * of it. The booking search survived as a last resort for a refused head. This is the arm that says
+	 * whether it is still earning its place.</p>
+	 */
+	@Test
+	void whatTheBookingIsStillWorth() throws Exception {
+		System.out.println();
+		System.out.println("==== v2 with and without the pad search ====");
+		try {
+			for (boolean books : new boolean[] {true, false}) {
+				SongBuilder.V2_BOOKS_PADS = books;
+				System.out.println("   -- V2_BOOKS_PADS = " + books);
+				weigh("all-25 at a gap of 1", AllTwentyFivesTest.allTwentyFives());
+				weigh("guardian", BreachView.song("deltarune-ch-4-guardian"));
+			}
+		} finally {
+			SongBuilder.V2_BOOKS_PADS = true;
+		}
+	}
+
+	private static void weigh(String name, List<SongBuilder.EventNote> song) {
+		int lanes = 0;
+		int blocks = 0;
+		int dirty = 0;
+		int refused = 0;
+		int wrong = 0;
+		long length = 0;
+		List<String> sizes = new java.util.ArrayList<>();
+		for (int floors = 2; floors <= 5; floors++) {
+			for (int width : new int[] {20, 24, 32, 40}) {
+				SongBuilder.PastePlan plan;
+				try {
+					plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0), song,
+						SongBuilder.PasteMode.ULTRA_COMPACT_LANE_V2,
+						new SongBuilder.BuildLimits(4, width, floors));
+				} catch (IllegalArgumentException refusal) {
+					refused++;
+					continue;
+				}
+				int sum = plan.breaches().stream().mapToInt(Integer::intValue).sum();
+				lanes += plan.breaches().size();
+				blocks += sum;
+				length += plan.width();
+				wrong += plan.wrongNotes();
+				if (sum > 0) {
+					dirty++;
+					sizes.add(String.format("         %2dw x %df  breaches %s", width, floors,
+						plan.breaches()));
+				}
+			}
+		}
+		System.out.println(String.format(
+			"      %-22s lanes=%-4d blocks=%-5d dirty=%-2d refused=%-2d wrong=%-3d length=%d",
+			name, lanes, blocks, dirty, refused, wrong, length));
+		sizes.forEach(System.out::println);
+	}
+
 	private static void song(String name, List<SongBuilder.EventNote> song) {
 		System.out.println("   " + name);
 		for (boolean pinned : new boolean[] {false, true}) {
