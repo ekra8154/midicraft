@@ -85,21 +85,32 @@ class UltraLaneV2Test {
 			int lanes = 0;
 			int blocks = 0;
 			int dirty = 0;
+			int refusals = 0;
 			long length = 0;
 			for (int floors = 2; floors <= 5; floors++) {
 				for (int width : new int[] {20, 24, 32, 40}) {
-					SongBuilder.PastePlan plan = build(song, mode, width, floors);
-					int sum = plan.breaches().stream().mapToInt(Integer::intValue).sum();
-					lanes += plan.breaches().size();
+					// A size that will not build at all is counted, not thrown. v2 is under construction and
+					// some of its switches collide at some widths -- STACKED_MAY_WRAP_A_BEND does -- and a
+					// table that stops at the first one tells you nothing about the other fifteen.
+					int sum;
+					try {
+						SongBuilder.PastePlan plan = build(song, mode, width, floors);
+						sum = plan.breaches().stream().mapToInt(Integer::intValue).sum();
+						lanes += plan.breaches().size();
+						length += plan.width();
+					} catch (IllegalArgumentException refused) {
+						refusals++;
+						continue;
+					}
 					blocks += sum;
-					length += plan.width();
 					if (sum > 0) {
 						dirty++;
 					}
 				}
 			}
 			System.out.println(String.format("      %-24s lanes=%-4d blocks=%-5d dirty=%d of 16"
-				+ "  length=%d", mode.label(), lanes, blocks, dirty, length));
+				+ "  length=%d%s", mode.label(), lanes, blocks, dirty, length,
+				refusals == 0 ? "" : "  refusedToBuild=" + refusals));
 		}
 	}
 }
