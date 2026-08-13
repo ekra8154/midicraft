@@ -401,6 +401,8 @@ public final class SongBuilder {
 			case ULTRA_COMPACT_LANE -> bestUltraPlan(origin, forward, notes, limits, start);
 			case LANE -> createStraightPastePlan(origin, forward, notes);
 			case HALF_TICK_LANE -> createHalfTickPastePlan(origin, forward, notes);
+			case ULTRA_HALF_TICK_LANE ->
+				createUltraHalfTickPastePlan(origin, forward, notes, limits, start);
 		};
 	}
 
@@ -637,6 +639,82 @@ public final class SongBuilder {
 
 	private static List<EventNote> parity(List<EventNote> notes, int odd) {
 		return notes.stream().filter(note -> Math.floorMod(note.time(), 2) == odd).toList();
+	}
+
+	/**
+	 * Blocks between the two ultra corridors' facing walls.
+	 *
+	 * <p>Wide enough that nothing in one snake stands next to anything in the other, and no wider.
+	 * Two corridors side by side is the crude arrangement -- the two pulses are a corridor's width
+	 * apart whenever they are at opposite ends of their sweeps -- but it is the one that needs
+	 * nothing from the walk, which already knows how to fill a corridor and nothing about company.</p>
+	 */
+	static int ULTRA_HALF_TICK_GAP = 4;
+
+	/**
+	 * Two ultra snakes side by side, one for each half of the game tick.
+	 *
+	 * <p>The same split as the straight half-tick lane, folded. Each parity is a whole song as far
+	 * as the walk is concerned -- its times halved so its own gaps are whole repeater ticks -- and
+	 * gets its own corridor, its own walls and its own floors, laid by exactly the walk that builds
+	 * one snake today. Neither knows the other is there.</p>
+	 *
+	 * <p>Both corridors are sized to the wider of the two songs' longest event, so their walls line
+	 * up and the pair reads as one build rather than two of different widths.</p>
+	 *
+	 * <p><b>What this does not do yet.</b> The two snakes are not paced against each other: a snake
+	 * spends columns on the chords it carries, so they creep away from each other exactly as the
+	 * straight lanes did before they were padded. Folding hides a great deal of that -- a corridor's
+	 * worth of drift is one lane step of it in world terms, so what was hundreds of blocks in a
+	 * straight line is a handful here -- but hiding is not fixing, and the drift is not measured yet.
+	 * The one thing that <em>is</em> deliberate is the timing: both snakes take the same bias, so
+	 * whatever else is wrong they are not a repeater tick out of step with each other.</p>
+	 */
+	private static PastePlan createUltraHalfTickPastePlan(BlockPos origin, Direction forward,
+			List<EventNote> notes, BuildLimits limits, WalkStart start) {
+		List<EventNote> even = laneTimes(parity(notes, 0));
+		List<EventNote> odd = laneTimes(parity(notes, 1));
+		List<EventGroup> evenEvents = eventGroups(even, Layout.ultra(limits.laneFloors(), origin));
+		BlockPos secondOrigin = origin;
+		List<EventGroup> oddEvents = eventGroups(odd, Layout.ultra(limits.laneFloors(), origin));
+		// Sized to whichever song holds the longest single event, so the two corridors are the same
+		// width. Letting each pick its own would put the far walls out of line and make the gap
+		// between them a different number at every floor.
+		int longest = Math.max(
+			evenEvents.stream().mapToInt(EventGroup::length).max().orElse(1),
+			oddEvents.stream().mapToInt(EventGroup::length).max().orElse(1));
+		int laneWidth = Math.max(longest + 2, limits.laneWidth() - 2);
+		secondOrigin = origin.relative(forward, laneWidth + ULTRA_HALF_TICK_GAP);
+
+		PlacementPlan placements = new PlacementPlan();
+		walkWall(evenEvents, origin, forward, laneWidth, limits.laneFloors(), placements,
+			Layout.ultra(limits.laneFloors(), origin), start);
+		// A fresh corridor, and nothing about its opening follows from the last cell of the one
+		// beside it -- least of all how much dust has gone down since a repeater it is not wired to.
+		placements.startFreshRun();
+		walkWall(oddEvents, secondOrigin, forward, laneWidth, limits.laneFloors(), placements,
+			Layout.ultra(limits.laneFloors(), secondOrigin), start);
+		return placements.finish(PasteMode.ULTRA_HALF_TICK_LANE, origin, origin.getX(),
+			origin.getX() + laneWidth);
+	}
+
+	/**
+	 * One parity's notes with their times put on that lane's own clock.
+	 *
+	 * <p>{@code time / 2} for the same reason the straight version uses it: two events sharing a
+	 * parity are an even number of game ticks apart, so halving turns every gap into a whole
+	 * repeater tick and the walk never learns that half ticks exist.</p>
+	 *
+	 * <p>The added tick is the bias both lanes share. A repeater cannot delay by less than one, so
+	 * an opening event wanting no delay gets one anyway -- and a lane clamped while its partner is
+	 * not runs a repeater tick out of step for the rest of the song. Paying it on both is the
+	 * cheapest way to be sure neither pays it alone.</p>
+	 */
+	private static List<EventNote> laneTimes(List<EventNote> notes) {
+		return notes.stream()
+			.map(note -> new EventNote(Math.floorDiv(note.time(), 2) + 1, note.trackNumber(),
+				note.order(), note.pitch(), note.instrumentBlock()))
+			.toList();
 	}
 
 	/**
@@ -7838,7 +7916,8 @@ public final class SongBuilder {
 		COMPACT_LANE("Compact lane"),
 		ULTRA_COMPACT_LANE("Ultra compact lane"),
 		LANE("Lane"),
-		HALF_TICK_LANE("Half-tick lane");
+		HALF_TICK_LANE("Half-tick lane"),
+		ULTRA_HALF_TICK_LANE("Ultra half-tick lane");
 
 		private final String label;
 
@@ -7979,6 +8058,18 @@ public final class SongBuilder {
 
 		int runSinceRepeater() {
 			return runSinceRepeater;
+		}
+
+		/**
+		 * Forgets how much wire has been laid since the last repeater.
+		 *
+		 * <p>For starting a second, unconnected machine in the same plan. The count is about one run
+		 * of dust reaching its repeater, and the first cells of a fresh corridor have nothing to do
+		 * with the last cells of the one beside it -- carried over, it would judge the new snake's
+		 * opening against wire that is not even wired to it.</p>
+		 */
+		void startFreshRun() {
+			runSinceRepeater = 0;
 		}
 		/** Note block positions and the event tick each one belongs to. */
 		private final Map<BlockPos, Integer> notes = new LinkedHashMap<>();
@@ -8467,7 +8558,8 @@ public final class SongBuilder {
 			// the signal sideways passes under the notes of the corridors either side of it, and a
 			// machine you cannot stand in front of is a machine you cannot work out. So it goes up,
 			// and says what is wrong with it.
-			if (!faults.isEmpty() && mode != PasteMode.ULTRA_COMPACT_LANE) {
+			if (!faults.isEmpty() && mode != PasteMode.ULTRA_COMPACT_LANE
+					&& mode != PasteMode.ULTRA_HALF_TICK_LANE) {
 				throw new IllegalArgumentException("Refusing to build a broken machine: "
 					+ faults.get(0) + ". This is a bug in the layout, not in the song.");
 			}

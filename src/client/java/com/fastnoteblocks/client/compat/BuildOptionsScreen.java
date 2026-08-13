@@ -125,7 +125,8 @@ final class BuildOptionsScreen extends Screen {
 	/** Whether this layout folds inside a width you choose, and so has a width and a floor count. */
 	private boolean hasLaneControls() {
 		return mode == SongBuilder.PasteMode.COMPACT_LANE
-			|| mode == SongBuilder.PasteMode.ULTRA_COMPACT_LANE;
+			|| mode == SongBuilder.PasteMode.ULTRA_COMPACT_LANE
+			|| mode == SongBuilder.PasteMode.ULTRA_HALF_TICK_LANE;
 	}
 
 	@Override
@@ -329,6 +330,12 @@ final class BuildOptionsScreen extends Screen {
 				+ "sit three apart rather than four wherever their notes can touch safely. Same "
 				+ "width and floor controls.";
 			case LANE -> "One straight line. Easiest to read and repair, largest footprint.";
+			case ULTRA_HALF_TICK_LANE -> "Two Ultra compact lane snakes side by side, one playing "
+				+ "the even game ticks and one the odd, with four blocks between their corridors. "
+				+ "Same width and floor controls, applied to each. You wire the head yourself: the "
+				+ "second snake must start exactly one game tick after the first. Experimental -- "
+				+ "the two are not yet paced against each other, so they drift apart as the song "
+				+ "goes on.";
 			case HALF_TICK_LANE -> "Two straight lines, the right one playing the even game ticks "
 				+ "and the left the odd. Plays the song at double speed and twice the timing "
 				+ "precision. You wire the head yourself: the left lane must start exactly one game "
