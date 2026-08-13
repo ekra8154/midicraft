@@ -48,14 +48,27 @@ class RailReadBackTest {
 				SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0),
 					notes, SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
 					new SongBuilder.BuildLimits(16, size[0], size[1]));
-				NoteMachineReader.Reading reading = readAll(placeInWorld(plan), name);
-				String where = name + " at " + size[0] + " wide over " + size[1] + " floors";
-				assertEquals("", difference(sounds(notes), sounds(reading.project())),
-					where + " did not read back as itself");
-				assertEquals(0, reading.unreachedNotes(),
-					where + ": some note blocks were never triggered");
+				assertEquals("", readBackDifference(plan, notes, name),
+					name + " at " + size[0] + " wide over " + size[1]
+						+ " floors did not read back as itself");
 			}
 		}
+	}
+
+	/**
+	 * How this build differs from the song it was made of, once read back out of the blocks.
+	 *
+	 * <p>Shared with the grid sweep, which asks the same question of every size the menu offers.
+	 * A note that never fires and a note that fires on the wrong tick both show up here; nothing
+	 * else in this repo sees either.</p>
+	 */
+	static String readBackDifference(SongBuilder.PastePlan plan,
+			List<SongBuilder.EventNote> notes, String name) {
+		NoteMachineReader.Reading reading = readAll(placeInWorld(plan), name);
+		String difference = difference(sounds(notes), sounds(reading.project()));
+		return reading.unreachedNotes() == 0 ? difference
+			: difference + String.format("%n  and %d note blocks were never triggered",
+				reading.unreachedNotes());
 	}
 
 	private static NoteMachineReader.Reading readAll(Map<BlockPos, BlockState> world, String name) {
