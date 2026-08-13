@@ -60,13 +60,57 @@ class UltraLaneV2Test {
 		SongBuilder.SMALL_MAY_STACK_IN_A_TURN = false;
 		SongBuilder.STRANDED_CHORD_MAY_STILL_CUT = false;
 		SongBuilder.CUT_FAR_HALF_FREES_THE_GAP = false;
+		// Not a v2 switch, and pinned all the same: v1's whole 88 depends on it, and it is the one a
+		// tidy-up in another class was leaving off. See StackedBusTest#putTheHeadsBack.
+		SongBuilder.STACKED_BUS_HEADS = true;
 		List<SongBuilder.EventNote> song = AllTwentyFivesTest.allTwentyFives();
 		SongBuilder.PastePlan v1 = build(song, SongBuilder.PasteMode.ULTRA_COMPACT_LANE, 40, 2);
+		// Printed whether it passes or not, because when this fails in the suite and passes on its own
+		// the question is always which switch the class before it left somewhere else. Naming a handful
+		// of suspects only answers that when the suspect is one of them -- the leak this caught was
+		// STACKED_BUS_HEADS, which is not in the list above and was not on anybody's list. Reflecting
+		// over every static in the file and diffing the two runs is what found it in one go.
+		System.out.println("V1GUARD blocks="
+			+ v1.breaches().stream().mapToInt(Integer::intValue).sum()
+			+ " busHeads=" + SongBuilder.STACKED_BUS_HEADS);
 		// 40 wide over two floors is where v1 breaches this song hardest, 88 blocks in 8 lanes. If
 		// that has changed, something meant for v2 has leaked into the mode it was supposed to leave
 		// alone -- which is the whole reason the two are separate modes rather than a flag.
 		assertEquals(88, v1.breaches().stream().mapToInt(Integer::intValue).sum(),
 			"v1 still breaches the target song exactly as it did");
+	}
+
+	/**
+	 * Every climb, descent and flat turn stands at its wall.
+	 *
+	 * <p>ekran's rule, and a regression rather than a measurement: a staircase set back inside the
+	 * corridor stands in a column no other corridor's turn stands in, which is the one thing that
+	 * reaches into the lane alongside. The closing pad has been walked out to its wall since
+	 * {@link SongBuilder#PIN_DESCENTS}; {@link SongBuilder#CUT_PINS_ITS_STAIRCASE} holds the cut to
+	 * the same rule, and v2 closes nearly every lane on a cut.</p>
+	 *
+	 * <p>Asserted on the count the walk takes from the block the staircase actually lands on, not on
+	 * the shape it was planned in.</p>
+	 */
+	@Test
+	void turnsAtTheWallAndNowhereElse() throws Exception {
+		for (List<SongBuilder.EventNote> song : List.of(AllTwentyFivesTest.allTwentyFives(),
+				BreachView.song("deltarune-ch-4-guardian"))) {
+			for (int floors = 2; floors <= 5; floors++) {
+				for (int width : new int[] {20, 24, 32, 40}) {
+					SongBuilder.PastePlan plan;
+					try {
+						plan = build(song, SongBuilder.PasteMode.ULTRA_COMPACT_LANE_V2, width, floors);
+					} catch (IllegalArgumentException refused) {
+						// A size that will not build at all is a different fault, and one this branch is
+						// still carrying. It says nothing about where the staircases stand.
+						continue;
+					}
+					assertEquals(0, plan.recessedColumns(),
+						"no staircase stands inside the wall at " + width + "w x " + floors + "f");
+				}
+			}
+		}
 	}
 
 	@Test
@@ -87,6 +131,7 @@ class UltraLaneV2Test {
 			int dirty = 0;
 			int refusals = 0;
 			long length = 0;
+			int recessed = 0;
 			for (int floors = 2; floors <= 5; floors++) {
 				for (int width : new int[] {20, 24, 32, 40}) {
 					// A size that will not build at all is counted, not thrown. v2 is under construction and
@@ -98,6 +143,7 @@ class UltraLaneV2Test {
 						sum = plan.breaches().stream().mapToInt(Integer::intValue).sum();
 						lanes += plan.breaches().size();
 						length += plan.width();
+						recessed += plan.recessedColumns();
 					} catch (IllegalArgumentException refused) {
 						refusals++;
 						continue;
@@ -108,8 +154,10 @@ class UltraLaneV2Test {
 					}
 				}
 			}
+			// Recessed columns beside the breach count, because they are the two ways a lane can fail to
+			// use the corridor it was given and only one of them has ever been printed.
 			System.out.println(String.format("      %-24s lanes=%-4d blocks=%-5d dirty=%d of 16"
-				+ "  length=%d%s", mode.label(), lanes, blocks, dirty, length,
+				+ "  length=%-7d recessed=%d%s", mode.label(), lanes, blocks, dirty, length, recessed,
 				refusals == 0 ? "" : "  refusedToBuild=" + refusals));
 		}
 	}
