@@ -114,22 +114,24 @@ final class UltraLaneV2 {
 	/**
 	 * A song built the v2 way.
 	 *
-	 * <p>Runs the shared walk for now, with the booking layer off and the cut offered a column
-	 * earlier. Both of those are v2's rules; what is not yet v2 is that the walk still carries the
-	 * other forty-five flags while obeying them.</p>
+	 * <p>Its own walk, {@code SongBuilder.walkV2}, which began as a copy of the first layout's and
+	 * had the decision layer cut out of it: no booking search, no veto, no lookahead pair. Copied and
+	 * cut rather than written afresh on purpose -- deleting a rule can be checked and re-deriving one
+	 * cannot, and every descent geometry in this repository that was derived rather than built by
+	 * hand has been wrong at least once.</p>
 	 */
 	static SongBuilder.PastePlan plan(BlockPos origin, Direction forward,
 			List<SongBuilder.EventNote> notes, SongBuilder.BuildLimits limits,
 			SongBuilder.WalkStart start) {
-		boolean planner = SongBuilder.CUT_ONLY_LANES;
-		boolean reaches = SongBuilder.CUTS_THE_CHORD_THAT_REACHES;
-		SongBuilder.CUT_ONLY_LANES = true;
-		SongBuilder.CUTS_THE_CHORD_THAT_REACHES = true;
-		try {
-			return SongBuilder.bestUltraPlan(origin, forward, notes, limits, start);
-		} finally {
-			SongBuilder.CUT_ONLY_LANES = planner;
-			SongBuilder.CUTS_THE_CHORD_THAT_REACHES = reaches;
-		}
+		// Where the snake is put down, matched to the first layout deliberately. A seeded walk is a
+		// debug build reproducing a fault at a stated floor and means it; everything else starts at
+		// the top when asked to. Passing the caller's start through raw here instead sent v2 up from
+		// floor nought while v1 came down from the top, so the two were not building the same snake
+		// and every number compared between them was comparing two different shapes.
+		SongBuilder.WalkStart head = start == SongBuilder.WalkStart.HEAD && limits.startTop()
+			? new SongBuilder.WalkStart(0, limits.laneFloors() - 1, -1)
+			: start;
+		return SongBuilder.createV2PastePlan(origin, forward, notes, limits.laneWidth(),
+			limits.laneFloors(), head);
 	}
 }
