@@ -2016,7 +2016,7 @@ public final class SongBuilder {
 							: columnBehindBusy,
 						turnCells, offBus, stepOffAhead,
 						splitCells, climb > 0, layout,
-						inTurn(turning, leavingTurn, lane.pos(), lastCorner), parity)
+						inTurn(placements, turning, leavingTurn, lane.pos(), lastCorner), parity)
 					: Map.of();
 				replan = false;
 			}
@@ -2043,7 +2043,7 @@ public final class SongBuilder {
 			// behind it spoken for is built as a bus instead, and a bus is longer -- so a lane could
 			// be told a chord fitted, build it, and land a column past its own wall.
 			Landing here = landingOf(lane.pos().getX(), lane.travel().getStepX(), event, wait,
-				columnBehindBusy, wall, layout, inTurn(turning, leavingTurn, lane.pos(), lastCorner),
+				columnBehindBusy, wall, layout, inTurn(placements, turning, leavingTurn, lane.pos(), lastCorner),
 				parity);
 			int landing = here.end() + lane.travel().getStepX() * reserve;
 			// Never while the route is still bending. Inside a turn the wire runs across the corridor
@@ -2627,7 +2627,7 @@ public final class SongBuilder {
 							currentTime + spentPadding,
 							tipSignal, columnBehindBusy, next.cells(), next.offBus(), next.stepOff(),
 							next.splitCells(), climb > 0, layout,
-							inTurn(turning, leavingTurn, lane.pos(), lastCorner), parity);
+							inTurn(placements, turning, leavingTurn, lane.pos(), lastCorner), parity);
 						replan = false;
 					}
 				} else {
@@ -2721,12 +2721,12 @@ public final class SongBuilder {
 			// notes to save 2 breaches.
 			if (owing > 0 && (landingOf(lane.pos().getX(), lane.travel().getStepX(), event,
 					wait - spentPadding, columnBehindBusy, wall, layout,
-					inTurn(turning, leavingTurn, lane.pos(), lastCorner),
+					inTurn(placements, turning, leavingTurn, lane.pos(), lastCorner),
 					parity).end() - padWall)
 					* lane.travel().getStepX() <= 0) {
 				while (owing > 0 && (landingOf(lane.pos().getX() + lane.travel().getStepX() * owing,
 						lane.travel().getStepX(), event, wait - spentPadding, columnBehindBusy, wall,
-						layout, inTurn(turning, leavingTurn, lane.pos(), lastCorner), parity).end() - padWall)
+						layout, inTurn(placements, turning, leavingTurn, lane.pos(), lastCorner), parity).end() - padWall)
 						* lane.travel().getStepX() > 0) {
 					owing--;
 				}
@@ -2759,20 +2759,20 @@ public final class SongBuilder {
 			boolean strandedAlready = PREPAD_NEVER_STRANDS_THE_NEXT
 				&& strandsTheEventAfter(events, index, event, owing, lane, wait - spentPadding,
 					columnBehindBusy, wall, layout,
-					inTurn(turning, leavingTurn, lane.pos(), lastCorner), parity, splitCells);
+					inTurn(placements, turning, leavingTurn, lane.pos(), lastCorner), parity, splitCells);
 			while (PREPADS_FOR_THE_OFF_BUS_DISCOUNT && owing > 0 && tipSignal >= owing + 1
 					&& owing - grownFrom < PREPAD_GROWTH_CAP
 					&& tipSignal - owing >= PREPAD_LEAVES_WIRE
 					&& (landingOf(lane.pos().getX() + lane.travel().getStepX() * owing,
 						lane.travel().getStepX(), event, wait - spentPadding, columnBehindBusy, wall,
-						layout, inTurn(turning, leavingTurn, lane.pos(), lastCorner), parity).end() - padWall)
+						layout, inTurn(placements, turning, leavingTurn, lane.pos(), lastCorner), parity).end() - padWall)
 						* lane.travel().getStepX() < 0) {
 				// One column further is one column the next chord has not got. Taken only where the
 				// next chord can still do something with what is left.
 				if (PREPAD_NEVER_STRANDS_THE_NEXT && !strandedAlready
 						&& strandsTheEventAfter(events, index, event, owing + 1, lane,
 							wait - spentPadding, columnBehindBusy, wall, layout,
-							inTurn(turning, leavingTurn, lane.pos(), lastCorner), parity, splitCells)) {
+							inTurn(placements, turning, leavingTurn, lane.pos(), lastCorner), parity, splitCells)) {
 					placements.padded("prepadWouldStrandTheNext");
 					break;
 				}
@@ -2859,7 +2859,7 @@ public final class SongBuilder {
 				// the wait -- so the event no longer starts where it did or carries the delay it did.
 				Landing reached = landingOf(cursor.getX(), travel.getStepX(), event,
 					wait - spentPadding, columnBehindBusy, laneWall, layout,
-					inTurn(turning, leavingTurn, cursor, lastCorner), parity);
+					inTurn(placements, turning, leavingTurn, cursor, lastCorner), parity);
 				int end = reached.end();
 				EventGroup next = events.get(index + 1);
 				int beyond = landingOf(end, travel.getStepX(), next, next.time() - event.time(),
@@ -2906,7 +2906,7 @@ public final class SongBuilder {
 					int ahead = prePad(cursor.getX(), travel.getStepX(), event, wait - spentPadding,
 						columnBehindBusy, layout, laneWall,
 						(laneWall - cursor.getX()) * travel.getStepX(),
-						inTurn(turning, leavingTurn, cursor, lastCorner), parity);
+						inTurn(placements, turning, leavingTurn, cursor, lastCorner), parity);
 					// Planned like the pad behind, and for the same reason: dust in front of an event
 					// spends the same wire dust behind it does, so a lane wanting a dozen columns off a
 					// wire worth eight laid what it could and stopped short of the wall anyway. What is
@@ -2995,7 +2995,7 @@ public final class SongBuilder {
 				slackColumns,
 				!columnBehindBusy || !opening.pos().equals(before)
 					|| backPairIsFree(placements, opening, event.time()),
-				inTurn(turning, leavingTurn, opening.pos(), lastCorner),
+				inTurn(placements, turning, leavingTurn, opening.pos(), lastCorner),
 				turning ? Integer.MAX_VALUE
 					: (wall - opening.pos().getX()) * opening.travel().getStepX(), tipSignal, layout);
 			if (event.style().busHeaded()) {
@@ -5998,6 +5998,22 @@ public final class SongBuilder {
 	 * Kick Back's chord of twenty-one was refused six columns clear of its corner while i-wonder's
 	 * was refused standing against the exit run, and a count cannot tell those apart.</p>
 	 */
+	/**
+	 * The same question, asked of the blocks rather than of where the walk has got to.
+	 *
+	 * <p>See {@link #STACKED_MAY_WRAP_A_BEND}. Off, this is the rule above exactly.</p>
+	 */
+	private static boolean inTurn(PlacementPlan placements, boolean turning, boolean leavingTurn,
+			BlockPos at, BlockPos lastCorner) {
+		if (!STACKED_MAY_WRAP_A_BEND) {
+			return inTurn(turning, leavingTurn, at, lastCorner);
+		}
+		// No short circuit on `turning`. A chord on the bend is judged by how far its centre stands
+		// from the corners, which is the thing that decides whether anything can reach it, and the
+		// walk being mid-turn is not that thing.
+		return placements.cornerDistance(at) < STACKED_CLEAR_OF_CORNER;
+	}
+
 	private static boolean inTurn(boolean turning, boolean leavingTurn, BlockPos at,
 			BlockPos lastCorner) {
 		if (turning) {
@@ -6024,6 +6040,26 @@ public final class SongBuilder {
 	 * the repeater may stand at {@code corner + 3}.</p>
 	 */
 	static boolean TURN_BAN_BY_DISTANCE = true;
+
+	/**
+	 * v2: a chord may wrap a bend, so long as its centre keeps clear of both corners.
+	 *
+	 * <p>{@link #inTurn} answers the distance question ekran's rule asks -- and never gets to ask it
+	 * while the route is still bending, because {@code if (turning) return true;} comes first. So a
+	 * chord laid on the bend is refused the stacked shape for <em>where the walk is</em> rather than
+	 * for where its blocks are, falls back to a bus, and the lane runs out of room.</p>
+	 *
+	 * <p>ekran found one at Guardian 15 wide over six floors, {@code 15 81 379}: a stacked bus of
+	 * twenty that breached a <b>flat</b> turn, and which they then rebuilt by hand taking both ends
+	 * of the bend with no breach and no dead wire. Their rule, read off those blocks: a stacked
+	 * centre is safe at exactly three blocks from a corner, the corners being the two stone cells the
+	 * lane turns on. Nothing laid along the perpendicular arm can reach it there.</p>
+	 *
+	 * <p>Which the constant already says -- {@code STACKED_CLEAR_OF_CORNER} is three and the test is
+	 * {@code < 3}, so three is allowed. All this does is let the test be reached, and measure it
+	 * against every corner on the level rather than the last one recorded, because a bend has two.</p>
+	 */
+	static boolean STACKED_MAY_WRAP_A_BEND = false;
 
 	/** How far past a corner a stacked module's repeater may stand. */
 	private static final int STACKED_CLEAR_OF_CORNER = 3;
@@ -9153,6 +9189,27 @@ public final class SongBuilder {
 		private final Map<String, Integer> padding = new java.util.LinkedHashMap<>();
 		/** Route cells the wire changes direction on, where a repeater can never work. */
 		private final Set<BlockPos> corners = new java.util.HashSet<>();
+
+		/**
+		 * How far this cell is from the nearest corner on its own level, in blocks along the floor.
+		 *
+		 * <p>Both corners of a bend rather than the last one recorded, which is what
+		 * {@link #inTurn} asks and is not the same question: a bend has two turning points and a
+		 * chord wrapping it is near both. Levels are kept apart because a corner four floors down
+		 * cannot reach anything here, and Manhattan because that is the shape of the rule ekran
+		 * measured -- a stacked centre is clear at exactly three from a corner.</p>
+		 */
+		int cornerDistance(BlockPos at) {
+			int nearest = Integer.MAX_VALUE;
+			for (BlockPos corner : corners) {
+				if (corner.getY() != at.getY()) {
+					continue;
+				}
+				nearest = Math.min(nearest, Math.abs(at.getX() - corner.getX())
+					+ Math.abs(at.getZ() - corner.getZ()));
+			}
+			return nearest;
+		}
 
 		/**
 		 * A savepoint, so a shape that will not fit can be undone and a bus built instead.
