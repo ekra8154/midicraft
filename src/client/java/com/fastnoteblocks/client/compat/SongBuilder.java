@@ -7814,8 +7814,18 @@ public final class SongBuilder {
 	 *
 	 * <p>Here so the claim can be asked rather than assumed. The veto and the lookahead pair are
 	 * already gone from v2; this is what is left of {@code planLane}.</p>
+	 *
+	 * <p><b>Off, ekran's call, 2026-08-13.</b> Guardian is better without it -- 35 breach blocks in 13
+	 * lanes with, 25 in 11 without -- and Guardian is the benchmark. The all-25 song pays for it: 0
+	 * with the booking and 56 blocks in 6 lanes without, three of them at 40 wide over five floors.</p>
+	 *
+	 * <p>Those 56 blocks are owed back, and the note above says where to look for them. Whatever the
+	 * search is doing for that song it is <em>not</em> padding, because at a gap of one tick there is
+	 * nowhere to put a pad: it is {@code owing} clamping where a chord may land, which is the walk
+	 * choosing where a lane closes through a side door. Find that rule, state it in the cut decision
+	 * where it belongs, and the booking has nothing left to do.</p>
 	 */
-	static boolean V2_BOOKS_PADS = true;
+	static boolean V2_BOOKS_PADS = false;
 
 	private static StackedSplit stackedSplitOf(List<EventNote> chord, int room, int splitCells,
 			boolean climbing, boolean roomBehind) {
