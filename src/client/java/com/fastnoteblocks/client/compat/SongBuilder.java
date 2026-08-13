@@ -6081,7 +6081,7 @@ public final class SongBuilder {
 	 * {@code < 3}, so three is allowed. All this does is let the test be reached, and measure it
 	 * against every corner on the level rather than the last one recorded, because a bend has two.</p>
 	 */
-	static boolean STACKED_MAY_WRAP_A_BEND = false;
+	static boolean STACKED_MAY_WRAP_A_BEND = true;
 
 	/** How far past a corner a stacked module's repeater may stand. */
 	private static final int STACKED_CLEAR_OF_CORNER = 3;
@@ -6148,7 +6148,7 @@ public final class SongBuilder {
 	 * back over the list with sea lantern. The build is then wrong on purpose and glowing where it is
 	 * wrong, which can be walked round and looked at. Never leave this on for a real build.</p>
 	 */
-	static boolean MARK_COLLISIONS = false;
+	static boolean MARK_COLLISIONS = true;
 
 	/** Scratch: turn {@link #strandsNext} off, so a lane it changed can be diffed against itself. */
 	static boolean LOOKAHEAD = true;
