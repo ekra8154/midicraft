@@ -860,8 +860,8 @@ public final class SongBuilder {
 					railStackSeed(placements, lane, lastStyle, currentTime, turning), booked)
 					// The head's columns, its chord, and the repeater a four-tick stretch of the wait
 					// in front of it costs -- the same sum the plain path makes of it.
-					? railHeadColumns(railStackSeed(placements, lane, lastStyle, currentTime, turning))
-						+ 1 + railPadColumns(wait) : 0;
+					? railHeadColumns(railStackSeed(placements, lane, lastStyle, currentTime, turning),
+						wait) + 1 + railPadColumns(wait) : 0;
 			int landing = railColumns > 0
 				? lane.pos().getX() + lane.travel().getStepX() * (railColumns + reserve)
 				: here.end() + lane.travel().getStepX() * reserve;
@@ -4448,12 +4448,24 @@ public final class SongBuilder {
 		return TWO_RAIL_RUNS && layout.ultra() && !turning && !lane.bending()
 			&& railMayStart(events, index, floorSeed, booked)
 			&& railRoom(lane, wall)
-				>= railHeadColumns(floorSeed) + railPadColumns(wait) + 2 + reserve;
+				>= railHeadColumns(floorSeed, wait) + railPadColumns(wait) + 2 + reserve;
 	}
 
-	/** What opening a run costs in columns: both of the head's, or only the trigger off a stack. */
-	private static int railHeadColumns(int floorSeed) {
-		return floorSeed == NO_BLANK ? RAIL_HEAD_COLUMNS : RAIL_HEAD_COLUMNS - 1;
+	/**
+	 * What opening a run costs in columns: both of the head's, or only the trigger off a stack.
+	 *
+	 * <p>The cheap head is only available where the wait in front of the run lays nothing. A stacked
+	 * chord is a head because its cross of dust sits in the cell behind the trigger; a column of the
+	 * wait's own wire in between puts it out of reach, and the walk builds a whole head instead --
+	 * which is what {@code offStack} asks when it checks the padding left the lane where it stood.
+	 * Asking it there and not here is how a run came to open with one column of room less than it
+	 * had been promised: it laid its head, found no room for the pair, and ended on the column its
+	 * head's dust drives. That column lights no dust of its own, so the song stopped there. One run
+	 * of eight ticks of wait in all-of-the-lights left 113 notes silent behind it.</p>
+	 */
+	private static int railHeadColumns(int floorSeed, int wait) {
+		return floorSeed == NO_BLANK || railPadColumns(wait) > 0
+			? RAIL_HEAD_COLUMNS : RAIL_HEAD_COLUMNS - 1;
 	}
 
 	/**

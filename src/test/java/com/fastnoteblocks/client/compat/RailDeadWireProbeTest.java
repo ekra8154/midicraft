@@ -39,7 +39,7 @@ class RailDeadWireProbeTest {
 	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
 
 	/** The build under the glass. Whichever one is leaving the most of itself silent today. */
-	private static final String SONG = "michael-jackson-thriller";
+	private static final String SONG = "all-of-the-lights-kanye-west";
 	private static final int WIDTH = 16;
 	private static final int FLOORS = 3;
 
@@ -54,6 +54,9 @@ class RailDeadWireProbeTest {
 		SongBuilder.MARK_UNREACHED = true;
 		Map<BlockPos, BlockState> world = placeInWorld(plan);
 		NoteMachineReader.Reading reading = readAll(world);
+		for (String fault : plan.faults()) {
+			System.out.println("PROBE fault: " + fault);
+		}
 		System.out.println("PROBE " + reading.unreachedNotes() + " never triggered of "
 			+ notes.size() + " notes");
 		System.out.println("PROBE reading: " + reading.report());
