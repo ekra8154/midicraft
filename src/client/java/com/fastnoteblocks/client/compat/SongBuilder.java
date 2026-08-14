@@ -9811,40 +9811,31 @@ public final class SongBuilder {
 		 * are the same however the build is laid out, and counting them buries the thing being
 		 * measured under a constant.</p>
 		 *
-		 * <p>Counted as the cells carrying the signal, which is what a step of corridor <em>is</em>:
-		 * dust and repeaters, and the glass a climb goes up. Read off the commands rather than carried
-		 * on the record, so nothing has to be kept in step with it.</p>
+		 * <p>Measured off the walls and the turns, not off the blocks. A lane runs from one wall to the
+		 * other, so its length is the distance between them -- and the turn recorded at the end of it
+		 * says where it actually stopped. Counting blocks instead needs the corridor told apart from
+		 * what hangs off it by block name, and it cannot be: a pad lays its dust on glass exactly as a
+		 * climb does, and a descent's spiral is the same stone and dust as the lane.</p>
 		 *
-		 * <p>One caveat worth knowing: a stacked module lights two cells of dust off to the side of the
-		 * path, and those fall in columns of their own. So a build made of stacked shapes reads a
-		 * little longer than the corridor it walks -- by the number of stacked modules, not by their
-		 * size.</p>
+		 * <p><b>Climbs and descents are out.</b> A staircase is the handover between two lanes rather
+		 * than either of them running forward, it costs the same whatever the build does, and counting
+		 * it makes a build look longer for having more floors -- which is the complaint against depth
+		 * in the first place. The wall-to-wall measure leaves them out by construction.</p>
+		 *
+		 * <p><b>A lane that breached is measured to where it turned</b>, not to the wall it should have
+		 * turned at. That corridor was spent; hiding it inside the promised width is how it stops being
+		 * counted.</p>
 		 */
 		int totalColumns() {
-			int lowest = Integer.MAX_VALUE;
-			for (String command : commands) {
-				String[] parts = command.split(" ");
-				if (!"minecraft:air".equals(parts[4])) {
-					lowest = Math.min(lowest, Integer.parseInt(parts[2]));
-				}
+			int columns = 0;
+			for (BlockPos turn : turns) {
+				// The wall this lane came from is the far one of the two, so the run is the longer of
+				// the two distances. A lane that overran is measured to where it turned rather than to
+				// the wall it should have turned at, which is the point: a breach is corridor the build
+				// spent, and hiding it inside the promised width is how it stops being counted.
+				columns += Math.max(Math.abs(turn.getX() - nearWall), Math.abs(farWall - turn.getX()));
 			}
-			if (lowest == Integer.MAX_VALUE) {
-				return 0;
-			}
-			Set<Long> columns = new HashSet<>();
-			for (String command : commands) {
-				String[] parts = command.split(" ");
-				String block = parts[4];
-				if (!block.startsWith("minecraft:redstone_wire") && !block.startsWith("minecraft:repeater")
-						&& !block.startsWith("minecraft:glass")) {
-					continue;
-				}
-				long x = Integer.parseInt(parts[1]);
-				long floor = Math.floorDiv(Integer.parseInt(parts[2]) - lowest, CUBE_FLOOR_HEIGHT);
-				long z = Integer.parseInt(parts[3]);
-				columns.add((x & 0xffffffL) << 40 | (z & 0xffffffL) << 16 | floor & 0xffffL);
-			}
-			return columns.size();
+			return columns;
 		}
 
 		/** Columns of corridor left empty by lanes that handed over before reaching their wall. */
