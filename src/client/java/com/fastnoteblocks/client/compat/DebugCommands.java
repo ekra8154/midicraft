@@ -283,7 +283,8 @@ public final class DebugCommands {
 		List<DebugChords.Chord> parsed = chords;
 		Runnable report = () -> {
 			source.sendFeedback(Component.literal(DebugChords.describe(parsed) + " -> "
-				+ built.mode().label() + ", " + built.width() + " long, " + built.depth() + " deep, "
+				+ built.mode().label() + ", " + built.totalColumns() + " columns of corridor, "
+				+ built.width() + " long, " + built.depth() + " deep, "
 				+ built.height() + " high, " + built.commands().size() + " blocks")
 				.withStyle(ChatFormatting.GRAY));
 			// Where the walls came out, in the world, which cannot be worked out from where you are

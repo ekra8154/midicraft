@@ -80,11 +80,11 @@ class GuardianV2StateProbe {
 				int unreached = BreachView.readBack("guardian", plan).unreachedNotes();
 				List<String> dead = deadRuns(plan);
 				System.out.println(String.format(
-					"   %2dw x %df  breachBlocks=%-4d lanes=%-3d worst=%-3d wrong=%-3d dead=%-3d"
-					+ " deadRuns=%-2d  walls %d..%d",
-					width, floors, blocks, plan.breaches().size(), plan.worstBreach(),
-					plan.wrongNotes(), unreached, dead.size(), plan.nearWall(), plan.farWall()));
-				dead.forEach(line -> System.out.println("        " + line));
+					"   %2dw x %df  totalCols=%-7d breachBlocks=%-4d lanes=%-3d worst=%-3d wrong=%-3d"
+					+ " dead=%-3d  walls %d..%d",
+					width, floors, plan.totalColumns(), blocks, plan.breaches().size(),
+					plan.worstBreach(), plan.wrongNotes(), unreached, plan.nearWall(),
+					plan.farWall()));
 				if (plan.worstBreach() > worstBlocks) {
 					worstBlocks = plan.worstBreach();
 					worstWidth = width;
