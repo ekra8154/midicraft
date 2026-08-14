@@ -849,10 +849,10 @@ public final class SongBuilder {
 			// the blank column that gets it onto the path rail, and then its own.
 			int railColumns = railContinues
 				? railPhase == 1 && railBlank != NO_BLANK ? 2 : 1
-				: railOpens(events, index, lane, wall, layout, turning)
+				: railOpens(events, index, lane, wall, layout, turning, reserve, wait)
 					// The head's two columns, its chord, and the repeater a four-tick stretch of the
 					// wait in front of it costs -- the same sum the plain path makes of it.
-					? RAIL_HEAD_COLUMNS + 1 + Math.max(0, (wait - 1) / 4) : 0;
+					? RAIL_HEAD_COLUMNS + 1 + railPadColumns(wait) : 0;
 			int landing = railColumns > 0
 				? lane.pos().getX() + lane.travel().getStepX() * (railColumns + reserve)
 				: here.end() + lane.travel().getStepX() * reserve;
@@ -1781,7 +1781,8 @@ public final class SongBuilder {
 			int laneWall = lane.travel() == forward ? farWall : nearWall;
 			if (turning || lane.bending()) {
 				railPhase = -1;
-			} else if (railPhase >= 0 || railOpens(events, index, lane, laneWall, layout, false)) {
+			} else if (railPhase >= 0
+					|| railOpens(events, index, lane, laneWall, layout, false, reserve, wait)) {
 				boolean opening = railPhase < 0;
 				if (opening) {
 					// The wait in front of the run, laid the way every other module lays it: a repeater
@@ -1837,8 +1838,10 @@ public final class SongBuilder {
 				railLive[railPhase] = event.time();
 				railPhase = nextDelay > 0 ? 1 - railPhase : -1;
 				currentTime = event.time();
-				// Every column of a run holds a repeater, so the wire never runs: whatever touches the
-				// end of one is reading a block a repeater drives directly.
+				// Every column of a run holds a repeater bar the one it opens on, so the wire never
+				// runs: whatever touches the end of one is reading a block a repeater drives directly.
+				// The opening column is the exception and it is not allowed to be the last, which is
+				// what {@link #railOpens} asks its room for.
 				tipSignal = DUST_RANGE;
 				columnBehindBusy = true;
 				lastStyle = ChordStyle.SMALL;
@@ -4342,21 +4345,36 @@ public final class SongBuilder {
 		return (wall - lane.pos().getX()) * lane.travel().getStepX();
 	}
 
+	/** Columns of repeater the wait in front of a run costs before its head can be laid. */
+	private static int railPadColumns(int wait) {
+		return Math.max(0, (wait - 1) / 4);
+	}
+
 	/**
 	 * Whether a run may open at this cell of this lane.
 	 *
-	 * <p>The room asked for is the room a run occupies and nothing else: two columns of head and the
-	 * three notes that are the shortest run worth opening. It used to keep the turn's cells back as
-	 * well, which stood a run several columns off every wall for nothing -- those cells are a
-	 * <em>wire</em> budget, and every column of a run holds a repeater, so a run hands the staircase
-	 * in front of it a full fifteen from the cell it stops in. ekran, who noticed the gap in game.
-	 * What a run does have to keep back is the pair, and that is asked column by column as it goes.</p>
+	 * <p>The room asked for is the room the run's <em>first pair</em> needs, because a run that stops
+	 * at the column it opened on is a dead wire. Every other column of a run is driven by a repeater,
+	 * and a block a repeater drives hands a full fifteen to whatever the lane lays next; the opening
+	 * column alone is driven by the head's dust, and a block that dust powers cannot light dust of
+	 * its own. So the lane carries on into its padding and the signal stops there, with the rest of
+	 * the song behind it. ekran read one off the world as a stone with wire running into it and out
+	 * of it, and prescribed a repeater beside the block -- which is the physics exactly. The column
+	 * is simply not worth building: a run of one costs three columns where the plain module costs
+	 * two, so the answer is to want the room up front rather than to buy a way out of it.</p>
+	 *
+	 * <p>Which makes this the same sum the column-by-column test makes, moved to before the head is
+	 * laid: the pair and the turn's reserve, plus the two columns of head and whatever the wait in
+	 * front of it spends, since the opening column stands that much further down the lane. The two
+	 * used to disagree by the reserve and by the padding, and every dead wire in the two real songs
+	 * measured was that disagreement.</p>
 	 */
 	private static boolean railOpens(List<EventGroup> events, int index, Lane lane, int wall,
-			Layout layout, boolean turning) {
+			Layout layout, boolean turning, int reserve, int wait) {
 		return TWO_RAIL_RUNS && layout.ultra() && !turning && !lane.bending()
 			&& railMayStart(events, index)
-			&& railRoom(lane, wall) >= RAIL_HEAD_COLUMNS + 3;
+			&& railRoom(lane, wall)
+				>= RAIL_HEAD_COLUMNS + railPadColumns(wait) + 2 + reserve;
 	}
 
 	/**
@@ -4471,6 +4489,14 @@ public final class SongBuilder {
 		List<EventNote> hanging = new ArrayList<>(chord);
 		if (phase == 0) {
 			BlockPos centre = at.pos().above();
+			// The one shape of run that cannot hand its signal on. {@link #railOpens} is what keeps
+			// this from happening and it is arithmetic against a wall, so it is worth saying out loud
+			// rather than trusting: dust powers this centre, and a block dust powers lights no dust of
+			// its own, so the padding the lane lays next is dead and the song stops there.
+			if (fromDust && nextDelay == 0) {
+				placements.trouble("a run at tick " + time
+					+ " ended on the column its head's dust drives, which cannot light the wire after it");
+			}
 			EventNote harp = fromDust ? null : takeHarpNote(hanging);
 			placements.placing("rail:PATH notes" + chord.size()
 				+ (harp == null ? " sidesOnly" : " centred") + (fromDust ? " head" : ""));
