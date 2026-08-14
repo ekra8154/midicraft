@@ -41,7 +41,8 @@ class GuardianStackedTest {
 		SongBuilder.BACK_FLANK_AWAY_FROM_NEXT_LANE = true;
 		SongBuilder.NUDGE_WHEN_BEHIND_BUSY = true;
 		SongBuilder.BACK_PAIR_ASKS_THE_BLOCKS = true;
-		SongBuilder.PREPADS_FOR_THE_OFF_BUS_DISCOUNT = true;
+		// The shipping default, which is off -- see the flag.
+		SongBuilder.PREPADS_FOR_THE_OFF_BUS_DISCOUNT = false;
 	}
 
 	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");

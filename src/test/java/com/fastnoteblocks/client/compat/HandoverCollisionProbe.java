@@ -197,7 +197,7 @@ class HandoverCollisionProbe {
 						}
 					}
 				} finally {
-					SongBuilder.CUTS_A_CHORD_THAT_FITS = false;
+					SongBuilder.CUTS_A_CHORD_THAT_FITS = true;
 					SongBuilder.CUT_PAD_COLUMNS = 2;
 				}
 				System.out.println("CUTFITS cuts=" + (cuts ? "on " : "off") + " cutPad=" + pad
@@ -225,7 +225,7 @@ class HandoverCollisionProbe {
 				System.out.println("CUTFITS44 cuts=" + (cuts ? "on " : "off") + " REFUSED: "
 					+ no.getMessage());
 			} finally {
-				SongBuilder.CUTS_A_CHORD_THAT_FITS = false;
+				SongBuilder.CUTS_A_CHORD_THAT_FITS = true;
 			}
 		}
 	}
@@ -244,7 +244,7 @@ class HandoverCollisionProbe {
 					new SongBuilder.BuildLimits(16, 44, 3));
 			} finally {
 				SongBuilder.TRACE_TURNS = false;
-				SongBuilder.CUTS_A_CHORD_THAT_FITS = false;
+				SongBuilder.CUTS_A_CHORD_THAT_FITS = true;
 			}
 		}
 	}
