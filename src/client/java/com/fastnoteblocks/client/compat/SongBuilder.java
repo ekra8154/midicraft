@@ -9798,6 +9798,47 @@ public final class SongBuilder {
 			return breaches.stream().mapToInt(Integer::intValue).max().orElse(0);
 		}
 
+		/**
+		 * How many columns of corridor the snake ended up occupying, across every floor.
+		 *
+		 * <p>ekran's, and it replaces {@code depth} as the number to watch. Depth is a bad measure of
+		 * a build: it moves in jumps, it depends on how many floors the config was given, and a real
+		 * optimisation can shorten the snake by hundreds of columns without moving it at all. This is
+		 * the length of the snake itself.</p>
+		 *
+		 * <p>A column is an {@code x, z} on one floor, so the same {@code x, z} one floor up is another
+		 * column -- the snake passes through both and pays for both. Floors are
+		 * {@link #CUBE_FLOOR_HEIGHT} apart and a floor's blocks span from one below its path to two
+		 * above, so the datum is offset to keep each floor's own blocks together.</p>
+		 *
+		 * <p>Read off the commands rather than carried on the record, because that is every block the
+		 * build actually places and nothing has to be kept in step with it.</p>
+		 */
+		int totalColumns() {
+			int floorOf = Integer.MAX_VALUE;
+			for (String command : commands) {
+				String[] parts = command.split(" ");
+				if (!"minecraft:air".equals(parts[4])) {
+					floorOf = Math.min(floorOf, Integer.parseInt(parts[2]));
+				}
+			}
+			if (floorOf == Integer.MAX_VALUE) {
+				return 0;
+			}
+			Set<Long> columns = new HashSet<>();
+			for (String command : commands) {
+				String[] parts = command.split(" ");
+				if ("minecraft:air".equals(parts[4])) {
+					continue;
+				}
+				long x = Integer.parseInt(parts[1]);
+				long floor = Math.floorDiv(Integer.parseInt(parts[2]) - floorOf, CUBE_FLOOR_HEIGHT);
+				long z = Integer.parseInt(parts[3]);
+				columns.add((x & 0xffffffL) << 40 | (z & 0xffffffL) << 16 | floor & 0xffffL);
+			}
+			return columns.size();
+		}
+
 		/** Columns of corridor left empty by lanes that handed over before reaching their wall. */
 		int recessedColumns() {
 			return recesses.stream().mapToInt(Integer::intValue).sum();

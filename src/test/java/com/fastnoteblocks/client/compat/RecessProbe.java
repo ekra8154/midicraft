@@ -160,6 +160,7 @@ class RecessProbe {
 		int refused = 0;
 		int wrong = 0;
 		long length = 0;
+		long columns = 0;
 		List<String> sizes = new java.util.ArrayList<>();
 		Map<String, Integer> census = new TreeMap<>();
 		for (int floors = 2; floors <= 5; floors++) {
@@ -179,6 +180,7 @@ class RecessProbe {
 				lanes += plan.breaches().size();
 				blocks += sum;
 				length += plan.width();
+				columns += plan.totalColumns();
 				wrong += plan.wrongNotes();
 				if (sum > 0) {
 					dirty++;
@@ -189,8 +191,9 @@ class RecessProbe {
 			}
 		}
 		System.out.println(String.format(
-			"      %-22s lanes=%-4d blocks=%-5d dirty=%-2d refused=%-2d wrong=%-3d length=%d",
-			name, lanes, blocks, dirty, refused, wrong, length));
+			"      %-22s lanes=%-4d blocks=%-5d dirty=%-2d refused=%-2d wrong=%-3d totalCols=%-8d"
+			+ " width=%d",
+			name, lanes, blocks, dirty, refused, wrong, columns, length));
 		// The shape decisions this arm turns on, so a table that does not move can say whether the
 		// thing being measured ever happened.
 		census.entrySet().stream()

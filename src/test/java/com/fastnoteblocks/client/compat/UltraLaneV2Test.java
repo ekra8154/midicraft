@@ -131,6 +131,10 @@ class UltraLaneV2Test {
 			int dirty = 0;
 			int refusals = 0;
 			long length = 0;
+			// The length of the snake, which is the number worth watching. Width and depth move in
+			// jumps and depend on how many floors the config was handed; this moves whenever the build
+			// actually gets shorter. ekran's.
+			long columns = 0;
 			int recessed = 0;
 			for (int floors = 2; floors <= 5; floors++) {
 				for (int width : new int[] {20, 24, 32, 40}) {
@@ -143,6 +147,7 @@ class UltraLaneV2Test {
 						sum = plan.breaches().stream().mapToInt(Integer::intValue).sum();
 						lanes += plan.breaches().size();
 						length += plan.width();
+						columns += plan.totalColumns();
 						recessed += plan.recessedColumns();
 					} catch (IllegalArgumentException refused) {
 						refusals++;
@@ -157,7 +162,8 @@ class UltraLaneV2Test {
 			// Recessed columns beside the breach count, because they are the two ways a lane can fail to
 			// use the corridor it was given and only one of them has ever been printed.
 			System.out.println(String.format("      %-24s lanes=%-4d blocks=%-5d dirty=%d of 16"
-				+ "  length=%-7d recessed=%d%s", mode.label(), lanes, blocks, dirty, length, recessed,
+				+ "  totalCols=%-8d width=%-7d recessed=%d%s", mode.label(), lanes, blocks, dirty,
+				columns, length, recessed,
 				refusals == 0 ? "" : "  refusedToBuild=" + refusals));
 		}
 	}
