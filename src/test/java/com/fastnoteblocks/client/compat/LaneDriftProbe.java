@@ -42,22 +42,32 @@ class LaneDriftProbe {
 
 	@Test
 	void measuresHowFarApartTheTwoPulsesGet() throws Exception {
-		for (String name : new String[] {
-				"deltarune-ch-4-guardian", "illit-do-the-dance", "a-dark-zone-2-lanes-maybe"}) {
+		// Songs at the speed they are saved at, and the same songs doubled. A song already on the
+		// repeater grid puts every event on an even game tick, so its second lane is empty and it
+		// cannot drift at all -- doubling is what makes it a two-lane song and what makes the
+		// question mean anything. Which is also why these are the repro: a drift needs a song whose
+		// two halves carry unequal weight, and it needs the song to have two halves in the first.
+		for (Object[] subject : new Object[][] {
+				{"a-dark-zone-2-lanes-maybe", 1}, {"deltarune-ch-4-guardian", 2},
+				{"illit-do-the-dance", 2}, {"michael-jackson-thriller", 2}}) {
+			String name = (String)subject[0];
+			int speedFactor = (Integer)subject[1];
 			List<SongBuilder.EventNote> song;
 			try {
-				song = BreachView.song(name, SongBuilder.PasteMode.HALF_TICK_LANE);
+				com.fastnoteblocks.client.composer.ComposerProject project = BreachView.project(name);
+				if (speedFactor != 1) {
+					project = project.withSpeedQuarters(
+						Math.max(1, project.speedQuarters()) * speedFactor);
+				}
+				song = SongBuilder.notesFor(SongBuilder.PasteMode.HALF_TICK_LANE,
+					project.toSequenceTracks(java.util.Set.of(), true), project, true);
 			} catch (java.io.IOException missing) {
 				continue;
 			}
 			SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0), song,
 				SongBuilder.PasteMode.HALF_TICK_LANE, new SongBuilder.BuildLimits(4, 44, 3));
 
-			int minZ = plan.commands().stream().map(SETBLOCK::matcher).filter(Matcher::matches)
-				.mapToInt(block -> Integer.parseInt(block.group(3))).min().orElse(0);
-			int maxZ = plan.commands().stream().map(SETBLOCK::matcher).filter(Matcher::matches)
-				.mapToInt(block -> Integer.parseInt(block.group(3))).max().orElse(0);
-			double split = (minZ + maxZ) / 2.0;
+			double split = laneSplit(plan);
 
 			List<Pulse> right = pulses(plan, song, 0, split, true);
 			List<Pulse> left = pulses(plan, song, 1, split, false);
@@ -100,7 +110,7 @@ class LaneDriftProbe {
 			}
 
 			System.out.println();
-			System.out.println("==== " + name + " ====");
+			System.out.println("==== " + name + (speedFactor == 1 ? "" : " at " + speedFactor + "x") + " ====");
 			System.out.println("  " + song.size() + " notes, right lane " + right.size()
 				+ " events, left lane " + left.size() + " events");
 			System.out.println("  build spans " + plan.spanX() + " blocks");
@@ -110,6 +120,150 @@ class LaneDriftProbe {
 				"  over 20 blocks apart for %.1f%% of the song, over 48 (earshot) for %.1f%%",
 				100.0 * over20 / Math.max(1, samples), 100.0 * over48 / Math.max(1, samples)));
 		}
+	}
+
+	/**
+	 * Every song there is, at its own speed and doubled, against the tolerance padding aims at.
+	 *
+	 * <p>The named songs above are a repro; this is the question. A tolerance of sixteen is where
+	 * padding starts rather than where drift stops -- a lane closes a gap one module at a time and
+	 * only with what its run has spare -- so what matters is which songs it fails to hold, and by
+	 * how much. Anything past 48 is out of earshot and is the real failure; past 16 is the tolerance
+	 * being missed, which is worth knowing before it becomes the other thing.</p>
+	 */
+	@Test
+	void sweepsEverySongForDriftPastTheTolerance() throws Exception {
+		java.nio.file.Path songs = java.nio.file.Path.of("run", "config", "fast-noteblocks", "songs");
+		List<java.nio.file.Path> files = new ArrayList<>();
+		try (var listing = java.nio.file.Files.list(songs)) {
+			listing.filter(file -> file.toString().endsWith(".json")).sorted().forEach(files::add);
+		}
+		System.out.println();
+		System.out.println("==== drift across the library, half-tick lane ====");
+		System.out.println(String.format("  %-42s %-7s %-9s %-8s %s",
+			"", "speed", "lanes", "worst", "out of earshot"));
+		int twoLane = 0;
+		int pastTolerance = 0;
+		int pastEarshot = 0;
+		int worstEver = 0;
+		int twoLaneAtOwnSpeed = 0;
+		int pastToleranceAtOwnSpeed = 0;
+		int pastEarshotAtOwnSpeed = 0;
+		int worstAtOwnSpeed = 0;
+		for (java.nio.file.Path file : files) {
+			String name = file.getFileName().toString().replace(".json", "");
+			for (int speedFactor : new int[] {1, 2}) {
+				com.fastnoteblocks.client.composer.ComposerProject project = BreachView.project(name);
+				if (speedFactor != 1) {
+					project = project.withSpeedQuarters(
+						Math.max(1, project.speedQuarters()) * speedFactor);
+				}
+				List<SongBuilder.EventNote> song = SongBuilder.notesFor(
+					SongBuilder.PasteMode.HALF_TICK_LANE,
+					project.toSequenceTracks(java.util.Set.of(), true), project, true);
+				if (song.isEmpty()) {
+					continue;
+				}
+				long odd = song.stream().filter(note -> Math.floorMod(note.time(), 2) == 1).count();
+				// A song entirely on one parity builds one lane and has nothing to drift from.
+				if (odd == 0 || odd == song.size()) {
+					continue;
+				}
+				twoLane++;
+				SongBuilder.PastePlan plan;
+				try {
+					plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0), song,
+						SongBuilder.PasteMode.HALF_TICK_LANE, new SongBuilder.BuildLimits(4, 44, 3));
+				} catch (RuntimeException refused) {
+					System.out.println(String.format("  %-42s %-7s REFUSED %s",
+						name.length() > 41 ? name.substring(0, 41) : name,
+						speedFactor + "x", refused.getMessage()));
+					continue;
+				}
+				double split = laneSplit(plan);
+				List<Pulse> right = pulses(plan, song, 0, split, true);
+				List<Pulse> left = pulses(plan, song, 1, split, false);
+				if (right.isEmpty() || left.isEmpty()) {
+					continue;
+				}
+				int worst = 0;
+				long beyond = 0;
+				long samples = 0;
+				int rightAt = 0;
+				int leftAt = 0;
+				List<Integer> ticks = new ArrayList<>();
+				right.forEach(pulse -> ticks.add(pulse.gameTick()));
+				left.forEach(pulse -> ticks.add(pulse.gameTick()));
+				ticks.sort(Comparator.naturalOrder());
+				for (int tick : ticks) {
+					while (rightAt + 1 < right.size() && right.get(rightAt + 1).gameTick() <= tick) {
+						rightAt++;
+					}
+					while (leftAt + 1 < left.size() && left.get(leftAt + 1).gameTick() <= tick) {
+						leftAt++;
+					}
+					int apart = Math.abs(right.get(rightAt).x() - left.get(leftAt).x());
+					worst = Math.max(worst, apart);
+					if (apart > 48) {
+						beyond++;
+					}
+					samples++;
+				}
+				worstEver = Math.max(worstEver, worst);
+				if (worst > 48) {
+					pastEarshot++;
+				}
+				if (worst > 16) {
+					pastTolerance++;
+				}
+				// Counted apart, because they are different claims. A song at the speed it is saved
+				// at is one ekran would actually paste; the same song doubled is a stress case I made
+				// up. Reporting them together said "49 of 51 drift" about a library whose songs
+				// mostly do not have two lanes at all, which is a true sentence about the wrong set.
+				if (speedFactor == 1) {
+					twoLaneAtOwnSpeed++;
+					worstAtOwnSpeed = Math.max(worstAtOwnSpeed, worst);
+					pastToleranceAtOwnSpeed += worst > 16 ? 1 : 0;
+					pastEarshotAtOwnSpeed += worst > 48 ? 1 : 0;
+				}
+				// Every song that really has two lanes gets a row whatever its drift, so the ones
+				// that are fine are visible too. Doubled ones appear only when they misbehave.
+				if (speedFactor == 1 || worst > 16) {
+					System.out.println(String.format("  %-42s %-7s %-9s %-8s %.1f%%",
+						name.length() > 41 ? name.substring(0, 41) : name,
+						speedFactor + "x",
+						right.size() + "/" + left.size(),
+						worst + " blk",
+						100.0 * beyond / Math.max(1, samples)));
+				}
+			}
+		}
+		System.out.println();
+		System.out.println("  AT THEIR OWN SPEED -- songs that really do build two lanes:");
+		System.out.println("    " + twoLaneAtOwnSpeed + " of " + files.size() + " songs, "
+			+ pastToleranceAtOwnSpeed + " past the 16-block tolerance, "
+			+ pastEarshotAtOwnSpeed + " past 48 (earshot); worst " + worstAtOwnSpeed + " blocks");
+		System.out.println("  DOUBLED -- a stress case, not a build anyone would paste:");
+		System.out.println("    " + (twoLane - twoLaneAtOwnSpeed) + " two-lane builds, "
+			+ (pastTolerance - pastToleranceAtOwnSpeed) + " past the tolerance, "
+			+ (pastEarshot - pastEarshotAtOwnSpeed) + " past earshot; worst overall "
+			+ worstEver + " blocks");
+	}
+
+	/**
+	 * The line between the two lanes, taken from the geometry rather than the middle.
+	 *
+	 * <p>The even lane sits at higher z and is three columns wide wherever one of its chords has
+	 * three notes; the odd lane is below it and may be narrower. Splitting the z range down the
+	 * middle assumes both are three wide, and Aria Math's odd lane is a single column -- its forty
+	 * notes are all lone ones. That put a third of the <em>even</em> lane on the odd side and had
+	 * this probe comparing the even lane against itself, reporting 6,171 blocks of drift for a lane
+	 * that does not drift: it simply stops, forty notes in.</p>
+	 */
+	private static double laneSplit(SongBuilder.PastePlan plan) {
+		return plan.commands().stream().map(SETBLOCK::matcher).filter(Matcher::matches)
+			.filter(block -> block.group(4).startsWith("minecraft:note_block"))
+			.mapToInt(block -> Integer.parseInt(block.group(3))).max().orElse(0) - 2.5;
 	}
 
 	/**
