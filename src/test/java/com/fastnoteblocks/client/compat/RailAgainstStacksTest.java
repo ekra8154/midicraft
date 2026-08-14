@@ -48,6 +48,9 @@ class RailAgainstStacksTest {
 		int betterOn = 0;
 		var wrongBySong = new TreeMap<String, String>();
 		var census = new TreeMap<String, Integer>();
+		var breachBySong = new TreeMap<String, String>();
+		var deadBySong = new TreeMap<String, String>();
+		var totals = new TreeMap<String, Integer>();
 		for (Path path : songs) {
 			String name = path.getFileName().toString().replace(".json", "");
 			List<SongBuilder.EventNote> notes;
@@ -72,6 +75,27 @@ class RailAgainstStacksTest {
 					wrongBySong.merge(name, size[0] + "/" + size[1] + ":"
 						+ off.wrongNotes() + "->" + on.wrongNotes(), (a, b) -> a + " " + b);
 				}
+				// The two faults a run could bring that a depth figure would never show. A breach is
+				// blocks laid past the wall the lane was measured against; a dead wire is the reader
+				// saying so, which every plan already asks itself under MARK_UNREACHED.
+				int breachOff = breaches(off);
+				int breachOn = breaches(on);
+				int deadOff = unreached(off);
+				int deadOn = unreached(on);
+				totals.merge("breach off", breachOff, Integer::sum);
+				totals.merge("breach on", breachOn, Integer::sum);
+				totals.merge("wrong off", off.wrongNotes(), Integer::sum);
+				totals.merge("wrong on", on.wrongNotes(), Integer::sum);
+				totals.merge("dead off", deadOff, Integer::sum);
+				totals.merge("dead on", deadOn, Integer::sum);
+				if (breachOn > breachOff) {
+					breachBySong.merge(name, size[0] + "/" + size[1] + ":"
+						+ breachOff + "->" + breachOn, (a, b) -> a + " " + b);
+				}
+				if (deadOn > deadOff) {
+					deadBySong.merge(name, size[0] + "/" + size[1] + ":"
+						+ deadOff + "->" + deadOn, (a, b) -> a + " " + b);
+				}
 				if (on.spanZ() > off.spanZ()) {
 					worseOn++;
 				} else if (on.spanZ() < off.spanZ()) {
@@ -89,8 +113,13 @@ class RailAgainstStacksTest {
 		}
 		System.out.println("STACKS runs opened " + census + " over the whole library");
 		System.out.println("STACKS depth better on " + betterOn + " sizes, worse on " + worseOn);
+		System.out.println("STACKS totals " + totals);
 		System.out.println("STACKS songs where runs add wrong notes: " + wrongBySong.size());
 		wrongBySong.forEach((name, where) -> System.out.println("STACKS  " + name + "  " + where));
+		System.out.println("STACKS songs where runs add breach: " + breachBySong.size());
+		breachBySong.forEach((name, where) -> System.out.println("STACKS breach " + name + "  " + where));
+		System.out.println("STACKS songs where runs add a dead wire: " + deadBySong.size());
+		deadBySong.forEach((name, where) -> System.out.println("STACKS dead " + name + "  " + where));
 	}
 
 	/** What the wrong notes a run brings actually say, in the song that has the most of them. */
@@ -145,6 +174,26 @@ class RailAgainstStacksTest {
 				System.out.println(line);
 			}
 		}
+	}
+
+	/** Blocks laid past the wall, summed over every lane that did it. */
+	private static int breaches(SongBuilder.PastePlan plan) {
+		return plan.breaches().stream().mapToInt(Integer::intValue).sum();
+	}
+
+	/**
+	 * Note blocks the signal never reaches, off the fault every plan already writes for itself.
+	 *
+	 * <p>{@code MARK_UNREACHED} reads every build back inside {@code createPastePlan} and says so,
+	 * so a dead wire is already counted here -- it only ever needed reporting.</p>
+	 */
+	private static int unreached(SongBuilder.PastePlan plan) {
+		for (String fault : plan.faults()) {
+			if (fault.contains("would never be triggered")) {
+				return Integer.parseInt(fault.split(" ")[0]);
+			}
+		}
+		return 0;
 	}
 
 	/** What share of this song's notes stand in a chord big enough to be built stacked. */

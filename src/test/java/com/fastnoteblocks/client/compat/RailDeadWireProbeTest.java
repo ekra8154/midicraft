@@ -38,14 +38,19 @@ class RailDeadWireProbeTest {
 
 	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
 
+	/** The build under the glass. Whichever one is leaving the most of itself silent today. */
+	private static final String SONG = "michael-jackson-thriller";
+	private static final int WIDTH = 16;
+	private static final int FLOORS = 3;
+
 	@Test
 	void dumpsWhereTheChainStops() throws Exception {
-		List<SongBuilder.EventNote> notes = load("song-of-storms-but-noteblocks-dont-kill-me");
+		List<SongBuilder.EventNote> notes = load(SONG);
 		// The marking is what makes it visible in game and what makes it invisible here: a sea lantern
 		// is not a note block, so a marked build reads back as having reached everything it has left.
 		SongBuilder.MARK_UNREACHED = false;
 		SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0), notes,
-			SongBuilder.PasteMode.ULTRA_COMPACT_LANE, new SongBuilder.BuildLimits(16, 8, 2));
+			SongBuilder.PasteMode.ULTRA_COMPACT_LANE, new SongBuilder.BuildLimits(16, WIDTH, FLOORS));
 		SongBuilder.MARK_UNREACHED = true;
 		Map<BlockPos, BlockState> world = placeInWorld(plan);
 		NoteMachineReader.Reading reading = readAll(world);
@@ -80,7 +85,7 @@ class RailDeadWireProbeTest {
 					net.minecraft.world.level.block.Blocks.NOTE_BLOCK))
 				.filter(entry -> entry.getValue() < laid.get(first))
 				.sorted((a, b) -> Integer.compare(b.getValue(), a.getValue()))
-				.limit(8).toList()) {
+				.limit(4).toList()) {
 			System.out.println("  #" + note.getValue() + "  " + note.getKey().getX() + " "
 				+ note.getKey().getY() + " " + note.getKey().getZ()
 				+ (dead.contains(note.getKey()) ? "  NEVER TRIGGERED" : "  reached"));
@@ -94,8 +99,8 @@ class RailDeadWireProbeTest {
 			int y = Integer.parseInt(parts[2]);
 			int z = Integer.parseInt(parts[3]);
 			order++;
-			if (Math.abs(z - first.getZ()) <= 1 && Math.abs(y - first.getY()) <= 2
-					&& x >= first.getX() - 1 && x <= first.getX() + 8) {
+			if (Math.abs(z - first.getZ()) <= 2 && y >= first.getY() - 7 && y <= first.getY() + 2
+					&& x >= first.getX() - 2 && x <= first.getX() + 14) {
 				System.out.println("  #" + order + "  " + x + " " + y + " " + z + "  " + parts[4]);
 			}
 		}
