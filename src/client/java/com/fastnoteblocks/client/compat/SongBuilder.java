@@ -15,6 +15,7 @@ import java.util.Set;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.commands.arguments.blocks.BlockStateParser;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.EmptyBlockGetter;
 
@@ -44,11 +45,12 @@ public final class SongBuilder {
 				continue;
 			}
 			String instrumentBlock = instrumentBlockId(layer.instrument());
+			PreviewInstrument.Effect effect = effectOf(layer.instrument());
 			int time = 0;
 			int order = 0;
 			for (Step step : project.toSteps(layer)) {
 				if (step.type() == StepType.NOTE) {
-					notes.add(new EventNote(time, layerIndex + 1, order++, step.value(), instrumentBlock));
+					notes.add(new EventNote(time, layerIndex + 1, order++, step.value(), instrumentBlock, effect));
 				} else {
 					time += step.value();
 				}
@@ -72,6 +74,7 @@ public final class SongBuilder {
 		for (int trackIndex = 0; trackIndex < tracks.size(); trackIndex++) {
 			FastNoteblocksConfig.SequenceTrack track = tracks.get(trackIndex);
 			String instrumentBlock = instrumentBlockId(track.instrument());
+			PreviewInstrument.Effect effect = effectOf(track.instrument());
 			int time = 0;
 			int order = 0;
 			List<Step> steps;
@@ -82,7 +85,7 @@ public final class SongBuilder {
 			}
 			for (Step step : steps) {
 				if (step.type() == StepType.NOTE) {
-					notes.add(new EventNote(time, trackIndex + 1, order++, step.value(), instrumentBlock));
+					notes.add(new EventNote(time, trackIndex + 1, order++, step.value(), instrumentBlock, effect));
 				} else {
 					time += step.value();
 				}
@@ -189,10 +192,16 @@ public final class SongBuilder {
 		}
 	}
 
-	/** How far a chord too small to need a bus reaches either side of its lane. */
-	private static LaneReach smallChordReach(int chordSize, int margin) {
+	/**
+	 * How far a chord too small to need a bus reaches either side of its lane.
+	 *
+	 * <p>A chord of one normally sits on the centre line and reaches nothing. The exception is one
+	 * that had to be lent a middle: its sound is off to the back side, so the lane owes it that
+	 * column even though there is only one sound in it.</p>
+	 */
+	private static LaneReach smallChordReach(int chordSize, boolean lentMiddle, int margin) {
 		if (chordSize <= 1) {
-			return new LaneReach(0, 0, margin, false);
+			return new LaneReach(lentMiddle ? 1 : 0, 0, margin, false);
 		}
 		return chordSize <= 2 ? new LaneReach(0, 1, margin, false)
 			: new LaneReach(1, 1, margin, false);
@@ -3824,7 +3833,7 @@ public final class SongBuilder {
 				: style.busHeaded() ? Math.max(0, 13 - tailCells)
 				: 13;
 			result.add(new EventGroup(time, List.copyOf(chord), delayRepeaters + eventLength,
-				maxSafeTurnDistance, style, laneReachOf(layout, style, chord.size())));
+				maxSafeTurnDistance, style, laneReachOf(layout, style, chord)));
 			currentTime = time;
 			previousTookTheGap = takesTheGapBehind(style, tailCells);
 		}
@@ -3936,10 +3945,14 @@ public final class SongBuilder {
 	static int HEADLESS_FOR_ROOM_BEHIND = 0;
 
 	private static ChordStyle chooseStyle(Layout layout, List<EventNote> chord, boolean roomBehind) {
-		if (chord.size() <= 3) {
+		if (fitsSmallModule(chord)) {
 			return ChordStyle.SMALL;
 		}
-		if (!layout.ultra()) {
+		if (!layout.ultra() || hasEffect(chord)) {
+			// Every stacked shape leans on its own notes to relay power outward, and an effect is a
+			// block that either sounds or conducts, mostly not both. The bus asks nothing of them:
+			// it powers each one directly off its own stone, so it is what a chord with an effect
+			// in it gets. A song of pure note blocks reaches this line exactly as it always did.
 			return ChordStyle.BUS;
 		}
 		if (ultraSlots(chord, false) != null) {
@@ -3972,8 +3985,9 @@ public final class SongBuilder {
 	 * occupy as live whether it is or not, which is what keeps their spacing -- and so every build
 	 * anyone has already made with them -- exactly as it was.</p>
 	 */
-	private static LaneReach laneReachOf(Layout layout, ChordStyle style, int chordSize) {
+	private static LaneReach laneReachOf(Layout layout, ChordStyle style, List<EventNote> chord) {
 		int margin = layout.ultra() ? 0 : 1;
+		int chordSize = chord.size();
 		if (style.stacked()) {
 			// The two blocks a cross hands its signal to sit one either side of the centre line,
 			// at the same level as the four low notes. A chord measured as this and then dropped
@@ -3983,7 +3997,11 @@ public final class SongBuilder {
 		if (style == ChordStyle.BUS) {
 			return new LaneReach(1, 1, margin, false);
 		}
-		LaneReach small = smallChordReach(chordSize, margin);
+		// The lent middle comes from main: a lone note carrying no module of its own borrows the
+		// centre cell, so it reaches one way where it used to reach nowhere. Asked before the rail
+		// claim below and kept underneath it, because a chord small enough for a run may still be
+		// that lone note, and the run's own claim is the wider of the two.
+		LaneReach small = smallChordReach(chordSize, needsLentMiddle(chord), margin);
 		// A run of single notes used to be the one lane that reached nowhere at all -- its whole
 		// module is the anchor on its own centre line -- so lanes of them packed two apart. A rail
 		// column hangs its notes out to the sides, which makes that untrue, and a lane spaced for the
@@ -5617,16 +5635,28 @@ public final class SongBuilder {
 		// The shape the walk settled on, not the one the size implies. A chord of three that could
 		// not have its two side slots is handed here as a bus, and branching on the size alone built
 		// it in the shape that had just been rejected -- which is the note that lands in a neighbour.
-		if (chord.size() <= 3 && !forceBus) {
-			placeNote(placements, anchor, chord.get(0));
+		// And not the one the physics implies either: a chord of three doors is small enough for this
+		// shape and cannot hold it, because the anchor has to pass power on and a door does not.
+		// {@link #fitsSmallModule} is the same test {@link #chooseStyle} priced the chord with.
+		if (!forceBus && fitsSmallModule(chord)) {
+			List<EventNote> ordered = smallOrder(chord);
+			if (needsLentMiddle(ordered)) {
+				// Stone in the middle and the sound beside it. The cell the repeater faces has to
+				// carry the signal onward, and this one sound cannot, so it borrows a block that can
+				// and is sounded the way a bus sounds its notes -- from the side, off powered stone.
+				placements.powered(anchor, "minecraft:stone", time);
+				placeNote(placements, anchor.relative(laneStep.getOpposite()), ordered.getFirst());
+				return new Body(lane.ahead(2), 0);
+			}
+			placeNote(placements, anchor, ordered.get(0));
 			// The repeater drives the anchor directly, and a note block is a full block, so the
 			// anchor passes that power on to whatever is beside it -- including the next repeater.
 			placements.powered(anchor, time);
-			if (chord.size() >= 2) {
-				placeNote(placements, anchor.relative(laneStep), chord.get(1));
+			if (ordered.size() >= 2) {
+				placeNote(placements, anchor.relative(laneStep), ordered.get(1));
 			}
-			if (chord.size() >= 3) {
-				placeNote(placements, anchor.relative(laneStep.getOpposite()), chord.get(2));
+			if (ordered.size() >= 3) {
+				placeNote(placements, anchor.relative(laneStep.getOpposite()), ordered.get(2));
 			}
 			return new Body(lane.ahead(2), 0);
 		}
@@ -5807,7 +5837,7 @@ public final class SongBuilder {
 		// bus is still what is left when neither holds.
 		if (style == ChordStyle.SMALL && lane.crowded()
 				&& !smallChordFits(placements, lane, event.notes().size(), event.time())) {
-			style = !inTurn && ultraSlots(event.notes(), false) != null
+			style = !inTurn && !hasEffect(event.notes()) && ultraSlots(event.notes(), false) != null
 				? ChordStyle.STACKED_FRONT
 				: ChordStyle.BUS;
 		}
@@ -7986,12 +8016,107 @@ public final class SongBuilder {
 	}
 
 	private static boolean isHarpNote(EventNote note) {
-		return "minecraft:air".equals(note.instrumentBlock());
+		return note.effect() == null && "minecraft:air".equals(note.instrumentBlock());
 	}
 
 	/** Whether this note's instrument block would pass power on to a note block beside it. */
 	private static boolean conductsSideways(EventNote note) {
-		return isHarpNote(note) || CONDUCTING_INSTRUMENT_BLOCKS.contains(note.instrumentBlock());
+		return note.effect() == null
+			&& (isHarpNote(note) || CONDUCTING_INSTRUMENT_BLOCKS.contains(note.instrumentBlock()));
+	}
+
+	/** Whether anything in this chord is a block that sounds for itself rather than a note block. */
+	private static boolean hasEffect(List<EventNote> chord) {
+		for (EventNote note : chord) {
+			if (note.effect() != null) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Whether this can stand in the middle of a small module and pass the power on to its flanks.
+	 *
+	 * <p>A note block always can: it is a full solid block, whatever instrument block it stands on.
+	 * Most effects cannot -- a door, a bell, a shrieker and, less obviously, a copper bulb are all
+	 * blocks power stops at. The ones that can are the two droppers and the note blocks in skulls,
+	 * which are note blocks.</p>
+	 */
+	private static boolean carriesAModule(EventNote note) {
+		return note.effect() == null || CONDUCTING_EFFECT_BLOCKS.contains(note.effect().blockId());
+	}
+
+	/**
+	 * Effects solid enough to sound and pass the signal on in the same breath.
+	 *
+	 * <p>Asked of the state that actually gets placed rather than of the block's default, since that
+	 * is the one whose neighbours have to be right.</p>
+	 */
+	private static final Set<String> CONDUCTING_EFFECT_BLOCKS = PreviewInstrument.EFFECTS.stream()
+		.filter(voice -> conducts(voice.effect().block()))
+		.map(voice -> voice.effect().blockId())
+		.collect(java.util.stream.Collectors.toUnmodifiableSet());
+
+	private static boolean conducts(String blockState) {
+		try {
+			return BlockStateParser.parseForBlock(BuiltInRegistries.BLOCK, blockState, false)
+				.blockState().isRedstoneConductor(EmptyBlockGetter.INSTANCE, BlockPos.ZERO);
+		} catch (com.mojang.brigadier.exceptions.CommandSyntaxException unparseable) {
+			throw new IllegalStateException("unplaceable sound effect: " + blockState, unparseable);
+		}
+	}
+
+	/**
+	 * A chord ordered so that whatever holds the middle of a small module comes first, or null if
+	 * nothing in it can.
+	 *
+	 * <p>The repeater points at the first note and the two after it are sounded by that first one
+	 * being a strongly powered solid block. A chord of one needs no such favour -- the repeater
+	 * faces it directly -- so anything at all can stand alone.</p>
+	 */
+	/**
+	 * Whether this chord has to be lent a middle: a stone in the cell the repeater faces, with the
+	 * one sound moved off to the side.
+	 *
+	 * <p>A chord of one used to be treated as needing no favour, on the grounds that the repeater
+	 * faces it directly and so anything at all can sound there. That is true of the sound and false
+	 * of everything after it. The cell the repeater faces is also the cell the <em>next</em>
+	 * repeater reads, so whatever stands in it has to be solid: a lone sculk shrieker sounded once
+	 * and took the rest of the lane with it.</p>
+	 *
+	 * <p>Only ever a chord of one. With two or more, {@link #smallOrder} finds something in the
+	 * chord that can hold the middle, or the chord goes to a bus where every sound has its own
+	 * stone.</p>
+	 */
+	private static boolean needsLentMiddle(List<EventNote> chord) {
+		return chord.size() == 1 && !carriesAModule(chord.getFirst());
+	}
+
+	private static List<EventNote> smallOrder(List<EventNote> chord) {
+		if (chord.size() <= 1 || carriesAModule(chord.get(0))) {
+			return chord;
+		}
+		for (int index = 1; index < chord.size(); index++) {
+			if (carriesAModule(chord.get(index))) {
+				List<EventNote> ordered = new ArrayList<>(chord);
+				ordered.add(0, ordered.remove(index));
+				return List.copyOf(ordered);
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Whether the small two-column module can hold this chord.
+	 *
+	 * <p>Asked by {@link #chooseStyle} and again by {@link #addEventModule}, from the one method, so
+	 * that the shape the plan priced and the shape the walk lays are the same shape. A chord of three
+	 * doors is the case that made this necessary: it fits by size and does not fit by physics, and a
+	 * planner that only counted would have reserved two columns for something that needs three.</p>
+	 */
+	private static boolean fitsSmallModule(List<EventNote> chord) {
+		return chord.size() <= 3 && smallOrder(chord) != null;
 	}
 
 	/**
@@ -8036,14 +8161,26 @@ public final class SongBuilder {
 		set(placements, triggerPos.above(), "minecraft:repeater[facing=" + repeaterFacing(forward) + ",delay=" + triggerDelay + "]");
 		BlockPos anchor = at(origin, forward, cursor + 1, 1, 0);
 		int time = chord.get(0).time();
-		if (chord.size() <= 3) {
-			placeNote(placements, anchor, chord.get(0));
-			placements.powered(anchor, time);
-			if (chord.size() >= 2) {
-				placeNote(placements, anchor.relative(right), chord.get(1));
+		if (fitsSmallModule(chord)) {
+			// Reordered, not merely taken as it came: the middle of this shape has to be something
+			// that passes power to its flanks, and on a chord that mixes a door with a note block
+			// only one of the two will do. {@link #chooseStyle} priced this same shape from the same
+			// test, so a chord that cannot be reordered into it never arrives here at all.
+			List<EventNote> ordered = smallOrder(chord);
+			if (needsLentMiddle(ordered)) {
+				// See layEventBody: the cell the repeater faces has to pass the signal on, so a sound
+				// that cannot is moved aside and given a stone to be powered from.
+				placements.powered(anchor, "minecraft:stone", time);
+				placeNote(placements, anchor.relative(right.getOpposite()), ordered.getFirst());
+				return cursor + 2;
 			}
-			if (chord.size() >= 3) {
-				placeNote(placements, anchor.relative(right.getOpposite()), chord.get(2));
+			placeNote(placements, anchor, ordered.get(0));
+			placements.powered(anchor, time);
+			if (ordered.size() >= 2) {
+				placeNote(placements, anchor.relative(right), ordered.get(1));
+			}
+			if (ordered.size() >= 3) {
+				placeNote(placements, anchor.relative(right.getOpposite()), ordered.get(2));
 			}
 			return cursor + 2;
 		}
@@ -8160,6 +8297,10 @@ public final class SongBuilder {
 	}
 
 	private static void placeNote(PlacementPlan placements, BlockPos notePos, EventNote note) {
+		if (note.effect() != null) {
+			placeEffect(placements, notePos, note);
+			return;
+		}
 		set(placements, notePos.below(), note.instrumentBlock());
 		if (FALLING_INSTRUMENT_BLOCKS.contains(note.instrumentBlock())) {
 			// Sand and friends drop the moment /setblock places them over air, taking the note
@@ -8180,6 +8321,31 @@ public final class SongBuilder {
 		set(placements, notePos, "minecraft:note_block[note=" + note.pitch() + "]");
 		placements.note(notePos, note.time());
 		set(placements, notePos.above(), "minecraft:air");
+	}
+
+	/**
+	 * A sound effect, in the same three cells a note would have used.
+	 *
+	 * <p>The effect goes where the note block would have gone, so everything that decided where a
+	 * note could stand -- reach, spacing, whether the ground is free -- decided this too, and none
+	 * of it had to learn a new shape. What differs is the two cells around it. Underneath, where an
+	 * instrument block would sit, most effects want nothing at all and a few want a floor. Above,
+	 * where a note block insists on air, a door puts its upper half and a note block wearing a skull
+	 * puts the skull -- and the air is still what a piston extends into, which is why the pistons
+	 * face up.</p>
+	 *
+	 * <p>Recorded as a note on the plan exactly like a note block is. It is a sound at a tick, and
+	 * {@code verify} has to hold it to the same rule: something next to it has to be powered on its
+	 * own tick and on no other.</p>
+	 */
+	private static void placeEffect(PlacementPlan placements, BlockPos notePos, EventNote note) {
+		PreviewInstrument.Effect effect = note.effect();
+		if (effect.floor()) {
+			placements.support(notePos.below(), "minecraft:stone");
+		}
+		set(placements, notePos, effect.block());
+		placements.note(notePos, note.time());
+		set(placements, notePos.above(), effect.above() == null ? "minecraft:air" : effect.above());
 	}
 
 	/** Instrument blocks affected by gravity, which need something solid underneath them. */
@@ -8221,6 +8387,11 @@ public final class SongBuilder {
 			return null;
 		}
 		PreviewInstrument preview = PreviewInstrument.byId(instrument);
+		if (preview.effect() != null) {
+			// The effect is the sound source, so this is the source's own id rather than a block for
+			// it to stand on. Carried so that chords still group and run-length by instrument.
+			return preview.effect().blockId();
+		}
 		if ("HARP".equals(preview.id())) {
 			// A note block over anything unrecognised already plays harp, so air is identical in
 			// sound and costs nothing. Placing grass would waste a block per piano note.
@@ -8229,7 +8400,26 @@ public final class SongBuilder {
 		return BuiltInRegistries.ITEM.getKey(preview.icon()).toString();
 	}
 
-	record EventNote(int time, int trackNumber, int order, int pitch, String instrumentBlock) {
+	/** The effect a layer's voice builds as, or null when it is a tuned instrument. */
+	private static PreviewInstrument.Effect effectOf(String instrument) {
+		return "MUTE".equals(instrument) ? null : PreviewInstrument.byId(instrument).effect();
+	}
+
+	/**
+	 * One sound to place.
+	 *
+	 * <p>For a pitched note {@code instrumentBlock} is what goes under the note block and
+	 * {@code effect} is null. For a sound effect there is no note block at all: {@code effect} says
+	 * what to lay in its place and {@code instrumentBlock} is that block's id, so that the grouping
+	 * and run-length code that sorts a chord by instrument keeps sorting doors next to doors.
+	 * {@code pitch} is carried either way and simply ignored on an effect, which cannot be tuned.</p>
+	 */
+	record EventNote(int time, int trackNumber, int order, int pitch, String instrumentBlock,
+			PreviewInstrument.Effect effect) {
+		/** A note block over an instrument block, which is every note this mod placed before effects. */
+		EventNote(int time, int trackNumber, int order, int pitch, String instrumentBlock) {
+			this(time, trackNumber, order, pitch, instrumentBlock, null);
+		}
 	}
 
 	/**

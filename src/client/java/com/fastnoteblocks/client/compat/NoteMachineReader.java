@@ -846,6 +846,13 @@ public final class NoteMachineReader {
 	}
 
 	private static Instrument instrumentAt(Region region, BlockPos position) {
+		// Upwards first, the way the game itself decides. A skull sitting on a note block is what
+		// gives it its voice, and the block underneath has no say while one is there -- so a reader
+		// that only looked down would find air under a zombie and call it a harp.
+		String head = PreviewInstrument.headVoice(region.at(position.above()).instrument());
+		if (head != null) {
+			return new Instrument(head, false);
+		}
 		String id = region.at(position.below()).instrument().name().toUpperCase(Locale.ROOT);
 		boolean known = PreviewInstrument.VALUES.stream().anyMatch(value -> value.id().equals(id));
 		return new Instrument(known ? id : "HARP", !known);
