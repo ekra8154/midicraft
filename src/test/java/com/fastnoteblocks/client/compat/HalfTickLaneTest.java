@@ -162,13 +162,14 @@ class HalfTickLaneTest {
 		heard.putAll(heardOnLane(plan, true));
 		heard.putAll(heardOnLane(plan, false));
 
-		// Both lanes are biased one repeater tick -- two game ticks -- later than nominal, together,
-		// so that neither is clamped without the other. A shift both lanes share is the machine
-		// starting a moment after the button, which is not a timing error; a shift only one of them
-		// takes is, and that is what the assertion below would catch.
+		// Both lanes are biased two repeater ticks -- four game ticks -- later than nominal,
+		// together, so that neither is clamped without the other and both have a tick to open a
+		// mirrored stretch on a repeater. A shift both lanes share is the machine starting a moment
+		// after the button, which is not a timing error; a shift only one of them takes is, and that
+		// is what the assertion below would catch.
 		Map<Integer, Integer> expected = new java.util.TreeMap<>();
 		for (int index = 0; index < written.length; index++) {
-			expected.put(index, written[index] + 2);
+			expected.put(index, written[index] + 4);
 		}
 		assertEquals(expected, heard,
 			"every note, by pitch, at the game tick it was written on");
@@ -307,6 +308,116 @@ class HalfTickLaneTest {
 			+ "pulse would not hear the other");
 	}
 
+	/**
+	 * A lane that spends its whole opening waiting is still a machine with a way into it.
+	 *
+	 * <p>Mirroring lays wire before it lays notes, so a lane whose first note is late begins with a
+	 * long run of plain dust -- and a run of dust is not somewhere a signal can be started. Read
+	 * back, such a lane came out as "found note blocks but no way in": every repeater on it was fed
+	 * by another one, because the first thing on it was not a repeater at all. ekran has to tap his
+	 * input somewhere too, and the head of the lane is that somewhere.</p>
+	 *
+	 * <p>Asserted through the reader rather than by looking for a repeater at the front, because
+	 * what is wanted is not the block, it is that the machine can be entered and plays the song.</p>
+	 */
+	@Test
+	void readsBackALaneThatOpensByWaiting() {
+		List<SongBuilder.EventNote> song = new ArrayList<>();
+		// Sixty game ticks of even-lane chords before the odd lane says anything at all, which is
+		// hundreds of columns of mirrored wire ahead of its first note block.
+		for (int gameTick = 0; gameTick <= 60; gameTick += 2) {
+			for (int index = 0; index < 12; index++) {
+				song.add(new SongBuilder.EventNote(gameTick, 1, index, index, "minecraft:gold_block"));
+			}
+		}
+		// Three to a chord, so the odd lane is its full three columns wide and laneSplit below --
+		// which halves the z range -- falls between the lanes rather than inside one of them.
+		// One chord at a time: the walk groups a chord by taking notes off the front while their
+		// times match, so a list holding two chords interleaved is six events, not two.
+		for (int index = 0; index < 3; index++) {
+			song.add(new SongBuilder.EventNote(61, 1, index, 12 + index, "minecraft:gold_block"));
+		}
+		for (int index = 0; index < 3; index++) {
+			song.add(new SongBuilder.EventNote(65, 1, index, 15 + index, "minecraft:gold_block"));
+		}
+		SongBuilder.PastePlan plan = build(song);
+
+		assertEquals(Map.of(12, 65, 13, 65, 14, 65, 15, 69, 16, 69, 17, 69),
+			heardOnLane(plan, false),
+			"the odd lane's two chords, four game ticks late like everything else and no later");
+	}
+
+	/**
+	 * The claim ekran made: the two lanes are neck and neck, not merely within some tolerance.
+	 *
+	 * <p>Sixteen notes against two is a wider split than any real song, chosen so that a lane left
+	 * to chase its partner would lose unmissably -- unpadded this walks the two about seven columns
+	 * further apart per event, for hundreds of events. What is measured is the gap between notes
+	 * that sound at the same moment, which is the only gap a listener can be standing in.</p>
+	 */
+	@Test
+	void keepsSimultaneousNotesInTheSameColumn() {
+		List<SongBuilder.EventNote> song = new ArrayList<>();
+		for (int event = 0; event < 300; event++) {
+			int gameTick = event * 2;
+			// The two lanes are told apart by pitch rather than by where they ended up, because
+			// where they ended up is the thing under test. Halving the z range to find the boundary
+			// assumes both lanes are three columns wide, and the whole point of this song is that
+			// its two lanes are nothing alike -- sixteen notes against two, so the odd lane is two
+			// columns and a third of the even lane lands on the wrong side of the line.
+			for (int index = 0; index < 16; index++) {
+				song.add(new SongBuilder.EventNote(gameTick, 1, index, index,
+					"minecraft:gold_block"));
+			}
+			for (int index = 0; index < 2; index++) {
+				song.add(new SongBuilder.EventNote(gameTick + 1, 1, index, 20 + index,
+					"minecraft:gold_block"));
+			}
+		}
+		SongBuilder.PastePlan plan = build(song);
+
+		List<Integer> even = chordColumns(plan, pitch -> pitch < 16, 16);
+		List<Integer> odd = chordColumns(plan, pitch -> pitch >= 20, 2);
+		assertEquals(300, even.size(), "every even-tick chord accounted for");
+		assertEquals(300, odd.size(), "every odd-tick chord accounted for");
+
+		int worst = 0;
+		int worstEvent = 0;
+		for (int event = 0; event < 300; event++) {
+			// Written one game tick apart, so these two sound as near to at once as the layout can
+			// put them, and a listener standing at one has to be able to hear the other.
+			int gap = Math.abs(even.get(event) - odd.get(event));
+			if (gap > worst) {
+				worst = gap;
+				worstEvent = event;
+			}
+		}
+		assertTrue(worst <= 20, "notes written a single game tick apart were built " + worst
+			+ " blocks apart (event " + worstEvent
+			+ "); the mirror is meant to hold the two lanes in the same column");
+	}
+
+	/**
+	 * The column each of one lane's chords begins in, in the order they were built.
+	 *
+	 * <p>Modules are laid in order along a lane and never overlap, so its note blocks sorted by
+	 * column arrive in the order their events did, and each event takes as many as its chord has
+	 * notes. That maps blocks back to moments without repeating the arithmetic that placed them.</p>
+	 */
+	private static List<Integer> chordColumns(SongBuilder.PastePlan plan,
+			java.util.function.IntPredicate onThisLane, int chordSize) {
+		List<Placed> lane = new ArrayList<>(noteBlocks(plan).stream()
+			.filter(block -> onThisLane.test(
+				Integer.parseInt(block.block().replaceAll(".*note=(\\d+).*", "$1"))))
+			.toList());
+		lane.sort(java.util.Comparator.comparingInt(Placed::x).thenComparingInt(Placed::z));
+		List<Integer> columns = new ArrayList<>();
+		for (int at = 0; at + chordSize <= lane.size(); at += chordSize) {
+			columns.add(lane.get(at).x());
+		}
+		return columns;
+	}
+
 	// ----------------------------------------------------------------- reading it off the blocks
 
 	private static final Pattern SETBLOCK = Pattern.compile(
@@ -334,17 +445,25 @@ class HalfTickLaneTest {
 	}
 
 	/**
-	 * The line between the two lanes.
+	 * The line between the two lanes, taken from the one column each of them is guaranteed to have.
 	 *
-	 * <p>A lane is three columns wide and the two sit at least three apart, so halfway between the
-	 * outermost columns falls in the space between them whatever the gap is set to. Only meaningful
-	 * when both lanes hold something, which is why the single-parity test does not ask.</p>
+	 * <p>Halfway between the outermost columns is what this used to be, and it quietly assumes both
+	 * lanes are three columns wide. They need not be: a lane whose chords are all one or two notes
+	 * is narrower than one carrying big ones, and then the midpoint slides into the wider lane and
+	 * cuts a strip of it onto the other side. A song of sixteen notes against three put half the
+	 * even lane's note blocks -- 186 of them -- on the odd lane's side of the line and read them
+	 * back as unreachable, which they were, because their bus had been left behind.</p>
+	 *
+	 * <p>Repeaters cannot slide. Every one of them -- the delay chain, the mirrored wire, each
+	 * module's trigger -- stands on its lane's centre column and nothing else does, so the two z
+	 * values holding repeaters are the two centres exactly, whatever shape the chords beside them
+	 * take.</p>
 	 */
 	private static double laneSplit(SongBuilder.PastePlan plan) {
-		List<Placed> blocks = placed(plan);
-		int minZ = blocks.stream().mapToInt(Placed::z).min().orElse(0);
-		int maxZ = blocks.stream().mapToInt(Placed::z).max().orElse(0);
-		return (minZ + maxZ) / 2.0;
+		List<Integer> centres = placed(plan).stream()
+			.filter(block -> block.block().startsWith("minecraft:repeater"))
+			.map(Placed::z).distinct().sorted().toList();
+		return centres.size() < 2 ? centres.get(0) : (centres.get(0) + centres.get(1)) / 2.0;
 	}
 
 	/** Note pitches on one lane, in build order, read off the commands rather than the plan. */

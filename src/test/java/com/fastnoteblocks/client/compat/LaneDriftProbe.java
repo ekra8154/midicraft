@@ -72,53 +72,15 @@ class LaneDriftProbe {
 			List<Pulse> right = pulses(plan, song, 0, split, true);
 			List<Pulse> left = pulses(plan, song, 1, split, false);
 
-			// Walked together on one clock: at every moment either lane last spoke, ask where the
-			// other one was standing when it last spoke too.
-			int worst = 0;
-			int worstTick = 0;
-			long over20 = 0;
-			long over48 = 0;
-			long samples = 0;
-			int rightAt = 0;
-			int leftAt = 0;
-			List<Integer> ticks = new ArrayList<>();
-			right.forEach(pulse -> ticks.add(pulse.gameTick()));
-			left.forEach(pulse -> ticks.add(pulse.gameTick()));
-			ticks.sort(Comparator.naturalOrder());
-			for (int tick : ticks) {
-				while (rightAt + 1 < right.size() && right.get(rightAt + 1).gameTick() <= tick) {
-					rightAt++;
-				}
-				while (leftAt + 1 < left.size() && left.get(leftAt + 1).gameTick() <= tick) {
-					leftAt++;
-				}
-				if (right.isEmpty() || left.isEmpty()) {
-					continue;
-				}
-				int apart = Math.abs(right.get(rightAt).x() - left.get(leftAt).x());
-				if (apart > worst) {
-					worst = apart;
-					worstTick = tick;
-				}
-				if (apart > 20) {
-					over20++;
-				}
-				if (apart > 48) {
-					over48++;
-				}
-				samples++;
+			if (right.isEmpty() || left.isEmpty()) {
+				continue;
 			}
-
 			System.out.println();
 			System.out.println("==== " + name + (speedFactor == 1 ? "" : " at " + speedFactor + "x") + " ====");
 			System.out.println("  " + song.size() + " notes, right lane " + right.size()
 				+ " events, left lane " + left.size() + " events");
 			System.out.println("  build spans " + plan.spanX() + " blocks");
-			System.out.println(String.format(
-				"  pulses drift apart by at most %d blocks (at game tick %d)", worst, worstTick));
-			System.out.println(String.format(
-				"  over 20 blocks apart for %.1f%% of the song, over 48 (earshot) for %.1f%%",
-				100.0 * over20 / Math.max(1, samples), 100.0 * over48 / Math.max(1, samples)));
+			System.out.println("  " + apart(right, left).summary());
 		}
 	}
 
@@ -186,29 +148,10 @@ class LaneDriftProbe {
 				if (right.isEmpty() || left.isEmpty()) {
 					continue;
 				}
-				int worst = 0;
-				long beyond = 0;
-				long samples = 0;
-				int rightAt = 0;
-				int leftAt = 0;
-				List<Integer> ticks = new ArrayList<>();
-				right.forEach(pulse -> ticks.add(pulse.gameTick()));
-				left.forEach(pulse -> ticks.add(pulse.gameTick()));
-				ticks.sort(Comparator.naturalOrder());
-				for (int tick : ticks) {
-					while (rightAt + 1 < right.size() && right.get(rightAt + 1).gameTick() <= tick) {
-						rightAt++;
-					}
-					while (leftAt + 1 < left.size() && left.get(leftAt + 1).gameTick() <= tick) {
-						leftAt++;
-					}
-					int apart = Math.abs(right.get(rightAt).x() - left.get(leftAt).x());
-					worst = Math.max(worst, apart);
-					if (apart > 48) {
-						beyond++;
-					}
-					samples++;
-				}
+				Apart gap = apart(right, left);
+				int worst = gap.worst();
+				long beyond = gap.beyond();
+				long samples = gap.pairs();
 				worstEver = Math.max(worstEver, worst);
 				if (worst > 48) {
 					pastEarshot++;
@@ -248,6 +191,60 @@ class LaneDriftProbe {
 			+ (pastTolerance - pastToleranceAtOwnSpeed) + " past the tolerance, "
 			+ (pastEarshot - pastEarshotAtOwnSpeed) + " past earshot; worst overall "
 			+ worstEver + " blocks");
+	}
+
+	/** How far apart two lanes get, and how often that is further than a note can be heard. */
+	private record Apart(int worst, int worstTick, long beyond, long pairs) {
+		String summary() {
+			return String.format("%d blocks apart at worst (game tick %d), past earshot for %.2f%% "
+				+ "of %d simultaneous pairs", worst, worstTick, 100.0 * beyond / Math.max(1, pairs),
+				pairs);
+		}
+	}
+
+	/**
+	 * The gap between notes that sound at the same moment, which is the whole of the question.
+	 *
+	 * <p>Not where each lane <em>last</em> spoke, which is what this measured before and what it can
+	 * no longer mean. A mirroring lane lays wire through its silences, so while it has nothing to
+	 * play its signal is running down that wire alongside its partner's and making no sound at all.
+	 * Its last note block is simply where it last made a noise, which may be thousands of blocks
+	 * back and says nothing about whether a listener is missing anything -- there is nothing there
+	 * to miss. Aria Math's odd lane speaks 22 times in 1,715 events, and measured the old way it
+	 * read 1,000 blocks adrift while every note it played landed within five blocks of its
+	 * partner's.</p>
+	 *
+	 * <p>So each event is matched with the nearest event in time on the other lane, and the pair is
+	 * only counted when the two are within two game ticks of each other -- the tightest reading of
+	 * "at once", since the lanes hold opposite parities and one tick is as close as they can be. If
+	 * the other lane has nothing near in time, there is no listener problem to have.</p>
+	 */
+	private static Apart apart(List<Pulse> right, List<Pulse> left) {
+		int worst = 0;
+		int worstTick = 0;
+		long beyond = 0;
+		long pairs = 0;
+		int at = 0;
+		for (Pulse pulse : right) {
+			while (at + 1 < left.size()
+					&& Math.abs(left.get(at + 1).gameTick() - pulse.gameTick())
+						<= Math.abs(left.get(at).gameTick() - pulse.gameTick())) {
+				at++;
+			}
+			if (Math.abs(left.get(at).gameTick() - pulse.gameTick()) > 2) {
+				continue;
+			}
+			int gap = Math.abs(left.get(at).x() - pulse.x());
+			if (gap > worst) {
+				worst = gap;
+				worstTick = pulse.gameTick();
+			}
+			if (gap > 48) {
+				beyond++;
+			}
+			pairs++;
+		}
+		return new Apart(worst, worstTick, beyond, pairs);
 	}
 
 	/**

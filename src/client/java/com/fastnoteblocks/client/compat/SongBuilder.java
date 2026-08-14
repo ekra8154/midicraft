@@ -539,22 +539,51 @@ public final class SongBuilder {
 	/**
 	 * Blocks between the two half-tick lane centres.
 	 *
-	 * <p>A lane is three columns wide -- a bus down the middle with a note hanging either side -- so
-	 * three sets the two of them touching, and two would have them share a column, which is not a
-	 * gap but a collision. Three it is, measured: Guardian builds and reads back as the song at
-	 * three, four and five alike, so the wider settings buy nothing.</p>
+	 * <p>A lane is three columns wide -- a chord hanging either side of the middle -- so three sets
+	 * the two of them touching, and two would have them share a column, which is not a gap but a
+	 * collision.</p>
 	 *
-	 * <p>Touching is safe here for the reason two lanes may ever touch -- a note block fires from a
-	 * neighbour that is <em>directly</em> powered, and what meets across the join is note blocks and
-	 * the instrument blocks under them, which are neither powered nor able to pass power on. The
-	 * live cells of a lane are its bus, and the bus is the middle column. That is a different
-	 * situation from the stacked module of the ultra lane, whose outer columns <em>are</em> live
-	 * every other cell, and it is why that layout has a rule about parity and this one does not.</p>
+	 * <p>Three was the setting while every chord was a bus, and it was safe for the reason two lanes
+	 * may ever touch: a note block fires from a neighbour that is <em>directly</em> powered, and what
+	 * met across the join was note blocks and the instrument blocks under them, neither of which
+	 * passes power on. A bus keeps all its live cells in the middle column.</p>
+	 *
+	 * <p>{@link #HALF_TICK_LANE_STACKS} ends that. A stacked module relays through two blocks in its
+	 * <em>outer</em> columns, so a lane's live cells are no longer only its middle one, and two lanes
+	 * touching would sound each other's notes -- the fault ekran's copper bulbs caught in the ultra
+	 * lane the one time its rule was removed. Four puts a column of air between the two lanes'
+	 * outermost blocks, which is the spacing the ultra lane uses and the spacing of the world the
+	 * stacked module was taken from.</p>
 	 *
 	 * <p>Not final so a probe can sweep it, and so it is one number to change if the world says
 	 * otherwise. Copper bulbs outrank everything measured here.</p>
 	 */
-	static int HALF_TICK_LANE_GAP = 3;
+	static int HALF_TICK_LANE_GAP = 4;
+
+	/**
+	 * Whether the straight half-tick lane builds its chords with the ultra lane's stacked shapes.
+	 *
+	 * <p>A plain bus spends a cell of wire on every pair of notes. A stacked module holds seven in
+	 * two cells -- a centre, a relay either side of it, and a low note in front of and behind each
+	 * relay -- and a stacked bus puts that head in front of a bus carrying the rest, so a chord of
+	 * twenty is ten columns instead of eleven and a chord of seven is two instead of five.</p>
+	 *
+	 * <p>Worth more here than the column count says, because of what the shape does to the wire. A
+	 * bus is dust, and its cells come out of the fifteen a run reaches; a stacked module hands the
+	 * signal on through its centre block, which the module's own repeater powers strongly, so the
+	 * wire beyond it starts again at full strength. That is exactly the budget the mirrored lane
+	 * spends catching up, which is why this makes the lanes easier to hold together and not merely
+	 * shorter. ekran asked for both.</p>
+	 *
+	 * <p>It moves the lanes apart, and that is not optional. A bus keeps every live cell in its
+	 * middle column, which is what made two lane centres three apart safe -- what met across the
+	 * join was note blocks and the instrument blocks under them, and neither passes power on. A
+	 * stacked module's outer columns are live: the two blocks its dust cross relays through sit
+	 * there. Two of those a column apart would sound each other's notes, which is the fault ekran's
+	 * copper bulbs caught in the ultra lane the one time the rule was taken out. Four apart is what
+	 * the ultra lane uses and what the world it was taken from used.</p>
+	 */
+	static boolean HALF_TICK_LANE_STACKS = true;
 
 	/**
 	 * How far apart the two lanes' pulses may drift before the lagging one is padded, in blocks.
@@ -568,6 +597,34 @@ public final class SongBuilder {
 	 * grows by and no note sounds from.</p>
 	 */
 	static int HALF_TICK_LANE_TOLERANCE = 16;
+
+	/**
+	 * Whether a lane copies the other's advance while it waits, instead of chasing it afterwards.
+	 *
+	 * <p>ekran's, and it replaces an argument about tolerances with an identity. Both lanes are known
+	 * in full before a block is laid, so a lane with nothing to play does not have to guess where its
+	 * partner will get to -- it can lay the same number of columns the partner just laid, carrying its
+	 * own signal and sounding nothing. Do that at every event and the two are not within sixteen
+	 * blocks of each other, they are in the same column, for the whole song.</p>
+	 *
+	 * <p>What the copy may not do is change when the quiet lane speaks. Dust has no delay, so most of
+	 * a mirrored stretch is free; a repeater is needed only where the wire would otherwise fade, and
+	 * every repeater it puts down is a repeater tick taken off the delay the lane still owes its next
+	 * note. So the mirror spends the silence it is already sitting in, and the delay chain that would
+	 * have been laid in one lump before that note shrinks by exactly what the mirror spent. The music
+	 * is untouched either way -- a tick is a tick wherever along the wire it sits.</p>
+	 *
+	 * <p>It can only fail by running out of delay to spend, and the arithmetic says it cannot: a
+	 * repeater every sixteenth column is one tick per sixteen columns, and sixteen columns per
+	 * repeater tick is exactly the fastest a lane laying thirty-note chords can move. The two rates
+	 * are the same rate because they are the same wire. The shortfall is counted anyway, because an
+	 * argument that says a thing cannot happen is not a measurement that says it did not.</p>
+	 *
+	 * <p>Off, the older reactive padding runs instead: a lane pads only when it places an event, so
+	 * its partner is free to run ahead in between and the gap peaks before it is closed. That is why
+	 * the tolerance above exists and why it was never quite held.</p>
+	 */
+	static boolean MIRRORS_THE_OTHER_LANE = true;
 
 	/**
 	 * Two straight lanes running side by side, one for each parity of the game tick.
@@ -604,11 +661,20 @@ public final class SongBuilder {
 		// Note times are game ticks here, so two blocks live beside each other for half as long as
 		// the check assumes. The button that starts the machine has not changed length.
 		placements.pulseWindow(2 * PlacementPlan.SHARED_PULSE_TICKS);
-		HalfTickLane right = new HalfTickLane(origin, parity(notes, 0));
+		// One repeater tick for the clamp both lanes would otherwise pay separately, and a second
+		// when mirroring, which needs a repeater at the head of a lane that opens by waiting. Both
+		// lanes take the same number, which is the only thing that matters: a shift they share is
+		// the machine starting a moment after the button, and a shift one of them takes alone is
+		// every note on that lane landing on the wrong side of the note it was written between.
+		int bias = MIRRORS_THE_OTHER_LANE ? 2 : 1;
+		HalfTickLane right = new HalfTickLane(origin, parity(notes, 0), bias);
 		HalfTickLane left = new HalfTickLane(
-			origin.relative(forward.getCounterClockWise(), HALF_TICK_LANE_GAP), parity(notes, 1));
+			origin.relative(forward.getCounterClockWise(), HALF_TICK_LANE_GAP),
+			parity(notes, 1), bias);
 		int padded = 0;
 		int short_ = 0;
+		int mirrored = 0;
+		int stalled = 0;
 		// Walked in step by the clock, and padded to stay in step by the ruler. The two are the same
 		// requirement seen twice, and both were got wrong once before arriving here.
 		//
@@ -627,6 +693,25 @@ public final class SongBuilder {
 				? right
 				: left;
 			HalfTickLane other = next == right ? left : right;
+			if (MIRRORS_THE_OTHER_LANE) {
+				// The game tick the pair is standing on, taken before the event is placed, because
+				// placing it is what moves the lane off it. Both lanes date their mirrored stretch
+				// from here, so neither can spend a repeater tick it has not yet reached.
+				int now = next.nextTime();
+				int before = Math.max(right.cursor(), left.cursor());
+				next.placeNextEvent(placements, forward, 0);
+				// Whichever is further along sets the mark, and both come up to it -- usually only
+				// one of them has anywhere to go. Taking the maximum rather than the placer's own
+				// cursor is what lets a lane that fell short once make the ground up later.
+				int target = Math.max(right.cursor(), left.cursor());
+				int shortfall = right.mirrorTo(placements, forward, target, now)
+					+ left.mirrorTo(placements, forward, target, now);
+				mirrored += Math.max(0, target - before);
+				if (shortfall > 0) {
+					stalled++;
+				}
+				continue;
+			}
 			// Only while both are still playing. Once one has run out there is no second pulse to
 			// keep up with, and padding the survivor would buy nothing and cost columns.
 			int wanted = other.hasMore() || next.hasMore() && other.cursor() > next.cursor()
@@ -647,6 +732,8 @@ public final class SongBuilder {
 		}
 		placements.padded("halfTickCatchUp", padded);
 		placements.padded("halfTickCatchUpShort", short_);
+		placements.padded("halfTickMirror", mirrored);
+		placements.padded("halfTickMirrorStalled", stalled);
 		return alongTheBuild(placements.finish(PasteMode.HALF_TICK_LANE, origin));
 	}
 
@@ -796,12 +883,64 @@ public final class SongBuilder {
 		 * one lane and not the other and the two run a repeater tick apart for the rest of the song,
 		 * which is the one thing this layout may not do. Biasing both by the same tick costs the
 		 * build one cell and keeps them in step whatever the song opens on.
+		 *
+		 * <p>Mirroring costs one more, on both lanes alike. A lane that spends its opening waiting
+		 * lays wire before it lays anything else, and a machine that begins with bare dust has no
+		 * way in -- {@link NoteMachineReader} looks for a repeater nothing feeds and finds none, and
+		 * ekran has nowhere obvious to tap the input either. So the mirror opens on a repeater, and
+		 * the extra tick is what buys it. Charged to both lanes because a tick charged to one is the
+		 * one fault this layout cannot survive.</p>
 		 */
-		private int currentTime = -1;
+		private int currentTime;
+		/**
+		 * Whether this lane has laid anything at all, which decides only its very first cell.
+		 */
+		private boolean opened;
+		/**
+		 * Repeater ticks of the delay owed to the next event that have already been laid, out in the
+		 * mirrored wire, before the delay chain proper gets its turn.
+		 *
+		 * <p>A tick is a tick wherever along the wire its repeater stands, so this is only
+		 * bookkeeping -- but it is bookkeeping the music depends on. Spend four ticks keeping the
+		 * mirror alive and forget to take them off, and the note sounds four ticks late.</p>
+		 */
+		private int paid;
+		/**
+		 * Cells of wire since the last repeater, which is what says when the next one is due.
+		 *
+		 * <p>Dust reaches fifteen and then is nothing. On a lane that only ever laid modules this
+		 * never had to be tracked, because a module is followed by its own trigger repeater; a lane
+		 * that lays hundreds of columns of plain wire between two notes has to count.</p>
+		 */
+		private int sinceRepeater;
+		/**
+		 * The column the last module hung low notes in past itself, or {@link Integer#MIN_VALUE}.
+		 *
+		 * <p>A stacked module reaches its own low notes back into the column its repeater stands in.
+		 * Two of them butted together would want the same two blocks, so the second has to know
+		 * whether the first got there first -- and only the lane can answer, because whatever wire
+		 * went down between the two is what decides it.</p>
+		 */
+		private int frontFlanks = Integer.MIN_VALUE;
+		/**
+		 * The game tick the lane's pulse leaves the last thing built, which is when the wire after it
+		 * lights.
+		 *
+		 * <p>Mirrored wire used to be laid as live-at-no-particular-time, which is what the delay
+		 * chain's own padding says and was harmless while nothing of a chord stood beside it. A
+		 * stacked module hangs low notes in the column the mirror starts in, and a live cell of
+		 * unknown time beside a note block is precisely what the layout check refuses -- rightly, on
+		 * what it was told. The truth is that the cell lights as the pulse passes, dust delays
+		 * nothing, and the pulse passes at the moment that module sounded, so those notes and that
+		 * wire share a tick and always did.</p>
+		 */
+		private int pulseTick;
 
-		HalfTickLane(BlockPos origin, List<EventNote> notes) {
+		HalfTickLane(BlockPos origin, List<EventNote> notes, int bias) {
 			this.origin = origin;
 			this.notes = notes;
+			this.currentTime = -bias;
+			this.pulseTick = 2 * -bias;
 		}
 
 		boolean hasMore() {
@@ -824,29 +963,108 @@ public final class SongBuilder {
 		 *     used most of the fifteen a dust run reaches
 		 */
 		int placeNextEvent(PlacementPlan placements, Direction forward, int wantedPad) {
+			placements.resumeRun(sinceRepeater);
+			opened = true;
 			int time = notes.get(index).time();
 			int laneTime = Math.floorDiv(time, 2);
-			int delay = laneTime - currentTime;
+			// Less whatever the mirror already spent on this lane's behalf while it waited. The
+			// repeaters are out there in the wire behind us and they have already run.
+			int delay = laneTime - currentTime - paid;
 			List<EventNote> chord = new ArrayList<>();
 			while (index < notes.size() && notes.get(index).time() == time) {
 				chord.add(notes.get(index++));
 			}
-			// Whatever is left of the run after the chord has taken its share. Overrunning it is
-			// not a slightly longer build, it is a dead one: the dust fades to nothing partway and
-			// the repeater at the far end never sees a signal, so the song stops there. A small
-			// chord spends one cell on its note block; a bus spends one per pair of notes.
-			int room = Math.max(0, MAX_BUS_LENGTH
-				- (chord.size() <= 3 ? 1 : (chord.size() + 1) / 2));
+			// How much of the run a module takes, which is both what is left over for padding and
+			// what the wire after it starts out having spent. Overrunning it is not a slightly
+			// longer build, it is a dead one: the dust fades to nothing partway and the repeater at
+			// the far end never sees a signal, so the song stops there. A small chord spends one
+			// cell on its note block; a bus spends one per pair of notes.
+			int moduleRun = chord.size() <= 3 ? 1 : (chord.size() + 1) / 2;
+			int room = Math.max(0, MAX_BUS_LENGTH - moduleRun);
 			// The silence gets first refusal, because it has far more room than a module does and
 			// because a lane that is behind is usually behind for want of modules in the first
 			// place. Whatever it could not take, the chord's own run tries to make up.
 			DelayTrigger trigger = addDelayBeforeEvent(placements, origin, forward, cursor, delay,
 				Math.max(0, wantedPad));
 			int pad = Math.min(Math.max(0, wantedPad - trigger.padCells()), room);
-			cursor = addEventModule(placements, origin, forward, trigger.cursor(),
-				trigger.triggerDelay(), chord, pad);
+			// A stacked module hangs low notes back into the column its own repeater stands in, so
+			// it may only do that where the module before did not leave notes there. Anything at all
+			// between the two -- a repeater of the delay chain, a cell of pad, a cell of mirrored
+			// wire -- moves this module along and the question answers itself.
+			StraightModule module = addStraightModule(placements, origin, forward, trigger.cursor(),
+				trigger.triggerDelay(), chord, pad, trigger.cursor() != frontFlanks);
+			cursor = module.cursor();
+			frontFlanks = module.frontFlanks();
 			currentTime = laneTime;
+			pulseTick = time;
+			paid = 0;
+			sinceRepeater = module.run();
 			return trigger.padCells() + pad;
+		}
+
+		/**
+		 * Wire, and nothing else, until this lane stands where the other one got to.
+		 *
+		 * <p>Dust is the whole of it wherever dust will do, since dust has no delay and so cannot
+		 * move the music. A repeater goes in only when the run has reached the fifteen cells dust
+		 * carries, or when there is more delay in hand than the columns still to come could ever
+		 * absorb -- and then it is set to four, so the repeaters spent are the fewest that shed the
+		 * ticks. Either way its delay comes off what this lane still owes its next note, which is
+		 * what keeps a mirrored stretch silent in the musical sense as well as the audible one.</p>
+		 *
+		 * <p>The allowance is the point of the whole method: a lane may only spend the ticks that
+		 * have actually passed. Spending ahead would put the note early, which is the one failure
+		 * this layout cannot survive, so the ceiling is the game tick the pair is standing on -- less
+		 * one, held back for the trigger repeater, which cannot delay by less than a tick and would
+		 * otherwise clamp and put the lane permanently out of step with its partner.</p>
+		 *
+		 * @param now the game tick both lanes are at, which bounds what this one may have spent
+		 * @return columns it could not cover, which is zero unless the wire wanted a repeater and the
+		 *     lane had no tick left to pay for it
+		 */
+		int mirrorTo(PlacementPlan placements, Direction forward, int target, int now) {
+			int columns = target - cursor;
+			if (!hasMore() || columns <= 0) {
+				return 0;
+			}
+			placements.resumeRun(sinceRepeater);
+			int allowance = Math.max(0, Math.min(Math.floorDiv(now, 2),
+				Math.floorDiv(nextTime(), 2) - 1) - currentTime - paid);
+			for (int placed = 0; placed < columns; placed++) {
+				// Ticks that must stay in hand for the repeaters the rest of this stretch will be
+				// forced into, so that shedding eagerly now cannot strand the wire later.
+				int reserve = (columns - placed - 1 + MAX_BUS_LENGTH) / (MAX_BUS_LENGTH + 1);
+				// The lane's first cell is a repeater whatever else is true, so that the machine has
+				// a way in: the reader follows repeaters nothing feeds, and ekran taps his input at
+				// the same place. One tick, and the shared bias is what paid for it.
+				boolean due = sinceRepeater >= MAX_BUS_LENGTH || !opened;
+				if (!due && allowance < 4 + reserve) {
+					BlockPos wire = at(origin, forward, cursor, 0, 0);
+					placements.powered(wire, "minecraft:stone", pulseTick);
+					set(placements, wire.above(), "minecraft:redstone_wire");
+					sinceRepeater++;
+					cursor++;
+					opened = true;
+					continue;
+				}
+				if (allowance <= 0) {
+					return columns - placed;
+				}
+				int delay = Math.min(4, allowance);
+				BlockPos pos = at(origin, forward, cursor, 0, 0);
+				set(placements, pos, "minecraft:stone");
+				set(placements, pos.above(), "minecraft:repeater[facing=" + repeaterFacing(forward)
+					+ ",delay=" + delay + "]");
+				allowance -= delay;
+				paid += delay;
+				// Past a repeater the pulse is later by its delay, and a repeater tick is two game
+				// ticks. Everything downstream of here lights at the new moment.
+				pulseTick += 2 * delay;
+				sinceRepeater = 0;
+				cursor++;
+				opened = true;
+			}
+			return 0;
 		}
 	}
 
@@ -7733,6 +7951,71 @@ public final class SongBuilder {
 	 * the layout check has nothing to find -- but a run of live wire that the check cannot see is
 	 * how a note ends up sounding early, and the cost of saying so is one map entry.</p>
 	 */
+	/**
+	 * A chord on a straight lane and what it leaves behind, whatever shape it turned out to be.
+	 *
+	 * @param cursor the first column past the module
+	 * @param run cells of dust the module has already spent out of the fifteen a wire reaches, which
+	 *     is what the mirrored lane budgets against
+	 * @param frontFlanks the column holding low notes past the module, or {@link Integer#MIN_VALUE}.
+	 *     The next module may not reach its own low notes back into that column.
+	 */
+	private record StraightModule(int cursor, int run, int frontFlanks) {
+	}
+
+	/**
+	 * One chord, in the smallest shape that will hold it here.
+	 *
+	 * <p>The choice is far simpler than the ultra lane's, and it is simpler because a straight lane
+	 * has none of what makes that one hard: no walls to breach, no floors to climb between, no
+	 * corners a repeater may not stand on, and no turn to keep clear of. What is left is the two
+	 * questions the shape itself asks -- can the chord fill the rigid slots, and are the slots behind
+	 * this module free -- so the ultra lane's own builders are called directly rather than copied.
+	 * A second implementation of a shape this fiddly would only prove the two disagree.</p>
+	 *
+	 * <p>Order is smallest-first. Three notes or fewer are cheapest as the plain small shape, which
+	 * is two columns and cannot be beaten. Up to seven fit the stacked module whole, at two columns
+	 * against a bus's {@code 1 + n/2}. Anything larger takes a head of seven and buses the rest,
+	 * which is one column better than a plain bus and never worse.</p>
+	 */
+	private static StraightModule addStraightModule(PlacementPlan placements, BlockPos origin,
+			Direction forward, int cursor, int triggerDelay, List<EventNote> chord,
+			int extraColumns, boolean roomBehind) {
+		int time = chord.get(0).time();
+		if (HALF_TICK_LANE_STACKS && chord.size() > 3) {
+			Lane lane = Lane.straight(at(origin, forward, cursor, 0, 0), forward,
+				forward.getClockWise());
+			// The low slots behind sit in this module's own trigger column. On a straight lane the
+			// only thing that ever reaches into them is the module before, and only when it ended
+			// close enough to put its front notes there.
+			int backFlanks = roomBehind ? 2 : 0;
+			UltraSlots whole = ultraSlots(chord, backFlanks);
+			if (whole != null) {
+				addStackedEventModule(placements, lane, triggerDelay, time, whole);
+				// Nothing of the fifteen is spent. The module hands on through its centre, which its
+				// own repeater powers strongly, so the first cell past it is back at full strength --
+				// whether that cell is the next module's repeater reading the centre from behind, or
+				// the mirrored lane's wire lying beside it.
+				return new StraightModule(cursor + STACKED_CELLS, 0, cursor + STACKED_CELLS);
+			}
+			StackedBusSplit split = stackedBusSplit(chord, backFlanks);
+			if (split != null) {
+				Body body = addStackedBusModule(placements, lane, triggerDelay, time, split.slots(),
+					split.tail());
+				int cells = body.busCells();
+				int after = cursor + STACKED_CELLS + STACKED_BUS_TRANSITION + cells;
+				return new StraightModule(
+					padFlat(placements, origin, forward, after, time,
+						Math.min(extraColumns, MAX_BUS_LENGTH - STACKED_BUS_TRANSITION - cells)),
+					STACKED_BUS_TRANSITION + cells, cursor + STACKED_CELLS);
+			}
+			placements.padded("halfTickNoHead");
+		}
+		int run = chord.size() <= 3 ? 1 : (chord.size() + 1) / 2;
+		return new StraightModule(addEventModule(placements, origin, forward, cursor, triggerDelay,
+			chord, extraColumns), run + extraColumns, Integer.MIN_VALUE);
+	}
+
 	private static int padFlat(PlacementPlan placements, BlockPos origin, Direction forward,
 			int cursor, int time, int cells) {
 		for (int cell = 0; cell < Math.max(0, cells); cell++) {
@@ -8237,6 +8520,24 @@ public final class SongBuilder {
 		void startFreshRun() {
 			runSinceRepeater = 0;
 		}
+
+		/**
+		 * Puts the count back to what the wire about to be built on has itself laid.
+		 *
+		 * <p>For a plan holding two machines built a piece at a time each, which is the half-tick
+		 * lane and nothing else. One counter cannot follow two runs at once: the lanes alternate, so
+		 * their dust arrives interleaved and the total is the two added together -- eleven cells of
+		 * one lane and eight of the other read as nineteen and a wire that has overrun, when neither
+		 * has. Guardian reported 1,484 of those and had none.</p>
+		 *
+		 * <p>The caller knows which run it is resuming because it has been counting its own, so this
+		 * hands the count back rather than clearing it. Clearing would silence the check; handing it
+		 * back keeps it able to catch something.</p>
+		 */
+		void resumeRun(int cells) {
+			runSinceRepeater = cells;
+		}
+
 		/** Note block positions and the event tick each one belongs to. */
 		private final Map<BlockPos, Integer> notes = new LinkedHashMap<>();
 		/**
