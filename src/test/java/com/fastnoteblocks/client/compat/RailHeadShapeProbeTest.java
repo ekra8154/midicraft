@@ -43,6 +43,49 @@ class RailHeadShapeProbeTest {
 		// redstone line going both into and out of this block".
 		report("a run of one column, carrying on in dust", stub(false));
 		report("a run of one column, carrying on through a repeater", stub(true));
+		// Whether the column a run opens on may keep its centre for a harp note. It is the one column
+		// the head's dust drives, and the centre there was given away to a stone on the grounds that
+		// dust does not hand a note block on to the repeater in front of it -- but nothing in front of
+		// this centre reads it, so the question is only whether the notes hung off it still sound.
+		report("an opening centre of stone, one note hung", opening(false, 1));
+		report("an opening centre of note, nothing hung", opening(true, 1));
+		report("an opening centre of note, one note hung", opening(true, 2));
+		report("an opening centre of stone, two notes hung", opening(false, 2));
+	}
+
+	/**
+	 * The head and the column it opens on, and nothing after it.
+	 *
+	 * @param centreIsNote whether a harp note takes the centre rather than a stone
+	 * @param notes how many notes the chord holds altogether
+	 */
+	private static Map<BlockPos, BlockState> opening(boolean centreIsNote, int notes) {
+		Map<BlockPos, BlockState> world = new HashMap<>();
+		put(world, 7, FLOOR, "minecraft:stone");
+		put(world, 7, FLOOR + 1, "minecraft:repeater[facing=east,delay=2]");
+		put(world, 6, FLOOR, "minecraft:stone");
+		put(world, 6, FLOOR + 1, "minecraft:redstone_wire");
+		put(world, 5, FLOOR + 1, centreIsNote ? "minecraft:note_block[note=7]" : "minecraft:stone");
+		put(world, 5, FLOOR + 2, "minecraft:air");
+		// The floor rail this column starts, so the run is a real one rather than a stub.
+		put(world, 5, FLOOR, "minecraft:repeater[facing=east,delay=2]");
+		put(world, 5, FLOOR - 1, "minecraft:stone");
+		put(world, 4, FLOOR, "minecraft:stone");
+		put(world, 4, FLOOR + 1, "minecraft:repeater[facing=east,delay=2]");
+		// And the path column after it, which is the whole point: the repeater above the floor column
+		// reads this centre, so a centre that cannot relay ends the path chain rather than merely
+		// losing its own note.
+		put(world, 3, FLOOR + 1, "minecraft:note_block[note=15]");
+		put(world, 3, FLOOR + 2, "minecraft:air");
+		int hung = notes - (centreIsNote ? 1 : 0);
+		for (int index = 0; index < hung; index++) {
+			int z = index == 0 ? -1 : 1;
+			world.put(new BlockPos(5, FLOOR + 1, z),
+				parse("minecraft:note_block[note=" + (11 + index) + "]"));
+			world.put(new BlockPos(5, FLOOR, z), parse("minecraft:air"));
+			world.put(new BlockPos(5, FLOOR + 2, z), parse("minecraft:air"));
+		}
+		return world;
 	}
 
 	/** Head, one column, and then whatever the lane lays next. */
