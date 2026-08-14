@@ -803,8 +803,10 @@ public final class SongBuilder {
 			}
 			// Whatever is left of the run after the chord has taken its share. Overrunning it is
 			// not a slightly longer build, it is a dead one: the dust fades to nothing partway and
-			// the repeater at the far end never sees a signal, so the song stops there.
-			int room = Math.max(0, MAX_BUS_LENGTH - (chord.size() + 1) / 2);
+			// the repeater at the far end never sees a signal, so the song stops there. A small
+			// chord spends one cell on its note block; a bus spends one per pair of notes.
+			int room = Math.max(0, MAX_BUS_LENGTH
+				- (chord.size() <= 3 ? 1 : (chord.size() + 1) / 2));
 			int pad = Math.min(Math.max(0, wantedPad), room);
 			DelayTrigger trigger = addDelayBeforeEvent(placements, origin, forward, cursor, delay);
 			cursor = addEventModule(placements, origin, forward, trigger.cursor(),
@@ -7576,11 +7578,19 @@ public final class SongBuilder {
 	private static final int MAX_BUS_LENGTH = 15;
 
 	/**
-	 * @param extraColumns bus blocks beyond what the chord needs, for a lane catching up with the
-	 *     one beside it. A bus is stone under dust and dust has no delay, so a longer one moves the
-	 *     lane further along without moving the music at all -- which is the only kind of padding
-	 *     the half-tick lane can use, since anything with a repeater in it would put the two lanes
-	 *     out of step, and staying in step is the entire point of padding them.
+	 * @param extraColumns cells of plain wire laid after the chord, for a lane catching up with the
+	 *     one beside it. Dust has no delay, so they move the lane further along without moving the
+	 *     music -- which is the only kind of padding the half-tick lane can use, since anything with
+	 *     a repeater in it would put the two lanes out of step, and staying in step is the point.
+	 *
+	 *     <p>Laid <em>flat</em>, at the height the delay chain runs at, rather than as more bus.
+	 *     The chord keeps the shape it would have had on its own and the padding is a plain run
+	 *     between modules, which is what it is. Padding by bus instead made every chord look like a
+	 *     bigger chord with its notes bunched at one end -- ekran's objection, and the right one.</p>
+	 *
+	 *     <p>It buys no extra reach. Bus dust and flat dust are one run from the same repeater, so
+	 *     the fifteen cells dust carries are shared between them however they are arranged. More
+	 *     room would need another repeater, and a repeater costs a tick.</p>
 	 */
 	private static int addEventModule(PlacementPlan placements, BlockPos origin, Direction forward,
 			int cursor, int triggerDelay, List<EventNote> chord, int extraColumns) {
@@ -7590,9 +7600,7 @@ public final class SongBuilder {
 		set(placements, triggerPos.above(), "minecraft:repeater[facing=" + repeaterFacing(forward) + ",delay=" + triggerDelay + "]");
 		BlockPos anchor = at(origin, forward, cursor + 1, 1, 0);
 		int time = chord.get(0).time();
-		// A small chord normally skips the bus and hangs its notes straight off the anchor, which
-		// is a cell shorter. A padded one cannot: the padding *is* bus, so it takes the bus shape.
-		if (chord.size() <= 3 && extraColumns <= 0) {
+		if (chord.size() <= 3) {
 			placeNote(placements, anchor, chord.get(0));
 			placements.powered(anchor, time);
 			if (chord.size() >= 2) {
@@ -7601,10 +7609,12 @@ public final class SongBuilder {
 			if (chord.size() >= 3) {
 				placeNote(placements, anchor.relative(right.getOpposite()), chord.get(2));
 			}
-			return cursor + 2;
+			// One cell of the run is spent on the note block the trigger drives, so the wire that
+			// follows starts a cell down on its fifteen.
+			return padFlat(placements, origin, forward, cursor + 2, time,
+				Math.min(extraColumns, MAX_BUS_LENGTH - 1));
 		}
-		int busLength = Math.min(MAX_BUS_LENGTH,
-			(chord.size() + 1) / 2 + Math.max(0, extraColumns));
+		int busLength = (chord.size() + 1) / 2;
 		for (int bus = 0; bus < busLength; bus++) {
 			BlockPos busPos = anchor.relative(forward, bus);
 			placements.powered(busPos, "minecraft:stone", time);
@@ -7617,7 +7627,30 @@ public final class SongBuilder {
 			Direction side = noteIndex % 2 == 0 ? right : right.getOpposite();
 			placeNote(placements, anchor.relative(forward, bus).relative(side), note);
 		}
-		return cursor + 1 + busLength;
+		return padFlat(placements, origin, forward, cursor + 1 + busLength, time,
+			Math.min(extraColumns, MAX_BUS_LENGTH - busLength));
+	}
+
+	/**
+	 * Cells of plain wire on the floor the delay chain runs along, and where the lane gets to.
+	 *
+	 * <p>A step down from the bus, which dust does happily as long as nothing sits over the lower
+	 * cell -- nothing does, the run being the only thing here. Going the other way is the direction
+	 * that does not work, and this never goes the other way: the next thing along is a repeater,
+	 * which reads the wire behind it at its own height.</p>
+	 *
+	 * <p>Marked powered like any other live cell. Nothing of a chord's stands beside it today, so
+	 * the layout check has nothing to find -- but a run of live wire that the check cannot see is
+	 * how a note ends up sounding early, and the cost of saying so is one map entry.</p>
+	 */
+	private static int padFlat(PlacementPlan placements, BlockPos origin, Direction forward,
+			int cursor, int time, int cells) {
+		for (int cell = 0; cell < Math.max(0, cells); cell++) {
+			BlockPos padPos = at(origin, forward, cursor + cell, 0, 0);
+			placements.powered(padPos, "minecraft:stone", time);
+			set(placements, padPos.above(), "minecraft:redstone_wire");
+		}
+		return cursor + Math.max(0, cells);
 	}
 
 	/**

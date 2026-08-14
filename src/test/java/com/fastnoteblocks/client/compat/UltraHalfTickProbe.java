@@ -33,7 +33,7 @@ class UltraHalfTickProbe {
 
 	@Test
 	void buildsGuardianAsTwoSnakes() throws Exception {
-		List<SongBuilder.EventNote> guardian = BreachView.song("deltarune-ch-4-guardian");
+		List<SongBuilder.EventNote> guardian = BreachView.song("deltarune-ch-4-guardian", SongBuilder.PasteMode.ULTRA_HALF_TICK_LANE);
 		System.out.println();
 		System.out.println("==== Ultra half-tick lane, Guardian ====");
 		for (int[] size : new int[][] {{44, 3}, {32, 4}, {24, 3}}) {
@@ -85,9 +85,31 @@ class UltraHalfTickProbe {
 	 */
 	@Test
 	void measuresHowFarApartTheTwoSnakesPlay() throws Exception {
-		List<SongBuilder.EventNote> guardian = BreachView.song("deltarune-ch-4-guardian");
+		// A song only fills both corridors if its notes actually land on both halves of the tick.
+		// Guardian at the speed it is saved at does not -- every gap is a whole repeater tick, so
+		// every event is on an even game tick and the second snake is empty. Measuring drift on it
+		// would be measuring one snake against nothing. So: ekran's own two-lane composition, and
+        // Guardian at double speed, which is the stress case the earlier numbers were really taken on.
+		for (Object[] subject : new Object[][] {
+				{"a-dark-zone-2-lanes-maybe", 1}, {"deltarune-ch-4-guardian", 2}}) {
+			measureOneSong((String)subject[0], (Integer)subject[1]);
+		}
+	}
+
+	private void measureOneSong(String name, int speedFactor) throws Exception {
+		com.fastnoteblocks.client.composer.ComposerProject project = BreachView.project(name);
+		if (speedFactor != 1) {
+			project = project.withSpeedQuarters(Math.max(1, project.speedQuarters()) * speedFactor);
+		}
+		List<SongBuilder.EventNote> guardian = SongBuilder.notesFor(
+			SongBuilder.PasteMode.ULTRA_HALF_TICK_LANE,
+			project.toSequenceTracks(java.util.Set.of(), true), project, true);
+		long even = guardian.stream().filter(note -> note.time() % 2 == 0).count();
 		System.out.println();
-		System.out.println("==== Ultra half-tick lane, Guardian, how far apart the snakes play ====");
+		System.out.println("==== Ultra half-tick lane, " + name
+			+ (speedFactor == 1 ? "" : " at " + speedFactor + "x")
+			+ ": " + guardian.size() + " notes, " + even + " even / "
+			+ (guardian.size() - even) + " odd ====");
 		// Split into the two things that separate the snakes, because they want opposite fixes.
 		// Across is the corridors sitting side by side, which no pacing can close and only sharing
 		// a corridor would; along is the two creeping apart down the fold, which is drift and is

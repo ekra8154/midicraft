@@ -41,12 +41,34 @@ final class BreachView {
 	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
 
 	static List<SongBuilder.EventNote> song(String name) throws Exception {
+		return song(name, SongBuilder.PasteMode.ULTRA_COMPACT_LANE);
+	}
+
+	/**
+	 * A saved song, read the way the mode about to build it would read it.
+	 *
+	 * <p>Worth the parameter, because getting it wrong is not a small error and has already been
+	 * made. A layout timed in game ticks is planned from the composition; every other one is
+	 * planned from the sequence, whose delays are repeater ticks. A probe that always reads the
+	 * sequence hands a game-tick layout a song at twice its speed, split down the middle by a
+	 * property of the sequence rather than of the music -- which is precisely the fault that
+	 * shipped, and the probes agreed with it because they were making the same mistake.</p>
+	 *
+	 * <p>So the question goes through the same method the paste uses. A probe and a build that
+	 * share a mistake agree perfectly and prove nothing.</p>
+	 */
+	static List<SongBuilder.EventNote> song(String name, SongBuilder.PasteMode mode)
+			throws Exception {
+		ComposerProject project = project(name);
+		return SongBuilder.notesFor(mode, project.toSequenceTracks(Set.of(), true), project, true);
+	}
+
+	static ComposerProject project(String name) throws Exception {
 		try (Reader reader = Files.newBufferedReader(SONGS.resolve(name + ".json"))) {
 			ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
-			ComposerProject project = new ComposerProject(raw.name(), raw.ppq(),
+			return new ComposerProject(raw.name(), raw.ppq(),
 				raw.tempoMicrosPerQuarter(), raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(),
 				raw.endTick(), raw.speedQuarters());
-			return SongBuilder.eventNotes(project.toSequenceTracks(Set.of(), true));
 		}
 	}
 

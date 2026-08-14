@@ -46,7 +46,7 @@ class LaneDriftProbe {
 				"deltarune-ch-4-guardian", "illit-do-the-dance", "a-dark-zone-2-lanes-maybe"}) {
 			List<SongBuilder.EventNote> song;
 			try {
-				song = BreachView.song(name);
+				song = BreachView.song(name, SongBuilder.PasteMode.HALF_TICK_LANE);
 			} catch (java.io.IOException missing) {
 				continue;
 			}
