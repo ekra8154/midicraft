@@ -837,12 +837,16 @@ public final class SongBuilder {
 			// chord spends one cell on its note block; a bus spends one per pair of notes.
 			int room = Math.max(0, MAX_BUS_LENGTH
 				- (chord.size() <= 3 ? 1 : (chord.size() + 1) / 2));
-			int pad = Math.min(Math.max(0, wantedPad), room);
-			DelayTrigger trigger = addDelayBeforeEvent(placements, origin, forward, cursor, delay);
+			// The silence gets first refusal, because it has far more room than a module does and
+			// because a lane that is behind is usually behind for want of modules in the first
+			// place. Whatever it could not take, the chord's own run tries to make up.
+			DelayTrigger trigger = addDelayBeforeEvent(placements, origin, forward, cursor, delay,
+				Math.max(0, wantedPad));
+			int pad = Math.min(Math.max(0, wantedPad - trigger.padCells()), room);
 			cursor = addEventModule(placements, origin, forward, trigger.cursor(),
 				trigger.triggerDelay(), chord, pad);
 			currentTime = laneTime;
-			return pad;
+			return trigger.padCells() + pad;
 		}
 	}
 
@@ -7583,7 +7587,63 @@ public final class SongBuilder {
 
 	private static DelayTrigger addDelayBeforeEvent(PlacementPlan placements, BlockPos origin, Direction forward,
 			int cursor, int delay) {
+		return addDelayBeforeEvent(placements, origin, forward, cursor, delay, 0);
+	}
+
+	/**
+	 * Whether a lane may spend its silences catching up with the lane beside it.
+	 *
+	 * <p>Off, a quiet lane advances one column per four repeater ticks while its partner lays chords
+	 * -- so a song whose halves are lopsided drifts apart during exactly the passages where the
+	 * quiet lane has no modules to pad with. Aria Math's odd lane holds 22 events against 1,693 and
+	 * ends five thousand blocks short of its partner; no amount of padding at its own modules could
+	 * have closed that, because it barely has any.</p>
+	 *
+	 * <p>ekran asked for it as a flag, and it earns one: it is the only thing here that lays blocks
+	 * for no musical reason at all, and a build that would rather be short than together should be
+	 * able to say so.</p>
+	 */
+	static boolean PADS_THE_DELAY_CHAIN = true;
+
+	/**
+	 * The wire between two events, with the lagging lane's catch-up folded into it.
+	 *
+	 * <p>Two things make the room. Dust has no delay, so up to fifteen cells of it can follow a
+	 * repeater before the next one without moving the music at all. And the repeaters themselves
+	 * can be short: four ticks of silence is one repeater set to four, or four set to one, and the
+	 * second spends the same time while handing out four dust budgets instead of one. So a lane in
+	 * silence goes from a column every four ticks to as many as sixteen every tick -- which is
+	 * exactly the rate a lane laying thirty-note chords advances at, and therefore enough to keep
+	 * up with anything.</p>
+	 *
+	 * @param wantedPad columns this lane would like to gain, of which it takes what the silence
+	 *     affords. What it cannot take here it may still take after the chord.
+	 */
+	private static DelayTrigger addDelayBeforeEvent(PlacementPlan placements, BlockPos origin,
+			Direction forward, int cursor, int delay, int wantedPad) {
 		int remaining = delay;
+		int pad = PADS_THE_DELAY_CHAIN ? Math.max(0, wantedPad) : 0;
+		int used = 0;
+		// Short repeaters first, while there is catching up to do and delay left to spend on them.
+		// One tick each, so the music is untouched; the point is the fresh fifteen cells of wire
+		// each one is allowed to drive.
+		while (pad > 0 && remaining > 1) {
+			BlockPos pos = at(origin, forward, cursor, 0, 0);
+			set(placements, pos, "minecraft:stone");
+			set(placements, pos.above(), "minecraft:repeater[facing=" + repeaterFacing(forward)
+				+ ",delay=1]");
+			cursor++;
+			remaining--;
+			int run = Math.min(pad, MAX_BUS_LENGTH);
+			for (int cell = 0; cell < run; cell++) {
+				BlockPos wire = at(origin, forward, cursor, 0, 0);
+				placements.powered(wire, "minecraft:stone", Integer.MIN_VALUE);
+				set(placements, wire.above(), "minecraft:redstone_wire");
+				cursor++;
+			}
+			pad -= run;
+			used += run;
+		}
 		while (remaining > 4) {
 			BlockPos pos = at(origin, forward, cursor, 0, 0);
 			set(placements, pos, "minecraft:stone");
@@ -7591,7 +7651,7 @@ public final class SongBuilder {
 			cursor++;
 			remaining -= 4;
 		}
-		return new DelayTrigger(cursor, Math.max(1, remaining));
+		return new DelayTrigger(cursor, Math.max(1, remaining), used);
 	}
 
 	private static int addEventModule(PlacementPlan placements, BlockPos origin, Direction forward,
@@ -7970,7 +8030,14 @@ public final class SongBuilder {
 		}
 	}
 
-	private record DelayTrigger(int cursor, int triggerDelay) {
+	/**
+	 * @param padCells columns of catch-up the silence before this event managed to absorb, so the
+	 *     module after it knows how much of the lane's debt is still outstanding
+	 */
+	private record DelayTrigger(int cursor, int triggerDelay, int padCells) {
+		DelayTrigger(int cursor, int triggerDelay) {
+			this(cursor, triggerDelay, 0);
+		}
 	}
 
 	private record SpatialDelayTrigger(Lane lane, int triggerDelay) {
