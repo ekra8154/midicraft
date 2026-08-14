@@ -52,6 +52,14 @@ public record ComposerProject(
 	 * guarantee arrives and before the bill does.</p>
 	 */
 	public static final int MELODY_WEIGHT = 12;
+	/**
+	 * What marks an instrument id as a sound effect rather than a pitched instrument.
+	 *
+	 * <p>A sound effect is a block that makes its own noise when redstone reaches it -- a door, a
+	 * bell, a note block wearing a skull. None of them can be tuned, so on those layers a row is
+	 * only somewhere to put a hit, and two hits on one tick are one hit.</p>
+	 */
+	public static final String SOUND_EFFECT_PREFIX = "FX_";
 	public static final int NOTE_BLOCK_BASE_MIDI_NOTE = 54;
 	public static final int NOTE_BLOCK_MAX_MIDI_NOTE = NOTE_BLOCK_BASE_MIDI_NOTE + NotePitch.PITCH_COUNT - 1;
 	public static final long DEFAULT_NOTE_DURATION_TICKS = DEFAULT_PPQ / 4L;
@@ -131,7 +139,24 @@ public record ComposerProject(
 		public Layer {
 			name = name == null || name.isBlank() ? "Layer" : name.trim();
 			instrument = instrument == null || instrument.isBlank() ? "HARP" : instrument;
-			notes = notes == null ? List.of() : oneNotePerCell(notes);
+			notes = notes == null ? List.of() : oneNotePerCell(notes, pitched(instrument));
+		}
+
+		/**
+		 * Whether this layer's voice does anything with the row a note sits on.
+		 *
+		 * <p>Read off the id rather than looked up, so that the document stays a document: the
+		 * palette lives in the client's compat package and touching it from here would drag
+		 * Minecraft's item and sound registries into every test that builds a layer.
+		 * {@code SoundEffectVoiceTest} holds the palette to the naming, which is where a new voice
+		 * that forgot the prefix gets caught.</p>
+		 */
+		public boolean pitched() {
+			return pitched(instrument);
+		}
+
+		private static boolean pitched(String instrument) {
+			return !instrument.startsWith(SOUND_EFFECT_PREFIX);
 		}
 
 		/**
@@ -153,20 +178,33 @@ public record ComposerProject(
 		 * the newest: a phrase dragged across an existing note would otherwise lose one of its own
 		 * notes to every note it passed, and a drag is rebuilt from its starting point each frame, so
 		 * only where it comes to rest can cost anything.</p>
+		 *
+		 * <p>On a sound effect layer the cell is the tick alone. A door cannot be tuned, so the row a
+		 * hit is drawn on says nothing about how it sounds, and two hits on one tick would be one door
+		 * opening twice in the same instant -- which is one door opening. The row is still yours to
+		 * use: drawing a part across the roll to keep it readable costs nothing, it just cannot mean
+		 * two of anything. Note that switching a layer onto an effect collapses whatever chords it
+		 * already had; that is an edit like any other and undo puts them back.</p>
 		 */
-		private static List<NoteEvent> oneNotePerCell(List<NoteEvent> notes) {
+		private static List<NoteEvent> oneNotePerCell(List<NoteEvent> notes, boolean pitched) {
+			// Unpitched layers leave the pitch out of the ordering as well as out of the cell, or the
+			// survivor would be the lowest row rather than the note that was there first.
+			Comparator<NoteEvent> order = pitched
+				? Comparator.comparingLong(NoteEvent::startTick)
+					.thenComparingInt(NoteEvent::midiNote)
+					.thenComparingLong(NoteEvent::id)
+				: Comparator.comparingLong(NoteEvent::startTick)
+					.thenComparingLong(NoteEvent::id);
 			List<NoteEvent> sorted = notes.stream()
 				.filter(java.util.Objects::nonNull)
-				.sorted(Comparator.comparingLong(NoteEvent::startTick)
-					.thenComparingInt(NoteEvent::midiNote)
-					.thenComparingLong(NoteEvent::id))
+				.sorted(order)
 				.toList();
 			// Sorted by tick then pitch, so anything sharing a cell is adjacent and one pass finds it.
 			List<NoteEvent> kept = new ArrayList<>(sorted.size());
 			for (NoteEvent note : sorted) {
 				NoteEvent last = kept.isEmpty() ? null : kept.getLast();
 				if (last == null || last.startTick() != note.startTick()
-						|| last.midiNote() != note.midiNote()) {
+						|| (pitched && last.midiNote() != note.midiNote())) {
 					kept.add(note);
 				}
 			}
@@ -362,7 +400,10 @@ public record ComposerProject(
 	 */
 	public record NoteSound(String instrument, int midiNote, long startTick) {
 		public static NoteSound of(Layer layer, NoteEvent note) {
-			return new NoteSound(layer.instrument(), note.midiNote(), note.startTick());
+			// Two sound effect layers on the same block, hit on the same tick, are one sound however
+			// far apart their rows are drawn. Only a pitched voice can tell two rows apart.
+			return new NoteSound(layer.instrument(), layer.pitched() ? note.midiNote() : 0,
+				note.startTick());
 		}
 	}
 
@@ -1318,14 +1359,20 @@ public record ComposerProject(
 	 * steps, so the two cannot disagree about what a composition builds as.</p>
 	 */
 	public List<Step> toSteps(Layer layer) {
-		List<NoteEvent> buildable = layer.notes().stream().filter(NoteEvent::isBuildable).toList();
+		// A sound effect has no range to fall outside of and no pitch to carry, so every note builds
+		// and each one is written as pitch 0 -- a number the sequence text can hold and read back,
+		// standing for the one sound the block makes.
+		boolean pitched = layer.pitched();
+		List<NoteEvent> buildable = pitched
+			? layer.notes().stream().filter(NoteEvent::isBuildable).toList()
+			: layer.notes();
 		List<Step> steps = new ArrayList<>();
 		long previousTick = 0L;
 		for (int index = 0; index < buildable.size();) {
 			long eventTick = buildable.get(index).startTick();
 			NoteSequence.addDelaySteps(steps, buildDelayTicks(eventTick - previousTick));
 			while (index < buildable.size() && buildable.get(index).startTick() == eventTick) {
-				steps.add(Step.note(buildable.get(index).noteBlockPitch()));
+				steps.add(Step.note(pitched ? buildable.get(index).noteBlockPitch() : 0));
 				index++;
 			}
 			previousTick = eventTick;
