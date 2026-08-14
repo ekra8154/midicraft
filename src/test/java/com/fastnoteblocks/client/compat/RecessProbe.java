@@ -194,9 +194,7 @@ class RecessProbe {
 		// The shape decisions this arm turns on, so a table that does not move can say whether the
 		// thing being measured ever happened.
 		census.entrySet().stream()
-			.filter(entry -> entry.getKey().startsWith("planRelocate")
-				|| entry.getKey().startsWith("planShiftAndRelocate")
-				|| entry.getKey().startsWith("planParityGaveUp")
+			.filter(entry -> entry.getKey().startsWith("v2")
 				|| entry.getKey().startsWith("planBusFor"))
 			.forEach(entry -> System.out.println("         " + entry.getKey() + " = "
 				+ entry.getValue()));

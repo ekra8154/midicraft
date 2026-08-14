@@ -2059,10 +2059,95 @@ public final class SongBuilder {
 			// the shape the chord was measured in. A stacked chord that finds the pair of slots
 			// behind it spoken for is built as a bus instead, and a bus is longer -- so a lane could
 			// be told a chord fitted, build it, and land a column past its own wall.
-			Landing here = landingOf(lane.pos().getX(), lane.travel().getStepX(), event, wait,
-				columnBehindBusy, wall, layout, inTurn(placements, turning, leavingTurn, lane.pos(), lastCorner),
-				parity);
+			// Decided once, here, and then measured from the decision.
+			//
+			// This is the whole of ekran's complaint about v1 in one place. A chord's shape used to be
+			// answered three times: {@link #chooseStyle} guessing at grouping time, {@link #landingOf}
+			// predicting from a different set of rules, and {@link #addChordModule} deciding for real
+			// when it came to build. Any two of them disagreeing is a lane measured for one shape and
+			// built as another, which is a lane outside its wall -- and there is no planner in v2 to
+			// blame, because there is no planner in v2. The decision is the decision.
+			//
+			// So the walk asks {@link #shapeFor} at the column the chord will actually open on -- past
+			// the delay, which is where the module's repeater goes -- and {@link #landingFrom} works out
+			// where that shape ends. The same record is handed to {@link #buildShaped} below, so what is
+			// built is the shape that was measured, by construction rather than by agreement.
+			int delayAhead = Math.max(0, (wait - 1) / 4);
+			Lane willOpenOn = lane.ahead(delayAhead);
+			// The same slack the build site works out, which at this point in the lane is the whole wait
+			// less the pad already spent -- nothing has been spent yet when a chord is measured.
+			int slackAhead = Math.max(0, (event.time() - currentTime - 1) / 4);
+			Shape shaped = shapeFor(placements, willOpenOn, event, slackAhead,
+				!columnBehindBusy || delayAhead > 0
+					|| backPairIsFree(placements, willOpenOn, event.time()),
+				inTurn(placements, turning, leavingTurn, willOpenOn.pos(), lastCorner),
+				turning ? Integer.MAX_VALUE
+					: (wall - willOpenOn.pos().getX()) * lane.travel().getStepX(),
+				tipSignal, layout);
+			// The columns a corner takes before the module starts.
+			//
+			// A repeater may not stand on a corner, so every shape walks past one first -- that is what
+			// {@link #pastAnyCorner} is, and it is applied inside the builders where no prediction can
+			// see it. The chord is then a column or two longer than the walk measured, in the shape the
+			// walk measured, which is the one disagreement deciding once cannot fix by itself: it is
+			// not a disagreement about the shape, it is a term missing from the arithmetic.
+			//
+			// Counted the same way the builder walks it, off the same lane, so the two cannot drift.
+			int cornerWalk = 0;
+			for (Lane probe = willOpenOn; probe.cornerAt(0) && cornerWalk < 4; probe = probe.ahead(1)) {
+				cornerWalk++;
+			}
+			Landing here = landingFrom(shaped,
+				lane.pos().getX() + lane.travel().getStepX() * cornerWalk,
+				lane.travel().getStepX(), event, wait);
+			// Against the prediction v2 used to make, while both exist. The old one deliberately erred
+			// towards the bus -- "the safe way round", because a lane measured long and built short
+			// lands inside its wall -- so where the two differ is where that safety was being spent.
+			if (TRACE_ONE_DECISION) {
+				Landing was = landingOf(lane.pos().getX(), lane.travel().getStepX(), event, wait,
+					columnBehindBusy, wall, layout,
+					inTurn(placements, turning, leavingTurn, lane.pos(), lastCorner), parity);
+				int drift = (here.end() - was.end()) * lane.travel().getStepX();
+				if (drift != 0) {
+					placements.padded("v2Landing" + (drift > 0 ? "Longer" : "Shorter")
+						+ Math.abs(drift));
+					placements.padded("v2LandingWas" + was.style() + "Now" + here.style());
+				}
+			}
 			int landing = here.end() + lane.travel().getStepX() * reserve;
+			// A chord that fits and leaves the lane unable to pay for its own turn does not fit.
+			//
+			// This is what deciding once exposed rather than caused. While the prediction erred towards the
+			// bus, every lane carried a column or two of slack it never used, and that slack was what paid
+			// for the staircase. Measuring honestly spends it on music -- builds come out 2.6% shorter --
+			// and the lane arrives at its wall with the wire gone.
+			//
+			// v1 answered this inside the pad search, with strandsNext booking a column so the lane could
+			// close. v2 has no search and does not need one: it can close the lane a chord earlier and let
+			// this chord open the next. No pad, no booking, and no looking further ahead than the chord in
+			// hand.
+			//
+			// Asked of the wire the chord hands on, which is what canTurn asks for when the lane does end.
+			// A lane holding nothing is exempt -- it has nothing to close on, and a lane that turned the
+			// moment it opened would never lay a note.
+			// Room, and not wire, is what a lane runs out of.
+			//
+			// v2 closes every lane by cutting the chord that reaches its wall, and a cut needs somewhere
+			// to put the head that makes it: the head's own columns and the cell it hands over on. A
+			// lane packed so tight that the chord reaching the wall has two columns left cannot be cut
+			// at all, and a lane that cannot cut and cannot pay for a turn walks out past its wall
+			// carrying the chord whole. That is every long breach on the all-25 song.
+			//
+			// Asked of the wire and not of the room, because the room was measured and is not it. Closing
+			// a lane whose next chord would have too few columns left to cut fires 98 times on the
+			// all-25 song and moves its breach count by nothing at all, and takes Guardian from 62 to
+			// 95. Whatever leaves those lanes unable to close, it is not that they were one chord too
+			// greedy about the columns.
+			boolean strandsTheTurn = STRANDED_LANE_CLOSES_EARLY && !turning && layout.ultra()
+				&& laneStarted && !flatAhead && here.tip() < turnCells;
+			if (strandsTheTurn) {
+				placements.padded("v2ClosedBeforeStranding");
+			}
 			// Never while the route is still bending. Inside a turn the wire runs across the corridor
 			// rather than along it, so every one of these measurements is taken down the wrong axis --
 			// and there is nothing to decide anyway, because the walk has already committed to the
@@ -2070,7 +2155,8 @@ public final class SongBuilder {
 			// arithmetic about walls says so.
 			// Whether this event will not fit before the wall, which is a different question from
 			// whether the lane may end here.
-			boolean overshoots = !turning && (landing > farWall || landing < nearWall);
+			boolean overshoots = !turning
+				&& (landing > farWall || landing < nearWall || strandsTheTurn);
 			// And whether it merely gets there. A chord ending on the wall, or one column short of
 			// it, has not overshot and so was never offered a cut -- which leaves the lane holding a
 			// long bus, no near half to cut, and a turn to pay for out of the two cells that bus left
@@ -3138,18 +3224,51 @@ public final class SongBuilder {
 				|| backPairIsFree(placements, opening, event.time());
 			int ahead = turning ? Integer.MAX_VALUE
 				: (wall - opening.pos().getX()) * opening.travel().getStepX();
+			// The shape the walk decided when it measured this chord, if the chord is still standing
+			// where it was measured. Every other route to here has moved it -- a pad the lane laid, a
+			// turn it took -- and a shape decided for one column is not an answer about another, so
+			// those ask again from where the chord actually is.
+			//
+			// This is what makes the decision the decision. The measurement above and the build below
+			// are one call apart rather than two rule sets apart, so the length the lane was closed on
+			// is the length that goes down.
+			Shape shape = opening.pos().equals(willOpenOn.pos()) && !turning
+				? shaped
+				: shapeFor(placements, opening, event, slack, behind,
+					inTurn(placements, turning, leavingTurn, opening.pos(), lastCorner), ahead,
+					tipSignal, layout);
+			if (shape != shaped) {
+				placements.padded("v2ShapeAskedAgain");
+			}
 			Placed placed;
 			placements.beginTrial();
 			try {
-				placed = addChordModule(placements, opening, trigger.triggerDelay(), event, slack,
-					behind, inTurn(placements, turning, leavingTurn, opening.pos(), lastCorner),
-					ahead, tipSignal, layout);
+				placed = buildShaped(placements, opening, trigger.triggerDelay(), event, shape, layout);
 				placements.commitTrial();
 			} catch (IllegalArgumentException collided) {
 				placements.rollbackTrial();
 				placements.padded("v2ShapeCollidedFellBack");
 				placed = addChordModule(placements, opening, trigger.triggerDelay(), event, slack,
 					behind, true, ahead, tipSignal, layout);
+			}
+			// The disagreement the one-decision walk exists to remove, counted rather than assumed
+			// gone. What the lane was measured for against what went into the ground -- and if those
+			// two are ever different, the lane was closed on a length that is not the length it got.
+			if (placed.style() != shape.style()) {
+				placements.padded("v2Built" + placed.style() + "Decided" + shape.style());
+			}
+			if (placed.nudged() && !shape.nudge()) {
+				placements.padded("v2NudgedAfterDeciding");
+			}
+			// And the length, which is the number the lane was actually closed on. The style agreeing
+			// is not the same as the length agreeing: a bus that finds a note's cell taken carries the
+			// run a block further and comes out longer in the shape it was measured in.
+			int predicted = here.end();
+			int actual = placed.lane().pos().getX();
+			int over = (actual - predicted) * lane.travel().getStepX();
+			if (over != 0) {
+				placements.padded("v2Built" + (over > 0 ? "Longer" : "Shorter") + Math.abs(over)
+					+ "Than" + shape.style());
 			}
 			if (event.style().busHeaded()) {
 				placements.padded("planStackedBusWanted" + (climbingLane ? "Climb" : "Descent"));
@@ -3508,6 +3627,44 @@ public final class SongBuilder {
 			.computeIfAbsent(((long) x << 32) ^ (time & 0xffffffffL), key ->
 				parityVerdict(placements, laneStart.ahead((x - originX) * step), time, slots,
 					room));
+	}
+
+	/**
+	 * Where a decided shape ends, and what it hands on.
+	 *
+	 * <p>The arithmetic half of {@link #landingOf}, taking the shape as settled instead of working it
+	 * out again. That is the point: v2 decides once through {@link #shapeFor} and measures the answer,
+	 * so a lane cannot be measured for one shape and built as another.</p>
+	 *
+	 * <p>One column for a shape that asked for a pad, whether it asked because the pair behind was
+	 * spoken for or because parity wanted it. {@link #addStackedShape} lays exactly one either way,
+	 * and {@code nudge} is already true whenever {@code behindShift} is.</p>
+	 */
+	private static Landing landingFrom(Shape shape, int startX, int stepX, EventGroup event,
+			int wait) {
+		int delayColumns = Math.max(0, (wait - 1) / 4);
+		ChordStyle style = shape.style();
+		int shift = shape.nudge() ? 1 : 0;
+		int cells = (event.notes().size() + 1) / 2;
+		// Off the split the shape is carrying, not off a fresh one. A note relocated to the tail makes
+		// the tail a note longer, and asking splitFor again is asking about the chord this module is
+		// no longer being built as.
+		int tailCells = 0;
+		if (style.busHeaded()) {
+			StackedBusSplit split = shape.moved() != null && shape.moved().split() != null
+				? shape.moved().split() : splitFor(style, event.notes());
+			tailCells = split == null ? 0 : (split.tail().size() + 1) / 2;
+		}
+		int length = style.busHeaded()
+			? delayColumns + shift + STACKED_CELLS + STACKED_BUS_TRANSITION + tailCells
+			: style.stacked()
+				? delayColumns + shift + 2
+				: delayColumns + (style == ChordStyle.BUS ? 1 + cells : 2);
+		int tip = style == ChordStyle.BUS ? DUST_RANGE - cells
+			: style.busHeaded()
+				? DUST_RANGE - STACKED_BUS_TRANSITION - tailCells
+				: DUST_RANGE;
+		return new Landing(startX + stepX * length, tip, takesTheGapBehind(style, tailCells), style);
 	}
 
 	private static Landing landingOf(int startX, int stepX, EventGroup event, int wait, boolean busy,
@@ -6517,17 +6674,32 @@ public final class SongBuilder {
 	}
 
 	/**
-	 * Builds a chord in the shape chosen for it, settling the one thing the choice could not know.
+	 * The shape a chord is to be built in, and everything the choice of it costs.
 	 *
-	 * <p>Whether the pair of slots behind this module is free depends on where the lanes turned,
-	 * and lanes turn according to lengths that were measured from these very choices. The knot is
-	 * cut by only ever moving in the direction that shortens: a full stacked module that finds its
-	 * pair taken drops to a bus, and a bus that finds a turn has freed the pair takes it.</p>
+	 * <p>One record so that the decision can be made once and then read, rather than made again by
+	 * whoever needs to know. {@code behindShift} and {@code nudge} are columns of pad the shape has
+	 * asked for, {@code moved} is a low note lifted out of a slot something else owns, and
+	 * {@code gaveUp} names the rule that took the shape away, for the trace.</p>
 	 */
-	private static Placed addChordModule(PlacementPlan placements, Lane lane, int triggerDelay,
-			EventGroup event, int slackColumns, boolean roomBehind, boolean inTurn, int roomAhead,
-			int signal, Layout layout) {
-		Direction travel = lane.travel();
+	private record Shape(ChordStyle style, boolean behindShift, boolean nudge, Relocation moved,
+			String gaveUp) {
+	}
+
+	/**
+	 * What shape this chord takes here, decided in one place and by asking.
+	 *
+	 * <p>Pulled out of {@link #addChordModule} whole, so that the walk can decide a chord's shape
+	 * before it measures where the chord will land and then build exactly the shape it measured. While
+	 * this lived inside the builder there were three answers to the question -- {@link #chooseStyle}
+	 * guessing at grouping time, {@link #landingOf} predicting, and this deciding -- and a lane
+	 * measured for one shape and built as another lands outside its wall.</p>
+	 *
+	 * <p>It writes to the census as it goes, so it is called once per chord and the answer is passed
+	 * on. Calling it twice counts every decision twice.</p>
+	 */
+	private static Shape shapeFor(PlacementPlan placements, Lane lane, EventGroup event,
+			int slackColumns, boolean roomBehind, boolean inTurn, int roomAhead, int signal,
+			Layout layout) {
 		ChordStyle style = event.style();
 		// Which rule took the shape the planner chose, for {@link #TRACE}. A lane past its wall is
 		// usually a chord that was measured as one shape and built as another, and there are seven
@@ -6771,6 +6943,32 @@ public final class SongBuilder {
 			style = ChordStyle.BUS;
 			nudge = false;
 		}
+		return new Shape(style, behindShift, nudge, moved, gaveUp);
+	}
+
+	private static Placed addChordModule(PlacementPlan placements, Lane lane, int triggerDelay,
+			EventGroup event, int slackColumns, boolean roomBehind, boolean inTurn, int roomAhead,
+			int signal, Layout layout) {
+		return buildShaped(placements, lane, triggerDelay, event,
+			shapeFor(placements, lane, event, slackColumns, roomBehind, inTurn, roomAhead, signal,
+				layout), layout);
+	}
+
+	/**
+	 * Lays down the shape that was decided, and the one thing the decision cannot settle.
+	 *
+	 * <p>Every rule above this tries to work out whether the ground is free. This is what happens when
+	 * one of them is wrong: the shape is built inside a trial, and a collision rolls it back and lays a
+	 * bus instead. Asking is cheaper than being right, and it is the only answer that cannot be
+	 * out of date.</p>
+	 */
+	private static Placed buildShaped(PlacementPlan placements, Lane lane, int triggerDelay,
+			EventGroup event, Shape shape, Layout layout) {
+		ChordStyle style = shape.style();
+		boolean nudge = shape.nudge();
+		Relocation moved = shape.moved();
+		String gaveUp = shape.gaveUp();
+		Lane start = lane;
 		if (!style.stacked()) {
 			trace(event, lane, style, style, gaveUp);
 			return layBus(placements, lane, triggerDelay, event, style,
@@ -8003,6 +8201,25 @@ public final class SongBuilder {
 
 	/** Scratch: every column a colliding bus tried, and what it met there. */
 	static boolean TRACE_BUS_MOVE = false;
+
+	/** Scratch: the one-decision prediction against the one it replaces, chord by chord. */
+	static boolean TRACE_ONE_DECISION = false;
+
+	/**
+	 * v2: a lane closes a chord early rather than take one that leaves it unable to turn.
+	 *
+	 * <p>The other half of deciding a chord's shape once. While {@link #landingOf} erred towards the
+	 * bus, every lane carried a column or two of slack it never used, and that slack was what paid for
+	 * the staircase at the end of it. Measuring honestly through {@link #shapeFor} spends the slack on
+	 * music -- builds come out 2.6% shorter -- and the lane reaches its wall with the wire gone.</p>
+	 *
+	 * <p>v1's answer was {@code strandsNext}, inside the pad search: book a column so the lane can
+	 * close. This is the same question without the search. A chord that would leave less wire than the
+	 * staircase costs is treated as not fitting, so the lane closes on what it is already holding and
+	 * the chord opens the next one. Nothing is booked and nothing is looked at beyond the chord in
+	 * hand, which is what v2 is for.</p>
+	 */
+	static boolean STRANDED_LANE_CLOSES_EARLY = true;
 
 	/**
 	 * v2: a stacked module may not stand where its own lane is going to walk.
