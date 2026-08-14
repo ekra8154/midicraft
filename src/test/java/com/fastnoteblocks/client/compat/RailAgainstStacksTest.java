@@ -47,6 +47,7 @@ class RailAgainstStacksTest {
 		int worseOn = 0;
 		int betterOn = 0;
 		var wrongBySong = new TreeMap<String, String>();
+		var census = new TreeMap<String, Integer>();
 		for (Path path : songs) {
 			String name = path.getFileName().toString().replace(".json", "");
 			List<SongBuilder.EventNote> notes;
@@ -76,11 +77,17 @@ class RailAgainstStacksTest {
 				} else if (on.spanZ() < off.spanZ()) {
 					betterOn++;
 				}
+				on.padding().forEach((key, count) -> {
+					if (key.equals("railHead") || key.equals("railFromStack")) {
+						census.merge(key, count, Integer::sum);
+					}
+				});
 				System.out.println(String.format("%-52s %5s %6d%% %7d %7d %7d %7d",
 					name, size[0] + "/" + size[1], big, off.spanZ(), on.spanZ(),
 					off.wrongNotes(), on.wrongNotes()));
 			}
 		}
+		System.out.println("STACKS runs opened " + census + " over the whole library");
 		System.out.println("STACKS depth better on " + betterOn + " sizes, worse on " + worseOn);
 		System.out.println("STACKS songs where runs add wrong notes: " + wrongBySong.size());
 		wrongBySong.forEach((name, where) -> System.out.println("STACKS  " + name + "  " + where));

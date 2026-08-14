@@ -52,6 +52,49 @@ class RailHeadShapeProbeTest {
 		report("an opening centre of note, nothing hung", opening(true, 1));
 		report("an opening centre of note, one note hung", opening(true, 2));
 		report("an opening centre of stone, two notes hung", opening(false, 2));
+		// ekran's transition. A stacked module already lays a cross of dust on a stone at the lane's
+		// floor level, which is the head's two blocks in the head's two places -- so the run needs no
+		// head, only the trigger column every module pays for. Ticks are what this has to get right:
+		// the floor rail is seeded at the stacked chord's own tick, a tick earlier than a head's
+		// would be.
+		report("a run opening off a stacked chord", fromStack(true));
+		report("a run opening off a stacked chord with a stone centre", fromStack(false));
+	}
+
+	/**
+	 * The tail of a stacked module, then a run opening straight off it.
+	 *
+	 * <p>Expected: the module at tick 0, the run's first chord at 2 where the trigger repeater puts
+	 * it, the floor rail's first chord at 3, and the path rail's second at 5.</p>
+	 *
+	 * @param centreIsNote whether the stacked module's centre is a note block or a stone, since both
+	 *     happen and both have to light the dust under them
+	 */
+	private static Map<BlockPos, BlockState> fromStack(boolean centreIsNote) {
+		Map<BlockPos, BlockState> world = new HashMap<>();
+		// The stacked module: its trigger, then its centre with the dust cross on stone beneath.
+		put(world, 8, FLOOR, "minecraft:stone");
+		put(world, 8, FLOOR + 1, "minecraft:repeater[facing=east,delay=1]");
+		put(world, 7, FLOOR + 1, centreIsNote ? "minecraft:note_block[note=3]" : "minecraft:stone");
+		put(world, 7, FLOOR + 2, "minecraft:air");
+		put(world, 7, FLOOR, "minecraft:redstone_wire[north=side,east=side,south=side,west=side]");
+		put(world, 7, FLOOR - 1, "minecraft:stone");
+		// The trigger column, which is all a run off a stack costs. Its stone is already powered by
+		// the cross behind it, so the floor rail starts here without a column of its own.
+		put(world, 6, FLOOR, "minecraft:stone");
+		put(world, 6, FLOOR + 1, "minecraft:repeater[facing=east,delay=2]");
+		// The run's first path column: its chord, and the repeater pulling the floor rail out.
+		put(world, 5, FLOOR + 1, "minecraft:note_block[note=7]");
+		put(world, 5, FLOOR + 2, "minecraft:air");
+		put(world, 5, FLOOR, "minecraft:repeater[facing=east,delay=3]");
+		put(world, 5, FLOOR - 1, "minecraft:stone");
+		// The floor column, and the path column after it.
+		put(world, 4, FLOOR, "minecraft:stone");
+		put(world, 4, FLOOR + 1, "minecraft:repeater[facing=east,delay=3]");
+		hang(world, 4, FLOOR, 20);
+		put(world, 3, FLOOR + 1, "minecraft:note_block[note=15]");
+		put(world, 3, FLOOR + 2, "minecraft:air");
+		return world;
 	}
 
 	/**

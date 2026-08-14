@@ -856,10 +856,12 @@ public final class SongBuilder {
 			// the blank column that gets it onto the path rail, and then its own.
 			int railColumns = railContinues
 				? railPhase == 1 && railBlank != NO_BLANK ? 2 : 1
-				: railOpens(events, index, lane, wall, layout, turning, reserve, wait)
-					// The head's two columns, its chord, and the repeater a four-tick stretch of the
-					// wait in front of it costs -- the same sum the plain path makes of it.
-					? RAIL_HEAD_COLUMNS + 1 + railPadColumns(wait) : 0;
+				: railOpens(events, index, lane, wall, layout, turning, reserve, wait,
+					railStackSeed(placements, lane, lastStyle, currentTime, turning))
+					// The head's columns, its chord, and the repeater a four-tick stretch of the wait
+					// in front of it costs -- the same sum the plain path makes of it.
+					? railHeadColumns(railStackSeed(placements, lane, lastStyle, currentTime, turning))
+						+ 1 + railPadColumns(wait) : 0;
 			int landing = railColumns > 0
 				? lane.pos().getX() + lane.travel().getStepX() * (railColumns + reserve)
 				: here.end() + lane.travel().getStepX() * reserve;
@@ -1788,10 +1790,12 @@ public final class SongBuilder {
 			int laneWall = lane.travel() == forward ? farWall : nearWall;
 			if (turning || lane.bending()) {
 				railPhase = -1;
-			} else if (railPhase >= 0
-					|| railOpens(events, index, lane, laneWall, layout, false, reserve, wait)) {
+			} else if (railPhase >= 0 || railOpens(events, index, lane, laneWall, layout, false,
+					reserve, wait, railStackSeed(placements, lane, lastStyle, currentTime, false))) {
 				boolean opening = railPhase < 0;
+				boolean fromDust = false;
 				if (opening) {
+					int seed = railStackSeed(placements, lane, lastStyle, currentTime, false);
 					// The wait in front of the run, laid the way every other module lays it: a repeater
 					// for every four ticks of it, and the remainder in the head's own. Clamping it to
 					// four instead is right only while no gap exceeds four, which is true of every
@@ -1799,14 +1803,23 @@ public final class SongBuilder {
 					// of eight and sounded its whole first phrase early.
 					SpatialDelayTrigger opener = addSpatialDelayBeforeEvent(placements, lane,
 						event.time() - currentTime - spentPadding, layout.ultra());
-					lane = addRailHead(placements, opener.lane(), opener.triggerDelay(), event.time());
+					// Off a stacked chord only where the padding did not move the lane on: the cross
+					// has to be the cell behind the trigger, and a column of wire in between puts the
+					// whole thing out of reach.
+					boolean offStack = seed != NO_BLANK && opener.lane().pos().equals(lane.pos());
+					fromDust = !offStack;
+					lane = offStack
+						? addRailFromStack(placements, opener.lane(), opener.triggerDelay(), seed)
+						: addRailHead(placements, opener.lane(), opener.triggerDelay(), event.time());
 					railPhase = 0;
 					railBlanksRunning = 0;
 					railFloorCarried = false;
 					// The head's own stone and the stone under its dust both go live with this chord,
 					// so both rails are timed from here.
 					railLive[0] = event.time();
-					railLive[1] = event.time();
+					// The floor rail is live from whatever seeded it: this chord where a head was
+					// built, and the stacked chord behind it where one was inherited.
+					railLive[1] = offStack ? seed : event.time();
 				} else if (railPhase == 1 && railBlank != NO_BLANK) {
 					// The floor column this chord would have taken, laid empty: either the chord is a
 					// three and the floor rail has no centre for it, or the pair of gaps behind it is
@@ -1858,7 +1871,7 @@ public final class SongBuilder {
 				// A floor column that is not a blank is the floor rail earning its keep.
 					railFloorCarried |= railPhase == 1;
 					lane = addRailNote(placements, lane, railPhase, event.notes(), event.time(),
-					nextDelay, opening);
+					nextDelay, fromDust);
 				railLive[railPhase] = event.time();
 				railPhase = nextDelay > 0 ? 1 - railPhase : -1;
 				currentTime = event.time();
@@ -4376,7 +4389,7 @@ public final class SongBuilder {
 	 * path rail, but the head is the one column that has no centre at all -- its stone has to relay
 	 * the dust -- so opening one is the place to be plain about what fits.</p>
 	 */
-	private static boolean railMayStart(List<EventGroup> events, int index) {
+	private static boolean railMayStart(List<EventGroup> events, int index, int floorSeed) {
 		if (!TWO_RAIL_RUNS || index + 2 >= events.size()) {
 			return false;
 		}
@@ -4390,7 +4403,11 @@ public final class SongBuilder {
 		// And then the same question a run in progress asks, so that opening one and carrying one on
 		// cannot answer differently. Both rails go live with this chord: the head's own stone, and the
 		// stone under the dust in front of it.
-		return railPairAfter(events, index, head.time(), head.time(), null, null) != null;
+		// Timed from wherever the floor rail actually starts: the chord itself where a head is built,
+		// and the stacked chord behind it where one is inherited -- which is earlier, so the first
+		// floor repeater has less of its four ticks left to play with.
+		return railPairAfter(events, index, head.time(),
+			floorSeed == NO_BLANK ? head.time() : floorSeed, null, null) != null;
 	}
 
 	/** Columns between this cell and the wall the lane is running at. */
@@ -4423,11 +4440,16 @@ public final class SongBuilder {
 	 * measured was that disagreement.</p>
 	 */
 	private static boolean railOpens(List<EventGroup> events, int index, Lane lane, int wall,
-			Layout layout, boolean turning, int reserve, int wait) {
+			Layout layout, boolean turning, int reserve, int wait, int floorSeed) {
 		return TWO_RAIL_RUNS && layout.ultra() && !turning && !lane.bending()
-			&& railMayStart(events, index)
+			&& railMayStart(events, index, floorSeed)
 			&& railRoom(lane, wall)
-				>= RAIL_HEAD_COLUMNS + railPadColumns(wait) + 2 + reserve;
+				>= railHeadColumns(floorSeed) + railPadColumns(wait) + 2 + reserve;
+	}
+
+	/** What opening a run costs in columns: both of the head's, or only the trigger off a stack. */
+	private static int railHeadColumns(int floorSeed) {
+		return floorSeed == NO_BLANK ? RAIL_HEAD_COLUMNS : RAIL_HEAD_COLUMNS - 1;
 	}
 
 	/**
@@ -4508,9 +4530,58 @@ public final class SongBuilder {
 		return railDelay(floorLive, blankTime) > 0 ? new RailPair(true, blankTime) : null;
 	}
 
+	/** Off, a run always pays for its own head even where a stacked chord has already built one. */
+	static boolean RAIL_FROM_STACK = true;
+
+	/**
+	 * The tick a run opening at this cell would find its floor rail already live at, or
+	 * {@link #NO_BLANK} where it would have to build a head of its own.
+	 *
+	 * <p>ekran's: a stacked module already <em>is</em> a head. It lays a cross of dust at the lane's
+	 * floor level standing on a stone, one column back from where it hands over -- which is the same
+	 * pair of blocks {@link #addRailHead} spends a column building, at the same level, live at the
+	 * module's own tick. The cross points along the lane as well as across it, so the cell the next
+	 * module's trigger repeater stands on is already powered. A repeater pulls that out into the floor
+	 * rail and the module's centre carries the path rail, so both rails are running from the column
+	 * after it, for the price of the trigger column every module pays anyway.</p>
+	 *
+	 * <p>Read off the blocks rather than off the style, because what matters is that the cross is
+	 * actually behind this cell -- a nudge, a corner or a column of padding puts it somewhere else,
+	 * and the style would still say stacked.</p>
+	 */
+	private static int railStackSeed(PlacementPlan placements, Lane lane, ChordStyle lastStyle,
+			int currentTime, boolean turning) {
+		if (!RAIL_FROM_STACK || turning || lane.bending()
+				|| lastStyle != ChordStyle.STACKED_FRONT && lastStyle != ChordStyle.STACKED_FULL) {
+			return NO_BLANK;
+		}
+		return placements.describeBlock(lane.pos().relative(lane.travel().getOpposite()))
+			.startsWith("minecraft:redstone_wire") ? currentTime : NO_BLANK;
+	}
+
+	/**
+	 * The trigger column of a run that opens off a stacked chord, and nothing else.
+	 *
+	 * <p>The same stone and repeater every module opens with. What makes it a head is what is already
+	 * behind it: the stacked module's cross powers this stone, so the floor rail starts here without
+	 * a column being spent on it, and the repeater carries the path rail on to the first chord.</p>
+	 */
+	private static Lane addRailFromStack(PlacementPlan placements, Lane lane, int delay, int seed) {
+		placements.placing("rail:FROM-STACK delay" + delay);
+		placements.padded("railFromStack");
+		lane = pastAnyCorner(placements, lane);
+		// Live at the stacked chord's tick, because the cross behind it is. Said out loud so that
+		// anything hung beside it is checked against that tick rather than against the run's.
+		placements.powered(lane.pos(), "minecraft:stone", seed);
+		set(placements, lane.pos().above(),
+			"minecraft:repeater[facing=" + repeaterFacing(lane.travel()) + ",delay=" + delay + "]");
+		return lane.ahead(1);
+	}
+
 	/** The two columns a run opens with: its own repeater, then the dust that starts the floor rail. */
 	private static Lane addRailHead(PlacementPlan placements, Lane lane, int delay, int time) {
 		placements.placing("rail:HEAD delay" + delay);
+		placements.padded("railHead");
 		lane = pastAnyCorner(placements, lane);
 		set(placements, lane.pos(), "minecraft:stone");
 		set(placements, lane.pos().above(),
