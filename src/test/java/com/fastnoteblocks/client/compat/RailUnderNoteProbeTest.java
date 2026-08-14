@@ -34,7 +34,7 @@ class RailUnderNoteProbeTest {
 		// SongBuilder.TRACE prints a RAIL line per column beside this, which is what named the run
 		// that walked through a staircase. Left off: it is a thousand lines on this song.
 		SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0),
-			load("ultra-ones-gap2"), SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+			load("ultra-threes-mixed"), SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
 			new SongBuilder.BuildLimits(16, 40, 2));
 		Map<BlockPos, String> world = new HashMap<>();
 		for (String command : plan.commands()) {
@@ -68,6 +68,44 @@ class RailUnderNoteProbeTest {
 			return "NOTE";
 		}
 		return name.startsWith("redstone_wire") ? "dust" : name;
+	}
+
+	/**
+	 * Which side of its anchor every floor-rail note hangs on.
+	 *
+	 * <p>A floor anchor is the one cell in the build that is powered stone with a repeater directly
+	 * over it, so a note beside one is a floor-rail note and nothing else. Counted rather than
+	 * eyeballed off a slice, because which side they take is the whole of the question: the side
+	 * facing ground the walk has not built yet is the side a stacked module of the next lane wants.</p>
+	 */
+	@Test
+	void countsWhichSideTheFloorRailFills() throws Exception {
+		Map<String, Integer> sides = new TreeMap<>();
+		for (String song : List.of("ultra-ones-gap2", "ultra-twos-mixed", "ultra-threes-mixed")) {
+			SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0),
+				load(song), SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+				new SongBuilder.BuildLimits(16, 40, 2));
+			Map<BlockPos, String> world = new HashMap<>();
+			for (String command : plan.commands()) {
+				String[] parts = command.split(" ");
+				world.put(new BlockPos(Integer.parseInt(parts[1]), Integer.parseInt(parts[2]),
+					Integer.parseInt(parts[3])), parts[4]);
+			}
+			for (Map.Entry<BlockPos, String> block : world.entrySet()) {
+				if (!block.getValue().startsWith("minecraft:note_block")) {
+					continue;
+				}
+				for (int step = -1; step <= 1; step += 2) {
+					BlockPos anchor = block.getKey().relative(net.minecraft.core.Direction.SOUTH, step);
+					if ("minecraft:stone".equals(world.get(anchor))
+							&& String.valueOf(world.get(anchor.above())).startsWith("minecraft:repeater")) {
+						sides.merge(song + (step > 0 ? "  note on the low-z side" : "  note on the high-z side"),
+							1, Integer::sum);
+					}
+				}
+			}
+		}
+		sides.forEach((where, count) -> System.out.println("SIDE " + count + "  " + where));
 	}
 
 	/** The faults themselves, which name the two cells and so the two shapes that met. */

@@ -4215,12 +4215,26 @@ public final class SongBuilder {
 	 * the dust -- so opening one is the place to be plain about what fits.</p>
 	 */
 	private static boolean railMayStart(List<EventGroup> events, int index) {
-		return TWO_RAIL_RUNS && index + 2 < events.size()
-			&& events.get(index).notes().size() <= RAIL_FLOOR_SLOTS
-			&& railHolds(events.get(index + 1), false)
-			&& railHolds(events.get(index + 2), true)
-			&& railNextDelay(events, index, events.get(index).time()) > 0
-			&& railNextDelay(events, index + 1, events.get(index).time()) > 0;
+		if (!TWO_RAIL_RUNS || index + 2 >= events.size()) {
+			return false;
+		}
+		EventGroup head = events.get(index);
+		EventGroup second = events.get(index + 1);
+		// The head column is the one path column with no centre to offer -- its stone has to relay the
+		// dust -- so it holds what a floor column holds. Which also means a run can never open on a
+		// chord of three: three notes need a centre, and the head has none.
+		if (head.notes().size() > RAIL_FLOOR_SLOTS || railDelay(head.time(), second.time()) == 0) {
+			return false;
+		}
+		if (!railHolds(second, false)) {
+			// The second chord takes a blank and lands on the path column after it, which is a place
+			// the run may end -- so nothing beyond it has to be asked. Refusing to open here is what
+			// left a whole stretch of three-two-three-one unrailed: every one of its threes wanted the
+			// path rail, which is exactly what a blank is for, and only the opening said no.
+			return railHolds(second, true);
+		}
+		return railHolds(events.get(index + 2), true)
+			&& railDelay(head.time(), events.get(index + 2).time()) > 0;
 	}
 
 	/** Columns between this cell and the wall the lane is running at. */
@@ -4361,7 +4375,13 @@ public final class SongBuilder {
 		// a note block plays only with air above, so both notes go out to the sides.
 		placements.placing("rail:FLOOR notes" + chord.size());
 		placements.powered(at.pos(), "minecraft:stone", time);
-		hangRailNotes(placements, at.pos(), at.noteSide(), hanging, time);
+		// And filled towards the lane behind first, which is the opposite way round from the path
+		// rail. A floor note sits at the lane's own floor level, which is exactly where a stacked
+		// module hangs its four low notes -- so a chord of one or two that fills the side facing
+		// ground the walk has not built yet leaves live stone against a slot the next lane's stacked
+		// modules were going to want. The side already built is one {@link #soundedByAnother} can see
+		// the whole of. ekran, reading a floor column in game.
+		hangRailNotes(placements, at.pos(), at.noteSide().getOpposite(), hanging, time);
 		if (nextDelay > 0) {
 			set(placements, at.pos().above(),
 				"minecraft:repeater[facing=" + facing + ",delay=" + nextDelay + "]");
