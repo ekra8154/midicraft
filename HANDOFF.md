@@ -1,11 +1,21 @@
-# Handoff — two-rail runs, and the one invariant still broken
+# Handoff — two-rail runs, and the invariant that is now held
 
-State at `2a659b5`, branch `claude/compact-chord-sequences-623d9d`. Everything below was measured
-over ekran's whole library, not derived.
+Branch `claude/double-rail-worktree-handoff-dd47ed`, working tree on top of `1fcc581`. Everything
+below was measured over ekran's whole library, not derived.
 
-**The branch is not mergeable.** Wrong notes and breaches are where they need to be; dead wires are
-not. One invariant, stated in the source and violated by some route the guard does not cover,
-accounts for all of it. That is the whole of what is left.
+**The dead wires are gone.** Both routes that produced them are named and fixed, and the whole
+library now reads back clean at all seven sizes a song:
+
+```
+wrong notes   0 off ->    0 on
+breach     2349 off -> 2349 on     (was 2353; the four extra went with the first fix)
+dead wires    0 off ->    0 on     (was 14200 over seven songs)
+depth              better on 202 sizes, worse on 44
+runs opened   6052 off a stacked chord, 13064 building a head
+```
+
+What is left before this merges is the ordinary check, not a search: the red set. See the last
+section.
 
 ## Draw the break. Do not read setblock lists.
 
@@ -46,50 +56,67 @@ on one rail and the repeater driving the next chord on the other.
 - **Blank**: a floor column with its notes left off, for a chord of three the floor rail cannot hold,
   for a pair of gaps over four ticks, and now for a chord a stacked neighbour would sound early.
 
-## What is open, and it is the only thing
+## The two routes that killed the wire, and what each one was
 
-**A run must end on a path column, and sometimes it ends on a floor column.** The reason is written
-into [`SongBuilder.java:887`](src/client/java/com/fastnoteblocks/client/compat/SongBuilder.java#L887)
-and the guard there is correct as far as it goes — `overshoots` refuses to interrupt a run while
-`railPhase >= 0`. Some second route into ending mid-pair does not pass through it.
+Both produce the same picture and neither was the route the last handoff guessed at. Its two
+suspects were both innocent, and instrumenting every run exit is what said so: 360 ends on thriller,
+every one of them on a path column by its own arithmetic, none abandoned by `turning || bending`.
+`railPairAfter` and `railNextDelay` do agree.
 
-Why it matters: a path column's centre is a block a **repeater** drives, so it lights whatever comes
-next. A floor column instead hands its repeater out at path level into plain dust, and the first
-block that dust reaches is soft powered — and the lane then climbs out of it, leaving the repeater
-that should have drawn the signal onward a floor above and past the staircase.
+**The signature is always wire-block-wire.** A block powered only by dust is *soft* powered: it will
+still sound the notes hung on it -- which is why the note on it reads as reached, and why the last
+live note in a build is always sitting on the fault -- and it cannot light the dust on its far side.
 
-Reproduce it in one run:
+### One: a booked pad landing inside a committed pair
 
-```bash
-./gradlew.bat sweepTest --offline -i --tests "com.fastnoteblocks.client.compat.RailDeadWireProbeTest"
+The run's own columns were right; a column was inserted *between* them. The plan books its pad
+against an event, and the walk lays that pad at the top of the event, before the rail branch is
+reached. So when a pair had been committed, a booked column landed between the repeater a rail
+column had already laid and the note that repeater existed to drive. On thriller at 16 wide over 3
+floors, `z=31`, reading west:
+
+```
+x=9 PATH   centre note, repeater below
+x=8 FLOOR  notes at floor level, repeater above
+x=7        stone + dust  <- booked pad, not part of the run
+x=6 PATH   stone centre -- soft powered, sounds its own notes, lights nothing
 ```
 
-It is pointed at `michael-jackson-thriller`, 16 wide over 3 floors — **7517 of 8027 notes silent**.
-Reading right to left in the rendered `z=31` slice: `x=11` head repeater, `x=10` head dust, `x=9`
-path column, `x=8` floor column, then dust. The run ended on the floor column. Had it run one column
-further to `x=7`, that centre would have been repeater-driven and the dust at `x=6` would have lit.
+Three of these in that build; the first buried 7517 of 8027 notes. Fixed where the pair is
+committed, as the last handoff predicted: `railPairAfter` refuses a pair that spans a booked pad, so
+the run ends on its path column, the lane pads as planned, and a fresh run opens beyond it. Thriller
+went 7517 -> 0, and the library 14200 -> 1337.
 
-Two things worth checking that were never resolved:
+### Two: the cheap head priced when the walk will not build it
 
-- `railPairAfter` commits to both columns of a pair at the path column; the floor column re-asks
-  independently through `railNextDelay`. They *look* like the same question — same event index, same
-  `railHolds(e, true)`, same anchor time — so if they are agreeing, the run is being abandoned by
-  `turning || lane.bending()` at the top of the rail branch rather than ending by its own arithmetic.
-- Whichever it is, the fix belongs where the pair is committed, not where it is discovered.
+`railOpens` priced the head at one column whenever a stacked chord stood behind, but the walk only
+takes that head where the padding leaves the lane where it stood -- the cross has to be the cell
+behind the trigger. With a wait of eight ticks the padding moves the lane one column, the walk
+builds the whole two-column head, and the run opens one column poorer than it was promised. It then
+finds no room for its pair and ends on the column its head's *dust* drives, which lights no dust of
+its own.
+
+The plan already had the words for it: `addRailNote` raises *"a run at tick N ended on the column its
+head's dust drives"*, and printing `plan.faults()` in the probe named it in one run. `railHeadColumns`
+now takes the wait and charges the full head whenever the padding will spend a column. That is the
+last 1337, over three songs.
+
+**Both fixes are one-liners in effect and neither is a flag.** Nothing was disabled to get here.
 
 ## The numbers, whole library, seven sizes a song
 
 ```
-wrong notes   0 off ->     0 on
-breach     2349 off ->  2353 on     (four blocks, three songs gaining one or two)
-dead wires    0 off -> 14200 on     (seven songs)
-depth              better on 201 sizes, worse on 43
-runs opened   6112 off a stacked chord, 13119 building a head
+wrong notes   0 off ->    0 on
+breach     2349 off -> 2349 on
+dead wires    0 off ->    0 on
+depth              better on 202 sizes, worse on 44
+runs opened   6052 off a stacked chord, 13064 building a head
 ```
 
-`RailAgainstStacksTest` prints all three now. It used to compare only wrong notes and depth, which is
-why it kept coming back clean while `BreachTraceTest` went red — **measure all three or the sweep
-lies to you.**
+`RailAgainstStacksTest` prints all three. It used to compare only wrong notes and depth, which is why
+it kept coming back clean while `BreachTraceTest` went red -- **measure all three or the sweep lies
+to you.** It takes about twenty minutes; do not run anything else against `sweepTest` while it does,
+or the two collide on `build/test-results/sweepTest` and both die.
 
 The six synthetic songs (`ultra-ones/twos/threes/gaps-mixed`, song of storms, lady brown) are clean
 at all 252 plan sizes and all 55 read back, and none of them holds a chord big enough to stack, so
@@ -124,6 +151,25 @@ the javadoc. Nothing has been disabled or reverted; ekran asked for it that way 
 
 ## Red tests
 
-`BreachReproSearchTest` is not this branch's — its spec builds no rail column at all, and
-`RailTouchesBreachReproTest` pins that. `BreachTraceTest` **is** ours: it asserts no song turns past
-its wall, passed at `70b777e`, and has been red since. It should come back with the invariant.
+`BreachReproSearchTest` is not this branch's -- its spec builds no rail column at all, and
+`RailTouchesBreachReproTest` pins that. `BreachTraceTest.listsTheRealBreachesLeft` **is** ours: it
+asserts no song somebody wrote turns past its wall, passed at `70b777e`, and has been red since.
+Running it is the check that is left.
+
+Run that method by name and nothing else in the class. The other three tests in the file are scratch
+probes that set `SongBuilder.TRACE = true`, and a traced build pours every walk line through log4j --
+that is where the eighteen-gigabyte `latest.log` came from. Two runs of the whole class sat at four
+hundred megabytes of heap each and had to be killed.
+
+```bash
+./gradlew.bat test --offline --tests "com.fastnoteblocks.client.compat.BreachTraceTest.listsTheRealBreachesLeft"
+```
+
+## Running any of this in a fresh worktree
+
+The probes read `run/config/fast-noteblocks/songs`, which is gitignored and lives in the main
+checkout. A worktree has no `run` at all, and every probe dies on `NoSuchFileException` until it does:
+
+```bash
+cmd //c mklink //J run "D:/Documents/modding/fast-noteblocks/run"
+```
