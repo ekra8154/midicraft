@@ -59,7 +59,7 @@ class RailAgainstStacksTest {
 				continue;
 			}
 			int big = bigChordShare(notes);
-			for (int[] size : new int[][] {{16, 3}, {24, 3}, {44, 3}}) {
+			for (int[] size : new int[][] {{16, 1}, {16, 3}, {20, 2}, {24, 3}, {32, 5}, {44, 3}, {44, 6}}) {
 				SongBuilder.TWO_RAIL_RUNS = false;
 				SongBuilder.PastePlan off = plan(notes, size[0], size[1]);
 				SongBuilder.TWO_RAIL_RUNS = true;
