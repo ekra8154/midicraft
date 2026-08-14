@@ -857,7 +857,7 @@ public final class SongBuilder {
 			int railColumns = railContinues
 				? railPhase == 1 && railBlank != NO_BLANK ? 2 : 1
 				: railOpens(events, index, lane, wall, layout, turning, reserve, wait,
-					railStackSeed(placements, lane, lastStyle, currentTime, turning))
+					railStackSeed(placements, lane, lastStyle, currentTime, turning), booked)
 					// The head's columns, its chord, and the repeater a four-tick stretch of the wait
 					// in front of it costs -- the same sum the plain path makes of it.
 					? railHeadColumns(railStackSeed(placements, lane, lastStyle, currentTime, turning))
@@ -1791,7 +1791,8 @@ public final class SongBuilder {
 			if (turning || lane.bending()) {
 				railPhase = -1;
 			} else if (railPhase >= 0 || railOpens(events, index, lane, laneWall, layout, false,
-					reserve, wait, railStackSeed(placements, lane, lastStyle, currentTime, false))) {
+					reserve, wait, railStackSeed(placements, lane, lastStyle, currentTime, false),
+					booked)) {
 				boolean opening = railPhase < 0;
 				boolean fromDust = false;
 				if (opening) {
@@ -1839,7 +1840,8 @@ public final class SongBuilder {
 					// turn's cells: those are a wire budget, and every column of a run holds a
 					// repeater.
 					RailPair pair = railRoom(lane, laneWall) >= 2 + reserve
-						? railPairAfter(events, index, event.time(), railLive[1], placements, lane.ahead(1))
+						? railPairAfter(events, index, event.time(), railLive[1], placements,
+							lane.ahead(1), booked)
 						: null;
 					// And a floor rail that keeps taking blanks is not carrying anything: a chord and a
 					// blank between them cost the two columns the plain lane charges for the chord
@@ -4389,7 +4391,8 @@ public final class SongBuilder {
 	 * path rail, but the head is the one column that has no centre at all -- its stone has to relay
 	 * the dust -- so opening one is the place to be plain about what fits.</p>
 	 */
-	private static boolean railMayStart(List<EventGroup> events, int index, int floorSeed) {
+	private static boolean railMayStart(List<EventGroup> events, int index, int floorSeed,
+			Map<Integer, Integer> booked) {
 		if (!TWO_RAIL_RUNS || index + 2 >= events.size()) {
 			return false;
 		}
@@ -4407,7 +4410,7 @@ public final class SongBuilder {
 		// and the stacked chord behind it where one is inherited -- which is earlier, so the first
 		// floor repeater has less of its four ticks left to play with.
 		return railPairAfter(events, index, head.time(),
-			floorSeed == NO_BLANK ? head.time() : floorSeed, null, null) != null;
+			floorSeed == NO_BLANK ? head.time() : floorSeed, null, null, booked) != null;
 	}
 
 	/** Columns between this cell and the wall the lane is running at. */
@@ -4440,9 +4443,10 @@ public final class SongBuilder {
 	 * measured was that disagreement.</p>
 	 */
 	private static boolean railOpens(List<EventGroup> events, int index, Lane lane, int wall,
-			Layout layout, boolean turning, int reserve, int wait, int floorSeed) {
+			Layout layout, boolean turning, int reserve, int wait, int floorSeed,
+			Map<Integer, Integer> booked) {
 		return TWO_RAIL_RUNS && layout.ultra() && !turning && !lane.bending()
-			&& railMayStart(events, index, floorSeed)
+			&& railMayStart(events, index, floorSeed, booked)
 			&& railRoom(lane, wall)
 				>= railHeadColumns(floorSeed) + railPadColumns(wait) + 2 + reserve;
 	}
@@ -4477,6 +4481,11 @@ public final class SongBuilder {
 		return at.ahead(1);
 	}
 
+	/** Whether the plan has booked pad at this event, which the walk lays before any rail column. */
+	private static boolean railPadBooked(Map<Integer, Integer> booked, int index) {
+		return booked != null && booked.getOrDefault(index, 0) > 0;
+	}
+
 	/** What the floor column after a path column carries: the next chord, or a blank at this tick. */
 	private record RailPair(boolean blank, int floorTime) {
 	}
@@ -4503,8 +4512,20 @@ public final class SongBuilder {
 	 * @param floorLive when the floor rail's last anchor went live
 	 */
 	private static RailPair railPairAfter(List<EventGroup> events, int index, int pathLive,
-			int floorLive, PlacementPlan placements, Lane floor) {
+			int floorLive, PlacementPlan placements, Lane floor, Map<Integer, Integer> booked) {
 		if (index + 1 >= events.size()) {
+			return null;
+		}
+		// A booked pad inside the pair is what breaks the chain, so the pair is never committed to
+		// across one. The plan books its pad against events, and the walk lays it at the top of the
+		// event, before the rail branch is reached -- so a column of it lands between the repeater a
+		// rail column has already laid and the note that repeater was laid to drive. What comes out
+		// is repeater, dust, block: the block is soft powered, it sounds the notes hung on it and it
+		// lights nothing after it, and the rest of the song is behind that. Refused here, where the
+		// pair is committed, rather than noticed two events later where the column is already built
+		// -- the run ends on this path column, the lane pads as the plan asked, and the next run
+		// opens on the far side.
+		if (railPadBooked(booked, index + 1) || railPadBooked(booked, index + 2)) {
 			return null;
 		}
 		EventGroup next = events.get(index + 1);
