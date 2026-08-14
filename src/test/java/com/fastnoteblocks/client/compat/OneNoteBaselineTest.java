@@ -34,7 +34,8 @@ class OneNoteBaselineTest {
 	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
 
 	private static final List<String> SUBJECTS =
-		List.of("ultra-ones-gap2", "ultra-ones-mixed", "ultra-twos-mixed", "ultra-threes-mixed");
+		List.of("ultra-ones-mixed", "ultra-twos-mixed", "ultra-threes-mixed", "ultra-gaps-mixed",
+			"song-of-storms-but-noteblocks-dont-kill-me", "lady-brown-nujabes");
 
 	@Test
 	void measuresTheOneNoteSongs() throws Exception {

@@ -51,12 +51,16 @@ class WriteOneNoteSongsTest {
 		// every sum from two to four, and the head, which is measured from t(k) instead, differs
 		// from the columns after it.
 		write("ultra-ones-mixed", 0, 600);
-		writeChords("ultra-twos-mixed", 600, 2);
+		writeChords("ultra-twos-mixed", 600, 2, 2);
 		// Chords of three as well, which is where a run has to swap its rails over: the floor rail
 		// has no centre, so half of them land somewhere they do not fit. And some of them carry no
 		// harp note at all, which the path rail cannot take either -- those are the ones a run has
 		// to break for.
-		writeChords("ultra-threes-mixed", 600, 3);
+		writeChords("ultra-threes-mixed", 600, 3, 2);
+		// Gaps up to four, so that consecutive pairs of them come to as much as eight. A rail
+		// repeater spans two gaps, so anything over four is what the blank has to hop in halves --
+		// which is the case song of storms opens with and nothing above reaches.
+		writeChords("ultra-gaps-mixed", 600, 3, 4);
 	}
 
 	/** Instruments a rail note may carry. Snare is sand, which is the one that needs holding up. */
@@ -70,7 +74,8 @@ class WriteOneNoteSongsTest {
 	 * has to walk is every combination of those: a chord with a harp note and one without, on the
 	 * rail that has a centre and the rail that does not.</p>
 	 */
-	private static void writeChords(String name, int events, int largest) throws Exception {
+	private static void writeChords(String name, int events, int largest, int maxGap)
+			throws Exception {
 		java.util.Random random = new java.util.Random(20260814L);
 		Map<String, List<ComposerProject.NoteEvent>> byInstrument = new LinkedHashMap<>();
 		long tick = 0;
@@ -89,7 +94,7 @@ class WriteOneNoteSongsTest {
 						ComposerProject.NOTE_BLOCK_BASE_MIDI_NOTE + upAndDown(index * 2 + note),
 						tick * TICK, TICK, 96));
 			}
-			tick += 1 + random.nextInt(2);
+			tick += 1 + random.nextInt(maxGap);
 		}
 		List<ComposerProject.Layer> layers = new ArrayList<>();
 		byInstrument.forEach((instrument, notes) ->

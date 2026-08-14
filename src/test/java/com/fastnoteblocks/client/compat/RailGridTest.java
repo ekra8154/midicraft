@@ -34,7 +34,8 @@ class RailGridTest {
 
 	@Test
 	void reportsEverySizeThatFails() throws Exception {
-		for (String name : List.of("ultra-ones-gap2", "ultra-ones-mixed", "ultra-twos-mixed", "ultra-threes-mixed")) {
+		for (String name : List.of("ultra-ones-mixed", "ultra-twos-mixed", "ultra-threes-mixed", "ultra-gaps-mixed",
+			"song-of-storms-but-noteblocks-dont-kill-me", "lady-brown-nujabes")) {
 			List<SongBuilder.EventNote> notes = load(name);
 			int sizes = 0;
 			int trouble = 0;
@@ -68,13 +69,22 @@ class RailGridTest {
 	 */
 	@Test
 	void readsBackEverySizeOfTheGrid() throws Exception {
-		for (String name : List.of("ultra-ones-gap2", "ultra-ones-mixed", "ultra-twos-mixed", "ultra-threes-mixed")) {
+		for (String name : List.of("ultra-ones-mixed", "ultra-twos-mixed", "ultra-threes-mixed", "ultra-gaps-mixed",
+			"song-of-storms-but-noteblocks-dont-kill-me", "lady-brown-nujabes")) {
 			List<SongBuilder.EventNote> notes = load(name);
 			int sizes = 0;
 			int broken = 0;
+			int brokenOff = 0;
 			for (int floors : new int[] {1, 2, 3, 5, 9}) {
 				for (int width = 8; width <= 48; width += 4) {
 					sizes++;
+					SongBuilder.RAIL_BLANKS_FOR_DELAY = false;
+					if (!RailReadBackTest.readBackDifference(SongBuilder.createPastePlan(
+							new BlockPos(0, 64, 0), notes, SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+							new SongBuilder.BuildLimits(16, width, floors)), notes, name).isEmpty()) {
+						brokenOff++;
+					}
+					SongBuilder.RAIL_BLANKS_FOR_DELAY = true;
 					SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0),
 						notes, SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
 						new SongBuilder.BuildLimits(16, width, floors));
@@ -88,7 +98,7 @@ class RailGridTest {
 				}
 			}
 			System.out.println("READ " + name + ": " + broken + " of " + sizes
-				+ " sizes did not read back as themselves");
+				+ " sizes did not read back as themselves, and " + brokenOff + " with delay blanks off");
 		}
 	}
 
