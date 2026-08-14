@@ -4480,7 +4480,11 @@ public final class SongBuilder {
 				placeNoteBlock(placements, centre, harp);
 				placements.powered(centre, time);
 			}
-			hangRailNotes(placements, centre, at.noteSide(), hanging, time);
+			// The same way round as the floor rail. Both rails filling towards the lane behind leaves
+			// the whole column on the other side empty, so a run occupies its centre and one flank
+			// rather than straddling both -- and every lane spaced three apart then has a clear
+			// column between it and the next. ekran, who found the two rails disagreeing.
+			hangRailNotes(placements, centre, at.noteSide().getOpposite(), hanging, time);
 			if (nextDelay > 0) {
 				set(placements, at.pos(),
 					"minecraft:repeater[facing=" + facing + ",delay=" + nextDelay + "]");
