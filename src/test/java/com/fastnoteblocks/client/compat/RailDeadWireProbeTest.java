@@ -104,6 +104,29 @@ class RailDeadWireProbeTest {
 				System.out.println("  #" + order + "  " + x + " " + y + " " + z + "  " + parts[4]);
 			}
 		}
+		// The break as a picture rather than as a list of setblocks. AsciiDiagram is what the machine
+		// reader's own command prints, so this is the same view ekran would get standing in front of
+		// it -- which matters when the client cannot be launched to go and look.
+		BlockPos live = laid.entrySet().stream()
+			.filter(entry -> world.get(entry.getKey()).is(Blocks.NOTE_BLOCK))
+			.filter(entry -> !dead.contains(entry.getKey()))
+			.filter(entry -> entry.getValue() < laid.get(first))
+			.max(Map.Entry.comparingByValue()).map(Map.Entry::getKey).orElse(first);
+		System.out.println();
+		System.out.println("PROBE the last live note is at " + live.getX() + " " + live.getY() + " "
+			+ live.getZ() + " and the first dead one at " + first.getX() + " " + first.getY() + " "
+			+ first.getZ());
+		BlockPos from = new BlockPos(
+			Math.min(live.getX(), first.getX()) - 3, Math.min(live.getY(), first.getY()) - 3,
+			Math.min(live.getZ(), first.getZ()) - 2);
+		BlockPos to = new BlockPos(
+			Math.max(live.getX(), first.getX()) + 9, Math.max(live.getY(), first.getY()) + 2,
+			Math.max(live.getZ(), first.getZ()) + 2);
+		if (AsciiDiagram.volume(from, to) <= AsciiDiagram.MAX_BLOCKS) {
+			System.out.println(AsciiDiagram.render(
+				position -> world.getOrDefault(position, Blocks.AIR.defaultBlockState()),
+				from, to, AsciiDiagram.View.NORTH, AsciiDiagram.Shape.CODE));
+		}
 		for (BlockPos at : unreached.stream().limit(2).toList()) {
 			System.out.println();
 			System.out.println("PROBE unreached note at " + at.getX() + " " + at.getY() + " "
