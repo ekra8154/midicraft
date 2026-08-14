@@ -258,9 +258,9 @@ class HalfTickLaneTest {
 			previousX = block.x();
 		}
 		int spanX = plan.spanX();
-		assertTrue(furthestBack < 32,
+		assertEquals(0, furthestBack,
 			"the paste front stepped " + furthestBack + " blocks back down a build " + spanX
-				+ " long; the two lanes are not being laid alongside each other");
+				+ " long; commands are laid in column order, so it must never step back at all");
 	}
 
 	/**

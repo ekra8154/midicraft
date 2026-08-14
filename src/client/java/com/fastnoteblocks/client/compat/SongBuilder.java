@@ -647,7 +647,37 @@ public final class SongBuilder {
 		}
 		placements.padded("halfTickCatchUp", padded);
 		placements.padded("halfTickCatchUpShort", short_);
-		return placements.finish(PasteMode.HALF_TICK_LANE, origin);
+		return alongTheBuild(placements.finish(PasteMode.HALF_TICK_LANE, origin));
+	}
+
+	/**
+	 * The same plan with its commands laid in the order a player walking beside them would meet
+	 * them, rather than the order the walk thought of them.
+	 *
+	 * <p>Pacing the two lanes by the clock keeps them in step musically and says nothing about
+	 * where they are. Where one lane carries almost all the song -- Aria Math splits 1,693 events
+	 * against 22 -- the quiet lane's cursor is thousands of columns behind at every moment, so a
+	 * stream in time order jumps the length of the build and back for each of its twenty-two
+	 * events. ekran could not paste it: blocks aimed at chunks nobody had loaded never arrived, and
+	 * whole passages came out missing.</p>
+	 *
+	 * <p>Nothing about the machine depends on the order, so this is free -- a setblock is a setblock
+	 * and each position is written once. Two things do depend on it and are kept: an instrument
+	 * block still precedes the support under it, since sorting is stable and they share a column,
+	 * and the collision markers stay at the end, where they are meant to win.</p>
+	 */
+	private static PastePlan alongTheBuild(PastePlan plan) {
+		int markers = plan.collisions().size();
+		List<String> laid = new ArrayList<>(plan.commands().subList(0,
+			plan.commands().size() - markers));
+		laid.sort(Comparator.comparingInt(command ->
+			Integer.parseInt(command.split(" ")[1])));
+		laid.addAll(plan.commands().subList(plan.commands().size() - markers,
+			plan.commands().size()));
+		return new PastePlan(List.copyOf(laid), plan.width(), plan.depth(), plan.height(),
+			plan.spanX(), plan.spanZ(), plan.mode(), plan.faults(), plan.turns(), plan.moved(),
+			plan.breaches(), plan.recesses(), plan.padding(), plan.nearWall(), plan.farWall(),
+			plan.collisions());
 	}
 
 	private static List<EventNote> parity(List<EventNote> notes, int odd) {
