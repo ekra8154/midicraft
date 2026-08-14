@@ -44,9 +44,10 @@ class RailHeadShapeProbeTest {
 		report("a run of one column, carrying on in dust", stub(false));
 		report("a run of one column, carrying on through a repeater", stub(true));
 		// Whether the column a run opens on may keep its centre for a harp note. It is the one column
-		// the head's dust drives, and the centre there was given away to a stone on the grounds that
-		// dust does not hand a note block on to the repeater in front of it -- but nothing in front of
-		// this centre reads it, so the question is only whether the notes hung off it still sound.
+		// the head's dust drives, and it gave the centre away to a stone for a long time on the
+		// grounds that dust does not hand a note block on to the repeater in front of it. It does:
+		// the block after the centre is what says so, and it is reached either way. ekran, who would
+		// not have it -- "a note block can be powered just like a stone, there's no difference".
 		report("an opening centre of stone, one note hung", opening(false, 1));
 		report("an opening centre of note, nothing hung", opening(true, 1));
 		report("an opening centre of note, one note hung", opening(true, 2));

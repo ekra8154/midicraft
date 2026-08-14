@@ -4553,14 +4553,16 @@ public final class SongBuilder {
 				placements.trouble("a run at tick " + time
 					+ " ended on the column its head's dust drives, which cannot light the wire after it");
 			}
-			// The centre goes to a harp note everywhere but the column a run opens on, and that one is
-			// structural rather than cautious. This centre is what the floor column in front of it
-			// reads -- the path chain runs centre, repeater, centre -- and what drives it is the head's
-			// dust, which hands a stone on to a repeater and does not hand on a note block. So a note
-			// here sounds itself and ends the chain: measured in RailHeadShapeProbeTest, where an
-			// opening centre of note block leaves the path column after it never triggered, with or
-			// without anything hung beside it. ekran, who read single notes sitting out to the side.
-			EventNote harp = fromDust ? null : takeHarpNote(hanging);
+			// The centre goes to a harp note wherever the chord has one, the column a run opens on
+			// included. That column was excluded for a long time on the grounds that the head's dust
+			// hands a stone on to the repeater in front of it and does not hand on a note block --
+			// which was never true. It came from one clause in the reader that refused to carry a
+			// dust's power into a note block, and the game says the two blocks are the same:
+			// isRedstoneConductor, isSignalSource, canOcclude and isSolidRender all read alike
+			// (NoteBlockConductsTest). ekran said so plainly -- "a note block can be powered just like
+			// a stone, there's no difference. a noteblock just cant have something on top, but that
+			// doesn't happen here" -- and the air above every centre is laid for exactly that reason.
+			EventNote harp = takeHarpNote(hanging);
 			placements.placing("rail:PATH notes" + chord.size()
 				+ (harp == null ? " sidesOnly" : " centred") + (fromDust ? " head" : ""));
 			placements.padded("railPath" + (harp == null

@@ -395,8 +395,15 @@ public final class NoteMachineReader {
 			if (noteBlocks.contains(side)) {
 				firedAt.merge(side, time, Math::min);
 			}
-			BlockState sideState = region.at(side);
-			if (isConductor(sideState) && !sideState.is(Blocks.NOTE_BLOCK)) {
+			// A note block among them. It carries power exactly as a stone does -- the game says so
+			// itself: isRedstoneConductor, isSignalSource, canOcclude and isSolidRender all read the
+			// same for the two blocks (NoteBlockConductsTest). It used to be excluded here, with
+			// nothing said about why, and the block below has never been excluded, so the two halves
+			// of this method disagreed. That one clause is what made a run's opening column give its
+			// centre away to a stone: it read a note there as ending the chain, and it does not.
+			// ekran: "a note block can be powered just like a stone, there's no difference. a
+			// noteblock just cant have something on top, but that doesn't happen here".
+			if (isConductor(region.at(side))) {
 				queue.add(new Pulse(time, side, 0, false, position, origin));
 			}
 			feedRepeater(region, queue, side, position, time, repeaterInput, origin, feeds);
