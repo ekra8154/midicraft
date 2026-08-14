@@ -143,6 +143,25 @@ class RailReadBackTest {
 		return counts;
 	}
 
+	/** How many sounds are missing, how many are extra, and how many note blocks never fired. */
+	static String readBackCensus(SongBuilder.PastePlan plan, List<SongBuilder.EventNote> notes,
+			String name) {
+		NoteMachineReader.Reading reading = readAll(placeInWorld(plan), name);
+		Map<Sound, Integer> expected = sounds(notes);
+		Map<Sound, Integer> actual = sounds(reading.project());
+		java.util.TreeSet<Sound> all = new java.util.TreeSet<>(expected.keySet());
+		all.addAll(actual.keySet());
+		int missing = 0;
+		int extra = 0;
+		for (Sound sound : all) {
+			int want = expected.getOrDefault(sound, 0);
+			int got = actual.getOrDefault(sound, 0);
+			missing += Math.max(0, want - got);
+			extra += Math.max(0, got - want);
+		}
+		return missing + " missing, " + extra + " extra, " + reading.unreachedNotes() + " unreached";
+	}
+
 	/** The first dozen sounds the build and the song disagree about, or nothing at all. */
 	private static String difference(Map<Sound, Integer> expected, Map<Sound, Integer> actual) {
 		java.util.TreeSet<Sound> all = new java.util.TreeSet<>(expected.keySet());

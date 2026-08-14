@@ -94,7 +94,8 @@ class RailGridTest {
 					}
 					broken++;
 					System.out.println("READ " + name + " " + width + " wide over " + floors
-						+ (floors == 1 ? " floor" : " floors") + ":" + difference);
+						+ (floors == 1 ? " floor" : " floors") + ": "
+						+ RailReadBackTest.readBackCensus(plan, notes, name));
 				}
 			}
 			System.out.println("READ " + name + ": " + broken + " of " + sizes

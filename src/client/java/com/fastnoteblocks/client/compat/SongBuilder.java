@@ -337,14 +337,93 @@ public final class SongBuilder {
 			throw new IllegalArgumentException(overloadMessage(stats));
 		}
 		Direction forward = Direction.EAST;
-		return switch (mode) {
+		return withUnreachedMarked(switch (mode) {
 			case COMPACT_CUBE -> createCubePastePlan(origin, forward, notes, limits.maxFloors());
 			case COMPACT -> createCompactPastePlan(origin, forward, notes);
 			case COMPACT_LANE -> createLanePastePlan(origin, forward, notes, limits.laneWidth(),
 				limits.laneFloors(), Layout.STANDARD, PasteMode.COMPACT_LANE, start);
 			case ULTRA_COMPACT_LANE -> bestUltraPlan(origin, forward, notes, limits, start);
 			case LANE -> createStraightPastePlan(origin, forward, notes);
-		};
+		});
+	}
+
+	/**
+	 * Whether a build is read back before it is handed over, so that note blocks the signal never
+	 * reaches are reported as a fault and shown as sea lanterns.
+	 *
+	 * <p>A note that never fires is as much a wrong note as one that fires twice, and it is the worse
+	 * of the two to find: nothing else here can see it. {@code verify} asks whether every note block
+	 * has something beside it that ought to set it off, and a machine whose wire dies upstream
+	 * satisfies that completely -- the notes downstream still have their triggers, those triggers
+	 * just never fire. So the only way to know is to read the blocks back, and the only place that
+	 * can be done is after they are laid.</p>
+	 *
+	 * <p>Sea lantern rather than a warning alone, because a count says a build is broken and a
+	 * position says where. Nothing is lost by overwriting them: they were never going to sound.</p>
+	 */
+	static boolean MARK_UNREACHED = true;
+
+	/** The same plan with every note the signal never reaches turned into a sea lantern. */
+	private static PastePlan withUnreachedMarked(PastePlan plan) {
+		if (!MARK_UNREACHED) {
+			return plan;
+		}
+		Map<BlockPos, net.minecraft.world.level.block.state.BlockState> world =
+			new java.util.HashMap<>();
+		for (String command : plan.commands()) {
+			String[] parts = command.split(" ");
+			try {
+				world.put(new BlockPos(Integer.parseInt(parts[1]), Integer.parseInt(parts[2]),
+						Integer.parseInt(parts[3])),
+					net.minecraft.commands.arguments.blocks.BlockStateParser
+						.parseForBlock(BuiltInRegistries.BLOCK, parts[4], false)
+						.blockState());
+			} catch (RuntimeException | com.mojang.brigadier.exceptions.CommandSyntaxException broken) {
+				return plan;
+			}
+		}
+		if (world.isEmpty()) {
+			return plan;
+		}
+		BlockPos low = new BlockPos(
+			world.keySet().stream().mapToInt(BlockPos::getX).min().orElse(0),
+			world.keySet().stream().mapToInt(BlockPos::getY).min().orElse(0),
+			world.keySet().stream().mapToInt(BlockPos::getZ).min().orElse(0));
+		BlockPos high = new BlockPos(
+			world.keySet().stream().mapToInt(BlockPos::getX).max().orElse(0),
+			world.keySet().stream().mapToInt(BlockPos::getY).max().orElse(0),
+			world.keySet().stream().mapToInt(BlockPos::getZ).max().orElse(0));
+		NoteMachineReader.Reading reading;
+		try {
+			reading = NoteMachineReader.read("unreached", low, high,
+				position -> world.getOrDefault(position,
+					net.minecraft.world.level.block.Blocks.AIR.defaultBlockState()));
+		} catch (RuntimeException unreadable) {
+			return plan;
+		}
+		if (reading.unreachedNotes() == 0) {
+			return plan;
+		}
+		Set<BlockPos> dead = Set.copyOf(reading.unreachedAt());
+		List<String> commands = new ArrayList<>(plan.commands().size());
+		for (String command : plan.commands()) {
+			String[] parts = command.split(" ");
+			BlockPos at = new BlockPos(Integer.parseInt(parts[1]), Integer.parseInt(parts[2]),
+				Integer.parseInt(parts[3]));
+			commands.add(dead.contains(at) && parts[4].startsWith("minecraft:note_block")
+				? "setblock " + at.getX() + " " + at.getY() + " " + at.getZ()
+					+ " minecraft:sea_lantern replace"
+				: command);
+		}
+		BlockPos first = reading.unreachedAt().getFirst();
+		List<String> faults = new ArrayList<>(plan.faults());
+		faults.add(reading.unreachedNotes() + " note blocks would never be triggered -- the signal "
+			+ "does not reach them, so that much of the song is silent. They are built as sea "
+			+ "lanterns; the first is at " + first.getX() + " " + first.getY() + " " + first.getZ());
+		return new PastePlan(List.copyOf(commands), plan.width(), plan.depth(), plan.height(),
+			plan.spanX(), plan.spanZ(), plan.mode(), List.copyOf(faults), plan.turns(), plan.moved(),
+			plan.breaches(), plan.recesses(), plan.padding(), plan.nearWall(), plan.farWall(),
+			plan.collisions());
 	}
 
 	/**
