@@ -1826,7 +1826,8 @@ public final class SongBuilder {
 					// turn's cells: those are a wire budget, and every column of a run holds a
 					// repeater.
 					RailPair pair = railRoom(lane, laneWall) >= 2 + reserve
-						? railPairAfter(events, index, event.time(), railLive[1]) : null;
+						? railPairAfter(events, index, event.time(), railLive[1], placements, lane.ahead(1))
+						: null;
 					// And a floor rail that keeps taking blanks is not carrying anything: a chord and a
 					// blank between them cost the two columns the plain lane charges for the chord
 					// alone, so a stretch of them is the head's two columns thrown away and nothing
@@ -4389,7 +4390,7 @@ public final class SongBuilder {
 		// And then the same question a run in progress asks, so that opening one and carrying one on
 		// cannot answer differently. Both rails go live with this chord: the head's own stone, and the
 		// stone under the dust in front of it.
-		return railPairAfter(events, index, head.time(), head.time()) != null;
+		return railPairAfter(events, index, head.time(), head.time(), null, null) != null;
 	}
 
 	/** Columns between this cell and the wall the lane is running at. */
@@ -4480,14 +4481,17 @@ public final class SongBuilder {
 	 * @param floorLive when the floor rail's last anchor went live
 	 */
 	private static RailPair railPairAfter(List<EventGroup> events, int index, int pathLive,
-			int floorLive) {
+			int floorLive, PlacementPlan placements, Lane floor) {
 		if (index + 1 >= events.size()) {
 			return null;
 		}
 		EventGroup next = events.get(index + 1);
 		// The plain pair: the next chord on the floor column, and the one after it on the path column
-		// where the run is allowed to stop.
-		if (railHolds(next, false) && railDelay(floorLive, next.time()) > 0
+		// where the run is allowed to stop. A chord the floor column cannot hold without sounding it
+		// early falls through to the blank below, which is the column that moves it up to the path
+		// rail -- ekran's second option, and the one already built.
+		if (railHolds(next, false) && railFloorTakes(placements, floor, next)
+				&& railDelay(floorLive, next.time()) > 0
 				&& index + 2 < events.size() && railHolds(events.get(index + 2), true)
 				&& railDelay(pathLive, events.get(index + 2).time()) > 0) {
 			return new RailPair(false, next.time());
@@ -4619,10 +4623,62 @@ public final class SongBuilder {
 		return null;
 	}
 
+	/** Whether a note may stand in this slot without something else sounding it at another tick. */
+	private static boolean railSlotTakes(PlacementPlan placements, BlockPos slot, int time) {
+		return placements.freeForNote(slot) && !soundedByAnother(placements, slot, time);
+	}
+
+	/**
+	 * Whether a floor column standing here could hold this chord without sounding it early.
+	 *
+	 * <p>The one contention a run has. A floor column's notes sit at the lane's own floor level,
+	 * which is where the lane alongside hangs the low half of a stacked module, and a stacked
+	 * module's low notes stand on instrument blocks that conduct sideways. The near side is the side
+	 * facing the lane <em>behind</em> -- deliberately, so a run cannot reach into ground the walk has
+	 * not built yet -- and that is the lane whose stacked modules are already standing there. So this
+	 * is asked of a column that does not exist yet, one cell ahead of where the walk is, at the tick
+	 * the chord would go live. ekran, who named the shape before it was measured: "a lower rail note
+	 * can get mispowered by a stacked chord if the center adjacent instrument of that stacked chord is
+	 * up against it".</p>
+	 *
+	 * @param floor the cell the floor column would stand in, or {@code null} where the caller is
+	 *     asking about events rather than about a place -- which is every question asked before the
+	 *     walk knows where the head will land
+	 */
+	private static boolean railFloorTakes(PlacementPlan placements, Lane floor, EventGroup event) {
+		if (!RAIL_MOVES_FOR_STACKS || floor == null) {
+			return true;
+		}
+		Direction near = floor.noteSide().getOpposite();
+		int room = 0;
+		for (Direction side : List.of(near, near.getOpposite())) {
+			if (railSlotTakes(placements, floor.pos().relative(side), event.time())) {
+				room++;
+			}
+		}
+		return room >= event.notes().size();
+	}
+
+	/**
+	 * Off, a run hangs its notes on the near side whatever is already standing there, and takes a
+	 * floor column whatever it would sound.
+	 */
+	static boolean RAIL_MOVES_FOR_STACKS = true;
+
 	/** What is left of a chord, hung either side of the cell that drives it, near side first. */
 	private static void hangRailNotes(PlacementPlan placements, BlockPos anchor, Direction near,
 			List<EventNote> notes, int time) {
 		List<Direction> sides = List.of(near, near.getOpposite());
+		// Unless the near side is spoken for and the chord is small enough to go the other way. The
+		// near side is the one facing the lane already built, so it is the only one that can have
+		// something in it -- and a single note that moves across costs nothing at all, where the same
+		// note left where it was sounds a stacked chord's tick instead of its own.
+		if (RAIL_MOVES_FOR_STACKS && notes.size() < sides.size()
+				&& !railSlotTakes(placements, anchor.relative(near), time)
+				&& railSlotTakes(placements, anchor.relative(near.getOpposite()), time)) {
+			placements.padded("railNoteMovedForStack");
+			sides = List.of(near.getOpposite(), near);
+		}
 		for (int index = 0; index < notes.size(); index++) {
 			if (index >= sides.size()) {
 				placements.trouble((notes.size() - index) + " notes of a chord at tick " + time
@@ -8599,6 +8655,22 @@ public final class SongBuilder {
 		 * @param shiftX how far the finished plan slides before it is built, so a fault names the
 		 *     block you can actually go and stand in front of rather than one in plan space
 		 */
+		/**
+		 * Which shape laid each end of a wrong note, where the plan was recorded with names on.
+		 *
+		 * <p>Both halves, because the fix belongs to whichever of the two can move and that is not
+		 * always the one that sounds early. Every wrong note a two-rail run brought with it had to be
+		 * read off a block dump to find out which side was the run, and the answer was in the plan the
+		 * whole time.</p>
+		 */
+		private String whose(BlockPos note, BlockPos neighbour) {
+			String victim = placedBy.get(note);
+			String aggressor = placedBy.get(neighbour);
+			return victim == null && aggressor == null ? ""
+				: " -- " + (victim == null ? "?" : victim) + " against "
+					+ (aggressor == null ? "?" : aggressor);
+		}
+
 		List<String> verify(int shiftX, int shiftZ) {
 			List<String> faults = new ArrayList<>();
 			for (Map.Entry<BlockPos, Integer> note : notes.entrySet()) {
@@ -8622,7 +8694,8 @@ public final class SongBuilder {
 						faults.add("the note at " + describe(note.getKey(), shiftX, shiftZ)
 							+ " belongs to tick " + time + " but would sound early, at tick "
 							+ neighbour + ", from the " + direction + " at "
-							+ describe(note.getKey().relative(direction), shiftX, shiftZ));
+							+ describe(note.getKey().relative(direction), shiftX, shiftZ)
+							+ whose(note.getKey(), note.getKey().relative(direction)));
 					} else if (neighbour > time + SHARED_PULSE_TICKS) {
 						// Named the same way round as the early case. Which side a second sounding comes
 						// from is as much the diagnosis here as it is there -- along the lane is one
