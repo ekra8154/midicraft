@@ -1992,31 +1992,6 @@ public final class SongBuilder {
 				columnBehindBusy = true;
 				replan = layout.ultra();
 			}
-			// A head too near a corner is offered a column before it is offered a bus.
-			//
-			// ekran's ordering: the fallback is the last thing tried, not the third. A stacked shape whose
-			// centre stands within STACKED_CLEAR_OF_CORNER of a bend is refused -- rightly, it is the rule
-			// that keeps two modules from sitting perpendicular -- and then handed straight to a plain bus,
-			// which for a chord of twenty is eleven columns against the head's ten. Nobody asks whether one
-			// column of pad would have put it clear. On Guardian that refusal fires 1,136 times.
-			//
-			// Laid here, before anything measures, rather than inside addChordModule. The shape's own shift
-			// is one column and is spent on parity; this is a different column spent on a different thing,
-			// and the two have to be able to happen together. Moving the cursor first is also what keeps
-			// {@link #landingOf} and the build agreeing -- both see a lane that simply starts a column
-			// further along, which is the one kind of surprise this file has never had trouble with.
-			//
-			// The wire has to reach, as it does for any pad laid in front of a repeater.
-			if (HEAD_PADS_CLEAR_OF_A_CORNER && event.style().stacked()
-					&& inTurn(placements, turning, leavingTurn, lane.pos(), lastCorner)
-					&& !inTurn(placements, turning, leavingTurn, lane.ahead(1).pos(), lastCorner)
-					&& placements.runSinceRepeater() + 1 <= DUST_RANGE) {
-				placements.placing("cornerClearance");
-				placements.padded("parity");
-				placements.padded("planPadToClearACorner");
-				addParityPad(placements, lane.pos());
-				lane = lane.ahead(1);
-			}
 			// Settled before the event is placed rather than after it. A turn hands back a cursor at
 			// the same point along the wall the last event reached, so an event that overshoots
 			// leaves the next lane starting outside the wall -- and nothing measured afterwards can
@@ -3544,26 +3519,10 @@ public final class SongBuilder {
 		// is nobody's but this one's. The same thing a wait already does, which is why the rule below
 		// only fires at delayColumns == 0, and why one column of pad is all it takes.
 		int behindShift = 0;
-		// Whether the pair behind is still answered from memory, or left to the oracle below.
-		//
-		// ekran's merge, and the two rules are these. This one asserts: the walk sets columnBehindBusy
-		// after a flat turn and after a carried bus, carries it down the lane, and every chord until
-		// something sets it again reads that. The one below looks -- {@link #parityVerdict} asks the
-		// cells the module's own slots want, tries {@link #relocate} on the note in contention, then a
-		// shift, then gives the shape up.
-		//
-		// They answer the same question, and the asserting one wins because it runs first: by the time
-		// the looking one is reached the shape has already been downgraded. So a chord whose back pair
-		// is free is handed a head of five, a front-only head or a plain bus, and the oracle is asked
-		// about a shape that was never in contention.
-		//
-		// v2 only, and only where there is an oracle to answer instead: without one this clause is the
-		// only thing here that knows about the lane behind at all.
-		boolean guessesBehind = !(BEHIND_IS_ASKED_NOT_CARRIED && layout.v2() && parity != null);
-		if (guessesBehind && style.reachesBack() && busy && delayColumns == 0
+		if (style.reachesBack() && busy && delayColumns == 0
 				&& NUDGE_WHEN_BEHIND_BUSY && losesTheHeadWithoutTheBackPair(style, event.notes())) {
 			behindShift = 1;
-		} else if (guessesBehind && style.reachesBack() && busy && delayColumns == 0) {
+		} else if (style.reachesBack() && busy && delayColumns == 0) {
 			// The same substitution the walk makes: a head with a bus behind it keeps a head of
 			// five, and only the rigid shape falls all the way to a bus.
 			// The rigid shape falls to a head of five with a bus behind it too, not all the way to a
@@ -8069,42 +8028,6 @@ public final class SongBuilder {
 	static boolean STACKED_KEEPS_OFF_THE_ROUTE = true;
 
 	/**
-	 * v2: whether the pair of cells behind a module is looked at rather than remembered.
-	 *
-	 * <p>ekran's, and it is a merge rather than a new rule. Two things in this file answer "is the
-	 * ground behind this module spoken for". One of them looks: {@link #parityVerdict} asks the cells
-	 * the module's own slots want, tries {@link #relocate} on the note in contention, then a shift,
-	 * then gives the shape up. The other asserts: {@code columnBehindBusy} is set {@code true} after a
-	 * flat turn and after a carried bus, and carried down the lane until something sets it again.</p>
-	 *
-	 * <p>The asserting one wins, because it runs first. {@link #landingOf} reads it and downgrades the
-	 * shape -- a head of five, a front-only head, or a plain bus -- before the module is ever built, so
-	 * the oracle never gets the chance to look at a back pair that was free all along.</p>
-	 *
-	 * <p>So with this on the guessing clause stands down in v2 wherever there is an oracle to answer
-	 * instead, and {@link #landingOf} predicts what {@link #parityVerdict} will actually do.</p>
-	 *
-	 * <p><b>Off, because it measures worse, and the reason is the useful part.</b> The all-25 song
-	 * goes 56 breach blocks to 181 and Guardian 31 to 53 -- while both builds come out
-	 * <em>shorter</em> (960 to 935, 6561 to 6558) and Guardian's wrong notes drop from 9 to 5. Denser
-	 * and more correct, and further outside its walls, which is the signature of a prediction and a
-	 * build that have stopped agreeing rather than of a worse shape.</p>
-	 *
-	 * <p>They stop agreeing because this is not two rules. It is three, and the third is upstream of
-	 * both: {@link #chooseStyle} picks every event's shape in {@code eventGroups}, before the walk
-	 * runs and before a single block exists, from {@code roomBehind = delayRepeaters > 0 ||
-	 * !previousTookTheGap} -- a guess about what the chord before took. Standing the second one down
-	 * leaves the prediction optimistic and the shape already chosen pessimistically, and a lane
-	 * measured for one shape and built as another lands outside its wall.</p>
-	 *
-	 * <p>Finishing this means choosing the style in the walk, where the blocks exist, rather than at
-	 * grouping time. That is the merge ekran asked for, and it is a real piece of work rather than a
-	 * clause standing down. The measurement above is what it is worth: shorter builds and half the
-	 * wrong notes, once the third rule goes too.</p>
-	 */
-	static boolean BEHIND_IS_ASKED_NOT_CARRIED = false;
-
-	/**
 	 * Whether a module that clashes in both columns is offered a relocation in the second one.
 	 *
 	 * <p>ekran's ordering, and what it fixes is that the bus was the third thing tried rather than the
@@ -8119,38 +8042,6 @@ public final class SongBuilder {
 	 * This is one of the things that was missing between "everything else" and "the bus".</p>
 	 */
 	static boolean RELOCATES_AFTER_THE_SHIFT = true;
-
-	/**
-	 * v2: a stacked head too near a corner is offered a column of pad before it is offered a bus.
-	 *
-	 * <p>The turn ban is right about what it forbids -- two stacked modules may not sit perpendicular,
-	 * and either side of a corner they are perpendicular by construction. What it does next is the
-	 * problem: it hands the chord straight to a plain bus, which for a chord of twenty is eleven
-	 * columns against the ten a head takes. Nobody asks whether one column of pad would put the centre
-	 * clear of the corner, and on Guardian that refusal fires <b>1,136</b> times.</p>
-	 *
-	 * <p>Laid in the walk, before anything measures, rather than inside {@link #addChordModule}. The
-	 * shape's own shift is one column and is spent on parity; this is a different column spent on a
-	 * different thing and the two have to be able to happen together. Moving the cursor first is also
-	 * what keeps {@link #landingOf} and the build agreeing -- both then see a lane that starts a column
-	 * further along, which is the one kind of surprise this file has never had trouble with.</p>
-	 *
-	 * <p><b>Off. It buys the heads and the notes sound wrong.</b> Guardian keeps 220 of them -- the
-	 * turn refusal goes 1,136 to 916 -- and pays 31 breach blocks to 47 and, far worse,
-	 * <b>9 wrong notes to 66</b>. The all-25 song does not move at all.</p>
-	 *
-	 * <p>Which says the distance is not what makes a head near a corner unsafe. A module padded out to
-	 * exactly {@code STACKED_CLEAR_OF_CORNER} satisfies the rule and is still sounded by something:
-	 * the turn's own run of powered stone is live at the tick of the lane it is leaving, and the
-	 * parity oracle does not model it, because parity is about the lane behind rather than about the
-	 * corner. So the padded module is judged safe by both tests and is neither.</p>
-	 *
-	 * <p>The way to have this is the way everything else here was had: pad, build it in a trial, and
-	 * ask the blocks whether anything is going to sound it -- {@link #soundedByAnother} over the
-	 * module's own cells at the ticks the turn is live. Until that is asked, the distance ban is
-	 * standing in for a measurement nobody has taken, and it is the cheaper of the two mistakes.</p>
-	 */
-	static boolean HEAD_PADS_CLEAR_OF_A_CORNER = false;
 
 	/**
 	 * How far down the route a module is asked to keep off, in columns.
