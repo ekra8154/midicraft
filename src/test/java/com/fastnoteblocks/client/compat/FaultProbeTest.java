@@ -72,7 +72,29 @@ class FaultProbeTest {
 			SongBuilder.V2_RUNS_ON_RAILS = rails;
 			System.out.println();
 			System.out.println("runs " + (rails ? "on" : "OFF"));
-			FaultView.report(FaultView.of(song, mode, width, floors, maxFloors, names), perKind);
+			FaultView.Build built = FaultView.of(song, mode, width, floors, maxFloors, names);
+			// A box somebody asked for, rather than the one a fault picked. -Dfault.at=x,y,z with
+			// -Dfault.span=xSpan,ySpan,zSpan and -Dfault.view=top|north. There is no substitute for
+			// looking at the place someone is standing in.
+			String at = text("at", "");
+			if (!at.isEmpty()) {
+				String[] middle = at.split("[ ,]+");
+				String[] span = text("span", "12,6,3").split("[ ,]+");
+				net.minecraft.core.BlockPos centre = new net.minecraft.core.BlockPos(
+					Integer.parseInt(middle[0]), Integer.parseInt(middle[1]),
+					Integer.parseInt(middle[2]));
+				System.out.println();
+				System.out.println("======== " + built.where() + " round " + FaultView.say(centre)
+					+ " ========");
+				System.out.println(FaultView.draw(built,
+					centre.offset(-Integer.parseInt(span[0]), -Integer.parseInt(span[1]),
+						-Integer.parseInt(span[2])),
+					centre.offset(Integer.parseInt(span[0]), Integer.parseInt(span[1]),
+						Integer.parseInt(span[2])),
+					AsciiDiagram.View.of(text("view", "top"))));
+				return;
+			}
+			FaultView.report(built, perKind);
 		} finally {
 			SongBuilder.TWO_RAIL_RUNS = wasV1;
 			SongBuilder.V2_RUNS_ON_RAILS = wasV2;
