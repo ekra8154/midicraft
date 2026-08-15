@@ -6322,13 +6322,22 @@ public final class SongBuilder {
 	 * delay of one, and a delay of one is the case no repeater is short enough for.</p>
 	 *
 	 * <p>So the gap is an upper bound and the threshold is the margin allowed for what padding eats.
-	 * One -- the raw reading of ekran's rule -- left every dead build in the library standing.
-	 * A large number is {@link #NOTE_BLOCK_MIDDLE_ALWAYS_BUSES} by another name, which costs 104
-	 * columns over 310 builds and takes 65,196 dead notes to two. What is wanted is the smallest
-	 * margin that reaches nought, and that is a sweep, not a guess:
-	 * {@code -Dcensus.set=SIMPLE_TAIL_KEEPS_A_NOTE_MIDDLE_ABOVE=N}.</p>
+	 * Swept over the library at five widths, once every site that lays a cell of dust after a module
+	 * asks whether the module ended soft: <b>1 leaves 3 dead builds at 22,340 columns, 2 and 3 leave
+	 * one at 22,410, and refusing the shape outright is 22,429.</b> Three is what ships -- it also
+	 * takes 17 breach blocks off, where two does not -- so the three-note tail is kept wherever the
+	 * next event is more than three ticks away, which is nearly everywhere it occurs.</p>
+	 *
+	 * <p><b>One dead build is left and it is known:</b> {@code ultra-stress-enormous-chord} at 24 wide
+	 * over three floors, 1,245 notes in the shadow of a parity pad at a delay of one. Closing it is
+	 * {@link #SIMPLE_TAIL_UNDONE_FOR_A_PAD}, and closing it is what makes a margin of one safe --
+	 * which is the other 70 columns.</p>
+	 *
+	 * <p>Re-sweep it rather than trusting this: {@code -Dcensus.set=SIMPLE_TAIL_KEEPS_A_NOTE_MIDDLE_ABOVE=N}.
+	 * The first sweep of it was taken against a builder with four unasked questions in it and said
+	 * no margin was worth anything, which was true of that builder and false of this one.</p>
 	 */
-	static int SIMPLE_TAIL_KEEPS_A_NOTE_MIDDLE_ABOVE = 1;
+	static int SIMPLE_TAIL_KEEPS_A_NOTE_MIDDLE_ABOVE = 3;
 
 	/**
 	 * Whether a note-block middle gives the simple shape up always, rather than only at a tight gap.
@@ -6345,30 +6354,26 @@ public final class SongBuilder {
 	 * <p>Priced against the tight-gap guess rather than assumed better than it: the guess keeps more
 	 * tails, and whether keeping them is worth the ones it gets wrong is a measurement.</p>
 	 *
-	 * <p><b>On, and the measurement is why.</b> Over the library at five widths -- 310 builds,
-	 * {@code FaultCensusProbe} -- the guess leaves <b>20 dead builds and 65,196 silenced notes</b>,
-	 * every one of them a cell of dust laid against a note-block middle. This leaves <b>one build and
-	 * two notes</b>, and that last one is not this shape. It costs <b>89 columns of 22,337</b>, four
-	 * tenths of one percent, and takes three wrong notes and five breach blocks off as well.</p>
+	 * <p><b>Off, and it was on for half a day.</b> When it went on, the library read <b>20 dead builds
+	 * and 65,196 silenced notes</b> with the three-note tail kept, and no value of
+	 * {@link #SIMPLE_TAIL_KEEPS_A_NOTE_MIDDLE_ABOVE} bought anything: the smallest margin that reached
+	 * nought was one where the corridor came out the same length as never taking the shape at all.
+	 * That measurement was against a builder in which <b>one of the five places that lay a cell of
+	 * dust after a module asked whether the module ended soft</b>. With the other four asking too
+	 * ({@link #padCellOrSplitRepeater}) the same sweep reads 3 dead builds at a margin of one and
+	 * <b>one</b> at a margin of three, and the threshold is worth 89 columns of 22,429.</p>
 	 *
-	 * <p><b>And the gap it is asked instead of is not worth keeping.</b>
-	 * {@link #SIMPLE_TAIL_KEEPS_A_NOTE_MIDDLE_ABOVE} was swept to find the smallest margin that
-	 * reaches nought: 1 leaves 65,196 dead, 2 leaves 9,972, 3 leaves 8,962, 4 leaves 1,247, and 6
-	 * reaches this. At 6 the depth is <b>the same to the column</b> as never keeping the shape at all,
-	 * because almost every three-note tail sits at a gap of six or less -- so the threshold that works
-	 * is this rule wearing a number. There is no margin that buys anything.</p>
+	 * <p>So the blunt rule is kept, off, as the thing to fall back to and the baseline the conditional
+	 * is priced against -- not as the shape that ships. ekran asked for the conditional and the
+	 * conditional is what there is: <i>"note middles should be allowed, but then it should fallback to
+	 * a 2 cell bus if the repeater gets padded forward"</i>.</p>
 	 *
-	 * <p><b>What it gives up, and what would win it back.</b> ekran asked for the conditional --
-	 * <i>"note middles should be allowed, but then it should fallback to a 2 cell bus if the repeater
-	 * gets padded forward"</i> -- and this is the fallback taken always instead of only when needed.
-	 * The condition is unknowable where it is asked: whether a pad comes is decided against blocks on
-	 * the ground an event later, and what the walk can hand down is the gap, which padding is spent
-	 * out of first. Recovering it means ekran's own better shape: hold the module's savepoint open
-	 * until the next chord's shape says whether a pad *does* come, and re-lay the tail as a bus then.
-	 * Same footprint either way -- the second bus cell stands in the pad's own column. The prize for
-	 * building it is those 89 columns, which is now a number rather than a hope.</p>
+	 * <p><b>The lesson is worth more than the flag.</b> A measurement is only as good as the builder
+	 * it was taken against, and "no threshold is worth anything" was a true statement about a builder
+	 * with four unasked questions in it. See {@link #SIMPLE_TAIL_UNDONE_FOR_A_PAD} for the shape that
+	 * would close the last of it.</p>
 	 */
-	static boolean NOTE_BLOCK_MIDDLE_ALWAYS_BUSES = true;
+	static boolean NOTE_BLOCK_MIDDLE_ALWAYS_BUSES = false;
 
 
 	/**
