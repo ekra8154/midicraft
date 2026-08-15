@@ -83,12 +83,16 @@ class GuardianV2StateProbe {
 				// amount of music, plus whatever wire the build had to lay to get between it. The song
 				// does not change, so every column of variation is the second one.
 				int lanes = plan.turns().size();
+				// Breach blocks, the lanes they are spread over, and the worst single one, because
+				// they answer different questions: blocks is how much wall is broken, lanes is how
+				// many places to go and look, and the worst is whether any of them is a lane that
+				// walked out or every one is a corner shaving its wall.
 				System.out.println(String.format(
-					"   %2dw x %df  totalCols=%-7d lanes=%-4d perLane=%-6.1f padCols=%-6d"
-					+ " breach=%-4d wrong=%-3d dead=%d",
-					width, floors, plan.totalColumns(), lanes,
-					lanes == 0 ? 0 : plan.totalColumns() / (double) lanes, plan.padCells(),
-					blocks, plan.wrongNotes(), unreached));
+					"   %2dw x %df  totalCols=%-7d lanes=%-4d padCols=%-6d"
+					+ " breach=%-4d in=%-3d worst=%-3d wrong=%-3d dead=%d",
+					width, floors, plan.totalColumns(), lanes, plan.padCells(),
+					blocks, plan.breaches().size(), plan.worstBreach(), plan.wrongNotes(),
+					unreached));
 				if (plan.worstBreach() > worstBlocks) {
 					worstBlocks = plan.worstBreach();
 					worstWidth = width;

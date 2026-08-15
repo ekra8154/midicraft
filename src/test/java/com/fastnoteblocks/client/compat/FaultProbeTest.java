@@ -60,6 +60,22 @@ class FaultProbeTest {
 		int maxFloors = number("maxFloors", 4);
 		boolean names = Boolean.parseBoolean(text("names", "false"));
 		int perKind = number("each", 2);
-		FaultView.report(FaultView.of(song, mode, width, floors, maxFloors, names), perKind);
+		// The runs, off as well as on. Two reasons worth the property: a fault that appears with them
+		// on wants to be seen with them off before it is blamed on them, and the plain lane has faults
+		// of its own that the runs happen to cover -- which is the only way to reach a dead wire on
+		// purpose, there being no known live one to point this at.
+		boolean rails = Boolean.parseBoolean(text("rails", "true"));
+		boolean wasV1 = SongBuilder.TWO_RAIL_RUNS;
+		boolean wasV2 = SongBuilder.V2_RUNS_ON_RAILS;
+		try {
+			SongBuilder.TWO_RAIL_RUNS = rails;
+			SongBuilder.V2_RUNS_ON_RAILS = rails;
+			System.out.println();
+			System.out.println("runs " + (rails ? "on" : "OFF"));
+			FaultView.report(FaultView.of(song, mode, width, floors, maxFloors, names), perKind);
+		} finally {
+			SongBuilder.TWO_RAIL_RUNS = wasV1;
+			SongBuilder.V2_RUNS_ON_RAILS = wasV2;
+		}
 	}
 }
