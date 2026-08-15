@@ -8831,6 +8831,19 @@ public final class SongBuilder {
 				trace(event, lane, style, ChordStyle.BUS, "onTheRoute");
 				return layBus(placements, lane, triggerDelay, event, ChordStyle.BUS, true, layout);
 			}
+			// And the third thing the decision cannot settle, asked the same way. onTheFreeSlots tries
+			// to rearrange the low notes onto quiet cells and, when no arrangement works, hands the
+			// slots back exactly as they were -- so the note is hung in the noisy cell anyway. That is
+			// 22 of the library's 31 wrong notes, always the same pair: a plain bus's live stone with
+			// the module built after it hanging a note against it. A bus can grow out of the way; the
+			// rigid shape cannot, which is why it is the shape that gets hit.
+			if (layout.v2() && STACKED_GIVES_UP_A_NOISY_SLOT
+					&& placements.trialHangsANoisyNote(event.time())) {
+				placements.rollbackTrial();
+				placements.padded("planBusForANoisySlot");
+				trace(event, lane, style, ChordStyle.BUS, "noisySlot");
+				return layBus(placements, lane, triggerDelay, event, ChordStyle.BUS, true, layout);
+			}
 			placements.commitTrial();
 			return placed;
 		} catch (IllegalArgumentException collided) {
@@ -10095,6 +10108,20 @@ public final class SongBuilder {
 	 * done.</p>
 	 */
 	static boolean STACKED_KEEPS_OFF_THE_ROUTE = true;
+
+	/**
+	 * Whether a stacked shape that hung a note somewhere else sounds gives itself up for a bus.
+	 *
+	 * <p>Off, {@code onTheFreeSlots} rearranges the low notes onto quiet cells where it can and hands
+	 * the slots back untouched where it cannot -- which puts the note in the noisy cell after all. A
+	 * rigid shape has no other move; a bus grows until it has somewhere for every note, so falling
+	 * back is the move.</p>
+	 *
+	 * <p>Asked after the shape is built, like {@link #STACKED_KEEPS_OFF_THE_ROUTE}, because a
+	 * module's low notes are decided against ground the module has not finished occupying. The cost
+	 * is columns -- a bus is longer than the shape it replaces -- and the census is where to read it.</p>
+	 */
+	static boolean STACKED_GIVES_UP_A_NOISY_SLOT = true;
 
 	/**
 	 * Whether a module that clashes in both columns is offered a relocation in the second one.
@@ -12752,6 +12779,36 @@ public final class SongBuilder {
 			for (BlockPos at : trial.blocksAdded()) {
 				if (cells.contains(at)) {
 					return true;
+				}
+			}
+			return false;
+		}
+
+		/**
+		 * Whether the trial hung a note against something that goes live on another tick.
+		 *
+		 * <p>{@link #trialTouches} for the other fault a shape cannot see coming. Every slot check in
+		 * this file asks before it builds, and the answer keeps being wrong for the same reason: a
+		 * module's low notes are decided against ground the module has not finished occupying. Asked
+		 * afterwards it is not a prediction at all -- the blocks are down, the ticks are recorded, and
+		 * the question is simply whether any note the trial added has a neighbour belonging to someone
+		 * else. The module's own cells are live at its own tick and {@link #liveAt} excludes those, so
+		 * a shape standing on its own does not answer yes.</p>
+		 */
+		boolean trialHangsANoisyNote(int time) {
+			if (trial == null) {
+				return false;
+			}
+			for (Map.Entry<BlockPos, Integer> was : trial.notesBefore().entrySet()) {
+				// Added by this trial, not merely retimed: an entry that had a note before belongs to
+				// whoever put it there.
+				if (was.getValue() != null || !notes.containsKey(was.getKey())) {
+					continue;
+				}
+				for (Direction direction : Direction.values()) {
+					if (liveAt(was.getKey().relative(direction), time)) {
+						return true;
+					}
 				}
 			}
 			return false;

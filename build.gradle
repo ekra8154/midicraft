@@ -83,7 +83,29 @@ test {
 	useJUnitPlatform {
 		excludeTags 'sweep'
 	}
+	// The same forwarding sweepTest does, so a regression can be run with a flag the other way
+	// instead of by editing the source and remembering to put it back. Bisecting which change turned
+	// a test red is the case it is for.
+	forwardProbeProperties(it)
 	consoleOnlyLogging(it)
+}
+
+/**
+ * Anything under these prefixes reaches the test JVM, so a probe can be re-aimed from the command
+ * line instead of by editing it. Prefixes rather than the lot: forwarding everything would drag the
+ * daemon's own properties across and change what the probes are measuring. 'probe.' is the one to
+ * use for anything new -- the other two predate it and are what their own probes read.
+ *
+ * A probe whose prefix is missing here does not fail: it runs with its defaults and prints a full
+ * page of numbers for the experiment nobody performed. That happened, and the only tell was that the
+ * numbers came out identical to the digit.
+ */
+def forwardProbeProperties(task) {
+	System.properties.each { key, value ->
+		if (['fault.', 'census.', 'probe.'].any { key.toString().startsWith(it) }) {
+			task.systemProperty(key.toString(), value)
+		}
+	}
 }
 
 /** The tagged probes, for when a change needs pricing. Never up to date: the point is the output. */
@@ -95,19 +117,7 @@ tasks.register('sweepTest', Test) {
 	useJUnitPlatform {
 		includeTags 'sweep'
 	}
-	// Anything under these prefixes reaches the test JVM, so a probe can be re-aimed from the command
-	// line instead of by editing it. Prefixes rather than the lot: forwarding everything would drag
-	// the daemon's own properties across and change what the probes are measuring. 'probe.' is the
-	// one to use for anything new -- the other two predate it and are what their own probes read.
-	//
-	// A probe whose prefix is missing here does not fail: it runs with its defaults and prints a full
-	// page of numbers for the experiment nobody performed. That happened, and the only tell was that
-	// the numbers came out identical to the digit.
-	System.properties.each { key, value ->
-		if (['fault.', 'census.', 'probe.'].any { key.toString().startsWith(it) }) {
-			systemProperty(key.toString(), value)
-		}
-	}
+	forwardProbeProperties(it)
 	consoleOnlyLogging(it)
 	outputs.upToDateWhen { false }
 }
