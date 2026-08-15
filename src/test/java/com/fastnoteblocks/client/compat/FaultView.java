@@ -239,6 +239,39 @@ final class FaultView {
 		}
 	}
 
+	/**
+	 * A shape's name with the numbers taken out of it, so a census can count shapes and not chords.
+	 *
+	 * <p>{@code chord:STACKED_BUS_HALF head6/tail9 reachesBack} and the same shape with a tail of
+	 * four are one shape and one rule. Left as they are, a single fault appears in a ranked list as
+	 * nine separate ones with a count of one each, and the thing that is actually happening
+	 * thirty-one times looks like nothing much happening fifteen times.</p>
+	 */
+	static String family(String shape) {
+		return shape.replaceAll("(head|tail|notes|delay|near|far)-?\\d+", "$1")
+			.replaceAll("\\s+", " ").strip();
+	}
+
+	/**
+	 * The two shapes a wrong note is between, as {@code aggressor -> victim}.
+	 *
+	 * <p>The pair, not the blocks. A note sounded by something else is always two shapes disagreeing
+	 * about a cell, and which two decides whose rule was broken -- the same reason the collision
+	 * marker prints a pair. Grouping a library's worth of them by pair is what says whether thirty
+	 * wrong notes are thirty bugs or three.</p>
+	 *
+	 * <p>The victim is named off the block <b>under</b> the note, because the note block itself is
+	 * hung by a shape that shares its label with the module, and it is the instrument block that says
+	 * which module owns the column.</p>
+	 */
+	static String whose(Build build, Wrong wrong) {
+		String victim = build.plan().laidBy().getOrDefault(wrong.at(),
+			build.plan().laidBy().getOrDefault(wrong.at().below(), "?"));
+		String aggressor = wrong.from() == null ? "nothing"
+			: build.plan().laidBy().getOrDefault(wrong.from(), "?");
+		return aggressor + " -> " + victim;
+	}
+
 	static List<Wrong> wrongNotes(Build build) {
 		List<Wrong> found = new ArrayList<>();
 		for (String fault : build.plan().faults()) {
@@ -253,6 +286,19 @@ final class FaultView {
 			}
 		}
 		return found;
+	}
+
+	/**
+	 * Notes the layout had nowhere to hang, which the build simply does not contain.
+	 *
+	 * <p>The fourth fault kind, and the only one with nothing to draw: there is no cell to look at,
+	 * because the whole complaint is that no cell was found. So it is listed rather than rendered,
+	 * with the chord it was cut out of -- which is the thing that decides whether the shape was too
+	 * small or the chord too big.</p>
+	 */
+	static List<String> missing(Build build) {
+		return build.plan().faults().stream()
+			.filter(fault -> fault.contains("had nowhere to hang")).toList();
 	}
 
 	/** A lane that turned outside its walls, and the furthest block it got. */
@@ -409,8 +455,24 @@ final class FaultView {
 					: ""));
 		}
 		deadLines(build, perKind);
+		gone(build, perKind);
 		wrong(build, perKind);
 		outside(build, perKind);
+	}
+
+	private static void gone(Build build, int perKind) {
+		List<String> missing = missing(build);
+		if (missing.isEmpty()) {
+			System.out.println("   no missing note: every note the song holds is in the build");
+			return;
+		}
+		System.out.println();
+		for (String one : missing.subList(0, Math.min(perKind, missing.size()))) {
+			System.out.println("#### MISSING NOTE -- " + one);
+		}
+		if (missing.size() > perKind) {
+			System.out.println("   ... and " + (missing.size() - perKind) + " more chords");
+		}
 	}
 
 	private static void deadLines(Build build, int perKind) {
@@ -456,6 +518,7 @@ final class FaultView {
 		for (Wrong one : wrong.subList(0, Math.min(perKind, wrong.size()))) {
 			System.out.println();
 			System.out.println("#### WRONG NOTE -- " + one);
+			System.out.println("   " + whose(build, one));
 			// Both views, and neither is optional. The levels are what the fault text cannot say, and
 			// which lane the other end is in is what tells a module reaching into the next from the
 			// corridor alongside -- and those two want opposite fixes.

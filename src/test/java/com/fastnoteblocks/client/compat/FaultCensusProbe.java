@@ -77,7 +77,8 @@ class FaultCensusProbe {
 	 * @param dropped notes the layout had nowhere to hang, which the build simply does not contain
 	 */
 	private record Row(String song, int width, int floors, int dead, int dropped, int wrong,
-			int breachLanes, int breachBlocks, int depth, String refused, FaultView.Break broke) {
+			int breachLanes, int breachBlocks, int depth, String refused, FaultView.Break broke,
+			List<String> wrongPairs) {
 
 		boolean clean() {
 			return refused == null && dead == 0 && dropped == 0 && wrong == 0 && breachBlocks == 0;
@@ -144,10 +145,12 @@ class FaultCensusProbe {
 						built.plan().breaches().size(),
 						built.plan().breaches().stream().mapToInt(Integer::intValue).sum(),
 						built.plan().spanZ(), null,
-						built.reading().unreachedNotes() == 0 ? null : FaultView.firstBreak(built)));
+						built.reading().unreachedNotes() == 0 ? null : FaultView.firstBreak(built),
+						FaultView.wrongNotes(built).stream()
+							.map(wrong -> FaultView.whose(built, wrong)).toList()));
 				} catch (RuntimeException refused) {
 					rows.add(new Row(name, size[0], size[1], 0, 0, 0, 0, 0, 0,
-						String.valueOf(refused.getMessage()), null));
+						String.valueOf(refused.getMessage()), null, List.of()));
 				}
 			}
 		}
@@ -211,13 +214,33 @@ class FaultCensusProbe {
 			for (Row row : broken) {
 				System.out.println(String.format("   %-34s %2dw x %df  %s", row.song(), row.width(),
 					row.floors(), row.broke()));
-				byPair.merge(row.broke().before() + " -> " + row.broke().what(), 1, Integer::sum);
+				byPair.merge(FaultView.family(row.broke().before()) + " -> "
+					+ FaultView.family(row.broke().what()), 1, Integer::sum);
 			}
 			System.out.println();
 			System.out.println("---- breaks by the pair of shapes that meet ----");
 			byPair.entrySet().stream().sorted((a, b) -> b.getValue() - a.getValue())
 				.forEach(entry -> System.out.println(String.format("   %3d  %s", entry.getValue(),
 					entry.getKey())));
+		}
+		// And the same question of the wrong notes, which are the other fault that is two shapes
+		// disagreeing rather than one shape being wrong on its own.
+		TreeMap<String, Integer> byWrong = new TreeMap<>();
+		TreeMap<String, String> whereWrong = new TreeMap<>();
+		for (Row row : faulty) {
+			for (String pair : row.wrongPairs()) {
+				String shapes = FaultView.family(pair);
+				byWrong.merge(shapes, 1, Integer::sum);
+				whereWrong.putIfAbsent(shapes,
+					row.song() + " " + row.width() + "x" + row.floors());
+			}
+		}
+		if (!byWrong.isEmpty()) {
+			System.out.println();
+			System.out.println("---- wrong notes by the pair of shapes that meet ----");
+			byWrong.entrySet().stream().sorted((a, b) -> b.getValue() - a.getValue())
+				.forEach(entry -> System.out.println(String.format("   %3d  %-72s  first at %s",
+					entry.getValue(), entry.getKey(), whereWrong.get(entry.getKey()))));
 		}
 		long dead = faulty.stream().mapToLong(Row::dead).sum();
 		long missing = faulty.stream().mapToLong(Row::dropped).sum();
