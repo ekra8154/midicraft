@@ -3150,12 +3150,19 @@ public final class SongBuilder {
 					// The columns that carry the module out to its wall. Laid as the parity pad an ordinary
 					// chord uses -- plain dust on the path, before the head's own repeater -- so the near
 					// half ends flush and the staircase stands where every other lane's does.
+					// Only the first cell of pad can be against the module behind, so only the first one
+					// asks. Whichever of the two comes first is that cell -- the pin where there is one,
+					// the nudge otherwise -- and the delay it spends comes off the head's own trigger.
+					int headDelay = trigger.triggerDelay();
+					boolean firstCell = true;
 					if (splitPin > 0) {
 						placements.placing("cutPin");
 					}
 					for (int cell = 0; cell < splitPin; cell++) {
 						placements.padded("cutPin");
-						addParityPad(placements, opening);
+						headDelay = padCellOrSplitRepeater(placements, opening, travel, headDelay,
+							firstCell && placements.softTip(), false, "cutPin");
+						firstCell = false;
 						opening = opening.relative(travel);
 					}
 					if (splitNudge) {
@@ -3165,7 +3172,9 @@ public final class SongBuilder {
 						// and the label it would otherwise wear belongs to whatever ran before it.
 						placements.placing("cutNudgePad");
 						placements.padded("parity");
-						addParityPad(placements, opening);
+						headDelay = padCellOrSplitRepeater(placements, opening, travel, headDelay,
+							firstCell && placements.softTip(), false, "cutNudgePad");
+						firstCell = false;
 						opening = opening.relative(travel);
 					}
 					if (headed.head().size() < STACKED_HEAD_NOTES) {
@@ -3176,7 +3185,7 @@ public final class SongBuilder {
 							headed.slots(), headed.shed() ? DESCENT_FLANK_SLOT : -1),
 						headed.head(), headed.nearTail(), headed.farTail(), headed.shed());
 					cursor = addStackedSplitModule(placements, opening, travel, depth,
-						trigger.triggerDelay(), headed, event.time());
+						headDelay, headed, event.time());
 					far = headed.farTail();
 					placements.padded("planStackedSplit" + (climb > 0 ? "Climb" : "Descent"));
 					if (headed.nearTail().isEmpty()) {
@@ -5480,6 +5489,16 @@ public final class SongBuilder {
 			String why) {
 		placements.placing(why);
 		for (int cell = 0; cell < columns; cell++) {
+			// The first cell is the only one that can be against the module behind, and a corner is
+			// never tradeable -- the corner cell belongs to the route and no bus may stand in it.
+			// The tail already buses itself for a corner, on repeaterComesOutOf.
+			if (cell == 0 && !raised && !"corner".equals(why)
+					&& (placements.softTip() || placements.softBehind())
+					&& undoTheSoftTailFor(placements, lane.pos())) {
+				placements.padded(why + "UndidTheTail");
+				lane = lane.ahead(1);
+				continue;
+			}
 			if (raised) {
 				addRaisedPad(placements, lane.pos());
 			} else {
@@ -5522,7 +5541,10 @@ public final class SongBuilder {
 			boolean raised = raiseAfter >= 0 && cell >= raiseAfter;
 			if (delay == 0) {
 				placements.padded(why + (raised ? "Raised" : ""));
-				if (raised) {
+				if (cell == 0 && !raised && (placements.softTip() || placements.softBehind())
+						&& undoTheSoftTailFor(placements, lane.pos())) {
+					placements.padded(why + "UndidTheTail");
+				} else if (raised) {
 					addRaisedPad(placements, lane.pos());
 				} else {
 					addParityPad(placements, lane.pos());
@@ -8893,7 +8915,10 @@ public final class SongBuilder {
 				Lane at = lane;
 				for (int cell = 0; cell < shifted; cell++) {
 					placements.placing("busMove");
-					addParityPad(placements, at.pos());
+					if (cell != 0 || !(placements.softTip() || placements.softBehind())
+							|| !undoTheSoftTailFor(placements, at.pos())) {
+						addParityPad(placements, at.pos());
+					}
 					at = at.ahead(1);
 				}
 				Body body = addSpatialEventModule(placements, at, triggerDelay, event.notes(), forceBus);
@@ -9537,6 +9562,13 @@ public final class SongBuilder {
 	 * points along the lane only, never sideways into a note.</p>
 	 */
 	private static void addParityPad(PlacementPlan placements, BlockPos cursor) {
+		if (TRACE) {
+			System.out.println("PAD at " + cursor.getX() + " " + cursor.getY() + " " + cursor.getZ()
+				+ " by " + placements.placing() + " softTip=" + placements.softTip()
+				+ " softBehind=" + placements.softBehind()
+				+ " tail=" + (placements.softTail() != null)
+				+ " tailBehind=" + (placements.softTailBehind() != null));
+		}
 		set(placements, cursor, "minecraft:stone");
 		set(placements, cursor.above(), "minecraft:redstone_wire");
 	}
@@ -9568,24 +9600,124 @@ public final class SongBuilder {
 		// sets the label and never puts it back -- so eleven dead builds read as a fault in the
 		// spatial delay when the pad is what laid the block. See pastAnyCorner for the same trap.
 		placements.placing("parityPad");
-		if (placements.softBehind() && SPLIT_THE_PAD_REPEATER && triggerDelay >= 2) {
-			placements.padded("paritySplitRepeater");
-			placements.powered(at.pos(), "minecraft:stone", NO_BLANK);
-			set(placements, at.pos().above(), "minecraft:repeater[facing="
-				+ repeaterFacing(at.travel()) + ",delay=1]");
+		placements.padded("parity");
+		return padCellOrSplitRepeater(placements, at.pos(), at.travel(), triggerDelay,
+			placements.softBehind(), true, "parityPad");
+	}
+
+	/**
+	 * One cell of pad, spent as a repeater where the module behind ended soft and there is a tick.
+	 *
+	 * <p>Three separate places lay a cell of dust immediately after a module -- the parity pad, the
+	 * pin a headed cut spends carrying itself out to its wall, and the column a shortened cut hands
+	 * back -- and until now <b>only the first of them knew the question existed</b>. Seven of the
+	 * library's twenty dead builds were the pin and one was the nudge, and no amount of care in the
+	 * pad could have reached either. One helper, so the three cannot drift again.</p>
+	 *
+	 * <p>The trade is ekran's and it costs nothing: the cell against the tip becomes {@code r1} and
+	 * the module's own trigger carries one tick less, so the columns and the total delay are both
+	 * unchanged and the thing standing against the soft middle is a repeater, which is the one thing
+	 * that reads it.</p>
+	 *
+	 * @param soft whether the module immediately behind this cell ended on a cell only dust powers.
+	 *     Passed in rather than read here because the two walks carry it in different fields: an
+	 *     ordinary chord goes through {@link #buildShaped}, which rolls the flag on entry, so during
+	 *     its build the module behind is {@code softBehind}. A cut is built straight from the walk and
+	 *     never rolls, so during a cut the module behind is still {@code softTip}. Reading the wrong
+	 *     one of those is a guard that never fires and reports numbers identical to the digit.
+	 * @return the delay the module's own trigger should now carry
+	 */
+	private static int padCellOrSplitRepeater(PlacementPlan placements, BlockPos at, Direction travel,
+			int triggerDelay, boolean soft, boolean rolled, String why) {
+		if (soft && SPLIT_THE_PAD_REPEATER && triggerDelay >= 2) {
+			placements.padded(why + "SplitRepeater");
+			placements.powered(at, "minecraft:stone", NO_BLANK);
+			set(placements, at.above(), "minecraft:repeater[facing="
+				+ repeaterFacing(travel) + ",delay=1]");
 			return triggerDelay - 1;
 		}
-		if (placements.softBehind()) {
-			// The one the split cannot reach. Only a note-block middle can be here at all now -- a stone
-			// middle carries its own dust and is never a soft tip -- and a note block has no cell above
-			// it to be rescued in, so this is the shape that has to give way before it is laid. Left
-			// visible: it is the count that says how often the tight-gap guess was too coarse.
-			placements.padded("parityPadOnASoftTip");
+		if (soft) {
+			// The one the split cannot reach: a delay of one, where there is no repeater short enough.
+			// Only a note-block middle can be here at all -- a stone middle carries its own dust and is
+			// never a soft tip -- and a note block has no cell above it to be rescued in. Counted by the
+			// delay as well as by the site, because "how often" and "at what delay" are different
+			// questions and only the second says whether anything short of undoing the tail can help.
+			placements.padded(why + "OnASoftTip");
+			placements.padded("softTipDelay" + triggerDelay);
+			// So take the tail back up and lay it as a bus instead. ekran's, and the reason it is free:
+			// a bus of the same notes starts in the tail's own column and its second cell is this one,
+			// the pad's -- so no pad is laid, nothing moves, and the module after it opens exactly
+			// where it was going to. The tail no longer has to guess what follows it, because by here
+			// the thing that follows it is standing right there.
+			if (undoTheSoftTailFor(placements, at)) {
+				placements.padded(why + "UndidTheTail");
+				return triggerDelay;
+			}
 		}
-		placements.padded("parity");
-		addParityPad(placements, at.pos());
+		addParityPad(placements, at);
 		return triggerDelay;
 	}
+
+	/**
+	 * Whether the tail behind this cell was taken back up and re-laid as a bus that reaches it.
+	 *
+	 * <p>Refused unless the geometry is exactly the one that makes the swap free: the bus's second
+	 * cell has to be <em>this</em> column, at bus height. Anything between the tail and here -- a
+	 * corner, a cell of spatial delay, a second pad -- and the bus would not reach, so the trade is
+	 * off and the pad goes down as it always did. Checked against the position rather than assumed
+	 * from the shape, because "nothing came between" is exactly the kind of thing this file keeps
+	 * being wrong about.</p>
+	 */
+	private static boolean undoTheSoftTailFor(PlacementPlan placements, BlockPos at) {
+		// Both of them, and the position decides which. The walk carries two copies of every "what did
+		// the module behind me do" answer -- one rolled and one not -- because buildShaped rolls on
+		// entry and the walk's own pads are laid on either side of that. Which copy is live at a given
+		// call site turned out to be genuinely hard to reason about, and I got it wrong twice in
+		// opposite directions. It does not have to be reasoned about: only a tail whose second bus
+		// cell is *this* column can be traded for *this* pad, so asking both and letting the geometry
+		// answer is exact where the flag was a guess.
+		boolean rolled = false;
+		PlacementPlan.SoftTail tail = placements.softTail();
+		if (tail == null || !tail.at().ahead(1).pos().equals(at.above())) {
+			tail = placements.softTailBehind();
+			rolled = true;
+		}
+		if (tail == null) {
+			placements.padded("softTailNotRecorded");
+			return false;
+		}
+		BlockPos second = tail.at().ahead(1).pos();
+		if (!second.equals(at.above())) {
+			placements.padded("softTailOutOfReach");
+			if (TRACE) {
+				System.out.println("SOFTTAIL out of reach: pad at " + at.getX() + " " + at.getY() + " "
+					+ at.getZ() + "  now=" + say(placements.softTail())
+					+ "  behind=" + say(placements.softTailBehind()));
+			}
+			return false;
+		}
+		placements.undoSoftTail(rolled);
+		// The handover's cross was shaped for a middle that does not join it. A bus cell in the very
+		// next column does join, so it goes back to plain wire -- which is what the bus tail has always
+		// been handed.
+		set(placements, tail.handoverDust(), "minecraft:redstone_wire");
+		String was = placements.placing();
+		placements.placing("chord:STACKED_BUS+busTailAfterAPad");
+		layBus(placements, tail.at(), tail.notes(), tail.time());
+		// Put back, for the reason pastAnyCorner puts it back: a label is sticky, and every cell the
+		// caller lays after this would otherwise be reported as part of a tail laid a chord ago.
+		placements.placing(was);
+		placements.softTip(false);
+		return true;
+	}
+
+	private static String say(PlacementPlan.SoftTail tail) {
+		return tail == null ? "none" : tail.at().pos().getX() + "," + tail.at().pos().getY() + ","
+			+ tail.at().pos().getZ() + "->" + tail.at().ahead(1).pos().getX();
+	}
+
+	/** Off, a simple tail that a pad lands in front of stays where it is and the lane dies there. */
+	static boolean SIMPLE_TAIL_UNDONE_FOR_A_PAD = true;
 
 	/** Whether a parity pad after a soft-ended module is spent as a repeater rather than as dust. */
 	static boolean SPLIT_THE_PAD_REPEATER = true;
@@ -10539,6 +10671,15 @@ public final class SongBuilder {
 		if (simple) {
 			placements.placing("chord:STACKED_BUS+simpleTail" + tail.size() + " handover");
 		}
+		// From here until the tail is down, so that whatever is laid after it can put it back. Only a
+		// middle that is a note block is worth recording -- a stone middle carries its own dust and
+		// was never at risk -- and only the shape a bus of the same notes would start in the same
+		// column, which is what makes the swap free. See PlacementPlan.SoftTail.
+		if (simple && noteBlockInTheMiddle(tail) && SIMPLE_TAIL_UNDONE_FOR_A_PAD) {
+			placements.padded("softTailRecorded");
+			placements.beginSoftTail(new PlacementPlan.SoftTail(afterHead.ahead(1).above(),
+				List.copyOf(tail), time, afterHead.pos().above()));
+		}
 		set(placements, afterHead.pos(), "minecraft:stone");
 		set(placements, afterHead.pos().above(), simple ? STACKED_CROSS : "minecraft:redstone_wire");
 		// Said out loud, because these two blocks are also what a corner is and what a cell of pad is,
@@ -10564,6 +10705,10 @@ public final class SongBuilder {
 			// more blocks.
 			placements.padded("simpleTailBusedForTheCorner");
 			simple = false;
+			// And the recorder goes with it. It is opened before the handover, which is before this
+			// decision can be taken back, so a tail that ends up a bus would otherwise be recorded as
+			// one that could be undone -- and the journal would go on recording into the bus itself.
+			placements.discardSoftTail();
 		}
 		if (simple) {
 			BlockPos middle = tailAt.pos().above();
@@ -10624,6 +10769,7 @@ public final class SongBuilder {
 			if (railReady) {
 				placements.railTail(tailAt.pos());
 			}
+			placements.endSoftTail();
 			// One column either way. The number beside it is how much dust the lane is still carrying:
 			// a dusted middle lays the one cell it just set, which is the same one a bus tail of this
 			// length would have reported, and a note-block middle lays none.
@@ -12232,6 +12378,39 @@ public final class SongBuilder {
 
 		private Trial trial;
 
+		/**
+		 * A simple tail that can still be taken back up and laid again as a bus.
+		 *
+		 * <p>ekran's shape, and the reason it is safe: a simple tail is one column and the bus that
+		 * replaces it is two, and the second of those two is <b>the pad's own column</b> -- so the
+		 * chord after it opens in exactly the same place and nothing downstream moves. Which means the
+		 * tail does not have to guess what follows it. It can be laid as the compact shape and undone
+		 * by whatever turns up behind it, at the one moment that thing is known.</p>
+		 *
+		 * <p>Only a tail whose middle is a note block is ever recorded. A stone middle carries its own
+		 * dust, is not a soft tip, and has nothing to be rescued from.</p>
+		 *
+		 * @param at the tail's own column, at bus height, which is where {@link #layBus} would start
+		 * @param handoverDust the cell whose cross has to go back to plain wire, because the cross is
+		 *     shaped for a middle that does not join and a bus cell joins
+		 */
+		record SoftTail(Lane at, List<EventNote> notes, int time, BlockPos handoverDust) {
+		}
+
+		/**
+		 * What was written while the soft tail was going down, so it can be taken back up.
+		 *
+		 * <p>Independent of {@link #trial} rather than nested inside it. A trial is last-in-first-out
+		 * and this has to outlive its enclosing one: the tail is laid deep inside the module's own
+		 * trial, that trial commits at the end of the chord, and the question this exists to answer is
+		 * not asked until the <em>next</em> chord. There is no stack discipline that expresses that,
+		 * so it is a second recorder running alongside.</p>
+		 */
+		private Trial tailJournal;
+		private Trial tailJournalBehind;
+		private SoftTail softTail;
+		private SoftTail softTailBehind;
+
 		void padded(String reason) {
 			if (recording) {
 				padding.merge(reason, 1, Integer::sum);
@@ -12241,8 +12420,12 @@ public final class SongBuilder {
 		void corner(BlockPos position) {
 			if (recording) {
 				BlockPos key = position.immutable();
-				if (corners.add(key) && trial != null) {
+				boolean fresh = corners.add(key);
+				if (fresh && trial != null) {
 					trial.cornersAdded().add(key);
+				}
+				if (fresh && tailJournal != null) {
+					tailJournal.cornersAdded().add(key);
 				}
 			}
 		}
@@ -12291,6 +12474,9 @@ public final class SongBuilder {
 				if (trial != null && !trial.poweredBefore().containsKey(key)) {
 					trial.poweredBefore().put(key, powered.get(key));
 				}
+				if (tailJournal != null && !tailJournal.poweredBefore().containsKey(key)) {
+					tailJournal.poweredBefore().put(key, powered.get(key));
+				}
 				powered.put(key, time);
 			}
 		}
@@ -12331,6 +12517,9 @@ public final class SongBuilder {
 				BlockPos key = position.immutable();
 				if (trial != null && !trial.notesBefore().containsKey(key)) {
 					trial.notesBefore().put(key, notes.get(key));
+				}
+				if (tailJournal != null && !tailJournal.notesBefore().containsKey(key)) {
+					tailJournal.notesBefore().put(key, notes.get(key));
 				}
 				notes.put(key, time);
 			}
@@ -12598,6 +12787,19 @@ public final class SongBuilder {
 		}
 
 		/**
+		 * Whether the module just built ended soft, before the flag has been rolled.
+		 *
+		 * <p>The cut path wants this one and an ordinary chord wants {@link #softBehind()}, and the
+		 * difference is only which of them has run yet: {@link #buildShaped} rolls on entry, so during
+		 * a chord's build the module behind is {@code softBehind}; a cut is built straight from the
+		 * walk and never rolls, so during a cut the module behind is still this. Asking the wrong one
+		 * is a guard that never fires.</p>
+		 */
+		boolean softTip() {
+			return softTip;
+		}
+
+		/**
 		 * Hand this module's answer back a step and start a fresh one.
 		 *
 		 * <p>Two fields and not one, because the module being built and the module before it are both
@@ -12612,6 +12814,87 @@ public final class SongBuilder {
 			railTail = null;
 			handoverBehind = handover;
 			handover = null;
+			tailJournalBehind = tailJournal;
+			tailJournal = null;
+			softTailBehind = softTail;
+			softTail = null;
+		}
+
+		/**
+		 * Starts recording a simple tail, so whatever is laid after it can take it back up.
+		 *
+		 * <p>Opened before the handover rather than before the tail, because the handover's dust is
+		 * shaped for the tail it drives -- a cross where the middle does not join it, plain wire where
+		 * a bus cell does -- so undoing the tail has to undo that as well.</p>
+		 */
+		void beginSoftTail(SoftTail what) {
+			softTail = what;
+			tailJournal = new Trial(new ArrayList<>(), new LinkedHashMap<>(), new LinkedHashMap<>(),
+				new ArrayList<>(), 0, 0, 0, 0, 0, Map.of(), 0, 0, 0, 0, 0, 0);
+		}
+
+		/** Stops recording, keeping what was recorded. The tail is down; the question comes later. */
+		void endSoftTail() {
+			if (softTail == null) {
+				tailJournal = null;
+			}
+		}
+
+		/** Forgets a tail that is not going to be laid after all, and stops recording for it. */
+		void discardSoftTail() {
+			tailJournal = null;
+			softTail = null;
+		}
+
+		/** The tail the module being built has just laid, for the cut path, which does not roll. */
+		SoftTail softTail() {
+			return softTail;
+		}
+
+		/** The tail the module <em>behind</em> laid, for an ordinary chord, whose build has rolled. */
+		SoftTail softTailBehind() {
+			return softTailBehind;
+		}
+
+		/**
+		 * Takes the recorded tail back up, leaving the ground as it was before the handover.
+		 *
+		 * <p>Only the blocks, the notes, the powered cells and the corners. Not the census, not the
+		 * bounds, not the turn and breach lists -- unlike a trial this undoes something that was laid
+		 * an entire chord ago, so those have moved on for reasons that have nothing to do with the
+		 * tail and putting them back would erase them.</p>
+		 */
+		void undoSoftTail(boolean rolled) {
+			Trial undo = rolled ? tailJournalBehind : tailJournal;
+			if (rolled) {
+				tailJournalBehind = null;
+				softTailBehind = null;
+			} else {
+				tailJournal = null;
+				softTail = null;
+			}
+			if (undo == null) {
+				return;
+			}
+			for (BlockPos at : undo.blocksAdded()) {
+				blocks.remove(at);
+				placedBy.remove(at);
+			}
+			undo.notesBefore().forEach((at, was) -> {
+				if (was == null) {
+					notes.remove(at);
+				} else {
+					notes.put(at, was);
+				}
+			});
+			undo.poweredBefore().forEach((at, was) -> {
+				if (was == null) {
+					powered.remove(at);
+				} else {
+					powered.put(at, was);
+				}
+			});
+			corners.removeAll(undo.cornersAdded());
 		}
 
 		/**
@@ -12726,6 +13009,9 @@ public final class SongBuilder {
 			if (existing == null && trial != null) {
 				trial.blocksAdded().add(key);
 			}
+			if (existing == null && tailJournal != null) {
+				tailJournal.blocksAdded().add(key);
+			}
 			if ((DEBUG_PASTE || NAME_EVERY_CELL) && existing == null) {
 				placedBy.put(key, placing);
 			}
@@ -12834,6 +13120,11 @@ public final class SongBuilder {
 			// Cleared first: putting the old values back goes through the same writers, and a trial
 			// still open would journal the undo as though it were more building.
 			trial = null;
+			// And the tail recorder with it. A tail is always laid inside the module's own trial, so a
+			// trial that rolls back is a tail that never happened -- and a journal pointing at cells
+			// this is about to remove would put stale notes back if anything undid it afterwards.
+			tailJournal = null;
+			softTail = null;
 			if (undo == null) {
 				return;
 			}

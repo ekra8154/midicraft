@@ -90,6 +90,22 @@ class FaultCensusProbe {
 		}
 	}
 
+	/** A substring of the padding keys to total over the run, or blank for none. */
+	private static final String COUNTED = text("count", "");
+
+	private static final TreeMap<String, Long> TALLY = new TreeMap<>();
+
+	private static void tally(SongBuilder.PastePlan plan) {
+		if (COUNTED.isEmpty()) {
+			return;
+		}
+		plan.padding().forEach((key, count) -> {
+			if (key.contains(COUNTED)) {
+				TALLY.merge(key, (long) count, Long::sum);
+			}
+		});
+	}
+
 	private static int droppedIn(SongBuilder.PastePlan plan) {
 		int lost = 0;
 		for (String fault : plan.faults()) {
@@ -140,6 +156,7 @@ class FaultCensusProbe {
 			for (int[] size : sizes) {
 				try {
 					FaultView.Build built = FaultView.of(name, notes, mode, size[0], size[1], 4, false);
+					tally(built.plan());
 					rows.add(new Row(name, size[0], size[1], built.reading().unreachedNotes(),
 						droppedIn(built.plan()), built.plan().wrongNotes(),
 						built.plan().breaches().size(),
@@ -241,6 +258,19 @@ class FaultCensusProbe {
 			byWrong.entrySet().stream().sorted((a, b) -> b.getValue() - a.getValue())
 				.forEach(entry -> System.out.println(String.format("   %3d  %-72s  first at %s",
 					entry.getValue(), entry.getKey(), whereWrong.get(entry.getKey()))));
+		}
+		// Whatever the run was asked to count. The faults say a build is wrong; the census keys say
+		// which shape's rule fired how often, and a change that is supposed to fire and does not is
+		// the commonest wrong answer this repo produces. -Dcensus.count=<substring>
+		if (!COUNTED.isEmpty()) {
+			System.out.println();
+			System.out.println("---- census keys matching \"" + COUNTED + "\" ----");
+			TALLY.entrySet().stream().sorted((a, b) -> Long.compare(b.getValue(), a.getValue()))
+				.forEach(entry -> System.out.println(String.format("   %6d  %s", entry.getValue(),
+					entry.getKey())));
+			if (TALLY.isEmpty()) {
+				System.out.println("   nothing matched -- the rule did not fire once");
+			}
 		}
 		long dead = faulty.stream().mapToLong(Row::dead).sum();
 		long missing = faulty.stream().mapToLong(Row::dropped).sum();
