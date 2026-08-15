@@ -2469,6 +2469,11 @@ public final class SongBuilder {
 			// A lane has to hold something before it can end, or a turn that lands short would turn
 			// again at once and the walk would climb the whole build without laying a note.
 			boolean wantsTurn = laneStarted && overshoots;
+			// Said to the builders, for the one shape that has to know. A simple tail is read by the
+			// repeater standing in front of it, and a lane that turns here does not put one there --
+			// it climbs, and the repeater goes up onto the next floor, leaving the tail driving
+			// nothing. ekran read exactly that off a paste at 16 wide over three floors.
+			placements.turnAhead(wantsTurn);
 			// What the cut is offered on. The same question in v1, one column earlier in v2.
 			boolean cutOffered = reaches;
 			// One tick has to be left for the next event's own repeater, which is the only thing that
@@ -9884,7 +9889,7 @@ public final class SongBuilder {
 			return new Body(afterHead.ahead(1), 0);
 		}
 		Lane tailAt = afterHead.ahead(1);
-		if (simple && !repeaterComesOutOf(tailAt)) {
+		if (simple && (!repeaterComesOutOf(tailAt) || placements.turnAhead())) {
 			// The one scenario that falls back, and only this one. A simple tail's middle is soft
 			// powered -- lit by the handover's dust and nothing else -- which drives a repeater
 			// standing against it and cannot light dust. So where the route bends and the corner
@@ -11801,6 +11806,23 @@ public final class SongBuilder {
 			softTip = false;
 			railTailBehind = railTail;
 			railTail = null;
+		}
+
+		/**
+		 * Whether the lane changes floors after the chord being built.
+		 *
+		 * <p>Handed down rather than worked out below, because it is a fact about the walk: the chord
+		 * cannot see that the repeater meant to follow it is about to be built at the top of a
+		 * staircase instead of in the next column.</p>
+		 */
+		private boolean turnAhead;
+
+		void turnAhead(boolean ahead) {
+			turnAhead = ahead;
+		}
+
+		boolean turnAhead() {
+			return turnAhead;
 		}
 
 		void railTail(BlockPos at) {
