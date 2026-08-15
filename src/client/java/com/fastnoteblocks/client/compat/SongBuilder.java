@@ -473,7 +473,7 @@ public final class SongBuilder {
 		return new PastePlan(List.copyOf(commands), plan.width(), plan.depth(), plan.height(),
 			plan.spanX(), plan.spanZ(), plan.mode(), List.copyOf(faults), plan.turns(), plan.moved(),
 			plan.breaches(), plan.recesses(), plan.padding(), plan.nearWall(), plan.farWall(),
-			plan.collisions(), plan.poweredAt());
+			plan.collisions(), plan.poweredAt(), plan.laidBy());
 	}
 
 	/** What a build with no name to put on it is called. */
@@ -553,7 +553,7 @@ public final class SongBuilder {
 		return new PastePlan(List.copyOf(commands), plan.width(), plan.depth(), plan.height(),
 			plan.spanX(), plan.spanZ(), plan.mode(), plan.faults(), plan.turns(), plan.moved(),
 			plan.breaches(), plan.recesses(), plan.padding(), plan.nearWall(), plan.farWall(),
-			plan.collisions(), plan.poweredAt());
+			plan.collisions(), plan.poweredAt(), plan.laidBy());
 	}
 
 	/**
@@ -1518,7 +1518,9 @@ public final class SongBuilder {
 					if (splitNudge) {
 						// The column the shortened cut gave back. Laid as the parity pad an ordinary
 						// chord uses, so the head starts one further along and meets the lane behind
-						// on the parity it wants.
+						// on the parity it wants. Named for the marker: addParityPad does not name itself
+						// and the label it would otherwise wear belongs to whatever ran before it.
+						placements.placing("cutNudgePad");
 						placements.padded("parity");
 						addParityPad(placements, opening);
 						opening = opening.relative(travel);
@@ -2730,8 +2732,8 @@ public final class SongBuilder {
 			// laid in front of it can only be spent as a repeater where there are two ticks to split, so
 			// a gap of one is the case a simple tail with a note-block middle cannot survive being padded
 			// into. The last event has nothing after it to be padded for.
-			placements.tightGapAhead(index + 1 < events.size()
-				&& events.get(index + 1).time() - event.time() <= 1);
+			placements.gapAhead(index + 1 < events.size()
+				? events.get(index + 1).time() - event.time() : Integer.MAX_VALUE);
 			// And that the two above were answered at all. Everything the simple tail's safety rests on
 			// is handed down from here, and walkWall hands down none of it -- where this walk says
 			// "there is a turn ahead" or "the next event is a tick away", the older one says nothing and
@@ -3159,7 +3161,9 @@ public final class SongBuilder {
 					if (splitNudge) {
 						// The column the shortened cut gave back. Laid as the parity pad an ordinary
 						// chord uses, so the head starts one further along and meets the lane behind
-						// on the parity it wants.
+						// on the parity it wants. Named for the marker: addParityPad does not name itself
+						// and the label it would otherwise wear belongs to whatever ran before it.
+						placements.placing("cutNudgePad");
 						placements.padded("parity");
 						addParityPad(placements, opening);
 						opening = opening.relative(travel);
@@ -6233,12 +6237,22 @@ public final class SongBuilder {
 	 * Whether this tail's middle would be a note block rather than stone.
 	 *
 	 * <p>Exactly the negation of the stone case the builder works out, and written the same way round
-	 * so the two cannot drift: a harp is taken outright and takes the middle, what is left goes to the
-	 * two sides, and only a third note with no harp to displace it has to be kept in the middle. Both
-	 * of those are note blocks, and a note block insists on air above it.</p>
+	 * so the two cannot drift: the builder refuses the harp the middle below three
+	 * ({@link #HARP_KEEPS_THE_MIDDLE_ONLY_AT_THREE}) and lays stone there instead, so at one or two
+	 * notes the middle is stone whatever the tail is made of, and at three it is a note block either
+	 * way -- a harp taken for the middle, or the third note kept in it because the two sides are full.
+	 * A note block insists on air above it, which is the cell the dust would go in.</p>
+	 *
+	 * <p>It read {@code takeHarpNote(...) != null || size > 2} until the harp stopped taking the
+	 * middle below three, and then it said yes for a two-note tail with a harp in it -- a tail whose
+	 * middle is stone, carries its own dust and was never at risk. Wrong in the safe direction, which
+	 * is why it cost columns rather than notes, and why nothing caught it.</p>
 	 */
 	private static boolean noteBlockInTheMiddle(List<EventNote> tail) {
 		List<EventNote> hanging = new ArrayList<>(tail);
+		if (HARP_KEEPS_THE_MIDDLE_ONLY_AT_THREE && hanging.size() <= 2) {
+			return false;
+		}
 		return !(takeHarpNote(hanging) == null && hanging.size() <= 2);
 	}
 
@@ -6277,6 +6291,24 @@ public final class SongBuilder {
 	static boolean SIMPLE_TAIL_GIVES_WAY_TO_A_TIGHT_GAP = true;
 
 	/**
+	 * The gap above which a simple tail is allowed to keep a note block in its middle.
+	 *
+	 * <p>The threshold behind {@link #SIMPLE_TAIL_GIVES_WAY_TO_A_TIGHT_GAP}, made a number because it
+	 * had to be measured rather than argued. The rule wants the <b>delay the next chord's repeater is
+	 * actually set to</b>, and what the walk can hand down is the <b>gap to the next event</b>. The
+	 * two are not the same: padding is spent out of the gap first, so a gap of four can arrive as a
+	 * delay of one, and a delay of one is the case no repeater is short enough for.</p>
+	 *
+	 * <p>So the gap is an upper bound and the threshold is the margin allowed for what padding eats.
+	 * One -- the raw reading of ekran's rule -- left every dead build in the library standing.
+	 * A large number is {@link #NOTE_BLOCK_MIDDLE_ALWAYS_BUSES} by another name, which costs 104
+	 * columns over 310 builds and takes 65,196 dead notes to two. What is wanted is the smallest
+	 * margin that reaches nought, and that is a sweep, not a guess:
+	 * {@code -Dcensus.set=SIMPLE_TAIL_KEEPS_A_NOTE_MIDDLE_ABOVE=N}.</p>
+	 */
+	static int SIMPLE_TAIL_KEEPS_A_NOTE_MIDDLE_ABOVE = 1;
+
+	/**
 	 * Whether a note-block middle gives the simple shape up always, rather than only at a tight gap.
 	 *
 	 * <p>The same move that worked for the stone middle, made for the middle that cannot take dust:
@@ -6291,14 +6323,30 @@ public final class SongBuilder {
 	 * <p>Priced against the tight-gap guess rather than assumed better than it: the guess keeps more
 	 * tails, and whether keeping them is worth the ones it gets wrong is a measurement.</p>
 	 *
-	 * <p><b>Off, and never measured.</b> Written, then set aside unmeasured when ekran proposed the
-	 * better shape of the same idea: rather than give the simple tail up wherever a pad *might* come,
-	 * hold the module's savepoint open until the next chord's shape says whether one *does*, and re-lay
-	 * the tail as a bus then. Same footprint either way -- the second bus cell stands in the pad's own
-	 * column -- so nothing about the lane's length moves. Kept here as the blunt baseline that version
-	 * has to beat.</p>
+	 * <p><b>On, and the measurement is why.</b> Over the library at five widths -- 310 builds,
+	 * {@code FaultCensusProbe} -- the guess leaves <b>20 dead builds and 65,196 silenced notes</b>,
+	 * every one of them a cell of dust laid against a note-block middle. This leaves <b>one build and
+	 * two notes</b>, and that last one is not this shape. It costs <b>89 columns of 22,337</b>, four
+	 * tenths of one percent, and takes three wrong notes and five breach blocks off as well.</p>
+	 *
+	 * <p><b>And the gap it is asked instead of is not worth keeping.</b>
+	 * {@link #SIMPLE_TAIL_KEEPS_A_NOTE_MIDDLE_ABOVE} was swept to find the smallest margin that
+	 * reaches nought: 1 leaves 65,196 dead, 2 leaves 9,972, 3 leaves 8,962, 4 leaves 1,247, and 6
+	 * reaches this. At 6 the depth is <b>the same to the column</b> as never keeping the shape at all,
+	 * because almost every three-note tail sits at a gap of six or less -- so the threshold that works
+	 * is this rule wearing a number. There is no margin that buys anything.</p>
+	 *
+	 * <p><b>What it gives up, and what would win it back.</b> ekran asked for the conditional --
+	 * <i>"note middles should be allowed, but then it should fallback to a 2 cell bus if the repeater
+	 * gets padded forward"</i> -- and this is the fallback taken always instead of only when needed.
+	 * The condition is unknowable where it is asked: whether a pad comes is decided against blocks on
+	 * the ground an event later, and what the walk can hand down is the gap, which padding is spent
+	 * out of first. Recovering it means ekran's own better shape: hold the module's savepoint open
+	 * until the next chord's shape says whether a pad *does* come, and re-lay the tail as a bus then.
+	 * Same footprint either way -- the second bus cell stands in the pad's own column. The prize for
+	 * building it is those 89 columns, which is now a number rather than a hope.</p>
 	 */
-	static boolean NOTE_BLOCK_MIDDLE_ALWAYS_BUSES = false;
+	static boolean NOTE_BLOCK_MIDDLE_ALWAYS_BUSES = true;
 
 
 	/**
@@ -8081,6 +8129,23 @@ public final class SongBuilder {
 	public static boolean DEBUG_PASTE = false;
 
 	/**
+	 * Whether every cell remembers which shape laid it, without any of the debug paste's other doing.
+	 *
+	 * <p>"Which shape laid this cell" is the question a fault raises first and the one the blocks
+	 * cannot answer, and until now the only way to ask it was {@link #DEBUG_PASTE} -- which also
+	 * stops a layout collision throwing. That matters most in v2, whose trial-and-rollback
+	 * <i>depends</i> on the throw to fall back to the conservative shape, so a v2 build made with
+	 * names on has quietly skipped every fallback it would have taken. Naming the cells and changing
+	 * the build were one switch, so every shape a fault was read off came off a different build from
+	 * the one that has the fault.</p>
+	 *
+	 * <p>This is the naming half on its own: a string reference per cell, put down beside the block
+	 * and taken back up with it on a rollback. It changes nothing a walk decides, so a probe may
+	 * leave it on and read a build that is the build that ships.</p>
+	 */
+	static boolean NAME_EVERY_CELL = false;
+
+	/**
 	 * What a cell of lane is built from, given the name of the shape that laid it.
 	 *
 	 * <p>Grouped by family rather than by style, because the question a build raises is almost never
@@ -9476,6 +9541,11 @@ public final class SongBuilder {
 	 * @return what the module's own trigger should now be delayed by
 	 */
 	private static int parityPadOrSplitRepeater(PlacementPlan placements, Lane at, int triggerDelay) {
+		// Named, because it did not name itself and a label is sticky. Every cell this laid wore
+		// whatever the last shape to set one called itself -- in practice "delayBeforeChord", which
+		// sets the label and never puts it back -- so eleven dead builds read as a fault in the
+		// spatial delay when the pad is what laid the block. See pastAnyCorner for the same trap.
+		placements.placing("parityPad");
 		if (placements.softBehind() && SPLIT_THE_PAD_REPEATER && triggerDelay >= 2) {
 			placements.padded("paritySplitRepeater");
 			placements.powered(at.pos(), "minecraft:stone", NO_BLANK);
@@ -10411,7 +10481,8 @@ public final class SongBuilder {
 		// three is two cells of bus and one column of this.
 		boolean simple = mayGoSimple && placements.answersWhatIsAhead() && simpleTail(tail)
 			&& !(SIMPLE_TAIL_GIVES_WAY_TO_A_TIGHT_GAP && noteBlockInTheMiddle(tail)
-				&& (NOTE_BLOCK_MIDDLE_ALWAYS_BUSES || placements.tightGapAhead()));
+				&& (NOTE_BLOCK_MIDDLE_ALWAYS_BUSES
+					|| placements.gapAhead() <= SIMPLE_TAIL_KEEPS_A_NOTE_MIDDLE_ABOVE));
 		if (mayGoSimple && simpleTail(tail) && !simple) {
 			placements.padded("simpleTailBusedForATightGap");
 		}
@@ -11888,10 +11959,16 @@ public final class SongBuilder {
 	 *     and neither side can name it alone -- most of a build is stone that was never meant to be
 	 *     live, so "not reached" on its own would paint the whole thing.
 	 */
+	/**
+	 * @param laidBy which shape laid each cell, in world space, and empty unless
+	 *     {@link #NAME_EVERY_CELL} or {@link #DEBUG_PASTE} was on. The one fact about a build that
+	 *     dies at {@code finish()} and that every fault wants first.
+	 */
 	record PastePlan(List<String> commands, int width, int depth, int height, int spanX, int spanZ,
 			PasteMode mode, List<String> faults, List<BlockPos> turns, List<Integer> moved,
 			List<Integer> breaches, List<Integer> recesses, Map<String, Integer> padding,
-			int nearWall, int farWall, Map<BlockPos, String> collisions, Set<BlockPos> poweredAt) {
+			int nearWall, int farWall, Map<BlockPos, String> collisions, Set<BlockPos> poweredAt,
+			Map<BlockPos, String> laidBy) {
 
 		/**
 		 * Cells of lane filled with wire rather than with music, counted by what asked for them.
@@ -12478,27 +12555,32 @@ public final class SongBuilder {
 		}
 
 		/**
-		 * Whether the next event follows too closely for a pad in front of it to be a repeater.
+		 * How many ticks after this chord the next event lands, or a large number for the last one.
 		 *
 		 * <p>Handed down for the same reason {@code turnAhead} is: it is a fact about the walk, and the
 		 * chord being built cannot see the event after it. See
 		 * {@link #SIMPLE_TAIL_GIVES_WAY_TO_A_TIGHT_GAP}.</p>
+		 *
+		 * <p>The number and not the verdict, because the verdict wanted a threshold and the threshold
+		 * had to be measured. This is the <b>gap</b>, which is an upper bound on the delay the next
+		 * chord's own repeater is actually set to -- {@code spentPadding} comes out of it first -- so
+		 * a rule written against it is right in one direction and optimistic in the other.</p>
 		 */
-		private boolean tightGapAhead;
+		private int gapAhead = Integer.MAX_VALUE;
 
-		void tightGapAhead(boolean tight) {
-			tightGapAhead = tight;
+		void gapAhead(int ticks) {
+			gapAhead = ticks;
 		}
 
-		boolean tightGapAhead() {
-			return tightGapAhead;
+		int gapAhead() {
+			return gapAhead;
 		}
 
 		/**
 		 * Whether the walk laying this build answers the questions a shape can only ask of the walk.
 		 *
 		 * <p>The difference between a guard that says no and a guard nobody asked. {@code turnAhead}
-		 * and {@code tightGapAhead} are false by default, and false is the answer that <i>keeps</i> the
+		 * and {@code gapAhead} default to the answers that <i>keep</i> the
 		 * simple tail -- so a walk that never sets them takes the shape with every one of its guards
 		 * switched off. Only {@link #walkV2} sets them, so only walkV2 may have the shape.</p>
 		 */
@@ -12557,7 +12639,7 @@ public final class SongBuilder {
 			if (existing == null && trial != null) {
 				trial.blocksAdded().add(key);
 			}
-			if (DEBUG_PASTE && existing == null) {
+			if ((DEBUG_PASTE || NAME_EVERY_CELL) && existing == null) {
 				placedBy.put(key, placing);
 			}
 			if (existing == null) {
@@ -12729,6 +12811,13 @@ public final class SongBuilder {
 			return shapeStone(placedBy.get(at));
 		}
 
+		/** What laid each cell, in world space, for a fault that wants to name the shapes either end. */
+		Map<BlockPos, String> laidBy(int shiftX, int shiftZ) {
+			Map<BlockPos, String> named = new LinkedHashMap<>();
+			placedBy.forEach((at, what) -> named.put(at.offset(shiftX, 0, shiftZ), what));
+			return Map.copyOf(named);
+		}
+
 		/** Cells the walk expects to carry the signal, in world space, for the dead-wire pass. */
 		Set<BlockPos> poweredAt(int shiftX, int shiftZ) {
 			return powered.keySet().stream().map(at -> at.offset(shiftX, 0, shiftZ))
@@ -12790,7 +12879,7 @@ public final class SongBuilder {
 				turns.stream().map(turn -> turn.offset(shiftX, 0, shiftZ)).toList(),
 				List.copyOf(moved), List.copyOf(breaches), List.copyOf(recesses),
 				Map.copyOf(padding), nearWall + shiftX, farWall + shiftX, Map.copyOf(marked),
-				poweredAt(shiftX, shiftZ));
+				poweredAt(shiftX, shiftZ), laidBy(shiftX, shiftZ));
 		}
 	}
 }
