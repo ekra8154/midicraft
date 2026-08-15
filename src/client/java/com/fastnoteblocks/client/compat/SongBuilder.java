@@ -6704,6 +6704,10 @@ public final class SongBuilder {
 		placements.padded("railFromHandover");
 		set(placements, tail, "minecraft:repeater[facing=" + repeaterFacing(travel)
 			+ ",delay=" + delay + "]");
+		// And the block it stands on, which every other floor-rail repeater gets from
+		// {@link #addRailNote} and this one was not getting from anywhere. A repeater on air is not a
+		// repeater. ekran's fixed slice has stone directly under it; the built one had neither.
+		set(placements, tail.below(), "minecraft:stone");
 	}
 
 	/** The two columns a run opens with: its own repeater, then the dust that starts the floor rail. */
