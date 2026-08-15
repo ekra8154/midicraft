@@ -95,11 +95,16 @@ tasks.register('sweepTest', Test) {
 	useJUnitPlatform {
 		includeTags 'sweep'
 	}
-	// Anything -Dfault.* reaches the test JVM, so a probe can be re-aimed from the command line
-	// instead of by editing it. Only that prefix: forwarding the lot would drag the daemon's own
-	// properties across and change what the probes are measuring.
+	// Anything under these prefixes reaches the test JVM, so a probe can be re-aimed from the command
+	// line instead of by editing it. Prefixes rather than the lot: forwarding everything would drag
+	// the daemon's own properties across and change what the probes are measuring. 'probe.' is the
+	// one to use for anything new -- the other two predate it and are what their own probes read.
+	//
+	// A probe whose prefix is missing here does not fail: it runs with its defaults and prints a full
+	// page of numbers for the experiment nobody performed. That happened, and the only tell was that
+	// the numbers came out identical to the digit.
 	System.properties.each { key, value ->
-		if (key.toString().startsWith('fault.')) {
+		if (['fault.', 'census.', 'probe.'].any { key.toString().startsWith(it) }) {
 			systemProperty(key.toString(), value)
 		}
 	}

@@ -67,6 +67,7 @@ class FaultProbeTest {
 		boolean rails = Boolean.parseBoolean(text("rails", "true"));
 		boolean wasV1 = SongBuilder.TWO_RAIL_RUNS;
 		boolean wasV2 = SongBuilder.V2_RUNS_ON_RAILS;
+		Flags.Held held = Flags.set(text("set", ""));
 		try {
 			SongBuilder.TWO_RAIL_RUNS = rails;
 			SongBuilder.V2_RUNS_ON_RAILS = rails;
@@ -86,18 +87,20 @@ class FaultProbeTest {
 				System.out.println();
 				System.out.println("======== " + built.where() + " round " + FaultView.say(centre)
 					+ " ========");
-				System.out.println(FaultView.draw(built,
-					centre.offset(-Integer.parseInt(span[0]), -Integer.parseInt(span[1]),
-						-Integer.parseInt(span[2])),
-					centre.offset(Integer.parseInt(span[0]), Integer.parseInt(span[1]),
-						Integer.parseInt(span[2])),
+				net.minecraft.core.BlockPos from = centre.offset(-Integer.parseInt(span[0]),
+					-Integer.parseInt(span[1]), -Integer.parseInt(span[2]));
+				net.minecraft.core.BlockPos to = centre.offset(Integer.parseInt(span[0]),
+					Integer.parseInt(span[1]), Integer.parseInt(span[2]));
+				System.out.println(FaultView.draw(built, from, to,
 					AsciiDiagram.View.of(text("view", "top"))));
+				System.out.println(FaultView.shapesIn(built, from, to));
 				return;
 			}
 			FaultView.report(built, perKind);
 		} finally {
 			SongBuilder.TWO_RAIL_RUNS = wasV1;
 			SongBuilder.V2_RUNS_ON_RAILS = wasV2;
+			held.putBack();
 		}
 	}
 }

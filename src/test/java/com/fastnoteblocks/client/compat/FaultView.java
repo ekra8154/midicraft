@@ -98,15 +98,22 @@ final class FaultView {
 			int width, int floors, int maxFloors, boolean nameShapes) {
 		boolean marking = SongBuilder.MARK_UNREACHED;
 		boolean naming = SongBuilder.DEBUG_PASTE;
+		boolean labelling = SongBuilder.NAME_EVERY_CELL;
 		SongBuilder.PastePlan plan;
 		try {
 			SongBuilder.MARK_UNREACHED = false;
 			SongBuilder.DEBUG_PASTE = nameShapes;
+			// Always, and it is not the same switch as the one above. This one only remembers what laid
+			// each cell; the one above also stops a collision throwing, which in v2 skips every trial
+			// fallback and builds a different machine. So every fault drawn here can name the shapes
+			// either end of it without the drawing having changed what it is looking at.
+			SongBuilder.NAME_EVERY_CELL = true;
 			plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0), notes, mode,
 				new SongBuilder.BuildLimits(maxFloors, width, floors));
 		} finally {
 			SongBuilder.MARK_UNREACHED = marking;
 			SongBuilder.DEBUG_PASTE = naming;
+			SongBuilder.NAME_EVERY_CELL = labelling;
 		}
 		Map<BlockPos, BlockState> world = new LinkedHashMap<>();
 		Map<BlockPos, Integer> laid = new LinkedHashMap<>();
@@ -140,6 +147,54 @@ final class FaultView {
 			return "dead from " + say(at) + ", last live note " + say(frontier) + ", "
 				+ shadowed + " notes in its shadow";
 		}
+	}
+
+	/**
+	 * The first cell of wire the signal never got to, and the shapes either side of it.
+	 *
+	 * <p>The dead <i>note</i> is what gets counted, and it is the wrong end of the fault: a note is
+	 * silent because a cell of wire upstream of it never went live, and that cell is where the two
+	 * shapes that disagreed meet. One line of this classifies a build; the drawing is for when the
+	 * line is not enough.</p>
+	 *
+	 * <p>Walk order is signal order within a structure, so the earliest-laid dead cell is the break
+	 * and everything after it is that break's shadow.</p>
+	 */
+	record Break(BlockPos at, String what, String before) {
+		@Override
+		public String toString() {
+			return "break at " + say(at) + "   " + before + " -> " + what;
+		}
+	}
+
+	static Break firstBreak(Build build) {
+		BlockPos first = null;
+		int bestOrder = Integer.MAX_VALUE;
+		for (BlockPos at : build.plan().poweredAt()) {
+			if (build.reading().reachedAt().contains(at)) {
+				continue;
+			}
+			int order = order(build, at);
+			if (order < bestOrder) {
+				bestOrder = order;
+				first = at;
+			}
+		}
+		if (first == null) {
+			return null;
+		}
+		// What was laid immediately before it, which is nearly always the shape that failed to hand
+		// the signal on. Read out of the walk order rather than out of the geometry: the cell behind
+		// in space may belong to the lane before, and the question is who was building at the time.
+		String before = "?";
+		int bestBefore = -1;
+		for (Map.Entry<BlockPos, Integer> cell : build.laid().entrySet()) {
+			if (cell.getValue() < bestOrder && cell.getValue() > bestBefore) {
+				bestBefore = cell.getValue();
+				before = build.plan().laidBy().getOrDefault(cell.getKey(), "?");
+			}
+		}
+		return new Break(first, build.plan().laidBy().getOrDefault(first, "?"), before);
 	}
 
 	static List<Dead> deadWires(Build build) {
@@ -280,14 +335,59 @@ final class FaultView {
 	 */
 	static String around(Build build, BlockPos one, BlockPos two, AsciiDiagram.View view,
 			int eitherX, int eitherZ, int below, int above) {
+		BlockPos[] box = box(build, one, two, eitherX, eitherZ, below, above);
+		return draw(build, box[0], box[1], view);
+	}
+
+	/** The corners {@link #around} would draw between, so the same box can be asked other questions. */
+	static BlockPos[] box(Build build, BlockPos one, BlockPos two, int eitherX, int eitherZ,
+			int below, int above) {
 		BlockPos other = two == null ? one : two;
 		int floor = build.floorOf(Math.min(one.getY(), other.getY()));
-		return draw(build,
+		return new BlockPos[] {
 			new BlockPos(Math.min(one.getX(), other.getX()) - eitherX, floor - below,
 				Math.min(one.getZ(), other.getZ()) - eitherZ),
 			new BlockPos(Math.max(one.getX(), other.getX()) + eitherX, floor + above,
-				Math.max(one.getZ(), other.getZ()) + eitherZ),
-			view);
+				Math.max(one.getZ(), other.getZ()) + eitherZ)};
+	}
+
+	/**
+	 * Which shape laid each cell of a box, grouped by shape.
+	 *
+	 * <p>The half of a fault the picture cannot draw. Every stone in a lane looks like every other
+	 * one, so a slice says a note block stands in a run of dust and cannot say whether that note
+	 * belongs to the chord in front, the tail behind it or the rail alongside -- and which of those it
+	 * is decides whose rule was broken. Grouped rather than listed per cell because the answer wanted
+	 * is nearly always "how many shapes are in this picture, and which", and a cell-by-cell dump of a
+	 * fifteen-column window buries that under sixty lines.</p>
+	 */
+	static String shapesIn(Build build, BlockPos from, BlockPos to) {
+		Map<String, List<BlockPos>> byShape = new java.util.TreeMap<>();
+		build.plan().laidBy().forEach((at, what) -> {
+			if (at.getX() < from.getX() || at.getX() > to.getX() || at.getY() < from.getY()
+					|| at.getY() > to.getY() || at.getZ() < from.getZ() || at.getZ() > to.getZ()) {
+				return;
+			}
+			byShape.computeIfAbsent(what, key -> new ArrayList<>()).add(at);
+		});
+		if (byShape.isEmpty()) {
+			return "   (nothing in this window remembers what laid it)";
+		}
+		StringBuilder said = new StringBuilder("   what laid this window:");
+		byShape.forEach((what, cells) -> {
+			cells.sort((a, b) -> a.getX() != b.getX() ? Integer.compare(a.getX(), b.getX())
+				: a.getZ() != b.getZ() ? Integer.compare(a.getZ(), b.getZ())
+				: Integer.compare(a.getY(), b.getY()));
+			said.append("\n      ").append(String.format("%-46s", what)).append(cells.size())
+				.append(cells.size() == 1 ? " cell  " : " cells ");
+			for (BlockPos at : cells.subList(0, Math.min(6, cells.size()))) {
+				said.append(' ').append(say(at)).append(" |");
+			}
+			if (cells.size() > 6) {
+				said.append(" ...");
+			}
+		});
+		return said.toString();
 	}
 
 	// ---- the page -----------------------------------------------------------------------------
@@ -322,13 +422,23 @@ final class FaultView {
 		for (Dead one : dead.subList(0, Math.min(perKind, dead.size()))) {
 			System.out.println();
 			System.out.println("#### DEAD WIRE -- " + one);
+			Break broke = firstBreak(build);
+			if (broke != null) {
+				System.out.println("   " + broke);
+			}
 			System.out.println("   look for wire, block, wire: a block lit only by dust is soft "
 				+ "powered and lights no dust of its own");
 			// Along the lane, because that is the axis a run of dust lies on and the break is a
 			// three-cell shape along it. The frontier and the break are usually the same lane, so one
 			// window holds both.
-			System.out.println(around(build, one.frontier(), one.at(), AsciiDiagram.View.NORTH,
-				2, 0, 1, 4));
+			//
+			// One column either side in z, and it is not decoration. A dead note is a note, and a note
+			// hangs *beside* the lane that failed to reach it -- so a window drawn on the notes' own z
+			// shows the two notes and none of the wire between them, which is every block that matters.
+			// This drew exactly that empty picture for the first fault it was ever pointed at.
+			BlockPos[] box = box(build, one.frontier(), one.at(), 2, 1, 1, 4);
+			System.out.println(draw(build, box[0], box[1], AsciiDiagram.View.NORTH));
+			System.out.println(shapesIn(build, box[0], box[1]));
 			if (one.frontier().getZ() != one.at().getZ()) {
 				System.out.println("   the two are in different lanes, so from above as well:");
 				System.out.println(around(build, one.frontier(), one.at(), AsciiDiagram.View.TOP,
@@ -346,10 +456,6 @@ final class FaultView {
 		for (Wrong one : wrong.subList(0, Math.min(perKind, wrong.size()))) {
 			System.out.println();
 			System.out.println("#### WRONG NOTE -- " + one);
-			if (!build.named()) {
-				System.out.println("   (build again with names on to have the fault say which shape "
-					+ "laid each end -- but read the caveat on FaultView.of first)");
-			}
 			// Both views, and neither is optional. The levels are what the fault text cannot say, and
 			// which lane the other end is in is what tells a module reaching into the next from the
 			// corridor alongside -- and those two want opposite fixes.
@@ -357,8 +463,9 @@ final class FaultView {
 			System.out.println(around(build, one.at(), one.from(), AsciiDiagram.View.NORTH,
 				3, 0, 1, 4));
 			System.out.println("   from above, which shows which lane the other end is in:");
-			System.out.println(around(build, one.at(), one.from(), AsciiDiagram.View.TOP,
-				3, 2, 0, 3));
+			BlockPos[] box = box(build, one.at(), one.from(), 3, 2, 0, 3);
+			System.out.println(draw(build, box[0], box[1], AsciiDiagram.View.TOP));
+			System.out.println(shapesIn(build, box[0], box[1]));
 		}
 	}
 
@@ -388,7 +495,9 @@ final class FaultView {
 			System.out.println("   from above, the corridor and both walls:");
 			System.out.println(around(build, at, wallward, AsciiDiagram.View.TOP, 2, 2, 0, 3));
 			System.out.println("   along the lane, which shows the staircase that wanted the columns:");
-			System.out.println(around(build, at, wallward, AsciiDiagram.View.NORTH, 2, 0, 1, 6));
+			BlockPos[] box = box(build, at, wallward, 2, 0, 1, 6);
+			System.out.println(draw(build, box[0], box[1], AsciiDiagram.View.NORTH));
+			System.out.println(shapesIn(build, box[0], box[1]));
 		}
 	}
 
