@@ -1942,6 +1942,7 @@ public final class SongBuilder {
 					railFloorCarried |= railPhase == 1;
 					lane = addRailNote(placements, lane, railPhase, event.notes(), event.time(),
 					nextDelay, fromDust);
+				RAIL_COLUMNS++;
 				railLive[railPhase] = event.time();
 				railPhase = nextDelay > 0 ? 1 - railPhase : -1;
 				currentTime = event.time();
@@ -2175,6 +2176,19 @@ public final class SongBuilder {
 		// What the wire at the end of the lane is still worth. Every module opens with a repeater, so
 		// this only ever counts what the module just built spent: nothing, unless it was a bus.
 		int tipSignal = DUST_RANGE;
+		// Which rail the next column of a run belongs to: 0 for the path, 1 for the floor, -1 for no
+		// run under way. The same state walkWall keeps, ported rather than re-derived -- every
+		// geometry in this file that was worked out a second time has been wrong at least once.
+		int railPhase = -1;
+		// When each rail last went live. Held apart because a blank swaps the rails over, and after a
+		// swap they no longer line up with the event order.
+		int[] railLive = new int[2];
+		// The tick a blank owes the next floor column, or {@link #NO_BLANK}.
+		int railBlank = NO_BLANK;
+		int railBlanksRunning = 0;
+		// And whether the floor rail has held a chord yet at all, rather than only blanks: that is
+		// what says the run is earning the head it paid for.
+		boolean railFloorCarried = false;
 		LaneReach reach = laneReach(events, 0, events.size());
 		int slabStep = laneSpacing(reach, reach);
 		// A seeded walk may also start mid-turn, with the corners at the end of the lane already on
@@ -2368,7 +2382,32 @@ public final class SongBuilder {
 					placements.padded("v2LandingWas" + was.style() + "Now" + here.style());
 				}
 			}
-			int landing = here.end() + lane.travel().getStepX() * reserve;
+			// A cell of a rail run is one column, and the column that opens one is three -- the
+			// repeater, the dust, then the note. Overridden here rather than taught to
+			// {@link #landingFrom}, because whether a run is under way is a fact about the walk rather
+			// than about the chord: the same event opens a run in one lane and continues one in the
+			// next. The same override walkWall makes, and for the same reason.
+			//
+			// It does mean {@link #shapeFor} has already decided a shape for a chord a rail column will
+			// take instead, which puts a decision in the census that nothing built. A miscount, not a
+			// misbuild -- the run lays its own notes and never asks for the shape -- but it is the one
+			// place v2's "the decision is the decision" does not hold, and it is worth closing by
+			// asking the rail question before the shape one.
+			boolean railContinues = V2_RUNS_ON_RAILS && railPhase >= 0;
+			// Two where a chord of three has landed on the floor rail, which has no centre to give it:
+			// the blank column that gets it onto the path rail, and then its own.
+			int railColumns = railContinues
+				? railPhase == 1 && railBlank != NO_BLANK ? 2 : 1
+				: V2_RUNS_ON_RAILS
+					&& railOpens(events, index, lane, wall, layout, turning, reserve, wait,
+						railStackSeed(placements, lane, lastStyle, currentTime, turning), booked)
+					// The head's columns, its chord, and the repeater a four-tick stretch of the wait in
+					// front of it costs -- the same sum the plain path makes of it.
+					? railHeadColumns(railStackSeed(placements, lane, lastStyle, currentTime, turning),
+						wait) + 1 + railPadColumns(wait) : 0;
+			int landing = railColumns > 0
+				? lane.pos().getX() + lane.travel().getStepX() * (railColumns + reserve)
+				: here.end() + lane.travel().getStepX() * reserve;
 			// A chord that fits and leaves the lane unable to pay for its own turn does not fit.
 			//
 			// This is what deciding once exposed rather than caused. While the prediction erred towards the
@@ -2409,14 +2448,23 @@ public final class SongBuilder {
 			// arithmetic about walls says so.
 			// Whether this event will not fit before the wall, which is a different question from
 			// whether the lane may end here.
-			boolean overshoots = !turning
+			// Never while a run owes its next column. A run that has laid a repeater has promised the
+			// column in front of it a note, and every way a lane can be interrupted takes that column
+			// away: the note ends up on the far side of a staircase, a floor down and running the other
+			// way, while the repeater meant to drive it stays at the wall driving the staircase.
+			//
+			// This invariant broke twice in v1, both times because it was said on the turn rather than
+			// on the overshoot. It matters more here than there: v1 offers the cut on the overshoot and
+			// v2 offers it a column earlier, on {@code reaches}, so in v2 the reach test is a live way
+			// into the cut rather than a flag-gated one.
+			boolean overshoots = !turning && railPhase < 0
 				&& (landing > farWall || landing < nearWall || strandsTheTurn);
 			// And whether it merely gets there. A chord ending on the wall, or one column short of
 			// it, has not overshot and so was never offered a cut -- which leaves the lane holding a
 			// long bus, no near half to cut, and a turn to pay for out of the two cells that bus left
 			// it. That is the case the whole pad layer was built around. See
 			// {@link #CUTS_THE_CHORD_THAT_REACHES}.
-			boolean reaches = !turning
+			boolean reaches = !turning && railPhase < 0
 				&& (wall - landing) * lane.travel().getStepX() <= 1;
 			// A lane has to hold something before it can end, or a turn that lands short would turn
 			// again at once and the walk would climb the whole build without laying a note.
@@ -3429,6 +3477,123 @@ public final class SongBuilder {
 					+ " tip=" + tipSignal + " spent=" + spentPadding + " style=" + event.style());
 			}
 			BlockPos before = lane.pos();
+			// A run of small chords, one column a chord instead of two. Ported from walkWall rather
+			// than re-derived: the shape is ekran's, the physics under it was measured rather than
+			// reasoned about, and every geometry in this file that was worked out a second time has
+			// been wrong at least once.
+			//
+			// A turn ends a run: the far side of a staircase is a fresh lane and wants a head of its
+			// own. Only ever reached from the path rail, because the floor rail refuses to turn, so
+			// the wire is already at path level and there is nothing to undo.
+			// Asked again here rather than taken from the top of the event, because by this point a
+			// staircase may already have been built: the lane stands somewhere else, running the
+			// other way, with the other wall in front of it. The answer from before the turn is
+			// about a lane that no longer exists, and measured against the old wall it is always no
+			// -- which is why a run used to take several chords to come back after a floor change,
+			// when it can open on the very first one. Only a flat turn is a reason to wait, and that
+			// is the bending test: its sideways run lies across the way both rails go.
+			int laneWall = lane.travel() == forward ? farWall : nearWall;
+			if (!V2_RUNS_ON_RAILS || turning || lane.bending()) {
+				railPhase = -1;
+			} else if (railPhase >= 0 || railOpens(events, index, lane, laneWall, layout, false,
+					reserve, wait, railStackSeed(placements, lane, lastStyle, currentTime, false),
+					booked)) {
+				boolean opening = railPhase < 0;
+				boolean fromDust = false;
+				if (opening) {
+					int seed = railStackSeed(placements, lane, lastStyle, currentTime, false);
+					// The wait in front of the run, laid the way every other module lays it: a repeater
+					// for every four ticks of it, and the remainder in the head's own. Clamping it to
+					// four instead is right only while no gap exceeds four, which is true of every
+					// synthetic song here and of no real one -- song of storms opened a run on a wait
+					// of eight and sounded its whole first phrase early.
+					SpatialDelayTrigger opener = addSpatialDelayBeforeEvent(placements, lane,
+						event.time() - currentTime - spentPadding, layout.ultra());
+					// Off a stacked chord only where the padding did not move the lane on: the cross
+					// has to be the cell behind the trigger, and a column of wire in between puts the
+					// whole thing out of reach.
+					boolean offStack = seed != NO_BLANK && opener.lane().pos().equals(lane.pos());
+					fromDust = !offStack;
+					lane = offStack
+						? addRailFromStack(placements, opener.lane(), opener.triggerDelay(), seed)
+						: addRailHead(placements, opener.lane(), opener.triggerDelay(), event.time());
+					railPhase = 0;
+					railBlanksRunning = 0;
+					railFloorCarried = false;
+					// The head's own stone and the stone under its dust both go live with this chord,
+					// so both rails are timed from here.
+					railLive[0] = event.time();
+					// The floor rail is live from whatever seeded it: this chord where a head was
+					// built, and the stacked chord behind it where one was inherited.
+					railLive[1] = offStack ? seed : event.time();
+				} else if (railPhase == 1 && railBlank != NO_BLANK) {
+					// The floor column this chord would have taken, laid empty: either the chord is a
+					// three and the floor rail has no centre for it, or the pair of gaps behind it is
+					// too long for one repeater. Either way the chord takes the path column after it
+					// and the two rails come out swapped over.
+					lane = addRailBlank(placements, lane, railBlank,
+						railDelay(railLive[0], event.time()));
+					railLive[1] = railBlank;
+					railPhase = 0;
+				}
+				railBlank = NO_BLANK;
+				int nextDelay;
+				if (railPhase == 0) {
+					// The path rail is the only place a run may end, so a column here only carries on
+					// where the whole pair after it fits -- both its columns, and whatever the lane
+					// keeps back for its turn. Measured against the wall rather than against the
+					// turn's cells: those are a wire budget, and every column of a run holds a
+					// repeater.
+					RailPair pair = railRoom(lane, laneWall) >= 2 + reserve
+						? railPairAfter(events, index, event.time(), railLive[1], placements,
+							lane.ahead(1), booked)
+						: null;
+					// And a floor rail that keeps taking blanks is not carrying anything: a chord and a
+					// blank between them cost the two columns the plain lane charges for the chord
+					// alone, so a stretch of them is the head's two columns thrown away and nothing
+					// gained. The run stops instead and the lane carries on plainly, which is what
+					// ekran asked for -- "it can just continue if it doesn't know it will be able to
+					// place a note there later".
+					if (pair != null && pair.blank() && !railFloorCarried
+							&& railBlanksRunning >= RAIL_BLANKS_IN_A_ROW) {
+						placements.padded("railStoppedForBlanks");
+						pair = null;
+					}
+					railBlanksRunning = pair == null || !pair.blank() ? 0 : railBlanksRunning + 1;
+					nextDelay = pair == null ? 0 : railDelay(railLive[1], pair.floorTime());
+					railBlank = pair != null && pair.blank() ? pair.floorTime() : NO_BLANK;
+				} else {
+					// A floor column always carries on: the pair it belongs to was committed to at the
+					// path column behind it. Its repeater is the path rail's, measured from the path
+					// rail's last anchor.
+					nextDelay = railNextDelay(events, index, railLive[0]);
+				}
+				if (TRACE) {
+					System.out.println("RAIL t=" + event.time() + " at " + lane.pos().getX() + ","
+						+ lane.pos().getY() + "," + lane.pos().getZ() + " phase=" + railPhase
+						+ " opening=" + opening + " nextDelay=" + nextDelay
+						+ " wall=" + laneWall + " room=" + railRoom(lane, laneWall)
+						+ " travel=" + lane.travel());
+				}
+				// A floor column that is not a blank is the floor rail earning its keep.
+				railFloorCarried |= railPhase == 1;
+				lane = addRailNote(placements, lane, railPhase, event.notes(), event.time(),
+					nextDelay, fromDust);
+				RAIL_COLUMNS++;
+				railLive[railPhase] = event.time();
+				railPhase = nextDelay > 0 ? 1 - railPhase : -1;
+				currentTime = event.time();
+				// Every column of a run holds a repeater bar the one it opens on, so the wire never
+				// runs: whatever touches the end of one is reading a block a repeater drives directly.
+				// The opening column is the exception and it is not allowed to be the last, which is
+				// what {@link #railOpens} asks its room for.
+				tipSignal = DUST_RANGE;
+				columnBehindBusy = true;
+				lastStyle = ChordStyle.SMALL;
+				laneStarted = true;
+				leavingTurn = false;
+				continue;
+			}
 			// What the planner would say this chord does, asked at the moment the walk is about to do
 			// it. Kept as a counter rather than a fault because a gap here is not wrong in itself --
 			// a nudge is decided against blocks on the ground and no arithmetic can foresee it -- but
@@ -6029,6 +6194,37 @@ public final class SongBuilder {
 	 * the run is only available where two consecutive gaps come to four or less.</p>
 	 */
 	static boolean TWO_RAIL_RUNS = true;
+
+	/**
+	 * Whether v2 runs on rails too.
+	 *
+	 * <p>Separate from {@link #TWO_RAIL_RUNS} because the two pasters can be wrong about this
+	 * independently, and because the lane spacing the runs need is claimed by
+	 * {@link #laneReachOf} for every ultra build already -- so v2 has been paying for the runs
+	 * since main was merged without being able to use them. This is what stops that being a
+	 * one-way trade.</p>
+	 *
+	 * <p>The port is walkWall's block moved across rather than rewritten, and it is not finished:
+	 * {@link #shapeFor} still decides a shape for every chord before the walk asks whether a rail
+	 * column will take it instead, so a run leaves shape decisions in the census that nothing built.
+	 * That is a miscount rather than a misbuild -- a run lays its own notes and never reads the
+	 * shape -- but it is the one place v2's "the decision is the decision" does not hold, and
+	 * closing it means asking the rail question first.</p>
+	 */
+	static boolean V2_RUNS_ON_RAILS = true;
+
+	/**
+	 * Columns laid as part of a run, counted by whichever walk laid them.
+	 *
+	 * <p>A plain counter because the question it answers is "did this fire at all", and that question
+	 * has a failure mode worth guarding against: a feature that never runs and a feature that runs and
+	 * changes nothing produce the same numbers everywhere else. Guardian came back byte-identical with
+	 * the runs on and off, which is either fact, and no other measurement here can tell them apart.
+	 *
+	 * <p>Reset by the caller, like {@link #HEADLESS_FOR_ROOM_BEHIND}. Read by the probes and by
+	 * nothing that builds.</p>
+	 */
+	static int RAIL_COLUMNS = 0;
 
 	/** A path column's cells: a centre and a side each way. Only a harp note can take the centre. */
 	private static final int RAIL_PATH_SLOTS = 3;

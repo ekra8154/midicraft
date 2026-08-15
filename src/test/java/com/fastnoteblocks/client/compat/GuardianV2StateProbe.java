@@ -79,12 +79,16 @@ class GuardianV2StateProbe {
 				int blocks = plan.breaches().stream().mapToInt(Integer::intValue).sum();
 				int unreached = BreachView.readBack("guardian", plan).unreachedNotes();
 				List<String> dead = deadRuns(plan);
+				// Lanes and pad beside the corridor, because the corridor is the two of them: a fixed
+				// amount of music, plus whatever wire the build had to lay to get between it. The song
+				// does not change, so every column of variation is the second one.
+				int lanes = plan.turns().size();
 				System.out.println(String.format(
-					"   %2dw x %df  totalCols=%-7d breachBlocks=%-4d lanes=%-3d worst=%-3d wrong=%-3d"
-					+ " dead=%-3d  walls %d..%d",
-					width, floors, plan.totalColumns(), blocks, plan.breaches().size(),
-					plan.worstBreach(), plan.wrongNotes(), unreached, plan.nearWall(),
-					plan.farWall()));
+					"   %2dw x %df  totalCols=%-7d lanes=%-4d perLane=%-6.1f padCols=%-6d"
+					+ " breach=%-4d wrong=%-3d dead=%d",
+					width, floors, plan.totalColumns(), lanes,
+					lanes == 0 ? 0 : plan.totalColumns() / (double) lanes, plan.padCells(),
+					blocks, plan.wrongNotes(), unreached));
 				if (plan.worstBreach() > worstBlocks) {
 					worstBlocks = plan.worstBreach();
 					worstWidth = width;

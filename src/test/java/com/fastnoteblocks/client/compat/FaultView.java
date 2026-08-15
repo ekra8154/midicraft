@@ -200,29 +200,49 @@ final class FaultView {
 		return found;
 	}
 
-	/** Every lane that finished outside its walls, worst first, with the turn that did it. */
-	record Breach(BreachView.Overrun run, BlockPos turn) {
+	/** A lane that turned outside its walls, and the furthest block it got. */
+	record Breach(BlockPos turn, int past, boolean nearSide, BreachView.Overrun run) {
 		@Override
 		public String toString() {
-			return run + (turn == null ? "" : "   turned at " + say(turn));
+			return "turned at " + say(turn) + ", " + past + " past the "
+				+ (nearSide ? "near" : "far") + " wall"
+				+ (run == null ? "" : "   furthest block " + run.out() + " out, tp " + run.x() + " "
+					+ run.y() + " " + run.z());
 		}
 	}
 
+	/**
+	 * Every lane that ended outside the width it promised, worst first.
+	 *
+	 * <p>Driven off the <b>turns</b> rather than off the blocks, because a breach is a lane that
+	 * turned outside its wall and the block scan cannot tell that from the corner sitting on the wall
+	 * by construction. A turn exactly one column past is the latter -- every build has them, they are
+	 * not faults, and listing them puts three non-faults above the two real ones. This is the same
+	 * cut {@code plan.breaches()} makes, so the two agree by construction rather than by luck.</p>
+	 *
+	 * <p>The block overrun is still attached where there is one, because the turn says the lane broke
+	 * its promise and the furthest block says where to go and stand.</p>
+	 */
 	static List<Breach> breaches(Build build) {
 		List<Breach> found = new ArrayList<>();
-		for (BreachView.Overrun run : BreachView.overruns(build.plan())) {
-			BlockPos turn = null;
-			for (BlockPos candidate : build.plan().turns()) {
-				boolean outside = candidate.getX() > build.plan().farWall()
-					|| candidate.getX() < build.plan().nearWall();
-				if (outside && Math.abs(candidate.getZ() - run.z()) <= 1
-						&& build.floorOf(candidate.getY()) == build.floorOf(run.y())) {
-					turn = candidate;
+		for (BlockPos turn : build.plan().turns()) {
+			boolean near = turn.getX() < build.plan().nearWall();
+			int past = near ? build.plan().nearWall() - turn.getX()
+				: turn.getX() > build.plan().farWall() ? turn.getX() - build.plan().farWall() : 0;
+			if (past < 2) {
+				continue;
+			}
+			BreachView.Overrun worst = null;
+			for (BreachView.Overrun run : BreachView.overruns(build.plan())) {
+				if (Math.abs(run.z() - turn.getZ()) <= 1
+						&& build.floorOf(run.y()) == build.floorOf(turn.getY())) {
+					worst = run;
 					break;
 				}
 			}
-			found.add(new Breach(run, turn));
+			found.add(new Breach(turn, past, near, worst));
 		}
+		found.sort((a, b) -> Integer.compare(b.past(), a.past()));
 		return found;
 	}
 
@@ -348,12 +368,13 @@ final class FaultView {
 					System.out.println("   fault " + fault);
 				}
 			}
-			BlockPos at = new BlockPos(one.run().x(), one.run().y(), one.run().z());
+			BlockPos at = one.run() == null ? one.turn()
+				: new BlockPos(one.run().x(), one.run().y(), one.run().z());
 			// Out to both walls, not merely around the overrun, because a breach is a lane against a
 			// wall and the wall has to be in the picture for the number of columns to mean anything.
 			BlockPos wallward = new BlockPos(
-				one.run().nearSide() ? build.plan().farWall() : build.plan().nearWall(),
-				one.run().y(), one.run().z());
+				one.nearSide() ? build.plan().farWall() : build.plan().nearWall(),
+				at.getY(), at.getZ());
 			System.out.println("   from above, the corridor and both walls:");
 			System.out.println(around(build, at, wallward, AsciiDiagram.View.TOP, 2, 2, 0, 3));
 			System.out.println("   along the lane, which shows the staircase that wanted the columns:");
