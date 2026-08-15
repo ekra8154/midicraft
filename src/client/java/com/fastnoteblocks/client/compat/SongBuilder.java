@@ -12,6 +12,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Stream;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -127,7 +128,17 @@ public final class SongBuilder {
 	 */
 	static PastePlan plan(Minecraft minecraft, List<FastNoteblocksConfig.SequenceTrack> tracks,
 			PasteMode mode) {
-		return createPastePlan(minecraft, eventNotes(tracks), mode);
+		return plan(minecraft, tracks, mode, null);
+	}
+
+	/**
+	 * @param title the composition's name, for the sign at the block the machine starts from. A
+	 *     build is thirty thousand blocks of stone that looks exactly like every other build, and a
+	 *     world with four of them standing in it has no way at all of saying which is which.
+	 */
+	static PastePlan plan(Minecraft minecraft, List<FastNoteblocksConfig.SequenceTrack> tracks,
+			PasteMode mode, String title) {
+		return createPastePlan(minecraft, eventNotes(tracks), mode, title);
 	}
 
 	static final int MAX_SIMULTANEOUS_NOTES = 30;
@@ -259,11 +270,12 @@ public final class SongBuilder {
 	private static final int CUBE_FLOOR_HEIGHT = 4;
 
 	private static PastePlan createPastePlan(Minecraft minecraft, List<EventNote> notes,
-			PasteMode mode) {
+			PasteMode mode, String title) {
 		// Fixed world axes rather than the player's facing: travel runs +X and lanes step +Z, so a
 		// build always grows into positive coordinates and you know where it will land before you
 		// commit to it. Alternating floors double back inside that volume, never past the origin.
-		return createPastePlan(pasteOrigin(minecraft, Direction.EAST), notes, mode);
+		return createPastePlan(pasteOrigin(minecraft, Direction.EAST), notes, mode,
+			BuildLimits.fromConfig(), WalkStart.HEAD, title);
 	}
 
 	/**
@@ -337,6 +349,11 @@ public final class SongBuilder {
 
 	static PastePlan createPastePlan(BlockPos origin, List<EventNote> notes, PasteMode mode,
 			BuildLimits limits, WalkStart start) {
+		return createPastePlan(origin, notes, mode, limits, start, null);
+	}
+
+	static PastePlan createPastePlan(BlockPos origin, List<EventNote> notes, PasteMode mode,
+			BuildLimits limits, WalkStart start, String title) {
 		if (notes.isEmpty()) {
 			throw new IllegalArgumentException(
 				"The build sequence is empty. Move some layers into it first.");
@@ -346,14 +363,17 @@ public final class SongBuilder {
 			throw new IllegalArgumentException(overloadMessage(stats));
 		}
 		Direction forward = Direction.EAST;
-		return withUnreachedMarked(switch (mode) {
+		// The sign last of all, after the marking pass has finished rewriting blocks. It is the one
+		// command in a build that is not a block of the machine, and the one command with spaces in
+		// it, which every pass that reads the list back by splitting on those would choke on.
+		return withTitleSign(withUnreachedMarked(switch (mode) {
 			case COMPACT_CUBE -> createCubePastePlan(origin, forward, notes, limits.maxFloors());
 			case COMPACT -> createCompactPastePlan(origin, forward, notes);
 			case COMPACT_LANE -> createLanePastePlan(origin, forward, notes, limits.laneWidth(),
 				limits.laneFloors(), Layout.STANDARD, PasteMode.COMPACT_LANE, start);
 			case ULTRA_COMPACT_LANE -> bestUltraPlan(origin, forward, notes, limits, start);
 			case LANE -> createStraightPastePlan(origin, forward, notes);
-		});
+		}), title);
 	}
 
 	/**
@@ -453,6 +473,141 @@ public final class SongBuilder {
 			plan.spanX(), plan.spanZ(), plan.mode(), List.copyOf(faults), plan.turns(), plan.moved(),
 			plan.breaches(), plan.recesses(), plan.padding(), plan.nearWall(), plan.farWall(),
 			plan.collisions(), plan.poweredAt());
+	}
+
+	/** What a build with no name to put on it is called. */
+	static final String UNNAMED = "Unnamed composition";
+
+	/** Characters that fit on one line of a sign before the font runs out of room. */
+	static final int SIGN_LINE = 15;
+
+	/** Lines on the front of a sign. */
+	static final int SIGN_LINES = 4;
+
+	/**
+	 * The composition's name, on a sign at the block the machine starts from.
+	 *
+	 * <p>Every build is thirty thousand blocks of grey that looks exactly like every other build, and
+	 * four of them standing in one world are four identical corridors. The name goes where the song
+	 * starts, on the side of the block the first repeater stands on.</p>
+	 *
+	 * <p>Facing negative Z where it can, which is the outward face of the first lane and the one you
+	 * walk up to. It is free in fifty-one of the sixty-one songs in the library and a note block in
+	 * the other ten -- the first chord hangs on both sides of its lane, and on the first lane one of
+	 * those sides is the edge of the build. So the fallback is the face behind the head, which is
+	 * empty in every song there is: nothing is ever built there, because that is where the player
+	 * stands to start the machine. Between the two, every build gets a name.</p>
+	 *
+	 * <p>The one command in a build that is not part of the machine, and the only one with spaces in
+	 * it. It is added last for both reasons: nothing after it reads the list back, and nothing that
+	 * splits a command on spaces has to know about it.</p>
+	 */
+	private static PastePlan withTitleSign(PastePlan plan, String title) {
+		BlockPos stone = null;
+		Set<BlockPos> taken = new java.util.HashSet<>();
+		for (String command : plan.commands()) {
+			String[] parts = command.split(" ");
+			BlockPos at = new BlockPos(Integer.parseInt(parts[1]), Integer.parseInt(parts[2]),
+				Integer.parseInt(parts[3]));
+			taken.add(at);
+			// The first repeater the walk laid, which is the one the player throws a switch at: blocks
+			// come out in the order the signal travels them, so nothing feeds this one.
+			if (stone == null && parts[4].startsWith("minecraft:repeater")) {
+				stone = at.below();
+			}
+		}
+		if (stone == null) {
+			return plan;
+		}
+		BlockPos head = stone;
+		// Never over the machine, whichever face it lands on. A sign that quietly ate a note block
+		// would be a silent note with no cause anybody could ever find.
+		Direction face = Stream.of(Direction.NORTH, Direction.WEST)
+			.filter(side -> !taken.contains(head.relative(side)))
+			.findFirst().orElse(null);
+		if (face == null) {
+			return plan;
+		}
+		BlockPos at = head.relative(face);
+		List<String> commands = new ArrayList<>(plan.commands());
+		commands.add("setblock " + at.getX() + " " + at.getY() + " " + at.getZ()
+			+ " minecraft:oak_wall_sign[facing=" + directionName(face)
+			+ "]{front_text:{messages:[" + String.join(",", signLines(title)) + "]}} replace");
+		return new PastePlan(List.copyOf(commands), plan.width(), plan.depth(), plan.height(),
+			plan.spanX(), plan.spanZ(), plan.mode(), plan.faults(), plan.turns(), plan.moved(),
+			plan.breaches(), plan.recesses(), plan.padding(), plan.nearWall(), plan.farWall(),
+			plan.collisions(), plan.poweredAt());
+	}
+
+	/**
+	 * A title laid out over the four lines of a sign, each one quoted ready for the command.
+	 *
+	 * <p>Words stay whole while they can, because a title read in two pieces is harder than a title
+	 * one word short. When one cannot -- a word longer than a line, or a last line that would drop
+	 * something -- it is split with a hyphen, which reads as a continuation rather than as a
+	 * mistake. Only the very end is given up on, and with an ellipsis so that it says so.</p>
+	 */
+	static List<String> signLines(String title) {
+		String name = title == null || title.isBlank() ? UNNAMED : title.trim();
+		List<String> lines = new ArrayList<>(SIGN_LINES);
+		StringBuilder line = new StringBuilder();
+		for (String word : name.split("\\s+")) {
+			while (!word.isEmpty() && lines.size() < SIGN_LINES) {
+				int room = SIGN_LINE - line.length() - (line.isEmpty() ? 0 : 1);
+				if (word.length() <= room) {
+					line.append(line.isEmpty() ? "" : " ").append(word);
+					word = "";
+					break;
+				}
+				// A hyphen costs one of the characters it is trying to save, so it is only worth it
+				// where enough of the word is left to be worth reading -- otherwise the word simply
+				// starts on the next line.
+				if (room >= 3 && word.length() > SIGN_LINE) {
+					line.append(line.isEmpty() ? "" : " ").append(word, 0, room - 1).append('-');
+					word = word.substring(room - 1);
+				}
+				lines.add(line.toString());
+				line.setLength(0);
+			}
+			if (lines.size() >= SIGN_LINES) {
+				break;
+			}
+		}
+		if (!line.isEmpty() && lines.size() < SIGN_LINES) {
+			lines.add(line.toString());
+		}
+		// What did not fit. An ellipsis rather than a clean edge, because a title that stops early
+		// looks like the name of a different song.
+		if (lines.size() == SIGN_LINES && trimmed(name, lines)) {
+			String last = lines.get(SIGN_LINES - 1);
+			lines.set(SIGN_LINES - 1, (last.length() > SIGN_LINE - 3
+				? last.substring(0, SIGN_LINE - 3) : last).stripTrailing() + "...");
+		}
+		while (lines.size() < SIGN_LINES) {
+			lines.add("");
+		}
+		return lines.stream().map(SongBuilder::quoted).toList();
+	}
+
+	/**
+	 * Whether the lines hold fewer letters of the name than the name has.
+	 *
+	 * <p>Counted without spaces on both sides and without the hyphens the wrapping added, because
+	 * neither is part of the name. Counting them was the whole of a bug: four full lines came out
+	 * longer than the name they were a shortening of, and every over-long title said it fitted.</p>
+	 */
+	private static boolean trimmed(String name, List<String> lines) {
+		int written = lines.stream()
+			.mapToInt(line -> line.replace("-", "").replaceAll("\\s+", "").length()).sum();
+		return written < name.replaceAll("\\s+", "").length();
+	}
+
+	/**
+	 * One line as the command wants it: a quoted string, with the two characters that would end it
+	 * early put out of the way.
+	 */
+	private static String quoted(String line) {
+		return '"' + line.replace("\\", "\\\\").replace("\"", "\\\"") + '"';
 	}
 
 	/**
@@ -4750,7 +4905,7 @@ public final class SongBuilder {
 			// the whole column on the other side empty, so a run occupies its centre and one flank
 			// rather than straddling both -- and every lane spaced three apart then has a clear
 			// column between it and the next. ekran, who found the two rails disagreeing.
-			hangRailNotes(placements, centre, at.noteSide().getOpposite(), hanging, time);
+			hangRailNotes(placements, centre, at.noteSide().getOpposite(), hanging, time, false);
 			if (nextDelay > 0) {
 				set(placements, at.pos(),
 					"minecraft:repeater[facing=" + facing + ",delay=" + nextDelay + "]");
@@ -4774,7 +4929,7 @@ public final class SongBuilder {
 		// ground the walk has not built yet leaves live stone against a slot the next lane's stacked
 		// modules were going to want. The side already built is one {@link #soundedByAnother} can see
 		// the whole of. ekran, reading a floor column in game.
-		hangRailNotes(placements, at.pos(), at.noteSide().getOpposite(), hanging, time);
+		hangRailNotes(placements, at.pos(), at.noteSide().getOpposite(), hanging, time, true);
 		if (nextDelay > 0) {
 			set(placements, at.pos().above(),
 				"minecraft:repeater[facing=" + facing + ",delay=" + nextDelay + "]");
@@ -4840,8 +4995,12 @@ public final class SongBuilder {
 	static boolean RAIL_MOVES_FOR_STACKS = true;
 
 	/** What is left of a chord, hung either side of the cell that drives it, near side first. */
+	/**
+	 * @param laneHeight whether this is a floor column, whose two notes hang at the lane's own floor
+	 *     level. A path column sits a level higher and its notes are ordinary ones.
+	 */
 	private static void hangRailNotes(PlacementPlan placements, BlockPos anchor, Direction near,
-			List<EventNote> notes, int time) {
+			List<EventNote> notes, int time, boolean laneHeight) {
 		List<Direction> sides = List.of(near, near.getOpposite());
 		// Unless the near side is spoken for and the chord is small enough to go the other way. The
 		// near side is the one facing the lane already built, so it is the only one that can have
@@ -4859,7 +5018,7 @@ public final class SongBuilder {
 					+ " had nowhere to hang: a rail column has a centre and two sides");
 				return;
 			}
-			placeNote(placements, anchor.relative(sides.get(index)), notes.get(index));
+			placeNote(placements, anchor.relative(sides.get(index)), notes.get(index), laneHeight);
 		}
 	}
 
@@ -4990,7 +5149,9 @@ public final class SongBuilder {
 		Direction arrival = null;
 		for (Direction side : List.of(lane.noteSide(), lane.noteSide().getOpposite())) {
 			BlockPos behind = corner.relative(side);
-			if (placements.describeBlock(behind).startsWith("minecraft:stone")
+			// Exactly stone, not merely starting with it. A bus block is laid as the bare string, and
+			// there are half-blocks in a build now whose names begin the same way.
+			if ("minecraft:stone".equals(placements.describeBlock(behind))
 					&& placements.describeBlock(behind.above())
 						.startsWith("minecraft:redstone_wire")) {
 				arrival = side;
@@ -7464,11 +7625,13 @@ public final class SongBuilder {
 				placements.support(instrument.below(), "minecraft:stone");
 			}
 			placeNoteBlock(placements, centre.relative(out), relay);
+			// The four low notes, which are the ones sitting at the lane's own floor level.
 			if (slots.front(side) != null) {
-				placeNote(placements, instrument.relative(travel), slots.front(side));
+				placeNote(placements, instrument.relative(travel), slots.front(side), true);
 			}
 			if (slots.back(side) != null) {
-				placeNote(placements, instrument.relative(travel.getOpposite()), slots.back(side));
+				placeNote(placements, instrument.relative(travel.getOpposite()), slots.back(side),
+					true);
 			}
 		}
 		return lane.ahead(2);
@@ -8409,19 +8572,59 @@ public final class SongBuilder {
 	}
 
 	private static void placeNote(PlacementPlan placements, BlockPos notePos, EventNote note) {
+		placeNote(placements, notePos, note, false);
+	}
+
+	/**
+	 * @param laneHeight whether this note hangs at the lane's own floor level, where its instrument
+	 *     block is laid as a half-block instead of a full one
+	 */
+	private static void placeNote(PlacementPlan placements, BlockPos notePos, EventNote note,
+			boolean laneHeight) {
 		if (note.effect() != null) {
 			placeEffect(placements, notePos, note);
 			return;
 		}
-		set(placements, notePos.below(), note.instrumentBlock());
-		if (FALLING_INSTRUMENT_BLOCKS.contains(note.instrumentBlock())) {
+		String instrument = note.instrumentBlock();
+		String slab = laneHeight ? LANE_HEIGHT_SLABS.get(instrument) : null;
+		set(placements, notePos.below(), slab == null ? instrument : slab);
+		if (FALLING_INSTRUMENT_BLOCKS.contains(instrument)) {
 			// Sand and friends drop the moment /setblock places them over air, taking the note
 			// block's instrument with them. Fill the space beneath, but never overwrite: anything
 			// already planned there is load-bearing and already does the supporting.
-			placements.support(notePos.below().below(), "minecraft:stone");
+			//
+			// A top slab holds it up as well as a full block does -- what makes a falling block fall
+			// is air or something replaceable underneath, and a slab is neither -- and it is a floor
+			// short of blocking the way through, which is the whole of why it is one.
+			placements.support(notePos.below().below(), "minecraft:stone_slab[type=top]");
 		}
 		placeNoteBlock(placements, notePos, note);
 	}
+
+	/**
+	 * The half-block an instrument sits on where its note hangs at the lane's own floor level.
+	 *
+	 * <p>Two reasons, and the second is the one that decides which slots are in here. Half a block is
+	 * half a floor you can see through and walk between, and the low slots are the only ones at the
+	 * height where that helps. But a slab cannot be strongly powered, and the instrument blocks
+	 * further up a stacked module are not decoration -- the two beside the centre are what relay its
+	 * pulse out to the flanks. So the substitution stops exactly where the block stops being a floor
+	 * and starts being a wire: the four low notes of a stacked module and the two of a floor rail
+	 * column, and nothing above them.</p>
+	 *
+	 * <p>Only the instruments that have a half-block at all, which is why this is a lookup and not a
+	 * rule. Everything else -- a bell's gold, a chime's ice, a banjo's hay -- stays a full block and
+	 * is none the worse for it. The game confirms each of these sounds the same as what it replaces
+	 * ({@link com.fastnoteblocks.client.compat.SlabInstrumentTest}); a slab that plays a different
+	 * instrument would be a whole line of a song retuned by a floor.</p>
+	 */
+	private static final Map<String, String> LANE_HEIGHT_SLABS = Map.of(
+		"minecraft:oak_planks", "minecraft:oak_slab[type=top]",
+		"minecraft:stone", "minecraft:stone_slab[type=top]",
+		"minecraft:waxed_copper_block", "minecraft:waxed_cut_copper_slab[type=top]",
+		"minecraft:waxed_exposed_copper", "minecraft:waxed_exposed_cut_copper_slab[type=top]",
+		"minecraft:waxed_weathered_copper", "minecraft:waxed_weathered_cut_copper_slab[type=top]",
+		"minecraft:waxed_oxidized_copper", "minecraft:waxed_oxidized_cut_copper_slab[type=top]");
 
 	/**
 	 * The note block itself, the air it needs over it, and the record that it owes its event a note.

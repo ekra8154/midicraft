@@ -5554,7 +5554,7 @@ public final class ComposerScreen extends Screen {
 				pasteMode(), mode -> {
 			SongBuilder.PastePlan plan;
 			try {
-				plan = SongBuilder.plan(minecraft, config.tracks(), mode);
+				plan = SongBuilder.plan(minecraft, config.tracks(), mode, project().name());
 			} catch (IllegalArgumentException refused) {
 				minecraft.gui.setScreen(this);
 				showResult(Component.literal(refused.getMessage())
