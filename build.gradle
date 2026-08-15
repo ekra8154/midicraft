@@ -95,6 +95,14 @@ tasks.register('sweepTest', Test) {
 	useJUnitPlatform {
 		includeTags 'sweep'
 	}
+	// Anything -Dfault.* reaches the test JVM, so a probe can be re-aimed from the command line
+	// instead of by editing it. Only that prefix: forwarding the lot would drag the daemon's own
+	// properties across and change what the probes are measuring.
+	System.properties.each { key, value ->
+		if (key.toString().startsWith('fault.')) {
+			systemProperty(key.toString(), value)
+		}
+	}
 	consoleOnlyLogging(it)
 	outputs.upToDateWhen { false }
 }

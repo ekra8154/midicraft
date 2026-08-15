@@ -1,0 +1,398 @@
+package com.fastnoteblocks.client.compat;
+
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
+
+/**
+ * Any fault in any build, drawn rather than listed.
+ *
+ * <p>{@link BreachView} does this for one fault kind in one paster. This does it for all three --
+ * dead wire, wrong note, breach -- in whichever mode is asked for, because the three are not the
+ * same kind of wrong and a session hunting one usually turns up the others. A breach is a lane
+ * outside the width it promised: visible, and harmless to the music. A wrong note is a note block
+ * something else sounds, at a tick nobody wrote. A dead wire is wire the signal never crosses, which
+ * silences everything downstream and which nothing but reading the blocks back can find.</p>
+ *
+ * <p>Drawing rather than listing is the whole point, and it is ekran's. Two long passes went into
+ * reading {@code setblock} lists and reasoning about redstone rules for one dead wire and reached
+ * the wrong explanation twice; ekran read the same fault off a single rendered slice immediately --
+ * <i>"a wire on both sides of a block. a wire can't be soft powered"</i>. So the rule this class
+ * exists to enforce is: draw it <b>before</b> forming a theory, and draw the shape rather than
+ * quoting the coordinates.</p>
+ *
+ * <p>What to look for, per kind:</p>
+ * <ul>
+ * <li><b>Dead wire</b> -- wire, block, wire. A block powered only by dust is soft powered: it still
+ * sounds the notes hung on it, so they read as reached, and it cannot light the dust on its far
+ * side. Every dead wire in this project has been that shape. Then check where the repeater that
+ * should have drawn the signal out went -- often up a staircase onto the next floor.</li>
+ * <li><b>Wrong note</b> -- the fault text says which side; the slice says which <i>level</i>, which
+ * the text cannot. Along the lane is one module reaching into the next, across it is the corridor
+ * alongside, and the two want opposite fixes.</li>
+ * <li><b>Breach</b> -- the last columns against the wall, and the staircase that wanted them.</li>
+ * </ul>
+ */
+final class FaultView {
+	private FaultView() {
+	}
+
+	/** Floors stand four apart, and a lane occupies three of them. */
+	private static final int FLOOR_HEIGHT = 4;
+
+	/**
+	 * A build stood up as blocks, and what the machine reader made of them.
+	 *
+	 * @param laid the command index each cell was first written at, which is walk order -- and walk
+	 *     order is signal order within a structure, so it is what says which of two faults is
+	 *     upstream of the other
+	 * @param named whether shapes were named, which costs the build its collision throw. See
+	 *     {@link #of}.
+	 */
+	record Build(String name, SongBuilder.PasteMode mode, int width, int floors,
+			SongBuilder.PastePlan plan, Map<BlockPos, BlockState> world, Map<BlockPos, Integer> laid,
+			NoteMachineReader.Reading reading, int ground, boolean named) {
+
+		BlockState at(BlockPos position) {
+			return world.getOrDefault(position, Blocks.AIR.defaultBlockState());
+		}
+
+		/** The floor a block belongs to, which is the level a lane's own path runs at. */
+		int floorOf(int y) {
+			return ground + Math.floorDiv(y - ground, FLOOR_HEIGHT) * FLOOR_HEIGHT;
+		}
+
+		String where() {
+			return name + " " + width + "w x " + floors + "f, " + mode.label();
+		}
+	}
+
+	/**
+	 * The build to look at, with the two flags that decide what there is to see set deliberately.
+	 *
+	 * <p>{@code MARK_UNREACHED} is off for the duration. A marked build turns every note the signal
+	 * never reached into a sea lantern, which is what makes a dead wire visible in game and invisible
+	 * here: a sea lantern is not a note block, so the reader comes back saying everything left was
+	 * reached.</p>
+	 *
+	 * <p>{@code nameShapes} is the caller's, and it is <b>off by default on purpose</b>. Turning it
+	 * on is not free instrumentation: it stops a layout collision throwing, so the first claim on a
+	 * cell wins and the walk carries on. That is usually what you want -- a build to look at beats an
+	 * exception -- but it is a different build. It matters most in v2, whose trial-and-rollback
+	 * <i>depends</i> on that throw to fall back to the conservative shape, so a v2 build made with
+	 * names on has quietly skipped every fallback it would have taken. Ask for names when reading a
+	 * wrong note, whose {@code whose} clause needs them; leave them off when the question is whether
+	 * this build is right.</p>
+	 */
+	static Build of(String song, SongBuilder.PasteMode mode, int width, int floors, int maxFloors,
+			boolean nameShapes) throws Exception {
+		return of(song, BreachView.song(song), mode, width, floors, maxFloors, nameShapes);
+	}
+
+	static Build of(String name, List<SongBuilder.EventNote> notes, SongBuilder.PasteMode mode,
+			int width, int floors, int maxFloors, boolean nameShapes) {
+		boolean marking = SongBuilder.MARK_UNREACHED;
+		boolean naming = SongBuilder.MARK_COLLISIONS;
+		SongBuilder.PastePlan plan;
+		try {
+			SongBuilder.MARK_UNREACHED = false;
+			SongBuilder.MARK_COLLISIONS = nameShapes;
+			plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0), notes, mode,
+				new SongBuilder.BuildLimits(maxFloors, width, floors));
+		} finally {
+			SongBuilder.MARK_UNREACHED = marking;
+			SongBuilder.MARK_COLLISIONS = naming;
+		}
+		Map<BlockPos, BlockState> world = new LinkedHashMap<>();
+		Map<BlockPos, Integer> laid = new LinkedHashMap<>();
+		int ground = Integer.MAX_VALUE;
+		int index = 0;
+		for (String command : plan.commands()) {
+			String[] word = command.split(" ");
+			BlockPos at = new BlockPos(Integer.parseInt(word[1]), Integer.parseInt(word[2]),
+				Integer.parseInt(word[3]));
+			world.put(at, BreachView.parse(word[4]));
+			laid.putIfAbsent(at, index++);
+			ground = Math.min(ground, at.getY());
+		}
+		return new Build(name, mode, width, floors, plan, world, laid,
+			BreachView.readBack(name, plan), ground, nameShapes);
+	}
+
+	// ---- the three faults -------------------------------------------------------------------
+
+	/**
+	 * A note the signal never reaches, and the last one it did reach before it.
+	 *
+	 * <p>Only the earliest in walk order is worth looking at: a break puts everything the walk laid
+	 * after it in its shadow, so the rest are that one's shadow rather than faults of their own.
+	 * The live frontier is the other half of the picture -- a run built on its own reads clean, so
+	 * what stopped this one is upstream of it, and the frontier is where upstream ends.</p>
+	 */
+	record Dead(BlockPos at, BlockPos frontier, int shadowed) {
+		@Override
+		public String toString() {
+			return "dead from " + say(at) + ", last live note " + say(frontier) + ", "
+				+ shadowed + " notes in its shadow";
+		}
+	}
+
+	static List<Dead> deadWires(Build build) {
+		if (build.reading().unreachedAt().isEmpty()) {
+			return List.of();
+		}
+		List<BlockPos> unreached = new ArrayList<>(build.reading().unreachedAt());
+		unreached.sort((a, b) -> Integer.compare(order(build, a), order(build, b)));
+		BlockPos first = unreached.get(0);
+		Set<BlockPos> dead = Set.copyOf(build.reading().unreachedAt());
+		BlockPos frontier = first;
+		int bestOrder = -1;
+		for (Map.Entry<BlockPos, Integer> cell : build.laid().entrySet()) {
+			if (cell.getValue() >= order(build, first) || dead.contains(cell.getKey())
+					|| !build.at(cell.getKey()).is(Blocks.NOTE_BLOCK)) {
+				continue;
+			}
+			if (cell.getValue() > bestOrder) {
+				bestOrder = cell.getValue();
+				frontier = cell.getKey();
+			}
+		}
+		return List.of(new Dead(first, frontier, unreached.size()));
+	}
+
+	private static int order(Build build, BlockPos at) {
+		return build.laid().getOrDefault(at, Integer.MAX_VALUE);
+	}
+
+	/**
+	 * A note block something else sounds, read out of the plan's own fault list.
+	 *
+	 * <p>Parsed rather than recomputed, so that what is drawn is what the layout check complained
+	 * about and the two can never drift. A fault naming no neighbour -- "has nothing to set it off"
+	 * -- carries a null aggressor and is still worth drawing: the missing trigger is the thing to
+	 * look for.</p>
+	 */
+	record Wrong(BlockPos at, BlockPos from, String text) {
+		@Override
+		public String toString() {
+			return text;
+		}
+	}
+
+	static List<Wrong> wrongNotes(Build build) {
+		List<Wrong> found = new ArrayList<>();
+		for (String fault : build.plan().faults()) {
+			if (!fault.startsWith("the note at ")) {
+				continue;
+			}
+			BlockPos at = positionAfter(fault, "the note at ");
+			BlockPos from = fault.contains(" from the ") ? positionAfter(fault, " at ",
+				fault.indexOf(" from the ")) : null;
+			if (at != null) {
+				found.add(new Wrong(at, from, fault));
+			}
+		}
+		return found;
+	}
+
+	/** Every lane that finished outside its walls, worst first, with the turn that did it. */
+	record Breach(BreachView.Overrun run, BlockPos turn) {
+		@Override
+		public String toString() {
+			return run + (turn == null ? "" : "   turned at " + say(turn));
+		}
+	}
+
+	static List<Breach> breaches(Build build) {
+		List<Breach> found = new ArrayList<>();
+		for (BreachView.Overrun run : BreachView.overruns(build.plan())) {
+			BlockPos turn = null;
+			for (BlockPos candidate : build.plan().turns()) {
+				boolean outside = candidate.getX() > build.plan().farWall()
+					|| candidate.getX() < build.plan().nearWall();
+				if (outside && Math.abs(candidate.getZ() - run.z()) <= 1
+						&& build.floorOf(candidate.getY()) == build.floorOf(run.y())) {
+					turn = candidate;
+					break;
+				}
+			}
+			found.add(new Breach(run, turn));
+		}
+		return found;
+	}
+
+	// ---- drawing ----------------------------------------------------------------------------
+
+	/**
+	 * A box of the build, or a line saying why not.
+	 *
+	 * <p>Refused rather than truncated when the box is too big: a diagram nobody will read is worse
+	 * than an admission that the window was wrong, because it looks like an answer.</p>
+	 */
+	static String draw(Build build, BlockPos from, BlockPos to, AsciiDiagram.View view) {
+		int volume = AsciiDiagram.volume(from, to);
+		if (volume > AsciiDiagram.MAX_BLOCKS) {
+			return "   (window of " + volume + " blocks is past the " + AsciiDiagram.MAX_BLOCKS
+				+ " a diagram is worth reading -- narrow it)";
+		}
+		return AsciiDiagram.render(build::at, from, to, view, AsciiDiagram.Shape.CODE);
+	}
+
+	/**
+	 * The box around one or two cells, padded by how far the shape reaches rather than by a guess.
+	 *
+	 * <p>Measured from the lane's own floor upward rather than from whichever block happens to be
+	 * highest, because the block that stands out is as likely to be the dust on top of a bus as the
+	 * path, and a window hung off it starts two levels above the lane and shows none of it.</p>
+	 */
+	static String around(Build build, BlockPos one, BlockPos two, AsciiDiagram.View view,
+			int eitherX, int eitherZ, int below, int above) {
+		BlockPos other = two == null ? one : two;
+		int floor = build.floorOf(Math.min(one.getY(), other.getY()));
+		return draw(build,
+			new BlockPos(Math.min(one.getX(), other.getX()) - eitherX, floor - below,
+				Math.min(one.getZ(), other.getZ()) - eitherZ),
+			new BlockPos(Math.max(one.getX(), other.getX()) + eitherX, floor + above,
+				Math.max(one.getZ(), other.getZ()) + eitherZ),
+			view);
+	}
+
+	// ---- the page -----------------------------------------------------------------------------
+
+	/** Everything wrong with one build, each fault drawn, worst kind first. */
+	static void report(Build build, int perKind) {
+		System.out.println();
+		System.out.println("======== " + build.where() + " ========");
+		System.out.println("   walls x=" + build.plan().nearWall() + ".." + build.plan().farWall()
+			+ "   spans x " + build.plan().spanX() + " z " + build.plan().spanZ()
+			+ "   breach blocks=" + build.plan().breaches().stream().mapToInt(Integer::intValue).sum()
+			+ " wrong=" + build.plan().wrongNotes()
+			+ " dead=" + build.reading().unreachedNotes());
+		if (build.named()) {
+			System.out.println("   shapes named, so collisions did not throw: "
+				+ build.plan().collisions().size() + " cells were held by whoever got there first"
+				+ (build.mode() == SongBuilder.PasteMode.ULTRA_COMPACT_LANE_V2
+					? " -- and v2's trial fallback never fired, so this is not the build that ships"
+					: ""));
+		}
+		deadLines(build, perKind);
+		wrong(build, perKind);
+		outside(build, perKind);
+	}
+
+	private static void deadLines(Build build, int perKind) {
+		List<Dead> dead = deadWires(build);
+		if (dead.isEmpty()) {
+			System.out.println("   no dead wire: every note the build holds is reached");
+			return;
+		}
+		for (Dead one : dead.subList(0, Math.min(perKind, dead.size()))) {
+			System.out.println();
+			System.out.println("#### DEAD WIRE -- " + one);
+			System.out.println("   look for wire, block, wire: a block lit only by dust is soft "
+				+ "powered and lights no dust of its own");
+			// Along the lane, because that is the axis a run of dust lies on and the break is a
+			// three-cell shape along it. The frontier and the break are usually the same lane, so one
+			// window holds both.
+			System.out.println(around(build, one.frontier(), one.at(), AsciiDiagram.View.NORTH,
+				2, 0, 1, 4));
+			if (one.frontier().getZ() != one.at().getZ()) {
+				System.out.println("   the two are in different lanes, so from above as well:");
+				System.out.println(around(build, one.frontier(), one.at(), AsciiDiagram.View.TOP,
+					2, 1, 0, 3));
+			}
+		}
+	}
+
+	private static void wrong(Build build, int perKind) {
+		List<Wrong> wrong = wrongNotes(build);
+		if (wrong.isEmpty()) {
+			System.out.println("   no wrong note: every note is set off on its own tick and no other");
+			return;
+		}
+		for (Wrong one : wrong.subList(0, Math.min(perKind, wrong.size()))) {
+			System.out.println();
+			System.out.println("#### WRONG NOTE -- " + one);
+			if (!build.named()) {
+				System.out.println("   (build again with names on to have the fault say which shape "
+					+ "laid each end -- but read the caveat on FaultView.of first)");
+			}
+			// Both views, and neither is optional. The levels are what the fault text cannot say, and
+			// which lane the other end is in is what tells a module reaching into the next from the
+			// corridor alongside -- and those two want opposite fixes.
+			System.out.println("   along the lane, which shows the levels:");
+			System.out.println(around(build, one.at(), one.from(), AsciiDiagram.View.NORTH,
+				3, 0, 1, 4));
+			System.out.println("   from above, which shows which lane the other end is in:");
+			System.out.println(around(build, one.at(), one.from(), AsciiDiagram.View.TOP,
+				3, 2, 0, 3));
+		}
+	}
+
+	private static void outside(Build build, int perKind) {
+		List<Breach> breaches = breaches(build);
+		if (breaches.isEmpty()) {
+			System.out.println("   no breach: every lane stayed inside the width it promised");
+			return;
+		}
+		for (Breach one : breaches.subList(0, Math.min(perKind, breaches.size()))) {
+			System.out.println();
+			System.out.println("#### BREACH -- " + one);
+			for (String fault : build.plan().faults()) {
+				if (fault.startsWith("a lane turned")) {
+					System.out.println("   fault " + fault);
+				}
+			}
+			BlockPos at = new BlockPos(one.run().x(), one.run().y(), one.run().z());
+			// Out to both walls, not merely around the overrun, because a breach is a lane against a
+			// wall and the wall has to be in the picture for the number of columns to mean anything.
+			BlockPos wallward = new BlockPos(
+				one.run().nearSide() ? build.plan().farWall() : build.plan().nearWall(),
+				one.run().y(), one.run().z());
+			System.out.println("   from above, the corridor and both walls:");
+			System.out.println(around(build, at, wallward, AsciiDiagram.View.TOP, 2, 2, 0, 3));
+			System.out.println("   along the lane, which shows the staircase that wanted the columns:");
+			System.out.println(around(build, at, wallward, AsciiDiagram.View.NORTH, 2, 0, 1, 6));
+		}
+	}
+
+	// ---- odds and ends ------------------------------------------------------------------------
+
+	/** Space separated, because ekran pastes these straight into /tp. */
+	static String say(BlockPos at) {
+		return at.getX() + " " + at.getY() + " " + at.getZ();
+	}
+
+	private static BlockPos positionAfter(String text, String marker) {
+		return positionAfter(text, marker, 0);
+	}
+
+	/**
+	 * The three numbers following a marker, or null.
+	 *
+	 * <p>Null rather than a throw: the fault list is prose and it has gained clauses twice already,
+	 * so a parser that stops the run when the wording moves is worse than one that says it could not
+	 * read this line.</p>
+	 */
+	private static BlockPos positionAfter(String text, String marker, int startAt) {
+		int at = text.indexOf(marker, startAt);
+		if (at < 0) {
+			return null;
+		}
+		String[] word = text.substring(at + marker.length()).strip().split(" ");
+		if (word.length < 3) {
+			return null;
+		}
+		try {
+			return new BlockPos(Integer.parseInt(word[0]), Integer.parseInt(word[1]),
+				Integer.parseInt(word[2]));
+		} catch (NumberFormatException notAPosition) {
+			return null;
+		}
+	}
+}
