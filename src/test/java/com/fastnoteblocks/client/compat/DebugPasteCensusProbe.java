@@ -71,6 +71,59 @@ class DebugPasteCensusProbe {
 		return named == null && block.startsWith("minecraft:dragon_head") ? "MISSEDNOTE" : named;
 	}
 
+	/**
+	 * Where in the library the three rare marks can actually be seen.
+	 *
+	 * <p>A wrong note, a note with nothing to set it off and a run of dead wire are all things a
+	 * good build does not have, which makes them the marks most likely to be shipped never having
+	 * fired. This looks for a configuration that shows each, so the regression test has something
+	 * real to pin itself to instead of a build somebody hoped was broken.</p>
+	 */
+	@Test
+	void whereTheRareMarksLive() throws Exception {
+		SongBuilder.DEBUG_PASTE = true;
+		Path songs = Path.of("run", "config", "fast-noteblocks", "songs");
+		int found = 0;
+		try (var listing = Files.list(songs)) {
+			for (Path file : listing.filter(path -> path.toString().endsWith(".json")).sorted()
+					.toList()) {
+				List<SongBuilder.EventNote> notes;
+				try {
+					notes = song(file.getFileName().toString());
+				} catch (RuntimeException unreadable) {
+					continue;
+				}
+				if (notes.isEmpty()) {
+					continue;
+				}
+				for (int[] size : new int[][] {{12, 1}, {12, 2}, {16, 1}, {8, 2}, {40, 3}, {24, 6}}) {
+					SongBuilder.PastePlan plan;
+					try {
+						plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0), notes,
+							SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+							new SongBuilder.BuildLimits(16, size[0], size[1]));
+					} catch (RuntimeException refused) {
+						continue;
+					}
+					Map<String, Integer> census = new TreeMap<>();
+					for (String command : plan.commands()) {
+						String mark = mark(command.split(" ", 5)[4].replace(" replace", ""));
+						if (mark != null && mark.equals(mark.toUpperCase(java.util.Locale.ROOT))) {
+							census.merge(mark, 1, Integer::sum);
+						}
+					}
+					census.remove("BREACH");
+					if (!census.isEmpty()) {
+						found++;
+						System.out.println("RARE " + file.getFileName() + " " + size[0] + "x"
+							+ size[1] + "  " + census);
+					}
+				}
+			}
+		}
+		System.out.println("RARE " + found + " configurations show a rare mark");
+	}
+
 	@Test
 	void census() throws Exception {
 		String[] songs = {"illit-do-the-dance.json", "deltarune-ch-4-guardian.json",

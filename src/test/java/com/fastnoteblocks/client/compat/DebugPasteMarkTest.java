@@ -173,6 +173,64 @@ class DebugPasteMarkTest {
 	}
 
 	/**
+	 * That the three marks a clean build never shows actually appear on a build that earns them.
+	 *
+	 * <p>The shape colours are on every block of every build and would be noticed the first time
+	 * anybody looked. These are the opposite: a wrong note and a note with nothing to set it off are
+	 * both things a good build has none of, and both are only ever wanted on the day something has
+	 * gone wrong -- which is the worst possible day to find out the mark was never wired up.</p>
+	 *
+	 * <p>There is no broken build to borrow. Sixty-one songs at six widths each were swept and not
+	 * one of them shows any of the three, which is the state the layout work has got the library
+	 * into and not something to undo for a test. So the fault is made rather than found: {@link
+	 * SongBuilder#RAIL_MOVES_FOR_STACKS} is the guard that moves a rail's single note off the side a
+	 * stacked neighbour reaches into, and its own comment says what happens without it -- the note
+	 * "sounds a stacked chord's tick instead of its own", which is a wrong note by construction.
+	 * Turning it off is the cheapest honest way to have one.</p>
+	 */
+	@Test
+	void theRareMarksAreReallyThere() throws Exception {
+		SongBuilder.DEBUG_PASTE = true;
+		SongBuilder.RAIL_MOVES_FOR_STACKS = false;
+		SongBuilder.PastePlan plan;
+		try {
+			// The song the rails actually run in: a third of its coloured stone is rail.
+			plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0),
+				song("all-of-the-lights-kanye-west.json"), SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+				LIMITS);
+		} finally {
+			SongBuilder.RAIL_MOVES_FOR_STACKS = true;
+		}
+		Map<String, Integer> census = new TreeMap<>();
+		for (String command : plan.commands()) {
+			String mark = markOf(command.split(" ", 5)[4].replace(" replace", ""));
+			if (mark != null) {
+				census.merge(mark, 1, Integer::sum);
+			}
+		}
+		System.out.println("RAREMARKS wrong=" + plan.wrongNotes() + " faults=" + plan.faults().size()
+			+ "  " + census);
+		plan.faults().stream().limit(4).forEach(fault -> System.out.println("   " + fault));
+		long silent = plan.faults().stream()
+			.filter(fault -> fault.endsWith("has nothing to set it off")).count();
+		long dead = plan.faults().stream()
+			.filter(fault -> fault.contains("never be triggered")).count();
+		// A note may be both early and doubled, and is one block either way, so the marks are counted
+		// against the notes rather than against the faults.
+		long wrong = plan.faults().stream().filter(fault -> fault.startsWith("the note at "))
+			.filter(fault -> !fault.endsWith("has nothing to set it off"))
+			.map(fault -> fault.substring(0, fault.indexOf(" belongs to tick "))).distinct().count();
+		assertTrue(wrong > 0, "turning the rail guard off no longer makes a wrong note, so this test "
+			+ "is checking nothing: " + plan.faults().size() + " faults");
+		assertEquals(wrong, census.getOrDefault("wrong note", 0).longValue(),
+			"a note that sounds at the wrong moment should be a copper bulb: " + census);
+		assertEquals(silent, census.getOrDefault("missed note", 0).longValue(),
+			"a note with nothing to set it off should wear a head: " + census);
+		assertTrue(dead == 0 || census.getOrDefault("dead wire", 0) > 0,
+			"the build has dead wire and none of it is marked: " + census);
+	}
+
+	/**
 	 * That a note is only ever recoloured where its sound does not depend on it.
 	 *
 	 * <p>A note block reads its instrument off the block underneath, so the one thing the colouring

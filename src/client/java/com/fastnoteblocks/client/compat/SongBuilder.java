@@ -503,27 +503,28 @@ public final class SongBuilder {
 	 * splits a command on spaces has to know about it.</p>
 	 */
 	private static PastePlan withTitleSign(PastePlan plan, String title) {
-		BlockPos stone = null;
-		Set<BlockPos> taken = new java.util.HashSet<>();
+		BlockPos head = null;
 		for (String command : plan.commands()) {
-			String[] parts = command.split(" ");
-			BlockPos at = new BlockPos(Integer.parseInt(parts[1]), Integer.parseInt(parts[2]),
-				Integer.parseInt(parts[3]));
-			taken.add(at);
 			// The first repeater the walk laid, which is the one the player throws a switch at: blocks
 			// come out in the order the signal travels them, so nothing feeds this one.
-			if (stone == null && parts[4].startsWith("minecraft:repeater")) {
-				stone = at.below();
+			String[] parts = command.split(" ", 5);
+			if (parts[4].startsWith("minecraft:repeater")) {
+				head = new BlockPos(Integer.parseInt(parts[1]), Integer.parseInt(parts[2]),
+					Integer.parseInt(parts[3])).below();
+				break;
 			}
 		}
-		if (stone == null) {
+		if (head == null) {
 			return plan;
 		}
-		BlockPos head = stone;
 		// Never over the machine, whichever face it lands on. A sign that quietly ate a note block
-		// would be a silent note with no cause anybody could ever find.
+		// would be a silent note with no cause anybody could ever find. Asked of the two cells rather
+		// than by collecting every position first: this runs on plans that are only being measured --
+		// the build screen forecasts a dozen of them a keystroke -- and a set of forty thousand
+		// positions to answer two questions is a set nobody needs.
+		BlockPos stone = head;
 		Direction face = Stream.of(Direction.NORTH, Direction.WEST)
-			.filter(side -> !taken.contains(head.relative(side)))
+			.filter(side -> !holds(plan, stone.relative(side)))
 			.findFirst().orElse(null);
 		if (face == null) {
 			return plan;
@@ -537,6 +538,12 @@ public final class SongBuilder {
 			plan.spanX(), plan.spanZ(), plan.mode(), plan.faults(), plan.turns(), plan.moved(),
 			plan.breaches(), plan.recesses(), plan.padding(), plan.nearWall(), plan.farWall(),
 			plan.collisions(), plan.poweredAt());
+	}
+
+	/** Whether the build puts anything at all in a cell, air included. */
+	private static boolean holds(PastePlan plan, BlockPos at) {
+		String prefix = "setblock " + at.getX() + " " + at.getY() + " " + at.getZ() + " ";
+		return plan.commands().stream().anyMatch(command -> command.startsWith(prefix));
 	}
 
 	/**
@@ -4909,7 +4916,7 @@ public final class SongBuilder {
 			if (nextDelay > 0) {
 				set(placements, at.pos(),
 					"minecraft:repeater[facing=" + facing + ",delay=" + nextDelay + "]");
-				set(placements, at.pos().below(), "minecraft:stone");
+				set(placements, at.pos().below(), UNDERFLOOR);
 			} else if (harp == null) {
 				// The floor under a centre the run has stopped driving. Only where that centre is a
 				// stone: a note block plays what it stands on, and filling the floor under one read
@@ -7605,7 +7612,7 @@ public final class SongBuilder {
 			"minecraft:repeater[facing=" + repeaterFacing(travel) + ",delay=" + triggerDelay + "]");
 		BlockPos centre = cursor.relative(travel).above();
 		BlockPos cross = centre.below();
-		set(placements, cross.below(), "minecraft:stone");
+		set(placements, cross.below(), UNDERFLOOR);
 		set(placements, cross, STACKED_CROSS);
 		if (slots.centre() == null) {
 			set(placements, centre, "minecraft:stone");
@@ -7622,7 +7629,7 @@ public final class SongBuilder {
 			BlockPos instrument = cross.relative(out);
 			placements.powered(instrument, conductingInstrumentBlock(relay), time);
 			if (FALLING_INSTRUMENT_BLOCKS.contains(relay.instrumentBlock())) {
-				placements.support(instrument.below(), "minecraft:stone");
+				placements.support(instrument.below(), UNDERFLOOR);
 			}
 			placeNoteBlock(placements, centre.relative(out), relay);
 			// The four low notes, which are the ones sitting at the lane's own floor level.
@@ -8596,10 +8603,27 @@ public final class SongBuilder {
 			// A top slab holds it up as well as a full block does -- what makes a falling block fall
 			// is air or something replaceable underneath, and a slab is neither -- and it is a floor
 			// short of blocking the way through, which is the whole of why it is one.
-			placements.support(notePos.below().below(), "minecraft:stone_slab[type=top]");
+			placements.support(notePos.below().below(), UNDERFLOOR);
 		}
 		placeNoteBlock(placements, notePos, note);
 	}
+
+	/**
+	 * Everything a build lays in the level below the lane, which is nothing but floor.
+	 *
+	 * <p>Four things end up there and not one of them is machinery: the block a falling instrument
+	 * needs under it, the block the stacked cross's dust sits on, the block the bottom rail's
+	 * repeater stands on, and the instrument blocks of the notes hanging at lane level. All four are
+	 * half-blocks now, which is what makes a floor something you can see down through and walk
+	 * between rather than a solid ceiling over the floor below.</p>
+	 *
+	 * <p>Safe there and nowhere else, for the reason ekran gave: a slab cannot be strongly powered.
+	 * Nothing in this level is ever asked to carry the signal -- a falling block's prop holds it up,
+	 * the cross's floor holds up dust, the rail's floor holds up a repeater, and a repeater does not
+	 * care what it stands on. One level higher and the same substitution would silence a module,
+	 * because that is where the blocks that relay a pulse out to the flanks live.</p>
+	 */
+	private static final String UNDERFLOOR = "minecraft:stone_slab[type=top]";
 
 	/**
 	 * The half-block an instrument sits on where its note hangs at the lane's own floor level.
@@ -9524,7 +9548,11 @@ public final class SongBuilder {
 			// Silent, and lit so it is findable down a corridor. Nothing downstream loses anything by
 			// it: a note hangs off the side of the wire and never carries it, so a note block swapped
 			// for something that conducts nothing still leaves every note after it sounding.
-			if (wrongNotesAt.contains(at)) {
+			//
+			// Note blocks only. A sound effect is two cells that belong together -- a door has a top
+			// half, a piston has something to push -- and replacing the lower one leaves the other
+			// half of it standing on nothing.
+			if (block.startsWith("minecraft:note_block") && wrongNotesAt.contains(at)) {
 				return "minecraft:waxed_copper_bulb[lit=true]";
 			}
 			// The air a note block insists on, which a head may stand in without silencing it. Only
