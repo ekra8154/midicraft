@@ -2470,10 +2470,17 @@ public final class SongBuilder {
 			// again at once and the walk would climb the whole build without laying a note.
 			boolean wantsTurn = laneStarted && overshoots;
 			// Said to the builders, for the one shape that has to know. A simple tail is read by the
-			// repeater standing in front of it, and a lane that turns here does not put one there --
-			// it climbs, and the repeater goes up onto the next floor, leaving the tail driving
+			// repeater standing in front of it, and a lane that turns does not put one there -- it
+			// climbs, and the repeater is built at the top of the staircase, leaving the tail driving
 			// nothing. ekran read exactly that off a paste at 16 wide over three floors.
-			placements.turnAhead(wantsTurn);
+			//
+			// Asked of {@code reaches} and not only of {@code wantsTurn}, which is a whole event too
+			// late: wantsTurn says *this* chord overshoots and so the lane turns before laying it, and
+			// a tail laid now is stranded by the turn decided at the *next* event, when it is already
+			// down. reaches is the same fact one event earlier -- this chord ends on the wall or a
+			// column short of it, so the lane closes after it -- and it is the moment the tail can
+			// still choose to be a bus.
+			placements.turnAhead(wantsTurn || reaches);
 			// What the cut is offered on. The same question in v1, one column earlier in v2.
 			boolean cutOffered = reaches;
 			// One tick has to be left for the next event's own repeater, which is the only thing that
