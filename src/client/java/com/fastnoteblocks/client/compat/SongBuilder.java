@@ -373,7 +373,7 @@ public final class SongBuilder {
 				limits.laneFloors(), Layout.STANDARD, PasteMode.COMPACT_LANE, start);
 			case ULTRA_COMPACT_LANE -> bestUltraPlan(origin, forward, notes, limits, start);
 			case LANE -> createStraightPastePlan(origin, forward, notes);
-		}), title);
+		}), title, mode, limits);
 	}
 
 	/**
@@ -492,17 +492,21 @@ public final class SongBuilder {
 	 * starts, on the side of the block the first repeater stands on.</p>
 	 *
 	 * <p>Facing negative Z where it can, which is the outward face of the first lane and the one you
-	 * walk up to. It is free in fifty-one of the sixty-one songs in the library and a note block in
-	 * the other ten -- the first chord hangs on both sides of its lane, and on the first lane one of
-	 * those sides is the edge of the build. So the fallback is the face behind the head, which is
-	 * empty in every song there is: nothing is ever built there, because that is where the player
-	 * stands to start the machine. Between the two, every build gets a name.</p>
+	 * walk up to. It is free in fifty-one of the sixty-one songs in the library; in the other ten the
+	 * first chord has hung a note there, because a chord fills both sides of its lane and on the
+	 * first lane one of those sides is the edge of the build. Then the sign simply steps one further
+	 * out and hangs off the note block instead, which keeps it on the same face of the build and
+	 * reading the same way. Behind the head is the last resort, and is empty in every song there is:
+	 * nothing is ever built there, because that is where the player stands to start the machine.</p>
 	 *
-	 * <p>The one command in a build that is not part of the machine, and the only one with spaces in
-	 * it. It is added last for both reasons: nothing after it reads the list back, and nothing that
-	 * splits a command on spaces has to know about it.</p>
+	 * <p>Placed as soon as the block it hangs on exists, and not at the end. A build is tens of
+	 * thousands of commands and a wide one has to be flown along as it goes up, so a sign written
+	 * last is a sign written when the start of the song is long out of simulation range -- which is
+	 * to say, never seen. It is still the only command in a build with spaces in it, so anything that
+	 * reads the list back by splitting on those has to run before this does.</p>
 	 */
-	private static PastePlan withTitleSign(PastePlan plan, String title) {
+	private static PastePlan withTitleSign(PastePlan plan, String title, PasteMode mode,
+			BuildLimits limits) {
 		BlockPos head = null;
 		for (String command : plan.commands()) {
 			// The first repeater the walk laid, which is the one the player throws a switch at: blocks
@@ -517,27 +521,56 @@ public final class SongBuilder {
 		if (head == null) {
 			return plan;
 		}
-		// Never over the machine, whichever face it lands on. A sign that quietly ate a note block
-		// would be a silent note with no cause anybody could ever find. Asked of the two cells rather
-		// than by collecting every position first: this runs on plans that are only being measured --
-		// the build screen forecasts a dozen of them a keystroke -- and a set of forty thousand
-		// positions to answer two questions is a set nobody needs.
+		// Never over the machine, wherever it lands. A sign that quietly ate a note block would be a
+		// silent note with no cause anybody could ever find. Asked of three cells rather than by
+		// collecting every position first: this runs on plans that are only being measured -- the
+		// build screen forecasts a dozen of them a keystroke -- and a set of forty thousand positions
+		// to answer three questions is a set nobody needs.
 		BlockPos stone = head;
-		Direction face = Stream.of(Direction.NORTH, Direction.WEST)
-			.filter(side -> !holds(plan, stone.relative(side)))
-			.findFirst().orElse(null);
-		if (face == null) {
+		BlockPos at = Stream.of(stone.north(), stone.north().north(), stone.west())
+			.filter(cell -> !holds(plan, cell)).findFirst().orElse(null);
+		if (at == null) {
 			return plan;
 		}
-		BlockPos at = head.relative(face);
-		List<String> commands = new ArrayList<>(plan.commands());
-		commands.add("setblock " + at.getX() + " " + at.getY() + " " + at.getZ()
+		// Whichever block it ended up beside: the head stone, the note hanging off it, or the head
+		// stone from behind.
+		Direction face = at.equals(stone.west()) ? Direction.WEST : Direction.NORTH;
+		BlockPos anchor = at.relative(face.getOpposite());
+		String sign = "setblock " + at.getX() + " " + at.getY() + " " + at.getZ()
 			+ " minecraft:oak_wall_sign[facing=" + directionName(face)
-			+ "]{front_text:{messages:[" + String.join(",", signLines(title)) + "]}} replace");
+			+ "]{front_text:{messages:[" + String.join(",", signLines(titled(title, mode, limits)))
+			+ "]}} replace";
+		List<String> commands = new ArrayList<>(plan.commands());
+		// Straight after the block it hangs on, which is the earliest it can go: a sign whose support
+		// is not there yet pops off the first time anything updates it.
+		int after = 0;
+		String prefix = "setblock " + anchor.getX() + " " + anchor.getY() + " " + anchor.getZ() + " ";
+		while (after < commands.size() && !commands.get(after).startsWith(prefix)) {
+			after++;
+		}
+		commands.add(Math.min(after + 1, commands.size()), sign);
 		return new PastePlan(List.copyOf(commands), plan.width(), plan.depth(), plan.height(),
 			plan.spanX(), plan.spanZ(), plan.mode(), plan.faults(), plan.turns(), plan.moved(),
 			plan.breaches(), plan.recesses(), plan.padding(), plan.nearWall(), plan.farWall(),
 			plan.collisions(), plan.poweredAt());
+	}
+
+	/**
+	 * The name with the size it was built at in front of it, as {@code 40|3}.
+	 *
+	 * <p>Which is the first thing anybody asks of a build standing in a world and the one thing that
+	 * cannot be recovered by looking at it: a corridor's width is not its lane width -- the walls sit
+	 * inside it -- and the floor count is only countable by flying up. Two songs built at different
+	 * sizes are otherwise the same grey corridor with the same name on it.</p>
+	 *
+	 * <p>Only where those two numbers mean anything, which is the two lane modes. A cube is sized
+	 * from the song rather than asked for.</p>
+	 */
+	private static String titled(String title, PasteMode mode, BuildLimits limits) {
+		String name = title == null || title.isBlank() ? UNNAMED : title.trim();
+		return mode == PasteMode.COMPACT_LANE || mode == PasteMode.ULTRA_COMPACT_LANE
+			? limits.laneWidth() + "|" + limits.laneFloors() + " " + name
+			: name;
 	}
 
 	/** Whether the build puts anything at all in a cell, air included. */
@@ -5778,6 +5811,37 @@ public final class SongBuilder {
 	 * <p>{@code minecraft:cobbled_deepslate} is held for the simple tail, which is not in this branch
 	 * yet. It goes with the rest of the stacked family when it arrives.</p>
 	 */
+	/**
+	 * What every block a marked paste uses means, in the words you would say out loud.
+	 *
+	 * <p>Here rather than in a comment because three separate things have to explain this table and
+	 * none of them should be holding its own copy: the chat key the command prints, the legend under
+	 * an {@code /asciidiagram}, and {@link #shapeStone}, which is the thing that actually decides.
+	 * The diagram is the one that matters most and is the easiest to forget -- a slice pasted into a
+	 * conversation is often all anybody has of a build, and "TU = minecraft:tuff" tells a reader
+	 * nothing at all unless it goes on to say that tuff is how a bus looks.</p>
+	 *
+	 * <p>Keyed by block id without its state, since that is what a reader has in hand.</p>
+	 */
+	static final Map<String, String> DEBUG_PASTE_KEY = debugPasteKey();
+
+	private static Map<String, String> debugPasteKey() {
+		Map<String, String> key = new LinkedHashMap<>();
+		key.put("minecraft:stone", "the lane -- wire, repeaters, pads, corners, staircases");
+		key.put("minecraft:tuff", "a standard bus");
+		key.put("minecraft:andesite", "a standard stacked chord");
+		key.put("minecraft:deepslate", "a stacked bus");
+		key.put("minecraft:deepslate_tiles", "the stacked head of a cut chord");
+		key.put("minecraft:cobbled_deepslate", "a stacked simple tail");
+		key.put("minecraft:smooth_basalt", "a double rail");
+		key.put("minecraft:stripped_crimson_hyphae", "a lane standing outside its wall");
+		key.put("minecraft:red_nether_bricks", "wire the signal never reaches");
+		key.put("minecraft:waxed_copper_bulb", "a note that would sound at the wrong moment");
+		key.put("minecraft:dragon_head", "a note with nothing to set it off");
+		key.put("minecraft:sea_lantern", "a cell two shapes both wanted");
+		return java.util.Collections.unmodifiableMap(key);
+	}
+
 	private static String shapeStone(String laidBy) {
 		if (laidBy == null) {
 			return "minecraft:stone";

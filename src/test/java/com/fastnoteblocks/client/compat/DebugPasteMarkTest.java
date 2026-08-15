@@ -15,8 +15,11 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import net.minecraft.SharedConstants;
+import net.minecraft.commands.arguments.blocks.BlockStateParser;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.Bootstrap;
+import net.minecraft.world.level.block.state.BlockState;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -228,6 +231,44 @@ class DebugPasteMarkTest {
 			"a note with nothing to set it off should wear a head: " + census);
 		assertTrue(dead == 0 || census.getOrDefault("dead wire", 0) > 0,
 			"the build has dead wire and none of it is marked: " + census);
+	}
+
+	/**
+	 * That a diagram of a marked build explains itself to somebody who has never seen one.
+	 *
+	 * <p>The colours are only useful if a reader knows what they mean, and the way a build usually
+	 * travels is as a slice of {@code /asciidiagram} pasted into a conversation -- to somebody, or to
+	 * something, that was not there when it was made. A legend reading {@code TU  minecraft:tuff} is
+	 * no help at all: the reader needs to be told that tuff is how a bus looks. So every block a
+	 * marked paste uses carries its meaning into the legend, out of the one table the builder
+	 * colours from.</p>
+	 */
+	@Test
+	void aDiagramOfAMarkedBuildSaysWhatTheColoursMean() throws Exception {
+		SongBuilder.DEBUG_PASTE = true;
+		Map<BlockPos, String> marked = laid(plan(song("illit-do-the-dance.json")));
+		Map<BlockPos, BlockState> world = new java.util.HashMap<>();
+		for (Map.Entry<BlockPos, String> cell : marked.entrySet()) {
+			world.put(cell.getKey(), BlockStateParser
+				.parseForBlock(BuiltInRegistries.BLOCK, cell.getValue(), false).blockState());
+		}
+		// A slice through the middle of the build, wherever that lands, which is all anybody ever has.
+		BlockPos low = new BlockPos(0, 60, 0);
+		BlockPos high = new BlockPos(24, 70, 8);
+		String drawn = AsciiDiagram.render(
+			at -> world.getOrDefault(at, net.minecraft.world.level.block.Blocks.AIR.defaultBlockState()),
+			low, high, AsciiDiagram.View.TOP, AsciiDiagram.Shape.CODE);
+		String legend = drawn.substring(drawn.indexOf("legend"));
+		System.out.println(legend);
+		// Whatever blocks that slice happens to hold, any of them that carry a meaning must say it.
+		List<String> silent = SongBuilder.DEBUG_PASTE_KEY.entrySet().stream()
+			.filter(entry -> legend.contains(entry.getKey()))
+			.filter(entry -> !legend.contains(entry.getValue()))
+			.map(Map.Entry::getKey).toList();
+		assertTrue(silent.isEmpty(), "the legend names these blocks without saying what they "
+			+ "mean: " + silent);
+		assertTrue(legend.contains("debug paste:"),
+			"a slice of a marked build should explain its colours: " + legend);
 	}
 
 	/**

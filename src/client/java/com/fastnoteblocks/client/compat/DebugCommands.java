@@ -81,10 +81,12 @@ public final class DebugCommands {
 				.then(corner("from").then(views())));
 			// A toggle rather than an argument to the paste, because the builds worth looking at this
 			// way are songs pasted from the build screen, which takes no arguments.
+			// On its own it says what the colours mean rather than toggling. Reading a marked build is
+			// the thing you do far more often than turning the marking on, and a toggle you have to
+			// read the state of afterwards is a toggle that gets pressed twice by accident.
 			dispatcher.register(literal("fastnoteblocksdebugpaste")
 				.requires(source -> FastNoteblocksConfig.get().debugCommandsEnabled())
-				.executes(context -> debugPaste(context.getSource(),
-					!FastNoteblocksConfig.get().debugPasteEnabled()))
+				.executes(context -> colourKey(context.getSource()))
 				.then(literal("on").executes(context -> debugPaste(context.getSource(), true)))
 				.then(literal("off").executes(context -> debugPaste(context.getSource(), false))));
 		});
@@ -349,6 +351,28 @@ public final class DebugCommands {
 	 * kept, whatever wanted it second is dropped, and the cell is a sea lantern -- so a build with
 	 * any of those in it is wrong on purpose and meant to be walked round rather than heard.</p>
 	 */
+	/**
+	 * What the blocks of a marked build mean, and whether the next one will be marked.
+	 *
+	 * <p>Read off {@link SongBuilder#DEBUG_PASTE_KEY}, which is the same table the builder colours
+	 * from and the same one an {@code /asciidiagram} legend explains itself with, so the three can
+	 * never come apart.</p>
+	 */
+	private static int colourKey(FabricClientCommandSource source) {
+		boolean on = FastNoteblocksConfig.get().debugPasteEnabled();
+		source.sendFeedback(Component.literal("Debug paste is " + (on ? "on" : "off")
+			+ ". /fastnoteblocksdebugpaste on|off to change it.")
+			.withStyle(on ? ChatFormatting.YELLOW : ChatFormatting.GRAY));
+		SongBuilder.DEBUG_PASTE_KEY.forEach((block, means) -> source.sendFeedback(Component
+			.literal("  " + block.substring(block.indexOf(':') + 1) + "  ")
+			.withStyle(ChatFormatting.WHITE)
+			.append(Component.literal(means).withStyle(ChatFormatting.GRAY))));
+		source.sendFeedback(Component.literal("  hyphae and red nether brick replace whichever stone "
+			+ "colour a cell had, and dead wire wins over a breach")
+			.withStyle(ChatFormatting.DARK_GRAY));
+		return 1;
+	}
+
 	private static int debugPaste(FabricClientCommandSource source, boolean on) {
 		FastNoteblocksConfig.get().setDebugPasteEnabled(on);
 		FastNoteblocksConfig.save();

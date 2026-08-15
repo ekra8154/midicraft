@@ -121,9 +121,117 @@ class TitleSignTest {
 		List<String> signs = plan.commands().stream()
 			.filter(command -> command.contains("wall_sign")).toList();
 		assertEquals(1, signs.size(), "a build should carry exactly one sign");
-		assertEquals(plan.commands().get(plan.commands().size() - 1), signs.get(0),
-			"the sign should be the last command, so nothing builds over it");
 		return signs.get(0);
+	}
+
+	/**
+	 * That the sign goes up with the start of the song rather than after the last block of it.
+	 *
+	 * <p>A wide build is tens of thousands of commands and has to be flown along as it goes up, so a
+	 * sign written last is written when the start of the song is long out of simulation range -- the
+	 * command is sent, nothing is there to receive it, and the build has no name. It has to land
+	 * within the first breath of the paste, and no earlier than the block it hangs on.</p>
+	 */
+	@Test
+	void theSignGoesUpWithTheStartOfTheSong() throws Exception {
+		Path songs = Path.of("run", "config", "fast-noteblocks", "songs");
+		List<String> late = new ArrayList<>();
+		for (String file : List.of("illit-do-the-dance.json", "deltarune-ch-4-guardian.json",
+				"all-of-the-lights-kanye-west.json", "big-shot.json")) {
+			List<SongBuilder.EventNote> notes;
+			try (Reader reader = Files.newBufferedReader(songs.resolve(file))) {
+				ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
+				ComposerProject project = new ComposerProject(raw.name(), raw.ppq(),
+					raw.tempoMicrosPerQuarter(), raw.layers(), raw.activeLayerIndex(),
+					raw.nextNoteId(), raw.endTick(), raw.speedQuarters());
+				notes = SongBuilder.eventNotes(project.toSequenceTracks(Set.of(), true));
+			}
+			SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0), notes,
+				SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+				new SongBuilder.BuildLimits(16, 40, 3), SongBuilder.WalkStart.HEAD, file);
+			int where = -1;
+			for (int index = 0; index < plan.commands().size(); index++) {
+				if (plan.commands().get(index).contains("wall_sign")) {
+					where = index;
+				}
+			}
+			System.out.println("SIGNAT " + file + " command " + where + " of "
+				+ plan.commands().size());
+			// A hundred blocks is a handful of chords, and every build here is thirty thousand.
+			if (where < 0 || where > 100) {
+				late.add(file + " at command " + where + " of " + plan.commands().size());
+			}
+		}
+		assertTrue(late.isEmpty(), "the sign is written too late to be in range: " + late);
+	}
+
+	/**
+	 * That the sign never lands on a face the build wanted, whichever of the three it takes.
+	 *
+	 * <p>The whole reason there are three candidates rather than one. Placing it early means it is
+	 * no longer last, so it can no longer rely on being the final word on a cell -- if it ever picks
+	 * an occupied one, it now overwrites a block of the machine outright.</p>
+	 */
+	@Test
+	void theSignNeverStandsWhereTheBuildDoes() throws Exception {
+		Path songs = Path.of("run", "config", "fast-noteblocks", "songs");
+		List<String> clashes = new ArrayList<>();
+		int checked = 0;
+		try (var listing = Files.list(songs)) {
+			for (Path file : listing.filter(path -> path.toString().endsWith(".json")).toList()) {
+				List<SongBuilder.EventNote> notes;
+				try (Reader reader = Files.newBufferedReader(file)) {
+					ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
+					ComposerProject project = new ComposerProject(raw.name(), raw.ppq(),
+						raw.tempoMicrosPerQuarter(), raw.layers(), raw.activeLayerIndex(),
+						raw.nextNoteId(), raw.endTick(), raw.speedQuarters());
+					notes = SongBuilder.eventNotes(project.toSequenceTracks(Set.of(), true));
+				} catch (RuntimeException unreadable) {
+					continue;
+				}
+				if (notes.isEmpty()) {
+					continue;
+				}
+				SongBuilder.PastePlan plan;
+				try {
+					plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0), notes,
+						SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+						new SongBuilder.BuildLimits(16, 40, 3), SongBuilder.WalkStart.HEAD,
+						file.getFileName().toString());
+				} catch (RuntimeException refused) {
+					continue;
+				}
+				checked++;
+				String signAt = null;
+				List<String> others = new ArrayList<>();
+				for (String command : plan.commands()) {
+					String[] parts = command.split(" ", 5);
+					String cell = parts[1] + " " + parts[2] + " " + parts[3];
+					if (parts[4].startsWith("minecraft:oak_wall_sign")) {
+						signAt = cell;
+					} else {
+						others.add(cell);
+					}
+				}
+				if (signAt == null || others.contains(signAt)) {
+					clashes.add(file.getFileName() + " sign at " + signAt);
+				}
+			}
+		}
+		System.out.println("SIGNCLASH " + clashes.size() + " of " + checked + " songs");
+		assertTrue(checked > 20, "the song library did not load: " + checked);
+		assertTrue(clashes.isEmpty(), "the sign stands on a block of the machine: " + clashes);
+	}
+
+	/** The size a build was made at, which is the one thing you cannot recover by looking at it. */
+	@Test
+	void theSignSaysWhatSizeTheBuildWasMadeAt() throws Exception {
+		String command = sign(SongBuilder.createPastePlan(new BlockPos(0, 64, 0),
+			DebugChords.notes(DebugChords.parse("6 2 18", DebugChords.DEFAULT_GAP)),
+			SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+			new SongBuilder.BuildLimits(16, 40, 3), SongBuilder.WalkStart.HEAD, "Big Shot"));
+		System.out.println("SIGNSIZE " + command);
+		assertTrue(command.contains("\"40|3 Big Shot\""), "no size on the sign: " + command);
 	}
 
 	/**
