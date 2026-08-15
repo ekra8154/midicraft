@@ -10,6 +10,7 @@ import java.util.Set;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.Bootstrap;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -33,6 +34,20 @@ class CutCrossesProbe {
 	static void bootstrapMinecraft() {
 		SharedConstants.tryDetectVersion();
 		Bootstrap.bootStrap();
+	}
+
+	/**
+	 * Both flags put back however this ends.
+	 *
+	 * <p>They are statics on the builder and the suite shares one JVM, so a probe that throws
+	 * halfway leaves the next class building with a different colour scheme -- or, worse, with
+	 * {@code DEBUG_PASTE} on, which builds through collisions instead of refusing them. Flags
+	 * leaking out of a failed test has cost this project a diagnosis before.</p>
+	 */
+	@AfterEach
+	void putTheFlagsBack() {
+		SongBuilder.TILES_EVERY_HEADED_CUT = false;
+		SongBuilder.DEBUG_PASTE = false;
 	}
 
 	@Test
@@ -74,7 +89,6 @@ class CutCrossesProbe {
 				}
 			}
 		}
-		SongBuilder.TILES_EVERY_HEADED_CUT = false;
 		System.out.println("CUTCROSS " + differing + " of " + compared
 			+ " builds hold a headed cut whose tail stayed on the near side");
 	}
