@@ -791,14 +791,19 @@ public final class NoteMachineReader {
 			warnings.add("ignored " + String.join(" and ", survey.unsupported)
 				+ ", which carry timing this cannot follow");
 		}
+		// Once, not once per note block. played() unions every version's fired set into a fresh
+		// HashSet each time it is asked, so asking it inside the loop makes this quadratic in the size
+		// of the song -- on Guardian that is twenty thousand notes each rebuilding a twenty thousand
+		// entry set, and it is where the footprint preview's minute and a half went.
+		Set<BlockPos> played = trace.played();
 		List<BlockPos> unreachedAt = new ArrayList<>();
 		for (BlockPos note : survey.noteBlocks) {
-			if (!trace.played().contains(note)) {
+			if (!played.contains(note)) {
 				unreachedAt.add(note);
 			}
 		}
 		return new Reading(project, survey.noteBlocks.size(),
-			survey.noteBlocks.size() - trace.played().size(), List.copyOf(unreachedAt), headNotes,
+			survey.noteBlocks.size() - played.size(), List.copyOf(unreachedAt), headNotes,
 			(int)(span / TICKS_PER_REDSTONE_TICK), versions, List.copyOf(warnings));
 	}
 
