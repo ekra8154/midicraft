@@ -222,6 +222,8 @@ public final class ComposerScreen extends Screen {
 	private static final int INSTRUMENT_CELL = 28;
 	/** A strip under the palette's grid naming what a pick would land on. */
 	private static final int INSTRUMENT_FOOTER = 12;
+	/** The two tabs over the palette's grid: pitched instruments, or blocks that make their own noise. */
+	private static final int INSTRUMENT_HEADER = 14;
 	private static final int CONTEXT_MENU_WIDTH = 104;
 	private static final int CONTEXT_MENU_ROW_HEIGHT = 16;
 	private static final int LAYER_MENU_WIDTH = 120;
@@ -468,6 +470,8 @@ public final class ComposerScreen extends Screen {
 	private double lastMouseX;
 	private double lastMouseY;
 	private int instrumentMenuLayer = -1;
+	/** Which of the palette's two tabs is showing. Follows the layer's own voice when it opens. */
+	private boolean instrumentMenuEffects;
 	private int editingLayer = -1;
 	/**
 	 * The grid new notes land on, defaulting to the repeater tick.
@@ -2013,7 +2017,7 @@ public final class ComposerScreen extends Screen {
 			case SELECT_TOO_FREQUENT -> selectNotesWhere("too frequent",
 				note -> projectStats().crowded().contains(note.startTick()), true);
 			case SELECT_OUT_OF_RANGE -> selectNotesWhere("out of range",
-				note -> !note.isBuildable(), true);
+				(layer, note) -> layer.pitched() && !note.isBuildable(), true);
 			case SELECT_OVERLOADED_CHORDS -> selectOverloadedChordNotes();
 			case SELECT_ALL_NOTES -> selectNotesWhere("selected", note -> true, false);
 			case SELECT_NONE -> {
@@ -2144,6 +2148,15 @@ public final class ComposerScreen extends Screen {
 		java.util.function.Predicate<NoteEvent> match,
 		boolean narrowExisting
 	) {
+		selectNotesWhere(label, (layer, note) -> match.test(note), narrowExisting);
+	}
+
+	/** For the one question whose answer depends on what the layer's voice is. */
+	private void selectNotesWhere(
+		String label,
+		java.util.function.BiPredicate<Layer, NoteEvent> match,
+		boolean narrowExisting
+	) {
 		Set<Long> previous = Set.copyOf(selectedNotes);
 		boolean narrowing = narrowExisting && !previous.isEmpty();
 		selectedNotes.clear();
@@ -2153,7 +2166,7 @@ public final class ComposerScreen extends Screen {
 				continue;
 			}
 			for (NoteEvent note : layer.notes()) {
-				if (match.test(note) && (!narrowing || previous.contains(note.id()))) {
+				if (match.test(layer, note) && (!narrowing || previous.contains(note.id()))) {
 					selectedNotes.add(note.id());
 				}
 			}
@@ -2551,14 +2564,19 @@ public final class ComposerScreen extends Screen {
 		}
 	}
 
+	/** Whichever tab is showing: the tuned instruments, or the blocks that sound for themselves. */
+	private List<PreviewInstrument> instrumentMenuPalette() {
+		return instrumentMenuEffects ? PreviewInstrument.EFFECTS : PreviewInstrument.VALUES;
+	}
+
 	/** The palette's box, shared by drawing, hit testing and "is the cursor over it". */
 	private NoteRect instrumentMenuRect() {
 		if (instrumentMenuLayer < 0 || instrumentMenuLayer >= project().layers().size()) {
 			return null;
 		}
-		int rows = (PreviewInstrument.VALUES.size() + INSTRUMENT_COLUMNS - 1) / INSTRUMENT_COLUMNS;
+		int rows = (instrumentMenuPalette().size() + INSTRUMENT_COLUMNS - 1) / INSTRUMENT_COLUMNS;
 		int menuWidth = INSTRUMENT_COLUMNS * INSTRUMENT_CELL + 6;
-		int menuHeight = rows * INSTRUMENT_CELL + 6 + INSTRUMENT_FOOTER;
+		int menuHeight = INSTRUMENT_HEADER + rows * INSTRUMENT_CELL + 6 + INSTRUMENT_FOOTER;
 		int top = Math.max(TOOLBAR_HEIGHT + 4, Math.min(height - menuHeight - 24,
 			layerY(instrumentMenuLayer) + LAYER_ROW_HEIGHT));
 		return new NoteRect(8, top, 8 + menuWidth, top + menuHeight);
@@ -2571,18 +2589,23 @@ public final class ComposerScreen extends Screen {
 		}
 		graphics.fill(menu.left(), menu.top(), menu.right(), menu.bottom(), 0xF0101115);
 		graphics.fill(menu.left(), menu.top(), menu.right(), menu.top() + 1, 0xFFAAAAAA);
+		extractInstrumentTabs(graphics, menu, mouseX, mouseY);
 		PreviewInstrument selected = PreviewInstrument.byId(project().layers().get(instrumentMenuLayer).instrument());
-		for (int index = 0; index < PreviewInstrument.VALUES.size(); index++) {
-			PreviewInstrument value = PreviewInstrument.VALUES.get(index);
+		List<PreviewInstrument> palette = instrumentMenuPalette();
+		for (int index = 0; index < palette.size(); index++) {
+			PreviewInstrument value = palette.get(index);
 			int cellX = menu.left() + 3 + index % INSTRUMENT_COLUMNS * INSTRUMENT_CELL;
-			int cellY = menu.top() + 3 + index / INSTRUMENT_COLUMNS * INSTRUMENT_CELL;
+			int cellY = instrumentMenuGridTop(menu) + index / INSTRUMENT_COLUMNS * INSTRUMENT_CELL;
 			boolean hovered = mouseX >= cellX && mouseX < cellX + INSTRUMENT_CELL
 				&& mouseY >= cellY && mouseY < cellY + INSTRUMENT_CELL;
 			graphics.fill(cellX, cellY, cellX + INSTRUMENT_CELL - 2, cellY + INSTRUMENT_CELL - 2,
 				value.equals(selected) ? 0xFF356070 : hovered ? 0xFF44484F : 0xFF25282D);
 			graphics.item(new ItemStack(value.icon()), cellX + 5, cellY + 5);
 			if (hovered) {
-				graphics.setTooltipForNextFrame(Component.literal(value.name()), mouseX, mouseY);
+				// Effects carry how far they reach. The pitched half is every one of them 48, so
+				// saying so on twenty cells would be twenty copies of one fact.
+				graphics.setTooltipForNextFrame(
+					Component.literal(value.pitched() ? value.name() : value.label()), mouseX, mouseY);
 			}
 		}
 		// Whose instrument is about to change. Picking one has always landed on the whole selection,
@@ -2595,6 +2618,35 @@ public final class ComposerScreen extends Screen {
 				: "Sets layer " + (instrumentMenuLayer + 1),
 			menu.left() + 4, menu.bottom() - INSTRUMENT_FOOTER + 2,
 			landing > 1 ? 0xFF8FD3FF : 0xFF8A9098, false);
+	}
+
+	/** Where the grid starts, once the tabs above it have had their strip. */
+	private static int instrumentMenuGridTop(NoteRect menu) {
+		return menu.top() + 3 + INSTRUMENT_HEADER;
+	}
+
+	/** Where one tab ends and the other begins. */
+	private static int instrumentTabSplit(NoteRect menu) {
+		return (menu.left() + menu.right()) / 2;
+	}
+
+	private void extractInstrumentTabs(GuiGraphicsExtractor graphics, NoteRect menu, int mouseX, int mouseY) {
+		int split = instrumentTabSplit(menu);
+		int top = menu.top() + 1;
+		int bottom = top + INSTRUMENT_HEADER - 2;
+		boolean overStrip = mouseY >= top && mouseY < bottom && mouseX >= menu.left() && mouseX < menu.right();
+		drawInstrumentTab(graphics, menu.left() + 1, top, split, bottom, "Instruments",
+			!instrumentMenuEffects, overStrip && mouseX < split);
+		drawInstrumentTab(graphics, split, top, menu.right() - 1, bottom, "Sound effects",
+			instrumentMenuEffects, overStrip && mouseX >= split);
+	}
+
+	private void drawInstrumentTab(GuiGraphicsExtractor graphics, int left, int top, int right, int bottom,
+			String label, boolean current, boolean hovered) {
+		graphics.fill(left, top, right, bottom, current ? 0xFF356070 : hovered ? 0xFF44484F : 0xFF1B1E22);
+		graphics.text(font, Component.literal(label),
+			left + Math.max(2, (right - left - font.width(label)) / 2), top + 2,
+			current ? 0xFFFFFFFF : 0xFF9AA0A8, false);
 	}
 
 	/** The composition being edited, so which one it is never has to be remembered. */
@@ -2781,9 +2833,12 @@ public final class ComposerScreen extends Screen {
 			// The slash is drawn on this icon, so this is where someone points to ask about it.
 			String silence = audibilityNote(instrumentLayer);
 			int landing = layersToEdit(instrumentLayer).size();
+			PreviewInstrument voice =
+				PreviewInstrument.byId(project().layers().get(instrumentLayer).instrument());
 			text = Component.literal(
-				PreviewInstrument.byId(project().layers().get(instrumentLayer).instrument()).name()
-					+ " - click to change the note-block instrument"
+				(voice.pitched() ? voice.name() : voice.label())
+					+ (voice.pitched() ? " - click to change the note-block instrument"
+						: " - click to change the voice")
 					+ (landing > 1 ? "\nPicks land on all " + landing + " selected layers." : "")
 					+ (silence == null ? "" : "\n" + silence));
 		} else if (dotLayer >= 0) {
@@ -3509,6 +3564,9 @@ public final class ComposerScreen extends Screen {
 			// whole note red, which on an unconverted song is most of them -- so the roll answered
 			// "this will not build", which you already knew, and stopped answering anything else.
 			int color = highlighted ? vivid(layerColor(layerIndex)) : faded(layerColor(layerIndex));
+			// A sound effect has no note block range to be outside of, so nothing on one of those
+			// layers is ever marked unbuildable, wherever on the roll it was drawn.
+			boolean rangeMatters = layer.pitched();
 			List<NoteEvent> notes = layer.notes();
 			for (int noteIndex = lowerBoundStart(notes, firstVisibleTick);
 					noteIndex < notes.size(); noteIndex++) {
@@ -3541,7 +3599,7 @@ public final class ComposerScreen extends Screen {
 				} else if (anyOffGrid && offGrid.contains(note.startTick())) {
 					flags |= NoteCellGrid.OFF_GRID;
 				}
-				if (!note.isBuildable()) {
+				if (rangeMatters && !note.isBuildable()) {
 					flags |= NoteCellGrid.UNBUILDABLE;
 				}
 				cells.add(left, top, color, flags, midi);
@@ -4062,7 +4120,13 @@ public final class ComposerScreen extends Screen {
 			}
 			int instrumentLayer = layerInstrumentAt(event.x(), event.y());
 			if (instrumentLayer >= 0) {
-				instrumentMenuLayer = instrumentMenuLayer == instrumentLayer ? -1 : instrumentLayer;
+				boolean closing = instrumentMenuLayer == instrumentLayer;
+				instrumentMenuLayer = closing ? -1 : instrumentLayer;
+				if (!closing) {
+					// Opens on the tab the layer is already using, so the voice it has is the one
+					// under the cursor rather than one page away from it.
+					instrumentMenuEffects = !project().layers().get(instrumentLayer).pitched();
+				}
 				return true;
 			}
 		}
@@ -4306,17 +4370,25 @@ public final class ComposerScreen extends Screen {
 		if (menu == null) {
 			return false;
 		}
+		int gridTop = instrumentMenuGridTop(menu);
+		if (mouseY < gridTop && mouseY >= menu.top()) {
+			// The tabs. Switching pages is not a pick: nothing about the layer changes, and the
+			// palette stays open so that one voice can be tried against another across both.
+			instrumentMenuEffects = mouseX >= instrumentTabSplit(menu);
+			return true;
+		}
 		int column = (int)(mouseX - menu.left() - 3) / INSTRUMENT_CELL;
-		int row = (int)(mouseY - menu.top() - 3) / INSTRUMENT_CELL;
-		if (mouseX < menu.left() + 3 || mouseY < menu.top() + 3
+		int row = (int)(mouseY - gridTop) / INSTRUMENT_CELL;
+		if (mouseX < menu.left() + 3 || mouseY < gridTop
 				|| column < 0 || column >= INSTRUMENT_COLUMNS || row < 0) {
 			return false;
 		}
 		int index = row * INSTRUMENT_COLUMNS + column;
-		if (index < 0 || index >= PreviewInstrument.VALUES.size()) {
+		List<PreviewInstrument> palette = instrumentMenuPalette();
+		if (index < 0 || index >= palette.size()) {
 			return false;
 		}
-		PreviewInstrument value = PreviewInstrument.VALUES.get(index);
+		PreviewInstrument value = palette.get(index);
 		value.play(12);
 		// Picking an instrument says nothing about whether the layer is heard. It used to, because
 		// silence was one of the instruments; the state letter answers that now.

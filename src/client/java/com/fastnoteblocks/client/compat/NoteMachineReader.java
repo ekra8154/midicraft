@@ -395,8 +395,15 @@ public final class NoteMachineReader {
 			if (noteBlocks.contains(side)) {
 				firedAt.merge(side, time, Math::min);
 			}
-			BlockState sideState = region.at(side);
-			if (isConductor(sideState) && !sideState.is(Blocks.NOTE_BLOCK)) {
+			// A note block among them. It carries power exactly as a stone does -- the game says so
+			// itself: isRedstoneConductor, isSignalSource, canOcclude and isSolidRender all read the
+			// same for the two blocks (NoteBlockConductsTest). It used to be excluded here, with
+			// nothing said about why, and the block below has never been excluded, so the two halves
+			// of this method disagreed. That one clause is what made a run's opening column give its
+			// centre away to a stone: it read a note there as ending the chain, and it does not.
+			// ekran: "a note block can be powered just like a stone, there's no difference. a
+			// noteblock just cant have something on top, but that doesn't happen here".
+			if (isConductor(region.at(side))) {
 				queue.add(new Pulse(time, side, 0, false, position, origin));
 			}
 			feedRepeater(region, queue, side, position, time, repeaterInput, origin, feeds);
@@ -839,6 +846,13 @@ public final class NoteMachineReader {
 	}
 
 	private static Instrument instrumentAt(Region region, BlockPos position) {
+		// Upwards first, the way the game itself decides. A skull sitting on a note block is what
+		// gives it its voice, and the block underneath has no say while one is there -- so a reader
+		// that only looked down would find air under a zombie and call it a harp.
+		String head = PreviewInstrument.headVoice(region.at(position.above()).instrument());
+		if (head != null) {
+			return new Instrument(head, false);
+		}
 		String id = region.at(position.below()).instrument().name().toUpperCase(Locale.ROOT);
 		boolean known = PreviewInstrument.VALUES.stream().anyMatch(value -> value.id().equals(id));
 		return new Instrument(known ? id : "HARP", !known);

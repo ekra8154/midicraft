@@ -88,6 +88,58 @@ selected slot is left unchanged.
 
 The settings screen includes a complete `0` through `24` pitch-name guide.
 
+## Sound effects
+
+The composer's instrument palette has two tabs. **Instruments** holds the tuned
+note block voices. **Sound effects** holds blocks that make their own noise when
+redstone reaches them: oak, iron and copper trapdoors, oak and iron doors, an oak
+fence gate, an oak shelf, a bell, a copper bulb, a dropper, a piston, a sculk
+shrieker, and the six note blocks that wear a mob head — skeleton, wither
+skeleton, zombie, creeper, piglin and ender dragon.
+
+There is no dispenser. An empty dispenser and an empty dropper both play
+`block.dispenser.fail`, so the two were one voice wearing two icons.
+
+A layer set to one of these is not tuned. Every hit sounds the same, so the row a
+hit is drawn on is only somewhere to put it, and two hits on the same tick are one
+hit. Nothing on such a layer is ever out of range.
+
+Each effect names how far it can be heard, because they are not all alike. Most
+carry 16 blocks; a bell carries 32, a mob head note block 48, and a sculk shrieker
+80. The figure is vanilla's own — the range a sound event reports for the volume
+that block plays at — so it is the distance to space a machine around rather than
+an estimate. Every tuned instrument is 48, so the Instruments tab does not repeat
+it twenty times.
+
+Each of these makes a second sound when the power leaves again — the door shuts,
+the bulb clicks off, the piston pulls back. A build sends a pulse, so that second
+sound always follows a moment behind the first.
+
+In a build each effect occupies exactly the three cells an ordinary note would:
+itself, the cell below where an instrument block would sit, and the cell above
+that a note block keeps as air. A door's upper half and a skull go in that air,
+and so does a piston's head, which is why the pistons face up. Most of these
+blocks do not carry a redstone signal onward — including the copper bulb, which
+looks like it should — so a chord containing one is built as a bus, where every
+sound is powered off its own block rather than through its neighbour. Dispensers,
+droppers and the mob head note blocks do carry a signal, and a chord led by one of
+those keeps the tighter shape.
+
+A lone effect that cannot carry a signal is not left standing where the repeater
+points, since that cell is also the one the next repeater reads. It gets a stone
+there instead and moves one block to the near side, sounded off that stone the way
+a bus sounds its notes.
+
+The hand sequencer understands these too. A sound effect step hands you the effect
+block itself rather than a note block on an instrument block, and the step is done
+the moment the block is down — there is no pitch to click it round to, and the HUD
+shows a dot instead of a note name. The mob heads take two placements, the same
+two the pitched instruments take but the other way up: the note block goes down
+first and the skull lands on top of it.
+
+NBS has no way to hold any of this, so sound effect layers are left out of an
+export and the report says how many went.
+
 ## Multiplayer safety
 
 Automated tuning sends ordinary vanilla use-block interactions. By default it

@@ -1,142 +1,175 @@
-# Handoff — the handover column, and heads that look instead of guessing
+# Handoff — two-rail runs, and the invariant that is now held
 
-State at `5733673`. Everything below was measured on ekran's own library, not derived.
+Branch `claude/double-rail-worktree-handoff-dd47ed`, working tree on top of `1fcc581`. Everything
+below was measured over ekran's whole library, not derived.
 
-**Read the collision marks before reasoning about the code.** That is the lesson of the session and
-it is not a style note. The last fault of the night got six explanations out of me, every one from
-reading source, every one wrong. ekran pasted the broken build, looked at one sea lantern, and named
-it in a sentence. `MARK_COLLISIONS` had been printing the answer for hours.
-
-## The two rules this file keeps breaking
-
-**One: fitting is not the same as being able to leave.** A chord that fits before the wall can still
-leave the lane unable to turn. Five sites now, and the fifth was the interesting one because it was
-never *asked* rather than asked wrongly: `overshoots` compared `landing > farWall`, which is false
-when they are equal, so a chord whose last cell landed exactly on the wall read as fitting and the
-lane handed over one column outside. Closed by `RESERVES_THE_HANDOVER_COLUMN`, which had to shut
-three doors together — the fit test and the two pads that aim a chord at the wall on purpose. Shutting
-only the fit test made the build *worse* than shutting none.
-
-**Two: the planner and the walk must ask the same question of the same thing.** Three separate bugs
-this session, all the same sentence: **the plan asked arithmetic where the walk asks blocks.**
-
-- `planLane` was handed the coarse `columnBehindBusy` and charged a stand-off column on the first
-  chord of a lane that the walk then did not build — carried through every event after it. That one
-  column was the whole of ekran's breach of ten. **Fixed** — `PLAN_ASKS_THE_BLOCKS_BEHIND`.
-- The nudge guard measured the room a lane had *before* the handover column was reserved. **Fixed.**
-- A cut decided whether it could open with a full head from `columnBehindBusy` alone and never asked
-  `backPairIsFree`, so where the flag said busy the full head was never attempted at all and the whole
-  cut fell to a plain bus. **Fixed** — `CUT_ASKS_THE_BLOCKS_BEHIND`.
-
-And its consequence: the walk can now see things the plan cannot, so **they can disagree**. `REPLAN_WHEN_BLOCKS_DISAGREE` tells the plan when the ground answered what it guessed.
-That is the design ekran chose over making the walk stop looking.
-
-## What changed
-
-| commit | what |
-|---|---|
-| `8d4b360` | Charge every chord the column its lane hands over into. Three doors, shut together. |
-| `b3fa8c3` | Charge it where a nudge is decided too — the guard was measuring a stale room. |
-| `7acdc81` | The cut-pad search says why it gave up, not just that it did. |
-| `5095145` | The plan asks the blocks behind. ekran's breach of ten, gone. |
-| `9bc9df0` | A head gives up one flank behind, not both. `STACKED_BUS_HALF`. |
-| `38e648c` | Say which of the two candidate builds the trace is showing. |
-| `bc61494` | A cut asks the blocks behind, and a cut says what it built. |
-| `a6812d1` | Redo the plan when the ground answers what it guessed. |
-| `ecb6131` | Resolve a head's free flank by looking — at every site that builds one. |
-| `f3ef7e7` | One rule for how many flanks a head keeps, and it does not mention cutting. |
-| `76a3d87` | Ask all four low slots, not the back pair and a guess for the front. |
-| `d0ebf59` | A head keeps one flank behind only where only one is spoken for. |
-
-Guardian at 44 wide over three floors, ekran's own build: **`[1, 10]` → clean.**
-
-Guardian, the 45 configurations from 16 wide up, start of session against end:
+**The dead wires are gone.** Both routes that produced them are named and fixed, and the whole
+library now reads back clean at all seven sizes a song:
 
 ```
-breaches      213 -> 144      breachBlocks  985 -> 729
-clean           4 ->  10      worst          24 ->  12
-wrong notes     0 either way  builds        45 of 45, none refused
+wrong notes   0 off ->    0 on
+breach     2349 off -> 2349 on     (was 2353; the four extra went with the first fix)
+dead wires    0 off ->    0 on     (was 14200 over seven songs)
+depth              better on 202 sizes, worse on 44
+runs opened   6052 off a stacked chord, 13064 building a head
 ```
 
-A cut may now open with a head of seven, six or five, chosen by a rule both halves of the builder
-agree on. That was the last thing outstanding and it is closed.
+What is left before this merges is the ordinary check, not a search: the red set. See the last
+section.
 
-Suite: **11 failing → 7**, a strict subset. Nothing was broken; four were fixed. The seven, which
-are the baseline to diff against and were all red before this session too:
+## Draw the break. Do not read setblock lists.
+
+The lesson of the session, and not a style note. Two long passes went into reading command dumps and
+reasoning about redstone rules, and reached the wrong explanation twice. ekran read the same fault
+off one rendered slice immediately:
 
 ```
-BreachReproSearchTest  > reportsTheWallsTheBuildWasMeasuredAgainst
-BreachTraceTest        > listsTheRealBreachesLeft
-HeldOutWidthTest       > noRealSongBreachesAtAWidthNobodyTunedOn
-SplitDescentTest       > cutsChordsTheOldDescentCouldNotCarry
-SplitDescentTest       > readsBackASongThatWasAlreadyBeingCut
-UltraLaneFaultsTest    > everyFloorChangeStandsOnAWall
-WallTurnReproTest      > tracesTheChosenRepro
+y=69     .  . ST ST w0 ST w0
 ```
 
-## Open, in priority order
+> *"a wire on both sides of a block. a wire can't be soft powered ... its repeater got sent up to the
+> floor above, but if it doesn't come directly out of the stone, it can't conduct"*
 
-**1. `HeldOutWidthTest.noRealSongBreachesAtAWidthNobodyTunedOn` is red, and has been all week.**
-It is the held-out check on whether hammering Guardian generalises, and it is currently answering
-no. Worth more than another Guardian config: every number in this file is Guardian, and this is the
-one test that is not.
+`AsciiDiagram.render(world, from, to, View, Shape)` takes any `BlockPos -> BlockState`, so a plan's
+own commands pour straight into it. `RailDeadWireProbeTest` does exactly that: it finds the last live
+note and the first dead one, boxes the span between them and prints every slice. Change
+`SONG`/`WIDTH`/`FLOORS` at the top of that file and it re-renders any build in one run, with no
+client needed.
 
-**2. Twelve wide and sixteen wide are the same build.** Byte-identical command lists, same 22
-breaches, `nearWall=11 farWall=26` either way — a 16-column corridor for both. Something floors the
-width at 16, so every sweep this week has been 45 configurations reported as 50, with nothing at all
-testing the narrow end.
+**The signature is wire–block–wire.** A block powered only by dust is *soft* powered: it will still
+sound the notes hung on it — which is why they read as reached — and it cannot light the dust on its
+far side. Every dead wire this project has produced has been that shape.
 
-**3. `worst 16` came from the replan trigger and went away again.** `REPLAN_WHEN_BLOCKS_DISAGREE`
-took worst from 12 to 16; looking at the free slots took it back to 12. Neither is understood, and
-the pair of them cancelling is luck rather than design.
+## The shape of a two-rail run
 
-**4. The front slot case is correct and unexercised.** `onTheFreeSlots` handles a contested *front*
-slot because the geometry allows one. Guardian never produces it — 1,682 swaps, every one a back
-slot. Do not spend a day on the front case without first finding a song that reaches it.
+ekran's, and it works: a run of small chords costs **one column per chord** instead of two, by running
+two chains past each other. The path chain runs at `lane.pos().above()`, the floor chain at
+`lane.pos()`, each carrying twice the gap and offset by one gap. Every column holds one chord's notes
+on one rail and the repeater driving the next chord on the other.
 
-## Traps
+- **Path column**: centre at P+1 (a harp note, or stone where the chord has none), repeater at P
+  driving the next floor anchor, support at P−1.
+- **Floor column**: stone at P carrying its notes to the sides, repeater at P+1 driving the next
+  path centre. No centre of its own — the path rail's repeater stands over it.
+- **Head**: repeater, then dust on stone. Two columns, of which one is the trigger every module pays
+  for anyway.
+- **Blank**: a floor column with its notes left off, for a chord of three the floor rail cannot hold,
+  for a pair of gaps over four ticks, and now for a chord a stacked neighbour would sound early.
 
-- **`main` is red and was already red.** Baseline is the **7 failing tests** listed above. Diff
-  names, never counts. The previous version of this file said 7 with `BigSplitTest` among them; that
-  was stale, `BigSplitTest` passes. Expect this list to go stale again -- check it, do not trust it.
-- **`createPastePlan` builds the song twice** — once without lookahead, once with — and keeps whichever
-  `beats` the other. Both walks go past the trace. `PLANRUN` lines now say which is which and which
-  won; before they existed, two chords were misidentified in one afternoon by reading the wrong half.
-- **The two candidates disagree about which floor a lane sits on and about the paste shift.** A chord
-  looked up by coordinate can be found in the plan that lost. Prefer `plan.commands()`, which is the
-  winning plan in paste coordinates, over arithmetic on the trace.
-- **`verify()` reports faults that do not happen.** `SHARED_PULSE_TICKS` was 4, which is shorter than
-  the button that starts the machine, so a note re-powered 8 ticks later was called doubled. ekran
-  played it: it sounds once. It is 10 now. This matters because `wrongNotes()` outranks every other
-  number by `betterThan`, so a phantom here can veto real work — and did, for most of a day.
-- **The invariant in `UltraSlots.slot` has an exception.** It says the lane alongside contests at
-  most one of the four low slots, so a head may always give up one and keep the other. That is false
-  when what stands behind is another stacked module's centre: then both slots behind are gone, and a
-  head that keeps one has a note in somebody else's cell. `stackedSplitOf` takes `stackedBehind` for
-  exactly this, read from `columnBehindBusy` in the walk and `sweep.busy()` in the planner so neither
-  has to guess. ekran's words: *the first rule of stacked chords.*
-- **A cut is built by its own path, not by `addChordModule`.** It gets none of that method's guards
-  and, until `bc61494`, none of its trace either. If a chord cannot be found in the trace, look for a
-  `SPLIT` line before concluding anything about it.
-- **`BlitzSweepTest` only builds `ULTRA_COMPACT_LANE`.** Run `gradlew cleanTest test` before
-  committing; `gradlew sweepTest` is the measurement, not the test.
-- **Measure the built song, not the layers.** ekran has dedupe on, so
-  `SongBuilder.eventNotes(project.toSequenceTracks(Set.of(), true))` is the right call.
-- **`run/` is not in the repo.** The song library every probe reads is local only.
-- **Only ekran ends what ekran asked for.** Shipping a flag off is disabling it. If a measurement
-  argues against something they asked for, that is the start of the investigation and not a verdict.
+## The two routes that killed the wire, and what each one was
 
-## Probes worth knowing
+Both produce the same picture and neither was the route the last handoff guessed at. Its two
+suspects were both innocent, and instrumenting every run exit is what said so: 360 ends on thriller,
+every one of them on a path column by its own arithmetic, none abandoned by `turning || bending`.
+`railPairAfter` and `railNextDelay` do agree.
 
-- `HandoverCollisionProbe` — the per-size Guardian table, the side-swap count, a region dump that
-  prints any box of the winning plan in paste coordinates, and `marksTheCutCollision`, which no
-  longer reproduces anything now that `d0ebf59` is in but is the shape to copy when the next
-  collision turns up.
-- `BreachOfOneProbe` — the handover column on and off, per width and floor, with breaches of exactly
-  one counted apart; and a full-`TRACE` walk of ekran's 44×3.
-- `MARK_COLLISIONS` — builds through a collision and lights it up, naming the shape that laid each
-  block. **Use this first.** It is the only tool this week that has never been wrong.
-- `TRACE_TURNS` — one line per chord standing outside the footprint, with the wire it has.
-- `TRACE` — the full walk, plus `SPLIT` for cut chords, `CUTTRY` for every refused closing pad, and
-  `DRIFT` where a chord did not land where `landingOf` said.
-- `GuardianStackedTest` — decision census, the 44×3 chord trace, the width/floor sweep.
+**The signature is always wire-block-wire.** A block powered only by dust is *soft* powered: it will
+still sound the notes hung on it -- which is why the note on it reads as reached, and why the last
+live note in a build is always sitting on the fault -- and it cannot light the dust on its far side.
+
+### One: a booked pad landing inside a committed pair
+
+The run's own columns were right; a column was inserted *between* them. The plan books its pad
+against an event, and the walk lays that pad at the top of the event, before the rail branch is
+reached. So when a pair had been committed, a booked column landed between the repeater a rail
+column had already laid and the note that repeater existed to drive. On thriller at 16 wide over 3
+floors, `z=31`, reading west:
+
+```
+x=9 PATH   centre note, repeater below
+x=8 FLOOR  notes at floor level, repeater above
+x=7        stone + dust  <- booked pad, not part of the run
+x=6 PATH   stone centre -- soft powered, sounds its own notes, lights nothing
+```
+
+Three of these in that build; the first buried 7517 of 8027 notes. Fixed where the pair is
+committed, as the last handoff predicted: `railPairAfter` refuses a pair that spans a booked pad, so
+the run ends on its path column, the lane pads as planned, and a fresh run opens beyond it. Thriller
+went 7517 -> 0, and the library 14200 -> 1337.
+
+### Two: the cheap head priced when the walk will not build it
+
+`railOpens` priced the head at one column whenever a stacked chord stood behind, but the walk only
+takes that head where the padding leaves the lane where it stood -- the cross has to be the cell
+behind the trigger. With a wait of eight ticks the padding moves the lane one column, the walk
+builds the whole two-column head, and the run opens one column poorer than it was promised. It then
+finds no room for its pair and ends on the column its head's *dust* drives, which lights no dust of
+its own.
+
+The plan already had the words for it: `addRailNote` raises *"a run at tick N ended on the column its
+head's dust drives"*, and printing `plan.faults()` in the probe named it in one run. `railHeadColumns`
+now takes the wait and charges the full head whenever the padding will spend a column. That is the
+last 1337, over three songs.
+
+**Both fixes are one-liners in effect and neither is a flag.** Nothing was disabled to get here.
+
+## The numbers, whole library, seven sizes a song
+
+```
+wrong notes   0 off ->    0 on
+breach     2349 off -> 2349 on
+dead wires    0 off ->    0 on
+depth              better on 202 sizes, worse on 44
+runs opened   6052 off a stacked chord, 13064 building a head
+```
+
+`RailAgainstStacksTest` prints all three. It used to compare only wrong notes and depth, which is why
+it kept coming back clean while `BreachTraceTest` went red -- **measure all three or the sweep lies
+to you.** It takes about twenty minutes; do not run anything else against `sweepTest` while it does,
+or the two collide on `build/test-results/sweepTest` and both die.
+
+The six synthetic songs (`ultra-ones/twos/threes/gaps-mixed`, song of storms, lady brown) are clean
+at all 252 plan sizes and all 55 read back, and none of them holds a chord big enough to stack, so
+none of them can see any of this. That is why the library sweep exists.
+
+## Settled during this session, with the measurement
+
+- **A note block carries power exactly as a stone does.** `NoteMachineReader.spreadFromDust` refused
+  to carry a dust's power into a note block — one clause, no comment, no matching refusal for the
+  block below. `NoteBlockConductsTest` asks the game: `isRedstoneConductor`, `isSignalSource`,
+  `canOcclude`, `isSolidRender` all read the same for stone and note block. **Ask Minecraft's own
+  block properties before believing the reader about physics.**
+- **A run may not end where it opened.** The opening column is the one column the head's *dust*
+  drives, and a block dust powers cannot light dust. `railOpens` now asks up front for the same room
+  the column-by-column test asks for after the head and the padding.
+- **Blanks are not waste**, though they look it. A blank is not against the plain lane, it is against
+  *ending the run*, and a run that ends pays a fresh head. Total depth: plain 1843, one blank ever
+  1557, one in a row 1498, two 1484, three 1476, **no limit 1473**. `RAIL_BLANKS_IN_A_ROW` holds the
+  switch, off.
+- **Floor notes contend with stacked chords, and both of ekran's fixes work.** A chord with a side to
+  spare hangs on the far side; a chord needing both sides is refused the floor column and the blank
+  lifts it onto the path rail. 32 songs went from no wrong notes to some; back to nought.
+- **A stacked chord is already a head.** Its dust cross sits on stone at the lane's own floor level,
+  one column back from where it hands over, live at the module's tick — so a run opens off it for the
+  price of the trigger column alone. Detected by reading the block behind, not by `lastStyle`.
+
+## Flags
+
+`TWO_RAIL_RUNS`, `RAIL_BLANKS`, `RAIL_BLANKS_FOR_DELAY`, `RAIL_MOVES_FOR_STACKS`, `RAIL_FROM_STACK`,
+`MARK_UNREACHED` — all on. `RAIL_BLANKS_IN_A_ROW` is off (`Integer.MAX_VALUE`) with its numbers in
+the javadoc. Nothing has been disabled or reverted; ekran asked for it that way twice.
+
+## Red tests
+
+`BreachReproSearchTest` is not this branch's -- its spec builds no rail column at all, and
+`RailTouchesBreachReproTest` pins that. `BreachTraceTest.listsTheRealBreachesLeft` **is** ours: it
+asserts no song somebody wrote turns past its wall, passed at `70b777e`, and has been red since.
+Running it is the check that is left.
+
+Run that method by name and nothing else in the class. The other three tests in the file are scratch
+probes that set `SongBuilder.TRACE = true`, and a traced build pours every walk line through log4j --
+that is where the eighteen-gigabyte `latest.log` came from. Two runs of the whole class sat at four
+hundred megabytes of heap each and had to be killed.
+
+```bash
+./gradlew.bat test --offline --tests "com.fastnoteblocks.client.compat.BreachTraceTest.listsTheRealBreachesLeft"
+```
+
+## Running any of this in a fresh worktree
+
+The probes read `run/config/fast-noteblocks/songs`, which is gitignored and lives in the main
+checkout. A worktree has no `run` at all, and every probe dies on `NoSuchFileException` until it does:
+
+```bash
+cmd //c mklink //J run "D:/Documents/modding/fast-noteblocks/run"
+```

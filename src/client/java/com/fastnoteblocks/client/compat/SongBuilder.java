@@ -15,6 +15,7 @@ import java.util.Set;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.commands.arguments.blocks.BlockStateParser;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.EmptyBlockGetter;
 
@@ -44,11 +45,12 @@ public final class SongBuilder {
 				continue;
 			}
 			String instrumentBlock = instrumentBlockId(layer.instrument());
+			PreviewInstrument.Effect effect = effectOf(layer.instrument());
 			int time = 0;
 			int order = 0;
 			for (Step step : project.toSteps(layer)) {
 				if (step.type() == StepType.NOTE) {
-					notes.add(new EventNote(time, layerIndex + 1, order++, step.value(), instrumentBlock));
+					notes.add(new EventNote(time, layerIndex + 1, order++, step.value(), instrumentBlock, effect));
 				} else {
 					time += step.value();
 				}
@@ -72,6 +74,7 @@ public final class SongBuilder {
 		for (int trackIndex = 0; trackIndex < tracks.size(); trackIndex++) {
 			FastNoteblocksConfig.SequenceTrack track = tracks.get(trackIndex);
 			String instrumentBlock = instrumentBlockId(track.instrument());
+			PreviewInstrument.Effect effect = effectOf(track.instrument());
 			int time = 0;
 			int order = 0;
 			List<Step> steps;
@@ -82,7 +85,7 @@ public final class SongBuilder {
 			}
 			for (Step step : steps) {
 				if (step.type() == StepType.NOTE) {
-					notes.add(new EventNote(time, trackIndex + 1, order++, step.value(), instrumentBlock));
+					notes.add(new EventNote(time, trackIndex + 1, order++, step.value(), instrumentBlock, effect));
 				} else {
 					time += step.value();
 				}
@@ -189,10 +192,16 @@ public final class SongBuilder {
 		}
 	}
 
-	/** How far a chord too small to need a bus reaches either side of its lane. */
-	private static LaneReach smallChordReach(int chordSize, int margin) {
+	/**
+	 * How far a chord too small to need a bus reaches either side of its lane.
+	 *
+	 * <p>A chord of one normally sits on the centre line and reaches nothing. The exception is one
+	 * that had to be lent a middle: its sound is off to the back side, so the lane owes it that
+	 * column even though there is only one sound in it.</p>
+	 */
+	private static LaneReach smallChordReach(int chordSize, boolean lentMiddle, int margin) {
 		if (chordSize <= 1) {
-			return new LaneReach(0, 0, margin, false);
+			return new LaneReach(lentMiddle ? 1 : 0, 0, margin, false);
 		}
 		return chordSize <= 2 ? new LaneReach(0, 1, margin, false)
 			: new LaneReach(1, 1, margin, false);
@@ -337,7 +346,7 @@ public final class SongBuilder {
 			throw new IllegalArgumentException(overloadMessage(stats));
 		}
 		Direction forward = Direction.EAST;
-		return switch (mode) {
+		return withUnreachedMarked(switch (mode) {
 			case COMPACT_CUBE -> createCubePastePlan(origin, forward, notes, limits.maxFloors());
 			case COMPACT -> createCompactPastePlan(origin, forward, notes);
 			case COMPACT_LANE -> createLanePastePlan(origin, forward, notes, limits.laneWidth(),
@@ -345,7 +354,86 @@ public final class SongBuilder {
 			case ULTRA_COMPACT_LANE -> bestUltraPlan(origin, forward, notes, limits, start);
 			case ULTRA_COMPACT_LANE_V2 -> UltraLaneV2.plan(origin, forward, notes, limits, start);
 			case LANE -> createStraightPastePlan(origin, forward, notes);
-		};
+		});
+	}
+
+	/**
+	 * Whether a build is read back before it is handed over, so that note blocks the signal never
+	 * reaches are reported as a fault and shown as sea lanterns.
+	 *
+	 * <p>A note that never fires is as much a wrong note as one that fires twice, and it is the worse
+	 * of the two to find: nothing else here can see it. {@code verify} asks whether every note block
+	 * has something beside it that ought to set it off, and a machine whose wire dies upstream
+	 * satisfies that completely -- the notes downstream still have their triggers, those triggers
+	 * just never fire. So the only way to know is to read the blocks back, and the only place that
+	 * can be done is after they are laid.</p>
+	 *
+	 * <p>Sea lantern rather than a warning alone, because a count says a build is broken and a
+	 * position says where. Nothing is lost by overwriting them: they were never going to sound.</p>
+	 */
+	static boolean MARK_UNREACHED = true;
+
+	/** The same plan with every note the signal never reaches turned into a sea lantern. */
+	private static PastePlan withUnreachedMarked(PastePlan plan) {
+		if (!MARK_UNREACHED) {
+			return plan;
+		}
+		Map<BlockPos, net.minecraft.world.level.block.state.BlockState> world =
+			new java.util.HashMap<>();
+		for (String command : plan.commands()) {
+			String[] parts = command.split(" ");
+			try {
+				world.put(new BlockPos(Integer.parseInt(parts[1]), Integer.parseInt(parts[2]),
+						Integer.parseInt(parts[3])),
+					net.minecraft.commands.arguments.blocks.BlockStateParser
+						.parseForBlock(BuiltInRegistries.BLOCK, parts[4], false)
+						.blockState());
+			} catch (RuntimeException | com.mojang.brigadier.exceptions.CommandSyntaxException broken) {
+				return plan;
+			}
+		}
+		if (world.isEmpty()) {
+			return plan;
+		}
+		BlockPos low = new BlockPos(
+			world.keySet().stream().mapToInt(BlockPos::getX).min().orElse(0),
+			world.keySet().stream().mapToInt(BlockPos::getY).min().orElse(0),
+			world.keySet().stream().mapToInt(BlockPos::getZ).min().orElse(0));
+		BlockPos high = new BlockPos(
+			world.keySet().stream().mapToInt(BlockPos::getX).max().orElse(0),
+			world.keySet().stream().mapToInt(BlockPos::getY).max().orElse(0),
+			world.keySet().stream().mapToInt(BlockPos::getZ).max().orElse(0));
+		NoteMachineReader.Reading reading;
+		try {
+			reading = NoteMachineReader.read("unreached", low, high,
+				position -> world.getOrDefault(position,
+					net.minecraft.world.level.block.Blocks.AIR.defaultBlockState()));
+		} catch (RuntimeException unreadable) {
+			return plan;
+		}
+		if (reading.unreachedNotes() == 0) {
+			return plan;
+		}
+		Set<BlockPos> dead = Set.copyOf(reading.unreachedAt());
+		List<String> commands = new ArrayList<>(plan.commands().size());
+		for (String command : plan.commands()) {
+			String[] parts = command.split(" ");
+			BlockPos at = new BlockPos(Integer.parseInt(parts[1]), Integer.parseInt(parts[2]),
+				Integer.parseInt(parts[3]));
+			commands.add(dead.contains(at) && parts[4].startsWith("minecraft:note_block")
+				? "setblock " + at.getX() + " " + at.getY() + " " + at.getZ()
+					+ " minecraft:sea_lantern replace"
+				: command);
+		}
+		BlockPos first = reading.unreachedAt().getFirst();
+		List<String> faults = new ArrayList<>(plan.faults());
+		faults.add(reading.unreachedNotes() + " note blocks would never be triggered -- the signal "
+			+ "does not reach them, so that much of the song is silent. They are built as sea "
+			+ "lanterns; the first is at " + first.getX() + " " + first.getY() + " " + first.getZ());
+		return new PastePlan(List.copyOf(commands), plan.width(), plan.depth(), plan.height(),
+			plan.spanX(), plan.spanZ(), plan.mode(), List.copyOf(faults), plan.turns(), plan.moved(),
+			plan.breaches(), plan.recesses(), plan.padding(), plan.nearWall(), plan.farWall(),
+			plan.collisions());
 	}
 
 	/**
@@ -643,6 +731,26 @@ public final class SongBuilder {
 		// stone lies right alongside it at the same level.
 		boolean columnBehindBusy = false;
 		ChordStyle lastStyle = ChordStyle.SMALL;
+		// Which rail of a two-rail run the next note falls on: 0 the path, 1 the floor beneath it,
+		// and -1 for a walk that is not in a run. A run cannot end on the floor rail -- its notes sit
+		// a level below the path and there is nothing to bring the wire back up -- so this only ever
+		// returns to -1 from 0. See {@link #addRailNote}.
+		int railPhase = -1;
+		// When each rail's last anchor went live, indexed the same way. Every repeater a run lays is
+		// measured from one of these rather than from an event two back, because a blank column
+		// swaps the rails over and after that the two no longer line up with the event order.
+		int[] railLive = new int[2];
+		// The tick a blank owed to the next floor column goes live at, or {@link #NO_BLANK}. Decided
+		// one column ahead, because the repeater that drives the blank is laid before the walk
+		// reaches it and the two have to agree about when it fires.
+		int railBlank = NO_BLANK;
+		// How many blanks this run has laid one after another, so that a floor rail carrying nothing
+		// stops rather than being paid for to the end of the lane. See {@link #RAIL_BLANKS_IN_A_ROW}.
+		int railBlanksRunning = 0;
+		// And whether the floor rail has held a chord yet at all. A run that has never got one down
+		// there is the one ekran read off lady brown, and the only one where the blank is not paying
+		// for itself: once the floor rail is carrying, breaking the run costs a whole fresh head.
+		boolean railFloorCarried = false;
 		// What the wire at the end of the lane is still worth. Every module opens with a repeater, so
 		// this only ever counts what the module just built spent: nothing, unless it was a bus.
 		int tipSignal = DUST_RANGE;
@@ -776,7 +884,24 @@ public final class SongBuilder {
 			Landing here = landingOf(lane.pos().getX(), lane.travel().getStepX(), event, wait,
 				columnBehindBusy, wall, layout, inTurn(turning, leavingTurn, lane.pos(), lastCorner),
 				parity);
-			int landing = here.end() + lane.travel().getStepX() * reserve;
+			// A cell of a rail run is one column, and the column that opens one is three -- the
+			// repeater, the dust, then the note. Overridden here rather than taught to landingOf,
+			// because whether a run is under way is a fact about the walk rather than about the
+			// chord: the same event opens a run in one lane and continues one in the next.
+			boolean railContinues = railPhase >= 0;
+			// Two where a chord of three has landed on the floor rail, which has no centre to give it:
+			// the blank column that gets it onto the path rail, and then its own.
+			int railColumns = railContinues
+				? railPhase == 1 && railBlank != NO_BLANK ? 2 : 1
+				: railOpens(events, index, lane, wall, layout, turning, reserve, wait,
+					railStackSeed(placements, lane, lastStyle, currentTime, turning), booked)
+					// The head's columns, its chord, and the repeater a four-tick stretch of the wait
+					// in front of it costs -- the same sum the plain path makes of it.
+					? railHeadColumns(railStackSeed(placements, lane, lastStyle, currentTime, turning),
+						wait) + 1 + railPadColumns(wait) : 0;
+			int landing = railColumns > 0
+				? lane.pos().getX() + lane.travel().getStepX() * (railColumns + reserve)
+				: here.end() + lane.travel().getStepX() * reserve;
 			// Never while the route is still bending. Inside a turn the wire runs across the corridor
 			// rather than along it, so every one of these measurements is taken down the wrong axis --
 			// and there is nothing to decide anyway, because the walk has already committed to the
@@ -784,13 +909,31 @@ public final class SongBuilder {
 			// arithmetic about walls says so.
 			// Whether this event will not fit before the wall, which is a different question from
 			// whether the lane may end here.
-			boolean overshoots = !turning && (landing > farWall || landing < nearWall);
+			// Never while a run owes its next column. A run that has laid a repeater has promised the
+			// column in front of it a note, and every way a lane can be interrupted takes that column
+			// away: the note ends up on the far side of a staircase, a floor down and running the
+			// other way, while the repeater meant to drive it stays at the wall driving the staircase.
+			//
+			// Said here, on the overshoot, rather than on {@code wantsTurn}. The cut is deliberately
+			// asked of the overshoot and not of the turn -- see the split below -- so a guard on the
+			// turn alone left the cut free to take the column, which is exactly what it did.
+			//
+			// Safe to refuse because a run only extends where the pair it commits to fits before the
+			// wall with the turn's column still to spare, asked column by column as it goes. The run
+			// always ends first, and then the lane turns.
+			boolean overshoots = !turning && railPhase < 0
+				&& (landing > farWall || landing < nearWall);
 			// And whether it merely gets there. A chord ending on the wall, or one column short of
 			// it, has not overshot and so was never offered a cut -- which leaves the lane holding a
 			// long bus, no near half to cut, and a turn to pay for out of the two cells that bus left
 			// it. That is the case the whole pad layer was built around. See
 			// {@link #CUTS_THE_CHORD_THAT_REACHES}.
-			boolean reaches = !turning
+			//
+			// Carries the run's guard as well. This is the other way into the cut, and it is off in v1
+			// -- so it changes nothing today -- but a cut offered here would take the column the run
+			// has already promised, which is the whole reason the guard is on the overshoot rather
+			// than on the turn.
+			boolean reaches = !turning && railPhase < 0
 				&& (wall - landing) * lane.travel().getStepX() <= 1;
 			// A lane has to hold something before it can end, or a turn that lands short would turn
 			// again at once and the walk would climb the whole build without laying a note.
@@ -1702,6 +1845,117 @@ public final class SongBuilder {
 					+ " tip=" + tipSignal + " spent=" + spentPadding + " style=" + event.style());
 			}
 			BlockPos before = lane.pos();
+			// A turn ends a run: the far side of a staircase is a fresh lane and wants a head of its
+			// own. Only ever reached from the path rail, because the floor rail refuses to turn, so
+			// the wire is already at path level and there is nothing to undo.
+			// Asked again here rather than taken from the top of the event, because by this point a
+			// staircase may already have been built: the lane stands somewhere else, running the
+			// other way, with the other wall in front of it. The answer from before the turn is
+			// about a lane that no longer exists, and measured against the old wall it is always no
+			// -- which is why a run used to take several chords to come back after a floor change,
+			// when it can open on the very first one. Only a flat turn is a reason to wait, and that
+			// is the bending test: its sideways run lies across the way both rails go.
+			int laneWall = lane.travel() == forward ? farWall : nearWall;
+			if (turning || lane.bending()) {
+				railPhase = -1;
+			} else if (railPhase >= 0 || railOpens(events, index, lane, laneWall, layout, false,
+					reserve, wait, railStackSeed(placements, lane, lastStyle, currentTime, false),
+					booked)) {
+				boolean opening = railPhase < 0;
+				boolean fromDust = false;
+				if (opening) {
+					int seed = railStackSeed(placements, lane, lastStyle, currentTime, false);
+					// The wait in front of the run, laid the way every other module lays it: a repeater
+					// for every four ticks of it, and the remainder in the head's own. Clamping it to
+					// four instead is right only while no gap exceeds four, which is true of every
+					// synthetic song here and of no real one -- song of storms opened a run on a wait
+					// of eight and sounded its whole first phrase early.
+					SpatialDelayTrigger opener = addSpatialDelayBeforeEvent(placements, lane,
+						event.time() - currentTime - spentPadding, layout.ultra());
+					// Off a stacked chord only where the padding did not move the lane on: the cross
+					// has to be the cell behind the trigger, and a column of wire in between puts the
+					// whole thing out of reach.
+					boolean offStack = seed != NO_BLANK && opener.lane().pos().equals(lane.pos());
+					fromDust = !offStack;
+					lane = offStack
+						? addRailFromStack(placements, opener.lane(), opener.triggerDelay(), seed)
+						: addRailHead(placements, opener.lane(), opener.triggerDelay(), event.time());
+					railPhase = 0;
+					railBlanksRunning = 0;
+					railFloorCarried = false;
+					// The head's own stone and the stone under its dust both go live with this chord,
+					// so both rails are timed from here.
+					railLive[0] = event.time();
+					// The floor rail is live from whatever seeded it: this chord where a head was
+					// built, and the stacked chord behind it where one was inherited.
+					railLive[1] = offStack ? seed : event.time();
+				} else if (railPhase == 1 && railBlank != NO_BLANK) {
+					// The floor column this chord would have taken, laid empty: either the chord is a
+					// three and the floor rail has no centre for it, or the pair of gaps behind it is
+					// too long for one repeater. Either way the chord takes the path column after it
+					// and the two rails come out swapped over.
+					lane = addRailBlank(placements, lane, railBlank,
+						railDelay(railLive[0], event.time()));
+					railLive[1] = railBlank;
+					railPhase = 0;
+				}
+				railBlank = NO_BLANK;
+				int nextDelay;
+				if (railPhase == 0) {
+					// The path rail is the only place a run may end, so a column here only carries on
+					// where the whole pair after it fits -- both its columns, and whatever the lane
+					// keeps back for its turn. Measured against the wall rather than against the
+					// turn's cells: those are a wire budget, and every column of a run holds a
+					// repeater.
+					RailPair pair = railRoom(lane, laneWall) >= 2 + reserve
+						? railPairAfter(events, index, event.time(), railLive[1], placements,
+							lane.ahead(1), booked)
+						: null;
+					// And a floor rail that keeps taking blanks is not carrying anything: a chord and a
+					// blank between them cost the two columns the plain lane charges for the chord
+					// alone, so a stretch of them is the head's two columns thrown away and nothing
+					// gained. The run stops instead and the lane carries on plainly, which is what
+					// ekran asked for -- "it can just continue if it doesn't know it will be able to
+					// place a note there later".
+					if (pair != null && pair.blank() && !railFloorCarried
+							&& railBlanksRunning >= RAIL_BLANKS_IN_A_ROW) {
+						placements.padded("railStoppedForBlanks");
+						pair = null;
+					}
+					railBlanksRunning = pair == null || !pair.blank() ? 0 : railBlanksRunning + 1;
+					nextDelay = pair == null ? 0 : railDelay(railLive[1], pair.floorTime());
+					railBlank = pair != null && pair.blank() ? pair.floorTime() : NO_BLANK;
+				} else {
+					// A floor column always carries on: the pair it belongs to was committed to at the
+					// path column behind it. Its repeater is the path rail's, measured from the path
+					// rail's last anchor.
+					nextDelay = railNextDelay(events, index, railLive[0]);
+				}
+				if (TRACE) {
+					System.out.println("RAIL t=" + event.time() + " at " + lane.pos().getX() + ","
+						+ lane.pos().getY() + "," + lane.pos().getZ() + " phase=" + railPhase
+						+ " opening=" + opening + " nextDelay=" + nextDelay
+						+ " wall=" + laneWall + " room=" + railRoom(lane, laneWall)
+						+ " travel=" + lane.travel());
+				}
+				// A floor column that is not a blank is the floor rail earning its keep.
+					railFloorCarried |= railPhase == 1;
+					lane = addRailNote(placements, lane, railPhase, event.notes(), event.time(),
+					nextDelay, fromDust);
+				railLive[railPhase] = event.time();
+				railPhase = nextDelay > 0 ? 1 - railPhase : -1;
+				currentTime = event.time();
+				// Every column of a run holds a repeater bar the one it opens on, so the wire never
+				// runs: whatever touches the end of one is reading a block a repeater drives directly.
+				// The opening column is the exception and it is not allowed to be the last, which is
+				// what {@link #railOpens} asks its room for.
+				tipSignal = DUST_RANGE;
+				columnBehindBusy = true;
+				lastStyle = ChordStyle.SMALL;
+				laneStarted = true;
+				leavingTurn = false;
+				continue;
+			}
 			// What the planner would say this chord does, asked at the moment the walk is about to do
 			// it. Kept as a counter rather than a fault because a gap here is not wrong in itself --
 			// a nudge is decided against blocks on the ground and no arithmetic can foresee it -- but
@@ -5307,7 +5561,7 @@ public final class SongBuilder {
 				: style.busHeaded() ? Math.max(0, 13 - tailCells)
 				: 13;
 			result.add(new EventGroup(time, List.copyOf(chord), delayRepeaters + eventLength,
-				maxSafeTurnDistance, style, laneReachOf(layout, style, chord.size())));
+				maxSafeTurnDistance, style, laneReachOf(layout, style, chord)));
 			currentTime = time;
 			previousTookTheGap = takesTheGapBehind(style, tailCells);
 		}
@@ -5419,10 +5673,14 @@ public final class SongBuilder {
 	static int HEADLESS_FOR_ROOM_BEHIND = 0;
 
 	private static ChordStyle chooseStyle(Layout layout, List<EventNote> chord, boolean roomBehind) {
-		if (chord.size() <= 3) {
+		if (fitsSmallModule(chord)) {
 			return ChordStyle.SMALL;
 		}
-		if (!layout.ultra()) {
+		if (!layout.ultra() || hasEffect(chord)) {
+			// Every stacked shape leans on its own notes to relay power outward, and an effect is a
+			// block that either sounds or conducts, mostly not both. The bus asks nothing of them:
+			// it powers each one directly off its own stone, so it is what a chord with an effect
+			// in it gets. A song of pure note blocks reaches this line exactly as it always did.
 			return ChordStyle.BUS;
 		}
 		if (ultraSlots(chord, false) != null) {
@@ -5455,16 +5713,36 @@ public final class SongBuilder {
 	 * occupy as live whether it is or not, which is what keeps their spacing -- and so every build
 	 * anyone has already made with them -- exactly as it was.</p>
 	 */
-	private static LaneReach laneReachOf(Layout layout, ChordStyle style, int chordSize) {
+	private static LaneReach laneReachOf(Layout layout, ChordStyle style, List<EventNote> chord) {
 		int margin = layout.ultra() ? 0 : 1;
+		int chordSize = chord.size();
 		if (style.stacked()) {
 			// The two blocks a cross hands its signal to sit one either side of the centre line,
 			// at the same level as the four low notes. A chord measured as this and then dropped
 			// to a bus keeps the wider claim, which is the harmless direction to be wrong in.
 			return new LaneReach(1, 1, margin, false);
 		}
-		return style == ChordStyle.BUS ? new LaneReach(1, 1, margin, false)
-			: smallChordReach(chordSize, margin);
+		if (style == ChordStyle.BUS) {
+			return new LaneReach(1, 1, margin, false);
+		}
+		// The lent middle comes from main: a lone note carrying no module of its own borrows the
+		// centre cell, so it reaches one way where it used to reach nowhere. Asked before the rail
+		// claim below and kept underneath it, because a chord small enough for a run may still be
+		// that lone note, and the run's own claim is the wider of the two.
+		LaneReach small = smallChordReach(chordSize, needsLentMiddle(chord), margin);
+		// A run of single notes used to be the one lane that reached nowhere at all -- its whole
+		// module is the anchor on its own centre line -- so lanes of them packed two apart. A rail
+		// column hangs its notes out to the sides, which makes that untrue, and a lane spaced for the
+		// old answer meets its neighbour's live centre line one block from that note. Claimed of
+		// every chord small enough for a run rather than of the ones that end up in one, because
+		// whether a run is under way is a fact about the walk and this is asked of the chord.
+		//
+		// Both sides, because the floor rail has no centre and a chord of two there fills each of
+		// them. It costs nothing over claiming one: a lane reaching one way already spaces at three,
+		// which is what {@link #laneSpacing} answers for either.
+		return TWO_RAIL_RUNS && layout.ultra() && chordSize <= RAIL_MAX_NOTES
+			? new LaneReach(1, 1, margin, small.lowLive())
+			: small;
 	}
 
 	private static CompactLayout chooseCompactLayout(List<EventGroup> events) {
@@ -5708,6 +5986,567 @@ public final class SongBuilder {
 		}
 		placements.placing(was);
 		return lane;
+	}
+
+	/**
+	 * Whether a run of small chords is laid as two interleaved rails rather than as a module each.
+	 *
+	 * <p>A chord of three or fewer costs two columns however small it is: a repeater, then the block
+	 * that repeater drives. Ekran's shape halves that by running two chains at once -- one on the
+	 * path, one on the floor beneath it -- each carrying twice the gap and offset from the other by
+	 * one gap. Every column then holds one note and the repeater that drives the next, and the notes
+	 * alternate between the two levels:</p>
+	 *
+	 * <pre>
+	 *   path    r2  w   sA  r4  C   r4  E   r4  G
+	 *   floor   s   s   r2  sB  r4  sD  r4  sF
+	 *   below           s       s       s
+	 * </pre>
+	 *
+	 * <p>{@code sX} is the cell the wire runs through with a note hung off the side of it. Each column
+	 * offers its slots in one order -- the centre, then the near side, then the far one -- and what
+	 * decides how many it needs is which of them the chord can use:</p>
+	 *
+	 * <ul>
+	 *   <li>The <b>centre</b> is the wire itself, so a note there has no instrument block of its own
+	 *       and plays harp whatever was meant. It is offered to a harp note of the chord and to
+	 *       nothing else.</li>
+	 *   <li>The <b>floor rail has no centre at all</b>: the path rail's repeater stands directly over
+	 *       it, and a note block plays only with air above. Both its notes go to the sides, which is
+	 *       what caps a run at chords of two.</li>
+	 *   <li>The <b>head's centre</b> can never hold a note, and that is the one thing here that had to
+	 *       be measured rather than reasoned about: a note block relays to the repeater in front of it
+	 *       when a <em>repeater</em> drives it and does not when <em>dust</em> points into it, while
+	 *       stone relays either way.</li>
+	 * </ul>
+	 *
+	 * <p>The sides hang off the centre with a block each of their own, so they keep any instrument
+	 * there is.</p>
+	 *
+	 * <p>The dust is what makes it start, and it is why the run opens with its repeater a column back
+	 * rather than facing the first note: dust powers the stone it sits on, and that stone is what the
+	 * floor rail's first repeater reads. Every repeater is then {@code t(k+1) - t(k-1)}, which is why
+	 * the run is only available where two consecutive gaps come to four or less.</p>
+	 */
+	static boolean TWO_RAIL_RUNS = true;
+
+	/** A path column's cells: a centre and a side each way. Only a harp note can take the centre. */
+	private static final int RAIL_PATH_SLOTS = 3;
+
+	/**
+	 * A floor column's cells: the two sides and no centre.
+	 *
+	 * <p>The path rail's repeater stands directly over a floor column's centre, and a note block
+	 * plays only with air above it. So the floor rail is the narrower of the two, and a chord of
+	 * three landing on it is what {@link #addRailBlank} exists for.</p>
+	 */
+	private static final int RAIL_FLOOR_SLOTS = 2;
+
+	/** The largest chord any column of a run can hold, which is a path column with a harp note. */
+	static int RAIL_MAX_NOTES = RAIL_PATH_SLOTS;
+
+	/**
+	 * Whether a column of this rail could hold this chord.
+	 *
+	 * @param path whether the column is a path column, which has a centre where a floor column has
+	 *     none -- and the centre is the cell the wire runs through, so only a harp note can take it
+	 */
+	private static boolean railHolds(EventGroup event, boolean path) {
+		if (!path && event.notes().stream()
+				.anyMatch(note -> FALLING_INSTRUMENT_BLOCKS.contains(note.instrumentBlock()))) {
+			// A floor column is the one shape in this build that hangs a note at the lane's own floor
+			// level, so its instrument block sits a level below that and sand wants holding up from
+			// the level below *that* -- which is the cell the floor underneath needs left empty over
+			// its own path notes. Floors are four apart and a rail's side column already uses all
+			// four, so there is nowhere for that stone to go. The path rail sits a level higher and
+			// has the room, so a chord carrying sand goes there instead.
+			return false;
+		}
+		int notes = event.notes().size();
+		return notes <= RAIL_FLOOR_SLOTS
+			|| path && notes <= RAIL_PATH_SLOTS
+				&& event.notes().stream().anyMatch(SongBuilder::isHarpNote);
+	}
+
+	/** The repeater and the dust in front of it, laid before the first note of a run. */
+	private static final int RAIL_HEAD_COLUMNS = 2;
+
+	/**
+	 * Whether this event could stand in a rail run at all, leaving aside where its neighbours are.
+	 *
+	 * <p>Asked of the path rail, which is the wider of the two. A chord of three that lands on the
+	 * floor rail is not turned away for it -- {@link #addRailBlank} lays that column empty and the
+	 * chord takes the path column after it.</p>
+	 */
+	private static boolean railFits(EventGroup event) {
+		return railHolds(event, RAIL_BLANKS);
+	}
+
+	/** Off, a run refuses any chord the floor rail cannot hold rather than blanking a column for it. */
+	static boolean RAIL_BLANKS = true;
+
+	/**
+	 * Off, a blank is only laid for a chord the floor rail cannot hold, and never for a pair of gaps
+	 * too long for one repeater. Here to tell the two triggers apart when one of them misbehaves.
+	 */
+	static boolean RAIL_BLANKS_FOR_DELAY = true;
+
+	/**
+	 * How many blanks a run may lay one after another before it is not worth carrying on.
+	 *
+	 * <p>A run of {@code k} chords holding {@code b} blanks costs {@code 2 + k + b} columns where the
+	 * plain lane costs {@code 2k}, so a run is only ahead while {@code b < k - 2}: a floor rail that
+	 * takes a blank every time is a chord and a column each, which is what the plain lane charges,
+	 * plus the head. ekran read the shape off lady brown -- "several bottom rails that are carried on
+	 * for many blocks but NEVER actually get a chord on the bottom before ending. at that point its
+	 * just a waste of resources not an optimization of space".</p>
+	 *
+	 * <p>A limit on how many come in a row rather than on how many there are, because that is the
+	 * question a run can answer where it stands. Whether a chord four events away will fit the floor
+	 * rail depends on where the wall is by then, and a run that guessed would be the third place the
+	 * same budget is kept. And it is only asked while the floor rail has carried nothing at all,
+	 * which is the shape ekran read.</p>
+	 *
+	 * <p><b>Off, because the arithmetic above is wrong about what a blank is against.</b> A blank is
+	 * not against the plain lane, it is against <em>ending the run</em> -- and a run that ends pays a
+	 * fresh head of two columns to start again, on top of the two columns a chord costs while there
+	 * is no run. Measured over every song at three widths and three floor counts
+	 * ({@code RailBlankLimitTest}), total depth: plain 1843, and with runs on 1557 at one blank ever,
+	 * 1498 at one in a row, 1484 at two, 1476 at three, and <b>1473 with no limit at all</b>. Every
+	 * limit is worse than none, and the tighter the limit the worse it gets. So the floor rails ekran
+	 * saw carrying nothing are not waste -- they are the cheapest way to keep the path rail's one
+	 * column per chord, which is the whole win. Left here as a flag rather than deleted, because it
+	 * is ekran's call whether a build that reads wasteful in game is worth three lanes.</p>
+	 */
+	static int RAIL_BLANKS_IN_A_ROW = Integer.MAX_VALUE;
+
+	/** A repeater's delay, or nought where it is not one a repeater can hold. */
+	private static int railDelay(int from, int to) {
+		return to - from >= 1 && to - from <= 4 ? to - from : 0;
+	}
+
+	/**
+	 * The delay of the repeater this column holds for the next note, or nought if the run ends here.
+	 *
+	 * @param behindTime the tick the block behind that repeater goes live, which is whenever the
+	 *     other rail's last anchor did -- normally the note two events back, at the head the stone
+	 *     under the opening dust, and after a blank the blank itself
+	 */
+	private static int railNextDelay(List<EventGroup> events, int index, int behindTime) {
+		return index + 1 >= events.size() || !railFits(events.get(index + 1)) ? 0
+			: railDelay(behindTime, events.get(index + 1).time());
+	}
+
+	/**
+	 * Whether a run may open here: three events that fit their natural rails, and both of the
+	 * repeaters the first two columns will have to hold.
+	 *
+	 * <p>Asked without blanks. A run can swap its rails over mid-way to get a chord of three onto the
+	 * path rail, but the head is the one column that has no centre at all -- its stone has to relay
+	 * the dust -- so opening one is the place to be plain about what fits.</p>
+	 */
+	private static boolean railMayStart(List<EventGroup> events, int index, int floorSeed,
+			Map<Integer, Integer> booked) {
+		if (!TWO_RAIL_RUNS || index + 2 >= events.size()) {
+			return false;
+		}
+		EventGroup head = events.get(index);
+		// The head column is the one path column with no centre to offer -- its stone has to relay the
+		// dust -- so it holds what a floor column holds. Which also means a run can never open on a
+		// chord of three: three notes need a centre, and the head has none.
+		if (head.notes().size() > RAIL_FLOOR_SLOTS) {
+			return false;
+		}
+		// And then the same question a run in progress asks, so that opening one and carrying one on
+		// cannot answer differently. Both rails go live with this chord: the head's own stone, and the
+		// stone under the dust in front of it.
+		// Timed from wherever the floor rail actually starts: the chord itself where a head is built,
+		// and the stacked chord behind it where one is inherited -- which is earlier, so the first
+		// floor repeater has less of its four ticks left to play with.
+		return railPairAfter(events, index, head.time(),
+			floorSeed == NO_BLANK ? head.time() : floorSeed, null, null, booked) != null;
+	}
+
+	/** Columns between this cell and the wall the lane is running at. */
+	private static int railRoom(Lane lane, int wall) {
+		return (wall - lane.pos().getX()) * lane.travel().getStepX();
+	}
+
+	/** Columns of repeater the wait in front of a run costs before its head can be laid. */
+	private static int railPadColumns(int wait) {
+		return Math.max(0, (wait - 1) / 4);
+	}
+
+	/**
+	 * Whether a run may open at this cell of this lane.
+	 *
+	 * <p>The room asked for is the room the run's <em>first pair</em> needs, because a run that stops
+	 * at the column it opened on is a dead wire. Every other column of a run is driven by a repeater,
+	 * and a block a repeater drives hands a full fifteen to whatever the lane lays next; the opening
+	 * column alone is driven by the head's dust, and a block that dust powers cannot light dust of
+	 * its own. So the lane carries on into its padding and the signal stops there, with the rest of
+	 * the song behind it. ekran read one off the world as a stone with wire running into it and out
+	 * of it, and prescribed a repeater beside the block -- which is the physics exactly. The column
+	 * is simply not worth building: a run of one costs three columns where the plain module costs
+	 * two, so the answer is to want the room up front rather than to buy a way out of it.</p>
+	 *
+	 * <p>Which makes this the same sum the column-by-column test makes, moved to before the head is
+	 * laid: the pair and the turn's reserve, plus the two columns of head and whatever the wait in
+	 * front of it spends, since the opening column stands that much further down the lane. The two
+	 * used to disagree by the reserve and by the padding, and every dead wire in the two real songs
+	 * measured was that disagreement.</p>
+	 */
+	private static boolean railOpens(List<EventGroup> events, int index, Lane lane, int wall,
+			Layout layout, boolean turning, int reserve, int wait, int floorSeed,
+			Map<Integer, Integer> booked) {
+		return TWO_RAIL_RUNS && layout.ultra() && !turning && !lane.bending()
+			&& railMayStart(events, index, floorSeed, booked)
+			&& railRoom(lane, wall)
+				>= railHeadColumns(floorSeed, wait) + railPadColumns(wait) + 2 + reserve;
+	}
+
+	/**
+	 * What opening a run costs in columns: both of the head's, or only the trigger off a stack.
+	 *
+	 * <p>The cheap head is only available where the wait in front of the run lays nothing. A stacked
+	 * chord is a head because its cross of dust sits in the cell behind the trigger; a column of the
+	 * wait's own wire in between puts it out of reach, and the walk builds a whole head instead --
+	 * which is what {@code offStack} asks when it checks the padding left the lane where it stood.
+	 * Asking it there and not here is how a run came to open with one column of room less than it
+	 * had been promised: it laid its head, found no room for the pair, and ended on the column its
+	 * head's dust drives. That column lights no dust of its own, so the song stopped there. One run
+	 * of eight ticks of wait in all-of-the-lights left 113 notes silent behind it.</p>
+	 */
+	private static int railHeadColumns(int floorSeed, int wait) {
+		return floorSeed == NO_BLANK || railPadColumns(wait) > 0
+			? RAIL_HEAD_COLUMNS : RAIL_HEAD_COLUMNS - 1;
+	}
+
+	/**
+	 * A floor column carrying no notes, so that the chord which wanted it goes on the path rail.
+	 *
+	 * <p>A chord of three cannot stand on the floor rail, which has no centre. Rather than end the
+	 * run for it -- a run pays two columns of head to start again, and an odd three in the middle of
+	 * a long sequence is not worth that -- the floor column is laid empty and the chord takes the
+	 * path column after it. The two rails come out of it swapped over and carry on (ekran).</p>
+	 *
+	 * <p>A blank is exactly an ordinary floor column with its notes left off, and that is what makes
+	 * it cheap: the floor repeater driving it keeps the delay it would have had anyway, two gaps, so
+	 * the blank goes live on the very tick the chord would have. The one thing that changes is the
+	 * path repeater standing here -- one gap instead of two -- so the path rail's next anchor comes
+	 * round in time to take the chord.</p>
+	 *
+	 * @param pathDelay one gap: from the path rail's last anchor to the chord this makes room for
+	 */
+	private static Lane addRailBlank(PlacementPlan placements, Lane at, int time, int pathDelay) {
+		placements.placing("rail:BLANK");
+		placements.padded("railBlankForOddThree");
+		placements.powered(at.pos(), "minecraft:stone", time);
+		set(placements, at.pos().above(), "minecraft:repeater[facing="
+			+ repeaterFacing(at.travel()) + ",delay=" + pathDelay + "]");
+		return at.ahead(1);
+	}
+
+	/** Whether the plan has booked pad at this event, which the walk lays before any rail column. */
+	private static boolean railPadBooked(Map<Integer, Integer> booked, int index) {
+		return booked != null && booked.getOrDefault(index, 0) > 0;
+	}
+
+	/** What the floor column after a path column carries: the next chord, or a blank at this tick. */
+	private record RailPair(boolean blank, int floorTime) {
+	}
+
+	/** No blank is owed. A real one is a tick, and ticks in a build are never this. */
+	private static final int NO_BLANK = Integer.MIN_VALUE;
+
+	/**
+	 * What comes after this path column, or {@code null} where the run has to end here.
+	 *
+	 * <p>A run may only end on a path column -- the floor rail's notes sit a level below the path and
+	 * nothing brings the wire back up -- so carrying on is a commitment to two more columns, and both
+	 * of the ways those two can go are settled here rather than discovered halfway.</p>
+	 *
+	 * <p>The blank is the interesting one, and it answers two questions with one column. A chord of
+	 * three cannot stand on the floor rail, which has no centre; and a pair of gaps coming to more
+	 * than four cannot be spanned by one repeater, which is what a rail asks of every repeater it
+	 * lays. Both are answered by laying the floor column empty: the chord takes the path column after
+	 * it, where the path rail has only the single gap to span, and the floor rail hops to a tick of
+	 * its own choosing and covers the rest from there. ekran, from the opening of song of storms,
+	 * where the two ticks to the second chord and the four to the third come to six.</p>
+	 *
+	 * @param pathLive when this column's own note goes live, which the path rail is timed from
+	 * @param floorLive when the floor rail's last anchor went live
+	 */
+	private static RailPair railPairAfter(List<EventGroup> events, int index, int pathLive,
+			int floorLive, PlacementPlan placements, Lane floor, Map<Integer, Integer> booked) {
+		if (index + 1 >= events.size()) {
+			return null;
+		}
+		// A booked pad inside the pair is what breaks the chain, so the pair is never committed to
+		// across one. The plan books its pad against events, and the walk lays it at the top of the
+		// event, before the rail branch is reached -- so a column of it lands between the repeater a
+		// rail column has already laid and the note that repeater was laid to drive. What comes out
+		// is repeater, dust, block: the block is soft powered, it sounds the notes hung on it and it
+		// lights nothing after it, and the rest of the song is behind that. Refused here, where the
+		// pair is committed, rather than noticed two events later where the column is already built
+		// -- the run ends on this path column, the lane pads as the plan asked, and the next run
+		// opens on the far side.
+		if (railPadBooked(booked, index + 1) || railPadBooked(booked, index + 2)) {
+			return null;
+		}
+		EventGroup next = events.get(index + 1);
+		// The plain pair: the next chord on the floor column, and the one after it on the path column
+		// where the run is allowed to stop. A chord the floor column cannot hold without sounding it
+		// early falls through to the blank below, which is the column that moves it up to the path
+		// rail -- ekran's second option, and the one already built.
+		if (railHolds(next, false) && railFloorTakes(placements, floor, next)
+				&& railDelay(floorLive, next.time()) > 0
+				&& index + 2 < events.size() && railHolds(events.get(index + 2), true)
+				&& railDelay(pathLive, events.get(index + 2).time()) > 0) {
+			return new RailPair(false, next.time());
+		}
+		if (!railHolds(next, true) || railDelay(pathLive, next.time()) == 0
+				|| !RAIL_BLANKS_FOR_DELAY && railHolds(next, false)) {
+			return null;
+		}
+		// As late as the floor rail can reach, so that whatever follows has the most room -- but
+		// never past the anchor after it, which has to be within a repeater of this one.
+		int latest = floorLive + 4;
+		int blankTime = index + 2 < events.size()
+			? Math.min(latest, events.get(index + 2).time() - 1) : latest;
+		return railDelay(floorLive, blankTime) > 0 ? new RailPair(true, blankTime) : null;
+	}
+
+	/** Off, a run always pays for its own head even where a stacked chord has already built one. */
+	static boolean RAIL_FROM_STACK = true;
+
+	/**
+	 * The tick a run opening at this cell would find its floor rail already live at, or
+	 * {@link #NO_BLANK} where it would have to build a head of its own.
+	 *
+	 * <p>ekran's: a stacked module already <em>is</em> a head. It lays a cross of dust at the lane's
+	 * floor level standing on a stone, one column back from where it hands over -- which is the same
+	 * pair of blocks {@link #addRailHead} spends a column building, at the same level, live at the
+	 * module's own tick. The cross points along the lane as well as across it, so the cell the next
+	 * module's trigger repeater stands on is already powered. A repeater pulls that out into the floor
+	 * rail and the module's centre carries the path rail, so both rails are running from the column
+	 * after it, for the price of the trigger column every module pays anyway.</p>
+	 *
+	 * <p>Read off the blocks rather than off the style, because what matters is that the cross is
+	 * actually behind this cell -- a nudge, a corner or a column of padding puts it somewhere else,
+	 * and the style would still say stacked.</p>
+	 */
+	private static int railStackSeed(PlacementPlan placements, Lane lane, ChordStyle lastStyle,
+			int currentTime, boolean turning) {
+		if (!RAIL_FROM_STACK || turning || lane.bending()
+				|| lastStyle != ChordStyle.STACKED_FRONT && lastStyle != ChordStyle.STACKED_FULL) {
+			return NO_BLANK;
+		}
+		return placements.describeBlock(lane.pos().relative(lane.travel().getOpposite()))
+			.startsWith("minecraft:redstone_wire") ? currentTime : NO_BLANK;
+	}
+
+	/**
+	 * The trigger column of a run that opens off a stacked chord, and nothing else.
+	 *
+	 * <p>The same stone and repeater every module opens with. What makes it a head is what is already
+	 * behind it: the stacked module's cross powers this stone, so the floor rail starts here without
+	 * a column being spent on it, and the repeater carries the path rail on to the first chord.</p>
+	 */
+	private static Lane addRailFromStack(PlacementPlan placements, Lane lane, int delay, int seed) {
+		placements.placing("rail:FROM-STACK delay" + delay);
+		placements.padded("railFromStack");
+		lane = pastAnyCorner(placements, lane);
+		// Live at the stacked chord's tick, because the cross behind it is. Said out loud so that
+		// anything hung beside it is checked against that tick rather than against the run's.
+		placements.powered(lane.pos(), "minecraft:stone", seed);
+		set(placements, lane.pos().above(),
+			"minecraft:repeater[facing=" + repeaterFacing(lane.travel()) + ",delay=" + delay + "]");
+		return lane.ahead(1);
+	}
+
+	/** The two columns a run opens with: its own repeater, then the dust that starts the floor rail. */
+	private static Lane addRailHead(PlacementPlan placements, Lane lane, int delay, int time) {
+		placements.placing("rail:HEAD delay" + delay);
+		placements.padded("railHead");
+		lane = pastAnyCorner(placements, lane);
+		set(placements, lane.pos(), "minecraft:stone");
+		set(placements, lane.pos().above(),
+			"minecraft:repeater[facing=" + repeaterFacing(lane.travel()) + ",delay=" + delay + "]");
+		lane = lane.ahead(1);
+		// The one cell in this build that starts a second chain. The dust powers the stone under it,
+		// and the floor rail's first repeater reads that stone; the path rail carries straight on
+		// through the dust into the first note.
+		placements.powered(lane.pos(), "minecraft:stone", time);
+		set(placements, lane.pos().above(), "minecraft:redstone_wire");
+		return lane.ahead(1);
+	}
+
+	/**
+	 * One column of a run: this event's note on the rail it falls on and, unless the run ends here,
+	 * the repeater that drives the next note on the other rail.
+	 *
+	 * <p>Slots go in one order, ekran's: the centre, then the near side, then the far one. The centre
+	 * is the cell the wire runs through, so a note there has no instrument block of its own and plays
+	 * harp whatever was meant -- it is offered to a harp note of the chord and to nothing else. The
+	 * sides hang off it with a block each of their own and keep any instrument there is.</p>
+	 *
+	 * @param phase 0 for the path rail, 1 for the floor rail
+	 * @param nextDelay the delay of that repeater, or nought to end the run at this column
+	 * @param fromDust whether what drives this column is the head's dust rather than a repeater, in
+	 *     which case the centre cannot be a note at all: dust hands a stone on to the repeater in
+	 *     front of it and does not hand on a note block. Measured; see RailLinkProbeTest.
+	 */
+	private static Lane addRailNote(PlacementPlan placements, Lane at, int phase,
+			List<EventNote> chord, int time, int nextDelay, boolean fromDust) {
+		String facing = repeaterFacing(at.travel());
+		List<EventNote> hanging = new ArrayList<>(chord);
+		if (phase == 0) {
+			BlockPos centre = at.pos().above();
+			// The one shape of run that cannot hand its signal on. {@link #railOpens} is what keeps
+			// this from happening and it is arithmetic against a wall, so it is worth saying out loud
+			// rather than trusting: dust powers this centre, and a block dust powers lights no dust of
+			// its own, so the padding the lane lays next is dead and the song stops there.
+			if (fromDust && nextDelay == 0) {
+				placements.trouble("a run at tick " + time
+					+ " ended on the column its head's dust drives, which cannot light the wire after it");
+			}
+			// The centre goes to a harp note wherever the chord has one, the column a run opens on
+			// included. That column was excluded for a long time on the grounds that the head's dust
+			// hands a stone on to the repeater in front of it and does not hand on a note block --
+			// which was never true. It came from one clause in the reader that refused to carry a
+			// dust's power into a note block, and the game says the two blocks are the same:
+			// isRedstoneConductor, isSignalSource, canOcclude and isSolidRender all read alike
+			// (NoteBlockConductsTest). ekran said so plainly -- "a note block can be powered just like
+			// a stone, there's no difference. a noteblock just cant have something on top, but that
+			// doesn't happen here" -- and the air above every centre is laid for exactly that reason.
+			EventNote harp = takeHarpNote(hanging);
+			placements.placing("rail:PATH notes" + chord.size()
+				+ (harp == null ? " sidesOnly" : " centred") + (fromDust ? " head" : ""));
+			placements.padded("railPath" + (harp == null
+				? chord.stream().anyMatch(SongBuilder::isHarpNote) ? "SidesWithAHarp" : "SidesOnly"
+				: "Centred"));
+			if (harp == null) {
+				placements.powered(centre, "minecraft:stone", time);
+			} else {
+				placeNoteBlock(placements, centre, harp);
+				placements.powered(centre, time);
+			}
+			// The same way round as the floor rail. Both rails filling towards the lane behind leaves
+			// the whole column on the other side empty, so a run occupies its centre and one flank
+			// rather than straddling both -- and every lane spaced three apart then has a clear
+			// column between it and the next. ekran, who found the two rails disagreeing.
+			hangRailNotes(placements, centre, at.noteSide().getOpposite(), hanging, time);
+			if (nextDelay > 0) {
+				set(placements, at.pos(),
+					"minecraft:repeater[facing=" + facing + ",delay=" + nextDelay + "]");
+				set(placements, at.pos().below(), "minecraft:stone");
+			} else if (harp == null) {
+				// The floor under a centre the run has stopped driving. Only where that centre is a
+				// stone: a note block plays what it stands on, and filling the floor under one read
+				// back basedrum sixty-two times over -- every tick right and every instrument wrong.
+				set(placements, at.pos(), "minecraft:stone");
+			}
+			return at.ahead(1);
+		}
+		// The floor rail has no centre to offer. The path rail's repeater stands directly over it and
+		// a note block plays only with air above, so both notes go out to the sides.
+		placements.placing("rail:FLOOR notes" + chord.size());
+		placements.padded("railFloorNotes");
+		placements.powered(at.pos(), "minecraft:stone", time);
+		// And filled towards the lane behind first, which is the opposite way round from the path
+		// rail. A floor note sits at the lane's own floor level, which is exactly where a stacked
+		// module hangs its four low notes -- so a chord of one or two that fills the side facing
+		// ground the walk has not built yet leaves live stone against a slot the next lane's stacked
+		// modules were going to want. The side already built is one {@link #soundedByAnother} can see
+		// the whole of. ekran, reading a floor column in game.
+		hangRailNotes(placements, at.pos(), at.noteSide().getOpposite(), hanging, time);
+		if (nextDelay > 0) {
+			set(placements, at.pos().above(),
+				"minecraft:repeater[facing=" + facing + ",delay=" + nextDelay + "]");
+		}
+		return at.ahead(1);
+	}
+
+	/**
+	 * The chord's first harp note, taken out of it, or {@code null} where the chord holds none.
+	 *
+	 * <p>Only a harp note can take a centre, so a chord that has one spends a side fewer than a chord
+	 * that has not -- which is the whole of why the order is centre first.</p>
+	 */
+	private static EventNote takeHarpNote(List<EventNote> chord) {
+		for (int index = 0; index < chord.size(); index++) {
+			if (isHarpNote(chord.get(index))) {
+				return chord.remove(index);
+			}
+		}
+		return null;
+	}
+
+	/** Whether a note may stand in this slot without something else sounding it at another tick. */
+	private static boolean railSlotTakes(PlacementPlan placements, BlockPos slot, int time) {
+		return placements.freeForNote(slot) && !soundedByAnother(placements, slot, time);
+	}
+
+	/**
+	 * Whether a floor column standing here could hold this chord without sounding it early.
+	 *
+	 * <p>The one contention a run has. A floor column's notes sit at the lane's own floor level,
+	 * which is where the lane alongside hangs the low half of a stacked module, and a stacked
+	 * module's low notes stand on instrument blocks that conduct sideways. The near side is the side
+	 * facing the lane <em>behind</em> -- deliberately, so a run cannot reach into ground the walk has
+	 * not built yet -- and that is the lane whose stacked modules are already standing there. So this
+	 * is asked of a column that does not exist yet, one cell ahead of where the walk is, at the tick
+	 * the chord would go live. ekran, who named the shape before it was measured: "a lower rail note
+	 * can get mispowered by a stacked chord if the center adjacent instrument of that stacked chord is
+	 * up against it".</p>
+	 *
+	 * @param floor the cell the floor column would stand in, or {@code null} where the caller is
+	 *     asking about events rather than about a place -- which is every question asked before the
+	 *     walk knows where the head will land
+	 */
+	private static boolean railFloorTakes(PlacementPlan placements, Lane floor, EventGroup event) {
+		if (!RAIL_MOVES_FOR_STACKS || floor == null) {
+			return true;
+		}
+		Direction near = floor.noteSide().getOpposite();
+		int room = 0;
+		for (Direction side : List.of(near, near.getOpposite())) {
+			if (railSlotTakes(placements, floor.pos().relative(side), event.time())) {
+				room++;
+			}
+		}
+		return room >= event.notes().size();
+	}
+
+	/**
+	 * Off, a run hangs its notes on the near side whatever is already standing there, and takes a
+	 * floor column whatever it would sound.
+	 */
+	static boolean RAIL_MOVES_FOR_STACKS = true;
+
+	/** What is left of a chord, hung either side of the cell that drives it, near side first. */
+	private static void hangRailNotes(PlacementPlan placements, BlockPos anchor, Direction near,
+			List<EventNote> notes, int time) {
+		List<Direction> sides = List.of(near, near.getOpposite());
+		// Unless the near side is spoken for and the chord is small enough to go the other way. The
+		// near side is the one facing the lane already built, so it is the only one that can have
+		// something in it -- and a single note that moves across costs nothing at all, where the same
+		// note left where it was sounds a stacked chord's tick instead of its own.
+		if (RAIL_MOVES_FOR_STACKS && notes.size() < sides.size()
+				&& !railSlotTakes(placements, anchor.relative(near), time)
+				&& railSlotTakes(placements, anchor.relative(near.getOpposite()), time)) {
+			placements.padded("railNoteMovedForStack");
+			sides = List.of(near.getOpposite(), near);
+		}
+		for (int index = 0; index < notes.size(); index++) {
+			if (index >= sides.size()) {
+				placements.trouble((notes.size() - index) + " notes of a chord at tick " + time
+					+ " had nowhere to hang: a rail column has a centre and two sides");
+				return;
+			}
+			placeNote(placements, anchor.relative(sides.get(index)), notes.get(index));
+		}
 	}
 
 	/**
@@ -6569,16 +7408,28 @@ public final class SongBuilder {
 		// The shape the walk settled on, not the one the size implies. A chord of three that could
 		// not have its two side slots is handed here as a bus, and branching on the size alone built
 		// it in the shape that had just been rejected -- which is the note that lands in a neighbour.
-		if (chord.size() <= 3 && !forceBus) {
-			placeNote(placements, anchor, chord.get(0));
+		// And not the one the physics implies either: a chord of three doors is small enough for this
+		// shape and cannot hold it, because the anchor has to pass power on and a door does not.
+		// {@link #fitsSmallModule} is the same test {@link #chooseStyle} priced the chord with.
+		if (!forceBus && fitsSmallModule(chord)) {
+			List<EventNote> ordered = smallOrder(chord);
+			if (needsLentMiddle(ordered)) {
+				// Stone in the middle and the sound beside it. The cell the repeater faces has to
+				// carry the signal onward, and this one sound cannot, so it borrows a block that can
+				// and is sounded the way a bus sounds its notes -- from the side, off powered stone.
+				placements.powered(anchor, "minecraft:stone", time);
+				placeNote(placements, anchor.relative(laneStep.getOpposite()), ordered.getFirst());
+				return new Body(lane.ahead(2), 0);
+			}
+			placeNote(placements, anchor, ordered.get(0));
 			// The repeater drives the anchor directly, and a note block is a full block, so the
 			// anchor passes that power on to whatever is beside it -- including the next repeater.
 			placements.powered(anchor, time);
-			if (chord.size() >= 2) {
-				placeNote(placements, anchor.relative(laneStep), chord.get(1));
+			if (ordered.size() >= 2) {
+				placeNote(placements, anchor.relative(laneStep), ordered.get(1));
 			}
-			if (chord.size() >= 3) {
-				placeNote(placements, anchor.relative(laneStep.getOpposite()), chord.get(2));
+			if (ordered.size() >= 3) {
+				placeNote(placements, anchor.relative(laneStep.getOpposite()), ordered.get(2));
 			}
 			return new Body(lane.ahead(2), 0);
 		}
@@ -6778,7 +7629,14 @@ public final class SongBuilder {
 			// no explanation, especially on flat turns" and this is the only line that can do it. The
 			// one worth knowing is the middle: a chord the stacked shape would have taken, refused it
 			// for the turn rule alone and given a column of lane to a bus instead.
-			boolean stackable = ultraSlots(event.notes(), false) != null;
+			//
+			// A chord with an effect in it is not stackable at all, whatever its slots say. Every
+			// stacked shape leans on its own notes to relay power outward and an effect block either
+			// sounds or conducts, mostly not both -- which is why {@link #chooseStyle} sends effects
+			// to the bus before it ever gets here. A small chord is the one shape that reaches this
+			// line ahead of that test, so the same question is asked again.
+			boolean stackable = !hasEffect(event.notes())
+				&& ultraSlots(event.notes(), false) != null;
 			placements.padded(stackable
 				? inTurn ? "smallBusForTheTurnRule" : "smallBecameStacked"
 				: "smallBusNoSlots");
@@ -9302,12 +10160,107 @@ public final class SongBuilder {
 	}
 
 	private static boolean isHarpNote(EventNote note) {
-		return "minecraft:air".equals(note.instrumentBlock());
+		return note.effect() == null && "minecraft:air".equals(note.instrumentBlock());
 	}
 
 	/** Whether this note's instrument block would pass power on to a note block beside it. */
 	private static boolean conductsSideways(EventNote note) {
-		return isHarpNote(note) || CONDUCTING_INSTRUMENT_BLOCKS.contains(note.instrumentBlock());
+		return note.effect() == null
+			&& (isHarpNote(note) || CONDUCTING_INSTRUMENT_BLOCKS.contains(note.instrumentBlock()));
+	}
+
+	/** Whether anything in this chord is a block that sounds for itself rather than a note block. */
+	private static boolean hasEffect(List<EventNote> chord) {
+		for (EventNote note : chord) {
+			if (note.effect() != null) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Whether this can stand in the middle of a small module and pass the power on to its flanks.
+	 *
+	 * <p>A note block always can: it is a full solid block, whatever instrument block it stands on.
+	 * Most effects cannot -- a door, a bell, a shrieker and, less obviously, a copper bulb are all
+	 * blocks power stops at. The ones that can are the two droppers and the note blocks in skulls,
+	 * which are note blocks.</p>
+	 */
+	private static boolean carriesAModule(EventNote note) {
+		return note.effect() == null || CONDUCTING_EFFECT_BLOCKS.contains(note.effect().blockId());
+	}
+
+	/**
+	 * Effects solid enough to sound and pass the signal on in the same breath.
+	 *
+	 * <p>Asked of the state that actually gets placed rather than of the block's default, since that
+	 * is the one whose neighbours have to be right.</p>
+	 */
+	private static final Set<String> CONDUCTING_EFFECT_BLOCKS = PreviewInstrument.EFFECTS.stream()
+		.filter(voice -> conducts(voice.effect().block()))
+		.map(voice -> voice.effect().blockId())
+		.collect(java.util.stream.Collectors.toUnmodifiableSet());
+
+	private static boolean conducts(String blockState) {
+		try {
+			return BlockStateParser.parseForBlock(BuiltInRegistries.BLOCK, blockState, false)
+				.blockState().isRedstoneConductor(EmptyBlockGetter.INSTANCE, BlockPos.ZERO);
+		} catch (com.mojang.brigadier.exceptions.CommandSyntaxException unparseable) {
+			throw new IllegalStateException("unplaceable sound effect: " + blockState, unparseable);
+		}
+	}
+
+	/**
+	 * A chord ordered so that whatever holds the middle of a small module comes first, or null if
+	 * nothing in it can.
+	 *
+	 * <p>The repeater points at the first note and the two after it are sounded by that first one
+	 * being a strongly powered solid block. A chord of one needs no such favour -- the repeater
+	 * faces it directly -- so anything at all can stand alone.</p>
+	 */
+	/**
+	 * Whether this chord has to be lent a middle: a stone in the cell the repeater faces, with the
+	 * one sound moved off to the side.
+	 *
+	 * <p>A chord of one used to be treated as needing no favour, on the grounds that the repeater
+	 * faces it directly and so anything at all can sound there. That is true of the sound and false
+	 * of everything after it. The cell the repeater faces is also the cell the <em>next</em>
+	 * repeater reads, so whatever stands in it has to be solid: a lone sculk shrieker sounded once
+	 * and took the rest of the lane with it.</p>
+	 *
+	 * <p>Only ever a chord of one. With two or more, {@link #smallOrder} finds something in the
+	 * chord that can hold the middle, or the chord goes to a bus where every sound has its own
+	 * stone.</p>
+	 */
+	private static boolean needsLentMiddle(List<EventNote> chord) {
+		return chord.size() == 1 && !carriesAModule(chord.getFirst());
+	}
+
+	private static List<EventNote> smallOrder(List<EventNote> chord) {
+		if (chord.size() <= 1 || carriesAModule(chord.get(0))) {
+			return chord;
+		}
+		for (int index = 1; index < chord.size(); index++) {
+			if (carriesAModule(chord.get(index))) {
+				List<EventNote> ordered = new ArrayList<>(chord);
+				ordered.add(0, ordered.remove(index));
+				return List.copyOf(ordered);
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Whether the small two-column module can hold this chord.
+	 *
+	 * <p>Asked by {@link #chooseStyle} and again by {@link #addEventModule}, from the one method, so
+	 * that the shape the plan priced and the shape the walk lays are the same shape. A chord of three
+	 * doors is the case that made this necessary: it fits by size and does not fit by physics, and a
+	 * planner that only counted would have reserved two columns for something that needs three.</p>
+	 */
+	private static boolean fitsSmallModule(List<EventNote> chord) {
+		return chord.size() <= 3 && smallOrder(chord) != null;
 	}
 
 	/**
@@ -9352,14 +10305,26 @@ public final class SongBuilder {
 		set(placements, triggerPos.above(), "minecraft:repeater[facing=" + repeaterFacing(forward) + ",delay=" + triggerDelay + "]");
 		BlockPos anchor = at(origin, forward, cursor + 1, 1, 0);
 		int time = chord.get(0).time();
-		if (chord.size() <= 3) {
-			placeNote(placements, anchor, chord.get(0));
-			placements.powered(anchor, time);
-			if (chord.size() >= 2) {
-				placeNote(placements, anchor.relative(right), chord.get(1));
+		if (fitsSmallModule(chord)) {
+			// Reordered, not merely taken as it came: the middle of this shape has to be something
+			// that passes power to its flanks, and on a chord that mixes a door with a note block
+			// only one of the two will do. {@link #chooseStyle} priced this same shape from the same
+			// test, so a chord that cannot be reordered into it never arrives here at all.
+			List<EventNote> ordered = smallOrder(chord);
+			if (needsLentMiddle(ordered)) {
+				// See layEventBody: the cell the repeater faces has to pass the signal on, so a sound
+				// that cannot is moved aside and given a stone to be powered from.
+				placements.powered(anchor, "minecraft:stone", time);
+				placeNote(placements, anchor.relative(right.getOpposite()), ordered.getFirst());
+				return cursor + 2;
 			}
-			if (chord.size() >= 3) {
-				placeNote(placements, anchor.relative(right.getOpposite()), chord.get(2));
+			placeNote(placements, anchor, ordered.get(0));
+			placements.powered(anchor, time);
+			if (ordered.size() >= 2) {
+				placeNote(placements, anchor.relative(right), ordered.get(1));
+			}
+			if (ordered.size() >= 3) {
+				placeNote(placements, anchor.relative(right.getOpposite()), ordered.get(2));
 			}
 			return cursor + 2;
 		}
@@ -9476,6 +10441,10 @@ public final class SongBuilder {
 	}
 
 	private static void placeNote(PlacementPlan placements, BlockPos notePos, EventNote note) {
+		if (note.effect() != null) {
+			placeEffect(placements, notePos, note);
+			return;
+		}
 		set(placements, notePos.below(), note.instrumentBlock());
 		if (FALLING_INSTRUMENT_BLOCKS.contains(note.instrumentBlock())) {
 			// Sand and friends drop the moment /setblock places them over air, taking the note
@@ -9496,6 +10465,31 @@ public final class SongBuilder {
 		set(placements, notePos, "minecraft:note_block[note=" + note.pitch() + "]");
 		placements.note(notePos, note.time());
 		set(placements, notePos.above(), "minecraft:air");
+	}
+
+	/**
+	 * A sound effect, in the same three cells a note would have used.
+	 *
+	 * <p>The effect goes where the note block would have gone, so everything that decided where a
+	 * note could stand -- reach, spacing, whether the ground is free -- decided this too, and none
+	 * of it had to learn a new shape. What differs is the two cells around it. Underneath, where an
+	 * instrument block would sit, most effects want nothing at all and a few want a floor. Above,
+	 * where a note block insists on air, a door puts its upper half and a note block wearing a skull
+	 * puts the skull -- and the air is still what a piston extends into, which is why the pistons
+	 * face up.</p>
+	 *
+	 * <p>Recorded as a note on the plan exactly like a note block is. It is a sound at a tick, and
+	 * {@code verify} has to hold it to the same rule: something next to it has to be powered on its
+	 * own tick and on no other.</p>
+	 */
+	private static void placeEffect(PlacementPlan placements, BlockPos notePos, EventNote note) {
+		PreviewInstrument.Effect effect = note.effect();
+		if (effect.floor()) {
+			placements.support(notePos.below(), "minecraft:stone");
+		}
+		set(placements, notePos, effect.block());
+		placements.note(notePos, note.time());
+		set(placements, notePos.above(), effect.above() == null ? "minecraft:air" : effect.above());
 	}
 
 	/** Instrument blocks affected by gravity, which need something solid underneath them. */
@@ -9537,6 +10531,11 @@ public final class SongBuilder {
 			return null;
 		}
 		PreviewInstrument preview = PreviewInstrument.byId(instrument);
+		if (preview.effect() != null) {
+			// The effect is the sound source, so this is the source's own id rather than a block for
+			// it to stand on. Carried so that chords still group and run-length by instrument.
+			return preview.effect().blockId();
+		}
 		if ("HARP".equals(preview.id())) {
 			// A note block over anything unrecognised already plays harp, so air is identical in
 			// sound and costs nothing. Placing grass would waste a block per piano note.
@@ -9545,7 +10544,26 @@ public final class SongBuilder {
 		return BuiltInRegistries.ITEM.getKey(preview.icon()).toString();
 	}
 
-	record EventNote(int time, int trackNumber, int order, int pitch, String instrumentBlock) {
+	/** The effect a layer's voice builds as, or null when it is a tuned instrument. */
+	private static PreviewInstrument.Effect effectOf(String instrument) {
+		return "MUTE".equals(instrument) ? null : PreviewInstrument.byId(instrument).effect();
+	}
+
+	/**
+	 * One sound to place.
+	 *
+	 * <p>For a pitched note {@code instrumentBlock} is what goes under the note block and
+	 * {@code effect} is null. For a sound effect there is no note block at all: {@code effect} says
+	 * what to lay in its place and {@code instrumentBlock} is that block's id, so that the grouping
+	 * and run-length code that sorts a chord by instrument keeps sorting doors next to doors.
+	 * {@code pitch} is carried either way and simply ignored on an effect, which cannot be tuned.</p>
+	 */
+	record EventNote(int time, int trackNumber, int order, int pitch, String instrumentBlock,
+			PreviewInstrument.Effect effect) {
+		/** A note block over an instrument block, which is every note this mod placed before effects. */
+		EventNote(int time, int trackNumber, int order, int pitch, String instrumentBlock) {
+			this(time, trackNumber, order, pitch, instrumentBlock, null);
+		}
 	}
 
 	/**
@@ -10158,6 +11176,22 @@ public final class SongBuilder {
 		 * @param shiftX how far the finished plan slides before it is built, so a fault names the
 		 *     block you can actually go and stand in front of rather than one in plan space
 		 */
+		/**
+		 * Which shape laid each end of a wrong note, where the plan was recorded with names on.
+		 *
+		 * <p>Both halves, because the fix belongs to whichever of the two can move and that is not
+		 * always the one that sounds early. Every wrong note a two-rail run brought with it had to be
+		 * read off a block dump to find out which side was the run, and the answer was in the plan the
+		 * whole time.</p>
+		 */
+		private String whose(BlockPos note, BlockPos neighbour) {
+			String victim = placedBy.get(note);
+			String aggressor = placedBy.get(neighbour);
+			return victim == null && aggressor == null ? ""
+				: " -- " + (victim == null ? "?" : victim) + " against "
+					+ (aggressor == null ? "?" : aggressor);
+		}
+
 		List<String> verify(int shiftX, int shiftZ) {
 			List<String> faults = new ArrayList<>();
 			for (Map.Entry<BlockPos, Integer> note : notes.entrySet()) {
@@ -10181,7 +11215,8 @@ public final class SongBuilder {
 						faults.add("the note at " + describe(note.getKey(), shiftX, shiftZ)
 							+ " belongs to tick " + time + " but would sound early, at tick "
 							+ neighbour + ", from the " + direction + " at "
-							+ describe(note.getKey().relative(direction), shiftX, shiftZ));
+							+ describe(note.getKey().relative(direction), shiftX, shiftZ)
+							+ whose(note.getKey(), note.getKey().relative(direction)));
 					} else if (neighbour > time + SHARED_PULSE_TICKS) {
 						// Named the same way round as the early case. Which side a second sounding comes
 						// from is as much the diagnosis here as it is there -- along the lane is one
