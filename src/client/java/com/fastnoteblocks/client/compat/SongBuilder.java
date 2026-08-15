@@ -4072,7 +4072,7 @@ public final class SongBuilder {
 		if (style.busHeaded()) {
 			StackedBusSplit split = shape.moved() != null && shape.moved().split() != null
 				? shape.moved().split() : splitFor(style, event.notes());
-			tailCells = split == null ? 0 : (split.tail().size() + 1) / 2;
+			tailCells = split == null ? 0 : stackedBusTailColumns(split.tail());
 		}
 		int length = style.busHeaded()
 			? delayColumns + shift + STACKED_CELLS + STACKED_BUS_TRANSITION + tailCells
@@ -4149,7 +4149,7 @@ public final class SongBuilder {
 				style = ChordStyle.BUS;
 				behindShift = 0;
 			} else {
-				tailCells = (split.tail().size() + 1) / 2;
+				tailCells = stackedBusTailColumns(split.tail());
 				// Head, transition and bus all have to be inside the wall, where a plain stacked
 				// module only ever had to fit its two columns.
 				//
@@ -5714,7 +5714,7 @@ public final class SongBuilder {
 			int tailCells = 0;
 			if (style.busHeaded()) {
 				StackedBusSplit split = splitFor(style, chord);
-				tailCells = split == null ? 0 : (split.tail().size() + 1) / 2;
+				tailCells = split == null ? 0 : stackedBusTailColumns(split.tail());
 			}
 			int eventLength = style == ChordStyle.BUS ? 1 + busLength
 				: style.busHeaded()
@@ -5826,6 +5826,89 @@ public final class SongBuilder {
 	 */
 	private static int backFlanksOf(ChordStyle style) {
 		return style == ChordStyle.STACKED_BUS ? 2 : style == ChordStyle.STACKED_BUS_HALF ? 1 : 0;
+	}
+
+	/**
+	 * Whether a short tail is laid as a simple chord rather than as a bus. ekran's.
+	 *
+	 * <p>The handover cell a stacked bus transitions on sits at the height of the lane rather than
+	 * raised -- it is there so the tail comes on with no delay -- and that is what makes this
+	 * possible: a bus cell stands a level up, but a simple chord's anchor stands exactly where the
+	 * handover's dust can drive it. So a tail of three, which is two cells of bus, becomes one
+	 * column; a tail of one or two is a column either way but comes out at lane height instead of
+	 * bus height, which is the plane a rail column runs in.</p>
+	 *
+	 * <p>"Try our best", ekran: a tail that cannot make the shape stays a bus rather than the chord
+	 * giving anything up. {@link #fitsSmallModule} is the same test every other simple chord is
+	 * priced with, so a tail of three doors -- which cannot hold a shape whose middle has to conduct
+	 * -- is refused here exactly as it would be anywhere else.</p>
+	 */
+	static boolean SIMPLE_TAIL_ON_A_STACKED_BUS = true;
+
+	/**
+	 * Whether a run may start off a stacked bus's handover, the way it already starts off a stacked
+	 * chord's cross. ekran's, and the reason the tail work was asked for at all.
+	 *
+	 * <p>The handover is stone on the lane with dust over it. The dust powers the stone, and a
+	 * repeater facing out of that stone reads it -- so the bottom rail starts instantly and the two
+	 * columns {@link #addRailHead} would have spent are not spent. Until this, {@link #railStackSeed}
+	 * refused every headed style outright, so on a song full of chords of eight and ten it never fired
+	 * once.</p>
+	 */
+	static boolean RAIL_FROM_HANDOVER = true;
+
+	/**
+	 * Whether this tail is laid as a simple chord.
+	 *
+	 * <p>The one place that answers it, because the answer sets the module's length and three
+	 * separate sums read that length. A shape built a column shorter than it was measured is a lane
+	 * that comes to rest outside its wall, and that is the bug this file keeps producing.</p>
+	 */
+	private static boolean simpleTail(List<EventNote> tail) {
+		return SIMPLE_TAIL_ON_A_STACKED_BUS && !tail.isEmpty() && tail.size() <= 3
+			&& fitsSmallModule(tail);
+	}
+
+
+	/**
+	 * The columns a stacked bus spends on its tail.
+	 *
+	 * <p>Priced as a bus even where the tail is going to be simple, which is deliberate and is the
+	 * one place in v2 that keeps a column of slack on purpose. Whether the simple shape may be used
+	 * is not a fact about the chord -- it is whether a repeater comes out of the tail in line, and
+	 * that depends on what the walk does next. Measuring the shorter shape and building the longer
+	 * one is a lane outside its wall; measuring the longer and building the shorter is a lane that
+	 * stops a column early. Only one of those is a fault.</p>
+	 *
+	 * <p>It costs nothing at all on a tail of one or two, where the bus is a single cell anyway. Only
+	 * a tail of three carries the column, and closing that means telling {@link #landingFrom} what is
+	 * ahead of the module rather than only what is in it.</p>
+	 */
+	private static int stackedBusTailColumns(List<EventNote> tail) {
+		return tail.isEmpty() ? 0 : (tail.size() + 1) / 2;
+	}
+
+	/**
+	 * Whether a repeater will come directly out of this cell, in line, with nothing in between.
+	 *
+	 * <p>ekran's test, and the one that decides whether a tail may be simple: <i>"can we / do we have
+	 * a repeater to continue this line leading directly out of this block? if the answer is no, THEN
+	 * we fallback to bus cell"</i>.</p>
+	 *
+	 * <p>The physics under it is narrower than the note this file used to carry. A block powered only
+	 * by dust is soft powered, and a soft-powered block cannot light <b>dust</b> on its far side --
+	 * but it drives a <b>repeater</b> against it perfectly well. So a simple tail is fine wherever the
+	 * next module's own trigger stands right in front of it, which is the ordinary case, and fails
+	 * only where something moves that repeater off the line: corner padding walking the route round a
+	 * bend, or a parity pad standing the next module a column over. ekran pasted the corner case and
+	 * read it back as sea lanterns.</p>
+	 *
+	 * <p>Asked of the route, which is what corner padding follows. A parity pad is decided later, by
+	 * the next chord's own shape against blocks that are not down yet, so it is not answered here --
+	 * that one is still open.</p>
+	 */
+	private static boolean repeaterComesOutOf(Lane at) {
+		return !at.cornerAt(0) && !at.ahead(1).cornerAt(0);
 	}
 
 	/**
@@ -6534,12 +6617,31 @@ public final class SongBuilder {
 	 */
 	private static int railStackSeed(PlacementPlan placements, Lane lane, ChordStyle lastStyle,
 			int currentTime, boolean turning) {
-		if (!RAIL_FROM_STACK || turning || lane.bending()
-				|| lastStyle != ChordStyle.STACKED_FRONT && lastStyle != ChordStyle.STACKED_FULL) {
+		if (!RAIL_FROM_STACK || turning || lane.bending()) {
 			return NO_BLANK;
 		}
-		return placements.describeBlock(lane.pos().relative(lane.travel().getOpposite()))
-			.startsWith("minecraft:redstone_wire") ? currentTime : NO_BLANK;
+		BlockPos behind = lane.pos().relative(lane.travel().getOpposite());
+		if (lastStyle == ChordStyle.STACKED_FRONT || lastStyle == ChordStyle.STACKED_FULL) {
+			// A rigid stacked module leaves its cross on the lane's own level, and the cross powers
+			// the stone in front of it.
+			return placements.describeBlock(behind).startsWith("minecraft:redstone_wire")
+				? currentTime : NO_BLANK;
+		}
+		// And a stacked bus leaves its handover there, which is the same thing one level apart: stone
+		// on the lane with dust over it. The dust powers the stone it sits on, and that stone is what
+		// a repeater facing out of it reads -- so the floor rail starts with no column spent on it,
+		// exactly as it does off a stacked chord. ekran built both by hand and the pair came out
+		// almost twice as compact as what the walk lays today.
+		//
+		// Asked of the blocks rather than of the style alone, because a stacked bus with a tail has
+		// that tail standing between its handover and here -- and a tail is at bus height, so what is
+		// behind then is a raised cell and this reads false, which is correct.
+		if (RAIL_FROM_HANDOVER && lastStyle.busHeaded()) {
+			return placements.describeBlock(behind).startsWith("minecraft:stone")
+				&& placements.describeBlock(behind.above()).startsWith("minecraft:redstone_wire")
+				? currentTime : NO_BLANK;
+		}
+		return NO_BLANK;
 	}
 
 	/**
@@ -7942,7 +8044,7 @@ public final class SongBuilder {
 		if (style.busHeaded()) {
 			StackedBusSplit measured = splitFor(style, event.notes());
 			stackedRoom = measured == null ? STACKED_CELLS + 1
-				: STACKED_CELLS + STACKED_BUS_TRANSITION + (measured.tail().size() + 1) / 2 + 1;
+				: STACKED_CELLS + STACKED_BUS_TRANSITION + stackedBusTailColumns(measured.tail()) + 1;
 		}
 		// A fallback has to be shorter than the shape it replaces, or it is not a fallback.
 		//
@@ -8018,6 +8120,9 @@ public final class SongBuilder {
 	 */
 	private static Placed buildShaped(PlacementPlan placements, Lane lane, int triggerDelay,
 			EventGroup event, Shape shape, Layout layout) {
+		// Cleared here and set by the one shape that ends soft, so the flag always describes the module
+		// that just went down rather than some earlier one.
+		placements.rollSoftTip();
 		ChordStyle style = shape.style();
 		boolean nudge = shape.nudge();
 		Relocation moved = shape.moved();
@@ -8199,8 +8304,7 @@ public final class SongBuilder {
 			}
 			start = pastAnyCorner(placements, start);
 			if (nudge) {
-				placements.padded("parity");
-				addParityPad(placements, start.pos());
+				triggerDelay = parityPadOrSplitRepeater(placements, start, triggerDelay);
 				start = start.ahead(1);
 			}
 			trace(event, lane, style, style, nudge ? "nudged" : gaveUp);
@@ -8217,8 +8321,7 @@ public final class SongBuilder {
 		// shape that cannot use it walks off it here.
 		start = pastAnyCorner(placements, start);
 		if (nudge) {
-			placements.padded("parity");
-			addParityPad(placements, start.pos());
+			triggerDelay = parityPadOrSplitRepeater(placements, start, triggerDelay);
 			start = start.ahead(1);
 		}
 		trace(event, lane, style, style, nudge ? "nudged" : gaveUp);
@@ -8778,6 +8881,49 @@ public final class SongBuilder {
 		set(placements, cursor, "minecraft:stone");
 		set(placements, cursor.above(), "minecraft:redstone_wire");
 	}
+
+	/**
+	 * The parity pad, or the same two columns with the delay split across them. ekran's.
+	 *
+	 * <p>A parity pad is a cell of dust, and dust after a module that ended soft is a dead wire: the
+	 * simple tail's middle is lit by the handover and by nothing else, so it drives a repeater and
+	 * cannot light dust. ekran read exactly that off a paste -- <i>"the chord got parity padded,
+	 * causing wire to be on both sides"</i>.</p>
+	 *
+	 * <p>But the pad and the module's own trigger are two columns either way, and a delay of two or
+	 * more can be spent as two repeaters instead of a pad and one: {@code r1} here, and the rest in
+	 * the trigger. Same columns, same total delay, and the cell against the soft middle is now a
+	 * repeater, which is the one thing that reads it. Nothing is undone to do it -- the pad is laid
+	 * after the tail, so this is a local decision that only has to know what came before, which is
+	 * what {@link PlacementPlan#softTip()} carries.</p>
+	 *
+	 * <p>A delay of one cannot be split: there is no repeater shorter than one tick. That case is
+	 * still open -- the tail would have had to be a bus, which is a decision a column too early --
+	 * and it is counted here rather than papered over.</p>
+	 *
+	 * @return what the module's own trigger should now be delayed by
+	 */
+	private static int parityPadOrSplitRepeater(PlacementPlan placements, Lane at, int triggerDelay) {
+		if (placements.softBehind() && SPLIT_THE_PAD_REPEATER && triggerDelay >= 2) {
+			placements.padded("paritySplitRepeater");
+			placements.powered(at.pos(), "minecraft:stone", NO_BLANK);
+			set(placements, at.pos().above(), "minecraft:repeater[facing="
+				+ repeaterFacing(at.travel()) + ",delay=1]");
+			return triggerDelay - 1;
+		}
+		if (placements.softBehind()) {
+			// The one the split cannot reach. Left visible instead of hidden: a tail of three at a
+			// one-tick delay is the only shape that still wants the tail decided a column earlier than
+			// it is.
+			placements.padded("parityPadOnASoftTip");
+		}
+		placements.padded("parity");
+		addParityPad(placements, at.pos());
+		return triggerDelay;
+	}
+
+	/** Whether a parity pad after a soft-ended module is spent as a repeater rather than as dust. */
+	static boolean SPLIT_THE_PAD_REPEATER = true;
 
 	/**
 	 * Whether a pad that runs into a climb is laid at bus height rather than on the path.
@@ -9548,8 +9694,12 @@ public final class SongBuilder {
 			placements.padded("busHandoverShed");
 			return afterHead.pos();
 		}
+		// Never the simple tail here. This near half is pinned flush to its wall, and its length is
+		// summed against a wire budget in {@link #stackedSplitOf} and {@link #closes} rather than as
+		// columns -- so a tail that quietly came out a column shorter would move the staircase and
+		// not the sum. That is the shape of every regression this file has produced.
 		Body body = addStackedBusModule(placements, Lane.straight(cursor, travel, laneStep),
-			triggerDelay, time, split.slots(), split.nearTail());
+			triggerDelay, time, split.slots(), split.nearTail(), false);
 		return body.lane().pos();
 	}
 
@@ -9642,11 +9792,40 @@ public final class SongBuilder {
 	 */
 	private static Body addStackedBusModule(PlacementPlan placements, Lane lane, int triggerDelay,
 			int time, UltraSlots slots, List<EventNote> tail) {
+		return addStackedBusModule(placements, lane, triggerDelay, time, slots, tail, true);
+	}
+
+	/**
+	 * @param mayGoSimple whether a short tail may take the simple chord shape rather than a bus.
+	 *     False on the cut path and true everywhere else. A cut's near half is pinned flush to its
+	 *     wall -- that pinning is what put every staircase back on its wall -- and its length is
+	 *     summed in {@link #stackedSplitOf} and {@link #closes} against a wire budget rather than a
+	 *     column count. A tail that quietly came out a column shorter there would move the staircase
+	 *     and not the sum, which is a lane measured for one shape and built as another.
+	 */
+	private static Body addStackedBusModule(PlacementPlan placements, Lane lane, int triggerDelay,
+			int time, UltraSlots slots, List<EventNote> tail, boolean mayGoSimple) {
 		Lane afterHead = addStackedEventModule(placements, lane, triggerDelay, time, slots);
 		// The cell the centre lights. Stone with dust over it, in the column the head came to rest
 		// in -- beside the centre and level with it, never above, because above the centre is the
 		// air a note block there insists on.
-		addParityPad(placements, afterHead.pos());
+		// A short tail as a simple chord, in the column the bus would have opened in and a level
+		// lower. ekran's: the handover sits at the height of the lane rather than raised, so a middle
+		// standing right there is driven by it, where a bus cell has to be a level up. A tail of
+		// three is two cells of bus and one column of this.
+		boolean simple = mayGoSimple && simpleTail(tail);
+		// The handover is dust over stone either way, but its *shape* is not the same either way.
+		//
+		// Dust with nothing beside it to join takes the dot shape, and a dot powers only the block
+		// beneath it -- it lights the stone under it, which is what a floor rail would read, and
+		// nothing in front. A bus tail hides that completely: the bus stone stands in the very next
+		// cell and joins the dust into a line. A simple tail's middle is a cell the dust does not
+		// connect to, so left to itself the handover collapses to a dot and everything downstream of
+		// it goes silent -- 4,767 notes on all of the lights, read off the slice by ekran. Naming the
+		// four sides makes it a cross and a cross stays one, which is the same reason
+		// {@link #STACKED_CROSS} is stated rather than left to the game.
+		set(placements, afterHead.pos(), "minecraft:stone");
+		set(placements, afterHead.pos().above(), simple ? STACKED_CROSS : "minecraft:redstone_wire");
 		// Counted as a hand-over and not as pad, which is what it used to be called. Pad is a column
 		// a chord could have been standing in; this cell stands where the shape's repeater would
 		// have stood, so a chord of twenty is eleven columns as a plain bus and ten as a stacked-bus
@@ -9656,6 +9835,55 @@ public final class SongBuilder {
 		placements.padded("busHandover");
 		if (tail.isEmpty()) {
 			return new Body(afterHead.ahead(1), 0);
+		}
+		Lane tailAt = afterHead.ahead(1);
+		if (simple && !repeaterComesOutOf(tailAt)) {
+			// The one scenario that falls back, and only this one. A simple tail's middle is soft
+			// powered -- lit by the handover's dust and nothing else -- which drives a repeater
+			// standing against it and cannot light dust. So where the route bends and the corner
+			// padding walks the next repeater off this line, the tail has to be a bus cell instead,
+			// which carries its own dust and hands on the ordinary way. It costs nothing but a couple
+			// more blocks.
+			placements.padded("simpleTailBusedForTheCorner");
+			simple = false;
+		}
+		if (simple) {
+			BlockPos middle = tailAt.pos().above();
+			List<EventNote> hanging = new ArrayList<>(tail);
+			// The middle, by the same rule a stacked centre and a rail's path column use. A harp takes
+			// it outright -- the middle has no instrument block of its own and sounds harp whatever was
+			// meant, so a harp is the one note that loses nothing there, and it leaves the cell below
+			// free for a repeater out of the handover.
+			//
+			// With no harp: stone where a run may want to quick-start off this, the notes on the sides.
+			// Taken whenever it is free, which is every tail of two or fewer since the two sides hold
+			// them all. Only a tail of three with no harp has to choose, and it keeps the note.
+			EventNote harp = takeHarpNote(hanging);
+			boolean railReady = harp != null || hanging.size() <= 2;
+			placements.placing("chord:STACKED_BUS+simpleTail" + tail.size()
+				+ (harp != null ? " harpMiddle" : railReady ? " stoneMiddle" : " noteMiddle"));
+			placements.padded("simpleTail" + (harp != null ? "Harp"
+				: railReady ? "Stone" : "NoteInTheMiddle"));
+			if (harp != null) {
+				placeNoteBlock(placements, middle, harp);
+				placements.powered(middle, time);
+			} else if (railReady) {
+				placements.powered(middle, "minecraft:stone", time);
+			} else {
+				placeNote(placements, middle, hanging.removeFirst());
+				placements.powered(middle, time);
+			}
+			Direction laneStep = tailAt.noteSide();
+			List<Direction> sides = List.of(laneStep.getOpposite(), laneStep);
+			for (int side = 0; side < sides.size() && side < hanging.size(); side++) {
+				placeNote(placements, middle.relative(sides.get(side)), hanging.get(side));
+			}
+			// Said out loud for whatever is laid next. This middle is powered by the handover's dust
+			// and by nothing else, so a repeater against it reads it and a pad against it dies.
+			placements.softTip(true);
+			// One column, and nought bus cells: what the caller does with that number is ask how much
+			// dust the lane is still carrying, and this shape lays none.
+			return new Body(afterHead.ahead(2), 0);
 		}
 		int cells = layBus(placements, afterHead.ahead(1).above(), tail, time);
 		return new Body(afterHead.ahead(1 + cells), cells);
@@ -11473,6 +11701,43 @@ public final class SongBuilder {
 		/** What it is called at the moment, for a helper that has to name itself and put it back. */
 		String placing() {
 			return placing;
+		}
+
+		/**
+		 * Whether the module just built ended on a cell that only dust powers.
+		 *
+		 * <p>Carried forward rather than looked back at, which is what makes the parity pad's answer
+		 * cheap. A simple tail's middle is lit by the handover's dust and by nothing else: it drives a
+		 * repeater standing against it and it cannot light dust. So the cell after it may be a
+		 * repeater and may not be a pad -- and the pad is laid by the *next* chord, which is a
+		 * decision made after this one and with no reason to look back at it. One boolean travelling
+		 * forward turns a retroactive question into a local one, the same way {@code tipSignal} and
+		 * {@code columnBehindBusy} already do for the walk.</p>
+		 */
+		private boolean softTip;
+
+		/** What the module before this one ended on, which is what a pad has to ask. */
+		private boolean softBehind;
+
+		void softTip(boolean soft) {
+			softTip = soft;
+		}
+
+		/**
+		 * Hand this module's answer back a step and start a fresh one.
+		 *
+		 * <p>Two fields and not one, because the module being built and the module before it are both
+		 * live at the same moment: the pad is laid at the front of module N and asks about module N-1.
+		 * Clearing a single flag at the top of the build read the module's own answer -- which is nought,
+		 * because it has not been built yet -- and the split never fired once.</p>
+		 */
+		void rollSoftTip() {
+			softBehind = softTip;
+			softTip = false;
+		}
+
+		boolean softBehind() {
+			return softBehind;
 		}
 
 		void set(BlockPos position, String block) {
