@@ -75,10 +75,15 @@ public record PreviewInstrument(String id, String name, Item icon, Holder<SoundE
 		new PreviewInstrument("BIT", "Bit", Items.EMERALD_BLOCK, SoundEvents.NOTE_BLOCK_BIT),
 		new PreviewInstrument("BANJO", "Banjo", Items.HAY_BLOCK, SoundEvents.NOTE_BLOCK_BANJO),
 		new PreviewInstrument("PLING", "Pling", Items.GLOWSTONE, SoundEvents.NOTE_BLOCK_PLING),
-		new PreviewInstrument("TRUMPET", "Trumpet", Items.COPPER_BLOCK.weathering().unaffected(), SoundEvents.NOTE_BLOCK_TRUMPET),
-		new PreviewInstrument("TRUMPET_EXPOSED", "Exposed trumpet", Items.COPPER_BLOCK.weathering().exposed(), SoundEvents.NOTE_BLOCK_TRUMPET_EXPOSED),
-		new PreviewInstrument("TRUMPET_WEATHERED", "Weathered trumpet", Items.COPPER_BLOCK.weathering().weathered(), SoundEvents.NOTE_BLOCK_TRUMPET_WEATHERED),
-		new PreviewInstrument("TRUMPET_OXIDIZED", "Oxidized trumpet", Items.COPPER_BLOCK.weathering().oxidized(), SoundEvents.NOTE_BLOCK_TRUMPET_OXIDIZED)
+		// Waxed, all four of them. The four trumpets are one instrument at four ages, so an unwaxed
+		// block does not merely weather -- it walks up the list and starts playing the next voice
+		// along. A song built with a trumpet line in it was quietly rewriting itself while it stood
+		// there, and the age it settles on is whatever the weather got to first. The same reason the
+		// sound effects have always been waxed, for once it actually changes the sound.
+		new PreviewInstrument("TRUMPET", "Trumpet", Items.COPPER_BLOCK.waxed().unaffected(), SoundEvents.NOTE_BLOCK_TRUMPET),
+		new PreviewInstrument("TRUMPET_EXPOSED", "Exposed trumpet", Items.COPPER_BLOCK.waxed().exposed(), SoundEvents.NOTE_BLOCK_TRUMPET_EXPOSED),
+		new PreviewInstrument("TRUMPET_WEATHERED", "Weathered trumpet", Items.COPPER_BLOCK.waxed().weathered(), SoundEvents.NOTE_BLOCK_TRUMPET_WEATHERED),
+		new PreviewInstrument("TRUMPET_OXIDIZED", "Oxidized trumpet", Items.COPPER_BLOCK.waxed().oxidized(), SoundEvents.NOTE_BLOCK_TRUMPET_OXIDIZED)
 	);
 
 	/**

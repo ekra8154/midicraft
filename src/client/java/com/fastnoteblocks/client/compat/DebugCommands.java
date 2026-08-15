@@ -81,12 +81,14 @@ public final class DebugCommands {
 				.then(corner("from").then(views())));
 			// A toggle rather than an argument to the paste, because the builds worth looking at this
 			// way are songs pasted from the build screen, which takes no arguments.
-			dispatcher.register(literal("fastnoteblockcollisions")
+			// On its own it says what the colours mean rather than toggling. Reading a marked build is
+			// the thing you do far more often than turning the marking on, and a toggle you have to
+			// read the state of afterwards is a toggle that gets pressed twice by accident.
+			dispatcher.register(literal("fastnoteblocksdebugpaste")
 				.requires(source -> FastNoteblocksConfig.get().debugCommandsEnabled())
-				.executes(context -> markCollisions(context.getSource(),
-					!SongBuilder.MARK_COLLISIONS))
-				.then(literal("on").executes(context -> markCollisions(context.getSource(), true)))
-				.then(literal("off").executes(context -> markCollisions(context.getSource(), false))));
+				.executes(context -> colourKey(context.getSource()))
+				.then(literal("on").executes(context -> debugPaste(context.getSource(), true)))
+				.then(literal("off").executes(context -> debugPaste(context.getSource(), false))));
 		});
 	}
 
@@ -322,14 +324,6 @@ public final class DebugCommands {
 	}
 
 	/**
-	 * Build through collisions and light them up, or stop doing that.
-	 *
-	 * <p>What comes back is a machine that is wrong on purpose: the block that got there first is
-	 * kept, whatever wanted it second is dropped, and the cell is a sea lantern. So the song will not
-	 * play properly and is not meant to -- it is meant to be walked round, to see whose column the
-	 * lantern is standing in.</p>
-	 */
-	/**
 	 * Every marked cell, as coordinates that can be pasted straight into {@code /tp}.
 	 *
 	 * <p>All of them rather than a count: there are never many, and the pair of blocks differs from
@@ -348,12 +342,47 @@ public final class DebugCommands {
 		}
 	}
 
-	private static int markCollisions(FabricClientCommandSource source, boolean on) {
-		SongBuilder.MARK_COLLISIONS = on;
+	/**
+	 * Paste marked up, or paste plain, and remember which.
+	 *
+	 * <p>What comes back marked is a machine you can read standing in it: the stone says which shape
+	 * laid it, wire the signal never gets to is red, a note that sounds at the wrong moment is a lit
+	 * bulb and one with nothing to set it off wears a dragon head. All of that is still a machine
+	 * that runs. The one part that is not is the collisions -- the block that got there first is
+	 * kept, whatever wanted it second is dropped, and the cell is a sea lantern -- so a build with
+	 * any of those in it is wrong on purpose and meant to be walked round rather than heard.</p>
+	 */
+	/**
+	 * What the blocks of a marked build mean, and whether the next one will be marked.
+	 *
+	 * <p>Read off {@link SongBuilder#DEBUG_PASTE_KEY}, which is the same table the builder colours
+	 * from and the same one an {@code /asciidiagram} legend explains itself with, so the three can
+	 * never come apart.</p>
+	 */
+	private static int colourKey(FabricClientCommandSource source) {
+		boolean on = FastNoteblocksConfig.get().debugPasteEnabled();
+		source.sendFeedback(Component.literal("Debug paste is " + (on ? "on" : "off")
+			+ ". /fastnoteblocksdebugpaste on|off to change it.")
+			.withStyle(on ? ChatFormatting.YELLOW : ChatFormatting.GRAY));
+		SongBuilder.DEBUG_PASTE_KEY.forEach((block, means) -> source.sendFeedback(Component
+			.literal("  " + block.substring(block.indexOf(':') + 1) + "  ")
+			.withStyle(ChatFormatting.WHITE)
+			.append(Component.literal(means).withStyle(ChatFormatting.GRAY))));
+		source.sendFeedback(Component.literal("  hyphae and red nether brick replace whichever stone "
+			+ "colour a cell had, and dead wire wins over a breach")
+			.withStyle(ChatFormatting.DARK_GRAY));
+		return 1;
+	}
+
+	private static int debugPaste(FabricClientCommandSource source, boolean on) {
+		FastNoteblocksConfig.get().setDebugPasteEnabled(on);
+		FastNoteblocksConfig.save();
 		source.sendFeedback(Component.literal(on
-			? "Collisions will be built through and marked with sea lantern. Builds made this way "
-				+ "are broken on purpose -- turn this off before building anything you want to hear."
-			: "Collisions refuse the build again.")
+			? "Debug paste on. Stone is coloured by the shape that laid it, dead wire goes red, "
+				+ "wrong notes become lit copper bulbs and missed ones wear a dragon head. "
+				+ "Collisions build through and light up in sea lantern, which is broken on purpose "
+				+ "-- turn this off before building anything you want to hear."
+			: "Debug paste off. Builds come out plain and a collision refuses them again.")
 			.withStyle(on ? ChatFormatting.YELLOW : ChatFormatting.GRAY));
 		return 1;
 	}

@@ -131,9 +131,9 @@ class RailAgainstStacksTest {
 			SongBuilder.TWO_RAIL_RUNS = true;
 			// Which is what puts names on the blocks, so a fault can say which shape is on each side
 			// rather than leaving it to be read off a dump.
-			SongBuilder.MARK_COLLISIONS = true;
+			SongBuilder.DEBUG_PASTE = true;
 			SongBuilder.PastePlan on = plan(notes, 44, 3);
-			SongBuilder.MARK_COLLISIONS = false;
+			SongBuilder.DEBUG_PASTE = false;
 			if (on == null) {
 				continue;
 			}

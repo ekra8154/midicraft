@@ -48,13 +48,13 @@ class UltraLaneV2Test {
 	 * <p>The flags are pinned first, and that is not belt and braces. Every switch in this file is a
 	 * static, the probes set them to measure a change, and a probe that throws or that forgets its
 	 * {@code finally} leaves the next class to run building something else. This assertion passed on
-	 * its own and failed in the suite for exactly that reason -- {@link SongBuilder#MARK_COLLISIONS}
+	 * its own and failed in the suite for exactly that reason -- {@link SongBuilder#DEBUG_PASTE}
 	 * left on by another class marks collisions instead of refusing them, which changes what v1
 	 * builds. An exact number is only worth asserting if what it depends on is stated.</p>
 	 */
 	@Test
 	void doesNotDisturbTheFirstLayout() {
-		SongBuilder.MARK_COLLISIONS = false;
+		SongBuilder.DEBUG_PASTE = false;
 		SongBuilder.CUT_ONLY_LANES = false;
 		SongBuilder.CUTS_THE_CHORD_THAT_REACHES = false;
 		SongBuilder.SMALL_MAY_STACK_IN_A_TURN = false;

@@ -346,6 +346,7 @@ public final class FastNoteblocksConfig {
 	private MidiInstrumentSource midiInstrumentSource;
 	private MidiTempoFit midiTempoFit;
 	private boolean debugCommandsEnabled;
+	private boolean debugPasteEnabled;
 	private int midiVelocityCutoff;
 	private int chordThinTarget;
 	private int layerPanelWidth;
@@ -469,6 +470,7 @@ public final class FastNoteblocksConfig {
 				instance.midiRangeFit = stored.midiRangeFit == null ? MidiRangeFit.OCTAVE_SHIFT : stored.midiRangeFit;
 				instance.midiIgnorePercussion = stored.midiIgnorePercussion == null || stored.midiIgnorePercussion;
 				instance.debugCommandsEnabled = Boolean.TRUE.equals(stored.debugCommandsEnabled);
+				instance.setDebugPasteEnabled(Boolean.TRUE.equals(stored.debugPasteEnabled));
 				instance.midiMaxImportedTracks = clampMidiMaxImportedTracks(
 					stored.midiMaxImportedTracks == null
 						? DEFAULT_MIDI_MAX_IMPORTED_TRACKS
@@ -1104,6 +1106,30 @@ public final class FastNoteblocksConfig {
 		this.debugCommandsEnabled = debugCommandsEnabled;
 	}
 
+	/**
+	 * Whether a paste comes out marked up rather than plain.
+	 *
+	 * <p>Remembered between sessions because it is a way of working rather than a one-off: the
+	 * builds worth marking are the ones being read over several evenings, and having to turn it back
+	 * on after every launch is how a build gets pasted plain by accident and read for an hour before
+	 * anybody notices the colours are missing.</p>
+	 */
+	public boolean debugPasteEnabled() {
+		return debugPasteEnabled;
+	}
+
+	/**
+	 * Sets the flag and the builder's copy of it together.
+	 *
+	 * <p>The builder holds its own {@code static} because the tests drive it without a config file
+	 * and the walk reads it per block. Setting them apart is how the two drift, so nothing outside
+	 * this method writes either one.</p>
+	 */
+	public void setDebugPasteEnabled(boolean debugPasteEnabled) {
+		this.debugPasteEnabled = debugPasteEnabled;
+		com.fastnoteblocks.client.compat.SongBuilder.DEBUG_PASTE = debugPasteEnabled;
+	}
+
 	public int midiMaxImportedTracks() {
 		return midiMaxImportedTracks;
 	}
@@ -1281,6 +1307,7 @@ public final class FastNoteblocksConfig {
 		config.midiRangeFit = MidiRangeFit.OCTAVE_SHIFT;
 		config.midiIgnorePercussion = true;
 		config.debugCommandsEnabled = false;
+		config.setDebugPasteEnabled(false);
 		config.midiMaxImportedTracks = DEFAULT_MIDI_MAX_IMPORTED_TRACKS;
 		config.midiDefaultInstrument = "HARP";
 		config.midiInstrumentSource = MidiInstrumentSource.FROM_FILE_THEN_NAME;
@@ -1444,6 +1471,7 @@ public final class FastNoteblocksConfig {
 		private MidiRangeFit midiRangeFit;
 		private Boolean midiIgnorePercussion;
 		private Boolean debugCommandsEnabled;
+		private Boolean debugPasteEnabled;
 		private Integer midiMaxImportedTracks;
 		private String midiDefaultInstrument;
 		private MidiInstrumentSource midiInstrumentSource;
@@ -1505,6 +1533,7 @@ public final class FastNoteblocksConfig {
 			this.midiRangeFit = config.midiRangeFit;
 			this.midiIgnorePercussion = config.midiIgnorePercussion;
 			this.debugCommandsEnabled = config.debugCommandsEnabled;
+			this.debugPasteEnabled = config.debugPasteEnabled;
 			this.midiMaxImportedTracks = config.midiMaxImportedTracks;
 			this.midiDefaultInstrument = config.midiDefaultInstrument;
 			this.midiInstrumentSource = config.midiInstrumentSource;

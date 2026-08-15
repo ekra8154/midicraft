@@ -97,16 +97,16 @@ final class FaultView {
 	static Build of(String name, List<SongBuilder.EventNote> notes, SongBuilder.PasteMode mode,
 			int width, int floors, int maxFloors, boolean nameShapes) {
 		boolean marking = SongBuilder.MARK_UNREACHED;
-		boolean naming = SongBuilder.MARK_COLLISIONS;
+		boolean naming = SongBuilder.DEBUG_PASTE;
 		SongBuilder.PastePlan plan;
 		try {
 			SongBuilder.MARK_UNREACHED = false;
-			SongBuilder.MARK_COLLISIONS = nameShapes;
+			SongBuilder.DEBUG_PASTE = nameShapes;
 			plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0), notes, mode,
 				new SongBuilder.BuildLimits(maxFloors, width, floors));
 		} finally {
 			SongBuilder.MARK_UNREACHED = marking;
-			SongBuilder.MARK_COLLISIONS = naming;
+			SongBuilder.DEBUG_PASTE = naming;
 		}
 		Map<BlockPos, BlockState> world = new LinkedHashMap<>();
 		Map<BlockPos, Integer> laid = new LinkedHashMap<>();

@@ -28,7 +28,7 @@ class BendFootprintProbe {
 	@Test
 	void marksWhatTheTurnLandsIn() throws Exception {
 		List<SongBuilder.EventNote> guardian = BreachView.song("deltarune-ch-4-guardian");
-		SongBuilder.MARK_COLLISIONS = true;
+		SongBuilder.DEBUG_PASTE = true;
 		try {
 			SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0), guardian,
 				SongBuilder.PasteMode.ULTRA_COMPACT_LANE_V2, new SongBuilder.BuildLimits(4, 20, 4));
@@ -65,7 +65,7 @@ class BendFootprintProbe {
 				}
 			}
 		} finally {
-			SongBuilder.MARK_COLLISIONS = false;
+			SongBuilder.DEBUG_PASTE = false;
 		}
 		// And the same build with the marker off, which is the one that throws. The marker cannot show
 		// this: with it on nothing throws at all, so the fallback that was supposed to catch the throw

@@ -35,7 +35,7 @@ class HandoverCollisionProbe {
 		List<SongBuilder.EventNote> notes = sampleSong();
 		for (boolean on : new boolean[] {false, true}) {
 			SongBuilder.RESERVES_THE_HANDOVER_COLUMN = on;
-			SongBuilder.MARK_COLLISIONS = true;
+			SongBuilder.DEBUG_PASTE = true;
 			try {
 				SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0),
 					notes, SongBuilder.PasteMode.ULTRA_COMPACT_LANE, LIMITS);
@@ -46,7 +46,7 @@ class HandoverCollisionProbe {
 			} catch (RuntimeException no) {
 				System.out.println("COLLIDE on=" + on + " REFUSED: " + no.getMessage());
 			} finally {
-				SongBuilder.MARK_COLLISIONS = false;
+				SongBuilder.DEBUG_PASTE = false;
 				SongBuilder.RESERVES_THE_HANDOVER_COLUMN = true;
 			}
 		}
