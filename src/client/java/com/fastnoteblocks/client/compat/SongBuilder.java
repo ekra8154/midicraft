@@ -3500,7 +3500,26 @@ public final class SongBuilder {
 					booked)) {
 				boolean opening = railPhase < 0;
 				boolean fromDust = false;
-				if (opening) {
+				// A stacked bus's rail-ready tail is already this run's first path column, so there is
+				// nothing to open with: the floor rail's repeater goes in the free cell under that tail
+				// and the run picks up on the floor rail. Asked before the head, because a head laid
+				// here would be two columns spent on a column that already exists.
+				BlockPos openOffTail = RAIL_FROM_HANDOVER && opening
+						&& placements.railTail() != null
+						&& lane.pos().equals(placements.railTail().relative(lane.travel()))
+					? placements.railTail() : null;
+				if (openOffTail != null) {
+					addRailFromHandover(placements, openOffTail, lane.travel(),
+						railDelay(currentTime, event.time()));
+					railPhase = 1;
+					railBlanksRunning = 0;
+					railFloorCarried = false;
+					// Both rails live at the module's tick: the tail sounded with the head, and the
+					// handover's stone went live with it.
+					railLive[0] = currentTime;
+					railLive[1] = currentTime;
+					opening = false;
+				} else if (opening) {
 					int seed = railStackSeed(placements, lane, lastStyle, currentTime, false);
 					// The wait in front of the run, laid the way every other module lays it: a repeater
 					// for every four ticks of it, and the remainder in the head's own. Clamping it to
@@ -6661,6 +6680,30 @@ public final class SongBuilder {
 		set(placements, lane.pos().above(),
 			"minecraft:repeater[facing=" + repeaterFacing(lane.travel()) + ",delay=" + delay + "]");
 		return lane.ahead(1);
+	}
+
+	/**
+	 * A run opening straight off a stacked bus, which costs no column at all.
+	 *
+	 * <p>The bus has already laid the first path column: its tail. That tail sounds at the head's own
+	 * tick -- the handover adds no delay, and it is the same chord -- and it left the cell below it
+	 * free. So the only thing owed is the floor rail's first repeater, and it goes in that free cell,
+	 * facing out of the handover's stone. The dust above that stone powers it and the head's cross
+	 * powers it from the side, which is exactly the block a run off a plain stacked chord reads.</p>
+	 *
+	 * <p>ekran, having built both by hand: <i>"it quite literally is the EXACT same as when we get an
+	 * instant start from a normal stacked chord. only difference is the first top rail slot is taken
+	 * by the tail of the stacked bus."</i> Eight columns against the eleven the walk laid before it.</p>
+	 *
+	 * <p>The run therefore resumes on the <b>floor</b> rail, not the path one, and both rails are live
+	 * from the module's own tick.</p>
+	 */
+	private static void addRailFromHandover(PlacementPlan placements, BlockPos tail, Direction travel,
+			int delay) {
+		placements.placing("rail:FROM-HANDOVER delay" + delay);
+		placements.padded("railFromHandover");
+		set(placements, tail, "minecraft:repeater[facing=" + repeaterFacing(travel)
+			+ ",delay=" + delay + "]");
 	}
 
 	/** The two columns a run opens with: its own repeater, then the dust that starts the floor rail. */
@@ -9881,6 +9924,11 @@ public final class SongBuilder {
 			// Said out loud for whatever is laid next. This middle is powered by the handover's dust
 			// and by nothing else, so a repeater against it reads it and a pad against it dies.
 			placements.softTip(true);
+			// And where the middle left the cell below it free -- a harp or a stone, never a note with
+			// an instrument block under it -- this column is a path rail's first slot, already laid.
+			if (railReady) {
+				placements.railTail(tailAt.pos());
+			}
 			// One column, and nought bus cells: what the caller does with that number is ask how much
 			// dust the lane is still carrying, and this shape lays none.
 			return new Body(afterHead.ahead(2), 0);
@@ -11719,6 +11767,19 @@ public final class SongBuilder {
 		/** What the module before this one ended on, which is what a pad has to ask. */
 		private boolean softBehind;
 
+		/**
+		 * Where a stacked bus left a tail a run can open straight off, or null.
+		 *
+		 * <p>The column of the tail itself. A rail-ready tail is already the run's first path column --
+		 * it sounds with the head, at the head's own tick, because the handover adds no delay -- and
+		 * the cell below it is empty, which is where the floor rail's repeater goes. So a run opening
+		 * here spends no column at all: no head, no trigger, nothing. Carried forward for the same
+		 * reason {@code softBehind} is, and rolled at the same moment.</p>
+		 */
+		private BlockPos railTail;
+
+		private BlockPos railTailBehind;
+
 		void softTip(boolean soft) {
 			softTip = soft;
 		}
@@ -11734,6 +11795,30 @@ public final class SongBuilder {
 		void rollSoftTip() {
 			softBehind = softTip;
 			softTip = false;
+			railTailBehind = railTail;
+			railTail = null;
+		}
+
+		void railTail(BlockPos at) {
+			railTail = at;
+		}
+
+		BlockPos railTailBehind() {
+			return railTailBehind;
+		}
+
+		/**
+		 * The tail the module just built left, if a run can open off it.
+		 *
+		 * <p>This one and not {@link #railTailBehind()}, which is the trap that made the whole thing
+		 * never fire. The roll happens inside {@code buildShaped}, and the walk asks this question
+		 * *before* building anything -- indeed it asks it in order to decide not to build a chord at
+		 * all. So at the moment of asking, the tail just laid is still here and the rolled copy is a
+		 * module older. A pad asks the rolled one because a pad is laid during the next build; a run
+		 * asks this one because a run is decided between builds.</p>
+		 */
+		BlockPos railTail() {
+			return railTail;
 		}
 
 		boolean softBehind() {
