@@ -232,12 +232,20 @@ final class FaultView {
 			if (past < 2) {
 				continue;
 			}
+			// Same side of the corridor, same floor, and then the nearest in z. A lane can overrun at
+			// both ends, and matching on floor and z alone paired a far-side turn with a near-side
+			// block and drew a window round the wrong end of the build entirely -- which reads as an
+			// answer rather than as a mismatch, and is how a theory gets formed about a lane nobody
+			// was looking at.
 			BreachView.Overrun worst = null;
 			for (BreachView.Overrun run : BreachView.overruns(build.plan())) {
-				if (Math.abs(run.z() - turn.getZ()) <= 1
-						&& build.floorOf(run.y()) == build.floorOf(turn.getY())) {
+				if (run.nearSide() != near || build.floorOf(run.y()) != build.floorOf(turn.getY())
+						|| Math.abs(run.z() - turn.getZ()) > 1) {
+					continue;
+				}
+				if (worst == null || Math.abs(run.z() - turn.getZ())
+						< Math.abs(worst.z() - turn.getZ())) {
 					worst = run;
-					break;
 				}
 			}
 			found.add(new Breach(turn, past, near, worst));
@@ -368,9 +376,11 @@ final class FaultView {
 					System.out.println("   fault " + fault);
 				}
 			}
-			BlockPos at = one.run() == null ? one.turn()
-				: new BlockPos(one.run().x(), one.run().y(), one.run().z());
-			// Out to both walls, not merely around the overrun, because a breach is a lane against a
+			// Centred on the turn, because the turn is what the breach is. The furthest block is
+			// quoted in the heading and is worth going to stand at, but it is as likely to be the
+			// sideways run or the slab step -- which are supposed to be outside -- as the fault.
+			BlockPos at = one.turn();
+			// Out to the other wall, not merely around the turn, because a breach is a lane against a
 			// wall and the wall has to be in the picture for the number of columns to mean anything.
 			BlockPos wallward = new BlockPos(
 				one.nearSide() ? build.plan().farWall() : build.plan().nearWall(),
