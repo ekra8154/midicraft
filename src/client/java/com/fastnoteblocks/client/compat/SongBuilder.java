@@ -8093,8 +8093,11 @@ public final class SongBuilder {
 	 * That is most of a build, and it wants to stay the colour a build has always been, so the
 	 * chords are what stand out.</p>
 	 *
-	 * <p>{@code minecraft:cobbled_deepslate} is held for the simple tail, which is not in this branch
-	 * yet. It goes with the rest of the stacked family when it arrives.</p>
+	 * <p>{@code minecraft:cobbled_deepslate} is the simple tail, which arrived with this branch: a
+	 * stacked bus whose tail came to rest in one column rather than a run of them. It wears the
+	 * handover column as well as the tail itself, because the two are one shape to look at -- and it
+	 * is told apart from the plain stacked bus precisely because from outside it looks like one that
+	 * came out a column short.</p>
 	 */
 	/**
 	 * What every block a marked paste uses means, in the words you would say out loud.
@@ -8150,6 +8153,13 @@ public final class SongBuilder {
 			return "minecraft:stone";
 		}
 		String style = laidBy.substring("chord:".length());
+		// Asked before the family it belongs to, because it is one: a simple tail is a stacked bus
+		// whose tail came to rest in a single column instead of a run of them, and the whole reason
+		// for giving it a colour of its own is that from outside it looks like an ordinary stacked
+		// bus that came out a column short.
+		if (style.contains("simpleTail")) {
+			return "minecraft:cobbled_deepslate";
+		}
 		if (style.startsWith("STACKED_BUS")) {
 			return "minecraft:deepslate";
 		}
@@ -10415,6 +10425,13 @@ public final class SongBuilder {
 		// it goes silent -- 4,767 notes on all of the lights, read off the slice by ekran. Naming the
 		// four sides makes it a cross and a cross stays one, which is the same reason
 		// {@link #STACKED_CROSS} is stated rather than left to the game.
+		// Named before the handover goes down rather than after, so the column that hands over to a
+		// simple tail wears the tail's own colour in a debug paste. The two are one shape to look at:
+		// the tail is a single column and the handover is what drives it, and colouring only the far
+		// half of that leaves the thing you are trying to see cut in two.
+		if (simple) {
+			placements.placing("chord:STACKED_BUS+simpleTail" + tail.size() + " handover");
+		}
 		set(placements, afterHead.pos(), "minecraft:stone");
 		set(placements, afterHead.pos().above(), simple ? STACKED_CROSS : "minecraft:redstone_wire");
 		// Counted as a hand-over and not as pad, which is what it used to be called. Pad is a column
