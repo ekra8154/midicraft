@@ -24,7 +24,7 @@ import org.junit.jupiter.api.Test;
 /**
  * The marking pass, on the smallest build that collides, drawn.
  *
- * <p>{@code MARK_COLLISIONS} exists so a broken build can be walked round in game rather than
+ * <p>{@code DEBUG_PASTE} exists so a broken build can be walked round in game rather than
  * guessed at from a message. The same build can be walked round here: what the diagram shows is
  * whose column the sea lantern is standing in, which is the thing the exception never said.</p>
  */
@@ -38,7 +38,7 @@ class CollisionMarkTest {
 
 	@AfterEach
 	void stopMarking() {
-		SongBuilder.MARK_COLLISIONS = false;
+		SongBuilder.DEBUG_PASTE = false;
 	}
 
 	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
@@ -62,7 +62,7 @@ class CollisionMarkTest {
 	 */
 	@Test
 	void marksTheCellsAndDrawsTheFirst() throws Exception {
-		SongBuilder.MARK_COLLISIONS = true;
+		SongBuilder.DEBUG_PASTE = true;
 		Object[][] cases = {
 			{"adventure-of-a-lifetime", 12, 2},
 			{"adventure-of-a-lifetime", 16, 4},
@@ -110,7 +110,7 @@ class CollisionMarkTest {
 
 	/** The first width and floor count this song refuses at, with the marking pass off. */
 	private static int[] firstRefusal(String name) throws Exception {
-		SongBuilder.MARK_COLLISIONS = false;
+		SongBuilder.DEBUG_PASTE = false;
 		try {
 			List<SongBuilder.EventNote> notes = load(name);
 			for (int floors = 2; floors <= 6; floors++) {
@@ -126,7 +126,7 @@ class CollisionMarkTest {
 			}
 			return null;
 		} finally {
-			SongBuilder.MARK_COLLISIONS = true;
+			SongBuilder.DEBUG_PASTE = true;
 		}
 	}
 

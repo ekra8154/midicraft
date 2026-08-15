@@ -358,7 +358,7 @@ public final class SongBuilder {
 
 	/**
 	 * Whether a build is read back before it is handed over, so that note blocks the signal never
-	 * reaches are reported as a fault and shown as sea lanterns.
+	 * reaches are reported as a fault -- and, on a marked paste, shown in the blocks.
 	 *
 	 * <p>A note that never fires is as much a wrong note as one that fires twice, and it is the worse
 	 * of the two to find: nothing else here can see it. {@code verify} asks whether every note block
@@ -367,12 +367,15 @@ public final class SongBuilder {
 	 * just never fire. So the only way to know is to read the blocks back, and the only place that
 	 * can be done is after they are laid.</p>
 	 *
-	 * <p>Sea lantern rather than a warning alone, because a count says a build is broken and a
-	 * position says where. Nothing is lost by overwriting them: they were never going to sound.</p>
+	 * <p>The count always goes to chat. The marking is the dead <em>wire</em> and not the dead notes:
+	 * a run that stops halfway silences everything after it, and every one of those notes is
+	 * blameless. What is worth standing in front of is the cell the signal got to and no further, so
+	 * a marked paste turns the stone of the dead run red and leaves the notes alone -- they still
+	 * play their own instrument, they simply never hear anything.</p>
 	 */
 	static boolean MARK_UNREACHED = true;
 
-	/** The same plan with every note the signal never reaches turned into a sea lantern. */
+	/** The same plan with the wire the signal never reaches turned red, on a marked paste. */
 	private static PastePlan withUnreachedMarked(PastePlan plan) {
 		if (!MARK_UNREACHED) {
 			return plan;
@@ -413,27 +416,74 @@ public final class SongBuilder {
 		if (reading.unreachedNotes() == 0) {
 			return plan;
 		}
-		Set<BlockPos> dead = Set.copyOf(reading.unreachedAt());
-		List<String> commands = new ArrayList<>(plan.commands().size());
-		for (String command : plan.commands()) {
-			String[] parts = command.split(" ");
-			BlockPos at = new BlockPos(Integer.parseInt(parts[1]), Integer.parseInt(parts[2]),
-				Integer.parseInt(parts[3]));
-			commands.add(dead.contains(at) && parts[4].startsWith("minecraft:note_block")
-				? "setblock " + at.getX() + " " + at.getY() + " " + at.getZ()
-					+ " minecraft:sea_lantern replace"
-				: command);
+		// The disagreement, and only the disagreement. A cell counts as dead wire when the walk meant
+		// it to carry the signal and the reader never got to it -- so the instrument blocks, the
+		// staircase fill and everything else that was never meant to be live stay out of it. Without
+		// that half the mark is every stone in the build, which says nothing.
+		Set<BlockPos> deadWire = plan.poweredAt().stream()
+			.filter(at -> !reading.reachedAt().contains(at))
+			.collect(java.util.stream.Collectors.toUnmodifiableSet());
+		List<String> commands = plan.commands();
+		if (DEBUG_PASTE && !deadWire.isEmpty()) {
+			List<String> marked = new ArrayList<>(commands.size());
+			for (String command : commands) {
+				String[] parts = command.split(" ");
+				BlockPos at = new BlockPos(Integer.parseInt(parts[1]), Integer.parseInt(parts[2]),
+					Integer.parseInt(parts[3]));
+				// Last word on the cell, over any colour the shape gave it: what a dead run was going
+				// to be is beside the point once it is dead. Stone only -- the dust and the repeaters
+				// standing on it have to stay themselves or the run stops being readable as a run.
+				marked.add(deadWire.contains(at) && STONE_COLOURS.contains(parts[4])
+					? "setblock " + at.getX() + " " + at.getY() + " " + at.getZ()
+						+ " minecraft:red_nether_bricks replace"
+					: command);
+			}
+			commands = marked;
 		}
 		BlockPos first = reading.unreachedAt().getFirst();
 		List<String> faults = new ArrayList<>(plan.faults());
 		faults.add(reading.unreachedNotes() + " note blocks would never be triggered -- the signal "
-			+ "does not reach them, so that much of the song is silent. They are built as sea "
-			+ "lanterns; the first is at " + first.getX() + " " + first.getY() + " " + first.getZ());
+			+ "does not reach them, so that much of the song is silent. The first is at "
+			+ first.getX() + " " + first.getY() + " " + first.getZ()
+			+ (DEBUG_PASTE && !deadWire.isEmpty()
+				? "; the " + deadWire.size() + " cells of wire that never go live are built in red "
+					+ "nether brick"
+				: ""));
 		return new PastePlan(List.copyOf(commands), plan.width(), plan.depth(), plan.height(),
 			plan.spanX(), plan.spanZ(), plan.mode(), List.copyOf(faults), plan.turns(), plan.moved(),
 			plan.breaches(), plan.recesses(), plan.padding(), plan.nearWall(), plan.farWall(),
-			plan.collisions());
+			plan.collisions(), plan.poweredAt());
 	}
+
+	/**
+	 * Every block a cell of lane can be built from, so that a later pass can recognise one.
+	 *
+	 * <p>The dead-wire mark runs after the colouring and has to overwrite whatever the colouring
+	 * decided, which means asking "is this a piece of lane" of a string that is no longer
+	 * {@code minecraft:stone}. Kept beside {@link #shapeStone} because the two have to list the same
+	 * blocks, and a colour added to one and not the other is a run that marks red in patches.</p>
+	 */
+	/**
+	 * How far outside its walls a build stands without anything being wrong.
+	 *
+	 * <p>Two, and it is not slack -- {@code finish} says why: the walk reaches outside its own walls
+	 * routinely, for a chord hanging off the far side of the first lane, for a corner overshooting
+	 * the end of one, for a floor not quite the width of the one below. The wall is where a lane
+	 * <em>turns</em>, and turning takes columns of its own.</p>
+	 *
+	 * <p>Measured rather than reasoned: twelve builds across four songs and four widths that record
+	 * no breach at all reach exactly this far past the wall and no further, and Guardian's near-side
+	 * breach of one at 24 wide over six floors is the first block past it. Marking from the wall
+	 * itself painted 1,231 blocks for three breaching lanes, which is a colour that means nothing.
+	 * If a layout change moves this, {@link com.fastnoteblocks.client.compat.DebugPasteMarkTest}
+	 * fails rather than the mark quietly lying.</p>
+	 */
+	private static final int WALL_OVERSHOOT = 2;
+
+	private static final Set<String> STONE_COLOURS = Set.of("minecraft:stone", "minecraft:tuff",
+		"minecraft:andesite", "minecraft:deepslate", "minecraft:cobbled_deepslate",
+		"minecraft:deepslate_tiles", "minecraft:smooth_basalt",
+		"minecraft:stripped_crimson_hyphae[axis=x]");
 
 	/**
 	 * The ultra build made both ways, keeping whichever of them came out better.
@@ -5515,18 +5565,80 @@ public final class SongBuilder {
 	static boolean TRACE_TURNS = false;
 
 	/**
-	 * Scratch: build through a collision instead of refusing, and light the cell up in sea lantern.
+	 * Whether a paste comes out marked up: coloured by shape, and wrong where it is wrong.
 	 *
-	 * <p>Ninety-five builds in the library will not paste, and every one of them is two shapes
-	 * wanting the same block. The message says which two and where, which is enough to know the rung
-	 * lands at instrument height and not enough to know whose column it lands in -- the chord going
-	 * into the turn, or the one coming out of it, or a lane on another floor entirely.</p>
+	 * <p>Everything this file knows about a build it knows in plan space, and every one of those
+	 * facts dies at {@code finish()} -- which shape laid a cell, which note has nothing to set it
+	 * off, which lane went past its wall. The build that goes up is stone either way, so reading one
+	 * means holding the report in one hand and counting columns with the other. This puts the report
+	 * into the blocks instead:</p>
 	 *
-	 * <p>So: keep whatever was standing, remember the cell, and after everything else is placed go
-	 * back over the list with sea lantern. The build is then wrong on purpose and glowing where it is
-	 * wrong, which can be walked round and looked at. Never leave this on for a real build.</p>
+	 * <ul>
+	 *   <li>the stone says what laid it -- tuff a bus, andesite a stacked chord, deepslate a stacked
+	 *     bus, deepslate tiles the head of a cut, smooth basalt a rail, and plain stone the lane;</li>
+	 *   <li>stripped crimson hyphae is a lane standing outside its wall, and red nether brick is wire
+	 *     the signal never got to, which wins over everything because everything under it is moot;</li>
+	 *   <li>a note that would sound at the wrong moment is a lit copper bulb, one with nothing to set
+	 *     it off wears a dragon head -- both still leave a machine that runs;</li>
+	 *   <li>and a cell two shapes both wanted is a sea lantern, the build going up rather than being
+	 *     refused, which is what this flag originally did and all it did.</li>
+	 * </ul>
+	 *
+	 * <p>The marking is a pass over the finished commands and never over the walk. Layout decisions
+	 * in this file read the blocks back -- {@code describeBlock(behind).startsWith("minecraft:stone")}
+	 * is one -- so a colour applied while walking would quietly build something else. Marked and
+	 * plain must be the same machine, or the marks are describing a build nobody has.</p>
+	 *
+	 * <p>Never leave this on for a real build: the collision half of it keeps whatever was standing
+	 * and drops the loser, which is broken on purpose.</p>
 	 */
-	static boolean MARK_COLLISIONS = false;
+	public static boolean DEBUG_PASTE = false;
+
+	/**
+	 * What a cell of lane is built from, given the name of the shape that laid it.
+	 *
+	 * <p>Grouped by family rather than by style, because the question a build raises is almost never
+	 * "is this a {@code STACKED_BUS_HALF}" -- it is "is this thing a bus at all", or "did that chord
+	 * get its head". So the stacked-bus family is one colour and the head of a cut is another, and
+	 * the three head sizes that cost so much argument are deliberately not told apart: they differ by
+	 * a note, which the chord itself shows you.</p>
+	 *
+	 * <p>Plain stone is everything that is not a chord -- wire, repeaters, pads, corners, staircases.
+	 * That is most of a build, and it wants to stay the colour a build has always been, so the
+	 * chords are what stand out.</p>
+	 *
+	 * <p>{@code minecraft:cobbled_deepslate} is held for the simple tail, which is not in this branch
+	 * yet. It goes with the rest of the stacked family when it arrives.</p>
+	 */
+	private static String shapeStone(String laidBy) {
+		if (laidBy == null) {
+			return "minecraft:stone";
+		}
+		if (laidBy.startsWith("rail:")) {
+			return "minecraft:smooth_basalt";
+		}
+		if (laidBy.startsWith("cutHead")) {
+			return "minecraft:deepslate_tiles";
+		}
+		// The two halves of a chord cut across a staircase. Both are runs of bus -- that is what makes
+		// a chord the one shape here that can be cut at all -- so they wear what a bus wears.
+		if (laidBy.startsWith("nearHalf") || laidBy.startsWith("farHalf")) {
+			return "minecraft:tuff";
+		}
+		if (!laidBy.startsWith("chord:")) {
+			return "minecraft:stone";
+		}
+		String style = laidBy.substring("chord:".length());
+		if (style.startsWith("STACKED_BUS")) {
+			return "minecraft:deepslate";
+		}
+		if (style.startsWith("STACKED_")) {
+			return "minecraft:andesite";
+		}
+		// A small chord lays no stone of its own -- its notes hang off the repeater's own block, which
+		// the lane laid -- so this arm is here for completeness rather than because it is reached.
+		return style.startsWith("BUS") ? "minecraft:tuff" : "minecraft:stone";
+	}
 
 	/** Scratch: turn {@link #strandsNext} off, so a lane it changed can be diffed against itself. */
 	static boolean LOOKAHEAD = true;
@@ -5927,7 +6039,7 @@ public final class SongBuilder {
 		// one that made the readback test refuse to build. The guard below exists so a nudge cannot
 		// push the staircase past the wall -- but it measures the room a lane had before that column
 		// was reserved, so with the reserve on it let a module be nudged into the descent'''s own
-		// steps. ekran'''s sample song at 24 wide over three floors, read off MARK_COLLISIONS: a
+		// steps. ekran'''s sample song at 24 wide over three floors, read off DEBUG_PASTE: a
 		// STACKED_FRONT+nudge holding off descent4 for a note block and its oak planks.
 		int roomToWall = roomAhead - handoverReserve(layout);
 		int stackedRoom = STACKED_CELLS + 1;
@@ -8600,10 +8712,17 @@ public final class SongBuilder {
 	 *     so it is the number to quote when the question is how the build looks rather than how
 	 *     much of it there is.
 	 */
+	/**
+	 * @param poweredAt every cell the walk believes carries the signal, in world space. Only for the
+	 *     dead-wire pass, which needs both halves of the disagreement: this is what the build was
+	 *     meant to light up, and the reader says what actually does. The difference is the dead line,
+	 *     and neither side can name it alone -- most of a build is stone that was never meant to be
+	 *     live, so "not reached" on its own would paint the whole thing.
+	 */
 	record PastePlan(List<String> commands, int width, int depth, int height, int spanX, int spanZ,
 			PasteMode mode, List<String> faults, List<BlockPos> turns, List<Integer> moved,
 			List<Integer> breaches, List<Integer> recesses, Map<String, Integer> padding,
-			int nearWall, int farWall, Map<BlockPos, String> collisions) {
+			int nearWall, int farWall, Map<BlockPos, String> collisions, Set<BlockPos> poweredAt) {
 
 		/**
 		 * Cells of lane filled with wire rather than with music, counted by what asked for them.
@@ -8673,10 +8792,10 @@ public final class SongBuilder {
 
 		private boolean recording = true;
 		private final Map<BlockPos, String> blocks = new LinkedHashMap<>();
-		/** Cells two shapes both wanted, and what each pair was, when {@link #MARK_COLLISIONS}. */
+		/** Cells two shapes both wanted, and what each pair was, when {@link #DEBUG_PASTE}. */
 		private final Map<BlockPos, String> collisions = new LinkedHashMap<>();
 		/**
-		 * What is being built right now, and what built each cell, when {@link #MARK_COLLISIONS}.
+		 * What is being built right now, and what built each cell, when {@link #DEBUG_PASTE}.
 		 *
 		 * <p>The pair of blocks in a collision message says a note block met a staircase, which is one
 		 * question short: a note block belongs to a chord, and which chord -- the one the lane ended
@@ -8967,6 +9086,16 @@ public final class SongBuilder {
 					+ (aggressor == null ? "?" : aggressor);
 		}
 
+		/**
+		 * Notes {@link #verify} found sounding at a moment nobody wrote, and notes it found silent.
+		 *
+		 * <p>The same two things the faults say in words. Kept as positions as well because a fault is
+		 * a line of chat and a build is nine thousand notes: reading one means finding it, and finding
+		 * it is what the marks are for.</p>
+		 */
+		private final Set<BlockPos> wrongNotesAt = new java.util.HashSet<>();
+		private final Set<BlockPos> missedNotesAt = new java.util.HashSet<>();
+
 		List<String> verify(int shiftX, int shiftZ) {
 			List<String> faults = new ArrayList<>();
 			for (Map.Entry<BlockPos, Integer> note : notes.entrySet()) {
@@ -8987,6 +9116,7 @@ public final class SongBuilder {
 						// comes from is the whole diagnosis: along the lane is one module reaching into
 						// the next, across the lane is the corridor alongside, and the two want opposite
 						// fixes. Without it there is nothing to do but guess, which is what happened.
+						wrongNotesAt.add(note.getKey());
 						faults.add("the note at " + describe(note.getKey(), shiftX, shiftZ)
 							+ " belongs to tick " + time + " but would sound early, at tick "
 							+ neighbour + ", from the " + direction + " at "
@@ -8997,6 +9127,7 @@ public final class SongBuilder {
 						// from is as much the diagnosis here as it is there -- along the lane is one
 						// module reaching into the next, across it is the corridor alongside -- and
 						// leaving it off meant every one of these had to be traced by hand.
+						wrongNotesAt.add(note.getKey());
 						faults.add("the note at " + describe(note.getKey(), shiftX, shiftZ)
 							+ " belongs to tick " + time + " but would sound again at tick "
 							+ neighbour + ", from the " + direction + " at "
@@ -9005,6 +9136,7 @@ public final class SongBuilder {
 					}
 				}
 				if (!triggered) {
+					missedNotesAt.add(note.getKey());
 					faults.add("the note at " + describe(note.getKey(), shiftX, shiftZ)
 						+ " has nothing to set it off");
 				}
@@ -9064,7 +9196,7 @@ public final class SongBuilder {
 			if (existing == null && trial != null) {
 				trial.blocksAdded().add(key);
 			}
-			if (MARK_COLLISIONS && existing == null) {
+			if (DEBUG_PASTE && existing == null) {
 				placedBy.put(key, placing);
 			}
 			if (existing == null) {
@@ -9081,7 +9213,7 @@ public final class SongBuilder {
 				}
 			}
 			if (existing != null && !existing.equals(block)) {
-				if (!MARK_COLLISIONS) {
+				if (!DEBUG_PASTE) {
 					throw new IllegalArgumentException("Placement layout collision at "
 						+ describe(key) + ": " + existing + " is already there and " + block
 						+ " wants the same block");
@@ -9127,6 +9259,10 @@ public final class SongBuilder {
 			}
 			for (BlockPos at : undo.blocksAdded()) {
 				blocks.remove(at);
+				// The name goes back with the block. A stacked module that will not fit is rolled back
+				// and a bus built over the same cells, and a label left behind from the shape that was
+				// undone would colour that bus after something the build has not got.
+				placedBy.remove(at);
 			}
 			undo.notesBefore().forEach((at, was) -> {
 				if (was == null) {
@@ -9168,6 +9304,52 @@ public final class SongBuilder {
 			return finish(mode, origin, origin.getX(), origin.getX());
 		}
 
+		/**
+		 * The block actually built at a cell, which is the planned one unless the paste is marked up.
+		 *
+		 * <p>Everything here is in plan space, before the slide, because that is the space the walk
+		 * recorded its own opinions in. The one thing it must not do is change what gets built for a
+		 * plain paste, which is why every arm falls through to {@code block}.</p>
+		 *
+		 * @param walled whether {@code nearWall} and {@code farWall} are real walls, so that a block
+		 *     outside them means a lane that overstepped rather than a mode that has no walls
+		 */
+		private String marked(BlockPos at, String block, int nearWall, int farWall, boolean walled) {
+			if (!DEBUG_PASTE) {
+				return block;
+			}
+			// Silent, and lit so it is findable down a corridor. Nothing downstream loses anything by
+			// it: a note hangs off the side of the wire and never carries it, so a note block swapped
+			// for something that conducts nothing still leaves every note after it sounding.
+			if (wrongNotesAt.contains(at)) {
+				return "minecraft:waxed_copper_bulb[lit=true]";
+			}
+			// The air a note block insists on, which a head may stand in without silencing it. Only
+			// where that cell really is air: an effect puts its own second half up there.
+			if ("minecraft:air".equals(block) && missedNotesAt.contains(at.below())) {
+				return "minecraft:dragon_head[rotation=8]";
+			}
+			if (!"minecraft:stone".equals(block)) {
+				return block;
+			}
+			// Never the block under a note. The instrument is read off it, so recolouring one is
+			// retuning it -- and stripped hyphae under a note block is not a marked kick, it is a bass.
+			if (notes.containsKey(at.above())) {
+				return block;
+			}
+			if (walled && (at.getX() < nearWall - WALL_OVERSHOOT
+					|| at.getX() > farWall + WALL_OVERSHOOT)) {
+				return "minecraft:stripped_crimson_hyphae[axis=x]";
+			}
+			return shapeStone(placedBy.get(at));
+		}
+
+		/** Cells the walk expects to carry the signal, in world space, for the dead-wire pass. */
+		Set<BlockPos> poweredAt(int shiftX, int shiftZ) {
+			return powered.keySet().stream().map(at -> at.offset(shiftX, 0, shiftZ))
+				.collect(java.util.stream.Collectors.toUnmodifiableSet());
+		}
+
 		PastePlan finish(PasteMode mode, BlockPos origin, int nearWall, int farWall) {
 			// Where the plan lands, worked out before anything is checked so that a fault can name a
 			// block you are able to go and stand in front of. Nothing lands behind you: the walk
@@ -9193,10 +9375,13 @@ public final class SongBuilder {
 				throw new IllegalArgumentException("Refusing to build a broken machine: "
 					+ faults.get(0) + ". This is a bug in the layout, not in the song.");
 			}
+			// Only the ultra lane has walls worth measuring a breach against: every other mode passes
+			// its own origin for both, so outside-the-walls would mean the whole build.
+			boolean walled = mode == PasteMode.ULTRA_COMPACT_LANE && !breaches.isEmpty();
 			List<String> commands = new ArrayList<>(blocks.entrySet().stream()
 				.map(entry -> "setblock " + (entry.getKey().getX() + shiftX) + " "
 					+ entry.getKey().getY() + " " + (entry.getKey().getZ() + shiftZ) + " "
-					+ entry.getValue() + " replace")
+					+ marked(entry.getKey(), entry.getValue(), nearWall, farWall, walled) + " replace")
 				.toList());
 			// The marking pass, last so that it wins: every other claim on the cell has been made by
 			// now, and a lantern placed halfway through would be quietly built over by the next chord.
@@ -9215,7 +9400,8 @@ public final class SongBuilder {
 				mode, List.copyOf(faults),
 				turns.stream().map(turn -> turn.offset(shiftX, 0, shiftZ)).toList(),
 				List.copyOf(moved), List.copyOf(breaches), List.copyOf(recesses),
-				Map.copyOf(padding), nearWall + shiftX, farWall + shiftX, Map.copyOf(marked));
+				Map.copyOf(padding), nearWall + shiftX, farWall + shiftX, Map.copyOf(marked),
+				poweredAt(shiftX, shiftZ));
 		}
 	}
 }

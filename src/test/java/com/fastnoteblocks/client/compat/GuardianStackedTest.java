@@ -74,7 +74,7 @@ class GuardianStackedTest {
 	@Test
 	void countsTheCollisionsEveryWayRound() throws Exception {
 		List<SongBuilder.EventNote> notes = load("deltarune-ch-4-guardian");
-		SongBuilder.MARK_COLLISIONS = true;
+		SongBuilder.DEBUG_PASTE = true;
 		try {
 			for (boolean climb : new boolean[] {false, true}) {
 				for (boolean swap : new boolean[] {false, true}) {
@@ -89,7 +89,7 @@ class GuardianStackedTest {
 				}
 			}
 		} finally {
-			SongBuilder.MARK_COLLISIONS = false;
+			SongBuilder.DEBUG_PASTE = false;
 		}
 	}
 
@@ -199,7 +199,7 @@ class GuardianStackedTest {
 		List<SongBuilder.EventNote> notes = load("deltarune-ch-4-guardian");
 		for (boolean ask : new boolean[] {false, true}) {
 			SongBuilder.CUTS_A_CHORD_THAT_FITS = ask;
-			SongBuilder.MARK_COLLISIONS = true;
+			SongBuilder.DEBUG_PASTE = true;
 			try {
 				SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0),
 					notes, SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
@@ -212,7 +212,7 @@ class GuardianStackedTest {
 				System.out.println("CUTFITS on=" + ask + " REFUSED: "
 					+ refused.getMessage());
 			} finally {
-				SongBuilder.MARK_COLLISIONS = false;
+				SongBuilder.DEBUG_PASTE = false;
 			}
 		}
 	}

@@ -39,7 +39,7 @@ class ShedRunLengthTest {
 	@AfterEach
 	void restore() {
 		SongBuilder.RELOCATES_CONTESTED_NOTE = true;
-		SongBuilder.MARK_COLLISIONS = false;
+		SongBuilder.DEBUG_PASTE = false;
 	}
 
 	/**
@@ -92,7 +92,7 @@ class ShedRunLengthTest {
 	@Test
 	void dumpsTheRunThatOverruns() throws Exception {
 		SongBuilder.RELOCATES_CONTESTED_NOTE = true;
-		SongBuilder.MARK_COLLISIONS = true;
+		SongBuilder.DEBUG_PASTE = true;
 		SongBuilder.PastePlan plan = build(load("deltarune-ch-4-guardian"));
 		plan.padding().forEach((key, count) -> {
 			if (key.startsWith("overran ")) {

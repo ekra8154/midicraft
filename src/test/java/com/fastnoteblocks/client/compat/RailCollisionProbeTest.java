@@ -29,7 +29,7 @@ class RailCollisionProbeTest {
 
 	@Test
 	void namesTheShapesThatCollide() throws Exception {
-		SongBuilder.MARK_COLLISIONS = true;
+		SongBuilder.DEBUG_PASTE = true;
 		try {
 			Map<String, Integer> byShapes = new TreeMap<>();
 			SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0),
@@ -64,7 +64,7 @@ class RailCollisionProbeTest {
 			System.out.println("CLASH " + plan.collisions().size() + " cells");
 			byShapes.forEach((what, count) -> System.out.println("CLASH  " + count + "x  " + what));
 		} finally {
-			SongBuilder.MARK_COLLISIONS = false;
+			SongBuilder.DEBUG_PASTE = false;
 		}
 	}
 

@@ -1,0 +1,205 @@
+package com.fastnoteblocks.client.compat;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import com.fastnoteblocks.client.composer.ComposerProject;
+import com.google.gson.Gson;
+import java.io.Reader;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeMap;
+import net.minecraft.SharedConstants;
+import net.minecraft.core.BlockPos;
+import net.minecraft.server.Bootstrap;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+
+/**
+ * That a marked paste and a plain one are the same machine, differing only in what they are made of.
+ *
+ * <p>This is the whole safety of the thing. The colouring is meant to be a report written into the
+ * blocks, and a report that changes what it describes is worse than no report -- an afternoon spent
+ * on a chord that only exists because somebody was looking at it. Layout decisions in
+ * {@code SongBuilder} do read blocks back ({@code describeBlock(behind).startsWith("minecraft:stone")}
+ * is one), so this is not a theoretical worry; it is the mistake the marking pass is arranged to
+ * avoid, and the arrangement is worth a test.</p>
+ *
+ * <p>So: build one song both ways and hold them to the same positions, in the same order, with the
+ * same block at every cell that is not one of the marks. Then print what the marks came out as,
+ * because a colour scheme nobody can read is a different kind of failure and the only way to know is
+ * to look at the census.</p>
+ */
+class DebugPasteMarkTest {
+	@BeforeAll
+	static void bootstrapMinecraft() {
+		SharedConstants.tryDetectVersion();
+		Bootstrap.bootStrap();
+	}
+
+	@AfterEach
+	void plainAgain() {
+		SongBuilder.DEBUG_PASTE = false;
+	}
+
+	/** ekran's own build limits, so the shapes counted here are the shapes they are looking at. */
+	private static final SongBuilder.BuildLimits LIMITS = new SongBuilder.BuildLimits(16, 40, 3);
+
+	private static List<SongBuilder.EventNote> song(String file) throws Exception {
+		Path songs = Path.of("run", "config", "fast-noteblocks", "songs");
+		try (Reader reader = Files.newBufferedReader(songs.resolve(file))) {
+			ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
+			ComposerProject song = new ComposerProject(raw.name(), raw.ppq(),
+				raw.tempoMicrosPerQuarter(), raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(),
+				raw.endTick(), raw.speedQuarters());
+			return SongBuilder.eventNotes(song.toSequenceTracks(Set.of(), true));
+		}
+	}
+
+	private static SongBuilder.PastePlan plan(List<SongBuilder.EventNote> notes) {
+		return SongBuilder.createPastePlan(new BlockPos(0, 64, 0), notes,
+			SongBuilder.PasteMode.ULTRA_COMPACT_LANE, LIMITS);
+	}
+
+	/** Which of the marks a block is, or null for anything the plain build would have laid too. */
+	private static String markOf(String block) {
+		return switch (block) {
+			case "minecraft:tuff" -> "bus";
+			case "minecraft:andesite" -> "stacked chord";
+			case "minecraft:deepslate" -> "stacked bus";
+			case "minecraft:deepslate_tiles" -> "cut head";
+			case "minecraft:cobbled_deepslate" -> "stacked simple";
+			case "minecraft:smooth_basalt" -> "rail";
+			case "minecraft:stripped_crimson_hyphae[axis=x]" -> "breach";
+			case "minecraft:red_nether_bricks" -> "dead wire";
+			case "minecraft:waxed_copper_bulb[lit=true]" -> "wrong note";
+			case "minecraft:sea_lantern" -> "collision";
+			default -> block.startsWith("minecraft:dragon_head") ? "missed note" : null;
+		};
+	}
+
+	private static Map<BlockPos, String> laid(SongBuilder.PastePlan plan) {
+		Map<BlockPos, String> blocks = new LinkedHashMap<>();
+		for (String command : plan.commands()) {
+			String[] parts = command.split(" ");
+			blocks.put(new BlockPos(Integer.parseInt(parts[1]), Integer.parseInt(parts[2]),
+				Integer.parseInt(parts[3])), parts[4]);
+		}
+		return blocks;
+	}
+
+	@Test
+	void aMarkedPasteIsTheSameMachineAsAPlainOne() throws Exception {
+		List<SongBuilder.EventNote> notes = song("illit-do-the-dance.json");
+		Map<BlockPos, String> plain = laid(plan(notes));
+		SongBuilder.DEBUG_PASTE = true;
+		SongBuilder.PastePlan markedPlan = plan(notes);
+		Map<BlockPos, String> marked = laid(markedPlan);
+
+		assertEquals(plain.keySet(), marked.keySet(),
+			"a marked paste puts blocks in different places from a plain one");
+
+		Map<String, Integer> census = new TreeMap<>();
+		List<String> unexplained = new ArrayList<>();
+		for (Map.Entry<BlockPos, String> cell : plain.entrySet()) {
+			String was = cell.getValue();
+			String now = marked.get(cell.getKey());
+			if (was.equals(now)) {
+				continue;
+			}
+			String mark = markOf(now);
+			if (mark == null) {
+				unexplained.add(cell.getKey().getX() + " " + cell.getKey().getY() + " "
+					+ cell.getKey().getZ() + "  " + was + " -> " + now);
+				continue;
+			}
+			census.merge(mark, 1, Integer::sum);
+		}
+		System.out.println("MARKED " + marked.size() + " blocks, " + census);
+		unexplained.stream().limit(10).forEach(line -> System.out.println("  UNEXPLAINED " + line));
+		assertTrue(unexplained.isEmpty(),
+			unexplained.size() + " cells changed into something that is not one of the marks");
+		// Not a target, just a floor: a build of this size is thousands of chords and every one of
+		// them is a bus or a stacked something, so a census of nothing means the labels never landed.
+		assertTrue(census.getOrDefault("bus", 0) + census.getOrDefault("stacked chord", 0)
+			+ census.getOrDefault("stacked bus", 0) > 100,
+			"the shape colours never landed: " + census);
+	}
+
+	/**
+	 * That a build which breaches nothing is marked as breaching nothing.
+	 *
+	 * <p>The breach mark is the one that cannot be read off a label -- a lane past its wall is a fact
+	 * about where blocks ended up, so it is worked out from the walls, and the walls are not where a
+	 * build stops. Every build stands two columns outside them for reasons that are not faults, so
+	 * the mark starts past that; and the moment it starts anywhere else it paints a thousand blocks
+	 * of a perfectly good lane and means nothing at all.</p>
+	 *
+	 * <p>Four songs and four widths, of which twelve breach nothing. Those twelve are the test: if
+	 * any of them comes out with a single block of hyphae in it, the allowance has moved.</p>
+	 *
+	 * <p>One way round only. A breach that marks nothing is not a failure and Guardian has one --
+	 * at 24 wide over six floors it oversteps by a single column, and that column holds a chord and
+	 * no lane at all, so there is no stone out there to colour. Nothing is going to be recoloured
+	 * into it either: the block under a note decides the note's instrument.</p>
+	 */
+	@Test
+	void aCleanLaneIsNeverMarkedAsBreaching() throws Exception {
+		SongBuilder.DEBUG_PASTE = true;
+		List<String> wrong = new ArrayList<>();
+		for (String file : List.of("illit-do-the-dance.json", "deltarune-ch-4-guardian.json",
+				"all-of-the-lights-kanye-west.json", "big-shot.json")) {
+			List<SongBuilder.EventNote> notes = song(file);
+			for (int[] size : new int[][] {{40, 3}, {16, 4}, {12, 3}, {24, 6}}) {
+				SongBuilder.PastePlan built = SongBuilder.createPastePlan(new BlockPos(0, 64, 0),
+					notes, SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+					new SongBuilder.BuildLimits(16, size[0], size[1]));
+				long hyphae = built.commands().stream()
+					.filter(command -> command.contains("stripped_crimson_hyphae")).count();
+				if (built.breaches().isEmpty() && hyphae > 0) {
+					wrong.add(file + " " + size[0] + "x" + size[1] + " breaches nothing but has "
+						+ hyphae + " blocks marked as a breach");
+				}
+			}
+		}
+		wrong.forEach(line -> System.out.println("  BREACHMARK " + line));
+		assertTrue(wrong.isEmpty(), "the breach mark disagrees with the breach count: " + wrong);
+	}
+
+	/**
+	 * That a note is only ever recoloured where its sound does not depend on it.
+	 *
+	 * <p>A note block reads its instrument off the block underneath, so the one thing the colouring
+	 * may never touch is a cell with a note on top of it -- tuff under a kick is still a kick, but
+	 * stripped hyphae under one is a bass, and a build that quietly retunes a third of its percussion
+	 * is exactly the kind of wrong that gets blamed on the composer.
+	 */
+	@Test
+	void nothingUnderANoteIsRecoloured() throws Exception {
+		List<SongBuilder.EventNote> notes = song("illit-do-the-dance.json");
+		SongBuilder.DEBUG_PASTE = true;
+		Map<BlockPos, String> marked = laid(plan(notes));
+		List<String> retuned = new ArrayList<>();
+		for (Map.Entry<BlockPos, String> cell : marked.entrySet()) {
+			String above = marked.get(cell.getKey().above());
+			if (above == null || !above.startsWith("minecraft:note_block")) {
+				continue;
+			}
+			String mark = markOf(cell.getValue());
+			// A collision keeps its lantern: that cell is a build refusing to be a machine at all, and
+			// nothing about it is meant to still play.
+			if (mark != null && !"collision".equals(mark)) {
+				retuned.add(cell.getKey().getX() + " " + cell.getKey().getY() + " "
+					+ cell.getKey().getZ() + "  " + cell.getValue() + " under " + above);
+			}
+		}
+		retuned.stream().limit(10).forEach(line -> System.out.println("  RETUNED " + line));
+		assertTrue(retuned.isEmpty(), retuned.size() + " notes had their instrument recoloured");
+	}
+}
