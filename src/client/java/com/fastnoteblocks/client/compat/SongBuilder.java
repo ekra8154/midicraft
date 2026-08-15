@@ -7096,7 +7096,10 @@ public final class SongBuilder {
 	 */
 	private static int railStackSeed(PlacementPlan placements, Lane lane, ChordStyle lastStyle,
 			int currentTime, boolean turning) {
-		if (!RAIL_FROM_STACK || turning || lane.bending()) {
+		// Standing on a corner counts, and bending() does not say so: it asks whether a bend is still
+		// *ahead*, and a lane on the last corner of a turn has none left. The same gap Lane.crowding
+		// exists for.
+		if (!RAIL_FROM_STACK || turning || lane.bending() || lane.cornerAt(0)) {
 			return NO_BLANK;
 		}
 		BlockPos behind = lane.pos().relative(lane.travel().getOpposite());
@@ -7112,13 +7115,19 @@ public final class SongBuilder {
 		// exactly as it does off a stacked chord. ekran built both by hand and the pair came out
 		// almost twice as compact as what the walk lays today.
 		//
-		// Asked of the blocks rather than of the style alone, because a stacked bus with a tail has
-		// that tail standing between its handover and here -- and a tail is at bus height, so what is
-		// behind then is a raised cell and this reads false, which is correct.
+		// Asked of the cell the shape said it handed over in, and not of what is standing there. Those
+		// two blocks -- stone with dust over it -- are also a corner and also a cell of pad, so the
+		// look-alike test said yes to a lane whose own wire had merely come round a bend. It seeded a
+		// floor rail off a corner on all-my-fellas 40x5: a corner's dust powers the stone beneath
+		// itself and nothing in front, so the repeater facing out of it read nothing and the run's two
+		// notes never sounded. Three blocks from the nearest marked corner, so asking about corners
+		// would not have caught it either.
+		//
+		// Naming the cell also settles what the style could not. A stacked bus with a tail leaves that
+		// tail between its handover and here, so the handover is not the cell behind and this reads
+		// false -- which is what the old comment claimed the block test was doing by accident.
 		if (RAIL_FROM_HANDOVER && lastStyle.busHeaded()) {
-			return placements.describeBlock(behind).startsWith("minecraft:stone")
-				&& placements.describeBlock(behind.above()).startsWith("minecraft:redstone_wire")
-				? currentTime : NO_BLANK;
+			return behind.equals(placements.handover()) ? currentTime : NO_BLANK;
 		}
 		return NO_BLANK;
 	}
@@ -10505,6 +10514,9 @@ public final class SongBuilder {
 		}
 		set(placements, afterHead.pos(), "minecraft:stone");
 		set(placements, afterHead.pos().above(), simple ? STACKED_CROSS : "minecraft:redstone_wire");
+		// Said out loud, because these two blocks are also what a corner is and what a cell of pad is,
+		// and the rail's floor seed was telling them apart by looking at them.
+		placements.handover(afterHead.pos());
 		// Counted as a hand-over and not as pad, which is what it used to be called. Pad is a column
 		// a chord could have been standing in; this cell stands where the shape's repeater would
 		// have stood, so a chord of twenty is eleven columns as a plain bus and ten as a stacked-bus
@@ -12207,6 +12219,18 @@ public final class SongBuilder {
 				}
 			}
 		}
+
+		/**
+		 * Whether this cell is one the wire changes direction on.
+		 *
+		 * <p>Asked by anything that reads a block back and draws a conclusion from what it is. A
+		 * corner is stone with dust over it, which is exactly what a stacked bus's handover is and
+		 * what the cell in front of a stacked chord's cross is, so the blocks alone cannot tell a
+		 * shape that hands power on from a lane that merely turned here.</p>
+		 */
+		boolean isCorner(BlockPos position) {
+			return corners.contains(position.immutable());
+		}
 		private int minimumX = Integer.MAX_VALUE;
 		private int minimumY = Integer.MAX_VALUE;
 		private int minimumZ = Integer.MAX_VALUE;
@@ -12522,6 +12546,26 @@ public final class SongBuilder {
 
 		private BlockPos railTailBehind;
 
+		/**
+		 * The cell the module just built hands its power forward out of, or null.
+		 *
+		 * <p>Recorded rather than recognised. A stacked bus's handover is a stone at lane level with
+		 * dust over it, and so is <b>a corner</b>, and so is an ordinary cell of pad -- the blocks are
+		 * the same blocks. The rail's seed was reading those two levels and concluding a handover was
+		 * behind it, and on {@code all-my-fellas} 40x5 what was actually behind it was the lane's own
+		 * wire coming round a bend: three blocks from the nearest marked corner, so no corner test
+		 * could have caught it either. The dust on a corner carries the path round and powers the
+		 * stone <i>beneath itself</i>, not the cell in front, so the floor rail seeded off it never
+		 * went live and two notes went with it.</p>
+		 *
+		 * <p>Rolled with {@link #railTail} and for the same reason. Null is the answer that refuses
+		 * the seed, which is the safe way round: a shape that does not say where its handover is does
+		 * not get a free floor rail.</p>
+		 */
+		private BlockPos handover;
+
+		private BlockPos handoverBehind;
+
 		void softTip(boolean soft) {
 			softTip = soft;
 		}
@@ -12539,6 +12583,8 @@ public final class SongBuilder {
 			softTip = false;
 			railTailBehind = railTail;
 			railTail = null;
+			handoverBehind = handover;
+			handover = null;
 		}
 
 		/**
@@ -12600,6 +12646,20 @@ public final class SongBuilder {
 
 		void railTail(BlockPos at) {
 			railTail = at;
+		}
+
+		void handover(BlockPos at) {
+			handover = at.immutable();
+		}
+
+		/**
+		 * Where the module just built hands over, asked the same way {@link #railTail()} is.
+		 *
+		 * <p>This one and not the rolled copy, for the reason written there: a run is decided between
+		 * builds, so the module just laid is still the current one.</p>
+		 */
+		BlockPos handover() {
+			return handover;
 		}
 
 		BlockPos railTailBehind() {
