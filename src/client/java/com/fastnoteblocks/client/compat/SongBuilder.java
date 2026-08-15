@@ -3516,7 +3516,34 @@ public final class SongBuilder {
 				// nothing to open with: the floor rail's repeater goes in the free cell under that tail
 				// and the run picks up on the floor rail. Asked before the head, because a head laid
 				// here would be two columns spent on a column that already exists.
-				BlockPos openOffTail = RAIL_FROM_HANDOVER && opening
+				// Never where the lane is closing. The tail is already down as this run's first path
+				// column, so a run opened here cannot be given up later -- and a lane that closes puts
+				// the repeater that would carry the run on at the top of a staircase, a floor away,
+				// which is the same thing that stranded the tail one layer down. Asked of the same
+				// {@code reaches} the tail asks, so the two cannot disagree about when a lane ends.
+				// And asked the floor rail's own three questions about the chord it is about to lay
+				// there, which is the one floor column in a run that nobody asks. Every other one is
+				// committed to by {@link #railPairAfter} at the path column behind it; this one has no
+				// path column behind it -- the tail is it -- so it inherited only {@link #railMayStart}'s
+				// head test. That test is asked of the *head*, which is a path column, and its
+				// {@code RAIL_FLOOR_SLOTS} limit is a coincidence of the two being two. The gravity rule
+				// is not: a floor note hangs at the lane's own floor level, so sand under it wants
+				// propping from the level below that, which is the cell the floor underneath keeps empty
+				// over its own path notes. ekran read exactly that off all of the lights at 40 by 5 --
+				// "it put a sand block on the lower rail, which is not allowed. then its support block
+				// below collided with the mandatory air block above every noteblock".
+				//
+				// All three, not just the gravity one. {@link #railFloorTakes} is the wrong-note test --
+				// a floor note hangs where the lane alongside hangs a stacked module's low half -- and
+				// dropping it here sounds four notes at the wrong tick across three rows of
+				// {@code HandoverStartProbeTest}, for 38 columns on the harp song at 40 by 5. It refuses
+				// 10 of 32 openings there, which is the price. {@code railDelay} fired nought times in
+				// that sweep and is here for the set to be complete: a delay out of a repeater's range
+				// would reach {@link #addRailFromHandover} as {@code delay=0} and fail to parse.
+				BlockPos openOffTail = RAIL_FROM_HANDOVER && opening && !reaches && !wantsTurn
+						&& railHolds(event, false)
+						&& railFloorTakes(placements, lane, event)
+						&& railDelay(currentTime, event.time()) > 0
 						&& placements.railTail() != null
 						&& lane.pos().equals(placements.railTail().relative(lane.travel()))
 					? placements.railTail() : null;
