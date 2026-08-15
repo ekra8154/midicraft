@@ -2481,6 +2481,12 @@ public final class SongBuilder {
 			// column short of it, so the lane closes after it -- and it is the moment the tail can
 			// still choose to be a bus.
 			placements.turnAhead(wantsTurn || reaches);
+			// And the other fact the chord cannot see for itself: how soon the next event arrives. A pad
+			// laid in front of it can only be spent as a repeater where there are two ticks to split, so
+			// a gap of one is the case a simple tail with a note-block middle cannot survive being padded
+			// into. The last event has nothing after it to be padded for.
+			placements.tightGapAhead(index + 1 < events.size()
+				&& events.get(index + 1).time() - event.time() <= 1);
 			// What the cut is offered on. The same question in v1, one column earlier in v2.
 			boolean cutOffered = reaches;
 			// One tick has to be left for the next event's own repeater, which is the only thing that
@@ -5904,6 +5910,51 @@ public final class SongBuilder {
 	static boolean SIMPLE_TAIL_ON_A_STACKED_BUS = true;
 
 	/**
+	 * Whether a simple tail with a stone middle lays the cell of dust that makes it a bus tail.
+	 *
+	 * <p>ekran's, said three times before I stopped trying to predict it and just laid the block:
+	 * <i>"Literally ALL it had to do was place a dust on top and the wire wouldn't have died"</i>.</p>
+	 *
+	 * <p>The rule is that a repeater must always come directly out of a simple tail, because the middle
+	 * is soft powered -- lit by the handover's dust and nothing else -- so it drives a repeater and
+	 * lights no dust of its own. Two attempts were made at knowing in advance when that would fail, and
+	 * both were too narrow. {@link #repeaterComesOutOf} follows the route, so it sees a bend and the
+	 * lane closing and nothing else. Hanging the answer off {@link #parityPadOrSplitRepeater} sees the
+	 * parity pad and nothing else -- and a wait, a turn pad and a rail column all lay dust there too.
+	 * <b>The set of things that can follow a tail is not enumerable from where the tail is laid.</b></p>
+	 *
+	 * <p>So it is not asked. A stone middle is the one middle with a free cell above it, dust there
+	 * costs a single block, and what it produces is exactly a bus tail: {@link #layBus} anchors at
+	 * {@code afterHead.ahead(1).above()} and lays stone there with dust over it and the notes either
+	 * side -- the same stone, the same two slots, the same one column. The handover's own dust climbs
+	 * onto it the way it climbs onto any bus. And it risks no length, because
+	 * {@link #stackedBusTailColumns} already prices every tail as a bus, so this is the shape the plan
+	 * was measured on. The whole cost is one cell of the lane's fifteen: {@code busCells} 0 becomes 1.</p>
+	 *
+	 * <p>A harp middle and a tail of three's kept note are note blocks, which insist on air above them.
+	 * They have no cell to put dust in, stay soft tips, and give way instead --
+	 * {@link #SIMPLE_TAIL_GIVES_WAY_TO_A_TIGHT_GAP}.</p>
+	 */
+	static boolean STONE_MIDDLE_CARRIES_ITS_OWN_DUST = true;
+
+	/**
+	 * Whether a harp is only taken for the tail's middle when the two sides cannot hold the tail.
+	 *
+	 * <p>The middle has no instrument block under it and sounds harp whatever was meant, so a harp is
+	 * the one note that can stand there for free -- but that is a reason it <i>may</i>, not a reason it
+	 * <i>should</i>. The sides hold two notes, so a tail of one or two never needs the middle for
+	 * storage at all, and a harp put there anyway costs nothing except the thing that matters most: a
+	 * note block insists on air above it, so the middle can no longer carry the cell of dust that makes
+	 * this tail immune to whatever is laid in front of it.</p>
+	 *
+	 * <p>The harp loses nothing on a side -- a harp note block is built over air there too. So at two
+	 * notes or fewer the middle is left to stone and the tail is dustable whatever it is made of, which
+	 * takes the last shape that could not be rescued down to one: a tail of <b>three</b> with a harp
+	 * in it, where the middle really is the only place the third note can go.</p>
+	 */
+	static boolean HARP_KEEPS_THE_MIDDLE_ONLY_AT_THREE = true;
+
+	/**
 	 * Whether a run may start off a stacked bus's handover, the way it already starts off a stacked
 	 * chord's cross. ekran's, and the reason the tail work was asked for at all.
 	 *
@@ -5926,6 +5977,77 @@ public final class SongBuilder {
 		return SIMPLE_TAIL_ON_A_STACKED_BUS && !tail.isEmpty() && tail.size() <= 3
 			&& fitsSmallModule(tail);
 	}
+
+	/**
+	 * Whether this tail's middle would be a note block rather than stone.
+	 *
+	 * <p>Exactly the negation of the stone case the builder works out, and written the same way round
+	 * so the two cannot drift: a harp is taken outright and takes the middle, what is left goes to the
+	 * two sides, and only a third note with no harp to displace it has to be kept in the middle. Both
+	 * of those are note blocks, and a note block insists on air above it.</p>
+	 */
+	private static boolean noteBlockInTheMiddle(List<EventNote> tail) {
+		List<EventNote> hanging = new ArrayList<>(tail);
+		return !(takeHarpNote(hanging) == null && hanging.size() <= 2);
+	}
+
+	/**
+	 * Whether a simple tail with a note-block middle gives way where a pad could not be a repeater.
+	 *
+	 * <p>ekran's invariant: a repeater always comes directly out of a simple tail, and where padding
+	 * moves that repeater forward the tail falls back to a bus instead -- two cells for a tail of
+	 * three. <b>The tail is kept</b>; it is worth its complexity, and up to three notes is the shape.
+	 * What is decided here is only <i>when</i> it gives way.</p>
+	 *
+	 * <p>A pad is survivable in two of the three cases. Where the delay is two or more the pad is spent
+	 * as {@code r1} and the cell against the middle is a repeater after all
+	 * ({@link #SPLIT_THE_PAD_REPEATER}); where the middle is stone the tail is finished off into a bus
+	 * cell after the fact ({@link #SOFT_TIP_DUSTED_FOR_THE_PAD}). What is left is a note-block middle
+	 * at a delay of one: no repeater is shorter than a tick, and there is no cell above a note block to
+	 * put dust in. That one has to be decided before the tail goes down.</p>
+	 *
+	 * <p><b>Asked of the gap, not of the pad,</b> and that is an approximation with a known direction.
+	 * Whether a pad is laid at all is {@code parityVerdict} read off blocks in the lane behind, which
+	 * is a simulation and not arithmetic -- the walk says so itself: <i>a nudge is decided against
+	 * blocks on the ground and no arithmetic can foresee it</i>. But the gap to the next event is known
+	 * a whole event ahead, so a tight gap is refused and everything else is kept.</p>
+	 *
+	 * <p><b>It is wrong in both directions, and only one of them is harmless.</b> It gives up tails
+	 * that would never have been padded, which costs nothing. But a raw gap of two is not the same as
+	 * a trigger delay of two -- {@code spentPadding} comes out of it first -- so a tail kept at a gap
+	 * of two can still meet a pad it cannot split. That is measured, not feared:
+	 * {@code parityPadOnASoftTip} still reads 2 and 4 on two rows of all-of-the-lights with this on.
+	 * Closing it means handing down the delay the next event will actually be triggered at, which is
+	 * settled an event later than this. It costs the tails it does refuse nothing anyway:
+	 * {@link #stackedBusTailColumns} already prices every tail as a bus, so the second column was
+	 * reserved and the simple shape was only ever spending one of them. ekran: <i>"the bus just would
+	 * have 2 cols"</i>.</p>
+	 */
+	static boolean SIMPLE_TAIL_GIVES_WAY_TO_A_TIGHT_GAP = true;
+
+	/**
+	 * Whether a note-block middle gives the simple shape up always, rather than only at a tight gap.
+	 *
+	 * <p>The same move that worked for the stone middle, made for the middle that cannot take dust:
+	 * stop asking whether a repeater will follow and take the shape that does not care. ekran's own
+	 * fallback, and their point about what it costs -- <i>"bottom rail seeding is only canceled if my
+	 * tail has more than 2 notes, since at 2, i can place notes on either side and still take up only
+	 * one col"</i>. A tail of one or two is a single bus cell with the notes either side, which is the
+	 * same column the simple shape spends, so at that size the fallback is free outright. Only a tail
+	 * of three goes to two cells -- and {@link #stackedBusTailColumns} priced it at two from the
+	 * start.</p>
+	 *
+	 * <p>Priced against the tight-gap guess rather than assumed better than it: the guess keeps more
+	 * tails, and whether keeping them is worth the ones it gets wrong is a measurement.</p>
+	 *
+	 * <p><b>Off, and never measured.</b> Written, then set aside unmeasured when ekran proposed the
+	 * better shape of the same idea: rather than give the simple tail up wherever a pad *might* come,
+	 * hold the module's savepoint open until the next chord's shape says whether one *does*, and re-lay
+	 * the tail as a bus then. Same footprint either way -- the second bus cell stands in the pad's own
+	 * column -- so nothing about the lane's length moves. Kept here as the blunt baseline that version
+	 * has to beat.</p>
+	 */
+	static boolean NOTE_BLOCK_MIDDLE_ALWAYS_BUSES = false;
 
 
 	/**
@@ -8998,9 +9120,10 @@ public final class SongBuilder {
 			return triggerDelay - 1;
 		}
 		if (placements.softBehind()) {
-			// The one the split cannot reach. Left visible instead of hidden: a tail of three at a
-			// one-tick delay is the only shape that still wants the tail decided a column earlier than
-			// it is.
+			// The one the split cannot reach. Only a note-block middle can be here at all now -- a stone
+			// middle carries its own dust and is never a soft tip -- and a note block has no cell above
+			// it to be rescued in, so this is the shape that has to give way before it is laid. Left
+			// visible: it is the count that says how often the tight-gap guess was too coarse.
 			placements.padded("parityPadOnASoftTip");
 		}
 		placements.padded("parity");
@@ -9899,7 +10022,12 @@ public final class SongBuilder {
 		// lower. ekran's: the handover sits at the height of the lane rather than raised, so a middle
 		// standing right there is driven by it, where a bus cell has to be a level up. A tail of
 		// three is two cells of bus and one column of this.
-		boolean simple = mayGoSimple && simpleTail(tail);
+		boolean simple = mayGoSimple && simpleTail(tail)
+			&& !(SIMPLE_TAIL_GIVES_WAY_TO_A_TIGHT_GAP && noteBlockInTheMiddle(tail)
+				&& (NOTE_BLOCK_MIDDLE_ALWAYS_BUSES || placements.tightGapAhead()));
+		if (mayGoSimple && simpleTail(tail) && !simple) {
+			placements.padded("simpleTailBusedForATightGap");
+		}
 		// The handover is dust over stone either way, but its *shape* is not the same either way.
 		//
 		// Dust with nothing beside it to join takes the dot shape, and a dot powers only the block
@@ -9944,8 +10072,21 @@ public final class SongBuilder {
 			// With no harp: stone where a run may want to quick-start off this, the notes on the sides.
 			// Taken whenever it is free, which is every tail of two or fewer since the two sides hold
 			// them all. Only a tail of three with no harp has to choose, and it keeps the note.
-			EventNote harp = takeHarpNote(hanging);
+			// Asked only where the middle is actually needed to hold a note. A harp is the one note that
+			// can stand in the middle -- the cell has no instrument block under it and sounds harp
+			// whatever was meant -- but taking it there is only worth anything when the two sides cannot
+			// hold the tail on their own, which is a tail of three. At one or two the sides hold all of
+			// it, and the harp loses nothing by sitting on one: a harp is built over air there too.
+			//
+			// And what it buys is the whole invariant. A harp in the middle is a note block, which
+			// insists on air above it and so cannot carry the dust that makes this tail safe. Leaving
+			// the middle to stone makes every tail of two or fewer dustable, whatever it is made of.
+			EventNote harp = HARP_KEEPS_THE_MIDDLE_ONLY_AT_THREE && hanging.size() <= 2
+				? null : takeHarpNote(hanging);
 			boolean railReady = harp != null || hanging.size() <= 2;
+			// The one middle that is a block rather than a note block, and so the one that can have
+			// something set on top of it. See {@link #SIMPLE_TAIL_CARRIES_ITS_OWN_DUST}.
+			boolean stoneMiddle = harp == null && hanging.size() <= 2;
 			placements.placing("chord:STACKED_BUS+simpleTail" + tail.size()
 				+ (harp != null ? " harpMiddle" : railReady ? " stoneMiddle" : " noteMiddle"));
 			placements.padded("simpleTail" + (harp != null ? "Harp"
@@ -9964,17 +10105,25 @@ public final class SongBuilder {
 			for (int side = 0; side < sides.size() && side < hanging.size(); side++) {
 				placeNote(placements, middle.relative(sides.get(side)), hanging.get(side));
 			}
-			// Said out loud for whatever is laid next. This middle is powered by the handover's dust
-			// and by nothing else, so a repeater against it reads it and a pad against it dies.
-			placements.softTip(true);
+			// A stone middle carries its own dust and is not a soft tip at all. A note-block middle has
+			// nowhere to put it and is, so it says so for whatever is laid next: it drives a repeater
+			// standing against it and anything else against it dies. See
+			// {@link #STONE_MIDDLE_CARRIES_ITS_OWN_DUST}.
+			boolean dusted = STONE_MIDDLE_CARRIES_ITS_OWN_DUST && stoneMiddle;
+			if (dusted) {
+				set(placements, middle.above(), "minecraft:redstone_wire");
+				placements.padded("stoneMiddleDusted");
+			}
+			placements.softTip(!dusted);
 			// And where the middle left the cell below it free -- a harp or a stone, never a note with
 			// an instrument block under it -- this column is a path rail's first slot, already laid.
 			if (railReady) {
 				placements.railTail(tailAt.pos());
 			}
-			// One column, and nought bus cells: what the caller does with that number is ask how much
-			// dust the lane is still carrying, and this shape lays none.
-			return new Body(afterHead.ahead(2), 0);
+			// One column either way. The number beside it is how much dust the lane is still carrying:
+			// a dusted middle lays the one cell it just set, which is the same one a bus tail of this
+			// length would have reported, and a note-block middle lays none.
+			return new Body(afterHead.ahead(2), dusted ? 1 : 0);
 		}
 		int cells = layBus(placements, afterHead.ahead(1).above(), tail, time);
 		return new Body(afterHead.ahead(1 + cells), cells);
@@ -11853,6 +12002,23 @@ public final class SongBuilder {
 
 		void turnAhead(boolean ahead) {
 			turnAhead = ahead;
+		}
+
+		/**
+		 * Whether the next event follows too closely for a pad in front of it to be a repeater.
+		 *
+		 * <p>Handed down for the same reason {@code turnAhead} is: it is a fact about the walk, and the
+		 * chord being built cannot see the event after it. See
+		 * {@link #SIMPLE_TAIL_GIVES_WAY_TO_A_TIGHT_GAP}.</p>
+		 */
+		private boolean tightGapAhead;
+
+		void tightGapAhead(boolean tight) {
+			tightGapAhead = tight;
+		}
+
+		boolean tightGapAhead() {
+			return tightGapAhead;
 		}
 
 		boolean turnAhead() {
