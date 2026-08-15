@@ -5492,7 +5492,12 @@ public final class SongBuilder {
 			// The first cell is the only one that can be against the module behind, and a corner is
 			// never tradeable -- the corner cell belongs to the route and no bus may stand in it.
 			// The tail already buses itself for a corner, on repeaterComesOutOf.
-			if (cell == 0 && !raised && !"corner".equals(why)
+			//
+			// A raised cell is tradeable and was excluded here on the assumption that it was not. It is
+			// the most tradeable shape of the lot: raised means stone at bus height with dust over it,
+			// which is exactly what a cell of bus tail is. That exclusion is the whole of
+			// ultra-stress-enormous-chord at 24 wide over three floors.
+			if (cell == 0 && !"corner".equals(why)
 					&& (placements.softTip() || placements.softBehind())
 					&& undoTheSoftTailFor(placements, lane.pos())) {
 				placements.padded(why + "UndidTheTail");
@@ -5541,7 +5546,7 @@ public final class SongBuilder {
 			boolean raised = raiseAfter >= 0 && cell >= raiseAfter;
 			if (delay == 0) {
 				placements.padded(why + (raised ? "Raised" : ""));
-				if (cell == 0 && !raised && (placements.softTip() || placements.softBehind())
+				if (cell == 0 && (placements.softTip() || placements.softBehind())
 						&& undoTheSoftTailFor(placements, lane.pos())) {
 					placements.padded(why + "UndidTheTail");
 				} else if (raised) {
