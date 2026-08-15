@@ -5831,7 +5831,8 @@ public final class SongBuilder {
 		key.put("minecraft:tuff", "a standard bus");
 		key.put("minecraft:andesite", "a standard stacked chord");
 		key.put("minecraft:deepslate", "a stacked bus");
-		key.put("minecraft:deepslate_tiles", "the stacked head of a cut chord");
+		key.put("minecraft:deepslate_tiles",
+			"a cut chord's stacked head, with its tail across the staircase");
 		key.put("minecraft:cobbled_deepslate", "a stacked simple tail");
 		key.put("minecraft:smooth_basalt", "a double rail");
 		key.put("minecraft:stripped_crimson_hyphae", "a lane standing outside its wall");
@@ -5849,6 +5850,9 @@ public final class SongBuilder {
 		if (laidBy.startsWith("rail:")) {
 			return "minecraft:smooth_basalt";
 		}
+		// Only where the cut put the head on one side of the staircase and tail on the other. A
+		// headed chord that fitted entirely before the staircase calls itself a stacked bus and is
+		// coloured as one -- see addStackedSplitModule.
 		if (laidBy.startsWith("cutHead")) {
 			return "minecraft:deepslate_tiles";
 		}
@@ -7536,10 +7540,33 @@ public final class SongBuilder {
 		return cut;
 	}
 
+	/**
+	 * Scratch: colour every headed cut in deepslate tiles, even one whose tail never crossed.
+	 *
+	 * <p>Off, which is the rule ekran asked for -- tiles mean the head stands on one side of the
+	 * staircase and tail on the other, not merely that a cut opened with a head.</p>
+	 *
+	 * <p>It has never yet made a difference, and the flag is here because of what that turned out to
+	 * mean. {@link CutCrossesProbe} builds the whole library both ways, 244 builds over four widths,
+	 * and the two agree on every block: <b>a headed cut always crosses.</b> Which follows once it is
+	 * said out loud -- a cut exists because the chord did not fit before the wall, so a chord whose
+	 * tail stays on the near side is not cut at all, it is simply built, and the walk never arrives
+	 * at {@link #addStackedSplitModule}. That invariant is stated nowhere else in this file, and the
+	 * branch is cheap insurance for the day something makes it false.</p>
+	 */
+	static boolean TILES_EVERY_HEADED_CUT = false;
+
 	/** The near half of a cut chord, built as a stacked head with a bus behind it. */
 	private static BlockPos addStackedSplitModule(PlacementPlan placements, BlockPos cursor,
 			Direction travel, Direction laneStep, int triggerDelay, StackedSplit split, int time) {
-		placements.placing("cutHead" + split.head().size()
+		// Deepslate tiles are for a cut that actually is one: the head standing on this side of the
+		// staircase and tail on the other. Where the far half came out empty nothing crossed, and
+		// what got built is a stacked bus that happens to stand at a cut -- so it says that instead,
+		// and takes the stacked bus's own colour rather than announcing a crossing that never
+		// happened. ekran, who has to tell the two apart standing in front of them.
+		placements.placing((split.farTail().isEmpty() && !TILES_EVERY_HEADED_CUT
+				? "chord:STACKED_BUS atCut " : "cutHead")
+			+ split.head().size()
 			+ "/near" + split.nearTail().size() + "/far" + split.farTail().size()
 			+ (split.slots().backFlanks() == 0 ? " frontOnly" : " reachesBack")
 			+ (split.shed() ? " shedFlank" : ""));

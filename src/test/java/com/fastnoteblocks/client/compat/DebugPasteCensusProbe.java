@@ -171,6 +171,11 @@ class DebugPasteCensusProbe {
 			+ "  breaches=" + plan.breaches() + " wrong=" + plan.wrongNotes()
 			+ "  walls " + plan.nearWall() + ".." + plan.farWall()
 			+ "  blocks span " + lowest + ".." + highest + "  " + census);
+		// What the walk counted about cut chords, which is the one shape whose colour depends on a
+		// decision rather than on what it is: a cut opens with a stacked head or it does not.
+		System.out.println("   CUTS " + plan.padding().entrySet().stream()
+			.filter(entry -> entry.getKey().toLowerCase(java.util.Locale.ROOT).contains("split"))
+			.sorted(Map.Entry.comparingByKey()).toList());
 		outside.forEach((column, blocks) -> System.out.println("   OUTSIDE x=" + column + " "
 			+ (column < plan.nearWall() ? "near" : "far") + " by "
 			+ (column < plan.nearWall() ? plan.nearWall() - column : column - plan.farWall())
