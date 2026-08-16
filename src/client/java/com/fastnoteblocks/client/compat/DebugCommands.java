@@ -70,12 +70,38 @@ public final class DebugCommands {
 
 	public static void register() {
 		ClientCommandRegistrationCallback.EVENT.register((dispatcher, registry) -> {
-			dispatcher.register(literal("fastnoteblockpaste")
+			LiteralArgumentBuilder<FabricClientCommandSource> paste = literal("fastnoteblockpaste")
 				// Checked here rather than by skipping registration, so that turning the setting on
 				// takes effect where it is turned on rather than at the next launch.
 				.requires(source -> FastNoteblocksConfig.get().debugCommandsEnabled())
-				.then(wall(false))
-				.then(literal("dry").then(wall(true))));
+				.then(wall(false, null))
+				.then(literal("dry").then(wall(true, null)));
+			// And the same again under each paster's own name, so a spec can be built both ways
+			// without going to the config screen and back. Left off it is whatever the paste button
+			// would use, and that default is deliberately not spelled out here: the command exists to
+			// build what a song would get, so the two must not be able to disagree.
+			//
+			// Literals rather than a word argument, for the reason the wall shapes are literals: a
+			// chord spec always opens with a digit and a mode name never does, so leaving it off is
+			// unambiguous and Brigadier tries its literal children first.
+			for (SongBuilder.PasteMode mode : SongBuilder.PasteMode.values()) {
+				String name = mode.name().toLowerCase(java.util.Locale.ROOT);
+				paste = paste.then(literal(name)
+					.then(wall(false, mode))
+					.then(literal("dry").then(wall(true, mode))));
+			}
+			// And the two names anybody actually says. The ultra lanes are v1 and v2 in conversation
+			// and in every commit message, and nobody is going to type ultra_compact_lane_v2 twice.
+			paste = paste
+				.then(literal("v1")
+					.then(wall(false, SongBuilder.PasteMode.ULTRA_COMPACT_LANE))
+					.then(literal("dry")
+						.then(wall(true, SongBuilder.PasteMode.ULTRA_COMPACT_LANE))))
+				.then(literal("v2")
+					.then(wall(false, SongBuilder.PasteMode.ULTRA_COMPACT_LANE_V2))
+					.then(literal("dry")
+						.then(wall(true, SongBuilder.PasteMode.ULTRA_COMPACT_LANE_V2))));
+			dispatcher.register(paste);
 			dispatcher.register(literal("asciidiagram")
 				.requires(source -> FastNoteblocksConfig.get().debugCommandsEnabled())
 				.then(corner("from").then(views())));
@@ -200,23 +226,24 @@ public final class DebugCommands {
 	 * spec ends in a number and so does everything else, so {@code 12 1 6 2 18} would have no reading
 	 * that is obviously right. Two numbers first, then everything else is chords.</p>
 	 */
-	private static RequiredArgumentBuilder<FabricClientCommandSource, Integer> wall(boolean dry) {
+	private static RequiredArgumentBuilder<FabricClientCommandSource, Integer> wall(
+			boolean dry, SongBuilder.PasteMode mode) {
 		RequiredArgumentBuilder<FabricClientCommandSource, Integer> floors = RequiredArgumentBuilder
 			.<FabricClientCommandSource, Integer>argument("floors",
 				IntegerArgumentType.integer(1, 16))
 			.then(RequiredArgumentBuilder
 				.<FabricClientCommandSource, String>argument("chords",
 					StringArgumentType.greedyString())
-				.executes(context -> run(context, dry, null, 0, false)));
+				.executes(context -> run(context, dry, null, 0, false, mode)));
 		// The wall shapes, each with its own distance to that wall. Literals rather than a word
 		// argument so that leaving them off is unambiguous: a chord spec always opens with a digit
 		// and a shape never does, and Brigadier tries its literal children first.
 		for (String shape : List.of("flat", "up", "down")) {
 			floors = floors.then(literal(shape)
-				.then(colsThenChords(dry, shape, false))
+				.then(colsThenChords(dry, shape, false, mode))
 				// And optionally with the lane already bending towards that wall, which is what a lane
 				// in the middle of a song is and what no run of chords can be written to produce.
-				.then(literal("turning").then(colsThenChords(dry, shape, true))));
+				.then(literal("turning").then(colsThenChords(dry, shape, true, mode))));
 		}
 		return RequiredArgumentBuilder
 			.<FabricClientCommandSource, Integer>argument("width",
@@ -226,7 +253,7 @@ public final class DebugCommands {
 
 	/** How far from that wall the first chord stands, and then the chords themselves. */
 	private static RequiredArgumentBuilder<FabricClientCommandSource, Integer> colsThenChords(
-			boolean dry, String shape, boolean turning) {
+			boolean dry, String shape, boolean turning, SongBuilder.PasteMode mode) {
 		return RequiredArgumentBuilder
 			.<FabricClientCommandSource, Integer>argument("columnsToWall",
 				IntegerArgumentType.integer(1, 512))
@@ -234,7 +261,7 @@ public final class DebugCommands {
 				.<FabricClientCommandSource, String>argument("chords",
 					StringArgumentType.greedyString())
 				.executes(context -> run(context, dry, shape,
-					IntegerArgumentType.getInteger(context, "columnsToWall"), turning)));
+					IntegerArgumentType.getInteger(context, "columnsToWall"), turning, mode)));
 	}
 
 	/**
@@ -258,7 +285,7 @@ public final class DebugCommands {
 	}
 
 	private static int run(CommandContext<FabricClientCommandSource> context, boolean dry,
-			String shape, int columnsToWall, boolean turning) {
+			String shape, int columnsToWall, boolean turning, SongBuilder.PasteMode mode) {
 		FabricClientCommandSource source = context.getSource();
 		String spec = StringArgumentType.getString(context, "chords");
 		int wall = IntegerArgumentType.getInteger(context, "width");
@@ -272,8 +299,8 @@ public final class DebugCommands {
 			}
 			chords = DebugChords.parse(spec, DebugChords.DEFAULT_GAP);
 			// The mode the paste button would use, so that what this builds is what a song would get.
-			SongBuilder.PasteMode mode = pasteMode();
-			plan = SongBuilder.createPastePlan(origin(source), DebugChords.notes(chords), mode,
+			SongBuilder.PasteMode chosen = mode == null ? pasteMode() : mode;
+			plan = SongBuilder.createPastePlan(origin(source), DebugChords.notes(chords), chosen,
 				new SongBuilder.BuildLimits(FastNoteblocksConfig.get().maxBuildFloors(), wall,
 					floors),
 				shape == null ? SongBuilder.WalkStart.HEAD : seed(shape, floors, wall, columnsToWall, turning));
