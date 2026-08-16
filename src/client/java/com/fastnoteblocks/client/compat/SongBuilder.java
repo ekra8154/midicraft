@@ -8830,21 +8830,20 @@ public final class SongBuilder {
 		Lane opening = lane.ahead(1);
 		Direction side = opening.noteSide();
 		BlockPos centreAt = opening.pos().above();
-		placeNote(placements, centreAt, centre);
-		// Said out loud, the way the small module says it: the repeater drives this block, and a note
-		// block is full and solid, so it passes that power to everything beside it -- the two flanks,
-		// and the dust in the next column.
-		placements.powered(centreAt, time);
-		int placed = 0;
-		for (Direction out : List.of(side, side.getOpposite())) {
-			if (placed < ordered.size()) {
-				placeNote(placements, centreAt.relative(out), ordered.get(placed++));
-			}
-		}
-		// The lowered cell. Stone where the lane's own floor runs and dust on top of it, which is one
-		// level below the bus -- that is the whole of "sunken", and it is what lets the dust read the
-		// note block beside it rather than having to start on top of one.
 		Lane low = lane.ahead(2);
+		// Every question first, and not one block before them.
+		//
+		// This method may hand the chord back to the plain bus below it, and until now it did so from
+		// the middle: the centre note and both flanks were already down when the parity check refused,
+		// so the bus was laid over the top of them and the two shapes met in the opening cell. ekran
+		// read it straight off a paste as a sea lantern with a note block wanting air above it and a
+		// bus cell wanting dust -- and the whole chord painted as a sunken bus while not one column of
+		// it was sunken. Without DEBUG_PASTE the same collision throws instead, which sends the shift
+		// loop hunting for a column that was never the problem.
+		//
+		// A builder that can refuse must refuse before it builds. Everything below this line is
+		// placement and nothing below it can say no.
+		int openingFlanks = Math.min(2, ordered.size());
 		// Parity, after all, and only here.
 		//
 		// ekran, off a paste: a sunken bus cannot accidentally *power* anything -- its notes are note
@@ -8878,7 +8877,7 @@ public final class SongBuilder {
 			// Two contested slots, or one with an even tail, and there is nothing free to do -- the note
 			// would cost a cell the walk did not measure. Then the module moves instead, which is what
 			// the shift loop in {@link #layBus} is for.
-			boolean oddTail = (ordered.size() - placed) % 2 == 1;
+			boolean oddTail = (ordered.size() - openingFlanks) % 2 == 1;
 			if (quiet.size() == 1 && oddTail && SUNKEN_RELOCATES_A_LOWERED_NOTE) {
 				placements.padded("sunkenRelocatedALoweredNote");
 				lowSides = List.of(quiet.get(0));
@@ -8898,6 +8897,21 @@ public final class SongBuilder {
 				return null;
 			}
 		}
+		// Decided. Now build it.
+		placeNote(placements, centreAt, centre);
+		// Said out loud, the way the small module says it: the repeater drives this block, and a note
+		// block is full and solid, so it passes that power to everything beside it -- the two flanks,
+		// and the dust in the next column.
+		placements.powered(centreAt, time);
+		int placed = 0;
+		for (Direction out : List.of(side, side.getOpposite())) {
+			if (placed < ordered.size()) {
+				placeNote(placements, centreAt.relative(out), ordered.get(placed++));
+			}
+		}
+		// The lowered cell. Stone where the lane's own floor runs and dust on top of it, which is one
+		// level below the bus -- that is the whole of "sunken", and it is what lets the dust read the
+		// note block beside it rather than having to start on top of one.
 		placements.powered(low.pos(), "minecraft:stone", time);
 		set(placements, low.pos().above(), "minecraft:redstone_wire");
 		for (Direction out : lowSides) {
@@ -8962,8 +8976,11 @@ public final class SongBuilder {
 				return sunken;
 			}
 			// No harp to open with, or the lowered pair could not be placed quietly. Either way the plain
-			// bus below is what this always was.
+			// bus below is what this always was -- and it says so, because the label went down before the
+			// shape was settled. ekran read a chord painted polished tuff end to end without one sunken
+			// column in it, which is a marker lying about the machine it is marking.
 			placements.padded("sunkenBusGaveWay");
+			placements.placing("chord:BUS notes" + chord.size());
 		}
 		int cells = layBus(placements, lane.ahead(1).above(), chord, time);
 		return new Body(lane.ahead(1 + cells), cells);
