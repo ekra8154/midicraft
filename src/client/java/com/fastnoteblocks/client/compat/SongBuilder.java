@@ -8738,7 +8738,20 @@ public final class SongBuilder {
 			RelocationRoom room = relocationRoom(style, event.notes());
 			// A module already stood a column off the lane behind asks about the column it will
 			// actually stand in, not the one it would have stood in.
-			Lane asking = behindShift ? start.ahead(1) : start;
+			//
+			// And so does one standing on a corner. addStackedShape walks past any corner before it
+			// builds -- a repeater may not stand on one -- so a module asking here is asking about a
+			// column it is about to be moved out of, and moved by exactly the one column parity is
+			// about. The walk is mirrored rather than shared because pastAnyCorner lays dust as it
+			// goes and this is a question, not a placement; it is the same loop over the same
+			// cornerAt, so the two cannot land in different places.
+			Lane onTheGround = start;
+			if (PARITY_ASKS_PAST_THE_CORNER) {
+				while (onTheGround.cornerAt(0)) {
+					onTheGround = onTheGround.ahead(1);
+				}
+			}
+			Lane asking = behindShift ? onTheGround.ahead(1) : onTheGround;
 			int verdict = parityVerdict(placements, asking, event.time(), slots, room);
 			if (verdict == 2) {
 				moved = relocate(placements, asking, event.time(), style, event.notes(), slots, room);
@@ -9091,7 +9104,15 @@ public final class SongBuilder {
 				Body body = addSpatialEventModule(placements, lane, triggerDelay, event.notes(), true);
 				return new Placed(body.lane(), ChordStyle.BUS, body.busCells(), false);
 			}
+			Lane askedAt = start;
 			start = pastAnyCorner(placements, start);
+			// The parity verdict was taken before this walk, at the column the module was standing in
+			// rather than the one it ends up in. Corner padding then moves it, and a shift of one
+			// column is exactly what parity is about -- so the answer it was given is the answer for
+			// somewhere else.
+			if (!start.pos().equals(askedAt.pos())) {
+				placements.padded("parityAskedBeforeTheCorner");
+			}
 			if (nudge) {
 				triggerDelay = parityPadOrSplitRepeater(placements, start, triggerDelay);
 				start = start.ahead(1);
@@ -9108,7 +9129,11 @@ public final class SongBuilder {
 		}
 		// The delay no longer walks off the corner for us -- the two-swap turn wants it -- so the one
 		// shape that cannot use it walks off it here.
+		Lane askedAt = start;
 		start = pastAnyCorner(placements, start);
+		if (!start.pos().equals(askedAt.pos())) {
+			placements.padded("parityAskedBeforeTheCorner");
+		}
 		if (nudge) {
 			triggerDelay = parityPadOrSplitRepeater(placements, start, triggerDelay);
 			start = start.ahead(1);
@@ -9424,6 +9449,21 @@ public final class SongBuilder {
 	 * the shape; the fallback throws it away for four cells of lane, so it is what is left when the
 	 * others have all been tried rather than the third thing reached for.</p>
 	 */
+	/**
+	 * Whether parity is judged at the column a module ends up in rather than the one it asks from.
+	 *
+	 * <p>Off, a stacked chord standing on a corner is judged where it stands and built one column
+	 * further along, because {@link #addStackedShape} walks past the corner first -- a repeater may
+	 * not stand on one. One column is the whole of what parity means, so the verdict it was given is
+	 * the verdict for somewhere else. ekran read it off a build: <i>"the question is why the other
+	 * stacked chord didn't parity pad forward. perhaps cause it had already padded forward from the
+	 * corner padding. corner padding and parity padding should be able to both happen."</i></p>
+	 *
+	 * <p>It fires 38 times over the library and produces one wrong note, so the two usually agree by
+	 * luck. Counted as {@code parityAskedBeforeTheCorner}.</p>
+	 */
+	static boolean PARITY_ASKS_PAST_THE_CORNER = true;
+
 	private static int parityVerdict(PlacementPlan placements, Lane at, int time, UltraSlots slots,
 			RelocationRoom room) {
 		if (!stackedClashes(placements, at, time, slots)) {
