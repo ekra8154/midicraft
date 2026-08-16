@@ -78,15 +78,17 @@ class FaultCensusProbe {
 	 */
 	private record Row(String song, int width, int floors, int dead, int dropped, int wrong,
 			int breachLanes, int breachBlocks, int depth, String refused, FaultView.Break broke,
-			List<String> wrongPairs) {
+			List<String> wrongPairs, int severed) {
 
 		boolean clean() {
-			return refused == null && dead == 0 && dropped == 0 && wrong == 0 && breachBlocks == 0;
+			return refused == null && dead == 0 && dropped == 0 && wrong == 0 && breachBlocks == 0
+				&& severed == 0;
 		}
 
 		/** Dead first, then missing notes, then wrong ones, then ground the build promised not to take. */
 		long weight() {
-			return dead * 1_000_000L + dropped * 10_000L + wrong * 100L + breachBlocks;
+			return (dead + severed * 1_000L) * 1_000_000L + dropped * 10_000L + wrong * 100L
+				+ breachBlocks;
 		}
 	}
 
@@ -164,10 +166,16 @@ class FaultCensusProbe {
 						built.plan().spanZ(), null,
 						built.reading().unreachedNotes() == 0 ? null : FaultView.firstBreak(built),
 						FaultView.wrongNotes(built).stream()
-							.map(wrong -> FaultView.whose(built, wrong)).toList()));
+							.map(wrong -> FaultView.whose(built, wrong)).toList(),
+						// A walk lays one entrance, so a second way in is a repeater the build left
+						// with nothing behind it -- a severed lane. The reader cannot tell that from an
+						// alternative beginning and takes the generous reading, starting a fresh
+						// performance at the orphan: everything downstream counts as reached and
+						// unreachedNotes comes back nought on a build cut in half.
+						Math.max(0, built.reading().versions() - 1)));
 				} catch (RuntimeException refused) {
 					rows.add(new Row(name, size[0], size[1], 0, 0, 0, 0, 0, 0,
-						String.valueOf(refused.getMessage()), null, List.of()));
+						String.valueOf(refused.getMessage()), null, List.of(), 0));
 				}
 			}
 		}
@@ -192,9 +200,9 @@ class FaultCensusProbe {
 		System.out.println("---- worst first (fault.song / fault.width / fault.floors) ----");
 		for (Row row : faulty) {
 			System.out.println(String.format(
-				"   %-34s %2dw x %df  dead %5d  missing %4d  wrong %3d  breach %2d lanes %3d blocks%s",
-				row.song(), row.width(), row.floors(), row.dead(), row.dropped(), row.wrong(),
-				row.breachLanes(), row.breachBlocks(),
+				"   %-34s %2dw x %df  severed %d  dead %5d  missing %4d  wrong %3d  breach %2d lanes %3d blocks%s",
+				row.song(), row.width(), row.floors(), row.severed(), row.dead(), row.dropped(),
+				row.wrong(), row.breachLanes(), row.breachBlocks(),
 				row.refused() == null ? "" : "   REFUSED: " + row.refused()));
 		}
 		// By song and by kind, because one song at five sizes is one bug five times and reads as five
@@ -283,6 +291,9 @@ class FaultCensusProbe {
 		// Summed over every build including the clean ones -- the faulty rows are not where a shape
 		// that costs columns spends them.
 		System.out.println("CENSUS depth=" + rows.stream().mapToLong(Row::depth).sum());
+		System.out.println("CENSUS severedBuilds="
+			+ faulty.stream().filter(row -> row.severed() > 0).count()
+			+ " severedLanes=" + faulty.stream().mapToLong(Row::severed).sum());
 		System.out.println("CENSUS builds=" + rows.size()
 			+ " deadBuilds=" + faulty.stream().filter(row -> row.dead() > 0).count()
 			+ " dead=" + dead + " missing=" + missing + " wrong=" + wrong
