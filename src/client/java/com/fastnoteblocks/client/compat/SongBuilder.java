@@ -12980,9 +12980,27 @@ public final class SongBuilder {
 			return this == STACKED_FRONT || this == STACKED_FULL || busHeaded();
 		}
 
-		/** Whether the shape ends in a run of bus, and so spends a cell of wire a note pair. */
+		/**
+		 * Whether the shape ends in a run of bus, and so spends a cell of wire a note pair.
+		 *
+		 * <p><b>Not a sunken bus</b>, and the difference is a level. Every caller of this asks the same
+		 * question -- does the lane end on a bus, so a staircase off it starts a level up and skips two
+		 * rungs -- and a sunken bus does not end that way. Its last cell is the lowered one: stone at
+		 * the lane's own height with the dust on top, which is what a pad looks like, not what a bus
+		 * looks like. Granted the discount anyway, the climb starts two rungs above a wire a level
+		 * below where it thinks it is, and the run stops at the gap.</p>
+		 *
+		 * <p>ekran read it as glass missing: <em>"its supposed to climb, but the first two glass blocks
+		 * and their redstone have been straight up deleted"</em>. They were never laid. am-i-dreaming at
+		 * 12 wide over seven floors, the lowered dust at {@code 3 69 7} with the first glass at
+		 * {@code 2 70 7} and plain air at {@code 2 69 7} between them.</p>
+		 *
+		 * <p>The wire sums are the other question and they are asked by name: {@code tipSignal} and
+		 * {@link #landingFrom} both test {@code == SUNKEN_BUS} explicitly, because for spending dust a
+		 * sunken bus is exactly a bus. Two questions that used to share one word.</p>
+		 */
 		boolean buses() {
-			return this == BUS || this == SUNKEN_BUS || busHeaded();
+			return this == BUS || busHeaded();
 		}
 
 		/** Whether the shape needs the pair of low slots behind it free. */
