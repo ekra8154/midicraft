@@ -3104,8 +3104,13 @@ public final class SongBuilder {
 				: turnCells;
 			boolean reachesWall = !PIN_DESCENTS || flatAhead
 				|| pad.signal() - unpaid >= turnCost;
+			// A straddling chord is charged for wire it is not going to use. The comment fifteen lines
+			// above already says why it should not be -- "its repeater goes down where the lane has got
+			// to, and a repeater hands out a fresh fifteen however dead the wire arriving was" -- and
+			// then the test asks for a block of wire anyway. See {@link #STRADDLE_NEEDS_NO_WIRE}.
+			boolean straddleAffordable = STRADDLE_NEEDS_NO_WIRE || pad.signal() >= 1;
 			boolean canTurn = layout.ultra()
-				? index > 0 && reachesWall && (flatAhead ? straddles && pad.signal() >= 1
+				? index > 0 && reachesWall && (flatAhead ? straddles && straddleAffordable
 					: pad.signal() >= turnPrice)
 				: index > 0 && events.get(index - 1).maxSafeTurnDistance() >= MAX_LANE_SPACING;
 			// A veto is a preference, not a prohibition.
@@ -5236,6 +5241,28 @@ public final class SongBuilder {
 	 * main by itself.</p>
 	 */
 	static boolean CUTS_THE_CHORD_THAT_REACHES = false;
+
+	/**
+	 * v2: a chord that lies across a flat turn is charged nothing for the wire arriving at it.
+	 *
+	 * <p>A flat turn is taken only by a chord that straddles it, and the test for that used to be
+	 * {@code straddles && pad.signal() >= 1}. The second half is superstition, and the comment three
+	 * lines above it says so in the file's own words: a straddling chord's repeater goes down where
+	 * the lane has got to and hands out a fresh fifteen however dead the wire arriving was, so the
+	 * only run that matters is the one inside the chord, which {@link #straddleFits} has already
+	 * checked. The pad in this branch is {@link Pad#none}, so {@code pad.signal()} is just the tip --
+	 * and the lane lays the very same chord in the very same column when it is refused the turn. The
+	 * wire is identical either way. Only the corner goes.</p>
+	 *
+	 * <p><b>Every one of Guardian's seven breaches at 20 wide over three floors was this line</b>, and
+	 * they are identical to the field: {@code flatAhead=true straddles=true pad=0c/0s}, a lane at
+	 * {@code x=11} with its wall at 18, and a chord of 16 to 24 that fits across the corner and is
+	 * told it cannot have it. The lane runs the chord straight out instead and the *next* chord opens
+	 * outside the footprint. A lane comes out of a cut with its fifteen spent on the transition, both
+	 * halves and the staircase, so {@code tip == 0} is the normal state of the first chord after a
+	 * climb -- which is why this bites over and over rather than once.</p>
+	 */
+	static boolean STRADDLE_NEEDS_NO_WIRE = true;
 
 	/**
 	 * v2: two stacked centres are never left two columns apart; a pad makes it three.
