@@ -2587,6 +2587,18 @@ public final class SongBuilder {
 			int above = turn.above();
 			int turnCells = turn.cells();
 			int offBus = turn.offBus();
+			// Whether this lane ends by climbing, which is the one turn a stacked centre can feed.
+			//
+			// Set here, before shapeFor is called, and that is the whole point. It used to be set beside
+			// turnAhead a hundred and thirty lines further down, so the room test read the previous
+			// event's answer while the builder read this one -- the dust went down and the shape never
+			// changed. Exactly the trap turnAhead is documented for, walked into twice.
+			//
+			// Without the reaches term, which cannot be had this early: it needs the landing, the landing
+			// needs the shape, and the shape is what this is for. It costs nothing to leave out. The room
+			// test only bites when the wall is within two columns, which is the same thing reaches says,
+			// and the dust is only ever claimed by a climb standing in the cell that reads it.
+			placements.climbAhead(above >= 0 && above < floors && climb > 0);
 			// Whether the module behind left dust on its empty centre for this climb to start from --
 			// and whether that dust is in the cell this climb would actually read.
 			//
@@ -2825,9 +2837,6 @@ public final class SongBuilder {
 			// down. reaches is the same fact one event earlier -- this chord ends on the wall or a
 			// column short of it, so the lane closes after it -- and it is the moment the tail can
 			// still choose to be a bus.
-			// And whether that close is a climb, which is the one turn a stacked centre can feed. Both
-			// facts are known here and neither is visible where the module is built.
-			placements.climbAhead(reaches && above >= 0 && above < floors && climb > 0);
 			placements.turnAhead(wantsTurn || reaches);
 			// And the other fact the chord cannot see for itself: how soon the next event arrives. A pad
 			// laid in front of it can only be spent as a repeater where there are two ticks to split, so
@@ -3153,8 +3162,32 @@ public final class SongBuilder {
 					splitNudge = true;
 				}
 			}
+			// A cut is how a chord that does not fit is made to fit, and this one does fit.
+			//
+			// The whole cut decision is made on {@code cells}, which is the length of a <em>bus</em> --
+			// and the walk may not be building a bus. A chord of four is two bus cells and one stacked
+			// module, and where the module lands inside the wall there is nothing for a cut to be around.
+			// Cutting anyway spends the same two columns on a bus of two notes and sends the other two
+			// over the staircase; the module lands flush in them and carries all four.
+			//
+			// Only where the centre is empty and a climb follows, because that is the one case where the
+			// module can hand over without the spare column a cut would have given it -- the dust on its
+			// centre is the handover. See {@link #CLIMB_OFF_A_STACKED_CENTRE}.
+			//
+			// ekran found it by repasting am-i-dreaming three times: "it still is a chord of 4, that is
+			// being cut, its still just a normal bus". The room test was never what refused it. This was.
+			boolean stackedFitsInstead = CLIMB_OFF_A_STACKED_CENTRE && placements.climbAhead()
+				&& shaped.style().stacked() && !shaped.style().busHeaded()
+				&& (wall - here.end()) * lane.travel().getStepX() >= 0;
+			if (stackedFitsInstead) {
+				UltraSlots insteadOfCutting = slotsFor(shaped.style(), event.notes());
+				stackedFitsInstead = insteadOfCutting != null && insteadOfCutting.centre() == null;
+			}
+			if (stackedFitsInstead) {
+				placements.padded("cutSkippedForAStackedClimb");
+			}
 			boolean couldSplit = layout.ultra() && cutOffered && index > 0 && above >= 0
-				&& above < floors && (headed != null
+				&& above < floors && !stackedFitsInstead && (headed != null
 					|| (room >= 2 && room - 1 < cells && cells + splitCells <= DUST_RANGE));
 			// Why the head went, where losing it costs the lane its wall.
 			//
