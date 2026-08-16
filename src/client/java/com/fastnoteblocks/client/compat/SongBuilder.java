@@ -2857,13 +2857,32 @@ public final class SongBuilder {
 			// still be cuttable with one. Asked first, and the plain sum is what is left when the
 			// chord cannot take a head -- too many falling instruments, no harp for the centre, or
 			// no room for a head and a cell of bus before the wall.
+			// What kind of thing is behind, which is not the same question as whether the column is
+			// taken. That last argument says in its own docstring that it means *another stacked
+			// module's centre* -- the one case where both slots behind are gone rather than one -- and
+			// the walk was handing it {@code columnBehindBusy}, which is also true after a rail column,
+			// after a carried chord, after a staircase landing and anywhere within reach of a corner.
+			// So a cut standing behind a plain bus was refused the head of six that
+			// {@link #HEAD_KEEPS_ONE_BACK_FLANK} exists to give it, fell through to a head of five,
+			// could not make one of those either, and was laid whole. Both of Guardian's remaining
+			// breaches at 20 wide over three floors were that: {@code last=BUS behindBusy=true},
+			// {@code refused=NoHeadFromTheFront}, a chord of 24 with nine columns of room -- which a
+			// head of six cuts flush, at fourteen cells of the fifteen.
+			//
+			// The ground cannot be asked here, and that was tried first. A head's back flanks stand in
+			// the column it opens on, and a cut opens {@code splitPin} columns further along than this --
+			// a pin worked out below, from the head this line is choosing. Asked at
+			// {@code lane.ahead(delayColumns)} it is the wrong cell and comes back yes every time:
+			// measured, it changed not one decision in 1,054 builds.
+			boolean stackedIsBehind = CUT_ASKS_WHAT_KIND_IS_BEHIND
+				? columnBehindBusy && lastStyle.stacked() : columnBehindBusy;
 			StackedSplit headed = layout.ultra() && cutOffered && index > 0 && above >= 0
 				&& above < floors
 				? stackedSplitOf(event.notes(), room, splitCells, climb > 0,
 					!columnBehindBusy || delayColumns > 0
 						|| CUT_ASKS_THE_BLOCKS_BEHIND
 							&& backPairIsFree(placements, lane.ahead(delayColumns), event.time()),
-					columnBehindBusy)
+					stackedIsBehind)
 				: null;
 			// A cut is built straight from the module rather than through {@link #addChordModule},
 			// so none of that method's guards are applied to it -- and the one that matters is the
@@ -2932,7 +2951,7 @@ public final class SongBuilder {
 							|| CUT_ASKS_THE_BLOCKS_BEHIND
 								&& backPairIsFree(placements, lane.ahead(delayColumns + inFront),
 									event.time()),
-						columnBehindBusy);
+						stackedIsBehind);
 				// And what that shape still leaves is checked rather than assumed. A shape that overshoots
 				// the smaller room is no use at all; one that falls short of it wants the rest behind.
 				int behind = flush == null ? -1 : room - inFront - flush.columns();
@@ -2996,7 +3015,7 @@ public final class SongBuilder {
 						!columnBehindBusy || delayColumns + splitPin + 1 > 0
 							|| CUT_ASKS_THE_BLOCKS_BEHIND
 								&& backPairIsFree(placements, lane.ahead(delayColumns + splitPin + 1), event.time()),
-						columnBehindBusy);
+						stackedIsBehind);
 				if (shifted == null) {
 					// Both cells wrong, or nothing left to cut once a column is spent. Then the head
 					// goes, which is what this did in every case before.
@@ -3199,7 +3218,8 @@ public final class SongBuilder {
 						: headed.nearTail().size() + "+" + headed.farTail().size())
 					+ " couldSplit=" + couldSplit + " vetoed=" + vetoed
 					+ " reachesWall=" + reachesWall + " unpaid=" + unpaid
-					+ " why=" + head + " clashed=" + splitClashed
+					+ " why=" + head + " refused=" + LAST_CUT_REFUSAL
+					+ " clashed=" + splitClashed
 					+ " nudged=" + splitNudge + " behindBusy=" + columnBehindBusy
 					+ " delayColumns=" + delayColumns);
 			}
@@ -9256,6 +9276,13 @@ public final class SongBuilder {
 			// them a column apart never meet at all.
 			boolean hasFront = !FLANK_AWARE_PARITY || slots == null || slots.front(side) != null;
 			boolean hasBack = !FLANK_AWARE_PARITY || slots == null || slots.back(side) != null;
+			// And the same two cells the other way round: a note this module is about to hang, against a
+			// block of the lane behind that goes live at somebody else's tick. Only one direction of the
+			// pair was ever asked. See {@link #CLASH_ASKS_IF_THE_NEIGHBOUR_IS_LIVE}.
+			if (CLASH_ASKS_IF_THE_NEIGHBOUR_IS_LIVE && (hasFront || hasBack)
+					&& placements.liveAt(beyond, time)) {
+				return true;
+			}
 			if (hasFront && placements.liveAt(beyond.relative(travel), time)) {
 				return true;
 			}
@@ -11434,6 +11461,52 @@ public final class SongBuilder {
 	 * is one.</p>
 	 */
 	static boolean HEAD_KEEPS_ONE_BACK_FLANK = true;
+
+	/**
+	 * v2: whether a cut asks what kind of thing stands behind it, or only whether anything does.
+	 *
+	 * <p>{@link #stackedSplitOf}'s last argument is documented as <em>another stacked module's
+	 * centre</em>, which is the one case where both back slots are gone rather than one -- ekran's
+	 * rule, and the exception {@link #HEAD_KEEPS_ONE_BACK_FLANK} is written around. The walk was
+	 * handing it {@code columnBehindBusy}, which also says busy for a rail column, a carried chord, a
+	 * staircase landing and anywhere within reach of a corner.</p>
+	 *
+	 * <p>So a cut standing behind a plain bus was refused the head of six, fell through to the head of
+	 * five, could not make one of those either, and was laid whole -- a lane outside its wall for a
+	 * rule about a shape that was not there. The ordinary chord path never had this: the matching line
+	 * in {@link #chooseStyle} asks {@code style.busHeaded()} and no more.</p>
+	 *
+	 * <p><b>On.</b> Guardian 34 breach blocks to 17 over seventeen widths, the library 4,689 to 4,640.
+	 * It also opens a fault that was already there and rarer:
+	 * {@link #CLASH_ASKS_IF_THE_NEIGHBOUR_IS_LIVE}.</p>
+	 */
+	static boolean CUT_ASKS_WHAT_KIND_IS_BEHIND = true;
+
+	/**
+	 * Whether a clash test asks the neighbour's cell about being live, as well as about being a note.
+	 *
+	 * <p>{@link #stackedClashes} looks at the cell two out from the module's cross column -- the lane
+	 * behind -- and asks {@code noteAt}: is there a note of theirs that our live relay would sound.
+	 * The same pair of cells has a second way to go wrong and nothing asked about it: a note of
+	 * <em>ours</em> hung against a block of theirs that goes live at their tick. Two cells, two
+	 * directions, one question.</p>
+	 *
+	 * <p>Read off the paste rather than reasoned about, which took two wrong guesses first. The render
+	 * at {@code no-batid-o} 12 wide over three floors: the note at {@code 6 64 72} belongs to tick 408
+	 * and sounds at 404 from {@code 6 64 71} -- the cell directly north, in the lane behind, which is
+	 * exactly {@code beyond}. Both earlier attempts looked in this module's own lane, along travel,
+	 * and the slice says the aggressor was never there.</p>
+	 *
+	 * <p><b>Off: the cell is right and the question is too broad.</b> {@code liveAt(cell, time)} means
+	 * <em>live at some tick other than this one</em>, and the lane behind's own wire is that
+	 * everywhere -- so this refuses nearly every module with a flank on that side. Over the library at
+	 * seventeen widths: wrong notes 9 to 87, breach blocks 4,640 to 6,129, and the new wrong notes are
+	 * in shapes that had none. The narrower question is whether a note hung at one out would be
+	 * sounded, which is what {@link #soundedByAnother} asks -- and the three lines below already ask
+	 * two of its four horizontal directions and not this one. Which cell holds which flank is the part
+	 * to establish first, off a paste, before the fourth attempt.</p>
+	 */
+	static boolean CLASH_ASKS_IF_THE_NEIGHBOUR_IS_LIVE = false;
 
 	/**
 	 * Whether a cut across a staircase asks the blocks behind rather than the coarse flag.
