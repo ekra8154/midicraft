@@ -2802,6 +2802,9 @@ public final class SongBuilder {
 			// down. reaches is the same fact one event earlier -- this chord ends on the wall or a
 			// column short of it, so the lane closes after it -- and it is the moment the tail can
 			// still choose to be a bus.
+			// And whether that close is a climb, which is the one turn a stacked centre can feed. Both
+			// facts are known here and neither is visible where the module is built.
+			placements.climbAhead(reaches && above >= 0 && above < floors && climb > 0);
 			placements.turnAhead(wantsTurn || reaches);
 			// And the other fact the chord cannot see for itself: how soon the next event arrives. A pad
 			// laid in front of it can only be spent as a repeater where there are two ticks to split, so
@@ -11597,6 +11600,18 @@ public final class SongBuilder {
 		set(placements, cross, STACKED_CROSS);
 		if (slots.centre() == null) {
 			set(placements, centre, "minecraft:stone");
+			// ekran's: a centre with no note in it has the cell above it going spare, and that cell is at
+			// exactly the height a bus runs its wire at. Dust there carries the run diagonally up onto the
+			// staircase's first rung -- the run is 4 rather than the 3 a real bus pays, because this cell
+			// is part of it, and it comes back as the two front flanks the module keeps.
+			//
+			// Only with no note, and that is physical rather than a preference: a note block in the centre
+			// insists on air above it, and this is that air. The file says so where the stacked bus
+			// explains why its own tail has to leave sideways.
+			if (CLIMB_OFF_A_STACKED_CENTRE && placements.climbAhead()) {
+				placements.padded("climbOffAStackedCentre");
+				set(placements, centre.above(), "minecraft:redstone_wire");
+			}
 		} else {
 			placeNoteBlock(placements, centre, slots.centre());
 		}
@@ -12059,6 +12074,23 @@ public final class SongBuilder {
 	 * prefer a single normal stacked chord over a sunken bus"</em>.</p>
 	 */
 	static boolean ROOM_TEST_KNOWS_THE_SUNKEN_FALLBACK = true;
+
+	/**
+	 * Whether a stacked module with an empty centre lays dust on it to feed a staircase.
+	 *
+	 * <p>ekran's. A stacked module's centre sits at bus height and is strongly powered by the
+	 * module's own repeater. When no note goes in it -- six notes or fewer with both back flanks,
+	 * four front-only -- the cell above it is free, and that cell is exactly where a bus runs its
+	 * wire. Dust there steps diagonally up onto the first rung of a glass climb, so the lane can
+	 * climb straight off a stacked chord without being turned into a bus or cut in two first.</p>
+	 *
+	 * <p>The staircase itself does not change: it is the ordinary {@code fromBus} climb, rung for
+	 * rung. What changes is only what feeds it. The run costs four rather than three, because this
+	 * cell is part of it and a real bus's last dust is not -- and ekran's arithmetic is that it comes
+	 * out level, because the module keeps the two front flanks that sit at lane level in the column
+	 * the first glass stands two levels above.</p>
+	 */
+	static boolean CLIMB_OFF_A_STACKED_CENTRE = true;
 
 	/**
 	 * The smallest chord laid as a {@link ChordStyle#SUNKEN_BUS}.
@@ -13996,6 +14028,24 @@ public final class SongBuilder {
 
 		boolean laneJustOpened() {
 			return laneJustOpened;
+		}
+
+		/**
+		 * Whether the lane climbs a staircase straight after the chord about to be built.
+		 *
+		 * <p>Handed down like {@link #turnAhead}, and for the same reason -- the builder cannot see the
+		 * turn. The one shape that wants it is a stacked module whose centre holds no note: the cell
+		 * above the centre is free only then, and dust there is what carries the run up onto the
+		 * staircase. See {@link #CLIMB_OFF_A_STACKED_CENTRE}.</p>
+		 */
+		private boolean climbAhead;
+
+		void climbAhead(boolean ahead) {
+			climbAhead = ahead;
+		}
+
+		boolean climbAhead() {
+			return climbAhead;
 		}
 
 		void sunkenOffered(boolean offered) {
