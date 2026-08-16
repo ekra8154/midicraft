@@ -2404,7 +2404,12 @@ public final class SongBuilder {
 			// chord ever sees it -- so reading it as a module, which is what {@code !BUS} used to
 			// mean, told the lane it had fifteen when it had four. That is dead wire, and the sweep
 			// found 260 builds of it. The same sum as {@link #landingOf}, which had it right.
-			tipSignal = placed.style() == ChordStyle.BUS
+			// A sunken bus is a bus for this sum, and saying so is not decoration: it spends a cell of
+			// dust on its lowered column and one on every bus cell after, and Body.busCells carries that
+			// total. Left out of this test it fell through to the module arm and handed the lane a full
+			// fifteen it had already spent -- which is the very fault the comment above records at 260
+			// builds, in the same line, for a different shape.
+			tipSignal = placed.style() == ChordStyle.BUS || placed.style() == ChordStyle.SUNKEN_BUS
 				? DUST_RANGE - placed.busCells()
 				: placed.style().busHeaded()
 					? DUST_RANGE - STACKED_BUS_TRANSITION - placed.busCells()
@@ -4321,7 +4326,12 @@ public final class SongBuilder {
 			// chord ever sees it -- so reading it as a module, which is what {@code !BUS} used to
 			// mean, told the lane it had fifteen when it had four. That is dead wire, and the sweep
 			// found 260 builds of it. The same sum as {@link #landingOf}, which had it right.
-			tipSignal = placed.style() == ChordStyle.BUS
+			// A sunken bus is a bus for this sum, and saying so is not decoration: it spends a cell of
+			// dust on its lowered column and one on every bus cell after, and Body.busCells carries that
+			// total. Left out of this test it fell through to the module arm and handed the lane a full
+			// fifteen it had already spent -- which is the very fault the comment above records at 260
+			// builds, in the same line, for a different shape.
+			tipSignal = placed.style() == ChordStyle.BUS || placed.style() == ChordStyle.SUNKEN_BUS
 				? DUST_RANGE - placed.busCells()
 				: placed.style().busHeaded()
 					? DUST_RANGE - STACKED_BUS_TRANSITION - placed.busCells()
@@ -8819,9 +8829,62 @@ public final class SongBuilder {
 		// level below the bus -- that is the whole of "sunken", and it is what lets the dust read the
 		// note block beside it rather than having to start on top of one.
 		Lane low = lane.ahead(2);
+		// Parity, after all, and only here.
+		//
+		// ekran, off a paste: a sunken bus cannot accidentally *power* anything -- its notes are note
+		// blocks and note blocks sound nothing -- so lining up with somebody else's flanks or with a
+		// bottom rail is fine and needs no check. What it can do is be powered: these two cells sit at
+		// the lane's own level, and a stacked module's centre is a live block whose sides drive whatever
+		// touches them. A note there sounds at that module's tick.
+		//
+		// So the question is asked of the cells and not of the shapes: {@link #soundedByAnother} is
+		// true of a live block belonging to another tick and false of a note block, which is exactly the
+		// line ekran drew. Refused rather than dropped, so that the module moves a column and keeps all
+		// its notes -- the shift loop in {@link #layBus} lays that column as a parity pad and tries
+		// again, which is what parity padding is.
+		List<Direction> lowSides = new ArrayList<>(List.of(side, side.getOpposite()));
+		if (SUNKEN_ASKS_PARITY) {
+			List<Direction> quiet = new ArrayList<>(2);
+			for (Direction out : lowSides) {
+				if (!soundedByAnother(placements, low.pos().relative(out), time)) {
+					quiet.add(out);
+				}
+			}
+			// Relocation before padding, which is ekran's order everywhere else in this file: move the
+			// contested note, not the module.
+			//
+			// And here it is free, exactly once. The tail is what is left after the opening's three, and
+			// an odd tail means the bus already ends on a half-empty cell -- so a note pushed off one
+			// lowered slot lands in that half and the module is the same length it was measured at.
+			// {@link #sunkenDustCells} does not move: at ten notes the tail is seven, and whether the
+			// bus carries five notes or six it is three cells either way.
+			//
+			// Two contested slots, or one with an even tail, and there is nothing free to do -- the note
+			// would cost a cell the walk did not measure. Then the module moves instead, which is what
+			// the shift loop in {@link #layBus} is for.
+			boolean oddTail = (ordered.size() - placed) % 2 == 1;
+			if (quiet.size() == 1 && oddTail && SUNKEN_RELOCATES_A_LOWERED_NOTE) {
+				placements.padded("sunkenRelocatedALoweredNote");
+				lowSides = List.of(quiet.get(0));
+			} else if (quiet.size() < 2) {
+				// Nothing free to do, so the shape goes rather than the ground.
+				//
+				// A parity pad would be the obvious answer and it is the wrong one here. The pad is dust
+				// laid on the wire *arriving* at this module, and nothing budgeted for it -- the walk
+				// measured a module at this column, not one column further with a cell of dust in front.
+				// Measured: padding for parity took the library from 18,355 dead notes to 162,055.
+				//
+				// A plain bus has no such trouble, because it hangs nothing at lane level at all -- which
+				// is the whole of the parity question for this shape. It is at most one column longer, so
+				// the lane lands short of what was measured rather than past it, and short is the safe
+				// direction to be wrong in.
+				placements.padded(quiet.isEmpty() ? "sunkenParityBothSides" : "sunkenParityEvenTail");
+				return null;
+			}
+		}
 		placements.powered(low.pos(), "minecraft:stone", time);
 		set(placements, low.pos().above(), "minecraft:redstone_wire");
-		for (Direction out : List.of(side, side.getOpposite())) {
+		for (Direction out : lowSides) {
 			if (placed < ordered.size()) {
 				placeNote(placements, low.pos().relative(out), ordered.get(placed++), true);
 			}
@@ -8882,7 +8945,9 @@ public final class SongBuilder {
 				placements.padded("sunkenBus");
 				return sunken;
 			}
-			placements.padded("sunkenBusHadNoHarp");
+			// No harp to open with, or the lowered pair could not be placed quietly. Either way the plain
+			// bus below is what this always was.
+			placements.padded("sunkenBusGaveWay");
 		}
 		int cells = layBus(placements, lane.ahead(1).above(), chord, time);
 		return new Body(lane.ahead(1 + cells), cells);
@@ -11926,6 +11991,34 @@ public final class SongBuilder {
 	 * use. Those are two different faults.</p>
 	 */
 	static boolean SUNKEN_OPENS_A_LANE = true;
+
+	/**
+	 * Whether a sunken bus asks about parity before hanging the two notes beside its lowered dust.
+	 *
+	 * <p>The shape was built on the understanding that it has no parity at all, and that was half
+	 * right. ekran, from the blocks: <em>"sunken buses cannot accidentally power another note on the
+	 * bottom rail, so if the sunken cell lines up with flanks from anything else or bottom rail,
+	 * that's fine. But if that sunken cell gets placed touching a stacked centre's powered side, it
+	 * must be parity padded."</em></p>
+	 *
+	 * <p>Which is a one-way rule, and that is why the check is {@link #soundedByAnother} rather than
+	 * anything about shapes: it is true of a live block belonging to another tick and false of a note
+	 * block. A neighbour's flank is a note block and passes; a stacked centre is live and does not.
+	 * The lowered pair only -- the opening's own flanks stand at bus height where a plain bus's notes
+	 * have always stood, and nothing there is new.</p>
+	 */
+	static boolean SUNKEN_ASKS_PARITY = true;
+
+	/**
+	 * Whether a sunken bus moves a note off a contested lowered slot instead of moving itself.
+	 *
+	 * <p>ekran's, and it is the same third option {@link #relocationRoom} gives a stacked chord: move
+	 * the contested note, not the module. Free exactly when the tail is odd, because then the bus
+	 * already ends on a half-empty cell and the note pushed off lands in it -- same cells, same
+	 * columns, same {@link #sunkenDustCells}. With an even tail, or with both slots contested, the
+	 * note would cost a cell nobody measured, and the module takes a parity pad instead.</p>
+	 */
+	static boolean SUNKEN_RELOCATES_A_LOWERED_NOTE = true;
 
 	/**
 	 * The smallest chord a busy pad will spend a column on.
