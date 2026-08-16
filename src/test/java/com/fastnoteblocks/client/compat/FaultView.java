@@ -631,6 +631,11 @@ final class FaultView {
 		return positionAfter(text, marker, 0);
 	}
 
+	/** A coordinate with the sentence's punctuation taken off it. */
+	private static int number(String word) {
+		return Integer.parseInt(word.replaceAll("[^-0-9].*$", ""));
+	}
+
 	/**
 	 * The three numbers following a marker, or null.
 	 *
@@ -648,8 +653,12 @@ final class FaultView {
 			return null;
 		}
 		try {
-			return new BlockPos(Integer.parseInt(word[0]), Integer.parseInt(word[1]),
-				Integer.parseInt(word[2]));
+			// Trimmed of whatever punctuation the sentence carries on with. A position at the end of a
+			// clause reads "at 39 72 3, too late for..." and the comma made the parse fail, which this
+			// returns as null -- and null here means "no aggressor", so a wrong note with a perfectly
+			// well named other end was reported as a note with nothing at all to set it off. One of the
+			// two wrong notes left in the library was mis-described that way, by me, in this session.
+			return new BlockPos(number(word[0]), number(word[1]), number(word[2]));
 		} catch (NumberFormatException notAPosition) {
 			return null;
 		}
