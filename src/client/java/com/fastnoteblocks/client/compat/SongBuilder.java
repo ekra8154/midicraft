@@ -6324,6 +6324,39 @@ public final class SongBuilder {
 	/** Whether a head may hold four, five or six notes rather than only the most it could fill. */
 	static boolean VARIABLE_HEAD_NOTES = true;
 
+	/**
+	 * Whether a harp is preferred over the other sideways conductors when a head picks its notes.
+	 *
+	 * <p>{@link #stackedBusSplit} takes the first {@code headSize} notes of a chord sorted so that
+	 * "the slots that can go unfilled" come first, and it ranked harps and the other conductors
+	 * together. They are not equally scarce. A harp can be a relay <em>or</em> the centre;
+	 * {@link #ultraSlots} takes the centre from an unused harp and from nothing else, while a relay
+	 * will accept any block that passes power sideways. So a chord whose conductors happen to be
+	 * listed first crowds its own harps out of the window -- and the window is exactly the head, so
+	 * the smaller the head the likelier it is.</p>
+	 *
+	 * <p>ekran's breach at Guardian 28 wide over seven floors, and the chord says it plainly: 24
+	 * notes opening {@code hay, hay, hay, hay, wool, air, air, clay, ...}, where hay, wool and clay
+	 * all conduct. With both back slots the head takes seven, both harps fall inside, and it builds
+	 * {@code head7+tail17}. With the column behind held by a stacked centre the head takes five --
+	 * four hay blocks and a wool, no harp, no centre, {@code refused=NoHeadFromTheFront}. The chord
+	 * was then laid whole: a bus of twenty-four is twelve cells and a descent is four, which is
+	 * sixteen against a fifteen, so the lane could not cut and could not turn.</p>
+	 *
+	 * <p><b>What it costs.</b> Over the library at eighteen widths: Guardian 23 breach blocks to 7 --
+	 * 28×7, 12×5 and 16×5 all go clean and 20×5 goes 5 to 7 -- and that sixteen is the whole of the
+	 * library's move, because the five synthetic limit songs come out identical to the digit. Against
+	 * it, two more wrong notes (9 to 11, the same stacked-bus-against-a-cut-head family) and 384
+	 * columns of depth, 0.27%.</p>
+	 *
+	 * <p><b>A third attempt rather than a reorder, and the two measure the same.</b> Reordering the
+	 * single {@code preferred} list gives byte-identical numbers, which says the difference comes
+	 * entirely from chords that were finding no head at all -- the straight order is tried first and
+	 * carries nearly everything, so {@code preferred} is already only reached by chords in trouble.
+	 * Kept as a third pass because it makes that property structural instead of measured.</p>
+	 */
+	static boolean HARPS_OUTRANK_THE_OTHER_CONDUCTORS = true;
+
 	/** Whether a headed cut on the wrong parity moves a column instead of giving up the head. */
 	static boolean SPLIT_NUDGES = true;
 
@@ -10842,6 +10875,21 @@ public final class SongBuilder {
 		preferred.sort(Comparator.comparingInt(note ->
 			FALLING_INSTRUMENT_BLOCKS.contains(note.instrumentBlock()) ? 1
 				: isHarpNote(note) || conductsSideways(note) ? 0 : 2));
+		// And the same again with harps ahead of the other conductors, because the two are not
+		// equally scarce: a harp can be a relay or the centre, while a conductor that is not a harp
+		// can only ever be a relay -- {@link #ultraSlots} takes the centre from an unused harp and
+		// from nothing else. Ranked together, a chord whose conductors happen to be listed first
+		// crowds its own harps out of the window, and the window is exactly the head.
+		//
+		// Tried third and not instead, which is the whole of why it is safe. Every chord that finds
+		// a head today finds the same head, so no shape the walk already builds moves; the only
+		// chords this reaches are the ones that were refused outright.
+		// See {@link #HARPS_OUTRANK_THE_OTHER_CONDUCTORS}.
+		List<EventNote> harpsFirst = new ArrayList<>(chord);
+		harpsFirst.sort(Comparator.comparingInt(note ->
+			isHarpNote(note) ? 0
+				: FALLING_INSTRUMENT_BLOCKS.contains(note.instrumentBlock()) ? 2
+					: conductsSideways(note) ? 1 : 3));
 		// Down from the biggest head the chord could fill rather than only at it: a chord that cannot
 		// fill the centre has no reason to give up the hangers along with it, and one that cannot
 		// reach back has no reason to give up the front.
@@ -10854,6 +10902,11 @@ public final class SongBuilder {
 			StackedBusSplit sorted = splitAt(preferred, headSize, backFlanks);
 			if (sorted != null) {
 				return sorted;
+			}
+			StackedBusSplit harped = HARPS_OUTRANK_THE_OTHER_CONDUCTORS
+				? splitAt(harpsFirst, headSize, backFlanks) : null;
+			if (harped != null) {
+				return harped;
 			}
 		}
 		return null;
