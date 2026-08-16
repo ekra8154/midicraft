@@ -5565,8 +5565,7 @@ public final class ComposerScreen extends Screen {
 			// they are told first, because a breached footprint overwrites whatever was standing in
 			// the ground the paste promised to stay out of.
 			if (DenseBuildScreen.needsAsking(plan)) {
-				minecraft.gui.setScreen(new DenseBuildScreen(this, plan.wrongNotes(),
-					plan.breaches().size(), plan.worstBreach(), () -> {
+				minecraft.gui.setScreen(new DenseBuildScreen(this, plan, () -> {
 						CommandPasteSender.start(plan.commands(), plan.report());
 						minecraft.gui.setScreen(null);
 					}));

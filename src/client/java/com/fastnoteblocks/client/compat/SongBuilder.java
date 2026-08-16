@@ -426,16 +426,41 @@ public final class SongBuilder {
 			world.keySet().stream().mapToInt(BlockPos::getX).max().orElse(0),
 			world.keySet().stream().mapToInt(BlockPos::getY).max().orElse(0),
 			world.keySet().stream().mapToInt(BlockPos::getZ).max().orElse(0));
+		// Asked of the blocks before the reader is asked anything, because this is the one fault the
+		// reader cannot see. A repeater reads the single cell behind it, so one with air there can
+		// never fire and everything downstream of it is silent -- but startingPoints treats exactly
+		// that shape as another way into the machine, starts a fresh performance at it, and counts
+		// all of it as reached. Over the library that hid 182 severed lanes, 178 of them on one song
+		// that every number called clean. One starved repeater is expected: it is where the player
+		// throws the lever.
+		List<BlockPos> starved = new ArrayList<>();
+		for (Map.Entry<BlockPos, net.minecraft.world.level.block.state.BlockState> cell
+				: world.entrySet()) {
+			if (cell.getValue().is(net.minecraft.world.level.block.Blocks.REPEATER)
+					&& !world.containsKey(cell.getKey().relative(cell.getValue()
+						.getValue(net.minecraft.world.level.block.RepeaterBlock.FACING)))) {
+				starved.add(cell.getKey());
+			}
+		}
+		List<String> severed = new ArrayList<>();
+		if (starved.size() > 1) {
+			starved.sort(java.util.Comparator.<BlockPos>comparingInt(BlockPos::getX)
+				.thenComparingInt(BlockPos::getZ).thenComparingInt(BlockPos::getY));
+			BlockPos cut = starved.get(1);
+			severed.add((starved.size() - 1) + " repeaters have nothing behind them to read, so the "
+				+ "lane is cut there and everything after it is silent. The first is at "
+				+ cut.getX() + " " + cut.getY() + " " + cut.getZ());
+		}
 		NoteMachineReader.Reading reading;
 		try {
 			reading = NoteMachineReader.read("unreached", low, high,
 				position -> world.getOrDefault(position,
 					net.minecraft.world.level.block.Blocks.AIR.defaultBlockState()));
 		} catch (RuntimeException unreadable) {
-			return plan;
+			return severed.isEmpty() ? plan : withFaults(plan, severed);
 		}
 		if (reading.unreachedNotes() == 0) {
-			return plan;
+			return severed.isEmpty() ? plan : withFaults(plan, severed);
 		}
 		// The disagreement, and only the disagreement. A cell counts as dead wire when the walk meant
 		// it to carry the signal and the reader never got to it -- so the instrument blocks, the
@@ -463,6 +488,7 @@ public final class SongBuilder {
 		}
 		BlockPos first = reading.unreachedAt().getFirst();
 		List<String> faults = new ArrayList<>(plan.faults());
+		faults.addAll(severed);
 		faults.add(reading.unreachedNotes() + " note blocks would never be triggered -- the signal "
 			+ "does not reach them, so that much of the song is silent. The first is at "
 			+ first.getX() + " " + first.getY() + " " + first.getZ()
@@ -471,6 +497,16 @@ public final class SongBuilder {
 					+ "nether brick"
 				: ""));
 		return new PastePlan(List.copyOf(commands), plan.width(), plan.depth(), plan.height(),
+			plan.spanX(), plan.spanZ(), plan.mode(), List.copyOf(faults), plan.turns(), plan.moved(),
+			plan.breaches(), plan.recesses(), plan.padding(), plan.nearWall(), plan.farWall(),
+			plan.collisions(), plan.poweredAt(), plan.laidBy(), plan.noteTicks());
+	}
+
+	/** The same plan with more wrong with it than it knew. */
+	private static PastePlan withFaults(PastePlan plan, List<String> extra) {
+		List<String> faults = new ArrayList<>(plan.faults());
+		faults.addAll(extra);
+		return new PastePlan(plan.commands(), plan.width(), plan.depth(), plan.height(),
 			plan.spanX(), plan.spanZ(), plan.mode(), List.copyOf(faults), plan.turns(), plan.moved(),
 			plan.breaches(), plan.recesses(), plan.padding(), plan.nearWall(), plan.farWall(),
 			plan.collisions(), plan.poweredAt(), plan.laidBy(), plan.noteTicks());
@@ -12263,6 +12299,57 @@ public final class SongBuilder {
 		 */
 		int wrongNotes() {
 			return (int)faults.stream().filter(fault -> fault.startsWith("the note")).count();
+		}
+
+		/**
+		 * Notes the layout had nowhere to hang, which the build simply does not contain.
+		 *
+		 * <p>Worse than a doubled note and worse than a breach, and until now the only fault of the
+		 * four that nothing asked the plan for -- so the paste went up without mentioning it. A
+		 * doubled note adds a sound; this one takes a sound away and there is no undoing it by
+		 * standing somewhere else.</p>
+		 */
+		int missingNotes() {
+			int lost = 0;
+			for (String fault : faults) {
+				if (fault.contains("had nowhere to hang")) {
+					lost += leadingCount(fault);
+				}
+			}
+			return lost;
+		}
+
+		/**
+		 * Notes the signal never reaches, which is the whole song from the break onward.
+		 *
+		 * <p>The worst of the four by a distance: a break silences everything downstream of it, so
+		 * this is not a count of faults but a count of what is left of the song. Read off the fault
+		 * {@link #withUnreachedMarked} adds, which is only added when there is one.</p>
+		 */
+		int deadNotes() {
+			for (String fault : faults) {
+				if (fault.contains("would never be triggered")) {
+					return leadingCount(fault);
+				}
+			}
+			return 0;
+		}
+
+		/**
+		 * The number a fault opens with, or nought.
+		 *
+		 * <p>Prose, parsed, which is the same shape {@link #wrongNotes} has always had. It is worth
+		 * naming as a weakness rather than leaving it to be discovered: the wording of these faults
+		 * has moved twice, and each time it moved the count would have gone quietly to nought rather
+		 * than failing. Anything that starts depending on these in the walk should carry the number
+		 * instead of reading it back out of the sentence.
+		 */
+		private static int leadingCount(String fault) {
+			try {
+				return Integer.parseInt(fault.split(" ")[0]);
+			} catch (NumberFormatException notACount) {
+				return 0;
+			}
 		}
 
 		/**

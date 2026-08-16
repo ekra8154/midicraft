@@ -27,21 +27,33 @@ final class DenseBuildScreen extends Screen {
 	private final int wrongNotes;
 	private final int breaches;
 	private final int worstBreach;
+	private final int missingNotes;
+	private final int deadNotes;
 	private final Runnable proceed;
 
-	DenseBuildScreen(Screen parent, int wrongNotes, int breaches, int worstBreach,
-			Runnable proceed) {
+	DenseBuildScreen(Screen parent, SongBuilder.PastePlan plan, Runnable proceed) {
 		super(Component.literal("Dense composition"));
 		this.parent = parent;
-		this.wrongNotes = wrongNotes;
-		this.breaches = breaches;
-		this.worstBreach = worstBreach;
+		this.wrongNotes = plan.wrongNotes();
+		this.breaches = plan.breaches().size();
+		this.worstBreach = plan.worstBreach();
+		this.missingNotes = plan.missingNotes();
+		this.deadNotes = plan.deadNotes();
 		this.proceed = proceed;
 	}
 
-	/** Whether a plan is clean enough to paste without asking. */
+	/**
+	 * Whether a plan is clean enough to paste without asking.
+	 *
+	 * <p>All four faults, where it used to be two. A doubled note and a breach were asked about; a
+	 * note the build does not contain, and a song silenced from a break onward, were not -- so the
+	 * two that actually cost the player their music were the two that went up without a word. The
+	 * plan has always known both. Nothing here is to do with the debug paste, which only decides what
+	 * the blocks are coloured.</p>
+	 */
 	static boolean needsAsking(SongBuilder.PastePlan plan) {
-		return plan.wrongNotes() > 0 || !plan.breaches().isEmpty();
+		return plan.wrongNotes() > 0 || !plan.breaches().isEmpty()
+			|| plan.missingNotes() > 0 || plan.deadNotes() > 0;
 	}
 
 	/**
@@ -53,6 +65,18 @@ final class DenseBuildScreen extends Screen {
 	private List<String> lines() {
 		List<String> lines = new ArrayList<>();
 		lines.add("This composition is dense, and at these settings:");
+		// Worst first, and that is a different order from the one the footprint used to have to
+		// itself. These two take music away -- a break silences everything after it, and a note with
+		// nowhere to go is simply absent -- where a breach takes ground and a doubled note adds a
+		// sound. Whichever of them applies is the one that decides the answer.
+		if (deadNotes > 0) {
+			lines.add("- " + count(deadNotes, "note") + " would never play at all: the wire dies");
+			lines.add("  part way, and everything after the break is silent.");
+		}
+		if (missingNotes > 0) {
+			lines.add("- " + count(missingNotes, "note") + " had nowhere to hang and would be left");
+			lines.add("  out of the build entirely.");
+		}
 		if (breaches > 0) {
 			lines.add("- it would breach its footprint " + count(breaches, "time")
 				+ ", by at most " + count(worstBreach, "block") + ".");
