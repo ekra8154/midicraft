@@ -452,11 +452,24 @@ final class FaultView {
 	static BlockPos[] box(Build build, BlockPos one, BlockPos two, int eitherX, int eitherZ,
 			int below, int above) {
 		BlockPos other = two == null ? one : two;
-		int floor = build.floorOf(Math.min(one.getY(), other.getY()));
+		// Both floors, not the lower one twice.
+		//
+		// This took the floor of whichever end was lower and drew {@code below..above} around that
+		// alone, so a fault whose two ends sit on different floors had one of them off the top of the
+		// picture -- and that is the case worth drawing, because a break that crosses a staircase is
+		// the one whose levels cannot be guessed from the text. ekran was handed a window of
+		// {@code y=65..70} for a break at {@code 5 73 7}: every block in the diagram was innocent and
+		// the guilty one was three levels above the frame.
+		//
+		// Same mistake as drawing the dead-wire window on the notes' own z, which cost the first fault
+		// this class was ever pointed at: a window that excludes the fault is worse than no window,
+		// because it looks like an answer.
+		int under = build.floorOf(Math.min(one.getY(), other.getY()));
+		int over = build.floorOf(Math.max(one.getY(), other.getY()));
 		return new BlockPos[] {
-			new BlockPos(Math.min(one.getX(), other.getX()) - eitherX, floor - below,
+			new BlockPos(Math.min(one.getX(), other.getX()) - eitherX, under - below,
 				Math.min(one.getZ(), other.getZ()) - eitherZ),
-			new BlockPos(Math.max(one.getX(), other.getX()) + eitherX, floor + above,
+			new BlockPos(Math.max(one.getX(), other.getX()) + eitherX, over + above,
 				Math.max(one.getZ(), other.getZ()) + eitherZ)};
 	}
 
