@@ -2603,12 +2603,6 @@ public final class SongBuilder {
 				&& above >= 0 && above < floors
 				&& lane.pos().relative(lane.travel().getOpposite()).above(2)
 					.equals(placements.climbFedFromCentre());
-			// Claimed against offered, because a rule that lays a block and never uses it reads exactly
-			// like a rule that works.
-			if (CLIMB_OFF_A_STACKED_CENTRE && climb > 0 && above >= 0 && above < floors
-					&& placements.climbFedFromCentre() != null) {
-				placements.padded(centreFeedsTheClimb ? "climbCentreClaimed" : "climbCentreOutOfReach");
-			}
 			// Such a climb joins two rungs in exactly as one off a bus does, so it is off-bus for every
 			// question the turn asks -- and it costs one cell more, because the dust on the centre is part
 			// of the run where a bus's own last dust is not. ekran: "the ascent costs 4 and not 3, but it
@@ -2857,6 +2851,21 @@ public final class SongBuilder {
 					climb > 0, above >= 0 && above < floors,
 					endsOnBus(lastStyle, lastBusCells))
 				: Pad.none(tipSignal);
+			// Claimed against offered, because a rule that lays a block and never uses it reads exactly
+			// like a rule that works.
+			if (CLIMB_OFF_A_STACKED_CENTRE && climb > 0 && above >= 0 && above < floors
+					&& placements.climbFedFromCentre() != null) {
+				placements.padded(centreFeedsTheClimb ? "climbCentreClaimed" : "climbCentreOutOfReach");
+				if (centreFeedsTheClimb) {
+					// What stands between the module and the staircase, which is the whole of why the
+					// discount never applies: turnPrice and addGlassClimb both want an empty pad, and a
+					// raised one only counts if every cell of it is plain dust.
+					placements.padded("climbCentrePad" + Math.min(pad.cells().size(), 6));
+					if (!pad.cells().isEmpty() && pad.cells().stream().allMatch(cell -> cell == 0)) {
+						placements.padded("climbCentrePadAllDust");
+					}
+				}
+			}
 			// A split comes before any of that. The event that will not fit is cut in two: as much of
 			// it as reaches the wall, then the staircase, then the rest -- one repeater, one tick, one
 			// chord, because dust takes no time however far it runs or however many levels it climbs.
