@@ -8591,7 +8591,11 @@ public final class SongBuilder {
 		key.put("minecraft:spruce_planks", "parity padding -- a module moved to land on its beat");
 		key.put("minecraft:dark_oak_planks",
 			"busy padding -- a column spent to free the slots behind, so a chord can be cut");
-		key.put("minecraft:oak_planks", "corner padding -- the columns a bend costs");
+		// Birch and not oak, which was the first choice and is unusable: oak planks is the instrument
+		// block of a BASS note, so every bass in the build would read as corner padding and every
+		// corner as a bass. Caught in a render where a note's own instrument sat in the legend claiming
+		// to be a pad. Spruce, dark oak, bamboo and birch are the four planks no instrument uses.
+		key.put("minecraft:birch_planks", "corner padding -- the columns a bend costs");
 		key.put("minecraft:bamboo_planks",
 			"padding of any other kind, which v2 is not supposed to need");
 		key.put("minecraft:tuff", "a standard bus");
@@ -8637,7 +8641,7 @@ public final class SongBuilder {
 			return "minecraft:dark_oak_planks";
 		}
 		if (laidBy.startsWith("corner")) {
-			return "minecraft:oak_planks";
+			return "minecraft:birch_planks";
 		}
 		// Everything else that lays a cell of pad. Named one by one rather than by a prefix, so a pad
 		// added later shows up as an unnamed cell somebody has to come and classify rather than
