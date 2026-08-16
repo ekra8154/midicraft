@@ -205,11 +205,18 @@ class FaultCensusProbe {
 		faulty.sort((a, b) -> Long.compare(b.weight(), a.weight()));
 		System.out.println("   " + (rows.size() - faulty.size()) + " clean, " + faulty.size()
 			+ " with something wrong, " + millis / 1000 + "s");
-		if (faulty.isEmpty()) {
+		// A clean run still has something to say.
+		//
+		// This used to return here, which took the census keys and the totals with it -- so the one
+		// moment you most want to ask "did that rule fire, and how often" is the moment the probe
+		// stops talking. Every question below the faults is about the build rather than about what is
+		// wrong with it, and a build with nothing wrong is still a build.
+		boolean anything = !faulty.isEmpty();
+		if (!anything) {
 			System.out.println("   nothing to draw: no dead wire, no missing note, no wrong note, "
 				+ "no breach anywhere in the library");
-			return;
 		}
+		if (anything) {
 		System.out.println();
 		System.out.println("---- worst first (fault.song / fault.width / fault.floors) ----");
 		for (Row row : faulty) {
@@ -242,6 +249,7 @@ class FaultCensusProbe {
 				"   %-34s dead %6d  missing %4d  wrong %3d  breach %4d  refused %d",
 				entry.getKey(), entry.getValue()[0], entry.getValue()[1], entry.getValue()[2],
 				entry.getValue()[3], entry.getValue()[4])));
+		}
 		// The shapes that meet at each break, which is what says whether twenty dead builds are twenty
 		// bugs or one. Nothing else here can tell those apart, and a session that guesses wrong spends
 		// itself on the rarest of them.

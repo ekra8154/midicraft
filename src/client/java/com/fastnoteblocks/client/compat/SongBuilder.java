@@ -9361,7 +9361,23 @@ public final class SongBuilder {
 		int busColumns = 1 + (event.notes().size() + 1) / 2;
 		boolean busIsLonger = KEEPS_HEAD_WHEN_THE_BUS_IS_LONGER && style.busHeaded()
 			&& busColumns > stackedRoom - 1;
-		if (style.stacked() && roomToWall < stackedRoom && !busIsLonger) {
+		// And what this would actually drop the chord to, which is no longer always a plain bus.
+		//
+		// The paragraph above says the rule: a fallback has to be shorter than the shape it replaces,
+		// or it is not a fallback. That was written against the plain bus and the sunken bus breaks it.
+		// A stacked module carries up to seven notes in two columns; a sunken bus of the same chord
+		// wants two columns plus a dust cell for every pair past the first three. It is never shorter,
+		// and at six or seven notes it is a column longer.
+		//
+		// ekran, looking at a chord of four -- three harps and a bass -- laid sunken where a stacked
+		// module would have fitted: "it should always prefer a single normal stacked chord over a
+		// sunken bus". {@link #chooseStyle} does prefer it, and says STACKED_FRONT for that chord; this
+		// line is what took it away, on an arithmetic about a shape it was no longer going to get.
+		boolean wouldGoSunken = SUNKEN_BUSES && !inTurn && sunkenFits(event.notes().size())
+			&& hasAHarp(event.notes());
+		boolean sunkenIsNoShorter = ROOM_TEST_KNOWS_THE_SUNKEN_FALLBACK && wouldGoSunken
+			&& 2 + sunkenDustCells(event.notes().size()) >= stackedRoom;
+		if (style.stacked() && roomToWall < stackedRoom && !busIsLonger && !sunkenIsNoShorter) {
 			gaveUp = "roomAhead" + roomToWall + "<" + stackedRoom;
 			placements.padded("planBusForRoom");
 			style = ChordStyle.BUS;
@@ -12028,6 +12044,21 @@ public final class SongBuilder {
 	 * the library.</p>
 	 */
 	static boolean SUNKEN_BUSES = true;
+
+	/**
+	 * Whether the room test knows a dropped stacked chord may become a sunken bus rather than a plain
+	 * one.
+	 *
+	 * <p>{@link #shapeFor} gives a stacked shape up when the wall is closer than the shape is long,
+	 * on the understanding -- written out at that line -- that the bus it falls to is shorter. With
+	 * {@link #SUNKEN_BUSES} on it does not fall to a bus. A stacked module carries up to seven notes
+	 * in two columns and a sunken bus of the same chord is never shorter than that, so the drop costs
+	 * the denser shape and buys nothing.</p>
+	 *
+	 * <p>ekran, on a chord of four laid sunken where a stacked module fitted: <em>"it should always
+	 * prefer a single normal stacked chord over a sunken bus"</em>.</p>
+	 */
+	static boolean ROOM_TEST_KNOWS_THE_SUNKEN_FALLBACK = true;
 
 	/**
 	 * The smallest chord laid as a {@link ChordStyle#SUNKEN_BUS}.
