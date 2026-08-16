@@ -4590,6 +4590,31 @@ public final class SongBuilder {
 	 * spoken for or because parity wanted it. {@link #addStackedShape} lays exactly one either way,
 	 * and {@code nudge} is already true whenever {@code behindShift} is.</p>
 	 */
+	/**
+	 * How many cells of dust a sunken bus spends on a chord of this size.
+	 *
+	 * <p>The opening cell spends none -- it is a note block the repeater drives directly -- and holds
+	 * three. Every cell after it is dust and holds two, the first of them at lane height and the rest
+	 * an ordinary bus. So {@code notes = 3 + 2 * cells}, and the cap is {@link #DUST_RANGE} cells,
+	 * which is 33 notes against a plain bus's 30.</p>
+	 *
+	 * <p>One cell at least, even for a chord of four: the module has to hand a live cell to whatever
+	 * stands after it, and the opening note block is spent on being read by the dust beside it.</p>
+	 *
+	 * <p>The single place this sum is made. {@link #landingFrom} measures the chord with it and
+	 * {@link #addSunkenBusModule} builds with it, which is the one arrangement those two cannot
+	 * disagree about -- and a lane measured for one shape and built as another is how every breach in
+	 * this file's history started.</p>
+	 */
+	private static int sunkenDustCells(int notes) {
+		return Math.max(1, (notes - 2) / 2);
+	}
+
+	/** Whether a chord of this size fits one sunken bus at all. */
+	private static boolean sunkenFits(int notes) {
+		return sunkenDustCells(notes) <= DUST_RANGE;
+	}
+
 	private static Landing landingFrom(Shape shape, int startX, int stepX, EventGroup event,
 			int wait) {
 		int delayColumns = Math.max(0, (wait - 1) / 4);
@@ -4605,12 +4630,18 @@ public final class SongBuilder {
 				? shape.moved().split() : splitFor(style, event.notes());
 			tailCells = split == null ? 0 : stackedBusTailColumns(split.tail());
 		}
+		// A sunken bus is the repeater, the opening note block, and then its dust cells -- so one
+		// column more than a plain bus of the same cell count, and it needs far fewer cells.
+		int sunken = sunkenDustCells(event.notes().size());
 		int length = style.busHeaded()
 			? delayColumns + shift + STACKED_CELLS + STACKED_BUS_TRANSITION + tailCells
 			: style.stacked()
 				? delayColumns + shift + 2
-				: delayColumns + (style == ChordStyle.BUS ? 1 + cells : 2);
+				: style == ChordStyle.SUNKEN_BUS
+					? delayColumns + 2 + sunken
+					: delayColumns + (style == ChordStyle.BUS ? 1 + cells : 2);
 		int tip = style == ChordStyle.BUS ? DUST_RANGE - cells
+			: style == ChordStyle.SUNKEN_BUS ? DUST_RANGE - sunken
 			: style.busHeaded()
 				? DUST_RANGE - STACKED_BUS_TRANSITION - tailCells
 				: DUST_RANGE;
@@ -7696,7 +7727,11 @@ public final class SongBuilder {
 	 */
 	private static Body addSpatialEventModule(PlacementPlan placements, Lane lane,
 			int triggerDelay, List<EventNote> chord, boolean forceBus) {
-		placements.placing("chord:" + (forceBus ? "BUS" : "SMALL") + " notes" + chord.size());
+		// Named for the shape that is about to be laid rather than the one that was asked for, so the
+		// marker and the fault census say sunken where a sunken bus went down.
+		boolean sunkenAhead = placements.sunkenOffered() && forceBus;
+		placements.placing("chord:" + (sunkenAhead ? "SUNKEN_BUS" : forceBus ? "BUS" : "SMALL")
+			+ " notes" + chord.size());
 		Body swapped = twoSwapTurn(placements, lane, triggerDelay, chord, forceBus);
 		if (swapped != null) {
 			return swapped;
@@ -8169,6 +8204,17 @@ public final class SongBuilder {
 	 */
 	private static int layBus(PlacementPlan placements, Lane anchor, List<EventNote> chord,
 			int time, Set<BlockPos> reserved) {
+		return layBus(placements, anchor, chord, time, reserved, DUST_RANGE);
+	}
+
+	/**
+	 * @param cellLimit how many cells of dust this run may spend. Fifteen for a bus that opens on its
+	 *     own repeater; one less for {@link #addSunkenBusModule}, whose lowered column has already
+	 *     spent a cell of the same run. Passed rather than assumed because it is one run of wire, and
+	 *     the far end of a run one cell too long is worth nothing.
+	 */
+	private static int layBus(PlacementPlan placements, Lane anchor, List<EventNote> chord,
+			int time, Set<BlockPos> reserved, int cellLimit) {
 		List<EventNote> ordered = busOrder(chord);
 		int placed = 0;
 		int cells = 0;
@@ -8192,7 +8238,7 @@ public final class SongBuilder {
 		//
 		// Only where the route bends. Down a straight lane the next repeater does stand on the bus's
 		// own last block, and giving up a cell there would cost a note pair for nothing.
-		int limit = DUST_RANGE;
+		int limit = cellLimit;
 		while (placed < ordered.size() && cells < limit) {
 			Lane at = anchor.ahead(cells);
 			placements.powered(at.pos(), "minecraft:stone", time);
@@ -8519,6 +8565,8 @@ public final class SongBuilder {
 		key.put("minecraft:bamboo_planks",
 			"padding of any other kind, which v2 is not supposed to need");
 		key.put("minecraft:tuff", "a standard bus");
+		key.put("minecraft:polished_tuff",
+			"a sunken bus -- a bus whose opening cell is a note block, so it carries three notes free");
 		key.put("minecraft:andesite", "a standard stacked chord");
 		key.put("minecraft:deepslate", "a stacked bus");
 		key.put("minecraft:deepslate_tiles",
@@ -8605,6 +8653,11 @@ public final class SongBuilder {
 		// bus that came out a column short.
 		if (style.contains("simpleTail")) {
 			return "minecraft:cobbled_deepslate";
+		}
+		// Polished tuff, ekran's choice, and the reason is the point of the shape: it is functionally a
+		// bus and as safe to place as one, so it wears what a bus wears with a finish on it.
+		if (style.startsWith("SUNKEN_BUS")) {
+			return "minecraft:polished_tuff";
 		}
 		if (style.startsWith("STACKED_BUS")) {
 			return "minecraft:deepslate";
@@ -8713,6 +8766,73 @@ public final class SongBuilder {
 	 */
 	private static final int FLAT_TURN_REACH = 2;
 
+	/**
+	 * ekran's sunken bus: the opening cell is a note block, and the cell after it runs a level down.
+	 *
+	 * <p>Laid exactly as ekran built it by hand. The repeater strongly powers the note block directly
+	 * in front of it, which holds a harp in the centre and a note either side; the dust in the next
+	 * column sits at the lane's own height, reads that block at a full fifteen, and steps up onto the
+	 * ordinary bus after it at fourteen. So the opening column carries three notes for no wire at
+	 * all.</p>
+	 *
+	 * <p>The two notes beside the lowered dust hang at lane level, where {@link #placeNote} lays their
+	 * instrument as a half-slab -- the same thing the rails do, and the reason nothing solid ends up
+	 * in the floor. The centre is a harp, so nothing is laid under it either.</p>
+	 *
+	 * @return the module, or null where the chord has no harp to drive the opening with.
+	 */
+	private static Body addSunkenBusModule(PlacementPlan placements, Lane lane,
+			List<EventNote> chord, int time) {
+		List<EventNote> ordered = new ArrayList<>(busOrder(chord));
+		EventNote centre = null;
+		for (EventNote note : ordered) {
+			// A harp, and one that is a note rather than an effect: the block has to be a full solid
+			// one for the repeater to drive it and for the dust beside it to read fifteen.
+			if (isHarpNote(note)) {
+				centre = note;
+				break;
+			}
+		}
+		if (centre == null) {
+			return null;
+		}
+		ordered.remove(centre);
+		Lane opening = lane.ahead(1);
+		Direction side = opening.noteSide();
+		BlockPos centreAt = opening.pos().above();
+		placeNote(placements, centreAt, centre);
+		// Said out loud, the way the small module says it: the repeater drives this block, and a note
+		// block is full and solid, so it passes that power to everything beside it -- the two flanks,
+		// and the dust in the next column.
+		placements.powered(centreAt, time);
+		int placed = 0;
+		for (Direction out : List.of(side, side.getOpposite())) {
+			if (placed < ordered.size()) {
+				placeNote(placements, centreAt.relative(out), ordered.get(placed++));
+			}
+		}
+		// The lowered cell. Stone where the lane's own floor runs and dust on top of it, which is one
+		// level below the bus -- that is the whole of "sunken", and it is what lets the dust read the
+		// note block beside it rather than having to start on top of one.
+		Lane low = lane.ahead(2);
+		placements.powered(low.pos(), "minecraft:stone", time);
+		set(placements, low.pos().above(), "minecraft:redstone_wire");
+		for (Direction out : List.of(side, side.getOpposite())) {
+			if (placed < ordered.size()) {
+				placeNote(placements, low.pos().relative(out), ordered.get(placed++), true);
+			}
+		}
+		int busCells = 0;
+		if (placed < ordered.size()) {
+			// One cell of the fifteen is already spent on the lowered column, so the bus after it may
+			// only have fourteen. Passed rather than assumed, because the run is one wire and the far
+			// end of a run that is one cell too long is worth nothing at all.
+			busCells = layBus(placements, lane.ahead(3).above(),
+				ordered.subList(placed, ordered.size()), time, Set.of(), DUST_RANGE - 1);
+		}
+		return new Body(lane.ahead(3 + busCells), 1 + busCells, true);
+	}
+
 	private static Body layEventBody(PlacementPlan placements, Lane lane,
 			List<EventNote> chord, boolean forceBus) {
 		int time = chord.get(0).time();
@@ -8749,6 +8869,17 @@ public final class SongBuilder {
 			}
 			return new Body(lane.ahead(2), 0);
 		}
+		// ekran's sunken bus, in front of the plain one it replaces. Never longer, and on an odd chord
+		// a column shorter -- see {@link ChordStyle#SUNKEN_BUS}. Refused only where the chord has no
+		// harp to drive its opening with, and then the plain bus below is what it always was.
+		if (placements.sunkenOffered()) {
+			Body sunken = addSunkenBusModule(placements, lane, chord, time);
+			if (sunken != null) {
+				placements.padded("sunkenBus");
+				return sunken;
+			}
+			placements.padded("sunkenBusHadNoHarp");
+		}
 		int cells = layBus(placements, lane.ahead(1).above(), chord, time);
 		return new Body(lane.ahead(1 + cells), cells);
 	}
@@ -8762,7 +8893,15 @@ public final class SongBuilder {
 	 * and the wire it spends is charged against the fifteen a repeater hands out. Charging the
 	 * nominal length instead is a run that overshoots its next repeater and nothing notices.</p>
 	 */
-	private record Body(Lane lane, int busCells) {
+	/**
+	 * @param sunken whether this came out as {@link ChordStyle#SUNKEN_BUS}. Carried rather than
+	 *     re-derived: the style the walk records has to be the style that was actually laid, or the
+	 *     chord after it is measured against a module that is not there.
+	 */
+	private record Body(Lane lane, int busCells, boolean sunken) {
+		Body(Lane lane, int busCells) {
+			this(lane, busCells, false);
+		}
 	}
 
 	/**
@@ -9130,7 +9269,39 @@ public final class SongBuilder {
 			style = ChordStyle.BUS;
 			nudge = false;
 		}
+		// And last of all, because it is the one substitution nothing else has an opinion about: a
+		// plain bus becomes a sunken one wherever the chord has a harp to open with. Said here so that
+		// {@link #landingFrom} measures the shape {@link #layEventBody} is going to build -- the two
+		// read the same style and the same {@link #sunkenDustCells}, which is the only arrangement
+		// that cannot drift. Every rule above has already run, so nothing is overridden by it: a shape
+		// that is still BUS at this line is a shape everything else has finished with.
+		//
+		// Never in a turn, which is ekran's own caveat and the one thing this shape asks of its
+		// surroundings. Its lowered column hangs two notes at the lane's own level, and the lane's own
+		// level either side of the centre line is where a flat turn runs -- so a module built there has
+		// put note blocks in ground the route comes back for. Refused rather than trimmed, because the
+		// length has to be the length that was measured.
+		boolean sunken = SUNKEN_BUSES && style == ChordStyle.BUS && !inTurn
+			&& sunkenFits(event.notes().size()) && hasAHarp(event.notes());
+		// Handed to the builder rather than re-derived there. {@link #layEventBody} is four calls down
+		// and can see none of this, and a builder that decides for itself is the second place deciding
+		// one thing -- which is the bug this file keeps producing. Set every event, and false is what
+		// {@link #walkWall} leaves it at, so the older walk never lays one.
+		placements.sunkenOffered(sunken);
+		if (sunken) {
+			style = ChordStyle.SUNKEN_BUS;
+		}
 		return new Shape(style, behindShift, nudge, moved, gaveUp);
+	}
+
+	/** Whether this chord has a harp to drive a {@link ChordStyle#SUNKEN_BUS} opening with. */
+	private static boolean hasAHarp(List<EventNote> chord) {
+		for (EventNote note : chord) {
+			if (isHarpNote(note)) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	private static Placed addChordModule(PlacementPlan placements, Lane lane, int triggerDelay,
@@ -9270,7 +9441,8 @@ public final class SongBuilder {
 			EventGroup event, ChordStyle style, boolean forceBus, Layout layout) {
 		if (!layout.v2() || !BUS_MOVES_OFF_A_COLLISION) {
 			Body body = addSpatialEventModule(placements, lane, triggerDelay, event.notes(), forceBus);
-			return new Placed(body.lane(), style, body.busCells(), false);
+			return new Placed(body.lane(), body.sunken() ? ChordStyle.SUNKEN_BUS : style,
+				body.busCells(), false);
 		}
 		for (int shifted = 0; ; shifted++) {
 			placements.beginTrial();
@@ -9292,7 +9464,11 @@ public final class SongBuilder {
 				if (shifted > 0) {
 					placements.padded("planBusMoved" + shifted);
 				}
-				return new Placed(body.lane(), style, body.busCells(), shifted > 0);
+				// The style that was laid, not the one that was asked for. layEventBody prefers the
+				// sunken shape wherever the chord has a harp to open with, and a walk that records BUS for
+				// a module built sunken measures the next chord against a module that is not there.
+				return new Placed(body.lane(), body.sunken() ? ChordStyle.SUNKEN_BUS : style,
+					body.busCells(), shifted > 0);
 			} catch (IllegalArgumentException collided) {
 				placements.rollbackTrial();
 				if (TRACE_BUS_MOVE) {
@@ -11704,6 +11880,19 @@ public final class SongBuilder {
 	static boolean BUSY_PAD_FREES_THE_BACK_FLANKS = true;
 
 	/**
+	 * ekran's sunken bus, in place of the plain one wherever a chord has a harp to open with.
+	 *
+	 * <p>See {@link ChordStyle#SUNKEN_BUS} for what it is and why. It is never longer than the bus it
+	 * replaces, a column shorter on every odd chord, reaches 33 notes where a bus reaches 30, and
+	 * leaves more wire behind it -- a chord of seven spends two dust cells against a bus's four.</p>
+	 *
+	 * <p>And it has no parity, which is the larger half: no centre cross and no back flanks, so it
+	 * contests nothing and nothing contests it. ekran expects it to replace nearly every plain bus in
+	 * the library.</p>
+	 */
+	static boolean SUNKEN_BUSES = true;
+
+	/**
 	 * The smallest chord a busy pad will spend a column on.
 	 *
 	 * <p>Twenty-five, and it is ekran's line: "it's not worth it unless the chord truly is cutting a
@@ -12589,7 +12778,35 @@ public final class SongBuilder {
 		 * twelve cells, which wants sixteen blocks of wire to cut across a staircase, and eleven, which
 		 * wants fifteen and has them.</p>
 		 */
-		STACKED_BUS_HALF;
+		STACKED_BUS_HALF,
+
+		/**
+		 * A bus whose opening cell carries the signal through a note block instead of stone and dust.
+		 *
+		 * <p>ekran's, and the name is theirs. A repeater strongly powers the block in front of it, and
+		 * a note block is a full solid block -- so if that block is a note block rather than the bus's
+		 * first stone, it holds three notes (a centre and two flanks) and spends <b>no dust at all</b>,
+		 * and the cell after it still starts at fifteen. The cell after is a bus cell laid a level
+		 * down, at the lane's own height, so its dust sits where the bus's stone would have and its
+		 * two notes hang at lane level on half-slab instruments. Then the bus runs on as normal, a
+		 * level up, from fourteen.</p>
+		 *
+		 * <p>So a single repeater carries <b>three notes plus two a dust cell</b> against a plain bus's
+		 * two a dust cell: <b>33 notes</b> where a bus reaches 30, one column shorter on every odd
+		 * chord, and two more blocks of wire left over on a chord of seven. It is never longer than the
+		 * bus it replaces.</p>
+		 *
+		 * <p><b>And it has no parity.</b> There is no centre cross and there are no back flanks, so
+		 * nothing behind it is contested and it contests nothing -- for itself or for the lane
+		 * alongside. That is the larger half of why ekran wanted it: a chord of twenty-five can be cut
+		 * wherever it stands, as a bus, with no parity question asked either way.</p>
+		 *
+		 * <p>The centre note must be a <b>harp</b>. It is the block the repeater drives and the only
+		 * thing carrying the signal onward, and a harp is the one instrument whose block is air -- so
+		 * nothing is laid in the lane's own centre line at floor level. ekran's rule, off their
+		 * paste.</p>
+		 */
+		SUNKEN_BUS;
 
 		boolean stacked() {
 			return this == STACKED_FRONT || this == STACKED_FULL || busHeaded();
@@ -12597,7 +12814,7 @@ public final class SongBuilder {
 
 		/** Whether the shape ends in a run of bus, and so spends a cell of wire a note pair. */
 		boolean buses() {
-			return this == BUS || busHeaded();
+			return this == BUS || this == SUNKEN_BUS || busHeaded();
 		}
 
 		/** Whether the shape needs the pair of low slots behind it free. */
@@ -13515,6 +13732,25 @@ public final class SongBuilder {
 		 * staircase instead of in the next column.</p>
 		 */
 		private boolean turnAhead;
+
+		/**
+		 * Whether {@link #shapeFor} settled on a {@link ChordStyle#SUNKEN_BUS} for the chord about to
+		 * be built.
+		 *
+		 * <p>Handed down the same way {@link #turnAhead} is, and for the same reason: the builder is
+		 * four calls below the decision and can see neither the turn nor the chord's measured length.
+		 * One decider, one answer -- {@link #landingFrom} measures what this says and the builder lays
+		 * what this says.</p>
+		 */
+		private boolean sunkenOffered;
+
+		void sunkenOffered(boolean offered) {
+			sunkenOffered = offered;
+		}
+
+		boolean sunkenOffered() {
+			return sunkenOffered;
+		}
 
 		void turnAhead(boolean ahead) {
 			turnAhead = ahead;
