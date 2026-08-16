@@ -2148,6 +2148,9 @@ public final class SongBuilder {
 				}
 				railBlank = NO_BLANK;
 				int nextDelay;
+				// Nought except where the run ends on a floor column, which is the one place it has to
+				// leave something behind for the lane to read. See below.
+				int handUp = 0;
 				if (railPhase == 0) {
 					// The path rail is the only place a run may end, so a column here only carries on
 					// where the whole pair after it fits -- both its columns, and whatever the lane
@@ -2185,12 +2188,21 @@ public final class SongBuilder {
 					// the lane resumes at path level, its next trigger reads the gap, and the song stops.
 					// The path branch of addRailNote fills the other rail's cell when it stops for
 					// exactly this reason and carries a tripwire besides. This half had neither.
-					// Counted, not reported: 182 runs over the library end this way and only 13 lanes
-					// come out severed, so the gap is usually survived and what saves it is not yet
-					// known. A fault on all 182 would bury the 13.
+					// A floor column that ends the run has to hand the path rail up before it goes.
+					// It fills the floor and lays the cell above it only when it has a repeater to put
+					// there, so an ending one leaves that cell as air -- and the lane resumes at path
+					// level and reads exactly that cell. Measured rather than reasoned about: 182 runs
+					// over the library end this way and the same 182 repeaters are left reading air,
+					// one for one (OrphanRepeaterProbe).
+					//
+					// The repeater that closes it is timed to leave the cell live at this chord's own
+					// tick, because that is what the lane's next trigger is measured from. The path
+					// rail last went live two events back, so the span is this tick less that one.
 					if (nextDelay == 0 && index + 1 < events.size()) {
 						placements.padded("railEndedOnAFloorColumn"
 							+ (railFits(events.get(index + 1)) ? "PathHop" : "ChordTooBig"));
+						handUp = RAIL_HANDS_THE_PATH_UP ? railDelay(railLive[0], event.time()) : 0;
+						placements.padded(handUp > 0 ? "railHandedThePathUp" : "railHandUpTooLong");
 					}
 				}
 				if (TRACE) {
@@ -2203,7 +2215,7 @@ public final class SongBuilder {
 				// A floor column that is not a blank is the floor rail earning its keep.
 					railFloorCarried |= railPhase == 1;
 					lane = addRailNote(placements, lane, railPhase, event.notes(), event.time(),
-					nextDelay, fromDust);
+					nextDelay, fromDust, handUp);
 				RAIL_COLUMNS++;
 				railLive[railPhase] = event.time();
 				railPhase = nextDelay > 0 ? 1 - railPhase : -1;
@@ -3881,6 +3893,9 @@ public final class SongBuilder {
 				}
 				railBlank = NO_BLANK;
 				int nextDelay;
+				// Nought except where the run ends on a floor column, which is the one place it has to
+				// leave something behind for the lane to read. See below.
+				int handUp = 0;
 				if (railPhase == 0) {
 					// The path rail is the only place a run may end, so a column here only carries on
 					// where the whole pair after it fits -- both its columns, and whatever the lane
@@ -3918,12 +3933,21 @@ public final class SongBuilder {
 					// the lane resumes at path level, its next trigger reads the gap, and the song stops.
 					// The path branch of addRailNote fills the other rail's cell when it stops for
 					// exactly this reason and carries a tripwire besides. This half had neither.
-					// Counted, not reported: 182 runs over the library end this way and only 13 lanes
-					// come out severed, so the gap is usually survived and what saves it is not yet
-					// known. A fault on all 182 would bury the 13.
+					// A floor column that ends the run has to hand the path rail up before it goes.
+					// It fills the floor and lays the cell above it only when it has a repeater to put
+					// there, so an ending one leaves that cell as air -- and the lane resumes at path
+					// level and reads exactly that cell. Measured rather than reasoned about: 182 runs
+					// over the library end this way and the same 182 repeaters are left reading air,
+					// one for one (OrphanRepeaterProbe).
+					//
+					// The repeater that closes it is timed to leave the cell live at this chord's own
+					// tick, because that is what the lane's next trigger is measured from. The path
+					// rail last went live two events back, so the span is this tick less that one.
 					if (nextDelay == 0 && index + 1 < events.size()) {
 						placements.padded("railEndedOnAFloorColumn"
 							+ (railFits(events.get(index + 1)) ? "PathHop" : "ChordTooBig"));
+						handUp = RAIL_HANDS_THE_PATH_UP ? railDelay(railLive[0], event.time()) : 0;
+						placements.padded(handUp > 0 ? "railHandedThePathUp" : "railHandUpTooLong");
 					}
 				}
 				if (TRACE) {
@@ -3936,7 +3960,7 @@ public final class SongBuilder {
 				// A floor column that is not a blank is the floor rail earning its keep.
 				railFloorCarried |= railPhase == 1;
 				lane = addRailNote(placements, lane, railPhase, event.notes(), event.time(),
-					nextDelay, fromDust);
+					nextDelay, fromDust, handUp);
 				RAIL_COLUMNS++;
 				railLive[railPhase] = event.time();
 				railPhase = nextDelay > 0 ? 1 - railPhase : -1;
@@ -7274,7 +7298,7 @@ public final class SongBuilder {
 	 *     front of it and does not hand on a note block. Measured; see RailLinkProbeTest.
 	 */
 	private static Lane addRailNote(PlacementPlan placements, Lane at, int phase,
-			List<EventNote> chord, int time, int nextDelay, boolean fromDust) {
+			List<EventNote> chord, int time, int nextDelay, boolean fromDust, int handUp) {
 		String facing = repeaterFacing(at.travel());
 		List<EventNote> hanging = new ArrayList<>(chord);
 		if (phase == 0) {
@@ -7337,9 +7361,14 @@ public final class SongBuilder {
 		// modules were going to want. The side already built is one {@link #soundedByAnother} can see
 		// the whole of. ekran, reading a floor column in game.
 		hangRailNotes(placements, at.pos(), at.noteSide().getOpposite(), hanging, time, true);
-		if (nextDelay > 0) {
+		// The path rail's own repeater, carrying it on to the next column -- or, where the run stops
+		// here, the one that hands the path rail up so the lane after it has something to read. The
+		// two are the same block in the same cell and differ only in what they are timed against, so
+		// the ending case is the delay the caller worked out rather than a second shape.
+		int above = nextDelay > 0 ? nextDelay : handUp;
+		if (above > 0) {
 			set(placements, at.pos().above(),
-				"minecraft:repeater[facing=" + facing + ",delay=" + nextDelay + "]");
+				"minecraft:repeater[facing=" + facing + ",delay=" + above + "]");
 		}
 		return at.ahead(1);
 	}
@@ -9755,6 +9784,21 @@ public final class SongBuilder {
 		return tail == null ? "none" : tail.at().pos().getX() + "," + tail.at().pos().getY() + ","
 			+ tail.at().pos().getZ() + "->" + tail.at().ahead(1).pos().getX();
 	}
+
+	/**
+	 * Whether a run ending on a floor column leaves the path rail live for the lane after it.
+	 *
+	 * <p>Off, it leaves air there and the lane's next trigger reads nothing -- which is 182 severed
+	 * lanes over the library, 178 of them on one song, and every dead-wire number in this repo blind
+	 * to all of them because a starved repeater reads to {@link NoteMachineReader} as a second way
+	 * into the machine rather than as a break.</p>
+	 *
+	 * <p>The cell is one the column was going to leave empty and the repeater costs no column at all.
+	 * It cannot always be done: the delay is this chord's tick less the path rail's last, and where
+	 * that is over four there is no repeater long enough -- counted as {@code railHandUpTooLong},
+	 * which wants the run to end a pair earlier instead.</p>
+	 */
+	static boolean RAIL_HANDS_THE_PATH_UP = true;
 
 	/** Off, a simple tail that a pad lands in front of stays where it is and the lane dies there. */
 	static boolean SIMPLE_TAIL_UNDONE_FOR_A_PAD = true;
