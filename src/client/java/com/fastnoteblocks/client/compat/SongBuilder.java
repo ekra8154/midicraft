@@ -6354,8 +6354,15 @@ public final class SongBuilder {
 	 * entirely from chords that were finding no head at all -- the straight order is tried first and
 	 * carries nearly everything, so {@code preferred} is already only reached by chords in trouble.
 	 * Kept as a third pass because it makes that property structural instead of measured.</p>
+	 *
+	 * <p><b>Off, and dominated rather than wrong.</b> The observation stands -- a harp really is the
+	 * scarcer note, and this really does fix the 28×7 refusal. But it fixes it by finding a head of
+	 * five where none was found, and {@link #MIN_STACKED_HEAD_NOTES} at four fixes the same chord
+	 * with a head that needs no centre and therefore no harp at all. With the floor at four this is
+	 * strictly worse in every column: breach 4,883 to 4,890, wrong 9 to 11, and 326 more columns of
+	 * depth. Two answers to one question, and the cheaper one does not need the harp.</p>
 	 */
-	static boolean HARPS_OUTRANK_THE_OTHER_CONDUCTORS = true;
+	static boolean HARPS_OUTRANK_THE_OTHER_CONDUCTORS = false;
 
 	/** Whether a headed cut on the wrong parity moves a column instead of giving up the head. */
 	static boolean SPLIT_NUDGES = true;
@@ -10924,7 +10931,23 @@ public final class SongBuilder {
 	 * the pair of slots behind. Five is the first size that uses either. Ekran caught this after the
 	 * loop had already been written down to four.</p>
 	 */
-	private static final int MIN_STACKED_HEAD_NOTES = 5;
+	/**
+	 * <p>Five is a <em>density</em> argument, and a cut wants the head for something else. ekran, at
+	 * the Guardian 28×7 breach: "the mere fact of having a stacked head is actually enough to split
+	 * the descent". A head hands the transition cell a strong fifteen off its own centre block --
+	 * which stands whether a note sits in it or not -- so the run that has to cross the staircase
+	 * starts a cell later than a plain bus's does, and that cell is the difference between a chord of
+	 * twenty-four cutting and being laid whole. At four notes with no back flanks {@code useCentre}
+	 * is false, so such a head needs no harp at all. Switchable so the two arguments can be measured
+	 * against each other rather than argued about.</p>
+	 *
+	 * <p><b>Four, and ekran's argument wins outright.</b> Over the library at eighteen widths against
+	 * five: breach blocks 4,910 to 4,883, wrong notes unchanged at 9, 168 columns of depth (0.12%),
+	 * and <b>Guardian clean at every width</b> -- no breach, no wrong note, nothing. Three is worse
+	 * on every count (wrong 14, Guardian back to 9 breach blocks and 2 wrong), which is the density
+	 * argument reasserting itself once the head stops buying a cell anything else could not.</p>
+	 */
+	static int MIN_STACKED_HEAD_NOTES = 4;
 
 	private static StackedBusSplit splitAt(List<EventNote> chord, int headSize, int backFlanks) {
 		List<EventNote> head = new ArrayList<>();
