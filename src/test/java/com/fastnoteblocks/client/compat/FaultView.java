@@ -1,5 +1,6 @@
 package com.fastnoteblocks.client.compat;
 
+import com.fastnoteblocks.NotePitch;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -299,6 +300,61 @@ final class FaultView {
 	static List<String> missing(Build build) {
 		return build.plan().faults().stream()
 			.filter(fault -> fault.contains("had nowhere to hang")).toList();
+	}
+
+	/**
+	 * Every note in a box, in the order it is meant to sound, with the gap to the one before it.
+	 *
+	 * <p>What the walk wrote, not what the machine does. Both halves matter and they are different
+	 * questions: the blocks say what is standing there, and this says what it was standing there
+	 * <i>for</i>. Around a break it is the only way to see whether the two sides of the break belong
+	 * to the same phrase or to different ones, and how far apart the machine was supposed to put
+	 * them -- which is what decides whether a missing column can simply be filled in or whether the
+	 * timing has to move with it.</p>
+	 *
+	 * <p>Ticks are the walk's own, and one of them is one repeater tick: every delay in the builder is
+	 * counted in these, which is why a gap of 1 is a repeater of 1 and a gap over 4 needs a repeater
+	 * of its own.</p>
+	 */
+	static String notesIn(Build build, BlockPos from, BlockPos to) {
+		record Sounding(BlockPos at, int tick, String instrument, int pitch) {
+		}
+		List<Sounding> found = new ArrayList<>();
+		build.plan().noteTicks().forEach((at, tick) -> {
+			if (at.getX() < from.getX() || at.getX() > to.getX() || at.getY() < from.getY()
+					|| at.getY() > to.getY() || at.getZ() < from.getZ() || at.getZ() > to.getZ()) {
+				return;
+			}
+			BlockState note = build.at(at);
+			found.add(new Sounding(at, tick,
+				build.at(at.below()).getBlock().getDescriptionId().replace("block.minecraft.", ""),
+				note.hasProperty(net.minecraft.world.level.block.NoteBlock.NOTE)
+					? note.getValue(net.minecraft.world.level.block.NoteBlock.NOTE) : -1));
+		});
+		if (found.isEmpty()) {
+			return "   (no notes in this window)";
+		}
+		found.sort((a, b) -> a.tick() != b.tick() ? Integer.compare(a.tick(), b.tick())
+			: Integer.compare(a.at().getX(), b.at().getX()));
+		// A chord to a line, because a chord is the thing the walk lays and the thing that sounds. One
+		// note to a line is the same information and nobody can see the phrase in it.
+		java.util.LinkedHashMap<Integer, List<Sounding>> byTick = new java.util.LinkedHashMap<>();
+		found.forEach(one -> byTick.computeIfAbsent(one.tick(), key -> new ArrayList<>()).add(one));
+		StringBuilder said = new StringBuilder(
+			"   what this window is meant to play, in repeater ticks:");
+		int previous = Integer.MIN_VALUE;
+		for (Map.Entry<Integer, List<Sounding>> chord : byTick.entrySet()) {
+			said.append("\n      t").append(String.format("%-6d", chord.getKey()))
+				.append(previous == Integer.MIN_VALUE ? "        "
+					: String.format("(+%-2d)   ", chord.getKey() - previous));
+			for (Sounding one : chord.getValue()) {
+				said.append(String.format("%02d", one.pitch()))
+					.append(NotePitch.name(one.pitch()).replace('♯', '#'))
+					.append(' ').append(one.instrument()).append("   ");
+			}
+			previous = chord.getKey();
+		}
+		return said.toString();
 	}
 
 	/** A lane that turned outside its walls, and the furthest block it got. */

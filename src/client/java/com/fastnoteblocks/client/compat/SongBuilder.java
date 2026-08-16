@@ -473,7 +473,7 @@ public final class SongBuilder {
 		return new PastePlan(List.copyOf(commands), plan.width(), plan.depth(), plan.height(),
 			plan.spanX(), plan.spanZ(), plan.mode(), List.copyOf(faults), plan.turns(), plan.moved(),
 			plan.breaches(), plan.recesses(), plan.padding(), plan.nearWall(), plan.farWall(),
-			plan.collisions(), plan.poweredAt(), plan.laidBy());
+			plan.collisions(), plan.poweredAt(), plan.laidBy(), plan.noteTicks());
 	}
 
 	/** What a build with no name to put on it is called. */
@@ -553,7 +553,7 @@ public final class SongBuilder {
 		return new PastePlan(List.copyOf(commands), plan.width(), plan.depth(), plan.height(),
 			plan.spanX(), plan.spanZ(), plan.mode(), plan.faults(), plan.turns(), plan.moved(),
 			plan.breaches(), plan.recesses(), plan.padding(), plan.nearWall(), plan.farWall(),
-			plan.collisions(), plan.poweredAt(), plan.laidBy());
+			plan.collisions(), plan.poweredAt(), plan.laidBy(), plan.noteTicks());
 	}
 
 	/**
@@ -2177,6 +2177,21 @@ public final class SongBuilder {
 					// path column behind it. Its repeater is the path rail's, measured from the path
 					// rail's last anchor.
 					nextDelay = railNextDelay(events, index, railLive[0]);
+					// Except that it does not, and nothing said so. railNextDelay comes back nought
+					// three ways -- the song ends, the next chord is too big for a rail column, or the
+					// path hop is outside one to four -- and two of those leave the run ending here, on
+					// a floor column. A floor column fills the floor and only lays the path cell above
+					// it when it has a repeater to put there, so an ending one leaves that cell as air:
+					// the lane resumes at path level, its next trigger reads the gap, and the song stops.
+					// The path branch of addRailNote fills the other rail's cell when it stops for
+					// exactly this reason and carries a tripwire besides. This half had neither.
+					// Counted, not reported: 182 runs over the library end this way and only 13 lanes
+					// come out severed, so the gap is usually survived and what saves it is not yet
+					// known. A fault on all 182 would bury the 13.
+					if (nextDelay == 0 && index + 1 < events.size()) {
+						placements.padded("railEndedOnAFloorColumn"
+							+ (railFits(events.get(index + 1)) ? "PathHop" : "ChordTooBig"));
+					}
 				}
 				if (TRACE) {
 					System.out.println("RAIL t=" + event.time() + " at " + lane.pos().getX() + ","
@@ -3895,6 +3910,21 @@ public final class SongBuilder {
 					// path column behind it. Its repeater is the path rail's, measured from the path
 					// rail's last anchor.
 					nextDelay = railNextDelay(events, index, railLive[0]);
+					// Except that it does not, and nothing said so. railNextDelay comes back nought
+					// three ways -- the song ends, the next chord is too big for a rail column, or the
+					// path hop is outside one to four -- and two of those leave the run ending here, on
+					// a floor column. A floor column fills the floor and only lays the path cell above
+					// it when it has a repeater to put there, so an ending one leaves that cell as air:
+					// the lane resumes at path level, its next trigger reads the gap, and the song stops.
+					// The path branch of addRailNote fills the other rail's cell when it stops for
+					// exactly this reason and carries a tripwire besides. This half had neither.
+					// Counted, not reported: 182 runs over the library end this way and only 13 lanes
+					// come out severed, so the gap is usually survived and what saves it is not yet
+					// known. A fault on all 182 would bury the 13.
+					if (nextDelay == 0 && index + 1 < events.size()) {
+						placements.padded("railEndedOnAFloorColumn"
+							+ (railFits(events.get(index + 1)) ? "PathHop" : "ChordTooBig"));
+					}
 				}
 				if (TRACE) {
 					System.out.println("RAIL t=" + event.time() + " at " + lane.pos().getX() + ","
@@ -12163,7 +12193,7 @@ public final class SongBuilder {
 			PasteMode mode, List<String> faults, List<BlockPos> turns, List<Integer> moved,
 			List<Integer> breaches, List<Integer> recesses, Map<String, Integer> padding,
 			int nearWall, int farWall, Map<BlockPos, String> collisions, Set<BlockPos> poweredAt,
-			Map<BlockPos, String> laidBy) {
+			Map<BlockPos, String> laidBy, Map<BlockPos, Integer> noteTicks) {
 
 		/**
 		 * Cells of lane filled with wire rather than with music, counted by what asked for them.
@@ -13229,6 +13259,22 @@ public final class SongBuilder {
 			return shapeStone(placedBy.get(at));
 		}
 
+		/**
+		 * The tick each note block was laid for, in world space.
+		 *
+		 * <p>The walk's own answer to "what is this note, and when is it meant to sound", which until
+		 * now died at {@code finish()} along with everything else it knew. The reader reconstructs the
+		 * same thing from the blocks, and that is the point: where the two disagree, the machine is not
+		 * playing what the walk wrote, and only having both in hand can say so. Ticks here are the
+		 * walk's own -- one of them is one repeater tick, which is what every delay in this file is
+		 * counted in.</p>
+		 */
+		Map<BlockPos, Integer> noteTicks(int shiftX, int shiftZ) {
+			Map<BlockPos, Integer> when = new LinkedHashMap<>();
+			notes.forEach((at, tick) -> when.put(at.offset(shiftX, 0, shiftZ), tick));
+			return Map.copyOf(when);
+		}
+
 		/** What laid each cell, in world space, for a fault that wants to name the shapes either end. */
 		Map<BlockPos, String> laidBy(int shiftX, int shiftZ) {
 			Map<BlockPos, String> named = new LinkedHashMap<>();
@@ -13297,7 +13343,7 @@ public final class SongBuilder {
 				turns.stream().map(turn -> turn.offset(shiftX, 0, shiftZ)).toList(),
 				List.copyOf(moved), List.copyOf(breaches), List.copyOf(recesses),
 				Map.copyOf(padding), nearWall + shiftX, farWall + shiftX, Map.copyOf(marked),
-				poweredAt(shiftX, shiftZ), laidBy(shiftX, shiftZ));
+				poweredAt(shiftX, shiftZ), laidBy(shiftX, shiftZ), noteTicks(shiftX, shiftZ));
 		}
 	}
 }

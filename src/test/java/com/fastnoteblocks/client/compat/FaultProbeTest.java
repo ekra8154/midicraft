@@ -73,6 +73,43 @@ class FaultProbeTest {
 			SongBuilder.V2_RUNS_ON_RAILS = rails;
 			System.out.println();
 			System.out.println("runs " + (rails ? "on" : "OFF"));
+			// What the song says, before any of this touched it. -Dfault.ticks=795-825
+			//
+			// The other half of every "is the build faithful" question, and the half nothing here
+			// could print. FaultView.notesIn says what the build is meant to play; this says what was
+			// written. Where they agree, a fault is in the redstone; where they differ, the fault is
+			// upstream of the redstone and no amount of staring at blocks will show it.
+			String window = text("ticks", "");
+			if (!window.isEmpty()) {
+				String[] ends = window.split("[-.]+");
+				int first = Integer.parseInt(ends[0]);
+				int last = Integer.parseInt(ends[ends.length - 1]);
+				System.out.println();
+				System.out.println("======== " + song + " as written, ticks " + first + ".." + last
+					+ " ========");
+				java.util.TreeMap<Integer, StringBuilder> byTick = new java.util.TreeMap<>();
+				for (SongBuilder.EventNote note : BreachView.song(song)) {
+					if (note.time() < first || note.time() > last) {
+						continue;
+					}
+					byTick.computeIfAbsent(note.time(), key -> new StringBuilder())
+						.append(String.format("%02d", note.pitch()))
+						.append(com.fastnoteblocks.NotePitch.name(note.pitch()).replace('♯', '#'))
+						.append(' ')
+						.append(note.instrumentBlock().replace("minecraft:", "")).append("   ");
+				}
+				int previous = Integer.MIN_VALUE;
+				for (java.util.Map.Entry<Integer, StringBuilder> chord : byTick.entrySet()) {
+					System.out.println("   t" + String.format("%-6d", chord.getKey())
+						+ (previous == Integer.MIN_VALUE ? "        "
+							: String.format("(+%-2d)   ", chord.getKey() - previous))
+						+ chord.getValue());
+					previous = chord.getKey();
+				}
+				if (byTick.isEmpty()) {
+					System.out.println("   (the song has nothing in that range)");
+				}
+			}
 			FaultView.Build built = FaultView.of(song, mode, width, floors, maxFloors, names);
 			// A box somebody asked for, rather than the one a fault picked. -Dfault.at=x,y,z with
 			// -Dfault.span=xSpan,ySpan,zSpan and -Dfault.view=top|north. There is no substitute for
@@ -94,6 +131,7 @@ class FaultProbeTest {
 				System.out.println(FaultView.draw(built, from, to,
 					AsciiDiagram.View.of(text("view", "top"))));
 				System.out.println(FaultView.shapesIn(built, from, to));
+				System.out.println(FaultView.notesIn(built, from, to));
 				return;
 			}
 			FaultView.report(built, perKind);
