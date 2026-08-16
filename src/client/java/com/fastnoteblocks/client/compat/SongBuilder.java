@@ -2488,6 +2488,9 @@ public final class SongBuilder {
 		// stone lies right alongside it at the same level.
 		boolean columnBehindBusy = false;
 		ChordStyle lastStyle = ChordStyle.SMALL;
+		// Only ever read when lastStyle is SUNKEN_BUS, and that style can only come from the one
+		// assignment off Placed below -- so one update site is enough and a stale value is unreachable.
+		int lastBusCells = 0;
 		// What the wire at the end of the lane is still worth. Every module opens with a repeater, so
 		// this only ever counts what the module just built spent: nothing, unless it was a bus.
 		int tipSignal = DUST_RANGE;
@@ -2820,7 +2823,7 @@ public final class SongBuilder {
 			Pad pad = layout.ultra() && wantsTurn && !straddles
 				? planTurnPad(columns, tipSignal, turnCells, offBus, Math.max(0, wait - 1),
 					climb > 0, above >= 0 && above < floors,
-					lastStyle.buses())
+					endsOnBus(lastStyle, lastBusCells))
 				: Pad.none(tipSignal);
 			// A split comes before any of that. The event that will not fit is cut in two: as much of
 			// it as reaches the wall, then the staircase, then the rest -- one repeater, one tick, one
@@ -3206,7 +3209,7 @@ public final class SongBuilder {
 			// walk builds a raised pad whether or not the search was allowed to plan for one. Gating
 			// it here also took the empty-pad bus discount out with it, which predates all of this.
 			int turnPrice = turnPrice(pad, climb > 0, above >= 0 && above < floors,
-				lastStyle.buses(), turnCells, offBus);
+				endsOnBus(lastStyle, lastBusCells), turnCells, offBus);
 			// Priced after the line above, because this is the second place the same turn is priced
 			// and the two were answering differently. {@link #turnPrice} knows a pad standing on a bus
 			// can be lifted onto the climb and charges three; this knew only the older discount, for a
@@ -3214,7 +3217,7 @@ public final class SongBuilder {
 			// and needing three was refused its turn by the arm that had not been told.
 			int turnCost = unpaid == 0
 				? Math.min(WALL_REACH_PRICES_THE_RAISED_PAD ? turnPrice : turnCells,
-					pad.cells().isEmpty() && lastStyle.buses() ? offBus : turnCells)
+					pad.cells().isEmpty() && endsOnBus(lastStyle, lastBusCells) ? offBus : turnCells)
 				: turnCells;
 			boolean reachesWall = !PIN_DESCENTS || flatAhead
 				|| pad.signal() - unpaid >= turnCost;
@@ -3510,7 +3513,7 @@ public final class SongBuilder {
 				// anything else the first cell has to hold the path so the rest has a live wire to
 				// climb from, and a pad of one column has no cell to spare for that.
 				int liftAfter = raiseAfter(pad, climb > 0, above >= 0 && above < floors,
-					lastStyle.buses());
+					endsOnBus(lastStyle, lastBusCells));
 				boolean raisedPad = liftAfter >= 0;
 				lane = emitPad(placements, lane, pad, "padClosing", liftAfter);
 				spentPadding = pad.delaySpent();
@@ -3566,7 +3569,7 @@ public final class SongBuilder {
 					// never could through a pad laid on the path.
 					BlockPos landed = climb > 0
 						? addGlassClimb(placements, lane.pos(), travel,
-							raisedPad || lastStyle.buses() && pad.cells().isEmpty(), currentTime)
+							raisedPad || endsOnBus(lastStyle, lastBusCells) && pad.cells().isEmpty(), currentTime)
 						: descend(placements, lane.pos(), travel, descentSide, currentTime);
 					floor = above;
 					// What the staircase leaves the next lane. It matters because the next lane may
@@ -3577,7 +3580,7 @@ public final class SongBuilder {
 					// Through the same one place canTurn asked, so the wire this lane books itself and
 					// the wire it demanded before turning cannot be two different sums.
 					tipSignal = pad.signal() - pinned - turnPrice(pad, climb > 0,
-						above >= 0 && above < floors, lastStyle.buses(), turnCells, offBus);
+						above >= 0 && above < floors, endsOnBus(lastStyle, lastBusCells), turnCells, offBus);
 					lane = Lane.straight(landed, travel.getOpposite(), depth);
 					gradeLaneStart(placements, wall, travel.getStepX(), 0, climb > 0, stepOffAhead,
 						lane.pos().getX(), climb > 0 ? "Climb" : "Descent");
@@ -3882,11 +3885,11 @@ public final class SongBuilder {
 				// two sees the room that bought and pads in turn, and a preference cascades down the
 				// lane as though it were a requirement.
 				Pad behind = planPad((laneWall - end) * travel.getStepX(), reached.tip(),
-					reached.style().buses() ? offBus : turnCells,
+					endsOnBus(reached.style(), sunkenDustCells(event.notes().size())) ? offBus : turnCells,
 					Math.max(0, next.time() - event.time() - 1));
 				boolean behindReaches = (laneWall - end) * travel.getStepX() >= 0
 					&& behind.cells().size() == (laneWall - end) * travel.getStepX()
-					&& behind.signal() >= (reached.style().buses() ? offBus : turnCells);
+					&& behind.signal() >= (endsOnBus(reached.style(), sunkenDustCells(event.notes().size())) ? offBus : turnCells);
 				if (V2_PADS_AHEAD && !cuttable && !nextStraddles && !behindReaches
 						&& (beyond > farWall || beyond < nearWall)) {
 					int ahead = prePad(cursor.getX(), travel.getStepX(), event, wait - spentPadding,
@@ -4270,6 +4273,7 @@ public final class SongBuilder {
 			lane = placed.lane();
 			columnBehindBusy = takesTheGapBehind(placed.style(), placed.busCells());
 			lastStyle = placed.style();
+			lastBusCells = placed.busCells();
 			// A nudge spends a column the plan was not told about, so everything the plan still owes
 			// this lane is owed from a column further along than it thinks. Left alone, the lane
 			// arrives carrying pad that was measured to close a gap the nudge has already closed --
@@ -4622,6 +4626,24 @@ public final class SongBuilder {
 	 */
 	private static int sunkenDustCells(int notes) {
 		return Math.max(1, (notes - 2) / 2);
+	}
+
+	/**
+	 * Whether a module of this shape leaves the lane standing on a bus cell, and so earns a staircase
+	 * the two-rung discount.
+	 *
+	 * <p>A sunken bus usually does. Its lowered column is only the <em>last</em> cell when the chord
+	 * was too small to need a bus after it -- four or five notes, where the whole module is the
+	 * opening and the lowered pair. From six up there is at least one ordinary bus cell on the end,
+	 * stone at bus height with the dust over it, which is exactly what a plain bus offers a climb.</p>
+	 *
+	 * <p>ekran, on the first attempt at this, which denied every sunken bus the discount: <em>"even
+	 * for sunken buses the 3-climb usually works, its simply because this one ended on the sunken
+	 * part that it didn't work."</em> {@code busCells} is the dust-cell count {@link Body} carries,
+	 * so two or more means the lowered column is not the end of it.</p>
+	 */
+	private static boolean endsOnBus(ChordStyle style, int busCells) {
+		return style.buses() || style == ChordStyle.SUNKEN_BUS && busCells >= 2;
 	}
 
 	/** Whether a chord of this size fits one sunken bus at all. */
