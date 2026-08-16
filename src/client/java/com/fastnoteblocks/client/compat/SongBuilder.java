@@ -2884,6 +2884,55 @@ public final class SongBuilder {
 							&& backPairIsFree(placements, lane.ahead(delayColumns), event.time()),
 					stackedIsBehind)
 				: null;
+			// Busy padding: one column spent so a chord can be cut at all.
+			//
+			// ekran's, and it is a different thing from a parity pad even though it lays the same cell.
+			// A parity pad moves a module so its slots land on a beat that works. This moves a module off
+			// the chord behind it, so the pair of slots behind comes free -- and with them the bigger head
+			// that is the difference between a chord that can be cut across the staircase and one that is
+			// laid whole and puts its lane outside the wall.
+			//
+			// Only where it buys the cut, which is the whole of the rule. Asked after the head has already
+			// been refused, and only when the plain cut is gone too -- so a chord that can be cut where it
+			// stands is never moved, and a chord that cannot be cut even with the slots behind is never
+			// moved for nothing. On Guardian at 28 wide over seven floors that is the chord of 24 whose
+			// head is refused because a stacked centre holds the column behind it.
+			//
+			// It costs a column and hands it straight back: the head asked for here is the same head in a
+			// room one smaller, so the near half is one cell shorter and the lane still comes to rest on
+			// its wall. The column is laid by the pin below, which already exists to do exactly this and
+			// already knows that a cell in front frees the back pair -- its own roomBehind reads
+			// {@code delayColumns + inFront > 0}. So this does not lay anything; it decides that a pin of
+			// at least one is worth having, and the pin lays it.
+			int busyPad = 0;
+			if (BUSY_PAD_FREES_THE_BACK_FLANKS && headed == null && CUT_PINS_ITS_STAIRCASE
+					&& layout.ultra() && cutOffered && index > 0 && above >= 0 && above < floors
+					// Only a column that is actually in the way. A delay already moves the opening, and a
+					// column that is not busy has nothing to free.
+					&& columnBehindBusy && delayColumns == 0
+					// Only for a chord that has to be cut. A cut is *offered* to every chord that
+					// reaches its wall, and most of those simply fit -- so "no plain cut available"
+					// is true of a chord of five that needs nothing at all, and asking only that
+					// fired this 563 times over the library, 385 of them on chords of five. The chord
+					// must actually overshoot, which is the same gate the refusal counter uses.
+					&& wantsTurn
+					// And only where there is no other way to close: a chord that cuts plain is left alone.
+					&& !(room >= 2 && room - 1 < cells && cells + splitCells <= DUST_RANGE)
+					// A column to spend, and the wire to lay it with. Both are what the pin will charge.
+					&& room >= 2 && placements.runSinceRepeater() + 1 <= DUST_RANGE) {
+				StackedSplit freed = stackedSplitOf(event.notes(), room - 1, splitCells, climb > 0,
+					true, false);
+				if (freed != null) {
+					placements.padded("busyPadBoughtTheCut");
+					placements.padded("busyPadBoughtTheCutAt" + Math.min(event.notes().size(), 30) + "Notes");
+					headed = freed;
+					busyPad = 1;
+				} else {
+					// Refused for something the column behind was not responsible for. Counted, because a
+					// pad that would not have helped is the interesting half of this rule.
+					placements.padded("busyPadWouldNotHaveHelped");
+				}
+			}
 			// A cut is built straight from the module rather than through {@link #addChordModule},
 			// so none of that method's guards are applied to it -- and the one that matters is the
 			// parity check. Without it a head can land its low notes against a live block of the
@@ -2974,6 +3023,18 @@ public final class SongBuilder {
 					headed = null;
 				}
 			}
+			// A busy pad is only sound if the pin really laid the column it was promised. The head above
+			// was chosen on the understanding that it opens a column further along, where the slots behind
+			// are free; built flush against the busy column instead it hangs its back flanks in somebody
+			// else's cell, which is a wrong note rather than a breach. So it is given up rather than built
+			// on a promise the pin did not keep.
+			if (busyPad > 0 && headed != null && splitPin < busyPad) {
+				placements.padded("busyPadLostItsColumn");
+				headed = null;
+				splitPin = 0;
+				splitPinBehind = 0;
+				busyPad = 0;
+			}
 			// A cut whose head lands on the wrong parity is moved a column, not given up.
 			//
 			// It used to be given up, on the grounds that a cut's near half is measured to land
@@ -3025,6 +3086,7 @@ public final class SongBuilder {
 					// is given and needs none.
 					splitPin = 0;
 					splitPinBehind = 0;
+					busyPad = 0;
 				} else {
 					placements.padded("planStackedSplitNudged");
 					headed = shifted;
@@ -3260,11 +3322,13 @@ public final class SongBuilder {
 					// the nudge otherwise -- and the delay it spends comes off the head's own trigger.
 					int headDelay = trigger.triggerDelay();
 					boolean firstCell = true;
-					if (splitPin > 0) {
-						placements.placing("cutPin");
-					}
 					for (int cell = 0; cell < splitPin; cell++) {
-						placements.padded("cutPin");
+						// The first cell is the busy pad where there is one -- the column that freed the slots
+						// behind and bought this cut -- and the rest is the ordinary pin walking the near half
+						// out to its wall. Two different reasons to spend a column, so two colours.
+						String pinWhy = busyPad > 0 && cell == 0 ? "busyPad" : "cutPin";
+						placements.placing(pinWhy);
+						placements.padded(pinWhy);
 						headDelay = padCellOrSplitRepeater(placements, opening, travel, headDelay,
 							firstCell && placements.softTip(), false, "cutPin");
 						firstCell = false;
@@ -8440,7 +8504,13 @@ public final class SongBuilder {
 
 	private static Map<String, String> debugPasteKey() {
 		Map<String, String> key = new LinkedHashMap<>();
-		key.put("minecraft:stone", "the lane -- wire, repeaters, pads, corners, staircases");
+		key.put("minecraft:stone", "the lane -- wire, repeaters, corners, staircases");
+		key.put("minecraft:spruce_planks", "parity padding -- a module moved to land on its beat");
+		key.put("minecraft:dark_oak_planks",
+			"busy padding -- a column spent to free the slots behind, so a chord can be cut");
+		key.put("minecraft:oak_planks", "corner padding -- the columns a bend costs");
+		key.put("minecraft:bamboo_planks",
+			"padding of any other kind, which v2 is not supposed to need");
 		key.put("minecraft:tuff", "a standard bus");
 		key.put("minecraft:andesite", "a standard stacked chord");
 		key.put("minecraft:deepslate", "a stacked bus");
@@ -8456,12 +8526,56 @@ public final class SongBuilder {
 		return java.util.Collections.unmodifiableMap(key);
 	}
 
+	/**
+	 * The padding labels, in planks, so a paste says at a glance what a lane is spending columns on.
+	 *
+	 * <p>ekran's, and the point of the fourth colour is the point of the whole table: v2 is meant to
+	 * need corner padding and parity padding and nothing else -- {@link #V2_PADS_AHEAD} and
+	 * {@link #V2_BOOKS_PADS} are off precisely because a lane that can cut anywhere never has to be
+	 * walked out to its wall. So anything that comes out <b>bamboo</b> is a column being spent for a
+	 * reason nobody has justified yet, and it can be counted by looking rather than by grepping the
+	 * census. {@link #BUSY_PAD_FREES_THE_BACK_FLANKS} gets its own colour because it is the one new
+	 * kind, and it is supposed to be rare enough to point at individually.</p>
+	 *
+	 * <p>Not included: {@code delayBeforeChord}, which is a chord waiting for its tick rather than a
+	 * lane buying ground, and the staircases and corners the lane walks through, which are route.</p>
+	 */
+	private static String padPlanks(String laidBy) {
+		// A cut's nudge pad counts as parity padding, because that is what it is: its own comment says
+		// it is "laid as the parity pad an ordinary chord uses, so the head meets the lane behind on
+		// the parity it wants". Only the label differs, and only so the collision marker can say which
+		// of the two laid a contested cell.
+		if (laidBy.startsWith("parityPad") || laidBy.startsWith("cutNudgePad")) {
+			return "minecraft:spruce_planks";
+		}
+		if (laidBy.startsWith("busyPad")) {
+			return "minecraft:dark_oak_planks";
+		}
+		if (laidBy.startsWith("corner")) {
+			return "minecraft:oak_planks";
+		}
+		// Everything else that lays a cell of pad. Named one by one rather than by a prefix, so a pad
+		// added later shows up as an unnamed cell somebody has to come and classify rather than
+		// quietly inheriting a colour that says it was fine.
+		if (laidBy.startsWith("padClosing") || laidBy.startsWith("padAhead")
+				|| laidBy.startsWith("padBooked") || laidBy.startsWith("pinToWall")
+				|| laidBy.startsWith("cutPin") || laidBy.startsWith("pad")
+				|| laidBy.startsWith("busMove")) {
+			return "minecraft:bamboo_planks";
+		}
+		return null;
+	}
+
 	private static String shapeStone(String laidBy) {
 		if (laidBy == null) {
 			return "minecraft:stone";
 		}
 		if (laidBy.startsWith("rail:")) {
 			return "minecraft:smooth_basalt";
+		}
+		String planks = padPlanks(laidBy);
+		if (planks != null) {
+			return planks;
 		}
 		// Only where the cut put the head on one side of the staircase and tail on the other. A
 		// headed chord that fitted entirely before the staircase calls itself a stacked bus and is
@@ -11557,6 +11671,30 @@ public final class SongBuilder {
 	 * {@link #CLASH_ASKS_IF_THE_NEIGHBOUR_IS_LIVE}.</p>
 	 */
 	static boolean CUT_ASKS_WHAT_KIND_IS_BEHIND = true;
+
+	/**
+	 * v2: one column spent to move a module off the chord behind it, so that a cut becomes possible.
+	 *
+	 * <p>ekran's, and a different thing from a parity pad even though it lays the same cell. A parity
+	 * pad moves a module so its slots land on a beat that works. This moves a module so the pair of
+	 * slots <em>behind</em> it comes free -- and with them the bigger head that is the difference
+	 * between a chord cut across the staircase and a chord laid whole with its lane outside the
+	 * wall.</p>
+	 *
+	 * <p><b>Only where it buys the cut.</b> Asked after the head has already been refused, and only
+	 * when the plain cut is gone too, so a chord that can be cut where it stands is never moved and a
+	 * chord that cannot be cut even with the slots behind is never moved for nothing. It also asks
+	 * only where the column behind really is busy and no delay already stands in front.</p>
+	 *
+	 * <p>It costs a column and hands it back: the head asked for is the same head in a room one
+	 * smaller, so the near half is one cell shorter and the lane still comes to rest on its wall. The
+	 * column is laid by the staircase pin, which already exists and already knows that a cell in front
+	 * frees the back pair -- its own {@code roomBehind} reads {@code delayColumns + inFront > 0}. So
+	 * this decides that a pin of at least one is worth having, and the pin lays it. Where the pin
+	 * cannot afford that column the head is given up rather than built flush against the busy
+	 * column, which would be a wrong note rather than a breach.</p>
+	 */
+	static boolean BUSY_PAD_FREES_THE_BACK_FLANKS = true;
 
 	/**
 	 * Whether a clash test asks the neighbour's cell about being live, as well as about being a note.
