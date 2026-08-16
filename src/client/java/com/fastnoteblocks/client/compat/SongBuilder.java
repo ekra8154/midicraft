@@ -2916,6 +2916,13 @@ public final class SongBuilder {
 					// fired this 563 times over the library, 385 of them on chords of five. The chord
 					// must actually overshoot, which is the same gate the refusal counter uses.
 					&& wantsTurn
+					// And big enough that a column is the only thing left to try. ekran's, and the
+					// reason is that everything smaller has other moves: it can cut plain, it can take
+					// a shorter head, it can be laid as a bus and let the lane turn after it. Gated on
+					// wantsTurn alone this still fired 211 times and only 11 of those were chords the
+					// rule was written for -- the rest were chords of five and six that strand the
+					// turn, which is a real refusal but not one worth spending ground on.
+					&& event.notes().size() >= BUSY_PAD_ABOVE_NOTES
 					// And only where there is no other way to close: a chord that cuts plain is left alone.
 					&& !(room >= 2 && room - 1 < cells && cells + splitCells <= DUST_RANGE)
 					// A column to spend, and the wire to lay it with. Both are what the pin will charge.
@@ -11695,6 +11702,21 @@ public final class SongBuilder {
 	 * column, which would be a wrong note rather than a breach.</p>
 	 */
 	static boolean BUSY_PAD_FREES_THE_BACK_FLANKS = true;
+
+	/**
+	 * The smallest chord a busy pad will spend a column on.
+	 *
+	 * <p>Twenty-five, and it is ekran's line: "it's not worth it unless the chord truly is cutting a
+	 * gap and truly cannot cut, even with a stacked head". Everything below that has other moves --
+	 * it can cut plain, it can take a shorter head, it can be laid as a bus and let the lane turn
+	 * after it -- so a column spent there is a column bought for a chord that had somewhere else to
+	 * go.</p>
+	 *
+	 * <p>The census made the case. Gated only on the chord overshooting, this fired 211 times over the
+	 * library and just 11 of those were chords of 24 or more; the other 200 were chords of five and
+	 * six that fit their room but strand the turn. A real refusal, and not one worth ground.</p>
+	 */
+	static int BUSY_PAD_ABOVE_NOTES = 25;
 
 	/**
 	 * Whether a clash test asks the neighbour's cell about being live, as well as about being a note.
