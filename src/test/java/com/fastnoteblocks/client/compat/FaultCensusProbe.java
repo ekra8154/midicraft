@@ -138,6 +138,20 @@ class FaultCensusProbe {
 				.filter(path -> only.isEmpty() || path.getFileName().toString().contains(only))
 				.sorted().toList();
 		}
+		// A filter that matches nothing is not an empty library, it is a typo -- and the report for
+		// one is a page of headings saying everything is clean, which reads exactly like a pass. A
+		// trailing comma in {@code -Dcensus.songs=guardian,} produced one of those here. Same trap as
+		// the unforwarded property: the probe runs, prints, and answers a question nobody asked.
+		if (!only.isEmpty() && files.isEmpty()) {
+			List<String> library;
+			try (Stream<Path> listing = Files.list(SONGS)) {
+				library = listing.filter(path -> path.toString().endsWith(".json"))
+					.map(path -> path.getFileName().toString().replace(".json", ""))
+					.sorted().toList();
+			}
+			throw new IllegalArgumentException("census.songs=\"" + only
+				+ "\" matches none of the " + library.size() + " songs in " + SONGS + ": " + library);
+		}
 		Gson gson = new Gson();
 		List<Row> rows = new ArrayList<>();
 		long started = System.currentTimeMillis();

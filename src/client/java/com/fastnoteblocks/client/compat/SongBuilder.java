@@ -3015,6 +3015,23 @@ public final class SongBuilder {
 			boolean couldSplit = layout.ultra() && cutOffered && index > 0 && above >= 0
 				&& above < floors && (headed != null
 					|| (room >= 2 && room - 1 < cells && cells + splitCells <= DUST_RANGE));
+			// Why the head went, where losing it costs the lane its wall.
+			//
+			// A refused head is the commonest way a v2 lane ends up outside its wall: a chord of
+			// twenty-four is twelve cells and cannot be cut plain against a staircase, so a head is the
+			// only cut it has, and the trace could only ever say {@code headed=no}.
+			// {@link #LAST_CUT_REFUSAL} says which of the four refusals it was, and nothing overwrites
+			// it between there and here: everything that asks again asks only when a head came back.
+			//
+			// Counted here rather than at the call, and only where the plain cut has gone too. Every
+			// chord that reaches its wall is offered a head and most are small enough to cut plain and
+			// have no use for one -- counted at the call this is 14,496 refusals over the library, of
+			// which the great majority cost nothing at all.
+			if (!couldSplit && wantsTurn && layout.ultra() && cutOffered && index > 0
+					&& above >= 0 && above < floors) {
+				placements.padded("cutRefused" + LAST_CUT_REFUSAL);
+				placements.padded("cutRefusedAt" + Math.min(event.notes().size(), 30) + "Notes");
+			}
 			// Counted where it bites rather than where it is decided. The planner books the veto on a
 			// lane it is only considering, and most of those plans are thrown away; what matters is how
 			// often a split the walk was about to build actually got stopped, because that is the number
@@ -3770,7 +3787,7 @@ public final class SongBuilder {
 				boolean behindReaches = (laneWall - end) * travel.getStepX() >= 0
 					&& behind.cells().size() == (laneWall - end) * travel.getStepX()
 					&& behind.signal() >= (reached.style().buses() ? offBus : turnCells);
-				if (!cuttable && !nextStraddles && !behindReaches
+				if (V2_PADS_AHEAD && !cuttable && !nextStraddles && !behindReaches
 						&& (beyond > farWall || beyond < nearWall)) {
 					int ahead = prePad(cursor.getX(), travel.getStepX(), event, wait - spentPadding,
 						columnBehindBusy, layout, laneWall,
@@ -5241,6 +5258,26 @@ public final class SongBuilder {
 	 * main by itself.</p>
 	 */
 	static boolean CUTS_THE_CHORD_THAT_REACHES = false;
+
+	/**
+	 * v2: whether a lane still lays wire in front of a chord to walk the next one out to its wall.
+	 *
+	 * <p>The last pad-to-wall in v2 that is neither a corner nor a parity pad. {@link #V2_BOOKS_PADS}
+	 * is off and {@link #CUT_ONLY_LANES} and {@link #CUTS_THE_CHORD_THAT_REACHES} are read only by
+	 * {@link #walkWall} -- v2 has both of those permanently on -- so the booking layer is already
+	 * gone from this walk. What is left is this one and the closing pad.</p>
+	 *
+	 * <p>ekran's position is that neither should be needed: v2 supports chords of twenty-five and a
+	 * chord of twenty-five cuts wherever it is standing, so a lane never has to be walked out to its
+	 * wall on wire it has to pay for. The guard above already exempts a next chord that can be cut
+	 * across the staircase or laid across a flat turn, so what fires here is what those two miss.</p>
+	 *
+	 * <p><b>Off, and it costs nothing to switch off.</b> Over the library at five widths: 1,084 breach
+	 * blocks to 1,079, three columns of depth <em>back</em>, one more clean build, and nothing dead,
+	 * missing or wrong moves. Guardian goes to nought. So the pad was not buying the lane its wall --
+	 * it was spending the wire the chord in front of it then wanted.</p>
+	 */
+	static boolean V2_PADS_AHEAD = false;
 
 	/**
 	 * v2: a chord that lies across a flat turn is charged nothing for the wire arriving at it.
@@ -10498,9 +10535,25 @@ public final class SongBuilder {
 	 *     the first rule of stacked chords is that if the block behind is the centre of another
 	 *     stacked chord you cannot place back flanks at all, because that chord would sound them.
 	 */
+	/**
+	 * Why the last call to {@link #stackedSplitOf} came back with nothing.
+	 *
+	 * <p>A headed cut is how v2 closes a lane on a chord too big to cut plain, and when it is refused
+	 * the chord is laid whole and the lane walks out past its wall. The trace could say
+	 * {@code headed=no} and nothing else, and the four ways to get there want four different fixes:
+	 * a chord whose notes will not fill any head, a corridor with no room for the near half, a chord
+	 * with nothing left to carry over, and a cut that simply runs out of wire.</p>
+	 *
+	 * <p>Set at each refusal and read by the walk, so there is one place deciding and one place
+	 * reporting rather than a second copy of the arithmetic that can drift from this one.</p>
+	 */
+	static String LAST_CUT_REFUSAL = "";
+
 	private static StackedSplit stackedSplitOf(List<EventNote> chord, int room, int splitCells,
 			boolean climbing, boolean roomBehind, boolean stackedBehind) {
+		LAST_CUT_REFUSAL = "";
 		if (!STACKED_SPLIT_HEADS) {
+			LAST_CUT_REFUSAL = "SwitchedOff";
 			return null;
 		}
 		// The full head first, the head of five when the column behind is spoken for. This is the
@@ -10535,6 +10588,10 @@ public final class SongBuilder {
 			granted = 0;
 		}
 		if (split == null) {
+			// Told apart by what was on offer. A chord refused a head with every slot available is a
+			// chord whose notes will not make one; a chord refused only because the column behind is
+			// spoken for is a chord that would have cut somewhere else in the lane.
+			LAST_CUT_REFUSAL = stackedBusSplit(chord, 2) == null ? "NoHeadAtAll" : "NoHeadFromTheFront";
 			return null;
 		}
 		// Head, transition, and -- unless the near half is allowed to be the head alone -- at least
@@ -10578,6 +10635,7 @@ public final class SongBuilder {
 						<= DUST_RANGE) {
 				HEAD_ONLY_NEAR_HALVES++;
 			}
+			LAST_CUT_REFUSAL = "NoRoomForTheNearHalf";
 			return null;
 		}
 		List<EventNote> tail = split.tail();
@@ -10598,6 +10656,7 @@ public final class SongBuilder {
 		// that cannot turn at all.
 		if (nearNotes >= tail.size()) {
 			if (!CUTS_A_CHORD_THAT_FITS || tail.size() < 2) {
+				LAST_CUT_REFUSAL = "NothingToCarryOver";
 				return null;
 			}
 			// One note over the staircase, and not two.
@@ -10671,6 +10730,10 @@ public final class SongBuilder {
 			}
 		}
 		if (cut.runCells(splitCells) > DUST_RANGE) {
+			// By how much, because one cell over is a shape question and five over is a chord that was
+			// never going to be cut here.
+			LAST_CUT_REFUSAL = "OutOfWireBy"
+				+ Math.min(cut.runCells(splitCells) - DUST_RANGE, 6);
 			return null;
 		}
 		return cut;
