@@ -12179,8 +12179,21 @@ public final class SongBuilder {
 	 * cell is part of it and a real bus's last dust is not -- and ekran's arithmetic is that it comes
 	 * out level, because the module keeps the two front flanks that sit at lane level in the column
 	 * the first glass stands two levels above.</p>
+	 *
+	 * <p><b>Off. ekran, in game: "the ascent hanging stacked chords just isn't working right".</b>
+	 * The headless numbers never saw it -- nought dead, nought severed, breach and depth within a
+	 * few hundred columns either way -- so whatever is wrong with it is something the reader and the
+	 * fault census both call fine. That is the more interesting half and the reason the whole thing
+	 * stays here rather than coming out: five pieces hang off this flag, and every one of them is
+	 * live code with its measurements written down.</p>
+	 *
+	 * <p>What it switches off, in the order it was built: the dust on the empty centre; the climb
+	 * taking it as {@code fromBus} at {@code offBus + 1}; the room test charging such a module two
+	 * columns instead of three; and the cut being skipped where the module fits instead. The last of
+	 * those is what finally made ekran's own repro build a stacked chord, so if any part of this is
+	 * worth keeping it is probably not the part that made the shape appear.</p>
 	 */
-	static boolean CLIMB_OFF_A_STACKED_CENTRE = true;
+	static boolean CLIMB_OFF_A_STACKED_CENTRE = false;
 
 	/**
 	 * The smallest chord laid as a {@link ChordStyle#SUNKEN_BUS}.
