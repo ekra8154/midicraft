@@ -8520,6 +8520,22 @@ public final class SongBuilder {
 	public static boolean DEBUG_PASTE = false;
 
 	/**
+	 * The colouring half of {@link #DEBUG_PASTE} on its own, without the half that changes the build.
+	 *
+	 * <p>Same split, same reason, as {@link #NAME_EVERY_CELL}. {@code DEBUG_PASTE} does two unrelated
+	 * things: it recolours the finished blocks so a shape can be told from a paste, and it stops a
+	 * layout collision throwing -- which in v2 skips every trial fallback and therefore builds a
+	 * <em>different machine</em>. So a diagram drawn with it on is a diagram of something other than
+	 * the build being diagnosed, which is why {@code -Dfault.names} defaulted to false and why the
+	 * renders had no shape colours in them at all.</p>
+	 *
+	 * <p>This is the recolour alone. It reads {@code placedBy} after the walk has finished and
+	 * substitutes one solid block for another; nothing a walk decides can see it. {@link FaultView}
+	 * turns it on for every build it draws.</p>
+	 */
+	public static boolean MARK_SHAPES = false;
+
+	/**
 	 * Whether every cell remembers which shape laid it, without any of the debug paste's other doing.
 	 *
 	 * <p>"Which shape laid this cell" is the question a fault raises first and the one the blocks
@@ -14171,7 +14187,7 @@ public final class SongBuilder {
 		 *     outside them means a lane that overstepped rather than a mode that has no walls
 		 */
 		private String marked(BlockPos at, String block, int nearWall, int farWall, boolean walled) {
-			if (!DEBUG_PASTE) {
+			if (!DEBUG_PASTE && !MARK_SHAPES) {
 				return block;
 			}
 			// Silent, and lit so it is findable down a corridor. Nothing downstream loses anything by

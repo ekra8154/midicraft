@@ -100,6 +100,7 @@ final class FaultView {
 		boolean marking = SongBuilder.MARK_UNREACHED;
 		boolean naming = SongBuilder.DEBUG_PASTE;
 		boolean labelling = SongBuilder.NAME_EVERY_CELL;
+		boolean marking2 = SongBuilder.MARK_SHAPES;
 		SongBuilder.PastePlan plan;
 		try {
 			SongBuilder.MARK_UNREACHED = false;
@@ -109,12 +110,18 @@ final class FaultView {
 			// fallback and builds a different machine. So every fault drawn here can name the shapes
 			// either end of it without the drawing having changed what it is looking at.
 			SongBuilder.NAME_EVERY_CELL = true;
+			// The shape colours, always, and without DEBUG_PASTE's other half. A diagram of a build is
+			// no use if it cannot say which shape laid which block, and turning DEBUG_PASTE on to get
+			// that would draw a different machine -- it suppresses collisions, which in v2 skips every
+			// trial fallback. See SongBuilder.MARK_SHAPES.
+			SongBuilder.MARK_SHAPES = true;
 			plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0), notes, mode,
 				new SongBuilder.BuildLimits(maxFloors, width, floors));
 		} finally {
 			SongBuilder.MARK_UNREACHED = marking;
 			SongBuilder.DEBUG_PASTE = naming;
 			SongBuilder.NAME_EVERY_CELL = labelling;
+			SongBuilder.MARK_SHAPES = marking2;
 		}
 		Map<BlockPos, BlockState> world = new LinkedHashMap<>();
 		Map<BlockPos, Integer> laid = new LinkedHashMap<>();
@@ -557,11 +564,15 @@ final class FaultView {
 			BlockPos[] box = box(build, one.frontier(), one.at(), 2, 1, 1, 4);
 			System.out.println(draw(build, box[0], box[1], AsciiDiagram.View.NORTH));
 			System.out.println(shapesIn(build, box[0], box[1]));
-			if (one.frontier().getZ() != one.at().getZ()) {
-				System.out.println("   the two are in different lanes, so from above as well:");
-				System.out.println(around(build, one.frontier(), one.at(), AsciiDiagram.View.TOP,
-					2, 1, 0, 3));
-			}
+			// Both views, and neither is optional -- the same rule the wrong-note render already keeps.
+			// The side view shows the levels, which is where a soft-powered block or a run that steps
+			// down a level can be seen at all; the top view shows which lane the other end is in and how
+			// the route runs through the break. This used to draw the top view only when the two ends sat
+			// in different lanes, which is exactly the fault that does not need it: a break within one
+			// lane is the commoner kind and the one whose route is hardest to read off levels alone.
+			System.out.println("   from above, which shows the route through the break:");
+			System.out.println(around(build, one.frontier(), one.at(), AsciiDiagram.View.TOP,
+				2, 1, 0, 3));
 		}
 	}
 
