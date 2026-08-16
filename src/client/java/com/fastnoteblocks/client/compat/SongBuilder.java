@@ -9419,8 +9419,15 @@ public final class SongBuilder {
 		Lane start = lane;
 		if (!style.stacked()) {
 			trace(event, lane, style, style, gaveUp);
+			// A sunken bus is a bus here too. forceBus is what tells addSpatialEventModule that the
+			// small module is not on offer, and it went down as {@code style == BUS} -- so a chord
+			// measured as SUNKEN_BUS arrived at the builder with the small shape still in play and
+			// labelled itself "chord:SMALL notes11". Harmless for eleven notes, which cannot fit the
+			// small shape anyway, and not harmless at all for what it does to twoSwapTurn, which is
+			// handed the same flag and takes a different route with it. Found from the top view of the
+			// dead break at 5 69 100 on Guardian 20x5, where the label was the thing that did not fit.
 			return layBus(placements, lane, triggerDelay, event, style,
-				style == ChordStyle.BUS, layout);
+				style == ChordStyle.BUS || style == ChordStyle.SUNKEN_BUS, layout);
 		}
 		// A stacked shape that will not fit becomes a bus rather than ending the build. Every rule
 		// above tries to predict whether the ground is free, and this is what happens when one of
