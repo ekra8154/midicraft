@@ -2587,6 +2587,35 @@ public final class SongBuilder {
 			int above = turn.above();
 			int turnCells = turn.cells();
 			int offBus = turn.offBus();
+			// Whether the module behind left dust on its empty centre for this climb to start from --
+			// and whether that dust is in the cell this climb would actually read.
+			//
+			// Asked by position, not by flag. A flag says "somebody did this" and relies on everything
+			// else remembering to unsay it: rollSoftTip clears it, but a rail column never goes through
+			// buildShaped, so a run of rails after a stacked module carried the answer along and handed a
+			// climb two free rungs it had nothing to stand on. 115 dead builds, and the render named it in
+			// one line -- rail:HEAD -> rail:HEAD.
+			//
+			// A stacked module ends two columns past its own opening and puts the dust one column past it,
+			// a level above the centre. So the cell this climb wants is one column back from where the
+			// lane now stands, two levels up. Anything else, whoever laid it, is not this module's.
+			boolean centreFeedsTheClimb = CLIMB_OFF_A_STACKED_CENTRE && climb > 0
+				&& above >= 0 && above < floors
+				&& lane.pos().relative(lane.travel().getOpposite()).above(2)
+					.equals(placements.climbFedFromCentre());
+			// Claimed against offered, because a rule that lays a block and never uses it reads exactly
+			// like a rule that works.
+			if (CLIMB_OFF_A_STACKED_CENTRE && climb > 0 && above >= 0 && above < floors
+					&& placements.climbFedFromCentre() != null) {
+				placements.padded(centreFeedsTheClimb ? "climbCentreClaimed" : "climbCentreOutOfReach");
+			}
+			// Such a climb joins two rungs in exactly as one off a bus does, so it is off-bus for every
+			// question the turn asks -- and it costs one cell more, because the dust on the centre is part
+			// of the run where a bus's own last dust is not. ekran: "the ascent costs 4 and not 3, but it
+			// comes out the same since we gain +2 flanks on the bottom".
+			boolean turnsOffBus = endsOnBus(lastStyle, lastBusCells) || centreFeedsTheClimb;
+			int turnOffBusCells = centreFeedsTheClimb && !endsOnBus(lastStyle, lastBusCells)
+				? offBus + 1 : offBus;
 			int wall = lane.travel() == forward ? farWall : nearWall;
 			int stepOffAhead = turn.stepOff();
 			int splitCells = turn.splitCells();
@@ -3212,7 +3241,7 @@ public final class SongBuilder {
 			// walk builds a raised pad whether or not the search was allowed to plan for one. Gating
 			// it here also took the empty-pad bus discount out with it, which predates all of this.
 			int turnPrice = turnPrice(pad, climb > 0, above >= 0 && above < floors,
-				endsOnBus(lastStyle, lastBusCells), turnCells, offBus);
+				turnsOffBus, turnCells, turnOffBusCells);
 			// Priced after the line above, because this is the second place the same turn is priced
 			// and the two were answering differently. {@link #turnPrice} knows a pad standing on a bus
 			// can be lifted onto the climb and charges three; this knew only the older discount, for a
@@ -3220,7 +3249,7 @@ public final class SongBuilder {
 			// and needing three was refused its turn by the arm that had not been told.
 			int turnCost = unpaid == 0
 				? Math.min(WALL_REACH_PRICES_THE_RAISED_PAD ? turnPrice : turnCells,
-					pad.cells().isEmpty() && endsOnBus(lastStyle, lastBusCells) ? offBus : turnCells)
+					pad.cells().isEmpty() && turnsOffBus ? turnOffBusCells : turnCells)
 				: turnCells;
 			boolean reachesWall = !PIN_DESCENTS || flatAhead
 				|| pad.signal() - unpaid >= turnCost;
@@ -3516,7 +3545,7 @@ public final class SongBuilder {
 				// anything else the first cell has to hold the path so the rest has a live wire to
 				// climb from, and a pad of one column has no cell to spare for that.
 				int liftAfter = raiseAfter(pad, climb > 0, above >= 0 && above < floors,
-					endsOnBus(lastStyle, lastBusCells));
+					turnsOffBus);
 				boolean raisedPad = liftAfter >= 0;
 				lane = emitPad(placements, lane, pad, "padClosing", liftAfter);
 				spentPadding = pad.delaySpent();
@@ -3572,7 +3601,7 @@ public final class SongBuilder {
 					// never could through a pad laid on the path.
 					BlockPos landed = climb > 0
 						? addGlassClimb(placements, lane.pos(), travel,
-							raisedPad || endsOnBus(lastStyle, lastBusCells) && pad.cells().isEmpty(), currentTime)
+							raisedPad || turnsOffBus && pad.cells().isEmpty(), currentTime)
 						: descend(placements, lane.pos(), travel, descentSide, currentTime);
 					floor = above;
 					// What the staircase leaves the next lane. It matters because the next lane may
@@ -3583,7 +3612,7 @@ public final class SongBuilder {
 					// Through the same one place canTurn asked, so the wire this lane books itself and
 					// the wire it demanded before turning cannot be two different sums.
 					tipSignal = pad.signal() - pinned - turnPrice(pad, climb > 0,
-						above >= 0 && above < floors, endsOnBus(lastStyle, lastBusCells), turnCells, offBus);
+						above >= 0 && above < floors, turnsOffBus, turnCells, turnOffBusCells);
 					lane = Lane.straight(landed, travel.getOpposite(), depth);
 					gradeLaneStart(placements, wall, travel.getStepX(), 0, climb > 0, stepOffAhead,
 						lane.pos().getX(), climb > 0 ? "Climb" : "Descent");
@@ -11611,6 +11640,7 @@ public final class SongBuilder {
 			if (CLIMB_OFF_A_STACKED_CENTRE && placements.climbAhead()) {
 				placements.padded("climbOffAStackedCentre");
 				set(placements, centre.above(), "minecraft:redstone_wire");
+				placements.climbFedFromCentre(centre.above());
 			}
 		} else {
 			placeNoteBlock(placements, centre, slots.centre());
@@ -13910,6 +13940,7 @@ public final class SongBuilder {
 		 * because it has not been built yet -- and the split never fired once.</p>
 		 */
 		void rollSoftTip() {
+			climbFedFromCentre = null;
 			softBehind = softTip;
 			softTip = false;
 			railTailBehind = railTail;
@@ -14039,6 +14070,23 @@ public final class SongBuilder {
 		 * staircase. See {@link #CLIMB_OFF_A_STACKED_CENTRE}.</p>
 		 */
 		private boolean climbAhead;
+
+		/**
+		 * Whether the module just built laid dust on an empty centre for a climb to start from.
+		 *
+		 * <p>Set by {@link #addStackedEventModule} and cleared by {@link #rollSoftTip}, so it always
+		 * describes the module behind. That is the right moment: a lane turns <em>before</em> laying the
+		 * chord that overshot, so the staircase is built between one module and the next.</p>
+		 */
+		private BlockPos climbFedFromCentre;
+
+		void climbFedFromCentre(BlockPos dust) {
+			climbFedFromCentre = dust == null ? null : dust.immutable();
+		}
+
+		BlockPos climbFedFromCentre() {
+			return climbFedFromCentre;
+		}
 
 		void climbAhead(boolean ahead) {
 			climbAhead = ahead;
