@@ -9380,6 +9380,24 @@ public final class SongBuilder {
 		// STACKED_FRONT+nudge holding off descent4 for a note block and its oak planks.
 		int roomToWall = roomAhead - handoverReserve(layout);
 		int stackedRoom = STACKED_CELLS + 1;
+		// The spare column a stacked module is charged is its handover, and a climb is a handover.
+		//
+		// Where the lane climbs straight after this chord and the centre holds no note, the dust on that
+		// centre is what carries the run onto the staircase -- so the module wants its own two columns
+		// and not a third. See {@link #CLIMB_OFF_A_STACKED_CENTRE}.
+		//
+		// ekran's, and it is what makes a one-cell cut unnecessary. A cut whose near half is a single
+		// cell spends those same two columns on a bus of two notes and sends the rest over the
+		// staircase; the module lands flush in them and carries four, with nothing to carry over. They
+		// repasted am-i-dreaming to show it: a lone {@code TU} at {@code 4 69 7} where an {@code AN}
+		// belonged, with the glass already starting in the very next column.
+		if (CLIMB_OFF_A_STACKED_CENTRE && style.stacked() && !style.busHeaded()
+				&& placements.climbAhead()) {
+			UltraSlots forTheClimb = slotsFor(style, event.notes());
+			if (forTheClimb != null && forTheClimb.centre() == null) {
+				stackedRoom = STACKED_CELLS;
+			}
+		}
 		if (style.busHeaded()) {
 			StackedBusSplit measured = splitFor(style, event.notes());
 			stackedRoom = measured == null ? STACKED_CELLS + 1
