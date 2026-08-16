@@ -2655,6 +2655,10 @@ public final class SongBuilder {
 			// The same slack the build site works out, which at this point in the lane is the whole wait
 			// less the pad already spent -- nothing has been spent yet when a chord is measured.
 			int slackAhead = Math.max(0, (event.time() - currentTime - 1) / 4);
+			// Whether this chord opens its lane, which a sunken bus is refused on -- see
+			// {@link #SUNKEN_OPENS_A_LANE}. Set before the shape is decided so the decision and the
+			// build read the same answer.
+			placements.laneJustOpened(!laneStarted);
 			Shape shaped = shapeFor(placements, willOpenOn, event, slackAhead,
 				!columnBehindBusy || delayAhead > 0
 					|| backPairIsFree(placements, willOpenOn, event.time()),
@@ -9282,6 +9286,8 @@ public final class SongBuilder {
 		// put note blocks in ground the route comes back for. Refused rather than trimmed, because the
 		// length has to be the length that was measured.
 		boolean sunken = SUNKEN_BUSES && style == ChordStyle.BUS && !inTurn
+			&& (SUNKEN_OPENS_A_LANE || !placements.laneJustOpened())
+			&& event.notes().size() >= SUNKEN_LOWEST_CHORD
 			&& sunkenFits(event.notes().size()) && hasAHarp(event.notes());
 		// Handed to the builder rather than re-derived there. {@link #layEventBody} is four calls down
 		// and can see none of this, and a builder that decides for itself is the second place deciding
@@ -11893,6 +11899,35 @@ public final class SongBuilder {
 	static boolean SUNKEN_BUSES = true;
 
 	/**
+	 * The smallest chord laid as a {@link ChordStyle#SUNKEN_BUS}.
+	 *
+	 * <p>Four is where the shape starts to exist -- three notes in the opening and one beside the
+	 * lowered dust. Whether it is where the shape is <em>safe</em> is a different question, and this
+	 * is here to answer it by measurement: a short sunken bus is mostly opening, so its two columns
+	 * of new geometry are a larger share of it and it stands in more places.</p>
+	 */
+	static int SUNKEN_LOWEST_CHORD = 4;
+
+	/**
+	 * Whether a sunken bus may be the chord that opens a lane.
+	 *
+	 * <p>The first chord after a staircase does not read its wire the way the others do -- a descent
+	 * lands on stone with dust running over it, and what a module finds behind its repeater there is
+	 * not what it finds mid-lane. The dead wire this shape arrived with renders as exactly that: a
+	 * lane opening off a descent4 at {@code 23 65 232} on Guardian 24 wide over three floors.</p>
+	 *
+	 * <p><b>On, because switching it off changes nothing and the hypothesis was wrong.</b> Measured
+	 * over the library at eighteen widths: 18,355 dead against 18,355, 316 wrong against 316, one
+	 * column of depth. So whatever is killing those lanes, it is not that the sunken bus opened
+	 * them. Left here with its number rather than deleted, so the next person does not spend the
+	 * same hour on the same idea. The other dead end was chord size -- see
+	 * {@link #SUNKEN_LOWEST_CHORD}, where the dead count holds at 18,349 whether the floor is 6, 8
+	 * or 12, while wrong notes fall from 279 to 80. Dead wire is structural; wrong notes scale with
+	 * use. Those are two different faults.</p>
+	 */
+	static boolean SUNKEN_OPENS_A_LANE = true;
+
+	/**
 	 * The smallest chord a busy pad will spend a column on.
 	 *
 	 * <p>Twenty-five, and it is ekran's line: "it's not worth it unless the chord truly is cutting a
@@ -13743,6 +13778,17 @@ public final class SongBuilder {
 		 * what this says.</p>
 		 */
 		private boolean sunkenOffered;
+
+		/** Whether the chord about to be measured is the first its lane holds. */
+		private boolean laneJustOpened;
+
+		void laneJustOpened(boolean opened) {
+			laneJustOpened = opened;
+		}
+
+		boolean laneJustOpened() {
+			return laneJustOpened;
+		}
 
 		void sunkenOffered(boolean offered) {
 			sunkenOffered = offered;
