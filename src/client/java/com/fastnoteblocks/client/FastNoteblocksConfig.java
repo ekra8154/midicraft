@@ -243,13 +243,6 @@ public final class FastNoteblocksConfig {
 	public static final int DEFAULT_BUILD_LANE_FLOORS = 1;
 	public static final int MIN_BUILD_LANE_FLOORS = 1;
 	public static final int MAX_BUILD_LANE_FLOORS = 16;
-	/**
-	 * Commands sent per client tick when pasting a build. Singleplayer tolerates far more than the
-	 * original fixed rate of 2; servers may treat a high rate as command spam.
-	 */
-	public static final int DEFAULT_COMMANDS_PER_TICK = 32;
-	public static final int MIN_COMMANDS_PER_TICK = 1;
-	public static final int MAX_COMMANDS_PER_TICK = 256;
 	/** Repeats of a pitch closer than this many repeater ticks collapse on convert. 0 disables. */
 	public static final int DEFAULT_REPEAT_MERGE_TICKS = 1;
 	public static final int MIN_REPEAT_MERGE_TICKS = 0;
@@ -353,7 +346,7 @@ public final class FastNoteblocksConfig {
 	private boolean layerPanelCollapsed;
 	private int repeatMergeTicks;
 	private int conversionGapPercentile;
-	private int commandsPerTick;
+	private double commandsPerTick;
 	private int buildLaneWidth;
 	private int buildLaneFloors;
 	private boolean ultraLaneStartTop;
@@ -489,7 +482,7 @@ public final class FastNoteblocksConfig {
 					stored.maxBuildFloors == null ? DEFAULT_MAX_BUILD_FLOORS : stored.maxBuildFloors
 				);
 				instance.commandsPerTick = clampCommandsPerTick(
-					stored.commandsPerTick == null ? DEFAULT_COMMANDS_PER_TICK : stored.commandsPerTick
+					stored.commandsPerTick == null ? PasteRate.DEFAULT : stored.commandsPerTick
 				);
 				instance.buildLaneWidth = clampBuildLaneWidth(
 					stored.buildLaneWidth == null ? DEFAULT_BUILD_LANE_WIDTH : stored.buildLaneWidth
@@ -1174,11 +1167,11 @@ public final class FastNoteblocksConfig {
 		this.maxBuildFloors = clampMaxBuildFloors(maxBuildFloors);
 	}
 
-	public int commandsPerTick() {
+	public double commandsPerTick() {
 		return commandsPerTick;
 	}
 
-	public void setCommandsPerTick(int commandsPerTick) {
+	public void setCommandsPerTick(double commandsPerTick) {
 		this.commandsPerTick = clampCommandsPerTick(commandsPerTick);
 	}
 
@@ -1319,7 +1312,7 @@ public final class FastNoteblocksConfig {
 		config.layerPanelCollapsed = false;
 		config.repeatMergeTicks = DEFAULT_REPEAT_MERGE_TICKS;
 		config.conversionGapPercentile = DEFAULT_CONVERSION_GAP_PERCENTILE;
-		config.commandsPerTick = DEFAULT_COMMANDS_PER_TICK;
+		config.commandsPerTick = PasteRate.DEFAULT;
 		config.buildLaneWidth = DEFAULT_BUILD_LANE_WIDTH;
 		config.buildLaneFloors = DEFAULT_BUILD_LANE_FLOORS;
 		config.ultraLaneStartTop = false;
@@ -1373,8 +1366,8 @@ public final class FastNoteblocksConfig {
 		return Math.max(MIN_BUILD_LANE_FLOORS, Math.min(MAX_BUILD_LANE_FLOORS, floors));
 	}
 
-	private static int clampCommandsPerTick(int commands) {
-		return Math.max(MIN_COMMANDS_PER_TICK, Math.min(MAX_COMMANDS_PER_TICK, commands));
+	private static double clampCommandsPerTick(double commands) {
+		return PasteRate.clamp(commands);
 	}
 
 	private static int clampConversionGapPercentile(int percentile) {
@@ -1483,7 +1476,7 @@ public final class FastNoteblocksConfig {
 		private Integer composerSpeedQuarters;
 		private Integer repeatMergeTicks;
 		private Integer conversionGapPercentile;
-		private Integer commandsPerTick;
+		private Double commandsPerTick;
 		private Integer buildLaneWidth;
 		private Integer buildLaneFloors;
 		private Boolean ultraLaneStartTop;

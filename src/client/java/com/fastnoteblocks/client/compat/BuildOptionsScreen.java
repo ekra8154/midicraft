@@ -1,6 +1,7 @@
 package com.fastnoteblocks.client.compat;
 
 import com.fastnoteblocks.client.FastNoteblocksConfig;
+import com.fastnoteblocks.client.PasteRate;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
@@ -38,7 +39,7 @@ final class BuildOptionsScreen extends Screen {
 	 * that says which layout is chosen.</p>
 	 */
 	private boolean layoutsShowing;
-	private int commandsPerTick;
+	private double commandsPerTick;
 	private int laneWidth;
 	private int laneFloors;
 
@@ -164,9 +165,9 @@ final class BuildOptionsScreen extends Screen {
 		}
 
 		y = rateRow(top);
-		addRenderableWidget(Button.builder(Component.literal("-"), clicked -> changeRate(-8))
+		addRenderableWidget(Button.builder(Component.literal("-"), clicked -> changeRate(-1))
 			.bounds(left, y, 20, 20).build());
-		addRenderableWidget(Button.builder(Component.literal("+"), clicked -> changeRate(8))
+		addRenderableWidget(Button.builder(Component.literal("+"), clicked -> changeRate(1))
 			.bounds(left + width - 20, y, 20, 20).build());
 
 		addRenderableWidget(Button.builder(Component.literal("Paste"), clicked -> {
@@ -269,9 +270,25 @@ final class BuildOptionsScreen extends Screen {
 		return predicted.breachingLanes() == 0 ? 0xFF7ACF7A : 0xFFFFAA00;
 	}
 
-	private void changeRate(int delta) {
-		commandsPerTick = Math.max(FastNoteblocksConfig.MIN_COMMANDS_PER_TICK,
-			Math.min(FastNoteblocksConfig.MAX_COMMANDS_PER_TICK, commandsPerTick + delta));
+	/**
+	 * How long it takes, in the largest unit that still says something.
+	 *
+	 * <p>A rate of one command every four ticks turns a big build into hours, and "31984.0s" is a
+	 * number nobody reads as a length of time.</p>
+	 */
+	private static String howLong(double seconds) {
+		if (seconds < 90) {
+			return String.format(Locale.ROOT, "%.1fs", seconds);
+		}
+		if (seconds < 5400) {
+			return String.format(Locale.ROOT, "%.0f min", seconds / 60);
+		}
+		return String.format(Locale.ROOT, "%.1f hours", seconds / 3600);
+	}
+
+	/** Along the ladder rather than by a fixed step: the range is a thousand-fold and a rate is a ratio. */
+	private void changeRate(int direction) {
+		commandsPerTick = PasteRate.step(commandsPerTick, direction);
 		init();
 	}
 
@@ -338,13 +355,13 @@ final class BuildOptionsScreen extends Screen {
 		SongBuilder.BlockCounts blocks = SongBuilder.blockCounts(sequence);
 		int commands = blocks.total();
 		double seconds = commands / (commandsPerTick * 20.0);
-		graphics.text(font, String.format(Locale.ROOT, "%d commands per tick", commandsPerTick),
+		graphics.text(font, PasteRate.label(commandsPerTick),
 			left + 26, rateY + 6, 0xFFD6D8DD, false);
 		// "If you stay with it" is the whole of the honesty here: a build longer than the loaded
 		// region around you pauses at the edge and waits to be walked to, so the figure is a floor
 		// and not an estimate.
 		graphics.text(font, String.format(Locale.ROOT,
-				"about %d blocks, roughly %.1fs if you stay with it", commands, seconds),
+				"about %d blocks, roughly %s if you stay with it", commands, howLong(seconds)),
 			left, rateY + 24, 0xFF8A9098, false);
 		Forecast predicted = forecast;
 		graphics.text(font, forecastLine(predicted), left, rateY + 36, forecastColour(predicted),

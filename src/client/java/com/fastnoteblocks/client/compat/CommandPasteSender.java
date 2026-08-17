@@ -100,6 +100,8 @@ public final class CommandPasteSender {
 	private static int changed;
 	private static BlockPos firstChanged;
 	private static long now;
+	/** Commands owed but not yet whole, for the rates below one a tick. */
+	private static double credit;
 	private static int nags;
 	private static boolean announced;
 
@@ -159,6 +161,7 @@ public final class CommandPasteSender {
 		changed = 0;
 		firstChanged = null;
 		now = 0;
+		credit = 0;
 		nags = 0;
 		announced = false;
 		whenDone = done;
@@ -193,6 +196,7 @@ public final class CommandPasteSender {
 		repaired = 0;
 		changed = 0;
 		firstChanged = null;
+		credit = 0;
 		nags = 0;
 		whenDone = null;
 	}
@@ -225,15 +229,21 @@ public final class CommandPasteSender {
 		if (QUEUE.isEmpty()) {
 			return;
 		}
-		int perTick = FastNoteblocksConfig.get().commandsPerTick();
+		// Below one a tick the rate is a wait rather than a count, so it is banked and spent. Never
+		// more than a tick's worth is banked: a paste that paused for two minutes at the edge of the
+		// world would otherwise resume by firing every command it had been owed at once, which is
+		// the disconnect the slow rates exist to avoid.
+		double rate = FastNoteblocksConfig.get().commandsPerTick();
+		credit = bank(credit, rate);
 		boolean waiting = false;
-		for (int i = 0; i < perTick && !QUEUE.isEmpty(); i++) {
+		while (credit >= 1 && !QUEUE.isEmpty()) {
 			Placement next = QUEUE.peekFirst();
 			if (next.at() != null && !writable(level, next.at())) {
 				waiting = true;
 				break;
 			}
 			QUEUE.removeFirst();
+			credit--;
 			minecraft.player.connection.sendCommand(next.command());
 			sent++;
 			if (next.at() != null) {
@@ -326,6 +336,18 @@ public final class CommandPasteSender {
 			nags++;
 			uncheckedAt(minecraft);
 		}
+	}
+
+	/**
+	 * A tick's worth of rate added to what was owed, capped at what a single tick may spend.
+	 *
+	 * <p>The cap is the whole of it. Without one, a paste held at the edge of the world for two
+	 * minutes would come back owed thousands of commands and send every one of them on the tick you
+	 * walked into range -- which is the disconnect that the rates below one a tick exist to
+	 * avoid.</p>
+	 */
+	static double bank(double credit, double rate) {
+		return Math.min(credit + rate, Math.max(rate, 1));
 	}
 
 	/** Whether a position is far enough inside what this client holds to be worth writing to. */
