@@ -86,8 +86,14 @@ class UltraLaneV2Test {
 	 * <p>ekran's rule, and a regression rather than a measurement: a staircase set back inside the
 	 * corridor stands in a column no other corridor's turn stands in, which is the one thing that
 	 * reaches into the lane alongside. The closing pad has been walked out to its wall since
-	 * {@link SongBuilder#PIN_DESCENTS}; {@link SongBuilder#CUT_PINS_ITS_STAIRCASE} holds the cut to
-	 * the same rule, and v2 closes nearly every lane on a cut.</p>
+	 * {@link SongBuilder#PIN_DESCENTS}, and that is what this holds.</p>
+	 *
+	 * <p>The pin that walked a headed cut out to its wall came out on 2026-08-16, as a fossil of the
+	 * paster that could not cut everywhere, and nothing was put in its place: a cut that would fall
+	 * short takes a shorter head and fills the columns with its own notes, or gives the head up for a
+	 * plain cut, or is laid whole and the lane breaches. ekran, the same day: <em>"a lane may NOT turn
+	 * before it's allowed to ... I do not want ANY recessed climbs or descents"</em> -- a breach is
+	 * allowed where a recess is not, and no column of padding is allowed to buy either.</p>
 	 *
 	 * <p>Asserted on the count the walk takes from the block the staircase actually lands on, not on
 	 * the shape it was planned in.</p>

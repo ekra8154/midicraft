@@ -11,12 +11,20 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * Scratch: what pinning a cut's staircase to the wall costs, size by size.
+ * Scratch: where a cut leaves its staircase, size by size.
  *
- * <p>ekran's rule is that every climb, descent and flat turn stands at the wall. The padded close has
- * pinned its staircase since {@link SongBuilder#PIN_DESCENTS}; the cut never has, and every recessed
- * column in either layout is a headed cut whose near half ran out of notes before the wall. The two
- * arms here are {@link SongBuilder#CUT_PINS_ITS_STAIRCASE} off and on.</p>
+ * <p>ekran's rule is that every climb, descent and flat turn stands at the wall, and the padded close
+ * has been walked out to it since {@link SongBuilder#PIN_DESCENTS}. The cut was held to the same rule
+ * by a pin until 2026-08-16, when ekran had it out as a fossil: a paster that can cut any chord
+ * anywhere does not have to buy itself a wall in wire.</p>
+ *
+ * <p>The rule stayed. What fills the columns now is the chord -- a cut that would fall short takes a
+ * shorter head, or gives the head up for a plain cut, or is laid whole and breaches. So the recessed
+ * columns here should read <b>nought</b>, and this is the table that says what holding them there
+ * costs in breaches, refusals and length.</p>
+ *
+ * <p>The arms that switched the pin are gone with it. What is left is the same table on one arm, and
+ * the read-back that says whether a build still plays.</p>
  */
 @Tag("sweep")
 class RecessProbe {
@@ -27,13 +35,12 @@ class RecessProbe {
 	}
 
 	@Test
-	void whatThePinCosts() throws Exception {
+	void whereTheCutLeavesItsStaircase() throws Exception {
 		System.out.println();
-		System.out.println("==== the cut's staircase, recessed and pinned ====");
+		System.out.println("==== the cut's staircase, and how far inside the wall it stands ====");
 		try {
-			// Both switches, because both are new and both can collide. A table that moves one of them
-			// cannot say which one a refusal belongs to, and the bend rule is known to refuse two
-			// Guardian sizes on its own.
+			// The bend rule stays on both arms, because it is known to refuse Guardian sizes on its own
+			// and a table that moves it cannot say which switch a refusal belongs to.
 			for (boolean bend : new boolean[] {false, true}) {
 				SongBuilder.STACKED_MAY_WRAP_A_BEND = bend;
 				System.out.println("   -- STACKED_MAY_WRAP_A_BEND = " + bend);
@@ -41,40 +48,24 @@ class RecessProbe {
 				song("guardian", BreachView.song("deltarune-ch-4-guardian"));
 			}
 		} finally {
-			SongBuilder.CUT_PINS_ITS_STAIRCASE = true;
 			SongBuilder.STACKED_MAY_WRAP_A_BEND = true;
 		}
 	}
 
 	/**
-	 * And the pinned build read back off its own blocks, which is the only thing that can see a pin
-	 * that conducts nothing.
+	 * And the build read back off its own blocks, which is the only thing that can see wire that
+	 * conducts nothing.
 	 *
 	 * <p>Breach counts cannot: a run of sixteen builds cleanly, reports nought and plays half a song.
-	 * The back pin is wire laid downstream of the cut's own repeater, so it is exactly the kind of
-	 * change that reads well and goes dead.</p>
+	 * Taking the pin out shortens the run a cut opens with and leaves bare corridor where wire used to
+	 * stand, so both songs are read back rather than counted.</p>
 	 */
 	@Test
-	void thePinnedBuildStillPlays() throws Exception {
+	void theUnpinnedBuildStillPlays() throws Exception {
 		System.out.println();
-		System.out.println("==== pinned builds, read off the blocks ====");
-		// Three arms, because the pin is two mechanisms. A pad in front of the module is plain dust on
-		// the path, which the parity pad has always laid; a pad behind the near half is raised, and
-		// raised wire beside a lane is the shape that reaches into a neighbour's notes.
-		List<SongBuilder.EventNote> guardian = BreachView.song("deltarune-ch-4-guardian");
-		try {
-			SongBuilder.CUT_PINS_ITS_STAIRCASE = false;
-			readBack("guardian pin=off", guardian);
-			SongBuilder.CUT_PINS_ITS_STAIRCASE = true;
-			SongBuilder.CUT_PINS_BEHIND = false;
-			readBack("guardian front only", guardian);
-			SongBuilder.CUT_PINS_BEHIND = true;
-			readBack("guardian both", guardian);
-			readBack("all-25 both", AllTwentyFivesTest.allTwentyFives());
-		} finally {
-			SongBuilder.CUT_PINS_ITS_STAIRCASE = true;
-			SongBuilder.CUT_PINS_BEHIND = true;
-		}
+		System.out.println("==== builds with no pin, read off the blocks ====");
+		readBack("guardian", BreachView.song("deltarune-ch-4-guardian"));
+		readBack("all-25", AllTwentyFivesTest.allTwentyFives());
 	}
 
 	private static void readBack(String name, List<SongBuilder.EventNote> song) {
@@ -206,8 +197,7 @@ class RecessProbe {
 
 	private static void song(String name, List<SongBuilder.EventNote> song) {
 		System.out.println("   " + name);
-		for (boolean pinned : new boolean[] {false, true}) {
-			SongBuilder.CUT_PINS_ITS_STAIRCASE = pinned;
+		{
 			int lanes = 0;
 			int blocks = 0;
 			int dirty = 0;
@@ -249,12 +239,12 @@ class RecessProbe {
 				}
 			}
 			System.out.println(String.format(
-				"      pin=%-5s lanes=%-4d blocks=%-5d dirty=%-2d refused=%-2d length=%-7d"
+				"      lanes=%-4d blocks=%-5d dirty=%-2d refused=%-2d length=%-7d"
 				+ " recessed=%d lanes / %d columns / worst %d",
-				pinned, lanes, blocks, dirty, refused, length, recessLanes, recessColumns,
+				lanes, blocks, dirty, refused, length, recessLanes, recessColumns,
 				worstRecess));
 			census.entrySet().stream()
-				.filter(entry -> entry.getKey().startsWith("cutPin")
+				.filter(entry -> entry.getKey().startsWith("busyPad")
 					|| entry.getKey().startsWith("recess"))
 				.forEach(entry -> System.out.println("         " + entry.getKey() + " = "
 					+ entry.getValue()));

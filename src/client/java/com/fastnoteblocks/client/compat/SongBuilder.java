@@ -1605,7 +1605,7 @@ public final class SongBuilder {
 				// A plain cut sizes its near half at {@code room - 1} cells and fills every one of them,
 				// so it lands flush. A headed cut sizes its near half from what the chord had left over
 				// after the head, and where the chord runs out first the staircase stands wherever the
-				// module happened to end -- which is the recess {@link #CUT_PINS_ITS_STAIRCASE} pays for.
+				// module happened to end. Neither walk pays that gap now; both count it.
 				int shortOfWall = ((travel == forward ? farWall : nearWall) - cursor.getX())
 					* travel.getStepX();
 				placements.recessed(shortOfWall);
@@ -2932,10 +2932,11 @@ public final class SongBuilder {
 			// head of six cuts flush, at fourteen cells of the fifteen.
 			//
 			// The ground cannot be asked here, and that was tried first. A head's back flanks stand in
-			// the column it opens on, and a cut opens {@code splitPin} columns further along than this --
-			// a pin worked out below, from the head this line is choosing. Asked at
+			// the column it opens on, and a cut may open a column further along than this -- the busy
+			// pad, decided below out of the head this line is choosing. Asked at
 			// {@code lane.ahead(delayColumns)} it is the wrong cell and comes back yes every time:
-			// measured, it changed not one decision in 1,054 builds.
+			// measured, it changed not one decision in 1,054 builds. (It was the pin's columns that
+			// made this worst, and the pin has gone; the ordering is the same either way.)
 			boolean stackedIsBehind = CUT_ASKS_WHAT_KIND_IS_BEHIND
 				? columnBehindBusy && lastStyle.stacked() : columnBehindBusy;
 			StackedSplit headed = layout.ultra() && cutOffered && index > 0 && above >= 0
@@ -2962,12 +2963,16 @@ public final class SongBuilder {
 			//
 			// It costs a column and hands it straight back: the head asked for here is the same head in a
 			// room one smaller, so the near half is one cell shorter and the lane still comes to rest on
-			// its wall. The column is laid by the pin below, which already exists to do exactly this and
-			// already knows that a cell in front frees the back pair -- its own roomBehind reads
-			// {@code delayColumns + inFront > 0}. So this does not lay anything; it decides that a pin of
-			// at least one is worth having, and the pin lays it.
+			// its wall.
+			//
+			// It lays its own column, which it did not have to while the cut pinned its staircase -- the
+			// pin was already laying columns in front of the module and one of them could be this one.
+			// With the pin gone there is nothing else laying anything in front of a cut, so the rule
+			// carries its own cell or it does not work at all. Kept when the pin went because it is a
+			// different thing from a pad to the wall: it buys a cut that is otherwise refused outright,
+			// where the pin bought a cut that was already happening a tidier place to stand.
 			int busyPad = 0;
-			if (BUSY_PAD_FREES_THE_BACK_FLANKS && headed == null && CUT_PINS_ITS_STAIRCASE
+			if (BUSY_PAD_FREES_THE_BACK_FLANKS && headed == null
 					&& layout.ultra() && cutOffered && index > 0 && above >= 0 && above < floors
 					// Only a column that is actually in the way. A delay already moves the opening, and a
 					// column that is not busy has nothing to free.
@@ -3023,87 +3028,17 @@ public final class SongBuilder {
 			if (headed != null && columnBehindBusy && delayColumns == 0) {
 				placements.padded("planStackedSplitShortHead");
 			}
-			// ekran's rule, and the whole of it: every climb, every descent and every flat turn stands
-			// at the wall. A staircase set back from it stands in a column no other corridor's turn
-			// stands in, and that is what reaches into the lane alongside. The closing pad is walked out
-			// to the wall for exactly this reason -- see {@link #PIN_DESCENTS} -- and the cut, which is
-			// how v2 closes nearly every lane, was never held to the same rule.
+			// A headed cut used to be walked out to its wall by columns of pad, in front of the module
+			// and behind its near half -- {@code CUT_PINS_ITS_STAIRCASE}, removed at ekran's word on
+			// 2026-08-16: <em>"cut pinning is a fossil from the v1 paster. we can split any chord,
+			// anywhere, so it's unneeded now. all it's doing right now is adding unused space."</em>
+			// Nothing replaced it and nothing is allowed to: a pad in front of the cut and a pad behind
+			// its near half are the same wire in the same corridor as the pin, whatever they are called.
 			//
-			// It is a headed cut every time. A plain cut sizes its near half at {@code room - 1} cells
-			// and fills all of them, so it lands flush by construction; a headed cut takes what the head
-			// left over, and a chord that runs out first leaves its staircase wherever the module ended.
-			// Measured across both songs at sixteen sizes: 2,725 columns of it in v2 and 425 in v1, and
-			// every single one a headed cut, predicted to the column by {@link StackedSplit#columns}.
-			//
-			// Paid for in front of the module rather than behind it. The two put the same wire in the
-			// same corridor, but a pad behind the near half is spent out of the fifteen the cut opens
-			// with -- which already carries the transition, both halves and the staircase -- while a pad
-			// in front stands before the module's own repeater and is spent out of the run the lane is
-			// already on. So the cut asked for here is the same cut in a room that much smaller: same
-			// head, same halves, same wire, starting further along and ending on the wall.
-			//
-			// Refused rather than recessed where it will not go, because "no give at all" is the rule.
-			// A cut that cannot be pinned is given up and the chord is laid whole, which is the fallback
-			// that has always been there.
-			int splitPin = 0;
-			int splitPinBehind = 0;
-			if (CUT_PINS_ITS_STAIRCASE && headed != null && room - headed.columns() > 0) {
-				int gap = room - headed.columns();
-				// As much of it in front as the wire there will carry, and the rest behind the near half.
-				// Neither side is reliably the affordable one -- see {@link #CUT_PINS_BEHIND} -- and a
-				// column is a column wherever it goes, so the gap is not one decision but two budgets to
-				// spend out of in order. Taking the front first is deliberate: it leaves the cut's own
-				// fifteen alone, and that fifteen is the one that also has to reach the far half.
-				//
-				// The front figure is the reach question the nudge asks, for the same reason: this pad is
-				// laid on top of the delay in front of the module, so what has to fit inside a repeater's
-				// fifteen is the run so far, the delay and the pin.
-				int inFront = Math.max(0, Math.min(gap,
-					DUST_RANGE - placements.runSinceRepeater() - delayColumns));
-				// The same cut in a room that much smaller -- same head, same halves, same wire, opening
-				// further along. Asked again rather than shifted, because a smaller room can come back
-				// with a different shape and the walk has to build the shape that was priced.
-				StackedSplit flush = inFront == 0 ? headed
-					: stackedSplitOf(event.notes(), room - inFront, splitCells, climb > 0,
-						!columnBehindBusy || delayColumns + inFront > 0
-							|| CUT_ASKS_THE_BLOCKS_BEHIND
-								&& backPairIsFree(placements, lane.ahead(delayColumns + inFront),
-									event.time()),
-						stackedIsBehind);
-				// And what that shape still leaves is checked rather than assumed. A shape that overshoots
-				// the smaller room is no use at all; one that falls short of it wants the rest behind.
-				int behind = flush == null ? -1 : room - inFront - flush.columns();
-				// Behind the near half is downstream of the module's repeater, so it comes out of the
-				// fifteen the cut opens with -- which already carries the transition, both halves and the
-				// staircase. Never on a shed head: a shed hands over onto the staircase's own first rung
-				// instead of laying a transition cell of its own, so it is the one shape that has to touch
-				// its staircase.
-				if (flush != null && behind >= 0 && (behind == 0
-						|| CUT_PINS_BEHIND && !flush.shed()
-							&& flush.runCells(splitCells) + behind <= DUST_RANGE)) {
-					placements.padded(behind == 0 ? "cutPinned" : "cutPinnedBehind");
-					headed = flush;
-					splitPin = inFront;
-					splitPinBehind = behind;
-				} else {
-					// Neither budget covers it. Then the head goes and the chord is laid whole, which is a
-					// lane past its wall -- a breach the build knows how to count, and the price of the rule.
-					placements.padded(inFront < gap ? "cutPinPastTheWire" : "cutPinRefused");
-					headed = null;
-				}
-			}
-			// A busy pad is only sound if the pin really laid the column it was promised. The head above
-			// was chosen on the understanding that it opens a column further along, where the slots behind
-			// are free; built flush against the busy column instead it hangs its back flanks in somebody
-			// else's cell, which is a wrong note rather than a breach. So it is given up rather than built
-			// on a promise the pin did not keep.
-			if (busyPad > 0 && headed != null && splitPin < busyPad) {
-				placements.padded("busyPadLostItsColumn");
-				headed = null;
-				splitPin = 0;
-				splitPinBehind = 0;
-				busyPad = 0;
-			}
+			// The rule the pin served is not repealed with it -- every climb, every descent and every
+			// flat turn stands at the wall, and ekran restated it the same day as absolute. What fills
+			// the columns instead is the chord itself, decided a few lines below where the shape is
+			// measured against the room it has to fill.
 			// A cut whose head lands on the wrong parity is moved a column, not given up.
 			//
 			// It used to be given up, on the grounds that a cut's near half is measured to land
@@ -3121,7 +3056,10 @@ public final class SongBuilder {
 			// twenty-four that would not cut, and a lane five columns past its wall for want of one.
 			boolean splitNudge = false;
 			boolean splitClashed = false;
-			if (headed != null && stackedClashes(placements, lane.ahead(delayColumns + splitPin),
+			// Asked at the column the module will actually open in, which is a column further along
+			// where a busy pad bought one. That offset used to be the pin's, and the busy pad is what
+			// is left of it.
+			if (headed != null && stackedClashes(placements, lane.ahead(delayColumns + busyPad),
 					event.time(), headed.slots())) {
 				splitClashed = true;
 				// And the same question the chord nudge is asked: does the wire still reach. This
@@ -3134,27 +3072,25 @@ public final class SongBuilder {
 				// falls inside that delay the run resets and this is too careful by however much it
 				// reset, which is the safe way to be wrong about a nudge.
 				boolean splitOutOfWire = MEASURED_NUDGE_REACH
-					&& placements.runSinceRepeater() + delayColumns + splitPin + 1 > DUST_RANGE;
+					&& placements.runSinceRepeater() + delayColumns + busyPad + 1 > DUST_RANGE;
 				if (splitOutOfWire) {
 					placements.padded("planSplitNudgePastTheWire");
 				}
 				StackedSplit shifted = !SPLIT_NUDGES || splitOutOfWire
-					|| stackedClashes(placements, lane.ahead(delayColumns + splitPin + 1), event.time(),
+					|| stackedClashes(placements, lane.ahead(delayColumns + busyPad + 1), event.time(),
 						headed.slots())
-					? null : stackedSplitOf(event.notes(), room - splitPin - 1, splitCells, climb > 0,
-						!columnBehindBusy || delayColumns + splitPin + 1 > 0
+					? null : stackedSplitOf(event.notes(), room - busyPad - 1, splitCells, climb > 0,
+						!columnBehindBusy || delayColumns + busyPad + 1 > 0
 							|| CUT_ASKS_THE_BLOCKS_BEHIND
-								&& backPairIsFree(placements, lane.ahead(delayColumns + splitPin + 1), event.time()),
+								&& backPairIsFree(placements, lane.ahead(delayColumns + busyPad + 1), event.time()),
 						stackedIsBehind);
 				if (shifted == null) {
 					// Both cells wrong, or nothing left to cut once a column is spent. Then the head
 					// goes, which is what this did in every case before.
 					placements.padded("planStackedSplitClashed");
 					headed = null;
-					// And with the head goes its pin. What follows is a plain cut, which fills the room it
-					// is given and needs none.
-					splitPin = 0;
-					splitPinBehind = 0;
+					// And with the head goes the column bought for it. What follows is a plain cut, which
+					// fills the room it is given and needs nothing in front of it.
 					busyPad = 0;
 				} else {
 					placements.padded("planStackedSplitNudged");
@@ -3185,6 +3121,80 @@ public final class SongBuilder {
 			}
 			if (stackedFitsInstead) {
 				placements.padded("cutSkippedForAStackedClimb");
+			}
+			// A cut fills the room it is given, or it is not this chord's cut.
+			//
+			// ekran's, 2026-08-16, and it is the rule the pin used to serve, stated without the pin and
+			// without anything else laying a column either: a lane may not turn before it is allowed
+			// to, and no wire is to be spent buying it the right to. A headed cut sizes its near half
+			// out of what the chord had left after the head, so a chord whose tail runs out before the
+			// room does leaves its module short of the wall -- and the staircase then gets built where
+			// the module ended, in a column no other corridor's turn stands in.
+			//
+			// So the shape is measured against the room before it is kept. What fills the gap is music
+			// or nothing: a plain cut sizes its near half at {@code room - 1} cells and fills every one
+			// of them, so where the chord is small enough for one it lands flush and carries more notes
+			// on this floor than the headed cut would have. Where it is not, the chord is laid whole and
+			// the lane breaches, which the build counts and says out loud.
+			//
+			// Both of those are allowed and a recessed staircase is not. Padding the gap is what this
+			// deliberately does not do -- see the removed pin, and {@link #V2_PADS_AHEAD} for the same
+			// reasoning about the lane in front.
+			//
+			// Asked here rather than where the head was chosen, because the nudge moves the module a
+			// column and the busy pad moves it another, and what has to fill the room is what is left
+			// after both. The pin asked before them and kept {@code recessMispredicted} to find out
+			// when that had been wrong.
+			if (headed != null) {
+				int roomLeft = room - busyPad - (splitNudge ? 1 : 0);
+				int gap = roomLeft - headed.columns();
+				if (gap > 0) {
+					// Counted by how far short it fell and how big the chord was, because those two say
+					// which lever is worth reaching for.
+					placements.padded("cutFellShortBy" + Math.min(gap, 6));
+					placements.padded("cutFellShortAt" + Math.min(event.notes().size(), 30) + "Notes");
+					// A shorter head, which is how a cut fills a column with music instead of wire.
+					//
+					// The head carries seven notes in the two columns a module takes; the near half
+					// carries two a column. So every pair of notes taken out of the head and left to the
+					// tail lengthens the near half by exactly one column, and the whole shape still ends
+					// on the same repeater with the same run. A head of five is a head of seven that has
+					// handed one column back to the music.
+					//
+					// Which is why this is not padding and is not a smaller cut: the columns between the
+					// module and the wall get filled with the chord's own notes. It reaches a gap of one
+					// and no further -- and a gap of one is 594 of the library's 1,574 short cuts,
+					// including the chords of twenty and twenty-four where losing the head means losing
+					// the cut altogether.
+					//
+					// Asked of {@link #stackedSplitOf} by telling it less than the truth about the ground
+					// behind: the back pair is what a head of seven hangs its last two notes in, so a
+					// shape asked for with no room behind is exactly the shape with those notes in the
+					// tail instead. Pessimism is always safe here -- it can only put notes on the bus.
+					//
+					// Never less conservative than the ground actually is, though. Where a stacked centre
+					// stands behind, both back slots are gone rather than one, and a head of six asked
+					// for as though only one were spoken for hangs a note in that centre's cell -- a
+					// wrong note, which is worse than the recess this is avoiding. So a real stacked
+					// neighbour is carried into every ask and only the shortest head is on offer.
+					//
+					// Behind {@link #CUT_SHORTENS_ITS_HEAD}, because it is a trade and not a win.
+					for (boolean stackedBehind : !CUT_SHORTENS_ITS_HEAD ? new boolean[] {}
+							: stackedIsBehind ? new boolean[] {true} : new boolean[] {false, true}) {
+						StackedSplit shorter = stackedSplitOf(event.notes(), roomLeft, splitCells,
+							climb > 0, false, stackedBehind);
+						if (shorter != null && roomLeft - shorter.columns() == 0) {
+							placements.padded("cutShortenedItsHead");
+							placements.padded("cutShortenedTo" + shorter.head().size());
+							headed = shorter;
+							gap = 0;
+							break;
+						}
+					}
+					if (gap > 0) {
+						headed = null;
+					}
+				}
 			}
 			boolean couldSplit = layout.ultra() && cutOffered && index > 0 && above >= 0
 				&& above < floors && !stackedFitsInstead && (headed != null
@@ -3407,23 +3417,22 @@ public final class SongBuilder {
 				BlockPos cursor;
 				if (headed != null) {
 					BlockPos opening = trigger.cursor();
-					// The columns that carry the module out to its wall. Laid as the parity pad an ordinary
-					// chord uses -- plain dust on the path, before the head's own repeater -- so the near
-					// half ends flush and the staircase stands where every other lane's does.
 					// Only the first cell of pad can be against the module behind, so only the first one
-					// asks. Whichever of the two comes first is that cell -- the pin where there is one,
-					// the nudge otherwise -- and the delay it spends comes off the head's own trigger.
+					// asks. Whichever of the two comes first is that cell -- the busy pad where there is
+					// one, the nudge otherwise -- and the delay it spends comes off the head's own
+					// trigger.
 					int headDelay = trigger.triggerDelay();
 					boolean firstCell = true;
-					for (int cell = 0; cell < splitPin; cell++) {
-						// The first cell is the busy pad where there is one -- the column that freed the slots
-						// behind and bought this cut -- and the rest is the ordinary pin walking the near half
-						// out to its wall. Two different reasons to spend a column, so two colours.
-						String pinWhy = busyPad > 0 && cell == 0 ? "busyPad" : "cutPin";
-						placements.placing(pinWhy);
-						placements.padded(pinWhy);
+					// The one column a cut still lays in front of itself: the column that freed the pair
+					// of slots behind and bought this cut at all. Never more than one, and only where the
+					// cut does not exist without it -- see {@link #BUSY_PAD_FREES_THE_BACK_FLANKS}. Every
+					// other column that used to stand here was the pin walking the module out to a wall
+					// it is no longer allowed to buy.
+					for (int cell = 0; cell < busyPad; cell++) {
+						placements.placing("busyPad");
+						placements.padded("busyPad");
 						headDelay = padCellOrSplitRepeater(placements, opening, travel, headDelay,
-							firstCell && placements.softTip(), false, "cutPin");
+							firstCell && placements.softTip(), false, "busyPad");
 						firstCell = false;
 						opening = opening.relative(travel);
 					}
@@ -3476,23 +3485,15 @@ public final class SongBuilder {
 						+ " built=" + (headed == null ? "BUS" : "head" + headed.head().size())
 						+ " depth=" + depth);
 				}
-				// The columns that carry the staircase out to the wall, where they could not be laid in
-				// front of the module. Raised, so what the staircase starts off is what a bus leaves.
-				if (splitPinBehind > 0) {
-					for (int cell = 0; cell < splitPinBehind; cell++) {
-						placements.padded("cutPinBehind");
-					}
-					cursor = emitDust(placements, Lane.straight(cursor, travel, depth), splitPinBehind,
-						true, "cutPinBehind").pos();
-				}
 				// Measured from where the staircase actually lands, which for a split is past the near
 				// half of the chord rather than where the lane stood when it decided to split.
 				//
 				// Told apart by the shape that left the gap, because the two have quite different causes.
 				// A plain cut sizes its near half at {@code room - 1} cells and fills every one of them,
 				// so it lands flush. A headed cut sizes its near half from what the chord had left over
-				// after the head, and where the chord runs out first the staircase stands wherever the
-				// module happened to end -- which is the recess {@link #CUT_PINS_ITS_STAIRCASE} pays for.
+				// after the head, and is walked out to the wall above where it fell short. Either way
+				// this should now read nought, and a build where it does not is a lane that turned
+				// before it was allowed to.
 				int shortOfWall = ((travel == forward ? farWall : nearWall) - cursor.getX())
 					* travel.getStepX();
 				placements.recessed(shortOfWall);
@@ -3503,7 +3504,7 @@ public final class SongBuilder {
 				// on. A recess that can be predicted can be paid for before the module is laid; one that
 				// cannot has some other cause. Counted rather than asserted because it is asked of every
 				// cut in the build, including the ones nothing is going to be done about.
-				if (headed != null && room - splitPin - splitPinBehind - (splitNudge ? 1 : 0)
+				if (headed != null && room - busyPad - (splitNudge ? 1 : 0)
 						- headed.columns() != shortOfWall) {
 					placements.padded("recessMispredicted");
 				}
@@ -3540,7 +3541,7 @@ public final class SongBuilder {
 				// a walk that charges the split more than the planner did refuses it and leaves the
 				// lane standing short of the wall it was measured for.
 				tipSignal = headed != null
-					? DUST_RANGE - headed.runCells(splitCells) - splitPinBehind
+					? DUST_RANGE - headed.runCells(splitCells)
 					: DUST_RANGE - cells - splitCells;
 				gradeLaneTip(placements, turnCells, tipSignal,
 					climb > 0 ? "SplitClimb" : "SplitDescent");
@@ -8690,8 +8691,11 @@ public final class SongBuilder {
 		// Birch and not oak, which was the first choice and is unusable: oak planks is the instrument
 		// block of a BASS note, so every bass in the build would read as corner padding and every
 		// corner as a bass. Caught in a render where a note's own instrument sat in the legend claiming
-		// to be a pad. Spruce, dark oak, bamboo and birch are the four planks no instrument uses.
+		// to be a pad. Spruce, dark oak, bamboo, birch and acacia are planks no instrument uses -- oak
+		// is the only one PreviewInstrument names.
 		key.put("minecraft:birch_planks", "corner padding -- the columns a bend costs");
+		key.put("minecraft:acacia_planks",
+			"the closing pad -- wire out to the wall, laid where a chord could not be cut");
 		key.put("minecraft:bamboo_planks",
 			"padding of any other kind, which v2 is not supposed to need");
 		key.put("minecraft:tuff", "a standard bus");
@@ -8722,6 +8726,16 @@ public final class SongBuilder {
 	 * census. {@link #BUSY_PAD_FREES_THE_BACK_FLANKS} gets its own colour because it is the one new
 	 * kind, and it is supposed to be rare enough to point at individually.</p>
 	 *
+	 * <p>The closing pad is <b>acacia</b> rather than bamboo, ekran's, because it is much the largest
+	 * of the unjustified ones and it drowned the rest. Over the library on v2 it lays 8,149 cells of
+	 * dust and 1,537 more raised into a climb, where the cut's pin -- the other big one, since
+	 * removed -- laid 3,087 in front and 318 behind. The pin to the wall goes with the closing pad:
+	 * it is the same pad continuing to the same wall, laid where the pad itself ran out of wire.</p>
+	 *
+	 * <p>What is left in bamboo is the two dead pads, the bus that moves off a collision, and anything
+	 * added later. A build that comes out with no bamboo in it at all is the state v2 is aiming
+	 * at.</p>
+	 *
 	 * <p>Not included: {@code delayBeforeChord}, which is a chord waiting for its tick rather than a
 	 * lane buying ground, and the staircases and corners the lane walks through, which are route.</p>
 	 */
@@ -8739,13 +8753,17 @@ public final class SongBuilder {
 		if (laidBy.startsWith("corner")) {
 			return "minecraft:birch_planks";
 		}
+		// The lane's own walk out to the wall it turns at, and the pin that finishes the job where the
+		// pad could not afford it. Asked before the bamboo arm, and before the bare "pad" prefix that
+		// would otherwise swallow padClosing.
+		if (laidBy.startsWith("padClosing") || laidBy.startsWith("pinToWall")) {
+			return "minecraft:acacia_planks";
+		}
 		// Everything else that lays a cell of pad. Named one by one rather than by a prefix, so a pad
 		// added later shows up as an unnamed cell somebody has to come and classify rather than
 		// quietly inheriting a colour that says it was fine.
-		if (laidBy.startsWith("padClosing") || laidBy.startsWith("padAhead")
-				|| laidBy.startsWith("padBooked") || laidBy.startsWith("pinToWall")
-				|| laidBy.startsWith("cutPin") || laidBy.startsWith("pad")
-				|| laidBy.startsWith("busMove")) {
+		if (laidBy.startsWith("padAhead") || laidBy.startsWith("padBooked")
+				|| laidBy.startsWith("pad") || laidBy.startsWith("busMove")) {
 			return "minecraft:bamboo_planks";
 		}
 		return null;
@@ -10931,50 +10949,38 @@ public final class SongBuilder {
 	 * halves separately fixes it; see {@link StackedSplit#runCells}. The run at {@code f3 w20} goes
 	 * back to fifteen.</p>
 	 *
-	 * <p>Paid, in v2, by {@link #CUT_PINS_ITS_STAIRCASE}.</p>
+	 * <p>The columns it leaves between the near half and the staircase were paid for, in v2, by the
+	 * cut's pin. The pin is gone -- a cut is not walked out to a wall any more -- so what this leaves
+	 * is a recess, counted as one where the split is built.</p>
 	 */
 	static boolean CUTS_A_CHORD_THAT_FITS = true;
 
 	/**
-	 * v2: a cut lands its staircase on the wall, or it is not cut.
+	 * Whether a cut that would fall a column short takes a shorter head rather than no head.
 	 *
-	 * <p>ekran's rule for the whole builder, and it is a rule rather than a preference: every climb,
-	 * every descent and every flat turn stands at the wall, with no give at all for a staircase set
-	 * back inside the corridor. A recessed turn occupies a column no other corridor's turn occupies,
-	 * and that is the one thing that reaches into the lane alongside. The closing pad has been walked
-	 * out to its wall since the {@code pinned-descents} branch ({@link #PIN_DESCENTS}); the cut never
-	 * was, and v2 closes nearly every lane on a cut.</p>
+	 * <p>A head carries seven notes in the two columns a module occupies and the near half carries two
+	 * a column, so every pair of notes handed back from the head to the tail is exactly one more column
+	 * of bus. A cut one column short of its wall can therefore be made flush out of its own notes,
+	 * which is the only way to fill a column that is neither padding nor a recess.</p>
 	 *
-	 * <p>It is a headed cut every time, and the shape says by how much before it is built --
-	 * {@code room - }{@link StackedSplit#columns}. Measured across both songs at sixteen sizes each,
-	 * every recessed column in either layout was a headed cut and every one was predicted exactly:
-	 * 2,725 columns in v2, 425 in v1.</p>
+	 * <p><b>A trade, measured both ways over the library at five widths and both songs at sixteen
+	 * sizes.</b> It fires 496 times, and:</p>
 	 *
-	 * <p><b>In front of the module, not behind it.</b> Both put the same wire in the same corridor,
-	 * but the two are spent from different budgets: a pad laid behind the near half comes out of the
-	 * fifteen the cut opens with, which already carries the transition, both halves and the staircase,
-	 * while a pad in front stands before the module's own repeater and comes out of the run the lane
-	 * is already on. So the cut is simply asked for again in a room that much smaller -- same head,
-	 * same halves, same wire, {@link StackedSplit#runCells} unchanged -- which is also what keeps the
-	 * planner and the walk pricing one cut rather than two.</p>
+	 * <pre>
+	 * off  library 285 clean / 1,104 breach blocks / 10 refused    all-25 36 blocks   guardian 6 refused
+	 * on   library 282 clean / 1,102 breach blocks / 12 refused    all-25 54 blocks   guardian 3 refused
+	 * </pre>
 	 *
-	 * <p>Where the wire in front will not stretch, or the smaller room comes back with a shape that
-	 * does not fill it either, the head is given up and the chord is laid whole. That is a breach the
-	 * build already knows how to count, and it is the price of the rule.</p>
+	 * <p>So it halves the sizes Guardian cannot build at all and costs the all-twenty-fives song half
+	 * as many breach blocks again. On, because a size that will not build is worse than a lane outside
+	 * its wall and because ekran's rule is that the head is what makes a cut of up to twenty-seven
+	 * possible -- but it is on as a choice, and the numbers to argue with are above.</p>
+	 *
+	 * <p>What it does <em>not</em> do is reach a gap of two: that would want four notes out of the head,
+	 * and there is no head that small. Those cuts still lose the head, take a plain cut where the chord
+	 * is small enough for one, and are laid whole where it is not.</p>
 	 */
-	static boolean CUT_PINS_ITS_STAIRCASE = true;
-
-	/**
-	 * Whether a cut that cannot pay for its pin in front may lay it behind the near half instead.
-	 *
-	 * <p>The same columns of the same corridor either way; what differs is which budget they come out
-	 * of. In front of the module the pad stands before the cut's own repeater and is spent out of the
-	 * run the lane was already on; behind the near half it is downstream of that repeater and comes out
-	 * of the fifteen the cut opens with -- which already carries the transition, both halves and the
-	 * staircase. Neither is reliably the affordable one: on a song of chords of twenty-five at a gap of
-	 * one the lane in front is nearly spent, and on a cut of that size the fifteen is too.</p>
-	 */
-	static boolean CUT_PINS_BEHIND = true;
+	static boolean CUT_SHORTENS_ITS_HEAD = true;
 
 	/**
 	 * Whether v2's walk still books pads ahead of itself, which is the last of the planner it kept.
