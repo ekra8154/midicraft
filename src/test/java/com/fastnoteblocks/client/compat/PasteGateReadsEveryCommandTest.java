@@ -1,6 +1,7 @@
 package com.fastnoteblocks.client.compat;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
@@ -139,6 +140,48 @@ class PasteGateReadsEveryCommandTest {
 				}
 				written.add(placement.at());
 			}
+		}
+	}
+
+	/**
+	 * Every note block claims the cell above it, whatever happens to be standing there.
+	 *
+	 * <p>The other half of what the air skip is allowed to assume, and the half that is easy to get
+	 * backwards. A note block needs air over it to sound, so the plan writes air there -- and it
+	 * writes it <em>unconditionally</em>, because a plan is built in its own space and never asks the
+	 * world what is already at a cell. So the cell is claimed, and a second module reaching for it
+	 * collides in the ordinary way.</p>
+	 *
+	 * <p>Which is what makes the skip safe against the obvious worry: that a cell already holding air
+	 * in the world would go unclaimed in the plan, and a later erroneous placement into it would land
+	 * silently. The skip happens in the sender, per command, after the whole plan and every collision
+	 * in it has been decided. It can drop a command; it cannot un-claim a cell.</p>
+	 */
+	@Test
+	void everyNoteBlockClaimsTheCellAboveIt() {
+		for (SongBuilder.PasteMode mode : SongBuilder.PasteMode.values()) {
+			SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0),
+				DebugChords.notes("5x4 30 2x6 24:12s12p 18@1", 4), mode,
+				new SongBuilder.BuildLimits(4, 16, 3), SongBuilder.WalkStart.HEAD, "Song of Storms");
+
+			Set<BlockPos> claimed = new java.util.HashSet<>();
+			List<BlockPos> notes = new java.util.ArrayList<>();
+			for (String command : plan.commands()) {
+				CommandPasteSender.Placement placement = CommandPasteSender.read(command);
+				claimed.add(placement.at());
+				if (placement.block().equals("minecraft:note_block")) {
+					notes.add(placement.at());
+				}
+			}
+
+			assertNotEquals(0, notes.size(), mode + " built no note blocks to check");
+			List<String> unclaimed = notes.stream()
+				.filter(at -> !claimed.contains(at.above()))
+				.map(at -> at.getX() + " " + at.getY() + " " + at.getZ())
+				.limit(5)
+				.toList();
+			assertEquals(List.of(), unclaimed, mode + ": these note blocks leave the cell above them "
+				+ "unclaimed, so nothing would collide with a block placed there");
 		}
 	}
 
