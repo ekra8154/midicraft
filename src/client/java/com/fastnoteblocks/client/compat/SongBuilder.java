@@ -9642,7 +9642,7 @@ public final class SongBuilder {
 			// one place it would have been invisible, because the build that has it is the build
 			// nobody can paste. See {@link PlacementPlan#trialCollided}.
 			if (placements.trialCollided()) {
-				throw new IllegalArgumentException("a marked paste held this shape off its own ground");
+				throw new IllegalArgumentException("marked: this shape lost ground, falling back to a bus");
 			}
 			// And then the shape is asked where it landed, which is a different question from whether
 			// it fitted. A stacked module hangs notes to the side of the path, and to the side of the
@@ -9758,8 +9758,15 @@ public final class SongBuilder {
 				Body body = addSpatialEventModule(placements, at, triggerDelay, event.notes(), forceBus);
 				// The same as in {@link #buildShaped}: marked, a collision does not throw, so the bus
 				// would settle on ground it had lost instead of trying the next column along.
-				if (placements.trialCollided()) {
-					throw new IllegalArgumentException("a marked paste held this bus off its own ground");
+				//
+				// Only while there is another column to try. This is the shape that has nothing to fall
+				// back to, so raising it on the last attempt does not buy a better build -- it ends the
+				// paste, which is the one thing a marked build must never do. ekran, who could not paste
+				// Guardian 20 wide over four floors at all: the whole reason to mark a build is to have
+				// something to stand in. Out of attempts, the cell goes to whoever got there first and
+				// wears a sea lantern saying so.
+				if (placements.trialCollided() && shifted < BUS_MOVES_AT_MOST) {
+					throw new IllegalArgumentException("marked: this bus lost ground, trying the next column");
 				}
 				placements.commitTrial();
 				for (int cell = 0; cell < shifted; cell++) {
