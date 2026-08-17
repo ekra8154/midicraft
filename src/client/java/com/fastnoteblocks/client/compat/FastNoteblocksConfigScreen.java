@@ -1,6 +1,7 @@
 package com.fastnoteblocks.client.compat;
 
 import com.fastnoteblocks.client.FastNoteblocksConfig;
+import com.fastnoteblocks.client.PasteRate;
 import com.fastnoteblocks.client.FastNoteblocksConfig.MidiInstrumentSource;
 import com.fastnoteblocks.client.FastNoteblocksConfig.MidiQuantizeGrid;
 import com.fastnoteblocks.client.FastNoteblocksConfig.MidiRangeFit;
@@ -165,14 +166,18 @@ public final class FastNoteblocksConfigScreen {
 			.setTooltip(Component.translatable("tooltip.fast-noteblocks.ultra_lane_start_top"))
 			.setSaveConsumer(config::setUltraLaneStartTop)
 			.build());
+		// A rung of the ladder rather than the rate itself: the range runs from a quarter to two
+		// hundred and fifty-six, and a slider that moved evenly across that would spend nine tenths
+		// of its travel above the point where more is no longer the question.
 		placement.addEntry(entries.startIntSlider(
 				Component.translatable("option.fast-noteblocks.commands_per_tick"),
-				config.commandsPerTick(),
-				FastNoteblocksConfig.MIN_COMMANDS_PER_TICK,
-				FastNoteblocksConfig.MAX_COMMANDS_PER_TICK)
-			.setDefaultValue(FastNoteblocksConfig.DEFAULT_COMMANDS_PER_TICK)
+				PasteRate.index(config.commandsPerTick()),
+				0, PasteRate.RATES.size() - 1)
+			.setDefaultValue(PasteRate.index(PasteRate.DEFAULT))
+			.setTextGetter(rung -> Component.literal(PasteRate.label(PasteRate.RATES.get(rung))))
 			.setTooltip(Component.translatable("tooltip.fast-noteblocks.commands_per_tick"))
-			.setSaveConsumer(config::setCommandsPerTick)
+			.setSaveConsumer(rung ->
+				config.setCommandsPerTick(PasteRate.RATES.get(rung)))
 			.build());
 		placement.addEntry(entries.startBooleanToggle(
 				Component.translatable("option.fast-noteblocks.auto_select_sequence_block"),

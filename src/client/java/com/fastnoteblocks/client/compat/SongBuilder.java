@@ -13389,6 +13389,37 @@ public final class SongBuilder {
 		set(placements, notePos.above(), effect.above() == null ? "minecraft:air" : effect.above());
 	}
 
+	/**
+	 * Every block in the game that falls, asked of the game rather than listed.
+	 *
+	 * <p>Wider than {@link #FALLING_INSTRUMENT_BLOCKS} on purpose. That one answers "does this
+	 * instrument need propping", which is a question about the notes a song has in it. This answers
+	 * "will this cell end up on the ground", which has to hold for every block a build writes --
+	 * an instrument, a sound effect's block, whatever a later layout puts somewhere.</p>
+	 */
+	private static final Set<String> FALLING_BLOCKS = fallingBlocks();
+
+	private static Set<String> fallingBlocks() {
+		Set<String> ids = new java.util.HashSet<>();
+		for (net.minecraft.world.level.block.Block block : BuiltInRegistries.BLOCK) {
+			if (block instanceof net.minecraft.world.level.block.FallingBlock) {
+				ids.add(BuiltInRegistries.BLOCK.getKey(block).toString());
+			}
+		}
+		return Set.copyOf(ids);
+	}
+
+	/** Whether a block written into a setblock is one that drops if nothing is under it. */
+	private static boolean falls(String block) {
+		int state = block.indexOf('[');
+		int data = block.indexOf('{');
+		int end = state < 0 ? block.length() : state;
+		if (data >= 0 && data < end) {
+			end = data;
+		}
+		return FALLING_BLOCKS.contains(block.substring(0, end));
+	}
+
 	/** Instrument blocks affected by gravity, which need something solid underneath them. */
 	private static final Set<String> FALLING_INSTRUMENT_BLOCKS = PreviewInstrument.VALUES.stream()
 		.filter(instrument -> net.minecraft.world.level.block.Block.byItem(instrument.icon())
@@ -15086,6 +15117,61 @@ public final class SongBuilder {
 				.collect(java.util.stream.Collectors.toUnmodifiableSet());
 		}
 
+		/**
+		 * A floor under everything that falls, wherever it landed.
+		 *
+		 * <p>The walk already props the sand it plans for. What it cannot prop is sand that ends up
+		 * somewhere it was not planning on: a chord that overshoots a wall stands a column past the
+		 * end of the floor laid between them, and there is nothing under it at all. Over the whole
+		 * library that was 170 blocks of sand in 60 builds of 372 -- which lands on the ground, and
+		 * takes the note above it with it, because a note block reads its instrument off whatever is
+		 * underneath and by then that is air.</p>
+		 *
+		 * <p>Never an overwrite. Anything already planned in that cell is load-bearing and is doing
+		 * the holding up already, air included -- air over a note block is what keeps it audible, and
+		 * a prop dropped into one would silence the note to save a block of sand.</p>
+		 */
+		private void holdUpEverythingThatFalls() {
+			for (BlockPos at : List.copyOf(blocks.keySet())) {
+				if (falls(blocks.get(at)) && !blocks.containsKey(at.below())) {
+					blocks.put(at.below(), UNDERFLOOR);
+					// The build's own floor, kept honest. Only the depth can move: a prop sits in the
+					// column its sand is already in, one level down, so it is the one bound of the six
+					// that a block written here can push out.
+					minimumY = Math.min(minimumY, at.getY() - 1);
+				}
+			}
+		}
+
+		/**
+		 * Every cell of the build in the order it is to be sent, with each prop ahead of what it
+		 * holds up.
+		 *
+		 * <p>The walk lays sand and then fills underneath it, which is the order a human would think
+		 * in and the wrong order to send. It survives at the default rate only by luck of arithmetic:
+		 * a falling block schedules its check two ticks out, and at 32 commands a tick the prop one
+		 * command behind it is comfortably inside that. At one command every four ticks it is not,
+		 * and every snare in the build lands on the floor.</p>
+		 *
+		 * <p>So the prop is hoisted rather than the sand deferred. What moves is a floor block, which
+		 * needs nothing underneath it and so cannot be broken by being placed sooner; deferring the
+		 * sand would instead move a block that something else -- the note block over it -- is
+		 * reading. And it moves by one place: the two are always adjacent in the walk's own order.</p>
+		 */
+		private List<BlockPos> propsFirst() {
+			List<BlockPos> order = new ArrayList<>(blocks.size());
+			Set<BlockPos> sent = new HashSet<>(blocks.size() * 2);
+			for (BlockPos at : blocks.keySet()) {
+				if (falls(blocks.get(at)) && blocks.containsKey(at.below()) && sent.add(at.below())) {
+					order.add(at.below());
+				}
+				if (sent.add(at)) {
+					order.add(at);
+				}
+			}
+			return order;
+		}
+
 		PastePlan finish(PasteMode mode, BlockPos origin, int nearWall, int farWall) {
 			// Where the plan lands, worked out before anything is checked so that a fault can name a
 			// block you are able to go and stand in front of. Nothing lands behind you: the walk
@@ -15115,10 +15201,11 @@ public final class SongBuilder {
 			// Only the ultra lane has walls worth measuring a breach against: every other mode passes
 			// its own origin for both, so outside-the-walls would mean the whole build.
 			boolean walled = mode == PasteMode.ULTRA_COMPACT_LANE && !breaches.isEmpty();
-			List<String> commands = new ArrayList<>(blocks.entrySet().stream()
-				.map(entry -> "setblock " + (entry.getKey().getX() + shiftX) + " "
-					+ entry.getKey().getY() + " " + (entry.getKey().getZ() + shiftZ) + " "
-					+ marked(entry.getKey(), entry.getValue(), nearWall, farWall, walled) + " replace")
+			holdUpEverythingThatFalls();
+			List<String> commands = new ArrayList<>(propsFirst().stream()
+				.map(at -> "setblock " + (at.getX() + shiftX) + " "
+					+ at.getY() + " " + (at.getZ() + shiftZ) + " "
+					+ marked(at, blocks.get(at), nearWall, farWall, walled) + " replace")
 				.toList());
 			// The marking pass, last so that it wins: every other claim on the cell has been made by
 			// now, and a lantern placed halfway through would be quietly built over by the next chord.

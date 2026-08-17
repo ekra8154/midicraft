@@ -1,6 +1,7 @@
 package com.fastnoteblocks.client.compat;
 
 import com.fastnoteblocks.client.FastNoteblocksConfig;
+import com.fastnoteblocks.client.PasteRate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -9,8 +10,11 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
+import java.util.function.IntConsumer;
+import java.util.function.IntFunction;
 import net.minecraft.core.BlockPos;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.components.AbstractSliderButton;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.Screen;
@@ -40,7 +44,7 @@ final class BuildOptionsScreen extends Screen {
 	 * that says which layout is chosen.</p>
 	 */
 	private boolean layoutsShowing;
-	private int commandsPerTick;
+	private double commandsPerTick;
 	private int laneWidth;
 	private int laneFloors;
 
@@ -75,12 +79,22 @@ final class BuildOptionsScreen extends Screen {
 	 * five positions on this record and writing the sentences at render time, once a frame, for
 	 * something that changes when the settings do and not otherwise.</p>
 	 *
+	 * @param above blocks the build reaches past the top of the world, and {@code below} past the
+	 *     bottom. Both nought for a build that fits. Measured against the level's own limits and
+	 *     never against 320 and -64: a datapack moves either of them, and a warning that assumed
+	 *     vanilla would be wrong in exactly the worlds that have a reason to need it.
 	 * @param error the reason there is no build at all, or {@code null} when there is one
 	 */
 	private record Forecast(int spanZ, int breachingLanes, int worstBreach, List<FaultLine> faults,
-			String error) {
+			int above, int below, String error) {
 
-		/** Whether anything is wrong with the machine itself, as opposed to with where it lands. */
+		/**
+		 * Whether anything is wrong with the machine itself, as opposed to with where it lands.
+		 *
+		 * <p>Which is why {@code above} and {@code below} are not in it. A build hanging out of the
+		 * world is a fault of the ground you chose to stand on and it has its own line to say so;
+		 * everything counted here would be wrong wherever you put it.</p>
+		 */
 		boolean broken() {
 			return !faults.isEmpty();
 		}
@@ -324,23 +338,25 @@ final class BuildOptionsScreen extends Screen {
 		}
 
 		if (hasLaneControls()) {
-			int widthY = widthRow(top);
-			addRenderableWidget(Button.builder(Component.literal("-"), clicked -> changeWidth(-4))
-				.bounds(left, widthY, 20, 20).build());
-			addRenderableWidget(Button.builder(Component.literal("+"), clicked -> changeWidth(4))
-				.bounds(left + width - 20, widthY, 20, 20).build());
-			int floorY = floorRow(top);
-			addRenderableWidget(Button.builder(Component.literal("-"), clicked -> changeFloors(-1))
-				.bounds(left, floorY, 20, 20).build());
-			addRenderableWidget(Button.builder(Component.literal("+"), clicked -> changeFloors(1))
-				.bounds(left + width - 20, floorY, 20, 20).build());
+			addRenderableWidget(new Choice(left, widthRow(top), width,
+				FastNoteblocksConfig.MAX_BUILD_LANE_WIDTH - FastNoteblocksConfig.MIN_BUILD_LANE_WIDTH
+					+ 1,
+				laneWidth - FastNoteblocksConfig.MIN_BUILD_LANE_WIDTH,
+				rung -> widthLine(FastNoteblocksConfig.MIN_BUILD_LANE_WIDTH + rung),
+				rung -> laneWidth = FastNoteblocksConfig.MIN_BUILD_LANE_WIDTH + rung));
+			addRenderableWidget(new Choice(left, floorRow(top), width,
+				FastNoteblocksConfig.MAX_BUILD_LANE_FLOORS
+					- FastNoteblocksConfig.MIN_BUILD_LANE_FLOORS + 1,
+				laneFloors - FastNoteblocksConfig.MIN_BUILD_LANE_FLOORS,
+				rung -> floorLine(FastNoteblocksConfig.MIN_BUILD_LANE_FLOORS + rung),
+				rung -> laneFloors = FastNoteblocksConfig.MIN_BUILD_LANE_FLOORS + rung));
 		}
 
 		y = rateRow(top);
-		addRenderableWidget(Button.builder(Component.literal("-"), clicked -> changeRate(-8))
-			.bounds(left, y, 20, 20).build());
-		addRenderableWidget(Button.builder(Component.literal("+"), clicked -> changeRate(8))
-			.bounds(left + width - 20, y, 20, 20).build());
+		addRenderableWidget(new Choice(left, y, width, PasteRate.RATES.size(),
+			PasteRate.index(commandsPerTick),
+			rung -> PasteRate.label(PasteRate.RATES.get(rung)),
+			rung -> commandsPerTick = PasteRate.RATES.get(rung)));
 
 		addRenderableWidget(Button.builder(Component.literal("Paste"), clicked -> {
 			FastNoteblocksConfig.get().setCommandsPerTick(commandsPerTick);
@@ -393,23 +409,49 @@ final class BuildOptionsScreen extends Screen {
 		// and neither is a thing to be touching from another thread.
 		BlockPos origin = SongBuilder.pasteOrigin(minecraft);
 		SongBuilder.PasteMode planned = mode;
+		// Read here with the origin, for the same reason: the level is the render thread's.
+		int worldTop = minecraft.level == null ? Integer.MAX_VALUE : minecraft.level.getMaxY();
+		int worldFloor = minecraft.level == null ? Integer.MIN_VALUE : minecraft.level.getMinY();
 		SongBuilder.BuildLimits limits = new SongBuilder.BuildLimits(
 			FastNoteblocksConfig.get().maxBuildFloors(), laneWidth, laneFloors,
 			FastNoteblocksConfig.get().ultraLaneStartTop());
 		FORECASTER.execute(() -> {
+			// Dropped before it is worked out, not after. A press asked for one forecast; a drag
+			// across the width slider asks for a hundred and twenty, and planning a big song is tens
+			// of milliseconds -- so a queue that does all of them is a screen that keeps answering
+			// questions nobody is asking any more, minutes after the slider stopped moving.
+			if (forecastGeneration.get() != generation) {
+				return;
+			}
 			Forecast result;
 			try {
 				SongBuilder.PastePlan plan = SongBuilder.createPastePlan(
 					origin, SongBuilder.eventNotes(sequence), planned, limits);
+				// Off the blocks rather than off the height, which is a span and says nothing
+				// about where the span sits. getMaxY is the highest cell that takes a block, not
+				// the first that refuses one.
+				int highest = Integer.MIN_VALUE;
+				int lowest = Integer.MAX_VALUE;
+				for (String command : plan.commands()) {
+					int y = Integer.parseInt(command.split(" ", 5)[2]);
+					highest = Math.max(highest, y);
+					lowest = Math.min(lowest, y);
+				}
 				result = new Forecast(plan.spanZ(), plan.breaches().size(),
-					plan.worstBreach(), faultLines(plan), null);
+					plan.worstBreach(), faultLines(plan),
+					// In long, because the no-world sentinels are the int extremes and
+					// MIN_VALUE minus a height wraps round to a large positive -- which would
+					// warn that two billion levels are below the floor of a world that is not
+					// there.
+					(int) Math.max(0, (long) highest - worldTop),
+					(int) Math.max(0, (long) worldFloor - lowest), null);
 			} catch (IllegalArgumentException refused) {
-				result = new Forecast(0, 0, 0, List.of(), refused.getMessage());
+				result = new Forecast(0, 0, 0, List.of(), 0, 0, refused.getMessage());
 			} catch (RuntimeException broken) {
 				// A forecast that throws must not take the paste down with it: the build itself may
 				// well be fine, and a screen that cannot tell you the depth is still a screen you
 				// can paste from.
-				result = new Forecast(0, 0, 0, List.of(), "could not work out the layout");
+				result = new Forecast(0, 0, 0, List.of(), 0, 0, "could not work out the layout");
 			}
 			if (forecastGeneration.get() == generation) {
 				forecast = result;
@@ -441,6 +483,39 @@ final class BuildOptionsScreen extends Screen {
 		return predicted.spanZ() + " blocks deep - " + verdict;
 	}
 
+	/**
+	 * What the world will not accept, when the build asks for more of it than there is.
+	 *
+	 * <p>A warning and not a refusal. Where a build ends up is your business -- you may be standing
+	 * somewhere on purpose, or about to move -- and the paste that goes ahead loses only the cells
+	 * outside the world. Everything else still lands, which is why this says how much rather than
+	 * whether.</p>
+	 *
+	 * <p>{@code null} while the forecast is still being worked out, and for a build that fits.</p>
+	 */
+	private static String outsideTheWorld(Forecast predicted) {
+		if (predicted == null || predicted.error() != null) {
+			return null;
+		}
+		// A count of levels and not of blocks: what is known is how far past the edge the build
+		// reaches, and saying "12 blocks" of something measured in height reads as twelve setblocks.
+		if (predicted.above() > 0 && predicted.below() > 0) {
+			return "top " + predicted.above() + " and bottom " + predicted.below()
+				+ " levels are outside the world - both will be cut off";
+		}
+		if (predicted.above() > 0) {
+			return "top " + levels(predicted.above()) + " above the world's ceiling - cut off";
+		}
+		if (predicted.below() > 0) {
+			return "bottom " + levels(predicted.below()) + " below the world's floor - cut off";
+		}
+		return null;
+	}
+
+	private static String levels(int deep) {
+		return deep == 1 ? "level is" : deep + " levels are";
+	}
+
 	/** Grey while it is being worked out, green when it is clean, and warm when it is not. */
 	private static int forecastColour(Forecast predicted) {
 		if (predicted == null) {
@@ -452,22 +527,77 @@ final class BuildOptionsScreen extends Screen {
 		return predicted.breachingLanes() == 0 ? 0xFF7ACF7A : 0xFFFFAA00;
 	}
 
-	private void changeRate(int delta) {
-		commandsPerTick = Math.max(FastNoteblocksConfig.MIN_COMMANDS_PER_TICK,
-			Math.min(FastNoteblocksConfig.MAX_COMMANDS_PER_TICK, commandsPerTick + delta));
-		init();
+	/**
+	 * How long it takes, in the largest unit that still says something.
+	 *
+	 * <p>A rate of one command every four ticks turns a big build into hours, and "31984.0s" is a
+	 * number nobody reads as a length of time.</p>
+	 */
+	private static String howLong(double seconds) {
+		if (seconds < 90) {
+			return String.format(Locale.ROOT, "%.1fs", seconds);
+		}
+		if (seconds < 5400) {
+			return String.format(Locale.ROOT, "%.0f min", seconds / 60);
+		}
+		return String.format(Locale.ROOT, "%.1f hours", seconds / 3600);
 	}
 
-	private void changeWidth(int delta) {
-		laneWidth = Math.max(FastNoteblocksConfig.MIN_BUILD_LANE_WIDTH,
-			Math.min(FastNoteblocksConfig.MAX_BUILD_LANE_WIDTH, laneWidth + delta));
-		init();
+	/**
+	 * A slider over a fixed run of settings, which is what all three of these are.
+	 *
+	 * <p>Sliders rather than a pair of buttons because two of the three ranges are long -- four to a
+	 * hundred and twenty-eight blocks wide, a quarter of a command a tick to two hundred and
+	 * fifty-six -- and stepping either of them end to end was thirty presses. The value is carried
+	 * as a rung rather than as the number itself so that the rate can use it too: its settings are a
+	 * ladder with gaps in it, not a run, and nothing here needs to know the difference.</p>
+	 *
+	 * <p>The slider says what the setting means rather than what it is set to. A number needs a
+	 * sentence next to it either way, and the sentence has to move as the slider does.</p>
+	 */
+	private final class Choice extends AbstractSliderButton {
+		private final int rungs;
+		private final IntFunction<String> say;
+		private final IntConsumer choose;
+
+		Choice(int x, int y, int width, int rungs, int chosen, IntFunction<String> say,
+				IntConsumer choose) {
+			super(x, y, width, 20, Component.empty(),
+				rungs <= 1 ? 0 : (double) Math.max(0, Math.min(rungs - 1, chosen)) / (rungs - 1));
+			this.rungs = rungs;
+			this.say = say;
+			this.choose = choose;
+			updateMessage();
+		}
+
+		private int rung() {
+			return rungs <= 1 ? 0 : (int) Math.round(value * (rungs - 1));
+		}
+
+		@Override
+		protected void updateMessage() {
+			// Called from the superclass constructor, before this class has its fields.
+			if (say != null) {
+				setMessage(Component.literal(say.apply(rung())));
+			}
+		}
+
+		@Override
+		protected void applyValue() {
+			choose.accept(rung());
+			requestForecast();
+		}
 	}
 
-	private void changeFloors(int delta) {
-		laneFloors = Math.max(FastNoteblocksConfig.MIN_BUILD_LANE_FLOORS,
-			Math.min(FastNoteblocksConfig.MAX_BUILD_LANE_FLOORS, laneFloors + delta));
-		init();
+	private String widthLine(int blocks) {
+		return blocks + " blocks wide before it folds back";
+	}
+
+	private String floorLine(int floors) {
+		return floors == 1
+			? "1 floor - flat, and folds sideways instead"
+			: floors + " floors, " + (4 * floors - 1) + " blocks tall - one " + nth(floors)
+				+ " the length";
 	}
 
 	private static String nth(int floors) {
@@ -511,24 +641,15 @@ final class BuildOptionsScreen extends Screen {
 			left, top - 14, 0xFFFFFFFF, false);
 		graphics.text(font, "Layout", left, top + 2, 0xFF8A9098, false);
 
-		if (hasLaneControls()) {
-			graphics.text(font, laneWidth + " blocks wide before it folds back",
-				left + 26, widthRow(top) + 6, 0xFFD6D8DD, false);
-			graphics.text(font, laneFloors == 1
-					? "1 floor - flat, and folds sideways instead"
-					: laneFloors + " floors, " + (4 * laneFloors - 1) + " blocks tall - one "
-						+ nth(laneFloors) + " the length",
-				left + 26, floorRow(top) + 6, 0xFFD6D8DD, false);
-		}
-
 		int rateY = rateRow(top);
 		SongBuilder.BlockCounts blocks = SongBuilder.blockCounts(sequence);
 		int commands = blocks.total();
 		double seconds = commands / (commandsPerTick * 20.0);
-		graphics.text(font, String.format(Locale.ROOT, "%d commands per tick", commandsPerTick),
-			left + 26, rateY + 6, 0xFFD6D8DD, false);
+		// "If you stay with it" is the whole of the honesty here: a build longer than the loaded
+		// region around you pauses at the edge and waits to be walked to, so the figure is a floor
+		// and not an estimate.
 		graphics.text(font, String.format(Locale.ROOT,
-				"about %d blocks, roughly %.1fs", commands, seconds),
+				"about %d blocks, roughly %s if you stay with it", commands, howLong(seconds)),
 			left, rateY + 24, 0xFF8A9098, false);
 		Forecast predicted = forecast;
 		graphics.text(font, forecastLine(predicted), left, rateY + 36, forecastColour(predicted),
@@ -551,11 +672,23 @@ final class BuildOptionsScreen extends Screen {
 					mouseX, mouseY);
 			}
 		}
+		// Below the buttons, and stacked. These are about the paste rather than about the build --
+		// what it needs permission to do, and where it would land -- so they sit under the thing you
+		// press rather than among the faults above it.
+		int note = rateY + BUTTON_ROW + 44;
 		graphics.text(font, "Needs /setblock permission. Overwrites whatever is there.",
-			left, rateY + BUTTON_ROW + 44, 0xFF8A9098, false);
+			left, note, 0xFF8A9098, false);
+		// Stacked rather than each at its own fixed height, because either of them can be absent and
+		// a warning with a gap above it reads as a warning about something else.
+		String outside = outsideTheWorld(predicted);
+		if (outside != null) {
+			note += 12;
+			graphics.text(font, outside, left, note, 0xFFFFAA00, false);
+		}
 		if (commandsPerTick > 64) {
+			note += 12;
 			graphics.text(font, "High rates can trip server command spam limits.",
-				left, rateY + BUTTON_ROW + 56, 0xFFFFAA00, false);
+				left, note, 0xFFFFAA00, false);
 		}
 	}
 
