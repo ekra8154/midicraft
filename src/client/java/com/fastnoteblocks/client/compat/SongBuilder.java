@@ -5686,6 +5686,16 @@ public final class SongBuilder {
 	 * song to a wire that fades out halfway up.</p>
 	 */
 	private static Pad planPad(int columns, int signal, int turnCells, int spareDelay) {
+		return planPad(columns, signal, turnCells, spareDelay, 0);
+	}
+
+	/**
+	 * @param absorb how many ticks of the coming wait this pad should hold if it has the columns for
+	 *     it, over and above the ones it has to spend to reach the wall at all. See
+	 *     {@link #PAD_SPENDS_THE_WAIT}: the columns are already being laid, so a repeater standing in
+	 *     one of them is a repeater the next floor does not lay a column for.
+	 */
+	private static Pad planPad(int columns, int signal, int turnCells, int spareDelay, int absorb) {
 		List<Integer> cells = new ArrayList<>();
 		int spent = 0;
 		int remaining = columns;
@@ -5725,6 +5735,47 @@ public final class SongBuilder {
 			spent++;
 			signal = DUST_RANGE;
 			remaining--;
+		}
+		// And then the wait, spent in the columns the pad was laying anyway.
+		//
+		// ekran, from the builds: a lane pads out to its wall in plain dust and then the next floor
+		// opens with a repeater, which costs it a column. The pad column and the repeater column are
+		// the same column in two different places, and only one of them has to exist. A repeater in
+		// the pad holds the ticks instead, {@link Pad#delaySpent} carries that to the walk, and the
+		// next event's own trigger has that much less to hold.
+		//
+		// From the front, and up to four ticks each, which is the most a repeater holds. Filling the
+		// nearest cells first is what leaves the pad's own reach alone: every repeater resets the run,
+		// so the cells after the last one are the only ones spending wire, and there are fewer of them
+		// this way.
+		//
+		// Never the last four ticks. The next chord's trigger is a repeater the build lays regardless
+		// -- {@link #addSpatialDelayBeforeEvent} only starts spending columns past four -- so absorbing
+		// those buys nothing and would only make this pad harder to lift.
+		int left = absorb - spent;
+		boolean absorbed = false;
+		for (int cell = 0; cell < cells.size() && left > 0; cell++) {
+			if (cells.get(cell) != 0) {
+				continue;
+			}
+			int holds = Math.min(MAX_LANE_SPACING, left);
+			cells.set(cell, holds);
+			spent += holds;
+			left -= holds;
+			absorbed = true;
+		}
+		if (absorbed) {
+			// What the wire is worth at the end of the pad, measured from the last repeater standing in
+			// it -- which may be one the reach loop placed rather than one of these. Recomputed rather
+			// than adjusted, because the two loops fill from opposite ends and "the one I just placed"
+			// is not the same as "the last one there is".
+			int lastRepeater = -1;
+			for (int cell = 0; cell < cells.size(); cell++) {
+				if (cells.get(cell) > 0) {
+					lastRepeater = cell;
+				}
+			}
+			signal = DUST_RANGE - (cells.size() - 1 - lastRepeater);
 		}
 		return new Pad(List.copyOf(cells), signal, spent);
 	}
@@ -10739,12 +10790,20 @@ public final class SongBuilder {
 			int spareDelay, boolean climbing, boolean staircase, boolean fromBus) {
 		if (PADS_AT_BUS_HEIGHT_INTO_A_CLIMB && climbing && staircase && columns > 0
 				&& offBus < turnCells) {
+			// Asked without absorbing anything, because a pad holding a repeater cannot be lifted and
+			// the lift is worth two cells of ascent. Where the pad does raise, that is the better
+			// trade and the wait stays where it was.
 			Pad cheap = planPad(columns, signal, offBus, spareDelay);
 			if (padRaises(cheap, climbing, staircase, fromBus)) {
 				return cheap;
 			}
 		}
-		return planPad(columns, signal, turnCells, spareDelay);
+		// And where it does not raise there is nothing to protect, so the pad may as well hold the
+		// wait: every four ticks it takes is a column the next floor does not open with a repeater in.
+		// Four are left behind for the next chord's own trigger, which is laid either way.
+		int absorb = PAD_SPENDS_THE_WAIT && staircase
+			? Math.max(0, spareDelay - MAX_LANE_SPACING) : 0;
+		return planPad(columns, signal, turnCells, spareDelay, absorb);
 	}
 
 	/**
@@ -11002,6 +11061,28 @@ public final class SongBuilder {
 	 * is a recess, counted as one where the split is built.</p>
 	 */
 	static boolean CUTS_A_CHORD_THAT_FITS = true;
+
+	/**
+	 * Whether a closing pad holds the coming wait, instead of the next floor spending columns on it.
+	 *
+	 * <p>ekran, from the builds: a lane pads out to its wall in plain dust and then the first thing on
+	 * the next floor is a repeater, which costs that floor a column. The pad column and the repeater
+	 * column are the same column in two places, and only one of them has to exist. So the pad holds
+	 * the ticks -- {@link Pad#delaySpent} carries that out to the walk, and the next event's own
+	 * trigger has that much less to hold, which is the same music on the same tick.</p>
+	 *
+	 * <p>Four ticks are left behind on purpose: the next chord's trigger is a repeater the build lays
+	 * whatever happens, and {@link #addSpatialDelayBeforeEvent} only starts spending columns past
+	 * four. Absorbing those would buy nothing. Whatever the pad has not the columns to hold stays up
+	 * there too, which is ekran's rule -- <em>"the last repeater can remain at the top if it truly
+	 * needs that much signal strength"</em>.</p>
+	 *
+	 * <p>Not into a climb whose pad can be lifted. A pad with a repeater in it cannot be raised to bus
+	 * height, and a raised pad is what makes an ascent cost three cells instead of five, so
+	 * {@link #planTurnPad} asks for the raisable all-dust pad first and only absorbs when it comes
+	 * back refused.</p>
+	 */
+	static boolean PAD_SPENDS_THE_WAIT = true;
 
 	/**
 	 * Whether a parity nudge asks the corner rule again from the column it moved to.
