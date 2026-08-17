@@ -14805,7 +14805,12 @@ public final class SongBuilder {
 			if (existing == null && tailJournal != null) {
 				tailJournal.blocksAdded().add(key);
 			}
-			if ((DEBUG_PASTE || NAME_EVERY_CELL) && existing == null) {
+			// And on the tolerant pass, which only exists because something collided. "Which shape laid
+			// this cell" is the first question a contested cell raises and the one the blocks cannot
+			// answer, and without it the fault reads "? held off ?". Naming cells changes nothing a walk
+			// decides -- see {@link #NAME_EVERY_CELL} -- so the second pass builds the same machine it
+			// would have built anyway, and it is the only pass that pays for the map.
+			if ((DEBUG_PASTE || NAME_EVERY_CELL || toleratingCollisions()) && existing == null) {
 				placedBy.put(key, placing);
 			}
 			if (existing == null) {

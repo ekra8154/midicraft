@@ -4,6 +4,7 @@ import com.fastnoteblocks.client.FastNoteblocksConfig;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -76,12 +77,29 @@ final class BuildOptionsScreen extends Screen {
 	 *
 	 * @param error the reason there is no build at all, or {@code null} when there is one
 	 */
-	private record Forecast(int spanZ, int breachingLanes, int worstBreach, List<String> faults,
+	private record Forecast(int spanZ, int breachingLanes, int worstBreach, List<FaultLine> faults,
 			String error) {
 
 		/** Whether anything is wrong with the machine itself, as opposed to with where it lands. */
 		boolean broken() {
 			return !faults.isEmpty();
+		}
+	}
+
+	/**
+	 * A fault, and what there is to say about it that will not fit on the line.
+	 *
+	 * <p>The line has room for a count and one block to walk to. A contested cell has more to it than
+	 * that -- which two things wanted it, and which of them got it -- and that is the question you ask
+	 * standing in front of the coordinate, not before you set off. So it hangs off the line as a
+	 * tooltip rather than being spent on the width of the dialog.</p>
+	 *
+	 * @param detail empty where there is nothing further to say, which is every fault but the
+	 *     collision so far
+	 */
+	record FaultLine(String text, List<String> detail) {
+		FaultLine(String text) {
+			this(text, List.of());
 		}
 	}
 
@@ -108,16 +126,17 @@ final class BuildOptionsScreen extends Screen {
 	 * They are world positions off the same origin the build would use, so they are where the blocks
 	 * will actually be, not offsets from something.</p>
 	 */
-	static List<String> faultLines(SongBuilder.PastePlan plan) {
-		List<String> lines = new ArrayList<>();
+	static List<FaultLine> faultLines(SongBuilder.PastePlan plan) {
+		List<FaultLine> lines = new ArrayList<>();
 		SongBuilder.FaultSites sites = plan.faultSites();
 		if (!plan.collisions().isEmpty()) {
-			lines.add(many(plan.collisions().size(), "cell", "contested")
-				+ at(plan.collisions().keySet().iterator().next(), plan.collisions().size()));
+			lines.add(new FaultLine(many(plan.collisions().size(), "cell", "contested")
+				+ at(plan.collisions().keySet().iterator().next(), plan.collisions().size()),
+				contested(plan)));
 		}
 		if (plan.severedLanes() > 0) {
-			lines.add(many(plan.severedLanes(), "repeater", "reads nothing behind it")
-				+ at(first(sites.severed()), plan.severedLanes()));
+			lines.add(new FaultLine(many(plan.severedLanes(), "repeater", "reads nothing behind it")
+				+ at(first(sites.severed()), plan.severedLanes())));
 		}
 		if (plan.deadNotes() > 0) {
 			// The break rather than the note, and said so in the sentence: the count is notes and the
@@ -129,27 +148,65 @@ final class BuildOptionsScreen extends Screen {
 			// The number of breaks as well as the first of them, because they are different questions:
 			// one break is a cell to go and look at, and a hundred and forty-five is a machine that is
 			// dead everywhere and a width to stop trying.
-			lines.add(plan.deadNotes() + (plan.deadNotes() == 1 ? " note silent" : " notes silent")
+			lines.add(new FaultLine(plan.deadNotes()
+				+ (plan.deadNotes() == 1 ? " note silent" : " notes silent")
 				+ (where == null ? ""
 					: breaks > 1 ? ", " + breaks + " breaks, first at " + coords(where)
-					: ", wire breaks at " + coords(where)));
+					: ", wire breaks at " + coords(where))));
 		}
 		if (plan.missingNotes() > 0) {
-			lines.add(many(plan.missingNotes(), "note", "left out")
-				+ at(first(sites.missingNotes()), plan.missingNotes()));
+			lines.add(new FaultLine(many(plan.missingNotes(), "note", "left out")
+				+ at(first(sites.missingNotes()), plan.missingNotes())));
 		}
 		if (plan.wrongNotes() > 0) {
-			lines.add(many(plan.wrongNotes(), "note", "sounds twice")
-				+ at(first(sites.wrongNotes()), plan.wrongNotes()));
+			lines.add(new FaultLine(many(plan.wrongNotes(), "note", "sounds twice")
+				+ at(first(sites.wrongNotes()), plan.wrongNotes())));
 		}
 		if (lines.size() > FAULT_LINES) {
 			// Trimmed rather than truncated. A list that simply stopped at three would say a build has
 			// three things wrong with it, which is a worse answer than a short one.
 			int hidden = lines.size() - FAULT_LINES;
 			lines = new ArrayList<>(lines.subList(0, FAULT_LINES));
-			lines.set(FAULT_LINES - 1, lines.get(FAULT_LINES - 1) + " (+" + hidden + " more)");
+			FaultLine last = lines.get(FAULT_LINES - 1);
+			lines.set(FAULT_LINES - 1,
+				new FaultLine(last.text() + " (+" + hidden + " more)", last.detail()));
 		}
 		return List.copyOf(lines);
+	}
+
+	/** How many contested cells the tooltip names before it starts counting them instead. */
+	private static final int CELLS_LISTED = 6;
+
+	/**
+	 * Every contested cell, as the pair that wanted it.
+	 *
+	 * <p>Read off the sentence the walk stored rather than off a structure, because the sentence
+	 * <em>is</em> the structure: {@code collisions} is a map of position to prose and several probes
+	 * read it that way. A split that does not find its separator falls through to the whole sentence,
+	 * which is worse to look at and still says the true thing.</p>
+	 *
+	 * <p>{@code minecraft:} comes off the front of both blocks. It is on every one of them, so it
+	 * distinguishes nothing and costs a third of the width of a line that has two block names and a
+	 * block state in it.</p>
+	 */
+	private static List<String> contested(SongBuilder.PastePlan plan) {
+		List<String> detail = new ArrayList<>();
+		detail.add(plan.collisions().size() == 1 ? "One cell two shapes both wanted:"
+			: plan.collisions().size() + " cells two shapes both wanted:");
+		for (Map.Entry<BlockPos, String> clash : plan.collisions().entrySet()) {
+			if (detail.size() > CELLS_LISTED) {
+				detail.add("...and " + (plan.collisions().size() - CELLS_LISTED) + " more");
+				break;
+			}
+			// Both halves labelled, because which way round the pair goes is the whole diagnosis and the
+			// names alone do not carry it. Which of the two is actually in the ground decides whether
+			// what is broken is the wire above the cell or the note that never got hung -- and with one
+			// of them routinely being air, an unlabelled pair reads as though nothing wanted it.
+			String[] pair = clash.getValue().replace("minecraft:", "").split(" held off ", 2);
+			detail.add(coords(clash.getKey()) + "  held: " + pair[0]
+				+ (pair.length < 2 ? "" : "\n      wanted: " + pair[1]));
+		}
+		return List.copyOf(detail);
 	}
 
 	/** {@code 3 cells contested}, with the noun and the verb agreeing with the count. */
@@ -479,9 +536,20 @@ final class BuildOptionsScreen extends Screen {
 		// Always red. Everything on these lines takes music away, and the line above them can be green
 		// at the same time -- a build that lands entirely inside its footprint and plays half the song
 		// is exactly the case worth catching before pasting rather than after.
-		List<String> faults = predicted == null ? List.of() : predicted.faults();
+		List<FaultLine> faults = predicted == null ? List.of() : predicted.faults();
 		for (int line = 0; line < faults.size(); line++) {
-			graphics.text(font, faults.get(line), left, rateY + 47 + line * 11, 0xFFFF5555, false);
+			FaultLine fault = faults.get(line);
+			int y = rateY + 47 + line * 11;
+			graphics.text(font, fault.text(), left, y, 0xFFFF5555, false);
+			// Hit-tested against the text rather than against the row, because these are drawn rather
+			// than laid out: a row-wide target on a line that ends halfway across would put a tooltip up
+			// over blank space with nothing under the pointer to explain it.
+			if (!fault.detail().isEmpty() && mouseX >= left && mouseX < left + font.width(fault.text())
+					&& mouseY >= y - 1 && mouseY < y + font.lineHeight) {
+				graphics.setTooltipForNextFrame(font,
+					font.split(Component.literal(String.join("\n", fault.detail())), 280),
+					mouseX, mouseY);
+			}
 		}
 		graphics.text(font, "Needs /setblock permission. Overwrites whatever is there.",
 			left, rateY + BUTTON_ROW + 44, 0xFF8A9098, false);
