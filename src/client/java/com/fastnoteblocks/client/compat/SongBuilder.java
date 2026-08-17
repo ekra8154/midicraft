@@ -10788,21 +10788,35 @@ public final class SongBuilder {
 	 */
 	private static Pad planTurnPad(int columns, int signal, int turnCells, int offBus,
 			int spareDelay, boolean climbing, boolean staircase, boolean fromBus) {
+		// The wait first, and ahead of the lift, which is ekran's call: <em>"you don't have to protect
+		// raised pad, these are better than raised pad."</em>
+		//
+		// The lift saves two cells of the wire a lane needs to cross its own staircase, and that is
+		// the only thing it saves -- but a repeater standing in a pad column hands that pad a fresh
+		// fifteen, so a lane that holds its wait is not short of wire for having skipped the lift. What
+		// it buys instead is a column of the floor above, one per repeater, and columns are the thing
+		// this builder is for.
+		//
+		// Nor does it risk the shape the lift exists to avoid. A raised pad is about what the staircase
+		// steps off; the chord's own trigger still stands at the top of it, so nothing up there is
+		// driven by dust and there is no wire-note-wire to make.
+		int absorb = PAD_SPENDS_THE_WAIT && staircase
+			? Math.max(0, spareDelay - MAX_LANE_SPACING) : 0;
+		if (absorb > 0) {
+			Pad holding = planPad(columns, signal, turnCells, spareDelay, absorb);
+			if (holding.cells().stream().anyMatch(cell -> cell > 0)) {
+				return holding;
+			}
+		}
+		// Nothing to hold, so the old trade stands: an all-dust pad that can be lifted takes the cheap
+		// ascent.
 		if (PADS_AT_BUS_HEIGHT_INTO_A_CLIMB && climbing && staircase && columns > 0
 				&& offBus < turnCells) {
-			// Asked without absorbing anything, because a pad holding a repeater cannot be lifted and
-			// the lift is worth two cells of ascent. Where the pad does raise, that is the better
-			// trade and the wait stays where it was.
 			Pad cheap = planPad(columns, signal, offBus, spareDelay);
 			if (padRaises(cheap, climbing, staircase, fromBus)) {
 				return cheap;
 			}
 		}
-		// And where it does not raise there is nothing to protect, so the pad may as well hold the
-		// wait: every four ticks it takes is a column the next floor does not open with a repeater in.
-		// Four are left behind for the next chord's own trigger, which is laid either way.
-		int absorb = PAD_SPENDS_THE_WAIT && staircase
-			? Math.max(0, spareDelay - MAX_LANE_SPACING) : 0;
 		return planPad(columns, signal, turnCells, spareDelay, absorb);
 	}
 
