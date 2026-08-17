@@ -29,6 +29,8 @@ final class DenseBuildScreen extends Screen {
 	private final int worstBreach;
 	private final int missingNotes;
 	private final int deadNotes;
+	private final int collisions;
+	private final int severedLanes;
 	private final Runnable proceed;
 
 	DenseBuildScreen(Screen parent, SongBuilder.PastePlan plan, Runnable proceed) {
@@ -39,21 +41,27 @@ final class DenseBuildScreen extends Screen {
 		this.worstBreach = plan.worstBreach();
 		this.missingNotes = plan.missingNotes();
 		this.deadNotes = plan.deadNotes();
+		this.collisions = plan.collisions().size();
+		this.severedLanes = plan.severedLanes();
 		this.proceed = proceed;
 	}
 
 	/**
 	 * Whether a plan is clean enough to paste without asking.
 	 *
-	 * <p>All four faults, where it used to be two. A doubled note and a breach were asked about; a
+	 * <p>All five faults, where it used to be two. A doubled note and a breach were asked about; a
 	 * note the build does not contain, and a song silenced from a break onward, were not -- so the
 	 * two that actually cost the player their music were the two that went up without a word. The
-	 * plan has always known both. Nothing here is to do with the debug paste, which only decides what
-	 * the blocks are coloured.</p>
+	 * plan has always known both.</p>
+	 *
+	 * <p>And the fifth, which used to end the paste rather than be asked about: a cell two shapes both
+	 * wanted. Nothing here is to do with the debug paste, which only decides whether that cell also
+	 * gets a lantern dropped on it.</p>
 	 */
 	static boolean needsAsking(SongBuilder.PastePlan plan) {
 		return plan.wrongNotes() > 0 || !plan.breaches().isEmpty()
-			|| plan.missingNotes() > 0 || plan.deadNotes() > 0;
+			|| plan.missingNotes() > 0 || plan.deadNotes() > 0 || !plan.collisions().isEmpty()
+			|| plan.severedLanes() > 0;
 	}
 
 	/**
@@ -69,6 +77,22 @@ final class DenseBuildScreen extends Screen {
 		// itself. These two take music away -- a break silences everything after it, and a note with
 		// nowhere to go is simply absent -- where a breach takes ground and a doubled note adds a
 		// sound. Whichever of them applies is the one that decides the answer.
+		// A contested cell first of all, because it is the only one of the five that is a fault in the
+		// layout rather than in the fit: the other four say this song does not go in this space, and
+		// this one says two shapes were both told they could have one block. It is also the cause of
+		// most of what follows it -- the shape that lost its block has dead wire above it -- so naming
+		// it first stops the same fault being read four times over.
+		if (collisions > 0) {
+			lines.add("- " + count(collisions, "cell") + " were wanted by two shapes at once. The");
+			lines.add("  second one lost its block, and the wire above it is dead.");
+		}
+		// Before the note count, and separately from it, because the two are not the same measurement:
+		// a repeater with nothing behind it reads to the machine reader as a second lever, so a build
+		// cut in four places can report a cut lane here and nought silent notes below.
+		if (severedLanes > 0) {
+			lines.add("- the lane is cut in " + count(severedLanes, "place") + ": a repeater there has");
+			lines.add("  nothing behind it to read, and everything after it is silent.");
+		}
 		if (deadNotes > 0) {
 			lines.add("- " + count(deadNotes, "note") + " would never play at all: the wire dies");
 			lines.add("  part way, and everything after the break is silent.");

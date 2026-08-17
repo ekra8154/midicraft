@@ -362,6 +362,74 @@ public final class SongBuilder {
 		if (stats.peak() > MAX_SIMULTANEOUS_NOTES) {
 			throw new IllegalArgumentException(overloadMessage(stats));
 		}
+		try {
+			return walkPastePlan(origin, notes, mode, limits, start, title);
+		} catch (LayoutCollision stuck) {
+			if (!OFFER_ON_COLLISION) {
+				throw stuck;
+			}
+			// Walked again, letting the cell go to whoever got there first. Two shapes wanting one
+			// column is a fault in the layout and the build that comes out of it is broken -- but it is
+			// broken in one place, and refusing it takes away the whole song and the only view of the
+			// fault there is. So the second pass carries on past the collision, the cells it lost are
+			// carried on the plan, and the paste screen says so in red before anything is pasted.
+			//
+			// A second walk rather than tolerating the first: a clean build must be the build it always
+			// was, down to the block. Nothing here runs unless the first pass has already given up.
+			TOLERATING_COLLISIONS.set(Boolean.TRUE);
+			try {
+				return walkPastePlan(origin, notes, mode, limits, start, title);
+			} finally {
+				TOLERATING_COLLISIONS.remove();
+			}
+		}
+	}
+
+	/**
+	 * Two shapes wanting one cell, raised where the second one writes.
+	 *
+	 * <p>An {@link IllegalArgumentException} still, because every trial in this file catches it as one
+	 * and the throw <em>is</em> the fallback -- the catch rolls the shape back and lays a bus. It has
+	 * its own type only so that {@link #createPastePlan} can tell the one refusal worth walking again
+	 * from the ones that are about the song rather than about the layout.</p>
+	 */
+	static final class LayoutCollision extends IllegalArgumentException {
+		private static final long serialVersionUID = 1L;
+
+		LayoutCollision(String message) {
+			super(message);
+		}
+	}
+
+	/**
+	 * Whether a collision no trial caught lets the walk carry on instead of ending the build.
+	 *
+	 * <p>The half of {@link #DEBUG_PASTE} that changes the build, on its own and off by default. Set
+	 * only by {@link #createPastePlan}'s second pass, and per thread: forecasts are planned on a
+	 * background thread while the paste itself is planned on the render thread, and a global here
+	 * would let one of them decide what the other builds.</p>
+	 */
+	private static final ThreadLocal<Boolean> TOLERATING_COLLISIONS =
+		ThreadLocal.withInitial(() -> Boolean.FALSE);
+
+	/**
+	 * Whether a build that collides is offered with its faults instead of refused.
+	 *
+	 * <p>ekran's, and on. Named as a switch rather than written straight into the catch because it is
+	 * the only way to ask what a test was doing before this existed: a build that collides is a build
+	 * that used to throw, so every probe and assertion over one of them has changed shape, and
+	 * {@code -Dfault.set=OFFER_ON_COLLISION=false} is what tells a fault this uncovered apart from a
+	 * fault it caused.</p>
+	 */
+	static boolean OFFER_ON_COLLISION = true;
+
+	/** Whether this thread is on the second pass, where a lost cell is recorded rather than thrown. */
+	static boolean toleratingCollisions() {
+		return TOLERATING_COLLISIONS.get();
+	}
+
+	private static PastePlan walkPastePlan(BlockPos origin, List<EventNote> notes, PasteMode mode,
+			BuildLimits limits, WalkStart start, String title) {
 		Direction forward = Direction.EAST;
 		// The sign last of all, after the marking pass has finished rewriting blocks. It is the one
 		// command in a build that is not a block of the machine, and the one command with spaces in
@@ -443,24 +511,28 @@ public final class SongBuilder {
 			}
 		}
 		List<String> severed = new ArrayList<>();
+		List<BlockPos> severedSites = List.of();
 		if (starved.size() > 1) {
-			starved.sort(java.util.Comparator.<BlockPos>comparingInt(BlockPos::getX)
-				.thenComparingInt(BlockPos::getZ).thenComparingInt(BlockPos::getY));
-			BlockPos cut = starved.get(1);
-			severed.add((starved.size() - 1) + " repeaters have nothing behind them to read, so the "
+			starved.sort(FaultSites.ORDER);
+			// All but the first, which is the lever. These are carried as positions as well as named in
+			// the sentence, because the sentence only has room for one of them.
+			severedSites = List.copyOf(starved.subList(1, starved.size()));
+			BlockPos cut = severedSites.getFirst();
+			severed.add(severedSites.size() + " repeaters have nothing behind them to read, so the "
 				+ "lane is cut there and everything after it is silent. The first is at "
 				+ cut.getX() + " " + cut.getY() + " " + cut.getZ());
 		}
+		FaultSites cutOnly = plan.faultSites().withDeadLine(List.of(), severedSites);
 		NoteMachineReader.Reading reading;
 		try {
 			reading = NoteMachineReader.read("unreached", low, high,
 				position -> world.getOrDefault(position,
 					net.minecraft.world.level.block.Blocks.AIR.defaultBlockState()));
 		} catch (RuntimeException unreadable) {
-			return severed.isEmpty() ? plan : withFaults(plan, severed);
+			return severed.isEmpty() ? plan : withFaults(plan, severed, cutOnly);
 		}
 		if (reading.unreachedNotes() == 0) {
-			return severed.isEmpty() ? plan : withFaults(plan, severed);
+			return severed.isEmpty() ? plan : withFaults(plan, severed, cutOnly);
 		}
 		// The disagreement, and only the disagreement. A cell counts as dead wire when the walk meant
 		// it to carry the signal and the reader never got to it -- so the instrument blocks, the
@@ -486,6 +558,24 @@ public final class SongBuilder {
 			}
 			commands = marked;
 		}
+		// Where the run actually stops, which is a different block from the first note to go quiet and
+		// the one worth being sent to. A dead cell touching a live one is the break itself: everything
+		// on one side of it fired and nothing on the other did. The first quiet note is wherever the
+		// song happened to hang a note next, which can be most of a floor further on and says nothing
+		// about the cause.
+		//
+		// A run can break in more than one place -- two lanes can die independently -- so all of them
+		// are kept, in the order you would walk into them.
+		List<BlockPos> breaks = deadWire.stream()
+			.filter(at -> {
+				for (Direction side : Direction.values()) {
+					if (reading.reachedAt().contains(at.relative(side))) {
+						return true;
+					}
+				}
+				return false;
+			})
+			.sorted(FaultSites.ORDER).toList();
 		BlockPos first = reading.unreachedAt().getFirst();
 		List<String> faults = new ArrayList<>(plan.faults());
 		faults.addAll(severed);
@@ -499,17 +589,23 @@ public final class SongBuilder {
 		return new PastePlan(List.copyOf(commands), plan.width(), plan.depth(), plan.height(),
 			plan.spanX(), plan.spanZ(), plan.mode(), List.copyOf(faults), plan.turns(), plan.moved(),
 			plan.breaches(), plan.recesses(), plan.padding(), plan.nearWall(), plan.farWall(),
-			plan.collisions(), plan.poweredAt(), plan.laidBy(), plan.noteTicks());
+			plan.collisions(), plan.poweredAt(), plan.laidBy(), plan.noteTicks(),
+			// The break where it can be found, and the first quiet note where it cannot. A reading that
+			// says notes are unreached while no powered cell went dark is a disagreement this pass
+			// cannot explain, and sending the player to the first silent note is at least sending them
+			// somewhere the fault can be seen.
+			plan.faultSites().withDeadLine(breaks.isEmpty() ? List.of(first) : breaks, severedSites));
 	}
 
-	/** The same plan with more wrong with it than it knew. */
-	private static PastePlan withFaults(PastePlan plan, List<String> extra) {
+	/** The same plan with more wrong with it than it knew, and the blocks it is wrong at. */
+	private static PastePlan withFaults(PastePlan plan, List<String> extra,
+			FaultSites sites) {
 		List<String> faults = new ArrayList<>(plan.faults());
 		faults.addAll(extra);
 		return new PastePlan(plan.commands(), plan.width(), plan.depth(), plan.height(),
 			plan.spanX(), plan.spanZ(), plan.mode(), List.copyOf(faults), plan.turns(), plan.moved(),
 			plan.breaches(), plan.recesses(), plan.padding(), plan.nearWall(), plan.farWall(),
-			plan.collisions(), plan.poweredAt(), plan.laidBy(), plan.noteTicks());
+			plan.collisions(), plan.poweredAt(), plan.laidBy(), plan.noteTicks(), sites);
 	}
 
 	/** What a build with no name to put on it is called. */
@@ -589,7 +685,7 @@ public final class SongBuilder {
 		return new PastePlan(List.copyOf(commands), plan.width(), plan.depth(), plan.height(),
 			plan.spanX(), plan.spanZ(), plan.mode(), plan.faults(), plan.turns(), plan.moved(),
 			plan.breaches(), plan.recesses(), plan.padding(), plan.nearWall(), plan.farWall(),
-			plan.collisions(), plan.poweredAt(), plan.laidBy(), plan.noteTicks());
+			plan.collisions(), plan.poweredAt(), plan.laidBy(), plan.noteTicks(), plan.faultSites());
 	}
 
 	/**
@@ -9884,8 +9980,13 @@ public final class SongBuilder {
 			EventGroup event, ChordStyle style, Lane start, String gaveUp, Relocation moved) {
 		placements.beginTrial();
 		try {
-			return addStackedShape(placements, lane, triggerDelay, event, style, false, start,
+			int cells = addStackedShape(placements, lane, triggerDelay, event, style, false, start,
 				gaveUp, moved).busCells();
+			// Asked as well as caught, for the same reason as in {@link #buildShaped}: where a collision
+			// does not throw -- a marked build, or the second pass that offers a broken build rather
+			// than refusing it -- a shape that lost ground would otherwise answer with a length as
+			// though it had fitted, and the relocation would be decided off a module nobody can build.
+			return placements.trialCollided() ? -1 : cells;
 		} catch (IllegalArgumentException collided) {
 			return -1;
 		} finally {
@@ -13509,11 +13610,44 @@ public final class SongBuilder {
 	 *     {@link #NAME_EVERY_CELL} or {@link #DEBUG_PASTE} was on. The one fact about a build that
 	 *     dies at {@code finish()} and that every fault wants first.
 	 */
+	/**
+	 * Where each kind of fault stands, in world space, so that a count can be walked up to.
+	 *
+	 * <p>Carried rather than read back out of the fault sentences. The counts beside them are parsed
+	 * from prose and {@link PastePlan#leadingCount} names that as a weakness -- the wording has moved
+	 * twice and each time it moved the count would have gone quietly to nought. A coordinate fails the
+	 * same way and worse: a number that silently becomes nought is a fault nobody is told about, and a
+	 * coordinate that silently becomes {@code 0 0 0} is a fault somebody is sent to the wrong place
+	 * for. So these come off the blocks the walk actually recorded.</p>
+	 *
+	 * <p>Every list is in a settled order -- along travel, then across, then up -- because these are
+	 * shown one at a time and "the first one" has to mean the same thing on two runs of the same song.
+	 * Collisions are not here: {@link PastePlan#collisions} already carries its own, keyed by position
+	 * and in the order the walk met them.</p>
+	 *
+	 * @param breaks cells the walk meant to carry the signal that the reader never got to, and that
+	 *     touch one it did. That is the break itself rather than the first note to go quiet, which is
+	 *     usually some distance downstream of it and tells you nothing about why.
+	 * @param severed repeaters with nothing behind them to read, less the first, which is the lever
+	 */
+	record FaultSites(List<BlockPos> wrongNotes, List<BlockPos> missingNotes, List<BlockPos> breaks,
+			List<BlockPos> severed) {
+		/** Along travel, then across, then up: the order you would walk into them. */
+		static final java.util.Comparator<BlockPos> ORDER =
+			java.util.Comparator.<BlockPos>comparingInt(BlockPos::getX)
+				.thenComparingInt(BlockPos::getZ).thenComparingInt(BlockPos::getY);
+
+		FaultSites withDeadLine(List<BlockPos> foundBreaks, List<BlockPos> foundSevered) {
+			return new FaultSites(wrongNotes, missingNotes, List.copyOf(foundBreaks),
+				List.copyOf(foundSevered));
+		}
+	}
+
 	record PastePlan(List<String> commands, int width, int depth, int height, int spanX, int spanZ,
 			PasteMode mode, List<String> faults, List<BlockPos> turns, List<Integer> moved,
 			List<Integer> breaches, List<Integer> recesses, Map<String, Integer> padding,
 			int nearWall, int farWall, Map<BlockPos, String> collisions, Set<BlockPos> poweredAt,
-			Map<BlockPos, String> laidBy, Map<BlockPos, Integer> noteTicks) {
+			Map<BlockPos, String> laidBy, Map<BlockPos, Integer> noteTicks, FaultSites faultSites) {
 
 		/**
 		 * Cells of lane filled with wire rather than with music, counted by what asked for them.
@@ -13576,6 +13710,24 @@ public final class SongBuilder {
 		}
 
 		/**
+		 * Repeaters with nothing behind them to read, each of which cuts the lane where it stands.
+		 *
+		 * <p>The dead line {@link #deadNotes} cannot see, and so worth counting beside it rather than
+		 * folded into it. A starved repeater looks to the reader exactly like a second lever -- it
+		 * starts a fresh performance there and calls everything after it reached -- so a build severed
+		 * in four places reports nought unreached notes and every other number clean. One starved
+		 * repeater is the lever the player throws; from two, the count here is what is wrong.</p>
+		 */
+		int severedLanes() {
+			for (String fault : faults) {
+				if (fault.contains("have nothing behind them to read")) {
+					return leadingCount(fault);
+				}
+			}
+			return 0;
+		}
+
+		/**
 		 * The number a fault opens with, or nought.
 		 *
 		 * <p>Prose, parsed, which is the same shape {@link #wrongNotes} has always had. It is worth
@@ -13602,7 +13754,9 @@ public final class SongBuilder {
 				return faults;
 			}
 			List<String> lines = new ArrayList<>(faults);
-			lines.add(collisions.size() + " collisions, marked with sea lantern:");
+			lines.add(collisions.size() + " cells two shapes both wanted; the second one lost its "
+				+ "block and the wire above it is dead"
+				+ (DEBUG_PASTE ? ", marked with sea lantern:" : ":"));
 			collisions.forEach((at, what) -> lines.add("  " + at.getX() + " " + at.getY() + " "
 				+ at.getZ() + "  " + what));
 			return lines;
@@ -14535,8 +14689,8 @@ public final class SongBuilder {
 				}
 			}
 			if (existing != null && !existing.equals(block)) {
-				if (!DEBUG_PASTE) {
-					throw new IllegalArgumentException("Placement layout collision at "
+				if (!DEBUG_PASTE && !toleratingCollisions()) {
+					throw new LayoutCollision("Placement layout collision at "
 						+ describe(key) + ": " + existing + " is already there and " + block
 						+ " wants the same block");
 				}
@@ -14768,6 +14922,19 @@ public final class SongBuilder {
 			return Map.copyOf(when);
 		}
 
+		/**
+		 * A set of walk positions as a world-space list in a settled order.
+		 *
+		 * <p>Both sets these come out of are {@link java.util.HashSet}s, so their iteration order is a
+		 * hash order -- stable within one run and not meaningfully first-to-last. "The first wrong
+		 * note" has to name the same block every time it is asked, or two forecasts of the same song
+		 * send you to two different places.</p>
+		 */
+		private static List<BlockPos> sited(Set<BlockPos> cells, int shiftX, int shiftZ) {
+			return cells.stream().map(at -> at.offset(shiftX, 0, shiftZ))
+				.sorted(FaultSites.ORDER).toList();
+		}
+
 		/** What laid each cell, in world space, for a fault that wants to name the shapes either end. */
 		Map<BlockPos, String> laidBy(int shiftX, int shiftZ) {
 			Map<BlockPos, String> named = new LinkedHashMap<>();
@@ -14797,19 +14964,16 @@ public final class SongBuilder {
 			}
 			List<String> faults = new ArrayList<>(trouble);
 			faults.addAll(verify(shiftX, shiftZ));
-			// Every other layout is finished, so a fault in one is a bug and the build is refused.
-			// The ultra lane is still being worked out on multiple floors, where the run that carries
-			// the signal sideways passes under the notes of the corridors either side of it, and a
-			// machine you cannot stand in front of is a machine you cannot work out. So it goes up,
-			// and says what is wrong with it.
-			// And v2 for the same reason, more so: it is the one being worked out now, and refusing to
-			// paste it is refusing ekran the only view of it that has ever settled an argument here.
-			// A broken v2 build goes up and says what is wrong with it, in the faults overlay.
-			if (!faults.isEmpty() && mode != PasteMode.ULTRA_COMPACT_LANE
-					&& mode != PasteMode.ULTRA_COMPACT_LANE_V2) {
-				throw new IllegalArgumentException("Refusing to build a broken machine: "
-					+ faults.get(0) + ". This is a bug in the layout, not in the song.");
-			}
+			// Every fault a build has travels on the build. It used to be that the two lane layouts
+			// still being worked out went up and said what was wrong with them, and every other layout
+			// refused -- on the reasoning that a finished layout with a fault in it has a bug, so there
+			// is nothing to paste. That reasoning is about whose bug it is, not about what the player
+			// wanted, and it answers by taking the whole song away: a build with one doubled note in it
+			// is a build worth standing in, and the machine that shows where the fault is is the same
+			// machine that plays the other four thousand notes correctly.
+			//
+			// So nothing is refused here. The faults are carried on the plan, the paste screen shows
+			// them in red before anything is committed, and the player decides.
 			// Only the ultra lane has walls worth measuring a breach against: every other mode passes
 			// its own origin for both, so outside-the-walls would mean the whole build.
 			boolean walled = mode == PasteMode.ULTRA_COMPACT_LANE && !breaches.isEmpty();
@@ -14820,12 +14984,20 @@ public final class SongBuilder {
 				.toList());
 			// The marking pass, last so that it wins: every other claim on the cell has been made by
 			// now, and a lantern placed halfway through would be quietly built over by the next chord.
+			//
+			// Only the lantern is the debug paste's. Every collision is recorded either way, because a
+			// contested cell is a fault the player has to be told about whether or not they asked for a
+			// diagnostic -- but a real build gets the best machine the layout could manage, and a
+			// lantern dropped into it would break the one shape that did get its cell as well. The
+			// coordinates go to chat instead, which is what you need to walk up to it.
 			Map<BlockPos, String> marked = new LinkedHashMap<>();
 			for (Map.Entry<BlockPos, String> clash : collisions.entrySet()) {
 				BlockPos at = clash.getKey().offset(shiftX, 0, shiftZ);
 				marked.put(at, clash.getValue());
-				commands.add("setblock " + at.getX() + " " + at.getY() + " " + at.getZ()
-					+ " minecraft:sea_lantern replace");
+				if (DEBUG_PASTE) {
+					commands.add("setblock " + at.getX() + " " + at.getY() + " " + at.getZ()
+						+ " minecraft:sea_lantern replace");
+				}
 			}
 			int widthX = maximumX < minimumX ? 0 : maximumX - minimumX + 1;
 			int widthZ = maximumZ < minimumZ ? 0 : maximumZ - minimumZ + 1;
@@ -14836,7 +15008,13 @@ public final class SongBuilder {
 				turns.stream().map(turn -> turn.offset(shiftX, 0, shiftZ)).toList(),
 				List.copyOf(moved), List.copyOf(breaches), List.copyOf(recesses),
 				Map.copyOf(padding), nearWall + shiftX, farWall + shiftX, Map.copyOf(marked),
-				poweredAt(shiftX, shiftZ), laidBy(shiftX, shiftZ), noteTicks(shiftX, shiftZ));
+				poweredAt(shiftX, shiftZ), laidBy(shiftX, shiftZ), noteTicks(shiftX, shiftZ),
+				// Shifted with everything else, because a coordinate that is not one you can walk to is
+				// not worth carrying. The dead line's own two lists are filled in later, by the pass
+				// that reads the blocks back -- it is the only thing that knows where the signal
+				// stopped, and it does not exist until the commands do.
+				new FaultSites(sited(wrongNotesAt, shiftX, shiftZ),
+					sited(missedNotesAt, shiftX, shiftZ), List.of(), List.of()));
 		}
 	}
 }
