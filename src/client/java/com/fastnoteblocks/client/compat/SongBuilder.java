@@ -9407,6 +9407,11 @@ public final class SongBuilder {
 					placements.padded(slackColumns > 0 ? "planParityHadSlack" : "planParityTight");
 				}
 			}
+			// Where the nudge puts the module next to a bend is asked after it is built, not here --
+			// see {@link #NUDGE_ASKS_THE_CORNER_AGAIN}. Asked here it is the wrong cell: the flank
+			// that lands near the corner is columns along from the one the module opens in. Both were
+			// built and measured, and the pre-build one changed nothing the after-build one had not
+			// already caught.
 		}
 		// A stacked module near the wall is built as a bus, whether or not it wanted a nudge.
 		//
@@ -9648,6 +9653,29 @@ public final class SongBuilder {
 				placements.rollbackTrial();
 				placements.padded("planBusForStandingOnTheRoute");
 				trace(event, lane, style, ChordStyle.BUS, "onTheRoute");
+				return layBus(placements, lane, triggerDelay, event, ChordStyle.BUS, true, layout);
+			}
+			// And the corner rule asked of the footprint rather than of the column the module opens in.
+			//
+			// Only for a nudged module, and only because the nudge is what moved it: the turn ban
+			// upstream answered about the cell the module was standing in before the parity pad pushed
+			// it a column along, and a column is the whole of that rule. See
+			// {@link #NUDGE_ASKS_THE_CORNER_AGAIN}.
+			//
+			// Of every cell the module wrote, because the cell that lands near the corner is not the one
+			// it opens in -- ekran's is a front flank two columns further along, with the opening still
+			// four from the bend. Asking the opening cell is asking about the wrong block, which is the
+			// mistake the route check was written to stop being made by hand.
+			//
+			// {@code routeAhead} cannot stand in for this. It is measured from where the module *ended*
+			// and follows bends the lane has already armed, so a module laid before its lane decides to
+			// turn is measured against a route that runs straight past the corner it is about to make.
+			if (layout.v2() && NUDGE_ASKS_THE_CORNER_AGAIN && shape.nudge()
+					&& placements.trialNearACorner(STACKED_CLEAR_OF_CORNER)) {
+				placements.rollbackTrial();
+				placements.padded("planBusForNudgingIntoACorner");
+				placements.padded("nudgedIntoACornerAt" + Math.min(event.notes().size(), 30) + "Notes");
+				trace(event, lane, style, ChordStyle.BUS, "nudgedIntoACorner");
 				return layBus(placements, lane, triggerDelay, event, ChordStyle.BUS, true, layout);
 			}
 			// And the third thing the decision cannot settle, asked the same way. onTheFreeSlots tries
@@ -10954,6 +10982,36 @@ public final class SongBuilder {
 	 * is a recess, counted as one where the split is built.</p>
 	 */
 	static boolean CUTS_A_CHORD_THAT_FITS = true;
+
+	/**
+	 * Whether a parity nudge asks the corner rule again from the column it moved to.
+	 *
+	 * <p>ekran's, read off Guardian 20 wide over four floors: a stacked bus standing clear of its bend
+	 * was nudged one column for parity, and the column it landed in put its front flank under the
+	 * lane's own raised path. A flank is a note block and a note block insists on air above it; the
+	 * path wants stone in that same cell. The module collides with its own tail coming back round the
+	 * bend, and the dust above it runs over air -- a dead line, out of a shape that was safe until it
+	 * was moved.</p>
+	 *
+	 * <p>The turn ban is a distance and a nudge is a column, so the upstream answer is an answer about
+	 * where the module <em>was</em>. The trial's collision catch already recovers from this by re-laying
+	 * the chord as a bus -- but a recovery is not a decision, and under a marked paste there is no
+	 * throw to recover from, which is exactly the build ekran has to stand in to see it.</p>
+	 *
+	 * <p><b>Asked of the note blocks the module wrote, once it is built.</b> Not of the column it opens
+	 * in, which is the wrong cell -- ekran's flank is two columns further along with the opening still
+	 * four clear of the bend; that version was built, measured, and caught nothing this one misses. And
+	 * not of every cell either: a bus tail runs through bends all day, and asking of the whole footprint
+	 * refuses 569 modules where 325 are the fault and costs the all-twenty-fives song 54 breach blocks
+	 * to <b>189</b>. A note block is what cannot stand there, because it insists on air above it and the
+	 * arm coming out of the corner wants stone in that cell.</p>
+	 *
+	 * <p><b>Measured, and it is what makes Guardian buildable.</b> Guardian goes from thirteen of its
+	 * sixteen sizes to <b>fifteen</b>, with the all-twenty-fives song unmoved at 54 breach blocks over
+	 * 951 columns. Over the library it is close to neutral: 1,102 breach blocks to 1,111, one refusal
+	 * back, one missing note back, nothing dead either way.</p>
+	 */
+	static boolean NUDGE_ASKS_THE_CORNER_AGAIN = true;
 
 	/**
 	 * Whether a cut that would fall a column short takes a shorter head rather than no head.
@@ -13566,6 +13624,34 @@ public final class SongBuilder {
 					+ Math.abs(at.getZ() - corner.getZ()));
 			}
 			return nearest;
+		}
+
+		/**
+		 * Whether anything the trial wrote stands within this many blocks of a corner on its own level.
+		 *
+		 * <p>{@link #trialTouches} for the corner rule. A stacked module is banned near a bend because
+		 * the route comes back along the other arm and walks over whatever it hung there -- and the
+		 * cell that ends up near the bend is not the cell the module opened in, so the question can
+		 * only be answered once the footprint exists. Levels are kept apart by
+		 * {@link #cornerDistance}: a corner a floor down cannot reach anything up here.</p>
+		 */
+		boolean trialNearACorner(int within) {
+			if (trial == null) {
+				return false;
+			}
+			for (BlockPos at : trial.blocksAdded()) {
+				// Notes only, and that is the whole difference between a rule and a ban. A bus tail
+				// runs through bends all day -- it is what every refused shape falls back to -- so
+				// asking of every cell the module wrote refuses 569 modules over the library where 39
+				// are the fault, and costs the all-twenty-fives song 54 breach blocks to 189. What
+				// cannot stand near a bend is a note block: it insists on air above it, and the arm
+				// coming out of the corner wants stone in that cell to carry the lane.
+				if (blocks.getOrDefault(at, "").startsWith("minecraft:note_block")
+						&& cornerDistance(at) < within) {
+					return true;
+				}
+			}
+			return false;
 		}
 
 		/**
