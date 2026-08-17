@@ -12,11 +12,14 @@ import java.util.Map;
 import java.util.Set;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screens.PauseScreen;
+import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
+import net.minecraft.world.level.block.Blocks;
 
 /**
  * Sends a paste to the server a few blocks a tick, and does not lose any of them.
@@ -97,12 +100,16 @@ public final class CommandPasteSender {
 	private static int total;
 	private static int sent;
 	private static int repaired;
+	/** Commands the world had already satisfied, so nothing was sent for them. */
+	private static int skipped;
 	private static int changed;
 	private static BlockPos firstChanged;
 	private static long now;
 	/** Commands owed but not yet whole, for the rates below one a tick. */
 	private static double credit;
 	private static int nags;
+	/** Ticks spent waiting behind a screen, which is also the flag that it is waiting. */
+	private static int heldFor;
 	private static boolean announced;
 
 	/**
@@ -158,11 +165,13 @@ public final class CommandPasteSender {
 		total = QUEUE.size();
 		sent = 0;
 		repaired = 0;
+		skipped = 0;
 		changed = 0;
 		firstChanged = null;
 		now = 0;
 		credit = 0;
 		nags = 0;
+		heldFor = 0;
 		announced = false;
 		whenDone = done;
 		world = Minecraft.getInstance().level;
@@ -194,10 +203,12 @@ public final class CommandPasteSender {
 		total = 0;
 		sent = 0;
 		repaired = 0;
+		skipped = 0;
 		changed = 0;
 		firstChanged = null;
 		credit = 0;
 		nags = 0;
+		heldFor = 0;
 		whenDone = null;
 	}
 
@@ -212,6 +223,22 @@ public final class CommandPasteSender {
 				|| minecraft.level == null || minecraft.level != world) {
 			cancel(true);
 			return;
+		}
+		if (held(minecraft)) {
+			// Before the clock, so nothing ages while you are in there: a block sent a moment before
+			// you opened the menu has not been settling, it has been sitting in a frozen world.
+			// Reading it back now would find whatever the paused server had got to and call the rest
+			// dropped.
+			if (heldFor++ % NAG == 0) {
+				show(Component.literal("Paste held at " + sent + "/" + total
+						+ " -- resumes when you close this")
+					.withStyle(net.minecraft.ChatFormatting.YELLOW));
+			}
+			return;
+		}
+		if (heldFor > 0) {
+			heldFor = 0;
+			show(Component.literal("Placing sequence: " + sent + "/" + total));
 		}
 		now++;
 		place(minecraft, minecraft.level);
@@ -236,10 +263,22 @@ public final class CommandPasteSender {
 		double rate = FastNoteblocksConfig.get().commandsPerTick();
 		credit = bank(credit, rate);
 		boolean waiting = false;
-		while (credit >= 1 && !QUEUE.isEmpty()) {
+		int looked = 0;
+		while (!QUEUE.isEmpty() && looked++ < CHECKS_PER_TICK) {
 			Placement next = QUEUE.peekFirst();
 			if (next.at() != null && !writable(level, next.at())) {
 				waiting = true;
+				break;
+			}
+			// Costs no credit, because it costs no packet. A rate is a limit on what the server is
+			// asked to do, and this asks it for nothing.
+			if (alreadyAir(level, next)) {
+				QUEUE.removeFirst();
+				sent++;
+				skipped++;
+				continue;
+			}
+			if (credit < 1) {
 				break;
 			}
 			QUEUE.removeFirst();
@@ -256,7 +295,8 @@ public final class CommandPasteSender {
 		if (QUEUE.isEmpty()) {
 			if (!announced) {
 				announced = true;
-				show(Component.literal("Sequence placement complete: " + sent + "/" + total));
+				show(Component.literal("Sequence placement complete: " + sent + "/" + total
+					+ (skipped == 0 ? "" : " (" + skipped + " already air)")));
 				finish();
 			}
 			return;
@@ -348,6 +388,50 @@ public final class CommandPasteSender {
 	 */
 	static double bank(double credit, double rate) {
 		return Math.min(credit + rate, Math.max(rate, 1));
+	}
+
+	/**
+	 * Screens a paste waits behind rather than building through.
+	 *
+	 * <p>The pause menu because in singleplayer it stops the server: the commands keep leaving the
+	 * client, nothing at the other end is processing them, and they arrive in one lump when you come
+	 * back. Which is the burst the slow send rates exist to avoid, arrived at by a different road.
+	 * The composer because a build going up behind an editor is a build nobody is watching, and the
+	 * whole reason a paste is worth pausing is that it wants you nearby.</p>
+	 *
+	 * <p>Only holds it. Cancelling is something you ask for, and it is still one button away.</p>
+	 */
+	private static boolean held(Minecraft minecraft) {
+		Screen screen = minecraft.gui.screen();
+		return screen instanceof PauseScreen || screen instanceof ComposerScreen;
+	}
+
+	/**
+	 * Whether a command would write air into a cell that is already exactly air.
+	 *
+	 * <p>Worth catching because it is not a rounding error: a build writes air over every note block,
+	 * because that is what keeps a note audible, and in the open sky that is a fifth to nearly a
+	 * third of every command it sends -- more commands than it spends on note blocks. Guardian sends
+	 * close to twenty-five thousand of them. Each one is refused by the server with "Could not set
+	 * the block", which is what {@code LevelChunk.setBlockState} says when the state asked for is the
+	 * state already there, and each one takes a line of chat and a slot in the send rate to change
+	 * nothing.</p>
+	 *
+	 * <p>Safe to drop only because no cell of a build is ever written twice with different blocks --
+	 * the plan is a map, and a second claim on a cell is a collision it reports rather than a
+	 * rewrite. If a build could lay stone and then clear it, this would have to know that the air was
+	 * meant to undo something and not merely to describe what is already there.</p>
+	 *
+	 * <p>Exactly {@code minecraft:air} on both sides, never {@code isAir()}. Cave air and void air are
+	 * different blocks, so writing air over one of them is a real change and goes out. That is also
+	 * what makes this safe behind the gate rather than dangerous in front of it: a chunk this client
+	 * does not hold reads as {@code void_air} -- from {@code EmptyLevelChunk}, and out of build height
+	 * from {@code Level} itself -- so an unloaded cell can never look like one worth skipping.</p>
+	 */
+	private static boolean alreadyAir(ClientLevel level, Placement next) {
+		return next.at() != null
+			&& "minecraft:air".equals(next.block())
+			&& level.getBlockState(next.at()).is(Blocks.AIR);
 	}
 
 	/** Whether a position is far enough inside what this client holds to be worth writing to. */

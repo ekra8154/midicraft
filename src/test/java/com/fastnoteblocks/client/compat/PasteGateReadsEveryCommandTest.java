@@ -108,6 +108,40 @@ class PasteGateReadsEveryCommandTest {
 		}
 	}
 
+	/**
+	 * No command writing air is undoing an earlier command of the same paste.
+	 *
+	 * <p>This is what lets the sender drop an air command when the cell is already air, which is a
+	 * fifth to nearly a third of everything a build sends. Dropping it is only equivalent while air
+	 * means "nothing goes here" and never "take away what I just put here" -- if a build could lay
+	 * stone and then clear it, skipping the clearing would leave the stone standing.</p>
+	 *
+	 * <p>It holds because the plan is a map keyed by cell, so a second claim on one is a collision it
+	 * reports rather than a rewrite. The passes that do add a second command for a cell -- the
+	 * marking pass and its lanterns, the title sign -- never add air. This asserts that, so that a
+	 * pass which one day does gets caught here rather than by a hole in a build.</p>
+	 */
+	@Test
+	void noAirCommandTakesBackAnEarlierBlock() {
+		for (SongBuilder.PasteMode mode : SongBuilder.PasteMode.values()) {
+			SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0),
+				DebugChords.notes("5x4 30 2x6 24:12s12p 18@1", 4), mode,
+				new SongBuilder.BuildLimits(4, 16, 3), SongBuilder.WalkStart.HEAD, "Song of Storms");
+
+			Set<BlockPos> written = new java.util.HashSet<>();
+			for (String command : plan.commands()) {
+				CommandPasteSender.Placement placement = CommandPasteSender.read(command);
+				if ("minecraft:air".equals(placement.block()) && written.contains(placement.at())) {
+					throw new AssertionError(mode + " writes air over a cell it already filled, at "
+						+ placement.at().getX() + " " + placement.at().getY() + " "
+						+ placement.at().getZ() + ", so that air is undoing something and the "
+						+ "sender must stop skipping it");
+				}
+				written.add(placement.at());
+			}
+		}
+	}
+
 	/** Every block read off a build is one the game knows, or the check would fail on every cell. */
 	@Test
 	void readsBlockIdsTheGameActuallyHas() {
