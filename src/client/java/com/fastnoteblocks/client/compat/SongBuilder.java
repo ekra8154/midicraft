@@ -9636,6 +9636,14 @@ public final class SongBuilder {
 		try {
 			Placed placed = addStackedShape(placements, lane, triggerDelay, event, style, nudge,
 				start, gaveUp, moved);
+			// A marked build gives the shape up where an unmarked one throws. Raised as the same
+			// exception on purpose, so it takes the same catch, the same rollback and the same bus --
+			// two code paths deciding one thing is the bug this file keeps producing, and this is the
+			// one place it would have been invisible, because the build that has it is the build
+			// nobody can paste. See {@link PlacementPlan#trialCollided}.
+			if (placements.trialCollided()) {
+				throw new IllegalArgumentException("a marked paste held this shape off its own ground");
+			}
 			// And then the shape is asked where it landed, which is a different question from whether
 			// it fitted. A stacked module hangs notes to the side of the path, and to the side of the
 			// path is a safe place to hang them only while the path is straight. Through a bend the
@@ -9748,6 +9756,11 @@ public final class SongBuilder {
 					at = at.ahead(1);
 				}
 				Body body = addSpatialEventModule(placements, at, triggerDelay, event.notes(), forceBus);
+				// The same as in {@link #buildShaped}: marked, a collision does not throw, so the bus
+				// would settle on ground it had lost instead of trying the next column along.
+				if (placements.trialCollided()) {
+					throw new IllegalArgumentException("a marked paste held this bus off its own ground");
+				}
 				placements.commitTrial();
 				for (int cell = 0; cell < shifted; cell++) {
 					placements.padded("parity");
@@ -13668,6 +13681,7 @@ public final class SongBuilder {
 		 */
 		private record Trial(List<BlockPos> blocksAdded, Map<BlockPos, Integer> notesBefore,
 				Map<BlockPos, Integer> poweredBefore, List<BlockPos> cornersAdded,
+				List<BlockPos> collisionsAdded,
 				int turnCount, int movedCount, int troubleCount, int breachCount, int recessCount,
 				Map<String, Integer> padding,
 				int minX, int minY, int minZ, int maxX, int maxY, int maxZ) {
@@ -14128,7 +14142,7 @@ public final class SongBuilder {
 		void beginSoftTail(SoftTail what) {
 			softTail = what;
 			tailJournal = new Trial(new ArrayList<>(), new LinkedHashMap<>(), new LinkedHashMap<>(),
-				new ArrayList<>(), 0, 0, 0, 0, 0, Map.of(), 0, 0, 0, 0, 0, 0);
+				new ArrayList<>(), new ArrayList<>(), 0, 0, 0, 0, 0, Map.of(), 0, 0, 0, 0, 0, 0);
 		}
 
 		/** Stops recording, keeping what was recorded. The tail is down; the question comes later. */
@@ -14400,8 +14414,14 @@ public final class SongBuilder {
 				// What was standing wins, so the rest of the walk carries on over the layout it would
 				// have had anyway. Only the first claim on a cell is remembered: a column that gets
 				// wanted three times is still one place to go and stand.
-				collisions.putIfAbsent(key, existing + " (" + placedBy.getOrDefault(key, "?")
-					+ ") held off " + block + " (" + placing + ")");
+				if (collisions.putIfAbsent(key, existing + " (" + placedBy.getOrDefault(key, "?")
+						+ ") held off " + block + " (" + placing + ")") == null && trial != null) {
+					// Journalled like everything else a trial writes, so a shape that is given up takes
+					// its collision back with it. See {@link #trialCollided}: a marked build gives the
+					// shape up exactly where an unmarked one throws, and a mark left behind by a shape
+					// that was rolled back is a fault the build does not have.
+					trial.collisionsAdded().add(key);
+				}
 			}
 			if (!"minecraft:air".equals(block)) {
 				minimumX = Math.min(minimumX, key.getX());
@@ -14467,9 +14487,27 @@ public final class SongBuilder {
 		void beginTrial() {
 			trialRun = runSinceRepeater;
 			trial = new Trial(new ArrayList<>(), new LinkedHashMap<>(), new LinkedHashMap<>(),
-				new ArrayList<>(), turns.size(), moved.size(), trouble.size(), breaches.size(),
+				new ArrayList<>(), new ArrayList<>(),
+				turns.size(), moved.size(), trouble.size(), breaches.size(),
 				recesses.size(), new LinkedHashMap<>(padding),
 				minimumX, minimumY, minimumZ, maximumX, maximumY, maximumZ);
+		}
+
+		/**
+		 * Whether the shape built in this trial has landed on ground somebody else was holding.
+		 *
+		 * <p>Only ever true under {@link #DEBUG_PASTE}, and that is the whole point of it. Without the
+		 * marking a collision throws, and the throw <em>is</em> the fallback: the catch rolls the trial
+		 * back and lays the chord as a bus. Marked, the throw is suppressed so that a build can be
+		 * pasted and looked at -- and the shape that would have been given up stays exactly where it
+		 * collided, wire dead above it.</p>
+		 *
+		 * <p>So the one build ekran can stand in was the only one keeping the broken shape, and every
+		 * fault read off it belonged to a machine that does not ship. Asked here, the marked build takes
+		 * the same fallback by the same route.</p>
+		 */
+		boolean trialCollided() {
+			return trial != null && !trial.collisionsAdded().isEmpty();
 		}
 
 		void commitTrial() {
@@ -14498,6 +14536,9 @@ public final class SongBuilder {
 				// undone would colour that bus after something the build has not got.
 				placedBy.remove(at);
 			}
+			// And the marks with them, for the same reason: a sea lantern standing where a shape was
+			// given up says two shapes wanted a cell that only one of them ever reached.
+			undo.collisionsAdded().forEach(collisions::remove);
 			undo.notesBefore().forEach((at, was) -> {
 				if (was == null) {
 					notes.remove(at);
