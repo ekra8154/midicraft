@@ -1625,7 +1625,7 @@ public final class SongBuilder {
 				int splitStepOff = climb > 0 || CHEAP_SPLIT_DESCENT ? stepOff : stepOff;
 				splitStepOff = climb > 0 ? stepOff : (CHEAP_SPLIT_DESCENT ? 0 : stepOff);
 				cursor = climb > 0
-					? addGlassClimb(placements, cursor, travel, true, currentTime)
+					? addGlassClimb(placements, cursor, travel, null, true, currentTime)
 					: CHEAP_SPLIT_DESCENT
 						? addSplitBusDescent(placements, cursor, travel, descentSide, currentTime)
 						: addSpiralDescent(placements, cursor, travel, descentSide, currentTime);
@@ -1753,7 +1753,7 @@ public final class SongBuilder {
 					// And a lane that ended on a bus keeps its discount through a raised pad, which it
 					// never could through a pad laid on the path.
 					BlockPos landed = climb > 0
-						? addGlassClimb(placements, lane.pos(), travel,
+						? addGlassClimb(placements, lane.pos(), travel, null,
 							raisedPad || lastStyle.buses() && pad.cells().isEmpty(), currentTime)
 						: descend(placements, lane.pos(), travel, descentSide, currentTime);
 					floor = above;
@@ -3514,7 +3514,7 @@ public final class SongBuilder {
 				int splitStepOff = climb > 0 || CHEAP_SPLIT_DESCENT ? stepOff : stepOff;
 				splitStepOff = climb > 0 ? stepOff : (CHEAP_SPLIT_DESCENT ? 0 : stepOff);
 				cursor = climb > 0
-					? addGlassClimb(placements, cursor, travel, true, currentTime)
+					? addGlassClimb(placements, cursor, travel, depth, true, currentTime)
 					: CHEAP_SPLIT_DESCENT
 						? addSplitBusDescent(placements, cursor, travel, descentSide, currentTime)
 						: addSpiralDescent(placements, cursor, travel, descentSide, currentTime);
@@ -3643,7 +3643,7 @@ public final class SongBuilder {
 					// And a lane that ended on a bus keeps its discount through a raised pad, which it
 					// never could through a pad laid on the path.
 					BlockPos landed = climb > 0
-						? addGlassClimb(placements, lane.pos(), travel,
+						? addGlassClimb(placements, lane.pos(), travel, depth,
 							raisedPad || turnsOffBus && pad.cells().isEmpty(), currentTime)
 						: descend(placements, lane.pos(), travel, descentSide, currentTime);
 					floor = above;
@@ -6023,12 +6023,39 @@ public final class SongBuilder {
 	 * @param fromBus whether the lane's last event was wide enough to have built a bus
 	 * @return the cursor for the next lane, which travels back the way this one came
 	 */
+	/**
+	 * Whether the climb alternates sideways instead of along the lane.
+	 *
+	 * <p>ekran's, and it is the change the instant rail seed is built on. A climb steps between two
+	 * columns, a block up each time; until now those were the turn column and the one in front of it,
+	 * so an ascent ate two columns of the lane's own run. Alternating across the lane instead --
+	 * {@code (x, z)} and {@code (x, z - 1)} -- puts the whole staircase in <b>one</b> column of lane
+	 * and two of depth, and the column in front of it is free the moment the climb lands.</p>
+	 *
+	 * <p>Sideways and not diagonally, which the first sketch of this said: dust does not connect across
+	 * a diagonal, so a step at {@code (x + 1, z - 1)} carries nothing at all. The two columns have to
+	 * touch.</p>
+	 *
+	 * <p>What makes it affordable is the pinned wall: every staircase in the build stands in the same
+	 * column, so the depth beside it is corridor rather than a neighbour's lane -- the same ground a
+	 * descent has spent for a long time, {@link #addSplitBusDescent} being two wide in depth already.
+	 * It is spent on the other side from the descent's, which is the thing to watch.</p>
+	 */
+	static boolean CLIMB_STEPS_SIDEWAYS = true;
+
+	/**
+	 * @param depth the way the snake advances. The sideways climb steps against it -- {@code z - 1},
+	 *     ekran's word -- so the staircase leans back towards the lane already built rather than into
+	 *     the ground the next one wants. Null from the first layout, which keeps the climb it was
+	 *     measured with: v1 is not being changed, and its own tests hold it to the block.
+	 */
 	private static BlockPos addGlassClimb(PlacementPlan placements, BlockPos cursor,
-			Direction travel, boolean fromBus, int time) {
+			Direction travel, Direction depth, boolean fromBus, int time) {
 		placements.placing("climb");
 		placements.turnedAt(cursor);
 		BlockPos near = cursor;
-		BlockPos far = cursor.relative(travel);
+		BlockPos far = CLIMB_STEPS_SIDEWAYS && depth != null
+			? cursor.relative(depth.getOpposite()) : cursor.relative(travel);
 		if (!fromBus) {
 			placements.powered(near, "minecraft:stone", time);
 			set(placements, near.above(), "minecraft:redstone_wire");
