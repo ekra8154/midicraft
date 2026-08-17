@@ -340,8 +340,11 @@ final class BuildOptionsScreen extends Screen {
 		double seconds = commands / (commandsPerTick * 20.0);
 		graphics.text(font, String.format(Locale.ROOT, "%d commands per tick", commandsPerTick),
 			left + 26, rateY + 6, 0xFFD6D8DD, false);
+		// "If you stay with it" is the whole of the honesty here: a build longer than the loaded
+		// region around you pauses at the edge and waits to be walked to, so the figure is a floor
+		// and not an estimate.
 		graphics.text(font, String.format(Locale.ROOT,
-				"about %d blocks, roughly %.1fs", commands, seconds),
+				"about %d blocks, roughly %.1fs if you stay with it", commands, seconds),
 			left, rateY + 24, 0xFF8A9098, false);
 		Forecast predicted = forecast;
 		graphics.text(font, forecastLine(predicted), left, rateY + 36, forecastColour(predicted),
