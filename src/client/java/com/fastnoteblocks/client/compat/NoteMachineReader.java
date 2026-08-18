@@ -427,10 +427,20 @@ public final class NoteMachineReader {
 	 *
 	 * <p>Not all four. Dust powers what it points at, and what it points at is decided by its shape:
 	 * a wire running north-south does nothing to the block sitting east of it. Two shape rules do
-	 * the rest of the work, and both matter here -- an isolated dust with nothing to join becomes a
-	 * cross and powers all four ways, and a dust joined on one side only straightens into a line
-	 * and powers the far side too. That second rule is the one that makes the commonest hand-built
-	 * arrangement of all work: a wire run ending against a note block, joined only from behind.</p>
+	 * the rest of the work.</p>
+	 *
+	 * <p><b>A dust with nothing to join is a dot, and a dot points nowhere.</b> It powers the block
+	 * beneath it and nothing else. This said "cross, and powers all four ways" until 2026-08-18, and
+	 * it is the pre-1.16 rule -- ekran, reading a corner reseed off the world: <i>"the corner dust
+	 * you place is a redstone dot not a cross, so its not powering the block next to it"</i>. The
+	 * clause passed 499 corner reseeds as live machines when every one of them was a dead line, which
+	 * is the worst kind of wrong an instrument can be.</p>
+	 *
+	 * <p>The second rule is right and stays: a dust joined on <em>one</em> side only straightens into
+	 * a line and powers the far side too. That is what makes the commonest hand-built arrangement of
+	 * all work -- a wire run ending against a note block, joined only from behind. Note the two
+	 * together: a lone dust beside a block gives it nothing, and the same dust with a repeater behind
+	 * it gives it fifteen.</p>
 	 */
 	private static Set<Direction> pointsAt(Region region, BlockPos position) {
 		Set<Direction> joined = new LinkedHashSet<>();
@@ -441,7 +451,7 @@ public final class NoteMachineReader {
 			}
 		}
 		if (joined.isEmpty()) {
-			return Set.of(Direction.NORTH, Direction.SOUTH, Direction.EAST, Direction.WEST);
+			return Set.of();
 		}
 		if (joined.size() == 1) {
 			Direction only = joined.iterator().next();
@@ -458,9 +468,18 @@ public final class NoteMachineReader {
 	 */
 	private static boolean acceptsWire(BlockState state, Direction from) {
 		if (state.is(Blocks.REPEATER)) {
-			// Only from behind. A repeater ignores a wire arriving at its side, which is exactly
-			// what keeps two neighbouring lanes of a build from feeding each other.
-			return state.getValue(RepeaterBlock.FACING) == from.getOpposite();
+			// Along its axis, both ends. A repeater takes input only from behind -- which is what
+			// keeps two neighbouring lanes from feeding each other, and {@link #feedRepeater} is
+			// where that is enforced -- but this is a question about the wire's *shape*, and a wire
+			// joins a repeater it is driven by exactly as it joins one it drives. The game says so:
+			// RedStoneWireBlock.shouldConnectTo returns true for facing and for its opposite.
+			//
+			// Read as "only from behind" until 2026-08-18, which made the dust in every rail head
+			// look like a lone dust with nothing to join -- and the isolated-dust clause in
+			// pointsAt then handed it a cross and all four directions back. Two wrong answers
+			// cancelling, and the second one is what passed 499 dead corner reseeds as live.
+			Direction facing = state.getValue(RepeaterBlock.FACING);
+			return facing == from || facing == from.getOpposite();
 		}
 		return state.getBlock() instanceof ComparatorBlock
 			|| state.is(Blocks.REDSTONE_BLOCK)
