@@ -6871,25 +6871,31 @@ public final class SongBuilder {
 	 * would sound at somebody else's tick reads that register.</p>
 	 */
 	/**
-	 * Whether the dust standing on this corner will carry the signal sideways, or only straight on.
+	 * Whether the dust standing on this corner can be made a cross that stays one.
 	 *
-	 * <p>The rule is the game's and {@link NoteMachineReader#pointsAt} states it: a length of dust
-	 * powers what it points at, an isolated one becomes a cross and points all four ways, and one
-	 * joined on a single side straightens into a line and points along that axis only. Dust joins to
-	 * dust -- level, or a step up or down -- and to a repeater it can drive; a plain block is merely
-	 * hit by a wire, never joined to it.</p>
+	 * <p>The reseed needs the corner's dust to power the column beside it, and that column holds a
+	 * stone at path level. Dust powers what it points at; a plain block is hit by a wire, never joined
+	 * to it. So the dust has to be a cross, and {@link #addRailFromSteppedCorner} makes it one by
+	 * naming its four sides.</p>
 	 *
-	 * <p>Which decides whether ekran's reseed can be taken. The column the reseed drives holds a stone
-	 * at path level, and a stone joins nothing -- so the corner's dust reaches it only where the dust
-	 * is a cross. Where the sideways leg leaves wire behind it, the dust straightens along the leg
-	 * instead and the run opens on a block nothing ever powers. Measured before this was here: 95 dead
-	 * builds and 145,510 notes behind them, every one of them that stone.</p>
+	 * <p>Naming them is only allowed to stick where there is nothing to join. The game recomputes a
+	 * wire's sides from its neighbours on every block update and then straightens the result -- a
+	 * stated cross with one real neighbour comes back a line -- so where the sideways leg leaves wire
+	 * behind the corner, the cross would collapse along the leg and the run would open on a block
+	 * nothing ever powers. Dust joins to dust, level or a step up or down, and to a repeater at either
+	 * end of its axis.</p>
 	 *
-	 * <p>An ordinary turn does not care, because what it puts in that cell is a module's trigger --
-	 * a repeater at path level, which the dust joins to. That is the whole difference between the two,
-	 * and it is why the corner has always worked and the reseed did not.</p>
+	 * <p>And the cell has to be holding the pad's own bare dust, or restating it would write over
+	 * somebody else's block.</p>
+	 *
+	 * <p>An ordinary turn needs none of this, because what it puts in that cell is a module's trigger
+	 * -- a repeater at path level, which the dust joins to, so the corner's wire straightens into the
+	 * lane and carries on. That is why the corner has always worked and the reseed did not.</p>
 	 */
 	private static boolean cornerDustCrosses(PlacementPlan placements, BlockPos dust) {
+		if (!"minecraft:redstone_wire".equals(placements.blockAt(dust))) {
+			return false;
+		}
 		for (Direction side : Direction.Plane.HORIZONTAL) {
 			BlockPos at = dust.relative(side);
 			if (joinsDust(placements, at) || joinsDust(placements, at.above())
@@ -6924,6 +6930,25 @@ public final class SongBuilder {
 			int delay, int time) {
 		placements.placing("rail:FROM-CORNER delay" + delay);
 		placements.padded("railFromSteppedCorner");
+		// The corner's dust, restated as a cross.
+		//
+		// {@link #pastAnyCorner} laid it as a bare {@code minecraft:redstone_wire}, and the builder does
+		// not place dust -- {@code /setblock} puts down the state it is handed. Bare is the default
+		// state, every side {@code none}, which is a dot; and a dot powers the block beneath it and
+		// nothing else. So the column this seed drives, a stone at path level, was never lit at all:
+		// 502 runs, 153 dead builds, 255,042 notes behind them. ekran, off the world: <i>"the corner
+		// dust you place is a redstone dot not a cross, so its not powering the block next to it."</i>
+		//
+		// Naming the four sides makes it a cross and a cross stays one, which is the same reason
+		// {@link #STACKED_CROSS} is stated rather than left to the game. It survives only where the
+		// dust has nothing to join -- a real neighbour makes the game recompute the sides and straighten
+		// them -- which is exactly what {@link #cornerDustCrosses} asks before this is reached.
+		//
+		// Taken up rather than written over: {@link PlacementPlan#set} is first-writer-wins and the pad
+		// got there first.
+		BlockPos dust = corner.above();
+		placements.take(dust);
+		set(placements, dust, STACKED_CROSS);
 		placements.powered(corner, time);
 		return addRailNote(placements, lane, 0, List.of(), time, delay, true, 0);
 	}
