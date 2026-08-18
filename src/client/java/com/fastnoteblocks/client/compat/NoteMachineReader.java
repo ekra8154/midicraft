@@ -20,8 +20,10 @@ import net.minecraft.world.level.EmptyBlockGetter;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.ComparatorBlock;
 import net.minecraft.world.level.block.NoteBlock;
+import net.minecraft.world.level.block.RedStoneWireBlock;
 import net.minecraft.world.level.block.RepeaterBlock;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.RedstoneSide;
 
 /**
  * Reads a note block machine back out of blocks, whether they came from the world or from a file.
@@ -451,13 +453,40 @@ public final class NoteMachineReader {
 			}
 		}
 		if (joined.isEmpty()) {
-			return Set.of();
+			// Nothing to join, so the shape is whatever the paste asked for. A dust the builder wrote
+			// out in full keeps the sides it names -- that is what STACKED_CROSS is for, and a cross
+			// stays a cross through every later block update -- while a dust written bare lands in
+			// the default state, which names no side at all, and is a dot.
+			return statedSides(region.at(position));
 		}
 		if (joined.size() == 1) {
 			Direction only = joined.iterator().next();
 			return Set.of(only, only.getOpposite());
 		}
 		return joined;
+	}
+
+	/**
+	 * The sides a length of dust was written with, for one that has nothing to join.
+	 *
+	 * <p>The game decides this at placement time and the paste does not place anything -- {@code
+	 * /setblock} puts down the state it is given. So a bare {@code minecraft:redstone_wire} is the
+	 * default state, every side {@code none}, which is a dot; and the builder states the four sides
+	 * wherever it needs a cross. Reading the block instead of guessing at it is the only way the two
+	 * can agree.</p>
+	 */
+	private static Set<Direction> statedSides(BlockState state) {
+		if (!state.is(Blocks.REDSTONE_WIRE)) {
+			return Set.of();
+		}
+		Set<Direction> named = new LinkedHashSet<>();
+		for (Direction direction : Direction.Plane.HORIZONTAL) {
+			if (state.getValue(RedStoneWireBlock.PROPERTY_BY_DIRECTION.get(direction))
+					!= RedstoneSide.NONE) {
+				named.add(direction);
+			}
+		}
+		return named;
 	}
 
 	/**
