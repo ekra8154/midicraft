@@ -2910,7 +2910,14 @@ public final class SongBuilder {
 			// on the overshoot. It matters more here than there: v1 offers the cut on the overshoot and
 			// v2 offers it a column earlier, on {@code reaches}, so in v2 the reach test is a live way
 			// into the cut rather than a flag-gated one.
-			boolean overshoots = !turning && railPhase < 0
+			// Except where the turn ahead is flat, ekran's. The promise this guard protects is that the
+			// column in front of a run's last repeater gets its note, and it is a *staircase* that breaks
+			// it: the note lands a floor down running the other way while the repeater stays at the wall
+			// driving the staircase. A flat turn takes nothing away -- the route bends at that very
+			// column, so the promised cell is the corner and the note stands on it, which is ekran's
+			// model 1 exactly. Whether everything downstream of wantsTurn copes with a live rail is the
+			// thing to measure; none of it has ever been asked to.
+			boolean overshoots = !turning && (railPhase < 0 || flatAhead)
 				&& (landing > farWall || landing < nearWall || strandsTheTurn);
 			// And whether it merely gets there. A chord ending on the wall, or one column short of
 			// it, has not overshot and so was never offered a cut -- which leaves the lane holding a
