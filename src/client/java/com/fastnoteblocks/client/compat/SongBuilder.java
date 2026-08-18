@@ -10587,9 +10587,15 @@ public final class SongBuilder {
 	 * whoever needs to know. {@code behindShift} and {@code nudge} are columns of pad the shape has
 	 * asked for, {@code moved} is a low note lifted out of a slot something else owns, and
 	 * {@code gaveUp} names the rule that took the shape away, for the trace.</p>
+	 *
+	 * @param parityWithoutTheMove what {@link #parityVerdict} answers about this chord with the
+	 *     relocation off the table -- 1 to shift a column, -1 to give the stacked shape up.
+	 *     Taken here, where the column the question is about is known, because
+	 *     {@link #buildShaped} is allowed to throw the move away again and the answer that let
+	 *     the shape stand goes with it. See {@link #RELOCATION_REFUSED_ASKS_PARITY_AGAIN}.
 	 */
 	private record Shape(ChordStyle style, boolean behindShift, boolean nudge, Relocation moved,
-			String gaveUp) {
+			String gaveUp, int parityWithoutTheMove) {
 	}
 
 	/**
@@ -10718,6 +10724,7 @@ public final class SongBuilder {
 		Lane start = lane;
 		boolean nudge = false;
 		Relocation moved = null;
+		int withoutTheMove = 0;
 		if (style.stacked()) {
 			UltraSlots slots = slotsFor(style, event.notes());
 			RelocationRoom room = relocationRoom(style, event.notes());
@@ -10738,6 +10745,17 @@ public final class SongBuilder {
 			}
 			Lane asking = behindShift ? onTheGround.ahead(1) : onTheGround;
 			int verdict = parityVerdict(placements, asking, event.time(), slots, room);
+			// And the same question with the move off the table, because downstream is allowed to take
+			// the move away. A verdict of 2 says this chord stands clean here *with one note lifted out*,
+			// and nothing about it says a shift would be clean -- the shift was never asked about. Asked
+			// here because here is where the column is known: {@code asking} has walked past a corner and
+			// may have taken the busy-column shift, and neither is visible from the builder.
+			//
+			// The same decider, not a second one. Relocation off is the whole of the difference, so it
+			// cannot come back with an answer this one disagrees with.
+			withoutTheMove = verdict == 2 || verdict == 3
+				? parityVerdict(placements, asking, event.time(), slots, RelocationRoom.NONE)
+				: verdict;
 			if (verdict == 2) {
 				moved = relocate(placements, asking, event.time(), style, event.notes(), slots, room);
 				placements.padded("planRelocateTo" + moved.where());
@@ -10933,7 +10951,7 @@ public final class SongBuilder {
 		if (sunken) {
 			style = ChordStyle.SUNKEN_BUS;
 		}
-		return new Shape(style, behindShift, nudge, moved, gaveUp);
+		return new Shape(style, behindShift, nudge, moved, gaveUp, withoutTheMove);
 	}
 
 	/** Whether this chord has a harp to drive a {@link ChordStyle#SUNKEN_BUS} opening with. */
@@ -10962,6 +10980,31 @@ public final class SongBuilder {
 	 * bus instead. Asking is cheaper than being right, and it is the only answer that cannot be
 	 * out of date.</p>
 	 */
+	/**
+	 * Whether a chord that loses its relocation asks parity again before shifting instead.
+	 *
+	 * <p>Off, this is the hole ekran read off golden-brown at forty wide over five floors: a nine
+	 * note stacked-bus whose centre column sounded a note of the lane behind it, with every rule
+	 * that was supposed to stop it switched on. <i>"it seemed to think it was safe to place a
+	 * stacked chord there, even though its center powered a note in the previous lane."</i></p>
+	 *
+	 * <p>Nothing was skipped and nothing was misread. {@link #parityVerdict} asked about the column
+	 * the chord was standing in, found the lane behind disagreeing, and answered 2 -- <em>clean
+	 * here, with one low note lifted out of its slot</em>. That answer is about one column and one
+	 * arrangement of notes. Then {@link #buildShaped} measured the relocation, found it grew the
+	 * bus by a cell, dropped it -- and shifted the module a column instead, into the one place the
+	 * verdict had never been asked about. It clashes there; the second ask inside
+	 * {@link #parityVerdict} says so plainly, and is never reached, because a verdict of 2 short
+	 * circuits before it.</p>
+	 *
+	 * <p>So the shift was standing on an answer that belonged to a different shape. On, the shape
+	 * carries what the same decider says with the move off the table, and the fallback reads it:
+	 * shift where the shifted column is clean, and give the stacked shape up where it is not. It is
+	 * ekran's ladder for a pad that lands in a second clash, arriving at the rung nobody had found
+	 * -- the pad is not what put it there.</p>
+	 */
+	static boolean RELOCATION_REFUSED_ASKS_PARITY_AGAIN = true;
+
 	private static Placed buildShaped(PlacementPlan placements, Lane lane, int triggerDelay,
 			EventGroup event, Shape shape, Layout layout) {
 		// Cleared here and set by the one shape that ends soft, so the flag always describes the module
@@ -11010,7 +11053,16 @@ public final class SongBuilder {
 			if (spent < 0 || plain < 0 || spent > plain) {
 				placements.padded("planRelocationWouldGrowTheBus");
 				moved = null;
-				nudge = true;
+				// The move was the whole of the parity answer, so taking it away takes the answer with it.
+				// What the shape carries is the same question decided without it, and the shift is only on
+				// offer where that came back clean.
+				if (RELOCATION_REFUSED_ASKS_PARITY_AGAIN && shape.parityWithoutTheMove() < 0) {
+					placements.padded("planBusForRefusedMoveAndParity");
+					trace(event, lane, style, ChordStyle.BUS, "refusedMoveAndParity");
+					return layBus(placements, lane, triggerDelay, event, ChordStyle.BUS, true, layout);
+				}
+				nudge = !RELOCATION_REFUSED_ASKS_PARITY_AGAIN
+					|| shape.parityWithoutTheMove() == 1;
 			}
 		}
 		placements.beginTrial();
