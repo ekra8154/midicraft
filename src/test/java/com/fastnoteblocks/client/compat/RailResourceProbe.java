@@ -44,7 +44,7 @@ import org.junit.jupiter.api.Test;
  * </ul>
  *
  * <pre>
- * gradlew sweepTest --tests "*RailResourceProbe" -Drail.sizes=24x3,40x3 -Drail.mode=v2
+ * gradlew sweepTest --tests "*RailResourceProbe" -Dprobe.sizes=24x3,40x3 -Dprobe.mode=v2
  * </pre>
  *
  * <p>Prints; asserts nothing.</p>
@@ -60,7 +60,11 @@ class RailResourceProbe {
 	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
 
 	private static String text(String key, String fallback) {
-		String given = System.getProperty("rail." + key);
+		// "probe.", not "rail.": build.gradle forwards three prefixes to the test JVM and that is
+		// not one of them. A probe whose prefix is missing does not fail -- it runs its defaults and
+		// prints a full page of numbers for the experiment nobody performed, which is exactly what
+		// this one did on the run that priced the runs.
+		String given = System.getProperty("probe." + key);
 		return given == null || given.isBlank() ? fallback : given.strip();
 	}
 
