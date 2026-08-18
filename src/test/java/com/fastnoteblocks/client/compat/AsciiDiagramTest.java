@@ -1,6 +1,7 @@
 package com.fastnoteblocks.client.compat;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.HashMap;
@@ -40,6 +41,73 @@ class AsciiDiagramTest {
 
 	private String draw(BlockPos from, BlockPos to, AsciiDiagram.View view) {
 		return AsciiDiagram.render(this::at, from, to, view, AsciiDiagram.Shape.CODE);
+	}
+
+	private String draw(BlockPos from, BlockPos to, AsciiDiagram.View view,
+			net.minecraft.core.Direction up, boolean numberNotes) {
+		return AsciiDiagram.render(this::at, from, to, view, up, numberNotes,
+			AsciiDiagram.Shape.CODE);
+	}
+
+	/** Two blocks a step apart on each horizontal axis, for asking which way a map is turned. */
+	private void twoApart() {
+		world.put(new BlockPos(0, 64, 0), Blocks.NOTE_BLOCK.defaultBlockState());
+		world.put(new BlockPos(1, 64, 1), Blocks.GLASS.defaultBlockState());
+	}
+
+	/** Turned so south is up the page, which is the map rotated by half a turn. */
+	@Test
+	void turnsTheMapToPutSouthUp() {
+		twoApart();
+		String drawn = draw(new BlockPos(0, 64, 0), new BlockPos(1, 64, 1),
+			AsciiDiagram.View.TOP, net.minecraft.core.Direction.SOUTH, false);
+		assertTrue(drawn.contains("looking top, south up"), drawn);
+		assertTrue(drawn.contains("columns are x, -x to the right; rows are z, -z downwards"),
+			drawn);
+		// z=1 is southernmost, so with south up it is the first row and x=1 is on the left.
+		assertTrue(drawn.indexOf("GL") < drawn.indexOf("NB"), "south up puts z=1 first: " + drawn);
+	}
+
+	/** Turned a quarter: east up puts the rows on x and south on the right. */
+	@Test
+	void turnsTheMapToPutEastUp() {
+		twoApart();
+		String drawn = draw(new BlockPos(0, 64, 0), new BlockPos(1, 64, 1),
+			AsciiDiagram.View.TOP, net.minecraft.core.Direction.EAST, false);
+		assertTrue(drawn.contains("columns are z, +z to the right; rows are x, -x downwards"),
+			drawn);
+	}
+
+	/** Left off, it is the map it always was, so nothing already drawn moves. */
+	@Test
+	void leavingUpOffIsNorthUp() {
+		twoApart();
+		assertEquals(draw(new BlockPos(0, 64, 0), new BlockPos(1, 64, 1), AsciiDiagram.View.TOP),
+			draw(new BlockPos(0, 64, 0), new BlockPos(1, 64, 1),
+				AsciiDiagram.View.TOP, net.minecraft.core.Direction.NORTH, false));
+	}
+
+	/** Seen from below the same map is mirrored, because east is now on your left. */
+	@Test
+	void looksUpAtTheCeilingMirrored() {
+		twoApart();
+		String drawn = draw(new BlockPos(0, 64, 0), new BlockPos(1, 64, 1),
+			AsciiDiagram.View.BOTTOM, null, false);
+		assertTrue(drawn.contains("slices advance +y (away from you); columns are x, "
+			+ "-x to the right"), drawn);
+	}
+
+	/** Asked for, a note block says which note it plays, in two digits so a column of them lines up. */
+	@Test
+	void numbersTheNotesWhenAsked() {
+		world.put(new BlockPos(0, 64, 0), Blocks.NOTE_BLOCK.defaultBlockState().setValue(
+			net.minecraft.world.level.block.state.properties.BlockStateProperties.NOTE, 1));
+		String drawn = draw(new BlockPos(0, 64, 0), new BlockPos(0, 64, 0),
+			AsciiDiagram.View.TOP, null, true);
+		assertTrue(drawn.contains("N01"), drawn);
+		assertTrue(drawn.contains("nn = note, 00 to 24"), drawn);
+		assertFalse(draw(new BlockPos(0, 64, 0), new BlockPos(0, 64, 0), AsciiDiagram.View.TOP)
+			.contains("N01"), "off by default");
 	}
 
 	/** Facing east, south is on the right -- so +z runs rightwards and the slices go up x. */

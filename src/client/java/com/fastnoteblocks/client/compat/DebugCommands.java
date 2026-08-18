@@ -1,6 +1,7 @@
 package com.fastnoteblocks.client.compat;
 
 import com.fastnoteblocks.client.FastNoteblocksConfig;
+import com.mojang.brigadier.arguments.BoolArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
@@ -57,7 +58,15 @@ import net.minecraft.world.phys.Vec3;
  * <pre>
  *   /asciidiagram 13 72 108 15 76 113 east    that box, sliced west to east
  *   /asciidiagram ~-8 ~ ~-8 ~8 ~4 ~8          the ground around you, sliced downwards
+ *   /asciidiagram ~-8 ~ ~-8 ~8 ~4 ~8 top south      the same, turned so south is up the page
+ *   /asciidiagram ~-8 ~ ~-8 ~8 ~4 ~8 top south true and with every note block saying which note
  * </pre>
+ *
+ * <p>A view from above or below is a map and a map can be turned, so those two take a direction for
+ * which way is up the page; north if it is left off, which is what every diagram in this repo was
+ * drawn with. The views from the side have nothing to decide -- up the page is up in the world --
+ * and take no such word. The last argument is off by default because {@code NB} is two characters
+ * and {@code N01} is three, and it widens every column in the box, not only the note blocks.</p>
  *
  * <p>Two corners and a point of view, the corners taken the way {@code /setblock} takes them -- so
  * looking at one and pressing tab fills it in. Chat gets the size and two links; clicking either
@@ -140,12 +149,34 @@ public final class DebugCommands {
 	 */
 	private static RequiredArgumentBuilder<FabricClientCommandSource, Coordinates> views() {
 		RequiredArgumentBuilder<FabricClientCommandSource, Coordinates> last = corner("to")
-			.executes(context -> diagram(context, AsciiDiagram.View.TOP));
+			.executes(context -> diagram(context, AsciiDiagram.View.TOP, null, false))
+			.then(numbered(AsciiDiagram.View.TOP, null));
 		for (AsciiDiagram.View view : AsciiDiagram.View.values()) {
-			last = last.then(literal(view.name().toLowerCase(java.util.Locale.ROOT))
-				.executes(context -> diagram(context, view)));
+			LiteralArgumentBuilder<FabricClientCommandSource> named =
+				literal(view.name().toLowerCase(java.util.Locale.ROOT))
+					.executes(context -> diagram(context, view, null, false))
+					.then(numbered(view, null));
+			// Only the two views along y. A view from the side has up the page pinned to up in the
+			// world, so offering it a compass direction would be offering a rotation it cannot do.
+			if (view.flat()) {
+				for (Direction up : Direction.Plane.HORIZONTAL) {
+					named = named.then(literal(up.getName())
+						.executes(context -> diagram(context, view, up, false))
+						.then(numbered(view, up)));
+				}
+			}
+			last = last.then(named);
 		}
 		return last;
+	}
+
+	/** The tail every form shares: whether note blocks say which note they play. */
+	private static RequiredArgumentBuilder<FabricClientCommandSource, Boolean> numbered(
+			AsciiDiagram.View view, Direction up) {
+		return RequiredArgumentBuilder.<FabricClientCommandSource, Boolean>argument(
+				"notes", BoolArgumentType.bool())
+			.executes(context -> diagram(context, view, up,
+				BoolArgumentType.getBool(context, "notes")));
 	}
 
 	/**
@@ -175,7 +206,7 @@ public final class DebugCommands {
 	 * chat is the shape of the thing and two links; the diagram itself goes to the clipboard whole.</p>
 	 */
 	private static int diagram(CommandContext<FabricClientCommandSource> context,
-			AsciiDiagram.View view) {
+			AsciiDiagram.View view, Direction up, boolean numberNotes) {
 		FabricClientCommandSource source = context.getSource();
 		ClientLevel level = Minecraft.getInstance().level;
 		if (level == null) {
@@ -196,16 +227,23 @@ public final class DebugCommands {
 			return 0;
 		}
 		source.sendFeedback(Component.literal("asciidiagram " + volume + " blocks, looking "
-			+ view.name().toLowerCase(java.util.Locale.ROOT)).withStyle(ChatFormatting.GRAY)
-			.append(copy(level, from, to, view, AsciiDiagram.Shape.CODE, "  [code]"))
-			.append(copy(level, from, to, view, AsciiDiagram.Shape.TABLE, "  [table]")));
+			+ view.name().toLowerCase(java.util.Locale.ROOT)
+			+ (view.flat()
+				? ", " + (up == null ? AsciiDiagram.DEFAULT_UP : up).getName() + " up" : "")
+			+ (numberNotes ? ", notes numbered" : "")).withStyle(ChatFormatting.GRAY)
+			.append(copy(level, from, to, view, up, numberNotes,
+				AsciiDiagram.Shape.CODE, "  [code]"))
+			.append(copy(level, from, to, view, up, numberNotes,
+				AsciiDiagram.Shape.TABLE, "  [table]")));
 		return 1;
 	}
 
 	/** One clickable offer of the box in one shape, rendered now so the click cannot fail. */
 	private static Component copy(ClientLevel level, BlockPos from, BlockPos to,
-			AsciiDiagram.View view, AsciiDiagram.Shape shape, String label) {
-		String drawn = AsciiDiagram.render(level::getBlockState, from, to, view, shape);
+			AsciiDiagram.View view, Direction up, boolean numberNotes, AsciiDiagram.Shape shape,
+			String label) {
+		String drawn = AsciiDiagram.render(level::getBlockState, from, to, view, up, numberNotes,
+			shape);
 		return Component.literal(label).withStyle(style -> style
 			.withColor(ChatFormatting.AQUA)
 			.withUnderlined(true)

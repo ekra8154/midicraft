@@ -32,10 +32,22 @@ public final class AsciiDiagram {
 
 	/** Which way the reader is looking. Slices advance away from them. */
 	public enum View {
-		NORTH, SOUTH, EAST, WEST, TOP;
+		NORTH, SOUTH, EAST, WEST, TOP, BOTTOM;
 
 		public static View of(String name) {
 			return valueOf(name.toUpperCase(java.util.Locale.ROOT));
+		}
+
+		/**
+		 * Whether this view looks along the y axis, and so has a free choice of which way is up.
+		 *
+		 * <p>Seen from the side, up the page is up in the world and there is nothing to decide. Seen
+		 * from above or below it is a map, and a map can be turned: which compass direction is at the
+		 * top is a real question, and the one a lane running east-west wants answered differently
+		 * from a lane running north-south.</p>
+		 */
+		public boolean flat() {
+			return this == TOP || this == BOTTOM;
 		}
 	}
 
@@ -59,10 +71,14 @@ public final class AsciiDiagram {
 			boolean colAscends, Direction.Axis row, boolean rowAscends) {
 	}
 
-	private static Axes axesOf(View view) {
+	/** Which way is up the page when nothing says otherwise, and what every old diagram used. */
+	public static final Direction DEFAULT_UP = Direction.NORTH;
+
+	private static Axes axesOf(View view, Direction up) {
 		// Rows run down the page, so for anything seen from the side the row axis is y and it
-		// descends: the top of the diagram is the top of the build. Seen from above the rows are z
-		// and they ascend, which puts north at the top and matches every map ever drawn.
+		// descends: the top of the diagram is the top of the build. Seen from above or below the rows
+		// are horizontal and which one is which is the caller's to say -- north up by default, which
+		// is what every map ever drawn does and what every diagram in this repo was drawn with.
 		return switch (view) {
 			case NORTH -> new Axes(Direction.Axis.Z, false, Direction.Axis.X, true,
 				Direction.Axis.Y, false);
@@ -72,9 +88,28 @@ public final class AsciiDiagram {
 				Direction.Axis.Y, false);
 			case WEST -> new Axes(Direction.Axis.X, false, Direction.Axis.Z, false,
 				Direction.Axis.Y, false);
-			case TOP -> new Axes(Direction.Axis.Y, false, Direction.Axis.X, true,
-				Direction.Axis.Z, true);
+			case TOP, BOTTOM -> flatAxes(view == View.TOP, up == null ? DEFAULT_UP : up);
 		};
+	}
+
+	/**
+	 * A map, turned so that the given direction is up the page.
+	 *
+	 * <p>Worked out rather than tabulated, because four ups times two views is eight rows of
+	 * hand-written axis flags and seven of them would be wrong at least once. Two facts settle all
+	 * eight. The row axis is the up direction's own axis, running down the page away from it -- so an
+	 * up that points along the negative direction ascends downwards. And rightwards is up turned
+	 * clockwise seen from above, anticlockwise seen from below, which is the whole of the difference
+	 * between the two views: looking up at a ceiling, east is on your left.</p>
+	 *
+	 * <p>{@code TOP} with north up comes out {@code (Y down, X right, Z down)}, which is exactly the
+	 * row this replaced, so nothing already drawn moves.</p>
+	 */
+	private static Axes flatAxes(boolean fromAbove, Direction up) {
+		Direction right = fromAbove ? up.getClockWise() : up.getCounterClockWise();
+		return new Axes(Direction.Axis.Y, !fromAbove,
+			right.getAxis(), right.getAxisDirection() == Direction.AxisDirection.POSITIVE,
+			up.getAxis(), up.getAxisDirection() == Direction.AxisDirection.NEGATIVE);
 	}
 
 	/** How many blocks the box holds, so a caller can refuse one before reading any of it. */
@@ -83,9 +118,23 @@ public final class AsciiDiagram {
 			* (Math.abs(from.getZ() - to.getZ()) + 1);
 	}
 
+	/** North up and note blocks unnumbered, which is what every caller wanted before there was a choice. */
 	public static String render(Function<BlockPos, BlockState> world, BlockPos from, BlockPos to,
 			View view, Shape shape) {
-		Axes axes = axesOf(view);
+		return render(world, from, to, view, null, false, shape);
+	}
+
+	/**
+	 * @param up which compass direction is up the page, for a {@link View#flat()} view. Null, and for
+	 *     a view from the side, means {@link #DEFAULT_UP}.
+	 * @param numberNotes whether a note block says which note it plays rather than only that it is
+	 *     one. Off by default: {@code NB} is two characters where {@code N01} is three, and widening
+	 *     every column of every diagram to carry a number nobody asked for is not a trade worth
+	 *     making by default.
+	 */
+	public static String render(Function<BlockPos, BlockState> world, BlockPos from, BlockPos to,
+			View view, Direction up, boolean numberNotes, Shape shape) {
+		Axes axes = axesOf(view, up);
 		int[] low = {Math.min(from.getX(), to.getX()), Math.min(from.getY(), to.getY()),
 			Math.min(from.getZ(), to.getZ())};
 		int[] high = {Math.max(from.getX(), to.getX()), Math.max(from.getY(), to.getY()),
@@ -98,7 +147,12 @@ public final class AsciiDiagram {
 		out.append("# ").append(low[0]).append(' ').append(low[1]).append(' ').append(low[2])
 			.append("  ..  ").append(high[0]).append(' ').append(high[1]).append(' ')
 			.append(high[2]).append(", looking ").append(view.name().toLowerCase(
-				java.util.Locale.ROOT)).append('\n');
+				java.util.Locale.ROOT))
+			// Said out loud for a flat view even when it is the default, because a diagram whose
+			// handedness has to be guessed at is worse than none -- and now there is something to
+			// guess at.
+			.append(view.flat() ? ", " + (up == null ? DEFAULT_UP : up).getName() + " up" : "")
+			.append('\n');
 		out.append(orientation(axes)).append('\n');
 		out.append("arrows point the way the signal leaves; x = away from you, o = towards you\n");
 		int empty = 0;
@@ -110,7 +164,7 @@ public final class AsciiDiagram {
 			for (int row = 0; row < rows.size(); row++) {
 				for (int col = 0; col < cols.size(); col++) {
 					BlockState state = world.apply(at(axes, slice, cols.get(col), rows.get(row)));
-					cells[row][col] = symbol(state, axes, legend);
+					cells[row][col] = symbol(state, axes, legend, numberNotes);
 					anything |= !state.isAir();
 				}
 			}
@@ -252,7 +306,8 @@ public final class AsciiDiagram {
 	 * what a staircase is made of; a copper bulb says whether it is lit, since that is what a build
 	 * is judged by. The rest is two letters and a line in the legend.</p>
 	 */
-	private static String symbol(BlockState state, Axes axes, Map<String, String> legend) {
+	private static String symbol(BlockState state, Axes axes, Map<String, String> legend,
+			boolean numberNotes) {
 		if (state.isAir()) {
 			legend.putIfAbsent(".", "air");
 			return ".";
@@ -294,6 +349,14 @@ public final class AsciiDiagram {
 			return lit ? "B*" : "B-";
 		}
 		if (path.equals("note_block")) {
+			// Which note, where the caller asked for it. Two digits and always two, so a column of
+			// them lines up and the eye can read the shape of a phrase down the page; a note block
+			// holds 0 to 24 and nothing wider is possible.
+			if (numberNotes && state.hasProperty(BlockStateProperties.NOTE)) {
+				legend.putIfAbsent("N<nn>", id + ", nn = note, 00 to 24");
+				return String.format(java.util.Locale.ROOT, "N%02d",
+					state.getValue(BlockStateProperties.NOTE));
+			}
 			legend.putIfAbsent("NB", id);
 			return "NB";
 		}
