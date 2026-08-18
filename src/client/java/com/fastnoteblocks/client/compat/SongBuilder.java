@@ -1721,7 +1721,7 @@ public final class SongBuilder {
 				int splitStepOff = climb > 0 || CHEAP_SPLIT_DESCENT ? stepOff : stepOff;
 				splitStepOff = climb > 0 ? stepOff : (CHEAP_SPLIT_DESCENT ? 0 : stepOff);
 				cursor = climb > 0
-					? addGlassClimb(placements, cursor, travel, null, true, currentTime, 0)
+					? addGlassClimb(placements, cursor, travel, null, true, currentTime, 0, false)
 					: CHEAP_SPLIT_DESCENT
 						? addSplitBusDescent(placements, cursor, travel, descentSide, currentTime)
 						: addSpiralDescent(placements, cursor, travel, descentSide, currentTime);
@@ -1850,7 +1850,7 @@ public final class SongBuilder {
 					// never could through a pad laid on the path.
 					BlockPos landed = climb > 0
 						? addGlassClimb(placements, lane.pos(), travel, null,
-							raisedPad || lastStyle.buses() && pad.cells().isEmpty(), currentTime, 0)
+							raisedPad || lastStyle.buses() && pad.cells().isEmpty(), currentTime, 0, false)
 						: descend(placements, lane.pos(), travel, descentSide, currentTime);
 					floor = above;
 					// What the staircase leaves the next lane. It matters because the next lane may
@@ -2934,6 +2934,22 @@ public final class SongBuilder {
 			// column short of it, so the lane closes after it -- and it is the moment the tail can
 			// still choose to be a bus.
 			placements.turnAhead(wantsTurn || reaches);
+			// And whether this chord in particular is the one that will end up against the staircase.
+			//
+			// Not merely "a climb is coming": the flanked closing shape gives up a cell of wire to
+			// leave its centre to the dust, and that buys nothing at all unless this chord's own body
+			// is the column the staircase reads from. Offered to every closing chord ahead of a climb
+			// it fired 1169 times and cost 161 blocks of depth, because most of those lanes close on a
+			// pad or a pin, which is already the dust the ladder wants.
+			//
+			// So: this chord is laid on this lane ({@code reaches}, not {@code wantsTurn}, which is a
+			// chord the lane turns before laying), and it comes to rest exactly one column short of
+			// the wall, which is where the staircase stands. Then nothing goes between them -- the
+			// next event measures {@code columns} as nought, plans no pad and pins nothing.
+			placements.seedAhead(CLOSING_CHORD_HANGS_ON_THE_FLANKS && RAIL_SEEDS_OFF_THE_CLIMB
+				&& V2_RUNS_ON_RAILS && layout.ultra()
+				&& above >= 0 && above < floors && climb > 0
+				&& reaches && (wall - landing) * lane.travel().getStepX() == 1);
 			// And the other fact the chord cannot see for itself: how soon the next event arrives. A pad
 			// laid in front of it can only be spent as a repeater where there are two ticks to split, so
 			// a gap of one is the case a simple tail with a note-block middle cannot survive being padded
@@ -3610,7 +3626,7 @@ public final class SongBuilder {
 				int splitStepOff = climb > 0 || CHEAP_SPLIT_DESCENT ? stepOff : stepOff;
 				splitStepOff = climb > 0 ? stepOff : (CHEAP_SPLIT_DESCENT ? 0 : stepOff);
 				cursor = climb > 0
-					? addGlassClimb(placements, cursor, travel, depth, true, currentTime, 0)
+					? addGlassClimb(placements, cursor, travel, depth, true, currentTime, 0, false)
 					: CHEAP_SPLIT_DESCENT
 						? addSplitBusDescent(placements, cursor, travel, descentSide, currentTime)
 						: addSpiralDescent(placements, cursor, travel, descentSide, currentTime);
@@ -3739,35 +3755,120 @@ public final class SongBuilder {
 					// it is the pad's own wire, less the pin, less what the turn spends.
 					int wouldTip = pad.signal() - pinned - turnPrice(pad, climb > 0,
 						above >= 0 && above < floors, turnsOffBus, turnCells, turnOffBusCells);
-					// The lookahead. A climb only pays for a seed the lane above is going to use, and
-					// that lane does not exist yet -- so it is built here, out of the two things a
-					// staircase settles: where it lands, and which wall the lane it lands on runs at.
-					// The wait is asked as well as the room, because a seed only survives a wait that
-					// lays nothing: a column of the wait's own wire between the landing and the trigger
-					// puts the seed out of the trigger's reach and the run builds a head anyway, which
-					// is a column of stone and dust standing in the lane for nothing.
+					// And what a *mirrored* staircase leaves, which is a different sum and has to be
+					// priced as one. A mirrored ladder is five rungs whatever the lane arrived on --
+					// the rung a bus would have skipped is the one the seed's own repeater reads -- so
+					// the off-bus three {@link #turnPrice} may hand out above is not available to it,
+					// and the dust over the seed's landing block is one more on top of the five.
+					// Worked out here and handed on below as the tip, so the wire this climb spends
+					// and the wire the next lane is told it has cannot be two different sums.
+					int seedTip = pad.signal() - pinned - turnCells - RAIL_SEED_CLIMB_STEPS - 1;
+					// The cell the mirrored ladder starts from, asked of the blocks rather than worked
+					// out from what the pad and the pin were supposed to have laid.
+					//
+					// A mirrored climb has no lift of its own, so its bottom rung is reached from the
+					// column behind and only from there: dust at path+1 steps up into it, dust at
+					// path+2 is already level with it, and a *block* -- the note block or bus stone a
+					// lane that closed flush comes to rest on -- reaches it not at all, because a
+					// powered block lights only the dust it stands square against. By position and not
+					// by flag, for the reason {@code centreFeedsTheClimb} is: a pin can skip its first
+					// cell to undo a soft tail, a pad's last cell can be a repeater rather than dust,
+					// and a rule that remembers all of that is a rule that stops being true.
+					BlockPos behindTheClimb = lane.pos().relative(travel.getOpposite());
+					boolean arrivesOnDust = placements.describeBlock(behindTheClimb.above())
+							.startsWith("minecraft:redstone_wire")
+						|| placements.describeBlock(behindTheClimb.above(2))
+							.startsWith("minecraft:redstone_wire");
+					// The wait the seed's repeater has to carry, which is the wait the closing pad has
+					// not already spent. A pad may hold repeaters, and ticks spent in those are ticks
+					// the chord has already waited -- every other module in this file subtracts them,
+					// {@link #addSpatialDelayBeforeEvent} taking {@code - spentPadding} -- and a seed
+					// that did not would delay the whole gap a second time and sound its lane late.
+					int seedWait = event.time() - currentTime - spentPadding;
 					boolean seedsRail = false;
+					// Offered to any climb, off a bus or off the path. It was gated to bus climbs for
+					// a while, to dodge the collision at the foot of the staircase -- a climb starting
+					// on the path laid its own stone and dust in the lane's column a block up, and the
+					// mirrored first rung's glass wanted that same cell. ekran, who read the wire in
+					// game: the signal travels through there correctly. And the gate cost the feature
+					// its whole reason for existing, since a song of chords of one to three never
+					// builds a bus to climb off -- which is exactly the song a free seed is for. The
+					// collision is gone now, laid rather than gated: a mirrored climb builds no lift.
 					if (RAIL_SEEDS_OFF_THE_CLIMB && V2_RUNS_ON_RAILS && layout.ultra() && climb > 0
-							&& wouldTip - RAIL_SEED_CLIMB_STEPS - 1 >= 1) {
+							&& railDelay(0, seedWait) > 0) {
+						// The lookahead. A climb only pays for a seed the lane above is going to use,
+						// and that lane does not exist yet -- so it is built here, out of the two
+						// things a staircase settles: where it lands, and which wall the lane it lands
+						// on runs at. Measured from the column *after* the landing, because the landing
+						// itself is the seed; a run measured against the wall from a column it does not
+						// have is a run that ends where it opened, which is a dead wire rather than a
+						// wasted column.
 						Direction next = travel.getOpposite();
 						Lane willRun = Lane.straight(
-							lane.pos().relative(next).above(CUBE_FLOOR_HEIGHT), next, depth);
-						int willWait = event.time() - currentTime - spentPadding;
-						seedsRail = railPadColumns(willWait) == 0
+							lane.pos().relative(next).relative(next).above(CUBE_FLOOR_HEIGHT),
+							next, depth);
+						// The wait is asked as well as the room, because a seed only survives a wait
+						// that lays nothing: a column of the wait's own wire between the seed and the
+						// run puts the two out of reach of each other and the run builds a head
+						// anyway, which is a column of stone and dust standing in the lane for
+						// nothing.
+						//
+						// And the floor rail's own two questions about the chord that will stand in the
+						// seed's first column, which is a floor column nobody else asks about. Every
+						// other floor column in a run is committed to by railPairAfter at the path
+						// column behind it; this one has no path column behind it -- the seed is it --
+						// exactly as the handover's opening does, and that one asks these. Left out, a
+						// seed opened runs a head would never have opened and hung their low notes
+						// where the lane alongside had already put a cut head's: 19 wrong notes across
+						// the library, all of them a cut head or a stacked front meeting rail:FLOOR.
+						boolean roomForRun = railPadColumns(seedWait) == 0
+							&& railHolds(event, false)
+							&& railFloorTakes(placements, willRun, event)
 							&& railOpens(events, index, willRun,
 								next == forward ? farWall : nearWall, layout, false,
-								turnReserve(event, turnCost(above, climb, floors, slabStep).offBus(),
-									layout),
-								willWait, currentTime, booked);
+								turnReserve(event,
+									turnCost(above, climb, floors, slabStep).offBus(), layout),
+								seedWait, currentTime, booked);
+						seedsRail = roomForRun && arrivesOnDust && seedTip >= 1;
+						// Asked in the order that makes each answer a piece of work rather than a
+						// tally. The room is asked first and of every climb, because a climb the next
+						// lane was never going to run on is not a seed anybody lost; what is left
+						// after it is the seeds that were there for the taking, and which of the two
+						// prices turned them down. climbSeedOnlyWantedDust is the one a column would
+						// buy -- the lane came to rest on a block, and a block does not reach the
+						// mirrored ladder's bottom rung.
+						if (!roomForRun) {
+							placements.padded("climbSeedNoRunToSeed");
+						} else if (!arrivesOnDust) {
+							placements.padded("climbSeedOnlyWantedDust");
+							// And what is actually standing there, asked of the blocks. "The lane came
+							// to rest on a block" is one sentence and several different shapes, and
+							// which shape it is decides whose builder has to learn to leave dust.
+							placements.padded("climbSeedBlockedBy:"
+								+ placements.describeBlock(behindTheClimb.above())
+									.replace("minecraft:", "").replaceAll("\\[.*", "")
+								+ "/" + placements.describeBlock(behindTheClimb)
+									.replace("minecraft:", "").replaceAll("\\[.*", ""));
+						} else if (seedTip < 1) {
+							placements.padded("climbSeedOnlyWantedWire");
+						}
 					}
 					// A raised pad leaves exactly what a bus leaves -- stone at path+1 with dust on top,
 					// one column back from here -- so the staircase joins it two rungs in just the same.
 					// And a lane that ended on a bus keeps its discount through a raised pad, which it
 					// never could through a pad laid on the path.
+					// The climb stays where the lane left it, mirrored or not. ekran read the mirror
+					// as ending the lane a block earlier and it does -- the cell the lift used to hold
+					// is glass now -- but moving the staircase back to take that column is not the way
+					// out: the lane had already measured itself as owning it and laid music into a
+					// staircase that was by then rising, 22 breaks of rail:PATH into climb. So the
+					// mirror asks for what is behind it instead of taking it, which costs no column at
+					// all wherever the lane closes on a pad, a pin, or a bus.
 					BlockPos landed = climb > 0
-						? addGlassClimb(placements, lane.pos(), travel, depth,
+						? addGlassClimb(placements, lane.pos(),
+							travel, depth,
 							raisedPad || turnsOffBus && pad.cells().isEmpty(), currentTime,
-							seedsRail ? RAIL_SEED_CLIMB_STEPS : 0)
+							seedsRail ? RAIL_SEED_CLIMB_STEPS : 0, seedsRail)
 						: descend(placements, lane.pos(), travel, descentSide, currentTime);
 					floor = above;
 					// What the staircase leaves the next lane. It matters because the next lane may
@@ -3777,16 +3878,15 @@ public final class SongBuilder {
 					// rungs, and counting them anyway left every lane after one two blocks poorer.
 					// Through the same one place canTurn asked, so the wire this lane books itself and
 					// the wire it demanded before turning cannot be two different sums.
-					tipSignal = wouldTip;
+					tipSignal = seedsRail ? seedTip : wouldTip;
 					lane = Lane.straight(landed, travel.getOpposite(), depth);
 					if (seedsRail) {
-						// Only the rungs past the floor. The seed's own dust stands beside the lane
-						// rather than in front of it, so it costs the wire arriving here nothing -- but
-						// a taller staircase does, and a staircase that told the lane above it otherwise
-						// is the whole of the raised-ascent regression. The price goes in here, where
-						// the one sum the walk and the plan both read is made.
-						tipSignal -= RAIL_SEED_CLIMB_STEPS;
-						addRailSeed(placements, lane, depth, currentTime);
+						// The rungs past the floor and the seed's own cell of wire are already off it,
+						// in {@code seedTip} above, which is where the same sum has to be made -- the
+						// seed is only offered if what is left after paying for it is worth something,
+						// and a staircase that charged one price to decide and handed on another is
+						// the whole of the raised-ascent regression.
+						lane = addRailSeed(placements, lane, railDelay(0, seedWait), currentTime);
 					}
 					gradeLaneStart(placements, wall, travel.getStepX(), 0, climb > 0, stepOffAhead,
 						lane.pos().getX(), climb > 0 ? "Climb" : "Descent");
@@ -4204,7 +4304,40 @@ public final class SongBuilder {
 				// 10 of 32 openings there, which is the price. {@code railDelay} fired nought times in
 				// that sweep and is here for the set to be complete: a delay out of a repeater's range
 				// would reach {@link #addRailFromHandover} as {@code delay=0} and fail to parse.
-				BlockPos openOffTail = RAIL_FROM_HANDOVER && opening && !reaches && !wantsTurn
+				// A climb that seeded this lane laid the run's first column at its landing, so what is
+				// owed here is the bottom rail's repeater and nothing else. Asked before the tail and
+				// before the head, both of which would lay a column over a seed already down.
+				// Not asked of {@code wantsTurn}, which the tail below is. That flag belongs to the
+				// event as it was measured on the lane it has just left -- a lane this event turned
+				// off the end of -- and it is still standing when the walk falls through to build the
+				// chord on the far side of the staircase. The tail wants it because a tail stranded by
+				// a closing lane is the fault it was written for; a seed is the opening of a lane and
+				// has nothing to do with the turn that made it.
+				boolean offClimb = RAIL_SEEDS_OFF_THE_CLIMB && opening
+					&& lane.pos().equals(placements.railSeed());
+				if (offClimb) {
+					// Not a column, and there is no builder for it. ekran's bottom-rail repeater is
+					// already down, in the seed's own landing column; this column is the run's first
+					// <em>floor</em> column, which the rail lays for itself. Anything laid here was a
+					// second repeater in a row -- the run started a column further along than the seed
+					// had been built for, and the floor column the seed drives held nothing at all.
+					placements.padded("railFromClimb");
+					// The floor rail and not the path one, because the seed's repeater sits at the
+					// lane's own level and a repeater drives the next note on its own rail. Opened on
+					// the path rail instead, the run asked for a floor note nothing was going to drive.
+					railPhase = 1;
+					railBlanksRunning = 0;
+					railFloorCarried = false;
+					fromDust = true;
+					// The bottom rail waits on the seed's repeater and so is live at this chord's own
+					// tick; the top rail is live from the wire over the seed's block, which went live
+					// when the staircase did.
+					railLive[0] = currentTime;
+					railLive[1] = event.time();
+					opening = false;
+				}
+				BlockPos openOffTail = !offClimb && RAIL_FROM_HANDOVER && opening
+						&& !reaches && !wantsTurn
 						&& railHolds(event, false)
 						&& railFloorTakes(placements, lane, event)
 						&& railDelay(currentTime, event.time()) > 0
@@ -4324,10 +4457,35 @@ public final class SongBuilder {
 						+ " wall=" + laneWall + " room=" + railRoom(lane, laneWall)
 						+ " travel=" + lane.travel());
 				}
+				// The run's last column, closing the way a small module closes: centre given up to the
+				// wire, notes hung either side of it a level down.
+				//
+				// This is where the instant seed is actually won or lost. A path column's centre is a
+				// note block at path+1 with nothing under it, and that is the one shape a mirrored
+				// ladder cannot start from -- a powered block lights only the dust it stands square
+				// against, and the ladder's bottom rung is diagonal from it. ekran read exactly that
+				// off ultra-ones-mixed at 26 wide and drew the fix: <i>"if it had just used stone there
+				// and placed the note on the side, then it could have done a double rail staircase
+				// (mirrored) and done an instant seed."</i>
+				//
+				// Only where this column really is the one the staircase reads from, which is one
+				// column short of the wall: the climb is pinned there, so nothing goes between them.
+				// And only where the run ends here anyway ({@code nextDelay == 0}) -- a column that
+				// still has to drive the next one needs its repeater, and this shape has no repeater
+				// in it.
+				boolean closesTheLane = railPhase == 0 && nextDelay == 0
+					&& RAIL_SEEDS_OFF_THE_CLIMB
+					&& placements.climbAhead() && railRoom(lane, laneWall) == 1
+					&& closesOnTheFlanks(placements, event.notes(), lane, event.time(), false);
 				// A floor column that is not a blank is the floor rail earning its keep.
 				railFloorCarried |= railPhase == 1;
-				lane = addRailNote(placements, lane, railPhase, event.notes(), event.time(),
-					nextDelay, fromDust, handUp);
+				if (closesTheLane) {
+					layFlankedClose(placements, lane, event.notes(), event.time(), "rail:CLOSING");
+					lane = lane.ahead(1);
+				} else {
+					lane = addRailNote(placements, lane, railPhase, event.notes(), event.time(),
+						nextDelay, fromDust, handUp);
+				}
 				RAIL_COLUMNS++;
 				railLive[railPhase] = event.time();
 				railPhase = nextDelay > 0 ? 1 - railPhase : -1;
@@ -6183,20 +6341,53 @@ public final class SongBuilder {
 	 *     staircase carries on in the same alternation and the landing does not move: the lane it
 	 *     serves stands where it always did, and what the extra rungs leave is live wire standing
 	 *     above it. Nought everywhere else, which is every climb this file laid before the seed.
+	 * @param mirrored swaps which of the two columns is glass and which is wire at every level, so
+	 *     the staircase leans the other way, and adds one rung on top. ekran's, and it is what the
+	 *     seed is made of. Writing {@code L} for the path level this climb starts from: the lane's own
+	 *     column then carries dust at {@code L+2}, {@code L+4} and {@code L+6} where an ordinary climb
+	 *     carries it at {@code L+1}, {@code L+3} and {@code L+5}. The even levels are the point --
+	 *     {@code L+4} is the new lane's own path, which the seed's repeater reads from behind, and
+	 *     {@code L+6} is level with the wire over the seed's block. An ordinary climb has neither and
+	 *     hands its landing a single dust at {@code L+5}, which is what a module's repeater reads. So
+	 *     this goes with the seed and with nothing else, and a climb built mirrored that then does not
+	 *     seed hands its landing glass.
 	 */
 	private static BlockPos addGlassClimb(PlacementPlan placements, BlockPos cursor,
-			Direction travel, Direction depth, boolean fromBus, int time, int extraSteps) {
+			Direction travel, Direction depth, boolean fromBus, int time, int extraSteps,
+			boolean mirrored) {
 		placements.placing("climb");
 		placements.turnedAt(cursor);
 		BlockPos near = cursor;
 		BlockPos far = CLIMB_STEPS_SIDEWAYS && depth != null
 			? cursor.relative(depth.getOpposite()) : cursor.relative(travel);
-		if (!fromBus) {
+		// A mirrored staircase gets neither the lift nor the skip, and the two are one fact.
+		//
+		// Its bottom rung is glass at path+1 -- the very cell the lift's own dust wants, which is the
+		// collision ekran read off the paste -- and its dusts stand at path+2, +4 and +6, so the wire
+		// behind the climb reaches the first of them on its own: from a pad's dust at path+1 it steps
+		// up one over that glass, and from a bus or a raised pad at path+2 it is already level with
+		// it. Which is also why a bus buys a mirrored climb nothing. The rung it would have skipped is
+		// the one the seed's own repeater reads, so the ladder is five rungs whatever the lane arrived
+		// on, and the turn is priced at the full {@link #TURN_DUST_CELLS} rather than the off-bus
+		// three. What the wire behind cannot be is a *block* -- a note block or a bus's stone only
+		// powers dust it stands square against, and path+2 is diagonal from it. That is the one thing
+		// the seed has to know before it is offered, and the turn asks the blocks for it.
+		if (!fromBus && !mirrored) {
 			placements.powered(near, "minecraft:stone", time);
 			set(placements, near.above(), "minecraft:redstone_wire");
 		}
-		for (int step = fromBus ? 2 : 1; step <= CUBE_FLOOR_HEIGHT + extraSteps; step++) {
-			BlockPos column = step % 2 == 1 ? far : near;
+		if (mirrored) {
+			// ekran's one more glass, carrying on the alternation, and it does two things. It stands in
+			// the cell the run's opening repeater would have shifted back into, so the glass takes that
+			// cell and the repeater is never laid; and its own dust, a level above the new lane's path,
+			// is what reaches across to the wire over the seed's block. Left off the first time and
+			// ekran read it straight off the paste: "the top one doesn't have redstone on it".
+			set(placements, near.above(CUBE_FLOOR_HEIGHT + 1), "minecraft:glass");
+			set(placements, near.above(CUBE_FLOOR_HEIGHT + 2), "minecraft:redstone_wire");
+		}
+		for (int step = fromBus && !mirrored ? 2 : 1; step <= CUBE_FLOOR_HEIGHT + extraSteps;
+				step++) {
+			BlockPos column = step % 2 == 1 != mirrored ? far : near;
 			set(placements, column.above(step), "minecraft:glass");
 			set(placements, column.above(step + 1), "minecraft:redstone_wire");
 		}
@@ -6210,18 +6401,26 @@ public final class SongBuilder {
 	 *
 	 * <p>ekran's, and the arithmetic is theirs: a run's head is two columns on every floor, and on a
 	 * song that is nothing but small chords -- lady brown, neverending night -- a floor eight columns
-	 * wide spends a quarter of itself reseeding. A climb already carries live wire up to the new
-	 * floor's own path level, so the one thing a head buys that the climb does not is the pair of
-	 * blocks the floor rail reads: stone on the lane with dust over it. Laid at the landing, that pair
-	 * is exactly what {@link #addRailFromStack} opens off, so the run costs the trigger column every
-	 * module pays anyway.</p>
+	 * wide spends a quarter of itself reseeding. A head is a repeater and then a block with dust over
+	 * it; slide that pair one column back into a mirrored staircase and the repeater lands in the cell
+	 * the glass is standing in, so the glass takes it and what reaches the lane is the block and its
+	 * dust alone -- {@link #addRailSeed}, in the landing column the lane was going to spend on a
+	 * trigger anyway.</p>
 	 *
 	 * <p>Only where the next lane is going to want a run, which is a question about a lane that does
 	 * not exist yet. Both halves of it are known before the staircase is built -- the landing is
 	 * {@code CUBE_FLOOR_HEIGHT} above the column the climb starts from and the new wall is the one the
-	 * lane is not running at -- so the lane is constructed and {@link #railOpens} is asked of it. The
-	 * cheaper alternatives were to guess from the chord about to be laid, or to build every climb tall
-	 * and waste the wire on the ones that never open a run.</p>
+	 * lane is not running at -- so the lane is constructed and {@link #railOpens} is asked of it,
+	 * along with the two questions the floor rail asks of every other column and nobody was asking of
+	 * this one. The cheaper alternatives were to guess from the chord about to be laid, or to build
+	 * every climb mirrored and leave the ones that never open a run with a staircase whose foot
+	 * nothing reaches.</p>
+	 *
+	 * <p>Measured over 315 v2 builds against the same flag off: 531 seeds, 534 fewer heads, total
+	 * depth 22211 against 22240, and the same one wrong note either way. Of the climbs it is offered
+	 * to, 2430 have no run on the next lane to seed at all and 320 want only a cell of dust behind the
+	 * staircase -- see {@code climbSeedOnlyWantedDust}, which is the number a reserved column would
+	 * buy, and 320 out of some 3281 climbs is not a column each.</p>
 	 */
 	static boolean RAIL_SEEDS_OFF_THE_CLIMB = true;
 
@@ -6238,32 +6437,49 @@ public final class SongBuilder {
 	static int RAIL_SEED_CLIMB_STEPS = 0;
 
 	/**
-	 * What a climb leaves so the lane above it opens a run for nothing: one cell of dust, beside it.
+	 * The landing of a seeding climb: a block on the lane with wire over it, and no trigger at all.
 	 *
-	 * <p>The landing column is not touched. It holds what it always held -- the module's own trigger,
-	 * stone with a repeater over it -- and the repeater reads the top of the climb exactly as it does
-	 * on every other floor. What a run wants on top of that is the one thing a stacked chord's cross
-	 * gives it: <b>dust at the lane's own floor level, pointing into that stone</b>, so the stone is
-	 * live and the floor rail's first repeater has something to read. The head spends a whole column
-	 * building that pair; this spends none.</p>
+	 * <p>ekran's, and it is the run's own head shifted a column back into the staircase. A head is a
+	 * repeater and then a block with dust over it; slide the pair towards the climb and the repeater
+	 * lands in the cell the glass is standing in, so the glass takes it and what reaches the lane is
+	 * the second half alone. <i>"The top lane starts with a block, not a repeater, and redstone goes
+	 * on top of it."</i></p>
 	 *
-	 * <p>It goes in the depth column beside the landing, which is where the sideways climb is already
-	 * standing: a climb alternates between {@code z} and {@code z - 1}, and its {@code z - 1} rung at
-	 * floor level sits directly behind this cell. So the wire runs climb, dust, stone, all at one
-	 * level and all in ground the pinned wall keeps clear. This is the whole reason the staircase was
-	 * turned sideways first.</p>
+	 * <p>Both rails come off it, which is what the mirrored staircase is for. The climb's last rung on
+	 * the lane's own column is now <b>dust at the lane's own level</b>, pointing straight into this
+	 * block along the lane -- so the block is live the way a stacked chord's cross makes it live, and
+	 * the floor rail's first repeater has something to read. The same dust steps up one into the wire
+	 * over the block, because what stands between them is glass and dust steps over glass, and that
+	 * wire carries the path rail on.</p>
 	 *
-	 * <p>ekran's shape was a column of its own -- <i>"the first block of the instant seed cannot be a
-	 * note, must be stone, and we put redstone on top of that too"</i> -- which is the handover's pair
-	 * rather than the cross's dust. Built that way it powers its own stone and nothing in front of it,
-	 * and {@link #addRailFromStack} lays its trigger on a stone no wire ever reaches. It also costs a
-	 * column, which is what the head costs, so there was nothing in it either way.</p>
+	 * <p>What is registered is the column <em>after</em> it. The seed is not a thing the run opens
+	 * off from behind, the way a stacked chord's cross is; it is the run's own first column, already
+	 * laid, and the question asked later is whether the lane is standing on the column that follows
+	 * it.</p>
 	 */
-	private static void addRailSeed(PlacementPlan placements, Lane lane, Direction depth, int time) {
-		placements.placing("rail:SEED");
+	private static Lane addRailSeed(PlacementPlan placements, Lane lane, int delay, int time) {
+		placements.placing("rail:SEED delay" + delay);
 		placements.padded("railSeededOffTheClimb");
-		set(placements, lane.pos().relative(depth.getOpposite()), "minecraft:redstone_wire");
+		// ekran, off the paste: "move the basalt up by 1 and place a repeater with support where it
+		// currently is, then put redstone on the basalt". So the column is four blocks deep and each
+		// one belongs to a different part of the run.
+		//
+		// The repeater is the bottom rail's first, at the lane's own level, reading the staircase's
+		// last rung behind it -- and it is where the wait lives. Nothing else could hold it: the
+		// trigger every module opens with is the block the glass ate, so a seed with no repeater in it
+		// can only sound its first chord on the tick the wire arrives, which no chord in the library
+		// ever wants. Gated on that tick, this fired nought times in 315 builds.
+		set(placements, lane.pos().below(), "minecraft:stone_slab[type=top]");
+		set(placements, lane.pos(), "minecraft:repeater[facing=" + repeaterFacing(lane.travel())
+			+ ",delay=" + delay + "]");
+		// And the top rail's first column above it: a block, never a note, with wire over it. The wire
+		// is fed by the dust on the staircase's tallest glass, a level above the path, which is the
+		// one thing the extra rung exists for.
+		placements.powered(lane.pos().above(), "minecraft:stone", time);
+		set(placements, lane.pos().above(2), "minecraft:redstone_wire");
+		lane = lane.ahead(1);
 		placements.railSeed(lane.pos(), time);
+		return lane;
 	}
 
 	/**
@@ -8115,6 +8331,108 @@ public final class SongBuilder {
 	}
 
 	/**
+	 * Whether a lane's last chord may be built with its centre left to the wire.
+	 *
+	 * <p>ekran's, and it is what makes the instant seed fire often instead of rarely. A lane that
+	 * closes flush comes to rest on a note block in the very column the mirrored staircase reads
+	 * from, and a powered block lights only the dust it stands square against -- so the seed is
+	 * refused and the next lane buys a head. Hang those notes on the flanks instead and the centre is
+	 * a cell of pad: the wire reaches the ladder, and the notes sound off the stone the wire makes
+	 * live. Same two columns as the small module it replaces, so nothing the lane was measured
+	 * against moves.</p>
+	 *
+	 * <p>Two notes, because a flanked column has two flanks. The small module holds three by sounding
+	 * its centre as well, and that centre is exactly what is being given up.</p>
+	 *
+	 * <p>Refused where the notes would not survive the drop to the lane's own floor level. Falling
+	 * instruments want propping from the level below that, which is the cell the floor underneath
+	 * keeps empty over its own notes; an effect is more than one cell and does not hang; and the two
+	 * flanks are where the lane alongside hangs the low half of a stacked module, which is the same
+	 * contention {@link #railFloorTakes} is asked about and is asked here in the same words.</p>
+	 */
+	private static boolean closesOnTheFlanks(PlacementPlan placements, List<EventNote> chord,
+			Lane body, int time, boolean forceBus) {
+		if (forceBus || !CLOSING_CHORD_HANGS_ON_THE_FLANKS
+				|| chord.size() > CLOSING_FLANK_SLOTS) {
+			return false;
+		}
+		for (EventNote note : chord) {
+			if (note.effect() != null
+					|| FALLING_INSTRUMENT_BLOCKS.contains(note.instrumentBlock())) {
+				placements.padded("closingFlanksWrongNotes");
+				return false;
+			}
+		}
+		Direction near = body.noteSide().getOpposite();
+		int room = 0;
+		for (Direction side : List.of(near, near.getOpposite())) {
+			if (railSlotTakes(placements, body.pos().relative(side), time)) {
+				room++;
+			}
+		}
+		if (room < chord.size()) {
+			placements.padded("closingFlanksTaken");
+			return false;
+		}
+		return true;
+	}
+
+	/**
+	 * Whether a lane's closing chord may hang on the flanks so the seed behind it has its dust.
+	 *
+	 * <p>On, and it does what it says: 265 chords over the library take the shape, and the build is a
+	 * block shallower and five blocks less breached for it. What it does <em>not</em> do is buy seeds
+	 * -- 542 against 541 with it off -- and the reason is worth keeping, because the mechanism is
+	 * right and only the shape it was aimed at is wrong.</p>
+	 *
+	 * <p>Of the 339 climbs that had the room and the wire and wanted only the dust behind them,
+	 * {@code climbSeedBlockedBy} says <b>249 are a note block at path+1 with nothing under it</b> --
+	 * the centre harp of a <b>rail path column</b> -- and 90 are stone over stone. Almost none are a
+	 * plain closing chord. Which stands to reason: a song whose next lane wants a run is a song whose
+	 * lane just <em>had</em> one, so what comes to rest against the staircase is the run's own last
+	 * column. The same trick is what that column wants -- give up the centre note, stand powered
+	 * stone there with dust over it, hang the notes on the flanks -- and it is a different builder,
+	 * {@link #addRailNote}, whose flanks are at path+1 rather than at the lane's floor.</p>
+	 */
+	static boolean CLOSING_CHORD_HANGS_ON_THE_FLANKS = true;
+
+	/** Two, and it is the shape rather than a budget: a flanked column has a near side and a far one. */
+	private static final int CLOSING_FLANK_SLOTS = 2;
+
+	/**
+	 * The closing column itself: live stone with dust over it, and the notes hung either side of it.
+	 *
+	 * <p>Shared, because two completely different builders end up wanting it. A lane can come to rest
+	 * against the staircase on a small module, and it can come to rest there on the last column of a
+	 * run -- and the census says the second is what actually happens: of the climbs that had the room
+	 * and the wire and wanted only the dust behind them, {@code climbSeedBlockedBy} put 249 on
+	 * {@code note_block/-}, the centre harp of a rail path column, against almost none on a plain
+	 * closing chord. Which stands to reason. A song whose next lane wants a run is a song whose lane
+	 * has just had one.</p>
+	 *
+	 * <p>Why it conducts: the repeater behind drives the dust, the dust makes the stone under it live,
+	 * and a block that dust has made live sounds the note blocks it stands square against. That is
+	 * also why the notes drop a level to the lane's own floor. Beside the dust they would not sound at
+	 * all -- a dust cell with a repeater behind it and a step up in front takes the straight shape and
+	 * points along the lane only, never sideways into a note.</p>
+	 *
+	 * <p>And why the tick does not move: dust carries no delay, so a note sounded off this stone
+	 * sounds on the tick the repeater behind it fires, which is the tick the centre note would have
+	 * sounded on.</p>
+	 */
+	private static void layFlankedClose(PlacementPlan placements, Lane body, List<EventNote> chord,
+			int time, String what) {
+		placements.placing(what + " notes" + chord.size());
+		placements.padded("closingChordOnTheFlanks");
+		placements.powered(body.pos(), "minecraft:stone", time);
+		set(placements, body.pos().above(), "minecraft:redstone_wire");
+		// Near side first, the way a floor column fills, because these notes stand in the cells a
+		// floor column's do and contend with the same lane alongside.
+		hangRailNotes(placements, body.pos(), body.noteSide().getOpposite(),
+			new ArrayList<>(chord), time, true);
+	}
+
+	/**
 	 * @param laneStep the direction the serpentine walks, which is the side a chord grows into
 	 *     first. Pinning it to the lane step rather than to travel -- which reverses every lane --
 	 *     is what makes {@link LaneReach} predictable enough to pack lanes closer than four apart.
@@ -9345,6 +9663,18 @@ public final class SongBuilder {
 		// And not the one the physics implies either: a chord of three doors is small enough for this
 		// shape and cannot hold it, because the anchor has to pass power on and a door does not.
 		// {@link #fitsSmallModule} is the same test {@link #chooseStyle} priced the chord with.
+		// ekran's closing chord. A lane about to climb into a seed puts its last notes on the flanks
+		// and leaves the centre of the column to the wire, so that what stands behind the staircase is
+		// dust rather than a note block -- which is the one thing a mirrored ladder cannot start from.
+		if (closesOnTheFlanks(placements, chord, body, time, forceBus)
+				&& placements.seedAhead() && placements.turnAhead()) {
+			layFlankedClose(placements, body, chord, time, "chord:CLOSING");
+			// One cell of wire, where the small module spends none: its note block is a conductor and
+			// the next cell reads it, whereas this column's centre is dust and comes off the fifteen
+			// the trigger repeater handed out. Reported through busCells so the walk's one sum stays
+			// the walk's one sum.
+			return new Body(lane.ahead(2), 1);
+		}
 		if (!forceBus && fitsSmallModule(chord)) {
 			List<EventNote> ordered = smallOrder(chord);
 			if (needsLentMiddle(ordered)) {
@@ -14674,6 +15004,7 @@ public final class SongBuilder {
 		 * staircase. See {@link #CLIMB_OFF_A_STACKED_CENTRE}.</p>
 		 */
 		private boolean climbAhead;
+		private boolean seedAhead;
 
 		/**
 		 * Whether the module just built laid dust on an empty centre for a climb to start from.
@@ -14698,6 +15029,26 @@ public final class SongBuilder {
 
 		boolean climbAhead() {
 			return climbAhead;
+		}
+
+		/**
+		 * Whether the climb ahead is one that could seed the next lane's run.
+		 *
+		 * <p>{@link #climbAhead} plus everything about the build that the shape being laid cannot see
+		 * for itself -- that this is the ultra layout, on the walk that runs on rails, with the seed
+		 * switched on. Handed down rather than worked out, for the reason the rest of this group is:
+		 * a chord is built by code that was given a lane and a chord and nothing else, and the closing
+		 * shape is a decision about the <em>build</em>, not about the notes.</p>
+		 *
+		 * <p>False everywhere the older walk goes, which is what keeps the closing shape out of
+		 * COMPACT_LANE: only walkV2 sets it, and only where the layout is ultra.</p>
+		 */
+		void seedAhead(boolean ahead) {
+			seedAhead = ahead;
+		}
+
+		boolean seedAhead() {
+			return seedAhead;
 		}
 
 		void sunkenOffered(boolean offered) {
