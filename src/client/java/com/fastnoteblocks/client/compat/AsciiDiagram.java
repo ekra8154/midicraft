@@ -139,6 +139,37 @@ public final class AsciiDiagram {
 			Math.min(from.getZ(), to.getZ())};
 		int[] high = {Math.max(from.getX(), to.getX()), Math.max(from.getY(), to.getY()),
 			Math.max(from.getZ(), to.getZ())};
+		// Shrunk to what is actually in the box, so a box can be thrown around a build rather than
+		// measured to it: ekran's, and the point is that
+		// {@code /asciidiagram ~10 ~10 ~10 ~-10 ~-10 ~-10} draws whatever is inside without anybody
+		// reading six numbers off the debug screen first.
+		//
+		// Only whole empty layers go. Air *between* blocks is most of what a diagram is read for --
+		// wire, block, wire is a dead line and the gap over a note block is why it sounds -- so
+		// nothing inside the shrunk box is touched, and the header says which box was drawn.
+		//
+		// A box with nothing in it at all is left exactly as asked for, because "there is nothing
+		// here" is an answer and an empty diagram is how it gets said.
+		int[] tightLow = {Integer.MAX_VALUE, Integer.MAX_VALUE, Integer.MAX_VALUE};
+		int[] tightHigh = {Integer.MIN_VALUE, Integer.MIN_VALUE, Integer.MIN_VALUE};
+		for (int x = low[0]; x <= high[0]; x++) {
+			for (int y = low[1]; y <= high[1]; y++) {
+				for (int z = low[2]; z <= high[2]; z++) {
+					if (world.apply(new BlockPos(x, y, z)).isAir()) {
+						continue;
+					}
+					int[] here = {x, y, z};
+					for (int axis = 0; axis < 3; axis++) {
+						tightLow[axis] = Math.min(tightLow[axis], here[axis]);
+						tightHigh[axis] = Math.max(tightHigh[axis], here[axis]);
+					}
+				}
+			}
+		}
+		if (tightLow[0] <= tightHigh[0]) {
+			low = tightLow;
+			high = tightHigh;
+		}
 		// Symbol to what it stands for, filled in as the box is read rather than declared up front,
 		// so the legend names the blocks that are actually there and nothing else. Insertion ordered
 		// because a legend that reshuffles between two runs of the same build is hard to diff.

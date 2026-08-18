@@ -55,6 +55,35 @@ class AsciiDiagramTest {
 		world.put(new BlockPos(1, 64, 1), Blocks.GLASS.defaultBlockState());
 	}
 
+	/** A box thrown round a build is shrunk to it, so nobody has to measure one first. */
+	@Test
+	void shrinksTheBoxToWhatIsInIt() {
+		world.put(new BlockPos(0, 64, 0), Blocks.NOTE_BLOCK.defaultBlockState());
+		String drawn = draw(new BlockPos(-10, 54, -10), new BlockPos(10, 74, 10),
+			AsciiDiagram.View.TOP);
+		assertTrue(drawn.startsWith("# 0 64 0  ..  0 64 0,"), drawn);
+		assertEquals(1, drawn.lines().filter(line -> line.startsWith("## ")).count(), drawn);
+	}
+
+	/** The air inside stays: it is most of what a diagram gets read for. */
+	@Test
+	void keepsTheAirBetweenBlocks() {
+		world.put(new BlockPos(0, 64, 0), Blocks.NOTE_BLOCK.defaultBlockState());
+		world.put(new BlockPos(2, 64, 0), Blocks.GLASS.defaultBlockState());
+		String drawn = draw(new BlockPos(-10, 54, -10), new BlockPos(10, 74, 10),
+			AsciiDiagram.View.TOP);
+		assertTrue(drawn.startsWith("# 0 64 0  ..  2 64 0,"), drawn);
+		String row = drawn.lines().filter(line -> line.contains("NB")).findFirst().orElseThrow();
+		assertTrue(row.contains("."), "the gap between them is still drawn: " + row);
+	}
+
+	/** A box with nothing in it is left as asked for, because that is how "nothing here" is said. */
+	@Test
+	void leavesAnEmptyBoxAlone() {
+		String drawn = draw(new BlockPos(0, 64, 0), new BlockPos(1, 64, 1), AsciiDiagram.View.TOP);
+		assertTrue(drawn.startsWith("# 0 64 0  ..  1 64 1,"), drawn);
+	}
+
 	/** Turned so south is up the page, which is the map rotated by half a turn. */
 	@Test
 	void turnsTheMapToPutSouthUp() {
@@ -204,13 +233,22 @@ class AsciiDiagramTest {
 		assertTrue(!cells[1].equals(cells[2]), "two blocks, two symbols: " + row);
 	}
 
-	/** A box drawn round a build catches air, and a page of dots is not worth pasting. */
+	/**
+	 * A page of dots is not worth pasting, so an empty slice is counted rather than drawn.
+	 *
+	 * <p>The ones at the edges never get here any more -- the box is shrunk to what is in it first --
+	 * so what this is left holding is the case that shrinking cannot reach: a floor of air with build
+	 * above it and below it.</p>
+	 */
 	@Test
 	void leavesOutTheSlicesThatAreNothing() {
 		world.put(new BlockPos(0, 64, 0), Blocks.NOTE_BLOCK.defaultBlockState());
-		String drawn = draw(new BlockPos(0, 64, 0), new BlockPos(0, 67, 0),
+		world.put(new BlockPos(0, 67, 0), Blocks.GLASS.defaultBlockState());
+		String drawn = draw(new BlockPos(0, 60, 0), new BlockPos(0, 70, 0),
 			AsciiDiagram.View.TOP);
-		assertTrue(drawn.contains("(3 slices were all air, left out)"), drawn);
+		assertTrue(drawn.startsWith("# 0 64 0  ..  0 67 0,"), drawn);
+		assertTrue(drawn.contains("(2 slices were all air, left out)"), drawn);
 		assertTrue(drawn.contains("y=64"), drawn);
+		assertTrue(drawn.contains("y=67"), drawn);
 	}
 }
