@@ -1323,7 +1323,7 @@ public final class SongBuilder {
 			Pad pad = layout.ultra() && wantsTurn && !straddles
 				? planTurnPad(columns, tipSignal, turnCells, offBus, Math.max(0, wait - 1),
 					climb > 0, above >= 0 && above < floors,
-					lastStyle.buses())
+					lastStyle.buses(), false)
 				: Pad.none(tipSignal);
 			// A split comes before any of that. The event that will not fit is cut in two: as much of
 			// it as reaches the wall, then the staircase, then the rest -- one repeater, one tick, one
@@ -2967,10 +2967,50 @@ public final class SongBuilder {
 			// One tick has to be left for the next event's own repeater, which is the only thing that
 			// can drive the module it stands in front of.
 			int columns = (wall - lane.pos().getX()) * lane.travel().getStepX();
+			// Whether the descent at the end of this lane is going to seed the run below it, asked
+			// before the pad is planned because the pad is the only thing that can pay for it.
+			//
+			// ekran's, and it is the descent's whole difference from the climb's seed: what lands is a
+			// block with dust over it and no repeater, so the wait has to have been spent *above* the
+			// drop. The pad is where it goes -- dust carries no delay down four rungs -- and the pad
+			// is told to keep back a tick for "the next event's own repeater", which is the very
+			// repeater this deletes. So where a run is coming, it may spend the lot.
+			//
+			// Askable this early because a descent is pinned: it stands at the wall whatever the pad
+			// could afford, so its landing is the wall's column four levels down, and the lane below
+			// runs at the other wall. Neither depends on anything planned after this line.
+			boolean seedsDescent = false;
+			if (RAIL_SEEDS_OFF_THE_CLIMB && V2_RUNS_ON_RAILS && layout.ultra() && wantsTurn
+					&& !straddles && climb < 0 && above >= 0 && above < floors) {
+				placements.padded("descentSeedAsked");
+				Direction below = lane.travel().getOpposite();
+				Lane willRun = Lane.straight(lane.pos()
+					.relative(lane.travel(), Math.max(0, columns))
+					.below(CUBE_FLOOR_HEIGHT).relative(below), below, depth);
+				boolean holds = railHolds(event, true);
+				boolean opens = railOpens(events, index, willRun,
+					below == forward ? farWall : nearWall, layout, false,
+					turnReserve(event, turnCost(above, climb, floors, slabStep).offBus(), layout),
+					0, event.time(), booked);
+				// Counted the way the climb's are: each answer a different piece of work. The chord
+				// is the commonest refusal by far and it is the honest one -- what lands on a seed is
+				// a path column, and a path column holds a chord of two, or of three with a harp in
+				// it to sound its centre.
+				if (wait <= 0) {
+					placements.padded("descentSeedNoWait");
+				} else if (!holds) {
+					placements.padded("descentSeedChordTooBig");
+				} else if (!opens) {
+					placements.padded("descentSeedNoRunBelow");
+				} else {
+					seedsDescent = true;
+				}
+			}
 			Pad pad = layout.ultra() && wantsTurn && !straddles
-				? planTurnPad(columns, tipSignal, turnCells, offBus, Math.max(0, wait - 1),
+				? planTurnPad(columns, tipSignal, turnCells, offBus,
+					seedsDescent ? wait : Math.max(0, wait - 1),
 					climb > 0, above >= 0 && above < floors,
-					endsOnBus(lastStyle, lastBusCells))
+					endsOnBus(lastStyle, lastBusCells), seedsDescent)
 				: Pad.none(tipSignal);
 			// Claimed against offered, because a rule that lays a block and never uses it reads exactly
 			// like a rule that works.
@@ -3888,6 +3928,21 @@ public final class SongBuilder {
 						// the whole of the raised-ascent regression.
 						lane = addRailSeed(placements, lane, railDelay(0, seedWait), currentTime);
 					}
+					// The descent's, and it is offered on one condition the climb's is not: the pad
+					// above had to swallow the wait whole. It was asked to -- {@code seedsDescent} is
+					// what let it spend the last tick -- but asking is not getting, and a pad of two
+					// cells cannot hold nine ticks. What arrives at the landing then is a chord's worth
+					// of delay with nothing left to spend it in, so the seed is dropped and the lane
+					// below opens with the head it would have had. Read off {@link Pad#delaySpent}
+					// rather than assumed, for the reason everything else here is read off the blocks.
+					if (seedsDescent && spentPadding == wait) {
+						// The dust over the landing block, which is a cell of the descent's own run and
+						// is not among the four the spiral is charged.
+						tipSignal -= 1;
+						lane = addDescentRailSeed(placements, lane, event.time());
+					} else if (seedsDescent) {
+						placements.padded("descentSeedPadKeptTicks");
+					}
 					gradeLaneStart(placements, wall, travel.getStepX(), 0, climb > 0, stepOffAhead,
 						lane.pos().getX(), climb > 0 ? "Climb" : "Descent");
 					gradeLaneTip(placements, turnCells, tipSignal, climb > 0 ? "Climb" : "Descent");
@@ -4316,24 +4371,34 @@ public final class SongBuilder {
 				boolean offClimb = RAIL_SEEDS_OFF_THE_CLIMB && opening
 					&& lane.pos().equals(placements.railSeed());
 				if (offClimb) {
-					// Not a column, and there is no builder for it. ekran's bottom-rail repeater is
-					// already down, in the seed's own landing column; this column is the run's first
-					// <em>floor</em> column, which the rail lays for itself. Anything laid here was a
-					// second repeater in a row -- the run started a column further along than the seed
-					// had been built for, and the floor column the seed drives held nothing at all.
-					placements.padded("railFromClimb");
-					// The floor rail and not the path one, because the seed's repeater sits at the
-					// lane's own level and a repeater drives the next note on its own rail. Opened on
-					// the path rail instead, the run asked for a floor note nothing was going to drive.
-					railPhase = 1;
+					// Not a column, and there is no builder for it. The seed's own landing column is
+					// all there is; this column is the run's first note column, which the rail lays for
+					// itself. Anything laid here was a second repeater in a row -- the run started a
+					// column further along than the seed had been built for, and the column the seed
+					// drives held nothing at all.
+					placements.padded(placements.railSeedOnPath() ? "railFromDescent" : "railFromClimb");
 					railBlanksRunning = 0;
 					railFloorCarried = false;
 					fromDust = true;
-					// The bottom rail waits on the seed's repeater and so is live at this chord's own
-					// tick; the top rail is live from the wire over the seed's block, which went live
-					// when the staircase did.
-					railLive[0] = currentTime;
-					railLive[1] = event.time();
+					if (placements.railSeedOnPath()) {
+						// A descent's seed is a head's second column: a block with dust over it and no
+						// repeater in it at all. So the run opens the way it opens off a head -- on the
+						// path rail, driven by that dust -- and both rails go live together, the path
+						// through the dust and the floor off the stone the dust makes live.
+						railPhase = 0;
+						railLive[0] = event.time();
+						railLive[1] = event.time();
+					} else {
+						// A climb's carries the run's first repeater at the lane's own level, and a
+						// repeater drives the next note on the *other* rail. So this column is a floor
+						// column; opened on the path rail instead, the run asked for a floor note
+						// nothing was going to drive. The bottom rail waits on that repeater and is
+						// live at this chord's tick, the top from the wire over the seed's block, which
+						// went live when the staircase did.
+						railPhase = 1;
+						railLive[0] = currentTime;
+						railLive[1] = event.time();
+					}
 					opening = false;
 				}
 				BlockPos openOffTail = !offClimb && RAIL_FROM_HANDOVER && opening
@@ -5487,7 +5552,7 @@ public final class SongBuilder {
 		return planTurnPad(owing, sweep.tips().get(last - from), turnCells, offBus,
 			last + 1 < events.size()
 				? Math.max(0, events.get(last + 1).time() - events.get(last).time() - 1) : 0,
-			climbing, staircase, fromBus);
+			climbing, staircase, fromBus, false);
 	}
 
 	/**
@@ -6478,7 +6543,34 @@ public final class SongBuilder {
 		placements.powered(lane.pos().above(), "minecraft:stone", time);
 		set(placements, lane.pos().above(2), "minecraft:redstone_wire");
 		lane = lane.ahead(1);
-		placements.railSeed(lane.pos(), time);
+		placements.railSeed(lane.pos(), time, false);
+		return lane;
+	}
+
+	/**
+	 * The landing of a seeding descent: a head's second column, and the head's first column deleted.
+	 *
+	 * <p>ekran's, 2026-08-17, and it is the smaller of the two seeds by their own account -- it saves
+	 * a column only where the lane above was going to lay a pad anyway. <i>"The repeater on the bottom
+	 * doesn't need to be there since wire is used to seed a double rail. So I moved it up to the top,
+	 * and then used the first block of the lane (redstone) to seed the double rail with no repeater
+	 * since the delay was already performed at the top."</i></p>
+	 *
+	 * <p>The spiral's last rung stands one column past the landing with its dust a level above the new
+	 * lane, so that dust steps <em>down</em> into this cell on its own -- nothing sits above the lower
+	 * one to cut the line. What goes here is therefore stone at the lane's own level with that dust on
+	 * top, which is {@link #addRailHead}'s second column and nothing else: the dust drives the path
+	 * rail into the first note, and the floor rail's first repeater reads the stone the dust makes
+	 * live. The head's own trigger column simply does not exist, because a repeater in the closing pad
+	 * above the descent already spent the wait and dust carries no delay down four rungs.</p>
+	 */
+	private static Lane addDescentRailSeed(PlacementPlan placements, Lane lane, int time) {
+		placements.placing("rail:SEED-DESCENT");
+		placements.padded("railSeededOffTheDescent");
+		placements.powered(lane.pos(), "minecraft:stone", time);
+		set(placements, lane.pos().above(), "minecraft:redstone_wire");
+		lane = lane.ahead(1);
+		placements.railSeed(lane.pos(), time, true);
 		return lane;
 	}
 
@@ -11353,8 +11445,17 @@ public final class SongBuilder {
 	 * worse here than usual: a plan that closes a lane on three cells the walk spends five on is a
 	 * lane that hands over two blocks of wire short of the top of its own staircase.</p>
 	 */
+	/**
+	 * @param everyTick whether the pad must swallow the wait down to the last tick, rather than
+	 *     leaving the final four to the next chord's own trigger. True for exactly one turn: a
+	 *     descent that is going to seed the run below it. That seed is a block with dust over it and
+	 *     <b>no repeater in it</b> -- which is the whole of what it saves -- so the four ticks this
+	 *     normally leaves behind have nothing downstream to spend them, and the lane below would
+	 *     sound its first chord early. See {@link #addDescentRailSeed}.
+	 */
 	private static Pad planTurnPad(int columns, int signal, int turnCells, int offBus,
-			int spareDelay, boolean climbing, boolean staircase, boolean fromBus) {
+			int spareDelay, boolean climbing, boolean staircase, boolean fromBus,
+			boolean everyTick) {
 		// The wait first, and ahead of the lift, which is ekran's call: <em>"you don't have to protect
 		// raised pad, these are better than raised pad."</em>
 		//
@@ -11368,7 +11469,8 @@ public final class SongBuilder {
 		// steps off; the chord's own trigger still stands at the top of it, so nothing up there is
 		// driven by dust and there is no wire-note-wire to make.
 		int absorb = PAD_SPENDS_THE_WAIT && staircase
-			? Math.max(0, spareDelay - MAX_LANE_SPACING) : 0;
+			? everyTick ? spareDelay : Math.max(0, spareDelay - MAX_LANE_SPACING)
+			: 0;
 		if (absorb > 0) {
 			Pad holding = planPad(columns, signal, turnCells, spareDelay, absorb);
 			if (holding.cells().stream().anyMatch(cell -> cell > 0)) {
@@ -14844,6 +14946,7 @@ public final class SongBuilder {
 		 */
 		private BlockPos railSeed;
 		private int railSeedTime = NO_BLANK;
+		private boolean railSeedOnPath;
 		private BlockPos handover;
 
 		private BlockPos handoverBehind;
@@ -15120,9 +15223,22 @@ public final class SongBuilder {
 		 * question asked of it is a position: the landing of one climb, at one height, which no later
 		 * lane in the build stands on.</p>
 		 */
-		void railSeed(BlockPos at, int time) {
+		/**
+		 * @param onPath which rail the run opens on, which is decided by what the seed has in it.
+		 *     A climb's seed carries the run's repeater at the lane's own level, so the column after
+		 *     it is a <b>floor</b> column driven by that repeater. A descent's has no repeater at all
+		 *     -- its wait was spent in the pad at the top, before the drop -- and what reaches the
+		 *     lane is a block with dust over it, which is a head's second column exactly: so the
+		 *     column after it is a <b>path</b> column driven by that dust.
+		 */
+		void railSeed(BlockPos at, int time, boolean onPath) {
 			railSeed = at.immutable();
 			railSeedTime = time;
+			railSeedOnPath = onPath;
+		}
+
+		boolean railSeedOnPath() {
+			return railSeedOnPath;
 		}
 
 		BlockPos railSeed() {
