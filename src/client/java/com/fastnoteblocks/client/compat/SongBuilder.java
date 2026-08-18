@@ -4324,7 +4324,12 @@ public final class SongBuilder {
 			// when it can open on the very first one. Only a flat turn is a reason to wait, and that
 			// is the bending test: its sideways run lies across the way both rails go.
 			int laneWall = lane.travel() == forward ? farWall : nearWall;
-			if (!V2_RUNS_ON_RAILS || turning || lane.bending()) {
+			// A run already going, only. Opening one mid-turn is a different question and railOpens
+			// still refuses it; what this allows is the run a lane already has reaching the corner it
+			// used to be cut off a column short of.
+			boolean intoTheCorner = RUN_RUNS_INTO_A_CORNER && railPhase >= 0
+				&& (turning || lane.bending());
+			if (!V2_RUNS_ON_RAILS || (turning || lane.bending()) && !intoTheCorner) {
 				railPhase = -1;
 			} else if (railPhase >= 0 || railOpens(events, index, lane, laneWall, layout, false,
 					reserve, wait, railStackSeed(placements, lane, lastStyle, currentTime, false),
@@ -4572,6 +4577,18 @@ public final class SongBuilder {
 				// And only where the run ends here anyway ({@code nextDelay == 0}) -- a column that
 				// still has to drive the next one needs its repeater, and this shape has no repeater
 				// in it.
+				// And it stops there. ekran's model 1 is that the last top-rail note lands on the
+				// corner and the sideways run after it is ordinary lane; carrying both rails round the
+				// bend is model 2, which is a different shape -- a repeater each, staggered -- and not
+				// this. A repeater may not stand on a corner either way, and ending here is what keeps
+				// one off it: both branches of addRailNote lay theirs only when the run carries on.
+				if (lane.cornerAt(0)) {
+					if (railPhase == 1 && nextDelay > 0) {
+						handUp = RAIL_HANDS_THE_PATH_UP ? railDelay(railLive[0], event.time()) : 0;
+					}
+					nextDelay = 0;
+					railBlank = NO_BLANK;
+				}
 				boolean closesTheLane = railPhase == 0 && nextDelay == 0
 					&& RAIL_SEEDS_OFF_THE_CLIMB
 					&& placements.climbAhead() && railRoom(lane, laneWall) == 1
@@ -6583,6 +6600,20 @@ public final class SongBuilder {
 
 	/** Whether a run may open on a flat turn's second corner instead of paying for a head. */
 	static boolean RUN_OPENS_ON_A_CORNER = true;
+
+	/**
+	 * Whether a run already going may carry on into the corner its lane turns at.
+	 *
+	 * <p>ekran's, and they said in advance what to expect of it: <i>"this will likely make a couple
+	 * collision builds from perpendicularity clashes but for now that's fine."</i> A note hung off a
+	 * corner hangs off a cell whose flanks point two ways at once, and the sideways run of the turn is
+	 * entitled to that ground.</p>
+	 *
+	 * <p>It is also the line that kept {@link #RUN_OPENS_ON_A_CORNER} from ever being asked: every
+	 * cell of a turn was thrown out of the rail branch before anything could look at it, so over 315
+	 * builds not one of 73,065 events reached it standing on a corner.</p>
+	 */
+	static boolean RUN_RUNS_INTO_A_CORNER = true;
 
 	/**
 	 * A run opening on a flat turn's second corner, ekran's, and the third of the three seeds.
