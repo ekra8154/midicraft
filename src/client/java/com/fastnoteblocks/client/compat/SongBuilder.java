@@ -2603,6 +2603,9 @@ public final class SongBuilder {
 		// And whether the floor rail has held a chord yet at all, rather than only blanks: that is
 		// what says the run is earning the head it paid for.
 		boolean railFloorCarried = false;
+		// MEASURE(flat-turn): whether the run this lane held ended on the turn's first corner, so
+		// the walk's distance to the second one can be read only where model 1 applies.
+		boolean railEndedOnCorner = false;
 		LaneReach reach = laneReach(events, 0, events.size());
 		int slabStep = laneSpacing(reach, reach);
 		// A seeded walk may also start mid-turn, with the corners at the end of the lane already on
@@ -2641,6 +2644,21 @@ public final class SongBuilder {
 			// slab's own depth, because a chord riding a corner turns with the path -- which is what
 			// makes a bend nothing but more lane -- while a lane's chords all grow the same way in the
 			// world, whichever way that lane happens to run.
+			// MEASURE(flat-turn): how near the walk gets to the second corner, read before the turn is
+			// closed out. Read anywhere below this and the answer is about the cell after the one
+			// that matters -- twice now.
+			if (lastCorner != null && layout.ultra() && (turning || lane.cornerAt(0))) {
+				int away = Math.abs(lane.pos().getX() - lastCorner.getX())
+					+ Math.abs(lane.pos().getZ() - lastCorner.getZ());
+				placements.padded((railEndedOnCorner ? "mflatSeatAfterRun" : "mflatSeatPlain")
+					+ Math.min(9, away));
+				// And whether a lane standing on the second corner knows it is. onCorner is carried by
+				// cells derived with ahead() and dropped by anything that rebuilds a straight route, so
+				// the cell and the flag are two different questions.
+				if (away == 0) {
+					placements.padded(lane.cornerAt(0) ? "mflatSeatKnows" : "mflatSeatForgot");
+				}
+			}
 			if (turning && !lane.bending()) {
 				lane = lane.pinned(depth);
 				turning = false;
@@ -2658,6 +2676,7 @@ public final class SongBuilder {
 				// out. Ekran found it in a vertical slice.
 				laneStarted = placedWhileTurning;
 				placedWhileTurning = false;
+				railEndedOnCorner = false;
 				// How far from the corner, not whether the last chord was in the bend.
 				//
 				// What fills the pair behind the first chord of a new lane is not the turn's own run,
@@ -3473,6 +3492,15 @@ public final class SongBuilder {
 				? index > 0 && reachesWall && (flatAhead ? straddles && straddleAffordable
 					: pad.signal() >= turnPrice)
 				: index > 0 && events.get(index - 1).maxSafeTurnDistance() >= MAX_LANE_SPACING;
+			// MEASURE(flat-turn): every turn the lane asks for, split by what is ahead and by whether
+			// a run is still live when it asks.
+			if (layout.ultra() && wantsTurn) {
+				placements.padded("mflatTurnAsked" + (flatAhead ? "Flat" : "Stair")
+					+ (railPhase >= 0 ? "RunLive" : "NoRun") + (canTurn ? "Can" : "Cannot"));
+				if (flatAhead) {
+					placements.padded("mflatTurnStep" + slabStep);
+				}
+			}
 			// A veto is a preference, not a prohibition.
 			//
 			// The plan forbids a cut where it has found a way to close the lane on a pad instead, so
@@ -4155,6 +4183,8 @@ public final class SongBuilder {
 			// the head of a machine is a repeater with nothing behind it, and that is how you can tell
 			// where to put the lever -- and how the reader tells where the song starts.
 			// And never mid-turn, where the wire runs across the corridor and a wall means nothing.
+			// The flat turn's second corner, once the walk has stepped off it. See below.
+			BlockPos steppedOffCorner = null;
 			if (layout.ultra() && !turning && index > 0 && index + 1 < events.size()
 				&& (event.notes().size() + 1) / 2 + offBus <= DUST_RANGE) {
 				// Off the corner before a column of this is measured. A pad that opens with a repeater
@@ -4197,11 +4227,24 @@ public final class SongBuilder {
 				// the corner intact for the swap already, but a wait long enough to want a repeater of
 				// its own lays one on the way past, and then there is no corner left to trade.
 				BlockPos onCorner = lane.pos();
+				boolean stoodOnACorner = lane.cornerAt(0) && !lane.bending();
 				if (tipSignal > 0 || event.time() - currentTime - spentPadding > 4
 						|| planSwapTurn(placements, lane, event.notes(), false, false) == null) {
 					lane = pastAnyCorner(placements, lane);
 					tipSignal -= Math.abs(lane.pos().getX() - onCorner.getX())
 						+ Math.abs(lane.pos().getZ() - onCorner.getZ());
+				}
+				// And the corner it has just left, for the run that may want to open off it.
+				//
+				// {@link #pastAnyCorner} lays {@link #addParityPad} on a corner it walks off -- stone
+				// with dust over it -- and that is {@link #addRailHead}'s second column exactly, which is
+				// to say it is ekran's reseed, already built and already paid for by the turn. What was
+				// missing was never the shape: it was that the rail branch is asked three hundred lines
+				// below this, by which point the cursor has stepped off and {@code cornerAt(0)} is false.
+				// Over the library the walk sits on a second corner 2127 times, knows it every time, and
+				// the rail branch saw 27 of them.
+				if (stoodOnACorner && !lane.pos().equals(onCorner)) {
+					steppedOffCorner = onCorner;
 				}
 				Direction travel = lane.travel();
 				BlockPos cursor = lane.pos();
@@ -4334,13 +4377,38 @@ public final class SongBuilder {
 			// A run already going, only. Opening one mid-turn is a different question and railOpens
 			// still refuses it; what this allows is the run a lane already has reaching the corner it
 			// used to be cut off a column short of.
+			// MEASURE(flat-turn): where the walk actually stands when the rail gate runs, so that
+			// "no event reaches it on a corner" is a reading of every event and not only of the ones
+			// that got past railOpens.
+			if (V2_RUNS_ON_RAILS && layout.ultra()) {
+				placements.padded("mflatGate" + (railPhase >= 0 ? "Running" : "Opening")
+					+ (lane.cornerAt(0) ? lane.bending() ? "OnCorner1" : "OnCorner2"
+						: lane.bending() ? "Bending" : turning ? "Turning" : "Plain"));
+				// And on a second corner with no run, what the ordinary opening test says about it and
+				// which half of it says no. The reseed asks none of this -- it pays for no head -- so
+				// every no here is a column the corner shape could have had.
+				if (railPhase < 0 && lane.cornerAt(0) && !lane.bending()) {
+					int seedHere = railStackSeed(placements, lane, lastStyle, currentTime, false);
+					int waitHere = event.time() - currentTime;
+					boolean mayStart = railMayStart(events, index, seedHere, booked);
+					int wanted = railHeadColumns(seedHere, waitHere) + railPadColumns(waitHere)
+						+ 2 + reserve;
+					placements.padded("mflatCornerTwo" + (!mayStart ? "NoChordChain"
+						: railRoom(lane, laneWall) < wanted ? "NoRoomWanted" + Math.min(9, wanted)
+							+ "Had" + Math.max(0, Math.min(9, railRoom(lane, laneWall)))
+						: "WouldOpenAnyway"));
+					placements.padded("mflatCornerTwoWait" + Math.max(0, Math.min(19, waitHere)));
+				}
+			}
 			boolean intoTheCorner = RUN_RUNS_INTO_A_CORNER && railPhase >= 0
 				&& (turning || lane.bending());
 			if (!V2_RUNS_ON_RAILS || (turning || lane.bending()) && !intoTheCorner) {
 				railPhase = -1;
 			} else if (railPhase >= 0 || railOpens(events, index, lane, laneWall, layout, false,
 					reserve, wait, railStackSeed(placements, lane, lastStyle, currentTime, false),
-					booked)) {
+					booked)
+					|| railOpensOnACorner(events, index, lane, laneWall, layout, reserve,
+						steppedOffCorner != null, booked)) {
 				boolean opening = railPhase < 0;
 				boolean fromDust = false;
 				// A stacked bus's rail-ready tail is already this run's first path column, so there is
@@ -4447,6 +4515,34 @@ public final class SongBuilder {
 					railLive[1] = event.time();
 					opening = false;
 				}
+				// And the same seed where the walk has already stepped off the corner and left the two
+				// blocks standing on it. Asked in the same words as the branch above and off the same
+				// wait, so the two cannot answer differently about one corner. The first real note lands
+				// one cell nearer than it does above, because the cursor is already past the corner: the
+				// silent column is the cell the walk is standing on.
+				boolean fromSteppedCorner = RUN_OPENS_ON_A_CORNER && opening && !fromCorner
+					&& steppedOffCorner != null
+					&& cornerDustCrosses(placements, steppedOffCorner.above())
+					&& railDelay(0, cornerWait) > 0
+					&& railHolds(event, false)
+					&& railFloorTakes(placements, lane.ahead(1), event);
+				if (steppedOffCorner != null && opening && !fromSteppedCorner) {
+					placements.padded(!cornerDustCrosses(placements, steppedOffCorner.above())
+						? "mflatSteppedDustStraightens"
+						: railDelay(0, cornerWait) <= 0 ? "mflatSteppedWaitTooLong"
+							: !railHolds(event, false) ? "mflatSteppedChordTooBig"
+								: "mflatSteppedFloorTaken");
+				}
+				if (fromSteppedCorner) {
+					lane = addRailFromSteppedCorner(placements, lane, steppedOffCorner,
+						railDelay(0, cornerWait), currentTime + spentPadding);
+					railPhase = 1;
+					railBlanksRunning = 0;
+					railFloorCarried = false;
+					railLive[0] = currentTime + spentPadding;
+					railLive[1] = event.time();
+					opening = false;
+				}
 				BlockPos openOffTail = !offClimb && RAIL_FROM_HANDOVER && opening
 						&& !reaches && !wantsTurn
 						&& railHolds(event, false)
@@ -4526,11 +4622,48 @@ public final class SongBuilder {
 					// Never past a corner all the same. A run that does reach one ends on it, which is
 					// what keeps a repeater off it: both branches of addRailNote lay theirs only to
 					// carry the run on.
+					// ekran's parity, read and never picked: carry the double rail to the corner column and
+					// ask what that column would have been. From a path column an even number of cells lands
+					// on another path column, so an even distance to the corner is model 1 -- the run's last
+					// note stands on the corner, the sideways leg is ordinary lane, and the reseed opens the
+					// next run off the corner's own dust. An odd one means the last path note lands one short,
+					// which is model 2 and a different shape.
+					//
+					// The ground this asks for is the corner and not the wall, and that is not the turn's
+					// reserve being spent. The reserve keeps back a column for the lane to hand over on; a
+					// turn already armed has bought that column and stood a corner in it, and the run hands
+					// over there. A lane whose turn is not yet armed still pays, which is why this asks the
+					// route for its bends rather than asking the wall how far off it is.
+					int toCorner = cellsToCorner(lane);
+					// Only ever at two. A corner stands one column past the wall, so the distance to it is the
+					// room plus one, and the ordinary test already passes at every even distance above two --
+					// four is room three, which is the two columns of a pair and the reserve. Two is the one
+					// the wall refuses, and it is the one ekran drew.
+					boolean ontoTheCorner = RUN_RUNS_TO_THE_CORNER && flatAhead && toCorner == 2;
+					if (flatAhead && toCorner >= 2) {
+						placements.padded("mflatPathToCorner" + Math.min(9, toCorner)
+							+ (toCorner % 2 == 0 ? "Model1" : "Model2")
+							+ (railRoom(lane, laneWall) >= 2 + reserve ? "HadRoom" : "Short"));
+					}
 					RailPair pair = !lane.cornerAt(0)
-						&& railRoom(lane, laneWall) >= 2 + reserve
+						&& (ontoTheCorner || railRoom(lane, laneWall) >= 2 + reserve)
 						? railPairAfter(events, index, event.time(), railLive[1], placements,
 							lane.ahead(1), booked)
 						: null;
+					// And the chord that would land on the corner has to be one a corner can hold. Asked of
+					// the pair rather than of the event two along, because a blank moves the chord up a column
+					// and the corner would then be holding a different one.
+					if (pair != null && ontoTheCorner
+							&& railRoom(lane, laneWall) < 2 + reserve) {
+						int cornerEvent = index + (pair.blank() ? 1 : 2);
+						if (cornerEvent >= events.size()
+								|| !railCornerTakes(events.get(cornerEvent))) {
+							placements.padded("mflatCornerRefusedChord");
+							pair = null;
+						} else {
+							placements.padded("mflatCornerTookChord");
+						}
+					}
 					// And a floor rail that keeps taking blanks is not carrying anything: a chord and a
 					// blank between them cost the two columns the plain lane charges for the chord
 					// alone, so a stretch of them is the head's two columns thrown away and nothing
@@ -4606,6 +4739,17 @@ public final class SongBuilder {
 						+ Math.max(0, Math.min(9, railRoom(lane, laneWall)))
 						+ (above >= 0 && above < floors ? "Staircase" : "Flat"));
 				}
+				// MEASURE(flat-turn): ekran's parity, read where the run gives up rather than guessed.
+				// A corner stands one column past the wall, so it is railRoom + 1 columns further on,
+				// and the phase there is this one flipped that many times. A path column on the corner
+				// is model 1; a floor column there means the last path note landed one short, model 2.
+				if (nextDelay == 0 && flatAhead) {
+					int toCorner = railRoom(lane, laneWall) + 1;
+					placements.padded("mflatEnd"
+						+ ((railPhase + toCorner) % 2 == 0 ? "Model1Path" : "Model2Floor")
+						+ "Room" + Math.max(0, Math.min(9, railRoom(lane, laneWall)))
+						+ "Step" + slabStep);
+				}
 				// And it stops there. ekran's model 1 is that the last top-rail note lands on the
 				// corner and the sideways run after it is ordinary lane; carrying both rails round the
 				// bend is model 2, which is a different shape -- a repeater each, staggered -- and not
@@ -4624,6 +4768,9 @@ public final class SongBuilder {
 					&& closesOnTheFlanks(placements, event.notes(), lane, event.time(), false);
 				// A floor column that is not a blank is the floor rail earning its keep.
 				railFloorCarried |= railPhase == 1;
+				// Read before the column is built, because addRailNote hands back the cell *after* the
+				// one it laid -- so asking the lane afterwards asks about the next cell along.
+				boolean laidOnACorner = lane.cornerAt(0);
 				if (closesTheLane) {
 					layFlankedClose(placements, lane, event.notes(), event.time(), "rail:CLOSING");
 					lane = lane.ahead(1);
@@ -4633,6 +4780,7 @@ public final class SongBuilder {
 				}
 				RAIL_COLUMNS++;
 				railLive[railPhase] = event.time();
+				railEndedOnCorner = nextDelay == 0 && laidOnACorner;
 				railPhase = nextDelay > 0 ? 1 - railPhase : -1;
 				currentTime = event.time();
 				// Every column of a run holds a repeater bar the one it opens on, so the wire never
@@ -6645,6 +6793,50 @@ public final class SongBuilder {
 	static boolean RUN_RUNS_INTO_A_CORNER = true;
 
 	/**
+	 * Whether a run heading into an armed flat turn may lay its last column on the corner itself.
+	 *
+	 * <p>ekran's model 1. Off, a run stops where {@link #railRoom} says the wall is and the lane pays
+	 * for a head again on the far side of the bend.</p>
+	 */
+	static boolean RUN_RUNS_TO_THE_CORNER = true;
+
+	/**
+	 * How far the nearest corner is along the route, or nought where the route is not bending.
+	 *
+	 * <p>Counted off the bends the route carries and not off the wall, because the two are not the
+	 * same cell: {@link #armTurn} stands the corner at {@code ahead(columns + 1)}, one column
+	 * <em>past</em> the wall a run measures its room against. That one column is why a run given all
+	 * the room in the world still stopped short of every corner.</p>
+	 */
+	/**
+	 * Whether the chord that would land on a corner can stand on one.
+	 *
+	 * <p>A corner column is a centre and nothing else, and that is geometry rather than caution. The
+	 * note side turns with the route, so at a corner the two flanks a rail column normally hangs on
+	 * lie along the way the wire <em>arrived</em>: one of them is the column the run has just laid,
+	 * and the other is a cell past the corner, outside the wall the lane was promised. {@link
+	 * #hangRailNotes} knows only that pair, so a chord of two or three hung there goes straight into
+	 * the run's own previous column. Measured: allowing it put 107 wrong notes into the library, every
+	 * one of them a rail shape against another rail shape.</p>
+	 *
+	 * <p>A harp, because only a harp note may take a centre -- anything else leaves the centre a stone
+	 * and hangs the note on a flank, which is the thing being refused.</p>
+	 */
+	private static boolean railCornerTakes(EventGroup event) {
+		return event.notes().size() == 1 && isHarpNote(event.notes().get(0));
+	}
+
+	private static int cellsToCorner(Lane lane) {
+		int nearest = 0;
+		for (Lane.Bend bend : lane.bends()) {
+			if (nearest == 0 || bend.after() < nearest) {
+				nearest = bend.after();
+			}
+		}
+		return nearest;
+	}
+
+	/**
 	 * A run opening on a flat turn's second corner, ekran's, and the third of the three seeds.
 	 *
 	 * <p>The corner already holds a lane cell, and a lane cell is stone with something over it -- so
@@ -6664,6 +6856,94 @@ public final class SongBuilder {
 	 * a climb's seed carries a repeater and spends it there; a descent's pushes the wait up into the
 	 * closing pad above the drop; this one has neither and pushes it downstream instead.</p>
 	 */
+	/**
+	 * A run opening off the corner the walk has already stepped off: the same seed, built by somebody
+	 * else.
+	 *
+	 * <p>{@link #addRailFromCorner} lays two blocks and then the silent column. This lays the silent
+	 * column alone, because the two blocks are already standing -- the walk pads every corner it comes
+	 * out of a turn on, and {@link #addParityPad} is stone with dust over it. So the reseed costs this
+	 * run nothing at all: not the head's two columns, and not the corner's either, which the turn
+	 * bought.</p>
+	 *
+	 * <p>What is owed is the recording. A pad is wire the lane runs through and a seed is a block the
+	 * run is driven by; only the second is registered live, and everything that asks whether a note
+	 * would sound at somebody else's tick reads that register.</p>
+	 */
+	/**
+	 * Whether the dust standing on this corner will carry the signal sideways, or only straight on.
+	 *
+	 * <p>The rule is the game's and {@link NoteMachineReader#pointsAt} states it: a length of dust
+	 * powers what it points at, an isolated one becomes a cross and points all four ways, and one
+	 * joined on a single side straightens into a line and points along that axis only. Dust joins to
+	 * dust -- level, or a step up or down -- and to a repeater it can drive; a plain block is merely
+	 * hit by a wire, never joined to it.</p>
+	 *
+	 * <p>Which decides whether ekran's reseed can be taken. The column the reseed drives holds a stone
+	 * at path level, and a stone joins nothing -- so the corner's dust reaches it only where the dust
+	 * is a cross. Where the sideways leg leaves wire behind it, the dust straightens along the leg
+	 * instead and the run opens on a block nothing ever powers. Measured before this was here: 95 dead
+	 * builds and 145,510 notes behind them, every one of them that stone.</p>
+	 *
+	 * <p>An ordinary turn does not care, because what it puts in that cell is a module's trigger --
+	 * a repeater at path level, which the dust joins to. That is the whole difference between the two,
+	 * and it is why the corner has always worked and the reseed did not.</p>
+	 */
+	private static boolean cornerDustCrosses(PlacementPlan placements, BlockPos dust) {
+		for (Direction side : Direction.Plane.HORIZONTAL) {
+			BlockPos at = dust.relative(side);
+			if (joinsDust(placements, at) || joinsDust(placements, at.above())
+					|| joinsDust(placements, at.below())) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	/**
+	 * Whether what stands here is a thing a wire joins to rather than merely runs into.
+	 *
+	 * <p>Asked of the step up and the step down as well as of the cell alongside, and without the
+	 * occlusion tests {@link NoteMachineReader#dustNeighbours} makes -- a join that turns out to be
+	 * blocked only means this refuses a reseed that would have worked, and the other way round is a
+	 * dead machine.</p>
+	 */
+	private static boolean joinsDust(PlacementPlan placements, BlockPos at) {
+		String block = placements.blockAt(at);
+		return block != null
+			&& (block.startsWith("minecraft:redstone_wire")
+				|| block.startsWith("minecraft:repeater")
+				|| block.startsWith("minecraft:comparator")
+				|| block.startsWith("minecraft:redstone_torch")
+				|| block.startsWith("minecraft:redstone_wall_torch")
+				|| block.startsWith("minecraft:redstone_block")
+				|| block.startsWith("minecraft:lever"));
+	}
+
+	private static Lane addRailFromSteppedCorner(PlacementPlan placements, Lane lane, BlockPos corner,
+			int delay, int time) {
+		placements.placing("rail:FROM-CORNER delay" + delay);
+		placements.padded("railFromSteppedCorner");
+		placements.powered(corner, time);
+		return addRailNote(placements, lane, 0, List.of(), time, delay, true, 0);
+	}
+
+	/**
+	 * Whether a run may open on the column after a corner the walk has stepped off.
+	 *
+	 * <p>The room asked for is smaller than {@link #railOpens} asks, and the difference is exactly
+	 * what the reseed buys. A head spends two columns before the run's first note and the wait in
+	 * front of it spends more; this spends the one silent column the corner's dust drives, because
+	 * nothing upstream of that column holds a delay.</p>
+	 */
+	private static boolean railOpensOnACorner(List<EventGroup> events, int index, Lane lane, int wall,
+			Layout layout, int reserve, boolean offACorner, Map<Integer, Integer> booked) {
+		return RUN_OPENS_ON_A_CORNER && TWO_RAIL_RUNS && layout.ultra() && offACorner
+			&& !lane.bending()
+			&& railMayStart(events, index, NO_BLANK, booked)
+			&& railRoom(lane, wall) >= 3 + reserve;
+	}
+
 	private static Lane addRailFromCorner(PlacementPlan placements, Lane lane, int delay, int time) {
 		placements.placing("rail:FROM-CORNER delay" + delay);
 		placements.padded("railFromCorner");
@@ -14755,6 +15035,11 @@ public final class SongBuilder {
 			set(position, block);
 		}
 
+
+		/** What is planned for this cell, or {@code null} where nothing is. */
+		String blockAt(BlockPos position) {
+			return blocks.get(position.immutable());
+		}
 
 		/** Places a block and records that the signal reaches it at {@code time}. */
 		void powered(BlockPos position, String block, int time) {
