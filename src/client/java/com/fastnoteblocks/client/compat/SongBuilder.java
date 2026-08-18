@@ -4506,7 +4506,21 @@ public final class SongBuilder {
 					// keeps back for its turn. Measured against the wall rather than against the
 					// turn's cells: those are a wire budget, and every column of a run holds a
 					// repeater.
-					RailPair pair = railRoom(lane, laneWall) >= 2 + reserve
+					// The turn's reserve is not spare, and a flat turn does not release it. Tried:
+					// letting a run heading for a flat turn spend that column took depth from 22342 to
+					// 22295 and breach blocks from 1106 to 1410, which is 304 blocks outside the
+					// promised width for 47 of depth. The column is keeping lanes inside their wall.
+					//
+					// And it bought no corner either, because a corner is not short of the wall -- it
+					// is one column *past* it. {@link #armTurn} sets it at {@code ahead(columns + 1)}
+					// while a run measures its room against the wall itself, so no run can stand on one
+					// however much room it is given. That is the line for the next attempt.
+					//
+					// Never past a corner all the same. A run that does reach one ends on it, which is
+					// what keeps a repeater off it: both branches of addRailNote lay theirs only to
+					// carry the run on.
+					RailPair pair = !lane.cornerAt(0)
+						&& railRoom(lane, laneWall) >= 2 + reserve
 						? railPairAfter(events, index, event.time(), railLive[1], placements,
 							lane.ahead(1), booked)
 						: null;
@@ -4577,6 +4591,14 @@ public final class SongBuilder {
 				// And only where the run ends here anyway ({@code nextDelay == 0}) -- a column that
 				// still has to drive the next one needs its repeater, and this shape has no repeater
 				// in it.
+				// How far short of its wall a run comes to rest, and whether what it is short of is a
+				// staircase or a flat turn. Counted because "two or three columns" was a guess and the
+				// fix depends on the number.
+				if (railPhase == 0 && nextDelay == 0) {
+					placements.padded("railEndedRoom"
+						+ Math.max(0, Math.min(9, railRoom(lane, laneWall)))
+						+ (above >= 0 && above < floors ? "Staircase" : "Flat"));
+				}
 				// And it stops there. ekran's model 1 is that the last top-rail note lands on the
 				// corner and the sideways run after it is ordinary lane; carrying both rails round the
 				// bend is model 2, which is a different shape -- a repeater each, staggered -- and not
