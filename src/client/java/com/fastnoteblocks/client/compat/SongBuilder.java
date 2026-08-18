@@ -1128,6 +1128,10 @@ public final class SongBuilder {
 		// there is the one ekran read off lady brown, and the only one where the blank is not paying
 		// for itself: once the floor rail is carrying, breaking the run costs a whole fresh head.
 		boolean railFloorCarried = false;
+		// MEASURE(barren): what this run has spent and what it has to show for it.
+		int railRunColumns = 0;
+		int railRunFloorNotes = 0;
+		int railRunBlanks = 0;
 		// What the wire at the end of the lane is still worth. Every module opens with a repeater, so
 		// this only ever counts what the module just built spent: nothing, unless it was a bus.
 		int tipSignal = DUST_RANGE;
@@ -2236,6 +2240,9 @@ public final class SongBuilder {
 			// is the bending test: its sideways run lies across the way both rails go.
 			int laneWall = lane.travel() == forward ? farWall : nearWall;
 			if (turning || lane.bending()) {
+				if (railPhase >= 0) {
+					railRunEnded(placements, railRunFloorNotes, railRunColumns, railRunBlanks);
+				}
 				railPhase = -1;
 			} else if (railPhase >= 0 || railOpens(events, index, lane, laneWall, layout, false,
 					reserve, wait, railStackSeed(placements, lane, lastStyle, currentTime, false),
@@ -2262,6 +2269,9 @@ public final class SongBuilder {
 					railPhase = 0;
 					railBlanksRunning = 0;
 					railFloorCarried = false;
+					railRunColumns = 0;
+					railRunFloorNotes = 0;
+					railRunBlanks = 0;
 					// The head's own stone and the stone under its dust both go live with this chord,
 					// so both rails are timed from here.
 					railLive[0] = event.time();
@@ -2275,6 +2285,8 @@ public final class SongBuilder {
 					// and the two rails come out swapped over.
 					lane = addRailBlank(placements, lane, railBlank,
 						railDelay(railLive[0], event.time()));
+					railRunColumns++;
+					railRunBlanks++;
 					railLive[1] = railBlank;
 					railPhase = 0;
 				}
@@ -2299,6 +2311,31 @@ public final class SongBuilder {
 					// gained. The run stops instead and the lane carries on plainly, which is what
 					// ekran asked for -- "it can just continue if it doesn't know it will be able to
 					// place a note there later".
+					// The opening question asked again, because the walk can find the answer has changed:
+					// {@link #railFloorChords} reads with no placements, so a floor column it counted on may
+					// turn out to be a cell a stacked module alongside has already taken.
+					//
+					// One chord, not {@link #RAIL_FLOOR_CHORDS_WANTED}, because the head is already spent
+					// and a spent head is not a reason to spend more. At the margin a blank pair is two
+					// columns for one chord, which is exactly what the plain lane charges -- so carrying on
+					// through blanks costs no depth at all, and costs a repeater a column. That is the whole
+					// of ekran's complaint, and it is why this is asked where a blank is about to be laid
+					// rather than where the run opened.
+					//
+					// Only while the floor rail has carried nothing at all. A run that has carried once has
+					// beaten the plain lane already, and ending it would only make the next one pay for
+					// another head.
+					//
+					// The reserve is not taken off the room here, which makes the horizon a column longer
+					// than the run really has. That errs towards carrying on, which is the direction a guess
+					// should err in: what this way costs is a column, and what the other way costs is a run
+					// that was about to start earning.
+					if (pair != null && pair.blank() && !railFloorCarried && RUN_WANTS_ITS_FLOOR_RAIL
+							&& railFloorChords(events, index, railLive[1], railRoom(lane, laneWall), 1,
+								booked) < 1) {
+						placements.padded("railStoppedBarren");
+						pair = null;
+					}
 					if (pair != null && pair.blank() && !railFloorCarried
 							&& railBlanksRunning >= RAIL_BLANKS_IN_A_ROW) {
 						placements.padded("railStoppedForBlanks");
@@ -2346,10 +2383,17 @@ public final class SongBuilder {
 				}
 				// A floor column that is not a blank is the floor rail earning its keep.
 					railFloorCarried |= railPhase == 1;
+				if (railPhase == 1) {
+					railRunFloorNotes++;
+				}
 					lane = addRailNote(placements, lane, railPhase, event.notes(), event.time(),
 					nextDelay, fromDust, handUp);
 				RAIL_COLUMNS++;
+				railRunColumns++;
 				railLive[railPhase] = event.time();
+				if (nextDelay <= 0) {
+					railRunEnded(placements, railRunFloorNotes, railRunColumns, railRunBlanks);
+				}
 				railPhase = nextDelay > 0 ? 1 - railPhase : -1;
 				currentTime = event.time();
 				// Every column of a run holds a repeater bar the one it opens on, so the wire never
@@ -2603,6 +2647,10 @@ public final class SongBuilder {
 		// And whether the floor rail has held a chord yet at all, rather than only blanks: that is
 		// what says the run is earning the head it paid for.
 		boolean railFloorCarried = false;
+		// MEASURE(barren): what this run has spent and what it has to show for it.
+		int railRunColumns = 0;
+		int railRunFloorNotes = 0;
+		int railRunBlanks = 0;
 		LaneReach reach = laneReach(events, 0, events.size());
 		int slabStep = laneSpacing(reach, reach);
 		// A seeded walk may also start mid-turn, with the corners at the end of the lane already on
@@ -4362,6 +4410,9 @@ public final class SongBuilder {
 			boolean intoTheCorner = RUN_RUNS_INTO_A_CORNER && railPhase >= 0
 				&& (turning || lane.bending());
 			if (!V2_RUNS_ON_RAILS || (turning || lane.bending()) && !intoTheCorner) {
+				if (railPhase >= 0) {
+					railRunEnded(placements, railRunFloorNotes, railRunColumns, railRunBlanks);
+				}
 				railPhase = -1;
 			} else if (railPhase >= 0 || railOpens(events, index, lane, laneWall, layout, false,
 					reserve, wait, railStackSeed(placements, lane, lastStyle, currentTime, false),
@@ -4418,6 +4469,9 @@ public final class SongBuilder {
 					placements.padded(placements.railSeedOnPath() ? "railFromDescent" : "railFromClimb");
 					railBlanksRunning = 0;
 					railFloorCarried = false;
+					railRunColumns = 0;
+					railRunFloorNotes = 0;
+					railRunBlanks = 0;
 					fromDust = true;
 					if (placements.railSeedOnPath()) {
 						// A descent's seed is a head's second column: a block with dust over it and no
@@ -4468,6 +4522,9 @@ public final class SongBuilder {
 					railPhase = 1;
 					railBlanksRunning = 0;
 					railFloorCarried = false;
+					railRunColumns = 0;
+					railRunFloorNotes = 0;
+					railRunBlanks = 0;
 					// The path rail went live with the chord before the corner, since dust carries no
 					// delay; the floor rail with this chord, which the silent column's repeater times.
 					railLive[0] = currentTime + spentPadding;
@@ -4498,6 +4555,9 @@ public final class SongBuilder {
 					railPhase = 1;
 					railBlanksRunning = 0;
 					railFloorCarried = false;
+					railRunColumns = 0;
+					railRunFloorNotes = 0;
+					railRunBlanks = 0;
 					railLive[0] = currentTime + spentPadding;
 					railLive[1] = event.time();
 					opening = false;
@@ -4516,6 +4576,9 @@ public final class SongBuilder {
 					railPhase = 1;
 					railBlanksRunning = 0;
 					railFloorCarried = false;
+					railRunColumns = 0;
+					railRunFloorNotes = 0;
+					railRunBlanks = 0;
 					// Both rails live at the module's tick: the tail sounded with the head, and the
 					// handover's stone went live with it.
 					railLive[0] = currentTime;
@@ -4541,6 +4604,9 @@ public final class SongBuilder {
 					railPhase = 0;
 					railBlanksRunning = 0;
 					railFloorCarried = false;
+					railRunColumns = 0;
+					railRunFloorNotes = 0;
+					railRunBlanks = 0;
 					// The head's own stone and the stone under its dust both go live with this chord,
 					// so both rails are timed from here.
 					railLive[0] = event.time();
@@ -4554,6 +4620,8 @@ public final class SongBuilder {
 					// and the two rails come out swapped over.
 					lane = addRailBlank(placements, lane, railBlank,
 						railDelay(railLive[0], event.time()));
+					railRunColumns++;
+					railRunBlanks++;
 					railLive[1] = railBlank;
 					railPhase = 0;
 				}
@@ -4657,6 +4725,31 @@ public final class SongBuilder {
 					// gained. The run stops instead and the lane carries on plainly, which is what
 					// ekran asked for -- "it can just continue if it doesn't know it will be able to
 					// place a note there later".
+					// The opening question asked again, because the walk can find the answer has changed:
+					// {@link #railFloorChords} reads with no placements, so a floor column it counted on may
+					// turn out to be a cell a stacked module alongside has already taken.
+					//
+					// One chord, not {@link #RAIL_FLOOR_CHORDS_WANTED}, because the head is already spent
+					// and a spent head is not a reason to spend more. At the margin a blank pair is two
+					// columns for one chord, which is exactly what the plain lane charges -- so carrying on
+					// through blanks costs no depth at all, and costs a repeater a column. That is the whole
+					// of ekran's complaint, and it is why this is asked where a blank is about to be laid
+					// rather than where the run opened.
+					//
+					// Only while the floor rail has carried nothing at all. A run that has carried once has
+					// beaten the plain lane already, and ending it would only make the next one pay for
+					// another head.
+					//
+					// The reserve is not taken off the room here, which makes the horizon a column longer
+					// than the run really has. That errs towards carrying on, which is the direction a guess
+					// should err in: what this way costs is a column, and what the other way costs is a run
+					// that was about to start earning.
+					if (pair != null && pair.blank() && !railFloorCarried && RUN_WANTS_ITS_FLOOR_RAIL
+							&& railFloorChords(events, index, railLive[1], railRoom(lane, laneWall), 1,
+								booked) < 1) {
+						placements.padded("railStoppedBarren");
+						pair = null;
+					}
 					if (pair != null && pair.blank() && !railFloorCarried
 							&& railBlanksRunning >= RAIL_BLANKS_IN_A_ROW) {
 						placements.padded("railStoppedForBlanks");
@@ -4755,6 +4848,9 @@ public final class SongBuilder {
 					&& closesOnTheFlanks(placements, event.notes(), lane, event.time(), false);
 				// A floor column that is not a blank is the floor rail earning its keep.
 				railFloorCarried |= railPhase == 1;
+				if (railPhase == 1) {
+					railRunFloorNotes++;
+				}
 				if (closesTheLane) {
 					layFlankedClose(placements, lane, event.notes(), event.time(), "rail:CLOSING");
 					lane = lane.ahead(1);
@@ -4763,7 +4859,11 @@ public final class SongBuilder {
 						nextDelay, fromDust, handUp);
 				}
 				RAIL_COLUMNS++;
+				railRunColumns++;
 				railLive[railPhase] = event.time();
+				if (nextDelay <= 0) {
+					railRunEnded(placements, railRunFloorNotes, railRunColumns, railRunBlanks);
+				}
 				railPhase = nextDelay > 0 ? 1 - railPhase : -1;
 				currentTime = event.time();
 				// Every column of a run holds a repeater bar the one it opens on, so the wire never
@@ -6801,6 +6901,53 @@ public final class SongBuilder {
 	static boolean RUN_SPENDS_THE_FLAT_RESERVE = true;
 
 	/**
+	 * Whether a run has to be able to get a chord onto its floor rail to be worth opening.
+	 *
+	 * <p>The floor rail is the only reason a run exists. A run of {@code k} chords holding {@code b}
+	 * blanks costs {@code head + k + b} columns against the plain lane's {@code 2k}, and a run whose
+	 * floor rail carries nothing holds a blank between every pair of chords -- {@code b = k - 1} --
+	 * so it costs {@code 2k + 1} columns to do what the lane does in {@code 2k}. It is a column worse
+	 * at every length, and it holds a repeater in <em>every</em> column where the plain lane holds one
+	 * per chord. ekran: <i>"the double lane gets seeded and continues for the whole lane, only to
+	 * never get used ... repeaters are very expensive in survival mode ... its placing one every other
+	 * block on the bottom rail and they never get used."</i></p>
+	 *
+	 * <p>Which is a question a run can answer before it opens, because the two things that decide
+	 * whether a chord may stand on the floor rail are both wall-free: {@link #railHolds} counts notes
+	 * and looks for sand, and {@link #railDelay} is arithmetic on ticks. Neither asks where the lane
+	 * is. So {@link #railFloorReach} walks the pair chain forward with no placements and no lane at
+	 * all, and the only thing it needs from the world is <em>how much room the run has</em> -- which
+	 * is what turns "will the floor rail ever carry" into a question with an answer.</p>
+	 *
+	 * <p>Not the same knob as {@link #RAIL_BLANKS_IN_A_ROW}, which is off, and the difference is the
+	 * whole point. That one is reactive: it ends a run after so many blanks, which spends the columns
+	 * first and kills runs that were one blank away from earning their head. Every setting of it
+	 * measured worse than none. This one is predictive, and it never ends a run that is going to
+	 * carry.</p>
+	 */
+	static boolean RUN_WANTS_ITS_FLOOR_RAIL = true;
+
+	/**
+	 * How many chords a run has to be able to get onto its floor rail before it is worth opening.
+	 *
+	 * <p>The arithmetic, which is worth having in one place. A run of {@code k} chords with {@code f}
+	 * of them on the floor rail has {@code k - f} path columns and {@code f + b} floor columns, and
+	 * the two alternate -- so {@code b = k - 2f} and the whole run is {@code head + 2k - 2f} columns
+	 * against the plain lane's {@code 2k}. <b>A run saves two columns for every chord it gets onto the
+	 * floor rail, and pays for its head once.</b> Nothing else about it matters: not how long it is,
+	 * not how many blanks it holds.</p>
+	 *
+	 * <p>So one floor chord is break-even against a full head of two columns, two is the first setting
+	 * that is ahead, and a run opening off a stack or off a staircase's seed pays one column or none
+	 * and is ahead at one. Which makes this a dial rather than a rule, because the two things ekran
+	 * optimises pull opposite ways: a run holds a repeater in every column and the plain lane holds
+	 * one per chord, so <em>repeaters</em> only come out level at {@code 2f >= k}, about half the run
+	 * on the floor rail. Depth wants one, resources want more. Measured over the library by
+	 * {@link RailResourceProbe}.</p>
+	 */
+	static int RAIL_FLOOR_CHORDS_WANTED = 1;
+
+	/**
 	 * How far the nearest corner is along the route, or nought where the route is not bending.
 	 *
 	 * <p>Counted off the bends the route carries and not off the wall, because the two are not the
@@ -6963,9 +7110,11 @@ public final class SongBuilder {
 	 */
 	private static boolean railOpensOnACorner(List<EventGroup> events, int index, Lane lane, int wall,
 			Layout layout, int reserve, boolean offACorner, Map<Integer, Integer> booked) {
+		// The reseed lays one column of its own -- the silent one after the corner -- so the run's own
+		// columns get the rest.
 		return RUN_OPENS_ON_A_CORNER && TWO_RAIL_RUNS && layout.ultra() && offACorner
 			&& !lane.bending()
-			&& railMayStart(events, index, NO_BLANK, booked)
+			&& railMayStart(events, index, NO_BLANK, railRoom(lane, wall) - 1 - reserve, booked)
 			&& railRoom(lane, wall) >= 3 + reserve;
 	}
 
@@ -8345,12 +8494,43 @@ public final class SongBuilder {
 	 * is no run. Measured over every song at three widths and three floor counts
 	 * ({@code RailBlankLimitTest}), total depth: plain 1843, and with runs on 1557 at one blank ever,
 	 * 1498 at one in a row, 1484 at two, 1476 at three, and <b>1473 with no limit at all</b>. Every
-	 * limit is worse than none, and the tighter the limit the worse it gets. So the floor rails ekran
-	 * saw carrying nothing are not waste -- they are the cheapest way to keep the path rail's one
-	 * column per chord, which is the whole win. Left here as a flag rather than deleted, because it
-	 * is ekran's call whether a build that reads wasteful in game is worth three lanes.</p>
+	 * limit is worse than none, and the tighter the limit the worse it gets.</p>
+	 *
+	 * <p><b>And the reading taken off those numbers was wrong.</b> It said the floor rails ekran saw
+	 * carrying nothing were the cheapest way to keep the path rail's one column per chord. They are
+	 * not: a run whose floor rail carries nothing is a column worse than the plain lane at every
+	 * length and holds about twice the repeaters, which {@link #RUN_WANTS_ITS_FLOOR_RAIL} sets out
+	 * and {@link RailResourceProbe} measures. What the sweep above actually measured is that
+	 * <em>this</em> limit is a bad way to find them -- it is reactive, so it spends the columns
+	 * before it decides, and it ends runs that were one blank away from earning their head. Asked
+	 * before the blank instead of after it, over the same library, the answer flips: 4,194 runs of
+	 * 8,779 carry nothing, and refusing them takes 51 lanes and 5,537 repeaters off the build at
+	 * once.</p>
+	 *
+	 * <p>Left here as a flag rather than deleted, because the sweep is still the record of what a
+	 * count of blanks buys, and the answer is nothing.</p>
 	 */
 	static int RAIL_BLANKS_IN_A_ROW = Integer.MAX_VALUE;
+
+	/**
+	 * MEASURE(barren): one run's bill, read where it ends.
+	 *
+	 * <p>ekran: <i>"the double lane gets seeded and continues for the whole lane, only to never get
+	 * used ... its placing one every other block on the bottom rail and they never get used."</i> The
+	 * headline is {@code Floor0}: a run whose floor rail carried no chord at all.</p>
+	 */
+	private static void railRunEnded(PlacementPlan placements, int floorNotes, int columns,
+			int blanks) {
+		String kind = floorNotes == 0 ? "Barren" : "Carried";
+		placements.padded("railRun" + kind);
+		placements.padded("railRunFloor" + Math.min(9, floorNotes));
+		for (int spent = 0; spent < columns; spent++) {
+			placements.padded("railRunColumns" + kind);
+		}
+		for (int spent = 0; spent < blanks; spent++) {
+			placements.padded("railRunBlanks" + kind);
+		}
+	}
 
 	/** A repeater's delay, or nought where it is not one a repeater can hold. */
 	private static int railDelay(int from, int to) {
@@ -8377,7 +8557,7 @@ public final class SongBuilder {
 	 * path rail, but the head is the one column that has no centre at all -- its stone has to relay
 	 * the dust -- so opening one is the place to be plain about what fits.</p>
 	 */
-	private static boolean railMayStart(List<EventGroup> events, int index, int floorSeed,
+	private static boolean railMayStart(List<EventGroup> events, int index, int floorSeed, int room,
 			Map<Integer, Integer> booked) {
 		if (!TWO_RAIL_RUNS || index + 2 >= events.size()) {
 			return false;
@@ -8395,8 +8575,17 @@ public final class SongBuilder {
 		// Timed from wherever the floor rail actually starts: the chord itself where a head is built,
 		// and the stacked chord behind it where one is inherited -- which is earlier, so the first
 		// floor repeater has less of its four ticks left to play with.
-		return railPairAfter(events, index, head.time(),
-			floorSeed == NO_BLANK ? head.time() : floorSeed, null, null, booked) != null;
+		int floorLive = floorSeed == NO_BLANK ? head.time() : floorSeed;
+		if (railPairAfter(events, index, head.time(), floorLive, null, null, booked) == null) {
+			return false;
+		}
+		// And that the floor rail earns the head, inside the room this run is going to have. See
+		// {@link #RUN_WANTS_ITS_FLOOR_RAIL}: a run whose floor rail carries nothing is a column worse
+		// than the plain lane and about twice the repeaters, so there is nothing to weigh -- it is not
+		// a cheaper shape, it is a more expensive one.
+		return !RUN_WANTS_ITS_FLOOR_RAIL
+			|| railFloorChords(events, index, floorLive, room, RAIL_FLOOR_CHORDS_WANTED, booked)
+				>= RAIL_FLOOR_CHORDS_WANTED;
 	}
 
 	/** Columns between this cell and the wall the lane is running at. */
@@ -8431,10 +8620,13 @@ public final class SongBuilder {
 	private static boolean railOpens(List<EventGroup> events, int index, Lane lane, int wall,
 			Layout layout, boolean turning, int reserve, int wait, int floorSeed,
 			Map<Integer, Integer> booked) {
+		// What is left for the run's own columns once the head, the wait in front of it and the turn's
+		// reserve are paid for -- which is the room the lookahead gets to spend.
+		int room = railRoom(lane, wall)
+			- railHeadColumns(floorSeed, wait) - railPadColumns(wait) - reserve;
 		return TWO_RAIL_RUNS && layout.ultra() && !turning && !lane.bending()
-			&& railMayStart(events, index, floorSeed, booked)
-			&& railRoom(lane, wall)
-				>= railHeadColumns(floorSeed, wait) + railPadColumns(wait) + 2 + reserve;
+			&& railMayStart(events, index, floorSeed, room, booked)
+			&& room >= 2;
 	}
 
 	/**
@@ -8547,6 +8739,57 @@ public final class SongBuilder {
 		int blankTime = index + 2 < events.size()
 			? Math.min(latest, events.get(index + 2).time() - 1) : latest;
 		return railDelay(floorLive, blankTime) > 0 ? new RailPair(true, blankTime) : null;
+	}
+
+	/**
+	 * How many chords a run standing here would get onto its floor rail, counted up to {@code wanted}.
+	 *
+	 * <p>The pair chain simulated forward and nothing else: {@link #railPairAfter} with no placements
+	 * and no lane, which is legal -- {@link #railFloorTakes} answers yes to a {@code null} lane, and
+	 * {@link #railHolds} and {@link #railDelay} never wanted one. Which is the point: whether a chord
+	 * <em>may</em> stand on the floor rail is a question about note counts, sand and ticks, and not
+	 * one about where the wall is. The wall only says how long the run gets to try.</p>
+	 *
+	 * <p>So this reads optimistically, counting floor chords in some places where the walk will find
+	 * the cells already taken by a stacked module alongside. That is the safe direction: an optimistic
+	 * count refuses fewer runs than it should, and what is being refused is a run that would have
+	 * built and played correctly.</p>
+	 *
+	 * <p>Two columns a step either way. A blank spends the path column and the empty floor column,
+	 * moves the chord that wanted the floor up onto the path rail, and leaves the rails swapped -- so
+	 * the next question is the same question one event along. A pair that is not a blank spends the
+	 * path column and a floor column with a chord in it, and moves on two events.</p>
+	 *
+	 * @param floorLive the tick the floor rail's last anchor went live, which at a head is the chord
+	 *     itself and off a stack is the stacked chord behind it
+	 * @param room columns the run has to spend, after whatever its head and the turn's reserve cost
+	 * @param wanted how many are worth counting; the caller only ever compares against this, and the
+	 *     walk is long enough without simulating the rest of a run nobody is asking about
+	 */
+	private static int railFloorChords(List<EventGroup> events, int index, int floorLive, int room,
+			int wanted, Map<Integer, Integer> booked) {
+		int at = index;
+		int spent = 0;
+		int found = 0;
+		int floor = floorLive;
+		while (at < events.size() && spent + 2 <= room && found < wanted) {
+			RailPair pair = railPairAfter(events, at, events.get(at).time(), floor, null, null, booked);
+			if (pair == null) {
+				return found;
+			}
+			spent += 2;
+			if (pair.blank()) {
+				floor = pair.floorTime();
+				at++;
+			} else {
+				found++;
+				// The chord lands on the floor column, and the run picks up at the path column after it.
+				// {@link #railPairAfter} has already found that one, so there is an event there to read.
+				floor = events.get(at + 1).time();
+				at += 2;
+			}
+		}
+		return found;
 	}
 
 	/** Off, a run always pays for its own head even where a stacked chord has already built one. */
