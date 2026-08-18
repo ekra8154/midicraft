@@ -4635,25 +4635,58 @@ public final class SongBuilder {
 					// over there. A lane whose turn is not yet armed still pays, which is why this asks the
 					// route for its bends rather than asking the wall how far off it is.
 					int toCorner = cellsToCorner(lane);
-					// Only ever at two. A corner stands one column past the wall, so the distance to it is the
-					// room plus one, and the ordinary test already passes at every even distance above two --
-					// four is room three, which is the two columns of a pair and the reserve. Two is the one
-					// the wall refuses, and it is the one ekran drew.
-					boolean ontoTheCorner = RUN_RUNS_TO_THE_CORNER && flatAhead && toCorner == 2;
+					// Two or three, which is one pair either way. A corner stands one column past the wall,
+					// so the distance to it is the room plus one, and the ordinary test already passes at four
+					// -- room three, which is a pair and the reserve. Two and three are the two it refuses,
+					// and they are the two halves of ekran's parity:
+					//
+					//   two    the pair lands a floor column on the wall and a path column on the corner. The
+					//          run's last note stands on the bend, the sideways leg is ordinary lane, and the
+					//          reseed opens the next run off the corner's own dust.
+					//   three  the pair lands a floor column one short of the wall and a path column on it.
+					//          The run comes to rest one column short of the corner and the turn is laid the
+					//          way it always was.
+					//
+					// Three was left out at first as "model 2", on the reading that a run stopping one short of
+					// a corner had to carry both rails round the bend to be worth anything. ekran, with the two
+					// laid side by side: <i>"turns out its easier and just as compact to only do model 1. the
+					// only optimization we need is the notes leading into the turn ... its just 1 extra note but
+					// there's no reason to drop the bottom lane too early."</i> The bend does not have to change
+					// at all. What the run buys is the last pair before it: two columns holding two notes where
+					// the ordinary module standing there holds one.
+					boolean ontoTheCorner = RUN_RUNS_TO_THE_CORNER && flatAhead
+						&& toCorner >= 2 && toCorner <= 3;
 					if (flatAhead && toCorner >= 2) {
 						placements.padded("mflatPathToCorner" + Math.min(9, toCorner)
 							+ (toCorner % 2 == 0 ? "Model1" : "Model2")
 							+ (railRoom(lane, laneWall) >= 2 + reserve ? "HadRoom" : "Short"));
 					}
-					RailPair pair = !lane.cornerAt(0)
-						&& (ontoTheCorner || railRoom(lane, laneWall) >= 2 + reserve)
+					// What the run may still spend, and what it must keep back. See
+					// {@link #RUN_SPENDS_THE_FLAT_RESERVE}: a flat turn's handover is the corner, which is not
+					// a column of this lane at all, so a run heading for one keeps nothing back and a run
+					// whose turn is already armed may spend the corner as well.
+					//
+					// Asked of the wall rather than of the bends, because a run comes to rest two columns
+					// short of its wall and a turn is not armed until a chord overshoots one. So at the
+					// moment this matters the route carries no corner yet and {@code cellsToCorner} is
+					// nought -- which is why asking the bends for it fired ten times over the library.
+					int keep = flatAhead && RUN_SPENDS_THE_FLAT_RESERVE ? 0 : reserve;
+					int ground = railRoom(lane, laneWall) + (ontoTheCorner && toCorner == 2 ? 1 : 0);
+					if (flatAhead && ground >= 2 + keep && railRoom(lane, laneWall) < 2 + reserve) {
+						placements.padded(toCorner == 2 ? "mflatPairOntoTheCorner" : "mflatPairIntoTheTurn");
+					}
+					RailPair pair = !lane.cornerAt(0) && ground >= 2 + keep
 						? railPairAfter(events, index, event.time(), railLive[1], placements,
 							lane.ahead(1), booked)
 						: null;
 					// And the chord that would land on the corner has to be one a corner can hold. Asked of
 					// the pair rather than of the event two along, because a blank moves the chord up a column
 					// and the corner would then be holding a different one.
-					if (pair != null && ontoTheCorner
+					//
+					// Only where the pair really does reach the corner, which is the distance of two. At three
+					// the run comes to rest on the wall, a column short of the bend, and its last column is an
+					// ordinary path column with the two flanks any other one has.
+					if (pair != null && ontoTheCorner && toCorner == 2
 							&& railRoom(lane, laneWall) < 2 + reserve) {
 						int cornerEvent = index + (pair.blank() ? 1 : 2);
 						if (cornerEvent >= events.size()
@@ -6799,6 +6832,23 @@ public final class SongBuilder {
 	 * for a head again on the far side of the bend.</p>
 	 */
 	static boolean RUN_RUNS_TO_THE_CORNER = true;
+
+	/**
+	 * Whether a run heading into a flat turn keeps the turn's reserve back, or spends it.
+	 *
+	 * <p>The reserve is a handover column -- the cell a lane comes to rest on so that whatever follows
+	 * has something to read. A lane meeting a <em>staircase</em> hands over inside its wall and has to
+	 * keep one. A lane meeting a <em>flat turn</em> hands over on the corner, and {@link #armTurn}
+	 * stands that one column <em>past</em> the wall, on ground the turn has already bought. So there is
+	 * nothing to keep back, and a run that stops short of the wall for it only leaves those columns to
+	 * an ordinary module -- which spends two of them on one note where the run's pair spends two on
+	 * two.</p>
+	 *
+	 * <p>ekran, with the two drawn side by side: <i>"its just 1 extra note but there's no reason to
+	 * drop the bottom lane too early."</i> The lane comes to rest in the same column either way, so
+	 * this moves no wall; it only decides what stands in the last two columns before the bend.</p>
+	 */
+	static boolean RUN_SPENDS_THE_FLAT_RESERVE = true;
 
 	/**
 	 * How far the nearest corner is along the route, or nought where the route is not bending.
