@@ -4401,6 +4401,40 @@ public final class SongBuilder {
 					}
 					opening = false;
 				}
+				// ekran's corner reseed. Asked before the tail and before the head, both of which
+				// would step past this corner and spend two columns getting back to it.
+				//
+				// The wait has to fit one repeater, because the column after the corner is the only
+				// cell that can hold it and a path column holds one repeater. And the chord has to be
+				// one a *floor* column can take, because the column after the corner is spoken for --
+				// it is the silent one -- so the run's first real note lands on the floor rail.
+				int cornerWait = event.time() - currentTime - spentPadding;
+				// Counted because the answer is nought and that is the whole finding: over the
+				// library not one event reaches this branch standing on a corner, opening or running.
+				// So the reseed below is not being refused, it is never being asked -- and what has to
+				// change is where the walk is when the rail branch runs, not the shape it lays.
+				placements.padded(lane.cornerAt(0) ? "cornerSeedReachedACorner"
+					: "cornerSeedReachedAPlainCell");
+				boolean fromCorner = RUN_OPENS_ON_A_CORNER && opening && lane.cornerAt(0)
+					&& railDelay(0, cornerWait) > 0
+					&& railHolds(event, false)
+					&& railFloorTakes(placements, lane.ahead(2), event);
+				if (opening && lane.cornerAt(0) && !fromCorner) {
+					placements.padded(railDelay(0, cornerWait) <= 0 ? "cornerSeedWaitTooLong"
+						: !railHolds(event, false) ? "cornerSeedChordTooBig" : "cornerSeedTaken");
+				}
+				if (fromCorner) {
+					lane = addRailFromCorner(placements, lane, railDelay(0, cornerWait),
+						currentTime + spentPadding);
+					railPhase = 1;
+					railBlanksRunning = 0;
+					railFloorCarried = false;
+					// The path rail went live with the chord before the corner, since dust carries no
+					// delay; the floor rail with this chord, which the silent column's repeater times.
+					railLive[0] = currentTime + spentPadding;
+					railLive[1] = event.time();
+					opening = false;
+				}
 				BlockPos openOffTail = !offClimb && RAIL_FROM_HANDOVER && opening
 						&& !reaches && !wantsTurn
 						&& railHolds(event, false)
@@ -6545,6 +6579,40 @@ public final class SongBuilder {
 		lane = lane.ahead(1);
 		placements.railSeed(lane.pos(), time, false);
 		return lane;
+	}
+
+	/** Whether a run may open on a flat turn's second corner instead of paying for a head. */
+	static boolean RUN_OPENS_ON_A_CORNER = true;
+
+	/**
+	 * A run opening on a flat turn's second corner, ekran's, and the third of the three seeds.
+	 *
+	 * <p>The corner already holds a lane cell, and a lane cell is stone with something over it -- so
+	 * make that something dust and it is a head's second column standing in ground the turn had
+	 * bought anyway. What lights it is the chord before the corner, which is a note block a repeater
+	 * drives, and a strongly driven block lights the dust it stands square against.</p>
+	 *
+	 * <p>Then the column the dust drives, which <b>carries no note and cannot</b>. Nothing upstream of
+	 * it holds a delay -- that is the whole of what a seed with no repeater in it means -- so it goes
+	 * live on the very tick the chord before the corner sounded, and no chord of this song wants that
+	 * tick. What it holds instead is the repeater every path column holds, the one at the lane's own
+	 * level, and that is where the wait to the run's first real note lives. So the run's first note
+	 * lands one column later than a plain opening would put it and two columns earlier than a head
+	 * would: one column saved, which is what ekran said it saves.</p>
+	 *
+	 * <p>Told apart from the other two by where the wait goes, which is the only thing that differs:
+	 * a climb's seed carries a repeater and spends it there; a descent's pushes the wait up into the
+	 * closing pad above the drop; this one has neither and pushes it downstream instead.</p>
+	 */
+	private static Lane addRailFromCorner(PlacementPlan placements, Lane lane, int delay, int time) {
+		placements.placing("rail:FROM-CORNER delay" + delay);
+		placements.padded("railFromCorner");
+		placements.powered(lane.pos(), "minecraft:stone", time);
+		set(placements, lane.pos().above(), "minecraft:redstone_wire");
+		lane = lane.ahead(1);
+		// An empty chord, laid by the same builder every other path column goes through: with nothing
+		// to hang it powers its centre and lays the repeater, which is exactly the column wanted.
+		return addRailNote(placements, lane, 0, List.of(), time, delay, true, 0);
 	}
 
 	/**
