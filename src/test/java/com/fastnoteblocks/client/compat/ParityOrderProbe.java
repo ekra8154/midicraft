@@ -5,6 +5,7 @@ import com.google.gson.Gson;
 import java.io.Reader;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -47,6 +48,17 @@ class ParityOrderProbe {
 
 	@Test
 	void whoWasFirst() throws Exception {
+		// The same -Dprobe.set=NAME=value every other probe takes, because a reading of a build
+		// made with a flag the other way is a reading of a build nobody is asking about.
+		Flags.Held held = Flags.set(text("set", ""));
+		try {
+			read();
+		} finally {
+			held.putBack();
+		}
+	}
+
+	private void read() throws Exception {
 		Path songs = Path.of("run", "config", "fast-noteblocks", "songs");
 		List<SongBuilder.EventNote> notes;
 		try (Reader reader = Files.newBufferedReader(
@@ -99,6 +111,59 @@ class ParityOrderProbe {
 				what.getOrDefault(at, "(nothing)"),
 				String.valueOf(plan.noteTicks().get(at)),
 				String.valueOf(plan.laidBy().get(at))));
+		}
+		// Every note block the build holds for one tick, against what the song asked for. A note the
+		// builder said it could not hang leaves no block behind, so it cannot be read off the world
+		// and it cannot be read off a copper bulb either -- there is nothing there to light.
+		String askedTick = text("tick", "");
+		if (!askedTick.isEmpty()) {
+			int want = Integer.parseInt(askedTick);
+			int inSong = 0;
+			for (SongBuilder.EventNote note : notes) {
+				if (note.time() == want) {
+					inSong++;
+				}
+			}
+			List<BlockPos> held = new ArrayList<>();
+			plan.noteTicks().forEach((at, when) -> {
+				if (when == want) {
+					held.add(at);
+				}
+			});
+			held.sort((left, right) -> left.getX() != right.getX() ? left.getX() - right.getX()
+				: left.getZ() != right.getZ() ? left.getZ() - right.getZ()
+					: left.getY() - right.getY());
+			System.out.println();
+			System.out.println("-- tick " + want + ": song holds " + inSong + ", build holds "
+				+ held.size());
+			// Which note of the chord is not there, by taking the pitches the build holds away from
+			// the pitches the song asked for. A dropped note leaves no block, so this is the only
+			// place its name survives.
+			List<Integer> wanted = new ArrayList<>();
+			for (SongBuilder.EventNote note : notes) {
+				if (note.time() == want) {
+					wanted.add(note.pitch());
+				}
+			}
+			for (BlockPos at : held) {
+				String block = what.getOrDefault(at, "");
+				int from = block.indexOf("note=");
+				if (from >= 0) {
+					wanted.remove(Integer.valueOf(
+						Integer.parseInt(block.substring(from + 5).replaceAll("[^0-9].*", ""))));
+				}
+			}
+			System.out.println("   nowhere to hang: pitches " + wanted);
+			for (SongBuilder.EventNote note : notes) {
+				if (note.time() == want && wanted.contains(note.pitch())) {
+					System.out.println("      pitch " + note.pitch() + "  " + note.instrumentBlock()
+						+ "  track " + note.trackNumber() + " order " + note.order());
+				}
+			}
+			for (BlockPos at : held) {
+				System.out.println(String.format("   %-12s %s", at.getX() + " " + at.getY() + " "
+					+ at.getZ(), what.getOrDefault(at, "?")));
+			}
 		}
 		System.out.println();
 		System.out.println("-- first command in each z row at y=" + wantedY);

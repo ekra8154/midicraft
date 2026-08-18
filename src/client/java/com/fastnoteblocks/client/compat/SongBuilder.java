@@ -2817,7 +2817,10 @@ public final class SongBuilder {
 			// and it was buying nothing: the chord was going to cover that ground anyway.
 			boolean straddles = layout.ultra() && flatAhead
 				&& straddleFits(event.notes().size(),
-					(wall - lane.pos().getX()) * lane.travel().getStepX(), slabStep);
+					(wall - lane.pos().getX()) * lane.travel().getStepX(), slabStep,
+					SUNKEN_MAY_OPEN_IN_A_TURN && layout.v2() && SUNKEN_BUSES
+						&& event.notes().size() >= SUNKEN_LOWEST_CHORD
+						&& sunkenFits(event.notes().size()) && hasAHarp(event.notes()));
 			int reserve = turnReserve(event, offBus, layout);
 			int wait = event.time() - currentTime;
 			// Measured with the same arithmetic the planner uses, and not with a length taken from
@@ -10250,9 +10253,28 @@ public final class SongBuilder {
 	 * @param columns how far the chord starts from the wall, which is where the first corner is
 	 */
 	private static boolean straddleFits(int notes, int columns, int slabStep) {
+		return straddleFits(notes, columns, slabStep, false);
+	}
+
+	/**
+	 * @param sunken whether this chord would take the {@link ChordStyle#SUNKEN_BUS} shape, which
+	 *     answers the same question with three notes fewer to carry and one column of lane more.
+	 *     Its opening is a note block rather than dust, so it costs no wire and the three notes in
+	 *     it are free; the run that has to stay inside a repeater's reach is only what comes after.
+	 *     ekran built the turn by hand at the columns it pastes at: a chord of thirty through both
+	 *     corners is fifteen cells of dust and a note to spare, where the same chord as a plain bus
+	 *     wants sixteen and is refused -- so the lane ran nine past its wall rather than turn in
+	 *     front of a chord this shape carries round.
+	 */
+	private static boolean straddleFits(int notes, int columns, int slabStep, boolean sunken) {
 		for (int corners = 0; corners <= 2; corners++) {
-			int cells = (notes + corners + 1) / 2;
-			int crossed = cells <= columns ? 0 : cells <= columns + slabStep ? 1 : 2;
+			// 3 + 2 * cells - corners notes, which is ekran's count off the blocks: the opening holds
+			// three, every cell after it holds two, and a bend spends one of the pair on the run.
+			int cells = sunken ? Math.max(1, (notes - 2 + corners) / 2) : (notes + corners + 1) / 2;
+			// The columns the chord stands in, which for a sunken bus is one more than its dust: the
+			// opening is a column of lane that carries no wire.
+			int reach = sunken ? cells + 1 : cells;
+			int crossed = reach <= columns ? 0 : reach <= columns + slabStep ? 1 : 2;
 			// The next corner this bus does not ride over, which is the one it has to pay a cell
 			// for. Riding both leaves none: the route comes out into the next lane and the repeater
 			// after the chord stands directly on the end of the bus.
@@ -10261,7 +10283,7 @@ public final class SongBuilder {
 				case 1 -> columns + slabStep;
 				default -> Integer.MAX_VALUE;
 			};
-			int run = cells + (cells + CORNER_AHEAD >= nextCorner ? CORNER_AHEAD : 0);
+			int run = cells + (reach + CORNER_AHEAD >= nextCorner ? CORNER_AHEAD : 0);
 			if (run > DUST_RANGE) {
 				continue;
 			}
@@ -10345,7 +10367,34 @@ public final class SongBuilder {
 		// its notes -- the shift loop in {@link #layBus} lays that column as a parity pad and tries
 		// again, which is what parity padding is.
 		List<Direction> openSides = new ArrayList<>(List.of(side, side.getOpposite()));
-		List<Direction> lowSides = new ArrayList<>(List.of(side, side.getOpposite()));
+		// Where the lowered notes go, read off the route rather than assumed to be the two sides.
+		//
+		// The lowered stone has four neighbours at the lane's own level and two of them are always
+		// spoken for: the cell under the opening's note block, and the cell under the bus's first
+		// stone. Down a straight lane those are the two along travel, so what is left is the two
+		// across and this is the rule it has always been. Through a bend they are not.
+		//
+		// ekran built the three arrangements by hand and this is the one that reads oddly: a chord
+		// turning on its lowered cell hangs a note on the side the route turned *away* from, and
+		// leaves the side it turned into empty. Which is the same rule -- the bus is about to stand
+		// there. Asked as two positions and not as a freeness test, because {@link #layBus} has not
+		// laid its stone yet and there would be nothing to find.
+		BlockPos underTheOpening = opening.pos();
+		BlockPos underTheBus = lane.ahead(3).pos();
+		List<Direction> lowSides = new ArrayList<>(2);
+		for (Direction out : List.of(side, side.getOpposite(), opening.travel(),
+				opening.travel().getOpposite())) {
+			BlockPos cell = low.pos().relative(out);
+			if (!cell.equals(underTheOpening) && !cell.equals(underTheBus)) {
+				lowSides.add(out);
+			}
+		}
+		if (lowSides.size() != 2) {
+			// Two of the four, always: the route enters the lowered cell from one neighbour and leaves
+			// by another, and it cannot double back. Said out loud because the count is what
+			// {@link #sunkenDustCells} was measured on.
+			placements.padded("sunkenLoweredSides" + lowSides.size());
+		}
 		if (SUNKEN_ASKS_PARITY) {
 			List<Direction> quiet = new ArrayList<>(2);
 			for (Direction out : lowSides) {
@@ -10910,7 +10959,9 @@ public final class SongBuilder {
 		// module would have fitted: "it should always prefer a single normal stacked chord over a
 		// sunken bus". {@link #chooseStyle} does prefer it, and says STACKED_FRONT for that chord; this
 		// line is what took it away, on an arithmetic about a shape it was no longer going to get.
-		boolean wouldGoSunken = SUNKEN_BUSES && !inTurn && sunkenFits(event.notes().size())
+		boolean wouldGoSunken = SUNKEN_BUSES
+			&& (SUNKEN_MAY_OPEN_IN_A_TURN && layout.v2() || !inTurn)
+			&& sunkenFits(event.notes().size())
 			&& hasAHarp(event.notes());
 		boolean sunkenIsNoShorter = ROOM_TEST_KNOWS_THE_SUNKEN_FALLBACK && wouldGoSunken
 			&& 2 + sunkenDustCells(event.notes().size()) >= stackedRoom;
@@ -10962,7 +11013,14 @@ public final class SongBuilder {
 		// level either side of the centre line is where a flat turn runs -- so a module built there has
 		// put note blocks in ground the route comes back for. Refused rather than trimmed, because the
 		// length has to be the length that was measured.
-		boolean sunken = SUNKEN_BUSES && style == ChordStyle.BUS && !inTurn
+		boolean sunken = SUNKEN_BUSES && style == ChordStyle.BUS
+			// v2 only, and not as a preference. shapeFor is shared -- v1's walk calls it too -- and
+			// v1 measures a chord's landing with rules of its own that know nothing about a sunken
+			// bus through a bend. Given one it built a run past the fifteen a repeater reaches and
+			// eight notes of StackedBusTest's song went silent, with every number in the plan reading
+			// nought. The comment on sunkenOffered says the older walk never lays one; that is about
+			// walkWall, and there are three walks.
+			&& (SUNKEN_MAY_OPEN_IN_A_TURN && layout.v2() || !inTurn)
 			&& (SUNKEN_OPENS_A_LANE || !placements.laneJustOpened())
 			&& event.notes().size() >= SUNKEN_LOWEST_CHORD
 			&& sunkenFits(event.notes().size()) && hasAHarp(event.notes());
@@ -13880,6 +13938,29 @@ public final class SongBuilder {
 	 * own slots and can grow out of the way.</p>
 	 */
 	static boolean SUNKEN_ASKS_ITS_OPENING_TOO = true;
+
+	/**
+	 * Whether a sunken bus may open inside a flat turn.
+	 *
+	 * <p>Off, this is ekran's own caveat from before the shape was built, and it was a column too
+	 * wide. What cannot be in a turn is the lowered column's <em>notes</em>, and only the one of
+	 * them the route is about to stand on -- which the lowered pair now works out from the route
+	 * rather than assuming to be the two sides.</p>
+	 *
+	 * <p>ekran built all three arrangements by hand and every one carries more than a plain bus
+	 * can: the bend on the centre costs nothing at all (the centre is a note block, not dust, so
+	 * there is no corner to pay for), on the lowered dust cell it costs one note, and a second
+	 * bend out on the bus costs the slot a corner always costs. <b>32 notes through a turn where
+	 * a plain bus manages 28.</b></p>
+	 *
+	 * <p>Census over 325 builds, on against off: depth 22385 -> 22354, dead 0, severed 0, wrong 0
+	 * unchanged, missing 4 -> 1, breach 1106 -> 1181. The breach is one build --
+	 * {@code ultra-limit-fast-and-dense} at 24x3, 185 blocks to 254 -- and it is not the shape
+	 * failing but {@link #straddleFits} not knowing about it: the room test that decides whether a
+	 * chord may lie across a turn is plain-bus arithmetic, so a lane still refuses to turn in
+	 * front of a chord this shape would carry round. That is the next piece.</p>
+	 */
+	static boolean SUNKEN_MAY_OPEN_IN_A_TURN = true;
 
 	/**
 	 * The smallest chord a busy pad will spend a column on.
