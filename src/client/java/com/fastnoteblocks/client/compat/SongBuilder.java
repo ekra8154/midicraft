@@ -10344,12 +10344,27 @@ public final class SongBuilder {
 		// line ekran drew. Refused rather than dropped, so that the module moves a column and keeps all
 		// its notes -- the shift loop in {@link #layBus} lays that column as a parity pad and tries
 		// again, which is what parity padding is.
+		List<Direction> openSides = new ArrayList<>(List.of(side, side.getOpposite()));
 		List<Direction> lowSides = new ArrayList<>(List.of(side, side.getOpposite()));
 		if (SUNKEN_ASKS_PARITY) {
 			List<Direction> quiet = new ArrayList<>(2);
 			for (Direction out : lowSides) {
 				if (!soundedByAnother(placements, low.pos().relative(out), time)) {
 					quiet.add(out);
+				}
+			}
+			// And the opening's own two flanks, on the same question. They stand at bus height, where
+			// a plain bus's notes have always stood -- and {@link #layBus} asks this of every one of
+			// them before it hangs anything, because the cell along the lane from a bus's first slot is
+			// the last cell of the chord a tick earlier. This column is the one place in the file where
+			// a note goes into such a slot without the question being put. See
+			// {@link #SUNKEN_ASKS_ITS_OPENING_TOO}.
+			List<Direction> quietOpen = new ArrayList<>(2);
+			for (int flank = 0; flank < openSides.size(); flank++) {
+				// A slot this chord is not going to fill cannot be contested by anything.
+				if (flank >= openingFlanks || !soundedByAnother(placements,
+						centreAt.relative(openSides.get(flank)), time)) {
+					quietOpen.add(openSides.get(flank));
 				}
 			}
 			// Relocation before padding, which is ekran's order everywhere else in this file: move the
@@ -10365,10 +10380,18 @@ public final class SongBuilder {
 			// would cost a cell the walk did not measure. Then the module moves instead, which is what
 			// the shift loop in {@link #layBus} is for.
 			boolean oddTail = (ordered.size() - openingFlanks) % 2 == 1;
-			if (quiet.size() == 1 && oddTail && SUNKEN_RELOCATES_A_LOWERED_NOTE) {
-				placements.padded("sunkenRelocatedALoweredNote");
-				lowSides = List.of(quiet.get(0));
-			} else if (quiet.size() < 2) {
+			// One budget over all four slots, because there is one spare half-cell to spend. Which
+			// column the contested slot is in changes nothing about what the move costs: the note
+			// falls through to the next slot down the module either way, and the last one lands in the
+			// half-empty cell the odd tail already ends on.
+			int loud = 2 - quiet.size()
+				+ (SUNKEN_ASKS_ITS_OPENING_TOO ? 2 - quietOpen.size() : 0);
+			if (loud == 1 && oddTail && SUNKEN_RELOCATES_A_LOWERED_NOTE) {
+				placements.padded(quiet.size() < 2 ? "sunkenRelocatedALoweredNote"
+					: "sunkenRelocatedAnOpeningNote");
+				lowSides = quiet.size() < 2 ? List.of(quiet.get(0)) : lowSides;
+				openSides = quietOpen.size() < 2 ? List.of(quietOpen.get(0)) : openSides;
+			} else if (loud > 0) {
 				// Nothing free to do, so the shape goes rather than the ground.
 				//
 				// A parity pad would be the obvious answer and it is the wrong one here. The pad is dust
@@ -10380,7 +10403,7 @@ public final class SongBuilder {
 				// is the whole of the parity question for this shape. It is at most one column longer, so
 				// the lane lands short of what was measured rather than past it, and short is the safe
 				// direction to be wrong in.
-				placements.padded(quiet.isEmpty() ? "sunkenParityBothSides" : "sunkenParityEvenTail");
+				placements.padded(loud >= 2 ? "sunkenParityBothSides" : "sunkenParityEvenTail");
 				return null;
 			}
 		}
@@ -10391,7 +10414,7 @@ public final class SongBuilder {
 		// and the dust in the next column.
 		placements.powered(centreAt, time);
 		int placed = 0;
-		for (Direction out : List.of(side, side.getOpposite())) {
+		for (Direction out : openSides) {
 			if (placed < ordered.size()) {
 				placeNote(placements, centreAt.relative(out), ordered.get(placed++));
 			}
@@ -13811,9 +13834,13 @@ public final class SongBuilder {
 	 *
 	 * <p>Which is a one-way rule, and that is why the check is {@link #soundedByAnother} rather than
 	 * anything about shapes: it is true of a live block belonging to another tick and false of a note
-	 * block. A neighbour's flank is a note block and passes; a stacked centre is live and does not.
-	 * The lowered pair only -- the opening's own flanks stand at bus height where a plain bus's notes
-	 * have always stood, and nothing there is new.</p>
+	 * block. A neighbour's flank is a note block and passes; a stacked centre is live and does not.</p>
+	 *
+	 * <p>It went on: "the lowered pair only -- the opening's own flanks stand at bus height where a
+	 * plain bus's notes have always stood, and nothing there is new". They do stand there, and that
+	 * sentence is what hid a wrong note. What was new is that this column hangs them without asking,
+	 * where {@link #layBus} asks of every slot it fills. See
+	 * {@link #SUNKEN_ASKS_ITS_OPENING_TOO}, which puts the question to all four.</p>
 	 */
 	static boolean SUNKEN_ASKS_PARITY = true;
 
@@ -13827,6 +13854,32 @@ public final class SongBuilder {
 	 * note would cost a cell nobody measured, and the module takes a parity pad instead.</p>
 	 */
 	static boolean SUNKEN_RELOCATES_A_LOWERED_NOTE = true;
+
+	/**
+	 * Whether a sunken bus asks the same question of the two flanks beside its opening note.
+	 *
+	 * <p>{@link #SUNKEN_ASKS_PARITY} asks it of the lowered pair only, on the stated reasoning that
+	 * <em>"the opening's own flanks stand at bus height where a plain bus's notes have always
+	 * stood, and nothing there is new"</em>. They do stand there -- and {@link #layBus} has asked
+	 * {@link #soundedByAnother} of every slot it fills since {@link #slotIsQuiet} was written, for
+	 * the reason that javadoc gives: the cell along the lane from a bus's first slot is the last
+	 * cell of the chord a tick earlier. What was new is that this column hangs its two notes without
+	 * asking at all, which no other shape in the file does.</p>
+	 *
+	 * <p>ekran read it at their {@code 40 81 15} on sweet-child-o-mine at forty wide over five
+	 * floors, and it is the third shape to be caught by the same thing -- the rigid module was the
+	 * second. <i>"this isn't a note sounds twice, this is a wrong note ... since the chord before it
+	 * activates it prematurely ... this seems like a job for relocation on the sunken bus. there's a
+	 * free spot on the tail."</i></p>
+	 *
+	 * <p>There is, and it is the one the shape already knows about: a chord of six spends
+	 * {@code sunkenDustCells} of two, which is three notes in the opening and four in the cells
+	 * after it, so one slot of the seven goes spare. That is the same spare {@code oddTail} names,
+	 * and it is one -- so the budget is shared across all four slots rather than kept per column,
+	 * and a second contested slot still gives the shape up for the plain bus, which asks about its
+	 * own slots and can grow out of the way.</p>
+	 */
+	static boolean SUNKEN_ASKS_ITS_OPENING_TOO = true;
 
 	/**
 	 * The smallest chord a busy pad will spend a column on.
