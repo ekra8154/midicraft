@@ -1026,11 +1026,163 @@ public final class SongBuilder {
 		Layout layout = Layout.ultra(floors, origin).asV2();
 		List<EventGroup> events = eventGroups(notes, layout);
 		int longest = events.stream().mapToInt(EventGroup::length).max().orElse(1);
-		int laneWidth = Math.max(longest + 2, width - 2);
-		PlacementPlan placements = new PlacementPlan();
-		walkV2(events, origin, forward, laneWidth, floors, placements, layout, start);
-		return placements.finish(PasteMode.ULTRA_COMPACT_LANE_V2, origin, origin.getX(),
-			origin.getX() + laneWidth);
+		// Three blocks of the width go on what stands past the walls, and only three: every turn in
+		// the build now reaches exactly one column past its wall -- a descent's outer rung, a climb's
+		// glass, a flat turn's corner or the notes hanging off it -- and the column behind the first
+		// repeater is where the button goes. So the walls stand {@code width - 3} apart and the paste
+		// is {@code width} blocks across, which is what the slider said it would be. The first layout
+		// keeps its {@code width - 2}: its turns still poke out by different amounts, and it is not
+		// being changed. See {@link #V2_WIDTH_IS_THE_PASTE_WIDTH}.
+		int laneWidth = Math.max(longest + 2, width - (V2_WIDTH_IS_THE_PASTE_WIDTH ? 3 : 2));
+		// Which flat turns are armed a column early, by the index of the event that armed them. Empty
+		// to begin with; a turn is only put here once a walk has laid it the wide way and watched a
+		// note land past its corner. See {@link #FLAT_TURN_KEEPS_ITS_WIDTH}.
+		Set<Integer> tightTurns = new HashSet<>();
+		List<String> rewalkedFor = new ArrayList<>();
+		while (true) {
+			PlacementPlan placements = new PlacementPlan();
+			try {
+				walkV2(events, origin, forward, laneWidth, floors, placements, layout, start,
+					tightTurns);
+				// What each pass before this one was for, by the shape that hung the note -- the guess
+				// that was wrong, and how it was wrong, is what the guess is tuned on.
+				for (String shape : rewalkedFor) {
+					placements.padded("flatTurnRewalk");
+					placements.padded("flatTurnRewalkFor:" + shape);
+				}
+				return placements.finish(PasteMode.ULTRA_COMPACT_LANE_V2, origin, origin.getX(),
+					origin.getX() + laneWidth);
+			} catch (FlatTurnHungOutside outside) {
+				// A wide turn hung a note past its corner. The walk is deterministic, so a walk told
+				// to arm that one turn tight replays exactly up to it and diverges only after -- which
+				// is why the decisions already made stay right and each pass settles one more turn.
+				// Bounded by the number of turns a song can hold, since every pass adds an index.
+				if (!tightTurns.add(outside.index()) || rewalkedFor.size() > events.size()) {
+					throw new IllegalStateException("a flat turn armed tight still hung a note past "
+						+ "its corner at " + outside.getMessage());
+				}
+				rewalkedFor.add(outside.shape());
+			}
+		}
+	}
+
+	/**
+	 * v2: the paste is exactly as wide as the paste screen said.
+	 *
+	 * <p>The width the slider shows was the distance between the walls plus two, from when the flat
+	 * turn was the only thing that stood past a wall and its notes reached two columns out. Since
+	 * then every kind of turn has grown a shape of its own: a descent pokes one column out, a climb
+	 * none, a corner one and the notes hanging off it two, and the first repeater stands on the wall
+	 * with the button behind it -- so the outline of a build was ragged and the number on the screen
+	 * matched none of it. ekran: <i>"if the slider on the paste screen shows 25 wide, thats how wide
+	 * it will be (not counting breaches)."</i></p>
+	 *
+	 * <p>Normalised to the descent and the button, which are both one column past the wall. That is
+	 * {@link #CLIMB_STANDS_A_COLUMN_OUT} for the climb and {@link #FLAT_TURN_KEEPS_ITS_WIDTH} for the
+	 * flat turn; this switch is the third piece, and puts the walls three columns closer than the
+	 * width rather than two so the whole thing measures what it says.</p>
+	 */
+	static boolean V2_WIDTH_IS_THE_PASTE_WIDTH = true;
+
+	/**
+	 * v2: a lane ending in a climb runs one column further, and the glass stands there.
+	 *
+	 * <p>A climb stood in the wall column and its landing one column back, so a lane that climbed
+	 * out reached one column less far than a lane that descended out, and the lane that opened off
+	 * the climb started a column further in than one that opened off a descent. The staircase now
+	 * stands one past the wall, level with a descent's outer rung, and lands on the wall -- so every
+	 * lane opens on its wall column whichever staircase put it there. Priced by moving the wall the
+	 * lane is measured against rather than by any special case: {@link #laneWall} hands back the
+	 * column past the wall for a lane whose turn is a climb, and every question the lane asks --
+	 * room, overshoot, the pad to the turn, the cut -- is asked of that column.</p>
+	 */
+	static boolean CLIMB_STANDS_A_COLUMN_OUT = true;
+
+	/**
+	 * v2: a flat turn is armed a column early where the notes riding it would otherwise hang past
+	 * the corner, and left where it was otherwise.
+	 *
+	 * <p>The corner stands one column past the wall, and a chord riding it hangs its second note two
+	 * out -- the one thing in a build that reached that far. ekran's rule, resolved per turn: <i>"if
+	 * it has any hanging notes on the outside of the perpendicular ... end 1 block less than it does
+	 * right now. otherwise, the flat turn can stay where it is."</i></p>
+	 *
+	 * <p>Decided in two halves, because which chords will ride a turn is only known once they are
+	 * laid. The walk guesses first, from the arithmetic of the chords ahead of it -- see
+	 * {@link #flatTurnHangsOutside} -- and where it guesses wide it watches: any block laid past the
+	 * corner while the turn is under way throws {@link FlatTurnHungOutside}, and
+	 * {@link #createV2PastePlan} walks the song again with that one turn armed tight. A guess of
+	 * tight is never checked, so a wrong one costs a column of lane and nothing else; the counters
+	 * {@code flatTurnTightUnneeded} and {@code flatTurnRewalk} say how often each way is wrong.</p>
+	 */
+	static boolean FLAT_TURN_KEEPS_ITS_WIDTH = true;
+
+	/**
+	 * Whether a wide flat turn that hangs a note past its corner has the song walked again with that
+	 * turn armed tight, or is merely counted and left as it stands. Off is a measurement of the guess
+	 * alone: {@code flatTurnWideHungOutside:<shape>} says what hung where the guess said nothing
+	 * would, in a build that can be dumped and looked at.
+	 */
+	static boolean FLAT_TURN_REWALKS = true;
+
+	/**
+	 * v2: a rigid stacked module that would land flush ahead of a descent, and could only give the
+	 * staircase its flank by growing a tail, is not laid there -- the lane turns first.
+	 *
+	 * <p>The flat-turn half of this rule is part of {@link #FLAT_TURN_KEEPS_ITS_WIDTH} and is not
+	 * switchable on its own: without it the tight turn's sideways run has a note block standing in
+	 * it. This is the descent half. A tail grown on a module measured to land flush is two columns
+	 * past the wall, and the census read every one of them as a breach of exactly two -- five over
+	 * the library before every lane opened on its wall column, thirty after. Turning first hands the
+	 * chord to the cut, which is what a chord that will not fit gets everywhere else in v2. Kept
+	 * apart so the two can be measured apart: this one changes a decision ekran took for the
+	 * descent on its own numbers, and the numbers are the argument.</p>
+	 */
+	static boolean FLUSH_HEAD_TURNS_BEFORE_A_DESCENT = true;
+
+	/**
+	 * A wide flat turn hung a note past its corner: the walk stops here and is run again with that
+	 * turn armed tight. Not an {@link IllegalArgumentException} on purpose -- every trial in this
+	 * file catches that as the fallback, and this is not a shape to fall back from.
+	 */
+	static final class FlatTurnHungOutside extends RuntimeException {
+		private static final long serialVersionUID = 1L;
+		private final int index;
+		private final String shape;
+
+		FlatTurnHungOutside(int index, String where, String shape) {
+			super(where);
+			this.index = index;
+			this.shape = shape;
+		}
+
+		int index() {
+			return index;
+		}
+
+		/** The shape that laid the block, trimmed to its kind and its note count. */
+		String shape() {
+			int cut = shape.indexOf(' ');
+			cut = cut < 0 ? -1 : shape.indexOf(' ', cut + 1);
+			return cut < 0 ? shape : shape.substring(0, cut);
+		}
+	}
+
+	/**
+	 * The column a lane's turn stands in, which is the wall for every turn but a climb.
+	 *
+	 * <p>A climb stands one column past the wall -- see {@link #CLIMB_STANDS_A_COLUMN_OUT} -- so a
+	 * lane ending in one is measured against that column instead. Asked wherever the walk asks which
+	 * wall it faces, and asked with the floor and climb the lane actually has, because those change
+	 * inside the event that builds a staircase and the wall in front of the chord after it is the
+	 * other one.</p>
+	 */
+	private static int laneWall(int nearWall, int farWall, Direction forward, Direction travel,
+			int floor, int climb, int floors) {
+		int wall = travel == forward ? farWall : nearWall;
+		int above = floor + climb;
+		return CLIMB_STANDS_A_COLUMN_OUT && above >= 0 && above < floors && climb > 0
+			? wall + travel.getStepX() : wall;
 	}
 
 	/**
@@ -2570,6 +2722,17 @@ public final class SongBuilder {
 	 */
 	static void walkV2(List<EventGroup> events, BlockPos origin, Direction forward,
 			int laneWidth, int floors, PlacementPlan placements, Layout layout, WalkStart start) {
+		walkV2(events, origin, forward, laneWidth, floors, placements, layout, start, Set.of());
+	}
+
+	/**
+	 * @param tightTurns the events at which a flat turn is to be armed a column early, because a
+	 *     walk before this one laid it wide and watched a note land past its corner. See
+	 *     {@link #FLAT_TURN_KEEPS_ITS_WIDTH}.
+	 */
+	static void walkV2(List<EventGroup> events, BlockPos origin, Direction forward,
+			int laneWidth, int floors, PlacementPlan placements, Layout layout, WalkStart start,
+			Set<Integer> tightTurns) {
 		// Where chords grow, and the direction the whole slab creeps once a sweep is done.
 		Direction depth = forward.getClockWise();
 		// The walk's whole position: where it stands, which way the wire is running, and any corners
@@ -2693,6 +2856,14 @@ public final class SongBuilder {
 				lane = lane.pinned(depth);
 				turning = false;
 				leavingTurn = TURN_BAN_OUTLASTS;
+				// What the turn just walked did past its corner. A wide turn that hung nothing there
+				// was rightly left wide; a tight one that hung nothing at the column it was tightened
+				// to protect was very likely tightened for nothing, and that is the number to watch.
+				if (placements.watchingATurn()) {
+					placements.padded(placements.turnWasWide() ? "flatTurnWideClean"
+						: placements.turnHungBeyond() ? "flatTurnTightNeeded" : "flatTurnTightUnneeded");
+					placements.stopWatchingTheTurn();
+				}
 				// Unless the turn itself held music, in which case this lane has already started.
 				//
 				// The rule this clears is "a lane must hold something before it can end", and it is
@@ -2766,7 +2937,8 @@ public final class SongBuilder {
 			boolean turnsOffBus = endsOnBus(lastStyle, lastBusCells) || centreFeedsTheClimb;
 			int turnOffBusCells = centreFeedsTheClimb && !endsOnBus(lastStyle, lastBusCells)
 				? offBus + 1 : offBus;
-			int wall = lane.travel() == forward ? farWall : nearWall;
+			// The column this lane's turn stands in: the wall, or one past it for a climb.
+			int wall = laneWall(nearWall, farWall, forward, lane.travel(), floor, climb, floors);
 			int stepOffAhead = turn.stepOff();
 			int splitCells = turn.splitCells();
 			if (replan) {
@@ -2965,6 +3137,46 @@ public final class SongBuilder {
 			if (strandsTheTurn) {
 				placements.padded("v2ClosedBeforeStranding");
 			}
+			// A rigid stacked module that would land flush on the wall ahead of a flat turn hangs its
+			// front pair in the wall column, and a tight turn's sideways run wants one of those cells
+			// -- see {@link #FLAT_TURN_FLANK_SLOT}. The module sheds that note where it can do so for
+			// nothing: onto its centre, a spare harp's slot, or a low slot it left empty. Where it
+			// cannot, the shed grows a tail, and a tail on a module measured to land flush is two
+			// columns past the wall: 157 of them over the library, every one a breach of exactly two.
+			// So a module that could only shed by growing does not land here at all. The lane turns
+			// first, and this chord rides the corner as the bus it would become in a turn anyway --
+			// which hangs its notes one past the wall and no further, and spends no column it was not
+			// going to spend. Asked of the shape the walk decided and the slots it would hang, before
+			// the overshoot test, so that the turn is armed as it is for any other chord that will not
+			// fit.
+			//
+			// And the same for a descent, which takes the other front slot and has grown the same tail
+			// for the same reason since the flush flank was first shed -- five times over the library
+			// then, thirty once every lane opened on its wall column. See
+			// {@link #FLUSH_HEAD_TURNS_BEFORE_A_DESCENT}.
+			boolean flushHeadWouldGrow = false;
+			if (SHEDS_A_FLUSH_MODULES_FLANK && layout.ultra() && !turning && railPhase < 0
+					&& laneStarted
+					&& (here.style() == ChordStyle.STACKED_FULL
+						|| here.style() == ChordStyle.STACKED_FRONT)) {
+				int flankAhead = -1;
+				if (FLAT_TURN_KEEPS_ITS_WIDTH && flatAhead
+						&& (wall - here.end()) * lane.travel().getStepX() == 0) {
+					flankAhead = FLAT_TURN_FLANK_SLOT;
+				} else if (FLUSH_HEAD_TURNS_BEFORE_A_DESCENT && !flatAhead && climb <= 0
+						&& (wall - landing) * lane.travel().getStepX() == 0) {
+					flankAhead = DESCENT_FLANK_SLOT;
+				}
+				if (flankAhead >= 0) {
+					boolean full = here.style() == ChordStyle.STACKED_FULL;
+					flushHeadWouldGrow = shedTurnFlank(ultraSlots(event.notes(), full),
+						full ? 2 : 0, false, flankAhead) == null;
+					if (flushHeadWouldGrow) {
+						placements.padded("v2ClosedBeforeAFlushHeadWouldGrow"
+							+ (flatAhead ? "Flat" : "Descent"));
+					}
+				}
+			}
 			// Never while the route is still bending. Inside a turn the wire runs across the corridor
 			// rather than along it, so every one of these measurements is taken down the wrong axis --
 			// and there is nothing to decide anyway, because the walk has already committed to the
@@ -2989,7 +3201,8 @@ public final class SongBuilder {
 			// model 1 exactly. Whether everything downstream of wantsTurn copes with a live rail is the
 			// thing to measure; none of it has ever been asked to.
 			boolean overshoots = !turning && (railPhase < 0 || flatAhead)
-				&& (landing > farWall || landing < nearWall || strandsTheTurn);
+				&& ((landing - wall) * lane.travel().getStepX() > 0 || strandsTheTurn
+					|| flushHeadWouldGrow);
 			// And whether it merely gets there. A chord ending on the wall, or one column short of
 			// it, has not overshot and so was never offered a cut -- which leaves the lane holding a
 			// long bus, no near half to cut, and a turn to pay for out of the two cells that bus left
@@ -3044,9 +3257,24 @@ public final class SongBuilder {
 			// a climb reads the dust in the column *before* the wall, a descent is anchored on the wall
 			// column itself. Before lanes were allowed to land flush there was always a pad in between
 			// and this could not arise.
-			placements.descentTakesTheFlank(SHEDS_A_FLUSH_MODULES_FLANK && layout.ultra()
+			boolean descentTakesTheFlank = SHEDS_A_FLUSH_MODULES_FLANK && layout.ultra()
 				&& above >= 0 && above < floors && climb <= 0
-				&& reaches && (wall - landing) * lane.travel().getStepX() == 0);
+				&& reaches && (wall - landing) * lane.travel().getStepX() == 0;
+			// And a flat turn armed tight wants the other one. Its corner stands on the wall column and
+			// its sideways run leaves the corner towards the next slab -- so the run's first cell is the
+			// wall column one along in depth, which is exactly where a module landing flush hangs the
+			// near-side note of its front pair. Left there, the run's first bus cell finds a note block
+			// standing in it, the chord walks off the collision, and the wire has a note block with air
+			// over it in the middle of it: 111 dead builds over the library, every one of them a bus
+			// breaking on the sideways run. Shed before the turn is armed, because whether the turn
+			// will be tight is decided a chord later and a note is cheap where a dead line is not.
+			// Asked of the chord's own end rather than the landing, which for a bus short of wire
+			// carries the reserve: this is about where the front pair hangs, and that is the end.
+			boolean flatTurnTakesTheFlank = FLAT_TURN_KEEPS_ITS_WIDTH && SHEDS_A_FLUSH_MODULES_FLANK
+				&& layout.ultra() && flatAhead && reaches
+				&& (wall - here.end()) * lane.travel().getStepX() == 0;
+			placements.turnTakesTheFlank(descentTakesTheFlank ? DESCENT_FLANK_SLOT
+				: flatTurnTakesTheFlank ? FLAT_TURN_FLANK_SLOT : -1);
 			// And the other fact the chord cannot see for itself: how soon the next event arrives. A pad
 			// laid in front of it can only be spent as a repeater where there are two ticks to split, so
 			// a gap of one is the case a simple tail with a note-block middle cannot survive being padded
@@ -3753,8 +3981,7 @@ public final class SongBuilder {
 				// after the head, and is walked out to the wall above where it fell short. Either way
 				// this should now read nought, and a build where it does not is a lane that turned
 				// before it was allowed to.
-				int shortOfWall = ((travel == forward ? farWall : nearWall) - cursor.getX())
-					* travel.getStepX();
+				int shortOfWall = (wall - cursor.getX()) * travel.getStepX();
 				placements.recessed(shortOfWall);
 				for (int cell = 0; cell < shortOfWall; cell++) {
 					placements.padded(headed != null ? "recessedCutHeaded" : "recessedCutPlain");
@@ -3863,8 +4090,7 @@ public final class SongBuilder {
 					// short the lane has got, and the chords still to come fill the gap in between. A
 					// staircase set back from the wall stands in a column no other corridor's turn
 					// stands in, which is what reaches into the lane alongside.
-					int shortBy = ((travel == forward ? farWall : nearWall)
-						- lane.pos().getX()) * travel.getStepX();
+					int shortBy = (wall - lane.pos().getX()) * travel.getStepX();
 					// Pinned: a descent is walked out to the wall whether the pad could afford it or
 					// not, so that every descent in the build stands in the same column as every
 					// other. What the pad would not pay for is laid as bare dust here, which is wire
@@ -3972,7 +4198,8 @@ public final class SongBuilder {
 							&& railHolds(event, false)
 							&& railFloorTakes(placements, willRun, event)
 							&& railOpens(events, index, willRun,
-								next == forward ? farWall : nearWall, layout, false,
+								laneWall(nearWall, farWall, forward, next, above, climb, floors),
+								layout, false,
 								turnReserve(event,
 									turnCost(above, climb, floors, slabStep).offBus(), layout),
 								seedWait, currentTime, booked);
@@ -4078,7 +4305,8 @@ public final class SongBuilder {
 						// by that much. Otherwise it counts columns of delay the walk will not place.
 						booked = V2_BOOKS_PADS
 							? planLane(events, index, lane.pos().getX(), lane.travel().getStepX(),
-								lane.travel() == forward ? farWall : nearWall,
+								laneWall(nearWall, farWall, forward, lane.travel(), floor, climb,
+									floors),
 								lane.travel() == forward ? nearWall : farWall,
 								currentTime + spentPadding,
 								tipSignal, columnBehindBusy, next.cells(), next.offBus(), next.stepOff(),
@@ -4119,8 +4347,47 @@ public final class SongBuilder {
 						// at a different column, and the whole reason a turn can never reach a
 						// neighbouring corridor's notes is that turns occupy the same reserved columns
 						// in every corridor.
-						lane = armTurn(placements, lane, depth, columns, slabStep);
+						// Tight where the notes riding this turn would otherwise hang two columns past
+						// the wall, wide where they would not -- guessed from the chords ahead and, where
+						// the guess is wide, checked against the blocks as they go down. See
+						// {@link #FLAT_TURN_KEEPS_ITS_WIDTH}. A turn a walk before this one watched hang
+						// a note past its corner is armed tight without asking.
+						boolean rewalked = FLAT_TURN_KEEPS_ITS_WIDTH && tightTurns.contains(index);
+						boolean tight = FLAT_TURN_KEEPS_ITS_WIDTH && (rewalked
+							|| flatTurnHangsOutside(events, index, delayAhead,
+								(here.end() - lane.pos().getX()) * lane.travel().getStepX(), columns,
+								slabStep));
+						// Only where the sideways run has its column. A tight run goes down the wall
+						// column, and the chord that closed this lane may already have hung something
+						// there -- its front pair is shed for exactly this, but a shed can fail and
+						// other shapes reach the wall column too. A run laid into a note block is a
+						// dead line, so where the ground says no the turn stays wide and says so, and
+						// what is standing in the way is named so the next shed can be built.
+						boolean stuckWide = false;
+						if (tight && !flatRunIsClear(placements, lane, depth, wall, columns, slabStep)) {
+							tight = false;
+							stuckWide = true;
+							placements.padded("flatTurnCouldNotTighten");
+						}
+						// Which way is out, read before the arm: a lane turning tight on its own cell is
+						// handed back already facing the sideways run.
+						int outward = lane.travel().getStepX();
+						lane = armTurn(placements, lane, depth, columns, slabStep, tight);
 						turning = true;
+						if (FLAT_TURN_KEEPS_ITS_WIDTH) {
+							int cornerX = lane.cornerAt(0) ? lane.pos().getX()
+								: lane.ahead(cellsToCorner(lane)).pos().getX();
+							placements.watchFlatTurn(index, cornerX, outward, !tight && !stuckWide);
+							placements.padded(rewalked ? "flatTurnTightRewalked"
+								: tight ? "flatTurnTightGuessed" : "flatTurnWideGuessed");
+							if (TRACE_TURNS) {
+								System.out.println("FLAT t=" + event.time() + " notes="
+									+ event.notes().size() + " columns=" + columns + " tight=" + tight
+									+ " rewalked=" + rewalked + " cornerX=" + cornerX + " at "
+									+ lane.pos().getX() + " " + lane.pos().getY() + " "
+									+ lane.pos().getZ());
+							}
+						}
 						// Nothing is spent on the corner itself: the wire crossing it is whatever the
 						// chords standing on it lay, and each of those opens with a repeater worth
 						// fifteen.
@@ -4320,7 +4587,7 @@ public final class SongBuilder {
 				}
 				Direction travel = lane.travel();
 				BlockPos cursor = lane.pos();
-				int laneWall = travel == forward ? farWall : nearWall;
+				int laneWall = laneWall(nearWall, farWall, forward, travel, floor, climb, floors);
 				// Where this event really ends and what it really leaves. Asked of a second piece of
 				// arithmetic before, and that one measured every chord in the shape it was sorted into
 				// rather than the shape it gets built in -- so a stacked module the walk was about to
@@ -4374,7 +4641,7 @@ public final class SongBuilder {
 					&& behind.cells().size() == (laneWall - end) * travel.getStepX()
 					&& behind.signal() >= (endsOnBus(reached.style(), sunkenDustCells(event.notes().size())) ? offBus : turnCells);
 				if (V2_PADS_AHEAD && !cuttable && !nextStraddles && !behindReaches
-						&& (beyond > farWall || beyond < nearWall)) {
+						&& (beyond - laneWall) * travel.getStepX() > 0) {
 					int ahead = prePad(cursor.getX(), travel.getStepX(), event, wait - spentPadding,
 						columnBehindBusy, layout, laneWall,
 						(laneWall - cursor.getX()) * travel.getStepX(),
@@ -4445,7 +4712,7 @@ public final class SongBuilder {
 			// -- which is why a run used to take several chords to come back after a floor change,
 			// when it can open on the very first one. Only a flat turn is a reason to wait, and that
 			// is the bending test: its sideways run lies across the way both rails go.
-			int laneWall = lane.travel() == forward ? farWall : nearWall;
+			int laneWall = laneWall(nearWall, farWall, forward, lane.travel(), floor, climb, floors);
 			// A run already going, only. Opening one mid-turn is a different question and railOpens
 			// still refuses it; what this allows is the run a lane already has reaching the corner it
 			// used to be cut off a column short of.
@@ -4704,10 +4971,26 @@ public final class SongBuilder {
 					// over there. A lane whose turn is not yet armed still pays, which is why this asks the
 					// route for its bends rather than asking the wall how far off it is.
 					int toCorner = cellsToCorner(lane);
-					// Two or three, which is one pair either way. A corner stands one column past the wall,
-					// so the distance to it is the room plus one, and the ordinary test already passes at four
-					// -- room three, which is a pair and the reserve. Two and three are the two it refuses,
-					// and they are the two halves of ekran's parity:
+					// Where the corner will stand once the turn is armed, for a run whose turn is not armed
+					// yet. A flat turn armed tight puts its corner on the wall column itself -- see
+					// {@link #FLAT_TURN_KEEPS_ITS_WIDTH} -- and nearly every flat turn in the library is
+					// armed tight, so a run heading for one is measured as though the wall column were the
+					// corner. That is the safe assumption: read as ordinary lane, the wall column takes a
+					// path column with two flanks, and the arm then turns the lane on that very cell and the
+					// flanks go down along the sideways run -- one into the floor column just laid, one past
+					// the corner. Every wrong note the tight turn first cost was that pair of flanks, and a
+					// note on the corner is a corner column: a centre and nothing else, which is what
+					// {@link #railCornerTakes} asks below. Where the turn ends up wide the run has kept one
+					// column it could have spent, and no more.
+					boolean cornerAssumedOnTheWall = FLAT_TURN_KEEPS_ITS_WIDTH && flatAhead
+						&& toCorner == 0;
+					if (cornerAssumedOnTheWall) {
+						toCorner = railRoom(lane, laneWall);
+					}
+					// Two or three, which is one pair either way. A wide corner stands one column past the
+					// wall, so the distance to it is the room plus one, and the ordinary test already passes
+					// at four -- room three, which is a pair and the reserve. Two and three are the two it
+					// refuses, and they are the two halves of ekran's parity:
 					//
 					//   two    the pair lands a floor column on the wall and a path column on the corner. The
 					//          run's last note stands on the bend, the sideways leg is ordinary lane, and the
@@ -4735,8 +5018,12 @@ public final class SongBuilder {
 					// moment this matters the route carries no corner yet and {@code cellsToCorner} is
 					// nought -- which is why asking the bends for it fired ten times over the library.
 					int keep = flatAhead && RUN_SPENDS_THE_FLAT_RESERVE ? 0 : reserve;
-					int ground = railRoom(lane, laneWall) + (ontoTheCorner && toCorner == 2 ? 1 : 0);
-					if (flatAhead && ground >= 2 + keep && railRoom(lane, laneWall) < 2 + reserve) {
+					// The corner's own column, where the corner stands past the wall; a tight corner is on
+					// the wall column and the room already counts it.
+					int cornerPastTheWall = Math.max(0, Math.min(1, toCorner - railRoom(lane, laneWall)));
+					int ground = railRoom(lane, laneWall)
+						+ (ontoTheCorner && toCorner == 2 ? cornerPastTheWall : 0);
+					if (flatAhead && ground >= 2 + keep && toCorner >= 2 && toCorner <= 3) {
 						placements.padded(toCorner == 2 ? "railPairOntoTheCorner" : "railPairIntoTheTurn");
 					}
 					RailPair pair = !lane.cornerAt(0) && ground >= 2 + keep
@@ -4750,8 +5037,13 @@ public final class SongBuilder {
 					// Only where the pair really does reach the corner, which is the distance of two. At three
 					// the run comes to rest on the wall, a column short of the bend, and its last column is an
 					// ordinary path column with the two flanks any other one has.
-					if (pair != null && ontoTheCorner && toCorner == 2
-							&& railRoom(lane, laneWall) < 2 + reserve) {
+					//
+					// Asked of the distance to the corner alone. It used to ask the room against the wall as
+					// well, which said the same thing while every corner stood one past the wall -- a
+					// distance of two was a room of one -- and says the opposite of a corner assumed on the
+					// wall, where a distance of two is a room of two: the pair landed on the corner and the
+					// question was never put.
+					if (pair != null && ontoTheCorner && toCorner == 2) {
 						int cornerEvent = index + (pair.blank() ? 1 : 2);
 						if (cornerEvent >= events.size()
 								|| !railCornerTakes(events.get(cornerEvent))) {
@@ -4982,7 +5274,8 @@ public final class SongBuilder {
 			// words -- {@code laneWall} -- because the answer from before the turn is about a lane that
 			// no longer exists. This is the other half of that.
 			int wallAhead = ROOM_AHEAD_ASKS_THE_WALL_IT_FACES
-				? opening.travel() == forward ? farWall : nearWall : wall;
+				? laneWall(nearWall, farWall, forward, opening.travel(), floor, climb, floors)
+				: wall;
 			int ahead = turning ? Integer.MAX_VALUE
 				: (wallAhead - opening.pos().getX()) * opening.travel().getStepX();
 			// The shape the walk decided when it measured this chord, if the chord is still standing
@@ -5276,14 +5569,183 @@ public final class SongBuilder {
 	 */
 	private static Lane armTurn(PlacementPlan placements, Lane lane, Direction depth, int columns,
 			int slabStep) {
+		return armTurn(placements, lane, depth, columns, slabStep, false);
+	}
+
+	/**
+	 * @param tight whether the first corner stands on the wall itself rather than one column past
+	 *     it, so that the notes hanging off the sideways run reach one column past the wall and not
+	 *     two. See {@link #FLAT_TURN_KEEPS_ITS_WIDTH}. The sideways run is the same length either
+	 *     way; what moves is where the lane stops and where the next one starts.
+	 */
+	private static Lane armTurn(PlacementPlan placements, Lane lane, Direction depth, int columns,
+			int slabStep, boolean tight) {
 		placements.placing("corner");
-		int toCorner = Math.max(1, columns + 1);
+		boolean clockwise = lane.travel().getClockWise() == depth;
+		int toCorner = tight ? Math.max(0, columns) : Math.max(1, columns + 1);
+		if (toCorner == 0) {
+			// The corner is the cell the walk is standing on -- a lane that landed flush on its wall
+			// and is turning tight. A bend at nought is not a bend the route can take, because
+			// {@link Lane#ahead} turns on arriving at a bend's cell and the walk has already arrived;
+			// so the cell is handed back already turned, facing the sideways run with the note side
+			// turned with it, and marked as a corner so the first repeater walks off it the way it
+			// walks off any other. The walk sits on a second corner two thousand times over the
+			// library and knows what to do there; this is the same state one corner earlier.
+			Direction turned = clockwise
+				? lane.travel().getClockWise() : lane.travel().getCounterClockWise();
+			Direction side = clockwise
+				? lane.noteSide().getClockWise() : lane.noteSide().getCounterClockWise();
+			placements.turnedAt(lane.pos().relative(lane.travel().getOpposite()));
+			Lane onTheCorner = new Lane(lane.pos(), turned, side,
+				List.of(new Lane.Bend(slabStep, clockwise)), true, true);
+			placements.corner(onTheCorner.pos());
+			placements.corner(onTheCorner.ahead(slabStep).pos());
+			return onTheCorner;
+		}
 		placements.turnedAt(lane.ahead(toCorner - 1).pos());
 		placements.corner(lane.ahead(toCorner).pos());
 		placements.corner(lane.ahead(toCorner + slabStep).pos());
-		boolean clockwise = lane.travel().getClockWise() == depth;
 		return lane.bending(List.of(new Lane.Bend(toCorner, clockwise),
 			new Lane.Bend(toCorner + slabStep, clockwise))).crowding();
+	}
+
+	/**
+	 * Whether a flat turn armed tight has its sideways run free to lay.
+	 *
+	 * <p>The run goes down the wall column from the corner to the second corner, at the lane's own
+	 * level and the two above it -- a bus stands a level up and its dust a level over that. Asked of
+	 * the blocks, because what stands there is whatever the lane that just closed hung into its own
+	 * landing column, and the shape that did it cannot always be told in advance.</p>
+	 */
+	private static boolean flatRunIsClear(PlacementPlan placements, Lane lane, Direction depth,
+			int wall, int columns, int slabStep) {
+		BlockPos corner = columns >= 0
+			? lane.ahead(columns).pos()
+			: lane.pos();
+		for (int along = 0; along <= slabStep; along++) {
+			BlockPos cell = corner.relative(depth, along);
+			for (int up = 0; up <= 2; up++) {
+				if (!"-".equals(placements.describeBlock(cell.above(up)))) {
+					placements.padded("flatRunBlockedBy:" + placements.describeBlock(cell.above(up))
+						.replace("minecraft:", "").replaceAll("\\[.*", "") + "@" + along + "+" + up);
+					return false;
+				}
+			}
+		}
+		return true;
+	}
+
+	/**
+	 * Whether the chords about to ride a flat turn armed the wide way -- first corner one column
+	 * past the wall -- would hang a note past that corner.
+	 *
+	 * <p>The guess half of {@link #FLAT_TURN_KEEPS_ITS_WIDTH}; the blocks are the other half. Walked
+	 * the way the lane will walk it, in route cells from where the walk stands: the delay's
+	 * repeaters and the chord's own, each moved a cell along where it would land on a corner; then
+	 * the chord's cells. What decides it is the slot order the shapes fill in. A bus hangs two notes
+	 * a cell. On the sideways run its first slot is the inside one, so a cell holding one note hangs
+	 * inside and a cell holding two hangs the second past the corner; more than two cells from
+	 * either bend the order flips -- a crowded bus fills the slot facing the next lane first -- and a
+	 * single note hangs outside as well. On the first corner the inside slot is the cell the wire
+	 * arrived from, so its first free slot is the outside one and any note at all lands there. On
+	 * the second the third slot is the outside one, so it takes two notes as an ordinary cell
+	 * does.</p>
+	 *
+	 * <p>A small chord keeps its own shape in a turn where its slots are quiet and becomes a bus where
+	 * they are not -- see {@link #smallChordFits}. One note is a note block in the wire's own column
+	 * either way. Three is both flanks either way. Two is the case that turns on the ground: on
+	 * either corner the inside flank is the wire's own cell and the chord is a bus, hanging both
+	 * ways; on the first cell of the sideways run the inside flank is the slot the chord standing on
+	 * the wall column has just hung its own note in, and the same; further along it is quiet and the
+	 * small shape hangs its one flank inside.</p>
+	 *
+	 * <p>Every stacked shape is walked as the bus it becomes in a turn, and the chord in hand as the
+	 * longer of that and the shape the walk decided for it, because a chord measured short and built
+	 * long only reaches further. It is a guess about a build not yet made, and it can be wrong both
+	 * ways: wrong towards wide is caught by the blocks and walked again, wrong towards tight costs a
+	 * column of lane and is counted.</p>
+	 *
+	 * @param delay0 columns of repeater the wait before the chord in hand will lay
+	 * @param end0 where the chord in hand was measured to end, as an offset from the walk's own cell
+	 * @param columns how far the walk stands from the wall, which is one short of the first corner
+	 */
+	private static boolean flatTurnHangsOutside(List<EventGroup> events, int index, int delay0,
+			int end0, int columns, int slabStep) {
+		int corner1 = columns + 1;
+		int corner2 = corner1 + slabStep;
+		int cell = 0;
+		// Whether a note has been hung off the wall column, which is the cell before the corner. Its
+		// near-side note is the inside flank of the sideways run's first cell.
+		boolean wallCellNoted = false;
+		for (int at = index; at < events.size(); at++) {
+			EventGroup chord = events.get(at);
+			int delay = at == index ? delay0
+				: Math.max(0, (chord.time() - events.get(at - 1).time() - 1) / 4);
+			// The delay's repeaters and then the chord's own. A repeater may not stand on a corner,
+			// so dust takes the corner and the repeater goes one further along.
+			boolean ownRepeaterOnACorner = false;
+			for (int repeater = 0; repeater <= delay; repeater++) {
+				if (cell == corner1 || cell == corner2) {
+					ownRepeaterOnACorner = repeater == delay;
+					cell++;
+				}
+				cell++;
+			}
+			int notes = chord.notes().size();
+			if (chord.style() == ChordStyle.SMALL && notes <= 2) {
+				// The block the repeater drives, and its one flank where it has one.
+				if (cell > corner2) {
+					return false;
+				}
+				if (cell == columns && notes == 2) {
+					wallCellNoted = true;
+				}
+				// Whether the small shape holds. It is asked of the ground before the repeater walks
+				// off a corner, so a chord whose repeater lands on one is asked about the corner's own
+				// flank -- the cell the wire came in from, or the note the chord before it hung -- and
+				// becomes a bus of two notes in the cell it actually gets. See
+				// {@link #smallChordFits}, and {@code parityAskedBeforeTheCorner} for the same thing
+				// happening to the stacked shape.
+				boolean bus = notes == 2 && (ownRepeaterOnACorner
+					|| cell == corner1 || cell == corner2
+					|| cell == corner1 + 1 && wallCellNoted);
+				if (bus && cell >= corner1) {
+					return true;
+				}
+				cell++;
+				continue;
+			}
+			// A bus, which every other shape is in a turn: two notes a cell, the last cell holding
+			// what is left.
+			int cells = (notes + 1) / 2;
+			if (at == index) {
+				cells = Math.max(cells, end0 - cell);
+			}
+			for (int filled = 0; filled < cells; filled++) {
+				if (cell > corner2) {
+					return false;
+				}
+				int here = Math.min(2, notes - 2 * filled);
+				if (cell == columns && here >= 1) {
+					wallCellNoted = true;
+				}
+				if (cell >= corner1) {
+					boolean nearBend = cell - corner1 <= 2 || corner2 - cell <= 2;
+					if (cell == corner1 || here >= 2 || !nearBend) {
+						return true;
+					}
+				}
+				if (cell == corner1 || cell == corner2) {
+					// A slot lost on the bend, so the run grows a cell to make it up.
+					cells++;
+				}
+				cell++;
+			}
+			if (cell > corner2) {
+				return false;
+			}
+		}
+		return false;
 	}
 
 	private static TurnCost turnCost(int floor, int climb, int floors, int slabStep) {
@@ -7015,9 +7477,10 @@ public final class SongBuilder {
 	 * How far the nearest corner is along the route, or nought where the route is not bending.
 	 *
 	 * <p>Counted off the bends the route carries and not off the wall, because the two are not the
-	 * same cell: {@link #armTurn} stands the corner at {@code ahead(columns + 1)}, one column
-	 * <em>past</em> the wall a run measures its room against. That one column is why a run given all
-	 * the room in the world still stopped short of every corner.</p>
+	 * same cell: {@link #armTurn} stands a wide corner at {@code ahead(columns + 1)}, one column
+	 * <em>past</em> the wall a run measures its room against, and a tight one on the wall column
+	 * itself -- see {@link #FLAT_TURN_KEEPS_ITS_WIDTH}. That one column is why a run given all the
+	 * room in the world still stopped short of every corner.</p>
 	 */
 	/**
 	 * Whether the chord that would land on a corner can stand on one.
@@ -11597,20 +12060,21 @@ public final class SongBuilder {
 		// "yes it should grow one. the alternative is to pad the chord down, which is about the same
 		// anyway. maybe it would be longer to move the chord down actually. plus moving the whole
 		// chord down means behind busy for the next chord."
-		if (SHEDS_A_FLUSH_MODULES_FLANK && placements.descentTakesTheFlank()) {
-			ShedFlank rehomed = shedDescentFlank(standing,
-				style == ChordStyle.STACKED_FULL ? 2 : 0, true);
+		int flankTaken = SHEDS_A_FLUSH_MODULES_FLANK ? placements.flankTaken() : -1;
+		if (flankTaken >= 0) {
+			ShedFlank rehomed = shedTurnFlank(standing,
+				style == ChordStyle.STACKED_FULL ? 2 : 0, true, flankTaken);
 			if (rehomed == null) {
 				placements.padded("flushFlankStuck");
 			} else if (rehomed.toBus() != null) {
 				placements.padded("flushFlankGrewATail");
 				Body grown = addStackedBusModule(placements, start, triggerDelay, event.time(),
 					onTheFreeSlots(placements, start.pos(), start.travel(), start.noteSide(),
-						event.time(), rehomed.slots(), DESCENT_FLANK_SLOT),
+						event.time(), rehomed.slots(), flankTaken),
 					List.of(rehomed.toBus()));
 				return new Placed(grown.lane(), style, grown.busCells(), nudge);
 			} else {
-				placements.padded(standing.slot(DESCENT_FLANK_SLOT) == null
+				placements.padded(standing.slot(flankTaken) == null
 					? "flushFlankWasEmpty" : "flushFlankRehomed");
 				standing = rehomed.slots();
 			}
@@ -11619,8 +12083,7 @@ public final class SongBuilder {
 		// no third option at all: it shifted or it fell to a bus.
 		return new Placed(addStackedEventModule(placements, start, triggerDelay, event.time(),
 			onTheFreeSlots(placements, start.pos(), start.travel(), start.noteSide(), event.time(),
-				standing, placements.descentTakesTheFlank() && SHEDS_A_FLUSH_MODULES_FLANK
-					? DESCENT_FLANK_SLOT : -1)),
+				standing, flankTaken)),
 			style, 0, nudge);
 	}
 
@@ -12093,6 +12556,17 @@ public final class SongBuilder {
 	 */
 	private static final int DESCENT_FLANK_SLOT = 1;
 
+	/**
+	 * The low slot a tight flat turn's sideways run leaves the corner into.
+	 *
+	 * <p>Side 0 is {@code depth}, the way the slabs advance and the way every flat turn bends. A
+	 * module landing flush on the wall column hangs its front pair there, and the sideways run of a
+	 * turn armed tight -- see {@link #FLAT_TURN_KEEPS_ITS_WIDTH} -- runs down that column from the
+	 * corner towards the next slab, so its first cell is this slot. The other front slot is the one
+	 * a descent's second rung wants, which is why the two are named apart.</p>
+	 */
+	private static final int FLAT_TURN_FLANK_SLOT = 0;
+
 	/** A head with the descent's flank rehomed, and the note the bus must take if no slot could. */
 	private record ShedFlank(UltraSlots slots, EventNote toBus) {
 	}
@@ -12112,22 +12586,34 @@ public final class SongBuilder {
 	 * @param hasBus whether there is a tail to take the note when no slot can
 	 */
 	private static ShedFlank shedDescentFlank(UltraSlots slots, int granted, boolean hasBus) {
+		return shedTurnFlank(slots, granted, hasBus, DESCENT_FLANK_SLOT);
+	}
+
+	/**
+	 * The same head with nothing hanging in the given front slot, or {@code null}.
+	 *
+	 * <p>{@link #shedDescentFlank} for the slot the descent wants; the same shed for the slot a tight
+	 * flat turn's sideways run wants, {@link #FLAT_TURN_FLANK_SLOT}. One rule, because it is one
+	 * shape giving up one low note, and only the turn standing next to it says which.</p>
+	 */
+	private static ShedFlank shedTurnFlank(UltraSlots slots, int granted, boolean hasBus,
+			int taken) {
 		if (slots == null) {
 			return null;
 		}
-		EventNote note = slots.slot(DESCENT_FLANK_SLOT);
+		EventNote note = slots.slot(taken);
 		if (note == null) {
 			// Nothing hangs there, so this head already stands alongside a staircase quite happily.
 			return new ShedFlank(slots, null);
 		}
-		UltraSlots emptied = slots.without(DESCENT_FLANK_SLOT);
+		UltraSlots emptied = slots.without(taken);
 		if (slots.centre() == null) {
 			if (isHarpNote(note)) {
 				return new ShedFlank(emptied.withCentre(note), null);
 			}
 			// Or it trades with a harp the module is hanging somewhere it does not mind losing: the
 			// harp takes the centre, this note takes the harp's slot, and the contested one empties.
-			int harp = CENTRE_TAKES_A_SPARE_HARP ? spareHarpFlank(slots, DESCENT_FLANK_SLOT) : -1;
+			int harp = CENTRE_TAKES_A_SPARE_HARP ? spareHarpFlank(slots, taken) : -1;
 			if (harp >= 0) {
 				return new ShedFlank(emptied.with(harp, note).withCentre(slots.slot(harp)), null);
 			}
@@ -12135,9 +12621,10 @@ public final class SongBuilder {
 		// Then a low slot the chord did not fill. The front slot on the other side is always this
 		// module's to use. A back slot only where the head was granted it, and {@link #backPair}
 		// fills the far side first, so a grant of one means slot three and not slot two.
-		int[] spare = granted >= 2 ? new int[] {0, 3, 2}
-			: granted == 1 ? new int[] {0, 3}
-			: new int[] {0};
+		int other = 1 - taken;
+		int[] spare = granted >= 2 ? new int[] {other, 3, 2}
+			: granted == 1 ? new int[] {other, 3}
+			: new int[] {other};
 		for (int slot : spare) {
 			if (slots.slot(slot) == null) {
 				return new ShedFlank(emptied.with(slot, note), null);
@@ -16122,6 +16609,45 @@ public final class SongBuilder {
 			placing = what;
 		}
 
+		/**
+		 * The flat turn under way, if one is being watched for notes hanging past its corner.
+		 *
+		 * <p>Set when a turn is armed and cleared when the walk comes out the far side. While it is
+		 * set every block written is measured against the corner's column: one laid past it is a
+		 * note the turn hung outside the width. A wide turn throws on the first one, so the song can
+		 * be walked again with that turn armed tight; a tight turn only remembers, so the walk can
+		 * count the turns it tightened for nothing. See {@link #FLAT_TURN_KEEPS_ITS_WIDTH}.</p>
+		 */
+		private int turnIndex = -1;
+		private int turnCornerX;
+		private int turnStepX;
+		private boolean turnWide;
+		private boolean turnHungBeyond;
+
+		void watchFlatTurn(int index, int cornerX, int stepX, boolean wide) {
+			turnIndex = index;
+			turnCornerX = cornerX;
+			turnStepX = stepX;
+			turnWide = wide;
+			turnHungBeyond = false;
+		}
+
+		boolean watchingATurn() {
+			return turnIndex >= 0;
+		}
+
+		boolean turnWasWide() {
+			return turnWide;
+		}
+
+		boolean turnHungBeyond() {
+			return turnHungBeyond;
+		}
+
+		void stopWatchingTheTurn() {
+			turnIndex = -1;
+		}
+
 		/** What it is called at the moment, for a helper that has to name itself and put it back. */
 		String placing() {
 			return placing;
@@ -16336,7 +16862,7 @@ public final class SongBuilder {
 		 */
 		private boolean climbAhead;
 		private boolean seedAhead;
-		private boolean descentTakesTheFlank;
+		private int flankTaken = -1;
 
 		/**
 		 * Whether the module just built laid dust on an empty centre for a climb to start from.
@@ -16394,12 +16920,17 @@ public final class SongBuilder {
 		 * this. With a pad between the two they never meet, which is why it only appeared once lanes
 		 * were allowed to land flush.</p>
 		 */
-		void descentTakesTheFlank(boolean takes) {
-			descentTakesTheFlank = takes;
+		void turnTakesTheFlank(int slot) {
+			flankTaken = slot;
 		}
 
-		boolean descentTakesTheFlank() {
-			return descentTakesTheFlank;
+		/**
+		 * The low slot the turn after this chord will stand in, or -1: {@link #DESCENT_FLANK_SLOT}
+		 * ahead of a descent the chord lands flush against, {@link #FLAT_TURN_FLANK_SLOT} ahead of a
+		 * flat turn it lands flush against, whose sideways run leaves the corner down that side.
+		 */
+		int flankTaken() {
+			return flankTaken;
 		}
 
 		void sunkenOffered(boolean offered) {
@@ -16542,6 +17073,19 @@ public final class SongBuilder {
 			// standing on a corner is a broken machine however it came to be there.
 			if (block.startsWith("minecraft:repeater") && corners.contains(position.below())) {
 				padded("REPEATER-ON-CORNER");
+			}
+			// A block past the corner of the flat turn under way, which is a note hung outside the
+			// width the paste was promised at. Air is the space over a note and stands nowhere.
+			if (turnIndex >= 0 && !"minecraft:air".equals(block)
+					&& (position.getX() - turnCornerX) * turnStepX >= 1) {
+				if (turnWide && FLAT_TURN_REWALKS) {
+					throw new FlatTurnHungOutside(turnIndex, describe(position) + " " + block
+						+ " laid by " + placing, placing == null ? "?" : placing);
+				}
+				if (turnWide && !turnHungBeyond) {
+					padded("flatTurnWideHungOutside:" + (placing == null ? "?" : placing));
+				}
+				turnHungBeyond = true;
 			}
 			BlockPos key = position.immutable();
 			String existing = blocks.putIfAbsent(key, block);

@@ -77,6 +77,18 @@ import net.minecraft.core.Direction;
  * contentious through the pad layer: the raised pad into a climb, the universal four-cell descent,
  * head-only cuts, shedding, parity padding, relocation.</p>
  *
+ * <h2>Width</h2>
+ *
+ * <p>A v2 paste is exactly as wide as the paste screen says (2026-08-18). The width used to be the
+ * distance between the walls plus two, and what stood past the walls depended on the turn: a
+ * descent poked one column out, a climb none, a flat turn's corner one and the notes hanging off it
+ * two, and the first repeater stood on the wall with the button behind it. Now every turn reaches
+ * exactly one column past its wall -- the climb stands a column further out and lands on the wall
+ * ({@link SongBuilder#CLIMB_STANDS_A_COLUMN_OUT}), a flat turn is armed a column early wherever the
+ * chords riding it would hang past its corner ({@link SongBuilder#FLAT_TURN_KEEPS_ITS_WIDTH}, guessed
+ * ahead and checked against the blocks), and the walls stand {@code width - 3} apart
+ * ({@link SongBuilder#V2_WIDTH_IS_THE_PASTE_WIDTH}). {@code PasteWidthTest} holds it.</p>
+ *
  * <h2>State</h2>
  *
  * <p><b>Scaffolding only.</b> The mode exists, is selectable, and takes the width and floor controls;
