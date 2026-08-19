@@ -12645,6 +12645,20 @@ public final class SongBuilder {
 			&& (SUNKEN_OPENS_A_LANE || !placements.laneJustOpened())
 			&& event.notes().size() >= SUNKEN_LOWEST_CHORD
 			&& sunkenFits(event.notes().size()) && hasAHarp(event.notes());
+		// A sunken bus that finds a loud slot sheds it and grows a cell, or gives the shape up for a
+		// longer bus -- and it was measured as though neither would happen. Where that growth puts
+		// it past the wall the shape is not offered: measured as the bus it becomes, the chord
+		// overshoots on paper and is cut or carried round the corner as any other chord is.
+		// hopes-and-dreams 24x4 at 1 77 45: a sunken bus of seventeen measured nine for a room of
+		// nine, shed a slot, stood ten, and the flat turn behind it stood one past the wall.
+		if (sunken && SUNKEN_MEASURES_ITS_SHED && roomAhead != Integer.MAX_VALUE) {
+			int growth = sunkenGrowth(placements, lane, event.notes(), event.time());
+			if (growth > 0
+					&& 2 + sunkenDustCells(event.notes().size()) + growth > roomAhead) {
+				placements.padded("sunkenWouldGrowPastTheWall");
+				sunken = false;
+			}
+		}
 		// Handed to the builder rather than re-derived there. {@link #layEventBody} is four calls down
 		// and can see none of this, and a builder that decides for itself is the second place deciding
 		// one thing -- which is the bug this file keeps producing. Set every event, and false is what
@@ -12654,6 +12668,52 @@ public final class SongBuilder {
 			style = ChordStyle.SUNKEN_BUS;
 		}
 		return new Shape(style, behindShift, nudge, moved, gaveUp, withoutTheMove);
+	}
+
+	/**
+	 * How many cells longer than {@link #sunkenDustCells} a sunken bus will come out once it has
+	 * asked its four slots -- {@link #addSunkenBusModule}'s own arithmetic, made before a block is
+	 * laid. Nought where every slot is quiet or the one loud slot is relocated for free; the shed's
+	 * growth where it sheds; the plain bus's excess where it gives the shape up.
+	 *
+	 * @param lane the column the module's repeater stands in, as {@link #shapeFor} is handed it.
+	 */
+	private static int sunkenGrowth(PlacementPlan placements, Lane lane, List<EventNote> chord,
+			int time) {
+		int notes = chord.size();
+		int ordered = notes - 1;
+		Lane opening = lane.ahead(1);
+		BlockPos centreAt = opening.pos().above();
+		Lane low = opening.ahead(1);
+		Direction side = opening.noteSide();
+		int openingFlanks = Math.min(2, ordered);
+		int quietOpen = 0;
+		int quietLow = 0;
+		int flank = 0;
+		for (Direction out : List.of(side, side.getOpposite())) {
+			if (flank >= openingFlanks || !soundedByAnother(placements, centreAt.relative(out), time)) {
+				quietOpen++;
+			}
+			flank++;
+			if (!soundedByAnother(placements, low.pos().relative(out), time)) {
+				quietLow++;
+			}
+		}
+		if (!SUNKEN_ASKS_PARITY) {
+			return 0;
+		}
+		int loud = 2 - quietLow + (SUNKEN_ASKS_ITS_OPENING_TOO ? 2 - quietOpen : 0);
+		boolean oddTail = (ordered - openingFlanks) % 2 == 1;
+		if (loud == 0 || loud == 1 && oddTail && SUNKEN_RELOCATES_A_LOWERED_NOTE) {
+			return 0;
+		}
+		int shedOpen = SUNKEN_ASKS_ITS_OPENING_TOO ? quietOpen : 2;
+		int shedTail = ordered - Math.min(shedOpen, ordered) - quietLow;
+		int shedCells = (Math.max(0, shedTail) + 1) / 2;
+		if (SUNKEN_SHEDS_EVERY_LOUD_SLOT && shedCells <= DUST_RANGE - 1) {
+			return Math.max(0, 1 + shedCells - sunkenDustCells(notes));
+		}
+		return Math.max(0, 1 + (notes + 1) / 2 - (2 + sunkenDustCells(notes)));
 	}
 
 	/** Whether this chord has a harp to drive a {@link ChordStyle#SUNKEN_BUS} opening with. */
@@ -15632,6 +15692,14 @@ public final class SongBuilder {
 	 * for a stacked-bus head and twenty-five sunken. Descents only, as drawn.</p>
 	 */
 	static boolean CROSS_DESCENTS = true;
+
+	/**
+	 * Whether a sunken bus is measured as it will be built -- its four slots asked before the shape
+	 * is offered -- and not offered where shedding a loud slot would stand it past the wall.
+	 * hopes-and-dreams 24x4: a sunken bus of seventeen measured nine for a room of nine, grew to
+	 * ten on a shed, and the flat turn behind it stood a block outside. See {@link #sunkenGrowth}.
+	 */
+	static boolean SUNKEN_MEASURES_ITS_SHED = true;
 
 	/**
 	 * Whether a bus puts its last unpaired note in the low-z slot of the cell.
