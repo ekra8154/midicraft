@@ -1126,6 +1126,27 @@ public final class SongBuilder {
 	static boolean FLAT_TURN_REWALKS = true;
 
 	/**
+	 * v2: a run heading for a staircase keeps its last pair off the wall column.
+	 *
+	 * <p>The wall column is the staircase's, and a chord's last cell stops a column short of it --
+	 * that is what landing flush means. A run's pair was allowed one further, because its room test
+	 * was written when the handover column was reserved and the reserve made up the difference; with
+	 * the reserve at nought ({@link #RESERVES_THE_HANDOVER_COLUMN} off since e0ab7b1) the path column
+	 * landed on the wall column and the staircase stood one out. Every song of small chords in the
+	 * library was breaching by one, several lanes a build -- lady brown 0 to 31 blocks -- and ekran
+	 * read it as breaches being "really bad right now".</p>
+	 */
+	static boolean RAIL_LEAVES_THE_WALL_COLUMN = true;
+
+	/**
+	 * A probe's handle: the event index of one flat turn to arm wide whatever the guess says, or -1.
+	 * With {@link #FLAT_TURN_REWALKS} off the build keeps whatever that turn then hangs, which is the
+	 * exact answer to "did this turn need to be tight" -- the guess only estimates it, and a tight
+	 * turn's own blocks cannot say, because arming tight moves every chord after it a cell along.
+	 */
+	static int FLAT_TURN_FORCE_WIDE_AT = -1;
+
+	/**
 	 * v2: a rigid stacked module that would land flush ahead of a descent, and could only give the
 	 * staircase its flank by growing a tail, is not laid there -- the lane turns first.
 	 *
@@ -2860,8 +2881,13 @@ public final class SongBuilder {
 				// was rightly left wide; a tight one that hung nothing at the column it was tightened
 				// to protect was very likely tightened for nothing, and that is the number to watch.
 				if (placements.watchingATurn()) {
-					placements.padded(placements.turnWasWide() ? "flatTurnWideClean"
-						: placements.turnHungBeyond() ? "flatTurnTightNeeded" : "flatTurnTightUnneeded");
+					String verdict = placements.turnWasWide() ? "flatTurnWideClean"
+						: placements.turnHungBeyond() ? "flatTurnTightNeeded" : "flatTurnTightUnneeded";
+					placements.padded(verdict);
+					if (TRACE_TURNS) {
+						System.out.println("FLATEXIT " + verdict + " t=" + event.time() + " at "
+							+ lane.pos().getX() + " " + lane.pos().getY() + " " + lane.pos().getZ());
+					}
 					placements.stopWatchingTheTurn();
 				}
 				// Unless the turn itself held music, in which case this lane has already started.
@@ -4357,6 +4383,12 @@ public final class SongBuilder {
 							|| flatTurnHangsOutside(events, index, delayAhead,
 								(here.end() - lane.pos().getX()) * lane.travel().getStepX(), columns,
 								slabStep));
+						// A probe's question: what would this one turn do if it were armed wide? Asked with
+						// the re-walk off, so the answer is a build with the outside notes left in it.
+						if (FLAT_TURN_FORCE_WIDE_AT == index) {
+							tight = false;
+							placements.padded("flatTurnForcedWide");
+						}
 						// Only where the sideways run has its column. A tight run goes down the wall
 						// column, and the chord that closed this lane may already have hung something
 						// there -- its front pair is shed for exactly this, but a shed can fail and
@@ -4381,7 +4413,7 @@ public final class SongBuilder {
 							placements.padded(rewalked ? "flatTurnTightRewalked"
 								: tight ? "flatTurnTightGuessed" : "flatTurnWideGuessed");
 							if (TRACE_TURNS) {
-								System.out.println("FLAT t=" + event.time() + " notes="
+								System.out.println("FLAT i=" + index + " t=" + event.time() + " notes="
 									+ event.notes().size() + " columns=" + columns + " tight=" + tight
 									+ " rewalked=" + rewalked + " cornerX=" + cornerX + " at "
 									+ lane.pos().getX() + " " + lane.pos().getY() + " "
@@ -5018,6 +5050,17 @@ public final class SongBuilder {
 					// moment this matters the route carries no corner yet and {@code cellsToCorner} is
 					// nought -- which is why asking the bends for it fired ten times over the library.
 					int keep = flatAhead && RUN_SPENDS_THE_FLAT_RESERVE ? 0 : reserve;
+					// And ahead of a staircase, the wall column itself: the staircase stands on it, so the
+					// pair's path column has to come to rest a column short of it, which is room three and
+					// not two. This was two, and it read right for as long as the handover column was
+					// reserved -- {@link #RESERVES_THE_HANDOVER_COLUMN} kept the reserve at one and two plus
+					// one is three. Letting lanes land flush took the reserve to nought, and every run
+					// heading for a staircase then laid its last path column on the wall column and stood
+					// the staircase a column out: 31 breach blocks on lady brown alone, one per lane, none
+					// of them a chord. See {@link #RAIL_LEAVES_THE_WALL_COLUMN}.
+					if (RAIL_LEAVES_THE_WALL_COLUMN && !flatAhead) {
+						keep = Math.max(keep, 1);
+					}
 					// The corner's own column, where the corner stands past the wall; a tight corner is on
 					// the wall column and the room already counts it.
 					int cornerPastTheWall = Math.max(0, Math.min(1, toCorner - railRoom(lane, laneWall)));
@@ -9149,8 +9192,16 @@ public final class SongBuilder {
 			Map<Integer, Integer> booked) {
 		// What is left for the run's own columns once the head, the wait in front of it and the turn's
 		// reserve are paid for -- which is the room the lookahead gets to spend.
+		//
+		// The wall column is never the run's: a staircase stands on it and a tight corner is it. The
+		// reserve used to keep it back on its own; since lanes may land flush the reserve is nought
+		// and this has to say so itself, or a run opens with room for its first pair only if that
+		// pair's path column stands on the wall -- and the pair test then refuses it, and the run
+		// ends on the column its head's dust drives, which lights nothing. Same rule as the pair
+		// test's, and it has to be the same rule: see {@link #RAIL_LEAVES_THE_WALL_COLUMN}.
+		int held = RAIL_LEAVES_THE_WALL_COLUMN ? Math.max(reserve, 1) : reserve;
 		int room = railRoom(lane, wall)
-			- railHeadColumns(floorSeed, wait) - railPadColumns(wait) - reserve;
+			- railHeadColumns(floorSeed, wait) - railPadColumns(wait) - held;
 		return TWO_RAIL_RUNS && layout.ultra() && !turning && !lane.bending()
 			&& railMayStart(events, index, floorSeed, room, booked)
 			&& room >= 2;
