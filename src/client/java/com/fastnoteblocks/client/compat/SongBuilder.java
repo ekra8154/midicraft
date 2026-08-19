@@ -15065,10 +15065,12 @@ public final class SongBuilder {
 	 * shortfall the decided shape foretold and left to land where it lands.
 	 *
 	 * <p>Off is the measured arm: Guardian over 90 sizes 135 breach blocks to 60, 76 clean to 79, no
-	 * dead, wrong or missing note, no collision. On, the trial frees 12x4 to 18x4 as well -- 36 and
-	 * 82 -- and relays 26x5 into a far half one cell past its wire (396 dead) and 24x3 into a
-	 * flat-turn collision. With {@link #NEAR_HALF_KEEPS_ITS_NOTES_FOR_THE_WIRE} the dead build is a
-	 * collision instead. Unmeasured over the library, so off until it is.</p>
+	 * dead, wrong or missing note, no collision. On alone, the trial frees 12x4 to 18x4 as well --
+	 * 47 and 83, no collision -- and relays 26x5 into a far half one cell past its wire (396 dead).
+	 * With {@link #NEAR_HALF_KEEPS_ITS_NOTES_FOR_THE_WIRE} as well: 36 and 82, no dead line, and two
+	 * collisions (26x5, 24x3). Library at nine sizes, both on: real songs identical to off, the
+	 * chords-of-thirty song 28 blocks worse, the 24x3 collision. Off until the collision is
+	 * understood.</p>
 	 */
 	static boolean V2_UNSTICK_BY_TRIAL = false;
 
@@ -15076,9 +15078,11 @@ public final class SongBuilder {
 	 * Whether a plain cut's crowded near half may only hand notes on that the far half's wire can
 	 * carry. See {@link #addPlainNearHalf}. Off, the near half is laid as it was: crowded, held to its
 	 * cells, leftovers to the far half -- which grew Guardian 26x5's far half to thirteen notes on six
-	 * cells of wire under {@link #V2_UNSTICK_BY_TRIAL}. On, that build reads one collision and no
-	 * dead line -- but the key it counts never fired, so what changed is the trial round the near
-	 * half and not the rule, and that wants understanding before it is on.</p>
+	 * cells of wire under {@link #V2_UNSTICK_BY_TRIAL}. On with it, Guardian over 90 sizes: hand-ons
+	 * 5 to 2, the dead build reads one collision and no dead line, breach 47 to 36, clean 83 to 82,
+	 * and 24x3 picks up a flat-turn collision it did not have. The key this counts reads nought in
+	 * the census while the hand-ons fall, so it is being rolled back by a trial enclosing the cut
+	 * rather than not firing; both want understanding before this is on.</p>
 	 */
 	static boolean NEAR_HALF_KEEPS_ITS_NOTES_FOR_THE_WIRE = false;
 
