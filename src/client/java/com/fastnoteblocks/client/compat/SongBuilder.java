@@ -4103,7 +4103,11 @@ public final class SongBuilder {
 					}
 				} else {
 					List<EventNote> handedOn = new ArrayList<>();
-					cursor = HEADED_CUT_FALLS_TO_PLAIN
+					cursor = HEADED_CUT_FALLS_TO_PLAIN && NEAR_HALF_KEEPS_ITS_NOTES_FOR_THE_WIRE
+						? addPlainNearHalf(placements, trigger.cursor(), travel, depth,
+							trigger.triggerDelay(), chord, near, Math.max(1, room - 1), splitCells,
+							handedOn)
+						: HEADED_CUT_FALLS_TO_PLAIN
 						? addSplitNearHalf(placements, trigger.cursor(), travel, depth,
 							trigger.triggerDelay(), chord.subList(0, near), Math.max(1, room - 1),
 							handedOn)
@@ -4133,7 +4137,11 @@ public final class SongBuilder {
 					placements.padded("cutHeadFellToPlain");
 					headed = null;
 					List<EventNote> handedOn = new ArrayList<>();
-					cursor = HEADED_CUT_FALLS_TO_PLAIN
+					cursor = HEADED_CUT_FALLS_TO_PLAIN && NEAR_HALF_KEEPS_ITS_NOTES_FOR_THE_WIRE
+						? addPlainNearHalf(placements, trigger.cursor(), travel, depth,
+							trigger.triggerDelay(), chord, near, Math.max(1, room - 1), splitCells,
+							handedOn)
+						: HEADED_CUT_FALLS_TO_PLAIN
 						? addSplitNearHalf(placements, trigger.cursor(), travel, depth,
 							trigger.triggerDelay(), chord.subList(0, near), Math.max(1, room - 1),
 							handedOn)
@@ -4674,6 +4682,8 @@ public final class SongBuilder {
 			// eleven blocks of wire could spend ten of them on bare dust to buy a two-cell discount.
 			// See {@link #PREPAD_GROWTH_CAP}.
 			int grownFrom = owing;
+			boolean unsticksTheNext = false;
+			int unstickFrom = 1;
 			// A chord that fits, a column or two short of the wall, in front of a chord that cannot:
 			// cannot fit, cannot be cut, and cannot turn either, because the wire this chord leaves
 			// has to cover the columns it left *and* the staircase, and with no spare tick there is no
@@ -4704,7 +4714,20 @@ public final class SongBuilder {
 						placements.padded(freed ? "v2StuckNextFreedBy" + shortBy
 							: "v2StuckNextNotFreed");
 					}
-					if (freed) {
+					if (TRACE) {
+						System.out.println("  STUCK t=" + event.time() + " shortBy=" + shortBy
+							+ " tip=" + tipSignal + " leaves=" + here.tip() + " stuck=" + stuck
+							+ " freed=" + freed);
+					}
+					// Not the columns: the shape is decided again where it opens, and a pad in front
+					// of it changes the column, the parity and the pair behind, so the chord that was
+					// foretold one short can come out one short again a column later -- Guardian 16x4
+					// tick 611 did, a stacked bus that went half behind a pad of one. The columns are
+					// settled where the chord is built, by building it.
+					if (V2_UNSTICK_BY_TRIAL) {
+						unsticksTheNext = freed;
+						unstickFrom = V2_UNSTICK_TRIES_EVERY_WIDTH ? 1 : shortBy;
+					} else if (freed) {
 						owing = shortBy;
 					}
 				}
@@ -5528,6 +5551,59 @@ public final class SongBuilder {
 			// This is what makes the decision the decision. The measurement above and the build below
 			// are one call apart rather than two rule sets apart, so the length the lane was closed on
 			// is the length that goes down.
+			// The pad that frees the chord after this one, sized by building. Each candidate is laid
+			// and the chord built behind it in a trial, and the first that lands this chord flush on
+			// its wall with the next chord no longer stuck is kept; the rest is rolled back. See
+			// {@link #V2_PREPADS_A_STUCK_NEXT}.
+			if (unsticksTheNext && !turning && index + 1 < events.size()) {
+				EventGroup next = events.get(index + 1);
+				int nextWait = next.time() - event.time();
+				int step = opening.travel().getStepX();
+				int chosen = 0;
+				for (int k = unstickFrom; k <= V2_STUCK_PREPAD_CAP && chosen == 0
+						&& tipSignal - k >= 1; k++) {
+					Pad candidate = planPad(k, tipSignal, 0, 0);
+					if (candidate.cells().size() != k) {
+						break;
+					}
+					PlacementPlan.Behind was = placements.behind();
+					placements.beginTrial();
+					try {
+						Lane padded = emitPad(placements, opening, candidate, "padUnsticksTheNext");
+						Placed tried = addChordModule(placements, padded, trigger.triggerDelay(), event,
+							slack, true,
+							inTurn(placements, turning, leavingTurn, padded.pos(), lastCorner),
+							(wallAhead - padded.pos().getX()) * step, candidate.signal(), layout);
+						int leaves = tried.style() == ChordStyle.BUS
+								|| tried.style() == ChordStyle.SUNKEN_BUS
+							? DUST_RANGE - tried.busCells()
+							: tried.style().busHeaded()
+								? DUST_RANGE - STACKED_BUS_TRANSITION - tried.busCells()
+								: DUST_RANGE;
+						boolean flush = (wallAhead - tried.lane().pos().getX()) * step == 0;
+						if (flush && !nextChordIsStuck(placements, tried.lane(), next, nextWait, 0,
+								leaves, endsOnBus(tried.style(), tried.busCells()),
+								takesTheGapBehind(tried.style(), tried.busCells()),
+								tried.style().stacked(), turnCells, offBus, splitCells, climb > 0)) {
+							chosen = k;
+						}
+					} catch (IllegalArgumentException collided) {
+						// Nothing to keep.
+					} finally {
+						placements.rollbackTrial();
+						placements.behind(was);
+					}
+				}
+				placements.padded(chosen > 0 ? "v2UnstuckBy" + chosen : "v2UnstuckNoPadFits");
+				if (chosen > 0) {
+					Pad unsticking = planPad(chosen, tipSignal, 0, 0);
+					opening = emitPad(placements, opening, unsticking, "padUnsticksTheNext");
+					tipSignal = unsticking.signal();
+					behind = true;
+					ahead = turning ? Integer.MAX_VALUE
+						: (wallAhead - opening.pos().getX()) * opening.travel().getStepX();
+				}
+			}
 			Shape shape = opening.pos().equals(willOpenOn.pos()) && !turning
 				? shaped
 				: shapeFor(placements, opening, event, slack, behind,
@@ -10373,6 +10449,49 @@ public final class SongBuilder {
 	}
 
 	/**
+	 * The near half of a plain cut, crowded only where the far half's wire can take what it hands on.
+	 *
+	 * <p>A crowded near half held to its cells hands the notes it cannot hang to the far half, and
+	 * the far half grows a cell for every two of them -- at the end of the one run the near half, the
+	 * staircase and the far half share. A plain cut of twenty-two against a descent is fifteen
+	 * exactly, so one note handed on puts the far half's last cell out of reach: Guardian 26x5 at
+	 * {@code 29 73 268}, 396 notes dead off a far half of thirteen notes on six cells of wire. Where
+	 * the far half has the slack it is crowded as before; where it has not, the near half is laid
+	 * plain and asks the ground nothing -- a collision at worst, which the second walk records, and
+	 * never a dead line.</p>
+	 */
+	private static BlockPos addPlainNearHalf(PlacementPlan placements, BlockPos cursor,
+			Direction travel, Direction laneStep, int triggerDelay, List<EventNote> chord, int near,
+			int cells, int splitCells, List<EventNote> handedOn) {
+		PlacementPlan.Behind was = placements.behind();
+		placements.beginTrial();
+		BlockPos landed;
+		try {
+			landed = addSplitNearHalf(placements, cursor, travel, laneStep, triggerDelay,
+				chord.subList(0, near), cells, handedOn);
+		} catch (IllegalArgumentException collided) {
+			placements.rollbackTrial();
+			placements.behind(was);
+			throw collided;
+		}
+		int farNotes = chord.size() - near + handedOn.size();
+		// The cells the near half laid, off the ground: its repeater column, then its bus.
+		int nearLaid = Math.abs(landed.getX() - cursor.getX()) + Math.abs(landed.getZ() - cursor.getZ())
+			- 1;
+		if (handedOn.isEmpty()
+				|| nearLaid + splitCells + (farNotes + 1) / 2 <= DUST_RANGE) {
+			placements.commitTrial();
+			return landed;
+		}
+		placements.rollbackTrial();
+		placements.behind(was);
+		placements.padded("nearHalfKeptItsNotesForTheWire");
+		handedOn.clear();
+		return addSplitEventModule(placements, cursor, travel, laneStep, triggerDelay,
+			chord.subList(0, near));
+	}
+
+	/**
 	 * The near half of a v2 cut: the same module, laid crowded and held to its cells.
 	 *
 	 * <p>Crowded, so the bus asks the ground for each slot -- the floor above may have hung a sunken
@@ -14933,6 +15052,35 @@ public final class SongBuilder {
 
 	/** The most columns {@link #V2_PREPADS_A_STUCK_NEXT} will lay in front of one chord. */
 	static int V2_STUCK_PREPAD_CAP = 3;
+
+	/**
+	 * Whether the unsticking pad is tried from one column up, or only from the shortfall the
+	 * decided shape foretold. From one up it frees four more Guardian sizes (12x4 to 18x4) and
+	 * relays 26x5 into a dead far half; from the shortfall it is the measured arm.
+	 */
+	static boolean V2_UNSTICK_TRIES_EVERY_WIDTH = false;
+
+	/**
+	 * Whether the unsticking pad is sized by building the chord behind it in a trial, or laid at the
+	 * shortfall the decided shape foretold and left to land where it lands.
+	 *
+	 * <p>Off is the measured arm: Guardian over 90 sizes 135 breach blocks to 60, 76 clean to 79, no
+	 * dead, wrong or missing note, no collision. On, the trial frees 12x4 to 18x4 as well -- 36 and
+	 * 82 -- and relays 26x5 into a far half one cell past its wire (396 dead) and 24x3 into a
+	 * flat-turn collision. With {@link #NEAR_HALF_KEEPS_ITS_NOTES_FOR_THE_WIRE} the dead build is a
+	 * collision instead. Unmeasured over the library, so off until it is.</p>
+	 */
+	static boolean V2_UNSTICK_BY_TRIAL = false;
+
+	/**
+	 * Whether a plain cut's crowded near half may only hand notes on that the far half's wire can
+	 * carry. See {@link #addPlainNearHalf}. Off, the near half is laid as it was: crowded, held to its
+	 * cells, leftovers to the far half -- which grew Guardian 26x5's far half to thirteen notes on six
+	 * cells of wire under {@link #V2_UNSTICK_BY_TRIAL}. On, that build reads one collision and no
+	 * dead line -- but the key it counts never fired, so what changed is the trial round the near
+	 * half and not the rule, and that wants understanding before it is on.</p>
+	 */
+	static boolean NEAR_HALF_KEEPS_ITS_NOTES_FOR_THE_WIRE = false;
 
 	/**
 	 * Whether a bus puts its last unpaired note in the low-z slot of the cell.
