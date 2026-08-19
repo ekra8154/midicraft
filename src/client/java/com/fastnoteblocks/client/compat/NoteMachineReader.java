@@ -71,6 +71,37 @@ public final class NoteMachineReader {
 	 * every gap in it is a whole number of repeater ticks because every gap in the machine was.</p>
 	 */
 	public static final int TICKS_PER_REDSTONE_TICK = 120;
+
+	/**
+	 * Composer ticks in one game tick, which is the resolution this reads at.
+	 *
+	 * <p>The walk used to count in repeater ticks, because until pistons were understood nothing in a
+	 * note machine could land between two of them. A piston is the exception -- it takes three game
+	 * ticks to put the block it pushes where it is going, an odd number, so a chain tapped off one
+	 * runs permanently on the opposite half of every repeater tick. That is the whole of half
+	 * ticking, and a reader counting in repeater ticks cannot see it: it would round the two chains
+	 * onto the same beat and report a build playing ten notes a second as one playing five.</p>
+	 *
+	 * <p>Nothing changes for a machine without pistons. Every repeater delay is two of these, so a
+	 * build whose timing is whole repeater ticks reads back at exactly the numbers it always did.</p>
+	 */
+	public static final int TICKS_PER_GAME_TICK = TICKS_PER_REDSTONE_TICK / 2;
+
+	/**
+	 * Game ticks a piston takes to put the block it is pushing where it is going.
+	 *
+	 * <p>ekran's, measured in the world, and the reason any of this is worth reading. Three is odd,
+	 * and every other delay in redstone is a whole repeater tick -- two game ticks -- so this is the
+	 * only way to reach the half of the clock a repeater cannot.</p>
+	 *
+	 * <p>What is modelled is the push and nothing else. A sticky piston pulling its block back turns
+	 * a signal off, and a note block does not sound on a falling edge, so retraction cannot change
+	 * when a note plays. Quasi-connectivity is not modelled at all -- a piston powered through the
+	 * block above it reads here as a piston nobody powered -- and a build relying on it will come
+	 * back missing whatever hung off that piston, which is the honest failure rather than a wrong
+	 * answer.</p>
+	 */
+	private static final int PISTON_PUSH_GAME_TICKS = 3;
 	private static final int TEMPO_MICROS_PER_QUARTER =
 		ComposerProject.DEFAULT_PPQ * 100_000 / TICKS_PER_REDSTONE_TICK;
 
@@ -190,8 +221,6 @@ public final class NoteMachineReader {
 						survey.unsupported.add("comparators");
 					} else if (state.is(Blocks.OBSERVER)) {
 						survey.unsupported.add("observers");
-					} else if (state.is(Blocks.PISTON) || state.is(Blocks.STICKY_PISTON)) {
-						survey.unsupported.add("pistons");
 					}
 				}
 			}
@@ -250,7 +279,7 @@ public final class NoteMachineReader {
 			if (state.is(Blocks.REPEATER)) {
 				// A head repeater with nothing behind it: whatever the player throws to start the
 				// machine arrives here, and the song begins when this repeater lets go.
-				queue.add(new Pulse(state.getValue(RepeaterBlock.DELAY),
+				queue.add(new Pulse(2 * state.getValue(RepeaterBlock.DELAY),
 					start.relative(state.getValue(RepeaterBlock.FACING).getOpposite()), 15, false,
 					start, start));
 			} else {
@@ -270,6 +299,10 @@ public final class NoteMachineReader {
 		// arrives at a repeater that has already been through, which is what refusal means here.
 		Map<BlockPos, Set<BlockPos>> feeds = new LinkedHashMap<>();
 		Set<BlockPos> noteBlocks = new HashSet<>(survey.noteBlocks);
+		// A piston shoves once. Power arriving at one already extended changes nothing in the world
+		// and must change nothing here, or a piston reached twice would push its block twice and
+		// walk it off down the lane.
+		Set<BlockPos> pushed = new HashSet<>();
 
 		while (!queue.isEmpty()) {
 			Pulse pulse = queue.poll();
@@ -307,6 +340,12 @@ public final class NoteMachineReader {
 			if (noteBlocks.contains(position)) {
 				firedAt.merge(position, pulse.time(), Math::min);
 			}
+			if (state.is(Blocks.PISTON) || state.is(Blocks.STICKY_PISTON)) {
+				push(region, queue, position, state, pulse.time(), pulse.origin(), pushed);
+				// A piston is not a conductor and hands nothing on by wire. What it hands on is the
+				// block it shoves, three game ticks later and a cell further out.
+				continue;
+			}
 			// A repeater pointed straight at another one, with no block in between. Every delay
 			// longer than a single repeater can hold is built that way, so missing this reads a
 			// machine as ending at its first long silence -- which is to say, almost at once.
@@ -335,6 +374,63 @@ public final class NoteMachineReader {
 		reached.addAll(repeaterInput.keySet());
 		return new Walk(firedAt, reached, hasCycle(feeds));
 	}
+
+	/**
+	 * A piston taking its block a cell further out, three game ticks after the power arrives.
+	 *
+	 * <p>Only a block of redstone is followed, because only a block of redstone changes what the
+	 * machine does by moving. Shove a stone block and the wire either side of it is where it was;
+	 * shove a block of redstone and everything it lands beside is suddenly powered, which is what
+	 * a half-ticked build is built out of. Anything else the piston pushes is left alone rather than
+	 * guessed at.</p>
+	 *
+	 * <p>The block that was pushed is a source where it started, too, and already read as one -- it
+	 * is a block of redstone sitting in the world from the moment the machine is loaded, powering
+	 * whatever it touches. So the timing this adds is the arrival of that power somewhere new, which
+	 * is the only part a repeater could not have said.</p>
+	 */
+	private static void push(Region region, PriorityQueue<Pulse> queue, BlockPos piston,
+			BlockState state, int time, BlockPos origin, Set<BlockPos> pushed) {
+		if (!pushed.add(piston)) {
+			return;
+		}
+		if (state.getValue(net.minecraft.world.level.block.piston.PistonBaseBlock.EXTENDED)) {
+			// Already out. Its block is where it was going to be and has been read there all along.
+			return;
+		}
+		Direction facing = state.getValue(net.minecraft.world.level.block.DirectionalBlock.FACING);
+		// The whole column in front, not just the block on the face. A block of redstone touching a
+		// piston powers it, so a retracted piston with one on its face is not a thing that can exist
+		// -- it would already have fired. Every real half-ticked build therefore has a spacer between
+		// the two, and the piston shoves both. Looking only at the face found nothing, every time.
+		List<BlockPos> column = new ArrayList<>();
+		BlockPos ahead = piston.relative(facing);
+		while (column.size() <= PISTON_PUSH_LIMIT && region.contains(ahead)
+				&& !region.at(ahead).isAir()) {
+			column.add(ahead);
+			ahead = ahead.relative(facing);
+		}
+		// Nowhere to go: a piston with more than it can shift, or with the way blocked, does not fire
+		// at all -- and neither does anything that was waiting on the block arriving.
+		if (column.isEmpty() || column.size() > PISTON_PUSH_LIMIT || !region.contains(ahead)) {
+			return;
+		}
+		for (BlockPos block : column) {
+			if (!region.at(block).is(Blocks.REDSTONE_BLOCK)) {
+				continue;
+			}
+			// Only a block of redstone changes what the machine does by moving. Shove a stone block
+			// and the wire either side of it is where it was.
+			BlockPos landing = block.relative(facing);
+			for (Direction direction : Direction.values()) {
+				queue.add(new Pulse(time + PISTON_PUSH_GAME_TICKS, landing.relative(direction), 15,
+					false, landing, origin));
+			}
+		}
+	}
+
+	/** Blocks a piston will shift. More than this and it does not move at all. */
+	private static final int PISTON_PUSH_LIMIT = 12;
 
 	/**
 	 * Whether the signal can get back to a repeater it has already been through.
@@ -392,7 +488,7 @@ public final class NoteMachineReader {
 		// Marked as dust-fed: a block powered only by the wire on top of it must not turn round and
 		// re-power that wire to fifteen, which is a loop the game avoids by ignoring wires entirely
 		// while it works out what a wire is carrying.
-		if (isConductor(region.at(below))) {
+		if (isConductor(region.at(below)) || isPiston(region.at(below))) {
 			queue.add(new Pulse(time, below, 0, false, position, origin));
 		}
 		Set<Direction> pointsAt = pointsAt(region, position);
@@ -415,7 +511,10 @@ public final class NoteMachineReader {
 			// centre away to a stone: it read a note there as ending the chain, and it does not.
 			// ekran: "a note block can be powered just like a stone, there's no difference. a
 			// noteblock just cant have something on top, but that doesn't happen here".
-			if (isConductor(region.at(side))) {
+			//
+			// A piston is the other way round: not a conductor at all, but it does take power. Left
+			// out, dust lying against one never tells it anything.
+			if (isConductor(region.at(side)) || isPiston(region.at(side))) {
 				queue.add(new Pulse(time, side, 0, false, position, origin));
 			}
 			feedRepeater(region, queue, side, position, time, repeaterInput, origin, feeds);
@@ -559,8 +658,26 @@ public final class NoteMachineReader {
 			if (fromSource && region.at(side).is(Blocks.REDSTONE_WIRE)) {
 				queue.add(new Pulse(time, side, 15, true, position, origin));
 			}
+			if (isPiston(region.at(side))) {
+				queue.add(new Pulse(time, side, 0, false, position, origin));
+			}
 			feedRepeater(region, queue, side, position, time, repeaterInput, origin, feeds);
 		}
+	}
+
+	/**
+	 * Whether a block is a piston, which takes power like a note block rather than passing it on.
+	 *
+	 * <p>Asked separately from {@link #isConductor} because a piston is not one. Everything else a
+	 * signal reaches sideways is either a conductor, which relays it, or a note block, which sounds.
+	 * A piston does neither: it takes the power and moves. Left out, dust lying beside a piston
+	 * never tells it anything, and a half-ticked build reads as two machines that share nothing --
+	 * the lane past the piston is reached only from the block of redstone sitting on its face, whose
+	 * own walk begins wherever it happens to begin. That is how the game tick between two lanes goes
+	 * missing while every note is still individually correct.</p>
+	 */
+	private static boolean isPiston(BlockState state) {
+		return state.is(Blocks.PISTON) || state.is(Blocks.STICKY_PISTON);
 	}
 
 	/** Drives a repeater, if the block at {@code candidate} is one and {@code from} is its back. */
@@ -584,7 +701,7 @@ public final class NoteMachineReader {
 		// A repeater holds the signal for its delay and then hands it to the block in front. That
 		// hold is the only thing in a machine that makes time pass, so the whole song's rhythm is
 		// this one addition, repeated.
-		queue.add(new Pulse(time + state.getValue(RepeaterBlock.DELAY),
+		queue.add(new Pulse(time + 2 * state.getValue(RepeaterBlock.DELAY),
 			candidate.relative(facing.getOpposite()), 15, false, candidate, candidate));
 	}
 
@@ -760,7 +877,7 @@ public final class NoteMachineReader {
 					headNotes++;
 				}
 				int pitch = region.at(position).getValue(NoteBlock.NOTE);
-				long tick = (firedAt.get(position) - earliest) * (long)TICKS_PER_REDSTONE_TICK;
+				long tick = (firedAt.get(position) - earliest) * (long)TICKS_PER_GAME_TICK;
 				span = Math.max(span, tick);
 				String key = trace.versions().size() > 1
 					? number + "/" + instrument.id()
@@ -828,7 +945,10 @@ public final class NoteMachineReader {
 			// line at once -- but if they are really started apart, the parts are out by however far
 			// apart that is, and nothing in the blocks says.
 			warnings.add(versions + " separate machines, split into numbered layers and read as "
-				+ "though started together");
+				+ "though started together -- if these are the lanes of a half-ticked build, the "
+				+ "game tick between them is exactly what has been lost, and the song will read as "
+				+ "though every note sat on a whole repeater tick. Select the piston and the wiring "
+				+ "that drives both, so they read as one machine with one way in");
 		}
 		if (survey.torches > 0) {
 			// A torch is usually there to invert something, and inversion means a note sounds when

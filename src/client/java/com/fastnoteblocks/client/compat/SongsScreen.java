@@ -297,7 +297,12 @@ public final class SongsScreen extends Screen {
 
 			SongAnalysis analysis = analyses.get(row.id());
 			boolean ready = analysis.buildable();
-			String verdict = ready ? "Minecraft ready" : String.join(", ", analysis.problems());
+			// Same wording as the composer's status line, shortened to what fits a list row. A song
+			// that reads one thing here and another there is the drift this analysis exists to stop.
+			String verdict = ready
+				? "Minecraft ready - " + analysis.lanesNeeded() + " lane"
+					+ (analysis.lanesNeeded() == 1 ? "" : "s")
+				: String.join(", ", analysis.problems());
 			graphics.text(font, summary(row), 14, y + 17, 0xFF8A9098, false);
 			int verdictX = 14 + font.width(summary(row)) + 10;
 			if (verdictX < width - 160) {

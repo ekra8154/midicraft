@@ -658,15 +658,31 @@ public record ComposerProject(
 	 * two are the same grid, which they almost never are.</p>
 	 */
 	public long repeaterGridTicks() {
-		return repeaterGrid().gridTicks();
+		return buildGridTicks(false);
+	}
+
+	/** The same, in whichever tick the build will be able to place. */
+	public long buildGridTicks(boolean gameTicks) {
+		return buildGrid(gameTicks).gridTicks();
 	}
 
 	private record RepeaterGrid(long gridTicks, long repeaterTicks, int tempo) {
 	}
 
 	private RepeaterGrid repeaterGrid() {
+		return buildGrid(false);
+	}
+
+	/**
+	 * The finest composer-tick grid whose steps are whole build ticks.
+	 *
+	 * @param gameTicks measure in game ticks rather than repeater ticks. A game tick is half a
+	 *     repeater tick, so the denominator doubles and the grid comes out half as coarse -- which
+	 *     is the whole of what a second lane buys the composer.
+	 */
+	private RepeaterGrid buildGrid(boolean gameTicks) {
 		long numerator = ppq * 100_000L * Math.max(1, speedQuarters);
-		long denominator = tempoMicrosPerQuarter * 4L;
+		long denominator = tempoMicrosPerQuarter * 4L * (gameTicks ? 2L : 1L);
 		long divisor = greatestCommonDivisor(numerator, denominator);
 		long grid = Math.max(1L, numerator / divisor);
 		long repeaterTicks = Math.max(1L, denominator / divisor);
@@ -682,7 +698,18 @@ public record ComposerProject(
 	}
 
 	public RepeaterQuantize withQuantizedToRepeaters(Set<Long> scope) {
-		RepeaterGrid target = repeaterGrid();
+		return withQuantizedToBuildTicks(scope, false);
+	}
+
+	/**
+	 * Note starts moved onto the grid a build can place, in whichever tick it counts in.
+	 *
+	 * @param gameTicks aim at the game-tick grid, which is twice as fine and so moves each note at
+	 *     most half as far. What it costs is the second lane: a song with anything landing between
+	 *     repeater ticks needs both, and the status bar says so.
+	 */
+	public RepeaterQuantize withQuantizedToBuildTicks(Set<Long> scope, boolean gameTicks) {
+		RepeaterGrid target = buildGrid(gameTicks);
 		long grid = target.gridTicks();
 		long repeaterTicks = target.repeaterTicks();
 		int tempo = target.tempo();
@@ -866,7 +893,12 @@ public record ComposerProject(
 
 	/** Tempo at which one grid step is a whole number of repeater ticks. */
 	public int repeaterAlignedTempoFor(int gridTicks) {
-		return repeaterAlignedTempo(Math.max(1, gridTicks));
+		return alignedTempoFor(gridTicks, false);
+	}
+
+	/** The same, in game ticks when the build may use both lanes. */
+	public int alignedTempoFor(int gridTicks, boolean gameTicks) {
+		return alignedTempo(Math.max(1, gridTicks), gameTicks);
 	}
 
 	/**
@@ -949,7 +981,19 @@ public record ComposerProject(
 	 *     survive; 0 disables merging. Songs that fake sustain by re-triggering a note every tick
 	 *     are otherwise unbuildable, and force the whole song to be slowed to fit them.
 	 */
-	public MinecraftConversion convertToMinecraft(int quantizeTicks, boolean snapTempo, int repeatMergeTicks) {
+	public MinecraftConversion convertToMinecraft(int quantizeTicks, boolean snapTempo,
+			int repeatMergeTicks) {
+		return convertToMinecraft(quantizeTicks, snapTempo, repeatMergeTicks, false);
+	}
+
+	/**
+	 * @param gameTicks fit the song to the game-tick grid rather than the repeater-tick one. The
+	 *     build then needs two lanes -- one for each half of the tick -- and in exchange the tempo
+	 *     moves at most half as far to reach the grid, and the grid the notes are quantised onto is
+	 *     half as coarse. Every other step of the conversion is identical.
+	 */
+	public MinecraftConversion convertToMinecraft(int quantizeTicks, boolean snapTempo,
+			int repeatMergeTicks, boolean gameTicks) {
 		int grid = Math.max(1, quantizeTicks);
 		double repeatWindow = repeatMergeTicks <= 0
 			? 0.0
@@ -1045,7 +1089,8 @@ public record ComposerProject(
 			convertedActiveLayer, nextNoteId, endTick, speedQuarters);
 		NoteSpacing spacing = shaped.noteSpacing();
 		int convertedTempo = snapTempo && spacing.gridTicks() > 0L
-			? shaped.repeaterAlignedTempoFor((int)Math.min(Integer.MAX_VALUE, spacing.gridTicks()))
+			? shaped.alignedTempoFor(
+				(int)Math.min(Integer.MAX_VALUE, spacing.gridTicks()), gameTicks)
 			: tempoMicrosPerQuarter;
 
 		// The marker is a musical position, so a tempo change carries it along with the notes --
@@ -1411,6 +1456,45 @@ public record ComposerProject(
 		return (int)Math.max(0L, Math.round(physical * 4.0 / Math.max(1, speedQuarters)));
 	}
 
+	/**
+	 * The same gap in game ticks, which is twice as fine as a repeater can place on its own.
+	 *
+	 * <p>Two lanes started a game tick apart reach between the repeater ticks, so a build made of
+	 * them is quantised at 50 ms rather than 100 -- and the rounding has to happen at that
+	 * resolution to be worth anything. Rounding to repeater ticks first and doubling afterwards
+	 * lands on precisely the same moments as before and buys nothing at all, which is the whole
+	 * distinction between this and {@link #buildDelayTicks}.</p>
+	 *
+	 * <p>Rounds once, from the real duration, for the reason the method beside it does: rounding
+	 * twice destroys anything shorter than the coarser unit.</p>
+	 */
+	public int buildDelayGameTicks(long composerTicks) {
+		double physical = composerTicksToMinecraftTicks(
+			Math.max(0L, composerTicks), ppq, tempoMicrosPerQuarter
+		);
+		return (int)Math.max(0L, Math.round(physical * 2.0 * 4.0 / Math.max(1, speedQuarters)));
+	}
+
+	/**
+	 * The layers a build would place, with anything already heard removed.
+	 *
+	 * <p>The deduplication {@code toSequenceTracks} does, reachable on its own so that a build
+	 * reading the composition at a different resolution drops exactly the same notes. Doing it
+	 * afterwards instead would not be the same: gaps are rounded one at a time, and a gap that
+	 * swallows a wholly deduplicated event rounds differently from the two it replaces.</p>
+	 */
+	public List<Layer> buildLayers(boolean dedupeIdentical) {
+		List<Layer> chosen = new ArrayList<>();
+		Set<NoteSound> heard = dedupeIdentical ? new java.util.HashSet<>() : null;
+		for (Layer layer : layers) {
+			if (!layer.buildEnabled()) {
+				continue;
+			}
+			chosen.add(heard == null ? layer : withoutAlreadyHeard(layer, heard));
+		}
+		return List.copyOf(chosen);
+	}
+
 	private static List<Layer> normalizeLayers(List<Layer> source) {
 		List<Layer> normalized = new ArrayList<>();
 		if (source != null) {
@@ -1447,10 +1531,23 @@ public record ComposerProject(
 	 * itself, and it hides in the same place: at 1.00x the factor is 1 and everything agrees.</p>
 	 */
 	private int repeaterAlignedTempo(int gridTicks) {
+		return alignedTempo(gridTicks, false);
+	}
+
+	/**
+	 * The same, against whichever tick the build will actually be able to place.
+	 *
+	 * @param gameTicks aim at game ticks rather than repeater ticks, which a build of two lanes
+	 *     offset by half a tick can place. Halving the unit halves how far the tempo has to move to
+	 *     reach it: a grid step of 1.25 repeater ticks has to become 1 or 2 -- a fifth of the song's
+	 *     speed either way -- where in game ticks it is 2.5 and becomes 2 or 3, a tenth.
+	 */
+	private int alignedTempo(int gridTicks, boolean gameTicks) {
 		double speedFactor = Math.max(1, speedQuarters) / 4.0;
-		double gridRepeaterTicks = gridTicks * tempoMicrosPerQuarter
-			/ (double)ppq / 100_000.0 / speedFactor;
-		int nearestRepeaterTicks = Math.max(1, (int)Math.round(gridRepeaterTicks));
+		double perBuildTick = gameTicks ? 2.0 : 1.0;
+		double gridBuildTicks = gridTicks * tempoMicrosPerQuarter
+			/ (double)ppq / 100_000.0 / speedFactor * perBuildTick;
+		int nearestBuildTicks = Math.max(1, (int)Math.round(gridBuildTicks));
 		// Rounded up, like the nudge in withQuantizedToRepeaters and for the same reason. The tempo
 		// is an integer, so the span it produces lands either side of the grid; one microsecond low
 		// makes the span a hair wider than the grid, and every gap that should be exactly one
@@ -1458,7 +1555,7 @@ public record ComposerProject(
 		// just inside the grid, where the error is harmless. Found by snapping a song that had just
 		// been quantized to repeater ticks and watching 369 gaps go red.
 		return Math.max(1, (int)Math.ceil(
-			nearestRepeaterTicks * 100_000.0 * ppq * speedFactor / gridTicks
+			nearestBuildTicks / perBuildTick * 100_000.0 * ppq * speedFactor / gridTicks
 		));
 	}
 

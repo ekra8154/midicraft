@@ -312,6 +312,19 @@ public final class ComposerScreen extends Screen {
 	private static final long MAX_GRID_STRETCH = 4L;
 	private static final int NOTE_TRIGGER_WIDTH = 7;
 	private static final int SNAP_REPEATER = -1;
+	/**
+	 * Snap to the game tick, which is half a repeater tick and the finest a build can ever place.
+	 *
+	 * <p>Only reachable by a song built on two lanes. One chain of repeaters cannot put a note on an
+	 * odd game tick at all -- a repeater's shortest delay is two of them -- so until half ticking
+	 * this grid would have offered placements no machine could hold. A piston takes three game ticks
+	 * and a second chain tapped off one runs on the opposite half of every repeater tick, and
+	 * between them the two reach every game tick there is.</p>
+	 *
+	 * <p>Notes drawn on it are buildable on {@code HALF_TICK_LANE} and are not buildable on one lane,
+	 * which is what the status line's lane count is for.</p>
+	 */
+	private static final int SNAP_GAME_TICK = -2;
 	private static final long PREVIEW_BACKLOG_TOLERANCE_MICROS = 100_000L;
 	private static final int MIN_MIDI_NOTE = 0;
 	private static final int MAX_MIDI_NOTE = 127;
@@ -637,7 +650,7 @@ public final class ComposerScreen extends Screen {
 		int recordWidth = widestLabel(CONTROL_PADDING, "Record", "Recording");
 		int playWidth = widestLabel(CONTROL_PADDING, "Play", "Stop");
 		int snapWidth = widestLabel(CONTROL_PADDING, "Snap 1/4", "Snap 1/8", "Snap 1/16",
-			"Snap 1/32", "Snap repeater", "Snap off");
+			"Snap 1/32", "Snap repeater", "Snap game tick", "Snap off");
 		int speedWidth = widestLabel(CONTROL_PADDING + 8, "Speed 0.25x", "Speed 2.00x", "Speed 8.00x");
 		int speedX = width - 6 - speedWidth;
 		int snapX = speedX - CONTROL_GAP - snapWidth;
@@ -1173,7 +1186,13 @@ public final class ComposerScreen extends Screen {
 			fit.semitones(), fit.outNow(), fit.outAfter(), fit.melodyOutNow(), fit.melodyOutAfter())));
 	}
 
-	private void convertToMinecraft() {
+	/**
+	 * @param gameTicks fit the song to the grid two lanes can place rather than the one a single
+	 *     chain can. Every step is the same; only the tick the tempo and the quantise aim at
+	 *     changes, and it is half as coarse -- which is the whole reason to pick it. The build then
+	 *     needs the Half-tick lane layout, and the status bar says so once this has run.
+	 */
+	private void convertToMinecraft(boolean gameTicks) {
 		stopPlayback();
 		// Bake the timescale into the tempo first, so converting at 2.00x produces a project that
 		// genuinely runs that fast rather than one that still depends on a slider.
@@ -1188,7 +1207,7 @@ public final class ComposerScreen extends Screen {
 		boolean snapTempo = config.midiTempoFit() == FastNoteblocksConfig.MidiTempoFit.SNAP_TO_REPEATERS;
 		try {
 			MinecraftConversion conversion = source.convertToMinecraft(
-				gridTicks, snapTempo, config.repeatMergeTicks());
+				gridTicks, snapTempo, config.repeatMergeTicks(), gameTicks);
 			if (conversion.project().equals(project())) {
 				showResult(
 					Component.literal("This composition is already Minecraft-ready."));
@@ -1205,6 +1224,7 @@ public final class ComposerScreen extends Screen {
 			layersChanged();
 			rebuildMoveLayerButtons();
 			String report = "Converted at " + conversionGridLabel(gridTicks)
+				+ (gameTicks ? " on game ticks (2 lanes)" : " on repeater ticks")
 				+ ": " + conversion.shiftedNotes() + " pitch-shifted"
 				+ (conversion.addedLayers() > 0 ? ", +" + conversion.addedLayers() + " layers" : "")
 				+ (conversion.mergedRepeats() > 0
@@ -1279,7 +1299,8 @@ public final class ComposerScreen extends Screen {
 			case 2 -> 4;
 			case 4 -> 8;
 			case 8 -> SNAP_REPEATER;
-			case SNAP_REPEATER -> 0;
+			case SNAP_REPEATER -> SNAP_GAME_TICK;
+			case SNAP_GAME_TICK -> 0;
 			default -> 1;
 		};
 		snapButton.setMessage(snapLabel());
@@ -1292,6 +1313,7 @@ public final class ComposerScreen extends Screen {
 			case 4 -> "Snap 1/16";
 			case 8 -> "Snap 1/32";
 			case SNAP_REPEATER -> "Snap repeater";
+			case SNAP_GAME_TICK -> "Snap game tick";
 			default -> "Snap off";
 		});
 	}
@@ -1863,6 +1885,7 @@ public final class ComposerScreen extends Screen {
 			// differ whenever a repeater tick is not a whole number of song ticks, and quoting the
 			// second one here said 1/8 for a song whose repeater grid was nothing of the kind.
 			case QUANTIZE_REPEATERS -> project().repeaterGridTicks();
+			case QUANTIZE_GAME_TICKS -> project().buildGridTicks(true);
 			default -> 0L;
 		};
 		return ticks == 0L ? "" : Long.toString(ticks);
@@ -1894,13 +1917,15 @@ public final class ComposerScreen extends Screen {
 		return switch (action) {
 			case UNDO -> history.canUndo();
 			case REDO -> history.canRedo();
-			case CONVERT, MERGE_REPEATS, FIT_ALL_RANGE, SNAP_TEMPO,
-				QUANTIZE_QUARTER, QUANTIZE_EIGHTH, QUANTIZE_SIXTEENTH, QUANTIZE_REPEATERS ->
+			case CONVERT, CONVERT_GAME_TICKS, MERGE_REPEATS, FIT_ALL_RANGE, SNAP_TEMPO,
+				SNAP_TEMPO_GAME, QUANTIZE_QUARTER, QUANTIZE_EIGHTH, QUANTIZE_SIXTEENTH,
+				QUANTIZE_REPEATERS, QUANTIZE_GAME_TICKS ->
 				project().layers().stream().anyMatch(layer -> !layer.notes().isEmpty());
 			// Greyed out when no shift beats standing still, so the menu answers "is my song already
 			// sitting where it best can" without changing the key to find out.
 			case TRANSPOSE_BEST_FIT -> project().bestTransposeIntoRange().worthDoing();
 			case SELECT_OFF_GRID -> !projectStats().offGridNotes().isEmpty();
+			case SELECT_HALF_TICKED -> !projectStats().halfTickedNotes().isEmpty();
 			case SELECT_TOO_FREQUENT -> !projectStats().crowdedNotes().isEmpty();
 			case SELECT_OUT_OF_RANGE -> projectStats().outOfRange() > 0;
 			case SELECT_OVERLOADED_CHORDS -> projectStats().overloadedTicks() > 0
@@ -1997,23 +2022,28 @@ public final class ComposerScreen extends Screen {
 			case CLOSE_TO_GAME -> closeToGame();
 			case UNDO -> undo();
 			case REDO -> redo();
-			case CONVERT -> convertToMinecraft();
+			case CONVERT -> convertToMinecraft(false);
+			case CONVERT_GAME_TICKS -> convertToMinecraft(true);
 			case MERGE_REPEATS -> applyStep("Merged", "merge repeated notes",
 				project().withMergedRepeats(config.repeatMergeTicks(), selectedNotes));
 			case QUANTIZE_QUARTER -> quantizeTo(project().ppq());
 			case QUANTIZE_EIGHTH -> quantizeTo(Math.max(1, project().ppq() / 2));
 			case QUANTIZE_SIXTEENTH -> quantizeTo(Math.max(1, project().ppq() / 4));
-			case QUANTIZE_REPEATERS -> quantizeToRepeaters();
+			case QUANTIZE_REPEATERS -> quantizeToBuildTicks(false);
+			case QUANTIZE_GAME_TICKS -> quantizeToBuildTicks(true);
 			case FIT_ALL_RANGE -> applyStep("Fitted to range", "fit notes into range",
 				project().withAllFittedToRange(selectedNotes));
 			case TRANSPOSE_BEST_FIT -> transposeToBestFit();
-			case SNAP_TEMPO -> snapTempo();
+			case SNAP_TEMPO -> snapTempo(false);
+			case SNAP_TEMPO_GAME -> snapTempo(true);
 			case SNAP_END -> applyStep("End snapped", "snap the end to the grid", project().withEndTick(
 				snapEndToRepeaterGrid()));
 			case TRIM_END -> applyStep("Trimmed", "trim the end to the last note",
 				project().trimmedToContent());
 			case SELECT_OFF_GRID -> selectNotesWhere("off grid",
 				note -> projectStats().offGrid().contains(note.startTick()), true);
+			case SELECT_HALF_TICKED -> selectNotesWhere("half-ticked",
+				note -> projectStats().halfTicked().contains(note.startTick()), true);
 			case SELECT_TOO_FREQUENT -> selectNotesWhere("too frequent",
 				note -> projectStats().crowded().contains(note.startTick()), true);
 			case SELECT_OUT_OF_RANGE -> selectNotesWhere("out of range",
@@ -2037,15 +2067,15 @@ public final class ComposerScreen extends Screen {
 	 * before. On the same songs it is now a no-op, which is the right answer for something already
 	 * aligned.</p>
 	 */
-	private void snapTempo() {
+	private void snapTempo(boolean gameTicks) {
 		ComposerProject baked = project().withBakedSpeed();
 		ComposerProject.NoteSpacing spacing = baked.noteSpacing();
 		if (spacing.gridTicks() <= 0L) {
 			showResult(Component.literal("Not enough notes to work out a spacing."));
 			return;
 		}
-		int tempo = baked.repeaterAlignedTempoFor(
-			(int)Math.min(Integer.MAX_VALUE, spacing.gridTicks()));
+		int tempo = baked.alignedTempoFor(
+			(int)Math.min(Integer.MAX_VALUE, spacing.gridTicks()), gameTicks);
 		ComposerProject snapped = baked.withTempo(tempo);
 		// Measured against the song's own tightest gap, not against a repeater tick. A slow song
 		// whose notes are naturally sixteen ticks apart is not a problem and its tempo does not
@@ -2077,18 +2107,22 @@ public final class ComposerScreen extends Screen {
 	 * it, so it is routinely something like 330 ticks that no musical grid would ever offer, and
 	 * how many notes it folded together is the thing to listen for afterwards.</p>
 	 */
-	private void quantizeToRepeaters() {
-		ComposerProject.RepeaterQuantize result = project().withQuantizedToRepeaters(selectedNotes);
+	private void quantizeToBuildTicks(boolean gameTicks) {
+		ComposerProject.RepeaterQuantize result =
+			project().withQuantizedToBuildTicks(selectedNotes, gameTicks);
 		if (result.project().equals(project())) {
-			showResult(Component.literal("Already on the repeater grid."));
+			showResult(Component.literal(
+				"Already on the " + (gameTicks ? "game-tick" : "repeater") + " grid."));
 			return;
 		}
 		int merged = distinctStartTicks(project()) - distinctStartTicks(result.project());
-		apply("quantize to the repeater grid", result.project());
+		apply("quantize to the " + (gameTicks ? "game-tick" : "repeater") + " grid",
+			result.project());
 		layersChanged();
 		String report = String.format(java.util.Locale.ROOT,
-			"Quantized to %d ticks (%d repeater tick%s)%s%s",
-			result.gridTicks(), result.repeaterTicks(), result.repeaterTicks() == 1 ? "" : "s",
+			"Quantized to %d ticks (%d %s tick%s)%s%s",
+			result.gridTicks(), result.repeaterTicks(), gameTicks ? "game" : "repeater",
+			result.repeaterTicks() == 1 ? "" : "s",
 			merged > 0 ? ", " + merged + " notes folded into chords" : "",
 			result.tempoNudged() ? ", tempo nudged to fit" : "");
 		showResult(Component.literal(report));
@@ -2294,6 +2328,13 @@ public final class ComposerScreen extends Screen {
 				+ "quantize note starts onto the chosen grid; octave-shift out-of-range notes in, "
 				+ "splitting a layer per shift it needs; snap the tempo so the grid lands on whole "
 				+ "repeater ticks; snap the end marker to match.";
+			case CONVERT_GAME_TICKS -> "The same conversion, aimed at game ticks instead of "
+				+ "repeater ticks. A game tick is half a repeater tick, so the grid the notes land "
+				+ "on is half as coarse and the tempo moves at most half as far to reach it -- a "
+				+ "song that had to be slowed or swung to fit often needs neither. The build then "
+				+ "needs the Half-tick lane layout, which plays the even game ticks down one lane "
+				+ "and the odd ones down a second beside it. The status bar says how many lanes a "
+				+ "song wants once this has run.";
 			case MERGE_REPEATS -> "Collapses a pitch that re-triggers faster than the repeat "
 				+ "window. Songs fake sustain this way, and note blocks cannot sustain.";
 			case QUANTIZE_QUARTER, QUANTIZE_EIGHTH, QUANTIZE_SIXTEENTH ->
@@ -2308,12 +2349,20 @@ public final class ComposerScreen extends Screen {
 				+ "as a chord, which is how a passage faster than redstone becomes buildable without "
 				+ "slowing the whole song down. Moves the tempo by a fraction of a percent if no "
 				+ "small grid exists at the current one.";
+			case QUANTIZE_GAME_TICKS -> "The same, on the grid two lanes can reach: half the step, "
+				+ "so half the worst a note has to move, and notes a single game tick apart stay "
+				+ "apart instead of folding together. Costs the second lane -- anything landing "
+				+ "between repeater ticks needs the Half-tick lane layout to play it.";
 			case FIT_ALL_RANGE -> "Octave-shifts notes outside F#3-F#5 into it. Quick rather than "
 				+ "faithful: intervals across a layer can change.";
 			case SNAP_TEMPO -> "Moves the tempo as little as it can while making the spacing the "
 				+ "song already has land on whole repeater ticks, folding the speed slider in first. "
 				+ "Leaves every note where it is, so it does nothing for a song whose notes share no "
 				+ "usable grid -- it says so rather than dragging the tempo down to meet them.";
+			case SNAP_TEMPO_GAME -> "The same, aimed at game ticks. Half the unit means half the "
+				+ "distance the tempo ever has to move: a spacing that sits a quarter of a repeater "
+				+ "tick off costs a fifth of the song's speed to snap, and a tenth of it here. "
+				+ "Wants the Half-tick lane layout for the result.";
 			case SNAP_END -> "Moves the end marker so its trailing delay is a whole number of "
 				+ "repeater ticks.";
 			case TRIM_END -> "Pulls the end marker back to the last note, discarding trailing "
@@ -2332,6 +2381,10 @@ public final class ComposerScreen extends Screen {
 				+ "and both notes come back.";
 			case SELECT_OFF_GRID -> "Selects notes whose gap from the previous one is not a whole "
 				+ "repeater tick.";
+			case SELECT_HALF_TICKED -> "Selects the notes that land between repeater ticks -- the "
+				+ "ones a single chain cannot place, and so the reason a song needs two lanes. Not "
+				+ "faults: a build of two lanes plays them exactly. Worth seeing when you would "
+				+ "rather nudge a handful of notes than carry a second lane for them.";
 			case SELECT_TOO_FREQUENT -> "Selects notes arriving less than one repeater tick after "
 				+ "the previous one -- faster than redstone can retrigger.";
 			case SELECT_OUT_OF_RANGE -> "Selects notes outside the note-block range of F#3-F#5.";
@@ -3925,7 +3978,13 @@ public final class ComposerScreen extends Screen {
 
 		// Most important first: the verdict, then whatever is blocking it, then context.
 		List<String> segments = new ArrayList<>();
-		segments.add(ready ? "MINECRAFT READY" : "NOT BUILDABLE");
+		// The lane count belongs on the verdict rather than beside it: it is not a caveat on being
+		// buildable, it is what being buildable means for this song. One lane is a plain chain of
+		// repeaters; two is that chain and a second one started half a tick later off a piston.
+		segments.add(ready
+			? "MINECRAFT READY - " + stats.lanesNeeded() + " lane"
+				+ (stats.lanesNeeded() == 1 ? "" : "s") + " needed"
+			: "NOT BUILDABLE");
 		if (stats.outOfRange() > 0) {
 			segments.add(stats.outOfRange() + " out of range");
 		}
@@ -3985,6 +4044,18 @@ public final class ComposerScreen extends Screen {
 			? 0xFF5AD46A
 			: peakChord >= CHORD_WARNING_THRESHOLD || overloaded > 0 ? 0xFFFF7777 : 0xFFFFAA00;
 		graphics.text(font, status.toString(), 8, height - 16, color, false);
+		// Amber after the green, in its own draw, because it is neither a problem nor part of the
+		// verdict: the song builds, and it builds as two machines rather than one. A reader who
+		// takes in only the colour should come away with "fine, but there is something to know",
+		// which is exactly what a second colour after a green one says.
+		if (ready && !stats.halfTickedNotes().isEmpty()) {
+			String note = "   half-ticked: " + stats.halfTickedNotes().size()
+				+ " notes land between repeater ticks, so the build uses 2 lanes";
+			int after = 8 + font.width(status.toString());
+			if (after + font.width(note) <= width - 8) {
+				graphics.text(font, note, after, height - 16, 0xFFFFAA00, false);
+			}
+		}
 	}
 
 	/**
@@ -5551,10 +5622,11 @@ public final class ComposerScreen extends Screen {
 			return;
 		}
 		minecraft.gui.setScreen(new BuildOptionsScreen(this, project().name(), config.tracks(),
-				pasteMode(), mode -> {
+				project(), config.dedupeIdenticalNotes(), pasteMode(), mode -> {
 			SongBuilder.PastePlan plan;
 			try {
-				plan = SongBuilder.plan(minecraft, config.tracks(), mode, project().name());
+				plan = SongBuilder.plan(minecraft, config.tracks(), mode, project(),
+					config.dedupeIdenticalNotes());
 			} catch (IllegalArgumentException refused) {
 				minecraft.gui.setScreen(this);
 				showResult(Component.literal(refused.getMessage())
@@ -6176,6 +6248,12 @@ public final class ComposerScreen extends Screen {
 		if (snapSubdivision == SNAP_REPEATER) {
 			return Math.max(1L, Math.round(SongAnalysis.redstoneTickSpan(project())));
 		}
+		if (snapSubdivision == SNAP_GAME_TICK) {
+			// Half a repeater tick. Halved before rounding rather than after, because rounding the
+			// repeater span and then halving it puts the grid back on whole repeater ticks whenever
+			// that span is odd -- and the odd tick is the only thing this grid exists to reach.
+			return Math.max(1L, Math.round(SongAnalysis.redstoneTickSpan(project()) / 2.0));
+		}
 		return snapSubdivision == 0 ? 1L : Math.max(1L, project().ppq() / snapSubdivision);
 	}
 
@@ -6409,9 +6487,10 @@ public final class ComposerScreen extends Screen {
 				+ "delays instead of whatever the source file happened to hold.",
 			new ToolbarAction[] {
 				ToolbarAction.QUANTIZE_QUARTER, ToolbarAction.QUANTIZE_EIGHTH,
-				ToolbarAction.QUANTIZE_SIXTEENTH, ToolbarAction.QUANTIZE_REPEATERS
+				ToolbarAction.QUANTIZE_SIXTEENTH, ToolbarAction.QUANTIZE_REPEATERS,
+				ToolbarAction.QUANTIZE_GAME_TICKS
 			},
-			new String[] {"1/4 note", "1/8 note", "1/16 note", "Repeater ticks"}, 3),
+			new String[] {"1/4 note", "1/8 note", "1/16 note", "Repeater ticks", "Game ticks"}, 3),
 		END("End", "Where the song stops, which is a delay the build has to place like any other.",
 			new ToolbarAction[] {ToolbarAction.SNAP_END, ToolbarAction.TRIM_END},
 			new String[] {"Snap to grid", "Trim to last note"}, -1);
@@ -6492,15 +6571,18 @@ public final class ComposerScreen extends Screen {
 		CLOSE_TO_GAME("Close to game"),
 		UNDO("Undo"),
 		REDO("Redo"),
-		CONVERT("Convert for Minecraft"),
+		CONVERT("Convert for Minecraft (redstone ticks, 1 lane)"),
+		CONVERT_GAME_TICKS("Convert for Minecraft (game ticks, 2 lanes)"),
 		MERGE_REPEATS("Merge repeats", true),
 		QUANTIZE_QUARTER("Quantize to 1/4", true),
 		QUANTIZE_EIGHTH("Quantize to 1/8", true),
 		QUANTIZE_SIXTEENTH("Quantize to 1/16", true),
 		QUANTIZE_REPEATERS("Quantize to repeater ticks", true),
+		QUANTIZE_GAME_TICKS("Quantize to game ticks", true),
 		FIT_ALL_RANGE("Fit into range", true),
 		TRANSPOSE_BEST_FIT("Transpose to best fit"),
 		SNAP_TEMPO("Snap tempo (whole song)"),
+		SNAP_TEMPO_GAME("Snap tempo to game ticks (whole song)"),
 		INCLUDE_SELECTED("Include selected layers in sequence"),
 		SET_INCLUDED_TO_SELECTION("Include only selected layers in sequence"),
 		PASTE_IN_WORLD("Paste current sequence in world (requires op)..."),
@@ -6509,6 +6591,7 @@ public final class ComposerScreen extends Screen {
 		SNAP_END("Snap end to grid"),
 		TRIM_END("Trim end to last note"),
 		SELECT_OFF_GRID("Off grid"),
+		SELECT_HALF_TICKED("Half-ticked"),
 		SELECT_TOO_FREQUENT("Too frequent"),
 		SELECT_OUT_OF_RANGE("Out of range"),
 		SELECT_OVERLOADED_CHORDS("Overloaded chords"),
@@ -6522,14 +6605,15 @@ public final class ComposerScreen extends Screen {
 		};
 		/** Quantize slots in at index 4 and End goes on the end; see {@link #menuRows}. */
 		private static final ToolbarAction[] EDIT_ACTIONS = {
-			UNDO, REDO, CONVERT, MERGE_REPEATS, TRANSPOSE_BEST_FIT, FIT_ALL_RANGE, SNAP_TEMPO
+			UNDO, REDO, CONVERT, CONVERT_GAME_TICKS, MERGE_REPEATS, TRANSPOSE_BEST_FIT,
+			FIT_ALL_RANGE, SNAP_TEMPO, SNAP_TEMPO_GAME
 		};
 		private static final ToolbarAction[] BUILD_ACTIONS = {
 			INCLUDE_SELECTED, SET_INCLUDED_TO_SELECTION, TOGGLE_DEDUPE, PASTE_IN_WORLD, BUILD_CANCEL
 		};
 		private static final ToolbarAction[] SELECT_ACTIONS = {
-			SELECT_OFF_GRID, SELECT_TOO_FREQUENT, SELECT_OUT_OF_RANGE, SELECT_OVERLOADED_CHORDS,
-			SELECT_ALL_NOTES, SELECT_NONE
+			SELECT_OFF_GRID, SELECT_HALF_TICKED, SELECT_TOO_FREQUENT, SELECT_OUT_OF_RANGE,
+			SELECT_OVERLOADED_CHORDS, SELECT_ALL_NOTES, SELECT_NONE
 		};
 		private final String label;
 		/** Whether the action can be limited to the selected notes. Tempo is a property of the

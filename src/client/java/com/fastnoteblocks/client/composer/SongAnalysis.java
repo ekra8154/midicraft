@@ -26,6 +26,7 @@ public record SongAnalysis(
 	long maximumNoteDuration,
 	Set<Long> offGrid,
 	Set<Long> crowded,
+	Set<Long> halfTicked,
 	Map<Long, Double> gaps,
 	long endTick,
 	double secondsLong,
@@ -86,6 +87,7 @@ public record SongAnalysis(
 		}
 		Set<Long> offGrid = new LinkedHashSet<>();
 		Set<Long> crowded = new LinkedHashSet<>();
+		Set<Long> halfTicked = new LinkedHashSet<>();
 		Map<Long, Double> gaps = new HashMap<>();
 		long previous = Long.MIN_VALUE;
 		for (long tick : checked.stream().sorted().toList()) {
@@ -96,17 +98,31 @@ public record SongAnalysis(
 				// repeater grid do not share a common multiple.
 				double gap = (tick - previous) / span;
 				gaps.put(tick, gap);
-				if (gap < 1.0 - 1.0e-6) {
+				// Measured in game ticks, because that is the finest a build can now place. A
+				// repeater still cannot delay by less than one repeater tick, but a second lane
+				// started half a tick late can, and the two together reach every game tick. So the
+				// grid this is held to is twice as fine as the repeaters laying it, and the gaps
+				// that fall between two repeater ticks are not errors any more -- they are the
+				// reason the second lane exists.
+				double gameGap = gap * 2.0;
+				long whole = Math.round(gameGap);
+				if (gameGap < 1.0 - 1.0e-6) {
 					crowded.add(tick);
-				} else if (Math.abs(gap - Math.round(gap)) > 0.02) {
+				} else if (Math.abs(gameGap - whole) > 0.04) {
 					offGrid.add(tick);
+				} else if (whole % 2L != 0L) {
+					// A whole number of game ticks, and an odd one. Everything before this gap and
+					// everything after it are on opposite halves of the tick, so they cannot share
+					// a chain and the build needs both lanes.
+					halfTicked.add(tick);
 				}
 			}
 			previous = tick;
 		}
 		return new SongAnalysis(totalNotes, outOfRange, Map.copyOf(counts), peak, overloaded,
-			maximumNoteDuration, Set.copyOf(offGrid), Set.copyOf(crowded), Map.copyOf(gaps),
-			project.endTick(), project.endTick() / span / 10.0, duplicateNotes, buildNotes);
+			maximumNoteDuration, Set.copyOf(offGrid), Set.copyOf(crowded), Set.copyOf(halfTicked),
+			Map.copyOf(gaps), project.endTick(), project.endTick() / span / 10.0, duplicateNotes,
+			buildNotes);
 	}
 
 	/**
@@ -152,6 +168,26 @@ public record SongAnalysis(
 
 	public Set<Long> offGridNotes() {
 		return withoutMarker(offGrid);
+	}
+
+	public Set<Long> halfTickedNotes() {
+		return withoutMarker(halfTicked);
+	}
+
+	/**
+	 * Lanes a build of this song needs: one, or two where anything half-ticks.
+	 *
+	 * <p>Two events an odd number of game ticks apart sit on opposite halves of the redstone tick,
+	 * and no single chain of repeaters can hold both -- so one such gap anywhere in the song is
+	 * enough to need the second lane, and a thousand of them need no more than that.</p>
+	 *
+	 * <p>Notes only. The end marker is measured with them but is not one of them, and a lane exists
+	 * to sound notes: trailing silence landing half a tick out asks nothing of a second lane, since
+	 * nothing sounds there. Counting it said "2 lanes" over songs with nothing half-ticked in them,
+	 * which is the same shape of nonsense as reporting a problem note that does not exist.</p>
+	 */
+	public int lanesNeeded() {
+		return halfTickedNotes().isEmpty() ? 1 : 2;
 	}
 
 	private Set<Long> withoutMarker(Set<Long> ticks) {

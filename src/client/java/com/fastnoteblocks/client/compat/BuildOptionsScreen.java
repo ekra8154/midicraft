@@ -33,6 +33,15 @@ final class BuildOptionsScreen extends Screen {
 	private final Screen parent;
 	private final String songName;
 	private final List<FastNoteblocksConfig.SequenceTrack> sequence;
+	/**
+	 * The composition behind that sequence, for the one layout that has to read it.
+	 *
+	 * <p>Only the half-tick lane looks at this, and only because a sequence delay is denominated in
+	 * repeater ticks and its notes are not. Everything else forecasts from the sequence, which is
+	 * still the thing that gets built.</p>
+	 */
+	private final com.fastnoteblocks.client.composer.ComposerProject project;
+	private final boolean dedupeIdenticalNotes;
 	private final Consumer<SongBuilder.PasteMode> confirm;
 	private SongBuilder.PasteMode mode;
 	/**
@@ -263,6 +272,8 @@ final class BuildOptionsScreen extends Screen {
 		Screen parent,
 		String songName,
 		List<FastNoteblocksConfig.SequenceTrack> sequence,
+		com.fastnoteblocks.client.composer.ComposerProject project,
+		boolean dedupeIdenticalNotes,
 		SongBuilder.PasteMode initialMode,
 		Consumer<SongBuilder.PasteMode> confirm
 	) {
@@ -270,6 +281,8 @@ final class BuildOptionsScreen extends Screen {
 		this.parent = parent;
 		this.songName = songName;
 		this.sequence = sequence;
+		this.project = project;
+		this.dedupeIdenticalNotes = dedupeIdenticalNotes;
 		this.confirm = confirm;
 		this.mode = initialMode;
 		this.commandsPerTick = FastNoteblocksConfig.get().commandsPerTick();
@@ -299,7 +312,8 @@ final class BuildOptionsScreen extends Screen {
 	private boolean hasLaneControls() {
 		return mode == SongBuilder.PasteMode.COMPACT_LANE
 			|| mode == SongBuilder.PasteMode.ULTRA_COMPACT_LANE
-			|| mode == SongBuilder.PasteMode.ULTRA_COMPACT_LANE_V2;
+			|| mode == SongBuilder.PasteMode.ULTRA_COMPACT_LANE_V2
+			|| mode == SongBuilder.PasteMode.ULTRA_HALF_TICK_LANE;
 	}
 
 	@Override
@@ -425,8 +439,12 @@ final class BuildOptionsScreen extends Screen {
 			}
 			Forecast result;
 			try {
-				SongBuilder.PastePlan plan = SongBuilder.createPastePlan(
-					origin, SongBuilder.eventNotes(sequence), planned, limits);
+				// The same events the Paste button would build from, which for the half-tick lane
+				// means the composition rather than the sequence -- forecasting the sequence there
+				// would predict a build at twice the speed of the one it is about to make.
+				SongBuilder.PastePlan plan = SongBuilder.createPastePlan(origin,
+					SongBuilder.notesFor(planned, sequence, project, dedupeIdenticalNotes),
+					planned, limits);
 				// Off the blocks rather than off the height, which is a span and says nothing
 				// about where the span sits. getMaxY is the highest cell that takes a block, not
 				// the first that refuses one.
@@ -627,6 +645,16 @@ final class BuildOptionsScreen extends Screen {
 				+ "there. Chords above 25 notes are not built. Experimental: try it against the "
 				+ "layout above rather than instead of it.";
 			case LANE -> "One straight line. Easiest to read and repair, largest footprint.";
+			case ULTRA_HALF_TICK_LANE -> "Two Ultra compact lane snakes side by side, one playing "
+				+ "the even game ticks and one the odd, with four blocks between their corridors. "
+				+ "Same width and floor controls, applied to each. You wire the head yourself: the "
+				+ "second snake must start exactly one game tick after the first. Experimental -- "
+				+ "the two are not yet paced against each other, so they drift apart as the song "
+				+ "goes on.";
+			case HALF_TICK_LANE -> "Two straight lines, the right one playing the even game ticks "
+				+ "and the left the odd. Plays the song at double speed and twice the timing "
+				+ "precision. You wire the head yourself: the left lane must start exactly one game "
+				+ "tick after the right.";
 		};
 	}
 
