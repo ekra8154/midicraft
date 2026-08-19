@@ -51,9 +51,33 @@ class FaultCensusProbe {
 		return given == null || given.isBlank() ? fallback : given.strip();
 	}
 
-	/** Sizes as {@code 40x3}, because that is how they are said out loud. */
+	/**
+	 * Sizes as {@code 40x3}, because that is how they are said out loud -- or a grid,
+	 * {@code -Dcensus.grid=8-50/1-5/1-10/7}: widths from 8 to 50 in seeded random steps of one to
+	 * five, every floor count from one to ten. ekran's thorough run: the corners a hand-picked list
+	 * never visits, and a seed so the same run can be made twice.
+	 */
 	private static List<int[]> sizes() {
 		List<int[]> found = new ArrayList<>();
+		String grid = text("grid", "");
+		if (!grid.isEmpty()) {
+			String[] part = grid.split("/");
+			String[] widths = part[0].split("-");
+			String[] steps = part[1].split("-");
+			String[] floors = part[2].split("-");
+			java.util.Random random = new java.util.Random(part.length > 3
+				? Long.parseLong(part[3]) : 7L);
+			int low = Integer.parseInt(steps[0]);
+			int high = Integer.parseInt(steps[1]);
+			for (int width = Integer.parseInt(widths[0]); width <= Integer.parseInt(widths[1]);
+					width += low + random.nextInt(high - low + 1)) {
+				for (int floor = Integer.parseInt(floors[0]); floor <= Integer.parseInt(floors[1]);
+						floor++) {
+					found.add(new int[] {width, floor});
+				}
+			}
+			return found;
+		}
 		for (String pair : text("sizes", "20x5,24x3,40x3,40x5,48x1").split(",")) {
 			String[] half = pair.strip().toLowerCase(Locale.ROOT).split("x");
 			found.add(new int[] {Integer.parseInt(half[0]), Integer.parseInt(half[1])});
@@ -132,10 +156,17 @@ class FaultCensusProbe {
 		SongBuilder.PasteMode mode = mode();
 		List<int[]> sizes = sizes();
 		String only = text("songs", "");
+		// -Dcensus.real=true leaves the synthetic limit songs out: they are the ones named ultra-*,
+		// built to carry chords of thirty, and ekran's scope is chords to twenty-five.
+		boolean realOnly = Boolean.parseBoolean(text("real", "false"));
+		// -Dcensus.readback=false plans and stops: breaches and collisions both come out of the walk,
+		// and the readback that finds dead, wrong and missing notes is most of a build's cost.
+		boolean readback = Boolean.parseBoolean(text("readback", "true"));
 		List<Path> files;
 		try (Stream<Path> listing = Files.list(SONGS)) {
 			files = listing.filter(path -> path.toString().endsWith(".json"))
 				.filter(path -> only.isEmpty() || path.getFileName().toString().contains(only))
+				.filter(path -> !realOnly || !path.getFileName().toString().startsWith("ultra-"))
 				.sorted().toList();
 		}
 		// A filter that matches nothing is not an empty library, it is a typo -- and the report for
@@ -170,6 +201,20 @@ class FaultCensusProbe {
 				continue;
 			}
 			for (int[] size : sizes) {
+				if (!readback) {
+					try {
+						SongBuilder.PastePlan plan = planOnly(notes, mode, size[0], size[1]);
+						tally(plan);
+						rows.add(new Row(name, size[0], size[1], 0, droppedIn(plan), plan.wrongNotes(),
+							plan.breaches().size(),
+							plan.breaches().stream().mapToInt(Integer::intValue).sum(),
+							plan.spanZ(), null, null, List.of(), 0, plan.collisions().size()));
+					} catch (RuntimeException refused) {
+						rows.add(new Row(name, size[0], size[1], 0, 0, 0, 0, 0, 0,
+							String.valueOf(refused.getMessage()), null, List.of(), 0, 0));
+					}
+					continue;
+				}
 				try {
 					FaultView.Build built = FaultView.of(name, notes, mode, size[0], size[1], 4, false);
 					tally(built.plan());
@@ -195,6 +240,19 @@ class FaultCensusProbe {
 			}
 		}
 		report(mode, sizes, rows, System.currentTimeMillis() - started, held);
+	}
+
+	/** The plan and nothing after it: what the preview does, without the reader. */
+	private static SongBuilder.PastePlan planOnly(List<SongBuilder.EventNote> notes,
+			SongBuilder.PasteMode mode, int width, int floors) {
+		boolean marking = SongBuilder.MARK_UNREACHED;
+		try {
+			SongBuilder.MARK_UNREACHED = false;
+			return SongBuilder.createPastePlan(new net.minecraft.core.BlockPos(0, 64, 0), notes, mode,
+				new SongBuilder.BuildLimits(4, width, floors));
+		} finally {
+			SongBuilder.MARK_UNREACHED = marking;
+		}
 	}
 
 	private static void report(SongBuilder.PasteMode mode, List<int[]> sizes, List<Row> rows,
