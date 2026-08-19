@@ -2940,8 +2940,28 @@ public final class SongBuilder {
 			// all-25 song and moves its breach count by nothing at all, and takes Guardian from 62 to
 			// 95. Whatever leaves those lanes unable to close, it is not that they were one chord too
 			// greedy about the columns.
+			// Priced the way the turn itself is priced, which is the third place in this walk to put a
+			// number on one staircase and the only one never told about the discount.
+			//
+			// A lane coming to rest on a bus hands the climb its own last block, so the ladder starts
+			// three cells up rather than five -- {@code offBus} against {@code turnCells}. {@link
+			// #canTurn} takes that discount and says in its own comment what happens when an arm does
+			// not: "a lane holding four and needing three was refused its turn by the arm that had not
+			// been told". This was that arm. A chord ending on a bus, leaving three, needing three,
+			// read as stranding the turn.
+			//
+			// ekran found it on Guardian 24x3 at {@code 25 69 127}: thirteen columns of acacia and a
+			// stacked bus of twenty-four carried up to the next floor, which they then moved down by
+			// hand -- "it turns out the whole thing fits just perfectly. no modifications needed. it
+			// even connects onto the glass 3-ascent perfectly."
+			//
+			// Written the same way the wall-reach test writes it fifteen hundred lines down, off the
+			// landing's own style and the sunken cell count, so the two cannot drift.
+			int strandPrice = STRAND_PRICES_THE_BUS_DISCOUNT
+				&& endsOnBus(here.style(), sunkenDustCells(event.notes().size()))
+				? offBus : turnCells;
 			boolean strandsTheTurn = STRANDED_LANE_CLOSES_EARLY && !turning && layout.ultra()
-				&& laneStarted && !flatAhead && here.tip() < turnCells;
+				&& laneStarted && !flatAhead && here.tip() < strandPrice;
 			if (strandsTheTurn) {
 				placements.padded("v2ClosedBeforeStranding");
 			}
@@ -14002,6 +14022,25 @@ public final class SongBuilder {
 	 * anyway... plus moving the whole chord down means behind busy for the next chord."</em></p>
 	 */
 	static boolean SHEDS_A_FLUSH_MODULES_FLANK = true;
+
+	/**
+	 * Whether {@code strandsTheTurn} charges the staircase what it will actually cost.
+	 *
+	 * <p>A lane that comes to rest on a bus hands the climb its own last block, so the ladder starts
+	 * three rungs up rather than five. {@link #turnPrice} knows it and {@code canTurn} takes it; the
+	 * strand test compared the wire in hand against the undiscounted {@code turnCells} and closed
+	 * lanes that could have paid.</p>
+	 *
+	 * <p>ekran, off the blocks on Guardian 24x3 at {@code 25 69 127}: thirteen columns of acacia and a
+	 * stacked bus of twenty-four carried to the floor above, where the lane below had room for it.
+	 * <em>"I just tested moving it down, and it turns out the whole thing fits just perfectly. no
+	 * modifications needed... it even connects onto the glass 3-ascent perfectly. so why did it pad
+	 * it?"</em> Because the chord left three, the climb wanted three, and this line asked for five.</p>
+	 *
+	 * <p>Third instance of one fault: two arms pricing the same turn and disagreeing. The comment on
+	 * {@code canTurn} records the second.</p>
+	 */
+	static boolean STRAND_PRICES_THE_BUS_DISCOUNT = true;
 
 	/**
 	 * Whether a bus puts its last unpaired note in the low-z slot of the cell.
