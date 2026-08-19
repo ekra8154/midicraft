@@ -2972,6 +2972,9 @@ public final class SongBuilder {
 			// test only bites when the wall is within two columns, which is the same thing reaches says,
 			// and the dust is only ever claimed by a climb standing in the cell that reads it.
 			placements.climbAhead(above >= 0 && above < floors && climb > 0);
+			// The floors stand CUBE_FLOOR_HEIGHT apart and the lowest lane runs at the origin's height,
+			// so a floor is under this lane exactly when it stands a floor or more above the origin.
+			placements.floorBelow(lane.pos().getY() - CUBE_FLOOR_HEIGHT >= origin.getY());
 			// Whether the module behind left dust on its empty centre for this climb to start from --
 			// and whether that dust is in the cell this climb would actually read.
 			//
@@ -10652,14 +10655,14 @@ public final class SongBuilder {
 		EventNote relayAway = !pool.isEmpty() && conductsSideways(pool.get(0))
 				&& railSlotTakes(placements, centreAt.relative(away), time)
 			? pool.remove(0) : null;
-		// The front and back flanks hang at lane level, so a falling instrument only as a last resort.
+		// The front and back flanks hang at lane level, so no falling instrument over a floor.
 		EventNote frontAway = railSlotTakes(placements, wallColumn.relative(away), time)
-			? sinkable(pool) : null;
+			? sinkable(placements, pool) : null;
 		if (frontAway != null) {
 			pool.remove(frontAway);
 		}
 		EventNote backAway = railSlotTakes(placements, repeater.relative(away), time)
-			? sinkable(pool) : null;
+			? sinkable(placements, pool) : null;
 		if (backAway != null) {
 			pool.remove(backAway);
 		}
@@ -10856,19 +10859,22 @@ public final class SongBuilder {
 		List<EventNote> open = new ArrayList<>(rest.subList(0,
 			Math.min(rest.size(), openSides.size())));
 		rest.subList(0, open.size()).clear();
-		// The lowered slots -- the lowered cell's pair and the note beside the rung -- take a falling
-		// instrument only when nothing else is left: its support would stand at lane-2, in the floor
-		// below's air.
+		// The lowered slots -- the lowered cell's pair and the note beside the rung -- never take a
+		// falling instrument over a floor: its support would stand at lane-2, in the floor below's
+		// air. See sinkable.
 		List<EventNote> low = new ArrayList<>(2);
-		for (int slot = 0; slot < lowSides.size() && !rest.isEmpty(); slot++) {
-			EventNote lowered = sinkable(rest);
+		for (int slot = 0; slot < lowSides.size(); slot++) {
+			EventNote lowered = sinkable(placements, rest);
+			if (lowered == null) {
+				break;
+			}
 			rest.remove(lowered);
 			low.add(lowered);
 		}
 		List<EventNote> raised = new ArrayList<>(rest.subList(0,
 			Math.min(rest.size(), raisedSlots)));
 		rest.subList(0, raised.size()).clear();
-		EventNote onTheRung = rungSide != null ? sinkable(rest) : null;
+		EventNote onTheRung = rungSide != null ? sinkable(placements, rest) : null;
 		if (onTheRung != null) {
 			rest.remove(onTheRung);
 		}
@@ -12047,15 +12053,15 @@ public final class SongBuilder {
 		// note block beside it rather than having to start on top of one.
 		placements.powered(low.pos(), "minecraft:stone", time);
 		set(placements, low.pos().above(), "minecraft:redstone_wire");
-		// A falling instrument in a lowered slot only when nothing else is left. A lowered note's
-		// instrument is the floor at lane-1, and sand or gravel there wants a support at lane-2 -- the
-		// air over the floor below's notes. ekran read it twice off Guardian, 18x4 and 20x4 at
-		// 5 74 141: a sand sunk onto the rail beneath, its support silencing the note under it, with
-		// plenty of harps it could have swapped for. The stacked head has kept its low pair clear of
-		// falling notes since it was written; this is the same preference for this pair. The note
-		// goes to the bus instead, which hangs it at bus height with its support on the floor.
+		// Never a falling instrument in a lowered slot over a floor. A lowered note's instrument is
+		// the floor at lane-1, and sand or gravel there wants a support at lane-2 -- the air over the
+		// floor below's notes. ekran read it twice off Guardian, 18x4 and 20x4 at 5 74 141: a sand
+		// sunk onto the rail beneath, its support silencing the note under it, with plenty of harps
+		// it could have swapped for. The stacked head has kept its low pair clear of falling notes
+		// since it was written; this is the same rule for this pair, see sinkable. The note goes to
+		// the bus instead, which hangs it at bus height with its support on the floor.
 		for (Direction out : lowSides) {
-			EventNote lowered = sinkable(rest);
+			EventNote lowered = sinkable(placements, rest);
 			if (lowered != null) {
 				rest.remove(lowered);
 				placeNote(placements, low.pos().relative(out), lowered, true);
@@ -12077,20 +12083,26 @@ public final class SongBuilder {
 	}
 
 	/**
-	 * The note for a lowered slot: the first whose instrument block does not fall, and only where
-	 * every note left falls, the first of those. A lowered note's instrument is the floor at lane-1,
-	 * and sand or gravel there wants a support at lane-2 -- which the walk, building downwards, cannot
-	 * yet see is the air over the floor below's notes; so a falling note sinks only when nothing else
-	 * is left to sink, rather than never, because refusing outright dropped two notes of a chord
-	 * that was all snares. Null only when the list is empty.
+	 * The note for a lowered slot, or null where none may go there.
+	 *
+	 * <p>A lowered note's instrument is the floor at lane-1, and sand or gravel there wants a support
+	 * at lane-2. Where a floor runs under the lane that cell is the air over its notes -- they hang
+	 * three below the lane -- so a falling instrument may not sink there, and the first note that
+	 * does not fall is taken instead; where no floor is under the lane anything may sink. ekran's
+	 * rule, and it needs no lookahead: the floor below is always the same four down, and so is where
+	 * its notes want air. Nothing is ever dropped for it -- a note this will not sink hangs on the
+	 * bus, at bus height, with its support on the floor.</p>
 	 */
-	private static EventNote sinkable(List<EventNote> notes) {
+	private static EventNote sinkable(PlacementPlan placements, List<EventNote> notes) {
+		if (!placements.floorBelow()) {
+			return notes.isEmpty() ? null : notes.get(0);
+		}
 		for (EventNote note : notes) {
 			if (!FALLING_INSTRUMENT_BLOCKS.contains(note.instrumentBlock())) {
 				return note;
 			}
 		}
-		return notes.isEmpty() ? null : notes.get(0);
+		return null;
 	}
 
 	private static Body layEventBody(PlacementPlan placements, Lane lane,
@@ -18027,6 +18039,23 @@ public final class SongBuilder {
 
 		boolean climbAhead() {
 			return climbAhead;
+		}
+
+		/**
+		 * Whether a floor runs under the lane being built. Its notes hang three below the lane and
+		 * want the cell two below as air, which is exactly where a lowered falling note's support
+		 * would stand -- so a falling instrument may sink only where this is false. Told by the walk,
+		 * off the lane's height against the build's lowest; false by default, which is the old
+		 * behaviour for any walk that does not say.
+		 */
+		private boolean floorBelow;
+
+		void floorBelow(boolean below) {
+			floorBelow = below;
+		}
+
+		boolean floorBelow() {
+			return floorBelow;
 		}
 
 		/**
