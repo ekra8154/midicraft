@@ -1126,6 +1126,20 @@ public final class SongBuilder {
 	static boolean FLAT_TURN_REWALKS = true;
 
 	/**
+	 * v2: a stacked shape that would land inside the wall, but whose fallback would not, is stood on
+	 * the ground in a trial before the lane is measured by it.
+	 *
+	 * <p>The shape is decided by arithmetic and built in a trial, and the trial can still refuse it --
+	 * a collision, a low note beside a block the lane behind drives at another tick -- and lay a bus
+	 * instead, which is longer. A chord measured to land flush then lands two or three columns past
+	 * the wall, and every one of those read as a breach of two or three on a song that had none.
+	 * Asked only where the fallback would overshoot, since anywhere else being wrong costs nothing.
+	 * A shape that falls in the dry build is a chord that does not fit here, and the lane turns or
+	 * cuts before it. Needs {@link PlacementPlan#beginTrial} to nest, which it now does.</p>
+	 */
+	static boolean STACKED_SHAPE_TRIED_BEFORE_MEASURING = true;
+
+	/**
 	 * v2: a run heading for a staircase keeps its last pair off the wall column.
 	 *
 	 * <p>The wall column is the staircase's, and a chord's last cell stops a column short of it --
@@ -3195,12 +3209,57 @@ public final class SongBuilder {
 				}
 				if (flankAhead >= 0) {
 					boolean full = here.style() == ChordStyle.STACKED_FULL;
-					flushHeadWouldGrow = shedTurnFlank(ultraSlots(event.notes(), full),
-						full ? 2 : 0, false, flankAhead) == null;
+					// With the slots the module will actually hang -- after relocation has lifted a
+					// contested note into the centre, the centre is no longer a place to shed to --
+					// and the ground it will hang them over, so a slot relocation emptied on purpose
+					// is not offered back. Asked at the column the chord opens on, which is the
+					// column the build asks at unless a corner or a nudge moves it.
+					UltraSlots willHang = shaped.moved() != null ? shaped.moved().slots()
+						: ultraSlots(event.notes(), full);
+					flushHeadWouldGrow = shedTurnFlank(willHang, full ? 2 : 0, false, flankAhead,
+						quietLowSlots(placements, willOpenOn.pos(), willOpenOn.travel(),
+							willOpenOn.noteSide(), event.time())) == null;
 					if (flushHeadWouldGrow) {
 						placements.padded("v2ClosedBeforeAFlushHeadWouldGrow"
 							+ (flatAhead ? "Flat" : "Descent"));
 					}
+				}
+			}
+			// The shape the walk decided, stood on the ground before the lane is measured by it.
+			//
+			// A stacked shape is decided by arithmetic and built in a trial, and the trial can still refuse
+			// it: a collision with the floor above's props, a low note beside a block the lane behind
+			// drives at another tick. The fallback is a bus, and a bus is longer -- so a chord measured to
+			// land flush was built two or three columns past the wall, and the lane read as breaching by
+			// exactly that. adventure-of-a-lifetime, every width up to twelve, one lane out by two. That is
+			// the one disagreement "the decision is the decision" left: the decision was never asked of the
+			// ground the trial asks of. So where the fallback would not fit, the shape is built now, in a
+			// trial inside no trial, and rolled back -- and if it fell, this chord does not fit here and
+			// the lane turns or cuts before it as it would for any other chord that will not fit. Only
+			// where it matters: a chord whose bus would land inside the wall pays nothing for being
+			// wrong, and asking costs a build of the module.
+			boolean shapeWouldFall = false;
+			if (STACKED_SHAPE_TRIED_BEFORE_MEASURING && layout.ultra() && !turning && railPhase < 0
+					&& laneStarted && shaped.style().stacked() && shaped.style() == here.style()
+					&& (here.end() - wall) * lane.travel().getStepX() <= 0) {
+				// What the fallback would end on: the repeater, a bus of the chord, and the column a
+				// nudge may add. Past the wall, and the answer matters.
+				int busEnd = willOpenOn.pos().getX() + lane.travel().getStepX()
+					* (2 + (event.notes().size() + 1) / 2);
+				if ((busEnd - wall) * lane.travel().getStepX() > 0) {
+					PlacementPlan.Behind was = placements.behind();
+					placements.beginTrial();
+					try {
+						Placed tried = buildShaped(placements, willOpenOn, 1, event, shaped, layout);
+						shapeWouldFall = tried.style() != shaped.style()
+							|| tried.lane().pos().getX() != here.end();
+					} catch (IllegalArgumentException collided) {
+						shapeWouldFall = true;
+					} finally {
+						placements.rollbackTrial();
+						placements.behind(was);
+					}
+					placements.padded(shapeWouldFall ? "v2ShapeTriedAndFell" : "v2ShapeTriedAndStood");
 				}
 			}
 			// Never while the route is still bending. Inside a turn the wire runs across the corridor
@@ -3228,7 +3287,7 @@ public final class SongBuilder {
 			// thing to measure; none of it has ever been asked to.
 			boolean overshoots = !turning && (railPhase < 0 || flatAhead)
 				&& ((landing - wall) * lane.travel().getStepX() > 0 || strandsTheTurn
-					|| flushHeadWouldGrow);
+					|| flushHeadWouldGrow || shapeWouldFall);
 			// And whether it merely gets there. A chord ending on the wall, or one column short of
 			// it, has not overshot and so was never offered a cut -- which leaves the lane holding a
 			// long bus, no near half to cut, and a turn to pay for out of the two cells that bus left
@@ -11517,6 +11576,11 @@ public final class SongBuilder {
 			}
 			Lane asking = behindShift ? onTheGround.ahead(1) : onTheGround;
 			int verdict = parityVerdict(placements, asking, event.time(), slots, room);
+			if (TRACE) {
+				System.out.println("  SHAPE t=" + event.time() + " at " + asking.pos().getX() + ","
+					+ asking.pos().getY() + "," + asking.pos().getZ() + " style=" + style
+					+ " verdict=" + verdict + " slots=" + slots + " room=" + room);
+			}
 			// And the same question with the move off the table, because downstream is allowed to take
 			// the move away. A verdict of 2 says this chord stands clean here *with one note lifted out*,
 			// and nothing about it says a shift would be clean -- the shift was never asked about. Asked
@@ -11919,6 +11983,9 @@ public final class SongBuilder {
 			placements.rollbackTrial();
 			placements.padded("planBusForCollision");
 			trace(event, lane, style, ChordStyle.BUS, "collided");
+			if (TRACE) {
+				System.out.println("  COLLIDED " + collided.getMessage());
+			}
 			// Through the same move as every other bus, and this is the site that mattered: the shape
 			// collided, dropped to a bus, and the bus landed in the same occupied ground with nothing
 			// left to try. That is what ended the build rather than the first collision.
@@ -12114,7 +12181,9 @@ public final class SongBuilder {
 		int flankTaken = SHEDS_A_FLUSH_MODULES_FLANK ? placements.flankTaken() : -1;
 		if (flankTaken >= 0) {
 			ShedFlank rehomed = shedTurnFlank(standing,
-				style == ChordStyle.STACKED_FULL ? 2 : 0, true, flankTaken);
+				style == ChordStyle.STACKED_FULL ? 2 : 0, true, flankTaken,
+				quietLowSlots(placements, start.pos(), start.travel(), start.noteSide(),
+					event.time()));
 			if (rehomed == null) {
 				placements.padded("flushFlankStuck");
 			} else if (rehomed.toBus() != null) {
@@ -12649,6 +12718,38 @@ public final class SongBuilder {
 	 */
 	private static ShedFlank shedTurnFlank(UltraSlots slots, int granted, boolean hasBus,
 			int taken) {
+		return shedTurnFlank(slots, granted, hasBus, taken, null);
+	}
+
+	/**
+	 * Which of a module's four low slots would hang quiet at this opening, numbered as
+	 * {@link #onTheFreeSlots} numbers them: front pair first, then back, note side first on each.
+	 *
+	 * <p>Asked so that a shed does not rehome a note into the one slot relocation has just emptied
+	 * on purpose. Relocation lifts the note whose cell sits against the lane behind's live block
+	 * and leaves the slot empty; the shed, told nothing, saw an empty low slot and put the flank's
+	 * note straight back into it, the trial read it as noisy, and the module fell to a bus two
+	 * columns longer than the flush landing it was measured for. adventure-of-a-lifetime, every
+	 * width up to twelve, one lane two out.</p>
+	 */
+	private static boolean[] quietLowSlots(PlacementPlan placements, BlockPos pos, Direction travel,
+			Direction noteSide, int time) {
+		BlockPos cross = pos.relative(travel);
+		boolean[] quiet = new boolean[4];
+		for (int side = 0; side < 2; side++) {
+			BlockPos instrument = cross.relative(side == 0 ? noteSide : noteSide.getOpposite());
+			quiet[side] = quietAndFree(placements, instrument.relative(travel), time);
+			quiet[2 + side] = quietAndFree(placements, instrument.relative(travel.getOpposite()), time);
+		}
+		return quiet;
+	}
+
+	/**
+	 * @param quiet which low slots may take the shed note, or {@code null} for any empty one. See
+	 *     {@link #quietLowSlots}.
+	 */
+	private static ShedFlank shedTurnFlank(UltraSlots slots, int granted, boolean hasBus,
+			int taken, boolean[] quiet) {
 		if (slots == null) {
 			return null;
 		}
@@ -12677,7 +12778,7 @@ public final class SongBuilder {
 			: granted == 1 ? new int[] {other, 3}
 			: new int[] {other};
 		for (int slot : spare) {
-			if (slots.slot(slot) == null) {
+			if (slots.slot(slot) == null && (quiet == null || quiet[slot])) {
 				return new ShedFlank(emptied.with(slot, note), null);
 			}
 		}
@@ -17238,6 +17339,13 @@ public final class SongBuilder {
 				}
 				for (Direction direction : Direction.values()) {
 					if (liveAt(was.getKey().relative(direction), time)) {
+						if (TRACE) {
+							BlockPos live = was.getKey().relative(direction);
+							System.out.println("  NOISY note at " + describe(was.getKey()) + " beside "
+								+ describe(live) + " " + blocks.get(live.immutable()) + " live at "
+								+ powered.get(live.immutable()) + " (this chord " + time + ") laid by "
+								+ placedBy.getOrDefault(live.immutable(), "?"));
+						}
 						return true;
 					}
 				}
@@ -17245,14 +17353,71 @@ public final class SongBuilder {
 			return false;
 		}
 
-		/** Opens a savepoint. Nested trials are not needed and not supported. */
+		/**
+		 * Opens a savepoint.
+		 *
+		 * <p>Nested now. A trial opened inside another journals into itself; committing it folds its
+		 * journal into the one outside, rolling it back puts back only what it wrote and leaves the
+		 * outer trial open. It was not nested for a long time and did not need to be, because every
+		 * trial was around one shape and the walk's own trial around the same shape simply became it.
+		 * What needs it is a shape tried on the ground <em>before</em> the lane is measured by it --
+		 * see {@link #STACKED_SHAPE_TRIED_BEFORE_MEASURING} -- which builds the module through the
+		 * same builders, trials and all, and then wants the whole thing gone.</p>
+		 */
 		void beginTrial() {
+			if (trial != null) {
+				outerTrials.push(trial);
+				outerTrialRuns.push(trialRun);
+			}
 			trialRun = runSinceRepeater;
 			trial = new Trial(new ArrayList<>(), new LinkedHashMap<>(), new LinkedHashMap<>(),
 				new ArrayList<>(), new ArrayList<>(),
 				turns.size(), moved.size(), trouble.size(), breaches.size(),
 				recesses.size(), new LinkedHashMap<>(padding),
 				minimumX, minimumY, minimumZ, maximumX, maximumY, maximumZ);
+		}
+
+		private final java.util.ArrayDeque<Trial> outerTrials = new java.util.ArrayDeque<>();
+		private final java.util.ArrayDeque<Integer> outerTrialRuns = new java.util.ArrayDeque<>();
+
+		/**
+		 * The facts the builders leave about the module just built, for a dry build to put back.
+		 *
+		 * <p>Everything a trial's journal does not cover: what the module behind ended on, where its
+		 * tail and its rail seed and its handover are, whether it left dust for a climb. A module
+		 * built and rolled back has still set these, and the chord after would read them as being
+		 * about a module that is not there.</p>
+		 */
+		private record Behind(boolean softTip, boolean softBehind, SoftTail softTail,
+				SoftTail softTailBehind, Trial tailJournal, Trial tailJournalBehind, BlockPos railTail,
+				BlockPos railTailBehind, BlockPos railSeed, int railSeedTime, boolean railSeedOnPath,
+				BlockPos handover, BlockPos handoverBehind, BlockPos climbFedFromCentre,
+				boolean sunkenOffered, String placing) {
+		}
+
+		Behind behind() {
+			return new Behind(softTip, softBehind, softTail, softTailBehind, tailJournal,
+				tailJournalBehind, railTail, railTailBehind, railSeed, railSeedTime, railSeedOnPath,
+				handover, handoverBehind, climbFedFromCentre, sunkenOffered, placing);
+		}
+
+		void behind(Behind was) {
+			softTip = was.softTip();
+			softBehind = was.softBehind();
+			softTail = was.softTail();
+			softTailBehind = was.softTailBehind();
+			tailJournal = was.tailJournal();
+			tailJournalBehind = was.tailJournalBehind();
+			railTail = was.railTail();
+			railTailBehind = was.railTailBehind();
+			railSeed = was.railSeed();
+			railSeedTime = was.railSeedTime();
+			railSeedOnPath = was.railSeedOnPath();
+			handover = was.handover();
+			handoverBehind = was.handoverBehind();
+			climbFedFromCentre = was.climbFedFromCentre();
+			sunkenOffered = was.sunkenOffered();
+			placing = was.placing();
 		}
 
 		/**
@@ -17273,7 +17438,32 @@ public final class SongBuilder {
 		}
 
 		void commitTrial() {
-			trial = null;
+			if (outerTrials.isEmpty()) {
+				trial = null;
+				return;
+			}
+			// Folded into the trial outside, which was open before this one wrote anything: what this
+			// one added the outer one now owns, and where both remember a cell's earlier state the
+			// outer one's memory is the earlier of the two.
+			Trial inner = trial;
+			Trial outer = outerTrials.pop();
+			trialRun = outerTrialRuns.pop();
+			if (inner != null) {
+				outer.blocksAdded().addAll(inner.blocksAdded());
+				inner.notesBefore().forEach((at, was) -> {
+					if (!outer.notesBefore().containsKey(at)) {
+						outer.notesBefore().put(at, was);
+					}
+				});
+				inner.poweredBefore().forEach((at, was) -> {
+					if (!outer.poweredBefore().containsKey(at)) {
+						outer.poweredBefore().put(at, was);
+					}
+				});
+				outer.cornersAdded().addAll(inner.cornersAdded());
+				outer.collisionsAdded().addAll(inner.collisionsAdded());
+			}
+			trial = outer;
 		}
 
 		/** Puts back everything written since {@link #beginTrial()}. */
@@ -17281,14 +17471,19 @@ public final class SongBuilder {
 			runSinceRepeater = trialRun;
 			Trial undo = trial;
 			// Cleared first: putting the old values back goes through the same writers, and a trial
-			// still open would journal the undo as though it were more building.
+			// still open would journal the undo as though it were more building. The trial outside,
+			// where there is one, comes back once the undo is done.
 			trial = null;
+			Trial outer = outerTrials.isEmpty() ? null : outerTrials.pop();
+			int outerRun = outerTrialRuns.isEmpty() ? trialRun : outerTrialRuns.pop();
 			// And the tail recorder with it. A tail is always laid inside the module's own trial, so a
 			// trial that rolls back is a tail that never happened -- and a journal pointing at cells
 			// this is about to remove would put stale notes back if anything undid it afterwards.
 			tailJournal = null;
 			softTail = null;
 			if (undo == null) {
+				trial = outer;
+				trialRun = outerRun;
 				return;
 			}
 			for (BlockPos at : undo.blocksAdded()) {
@@ -17329,6 +17524,8 @@ public final class SongBuilder {
 			maximumX = undo.maxX();
 			maximumY = undo.maxY();
 			maximumZ = undo.maxZ();
+			trial = outer;
+			trialRun = outerRun;
 		}
 
 		private static void trim(List<?> list, int to) {

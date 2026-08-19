@@ -233,7 +233,10 @@ public final class FastNoteblocksConfig {
 	 * building on, not of the song.</p>
 	 */
 	public static final int DEFAULT_BUILD_LANE_WIDTH = 32;
-	public static final int MIN_BUILD_LANE_WIDTH = 4;
+	// Eight, up from four. Below about a dozen the walls stand no closer than the widest chord needs
+	// anyway, so the paste comes out wider than the slider says whatever it says -- ekran: "a width of
+	// 4 ... is kind of ridiculous to support". A saved value below this reads as this.
+	public static final int MIN_BUILD_LANE_WIDTH = 8;
 	public static final int MAX_BUILD_LANE_WIDTH = 128;
 	/**
 	 * Floors a Compact lane build folds onto. Each one retraces the one below it, so three floors is
@@ -1192,7 +1195,7 @@ public final class FastNoteblocksConfig {
 	}
 
 	public int buildLaneWidth() {
-		return buildLaneWidth;
+		return clampBuildLaneWidth(buildLaneWidth);
 	}
 
 	public void setBuildLaneWidth(int buildLaneWidth) {
