@@ -9448,6 +9448,35 @@ public final class SongBuilder {
 		// them. A note hung there by this bus is a collision the walk finds two events later. Ekran's
 		// on Hammer at twelve wide: a chord of two, one cell of bus, a note on the cell the route
 		// bends into, and the repeater after it had nowhere to stand.
+		// The chord after the swap may be the sunken shape, and then swap two is not merely
+		// unnecessary -- it costs a note. Its whole job is to put a bus block where the repeater is
+		// looking, because a repeater facing a note block has nowhere to send the line. A sunken
+		// bus's opening *is* a note block the repeater drives, and a note block is full and solid,
+		// so it passes fifteen to the dust beyond exactly as the bus block would have. Swapping it
+		// out therefore trades a note for nothing and the chord comes up one short.
+		//
+		// ekran read it off the blocks and built the answer: put the missing note in the cell the
+		// repeater faces, and sink the bus cell beside it. Which is the opening and the lowered
+		// column, so it is this shape's own builder, handed the column rather than left to work it
+		// out from a lane the swap has moved off the route.
+		if (SWAP_KEEPS_THE_SUNKEN_SHAPE && placements.sunkenOffered() && forceBus) {
+			Lane openingAt = new Lane(opening.pos().below(), opening.travel(), opening.noteSide(),
+				opening.bends(), opening.cornerAt(0), lane.crowded());
+			// The route, and the cell the repeater is standing in. Both are cells beside the opening
+			// note block -- the swap steps sideways off the lane and bends back onto it, so the route
+			// comes past its own opening -- and the module's flank pair has to be told about both or
+			// it hangs a note in one of them. The repeater is already down by now and would silently
+			// swallow the note; the route cell is not, and the collision is the lane's own next dust.
+			Set<BlockPos> spokenFor = new java.util.HashSet<>(route(opening, DUST_RANGE + 2));
+			spokenFor.add(inside.immutable());
+			Body sunken = addSunkenBusModule(placements, openingAt, chord, chord.get(0).time(),
+				spokenFor);
+			if (sunken != null) {
+				placements.padded("swapKeptTheSunkenShape");
+				return sunken;
+			}
+			placements.padded("swapSunkenGaveWay");
+		}
 		int cells = layBus(placements, opening, chord, chord.get(0).time(),
 			route(opening, DUST_RANGE + 2));
 		Lane landed = opening.ahead(cells);
@@ -10322,6 +10351,22 @@ public final class SongBuilder {
 	 */
 	private static Body addSunkenBusModule(PlacementPlan placements, Lane lane,
 			List<EventNote> chord, int time) {
+		return addSunkenBusModule(placements, lane.ahead(1), chord, time, Set.of());
+	}
+
+	/**
+	 * @param opening the column the note block goes in, at the lane's own level -- one ahead of
+	 *     the repeater down a straight lane, and handed in directly by {@link #twoSwapTurn},
+	 *     whose repeater stands on the inside diagonal of a corner rather than on the route.
+	 * @param reserved cells this module may not hang a note in, asked of the opening's pair as well
+	 *     as of the tail. Empty down a straight lane, where what follows the chord is not decided
+	 *     yet and the route runs away along travel in any case; after a two-swap turn it is the
+	 *     route the walk carries on through -- which this module's own route bends back onto -- and
+	 *     the cell the swap stood its repeater in. A note in either is a collision, and the one at
+	 *     the module's landing column is a collision with the lane itself.
+	 */
+	private static Body addSunkenBusModule(PlacementPlan placements, Lane opening,
+			List<EventNote> chord, int time, Set<BlockPos> reserved) {
 		List<EventNote> ordered = new ArrayList<>(busOrder(chord));
 		EventNote centre = null;
 		for (EventNote note : ordered) {
@@ -10336,10 +10381,9 @@ public final class SongBuilder {
 			return null;
 		}
 		ordered.remove(centre);
-		Lane opening = lane.ahead(1);
 		Direction side = opening.noteSide();
 		BlockPos centreAt = opening.pos().above();
-		Lane low = lane.ahead(2);
+		Lane low = opening.ahead(1);
 		// Every question first, and not one block before them.
 		//
 		// This method may hand the chord back to the plain bus below it, and until now it did so from
@@ -10352,7 +10396,7 @@ public final class SongBuilder {
 		//
 		// A builder that can refuse must refuse before it builds. Everything below this line is
 		// placement and nothing below it can say no.
-		int openingFlanks = Math.min(2, ordered.size());
+		//
 		// Parity, after all, and only here.
 		//
 		// ekran, off a paste: a sunken bus cannot accidentally *power* anything -- its notes are note
@@ -10366,7 +10410,28 @@ public final class SongBuilder {
 		// line ekran drew. Refused rather than dropped, so that the module moves a column and keeps all
 		// its notes -- the shift loop in {@link #layBus} lays that column as a parity pad and tries
 		// again, which is what parity padding is.
-		List<Direction> openSides = new ArrayList<>(List.of(side, side.getOpposite()));
+		//
+		// Where the opening's own pair goes, read off the route the same way the lowered pair below
+		// it is -- because the route is the same route, and it doubles back for the same reason.
+		//
+		// Down a straight lane this is the pair it has always been: the route runs off along travel,
+		// both flanks are across it, and nothing is reserved. A two-swap turn is what needed telling.
+		// Its route bends twice inside the module, so one flank is the very column the module hands
+		// back to the walk, and the other is the repeater the swap stood on the corner's inside
+		// diagonal. A note in the first is a note block sitting where the lane's next dust goes, and
+		// the lane stops there.
+		//
+		// ekran read it off illit at 40x5 -- 3,702 notes dead behind one note block -- and named the
+		// answer: that column stays the lane's, laid raised, and the note moves round onto the free
+		// side of it. Which is what dropping the slot does. The note falls through to the tail, the
+		// tail grows the cell it was going to need anyway, and the note hangs off the side of it.
+		List<Direction> openSides = new ArrayList<>(2);
+		for (Direction out : List.of(side, side.getOpposite())) {
+			if (!reserved.contains(centreAt.relative(out))) {
+				openSides.add(out);
+			}
+		}
+		int openingFlanks = Math.min(openSides.size(), ordered.size());
 		// Where the lowered notes go, read off the route rather than assumed to be the two sides.
 		//
 		// The lowered stone has four neighbours at the lane's own level and two of them are always
@@ -10380,7 +10445,7 @@ public final class SongBuilder {
 		// there. Asked as two positions and not as a freeness test, because {@link #layBus} has not
 		// laid its stone yet and there would be nothing to find.
 		BlockPos underTheOpening = opening.pos();
-		BlockPos underTheBus = lane.ahead(3).pos();
+		BlockPos underTheBus = opening.ahead(2).pos();
 		List<Direction> lowSides = new ArrayList<>(2);
 		for (Direction out : List.of(side, side.getOpposite(), opening.travel(),
 				opening.travel().getOpposite())) {
@@ -10433,13 +10498,18 @@ public final class SongBuilder {
 			// column the contested slot is in changes nothing about what the move costs: the note
 			// falls through to the next slot down the module either way, and the last one lands in the
 			// half-empty cell the odd tail already ends on.
+			//
+			// Counted against the slots the opening actually has, not against two. A two-swap turn
+			// leaves it with one or none, and a slot the module was never going to fill cannot be
+			// contested by anything -- scoring it loud refuses shapes over cells nothing is standing
+			// in.
 			int loud = 2 - quiet.size()
-				+ (SUNKEN_ASKS_ITS_OPENING_TOO ? 2 - quietOpen.size() : 0);
+				+ (SUNKEN_ASKS_ITS_OPENING_TOO ? openSides.size() - quietOpen.size() : 0);
 			if (loud == 1 && oddTail && SUNKEN_RELOCATES_A_LOWERED_NOTE) {
 				placements.padded(quiet.size() < 2 ? "sunkenRelocatedALoweredNote"
 					: "sunkenRelocatedAnOpeningNote");
 				lowSides = quiet.size() < 2 ? List.of(quiet.get(0)) : lowSides;
-				openSides = quietOpen.size() < 2 ? List.of(quietOpen.get(0)) : openSides;
+				openSides = quietOpen.size() < openSides.size() ? quietOpen : openSides;
 			} else if (loud > 0) {
 				// Nothing free to do, so the shape goes rather than the ground.
 				//
@@ -10483,10 +10553,14 @@ public final class SongBuilder {
 			// One cell of the fifteen is already spent on the lowered column, so the bus after it may
 			// only have fourteen. Passed rather than assumed, because the run is one wire and the far
 			// end of a run that is one cell too long is worth nothing at all.
-			busCells = layBus(placements, lane.ahead(3).above(),
-				ordered.subList(placed, ordered.size()), time, Set.of(), DUST_RANGE - 1);
+			busCells = layBus(placements, opening.ahead(2).above(),
+				ordered.subList(placed, ordered.size()), time, reserved, DUST_RANGE - 1);
 		}
-		return new Body(lane.ahead(3 + busCells), 1 + busCells, true);
+		// The opening column, the lowered one, and the bus after them -- so the column after the
+		// module is two past the opening plus whatever the tail spent. Measured from the opening
+		// rather than from the repeater, because a two-swap turn's repeater stands on the inside
+		// diagonal of a corner and is not on the route at all.
+		return new Body(opening.ahead(2 + busCells), 1 + busCells, true);
 	}
 
 	private static Body layEventBody(PlacementPlan placements, Lane lane,
@@ -13961,6 +14035,32 @@ public final class SongBuilder {
 	 * front of a chord this shape would carry round. That is the next piece.</p>
 	 */
 	static boolean SUNKEN_MAY_OPEN_IN_A_TURN = true;
+
+	/**
+	 * Whether a two-swap turn builds the sunken shape the walk measured, instead of a plain bus.
+	 *
+	 * <p>The fault it is for: {@link #twoSwapTurn} ends in {@link #layBus} unconditionally, so a
+	 * chord the walk measured as a sunken bus is built as a plain one. Swap two exists to put a
+	 * bus block where the repeater looks, because a repeater facing a note block has nowhere to
+	 * send the line -- but a sunken bus's opening <em>is</em> a note block the repeater drives,
+	 * full and solid, passing fifteen to the dust beyond. Swapping it out trades a note for
+	 * nothing and the chord comes up one short. ekran read it off the blocks and built the
+	 * answer: the missing note in the cell the repeater faces, and the bus cell beside it sunk.
+	 * Which is this shape's opening and lowered column, so it is this shape's own builder.</p>
+	 *
+	 * <p>Census over 325 builds, on against off: <b>missing 5 -> 0</b>, breach blocks 635 -> 634,
+	 * depth 22392 -> 22389, and dead, severed and wrong nought either way. It fires 88 times and
+	 * never gives the shape back.</p>
+	 *
+	 * <p>It cost 44,297 dead notes in 14 builds until the opening's own flank pair learned about
+	 * the route -- see {@link #addSunkenBusModule}. Swap two opens one cell off the lane and bends
+	 * back onto it twice, so one of the two cells beside the opening note block is the column the
+	 * module hands back to the walk, and a note there is a note block where the lane's next dust
+	 * goes. The break was {@code illit-do-the-dance} at 40x5, dead from {@code 36 81 52} with
+	 * 3,702 notes behind it, and what it wanted was not a landing correction -- three of those were
+	 * tried, worth one note in 44,000 -- but one slot given up.</p>
+	 */
+	static boolean SWAP_KEEPS_THE_SUNKEN_SHAPE = true;
 
 	/**
 	 * The smallest chord a busy pad will spend a column on.
