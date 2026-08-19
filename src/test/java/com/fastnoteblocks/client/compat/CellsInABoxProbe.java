@@ -49,9 +49,21 @@ class CellsInABoxProbe {
 
 	@Test
 	void listsWhatIsInTheBox() throws Exception {
+		// The same -Dprobe.set=NAME=value every other probe takes, because a dump of a build made
+		// with a flag the other way is a dump of a build nobody is asking about.
+		Flags.Held held = Flags.set(text("set", ""));
+		try {
+			listThem();
+		} finally {
+			held.putBack();
+		}
+	}
+
+	private void listThem() throws Exception {
 		FaultView.Build built = FaultView.of(text("song", "illit-do-the-dance"),
 			SongBuilder.PasteMode.valueOf(text("mode", "ULTRA_COMPACT_LANE_V2")),
-			number("width", 40), number("floors", 5), number("maxFloors", 16), false);
+			number("width", 40), number("floors", 5), number("maxFloors", 16),
+			"true".equals(text("names", "false")));
 		String[] middle = text("at", "41,80,51").split("[ ,]+");
 		String[] span = text("span", "2,3,3").split("[ ,]+");
 		BlockPos centre = new BlockPos(Integer.parseInt(middle[0]), Integer.parseInt(middle[1]),
@@ -72,6 +84,13 @@ class CellsInABoxProbe {
 		});
 		// Sorted as text, which sorts by x then y then z, because a module is read column by column.
 		lines.sort(String::compareTo);
+		built.plan().collisions().forEach((at, what) -> {
+			if (at.getX() >= from.getX() && at.getX() <= to.getX() && at.getY() >= from.getY()
+					&& at.getY() <= to.getY() && at.getZ() >= from.getZ() && at.getZ() <= to.getZ()) {
+				lines.add(String.format("%4d %3d %4d  COLLISION %s", at.getX(), at.getY(),
+					at.getZ(), what));
+			}
+		});
 		System.out.println();
 		System.out.println("======== " + built.where() + " in " + FaultView.say(from) + " .. "
 			+ FaultView.say(to) + " ========");

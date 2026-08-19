@@ -3008,6 +3008,25 @@ public final class SongBuilder {
 				&& V2_RUNS_ON_RAILS && layout.ultra()
 				&& above >= 0 && above < floors && climb > 0
 				&& reaches && (wall - landing) * lane.travel().getStepX() == 1);
+			// And the same question for a descent, which wants the opposite thing: not the centre's
+			// dust but the low slot beside it.
+			//
+			// A descent spirals round the four cells of a two-by-two column anchored where the lane
+			// comes to rest, a block down at each, and its second rung is {@code cursor.relative(depth)}
+			// -- which is one of the front pair a stacked module hangs in its own landing column. So a
+			// module that lands flush and a staircase that starts on it want the same two cells, and
+			// {@link #set} is first-writer-wins: the note gets there, the rung is silently skipped, and
+			// the wire steps two levels in one go into air. ekran read the pair of sea lanterns on
+			// Guardian at 24x3, {@code 33 68 171} and {@code 33 67 171}, with 13,254 notes dark behind
+			// them, and named the answer -- the flank is shed, not the shape.
+			//
+			// Nought rather than the climb's one, because the two staircases meet the lane differently:
+			// a climb reads the dust in the column *before* the wall, a descent is anchored on the wall
+			// column itself. Before lanes were allowed to land flush there was always a pad in between
+			// and this could not arise.
+			placements.descentTakesTheFlank(SHEDS_A_FLUSH_MODULES_FLANK && layout.ultra()
+				&& above >= 0 && above < floors && climb <= 0
+				&& reaches && (wall - landing) * lane.travel().getStepX() == 0);
 			// And the other fact the chord cannot see for itself: how soon the next event arrives. A pad
 			// laid in front of it can only be spent as a repeater where there are two ticks to split, so
 			// a gap of one is the case a simple tail with a note-block middle cannot survive being padded
@@ -5135,7 +5154,12 @@ public final class SongBuilder {
 	 * </p>
 	 */
 	private static int handoverReserve(Layout layout) {
-		return RESERVES_THE_HANDOVER_COLUMN && layout.ultra() ? 1 : 0;
+		// v2 only, and for the reason SUNKEN_MAY_OPEN_IN_A_TURN is v2 only: the older walk measures
+		// its landings with rules of its own, and nothing in it sheds the flank a descent wants.
+		// Taken off both, v1's own regressions caught it at once -- 88 breaches on the target song
+		// became nought, which is the layout changing under a test that exists to say it has not, and
+		// a song of nothing but stacked chords stopped reading back as itself.
+		return layout.ultra() && (RESERVES_THE_HANDOVER_COLUMN || !layout.v2()) ? 1 : 0;
 	}
 
 	/**
@@ -11534,12 +11558,49 @@ public final class SongBuilder {
 		trace(event, lane, style, style, nudge ? "nudged" : gaveUp);
 		placements.placing("chord:" + style + (nudge ? "+nudge" : "")
 			+ (moved == null ? "" : " moved" + moved.where()));
+		UltraSlots standing = moved != null ? moved.slots()
+			: ultraSlots(event.notes(), style == ChordStyle.STACKED_FULL);
+		// The flank the staircase is about to stand in, given up before it is filled rather than
+		// discovered as a collision afterwards.
+		//
+		// {@link #shedDescentFlank} is ekran's order and it already existed for a cut: the centre if
+		// the note is a harp, or a trade with a harp hanging somewhere the module does not mind
+		// losing; then a low slot the chord did not fill, the far front one before the back pair; and
+		// a tail at the bottom of the staircase where neither will have it. All this adds is the
+		// plain module, which was never asked.
+		//
+		// The grant is the style's own: a module that reaches back was granted the back pair and one
+		// that does not was not, and a back slot standing empty because the lane behind owns it is
+		// not one this chord may rehome into.
+		//
+		// ekran on the third option, which for a plain module means growing a bus it did not have:
+		// "yes it should grow one. the alternative is to pad the chord down, which is about the same
+		// anyway. maybe it would be longer to move the chord down actually. plus moving the whole
+		// chord down means behind busy for the next chord."
+		if (SHEDS_A_FLUSH_MODULES_FLANK && placements.descentTakesTheFlank()) {
+			ShedFlank rehomed = shedDescentFlank(standing,
+				style == ChordStyle.STACKED_FULL ? 2 : 0, true);
+			if (rehomed == null) {
+				placements.padded("flushFlankStuck");
+			} else if (rehomed.toBus() != null) {
+				placements.padded("flushFlankGrewATail");
+				Body grown = addStackedBusModule(placements, start, triggerDelay, event.time(),
+					onTheFreeSlots(placements, start.pos(), start.travel(), start.noteSide(),
+						event.time(), rehomed.slots(), DESCENT_FLANK_SLOT),
+					List.of(rehomed.toBus()));
+				return new Placed(grown.lane(), style, grown.busCells(), nudge);
+			} else {
+				placements.padded(standing.slot(DESCENT_FLANK_SLOT) == null
+					? "flushFlankWasEmpty" : "flushFlankRehomed");
+				standing = rehomed.slots();
+			}
+		}
 		// The rigid shape has no bus to hand a note to, so until the centre became a target it had
 		// no third option at all: it shifted or it fell to a bus.
 		return new Placed(addStackedEventModule(placements, start, triggerDelay, event.time(),
 			onTheFreeSlots(placements, start.pos(), start.travel(), start.noteSide(), event.time(),
-				moved != null ? moved.slots()
-					: ultraSlots(event.notes(), style == ChordStyle.STACKED_FULL))),
+				standing, placements.descentTakesTheFlank() && SHEDS_A_FLUSH_MODULES_FLANK
+					? DESCENT_FLANK_SLOT : -1)),
 			style, 0, nudge);
 	}
 
@@ -13846,8 +13907,26 @@ public final class SongBuilder {
 	 * one named test, {@code NoteMachineReaderTest.readsBackEveryNoteOfItsOwnBuild[3]}, which is a bug
 	 * with an address rather than a verdict. ekran asked for this one, so it stays on and red until
 	 * that readback is understood.</p>
+	 *
+	 * <p><b>Off again, 2026-08-18, and this time to be looked at in game.</b> ekran: <em>"should we
+	 * try letting chords land flush with the wall? i have a feeling it might break something but
+	 * that's fine, we'll just fix it."</em> Over 325 builds, on against off: the closing pad falls
+	 * <b>8,260 → 5,513</b> cells and its raised half <b>1,985 → 438</b>, depth 22339 → <b>22156</b>
+	 * -- and dead notes go <b>0 → 20,107</b> over seven builds, breach blocks 632 → 1,574. Missing,
+	 * wrong and severed stay nought.</p>
+	 *
+	 * <p><b>The dead wire is one fault and it is not the fit test.</b> Guardian 24x3, dead from
+	 * {@code 32 65 172}: the staircase after the last chord lays dust at {@code 33 69 172},
+	 * {@code 34 67 171} and {@code 34 66 172} -- two levels down in one step, with no rung at
+	 * {@code y=68}. The chord in front of it is a {@code STACKED_FRONT+nudge}, which ends on its
+	 * centre block a level below the path, and the branch that builds the staircase says out loud why
+	 * that used to be safe: <em>"A pad puts the wire back down on the path either way, so a padded
+	 * lane never skips them."</em> This column was that pad. So the reserve was paying for two things
+	 * at once and only one of them was the column, and what wants fixing is the descent -- a staircase
+	 * handed a shape that does not end on a bus has to lay its own step-down rather than assume a pad
+	 * put the wire back.</p>
 	 */
-	static boolean RESERVES_THE_HANDOVER_COLUMN = true;
+	static boolean RESERVES_THE_HANDOVER_COLUMN = false;
 
 	/**
 	 * Whether the room test asks about the wall the chord is facing, rather than the one the lane
@@ -13901,6 +13980,28 @@ public final class SongBuilder {
 	 * not carry them.</p>
 	 */
 	static boolean SUNKEN_SHEDS_EVERY_LOUD_SLOT = true;
+
+	/**
+	 * Whether a stacked module landing flush on its wall gives up the flank the descent wants.
+	 *
+	 * <p>A descent spirals round a two-by-two column anchored where the lane comes to rest, and its
+	 * second rung stands in {@code cursor.relative(depth)} -- which is one of the front pair a
+	 * stacked module hangs in its own landing column. {@link #DESCENT_FLANK_SLOT} is named for that
+	 * cell and {@link #shedDescentFlank} has rehomed it for a cut since the shed was written; a plain
+	 * module was never asked, because until {@link #RESERVES_THE_HANDOVER_COLUMN} came off there was
+	 * always a pad column between the two and they never met.</p>
+	 *
+	 * <p>ekran read it in game on Guardian 24x3 -- sea lanterns at {@code 33 68 171} and
+	 * {@code 33 67 171}, 13,254 notes dark behind them: <em>"a stacked chord that was placed flush is
+	 * fine as long as it sheds, but it didn't for some reason. so it collided with the staircase
+	 * trying to go down. so it should go to the center block or back flanks if possible, and if not
+	 * become a tail at the bottom of the staircase."</em></p>
+	 *
+	 * <p>The third option costs a plain module a bus it did not have, and that is ekran's call too:
+	 * <em>"yes it should grow one. the alternative is to pad the chord down, which is about the same
+	 * anyway... plus moving the whole chord down means behind busy for the next chord."</em></p>
+	 */
+	static boolean SHEDS_A_FLUSH_MODULES_FLANK = true;
 
 	/**
 	 * Whether a bus puts its last unpaired note in the low-z slot of the cell.
@@ -16196,6 +16297,7 @@ public final class SongBuilder {
 		 */
 		private boolean climbAhead;
 		private boolean seedAhead;
+		private boolean descentTakesTheFlank;
 
 		/**
 		 * Whether the module just built laid dust on an empty centre for a climb to start from.
@@ -16240,6 +16342,25 @@ public final class SongBuilder {
 
 		boolean seedAhead() {
 			return seedAhead;
+		}
+
+		/**
+		 * Whether the staircase after this chord will stand on the chord's own landing column, so that
+		 * the descent's second rung wants the low slot the module is about to fill.
+		 *
+		 * <p>The same question {@link #seedAhead} asks of a climb, at the offset a descent uses. A
+		 * stacked module comes to rest two columns past its opening and hangs its front pair in that
+		 * column; a descent anchored there takes {@code cursor.relative(depth)} for its second rung,
+		 * which is that pair's far slot -- {@link SongBuilder#DESCENT_FLANK_SLOT}, named for exactly
+		 * this. With a pad between the two they never meet, which is why it only appeared once lanes
+		 * were allowed to land flush.</p>
+		 */
+		void descentTakesTheFlank(boolean takes) {
+			descentTakesTheFlank = takes;
+		}
+
+		boolean descentTakesTheFlank() {
+			return descentTakesTheFlank;
 		}
 
 		void sunkenOffered(boolean offered) {
