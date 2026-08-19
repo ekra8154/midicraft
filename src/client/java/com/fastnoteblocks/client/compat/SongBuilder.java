@@ -4927,8 +4927,25 @@ public final class SongBuilder {
 			int slack = slackColumns;
 			boolean behind = !columnBehindBusy || !opening.pos().equals(before)
 				|| backPairIsFree(placements, opening, event.time());
+			// Against the wall this chord is actually facing, which after a staircase is the other one.
+			//
+			// {@code wall} is worked out once at the top of the event, from the travel the lane had
+			// then. A descent or a climb built further up this same iteration turns the lane round and
+			// sets it down on the next floor, and the chord is laid straight after -- so the wall in
+			// front of it is the far one where the old wall was the near one. Measured against the old
+			// one, {@code (wall - x) * step} is nought or less on every such chord, and the room test
+			// below hands every stacked and headed shape on the first chord of every descended lane to
+			// a plain bus: {@code gaveUp=roomAhead-1<5} with twenty-two columns of empty lane in front
+			// of it. ekran found it on adventure-of-a-lifetime at 25x5, a chord of five measured for a
+			// stacked bus and built as a plain one.
+			//
+			// The rails a hundred lines up already ask this question again and say why in the same
+			// words -- {@code laneWall} -- because the answer from before the turn is about a lane that
+			// no longer exists. This is the other half of that.
+			int wallAhead = ROOM_AHEAD_ASKS_THE_WALL_IT_FACES
+				? opening.travel() == forward ? farWall : nearWall : wall;
 			int ahead = turning ? Integer.MAX_VALUE
-				: (wall - opening.pos().getX()) * opening.travel().getStepX();
+				: (wallAhead - opening.pos().getX()) * opening.travel().getStepX();
 			// The shape the walk decided when it measured this chord, if the chord is still standing
 			// where it was measured. Every other route to here has moved it -- a pad the lane laid, a
 			// turn it took -- and a shape decided for one column is not an answer about another, so
@@ -10481,6 +10498,27 @@ public final class SongBuilder {
 					quietOpen.add(openSides.get(flank));
 				}
 			}
+			if (TRACE) {
+				// Every slot and what it answered, because "the parity check refused it" is not an
+				// answer anybody can go and stand in front of. Coordinates space-separated, so a line
+				// can be pasted straight into /tp.
+				StringBuilder said = new StringBuilder("SUNKENPARITY t=" + time + " notes="
+					+ chord.size() + " opening " + centreAt.getX() + " " + centreAt.getY() + " "
+					+ centreAt.getZ() + " |");
+				for (Direction out : openSides) {
+					BlockPos slot = centreAt.relative(out);
+					said.append(" open ").append(out).append(' ').append(slot.getX()).append(' ')
+						.append(slot.getY()).append(' ').append(slot.getZ())
+						.append(soundedByAnother(placements, slot, time) ? " LOUD" : " quiet");
+				}
+				for (Direction out : lowSides) {
+					BlockPos slot = low.pos().relative(out);
+					said.append(" low ").append(out).append(' ').append(slot.getX()).append(' ')
+						.append(slot.getY()).append(' ').append(slot.getZ())
+						.append(soundedByAnother(placements, slot, time) ? " LOUD" : " quiet");
+				}
+				System.out.println(said);
+			}
 			// Relocation before padding, which is ekran's order everywhere else in this file: move the
 			// contested note, not the module.
 			//
@@ -10505,11 +10543,41 @@ public final class SongBuilder {
 			// in.
 			int loud = 2 - quiet.size()
 				+ (SUNKEN_ASKS_ITS_OPENING_TOO ? openSides.size() - quietOpen.size() : 0);
+			// What the tail would cost if every loud slot were simply dropped, which is the same sum
+			// {@link #layBus} is about to make: the notes that find no slot in the opening or the
+			// lowered column fall through to it, two to a cell, and its last cell may be half empty.
+			// The lowered column is the fifteenth cell of the same run, so the tail may have fourteen.
+			List<Direction> shedLow = quiet;
+			List<Direction> shedOpen = SUNKEN_ASKS_ITS_OPENING_TOO ? quietOpen : openSides;
+			int shedTail = ordered.size() - Math.min(shedOpen.size(), ordered.size())
+				- shedLow.size();
+			boolean shedFits = (Math.max(0, shedTail) + 1) / 2 <= DUST_RANGE - 1;
 			if (loud == 1 && oddTail && SUNKEN_RELOCATES_A_LOWERED_NOTE) {
 				placements.padded(quiet.size() < 2 ? "sunkenRelocatedALoweredNote"
 					: "sunkenRelocatedAnOpeningNote");
 				lowSides = quiet.size() < 2 ? List.of(quiet.get(0)) : lowSides;
 				openSides = quietOpen.size() < openSides.size() ? quietOpen : openSides;
+			} else if (loud > 0 && SUNKEN_SHEDS_EVERY_LOUD_SLOT && shedFits) {
+				// The same move, with the wire for a budget instead of one spare half-cell.
+				//
+				// Relocation above spends the half-empty cell an odd tail already ends on, so it can
+				// afford exactly one note. A second loud slot gave the whole shape up -- and the shape
+				// is what was carrying the chord. A sunken bus is three notes free in the opening and
+				// fifteen cells of dust, which is thirty-three; the plain bus it falls to is fifteen
+				// cells for thirty notes with not a slot spare, so at the cap the fallback does not
+				// land short, it drops notes. ekran, standing in front of the one that did:
+				// "it just had to... not put a note there. that should have been relocation doing its
+				// thing but it didnt."
+				//
+				// So every loud slot is dropped and its note falls through to the tail, the way a note
+				// falls through a slot the route has reserved. What it costs is cells, and the run is
+				// what says whether they are there -- checked above rather than assumed, because the
+				// far end of a run one cell too long is worth nothing. The module may come out a cell
+				// longer than {@link #sunkenDustCells} measured; {@link Body} reports the real count
+				// and {@link #REPLAN_ON_DRIFT} re-plans the rest of the lane on it.
+				placements.padded("sunkenShedLoudSlots" + loud);
+				lowSides = shedLow;
+				openSides = shedOpen;
 			} else if (loud > 0) {
 				// Nothing free to do, so the shape goes rather than the ground.
 				//
@@ -13780,6 +13848,59 @@ public final class SongBuilder {
 	 * that readback is understood.</p>
 	 */
 	static boolean RESERVES_THE_HANDOVER_COLUMN = true;
+
+	/**
+	 * Whether the room test asks about the wall the chord is facing, rather than the one the lane
+	 * had when the event began.
+	 *
+	 * <p>{@code wall} is settled once at the top of each event. A staircase built later in the same
+	 * iteration turns the lane round and sets it down on the next floor, and the chord is laid
+	 * straight after -- so the wall in front of it is the other one, and the old answer is about a
+	 * lane that no longer exists. Measured against it, {@code (wall - x) * step} comes out nought or
+	 * less on the first chord of every descended lane, so {@link #shapeFor}'s room test hands every
+	 * stacked and headed shape to a plain bus with the whole floor empty in front of it.</p>
+	 *
+	 * <p>ekran found it on {@code adventure-of-a-lifetime} at 25x5: a chord of five planned as a
+	 * stacked bus, pushed to the floor below and built as a plain one, with {@code
+	 * gaveUp=roomAhead-1<5} on a lane twenty-two columns wide. The rails ask this question again a
+	 * hundred lines earlier for exactly this reason and say so in the same words -- see
+	 * {@code laneWall} -- so this is the other half of a fix that was only half made.</p>
+	 *
+	 * <p>Census over 325 builds, off against on: depth 22389 -> <b>22339</b>, breach blocks 634 ->
+	 * <b>632</b>, dead, severed and wrong nought either way -- and <b>missing 0 -> 2</b>.</p>
+	 *
+	 * <p><b>Those two notes are worth reading before this flag is trusted.</b> They are one chord of
+	 * thirty on {@code ultra-limit-two-thirties} at 20x5, and the fault is not this rule: with the
+	 * shapes it frees, the walk lands that chord inside a flat turn instead of on a straight lane,
+	 * and a chord of thirty is the largest there is. As a plain bus it is fifteen cells with two
+	 * slots each -- thirty slots for thirty notes and not one spare -- and in that turn four of them
+	 * are taken (a repeater, the corner's own stone and two neighbours' notes) against two the two
+	 * corners hand back. So it is two short. The hole is that a chord this size is laid into a turn
+	 * at all without {@link #straddleFits} being asked; this rule only moved a build into it.</p>
+	 */
+	static boolean ROOM_AHEAD_ASKS_THE_WALL_IT_FACES = true;
+
+	/**
+	 * Whether a sunken bus drops every slot the parity check calls loud, instead of giving the shape
+	 * up when there is more than one.
+	 *
+	 * <p>{@link #SUNKEN_RELOCATES_A_LOWERED_NOTE} does this already for exactly one slot, because it
+	 * spends the half-empty cell an odd tail already ends on and that is one note's worth. A second
+	 * loud slot handed the whole chord to a plain bus -- and the shape is what was carrying it. A
+	 * sunken bus is three notes free in the opening and fifteen cells of dust: thirty-three. The plain
+	 * bus it falls to is fifteen cells for thirty notes with not a slot spare, so at the cap the
+	 * fallback does not land short, it drops notes.</p>
+	 *
+	 * <p>ekran read one in game on {@code ultra-limit-two-thirties} at 20x5 -- a chord of thirty
+	 * opening at {@code 21 81 7}, its west flank and its west lowered slot both loud against the
+	 * stacked chord behind: <em>"it just had to... not put a note there. that should have been
+	 * relocation doing its thing but it didnt."</em></p>
+	 *
+	 * <p>So the budget is the wire rather than the half-cell: the notes fall through to the tail the
+	 * way they do off a slot the route has reserved, and the shape still gives way where the run will
+	 * not carry them.</p>
+	 */
+	static boolean SUNKEN_SHEDS_EVERY_LOUD_SLOT = true;
 
 	/**
 	 * Whether a bus puts its last unpaired note in the low-z slot of the cell.
