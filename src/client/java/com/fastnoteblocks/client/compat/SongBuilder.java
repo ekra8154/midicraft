@@ -3829,9 +3829,28 @@ public final class SongBuilder {
 						+ "Notes");
 				}
 			}
+			// ekran's fourth cut, for the room of one: repeater, centre on the wall column, and the
+			// front flanks on the border. No transition cell, so no head; no column for a sunken
+			// opening. The head's cross is the staircase's first rung -- one level below where the
+			// rung's dust would stand, on the centre column -- and the ring turns under the head from
+			// there. Twenty-eight notes across a descent, against twenty-seven for a stacked-bus head
+			// and twenty-five sunken. See {@link #CROSS_DESCENTS}.
+			CrossDescent cross = null;
+			if (CROSS_DESCENTS && layout.ultra() && cutOffered && index > 0 && above >= 0
+					&& above < floors && !stackedFitsInstead && headed == null && !plainCut
+					&& sunken == null && climb <= 0 && room == 1 && room - 1 < cells) {
+				cross = crossDescentOf(placements, lane.ahead(delayColumns), event.notes(),
+					splitCells, descentSide, event.time());
+				placements.padded(cross != null ? "planCrossDescent"
+					: "crossDescentRefused" + LAST_CROSS_DESCENT_REFUSAL);
+				if (cross != null) {
+					placements.padded("planCrossDescentAt" + Math.min(event.notes().size(), 30)
+						+ "Notes");
+				}
+			}
 			boolean couldSplit = layout.ultra() && cutOffered && index > 0 && above >= 0
 				&& above < floors && !stackedFitsInstead && (headed != null || sunken != null
-					|| plainCut);
+					|| cross != null || plainCut);
 			// Why the head went, where losing it costs the lane its wall.
 			//
 			// A refused head is the commonest way a v2 lane ends up outside its wall: a chord of
@@ -4122,6 +4141,16 @@ public final class SongBuilder {
 					if (HEADED_CUT_FALLS_TO_PLAIN) {
 						placements.commitTrial();
 					}
+				} else if (cross != null) {
+					cursor = addCrossDescentHead(placements, trigger.cursor(), travel, depth,
+						descentSide, trigger.triggerDelay(), cross, event.time());
+					far = cross.far();
+					placements.padded("builtCrossDescent");
+					if (TRACE) {
+						System.out.println("  CROSSDESCENT t=" + event.time() + " notes="
+							+ chord.size() + " head=" + (chord.size() - far.size()) + " far="
+							+ far.size());
+					}
 				} else if (sunken != null) {
 					cursor = addSunkenSplitNearHalf(placements, trigger.cursor(), travel, depth,
 						trigger.triggerDelay(), sunken, event.time());
@@ -4264,7 +4293,9 @@ public final class SongBuilder {
 				// started from, which is exactly where the old landing plus its step off arrived.
 				int splitStepOff = climb > 0 || CHEAP_SPLIT_DESCENT ? stepOff : stepOff;
 				splitStepOff = climb > 0 ? stepOff : (CHEAP_SPLIT_DESCENT ? 0 : stepOff);
-				cursor = climb > 0
+				cursor = cross != null
+					? addCrossDescentSpiral(placements, cursor, travel, descentSide, currentTime)
+					: climb > 0
 					? addGlassClimb(placements, cursor, travel, depth, true, currentTime, 0, false)
 					: CHEAP_SPLIT_DESCENT
 						? addSplitBusDescent(placements, cursor, travel, descentSide, currentTime)
@@ -10559,6 +10590,171 @@ public final class SongBuilder {
 	}
 
 	/**
+	 * ekran's cross-descent: a stacked head whose cross is the staircase's first rung.
+	 *
+	 * <p>What the six head slots carry, by name. {@code relayOver} stands over the second rung's
+	 * dust and {@code backLow} beside the second rung's stone, a level down; both, and the centre,
+	 * must be harps -- the centre and the relay because dust is under them, the low back flank
+	 * because its instrument block would stand on the far half's note and mute it. The front flank
+	 * on the descent side is never filled: a block there cuts the run from the second rung to the
+	 * third.</p>
+	 */
+	private record CrossDescent(EventNote centre, EventNote relayAway, EventNote relayOver,
+			EventNote frontAway, EventNote backAway, EventNote backLow, List<EventNote> far) {
+	}
+
+	/** Why the last {@link #crossDescentOf} came back with nothing. */
+	static String LAST_CROSS_DESCENT_REFUSAL = "";
+
+	/**
+	 * Decides a cross-descent, every slot asked of the ground before a block is laid.
+	 *
+	 * <p>Harps first, because three slots can hold nothing else; a chord without one has no centre
+	 * and no cut. Fewer harps than three does not cancel the shape -- the slots stand empty and their
+	 * notes go over the staircase. The far half is sized on what the head will carry, and the run is
+	 * the cross, three rungs, and the far half's cells: {@code 4 + (far + 1) / 2 <= 15}, which is
+	 * twenty-two over plus six in the head.</p>
+	 *
+	 * @param opens the column the repeater stands in -- the wall is the column after next.
+	 */
+	private static CrossDescent crossDescentOf(PlacementPlan placements, Lane opens,
+			List<EventNote> notes, int splitCells, Direction descentSide, int time) {
+		LAST_CROSS_DESCENT_REFUSAL = "";
+		Direction side = opens.noteSide();
+		Direction away = descentSide.getOpposite();
+		if (away != side && away != side.getOpposite()) {
+			LAST_CROSS_DESCENT_REFUSAL = "DescentNotAcross";
+			return null;
+		}
+		List<EventNote> harps = new ArrayList<>();
+		List<EventNote> others = new ArrayList<>();
+		for (EventNote note : busOrder(notes)) {
+			(isHarpNote(note) && note.effect() == null ? harps : others).add(note);
+		}
+		if (harps.isEmpty()) {
+			LAST_CROSS_DESCENT_REFUSAL = "NoHarp";
+			return null;
+		}
+		Direction travel = opens.travel();
+		BlockPos repeater = opens.pos();
+		BlockPos centreColumn = repeater.relative(travel);
+		BlockPos wallColumn = centreColumn.relative(travel);
+		BlockPos centreAt = centreColumn.above();
+		EventNote centre = harps.remove(0);
+		EventNote relayOver = !harps.isEmpty()
+				&& railSlotTakes(placements, centreAt.relative(descentSide), time)
+			? harps.remove(0) : null;
+		EventNote backLow = !harps.isEmpty()
+				&& railSlotTakes(placements, repeater.relative(descentSide).below(), time)
+			? harps.remove(0) : null;
+		List<EventNote> pool = new ArrayList<>(others);
+		pool.addAll(harps);
+		EventNote relayAway = !pool.isEmpty() && conductsSideways(pool.get(0))
+				&& railSlotTakes(placements, centreAt.relative(away), time)
+			? pool.remove(0) : null;
+		EventNote frontAway = !pool.isEmpty()
+				&& railSlotTakes(placements, wallColumn.relative(away), time)
+			? pool.remove(0) : null;
+		EventNote backAway = !pool.isEmpty()
+				&& railSlotTakes(placements, repeater.relative(away), time)
+			? pool.remove(0) : null;
+		if (pool.isEmpty()) {
+			LAST_CROSS_DESCENT_REFUSAL = "NothingToCarryOver";
+			return null;
+		}
+		if ((pool.size() + 1) / 2 + splitCells > DUST_RANGE) {
+			LAST_CROSS_DESCENT_REFUSAL = "OutOfWireBy"
+				+ ((pool.size() + 1) / 2 + splitCells - DUST_RANGE);
+			return null;
+		}
+		return new CrossDescent(centre, relayAway, relayOver, frontAway, backAway, backLow, pool);
+	}
+
+	/**
+	 * Lays the head of a cross-descent and hands back the centre column at lane level, where
+	 * {@link #addCrossDescentSpiral} starts.
+	 *
+	 * <p>The same blocks a stacked head lays -- repeater, centre note block, the cross on its floor
+	 * slab, a conducting instrument block beside the cross on the side away from the descent with
+	 * the relay note over it and the front and back flanks at lane level either end of it -- and
+	 * on the descent side nothing beside the cross at all: that cell is the second rung's dust, laid
+	 * by the spiral, with the relay harp over it and the low back flank a level down beside the
+	 * rung's stone.</p>
+	 */
+	private static BlockPos addCrossDescentHead(PlacementPlan placements, BlockPos cursor,
+			Direction travel, Direction laneStep, Direction descentSide, int triggerDelay,
+			CrossDescent cut, int time) {
+		placements.placing("crossHead" + (6 - (cut.relayAway() == null ? 1 : 0)
+			- (cut.relayOver() == null ? 1 : 0) - (cut.frontAway() == null ? 1 : 0)
+			- (cut.backAway() == null ? 1 : 0) - (cut.backLow() == null ? 1 : 0))
+			+ "/far" + cut.far().size());
+		Direction away = descentSide.getOpposite();
+		set(placements, cursor, "minecraft:stone");
+		set(placements, cursor.above(),
+			"minecraft:repeater[facing=" + repeaterFacing(travel) + ",delay=" + triggerDelay + "]");
+		BlockPos centre = cursor.relative(travel).above();
+		BlockPos cross = centre.below();
+		set(placements, cross.below(), UNDERFLOOR);
+		// Plain wire, not STACKED_CROSS. A stacked head's cross is walled in and off the path, so it
+		// is stated as a cross and left out of the run count. This one is the run's first cell --
+		// fifteen from the centre, fourteen at the rung beside it -- and has that rung for a
+		// neighbour, so the paste shapes it; and counted, the run reads true. Uncounted, the busy pad
+		// after a far half of eleven read one cell in hand and spent it: ultra-dense-slow-gaps 16x5,
+		// 1,181 dead.
+		set(placements, cross, "minecraft:redstone_wire");
+		placeNoteBlock(placements, centre, cut.centre());
+		placements.powered(centre, time);
+		// The side away from the descent: a stacked head's side, as it has always been built.
+		BlockPos instrument = cross.relative(away);
+		placements.powered(instrument, cut.relayAway() == null ? "minecraft:stone"
+			: conductingInstrumentBlock(cut.relayAway()), time);
+		if (cut.relayAway() != null) {
+			if (FALLING_INSTRUMENT_BLOCKS.contains(cut.relayAway().instrumentBlock())) {
+				placements.support(instrument.below(), UNDERFLOOR);
+			}
+			placeNoteBlock(placements, centre.relative(away), cut.relayAway());
+		}
+		if (cut.frontAway() != null) {
+			placeNote(placements, instrument.relative(travel), cut.frontAway(), true);
+		}
+		if (cut.backAway() != null) {
+			placeNote(placements, instrument.relative(travel.getOpposite()), cut.backAway(), true);
+		}
+		// The descent side: the relay harp over where the second rung's dust will be, and the low
+		// back flank beside that rung's stone.
+		if (cut.relayOver() != null) {
+			placeNoteBlock(placements, centre.relative(descentSide), cut.relayOver());
+		}
+		if (cut.backLow() != null) {
+			placeNote(placements, cursor.relative(descentSide).below(), cut.backLow(), true);
+		}
+		return cross;
+	}
+
+	/**
+	 * The split descent's ring from its second rung, anchored on the centre column: the cross is
+	 * the first rung, one level below where a rung's dust would stand, and the second rung's dust
+	 * lies beside it at lane level. Lands where {@link #addSplitBusDescent} lands, a column nearer.
+	 */
+	private static BlockPos addCrossDescentSpiral(PlacementPlan placements, BlockPos cursor,
+			Direction travel, Direction depth, int time) {
+		placements.placing("crossDescent");
+		placements.turnedAt(cursor);
+		List<BlockPos> ring = List.of(
+			cursor,
+			cursor.relative(depth),
+			cursor.relative(travel).relative(depth),
+			cursor.relative(travel));
+		for (int step = 2; step <= CUBE_FLOOR_HEIGHT; step++) {
+			int drop = step - 1;
+			BlockPos stone = ring.get((step - 1) % ring.size()).below(drop);
+			placements.powered(stone, "minecraft:stone", time);
+			set(placements, stone.above(), "minecraft:redstone_wire");
+		}
+		return cursor.below(CUBE_FLOOR_HEIGHT);
+	}
+
+	/**
 	 * A chord cut across a descent with a sunken opening: what rides in the opening note block and
 	 * its flanks, what the lowered cell and the raised cells carry, and what goes over the staircase.
 	 *
@@ -11425,6 +11621,9 @@ public final class SongBuilder {
 		// a chord the one shape here that can be cut at all -- so they wear what a bus wears.
 		if (laidBy.startsWith("sunkenNearHalf")) {
 			return "minecraft:polished_tuff";
+		}
+		if (laidBy.startsWith("crossHead")) {
+			return "minecraft:deepslate_tiles";
 		}
 		if (laidBy.startsWith("nearHalf") || laidBy.startsWith("farHalf")) {
 			return "minecraft:tuff";
@@ -12511,6 +12710,17 @@ public final class SongBuilder {
 				}
 				nudge = !RELOCATION_REFUSED_ASKS_PARITY_AGAIN
 					|| shape.parityWithoutTheMove() == 1;
+				// The same question shapeFor puts to every nudge it decides, which this one -- decided
+				// here, after the move fell through -- never was: a nudge is a cell of dust, and a run
+				// already at fifteen has no cell left. Guardian 18x4 at 4 76 168: a cut across a climb
+				// landed its far half with one block of wire, this shift spent it, and the repeater
+				// behind the pad read nought -- 14,023 notes dead off one column.
+				if (nudge && MEASURED_NUDGE_REACH
+						&& placements.runSinceRepeater() + 1 > DUST_RANGE) {
+					placements.padded("planBusForRefusedMoveAndNoWire");
+					trace(event, lane, style, ChordStyle.BUS, "refusedMoveNudgePastTheWire");
+					return layBus(placements, lane, triggerDelay, event, ChordStyle.BUS, true, layout);
+				}
 			}
 		}
 		placements.beginTrial();
@@ -15351,6 +15561,22 @@ public final class SongBuilder {
 	 * 24 where a flank is shed. Descents only, as drawn; a climb off a note block is not measured.</p>
 	 */
 	static boolean SUNKEN_CUTS = true;
+
+	/**
+	 * Whether a chord arriving with a room of one -- repeater, then the wall -- is cut with a
+	 * cross-descent: a stacked head whose centre stands on the wall column, whose front flanks stand
+	 * on the border, and whose cross is the staircase's first rung.
+	 *
+	 * <p>ekran's, Guardian 18x4 at {@code 16 77 172}, built by hand and handed over with emerald for
+	 * the wall. The ordinary head needs a transition cell and sheds its front flank for the spiral;
+	 * here there is no column for either, so the spiral's top rung goes instead: the cross under the
+	 * centre is one level below where that rung's dust would stand, and the ring turns from there,
+	 * one column nearer. Three harps -- centre, the relay over the second rung's dust, the back
+	 * flank dropped beside the second rung's stone -- and the front flank on the descent side shed
+	 * because a block there cuts the run to the third rung. Twenty-eight notes, against twenty-seven
+	 * for a stacked-bus head and twenty-five sunken. Descents only, as drawn.</p>
+	 */
+	static boolean CROSS_DESCENTS = true;
 
 	/**
 	 * Whether a bus puts its last unpaired note in the low-z slot of the cell.

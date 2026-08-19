@@ -42,6 +42,7 @@ class SplitDescentTest {
 		SongBuilder.CHEAP_SPLIT_DESCENT = true;
 		SongBuilder.STACKED_SPLIT_HEADS = true;
 		SongBuilder.SUNKEN_CUTS = true;
+		SongBuilder.CROSS_DESCENTS = true;
 	}
 
 	/** Chords too big to carry across a turn whole, so the only way over one is a cut. */
@@ -96,6 +97,7 @@ class SplitDescentTest {
 		// And the sunken cut, for the same reason: its opening costs the wire nothing, so with it
 		// even the old descent reaches twenty-one.
 		SongBuilder.SUNKEN_CUTS = false;
+		SongBuilder.CROSS_DESCENTS = false;
 		int fired = 0;
 		for (int floors = 2; floors <= 4; floors++) {
 			for (int width = 16; width <= 32; width += 8) {
