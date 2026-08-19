@@ -78,11 +78,11 @@ class FaultCensusProbe {
 	 */
 	private record Row(String song, int width, int floors, int dead, int dropped, int wrong,
 			int breachLanes, int breachBlocks, int depth, String refused, FaultView.Break broke,
-			List<String> wrongPairs, int severed) {
+			List<String> wrongPairs, int severed, int collisions) {
 
 		boolean clean() {
 			return refused == null && dead == 0 && dropped == 0 && wrong == 0 && breachBlocks == 0
-				&& severed == 0;
+				&& severed == 0 && collisions == 0;
 		}
 
 		/** Dead first, then missing notes, then wrong ones, then ground the build promised not to take. */
@@ -186,10 +186,11 @@ class FaultCensusProbe {
 						// alternative beginning and takes the generous reading, starting a fresh
 						// performance at the orphan: everything downstream counts as reached and
 						// unreachedNotes comes back nought on a build cut in half.
-						Math.max(0, built.reading().versions() - 1)));
+						Math.max(0, built.reading().versions() - 1),
+						built.plan().collisions().size()));
 				} catch (RuntimeException refused) {
 					rows.add(new Row(name, size[0], size[1], 0, 0, 0, 0, 0, 0,
-						String.valueOf(refused.getMessage()), null, List.of(), 0));
+						String.valueOf(refused.getMessage()), null, List.of(), 0, 0));
 				}
 			}
 		}
@@ -221,9 +222,9 @@ class FaultCensusProbe {
 		System.out.println("---- worst first (fault.song / fault.width / fault.floors) ----");
 		for (Row row : faulty) {
 			System.out.println(String.format(
-				"   %-34s %2dw x %df  severed %d  dead %5d  missing %4d  wrong %3d  breach %2d lanes %3d blocks%s",
+				"   %-34s %2dw x %df  severed %d  dead %5d  missing %4d  wrong %3d  breach %2d lanes %3d blocks  collisions %2d%s",
 				row.song(), row.width(), row.floors(), row.severed(), row.dead(), row.dropped(),
-				row.wrong(), row.breachLanes(), row.breachBlocks(),
+				row.wrong(), row.breachLanes(), row.breachBlocks(), row.collisions(),
 				row.refused() == null ? "" : "   REFUSED: " + row.refused()));
 		}
 		// By song and by kind, because one song at five sizes is one bug five times and reads as five
@@ -316,6 +317,8 @@ class FaultCensusProbe {
 		System.out.println("CENSUS severedBuilds="
 			+ faulty.stream().filter(row -> row.severed() > 0).count()
 			+ " severedLanes=" + faulty.stream().mapToLong(Row::severed).sum());
+		System.out.println("CENSUS collisions=" + rows.stream().mapToLong(Row::collisions).sum()
+			+ " inBuilds=" + rows.stream().filter(row -> row.collisions() > 0).count());
 		System.out.println("CENSUS builds=" + rows.size()
 			+ " deadBuilds=" + faulty.stream().filter(row -> row.dead() > 0).count()
 			+ " dead=" + dead + " missing=" + missing + " wrong=" + wrong

@@ -1212,6 +1212,24 @@ public final class SongBuilder {
 	 * inside the event that builds a staircase and the wall in front of the chord after it is the
 	 * other one.</p>
 	 */
+	/**
+	 * A fresh lane, marked crowded where the layout is ultra.
+	 *
+	 * <p>The first lane of an ultra walk is marked from its first cell -- no lane in ultra owns the
+	 * ground its notes hang over, so every slot is offered rather than assumed -- and a lane coming
+	 * out of a flat turn keeps the mark through {@link Lane#pinned}. The lanes opened after a
+	 * staircase and after a cut were built with {@link Lane#straight} and lost it, so every bus in
+	 * them hung its notes without asking: under a sunken bus's lowered notes on the floor above,
+	 * which is the one thing in a build that reaches two levels down into the floor below's air.
+	 * Guardian 24x3, a bus of twenty-four against a top slab at 12 70 153.</p>
+	 */
+	private static Lane crowdedIfUltra(Lane lane, Layout layout) {
+		return layout.ultra() && CROWDED_AFTER_A_STAIRCASE ? lane.crowding() : lane;
+	}
+
+	/** v2: lanes opened after a staircase or a cut ask the ground for their slots like the first. */
+	static boolean CROWDED_AFTER_A_STAIRCASE = true;
+
 	private static int laneWall(int nearWall, int farWall, Direction forward, Direction travel,
 			int floor, int climb, int floors) {
 		int wall = travel == forward ? farWall : nearWall;
@@ -2966,8 +2984,8 @@ public final class SongBuilder {
 			// A stacked module ends two columns past its own opening and puts the dust one column past it,
 			// a level above the centre. So the cell this climb wants is one column back from where the
 			// lane now stands, two levels up. Anything else, whoever laid it, is not this module's.
-			boolean centreFeedsTheClimb = CLIMB_OFF_A_STACKED_CENTRE && climb > 0
-				&& above >= 0 && above < floors
+			boolean centreFeedsTheClimb = (CLIMB_OFF_A_STACKED_CENTRE || CLIMB_FED_FROM_A_FLUSH_CENTRE)
+				&& climb > 0 && above >= 0 && above < floors
 				&& lane.pos().relative(lane.travel().getOpposite()).above(2)
 					.equals(placements.climbFedFromCentre());
 			// Such a climb joins two rungs in exactly as one off a bus does, so it is off-bus for every
@@ -3194,6 +3212,35 @@ public final class SongBuilder {
 			// for the same reason since the flush flank was first shed -- five times over the library
 			// then, thirty once every lane opened on its wall column. See
 			// {@link #FLUSH_HEAD_TURNS_BEFORE_A_DESCENT}.
+			// And a climb, which the climb standing a column out brought to the same place: the glass
+			// climb's second column is the cell beside its own, a level up -- sideways, against the
+			// slabs -- and a rigid module landing flush against the climb hangs a front note exactly
+			// under it. Glass over a note block is a note that cannot sound and, as the plan sees it, a
+			// collision: Guardian 24x4 at 25 65 138, a head's front flank under the staircase, ekran.
+			//
+			// ekran's answer, where the module's centre holds no note: climb straight off the centre.
+			// Dust on the centre carries the run diagonally up onto the first rung, the climb skips
+			// the two rungs a bus skips, the glass over the note is never laid, and the run costs four
+			// rather than three for the cell of dust. That is {@link #CLIMB_FED_FROM_A_FLUSH_CENTRE},
+			// told to the builder here. Where the centre does hold a note the module sheds that flank
+			// the way it sheds a descent's -- the same slot, because the climb steps the same way the
+			// spiral does -- and where it could only shed by growing it turns first, as below.
+			boolean flushBeforeAClimb = layout.ultra() && !turning && railPhase < 0 && laneStarted
+				&& above >= 0 && above < floors && climb > 0
+				&& (here.style() == ChordStyle.STACKED_FULL
+					|| here.style() == ChordStyle.STACKED_FRONT)
+				&& (wall - here.end()) * lane.travel().getStepX() == 0;
+			UltraSlots flushSlots = flushBeforeAClimb
+				? (shaped.moved() != null ? shaped.moved().slots()
+					: slotsFor(here.style(), event.notes()))
+				: null;
+			boolean centreFeedsThisClimb = CLIMB_FED_FROM_A_FLUSH_CENTRE && flushBeforeAClimb
+				&& flushSlots != null && flushSlots.centre() == null;
+			placements.climbFedByCentre(centreFeedsThisClimb);
+			if (flushBeforeAClimb) {
+				placements.padded(centreFeedsThisClimb ? "climbOffAFlushCentre"
+					: "climbTakesAFlushFlank");
+			}
 			boolean flushHeadWouldGrow = false;
 			if (SHEDS_A_FLUSH_MODULES_FLANK && layout.ultra() && !turning && railPhase < 0
 					&& laneStarted
@@ -3205,6 +3252,8 @@ public final class SongBuilder {
 					flankAhead = FLAT_TURN_FLANK_SLOT;
 				} else if (FLUSH_HEAD_TURNS_BEFORE_A_DESCENT && !flatAhead && climb <= 0
 						&& (wall - landing) * lane.travel().getStepX() == 0) {
+					flankAhead = DESCENT_FLANK_SLOT;
+				} else if (flushBeforeAClimb && !centreFeedsThisClimb) {
 					flankAhead = DESCENT_FLANK_SLOT;
 				}
 				if (flankAhead >= 0) {
@@ -3359,7 +3408,8 @@ public final class SongBuilder {
 				&& layout.ultra() && flatAhead && reaches
 				&& (wall - here.end()) * lane.travel().getStepX() == 0;
 			placements.turnTakesTheFlank(descentTakesTheFlank ? DESCENT_FLANK_SLOT
-				: flatTurnTakesTheFlank ? FLAT_TURN_FLANK_SLOT : -1);
+				: flatTurnTakesTheFlank ? FLAT_TURN_FLANK_SLOT
+				: flushBeforeAClimb && !centreFeedsThisClimb ? DESCENT_FLANK_SLOT : -1);
 			// And the other fact the chord cannot see for itself: how soon the next event arrives. A pad
 			// laid in front of it can only be spent as a repeater where there are two ticks to split, so
 			// a gap of one is the case a simple tail with a note-block middle cannot survive being padded
@@ -3424,8 +3474,8 @@ public final class SongBuilder {
 				: Pad.none(tipSignal);
 			// Claimed against offered, because a rule that lays a block and never uses it reads exactly
 			// like a rule that works.
-			if (CLIMB_OFF_A_STACKED_CENTRE && climb > 0 && above >= 0 && above < floors
-					&& placements.climbFedFromCentre() != null) {
+			if ((CLIMB_OFF_A_STACKED_CENTRE || CLIMB_FED_FROM_A_FLUSH_CENTRE) && climb > 0
+					&& above >= 0 && above < floors && placements.climbFedFromCentre() != null) {
 				placements.padded(centreFeedsTheClimb ? "climbCentreClaimed" : "climbCentreOutOfReach");
 				if (centreFeedsTheClimb) {
 					// What stands between the module and the staircase, which is the whole of why the
@@ -3987,6 +4037,19 @@ public final class SongBuilder {
 				int near = 2 * (room - 1);
 				List<EventNote> far;
 				BlockPos cursor;
+				// A headed cut built in a trial, because its head's side notes stand where they stand:
+				// two cells beside the centre, a level up, with air wanted over each. What can be over
+				// them is the floor above -- a sunken bus there hangs its lowered notes two levels down,
+				// and their instrument blocks land exactly in that air. A head that meets one used to
+				// collide outright, and a collision is a build the player is offered with a note that
+				// cannot sound. Now it is rolled back and the chord cut plain, where the plain cut can
+				// carry it; a plain cut's halves are buses, and a bus asks the ground for every slot and
+				// grows past one it cannot have. Every collision left in the library at ekran's sizes
+				// was this one shape against that one slab. See {@link #HEADED_CUT_FALLS_TO_PLAIN}.
+				if (headed != null && HEADED_CUT_FALLS_TO_PLAIN) {
+					placements.beginTrial();
+				}
+				try {
 				if (headed != null) {
 					BlockPos opening = trigger.cursor();
 					// Only the first cell of pad can be against the module behind, so only the first one
@@ -4035,10 +4098,52 @@ public final class SongBuilder {
 						placements.padded("planStackedSplitHeadOnly");
 						HEAD_ONLY_AT = cursor;
 					}
+					if (HEADED_CUT_FALLS_TO_PLAIN) {
+						placements.commitTrial();
+					}
 				} else {
-					cursor = addSplitEventModule(placements, trigger.cursor(), travel, depth,
-						trigger.triggerDelay(), chord.subList(0, near));
-					far = near < chord.size() ? chord.subList(near, chord.size()) : List.of();
+					List<EventNote> handedOn = new ArrayList<>();
+					cursor = HEADED_CUT_FALLS_TO_PLAIN
+						? addSplitNearHalf(placements, trigger.cursor(), travel, depth,
+							trigger.triggerDelay(), chord.subList(0, near), Math.max(1, room - 1),
+							handedOn)
+						: addSplitEventModule(placements, trigger.cursor(), travel, depth,
+							trigger.triggerDelay(), chord.subList(0, near));
+					List<EventNote> farRest = new ArrayList<>(handedOn);
+					if (near < chord.size()) {
+						farRest.addAll(chord.subList(near, chord.size()));
+					}
+					far = farRest;
+				}
+				} catch (IllegalArgumentException collided) {
+					if (headed == null || !HEADED_CUT_FALLS_TO_PLAIN) {
+						throw collided;
+					}
+					placements.rollbackTrial();
+					if (TRACE) {
+						System.out.println("  CUT HEAD COLLIDED " + collided.getMessage());
+					}
+					// Only where the plain cut can carry the chord across: both halves and the staircase
+					// off one repeater. A chord too big for that keeps its head and its collision, which
+					// the paste then says in red, as it did.
+					if (cells + splitCells > DUST_RANGE || near < 2) {
+						placements.padded("cutHeadCollidedAndStayed");
+						throw collided;
+					}
+					placements.padded("cutHeadFellToPlain");
+					headed = null;
+					List<EventNote> handedOn = new ArrayList<>();
+					cursor = HEADED_CUT_FALLS_TO_PLAIN
+						? addSplitNearHalf(placements, trigger.cursor(), travel, depth,
+							trigger.triggerDelay(), chord.subList(0, near), Math.max(1, room - 1),
+							handedOn)
+						: addSplitEventModule(placements, trigger.cursor(), travel, depth,
+							trigger.triggerDelay(), chord.subList(0, near));
+					List<EventNote> farRest = new ArrayList<>(handedOn);
+					if (near < chord.size()) {
+						farRest.addAll(chord.subList(near, chord.size()));
+					}
+					far = farRest;
 				}
 				// A cut chord is built here and not by {@link #addChordModule}, so none of it ever reached
 				// the CHORD line -- the one place the trace says what a chord was planned as, what it came
@@ -4095,7 +4200,7 @@ public final class SongBuilder {
 					cursor = addCarriedEventModule(placements, cursor, travel, depth, far,
 						splitStepOff);
 				}
-				lane = Lane.straight(cursor, travel, depth);
+				lane = crowdedIfUltra(Lane.straight(cursor, travel, depth), layout);
 				// Graded against where the lane actually opened, because every hand-derivation of this
 				// arithmetic in the session that found it was off by one, in both directions. A
 				// prediction the planner is going to search backwards on has to be checked against the
@@ -4338,7 +4443,7 @@ public final class SongBuilder {
 					// Through the same one place canTurn asked, so the wire this lane books itself and
 					// the wire it demanded before turning cannot be two different sums.
 					tipSignal = seedsRail ? seedTip : wouldTip;
-					lane = Lane.straight(landed, travel.getOpposite(), depth);
+					lane = crowdedIfUltra(Lane.straight(landed, travel.getOpposite(), depth), layout);
 					if (seedsRail) {
 						// The rungs past the floor and the seed's own cell of wire are already off it,
 						// in {@code seedTip} above, which is where the same sum has to be made -- the
@@ -4502,7 +4607,7 @@ public final class SongBuilder {
 				// it and here is dust. Nothing left to time it with, and nothing needed.
 				currentTime = event.time();
 				lane = Lane.straight(addCarriedEventModule(placements, lane.pos(), lane.travel(), depth,
-					event.notes(), stepOff), lane.travel(), depth);
+					event.notes(), stepOff), lane.travel(), depth).crowding();
 				lastStyle = ChordStyle.BUS;
 				tipSignal = pad.signal() - turnCells - stepOff - (event.notes().size() + 1) / 2;
 				// A carried bus starts where the turn left off, so its first pair of notes stands where
@@ -10154,9 +10259,11 @@ public final class SongBuilder {
 		cursor = emitDust(placements, Lane.straight(cursor, travel, laneStep), stepOff,
 			false, "farHalfStepOff").pos();
 		// The wire arrives level with the repeater that is not there, and climbs the side of the
-		// first stone onto the dust running over it.
+		// first stone onto the dust running over it. Crowded for the reason the near half is.
+		Lane half = Lane.straight(cursor.above(), travel, laneStep);
 		return cursor.relative(travel, layBus(placements,
-			Lane.straight(cursor.above(), travel, laneStep), chord, chord.get(0).time()));
+			HEADED_CUT_FALLS_TO_PLAIN && placements.answersWhatIsAhead() ? half.crowding() : half,
+			chord, chord.get(0).time()));
 	}
 
 	/**
@@ -10177,6 +10284,32 @@ public final class SongBuilder {
 		return cursor.relative(travel, 1 + layBus(placements,
 			Lane.straight(cursor.relative(travel).above(), travel, laneStep), chord,
 			chord.get(0).time()));
+	}
+
+	/**
+	 * The near half of a v2 cut: the same module, laid crowded and held to its cells.
+	 *
+	 * <p>Crowded, so the bus asks the ground for each slot -- the floor above may have hung a sunken
+	 * bus's lowered notes into the air this bus's notes want, and a slot it cannot have is skipped
+	 * rather than collided with. Held to the cells the cut sized it at, because a near half that
+	 * grows a cell lands past the wall and spends a cell of the one run both halves and the staircase
+	 * share: Guardian 24x3 lost 397 notes to a far half one cell out of reach. What the near half
+	 * cannot hang is handed back, and the caller gives it to the far half, which is a bus too and
+	 * has the room. See {@link #HEADED_CUT_FALLS_TO_PLAIN}.</p>
+	 */
+	private static BlockPos addSplitNearHalf(PlacementPlan placements, BlockPos cursor,
+			Direction travel, Direction laneStep, int triggerDelay, List<EventNote> chord, int cells,
+			List<EventNote> leftover) {
+		placements.placing("nearHalf");
+		set(placements, cursor, "minecraft:stone");
+		set(placements, cursor.above(),
+			"minecraft:repeater[facing=" + repeaterFacing(travel) + ",delay=" + triggerDelay + "]");
+		Lane half = Lane.straight(cursor.relative(travel).above(), travel, laneStep).crowding();
+		int laid = layBus(placements, half, chord, chord.get(0).time(), Set.of(), cells, leftover);
+		if (!leftover.isEmpty()) {
+			placements.padded("nearHalfHandedNotesOn");
+		}
+		return cursor.relative(travel, 1 + laid);
 	}
 
 	/**
@@ -10361,6 +10494,16 @@ public final class SongBuilder {
 	 */
 	private static int layBus(PlacementPlan placements, Lane anchor, List<EventNote> chord,
 			int time, Set<BlockPos> reserved, int cellLimit) {
+		return layBus(placements, anchor, chord, time, reserved, cellLimit, null);
+	}
+
+	/**
+	 * @param leftover where to put the notes that did not fit in {@code cellLimit} cells, or
+	 *     {@code null} to report them as having nowhere to hang. A cut's near half is sized to land
+	 *     on the wall and may not grow past it; what it cannot hang goes to the far half instead.
+	 */
+	private static int layBus(PlacementPlan placements, Lane anchor, List<EventNote> chord,
+			int time, Set<BlockPos> reserved, int cellLimit, List<EventNote> leftover) {
 		List<EventNote> ordered = busOrder(chord);
 		int placed = 0;
 		int cells = 0;
@@ -10455,7 +10598,9 @@ public final class SongBuilder {
 				}
 			}
 		}
-		if (placed < ordered.size()) {
+		if (placed < ordered.size() && leftover != null) {
+			leftover.addAll(ordered.subList(placed, ordered.size()));
+		} else if (placed < ordered.size()) {
 			placements.trouble((ordered.size() - placed) + " notes of a chord of " + ordered.size()
 				+ " at tick " + time + " had nowhere to hang: a bus is fifteen blocks at the most, "
 				+ "and this one filled them without room for the rest");
@@ -14216,7 +14361,8 @@ public final class SongBuilder {
 			// Only with no note, and that is physical rather than a preference: a note block in the centre
 			// insists on air above it, and this is that air. The file says so where the stacked bus
 			// explains why its own tail has to leave sideways.
-			if (CLIMB_OFF_A_STACKED_CENTRE && placements.climbAhead()) {
+			if (CLIMB_OFF_A_STACKED_CENTRE && placements.climbAhead()
+					|| placements.climbFedByCentre()) {
 				placements.padded("climbOffAStackedCentre");
 				set(placements, centre.above(), "minecraft:redstone_wire");
 				placements.climbFedFromCentre(centre.above());
@@ -14825,6 +14971,37 @@ public final class SongBuilder {
 	 * worth keeping it is probably not the part that made the shape appear.</p>
 	 */
 	static boolean CLIMB_OFF_A_STACKED_CENTRE = false;
+
+	/**
+	 * v2: a stacked module landing flush against a climb, with no note in its centre, feeds the climb
+	 * from the centre.
+	 *
+	 * <p>The flush half of {@link #CLIMB_OFF_A_STACKED_CENTRE}, and only that half: the dust on the
+	 * empty centre, and the climb taking it as off-bus at {@code offBus + 1}. Not the room test and
+	 * not the cut being skipped, which are what chose the shape in the build ekran said was not
+	 * working. Here the shape is already chosen and already flush, and the choice is between this
+	 * and a note under glass: with the climb standing a column out its second column is the cell
+	 * over the module's far front note, and the first rung's glass lands on that note. ekran, at
+	 * Guardian 24x4 25 65 138: <i>"do the 3 ascent directly off of the top of the stacked chord ...
+	 * we place a redstone on top of it. that connects it directly to the glass, and we can skip the
+	 * bottom 2 rungs, allowing the note to sound with air above it and no collision. note that this
+	 * does mean that the ascent costs 4 and not 3."</i> Where the centre holds a note the module sheds
+	 * that flank instead, as it does for a descent.</p>
+	 */
+	static boolean CLIMB_FED_FROM_A_FLUSH_CENTRE = true;
+
+	/**
+	 * v2: a headed cut whose head collides is rolled back and the chord cut plain.
+	 *
+	 * <p>A head's two side notes stand two cells beside the centre, a level up, and want air over
+	 * them; a sunken bus on the floor above hangs its lowered notes two levels down and their
+	 * instrument blocks land in that very air. Every collision left in the library at 33x3, 25x5,
+	 * 24x4 and 16x5 was that: a sunken bus's top slab over a cut head's side note, or over a cut's
+	 * plain half laid on a lane not marked crowded. The head now goes in a trial and falls to the
+	 * plain cut where the plain cut can carry the chord, and the halves' buses are laid crowded so
+	 * they ask the ground for each slot the way every other bus in v2 does.</p>
+	 */
+	static boolean HEADED_CUT_FALLS_TO_PLAIN = true;
 
 	/**
 	 * The smallest chord laid as a {@link ChordStyle#SUNKEN_BUS}.
@@ -17035,6 +17212,23 @@ public final class SongBuilder {
 
 		void climbAhead(boolean ahead) {
 			climbAhead = ahead;
+		}
+
+		/**
+		 * Whether the chord about to be built is a stacked module landing flush against a climb with
+		 * its centre empty, so the builder lays dust on the centre for the climb to start from.
+		 * Narrower than {@link #climbAhead}: that says a climb is somewhere ahead, this says the
+		 * staircase stands on this module's landing column. See
+		 * {@link SongBuilder#CLIMB_FED_FROM_A_FLUSH_CENTRE}.
+		 */
+		private boolean climbFedByCentre;
+
+		void climbFedByCentre(boolean fed) {
+			climbFedByCentre = fed;
+		}
+
+		boolean climbFedByCentre() {
+			return climbFedByCentre;
 		}
 
 		boolean climbAhead() {
