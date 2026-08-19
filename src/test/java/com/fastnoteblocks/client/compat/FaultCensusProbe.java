@@ -102,7 +102,7 @@ class FaultCensusProbe {
 	 */
 	private record Row(String song, int width, int floors, int dead, int dropped, int wrong,
 			int breachLanes, int breachBlocks, int depth, String refused, FaultView.Break broke,
-			List<String> wrongPairs, int severed, int collisions) {
+			List<String> wrongPairs, int severed, int collisions, int totalCols) {
 
 		boolean clean() {
 			return refused == null && dead == 0 && dropped == 0 && wrong == 0 && breachBlocks == 0
@@ -208,10 +208,11 @@ class FaultCensusProbe {
 						rows.add(new Row(name, size[0], size[1], 0, droppedIn(plan), plan.wrongNotes(),
 							plan.breaches().size(),
 							plan.breaches().stream().mapToInt(Integer::intValue).sum(),
-							plan.spanZ(), null, null, List.of(), 0, plan.collisions().size()));
+							plan.spanZ(), null, null, List.of(), 0, plan.collisions().size(),
+							plan.totalColumns()));
 					} catch (RuntimeException refused) {
 						rows.add(new Row(name, size[0], size[1], 0, 0, 0, 0, 0, 0,
-							String.valueOf(refused.getMessage()), null, List.of(), 0, 0));
+							String.valueOf(refused.getMessage()), null, List.of(), 0, 0, 0));
 					}
 					continue;
 				}
@@ -232,10 +233,10 @@ class FaultCensusProbe {
 						// performance at the orphan: everything downstream counts as reached and
 						// unreachedNotes comes back nought on a build cut in half.
 						Math.max(0, built.reading().versions() - 1),
-						built.plan().collisions().size()));
+						built.plan().collisions().size(), built.plan().totalColumns()));
 				} catch (RuntimeException refused) {
 					rows.add(new Row(name, size[0], size[1], 0, 0, 0, 0, 0, 0,
-						String.valueOf(refused.getMessage()), null, List.of(), 0, 0));
+						String.valueOf(refused.getMessage()), null, List.of(), 0, 0, 0));
 				}
 			}
 		}
@@ -372,6 +373,22 @@ class FaultCensusProbe {
 		// Summed over every build including the clean ones -- the faulty rows are not where a shape
 		// that costs columns spends them.
 		System.out.println("CENSUS depth=" + rows.stream().mapToLong(Row::depth).sum());
+		// Corridor actually spent -- every lane's length, breaches included -- which is what depth
+		// cannot say: the last floor may be mostly empty.
+		System.out.println("CENSUS totalCols=" + rows.stream().mapToLong(Row::totalCols).sum());
+		// By song, one line each, for comparing two pasters on the same grid: -Dcensus.depth=true.
+		if (Boolean.parseBoolean(text("depth", "false"))) {
+			TreeMap<String, long[]> depthBySong = new TreeMap<>();
+			for (Row row : rows) {
+				long[] tally = depthBySong.computeIfAbsent(row.song(), key -> new long[3]);
+				tally[0] += row.depth();
+				tally[1] += row.refused() == null ? 1 : 0;
+				tally[2] += row.totalCols();
+			}
+			depthBySong.forEach((song, tally) -> System.out.println(
+				String.format("DEPTH %-34s builds %5d  depth %9d  totalCols %10d", song, tally[1],
+					tally[0], tally[2])));
+		}
 		System.out.println("CENSUS severedBuilds="
 			+ faulty.stream().filter(row -> row.severed() > 0).count()
 			+ " severedLanes=" + faulty.stream().mapToLong(Row::severed).sum());
