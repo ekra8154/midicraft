@@ -4674,6 +4674,41 @@ public final class SongBuilder {
 			// eleven blocks of wire could spend ten of them on bare dust to buy a two-cell discount.
 			// See {@link #PREPAD_GROWTH_CAP}.
 			int grownFrom = owing;
+			// A chord that fits, a column or two short of the wall, in front of a chord that cannot:
+			// cannot fit, cannot be cut, and cannot turn either, because the wire this chord leaves
+			// has to cover the columns it left *and* the staircase, and with no spare tick there is no
+			// repeater to put in them. That is the breach of eleven: Guardian 20x5 at tick 1480, a
+			// stacked bus of twenty-four ending two short on five blocks of wire, the next chord of
+			// twenty-four wanting two and four, {@code pad=1c/4s}, laid whole twelve columns out. The
+			// off-bus prepad was written for exactly this lane and grew without a brake; this asks
+			// only whether the chord after is stuck as things stand and whether landing flush frees
+			// it, and lays the fewest columns that do. See {@link #V2_PREPADS_A_STUCK_NEXT}.
+			if (V2_PREPADS_A_STUCK_NEXT && layout.ultra() && !turning && !wantsTurn && laneStarted
+					&& railPhase < 0 && owing == 0 && index + 1 < events.size()
+					&& above >= 0 && above < floors) {
+				int step = lane.travel().getStepX();
+				int shortBy = (wall - here.end()) * step;
+				EventGroup next = events.get(index + 1);
+				int nextWait = next.time() - event.time();
+				boolean onBus = endsOnBus(here.style(), sunkenDustCells(event.notes().size()));
+				if (shortBy > 0 && shortBy <= V2_STUCK_PREPAD_CAP
+						&& tipSignal - shortBy >= 1) {
+					Lane nextOpens = lane.ahead((here.end() - lane.pos().getX()) * step);
+					boolean stuck = nextChordIsStuck(placements, nextOpens, next, nextWait, shortBy,
+						here.tip(), onBus, here.busy(), here.style().stacked(), turnCells, offBus,
+						splitCells, climb > 0);
+					boolean freed = stuck && !nextChordIsStuck(placements, nextOpens.ahead(shortBy),
+						next, nextWait, 0, here.tip(), onBus, here.busy(), here.style().stacked(),
+						turnCells, offBus, splitCells, climb > 0);
+					if (stuck) {
+						placements.padded(freed ? "v2StuckNextFreedBy" + shortBy
+							: "v2StuckNextNotFreed");
+					}
+					if (freed) {
+						owing = shortBy;
+					}
+				}
+			}
 			// Whether the event after this one still has somewhere to go at the booking as it stands.
 			// If it is already stranded there, the growth below is not what stranded it.
 			boolean strandedAlready = PREPAD_NEVER_STRANDS_THE_NEXT
@@ -6005,6 +6040,57 @@ public final class SongBuilder {
 	 * moves the lane, and a lane moved for no reason lands its notes against somebody else's tick.
 	 * The same reasoning, and the same measurement, as the down-clamp above.</p>
 	 */
+	/**
+	 * Whether a chord opening with {@code columns} to the wall, on {@code tip} blocks of wire, has
+	 * nowhere to go: too big to fit, too big to cut plain or with a head on the best terms a head is
+	 * ever offered, and the lane unable to turn in front of it because the wire cannot pay for the
+	 * columns and the staircase both.
+	 *
+	 * <p>The turn half is the walk's own sum -- {@link #planTurnPad}, {@link #turnPrice}, the
+	 * {@code reachesWall} and {@code canTurn} tests -- made a chord early, for the chord after. The
+	 * head is asked for on the terms the walk will ask for it: the pair behind is this chord's, and
+	 * a stacked chord takes both of its slots. Asked generously the first time -- pair free, nothing
+	 * stacked behind -- it found a head the walk was then refused, and the lane it was written for
+	 * did not move.</p>
+	 */
+	private static boolean nextChordIsStuck(PlacementPlan placements, Lane opens, EventGroup next,
+			int nextWait, int columns, int tip, boolean fromBus, boolean behindBusy,
+			boolean stackedBehind, int turnCells, int offBus, int splitCells, boolean climbing) {
+		int delayColumns = Math.max(0, (nextWait - 1) / 4);
+		int room = columns - delayColumns;
+		int cells = (next.notes().size() + 1) / 2;
+		if (cells <= room - 1) {
+			return false;
+		}
+		if (room >= 2 && room - 1 < cells && cells + splitCells <= DUST_RANGE) {
+			return false;
+		}
+		// The head, and the clash the walk asks of it: a head on the wrong parity is moved a column,
+		// and where there is no column to move into it is given up. Guardian 20x5 tick 1480 was
+		// exactly that -- a head-only near half found, clashing, one column short of a nudge.
+		StackedSplit headed = stackedSplitOf(next.notes(), room, splitCells, climbing,
+			!behindBusy || delayColumns > 0, behindBusy && stackedBehind);
+		if (headed != null && stackedClashes(placements, opens.ahead(delayColumns), next.time(),
+				headed.slots())) {
+			headed = stackedClashes(placements, opens.ahead(delayColumns + 1), next.time(),
+					headed.slots()) ? null
+				: stackedSplitOf(next.notes(), room - 1, splitCells, climbing, true,
+					behindBusy && stackedBehind);
+		}
+		if (headed != null) {
+			return false;
+		}
+		Pad pad = planTurnPad(columns, tip, turnCells, offBus, Math.max(0, nextWait - 1), climbing,
+			true, fromBus, false);
+		int unpaid = Math.max(0, columns - pad.cells().size());
+		int price = turnPrice(pad, climbing, true, fromBus, turnCells, offBus);
+		int cost = unpaid == 0
+			? Math.min(price, pad.cells().isEmpty() && fromBus ? offBus : turnCells)
+			: turnCells;
+		boolean reaches = pad.signal() - unpaid >= cost;
+		return !(reaches && pad.signal() >= price);
+	}
+
 	private static boolean strandsTheEventAfter(List<EventGroup> events, int index, EventGroup event,
 			int columnsAhead, Lane lane, int wait, boolean busy, int wall, Layout layout,
 			boolean inTurn, ParityOracle parity, int splitCells) {
@@ -14826,6 +14912,27 @@ public final class SongBuilder {
 	 * {@code canTurn} records the second.</p>
 	 */
 	static boolean STRAND_PRICES_THE_BUS_DISCOUNT = true;
+
+	/**
+	 * Whether v2 lands a chord flush on its wall when the chord after it would otherwise be stuck.
+	 *
+	 * <p>The off-bus prepad ({@link #PREPADS_FOR_THE_OFF_BUS_DISCOUNT}) was written for one lane --
+	 * ekran's breach of eleven on Guardian, "one column short with five blocks of wire" -- and went
+	 * off because it padded every chord it could for a discount worth two, with no brake. ekran's
+	 * terms for a better one: pad only where it stops a breach, the fewest columns that do, and never
+	 * be the cause of one. This is that. It fires only where the chord after is stuck as things stand
+	 * -- neither fits nor cuts, and the lane cannot turn in front of it because the wire has to cover
+	 * the columns this chord left short and then the staircase, with no tick to buy a repeater -- and
+	 * only where landing this chord flush is what frees it. The columns it lays are exactly the
+	 * shortfall, and it never lays them where the wire cannot reach the chord's own repeater.</p>
+	 *
+	 * <p>The same lane again, 2026-08-19: Guardian 20x5 tick 1479, a stacked bus of twenty-four that
+	 * fits with two to spare, in front of another that cannot, laid twelve columns past the wall.</p>
+	 */
+	static boolean V2_PREPADS_A_STUCK_NEXT = true;
+
+	/** The most columns {@link #V2_PREPADS_A_STUCK_NEXT} will lay in front of one chord. */
+	static int V2_STUCK_PREPAD_CAP = 3;
 
 	/**
 	 * Whether a bus puts its last unpaired note in the low-z slot of the cell.
