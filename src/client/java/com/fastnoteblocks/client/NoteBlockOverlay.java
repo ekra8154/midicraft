@@ -40,6 +40,7 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.inventory.ContainerInput;
 import net.minecraft.world.item.BlockItem;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.context.BlockPlaceContext;
@@ -803,8 +804,9 @@ public final class NoteBlockOverlay {
 		if (!instrument.isEmpty()) {
 			graphics.item(new ItemStack(PreviewInstrument.byId(instrument).icon()), iconX, iconY);
 			// Harp with its setting off is a block the sequencer will walk past. Saying so is better
-			// than showing grass the same way as a block you are about to be handed.
-			if (!needsInstrumentLaid(placement)) {
+			// than showing grass the same way as a block you are about to be handed. A sound effect
+			// is never greyed: its icon is not a block laid underneath, it is the block you place.
+			if (PreviewInstrument.byId(instrument).pitched() && !needsInstrumentLaid(placement)) {
 				graphics.fill(iconX, iconY, iconX + ICON_SIZE, iconY + ICON_SIZE, 0xA8101010);
 			}
 		}
@@ -822,6 +824,12 @@ public final class NoteBlockOverlay {
 	}
 
 	private static String noteText(NoteSequence.Placement step) {
+		// A sound effect has one sound, and the roll writes it as pitch 0 only because a step has to
+		// hold a number. Printing "F#0" over a door would be reading that number out as if it meant
+		// something. The icon beside it is what says which effect this is.
+		if (!PreviewInstrument.byId(stepInstrument(step)).pitched()) {
+			return "•";
+		}
 		return NotePitch.name(step.step().value()) + step.step().value();
 	}
 
@@ -1070,7 +1078,7 @@ public final class NoteBlockOverlay {
 		}
 
 		BlockState state = minecraft.level.getBlockState(pending.blockPos());
-		if (!matchesStepBlock(state, pending.targetStep())
+		if (!matchesTunableStep(state, pending.targetStep())
 			|| !minecraft.player.isWithinBlockInteractionRange(pending.blockPos(), 0.0)) {
 			cancelWorkForBlock(pending.blockPos());
 			return;
@@ -1166,7 +1174,7 @@ public final class NoteBlockOverlay {
 		expectedSteps.entrySet().removeIf(entry -> {
 			BlockState state = level.getBlockState(entry.getKey());
 			ExpectedStep expected = entry.getValue();
-			if (!matchesStepBlock(state, expected.step())) {
+			if (!matchesTunableStep(state, expected.step())) {
 				clickQueue.removeIf(pending -> pending.blockPos().equals(entry.getKey()));
 				return true;
 			}
@@ -1207,6 +1215,11 @@ public final class NoteBlockOverlay {
 		if (isHarp(instrument)) {
 			return state.is(Blocks.GRASS_BLOCK) || state.is(Blocks.DIRT);
 		}
+		if (PreviewInstrument.byId(instrument).wearsASkull()) {
+			// Asked of the block, not of its instrument: a bare note block reads as a harp until the
+			// skull is on it, and the skull is the very thing this step is waiting to let you place.
+			return state.is(Blocks.NOTE_BLOCK);
+		}
 		return state.instrument().name().equalsIgnoreCase(instrument)
 			|| state.getBlock().asItem() == PreviewInstrument.byId(instrument).icon();
 	}
@@ -1215,7 +1228,18 @@ public final class NoteBlockOverlay {
 		return "HARP".equals(PreviewInstrument.byId(instrument).id());
 	}
 
-	private static boolean matchesStepBlock(BlockState state, NoteSequence.Step step) {
+	private static boolean matchesStepBlock(BlockState state, Item stepBlock) {
+		return !state.isAir() && state.is(net.minecraft.world.level.block.Block.byItem(stepBlock));
+	}
+
+	/**
+	 * The block a step gets tuned on, which is only ever a note block or a repeater.
+	 *
+	 * <p>Kept apart from {@link #matchesStepBlock} on purpose. That one answers "is the thing this
+	 * step places now standing here", and for a sound effect the answer is a door or a bell; this one
+	 * guards the clicking, and nothing but these two has a value to click round.</p>
+	 */
+	private static boolean matchesTunableStep(BlockState state, NoteSequence.Step step) {
 		return step.type() == NoteSequence.StepType.NOTE
 			? state.is(Blocks.NOTE_BLOCK)
 			: state.is(Blocks.REPEATER);
@@ -1233,23 +1257,12 @@ public final class NoteBlockOverlay {
 			: value % 4 + 1;
 	}
 
-	private static int findSequenceItemSlot(LocalPlayer player, NoteSequence.Step expected) {
+	private static int findSequenceItemSlot(LocalPlayer player, Item stepBlock) {
 		int selectedSlot = player.getInventory().getSelectedSlot();
-		if (sequenceItemMatches(player, expected, selectedSlot)) {
+		if (player.getInventory().getItem(selectedSlot).is(stepBlock)) {
 			return selectedSlot;
 		}
-		for (int slot = 0; slot < 9; slot++) {
-			if (sequenceItemMatches(player, expected, slot)) {
-				return slot;
-			}
-		}
-		return -1;
-	}
-
-	private static boolean sequenceItemMatches(LocalPlayer player, NoteSequence.Step expected, int slot) {
-		return expected.type() == NoteSequence.StepType.NOTE
-			? player.getInventory().getItem(slot).is(Items.NOTE_BLOCK)
-			: player.getInventory().getItem(slot).is(Items.REPEATER);
+		return findHotbarSlot(player, stepBlock);
 	}
 
 	private InteractionResult watchForSequencePlacement(
@@ -1281,35 +1294,38 @@ public final class NoteBlockOverlay {
 		}
 		NoteSequence.Step expected = sequence.get(Math.floorMod(placementSequenceIndex, sequence.size())).step();
 		ItemStack held = player.getItemInHand(hand);
+		NoteSequence.Placement placement = sequence.get(
+			Math.floorMod(placementSequenceIndex, sequence.size()));
+		Item stepBlock = stepBlockItem(placement);
 		if (awaitingInstrument) {
-			if (!held.is(Items.NOTE_BLOCK) && !held.is(Items.REPEATER)
+			// Told apart by the block that sounds rather than by naming the note block, because for a
+			// mob head the note block is the thing that goes underneath -- reaching for one there is
+			// doing the step, not skipping it. What is excluded is whatever this step ends on.
+			if (!held.is(stepBlock) && !held.is(Items.REPEATER)
 				&& held.getItem() instanceof BlockItem blockItem) {
 				BlockPos under = new BlockPlaceContext(player, hand, held, hitResult)
 					.getClickedPos().immutable();
-				String wanted = stepInstrument(
-					sequence.get(Math.floorMod(placementSequenceIndex, sequence.size())));
+				String wanted = stepInstrument(placement);
 				// Judged on what is in your hand, so a block that was never going to count does not sit
 				// there being waited for. The same question is asked again of what actually lands.
 				if (level.getBlockState(under).isAir()
 					&& givesInstrument(blockItem.getBlock().defaultBlockState(), wanted)) {
-					placementWatches.put(under, new PlacementWatch(expected, PLACEMENT_WATCH_TICKS, wanted));
+					placementWatches.put(under,
+						new PlacementWatch(expected, PLACEMENT_WATCH_TICKS, wanted, stepBlock));
 				}
 				return InteractionResult.PASS;
 			}
-			// Reaching for the note block itself is how you say this one needs no instrument laid.
+			// Reaching for the block that sounds is how you say this one needs no instrument laid.
 			awaitingInstrument = false;
 		}
-		boolean matchingItem = expected.type() == NoteSequence.StepType.NOTE
-			? held.is(Items.NOTE_BLOCK)
-			: held.is(Items.REPEATER);
-		if (!matchingItem) {
+		if (!held.is(stepBlock)) {
 			return InteractionResult.PASS;
 		}
 
 		BlockPlaceContext context = new BlockPlaceContext(player, hand, held, hitResult);
 		BlockPos placementPos = context.getClickedPos().immutable();
-		if (!matchesStepBlock(level.getBlockState(placementPos), expected)) {
-			placementWatches.put(placementPos, new PlacementWatch(expected, PLACEMENT_WATCH_TICKS, ""));
+		if (!matchesStepBlock(level.getBlockState(placementPos), stepBlock)) {
+			placementWatches.put(placementPos, new PlacementWatch(expected, PLACEMENT_WATCH_TICKS, "", stepBlock));
 		}
 		return InteractionResult.PASS;
 	}
@@ -1342,27 +1358,35 @@ public final class NoteBlockOverlay {
 				if (left <= 0) {
 					return true;
 				}
-				entry.setValue(new PlacementWatch(watch.step(), left, watch.instrument()));
+				entry.setValue(new PlacementWatch(watch.step(), left, watch.instrument(), watch.stepBlock()));
 				return false;
 			}
-			if (matchesStepBlock(minecraft.level.getBlockState(entry.getKey()), watch.step())) {
-				applyPlacementStep(minecraft, entry.getKey(), watch.step());
+			if (matchesStepBlock(minecraft.level.getBlockState(entry.getKey()), watch.stepBlock())) {
+				applyPlacementStep(minecraft, entry.getKey(), watch.step(), watch.stepBlock());
 				return true;
 			}
 			int remaining = watch.ticksRemaining() - 1;
 			if (remaining <= 0) {
 				return true;
 			}
-			entry.setValue(new PlacementWatch(watch.step(), remaining, ""));
+			entry.setValue(new PlacementWatch(watch.step(), remaining, "", watch.stepBlock()));
 			return false;
 		});
 	}
 
-	private void applyPlacementStep(Minecraft minecraft, BlockPos pos, NoteSequence.Step target) {
-		int currentValue = stepValue(minecraft.level.getBlockState(pos), target);
-		int clicks = target.type() == NoteSequence.StepType.NOTE
-			? NotePitch.clicksForward(currentValue, target.value())
-			: Math.floorMod(target.value() - currentValue, 4);
+	private void applyPlacementStep(Minecraft minecraft, BlockPos pos, NoteSequence.Step target,
+			Item stepBlock) {
+		// A sound effect is done the moment it is down. There is no pitch to click it round to, and
+		// asking one for the value a note block keeps would not merely be pointless -- a door has no
+		// such property, and reading it would throw.
+		boolean tunable = stepBlock.equals(Items.NOTE_BLOCK) || stepBlock.equals(Items.REPEATER);
+		int clicks = 0;
+		if (tunable) {
+			int currentValue = stepValue(minecraft.level.getBlockState(pos), target);
+			clicks = target.type() == NoteSequence.StepType.NOTE
+				? NotePitch.clicksForward(currentValue, target.value())
+				: Math.floorMod(target.value() - currentValue, 4);
+		}
 		advancePlacementSequenceCursor();
 		if (clicks > 0) {
 			clickQueue.addLast(PendingClicks.ready(pos, clicks, true, target));
@@ -1394,7 +1418,7 @@ public final class NoteBlockOverlay {
 		NoteSequence.Placement current = sequence.get(Math.floorMod(placementSequenceIndex, sequence.size()));
 		int hotbarSlot = awaitingInstrument
 			? findInstrumentSlot(minecraft.player, stepInstrument(current))
-			: findSequenceItemSlot(minecraft.player, current.step());
+			: findSequenceItemSlot(minecraft.player, stepBlockItem(current));
 		if (hotbarSlot < 0 && awaitingInstrument) {
 			hotbarSlot = fetchInstrumentToHotbar(minecraft, stepInstrument(current));
 		}
@@ -1461,7 +1485,7 @@ public final class NoteBlockOverlay {
 	private static boolean instrumentItemMatches(ItemStack stack, String instrument) {
 		return isHarp(instrument)
 			? stack.is(Items.GRASS_BLOCK) || stack.is(Items.DIRT)
-			: stack.is(PreviewInstrument.byId(instrument).icon());
+			: stack.is(underBlockItem(instrument));
 	}
 
 	/**
@@ -1488,7 +1512,40 @@ public final class NoteBlockOverlay {
 		if (placement.step().type() != NoteSequence.StepType.NOTE) {
 			return false;
 		}
-		return !isHarp(stepInstrument(placement)) || FastNoteblocksConfig.get().selectHarpBlocks();
+		String instrument = stepInstrument(placement);
+		PreviewInstrument voice = PreviewInstrument.byId(instrument);
+		if (!voice.pitched()) {
+			// A sound effect is the sound source itself, so there is nothing to stand it on. The mob
+			// heads are the exception, and what goes under one is a note block.
+			return voice.wearsASkull();
+		}
+		return !isHarp(instrument) || FastNoteblocksConfig.get().selectHarpBlocks();
+	}
+
+	/**
+	 * What a step wants laid before the block that sounds, or empty when it wants nothing.
+	 *
+	 * <p>For a pitched note this is the instrument block and the note block goes over it. A mob head
+	 * is the same shape read the other way round: the note block is what goes underneath and the
+	 * skull is what lands on top, so the sequencer can walk it with the two phases it already has.</p>
+	 */
+	private static Item underBlockItem(String instrument) {
+		PreviewInstrument voice = PreviewInstrument.byId(instrument);
+		if (voice.wearsASkull()) {
+			return Items.NOTE_BLOCK;
+		}
+		return voice.icon();
+	}
+
+	/** The block a step actually places -- an effect is its own, everything pitched is a note block. */
+	private static Item stepBlockItem(NoteSequence.Placement placement) {
+		if (placement.step().type() != NoteSequence.StepType.NOTE) {
+			return Items.REPEATER;
+		}
+		PreviewInstrument voice = PreviewInstrument.byId(stepInstrument(placement));
+		// A head's icon is its skull, which is exactly the block that goes on top, so both kinds of
+		// effect answer this the same way.
+		return voice.pitched() ? Items.NOTE_BLOCK : voice.icon();
 	}
 
 	/** A hotbar slot holding something this instrument will take, preferring the block on the tile. */
@@ -1497,7 +1554,7 @@ public final class NoteBlockOverlay {
 			int grass = findHotbarSlot(player, Items.GRASS_BLOCK);
 			return grass >= 0 ? grass : findHotbarSlot(player, Items.DIRT);
 		}
-		return findHotbarSlot(player, PreviewInstrument.byId(instrument).icon());
+		return findHotbarSlot(player, underBlockItem(instrument));
 	}
 
 	private static int findHotbarSlot(LocalPlayer player, net.minecraft.world.item.Item item) {
@@ -2082,7 +2139,13 @@ public final class NoteBlockOverlay {
 	private record ExpectedStep(NoteSequence.Step step, int ticksRemaining, boolean placementSequence) {
 	}
 
-	private record PlacementWatch(NoteSequence.Step step, int ticksRemaining, String instrument) {
+	/**
+	 * @param stepBlock what the block that sounds will be once it lands. Carried rather than worked
+	 *     out from the step, because the step alone cannot say it: a note is a note block for every
+	 *     pitched instrument and an oak door for one of the sound effects.
+	 */
+	private record PlacementWatch(NoteSequence.Step step, int ticksRemaining, String instrument,
+			Item stepBlock) {
 		boolean forInstrument() {
 			return !instrument.isEmpty();
 		}

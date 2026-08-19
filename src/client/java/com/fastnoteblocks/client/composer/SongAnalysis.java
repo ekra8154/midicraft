@@ -63,7 +63,9 @@ public record SongAnalysis(
 					duplicateNotes++;
 					continue;
 				}
-				if (!note.isBuildable()) {
+				// A sound effect layer has no range: the row is somewhere to put a hit, not a pitch,
+				// so every note on one counts towards the build rather than towards the verdict.
+				if (layer.pitched() && !note.isBuildable()) {
 					outOfRange++;
 				} else {
 					counts.merge(note.startTick(), 1, Integer::sum);

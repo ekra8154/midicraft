@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.List;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -120,8 +121,15 @@ class AsciiDiagramTest {
 		world.put(new BlockPos(1, 64, 0), Blocks.STONE_BRICKS.defaultBlockState());
 		String drawn = draw(new BlockPos(0, 64, 0), new BlockPos(1, 64, 0),
 			AsciiDiagram.View.TOP);
-		assertTrue(drawn.contains("minecraft:stone\n"), drawn);
-		assertTrue(drawn.contains("minecraft:stone_bricks"), drawn);
+		// By the id alone, not by the whole line: a marked paste gives some blocks a meaning and the
+		// legend says it after the id, which is the point of the legend and not something to pin.
+		// What matters here is that two blocks whose names share a prefix get an entry each.
+		List<String> named = drawn.lines()
+			.filter(line -> line.trim().contains("  minecraft:"))
+			.map(line -> line.substring(line.indexOf("minecraft:")).split(" ")[0])
+			.toList();
+		assertTrue(named.contains("minecraft:stone"), drawn);
+		assertTrue(named.contains("minecraft:stone_bricks"), drawn);
 		String row = drawn.lines().filter(line -> line.startsWith("z=")).findFirst().orElseThrow();
 		String[] cells = row.trim().split("\\s+");
 		assertEquals(3, cells.length, row);

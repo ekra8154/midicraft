@@ -42,9 +42,18 @@ final class NbsExporter {
 		int outsideKeyRange = 0;
 		int pastTheEnd = 0;
 		int remappedInstruments = 0;
+		int culledEffects = 0;
 
 		int spilled = 0;
 		for (ComposerProject.Layer layer : project.layers()) {
+			// A sound effect layer has nothing to become here. NBS numbers note block instruments,
+			// and a door is not one of those -- writing it as a harp would put a wrong note in the
+			// file where the composition has a door, which is worse than leaving it out. Left out
+			// and counted, so the report says a layer went missing rather than the file lying.
+			if (!layer.pitched()) {
+				culledEffects++;
+				continue;
+			}
 			int instrument = instrumentId(layer.instrument());
 			if (instrument < 0) {
 				// Beyond the sixteen Note Block Studio knows. Written as a piano so the file opens
@@ -146,6 +155,11 @@ final class NbsExporter {
 			report.append("; ").append(remappedInstruments)
 				.append(remappedInstruments == 1 ? " layer" : " layers")
 				.append(" had an instrument NBS has no number for, written as harp");
+		}
+		if (culledEffects > 0) {
+			report.append("; ").append(culledEffects)
+				.append(culledEffects == 1 ? " sound effect layer" : " sound effect layers")
+				.append(" left out, because NBS has no way to hold one");
 		}
 		if (outsideKeyRange > 0) {
 			report.append("; ").append(outsideKeyRange)

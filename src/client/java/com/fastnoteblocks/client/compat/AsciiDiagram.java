@@ -257,8 +257,14 @@ public final class AsciiDiagram {
 			legend.putIfAbsent(".", "air");
 			return ".";
 		}
-		String id = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
-		String path = id.substring(id.indexOf(':') + 1);
+		String raw = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
+		// What goes in the legend, which is the block and -- where a marked paste gives a block a
+		// meaning -- what that block is telling you. A slice pasted into a conversation is often all
+		// anybody has of a build, and "TU = minecraft:tuff" says nothing on its own.
+		String id = SongBuilder.DEBUG_PASTE_KEY.containsKey(raw)
+			? raw + " (debug paste: " + SongBuilder.DEBUG_PASTE_KEY.get(raw) + ")"
+			: raw;
+		String path = raw.substring(raw.indexOf(':') + 1);
 		if (state.hasProperty(RedStoneWireBlock.POWER)) {
 			legend.putIfAbsent("w<n>", id + ", n = power, 0 to 15");
 			return "w" + state.getValue(RedStoneWireBlock.POWER);

@@ -128,6 +128,7 @@ public final class NoteMachineReader {
 		int noteBlocks,
 		int unreachedNotes,
 		List<BlockPos> unreachedAt,
+		Set<BlockPos> reachedAt,
 		int headNotes,
 		int redstoneTicks,
 		int versions,
@@ -253,7 +254,13 @@ public final class NoteMachineReader {
 	 * @param looped whether the signal came back to a repeater it had already been through, which
 	 *     is a machine that repeats rather than one that ends
 	 */
-	private record Walk(Map<BlockPos, Integer> firedAt, boolean looped) {
+	/**
+	 * @param reached every cell the signal actually energised -- wire it ran along, blocks it
+	 *     strongly powered, repeaters it arrived at. The note blocks are the half worth counting, but
+	 *     they are not the half worth looking at when a machine is dead: a run of wire that stops
+	 *     halfway silences everything after it, and where it stops is the only thing to go and see.
+	 */
+	private record Walk(Map<BlockPos, Integer> firedAt, Set<BlockPos> reached, boolean looped) {
 	}
 
 	/**
@@ -360,7 +367,10 @@ public final class NoteMachineReader {
 			spreadFromPoweredBlock(region, queue, position, pulse.time(), pulse.strength() > 0,
 				firedAt, noteBlocks, repeaterInput, pulse.origin(), feeds);
 		}
-		return new Walk(firedAt, hasCycle(feeds));
+		Set<BlockPos> reached = new HashSet<>(dustTime.keySet());
+		reached.addAll(strongAt.keySet());
+		reached.addAll(repeaterInput.keySet());
+		return new Walk(firedAt, reached, hasCycle(feeds));
 	}
 
 	/**
@@ -491,9 +501,18 @@ public final class NoteMachineReader {
 			if (noteBlocks.contains(side)) {
 				firedAt.merge(side, time, Math::min);
 			}
-			BlockState sideState = region.at(side);
-			if (isConductor(sideState) && !sideState.is(Blocks.NOTE_BLOCK)
-					|| isPiston(sideState)) {
+			// A note block among them. It carries power exactly as a stone does -- the game says so
+			// itself: isRedstoneConductor, isSignalSource, canOcclude and isSolidRender all read the
+			// same for the two blocks (NoteBlockConductsTest). It used to be excluded here, with
+			// nothing said about why, and the block below has never been excluded, so the two halves
+			// of this method disagreed. That one clause is what made a run's opening column give its
+			// centre away to a stone: it read a note there as ending the chain, and it does not.
+			// ekran: "a note block can be powered just like a stone, there's no difference. a
+			// noteblock just cant have something on top, but that doesn't happen here".
+			//
+			// A piston is the other way round: not a conductor at all, but it does take power. Left
+			// out, dust lying against one never tells it anything.
+			if (isConductor(region.at(side)) || isPiston(region.at(side))) {
 				queue.add(new Pulse(time, side, 0, false, position, origin));
 			}
 			feedRepeater(region, queue, side, position, time, repeaterInput, origin, feeds);
@@ -642,7 +661,7 @@ public final class NoteMachineReader {
 	private static final int MAX_TRACED_STARTS = 24;
 
 	/** One complete performance: press this way in, hear these note blocks at these times. */
-	private record Version(BlockPos entry, Map<BlockPos, Integer> firedAt) {
+	private record Version(BlockPos entry, Map<BlockPos, Integer> firedAt, Set<BlockPos> reached) {
 	}
 
 	/**
@@ -651,6 +670,13 @@ public final class NoteMachineReader {
 	 * @param subsumed ways in dropped for reaching only part of what another reaches
 	 */
 	private record Trace(List<Version> versions, boolean overlapping, int subsumed, boolean looped) {
+		/** Everything any way in energises. A cell one performance reaches is not dead wire. */
+		Set<BlockPos> reached() {
+			Set<BlockPos> all = new HashSet<>();
+			versions.forEach(version -> all.addAll(version.reached()));
+			return all;
+		}
+
 		Set<BlockPos> played() {
 			Set<BlockPos> all = new HashSet<>();
 			versions.forEach(version -> all.addAll(version.firedAt().keySet()));
@@ -684,8 +710,8 @@ public final class NoteMachineReader {
 		List<BlockPos> starts = startingPoints(region, survey);
 		if (starts.size() == 1 || starts.size() > MAX_TRACED_STARTS) {
 			Walk walk = traceFrom(region, survey, starts);
-			return new Trace(List.of(new Version(starts.get(0), walk.firedAt())), false, 0,
-				walk.looped());
+			return new Trace(List.of(new Version(starts.get(0), walk.firedAt(), walk.reached())),
+				false, 0, walk.looped());
 		}
 
 		boolean looped = false;
@@ -693,7 +719,7 @@ public final class NoteMachineReader {
 		for (BlockPos start : starts) {
 			Walk walk = traceFrom(region, survey, List.of(start));
 			looped |= walk.looped();
-			traced.add(new Version(start, walk.firedAt()));
+			traced.add(new Version(start, walk.firedAt(), walk.reached()));
 		}
 
 		List<Version> kept = new ArrayList<>();
@@ -909,7 +935,8 @@ public final class NoteMachineReader {
 			}
 		}
 		return new Reading(project, survey.noteBlocks.size(),
-			survey.noteBlocks.size() - trace.played().size(), List.copyOf(unreachedAt), headNotes,
+			survey.noteBlocks.size() - trace.played().size(), List.copyOf(unreachedAt),
+			Set.copyOf(trace.reached()), headNotes,
 			(int)(span / TICKS_PER_REDSTONE_TICK), versions, List.copyOf(warnings));
 	}
 
@@ -957,6 +984,13 @@ public final class NoteMachineReader {
 	}
 
 	private static Instrument instrumentAt(Region region, BlockPos position) {
+		// Upwards first, the way the game itself decides. A skull sitting on a note block is what
+		// gives it its voice, and the block underneath has no say while one is there -- so a reader
+		// that only looked down would find air under a zombie and call it a harp.
+		String head = PreviewInstrument.headVoice(region.at(position.above()).instrument());
+		if (head != null) {
+			return new Instrument(head, false);
+		}
 		String id = region.at(position.below()).instrument().name().toUpperCase(Locale.ROOT);
 		boolean known = PreviewInstrument.VALUES.stream().anyMatch(value -> value.id().equals(id));
 		return new Instrument(known ? id : "HARP", !known);

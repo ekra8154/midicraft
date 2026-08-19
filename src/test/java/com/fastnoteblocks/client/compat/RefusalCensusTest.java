@@ -46,7 +46,7 @@ class RefusalCensusTest {
 	 */
 	@Test
 	void countsEveryRefusalByWhichShapesCollided() throws Exception {
-		SongBuilder.MARK_COLLISIONS = true;
+		SongBuilder.DEBUG_PASTE = true;
 		try {
 			Map<String, Integer> byShapes = new TreeMap<>();
 			int marked = 0;
@@ -91,7 +91,7 @@ class RefusalCensusTest {
 				.forEach(pair -> System.out.println("SHAPES  " + pair.getValue() + "x  "
 					+ pair.getKey()));
 		} finally {
-			SongBuilder.MARK_COLLISIONS = false;
+			SongBuilder.DEBUG_PASTE = false;
 		}
 	}
 
