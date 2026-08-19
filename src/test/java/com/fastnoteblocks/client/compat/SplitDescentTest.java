@@ -41,6 +41,7 @@ class SplitDescentTest {
 	void restoreTheCheapDescent() {
 		SongBuilder.CHEAP_SPLIT_DESCENT = true;
 		SongBuilder.STACKED_SPLIT_HEADS = true;
+		SongBuilder.SUNKEN_CUTS = true;
 	}
 
 	/** Chords too big to carry across a turn whole, so the only way over one is a cut. */
@@ -92,6 +93,9 @@ class SplitDescentTest {
 		// twenty-three -- so it is held off here. What this isolates is the price of the staircase,
 		// not the shape of the chord crossing it.
 		SongBuilder.STACKED_SPLIT_HEADS = false;
+		// And the sunken cut, for the same reason: its opening costs the wire nothing, so with it
+		// even the old descent reaches twenty-one.
+		SongBuilder.SUNKEN_CUTS = false;
 		int fired = 0;
 		for (int floors = 2; floors <= 4; floors++) {
 			for (int width = 16; width <= 32; width += 8) {

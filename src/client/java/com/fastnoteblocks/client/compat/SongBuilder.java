@@ -3808,9 +3808,30 @@ public final class SongBuilder {
 					}
 				}
 			}
+			// ekran's third cut, for the chord that can be cut neither plain nor with a head: open it
+			// with a sunken note block instead. The repeater strongly powers the note block, the note
+			// block hands the next cell a fresh fifteen, and that cell is the descent's first rung --
+			// so the opening costs one column and no wire, carries three notes, and the run is
+			// 3 + 2 * (15 - 4) = 25 on a descent. Guardian 20x5 tick 1480: a chord of 24 with two
+			// columns, head found and clashing with nowhere to nudge, laid whole twelve columns
+			// out; ekran built the sunken cut by hand inside the emerald. See {@link #SUNKEN_CUTS}.
+			boolean plainCut = room >= 2 && room - 1 < cells && cells + splitCells <= DUST_RANGE;
+			SunkenCut sunken = null;
+			if (SUNKEN_CUTS && layout.ultra() && cutOffered && index > 0 && above >= 0
+					&& above < floors && !stackedFitsInstead && headed == null && !plainCut
+					&& climb <= 0 && room >= 2 && room - 1 < cells) {
+				sunken = sunkenCutOf(placements, lane.ahead(delayColumns), event.notes(), room,
+					splitCells, descentSide, event.time());
+				placements.padded(sunken != null ? "planSunkenCut"
+					: "sunkenCutRefused" + LAST_SUNKEN_CUT_REFUSAL);
+				if (sunken != null) {
+					placements.padded("planSunkenCutAt" + Math.min(event.notes().size(), 30)
+						+ "Notes");
+				}
+			}
 			boolean couldSplit = layout.ultra() && cutOffered && index > 0 && above >= 0
-				&& above < floors && !stackedFitsInstead && (headed != null
-					|| (room >= 2 && room - 1 < cells && cells + splitCells <= DUST_RANGE));
+				&& above < floors && !stackedFitsInstead && (headed != null || sunken != null
+					|| plainCut);
 			// Why the head went, where losing it costs the lane its wall.
 			//
 			// A refused head is the commonest way a v2 lane ends up outside its wall: a chord of
@@ -4101,6 +4122,18 @@ public final class SongBuilder {
 					if (HEADED_CUT_FALLS_TO_PLAIN) {
 						placements.commitTrial();
 					}
+				} else if (sunken != null) {
+					cursor = addSunkenSplitNearHalf(placements, trigger.cursor(), travel, depth,
+						trigger.triggerDelay(), sunken, event.time());
+					far = sunken.far();
+					placements.padded("builtSunkenCut");
+					if (TRACE) {
+						System.out.println("  SUNKENCUT t=" + event.time() + " notes=" + chord.size()
+							+ " opening=" + (1 + sunken.open().size()) + " low=" + sunken.low().size()
+							+ " raised=" + sunken.raised().size()
+							+ " rung=" + (sunken.onTheRung() == null ? 0 : 1) + " far=" + far.size()
+							+ " room=" + room);
+					}
 				} else {
 					List<EventNote> handedOn = new ArrayList<>();
 					cursor = HEADED_CUT_FALLS_TO_PLAIN && NEAR_HALF_KEEPS_ITS_NOTES_FOR_THE_WIRE
@@ -4131,9 +4164,42 @@ public final class SongBuilder {
 					// off one repeater. A chord too big for that keeps its head and its collision, which
 					// the paste then says in red, as it did.
 					if (cells + splitCells > DUST_RANGE || near < 2) {
-						placements.padded("cutHeadCollidedAndStayed");
-						throw collided;
-					}
+						// The next rung: a chord the plain cut cannot carry may still go over as a
+						// sunken cut, which is a column shorter than the head and asks nothing of the
+						// cells the head collided in. Tried in a trial; if it collides too, the head's
+						// collision stands as before.
+						SunkenCut rescue = SUNKEN_CUTS && climb <= 0
+							? sunkenCutOf(placements, Lane.straight(trigger.cursor(), travel, depth),
+								event.notes(), room, splitCells, descentSide, event.time())
+							: null;
+						if (rescue == null) {
+							placements.padded("cutHeadCollidedAndStayed");
+							placements.padded("cutHeadNoSunkenRescue" + LAST_SUNKEN_CUT_REFUSAL);
+							if (TRACE) {
+								System.out.println("  NO SUNKEN RESCUE t=" + event.time() + " room="
+									+ room + " why=" + LAST_SUNKEN_CUT_REFUSAL);
+							}
+							throw collided;
+						}
+						placements.beginTrial();
+						try {
+							cursor = addSunkenSplitNearHalf(placements, trigger.cursor(), travel, depth,
+								trigger.triggerDelay(), rescue, event.time());
+							placements.commitTrial();
+						} catch (IllegalArgumentException again) {
+							placements.rollbackTrial();
+							placements.padded("cutHeadCollidedAndStayed");
+							throw collided;
+						}
+						placements.padded("cutHeadFellToSunken");
+						headed = null;
+						sunken = rescue;
+						far = rescue.far();
+						if (TRACE) {
+							System.out.println("  SUNKENCUT(rescue) t=" + event.time() + " notes="
+								+ chord.size() + " far=" + far.size() + " room=" + room);
+						}
+					} else {
 					placements.padded("cutHeadFellToPlain");
 					headed = null;
 					List<EventNote> handedOn = new ArrayList<>();
@@ -4152,6 +4218,7 @@ public final class SongBuilder {
 						farRest.addAll(chord.subList(near, chord.size()));
 					}
 					far = farRest;
+					}
 				}
 				// A cut chord is built here and not by {@link #addChordModule}, so none of it ever reached
 				// the CHORD line -- the one place the trace says what a chord was planned as, what it came
@@ -10492,6 +10559,189 @@ public final class SongBuilder {
 	}
 
 	/**
+	 * A chord cut across a descent with a sunken opening: what rides in the opening note block and
+	 * its flanks, what the lowered cell and the raised cells carry, and what goes over the staircase.
+	 *
+	 * @param nearBus the bus cells the near half lays after the opening -- the first of them the
+	 *     lowered cell -- which is {@code room - 2}: the repeater's column and the note block's out of
+	 *     the room, and the descent standing on the wall column after them.
+	 */
+	private record SunkenCut(EventNote centre, List<EventNote> open, List<Direction> openSides,
+			List<EventNote> low, List<Direction> lowSides, List<EventNote> raised,
+			EventNote onTheRung, Direction rungSide, List<EventNote> far, int nearBus) {
+	}
+
+	/** Why the last {@link #sunkenCutOf} came back with nothing. */
+	static String LAST_SUNKEN_CUT_REFUSAL = "";
+
+	/**
+	 * ekran's sunken cut, decided before a block is laid.
+	 *
+	 * <p>Every slot is asked {@link #soundedByAnother} here, the way a sunken bus asks its four, so
+	 * that what the near half carries is settled before the far half is sized -- a near half that
+	 * hands notes on after the fact grows the far half past its wire, which is the fault
+	 * {@link #addPlainNearHalf} exists for. A loud slot is simply not used and its note goes over
+	 * the staircase; if that puts the far half out of reach the cut is refused.</p>
+	 *
+	 * @param opens the column the cut's repeater stands in.
+	 */
+	private static SunkenCut sunkenCutOf(PlacementPlan placements, Lane opens,
+			List<EventNote> notes, int room, int splitCells, Direction descentSide, int time) {
+		LAST_SUNKEN_CUT_REFUSAL = "";
+		if (room < 2) {
+			LAST_SUNKEN_CUT_REFUSAL = "NoRoom";
+			return null;
+		}
+		List<EventNote> ordered = new ArrayList<>(busOrder(notes));
+		EventNote centre = null;
+		for (EventNote note : ordered) {
+			if (isHarpNote(note)) {
+				centre = note;
+				break;
+			}
+		}
+		if (centre == null) {
+			LAST_SUNKEN_CUT_REFUSAL = "NoHarp";
+			return null;
+		}
+		ordered.remove(centre);
+		Lane opening = opens.ahead(1);
+		BlockPos centreAt = opening.pos().above();
+		Direction side = opening.noteSide();
+		List<Direction> openSides = new ArrayList<>(2);
+		for (Direction out : List.of(side, side.getOpposite())) {
+			if (railSlotTakes(placements, centreAt.relative(out), time)) {
+				openSides.add(out);
+			}
+		}
+		int nearBus = room - 2;
+		List<Direction> lowSides = new ArrayList<>(2);
+		if (nearBus >= 1) {
+			Lane low = opening.ahead(1);
+			for (Direction out : List.of(side, side.getOpposite())) {
+				if (railSlotTakes(placements, low.pos().relative(out), time)) {
+					lowSides.add(out);
+				}
+			}
+		}
+		// The raised cells, slot by slot, on the same question the crowded bus will put when it lays
+		// them -- so what they carry is known here and the far half is sized on it. The rescue at
+		// Guardian 25x4 tick 1454 laid them plain into the slab the head had just collided with.
+		int raisedCells = Math.max(0, nearBus - 1);
+		int raisedSlots = 0;
+		for (int cell = 0; cell < raisedCells; cell++) {
+			BlockPos at = opening.ahead(2 + cell).pos().above();
+			for (Direction out : List.of(side, side.getOpposite())) {
+				if (railSlotTakes(placements, at.relative(out), time)) {
+					raisedSlots++;
+				}
+			}
+		}
+		// Where the room is the repeater and the note block only, the descent's first rung stands
+		// in the next column -- powered stone with dust on it, which is a lowered cell -- and carries
+		// one note on the side away from the descent. The descent side is where the second rung's
+		// stone goes, a level down, under where that note's instrument would be: that is the block
+		// ekran's drawing sheds, and why the cut is 24 there and 25 with room for a lowered cell.
+		Direction rungSide = null;
+		if (nearBus == 0) {
+			Direction away = descentSide.getOpposite();
+			BlockPos rung = opening.ahead(1).pos();
+			if ((away == side || away == side.getOpposite())
+					&& railSlotTakes(placements, rung.relative(away), time)) {
+				rungSide = away;
+			}
+		}
+		int at = 0;
+		List<EventNote> open = new ArrayList<>(ordered.subList(at,
+			at = Math.min(ordered.size(), at + openSides.size())));
+		List<EventNote> low = new ArrayList<>(ordered.subList(at,
+			at = Math.min(ordered.size(), at + lowSides.size())));
+		List<EventNote> raised = new ArrayList<>(ordered.subList(at,
+			at = Math.min(ordered.size(), at + raisedSlots)));
+		EventNote onTheRung = rungSide != null && at < ordered.size() ? ordered.get(at++) : null;
+		List<EventNote> far = new ArrayList<>(ordered.subList(at, ordered.size()));
+		if (far.isEmpty()) {
+			LAST_SUNKEN_CUT_REFUSAL = "NothingToCarryOver";
+			return null;
+		}
+		if ((far.size() + 1) / 2 + nearBus + splitCells > DUST_RANGE) {
+			LAST_SUNKEN_CUT_REFUSAL = "OutOfWireBy"
+				+ ((far.size() + 1) / 2 + nearBus + splitCells - DUST_RANGE);
+			return null;
+		}
+		return new SunkenCut(centre, open, openSides.subList(0, open.size()), low,
+			lowSides.subList(0, low.size()), raised, onTheRung, onTheRung == null ? null : rungSide,
+			far, nearBus);
+	}
+
+	/**
+	 * The near half of a sunken cut, laid as {@link #sunkenCutOf} decided it.
+	 *
+	 * <p>Repeater; the opening note block in front of it, a level up, with its flanks; then, where
+	 * the room allows, the lowered cell -- powered stone at lane level with dust on it and its notes
+	 * beside it as slabs -- and a plain raised bus after that, uncrowded because the far half was
+	 * sized on these cells carrying what they were given. Hands back the wall column at lane level,
+	 * which is where the descent's first rung stands: its dust is level with the opening note
+	 * block, or with the lowered cell's dust, and reads it at fifteen.</p>
+	 */
+	private static BlockPos addSunkenSplitNearHalf(PlacementPlan placements, BlockPos cursor,
+			Direction travel, Direction laneStep, int triggerDelay, SunkenCut cut, int time) {
+		placements.placing("sunkenNearHalf");
+		set(placements, cursor, "minecraft:stone");
+		set(placements, cursor.above(),
+			"minecraft:repeater[facing=" + repeaterFacing(travel) + ",delay=" + triggerDelay + "]");
+		BlockPos centreAt = cursor.relative(travel).above();
+		placeNote(placements, centreAt, cut.centre());
+		placements.powered(centreAt, time);
+		for (int flank = 0; flank < cut.open().size(); flank++) {
+			placeNote(placements, centreAt.relative(cut.openSides().get(flank)),
+				cut.open().get(flank));
+		}
+		BlockPos at = cursor.relative(travel, 2);
+		if (cut.nearBus() >= 1) {
+			placements.powered(at, "minecraft:stone", time);
+			set(placements, at.above(), "minecraft:redstone_wire");
+			for (int flank = 0; flank < cut.low().size(); flank++) {
+				placeNote(placements, at.relative(cut.lowSides().get(flank)), cut.low().get(flank),
+					true);
+			}
+			at = at.relative(travel);
+			if (cut.nearBus() >= 2) {
+				int raisedCells = cut.nearBus() - 1;
+				int laid = 0;
+				if (!cut.raised().isEmpty()) {
+					List<EventNote> handedOn = new ArrayList<>();
+					laid = layBus(placements,
+						Lane.straight(at.above(), travel, laneStep).crowding(), cut.raised(), time,
+						Set.of(), raisedCells, handedOn);
+					if (!handedOn.isEmpty()) {
+						// The decider asked the same question of the same slots; this is the two
+						// disagreeing, and the notes have nowhere else to go.
+						placements.padded("sunkenNearHalfDisagreed" + handedOn.size());
+						throw new IllegalArgumentException("sunken cut's near half could not hang "
+							+ handedOn.size() + " notes it was sized for at " + at.getX() + " "
+							+ at.getY() + " " + at.getZ());
+					}
+				}
+				// layBus lays only the cells its notes need. The rest of the room is bus all the
+				// same -- powered stone with dust over it -- so the descent's first rung has wire
+				// beside it whatever the slots gave.
+				for (int cell = laid; cell < raisedCells; cell++) {
+					BlockPos stone = at.relative(travel, cell).above();
+					placements.powered(stone, "minecraft:stone", time);
+					set(placements, stone.above(), "minecraft:redstone_wire");
+				}
+				at = at.relative(travel, raisedCells);
+			}
+		} else if (cut.onTheRung() != null) {
+			// Beside the first rung the descent is about to lay at {@code at}: powered stone with
+			// dust on it, which is what a lowered cell is.
+			placeNote(placements, at.relative(cut.rungSide()), cut.onTheRung(), true);
+		}
+		return at;
+	}
+
+	/**
 	 * The near half of a v2 cut: the same module, laid crowded and held to its cells.
 	 *
 	 * <p>Crowded, so the bus asks the ground for each slot -- the floor above may have hung a sunken
@@ -11173,6 +11423,9 @@ public final class SongBuilder {
 		}
 		// The two halves of a chord cut across a staircase. Both are runs of bus -- that is what makes
 		// a chord the one shape here that can be cut at all -- so they wear what a bus wears.
+		if (laidBy.startsWith("sunkenNearHalf")) {
+			return "minecraft:polished_tuff";
+		}
 		if (laidBy.startsWith("nearHalf") || laidBy.startsWith("farHalf")) {
 			return "minecraft:tuff";
 		}
@@ -15048,7 +15301,7 @@ public final class SongBuilder {
 	 * <p>The same lane again, 2026-08-19: Guardian 20x5 tick 1479, a stacked bus of twenty-four that
 	 * fits with two to spare, in front of another that cannot, laid twelve columns past the wall.</p>
 	 */
-	static boolean V2_PREPADS_A_STUCK_NEXT = true;
+	static boolean V2_PREPADS_A_STUCK_NEXT = false;
 
 	/** The most columns {@link #V2_PREPADS_A_STUCK_NEXT} will lay in front of one chord. */
 	static int V2_STUCK_PREPAD_CAP = 3;
@@ -15085,6 +15338,19 @@ public final class SongBuilder {
 	 * rather than not firing; both want understanding before this is on.</p>
 	 */
 	static boolean NEAR_HALF_KEEPS_ITS_NOTES_FOR_THE_WIRE = false;
+
+	/**
+	 * Whether a chord that can be cut neither plain nor with a head is cut with a sunken opening.
+	 *
+	 * <p>ekran's, built by hand on Guardian 20x5 at tick 1480 and handed over as a before/after
+	 * with emerald for the wall. A plain cut of twenty-four is twelve cells against a budget of
+	 * eleven; a head buys the cell of wire back but costs two columns and, here, clashed with the
+	 * lane behind with no column to nudge into. A note block in front of the repeater costs one
+	 * column and no wire at all: the repeater powers it strongly, it hands the descent's first rung
+	 * a fresh fifteen, and it carries three notes of its own. 3 + 2 * (15 - 4) = 25 on a descent,
+	 * 24 where a flank is shed. Descents only, as drawn; a climb off a note block is not measured.</p>
+	 */
+	static boolean SUNKEN_CUTS = true;
 
 	/**
 	 * Whether a bus puts its last unpaired note in the low-z slot of the cell.
@@ -17730,6 +17996,11 @@ public final class SongBuilder {
 				// What was standing wins, so the rest of the walk carries on over the layout it would
 				// have had anyway. Only the first claim on a cell is remembered: a column that gets
 				// wanted three times is still one place to go and stand.
+				if (TRACE && !collisions.containsKey(key)) {
+					System.out.println("  COLLISION RECORDED at " + describe(key) + ": " + existing
+						+ " (" + placedBy.getOrDefault(key, "?") + ") held off " + block + " ("
+						+ placing + ")");
+				}
 				if (collisions.putIfAbsent(key, existing + " (" + placedBy.getOrDefault(key, "?")
 						+ ") held off " + block + " (" + placing + ")") == null && trial != null) {
 					// Journalled like everything else a trial writes, so a shape that is given up takes
