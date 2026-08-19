@@ -10652,12 +10652,17 @@ public final class SongBuilder {
 		EventNote relayAway = !pool.isEmpty() && conductsSideways(pool.get(0))
 				&& railSlotTakes(placements, centreAt.relative(away), time)
 			? pool.remove(0) : null;
-		EventNote frontAway = !pool.isEmpty()
-				&& railSlotTakes(placements, wallColumn.relative(away), time)
-			? pool.remove(0) : null;
-		EventNote backAway = !pool.isEmpty()
-				&& railSlotTakes(placements, repeater.relative(away), time)
-			? pool.remove(0) : null;
+		// The front and back flanks hang at lane level, so a falling instrument only as a last resort.
+		EventNote frontAway = railSlotTakes(placements, wallColumn.relative(away), time)
+			? sinkable(pool) : null;
+		if (frontAway != null) {
+			pool.remove(frontAway);
+		}
+		EventNote backAway = railSlotTakes(placements, repeater.relative(away), time)
+			? sinkable(pool) : null;
+		if (backAway != null) {
+			pool.remove(backAway);
+		}
 		if (pool.isEmpty()) {
 			LAST_CROSS_DESCENT_REFUSAL = "NothingToCarryOver";
 			return null;
@@ -10847,15 +10852,27 @@ public final class SongBuilder {
 				rungSide = away;
 			}
 		}
-		int at = 0;
-		List<EventNote> open = new ArrayList<>(ordered.subList(at,
-			at = Math.min(ordered.size(), at + openSides.size())));
-		List<EventNote> low = new ArrayList<>(ordered.subList(at,
-			at = Math.min(ordered.size(), at + lowSides.size())));
-		List<EventNote> raised = new ArrayList<>(ordered.subList(at,
-			at = Math.min(ordered.size(), at + raisedSlots)));
-		EventNote onTheRung = rungSide != null && at < ordered.size() ? ordered.get(at++) : null;
-		List<EventNote> far = new ArrayList<>(ordered.subList(at, ordered.size()));
+		List<EventNote> rest = new ArrayList<>(ordered);
+		List<EventNote> open = new ArrayList<>(rest.subList(0,
+			Math.min(rest.size(), openSides.size())));
+		rest.subList(0, open.size()).clear();
+		// The lowered slots -- the lowered cell's pair and the note beside the rung -- take a falling
+		// instrument only when nothing else is left: its support would stand at lane-2, in the floor
+		// below's air.
+		List<EventNote> low = new ArrayList<>(2);
+		for (int slot = 0; slot < lowSides.size() && !rest.isEmpty(); slot++) {
+			EventNote lowered = sinkable(rest);
+			rest.remove(lowered);
+			low.add(lowered);
+		}
+		List<EventNote> raised = new ArrayList<>(rest.subList(0,
+			Math.min(rest.size(), raisedSlots)));
+		rest.subList(0, raised.size()).clear();
+		EventNote onTheRung = rungSide != null ? sinkable(rest) : null;
+		if (onTheRung != null) {
+			rest.remove(onTheRung);
+		}
+		List<EventNote> far = rest;
 		if (far.isEmpty()) {
 			LAST_SUNKEN_CUT_REFUSAL = "NothingToCarryOver";
 			return null;
@@ -12019,10 +12036,10 @@ public final class SongBuilder {
 		// block is full and solid, so it passes that power to everything beside it -- the two flanks,
 		// and the dust in the next column.
 		placements.powered(centreAt, time);
-		int placed = 0;
+		List<EventNote> rest = new ArrayList<>(ordered);
 		for (Direction out : openSides) {
-			if (placed < ordered.size()) {
-				placeNote(placements, centreAt.relative(out), ordered.get(placed++));
+			if (!rest.isEmpty()) {
+				placeNote(placements, centreAt.relative(out), rest.remove(0));
 			}
 		}
 		// The lowered cell. Stone where the lane's own floor runs and dust on top of it, which is one
@@ -12030,24 +12047,50 @@ public final class SongBuilder {
 		// note block beside it rather than having to start on top of one.
 		placements.powered(low.pos(), "minecraft:stone", time);
 		set(placements, low.pos().above(), "minecraft:redstone_wire");
+		// A falling instrument in a lowered slot only when nothing else is left. A lowered note's
+		// instrument is the floor at lane-1, and sand or gravel there wants a support at lane-2 -- the
+		// air over the floor below's notes. ekran read it twice off Guardian, 18x4 and 20x4 at
+		// 5 74 141: a sand sunk onto the rail beneath, its support silencing the note under it, with
+		// plenty of harps it could have swapped for. The stacked head has kept its low pair clear of
+		// falling notes since it was written; this is the same preference for this pair. The note
+		// goes to the bus instead, which hangs it at bus height with its support on the floor.
 		for (Direction out : lowSides) {
-			if (placed < ordered.size()) {
-				placeNote(placements, low.pos().relative(out), ordered.get(placed++), true);
+			EventNote lowered = sinkable(rest);
+			if (lowered != null) {
+				rest.remove(lowered);
+				placeNote(placements, low.pos().relative(out), lowered, true);
 			}
 		}
 		int busCells = 0;
-		if (placed < ordered.size()) {
+		if (!rest.isEmpty()) {
 			// One cell of the fifteen is already spent on the lowered column, so the bus after it may
 			// only have fourteen. Passed rather than assumed, because the run is one wire and the far
 			// end of a run that is one cell too long is worth nothing at all.
 			busCells = layBus(placements, opening.ahead(2).above(),
-				ordered.subList(placed, ordered.size()), time, reserved, DUST_RANGE - 1);
+				rest, time, reserved, DUST_RANGE - 1);
 		}
 		// The opening column, the lowered one, and the bus after them -- so the column after the
 		// module is two past the opening plus whatever the tail spent. Measured from the opening
 		// rather than from the repeater, because a two-swap turn's repeater stands on the inside
 		// diagonal of a corner and is not on the route at all.
 		return new Body(opening.ahead(2 + busCells), 1 + busCells, true);
+	}
+
+	/**
+	 * The note for a lowered slot: the first whose instrument block does not fall, and only where
+	 * every note left falls, the first of those. A lowered note's instrument is the floor at lane-1,
+	 * and sand or gravel there wants a support at lane-2 -- which the walk, building downwards, cannot
+	 * yet see is the air over the floor below's notes; so a falling note sinks only when nothing else
+	 * is left to sink, rather than never, because refusing outright dropped two notes of a chord
+	 * that was all snares. Null only when the list is empty.
+	 */
+	private static EventNote sinkable(List<EventNote> notes) {
+		for (EventNote note : notes) {
+			if (!FALLING_INSTRUMENT_BLOCKS.contains(note.instrumentBlock())) {
+				return note;
+			}
+		}
+		return notes.isEmpty() ? null : notes.get(0);
 	}
 
 	private static Body layEventBody(PlacementPlan placements, Lane lane,
