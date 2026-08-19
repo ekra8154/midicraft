@@ -310,6 +310,19 @@ public final class ComposerScreen extends Screen {
 	private static final long MAX_GRID_STRETCH = 4L;
 	private static final int NOTE_TRIGGER_WIDTH = 7;
 	private static final int SNAP_REPEATER = -1;
+	/**
+	 * Snap to the game tick, which is half a repeater tick and the finest a build can ever place.
+	 *
+	 * <p>Only reachable by a song built on two lanes. One chain of repeaters cannot put a note on an
+	 * odd game tick at all -- a repeater's shortest delay is two of them -- so until half ticking
+	 * this grid would have offered placements no machine could hold. A piston takes three game ticks
+	 * and a second chain tapped off one runs on the opposite half of every repeater tick, and
+	 * between them the two reach every game tick there is.</p>
+	 *
+	 * <p>Notes drawn on it are buildable on {@code HALF_TICK_LANE} and are not buildable on one lane,
+	 * which is what the status line's lane count is for.</p>
+	 */
+	private static final int SNAP_GAME_TICK = -2;
 	private static final long PREVIEW_BACKLOG_TOLERANCE_MICROS = 100_000L;
 	private static final int MIN_MIDI_NOTE = 0;
 	private static final int MAX_MIDI_NOTE = 127;
@@ -633,7 +646,7 @@ public final class ComposerScreen extends Screen {
 		int recordWidth = widestLabel(CONTROL_PADDING, "Record", "Recording");
 		int playWidth = widestLabel(CONTROL_PADDING, "Play", "Stop");
 		int snapWidth = widestLabel(CONTROL_PADDING, "Snap 1/4", "Snap 1/8", "Snap 1/16",
-			"Snap 1/32", "Snap repeater", "Snap off");
+			"Snap 1/32", "Snap repeater", "Snap game tick", "Snap off");
 		int speedWidth = widestLabel(CONTROL_PADDING + 8, "Speed 0.25x", "Speed 2.00x", "Speed 8.00x");
 		int speedX = width - 6 - speedWidth;
 		int snapX = speedX - CONTROL_GAP - snapWidth;
@@ -1282,7 +1295,8 @@ public final class ComposerScreen extends Screen {
 			case 2 -> 4;
 			case 4 -> 8;
 			case 8 -> SNAP_REPEATER;
-			case SNAP_REPEATER -> 0;
+			case SNAP_REPEATER -> SNAP_GAME_TICK;
+			case SNAP_GAME_TICK -> 0;
 			default -> 1;
 		};
 		snapButton.setMessage(snapLabel());
@@ -1295,6 +1309,7 @@ public final class ComposerScreen extends Screen {
 			case 4 -> "Snap 1/16";
 			case 8 -> "Snap 1/32";
 			case SNAP_REPEATER -> "Snap repeater";
+			case SNAP_GAME_TICK -> "Snap game tick";
 			default -> "Snap off";
 		});
 	}
@@ -6161,6 +6176,12 @@ public final class ComposerScreen extends Screen {
 	private long gridTicks() {
 		if (snapSubdivision == SNAP_REPEATER) {
 			return Math.max(1L, Math.round(SongAnalysis.redstoneTickSpan(project())));
+		}
+		if (snapSubdivision == SNAP_GAME_TICK) {
+			// Half a repeater tick. Halved before rounding rather than after, because rounding the
+			// repeater span and then halving it puts the grid back on whole repeater ticks whenever
+			// that span is odd -- and the odd tick is the only thing this grid exists to reach.
+			return Math.max(1L, Math.round(SongAnalysis.redstoneTickSpan(project()) / 2.0));
 		}
 		return snapSubdivision == 0 ? 1L : Math.max(1L, project().ppq() / snapSubdivision);
 	}
