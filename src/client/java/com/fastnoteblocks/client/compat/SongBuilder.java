@@ -7826,11 +7826,15 @@ public final class SongBuilder {
 	 * experiment: the walk cuts wherever it holds a cut, bookings notwithstanding. The one time
 	 * this was tried without a switch, the walk cut where the plan had not and Guardian walked a
 	 * lane five columns past its wall on a chord of fourteen -- nothing was too big, the two
-	 * halves were answering different questions -- which is why the veto stays while the booking
-	 * search does. Flip it with {@code -Dcensus.set=V2_PAD_CLOSE_VETOES_THE_CUT=false} and read
-	 * the census, rather than shipping it off.</p>
+	 * halves were answering different questions.</p>
+	 *
+	 * <p>Off, and by measurement rather than argument: both arms over the whole library at six
+	 * sizes are identical to the block, {@code planVetoBit} nought across all 210 builds -- the
+	 * walk never holds a cut at an event the plan pad-closed, so there is nothing for the veto to
+	 * defend. The switch stays so the day some change makes the two halves meet again costs one
+	 * {@code -Dcensus.set=V2_PAD_CLOSE_VETOES_THE_CUT=true} to compare, not an edit.</p>
 	 */
-	static boolean V2_PAD_CLOSE_VETOES_THE_CUT = true;
+	static boolean V2_PAD_CLOSE_VETOES_THE_CUT = false;
 
 	/**
 	 * v2: the planner is not consulted, and a lane closes on a cut or not at all.
