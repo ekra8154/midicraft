@@ -134,6 +134,19 @@ public final class AsciiDiagram {
 	 */
 	public static String render(Function<BlockPos, BlockState> world, BlockPos from, BlockPos to,
 			View view, Direction up, boolean numberNotes, Shape shape) {
+		return render(world, from, to, view, up, numberNotes, null, shape);
+	}
+
+	/**
+	 * @param signNotes the text on the sign at a position, or null where there is none -- or null
+	 *     altogether to leave signs drawn as plain blocks. With it, a sign carrying text becomes a
+	 *     footnote: {@code S1} in the grid and its words in the legend, which is how notes written
+	 *     in the world -- "this is the fix" on an oak sign -- travel with the diagram they were
+	 *     written about instead of being lost to it.
+	 */
+	public static String render(Function<BlockPos, BlockState> world, BlockPos from, BlockPos to,
+			View view, Direction up, boolean numberNotes, Function<BlockPos, String> signNotes,
+			Shape shape) {
 		Axes axes = axesOf(view, up);
 		int[] low = {Math.min(from.getX(), to.getX()), Math.min(from.getY(), to.getY()),
 			Math.min(from.getZ(), to.getZ())};
@@ -174,6 +187,10 @@ public final class AsciiDiagram {
 		// so the legend names the blocks that are actually there and nothing else. Insertion ordered
 		// because a legend that reshuffles between two runs of the same build is hard to diff.
 		Map<String, String> legend = new LinkedHashMap<>();
+		// Signs already footnoted, by position, so a sign spanning two slices of a box cannot be
+		// numbered twice -- and a counter, since the number a sign gets is the order the scan met
+		// it in.
+		Map<BlockPos, String> footnotes = new LinkedHashMap<>();
 		StringBuilder out = new StringBuilder();
 		out.append("# ").append(low[0]).append(' ').append(low[1]).append(' ').append(low[2])
 			.append("  ..  ").append(high[0]).append(' ').append(high[1]).append(' ')
@@ -194,8 +211,10 @@ public final class AsciiDiagram {
 			boolean anything = false;
 			for (int row = 0; row < rows.size(); row++) {
 				for (int col = 0; col < cols.size(); col++) {
-					BlockState state = world.apply(at(axes, slice, cols.get(col), rows.get(row)));
-					cells[row][col] = symbol(state, axes, legend, numberNotes);
+					BlockPos here = at(axes, slice, cols.get(col), rows.get(row));
+					BlockState state = world.apply(here);
+					cells[row][col] = symbol(state, here, axes, legend, numberNotes, signNotes,
+						footnotes);
 					anything |= !state.isAir();
 				}
 			}
@@ -337,13 +356,30 @@ public final class AsciiDiagram {
 	 * what a staircase is made of; a copper bulb says whether it is lit, since that is what a build
 	 * is judged by. The rest is two letters and a line in the legend.</p>
 	 */
-	private static String symbol(BlockState state, Axes axes, Map<String, String> legend,
-			boolean numberNotes) {
+	private static String symbol(BlockState state, BlockPos pos, Axes axes,
+			Map<String, String> legend, boolean numberNotes, Function<BlockPos, String> signNotes,
+			Map<BlockPos, String> footnotes) {
 		if (state.isAir()) {
 			legend.putIfAbsent(".", "air");
 			return ".";
 		}
 		String raw = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
+		// A sign with words on it is a footnote: the words are the point of the block, so they go
+		// in the legend under the sign's own number and the grid says only which sign is which. A
+		// blank sign stays a plain block, since it has nothing to say.
+		if (signNotes != null && raw.endsWith("_sign")) {
+			String noted = footnotes.get(pos.immutable());
+			if (noted != null) {
+				return noted;
+			}
+			String words = signNotes.apply(pos);
+			if (words != null && !words.isBlank()) {
+				String mark = "S" + (footnotes.size() + 1);
+				footnotes.put(pos.immutable(), mark);
+				legend.put(mark, "sign: \"" + words.strip() + "\"");
+				return mark;
+			}
+		}
 		// What goes in the legend, which is the block and -- where a marked paste gives a block a
 		// meaning -- what that block is telling you. A slice pasted into a conversation is often all
 		// anybody has of a build, and "TU = minecraft:tuff" says nothing on its own.
