@@ -4803,6 +4803,10 @@ public final class SongBuilder {
 						headed.head(), headed.nearTail(), headed.farTail(), headed.shed(),
 						headed.centreFeeds(), headed.centreToFront(), headed.rungNotes(),
 						headed.severNote());
+					if (headed.centreFeeds() != CentreFeed.NONE) {
+						headed = lowsToppedUpFromTheTail(placements, opening, travel, depth,
+							event.time(), headed);
+					}
 					cursor = addStackedSplitModule(placements, opening, travel, depth,
 						headDelay, headed, event.time());
 					far = headed.farTail();
@@ -17473,6 +17477,71 @@ public final class SongBuilder {
 
 	private static boolean quietAndFree(PlacementPlan placements, BlockPos cell, int time) {
 		return placements.freeForNote(cell) && !soundedByAnother(placements, cell, time);
+	}
+
+	/**
+	 * A centre-fed head topped up to capacity from its own tail, one free low slot at a time.
+	 *
+	 * <p>Head first, then the climb, then the tail: that is the order the notes are owed, and a
+	 * low slot left empty while the tail crosses is a cell of far-half bus spent on a note the
+	 * head had room for. In-game reading found exactly that -- a corkscrew with an unused back
+	 * flank and an odd tail.</p>
+	 *
+	 * <p>Filled here, after {@link #onTheFreeSlots}, rather than in {@link #centreFedCut},
+	 * because the ground is the whole question: an oracle-time fill measured 83 wrong notes and
+	 * 127 contested cells on the crowded songs, every one a low hung on a cell the lane behind
+	 * already owned, and the oracle cannot see the ground. Only a slot whose cell is quiet and
+	 * free takes a note. Non-harps by preference, so the harps stay where only harps work; a
+	 * corkscrew's front pair stays empty because there is no ground for it; and the lows under
+	 * a staircase or a rung flank take nothing falling.</p>
+	 */
+	private static StackedSplit lowsToppedUpFromTheTail(PlacementPlan placements, BlockPos pos,
+			Direction travel, Direction noteSide, int time, StackedSplit split) {
+		UltraSlots slots = split.slots();
+		List<EventNote> front = new ArrayList<>(slots.front());
+		List<EventNote> back = new ArrayList<>(slots.back());
+		List<EventNote> head = new ArrayList<>(split.head());
+		List<EventNote> tail = new ArrayList<>(split.farTail());
+		BlockPos cross = pos.relative(travel);
+		boolean filled = false;
+		for (int index = 0; index < 4; index++) {
+			boolean rear = index >= 2;
+			int side = index % 2;
+			List<EventNote> lows = rear ? back : front;
+			if (lows.get(side) != null) {
+				continue;
+			}
+			if (!rear && split.centreFeeds() == CentreFeed.CORKSCREW) {
+				continue;
+			}
+			BlockPos instrument = cross.relative(side == 0 ? noteSide : noteSide.getOpposite());
+			BlockPos cell = instrument.relative(rear ? travel.getOpposite() : travel);
+			if (!quietAndFree(placements, cell, time)) {
+				continue;
+			}
+			boolean constrained = split.centreFeeds() == CentreFeed.CORKSCREW ? rear : !rear;
+			java.util.function.Predicate<EventNote> fits = note -> note.effect() == null
+				&& (!constrained || !FALLING_INSTRUMENT_BLOCKS.contains(note.instrumentBlock()));
+			EventNote fill = takeFromTail(tail, note -> fits.test(note) && !isHarpNote(note));
+			if (fill == null) {
+				fill = takeFromTail(tail, fits);
+			}
+			if (fill == null) {
+				continue;
+			}
+			lows.set(side, fill);
+			head.add(fill);
+			placements.padded("cutHeadLowFilledFromTheTail");
+			filled = true;
+		}
+		if (!filled) {
+			return split;
+		}
+		return new StackedSplit(new UltraSlots(slots.centre(), slots.sides(),
+			java.util.Collections.unmodifiableList(front),
+			java.util.Collections.unmodifiableList(back)),
+			head, split.nearTail(), tail, split.shed(), split.centreFeeds(),
+			split.centreToFront(), split.rungNotes(), split.severNote());
 	}
 
 	/** How often looking found a low note on a cell something else already owned. */
