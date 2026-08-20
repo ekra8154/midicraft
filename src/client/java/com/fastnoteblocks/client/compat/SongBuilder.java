@@ -11756,12 +11756,11 @@ public final class SongBuilder {
 		EventNote awayFlank = !pool.isEmpty()
 				&& railSlotTakes(placements, centreAt.relative(away), time)
 			? pool.remove(0) : null;
-		// The stand flank, live for in-game debugging at the word. Nothing this build's model
-		// says powers the stand -- the centre's wire shapes itself down the staircase's diagonal
-		// and points z, not x -- so verify and the reader both call this note silent, and every
-		// census will read it as a wrong or dead note until the game itself answers. If it
-		// sounds, the mechanism goes into the model; if it does not, the slot goes.
-		EventNote standFlank = !pool.isEmpty()
+		// The stand flank rides on the away flank: its driver is the away flank's instrument
+		// block, weak-powered by the wire pointing into it and standing x-adjacent -- in-game
+		// testing proved the chain when the dragon head the layout check had put on this note
+		// roared as the lane ran. No away flank, no instrument, no driver, no note.
+		EventNote standFlank = awayFlank != null && !pool.isEmpty()
 				&& railSlotTakes(placements, stand.relative(away), time)
 			? pool.remove(0) : null;
 		// The border's end note, live for the same in-game debugging as the stand flank: the
@@ -11827,9 +11826,14 @@ public final class SongBuilder {
 		}
 		if (cut.awayFlank() != null) {
 			placeNote(placements, centreAt.relative(away), cut.awayFlank());
+			// The away flank's instrument block is weak-powered by the wire pointing into it,
+			// and it is the stand flank's whole driver as well as this note's ground. In-game
+			// testing proved the chain on the marked paste: the layout check had flagged the
+			// stand flank unfired and put a dragon head on it, and the dragon roared when the
+			// lane ran.
+			placements.powered(centreAt.relative(away).below(), time);
 		}
 		if (cut.standFlank() != null) {
-			// Expected silent by the model; see the oracle. Placed so the game can be asked.
 			placeNote(placements, cursor.relative(away), cut.standFlank());
 		}
 		if (cut.endNote() != null) {
