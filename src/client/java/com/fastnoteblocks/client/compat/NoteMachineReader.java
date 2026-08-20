@@ -310,22 +310,6 @@ public final class NoteMachineReader {
 			if (!region.contains(position)) {
 				continue;
 			}
-			// A firing repeater powers the block it stands on, and that block sounds the notes
-			// hung beside it. In-game testing established this against the pasted build: the
-			// flank pair beside a cut head's stand plays, with nothing else near enough to drive
-			// it. The stand conducts nothing onward -- notes only, no dust -- so this fires the
-			// notes and leaves the walk alone. Every repeater output pulse carries the repeater
-			// as its {@code from}, including the head repeaters a trace starts at.
-			if (!pulse.dust() && region.contains(pulse.from())
-					&& region.at(pulse.from()).is(Blocks.REPEATER)) {
-				BlockPos stand = pulse.from().below();
-				for (Direction direction : Direction.Plane.HORIZONTAL) {
-					BlockPos beside = stand.relative(direction);
-					if (noteBlocks.contains(beside)) {
-						firedAt.merge(beside, pulse.time(), Math::min);
-					}
-				}
-			}
 			BlockState state = region.at(position);
 			if (pulse.dust()) {
 				if (!state.is(Blocks.REDSTONE_WIRE) || pulse.strength() < 1) {

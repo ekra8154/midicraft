@@ -15948,12 +15948,15 @@ public final class SongBuilder {
 			// block later -- the sideways corkscrew and the second stone over the wire behind
 			// both went with it.
 			placements.climbFedByCentre(true);
-			// Without the cross under its centre: every other stacked module's cross is the
-			// lane's own wire running through, and here nothing runs through -- the module is
-			// flush at the wall and the line leaves upward. In-game testing read the cross at
-			// nought and asked for it to go.
+			// With the cross under its centre, like every other stacked head: the strongly
+			// powered centre lights it, and the cross is what weak-powers the stand behind it so
+			// the back flanks sound. In-game testing first read that cross at nought and asked
+			// for it to go -- and then found the nought was the fault, not the cross: with the
+			// tail's current skipping up the ladder, the centre was soft-powered before the
+			// repeater could power it properly, and a soft-powered block lights no dust. The cap
+			// over the tail's wire is what fixed the reading, and the cross stays.
 			Lane afterHead = addStackedEventModule(placements,
-				Lane.straight(cursor, travel, laneStep), triggerDelay, time, split.slots(), true);
+				Lane.straight(cursor, travel, laneStep), triggerDelay, time, split.slots());
 			BlockPos centreCol = cursor.relative(travel);
 			placements.powered(cursor.above(2), "minecraft:stone", time);
 			set(placements, cursor.above(3), "minecraft:redstone_wire");
@@ -16294,17 +16297,6 @@ public final class SongBuilder {
 
 	private static Lane addStackedEventModule(PlacementPlan placements, Lane lane,
 			int triggerDelay, int time, UltraSlots slots) {
-		return addStackedEventModule(placements, lane, triggerDelay, time, slots, false);
-	}
-
-	/**
-	 * @param bareCross whether to leave the cell under the centre empty. Every mid-lane module's
-	 *     cross is the lane's own wire running through it; a corkscrew is flush at the wall with
-	 *     nothing in front, so its cross carries nothing and gets nothing -- in-game testing read
-	 *     it at nought -- and laying it anyway is a cell of dead dust in every such head.
-	 */
-	private static Lane addStackedEventModule(PlacementPlan placements, Lane lane,
-			int triggerDelay, int time, UltraSlots slots, boolean bareCross) {
 		lane = pastAnyCorner(placements, lane);
 		BlockPos cursor = lane.pos();
 		Direction travel = lane.travel();
@@ -16315,9 +16307,7 @@ public final class SongBuilder {
 		BlockPos centre = cursor.relative(travel).above();
 		BlockPos cross = centre.below();
 		set(placements, cross.below(), UNDERFLOOR);
-		if (!bareCross) {
-			set(placements, cross, STACKED_CROSS);
-		}
+		set(placements, cross, STACKED_CROSS);
 		if (slots.centre() == null) {
 			set(placements, centre, "minecraft:stone");
 			// A centre with no note in it has the cell above it going spare, and that cell is at
