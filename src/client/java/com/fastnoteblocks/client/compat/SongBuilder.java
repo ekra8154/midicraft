@@ -4568,7 +4568,8 @@ public final class SongBuilder {
 				// the plan let the walk cut where the plan had not, and Guardian walked a lane five columns
 				// past its wall on a chord of 14 -- a chord whose cut is 7 cells against a budget of 11.
 				// Nothing was too big; the two halves were answering different questions.
-				boolean vetoed = couldSplit && booked != null && booked.containsKey(NO_SPLIT - index)
+				boolean vetoed = V2_PAD_CLOSE_VETOES_THE_CUT
+					&& couldSplit && booked != null && booked.containsKey(NO_SPLIT - index)
 					// A centre-fed climbing cut is never vetoed for a pad-close. The pad spends
 					// columns on wire; the cut hangs notes in cells no other shape has and every
 					// one of them shortens the far half's bus on the floor above -- so where both
@@ -7815,6 +7816,21 @@ public final class SongBuilder {
 	 * that {@code reachesWall} refuses. The cut was there and already shed. Ten columns outside.</p>
 	 */
 	static boolean CUTS_WHEN_THE_VETOED_LANE_CANNOT_TURN = true;
+
+	/**
+	 * v2: a pad-close the planner booked forbids the cut the walk has in hand.
+	 *
+	 * <p>The veto itself, behind a switch so it can be priced. On, the behaviour v2 has always
+	 * had: {@code planLane} books {@link #NO_SPLIT} where it found a pad that closes the lane, and
+	 * the walk defers to the booking so the two agree about where the lane ends. Off is the
+	 * experiment: the walk cuts wherever it holds a cut, bookings notwithstanding. The one time
+	 * this was tried without a switch, the walk cut where the plan had not and Guardian walked a
+	 * lane five columns past its wall on a chord of fourteen -- nothing was too big, the two
+	 * halves were answering different questions -- which is why the veto stays while the booking
+	 * search does. Flip it with {@code -Dcensus.set=V2_PAD_CLOSE_VETOES_THE_CUT=false} and read
+	 * the census, rather than shipping it off.</p>
+	 */
+	static boolean V2_PAD_CLOSE_VETOES_THE_CUT = true;
 
 	/**
 	 * v2: the planner is not consulted, and a lane closes on a cut or not at all.
