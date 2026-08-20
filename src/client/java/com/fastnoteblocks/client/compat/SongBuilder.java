@@ -11753,9 +11753,19 @@ public final class SongBuilder {
 			? harps.remove(0) : null;
 		List<EventNote> pool = new ArrayList<>(others);
 		pool.addAll(harps);
-		EventNote awayFlank = !pool.isEmpty()
-				&& railSlotTakes(placements, centreAt.relative(away), time)
-			? pool.remove(0) : null;
+		// The away flank's instrument has to conduct: the wire points into it and it relays the
+		// power on to the stand flank, and a wire pointing into glowstone powers nothing at all
+		// -- in-game reading found exactly that dead pair on illit. Same rule as the stacked
+		// module's relays: a solid conductor, a harp wearing the harp block, sand included.
+		EventNote awayFlank = null;
+		if (railSlotTakes(placements, centreAt.relative(away), time)) {
+			for (int index = 0; index < pool.size(); index++) {
+				if (conductsSideways(pool.get(index))) {
+					awayFlank = pool.remove(index);
+					break;
+				}
+			}
+		}
 		// The stand flank rides on the away flank: its driver is the away flank's instrument
 		// block, weak-powered by the wire pointing into it and standing x-adjacent -- in-game
 		// testing proved the chain when the dragon head the layout check had put on this note
@@ -11825,13 +11835,17 @@ public final class SongBuilder {
 			placeNote(placements, centreAt.relative(descentSide), cut.jogFlank());
 		}
 		if (cut.awayFlank() != null) {
-			placeNote(placements, centreAt.relative(away), cut.awayFlank());
-			// The away flank's instrument block is weak-powered by the wire pointing into it,
-			// and it is the stand flank's whole driver as well as this note's ground. In-game
-			// testing proved the chain on the marked paste: the layout check had flagged the
-			// stand flank unfired and put a dragon head on it, and the dragon roared when the
-			// lane ran.
-			placements.powered(centreAt.relative(away).below(), time);
+			// Laid the way a stacked module lays its relays: a conducting block, powered, with
+			// the note on top. The wire points into it, it sounds its own note and relays on to
+			// the stand flank beside it -- in-game testing proved the chain when the dragon head
+			// the layout check had put on that flank roared as the lane ran, and proved the
+			// conductor rule when a glowstone here left the pair dead on illit.
+			BlockPos instrument = centreAt.relative(away).below();
+			placements.powered(instrument, conductingInstrumentBlock(cut.awayFlank()), time);
+			if (FALLING_INSTRUMENT_BLOCKS.contains(cut.awayFlank().instrumentBlock())) {
+				placements.support(instrument.below(), UNDERFLOOR);
+			}
+			placeNoteBlock(placements, centreAt.relative(away), cut.awayFlank());
 		}
 		if (cut.standFlank() != null) {
 			placeNote(placements, cursor.relative(away), cut.standFlank());
