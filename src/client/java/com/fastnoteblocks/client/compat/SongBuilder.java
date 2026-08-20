@@ -3979,10 +3979,36 @@ public final class SongBuilder {
 			// chord the lane turns before laying), and it comes to rest exactly one column short of
 			// the wall, which is where the staircase stands. Then nothing goes between them -- the
 			// next event measures {@code columns} as nought, plans no pad and pins nothing.
-			placements.seedAhead(CLOSING_CHORD_HANGS_ON_THE_FLANKS && RAIL_SEEDS_OFF_THE_CLIMB
+			boolean closesOnTheSeed = CLOSING_CHORD_HANGS_ON_THE_FLANKS && RAIL_SEEDS_OFF_THE_CLIMB
 				&& V2_RUNS_ON_RAILS && layout.ultra()
 				&& above >= 0 && above < floors && climb > 0
-				&& reaches && (wall - landing) * lane.travel().getStepX() == 1);
+				&& reaches && (wall - landing) * lane.travel().getStepX() == 1;
+			// And only where the seed is going to be used. The geometry above says a ladder could
+			// read this chord's column; whether one will is a question about the lane the climb
+			// lands on, and it is the climb's own question -- {@link #railOpens}, blanks and all --
+			// asked here of the same events with the landing lane built from the two things the
+			// staircase settles, exactly as the climb builds it. In-game reading found the shape
+			// dressed for a ladder behind a corkscrew: a centre-fed cut lays its own staircase and
+			// never seeds, so the chord had paid a cell of wire and hung two notes on the floor --
+			// the cells every later parity question contends for -- for nothing at all. The climb
+			// still decides the seed itself; a wrong yes here costs what it always cost, and a
+			// wrong no is counted so it can be seen.
+			if (closesOnTheSeed) {
+				Direction seedNext = lane.travel().getOpposite();
+				closesOnTheSeed = index + 1 < events.size()
+					&& railOpens(events, index + 1,
+						Lane.straight(new BlockPos(wall, lane.pos().getY(), lane.pos().getZ())
+							.relative(seedNext, 2).above(CUBE_FLOOR_HEIGHT), seedNext, depth),
+						laneWall(nearWall, farWall, forward, seedNext, above, climb, floors),
+						layout, false,
+						turnReserve(events.get(index + 1),
+							turnCost(above, climb, floors, slabStep).offBus(), layout),
+						events.get(index + 1).time() - event.time(), event.time(), booked);
+				if (!closesOnTheSeed) {
+					placements.padded("closingKeptItsAnchorNoRunAbove");
+				}
+			}
+			placements.seedAhead(closesOnTheSeed);
 			// And the same question for a descent, which wants the opposite thing: not the centre's
 			// dust but the low slot beside it.
 			//
