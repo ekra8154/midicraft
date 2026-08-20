@@ -16,13 +16,13 @@ import org.junit.jupiter.api.Test;
  *
  * <p>A chord of 27 is head seven and tail twenty, and a descent's cut of it is
  * {@code 1 + 10 + 4 = 15} -- inside the fifteen with nothing to spare but nothing over either. It
- * should cut essentially whenever, and on a song of nothing but 27s it does not: 54 blocks of breach
- * where the same song built without {@link SongBuilder#SHED_BUYS_THE_LAST_CELL} has none.</p>
+ * should cut essentially whenever, and on a song of nothing but 27s it does not: 54 blocks of
+ * breach where the same song built without {@link SongBuilder#SHED_BUYS_THE_LAST_CELL} has none.</p>
  *
- * <p>ekran suspects parity, which forces either a column of pad or a fall back to a plain bus, and
- * either of those stops the cut. So this prints the census keys that name those two decisions beside
- * the breach, and writes out one whole chord -- every note, its instrument and its pitch -- so the
- * case can be stood up in the world rather than argued about from totals.</p>
+ * <p>Parity is the suspect, forcing either a column of pad or a fall back to a plain bus, and
+ * either of those stops the cut. So this prints the census keys that name those two decisions
+ * beside the breach, and writes out one whole chord -- every note, its instrument and its pitch --
+ * so the case can be stood up in the world rather than argued about from totals.</p>
  */
 @Tag("sweep")
 class TwentySevenCutTest {
@@ -78,7 +78,7 @@ class TwentySevenCutTest {
 			why.forEach((key, count) -> System.out.println("   " + key + " " + count));
 		}
 
-		// And one chord, whole, so ekran can stand it up. Instruments as block names because that is
+		// And one chord, whole, so a player can stand it up. Instruments as block names because that is
 		// what the note block is tuned by, and pitch because that is what it is tuned to.
 		System.out.println();
 		System.out.println("######## one chord of 27, as built");

@@ -48,7 +48,7 @@ class HalfTickLaneTest {
 	}
 
 	/**
-	 * ekran's own example: a b c d, one game tick apart, alternating lanes.
+	 * The live example: a b c d, one game tick apart, alternating lanes.
 	 *
 	 * <p>Each lane sees one repeater tick between its two notes, because a and c are two game ticks
 	 * apart and so are b and d. That is the whole reason the split works, and it is worth pinning as
@@ -235,7 +235,7 @@ class HalfTickLaneTest {
 	 * <p>Not a nicety. A paste is a stream of commands the player walks beside, and blocks only land
 	 * in chunks that are loaded -- so a build that finishes one lane before starting the other lays
 	 * its second lane thousands of blocks behind whoever is watching, into chunks that have long
-	 * since unloaded, and none of it arrives. ekran hit exactly that in the world.</p>
+	 * since unloaded, and none of it arrives. Exactly that happened in the world.</p>
 	 *
 	 * <p>What is asserted is the property that fixes it: the paste front never drops far back down
 	 * the build. It steps back a little constantly, because the lane that is behind is the one that
@@ -267,7 +267,7 @@ class HalfTickLaneTest {
 	/**
 	 * A song whose two halves carry very different chords still keeps its pulses together.
 	 *
-	 * <p>The failure this exists for is the one ekran asked about and none of the checks above can
+	 * <p>The failure this exists for is the one named in game, and none of the checks above can
 	 * see. A lane spends columns on the chords it carries, so a song with big chords on its even
 	 * ticks and small ones on its odd ticks runs one pulse steadily ahead of the other -- every note
 	 * on the beat, half of them sounding from outside the 48 blocks a note block carries. Timing is
@@ -312,10 +312,10 @@ class HalfTickLaneTest {
 	 * A lane that spends its whole opening waiting is still a machine with a way into it.
 	 *
 	 * <p>Mirroring lays wire before it lays notes, so a lane whose first note is late begins with a
-	 * long run of plain dust -- and a run of dust is not somewhere a signal can be started. Read
-	 * back, such a lane came out as "found note blocks but no way in": every repeater on it was fed
-	 * by another one, because the first thing on it was not a repeater at all. ekran has to tap his
-	 * input somewhere too, and the head of the lane is that somewhere.</p>
+	 * long run of plain dust -- and a run of dust is not somewhere a signal can be started. Read back,
+	 * such a lane came out as "found note blocks but no way in": every repeater on it was fed by
+	 * another one, because the first thing on it was not a repeater at all. In-game testing has to tap
+	 * his input somewhere too, and the head of the lane is that somewhere.</p>
 	 *
 	 * <p>Asserted through the reader rather than by looking for a repeater at the front, because
 	 * what is wanted is not the block, it is that the machine can be entered and plays the song.</p>
@@ -348,7 +348,7 @@ class HalfTickLaneTest {
 	}
 
 	/**
-	 * The claim ekran made: the two lanes are neck and neck, not merely within some tolerance.
+	 * The claim under test: the two lanes are neck and neck, not merely within some tolerance.
 	 *
 	 * <p>Sixteen notes against two is a wider split than any real song, chosen so that a lane left
 	 * to chase its partner would lose unmissably -- unpadded this walks the two about seven columns

@@ -21,12 +21,12 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * ekran's dead wire, read out of the blocks rather than guessed at.
+ * The dead wire, read out of the blocks rather than guessed at.
  *
- * <p>Eight wide over two floors, pasted at 0 64 0 -- their exact paste, so that what this prints and
- * what they are standing in front of are the same build. A dead wire is not a missed note: the rest
- * of the song stops behind it, so the first one in the chain is the only one worth looking at and
- * everything after it is that one's shadow.</p>
+ * <p>Eight wide over two floors, pasted at 0 64 0 -- their exact paste, so that what this prints
+ * and what they are standing in front of are the same build. A dead wire is not a missed note: the
+ * rest of the song stops behind it, so the first one in the chain is the only one worth looking at
+ * and everything after it is that one's shadow.</p>
  */
 @Tag("sweep")
 class RailDeadWireProbeTest {
@@ -108,8 +108,8 @@ class RailDeadWireProbeTest {
 			}
 		}
 		// The break as a picture rather than as a list of setblocks. AsciiDiagram is what the machine
-		// reader's own command prints, so this is the same view ekran would get standing in front of
-		// it -- which matters when the client cannot be launched to go and look.
+		// reader's own command prints, so this is the same view as standing in front of it --
+		// which matters when the client cannot be launched to go and look.
 		BlockPos live = laid.entrySet().stream()
 			.filter(entry -> world.get(entry.getKey()).is(Blocks.NOTE_BLOCK))
 			.filter(entry -> !dead.contains(entry.getKey()))
@@ -140,7 +140,8 @@ class RailDeadWireProbeTest {
 		}
 	}
 
-	/** One z slice as a side view: x across, y down, the way ekran reads a lane off the world. */
+	/** One z slice as a side view: x across, y down, the way in-game reading shows a lane off the
+	/** world. */
 	private static void dump(Map<BlockPos, BlockState> world, BlockPos at, int z) {
 		int fromX = at.getX() - 9;
 		int toX = at.getX() + 4;
@@ -160,7 +161,7 @@ class RailDeadWireProbeTest {
 		}
 	}
 
-	/** ekran's shorthand, so a dump from here and a dump from the world read the same. */
+	/** The shorthand, so a dump from here and a dump from the world read the same. */
 	private static String code(BlockState state) {
 		String name = BuiltInRegistries.BLOCK.getKey(state.getBlock()).getPath();
 		return switch (name) {

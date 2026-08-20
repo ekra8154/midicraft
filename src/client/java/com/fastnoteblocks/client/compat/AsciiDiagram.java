@@ -18,9 +18,9 @@ import net.minecraft.world.level.block.state.properties.SlabType;
  * A box of world, written out as flat slices somebody can paste into a conversation.
  *
  * <p>What this is for is settling arguments about geometry. A build that does not fire is read by
- * arguing from the plan about where the blocks must be, and the plan is the thing under suspicion --
- * so the argument runs for hours and both sides are reasoning from the same possibly-wrong model.
- * Slices of the actual world end that: whatever is there is there.</p>
+ * arguing from the plan about where the blocks must be, and the plan is the thing under suspicion
+ * -- so the argument runs for hours and both sides are reasoning from the same possibly-wrong
+ * model. Slices of the actual world end that: whatever is there is there.</p>
  *
  * <p>Everything is oriented from a stated point of view, and every slice says which way is which,
  * because a diagram whose handedness has to be guessed at is worse than none. Looking east, the
@@ -140,7 +140,7 @@ public final class AsciiDiagram {
 		int[] high = {Math.max(from.getX(), to.getX()), Math.max(from.getY(), to.getY()),
 			Math.max(from.getZ(), to.getZ())};
 		// Shrunk to what is actually in the box, so a box can be thrown around a build rather than
-		// measured to it: ekran's, and the point is that
+		// measured to it, and the point is that
 		// {@code /asciidiagram ~10 ~10 ~10 ~-10 ~-10 ~-10} draws whatever is inside without anybody
 		// reading six numbers off the debug screen first.
 		//

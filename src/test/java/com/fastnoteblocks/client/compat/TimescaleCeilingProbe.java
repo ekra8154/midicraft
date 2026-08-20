@@ -102,7 +102,7 @@ class TimescaleCeilingProbe {
 	}
 
 	/**
-	 * The one song ekran named, and what its grid actually is.
+	 * The one song named in game, and what its grid actually is.
 	 *
 	 * <p>Its three saved versions are all the same conversion, so the interesting number is not
 	 * which is best but what a game tick is worth at that tempo -- which is what decides how finely

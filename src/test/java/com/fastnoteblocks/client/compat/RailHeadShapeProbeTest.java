@@ -16,7 +16,7 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * The opening of ekran's dead run, lifted out of the song and built by hand.
+ * The opening of the dead run, lifted out of the song and built by hand.
  *
  * <p>Their build is eight wide over two floors and the whole of it after one head is silent, which
  * is far too much machine to reason about. This is the same blocks in the same places -- the head's
@@ -39,20 +39,20 @@ class RailHeadShapeProbeTest {
 		report("the run on its own", world(false, false));
 		report("the run reached by the climb that feeds it", world(false, true));
 		// A run that stops at its opening column, which is the one column the head's dust drives
-		// rather than a repeater. ekran, reading a stone with wire either side of it: "issue is
+		// rather than a repeater. Reading a stone with wire either side of it: "issue is
 		// redstone line going both into and out of this block".
 		report("a run of one column, carrying on in dust", stub(false));
 		report("a run of one column, carrying on through a repeater", stub(true));
-		// Whether the column a run opens on may keep its centre for a harp note. It is the one column
-		// the head's dust drives, and it gave the centre away to a stone for a long time on the
-		// grounds that dust does not hand a note block on to the repeater in front of it. It does:
-		// the block after the centre is what says so, and it is reached either way. ekran, who would
-		// not have it -- "a note block can be powered just like a stone, there's no difference".
+		// Whether the column a run opens on may keep its centre for a harp note. It is the one column the
+		// head's dust drives, and it gave the centre away to a stone for a long time on the grounds that
+		// dust does not hand a note block on to the repeater in front of it. It does: the block after the
+		// centre is what says so, and it is reached either way. In-game testing, which would not have it
+		// -- "a note block can be powered just like a stone, there's no difference".
 		report("an opening centre of stone, one note hung", opening(false, 1));
 		report("an opening centre of note, nothing hung", opening(true, 1));
 		report("an opening centre of note, one note hung", opening(true, 2));
 		report("an opening centre of stone, two notes hung", opening(false, 2));
-		// ekran's transition. A stacked module already lays a cross of dust on a stone at the lane's
+		// The transition. A stacked module already lays a cross of dust on a stone at the lane's
 		// floor level, which is the head's two blocks in the head's two places -- so the run needs no
 		// head, only the trigger column every module pays for. Ticks are what this has to get right:
 		// the floor rail is seeded at the stacked chord's own tick, a tick earlier than a head's

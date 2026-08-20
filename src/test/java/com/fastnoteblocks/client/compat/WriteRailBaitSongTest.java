@@ -17,15 +17,15 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * ekran's song for standing in the two-rail shapes: everything harp, every gap two ticks, chords
+ * The song for standing in the two-rail shapes: everything harp, every gap two ticks, chords
  * mostly of one and two with the occasional big one.
  *
- * <p>Written to bait runs into existing rather than to be hard. A run wants three consecutive chords
- * of three or fewer, and the library has almost nothing like that -- Guardian lays nought rail
- * columns at every size because only 78 of its 1,556 chords are small enough and they never come
- * three in a row. Weighting the sizes so that more than half are one or two puts long stretches of
- * railable chords everywhere, and the bigger ones break them up into the shapes that matter: a
- * stacked bus arriving mid-run, a run that has to close, a run opening again after one.</p>
+ * <p>Written to bait runs into existing rather than to be hard. A run wants three consecutive
+ * chords of three or fewer, and the library has almost nothing like that -- Guardian lays nought
+ * rail columns at every size because only 78 of its 1,556 chords are small enough and they never
+ * come three in a row. Weighting the sizes so that more than half are one or two puts long
+ * stretches of railable chords everywhere, and the bigger ones break them up into the shapes that
+ * matter: a stacked bus arriving mid-run, a run that has to close, a run opening again after one.</p>
  *
  * <p>All harp on purpose. The centre of a path column is the cell the wire runs through, so it
  * sounds harp whatever was meant and only a harp note can take it -- an all-harp song is therefore
@@ -88,8 +88,8 @@ class WriteRailBaitSongTest {
 			for (int note = 0; note < size; note++) {
 				// Distinct degrees within the chord, and deliberately not the up-and-down walk the
 				// other synthetic songs use. That walk folds back on itself, and two notes of one
-				// chord landing on the same pitch would be deduped away -- ekran builds with dedupe
-				// on -- so a chord of ten would quietly arrive as a chord of nine.
+				// chord landing on the same pitch would be deduped away -- the live config builds
+				// with dedupe on -- so a chord of ten would quietly arrive as a chord of nine.
 				notes.add(new ComposerProject.NoteEvent(id++,
 					ComposerProject.NOTE_BLOCK_BASE_MIDI_NOTE
 						+ SCALE[(index + note * 2) % SCALE.length],
@@ -104,7 +104,7 @@ class WriteRailBaitSongTest {
 		Files.writeString(SONGS.resolve(name + ".json"), new Gson().toJson(song));
 
 		// Read back off the sequence the game will actually build, not off the layer. Dedupe is on in
-		// ekran's config, so the layer and the build disagree by up to a sixth on a real song -- and
+		// the live config, so the layer and the build disagree by up to a sixth on a real song -- and
 		// a chord that arrived smaller than it was written is exactly what this song must not have.
 		List<SongBuilder.EventNote> built =
 			SongBuilder.eventNotes(song.toSequenceTracks(Set.of(), true));

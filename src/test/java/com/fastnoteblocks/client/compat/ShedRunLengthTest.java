@@ -86,7 +86,7 @@ class ShedRunLengthTest {
 	 *
 	 * <p>Which answers the question the length alone cannot: a pad is glass with dust over it and a
 	 * bus is powered stone, so the run says outright how much of itself is music and how much is
-	 * wire laid to wait. ekran, reading it in game: a standard bus that dies because the chord after
+	 * wire laid to wait. Reading it in game: a standard bus that dies because the chord after
 	 * it was given a block of padding, with nothing stacked on either side to want one.</p>
 	 */
 	@Test

@@ -21,12 +21,12 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * The ten columns of bare wire ekran read off illit at 32 wide over two floors.
+ * The ten columns of bare wire in-game reading found off illit at 32 wide over two floors.
  *
  * <p>A pad is wire a lane pays for out of the same fifteen the chords spend, so ten of them is ten
  * columns of music given up. The question is what asked for them, and the trace says that in one
  * line -- so this prints the turn decisions for the lane holding them beside the blocks themselves,
- * drawn over the box ekran quoted.</p>
+ * drawn over the box named in game.</p>
  */
 @Tag("sweep")
 class IllitTwoFloorPadTest {
@@ -71,7 +71,7 @@ class IllitTwoFloorPadTest {
 			.limit(12)
 			.forEach(entry -> System.out.println("   " + entry.getKey() + " " + entry.getValue()));
 
-		// The box ekran quoted, from the same origin, so the two diagrams are of the same blocks.
+		// The box named in game, from the same origin, so the two diagrams are of the same blocks.
 		Map<BlockPos, BlockState> world = new HashMap<>();
 		for (String command : plan.commands()) {
 			String[] word = command.split(" ");

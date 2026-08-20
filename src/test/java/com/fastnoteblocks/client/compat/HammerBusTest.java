@@ -16,9 +16,9 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * Why a chord that fits a stacked-bus is built as a plain bus, on ekran's Hammer of Justice.
+ * Why a chord that fits a stacked-bus is built as a plain bus, on the Hammer of Justice.
  *
- * <p>ekran pasted the same chord in the air and it came out a stacked-bus of seven columns against
+ * <p>The same chord pasted in the air came out a stacked-bus of seven columns against
  * the nine the build gave it, so the shape is available and something declined it. Every downgrade
  * counts itself in the padding map; this prints them, and then the chords themselves.</p>
  */

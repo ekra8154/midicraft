@@ -15,11 +15,11 @@ import org.junit.jupiter.api.Test;
 /**
  * Where Guardian's biggest breach is right now, in coordinates somebody can stand on.
  *
- * <p>Every number in the handoff is a total. A total says how much is wrong and nothing about where,
- * and a rule that takes breaches to nought has to be derived from one lane that can be looked at.
- * This finds the worst single breach over the whole Guardian sweep, then prints the config, the
- * chord that walked out, and every block of the build standing past its far wall -- space-separated,
- * so a line can go straight into {@code /tp}.</p>
+ * <p>Every number in the handoff is a total. A total says how much is wrong and nothing about
+ * where, and a rule that takes breaches to nought has to be derived from one lane that can be
+ * looked at. This finds the worst single breach over the whole Guardian sweep, then prints the
+ * config, the chord that walked out, and every block of the build standing past its far wall --
+ * space-separated, so a line can go straight into {@code /tp}.</p>
  */
 @Tag("sweep")
 class GuardianBreachReproProbe {
@@ -137,14 +137,14 @@ class GuardianBreachReproProbe {
 	}
 
 	/**
-	 * The repro at the {@code maxBuildFloors} ekran actually has set, not the sweep's.
+	 * The repro at the {@code maxBuildFloors} the library actually e set, not the sweep's.
 	 *
-	 * <p>Every table in this file sweeps with {@code maxFloors=4} and ekran's config says 16. A
+	 * <p>Every table in this file sweeps with {@code maxFloors=4} and the live config says 16. A
 	 * repro they cannot paste is not a repro, so the config the coordinates belong to has to be the
 	 * one they would type.</p>
 	 */
 	@Test
-	void checksTheReproSurvivesEkransMaxFloors() throws Exception {
+	void checksTheReproSurvivesTheLiveMaxFloors() throws Exception {
 		List<SongBuilder.EventNote> notes = guardian();
 		for (int max : new int[] {4, 16}) {
 			SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0), notes,
@@ -372,7 +372,7 @@ class GuardianBreachReproProbe {
 	/**
 	 * Which songs are clean, and at which widths, with the rule off and on.
 	 *
-	 * <p>ekran remembers the library at nought breaches for everything but Guardian. The sweep says
+	 * <p>The library is remembered at nought breaches for everything but Guardian. The sweep says
 	 * otherwise with the rule <em>off</em>, which is main -- so either the memory is of a narrower
 	 * band of configurations than a sweep from twelve wide over one floor, or it is of a different
 	 * build. Worth settling before anything is blamed on the shed rule: a config band nobody would

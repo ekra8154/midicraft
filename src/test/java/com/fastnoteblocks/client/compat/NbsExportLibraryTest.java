@@ -22,7 +22,7 @@ import org.junit.jupiter.api.io.TempDir;
  *
  * <p>The hand-built cases all passed while the feature was broken, because none of them had two
  * notes on one tick in one layer and every real song does. A synthetic song only contains what I
- * thought to put in it; the library contains what ekran actually writes.</p>
+ * thought to put in it; the library contains what the library actually e.</p>
  */
 @Tag("sweep")
 class NbsExportLibraryTest {

@@ -17,15 +17,15 @@ import net.minecraft.world.level.block.state.BlockState;
  * dead wire, wrong note, breach -- in whichever mode is asked for, because the three are not the
  * same kind of wrong and a session hunting one usually turns up the others. A breach is a lane
  * outside the width it promised: visible, and harmless to the music. A wrong note is a note block
- * something else sounds, at a tick nobody wrote. A dead wire is wire the signal never crosses, which
- * silences everything downstream and which nothing but reading the blocks back can find.</p>
+ * something else sounds, at a tick nobody wrote. A dead wire is wire the signal never crosses,
+ * which silences everything downstream and which nothing but reading the blocks back can find.</p>
  *
- * <p>Drawing rather than listing is the whole point, and it is ekran's. Two long passes went into
+ * <p>Drawing rather than listing is the whole point, and it is measured. Two long passes went into
  * reading {@code setblock} lists and reasoning about redstone rules for one dead wire and reached
- * the wrong explanation twice; ekran read the same fault off a single rendered slice immediately --
- * <i>"a wire on both sides of a block. a wire can't be soft powered"</i>. So the rule this class
- * exists to enforce is: draw it <b>before</b> forming a theory, and draw the shape rather than
- * quoting the coordinates.</p>
+ * the wrong explanation twice; in-game reading showed the same fault off a single rendered slice
+ * immediately: a wire on both sides of a block, and a wire cannot be soft powered. So the
+ * rule this class exists to enforce is: draw it <b>before</b> forming a theory, and draw the shape
+ * rather than quoting the coordinates.</p>
  *
  * <p>What to look for, per kind:</p>
  * <ul>
@@ -457,8 +457,8 @@ final class FaultView {
 		// This took the floor of whichever end was lower and drew {@code below..above} around that
 		// alone, so a fault whose two ends sit on different floors had one of them off the top of the
 		// picture -- and that is the case worth drawing, because a break that crosses a staircase is
-		// the one whose levels cannot be guessed from the text. ekran was handed a window of
-		// {@code y=65..70} for a break at {@code 5 73 7}: every block in the diagram was innocent and
+		// the one whose levels cannot be guessed from the text. A window of {@code y=65..70} was
+		// once drawn for a break at {@code 5 73 7}: every block in the diagram was innocent and
 		// the guilty one was three levels above the frame.
 		//
 		// Same mistake as drawing the dead-wire window on the notes' own z, which cost the first fault
@@ -646,7 +646,7 @@ final class FaultView {
 
 	// ---- odds and ends ------------------------------------------------------------------------
 
-	/** Space separated, because ekran pastes these straight into /tp. */
+	/** Space separated, because these are pasted straight into /tp. */
 	static String say(BlockPos at) {
 		return at.getX() + " " + at.getY() + " " + at.getZ();
 	}

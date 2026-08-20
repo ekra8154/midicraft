@@ -13,9 +13,9 @@ import org.junit.jupiter.api.Test;
  * One Guardian breach, in coordinates to stand in.
  *
  * <p>Finds every size that still breaches rather than working from a list, because the list keeps
- * moving and a stale one sends ekran to a config that is now clean. Ranked worst first, then the
- * worst single lane of the worst size is dumped whole: where it is, what the walk decided on the way
- * there, and the blocks around it.</p>
+ * moving and a stale one points at a config that is now clean. Ranked worst first, then the
+ * worst single lane of the worst size is dumped whole: where it is, what the walk decided on the
+ * way there, and the blocks around it.</p>
  *
  * <p>Paste at {@code 0 64 0} and every coordinate printed here is the coordinate in the world.
  * Space-separated, so a line goes straight into {@code /tp}.</p>
@@ -55,10 +55,10 @@ class GuardianReproTest {
 			System.out.println("   " + size.width() + "w x " + size.floors() + "f   worst="
 				+ size.worst() + " lanes=" + size.lanes() + " blocks=" + size.blocks());
 		}
-		// And ekran's own, which should say nothing.
+		// And the live, which should say nothing.
 		SongBuilder.PastePlan mine = SongBuilder.createPastePlan(new BlockPos(0, 64, 0), guardian,
 			SongBuilder.PasteMode.ULTRA_COMPACT_LANE, new SongBuilder.BuildLimits(16, 40, 5));
-		System.out.println("   40w x 5f (ekran's)   breaches=" + mine.breaches());
+		System.out.println("   40w x 5f (live)   breaches=" + mine.breaches());
 		if (dirty.isEmpty()) {
 			return;
 		}

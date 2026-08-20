@@ -139,7 +139,7 @@ class PrepadGrowthTest {
 		"as it is", "cap 1", "guard", "strict", "strict+cap 1", "strict+cap 2", "off"};
 
 	/**
-	 * The same three arms at ekran's own size, and read back through the machine.
+	 * The same three arms at the live size, and read back through the machine.
 	 *
 	 * <p>A sweep total says a build is smaller and says nothing about whether it fires. Turning the
 	 * prepad off moves chords, and a moved chord is exactly what puts a note on somebody else's tick
@@ -149,7 +149,7 @@ class PrepadGrowthTest {
 	@Test
 	void readsBackTheArmsWorthShipping() throws Exception {
 		System.out.println();
-		System.out.println("==== ekran's 40w x 5f, read back ====");
+		System.out.println("==== live config 40w x 5f, read back ====");
 		for (String arm : ARMS) {
 			arm(arm);
 			int lanes = 0;
@@ -220,10 +220,10 @@ class PrepadGrowthTest {
 		lines.sort((a, b) -> b.compareTo(a));
 		lines.forEach(System.out::println);
 		System.out.println("   clean " + clean + " of " + (clean + dirty));
-		// And ekran's own size, which is not in the grid above.
+		// And the live size, which is not in the grid above.
 		SongBuilder.PastePlan mine = SongBuilder.createPastePlan(new BlockPos(0, 64, 0), guardian,
 			SongBuilder.PasteMode.ULTRA_COMPACT_LANE, new SongBuilder.BuildLimits(16, 40, 5));
-		System.out.println("   40w x 5f (ekran's)   breaches=" + mine.breaches() + " unreached="
+		System.out.println("   40w x 5f (live)   breaches=" + mine.breaches() + " unreached="
 			+ readAll(placeInWorld(mine)).unreachedNotes() + " wrong=" + mine.wrongNotes()
 			+ " length=" + mine.width());
 	}
@@ -231,7 +231,7 @@ class PrepadGrowthTest {
 	/**
 	 * Guardian at 44 wide over three floors, which is the breach the prepad was written for.
 	 *
-	 * <p>ekran's breach of eleven: a lane one column short of its wall with five blocks of wire,
+	 * <p>The breach of eleven: a lane one column short of its wall with five blocks of wire,
 	 * wanting one for the column and five for the climb. Taking the prepad away has to be measured
 	 * against the case it exists to fix, not only against the totals -- a change that wins on average
 	 * and loses the one build somebody went and stood in is not a win.</p>

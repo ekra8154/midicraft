@@ -13,14 +13,15 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * What the new verdict says about every song ekran actually has, at its own speed and at double.
+ * What the new verdict says about every song the library actually e, at its own speed and at
+ * double.
  *
  * <p>Two questions. The one that was asked: a song that builds today should still read buildable
  * and want one lane, and the same song at twice the timescale should read buildable and want two --
  * that is the whole claim of half-ticking, put in terms of the library rather than of a test song.
  * And the one that has to be asked whenever a verdict changes: how many songs does the new rule
- * judge differently at the speed they are saved at, because that is guidance ekran already relies
- * on and it moving quietly would be worse than it being wrong.</p>
+ * judge differently at the speed they are saved at, because that is guidance already relied on,
+ * and it moving quietly would be worse than it being wrong.</p>
  */
 @Tag("sweep")
 class HalfTickVerdictProbe {
@@ -74,8 +75,8 @@ class HalfTickVerdictProbe {
 	 * intervals, so what is measured is the interval: every gap between consecutive events, against
 	 * what the composition says that gap really is.</p>
 	 *
-	 * <p>Measured at double speed, because that is where a song ekran already has starts asking for
-	 * timing the repeater grid cannot hold. At its own speed a song of his is exact under both, and
+	 * <p>Measured at double speed, because that is where a song already in the library starts asking
+	 * for timing the repeater grid cannot hold. At its own speed such a song is exact under both, and
 	 * the two projections should agree to the millisecond -- which is worth printing too, since a
 	 * finer grid that moved a song already sitting on the coarse one would be a bug.</p>
 	 */

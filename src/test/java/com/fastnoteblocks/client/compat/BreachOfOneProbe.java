@@ -14,7 +14,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
-/** Scratch: the whole walk around ekran's single breach on Guardian at 44 wide over three floors. */
+/** Scratch: The whole walk around the single breach on Guardian at 44 wide over three floors. */
 @Tag("sweep")
 class BreachOfOneProbe {
 	@BeforeAll
@@ -130,7 +130,7 @@ class BreachOfOneProbe {
 		}
 	}
 
-	/** Which maxFloors ekran can leave alone and still get the wrong note. */
+	/** Which maxFloors a player can leave alone and still get the wrong note. */
 	@Test
 	void checksTheRepro() throws Exception {
 		List<SongBuilder.EventNote> notes = load("deltarune-ch-4-guardian");
@@ -156,7 +156,7 @@ class BreachOfOneProbe {
 		}
 	}
 
-	/** What is actually standing at the corner in each arm, in the coordinates ekran would /tp to. */
+	/** What is actually standing at the corner in each arm, in coordinates to /tp straight to. */
 	@Test
 	void dumpsTheCorner() throws Exception {
 		List<SongBuilder.EventNote> notes = load("deltarune-ch-4-guardian");
@@ -185,7 +185,7 @@ class BreachOfOneProbe {
 		}
 	}
 
-	/** Which build ekran is actually standing in: the two blocks, in every candidate config. */
+	/** Which build is the one being stood in: the two blocks, in every candidate config. */
 	@Test
 	void namesTheBuildFromTwoBlocks() throws Exception {
 		List<SongBuilder.EventNote> notes = load("deltarune-ch-4-guardian");

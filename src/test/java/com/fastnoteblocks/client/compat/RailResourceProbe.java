@@ -23,12 +23,12 @@ import org.junit.jupiter.api.Test;
 /**
  * What a two-rail run costs in blocks a player has to make, rather than in lanes.
  *
- * <p>Every other measurement of the runs asks about depth, because that is what ekran optimises for
- * space. This asks the other question: <i>"repeaters are very expensive in survival mode ... its
- * placing one every other block on the bottom rail and they never get used."</i> A run holds a
- * repeater in every column bar the one it opens on, where the plain lane holds one per module across
- * two columns -- so a run that buys no depth is straightforwardly worse, and one that buys a little
- * has a price nobody had ever put a number on.</p>
+ * <p>Every other measurement of the runs asks about depth, because that is what is optimised for
+ * space. This asks the other question: repeaters are expensive in survival mode, and a run places
+ * one every other block on the bottom rail where they never get used. A run holds a
+ * repeater in every column bar the one it opens on, where the plain lane holds one per module
+ * across two columns -- so a run that buys no depth is straightforwardly worse, and one that buys a
+ * little has a price nobody had ever put a number on.</p>
  *
  * <p>Every arm in one window, because the library grows between sessions and a number remembered
  * from last week is a number about a different library:</p>

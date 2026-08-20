@@ -11,7 +11,8 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * Why a chord of three comes out shaped like a bus, which ekran reads in game and cannot explain.
+ * Why a chord of three comes out shaped like a bus, which in-game reading shows in game and cannot
+ * explain.
  *
  * <p>One line can do it. A chord of three or fewer is {@code SMALL}, and where the lane is crowded
  * and the chord will not fit it falls back -- to the stacked front shape normally, and to a
@@ -23,9 +24,10 @@ import org.junit.jupiter.api.Test;
  *
  * <p>The stated reason is that a stacked module in a turn stands across the run rather than along
  * it. That is the same claim {@link SongBuilder#TURN_BAN_OUTLASTS} makes about the chord after a
- * turn, and ekran has already read it off the blocks once and doubted it: a turn's bus comes out of
- * its second bend running the new lane's way, so the cells behind the chord are collinear with it.
- * Whether it is still true here is a question with a number, so this counts rather than argues:</p>
+ * turn, and in-game testing has already read it off the blocks once and doubted it: a turn's bus
+ * comes out of its second bend running the new lane's way, so the cells behind the chord are
+ * collinear with it. Whether it is still true here is a question with a number, so this counts
+ * rather than argues:</p>
  *
  * <ul>
  *   <li>{@code smallBecameStacked} -- fell back and took the denser shape.</li>
@@ -117,7 +119,7 @@ class SmallChordShapeTest {
 							volume += plan.commands().size();
 						}
 					}
-					// The machine, at ekran's own size and at a narrow one where turns come thick.
+					// The machine, at the live size and at a narrow one where turns come thick.
 					for (int[] size : new int[][] {{40, 5}, {16, 3}}) {
 						unreached += BreachView.readBack(name, SongBuilder.createPastePlan(
 							new BlockPos(0, 64, 0), notes, SongBuilder.PasteMode.ULTRA_COMPACT_LANE,

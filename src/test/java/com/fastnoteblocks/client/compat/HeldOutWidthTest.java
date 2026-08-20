@@ -28,7 +28,7 @@ import org.junit.jupiter.api.Test;
  *
  * <p>So: the widths in between, which no change has ever been graded on. If the mode is really
  * sound the odd widths are unremarkable, and if it was fitted to the sweep they are where it shows.
- * ekran asked the question -- the sample is decently large, but it is the same sample.</p>
+ * That was the question asked -- the sample is decently large, but it is the same sample.</p>
  */
 class HeldOutWidthTest {
 	@BeforeAll

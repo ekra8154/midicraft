@@ -160,7 +160,7 @@ class LaneDriftProbe {
 					pastTolerance++;
 				}
 				// Counted apart, because they are different claims. A song at the speed it is saved
-				// at is one ekran would actually paste; the same song doubled is a stress case I made
+				// at is one that would actually be pasted; the same song doubled is a stress case made
 				// up. Reporting them together said "49 of 51 drift" about a library whose songs
 				// mostly do not have two lanes at all, which is a true sentence about the wrong set.
 				if (speedFactor == 1) {

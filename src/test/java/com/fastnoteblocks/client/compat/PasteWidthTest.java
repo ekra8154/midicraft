@@ -13,13 +13,13 @@ import org.junit.jupiter.api.Test;
 /**
  * A v2 paste is exactly as wide as the paste screen said it would be.
  *
- * <p>ekran's rule: <i>"if the slider on the paste screen shows 25 wide, thats how wide it will be
- * (not counting breaches)."</i> Every kind of turn now reaches exactly one column past its wall --
- * a descent's outer rung, a climb's glass, a flat turn's corner and the notes hanging off it -- and
+ * <p>The rule: a slider reading 25 wide means a paste 25 wide, breaches aside. Every kind of turn
+ * now reaches exactly one column past its wall -- a
+ * descent's outer rung, a climb's glass, a flat turn's corner and the notes hanging off it -- and
  * the column behind the first repeater is where the button goes. So a build with no breach spans
  * {@code width} columns, from one past the near wall to one past the far, and nothing at all stands
- * further out. See {@link SongBuilder#V2_WIDTH_IS_THE_PASTE_WIDTH},
- * {@link SongBuilder#CLIMB_STANDS_A_COLUMN_OUT} and {@link SongBuilder#FLAT_TURN_KEEPS_ITS_WIDTH}.</p>
+ * further out. See {@link SongBuilder#V2_WIDTH_IS_THE_PASTE_WIDTH}, {@link
+ * SongBuilder#CLIMB_STANDS_A_COLUMN_OUT} and {@link SongBuilder#FLAT_TURN_KEEPS_ITS_WIDTH}.</p>
  *
  * <p>Not tagged {@code sweep}: it is a regression, on builds that were clean when it was written.
  * A build that starts breaching fails it for the wrong reason, which is why the breach list is

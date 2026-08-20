@@ -11,11 +11,11 @@ import org.junit.jupiter.api.Test;
 /**
  * What the footprint preview costs, per mode and per size.
  *
- * <p>ekran: clicking through build sizes on Guardian used to answer in half a second to two seconds
+ * <p>Clicking through build sizes on Guardian used to answer in half a second to two seconds
  * and now sits for about a minute and a half. {@code BuildOptionsScreen} runs a whole
- * {@link SongBuilder#createPastePlan} for every click, so the preview costs exactly one build -- and
- * which build is the question this asks, because the ultra lane runs the walk twice and keeps the
- * better one while v2 runs it once.</p>
+ * {@link SongBuilder#createPastePlan} for every click, so the preview costs exactly one build --
+ * and which build is the question this asks, because the ultra lane runs the walk twice and keeps
+ * the better one while v2 runs it once.</p>
  */
 @Tag("sweep")
 class ForecastCostProbeTest {

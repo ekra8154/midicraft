@@ -11,8 +11,8 @@ import org.junit.jupiter.api.Test;
 /**
  * Scratch probe: the shortest spec that turns past the wall the way Do The Dance does at tick 668.
  *
- * <p>The shape to hit is a big bus that lands the lane flush on its wall having spent the wire, then
- * a small chord standing on the wall that wants to turn and has not the signal left to cut the
+ * <p>The shape to hit is a big bus that lands the lane flush on its wall having spent the wire,
+ * then a small chord standing on the wall that wants to turn and has not the signal left to cut the
  * staircase. Every other breach shape is noise here, so the search asks for exactly two columns.</p>
  */
 class WallTurnReproTest {
@@ -60,7 +60,7 @@ class WallTurnReproTest {
 	/**
 	 * The same three chords, started a column at a time further from the wall.
 	 *
-	 * <p>ekran's fix moves the chord before the bus a single column along the lane, and everything
+	 * <p>The fix moves the chord before the bus a single column along the lane, and everything
 	 * after it with them. Whether that is the column the lane needed is not worth another argument
 	 * from the plan: the walk will say. What is being read off is which way the lane has to slide,
 	 * since the arithmetic said one way and the blocks in the world said the other.</p>

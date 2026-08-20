@@ -18,14 +18,14 @@ import org.junit.jupiter.api.Test;
  * Giving a lane back the cut it was refused, where it cannot turn either.
  *
  * <p>The plan books a no-split bit when it has found a way to close a lane on a pad. Where the walk
- * then finds it cannot afford that pad, the lane has been told it may not cut and cannot turn, so it
- * lays its chord whole and comes to rest outside. ekran read one at Guardian 16 wide over four
- * floors: a chord of 24 with the cut sitting right there, shed and ready, thrown away for a pad of
- * one cell.</p>
+ * then finds it cannot afford that pad, the lane has been told it may not cut and cannot turn, so
+ * it lays its chord whole and comes to rest outside. In-game reading found one at Guardian 16 wide
+ * over four floors: a chord of 24 with the cut sitting right there, shed and ready, thrown away for
+ * a pad of one cell.</p>
  *
  * <p>Read back over the real songs and over a song of nothing but chords too big to cut plain,
- * because a change that moves which half of a chord lands on which side of a staircase is exactly the
- * change that silences a machine while every breach count improves.</p>
+ * because a change that moves which half of a chord lands on which side of a staircase is exactly
+ * the change that silences a machine while every breach count improves.</p>
  */
 @Tag("sweep")
 class VetoTakenBackTest {
@@ -192,7 +192,7 @@ class VetoTakenBackTest {
 		}
 		SongBuilder.PastePlan mine = SongBuilder.createPastePlan(new BlockPos(0, 64, 0), guardian,
 			SongBuilder.PasteMode.ULTRA_COMPACT_LANE, new SongBuilder.BuildLimits(16, 40, 5));
-		System.out.println("   40w x 5f (ekran's)   breaches=" + mine.breaches());
+		System.out.println("   40w x 5f (live)   breaches=" + mine.breaches());
 		SongBuilder.CUTS_WHEN_THE_VETOED_LANE_CANNOT_TURN = true;
 	}
 

@@ -14,9 +14,9 @@ import org.junit.jupiter.api.Test;
 /**
  * The second layout, against the first, on both songs that matter.
  *
- * <p>Not tagged {@code sweep}: this one is a regression. It asserts that the new mode builds at all,
- * that it plays -- no wrong note and no dead line, the latter read off the blocks -- and that it
- * still beats the old layout on the song it was designed for. The comparison numbers are printed
+ * <p>Not tagged {@code sweep}: this one is a regression. It asserts that the new mode builds at
+ * all, that it plays -- no wrong note and no dead line, the latter read off the blocks -- and that
+ * it still beats the old layout on the song it was designed for. The comparison numbers are printed
  * rather than asserted, because they are meant to move.</p>
  */
 class UltraLaneV2Test {
@@ -83,7 +83,7 @@ class UltraLaneV2Test {
 	/**
 	 * Every climb, descent and flat turn stands at its wall.
 	 *
-	 * <p>ekran's rule, and a regression rather than a measurement: a staircase set back inside the
+	 * <p>The rule, and a regression rather than a measurement: a staircase set back inside the
 	 * corridor stands in a column no other corridor's turn stands in, which is the one thing that
 	 * reaches into the lane alongside. The closing pad has been walked out to its wall since
 	 * {@link SongBuilder#PIN_DESCENTS}, and that is what this holds.</p>
@@ -91,8 +91,8 @@ class UltraLaneV2Test {
 	 * <p>The pin that walked a headed cut out to its wall came out on 2026-08-16, as a fossil of the
 	 * paster that could not cut everywhere, and nothing was put in its place: a cut that would fall
 	 * short takes a shorter head and fills the columns with its own notes, or gives the head up for a
-	 * plain cut, or is laid whole and the lane breaches. ekran, the same day: <em>"a lane may NOT turn
-	 * before it's allowed to ... I do not want ANY recessed climbs or descents"</em> -- a breach is
+	 * plain cut, or is laid whole and the lane breaches. The rule, restated the same day: a lane may
+	 * not turn before it is allowed to, and no climb or descent may be recessed -- a breach is
 	 * allowed where a recess is not, and no column of padding is allowed to buy either.</p>
 	 *
 	 * <p>Asserted on the count the walk takes from the block the staircase actually lands on, not on
@@ -139,7 +139,7 @@ class UltraLaneV2Test {
 			long length = 0;
 			// The length of the snake, which is the number worth watching. Width and depth move in
 			// jumps and depend on how many floors the config was handed; this moves whenever the build
-			// actually gets shorter. ekran's.
+			// actually gets shorter.
 			long columns = 0;
 			int recessed = 0;
 			for (int floors = 2; floors <= 5; floors++) {

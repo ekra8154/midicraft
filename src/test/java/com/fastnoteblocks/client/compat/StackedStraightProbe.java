@@ -14,11 +14,11 @@ import org.junit.jupiter.api.Test;
 /**
  * What the ultra lane's chord shapes are worth on a straight half-tick lane.
  *
- * <p>Two numbers, and the second is the one ekran asked for. Length, because a stacked module holds
- * seven notes in the two columns a bus spends on four. And stalls, because a bus's cells come out of
- * the fifteen a dust run reaches while a stacked module hands the signal on through a strongly
- * powered block -- so the wire past it starts again at full strength, and full strength is exactly
- * what the mirrored lane spends keeping level with its partner.</p>
+ * <p>Two numbers, and the second is the one asked for. Length, because a stacked module
+ * holds seven notes in the two columns a bus spends on four. And stalls, because a bus's cells come
+ * out of the fifteen a dust run reaches while a stacked module hands the signal on through a
+ * strongly powered block -- so the wire past it starts again at full strength, and full strength is
+ * exactly what the mirrored lane spends keeping level with its partner.</p>
  */
 @Tag("sweep")
 class StackedStraightProbe {

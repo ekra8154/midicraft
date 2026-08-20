@@ -10,13 +10,13 @@ import org.junit.jupiter.api.Test;
 /**
  * Guardian's remaining breaches, one page each, in the order they are worth looking at.
  *
- * <p>ekran's reading order, which is the point of this class: look at the blocks, work out how the
- * same notes could have been laid inside the rules without going outside, then ask why the walk did
- * not do that. A total cannot be read that way and neither can a fault string; the corridor can.</p>
+ * <p>The reading order, which is the point of this class: look at the blocks, work out how the same
+ * notes could have been laid inside the rules without going outside, then ask why the walk did not
+ * do that. A total cannot be read that way and neither can a fault string; the corridor can.</p>
  *
- * <p>Widest first, because a wide corridor that breaches is a bug and a narrow one may simply be too
- * small for the chord. 12 wide is skipped: it produces a build identical to 16 in every breach, so
- * something clamps the corridor to a floor of sixteen and the 12w rows are the same machine twice.</p>
+ * <p>Widest first, because a wide corridor that breaches is a bug and a narrow one may simply be
+ * too small for the chord. 12 wide is skipped: it produces a build identical to 16 in every breach,
+ * so something clamps the corridor to a floor of sixteen and the 12w rows are the same machine twice.</p>
  */
 @Tag("sweep")
 class GuardianBlitzTest {
@@ -37,7 +37,7 @@ class GuardianBlitzTest {
 	 * Which of these breaches the prepad was holding shut, and which it never touched.
 	 *
 	 * <p>Worth knowing before any of them is diagnosed. A breach the prepad used to cover is a breach
-	 * whose real answer is the better prepad ekran wants, and reasoning about it as though it were a
+	 * whose real answer is the better prepad wanted, and reasoning about it as though it were a
 	 * fresh bug is reasoning about the wrong thing. A breach present either way is the walk's own.</p>
 	 */
 	@Test
@@ -169,7 +169,7 @@ class GuardianBlitzTest {
 				+ " blocks=" + blocks + " worst=" + worst + " wrong=" + wrong + " refused=" + refused
 				+ " length=" + length + " volume=" + volume);
 		}
-		// And the machine, at ekran's own size and at the two Guardian configs the flag changes most.
+		// And the machine, at the live size and at the two Guardian configs the flag changes most.
 		System.out.println("   -- read back --");
 		for (boolean cuts : new boolean[] {false, true}) {
 			SongBuilder.CUTS_A_CHORD_THAT_FITS = cuts;
@@ -201,7 +201,7 @@ class GuardianBlitzTest {
 	/**
 	 * The shed bought as a cell of wire rather than as a column, across the library.
 	 *
-	 * <p>ekran's arithmetic says a chord of 28 can cut a descent if the head sheds its flank: six in
+	 * <p>The arithmetic says a chord of 28 can cut a descent if the head sheds its flank: six in
 	 * the head, twenty-two on the bus at eleven cells, no transition, staircase of four -- fifteen. It
 	 * can, and on a song of nothing but 28s the cuts go from five to forty-eight. Whether that is
 	 * <em>worth</em> anything is a different question, and it is this one.</p>
@@ -263,10 +263,10 @@ class GuardianBlitzTest {
 	/**
 	 * Padding a chord forward until it cuts, against telling the cutter to cut anyway.
 	 *
-	 * <p>They are two answers to one problem, and ekran's is the honest one: move the chord forward so
-	 * it really does overshoot, and the ordinary cut applies with the near half filling to the wall.
-	 * {@link SongBuilder#CUTS_A_CHORD_THAT_FITS} is the shortcut -- it skips the padding and forces the
-	 * division instead, which is why its near half ends wherever the chord ended.</p>
+	 * <p>They are two answers to one problem, and the is the honest one: move the chord forward so it
+	 * really does overshoot, and the ordinary cut applies with the near half filling to the wall.
+	 * {@link SongBuilder#CUTS_A_CHORD_THAT_FITS} is the shortcut -- it skips the padding and forces
+	 * the division instead, which is why its near half ends wherever the chord ended.</p>
 	 *
 	 * <p>So: does a deeper search let the shortcut go? {@link SongBuilder#CUT_PAD_COLUMNS} is 2, and a
 	 * chord smaller than its room can be short by a great deal more than two.</p>
@@ -368,7 +368,7 @@ class GuardianBlitzTest {
 	/**
 	 * How often the pad in front of a lane's last chord is wanted, and how often it happens.
 	 *
-	 * <p>The mechanism ekran drew is already in the walk: where the wire would die crossing the
+	 * <p>The mechanism drawn in game is already in the walk: where the wire would die crossing the
 	 * staircase, the columns that would have gone behind the chord go in front of it instead, so the
 	 * chord's own repeater stands between them and the turn. It is guarded on {@code !behindReaches},
 	 * which is exactly "only when the wire would die". So a lane that still dies with a gap in front

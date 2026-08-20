@@ -16,8 +16,8 @@ import org.junit.jupiter.api.Test;
  *
  * <p>A piston extends in three game ticks where every other component takes an even number, so a
  * signal put through one lands on the other parity and every repeater after it keeps it there. That
- * makes a note on an odd game tick buildable, and a note every game tick -- twenty a second -- rather
- * than the ten the machine plays now.</p>
+ * makes a note on an odd game tick buildable, and a note every game tick -- twenty a second --
+ * rather than the ten the machine plays now.</p>
  *
  * <p>Whether that is worth an architecture depends entirely on how real songs use it, and the
  * answer is already in the library: an NBS file carries its own tempo, so a song written at more
@@ -27,7 +27,7 @@ import org.junit.jupiter.api.Test;
  */
 @Tag("sweep")
 class OddTickDistributionProbe {
-	private static final Path SONGS = Path.of("C:", "Users", "ekran", "Downloads",
+	private static final Path SONGS = Path.of(System.getProperty("user.home"), "Downloads",
 		"fast-noteblocks-midi-tests");
 
 	@Test

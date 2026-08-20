@@ -142,7 +142,7 @@ class GameTickGridTest {
 		assertEquals(1, SongAnalysis.of(onRepeaters, true).lanesNeeded(),
 			"and the coarser one flattens it onto whole repeater ticks");
 
-		// The point of the whole thing, stated as the number ekran would hear: how far the song's
+		// The point of the whole thing, stated as the number a listener would hear: how far the song's
 		// own speed had to move to become buildable.
 		double keptSpeed = onGameTicks.tempoMicrosPerQuarter() / (double)song.tempoMicrosPerQuarter();
 		double lostSpeed = onRepeaters.tempoMicrosPerQuarter() / (double)song.tempoMicrosPerQuarter();

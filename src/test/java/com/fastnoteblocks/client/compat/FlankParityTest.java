@@ -23,7 +23,7 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * ekran's rule: a nudge is only owed when the flanks that would meet actually exist.
+ * The rule: a nudge is only owed when the flanks that would meet actually exist.
  *
  * <p>Touching lanes run opposite ways and the stacked slots fill front-first, so a chord of five
  * hangs no back flank at all and two of them a column apart never reach each other. The check did

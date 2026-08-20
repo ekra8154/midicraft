@@ -17,23 +17,23 @@ import org.junit.jupiter.api.Test;
 /**
  * What size of chord can still be cut, asked one size at a time and read back.
  *
- * <p>The ceilings in this file are quoted as arithmetic -- 22 notes for a plain cut at a descent, 27
- * for a headed one, 29 climbing -- and arithmetic is what the wire check makes, not what the builder
- * lays. So: a build of nothing but chords of that size, read through {@link NoteMachineReader}, with
- * the longest run counted off the commands. One size a line.</p>
+ * <p>The ceilings in this file are quoted as arithmetic -- 22 notes for a plain cut at a descent,
+ * 27 for a headed one, 29 climbing -- and arithmetic is what the wire check makes, not what the
+ * builder lays. So: a build of nothing but chords of that size, read through {@link
+ * NoteMachineReader}, with the longest run counted off the commands. One size a line.</p>
  *
- * <p><b>Climbs and descents are counted apart, on ekran's point, and it is the whole value of the
- * table.</b> They are different ceilings -- {@code turnCost} gives a climb {@code splitCells} 3 and a
- * descent 4, so {@code runCells = 1 + tail / 2 + splitCells <= 15} reaches 29 notes climbing and 27
- * descending -- and a column that sums them says nothing about either. Measured, descents cut 43
+ * <p><b>Climbs and descents are counted apart, on the point, and it is the whole value of the
+ * table.</b> They are different ceilings -- {@code turnCost} gives a climb {@code splitCells} 3 and
+ * a descent 4, so {@code runCells = 1 + tail / 2 + splitCells <= 15} reaches 29 notes climbing and
+ * 27 descending -- and a column that sums them says nothing about either. Measured, descents cut 43
  * chords of 27, five of 28 and <b>none</b> of 29; climbs cut 45 of 28, seven of 29 and none of 30.
  * The five descents at 28 are the shed form, which drops the transition cell and so makes 15 of a
  * sum that is otherwise 16.</p>
  *
  * <p><b>Flat turns are not in here at all</b>, and could not be: {@code headed} is only asked where
  * there is a staircase. A flat turn is walked rather than crossed -- the chord takes the corner and
- * carries on through the ordinary chord machinery, with no near half and far half to keep in step --
- * so it has no cut ceiling to measure and carries chords the other two cannot.</p>
+ * carries on through the ordinary chord machinery, with no near half and far half to keep in step
+ * -- so it has no cut ceiling to measure and carries chords the other two cannot.</p>
  */
 @Tag("sweep")
 class CutCeilingTest {

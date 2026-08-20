@@ -8,10 +8,10 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
-/** ekran's flat-turn breach: Guardian 15 wide over six floors, the lane through 15 81 379. */
+/** The flat-turn breach: Guardian 15 wide over six floors, the lane through 15 81 379. */
 @Tag("sweep")
 class BendCollisionTest {
-	/** ekran's, at {@code 15 81 379}. Sixteen wide over five floors. */
+	/** At {@code 15 81 379}. Sixteen wide over five floors. */
 	private static final int WIDE = Integer.getInteger("bend.w", 16);
 	private static final int TALL = Integer.getInteger("bend.f", 5);
 

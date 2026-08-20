@@ -488,7 +488,7 @@ public final class SongBuilder {
 	/**
 	 * Whether a build that collides is offered with its faults instead of refused.
 	 *
-	 * <p>ekran's, and on. Named as a switch rather than written straight into the catch because it is
+	 * <p>On. Named as a switch rather than written straight into the catch because it is
 	 * the only way to ask what a test was doing before this existed: a build that collides is a build
 	 * that used to throw, so every probe and assertion over one of them has changed shape, and
 	 * {@code -Dfault.set=OFFER_ON_COLLISION=false} is what tells a fault this uncovered apart from a
@@ -949,7 +949,7 @@ public final class SongBuilder {
 	 * <p>Ranked the way the faults are worth caring about and not the way they are easy to count. A
 	 * wrong note is a song that plays wrong and outranks everything. Then breaches, in columns
 	 * rather than lanes, because the ground a lane covers that it promised not to is the thing
-	 * ekran finds in the world. Length last, and only as a tie-break: a shorter build that breaches
+	 * found in the world. Length last, and only as a tie-break: a shorter build that breaches
 	 * is not a better build.</p>
 	 *
 	 * <p>The tie going to the incumbent is the point rather than a detail. A move that has to be
@@ -1020,7 +1020,7 @@ public final class SongBuilder {
 	 *
 	 * <p>{@link #HALF_TICK_LANE_STACKS} ends that. A stacked module relays through two blocks in its
 	 * <em>outer</em> columns, so a lane's live cells are no longer only its middle one, and two lanes
-	 * touching would sound each other's notes -- the fault ekran's copper bulbs caught in the ultra
+	 * touching would sound each other's notes -- the fault the copper bulbs caught in the ultra
 	 * lane the one time its rule was removed. Four puts a column of air between the two lanes'
 	 * outermost blocks, which is the spacing the ultra lane uses and the spacing of the world the
 	 * stacked module was taken from.</p>
@@ -1043,13 +1043,13 @@ public final class SongBuilder {
 	 * signal on through its centre block, which the module's own repeater powers strongly, so the
 	 * wire beyond it starts again at full strength. That is exactly the budget the mirrored lane
 	 * spends catching up, which is why this makes the lanes easier to hold together and not merely
-	 * shorter. ekran asked for both.</p>
+	 * shorter. Both were asked for.</p>
 	 *
 	 * <p>It moves the lanes apart, and that is not optional. A bus keeps every live cell in its
 	 * middle column, which is what made two lane centres three apart safe -- what met across the
 	 * join was note blocks and the instrument blocks under them, and neither passes power on. A
 	 * stacked module's outer columns are live: the two blocks its dust cross relays through sit
-	 * there. Two of those a column apart would sound each other's notes, which is the fault ekran's
+	 * there. Two of those a column apart would sound each other's notes, which is the fault the
 	 * copper bulbs caught in the ultra lane the one time the rule was taken out. Four apart is what
 	 * the ultra lane uses and what the world it was taken from used.</p>
 	 */
@@ -1063,7 +1063,7 @@ public final class SongBuilder {
 	 * lane closes a gap a module at a time and only with what its dust run has left over, so the
 	 * tolerance is where the padding starts rather than where the drift stops.</p>
 	 *
-	 * <p>ekran's number, and the trade it buys is length: every padded column is a column the build
+	 * <p>The number, and the trade it buys is length: every padded column is a column the build
 	 * grows by and no note sounds from.</p>
 	 */
 	static int HALF_TICK_LANE_TOLERANCE = 16;
@@ -1071,7 +1071,7 @@ public final class SongBuilder {
 	/**
 	 * Whether a lane copies the other's advance while it waits, instead of chasing it afterwards.
 	 *
-	 * <p>ekran's, and it replaces an argument about tolerances with an identity. Both lanes are known
+	 * <p>This replaces an argument about tolerances with an identity. Both lanes are known
 	 * in full before a block is laid, so a lane with nothing to play does not have to guess where its
 	 * partner will get to -- it can lay the same number of columns the partner just laid, carrying its
 	 * own signal and sounding nothing. Do that at every event and the two are not within sixteen
@@ -1215,7 +1215,8 @@ public final class SongBuilder {
 	 * where they are. Where one lane carries almost all the song -- Aria Math splits 1,693 events
 	 * against 22 -- the quiet lane's cursor is thousands of columns behind at every moment, so a
 	 * stream in time order jumps the length of the build and back for each of its twenty-two
-	 * events. ekran could not paste it: blocks aimed at chunks nobody had loaded never arrived, and
+	 * events. It could not be pasted at all: blocks aimed at chunks nobody had loaded never
+	 * arrived, and
 	 * whole passages came out missing.</p>
 	 *
 	 * <p>Nothing about the machine depends on the order, so this is free -- a setblock is a setblock
@@ -1354,12 +1355,12 @@ public final class SongBuilder {
 		 * which is the one thing this layout may not do. Biasing both by the same tick costs the
 		 * build one cell and keeps them in step whatever the song opens on.
 		 *
-		 * <p>Mirroring costs one more, on both lanes alike. A lane that spends its opening waiting
-		 * lays wire before it lays anything else, and a machine that begins with bare dust has no
-		 * way in -- {@link NoteMachineReader} looks for a repeater nothing feeds and finds none, and
-		 * ekran has nowhere obvious to tap the input either. So the mirror opens on a repeater, and
-		 * the extra tick is what buys it. Charged to both lanes because a tick charged to one is the
-		 * one fault this layout cannot survive.</p>
+		 * <p>Mirroring costs one more, on both lanes alike. A lane that spends its opening waiting lays
+		 * wire before it lays anything else, and a machine that begins with bare dust has no way in --
+		 * {@link NoteMachineReader} looks for a repeater nothing feeds and finds none, and in-game
+		 * testing has nowhere obvious to tap the input either. So the mirror opens on a repeater, and the
+		 * extra tick is what buys it. Charged to both lanes because a tick charged to one is the one
+		 * fault this layout cannot survive.</p>
 		 */
 		private int currentTime;
 		/**
@@ -1505,7 +1506,7 @@ public final class SongBuilder {
 				// forced into, so that shedding eagerly now cannot strand the wire later.
 				int reserve = (columns - placed - 1 + MAX_BUS_LENGTH) / (MAX_BUS_LENGTH + 1);
 				// The lane's first cell is a repeater whatever else is true, so that the machine has
-				// a way in: the reader follows repeaters nothing feeds, and ekran taps his input at
+				// a way in: the reader follows repeaters nothing feeds, and an input is tapped at
 				// the same place. One tick, and the shared bias is what paid for it.
 				boolean due = sinceRepeater >= MAX_BUS_LENGTH || !opened;
 				if (!due && allowance < 4 + reserve) {
@@ -1682,8 +1683,8 @@ public final class SongBuilder {
 	 * then every kind of turn has grown a shape of its own: a descent pokes one column out, a climb
 	 * none, a corner one and the notes hanging off it two, and the first repeater stands on the wall
 	 * with the button behind it -- so the outline of a build was ragged and the number on the screen
-	 * matched none of it. ekran: <i>"if the slider on the paste screen shows 25 wide, thats how wide
-	 * it will be (not counting breaches)."</i></p>
+	 * matched none of it. The requirement is plain: a slider reading 25 wide means a paste 25
+	 * wide, breaches aside.</p>
 	 *
 	 * <p>Normalised to the descent and the button, which are both one column past the wall. That is
 	 * {@link #CLIMB_STANDS_A_COLUMN_OUT} for the climb and {@link #FLAT_TURN_KEEPS_ITS_WIDTH} for the
@@ -1711,9 +1712,9 @@ public final class SongBuilder {
 	 * the corner, and left where it was otherwise.
 	 *
 	 * <p>The corner stands one column past the wall, and a chord riding it hangs its second note two
-	 * out -- the one thing in a build that reached that far. ekran's rule, resolved per turn: <i>"if
-	 * it has any hanging notes on the outside of the perpendicular ... end 1 block less than it does
-	 * right now. otherwise, the flat turn can stay where it is."</i></p>
+	 * out -- the one thing in a build that reached that far. The rule, resolved per turn: where the
+	 * turn has hanging notes on the outside of the perpendicular it ends one block shorter than it
+	 * does now, and otherwise the flat turn stays where it is.</p>
 	 *
 	 * <p>Decided in two halves, because which chords will ride a turn is only known once they are
 	 * laid. The walk guesses first, from the arithmetic of the chords ahead of it -- see
@@ -1755,8 +1756,8 @@ public final class SongBuilder {
 	 * was written when the handover column was reserved and the reserve made up the difference; with
 	 * the reserve at nought ({@link #RESERVES_THE_HANDOVER_COLUMN} off since e0ab7b1) the path column
 	 * landed on the wall column and the staircase stood one out. Every song of small chords in the
-	 * library was breaching by one, several lanes a build -- lady brown 0 to 31 blocks -- and ekran
-	 * read it as breaches being "really bad right now".</p>
+	 * library was breaching by one, several lanes a build -- lady brown 0 to 31 blocks -- which
+	 * read in game as a bad regression in breaches.</p>
 	 */
 	static boolean RAIL_LEAVES_THE_WALL_COLUMN = true;
 
@@ -1778,7 +1779,7 @@ public final class SongBuilder {
 	 * past the wall, and the census read every one of them as a breach of exactly two -- five over
 	 * the library before every lane opened on its wall column, thirty after. Turning first hands the
 	 * chord to the cut, which is what a chord that will not fit gets everywhere else in v2. Kept
-	 * apart so the two can be measured apart: this one changes a decision ekran took for the
+	 * apart so the two can be measured apart: this one changes a decision taken for the
 	 * descent on its own numbers, and the numbers are the argument.</p>
 	 */
 	static boolean FLUSH_HEAD_TURNS_BEFORE_A_DESCENT = true;
@@ -1889,7 +1890,7 @@ public final class SongBuilder {
 		// sideways run it has just left -- the corner behind it rather than under it, near enough to
 		// be the same problem -- so the restriction outlasts the turn by exactly one chord.
 		//
-		// Ekran doubts that reason and the blocks are on their side. A turn's bus comes out of the
+		// That reason is doubtful, and the blocks agree. A turn's bus comes out of the
 		// second bend running the new lane's way, so by the time this chord is placed the cells
 		// behind it are collinear with it, not across it: Kick Back's turn at tick 340 is nine cells,
 		// bends after one and after four, so its last five run along x on the new z and the chord at
@@ -1937,8 +1938,8 @@ public final class SongBuilder {
 		// How many blanks this run has laid one after another, so that a floor rail carrying nothing
 		// stops rather than being paid for to the end of the lane. See {@link #RAIL_BLANKS_IN_A_ROW}.
 		int railBlanksRunning = 0;
-		// And whether the floor rail has held a chord yet at all. A run that has never got one down
-		// there is the one ekran read off lady brown, and the only one where the blank is not paying
+		// And whether the floor rail has held a chord yet at all. A run that has never got one down there
+		// is the one in-game reading found off lady brown, and the only one where the blank is not paying
 		// for itself: once the floor rail is carrying, breaking the run costs a whole fresh head.
 		boolean railFloorCarried = false;
 		// MEASURE(barren): what this run has spent and what it has to show for it.
@@ -2000,7 +2001,7 @@ public final class SongBuilder {
 				// that is a chord of twenty-four landing flush against the wall with the column its
 				// own turn reserve asked for already spent, three blocks of wire left, and a
 				// staircase wanting five: the lane cannot turn, cannot cut, and runs seven columns
-				// out. Ekran found it in a vertical slice.
+				// out. In-game testing found it in a vertical slice.
 				laneStarted = placedWhileTurning;
 				placedWhileTurning = false;
 				// How far from the corner, not whether the last chord was in the bend.
@@ -2009,7 +2010,7 @@ public final class SongBuilder {
 				// which lies perpendicular to it. It is the chord standing *on* the turn -- the one
 				// inTurn converts to a plain bus -- hanging its notes along the corner. So how far
 				// that reaches is a distance, and asking "did the route just stop bending" answers a
-				// question about the route rather than about the blocks. ekran: this chord is already
+				// question about the route rather than about the blocks. In practice this chord is already
 				// well out of the bend, and four blocks clear of a flat corner is enough for any chord
 				// to stand without collisions.
 				//
@@ -2155,37 +2156,34 @@ public final class SongBuilder {
 			// A descent lands where it cannot be built on straight away and spends a block stepping
 			// off, which is a block the chord could have used.
 			int stepOff = stepOffAhead;
-			// Only ahead of a staircase now. A flat turn is walked rather than crossed, so a chord that
-			// will not fit before it is not cut in two: the walk takes the corner and carries on laying
-			// the same chord along the sideways run, which is the cut done by the ordinary machinery
-			// and without a near half and a far half to keep in step.
-			// The whole run and nothing more: both halves of the chord, and the staircase between
-			// them, reaching from the repeater this module opens with to the next one. There is no
-			// further cell to charge at the far end. A carried module hands back the cell after its
-			// last bus block, and the next module stands its repeater on that cell a level up --
-			// which puts the repeater against the bus, not a block short of it. This once carried a
-			// cell for that gap and the gap is not there; it cost 256 lanes their wall to buy
-			// nothing. Ekran built the descent by hand and counted the wire through it: eight cells
-			// of bus, six of staircase, one cell more, and the last of them still reads one.
-			// Asked of the overshoot and not of {@code wantsTurn}, which is the same question plus
-			// "and this lane already holds something". That extra clause is there to stop a lane
-			// turning the instant it opens, and it has no business here: a split *builds* -- it fills
-			// the columns to the wall with the near half of the chord before it turns -- so it always
-			// makes progress and can never loop. Charging it that clause meant the first event of a
-			// lane could not be cut, and the first event of a lane is exactly the one that lands
-			// wherever the staircase happened to put it. A chord needing eight columns opened on a
-			// lane with seven and was laid anyway, a column past the wall. Ekran found it as the
-			// second of two breaches on Kick Back, and it is the same exemption that put the old
-			// build seven columns out.
-			// Charged at what a split's own crossing costs, which is not the turn plus the step off
-			// any more. A split always arrives on a bus, and a descent that may assume that is four
-			// cells rather than six -- see {@link #addSplitBusDescent}. The same sum is made in
-			// {@link #closes}, and the two have to be the same sum: a lane the planner closes by a
-			// cut and the walk refuses to cut is a lane that runs on past its wall.
-			// The head carries seven for nothing, so a chord too big to cut as a plain bus may
-			// still be cuttable with one. Asked first, and the plain sum is what is left when the
-			// chord cannot take a head -- too many falling instruments, no harp for the centre, or
-			// no room for a head and a cell of bus before the wall.
+			// Only ahead of a staircase now. A flat turn is walked rather than crossed, so a chord that will
+			// not fit before it is not cut in two: the walk takes the corner and carries on laying the same
+			// chord along the sideways run, which is the cut done by the ordinary machinery and without a
+			// near half and a far half to keep in step. The whole run and nothing more: both halves of the
+			// chord, and the staircase between them, reaching from the repeater this module opens with to
+			// the next one. There is no further cell to charge at the far end. A carried module hands back
+			// the cell after its last bus block, and the next module stands its repeater on that cell a
+			// level up -- which puts the repeater against the bus, not a block short of it. This once
+			// carried a cell for that gap and the gap is not there; it cost 256 lanes their wall to buy
+			// nothing. In-game testing built the descent by hand and counted the wire through it: eight
+			// cells of bus, six of staircase, one cell more, and the last of them still reads one. Asked of
+			// the overshoot and not of {@code wantsTurn}, which is the same question plus "and this lane
+			// already holds something". That extra clause is there to stop a lane turning the instant it
+			// opens, and it has no business here: a split *builds* -- it fills the columns to the wall with
+			// the near half of the chord before it turns -- so it always makes progress and can never loop.
+			// Charging it that clause meant the first event of a lane could not be cut, and the first event
+			// of a lane is exactly the one that lands wherever the staircase happened to put it. A chord
+			// needing eight columns opened on a lane with seven and was laid anyway, a column past the wall.
+			// In-game testing found it as the second of two breaches on Kick Back, and it is the same
+			// exemption that put the old build seven columns out. Charged at what a split's own crossing
+			// costs, which is not the turn plus the step off any more. A split always arrives on a bus, and
+			// a descent that may assume that is four cells rather than six -- see {@link
+			// #addSplitBusDescent}. The same sum is made in {@link #closes}, and the two have to be the same
+			// sum: a lane the planner closes by a cut and the walk refuses to cut is a lane that runs on
+			// past its wall. The head carries seven for nothing, so a chord too big to cut as a plain bus
+			// may still be cuttable with one. Asked first, and the plain sum is what is left when the chord
+			// cannot take a head -- too many falling instruments, no harp for the centre, or no room for a
+			// head and a cell of bus before the wall.
 			StackedSplit headed = layout.ultra() && cutOffered && index > 0 && above >= 0
 				&& above < floors
 				? stackedSplitOf(event.notes(), room, splitCells, climb > 0,
@@ -2228,7 +2226,7 @@ public final class SongBuilder {
 			//
 			// A cut opens on a repeater and is handed the whole fifteen, so there is no question of
 			// the wire reaching -- which is the other thing that stops an ordinary chord nudging.
-			// Ekran found this on Do The Dance at forty wide over eight floors: a chord of
+			// In-game testing found this on Do The Dance at forty wide over eight floors: a chord of
 			// twenty-four that would not cut, and a lane five columns past its wall for want of one.
 			boolean splitNudge = false;
 			boolean splitClashed = false;
@@ -2238,7 +2236,7 @@ public final class SongBuilder {
 				// And the same question the chord nudge is asked: does the wire still reach. This
 				// nudge lays a cell of dust where the head's repeater would have stood, on top of the
 				// delay about to be laid in front of it -- so what has to fit is the run so far, the
-				// delay, and the pad. ekran found this one from the blocks: the module really did
+				// delay, and the pad. In-game testing found this one from the blocks: the module really did
 				// have to move, and moving it put its repeater a cell past the wire.
 				//
 				// Asked before the delay exists, so the delay is added by hand. Where a repeater
@@ -2366,10 +2364,10 @@ public final class SongBuilder {
 			// Where it does not, the lane has been told it may not cut *and* cannot turn, so it does
 			// neither and walks out past its wall carrying the chord whole.
 			//
-			// ekran found one at Guardian 16 wide over four floors, {@code 20 77 148}: a chord of 24
-			// at {@code x=13} with the wall at 15, {@code headed=0+18} and {@code couldSplit=true} --
-			// the cut was there, already shed, and the veto threw it away for a pad of one cell with
-			// four blocks of wire, which {@code reachesWall} then refused. Ten columns outside.
+			// In-game testing found one at Guardian 16 wide over four floors, {@code 20 77 148}: a chord of
+			// 24 at {@code x=13} with the wall at 15, {@code headed=0+18} and {@code couldSplit=true} -- the
+			// cut was there, already shed, and the veto threw it away for a pad of one cell with four blocks
+			// of wire, which {@code reachesWall} then refused. Ten columns outside.
 			//
 			// Asked here rather than where {@code split} is first worked out, because this is the
 			// first line at which the walk knows whether the plan's alternative is open to it.
@@ -2392,10 +2390,10 @@ public final class SongBuilder {
 			if (layout.ultra() && wantsTurn && canTurn && columns < 0) {
 				placements.breached(-columns);
 			}
-			// Every chord standing outside the footprint, not only the ones that asked to turn.
-			// A chord that does not overshoot prints nothing on the old condition, and a lane already
-			// past its wall can lay several of those in a row -- which is exactly the run ekran has
-			// been reading in game and the old trace could not see.
+			// Every chord standing outside the footprint, not only the ones that asked to turn. A chord that
+			// does not overshoot prints nothing on the old condition, and a lane already past its wall can
+			// lay several of those in a row -- which is exactly the run in-game testing has been reading in
+			// game and the old trace could not see.
 			if (TRACE_TURNS && layout.ultra() && (wantsTurn || columns < 0)) {
 				System.out.println("PAST t=" + event.time() + " notes=" + event.notes().size()
 					+ " columns=" + columns + " overshoots=" + overshoots
@@ -2480,7 +2478,8 @@ public final class SongBuilder {
 					headed = new StackedSplit(
 						onTheFreeSlots(placements, opening, travel, depth, event.time(),
 							headed.slots(), headed.shed() ? DESCENT_FLANK_SLOT : -1),
-						headed.head(), headed.nearTail(), headed.farTail(), headed.shed());
+						headed.head(), headed.nearTail(), headed.farTail(), headed.shed(),
+						headed.centreFeeds(), headed.centreToFront());
 					cursor = addStackedSplitModule(placements, opening, travel, depth,
 						trigger.triggerDelay(), headed, event.time());
 					far = headed.farTail();
@@ -2498,7 +2497,7 @@ public final class SongBuilder {
 				// the CHORD line -- the one place the trace says what a chord was planned as, what it came
 				// out as, and why it gave the shape up. Every chord laid across a staircase was therefore
 				// invisible, which is a whole class of the build: the shape that carries ten cells on one
-				// floor and one on the next is exactly the shape a lane closes on. ekran pointed at one and
+				// floor and one on the next is exactly the shape a lane closes on. One was pointed at and
 				// it could not be found at all, through three separate readings of the trace.
 				if (TRACE) {
 					System.out.println("SPLIT t=" + event.time() + " at " + trigger.cursor().getX() + ","
@@ -2578,8 +2577,8 @@ public final class SongBuilder {
 				// it, and asks a different question -- whether that chord may hang notes in the pair
 				// of slots behind its own repeater.
 				//
-				// ekran: after a cut the first chord's back flanks are always free, because a stacked
-				// head is never placed at the bottom of a cut. The code agrees with them everywhere
+				// The rule: after a cut the first chord's back flanks are always free, because a
+				// stacked head is never placed at the bottom of a cut. The code agrees everywhere
 				// else -- {@link #takesTheGapBehind} is {@code style.stacked() && ...} and the far half
 				// is laid as {@link ChordStyle#BUS} four lines above -- so every other site would
 				// answer false here. Two places deciding one thing, which is the bug this file keeps
@@ -2596,7 +2595,7 @@ public final class SongBuilder {
 			}
 			if (canTurn && wantsTurn) {
 				// The shape the lane actually came to rest on, against the wall it is turning at.
-				// This is the question ekran asked -- not what shapes a lane holds, but what shape
+				// This is the question that was asked -- not what shapes a lane holds, but what shape
 				// is standing in front of the staircase when it turns.
 				placements.padded("planLaneEndedOn" + lastStyle
 					+ (above >= 0 && above < floors ? (climb > 0 ? "Climb" : "Descent") : "Flat"));
@@ -2606,7 +2605,7 @@ public final class SongBuilder {
 				if (!pad.cells().isEmpty()) {
 					placements.moved(event.notes().size());
 				}
-				// ekran's: where the rest of the lane is nothing but wire up to the wall and then a
+				// Where the rest of the lane is nothing but wire up to the wall and then a
 				// climb, run that wire at bus height. It costs the same columns and the staircase then
 				// starts off a bus, which is two cells cheaper. Off a bus the run simply stays up; off
 				// anything else the first cell has to hold the path so the rest has a live wire to
@@ -2689,7 +2688,7 @@ public final class SongBuilder {
 					// powered stone -- not that it bends. A climb is glass and dust up two columns of
 					// the lane's own centre line; a descent spirals round a two-by-two column. Both
 					// carry the signal and neither hangs a note, so there is nothing there to be in
-					// the way. ekran, who has read both in game.
+					// the way. .
 					columnBehindBusy = !BACK_PAIR_FREE_AFTER_A_STAIRCASE;
 					// Planned here and not at the top of the next event, because this event is about to
 					// be built on the far side of the staircase -- it is the new lane's first chord.
@@ -2826,8 +2825,8 @@ public final class SongBuilder {
 			// to lose. A lane that could have afforded the first cannot afford the second, so it does
 			// not turn at all, lays the chord that beat it whole, and comes to rest past its wall.
 			//
-			// ekran read exactly that as a breach of eleven: one column short with five blocks of wire,
-			// wanting one and five where landing flush wants one and three.
+			// In-game reading showed exactly that as a breach of eleven: one column short with five blocks
+			// of wire, wanting one and five where landing flush wants one and three.
 			//
 			// Only upward from a pad the plan already asked for, and only while the wire covers it, so
 			// this can move a lane onto its wall and never off it.
@@ -2883,32 +2882,29 @@ public final class SongBuilder {
 			// And never mid-turn, where the wire runs across the corridor and a wall means nothing.
 			if (layout.ultra() && !turning && index > 0 && index + 1 < events.size()
 				&& (event.notes().size() + 1) / 2 + offBus <= DUST_RANGE) {
-				// Off the corner before a column of this is measured. A pad that opens with a repeater
-				// cannot stand one on a corner -- the repeater moves along and dust takes the corner --
-				// so a pad planned for eleven columns spends twelve, and the chord in front of it lands
-				// a column past the wall it was padded to meet. That column is spent either way: this
-				// walks off the corner now, where the arithmetic can see it, instead of inside
-				// emitPad where it cannot. Ekran found it as two breaches of exactly one on Kick Back,
-				// both on the event coming out of a turn, which is the only place a lane stands on a
-				// corner with a pad still to lay.
-				// Off the corner before a column of this is measured, and charged for. A pad that opens
-				// with a repeater cannot stand one on a corner -- the repeater moves along and dust
-				// takes the corner -- so a pad planned for eleven columns spends twelve, and the chord
-				// in front of it lands a column past the wall it was padded to meet. Ekran found that
-				// as two breaches of exactly one on Kick Back, both on the event coming out of a turn,
-				// which is the only place a lane stands on a corner with a pad still to lay.
-				// The charge is the point. Walking off the corner here and *not* taking it off the
-				// wire only moves the error: the column is still spent, the next pad is still planned
-				// as though it were not, and what was a breach becomes a run of sixteen. Measured both
-				// ways over the library -- nine breaches traded for nine dead builds, which is the
-				// wrong way round.
-				// Unless the wire cannot afford it and the two-swap turn can take the corner instead.
-				// That trade spends no column -- the corner ends up holding a note rather than dust --
-				// so where the cell walked off here is the one that runs the wire out, the swap is the
-				// difference between a lane that plays and a lane that does not. Ekran found it on the
-				// one-floor build of {@code ultra-limit-two-thirties}: a chord of thirty riding a
-				// turnaround, tip worth nought, and the cell spent here taking it to sixteen blocks of
-				// wire with the last at nothing.
+				// Off the corner before a column of this is measured. A pad that opens with a repeater cannot
+				// stand one on a corner -- the repeater moves along and dust takes the corner -- so a pad
+				// planned for eleven columns spends twelve, and the chord in front of it lands a column past
+				// the wall it was padded to meet. That column is spent either way: this walks off the corner
+				// now, where the arithmetic can see it, instead of inside emitPad where it cannot. In-game
+				// testing found it as two breaches of exactly one on Kick Back, both on the event coming out of
+				// a turn, which is the only place a lane stands on a corner with a pad still to lay. Off the
+				// corner before a column of this is measured, and charged for. A pad that opens with a repeater
+				// cannot stand one on a corner -- the repeater moves along and dust takes the corner -- so a
+				// pad planned for eleven columns spends twelve, and the chord in front of it lands a column
+				// past the wall it was padded to meet. In-game testing found that as two breaches of exactly
+				// one on Kick Back, both on the event coming out of a turn, which is the only place a lane
+				// stands on a corner with a pad still to lay. The charge is the point. Walking off the corner
+				// here and *not* taking it off the wire only moves the error: the column is still spent, the
+				// next pad is still planned as though it were not, and what was a breach becomes a run of
+				// sixteen. Measured both ways over the library -- nine breaches traded for nine dead builds,
+				// which is the wrong way round. Unless the wire cannot afford it and the two-swap turn can take
+				// the corner instead. That trade spends no column -- the corner ends up holding a note rather
+				// than dust -- so where the cell walked off here is the one that runs the wire out, the swap is
+				// the difference between a lane that plays and a lane that does not. In-game testing found it
+				// on the one-floor build of {@code ultra-limit-two-thirties}: a chord of thirty riding a
+				// turnaround, tip worth nought, and the cell spent here taking it to sixteen blocks of wire
+				// with the last at nothing.
 				//
 				// Asked only when the tip cannot pay, and that restraint is the whole of it. The swap
 				// is free in wire and not free in everything else: it moves a note onto a cell two
@@ -2975,7 +2971,7 @@ public final class SongBuilder {
 				// Which is not free, because a pad in front is not only wire. planPad buys a
 				// repeater when dust alone will not reach, and a repeater costs a tick out of the
 				// wait -- 1,071 of them over the library. Every one changes spentPadding, and so the
-				// next event's wait, and so where it lands. Ekran's reading: chord one pads, chord
+				// next event's wait, and so where it lands. The reading: chord one pads, chord
 				// two sees the room that bought and pads in turn, and a preference cascades down the
 				// lane as though it were a requirement.
 				Pad behind = planPad((laneWall - end) * travel.getStepX(), reached.tip(),
@@ -3002,7 +2998,7 @@ public final class SongBuilder {
 					// nothing at all means {@link #prePad} and the run disagree about how many columns
 					// short the wire is; asked for more than the wire could lay means the pad is
 					// abandoned wholesale where laying what it can would still have moved the chord.
-					// ekran has watched a lane die on a staircase with a gap in front of it, and this
+					// In-game testing has watched a lane die on a staircase with a gap in front of it, and this
 					// says which of the two was standing in the way.
 					placements.padded("padAheadWanted");
 					if (ahead == 0) {
@@ -3122,8 +3118,8 @@ public final class SongBuilder {
 					// blank between them cost the two columns the plain lane charges for the chord
 					// alone, so a stretch of them is the head's two columns thrown away and nothing
 					// gained. The run stops instead and the lane carries on plainly, which is what
-					// ekran asked for -- "it can just continue if it doesn't know it will be able to
-					// place a note there later".
+					// what was asked for: the lane may simply continue where it does not know whether a
+					// note can be placed there later.
 					// The opening question asked again, because the walk can find the answer has changed:
 					// {@link #railFloorChords} reads with no placements, so a floor column it counted on may
 					// turn out to be a cell a stacked module alongside has already taken.
@@ -3132,7 +3128,7 @@ public final class SongBuilder {
 					// and a spent head is not a reason to spend more. At the margin a blank pair is two
 					// columns for one chord, which is exactly what the plain lane charges -- so carrying on
 					// through blanks costs no depth at all, and costs a repeater a column. That is the whole
-					// of ekran's complaint, and it is why this is asked where a blank is about to be laid
+					// of the complaint, and it is why this is asked where a blank is about to be laid
 					// rather than where the run opened.
 					//
 					// Only while the floor rail has carried nothing at all. A run that has carried once has
@@ -3249,7 +3245,7 @@ public final class SongBuilder {
 			// is the one rule every repeater in the build obeys and so is applied where they are laid.
 			Lane opening = trigger.lane();
 			// Which way the wall at the end of this lane goes, recorded against the shape the chord
-			// came out as. Ekran noticed heads seemed never to appear on a lane ending in a climb,
+			// came out as. In-game testing noticed heads seemed never to appear on a lane ending in a climb,
 			// and a shape that can only be built going one way is a shape half of whose value is
 			// missing -- so it is counted rather than argued about.
 			boolean climbingLane = climb > 0;
@@ -3304,7 +3300,7 @@ public final class SongBuilder {
 			// A nudge spends a column the plan was not told about, so everything the plan still owes
 			// this lane is owed from a column further along than it thinks. Left alone, the lane
 			// arrives carrying pad that was measured to close a gap the nudge has already closed --
-			// and lands past the wall by exactly the columns nudged. Ekran found it on Big Shot at
+			// and lands past the wall by exactly the columns nudged. In-game testing found it on Big Shot at
 			// thirty-six wide: a stacked chord of six nudged, four chords later a pad of one was laid
 			// for a shortfall that no longer existed, and the bus behind it came to rest a column out.
 			//
@@ -3346,12 +3342,12 @@ public final class SongBuilder {
 			// reads through -- and that cell is the first of the fifteen, not a free block in front of
 			// them. Handing on the whole fifteen let a lane lay fifteen more cells after it and land
 			// the last one at nought, which is the exact width of a dead line: sixteen blocks of wire
-			// where the budget said fifteen. Ekran found it on Do The Dance.
+			// where the budget said fifteen. In-game testing found it on Do The Dance.
 			// A stacked module hands on the whole fifteen, exactly as a chord of three does. Its one
 			// cell of dust is the cross *underneath* the centre block, feeding the two side relays;
 			// the signal path over the top is repeater, centre block, next cell, and a centre block
 			// driven by a repeater is a solid block strongly powered, so the cell after it reads
-			// fifteen. Ekran measured it with lamps: fifteen lit from the module, in and out.
+			// fifteen. In-game testing measured it with lamps: fifteen lit from the module, in and out.
 			// A stacked-bus is the one shape that is both. Its head hands on the full fifteen the way
 			// any module does, and then its own transition and bus spend out of that before the next
 			// chord ever sees it -- so reading it as a module, which is what {@code !BUS} used to
@@ -3420,7 +3416,7 @@ public final class SongBuilder {
 		// sideways run it has just left -- the corner behind it rather than under it, near enough to
 		// be the same problem -- so the restriction outlasts the turn by exactly one chord.
 		//
-		// Ekran doubts that reason and the blocks are on their side. A turn's bus comes out of the
+		// That reason is doubtful, and the blocks agree. A turn's bus comes out of the
 		// second bend running the new lane's way, so by the time this chord is placed the cells
 		// behind it are collinear with it, not across it: Kick Back's turn at tick 340 is nine cells,
 		// bends after one and after four, so its last five run along x on the new z and the chord at
@@ -3540,7 +3536,7 @@ public final class SongBuilder {
 				// that is a chord of twenty-four landing flush against the wall with the column its
 				// own turn reserve asked for already spent, three blocks of wire left, and a
 				// staircase wanting five: the lane cannot turn, cannot cut, and runs seven columns
-				// out. Ekran found it in a vertical slice.
+				// out. In-game testing found it in a vertical slice.
 				laneStarted = placedWhileTurning;
 				placedWhileTurning = false;
 				// How far from the corner, not whether the last chord was in the bend.
@@ -3549,7 +3545,7 @@ public final class SongBuilder {
 				// which lies perpendicular to it. It is the chord standing *on* the turn -- the one
 				// inTurn converts to a plain bus -- hanging its notes along the corner. So how far
 				// that reaches is a distance, and asking "did the route just stop bending" answers a
-				// question about the route rather than about the blocks. ekran: this chord is already
+				// question about the route rather than about the blocks. In practice this chord is already
 				// well out of the bend, and four blocks clear of a flat corner is enough for any chord
 				// to stand without collisions.
 				//
@@ -3601,8 +3597,8 @@ public final class SongBuilder {
 					.equals(placements.climbFedFromCentre());
 			// Such a climb joins two rungs in exactly as one off a bus does, so it is off-bus for every
 			// question the turn asks -- and it costs one cell more, because the dust on the centre is part
-			// of the run where a bus's own last dust is not. ekran: "the ascent costs 4 and not 3, but it
-			// comes out the same since we gain +2 flanks on the bottom".
+			// of the run where a bus's own last dust is not. The ascent costs four and not three, and
+			// comes out the same for the two flanks gained at the bottom.
 			boolean turnsOffBus = endsOnBus(lastStyle, lastBusCells) || centreFeedsTheClimb;
 			int turnOffBusCells = centreFeedsTheClimb && !endsOnBus(lastStyle, lastBusCells)
 				? offBus + 1 : offBus;
@@ -3670,7 +3666,7 @@ public final class SongBuilder {
 			// be told a chord fitted, build it, and land a column past its own wall.
 			// Decided once, here, and then measured from the decision.
 			//
-			// This is the whole of ekran's complaint about v1 in one place. A chord's shape used to be
+			// This is the whole of the complaint about v1 in one place. A chord's shape used to be
 			// answered three times: {@link #chooseStyle} guessing at grouping time, {@link #landingOf}
 			// predicting from a different set of rules, and {@link #addChordModule} deciding for real
 			// when it came to build. Any two of them disagreeing is a lane measured for one shape and
@@ -3791,10 +3787,10 @@ public final class SongBuilder {
 			// been told". This was that arm. A chord ending on a bus, leaving three, needing three,
 			// read as stranding the turn.
 			//
-			// ekran found it on Guardian 24x3 at {@code 25 69 127}: thirteen columns of acacia and a
-			// stacked bus of twenty-four carried up to the next floor, which they then moved down by
-			// hand -- "it turns out the whole thing fits just perfectly. no modifications needed. it
-			// even connects onto the glass 3-ascent perfectly."
+			// In-game testing found it on Guardian 24x3 at {@code 25 69 127}: thirteen columns of acacia and
+			// a stacked bus of twenty-four carried up to the next floor, which they then moved down by hand
+			// -- "it turns out the whole thing fits just perfectly. no modifications needed. it even
+			// connects onto the glass 3-ascent perfectly."
 			//
 			// Written the same way the wall-reach test writes it fifteen hundred lines down, off the
 			// landing's own style and the sunken cell count, so the two cannot drift.
@@ -3827,9 +3823,9 @@ public final class SongBuilder {
 			// climb's second column is the cell beside its own, a level up -- sideways, against the
 			// slabs -- and a rigid module landing flush against the climb hangs a front note exactly
 			// under it. Glass over a note block is a note that cannot sound and, as the plan sees it, a
-			// collision: Guardian 24x4 at 25 65 138, a head's front flank under the staircase, ekran.
+			// collision: Guardian 24x4 at 25 65 138, a head's front flank under the staircase.
 			//
-			// ekran's answer, where the module's centre holds no note: climb straight off the centre.
+			// The answer, where the module's centre holds no note: climb straight off the centre.
 			// Dust on the centre carries the run diagonally up onto the first rung, the climb skips
 			// the two rungs a bus skips, the glass over the note is never laid, and the run costs four
 			// rather than three for the cell of dust. That is {@link #CLIMB_FED_FROM_A_FLUSH_CENTRE},
@@ -3938,11 +3934,11 @@ public final class SongBuilder {
 			// on the overshoot. It matters more here than there: v1 offers the cut on the overshoot and
 			// v2 offers it a column earlier, on {@code reaches}, so in v2 the reach test is a live way
 			// into the cut rather than a flag-gated one.
-			// Except where the turn ahead is flat, ekran's. The promise this guard protects is that the
+			// Except where the turn ahead is flat. The promise this guard protects is that the
 			// column in front of a run's last repeater gets its note, and it is a *staircase* that breaks
 			// it: the note lands a floor down running the other way while the repeater stays at the wall
 			// driving the staircase. A flat turn takes nothing away -- the route bends at that very
-			// column, so the promised cell is the corner and the note stands on it, which is ekran's
+			// column, so the promised cell is the corner and the note stands on it, which is the
 			// model 1 exactly. Whether everything downstream of wantsTurn copes with a live rail is the
 			// thing to measure; none of it has ever been asked to.
 			boolean overshoots = !turning && (railPhase < 0 || flatAhead)
@@ -3961,7 +3957,7 @@ public final class SongBuilder {
 			// Said to the builders, for the one shape that has to know. A simple tail is read by the
 			// repeater standing in front of it, and a lane that turns does not put one there -- it
 			// climbs, and the repeater is built at the top of the staircase, leaving the tail driving
-			// nothing. ekran read exactly that off a paste at 16 wide over three floors.
+			// nothing. In-game reading showed exactly that off a paste at 16 wide over three floors.
 			//
 			// Asked of {@code reaches} and not only of {@code wantsTurn}, which is a whole event too
 			// late: wantsTurn says *this* chord overshoots and so the lane turns before laying it, and
@@ -3989,14 +3985,14 @@ public final class SongBuilder {
 			// And the same question for a descent, which wants the opposite thing: not the centre's
 			// dust but the low slot beside it.
 			//
-			// A descent spirals round the four cells of a two-by-two column anchored where the lane
-			// comes to rest, a block down at each, and its second rung is {@code cursor.relative(depth)}
-			// -- which is one of the front pair a stacked module hangs in its own landing column. So a
-			// module that lands flush and a staircase that starts on it want the same two cells, and
-			// {@link #set} is first-writer-wins: the note gets there, the rung is silently skipped, and
-			// the wire steps two levels in one go into air. ekran read the pair of sea lanterns on
-			// Guardian at 24x3, {@code 33 68 171} and {@code 33 67 171}, with 13,254 notes dark behind
-			// them, and named the answer -- the flank is shed, not the shape.
+			// A descent spirals round the four cells of a two-by-two column anchored where the lane comes to
+			// rest, a block down at each, and its second rung is {@code cursor.relative(depth)} -- which is
+			// one of the front pair a stacked module hangs in its own landing column. So a module that lands
+			// flush and a staircase that starts on it want the same two cells, and {@link #set} is
+			// first-writer-wins: the note gets there, the rung is silently skipped, and the wire steps two
+			// levels in one go into air. In-game reading found the pair of sea lanterns on Guardian at 24x3,
+			// {@code 33 68 171} and {@code 33 67 171}, with 13,254 notes dark behind them, and named the
+			// answer -- the flank is shed, not the shape.
 			//
 			// Nought rather than the climb's one, because the two staircases meet the lane differently:
 			// a climb reads the dust in the column *before* the wall, a descent is anchored on the wall
@@ -4041,7 +4037,7 @@ public final class SongBuilder {
 			// Whether the descent at the end of this lane is going to seed the run below it, asked
 			// before the pad is planned because the pad is the only thing that can pay for it.
 			//
-			// ekran's, and it is the descent's whole difference from the climb's seed: what lands is a
+			// This is the descent's whole difference from the climb's seed: what lands is a
 			// block with dust over it and no repeater, so the wait has to have been spent *above* the
 			// drop. The pad is where it goes -- dust carries no delay down four rungs -- and the pad
 			// is told to keep back a tick for "the next event's own repeater", which is the very
@@ -4111,48 +4107,44 @@ public final class SongBuilder {
 			// A descent lands where it cannot be built on straight away and spends a block stepping
 			// off, which is a block the chord could have used.
 			int stepOff = stepOffAhead;
-			// Only ahead of a staircase now. A flat turn is walked rather than crossed, so a chord that
-			// will not fit before it is not cut in two: the walk takes the corner and carries on laying
-			// the same chord along the sideways run, which is the cut done by the ordinary machinery
-			// and without a near half and a far half to keep in step.
-			// The whole run and nothing more: both halves of the chord, and the staircase between
-			// them, reaching from the repeater this module opens with to the next one. There is no
-			// further cell to charge at the far end. A carried module hands back the cell after its
-			// last bus block, and the next module stands its repeater on that cell a level up --
-			// which puts the repeater against the bus, not a block short of it. This once carried a
-			// cell for that gap and the gap is not there; it cost 256 lanes their wall to buy
-			// nothing. Ekran built the descent by hand and counted the wire through it: eight cells
-			// of bus, six of staircase, one cell more, and the last of them still reads one.
-			// Asked of the overshoot and not of {@code wantsTurn}, which is the same question plus
-			// "and this lane already holds something". That extra clause is there to stop a lane
-			// turning the instant it opens, and it has no business here: a split *builds* -- it fills
-			// the columns to the wall with the near half of the chord before it turns -- so it always
-			// makes progress and can never loop. Charging it that clause meant the first event of a
-			// lane could not be cut, and the first event of a lane is exactly the one that lands
-			// wherever the staircase happened to put it. A chord needing eight columns opened on a
-			// lane with seven and was laid anyway, a column past the wall. Ekran found it as the
-			// second of two breaches on Kick Back, and it is the same exemption that put the old
-			// build seven columns out.
-			// Charged at what a split's own crossing costs, which is not the turn plus the step off
-			// any more. A split always arrives on a bus, and a descent that may assume that is four
-			// cells rather than six -- see {@link #addSplitBusDescent}. The same sum is made in
-			// {@link #closes}, and the two have to be the same sum: a lane the planner closes by a
-			// cut and the walk refuses to cut is a lane that runs on past its wall.
-			// The head carries seven for nothing, so a chord too big to cut as a plain bus may
-			// still be cuttable with one. Asked first, and the plain sum is what is left when the
-			// chord cannot take a head -- too many falling instruments, no harp for the centre, or
-			// no room for a head and a cell of bus before the wall.
-			// What kind of thing is behind, which is not the same question as whether the column is
-			// taken. That last argument says in its own docstring that it means *another stacked
-			// module's centre* -- the one case where both slots behind are gone rather than one -- and
-			// the walk was handing it {@code columnBehindBusy}, which is also true after a rail column,
-			// after a carried chord, after a staircase landing and anywhere within reach of a corner.
-			// So a cut standing behind a plain bus was refused the head of six that
-			// {@link #HEAD_KEEPS_ONE_BACK_FLANK} exists to give it, fell through to a head of five,
-			// could not make one of those either, and was laid whole. Both of Guardian's remaining
-			// breaches at 20 wide over three floors were that: {@code last=BUS behindBusy=true},
-			// {@code refused=NoHeadFromTheFront}, a chord of 24 with nine columns of room -- which a
-			// head of six cuts flush, at fourteen cells of the fifteen.
+			// Only ahead of a staircase now. A flat turn is walked rather than crossed, so a chord that will
+			// not fit before it is not cut in two: the walk takes the corner and carries on laying the same
+			// chord along the sideways run, which is the cut done by the ordinary machinery and without a
+			// near half and a far half to keep in step. The whole run and nothing more: both halves of the
+			// chord, and the staircase between them, reaching from the repeater this module opens with to
+			// the next one. There is no further cell to charge at the far end. A carried module hands back
+			// the cell after its last bus block, and the next module stands its repeater on that cell a
+			// level up -- which puts the repeater against the bus, not a block short of it. This once
+			// carried a cell for that gap and the gap is not there; it cost 256 lanes their wall to buy
+			// nothing. In-game testing built the descent by hand and counted the wire through it: eight
+			// cells of bus, six of staircase, one cell more, and the last of them still reads one. Asked of
+			// the overshoot and not of {@code wantsTurn}, which is the same question plus "and this lane
+			// already holds something". That extra clause is there to stop a lane turning the instant it
+			// opens, and it has no business here: a split *builds* -- it fills the columns to the wall with
+			// the near half of the chord before it turns -- so it always makes progress and can never loop.
+			// Charging it that clause meant the first event of a lane could not be cut, and the first event
+			// of a lane is exactly the one that lands wherever the staircase happened to put it. A chord
+			// needing eight columns opened on a lane with seven and was laid anyway, a column past the wall.
+			// In-game testing found it as the second of two breaches on Kick Back, and it is the same
+			// exemption that put the old build seven columns out. Charged at what a split's own crossing
+			// costs, which is not the turn plus the step off any more. A split always arrives on a bus, and
+			// a descent that may assume that is four cells rather than six -- see {@link
+			// #addSplitBusDescent}. The same sum is made in {@link #closes}, and the two have to be the same
+			// sum: a lane the planner closes by a cut and the walk refuses to cut is a lane that runs on
+			// past its wall. The head carries seven for nothing, so a chord too big to cut as a plain bus
+			// may still be cuttable with one. Asked first, and the plain sum is what is left when the chord
+			// cannot take a head -- too many falling instruments, no harp for the centre, or no room for a
+			// head and a cell of bus before the wall. What kind of thing is behind, which is not the same
+			// question as whether the column is taken. That last argument says in its own docstring that it
+			// means *another stacked module's centre* -- the one case where both slots behind are gone
+			// rather than one -- and the walk was handing it {@code columnBehindBusy}, which is also true
+			// after a rail column, after a carried chord, after a staircase landing and anywhere within
+			// reach of a corner. So a cut standing behind a plain bus was refused the head of six that
+			// {@link #HEAD_KEEPS_ONE_BACK_FLANK} exists to give it, fell through to a head of five, could
+			// not make one of those either, and was laid whole. Both of Guardian's remaining breaches at 20
+			// wide over three floors were that: {@code last=BUS behindBusy=true}, {@code
+			// refused=NoHeadFromTheFront}, a chord of 24 with nine columns of room -- which a head of six
+			// cuts flush, at fourteen cells of the fifteen.
 			//
 			// The ground cannot be asked here, and that was tried first. A head's back flanks stand in
 			// the column it opens on, and a cut may open a column further along than this -- the busy
@@ -4168,11 +4160,11 @@ public final class SongBuilder {
 					!columnBehindBusy || delayColumns > 0
 						|| CUT_ASKS_THE_BLOCKS_BEHIND
 							&& backPairIsFree(placements, lane.ahead(delayColumns), event.time()),
-					stackedIsBehind)
+					stackedIsBehind, true)
 				: null;
 			// Busy padding: one column spent so a chord can be cut at all.
 			//
-			// ekran's, and it is a different thing from a parity pad even though it lays the same cell.
+			// This is a different thing from a parity pad even though it lays the same cell.
 			// A parity pad moves a module so its slots land on a beat that works. This moves a module off
 			// the chord behind it, so the pair of slots behind comes free -- and with them the bigger head
 			// that is the difference between a chord that can be cut across the staircase and one that is
@@ -4206,7 +4198,7 @@ public final class SongBuilder {
 					// fired this 563 times over the library, 385 of them on chords of five. The chord
 					// must actually overshoot, which is the same gate the refusal counter uses.
 					&& wantsTurn
-					// And big enough that a column is the only thing left to try. ekran's, and the
+					// And big enough that a column is the only thing left to try. The
 					// reason is that everything smaller has other moves: it can cut plain, it can take
 					// a shorter head, it can be laid as a bus and let the lane turn after it. Gated on
 					// wantsTurn alone this still fired 211 times and only 11 of those were chords the
@@ -4218,7 +4210,7 @@ public final class SongBuilder {
 					// A column to spend, and the wire to lay it with. Both are what the pin will charge.
 					&& room >= 2 && placements.runSinceRepeater() + 1 <= DUST_RANGE) {
 				StackedSplit freed = stackedSplitOf(event.notes(), room - 1, splitCells, climb > 0,
-					true, false);
+					true, false, true);
 				if (freed != null) {
 					placements.padded("busyPadBoughtTheCut");
 					placements.padded("busyPadBoughtTheCutAt" + Math.min(event.notes().size(), 30) + "Notes");
@@ -4252,14 +4244,14 @@ public final class SongBuilder {
 				placements.padded("planStackedSplitShortHead");
 			}
 			// A headed cut used to be walked out to its wall by columns of pad, in front of the module
-			// and behind its near half -- {@code CUT_PINS_ITS_STAIRCASE}, removed at ekran's word on
-			// 2026-08-16: <em>"cut pinning is a fossil from the v1 paster. we can split any chord,
-			// anywhere, so it's unneeded now. all it's doing right now is adding unused space."</em>
+			// and behind its near half -- {@code CUT_PINS_ITS_STAIRCASE}, removed at the word on
+			// 2026-08-16: cut pinning is a fossil from the v1 paster. Any chord can be split anywhere
+			// now, so it is unneeded, and all it does is add unused space.
 			// Nothing replaced it and nothing is allowed to: a pad in front of the cut and a pad behind
 			// its near half are the same wire in the same corridor as the pin, whatever they are called.
 			//
 			// The rule the pin served is not repealed with it -- every climb, every descent and every
-			// flat turn stands at the wall, and ekran restated it the same day as absolute. What fills
+			// flat turn stands at the wall, and it was restated the same day as absolute. What fills
 			// the columns instead is the chord itself, decided a few lines below where the shape is
 			// measured against the room it has to fill.
 			// A cut whose head lands on the wrong parity is moved a column, not given up.
@@ -4275,7 +4267,7 @@ public final class SongBuilder {
 			//
 			// A cut opens on a repeater and is handed the whole fifteen, so there is no question of
 			// the wire reaching -- which is the other thing that stops an ordinary chord nudging.
-			// Ekran found this on Do The Dance at forty wide over eight floors: a chord of
+			// In-game testing found this on Do The Dance at forty wide over eight floors: a chord of
 			// twenty-four that would not cut, and a lane five columns past its wall for want of one.
 			boolean splitNudge = false;
 			boolean splitClashed = false;
@@ -4288,7 +4280,7 @@ public final class SongBuilder {
 				// And the same question the chord nudge is asked: does the wire still reach. This
 				// nudge lays a cell of dust where the head's repeater would have stood, on top of the
 				// delay about to be laid in front of it -- so what has to fit is the run so far, the
-				// delay, and the pad. ekran found this one from the blocks: the module really did
+				// delay, and the pad. In-game testing found this one from the blocks: the module really did
 				// have to move, and moving it put its repeater a cell past the wire.
 				//
 				// Asked before the delay exists, so the delay is added by hand. Where a repeater
@@ -4306,7 +4298,7 @@ public final class SongBuilder {
 						!columnBehindBusy || delayColumns + busyPad + 1 > 0
 							|| CUT_ASKS_THE_BLOCKS_BEHIND
 								&& backPairIsFree(placements, lane.ahead(delayColumns + busyPad + 1), event.time()),
-						stackedIsBehind);
+						stackedIsBehind, true);
 				if (shifted == null) {
 					// Both cells wrong, or nothing left to cut once a column is spent. Then the head
 					// goes, which is what this did in every case before.
@@ -4333,8 +4325,9 @@ public final class SongBuilder {
 			// module can hand over without the spare column a cut would have given it -- the dust on its
 			// centre is the handover. See {@link #CLIMB_OFF_A_STACKED_CENTRE}.
 			//
-			// ekran found it by repasting am-i-dreaming three times: "it still is a chord of 4, that is
-			// being cut, its still just a normal bus". The room test was never what refused it. This was.
+			// In-game testing found it by repasting am-i-dreaming three times: still a chord of four,
+			// still being cut, still coming out a plain bus. The room test was never what refused it.
+			// This was.
 			boolean stackedFitsInstead = CLIMB_OFF_A_STACKED_CENTRE && placements.climbAhead()
 				&& shaped.style().stacked() && !shaped.style().busHeaded()
 				&& (wall - here.end()) * lane.travel().getStepX() >= 0;
@@ -4347,7 +4340,7 @@ public final class SongBuilder {
 			}
 			// A cut fills the room it is given, or it is not this chord's cut.
 			//
-			// ekran's, 2026-08-16, and it is the rule the pin used to serve, stated without the pin and
+			// 2026-08-16, and it is the rule the pin used to serve, stated without the pin and
 			// without anything else laying a column either: a lane may not turn before it is allowed
 			// to, and no wire is to be spent buying it the right to. A headed cut sizes its near half
 			// out of what the chord had left after the head, so a chord whose tail runs out before the
@@ -4405,7 +4398,7 @@ public final class SongBuilder {
 					for (boolean stackedBehind : !CUT_SHORTENS_ITS_HEAD ? new boolean[] {}
 							: stackedIsBehind ? new boolean[] {true} : new boolean[] {false, true}) {
 						StackedSplit shorter = stackedSplitOf(event.notes(), roomLeft, splitCells,
-							climb > 0, false, stackedBehind);
+							climb > 0, false, stackedBehind, true);
 						if (shorter != null && roomLeft - shorter.columns() == 0) {
 							placements.padded("cutShortenedItsHead");
 							placements.padded("cutShortenedTo" + shorter.head().size());
@@ -4419,13 +4412,13 @@ public final class SongBuilder {
 					}
 				}
 			}
-			// ekran's third cut, for the chord that can be cut neither plain nor with a head: open it
-			// with a sunken note block instead. The repeater strongly powers the note block, the note
-			// block hands the next cell a fresh fifteen, and that cell is the descent's first rung --
-			// so the opening costs one column and no wire, carries three notes, and the run is
-			// 3 + 2 * (15 - 4) = 25 on a descent. Guardian 20x5 tick 1480: a chord of 24 with two
-			// columns, head found and clashing with nowhere to nudge, laid whole twelve columns
-			// out; ekran built the sunken cut by hand inside the emerald. See {@link #SUNKEN_CUTS}.
+			// The third cut, for the chord that can be cut neither plain nor with a head: open it with a
+			// sunken note block instead. The repeater strongly powers the note block, the note block hands
+			// the next cell a fresh fifteen, and that cell is the descent's first rung -- so the opening
+			// costs one column and no wire, carries three notes, and the run is 3 + 2 * (15 - 4) = 25 on a
+			// descent. Guardian 20x5 tick 1480: a chord of 24 with two columns, head found and clashing with
+			// nowhere to nudge, laid whole twelve columns out; in-game testing built the sunken cut by hand
+			// inside the emerald. See {@link #SUNKEN_CUTS}.
 			boolean plainCut = room >= 2 && room - 1 < cells && cells + splitCells <= DUST_RANGE;
 			SunkenCut sunken = null;
 			if (SUNKEN_CUTS && layout.ultra() && cutOffered && index > 0 && above >= 0
@@ -4440,7 +4433,7 @@ public final class SongBuilder {
 						+ "Notes");
 				}
 			}
-			// ekran's fourth cut, for the room of one: repeater, centre on the wall column, and the
+			// The fourth cut, for the room of one: repeater, centre on the wall column, and the
 			// front flanks on the border. No transition cell, so no head; no column for a sunken
 			// opening. The head's cross is the staircase's first rung -- one level below where the
 			// rung's dust would stand, on the centre column -- and the ring turns under the head from
@@ -4595,10 +4588,10 @@ public final class SongBuilder {
 			// Where it does not, the lane has been told it may not cut *and* cannot turn, so it does
 			// neither and walks out past its wall carrying the chord whole.
 			//
-			// ekran found one at Guardian 16 wide over four floors, {@code 20 77 148}: a chord of 24
-			// at {@code x=13} with the wall at 15, {@code headed=0+18} and {@code couldSplit=true} --
-			// the cut was there, already shed, and the veto threw it away for a pad of one cell with
-			// four blocks of wire, which {@code reachesWall} then refused. Ten columns outside.
+			// In-game testing found one at Guardian 16 wide over four floors, {@code 20 77 148}: a chord of
+			// 24 at {@code x=13} with the wall at 15, {@code headed=0+18} and {@code couldSplit=true} -- the
+			// cut was there, already shed, and the veto threw it away for a pad of one cell with four blocks
+			// of wire, which {@code reachesWall} then refused. Ten columns outside.
 			//
 			// Asked here rather than where {@code split} is first worked out, because this is the
 			// first line at which the walk knows whether the plan's alternative is open to it.
@@ -4617,10 +4610,10 @@ public final class SongBuilder {
 			if (layout.ultra() && wantsTurn && canTurn && columns < 0) {
 				placements.breached(-columns);
 			}
-			// Every chord standing outside the footprint, not only the ones that asked to turn.
-			// A chord that does not overshoot prints nothing on the old condition, and a lane already
-			// past its wall can lay several of those in a row -- which is exactly the run ekran has
-			// been reading in game and the old trace could not see.
+			// Every chord standing outside the footprint, not only the ones that asked to turn. A chord that
+			// does not overshoot prints nothing on the old condition, and a lane already past its wall can
+			// lay several of those in a row -- which is exactly the run in-game testing has been reading in
+			// game and the old trace could not see.
 			if (TRACE_TURNS && layout.ultra() && (wantsTurn || columns < 0)) {
 				System.out.println("PAST t=" + event.time() + " notes=" + event.notes().size()
 					+ " columns=" + columns + " overshoots=" + overshoots
@@ -4695,7 +4688,7 @@ public final class SongBuilder {
 				// collide outright, and a collision is a build the player is offered with a note that
 				// cannot sound. Now it is rolled back and the chord cut plain, where the plain cut can
 				// carry it; a plain cut's halves are buses, and a bus asks the ground for every slot and
-				// grows past one it cannot have. Every collision left in the library at ekran's sizes
+				// grows past one it cannot have. Every collision left in the library at the sizes
 				// was this one shape against that one slab. See {@link #HEADED_CUT_FALLS_TO_PLAIN}.
 				if (headed != null && HEADED_CUT_FALLS_TO_PLAIN) {
 					placements.beginTrial();
@@ -4740,7 +4733,8 @@ public final class SongBuilder {
 					headed = new StackedSplit(
 						onTheFreeSlots(placements, opening, travel, depth, event.time(),
 							headed.slots(), headed.shed() ? DESCENT_FLANK_SLOT : -1),
-						headed.head(), headed.nearTail(), headed.farTail(), headed.shed());
+						headed.head(), headed.nearTail(), headed.farTail(), headed.shed(),
+						headed.centreFeeds(), headed.centreToFront());
 					cursor = addStackedSplitModule(placements, opening, travel, depth,
 						headDelay, headed, event.time());
 					far = headed.farTail();
@@ -4864,7 +4858,7 @@ public final class SongBuilder {
 				// the CHORD line -- the one place the trace says what a chord was planned as, what it came
 				// out as, and why it gave the shape up. Every chord laid across a staircase was therefore
 				// invisible, which is a whole class of the build: the shape that carries ten cells on one
-				// floor and one on the next is exactly the shape a lane closes on. ekran pointed at one and
+				// floor and one on the next is exactly the shape a lane closes on. One was pointed at and
 				// it could not be found at all, through three separate readings of the trace.
 				if (TRACE) {
 					System.out.println("SPLIT t=" + event.time() + " at " + trigger.cursor().getX() + ","
@@ -4947,8 +4941,8 @@ public final class SongBuilder {
 				// it, and asks a different question -- whether that chord may hang notes in the pair
 				// of slots behind its own repeater.
 				//
-				// ekran: after a cut the first chord's back flanks are always free, because a stacked
-				// head is never placed at the bottom of a cut. The code agrees with them everywhere
+				// The rule: after a cut the first chord's back flanks are always free, because a
+				// stacked head is never placed at the bottom of a cut. The code agrees everywhere
 				// else -- {@link #takesTheGapBehind} is {@code style.stacked() && ...} and the far half
 				// is laid as {@link ChordStyle#BUS} four lines above -- so every other site would
 				// answer false here. Two places deciding one thing, which is the bug this file keeps
@@ -4965,7 +4959,7 @@ public final class SongBuilder {
 			}
 			if (canTurn && wantsTurn) {
 				// The shape the lane actually came to rest on, against the wall it is turning at.
-				// This is the question ekran asked -- not what shapes a lane holds, but what shape
+				// This is the question that was asked -- not what shapes a lane holds, but what shape
 				// is standing in front of the staircase when it turns.
 				placements.padded("planLaneEndedOn" + lastStyle
 					+ (above >= 0 && above < floors ? (climb > 0 ? "Climb" : "Descent") : "Flat"));
@@ -4975,7 +4969,7 @@ public final class SongBuilder {
 				if (!pad.cells().isEmpty()) {
 					placements.moved(event.notes().size());
 				}
-				// ekran's: where the rest of the lane is nothing but wire up to the wall and then a
+				// Where the rest of the lane is nothing but wire up to the wall and then a
 				// climb, run that wire at bus height. It costs the same columns and the staircase then
 				// starts off a bus, which is two cells cheaper. Off a bus the run simply stays up; off
 				// anything else the first cell has to hold the path so the rest has a live wire to
@@ -5069,7 +5063,7 @@ public final class SongBuilder {
 					// Offered to any climb, off a bus or off the path. It was gated to bus climbs for
 					// a while, to dodge the collision at the foot of the staircase -- a climb starting
 					// on the path laid its own stone and dust in the lane's column a block up, and the
-					// mirrored first rung's glass wanted that same cell. ekran, who read the wire in
+					// mirrored first rung's glass wanted that same cell. In-game testing, which read the wire in
 					// game: the signal travels through there correctly. And the gate cost the feature
 					// its whole reason for existing, since a song of chords of one to three never
 					// builds a bus to climb off -- which is exactly the song a free seed is for. The
@@ -5138,7 +5132,7 @@ public final class SongBuilder {
 					// one column back from here -- so the staircase joins it two rungs in just the same.
 					// And a lane that ended on a bus keeps its discount through a raised pad, which it
 					// never could through a pad laid on the path.
-					// The climb stays where the lane left it, mirrored or not. ekran read the mirror
+					// The climb stays where the lane left it, mirrored or not. In-game reading found the mirror
 					// as ending the lane a block earlier and it does -- the cell the lift used to hold
 					// is glass now -- but moving the staircase back to take that column is not the way
 					// out: the lane had already measured itself as owning it and laid music into a
@@ -5193,7 +5187,7 @@ public final class SongBuilder {
 					// powered stone -- not that it bends. A climb is glass and dust up two columns of
 					// the lane's own centre line; a descent spirals round a two-by-two column. Both
 					// carry the signal and neither hangs a note, so there is nothing there to be in
-					// the way. ekran, who has read both in game.
+					// the way. .
 					columnBehindBusy = !BACK_PAIR_FREE_AFTER_A_STAIRCASE;
 					// Planned here and not at the top of the next event, because this event is about to
 					// be built on the far side of the staircase -- it is the new lane's first chord.
@@ -5380,8 +5374,8 @@ public final class SongBuilder {
 			// to lose. A lane that could have afforded the first cannot afford the second, so it does
 			// not turn at all, lays the chord that beat it whole, and comes to rest past its wall.
 			//
-			// ekran read exactly that as a breach of eleven: one column short with five blocks of wire,
-			// wanting one and five where landing flush wants one and three.
+			// In-game reading showed exactly that as a breach of eleven: one column short with five blocks
+			// of wire, wanting one and five where landing flush wants one and three.
 			//
 			// Only upward from a pad the plan already asked for, and only while the wire covers it, so
 			// this can move a lane onto its wall and never off it.
@@ -5489,32 +5483,29 @@ public final class SongBuilder {
 			BlockPos steppedOffCorner = null;
 			if (layout.ultra() && !turning && index > 0 && index + 1 < events.size()
 				&& (event.notes().size() + 1) / 2 + offBus <= DUST_RANGE) {
-				// Off the corner before a column of this is measured. A pad that opens with a repeater
-				// cannot stand one on a corner -- the repeater moves along and dust takes the corner --
-				// so a pad planned for eleven columns spends twelve, and the chord in front of it lands
-				// a column past the wall it was padded to meet. That column is spent either way: this
-				// walks off the corner now, where the arithmetic can see it, instead of inside
-				// emitPad where it cannot. Ekran found it as two breaches of exactly one on Kick Back,
-				// both on the event coming out of a turn, which is the only place a lane stands on a
-				// corner with a pad still to lay.
-				// Off the corner before a column of this is measured, and charged for. A pad that opens
-				// with a repeater cannot stand one on a corner -- the repeater moves along and dust
-				// takes the corner -- so a pad planned for eleven columns spends twelve, and the chord
-				// in front of it lands a column past the wall it was padded to meet. Ekran found that
-				// as two breaches of exactly one on Kick Back, both on the event coming out of a turn,
-				// which is the only place a lane stands on a corner with a pad still to lay.
-				// The charge is the point. Walking off the corner here and *not* taking it off the
-				// wire only moves the error: the column is still spent, the next pad is still planned
-				// as though it were not, and what was a breach becomes a run of sixteen. Measured both
-				// ways over the library -- nine breaches traded for nine dead builds, which is the
-				// wrong way round.
-				// Unless the wire cannot afford it and the two-swap turn can take the corner instead.
-				// That trade spends no column -- the corner ends up holding a note rather than dust --
-				// so where the cell walked off here is the one that runs the wire out, the swap is the
-				// difference between a lane that plays and a lane that does not. Ekran found it on the
-				// one-floor build of {@code ultra-limit-two-thirties}: a chord of thirty riding a
-				// turnaround, tip worth nought, and the cell spent here taking it to sixteen blocks of
-				// wire with the last at nothing.
+				// Off the corner before a column of this is measured. A pad that opens with a repeater cannot
+				// stand one on a corner -- the repeater moves along and dust takes the corner -- so a pad
+				// planned for eleven columns spends twelve, and the chord in front of it lands a column past
+				// the wall it was padded to meet. That column is spent either way: this walks off the corner
+				// now, where the arithmetic can see it, instead of inside emitPad where it cannot. In-game
+				// testing found it as two breaches of exactly one on Kick Back, both on the event coming out of
+				// a turn, which is the only place a lane stands on a corner with a pad still to lay. Off the
+				// corner before a column of this is measured, and charged for. A pad that opens with a repeater
+				// cannot stand one on a corner -- the repeater moves along and dust takes the corner -- so a
+				// pad planned for eleven columns spends twelve, and the chord in front of it lands a column
+				// past the wall it was padded to meet. In-game testing found that as two breaches of exactly
+				// one on Kick Back, both on the event coming out of a turn, which is the only place a lane
+				// stands on a corner with a pad still to lay. The charge is the point. Walking off the corner
+				// here and *not* taking it off the wire only moves the error: the column is still spent, the
+				// next pad is still planned as though it were not, and what was a breach becomes a run of
+				// sixteen. Measured both ways over the library -- nine breaches traded for nine dead builds,
+				// which is the wrong way round. Unless the wire cannot afford it and the two-swap turn can take
+				// the corner instead. That trade spends no column -- the corner ends up holding a note rather
+				// than dust -- so where the cell walked off here is the one that runs the wire out, the swap is
+				// the difference between a lane that plays and a lane that does not. In-game testing found it
+				// on the one-floor build of {@code ultra-limit-two-thirties}: a chord of thirty riding a
+				// turnaround, tip worth nought, and the cell spent here taking it to sixteen blocks of wire
+				// with the last at nothing.
 				//
 				// Asked only when the tip cannot pay, and that restraint is the whole of it. The swap
 				// is free in wire and not free in everything else: it moves a note onto a cell two
@@ -5540,7 +5531,7 @@ public final class SongBuilder {
 				//
 				// {@link #pastAnyCorner} lays {@link #addParityPad} on a corner it walks off -- stone
 				// with dust over it -- and that is {@link #addRailHead}'s second column exactly, which is
-				// to say it is ekran's reseed, already built and already paid for by the turn. What was
+				// to say it is the reseed, already built and already paid for by the turn. What was
 				// missing was never the shape: it was that the rail branch is asked three hundred lines
 				// below this, by which point the cursor has stepped off and {@code cornerAt(0)} is false.
 				// Over the library the walk sits on a second corner 2127 times, knows it every time, and
@@ -5594,7 +5585,7 @@ public final class SongBuilder {
 				// Which is not free, because a pad in front is not only wire. planPad buys a
 				// repeater when dust alone will not reach, and a repeater costs a tick out of the
 				// wait -- 1,071 of them over the library. Every one changes spentPadding, and so the
-				// next event's wait, and so where it lands. Ekran's reading: chord one pads, chord
+				// next event's wait, and so where it lands. The reading: chord one pads, chord
 				// two sees the room that bought and pads in turn, and a preference cascades down the
 				// lane as though it were a requirement.
 				Pad behind = planPad((laneWall - end) * travel.getStepX(), reached.tip(),
@@ -5621,7 +5612,7 @@ public final class SongBuilder {
 					// nothing at all means {@link #prePad} and the run disagree about how many columns
 					// short the wire is; asked for more than the wire could lay means the pad is
 					// abandoned wholesale where laying what it can would still have moved the chord.
-					// ekran has watched a lane die on a staircase with a gap in front of it, and this
+					// In-game testing has watched a lane die on a staircase with a gap in front of it, and this
 					// says which of the two was standing in the way.
 					placements.padded("padAheadWanted");
 					if (ahead == 0) {
@@ -5661,7 +5652,7 @@ public final class SongBuilder {
 			}
 			BlockPos before = lane.pos();
 			// A run of small chords, one column a chord instead of two. Ported from walkWall rather
-			// than re-derived: the shape is ekran's, the physics under it was measured rather than
+			// than re-derived: the shape is measured, the physics under it was measured rather than
 			// reasoned about, and every geometry in this file that was worked out a second time has
 			// been wrong at least once.
 			//
@@ -5693,26 +5684,25 @@ public final class SongBuilder {
 						steppedOffCorner != null, booked)) {
 				boolean opening = railPhase < 0;
 				boolean fromDust = false;
-				// A stacked bus's rail-ready tail is already this run's first path column, so there is
-				// nothing to open with: the floor rail's repeater goes in the free cell under that tail
-				// and the run picks up on the floor rail. Asked before the head, because a head laid
-				// here would be two columns spent on a column that already exists.
-				// Never where the lane is closing. The tail is already down as this run's first path
-				// column, so a run opened here cannot be given up later -- and a lane that closes puts
-				// the repeater that would carry the run on at the top of a staircase, a floor away,
-				// which is the same thing that stranded the tail one layer down. Asked of the same
-				// {@code reaches} the tail asks, so the two cannot disagree about when a lane ends.
-				// And asked the floor rail's own three questions about the chord it is about to lay
-				// there, which is the one floor column in a run that nobody asks. Every other one is
-				// committed to by {@link #railPairAfter} at the path column behind it; this one has no
-				// path column behind it -- the tail is it -- so it inherited only {@link #railMayStart}'s
-				// head test. That test is asked of the *head*, which is a path column, and its
-				// {@code RAIL_FLOOR_SLOTS} limit is a coincidence of the two being two. The gravity rule
-				// is not: a floor note hangs at the lane's own floor level, so sand under it wants
-				// propping from the level below that, which is the cell the floor underneath keeps empty
-				// over its own path notes. ekran read exactly that off all of the lights at 40 by 5 --
-				// "it put a sand block on the lower rail, which is not allowed. then its support block
-				// below collided with the mandatory air block above every noteblock".
+				// A stacked bus's rail-ready tail is already this run's first path column, so there is nothing
+				// to open with: the floor rail's repeater goes in the free cell under that tail and the run
+				// picks up on the floor rail. Asked before the head, because a head laid here would be two
+				// columns spent on a column that already exists. Never where the lane is closing. The tail is
+				// already down as this run's first path column, so a run opened here cannot be given up later
+				// -- and a lane that closes puts the repeater that would carry the run on at the top of a
+				// staircase, a floor away, which is the same thing that stranded the tail one layer down. Asked
+				// of the same {@code reaches} the tail asks, so the two cannot disagree about when a lane ends.
+				// And asked the floor rail's own three questions about the chord it is about to lay there,
+				// which is the one floor column in a run that nobody asks. Every other one is committed to by
+				// {@link #railPairAfter} at the path column behind it; this one has no path column behind it --
+				// the tail is it -- so it inherited only {@link #railMayStart}'s head test. That test is asked
+				// of the *head*, which is a path column, and its {@code RAIL_FLOOR_SLOTS} limit is a
+				// coincidence of the two being two. The gravity rule is not: a floor note hangs at the lane's
+				// own floor level, so sand under it wants propping from the level below that, which is the cell
+				// the floor underneath keeps empty over its own path notes. In-game reading showed exactly that
+				// off all of the lights at 40 by 5 -- "it put a sand block on the lower rail, which is not
+				// allowed. then its support block below collided with the mandatory air block above every
+				// noteblock".
 				//
 				// All three, not just the gravity one. {@link #railFloorTakes} is the wrong-note test --
 				// a floor note hangs where the lane alongside hangs a stacked module's low half -- and
@@ -5766,7 +5756,7 @@ public final class SongBuilder {
 					}
 					opening = false;
 				}
-				// ekran's corner reseed. Asked before the tail and before the head, both of which
+				// The corner reseed. Asked before the tail and before the head, both of which
 				// would step past this corner and spend two columns getting back to it.
 				//
 				// The wait has to fit one repeater, because the column after the corner is the only
@@ -5921,7 +5911,7 @@ public final class SongBuilder {
 					// Never past a corner all the same. A run that does reach one ends on it, which is
 					// what keeps a repeater off it: both branches of addRailNote lay theirs only to
 					// carry the run on.
-					// ekran's parity, read and never picked: carry the double rail to the corner column and
+					// The parity, read and never picked: carry the double rail to the corner column and
 					// ask what that column would have been. From a path column an even number of cells lands
 					// on another path column, so an even distance to the corner is model 1 -- the run's last
 					// note stands on the corner, the sideways leg is ordinary lane, and the reseed opens the
@@ -5953,7 +5943,7 @@ public final class SongBuilder {
 					// Two or three, which is one pair either way. A wide corner stands one column past the
 					// wall, so the distance to it is the room plus one, and the ordinary test already passes
 					// at four -- room three, which is a pair and the reserve. Two and three are the two it
-					// refuses, and they are the two halves of ekran's parity:
+					// refuses, and they are the two halves of the parity:
 					//
 					//   two    the pair lands a floor column on the wall and a path column on the corner. The
 					//          run's last note stands on the bend, the sideways leg is ordinary lane, and the
@@ -5963,10 +5953,10 @@ public final class SongBuilder {
 					//          way it always was.
 					//
 					// Three was left out at first as "model 2", on the reading that a run stopping one short of
-					// a corner had to carry both rails round the bend to be worth anything. ekran, with the two
-					// laid side by side: <i>"turns out its easier and just as compact to only do model 1. the
-					// only optimization we need is the notes leading into the turn ... its just 1 extra note but
-					// there's no reason to drop the bottom lane too early."</i> The bend does not have to change
+					// a corner had to carry both rails round the bend to be worth anything. With the two laid
+					// side by side, model 1 alone turned out easier and just as compact: the only optimisation
+					// wanted is the notes leading into the turn, one extra note, with no reason to drop the
+					// bottom lane early. The bend does not have to change
 					// at all. What the run buys is the last pair before it: two columns holding two notes where
 					// the ordinary module standing there holds one.
 					boolean ontoTheCorner = RUN_RUNS_TO_THE_CORNER && flatAhead
@@ -6031,8 +6021,8 @@ public final class SongBuilder {
 					// blank between them cost the two columns the plain lane charges for the chord
 					// alone, so a stretch of them is the head's two columns thrown away and nothing
 					// gained. The run stops instead and the lane carries on plainly, which is what
-					// ekran asked for -- "it can just continue if it doesn't know it will be able to
-					// place a note there later".
+					// what was asked for: the lane may simply continue where it does not know whether a
+					// note can be placed there later.
 					// The opening question asked again, because the walk can find the answer has changed:
 					// {@link #railFloorChords} reads with no placements, so a floor column it counted on may
 					// turn out to be a cell a stacked module alongside has already taken.
@@ -6041,7 +6031,7 @@ public final class SongBuilder {
 					// and a spent head is not a reason to spend more. At the margin a blank pair is two
 					// columns for one chord, which is exactly what the plain lane charges -- so carrying on
 					// through blanks costs no depth at all, and costs a repeater a column. That is the whole
-					// of ekran's complaint, and it is why this is asked where a blank is about to be laid
+					// of the complaint, and it is why this is asked where a blank is about to be laid
 					// rather than where the run opened.
 					//
 					// Only while the floor rail has carried nothing at all. A run that has carried once has
@@ -6106,13 +6096,12 @@ public final class SongBuilder {
 				// The run's last column, closing the way a small module closes: centre given up to the
 				// wire, notes hung either side of it a level down.
 				//
-				// This is where the instant seed is actually won or lost. A path column's centre is a
-				// note block at path+1 with nothing under it, and that is the one shape a mirrored
-				// ladder cannot start from -- a powered block lights only the dust it stands square
-				// against, and the ladder's bottom rung is diagonal from it. ekran read exactly that
-				// off ultra-ones-mixed at 26 wide and drew the fix: <i>"if it had just used stone there
-				// and placed the note on the side, then it could have done a double rail staircase
-				// (mirrored) and done an instant seed."</i>
+				// This is where the instant seed is actually won or lost. A path column's centre is a note
+				// block at path+1 with nothing under it, and that is the one shape a mirrored ladder cannot
+				// start from -- a powered block lights only the dust it stands square against, and the ladder's
+				// bottom rung is diagonal from it. In-game reading showed exactly that off ultra-ones-mixed at
+				// 26 wide, and the fix was drawn there: with stone in that cell and the note on the side,
+				// it could have run a mirrored double-rail staircase and seeded instantly.
 				//
 				// Only where this column really is the one the staircase reads from, which is one
 				// column short of the wall: the climb is pinned there, so nothing goes between them.
@@ -6127,7 +6116,7 @@ public final class SongBuilder {
 						+ Math.max(0, Math.min(9, railRoom(lane, laneWall)))
 						+ (above >= 0 && above < floors ? "Staircase" : "Flat"));
 				}
-				// ekran's parity, read where the run gives up rather than guessed.
+				// The parity, read where the run gives up rather than guessed.
 				// A corner stands one column past the wall, so it is railRoom + 1 columns further on,
 				// and the phase there is this one flipped that many times. A path column on the corner
 				// is model 1; a floor column there means the last path note landed one short, model 2.
@@ -6138,7 +6127,7 @@ public final class SongBuilder {
 						+ "Room" + Math.max(0, Math.min(9, railRoom(lane, laneWall)))
 						+ "Step" + slabStep);
 				}
-				// And it stops there. ekran's model 1 is that the last top-rail note lands on the
+				// And it stops there. The model 1 is that the last top-rail note lands on the
 				// corner and the sideways run after it is ordinary lane; carrying both rails round the
 				// bend is model 2, which is a different shape -- a repeater each, staggered -- and not
 				// this. A repeater may not stand on a corner either way, and ending here is what keeps
@@ -6214,7 +6203,7 @@ public final class SongBuilder {
 			// is the one rule every repeater in the build obeys and so is applied where they are laid.
 			Lane opening = trigger.lane();
 			// Which way the wall at the end of this lane goes, recorded against the shape the chord
-			// came out as. Ekran noticed heads seemed never to appear on a lane ending in a climb,
+			// came out as. In-game testing noticed heads seemed never to appear on a lane ending in a climb,
 			// and a shape that can only be built going one way is a shape half of whose value is
 			// missing -- so it is counted rather than argued about.
 			boolean climbingLane = climb > 0;
@@ -6234,15 +6223,15 @@ public final class SongBuilder {
 				|| backPairIsFree(placements, opening, event.time());
 			// Against the wall this chord is actually facing, which after a staircase is the other one.
 			//
-			// {@code wall} is worked out once at the top of the event, from the travel the lane had
-			// then. A descent or a climb built further up this same iteration turns the lane round and
-			// sets it down on the next floor, and the chord is laid straight after -- so the wall in
-			// front of it is the far one where the old wall was the near one. Measured against the old
-			// one, {@code (wall - x) * step} is nought or less on every such chord, and the room test
-			// below hands every stacked and headed shape on the first chord of every descended lane to
-			// a plain bus: {@code gaveUp=roomAhead-1<5} with twenty-two columns of empty lane in front
-			// of it. ekran found it on adventure-of-a-lifetime at 25x5, a chord of five measured for a
-			// stacked bus and built as a plain one.
+			// {@code wall} is worked out once at the top of the event, from the travel the lane had then. A
+			// descent or a climb built further up this same iteration turns the lane round and sets it down
+			// on the next floor, and the chord is laid straight after -- so the wall in front of it is the
+			// far one where the old wall was the near one. Measured against the old one, {@code (wall - x) *
+			// step} is nought or less on every such chord, and the room test below hands every stacked and
+			// headed shape on the first chord of every descended lane to a plain bus: {@code
+			// gaveUp=roomAhead-1<5} with twenty-two columns of empty lane in front of it. In-game testing
+			// found it on adventure-of-a-lifetime at 25x5, a chord of five measured for a stacked bus and
+			// built as a plain one.
 			//
 			// The rails a hundred lines up already ask this question again and say why in the same
 			// words -- {@code laneWall} -- because the answer from before the turn is about a lane that
@@ -6396,7 +6385,7 @@ public final class SongBuilder {
 			// A nudge spends a column the plan was not told about, so everything the plan still owes
 			// this lane is owed from a column further along than it thinks. Left alone, the lane
 			// arrives carrying pad that was measured to close a gap the nudge has already closed --
-			// and lands past the wall by exactly the columns nudged. Ekran found it on Big Shot at
+			// and lands past the wall by exactly the columns nudged. In-game testing found it on Big Shot at
 			// thirty-six wide: a stacked chord of six nudged, four chords later a pad of one was laid
 			// for a shortfall that no longer existed, and the bus behind it came to rest a column out.
 			//
@@ -6438,12 +6427,12 @@ public final class SongBuilder {
 			// reads through -- and that cell is the first of the fifteen, not a free block in front of
 			// them. Handing on the whole fifteen let a lane lay fifteen more cells after it and land
 			// the last one at nought, which is the exact width of a dead line: sixteen blocks of wire
-			// where the budget said fifteen. Ekran found it on Do The Dance.
+			// where the budget said fifteen. In-game testing found it on Do The Dance.
 			// A stacked module hands on the whole fifteen, exactly as a chord of three does. Its one
 			// cell of dust is the cross *underneath* the centre block, feeding the two side relays;
 			// the signal path over the top is repeater, centre block, next cell, and a centre block
 			// driven by a repeater is a solid block strongly powered, so the cell after it reads
-			// fifteen. Ekran measured it with lamps: fifteen lit from the module, in and out.
+			// fifteen. In-game testing measured it with lamps: fifteen lit from the module, in and out.
 			// A stacked-bus is the one shape that is both. Its head hands on the full fifteen the way
 			// any module does, and then its own transition and bus spend out of that before the next
 			// chord ever sees it -- so reading it as a module, which is what {@code !BUS} used to
@@ -6490,8 +6479,8 @@ public final class SongBuilder {
 	 * <p>Read in the three places that decide where a chord ends: the fit test through
 	 * {@link #turnReserve}, and the two pads that aim a chord at the wall on purpose --
 	 * {@link #prePad} and the booked-pad clamps. They are one rule, and a build that closed only some
-	 * of those doors was measurably worse than closing none: see {@link #RESERVES_THE_HANDOVER_COLUMN}.
-	 * </p>
+	 * of those doors was measurably worse than closing none: see {@link
+	 * #RESERVES_THE_HANDOVER_COLUMN}. </p>
 	 */
 	private static int handoverReserve(Layout layout) {
 		// v2 only, and for the reason SUNKEN_MAY_OPEN_IN_A_TURN is v2 only: the older walk measures
@@ -6552,7 +6541,7 @@ public final class SongBuilder {
 	 * Experimental: one descent cost everywhere, four cells, rather than four for a cut and five
 	 * plus a step off for an ordinary turn.
 	 *
-	 * <p>ekran's, and the reasoning is theirs: the two descents differ only in where the wire
+	 * <p>The reasoning: the two descents differ only in where the wire
 	 * arrives. {@link #addSplitBusDescent} may assume a bus, which runs a level above its lane, so
 	 * its first rung connects on its own and its landing is the column the spiral started from.
 	 * {@link #addSpiralDescent} serves a lane arriving at lane level, so it spends one cell standing
@@ -6571,7 +6560,7 @@ public final class SongBuilder {
 	/**
 	 * Experimental: the descent's last rung stands beside the landing rather than below it.
 	 *
-	 * <p>ekran's reading of the two diagrams. The spiral currently drops until its dust is level with
+	 * <p>The reading of the two diagrams. The spiral currently drops until its dust is level with
 	 * the repeater and feeds it from behind; a repeater takes its input from the block behind it, and
 	 * dust on top of that block powers it just as well. So the last stone can sit at the landing's
 	 * own level with its dust one up.</p>
@@ -6781,7 +6770,7 @@ public final class SongBuilder {
 		int cells = staircase ? TURN_DUST_CELLS : slabStep + 2;
 		int offBus = staircase && climb > 0 ? cells - 2 : cells;
 		int stepOff = staircase && climb < 0 ? 1 : 0;
-		// ekran's: a descent is four everywhere, not four for a cut and five plus a step off for
+		// A descent is four everywhere, not four for a cut and five plus a step off for
 		// everyone else. The ordinary descent paid the extra cell to meet a lane arriving at lane
 		// level, and the step off to walk back into the spiral it landed past. Put the handover where
 		// a bus would start and neither is needed -- which is what addSplitBusDescent already builds,
@@ -6981,9 +6970,9 @@ public final class SongBuilder {
 	 * opening and the lowered pair. From six up there is at least one ordinary bus cell on the end,
 	 * stone at bus height with the dust over it, which is exactly what a plain bus offers a climb.</p>
 	 *
-	 * <p>ekran, on the first attempt at this, which denied every sunken bus the discount: <em>"even
-	 * for sunken buses the 3-climb usually works, its simply because this one ended on the sunken
-	 * part that it didn't work."</em> {@code busCells} is the dust-cell count {@link Body} carries,
+	 * <p>The first attempt at this denied every sunken bus the discount, and that was wrong: the
+	 * three-climb usually works for a sunken bus too, and the one that failed had merely ended on
+	 * its sunken part. {@code busCells} is the dust-cell count {@link Body} carries,
 	 * so two or more means the lowered column is not the end of it.</p>
 	 */
 	private static boolean endsOnBus(ChordStyle style, int busCells) {
@@ -7044,7 +7033,7 @@ public final class SongBuilder {
 			// The same substitution the walk makes: a head with a bus behind it keeps a head of
 			// five, and only the rigid shape falls all the way to a bus.
 			// The rigid shape falls to a head of five with a bus behind it too, not all the way to a
-			// plain bus. ekran, reading one in game: there was no stacked chord anywhere near it to
+			// plain bus. Reading one in game: there was no stacked chord anywhere near it to
 			// justify a plain bus, and a front-only head fits. A chord of seven is a repeater and
 			// four cells as a bus -- five columns -- against two, a handover and one cell as a head
 			// of five with a tail of two, which is four. A chord of six is four either way, so this
@@ -7197,8 +7186,8 @@ public final class SongBuilder {
 		// walk ignores. Recorded under a negative key, which no event index can collide with.
 		// Unless the chord it is said to strand can simply be cut in its own turn.
 		//
-		// ekran: "it's fine if the next chord can't fit entirely inside the next lane -- that's why we
-		// have cuts." {@link #strandsNext} sweeps that lane and a sweep only asks whether a chord
+		// A chord that cannot fit entirely inside the next lane is fine, because that is what cuts
+		// are for. {@link #strandsNext} sweeps that lane and a sweep only asks whether a chord
 		// *fits*; a chord that does not fit is precisely the chord that gets cut, and the walk cuts a
 		// lane's first event on purpose. So a lane reported stranded may be one that closes perfectly
 		// well by cutting.
@@ -7221,7 +7210,7 @@ public final class SongBuilder {
 			// offered where the chord does not fit, and a chord that fits by a column or two is laid
 			// whole. The lane then has nothing left to climb with, cannot turn, and runs on.
 			//
-			// So try the smallest pad that makes it not fit. ekran: move the start of the chord forward
+			// So try the smallest pad that makes it not fit: move the start of the chord forward
 			// a couple of blocks so that it cuts the stacked bus. On Guardian at 44 wide over three
 			// floors that is two columns in front of a chord of twenty-four, which turns a run of
 			// eleven columns past the wall into a lane that ends on it.
@@ -7339,11 +7328,11 @@ public final class SongBuilder {
 		// wire it was holding. So it turned where it stood with cells to spare, and the staircase came
 		// down in the middle of the corridor, against whatever the lane alongside had hung there.
 		//
-		// Spend it anyway, if spending it helps. Every column of pad is a column the turn happens
-		// further along, and the difference between a staircase that lands beside somebody's notes and
-		// one that does not is usually a column or two. {@link #book} already works backwards from the
-		// last chord through whatever room the ones before it have, so a chord arriving on a strong
-		// wire pays for the one arriving on a weak one. Ekran read it off the blocks on Do The Dance at
+		// Spend it anyway, if spending it helps. Every column of pad is a column the turn happens further
+		// along, and the difference between a staircase that lands beside somebody's notes and one that
+		// does not is usually a column or two. {@link #book} already works backwards from the last chord
+		// through whatever room the ones before it have, so a chord arriving on a strong wire pays for
+		// the one arriving on a weak one. In-game reading showed it off the blocks on Do The Dance at
 		// twenty wide: a lane of one chord, fifteen columns of wall and three blocks of wire, padding
 		// nothing at all.
 		//
@@ -7475,8 +7464,8 @@ public final class SongBuilder {
 	 *
 	 * <p>The planner needs this and has never had it. It plans one lane at a time from a start it is
 	 * handed, so a lane that cannot seat its own first chord has no way to say so to the lane whose
-	 * turn put it there -- and that is the whole of the breach ekran has been pointing at: the
-	 * planner is right that the chord will not fit, the walk lays it anyway, and the column that
+	 * turn put it there -- and that is the whole of the breach in-game testing has been pointing at:
+	 * The planner is right that the chord will not fit, the walk lays it anyway, and the column that
 	 * would have fixed it is sitting unspent in the lane before.</p>
 	 *
 	 * <p>Two shapes, because there are two ways to hand over. A plain close walks out to the wall and
@@ -7574,8 +7563,8 @@ public final class SongBuilder {
 	 * start further from one. So it lays the chord anyway and breaches two chords later, which is
 	 * every breach left in the library.</p>
 	 *
-	 * <p>Asked one lane deep and no further. That is enough for the fault ekran found, and a search
-	 * that reached back further would be re-planning the song rather than closing a lane.</p>
+	 * <p>Asked one lane deep and no further. That is enough for the fault in-game testing found, and a
+	 * search that reached back further would be re-planning the song rather than closing a lane.</p>
 	 *
 	 * @param carriedCells cells of a cut chord laid after the staircase, zero for a plain close
 	 */
@@ -7634,7 +7623,7 @@ public final class SongBuilder {
 		Sweep after = sweep(events, first, start, -stepX, otherWall,
 			events.get(spent).time(), Math.max(0, handedOn), true, offBus, layout, Map.of(),
 			false, null);
-		// Left alone deliberately. ekran's point is right -- a chord the next lane cannot lay whole is
+		// Left alone deliberately. The point is right -- a chord the next lane cannot lay whole is
 		// the chord that gets cut, not a stranded lane -- but this answer is not only used to veto a
 		// cut. `planLane` reads a false here as "this lane closes cleanly, book nothing", so relaxing
 		// it stops the planner laying pads that lanes were relying on: Guardian goes from 20 breached
@@ -7707,7 +7696,7 @@ public final class SongBuilder {
 	 * told it may not cut and finds it cannot turn, so it does neither: the chord is laid whole and
 	 * the lane comes to rest outside its wall.</p>
 	 *
-	 * <p>ekran's, off the blocks at Guardian 16 wide over four floors, {@code 20 77 148}. Tick 548, a
+	 * <p>Off the blocks at Guardian 16 wide over four floors, {@code 20 77 148}. Tick 548, a
 	 * chord of 24 standing at {@code x=13} with its wall at 15: {@code headed=0+18},
 	 * {@code couldSplit=true}, {@code vetoed=true}, and a pad of one cell holding four blocks of wire
 	 * that {@code reachesWall} refuses. The cut was there and already shed. Ten columns outside.</p>
@@ -7717,7 +7706,7 @@ public final class SongBuilder {
 	/**
 	 * v2: the planner is not consulted, and a lane closes on a cut or not at all.
 	 *
-	 * <p>ekran's, and the argument is arithmetic rather than taste. A cut costs a transition cell,
+	 * <p>The argument is arithmetic rather than taste. A cut costs a transition cell,
 	 * the two halves of the chord, and the staircase, all off the repeater the chord opens with:
 	 * {@code 1 + ⌈near/2⌉ + ⌈far/2⌉ + splitCells ≤ 15}. Plain that reaches 22 notes descending and 24
 	 * climbing; with a head it reaches 27 and 29. So on a song whose chords stop at twenty-four --
@@ -7734,7 +7723,7 @@ public final class SongBuilder {
 	 * slots land on a parity that works, and nothing about cutting makes that unnecessary.</p>
 	 *
 	 * <p><b>On, on this branch.</b> It loses on Guardian -- 86 breach blocks to 273 on its own, 97
-	 * with the earlier cut alongside it -- and wins on the song that isolates what it claims, ekran's
+	 * with the earlier cut alongside it -- and wins on the song that isolates what it claims, the
 	 * chords of twenty-five at a gap of one, 164 blocks to 36. It is on so that it can be pasted and
 	 * looked at, which is the point of the branch. It is not ready for main.</p>
 	 */
@@ -7756,7 +7745,7 @@ public final class SongBuilder {
 	 *
 	 * <p><b>On, on this branch, and it stands on its own.</b> Measured with the planner left alone it
 	 * takes Guardian from 86 breach blocks to 68 over the same 21 lanes, for 1.7% more length, with
-	 * ekran's 40 wide over five floors still clean. That is the one part of v2 that is ready to go to
+	 * the 40 wide over five floors still clean. That is the one part of v2 that is ready to go to
 	 * main by itself.</p>
 	 */
 	static boolean CUTS_THE_CHORD_THAT_REACHES = false;
@@ -7769,7 +7758,7 @@ public final class SongBuilder {
 	 * {@link #walkWall} -- v2 has both of those permanently on -- so the booking layer is already
 	 * gone from this walk. What is left is this one and the closing pad.</p>
 	 *
-	 * <p>ekran's position is that neither should be needed: v2 supports chords of twenty-five and a
+	 * <p>The position is that neither should be needed: v2 supports chords of twenty-five and a
 	 * chord of twenty-five cuts wherever it is standing, so a lane never has to be walked out to its
 	 * wall on wire it has to pay for. The guard above already exempts a next chord that can be cut
 	 * across the staircase or laid across a flat turn, so what fires here is what those two miss.</p>
@@ -7806,7 +7795,7 @@ public final class SongBuilder {
 	/**
 	 * v2: two stacked centres are never left two columns apart; a pad makes it three.
 	 *
-	 * <p>ekran's, and it replaces a fallback with a guarantee. Two stacked modules whose centres sit
+	 * <p>This replaces a fallback with a guarantee. Two stacked modules whose centres sit
 	 * two apart contend for the same slots, and the answer until now was to give the second one up and
 	 * build it as a bus. A bus is wider and carries half as much, so the fallback costs the lane the
 	 * columns it was trying to save.</p>
@@ -7826,8 +7815,8 @@ public final class SongBuilder {
 	/**
 	 * Whether a small chord that will not fit its crowded lane may stack while inside a turn.
 	 *
-	 * <p>ekran, from the blocks: small chords come out bus-shaped <em>"with no explanation,
-	 * especially on flat turns"</em>. One line does it, and the census says it does nothing else --
+	 * <p>From the blocks: small chords come out bus-shaped for no visible reason, especially on
+	 * flat turns. One line does it, and the census says it does nothing else --
 	 * over 240 builds of eight songs, a small chord that fell back and had slots available was refused
 	 * the stacked shape by the turn clause <b>1,733 times out of 1,733</b>. The other branch never
 	 * fires at all: a small chord only ever fails to fit when it is in a turn, so in practice the
@@ -7835,8 +7824,9 @@ public final class SongBuilder {
 	 *
 	 * <p>The stated reason is that a stacked module in a turn stands across the run rather than along
 	 * it. That is the same claim {@link #TURN_BAN_OUTLASTS} makes about the chord <em>after</em> a
-	 * turn, which ekran has already read off the blocks and doubted -- a turn's bus comes out of its
-	 * second bend running the new lane's way, so the cells behind are collinear with the chord.</p>
+	 * turn, which in-game testing has already read off the blocks and doubted -- a turn's bus comes
+	 * out of its second bend running the new lane's way, so the cells behind are collinear with the
+	 * chord.</p>
 	 *
 	 * <p>Whether it is physical or deferred is a question the machine can answer: allow it and read
 	 * every build back. A rule that is really about geometry shows up as a wrong note or a dead line;
@@ -7847,8 +7837,8 @@ public final class SongBuilder {
 	/**
 	 * Whether a chord the next lane cannot lay whole counts as stranding it, or as a chord to be cut.
 	 *
-	 * <p>ekran's, and it is a gap rather than a tuning: <em>"it's fine if the next chord can't fit
-	 * entirely inside the next lane -- that's why we have cuts."</em> {@link #strandsNext} sweeps the
+	 * <p>This is a gap rather than a tuning: a chord that cannot fit entirely inside the next lane
+	 * is fine, because that is what cuts are for. {@link #strandsNext} sweeps the
 	 * following lane and calls it stranded when the sweep does not reach its first event, and a sweep
 	 * only asks whether a chord <b>fits</b>. A chord that will not fit is precisely the chord that
 	 * gets cut, and the walk cuts a lane's first event on purpose -- {@code couldSplit} carries an
@@ -7857,9 +7847,9 @@ public final class SongBuilder {
 	 *
 	 * <p>What it costs to have it wrong: the lane before is told its cut would strand its neighbour,
 	 * so the cut is vetoed, so it looks for a pad close instead, and where the walk cannot afford that
-	 * pad the chord is laid whole and the lane comes to rest outside its wall. ekran read one at
-	 * Guardian 16 wide over four floors -- and the lane it was protecting turns on its own wall with
-	 * room to spare.</p>
+	 * pad the chord is laid whole and the lane comes to rest outside its wall. In-game reading found
+	 * one at Guardian 16 wide over four floors -- and the lane it was protecting turns on its own wall
+	 * with room to spare.</p>
 	 *
 	 * <p>On Guardian nothing exceeds twenty-four notes, and a headed cut of twenty-four is a
 	 * transition, nine cells and a staircase. Inside fifteen at every kind of turn. So very nearly
@@ -7889,9 +7879,9 @@ public final class SongBuilder {
 	 * the question: {@code columnBehindBusy} is read by the chord <em>after</em> it and asks whether
 	 * that chord may hang notes in the two slots behind its own repeater.</p>
 	 *
-	 * <p>ekran: <em>"there's no reason behind-busy should be true. after a cut, if it's the first
-	 * chord, they always can -- we don't place stacked heads at the bottom of a cut."</em> The file
-	 * agrees with them everywhere else. {@link #takesTheGapBehind} is {@code style.stacked() && ...},
+	 * <p>There is no reason for behind-busy to be true here: after a cut, the first chord's slots
+	 * are always free, because stacked heads are never placed at the bottom of a cut. The file
+	 * agrees everywhere else. {@link #takesTheGapBehind} is {@code style.stacked() && ...},
 	 * the far half is laid as {@link ChordStyle#BUS}, and a bus keeps its notes beside its stone with
 	 * the instrument blocks under those -- a column further back than the slots in question. Every
 	 * other site that tracks the gap would answer false.</p>
@@ -7906,7 +7896,7 @@ public final class SongBuilder {
 	 * blocks to 31 and 176, against builds 11 columns shorter over 336 configs. Guardian is mixed,
 	 * fewer dirty configs and lanes for more blocks.</p>
 	 *
-	 * <p>So it is a compaction trade wearing a correctness argument's clothes, and ekran's rule is
+	 * <p>So it is a compaction trade wearing a correctness argument's clothes, and the rule is
 	 * that a breach is the last resort even where it costs space. One word to flip if the shorter
 	 * builds are ever worth more than the forty blocks.</p>
 	 */
@@ -8007,7 +7997,7 @@ public final class SongBuilder {
 		}
 		// And then the wait, spent in the columns the pad was laying anyway.
 		//
-		// ekran, from the builds: a lane pads out to its wall in plain dust and then the next floor
+		// From the builds: a lane pads out to its wall in plain dust and then the next floor
 		// opens with a repeater, which costs it a column. The pad column and the repeater column are
 		// the same column in two different places, and only one of them has to exist. A repeater in
 		// the pad holds the ticks instead, {@link Pad#delaySpent} carries that to the walk, and the
@@ -8295,15 +8285,15 @@ public final class SongBuilder {
 	/**
 	 * Whether the climb alternates sideways instead of along the lane.
 	 *
-	 * <p>ekran's, and it is the change the instant rail seed is built on. A climb steps between two
+	 * <p>This is the change the instant rail seed is built on. A climb steps between two
 	 * columns, a block up each time; until now those were the turn column and the one in front of it,
 	 * so an ascent ate two columns of the lane's own run. Alternating across the lane instead --
 	 * {@code (x, z)} and {@code (x, z - 1)} -- puts the whole staircase in <b>one</b> column of lane
 	 * and two of depth, and the column in front of it is free the moment the climb lands.</p>
 	 *
-	 * <p>Sideways and not diagonally, which the first sketch of this said: dust does not connect across
-	 * a diagonal, so a step at {@code (x + 1, z - 1)} carries nothing at all. The two columns have to
-	 * touch.</p>
+	 * <p>Sideways and not diagonally, which the first sketch of this said: dust does not connect
+	 * across a diagonal, so a step at {@code (x + 1, z - 1)} carries nothing at all. The two columns
+	 * have to touch.</p>
 	 *
 	 * <p>What makes it affordable is the pinned wall: every staircase in the build stands in the same
 	 * column, so the depth beside it is corridor rather than a neighbour's lane -- the same ground a
@@ -8314,7 +8304,7 @@ public final class SongBuilder {
 
 	/**
 	 * @param depth the way the snake advances. The sideways climb steps against it -- {@code z - 1},
-	 *     ekran's word -- so the staircase leans back towards the lane already built rather than into
+	 *     the word -- so the staircase leans back towards the lane already built rather than into
 	 *     the ground the next one wants. Null from the first layout, which keeps the climb it was
 	 *     measured with: v1 is not being changed, and its own tests hold it to the block.
 	 * @param extraSteps rungs past the floor it is climbing to, for the instant rail seed. The
@@ -8322,7 +8312,7 @@ public final class SongBuilder {
 	 *     serves stands where it always did, and what the extra rungs leave is live wire standing
 	 *     above it. Nought everywhere else, which is every climb this file laid before the seed.
 	 * @param mirrored swaps which of the two columns is glass and which is wire at every level, so
-	 *     the staircase leans the other way, and adds one rung on top. ekran's, and it is what the
+	 *     the staircase leans the other way, and adds one rung on top. That rung is what the
 	 *     seed is made of. Writing {@code L} for the path level this climb starts from: the lane's own
 	 *     column then carries dust at {@code L+2}, {@code L+4} and {@code L+6} where an ordinary climb
 	 *     carries it at {@code L+1}, {@code L+3} and {@code L+5}. The even levels are the point --
@@ -8343,25 +8333,25 @@ public final class SongBuilder {
 		// A mirrored staircase gets neither the lift nor the skip, and the two are one fact.
 		//
 		// Its bottom rung is glass at path+1 -- the very cell the lift's own dust wants, which is the
-		// collision ekran read off the paste -- and its dusts stand at path+2, +4 and +6, so the wire
-		// behind the climb reaches the first of them on its own: from a pad's dust at path+1 it steps
-		// up one over that glass, and from a bus or a raised pad at path+2 it is already level with
+		// collision in-game reading found off the paste -- and its dusts stand at path+2, +4 and +6, so
+		// the wire behind the climb reaches the first of them on its own: from a pad's dust at path+1 it
+		// steps up one over that glass, and from a bus or a raised pad at path+2 it is already level with
 		// it. Which is also why a bus buys a mirrored climb nothing. The rung it would have skipped is
 		// the one the seed's own repeater reads, so the ladder is five rungs whatever the lane arrived
-		// on, and the turn is priced at the full {@link #TURN_DUST_CELLS} rather than the off-bus
-		// three. What the wire behind cannot be is a *block* -- a note block or a bus's stone only
-		// powers dust it stands square against, and path+2 is diagonal from it. That is the one thing
-		// the seed has to know before it is offered, and the turn asks the blocks for it.
+		// on, and the turn is priced at the full {@link #TURN_DUST_CELLS} rather than the off-bus three.
+		// What the wire behind cannot be is a *block* -- a note block or a bus's stone only powers dust
+		// it stands square against, and path+2 is diagonal from it. That is the one thing the seed has to
+		// know before it is offered, and the turn asks the blocks for it.
 		if (!fromBus && !mirrored) {
 			placements.powered(near, "minecraft:stone", time);
 			set(placements, near.above(), "minecraft:redstone_wire");
 		}
 		if (mirrored) {
-			// ekran's one more glass, carrying on the alternation, and it does two things. It stands in
+			// The one more glass, carrying on the alternation, and it does two things. It stands in
 			// the cell the run's opening repeater would have shifted back into, so the glass takes that
 			// cell and the repeater is never laid; and its own dust, a level above the new lane's path,
 			// is what reaches across to the wire over the seed's block. Left off the first time and
-			// ekran read it straight off the paste: "the top one doesn't have redstone on it".
+			// in-game reading showed it straight off the paste: the top one has no redstone on it.
 			set(placements, near.above(CUBE_FLOOR_HEIGHT + 1), "minecraft:glass");
 			set(placements, near.above(CUBE_FLOOR_HEIGHT + 2), "minecraft:redstone_wire");
 		}
@@ -8379,7 +8369,7 @@ public final class SongBuilder {
 	/**
 	 * Whether a climb may seed the next lane's two-rail run instead of that lane paying for a head.
 	 *
-	 * <p>ekran's, and the arithmetic is theirs: a run's head is two columns on every floor, and on a
+	 * <p>The arithmetic: A run's head is two columns on every floor, and on a
 	 * song that is nothing but small chords -- lady brown, neverending night -- a floor eight columns
 	 * wide spends a quarter of itself reseeding. A head is a repeater and then a block with dust over
 	 * it; slide that pair one column back into a mirrored staircase and the repeater lands in the cell
@@ -8405,9 +8395,9 @@ public final class SongBuilder {
 	static boolean RAIL_SEEDS_OFF_THE_CLIMB = true;
 
 	/**
-	 * Rungs a seeding climb adds past its floor, ekran's number.
+	 * Rungs a seeding climb adds past its floor, the number.
 	 *
-	 * <p>Their words: <i>"we just go up 2 more glass than normal (each with a redstone on top)."</i>
+	 * <p>The shape as drawn goes up two more glass than normal, each with a redstone on top.
 	 * Nought here, and the reason is a measurement rather than a disagreement: the sideways step
 	 * already lands an ordinary climb's top dust at the new floor's own path level, so two more rungs
 	 * put it at path plus two, and dust steps down one. Drawn from jackpot 24x3, the seed's cell read
@@ -8419,11 +8409,11 @@ public final class SongBuilder {
 	/**
 	 * The landing of a seeding climb: a block on the lane with wire over it, and no trigger at all.
 	 *
-	 * <p>ekran's, and it is the run's own head shifted a column back into the staircase. A head is a
+	 * <p>This is the run's own head shifted a column back into the staircase. A head is a
 	 * repeater and then a block with dust over it; slide the pair towards the climb and the repeater
 	 * lands in the cell the glass is standing in, so the glass takes it and what reaches the lane is
-	 * the second half alone. <i>"The top lane starts with a block, not a repeater, and redstone goes
-	 * on top of it."</i></p>
+	 * the second half alone: the top lane starts with a block rather than a repeater, and redstone
+	 * goes on top of it.</p>
 	 *
 	 * <p>Both rails come off it, which is what the mirrored staircase is for. The climb's last rung on
 	 * the lane's own column is now <b>dust at the lane's own level</b>, pointing straight into this
@@ -8440,8 +8430,8 @@ public final class SongBuilder {
 	private static Lane addRailSeed(PlacementPlan placements, Lane lane, int delay, int time) {
 		placements.placing("rail:SEED delay" + delay);
 		placements.padded("railSeededOffTheClimb");
-		// ekran, off the paste: "move the basalt up by 1 and place a repeater with support where it
-		// currently is, then put redstone on the basalt". So the column is four blocks deep and each
+		// Off the paste: move the basalt up by one and put a repeater with support where it
+		// currently is, then redstone on the basalt. So the column is four blocks deep and each
 		// one belongs to a different part of the run.
 		//
 		// The repeater is the bottom rail's first, at the lane's own level, reading the staircase's
@@ -8468,8 +8458,8 @@ public final class SongBuilder {
 	/**
 	 * Whether a run already going may carry on into the corner its lane turns at.
 	 *
-	 * <p>ekran's, and they said in advance what to expect of it: <i>"this will likely make a couple
-	 * collision builds from perpendicularity clashes but for now that's fine."</i> A note hung off a
+	 * <p>What to expect of it was said in advance: a couple of collision builds from
+	 * perpendicularity clashes, and that is acceptable for now. A note hung off a
 	 * corner hangs off a cell whose flanks point two ways at once, and the sideways run of the turn is
 	 * entitled to that ground.</p>
 	 *
@@ -8482,7 +8472,7 @@ public final class SongBuilder {
 	/**
 	 * Whether a run heading into an armed flat turn may lay its last column on the corner itself.
 	 *
-	 * <p>ekran's model 1. Off, a run stops where {@link #railRoom} says the wall is and the lane pays
+	 * <p>The model 1. Off, a run stops where {@link #railRoom} says the wall is and the lane pays
 	 * for a head again on the far side of the bend.</p>
 	 */
 	static boolean RUN_RUNS_TO_THE_CORNER = true;
@@ -8493,13 +8483,13 @@ public final class SongBuilder {
 	 * <p>The reserve is a handover column -- the cell a lane comes to rest on so that whatever follows
 	 * has something to read. A lane meeting a <em>staircase</em> hands over inside its wall and has to
 	 * keep one. A lane meeting a <em>flat turn</em> hands over on the corner, and {@link #armTurn}
-	 * stands that one column <em>past</em> the wall, on ground the turn has already bought. So there is
-	 * nothing to keep back, and a run that stops short of the wall for it only leaves those columns to
-	 * an ordinary module -- which spends two of them on one note where the run's pair spends two on
+	 * stands that one column <em>past</em> the wall, on ground the turn has already bought. So there
+	 * is nothing to keep back, and a run that stops short of the wall for it only leaves those columns
+	 * to an ordinary module -- which spends two of them on one note where the run's pair spends two on
 	 * two.</p>
 	 *
-	 * <p>ekran, with the two drawn side by side: <i>"its just 1 extra note but there's no reason to
-	 * drop the bottom lane too early."</i> The lane comes to rest in the same column either way, so
+	 * <p>With the two drawn side by side it is one extra note, and no reason to drop the bottom
+	 * lane early. The lane comes to rest in the same column either way, so
 	 * this moves no wall; it only decides what stands in the last two columns before the bend.</p>
 	 */
 	static boolean RUN_SPENDS_THE_FLAT_RESERVE = true;
@@ -8512,9 +8502,9 @@ public final class SongBuilder {
 	 * floor rail carries nothing holds a blank between every pair of chords -- {@code b = k - 1} --
 	 * so it costs {@code 2k + 1} columns to do what the lane does in {@code 2k}. It is a column worse
 	 * at every length, and it holds a repeater in <em>every</em> column where the plain lane holds one
-	 * per chord. ekran: <i>"the double lane gets seeded and continues for the whole lane, only to
-	 * never get used ... repeaters are very expensive in survival mode ... its placing one every other
-	 * block on the bottom rail and they never get used."</i></p>
+	 * per chord. Read in game: the double lane is seeded and runs the whole lane only never to be
+	 * used, and repeaters are expensive in survival -- one every other block on the bottom rail,
+	 * none of them used.</p>
 	 *
 	 * <p>Which is a question a run can answer before it opens, because the two things that decide
 	 * whether a chord may stand on the floor rail are both wall-free: {@link #railHolds} counts notes
@@ -8543,8 +8533,8 @@ public final class SongBuilder {
 	 *
 	 * <p>So one floor chord is break-even against a full head of two columns, two is the first setting
 	 * that is ahead, and a run opening off a stack or off a staircase's seed pays one column or none
-	 * and is ahead at one. Which makes this a dial rather than a rule, because the two things ekran
-	 * optimises pull opposite ways: a run holds a repeater in every column and the plain lane holds
+	 * and is ahead at one. Which makes this a dial rather than a rule, because the two things being
+	 * optimised pull opposite ways: a run holds a repeater in every column and the plain lane holds
 	 * one per chord, so <em>repeaters</em> only come out level at {@code 2f >= k}, about half the run
 	 * on the floor rail. Depth wants one, resources want more. Measured over the library by
 	 * {@link RailResourceProbe}.</p>
@@ -8589,7 +8579,7 @@ public final class SongBuilder {
 	}
 
 	/**
-	 * A run opening on a flat turn's second corner, ekran's, and the third of the three seeds.
+	 * A run opening on a flat turn's second corner, and the third of the three seeds.
 	 *
 	 * <p>The corner already holds a lane cell, and a lane cell is stone with something over it -- so
 	 * make that something dust and it is a head's second column standing in ground the turn had
@@ -8602,7 +8592,7 @@ public final class SongBuilder {
 	 * tick. What it holds instead is the repeater every path column holds, the one at the lane's own
 	 * level, and that is where the wait to the run's first real note lives. So the run's first note
 	 * lands one column later than a plain opening would put it and two columns earlier than a head
-	 * would: one column saved, which is what ekran said it saves.</p>
+	 * would: one column saved, which is what it is said to save.</p>
 	 *
 	 * <p>Told apart from the other two by where the wait goes, which is the only thing that differs:
 	 * a climb's seed carries a repeater and spends it there; a descent's pushes the wait up into the
@@ -8688,8 +8678,8 @@ public final class SongBuilder {
 		// not place dust -- {@code /setblock} puts down the state it is handed. Bare is the default
 		// state, every side {@code none}, which is a dot; and a dot powers the block beneath it and
 		// nothing else. So the column this seed drives, a stone at path level, was never lit at all:
-		// 502 runs, 153 dead builds, 255,042 notes behind them. ekran, off the world: <i>"the corner
-		// dust you place is a redstone dot not a cross, so its not powering the block next to it."</i>
+		// 502 runs, 153 dead builds, 255,042 notes behind them. Off the world: the corner dust
+		// laid there is a redstone dot and not a cross, so it powers no block beside it.
 		//
 		// Naming the four sides makes it a cross and a cross stays one, which is the same reason
 		// {@link #STACKED_CROSS} is stated rather than left to the game. It survives only where the
@@ -8737,11 +8727,11 @@ public final class SongBuilder {
 	/**
 	 * The landing of a seeding descent: a head's second column, and the head's first column deleted.
 	 *
-	 * <p>ekran's, 2026-08-17, and it is the smaller of the two seeds by their own account -- it saves
-	 * a column only where the lane above was going to lay a pad anyway. <i>"The repeater on the bottom
-	 * doesn't need to be there since wire is used to seed a double rail. So I moved it up to the top,
-	 * and then used the first block of the lane (redstone) to seed the double rail with no repeater
-	 * since the delay was already performed at the top."</i></p>
+	 * <p>2026-08-17, and it is the smaller of the two seeds by their own account -- it saves
+	 * a column only where the lane above was going to lay a pad anyway. The repeater on the bottom
+	 * does not need to be there, since wire is what seeds a double rail: moved up to the top, the
+	 * lane's first block of redstone seeds the double rail with no repeater at all, the delay
+	 * having already been spent above.</p>
 	 *
 	 * <p>The spiral's last rung stands one column past the landing with its dust a level above the new
 	 * lane, so that dust steps <em>down</em> into this cell on its own -- nothing sits above the lower
@@ -8805,14 +8795,14 @@ public final class SongBuilder {
 		// stepped off onto. Anchored a step lower, the second rung stands in the air a note block
 		// needs above it and the build refuses outright, which is how this was found.
 		for (int step = 1; step <= CUBE_FLOOR_HEIGHT; step++) {
-			// ekran, from the blocks: the last rung does not have to come down to the repeater's own
+			// from the blocks: the last rung does not have to come down to the repeater's own
 			// level to feed it. A repeater reads the block behind it, and dust resting on top of that
 			// block is what powers it -- so the final stone stands beside the landing rather than
 			// under the dust that used to reach across to it, and the run is a cell shorter.
 			//
 			// Guardian at twenty-four wide over five floors laid the old shape as
 			//   y=65   w0 >1 ST      wire level with the repeater, behind it
-			// where ekran's hand-built descent is
+			// where the hand-built descent is
 			//   y=129  w0            dust one level up ...
 			//   y=128  ST >1 NB      ... on the stone the repeater actually reads
 			int drop = step - 1;
@@ -9263,8 +9253,8 @@ public final class SongBuilder {
 	 * further back. So the head that follows a stacked-bus has its back slots free, and asking it to
 	 * give them up cost 185,760 heads across the library for nothing at all.</p>
 	 *
-	 * <p>Ekran found this from a vertical slice of Do The Dance at forty wide over two floors, and
-	 * was right about the geometry before it was measured.</p>
+	 * <p>In-game testing found this from a vertical slice of Do The Dance at forty wide over two
+	 * floors, and was right about the geometry before it was measured.</p>
 	 *
 	 * <p>Every place that tracks the gap asks this one question, because they have to give the same
 	 * answer: {@link #eventGroups} choosing the shape, {@link #landingOf} predicting the length, and
@@ -9290,8 +9280,8 @@ public final class SongBuilder {
 	 * one stacked module -- so the signal reaches the repeater on {@code 33 77 247} and stops there
 	 * rather than failing in scattered places.</p>
 	 *
-	 * <p>It is on because ekran asked for it and because a build that pastes is a build that can be
-	 * stood in front of. It was switched off once without being asked and that was mine to undo.
+	 * <p>It is on because it was asked for, and because a build that pastes is a build that can be
+	 * stood in front of. It was switched off once without being asked, and that was undone.
 	 * Where to look: a head of five keeps its two low slots forward rather than behind, and the cut
 	 * measures its far half from a tail length that assumed the other shape.</p>
 	 */
@@ -9317,7 +9307,7 @@ public final class SongBuilder {
 	 * listed first crowds its own harps out of the window -- and the window is exactly the head, so
 	 * the smaller the head the likelier it is.</p>
 	 *
-	 * <p>ekran's breach at Guardian 28 wide over seven floors, and the chord says it plainly: 24
+	 * <p>The breach at Guardian 28 wide over seven floors, and the chord says it plainly: 24
 	 * notes opening {@code hay, hay, hay, hay, wool, air, air, clay, ...}, where hay, wool and clay
 	 * all conduct. With both back slots the head takes seven, both harps fall inside, and it builds
 	 * {@code head7+tail17}. With the column behind held by a stacked centre the head takes five --
@@ -9371,7 +9361,7 @@ public final class SongBuilder {
 	}
 
 	/**
-	 * Whether a short tail is laid as a simple chord rather than as a bus. ekran's.
+	 * Whether a short tail is laid as a simple chord rather than as a bus.
 	 *
 	 * <p>The handover cell a stacked bus transitions on sits at the height of the lane rather than
 	 * raised -- it is there so the tail comes on with no delay -- and that is what makes this
@@ -9380,7 +9370,7 @@ public final class SongBuilder {
 	 * column; a tail of one or two is a column either way but comes out at lane height instead of
 	 * bus height, which is the plane a rail column runs in.</p>
 	 *
-	 * <p>"Try our best", ekran: a tail that cannot make the shape stays a bus rather than the chord
+	 * <p>Best effort: a tail that cannot make the shape stays a bus rather than the chord
 	 * giving anything up. {@link #fitsSmallModule} is the same test every other simple chord is
 	 * priced with, so a tail of three doors -- which cannot hold a shape whose middle has to conduct
 	 * -- is refused here exactly as it would be anywhere else.</p>
@@ -9390,16 +9380,16 @@ public final class SongBuilder {
 	/**
 	 * Whether a simple tail with a stone middle lays the cell of dust that makes it a bus tail.
 	 *
-	 * <p>ekran's, said three times before I stopped trying to predict it and just laid the block:
-	 * <i>"Literally ALL it had to do was place a dust on top and the wire wouldn't have died"</i>.</p>
+	 * <p>Said three times before I stopped trying to predict it and just laid the block:
+	 * All it had to do was place a dust on top, and the wire would not have died.</p>
 	 *
-	 * <p>The rule is that a repeater must always come directly out of a simple tail, because the middle
-	 * is soft powered -- lit by the handover's dust and nothing else -- so it drives a repeater and
-	 * lights no dust of its own. Two attempts were made at knowing in advance when that would fail, and
-	 * both were too narrow. {@link #repeaterComesOutOf} follows the route, so it sees a bend and the
-	 * lane closing and nothing else. Hanging the answer off {@link #parityPadOrSplitRepeater} sees the
-	 * parity pad and nothing else -- and a wait, a turn pad and a rail column all lay dust there too.
-	 * <b>The set of things that can follow a tail is not enumerable from where the tail is laid.</b></p>
+	 * <p>The rule is that a repeater must always come directly out of a simple tail, because the
+	 * middle is soft powered -- lit by the handover's dust and nothing else -- so it drives a repeater
+	 * and lights no dust of its own. Two attempts were made at knowing in advance when that would
+	 * fail, and both were too narrow. {@link #repeaterComesOutOf} follows the route, so it sees a bend
+	 * and the lane closing and nothing else. Hanging the answer off {@link #parityPadOrSplitRepeater}
+	 * sees the parity pad and nothing else -- and a wait, a turn pad and a rail column all lay dust
+	 * there too. <b>The set of things that can follow a tail is not enumerable from where the tail is laid.</b></p>
 	 *
 	 * <p>So it is not asked. A stone middle is the one middle with a free cell above it, dust there
 	 * costs a single block, and what it produces is exactly a bus tail: {@link #layBus} anchors at
@@ -9409,8 +9399,8 @@ public final class SongBuilder {
 	 * {@link #stackedBusTailColumns} already prices every tail as a bus, so this is the shape the plan
 	 * was measured on. The whole cost is one cell of the lane's fifteen: {@code busCells} 0 becomes 1.</p>
 	 *
-	 * <p>A harp middle and a tail of three's kept note are note blocks, which insist on air above them.
-	 * They have no cell to put dust in, stay soft tips, and give way instead --
+	 * <p>A harp middle and a tail of three's kept note are note blocks, which insist on air above
+	 * them. They have no cell to put dust in, stay soft tips, and give way instead --
 	 * {@link #SIMPLE_TAIL_GIVES_WAY_TO_A_TIGHT_GAP}.</p>
 	 */
 	static boolean STONE_MIDDLE_CARRIES_ITS_OWN_DUST = true;
@@ -9419,22 +9409,22 @@ public final class SongBuilder {
 	 * Whether a harp is only taken for the tail's middle when the two sides cannot hold the tail.
 	 *
 	 * <p>The middle has no instrument block under it and sounds harp whatever was meant, so a harp is
-	 * the one note that can stand there for free -- but that is a reason it <i>may</i>, not a reason it
-	 * <i>should</i>. The sides hold two notes, so a tail of one or two never needs the middle for
+	 * the one note that can stand there for free -- but that is a reason it <i>may</i>, not a reason
+	 * it <i>should</i>. The sides hold two notes, so a tail of one or two never needs the middle for
 	 * storage at all, and a harp put there anyway costs nothing except the thing that matters most: a
-	 * note block insists on air above it, so the middle can no longer carry the cell of dust that makes
-	 * this tail immune to whatever is laid in front of it.</p>
+	 * note block insists on air above it, so the middle can no longer carry the cell of dust that
+	 * makes this tail immune to whatever is laid in front of it.</p>
 	 *
 	 * <p>The harp loses nothing on a side -- a harp note block is built over air there too. So at two
-	 * notes or fewer the middle is left to stone and the tail is dustable whatever it is made of, which
-	 * takes the last shape that could not be rescued down to one: a tail of <b>three</b> with a harp
-	 * in it, where the middle really is the only place the third note can go.</p>
+	 * notes or fewer the middle is left to stone and the tail is dustable whatever it is made of,
+	 * which takes the last shape that could not be rescued down to one: a tail of <b>three</b> with a
+	 * harp in it, where the middle really is the only place the third note can go.</p>
 	 */
 	static boolean HARP_KEEPS_THE_MIDDLE_ONLY_AT_THREE = true;
 
 	/**
 	 * Whether a run may start off a stacked bus's handover, the way it already starts off a stacked
-	 * chord's cross. ekran's, and the reason the tail work was asked for at all.
+	 * chord's cross. The reason the tail work was asked for at all.
 	 *
 	 * <p>The handover is stone on the lane with dust over it. The dust powers the stone, and a
 	 * repeater facing out of that stone reads it -- so the bottom rail starts instantly and the two
@@ -9482,23 +9472,23 @@ public final class SongBuilder {
 	/**
 	 * Whether a simple tail with a note-block middle gives way where a pad could not be a repeater.
 	 *
-	 * <p>ekran's invariant: a repeater always comes directly out of a simple tail, and where padding
+	 * <p>The invariant: a repeater always comes directly out of a simple tail, and where padding
 	 * moves that repeater forward the tail falls back to a bus instead -- two cells for a tail of
 	 * three. <b>The tail is kept</b>; it is worth its complexity, and up to three notes is the shape.
 	 * What is decided here is only <i>when</i> it gives way.</p>
 	 *
-	 * <p>A pad is survivable in two of the three cases. Where the delay is two or more the pad is spent
-	 * as {@code r1} and the cell against the middle is a repeater after all
+	 * <p>A pad is survivable in two of the three cases. Where the delay is two or more the pad is
+	 * spent as {@code r1} and the cell against the middle is a repeater after all
 	 * ({@link #SPLIT_THE_PAD_REPEATER}); where the middle is stone the tail is finished off into a bus
 	 * cell after the fact ({@link #SOFT_TIP_DUSTED_FOR_THE_PAD}). What is left is a note-block middle
-	 * at a delay of one: no repeater is shorter than a tick, and there is no cell above a note block to
-	 * put dust in. That one has to be decided before the tail goes down.</p>
+	 * at a delay of one: no repeater is shorter than a tick, and there is no cell above a note block
+	 * to put dust in. That one has to be decided before the tail goes down.</p>
 	 *
 	 * <p><b>Asked of the gap, not of the pad,</b> and that is an approximation with a known direction.
 	 * Whether a pad is laid at all is {@code parityVerdict} read off blocks in the lane behind, which
 	 * is a simulation and not arithmetic -- the walk says so itself: <i>a nudge is decided against
-	 * blocks on the ground and no arithmetic can foresee it</i>. But the gap to the next event is known
-	 * a whole event ahead, so a tight gap is refused and everything else is kept.</p>
+	 * blocks on the ground and no arithmetic can foresee it</i>. But the gap to the next event is
+	 * known a whole event ahead, so a tight gap is refused and everything else is kept.</p>
 	 *
 	 * <p><b>It is wrong in both directions, and only one of them is harmless.</b> It gives up tails
 	 * that would never have been padded, which costs nothing. But a raw gap of two is not the same as
@@ -9508,8 +9498,8 @@ public final class SongBuilder {
 	 * Closing it means handing down the delay the next event will actually be triggered at, which is
 	 * settled an event later than this. It costs the tails it does refuse nothing anyway:
 	 * {@link #stackedBusTailColumns} already prices every tail as a bus, so the second column was
-	 * reserved and the simple shape was only ever spending one of them. ekran: <i>"the bus just would
-	 * have 2 cols"</i>.</p>
+	 * reserved and the simple shape was only ever spending one of them: the bus would have two
+	 * columns.</p>
 	 */
 	static boolean SIMPLE_TAIL_GIVES_WAY_TO_A_TIGHT_GAP = true;
 
@@ -9534,9 +9524,9 @@ public final class SongBuilder {
 	 * {@link #SIMPLE_TAIL_UNDONE_FOR_A_PAD}, and closing it is what makes a margin of one safe --
 	 * which is the other 70 columns.</p>
 	 *
-	 * <p>Re-sweep it rather than trusting this: {@code -Dcensus.set=SIMPLE_TAIL_KEEPS_A_NOTE_MIDDLE_ABOVE=N}.
-	 * The first sweep of it was taken against a builder with four unasked questions in it and said
-	 * no margin was worth anything, which was true of that builder and false of this one.</p>
+	 * <p>Re-sweep it rather than trusting this: {@code
+	 * -Dcensus.set=SIMPLE_TAIL_KEEPS_A_NOTE_MIDDLE_ABOVE=N}. The first sweep of it was taken against a
+	 * builder with four unasked questions in it and said no margin was worth anything, which was true of that builder and false of this one.</p>
 	 */
 	static int SIMPLE_TAIL_KEEPS_A_NOTE_MIDDLE_ABOVE = 3;
 
@@ -9544,10 +9534,10 @@ public final class SongBuilder {
 	 * Whether a note-block middle gives the simple shape up always, rather than only at a tight gap.
 	 *
 	 * <p>The same move that worked for the stone middle, made for the middle that cannot take dust:
-	 * stop asking whether a repeater will follow and take the shape that does not care. ekran's own
-	 * fallback, and their point about what it costs -- <i>"bottom rail seeding is only canceled if my
-	 * tail has more than 2 notes, since at 2, i can place notes on either side and still take up only
-	 * one col"</i>. A tail of one or two is a single bus cell with the notes either side, which is the
+	 * stop asking whether a repeater will follow and take the shape that does not care. The live
+	 * fallback, and what it costs: bottom rail seeding is only cancelled where the tail has more
+	 * than two notes, because at two the notes go either side and still spend one column.
+	 * A tail of one or two is a single bus cell with the notes either side, which is the
 	 * same column the simple shape spends, so at that size the fallback is free outright. Only a tail
 	 * of three goes to two cells -- and {@link #stackedBusTailColumns} priced it at two from the
 	 * start.</p>
@@ -9565,9 +9555,9 @@ public final class SongBuilder {
 	 * <b>one</b> at a margin of three, and the threshold is worth 89 columns of 22,429.</p>
 	 *
 	 * <p>So the blunt rule is kept, off, as the thing to fall back to and the baseline the conditional
-	 * is priced against -- not as the shape that ships. ekran asked for the conditional and the
-	 * conditional is what there is: <i>"note middles should be allowed, but then it should fallback to
-	 * a 2 cell bus if the repeater gets padded forward"</i>.</p>
+	 * is priced against -- not as the shape that ships. The conditional was what was asked for, and
+	 * the conditional is what there is: note middles are allowed, and the shape falls back to a
+	 * two-cell bus where the repeater gets padded forward.</p>
 	 *
 	 * <p><b>The lesson is worth more than the flag.</b> A measurement is only as good as the builder
 	 * it was taken against, and "no threshold is worth anything" was a true statement about a builder
@@ -9598,17 +9588,17 @@ public final class SongBuilder {
 	/**
 	 * Whether a repeater will come directly out of this cell, in line, with nothing in between.
 	 *
-	 * <p>ekran's test, and the one that decides whether a tail may be simple: <i>"can we / do we have
-	 * a repeater to continue this line leading directly out of this block? if the answer is no, THEN
-	 * we fallback to bus cell"</i>.</p>
+	 * <p>The test, and the one that decides whether a tail may be simple: is there a repeater to
+	 * carry this line on directly out of the block? Where there is not, the shape falls back to a
+	 * bus cell.</p>
 	 *
 	 * <p>The physics under it is narrower than the note this file used to carry. A block powered only
 	 * by dust is soft powered, and a soft-powered block cannot light <b>dust</b> on its far side --
 	 * but it drives a <b>repeater</b> against it perfectly well. So a simple tail is fine wherever the
 	 * next module's own trigger stands right in front of it, which is the ordinary case, and fails
 	 * only where something moves that repeater off the line: corner padding walking the route round a
-	 * bend, or a parity pad standing the next module a column over. ekran pasted the corner case and
-	 * read it back as sea lanterns.</p>
+	 * bend, or a parity pad standing the next module a column over. The corner case was pasted and
+	 * read back as sea lanterns.</p>
 	 *
 	 * <p>Asked of the route, which is what corner padding follows. A parity pad is decided later, by
 	 * the next chord's own shape against blocks that are not down yet, so it is not answered here --
@@ -9947,7 +9937,7 @@ public final class SongBuilder {
 	 * Whether a run of small chords is laid as two interleaved rails rather than as a module each.
 	 *
 	 * <p>A chord of three or fewer costs two columns however small it is: a repeater, then the block
-	 * that repeater drives. Ekran's shape halves that by running two chains at once -- one on the
+	 * that repeater drives. The shape halves that by running two chains at once -- one on the
 	 * path, one on the floor beneath it -- each carrying twice the gap and offset from the other by
 	 * one gap. Every column then holds one note and the repeater that drives the next, and the notes
 	 * alternate between the two levels:</p>
@@ -10083,15 +10073,15 @@ public final class SongBuilder {
 	 * <p>A run of {@code k} chords holding {@code b} blanks costs {@code 2 + k + b} columns where the
 	 * plain lane costs {@code 2k}, so a run is only ahead while {@code b < k - 2}: a floor rail that
 	 * takes a blank every time is a chord and a column each, which is what the plain lane charges,
-	 * plus the head. ekran read the shape off lady brown -- "several bottom rails that are carried on
-	 * for many blocks but NEVER actually get a chord on the bottom before ending. at that point its
-	 * just a waste of resources not an optimization of space".</p>
+	 * plus the head. In-game reading found the shape off lady brown -- "several bottom rails that are
+	 * carried on for many blocks but NEVER actually get a chord on the bottom before ending. at that
+	 * point its just a waste of resources not an optimization of space".</p>
 	 *
 	 * <p>A limit on how many come in a row rather than on how many there are, because that is the
 	 * question a run can answer where it stands. Whether a chord four events away will fit the floor
 	 * rail depends on where the wall is by then, and a run that guessed would be the third place the
 	 * same budget is kept. And it is only asked while the floor rail has carried nothing at all,
-	 * which is the shape ekran read.</p>
+	 * which is the shape in-game reading found.</p>
 	 *
 	 * <p><b>Off, because the arithmetic above is wrong about what a blank is against.</b> A blank is
 	 * not against the plain lane, it is against <em>ending the run</em> -- and a run that ends pays a
@@ -10101,7 +10091,7 @@ public final class SongBuilder {
 	 * 1498 at one in a row, 1484 at two, 1476 at three, and <b>1473 with no limit at all</b>. Every
 	 * limit is worse than none, and the tighter the limit the worse it gets.</p>
 	 *
-	 * <p><b>And the reading taken off those numbers was wrong.</b> It said the floor rails ekran saw
+	 * <p><b>And the reading taken off those numbers was wrong.</b> It said the floor rails seen
 	 * carrying nothing were the cheapest way to keep the path rail's one column per chord. They are
 	 * not: a run whose floor rail carries nothing is a column worse than the plain lane at every
 	 * length and holds about twice the repeaters, which {@link #RUN_WANTS_ITS_FLOOR_RAIL} sets out
@@ -10120,8 +10110,8 @@ public final class SongBuilder {
 	/**
 	 * MEASURE(barren): one run's bill, read where it ends.
 	 *
-	 * <p>ekran: <i>"the double lane gets seeded and continues for the whole lane, only to never get
-	 * used ... its placing one every other block on the bottom rail and they never get used."</i> The
+	 * <p>Read in game: the double lane is seeded and runs the whole lane only never to be used, a
+	 * repeater every other block on the bottom rail and none of them used. The
 	 * headline is {@code Floor0}: a run whose floor rail carried no chord at all.</p>
 	 */
 	private static void railRunEnded(PlacementPlan placements, int floorNotes, int columns,
@@ -10209,12 +10199,12 @@ public final class SongBuilder {
 	 * <p>The room asked for is the room the run's <em>first pair</em> needs, because a run that stops
 	 * at the column it opened on is a dead wire. Every other column of a run is driven by a repeater,
 	 * and a block a repeater drives hands a full fifteen to whatever the lane lays next; the opening
-	 * column alone is driven by the head's dust, and a block that dust powers cannot light dust of
-	 * its own. So the lane carries on into its padding and the signal stops there, with the rest of
-	 * the song behind it. ekran read one off the world as a stone with wire running into it and out
-	 * of it, and prescribed a repeater beside the block -- which is the physics exactly. The column
-	 * is simply not worth building: a run of one costs three columns where the plain module costs
-	 * two, so the answer is to want the room up front rather than to buy a way out of it.</p>
+	 * column alone is driven by the head's dust, and a block that dust powers cannot light dust of its
+	 * own. So the lane carries on into its padding and the signal stops there, with the rest of the
+	 * song behind it. In-game reading found one off the world as a stone with wire running into it and
+	 * out of it, and prescribed a repeater beside the block -- which is the physics exactly. The
+	 * column is simply not worth building: a run of one costs three columns where the plain module
+	 * costs two, so the answer is to want the room up front rather than to buy a way out of it.</p>
 	 *
 	 * <p>Which makes this the same sum the column-by-column test makes, moved to before the head is
 	 * laid: the pair and the turn's reserve, plus the two columns of head and whatever the wait in
@@ -10265,7 +10255,7 @@ public final class SongBuilder {
 	 * <p>A chord of three cannot stand on the floor rail, which has no centre. Rather than end the
 	 * run for it -- a run pays two columns of head to start again, and an odd three in the middle of
 	 * a long sequence is not worth that -- the floor column is laid empty and the chord takes the
-	 * path column after it. The two rails come out of it swapped over and carry on (ekran).</p>
+	 * path column after it. The two rails come out of it swapped over and carry on.</p>
 	 *
 	 * <p>A blank is exactly an ordinary floor column with its notes left off, and that is what makes
 	 * it cheap: the floor repeater driving it keeps the delay it would have had anyway, two gaps, so
@@ -10308,7 +10298,7 @@ public final class SongBuilder {
 	 * than four cannot be spanned by one repeater, which is what a rail asks of every repeater it
 	 * lays. Both are answered by laying the floor column empty: the chord takes the path column after
 	 * it, where the path rail has only the single gap to span, and the floor rail hops to a tick of
-	 * its own choosing and covers the rest from there. ekran, from the opening of song of storms,
+	 * its own choosing and covers the rest from there. From the opening of song of storms,
 	 * where the two ticks to the second chord and the four to the third come to six.</p>
 	 *
 	 * @param pathLive when this column's own note goes live, which the path rail is timed from
@@ -10335,7 +10325,7 @@ public final class SongBuilder {
 		// The plain pair: the next chord on the floor column, and the one after it on the path column
 		// where the run is allowed to stop. A chord the floor column cannot hold without sounding it
 		// early falls through to the blank below, which is the column that moves it up to the path
-		// rail -- ekran's second option, and the one already built.
+		// rail -- the second option, and the one already built.
 		if (railHolds(next, false) && railFloorTakes(placements, floor, next)
 				&& railDelay(floorLive, next.time()) > 0
 				&& index + 2 < events.size() && railHolds(events.get(index + 2), true)
@@ -10412,7 +10402,7 @@ public final class SongBuilder {
 	 * The tick a run opening at this cell would find its floor rail already live at, or
 	 * {@link #NO_BLANK} where it would have to build a head of its own.
 	 *
-	 * <p>ekran's: a stacked module already <em>is</em> a head. It lays a cross of dust at the lane's
+	 * <p>A stacked module already <em>is</em> a head. It lays a cross of dust at the lane's
 	 * floor level standing on a stone, one column back from where it hands over -- which is the same
 	 * pair of blocks {@link #addRailHead} spends a column building, at the same level, live at the
 	 * module's own tick. The cross points along the lane as well as across it, so the cell the next
@@ -10448,11 +10438,11 @@ public final class SongBuilder {
 			return placements.describeBlock(behind).startsWith("minecraft:redstone_wire")
 				? currentTime : NO_BLANK;
 		}
-		// And a stacked bus leaves its handover there, which is the same thing one level apart: stone
-		// on the lane with dust over it. The dust powers the stone it sits on, and that stone is what
-		// a repeater facing out of it reads -- so the floor rail starts with no column spent on it,
-		// exactly as it does off a stacked chord. ekran built both by hand and the pair came out
-		// almost twice as compact as what the walk lays today.
+		// And a stacked bus leaves its handover there, which is the same thing one level apart: stone on
+		// the lane with dust over it. The dust powers the stone it sits on, and that stone is what a
+		// repeater facing out of it reads -- so the floor rail starts with no column spent on it, exactly
+		// as it does off a stacked chord. In-game testing built both by hand and the pair came out almost
+		// twice as compact as what the walk lays today.
 		//
 		// Asked of the cell the shape said it handed over in, and not of what is standing there. Those
 		// two blocks -- stone with dust over it -- are also a corner and also a cell of pad, so the
@@ -10499,9 +10489,9 @@ public final class SongBuilder {
 	 * facing out of the handover's stone. The dust above that stone powers it and the head's cross
 	 * powers it from the side, which is exactly the block a run off a plain stacked chord reads.</p>
 	 *
-	 * <p>ekran, having built both by hand: <i>"it quite literally is the EXACT same as when we get an
-	 * instant start from a normal stacked chord. only difference is the first top rail slot is taken
-	 * by the tail of the stacked bus."</i> Eight columns against the eleven the walk laid before it.</p>
+	 * <p>Both built by hand and compared: it is exactly the instant start a normal stacked chord
+	 * gives, the one difference being that the first top rail slot is taken by the tail of the
+	 * stacked bus. Eight columns against the eleven the walk laid before it.</p>
 	 *
 	 * <p>The run therefore resumes on the <b>floor</b> rail, not the path one, and both rails are live
 	 * from the module's own tick.</p>
@@ -10514,7 +10504,7 @@ public final class SongBuilder {
 			+ ",delay=" + delay + "]");
 		// And the block it stands on, which every other floor-rail repeater gets from
 		// {@link #addRailNote} and this one was not getting from anywhere. A repeater on air is not a
-		// repeater. ekran's fixed slice has stone directly under it; the built one had neither.
+		// repeater. The fixed slice has stone directly under it; the built one had neither.
 		set(placements, tail.below(), "minecraft:stone");
 	}
 
@@ -10539,7 +10529,7 @@ public final class SongBuilder {
 	 * One column of a run: this event's note on the rail it falls on and, unless the run ends here,
 	 * the repeater that drives the next note on the other rail.
 	 *
-	 * <p>Slots go in one order, ekran's: the centre, then the near side, then the far one. The centre
+	 * <p>Slots go in one order: the centre, then the near side, then the far one. The centre
 	 * is the cell the wire runs through, so a note there has no instrument block of its own and plays
 	 * harp whatever was meant -- it is offered to a harp note of the chord and to nothing else. The
 	 * sides hang off it with a block each of their own and keep any instrument there is.</p>
@@ -10570,9 +10560,9 @@ public final class SongBuilder {
 			// which was never true. It came from one clause in the reader that refused to carry a
 			// dust's power into a note block, and the game says the two blocks are the same:
 			// isRedstoneConductor, isSignalSource, canOcclude and isSolidRender all read alike
-			// (NoteBlockConductsTest). ekran said so plainly -- "a note block can be powered just like
-			// a stone, there's no difference. a noteblock just cant have something on top, but that
-			// doesn't happen here" -- and the air above every centre is laid for exactly that reason.
+			// (NoteBlockConductsTest). A note block can be powered just like a stone, the one difference
+			// being that it cannot have something on top -- and the air above every centre is laid for
+			// exactly that reason.
 			EventNote harp = takeHarpNote(hanging);
 			placements.placing("rail:PATH notes" + chord.size()
 				+ (harp == null ? " sidesOnly" : " centred") + (fromDust ? " head" : ""));
@@ -10588,7 +10578,7 @@ public final class SongBuilder {
 			// The same way round as the floor rail. Both rails filling towards the lane behind leaves
 			// the whole column on the other side empty, so a run occupies its centre and one flank
 			// rather than straddling both -- and every lane spaced three apart then has a clear
-			// column between it and the next. ekran, who found the two rails disagreeing.
+			// column between it and the next. In-game testing, which found the two rails disagreeing.
 			hangRailNotes(placements, centre, at.noteSide().getOpposite(), hanging, time, false);
 			if (nextDelay > 0) {
 				set(placements, at.pos(),
@@ -10612,7 +10602,7 @@ public final class SongBuilder {
 		// module hangs its four low notes -- so a chord of one or two that fills the side facing
 		// ground the walk has not built yet leaves live stone against a slot the next lane's stacked
 		// modules were going to want. The side already built is one {@link #soundedByAnother} can see
-		// the whole of. ekran, reading a floor column in game.
+		// the whole of. Reading a floor column in game.
 		hangRailNotes(placements, at.pos(), at.noteSide().getOpposite(), hanging, time, true);
 		// The path rail's own repeater, carrying it on to the next column -- or, where the run stops
 		// here, the one that hands the path rail up so the lane after it has something to read. The
@@ -10649,15 +10639,15 @@ public final class SongBuilder {
 	/**
 	 * Whether a floor column standing here could hold this chord without sounding it early.
 	 *
-	 * <p>The one contention a run has. A floor column's notes sit at the lane's own floor level,
-	 * which is where the lane alongside hangs the low half of a stacked module, and a stacked
-	 * module's low notes stand on instrument blocks that conduct sideways. The near side is the side
-	 * facing the lane <em>behind</em> -- deliberately, so a run cannot reach into ground the walk has
-	 * not built yet -- and that is the lane whose stacked modules are already standing there. So this
-	 * is asked of a column that does not exist yet, one cell ahead of where the walk is, at the tick
-	 * the chord would go live. ekran, who named the shape before it was measured: "a lower rail note
-	 * can get mispowered by a stacked chord if the center adjacent instrument of that stacked chord is
-	 * up against it".</p>
+	 * <p>The one contention a run has. A floor column's notes sit at the lane's own floor level, which
+	 * is where the lane alongside hangs the low half of a stacked module, and a stacked module's low
+	 * notes stand on instrument blocks that conduct sideways. The near side is the side facing the
+	 * lane <em>behind</em> -- deliberately, so a run cannot reach into ground the walk has not built
+	 * yet -- and that is the lane whose stacked modules are already standing there. So this is asked
+	 * of a column that does not exist yet, one cell ahead of where the walk is, at the tick the chord
+	 * would go live. The shape was named in game before it was measured: a lower rail note can be
+	 * mispowered by a stacked chord where that chord's centre-adjacent instrument is up against
+	 * it.</p>
 	 *
 	 * @param floor the cell the floor column would stand in, or {@code null} where the caller is
 	 *     asking about events rather than about a place -- which is every question asked before the
@@ -10714,7 +10704,7 @@ public final class SongBuilder {
 	/**
 	 * Whether a lane's last chord may be built with its centre left to the wire.
 	 *
-	 * <p>ekran's, and it is what makes the instant seed fire often instead of rarely. A lane that
+	 * <p>This is what makes the instant seed fire often instead of rarely. A lane that
 	 * closes flush comes to rest on a note block in the very column the mirrored staircase reads
 	 * from, and a powered block lights only the dust it stands square against -- so the seed is
 	 * refused and the next lane buys a head. Hang those notes on the flanks instead and the centre is
@@ -10838,7 +10828,7 @@ public final class SongBuilder {
 
 	/**
 	 * The two-swap turn: a repeater that would land on a corner trades places with a note instead of
-	 * being padded past it (ekran, 2026-07-31, built by hand in world first).
+	 * being padded past it (2026-07-31, built by hand in world first).
 	 *
 	 * <p>A repeater may not stand on a corner, so until now dust took the corner and the repeater
 	 * moved one cell along. That cell carries nothing and costs a block of the fifteen a repeater
@@ -11055,7 +11045,7 @@ public final class SongBuilder {
 		// here rather than a route rebuilt from scratch.
 		// Reserved well past what this chord will use. The cells beyond the bus are not free either:
 		// they are where the walk carries on, and the next module stands its repeater on the first of
-		// them. A note hung there by this bus is a collision the walk finds two events later. Ekran's
+		// them. A note hung there by this bus is a collision the walk finds two events later. The
 		// on Hammer at twelve wide: a chord of two, one cell of bus, a note on the cell the route
 		// bends into, and the repeater after it had nowhere to stand.
 		// The chord after the swap may be the sunken shape, and then swap two is not merely
@@ -11065,10 +11055,10 @@ public final class SongBuilder {
 		// so it passes fifteen to the dust beyond exactly as the bus block would have. Swapping it
 		// out therefore trades a note for nothing and the chord comes up one short.
 		//
-		// ekran read it off the blocks and built the answer: put the missing note in the cell the
-		// repeater faces, and sink the bus cell beside it. Which is the opening and the lowered
-		// column, so it is this shape's own builder, handed the column rather than left to work it
-		// out from a lane the swap has moved off the route.
+		// In-game reading showed it off the blocks and built the answer: put the missing note in the cell
+		// the repeater faces, and sink the bus cell beside it. Which is the opening and the lowered
+		// column, so it is this shape's own builder, handed the column rather than left to work it out
+		// from a lane the swap has moved off the route.
 		if (SWAP_KEEPS_THE_SUNKEN_SHAPE && placements.sunkenOffered() && forceBus) {
 			Lane openingAt = new Lane(opening.pos().below(), opening.travel(), opening.noteSide(),
 				opening.bends(), opening.cornerAt(0), lane.crowded());
@@ -11201,7 +11191,7 @@ public final class SongBuilder {
 	}
 
 	/**
-	 * ekran's cross-descent: a stacked head whose cross is the staircase's first rung.
+	 * The cross-descent: a stacked head whose cross is the staircase's first rung.
 	 *
 	 * <p>What the six head slots carry, by name. {@code relayOver} stands over the second rung's
 	 * dust and {@code backLow} beside the second rung's stone, a level down; both, and the centre,
@@ -11387,7 +11377,7 @@ public final class SongBuilder {
 	static String LAST_SUNKEN_CUT_REFUSAL = "";
 
 	/**
-	 * ekran's sunken cut, decided before a block is laid.
+	 * The sunken cut, decided before a block is laid.
 	 *
 	 * <p>Every slot is asked {@link #soundedByAnother} here, the way a sunken bus asks its four, so
 	 * that what the near half carries is settled before the far half is sized -- a near half that
@@ -11453,7 +11443,7 @@ public final class SongBuilder {
 		// in the next column -- powered stone with dust on it, which is a lowered cell -- and carries
 		// one note on the side away from the descent. The descent side is where the second rung's
 		// stone goes, a level down, under where that note's instrument would be: that is the block
-		// ekran's drawing sheds, and why the cut is 24 there and 25 with room for a lowered cell.
+		// the drawing sheds, and why the cut is 24 there and 25 with room for a lowered cell.
 		Direction rungSide = null;
 		if (nearBus == 0) {
 			Direction away = descentSide.getOpposite();
@@ -11726,10 +11716,10 @@ public final class SongBuilder {
 		 * pair either side of the run is worked out from the outgoing direction alone.</p>
 		 *
 		 * <p>That mattered more than it looks. A corner already loses one of its pair to the cell the
-		 * wire arrived from, so without this a turn costs a chord two note slots, and a bus that has
-		 * to grow two blocks to make them up can be pushed past the fifteen its repeater reaches --
-		 * at which point the far end of it never fires at all. Ekran found it as two copper bulbs
-		 * that never lit, on a chord of twenty-eight that should have fitted round the bend.</p>
+		 * wire arrived from, so without this a turn costs a chord two note slots, and a bus that has to
+		 * grow two blocks to make them up can be pushed past the fifteen its repeater reaches -- at which
+		 * point the far end of it never fires at all. In-game testing found it as two copper bulbs that
+		 * never lit, on a chord of twenty-eight that should have fitted round the bend.</p>
 		 */
 		List<BlockPos> noteSlots() {
 			if (!onCorner) {
@@ -11738,7 +11728,7 @@ public final class SongBuilder {
 			// Three at a corner. The pair either side of the run is worked out from the direction the
 			// wire *leaves* on, which makes the cell opposite that direction invisible -- and that
 			// cell is free for exactly the reason the corner exists, because the wire turned away
-			// from it. Traced on ekran's failing chord: at both corners the run's own stone took one
+			// from it. Traced on the failing chord: at both corners the run's own stone took one
 			// of the pair, so a turn was costing the chord two slots and the bus grew two blocks to
 			// make them up. Sixteen blocks is past the fifteen a repeater reaches, so the tail of it
 			// never fired -- two copper bulbs that stayed lit on a chord of twenty-eight.
@@ -11846,7 +11836,7 @@ public final class SongBuilder {
 			// so which it takes cannot change the length of the run -- only which lane the note ends
 			// up beside, and the high-z slot is beside the lane the walk has not built yet.
 			//
-			// ekran's, off the corner at 32 wide over two floors: a bus of five with both slots of its
+			// Off the corner at 32 wide over two floors: a bus of five with both slots of its
 			// last cell free took the one facing the next lane, and the corner cell of that lane came
 			// down against it. Not free, though -- the bend exception it overrides is there because the
 			// two-swap turn wants a note on the inside diagonal, so this can cost a swap where the odd
@@ -11927,7 +11917,7 @@ public final class SongBuilder {
 	 * takes its turn part way through an iteration, so {@code turning} means different things before
 	 * and after. Hoisting it into a local broke every mode at once and refused 1,528 builds.</p>
 	 *
-	 * <p>Two forms. The old one asks "is this the first chord after the turn", a count. ekran's asks
+	 * <p>Two forms. The old one asks "is this the first chord after the turn", a count. The asks
 	 * how far the repeater stands from the second corner, which is what the blocks care about --
 	 * Kick Back's chord of twenty-one was refused six columns clear of its corner while i-wonder's
 	 * was refused standing against the exit run, and a count cannot tell those apart.</p>
@@ -11970,7 +11960,7 @@ public final class SongBuilder {
 	 * standing directly against the exit run, which is the case that actually breaks. Both are "the
 	 * first chord after the turn".</p>
 	 *
-	 * <p>ekran's rule instead: the centre of a stacked chord is clear of a corner at four blocks, so
+	 * <p>The rule instead: the centre of a stacked chord is clear of a corner at four blocks, so
 	 * the repeater may stand at {@code corner + 3}.</p>
 	 */
 	static boolean TURN_BAN_BY_DISTANCE = true;
@@ -11978,14 +11968,14 @@ public final class SongBuilder {
 	/**
 	 * v2: a chord may wrap a bend, so long as its centre keeps clear of both corners.
 	 *
-	 * <p>{@link #inTurn} answers the distance question ekran's rule asks -- and never gets to ask it
+	 * <p>{@link #inTurn} answers the distance question the rule asks -- and never gets to ask it
 	 * while the route is still bending, because {@code if (turning) return true;} comes first. So a
 	 * chord laid on the bend is refused the stacked shape for <em>where the walk is</em> rather than
 	 * for where its blocks are, falls back to a bus, and the lane runs out of room.</p>
 	 *
-	 * <p>ekran found one at Guardian 15 wide over six floors, {@code 15 81 379}: a stacked bus of
-	 * twenty that breached a <b>flat</b> turn, and which they then rebuilt by hand taking both ends
-	 * of the bend with no breach and no dead wire. Their rule, read off those blocks: a stacked
+	 * <p>In-game testing found one at Guardian 15 wide over six floors, {@code 15 81 379}: a stacked
+	 * bus of twenty that breached a <b>flat</b> turn, and which they then rebuilt by hand taking both
+	 * ends of the bend with no breach and no dead wire. Their rule, read off those blocks: a stacked
 	 * centre is safe at exactly three blocks from a corner, the corners being the two stone cells the
 	 * lane turns on. Nothing laid along the perpendicular arm can reach it there.</p>
 	 *
@@ -12061,8 +12051,8 @@ public final class SongBuilder {
 	 *   <li>the stone says what laid it -- tuff a bus, andesite a stacked chord, deepslate a stacked
 	 *     bus, deepslate tiles the head of a cut, smooth basalt a rail, and plain stone the lane;</li>
 	 *   <li>stripped crimson hyphae is a lane standing outside its wall, and red nether brick is wire
-	 *     the signal never got to, which wins over everything because everything under it is moot;</li>
-	 *   <li>a note that would sound at the wrong moment is a lit copper bulb, one with nothing to set
+	 * the signal never got to, which wins over everything because everything under it is moot;</li>
+	 * <li>a note that would sound at the wrong moment is a lit copper bulb, one with nothing to set
 	 *     it off wears a dragon head -- both still leave a machine that runs;</li>
 	 *   <li>and a cell two shapes both wanted is a sea lantern, the build going up rather than being
 	 *     refused, which is what this flag originally did and all it did.</li>
@@ -12180,7 +12170,7 @@ public final class SongBuilder {
 	/**
 	 * The padding labels, in planks, so a paste says at a glance what a lane is spending columns on.
 	 *
-	 * <p>ekran's, and the point of the fourth colour is the point of the whole table: v2 is meant to
+	 * <p>The point of the fourth colour is the point of the whole table: v2 is meant to
 	 * need corner padding and parity padding and nothing else -- {@link #V2_PADS_AHEAD} and
 	 * {@link #V2_BOOKS_PADS} are off precisely because a lane that can cut anywhere never has to be
 	 * walked out to its wall. So anything that comes out <b>bamboo</b> is a column being spent for a
@@ -12188,7 +12178,7 @@ public final class SongBuilder {
 	 * census. {@link #BUSY_PAD_FREES_THE_BACK_FLANKS} gets its own colour because it is the one new
 	 * kind, and it is supposed to be rare enough to point at individually.</p>
 	 *
-	 * <p>The closing pad is <b>acacia</b> rather than bamboo, ekran's, because it is much the largest
+	 * <p>The closing pad is <b>acacia</b> rather than bamboo, because it is much the largest
 	 * of the unjustified ones and it drowned the rest. Over the library on v2 it lays 8,149 cells of
 	 * dust and 1,537 more raised into a climb, where the cut's pin -- the other big one, since
 	 * removed -- laid 3,087 in front and 318 behind. The pin to the wall goes with the closing pad:
@@ -12270,7 +12260,7 @@ public final class SongBuilder {
 		if (style.contains("simpleTail")) {
 			return "minecraft:cobbled_deepslate";
 		}
-		// Polished tuff, ekran's choice, and the reason is the point of the shape: it is functionally a
+		// Polished tuff, the choice, and the reason is the point of the shape: it is functionally a
 		// bus and as safe to place as one, so it wears what a bus wears with a finish on it.
 		if (style.startsWith("SUNKEN_BUS")) {
 			return "minecraft:polished_tuff";
@@ -12296,8 +12286,8 @@ public final class SongBuilder {
 	/**
 	 * Whether a descent is walked out to its wall rather than built where the lane stopped.
 	 *
-	 * <p>The experiment behind the {@code pinned-descents} branch. A recessed descent is the one
-	 * turn that stands in a column no other corridor's turn stands in, and ekran has traced wrong
+	 * <p>The experiment behind the {@code pinned-descents} branch. A recessed descent is the one turn
+	 * that stands in a column no other corridor's turn stands in, and in-game testing has traced wrong
 	 * notes to one twice. Pinning it costs whatever the wire cannot pay for.</p>
 	 */
 	static boolean PIN_DESCENTS = true;
@@ -12321,19 +12311,19 @@ public final class SongBuilder {
 	 *   comes out into the next lane 15 blocks, two corners -- up to 28
 	 * </pre>
 	 *
-	 * <p>Ekran's, and twenty-eight is only the worst of the three. Holding every chord to it padded
+	 * <p>Twenty-eight is only the worst of the three. Holding every chord to it padded
 	 * out lanes in front of chords of twenty-nine and thirty that were never going to reach the
 	 * second bend in the first place.</p>
 	 *
-	 * <p>The first line of that table wants one more thing said, and it is the thing that was
-	 * missing. A chord that stops <em>in front of</em> a bend still pays a cell for it: a repeater
-	 * may not stand on a corner, so dust takes the corner and the repeater goes one further, and
-	 * that dust is on this chord's run. Where the bus rides <em>over</em> the bend the corner is a
-	 * bus block and is counted already -- which is why riding a corner is, oddly, cheaper than
-	 * stopping against one. Thirty notes is fifteen blocks, which is the whole of what a repeater
-	 * reaches, so a chord of thirty has nothing left to pay a corner with and may only end a run
-	 * where a repeater follows it directly. Ekran found it as two copper bulbs on a chord of thirty
-	 * a block short of the bend, on the one-floor build of {@code ultra-limit-two-thirties}.</p>
+	 * <p>The first line of that table wants one more thing said, and it is the thing that was missing.
+	 * A chord that stops <em>in front of</em> a bend still pays a cell for it: a repeater may not
+	 * stand on a corner, so dust takes the corner and the repeater goes one further, and that dust is
+	 * on this chord's run. Where the bus rides <em>over</em> the bend the corner is a bus block and is
+	 * counted already -- which is why riding a corner is, oddly, cheaper than stopping against one.
+	 * Thirty notes is fifteen blocks, which is the whole of what a repeater reaches, so a chord of
+	 * thirty has nothing left to pay a corner with and may only end a run where a repeater follows it
+	 * directly. In-game testing found it as two copper bulbs on a chord of thirty a block short of the
+	 * bend, on the one-floor build of {@code ultra-limit-two-thirties}.</p>
 	 *
 	 * <p>Charged only where the bus actually reaches the bend. A chord ending well short of one is
 	 * not the thing that has to carry the wire to it -- something else will stand a repeater in
@@ -12354,17 +12344,17 @@ public final class SongBuilder {
 
 	/**
 	 * @param sunken whether this chord would take the {@link ChordStyle#SUNKEN_BUS} shape, which
-	 *     answers the same question with three notes fewer to carry and one column of lane more.
-	 *     Its opening is a note block rather than dust, so it costs no wire and the three notes in
-	 *     it are free; the run that has to stay inside a repeater's reach is only what comes after.
-	 *     ekran built the turn by hand at the columns it pastes at: a chord of thirty through both
-	 *     corners is fifteen cells of dust and a note to spare, where the same chord as a plain bus
-	 *     wants sixteen and is refused -- so the lane ran nine past its wall rather than turn in
-	 *     front of a chord this shape carries round.
+	 * answers the same question with three notes fewer to carry and one column of lane more. Its
+	 * opening is a note block rather than dust, so it costs no wire and the three notes in it are
+	 * free; the run that has to stay inside a repeater's reach is only what comes after. In-game
+	 * testing built the turn by hand at the columns it pastes at: a chord of thirty through both
+	 * corners is fifteen cells of dust and a note to spare, where the same chord as a plain bus wants
+	 * sixteen and is refused -- so the lane ran nine past its wall rather than turn in front of a
+	 * chord this shape carries round.
 	 */
 	private static boolean straddleFits(int notes, int columns, int slabStep, boolean sunken) {
 		for (int corners = 0; corners <= 2; corners++) {
-			// 3 + 2 * cells - corners notes, which is ekran's count off the blocks: the opening holds
+			// 3 + 2 * cells - corners notes, which is the count off the blocks: the opening holds
 			// three, every cell after it holds two, and a bend spends one of the pair on the run.
 			int cells = sunken ? Math.max(1, (notes - 2 + corners) / 2) : (notes + corners + 1) / 2;
 			// The columns the chord stands in, which for a sunken bus is one more than its dust: the
@@ -12402,13 +12392,13 @@ public final class SongBuilder {
 	private static final int FLAT_TURN_REACH = 2;
 
 	/**
-	 * ekran's sunken bus: the opening cell is a note block, and the cell after it runs a level down.
+	 * The sunken bus: the opening cell is a note block, and the cell after it runs a level down.
 	 *
-	 * <p>Laid exactly as ekran built it by hand. The repeater strongly powers the note block directly
-	 * in front of it, which holds a harp in the centre and a note either side; the dust in the next
-	 * column sits at the lane's own height, reads that block at a full fifteen, and steps up onto the
-	 * ordinary bus after it at fourteen. So the opening column carries three notes for no wire at
-	 * all.</p>
+	 * <p>Laid exactly as in-game testing built it by hand. The repeater strongly powers the note block
+	 * directly in front of it, which holds a harp in the centre and a note either side; the dust in
+	 * the next column sits at the lane's own height, reads that block at a full fifteen, and steps up
+	 * onto the ordinary bus after it at fourteen. So the opening column carries three notes for no
+	 * wire at all.</p>
 	 *
 	 * <p>The two notes beside the lowered dust hang at lane level, where {@link #placeNote} lays their
 	 * instrument as a half-slab -- the same thing the rails do, and the reason nothing solid ends up
@@ -12455,8 +12445,8 @@ public final class SongBuilder {
 		//
 		// This method may hand the chord back to the plain bus below it, and until now it did so from
 		// the middle: the centre note and both flanks were already down when the parity check refused,
-		// so the bus was laid over the top of them and the two shapes met in the opening cell. ekran
-		// read it straight off a paste as a sea lantern with a note block wanting air above it and a
+		// so the bus was laid over the top of them and the two shapes met in the opening cell. It
+		// read straight off a paste as a sea lantern with a note block wanting air above it and a
 		// bus cell wanting dust -- and the whole chord painted as a sunken bus while not one column of
 		// it was sunken. Without DEBUG_PASTE the same collision throws instead, which sends the shift
 		// loop hunting for a column that was never the problem.
@@ -12466,7 +12456,7 @@ public final class SongBuilder {
 		//
 		// Parity, after all, and only here.
 		//
-		// ekran, off a paste: a sunken bus cannot accidentally *power* anything -- its notes are note
+		// off a paste: a sunken bus cannot accidentally *power* anything -- its notes are note
 		// blocks and note blocks sound nothing -- so lining up with somebody else's flanks or with a
 		// bottom rail is fine and needs no check. What it can do is be powered: these two cells sit at
 		// the lane's own level, and a stacked module's centre is a live block whose sides drive whatever
@@ -12474,8 +12464,8 @@ public final class SongBuilder {
 		//
 		// So the question is asked of the cells and not of the shapes: {@link #soundedByAnother} is
 		// true of a live block belonging to another tick and false of a note block, which is exactly the
-		// line ekran drew. Refused rather than dropped, so that the module moves a column and keeps all
-		// its notes -- the shift loop in {@link #layBus} lays that column as a parity pad and tries
+		// line drawn in game. Refused rather than dropped, so that the module moves a column and keeps
+		// all its notes -- the shift loop in {@link #layBus} lays that column as a parity pad and tries
 		// again, which is what parity padding is.
 		//
 		// Where the opening's own pair goes, read off the route the same way the lowered pair below
@@ -12488,9 +12478,9 @@ public final class SongBuilder {
 		// diagonal. A note in the first is a note block sitting where the lane's next dust goes, and
 		// the lane stops there.
 		//
-		// ekran read it off illit at 40x5 -- 3,702 notes dead behind one note block -- and named the
-		// answer: that column stays the lane's, laid raised, and the note moves round onto the free
-		// side of it. Which is what dropping the slot does. The note falls through to the tail, the
+		// In-game reading showed it off illit at 40x5 -- 3,702 notes dead behind one note block -- and
+		// named the answer: that column stays the lane's, laid raised, and the note moves round onto the
+		// free side of it. Which is what dropping the slot does. The note falls through to the tail, the
 		// tail grows the cell it was going to need anyway, and the note hangs off the side of it.
 		List<Direction> openSides = new ArrayList<>(2);
 		for (Direction out : List.of(side, side.getOpposite())) {
@@ -12506,11 +12496,11 @@ public final class SongBuilder {
 		// stone. Down a straight lane those are the two along travel, so what is left is the two
 		// across and this is the rule it has always been. Through a bend they are not.
 		//
-		// ekran built the three arrangements by hand and this is the one that reads oddly: a chord
-		// turning on its lowered cell hangs a note on the side the route turned *away* from, and
+		// In-game testing built the three arrangements by hand and this is the one that reads oddly: a
+		// chord turning on its lowered cell hangs a note on the side the route turned *away* from, and
 		// leaves the side it turned into empty. Which is the same rule -- the bus is about to stand
-		// there. Asked as two positions and not as a freeness test, because {@link #layBus} has not
-		// laid its stone yet and there would be nothing to find.
+		// there. Asked as two positions and not as a freeness test, because {@link #layBus} has not laid
+		// its stone yet and there would be nothing to find.
 		BlockPos underTheOpening = opening.pos();
 		BlockPos underTheBus = opening.ahead(2).pos();
 		List<Direction> lowSides = new ArrayList<>(2);
@@ -12569,7 +12559,7 @@ public final class SongBuilder {
 				}
 				System.out.println(said);
 			}
-			// Relocation before padding, which is ekran's order everywhere else in this file: move the
+			// Relocation before padding, which is the order everywhere else in this file: move the
 			// contested note, not the module.
 			//
 			// And here it is free, exactly once. The tail is what is left after the opening's three, and
@@ -12615,9 +12605,8 @@ public final class SongBuilder {
 				// is what was carrying the chord. A sunken bus is three notes free in the opening and
 				// fifteen cells of dust, which is thirty-three; the plain bus it falls to is fifteen
 				// cells for thirty notes with not a slot spare, so at the cap the fallback does not
-				// land short, it drops notes. ekran, standing in front of the one that did:
-				// "it just had to... not put a note there. that should have been relocation doing its
-				// thing but it didnt."
+				// land short, it drops notes. Standing in front of the one that did: it simply had
+				// to not put a note there, which is what relocation should have done and did not.
 				//
 				// So every loud slot is dropped and its note falls through to the tail, the way a note
 				// falls through a slot the route has reserved. What it costs is cells, and the run is
@@ -12661,13 +12650,13 @@ public final class SongBuilder {
 		// note block beside it rather than having to start on top of one.
 		placements.powered(low.pos(), "minecraft:stone", time);
 		set(placements, low.pos().above(), "minecraft:redstone_wire");
-		// Never a falling instrument in a lowered slot over a floor. A lowered note's instrument is
-		// the floor at lane-1, and sand or gravel there wants a support at lane-2 -- the air over the
-		// floor below's notes. ekran read it twice off Guardian, 18x4 and 20x4 at 5 74 141: a sand
-		// sunk onto the rail beneath, its support silencing the note under it, with plenty of harps
-		// it could have swapped for. The stacked head has kept its low pair clear of falling notes
-		// since it was written; this is the same rule for this pair, see sinkable. The note goes to
-		// the bus instead, which hangs it at bus height with its support on the floor.
+		// Never a falling instrument in a lowered slot over a floor. A lowered note's instrument is the
+		// floor at lane-1, and sand or gravel there wants a support at lane-2 -- the air over the floor
+		// below's notes. In-game reading showed it twice off Guardian, 18x4 and 20x4 at 5 74 141: a sand
+		// sunk onto the rail beneath, its support silencing the note under it, with plenty of harps it
+		// could have swapped for. The stacked head has kept its low pair clear of falling notes since it
+		// was written; this is the same rule for this pair, see sinkable. The note goes to the bus
+		// instead, which hangs it at bus height with its support on the floor.
 		for (Direction out : lowSides) {
 			EventNote lowered = sinkable(placements, rest);
 			if (lowered != null) {
@@ -12696,7 +12685,7 @@ public final class SongBuilder {
 	 * <p>A lowered note's instrument is the floor at lane-1, and sand or gravel there wants a support
 	 * at lane-2. Where a floor runs under the lane that cell is the air over its notes -- they hang
 	 * three below the lane -- so a falling instrument may not sink there, and the first note that
-	 * does not fall is taken instead; where no floor is under the lane anything may sink. ekran's
+	 * does not fall is taken instead; where no floor is under the lane anything may sink. The
 	 * rule, and it needs no lookahead: the floor below is always the same four down, and so is where
 	 * its notes want air. Nothing is ever dropped for it -- a note this will not sink hangs on the
 	 * bus, at bus height, with its support on the floor.</p>
@@ -12727,7 +12716,7 @@ public final class SongBuilder {
 		// And not the one the physics implies either: a chord of three doors is small enough for this
 		// shape and cannot hold it, because the anchor has to pass power on and a door does not.
 		// {@link #fitsSmallModule} is the same test {@link #chooseStyle} priced the chord with.
-		// ekran's closing chord. A lane about to climb into a seed puts its last notes on the flanks
+		// The closing chord. A lane about to climb into a seed puts its last notes on the flanks
 		// and leaves the centre of the column to the wire, so that what stands behind the staircase is
 		// dust rather than a note block -- which is the one thing a mirrored ladder cannot start from.
 		if (closesOnTheFlanks(placements, chord, body, time, forceBus)
@@ -12761,7 +12750,7 @@ public final class SongBuilder {
 			}
 			return new Body(lane.ahead(2), 0);
 		}
-		// ekran's sunken bus, in front of the plain one it replaces. Never longer, and on an odd chord
+		// The sunken bus, in front of the plain one it replaces. Never longer, and on an odd chord
 		// a column shorter -- see {@link ChordStyle#SUNKEN_BUS}. Refused only where the chord has no
 		// harp to drive its opening with, and then the plain bus below is what it always was.
 		if (placements.sunkenOffered()) {
@@ -12772,8 +12761,8 @@ public final class SongBuilder {
 			}
 			// No harp to open with, or the lowered pair could not be placed quietly. Either way the plain
 			// bus below is what this always was -- and it says so, because the label went down before the
-			// shape was settled. ekran read a chord painted polished tuff end to end without one sunken
-			// column in it, which is a marker lying about the machine it is marking.
+			// shape was settled. In-game reading found a chord painted polished tuff end to end without one
+			// sunken column in it, which is a marker lying about the machine it is marking.
 			placements.padded("sunkenBusGaveWay");
 			placements.placing("chord:BUS notes" + chord.size());
 		}
@@ -12829,9 +12818,10 @@ public final class SongBuilder {
 	 * this since it started opening into the air gap beside another lane; the rigid shape never did,
 	 * and it is the shape that cannot grow out of the way, so it is the shape that was hit.</p>
 	 *
-	 * <p>Ekran found it at 3 65 6 of jojo-il-vento-d-oro at thirty-six wide: a chord of three hung a
-	 * note against the last bus block of the chord a tick earlier. Nothing looked wrong -- the blocks
-	 * are all correct and the bulb test passes, because the extra sounding takes nothing away.</p>
+	 * <p>In-game testing found it at 3 65 6 of jojo-il-vento-d-oro at thirty-six wide: a chord of
+	 * three hung a note against the last bus block of the chord a tick earlier. Nothing looked wrong
+	 * -- the blocks are all correct and the bulb test passes, because the extra sounding takes nothing
+	 * away.</p>
 	 */
 	private static boolean slotIsQuiet(PlacementPlan placements, Lane lane, BlockPos slot, int time) {
 		return slotIsFree(placements, lane, slot) && !soundedByAnother(placements, slot, time);
@@ -12928,7 +12918,7 @@ public final class SongBuilder {
 			// short head cannot be made at all the chord falls to a plain bus instead, and for a chord
 			// of fifteen that is nine columns against the eight a shifted head takes.
 			//
-			// ekran found it by pasting the chord in the air: the shape was there all along.
+			// In-game testing found it by pasting the chord in the air: the shape was there all along.
 			behindShift = true;
 			gaveUp = "behindBusyShifted";
 			placements.padded(style.busHeaded() ? "planShiftForBehindStackedBus"
@@ -12944,7 +12934,7 @@ public final class SongBuilder {
 			// {@link #landingOf} makes the same substitution, so most of the time it is not a
 			// surprise at all.
 			// The rigid shape falls to a head of five with a bus behind it too, not all the way to a
-			// plain bus. ekran, reading one in game: there was no stacked chord anywhere near it to
+			// plain bus. Reading one in game: there was no stacked chord anywhere near it to
 			// justify a plain bus, and a front-only head fits. A chord of seven is a repeater and
 			// four cells as a bus -- five columns -- against two, a handover and one cell as a head
 			// of five with a tail of two, which is four. A chord of six is four either way, so this
@@ -12974,19 +12964,19 @@ public final class SongBuilder {
 		// slots is the cell the wire came in from. A bus can put them anywhere down its length and
 		// grow until it has, so it is what every shape falls back to rather than a shape that fails.
 		//
-		// The stacked shape first and the bus only after it. Both leave the contested cell open, but
-		// the bus pays a column of lane to do it and the stacked module does not -- it is the denser
-		// shape, and a chord of three leaves one of its hangers empty rather than growing. Ekran built
+		// The stacked shape first and the bus only after it. Both leave the contested cell open, but the
+		// bus pays a column of lane to do it and the stacked module does not -- it is the denser shape,
+		// and a chord of three leaves one of its hangers empty rather than growing. In-game testing built
 		// both by hand before choosing: bus-converting works and costs space, stacking works and does
-		// not. In a turn the stacked shape is unavailable whatever its size, and a chord with fewer
-		// than two notes that will pass power sideways has no relays to stand the module on, so the
-		// bus is still what is left when neither holds.
+		// not. In a turn the stacked shape is unavailable whatever its size, and a chord with fewer than
+		// two notes that will pass power sideways has no relays to stand the module on, so the bus is
+		// still what is left when neither holds.
 		if (style == ChordStyle.SMALL && lane.crowded()
 				&& !smallChordFits(placements, lane, event.notes().size(), event.time())) {
-			// Counted three ways, because ekran reads small chords coming out bus-shaped in game "with
-			// no explanation, especially on flat turns" and this is the only line that can do it. The
-			// one worth knowing is the middle: a chord the stacked shape would have taken, refused it
-			// for the turn rule alone and given a column of lane to a bus instead.
+			// Counted three ways, because in-game reading shows small chords coming out bus-shaped in game
+			// "with no explanation, especially on flat turns" and this is the only line that can do it. The
+			// one worth knowing is the middle: a chord the stacked shape would have taken, refused it for
+			// the turn rule alone and given a column of lane to a bus instead.
 			//
 			// A chord with an effect in it is not stackable at all, whatever its slots say. Every
 			// stacked shape leans on its own notes to relay power outward and an effect block either
@@ -13010,7 +13000,7 @@ public final class SongBuilder {
 		// the wrong tick. Asked of both cells this module could stand in, because one may be no
 		// better than the other: two stacked modules in the lane behind at odd spacing put *both*
 		// parities in that lane, and then a nudge only swaps which of them this chord disagrees with.
-		// Ekran found exactly that in world, on two copper bulbs left lit.
+		// In-game testing found exactly that in world, on two copper bulbs left lit.
 		//
 		// Boxed in like that, the chord gives up the stacked shape and is built as a bus, which has no
 		// alternating column to disagree with at all. That costs no pad, where nudging into a clash
@@ -13117,7 +13107,7 @@ public final class SongBuilder {
 		//
 		// It is two cells, three if nudged, and what the lane was measured for is two -- so one nudged
 		// with only two columns left puts whatever comes next, a staircase or a turn, a block past the
-		// wall. Ekran found it as a single glass step outside the footprint.
+		// wall. In-game testing found it as a single glass step outside the footprint.
 		//
 		// No condition on how much room the bus wants, because it does not want any: a stacked chord
 		// is seven notes at the most, so as a bus it is four blocks at the most, always small enough
@@ -13131,8 +13121,8 @@ public final class SongBuilder {
 		// Less the column the lane hands over into, which is the fifth site of the same rule and the
 		// one that made the readback test refuse to build. The guard below exists so a nudge cannot
 		// push the staircase past the wall -- but it measures the room a lane had before that column
-		// was reserved, so with the reserve on it let a module be nudged into the descent'''s own
-		// steps. ekran'''s sample song at 24 wide over three floors, read off DEBUG_PASTE: a
+		// was reserved, so with the reserve on it let a module be nudged into the descent's own
+		// steps. A sample song at 24 wide over three floors, read off DEBUG_PASTE: a
 		// STACKED_FRONT+nudge holding off descent4 for a note block and its oak planks.
 		int roomToWall = roomAhead - handoverReserve(layout);
 		int stackedRoom = STACKED_CELLS + 1;
@@ -13142,7 +13132,7 @@ public final class SongBuilder {
 		// centre is what carries the run onto the staircase -- so the module wants its own two columns
 		// and not a third. See {@link #CLIMB_OFF_A_STACKED_CENTRE}.
 		//
-		// ekran's, and it is what makes a one-cell cut unnecessary. A cut whose near half is a single
+		// This is what makes a one-cell cut unnecessary. A cut whose near half is a single
 		// cell spends those same two columns on a bus of two notes and sends the rest over the
 		// staircase; the module lands flush in them and carries four, with nothing to carry over. They
 		// repasted am-i-dreaming to show it: a lone {@code TU} at {@code 4 69 7} where an {@code AN}
@@ -13172,7 +13162,7 @@ public final class SongBuilder {
 		// inside the fifteen a repeater reaches. Unheaded it is twelve cells and the staircase,
 		// which is sixteen, so `couldSplit` says no. The lane runs on, and every chord of that size
 		// after it hands on 15 - 12 = 3 blocks of wire where the staircase wants four, so it cannot
-		// turn either. That is where ekran's long breaches start, and it starts here.
+		// turn either. That is where the long breaches start, and it starts here.
 		int busColumns = 1 + (event.notes().size() + 1) / 2;
 		boolean busIsLonger = KEEPS_HEAD_WHEN_THE_BUS_IS_LONGER && style.busHeaded()
 			&& busColumns > stackedRoom - 1;
@@ -13184,9 +13174,9 @@ public final class SongBuilder {
 		// wants two columns plus a dust cell for every pair past the first three. It is never shorter,
 		// and at six or seven notes it is a column longer.
 		//
-		// ekran, looking at a chord of four -- three harps and a bass -- laid sunken where a stacked
-		// module would have fitted: "it should always prefer a single normal stacked chord over a
-		// sunken bus". {@link #chooseStyle} does prefer it, and says STACKED_FRONT for that chord; this
+		// A chord of four -- three harps and a bass -- laid sunken where a stacked module would
+		// have fitted: a single normal stacked chord should always be preferred over a sunken
+		// bus. {@link #chooseStyle} does prefer it, and says STACKED_FRONT for that chord; this
 		// line is what took it away, on an arithmetic about a shape it was no longer going to get.
 		boolean wouldGoSunken = SUNKEN_BUSES
 			&& (SUNKEN_MAY_OPEN_IN_A_TURN && layout.v2() || !inTurn)
@@ -13207,8 +13197,8 @@ public final class SongBuilder {
 		// down a staircase there is often nothing spare at all. Then the module is built as a bus with
 		// its repeater left where it stands, which is the one place the signal is known to reach.
 		//
-		// Ekran found it on Big Shot at 44 wide: a chord of eighteen split down a staircase powered
-		// perfectly, and the stacked chord after it was nudged one past the end of the wire.
+		// In-game testing found it on Big Shot at 44 wide: a chord of eighteen split down a staircase
+		// powered perfectly, and the stacked chord after it was nudged one past the end of the wire.
 		//
 		// Asked of the wire and not of the budget. `signal` is the tip carried down the lane by
 		// arithmetic, and it only ever refused a nudge at nought -- "is there any wire left", where
@@ -13237,7 +13227,7 @@ public final class SongBuilder {
 		// that cannot drift. Every rule above has already run, so nothing is overridden by it: a shape
 		// that is still BUS at this line is a shape everything else has finished with.
 		//
-		// Never in a turn, which is ekran's own caveat and the one thing this shape asks of its
+		// Never in a turn, which is the live caveat and the one thing this shape asks of its
 		// surroundings. Its lowered column hangs two notes at the lane's own level, and the lane's own
 		// level either side of the centre line is where a flat turn runs -- so a module built there has
 		// put note blocks in ground the route comes back for. Refused rather than trimmed, because the
@@ -13346,17 +13336,17 @@ public final class SongBuilder {
 	 * Lays down the shape that was decided, and the one thing the decision cannot settle.
 	 *
 	 * <p>Every rule above this tries to work out whether the ground is free. This is what happens when
-	 * one of them is wrong: the shape is built inside a trial, and a collision rolls it back and lays a
-	 * bus instead. Asking is cheaper than being right, and it is the only answer that cannot be
+	 * one of them is wrong: the shape is built inside a trial, and a collision rolls it back and lays
+	 * a bus instead. Asking is cheaper than being right, and it is the only answer that cannot be
 	 * out of date.</p>
 	 */
 	/**
 	 * Whether a chord that loses its relocation asks parity again before shifting instead.
 	 *
-	 * <p>Off, this is the hole ekran read off golden-brown at forty wide over five floors: a nine
-	 * note stacked-bus whose centre column sounded a note of the lane behind it, with every rule
-	 * that was supposed to stop it switched on. <i>"it seemed to think it was safe to place a
-	 * stacked chord there, even though its center powered a note in the previous lane."</i></p>
+	 * <p>Off, this is the hole in-game reading found off golden-brown at forty wide over five floors:
+	 * a nine note stacked-bus whose centre column sounded a note of the lane behind it, with every
+	 * rule that was supposed to stop it switched on: it took the column for a safe place to stand a
+	 * stacked chord, though its centre powered a note in the previous lane.</p>
 	 *
 	 * <p>Nothing was skipped and nothing was misread. {@link #parityVerdict} asked about the column
 	 * the chord was standing in, found the lane behind disagreeing, and answered 2 -- <em>clean
@@ -13370,7 +13360,7 @@ public final class SongBuilder {
 	 * <p>So the shift was standing on an answer that belonged to a different shape. On, the shape
 	 * carries what the same decider says with the move off the table, and the fallback reads it:
 	 * shift where the shifted column is clean, and give the stacked shape up where it is not. It is
-	 * ekran's ladder for a pad that lands in a second clash, arriving at the rung nobody had found
+	 * the ladder for a pad that lands in a second clash, arriving at the rung nobody had found
 	 * -- the pad is not what put it there.</p>
 	 */
 	static boolean RELOCATION_REFUSED_ASKS_PARITY_AGAIN = true;
@@ -13485,7 +13475,7 @@ public final class SongBuilder {
 			// {@link #NUDGE_ASKS_THE_CORNER_AGAIN}.
 			//
 			// Of every cell the module wrote, because the cell that lands near the corner is not the one
-			// it opens in -- ekran's is a front flank two columns further along, with the opening still
+			// it opens in -- the is a front flank two columns further along, with the opening still
 			// four from the bend. Asking the opening cell is asking about the wrong block, which is the
 			// mistake the route check was written to stop being made by hand.
 			//
@@ -13576,12 +13566,12 @@ public final class SongBuilder {
 				// The same as in {@link #buildShaped}: marked, a collision does not throw, so the bus
 				// would settle on ground it had lost instead of trying the next column along.
 				//
-				// Only while there is another column to try. This is the shape that has nothing to fall
-				// back to, so raising it on the last attempt does not buy a better build -- it ends the
-				// paste, which is the one thing a marked build must never do. ekran, who could not paste
+				// Only while there is another column to try. This is the shape that has nothing to fall back
+				// to, so raising it on the last attempt does not buy a better build -- it ends the paste, which
+				// is the one thing a marked build must never do. In-game testing, which could not paste
 				// Guardian 20 wide over four floors at all: the whole reason to mark a build is to have
-				// something to stand in. Out of attempts, the cell goes to whoever got there first and
-				// wears a sea lantern saying so.
+				// something to stand in. Out of attempts, the cell goes to whoever got there first and wears a
+				// sea lantern saying so.
 				if (placements.trialCollided() && shifted < BUS_MOVES_AT_MOST) {
 					throw new IllegalArgumentException("marked: this bus lost ground, trying the next column");
 				}
@@ -13700,7 +13690,7 @@ public final class SongBuilder {
 		// The flank the staircase is about to stand in, given up before it is filled rather than
 		// discovered as a collision afterwards.
 		//
-		// {@link #shedDescentFlank} is ekran's order and it already existed for a cut: the centre if
+		// {@link #shedDescentFlank} is the order and it already existed for a cut: the centre if
 		// the note is a harp, or a trade with a harp hanging somewhere the module does not mind
 		// losing; then a low slot the chord did not fill, the far front one before the back pair; and
 		// a tail at the bottom of the staircase where neither will have it. All this adds is the
@@ -13710,10 +13700,9 @@ public final class SongBuilder {
 		// that does not was not, and a back slot standing empty because the lane behind owns it is
 		// not one this chord may rehome into.
 		//
-		// ekran on the third option, which for a plain module means growing a bus it did not have:
-		// "yes it should grow one. the alternative is to pad the chord down, which is about the same
-		// anyway. maybe it would be longer to move the chord down actually. plus moving the whole
-		// chord down means behind busy for the next chord."
+		// On the third option, which for a plain module means growing a bus it did not have: it
+		// should grow one. The alternative is to pad the chord down, which comes to about the same
+		// and may be longer, and moving the whole chord down leaves the next chord behind-busy.
 		int flankTaken = SHEDS_A_FLUSH_MODULES_FLANK ? placements.flankTaken() : -1;
 		if (flankTaken >= 0) {
 			ShedFlank rehomed = shedTurnFlank(standing,
@@ -13750,7 +13739,7 @@ public final class SongBuilder {
 	 * the dust cross relays through are live, and the low notes sit in front of and behind them. Two
 	 * lanes close enough to touch therefore have to agree which of those falls where, or one lane's
 	 * live block sits against the other's note and sounds it at the wrong tick. That much is real --
-	 * ekran's copper bulbs caught it the one time this was taken out altogether.</p>
+	 * the copper bulbs caught it the one time this was taken out altogether.</p>
 	 *
 	 * <p>What is <em>not</em> needed is the global convention it used to be enforced with, where
 	 * every module centre was pushed onto an even coordinate whether anything was beside it or not.
@@ -13775,7 +13764,7 @@ public final class SongBuilder {
 				return true;
 			}
 			// And this module's own low notes, against a live block of the lane behind -- but only the
-			// ones it is actually going to hang. ekran, from the collision that started this: the two
+			// ones it is actually going to hang. From the collision that started this: the two
 			// modules in it use four hangers each and would not have powered one another, so the nudge
 			// bought nothing and cost the column the staircase needed.
 			//
@@ -13814,7 +13803,7 @@ public final class SongBuilder {
 	/**
 	 * Whether a contested low note moves out of its slot instead of the module moving a column.
 	 *
-	 * <p>ekran's third option, against the two this file had: a stacked chord that disagrees with the
+	 * <p>The third option, against the two this file had: a stacked chord that disagrees with the
 	 * lane behind used to either shift a column or give the shape up. It can also simply not hang the
 	 * one note that is in contention, and hang it somewhere else in the same module.</p>
 	 *
@@ -13928,7 +13917,7 @@ public final class SongBuilder {
 	/**
 	 * Whether a nudge is refused by measuring the run rather than by trusting the lane's budget.
 	 *
-	 * <p>ekran: nudge when it can, and fall back to a bus when nudging would leave a dead wire. The
+	 * <p>The rule: nudge when it can, and fall back to a bus when nudging would leave a dead wire. The
 	 * rule for that already existed and could not fire -- it refused only when the tip had reached
 	 * nought, which is a different question from whether the wire reaches one cell further.</p>
 	 */
@@ -13980,9 +13969,9 @@ public final class SongBuilder {
 	 * the slot that was in contention -- and the module is the same size, in the same two columns,
 	 * with the same notes in it.</p>
 	 *
-	 * <p>ekran found the case: a chord of six with the centre standing as plain stone, a harp
-	 * somewhere in it, and the module padded a column forward anyway -- into a staircase, which is
-	 * what turned it into a collision rather than merely a wasted column.</p>
+	 * <p>In-game testing found the case: a chord of six with the centre standing as plain stone, a
+	 * harp somewhere in it, and the module padded a column forward anyway -- into a staircase, which
+	 * is what turned it into a collision rather than merely a wasted column.</p>
 	 */
 	private static boolean roomFor(UltraSlots slots, RelocationRoom room, int slot) {
 		if (room.tail()) {
@@ -14045,7 +14034,7 @@ public final class SongBuilder {
 	 * asked by the planner and the walk through this one method so that neither can answer it
 	 * differently from the other.</p>
 	 *
-	 * <p>The order is ekran's, and the point of it is that the bus is last. Every one of these keeps
+	 * <p>The order is measured, and the point of it is that the bus is last. Every one of these keeps
 	 * the shape; the fallback throws it away for four cells of lane, so it is what is left when the
 	 * others have all been tried rather than the third thing reached for.</p>
 	 */
@@ -14055,9 +14044,10 @@ public final class SongBuilder {
 	 * <p>Off, a stacked chord standing on a corner is judged where it stands and built one column
 	 * further along, because {@link #addStackedShape} walks past the corner first -- a repeater may
 	 * not stand on one. One column is the whole of what parity means, so the verdict it was given is
-	 * the verdict for somewhere else. ekran read it off a build: <i>"the question is why the other
-	 * stacked chord didn't parity pad forward. perhaps cause it had already padded forward from the
-	 * corner padding. corner padding and parity padding should be able to both happen."</i></p>
+	 * the verdict for somewhere else. In-game reading showed it off a build: the question is why the
+	 * other stacked chord did not parity pad forward, and the answer is that it had already padded
+	 * forward from the corner padding. Corner padding and parity padding should both be able to
+	 * happen.</p>
 	 *
 	 * <p>It fires 38 times over the library and produces one wrong note, so the two usually agree by
 	 * luck. Counted as {@code parityAskedBeforeTheCorner}.</p>
@@ -14077,7 +14067,7 @@ public final class SongBuilder {
 		}
 		// Asked again from the column the pad would put it in, before the shape is given up.
 		//
-		// ekran's ordering, and the bus is meant to be the last thing tried rather than the third.
+		// The ordering, and the bus is meant to be the last thing tried rather than the third.
 		// Relocation is offered where the module stands and a shift is offered after it, but the two
 		// were never combined: a module that clashes in both columns went straight to a bus, even
 		// where one note moved out of one slot would have settled the shifted column. And the pad is
@@ -14136,7 +14126,7 @@ public final class SongBuilder {
 	/**
 	 * Whether a stacked head in front of a descent gives up the one flank the staircase wants.
 	 *
-	 * <p>ekran's, read off the breach at forty wide over five floors. A head is three columns --
+	 * <p>Read off the breach at forty wide over five floors. A head is three columns --
 	 * repeater, centre, front flanks -- and it hands over on a transition cell, which is stone with
 	 * dust on it. A descent's first rung is stone with dust on it, in the same place, at the same
 	 * level: {@link #addParityPad} and the first step of {@link #addSplitBusDescent} lay the same two
@@ -14166,7 +14156,7 @@ public final class SongBuilder {
 	 * the same shed as a saving of <em>wire</em>, for a corridor with room to spare where the fifteen
 	 * is what ran out. The two want it at opposite ends and neither covers the other.</p>
 	 *
-	 * <p>ekran's, and their arithmetic for a chord of 28 going down: six in the head once the flank is
+	 * <p>Their arithmetic for a chord of 28 going down: six in the head once the flank is
 	 * shed, twenty-two left for the bus at eleven cells, no transition cell because the head hands
 	 * over onto the staircase's own first rung, and a staircase of four. Fifteen exactly.</p>
 	 *
@@ -14193,7 +14183,7 @@ public final class SongBuilder {
 	/**
 	 * The chord sizes that needed it, so over-use is visible rather than argued about.
 	 *
-	 * <p>ekran's worry, and the right one: a head-only near half is the dear shape, and it should be
+	 * <p>The worry, and the right one: a head-only near half is the dear shape, and it should be
 	 * reached for only where nothing else will do. The gate says it cannot be reached for otherwise --
 	 * it fires at {@code runCells == 16} exactly, which is one over, and a cut that already fits
 	 * returns before it. On a descent that arithmetic is {@code 1 + 11 + 4}, so the tail is 21 or 22
@@ -14348,13 +14338,13 @@ public final class SongBuilder {
 	 *
 	 * <p>What a pad is made of, and what a corner takes so that no repeater has to stand on one.</p>
 	 *
-	 * <p>It used to be laid for a third reason as well, and that reason was not real. Stacked
-	 * modules were nudged onto an even coordinate on the story that two lanes had to agree which
-	 * of their alternating outer cells was live, or they would set off each other's notes. They
-	 * cannot: lane centres are four apart, and a module is driven from its own centre, so nothing
-	 * of one lane ever reaches the notes of the next. Removed 2026-07-30 -- ekran, who did not
-	 * invent the stacked module but took it from a working world built by somebody else, and so
-	 * knew the constraint had never existed.</p>
+	 * <p>It used to be laid for a third reason as well, and that reason was not real. Stacked modules
+	 * were nudged onto an even coordinate on the story that two lanes had to agree which of their
+	 * alternating outer cells was live, or they would set off each other's notes. They cannot: lane
+	 * centres are four apart, and a module is driven from its own centre, so nothing of one lane ever
+	 * reaches the notes of the next. Removed 2026-07-30 -- in-game testing, which did not invent the
+	 * stacked module but took it from a working world built by somebody else, and so knew the
+	 * constraint had never existed.</p>
 	 *
 	 * <p>Glass and not stone. Dust makes the block beneath it live, and the blocks either side of
 	 * that one are exactly where low notes hang -- notes belonging to a later chord, which an
@@ -14375,12 +14365,12 @@ public final class SongBuilder {
 	}
 
 	/**
-	 * The parity pad, or the same two columns with the delay split across them. ekran's.
+	 * The parity pad, or the same two columns with the delay split across them.
 	 *
 	 * <p>A parity pad is a cell of dust, and dust after a module that ended soft is a dead wire: the
 	 * simple tail's middle is lit by the handover and by nothing else, so it drives a repeater and
-	 * cannot light dust. ekran read exactly that off a paste -- <i>"the chord got parity padded,
-	 * causing wire to be on both sides"</i>.</p>
+	 * cannot light dust. In-game reading showed exactly that off a paste: the chord was parity
+	 * padded, which put wire on both sides.</p>
 	 *
 	 * <p>But the pad and the module's own trigger are two columns either way, and a delay of two or
 	 * more can be spent as two repeaters instead of a pad and one: {@code r1} here, and the rest in
@@ -14415,7 +14405,7 @@ public final class SongBuilder {
 	 * library's twenty dead builds were the pin and one was the nudge, and no amount of care in the
 	 * pad could have reached either. One helper, so the three cannot drift again.</p>
 	 *
-	 * <p>The trade is ekran's and it costs nothing: the cell against the tip becomes {@code r1} and
+	 * <p>The trade costs nothing: the cell against the tip becomes {@code r1} and
 	 * the module's own trigger carries one tick less, so the columns and the total delay are both
 	 * unchanged and the thing standing against the soft middle is a repeater, which is the one thing
 	 * that reads it.</p>
@@ -14445,7 +14435,7 @@ public final class SongBuilder {
 			// questions and only the second says whether anything short of undoing the tail can help.
 			placements.padded(why + "OnASoftTip");
 			placements.padded("softTipDelay" + triggerDelay);
-			// So take the tail back up and lay it as a bus instead. ekran's, and the reason it is free:
+			// So take the tail back up and lay it as a bus instead. The reason it is free:
 			// a bus of the same notes starts in the tail's own column and its second cell is this one,
 			// the pad's -- so no pad is laid, nothing moves, and the module after it opens exactly
 			// where it was going to. The tail no longer has to guess what follows it, because by here
@@ -14541,7 +14531,7 @@ public final class SongBuilder {
 	/**
 	 * Whether a pad that runs into a climb is laid at bus height rather than on the path.
 	 *
-	 * <p>ekran's. A climb off a bus costs three cells and a climb off the path costs five, and the
+	 * <p>A climb off a bus costs three cells and a climb off the path costs five, and the
 	 * only difference between them is one level: a bus is stone at path+1 with dust at path+2, a pad
 	 * is stone on the path with dust at path+1, and {@link #addGlassClimb} skips its first two rungs
 	 * exactly when the live wire is already a block up. So a pad laid one level higher is a bus as
@@ -14589,7 +14579,7 @@ public final class SongBuilder {
 	 * forty-three note blocks the signal never reached, on a machine that looked right in every
 	 * number a {@code PastePlan} carries. Only {@link NoteMachineReader#read} could see it.</p>
 	 *
-	 * <p><b>Stone, on ekran's say-so, and the glass above is my inference rather than a reading.</b>
+	 * <p><b>Stone, on the say-so, and the glass above is my inference rather than a reading.</b>
 	 * A floor of stone under a run of dust is what every other pad in this build is, and the step up
 	 * onto it is one block -- so if that will not conduct, the current is being cut somewhere else
 	 * and glass here would only paper over it. Left as stone so the fault is the one being looked at.
@@ -14615,7 +14605,7 @@ public final class SongBuilder {
 	/**
 	 * How many cells of pad stay on the path before the rest is lifted, or -1 for no lift at all.
 	 *
-	 * <p>ekran, reading a dead wire at {@code 453 92 -52}: a lane that ends on a bus already has its
+	 * <p>Reading a dead wire at {@code 453 92 -52}: a lane that ends on a bus already has its
 	 * wire a block up and the pad simply stays there, but a lane that ends on a note block has
 	 * nothing up there to step off. A note block is a full block and the repeater drives it, but a
 	 * driven block does not pass power on to its neighbour -- so the lifted stone beside it is fed by
@@ -14663,8 +14653,8 @@ public final class SongBuilder {
 	private static Pad planTurnPad(int columns, int signal, int turnCells, int offBus,
 			int spareDelay, boolean climbing, boolean staircase, boolean fromBus,
 			boolean everyTick) {
-		// The wait first, and ahead of the lift, which is ekran's call: <em>"you don't have to protect
-		// raised pad, these are better than raised pad."</em>
+		// The wait first, and ahead of the lift, which is the call: the raised pad does not have to
+		// be protected, because these are better than it.
 		//
 		// The lift saves two cells of the wire a lane needs to cross its own staircase, and that is
 		// the only thing it saves -- but a repeater standing in a pad column hands that pad a fresh
@@ -14718,11 +14708,11 @@ public final class SongBuilder {
 	 * was refused by the other's -- and being refused, it laid its chord whole and walked out past its
 	 * wall.</p>
 	 *
-	 * <p>ekran found it at illit, 32 wide over four floors: tick 1311, a chord of four standing one
-	 * column short of the wall with a pad of one cell and four blocks of wire. {@code turnPrice} said
-	 * three, {@code turnCost} said five, {@code reachesWall} went false, and the chord was laid whole
-	 * two columns outside. The next chord then arrived already past the wall with nothing it could do
-	 * about it.</p>
+	 * <p>In-game testing found it at illit, 32 wide over four floors: tick 1311, a chord of four
+	 * standing one column short of the wall with a pad of one cell and four blocks of wire. {@code
+	 * turnPrice} said three, {@code turnCost} said five, {@code reachesWall} went false, and the chord
+	 * was laid whole two columns outside. The next chord then arrived already past the wall with
+	 * nothing it could do about it.</p>
 	 *
 	 * <p>Kept as {@code min} of the two rather than replacing one with the other, so the empty-pad
 	 * discount that predates all of this cannot be lost on a descent by the change.</p>
@@ -14820,14 +14810,14 @@ public final class SongBuilder {
 	 * breaches 982 -> 854 and breach blocks 19,073 -> 16,500, with a third again as many headed cuts
 	 * and every build still reading back.
 	 *
-	 * <p>A climb does not, and the reason is one ekran found by pasting it rather than by any amount
-	 * of reading. A climb leaves the near half by a glass staircase whose first rung is a level up
-	 * and a column over. After a bus that is fine -- the bus is already a level up. After a head the
-	 * handover sits beside the centre, on the module's own level, and there is simply nothing
+	 * <p>A climb does not, and the reason is one in-game testing found by pasting it rather than by
+	 * any amount of reading. A climb leaves the near half by a glass staircase whose first rung is a
+	 * level up and a column over. After a bus that is fine -- the bus is already a level up. After a
+	 * head the handover sits beside the centre, on the module's own level, and there is simply nothing
 	 * bridging it to the glass: the staircase is disconnected. Three slice-by-slice derivations here
 	 * failed to see it because they were all made against a descent, which has no such gap.
 	 *
-	 * <p>Two ways out, both ekran's, both built by hand and neither yet coded:
+	 * <p>Two ways out, both measured, both built by hand and neither yet coded:
 	 * <ul>
 	 *   <li>Spend a cell: a second glass block with dust on it, level with the last of the three
 	 *       bus-staircase rungs, plus dust on top of the head's high block. Costs one column.</li>
@@ -14836,6 +14826,11 @@ public final class SongBuilder {
 	 *       begins a column along -- which is the same kind of agreement the parity nudge needs, and
 	 *       is why it is the more interesting of the two.</li>
 	 * </ul>
+	 *
+	 * <p>A third way is now coded for the one placement that needs no bridge at all: at a room of
+	 * two the head stands with its centre one column before the staircase, and dust on that centre
+	 * -- in v2, where the walk arms the builder for it -- is the handover. See
+	 * {@link #HEAD_FEEDS_THE_CLIMB}.</p>
 	 */
 	static boolean HEAD_ONLY_NEAR_HALF = true;
 
@@ -14857,9 +14852,17 @@ public final class SongBuilder {
 	 *     One column shorter and one cell of wire cheaper than the same head without it -- see
 	 *     {@link #SHEDS_THE_FLANK_THE_DESCENT_WANTS}. Carried on the record because the walk has to
 	 *     build the shape the planner priced, and the two read this from the one oracle.
+	 * @param centreFeeds whether the near half is a head alone whose centre wears the dust that
+	 *     carries the run onto a climb -- see {@link #HEAD_FEEDS_THE_CLIMB}. The transition cell
+	 *     stays in the run, because that dust is it, but it stops being a column: the head hands
+	 *     over at its own centre and the staircase stands in the very next column.
+	 * @param centreToFront the note the dust evicted from the centre, rehomed to the bottom-rail
+	 *     cell in front of the cross. That cell is free in exactly this shape, because the line
+	 *     leaves upward and nothing needs the front flank area to carry it on. Null where the head
+	 *     never filled its centre.
 	 */
 	private record StackedSplit(UltraSlots slots, List<EventNote> head, List<EventNote> nearTail,
-			List<EventNote> farTail, boolean shed) {
+			List<EventNote> farTail, boolean shed, boolean centreFeeds, EventNote centreToFront) {
 		/**
 		 * Cells of wire from the head's repeater to the far half, staircase included.
 		 *
@@ -14887,7 +14890,8 @@ public final class SongBuilder {
 		 *
 		 * <p>The head, its transition, and whatever the near tail fills. A shed head hands over on the
 		 * staircase's own first rung and lays no transition of its own, which is one column as well as
-		 * one cell of wire.</p>
+		 * one cell of wire. A centre-fed head lays no transition column either, but keeps the cell in
+		 * the run: the dust on its centre is that cell, standing on the head's own second column.</p>
 		 *
 		 * <p>What this is for: {@code room} minus this is how far short of the wall the staircase would
 		 * stand. {@link #stackedSplitOf} sizes the near tail to fill the room it was given, so the
@@ -14896,7 +14900,8 @@ public final class SongBuilder {
 		 * {@code recessMispredicted} against the block it actually reaches.</p>
 		 */
 		int columns() {
-			return STACKED_CELLS + (shed ? 0 : STACKED_BUS_TRANSITION) + (nearTail.size() + 1) / 2;
+			return STACKED_CELLS + (shed || centreFeeds ? 0 : STACKED_BUS_TRANSITION)
+				+ (nearTail.size() + 1) / 2;
 		}
 	}
 
@@ -14922,7 +14927,7 @@ public final class SongBuilder {
 	 *
 	 * <p>Guardian alone 43 lanes / 229 blocks -> 20 / 86, and 40x4, 32x5, 24x4, 24x3, 20x2 and 16x2
 	 * go to nought. {@code wrong=0} and {@code refused=0} both ways, {@code unreached=0} read back
-	 * through {@link NoteMachineReader} at ekran's 40x5 across all eight songs and at the four
+	 * through {@link NoteMachineReader} at the 40x5 across all eight songs and at the four
 	 * Guardian configs this moves most. Builds are 101 columns longer over 480 of them and 7,372
 	 * blocks smaller.</p>
 	 *
@@ -14933,9 +14938,9 @@ public final class SongBuilder {
 	 *
 	 * <p><b>Back off, and the breach numbers above are not the reason.</b> {@link BigSplitTest} reads
 	 * the machine at {@code f3 w20} and finds <b>3,606 note blocks the signal never reaches</b> and a
-	 * run of <b>sixteen</b> blocks of wire. The readback that said this was safe covered eight songs at
-	 * 40x5 and four Guardian sizes; it did not cover the one config that builds nothing but chords too
-	 * big to cut plain. {@code runCells} cannot see the fault, because the wire it counts is the
+	 * run of <b>sixteen</b> blocks of wire. The readback that said this was safe covered eight songs
+	 * at 40x5 and four Guardian sizes; it did not cover the one config that builds nothing but chords
+	 * too big to cut plain. {@code runCells} cannot see the fault, because the wire it counts is the
 	 * transition, the pairs and the staircase -- and the columns between where the near half ends and
 	 * where the staircase starts are covered with dust that nobody charged for.</p>
 	 *
@@ -14955,7 +14960,7 @@ public final class SongBuilder {
 	/**
 	 * Whether a closing pad holds the coming wait, instead of the next floor spending columns on it.
 	 *
-	 * <p>ekran, from the builds: a lane pads out to its wall in plain dust and then the first thing on
+	 * <p>From the builds: a lane pads out to its wall in plain dust and then the first thing on
 	 * the next floor is a repeater, which costs that floor a column. The pad column and the repeater
 	 * column are the same column in two places, and only one of them has to exist. So the pad holds
 	 * the ticks -- {@link Pad#delaySpent} carries that out to the walk, and the next event's own
@@ -14964,8 +14969,8 @@ public final class SongBuilder {
 	 * <p>Four ticks are left behind on purpose: the next chord's trigger is a repeater the build lays
 	 * whatever happens, and {@link #addSpatialDelayBeforeEvent} only starts spending columns past
 	 * four. Absorbing those would buy nothing. Whatever the pad has not the columns to hold stays up
-	 * there too, which is ekran's rule -- <em>"the last repeater can remain at the top if it truly
-	 * needs that much signal strength"</em>.</p>
+	 * there too, which is the rule: the last repeater may remain at the top where it truly needs
+	 * that much signal strength.</p>
 	 *
 	 * <p>Not into a climb whose pad can be lifted. A pad with a repeater in it cannot be raised to bus
 	 * height, and a raised pad is what makes an ascent cost three cells instead of five, so
@@ -14977,7 +14982,7 @@ public final class SongBuilder {
 	/**
 	 * Whether a parity nudge asks the corner rule again from the column it moved to.
 	 *
-	 * <p>ekran's, read off Guardian 20 wide over four floors: a stacked bus standing clear of its bend
+	 * <p>Read off Guardian 20 wide over four floors: a stacked bus standing clear of its bend
 	 * was nudged one column for parity, and the column it landed in put its front flank under the
 	 * lane's own raised path. A flank is a note block and a note block insists on air above it; the
 	 * path wants stone in that same cell. The module collides with its own tail coming back round the
@@ -14985,17 +14990,18 @@ public final class SongBuilder {
 	 * was moved.</p>
 	 *
 	 * <p>The turn ban is a distance and a nudge is a column, so the upstream answer is an answer about
-	 * where the module <em>was</em>. The trial's collision catch already recovers from this by re-laying
-	 * the chord as a bus -- but a recovery is not a decision, and under a marked paste there is no
-	 * throw to recover from, which is exactly the build ekran has to stand in to see it.</p>
+	 * where the module <em>was</em>. The trial's collision catch already recovers from this by
+	 * re-laying the chord as a bus -- but a recovery is not a decision, and under a marked paste there
+	 * is no throw to recover from, which is exactly the build in-game testing has to stand in to see
+	 * it.</p>
 	 *
-	 * <p><b>Asked of the note blocks the module wrote, once it is built.</b> Not of the column it opens
-	 * in, which is the wrong cell -- ekran's flank is two columns further along with the opening still
-	 * four clear of the bend; that version was built, measured, and caught nothing this one misses. And
-	 * not of every cell either: a bus tail runs through bends all day, and asking of the whole footprint
-	 * refuses 569 modules where 325 are the fault and costs the all-twenty-fives song 54 breach blocks
-	 * to <b>189</b>. A note block is what cannot stand there, because it insists on air above it and the
-	 * arm coming out of the corner wants stone in that cell.</p>
+	 * <p><b>Asked of the note blocks the module wrote, once it is built.</b> Not of the column it
+	 * opens in, which is the wrong cell -- the flank is two columns further along with the opening
+	 * still four clear of the bend; that version was built, measured, and caught nothing this one
+	 * misses. And not of every cell either: a bus tail runs through bends all day, and asking of the
+	 * whole footprint refuses 569 modules where 325 are the fault and costs the all-twenty-fives song
+	 * 54 breach blocks to <b>189</b>. A note block is what cannot stand there, because it insists on
+	 * air above it and the arm coming out of the corner wants stone in that cell.</p>
 	 *
 	 * <p><b>Measured, and it is what makes Guardian buildable.</b> Guardian goes from thirteen of its
 	 * sixteen sizes to <b>fifteen</b>, with the all-twenty-fives song unmoved at 54 breach blocks over
@@ -15008,26 +15014,26 @@ public final class SongBuilder {
 	 * Whether a cut that would fall a column short takes a shorter head rather than no head.
 	 *
 	 * <p>A head carries seven notes in the two columns a module occupies and the near half carries two
-	 * a column, so every pair of notes handed back from the head to the tail is exactly one more column
-	 * of bus. A cut one column short of its wall can therefore be made flush out of its own notes,
-	 * which is the only way to fill a column that is neither padding nor a recess.</p>
+	 * a column, so every pair of notes handed back from the head to the tail is exactly one more
+	 * column of bus. A cut one column short of its wall can therefore be made flush out of its own
+	 * notes, which is the only way to fill a column that is neither padding nor a recess.</p>
 	 *
 	 * <p><b>A trade, measured both ways over the library at five widths and both songs at sixteen
 	 * sizes.</b> It fires 496 times, and:</p>
 	 *
 	 * <pre>
-	 * off  library 285 clean / 1,104 breach blocks / 10 refused    all-25 36 blocks   guardian 6 refused
-	 * on   library 282 clean / 1,102 breach blocks / 12 refused    all-25 54 blocks   guardian 3 refused
+	 * off library 285 clean / 1,104 breach blocks / 10 refused all-25 36 blocks guardian 6 refused
+	 * on library 282 clean / 1,102 breach blocks / 12 refused all-25 54 blocks guardian 3 refused
 	 * </pre>
 	 *
 	 * <p>So it halves the sizes Guardian cannot build at all and costs the all-twenty-fives song half
 	 * as many breach blocks again. On, because a size that will not build is worse than a lane outside
-	 * its wall and because ekran's rule is that the head is what makes a cut of up to twenty-seven
+	 * its wall and because the rule is that the head is what makes a cut of up to twenty-seven
 	 * possible -- but it is on as a choice, and the numbers to argue with are above.</p>
 	 *
-	 * <p>What it does <em>not</em> do is reach a gap of two: that would want four notes out of the head,
-	 * and there is no head that small. Those cuts still lose the head, take a plain cut where the chord
-	 * is small enough for one, and are laid whole where it is not.</p>
+	 * <p>What it does <em>not</em> do is reach a gap of two: that would want four notes out of the
+	 * head, and there is no head that small. Those cuts still lose the head, take a plain cut where
+	 * the chord is small enough for one, and are laid whole where it is not.</p>
 	 */
 	static boolean CUT_SHORTENS_ITS_HEAD = true;
 
@@ -15035,16 +15041,17 @@ public final class SongBuilder {
 	 * Whether v2's walk still books pads ahead of itself, which is the last of the planner it kept.
 	 *
 	 * <p>v2 was opened on the claim that a lane which can always cut never has to be walked out to its
-	 * wall, so there is nothing for a pad search to buy. The booking survived anyway, as a last resort:
-	 * a cut is arithmetically always available under the 25-note cap, but the <em>head</em> it needs is
-	 * not, and a refused head used to walk a lane nine columns past its wall.</p>
+	 * wall, so there is nothing for a pad search to buy. The booking survived anyway, as a last
+	 * resort: a cut is arithmetically always available under the 25-note cap, but the <em>head</em> it
+	 * needs is not, and a refused head used to walk a lane nine columns past its wall.</p>
 	 *
 	 * <p>Here so the claim can be asked rather than assumed. The veto and the lookahead pair are
 	 * already gone from v2; this is what is left of {@code planLane}.</p>
 	 *
-	 * <p><b>Off, ekran's call, 2026-08-13.</b> Guardian is better without it -- 35 breach blocks in 13
+	 * <p><b>Off, the call, 2026-08-13.</b> Guardian is better without it -- 35 breach blocks in 13
 	 * lanes with, 25 in 11 without -- and Guardian is the benchmark. The all-25 song pays for it: 0
-	 * with the booking and 56 blocks in 6 lanes without, three of them at 40 wide over five floors.</p>
+	 * with the booking and 56 blocks in 6 lanes without, three of them at 40 wide over five
+	 * floors.</p>
 	 *
 	 * <p>Those 56 blocks are owed back, and the note above says where to look for them. Whatever the
 	 * search is doing for that song it is <em>not</em> padding, because at a gap of one tick there is
@@ -15146,7 +15153,7 @@ public final class SongBuilder {
 	/**
 	 * Whether a module that clashes in both columns is offered a relocation in the second one.
 	 *
-	 * <p>ekran's ordering, and what it fixes is that the bus was the third thing tried rather than the
+	 * <p>The ordering, and what it fixes is that the bus was the third thing tried rather than the
 	 * last. {@link #parityVerdict} offers a relocation where the module stands, then a shift into the
 	 * next column -- and if the shifted column clashes too, it gives the shape up. It never asks
 	 * whether the shifted column could be settled by moving a note, though moving into a column is
@@ -15193,9 +15200,20 @@ public final class SongBuilder {
 	}
 
 	/**
+	 * The five- and six-argument forms never offer a centre-fed head. The shape is v2's -- its
+	 * builder rides {@link PlacementPlan#climbFedByCentre}, which only v2's walk arms -- and the
+	 * planner helpers that close lanes by arithmetic have not been taught to price it, so an offer
+	 * from here would be a cut the walk builds and the plan never saw.
+	 */
+	private static StackedSplit stackedSplitOf(List<EventNote> chord, int room, int splitCells,
+			boolean climbing, boolean roomBehind, boolean stackedBehind) {
+		return stackedSplitOf(chord, room, splitCells, climbing, roomBehind, stackedBehind, false);
+	}
+
+	/**
 	 * @param stackedBehind whether what stands behind is another stacked module's centre. Then both
 	 *     slots behind are gone rather than one, and a head that keeps one of them is not a smaller
-	 *     head -- it is a head with a note in somebody else's cell. ekran, standing at {@code 6 72 51}:
+	 *     head -- it is a head with a note in somebody else's cell. Read at {@code 6 72 51}:
 	 *     the first rule of stacked chords is that if the block behind is the centre of another
 	 *     stacked chord you cannot place back flanks at all, because that chord would sound them.
 	 */
@@ -15214,7 +15232,7 @@ public final class SongBuilder {
 	static String LAST_CUT_REFUSAL = "";
 
 	private static StackedSplit stackedSplitOf(List<EventNote> chord, int room, int splitCells,
-			boolean climbing, boolean roomBehind, boolean stackedBehind) {
+			boolean climbing, boolean roomBehind, boolean stackedBehind, boolean centreFeed) {
 		LAST_CUT_REFUSAL = "";
 		if (!STACKED_SPLIT_HEADS) {
 			LAST_CUT_REFUSAL = "SwitchedOff";
@@ -15237,8 +15255,8 @@ public final class SongBuilder {
 		// One rule, and it is not about cutting. How many slots behind a head can use is a question
 		// about the ground beside it, so the answer cannot depend on whether the chord is going to be
 		// split across a staircase -- gating it on the cut is telling the builder not to optimise in
-		// the one case it most needs to. ekran said so; it was two flags because it was bolted onto
-		// two code paths separately, which is the mistake this file keeps making.
+		// the one case it most needs to. It was two flags because it was bolted onto two code paths
+		// separately, which is the mistake this file keeps making.
 		// Keeping one of the two is only a shape at all where only one of the two is spoken for. The
 		// file's own invariant says that is the usual case -- the lane alongside has a single live cell
 		// in the column that touches this one, so it lines up with one slot and never with both -- but
@@ -15289,10 +15307,33 @@ public final class SongBuilder {
 				shed = true;
 			}
 		}
-		// Descents only for now. A climb leaves the near half by a glass staircase whose first rung
-		// is a level up and a column over, and the handover -- which sits beside the centre on the
-		// module's own level -- has nothing bridging it to that rung. Ekran pasted one and found the
-		// glass simply disconnected. A descent has no such gap and works today.
+		// A climb at a room of two exactly: repeater, centre, and the staircase in the very next
+		// column. No cell for a transition and none for a bus -- which used to be the whole story,
+		// because the handover beside the centre had nothing bridging it to the glass. The bridge
+		// is the centre's own top cell: dust there sits at bus height, strongly powered by the
+		// centre under it, and the staircase's first rung is diagonal from it -- the same handover
+		// {@link #CLIMB_FED_FROM_A_FLUSH_CENTRE} already makes for a plain flush module. The whole
+		// tail leaves up the staircase, and the centre's note is not dropped: the line leaves
+		// upward, so the bottom-rail cell in front of the cross carries nothing any more, and the
+		// note moves there. Same seven notes, two columns, and the run is the dust, the staircase
+		// and the far half, all off the head's own repeater. See {@link #HEAD_FEEDS_THE_CLIMB}.
+		if (HEAD_FEEDS_THE_CLIMB && centreFeed && climbing && HEAD_ONLY_NEAR_HALF
+				&& room == STACKED_CELLS && !split.tail().isEmpty()) {
+			UltraSlots dusted = split.slots();
+			StackedSplit fed = new StackedSplit(dusted.centre() == null ? dusted
+				: new UltraSlots(null, dusted.sides(), dusted.front(), dusted.back()),
+				split.head(), List.of(), split.tail(), false, true, dusted.centre());
+			if (fed.runCells(splitCells) <= DUST_RANGE) {
+				return fed;
+			}
+			LAST_CUT_REFUSAL = "OutOfWireBy"
+				+ Math.min(fed.runCells(splitCells) - DUST_RANGE, 6);
+			return null;
+		}
+		// Descents and centre-fed climbs only. Any other climb leaves the near half by a glass
+		// staircase whose first rung is a level up and a column over, and the handover -- which
+		// sits beside the centre on the module's own level -- has nothing bridging it to that
+		// rung. One was pasted and the glass simply disconnected.
 		if (nearBusCells < floorCells) {
 			if (nearBusCells == 0 && !split.tail().isEmpty()
 					&& STACKED_BUS_TRANSITION + (split.tail().size() + 1) / 2 + splitCells
@@ -15306,12 +15347,12 @@ public final class SongBuilder {
 		int nearNotes = Math.min(tail.size(), 2 * nearBusCells);
 		// Fitting before the wall is not the same as being able to leave.
 		//
-		// This used to read "nothing to carry over the staircase means this was never a chord that
-		// had to be cut", and it is asked only where the chord already overshoots -- and overshooting
-		// counts the turn reserve, so the chord that reaches this line does not fit *with its
-		// staircase*, however comfortably it fits without one. Refusing the cut there lays it whole,
-		// and the lane then discovers it has no wire left to climb with and runs on. ekran read one
-		// as a breach of eleven: a stacked-bus that ended without the power to reach the top.
+		// This used to read "nothing to carry over the staircase means this was never a chord that had to
+		// be cut", and it is asked only where the chord already overshoots -- and overshooting counts the
+		// turn reserve, so the chord that reaches this line does not fit *with its staircase*, however
+		// comfortably it fits without one. Refusing the cut there lays it whole, and the lane then
+		// discovers it has no wire left to climb with and runs on. In-game reading found one as a breach
+		// of eleven: a stacked-bus that ended without the power to reach the top.
 		//
 		// So the last pair goes over the staircase deliberately. A cut spends one repeater on the
 		// whole chord -- transition, near cells, the staircase and the far cells, which the wire
@@ -15344,7 +15385,7 @@ public final class SongBuilder {
 		// further than the same cut without it. Stated through the record rather than here, because
 		// the walk makes this same sum for {@code tipSignal} and the two must not drift apart.
 		StackedSplit cut = new StackedSplit(split.slots(), split.head(), tail.subList(0, nearNotes),
-			tail.subList(nearNotes, tail.size()), shed);
+			tail.subList(nearNotes, tail.size()), shed, false, null);
 		// One cell over, and the head still has a flank the staircase wants: then shedding it is worth
 		// the whole cut. The shed hands over on the staircase's own first rung instead of on a
 		// transition cell, so it gives the run that cell back -- and the note it displaces goes to the
@@ -15356,7 +15397,7 @@ public final class SongBuilder {
 		// ends: one where the corridor is too tight to hold the near half, the other where the corridor
 		// is roomy and the fifteen is what ran out.
 		//
-		// ekran's arithmetic, for a chord of 28 going down: six in the head once the flank is shed,
+		// The arithmetic, for a chord of 28 going down: six in the head once the flank is shed,
 		// twenty-two left for the bus at eleven cells, no transition, and a staircase of four -- which
 		// is fifteen exactly. Measured before this, descents cut 43 chords of 27 and only 5 of 28.
 		if (SHED_BUYS_THE_LAST_CELL && !shed && !climbing && HEAD_ONLY_NEAR_HALF
@@ -15377,14 +15418,14 @@ public final class SongBuilder {
 				// whose notes are planned and never placed. Two snares went missing at {@code f2 w36}
 				// that way, built 1 and read 0, before this line said nought.
 				//
-				// It is also what the arithmetic wanted. ekran, for a chord of 28: six in the head once
-				// the flank is shed and twenty-two left "at the bottom" -- below the descent, not before
+				// It is also what the arithmetic wanted. For a chord of 28: six in the head once the
+				// flank is shed and twenty-two left at the bottom -- below the descent, not before
 				// it -- which is eleven cells, no transition, and a staircase of four. Fifteen.
 				int shedNear = 0;
 				if (!shedTail.isEmpty()) {
 					StackedSplit shedCut = new StackedSplit(rehomed.slots(), shedHead,
 						shedTail.subList(0, shedNear), shedTail.subList(shedNear, shedTail.size()),
-						true);
+						true, false, null);
 					if (shedCut.runCells(splitCells) <= DUST_RANGE) {
 						SHED_BOUGHT_THE_CELL++;
 						SHED_BOUGHT_BY_SIZE.merge(chord.size(), 1, Integer::sum);
@@ -15406,7 +15447,7 @@ public final class SongBuilder {
 	/**
 	 * Scratch: colour every headed cut in deepslate tiles, even one whose tail never crossed.
 	 *
-	 * <p>Off, which is the rule ekran asked for -- tiles mean the head stands on one side of the
+	 * <p>Off, which is the rule as asked for -- tiles mean the head stands on one side of the
 	 * staircase and tail on the other, not merely that a cut opened with a head.</p>
 	 *
 	 * <p>It has never yet made a difference, and the flag is here because of what that turned out to
@@ -15426,13 +15467,38 @@ public final class SongBuilder {
 		// staircase and tail on the other. Where the far half came out empty nothing crossed, and
 		// what got built is a stacked bus that happens to stand at a cut -- so it says that instead,
 		// and takes the stacked bus's own colour rather than announcing a crossing that never
-		// happened. ekran, who has to tell the two apart standing in front of them.
+		// happened. In-game testing, which has to tell the two apart standing in front of them.
 		placements.placing((split.farTail().isEmpty() && !TILES_EVERY_HEADED_CUT
 				? "chord:STACKED_BUS atCut " : "cutHead")
 			+ split.head().size()
 			+ "/near" + split.nearTail().size() + "/far" + split.farTail().size()
 			+ (split.slots().backFlanks() == 0 ? " frontOnly" : " reachesBack")
 			+ (split.shed() ? " shedFlank" : ""));
+		if (split.centreFeeds()) {
+			// Head only, dust on the centre, and the whole tail up the staircase. The dust is laid
+			// through the same switch the flush module uses -- {@link PlacementPlan#climbFedByCentre}
+			// -- so the climb after this is fed and read exactly as that one is. The note the dust
+			// evicted hangs on the bottom rail in front of the cross: that cell carries the line
+			// onward in every other head, and here the line leaves upward, so the cross points into
+			// a note block instead and sounds it like any flank. In-game testing built the shape by
+			// hand first and the paste has to match it block for block.
+			placements.climbFedByCentre(true);
+			Lane afterHead = addStackedEventModule(placements,
+				Lane.straight(cursor, travel, laneStep), triggerDelay, time, split.slots());
+			if (split.centreToFront() != null) {
+				placeNote(placements, cursor.relative(travel, 2), split.centreToFront(), true);
+				// The cross is what sets this note off, and the bookkeeping has to say so or
+				// verify calls the note silent. Every other slot of a stacked module is driven by
+				// a registered block -- the centre, the two instrument blocks -- and this is the
+				// one slot driven by the dust itself. Recorded here and not for every module,
+				// because the parity answers around an ordinary head were all measured with the
+				// cross unrecorded and nothing else stands next to this one: past it is the
+				// staircase, and past that the wall.
+				placements.powered(cursor.relative(travel), time);
+			}
+			placements.padded("cutHeadFeedsTheClimb");
+			return afterHead.pos();
+		}
 		if (split.shed()) {
 			// No transition cell and no column for it. The head is laid and handed straight back at
 			// the column it came to rest in, which is the column the staircase starts in -- and the
@@ -15525,20 +15591,20 @@ public final class SongBuilder {
 	 * either way, except that the stacked one also has to keep parity with the lane behind it.</p>
 	 *
 	 * <p>So a head earns its place only by using something a bus has not got: the centre block, or
-	 * the pair of slots behind. Five is the first size that uses either. Ekran caught this after the
+	 * the pair of slots behind. Five is the first size that uses either. This was caught after the
 	 * loop had already been written down to four.</p>
 	 */
 	/**
-	 * <p>Five is a <em>density</em> argument, and a cut wants the head for something else. ekran, at
-	 * the Guardian 28×7 breach: "the mere fact of having a stacked head is actually enough to split
-	 * the descent". A head hands the transition cell a strong fifteen off its own centre block --
+	 * <p>Five is a <em>density</em> argument, and a cut wants the head for something else. At the
+	 * Guardian 28×7 breach the mere fact of having a stacked head is enough to split the
+	 * descent. A head hands the transition cell a strong fifteen off its own centre block --
 	 * which stands whether a note sits in it or not -- so the run that has to cross the staircase
 	 * starts a cell later than a plain bus's does, and that cell is the difference between a chord of
 	 * twenty-four cutting and being laid whole. At four notes with no back flanks {@code useCentre}
 	 * is false, so such a head needs no harp at all. Switchable so the two arguments can be measured
 	 * against each other rather than argued about.</p>
 	 *
-	 * <p><b>Four, and ekran's argument wins outright.</b> Over the library at eighteen widths against
+	 * <p><b>Four, and the argument wins outright.</b> Over the library at eighteen widths against
 	 * five: breach blocks 4,910 to 4,883, wrong notes unchanged at 9, 168 columns of depth (0.12%),
 	 * and <b>Guardian clean at every width</b> -- no breach, no wrong note, nothing. Three is worse
 	 * on every count (wrong 14, Guardian back to 9 breach blocks and 2 wrong), which is the density
@@ -15594,7 +15660,7 @@ public final class SongBuilder {
 		// in -- beside the centre and level with it, never above, because above the centre is the
 		// air a note block there insists on.
 		// A short tail as a simple chord, in the column the bus would have opened in and a level
-		// lower. ekran's: the handover sits at the height of the lane rather than raised, so a middle
+		// lower. The: the handover sits at the height of the lane rather than raised, so a middle
 		// standing right there is driven by it, where a bus cell has to be a level up. A tail of
 		// three is two cells of bus and one column of this.
 		boolean simple = mayGoSimple && placements.answersWhatIsAhead() && simpleTail(tail)
@@ -15611,7 +15677,7 @@ public final class SongBuilder {
 		// nothing in front. A bus tail hides that completely: the bus stone stands in the very next
 		// cell and joins the dust into a line. A simple tail's middle is a cell the dust does not
 		// connect to, so left to itself the handover collapses to a dot and everything downstream of
-		// it goes silent -- 4,767 notes on all of the lights, read off the slice by ekran. Naming the
+		// it goes silent -- 4,767 notes on all of the lights, read off the slice. Naming the
 		// four sides makes it a cross and a cross stays one, which is the same reason
 		// {@link #STACKED_CROSS} is stated rather than left to the game.
 		// Named before the handover goes down rather than after, so the column that hands over to a
@@ -15744,7 +15810,7 @@ public final class SongBuilder {
 		set(placements, cross, STACKED_CROSS);
 		if (slots.centre() == null) {
 			set(placements, centre, "minecraft:stone");
-			// ekran's: a centre with no note in it has the cell above it going spare, and that cell is at
+			// A centre with no note in it has the cell above it going spare, and that cell is at
 			// exactly the height a bus runs its wire at. Dust there carries the run diagonally up onto the
 			// staircase's first rung -- the run is 4 rather than the 3 a real bus pays, because this cell
 			// is part of it, and it comes back as the two front flanks the module keeps.
@@ -15888,7 +15954,7 @@ public final class SongBuilder {
 	 * note is already built, and nothing it does to its own slots reaches it. Hung on the far side
 	 * instead it costs that lane nothing, and the module here is identical either way.</p>
 	 *
-	 * <p>ekran, reading a module with one back flank and asking for it the other way round. Only the
+	 * <p>Reading a module with one back flank and asking for it the other way round. Only the
 	 * back pair, because the front pair is full whenever the back has anything in it at all.</p>
 	 */
 	private static List<EventNote> backPair(List<EventNote> notes) {
@@ -15915,11 +15981,11 @@ public final class SongBuilder {
 	 * about what the chord hands on changes, because it opens with its own repeater however little
 	 * wire arrives -- so the test is the tip the sweep already recorded.</p>
 	 *
-	 * <p>ekran's, from a breach of eleven on Guardian at 44 wide over three floors: a lane one column
+	 * <p>From a breach of eleven on Guardian at 44 wide over three floors: a lane one column
 	 * short of its wall with five blocks of wire, wanting one for the column and five for the climb,
 	 * where moving the chord makes it one and three.</p>
 	 *
-	 * <p><b>Off since 2026-08-11, on ekran's instruction, and the idea is not dead.</b> It was added
+	 * <p><b>Off since 2026-08-11, on the instruction, and the idea is not dead.</b> It was added
 	 * (af5a019) a day before {@link #PADS_AT_BUS_HEIGHT_INTO_A_CLIMB}, and the two are competing
 	 * answers to one question -- how to keep a climb starting on a bus so it costs three. This one
 	 * moves the chord to the wall; the raise leaves the pad up so the contact is never broken. The
@@ -15930,12 +15996,12 @@ public final class SongBuilder {
 	 * nothing to do with the raise. It was only ever measured against Guardian, 37 builds, where it
 	 * did win: 267 lanes to 246, 1,539 breach blocks to 1,160, worst 17 to 12.</p>
 	 *
-	 * <p><b>What a better version has to do</b>, in ekran's words: pad only where it stops a breach,
-	 * pad the fewest columns that does it, and never be the cause of one. The controls below are left
-	 * in for that, and one of them is already known not to be enough --
-	 * {@link #PREPAD_NEVER_STRANDS_THE_NEXT} looks one event ahead and scored 357 breached lanes
-	 * against 63 for simply not growing. One event of lookahead cannot see the harm; the planner's can,
-	 * which is where a rewrite should start.</p>
+	 * <p><b>What a better version has to do</b>, in the words: pad only where it stops a breach, pad
+	 * the fewest columns that does it, and never be the cause of one. The controls below are left in
+	 * for that, and one of them is already known not to be enough -- {@link
+	 * #PREPAD_NEVER_STRANDS_THE_NEXT} looks one event ahead and scored 357 breached lanes against 63
+	 * for simply not growing. One event of lookahead cannot see the harm; the planner's can, which is
+	 * where a rewrite should start.</p>
 	 */
 	static boolean PREPADS_FOR_THE_OFF_BUS_DISCOUNT = false;
 
@@ -15945,13 +16011,13 @@ public final class SongBuilder {
 	 *
 	 * <p>The loop had neither brake. It stopped when the chord it is padding lands flush on the wall
 	 * or when the wire could not buy one more column -- and nothing in either test asks what the pad
-	 * costs the lane. ekran read the result off illit at 32 wide over two floors: the lane stood at
-	 * {@code x=17} with eleven blocks of wire and thirteen columns to its wall, the plan booked
-	 * <b>two</b> columns of prepad, and this loop grew them to <b>ten</b>. That left {@code tip=1}, so
-	 * the chord of seven it was padding gave up its stacked shape and was laid as a wider plain bus,
-	 * and the chord of eighteen behind it arrived at {@code x=32} -- two columns outside a wall at
-	 * thirty, where {@code room} is negative and so {@code couldSplit} is false. Unpadded that chord
-	 * had nine columns to work with and would simply have been cut.</p>
+	 * costs the lane. In-game reading found the result off illit at 32 wide over two floors: the lane
+	 * stood at {@code x=17} with eleven blocks of wire and thirteen columns to its wall, the plan
+	 * booked <b>two</b> columns of prepad, and this loop grew them to <b>ten</b>. That left {@code
+	 * tip=1}, so the chord of seven it was padding gave up its stacked shape and was laid as a wider
+	 * plain bus, and the chord of eighteen behind it arrived at {@code x=32} -- two columns outside a
+	 * wall at thirty, where {@code room} is negative and so {@code couldSplit} is false. Unpadded that
+	 * chord had nine columns to work with and would simply have been cut.</p>
 	 *
 	 * <p>Ten columns of wire to buy a discount worth two. The trade is the whole objection.</p>
 	 *
@@ -15969,7 +16035,7 @@ public final class SongBuilder {
 	/**
 	 * Whether the off-bus prepad may take the last room the chord behind it had.
 	 *
-	 * <p>ekran's rule, and the sharper statement of the whole thing: a pad is worth laying where a
+	 * <p>The rule, and the sharper statement of the whole thing: a pad is worth laying where a
 	 * dense chord would not otherwise place, it should be the smallest number of columns that does
 	 * the job, and <b>it must never be the reason something breaches</b>. The growth loop had no way
 	 * to know it was the reason -- it looks only at the chord it is padding.</p>
@@ -15987,7 +16053,7 @@ public final class SongBuilder {
 	 * <p>The looser reading was measured first and is not enough: {@code couldSplit} stays true down
 	 * to two columns of room, so "the next one can still be cut" permitted almost every column the
 	 * growth asked for. This requires the next chord to fit in what is left of the lane, which is the
-	 * strict reading of ekran's rule -- the pad may not be the reason anything has to be cut, never
+	 * strict reading of the rule -- the pad may not be the reason anything has to be cut, never
 	 * mind the reason anything breaches.</p>
 	 */
 	static boolean PREPAD_NEXT_MUST_FIT = true;
@@ -16001,7 +16067,7 @@ public final class SongBuilder {
 	 * music, but it is only offered where the chord does not fit. A chord that fits by a column or
 	 * two is therefore laid whole, and the lane is left with nothing to climb with.</p>
 	 *
-	 * <p>ekran: move the start of the chord forward a couple of blocks so that it cuts the stacked
+	 * <p>The move: start the chord a couple of blocks forward so that it cuts the stacked
 	 * bus. That is what this tries -- one column at a time, keeping the first that closes the lane.</p>
 	 */
 	static boolean PADS_UNTIL_THE_NEXT_CHORD_CUTS = true;
@@ -16023,8 +16089,8 @@ public final class SongBuilder {
 	 * breach blocks down 15% -- for one column on the worst breach. A build that will not paste is a
 	 * build nobody can go and stand in front of, which outranks the column it was bought with.</p>
 	 *
-	 * <p>Two is also what ekran counted off the lane: room thirteen holds the whole tail of a chord
-	 * of twenty-four and room eleven does not.</p>
+	 * <p>Two is also what in-game testing counted off the lane: room thirteen holds the whole tail of
+	 * a chord of twenty-four and room eleven does not.</p>
 	 */
 	static int CUT_PAD_COLUMNS = 2;
 
@@ -16039,7 +16105,7 @@ public final class SongBuilder {
 	 * lookahead and {@link #closes} are all skipped, and the lane comes to rest on the column after
 	 * the wall with nothing having objected.</p>
 	 *
-	 * <p>ekran's, from the last breaches on Guardian at 44 wide over three floors, both the same
+	 * <p>From the last breaches on Guardian at 44 wide over three floors, both the same
 	 * shape: a stacked bus of twenty-four ending on the wall at {@code 34 69 208} and the lane handing
 	 * over at {@code 43}. {@link #turnReserve} already kept this column back, but only for a plain bus
 	 * whose wire was too dead to turn -- a wire reserve that happened to be a column. The column is
@@ -16088,7 +16154,7 @@ public final class SongBuilder {
 	 * of them. Turning this flag on does not create that gap, it walks a lane into it.</p>
 	 *
 	 * <p><b>Off, and not because the diagnosis was wrong.</b> With all three shut the flush-landing
-	 * class is gone outright -- every {@code columns=-1} in the build, including both of ekran's --
+	 * class is gone outright -- every {@code columns=-1} in the build, including both of the --
 	 * and what is left is one lane ten columns out at {@code -10 72 243}. That lane is a different
 	 * fault wearing this one's clothes: at {@code t=1546} it has three columns left, five of wire and
 	 * a chord of twenty-four, its head is refused by a parity clash and its plain cut by one block of
@@ -16098,26 +16164,26 @@ public final class SongBuilder {
 	 * </p>
 	 *
 	 * <p><b>On.</b> It shipped off first, on the two wrong notes above -- and those turned out to be
-	 * phantoms of {@code SHARED_PULSE_TICKS} being tighter than the button that starts the machine,
-	 * so the one number that outranked everything else here was never real. What is left against it is
+	 * phantoms of {@code SHARED_PULSE_TICKS} being tighter than the button that starts the machine, so
+	 * the one number that outranked everything else here was never real. What is left against it is
 	 * one named test, {@code NoteMachineReaderTest.readsBackEveryNoteOfItsOwnBuild[3]}, which is a bug
-	 * with an address rather than a verdict. ekran asked for this one, so it stays on and red until
-	 * that readback is understood.</p>
+	 * with an address rather than a verdict. This one was asked for, so it stays on and red
+	 * until that readback is understood.</p>
 	 *
-	 * <p><b>Off again, 2026-08-18, and this time to be looked at in game.</b> ekran: <em>"should we
-	 * try letting chords land flush with the wall? i have a feeling it might break something but
-	 * that's fine, we'll just fix it."</em> Over 325 builds, on against off: the closing pad falls
-	 * <b>8,260 → 5,513</b> cells and its raised half <b>1,985 → 438</b>, depth 22339 → <b>22156</b>
-	 * -- and dead notes go <b>0 → 20,107</b> over seven builds, breach blocks 632 → 1,574. Missing,
-	 * wrong and severed stay nought.</p>
+	 * <p><b>Off again, 2026-08-18, and this time to be looked at in game.</b> The question was
+	 * whether chords should be let land flush with the wall, on the understanding that it might
+	 * break something and that would then be fixed. Over 325 builds, on against off: the closing pad
+	 * falls <b>8,260 → 5,513</b> cells and its raised half <b>1,985 → 438</b>, depth 22339 →
+	 * <b>22156</b> -- and dead notes go <b>0 → 20,107</b> over seven builds, breach blocks 632 →
+	 * 1,574. Missing, wrong and severed stay nought.</p>
 	 *
 	 * <p><b>The dead wire is one fault and it is not the fit test.</b> Guardian 24x3, dead from
 	 * {@code 32 65 172}: the staircase after the last chord lays dust at {@code 33 69 172},
 	 * {@code 34 67 171} and {@code 34 66 172} -- two levels down in one step, with no rung at
 	 * {@code y=68}. The chord in front of it is a {@code STACKED_FRONT+nudge}, which ends on its
 	 * centre block a level below the path, and the branch that builds the staircase says out loud why
-	 * that used to be safe: <em>"A pad puts the wire back down on the path either way, so a padded
-	 * lane never skips them."</em> This column was that pad. So the reserve was paying for two things
+	 * that used to be safe: a pad puts the wire back down on the path either way, so a padded lane
+	 * never skips them. This column was that pad. So the reserve was paying for two things
 	 * at once and only one of them was the column, and what wants fixing is the descent -- a staircase
 	 * handed a shape that does not end on a bus has to lay its own step-down rather than assume a pad
 	 * put the wire back.</p>
@@ -16135,11 +16201,11 @@ public final class SongBuilder {
 	 * less on the first chord of every descended lane, so {@link #shapeFor}'s room test hands every
 	 * stacked and headed shape to a plain bus with the whole floor empty in front of it.</p>
 	 *
-	 * <p>ekran found it on {@code adventure-of-a-lifetime} at 25x5: a chord of five planned as a
-	 * stacked bus, pushed to the floor below and built as a plain one, with {@code
+	 * <p>In-game testing found it on {@code adventure-of-a-lifetime} at 25x5: a chord of five planned
+	 * as a stacked bus, pushed to the floor below and built as a plain one, with {@code
 	 * gaveUp=roomAhead-1<5} on a lane twenty-two columns wide. The rails ask this question again a
-	 * hundred lines earlier for exactly this reason and say so in the same words -- see
-	 * {@code laneWall} -- so this is the other half of a fix that was only half made.</p>
+	 * hundred lines earlier for exactly this reason and say so in the same words -- see {@code
+	 * laneWall} -- so this is the other half of a fix that was only half made.</p>
 	 *
 	 * <p>Census over 325 builds, off against on: depth 22389 -> <b>22339</b>, breach blocks 634 ->
 	 * <b>632</b>, dead, severed and wrong nought either way -- and <b>missing 0 -> 2</b>.</p>
@@ -16166,10 +16232,10 @@ public final class SongBuilder {
 	 * bus it falls to is fifteen cells for thirty notes with not a slot spare, so at the cap the
 	 * fallback does not land short, it drops notes.</p>
 	 *
-	 * <p>ekran read one in game on {@code ultra-limit-two-thirties} at 20x5 -- a chord of thirty
-	 * opening at {@code 21 81 7}, its west flank and its west lowered slot both loud against the
-	 * stacked chord behind: <em>"it just had to... not put a note there. that should have been
-	 * relocation doing its thing but it didnt."</em></p>
+	 * <p>In-game reading found one in game on {@code ultra-limit-two-thirties} at 20x5 -- a chord of
+	 * thirty opening at {@code 21 81 7}, its west flank and its west lowered slot both loud against
+	 * the stacked chord behind: it simply had to not put a note there, which is what relocation
+	 * should have done and did not.</p>
 	 *
 	 * <p>So the budget is the wire rather than the half-cell: the notes fall through to the tail the
 	 * way they do off a slot the route has reserved, and the shape still gives way where the run will
@@ -16187,15 +16253,15 @@ public final class SongBuilder {
 	 * module was never asked, because until {@link #RESERVES_THE_HANDOVER_COLUMN} came off there was
 	 * always a pad column between the two and they never met.</p>
 	 *
-	 * <p>ekran read it in game on Guardian 24x3 -- sea lanterns at {@code 33 68 171} and
-	 * {@code 33 67 171}, 13,254 notes dark behind them: <em>"a stacked chord that was placed flush is
-	 * fine as long as it sheds, but it didn't for some reason. so it collided with the staircase
-	 * trying to go down. so it should go to the center block or back flanks if possible, and if not
-	 * become a tail at the bottom of the staircase."</em></p>
+	 * <p>In-game reading showed it in game on Guardian 24x3 -- sea lanterns at {@code 33 68 171} and
+	 * {@code 33 67 171}, 13,254 notes dark behind them: a stacked chord placed flush is fine so long
+	 * as it sheds, and this one did not, so it collided with the staircase on the way down. The note
+	 * should go to the centre block or the back flanks where it can, and become a tail at the bottom
+	 * of the staircase where it cannot.</p>
 	 *
-	 * <p>The third option costs a plain module a bus it did not have, and that is ekran's call too:
-	 * <em>"yes it should grow one. the alternative is to pad the chord down, which is about the same
-	 * anyway... plus moving the whole chord down means behind busy for the next chord."</em></p>
+	 * <p>The third option costs a plain module a bus it did not have, and that is the call too:
+	 * It should grow one: the alternative is to pad the chord down, which comes to about the same,
+	 * and moving the whole chord down leaves the next chord behind-busy.</p>
 	 */
 	static boolean SHEDS_A_FLUSH_MODULES_FLANK = true;
 
@@ -16207,11 +16273,12 @@ public final class SongBuilder {
 	 * strand test compared the wire in hand against the undiscounted {@code turnCells} and closed
 	 * lanes that could have paid.</p>
 	 *
-	 * <p>ekran, off the blocks on Guardian 24x3 at {@code 25 69 127}: thirteen columns of acacia and a
+	 * <p>off the blocks on Guardian 24x3 at {@code 25 69 127}: thirteen columns of acacia and a
 	 * stacked bus of twenty-four carried to the floor above, where the lane below had room for it.
-	 * <em>"I just tested moving it down, and it turns out the whole thing fits just perfectly. no
-	 * modifications needed... it even connects onto the glass 3-ascent perfectly. so why did it pad
-	 * it?"</em> Because the chord left three, the climb wanted three, and this line asked for five.</p>
+	 * Moved down by hand, the whole thing fits perfectly with no modifications, and even connects
+	 * onto the glass three-ascent -- so the question was why it padded at all. Because the chord
+	 * left three, the climb wanted three, and this line asked for
+	 * five.</p>
 	 *
 	 * <p>Third instance of one fault: two arms pricing the same turn and disagreeing. The comment on
 	 * {@code canTurn} records the second.</p>
@@ -16222,8 +16289,8 @@ public final class SongBuilder {
 	 * Whether v2 lands a chord flush on its wall when the chord after it would otherwise be stuck.
 	 *
 	 * <p>The off-bus prepad ({@link #PREPADS_FOR_THE_OFF_BUS_DISCOUNT}) was written for one lane --
-	 * ekran's breach of eleven on Guardian, "one column short with five blocks of wire" -- and went
-	 * off because it padded every chord it could for a discount worth two, with no brake. ekran's
+	 * the breach of eleven on Guardian, "one column short with five blocks of wire" -- and went
+	 * off because it padded every chord it could for a discount worth two, with no brake. The
 	 * terms for a better one: pad only where it stops a breach, the fewest columns that do, and never
 	 * be the cause of one. This is that. It fires only where the chord after is stuck as things stand
 	 * -- neither fits nor cuts, and the lane cannot turn in front of it because the wire has to cover
@@ -16275,7 +16342,7 @@ public final class SongBuilder {
 	/**
 	 * Whether a chord that can be cut neither plain nor with a head is cut with a sunken opening.
 	 *
-	 * <p>ekran's, built by hand on Guardian 20x5 at tick 1480 and handed over as a before/after
+	 * <p>Built by hand on Guardian 20x5 at tick 1480 and handed over as a before/after
 	 * with emerald for the wall. A plain cut of twenty-four is twelve cells against a budget of
 	 * eleven; a head buys the cell of wire back but costs two columns and, here, clashed with the
 	 * lane behind with no column to nudge into. A note block in front of the repeater costs one
@@ -16290,7 +16357,7 @@ public final class SongBuilder {
 	 * cross-descent: a stacked head whose centre stands on the wall column, whose front flanks stand
 	 * on the border, and whose cross is the staircase's first rung.
 	 *
-	 * <p>ekran's, Guardian 18x4 at {@code 16 77 172}, built by hand and handed over with emerald for
+	 * <p>Guardian 18x4 at {@code 16 77 172}, built by hand and handed over with emerald for
 	 * the wall. The ordinary head needs a transition cell and sheds its front flank for the spiral;
 	 * here there is no column for either, so the spiral's top rung goes instead: the cross under the
 	 * centre is one level below where that rung's dust would stand, and the ring turns from there,
@@ -16312,7 +16379,7 @@ public final class SongBuilder {
 	/**
 	 * Whether a bus puts its last unpaired note in the low-z slot of the cell.
 	 *
-	 * <p>ekran's, and the same instinct as {@link #BACK_FLANK_AWAY_FROM_NEXT_LANE}: the build grows
+	 * <p>The same instinct as {@link #BACK_FLANK_AWAY_FROM_NEXT_LANE}: the build grows
 	 * towards +z, so the high-z slot of every pair faces the lane the walk has not laid yet, and a
 	 * note left there is a note whose neighbour does not exist to be checked against.</p>
 	 */
@@ -16325,10 +16392,10 @@ public final class SongBuilder {
 	 * behind. The walk decides that from the ground -- {@code backPairIsFree}, which looks at what is
 	 * actually there -- and the plan was deciding it from {@code columnBehindBusy} alone, which is the
 	 * coarse arithmetic answer and says busy far more often. So the sweep charged a stand-off column
-	 * the walk then did not build, on the <em>first</em> chord of a lane, and carried the error through
-	 * every event after it.</p>
+	 * the walk then did not build, on the <em>first</em> chord of a lane, and carried the error
+	 * through every event after it.</p>
 	 *
-	 * <p>It costs a lane its turn at the far end. ekran's breach of ten on Guardian at 44 wide over
+	 * <p>It costs a lane its turn at the far end. The breach of ten on Guardian at 44 wide over
 	 * three floors: the plan had the lane owing one column at the wall and exactly enough wire for a
 	 * one-column pad, and the walk arrived owing two. One column it could not pay for, so
 	 * {@code reachesWall} went false, so it never turned, so it laid a chord of twenty-four whole and
@@ -16344,7 +16411,7 @@ public final class SongBuilder {
 	/**
 	 * Whether a head may keep the one slot behind it that nothing else wants.
 	 *
-	 * <p>ekran's, rebuilt by hand at the breach on Guardian at 16 wide over six floors. The pair of
+	 * <p>Rebuilt by hand at the breach on Guardian at 16 wide over six floors. The pair of
 	 * slots behind a head was one thing, available or not, so a module whose neighbour reached into
 	 * one of them gave up both. The lane behind has exactly one live cell in the column that touches
 	 * this one -- {@link UltraSlots#slot} says so in as many words -- so the most it can ever contest
@@ -16356,7 +16423,7 @@ public final class SongBuilder {
 	 * v2: whether a cut asks what kind of thing stands behind it, or only whether anything does.
 	 *
 	 * <p>{@link #stackedSplitOf}'s last argument is documented as <em>another stacked module's
-	 * centre</em>, which is the one case where both back slots are gone rather than one -- ekran's
+	 * centre</em>, which is the one case where both back slots are gone rather than one -- the
 	 * rule, and the exception {@link #HEAD_KEEPS_ONE_BACK_FLANK} is written around. The walk was
 	 * handing it {@code columnBehindBusy}, which also says busy for a rail column, a carried chord, a
 	 * staircase landing and anywhere within reach of a corner.</p>
@@ -16375,7 +16442,7 @@ public final class SongBuilder {
 	/**
 	 * v2: one column spent to move a module off the chord behind it, so that a cut becomes possible.
 	 *
-	 * <p>ekran's, and a different thing from a parity pad even though it lays the same cell. A parity
+	 * <p>A different thing from a parity pad even though it lays the same cell. A parity
 	 * pad moves a module so its slots land on a beat that works. This moves a module so the pair of
 	 * slots <em>behind</em> it comes free -- and with them the bigger head that is the difference
 	 * between a chord cut across the staircase and a chord laid whole with its lane outside the
@@ -16397,14 +16464,14 @@ public final class SongBuilder {
 	static boolean BUSY_PAD_FREES_THE_BACK_FLANKS = true;
 
 	/**
-	 * ekran's sunken bus, in place of the plain one wherever a chord has a harp to open with.
+	 * The sunken bus, in place of the plain one wherever a chord has a harp to open with.
 	 *
 	 * <p>See {@link ChordStyle#SUNKEN_BUS} for what it is and why. It is never longer than the bus it
 	 * replaces, a column shorter on every odd chord, reaches 33 notes where a bus reaches 30, and
 	 * leaves more wire behind it -- a chord of seven spends two dust cells against a bus's four.</p>
 	 *
 	 * <p>And it has no parity, which is the larger half: no centre cross and no back flanks, so it
-	 * contests nothing and nothing contests it. ekran expects it to replace nearly every plain bus in
+	 * contests nothing and nothing contests it. It is expected to replace nearly every plain bus in
 	 * the library.</p>
 	 */
 	static boolean SUNKEN_BUSES = true;
@@ -16419,15 +16486,15 @@ public final class SongBuilder {
 	 * in two columns and a sunken bus of the same chord is never shorter than that, so the drop costs
 	 * the denser shape and buys nothing.</p>
 	 *
-	 * <p>ekran, on a chord of four laid sunken where a stacked module fitted: <em>"it should always
-	 * prefer a single normal stacked chord over a sunken bus"</em>.</p>
+	 * <p>On a chord of four laid sunken where a stacked module fitted: a single normal stacked
+	 * chord should always be preferred over a sunken bus.</p>
 	 */
 	static boolean ROOM_TEST_KNOWS_THE_SUNKEN_FALLBACK = true;
 
 	/**
 	 * Whether a stacked module with an empty centre lays dust on it to feed a staircase.
 	 *
-	 * <p>ekran's. A stacked module's centre sits at bus height and is strongly powered by the
+	 * <p>A stacked module's centre sits at bus height and is strongly powered by the
 	 * module's own repeater. When no note goes in it -- six notes or fewer with both back flanks,
 	 * four front-only -- the cell above it is free, and that cell is exactly where a bus runs its
 	 * wire. Dust there steps diagonally up onto the first rung of a glass climb, so the lane can
@@ -16435,11 +16502,11 @@ public final class SongBuilder {
 	 *
 	 * <p>The staircase itself does not change: it is the ordinary {@code fromBus} climb, rung for
 	 * rung. What changes is only what feeds it. The run costs four rather than three, because this
-	 * cell is part of it and a real bus's last dust is not -- and ekran's arithmetic is that it comes
+	 * cell is part of it and a real bus's last dust is not -- and the arithmetic is that it comes
 	 * out level, because the module keeps the two front flanks that sit at lane level in the column
 	 * the first glass stands two levels above.</p>
 	 *
-	 * <p><b>Off. ekran, in game: "the ascent hanging stacked chords just isn't working right".</b>
+	 * <p><b>Off: in game the ascent hanging stacked chords does not work right.</b>
 	 * The headless numbers never saw it -- nought dead, nought severed, breach and depth within a
 	 * few hundred columns either way -- so whatever is wrong with it is something the reader and the
 	 * fault census both call fine. That is the more interesting half and the reason the whole thing
@@ -16449,7 +16516,7 @@ public final class SongBuilder {
 	 * <p>What it switches off, in the order it was built: the dust on the empty centre; the climb
 	 * taking it as {@code fromBus} at {@code offBus + 1}; the room test charging such a module two
 	 * columns instead of three; and the cut being skipped where the module fits instead. The last of
-	 * those is what finally made ekran's own repro build a stacked chord, so if any part of this is
+	 * those is what finally made the live repro build a stacked chord, so if any part of this is
 	 * worth keeping it is probably not the part that made the shape appear.</p>
 	 */
 	static boolean CLIMB_OFF_A_STACKED_CENTRE = false;
@@ -16460,17 +16527,49 @@ public final class SongBuilder {
 	 *
 	 * <p>The flush half of {@link #CLIMB_OFF_A_STACKED_CENTRE}, and only that half: the dust on the
 	 * empty centre, and the climb taking it as off-bus at {@code offBus + 1}. Not the room test and
-	 * not the cut being skipped, which are what chose the shape in the build ekran said was not
-	 * working. Here the shape is already chosen and already flush, and the choice is between this
+	 * not the cut being skipped, which are what chose the shape in the build that was called wrong.
+	 * Here the shape is already chosen and already flush, and the choice is between this
 	 * and a note under glass: with the climb standing a column out its second column is the cell
-	 * over the module's far front note, and the first rung's glass lands on that note. ekran, at
-	 * Guardian 24x4 25 65 138: <i>"do the 3 ascent directly off of the top of the stacked chord ...
-	 * we place a redstone on top of it. that connects it directly to the glass, and we can skip the
-	 * bottom 2 rungs, allowing the note to sound with air above it and no collision. note that this
-	 * does mean that the ascent costs 4 and not 3."</i> Where the centre holds a note the module sheds
+	 * over the module's far front note, and the first rung's glass lands on that note. At Guardian
+	 * 24x4 25 65 138 the answer was to take the three-ascent directly off the top of the stacked
+	 * chord: redstone on top of it connects it straight to the glass, the bottom two rungs are
+	 * skipped, and the note sounds with air above it and no collision -- at the price of an ascent
+	 * costing four rather than three. Where the centre holds a note the module sheds
 	 * that flank instead, as it does for a descent.</p>
 	 */
 	static boolean CLIMB_FED_FROM_A_FLUSH_CENTRE = true;
+
+	/**
+	 * v2: a chord too big to climb whole, standing two columns from the staircase, cuts as a head
+	 * alone whose centre feeds the climb.
+	 *
+	 * <p>The busHeaded twin of {@link #CLIMB_FED_FROM_A_FLUSH_CENTRE}, and the climb's answer to
+	 * the descent's room-two shed. At a room of two -- against {@link #laneWall}, which for a lane
+	 * ending in a climb is the staircase's own column, the paste border -- there is no cell for a
+	 * transition and none for a bus, and {@link #HEAD_ONLY_NEAR_HALF} says why the plain head-only
+	 * cut never worked going up: the handover beside the centre has nothing bridging it to the
+	 * glass. Its javadoc lists two hand-built ways out, a spent cell and a repositioned chord.
+	 * This is a third, cheaper than both, built by hand in-game first: dust on the head's centre.
+	 * That cell sits at bus height and is strongly powered, the ordinary three-rung staircase's
+	 * first rung is diagonal from it, and the whole tail leaves up the staircase as the next
+	 * floor's opening bus.</p>
+	 *
+	 * <p>The dust costs the centre its note and the shape gives it straight back: the line leaves
+	 * upward, so the bottom-rail cell in front of the cross -- the cell that carries the line
+	 * onward under every other head -- carries nothing here, and the note hangs there instead,
+	 * sounded by the cross pointing into it. Same seven notes in the head, so the ceiling is
+	 * {@code 7 + 2 * (15 - 1 - 3) = 29} climbing, exactly the number the file has always claimed
+	 * and never had a shape for at the wall. The run prices the dust as the transition cell --
+	 * an ascent of four, not three -- and the head as two columns, which is what the room holds.</p>
+	 *
+	 * <p>What it is for: guardian-w-25-chords at 28 wide over five floors, a chord of 25 at a
+	 * room of two with four blocks of wire and no spare tick. A pad-close wants five, a plain cut
+	 * is sixteen cells of a possible fifteen, and every headed cut was refused
+	 * {@code NoRoomForTheNearHalf} -- so the lane laid the chord whole, twelve columns of stacked
+	 * bus outside the wall, and turned there. Both breaches in that build read exactly so in the
+	 * turn trace at ticks 552 and 772.</p>
+	 */
+	static boolean HEAD_FEEDS_THE_CLIMB = true;
 
 	/**
 	 * v2: a headed cut whose head collides is rolled back and the chord cut plain.
@@ -16518,19 +16617,18 @@ public final class SongBuilder {
 	 * Whether a sunken bus asks about parity before hanging the two notes beside its lowered dust.
 	 *
 	 * <p>The shape was built on the understanding that it has no parity at all, and that was half
-	 * right. ekran, from the blocks: <em>"sunken buses cannot accidentally power another note on the
-	 * bottom rail, so if the sunken cell lines up with flanks from anything else or bottom rail,
-	 * that's fine. But if that sunken cell gets placed touching a stacked centre's powered side, it
-	 * must be parity padded."</em></p>
+	 * right. From the blocks: a sunken bus cannot accidentally power another note on the bottom
+	 * rail, so a sunken cell lining up with flanks from anything else, or with the bottom rail, is
+	 * fine. A sunken cell placed touching a stacked centre's powered side must be parity padded.</p>
 	 *
 	 * <p>Which is a one-way rule, and that is why the check is {@link #soundedByAnother} rather than
 	 * anything about shapes: it is true of a live block belonging to another tick and false of a note
 	 * block. A neighbour's flank is a note block and passes; a stacked centre is live and does not.</p>
 	 *
-	 * <p>It went on: "the lowered pair only -- the opening's own flanks stand at bus height where a
-	 * plain bus's notes have always stood, and nothing there is new". They do stand there, and that
-	 * sentence is what hid a wrong note. What was new is that this column hangs them without asking,
-	 * where {@link #layBus} asks of every slot it fills. See
+	 * <p>It went on: the lowered pair only, because the opening's own flanks stand at bus height
+	 * where a plain bus's notes have always stood, and nothing there is new. They do stand there, and
+	 * that sentence is what hid a wrong note. What was new is that this column hangs them without
+	 * asking, where {@link #layBus} asks of every slot it fills. See
 	 * {@link #SUNKEN_ASKS_ITS_OPENING_TOO}, which puts the question to all four.</p>
 	 */
 	static boolean SUNKEN_ASKS_PARITY = true;
@@ -16538,7 +16636,7 @@ public final class SongBuilder {
 	/**
 	 * Whether a sunken bus moves a note off a contested lowered slot instead of moving itself.
 	 *
-	 * <p>ekran's, and it is the same third option {@link #relocationRoom} gives a stacked chord: move
+	 * <p>This is the same third option {@link #relocationRoom} gives a stacked chord: move
 	 * the contested note, not the module. Free exactly when the tail is odd, because then the bus
 	 * already ends on a half-empty cell and the note pushed off lands in it -- same cells, same
 	 * columns, same {@link #sunkenDustCells}. With an even tail, or with both slots contested, the
@@ -16550,18 +16648,17 @@ public final class SongBuilder {
 	 * Whether a sunken bus asks the same question of the two flanks beside its opening note.
 	 *
 	 * <p>{@link #SUNKEN_ASKS_PARITY} asks it of the lowered pair only, on the stated reasoning that
-	 * <em>"the opening's own flanks stand at bus height where a plain bus's notes have always
-	 * stood, and nothing there is new"</em>. They do stand there -- and {@link #layBus} has asked
-	 * {@link #soundedByAnother} of every slot it fills since {@link #slotIsQuiet} was written, for
-	 * the reason that javadoc gives: the cell along the lane from a bus's first slot is the last
+	 * The reasoning was that the opening's own flanks stand at bus height where a plain bus's notes
+	 * have always stood, and nothing there is new. They do stand there -- and {@link #layBus} has
+	 * asked {@link #soundedByAnother} of every slot it fills since {@link #slotIsQuiet} was written,
+	 * for the reason that javadoc gives: the cell along the lane from a bus's first slot is the last
 	 * cell of the chord a tick earlier. What was new is that this column hangs its two notes without
 	 * asking at all, which no other shape in the file does.</p>
 	 *
-	 * <p>ekran read it at their {@code 40 81 15} on sweet-child-o-mine at forty wide over five
-	 * floors, and it is the third shape to be caught by the same thing -- the rigid module was the
-	 * second. <i>"this isn't a note sounds twice, this is a wrong note ... since the chord before it
-	 * activates it prematurely ... this seems like a job for relocation on the sunken bus. there's a
-	 * free spot on the tail."</i></p>
+	 * <p>In-game reading showed it at their {@code 40 81 15} on sweet-child-o-mine at forty wide over
+	 * five floors, and it is the third shape to be caught by the same thing -- the rigid module was
+	 * the second: this is not a note sounding twice but a wrong note, the chord before it setting it
+	 * off early -- a job for relocation on the sunken bus, which has a free spot on the tail.</p>
 	 *
 	 * <p>There is, and it is the one the shape already knows about: a chord of six spends
 	 * {@code sunkenDustCells} of two, which is three notes in the opening and four in the cells
@@ -16575,16 +16672,16 @@ public final class SongBuilder {
 	/**
 	 * Whether a sunken bus may open inside a flat turn.
 	 *
-	 * <p>Off, this is ekran's own caveat from before the shape was built, and it was a column too
+	 * <p>Off, this is the live caveat from before the shape was built, and it was a column too
 	 * wide. What cannot be in a turn is the lowered column's <em>notes</em>, and only the one of
 	 * them the route is about to stand on -- which the lowered pair now works out from the route
 	 * rather than assuming to be the two sides.</p>
 	 *
-	 * <p>ekran built all three arrangements by hand and every one carries more than a plain bus
-	 * can: the bend on the centre costs nothing at all (the centre is a note block, not dust, so
-	 * there is no corner to pay for), on the lowered dust cell it costs one note, and a second
-	 * bend out on the bus costs the slot a corner always costs. <b>32 notes through a turn where
-	 * a plain bus manages 28.</b></p>
+	 * <p>In-game testing built all three arrangements by hand and every one carries more than a plain
+	 * bus can: the bend on the centre costs nothing at all (the centre is a note block, not dust, so
+	 * there is no corner to pay for), on the lowered dust cell it costs one note, and a second bend
+	 * out on the bus costs the slot a corner always costs. <b>32 notes through a turn where a plain
+	 * bus manages 28.</b></p>
 	 *
 	 * <p>Census over 325 builds, on against off: depth 22385 -> 22354, dead 0, severed 0, wrong 0
 	 * unchanged, missing 4 -> 1, breach 1106 -> 1181. The breach is one build --
@@ -16603,7 +16700,7 @@ public final class SongBuilder {
 	 * bus block where the repeater looks, because a repeater facing a note block has nowhere to
 	 * send the line -- but a sunken bus's opening <em>is</em> a note block the repeater drives,
 	 * full and solid, passing fifteen to the dust beyond. Swapping it out trades a note for
-	 * nothing and the chord comes up one short. ekran read it off the blocks and built the
+	 * nothing and the chord comes up one short. In-game reading showed it off the blocks and built the
 	 * answer: the missing note in the cell the repeater faces, and the bus cell beside it sunk.
 	 * Which is this shape's opening and lowered column, so it is this shape's own builder.</p>
 	 *
@@ -16624,8 +16721,8 @@ public final class SongBuilder {
 	/**
 	 * The smallest chord a busy pad will spend a column on.
 	 *
-	 * <p>Twenty-five, and it is ekran's line: "it's not worth it unless the chord truly is cutting a
-	 * gap and truly cannot cut, even with a stacked head". Everything below that has other moves --
+	 * <p>Twenty-five, and it is the line: not worth it unless the chord truly is cutting a gap and
+	 * truly cannot cut, even with a stacked head. Everything below that has other moves --
 	 * it can cut plain, it can take a shorter head, it can be laid as a bus and let the lane turn
 	 * after it -- so a column spent there is a column bought for a chord that had somewhere else to
 	 * go.</p>
@@ -16670,7 +16767,7 @@ public final class SongBuilder {
 	 * ground does -- so a chord whose back pair was actually free was never offered a full head, and
 	 * the whole cut fell to a plain bus.</p>
 	 *
-	 * <p>ekran's, from the breach at 16 wide over six floors: a chord of twenty-two cut ten cells on
+	 * <p>From the breach at 16 wide over six floors: a chord of twenty-two cut ten cells on
 	 * one floor and one on the next, {@code headed=no}, which they rebuilt by hand with a full head of
 	 * seven and no parity trouble at all.</p>
 	 */
@@ -16679,9 +16776,9 @@ public final class SongBuilder {
 	/**
 	 * Whether the plan is redone when the blocks answer what it had to guess.
 	 *
-	 * <p>ekran: be more intelligent whenever possible. The walk can see things the plan cannot -- the
-	 * plan runs before any of the lane exists -- so the choice when they disagree is either to make
-	 * the walk stop looking, or to let it look and tell the plan. This is the second.</p>
+	 * <p>The principle: be more intelligent whenever possible. The walk can see things the plan cannot
+	 * -- the plan runs before any of the lane exists -- so the choice when they disagree is either to
+	 * make the walk stop looking, or to let it look and tell the plan. This is the second.</p>
 	 */
 	static boolean REPLAN_WHEN_BLOCKS_DISAGREE = true;
 
@@ -16695,7 +16792,7 @@ public final class SongBuilder {
 	 * turn makes is far bigger than what it does. A turn claims the pair because its run of powered
 	 * stone lies at the level the low notes hang at and is live at the tick of the lane it is
 	 * leaving -- true of the cells beside the corner, and nothing to do with a module standing five
-	 * columns further along. ekran, on Guardian at 44 wide over three floors: a chord of twelve at
+	 * columns further along. On Guardian at 44 wide over three floors: a chord of twelve at
 	 * {@code 38 72 15}, first of the lane after a flat turn, that lost its head of seven for a head
 	 * of five and a cell of bus with both cells behind it plain air.</p>
 	 *
@@ -16729,7 +16826,7 @@ public final class SongBuilder {
 	 * shape changes: same head, same size, same columns, same tail -- so the plan does not need to
 	 * know, and the planner and the walk cannot part company over it.</p>
 	 *
-	 * <p>ekran: look instead of guess. Applies to any stacked shape carrying exactly one back note,
+	 * <p>The rule: look instead of guess. Applies to any stacked shape carrying exactly one back note,
 	 * not to the head of six alone.</p>
 	 */
 	/**
@@ -16747,8 +16844,8 @@ public final class SongBuilder {
 	 * to know and the two cannot part company over it. Where there are not enough free slots to hold
 	 * them the module is handed back untouched, and the caller's own fallback takes over.</p>
 	 *
-	 * <p>ekran: look at both, not just guess for the front and actually look for the back. Either of
-	 * the two flanks on the contested side may be the one given up, and it could be the front.</p>
+	 * <p>The rule: look at both, rather than guessing the front and looking only for the back. Either
+	 * of the two flanks on the contested side may be the one given up, and it could be the front.</p>
 	 */
 	private static UltraSlots onTheFreeSlots(PlacementPlan placements, BlockPos pos, Direction travel,
 			Direction noteSide, int time, UltraSlots slots) {
@@ -16848,7 +16945,7 @@ public final class SongBuilder {
 	 * sixteen, so the chord that lost its head can no longer be cut across the descent either. It is
 	 * laid whole, past the wall, and hands on {@code 15 - 12 = 3} blocks of wire where the staircase
 	 * wants four. Every chord of that size after it does the same, so the lane cannot turn until a
-	 * smaller chord comes along. ekran: the code is already supposed to be able to split a chord of
+	 * smaller chord comes along. The code is already supposed to be able to split a chord of
 	 * twenty-seven, and all of these are below that.</p>
 	 */
 	static boolean KEEPS_HEAD_WHEN_THE_BUS_IS_LONGER = true;
@@ -16863,7 +16960,7 @@ public final class SongBuilder {
 	 * two columns of the lane's own centre line; a descent spirals round a two-by-two column. Both
 	 * carry the signal and neither hangs a note, so the pair beside the landing is nobody's.</p>
 	 *
-	 * <p>ekran, who has read both in game: only the flat turn should have the rule, and a stacked-bus
+	 * <p>: only the flat turn should have the rule, and a stacked-bus
 	 * should be able to stand immediately either side of a descent. The climb half of this was theirs
 	 * too, from a stacked-bus that landed off an ascent with both back cells plain air.</p>
 	 *
@@ -17091,9 +17188,9 @@ public final class SongBuilder {
 	 * ends five thousand blocks short of its partner; no amount of padding at its own modules could
 	 * have closed that, because it barely has any.</p>
 	 *
-	 * <p>ekran asked for it as a flag, and it earns one: it is the only thing here that lays blocks
-	 * for no musical reason at all, and a build that would rather be short than together should be
-	 * able to say so.</p>
+	 * <p>It was asked for as a flag, and it earns one: it is the only thing here that lays
+	 * blocks for no musical reason at all, and a build that would rather be short than together should
+	 * be able to say so.</p>
 	 */
 	static boolean PADS_THE_DELAY_CHAIN = true;
 
@@ -17168,7 +17265,7 @@ public final class SongBuilder {
 	 *     <p>Laid <em>flat</em>, at the height the delay chain runs at, rather than as more bus.
 	 *     The chord keeps the shape it would have had on its own and the padding is a plain run
 	 *     between modules, which is what it is. Padding by bus instead made every chord look like a
-	 *     bigger chord with its notes bunched at one end -- ekran's objection, and the right one.</p>
+	 *     bigger chord with its notes bunched at one end -- the objection, and the right one.</p>
 	 *
 	 *     <p>It buys no extra reach. Bus dust and flat dust are one run from the same repeater, so
 	 *     the fifteen cells dust carries are shared between them however they are arranged. More
@@ -17447,7 +17544,7 @@ public final class SongBuilder {
 	 * half-blocks now, which is what makes a floor something you can see down through and walk
 	 * between rather than a solid ceiling over the floor below.</p>
 	 *
-	 * <p>Safe there and nowhere else, for the reason ekran gave: a slab cannot be strongly powered.
+	 * <p>Safe there and nowhere else, for one reason: a slab cannot be strongly powered.
 	 * Nothing in this level is ever asked to carry the signal -- a falling block's prop holds it up,
 	 * the cross's floor holds up dust, the rail's floor holds up a repeater, and a repeater does not
 	 * care what it stands on. One level higher and the same substitution would silence a module,
@@ -17707,9 +17804,9 @@ public final class SongBuilder {
 		 * onto the bus, a cell longer than it had to be. The lane behind has exactly one live cell in
 		 * the column that touches this one, so the most it can ever contest is one slot.</p>
 		 *
-		 * <p>ekran built it by hand at the breach on Guardian at 16 wide over six floors: a chord of
-		 * twenty-three laid as a plain bus, rebuilt with one note in the centre and one in the free
-		 * back flank, exactly one cell shorter. That cell is the whole difference between a bus of
+		 * <p>In-game testing built it by hand at the breach on Guardian at 16 wide over six floors: a
+		 * chord of twenty-three laid as a plain bus, rebuilt with one note in the centre and one in the
+		 * free back flank, exactly one cell shorter. That cell is the whole difference between a bus of
 		 * twelve cells, which wants sixteen blocks of wire to cut across a staircase, and eleven, which
 		 * wants fifteen and has them.</p>
 		 */
@@ -17718,7 +17815,7 @@ public final class SongBuilder {
 		/**
 		 * A bus whose opening cell carries the signal through a note block instead of stone and dust.
 		 *
-		 * <p>ekran's, and the name is theirs. A repeater strongly powers the block in front of it, and
+		 * <p>The name is theirs. A repeater strongly powers the block in front of it, and
 		 * a note block is a full solid block -- so if that block is a note block rather than the bus's
 		 * first stone, it holds three notes (a centre and two flanks) and spends <b>no dust at all</b>,
 		 * and the cell after it still starts at fifteen. The cell after is a bus cell laid a level
@@ -17733,12 +17830,12 @@ public final class SongBuilder {
 		 *
 		 * <p><b>And it has no parity.</b> There is no centre cross and there are no back flanks, so
 		 * nothing behind it is contested and it contests nothing -- for itself or for the lane
-		 * alongside. That is the larger half of why ekran wanted it: a chord of twenty-five can be cut
+		 * alongside. That is the larger half of why it was wanted: a chord of twenty-five can be cut
 		 * wherever it stands, as a bus, with no parity question asked either way.</p>
 		 *
 		 * <p>The centre note must be a <b>harp</b>. It is the block the repeater drives and the only
 		 * thing carrying the signal onward, and a harp is the one instrument whose block is air -- so
-		 * nothing is laid in the lane's own centre line at floor level. ekran's rule, off their
+		 * nothing is laid in the lane's own centre line at floor level. The rule, off their
 		 * paste.</p>
 		 */
 		SUNKEN_BUS;
@@ -17757,10 +17854,10 @@ public final class SongBuilder {
 		 * looks like. Granted the discount anyway, the climb starts two rungs above a wire a level
 		 * below where it thinks it is, and the run stops at the gap.</p>
 		 *
-		 * <p>ekran read it as glass missing: <em>"its supposed to climb, but the first two glass blocks
-		 * and their redstone have been straight up deleted"</em>. They were never laid. am-i-dreaming at
-		 * 12 wide over seven floors, the lowered dust at {@code 3 69 7} with the first glass at
-		 * {@code 2 70 7} and plain air at {@code 2 69 7} between them.</p>
+		 * <p>In-game reading showed it as glass missing: the lane is supposed to climb, and the first
+		 * two glass blocks and their redstone are simply absent. They were never laid.
+		 * am-i-dreaming at 12 wide over seven floors, the lowered dust at {@code 3 69 7} with the first
+		 * glass at {@code 2 70 7} and plain air at {@code 2 69 7} between them.</p>
 		 *
 		 * <p>The wire sums are the other question and they are asked by name: {@code tipSignal} and
 		 * {@link #landingFrom} both test {@code == SUNKEN_BUS} explicitly, because for spending dust a
@@ -17847,8 +17944,8 @@ public final class SongBuilder {
 		 * tested {@code == HALF_TICK_LANE}, so the folded pair quietly took the sequence instead of
 		 * the composition -- and a sequence delay is repeater ticks. Its notes were then halved, so
 		 * the song played at double speed, and split by the parity of a repeater-tick index, which
-		 * is not a property of the music at all. ekran heard all of it in about a minute: "twice as
-		 * fast", "a chaotic mess", "way more notes". A flag on the mode cannot be forgotten by the
+		 * is not a property of the music at all. All of it was audible in about a minute -- twice as
+		 * fast, a chaotic mess, far more notes. A flag on the mode cannot be forgotten by the
 		 * next layout that needs it.</p>
 		 */
 		private final boolean gameTicks;
@@ -18070,7 +18167,7 @@ public final class SongBuilder {
 		/**
 		 * How many steps forward the snake took, added up over every lane on every floor.
 		 *
-		 * <p>ekran's, and it replaces {@code depth} as the number to watch. Depth is a bad measure of a
+		 * <p>This replaces {@code depth} as the number to watch. Depth is a bad measure of a
 		 * build: it moves in jumps, it depends on how many floors the config was handed, and a real
 		 * optimisation can shorten the snake by hundreds of columns without moving it at all.</p>
 		 *
@@ -18218,10 +18315,10 @@ public final class SongBuilder {
 		/**
 		 * Columns by which a lane stopped short of its wall, one per lane that did.
 		 *
-		 * <p>The other half of a breach, and worth as much watching. A short lane wastes the columns
-		 * it never reached, but the expensive part is where it leaves the turn: a staircase that comes
-		 * down inside the corridor instead of at the wall stands where no other lane's does, and the
-		 * lane beside it hangs its notes into ground that is suddenly live. Ekran has traced two
+		 * <p>The other half of a breach, and worth as much watching. A short lane wastes the columns it
+		 * never reached, but the expensive part is where it leaves the turn: a staircase that comes down
+		 * inside the corridor instead of at the wall stands where no other lane's does, and the lane
+		 * beside it hangs its notes into ground that is suddenly live. In-game testing has traced two
 		 * separate wrong-note faults to exactly that and asked for the source treated rather than the
 		 * symptom, which needs the source counted first.</p>
 		 */
@@ -18237,7 +18334,7 @@ public final class SongBuilder {
 		 * <p>Both corners of a bend rather than the last one recorded, which is what
 		 * {@link #inTurn} asks and is not the same question: a bend has two turning points and a
 		 * chord wrapping it is near both. Levels are kept apart because a corner four floors down
-		 * cannot reach anything here, and Manhattan because that is the shape of the rule ekran
+		 * cannot reach anything here, and Manhattan because that is the shape of the rule as
 		 * measured -- a stacked centre is clear at exactly three from a corner.</p>
 		 */
 		int cornerDistance(BlockPos at) {
@@ -18293,7 +18390,8 @@ public final class SongBuilder {
 		 * module writes is a few dozen positions, and those are what get remembered.</p>
 		 */
 		private record Trial(List<BlockPos> blocksAdded, Map<BlockPos, Integer> notesBefore,
-				Map<BlockPos, Integer> poweredBefore, List<BlockPos> cornersAdded,
+				Map<BlockPos, Integer> poweredBefore, Map<BlockPos, String> blocksBefore,
+				Map<BlockPos, String> namesBefore, List<BlockPos> cornersAdded,
 				List<BlockPos> collisionsAdded,
 				int turnCount, int movedCount, int troubleCount, int breachCount, int recessCount,
 				Map<String, Integer> padding,
@@ -18305,7 +18403,7 @@ public final class SongBuilder {
 		/**
 		 * A simple tail that can still be taken back up and laid again as a bus.
 		 *
-		 * <p>ekran's shape, and the reason it is safe: a simple tail is one column and the bus that
+		 * <p>The shape, and the reason it is safe: a simple tail is one column and the bus that
 		 * replaces it is two, and the second of those two is <b>the pad's own column</b> -- so the
 		 * chord after it opens in exactly the same place and nothing downstream moves. Which means the
 		 * tail does not have to guess what follows it. It can be laid as the compact shape and undone
@@ -18640,8 +18738,8 @@ public final class SongBuilder {
 		 * wrongNotes()} is built on this, and by {@code betterThan} a wrong note outranks every
 		 * breach number in the file. So a phantom here can veto a real improvement, and did.</p>
 		 *
-		 * <p>ekran found it from the world, which is the only place it could have been found. The
-		 * layout check called a note at {@code 3 69 140} doubled -- eight ticks between its own pulse
+		 * <p>In-game testing found it from the world, which is the only place it could have been found.
+		 * The layout check called a note at {@code 3 69 140} doubled -- eight ticks between its own pulse
 		 * and the corner cell laid beside it -- and playing the build showed it sounding once, because
 		 * the button was still holding the first pulse high when the second arrived.</p>
 		 */
@@ -18820,6 +18918,7 @@ public final class SongBuilder {
 		void beginSoftTail(SoftTail what) {
 			softTail = what;
 			tailJournal = new Trial(new ArrayList<>(), new LinkedHashMap<>(), new LinkedHashMap<>(),
+				new LinkedHashMap<>(), new LinkedHashMap<>(),
 				new ArrayList<>(), new ArrayList<>(), 0, 0, 0, 0, 0, Map.of(), 0, 0, 0, 0, 0, 0);
 		}
 
@@ -18866,11 +18965,32 @@ public final class SongBuilder {
 			if (undo == null) {
 				return;
 			}
+			// Journalled into the open trial like everything else the trial changes, because this is
+			// a writer too -- one that removes. The tail it takes up was laid by a chord already
+			// committed, so a rollback that forgot these cells would erase a committed module's blocks
+			// for an attempt that was abandoned. That is not hypothetical: the closing search dry-built
+			// a padded chord over a simple tail, this ran, the search rolled its own blocks back and
+			// restored its {@link Behind} snapshot -- and the tail's three notes were simply gone, with
+			// every number still reading nought except the severed-lane count. Two builds of
+			// sweet-child-o-mine, each with one starved repeater reading air where the tail had stood.
 			for (BlockPos at : undo.blocksAdded()) {
+				if (trial != null && !trial.blocksAdded().remove(at)) {
+					String standing = blocks.get(at);
+					if (standing != null && !trial.blocksBefore().containsKey(at)) {
+						trial.blocksBefore().put(at, standing);
+						String name = placedBy.get(at);
+						if (name != null) {
+							trial.namesBefore().put(at, name);
+						}
+					}
+				}
 				blocks.remove(at);
 				placedBy.remove(at);
 			}
 			undo.notesBefore().forEach((at, was) -> {
+				if (trial != null && !trial.notesBefore().containsKey(at)) {
+					trial.notesBefore().put(at, notes.get(at));
+				}
 				if (was == null) {
 					notes.remove(at);
 				} else {
@@ -18878,6 +18998,9 @@ public final class SongBuilder {
 				}
 			});
 			undo.poweredBefore().forEach((at, was) -> {
+				if (trial != null && !trial.poweredBefore().containsKey(at)) {
+					trial.poweredBefore().put(at, powered.get(at));
+				}
 				if (was == null) {
 					powered.remove(at);
 				} else {
@@ -19324,7 +19447,7 @@ public final class SongBuilder {
 			}
 			trialRun = runSinceRepeater;
 			trial = new Trial(new ArrayList<>(), new LinkedHashMap<>(), new LinkedHashMap<>(),
-				new ArrayList<>(), new ArrayList<>(),
+				new LinkedHashMap<>(), new LinkedHashMap<>(), new ArrayList<>(), new ArrayList<>(),
 				turns.size(), moved.size(), trouble.size(), breaches.size(),
 				recesses.size(), new LinkedHashMap<>(padding),
 				minimumX, minimumY, minimumZ, maximumX, maximumY, maximumZ);
@@ -19382,7 +19505,7 @@ public final class SongBuilder {
 		 * pasted and looked at -- and the shape that would have been given up stays exactly where it
 		 * collided, wire dead above it.</p>
 		 *
-		 * <p>So the one build ekran can stand in was the only one keeping the broken shape, and every
+		 * <p>So the one build a player can stand in was the only one keeping the broken shape, and every
 		 * fault read off it belonged to a machine that does not ship. Asked here, the marked build takes
 		 * the same fallback by the same route.</p>
 		 */
@@ -19411,6 +19534,16 @@ public final class SongBuilder {
 				inner.poweredBefore().forEach((at, was) -> {
 					if (!outer.poweredBefore().containsKey(at)) {
 						outer.poweredBefore().put(at, was);
+					}
+				});
+				inner.blocksBefore().forEach((at, was) -> {
+					if (!outer.blocksBefore().containsKey(at)) {
+						outer.blocksBefore().put(at, was);
+					}
+				});
+				inner.namesBefore().forEach((at, was) -> {
+					if (!outer.namesBefore().containsKey(at)) {
+						outer.namesBefore().put(at, was);
 					}
 				});
 				outer.cornersAdded().addAll(inner.cornersAdded());
@@ -19446,6 +19579,12 @@ public final class SongBuilder {
 				// undone would colour that bus after something the build has not got.
 				placedBy.remove(at);
 			}
+			// What the trial removed goes back too -- today that is only {@link #undoSoftTail} taking
+			// up a committed module's tail. Restored after the additions come out, and the two sets
+			// are disjoint by construction: a cell the same trial added is dropped from blocksAdded
+			// at the moment of removal rather than remembered here.
+			undo.blocksBefore().forEach(blocks::put);
+			undo.namesBefore().forEach(placedBy::put);
 			// And the marks with them, for the same reason: a sea lantern standing where a shape was
 			// given up says two shapes wanted a cell that only one of them ever reached.
 			undo.collisionsAdded().forEach(collisions::remove);

@@ -60,7 +60,7 @@ class TurnBanTest {
 		try (Stream<Path> listing = Files.list(SONGS)) {
 			files = listing.filter(f -> f.toString().endsWith(".json")).sorted().toList();
 		}
-		// 0 = ban ends with the turn, 1 = ban outlasts it by a chord, 2 = ekran's distance rule.
+		// 0 = ban ends with the turn, 1 = ban outlasts it by a chord, 2 = the distance rule.
 		for (int mode = 1; mode >= 0; mode--) {
 			int outlasts = mode;
 			SongBuilder.TURN_BAN_BY_DISTANCE = true;

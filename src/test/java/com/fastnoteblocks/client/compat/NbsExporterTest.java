@@ -131,8 +131,8 @@ class NbsExporterTest {
 	 *
 	 * <p>Note Block Studio decides whether a song could be built in Minecraft from the tempo field
 	 * alone, so a song whose notes are four ticks apart written at forty a second reads as four
-	 * times faster than redstone can go -- even though the notes are exactly ten a second. Ekran hit
-	 * that on Hammer after baking its speed in: flagged incompatible with a game it had already been
+	 * times faster than redstone can go -- even though the notes are exactly ten a second. Hammer
+	 * hit that after baking its speed in: flagged incompatible with a game it had already been
 	 * pasted into.</p>
 	 */
 	@Test

@@ -23,7 +23,7 @@ import org.junit.jupiter.api.Test;
  *
  * <p>Every number quoted for this rule so far has been a library total or a Guardian total, and a
  * total says how much moved and nothing about where. This prints the same measurement at three
- * altitudes -- the config ekran actually builds at, one line a song over the sweep, and one line a
+ * altitudes -- the config actually built at, one line a song over the sweep, and one line a
  * config for Guardian -- so a regression can be pointed at rather than argued about.</p>
  */
 @Tag("sweep")
@@ -120,7 +120,7 @@ class RaisedAscentABTest {
 		return configs;
 	}
 
-	/** ekran's own build limits, read off {@code run/config/fast-noteblocks.json}. */
+	/** The live build limits, read off {@code run/config/fast-noteblocks.json}. */
 	private static final List<int[]> REAL = List.of(new int[] {40, 5, 16});
 
 	private static Map<String, Tally> arm(boolean raised, List<int[]> configs) throws Exception {
@@ -164,7 +164,7 @@ class RaisedAscentABTest {
 
 	@Test
 	void measuresTheRaisedAscentAtEveryAltitude() throws Exception {
-		report("ekran's config, 40w x 5f", arm(false, REAL), arm(true, REAL));
+		report("the live config, 40w x 5f", arm(false, REAL), arm(true, REAL));
 
 		List<int[]> grid = sweepGrid();
 		Map<String, Tally> offSweep = arm(false, grid);
@@ -298,7 +298,7 @@ class RaisedAscentABTest {
 	}
 
 	/**
-	 * illit at 32 wide over four floors, which is a cut ekran can see going wrong.
+	 * illit at 32 wide over four floors, which is a cut a player can see going wrong.
 	 *
 	 * <p>The chord is divided by {@code near = 2 * (room - 1)} and {@code room} is however many
 	 * columns are left to the wall, so the near half is not chosen -- it falls out of where the lane
@@ -347,7 +347,7 @@ class RaisedAscentABTest {
 	}
 
 	/**
-	 * The two lanes Guardian loses at ekran's own size, in coordinates somebody can stand on.
+	 * The two lanes Guardian loses at the live size, in coordinates somebody can stand on.
 	 *
 	 * <p>Paste at {@code 0 64 0} and every number here is a number in the world. The turns are
 	 * printed as a difference rather than a list because a build has hundreds and only the ones that

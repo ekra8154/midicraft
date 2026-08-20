@@ -15,10 +15,10 @@ import org.junit.jupiter.api.Test;
 /**
  * The one thing standing against {@link SongBuilder#RESERVES_THE_HANDOVER_COLUMN}.
  *
- * <p>{@code NoteMachineReaderTest.readsBackEveryNoteOfItsOwnBuild[3]} does not read back wrong -- it
- * never gets that far. The plan is refused outright with a collision at {@code 0 71 32}, oak planks
- * against stone. This builds the same song and limits with the collision marked instead of thrown,
- * so the shape that laid each block can be read off rather than guessed at.</p>
+ * <p>{@code NoteMachineReaderTest.readsBackEveryNoteOfItsOwnBuild[3]} does not read back wrong --
+ * it never gets that far. The plan is refused outright with a collision at {@code 0 71 32}, oak
+ * planks against stone. This builds the same song and limits with the collision marked instead of
+ * thrown, so the shape that laid each block can be read off rather than guessed at.</p>
  */
 @Tag("sweep")
 class HandoverCollisionProbe {
@@ -158,7 +158,7 @@ class HandoverCollisionProbe {
 		return List.copyOf(notes);
 	}
 
-	/** ekran's: pad the chord that fits forward until it cuts. Both flags, every way round. */
+	/** Pad the chord that fits forward until it cuts. Both flags, every way round. */
 	@Test
 	void pricesCuttingAChordThatFits() throws Exception {
 		List<SongBuilder.EventNote> notes = guardian();
@@ -208,7 +208,7 @@ class HandoverCollisionProbe {
 		}
 	}
 
-	/** And the same on ekran's own 44 by 3, where the breach of ten is. */
+	/** And the same on the live 44 by 3, where the breach of ten is. */
 	@Test
 	void pricesItOnTheRealBuild() throws Exception {
 		List<SongBuilder.EventNote> notes = guardian();
@@ -249,7 +249,7 @@ class HandoverCollisionProbe {
 		}
 	}
 
-	/** The breach of ten on ekran's own build, in the coordinates a paste at 0 64 0 lands on. */
+	/** The breach of ten on the live build, in the coordinates a paste at 0 64 0 lands on. */
 	@Test
 	void dumpsTheBreachOfTen() throws Exception {
 		SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0), guardian(),
@@ -267,7 +267,7 @@ class HandoverCollisionProbe {
 		}
 	}
 
-	/** ekran's breach of ten: does the plan asking the blocks close that lane? */
+	/** The breach of ten: does the plan asking the blocks close that lane? */
 	@Test
 	void pricesAskingTheBlocksBehind() throws Exception {
 		List<SongBuilder.EventNote> notes = guardian();
@@ -421,7 +421,7 @@ class HandoverCollisionProbe {
 				+ " " + run[3]));
 	}
 
-	/** ekran's head of six: 16 by 6 where they built it, then every Guardian size. */
+	/** The head of six: 16 by 6 where they built it, then every Guardian size. */
 	@Test
 	void pricesTheHalfHead() throws Exception {
 		List<SongBuilder.EventNote> notes = guardian();
@@ -535,12 +535,12 @@ class HandoverCollisionProbe {
 		}
 	}
 
-	/** ekran's own 44 by 3, with the cut head of six on and collisions marked. */
+	/** The live 44 by 3, with the cut head of six on and collisions marked. */
 	@Test
-	void marksTheCutCollisionOnEkransBuild() throws Exception {
+	void marksTheCutCollisionOnTheLiveBuild() throws Exception {
 		SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0), guardian(),
 			SongBuilder.PasteMode.ULTRA_COMPACT_LANE, new SongBuilder.BuildLimits(16, 44, 3));
-		System.out.println("EKRAN44 collisions=" + plan.collisions().size()
+		System.out.println("LIVE44 collisions=" + plan.collisions().size()
 			+ " breaches=" + plan.breaches().size() + " wrong=" + plan.wrongNotes()
 			+ " nearWall=" + plan.nearWall() + " farWall=" + plan.farWall());
 		int shown = 0;

@@ -58,7 +58,7 @@ class CollisionMarkTest {
 	 *
 	 * <p>Adventure of a Lifetime is the smallest that refuses, and refuses twice at different widths
 	 * -- so if the two lanterns land in the same relation to the staircase, the shape is the fault
-	 * and not the song. Kick Back is here because ekran has that one built.</p>
+	 * and not the song. Kick Back is here because in-game testing has that one built.</p>
 	 */
 	@Test
 	void marksTheCellsAndDrawsTheFirst() throws Exception {

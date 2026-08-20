@@ -21,7 +21,7 @@ import org.junit.jupiter.api.Test;
  *
  * <p>The two-rail shape halves a run of small chords, so before any of it is built the question is
  * how much of the library is such a run. A song whose largest chord is one note is the base case
- * ekran asked for -- it exercises the shape and nothing else.</p>
+ * what was asked for -- it exercises the shape and nothing else.</p>
  */
 @Tag("sweep")
 class SingleNoteCensusTest {

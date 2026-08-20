@@ -12,7 +12,7 @@ import org.junit.jupiter.api.Test;
 /**
  * Nothing but chords of twenty-five, a repeater tick apart. The bar the next builder has to clear.
  *
- * <p>ekran's target, and it is the hardest chord in the range rather than a gentle one. A cut costs
+ * <p>The target, and it is the hardest chord in the range rather than a gentle one. A cut costs
  * a transition cell, the two halves of the tail, and the staircase, and it has to come in under the
  * fifteen a repeater carries:</p>
  *
@@ -22,15 +22,15 @@ import org.junit.jupiter.api.Test;
  *   twenty-five        =  13 cells        -&gt;  17 and 16, over both ways
  * </pre>
  *
- * <p>So <b>every cut in this song has to be headed</b>. Seven notes go in the head and the remaining
- * eighteen make nine cells, {@code 1 + 9 + 4 = 14}, one cell clear -- which is one parity pad's
- * worth, and two if the head sheds its flank onto the staircase. That is the whole margin this song
- * has, and it is why it is the right thing to build against: it puts no weight at all on the pad
- * machinery and all of it on the head.</p>
+ * <p>So <b>every cut in this song has to be headed</b>. Seven notes go in the head and the
+ * remaining eighteen make nine cells, {@code 1 + 9 + 4 = 14}, one cell clear -- which is one parity
+ * pad's worth, and two if the head sheds its flank onto the staircase. That is the whole margin
+ * this song has, and it is why it is the right thing to build against: it puts no weight at all on
+ * the pad machinery and all of it on the head.</p>
  *
- * <p>The pass mark is all three of no breach, no wrong note, and <b>no dead line</b> -- the last read
- * off the blocks with {@link NoteMachineReader}, because {@code plan.breaches()} reads nought over a
- * machine whose wire has been severed and has done exactly that here before.</p>
+ * <p>The pass mark is all three of no breach, no wrong note, and <b>no dead line</b> -- the last
+ * read off the blocks with {@link NoteMachineReader}, because {@code plan.breaches()} reads nought
+ * over a machine whose wire has been severed and has done exactly that here before.</p>
  */
 @Tag("sweep")
 class AllTwentyFivesTest {
@@ -205,11 +205,11 @@ class AllTwentyFivesTest {
 				System.out.println("   " + named[arm]
 					+ "   lanes=" + lanes + " blocks=" + blocks + " wrong=" + wrong
 					+ " dirtyConfigs=" + dirty + " length=" + length);
-				// ekran's own size, and the machine rather than the plan.
+				// The live size, and the machine rather than the plan.
 				SongBuilder.PastePlan mine = SongBuilder.createPastePlan(new BlockPos(0, 64, 0),
 					guardian, SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
 					new SongBuilder.BuildLimits(16, 40, 5));
-				System.out.println("      40w x 5f (ekran's)  breaches=" + mine.breaches()
+				System.out.println("      40w x 5f (live)  breaches=" + mine.breaches()
 					+ " unreached=" + BreachView.readBack("Guardian", mine).unreachedNotes());
 			}
 		} finally {

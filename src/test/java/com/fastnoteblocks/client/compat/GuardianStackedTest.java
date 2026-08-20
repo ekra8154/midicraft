@@ -16,7 +16,7 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * The two things ekran read off a collision in Guardian at 32 wide over four floors.
+ * The two things in-game reading found off a collision in Guardian at 32 wide over four floors.
  *
  * <p>A stacked chord of six with the centre standing as plain stone and a harp somewhere in it,
  * padded a column forward for parity anyway -- into a staircase, which is what turned a wasted
@@ -70,7 +70,8 @@ class GuardianStackedTest {
 		}
 	}
 
-	/** The collisions themselves, which are marked rather than rolled back when ekran reads one. */
+	/** The collisions themselves, which are marked rather than rolled back when in-game reading shows
+	/** one. */
 	@Test
 	void countsTheCollisionsEveryWayRound() throws Exception {
 		List<SongBuilder.EventNote> notes = load("deltarune-ch-4-guardian");
@@ -180,7 +181,7 @@ class GuardianStackedTest {
 		}
 	}
 
-	/** ekran's chord at 40 61 16, Guardian 44 wide over three floors, and the one before it. */
+	/** The chord at 40 61 16, Guardian 44 wide over three floors, and the one before it. */
 	@Test
 	void tracesGuardianFortyFourByThree() throws Exception {
 		List<SongBuilder.EventNote> notes = load("deltarune-ch-4-guardian");
@@ -193,7 +194,7 @@ class GuardianStackedTest {
 		}
 	}
 
-	/** Letting the first chord out of a bend keep its back pair, priced on ekran's own build. */
+	/** Letting the first chord out of a bend keep its back pair, priced on the live build. */
 	@Test
 	void pricesTheBackPairAfterATurn() throws Exception {
 		List<SongBuilder.EventNote> notes = load("deltarune-ch-4-guardian");
@@ -217,7 +218,7 @@ class GuardianStackedTest {
 		}
 	}
 
-	/** Every chord standing outside the footprint on ekran's own 44 x 3, with the wire it has. */
+	/** Every chord standing outside the footprint on the live 44 x 3, with the wire it has. */
 	@Test
 	void tracesTurnsFortyFourByThree() throws Exception {
 		SongBuilder.TRACE_TURNS = true;
@@ -229,7 +230,7 @@ class GuardianStackedTest {
 		}
 	}
 
-	/** ekran's breach of eleven: the lane one column short of its wall with five blocks of wire. */
+	/** The breach of eleven: The lane one column short of its wall with five blocks of wire. */
 	@Test
 	void pricesPrepaddingForTheOffBusDiscount() throws Exception {
 		List<SongBuilder.EventNote> notes = load("deltarune-ch-4-guardian");

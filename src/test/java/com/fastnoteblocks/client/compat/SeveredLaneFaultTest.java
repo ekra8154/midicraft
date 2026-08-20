@@ -20,8 +20,8 @@ import org.junit.jupiter.api.Test;
  * lane stopped a third of the way through. 182 of them over the library, 178 on one song.</p>
  *
  * <p>Pinned by switching the fix off rather than by a hand-built machine, because the shape is a
- * property of the run and a hand-built one would only prove that the check works on the thing it was
- * written against.</p>
+ * property of the run and a hand-built one would only prove that the check works on the thing it
+ * was written against.</p>
  */
 class SeveredLaneFaultTest {
 	@BeforeAll
@@ -61,6 +61,6 @@ class SeveredLaneFaultTest {
 		assertEquals(0, severed(faultsFor("gangsta-s-paradise", 40, 3)),
 			"the same build, with the run handing the path rail up before it stops");
 		assertEquals(0, severed(faultsFor("hammer-of-justice-2", 128, 1)),
-			"and ekran's 128-wide paste, which is where this was found");
+			"and the 128-wide paste, which is where this was found");
 	}
 }

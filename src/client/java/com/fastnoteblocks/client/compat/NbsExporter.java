@@ -69,7 +69,7 @@ final class NbsExporter {
 			// Getting this wrong does not produce a wrong note, it produces an unreadable file: two
 			// notes on one tick in one layer write a layer jump of nought, and nought is the byte
 			// that means "no more notes on this tick". Everything after it is read as structure and
-			// the file dissolves. Ekran found it the moment a real song went through -- Note Block
+			// the file dissolves. In-game testing found it the moment a real song went through -- Note Block
 			// Studio read past the end of its buffer, and so did we.
 			int base = layers.size();
 			int voices = 0;
@@ -113,8 +113,8 @@ final class NbsExporter {
 		// is written as though a note could land on every one of them. That plays correctly -- the
 		// tempo and the spacing cancel -- but Note Block Studio reads the tempo field alone when it
 		// decides whether a song could be built in Minecraft, and a rate above ten a second is a
-		// rate redstone cannot keep. Ekran exported Hammer after baking its speed in and got forty a
-		// second flagged as incompatible with a game it had already been pasted into.
+		// rate redstone cannot keep. Hammer, exported after baking its speed in, came out at forty a
+		// second and was flagged incompatible with a game it had already been pasted into.
 		//
 		// So divide out whatever every note has in common. Same notes, same moments, same music, on
 		// a grid that says what the song is really doing -- and for anything written to redstone in

@@ -234,8 +234,8 @@ public final class FastNoteblocksConfig {
 	 */
 	public static final int DEFAULT_BUILD_LANE_WIDTH = 32;
 	// Eight, up from four. Below about a dozen the walls stand no closer than the widest chord needs
-	// anyway, so the paste comes out wider than the slider says whatever it says -- ekran: "a width of
-	// 4 ... is kind of ridiculous to support". A saved value below this reads as this.
+	// anyway, so the paste comes out wider than the slider says whatever it says, and a width of
+	// four is not worth supporting. A saved value below this reads as this.
 	public static final int MIN_BUILD_LANE_WIDTH = 8;
 	public static final int MAX_BUILD_LANE_WIDTH = 128;
 	/**

@@ -13,10 +13,10 @@ import org.junit.jupiter.api.Test;
  * <p>The songs written for the runs cannot see the thing most likely to break them. None of them
  * holds a chord big enough to stack, and the known fault of the runs is exactly a stacked chord
  * standing beside one: a floor column hangs its notes at the lane's own floor level, which is where
- * the lane alongside hangs the low half of a stacked module, and those low notes stand on instrument
- * blocks that conduct sideways. Both fixes for it came across with the port -- a chord with a side
- * to spare hangs on the far side, and a chord needing both is refused the floor column -- but they
- * were measured against v1's walk, not v2's.</p>
+ * the lane alongside hangs the low half of a stacked module, and those low notes stand on
+ * instrument blocks that conduct sideways. Both fixes for it came across with the port -- a chord
+ * with a side to spare hangs on the far side, and a chord needing both is refused the floor column
+ * -- but they were measured against v1's walk, not v2's.</p>
  *
  * <p>Read back in both arms, and the wrong-note and dead columns are the ones to read. Depth is
  * whatever the song allows: a song of big chords has no run in it and should not move at all, and
@@ -33,10 +33,10 @@ class V2RailRealSongsTest {
 	/**
 	 * Real songs, picked for the shapes that break things rather than for being liked.
 	 *
-	 * <p>lady brown is where ekran read the floor rail carried the length of a run without ever
-	 * holding a chord; song of storms is where a run opened on a wait of eight and sounded its whole
-	 * first phrase early; all of the lights is where the dead wire was found. The rest are ordinary
-	 * and are here to be ordinary.</p>
+	 * <p>lady brown is where in-game reading found the floor rail carried the length of a run without
+	 * ever holding a chord; song of storms is where a run opened on a wait of eight and sounded its
+	 * whole first phrase early; all of the lights is where the dead wire was found. The rest are
+	 * ordinary and are here to be ordinary.</p>
 	 */
 	private static final List<String> SONGS = List.of(
 		"lady-brown-nujabes", "song-of-storms-legend-of-zelda-ocarina-of-time",

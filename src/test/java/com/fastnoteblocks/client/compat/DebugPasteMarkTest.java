@@ -30,14 +30,14 @@ import org.junit.jupiter.api.Test;
  * <p>This is the whole safety of the thing. The colouring is meant to be a report written into the
  * blocks, and a report that changes what it describes is worse than no report -- an afternoon spent
  * on a chord that only exists because somebody was looking at it. Layout decisions in
- * {@code SongBuilder} do read blocks back ({@code describeBlock(behind).startsWith("minecraft:stone")}
- * is one), so this is not a theoretical worry; it is the mistake the marking pass is arranged to
- * avoid, and the arrangement is worth a test.</p>
+ * {@code SongBuilder} do read blocks back ({@code
+ * describeBlock(behind).startsWith("minecraft:stone")} is one), so this is not a theoretical worry;
+ * it is the mistake the marking pass is arranged to avoid, and the arrangement is worth a test.</p>
  *
  * <p>So: build one song both ways and hold them to the same positions, in the same order, with the
  * same block at every cell that is not one of the marks. Then print what the marks came out as,
- * because a colour scheme nobody can read is a different kind of failure and the only way to know is
- * to look at the census.</p>
+ * because a colour scheme nobody can read is a different kind of failure and the only way to know
+ * is to look at the census.</p>
  */
 class DebugPasteMarkTest {
 	@BeforeAll
@@ -51,7 +51,7 @@ class DebugPasteMarkTest {
 		SongBuilder.DEBUG_PASTE = false;
 	}
 
-	/** ekran's own build limits, so the shapes counted here are the shapes they are looking at. */
+	/** The live build limits, so the shapes counted here are the shapes they are looking at. */
 	private static final SongBuilder.BuildLimits LIMITS = new SongBuilder.BuildLimits(16, 40, 3);
 
 	private static List<SongBuilder.EventNote> song(String file) throws Exception {

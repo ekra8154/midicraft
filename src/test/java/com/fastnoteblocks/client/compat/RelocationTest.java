@@ -23,7 +23,7 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * ekran's third option: a contested note moves out of its slot, and the module keeps its column.
+ * The third option: a contested note moves out of its slot, and the module keeps its column.
  *
  * <p>The old rule could only push a note onto a bus, so only a stacked-bus ever had the option. Two
  * things are new: the note may take a free centre, which every stacked shape has and which costs no

@@ -1,7 +1,7 @@
 # Handoff — two-rail runs, and the invariant that is now held
 
 Branch `claude/double-rail-worktree-handoff-dd47ed`, working tree on top of `1fcc581`. Everything
-below was measured over ekran's whole library, not derived.
+below was measured over the whole library, not derived.
 
 **The dead wires are gone.** Both routes that produced them are named and fixed, and the whole
 library now reads back clean at all seven sizes a song:
@@ -20,7 +20,7 @@ section.
 ## Draw the break. Do not read setblock lists.
 
 The lesson of the session, and not a style note. Two long passes went into reading command dumps and
-reasoning about redstone rules, and reached the wrong explanation twice. ekran read the same fault
+reasoning about redstone rules, and reached the wrong explanation twice. In-game reading showed the same fault
 off one rendered slice immediately:
 
 ```
@@ -42,7 +42,7 @@ far side. Every dead wire this project has produced has been that shape.
 
 ## The shape of a two-rail run
 
-ekran's, and it works: a run of small chords costs **one column per chord** instead of two, by running
+the, and it works: a run of small chords costs **one column per chord** instead of two, by running
 two chains past each other. The path chain runs at `lane.pos().above()`, the floor chain at
 `lane.pos()`, each carrying twice the gap and offset by one gap. Every column holds one chord's notes
 on one rail and the repeater driving the next chord on the other.
@@ -136,7 +136,7 @@ none of them can see any of this. That is why the library sweep exists.
   *ending the run*, and a run that ends pays a fresh head. Total depth: plain 1843, one blank ever
   1557, one in a row 1498, two 1484, three 1476, **no limit 1473**. `RAIL_BLANKS_IN_A_ROW` holds the
   switch, off.
-- **Floor notes contend with stacked chords, and both of ekran's fixes work.** A chord with a side to
+- **Floor notes contend with stacked chords, and both of the fixes work.** A chord with a side to
   spare hangs on the far side; a chord needing both sides is refused the floor column and the blank
   lifts it onto the path rail. 32 songs went from no wrong notes to some; back to nought.
 - **A stacked chord is already a head.** Its dust cross sits on stone at the lane's own floor level,
@@ -147,7 +147,7 @@ none of them can see any of this. That is why the library sweep exists.
 
 `TWO_RAIL_RUNS`, `RAIL_BLANKS`, `RAIL_BLANKS_FOR_DELAY`, `RAIL_MOVES_FOR_STACKS`, `RAIL_FROM_STACK`,
 `MARK_UNREACHED` — all on. `RAIL_BLANKS_IN_A_ROW` is off (`Integer.MAX_VALUE`) with its numbers in
-the javadoc. Nothing has been disabled or reverted; ekran asked for it that way twice.
+the javadoc. Nothing has been disabled or reverted; the request was for it that way twice.
 
 ## Red tests
 

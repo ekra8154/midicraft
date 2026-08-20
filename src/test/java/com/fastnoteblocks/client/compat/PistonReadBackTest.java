@@ -111,7 +111,7 @@ class PistonReadBackTest {
 	 * The arrangement a half-ticked build is actually made of: a lane fed by nothing until the
 	 * block arrives.
 	 *
-	 * <p>ekran's, and the detail the tests above both miss. The block of redstone cannot start out
+	 * <p>The detail the tests above both miss. The block of redstone cannot start out
 	 * touching the wire it is meant to drive, or that lane would run from the moment the machine
 	 * loaded -- so there is a cell of air between them, and the push closes it. Which means the left
 	 * lane, read as it stands, is a repeater nobody feeds: the reader's own definition of a way in.

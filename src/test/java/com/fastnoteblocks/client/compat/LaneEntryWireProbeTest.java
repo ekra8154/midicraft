@@ -20,8 +20,8 @@ import org.junit.jupiter.api.Test;
  * arithmetic that says what should be there.
  *
  * <p>The planner says the wire arriving at that lane is worth three and that moving its first
- * chord three columns forward is therefore one column too far. ekran moved it three in world and
- * it fired. One of those is wrong, and blocks settle it.</p>
+ * chord three columns forward is therefore one column too far. Moved three in world, it
+ * fired. One of those is wrong, and blocks settle it.</p>
  */
 @Tag("sweep")
 class LaneEntryWireProbeTest {

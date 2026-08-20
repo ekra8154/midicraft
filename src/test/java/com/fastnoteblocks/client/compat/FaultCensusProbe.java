@@ -20,10 +20,10 @@ import org.junit.jupiter.api.Test;
 /**
  * Every fault in the whole library, on whichever paster is asked for, ranked worst first.
  *
- * <p>{@link BlitzSweepTest} does this for v1 and cannot be pointed anywhere else; {@link FaultProbeTest}
- * draws one build in detail but you have to know which build to name. This is the step between them:
- * it says <b>which builds are worth drawing</b>, which is the question at the start of a fault
- * session and the one nothing here answered for v2.</p>
+ * <p>{@link BlitzSweepTest} does this for v1 and cannot be pointed anywhere else; {@link
+ * FaultProbeTest} draws one build in detail but you have to know which build to name. This is the
+ * step between them: it says <b>which builds are worth drawing</b>, which is the question at the
+ * start of a fault session and the one nothing here answered for v2.</p>
  *
  * <p>Read back through {@link NoteMachineReader}, because the plan's own numbers read nought over a
  * severed wire -- a build that has stopped playing reports no wrong notes at all.</p>
@@ -54,7 +54,7 @@ class FaultCensusProbe {
 	/**
 	 * Sizes as {@code 40x3}, because that is how they are said out loud -- or a grid,
 	 * {@code -Dcensus.grid=8-50/1-5/1-10/7}: widths from 8 to 50 in seeded random steps of one to
-	 * five, every floor count from one to ten. ekran's thorough run: the corners a hand-picked list
+	 * five, every floor count from one to ten. The thorough run: the corners a hand-picked list
 	 * never visits, and a seed so the same run can be made twice.
 	 */
 	private static List<int[]> sizes() {
@@ -157,7 +157,7 @@ class FaultCensusProbe {
 		List<int[]> sizes = sizes();
 		String only = text("songs", "");
 		// -Dcensus.real=true leaves the synthetic limit songs out: they are the ones named ultra-*,
-		// built to carry chords of thirty, and ekran's scope is chords to twenty-five.
+		// built to carry chords of thirty, and the scope is chords to twenty-five.
 		boolean realOnly = Boolean.parseBoolean(text("real", "false"));
 		// -Dcensus.readback=false plans and stops: breaches and collisions both come out of the walk,
 		// and the readback that finds dead, wrong and missing notes is most of a build's cost.

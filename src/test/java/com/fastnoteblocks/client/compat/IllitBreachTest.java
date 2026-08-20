@@ -15,7 +15,7 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * Scratch probe: the chord ekran found laid as a plain bus at forty wide over two floors.
+ * Scratch probe: the chord in-game testing found laid as a plain bus at forty wide over two floors.
  *
  * <p>A chord of twenty-four that is too big to cut as a bus and did not open with a head either.
  * The question is which rule took the head, and the answer has to come from the build rather than
@@ -58,7 +58,7 @@ class IllitBreachTest {
 		}
 	}
 
-	/** Ekran's second find: forty wide over eight floors, a chord of twenty-four that would not cut. */
+	/** The second find: forty wide over eight floors, a chord of twenty-four that would not cut. */
 	@Test
 	void namesTheRuleAtFortyByEight() throws Exception {
 		List<SongBuilder.EventNote> notes = load("illit-do-the-dance");

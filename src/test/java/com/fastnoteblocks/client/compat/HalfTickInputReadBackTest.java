@@ -17,22 +17,22 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 /**
- * ekran's own half-tick input, block for block, read back off the world.
+ * The live half-tick input, block for block, read back off the world.
  *
  * <p>Transcribed from a scan of the real thing rather than invented, because what it caught was a
  * fault every made-up example had missed. One switch drives two chains: one straight through a
  * repeater, and one through a sticky piston that shoves a block of redstone across a cell of air
- * into the second chain's wire. The air is not optional -- a block of redstone already touching that
- * wire would drive its lane from the moment the machine loaded -- and it is what makes the second
- * lane, read as it stands, a chain nothing feeds.</p>
+ * into the second chain's wire. The air is not optional -- a block of redstone already touching
+ * that wire would drive its lane from the moment the machine loaded -- and it is what makes the
+ * second lane, read as it stands, a chain nothing feeds.</p>
  *
  * <p>The fault: dust handed its signal to a side block only when that block was a conductor, and a
  * piston is not one. So dust lying against a piston never told it anything, the switch's walk
  * stopped dead at it, and the only thing that reached the second lane was the block of redstone
- * sitting on the piston's face -- read as a machine in its own right, timed from its own first note.
- * Two versions, no relation between them, and the game tick between the lanes gone. Every note was
- * individually right, which is why it read as a perfectly ordinary song that happened to want only
- * one lane.</p>
+ * sitting on the piston's face -- read as a machine in its own right, timed from its own first
+ * note. Two versions, no relation between them, and the game tick between the lanes gone. Every
+ * note was individually right, which is why it read as a perfectly ordinary song that happened to
+ * want only one lane.</p>
  */
 class HalfTickInputReadBackTest {
 	@BeforeAll
@@ -48,7 +48,7 @@ class HalfTickInputReadBackTest {
 	}
 
 	@Test
-	void readsBothLanesOfEkransInputAsOneMachineAHalfTickApart() {
+	void readsBothLanesOfTheHandBuiltInputAsOneMachineAHalfTickApart() {
 		// A lever where the real thing has a button. Buttons are recognised through a block tag, and
 		// block tags are not loaded by a bare bootstrap -- so a button here is silently not a way in
 		// at all, and the whole machine reads as unreachable. That cost an hour of chasing the wrong

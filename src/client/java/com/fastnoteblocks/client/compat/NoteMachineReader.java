@@ -90,7 +90,7 @@ public final class NoteMachineReader {
 	/**
 	 * Game ticks a piston takes to put the block it is pushing where it is going.
 	 *
-	 * <p>ekran's, measured in the world, and the reason any of this is worth reading. Three is odd,
+	 * <p>Measured in the world, and the reason any of this is worth reading. Three is odd,
 	 * and every other delay in redstone is a whole repeater tick -- two game ticks -- so this is the
 	 * only way to reach the half of the clock a repeater cannot.</p>
 	 *
@@ -509,8 +509,8 @@ public final class NoteMachineReader {
 			// nothing said about why, and the block below has never been excluded, so the two halves
 			// of this method disagreed. That one clause is what made a run's opening column give its
 			// centre away to a stone: it read a note there as ending the chain, and it does not.
-			// ekran: "a note block can be powered just like a stone, there's no difference. a
-			// noteblock just cant have something on top, but that doesn't happen here".
+			// A note block can be powered just like a stone; the only difference is that it cannot
+			// have something on top, and that does not happen here.
 			//
 			// A piston is the other way round: not a conductor at all, but it does take power. Left
 			// out, dust lying against one never tells it anything.
@@ -532,8 +532,8 @@ public final class NoteMachineReader {
 	 *
 	 * <p><b>A dust with nothing to join is a dot, and a dot points nowhere.</b> It powers the block
 	 * beneath it and nothing else. This said "cross, and powers all four ways" until 2026-08-18, and
-	 * it is the pre-1.16 rule -- ekran, reading a corner reseed off the world: <i>"the corner dust
-	 * you place is a redstone dot not a cross, so its not powering the block next to it"</i>. The
+	 * it is the pre-1.16 rule -- reading a corner reseed off the world shows the corner dust laid
+	 * there as a redstone dot and not a cross, so it powers no block beside it. The
 	 * clause passed 499 corner reseeds as live machines when every one of them was a dead line, which
 	 * is the worst kind of wrong an instrument can be.</p>
 	 *

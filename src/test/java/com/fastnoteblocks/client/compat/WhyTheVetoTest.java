@@ -12,7 +12,7 @@ import org.junit.jupiter.api.Test;
  *
  * <p>Its stated reason is too strong: it forbids a cut that would leave the next lane unable to lay
  * its first chord whole, and a chord that will not fit whole is precisely the chord that gets cut.
- * ekran's point, and on Guardian it is nearly always true -- a headed cut of twenty-four is
+ * The point, and on Guardian it is nearly always true -- a headed cut of twenty-four is
  * {@code 1 + 9 + 5 = 15} even at the dearest crossing.</p>
  *
  * <p>And removing it on that basis costs Guardian 86 breach blocks to 157. So it is protecting

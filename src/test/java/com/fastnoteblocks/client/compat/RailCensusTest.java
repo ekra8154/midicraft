@@ -19,11 +19,11 @@ import org.junit.jupiter.api.Test;
 /**
  * What the runs in a build are actually made of.
  *
- * <p>Three of ekran's readings off the world are counting questions -- how many path columns give
- * their centre away when the chord had a harp for it, and how many floor rails are carried the whole
+ * <p>Three of the readings off the world are counting questions -- how many path columns give their
+ * centre away when the chord had a harp for it, and how many floor rails are carried the whole
  * length of a run without ever holding a note. Neither shows up as a wrong note or a breach, so
- * nothing here would have said so; this prints the shape of every run in every song so a claim about
- * them has a number behind it.</p>
+ * nothing here would have said so; this prints the shape of every run in every song so a claim
+ * about them has a number behind it.</p>
  */
 @Tag("sweep")
 class RailCensusTest {

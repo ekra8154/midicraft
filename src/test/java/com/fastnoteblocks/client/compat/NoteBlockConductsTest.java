@@ -22,8 +22,8 @@ import org.junit.jupiter.api.Test;
  *
  * <p>{@link NoteMachineReader} refuses to spread a dust's power into a note block -- one clause, no
  * comment on it -- and that refusal is why a run's opening column gives its centre away to a stone.
- * ekran says there is no difference between the two: "a note block can be powered just like a stone,
- * there's no difference. a noteblock just cant have something on top, but that doesn't happen here".
+ * There is no difference between the two: a note block can be powered just like a stone, and the
+ * only difference is that it cannot have something on top, which does not happen here.
  * The game's own block properties are the only thing that can settle it, and they are right here in
  * the test classpath.</p>
  */

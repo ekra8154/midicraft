@@ -15,7 +15,7 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * What an ordinary descent actually gets built as, drawn the way ekran drew it.
+ * What an ordinary descent actually gets built as, drawn the way it was drawn in game.
  *
  * <p>Small enough to read: two chords over a seeded descent, so the only staircase in the box is
  * the one in question. Rendered with the four-cell descent on and off at the same place, since

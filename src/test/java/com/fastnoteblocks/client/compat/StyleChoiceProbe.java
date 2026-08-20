@@ -13,13 +13,13 @@ import org.junit.jupiter.api.Test;
 /**
  * What shape a chord is given, and which test refused the ones before it.
  *
- * <p>{@link SongBuilder#chooseStyle} settles a chord's shape at grouping time and says nothing about
- * why. That is fine until a chord comes out as a shape nobody expected, and then there is no way to
- * ask it anything -- the walk is a thousand lines downstream and every census key it prints is about
- * a shape being <em>dropped</em>, which is a different question from a shape never being chosen.
+ * <p>{@link SongBuilder#chooseStyle} settles a chord's shape at grouping time and says nothing
+ * about why. That is fine until a chord comes out as a shape nobody expected, and then there is no
+ * way to ask it anything -- the walk is a thousand lines downstream and every census key it prints
+ * is about a shape being <em>dropped</em>, which is a different question from a shape never being chosen.
  *
- * <p>ekran, on a chord of four at {@code am-i-dreaming} 12 wide over seven floors: three harps and a
- * bass, laid as a sunken bus, and "it absolutely should be a stacked chord". Reading the method said
+ * <p>A chord of four at {@code am-i-dreaming} 12 wide over seven floors: three harps and a bass,
+ * laid as a sunken bus where it should have been a stacked chord. Reading the method said
  * it should be. This asks it instead.
  *
  * <p>Reflective because the whole decision is private, and it should stay private -- a probe that
@@ -55,7 +55,7 @@ class StyleChoiceProbe {
 	}
 
 	@Test
-	void saysWhatEkransChordOfFourIsGiven() throws Exception {
+	void saysWhatThatChordOfFourIsGiven() throws Exception {
 		Class<?> layoutType = Class.forName("com.fastnoteblocks.client.compat.SongBuilder$Layout");
 		Object layout = ultraV2();
 		List<SongBuilder.EventNote> chord = new ArrayList<>(List.of(
@@ -63,7 +63,7 @@ class StyleChoiceProbe {
 			note(3, "minecraft:oak_planks"),
 			note(3, "minecraft:air"),
 			note(10, "minecraft:air")));
-		System.out.println("==== ekran's chord: 18C harp, 03A bass, 03A harp, 10E harp ====");
+		System.out.println("==== the chord in question: 18C harp, 03A bass, 03A harp, 10E harp ====");
 		for (boolean roomBehind : new boolean[] {true, false}) {
 			Object style = call("chooseStyle",
 				new Class<?>[] {layoutType, List.class, boolean.class},

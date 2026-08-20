@@ -23,7 +23,7 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * ekran's universal four-cell descent: is a descent four everywhere, or only for a cut?
+ * The universal four-cell descent: is a descent four everywhere, or only for a cut?
  *
  * <p>The claim is that the two descents differ only in where the wire arrives, and that the cheap
  * one's first rung -- a powered stone with wire on top -- is itself a cell of bus. If that holds,

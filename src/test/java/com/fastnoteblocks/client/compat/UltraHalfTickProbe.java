@@ -88,7 +88,7 @@ class UltraHalfTickProbe {
 		// A song only fills both corridors if its notes actually land on both halves of the tick.
 		// Guardian at the speed it is saved at does not -- every gap is a whole repeater tick, so
 		// every event is on an even game tick and the second snake is empty. Measuring drift on it
-		// would be measuring one snake against nothing. So: ekran's own two-lane composition, and
+		// would be measuring one snake against nothing. So: the live two-lane composition, and
         // Guardian at double speed, which is the stress case the earlier numbers were really taken on.
 		for (Object[] subject : new Object[][] {
 				{"a-dark-zone-2-lanes-maybe", 1}, {"deltarune-ch-4-guardian", 2}}) {

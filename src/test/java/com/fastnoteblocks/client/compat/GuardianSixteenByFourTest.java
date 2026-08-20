@@ -8,14 +8,14 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * ekran's repro: Guardian at 16 wide over four floors, the lane through {@code 20 77 148}.
+ * The repro: Guardian at 16 wide over four floors, the lane through {@code 20 77 148}.
  *
- * <p>Their reading, off the blocks: the thing standing outside the wall is a stacked bus, and had it
- * shed its flank it would have crossed the staircase without going outside at all. Which would be a
- * third reason to shed, and a different one from either that exists --
- * {@link SongBuilder#SHEDS_THE_FLANK_THE_DESCENT_WANTS} sheds where the corridor is too tight to hold
- * the near half ({@code room == 2}), and {@link SongBuilder#SHED_BUYS_THE_LAST_CELL} sheds where the
- * run is one cell over. Neither asks whether the head is standing against the wall.</p>
+ * <p>Their reading, off the blocks: the thing standing outside the wall is a stacked bus, and had
+ * it shed its flank it would have crossed the staircase without going outside at all. Which would
+ * be a third reason to shed, and a different one from either that exists --
+ * {@link SongBuilder#SHEDS_THE_FLANK_THE_DESCENT_WANTS} sheds where the corridor is too tight to
+ * hold the near half ({@code room == 2}), and {@link SongBuilder#SHED_BUYS_THE_LAST_CELL} sheds
+ * where the run is one cell over. Neither asks whether the head is standing against the wall.</p>
  *
  * <p>So: the blocks first. The corridor around that column, the walk's decisions for that lane, and
  * the census keys that say what shape the chord came out as.</p>
@@ -30,13 +30,13 @@ class GuardianSixteenByFourTest {
 
 	private static final int WIDTH = 16;
 	private static final int FLOORS = 4;
-	/** ekran's coordinate, pasted at {@code 0 64 0}. */
+	/** The coordinate, pasted at {@code 0 64 0}. */
 	private static final int AT_X = 20;
 	private static final int AT_Y = 77;
 	private static final int AT_Z = 148;
 
 	@Test
-	void dumpsTheLaneEkranFound() throws Exception {
+	void dumpsTheLaneFoundInGame() throws Exception {
 		List<SongBuilder.EventNote> guardian = BreachView.song("deltarune-ch-4-guardian");
 		BreachView.Traced traced = BreachView.build(guardian, WIDTH, FLOORS, 4);
 		SongBuilder.PastePlan plan = traced.plan();
@@ -52,7 +52,7 @@ class GuardianSixteenByFourTest {
 		List<BreachView.Overrun> out = BreachView.overruns(plan);
 		out.stream().limit(8).forEach(run -> System.out.println("   " + run));
 
-		// ekran's column, whichever lane it belongs to.
+		// The column, whichever lane it belongs to.
 		BreachView.Overrun here = new BreachView.Overrun(AT_Y, AT_Z,
 			Math.max(1, AT_X - plan.farWall()), AT_X, AT_X < plan.nearWall());
 		System.out.println();

@@ -19,12 +19,12 @@ import org.junit.jupiter.api.Test;
 /**
  * What runs cost the songs that are actually made of big chords.
  *
- * <p>Every song the two-rail shape was developed against tops out at three notes, so no build in any
- * of those tests holds a single stacked module -- which is to say none of them can show the one
- * contention ekran is asking about. A run's floor notes sit at the lane's own floor level, exactly
+ * <p>Every song the two-rail shape was developed against tops out at three notes, so no build in
+ * any of those tests holds a single stacked module -- which is to say none of them can show the one
+ * contention in question. A run's floor notes sit at the lane's own floor level, exactly
  * where the lane alongside hangs the low half of a stacked chord, and a stacked centre's instrument
- * blocks conduct sideways. So the songs to measure are the ones with both: runs of small chords, and
- * chords of five and up in the lanes beside them.</p>
+ * blocks conduct sideways. So the songs to measure are the ones with both: runs of small chords,
+ * and chords of five and up in the lanes beside them.</p>
  */
 @Tag("sweep")
 class RailAgainstStacksTest {

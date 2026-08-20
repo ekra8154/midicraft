@@ -20,11 +20,12 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 
 /**
- * A breach, drawn the way ekran reads one off the world.
+ * A breach, drawn the way in-game reading shows one off the world.
  *
- * <p>Every diagnosis in this file so far has come from ekran standing at the blocks and asking how
- * the same notes could have been laid without going outside -- and every one of mine has come from
- * reading arithmetic and guessing. The difference is not insight, it is that they can see the
+ * <p>Every diagnosis in this file so far has come from standing at the blocks in game and asking
+ * how the same notes could have been laid without going outside -- and every one made away from
+ * the blocks has come from reading arithmetic and guessing. The difference is not insight, it is
+ * that the blocks show the
  * machine and I could not. {@link AsciiDiagram} already draws a box of world for the in-game
  * command; this points it at a headless plan and puts the walk's own turn trace beside it.</p>
  *

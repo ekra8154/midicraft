@@ -20,7 +20,7 @@ import org.junit.jupiter.api.Test;
 /**
  * Can one stacked-bus follow another with nothing between them?
  *
- * <p>Ekran's question, and the smallest case that answers it: a chord of eight is seven notes in
+ * <p>The question, and the smallest case that answers it: a chord of eight is seven notes in
  * the head and one left over, which is a single cell of bus. If one cell is enough to hand the back
  * slots on, a run of eights is a run of stacked-buses; if the rule is really about the shape rather
  * than about where the shape ends, every other one drops to a plain bus.</p>

@@ -23,7 +23,8 @@ import org.junit.jupiter.api.Test;
  *
  * <p>The old rule said any stacked shape takes the pair of low slots behind whatever follows it.
  * That is true of two modules a repeater apart and false of a stacked-bus, whose head is back
- * behind its transition and its whole tail. Ekran read it off a slice; this prices it.</p>
+ * behind its transition and its whole tail. In-game reading showed it off a slice; this prices
+ * it.</p>
  */
 @Tag("sweep")
 class GapEndsOnBusTest {

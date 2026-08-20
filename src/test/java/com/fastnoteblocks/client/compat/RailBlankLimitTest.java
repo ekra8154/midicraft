@@ -19,8 +19,8 @@ import org.junit.jupiter.api.Test;
  *
  * <p>The arithmetic says a run holding a blank for every chord costs exactly what the plain lane
  * costs plus its head, so somewhere between "never" and "as many as it likes" is a limit worth
- * having. This builds every song at every limit and prints the depth, which is the figure ekran
- * optimises: a build is as deep as it has lanes.</p>
+ * having. This builds every song at every limit and prints the depth, which is the figure being
+ * optimised: a build is as deep as it has lanes.</p>
  */
 @Tag("sweep")
 class RailBlankLimitTest {
