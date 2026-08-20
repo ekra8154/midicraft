@@ -4181,13 +4181,32 @@ public final class SongBuilder {
 			// made this worst, and the pin has gone; the ordering is the same either way.)
 			boolean stackedIsBehind = CUT_ASKS_WHAT_KIND_IS_BEHIND
 				? columnBehindBusy && lastStyle.stacked() : columnBehindBusy;
+			// The stair extras' ground, asked once for every shape of this cut. The descent is
+			// pinned: it stands one past the wall whatever the pads and nudges do to the module,
+			// so its two rung-side cells are the same cells for the plain ask, the busy pad's, the
+			// nudge's and the shortened head's -- and the oracle may count the notes they will
+			// carry before the wire refusal is made. The builder walks to the same cells off the
+			// blocks and re-asks before it hangs anything. See {@link #STAIR_EXTRAS}.
+			boolean stairTopFree = false;
+			boolean stairBottomFree = false;
+			if (STAIR_EXTRAS && layout.ultra() && cutOffered && climb <= 0 && above >= 0
+					&& above < floors && CHEAP_SPLIT_DESCENT) {
+				BlockPos stairFoot = new BlockPos(wall + lane.travel().getStepX(),
+					lane.pos().getY(), lane.pos().getZ());
+				Direction stairAway = descentSide.getOpposite();
+				stairTopFree = quietAndFree(placements, stairFoot.relative(stairAway),
+					event.time());
+				stairBottomFree = quietAndFree(placements,
+					stairFoot.relative(lane.travel()).below(CUBE_FLOOR_HEIGHT - 1)
+						.relative(stairAway), event.time());
+			}
 			StackedSplit headed = layout.ultra() && cutOffered && index > 0 && above >= 0
 				&& above < floors
 				? stackedSplitOf(event.notes(), room, splitCells, climb > 0,
 					!columnBehindBusy || delayColumns > 0
 						|| CUT_ASKS_THE_BLOCKS_BEHIND
 							&& backPairIsFree(placements, lane.ahead(delayColumns), event.time()),
-					stackedIsBehind, true)
+					stackedIsBehind, true, stairTopFree, stairBottomFree)
 				: null;
 			// Busy padding: one column spent so a chord can be cut at all.
 			//
@@ -4237,7 +4256,7 @@ public final class SongBuilder {
 					// A column to spend, and the wire to lay it with. Both are what the pin will charge.
 					&& room >= 2 && placements.runSinceRepeater() + 1 <= DUST_RANGE) {
 				StackedSplit freed = stackedSplitOf(event.notes(), room - 1, splitCells, climb > 0,
-					true, false, true);
+					true, false, true, stairTopFree, stairBottomFree);
 				if (freed != null) {
 					placements.padded("busyPadBoughtTheCut");
 					placements.padded("busyPadBoughtTheCutAt" + Math.min(event.notes().size(), 30) + "Notes");
@@ -4325,7 +4344,7 @@ public final class SongBuilder {
 						!columnBehindBusy || delayColumns + busyPad + 1 > 0
 							|| CUT_ASKS_THE_BLOCKS_BEHIND
 								&& backPairIsFree(placements, lane.ahead(delayColumns + busyPad + 1), event.time()),
-						stackedIsBehind, true);
+						stackedIsBehind, true, stairTopFree, stairBottomFree);
 				if (shifted == null) {
 					// Both cells wrong, or nothing left to cut once a column is spent. Before the head
 					// goes: shed the clashing slot instead, which costs no column and no wire -- the
@@ -4498,7 +4517,7 @@ public final class SongBuilder {
 					for (boolean stackedBehind : !CUT_SHORTENS_ITS_HEAD ? new boolean[] {}
 							: stackedIsBehind ? new boolean[] {true} : new boolean[] {false, true}) {
 						StackedSplit shorter = stackedSplitOf(event.notes(), roomLeft, splitCells,
-							climb > 0, false, stackedBehind, true);
+							climb > 0, false, stackedBehind, true, stairTopFree, stairBottomFree);
 						if (shorter != null && roomLeft - shorter.columns() == 0) {
 							placements.padded("cutShortenedItsHead");
 							placements.padded("cutShortenedTo" + shorter.head().size());
@@ -4843,7 +4862,7 @@ public final class SongBuilder {
 							headed.slots(), headed.shed() ? DESCENT_FLANK_SLOT : -1),
 						headed.head(), headed.nearTail(), headed.farTail(), headed.shed(),
 						headed.centreFeeds(), headed.centreToFront(), headed.rungNotes(),
-						headed.severNote());
+						headed.severNote(), headed.stairExtras());
 					if (headed.centreFeeds() != CentreFeed.NONE) {
 						headed = lowsToppedUpFromTheTail(placements, opening, travel, depth,
 							event.time(), headed);
@@ -5024,6 +5043,7 @@ public final class SongBuilder {
 				boolean climbedAlready = headed != null
 					&& (headed.centreFeeds() == CentreFeed.FLANKED_RUNGS
 						|| headed.centreFeeds() == CentreFeed.CORKSCREW);
+				BlockPos stairFoot = cursor;
 				cursor = cross != null
 					? addCrossDescentSpiral(placements, cursor, travel, descentSide, currentTime)
 					: climb > 0
@@ -5033,6 +5053,41 @@ public final class SongBuilder {
 					: CHEAP_SPLIT_DESCENT
 						? addSplitBusDescent(placements, cursor, travel, descentSide, currentTime)
 						: addSpiralDescent(placements, cursor, travel, descentSide, currentTime);
+				// The stair extras, hung off the rungs the descent just laid. The cells are asked
+				// again off the blocks -- the oracle asked them at plan time from the pinned
+				// descent's arithmetic, and the two should always agree; where they do not, the
+				// note goes back over the staircase with the far half and the growth is counted,
+				// because a silently grown far half is a run past its fifteen.
+				if (headed != null && !headed.stairExtras().isEmpty() && cross == null
+						&& climb <= 0 && CHEAP_SPLIT_DESCENT) {
+					placements.placing("stairExtras");
+					Direction stairAway = descentSide.getOpposite();
+					BlockPos topCell = stairFoot.relative(stairAway);
+					BlockPos bottomCell = stairFoot.relative(travel)
+						.below(CUBE_FLOOR_HEIGHT - 1).relative(stairAway);
+					EventNote topNote = headed.stairExtras().get(0);
+					EventNote bottomNote = headed.stairExtras().get(1);
+					if (topNote != null) {
+						if (quietAndFree(placements, topCell, event.time())) {
+							placeNote(placements, topCell, topNote, true);
+							placements.padded("stairExtraTop");
+						} else {
+							far = new ArrayList<>(far);
+							far.add(0, topNote);
+							placements.padded("stairExtraCameHome");
+						}
+					}
+					if (bottomNote != null) {
+						if (quietAndFree(placements, bottomCell, event.time())) {
+							placeNote(placements, bottomCell, bottomNote, true);
+							placements.padded("stairExtraBottom");
+						} else {
+							far = new ArrayList<>(far);
+							far.add(0, bottomNote);
+							placements.padded("stairExtraCameHome");
+						}
+					}
+				}
 				floor = above;
 				travel = travel.getOpposite();
 				if (!far.isEmpty()) {
@@ -14091,7 +14146,7 @@ public final class SongBuilder {
 			java.util.Collections.unmodifiableList(front),
 			java.util.Collections.unmodifiableList(back)),
 			head, split.nearTail(), far, split.shed(), split.centreFeeds(),
-			split.centreToFront(), split.rungNotes(), split.severNote());
+			split.centreToFront(), split.rungNotes(), split.severNote(), split.stairExtras());
 		if (reduced.runCells(splitCells) > DUST_RANGE) {
 			placements.padded("shedClashPutTheRunOver");
 			return null;
@@ -15179,18 +15234,29 @@ public final class SongBuilder {
 	 */
 	private record StackedSplit(UltraSlots slots, List<EventNote> head, List<EventNote> nearTail,
 			List<EventNote> farTail, boolean shed, CentreFeed centreFeeds, EventNote centreToFront,
-			List<EventNote> rungNotes, EventNote severNote) {
+			List<EventNote> rungNotes, EventNote severNote, List<EventNote> stairExtras) {
 		/**
 		 * Every shape but one has no sever note: it exists only on a corkscrew standing in front
 		 * of a raised tail, where the cell over that tail's wire has to be filled to keep the
 		 * tail's current off the staircase -- and a harp filled in there is a note carried for
 		 * free, its instrument the wire it stands over. Null means the cell gets plain stone.
+		 *
+		 * <p>{@code stairExtras} is the descent's pair: positional, the top rung's extra then the
+		 * bottom rung's, nulls where a slot went unfilled, empty for every shape that is not a
+		 * tail split over a descent. See {@link #STAIR_EXTRAS}.</p>
 		 */
+		StackedSplit(UltraSlots slots, List<EventNote> head, List<EventNote> nearTail,
+				List<EventNote> farTail, boolean shed, CentreFeed centreFeeds,
+				EventNote centreToFront, List<EventNote> rungNotes, EventNote severNote) {
+			this(slots, head, nearTail, farTail, shed, centreFeeds, centreToFront, rungNotes,
+				severNote, List.of());
+		}
+
 		StackedSplit(UltraSlots slots, List<EventNote> head, List<EventNote> nearTail,
 				List<EventNote> farTail, boolean shed, CentreFeed centreFeeds,
 				EventNote centreToFront, List<EventNote> rungNotes) {
 			this(slots, head, nearTail, farTail, shed, centreFeeds, centreToFront, rungNotes,
-				null);
+				null, List.of());
 		}
 		/**
 		 * Cells of wire from the head's repeater to the far half, staircase included.
@@ -15594,6 +15660,18 @@ public final class SongBuilder {
 
 	private static StackedSplit stackedSplitOf(List<EventNote> chord, int room, int splitCells,
 			boolean climbing, boolean roomBehind, boolean stackedBehind, boolean centreFeed) {
+		return stackedSplitOf(chord, room, splitCells, climbing, roomBehind, stackedBehind,
+			centreFeed, false, false);
+	}
+
+	/**
+	 * @param topExtraFree whether the walk found the cell beside the descent's first rung quiet
+	 *     and free, so a note may hang there -- see {@link #STAIR_EXTRAS}. Meaningless on climbs.
+	 * @param bottomExtraFree the same for the cell beside the descent's last rung.
+	 */
+	private static StackedSplit stackedSplitOf(List<EventNote> chord, int room, int splitCells,
+			boolean climbing, boolean roomBehind, boolean stackedBehind, boolean centreFeed,
+			boolean topExtraFree, boolean bottomExtraFree) {
 		LAST_CUT_REFUSAL = "";
 		if (!STACKED_SPLIT_HEADS) {
 			LAST_CUT_REFUSAL = "SwitchedOff";
@@ -15735,13 +15813,34 @@ public final class SongBuilder {
 			// the blocks a second note over the staircase is not safe to lay.
 			nearNotes = tail.size() - 1;
 		}
+		// The stair extras: a descent's own rungs are powered stone, and powered stone sounds
+		// whatever hangs beside it -- so the cell beside the first rung and the cell beside the
+		// last carry a note each for no wire and no columns at all, where the walk has read those
+		// cells as free. Two notes out of the far half is one cell off its run, which is what
+		// takes a tail split from twenty-four notes to twenty-six. The top cell takes nothing
+		// falling; the bottom takes anything, sand included. In-game design, hand-placed first.
+		List<EventNote> farPart = new ArrayList<>(tail.subList(nearNotes, tail.size()));
+		EventNote topExtra = null;
+		EventNote bottomExtra = null;
+		if (STAIR_EXTRAS && !climbing && centreFeed) {
+			if (bottomExtraFree) {
+				bottomExtra = takeFromTail(farPart, note -> note.effect() == null);
+			}
+			if (topExtraFree) {
+				topExtra = takeFromTail(farPart, note -> note.effect() == null
+					&& !FALLING_INSTRUMENT_BLOCKS.contains(note.instrumentBlock()));
+			}
+		}
 		// The transition cell drops out of the run as well as out of the columns when the head hands
 		// over onto the staircase, because the cell it would have laid is a rung the staircase lays
 		// anyway and {@code splitCells} already counts every rung. So a shed cut reaches one cell
 		// further than the same cut without it. Stated through the record rather than here, because
 		// the walk makes this same sum for {@code tipSignal} and the two must not drift apart.
 		StackedSplit cut = new StackedSplit(split.slots(), split.head(), tail.subList(0, nearNotes),
-			tail.subList(nearNotes, tail.size()), shed, CentreFeed.NONE, null, List.of());
+			farPart, shed, CentreFeed.NONE, null, List.of(), null,
+			topExtra == null && bottomExtra == null ? List.of()
+				: java.util.Collections.unmodifiableList(
+					java.util.Arrays.asList(topExtra, bottomExtra)));
 		// One cell over, and the head still has a flank the staircase wants: then shedding it is worth
 		// the whole cut. The shed hands over on the staircase's own first rung instead of on a
 		// transition cell, so it gives the run that cell back -- and the note it displaces goes to the
@@ -17288,6 +17387,26 @@ public final class SongBuilder {
 	 * stone, the relay keeps its cell and wears the wire as its instrument. Five harps in all.</p>
 	 */
 	static boolean CROSS_DESCENT_LOWERED_SIDE = true;
+
+	/**
+	 * v2: a tail split's descent carries two extra notes on its own rungs.
+	 *
+	 * <p>The staircase is powered stone all the way down, and powered stone sounds whatever hangs
+	 * beside it -- so the cell beside the first rung and the cell beside the last carry a note
+	 * each, at the rung's own height, on the side away from the spiral's jog. No wire, no columns:
+	 * two notes out of the far half is one cell off its run, which takes a tail split over a
+	 * descent from twenty-four notes to twenty-six. The top cell takes anything but a falling
+	 * instrument; the bottom takes anything, sand included. In-game design, hand-placed first,
+	 * with the two cells named to the block.</p>
+	 *
+	 * <p>Tail splits only for now: the special descent heads -- the cross descent, the sunken cut
+	 * -- have their own shapes around the staircase and get their own variants later. The ground
+	 * is asked at plan time from the pinned descent's own cells, which no pad or nudge moves, and
+	 * asked again off the blocks before anything is hung; a note whose cell has gone goes back to
+	 * the far half and is counted at {@code stairExtraCameHome}, because that growth is exactly
+	 * the decided-versus-built gap this file keeps being burned by.</p>
+	 */
+	static boolean STAIR_EXTRAS = true;
 
 	/**
 	 * v2: a headed cut whose head collides is rolled back and the chord cut plain.
