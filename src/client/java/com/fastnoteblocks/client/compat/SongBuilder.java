@@ -2479,7 +2479,8 @@ public final class SongBuilder {
 						onTheFreeSlots(placements, opening, travel, depth, event.time(),
 							headed.slots(), headed.shed() ? DESCENT_FLANK_SLOT : -1),
 						headed.head(), headed.nearTail(), headed.farTail(), headed.shed(),
-						headed.centreFeeds(), headed.centreToFront(), headed.rungNotes());
+						headed.centreFeeds(), headed.centreToFront(), headed.rungNotes(),
+						headed.severNote());
 					cursor = addStackedSplitModule(placements, opening, travel, depth,
 						trigger.triggerDelay(), headed, event.time());
 					far = headed.farTail();
@@ -4329,13 +4330,18 @@ public final class SongBuilder {
 					placements.padded("corkscrewRefusedForWireBehind");
 					headed = null;
 				} else if (lower != null && lower.startsWith("minecraft:redstone_wire")) {
-					// Two couplings from that wire, two answers. The diagonal -- their wire
+					// Two couplings from that wire, two answers. The horizontal -- their wire
+					// weakly powering the rung stone itself -- only ever reaches the rung's flank
+					// notes, so those two slots ride over the staircase instead and the rung runs
+					// bare. A corkscrew of twenty-four still beats the pad this used to lose to:
+					// 256 refusals against 239 built, library-wide. The diagonal -- their wire
 					// stepping up into the rung's dust, which would carry the whole far half at
-					// their tick -- is severed by a stone the builder lays over their wire. The
-					// horizontal -- their wire weakly powering the rung stone itself -- only ever
-					// reaches the rung's flank notes, so those two slots ride over the staircase
-					// instead and the rung runs bare. A corkscrew of twenty-four still beats the
-					// pad this used to lose to: 256 refusals against 239 built, library-wide.
+					// their tick without ever waiting on this module's repeater -- is blocked by
+					// filling the cell over their wire. In-game testing confirmed the skip and
+					// the fix, and found the filler need not be stone: a harp note there is
+					// sounded by the rung's own dust at the module's own tick, its instrument the
+					// wire it stands over. A harp from the tail takes the cell when one can be
+					// spared; plain stone when the harps have run out.
 					List<EventNote> kept = new ArrayList<>();
 					for (EventNote rung : headed.rungNotes()) {
 						if (rung != null) {
@@ -4346,9 +4352,14 @@ public final class SongBuilder {
 					bareHead.removeAll(kept);
 					List<EventNote> fullerFar = new ArrayList<>(headed.farTail());
 					fullerFar.addAll(0, kept);
+					EventNote cap = takeFromTail(fullerFar,
+						note -> note.effect() == null && isHarpNote(note));
+					if (cap != null) {
+						bareHead.add(cap);
+					}
 					StackedSplit bare = new StackedSplit(headed.slots(), bareHead,
 						headed.nearTail(), fullerFar, false, CentreFeed.CORKSCREW,
-						headed.centreToFront(), List.of());
+						headed.centreToFront(), List.of(), cap);
 					if (bare.runCells(splitCells) > DUST_RANGE) {
 						placements.padded("corkscrewFlanklessOutOfWire");
 						headed = null;
@@ -4790,7 +4801,8 @@ public final class SongBuilder {
 						onTheFreeSlots(placements, opening, travel, depth, event.time(),
 							headed.slots(), headed.shed() ? DESCENT_FLANK_SLOT : -1),
 						headed.head(), headed.nearTail(), headed.farTail(), headed.shed(),
-						headed.centreFeeds(), headed.centreToFront(), headed.rungNotes());
+						headed.centreFeeds(), headed.centreToFront(), headed.rungNotes(),
+						headed.severNote());
 					cursor = addStackedSplitModule(placements, opening, travel, depth,
 						headDelay, headed, event.time());
 					far = headed.farTail();
@@ -15013,7 +15025,19 @@ public final class SongBuilder {
 	 */
 	private record StackedSplit(UltraSlots slots, List<EventNote> head, List<EventNote> nearTail,
 			List<EventNote> farTail, boolean shed, CentreFeed centreFeeds, EventNote centreToFront,
-			List<EventNote> rungNotes) {
+			List<EventNote> rungNotes, EventNote severNote) {
+		/**
+		 * Every shape but one has no sever note: it exists only on a corkscrew standing in front
+		 * of a raised tail, where the cell over that tail's wire has to be filled to keep the
+		 * tail's current off the staircase -- and a harp filled in there is a note carried for
+		 * free, its instrument the wire it stands over. Null means the cell gets plain stone.
+		 */
+		StackedSplit(UltraSlots slots, List<EventNote> head, List<EventNote> nearTail,
+				List<EventNote> farTail, boolean shed, CentreFeed centreFeeds,
+				EventNote centreToFront, List<EventNote> rungNotes) {
+			this(slots, head, nearTail, farTail, shed, centreFeeds, centreToFront, rungNotes,
+				null);
+		}
 		/**
 		 * Cells of wire from the head's repeater to the far half, staircase included.
 		 *
@@ -15032,12 +15056,12 @@ public final class SongBuilder {
 		 * wrong by the same cell and neither could see it.</p>
 		 */
 		int runCells(int splitCells) {
-			// A corkscrew's centre stands on the border, so its wire has one more level to climb
-			// than the staircase the caller priced: four rungs, not three. Said here so the walk's
-			// tipSignal and the oracle cannot disagree about it.
+			// A corkscrew's staircase zigzags along the travel between the border and the rung's
+			// column -- rung dust and a wire on each of its two panes -- which is the same three
+			// cells every other climb spends. The old sideways corkscrew stood a pane taller and
+			// charged one more; in-game review replaced it with this shape.
 			return (shed ? 0 : STACKED_BUS_TRANSITION)
-				+ (nearTail.size() + 1) / 2 + (farTail.size() + 1) / 2
-				+ (centreFeeds == CentreFeed.CORKSCREW ? splitCells + 1 : splitCells);
+				+ (nearTail.size() + 1) / 2 + (farTail.size() + 1) / 2 + splitCells;
 		}
 
 		/**
@@ -15081,8 +15105,9 @@ public final class SongBuilder {
 		 */
 		FLANKED_RUNGS,
 		/**
-		 * Room one: the centre on the border column, the first rung backward over the module's
-		 * own repeater, and a corkscrew of glass out to the floor above.
+		 * Room one: the centre on the border column, the one stone rung backward over the
+		 * module's own repeater, and two panes of glass zigzagging along the travel out to the
+		 * floor above, where the far half opens a column recessed.
 		 */
 		CORKSCREW
 	}
@@ -15913,29 +15938,45 @@ public final class SongBuilder {
 		}
 		if (split.centreFeeds() == CentreFeed.CORKSCREW) {
 			// Room one: repeater, then the border. The centre stands on the border column with
-			// dust on top, the first rung is stone standing backward over the module's own
-			// repeater -- flanked by two harps a gap of one over the back lows -- and the rest is
-			// a corkscrew of glass: forward, sideways, forward, the wire stepping up past each
-			// pane because glass is what a wire steps past. The landing wire sits on the last
-			// glass, so the far half's ten cells start one column in. In-game testing built it by
-			// hand first -- a chord of 26, the wire dying on its last cell -- and the paste has to
-			// match it block for block.
+			// dust on top, the one stone rung stands backward over the module's own repeater --
+			// flanked by two harps a gap of one over the back lows -- and the rest is two panes
+			// of glass zigzagging along the travel between the border and the rung's own column,
+			// the wire stepping up past each pane because glass is what a wire steps past. The
+			// landing wire sits over the repeater's column, so the far half opens one column
+			// recessed. In-game review of the first shape asked for exactly this: one stone rung,
+			// two panes running along the travel rather than jogging sideways, and the tail a
+			// block later -- the sideways corkscrew and the second stone over the wire behind
+			// both went with it.
 			placements.climbFedByCentre(true);
+			// Without the cross under its centre: every other stacked module's cross is the
+			// lane's own wire running through, and here nothing runs through -- the module is
+			// flush at the wall and the line leaves upward. In-game testing read the cross at
+			// nought and asked for it to go.
 			Lane afterHead = addStackedEventModule(placements,
-				Lane.straight(cursor, travel, laneStep), triggerDelay, time, split.slots());
+				Lane.straight(cursor, travel, laneStep), triggerDelay, time, split.slots(), true);
 			BlockPos centreCol = cursor.relative(travel);
 			placements.powered(cursor.above(2), "minecraft:stone", time);
 			set(placements, cursor.above(3), "minecraft:redstone_wire");
-			// Raised wire behind the module would step up diagonally into the rung's dust and
-			// carry the whole far half at its own tick. A stone over that wire is what a diagonal
-			// cannot pass; the wire itself still feeds this module's repeater exactly as before,
-			// and the walk already sent the rung's flanks over the staircase for the horizontal
-			// coupling the stone cannot stop.
+			// A raised tail behind would step its wire up diagonally into the rung's dust and
+			// carry the whole far half at its own tick, never waiting on this module's repeater.
+			// The cell over that wire is filled to block the diagonal -- with a harp where the
+			// tail could spare one, which the rung's dust sounds at the module's own tick and
+			// whose instrument is the wire it stands over, and with plain stone where it could
+			// not. In-game testing found the skip on the pasted build and hand-built the fix.
 			BlockPos behindWire = cursor.relative(travel.getOpposite()).above(2);
 			String behind = placements.blockAt(behindWire);
 			if (behind != null && behind.startsWith("minecraft:redstone_wire")) {
-				set(placements, behindWire.above(), "minecraft:stone");
-				placements.padded("corkscrewSeveredTheDiagonal");
+				if (split.severNote() != null) {
+					placeNoteBlock(placements, behindWire.above(), split.severNote());
+					// The rung's dust is what sounds it, and the bookkeeping has to say so or
+					// verify calls the note silent -- the same recording the room-two head makes
+					// for the note its cross drives.
+					placements.powered(cursor.above(3), time);
+					placements.padded("corkscrewCapsTheTailWithAHarp");
+				} else {
+					set(placements, behindWire.above(), "minecraft:stone");
+					placements.padded("corkscrewSeveredTheDiagonal");
+				}
 			}
 			BlockPos[] rungCells = {cursor.above(2).relative(laneStep),
 				cursor.above(2).relative(laneStep.getOpposite())};
@@ -15945,18 +15986,15 @@ public final class SongBuilder {
 					placeNote(placements, rungCells[slot], split.rungNotes().get(slot));
 				}
 			}
-			Direction jog = laneStep.getOpposite();
 			set(placements, centreCol.above(3), "minecraft:glass");
 			set(placements, centreCol.above(4), "minecraft:redstone_wire");
-			set(placements, centreCol.above(4).relative(jog), "minecraft:glass");
-			set(placements, centreCol.above(5).relative(jog), "minecraft:redstone_wire");
-			set(placements, centreCol.above(5), "minecraft:glass");
-			set(placements, centreCol.above(6), "minecraft:redstone_wire");
+			set(placements, cursor.above(4), "minecraft:glass");
+			set(placements, cursor.above(5), "minecraft:redstone_wire");
 			placements.padded("cutHeadFeedsTheClimb");
 			placements.padded("cutCorkscrewsAtTheWall");
-			// One column of module: the centre is the staircase's own column, so the walk's climb
-			// bookkeeping is handed the border itself.
-			return centreCol;
+			// The top pane stands over the repeater, so the walk's climb bookkeeping is handed
+			// the repeater's own column and the far half opens a column recessed.
+			return cursor;
 		}
 		if (split.shed()) {
 			// No transition cell and no column for it. The head is laid and handed straight back at
@@ -16256,6 +16294,17 @@ public final class SongBuilder {
 
 	private static Lane addStackedEventModule(PlacementPlan placements, Lane lane,
 			int triggerDelay, int time, UltraSlots slots) {
+		return addStackedEventModule(placements, lane, triggerDelay, time, slots, false);
+	}
+
+	/**
+	 * @param bareCross whether to leave the cell under the centre empty. Every mid-lane module's
+	 *     cross is the lane's own wire running through it; a corkscrew is flush at the wall with
+	 *     nothing in front, so its cross carries nothing and gets nothing -- in-game testing read
+	 *     it at nought -- and laying it anyway is a cell of dead dust in every such head.
+	 */
+	private static Lane addStackedEventModule(PlacementPlan placements, Lane lane,
+			int triggerDelay, int time, UltraSlots slots, boolean bareCross) {
 		lane = pastAnyCorner(placements, lane);
 		BlockPos cursor = lane.pos();
 		Direction travel = lane.travel();
@@ -16266,7 +16315,9 @@ public final class SongBuilder {
 		BlockPos centre = cursor.relative(travel).above();
 		BlockPos cross = centre.below();
 		set(placements, cross.below(), UNDERFLOOR);
-		set(placements, cross, STACKED_CROSS);
+		if (!bareCross) {
+			set(placements, cross, STACKED_CROSS);
+		}
 		if (slots.centre() == null) {
 			set(placements, centre, "minecraft:stone");
 			// A centre with no note in it has the cell above it going spare, and that cell is at
@@ -17050,18 +17101,21 @@ public final class SongBuilder {
 	/**
 	 * v2: a chord one column from its climb -- repeater, then the border -- cuts as a corkscrew.
 	 *
-	 * <p>The room-one shape of {@link #HEAD_FEEDS_THE_CLIMB}, hand-built in-game first as a chord
-	 * of 26 with the wire dying on its last cell. The centre stands on the border column itself,
-	 * so there is no ground in front of the module at all: no front lows, no transition, nothing.
-	 * The first rung is stone standing backward over the module's own repeater, flanked by two
-	 * harps a gap of one over the back lows, and the rest is glass corkscrewing out -- forward,
-	 * sideways, forward -- to land its wire on the last pane at the floor above. The ascent spends
-	 * four rungs of wire rather than three, because it starts a level lower than a staircase fed
-	 * from a bus, so the ceiling is {@code 4 + 2 + 2 * (15 - 1 - 4) = 26}.</p>
+	 * <p>The room-one shape of {@link #HEAD_FEEDS_THE_CLIMB}. The centre stands on the border
+	 * column itself, so there is no ground in front of the module at all: no front lows, no
+	 * transition, nothing. The one stone rung stands backward over the module's own repeater,
+	 * flanked by two harps a gap of one over the back lows, and the rest is two panes of glass
+	 * zigzagging along the travel between the border and the rung's own column -- the landing
+	 * wire sits over the repeater, so the far half opens one column recessed. That is the shape
+	 * in-game review of the first build asked for; the first build corkscrewed sideways off the
+	 * border, stood a pane taller, spent a fourth cell of climb wire, and severed the diagonal
+	 * behind it with a second stone, and all three went. The ascent spends the same three cells
+	 * every climb does.</p>
 	 *
-	 * <p>Refused where the module behind left raised wire in the cell diagonal to the first
-	 * rung's dust -- wire joins wire diagonally, and a live tail behind would sound the rung's
-	 * flanks at its own tick. See {@code corkscrewRefusedForWireBehind}.</p>
+	 * <p>Refused where the module behind left wire level with the rung's own dust, a join no
+	 * block can stand between; run bare where the wire behind sits a step lower, so the flanks
+	 * it could sound ride over the staircase instead. See
+	 * {@code corkscrewRefusedForWireBehind} and {@code corkscrewRunsBareForWireBehind}.</p>
 	 */
 	static boolean CLIMB_CORKSCREWS_AT_THE_WALL = true;
 
