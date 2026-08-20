@@ -4571,9 +4571,27 @@ public final class SongBuilder {
 						+ "Notes");
 				}
 			}
+			// The fifth cut, for the room of nought: the repeater on the wall column itself, the
+			// note-block conductor on the border, and a three-rung jog of a staircase in the one
+			// column of x a turn is allowed past the wall. The last shapeless arrival -- a cap
+			// chord landing flush had no cut at any room below one, and walked out thirteen
+			// columns for want of this. In-game design, hand-built and signed first.
+			WallDescent wallCut = null;
+			if (WALL_DESCENTS && layout.ultra() && cutOffered && index > 0 && above >= 0
+					&& above < floors && !stackedFitsInstead && headed == null && !plainCut
+					&& sunken == null && cross == null && climb <= 0 && room == 0) {
+				wallCut = wallDescentOf(placements, lane.ahead(delayColumns), event.notes(),
+					splitCells, descentSide, event.time());
+				placements.padded(wallCut != null ? "planWallDescent"
+					: "wallDescentRefused" + LAST_WALL_DESCENT_REFUSAL);
+				if (wallCut != null) {
+					placements.padded("planWallDescentAt" + Math.min(event.notes().size(), 30)
+						+ "Notes");
+				}
+			}
 			boolean couldSplit = layout.ultra() && cutOffered && index > 0 && above >= 0
 				&& above < floors && !stackedFitsInstead && (headed != null || sunken != null
-					|| cross != null || plainCut);
+					|| cross != null || wallCut != null || plainCut);
 			// Why the head went, where losing it costs the lane its wall.
 			//
 			// A refused head is the commonest way a v2 lane ends up outside its wall: a chord of
@@ -4888,6 +4906,17 @@ public final class SongBuilder {
 							+ chord.size() + " head=" + (chord.size() - far.size()) + " far="
 							+ far.size());
 					}
+				} else if (wallCut != null) {
+					// Head, staircase and landing in one: the module returns the cell the far
+					// half opens on, and the walk's descent step below has nothing left to lay.
+					cursor = addWallDescentHead(placements, trigger.cursor(), travel,
+						descentSide, trigger.triggerDelay(), wallCut, event.time());
+					far = wallCut.far();
+					if (TRACE) {
+						System.out.println("  WALLDESCENT t=" + event.time() + " notes="
+							+ chord.size() + " head=" + (chord.size() - far.size()) + " far="
+							+ far.size());
+					}
 				} else if (sunken != null) {
 					cursor = addSunkenSplitNearHalf(placements, trigger.cursor(), travel, depth,
 						trigger.triggerDelay(), sunken, event.time());
@@ -5045,7 +5074,10 @@ public final class SongBuilder {
 					&& (headed.centreFeeds() == CentreFeed.FLANKED_RUNGS
 						|| headed.centreFeeds() == CentreFeed.CORKSCREW);
 				BlockPos stairFoot = cursor;
-				cursor = cross != null
+				// A wall descent laid its whole staircase inside the module and returned the
+				// landing; the walk's cursor is already where the far half opens.
+				cursor = wallCut != null ? cursor
+					: cross != null
 					? addCrossDescentSpiral(placements, cursor, travel, descentSide, currentTime)
 					: climb > 0
 					? (climbedAlready ? climbLaidByTheModule(placements, cursor, travel)
@@ -5115,6 +5147,8 @@ public final class SongBuilder {
 				// lane standing short of the wall it was measured for.
 				tipSignal = headed != null
 					? DUST_RANGE - headed.runCells(splitCells)
+					: wallCut != null
+					? DUST_RANGE - 3 - (wallCut.far().size() + 2) / 2
 					: DUST_RANGE - cells - splitCells;
 				gradeLaneTip(placements, turnCells, tipSignal,
 					climb > 0 ? "SplitClimb" : "SplitDescent");
@@ -11641,6 +11675,163 @@ public final class SongBuilder {
 	}
 
 	/**
+	 * The wall descent: a chord cut across a descent at a room of nought, in-game design.
+	 *
+	 * <p>The repeater stands on the wall column itself and drives a note block on the border --
+	 * the note is the conductor, sunken-bus style, and a harp by its own ground: it stands on the
+	 * descent's first cell of wire, so the wire is its instrument. The staircase is three rungs
+	 * jogging sideways and back: stone under the centre's wire, stone a level down on the jog
+	 * side of the border, stone a level down again back on the wall column, whose dust steps
+	 * down-and-sideways into the far half's own wire. One column of x past the wall, which is
+	 * the one column a turn is allowed.</p>
+	 *
+	 * @param jogFlank beside the centre on the staircase side, harp only -- its instrument cell
+	 *     stands over the second rung's dust, and anything solid there cuts the descent line
+	 * @param awayFlank beside the centre on the open side, any instrument
+	 * @param endNote on the border at the far half's own level, sounded by the far bus's first
+	 *     low -- the note the third rung's column gives back
+	 */
+	private record WallDescent(EventNote centre, EventNote jogFlank, EventNote awayFlank,
+			EventNote endNote, List<EventNote> far) {
+	}
+
+	/** Why the last {@link #wallDescentOf} came back with nothing. */
+	static String LAST_WALL_DESCENT_REFUSAL = "";
+
+	/**
+	 * Decides a wall descent, every slot asked of the ground before a block is laid.
+	 *
+	 * <p>Harp first, because the centre can hold nothing else and without it there is no cut. The
+	 * far half is sized on what the head carries, held to a first cell that hangs one flank
+	 * rather than two -- the third rung stands where its jog-side flank would breathe -- so the
+	 * run is three rungs and {@code (far + 2) / 2} cells against the fifteen: twenty-three over
+	 * plus five below.</p>
+	 *
+	 * @param opens the column the repeater stands in, which is the wall itself.
+	 */
+	private static WallDescent wallDescentOf(PlacementPlan placements, Lane opens,
+			List<EventNote> notes, int splitCells, Direction descentSide, int time) {
+		LAST_WALL_DESCENT_REFUSAL = "";
+		Direction side = opens.noteSide();
+		Direction away = descentSide.getOpposite();
+		if (away != side && away != side.getOpposite()) {
+			LAST_WALL_DESCENT_REFUSAL = "DescentNotAcross";
+			return null;
+		}
+		List<EventNote> harps = new ArrayList<>();
+		List<EventNote> others = new ArrayList<>();
+		for (EventNote note : busOrder(notes)) {
+			(isHarpNote(note) && note.effect() == null ? harps : others).add(note);
+		}
+		if (harps.isEmpty()) {
+			LAST_WALL_DESCENT_REFUSAL = "NoHarp";
+			return null;
+		}
+		Direction travel = opens.travel();
+		BlockPos stand = opens.pos();
+		// Every rung is powered stone, and powered stone sounds whatever hangs beside it -- at
+		// this module's tick, which for a neighbour corridor's note is the wrong one. The two jog
+		// rungs stand in the flank row the corridor alongside shares, and in-game census found
+		// them re-sounding an earlier cut head's flanks. The neighbour is already built, so it is
+		// asked, and a contested staircase refuses the cut: a breach says what it costs, a wrong
+		// note says nothing.
+		for (BlockPos rung : List.of(
+				stand.relative(travel).below(),
+				stand.relative(travel).below(2).relative(descentSide),
+				stand.below(3).relative(descentSide))) {
+			for (Direction out : Direction.Plane.HORIZONTAL) {
+				if (placements.noteAt(rung.relative(out), time)) {
+					LAST_WALL_DESCENT_REFUSAL = "RungWouldSoundANeighbour";
+					return null;
+				}
+			}
+		}
+		BlockPos centreAt = stand.relative(travel).above();
+		EventNote centre = harps.remove(0);
+		EventNote jogFlank = !harps.isEmpty()
+				&& railSlotTakes(placements, centreAt.relative(descentSide), time)
+			? harps.remove(0) : null;
+		List<EventNote> pool = new ArrayList<>(others);
+		pool.addAll(harps);
+		EventNote awayFlank = !pool.isEmpty()
+				&& railSlotTakes(placements, centreAt.relative(away), time)
+			? pool.remove(0) : null;
+		// The mockup hangs a fourth head note beside the repeater's stand on the open side, and
+		// it is left out on purpose: nothing this build lays powers the stand -- the centre's
+		// wire shapes itself down the staircase's diagonal and points z, not x -- so verify and
+		// the reader both called the note silent, at every module. If in-game reading finds the
+		// game sounds it anyway, the slot comes back with whatever mechanism that turns out to
+		// be.
+		// The border's end note -- the mockup's bonus note beside the far half's first low -- is
+		// parked with the stand flank: laid, it kept meeting a later module's instrument block
+		// across the corridor gap and sounding at that module's tick, sixteen wrong notes over
+		// thirteen builds. It returns with the extras pass, with whatever ground question keeps
+		// it quiet.
+		EventNote endNote = null;
+		if (pool.isEmpty()) {
+			LAST_WALL_DESCENT_REFUSAL = "NothingToCarryOver";
+			return null;
+		}
+		if (3 + (pool.size() + 2) / 2 > DUST_RANGE) {
+			LAST_WALL_DESCENT_REFUSAL = "OutOfWireBy"
+				+ (3 + (pool.size() + 2) / 2 - DUST_RANGE);
+			return null;
+		}
+		return new WallDescent(centre, jogFlank, awayFlank, endNote, pool);
+	}
+
+	/**
+	 * Lays the whole wall descent -- head, staircase and the border's end note -- and hands back
+	 * the landing, where the far half opens. There is nothing left for a descent builder to lay.
+	 */
+	private static BlockPos addWallDescentHead(PlacementPlan placements, BlockPos cursor,
+			Direction travel, Direction descentSide, int triggerDelay, WallDescent cut, int time) {
+		placements.placing("wallDescent" + (4 - (cut.jogFlank() == null ? 1 : 0)
+			- (cut.awayFlank() == null ? 1 : 0)
+			- (cut.endNote() == null ? 1 : 0)) + "/far" + cut.far().size());
+		placements.turnedAt(cursor);
+		Direction away = descentSide.getOpposite();
+		set(placements, cursor, "minecraft:stone");
+		set(placements, cursor.above(),
+			"minecraft:repeater[facing=" + repeaterFacing(travel) + ",delay=" + triggerDelay + "]");
+		BlockPos wire = cursor.relative(travel);
+		BlockPos centreAt = wire.above();
+		// The conductor. Bare, not through placeNote: its instrument is the wire it stands on.
+		placeNoteBlock(placements, centreAt, cut.centre());
+		placements.powered(centreAt, time);
+		set(placements, wire, "minecraft:redstone_wire");
+		// Recorded powered the way the room-two head records its cross: the wire is what sounds
+		// the flanks' instrument blocks, and verify has to see the driver.
+		placements.powered(wire, time);
+		// The three rungs. The first under the centre's own wire; the second a level down on the
+		// jog side; the third a level down again, back on the wall column, its dust stepping
+		// down-and-sideways into the far half's wire.
+		placements.powered(wire.below(), "minecraft:stone", time);
+		BlockPos second = wire.below(2).relative(descentSide);
+		placements.powered(second, "minecraft:stone", time);
+		set(placements, second.above(), "minecraft:redstone_wire");
+		BlockPos third = cursor.below(3).relative(descentSide);
+		placements.powered(third, "minecraft:stone", time);
+		set(placements, third.above(), "minecraft:redstone_wire");
+		if (cut.jogFlank() != null) {
+			// The harp, and the claim of air beneath it is load-bearing: that cell stands over
+			// the second rung's dust, and anything solid there cuts the line.
+			placeNote(placements, centreAt.relative(descentSide), cut.jogFlank());
+		}
+		if (cut.awayFlank() != null) {
+			placeNote(placements, centreAt.relative(away), cut.awayFlank());
+		}
+		if (cut.endNote() != null) {
+			// At the far bus's own low level -- one above the landing -- beside its first stone,
+			// which is what sounds it.
+			placeNote(placements, cursor.below(CUBE_FLOOR_HEIGHT - 1).relative(travel),
+				cut.endNote(), true);
+		}
+		placements.padded("builtWallDescent");
+		return cursor.below(CUBE_FLOOR_HEIGHT);
+	}
+
+	/**
 	 * A chord cut across a descent with a sunken opening: what rides in the opening note block and
 	 * its flanks, what the lowered cell and the raised cells carry, and what goes over the staircase.
 	 *
@@ -17146,6 +17337,23 @@ public final class SongBuilder {
 	 * for a stacked-bus head and twenty-five sunken. Descents only, as drawn.</p>
 	 */
 	static boolean CROSS_DESCENTS = true;
+
+	/**
+	 * v2: a chord at a room of nought -- its repeater on the wall column itself -- cuts as a wall
+	 * descent.
+	 *
+	 * <p>The fifth cut, and the descent-side twin of the corkscrew's room: below the cross
+	 * descent's room there was no shape at all, and a cap chord landing flush walked out thirteen
+	 * columns for want of one. The repeater drives a harp note block on the border -- the note is
+	 * the conductor, sunken-bus style, standing on the descent's own first cell of wire -- and
+	 * the staircase is three rungs jogging sideways and back in the one column of x a turn is
+	 * allowed past the wall, its last dust stepping down-and-sideways into the far half's wire.
+	 * The far half's first cell hangs one flank rather than two, the third rung standing in the
+	 * other's air, and the border pays it back with a note at the far half's own level, sounded
+	 * by its first low. Twenty-three over plus five below. In-game design, hand-built and signed
+	 * first: "desc1 28 notes".</p>
+	 */
+	static boolean WALL_DESCENTS = true;
 
 	/**
 	 * Whether a sunken bus is measured as it will be built -- its four slots asked before the shape
