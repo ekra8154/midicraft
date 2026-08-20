@@ -4544,7 +4544,7 @@ public final class SongBuilder {
 					&& above < floors && !stackedFitsInstead && headed == null && !plainCut
 					&& climb <= 0 && room >= 2 && room - 1 < cells) {
 				sunken = sunkenCutOf(placements, lane.ahead(delayColumns), event.notes(), room,
-					splitCells, descentSide, event.time());
+					splitCells, descentSide, event.time(), stairTopFree, stairBottomFree);
 				placements.padded(sunken != null ? "planSunkenCut"
 					: "sunkenCutRefused" + LAST_SUNKEN_CUT_REFUSAL);
 				if (sunken != null) {
@@ -4936,7 +4936,8 @@ public final class SongBuilder {
 						// collision stands as before.
 						SunkenCut rescue = SUNKEN_CUTS && climb <= 0
 							? sunkenCutOf(placements, Lane.straight(trigger.cursor(), travel, depth),
-								event.notes(), room, splitCells, descentSide, event.time())
+								event.notes(), room, splitCells, descentSide, event.time(),
+								stairTopFree, stairBottomFree)
 							: null;
 						if (rescue == null) {
 							placements.padded("cutHeadCollidedAndStayed");
@@ -5058,15 +5059,17 @@ public final class SongBuilder {
 				// descent's arithmetic, and the two should always agree; where they do not, the
 				// note goes back over the staircase with the far half and the growth is counted,
 				// because a silently grown far half is a run past its fifteen.
-				if (headed != null && !headed.stairExtras().isEmpty() && cross == null
+				List<EventNote> hungExtras = headed != null ? headed.stairExtras()
+					: sunken != null ? sunken.stairExtras() : List.of();
+				if (!hungExtras.isEmpty() && cross == null
 						&& climb <= 0 && CHEAP_SPLIT_DESCENT) {
 					placements.placing("stairExtras");
 					Direction stairAway = descentSide.getOpposite();
 					BlockPos topCell = stairFoot.relative(stairAway);
 					BlockPos bottomCell = stairFoot.relative(travel)
 						.below(CUBE_FLOOR_HEIGHT - 1).relative(stairAway);
-					EventNote topNote = headed.stairExtras().get(0);
-					EventNote bottomNote = headed.stairExtras().get(1);
+					EventNote topNote = hungExtras.get(0);
+					EventNote bottomNote = hungExtras.get(1);
 					if (topNote != null) {
 						if (quietAndFree(placements, topCell, event.time())) {
 							placeNote(placements, topCell, topNote, true);
@@ -11647,7 +11650,8 @@ public final class SongBuilder {
 	 */
 	private record SunkenCut(EventNote centre, List<EventNote> open, List<Direction> openSides,
 			List<EventNote> low, List<Direction> lowSides, List<EventNote> raised,
-			EventNote onTheRung, Direction rungSide, List<EventNote> far, int nearBus) {
+			EventNote onTheRung, Direction rungSide, List<EventNote> far, int nearBus,
+			List<EventNote> stairExtras) {
 	}
 
 	/** Why the last {@link #sunkenCutOf} came back with nothing. */
@@ -11665,7 +11669,8 @@ public final class SongBuilder {
 	 * @param opens the column the cut's repeater stands in.
 	 */
 	private static SunkenCut sunkenCutOf(PlacementPlan placements, Lane opens,
-			List<EventNote> notes, int room, int splitCells, Direction descentSide, int time) {
+			List<EventNote> notes, int room, int splitCells, Direction descentSide, int time,
+			boolean topExtraFree, boolean bottomExtraFree) {
 		LAST_SUNKEN_CUT_REFUSAL = "";
 		if (room < 2) {
 			LAST_SUNKEN_CUT_REFUSAL = "NoRoom";
@@ -11758,6 +11763,24 @@ public final class SongBuilder {
 			LAST_SUNKEN_CUT_REFUSAL = "NothingToCarryOver";
 			return null;
 		}
+		// The stair extras, same pair the tail split hangs: the sunken cut descends by the same
+		// staircase, so the cell beside its first rung and the cell beside its last carry a note
+		// each where the walk read them free. In-game reading found the one guardian25 16x3
+		// breach left was exactly this sum refused by one -- a 25 that fits sunken with the two
+		// extras and no other way. See {@link #STAIR_EXTRAS}.
+		EventNote topExtra = null;
+		EventNote bottomExtra = null;
+		if (STAIR_EXTRAS) {
+			if (bottomExtraFree) {
+				bottomExtra = takeFromTail(far, note -> note.effect() == null);
+			}
+			// Never on top of the rung note: at a room of two, {@code onTheRung} already hangs in
+			// the first rung's away cell, which is the same cell the top extra wants.
+			if (topExtraFree && onTheRung == null) {
+				topExtra = takeFromTail(far, note -> note.effect() == null
+					&& !FALLING_INSTRUMENT_BLOCKS.contains(note.instrumentBlock()));
+			}
+		}
 		if ((far.size() + 1) / 2 + nearBus + splitCells > DUST_RANGE) {
 			LAST_SUNKEN_CUT_REFUSAL = "OutOfWireBy"
 				+ ((far.size() + 1) / 2 + nearBus + splitCells - DUST_RANGE);
@@ -11765,7 +11788,10 @@ public final class SongBuilder {
 		}
 		return new SunkenCut(centre, open, openSides.subList(0, open.size()), low,
 			lowSides.subList(0, low.size()), raised, onTheRung, onTheRung == null ? null : rungSide,
-			far, nearBus);
+			far, nearBus,
+			topExtra == null && bottomExtra == null ? List.of()
+				: java.util.Collections.unmodifiableList(
+					java.util.Arrays.asList(topExtra, bottomExtra)));
 	}
 
 	/**
