@@ -19320,10 +19320,23 @@ public final class SongBuilder {
 		}
 
 		boolean freeForNote(BlockPos position) {
-			return !recording
-				|| !blocks.containsKey(position.immutable())
-					&& !blocks.containsKey(position.below().immutable())
-					&& !blocks.containsKey(position.above().immutable());
+			if (!recording) {
+				return true;
+			}
+			// The cell above may be claimed as air and still be free: claimed air is somebody's
+			// guarantee of emptiness, which is exactly what a note wants over it. In-game reading
+			// found the hole this punched -- the far half of every cross-descent skipping the cell
+			// beneath the lowered back flank, because that flank is a harp and a harp's instrument
+			// is air, claimed by placeNote like any other instrument. The physics squares itself:
+			// a note two above claims this cell with its instrument block, so only a HARP two
+			// above leaves claimed air here -- and a note under an air gap of one with a harp on
+			// top is the legal arrangement exactly. The cells at and below stay strict: the note
+			// itself and its instrument have to be laid there, and claimed air would collide with
+			// the instrument.
+			String above = blocks.get(position.above().immutable());
+			return !blocks.containsKey(position.immutable())
+				&& !blocks.containsKey(position.below().immutable())
+				&& (above == null || "minecraft:air".equals(above));
 		}
 
 		void note(BlockPos position, int time) {
