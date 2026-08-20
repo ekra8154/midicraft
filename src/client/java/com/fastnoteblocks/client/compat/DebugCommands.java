@@ -38,16 +38,22 @@ import net.minecraft.world.phys.Vec3;
  *   /fastnoteblockpaste 36 1 30x4                   four chords of thirty
  *   /fastnoteblockpaste dry 24 2 5x8@4 30@1         reported, not placed
  *   /fastnoteblockpaste 36 3 down 12 18 30          the next wall a descent, first chord twelve off
+ *   /fastnoteblockpaste 28 5 up 25x8                a whole lane ending in a climb, every chord
+ *                                                   placed where the walk itself wants it
  *   /fastnoteblockpaste 36 1 flat turning 12 30 5@1 5 5
  *                                                   the thirty-chord turnaround, as a single line
  *   /fastnoteblockpaste 40 1 7:7b 7:7h              the stacked seven over gold, then over glass
  * </pre>
  *
  * <p>Width and floors first, then the chords, which run to the end of the line. Between them may go
- * a wall shape -- {@code flat}, {@code up} or {@code down} -- and how far from that wall the first
- * chord stands. Without it the build starts where a song does: at the head of the first lane, on the
- * bottom floor, climbing. With it the walk begins as though it had already got there, which is the
- * only way to meet a descent without building every lane in front of it first.</p>
+ * a wall shape -- {@code flat}, {@code up} or {@code down} -- and, optionally, how far from that
+ * wall the first chord stands. With the distance the walk begins as though it had already got
+ * there, which pins where the first chord lands -- the right tool for rebuilding one fault.
+ * Without it the lane starts at its own origin with that wall ahead and the walk places the
+ * chords itself, which is the only form that can sim a shape the walk has to choose -- a padded
+ * approach, a cut at whatever room the lane arrives at. (A first token that is a lone integer
+ * still binds as the distance; a single chord with no distance is said as {@code 18x1} or with a
+ * gap, {@code 18@4}.) With no shape at all the build starts where a song does.</p>
  *
  * <p>The dry form is the one that gets used most: it reports the faults, the size and where the
  * build would land without touching the world, so a dozen widths can be tried in as many seconds.
@@ -273,15 +279,27 @@ public final class DebugCommands {
 				.<FabricClientCommandSource, String>argument("chords",
 					StringArgumentType.greedyString())
 				.executes(context -> run(context, dry, null, 0, false, mode)));
-		// The wall shapes, each with its own distance to that wall. Literals rather than a word
-		// argument so that leaving them off is unambiguous: a chord spec always opens with a digit
-		// and a shape never does, and Brigadier tries its literal children first.
+		// The wall shapes, each optionally with its own distance to that wall. Literals rather
+		// than a word argument so that leaving them off is unambiguous: a chord spec always opens
+		// with a digit and a shape never does, and Brigadier tries its literal children first.
+		//
+		// The distance itself is optional now. With it, the walk begins as though it had already
+		// got to that column, which pins where the first chord lands -- the right tool for
+		// rebuilding one fault. Without it the lane starts at its own origin with that wall
+		// ahead, and the walk places the chords wherever it wants them -- the only form that can
+		// sim a shape the walk has to choose for itself, like the centre-fed climbing cuts.
+		// One ambiguity comes with that: a first token that is a lone integer binds as the
+		// distance, so "up 12 18" is a chord of eighteen twelve columns off the wall. A single
+		// chord with no distance is said as "18x1" or given a gap, "18@4".
 		for (String shape : List.of("flat", "up", "down")) {
 			floors = floors.then(literal(shape)
 				.then(colsThenChords(dry, shape, false, mode))
+				.then(chordsFromTheOrigin(dry, shape, false, mode))
 				// And optionally with the lane already bending towards that wall, which is what a lane
 				// in the middle of a song is and what no run of chords can be written to produce.
-				.then(literal("turning").then(colsThenChords(dry, shape, true, mode))));
+				.then(literal("turning")
+					.then(colsThenChords(dry, shape, true, mode))
+					.then(chordsFromTheOrigin(dry, shape, true, mode))));
 		}
 		return RequiredArgumentBuilder
 			.<FabricClientCommandSource, Integer>argument("width",
@@ -303,6 +321,25 @@ public final class DebugCommands {
 	}
 
 	/**
+	 * The chords alone: the lane starts at its own origin with the chosen wall ahead.
+	 *
+	 * <p>The distance forces where the first chord lands, and a forced landing cannot sim a shape
+	 * the walk chooses by where things fall -- a padded approach, a cut at the room the lane
+	 * happens to arrive at. This form gives the walk the whole lane and lets it decide, which is
+	 * what a real paste does.</p>
+	 */
+	private static RequiredArgumentBuilder<FabricClientCommandSource, String> chordsFromTheOrigin(
+			boolean dry, String shape, boolean turning, SongBuilder.PasteMode mode) {
+		return RequiredArgumentBuilder
+			.<FabricClientCommandSource, String>argument("chords",
+				StringArgumentType.greedyString())
+			.executes(context -> run(context, dry, shape, FROM_THE_ORIGIN, turning, mode));
+	}
+
+	/** The distance meaning "no distance": the lane runs from its origin to the wall. */
+	private static final int FROM_THE_ORIGIN = -1;
+
+	/**
 	 * The seed that makes the next wall the shape asked for.
 	 *
 	 * <p>Read straight off {@code turnCost}, which calls the step above {@code floor + climb} and
@@ -314,7 +351,10 @@ public final class DebugCommands {
 			int columnsToWall, boolean turning) {
 		// The wall is two columns inside the width -- two of it go on the fold itself -- so a chord
 		// asked to stand twelve columns from the wall starts twelve short of there, not of the width.
-		int column = Math.max(0, width - 2 - columnsToWall);
+		// No distance at all is the head of the lane: the walk crosses the whole corridor to reach
+		// the wall and places every chord itself.
+		int column = columnsToWall == FROM_THE_ORIGIN ? 0
+			: Math.max(0, width - 2 - columnsToWall);
 		return switch (shape) {
 			case "up" -> new SongBuilder.WalkStart(column, 0, 1, turning);
 			case "down" -> new SongBuilder.WalkStart(column, floors - 1, -1, turning);
