@@ -135,7 +135,7 @@ class UnreachedLocatorTest {
 	}
 
 	private static List<SongBuilder.EventNote> load(String name) throws Exception {
-		try (Reader reader = Files.newBufferedReader(SONGS.resolve(name + ".json"))) {
+		try (Reader reader = Files.newBufferedReader(BreachView.songFile(name))) {
 			ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
 			ComposerProject song = new ComposerProject(raw.name(), raw.ppq(),
 				raw.tempoMicrosPerQuarter(), raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(),

@@ -127,7 +127,7 @@ class RailAgainstStacksTest {
 	void namesTheWrongNotes() throws Exception {
 		for (String name : List.of("untitled-composition-5", "porter-robinson-goodbye-to-a-world",
 				"harder-better-faster-stronger-daft-punk")) {
-			List<SongBuilder.EventNote> notes = load(SONGS.resolve(name + ".json"));
+			List<SongBuilder.EventNote> notes = load(BreachView.songFile(name));
 			SongBuilder.TWO_RAIL_RUNS = true;
 			// Which is what puts names on the blocks, so a fault can say which shape is on each side
 			// rather than leaving it to be read off a dump.

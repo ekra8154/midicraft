@@ -62,7 +62,7 @@ class StackedBusCostTest {
 	@Test
 	void doTheDanceInDetail() throws Exception {
 		List<SongBuilder.EventNote> notes = SongBuilder.eventNotes(
-			load(SONGS.resolve("illit-do-the-dance.json")).toSequenceTracks(Set.of(), true));
+			load(BreachView.songFile("illit-do-the-dance")).toSequenceTracks(Set.of(), true));
 		System.out.println("DTD  cfg        pad(off->on)  closing      parity      "
 			+ "len   depth  hgt   volume        blocks");
 		for (int floors : new int[] {4, 6}) {

@@ -99,7 +99,7 @@ class RaisedPadReadBackTest {
 		java.nio.file.Path songs = java.nio.file.Path.of("run", "config", "fast-noteblocks", "songs");
 		List<SongBuilder.EventNote> notes;
 		try (java.io.Reader reader = java.nio.file.Files.newBufferedReader(
-				songs.resolve("deltarune-ch-4-guardian.json"))) {
+				BreachView.songFile("deltarune-ch-4-guardian"))) {
 			com.fastnoteblocks.client.composer.ComposerProject raw =
 				new com.google.gson.Gson().fromJson(reader,
 					com.fastnoteblocks.client.composer.ComposerProject.class);

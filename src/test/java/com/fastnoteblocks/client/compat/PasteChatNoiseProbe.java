@@ -50,7 +50,7 @@ class PasteChatNoiseProbe {
 			"hopes-and-dreams");
 		for (String name : songs) {
 			ComposerProject song;
-			try (Reader reader = Files.newBufferedReader(SONGS.resolve(name + ".json"))) {
+			try (Reader reader = Files.newBufferedReader(BreachView.songFile(name))) {
 				ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
 				song = new ComposerProject(raw.name(), raw.ppq(), raw.tempoMicrosPerQuarter(),
 					raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(), raw.endTick(),

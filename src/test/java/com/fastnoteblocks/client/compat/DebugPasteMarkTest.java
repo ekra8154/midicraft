@@ -56,7 +56,7 @@ class DebugPasteMarkTest {
 
 	private static List<SongBuilder.EventNote> song(String file) throws Exception {
 		Path songs = Path.of("run", "config", "fast-noteblocks", "songs");
-		try (Reader reader = Files.newBufferedReader(songs.resolve(file))) {
+		try (Reader reader = Files.newBufferedReader(BreachView.songFile(file.replace(".json", "")))) {
 			ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
 			ComposerProject song = new ComposerProject(raw.name(), raw.ppq(),
 				raw.tempoMicrosPerQuarter(), raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(),
@@ -158,6 +158,9 @@ class DebugPasteMarkTest {
 		List<String> wrong = new ArrayList<>();
 		for (String file : List.of("illit-do-the-dance.json", "deltarune-ch-4-guardian.json",
 				"all-of-the-lights-kanye-west.json", "big-shot.json")) {
+			if (!BreachView.inLibrary(file.replace(".json", ""))) {
+				continue;
+			}
 			List<SongBuilder.EventNote> notes = song(file);
 			for (int[] size : new int[][] {{40, 3}, {16, 4}, {12, 3}, {24, 6}}) {
 				SongBuilder.PastePlan built = SongBuilder.createPastePlan(new BlockPos(0, 64, 0),

@@ -45,7 +45,7 @@ class DebugPasteCensusProbe {
 
 	private static List<SongBuilder.EventNote> song(String file) throws Exception {
 		Path songs = Path.of("run", "config", "fast-noteblocks", "songs");
-		try (Reader reader = Files.newBufferedReader(songs.resolve(file))) {
+		try (Reader reader = Files.newBufferedReader(BreachView.songFile(file.replace(".json", "")))) {
 			ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
 			ComposerProject project = new ComposerProject(raw.name(), raw.ppq(),
 				raw.tempoMicrosPerQuarter(), raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(),
@@ -131,6 +131,9 @@ class DebugPasteCensusProbe {
 		int[][] configurations = {{40, 3}, {16, 4}, {12, 3}, {24, 6}};
 		SongBuilder.DEBUG_PASTE = true;
 		for (String file : songs) {
+			if (!BreachView.inLibrary(file.replace(".json", ""))) {
+				continue;
+			}
 			List<SongBuilder.EventNote> notes = song(file);
 			for (int[] configuration : configurations) {
 				String heading = file.replace(".json", "") + "  " + configuration[0] + "x"

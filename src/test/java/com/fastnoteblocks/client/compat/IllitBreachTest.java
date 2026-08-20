@@ -32,7 +32,7 @@ class IllitBreachTest {
 	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
 
 	private static List<SongBuilder.EventNote> load(String name) throws Exception {
-		Path file = SONGS.resolve(name + ".json");
+		Path file = BreachView.songFile(name);
 		ComposerProject song;
 		try (Reader reader = Files.newBufferedReader(file)) {
 			ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);

@@ -250,7 +250,7 @@ class TurnBanTest {
 	void dumpsTheSmallestWrongNote() throws Exception {
 		SongBuilder.TURN_BAN_OUTLASTS = false;
 		ComposerProject song;
-		try (Reader reader = Files.newBufferedReader(SONGS.resolve("i-wonder.json"))) {
+		try (Reader reader = Files.newBufferedReader(BreachView.songFile("i-wonder"))) {
 			ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
 			song = new ComposerProject(raw.name(), raw.ppq(), raw.tempoMicrosPerQuarter(),
 				raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(), raw.endTick(),
@@ -300,7 +300,7 @@ class TurnBanTest {
 	void dumpsTheSouthSideDouble() throws Exception {
 		SongBuilder.TURN_BAN_BY_DISTANCE = true;
 		ComposerProject song;
-		try (Reader reader = Files.newBufferedReader(SONGS.resolve("deltarune-ch-4-guardian.json"))) {
+		try (Reader reader = Files.newBufferedReader(BreachView.songFile("deltarune-ch-4-guardian"))) {
 			ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
 			song = new ComposerProject(raw.name(), raw.ppq(), raw.tempoMicrosPerQuarter(),
 				raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(), raw.endTick(),

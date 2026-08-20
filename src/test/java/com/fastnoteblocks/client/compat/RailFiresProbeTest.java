@@ -28,8 +28,9 @@ class RailFiresProbeTest {
 	}
 
 	private static final List<String> SONGS = List.of(
-		"ultra-ones-mixed", "ultra-twos-mixed", "ultra-threes-mixed", "ultra-gaps-mixed",
-		"deltarune-ch-4-guardian");
+			"ultra-ones-mixed", "ultra-twos-mixed", "ultra-threes-mixed", "ultra-gaps-mixed",
+			"deltarune-ch-4-guardian")
+		.stream().filter(BreachView::inLibrary).toList();
 
 	private static int columns(List<SongBuilder.EventNote> notes, SongBuilder.PasteMode mode,
 			int width, int floors) {

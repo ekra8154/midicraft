@@ -60,7 +60,7 @@ class RailStackReadBackTest {
 				break;
 			}
 			read++;
-			List<SongBuilder.EventNote> notes = load(SONGS.resolve(name + ".json"));
+			List<SongBuilder.EventNote> notes = load(BreachView.songFile(name));
 			for (int[] size : new int[][] {{16, 2}, {24, 3}}) {
 				SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0),
 					notes, SongBuilder.PasteMode.ULTRA_COMPACT_LANE,

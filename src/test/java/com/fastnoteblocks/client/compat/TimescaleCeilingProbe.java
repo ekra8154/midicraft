@@ -113,7 +113,7 @@ class TimescaleCeilingProbe {
 		System.out.println();
 		System.out.println("==== A Dark Zone, the grid it sits on ====");
 		for (String name : new String[] {"a-dark-zone", "a-dark-zone-2", "a-dark-zone-3"}) {
-			ComposerProject song = load(SONGS.resolve(name + ".json"));
+			ComposerProject song = load(BreachView.songFile(name));
 			double span = SongAnalysis.redstoneTickSpan(song);
 			List<Long> ticks = song.layers().stream()
 				.flatMap(layer -> layer.notes().stream())

@@ -273,7 +273,7 @@ class FallingBlockOrderProbe {
 	/** The same question of every layout, on one song, in case this is not only the ultra lane. */
 	@Test
 	void asksEveryLayoutTheSameQuestion() throws Exception {
-		Path file = SONGS.resolve("big-shot.json");
+		Path file = BreachView.songFile("big-shot");
 		ComposerProject song;
 		try (Reader reader = Files.newBufferedReader(file)) {
 			ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
@@ -349,7 +349,7 @@ class FallingBlockOrderProbe {
 	 */
 	@Test
 	void drawsTheSandThatIsHeldUpByNothing() throws Exception {
-		Path file = SONGS.resolve("aria-math-c418.json");
+		Path file = BreachView.songFile("aria-math-c418");
 		ComposerProject song;
 		try (Reader reader = Files.newBufferedReader(file)) {
 			ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);

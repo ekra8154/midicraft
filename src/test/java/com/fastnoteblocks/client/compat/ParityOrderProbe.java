@@ -62,7 +62,7 @@ class ParityOrderProbe {
 		Path songs = Path.of("run", "config", "fast-noteblocks", "songs");
 		List<SongBuilder.EventNote> notes;
 		try (Reader reader = Files.newBufferedReader(
-				songs.resolve(text("song", "golden-brown-2xspeed") + ".json"))) {
+				BreachView.songFile(text("song", "golden-brown-2xspeed")))) {
 			ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
 			ComposerProject project = new ComposerProject(raw.name(), raw.ppq(),
 				raw.tempoMicrosPerQuarter(), raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(),

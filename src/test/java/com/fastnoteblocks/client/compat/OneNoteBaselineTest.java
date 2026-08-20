@@ -35,7 +35,8 @@ class OneNoteBaselineTest {
 
 	private static final List<String> SUBJECTS =
 		List.of("ultra-ones-mixed", "ultra-twos-mixed", "ultra-threes-mixed", "ultra-gaps-mixed",
-			"song-of-storms-but-noteblocks-dont-kill-me", "lady-brown-nujabes");
+				"song-of-storms-but-noteblocks-dont-kill-me", "lady-brown-nujabes")
+			.stream().filter(BreachView::inLibrary).toList();
 
 	@Test
 	void measuresTheOneNoteSongs() throws Exception {
@@ -76,7 +77,7 @@ class OneNoteBaselineTest {
 	}
 
 	private static List<SongBuilder.EventNote> load(String name) throws Exception {
-		try (Reader reader = Files.newBufferedReader(SONGS.resolve(name + ".json"))) {
+		try (Reader reader = Files.newBufferedReader(BreachView.songFile(name))) {
 			ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
 			ComposerProject song = new ComposerProject(raw.name(), raw.ppq(),
 				raw.tempoMicrosPerQuarter(), raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(),
