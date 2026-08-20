@@ -2479,7 +2479,7 @@ public final class SongBuilder {
 						onTheFreeSlots(placements, opening, travel, depth, event.time(),
 							headed.slots(), headed.shed() ? DESCENT_FLANK_SLOT : -1),
 						headed.head(), headed.nearTail(), headed.farTail(), headed.shed(),
-						headed.centreFeeds(), headed.centreToFront());
+						headed.centreFeeds(), headed.centreToFront(), headed.rungNotes());
 					cursor = addStackedSplitModule(placements, opening, travel, depth,
 						trigger.triggerDelay(), headed, event.time());
 					far = headed.farTail();
@@ -4313,6 +4313,23 @@ public final class SongBuilder {
 					splitNudge = true;
 				}
 			}
+			// A corkscrew's first rung stands over the module's own repeater, and the dust on
+			// it sits at floor+3 -- one diagonal step from any raised wire the module behind
+			// left at floor+2. Wire joins wire diagonally, so a live tail behind would carry
+			// the rung's flanks at its own tick. Asked of the blocks, and the head given up
+			// rather than nudged: a corkscrew exists only at a room of one, so there is no
+			// column to move into.
+			if (headed != null && headed.centreFeeds() == CentreFeed.CORKSCREW) {
+				BlockPos behindUp = lane.ahead(delayColumns + busyPad + (splitNudge ? 1 : 0))
+					.pos().relative(lane.travel().getOpposite()).above(2);
+				String lower = placements.blockAt(behindUp);
+				String upper = placements.blockAt(behindUp.above());
+				if (lower != null && lower.startsWith("minecraft:redstone_wire")
+						|| upper != null && upper.startsWith("minecraft:redstone_wire")) {
+					placements.padded("corkscrewRefusedForWireBehind");
+					headed = null;
+				}
+			}
 			// A cut is how a chord that does not fit is made to fit, and this one does fit.
 			//
 			// The whole cut decision is made on {@code cells}, which is the length of a <em>bus</em> --
@@ -4361,7 +4378,11 @@ public final class SongBuilder {
 			// column and the busy pad moves it another, and what has to fill the room is what is left
 			// after both. The pin asked before them and kept {@code recessMispredicted} to find out
 			// when that had been wrong.
-			if (headed != null) {
+			// Never of a centre-fed head. Its shape is chosen by the room itself -- a flanked-rung
+			// head's module ends a column short of the border because the staircase takes two
+			// columns and fills both -- so measuring the module's columns against the room reads
+			// the staircase's own ground as a gap and throws the one cut this room has away.
+			if (headed != null && headed.centreFeeds() == CentreFeed.NONE) {
 				int roomLeft = room - busyPad - (splitNudge ? 1 : 0);
 				int gap = roomLeft - headed.columns();
 				if (gap > 0) {
@@ -4734,7 +4755,7 @@ public final class SongBuilder {
 						onTheFreeSlots(placements, opening, travel, depth, event.time(),
 							headed.slots(), headed.shed() ? DESCENT_FLANK_SLOT : -1),
 						headed.head(), headed.nearTail(), headed.farTail(), headed.shed(),
-						headed.centreFeeds(), headed.centreToFront());
+						headed.centreFeeds(), headed.centreToFront(), headed.rungNotes());
 					cursor = addStackedSplitModule(placements, opening, travel, depth,
 						headDelay, headed, event.time());
 					far = headed.farTail();
@@ -4881,9 +4902,15 @@ public final class SongBuilder {
 				// this should now read nought, and a build where it does not is a lane that turned
 				// before it was allowed to.
 				int shortOfWall = (wall - cursor.getX()) * travel.getStepX();
-				placements.recessed(shortOfWall);
-				for (int cell = 0; cell < shortOfWall; cell++) {
-					placements.padded(headed != null ? "recessedCutHeaded" : "recessedCutPlain");
+				// Not for a centre-fed head. Its staircase reaches the border whatever column the
+				// module handed back -- a flanked-rung head stands its foot a column short because
+				// the staircase itself takes two -- so a nought here is the shape working, not a
+				// lane that turned early.
+				if (headed == null || headed.centreFeeds() == CentreFeed.NONE) {
+					placements.recessed(shortOfWall);
+					for (int cell = 0; cell < shortOfWall; cell++) {
+						placements.padded(headed != null ? "recessedCutHeaded" : "recessedCutPlain");
+					}
 				}
 				// And the same number worked out from the shape rather than read off the block it landed
 				// on. A recess that can be predicted can be paid for before the module is laid; one that
@@ -4898,10 +4925,19 @@ public final class SongBuilder {
 				// started from, which is exactly where the old landing plus its step off arrived.
 				int splitStepOff = climb > 0 || CHEAP_SPLIT_DESCENT ? stepOff : stepOff;
 				splitStepOff = climb > 0 ? stepOff : (CHEAP_SPLIT_DESCENT ? 0 : stepOff);
+				// A flanked-rung or corkscrew head laid its own staircase -- stone rungs carrying
+				// notes, a backward first step -- so there is nothing left for addGlassClimb to
+				// lay, and calling it anyway would put glass where the module put stone. What
+				// remains is the bookkeeping and the landing.
+				boolean climbedAlready = headed != null
+					&& (headed.centreFeeds() == CentreFeed.FLANKED_RUNGS
+						|| headed.centreFeeds() == CentreFeed.CORKSCREW);
 				cursor = cross != null
 					? addCrossDescentSpiral(placements, cursor, travel, descentSide, currentTime)
 					: climb > 0
-					? addGlassClimb(placements, cursor, travel, depth, true, currentTime, 0, false)
+					? (climbedAlready ? climbLaidByTheModule(placements, cursor, travel)
+						: addGlassClimb(placements, cursor, travel, depth, true, currentTime, 0,
+							false))
 					: CHEAP_SPLIT_DESCENT
 						? addSplitBusDescent(placements, cursor, travel, descentSide, currentTime)
 						: addSpiralDescent(placements, cursor, travel, descentSide, currentTime);
@@ -8363,6 +8399,21 @@ public final class SongBuilder {
 		}
 		// The next repeater stands one back the way we came and reads the top of the climb, which
 		// is the block in front of it.
+		return cursor.relative(travel.getOpposite()).above(CUBE_FLOOR_HEIGHT);
+	}
+
+	/**
+	 * The landing of a staircase the near-half module laid itself.
+	 *
+	 * <p>A flanked-rung or corkscrew head builds its own staircase, so there is nothing left for
+	 * {@link #addGlassClimb} to lay -- calling it anyway would put glass where the module put
+	 * stone. What remains is the bookkeeping and the landing, which is the same landing that
+	 * method hands back: one column back from the column it was given, a floor up.</p>
+	 */
+	private static BlockPos climbLaidByTheModule(PlacementPlan placements, BlockPos cursor,
+			Direction travel) {
+		placements.placing("climb");
+		placements.turnedAt(cursor);
 		return cursor.relative(travel.getOpposite()).above(CUBE_FLOOR_HEIGHT);
 	}
 
@@ -14852,17 +14903,22 @@ public final class SongBuilder {
 	 *     One column shorter and one cell of wire cheaper than the same head without it -- see
 	 *     {@link #SHEDS_THE_FLANK_THE_DESCENT_WANTS}. Carried on the record because the walk has to
 	 *     build the shape the planner priced, and the two read this from the one oracle.
-	 * @param centreFeeds whether the near half is a head alone whose centre wears the dust that
-	 *     carries the run onto a climb -- see {@link #HEAD_FEEDS_THE_CLIMB}. The transition cell
-	 *     stays in the run, because that dust is it, but it stops being a column: the head hands
-	 *     over at its own centre and the staircase stands in the very next column.
-	 * @param centreToFront the note the dust evicted from the centre, rehomed to the bottom-rail
-	 *     cell in front of the cross. That cell is free in exactly this shape, because the line
-	 *     leaves upward and nothing needs the front flank area to carry it on. Null where the head
-	 *     never filled its centre.
+	 * @param centreFeeds which centre-fed shape the near half takes, or {@link CentreFeed#NONE} --
+	 *     see {@link #HEAD_FEEDS_THE_CLIMB}. In every centre-fed shape the transition cell stays in
+	 *     the run, because the dust on the centre is it, but it stops being a column: the head
+	 *     hands over at its own centre and the staircase stands hard against it.
+	 * @param centreToFront the note rehomed to the bottom-rail cell in front of the cross -- the
+	 *     dust's evicted centre note, or a tail note pulled up where the centre was empty. That
+	 *     cell is free in exactly these shapes, because the line leaves upward and nothing needs
+	 *     the front flank area to carry it on. Null in a corkscrew, whose front cells are outside
+	 *     the border, and where nothing could be pulled.
+	 * @param rungNotes harps hung beside the staircase's stone rungs, pulled from the tail. Harps
+	 *     because every one of these cells has a note block an air gap of one below it, and a note
+	 *     over a gap of one can only wear the air as its instrument.
 	 */
 	private record StackedSplit(UltraSlots slots, List<EventNote> head, List<EventNote> nearTail,
-			List<EventNote> farTail, boolean shed, boolean centreFeeds, EventNote centreToFront) {
+			List<EventNote> farTail, boolean shed, CentreFeed centreFeeds, EventNote centreToFront,
+			List<EventNote> rungNotes) {
 		/**
 		 * Cells of wire from the head's repeater to the far half, staircase included.
 		 *
@@ -14881,8 +14937,12 @@ public final class SongBuilder {
 		 * wrong by the same cell and neither could see it.</p>
 		 */
 		int runCells(int splitCells) {
+			// A corkscrew's centre stands on the border, so its wire has one more level to climb
+			// than the staircase the caller priced: four rungs, not three. Said here so the walk's
+			// tipSignal and the oracle cannot disagree about it.
 			return (shed ? 0 : STACKED_BUS_TRANSITION)
-				+ (nearTail.size() + 1) / 2 + (farTail.size() + 1) / 2 + splitCells;
+				+ (nearTail.size() + 1) / 2 + (farTail.size() + 1) / 2
+				+ (centreFeeds == CentreFeed.CORKSCREW ? splitCells + 1 : splitCells);
 		}
 
 		/**
@@ -14900,9 +14960,36 @@ public final class SongBuilder {
 		 * {@code recessMispredicted} against the block it actually reaches.</p>
 		 */
 		int columns() {
-			return STACKED_CELLS + (shed || centreFeeds ? 0 : STACKED_BUS_TRANSITION)
+			// A corkscrew is one column of module: its centre is the staircase's own column.
+			if (centreFeeds == CentreFeed.CORKSCREW) {
+				return STACKED_CELLS - 1;
+			}
+			return STACKED_CELLS
+				+ (shed || centreFeeds != CentreFeed.NONE ? 0 : STACKED_BUS_TRANSITION)
 				+ (nearTail.size() + 1) / 2;
 		}
+	}
+
+	/**
+	 * How a centre-fed head hands its run to the staircase, which is decided by the room and
+	 * decides the whole shape. See {@link #HEAD_FEEDS_THE_CLIMB},
+	 * {@link #CLIMB_RUNGS_CARRY_FLANKS} and {@link #CLIMB_CORKSCREWS_AT_THE_WALL}.
+	 */
+	private enum CentreFeed {
+		/** Not a centre-fed head at all. */
+		NONE,
+		/** Room two: the head hard against the ordinary sideways three-ascent. */
+		BESIDE_THE_STAIRCASE,
+		/**
+		 * Room three: a bottom-rail extension cell, and a staircase zigzagging along the travel
+		 * whose first two rungs are stone and carry a flanked pair of harps each.
+		 */
+		FLANKED_RUNGS,
+		/**
+		 * Room one: the centre on the border column, the first rung backward over the module's
+		 * own repeater, and a corkscrew of glass out to the floor above.
+		 */
+		CORKSCREW
 	}
 
 	/**
@@ -15307,28 +15394,23 @@ public final class SongBuilder {
 				shed = true;
 			}
 		}
-		// A climb at a room of two exactly: repeater, centre, and the staircase in the very next
-		// column. No cell for a transition and none for a bus -- which used to be the whole story,
-		// because the handover beside the centre had nothing bridging it to the glass. The bridge
-		// is the centre's own top cell: dust there sits at bus height, strongly powered by the
-		// centre under it, and the staircase's first rung is diagonal from it -- the same handover
-		// {@link #CLIMB_FED_FROM_A_FLUSH_CENTRE} already makes for a plain flush module. The whole
-		// tail leaves up the staircase, and the centre's note is not dropped: the line leaves
-		// upward, so the bottom-rail cell in front of the cross carries nothing any more, and the
-		// note moves there. Same seven notes, two columns, and the run is the dust, the staircase
-		// and the far half, all off the head's own repeater. See {@link #HEAD_FEEDS_THE_CLIMB}.
+		// A climb with the head hard against it: rooms two, three and one, each its own shape and
+		// all of them fed from the head's own centre. Dust on the centre sits at bus height,
+		// strongly powered by the centre under it -- the same handover
+		// {@link #CLIMB_FED_FROM_A_FLUSH_CENTRE} makes for a plain flush module -- and the whole
+		// tail leaves up the staircase off the head's own repeater. What used to stop every one
+		// of these was the handover beside the centre having nothing bridging it to the glass.
+		// See {@link #HEAD_FEEDS_THE_CLIMB}, {@link #CLIMB_RUNGS_CARRY_FLANKS} and
+		// {@link #CLIMB_CORKSCREWS_AT_THE_WALL}.
 		if (HEAD_FEEDS_THE_CLIMB && centreFeed && climbing && HEAD_ONLY_NEAR_HALF
-				&& room == STACKED_CELLS && !split.tail().isEmpty()) {
-			UltraSlots dusted = split.slots();
-			StackedSplit fed = new StackedSplit(dusted.centre() == null ? dusted
-				: new UltraSlots(null, dusted.sides(), dusted.front(), dusted.back()),
-				split.head(), List.of(), split.tail(), false, true, dusted.centre());
-			if (fed.runCells(splitCells) <= DUST_RANGE) {
-				return fed;
+				&& !split.tail().isEmpty()) {
+			CentreFeed shape = room == STACKED_CELLS ? CentreFeed.BESIDE_THE_STAIRCASE
+				: CLIMB_RUNGS_CARRY_FLANKS && room == STACKED_CELLS + 1 ? CentreFeed.FLANKED_RUNGS
+				: CLIMB_CORKSCREWS_AT_THE_WALL && room == STACKED_CELLS - 1 ? CentreFeed.CORKSCREW
+				: CentreFeed.NONE;
+			if (shape != CentreFeed.NONE) {
+				return centreFedCut(split, shape, splitCells);
 			}
-			LAST_CUT_REFUSAL = "OutOfWireBy"
-				+ Math.min(fed.runCells(splitCells) - DUST_RANGE, 6);
-			return null;
 		}
 		// Descents and centre-fed climbs only. Any other climb leaves the near half by a glass
 		// staircase whose first rung is a level up and a column over, and the handover -- which
@@ -15385,7 +15467,7 @@ public final class SongBuilder {
 		// further than the same cut without it. Stated through the record rather than here, because
 		// the walk makes this same sum for {@code tipSignal} and the two must not drift apart.
 		StackedSplit cut = new StackedSplit(split.slots(), split.head(), tail.subList(0, nearNotes),
-			tail.subList(nearNotes, tail.size()), shed, false, null);
+			tail.subList(nearNotes, tail.size()), shed, CentreFeed.NONE, null, List.of());
 		// One cell over, and the head still has a flank the staircase wants: then shedding it is worth
 		// the whole cut. The shed hands over on the staircase's own first rung instead of on a
 		// transition cell, so it gives the run that cell back -- and the note it displaces goes to the
@@ -15425,7 +15507,7 @@ public final class SongBuilder {
 				if (!shedTail.isEmpty()) {
 					StackedSplit shedCut = new StackedSplit(rehomed.slots(), shedHead,
 						shedTail.subList(0, shedNear), shedTail.subList(shedNear, shedTail.size()),
-						true, false, null);
+						true, CentreFeed.NONE, null, List.of());
 					if (shedCut.runCells(splitCells) <= DUST_RANGE) {
 						SHED_BOUGHT_THE_CELL++;
 						SHED_BOUGHT_BY_SIZE.merge(chord.size(), 1, Integer::sum);
@@ -15442,6 +15524,122 @@ public final class SongBuilder {
 			return null;
 		}
 		return cut;
+	}
+
+	/**
+	 * A centre-fed climbing cut in the given shape, or {@code null} with the refusal named.
+	 *
+	 * <p>Three shapes, one family. All of them dust the centre, hand the run up the staircase and
+	 * send the whole tail over it; what differs is what the room leaves beside the glass, and the
+	 * notes that go there obey two rules from the world rather than from taste. A note block with
+	 * another note an air gap of one below it can only be a harp, because the gap is the air its
+	 * instrument would have stood in -- which is every rung-flank slot. And a note within a gap of
+	 * two below anything may not wear a falling instrument, which is the front lows under a
+	 * staircase and a corkscrew's back lows under its rung flanks; those notes are swapped with a
+	 * suitable tail note or sent over the top with the rest.</p>
+	 */
+	private static StackedSplit centreFedCut(StackedBusSplit split, CentreFeed shape,
+			int splitCells) {
+		UltraSlots slots = split.slots();
+		List<EventNote> head = new ArrayList<>(split.head());
+		List<EventNote> tail = new ArrayList<>(split.tail());
+		List<EventNote> front = new ArrayList<>(slots.front());
+		List<EventNote> back = new ArrayList<>(slots.back());
+		EventNote toFront = null;
+		if (shape == CentreFeed.CORKSCREW) {
+			// No ground in front of the module at all -- the centre stands on the border -- so the
+			// front pair rides over the staircase with the rest of the tail.
+			for (int slot = 0; slot < front.size(); slot++) {
+				EventNote note = front.get(slot);
+				if (note != null) {
+					head.remove(note);
+					tail.add(0, note);
+					front.set(slot, null);
+				}
+			}
+			// The rung flanks stand a gap of one over the back lows, so nothing falling below them.
+			sendUnsuitedToTail(back, head, tail);
+		} else {
+			// The front lows stand within two of the staircase's rungs and flanks.
+			sendUnsuitedToTail(front, head, tail);
+			// The bottom-rail cell in front of the cross: the dust's evicted centre note, or a
+			// tail note pulled up where the centre was empty. Never a falling one -- above it is
+			// two cells of air and then the staircase.
+			toFront = slots.centre();
+			if (toFront == null) {
+				toFront = takeFromTail(tail, note -> note.effect() == null
+					&& !FALLING_INSTRUMENT_BLOCKS.contains(note.instrumentBlock()));
+				if (toFront != null) {
+					head.add(toFront);
+				}
+			}
+		}
+		// Harps beside the stone rungs, pulled from the tail -- and the corkscrew's evicted centre
+		// first, which is a harp already by the centre's own rule.
+		List<EventNote> rungs = new ArrayList<>();
+		int rungSlots = shape == CentreFeed.FLANKED_RUNGS ? 4
+			: shape == CentreFeed.CORKSCREW ? 2 : 0;
+		if (shape == CentreFeed.CORKSCREW && slots.centre() != null) {
+			rungs.add(slots.centre());
+		}
+		while (rungs.size() < rungSlots) {
+			EventNote harp = takeFromTail(tail, SongBuilder::isHarpNote);
+			if (harp == null) {
+				break;
+			}
+			head.add(harp);
+			rungs.add(harp);
+		}
+		if (tail.isEmpty()) {
+			LAST_CUT_REFUSAL = "NothingToCarryOver";
+			return null;
+		}
+		UltraSlots dusted = new UltraSlots(null, slots.sides(),
+			java.util.Collections.unmodifiableList(front),
+			java.util.Collections.unmodifiableList(back));
+		StackedSplit fed = new StackedSplit(dusted, head, List.of(), tail, false, shape, toFront,
+			List.copyOf(rungs));
+		if (fed.runCells(splitCells) > DUST_RANGE) {
+			LAST_CUT_REFUSAL = "OutOfWireBy"
+				+ Math.min(fed.runCells(splitCells) - DUST_RANGE, 6);
+			return null;
+		}
+		return fed;
+	}
+
+	/** Pulls the first tail note the test accepts, or null. Never the last -- a cut has to cross. */
+	private static EventNote takeFromTail(List<EventNote> tail,
+			java.util.function.Predicate<EventNote> suits) {
+		for (int index = 0; tail.size() > 1 && index < tail.size(); index++) {
+			if (suits.test(tail.get(index))) {
+				return tail.remove(index);
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Clears falling instruments and effects out of the given low slots, swapping each with a
+	 * suitable tail note where the tail has one and sending it over the staircase where it does
+	 * not. The slot lists are the caller's mutable copies; head and tail are adjusted to match.
+	 */
+	private static void sendUnsuitedToTail(List<EventNote> slots, List<EventNote> head,
+			List<EventNote> tail) {
+		for (int slot = 0; slot < slots.size(); slot++) {
+			EventNote note = slots.get(slot);
+			if (note == null || note.effect() == null
+					&& !FALLING_INSTRUMENT_BLOCKS.contains(note.instrumentBlock())) {
+				continue;
+			}
+			EventNote swap = takeFromTail(tail, candidate -> candidate.effect() == null
+				&& !FALLING_INSTRUMENT_BLOCKS.contains(candidate.instrumentBlock()));
+			slots.set(slot, swap);
+			head.remove(note);
+			tail.add(note);
+			if (swap != null) {
+				head.add(swap);
+			}
+		}
 	}
 
 	/**
@@ -15474,7 +15672,7 @@ public final class SongBuilder {
 			+ "/near" + split.nearTail().size() + "/far" + split.farTail().size()
 			+ (split.slots().backFlanks() == 0 ? " frontOnly" : " reachesBack")
 			+ (split.shed() ? " shedFlank" : ""));
-		if (split.centreFeeds()) {
+		if (split.centreFeeds() == CentreFeed.BESIDE_THE_STAIRCASE) {
 			// Head only, dust on the centre, and the whole tail up the staircase. The dust is laid
 			// through the same switch the flush module uses -- {@link PlacementPlan#climbFedByCentre}
 			// -- so the climb after this is fed and read exactly as that one is. The note the dust
@@ -15498,6 +15696,87 @@ public final class SongBuilder {
 			}
 			placements.padded("cutHeadFeedsTheClimb");
 			return afterHead.pos();
+		}
+		if (split.centreFeeds() == CentreFeed.FLANKED_RUNGS) {
+			// Room three: the head, a bottom-rail extension cell, and the staircase laid right
+			// here -- its first two rungs are stone rather than glass, so each carries a flanked
+			// pair of harps the way a bus stone carries its sides: the dust on the rung powers the
+			// rung, and a powered block sounds what hangs beside it. The staircase zigzags along
+			// the travel rather than sideways, so the rungs stay on the centre line and their
+			// flanks land in the lane's own flank columns. Only the third rung is glass, because
+			// that one stands directly over the first rung's dust and the wire has to step up past
+			// it. In-game testing built the shape by hand first -- a chord of 33 exactly, the wire
+			// dying on its last cell -- and the paste has to match it block for block.
+			placements.climbFedByCentre(true);
+			Lane afterHead = addStackedEventModule(placements,
+				Lane.straight(cursor, travel, laneStep), triggerDelay, time, split.slots());
+			BlockPos foot = cursor.relative(travel, 2);
+			BlockPos border = cursor.relative(travel, 3);
+			// The extension: a block in front of the cross wearing dust the centre lights. The
+			// dust is a dot and only has to be -- it powers the block beneath it, and that block
+			// sounds the front lows beside it and the note on the border's floor cell ahead.
+			placements.powered(foot, "minecraft:stone", time);
+			set(placements, foot.above(), "minecraft:redstone_wire");
+			placements.powered(foot.above(2), "minecraft:stone", time);
+			set(placements, foot.above(3), "minecraft:redstone_wire");
+			placements.powered(border.above(3), "minecraft:stone", time);
+			set(placements, border.above(4), "minecraft:redstone_wire");
+			set(placements, foot.above(4), "minecraft:glass");
+			set(placements, foot.above(5), "minecraft:redstone_wire");
+			int hung = 0;
+			for (Direction out : new Direction[] {laneStep, laneStep.getOpposite()}) {
+				if (hung < split.rungNotes().size()) {
+					placeNote(placements, foot.above(2).relative(out),
+						split.rungNotes().get(hung++));
+				}
+			}
+			for (Direction out : new Direction[] {laneStep, laneStep.getOpposite()}) {
+				if (hung < split.rungNotes().size()) {
+					placeNote(placements, border.above(3).relative(out),
+						split.rungNotes().get(hung++));
+				}
+			}
+			if (split.centreToFront() != null) {
+				placeNote(placements, border, split.centreToFront(), true);
+			}
+			placements.padded("cutHeadFeedsTheClimb");
+			placements.padded("cutClimbsOnFlankedRungs");
+			return afterHead.pos();
+		}
+		if (split.centreFeeds() == CentreFeed.CORKSCREW) {
+			// Room one: repeater, then the border. The centre stands on the border column with
+			// dust on top, the first rung is stone standing backward over the module's own
+			// repeater -- flanked by two harps a gap of one over the back lows -- and the rest is
+			// a corkscrew of glass: forward, sideways, forward, the wire stepping up past each
+			// pane because glass is what a wire steps past. The landing wire sits on the last
+			// glass, so the far half's ten cells start one column in. In-game testing built it by
+			// hand first -- a chord of 26, the wire dying on its last cell -- and the paste has to
+			// match it block for block.
+			placements.climbFedByCentre(true);
+			Lane afterHead = addStackedEventModule(placements,
+				Lane.straight(cursor, travel, laneStep), triggerDelay, time, split.slots());
+			BlockPos centreCol = cursor.relative(travel);
+			placements.powered(cursor.above(2), "minecraft:stone", time);
+			set(placements, cursor.above(3), "minecraft:redstone_wire");
+			int hung = 0;
+			for (Direction out : new Direction[] {laneStep, laneStep.getOpposite()}) {
+				if (hung < split.rungNotes().size()) {
+					placeNote(placements, cursor.above(2).relative(out),
+						split.rungNotes().get(hung++));
+				}
+			}
+			Direction jog = laneStep.getOpposite();
+			set(placements, centreCol.above(3), "minecraft:glass");
+			set(placements, centreCol.above(4), "minecraft:redstone_wire");
+			set(placements, centreCol.above(4).relative(jog), "minecraft:glass");
+			set(placements, centreCol.above(5).relative(jog), "minecraft:redstone_wire");
+			set(placements, centreCol.above(5), "minecraft:glass");
+			set(placements, centreCol.above(6), "minecraft:redstone_wire");
+			placements.padded("cutHeadFeedsTheClimb");
+			placements.padded("cutCorkscrewsAtTheWall");
+			// One column of module: the centre is the staircase's own column, so the walk's climb
+			// bookkeeping is handed the border itself.
+			return centreCol;
 		}
 		if (split.shed()) {
 			// No transition cell and no column for it. The head is laid and handed straight back at
@@ -16570,6 +16849,41 @@ public final class SongBuilder {
 	 * turn trace at ticks 552 and 772.</p>
 	 */
 	static boolean HEAD_FEEDS_THE_CLIMB = true;
+
+	/**
+	 * v2: a chord three columns from its climb cuts as a centre-fed head whose staircase carries
+	 * notes on its own rungs.
+	 *
+	 * <p>The room-three shape of {@link #HEAD_FEEDS_THE_CLIMB}, hand-built in-game first as a
+	 * chord of 33 with the wire dying on its last cell. The head dusts its centre as at room two;
+	 * the spare column takes a bottom-rail extension -- a block in front of the cross wearing a
+	 * dot of dust the centre lights, which carries the front lows' line one cell on and sounds a
+	 * note on the border's floor -- and the staircase zigzags along the travel rather than
+	 * sideways, its first two rungs stone rather than glass. A stone rung with dust on it is a
+	 * powered block, and a powered block sounds what hangs beside it, so each of those rungs
+	 * carries a flanked pair. Harps only in those four slots: every one has a note block an air
+	 * gap of one below it, and a note over a gap of one can only wear the air as its instrument.
+	 * The ceiling is {@code 6 + 1 + 4 + 2 * (15 - 1 - 3) = 33}.</p>
+	 */
+	static boolean CLIMB_RUNGS_CARRY_FLANKS = true;
+
+	/**
+	 * v2: a chord one column from its climb -- repeater, then the border -- cuts as a corkscrew.
+	 *
+	 * <p>The room-one shape of {@link #HEAD_FEEDS_THE_CLIMB}, hand-built in-game first as a chord
+	 * of 26 with the wire dying on its last cell. The centre stands on the border column itself,
+	 * so there is no ground in front of the module at all: no front lows, no transition, nothing.
+	 * The first rung is stone standing backward over the module's own repeater, flanked by two
+	 * harps a gap of one over the back lows, and the rest is glass corkscrewing out -- forward,
+	 * sideways, forward -- to land its wire on the last pane at the floor above. The ascent spends
+	 * four rungs of wire rather than three, because it starts a level lower than a staircase fed
+	 * from a bus, so the ceiling is {@code 4 + 2 + 2 * (15 - 1 - 4) = 26}.</p>
+	 *
+	 * <p>Refused where the module behind left raised wire in the cell diagonal to the first
+	 * rung's dust -- wire joins wire diagonally, and a live tail behind would sound the rung's
+	 * flanks at its own tick. See {@code corkscrewRefusedForWireBehind}.</p>
+	 */
+	static boolean CLIMB_CORKSCREWS_AT_THE_WALL = true;
 
 	/**
 	 * v2: a headed cut whose head collides is rolled back and the chord cut plain.
