@@ -4327,13 +4327,27 @@ public final class SongBuilder {
 								&& backPairIsFree(placements, lane.ahead(delayColumns + busyPad + 1), event.time()),
 						stackedIsBehind, true);
 				if (shifted == null) {
-					// Both cells wrong, or nothing left to cut once a column is spent. Then the head
-					// goes, which is what this did in every case before.
-					placements.padded("planStackedSplitClashed");
-					headed = null;
-					// And with the head goes the column bought for it. What follows is a plain cut, which
-					// fills the room it is given and needs nothing in front of it.
-					busyPad = 0;
+					// Both cells wrong, or nothing left to cut once a column is spent. Before the head
+					// goes: shed the clashing slot instead, which costs no column and no wire -- the
+					// move a lane at tip nought still has. In-game reading found every guardian25
+					// breach at 20x5 was a cut given up here that one shed flank would have kept.
+					// Centre-fed heads keep the old give-up: their slots carry the climb and are not
+					// this method's to shed.
+					StackedSplit shedded = SHEDS_THE_CLASHING_SLOTS
+							&& headed.centreFeeds() == CentreFeed.NONE
+						? shedTheClashingSlots(placements, lane.ahead(delayColumns + busyPad),
+							event.time(), headed, splitCells)
+						: null;
+					if (shedded != null) {
+						placements.padded("planStackedSplitShedTheClash");
+						headed = shedded;
+					} else {
+						placements.padded("planStackedSplitClashed");
+						headed = null;
+						// And with the head goes the column bought for it. What follows is a plain cut,
+						// which fills the room it is given and needs nothing in front of it.
+						busyPad = 0;
+					}
 				} else {
 					placements.padded("planStackedSplitNudged");
 					headed = shifted;
@@ -13997,6 +14011,96 @@ public final class SongBuilder {
 			}
 		}
 		return false;
+	}
+
+	/**
+	 * v2: a clashed cut sheds its clashing low slots before the whole head is given up.
+	 *
+	 * <p>Off, because it measured as buying nothing. Built for the five guardian25 breaches --
+	 * cuts given up at tip nought where the nudge cannot cross the cell it vacates -- and then the
+	 * counters said those five are the <em>other</em> clash: the neighbour's note against this
+	 * module's relay ({@code shedClashRelayAgainstTheirNote}, 45 of the refusals on the breaching
+	 * sizes), which no arrangement of this module's own slots escapes. Library-wide it won no
+	 * breach anywhere and wobbled the fault song by sixteen blocks. Kept with its counters for the
+	 * day a case it wins turns up; the five it was built for need the neighbour prevented or moved
+	 * -- the occupancy model, or a parity column spent earlier in the lane while the wire still
+	 * had the slack to pay for one.</p>
+	 */
+	static boolean SHEDS_THE_CLASHING_SLOTS = false;
+
+	/**
+	 * The same split with the clashing low slots shed, or null where shedding cannot clear it.
+	 *
+	 * <p>The third answer to a parity clash, after the nudge and before the give-up. A nudge moves
+	 * the whole module a column and needs the wire to cross the cell it vacates -- which is exactly
+	 * what a lane at tip nought does not have, and in-game reading found five guardian25 breaches
+	 * that were all this one case: the oracle held a cut of {@code head6+tail19} inside the budget,
+	 * the clash check said a slot lands on live ground, the nudge was refused for the wire, and the
+	 * whole head went -- a thirteen-cell bus through the wall, for want of one flank. Shedding costs
+	 * no column and no wire: the contested note rides over the staircase with the far half, and a
+	 * head of six at twenty-five notes is still inside fifteen as a head of five.</p>
+	 *
+	 * <p>Cell for cell the same asks as {@link #stackedClashes}, kept beside it so the two cannot
+	 * drift: a neighbour's <em>note</em> against the relay is fatal, because both relays are built
+	 * whatever the chord holds; a live neighbour block against the outer column sheds both of that
+	 * side's lows; a live block a cell along sheds the one low it would sound. The far half takes
+	 * the shed notes and the run is re-summed, because the halves round up separately and a shed
+	 * that puts the sum past fifteen has saved nothing.</p>
+	 */
+	private static StackedSplit shedTheClashingSlots(PlacementPlan placements, Lane lane, int time,
+			StackedSplit split, int splitCells) {
+		UltraSlots slots = split.slots();
+		BlockPos cross = lane.ahead(1).pos();
+		Direction travel = lane.travel();
+		List<Direction> outward = List.of(lane.noteSide(), lane.noteSide().getOpposite());
+		List<EventNote> front = new ArrayList<>(slots.front());
+		List<EventNote> back = new ArrayList<>(slots.back());
+		List<EventNote> head = new ArrayList<>(split.head());
+		List<EventNote> far = new ArrayList<>(split.farTail());
+		boolean shed = false;
+		for (int side = 0; side < outward.size(); side++) {
+			BlockPos beyond = cross.relative(outward.get(side), 2);
+			if (placements.noteAt(beyond, time)) {
+				// The neighbour's own note against this module's relay, which is built whatever
+				// the chord holds. No arrangement of slots avoids sounding it.
+				placements.padded("shedClashRelayAgainstTheirNote");
+				return null;
+			}
+			boolean wholeSide = CLASH_ASKS_IF_THE_NEIGHBOUR_IS_LIVE
+				&& placements.liveAt(beyond, time);
+			if (front.get(side) != null
+					&& (wholeSide || placements.liveAt(beyond.relative(travel), time))) {
+				head.remove(front.get(side));
+				far.add(0, front.get(side));
+				front.set(side, null);
+				shed = true;
+			}
+			if (back.get(side) != null
+					&& (wholeSide || placements.liveAt(beyond.relative(travel.getOpposite()), time))) {
+				head.remove(back.get(side));
+				far.add(0, back.get(side));
+				back.set(side, null);
+				shed = true;
+			}
+		}
+		if (!shed) {
+			placements.padded("shedClashFoundNoSlotToShed");
+			return null;
+		}
+		StackedSplit reduced = new StackedSplit(new UltraSlots(slots.centre(), slots.sides(),
+			java.util.Collections.unmodifiableList(front),
+			java.util.Collections.unmodifiableList(back)),
+			head, split.nearTail(), far, split.shed(), split.centreFeeds(),
+			split.centreToFront(), split.rungNotes(), split.severNote());
+		if (reduced.runCells(splitCells) > DUST_RANGE) {
+			placements.padded("shedClashPutTheRunOver");
+			return null;
+		}
+		if (stackedClashes(placements, lane, time, reduced.slots())) {
+			placements.padded("shedClashStillClashed");
+			return null;
+		}
+		return reduced;
 	}
 
 	/**
