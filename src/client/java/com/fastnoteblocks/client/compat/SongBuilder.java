@@ -4324,10 +4324,38 @@ public final class SongBuilder {
 					.pos().relative(lane.travel().getOpposite()).above(2);
 				String lower = placements.blockAt(behindUp);
 				String upper = placements.blockAt(behindUp.above());
-				if (lower != null && lower.startsWith("minecraft:redstone_wire")
-						|| upper != null && upper.startsWith("minecraft:redstone_wire")) {
+				if (upper != null && upper.startsWith("minecraft:redstone_wire")) {
+					// Level with the rung's own dust: a join no block can stand between.
 					placements.padded("corkscrewRefusedForWireBehind");
 					headed = null;
+				} else if (lower != null && lower.startsWith("minecraft:redstone_wire")) {
+					// Two couplings from that wire, two answers. The diagonal -- their wire
+					// stepping up into the rung's dust, which would carry the whole far half at
+					// their tick -- is severed by a stone the builder lays over their wire. The
+					// horizontal -- their wire weakly powering the rung stone itself -- only ever
+					// reaches the rung's flank notes, so those two slots ride over the staircase
+					// instead and the rung runs bare. A corkscrew of twenty-four still beats the
+					// pad this used to lose to: 256 refusals against 239 built, library-wide.
+					List<EventNote> kept = new ArrayList<>();
+					for (EventNote rung : headed.rungNotes()) {
+						if (rung != null) {
+							kept.add(rung);
+						}
+					}
+					List<EventNote> bareHead = new ArrayList<>(headed.head());
+					bareHead.removeAll(kept);
+					List<EventNote> fullerFar = new ArrayList<>(headed.farTail());
+					fullerFar.addAll(0, kept);
+					StackedSplit bare = new StackedSplit(headed.slots(), bareHead,
+						headed.nearTail(), fullerFar, false, CentreFeed.CORKSCREW,
+						headed.centreToFront(), List.of());
+					if (bare.runCells(splitCells) > DUST_RANGE) {
+						placements.padded("corkscrewFlanklessOutOfWire");
+						headed = null;
+					} else {
+						placements.padded("corkscrewRunsBareForWireBehind");
+						headed = bare;
+					}
 				}
 			}
 			// A cut is how a chord that does not fit is made to fit, and this one does fit.
@@ -4503,7 +4531,14 @@ public final class SongBuilder {
 				// the plan let the walk cut where the plan had not, and Guardian walked a lane five columns
 				// past its wall on a chord of 14 -- a chord whose cut is 7 cells against a budget of 11.
 				// Nothing was too big; the two halves were answering different questions.
-				boolean vetoed = couldSplit && booked != null && booked.containsKey(NO_SPLIT - index);
+				boolean vetoed = couldSplit && booked != null && booked.containsKey(NO_SPLIT - index)
+					// A centre-fed climbing cut is never vetoed for a pad-close. The pad spends
+					// columns on wire; the cut hangs notes in cells no other shape has and every
+					// one of them shortens the far half's bus on the floor above -- so where both
+					// are possible the cut is the better lane, and the plan's booking stands for
+					// the events after this one either way. See {@link #CENTRE_FED_CUT_OUTRANKS_THE_PAD}.
+					&& !(CENTRE_FED_CUT_OUTRANKS_THE_PAD && headed != null
+						&& headed.centreFeeds() != CentreFeed.NONE);
 				if (vetoed) {
 					placements.padded("planVetoBit");
 				}
@@ -11247,7 +11282,10 @@ public final class SongBuilder {
 	 * <p>What the six head slots carry, by name. {@code relayOver} stands over the second rung's
 	 * dust and {@code backLow} beside the second rung's stone, a level down; both, and the centre,
 	 * must be harps -- the centre and the relay because dust is under them, the low back flank
-	 * because its instrument block would stand on the far half's note and mute it. The front flank
+	 * because its instrument block would stand on the far half's note and mute it. Since the away
+	 * side was lowered (see {@link #addCrossDescentHead}), {@code relayAway} sits on wire and
+	 * {@code backAway} hangs with no instrument block, so those are harps too -- five in all --
+	 * while {@code frontAway} may be anything, falling instruments included. The front flank
 	 * on the descent side is never filled: a block there cuts the run from the second rung to the
 	 * third.</p>
 	 */
@@ -11261,8 +11299,8 @@ public final class SongBuilder {
 	/**
 	 * Decides a cross-descent, every slot asked of the ground before a block is laid.
 	 *
-	 * <p>Harps first, because three slots can hold nothing else; a chord without one has no centre
-	 * and no cut. Fewer harps than three does not cancel the shape -- the slots stand empty and their
+	 * <p>Harps first, because five slots can hold nothing else; a chord without one has no centre
+	 * and no cut. Fewer harps than five does not cancel the shape -- the slots stand empty and their
 	 * notes go over the staircase. The far half is sized on what the head will carry, and the run is
 	 * the cross, three rungs, and the far half's cells: {@code 4 + (far + 1) / 2 <= 15}, which is
 	 * twenty-two over plus six in the head.</p>
@@ -11299,26 +11337,57 @@ public final class SongBuilder {
 		EventNote backLow = !harps.isEmpty()
 				&& railSlotTakes(placements, repeater.relative(descentSide).below(), time)
 			? harps.remove(0) : null;
-		List<EventNote> pool = new ArrayList<>(others);
-		pool.addAll(harps);
-		EventNote relayAway = !pool.isEmpty() && conductsSideways(pool.get(0))
-				&& railSlotTakes(placements, centreAt.relative(away), time)
-			? pool.remove(0) : null;
-		// The front and back flanks hang at lane level, so no falling instrument over a floor.
-		EventNote frontAway = railSlotTakes(placements, wallColumn.relative(away), time)
-			? sinkable(placements, pool) : null;
-		if (frontAway != null) {
-			pool.remove(frontAway);
-		}
-		EventNote backAway = railSlotTakes(placements, repeater.relative(away), time)
-			? sinkable(placements, pool) : null;
-		if (backAway != null) {
-			pool.remove(backAway);
+		// The away side is a level lower than it used to be -- see {@link #addCrossDescentHead} for
+		// the in-game reading that moved it. The relay sits on wire now, so it is a harp; the back
+		// flank hangs beside the powered stone with no instrument block of its own, so it is a harp
+		// too. The front flank got its fall clearance back in the move and may be anything,
+		// falling instruments included.
+		EventNote relayAway;
+		EventNote backAway;
+		EventNote frontAway;
+		List<EventNote> pool;
+		if (CROSS_DESCENT_LOWERED_SIDE) {
+			relayAway = !harps.isEmpty()
+					&& railSlotTakes(placements, centreAt.relative(away), time)
+				? harps.remove(0) : null;
+			backAway = !harps.isEmpty()
+					&& railSlotTakes(placements, repeater.relative(away).below(), time)
+				? harps.remove(0) : null;
+			pool = new ArrayList<>(others);
+			pool.addAll(harps);
+			frontAway = !pool.isEmpty()
+					&& railSlotTakes(placements, wallColumn.relative(away).below(), time)
+				? pool.remove(0) : null;
+		} else {
+			pool = new ArrayList<>(others);
+			pool.addAll(harps);
+			relayAway = !pool.isEmpty() && conductsSideways(pool.get(0))
+					&& railSlotTakes(placements, centreAt.relative(away), time)
+				? pool.remove(0) : null;
+			frontAway = railSlotTakes(placements, wallColumn.relative(away), time)
+				? sinkable(placements, pool) : null;
+			if (frontAway != null) {
+				pool.remove(frontAway);
+			}
+			backAway = railSlotTakes(placements, repeater.relative(away), time)
+				? sinkable(placements, pool) : null;
+			if (backAway != null) {
+				pool.remove(backAway);
+			}
 		}
 		if (pool.isEmpty()) {
 			LAST_CROSS_DESCENT_REFUSAL = "NothingToCarryOver";
 			return null;
 		}
+		// KNOWN OPEN FAULT (2026-08-20, overnight): with the lowered side on, a descending far
+		// half can grow past its fifteen -- the lowered flanks stand in ground the crowded bus
+		// asks for, it skips those slots and grows, and the walk's own overran counter names the
+		// spill at farHalfStepOff. Charging the growth a cell here was tried and measured worse:
+		// it moved the deaths around the library instead of ending them (47.8k dead confined to
+		// forced-v2 deltarune-ch-4-guardian without the charge; 59.2k spread onto guardian25 with
+		// it). The right fix is likely the far half shedding to its budget rather than growing.
+		// Left as measured for an in-game read; {@link #CROSS_DESCENT_LOWERED_SIDE} flips the two
+		// arms for comparison.
 		if ((pool.size() + 1) / 2 + splitCells > DUST_RANGE) {
 			LAST_CROSS_DESCENT_REFUSAL = "OutOfWireBy"
 				+ ((pool.size() + 1) / 2 + splitCells - DUST_RANGE);
@@ -11361,21 +11430,47 @@ public final class SongBuilder {
 		set(placements, cross, "minecraft:redstone_wire");
 		placeNoteBlock(placements, centre, cut.centre());
 		placements.powered(centre, time);
-		// The side away from the descent: a stacked head's side, as it has always been built.
-		BlockPos instrument = cross.relative(away);
-		placements.powered(instrument, cut.relayAway() == null ? "minecraft:stone"
-			: conductingInstrumentBlock(cut.relayAway()), time);
-		if (cut.relayAway() != null) {
-			if (FALLING_INSTRUMENT_BLOCKS.contains(cut.relayAway().instrumentBlock())) {
-				placements.support(instrument.below(), UNDERFLOOR);
+		// The side away from the descent used to be a stacked head's ordinary side: a conducting
+		// instrument block with the relay on it and the flanks at lane level either end. In-game
+		// reading found the front flank sounding at the neighbour corridor's tick -- its cell
+		// stands beside the glass staircase of the lane one corridor over, and that staircase's
+		// dust reaches it. (The layout check never saw it because a staircase's dust is not in the
+		// powered records.) So the whole side is a level lower now: wire where the instrument
+		// block stood, on a full stone block, and both flanks dropped beside that stone, out of
+		// the staircase's reach, sounded by the stone the wire powers. The relay stays where it
+		// was -- the centre drove it all along -- and wears the wire below it as its instrument,
+		// which is why it has to be a harp now, as does the lowered back flank, which hangs with
+		// no instrument block of its own. The lowered front flank got its fall clearance back in
+		// the move and may be anything, sand included.
+		BlockPos wired = cross.relative(away);
+		if (CROSS_DESCENT_LOWERED_SIDE) {
+			set(placements, wired, "minecraft:redstone_wire");
+			placements.powered(wired.below(), "minecraft:stone", time);
+			if (cut.relayAway() != null) {
+				placeNoteBlock(placements, centre.relative(away), cut.relayAway());
 			}
-			placeNoteBlock(placements, centre.relative(away), cut.relayAway());
-		}
-		if (cut.frontAway() != null) {
-			placeNote(placements, instrument.relative(travel), cut.frontAway(), true);
-		}
-		if (cut.backAway() != null) {
-			placeNote(placements, instrument.relative(travel.getOpposite()), cut.backAway(), true);
+			if (cut.frontAway() != null) {
+				placeNote(placements, wired.below().relative(travel), cut.frontAway(), true);
+			}
+			if (cut.backAway() != null) {
+				placeNote(placements, wired.below().relative(travel.getOpposite()),
+					cut.backAway(), true);
+			}
+		} else {
+			placements.powered(wired, cut.relayAway() == null ? "minecraft:stone"
+				: conductingInstrumentBlock(cut.relayAway()), time);
+			if (cut.relayAway() != null) {
+				if (FALLING_INSTRUMENT_BLOCKS.contains(cut.relayAway().instrumentBlock())) {
+					placements.support(wired.below(), UNDERFLOOR);
+				}
+				placeNoteBlock(placements, centre.relative(away), cut.relayAway());
+			}
+			if (cut.frontAway() != null) {
+				placeNote(placements, wired.relative(travel), cut.frontAway(), true);
+			}
+			if (cut.backAway() != null) {
+				placeNote(placements, wired.relative(travel.getOpposite()), cut.backAway(), true);
+			}
 		}
 		// The descent side: the relay harp over where the second rung's dust will be, and the low
 		// back flank beside that rung's stone.
@@ -15543,9 +15638,10 @@ public final class SongBuilder {
 		UltraSlots slots = split.slots();
 		List<EventNote> head = new ArrayList<>(split.head());
 		List<EventNote> tail = new ArrayList<>(split.tail());
+		List<EventNote> sides = new ArrayList<>(slots.sides());
 		List<EventNote> front = new ArrayList<>(slots.front());
 		List<EventNote> back = new ArrayList<>(slots.back());
-		EventNote toFront = null;
+		EventNote centreNote = slots.centre();
 		if (shape == CentreFeed.CORKSCREW) {
 			// No ground in front of the module at all -- the centre stands on the border -- so the
 			// front pair rides over the staircase with the rest of the tail.
@@ -15562,49 +15658,120 @@ public final class SongBuilder {
 		} else {
 			// The front lows stand within two of the staircase's rungs and flanks.
 			sendUnsuitedToTail(front, head, tail);
-			// The bottom-rail cell in front of the cross: the dust's evicted centre note, or a
-			// tail note pulled up where the centre was empty. Never a falling one -- above it is
-			// two cells of air and then the staircase.
-			toFront = slots.centre();
-			if (toFront == null) {
-				toFront = takeFromTail(tail, note -> note.effect() == null
-					&& !FALLING_INSTRUMENT_BLOCKS.contains(note.instrumentBlock()));
-				if (toFront != null) {
-					head.add(toFront);
-				}
-			}
 		}
-		// Harps beside the stone rungs, pulled from the tail -- and the corkscrew's evicted centre
-		// first, which is a harp already by the centre's own rule.
-		List<EventNote> rungs = new ArrayList<>();
+		// The climb-only slots are filled before anything else gets a say, because these cells
+		// exist in no other shape and every note hung in one shortens the far half's bus on the
+		// floor above. Harps come from the evicted centre, then the tail, and then out of the
+		// head itself -- a harp sitting in a slot any conductor could hold is swapped for a tail
+		// note so the harp can hang where only a harp works.
 		int rungSlots = shape == CentreFeed.FLANKED_RUNGS ? 4
 			: shape == CentreFeed.CORKSCREW ? 2 : 0;
-		if (shape == CentreFeed.CORKSCREW && slots.centre() != null) {
-			rungs.add(slots.centre());
-		}
-		while (rungs.size() < rungSlots) {
-			EventNote harp = takeFromTail(tail, SongBuilder::isHarpNote);
+		EventNote[] rungs = new EventNote[rungSlots];
+		boolean centreSpent = false;
+		for (int slot = 0; slot < rungSlots; slot++) {
+			EventNote harp = null;
+			if (!centreSpent && centreNote != null) {
+				harp = centreNote;
+				centreSpent = true;
+			}
+			if (harp == null) {
+				harp = takeFromTail(tail, SongBuilder::isHarpNote);
+				if (harp != null) {
+					head.add(harp);
+				}
+			}
+			if (harp == null) {
+				harp = harpOutOfTheHead(sides, front,
+					shape == CentreFeed.CORKSCREW ? null : back, head, tail);
+			}
+			if (harp == null && shape == CentreFeed.FLANKED_RUNGS && slot >= 2) {
+				// The second stone rung's flanks stand over nothing but their own instrument
+				// block and open air, so when the harps run out they take any instrument at all.
+				harp = takeFromTail(tail, note -> note.effect() == null);
+				if (harp != null) {
+					head.add(harp);
+				}
+			}
 			if (harp == null) {
 				break;
 			}
-			head.add(harp);
-			rungs.add(harp);
+			rungs[slot] = harp;
+		}
+		// The bottom-rail cell in front of the cross, on the shapes that have one. Never a
+		// falling instrument -- above it is at most two cells of air and then the staircase --
+		// and by preference not a harp either, so the harps stay where only harps work. The
+		// evicted centre lands here only when no rung slot wanted it.
+		EventNote toFront = null;
+		if (shape != CentreFeed.CORKSCREW) {
+			toFront = takeFromTail(tail, note -> note.effect() == null && !isHarpNote(note)
+				&& !FALLING_INSTRUMENT_BLOCKS.contains(note.instrumentBlock()));
+			if (toFront == null && centreNote != null && !centreSpent) {
+				toFront = centreNote;
+				centreSpent = true;
+			}
+			if (toFront == null) {
+				toFront = takeFromTail(tail, note -> note.effect() == null
+					&& !FALLING_INSTRUMENT_BLOCKS.contains(note.instrumentBlock()));
+			}
+			if (toFront != null && !head.contains(toFront)) {
+				head.add(toFront);
+			}
+		}
+		// An evicted centre nothing wanted goes over the staircase with the tail.
+		if (centreNote != null && !centreSpent) {
+			head.remove(centreNote);
+			tail.add(0, centreNote);
 		}
 		if (tail.isEmpty()) {
 			LAST_CUT_REFUSAL = "NothingToCarryOver";
 			return null;
 		}
-		UltraSlots dusted = new UltraSlots(null, slots.sides(),
+		UltraSlots dusted = new UltraSlots(null,
+			java.util.Collections.unmodifiableList(sides),
 			java.util.Collections.unmodifiableList(front),
 			java.util.Collections.unmodifiableList(back));
 		StackedSplit fed = new StackedSplit(dusted, head, List.of(), tail, false, shape, toFront,
-			List.copyOf(rungs));
+			java.util.Collections.unmodifiableList(java.util.Arrays.asList(rungs)));
 		if (fed.runCells(splitCells) > DUST_RANGE) {
 			LAST_CUT_REFUSAL = "OutOfWireBy"
 				+ Math.min(fed.runCells(splitCells) - DUST_RANGE, 6);
 			return null;
 		}
 		return fed;
+	}
+
+	/**
+	 * A harp lifted out of a head slot any other note could hold, its place taken by a suitable
+	 * tail note, so the harp can hang in a slot only harps fit.
+	 *
+	 * <p>A side wants a sideways conductor in exchange; a low slot takes any non-falling,
+	 * non-effect note. The swap keeps the head as full as it was -- the tail note steps in, the
+	 * harp steps up -- so the far half never grows by it. {@code back} is null where the back
+	 * lows are themselves harp-only (the corkscrew) and may not be raided.</p>
+	 */
+	private static EventNote harpOutOfTheHead(List<EventNote> sides, List<EventNote> front,
+			List<EventNote> back, List<EventNote> head, List<EventNote> tail) {
+		List<List<EventNote>> raidable = back == null ? List.of(front, sides)
+			: List.of(front, back, sides);
+		for (List<EventNote> slotList : raidable) {
+			boolean side = slotList == sides;
+			for (int slot = 0; slot < slotList.size(); slot++) {
+				EventNote note = slotList.get(slot);
+				if (note == null || !isHarpNote(note)) {
+					continue;
+				}
+				EventNote swap = takeFromTail(tail, candidate -> candidate.effect() == null
+					&& !isHarpNote(candidate)
+					&& (side ? conductsSideways(candidate)
+						: !FALLING_INSTRUMENT_BLOCKS.contains(candidate.instrumentBlock())));
+				if (swap != null) {
+					slotList.set(slot, swap);
+					head.add(swap);
+					return note;
+				}
+			}
+		}
+		return null;
 	}
 
 	/** Pulls the first tail note the test accepts, or null. Never the last -- a cut has to cross. */
@@ -15723,17 +15890,18 @@ public final class SongBuilder {
 			set(placements, border.above(4), "minecraft:redstone_wire");
 			set(placements, foot.above(4), "minecraft:glass");
 			set(placements, foot.above(5), "minecraft:redstone_wire");
-			int hung = 0;
-			for (Direction out : new Direction[] {laneStep, laneStep.getOpposite()}) {
-				if (hung < split.rungNotes().size()) {
-					placeNote(placements, foot.above(2).relative(out),
-						split.rungNotes().get(hung++));
-				}
-			}
-			for (Direction out : new Direction[] {laneStep, laneStep.getOpposite()}) {
-				if (hung < split.rungNotes().size()) {
-					placeNote(placements, border.above(3).relative(out),
-						split.rungNotes().get(hung++));
+			// Positional: the first pair belongs to the first rung and the second pair to the
+			// second, and a slot the oracle could not fill stays empty rather than shifting the
+			// rest -- the first rung is harp-only and the second takes anything, so the two pairs
+			// are not interchangeable.
+			BlockPos[] rungCells = {
+				foot.above(2).relative(laneStep), foot.above(2).relative(laneStep.getOpposite()),
+				border.above(3).relative(laneStep),
+				border.above(3).relative(laneStep.getOpposite())};
+			for (int slot = 0; slot < rungCells.length && slot < split.rungNotes().size();
+					slot++) {
+				if (split.rungNotes().get(slot) != null) {
+					placeNote(placements, rungCells[slot], split.rungNotes().get(slot));
 				}
 			}
 			if (split.centreToFront() != null) {
@@ -15758,11 +15926,23 @@ public final class SongBuilder {
 			BlockPos centreCol = cursor.relative(travel);
 			placements.powered(cursor.above(2), "minecraft:stone", time);
 			set(placements, cursor.above(3), "minecraft:redstone_wire");
-			int hung = 0;
-			for (Direction out : new Direction[] {laneStep, laneStep.getOpposite()}) {
-				if (hung < split.rungNotes().size()) {
-					placeNote(placements, cursor.above(2).relative(out),
-						split.rungNotes().get(hung++));
+			// Raised wire behind the module would step up diagonally into the rung's dust and
+			// carry the whole far half at its own tick. A stone over that wire is what a diagonal
+			// cannot pass; the wire itself still feeds this module's repeater exactly as before,
+			// and the walk already sent the rung's flanks over the staircase for the horizontal
+			// coupling the stone cannot stop.
+			BlockPos behindWire = cursor.relative(travel.getOpposite()).above(2);
+			String behind = placements.blockAt(behindWire);
+			if (behind != null && behind.startsWith("minecraft:redstone_wire")) {
+				set(placements, behindWire.above(), "minecraft:stone");
+				placements.padded("corkscrewSeveredTheDiagonal");
+			}
+			BlockPos[] rungCells = {cursor.above(2).relative(laneStep),
+				cursor.above(2).relative(laneStep.getOpposite())};
+			for (int slot = 0; slot < rungCells.length && slot < split.rungNotes().size();
+					slot++) {
+				if (split.rungNotes().get(slot) != null) {
+					placeNote(placements, rungCells[slot], split.rungNotes().get(slot));
 				}
 			}
 			Direction jog = laneStep.getOpposite();
@@ -16884,6 +17064,32 @@ public final class SongBuilder {
 	 * flanks at its own tick. See {@code corkscrewRefusedForWireBehind}.</p>
 	 */
 	static boolean CLIMB_CORKSCREWS_AT_THE_WALL = true;
+
+	/**
+	 * v2: a centre-fed climbing cut outranks the pad-close the planner booked.
+	 *
+	 * <p>In-game reading found lanes padded out to their climb where a corkscrew or a flanked-rung
+	 * head could have stood: the planner's booking search closes a lane on a pad wherever the tip
+	 * affords one, books {@code NO_SPLIT}, and the veto then forbids the cut the walk had in hand.
+	 * A pad fills those columns with wire; a centre-fed head fills them with notes in cells no
+	 * other shape has, and every note hung below is a note the far half's bus on the floor above
+	 * does not have to carry. So where both are possible, the cut wins and only the pad-close is
+	 * given up -- the plan's bookings for the events after this one stand either way, which is
+	 * the same tolerance the nudge already asks of them.</p>
+	 */
+	static boolean CENTRE_FED_CUT_OUTRANKS_THE_PAD = true;
+
+	/**
+	 * The cross-descent's away side stands a level lower, out of the neighbour staircase's reach.
+	 *
+	 * <p>In-game reading found the old front flank sounding at the neighbour corridor's tick --
+	 * its cell stands beside the glass staircase of the lane one corridor over, and the
+	 * staircase's dust reaches it; the layout check never saw it because a staircase's dust is
+	 * not in the powered records. The fix, built by hand in game first: the conducting
+	 * instrument block becomes wire on a full stone, both away flanks drop a level beside that
+	 * stone, the relay keeps its cell and wears the wire as its instrument. Five harps in all.</p>
+	 */
+	static boolean CROSS_DESCENT_LOWERED_SIDE = true;
 
 	/**
 	 * v2: a headed cut whose head collides is rolled back and the chord cut plain.
