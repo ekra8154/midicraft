@@ -11692,7 +11692,7 @@ public final class SongBuilder {
 	 *     low -- the note the third rung's column gives back
 	 */
 	private record WallDescent(EventNote centre, EventNote jogFlank, EventNote awayFlank,
-			EventNote endNote, List<EventNote> far) {
+			EventNote standFlank, EventNote endNote, List<EventNote> far) {
 	}
 
 	/** Why the last {@link #wallDescentOf} came back with nothing. */
@@ -11756,17 +11756,18 @@ public final class SongBuilder {
 		EventNote awayFlank = !pool.isEmpty()
 				&& railSlotTakes(placements, centreAt.relative(away), time)
 			? pool.remove(0) : null;
-		// The mockup hangs a fourth head note beside the repeater's stand on the open side, and
-		// it is left out on purpose: nothing this build lays powers the stand -- the centre's
-		// wire shapes itself down the staircase's diagonal and points z, not x -- so verify and
-		// the reader both called the note silent, at every module. If in-game reading finds the
-		// game sounds it anyway, the slot comes back with whatever mechanism that turns out to
-		// be.
-		// The border's end note -- the mockup's bonus note beside the far half's first low -- is
-		// parked with the stand flank: laid, it kept meeting a later module's instrument block
-		// across the corridor gap and sounding at that module's tick, sixteen wrong notes over
-		// thirteen builds. It returns with the extras pass, with whatever ground question keeps
-		// it quiet.
+		// The stand flank, live for in-game debugging at the word. Nothing this build's model
+		// says powers the stand -- the centre's wire shapes itself down the staircase's diagonal
+		// and points z, not x -- so verify and the reader both call this note silent, and every
+		// census will read it as a wrong or dead note until the game itself answers. If it
+		// sounds, the mechanism goes into the model; if it does not, the slot goes.
+		EventNote standFlank = !pool.isEmpty()
+				&& railSlotTakes(placements, stand.relative(away), time)
+			? pool.remove(0) : null;
+		// The border's end note -- the mockup's bonus note beside the far half's first low --
+		// stays parked: laid, it kept meeting a later module's instrument block across the
+		// corridor gap and sounding at that module's tick, sixteen wrong notes over thirteen
+		// builds. It returns with the extras pass, with whatever ground question keeps it quiet.
 		EventNote endNote = null;
 		if (pool.isEmpty()) {
 			LAST_WALL_DESCENT_REFUSAL = "NothingToCarryOver";
@@ -11777,7 +11778,7 @@ public final class SongBuilder {
 				+ (3 + (pool.size() + 2) / 2 - DUST_RANGE);
 			return null;
 		}
-		return new WallDescent(centre, jogFlank, awayFlank, endNote, pool);
+		return new WallDescent(centre, jogFlank, awayFlank, standFlank, endNote, pool);
 	}
 
 	/**
@@ -11786,8 +11787,8 @@ public final class SongBuilder {
 	 */
 	private static BlockPos addWallDescentHead(PlacementPlan placements, BlockPos cursor,
 			Direction travel, Direction descentSide, int triggerDelay, WallDescent cut, int time) {
-		placements.placing("wallDescent" + (4 - (cut.jogFlank() == null ? 1 : 0)
-			- (cut.awayFlank() == null ? 1 : 0)
+		placements.placing("wallDescent" + (5 - (cut.jogFlank() == null ? 1 : 0)
+			- (cut.awayFlank() == null ? 1 : 0) - (cut.standFlank() == null ? 1 : 0)
 			- (cut.endNote() == null ? 1 : 0)) + "/far" + cut.far().size());
 		placements.turnedAt(cursor);
 		Direction away = descentSide.getOpposite();
@@ -11820,6 +11821,10 @@ public final class SongBuilder {
 		}
 		if (cut.awayFlank() != null) {
 			placeNote(placements, centreAt.relative(away), cut.awayFlank());
+		}
+		if (cut.standFlank() != null) {
+			// Expected silent by the model; see the oracle. Placed so the game can be asked.
+			placeNote(placements, cursor.relative(away), cut.standFlank());
 		}
 		if (cut.endNote() != null) {
 			// At the far bus's own low level -- one above the landing -- beside its first stone,
