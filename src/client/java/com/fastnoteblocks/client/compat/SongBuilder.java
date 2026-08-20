@@ -11764,11 +11764,15 @@ public final class SongBuilder {
 		EventNote standFlank = !pool.isEmpty()
 				&& railSlotTakes(placements, stand.relative(away), time)
 			? pool.remove(0) : null;
-		// The border's end note -- the mockup's bonus note beside the far half's first low --
-		// stays parked: laid, it kept meeting a later module's instrument block across the
-		// corridor gap and sounding at that module's tick, sixteen wrong notes over thirteen
-		// builds. It returns with the extras pass, with whatever ground question keeps it quiet.
-		EventNote endNote = null;
+		// The border's end note, live for the same in-game debugging as the stand flank: the
+		// census reads it re-sounded by a later module's instrument block across the corridor
+		// gap -- sixteen wrong notes over thirteen builds -- and those are exactly the wrong
+		// notes being gone to look at. The ground question that keeps it quiet comes with the
+		// extras pass.
+		EventNote endNote = !pool.isEmpty()
+				&& railSlotTakes(placements,
+					stand.below(CUBE_FLOOR_HEIGHT - 1).relative(travel), time)
+			? pool.remove(0) : null;
 		if (pool.isEmpty()) {
 			LAST_WALL_DESCENT_REFUSAL = "NothingToCarryOver";
 			return null;
@@ -11800,14 +11804,16 @@ public final class SongBuilder {
 		// The conductor. Bare, not through placeNote: its instrument is the wire it stands on.
 		placeNoteBlock(placements, centreAt, cut.centre());
 		placements.powered(centreAt, time);
+		// The three rungs. The first under the centre's own wire -- and laid BEFORE that wire:
+		// the paste runs its commands in build order, and a wire set over air pops off as an
+		// item the moment it lands. In-game reading found exactly that, a wire item floating in
+		// the cell the line needed, and no plan-space check can see it because gravity is not in
+		// the model.
+		placements.powered(wire.below(), "minecraft:stone", time);
 		set(placements, wire, "minecraft:redstone_wire");
 		// Recorded powered the way the room-two head records its cross: the wire is what sounds
 		// the flanks' instrument blocks, and verify has to see the driver.
 		placements.powered(wire, time);
-		// The three rungs. The first under the centre's own wire; the second a level down on the
-		// jog side; the third a level down again, back on the wall column, its dust stepping
-		// down-and-sideways into the far half's wire.
-		placements.powered(wire.below(), "minecraft:stone", time);
 		BlockPos second = wire.below(2).relative(descentSide);
 		placements.powered(second, "minecraft:stone", time);
 		set(placements, second.above(), "minecraft:redstone_wire");
