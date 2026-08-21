@@ -11578,15 +11578,17 @@ public final class SongBuilder {
 	/**
 	 * The cross-descent: a stacked head whose cross is the staircase's first rung.
 	 *
-	 * <p>What the six head slots carry, by name. {@code relayOver} stands over the second rung's
-	 * dust and {@code backLow} beside the second rung's stone, a level down; both, and the centre,
-	 * must be harps -- the centre and the relay because dust is under them, the low back flank
-	 * because its instrument block would stand on the far half's note and mute it. Since the away
-	 * side was lowered (see {@link #addCrossDescentHead}), {@code relayAway} sits on wire and
-	 * {@code backAway} hangs with no instrument block, so those are harps too -- five in all --
-	 * while {@code frontAway} may be anything, falling instruments included. The front flank
-	 * on the descent side is never filled: a block there cuts the run from the second rung to the
-	 * third.</p>
+	 * <p>What the head slots carry, by name. {@code relayOver} stands over the second rung's
+	 * dust and {@code backLow} beside the second rung's stone, a level down; both, and the
+	 * centre, must be harps -- the centre and the relay because dust is under them, the low back
+	 * flank because its instrument block would stand on the far half's note and mute it. On the
+	 * away side {@code relayAway} sits on a conducting instrument block the cross weak-powers,
+	 * and {@code backAway} hangs beside that block, so both take any instrument -- three harps
+	 * required in all. {@code frontAway} is always null there (the neighbour staircase's dust
+	 * reaches its cell) and filled only by the lowered arm, {@link #CROSS_DESCENT_LOWERED_SIDE},
+	 * where the whole side drops a level and every slot on it is a harp. The front flank on the
+	 * descent side is never filled in either arm: a block there cuts the run from the second
+	 * rung to the third.</p>
 	 */
 	private record CrossDescent(EventNote centre, EventNote relayAway, EventNote relayOver,
 			EventNote frontAway, EventNote backAway, EventNote backLow, List<EventNote> far,
@@ -11671,14 +11673,21 @@ public final class SongBuilder {
 		} else {
 			pool = new ArrayList<>(others);
 			pool.addAll(harps);
-			relayAway = !pool.isEmpty() && conductsSideways(pool.get(0))
-					&& railSlotTakes(placements, centreAt.relative(away), time)
-				? pool.remove(0) : null;
-			frontAway = railSlotTakes(placements, wallColumn.relative(away), time)
-				? sinkable(placements, pool) : null;
-			if (frontAway != null) {
-				pool.remove(frontAway);
-			}
+			// The relay wants a sideways conductor: the cross weak-powers its instrument
+			// block, and the block relays the pulse to the flank beside it. Searched through
+			// the pool rather than peeked at its head, so a chord whose loudest instrument
+			// happens not to conduct still finds one that does.
+			relayAway = railSlotTakes(placements, centreAt.relative(away), time)
+				? takeFromTail(pool, note -> note.effect() == null && conductsSideways(note))
+				: null;
+			// The front slot stays empty, always. In-game reading found a note there sounding
+			// at the neighbour corridor's tick -- the cell stands beside the glass staircase
+			// of the lane one corridor over, and that staircase's dust reaches it. Lowering
+			// the whole side out of reach was the first fix and made every slot on it
+			// harp-only; leaving the one reachable cell empty costs that slot alone, and the
+			// side keeps its any-instrument relay and back flank -- three harps required
+			// instead of five. In-game design, from the reworked desc2 mockup.
+			frontAway = null;
 			backAway = railSlotTakes(placements, repeater.relative(away), time)
 				? sinkable(placements, pool) : null;
 			if (backAway != null) {
@@ -11788,9 +11797,8 @@ public final class SongBuilder {
 				}
 				placeNoteBlock(placements, centre.relative(away), cut.relayAway());
 			}
-			if (cut.frontAway() != null) {
-				placeNote(placements, wired.relative(travel), cut.frontAway(), true);
-			}
+			// No front flank on this side, ever -- the oracle leaves the slot empty because
+			// the neighbour corridor's staircase dust reaches it. See {@link #crossDescentOf}.
 			if (cut.backAway() != null) {
 				placeNote(placements, wired.relative(travel.getOpposite()), cut.backAway(), true);
 			}
@@ -17876,11 +17884,17 @@ public final class SongBuilder {
 	 * <p>In-game reading found the old front flank sounding at the neighbour corridor's tick --
 	 * its cell stands beside the glass staircase of the lane one corridor over, and the
 	 * staircase's dust reaches it; the layout check never saw it because a staircase's dust is
-	 * not in the powered records. The fix, built by hand in game first: the conducting
+	 * not in the powered records. The first fix, built by hand in game: the conducting
 	 * instrument block becomes wire on a full stone, both away flanks drop a level beside that
 	 * stone, the relay keeps its cell and wears the wire as its instrument. Five harps in all.</p>
+	 *
+	 * <p><b>Off since the reworked desc2 mockup</b>: only the front cell was ever reachable, so
+	 * the raised side stands again with that one slot left empty -- the conducting instrument
+	 * block, the relay on it and the back flank beside it, all any-instrument, and three harps
+	 * required instead of five. The lowered arm is kept whole behind this flag for
+	 * comparison.</p>
 	 */
-	static boolean CROSS_DESCENT_LOWERED_SIDE = true;
+	static boolean CROSS_DESCENT_LOWERED_SIDE = false;
 
 	/**
 	 * v2: a tail split's descent carries two extra notes on its own rungs.
