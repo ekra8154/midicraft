@@ -272,7 +272,7 @@ public final class FastNoteblocksConfig {
 	 * want to work, and having to make it again every time the composer opens would be a reason
 	 * not to bother.</p>
 	 */
-	public static final int DEFAULT_LAYER_PANEL_WIDTH = 196;
+	public static final int DEFAULT_LAYER_PANEL_WIDTH = 150;
 	/**
 	 * Narrow enough to hold an instrument icon and a row number and nothing else, which is as far
 	 * as dragging goes before the panel folds instead.

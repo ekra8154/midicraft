@@ -157,7 +157,24 @@ public final class ComposerScreen extends Screen {
 	private int layerPanelWidth() {
 		return config.layerPanelCollapsed()
 			? COLLAPSED_LAYER_PANEL_WIDTH
-			: config.layerPanelWidth();
+			: Math.min(config.layerPanelWidth(), widestUsefulLayerPanel());
+	}
+
+	/**
+	 * The most of the window the panel may take, whatever width it has been dragged to.
+	 *
+	 * <p>The stored width is in scaled pixels, so what it comes to on screen depends on the GUI
+	 * scale -- and the composer defaults to the game's, which on a small window or a high setting
+	 * is four or six. Two hundred scaled pixels is a quarter of a wide window and getting on for
+	 * half a narrow one, so opening the composer for the first time showed a list of layers with a
+	 * sliver of music beside it.</p>
+	 *
+	 * <p>Capped on the way out rather than clamped into the config, so the width survives being
+	 * looked at on a smaller window: drag the panel wide on a desktop, open the same song on a
+	 * laptop, and it comes back to what you chose once there is room for it again.</p>
+	 */
+	private int widestUsefulLayerPanel() {
+		return Math.max(ROW_NAME_AT, width / 4);
 	}
 
 	/** Widest a layer's name may draw, which is whatever the panel leaves after the row number. */
@@ -179,6 +196,7 @@ public final class ComposerScreen extends Screen {
 		boolean chip = panel >= ROW_CHIP_AT;
 		boolean name = panel >= ROW_NAME_AT;
 		int inset = chip ? 8 : 2;
+		int instrumentX = chip ? LAYER_INSTRUMENT_X : inset + 2;
 		// The number sits inside the row now. Out in the gutter it shared its pixels with the
 		// scrollbar, which drew over the top of it and left half a digit showing. Every row reserves
 		// the width of the largest number in the panel rather than its own, so the column does not
@@ -190,8 +208,11 @@ public final class ComposerScreen extends Screen {
 			inset,
 			chip,
 			name,
-			chip ? LAYER_INSTRUMENT_X : inset + 2,
-			LAYER_NAME_X,
+			instrumentX,
+			// A fixed gap after the instrument icon rather than a fixed column. Pinned to the
+			// column, the name held the pixels the state chip had vacated and spent them on
+			// nothing, which is most of the room a narrow panel has to give.
+			instrumentX + (LAYER_NAME_X - LAYER_INSTRUMENT_X),
 			ordinalLeft - 4,
 			ordinalLeft,
 			ordinalRight);
@@ -214,8 +235,15 @@ public final class ComposerScreen extends Screen {
 	 * snapped to something narrower than you could drag to would be a second layout to get right.</p>
 	 */
 	private static final int SPLITTER_COLLAPSE_AT = COLLAPSED_LAYER_PANEL_WIDTH;
-	/** Widths at which a row stops having room for each of its parts, narrowest last. */
-	private static final int ROW_NAME_AT = 116;
+	/**
+	 * Widths at which a row stops having room for each of its parts, narrowest last.
+	 *
+	 * <p>The name goes last of the three and only once there is no room to write anything in at
+	 * all. It used to be dropped first, at a width where fifty pixels of it still fitted, so
+	 * narrowing the panel took the names off every row at once instead of shortening them -- and a
+	 * panel wide enough to read half a name showed none of it.</p>
+	 */
+	private static final int ROW_NAME_AT = 62;
 	/** Below this the scrollbar's track would sit on the row numbers, so it is not drawn. */
 	private static final int ROW_SCROLLBAR_AT = 96;
 	private static final int ROW_CHIP_AT = 76;
@@ -3008,8 +3036,13 @@ public final class ComposerScreen extends Screen {
 			}
 			if (row.name()) {
 				String mark = selected ? "✓ " : "";
-				String label = mark + layer.name() + "  (" + layer.notes().size() + ")";
-				smallText(graphics, smallFit(label, row.nameRight() - row.nameLeft()),
+				// How many notes are on a layer is worth knowing and worth less than which layer it
+				// is, so the count is the first thing to go: a narrow panel spends what it has on
+				// the name and truncates that, rather than truncating the name to keep a number.
+				int room = row.nameRight() - row.nameLeft();
+				String counted = mark + layer.name() + "  (" + layer.notes().size() + ")";
+				String label = smallTextWidth(counted) <= room ? counted : mark + layer.name();
+				smallText(graphics, smallFit(label, room),
 					row.nameLeft(), y + 5,
 					activeLayer ? 0xFFFFFFFF : selected ? 0xFFE8F4FF : 0xFFD6D8DD);
 			}
@@ -6612,7 +6645,9 @@ public final class ComposerScreen extends Screen {
 		cancelLayerRename();
 		editingLayer = layerIndex;
 		int y = layerY(layerIndex);
-		layerNameBox = new EditBox(font, LAYER_NAME_X - 3, y - 2, layerNameRight() - LAYER_NAME_X + 6,
+		// Over the name it is replacing, wherever the row's width has put that.
+		int nameLeft = layerRowLayout().nameLeft();
+		layerNameBox = new EditBox(font, nameLeft - 3, y - 2, layerNameRight() - nameLeft + 6,
 			LAYER_ROW_HEIGHT, Component.literal("Layer name"));
 		layerNameBox.setMaxLength(48);
 		layerNameBox.setValue(project().layers().get(layerIndex).name());
