@@ -1346,7 +1346,11 @@ public final class FastNoteblocksConfig {
 		config.midiIgnorePercussion = false;
 		config.debugCommandsEnabled = false;
 		config.seenWelcome = false;
-		config.setDebugPasteEnabled(false);
+		// The field, not the setter: setDebugPasteEnabled also writes SongBuilder.DEBUG_PASTE,
+		// which is global. defaults() builds a throwaway config every time the settings screen
+		// asks what a value would go back to, and going through the setter meant opening the
+		// settings quietly switched the debug paste off underneath whoever had turned it on.
+		config.debugPasteEnabled = false;
 		config.midiDefaultInstrument = "HARP";
 		config.midiInstrumentSource = MidiInstrumentSource.FROM_FILE_THEN_NAME;
 		config.composerSpeedQuarters = DEFAULT_COMPOSER_SPEED_QUARTERS;
