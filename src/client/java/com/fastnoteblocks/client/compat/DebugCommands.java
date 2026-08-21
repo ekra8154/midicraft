@@ -65,13 +65,17 @@ import net.minecraft.world.phys.Vec3;
  *   /fastnoteblocks asciidiagram ~-8 ~ ~-8 ~8 ~4 ~8          the ground around you, sliced downwards
  *   /fastnoteblocks asciidiagram ~-8 ~ ~-8 ~8 ~4 ~8 top south      the same, turned so south is up the page
  *   /fastnoteblocks asciidiagram ~-8 ~ ~-8 ~8 ~4 ~8 top south true and with every note block saying which note
+ *   /fastnoteblocks asciidiagram ~-8 ~ ~-8 ~8 ~4 ~8 south false true    signs become footnotes: S1 in the grid,
+ *                                                                        the words in the legend
  * </pre>
  *
  * <p>A view from above or below is a map and a map can be turned, so those two take a direction for
  * which way is up the page; north if it is left off, which is what every diagram in this repo was
  * drawn with. The views from the side have nothing to decide -- up the page is up in the world --
- * and take no such word. The last argument is off by default because {@code NB} is two characters
- * and {@code N01} is three, and it widens every column in the box, not only the note blocks.</p>
+ * and take no such word. The two boolean arguments are off by default: the first numbers the note
+ * blocks ({@code NB} is two characters and {@code N01} is three, and it widens every column in the
+ * box), the second turns signs with writing into footnotes -- which is how a note left in the world
+ * beside a build travels with the diagram of it.</p>
  *
  * <p>Two corners and a point of view, the corners taken the way {@code /setblock} takes them -- so
  * looking at one and pressing tab fills it in. Chat gets the size and two links; clicking either
@@ -171,19 +175,19 @@ public final class DebugCommands {
 	 */
 	private static RequiredArgumentBuilder<FabricClientCommandSource, Coordinates> views() {
 		RequiredArgumentBuilder<FabricClientCommandSource, Coordinates> last = corner("to")
-			.executes(context -> diagram(context, AsciiDiagram.View.TOP, null, false))
+			.executes(context -> diagram(context, AsciiDiagram.View.TOP, null, false, false))
 			.then(numbered(AsciiDiagram.View.TOP, null));
 		for (AsciiDiagram.View view : AsciiDiagram.View.values()) {
 			LiteralArgumentBuilder<FabricClientCommandSource> named =
 				literal(view.name().toLowerCase(java.util.Locale.ROOT))
-					.executes(context -> diagram(context, view, null, false))
+					.executes(context -> diagram(context, view, null, false, false))
 					.then(numbered(view, null));
 			// Only the two views along y. A view from the side has up the page pinned to up in the
 			// world, so offering it a compass direction would be offering a rotation it cannot do.
 			if (view.flat()) {
 				for (Direction up : Direction.Plane.HORIZONTAL) {
 					named = named.then(literal(up.getName())
-						.executes(context -> diagram(context, view, up, false))
+						.executes(context -> diagram(context, view, up, false, false))
 						.then(numbered(view, up)));
 				}
 			}
@@ -198,7 +202,22 @@ public final class DebugCommands {
 		return RequiredArgumentBuilder.<FabricClientCommandSource, Boolean>argument(
 				"notes", BoolArgumentType.bool())
 			.executes(context -> diagram(context, view, up,
-				BoolArgumentType.getBool(context, "notes")));
+				BoolArgumentType.getBool(context, "notes"), false))
+			.then(signed(view, up));
+	}
+
+	/**
+	 * And after it, whether signs with writing on them become footnotes: {@code S1} in the grid
+	 * and the words in the legend. Off unless asked for, so a diagram of a build that happens to
+	 * have signs near it does not fill its legend with them.
+	 */
+	private static RequiredArgumentBuilder<FabricClientCommandSource, Boolean> signed(
+			AsciiDiagram.View view, Direction up) {
+		return RequiredArgumentBuilder.<FabricClientCommandSource, Boolean>argument(
+				"signs", BoolArgumentType.bool())
+			.executes(context -> diagram(context, view, up,
+				BoolArgumentType.getBool(context, "notes"),
+				BoolArgumentType.getBool(context, "signs")));
 	}
 
 	/**
@@ -228,7 +247,7 @@ public final class DebugCommands {
 	 * chat is the shape of the thing and two links; the diagram itself goes to the clipboard whole.</p>
 	 */
 	private static int diagram(CommandContext<FabricClientCommandSource> context,
-			AsciiDiagram.View view, Direction up, boolean numberNotes) {
+			AsciiDiagram.View view, Direction up, boolean numberNotes, boolean signs) {
 		FabricClientCommandSource source = context.getSource();
 		ClientLevel level = Minecraft.getInstance().level;
 		if (level == null) {
@@ -252,26 +271,51 @@ public final class DebugCommands {
 			+ view.name().toLowerCase(java.util.Locale.ROOT)
 			+ (view.flat()
 				? ", " + (up == null ? AsciiDiagram.DEFAULT_UP : up).getName() + " up" : "")
-			+ (numberNotes ? ", notes numbered" : "")).withStyle(ChatFormatting.GRAY)
-			.append(copy(level, from, to, view, up, numberNotes,
+			+ (numberNotes ? ", notes numbered" : "")
+			+ (signs ? ", signs footnoted" : "")).withStyle(ChatFormatting.GRAY)
+			.append(copy(level, from, to, view, up, numberNotes, signs,
 				AsciiDiagram.Shape.CODE, "  [code]"))
-			.append(copy(level, from, to, view, up, numberNotes,
+			.append(copy(level, from, to, view, up, numberNotes, signs,
 				AsciiDiagram.Shape.TABLE, "  [table]")));
 		return 1;
 	}
 
 	/** One clickable offer of the box in one shape, rendered now so the click cannot fail. */
 	private static Component copy(ClientLevel level, BlockPos from, BlockPos to,
-			AsciiDiagram.View view, Direction up, boolean numberNotes, AsciiDiagram.Shape shape,
-			String label) {
+			AsciiDiagram.View view, Direction up, boolean numberNotes, boolean signs,
+			AsciiDiagram.Shape shape, String label) {
 		String drawn = AsciiDiagram.render(level::getBlockState, from, to, view, up, numberNotes,
-			shape);
+			signs ? position -> signText(level, position) : null, shape);
 		return Component.literal(label).withStyle(style -> style
 			.withColor(ChatFormatting.AQUA)
 			.withUnderlined(true)
 			.withClickEvent(new ClickEvent.CopyToClipboard(drawn))
 			.withHoverEvent(new HoverEvent.ShowText(Component.literal("Copy "
 				+ drawn.lines().count() + " lines to the clipboard"))));
+	}
+
+	/**
+	 * The words on a sign, front face first and the back only where the front is blank, joined
+	 * into one line. Null where the block is not a sign or has nothing written on it.
+	 */
+	private static String signText(ClientLevel level, BlockPos pos) {
+		if (!(level.getBlockEntity(pos)
+				instanceof net.minecraft.world.level.block.entity.SignBlockEntity sign)) {
+			return null;
+		}
+		String front = signFace(sign.getFrontText());
+		return front.isBlank() ? signFace(sign.getBackText()) : front;
+	}
+
+	private static String signFace(net.minecraft.world.level.block.entity.SignText text) {
+		StringBuilder words = new StringBuilder();
+		for (Component line : text.getMessages(false)) {
+			String said = line.getString().strip();
+			if (!said.isEmpty()) {
+				words.append(words.isEmpty() ? "" : " ").append(said);
+			}
+		}
+		return words.toString();
 	}
 
 	private static LiteralArgumentBuilder<FabricClientCommandSource> literal(String name) {

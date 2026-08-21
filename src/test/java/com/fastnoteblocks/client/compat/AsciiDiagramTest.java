@@ -49,6 +49,27 @@ class AsciiDiagramTest {
 			AsciiDiagram.Shape.CODE);
 	}
 
+	/** A sign with words becomes a footnote; the same sign without the lookup stays a block. */
+	@Test
+	void footnotesSigns() {
+		world.put(new BlockPos(0, 64, 0), Blocks.OAK_SIGN.defaultBlockState());
+		world.put(new BlockPos(1, 64, 0), Blocks.OAK_WALL_SIGN.defaultBlockState());
+		world.put(new BlockPos(2, 64, 0), Blocks.STONE.defaultBlockState());
+		String noted = AsciiDiagram.render(this::at, new BlockPos(0, 64, 0),
+			new BlockPos(2, 64, 0), AsciiDiagram.View.TOP, null, false,
+			position -> position.equals(new BlockPos(0, 64, 0)) ? "this is the fix" : null,
+			AsciiDiagram.Shape.CODE);
+		assertTrue(noted.contains("S1"), noted);
+		assertTrue(noted.contains("sign: \"this is the fix\""), noted);
+		// The wall sign carried no words, so it is drawn as the block it is, not numbered.
+		assertFalse(noted.contains("S2"), noted);
+		// And with no lookup at all, nothing is footnoted.
+		String plain = draw(new BlockPos(0, 64, 0), new BlockPos(2, 64, 0),
+			AsciiDiagram.View.TOP);
+		assertFalse(plain.contains("S1"), plain);
+		assertTrue(plain.contains("minecraft:oak_sign"), plain);
+	}
+
 	/** Two blocks a step apart on each horizontal axis, for asking which way a map is turned. */
 	private void twoApart() {
 		world.put(new BlockPos(0, 64, 0), Blocks.NOTE_BLOCK.defaultBlockState());
