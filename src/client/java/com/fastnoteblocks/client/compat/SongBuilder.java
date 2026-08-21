@@ -12495,6 +12495,18 @@ public final class SongBuilder {
 		// shared with other lanes' flanks, and a note the run cannot hang would fold down and
 		// could push the folded run past its wire.
 		List<EventNote> pool = new ArrayList<>(busOrder(notes));
+		int chordHarps = 0;
+		for (EventNote note : pool) {
+			if (note.effect() == null && isHarpNote(note)) {
+				chordHarps++;
+			}
+		}
+		// Counted against foldbackHeadOf, and the pair is the point: the head's three cells are
+		// the only slots in a descent foldback that take a harp and nothing else, and they cost
+		// no columns, so a harp that goes anywhere else while one of them stands empty is a
+		// column of corridor bought for nothing. While these two read the same numbers the head
+		// is taking every harp the chord has; a build where they part company is the bug.
+		placements.padded("foldbackChordHarps" + Math.min(chordHarps, 3));
 		// The head's harps come out of the whole pool, before the wall-bound run is served. The
 		// head's cells cost no columns, so a harp moved into it can only shorten the folded
 		// tail, never lengthen anything -- where the chord has no surplus over the wall run,
@@ -12502,9 +12514,15 @@ public final class SongBuilder {
 		// rest instead, the harps all rode the wall run and the head stood empty.
 		EventNote centre = takeFromTail(pool,
 			note -> note.effect() == null && isHarpNote(note));
-		EventNote sideA = railSlotTakes(placements, centreAt.relative(side), time)
+		// Asked as harps, because that is what hangs there. Both flanks are driven by the
+		// conductor beside them and keep nothing underneath, so the cell below may perfectly
+		// well be air another note is holding empty -- and asking freeForNote of them, which
+		// insists on that cell outright, refused the head a slot no other note in the chord
+		// could have used. The same mistake the staircases were making.
+		EventNote sideA = quietAndFreeForHarp(placements, centreAt.relative(side), time)
 			? takeFromTail(pool, note -> note.effect() == null && isHarpNote(note)) : null;
-		EventNote sideB = railSlotTakes(placements, centreAt.relative(side.getOpposite()), time)
+		EventNote sideB = quietAndFreeForHarp(placements,
+				centreAt.relative(side.getOpposite()), time)
 			? takeFromTail(pool, note -> note.effect() == null && isHarpNote(note)) : null;
 		List<EventNote> wallward = foldbackRunTakes(placements,
 			opens.pos().relative(travel).below(), travel, side, pool, foldbackWallCells(room),
@@ -12550,8 +12568,12 @@ public final class SongBuilder {
 	 */
 	private static BlockPos addFoldbackCut(PlacementPlan placements, BlockPos cursor,
 			Direction travel, Direction depth, int triggerDelay, Foldback fold, int time) {
-		placements.placing("foldback head" + (3 - (fold.centre() == null ? 1 : 0)
-			- (fold.sideA() == null ? 1 : 0) - (fold.sideB() == null ? 1 : 0)));
+		int headNotes = 3 - (fold.centre() == null ? 1 : 0)
+			- (fold.sideA() == null ? 1 : 0) - (fold.sideB() == null ? 1 : 0);
+		placements.placing("foldback head" + headNotes);
+		// The head's three slots take a harp and nothing else, and they cost no columns at all,
+		// so a head that comes out short is the one place a descent foldback wastes a chord.
+		placements.padded("foldbackHeadOf" + headNotes);
 		placements.turnedAt(cursor);
 		// The slab before the repeater on it: the paste runs its commands in build order, and a
 		// component set over air drops as an item the moment it lands.
