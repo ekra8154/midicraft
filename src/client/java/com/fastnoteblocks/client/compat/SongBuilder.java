@@ -12165,13 +12165,6 @@ public final class SongBuilder {
 	}
 
 	/**
-	 * How many of a foldback run's note slots the ground will actually grant, asked with the same
-	 * question the builder asks. The runs cross rows other lanes already hang notes and claims in,
-	 * so an oracle that assumes two a column sends the walk more notes than the run can hang --
-	 * and a note past the run's wire limit is simply lost. Counting first is what lets the oracle
-	 * hand each run exactly what it can carry.
-	 */
-	/**
 	 * How many slots of a staircase will take a harp and nothing else.
 	 *
 	 * <p>Two kinds, and both are slots no other note in the chord can use: the first rung, which
@@ -12202,20 +12195,38 @@ public final class SongBuilder {
 		return wanted;
 	}
 
-	private static int foldbackRunSlotsFree(PlacementPlan placements, BlockPos firstStone,
-			Direction travel, Direction depth, int cells, int flatCells, int riseCap, int riseStep,
-			int mutedCells, int time) {
-		int free = 0;
-		for (int cell = mutedCells; cell < cells; cell++) {
+	/**
+	 * The notes a run would take out of this pool, removed from it.
+	 *
+	 * <p>The same walk the builder makes, made before the pool is split. A run used to be handed
+	 * the first so many notes by position and kept whatever they happened to be -- so a harp
+	 * sitting early in the bus order rode the wall-bound run, where any note would have done,
+	 * while a slot further on that takes nothing else stood empty and the run grew a column to
+	 * carry the note instead. Asking each run what it can actually use, in the order it will use
+	 * it, lets what it cannot flow on to the run after it.</p>
+	 */
+	private static List<EventNote> foldbackRunTakes(PlacementPlan placements, BlockPos firstStone,
+			Direction travel, Direction depth, List<EventNote> pool, int cellLimit, int flatCells,
+			int riseCap, int riseStep, int mutedCells, int harpCells, int noFallCells, int time) {
+		List<EventNote> taken = new ArrayList<>();
+		for (int cell = 0; cell < cellLimit && !pool.isEmpty(); cell++) {
+			if (cell < mutedCells) {
+				continue;
+			}
 			BlockPos stone = foldbackRunStone(firstStone, travel, cell, flatCells, riseCap,
 				riseStep);
 			for (Direction out : List.of(depth.getOpposite(), depth)) {
-				if (railSlotTakes(placements, stone.relative(out), time)) {
-					free++;
+				if (pool.isEmpty()) {
+					continue;
+				}
+				int pick = suitedNote(placements, stone.relative(out), pool, cell, harpCells,
+					noFallCells, time);
+				if (pick >= 0) {
+					taken.add(pool.remove(pick));
 				}
 			}
 		}
-		return free;
+		return taken;
 	}
 
 	/**
@@ -12495,11 +12506,10 @@ public final class SongBuilder {
 			? takeFromTail(pool, note -> note.effect() == null && isHarpNote(note)) : null;
 		EventNote sideB = railSlotTakes(placements, centreAt.relative(side.getOpposite()), time)
 			? takeFromTail(pool, note -> note.effect() == null && isHarpNote(note)) : null;
-		int wallFree = foldbackRunSlotsFree(placements, opens.pos().relative(travel).below(),
-			travel, side, foldbackWallCells(room), 0, 2, 1, 0, time);
-		List<EventNote> wallward = new ArrayList<>(
-			pool.subList(0, Math.min(wallFree, pool.size())));
-		List<EventNote> rest = new ArrayList<>(pool.subList(wallward.size(), pool.size()));
+		List<EventNote> wallward = foldbackRunTakes(placements,
+			opens.pos().relative(travel).below(), travel, side, pool, foldbackWallCells(room),
+			0, 2, 1, 0, 0, 0, time);
+		List<EventNote> rest = new ArrayList<>(pool);
 		List<EventNote> stepdown = new ArrayList<>(rest.subList(0, Math.min(2, rest.size())));
 		List<EventNote> inbound = new ArrayList<>(rest.subList(stepdown.size(), rest.size()));
 		// The run below, and the cell the next module opens on after it, both inside the far
@@ -12711,14 +12721,12 @@ public final class SongBuilder {
 		// lane's own bus rows, which the corridor alongside already hangs notes and claims in,
 		// and a note the run cannot hang would climb with the rest and could push the climb
 		// past its wire.
-		int wallFree = room > 1
-			? foldbackRunSlotsFree(placements, stand.relative(travel, 2).above(), travel, side,
-				room - 1, 0, 0, 1, 0, time)
-			: 0;
-		List<EventNote> wallward = new ArrayList<>(
-			pool.subList(0, Math.min(wallFree, pool.size())));
+		List<EventNote> wallward = room > 1
+			? foldbackRunTakes(placements, stand.relative(travel, 2).above(), travel, side, pool,
+				room - 1, 0, 0, 1, 0, 0, 0, time)
+			: new ArrayList<EventNote>();
 		List<EventNote> outbound = new ArrayList<>(rungHarps);
-		outbound.addAll(pool.subList(wallward.size(), pool.size()));
+		outbound.addAll(pool);
 		// The same off-by-one as the descent's tail: the climb's handover may land ON the far
 		// wall column, so the run has the whole corridor and not the corridor less one.
 		int outboundLimit = Math.min(DUST_RANGE - 1, availableBehind);
