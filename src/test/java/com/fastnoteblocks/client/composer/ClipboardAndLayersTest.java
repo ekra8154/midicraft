@@ -536,6 +536,161 @@ class ClipboardAndLayersTest {
 			startTicks(song.layers().getFirst()));
 	}
 
+	/**
+	 * A layer sitting two octaves low moves as one under either mode, and does not split.
+	 *
+	 * <p>The baseline every other case is read against: when every note needs the same octave there
+	 * is nothing for the modes to disagree about.</p>
+	 */
+	@Test
+	void aLayerEntirelyOutOfRangeTakesOneOctaveAndStaysOneLayer() {
+		ComposerProject song = songOf(new Layer("Bass", "HARP", false, true, true,
+			List.of(note(30, 0L), note(34, 480L), note(37, 960L))));
+
+		for (ComposerProject.OctaveShifting mode : ComposerProject.OctaveShifting.values()) {
+			ComposerProject converted =
+				song.convertToMinecraft(480, false, 0, false, mode, true).project();
+			assertEquals(1, converted.layers().size(), mode + " needed no split");
+			assertTrue(converted.layers().getFirst().notes().stream().allMatch(NoteEvent::isBuildable),
+				mode + " left a note out of range");
+		}
+	}
+
+	/**
+	 * The mode's whole claim: moving the layer first costs one layer where moving notes costs two.
+	 *
+	 * <p>Four notes inside one octave, sitting a fifth below the window. Per note, the two lowest
+	 * need an octave and the two highest do not, so the layer splits. Moved as a unit, one octave
+	 * takes all four in, and the notes keep their intervals -- which is the musical difference, not
+	 * merely the layer count: split, the part is torn an octave apart down its middle.</p>
+	 */
+	@Test
+	void shiftingTheLayerFirstAvoidsASplitThatShiftingNotesCannot() {
+		ComposerProject song = songOf(new Layer("Lead", "HARP", false, true, true,
+			List.of(note(47, 0L), note(50, 480L), note(54, 960L), note(57, 1440L))));
+
+		ComposerProject perNote = song.convertToMinecraft(480, false, 0, false,
+			ComposerProject.OctaveShifting.NOTES_ONLY, true).project();
+		ComposerProject perLayer = song.convertToMinecraft(480, false, 0, false,
+			ComposerProject.OctaveShifting.LAYER_THEN_NOTES, true).project();
+
+		assertEquals(2, perNote.layers().size(), "47 and 50 need an octave, 54 and 57 do not");
+		assertEquals(1, perLayer.layers().size(), "one octave takes the whole part in");
+		assertEquals(List.of(59, 62, 66, 69), pitches(perLayer.layers().getFirst()),
+			"and the intervals between the four notes survive");
+		assertTrue(perLayer.layers().getFirst().notes().stream().allMatch(NoteEvent::isBuildable));
+	}
+
+	/** A part already in range is not moved to make a point. */
+	@Test
+	void aLayerAlreadyInRangeIsLeftWhereItIs() {
+		ComposerProject song = songOf(new Layer("Lead", "HARP", false, true, true,
+			List.of(note(60, 0L), note(64, 480L), note(67, 960L))));
+
+		ComposerProject converted = song.convertToMinecraft(480, false, 0, false,
+			ComposerProject.OctaveShifting.LAYER_THEN_NOTES, true).project();
+
+		assertEquals(List.of(60, 64, 67), pitches(converted.layers().getFirst()),
+			"nought out of range at nought shift, and ties go to the smaller move");
+		assertEquals("Lead", converted.layers().getFirst().name(), "so the name is untouched too");
+	}
+
+	/**
+	 * Whatever one octave cannot reach still moves note by note, so the result is always buildable.
+	 *
+	 * <p>The guarantee that makes every mode safe to leave on: the second step is the same per-note
+	 * shift as the first mode, and the window is 25 semitones wide, so no pitch class can fail.</p>
+	 */
+	@Test
+	void notesTheLayerShiftCannotReachAreStillBroughtIntoRange() {
+		ComposerProject song = songOf(new Layer("Piano", "HARP", false, true, true,
+			List.of(note(36, 0L), note(60, 480L), note(84, 960L), note(96, 1440L))));
+
+		for (ComposerProject.OctaveShifting mode : ComposerProject.OctaveShifting.values()) {
+			ComposerProject converted =
+				song.convertToMinecraft(480, false, 0, false, mode, true).project();
+			assertTrue(converted.layers().stream()
+					.flatMap(layer -> layer.notes().stream())
+					.allMatch(NoteEvent::isBuildable),
+				mode + " left something outside the note-block range");
+		}
+	}
+
+	/** Off, the octaves land in the layer they came from and nothing is split off it. */
+	@Test
+	void withoutSplittingATransposedNoteStaysOnItsOwnLayer() {
+		ComposerProject song = songOf(new Layer("Piano", "HARP", false, true, true,
+			List.of(note(36, 0L), note(60, 480L), note(96, 960L))));
+
+		ComposerProject split = song.convertToMinecraft(480, false, 0, false,
+			ComposerProject.OctaveShifting.NOTES_ONLY, true).project();
+		ComposerProject whole = song.convertToMinecraft(480, false, 0, false,
+			ComposerProject.OctaveShifting.NOTES_ONLY, false).project();
+
+		assertTrue(split.layers().size() > 1, "three octaves apart, the split is what happens today");
+		assertEquals(1, whole.layers().size());
+		assertEquals("Piano", whole.layers().getFirst().name());
+		assertEquals(3, whole.layers().getFirst().notes().size(), "and every note survived");
+	}
+
+	/**
+	 * Two notes an octave apart become one note, and Convert says how many did.
+	 *
+	 * <p>With the split on this is a duplicate layer being dropped and is already reported. Off,
+	 * there is no second layer to drop, so the same dedupe happens a note at a time inside the
+	 * layer -- which would be silent if it were not counted.</p>
+	 */
+	@Test
+	void mergedDuplicatesAreCounted() {
+		ComposerProject song = songOf(new Layer("Snare", "SNARE", false, true, true,
+			List.of(note(48, 0L), note(60, 0L))));
+
+		ComposerProject.MinecraftConversion whole = song.convertToMinecraft(480, false, 0, false,
+			ComposerProject.OctaveShifting.NOTES_ONLY, false);
+
+		assertEquals(1, whole.project().layers().getFirst().notes().size(),
+			"one pitch at one tick is one note");
+		assertEquals(1, whole.mergedIntoExisting(), "and the one that went is counted");
+		assertEquals(0, song.convertToMinecraft(480, false, 0, false,
+			ComposerProject.OctaveShifting.NOTES_ONLY, true).mergedIntoExisting(),
+			"with the split on it is a dropped duplicate layer instead, counted there");
+	}
+
+	/**
+	 * A sound-effect layer has no pitch to fit, so the layer shift is not offered one.
+	 *
+	 * <p>Its rows are only somewhere to put a hit -- {@code toSteps} does not filter an unpitched
+	 * layer by range at all, so every note on one builds wherever it is drawn. Moving such a layer
+	 * would move nothing, so the mode leaves it exactly as the other mode does. The same notes on a
+	 * harp are the control: there, moving the layer is the whole difference.</p>
+	 *
+	 * <p>It still splits, because the per-note step runs on it as it always has. That is older than
+	 * this setting and is not what the setting is for.</p>
+	 */
+	@Test
+	void theLayerShiftSkipsSoundEffectLayers() {
+		List<NoteEvent> line = List.of(note(47, 0L), note(50, 480L), note(54, 960L), note(57, 1440L));
+		ComposerProject effects = songOf(new Layer("Door", "FX_OAK_DOOR", false, true, true, line));
+		ComposerProject harp = songOf(new Layer("Lead", "HARP", false, true, true, line));
+
+		assertEquals(
+			names(effects.convertToMinecraft(480, false, 0, false,
+				ComposerProject.OctaveShifting.NOTES_ONLY, true).project()),
+			names(effects.convertToMinecraft(480, false, 0, false,
+				ComposerProject.OctaveShifting.LAYER_THEN_NOTES, true).project()),
+			"the two modes agree on an unpitched layer, because there is nothing to move");
+		assertNotEquals(
+			names(harp.convertToMinecraft(480, false, 0, false,
+				ComposerProject.OctaveShifting.NOTES_ONLY, true).project()),
+			names(harp.convertToMinecraft(480, false, 0, false,
+				ComposerProject.OctaveShifting.LAYER_THEN_NOTES, true).project()),
+			"and disagree on the same notes played by something with a pitch");
+	}
+
+	private static List<Integer> pitches(Layer layer) {
+		return layer.notes().stream().map(NoteEvent::midiNote).toList();
+	}
+
 	private static List<String> names(ComposerProject song) {
 		return song.layers().stream().map(Layer::name).toList();
 	}

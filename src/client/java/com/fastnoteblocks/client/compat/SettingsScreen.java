@@ -8,6 +8,7 @@ import com.fastnoteblocks.client.FastNoteblocksConfig.OverlayMode;
 import com.fastnoteblocks.client.FastNoteblocksConfig.RepeaterControlStyle;
 import com.fastnoteblocks.client.FastNoteblocksConfig.SequencingEditProtection;
 import com.fastnoteblocks.client.NoteBlockOverlay;
+import com.fastnoteblocks.client.composer.ComposerProject;
 import com.fastnoteblocks.client.PasteRate;
 import java.util.ArrayList;
 import java.util.List;
@@ -687,6 +688,13 @@ public final class SettingsScreen extends Screen {
 					FastNoteblocksConfig::conversionGapPercentile,
 					config::setConversionGapPercentile,
 					value -> value <= 0 ? "none (strict)" : "ignore closest " + value + "%")));
+				// Both are buttons rather than sliders without being asked to be: a two-value option
+				// has max - min == 1, which is what flips() already tests for.
+				entries.add(Entry.of(choice("convert_octave_shifting",
+					ComposerProject.OctaveShifting.values(),
+					FastNoteblocksConfig::convertOctaveShifting, config::setConvertOctaveShifting)));
+				entries.add(Entry.of(toggle("convert_split_transposed",
+					FastNoteblocksConfig::convertSplitTransposed, config::setConvertSplitTransposed)));
 				entries.add(Entry.of(slider("repeat_merge_ticks",
 					FastNoteblocksConfig.MIN_REPEAT_MERGE_TICKS,
 					FastNoteblocksConfig.MAX_REPEAT_MERGE_TICKS,

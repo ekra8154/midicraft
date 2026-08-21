@@ -350,6 +350,8 @@ public final class FastNoteblocksConfig {
 	private int activeTrackIndex;
 	private List<SavedSequence> savedSequences;
 	private MidiQuantizeGrid midiQuantizeGrid;
+	private ComposerProject.OctaveShifting convertOctaveShifting;
+	private boolean convertSplitTransposed;
 	private boolean midiIgnorePercussion;
 	private String midiDefaultInstrument;
 	private MidiInstrumentSource midiInstrumentSource;
@@ -523,6 +525,12 @@ public final class FastNoteblocksConfig {
 						? DEFAULT_CONVERSION_GAP_PERCENTILE
 						: stored.conversionGapPercentile
 				);
+				// A file written before these existed says nothing about them, which is the default.
+				instance.convertOctaveShifting = stored.convertOctaveShifting == null
+					? ComposerProject.OctaveShifting.NOTES_ONLY
+					: stored.convertOctaveShifting;
+				instance.convertSplitTransposed = stored.convertSplitTransposed == null
+					|| stored.convertSplitTransposed;
 				instance.repeatMergeTicks = clampRepeatMergeTicks(
 					stored.repeatMergeTicks == null
 						? DEFAULT_REPEAT_MERGE_TICKS
@@ -1243,6 +1251,24 @@ public final class FastNoteblocksConfig {
 		this.buildLaneFloors = clampBuildLaneFloors(buildLaneFloors);
 	}
 
+	public ComposerProject.OctaveShifting convertOctaveShifting() {
+		return convertOctaveShifting;
+	}
+
+	public void setConvertOctaveShifting(ComposerProject.OctaveShifting value) {
+		this.convertOctaveShifting = value == null
+			? ComposerProject.OctaveShifting.NOTES_ONLY
+			: value;
+	}
+
+	public boolean convertSplitTransposed() {
+		return convertSplitTransposed;
+	}
+
+	public void setConvertSplitTransposed(boolean value) {
+		this.convertSplitTransposed = value;
+	}
+
 	public int conversionGapPercentile() {
 		return conversionGapPercentile;
 	}
@@ -1361,6 +1387,8 @@ public final class FastNoteblocksConfig {
 		config.layerPanelCollapsed = false;
 		config.repeatMergeTicks = DEFAULT_REPEAT_MERGE_TICKS;
 		config.conversionGapPercentile = DEFAULT_CONVERSION_GAP_PERCENTILE;
+		config.convertOctaveShifting = ComposerProject.OctaveShifting.NOTES_ONLY;
+		config.convertSplitTransposed = true;
 		config.commandsPerTick = PasteRate.DEFAULT;
 		config.buildLaneWidth = DEFAULT_BUILD_LANE_WIDTH;
 		config.buildLaneFloors = DEFAULT_BUILD_LANE_FLOORS;
@@ -1526,6 +1554,8 @@ public final class FastNoteblocksConfig {
 		private Integer composerSpeedQuarters;
 		private Integer repeatMergeTicks;
 		private Integer conversionGapPercentile;
+		private ComposerProject.OctaveShifting convertOctaveShifting;
+		private Boolean convertSplitTransposed;
 		private Double commandsPerTick;
 		private Integer buildLaneWidth;
 		private Integer buildLaneFloors;
@@ -1586,6 +1616,8 @@ public final class FastNoteblocksConfig {
 			this.composerSpeedQuarters = config.composerSpeedQuarters;
 			this.repeatMergeTicks = config.repeatMergeTicks;
 			this.conversionGapPercentile = config.conversionGapPercentile;
+			this.convertOctaveShifting = config.convertOctaveShifting;
+			this.convertSplitTransposed = config.convertSplitTransposed;
 			this.commandsPerTick = config.commandsPerTick;
 			this.buildLaneWidth = config.buildLaneWidth;
 			this.buildLaneFloors = config.buildLaneFloors;

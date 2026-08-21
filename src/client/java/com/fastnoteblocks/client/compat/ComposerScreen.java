@@ -1336,7 +1336,8 @@ public final class ComposerScreen extends Screen {
 			// redstone grid is the whole of what Convert is for, and Edit > Quantize is there for
 			// anyone who wants the notes moved without the tempo following.
 			MinecraftConversion conversion = source.convertToMinecraft(
-				gridTicks, true, config.repeatMergeTicks(), gameTicks);
+				gridTicks, true, config.repeatMergeTicks(), gameTicks,
+				config.convertOctaveShifting(), config.convertSplitTransposed());
 			if (conversion.project().equals(project())) {
 				showResult(
 					Component.literal("This composition is already Minecraft-ready."));
@@ -1360,7 +1361,12 @@ public final class ComposerScreen extends Screen {
 					? ", " + conversion.mergedRepeats() + " repeats merged" : "")
 				+ (conversion.duplicateLayers() > 0
 					? ", " + conversion.duplicateLayers() + " duplicate layers dropped ("
-						+ conversion.duplicateLayerNotes() + " notes)" : "");
+						+ conversion.duplicateLayerNotes() + " notes)" : "")
+				// The same dedupe as the line above, arriving a note at a time because with the
+				// split off there is no second layer for it to arrive as. Said either way: a note
+				// that stopped existing is worth a number even when it was already being played.
+				+ (conversion.mergedIntoExisting() > 0
+					? ", " + conversion.mergedIntoExisting() + " duplicate notes merged" : "");
 			// Every tempo change says by how much. Aligning to the repeater grid moves the tempo to
 			// whichever side is nearest, so a conversion speeds a song up about as often as it slows
 			// one down -- but only the slowdown ever carried a number, and the speed-up was reported

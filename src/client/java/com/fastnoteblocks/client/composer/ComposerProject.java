@@ -360,6 +360,38 @@ public record ComposerProject(
 		}
 	}
 
+	/**
+	 * What {@link #convertToMinecraft} moves when a layer will not fit the note-block range.
+	 *
+	 * <p>Both end with every note in range, because the second step of each is the same per-note
+	 * octave shift and that can never fail: the window is 25 semitones, so every pitch class has an
+	 * octave inside it. What differs is how much of the part moves together.</p>
+	 *
+	 * <p>Multiples of twelve throughout, and that is not a detail. A whole-song transpose may move
+	 * by any interval, because everything moves with it and the song simply lands in a new key. One
+	 * layer moved by three semitones is not in a different octave, it is in a different key from
+	 * every other part -- so a shift applied to a part is always an octave.</p>
+	 */
+	public enum OctaveShifting {
+		/**
+		 * Only the notes that are out of range move, each by its own nearest octave.
+		 *
+		 * <p>Nothing in range is touched, and a layer straddling the window splits once per distinct
+		 * octave the notes needed.</p>
+		 */
+		NOTES_ONLY,
+		/**
+		 * The layer moves as a unit to wherever the fewest of its notes are out of range, and then
+		 * whatever is still out moves note by note.
+		 *
+		 * <p>Fewer splits, because the bulk of the layer ends up needing one shift rather than two.
+		 * The cost is that notes with nothing wrong with them can move, when moving them catches
+		 * more strays than it creates -- a layer already wholly in range scores nothing at all at
+		 * shift zero, so it stays where it is.</p>
+		 */
+		LAYER_THEN_NOTES
+	}
+
 	public record MinecraftConversion(
 		ComposerProject project,
 		int shiftedNotes,
@@ -368,7 +400,9 @@ public record ComposerProject(
 		double tempoFactor,
 		int mergedRepeats,
 		int duplicateLayers,
-		int duplicateLayerNotes
+		int duplicateLayerNotes,
+		/** Notes that landed on a pitch and tick their layer already held, and so became one note. */
+		int mergedIntoExisting
 	) {
 		/**
 		 * How much slower the converted song plays. Greater than 1 means the source was faster than
@@ -1247,6 +1281,19 @@ public record ComposerProject(
 	 */
 	public MinecraftConversion convertToMinecraft(int quantizeTicks, boolean snapTempo,
 			int repeatMergeTicks, boolean gameTicks) {
+		return convertToMinecraft(quantizeTicks, snapTempo, repeatMergeTicks, gameTicks,
+			OctaveShifting.NOTES_ONLY, true);
+	}
+
+	/**
+	 * @param shifting what moves when a layer will not fit; see {@link OctaveShifting}
+	 * @param splitTransposed whether notes that took a different octave from the rest of their layer
+	 *     get a layer of their own. Off, the layer keeps them, and two source notes an octave apart
+	 *     that land on one pitch become one note rather than one dropped layer.
+	 */
+	public MinecraftConversion convertToMinecraft(int quantizeTicks, boolean snapTempo,
+			int repeatMergeTicks, boolean gameTicks, OctaveShifting shifting,
+			boolean splitTransposed) {
 		int grid = Math.max(1, quantizeTicks);
 		double repeatWindow = repeatMergeTicks <= 0
 			? 0.0
@@ -1254,6 +1301,7 @@ public record ComposerProject(
 		int mergedRepeats = 0;
 		int duplicateLayers = 0;
 		int duplicateLayerNotes = 0;
+		int mergedIntoExisting = 0;
 		List<Layer> convertedLayers = new ArrayList<>();
 		int convertedActiveLayer = 0;
 		int shiftedNotes = 0;
@@ -1269,11 +1317,23 @@ public record ComposerProject(
 			if (sourceNotes.isEmpty()) {
 				notesByShift.put(0, List.of());
 			}
+			// Where the layer sits before any note is looked at individually. Nought under
+			// NOTES_ONLY, and nought as well for a sound-effect layer, whose rows are only somewhere
+			// to put a hit -- moving one would be moving nothing, and splitting one would file the
+			// same drum under two headings.
+			int base = shifting == OctaveShifting.LAYER_THEN_NOTES && source.pitched()
+				? bestLayerOctaveShift(sourceNotes)
+				: 0;
 			for (NoteEvent note : sourceNotes) {
-				int shift = octaveShiftIntoNoteBlockRange(note.midiNote());
+				// Bucketed by what the note needed *after* the layer moved, so everything the base
+				// already fixed shares one bucket and one layer. Named by the total, because what a
+				// name has to answer is how far these notes are from where they were written.
+				int residual = octaveShiftIntoNoteBlockRange(note.midiNote() + base);
+				int shift = base + residual;
 				long quantizedStart = Math.max(0L, Math.round(note.startTick() / (double)grid) * (long)grid);
 				NoteEvent converted = note.movedTo(quantizedStart, note.midiNote() + shift);
-				notesByShift.computeIfAbsent(shift, ignored -> new ArrayList<>()).add(converted);
+				notesByShift.computeIfAbsent(splitTransposed ? residual : 0,
+					ignored -> new ArrayList<>()).add(converted);
 				if (shift != 0) {
 					shiftedNotes++;
 				}
@@ -1317,18 +1377,25 @@ public record ComposerProject(
 				convertedActiveLayer = convertedLayers.size();
 			}
 			for (Map.Entry<Integer, List<NoteEvent>> entry : distinct) {
-				int shift = entry.getKey();
+				int shift = base + entry.getKey();
 				String convertedName = distinct.size() == 1 && shift == 0
 					? source.name()
 					: source.name() + octaveShiftSuffix(shift);
-				convertedLayers.add(new Layer(
+				Layer built = new Layer(
 					convertedName,
 					source.instrument(),
 					source.muted(),
 					source.buildEnabled(),
 					source.visible(),
 					entry.getValue()
-				));
+				);
+				// What the layer would not hold. A layer keeps one note per pitch per tick, so two
+				// source notes an octave apart that land on the same pitch become one -- the same
+				// dedupe the split reports as a dropped duplicate layer, arriving a note at a time
+				// because there is no second layer for it to arrive as. Counted rather than left
+				// silent: it is the one way this can take notes away, and it should say so.
+				mergedIntoExisting += entry.getValue().size() - built.notes().size();
+				convertedLayers.add(built);
 			}
 		}
 
@@ -1383,7 +1450,8 @@ public record ComposerProject(
 			convertedTempo / (double)tempoMicrosPerQuarter,
 			mergedRepeats,
 			duplicateLayers,
-			duplicateLayerNotes
+			duplicateLayerNotes,
+			mergedIntoExisting
 		);
 	}
 
@@ -1910,6 +1978,48 @@ public record ComposerProject(
 		List<NoteEvent> result = new ArrayList<>(kept);
 		notes.stream().filter(note -> !scope.contains(note.id())).forEach(result::add);
 		return List.copyOf(result);
+	}
+
+	/**
+	 * The multiple of twelve that leaves the fewest of a layer's notes outside the note-block range.
+	 *
+	 * <p>Its own count, not the melody-weighted one {@link #bestTransposeIntoRange} uses. That weight
+	 * was measured for moving a whole song, where the top voice at each instant is the melody often
+	 * enough to steer by; the top voice of one accompaniment layer is not the melody, it is merely
+	 * that layer's highest note. A weight measured for one question is not evidence about a different
+	 * one, so this minimises the thing the mode is named after and nothing else.</p>
+	 *
+	 * <p>Ties go to the smaller move, which is what keeps a layer already wholly in range where it
+	 * is: it scores nought at nought, and nothing can beat that.</p>
+	 */
+	private static int bestLayerOctaveShift(List<NoteEvent> notes) {
+		if (notes.isEmpty()) {
+			return 0;
+		}
+		int lowest = notes.stream().mapToInt(NoteEvent::midiNote).min().orElse(0);
+		int highest = notes.stream().mapToInt(NoteEvent::midiNote).max().orElse(0);
+		int best = 0;
+		int fewest = Integer.MAX_VALUE;
+		for (int shift = -120; shift <= 120; shift += 12) {
+			// Only shifts that keep every note a MIDI note. NoteEvent clamps to 0..127, so a shift
+			// that ran off either end would not be rejected, it would silently retune the notes it
+			// pushed over the edge.
+			if (lowest + shift < 0 || highest + shift > 127) {
+				continue;
+			}
+			int outside = 0;
+			for (NoteEvent note : notes) {
+				int moved = note.midiNote() + shift;
+				if (moved < NOTE_BLOCK_BASE_MIDI_NOTE || moved > NOTE_BLOCK_MAX_MIDI_NOTE) {
+					outside++;
+				}
+			}
+			if (outside < fewest || outside == fewest && Math.abs(shift) < Math.abs(best)) {
+				fewest = outside;
+				best = shift;
+			}
+		}
+		return best;
 	}
 
 	private static int octaveShiftIntoNoteBlockRange(int midiNote) {

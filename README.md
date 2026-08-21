@@ -111,6 +111,37 @@ never intercepts right-clicks. If the required item is not in the hotbar, the
 selected slot is left unchanged.
 
 
+## Convert for Minecraft
+
+A note block plays two octaves and one semitone, MIDI 54 to 78, and most music
+does not fit in that. Convert brings every note into it by moving notes whole
+octaves -- always whole octaves, because a part moved by anything else is not in
+a different octave, it is in a different key from the rest of the song.
+
+Two settings under **Convert for Minecraft** decide how:
+
+- **Out-of-range notes** -- `Shift the notes` moves only the notes that are out
+  of range, each by its own nearest octave, and leaves everything else exactly
+  where it was written. `Shift the layer, then the notes` moves the whole layer
+  to wherever the fewest of its notes are out of range and then shifts whatever
+  is still out, note by note. The second splits fewer layers and keeps a part's
+  intervals together; the cost is that notes with nothing wrong with them can
+  move, when moving them catches more strays than it creates. A layer already
+  wholly in range scores nothing at all and stays where it is.
+- **Split transposed notes into layers** -- when a note takes a different octave
+  from the rest of its layer, give it a layer of its own, named with the octave
+  it moved. Nothing about a layer requires this: it is so you can see what
+  Convert moved, mute it, or put it back. Off keeps the layer whole and the layer
+  count down, and two notes an octave apart that land on one pitch become one
+  note instead of one dropped layer.
+
+Both modes end with every note in range, whichever way the split is set, because
+the last step of each is the same per-note octave shift and the window is wide
+enough that no pitch class can fail. A wide part still splits either way if no
+single octave holds it -- that is the part being wider than a note block, not a
+setting being wrong.
+
+
 ## Copying and repeating
 
 Dragging a box over a passage does two things. It selects the notes inside it,
