@@ -657,34 +657,30 @@ class ClipboardAndLayersTest {
 	}
 
 	/**
-	 * A sound-effect layer has no pitch to fit, so the layer shift is not offered one.
+	 * A sound-effect layer is not transposed, is not split, and is not renamed.
 	 *
-	 * <p>Its rows are only somewhere to put a hit -- {@code toSteps} does not filter an unpitched
-	 * layer by range at all, so every note on one builds wherever it is drawn. Moving such a layer
-	 * would move nothing, so the mode leaves it exactly as the other mode does. The same notes on a
-	 * harp are the control: there, moving the layer is the whole difference.</p>
-	 *
-	 * <p>It still splits, because the per-note step runs on it as it always has. That is older than
-	 * this setting and is not what the setting is for.</p>
+	 * <p>{@code toSteps} does not filter an unpitched layer by range, so every note on one builds
+	 * wherever it is drawn and the row a hit sits on is only somewhere to put it. A shift therefore
+	 * moved nothing while the split it caused was pure cost. The same notes on a harp are the
+	 * control: there, both the shift and the split are the whole point.</p>
 	 */
 	@Test
-	void theLayerShiftSkipsSoundEffectLayers() {
-		List<NoteEvent> line = List.of(note(47, 0L), note(50, 480L), note(54, 960L), note(57, 1440L));
+	void soundEffectLayersAreLeftAlone() {
+		List<NoteEvent> line = List.of(note(20, 0L), note(23, 480L), note(96, 960L));
 		ComposerProject effects = songOf(new Layer("Door", "FX_OAK_DOOR", false, true, true, line));
 		ComposerProject harp = songOf(new Layer("Lead", "HARP", false, true, true, line));
 
-		assertEquals(
-			names(effects.convertToMinecraft(480, false, 0, false,
-				ComposerProject.OctaveShifting.NOTES_ONLY, true).project()),
-			names(effects.convertToMinecraft(480, false, 0, false,
-				ComposerProject.OctaveShifting.LAYER_THEN_NOTES, true).project()),
-			"the two modes agree on an unpitched layer, because there is nothing to move");
-		assertNotEquals(
-			names(harp.convertToMinecraft(480, false, 0, false,
-				ComposerProject.OctaveShifting.NOTES_ONLY, true).project()),
-			names(harp.convertToMinecraft(480, false, 0, false,
-				ComposerProject.OctaveShifting.LAYER_THEN_NOTES, true).project()),
-			"and disagree on the same notes played by something with a pitch");
+		for (ComposerProject.OctaveShifting mode : ComposerProject.OctaveShifting.values()) {
+			ComposerProject.MinecraftConversion converted =
+				effects.convertToMinecraft(480, false, 0, false, mode, true);
+			assertEquals(List.of("Door"), names(converted.project()), mode + " split a door");
+			assertEquals(List.of(20, 23, 96), pitches(converted.project().layers().getFirst()),
+				mode + " retuned a block that has no pitch");
+			assertEquals(0, converted.shiftedNotes(), mode + " counted a move that did not happen");
+		}
+		assertTrue(harp.convertToMinecraft(480, false, 0, false,
+				ComposerProject.OctaveShifting.NOTES_ONLY, true).project().layers().size() > 1,
+			"the same notes on a pitched instrument do split");
 	}
 
 	private static List<Integer> pitches(Layer layer) {

@@ -1317,18 +1317,22 @@ public record ComposerProject(
 			if (sourceNotes.isEmpty()) {
 				notesByShift.put(0, List.of());
 			}
-			// Where the layer sits before any note is looked at individually. Nought under
-			// NOTES_ONLY, and nought as well for a sound-effect layer, whose rows are only somewhere
-			// to put a hit -- moving one would be moving nothing, and splitting one would file the
-			// same drum under two headings.
-			int base = shifting == OctaveShifting.LAYER_THEN_NOTES && source.pitched()
+			// A sound effect is not transposed at all, by either mode. There is no range for it to
+			// be outside of -- toSteps does not filter an unpitched layer by range, so every note on
+			// one builds wherever it is drawn, and the row a hit sits on is only somewhere to put
+			// it. So the shift moved nothing and the split it caused was pure cost: a door written
+			// low came out as "Door (+2 oct)" and "Door (+1 oct)", two layers against the
+			// hundred-and-twenty-eight for a block that makes one noise.
+			boolean pitched = source.pitched();
+			// Where the layer sits before any note is looked at individually.
+			int base = pitched && shifting == OctaveShifting.LAYER_THEN_NOTES
 				? bestLayerOctaveShift(sourceNotes)
 				: 0;
 			for (NoteEvent note : sourceNotes) {
 				// Bucketed by what the note needed *after* the layer moved, so everything the base
 				// already fixed shares one bucket and one layer. Named by the total, because what a
 				// name has to answer is how far these notes are from where they were written.
-				int residual = octaveShiftIntoNoteBlockRange(note.midiNote() + base);
+				int residual = pitched ? octaveShiftIntoNoteBlockRange(note.midiNote() + base) : 0;
 				int shift = base + residual;
 				long quantizedStart = Math.max(0L, Math.round(note.startTick() / (double)grid) * (long)grid);
 				NoteEvent converted = note.movedTo(quantizedStart, note.midiNote() + shift);

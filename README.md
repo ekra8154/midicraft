@@ -234,7 +234,9 @@ There is no dispenser. An empty dispenser and an empty dropper both play
 
 A layer set to one of these is not tuned. Every hit sounds the same, so the row a
 hit is drawn on is only somewhere to put it, and two hits on the same tick are one
-hit. Nothing on such a layer is ever out of range.
+hit. Nothing on such a layer is ever out of range, and Convert leaves it exactly
+where it is -- there is no octave to move it to that would sound like anything
+different, so it is neither transposed nor split.
 
 Each effect names how far it can be heard, because they are not all alike. Most
 carry 16 blocks; a bell carries 32, a mob head note block 48, and a sculk shrieker
