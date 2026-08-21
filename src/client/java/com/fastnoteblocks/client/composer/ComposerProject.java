@@ -1645,6 +1645,37 @@ public record ComposerProject(
 	}
 
 	/**
+	 * Puts copies of {@code incoming} into the list at {@code at}, with notes under fresh ids.
+	 *
+	 * <p>All or nothing against the layer cap, the same as duplicating: half a paste is a song with
+	 * some of what you asked for and no way to tell which half.</p>
+	 *
+	 * <p>Names are left exactly as they came. Pasting a layer called Bass gives a second layer
+	 * called Bass, which reads oddly for a copy and is exactly right for a cut being moved -- and
+	 * the clipboard cannot tell those apart at the moment it lands.</p>
+	 */
+	public ComposerProject withLayersInserted(int at, List<Layer> incoming) {
+		if (incoming == null || incoming.isEmpty()
+				|| layers.size() + incoming.size() > MAX_LAYERS) {
+			return this;
+		}
+		int landing = Math.max(0, Math.min(layers.size(), at));
+		long nextId = nextNoteId;
+		List<Layer> arriving = new ArrayList<>(incoming.size());
+		for (Layer layer : incoming) {
+			List<NoteEvent> copied = new ArrayList<>(layer.notes().size());
+			for (NoteEvent note : layer.notes()) {
+				copied.add(new NoteEvent(nextId++, note.midiNote(), note.startTick(),
+					note.durationTicks(), note.velocity()));
+			}
+			arriving.add(layer.withNotes(copied));
+		}
+		List<Layer> updated = new ArrayList<>(layers);
+		updated.addAll(landing, arriving);
+		return with(updated, landing, nextId);
+	}
+
+	/**
 	 * Copies the given notes {@code tickDelta} later, each one staying on the layer it is already on.
 	 *
 	 * <p>The difference from {@link #pasteNotes}: a paste arrives from a clipboard and is aimed at a

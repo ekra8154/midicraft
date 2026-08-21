@@ -366,6 +366,21 @@ public final class ComposerScreen extends Screen {
 	private final Set<Long> selectedNotes = new LinkedHashSet<>();
 	private final List<Button> moveLayerButtons = new ArrayList<>();
 	private final Set<Integer> selectedLayers = new LinkedHashSet<>();
+	/**
+	 * Which half of the screen the keyboard is pointing at.
+	 *
+	 * <p>Delete used to mean "the notes, or the layers if no note is selected". That is a mode you
+	 * cannot see deciding an expensive thing: reach for Delete believing a passage is selected, and
+	 * a layer goes instead. Five more keys had the opposite fault and were nailed to one pane
+	 * whatever you were working in -- Ctrl+E always merged layers, Ctrl+D and Ctrl+C always acted on
+	 * notes.</p>
+	 *
+	 * <p>So the keyboard follows the last pane clicked, the way it does in every file manager and
+	 * every editor with two panes. It is caused by an act, it is drawn on screen, and it is already
+	 * learned. Selections in both panes survive it -- clicking into the roll leaves the layers
+	 * selected, it just stops the keyboard reaching them.</p>
+	 */
+	private Pane focusedPane = Pane.ROLL;
 	private int rowHeight = ROW_HEIGHT;
 	private int layerScroll;
 	private boolean layerViewInitialised;
@@ -381,6 +396,8 @@ public final class ComposerScreen extends Screen {
 	 */
 	private int layerMenuRow = -1;
 	private List<ClipboardNote> clipboard = List.of();
+	/** Whole layers taken by Ctrl+C while the panel had the keyboard. Separate from the notes one. */
+	private List<Layer> layerClipboard = List.of();
 	/** The tick the copy started on, which is where Ctrl+Shift+V puts it back. */
 	private long clipboardOriginTick;
 	private Button playButton;
@@ -1003,7 +1020,21 @@ public final class ComposerScreen extends Screen {
 	 * order nobody chose.</p>
 	 */
 	private void duplicateLayers(int source) {
-		List<Integer> sources = layersToEdit(source);
+		duplicateLayers(layersToEdit(source));
+	}
+
+	/** The rows in view order, for the keyboard, which has no clicked row to start from. */
+	private List<Integer> sortedSelectedLayers() {
+		return selectedLayers.stream()
+			.filter(index -> index >= 0 && index < project().layers().size())
+			.sorted()
+			.toList();
+	}
+
+	private void duplicateLayers(List<Integer> sources) {
+		if (sources.isEmpty()) {
+			return;
+		}
 		ComposerProject copied = project().duplicateLayers(Set.copyOf(sources));
 		if (copied.equals(project())) {
 			showResult(Component.literal("No room for " + (sources.size() == 1 ? "another layer"
@@ -2259,6 +2290,16 @@ public final class ComposerScreen extends Screen {
 	 * @return whether anything was actually put down
 	 */
 	private boolean dropSelection() {
+		// The focused pane's selection goes first, because that is the one the keyboard is holding.
+		// With the roll focused it still falls through to the layers on a second press, which is how
+		// you get all the way back to nothing without reaching for the mouse.
+		if (focusedPane == Pane.LAYERS) {
+			if (!selectedLayers.isEmpty()) {
+				clearLayerSelection();
+				return true;
+			}
+			return false;
+		}
 		if (!selectedNotes.isEmpty() || hasRange()) {
 			selectedNotes.clear();
 			clearRange();
@@ -2646,9 +2687,9 @@ public final class ComposerScreen extends Screen {
 			case CLEAR_MARKERS -> "Removes every marker, and with them the strip they are drawn in. "
 				+ "Ctrl+Z puts them back.";
 			case SELECT_ALL_NOTES -> "Selects every note on the active layers.";
-			case SELECT_NONE -> "Puts down the selected notes. With none selected it steps out of "
-				+ "the selected layers instead, which is the same thing as clicking the empty run under "
-				+ "the layer list.";
+			case SELECT_NONE -> "Puts down whatever the keyboard is holding: the selected notes if "
+				+ "you last clicked the roll, the selected layers if you last clicked the panel. From "
+				+ "the roll a second press steps out of the layers as well.";
 		};
 	}
 
@@ -2658,7 +2699,8 @@ public final class ComposerScreen extends Screen {
 			case DUPLICATE -> "Copies this layer, notes and all, into a new one directly below it, "
 				+ "and selects the copy. The usual reason is to double a part on a second instrument, "
 				+ "so the copy is where the change goes. With several layers selected it copies all "
-				+ "of them, each copy under its own original.";
+				+ "of them, each copy under its own original. Ctrl+D does the same while this panel "
+				+ "has the keyboard.";
 			case MOVE_UP -> "Moves this layer one row up. With several selected they move together "
 				+ "as a block, keeping their order. Dragging a row by its name does the same thing.";
 			case MOVE_DOWN -> "Moves this layer one row down. With several selected they move "
@@ -2670,7 +2712,9 @@ public final class ComposerScreen extends Screen {
 				+ "keeps its name and instrument -- so merging across two instruments gives every "
 				+ "note the surviving one. Ctrl+E does the same thing.";
 			case DELETE_SELECTED -> "Removes the selected layers and every note on them. Deleting all "
-				+ "of them leaves one empty layer to work in. Ctrl+Z puts them back.";
+				+ "of them leaves one empty layer to work in. Ctrl+Z puts them back, and so does "
+				+ "Ctrl+V if you took them with Ctrl+X. Delete does this while the panel has the "
+				+ "keyboard, which is what the brighter highlight on these rows means.";
 			case SNAP_TO_START -> "Pulls the selected layers forward until the first of them plays "
 				+ "on tick zero, taking the silence an import left at the front off the build. They "
 				+ "all move by the same amount, so parts that did not start together still do not. "
@@ -2910,11 +2954,20 @@ public final class ComposerScreen extends Screen {
 			int color = layerLit(index) ? vivid(layerColor(index)) : faded(layerColor(index));
 			int left = row.inset();
 			int right = layerPanelWidth() - row.inset();
+			// Two saturations of one highlight rather than a third colour. The row already carries
+			// two states -- active, which is where a new note lands, and selected, which is what a
+			// layer action acts on -- and a panel that does not hold the keyboard draws both of them
+			// muted. That is the file-manager convention, and it says "these are still selected, and
+			// Delete will not reach them" without needing a fourth thing to learn.
+			boolean lit = focusedPane == Pane.LAYERS;
 			graphics.fill(left, y - 2, right, y + rowHeight - 2,
-				activeLayer ? 0xAA4C6D82 : selected ? 0xAA3C5266 : 0x33202429);
+				activeLayer ? (lit ? 0xAA4C6D82 : 0x66343C44)
+					: selected ? (lit ? 0xAA3C5266 : 0x552E3740) : 0x33202429);
 			if (selected) {
 				// Unmistakable outline: a tinted background alone reads as noise on a dark panel.
-				int edge = activeLayer ? 0xFFAEE2FF : 0xFF6FA8CC;
+				int edge = activeLayer
+					? (lit ? 0xFFAEE2FF : 0xFF6E7A83)
+					: (lit ? 0xFF6FA8CC : 0xFF566068);
 				graphics.fill(left, y - 2, right, y - 1, edge);
 				graphics.fill(left, y + rowHeight - 3, right, y + rowHeight - 2, edge);
 				graphics.fill(right - 1, y - 2, right, y + rowHeight - 2, edge);
@@ -4108,7 +4161,9 @@ public final class ComposerScreen extends Screen {
 		}
 		long drawStart = profiling ? System.nanoTime() : 0L;
 		quads.graphics = graphics;
-		noteQuads = cells.draw(quads);
+		// Dimmed while the layer panel holds the keyboard, for the same reason and in the other
+		// direction: a note selection Delete can no longer reach should not look like one it can.
+		noteQuads = cells.draw(quads, focusedPane == Pane.ROLL ? 0xFFFFFFFF : 0xFF6E7A83);
 		quads.graphics = null;
 		if (profiling) {
 			long now = System.nanoTime();
@@ -4618,6 +4673,9 @@ public final class ComposerScreen extends Screen {
 			instrumentMenuLayer = -1;
 			return true;
 		}
+		// Every menu above has had its say and none of them is a pane, so whatever is left is a
+		// click on the composition itself and decides where the keyboard points.
+		focusedPane = event.x() < layerPanelWidth() ? Pane.LAYERS : Pane.ROLL;
 		if (event.button() == 1) {
 			int stateLayer = layerStateAt(event.x(), event.y());
 			if (stateLayer >= 0) {
@@ -5365,7 +5423,16 @@ public final class ComposerScreen extends Screen {
 			dropSelection();
 			return true;
 		}
+		// From here to the arrow keys, everything follows the pane that holds the keyboard.
+		boolean onLayers = focusedPane == Pane.LAYERS;
 		if (event.isSelectAll()) {
+			if (onLayers) {
+				selectedLayers.clear();
+				for (int index = 0; index < project().layers().size(); index++) {
+					selectedLayers.add(index);
+				}
+				return true;
+			}
 			selectedNotes.clear();
 			clearRange();
 			for (int layerIndex : selectionLayers()) {
@@ -5375,22 +5442,35 @@ public final class ComposerScreen extends Screen {
 			return true;
 		}
 		if (event.isCopy()) {
-			copySelection();
+			if (onLayers) {
+				copyLayers();
+			} else {
+				copySelection();
+			}
 			return true;
 		}
 		if (event.isCut()) {
-			copySelection();
-			deleteSelectedNotes();
+			if (onLayers) {
+				copyLayers();
+				deleteSelectedLayers();
+			} else {
+				copySelection();
+				deleteSelectedNotes();
+			}
 			return true;
 		}
 		if (event.isPaste()) {
-			pasteClipboard(false);
+			if (onLayers) {
+				pasteLayers();
+			} else {
+				pasteClipboard(false);
+			}
 			return true;
 		}
 		// isPaste is Ctrl+V with no shift, so the shifted one is free for the variant of it -- the
 		// same shift-a-variant convention Ctrl+Shift+S and Ctrl+Shift+C already follow here.
 		if (event.hasControlDownWithQuirk() && event.hasShiftDown()
-				&& event.key() == GLFW.GLFW_KEY_V) {
+				&& event.key() == GLFW.GLFW_KEY_V && !onLayers) {
 			pasteClipboard(true);
 			return true;
 		}
@@ -5423,11 +5503,17 @@ public final class ComposerScreen extends Screen {
 					return true;
 				}
 				case GLFW.GLFW_KEY_E -> {
-					mergeSelectedLayers();
+					if (onLayers) {
+						mergeSelectedLayers();
+					}
 					return true;
 				}
 				case GLFW.GLFW_KEY_D -> {
-					duplicateSelection();
+					if (onLayers) {
+						duplicateLayers(sortedSelectedLayers());
+					} else {
+						duplicateSelection();
+					}
 					return true;
 				}
 				case GLFW.GLFW_KEY_I -> {
@@ -5450,16 +5536,16 @@ public final class ComposerScreen extends Screen {
 				return true;
 			}
 		}
-		if ((event.key() == GLFW.GLFW_KEY_DELETE || event.key() == GLFW.GLFW_KEY_BACKSPACE)
-				&& !selectedNotes.isEmpty()) {
-			deleteSelectedNotes();
-			return true;
-		}
-		// With no notes selected, the selection is the layers, so that is what Delete is pointing at.
-		// Delete only, not Backspace: the notes case has two keys because deleting a note is small
-		// and constant, and taking out four layers of a song is neither.
-		if (event.key() == GLFW.GLFW_KEY_DELETE && !selectedLayers.isEmpty()) {
-			deleteSelectedLayers();
+		// One rule instead of the old chain: whichever pane holds the keyboard is what Delete is
+		// pointing at, and if that pane has nothing selected the key does nothing. Backspace reaches
+		// layers too now -- it was held back only because Delete could arrive at them by accident,
+		// and it no longer can.
+		if (event.key() == GLFW.GLFW_KEY_DELETE || event.key() == GLFW.GLFW_KEY_BACKSPACE) {
+			if (onLayers) {
+				deleteSelectedLayers();
+			} else {
+				deleteSelectedNotes();
+			}
 			return true;
 		}
 		if (!selectedNotes.isEmpty() && (event.isLeft() || event.isRight() || event.isUp() || event.isDown())) {
@@ -6615,6 +6701,58 @@ public final class ComposerScreen extends Screen {
 			.toList();
 	}
 
+	/**
+	 * Takes the selected layers, whole, so they can be put back somewhere else.
+	 *
+	 * <p>Held as layers rather than as notes: a layer is a name, an instrument and a state as much
+	 * as it is the music on it, and copying one that arrived back as bare notes on whatever layer
+	 * happened to be active would not be a copy of it.</p>
+	 */
+	private void copyLayers() {
+		List<Layer> taken = selectedLayers.stream()
+			.filter(index -> index >= 0 && index < project().layers().size())
+			.sorted()
+			.map(index -> project().layers().get(index))
+			.toList();
+		if (taken.isEmpty()) {
+			return;
+		}
+		layerClipboard = taken;
+		showResult(Component.literal("Copied " + layerCountLabel(taken.size()) + "."));
+	}
+
+	/**
+	 * Puts the copied layers back, directly below the lowest selected row.
+	 *
+	 * <p>Below rather than above, and below the <em>lowest</em> rather than the first, so pasting
+	 * next to a block of layers you have selected lands after all of them instead of splitting
+	 * them. With nothing selected they go on the end, which is where a layer with no stated
+	 * position belongs.</p>
+	 */
+	private void pasteLayers() {
+		if (layerClipboard.isEmpty()) {
+			return;
+		}
+		int at = selectedLayers.isEmpty()
+			? project().layers().size()
+			: selectedLayers.stream().mapToInt(Integer::intValue).max().orElse(-1) + 1;
+		ComposerProject pasted = project().withLayersInserted(at, layerClipboard);
+		if (pasted.equals(project())) {
+			showResult(Component.literal("No room for " + layerCountLabel(layerClipboard.size())
+				+ " - " + ComposerProject.MAX_LAYERS + " is the limit."));
+			return;
+		}
+		apply("paste " + layerCountLabel(layerClipboard.size()), pasted);
+		selectedLayers.clear();
+		for (int offset = 0; offset < layerClipboard.size(); offset++) {
+			selectedLayers.add(at + offset);
+		}
+		layersChanged();
+		rebuildMoveLayerButtons();
+		showResult(Component.literal("Pasted " + layerCountLabel(layerClipboard.size())
+			+ " below row " + at + "."));
+	}
+
 	private void deleteSelectedNotes() {
 		if (!selectedNotes.isEmpty()) {
 			apply("delete " + selectedNotes.size() + (selectedNotes.size() == 1 ? " note" : " notes"),
@@ -7373,6 +7511,12 @@ public final class ComposerScreen extends Screen {
 
 	/** One row of an open menu: a thing to do, a setting to cycle, or a submenu to open. */
 	/** A marker and the run of pixels its name occupies in the lane. */
+	/** The two halves of the screen that own a selection and can hold the keyboard. */
+	private enum Pane {
+		ROLL,
+		LAYERS
+	}
+
 	private record MarkerTab(ComposerProject.Marker marker, int left, int right) {
 	}
 

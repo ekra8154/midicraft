@@ -172,6 +172,37 @@ any two of them. That is usually right for a phrase of even steps and it is
 always visible, drawn as a hairline in the same strip, before you commit to it.
 
 
+## Two panes, one keyboard
+
+The composer has two halves that own a selection: the layer panel and the piano
+roll. The keyboard points at whichever you clicked last, and that decides what
+Delete, Ctrl+A, Ctrl+C, Ctrl+X, Ctrl+V, Ctrl+D and Ctrl+E act on. Clicking into
+the roll leaves the layers selected -- it only stops the keyboard reaching them.
+
+You can see which has it. A selection in the pane holding the keyboard draws at
+full strength; the other pane's draws muted. Same highlight, two saturations, so
+"these are still selected and Delete will not reach them" needs nothing new to
+learn.
+
+This replaces a rule you could not see. Delete used to mean "the notes, or the
+layers if no note is selected", so reaching for it while believing a passage was
+selected took a layer instead. Five other keys had the opposite fault and were
+nailed to one pane whatever you were working in.
+
+With the panel holding the keyboard:
+
+- **Ctrl+C** takes the selected layers whole -- names, instruments, states and
+  notes. **Ctrl+X** takes them and removes them. **Ctrl+V** puts them back
+  directly below the lowest selected row, or on the end when nothing is selected.
+  Pasted layers get fresh note ids and keep their names.
+- **Ctrl+D** duplicates them, each copy under its own original.
+- **Ctrl+E** merges them. **Ctrl+A** selects every layer.
+- **Delete** and **Backspace** remove them.
+
+Undo and redo are not routed and never were: there is one history for the whole
+composition, and Ctrl+Z takes back the last thing you did whichever pane did it.
+
+
 ## What gets built
 
 A layer goes into the build if you can hear it and see it. Muting a layer or

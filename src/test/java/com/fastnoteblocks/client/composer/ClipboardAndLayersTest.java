@@ -720,6 +720,54 @@ class ClipboardAndLayersTest {
 				.map(com.fastnoteblocks.client.FastNoteblocksConfig.SequenceTrack::name).toList());
 	}
 
+	/**
+	 * Pasted layers land where they were aimed, under fresh note ids, keeping their own names.
+	 *
+	 * <p>Fresh ids for the reason a duplicate needs them: layers are selected and moved by note id,
+	 * and a paste sharing them would be a second view of the layer it came from rather than a new
+	 * one. Names are left alone, which reads oddly for a copy and is exactly right for a cut being
+	 * moved -- and at the moment it lands the clipboard cannot tell those apart.</p>
+	 */
+	@Test
+	void pastedLayersArriveWhereTheyWereAimedWithTheirOwnNotes() {
+		ComposerProject song = songOf(
+			layer("A", "HARP", 60),
+			layer("B", "BASS", 40),
+			layer("C", "HARP", 62));
+		List<Layer> taken = List.of(song.layers().getFirst(), song.layers().get(1));
+
+		ComposerProject pasted = song.withLayersInserted(2, taken);
+
+		assertEquals(List.of("A", "B", "A", "B", "C"), names(pasted));
+		assertEquals("BASS", pasted.layers().get(3).instrument(), "and their instruments came too");
+		Set<Long> before = song.layers().stream()
+			.flatMap(current -> current.notes().stream())
+			.map(NoteEvent::id)
+			.collect(Collectors.toCollection(LinkedHashSet::new));
+		assertTrue(pasted.layers().get(2).notes().stream().noneMatch(note -> before.contains(note.id())),
+			"the arriving notes answer to their own ids");
+		assertEquals(startTicks(song.layers().getFirst()), startTicks(pasted.layers().get(2)),
+			"and sit where they did");
+	}
+
+	/** Landing past either end is clamped, and a paste that would pass the cap does not happen. */
+	@Test
+	void insertingLayersIsClampedAndAllOrNothing() {
+		ComposerProject song = songOf(layer("A", "HARP", 60));
+		List<Layer> taken = List.of(song.layers().getFirst());
+
+		assertEquals(List.of("A", "A"), names(song.withLayersInserted(99, taken)), "past the end");
+		assertEquals(List.of("A", "A"), names(song.withLayersInserted(-5, taken)), "past the start");
+		assertEquals(song, song.withLayersInserted(0, List.of()), "nothing to paste is no edit");
+
+		List<Layer> tooMany = new ArrayList<>();
+		for (int index = 0; index < ComposerProject.MAX_LAYERS; index++) {
+			tooMany.add(song.layers().getFirst());
+		}
+		assertEquals(song, song.withLayersInserted(0, tooMany),
+			"one over the cap and none of them arrive");
+	}
+
 	private static List<Integer> pitches(Layer layer) {
 		return layer.notes().stream().map(NoteEvent::midiNote).toList();
 	}
