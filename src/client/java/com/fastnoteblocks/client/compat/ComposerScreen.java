@@ -3927,21 +3927,69 @@ public final class ComposerScreen extends Screen {
 		if (to < rollX || from > rollX + rollWidth) {
 			return;
 		}
-		graphics.fill(Math.max(rollX, from), rollY, Math.min(rollX + rollWidth, to),
-			rollY + rollHeight, 0x1444CCFF);
+		// As tall as what is in it, not as tall as the roll. A column running the full height of the
+		// window reads as a mode the whole composition is in; the range is a fact about one passage
+		// on a few of its parts, and drawn around those it says so and leaves the rest alone. It
+		// falls back to the full height only with no selection left to measure, which is a range
+		// about to be put down anyway.
+		int[] pitches = rangePitchExtent();
+		int top = pitches == null ? rollY : Math.max(rollY, noteY(pitches[0]) - 1);
+		int bottom = pitches == null
+			? rollY + rollHeight
+			: Math.min(rollY + rollHeight, noteY(pitches[1]) + rowHeight);
+		if (bottom <= top) {
+			return;
+		}
+		graphics.fill(Math.max(rollX, from), top, Math.min(rollX + rollWidth, to), bottom,
+			0x1444CCFF);
 		if (from >= rollX) {
-			graphics.fill(from, rollY, from + 1, rollY + rollHeight, 0x667FD8F0);
+			graphics.fill(from, top, from + 1, bottom, 0x667FD8F0);
 		}
 		if (to <= rollX + rollWidth) {
-			graphics.fill(to - 1, rollY, to, rollY + rollHeight, 0x667FD8F0);
+			graphics.fill(to - 1, top, to, bottom, 0x667FD8F0);
 		}
 		String label = rangeLabel(rangeLength());
 		int labelLeft = Math.max(rollX + 2, from + 3);
+		// Above the band where there is room, so it does not sit on the notes it is measuring.
+		int labelTop = top - 9 >= rollY ? top - 9 : top + 1;
 		if (labelLeft + smallTextWidth(label) + 2 <= Math.min(rollX + rollWidth, to)) {
-			graphics.fill(labelLeft - 2, rollY + 1, labelLeft + smallTextWidth(label) + 2,
-				rollY + 9, 0xCC0E2028);
-			smallText(graphics, label, labelLeft, rollY + 2, 0xFF9FE8FF);
+			graphics.fill(labelLeft - 2, labelTop, labelLeft + smallTextWidth(label) + 2,
+				labelTop + 8, 0xCC0E2028);
+			smallText(graphics, label, labelLeft, labelTop + 1, 0xFF9FE8FF);
 		}
+	}
+
+	/**
+	 * The highest and lowest note the range's selection covers, or null when it covers none.
+	 *
+	 * <p>Bounded by the range at both ends, so this walks the notes inside the passage rather than
+	 * the notes in the song. A selection is nearly always one phrase, and a phrase is a few dozen
+	 * notes out of several thousand.</p>
+	 */
+	private int[] rangePitchExtent() {
+		if (selectedNotes.isEmpty()) {
+			return null;
+		}
+		int highest = Integer.MIN_VALUE;
+		int lowest = Integer.MAX_VALUE;
+		for (int layerIndex : selectionLayers()) {
+			Layer layer = project().layers().get(layerIndex);
+			if (!layer.visible()) {
+				continue;
+			}
+			List<NoteEvent> notes = layer.notes();
+			for (int index = lowerBoundStart(notes, rangeStart); index < notes.size(); index++) {
+				NoteEvent note = notes.get(index);
+				if (note.startTick() > rangeEnd) {
+					break;
+				}
+				if (selectedNotes.contains(note.id())) {
+					highest = Math.max(highest, note.midiNote());
+					lowest = Math.min(lowest, note.midiNote());
+				}
+			}
+		}
+		return highest == Integer.MIN_VALUE ? null : new int[] { highest, lowest };
 	}
 
 	/** The biggest step that still divides {@code value} evenly, or 1 when it is prime. */
