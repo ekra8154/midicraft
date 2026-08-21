@@ -564,6 +564,24 @@ public final class ComposerScreen extends Screen {
 	private int rollY;
 	private int rollWidth;
 	private int rollHeight;
+	/**
+	 * Whether the window had the keyboard at the last tick.
+	 *
+	 * <p>Read on the next click, so a press can tell whether it is the one handing focus back to
+	 * Minecraft. A tick is the right grain for it: the click that raises the window arrives in the
+	 * same batch of events as the focus itself, so nothing between them has run, while an alt-tab
+	 * followed by a click a moment later gets a tick in between and counts as a real click.</p>
+	 */
+	private boolean windowWasFocused = true;
+	/**
+	 * Whether the press being handled is spending itself on pointing something at the roll.
+	 *
+	 * <p>Two ways a click can be about focus rather than about music: it gave the window back to
+	 * Minecraft, or it moved the keyboard from the layer panel onto the roll. Either way it may
+	 * still select, drag or box, because none of those leave anything behind -- but it may not
+	 * write a note, which is the one thing you cannot undo by looking away.</p>
+	 */
+	private boolean pressClaimedFocus;
 	private double lastMouseX;
 	private double lastMouseY;
 	private int instrumentMenuLayer = -1;
@@ -4644,8 +4662,31 @@ public final class ComposerScreen extends Screen {
 		return cachedStats;
 	}
 
+	/** Whether anything is hanging open over the composition: a menu, a context menu, the palette. */
+	private boolean anyMenuOpen() {
+		return toolbarMenu != ToolbarMenu.NONE || layerMenuOpen || contextMenuOpen
+			|| instrumentMenuLayer >= 0;
+	}
+
+	/** Puts all of them away, which is what every way out of a menu ends up doing. */
+	private void closeMenus() {
+		toolbarMenu = ToolbarMenu.NONE;
+		openSubmenu = null;
+		layerMenuOpen = false;
+		contextMenuOpen = false;
+		instrumentMenuLayer = -1;
+	}
+
 	@Override
 	public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
+		// Right-click is the way out of anything open, and is spent on getting out of it. Before
+		// every other test, because the alternatives were all wrong in their own way: a right-click
+		// on a menu row ran the row, one inside the palette did nothing at all, and one outside
+		// either of them closed the menu and then went on to erase the notes underneath.
+		if (event.button() == 1 && anyMenuOpen()) {
+			closeMenus();
+			return true;
+		}
 		ToolbarMenu title = menuTitleAt(event.x(), event.y());
 		if (title == ToolbarMenu.SETTINGS) {
 			toolbarMenu = ToolbarMenu.NONE;
@@ -4708,6 +4749,20 @@ public final class ComposerScreen extends Screen {
 		}
 		// Every menu above has had its say and none of them is a pane, so whatever is left is a
 		// click on the composition itself and decides where the keyboard points.
+		//
+		// A press that arrives while the roll does not have the keyboard is spent on giving it the
+		// keyboard. The panel and the roll are two places to be, so clicking out of one and into
+		// the other is a move rather than an edit -- and the same is true of the click that brings
+		// the window back to the front, which used to leave a note behind wherever the cursor
+		// happened to be resting when you tabbed away.
+		pressClaimedFocus = !windowWasFocused
+			|| (focusedPane != Pane.ROLL && event.x() >= layerPanelWidth());
+		windowWasFocused = true;
+		// The box is drawn to wherever the mouse was last seen, and after a spell outside the window
+		// that is wherever it left. One frame of a selection box stretched across the whole song,
+		// every time you clicked back in.
+		lastMouseX = event.x();
+		lastMouseY = event.y();
 		focusedPane = event.x() < layerPanelWidth() ? Pane.LAYERS : Pane.ROLL;
 		if (event.button() == 1) {
 			int stateLayer = layerStateAt(event.x(), event.y());
@@ -4800,7 +4855,7 @@ public final class ComposerScreen extends Screen {
 			// library and 200ms on the slowest, and the slow ones were worse, because the cell being
 			// thrown across is bigger. Nearest tolerates half a cell either side, which is what makes
 			// it feel like it is listening.
-			if (takingNotes()) {
+			if (takingNotes() && !pressClaimedFocus) {
 				int before = project().noteCount();
 				placeNote(mouseMidi(event.y()), snapTick(recordTick()));
 				int added = project().noteCount() - before;
@@ -4919,7 +4974,7 @@ public final class ComposerScreen extends Screen {
 			}
 			return true;
 		}
-		if (doubleClick) {
+		if (doubleClick && !pressClaimedFocus) {
 			placeNote(mouseMidi(event.y()), snapTickInto(mouseTick(event.x())));
 			return true;
 		}
@@ -5107,6 +5162,15 @@ public final class ComposerScreen extends Screen {
 			}
 			case DELETE -> deleteSelectedNotes();
 		}
+	}
+
+	/** Whether Minecraft has the keyboard, asked of GLFW rather than inferred from anything. */
+	private boolean windowFocused() {
+		if (minecraft == null || minecraft.getWindow() == null) {
+			return true;
+		}
+		return GLFW.glfwGetWindowAttrib(minecraft.getWindow().handle(), GLFW.GLFW_FOCUSED)
+			== GLFW.GLFW_TRUE;
 	}
 
 	@Override
@@ -5302,7 +5366,7 @@ public final class ComposerScreen extends Screen {
 			// gesture whether or not it moved. With no layer selected there is nothing to draw into,
 			// so a click there stays what it was.
 			if (!boxAdditive && !boxDroppedSelection && !noLayerSelected()
-					&& !travelled(event.x(), event.y())) {
+					&& !pressClaimedFocus && !travelled(event.x(), event.y())) {
 				placeNote(mouseMidi(dragStartY), snapTickInto(mouseTick(dragStartX)));
 				return true;
 			}
@@ -5337,12 +5401,22 @@ public final class ComposerScreen extends Screen {
 					anchoredMidi + (int)Math.floor((mouseY - rollY) / rowHeight)));
 				return true;
 			}
-			topMidiNote = Math.max(12, Math.min(MAX_MIDI_NOTE,
-				topMidiNote + (scrollY > 0 ? 3 : -3)));
+			scrollPitch(scrollY);
 			return true;
 		}
 		if (!insideRoll(mouseX, mouseY)) {
 			return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
+		}
+		if (altDown()) {
+			// Up and down the pitch range without having to put the cursor on the keyboard first.
+			// The keyboard is a strip a few dozen pixels wide at the left-hand edge, so scrolling
+			// pitch meant leaving whatever you were looking at to reach it and coming back.
+			//
+			// Alt rather than Shift because Shift is already the fast horizontal scroll, and a
+			// modifier that means one thing over the roll and another over the keys is worse than
+			// one more modifier.
+			scrollPitch(scrollY);
+			return true;
 		}
 		if (controlDown()) {
 			long anchoredTick = mouseTick(mouseX);
@@ -5363,6 +5437,12 @@ public final class ComposerScreen extends Screen {
 		}
 		horizontalScroll = Math.max(0L, horizontalScroll - Math.round(scrollY * project().ppq()));
 		return true;
+	}
+
+	/** Moves the roll up and down the pitch range, from the keys or from the roll itself. */
+	private void scrollPitch(double scrollY) {
+		topMidiNote = Math.max(12, Math.min(MAX_MIDI_NOTE,
+			topMidiNote + (scrollY > 0 ? 3 : -3)));
 	}
 
 	@Override
@@ -5604,6 +5684,7 @@ public final class ComposerScreen extends Screen {
 		}
 		updateBoxScroll();
 		updateButtonStates();
+		windowWasFocused = windowFocused();
 	}
 
 	/**
@@ -7445,6 +7526,11 @@ public final class ComposerScreen extends Screen {
 	private boolean shiftDown() {
 		return InputConstants.isKeyDown(minecraft.getWindow(), GLFW.GLFW_KEY_LEFT_SHIFT)
 			|| InputConstants.isKeyDown(minecraft.getWindow(), GLFW.GLFW_KEY_RIGHT_SHIFT);
+	}
+
+	private boolean altDown() {
+		return InputConstants.isKeyDown(minecraft.getWindow(), GLFW.GLFW_KEY_LEFT_ALT)
+			|| InputConstants.isKeyDown(minecraft.getWindow(), GLFW.GLFW_KEY_RIGHT_ALT);
 	}
 
 	private void centerMinecraftRange() {
