@@ -273,6 +273,8 @@ public final class ComposerScreen extends Screen {
 		private static final int CHORD_WARNING_THRESHOLD = 24;
 	private static final int MAX_PREVIEW_SOUNDS_PER_FRAME = 64;
 	private static final int MIN_GRID_PIXEL_SPACING = 4;
+	/** Ten repeater ticks to the second, which is the landmark a redstone grid is counted in. */
+	private static final int REPEATER_TICKS_PER_SECOND = 10;
 	private static final int MIN_LABEL_PIXEL_SPACING = 32;
 	/** Room a ruler label needs: a bar number with a clock time under it, and air after them. */
 	private static final int RULER_LABEL_SPACING = 58;
@@ -454,6 +456,11 @@ public final class ComposerScreen extends Screen {
 	 */
 	private final Set<Long> takeNotes = new LinkedHashSet<>();
 	private Button snapButton;
+	/** The snap settings, in the order the button used to walk through them one click at a time. */
+	private static final int[] SNAP_CHOICES = { 1, 2, 4, 8, SNAP_REPEATER, SNAP_GAME_TICK, 0 };
+	private boolean snapMenuOpen;
+	private int snapMenuX;
+	private int snapMenuY;
 	private DelayScaleSlider delayScaleSlider;
 	private Button addLayerButton;
 	private EditBox layerNameBox;
@@ -775,9 +782,11 @@ public final class ComposerScreen extends Screen {
 			.tooltip(Tooltip.create(Component.literal(
 				"Preview all unmuted layers. Space plays from the marker, Enter from the start.")))
 			.build());
-		snapButton = addRenderableWidget(Button.builder(snapLabel(), button -> cycleSnap())
+		snapButton = addRenderableWidget(Button.builder(snapLabel(), button -> toggleSnapMenu())
 			.bounds(snapX, CONTROL_TOP, snapWidth, CONTROL_HEIGHT)
 			.build());
+		snapMenuX = snapX;
+		snapMenuY = CONTROL_TOP + CONTROL_HEIGHT + 1;
 		refreshSnapButton();
 		delayScaleSlider = addRenderableWidget(new DelayScaleSlider(
 			speedX, CONTROL_TOP, speedWidth, CONTROL_HEIGHT, project().speedQuarters(),
@@ -1508,16 +1517,103 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private void cycleSnap() {
-		snapSubdivision = switch (snapSubdivision) {
-			case 1 -> 2;
-			case 2 -> 4;
-			case 4 -> 8;
-			case 8 -> SNAP_REPEATER;
-			case SNAP_REPEATER -> SNAP_GAME_TICK;
-			case SNAP_GAME_TICK -> 0;
-			default -> 1;
-		};
+		int at = 0;
+		for (int index = 0; index < SNAP_CHOICES.length; index++) {
+			if (SNAP_CHOICES[index] == snapSubdivision) {
+				at = index;
+				break;
+			}
+		}
+		setSnap(SNAP_CHOICES[(at + 1) % SNAP_CHOICES.length]);
+	}
+
+	private void setSnap(int subdivision) {
+		snapSubdivision = subdivision;
+		snapMenuOpen = false;
 		refreshSnapButton();
+	}
+
+	/**
+	 * Opens the list of grids under the button.
+	 *
+	 * <p>Seven settings behind one button meant getting to the one you wanted by pressing it up to
+	 * six times and reading the label each time, which is a worse way to choose from a list than
+	 * any list. The button still says which grid is on -- that is the thing worth having on screen
+	 * at a glance -- and the list is what changing it costs.</p>
+	 */
+	private void toggleSnapMenu() {
+		boolean opening = !snapMenuOpen;
+		closeMenus();
+		snapMenuOpen = opening;
+	}
+
+	private int snapMenuWidth() {
+		int widest = 0;
+		for (int choice : SNAP_CHOICES) {
+			widest = Math.max(widest, font.width(snapLabel(choice).getString())
+				+ 14 + smallTextWidth(snapDetail(choice)));
+		}
+		return widest + 20;
+	}
+
+	private int snapMenuHeight() {
+		return SNAP_CHOICES.length * CONTEXT_MENU_ROW_HEIGHT + 4;
+	}
+
+	/**
+	 * The grids, each with what one of its steps is worth in repeater ticks.
+	 *
+	 * <p>The number is the whole reason this is a list rather than a cycle. "1/16" says nothing on
+	 * its own -- across a library it is anything from a quarter of a repeater tick to four of them,
+	 * because it is a note value and a repeater tick is a hundred milliseconds. Amber marks the
+	 * settings whose steps are not delays a build can place, so the ones that will hold up are
+	 * visible before one of them is picked rather than after.</p>
+	 */
+	private void extractSnapMenu(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
+		if (!snapMenuOpen) {
+			return;
+		}
+		int menuWidth = snapMenuWidth();
+		int left = Math.max(0, Math.min(snapMenuX, width - menuWidth));
+		int top = snapMenuY;
+		graphics.fill(left, top, left + menuWidth, top + snapMenuHeight(), 0xF0101115);
+		graphics.fill(left, top, left + menuWidth, top + 1, 0xFFAAAAAA);
+		for (int index = 0; index < SNAP_CHOICES.length; index++) {
+			int choice = SNAP_CHOICES[index];
+			int rowY = top + 2 + index * CONTEXT_MENU_ROW_HEIGHT;
+			boolean hovered = mouseX >= left && mouseX < left + menuWidth
+				&& mouseY >= rowY && mouseY < rowY + CONTEXT_MENU_ROW_HEIGHT;
+			boolean current = choice == snapSubdivision;
+			if (hovered) {
+				graphics.fill(left + 2, rowY, left + menuWidth - 2,
+					rowY + CONTEXT_MENU_ROW_HEIGHT, 0xFF356070);
+			}
+			if (current) {
+				graphics.fill(left + 2, rowY, left + 4, rowY + CONTEXT_MENU_ROW_HEIGHT, 0xFF8FD3FF);
+			}
+			graphics.text(font, snapLabel(choice), left + 8, rowY + 4,
+				current ? 0xFFFFFFFF : 0xFFCFD4DA, false);
+			// Off is the one setting with no step, so it has no number to carry.
+			if (choice != 0) {
+				String detail = snapDetail(choice);
+				smallText(graphics, detail, left + menuWidth - 8 - smallTextWidth(detail), rowY + 5,
+					snapOnRedstoneGrid(choice) ? 0xFF8A9098 : 0xFFE8B04A);
+			}
+		}
+	}
+
+	private boolean handleSnapMenuClick(double mouseX, double mouseY) {
+		int menuWidth = snapMenuWidth();
+		int left = Math.max(0, Math.min(snapMenuX, width - menuWidth));
+		if (mouseX < left || mouseX >= left + menuWidth) {
+			return false;
+		}
+		int row = ((int)mouseY - snapMenuY - 2) / CONTEXT_MENU_ROW_HEIGHT;
+		if (row < 0 || row >= SNAP_CHOICES.length || mouseY < snapMenuY + 2) {
+			return false;
+		}
+		setSnap(SNAP_CHOICES[row]);
+		return true;
 	}
 
 	/**
@@ -1540,7 +1636,12 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private String snapDetail() {
-		double ticks = gridSpan() / Math.max(1.0e-6, SongAnalysis.redstoneTickSpan(project()));
+		return snapDetail(snapSubdivision);
+	}
+
+	private String snapDetail(int subdivision) {
+		double ticks = gridSpan(subdivision)
+			/ Math.max(1.0e-6, SongAnalysis.redstoneTickSpan(project()));
 		String count = Math.abs(ticks - Math.rint(ticks)) < 0.005
 			? Long.toString(Math.round(ticks))
 			: trimZeros(String.format(java.util.Locale.ROOT, "%.2f", ticks));
@@ -1556,7 +1657,11 @@ public final class ComposerScreen extends Screen {
 	 * between the delays a repeater can make and cannot be built at all.</p>
 	 */
 	private boolean snapOnRedstoneGrid() {
-		double gameTicks = gridSpan()
+		return snapOnRedstoneGrid(snapSubdivision);
+	}
+
+	private boolean snapOnRedstoneGrid(int subdivision) {
+		double gameTicks = gridSpan(subdivision)
 			/ Math.max(1.0e-6, SongAnalysis.redstoneTickSpan(project()) / 2.0);
 		long whole = Math.round(gameTicks);
 		if (whole < 1L || Math.abs(gameTicks - whole) > 0.01) {
@@ -1571,12 +1676,26 @@ public final class ComposerScreen extends Screen {
 			: "That is not a delay a build can place in " + pasteMode().label() + ", so notes put on "
 				+ "this grid fall between the ticks it can reach. Edit > Convert for Minecraft moves "
 				+ "the tempo until the two line up.";
+		// Whether the lines on screen are the grid or a stand-in for it. Drawing every step at
+		// this zoom would be a wall of pixels, so the grid doubles until its lines are far
+		// enough apart -- which means "is that a game tick" sometimes answers no, and used to
+		// be unaskable. The lines are drawn brighter when they are the grid itself; this puts
+		// the same thing in words, with how far out of true the drawing is.
+		double drawn = drawnGridSpan();
+		String zoom = drawn <= gridSpan() * 1.001
+			? "Every step is drawn at this zoom."
+			: "Zoomed out: one line drawn per " + Math.round(drawn / gridSpan())
+				+ " steps, and drawn dimmer to say so.";
 		return Tooltip.create(Component.literal("Grid used when adding or dragging notes."
-			+ "\nOne step is " + snapDetail() + ".\n" + where));
+			+ "\nOne step is " + snapDetail() + ".\n" + where + "\n" + zoom));
 	}
 
 	private Component snapLabel() {
-		return Component.literal(switch (snapSubdivision) {
+		return snapLabel(snapSubdivision);
+	}
+
+	private Component snapLabel(int subdivision) {
+		return Component.literal(switch (subdivision) {
 			case 1 -> "Snap 1/4";
 			case 2 -> "Snap 1/8";
 			case 4 -> "Snap 1/16";
@@ -1688,6 +1807,7 @@ public final class ComposerScreen extends Screen {
 		extractContextMenu(graphics, mouseX, mouseY);
 		extractLayerMenu(graphics, mouseX, mouseY);
 		extractToolbarMenu(graphics, mouseX, mouseY);
+		extractSnapMenu(graphics, mouseX, mouseY);
 		extractMenuDescription(graphics);
 		phase(PHASE_MENUS, mark);
 		endProfiledFrame(graphics, frameStart);
@@ -4008,47 +4128,51 @@ public final class ComposerScreen extends Screen {
 		long lastTick = horizontalScroll + (long)Math.ceil(rollWidth * ticksPerPixel);
 		long measureTicks = Math.max(1L, project().ppq() * 4L);
 
-		// The roll carries two grids that mean different things. One is the music: bars and beats,
-		// counted off the song's own resolution, which is what a phrase is written against. The
-		// other is the snap, and on a redstone setting that is real time -- where a build can
-		// actually put a note -- which lands wherever it lands with respect to the beat.
-		//
-		// Both at full strength is a haze. Two sets of lines at spacings that share no common
-		// factor read as one set at neither, which is the opposite of the reason to show the second
-		// one. So a redstone snap drops the beats and keeps the bars: the music stays readable at
-		// the grain a bar number is written at, and the machine grid is the only fine one on screen.
-		boolean redstoneSnap = snapSubdivision == SNAP_REPEATER || snapSubdivision == SNAP_GAME_TICK;
+		// The grid drawn is the snap doubled until its lines are far enough apart to be lines, so
+		// most of the time you are looking at every second or every fourth step rather than at the
+		// step itself -- and nothing said which. Lines that are the grid are drawn brighter than
+		// lines that stand in for it, so "am I actually seeing game ticks" is answered by looking.
+		double snapSpan = drawnGridSpan();
+		boolean trueGrid = snapSubdivision != 0 && snapSpan <= gridSpan() * 1.001;
+		int snapFloor = redstoneSnap() ? MIN_GRID_PIXEL_SPACING * 2 : MIN_GRID_PIXEL_SPACING;
+		boolean drawSnap = snapSpan / ticksPerPixel >= snapFloor;
 
-		// Bars and beats are drawn whatever the snap is set to, so their step is settled first: the
-		// snap pass has to know which of its lines it must leave alone.
-		long beatTicks = redstoneSnap
-			? measureTicks
-			: readableStep(Math.max(1L, project().ppq()), measureTicks);
+		if (redstoneSnap()) {
+			extractRedstoneGrid(graphics, lastTick, snapSpan, trueGrid, drawSnap);
+		} else {
+			extractMusicalGrid(graphics, lastTick, measureTicks, snapSpan, trueGrid, drawSnap);
+		}
+
+		for (long overloaded : overloadedTicks()) {
+			int x = tickX(overloaded);
+			if (x >= rollX && x <= rollX + rollWidth) {
+				graphics.fill(x - 1, rollY, x + 2, rollY + rollHeight, 0x66FF3333);
+			}
+		}
+		// The markers drop through the roll as another kind of grid line, which is what they are
+		// being used as. Behind the notes, since a landmark is for finding the music by.
+		for (ComposerProject.Marker marker : project().markers()) {
+			int x = tickX(marker.tick());
+			if (x >= rollX && x <= rollX + rollWidth) {
+				graphics.fill(x, rollY, x + 1, rollY + rollHeight, 0x55A294FF);
+			}
+		}
+	}
+
+	/**
+	 * The roll under a musical snap: the song's own bars and beats, with the snap under them.
+	 *
+	 * <p>The snap lines are positions rather than multiples of a step, and a line the beat pass is
+	 * going to draw is skipped rather than drawn under it. All of these colours are part
+	 * transparent, so drawing both composites them and every beat comes out darker than it should.
+	 * </p>
+	 */
+	private void extractMusicalGrid(GuiGraphicsExtractor graphics, long lastTick, long measureTicks,
+			double snapSpan, boolean trueGrid, boolean drawSnap) {
+		long beatTicks = readableStep(Math.max(1L, project().ppq()), measureTicks);
 		boolean showLabels = measureTicks / ticksPerPixel >= MIN_LABEL_PIXEL_SPACING;
-
-		// The snap grid first and dimmest, so bars and beats drawn over it win wherever they land on
-		// the same pixel. Its lines are positions rather than multiples of a step, which is what lets
-		// the redstone grids be drawn where they actually are -- and on an unconverted song that
-		// means visibly not on the beat, which is the truth and the reason to look.
-		//
-		// A line the beat pass is going to draw is skipped rather than drawn under it. All three
-		// colours are part transparent, so drawing both composites them: every beat and bar on a
-		// musical snap would come out darker than it does today, which is a difference nobody asked
-		// for in the one case where none of this was supposed to change anything.
-
-		// A wider floor for the redstone grids. Four pixels apart is fine for a grid that lines up
-		// with the beats either side of it and a moire pattern for one that does not, so the
-		// machine grid doubles its step one notch sooner as you zoom out rather than filling in.
-		int snapFloor = redstoneSnap ? MIN_GRID_PIXEL_SPACING * 2 : MIN_GRID_PIXEL_SPACING;
-		double snapSpan = readableSpan(snapSubdivision == 0
-			? Math.max(1.0, project().ppq() / 4.0)
-			: gridSpan(), snapFloor);
-		// Its own colour when it is the machine's grid rather than the music's, so that two sets of
-		// lines on the same roll read as two things. Cooler and a shade stronger than the musical
-		// grey: it is the one you chose to look at, and it is the one you cannot work out from the
-		// bar numbers.
-		int snapColor = redstoneSnap ? 0x3C2E4756 : 0x242F343A;
-		if (snapSpan / ticksPerPixel >= snapFloor) {
+		if (drawSnap) {
+			int snapColor = trueGrid ? 0x40343C47 : 0x1E2A2F36;
 			for (long index = (long)Math.floor(horizontalScroll / snapSpan);
 					gridLineAt(index, snapSpan) <= lastTick + snapSpan; index++) {
 				long line = gridLineAt(index, snapSpan);
@@ -4058,12 +4182,6 @@ public final class ComposerScreen extends Screen {
 				}
 			}
 		}
-
-		// They used to be drawn only where a snap line happened to coincide with one, so choosing a
-		// redstone grid on a song whose tempo does not divide into it took every bar line and every
-		// bar number off the roll -- the two grids agree only every few hundred ticks. Losing the
-		// bars is losing the ability to read the music at all, and the whole point of showing a
-		// redstone grid is to see it against them.
 		for (long tick = Math.max(0L, horizontalScroll / beatTicks * beatTicks);
 				tick <= lastTick + beatTicks; tick += beatTicks) {
 			int x = tickX(tick);
@@ -4077,18 +4195,50 @@ public final class ComposerScreen extends Screen {
 					x + 3, rollY + 2, 0xFFAAAAAA, false);
 			}
 		}
-		for (long overloaded : overloadedTicks()) {
-			int x = tickX(overloaded);
-			if (x >= rollX && x <= rollX + rollWidth) {
-				graphics.fill(x - 1, rollY, x + 2, rollY + rollHeight, 0x66FF3333);
+	}
+
+	/**
+	 * The roll under a redstone snap: one grid, and it is real time.
+	 *
+	 * <p>The bars and beats are gone from here. Two spacings that share no common factor read as one
+	 * set of lines at neither of them, and the whole reason to put a redstone grid on screen is to
+	 * see where a build can actually place a note -- which is a fact about seconds, not about the
+	 * music. Nothing is lost by dropping them: the ruler above the roll still carries bar numbers
+	 * and the clock, which is where you look to ask where you are.</p>
+	 *
+	 * <p>What replaces the bar line is the second. Ten repeater ticks is exactly one second and
+	 * twenty game ticks is the same second, so the same landmark serves both settings and agrees
+	 * with the times written along the ruler.</p>
+	 */
+	private void extractRedstoneGrid(GuiGraphicsExtractor graphics, long lastTick, double snapSpan,
+			boolean trueGrid, boolean drawSnap) {
+		double secondSpan = Math.max(1.0,
+			SongAnalysis.redstoneTickSpan(project()) * REPEATER_TICKS_PER_SECOND);
+		boolean drawSeconds = secondSpan / ticksPerPixel >= MIN_GRID_PIXEL_SPACING * 2;
+		if (drawSnap) {
+			int snapColor = trueGrid ? 0x6A31505F : 0x2E28343D;
+			for (long index = (long)Math.floor(horizontalScroll / snapSpan);
+					gridLineAt(index, snapSpan) <= lastTick + snapSpan; index++) {
+				int x = tickX(gridLineAt(index, snapSpan));
+				if (x < rollX || x > rollX + rollWidth) {
+					continue;
+				}
+				// Skipped rather than drawn under the second line, for the same reason the musical
+				// grid skips its beats: both are part transparent and would composite.
+				if (drawSeconds && tickX(gridLineAt(Math.round(gridLineAt(index, snapSpan) / secondSpan),
+						secondSpan)) == x) {
+					continue;
+				}
+				graphics.fill(x, rollY, x + 1, rollY + rollHeight, snapColor);
 			}
 		}
-		// The markers drop through the roll as another kind of grid line, which is what they are
-		// being used as. Behind the notes, since a landmark is for finding the music by.
-		for (ComposerProject.Marker marker : project().markers()) {
-			int x = tickX(marker.tick());
-			if (x >= rollX && x <= rollX + rollWidth) {
-				graphics.fill(x, rollY, x + 1, rollY + rollHeight, 0x55A294FF);
+		if (drawSeconds) {
+			for (long index = (long)Math.floor(horizontalScroll / secondSpan);
+					gridLineAt(index, secondSpan) <= lastTick + secondSpan; index++) {
+				int x = tickX(gridLineAt(index, secondSpan));
+				if (x >= rollX && x <= rollX + rollWidth) {
+					graphics.fill(x, rollY, x + 1, rollY + rollHeight, 0x77828C97);
+				}
 			}
 		}
 	}
@@ -4181,7 +4331,8 @@ public final class ComposerScreen extends Screen {
 		notesConsidered = 0;
 		notesDrawn = 0;
 		long layoutStart = profiling ? System.nanoTime() : 0L;
-		cells.begin(rollX, rollWidth, NOTE_TRIGGER_WIDTH, rowHeight - 2);
+		int noteWidth = noteWidth();
+		cells.begin(rollX, rollWidth, noteWidth, rowHeight - 2);
 		for (int layerIndex : noteDrawOrder(shown)) {
 			Layer layer = shown.layers().get(layerIndex);
 			if (!layer.visible()) {
@@ -4208,7 +4359,7 @@ public final class ComposerScreen extends Screen {
 					continue;
 				}
 				int left = tickX(note.startTick());
-				int right = left + NOTE_TRIGGER_WIDTH;
+				int right = left + noteWidth;
 				if (right <= rollX || left >= rollRight) {
 					continue;
 				}
@@ -4693,7 +4844,7 @@ public final class ComposerScreen extends Screen {
 	/** Whether anything is hanging open over the composition: a menu, a context menu, the palette. */
 	private boolean anyMenuOpen() {
 		return toolbarMenu != ToolbarMenu.NONE || layerMenuOpen || contextMenuOpen
-			|| instrumentMenuLayer >= 0;
+			|| snapMenuOpen || instrumentMenuLayer >= 0;
 	}
 
 	/** Puts all of them away, which is what every way out of a menu ends up doing. */
@@ -4702,6 +4853,7 @@ public final class ComposerScreen extends Screen {
 		openSubmenu = null;
 		layerMenuOpen = false;
 		contextMenuOpen = false;
+		snapMenuOpen = false;
 		instrumentMenuLayer = -1;
 	}
 
@@ -4759,6 +4911,17 @@ public final class ComposerScreen extends Screen {
 				return true;
 			}
 			contextMenuOpen = false;
+		}
+		if (snapMenuOpen) {
+			if (handleSnapMenuClick(event.x(), event.y())) {
+				return true;
+			}
+			// Spent on closing, like the instrument palette's, and for the same two reasons. It
+			// hangs over the roll, so falling through would draw a note under the list you were
+			// putting away -- and that includes the button it came from, which would otherwise
+			// take the press and open it straight back up.
+			snapMenuOpen = false;
+			return true;
 		}
 		NoteRect palette = instrumentMenuRect();
 		if (palette != null) {
@@ -5482,6 +5645,10 @@ public final class ComposerScreen extends Screen {
 		}
 		if (contextMenuOpen && event.isEscape()) {
 			contextMenuOpen = false;
+			return true;
+		}
+		if (snapMenuOpen && event.isEscape()) {
+			snapMenuOpen = false;
 			return true;
 		}
 		// Ahead of the screen's own Escape, which closes the composer. Stopping a take is what you
@@ -7236,7 +7403,7 @@ public final class ComposerScreen extends Screen {
 	private NoteRect noteRect(NoteEvent note) {
 		int left = tickX(note.startTick());
 		int top = noteY(note.midiNote()) + 1;
-		return new NoteRect(left, top, left + NOTE_TRIGGER_WIDTH, top + rowHeight - 2);
+		return new NoteRect(left, top, left + noteWidth(), top + rowHeight - 2);
 	}
 
 	private static int lowerBoundStart(List<NoteEvent> notes, long tick) {
@@ -7406,13 +7573,56 @@ public final class ComposerScreen extends Screen {
 	 * them within half a composer tick of the truth forever, which is under a millisecond.</p>
 	 */
 	private double gridSpan() {
-		if (snapSubdivision == SNAP_REPEATER) {
+		return gridSpan(snapSubdivision);
+	}
+
+	/** The same, asked of a setting the snap is not on -- which is what a menu of them needs. */
+	private double gridSpan(int subdivision) {
+		if (subdivision == SNAP_REPEATER) {
 			return Math.max(1.0, SongAnalysis.redstoneTickSpan(project()));
 		}
-		if (snapSubdivision == SNAP_GAME_TICK) {
+		if (subdivision == SNAP_GAME_TICK) {
 			return Math.max(1.0, SongAnalysis.redstoneTickSpan(project()) / 2.0);
 		}
-		return snapSubdivision == 0 ? 1.0 : Math.max(1.0, project().ppq() / (double)snapSubdivision);
+		return subdivision == 0 ? 1.0 : Math.max(1.0, project().ppq() / (double)subdivision);
+	}
+
+	/** Whether the snap is one of the two that measure in real time rather than in note values. */
+	private boolean redstoneSnap() {
+		return snapSubdivision == SNAP_REPEATER || snapSubdivision == SNAP_GAME_TICK;
+	}
+
+	/**
+	 * The grid actually on screen, which is the snap doubled until its lines are far enough apart
+	 * to be lines.
+	 *
+	 * <p>One answer shared by the drawing and by everything sized against it. A note drawn wider
+	 * than the cell it sits in is the drawing and the sizing disagreeing, and there is no version
+	 * of that which is not a bug.</p>
+	 */
+	private double drawnGridSpan() {
+		return readableSpan(snapSubdivision == 0
+			? Math.max(1.0, project().ppq() / 4.0)
+			: gridSpan(), redstoneSnap() ? MIN_GRID_PIXEL_SPACING * 2 : MIN_GRID_PIXEL_SPACING);
+	}
+
+	/**
+	 * How wide a note draws: a fixed trigger, unless the grid is finer than that.
+	 *
+	 * <p>A note is a moment, not a duration -- the block fires and the sound plays out on its own --
+	 * so it is drawn as a fixed little block rather than as a length. Seven pixels reads well at
+	 * every ordinary zoom and is a lie at a tight one: on a 1/32 grid zoomed out, one note covered
+	 * its own cell and most of the next two, so the grid said the notes were a thirty-second apart
+	 * and the notes said they were touching.</p>
+	 */
+	private int noteWidth() {
+		if (snapSubdivision == 0) {
+			return NOTE_TRIGGER_WIDTH;
+		}
+		// Never below two. A one-pixel note is a mark you cannot see, click or drag, and a grid
+		// fine enough to demand that is one you are about to zoom into anyway.
+		return Math.max(2, Math.min(NOTE_TRIGGER_WIDTH,
+			(int)Math.floor(drawnGridSpan() / ticksPerPixel)));
 	}
 
 	/** Where the nth line of a grid falls, rounded once so the error cannot accumulate. */
@@ -7528,12 +7738,12 @@ public final class ComposerScreen extends Screen {
 	 * back into a tick has to take it off again — see {@link #endMarkerTick(double)}.</p>
 	 */
 	private int endMarkerX() {
-		return tickX(project().endTick()) + NOTE_TRIGGER_WIDTH;
+		return tickX(project().endTick()) + noteWidth();
 	}
 
 	/** The tick a cursor at {@code x} is pointing the end marker at, undoing the drawing offset. */
 	private long endMarkerTick(double x) {
-		return mouseTick(x - NOTE_TRIGGER_WIDTH);
+		return mouseTick(x - noteWidth());
 	}
 
 	/** The end marker's grab zone, a few pixels either side of it in the ruler. */
