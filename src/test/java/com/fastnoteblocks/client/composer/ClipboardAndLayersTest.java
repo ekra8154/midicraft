@@ -433,6 +433,35 @@ class ClipboardAndLayersTest {
 			"first written wins the shared tick");
 	}
 
+	/**
+	 * A song file written before markers existed still reads, and one written now still round-trips.
+	 *
+	 * <p>The library reads its songs with a plain {@code Gson} straight into this record, so adding
+	 * a component changes the file format for every composition already on disk. The old ones have
+	 * no {@code markers} field at all, which arrives as null -- and the whole of what makes that
+	 * survivable is the compact constructor turning it into an empty list before anything reads it.
+	 * The same call is what {@link SongLibrary} makes, minus the loader it needs a game for.</p>
+	 */
+	@Test
+	void aSongFileWithoutMarkersStillReads() {
+		com.google.gson.Gson gson = new com.google.gson.Gson();
+		ComposerProject old = gson.fromJson(
+			"{\"name\":\"old\",\"ppq\":480,\"tempoMicrosPerQuarter\":500000,\"layers\":"
+				+ "[{\"name\":\"A\",\"instrument\":\"HARP\",\"muted\":false,\"buildEnabled\":true,"
+				+ "\"visible\":true,\"notes\":[{\"id\":1,\"midiNote\":60,\"startTick\":0,"
+				+ "\"durationTicks\":120,\"velocity\":100}]}],\"activeLayerIndex\":0,"
+				+ "\"nextNoteId\":2,\"endTick\":1920,\"speedQuarters\":4}",
+			ComposerProject.class);
+
+		assertEquals(List.of(), old.markers(), "a missing field is no markers, not a null list");
+		assertEquals(1, old.layers().size());
+
+		ComposerProject marked = old.withMarkerAt(960L, "Chorus");
+		ComposerProject reread = gson.fromJson(gson.toJson(marked), ComposerProject.class);
+		assertTrue(marked.sameContentAs(reread), "and one written now comes back the same song");
+		assertEquals(List.of("Chorus"), markerLabels(reread));
+	}
+
 	/** An unmarked composition is not a marked one, whatever else the two agree about. */
 	@Test
 	void markersCountAsContent() {
