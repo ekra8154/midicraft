@@ -4207,27 +4207,13 @@ public final class SongBuilder {
 						stairFoot.relative(lane.travel()), event.time());
 				}
 			}
-			// The climb pane extra's ground, asked at the cell the room-two shape will land its
-			// first pane on. Only the plain ask below can come back BESIDE_THE_STAIRCASE -- the
-			// busy pad and the nudge shrink the room and change the shape -- so the cell is as
-			// pinned as the descent's: two columns past the opening, two levels up, beside on
-			// the side away from the climb's jog. See {@link #CLIMB_PANE_EXTRAS}.
-			boolean paneExtraFree = false;
-			if (CLIMB_PANE_EXTRAS && layout.ultra() && cutOffered && climb > 0 && above >= 0
-					&& above < floors) {
-				BlockPos pane = lane.ahead(delayColumns).pos()
-					.relative(lane.travel(), 2).above(2);
-				paneExtraFree = quietAndFreeForHarp(placements, pane.relative(depth),
-					event.time());
-			}
 			StackedSplit headed = layout.ultra() && cutOffered && index > 0 && above >= 0
 				&& above < floors
 				? stackedSplitOf(event.notes(), room, splitCells, climb > 0,
 					!columnBehindBusy || delayColumns > 0
 						|| CUT_ASKS_THE_BLOCKS_BEHIND
 							&& backPairIsFree(placements, lane.ahead(delayColumns), event.time()),
-					stackedIsBehind, true, stairTopFree, stairBottomFree, stairWallFree,
-					paneExtraFree)
+					stackedIsBehind, true, stairTopFree, stairBottomFree, stairWallFree)
 				: null;
 			// Busy padding: one column spent so a chord can be cut at all.
 			//
@@ -4277,7 +4263,7 @@ public final class SongBuilder {
 					// A column to spend, and the wire to lay it with. Both are what the pin will charge.
 					&& room >= 2 && placements.runSinceRepeater() + 1 <= DUST_RANGE) {
 				StackedSplit freed = stackedSplitOf(event.notes(), room - 1, splitCells, climb > 0,
-					true, false, true, stairTopFree, stairBottomFree, stairWallFree, false);
+					true, false, true, stairTopFree, stairBottomFree, stairWallFree);
 				if (freed != null) {
 					placements.padded("busyPadBoughtTheCut");
 					placements.padded("busyPadBoughtTheCutAt" + Math.min(event.notes().size(), 30) + "Notes");
@@ -4365,8 +4351,7 @@ public final class SongBuilder {
 						!columnBehindBusy || delayColumns + busyPad + 1 > 0
 							|| CUT_ASKS_THE_BLOCKS_BEHIND
 								&& backPairIsFree(placements, lane.ahead(delayColumns + busyPad + 1), event.time()),
-						stackedIsBehind, true, stairTopFree, stairBottomFree, stairWallFree,
-						false);
+						stackedIsBehind, true, stairTopFree, stairBottomFree, stairWallFree);
 				if (shifted == null) {
 					// Both cells wrong, or nothing left to cut once a column is spent. Before the head
 					// goes: shed the clashing slot instead, which costs no column and no wire -- the
@@ -4540,7 +4525,7 @@ public final class SongBuilder {
 							: stackedIsBehind ? new boolean[] {true} : new boolean[] {false, true}) {
 						StackedSplit shorter = stackedSplitOf(event.notes(), roomLeft, splitCells,
 							climb > 0, false, stackedBehind, true, stairTopFree, stairBottomFree,
-							stairWallFree, false);
+							stairWallFree);
 						if (shorter != null && roomLeft - shorter.columns() == 0) {
 							placements.padded("cutShortenedItsHead");
 							placements.padded("cutShortenedTo" + shorter.head().size());
@@ -5098,30 +5083,6 @@ public final class SongBuilder {
 					&& (headed.centreFeeds() == CentreFeed.FLANKED_RUNGS
 						|| headed.centreFeeds() == CentreFeed.CORKSCREW);
 				BlockPos stairFoot = cursor;
-				// The pane extra, room two only: the climb's first pane stands on the border
-				// over no wire, so it may be powered stone instead of glass -- and powered stone
-				// sounds what hangs beside it, the rung-and-extra shape at climb height. Laid
-				// here so the climb can skip the pane; refused off the blocks, the harp goes
-				// back over the staircase with the far half. See {@link #CLIMB_PANE_EXTRAS}.
-				boolean paneLaid = false;
-				if (climb > 0 && !climbedAlready && headed != null
-						&& headed.centreFeeds() == CentreFeed.BESIDE_THE_STAIRCASE
-						&& !headed.stairExtras().isEmpty()) {
-					EventNote paneNote = headed.stairExtras().get(0);
-					BlockPos pane = cursor.above(2);
-					if (quietAndFreeForHarp(placements, pane.relative(depth), event.time())) {
-						placements.placing("climbPaneExtra");
-						placements.powered(pane, "minecraft:stone", event.time());
-						set(placements, pane.above(), "minecraft:redstone_wire");
-						placeNote(placements, pane.relative(depth), paneNote, true);
-						placements.padded("climbPaneExtra");
-						paneLaid = true;
-					} else {
-						far = new ArrayList<>(far);
-						far.add(0, paneNote);
-						placements.padded("climbExtraCameHome");
-					}
-				}
 				// A wall descent laid its whole staircase inside the module and returned the
 				// landing; the walk's cursor is already where the far half opens.
 				cursor = wallCut != null ? cursor
@@ -5130,7 +5091,7 @@ public final class SongBuilder {
 					: climb > 0
 					? (climbedAlready ? climbLaidByTheModule(placements, cursor, travel)
 						: addGlassClimb(placements, cursor, travel, depth, true, currentTime, 0,
-							false, paneLaid))
+							false))
 					: CHEAP_SPLIT_DESCENT
 						? addSplitBusDescent(placements, cursor, travel, descentSide, currentTime)
 						: addSpiralDescent(placements, cursor, travel, descentSide, currentTime);
@@ -5155,14 +5116,8 @@ public final class SongBuilder {
 					EventNote topNote = hungExtras.get(0);
 					EventNote bottomNote = hungExtras.size() > 1 ? hungExtras.get(1) : null;
 					EventNote wallNote = hungExtras.size() > 2 ? hungExtras.get(2) : null;
-					// The first rung drives the top and wall extras, and it may have gone down
-					// as glass to spare a neighbour's note -- glass sounds nothing, so a note
-					// hung beside it would be silent. The last rung is never glass.
-					String firstRung = placements.blockAt(stairFoot);
-					boolean firstRungSounds = firstRung != null
-						&& firstRung.startsWith("minecraft:stone");
 					if (topNote != null) {
-						if (firstRungSounds && quietAndFree(placements, topCell, event.time())) {
+						if (quietAndFree(placements, topCell, event.time())) {
 							placeNote(placements, topCell, topNote, true);
 							placements.padded("stairExtraTop");
 						} else {
@@ -5186,8 +5141,7 @@ public final class SongBuilder {
 					// down through. See {@link #STAIR_WALL_EXTRAS}.
 					if (wallNote != null) {
 						BlockPos wallCell = stairFoot.relative(travel);
-						if (firstRungSounds
-								&& quietAndFreeForHarp(placements, wallCell, event.time())) {
+						if (quietAndFreeForHarp(placements, wallCell, event.time())) {
 							placeNote(placements, wallCell, wallNote, true);
 							placements.padded("stairExtraWall");
 						} else {
@@ -5205,9 +5159,7 @@ public final class SongBuilder {
 						&& cross == null && wallCut == null && climb <= 0 && CHEAP_SPLIT_DESCENT
 						&& far.size() > 1) {
 					BlockPos wallCell = stairFoot.relative(travel);
-					String plainRung = placements.blockAt(stairFoot);
-					if (plainRung != null && plainRung.startsWith("minecraft:stone")
-							&& quietAndFreeForHarp(placements, wallCell, event.time())) {
+					if (quietAndFreeForHarp(placements, wallCell, event.time())) {
 						List<EventNote> shorterFar = new ArrayList<>(far);
 						EventNote wallHarp = takeFromTail(shorterFar,
 							note -> note.effect() == null && isHarpNote(note));
@@ -8661,18 +8613,6 @@ public final class SongBuilder {
 	private static BlockPos addGlassClimb(PlacementPlan placements, BlockPos cursor,
 			Direction travel, Direction depth, boolean fromBus, int time, int extraSteps,
 			boolean mirrored) {
-		return addGlassClimb(placements, cursor, travel, depth, fromBus, time, extraSteps,
-			mirrored, false);
-	}
-
-	/**
-	 * @param footLaid whether the caller already laid the first pane's cell -- the pane extra
-	 *     puts powered stone and its wire there so the pane can sound a note, see
-	 *     {@link #CLIMB_PANE_EXTRAS} -- so the climb starts at its second pane.
-	 */
-	private static BlockPos addGlassClimb(PlacementPlan placements, BlockPos cursor,
-			Direction travel, Direction depth, boolean fromBus, int time, int extraSteps,
-			boolean mirrored, boolean footLaid) {
 		placements.placing("climb");
 		placements.turnedAt(cursor);
 		BlockPos near = cursor;
@@ -8703,8 +8643,8 @@ public final class SongBuilder {
 			set(placements, near.above(CUBE_FLOOR_HEIGHT + 1), "minecraft:glass");
 			set(placements, near.above(CUBE_FLOOR_HEIGHT + 2), "minecraft:redstone_wire");
 		}
-		for (int step = footLaid ? 3 : fromBus && !mirrored ? 2 : 1;
-				step <= CUBE_FLOOR_HEIGHT + extraSteps; step++) {
+		for (int step = fromBus && !mirrored ? 2 : 1; step <= CUBE_FLOOR_HEIGHT + extraSteps;
+				step++) {
 			BlockPos column = step % 2 == 1 != mirrored ? far : near;
 			set(placements, column.above(step), "minecraft:glass");
 			set(placements, column.above(step + 1), "minecraft:redstone_wire");
@@ -9170,36 +9110,16 @@ public final class SongBuilder {
 			//   y=128  ST >1 NB      ... on the stone the repeater actually reads
 			int drop = step - 1;
 			BlockPos stone = ring.get((step - 1) % ring.size()).below(drop);
-			// A rung only supports its dust -- the signal steps dust to dust -- so a rung whose
-			// powered stone would set off a note belonging to another tick goes down as glass
-			// instead: dust sits on glass exactly as the climb's does, and glass cannot be
-			// powered, so the foreign note stays silent. Found by the stair extras: an extra
-			// hung on the border stands exactly one cell from where a later corridor's third
-			// rung lands, and the extra was there first, so the newcomer yields -- the same
-			// verdict the wall descent's rung guard reaches, made without refusing anything
-			// because a rung has a quiet shape to fall to and a cut does not. Never the last
-			// rung: the repeater ahead reads the dust through that stone, and dust on glass
-			// powers nothing behind it.
-			if (step < CUBE_FLOOR_HEIGHT && rungWouldSoundAForeignNote(placements, stone, time)) {
-				set(placements, stone, "minecraft:glass");
-				placements.padded("descentRungWentGlassForANeighbour");
-			} else {
-				placements.powered(stone, "minecraft:stone", time);
-			}
+			// Always stone, never glass. A contested rung yielding as glass was tried for one
+			// census -- a note hung by an earlier module one cell from a rung is re-sounded at
+			// this module's tick -- and in-game testing found the glass a dead line: dust
+			// cannot step down past glass, ever, and the reader does not know it, so the whole
+			// far half below read clean and played nothing. The one shape that hung a note
+			// there went instead.
+			placements.powered(stone, "minecraft:stone", time);
 			set(placements, stone.above(), "minecraft:redstone_wire");
 		}
 		return cursor.below(CUBE_FLOOR_HEIGHT);
-	}
-
-	/** Whether powered stone here would set off a note that belongs to another tick. */
-	private static boolean rungWouldSoundAForeignNote(PlacementPlan placements, BlockPos rung,
-			int time) {
-		for (Direction out : Direction.Plane.HORIZONTAL) {
-			if (placements.noteAt(rung.relative(out), time)) {
-				return true;
-			}
-		}
-		return false;
 	}
 
 	/**
@@ -11827,15 +11747,7 @@ public final class SongBuilder {
 		for (int step = 2; step <= CUBE_FLOOR_HEIGHT; step++) {
 			int drop = step - 1;
 			BlockPos stone = ring.get((step - 1) % ring.size()).below(drop);
-			// The same yield the tail split's descent makes: a rung that would set off a note
-			// belonging to another tick goes down as glass, except the last, which the repeater
-			// ahead reads through.
-			if (step < CUBE_FLOOR_HEIGHT && rungWouldSoundAForeignNote(placements, stone, time)) {
-				set(placements, stone, "minecraft:glass");
-				placements.padded("descentRungWentGlassForANeighbour");
-			} else {
-				placements.powered(stone, "minecraft:stone", time);
-			}
+			placements.powered(stone, "minecraft:stone", time);
 			set(placements, stone.above(), "minecraft:redstone_wire");
 		}
 		return cursor.below(CUBE_FLOOR_HEIGHT);
@@ -15659,12 +15571,10 @@ public final class SongBuilder {
 		 * tail's current off the staircase -- and a harp filled in there is a note carried for
 		 * free, its instrument the wire it stands over. Null means the cell gets plain stone.
 		 *
-		 * <p>{@code stairExtras} is positional, and its meaning follows the shape. On a tail
-		 * split over a descent it is the top rung's extra, the bottom rung's, then the wall
-		 * harp on the border, nulls where a slot went unfilled -- see {@link #STAIR_EXTRAS}
-		 * and {@link #STAIR_WALL_EXTRAS}. On a {@link CentreFeed#BESIDE_THE_STAIRCASE} climb
-		 * it is a single element, the harp beside the solid first pane -- see
-		 * {@link #CLIMB_PANE_EXTRAS}. Empty everywhere else.</p>
+		 * <p>{@code stairExtras} is the descent's triple: positional, the top rung's extra, the
+		 * bottom rung's, then the wall harp on the border, nulls where a slot went unfilled,
+		 * empty for every shape that does not descend by the rung staircase. See
+		 * {@link #STAIR_EXTRAS} and {@link #STAIR_WALL_EXTRAS}.</p>
 		 */
 		StackedSplit(UltraSlots slots, List<EventNote> head, List<EventNote> nearTail,
 				List<EventNote> farTail, boolean shed, CentreFeed centreFeeds,
@@ -16082,7 +15992,7 @@ public final class SongBuilder {
 	private static StackedSplit stackedSplitOf(List<EventNote> chord, int room, int splitCells,
 			boolean climbing, boolean roomBehind, boolean stackedBehind, boolean centreFeed) {
 		return stackedSplitOf(chord, room, splitCells, climbing, roomBehind, stackedBehind,
-			centreFeed, false, false, false, false);
+			centreFeed, false, false, false);
 	}
 
 	/**
@@ -16091,14 +16001,10 @@ public final class SongBuilder {
 	 * @param bottomExtraFree the same for the cell beside the descent's last rung.
 	 * @param wallExtraFree the same for the border cell level with the first rung, which is
 	 *     harp-only -- see {@link #STAIR_WALL_EXTRAS}. Meaningless on climbs.
-	 * @param paneExtraFree whether the walk found the cell beside a room-two climb's first pane
-	 *     quiet and free, so a harp may hang there -- see {@link #CLIMB_PANE_EXTRAS}.
-	 *     Meaningless on descents.
 	 */
 	private static StackedSplit stackedSplitOf(List<EventNote> chord, int room, int splitCells,
 			boolean climbing, boolean roomBehind, boolean stackedBehind, boolean centreFeed,
-			boolean topExtraFree, boolean bottomExtraFree, boolean wallExtraFree,
-			boolean paneExtraFree) {
+			boolean topExtraFree, boolean bottomExtraFree, boolean wallExtraFree) {
 		LAST_CUT_REFUSAL = "";
 		if (!STACKED_SPLIT_HEADS) {
 			LAST_CUT_REFUSAL = "SwitchedOff";
@@ -16188,7 +16094,7 @@ public final class SongBuilder {
 				: CLIMB_CORKSCREWS_AT_THE_WALL && room == STACKED_CELLS - 1 ? CentreFeed.CORKSCREW
 				: CentreFeed.NONE;
 			if (shape != CentreFeed.NONE) {
-				return centreFedCut(split, shape, splitCells, paneExtraFree);
+				return centreFedCut(split, shape, splitCells);
 			}
 		}
 		// Descents and centre-fed climbs only. Any other climb leaves the near half by a glass
@@ -16366,7 +16272,7 @@ public final class SongBuilder {
 	 * suitable tail note or sent over the top with the rest.</p>
 	 */
 	private static StackedSplit centreFedCut(StackedBusSplit split, CentreFeed shape,
-			int splitCells, boolean paneExtraFree) {
+			int splitCells) {
 		UltraSlots slots = split.slots();
 		List<EventNote> head = new ArrayList<>(split.head());
 		List<EventNote> tail = new ArrayList<>(split.tail());
@@ -16458,20 +16364,19 @@ public final class SongBuilder {
 			LAST_CUT_REFUSAL = "NothingToCarryOver";
 			return null;
 		}
-		// The pane extra, room two only: a harp hung beside the climb's first pane, which is laid
-		// solid to sound it. Out of the tail before the wire refusal, so the cut's capacity grows
-		// by the note. See {@link #CLIMB_PANE_EXTRAS}.
-		EventNote paneExtra = null;
-		if (CLIMB_PANE_EXTRAS && shape == CentreFeed.BESIDE_THE_STAIRCASE && paneExtraFree) {
-			paneExtra = takeFromTail(tail, note -> note.effect() == null && isHarpNote(note));
-		}
+		// No pane extra for the room-two shape, and none ever: a harp hung beside the climb's
+		// first pane was built and taken out the same day. The cell one over from the pane is
+		// exactly one cell from where a later corridor's descent lands its border rung, so the
+		// note is re-sounded at the neighbour's tick -- and the rung yielding as glass instead
+		// was worse, because dust cannot step down past glass, ever, and the reader does not
+		// know it: the whole far half below went dead with every number reading nought.
+		// In-game testing found the dead line the census could not.
 		UltraSlots dusted = new UltraSlots(null,
 			java.util.Collections.unmodifiableList(sides),
 			java.util.Collections.unmodifiableList(front),
 			java.util.Collections.unmodifiableList(back));
 		StackedSplit fed = new StackedSplit(dusted, head, List.of(), tail, false, shape, toFront,
-			java.util.Collections.unmodifiableList(java.util.Arrays.asList(rungs)), null,
-			paneExtra == null ? List.of() : List.of(paneExtra));
+			java.util.Collections.unmodifiableList(java.util.Arrays.asList(rungs)));
 		if (fed.runCells(splitCells) > DUST_RANGE) {
 			LAST_CUT_REFUSAL = "OutOfWireBy"
 				+ Math.min(fed.runCells(splitCells) - DUST_RANGE, 6);
@@ -17900,19 +17805,6 @@ public final class SongBuilder {
 	 * half at build time. In-game design, from the desc3 reference mockup on the border.</p>
 	 */
 	static boolean STAIR_WALL_EXTRAS = true;
-
-	/**
-	 * v2: a room-two climb cut lays its first pane solid and hangs a harp beside it.
-	 *
-	 * <p>The {@link CentreFeed#BESIDE_THE_STAIRCASE} head leaves by {@link #addGlassClimb},
-	 * whose first pane stands on the border two levels over the module's landing column -- above
-	 * no wire, so nothing needs it to be glass. Laid as powered stone instead, it sounds a note
-	 * hanging beside it on the side away from the staircase's jog, the way a descent's rung
-	 * sounds its extras. Harp only: the head's own front flank stands an air gap of one below
-	 * the cell, and a note over a gap of one can only wear the air as its instrument. In-game
-	 * design, from the asc2 reference mockup on the border.</p>
-	 */
-	static boolean CLIMB_PANE_EXTRAS = true;
 
 	/**
 	 * v2: the cross descent's own pair of extras, from the desc2 reference mockup.

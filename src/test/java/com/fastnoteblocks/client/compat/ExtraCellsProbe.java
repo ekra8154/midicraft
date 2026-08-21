@@ -13,8 +13,7 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * Lists where a build hung its extras -- the stair pair, the border wall harp, the climb pane
- * harp -- and where a descent rung went down as glass to spare a neighbour's note, so each can
+ * Lists where a build hung its extras -- the stair pair and the border wall harp -- so each can
  * be walked to in game. Coordinates are absolute for a paste at 0 64 0; re-aim with
  * {@code -Dprobe.song=} / {@code -Dprobe.width=} / {@code -Dprobe.floors=}.
  */
@@ -64,18 +63,9 @@ class ExtraCellsProbe {
 				if (block == null) {
 					continue;
 				}
-				String kind = null;
 				if (by.startsWith("stairExtras") && block.startsWith("minecraft:note_block")) {
-					kind = "stair extra";
-				} else if (by.startsWith("climbPaneExtra")
-						&& block.startsWith("minecraft:note_block")) {
-					kind = "climb pane extra";
-				} else if ((by.startsWith("descent4") || by.startsWith("crossDescent"))
-						&& block.startsWith("minecraft:glass")) {
-					kind = "glass rung";
-				}
-				if (kind != null) {
-					found.computeIfAbsent(kind, unused -> new ArrayList<>()).add(cell.getKey());
+					found.computeIfAbsent("stair extra", unused -> new ArrayList<>())
+						.add(cell.getKey());
 				}
 			}
 			System.out.println("EXTRAS " + name + " " + width + "x" + floors
