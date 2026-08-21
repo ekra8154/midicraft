@@ -12687,8 +12687,16 @@ public final class SongBuilder {
 			LAST_FOLDBACK_REFUSAL = "RaisedRepeaterBehind";
 			return null;
 		}
-		int muted = behindUpper != null && behindUpper.startsWith("minecraft:redstone_wire")
-			? 1 : 0;
+		// Nothing is muted. The first rung was stood down wherever a bus ended behind the
+		// module, on the reasoning that the bus's last dust lies against the rung's stone and a
+		// line of dust powers the block at either end of it -- so the rung's notes would sound
+		// at the bus's tick as well as this module's. In-game reading says otherwise, and the
+		// readback agrees: with the rule off, 4,600 notes appear on first rungs across the
+		// library and not one of them reads back at a foreign tick, with dead, collisions and
+		// severed nought as well. The rule was a guess made while building the shape and it
+		// cost every one of those slots. Kept as a parameter because a run may yet meet a
+		// column it has to carry bare.
+		int muted = 0;
 		List<EventNote> pool = new ArrayList<>(busOrder(notes));
 		EventNote pairA = !pool.isEmpty()
 				&& railSlotTakes(placements, conductorAt.relative(side.getOpposite()), time)
