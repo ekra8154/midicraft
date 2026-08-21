@@ -275,6 +275,25 @@ public record ComposerProject(
 		 * {@code SoundEffectVoiceTest} holds the palette to the naming, which is where a new voice
 		 * that forgot the prefix gets caught.</p>
 		 */
+		/**
+		 * Whether this layer goes into a build: it does if you can hear it and see it.
+		 *
+		 * <p>There used to be a flag of its own for this, set by a dot on each row, independent of
+		 * whether the layer was muted or hidden. Two switches for one question, and the composer had
+		 * two signal paths as a result -- preview played what was unmuted and a build placed what was
+		 * dotted, with nothing connecting them, so pressing Space was not a preview of the build and
+		 * there was no way to hear what would be built. A DAW does not have this problem because a
+		 * bounce is the same chain as the transport: what you heard is what you got. This is that,
+		 * and the flag it replaces stays on the record only so that older song files still load.</p>
+		 *
+		 * <p>Solo is not part of it. Soloing is a momentary lens for listening around a part, and it
+		 * is the one place preview and build can still disagree -- the screen says so while it is on
+		 * rather than quietly dropping four layers out of somebody's machine.</p>
+		 */
+		public boolean inBuild() {
+			return !muted && visible;
+		}
+
 		public boolean pitched() {
 			return pitched(instrument);
 		}
@@ -598,10 +617,8 @@ public record ComposerProject(
 		Set<NoteSound> heard = dedupeIdentical ? new java.util.HashSet<>() : null;
 		for (int index = 0; index < layers.size(); index++) {
 			Layer layer = layers.get(index);
-			// Mute is about listening, not building. Once solo exists, muting a layer to hear
-			// around it would otherwise drop it out of the build without saying so.
 			boolean chosen = layerIndices == null || layerIndices.isEmpty()
-				? layer.buildEnabled()
+				? layer.inBuild()
 				: layerIndices.contains(index);
 			if (!chosen) {
 				continue;
@@ -1101,7 +1118,7 @@ public record ComposerProject(
 	/** @param melodyWeight what a top-voice note counts for; exposed so a probe can sweep it. */
 	public TransposeFit bestTransposeIntoRange(int melodyWeight) {
 		List<NoteEvent> measured = layers.stream()
-			.filter(Layer::buildEnabled)
+			.filter(Layer::inBuild)
 			.flatMap(layer -> layer.notes().stream())
 			.toList();
 		if (measured.isEmpty()) {
@@ -1201,7 +1218,7 @@ public record ComposerProject(
 	 */
 	public NoteSpacing noteSpacing() {
 		List<Long> starts = layers.stream()
-			.filter(Layer::buildEnabled)
+			.filter(Layer::inBuild)
 			.flatMap(layer -> layer.notes().stream())
 			.map(NoteEvent::startTick)
 			.distinct()
@@ -1858,7 +1875,7 @@ public record ComposerProject(
 		List<Layer> chosen = new ArrayList<>();
 		Set<NoteSound> heard = dedupeIdentical ? new java.util.HashSet<>() : null;
 		for (Layer layer : layers) {
-			if (!layer.buildEnabled()) {
+			if (!layer.inBuild()) {
 				continue;
 			}
 			chosen.add(heard == null ? layer : withoutAlreadyHeard(layer, heard));

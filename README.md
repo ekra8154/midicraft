@@ -172,6 +172,34 @@ any two of them. That is usually right for a phrase of even steps and it is
 always visible, drawn as a hairline in the same strip, before you commit to it.
 
 
+## What gets built
+
+A layer goes into the build if you can hear it and see it. Muting a layer or
+hiding it takes it out; setting it back to Active puts it back. There is nothing
+else to set -- what you hear in the composer is what the machine plays.
+
+That used to be a separate flag, a dot on each row, independent of mute. It made
+the composer two things at once: preview played the unmuted layers and a build
+placed the dotted ones, with nothing connecting them, so pressing Space was not a
+preview of the build and there was no way to hear what would be built. A DAW does
+not have this problem, because a bounce is the same signal chain as the transport
+-- what you heard is what you got. This is that.
+
+**Solo is the exception, on purpose.** Soloing is a lens for listening around a
+part, not a decision about the song, so the layers it silences are still built.
+That is the one case where preview and build disagree, and the status bar says so
+while any layer is soloed.
+
+Muting a layer to hear around it and then pasting is the mistake this invites, so
+two things say the count: the status line reads `Build: 12 of 15 layers`, and
+starting a paste says `3 layers are muted or hidden, so they are not in this
+build.`
+
+Older songs carry the old flag in their files and it is ignored. Nothing is lost
+by it: a layer that was dotted but muted is now left out, and a layer that was
+undotted but audible is now built.
+
+
 ## Tempo and speed
 
 Two numbers decide how fast a song plays, and they multiply.

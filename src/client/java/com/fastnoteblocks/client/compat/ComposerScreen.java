@@ -92,8 +92,6 @@ public final class ComposerScreen extends Screen {
 	private static final int LAYER_INSTRUMENT_X = 26;
 	private static final int LAYER_NAME_X = 45;
 	/** Filled means the layer goes into the build sequence, hollow means it is left out. */
-	private static final String BUILD_DOT_ON = "●";
-	private static final String BUILD_DOT_OFF = "○";
 	/**
 	 * The grab strip on the panel's edge, and the cursor that says it can be grabbed.
 	 *
@@ -170,8 +168,8 @@ public final class ComposerScreen extends Screen {
 	/**
 	 * What fits on a layer row at the panel's current width.
 	 *
-	 * <p>Parts drop off as it narrows -- the name first, then the build dot, then the state chip --
-	 * until only the instrument and the row number are left, which is also what a folded panel
+	 * <p>Parts drop off as it narrows -- the name first, then the state chip -- until only the
+	 * instrument and the row number are left, which is also what a folded panel
 	 * shows. One description of the row shared by the drawing and by every hit test, because a
 	 * panel where the chip is painted in one place and clicked in another is worse than one that
 	 * never shrank.</p>
@@ -179,7 +177,6 @@ public final class ComposerScreen extends Screen {
 	private LayerRowLayout layerRowLayout() {
 		int panel = layerPanelWidth();
 		boolean chip = panel >= ROW_CHIP_AT;
-		boolean dot = panel >= ROW_DOT_AT;
 		boolean name = panel >= ROW_NAME_AT;
 		int inset = chip ? 8 : 2;
 		// The number sits inside the row now. Out in the gutter it shared its pixels with the
@@ -189,20 +186,13 @@ public final class ComposerScreen extends Screen {
 		int ordinalRight = panel - inset - 3;
 		int ordinalLeft = ordinalRight
 			- smallTextWidth(Integer.toString(Math.max(1, project().layers().size())));
-		// And the build dot sits against the number. They answer the two questions you ask about a
-		// row at a glance -- which layer, and is it in the build -- so they read as one column.
-		int dotRight = ordinalLeft - 5;
-		int dotX = dotRight - Math.max(font.width(BUILD_DOT_ON), font.width(BUILD_DOT_OFF));
 		return new LayerRowLayout(
 			inset,
 			chip,
-			dot,
 			name,
 			chip ? LAYER_INSTRUMENT_X : inset + 2,
 			LAYER_NAME_X,
-			(dot ? dotX : ordinalLeft) - 4,
-			dotX,
-			dotRight,
+			ordinalLeft - 4,
 			ordinalLeft,
 			ordinalRight);
 	}
@@ -226,7 +216,8 @@ public final class ComposerScreen extends Screen {
 	private static final int SPLITTER_COLLAPSE_AT = COLLAPSED_LAYER_PANEL_WIDTH;
 	/** Widths at which a row stops having room for each of its parts, narrowest last. */
 	private static final int ROW_NAME_AT = 116;
-	private static final int ROW_DOT_AT = 96;
+	/** Below this the scrollbar's track would sit on the row numbers, so it is not drawn. */
+	private static final int ROW_SCROLLBAR_AT = 96;
 	private static final int ROW_CHIP_AT = 76;
 	private static final int LAYER_LIST_TOP = 48;
 	private static final int MIN_ROW_HEIGHT = 4;
@@ -600,7 +591,6 @@ public final class ComposerScreen extends Screen {
 	 * layers out of the build in one stroke.</p>
 	 */
 	private LayerPaint painting = LayerPaint.NONE;
-	private boolean paintBuildEnabled;
 	private LayerState paintState = LayerState.ACTIVE;
 	/** Whether the box being dragged was started with Ctrl, which makes it add rather than replace. */
 	private boolean boxAdditive;
@@ -850,13 +840,16 @@ public final class ComposerScreen extends Screen {
 	 */
 	private enum LayerState {
 		ACTIVE("A", "Active", 0xFFE8EAEE, 0xFF3A4048,
-			"you hear it, and it is in the piano roll."),
+			"you hear it, it is in the piano roll, and it is in the build."),
 		MUTED("M", "Muted", 0xFFFFB05A, 0xFF3E332A,
-			"silent, but still in the roll and still editable. Its instrument wears a red slash."),
+			"silent, and left out of the build. Still in the roll and still editable, and its "
+				+ "instrument wears a red slash."),
 		SOLO("S", "Solo", 0xFFFFD65A, 0xFF453D22,
-			"the only thing you hear. Every other layer is slashed out until you turn it off."),
+			"the only thing you hear. Every other layer is slashed out until you turn it off -- "
+				+ "but solo is only about listening, so the others are still built."),
 		HIDDEN("H", "Hidden", 0xFF787D85, 0xFF24272B,
-			"silent and out of the piano roll, so it is not in the way. Its row is greyed out.");
+			"silent, out of the piano roll and left out of the build, so it is not in the way at "
+				+ "all. Its row is greyed out.");
 
 		private final String letter;
 		private final String title;
@@ -935,22 +928,6 @@ public final class ComposerScreen extends Screen {
 			resetPlaybackSchedule();
 		}
 		updateButtonStates();
-	}
-
-	private void setLayerBuildEnabled(List<Integer> indices, boolean enabled) {
-		setLayerBuildEnabled(indices, enabled, false);
-	}
-
-	private void setLayerBuildEnabled(List<Integer> indices, boolean enabled, boolean coalesce) {
-		ComposerProject updated = project();
-		for (int index : indices) {
-			if (index >= 0 && index < updated.layers().size()) {
-				updated = updated.withLayer(index, updated.layers().get(index).withBuildEnabled(enabled));
-			}
-		}
-		applyMaybeCoalesced((enabled ? "include " : "leave out ")
-			+ layerCountLabel(indices.size()), updated, coalesce);
-		layersChanged();
 	}
 
 	private void applyMaybeCoalesced(String label, ComposerProject updated, boolean coalesce) {
@@ -1757,9 +1734,6 @@ public final class ComposerScreen extends Screen {
 				+ (selectedNotes.size() == 1 ? " note here" : " notes here");
 			case MERGE_SELECTED -> "Merge " + selected + " layers (Ctrl+E)";
 			case DELETE_SELECTED -> "Delete " + layerCountLabel(Math.max(1, selected));
-			case INCLUDE_SELECTED -> "Include " + layerCountLabel(Math.max(1, selected)) + " in sequence";
-			case SET_INCLUDED_TO_SELECTION ->
-				"Include only " + layerCountLabel(Math.max(1, selected)) + " in sequence";
 			case SNAP_TO_START -> "Snap " + layerCountLabel(Math.max(1, selected)) + " to song start";
 			default -> action.label;
 		};
@@ -1780,8 +1754,7 @@ public final class ComposerScreen extends Screen {
 	private boolean layerActionEnabled(LayerAction action) {
 		return switch (action) {
 			case MERGE_SELECTED -> selectedLayers.size() >= 2;
-			case DELETE_SELECTED, INCLUDE_SELECTED, SET_INCLUDED_TO_SELECTION ->
-				!selectedLayers.isEmpty();
+			case DELETE_SELECTED -> !selectedLayers.isEmpty();
 			// Greyed out when the selection already starts at zero, so the menu answers "is there
 			// anything to pull forward" without having to click it and read the result.
 			case SNAP_TO_START -> project().firstNoteTick(Set.copyOf(selectedLayers)) > 0L;
@@ -1821,8 +1794,6 @@ public final class ComposerScreen extends Screen {
 			case MERGE_SELECTED -> mergeSelectedLayers();
 			case SNAP_TO_START -> snapSelectedLayersToStart();
 			case DELETE_SELECTED -> deleteSelectedLayers();
-			case INCLUDE_SELECTED -> setIncludedLayers(true);
-			case SET_INCLUDED_TO_SELECTION -> setIncludedLayers(false);
 			case SELECT_ALL -> {
 				selectedLayers.clear();
 				for (int index = 0; index < project().layers().size(); index++) {
@@ -2163,7 +2134,6 @@ public final class ComposerScreen extends Screen {
 			// Not disabled on an unbuildable song: greying it out would hide the reason. The status
 			// bar already names the problem and the planner refuses with a specific one.
 			case PASTE_IN_WORLD -> projectStats().totalNotes() > 0 || project().endTick() > 0L;
-			case INCLUDE_SELECTED, SET_INCLUDED_TO_SELECTION -> !selectedLayers.isEmpty();
 			case BUILD_CANCEL -> CommandPasteSender.isRunning();
 			default -> true;
 		};
@@ -2222,8 +2192,6 @@ public final class ComposerScreen extends Screen {
 			case RENAME_COMPOSITION -> renameComposition();
 			case EXPORT_NBS -> exportAsNbs();
 			case COPY_AS_TEXT -> copySequenceAsText();
-			case INCLUDE_SELECTED -> setIncludedLayers(true);
-			case SET_INCLUDED_TO_SELECTION -> setIncludedLayers(false);
 			case PASTE_IN_WORLD -> pasteInWorld();
 			case BUILD_CANCEL -> CommandPasteSender.cancel(true);
 			case TOGGLE_DEDUPE -> {
@@ -2639,10 +2607,6 @@ public final class ComposerScreen extends Screen {
 				+ "repeater ticks.";
 			case TRIM_END -> "Pulls the end marker back to the last note, discarding trailing "
 				+ "silence.";
-			case INCLUDE_SELECTED -> "Fills in the build dot on the selected layers, adding them to "
-				+ "the sequence. The others are left as they are.";
-			case SET_INCLUDED_TO_SELECTION -> "Makes the selected layers the only included ones, "
-				+ "clearing the rest. A batch off as well as a batch on.";
 			case PASTE_IN_WORLD -> "Builds the sequence with /setblock. Needs permission, and "
 				+ "overwrites whatever is standing there.";
 			case BUILD_CANCEL -> "Stops a paste part-way. Blocks already placed stay put.";
@@ -2707,10 +2671,6 @@ public final class ComposerScreen extends Screen {
 				+ "note the surviving one. Ctrl+E does the same thing.";
 			case DELETE_SELECTED -> "Removes the selected layers and every note on them. Deleting all "
 				+ "of them leaves one empty layer to work in. Ctrl+Z puts them back.";
-			case INCLUDE_SELECTED -> "Fills in the build dot on the selected layers, adding them to "
-				+ "the sequence.";
-			case SET_INCLUDED_TO_SELECTION -> "Makes the selected layers the only included ones, "
-				+ "clearing the rest.";
 			case SNAP_TO_START -> "Pulls the selected layers forward until the first of them plays "
 				+ "on tick zero, taking the silence an import left at the front off the build. They "
 				+ "all move by the same amount, so parts that did not start together still do not. "
@@ -2758,13 +2718,6 @@ public final class ComposerScreen extends Screen {
 		if (action == ToolbarAction.UNDO || action == ToolbarAction.REDO) {
 			String step = action == ToolbarAction.UNDO ? history.undoLabel() : history.redoLabel();
 			return step == null ? action.label : action.label + " " + clipped(step, 16);
-		}
-		int selected = selectedLayers.size();
-		if (selected > 0 && action == ToolbarAction.INCLUDE_SELECTED) {
-			return "Include " + layerCountLabel(selected) + " in sequence";
-		}
-		if (selected > 0 && action == ToolbarAction.SET_INCLUDED_TO_SELECTION) {
-			return "Include only " + layerCountLabel(selected) + " in sequence";
 		}
 		if (action == ToolbarAction.TOGGLE_DEDUPE) {
 			return action.label + ": " + (config.dedupeIdenticalNotes() ? "On" : "Off");
@@ -3019,15 +2972,7 @@ public final class ComposerScreen extends Screen {
 				// Inside the row's own border, so that a hidden layer you have selected still shows
 				// the outline saying so.
 				graphics.fill(left + (row.chip() ? 4 : 2), y - 1,
-					row.dot() ? row.dotX() - 3 : row.ordinalLeft() - 2, y + rowHeight - 3, 0xAA0E1014);
-			}
-			if (row.dot()) {
-				// Filled means this layer goes into the build sequence. Deliberately not the same
-				// control as the state icon beside it: what you hear while working and what gets
-				// built are different questions, and one switch for both is how a layer goes missing.
-				graphics.text(font,
-					Component.literal(layer.buildEnabled() ? BUILD_DOT_ON : BUILD_DOT_OFF),
-					row.dotX(), y + 4, layer.buildEnabled() ? 0xFF5AD46A : 0xFF6A7078, false);
+					row.ordinalLeft() - 2, y + rowHeight - 3, 0xAA0E1014);
 			}
 			// The row number is for pointing at a layer out loud, nothing more, so it sits out at the
 			// edge in the smallest thing that can still be read rather than in front of the name.
@@ -3068,7 +3013,6 @@ public final class ComposerScreen extends Screen {
 		Component text = null;
 		int stateLayer = layerStateAt(lastMouseX, lastMouseY);
 		int instrumentLayer = layerInstrumentAt(lastMouseX, lastMouseY);
-		int dotLayer = buildDotAt(lastMouseX, lastMouseY);
 		if (stateLayer >= 0) {
 			text = Component.literal(layerStateTooltip(stateLayer));
 		} else if (instrumentLayer >= 0) {
@@ -3083,10 +3027,6 @@ public final class ComposerScreen extends Screen {
 						: " - click to change the voice")
 					+ (landing > 1 ? "\nPicks land on all " + landing + " selected layers." : "")
 					+ (silence == null ? "" : "\n" + silence));
-		} else if (dotLayer >= 0) {
-			text = Component.literal(project().layers().get(dotLayer).buildEnabled()
-				? "In the build sequence - click to leave it out"
-				: "Left out of the build sequence - click to include it");
 		}
 		if (text != null) {
 			graphics.setTooltipForNextFrame(font, font.split(text, 200), x, y);
@@ -3445,7 +3385,7 @@ public final class ComposerScreen extends Screen {
 		int contentHeight = layerContentHeight();
 		int thumbHeight = Math.max(16, trackHeight * trackHeight / Math.max(1, contentHeight));
 		int thumbTop = trackTop + (trackHeight - thumbHeight) * layerScroll / maximum;
-		if (!layerRowLayout().dot()) {
+		if (layerPanelWidth() < ROW_SCROLLBAR_AT) {
 			// Narrow, the track would sit on top of the row numbers, which are the last thing left.
 			return;
 		}
@@ -4523,10 +4463,10 @@ public final class ComposerScreen extends Screen {
 					+ (stats.duplicateNotes() > 0 ? " (" + stats.duplicateNotes() + " deduped)" : ""))
 			+ " · " + project().layers().size() + " layers");
 		int included = (int)project().layers().stream()
-			.filter(Layer::buildEnabled)
+			.filter(Layer::inBuild)
 			.count();
 		if (included == 0) {
-			segments.add("nothing included");
+			segments.add("every layer muted or hidden");
 		} else {
 			// Counted off the sequence rather than off the composition, so it agrees with what the
 			// paste would place -- including which notes deduplication left out of it.
@@ -4538,6 +4478,14 @@ public final class ComposerScreen extends Screen {
 		// belongs on screen rather than behind a hover.
 		segments.add(tempoLabel() + " · " + project().ppq() + " ticks/beat");
 		segments.add("grid " + snapLabel().getString().replace("Snap ", "") + " = " + snapDetail());
+		// The one place preview and build still disagree. Solo is a lens for listening around a
+		// part, so it deliberately does not change what gets built -- which means that while it is
+		// on, what you are hearing is not what would be placed. Said out loud rather than left to
+		// be discovered, because it is the same trap a DAW's bounce sets when solo is left up.
+		if (!soloedLayers.isEmpty()) {
+			segments.add(soloedLayers.size() + (soloedLayers.size() == 1 ? " layer" : " layers")
+				+ " soloed - solo does not change the build");
+		}
 		if (!selectedNotes.isEmpty()) {
 			segments.add(selectedNotes.size() + " selected");
 		}
@@ -4673,7 +4621,7 @@ public final class ComposerScreen extends Screen {
 		if (event.button() == 1) {
 			int stateLayer = layerStateAt(event.x(), event.y());
 			if (stateLayer >= 0) {
-				startPainting(LayerPaint.STATE, stateLayer, cycleLayerState(stateLayer, -1), false);
+				startPainting(LayerPaint.STATE, stateLayer, cycleLayerState(stateLayer, -1));
 				return true;
 			}
 			int layerIndex = layerHeaderAt(event.x(), event.y());
@@ -4703,17 +4651,9 @@ public final class ComposerScreen extends Screen {
 			commitLayerRename();
 		}
 		if (event.button() == 0) {
-			int dotLayer = buildDotAt(event.x(), event.y());
-			if (dotLayer >= 0) {
-				boolean next = !project().layers().get(dotLayer).buildEnabled();
-				setLayerBuildEnabled(layersToEdit(dotLayer), next);
-				showResult(Component.literal(sequenceSummary()));
-				startPainting(LayerPaint.BUILD_DOT, dotLayer, LayerState.ACTIVE, next);
-				return true;
-			}
 			int stateLayer = layerStateAt(event.x(), event.y());
 			if (stateLayer >= 0) {
-				startPainting(LayerPaint.STATE, stateLayer, cycleLayerState(stateLayer, 1), false);
+				startPainting(LayerPaint.STATE, stateLayer, cycleLayerState(stateLayer, 1));
 				return true;
 			}
 			int instrumentLayer = layerInstrumentAt(event.x(), event.y());
@@ -5125,11 +5065,7 @@ public final class ComposerScreen extends Screen {
 			// inside a twelve-pixel column while dragging down thirty layers is not a gesture.
 			int row = layerRowAtY(event.y());
 			if (row >= 0 && paintedRows.add(row)) {
-				if (painting == LayerPaint.BUILD_DOT) {
-					setLayerBuildEnabled(List.of(row), paintBuildEnabled, true);
-				} else {
-					setLayerState(List.of(row), paintState, true);
-				}
+				setLayerState(List.of(row), paintState, true);
 			}
 			return true;
 		}
@@ -5208,9 +5144,9 @@ public final class ComposerScreen extends Screen {
 			return true;
 		}
 		if (painting != LayerPaint.NONE) {
-			// The sequence summary is only news when the build dots moved; a run of mutes has not
-			// changed what would be built by a single block.
-			boolean report = painting == LayerPaint.BUILD_DOT && paintedRows.size() > 1;
+			// A run of state changes is worth a word, because it is now a run of layers going into
+			// or out of the build and the panel alone does not say how many that came to.
+			boolean report = paintedRows.size() > 1;
 			painting = LayerPaint.NONE;
 			paintedRows.clear();
 			if (report) {
@@ -6121,38 +6057,26 @@ public final class ComposerScreen extends Screen {
 	 * <p>Nothing needs moving afterwards. The sequence is derived from these dots, so it has
 	 * already changed by the time this returns.</p>
 	 */
-	private void setIncludedLayers(boolean add) {
-		Set<Integer> chosen = new java.util.LinkedHashSet<>(selectedLayers);
-		if (chosen.isEmpty()) {
-			showResult(Component.literal("Select some layers first."));
-			return;
-		}
-		ComposerProject updated = project();
-		for (int index = 0; index < updated.layers().size(); index++) {
-			boolean include = chosen.contains(index)
-				|| (add && updated.layers().get(index).buildEnabled());
-			if (updated.layers().get(index).buildEnabled() != include) {
-				updated = updated.withLayer(index, updated.layers().get(index).withBuildEnabled(include));
-			}
-		}
-		if (updated.equals(project())) {
-			showResult(Component.literal("Those layers were already the included ones."));
-			return;
-		}
-		apply(add ? "add layers to the sequence" : "set the sequence layers", updated);
-		layersChanged();
-		showResult(Component.literal(sequenceSummary()));
+	/** What the build sequence now holds, for confirming a dot change did what was expected. */
+	/** How many layers are left out of the build because they are muted or hidden. */
+	private int leftOutLayers() {
+		return (int)project().layers().stream().filter(layer -> !layer.inBuild()).count();
 	}
 
-	/** What the build sequence now holds, for confirming a dot change did what was expected. */
 	private String sequenceSummary() {
 		var sequence = config.tracks();
 		if (sequence.isEmpty()) {
-			return "No layers included - the build sequence is empty.";
+			return "Every layer is muted or hidden, so the build is empty.";
 		}
 		SongBuilder.BlockCounts blocks = SongBuilder.blockCounts(sequence);
-		String report = "Sequence: " + sequence.size() + (sequence.size() == 1 ? " layer" : " layers")
+		String report = "Build: " + sequence.size() + " of " + project().layers().size()
+			+ (project().layers().size() == 1 ? " layer" : " layers")
 			+ ", " + blocks.noteBlocks() + " note blocks, " + blocks.repeaters() + " repeaters";
+		int out = leftOutLayers();
+		if (out > 0) {
+			report += "; " + out + (out == 1 ? " layer is" : " layers are")
+				+ " muted or hidden and left out";
+		}
 		SongAnalysis stats = projectStats();
 		if (stats.outOfRange() > 0) {
 			report += "; " + stats.outOfRange() + " out-of-range notes left out";
@@ -6252,9 +6176,18 @@ public final class ComposerScreen extends Screen {
 			return;
 		}
 		if (config.tracks().stream().allMatch(track -> track.sequence().isBlank())) {
-			showResult(Component.literal(
-				"The build sequence is empty. Include some layers first."));
+			showResult(Component.literal("Nothing to build: every layer with notes on it is muted "
+				+ "or hidden. Set one back to Active with the letter beside its name."));
 			return;
+		}
+		// The last chance to notice. What is built is what you can hear, so a layer muted an hour
+		// ago to listen around it is a layer that will not be in the world -- and this is the one
+		// moment where that is expensive to find out afterwards.
+		int leftOut = leftOutLayers();
+		if (leftOut > 0) {
+			showResult(Component.literal(leftOut + (leftOut == 1 ? " layer is" : " layers are")
+				+ " muted or hidden, so " + (leftOut == 1 ? "it is" : "they are")
+				+ " not in this build."));
 		}
 		minecraft.gui.setScreen(new BuildOptionsScreen(this, project().name(), config.tracks(),
 				project(), config.dedupeIdenticalNotes(), pasteMode(), mode -> {
@@ -6456,17 +6389,9 @@ public final class ComposerScreen extends Screen {
 		return content + Math.round(Math.round(gap / span) * span);
 	}
 
-	/** Left edge of the build dot, inset from the panel's right edge. */
-	private int buildDotX() {
-		// Left of where it used to sit, to leave the panel's right edge to the row number. The two
-		// were close enough that the dot's generous hit box swallowed clicks meant for the number.
-		return layerRowLayout().dotX();
-	}
-
-	private void startPainting(LayerPaint kind, int fromRow, LayerState state, boolean buildEnabled) {
+	private void startPainting(LayerPaint kind, int fromRow, LayerState state) {
 		painting = kind;
 		paintState = state;
-		paintBuildEnabled = buildEnabled;
 		paintedRows.clear();
 		paintedRows.addAll(layersToEdit(fromRow));
 	}
@@ -6492,11 +6417,6 @@ public final class ComposerScreen extends Screen {
 	 * <p>It used to reach ten pixels past the glyph, which was harmless while the number was out at
 	 * the panel's edge and swallows clicks meant for the number now that the two sit together.</p>
 	 */
-	private int buildDotAt(double x, double y) {
-		LayerRowLayout row = layerRowLayout();
-		return row.dot() && x >= row.dotX() - 3 && x < row.dotRight() + 2 ? layerRowAt(x, y) : -1;
-	}
-
 	/** The one control that decides whether a layer is soloed, heard, silent or gone. */
 	private int layerStateAt(double x, double y) {
 		LayerRowLayout row = layerRowLayout();
@@ -7433,7 +7353,6 @@ public final class ComposerScreen extends Screen {
 	/** What a drag down the layer panel is setting on every row it crosses. */
 	private enum LayerPaint {
 		NONE,
-		BUILD_DOT,
 		STATE
 	}
 
@@ -7448,9 +7367,8 @@ public final class ComposerScreen extends Screen {
 	}
 
 	/** Where each part of a layer row goes, and whether the panel is wide enough to have it. */
-	private record LayerRowLayout(int inset, boolean chip, boolean dot, boolean name,
-			int instrumentX, int nameLeft, int nameRight, int dotX, int dotRight, int ordinalLeft,
-			int ordinalRight) {
+	private record LayerRowLayout(int inset, boolean chip, boolean name,
+			int instrumentX, int nameLeft, int nameRight, int ordinalLeft, int ordinalRight) {
 	}
 
 	/** One row of an open menu: a thing to do, a setting to cycle, or a submenu to open. */
@@ -7566,8 +7484,6 @@ public final class ComposerScreen extends Screen {
 		BAKE_SPEED("Apply speed to the tempo"),
 		SNAP_TEMPO("Snap tempo (whole song)"),
 		SNAP_TEMPO_GAME("Snap tempo to game ticks (whole song)"),
-		INCLUDE_SELECTED("Include selected layers in sequence"),
-		SET_INCLUDED_TO_SELECTION("Include only selected layers in sequence"),
 		PASTE_IN_WORLD("Paste current sequence in world (requires op)..."),
 		BUILD_CANCEL("Cancel paste"),
 		TOGGLE_DEDUPE("Dedupe identical notes"),
@@ -7596,7 +7512,7 @@ public final class ComposerScreen extends Screen {
 			FIT_ALL_RANGE, BAKE_SPEED, SNAP_TEMPO, SNAP_TEMPO_GAME
 		};
 		private static final ToolbarAction[] BUILD_ACTIONS = {
-			INCLUDE_SELECTED, SET_INCLUDED_TO_SELECTION, TOGGLE_DEDUPE, PASTE_IN_WORLD, BUILD_CANCEL
+			TOGGLE_DEDUPE, PASTE_IN_WORLD, BUILD_CANCEL
 		};
 		private static final ToolbarAction[] SELECT_ACTIONS = {
 			SELECT_OFF_GRID, SELECT_HALF_TICKED, SELECT_TOO_FREQUENT, SELECT_OUT_OF_RANGE,
@@ -7625,8 +7541,6 @@ public final class ComposerScreen extends Screen {
 		MOVE_NOTES_HERE("Move selected notes here"),
 		MERGE_SELECTED("Merge selected"),
 		SNAP_TO_START("Snap to song start"),
-		INCLUDE_SELECTED("Include selected layers in sequence"),
-		SET_INCLUDED_TO_SELECTION("Include only selected layers in sequence"),
 		SELECT_ALL("Select all layers"),
 		// Last, and not next to Merge. The two read alike in a hurry and only one of them can be
 		// reached by a slip of the hand from a row you meant to rename.

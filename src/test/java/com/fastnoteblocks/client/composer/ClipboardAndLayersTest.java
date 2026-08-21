@@ -683,6 +683,43 @@ class ClipboardAndLayersTest {
 			"the same notes on a pitched instrument do split");
 	}
 
+	/**
+	 * What gets built is what you can hear: active layers, and nothing else.
+	 *
+	 * <p>There used to be a flag of its own for this, so the composer had two independent signal
+	 * paths -- preview played what was unmuted, a build placed what was dotted, and nothing tied
+	 * them together. Pressing Space was not a preview of the build, and there was no way to hear
+	 * what would be built. The flag stays on the record so older song files still load; it decides
+	 * nothing.</p>
+	 */
+	@Test
+	void onlyAudibleLayersGoIntoTheBuild() {
+		ComposerProject song = songOf(
+			new Layer("Active", "HARP", false, true, true, List.of(note(60, 0L))),
+			new Layer("Muted", "HARP", true, true, true, List.of(note(62, 0L))),
+			new Layer("Hidden", "HARP", false, true, false, List.of(note(64, 0L))),
+			// The old flag says leave it out; audible says build it. Audible wins now.
+			new Layer("Undotted", "HARP", false, false, true, List.of(note(65, 0L))));
+
+		assertEquals(List.of(true, false, false, true),
+			song.layers().stream().map(Layer::inBuild).toList());
+		assertEquals(List.of("Active", "Undotted"),
+			song.toSequenceTracks(Set.of(), false).stream()
+				.map(com.fastnoteblocks.client.FastNoteblocksConfig.SequenceTrack::name).toList());
+	}
+
+	/** An explicit set of layers still overrides it, which is how a probe builds one part alone. */
+	@Test
+	void namingLayersOutrightIgnoresWhetherTheyAreAudible() {
+		ComposerProject song = songOf(
+			new Layer("Active", "HARP", false, true, true, List.of(note(60, 0L))),
+			new Layer("Muted", "HARP", true, true, true, List.of(note(62, 0L))));
+
+		assertEquals(List.of("Muted"),
+			song.toSequenceTracks(Set.of(1), false).stream()
+				.map(com.fastnoteblocks.client.FastNoteblocksConfig.SequenceTrack::name).toList());
+	}
+
 	private static List<Integer> pitches(Layer layer) {
 		return layer.notes().stream().map(NoteEvent::midiNote).toList();
 	}

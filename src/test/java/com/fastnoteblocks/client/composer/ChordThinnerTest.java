@@ -205,7 +205,7 @@ class ChordThinnerTest {
 		}
 		ComposerProject song = songOf(List.of(
 			layer("In", "HARP", included),
-			new Layer("Out", "FLUTE", false, false, true, excluded)));
+			new Layer("Out", "FLUTE", true, true, true, excluded)));
 		assertTrue(ChordThinner.thin(song, 20, true).isEmpty(),
 			"only the included layer's ten sounds count, which is under the target");
 	}
