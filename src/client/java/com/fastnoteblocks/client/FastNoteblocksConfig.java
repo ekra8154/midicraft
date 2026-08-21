@@ -128,6 +128,16 @@ public final class FastNoteblocksConfig {
 		public boolean includesRepeaters() {
 			return repeaters;
 		}
+
+		/** The types either of two settings asks for -- what the scan and the render must cover. */
+		public OverlayMode or(OverlayMode other) {
+			boolean bothNotes = notes || other.notes;
+			boolean bothRepeaters = repeaters || other.repeaters;
+			return bothNotes && bothRepeaters ? BOTH
+				: bothNotes ? NOTES_ONLY
+				: bothRepeaters ? REPEATERS_ONLY
+				: OFF;
+		}
 	}
 
 	public enum RepeaterControlStyle {
@@ -170,17 +180,6 @@ public final class FastNoteblocksConfig {
 		SIXTEENTH
 	}
 
-	public enum MidiRangeFit {
-		OCTAVE_SHIFT,
-		OCTAVE_WRAP,
-		CLAMP,
-		REJECT_OUT_OF_RANGE
-	}
-
-	public enum MidiTempoFit {
-		PRESERVE_ORIGINAL,
-		SNAP_TO_REPEATERS
-	}
 
 	/**
 	 * Where an imported track's note block instrument comes from.
@@ -205,10 +204,6 @@ public final class FastNoteblocksConfig {
 	public static final int DEFAULT_RADIAL_FOCUS_DELAY_TICKS = 5;
 	public static final int MIN_RADIAL_FOCUS_DELAY_TICKS = 0;
 	public static final int MAX_RADIAL_FOCUS_DELAY_TICKS = 20;
-	/** Kept independent of the layer cap: importing 128 MIDI tracks by default helps nobody. */
-	public static final int DEFAULT_MIDI_MAX_IMPORTED_TRACKS = 16;
-	public static final int MIN_MIDI_MAX_IMPORTED_TRACKS = 1;
-	public static final int MAX_MIDI_MAX_IMPORTED_TRACKS = MAX_TRACKS;
 	/**
 	 * Share of the closest note gaps the automatic convert grid is allowed to ignore. Picking the
 	 * grid from the single smallest gap lets one outlier in thousands of notes dictate the tempo
@@ -260,7 +255,7 @@ public final class FastNoteblocksConfig {
 	 * ramp while leaving real music alone, and Merge repeats is the tool that actually handles
 	 * fake sustain, regardless of how loud it is.</p>
 	 */
-	public static final int DEFAULT_MIDI_VELOCITY_CUTOFF = 8;
+	public static final int DEFAULT_MIDI_VELOCITY_CUTOFF = 0;
 	public static final int MIN_MIDI_VELOCITY_CUTOFF = 0;
 	public static final int MAX_MIDI_VELOCITY_CUTOFF = 127;
 	/**
@@ -284,7 +279,18 @@ public final class FastNoteblocksConfig {
 	 */
 	public static final int MIN_LAYER_PANEL_WIDTH = 34;
 	public static final int MAX_LAYER_PANEL_WIDTH = 420;
-	public static final int DEFAULT_CHORD_THIN_TARGET = ChordThinner.DEFAULT_TARGET;
+	/**
+	 * GUI scale for the mod's own screens, or 0 to leave the game's alone.
+	 *
+	 * <p>The Composer is a piano roll, and a piano roll wants pixels: the scale that suits
+	 * reading a hotbar is not the scale that suits seeing four bars of a song at once. The cap is
+	 * nominal -- the window clamps whatever it is given to what actually fits.</p>
+	 */
+	public static final int SAME_GUI_SCALE_AS_MINECRAFT = 0;
+	public static final int MIN_COMPOSER_GUI_SCALE = SAME_GUI_SCALE_AS_MINECRAFT;
+	public static final int MAX_COMPOSER_GUI_SCALE = 6;
+	public static final int DEFAULT_COMPOSER_GUI_SCALE = SAME_GUI_SCALE_AS_MINECRAFT;
+	public static final int DEFAULT_CHORD_THIN_TARGET = 25;
 	public static final int MIN_CHORD_THIN_TARGET = ChordThinner.MIN_TARGET;
 	public static final int MAX_CHORD_THIN_TARGET = ChordThinner.MAX_TARGET;
 	private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
@@ -293,10 +299,19 @@ public final class FastNoteblocksConfig {
 	private static FastNoteblocksConfig instance = defaults();
 
 	private boolean modEnabled;
-	private OverlayMode overlayMode;
-	private OverlayMode previousOverlayMode;
-	private boolean nearbyPreviewsEnabled;
-	private boolean interactiveControlsEnabled;
+	/**
+	 * Labels drawn over every block in range, whether or not you are looking at one.
+	 *
+	 * <p>Purely something to read. Kept apart from the interactive overlay because the two are
+	 * wanted at different times: seeing what a wall of note blocks is tuned to is not the same
+	 * job as retuning the one under your crosshair, and a single mode governing both meant
+	 * turning labels on also armed the scroll wheel, or worse, showed labels that ignored it.</p>
+	 */
+	private OverlayMode nearbyOverlays;
+	/** The overlay you can act on: the block under the crosshair. What the overlay key toggles. */
+	private boolean interactiveOverlays;
+	/** Which block types the interactive overlay answers for. Never {@code OFF}. */
+	private OverlayMode interactiveOverlayType;
 	private int radialFocusDelayTicks;
 	private RepeaterControlStyle repeaterControlStyle;
 	private boolean invertScrolling;
@@ -335,16 +350,16 @@ public final class FastNoteblocksConfig {
 	private int activeTrackIndex;
 	private List<SavedSequence> savedSequences;
 	private MidiQuantizeGrid midiQuantizeGrid;
-	private MidiRangeFit midiRangeFit;
 	private boolean midiIgnorePercussion;
-	private int midiMaxImportedTracks;
 	private String midiDefaultInstrument;
 	private MidiInstrumentSource midiInstrumentSource;
-	private MidiTempoFit midiTempoFit;
 	private boolean debugCommandsEnabled;
+	/** Whether the one-time "the Composer is behind /fastnoteblocks" line has been said. */
+	private boolean seenWelcome;
 	private boolean debugPasteEnabled;
 	private int midiVelocityCutoff;
 	private int chordThinTarget;
+	private int composerGuiScale;
 	private int layerPanelWidth;
 	private boolean layerPanelCollapsed;
 	private int repeatMergeTicks;
@@ -375,14 +390,26 @@ public final class FastNoteblocksConfig {
 			StoredConfig stored = GSON.fromJson(reader, StoredConfig.class);
 			if (stored != null) {
 				instance.modEnabled = stored.modEnabled == null || stored.modEnabled;
-				instance.overlayMode = stored.overlayMode == null ? migrateOverlayMode(stored) : stored.overlayMode;
-				instance.previousOverlayMode = stored.previousOverlayMode == null || stored.previousOverlayMode == OverlayMode.OFF
-					? (instance.overlayMode == OverlayMode.OFF ? OverlayMode.NOTES_ONLY : instance.overlayMode)
-					: stored.previousOverlayMode;
-				instance.nearbyPreviewsEnabled = stored.nearbyPreviewsEnabled == null || stored.nearbyPreviewsEnabled;
-				instance.interactiveControlsEnabled = stored.interactiveControlsEnabled == null
-					? stored.radialControlsEnabled == null || stored.radialControlsEnabled
-					: stored.interactiveControlsEnabled;
+				// One mode used to govern both overlays, with two booleans beside it. Split in two:
+				// the nearby labels take that mode if previews were on and go dark if they were
+				// not, and the interactive overlay keeps its own on/off and inherits the same
+				// types -- so a config from before the split comes back looking as it did.
+				OverlayMode legacyMode = stored.overlayMode == null
+					? migrateOverlayMode(stored)
+					: stored.overlayMode;
+				boolean legacyPreviews = stored.nearbyPreviewsEnabled == null
+					|| stored.nearbyPreviewsEnabled;
+				instance.nearbyOverlays = stored.nearbyOverlays != null
+					? stored.nearbyOverlays
+					: legacyPreviews ? legacyMode : OverlayMode.OFF;
+				instance.interactiveOverlays = stored.interactiveOverlays != null
+					? stored.interactiveOverlays
+					: stored.interactiveControlsEnabled == null
+						? stored.radialControlsEnabled == null || stored.radialControlsEnabled
+						: stored.interactiveControlsEnabled;
+				instance.setInteractiveOverlayType(stored.interactiveOverlayType != null
+					? stored.interactiveOverlayType
+					: legacyMode);
 				instance.radialFocusDelayTicks = clampRadialFocusDelay(
 					stored.radialFocusDelayTicks == null ? DEFAULT_RADIAL_FOCUS_DELAY_TICKS : stored.radialFocusDelayTicks
 				);
@@ -463,19 +490,14 @@ public final class FastNoteblocksConfig {
 						.collect(java.util.stream.Collectors.toCollection(ArrayList::new));
 				}
 				instance.midiQuantizeGrid = stored.midiQuantizeGrid == null ? MidiQuantizeGrid.AUTO : stored.midiQuantizeGrid;
-				instance.midiRangeFit = stored.midiRangeFit == null ? MidiRangeFit.OCTAVE_SHIFT : stored.midiRangeFit;
 				instance.midiIgnorePercussion = stored.midiIgnorePercussion == null || stored.midiIgnorePercussion;
 				instance.debugCommandsEnabled = Boolean.TRUE.equals(stored.debugCommandsEnabled);
+				// An existing config means an existing player, who does not need introducing.
+				instance.seenWelcome = stored.seenWelcome == null || stored.seenWelcome;
 				instance.setDebugPasteEnabled(Boolean.TRUE.equals(stored.debugPasteEnabled));
-				instance.midiMaxImportedTracks = clampMidiMaxImportedTracks(
-					stored.midiMaxImportedTracks == null
-						? DEFAULT_MIDI_MAX_IMPORTED_TRACKS
-						: stored.midiMaxImportedTracks
-				);
 				instance.midiDefaultInstrument = stored.midiDefaultInstrument == null || stored.midiDefaultInstrument.isBlank()
 					? "HARP"
 					: stored.midiDefaultInstrument;
-				instance.midiTempoFit = stored.midiTempoFit == null ? MidiTempoFit.SNAP_TO_REPEATERS : stored.midiTempoFit;
 				// A config written before the setting existed is one that never asked for a single
 				// instrument -- it just never had the choice -- so it opens on reading the file.
 				instance.midiInstrumentSource = stored.midiInstrumentSource == null
@@ -517,6 +539,9 @@ public final class FastNoteblocksConfig {
 						? DEFAULT_CHORD_THIN_TARGET
 						: stored.chordThinTarget
 				);
+				instance.setComposerGuiScale(stored.composerGuiScale == null
+					? DEFAULT_COMPOSER_GUI_SCALE
+					: stored.composerGuiScale);
 				instance.layerPanelWidth = clampLayerPanelWidth(
 					stored.layerPanelWidth == null
 						? DEFAULT_LAYER_PANEL_WIDTH
@@ -624,46 +649,53 @@ public final class FastNoteblocksConfig {
 		this.modEnabled = modEnabled;
 	}
 
-	public OverlayMode overlayMode() {
-		return overlayMode;
+	public OverlayMode nearbyOverlays() {
+		return nearbyOverlays == null ? OverlayMode.OFF : nearbyOverlays;
 	}
 
-	public void setOverlayMode(OverlayMode overlayMode) {
-		this.overlayMode = overlayMode == null ? OverlayMode.NOTES_ONLY : overlayMode;
-		if (this.overlayMode != OverlayMode.OFF) {
-			previousOverlayMode = this.overlayMode;
-		}
+	public void setNearbyOverlays(OverlayMode nearbyOverlays) {
+		this.nearbyOverlays = nearbyOverlays == null ? OverlayMode.OFF : nearbyOverlays;
 	}
 
-	public void toggleOverlays() {
-		if (overlayMode == OverlayMode.OFF) {
-			overlayMode = previousOverlayMode == null || previousOverlayMode == OverlayMode.OFF
-				? OverlayMode.NOTES_ONLY
-				: previousOverlayMode;
-		} else {
-			previousOverlayMode = overlayMode;
-			overlayMode = OverlayMode.OFF;
-		}
+	public boolean interactiveOverlays() {
+		return interactiveOverlays;
 	}
 
-	public boolean overlaysEnabled() {
-		return overlayMode != OverlayMode.OFF;
+	public void setInteractiveOverlays(boolean interactiveOverlays) {
+		this.interactiveOverlays = interactiveOverlays;
 	}
 
-	public boolean nearbyPreviewsEnabled() {
-		return nearbyPreviewsEnabled;
+	public OverlayMode interactiveOverlayType() {
+		return interactiveOverlayType == null || interactiveOverlayType == OverlayMode.OFF
+			? OverlayMode.BOTH
+			: interactiveOverlayType;
 	}
 
-	public void setNearbyPreviewsEnabled(boolean nearbyPreviewsEnabled) {
-		this.nearbyPreviewsEnabled = nearbyPreviewsEnabled;
+	public void setInteractiveOverlayType(OverlayMode interactiveOverlayType) {
+		this.interactiveOverlayType = interactiveOverlayType == null
+				|| interactiveOverlayType == OverlayMode.OFF
+			? OverlayMode.BOTH
+			: interactiveOverlayType;
 	}
 
-	public boolean interactiveControlsEnabled() {
-		return interactiveControlsEnabled;
+	/** Which types the interactive overlay actually answers for right now, {@code OFF} if none. */
+	public OverlayMode activeInteractiveOverlays() {
+		return interactiveOverlays ? interactiveOverlayType() : OverlayMode.OFF;
 	}
 
-	public void setInteractiveControlsEnabled(boolean interactiveControlsEnabled) {
-		this.interactiveControlsEnabled = interactiveControlsEnabled;
+	/**
+	 * Every type either overlay wants.
+	 *
+	 * <p>What the block scan collects and what the render loop bothers to walk. Neither cares
+	 * which of the two settings asked for it, only that something did.</p>
+	 */
+	public OverlayMode shownOverlays() {
+		return nearbyOverlays().or(activeInteractiveOverlays());
+	}
+
+	/** The overlay key: the interactive half only, which is the half you can tell is on. */
+	public void toggleInteractiveOverlays() {
+		interactiveOverlays = !interactiveOverlays;
 	}
 
 	public int radialFocusDelayTicks() {
@@ -1071,13 +1103,6 @@ public final class FastNoteblocksConfig {
 		this.midiQuantizeGrid = midiQuantizeGrid == null ? MidiQuantizeGrid.AUTO : midiQuantizeGrid;
 	}
 
-	public MidiRangeFit midiRangeFit() {
-		return midiRangeFit;
-	}
-
-	public void setMidiRangeFit(MidiRangeFit midiRangeFit) {
-		this.midiRangeFit = midiRangeFit == null ? MidiRangeFit.OCTAVE_SHIFT : midiRangeFit;
-	}
 
 	public boolean midiIgnorePercussion() {
 		return midiIgnorePercussion;
@@ -1094,6 +1119,14 @@ public final class FastNoteblocksConfig {
 	 * chords of stated sizes, all one note, at a stated distance from the wall. That is how a fault
 	 * found in a real song gets cut down to the half dozen chords that actually cause it.</p>
 	 */
+	public boolean seenWelcome() {
+		return seenWelcome;
+	}
+
+	public void setSeenWelcome(boolean seenWelcome) {
+		this.seenWelcome = seenWelcome;
+	}
+
 	public boolean debugCommandsEnabled() {
 		return debugCommandsEnabled;
 	}
@@ -1126,13 +1159,6 @@ public final class FastNoteblocksConfig {
 		com.fastnoteblocks.client.compat.SongBuilder.DEBUG_PASTE = debugPasteEnabled;
 	}
 
-	public int midiMaxImportedTracks() {
-		return midiMaxImportedTracks;
-	}
-
-	public void setMidiMaxImportedTracks(int midiMaxImportedTracks) {
-		this.midiMaxImportedTracks = clampMidiMaxImportedTracks(midiMaxImportedTracks);
-	}
 
 	public String midiDefaultInstrument() {
 		return midiDefaultInstrument;
@@ -1152,14 +1178,6 @@ public final class FastNoteblocksConfig {
 		this.midiDefaultInstrument = midiDefaultInstrument == null || midiDefaultInstrument.isBlank()
 			? "HARP"
 			: midiDefaultInstrument.trim();
-	}
-
-	public MidiTempoFit midiTempoFit() {
-		return midiTempoFit;
-	}
-
-	public void setMidiTempoFit(MidiTempoFit midiTempoFit) {
-		this.midiTempoFit = midiTempoFit == null ? MidiTempoFit.SNAP_TO_REPEATERS : midiTempoFit;
 	}
 
 	public int maxBuildFloors() {
@@ -1249,6 +1267,15 @@ public final class FastNoteblocksConfig {
 		this.midiVelocityCutoff = clampMidiVelocityCutoff(midiVelocityCutoff);
 	}
 
+	public int composerGuiScale() {
+		return composerGuiScale;
+	}
+
+	public void setComposerGuiScale(int composerGuiScale) {
+		this.composerGuiScale = Math.max(MIN_COMPOSER_GUI_SCALE,
+			Math.min(MAX_COMPOSER_GUI_SCALE, composerGuiScale));
+	}
+
 	public int chordThinTarget() {
 		return chordThinTarget;
 	}
@@ -1273,13 +1300,29 @@ public final class FastNoteblocksConfig {
 		this.layerPanelCollapsed = layerPanelCollapsed;
 	}
 
+	/**
+	 * A config nobody is using, holding what every setting is worth before anyone touches it.
+	 *
+	 * <p>For the settings screen's reset controls, which need to ask what a value would go back to
+	 * without changing it first. {@link #defaults()} was already the one place those are written
+	 * down -- the settings panel used to repeat them as literals beside each entry, and a default
+	 * written twice is a default that drifts -- so a reset reads them from here rather than
+	 * carrying a table of its own.</p>
+	 */
+	public static FastNoteblocksConfig defaultValues() {
+		return defaults();
+	}
+
 	private static FastNoteblocksConfig defaults() {
 		FastNoteblocksConfig config = new FastNoteblocksConfig();
 		config.modEnabled = true;
-		config.overlayMode = OverlayMode.NOTES_ONLY;
-		config.previousOverlayMode = OverlayMode.NOTES_ONLY;
-		config.nearbyPreviewsEnabled = true;
-		config.interactiveControlsEnabled = true;
+		// Both overlays off until asked for. The mod's centre of gravity is the Composer now, and a
+		// fresh install covering every note block in sight with labels is not the first impression
+		// it wants. The type the interactive overlay will answer for is still set, so the overlay
+		// key alone is enough to get a working one.
+		config.nearbyOverlays = OverlayMode.OFF;
+		config.interactiveOverlays = false;
+		config.interactiveOverlayType = OverlayMode.NOTES_ONLY;
 		config.radialFocusDelayTicks = DEFAULT_RADIAL_FOCUS_DELAY_TICKS;
 		config.repeaterControlStyle = RepeaterControlStyle.SCROLL;
 		config.invertScrolling = false;
@@ -1300,17 +1343,16 @@ public final class FastNoteblocksConfig {
 		config.activeTrackIndex = 0;
 		config.savedSequences = new ArrayList<>();
 		config.midiQuantizeGrid = MidiQuantizeGrid.AUTO;
-		config.midiRangeFit = MidiRangeFit.OCTAVE_SHIFT;
-		config.midiIgnorePercussion = true;
+		config.midiIgnorePercussion = false;
 		config.debugCommandsEnabled = false;
+		config.seenWelcome = false;
 		config.setDebugPasteEnabled(false);
-		config.midiMaxImportedTracks = DEFAULT_MIDI_MAX_IMPORTED_TRACKS;
 		config.midiDefaultInstrument = "HARP";
 		config.midiInstrumentSource = MidiInstrumentSource.FROM_FILE_THEN_NAME;
-		config.midiTempoFit = MidiTempoFit.SNAP_TO_REPEATERS;
 		config.composerSpeedQuarters = DEFAULT_COMPOSER_SPEED_QUARTERS;
 		config.midiVelocityCutoff = DEFAULT_MIDI_VELOCITY_CUTOFF;
 		config.chordThinTarget = DEFAULT_CHORD_THIN_TARGET;
+		config.composerGuiScale = DEFAULT_COMPOSER_GUI_SCALE;
 		config.layerPanelWidth = DEFAULT_LAYER_PANEL_WIDTH;
 		config.layerPanelCollapsed = false;
 		config.repeatMergeTicks = DEFAULT_REPEAT_MERGE_TICKS;
@@ -1353,9 +1395,6 @@ public final class FastNoteblocksConfig {
 		return String.format(java.util.Locale.ROOT, "%.2fx", clampSequenceDelayScale(delayScaleQuarters) / 4.0F);
 	}
 
-	private static int clampMidiMaxImportedTracks(int tracks) {
-		return Math.max(MIN_MIDI_MAX_IMPORTED_TRACKS, Math.min(MAX_MIDI_MAX_IMPORTED_TRACKS, tracks));
-	}
 
 	private static int clampMaxBuildFloors(int floors) {
 		return Math.max(MIN_MAX_BUILD_FLOORS, Math.min(MAX_MAX_BUILD_FLOORS, floors));
@@ -1428,13 +1467,18 @@ public final class FastNoteblocksConfig {
 
 	private static final class StoredConfig {
 		private Boolean modEnabled;
+		private OverlayMode nearbyOverlays;
+		private Boolean interactiveOverlays;
+		private OverlayMode interactiveOverlayType;
+		// Legacy fields, read on load and never written again. They are how a config from before
+		// the overlay selector, and from before the nearby/interactive split, still opens.
 		private OverlayMode overlayMode;
 		private OverlayMode previousOverlayMode;
-		// Legacy fields retained for migration from versions before the overlay selector.
 		private Boolean overlaysEnabled;
 		private Boolean noteBlockOverlaysEnabled;
 		private Boolean nearbyPreviewsEnabled;
 		private Boolean interactiveControlsEnabled;
+		private Boolean previousInteractiveControls;
 		private Integer radialFocusDelayTicks;
 		private RepeaterControlStyle repeaterControlStyle;
 		private Boolean radialControlsEnabled;
@@ -1464,16 +1508,15 @@ public final class FastNoteblocksConfig {
 		private Integer activeTrackIndex;
 		private List<SavedSequence> savedSequences;
 		private MidiQuantizeGrid midiQuantizeGrid;
-		private MidiRangeFit midiRangeFit;
 		private Boolean midiIgnorePercussion;
 		private Boolean debugCommandsEnabled;
+		private Boolean seenWelcome;
 		private Boolean debugPasteEnabled;
-		private Integer midiMaxImportedTracks;
 		private String midiDefaultInstrument;
 		private MidiInstrumentSource midiInstrumentSource;
-		private MidiTempoFit midiTempoFit;
 		private Integer midiVelocityCutoff;
 		private Integer chordThinTarget;
+		private Integer composerGuiScale;
 		private Integer layerPanelWidth;
 		private Boolean layerPanelCollapsed;
 		private Integer composerSpeedQuarters;
@@ -1492,10 +1535,9 @@ public final class FastNoteblocksConfig {
 
 		private StoredConfig(FastNoteblocksConfig config) {
 			this.modEnabled = config.modEnabled;
-			this.overlayMode = config.overlayMode;
-			this.previousOverlayMode = config.previousOverlayMode;
-			this.nearbyPreviewsEnabled = config.nearbyPreviewsEnabled;
-			this.interactiveControlsEnabled = config.interactiveControlsEnabled;
+			this.nearbyOverlays = config.nearbyOverlays;
+			this.interactiveOverlays = config.interactiveOverlays;
+			this.interactiveOverlayType = config.interactiveOverlayType;
 			this.radialFocusDelayTicks = config.radialFocusDelayTicks;
 			this.repeaterControlStyle = config.repeaterControlStyle;
 			this.invertScrolling = config.invertScrolling;
@@ -1526,16 +1568,15 @@ public final class FastNoteblocksConfig {
 			this.activeTrackIndex = config.activeTrackIndex;
 			this.savedSequences = null;
 			this.midiQuantizeGrid = config.midiQuantizeGrid;
-			this.midiRangeFit = config.midiRangeFit;
 			this.midiIgnorePercussion = config.midiIgnorePercussion;
 			this.debugCommandsEnabled = config.debugCommandsEnabled;
+			this.seenWelcome = config.seenWelcome;
 			this.debugPasteEnabled = config.debugPasteEnabled;
-			this.midiMaxImportedTracks = config.midiMaxImportedTracks;
 			this.midiDefaultInstrument = config.midiDefaultInstrument;
 			this.midiInstrumentSource = config.midiInstrumentSource;
-			this.midiTempoFit = config.midiTempoFit;
 			this.midiVelocityCutoff = config.midiVelocityCutoff;
 			this.chordThinTarget = config.chordThinTarget;
+			this.composerGuiScale = config.composerGuiScale;
 			this.layerPanelWidth = config.layerPanelWidth;
 			this.layerPanelCollapsed = config.layerPanelCollapsed;
 			this.composerSpeedQuarters = config.composerSpeedQuarters;

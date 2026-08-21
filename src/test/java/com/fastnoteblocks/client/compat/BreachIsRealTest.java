@@ -40,7 +40,7 @@ import org.junit.jupiter.api.Test;
  * readily: five of the twelve identical builds here move their {@code farWall}, the repro among
  * them. A song never seeds -- it walks from the head of its first lane -- so this reaches exactly
  * two things: the repro tests pinned on breach depth, and the wall that
- * {@code /fastnoteblockpaste} prints, which is the number in-game reading shows a breach off when
+ * {@code /fastnoteblocks paste} prints, which is the number in-game reading shows a breach off when
  * diagnosing one.</p>
  */
 @Tag("sweep")

@@ -120,7 +120,7 @@ class BreachReproSearchTest {
 									if (over > 3) {
 										continue;
 									}
-									hits.add(new Hit("/fastnoteblockpaste " + width + " 3 down "
+									hits.add(new Hit("/fastnoteblocks paste " + width + " 3 down "
 										+ cols + " " + spec, fault, plan.commands().size()));
 								}
 							}

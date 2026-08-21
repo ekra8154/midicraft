@@ -9,7 +9,6 @@ import com.mojang.brigadier.builder.RequiredArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
 import java.util.List;
 import java.util.Map;
-import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
@@ -34,15 +33,15 @@ import net.minecraft.world.phys.Vec3;
  * one variable, because corridor width and floor count are sized from the whole song.</p>
  *
  * <pre>
- *   /fastnoteblockpaste 12 1 6 2 18                 three chords, corridor twelve wide, one floor
- *   /fastnoteblockpaste 36 1 30x4                   four chords of thirty
- *   /fastnoteblockpaste dry 24 2 5x8@4 30@1         reported, not placed
- *   /fastnoteblockpaste 36 3 down 12 18 30          the next wall a descent, first chord twelve off
- *   /fastnoteblockpaste 28 5 up 25x8                a whole lane ending in a climb, every chord
+ *   /fastnoteblocks paste 12 1 6 2 18                 three chords, corridor twelve wide, one floor
+ *   /fastnoteblocks paste 36 1 30x4                   four chords of thirty
+ *   /fastnoteblocks paste dry 24 2 5x8@4 30@1         reported, not placed
+ *   /fastnoteblocks paste 36 3 down 12 18 30          the next wall a descent, first chord twelve off
+ *   /fastnoteblocks paste 28 5 up 25x8                a whole lane ending in a climb, every chord
  *                                                   placed where the walk itself wants it
- *   /fastnoteblockpaste 36 1 flat turning 12 30 5@1 5 5
+ *   /fastnoteblocks paste 36 1 flat turning 12 30 5@1 5 5
  *                                                   the thirty-chord turnaround, as a single line
- *   /fastnoteblockpaste 40 1 7:7b 7:7h              the stacked seven over gold, then over glass
+ *   /fastnoteblocks paste 40 1 7:7b 7:7h              the stacked seven over gold, then over glass
  * </pre>
  *
  * <p>Width and floors first, then the chords, which run to the end of the line. Between them may go
@@ -62,10 +61,10 @@ import net.minecraft.world.phys.Vec3;
  * <p>And the other half of the same job, reading a build rather than making one:</p>
  *
  * <pre>
- *   /asciidiagram 13 72 108 15 76 113 east    that box, sliced west to east
- *   /asciidiagram ~-8 ~ ~-8 ~8 ~4 ~8          the ground around you, sliced downwards
- *   /asciidiagram ~-8 ~ ~-8 ~8 ~4 ~8 top south      the same, turned so south is up the page
- *   /asciidiagram ~-8 ~ ~-8 ~8 ~4 ~8 top south true and with every note block saying which note
+ *   /fastnoteblocks asciidiagram 13 72 108 15 76 113 east    that box, sliced west to east
+ *   /fastnoteblocks asciidiagram ~-8 ~ ~-8 ~8 ~4 ~8          the ground around you, sliced downwards
+ *   /fastnoteblocks asciidiagram ~-8 ~ ~-8 ~8 ~4 ~8 top south      the same, turned so south is up the page
+ *   /fastnoteblocks asciidiagram ~-8 ~ ~-8 ~8 ~4 ~8 top south true and with every note block saying which note
  * </pre>
  *
  * <p>A view from above or below is a map and a map can be turned, so those two take a direction for
@@ -83,54 +82,71 @@ public final class DebugCommands {
 	private DebugCommands() {
 	}
 
-	public static void register() {
-		ClientCommandRegistrationCallback.EVENT.register((dispatcher, registry) -> {
-			LiteralArgumentBuilder<FabricClientCommandSource> paste = literal("fastnoteblockpaste")
-				// Checked here rather than by skipping registration, so that turning the setting on
-				// takes effect where it is turned on rather than at the next launch.
-				.requires(source -> FastNoteblocksConfig.get().debugCommandsEnabled())
-				.then(wall(false, null))
-				.then(literal("dry").then(wall(true, null)));
-			// And the same again under each paster's own name, so a spec can be built both ways
-			// without going to the config screen and back. Left off it is whatever the paste button
-			// would use, and that default is deliberately not spelled out here: the command exists to
-			// build what a song would get, so the two must not be able to disagree.
-			//
-			// Literals rather than a word argument, for the reason the wall shapes are literals: a
-			// chord spec always opens with a digit and a mode name never does, so leaving it off is
-			// unambiguous and Brigadier tries its literal children first.
-			for (SongBuilder.PasteMode mode : SongBuilder.PasteMode.values()) {
-				String name = mode.name().toLowerCase(java.util.Locale.ROOT);
-				paste = paste.then(literal(name)
-					.then(wall(false, mode))
-					.then(literal("dry").then(wall(true, mode))));
-			}
-			// And the two names anybody actually says. The ultra lanes are v1 and v2 in conversation
-			// and in every commit message, and nobody is going to type ultra_compact_lane_v2 twice.
-			paste = paste
-				.then(literal("v1")
-					.then(wall(false, SongBuilder.PasteMode.ULTRA_COMPACT_LANE))
-					.then(literal("dry")
-						.then(wall(true, SongBuilder.PasteMode.ULTRA_COMPACT_LANE))))
-				.then(literal("v2")
-					.then(wall(false, SongBuilder.PasteMode.ULTRA_COMPACT_LANE_V2))
-					.then(literal("dry")
-						.then(wall(true, SongBuilder.PasteMode.ULTRA_COMPACT_LANE_V2))));
-			dispatcher.register(paste);
-			dispatcher.register(literal("asciidiagram")
-				.requires(source -> FastNoteblocksConfig.get().debugCommandsEnabled())
-				.then(corner("from").then(views())));
-			// A toggle rather than an argument to the paste, because the builds worth looking at this
-			// way are songs pasted from the build screen, which takes no arguments.
-			// On its own it says what the colours mean rather than toggling. Reading a marked build is
-			// the thing you do far more often than turning the marking on, and a toggle you have to
-			// read the state of afterwards is a toggle that gets pressed twice by accident.
-			dispatcher.register(literal("fastnoteblocksdebugpaste")
-				.requires(source -> FastNoteblocksConfig.get().debugCommandsEnabled())
-				.executes(context -> colourKey(context.getSource()))
-				.then(literal("on").executes(context -> debugPaste(context.getSource(), true)))
-				.then(literal("off").executes(context -> debugPaste(context.getSource(), false))));
-		});
+	/**
+	 * The paster, as {@code /fastnoteblocks paste}.
+	 *
+	 * <p>Handed to {@link ComposerCommand} to hang under the mod's own command rather than
+	 * registered here, so the mod owns one name in a list everybody's mods are competing for. The
+	 * gate stays on this node: the Composer and the settings are how anyone uses the mod, and
+	 * neither should disappear because a debugging switch is off.</p>
+	 */
+	static LiteralArgumentBuilder<FabricClientCommandSource> pasteCommand() {
+		LiteralArgumentBuilder<FabricClientCommandSource> paste = literal("paste")
+			// Checked here rather than by skipping registration, so that turning the setting on
+			// takes effect where it is turned on rather than at the next launch.
+			.requires(source -> FastNoteblocksConfig.get().debugCommandsEnabled())
+			.then(wall(false, null))
+			.then(literal("dry").then(wall(true, null)));
+		// And the same again under each paster's own name, so a spec can be built both ways
+		// without going to the config screen and back. Left off it is whatever the paste button
+		// would use, and that default is deliberately not spelled out here: the command exists to
+		// build what a song would get, so the two must not be able to disagree.
+		//
+		// Literals rather than a word argument, for the reason the wall shapes are literals: a
+		// chord spec always opens with a digit and a mode name never does, so leaving it off is
+		// unambiguous and Brigadier tries its literal children first.
+		for (SongBuilder.PasteMode mode : SongBuilder.PasteMode.values()) {
+			String name = mode.name().toLowerCase(java.util.Locale.ROOT);
+			paste = paste.then(literal(name)
+				.then(wall(false, mode))
+				.then(literal("dry").then(wall(true, mode))));
+		}
+		// And the two names anybody actually says. The ultra lanes are v1 and v2 in conversation
+		// and in every commit message, and nobody is going to type ultra_compact_lane_v2 twice.
+		paste = paste
+			.then(literal("v1")
+				.then(wall(false, SongBuilder.PasteMode.ULTRA_COMPACT_LANE))
+				.then(literal("dry")
+					.then(wall(true, SongBuilder.PasteMode.ULTRA_COMPACT_LANE))))
+			.then(literal("v2")
+				.then(wall(false, SongBuilder.PasteMode.ULTRA_COMPACT_LANE_V2))
+				.then(literal("dry")
+					.then(wall(true, SongBuilder.PasteMode.ULTRA_COMPACT_LANE_V2))));
+		return paste;
+	}
+
+	/** The diagram, as {@code /fastnoteblocks asciidiagram}. */
+	static LiteralArgumentBuilder<FabricClientCommandSource> asciiDiagramCommand() {
+		return literal("asciidiagram")
+			.requires(source -> FastNoteblocksConfig.get().debugCommandsEnabled())
+			.then(corner("from").then(views()));
+	}
+
+	/**
+	 * The collision marking, as {@code /fastnoteblocks debugpaste}.
+	 *
+	 * <p>A toggle rather than an argument to the paste, because the builds worth looking at this
+	 * way are songs pasted from the build screen, which takes no arguments. On its own it says what
+	 * the colours mean rather than toggling: reading a marked build is the thing you do far more
+	 * often than turning the marking on, and a toggle you have to read the state of afterwards is a
+	 * toggle that gets pressed twice by accident.</p>
+	 */
+	static LiteralArgumentBuilder<FabricClientCommandSource> debugPasteCommand() {
+		return literal("debugpaste")
+			.requires(source -> FastNoteblocksConfig.get().debugCommandsEnabled())
+			.executes(context -> colourKey(context.getSource()))
+			.then(literal("on").executes(context -> debugPaste(context.getSource(), true)))
+			.then(literal("off").executes(context -> debugPaste(context.getSource(), false)));
 	}
 
 	/**
@@ -461,13 +477,13 @@ public final class DebugCommands {
 	 * What the blocks of a marked build mean, and whether the next one will be marked.
 	 *
 	 * <p>Read off {@link SongBuilder#DEBUG_PASTE_KEY}, which is the same table the builder colours
-	 * from and the same one an {@code /asciidiagram} legend explains itself with, so the three can
+	 * from and the same one an {@code /fastnoteblocks asciidiagram} legend explains itself with, so the three can
 	 * never come apart.</p>
 	 */
 	private static int colourKey(FabricClientCommandSource source) {
 		boolean on = FastNoteblocksConfig.get().debugPasteEnabled();
 		source.sendFeedback(Component.literal("Debug paste is " + (on ? "on" : "off")
-			+ ". /fastnoteblocksdebugpaste on|off to change it.")
+			+ ". /fastnoteblocks debugpaste on|off to change it.")
 			.withStyle(on ? ChatFormatting.YELLOW : ChatFormatting.GRAY));
 		SongBuilder.DEBUG_PASTE_KEY.forEach((block, means) -> source.sendFeedback(Component
 			.literal("  " + block.substring(block.indexOf(':') + 1) + "  ")

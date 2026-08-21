@@ -2,6 +2,8 @@ package com.fastnoteblocks.client;
 
 import com.fastnoteblocks.NotePitch;
 import com.fastnoteblocks.NoteSequence;
+import com.fastnoteblocks.client.compat.ComposerCommand;
+import com.fastnoteblocks.client.compat.ComposerScale;
 import com.fastnoteblocks.client.compat.ComposerScreen;
 import com.fastnoteblocks.client.compat.PreviewInstrument;
 import com.mojang.blaze3d.platform.InputConstants;
@@ -106,17 +108,30 @@ public final class NoteBlockOverlay {
 	private final Deque<PendingClicks> clickQueue = new ArrayDeque<>();
 	private final Map<BlockPos, ExpectedStep> expectedSteps = new HashMap<>();
 	private final Map<BlockPos, PlacementWatch> placementWatches = new HashMap<>();
+	// Unbound. Taking a letter key from someone who plays with a lot of mods is a rude default,
+	// and the setting it toggles is reachable in the settings screen either way.
 	private final KeyMapping toggleKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
-		"key.fast-noteblocks.toggle", InputConstants.Type.KEYSYM, 78, CATEGORY
+		"key.fast-noteblocks.toggle", InputConstants.Type.KEYSYM, -1, CATEGORY
 	));
 	private final KeyMapping placementSequenceKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
 		"key.fast-noteblocks.toggle_placement_sequence", InputConstants.Type.KEYSYM, -1, CATEGORY
 	));
-	// M, next to the overlay toggle on N. Bound by default because the composer is now the way in
-	// to every song, and an unbound key made it reachable only through Mod Menu.
+	// Unbound, like the other two. /fastnoteblocks is the way in that costs nobody a key, and
+	// Brigadier listing it as you type is better discovery than a letter you have to be told.
 	private final KeyMapping composerKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
-		"key.fast-noteblocks.open_composer", InputConstants.Type.KEYSYM, 77, CATEGORY
+		"key.fast-noteblocks.open_composer", InputConstants.Type.KEYSYM, -1, CATEGORY
 	));
+
+	/**
+	 * The mod's key bindings, in the order the settings screen lists them.
+	 *
+	 * <p>Handed out rather than copied: rebinding one has to change the same {@link KeyMapping}
+	 * the game already holds, which is what keeps our screen and vanilla's Controls screen
+	 * agreeing without either of them storing a key of its own.</p>
+	 */
+	public List<KeyMapping> keyMappings() {
+		return List.of(composerKey, toggleKey, placementSequenceKey);
+	}
 
 	private int ticksUntilRescan;
 	private ClientLevel lastLevel;
@@ -195,8 +210,8 @@ public final class NoteBlockOverlay {
 		if (sequenceRadialsBlocked(config)) {
 			return false;
 		}
-		if (!overlaysActive(config)
-			|| !config.interactiveControlsEnabled()
+		if (!config.modEnabled()
+			|| config.activeInteractiveOverlays() == FastNoteblocksConfig.OverlayMode.OFF
 			|| verticalAmount == 0.0
 			|| minecraft.gui.screen() != null
 			|| !isReady(minecraft)) {
@@ -289,9 +304,11 @@ public final class NoteBlockOverlay {
 			FastNoteblocksConfig.save();
 			sequencePositionSavePending = false;
 		}
+		ComposerCommand.tick(minecraft);
+		ComposerScale.tick(minecraft);
 		FastNoteblocksConfig config = FastNoteblocksConfig.get();
 		while (toggleKey.consumeClick()) {
-			config.toggleOverlays();
+			config.toggleInteractiveOverlays();
 			FastNoteblocksConfig.save();
 			expandedBlock = null;
 			menuCenterFamily = null;
@@ -301,7 +318,8 @@ public final class NoteBlockOverlay {
 			ticksUntilRescan = 0;
 			if (minecraft.player != null) {
 				minecraft.gui.hud.setOverlayMessage(Component.translatable(
-					config.overlaysEnabled() ? "message.fast-noteblocks.enabled" : "message.fast-noteblocks.disabled"
+					config.interactiveOverlays()
+						? "message.fast-noteblocks.enabled" : "message.fast-noteblocks.disabled"
 				), true);
 			}
 		}
@@ -375,14 +393,12 @@ public final class NoteBlockOverlay {
 			clearRadialFocusCandidate();
 			return;
 		}
-		if (!config.interactiveControlsEnabled()
-			|| !config.overlayMode().includesNotes()
+		if (!config.activeInteractiveOverlays().includesNotes()
 			|| sequenceRadialsBlocked(config)) {
 			expandedBlock = null;
 			menuCenterFamily = null;
 		}
-		if (!config.interactiveControlsEnabled()
-			|| !config.overlayMode().includesRepeaters()
+		if (!config.activeInteractiveOverlays().includesRepeaters()
 			|| config.repeaterControlStyle() != FastNoteblocksConfig.RepeaterControlStyle.RADIAL_SELECT
 			|| sequenceRadialsBlocked(config)) {
 			expandedRepeater = null;
@@ -1045,7 +1061,7 @@ public final class NoteBlockOverlay {
 	private void rescan(Minecraft minecraft) {
 		nearbyNoteBlocks.clear();
 		nearbyRepeaters.clear();
-		FastNoteblocksConfig.OverlayMode overlayMode = FastNoteblocksConfig.get().overlayMode();
+		FastNoteblocksConfig.OverlayMode shown = FastNoteblocksConfig.get().shownOverlays();
 		int searchRadius = FastNoteblocksConfig.get().viewDistance();
 		BlockPos origin = minecraft.player.blockPosition();
 		BlockPos min = origin.offset(-searchRadius, -searchRadius, -searchRadius);
@@ -1055,9 +1071,9 @@ public final class NoteBlockOverlay {
 		for (BlockPos mutablePos : BlockPos.betweenClosed(min, max)) {
 			if (mutablePos.distToCenterSqr(minecraft.player.position()) <= radiusSquared) {
 				BlockState state = minecraft.level.getBlockState(mutablePos);
-				if (overlayMode.includesNotes() && state.is(Blocks.NOTE_BLOCK)) {
+				if (shown.includesNotes() && state.is(Blocks.NOTE_BLOCK)) {
 					nearbyNoteBlocks.add(mutablePos.immutable());
-				} else if (overlayMode.includesRepeaters() && state.is(Blocks.REPEATER)) {
+				} else if (shown.includesRepeaters() && state.is(Blocks.REPEATER)) {
 					nearbyRepeaters.add(mutablePos.immutable());
 				}
 			}
@@ -1651,7 +1667,7 @@ public final class NoteBlockOverlay {
 		PoseStack poseStack = context.poseStack();
 		HoveredLabel hovered = findHoveredLabel(minecraft);
 
-		if (config.overlayMode().includesNotes()) {
+		if (config.shownOverlays().includesNotes()) {
 			for (BlockPos pos : nearbyNoteBlocks) {
 				BlockState state = minecraft.level.getBlockState(pos);
 				if (!state.is(Blocks.NOTE_BLOCK)) {
@@ -1660,7 +1676,7 @@ public final class NoteBlockOverlay {
 
 				boolean focusedBlock = pos.equals(expandedBlock)
 					|| hovered != null && hovered.blockPos().equals(pos);
-				if (!config.nearbyPreviewsEnabled() && !focusedBlock) {
+				if (!config.nearbyOverlays().includesNotes() && !focusedBlock) {
 					continue;
 				}
 
@@ -1669,7 +1685,8 @@ public final class NoteBlockOverlay {
 				Vec3 labelCenter = new Vec3(pos.getX() + 0.5, pos.getY() + LABEL_Y, pos.getZ() + 0.5);
 				Vec3 right = labelRight(cameraPos, labelCenter);
 				Vec3 up = labelUp(cameraPos, labelCenter, right);
-				boolean expanded = config.interactiveControlsEnabled() && pos.equals(expandedBlock);
+				boolean expanded = config.activeInteractiveOverlays().includesNotes()
+					&& pos.equals(expandedBlock);
 				poseStack.pushPose();
 				poseStack.translate(pos.getX() - cameraPos.x, pos.getY() - cameraPos.y, pos.getZ() - cameraPos.z);
 				char layoutCenterFamily = expanded && menuCenterFamily != null
@@ -1696,7 +1713,7 @@ public final class NoteBlockOverlay {
 			}
 		}
 
-		if (config.overlayMode().includesRepeaters()) {
+		if (config.shownOverlays().includesRepeaters()) {
 			for (BlockPos pos : nearbyRepeaters) {
 				BlockState state = minecraft.level.getBlockState(pos);
 				if (!state.is(Blocks.REPEATER)) {
@@ -1704,12 +1721,12 @@ public final class NoteBlockOverlay {
 				}
 				boolean focused = pos.equals(expandedRepeater)
 					|| hovered != null && hovered.isRepeater() && hovered.blockPos().equals(pos);
-				if (!config.nearbyPreviewsEnabled() && !focused) {
+				if (!config.nearbyOverlays().includesRepeaters() && !focused) {
 					continue;
 				}
 				boolean inRange = minecraft.player.isWithinBlockInteractionRange(pos, 0.0);
 				int currentDelay = displayedRepeaterDelay(minecraft.level, pos);
-				boolean expanded = config.interactiveControlsEnabled()
+				boolean expanded = config.activeInteractiveOverlays().includesRepeaters()
 					&& config.repeaterControlStyle() == FastNoteblocksConfig.RepeaterControlStyle.RADIAL_SELECT
 					&& pos.equals(expandedRepeater);
 				int layoutBottomDelay = expanded && repeaterBottomDelay != null ? repeaterBottomDelay : currentDelay;
@@ -1751,14 +1768,14 @@ public final class NoteBlockOverlay {
 
 	private HoveredLabel findHoveredLabel(Minecraft minecraft) {
 		FastNoteblocksConfig config = FastNoteblocksConfig.get();
-		boolean interactiveControlsEnabled = config.interactiveControlsEnabled()
+		boolean interactiveOverlaysOn = config.interactiveOverlays()
 			&& !sequenceRadialsBlocked(config);
-		if (!interactiveControlsEnabled || !config.overlayMode().includesNotes()) {
+		if (!interactiveOverlaysOn || !config.interactiveOverlayType().includesNotes()) {
 			expandedBlock = null;
 			menuCenterFamily = null;
 		}
-		boolean repeaterRadialEnabled = interactiveControlsEnabled
-			&& config.overlayMode().includesRepeaters()
+		boolean repeaterRadialEnabled = interactiveOverlaysOn
+			&& config.interactiveOverlayType().includesRepeaters()
 			&& config.repeaterControlStyle() == FastNoteblocksConfig.RepeaterControlStyle.RADIAL_SELECT;
 		if (!repeaterRadialEnabled) {
 			expandedRepeater = null;
@@ -1768,7 +1785,7 @@ public final class NoteBlockOverlay {
 		Vec3 origin = camera.position();
 		Vec3 direction = new Vec3(camera.forwardVector()).normalize();
 
-		if (interactiveControlsEnabled
+		if (interactiveOverlaysOn
 			&& expandedBlock != null
 			&& minecraft.player.isWithinBlockInteractionRange(expandedBlock, 0.0)
 			&& minecraft.level.getBlockState(expandedBlock).is(Blocks.NOTE_BLOCK)) {
@@ -1800,7 +1817,7 @@ public final class NoteBlockOverlay {
 		}
 
 		LabelHit closest = null;
-		if (config.overlayMode().includesNotes()) {
+		if (config.activeInteractiveOverlays().includesNotes()) {
 			for (BlockPos pos : nearbyNoteBlocks) {
 				if (pos.equals(expandedBlock)
 					|| !minecraft.player.isWithinBlockInteractionRange(pos, 0.0)
@@ -1813,7 +1830,7 @@ public final class NoteBlockOverlay {
 				}
 			}
 		}
-		if (config.overlayMode().includesRepeaters()) {
+		if (config.activeInteractiveOverlays().includesRepeaters()) {
 			for (BlockPos pos : nearbyRepeaters) {
 				if (!minecraft.player.isWithinBlockInteractionRange(pos, 0.0)
 					|| !minecraft.level.getBlockState(pos).is(Blocks.REPEATER)) {
@@ -1830,7 +1847,7 @@ public final class NoteBlockOverlay {
 		}
 
 		if (closest != null) {
-			boolean noteRadial = interactiveControlsEnabled && !closest.label().isRepeater();
+			boolean noteRadial = interactiveOverlaysOn && !closest.label().isRepeater();
 			boolean repeaterRadial = repeaterRadialEnabled && closest.label().isRepeater();
 			if (noteRadial || repeaterRadial) {
 				if (!radialFocusReady(minecraft, closest.label())) {
@@ -2075,7 +2092,8 @@ public final class NoteBlockOverlay {
 	}
 
 	private static boolean overlaysActive(FastNoteblocksConfig config) {
-		return config.modEnabled() && config.overlaysEnabled();
+		return config.modEnabled()
+			&& config.shownOverlays() != FastNoteblocksConfig.OverlayMode.OFF;
 	}
 
 	private static boolean sequenceRadialsBlocked(FastNoteblocksConfig config) {

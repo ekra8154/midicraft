@@ -240,7 +240,7 @@ class DebugPasteMarkTest {
 	 * That a diagram of a marked build explains itself to somebody who has never seen one.
 	 *
 	 * <p>The colours are only useful if a reader knows what they mean, and the way a build usually
-	 * travels is as a slice of {@code /asciidiagram} pasted into a conversation -- to somebody, or to
+	 * travels is as a slice of {@code /fastnoteblocks asciidiagram} pasted into a conversation -- to somebody, or to
 	 * something, that was not there when it was made. A legend reading {@code TU  minecraft:tuff} is
 	 * no help at all: the reader needs to be told that tuff is how a bus looks. So every block a
 	 * marked paste uses carries its meaning into the legend, out of the one table the builder

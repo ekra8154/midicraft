@@ -47,7 +47,8 @@ public final class ComposerScreen extends Screen {
 	 * the second thing on their own, and give back twelve pixels of height to the roll.</p>
 	 */
 	private static final ToolbarMenu[] MENU_BAR = {
-		ToolbarMenu.FILE, ToolbarMenu.EDIT, ToolbarMenu.IMPORT, ToolbarMenu.SELECT, ToolbarMenu.BUILD
+		ToolbarMenu.FILE, ToolbarMenu.EDIT, ToolbarMenu.SELECT, ToolbarMenu.BUILD,
+		ToolbarMenu.SETTINGS
 	};
 	private static final int MENU_BAR_LEFT = 6;
 	private static final int MENU_BAR_TOP = 3;
@@ -228,9 +229,7 @@ public final class ComposerScreen extends Screen {
 	private static final int CONTEXT_MENU_ROW_HEIGHT = 16;
 	private static final int LAYER_MENU_WIDTH = 120;
 	private static final int TOOLBAR_MENU_WIDTH = 126;
-	private static final int IMPORT_MENU_WIDTH = 196;
 	private static final int TOOLBAR_MENU_ROW_HEIGHT = 18;
-	private static final int VELOCITY_CUTOFF_STEP = 8;
 	/**
 	 * Starting height of a piano-roll row, and below it the starting horizontal zoom.
 	 *
@@ -1204,10 +1203,13 @@ public final class ComposerScreen extends Screen {
 		// import worked and converting again after nudging the speed left the song off grid.
 		ComposerProject source = project().withBakedSpeed();
 		int gridTicks = minecraftConversionGridTicks(source);
-		boolean snapTempo = config.midiTempoFit() == FastNoteblocksConfig.MidiTempoFit.SNAP_TO_REPEATERS;
 		try {
+			// Always aligned, and to the grid the button named. Whether to align used to be a
+			// setting, from before there were two Convert buttons -- but landing the song on a
+			// redstone grid is the whole of what Convert is for, and Edit > Quantize is there for
+			// anyone who wants the notes moved without the tempo following.
 			MinecraftConversion conversion = source.convertToMinecraft(
-				gridTicks, snapTempo, config.repeatMergeTicks(), gameTicks);
+				gridTicks, true, config.repeatMergeTicks(), gameTicks);
 			if (conversion.project().equals(project())) {
 				showResult(
 					Component.literal("This composition is already Minecraft-ready."));
@@ -1604,8 +1606,7 @@ public final class ComposerScreen extends Screen {
 			openSubmenu = null;
 			return;
 		}
-		int menuWidth = menuWidth(rows, toolbarMenu == ToolbarMenu.IMPORT
-			? IMPORT_MENU_WIDTH : TOOLBAR_MENU_WIDTH, toolbarMenuX);
+		int menuWidth = menuWidth(rows, TOOLBAR_MENU_WIDTH, toolbarMenuX);
 		int menuHeight = rows.size() * TOOLBAR_MENU_ROW_HEIGHT + 4;
 		// Whether the cursor is in the open submenu has to be settled before the parent rows get a
 		// say, or reaching across into the submenu would count as leaving the row that opened it.
@@ -1648,10 +1649,6 @@ public final class ComposerScreen extends Screen {
 			}
 			graphics.text(font, Component.literal(rowLabel(row)), toolbarMenuX + 6, rowY + 5,
 				enabled ? 0xFFFFFFFF : 0xFF777777, false);
-		}
-		if (toolbarMenu == ToolbarMenu.IMPORT) {
-			graphics.text(font, Component.literal("Left-click cycles, right-click reverses"),
-				toolbarMenuX + 6, MENU_PANEL_TOP + menuHeight + 3, 0xFF888888, false);
 		}
 		openSubmenu = wanted;
 		if (openSubmenu == null) {
@@ -1750,9 +1747,9 @@ public final class ComposerScreen extends Screen {
 		return switch (menu) {
 			case FILE -> "File";
 			case EDIT -> "Edit";
-			case IMPORT -> "Import";
 			case SELECT -> "Select";
 			case BUILD -> "Build";
+			case SETTINGS -> "Settings";
 			case NONE -> "";
 		};
 	}
@@ -1820,12 +1817,8 @@ public final class ComposerScreen extends Screen {
 			}
 			case BUILD -> addActionRows(rows, ToolbarAction.BUILD_ACTIONS);
 			case SELECT -> addActionRows(rows, ToolbarAction.SELECT_ACTIONS);
-			case IMPORT -> {
-				for (ImportSetting setting : ImportSetting.values()) {
-					rows.add(MenuRow.of(setting));
-				}
-			}
-			case NONE -> {
+			// Settings opens a screen from the bar, so it never hangs a panel of its own.
+			case SETTINGS, NONE -> {
 			}
 		}
 		return rows;
@@ -1841,17 +1834,11 @@ public final class ComposerScreen extends Screen {
 		if (row.submenu() != null) {
 			return row.submenu().label;
 		}
-		if (row.setting() != null) {
-			return importSettingLabel(row.setting());
-		}
 		return toolbarRowLabel(row.action())
 			+ (selectedNotes.isEmpty() || !row.action().scopeable ? "" : " (selection)");
 	}
 
 	private boolean rowEnabled(MenuRow row) {
-		if (row.setting() != null) {
-			return true;
-		}
 		if (row.submenu() == null) {
 			return toolbarActionEnabled(row.action());
 		}
@@ -1895,9 +1882,7 @@ public final class ComposerScreen extends Screen {
 		if (row.submenu() != null) {
 			return row.submenu().description;
 		}
-		return row.setting() != null
-			? importSettingTooltip(row.setting())
-			: toolbarActionTooltip(row.action());
+		return toolbarActionTooltip(row.action());
 	}
 
 	private void toggleToolbarMenu(ToolbarMenu menu, int x) {
@@ -1964,8 +1949,7 @@ public final class ComposerScreen extends Screen {
 			return true;
 		}
 		List<MenuRow> rows = menuRows(toolbarMenu);
-		int menuWidth = menuWidth(rows, toolbarMenu == ToolbarMenu.IMPORT
-			? IMPORT_MENU_WIDTH : TOOLBAR_MENU_WIDTH, toolbarMenuX);
+		int menuWidth = menuWidth(rows, TOOLBAR_MENU_WIDTH, toolbarMenuX);
 		if (rows.isEmpty() || mouseX < toolbarMenuX || mouseX >= toolbarMenuX + menuWidth) {
 			return false;
 		}
@@ -1980,11 +1964,6 @@ public final class ComposerScreen extends Screen {
 		if (clicked.submenu() != null) {
 			// Already opened by hovering; clicking it is neither a mistake nor a second thing.
 			openSubmenu = clicked.submenu();
-			return true;
-		}
-		if (clicked.setting() != null) {
-			// Settings stay open so several can be adjusted in one visit.
-			cycleImportSetting(clicked.setting(), button == 1 ? -1 : 1);
 			return true;
 		}
 		toolbarMenu = ToolbarMenu.NONE;
@@ -2060,7 +2039,7 @@ public final class ComposerScreen extends Screen {
 	/**
 	 * The nearest tempo at which the song's own spacing is a whole number of repeater ticks.
 	 *
-	 * <p>Measured off the notes, not off a grid chosen elsewhere. It used to take the Import menu's
+	 * <p>Measured off the notes, not off a grid chosen elsewhere. It used to take the MIDI import
 	 * quantize setting and force one step of that to be at least one repeater tick, whether or not
 	 * any two notes in the song were ever that close -- so a song already sitting on the repeater
 	 * grid got slowed by up to nine times and came back with hundreds of gaps it did not have
@@ -2421,32 +2400,6 @@ public final class ComposerScreen extends Screen {
 		};
 	}
 
-	private static String importSettingTooltip(ImportSetting setting) {
-		return switch (setting) {
-			case QUANTIZE_GRID -> "Grid that imported notes are snapped onto. Auto picks one from "
-				+ "the song's own spacing.";
-			case TEMPO_FIT -> "Snap to repeaters nudges the tempo so the grid lands on whole "
-				+ "repeater ticks. Preserve original keeps the tempo and leaves the timing to you.";
-			case RANGE_FIT -> "What to do with notes outside F#3-F#5: shift them by octaves, wrap "
-				+ "them, clamp them to the edges, or keep them out of range for editing.";
-			case REPEAT_MERGE -> "How close a repeat of the same pitch must be to be collapsed. "
-				+ "This, not the velocity cutoff, is what removes fake sustain.";
-			case GRID_OUTLIERS -> "Share of the closest note gaps the automatic grid may ignore. "
-				+ "Without it a single tight pair sets the tempo for the whole song.";
-			case VELOCITY_CUTOFF -> "Notes quieter than this are dropped, since note blocks have no "
-				+ "volume. Set it too high and a quiet passage disappears -- the import report says "
-				+ "what range the file uses.";
-			case CHORD_THIN_TARGET -> "How far Select > Overloaded chords cuts a chord back. Thirty "
-				+ "is the most a build can place at one instant; under that leaves the paste room.";
-			case IGNORE_PERCUSSION -> "Skip MIDI channel 10, which is drums. They rarely map onto "
-				+ "note-block pitches.";
-			case MAX_TRACKS -> "How many parts to keep. Busiest first, so a sparse intro can be "
-				+ "cut; the import report says when that happens.";
-			case DEFAULT_INSTRUMENT -> "Note-block instrument given to every imported MIDI layer. "
-				+ "NBS imports keep their own.";
-		};
-	}
-
 	private static String contextActionTooltip(ContextAction action) {
 		return switch (action) {
 			case OCTAVE_DOWN -> "Drops the selected notes an octave.";
@@ -2504,93 +2457,6 @@ public final class ComposerScreen extends Screen {
 	/** "this layer" reads better than "these 1 layer", and the count matters at any size. */
 	private static String layerCountLabel(int count) {
 		return count == 1 ? "this layer" : "these " + count + " layers";
-	}
-
-	private String importSettingLabel(ImportSetting setting) {
-		return setting.label + ": " + switch (setting) {
-			case QUANTIZE_GRID -> switch (config.midiQuantizeGrid()) {
-				case AUTO -> "Auto";
-				case QUARTER -> "1/4";
-				case EIGHTH -> "1/8";
-				case SIXTEENTH -> "1/16";
-			};
-			case TEMPO_FIT -> config.midiTempoFit() == FastNoteblocksConfig.MidiTempoFit.SNAP_TO_REPEATERS
-				? "Snap to repeaters"
-				: "Preserve original";
-			case RANGE_FIT -> switch (config.midiRangeFit()) {
-				case OCTAVE_SHIFT -> "Octave shift";
-				case OCTAVE_WRAP -> "Octave wrap";
-				case CLAMP -> "Clamp";
-				case REJECT_OUT_OF_RANGE -> "Reject";
-			};
-			case GRID_OUTLIERS -> config.conversionGapPercentile() <= 0
-				? "none (strict)"
-				: "ignore closest " + config.conversionGapPercentile() + "%";
-			case REPEAT_MERGE -> config.repeatMergeTicks() <= FastNoteblocksConfig.MIN_REPEAT_MERGE_TICKS
-				? "off (keep all)"
-				: config.repeatMergeTicks() + (config.repeatMergeTicks() == 1 ? " tick" : " ticks");
-			case VELOCITY_CUTOFF -> config.midiVelocityCutoff() <= FastNoteblocksConfig.MIN_MIDI_VELOCITY_CUTOFF
-				? "off (keep all)"
-				: Integer.toString(config.midiVelocityCutoff());
-			case CHORD_THIN_TARGET -> config.chordThinTarget() + " per chord";
-			case IGNORE_PERCUSSION -> config.midiIgnorePercussion() ? "ignored" : "imported";
-			case MAX_TRACKS -> Integer.toString(config.midiMaxImportedTracks());
-			case DEFAULT_INSTRUMENT -> PreviewInstrument.byId(config.midiDefaultInstrument()).name();
-		};
-	}
-
-	private void cycleImportSetting(ImportSetting setting, int direction) {
-		switch (setting) {
-			case QUANTIZE_GRID -> config.setMidiQuantizeGrid(
-				cycle(FastNoteblocksConfig.MidiQuantizeGrid.values(), config.midiQuantizeGrid(), direction));
-			case TEMPO_FIT -> config.setMidiTempoFit(
-				cycle(FastNoteblocksConfig.MidiTempoFit.values(), config.midiTempoFit(), direction));
-			case RANGE_FIT -> config.setMidiRangeFit(
-				cycle(FastNoteblocksConfig.MidiRangeFit.values(), config.midiRangeFit(), direction));
-			case VELOCITY_CUTOFF -> config.setMidiVelocityCutoff(cycleVelocityCutoff(direction));
-			case CHORD_THIN_TARGET -> config.setChordThinTarget(config.chordThinTarget() + direction);
-			case GRID_OUTLIERS -> {
-				int span = FastNoteblocksConfig.MAX_CONVERSION_GAP_PERCENTILE
-					- FastNoteblocksConfig.MIN_CONVERSION_GAP_PERCENTILE + 1;
-				int offset = config.conversionGapPercentile()
-					- FastNoteblocksConfig.MIN_CONVERSION_GAP_PERCENTILE;
-				config.setConversionGapPercentile(FastNoteblocksConfig.MIN_CONVERSION_GAP_PERCENTILE
-					+ Math.floorMod(offset + direction, span));
-			}
-			case REPEAT_MERGE -> {
-				int span = FastNoteblocksConfig.MAX_REPEAT_MERGE_TICKS
-					- FastNoteblocksConfig.MIN_REPEAT_MERGE_TICKS + 1;
-				int offset = config.repeatMergeTicks() - FastNoteblocksConfig.MIN_REPEAT_MERGE_TICKS;
-				config.setRepeatMergeTicks(FastNoteblocksConfig.MIN_REPEAT_MERGE_TICKS
-					+ Math.floorMod(offset + direction, span));
-			}
-			case IGNORE_PERCUSSION -> config.setMidiIgnorePercussion(!config.midiIgnorePercussion());
-			case MAX_TRACKS -> {
-				int span = FastNoteblocksConfig.MAX_MIDI_MAX_IMPORTED_TRACKS
-					- FastNoteblocksConfig.MIN_MIDI_MAX_IMPORTED_TRACKS + 1;
-				int offset = config.midiMaxImportedTracks() - FastNoteblocksConfig.MIN_MIDI_MAX_IMPORTED_TRACKS;
-				config.setMidiMaxImportedTracks(FastNoteblocksConfig.MIN_MIDI_MAX_IMPORTED_TRACKS
-					+ Math.floorMod(offset + direction, span));
-			}
-			case DEFAULT_INSTRUMENT -> {
-				int index = PreviewInstrument.VALUES.indexOf(
-					PreviewInstrument.byId(config.midiDefaultInstrument()));
-				config.setMidiDefaultInstrument(PreviewInstrument.VALUES.get(
-					Math.floorMod(index + direction, PreviewInstrument.VALUES.size())).id());
-			}
-		}
-		FastNoteblocksConfig.save();
-	}
-
-	/** Steps the cutoff in even increments, with a dedicated "off" stop at zero. */
-	private int cycleVelocityCutoff(int direction) {
-		int stops = FastNoteblocksConfig.MAX_MIDI_VELOCITY_CUTOFF / VELOCITY_CUTOFF_STEP + 1;
-		int current = config.midiVelocityCutoff() / VELOCITY_CUTOFF_STEP;
-		return Math.floorMod(current + direction, stops) * VELOCITY_CUTOFF_STEP;
-	}
-
-	private static <T extends Enum<T>> T cycle(T[] values, T current, int direction) {
-		return values[Math.floorMod(current.ordinal() + direction, values.length)];
 	}
 
 	private void extractContextMenu(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
@@ -2965,8 +2831,7 @@ public final class ComposerScreen extends Screen {
 			return true;
 		}
 		List<MenuRow> rows = menuRows(toolbarMenu);
-		int menuWidth = menuWidth(rows, toolbarMenu == ToolbarMenu.IMPORT
-			? IMPORT_MENU_WIDTH : TOOLBAR_MENU_WIDTH, toolbarMenuX);
+		int menuWidth = menuWidth(rows, TOOLBAR_MENU_WIDTH, toolbarMenuX);
 		return !rows.isEmpty() && x >= toolbarMenuX && x < toolbarMenuX + menuWidth
 			&& y >= MENU_PANEL_TOP && y < MENU_PANEL_TOP + rows.size() * TOOLBAR_MENU_ROW_HEIGHT + 4;
 	}
@@ -4093,6 +3958,12 @@ public final class ComposerScreen extends Screen {
 	@Override
 	public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
 		ToolbarMenu title = menuTitleAt(event.x(), event.y());
+		if (title == ToolbarMenu.SETTINGS) {
+			toolbarMenu = ToolbarMenu.NONE;
+			openSubmenu = null;
+			minecraft.gui.setScreen(new SettingsScreen(this));
+			return true;
+		}
 		if (title != null) {
 			for (MenuTitle bar : menuTitles()) {
 				if (bar.menu() == title) {
@@ -4515,9 +4386,11 @@ public final class ComposerScreen extends Screen {
 		lastMouseX = x;
 		lastMouseY = y;
 		// With one menu already open, sliding along the bar opens the next, which is what a menu
-		// bar does everywhere else and what makes browsing five of them one gesture.
+		// bar does everywhere else and what makes browsing five of them one gesture. Settings is
+		// left out: it opens a screen, and a screen nobody asked for is not a thing to slide onto.
 		ToolbarMenu title = menuTitleAt(x, y);
-		if (toolbarMenu != ToolbarMenu.NONE && title != null && title != toolbarMenu) {
+		if (toolbarMenu != ToolbarMenu.NONE && title != null && title != toolbarMenu
+				&& title != ToolbarMenu.SETTINGS) {
 			for (MenuTitle bar : menuTitles()) {
 				if (bar.menu() == title) {
 					toolbarMenu = title;
@@ -6461,17 +6334,13 @@ public final class ComposerScreen extends Screen {
 	}
 
 	/** One row of an open menu: a thing to do, a setting to cycle, or a submenu to open. */
-	private record MenuRow(ToolbarAction action, ImportSetting setting, ToolbarSubmenu submenu) {
+	private record MenuRow(ToolbarAction action, ToolbarSubmenu submenu) {
 		static MenuRow of(ToolbarAction action) {
-			return new MenuRow(action, null, null);
-		}
-
-		static MenuRow of(ImportSetting setting) {
-			return new MenuRow(null, setting, null);
+			return new MenuRow(action, null);
 		}
 
 		static MenuRow of(ToolbarSubmenu submenu) {
-			return new MenuRow(null, null, submenu);
+			return new MenuRow(null, submenu);
 		}
 	}
 
@@ -6534,27 +6403,8 @@ public final class ComposerScreen extends Screen {
 		FILE,
 		EDIT,
 		SELECT,
-		IMPORT
-	}
-
-	/** MIDI and NBS import settings, surfaced here so the Composer does not depend on Mod Menu. */
-	private enum ImportSetting {
-		QUANTIZE_GRID("Quantize"),
-		TEMPO_FIT("Tempo"),
-		RANGE_FIT("Range fit"),
-		REPEAT_MERGE("Merge repeats"),
-		GRID_OUTLIERS("Grid outliers"),
-		VELOCITY_CUTOFF("Velocity cutoff"),
-		CHORD_THIN_TARGET("Thin chords to"),
-		IGNORE_PERCUSSION("Percussion"),
-		MAX_TRACKS("Max tracks"),
-		DEFAULT_INSTRUMENT("Instrument");
-
-		private final String label;
-
-		ImportSetting(String label) {
-			this.label = label;
-		}
+		/** The odd one out: a title in the bar that opens a screen instead of hanging a menu. */
+		SETTINGS
 	}
 
 	private enum ToolbarAction {

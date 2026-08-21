@@ -3,8 +3,23 @@
 A fully client-side Fabric mod for Minecraft Java Edition 26.2 that displays
 interactive pitch and delay controls above nearby note blocks and repeaters.
 
-Press **N** to switch overlays off or restore the last selected overlay mode.
-Each nearby note block shows one billboard label for its current pitch. Hover
+Run **`/fastnoteblocks`** to open the Composer -- or `/fastnoteblocks composer`,
+which does the same thing and is easier to find by tab-completing. Settings are
+at **`/fastnoteblocks settings`**. The mod binds no keys by
+default -- taking a letter key from someone who plays with a lot of mods is a
+rude way to introduce yourself -- so the Composer, the interactive overlay and
+the placement sequence control are all unbound until you say otherwise. Bind
+them on the Keys tab of the mod's own settings, or in Minecraft's Controls
+screen, which are two views of the same binding.
+
+There are two overlays, and they are set separately. **Nearby overlays** label
+every block of the chosen types within view distance: something to read, and off
+by default. The **interactive overlay** is the one on the block under your
+crosshair, the one you can scroll to retune. Turning it on is enough on its own
+-- with nearby overlays off you see and change the block you are aiming at and
+nothing else.
+
+With note blocks interactive, each one shows a billboard label for its current pitch. Hover
 that label to open a compact radial A-G menu for only that note block. While in
 normal block-interaction range:
 
@@ -23,16 +38,25 @@ bottom. An optional single-number scroll style cycles delays directionally.
 
 ## Settings
 
-When the optional Mod Menu and Cloth Config mods are installed, the Mod Menu
-configuration button provides:
+The Settings tab in the Composer's menu bar opens them, and so does the
+configuration button beside the mod in Mod Menu's list if that mod is installed.
+Neither route needs anything beyond Fabric API. Settings are grouped into
+In-world tools, Keys, Server Friendliness, Placement Sequence, Composer and
+Debug; any one of them can be put back with the arrow beside it, and a whole tab
+or the whole mod can be reset from the buttons underneath. Resetting the whole
+mod leaves key bindings alone.
 
-- a master switch for the entire mod;
-- a four-way overlay selector: note blocks and repeaters, note blocks only
-  (default), repeaters only, or off;
-- optional nearby previews; when disabled, labels are hidden until their center
-  position is targeted;
-- optional interactive controls, including the note radial and scrolling for
-  both block types;
+The in-world half of the mod is off on a fresh install and the Composer is not:
+labels over blocks and scrolling to retune them are tools you turn on when you
+want them, rather than the first thing a new world greets you with. What the
+settings cover:
+
+- a GUI scale for the mod's own screens, separate from Minecraft's, since a piano
+  roll wants more pixels than a hotbar does;
+- a master switch for the in-world tools, which does not touch the Composer;
+- nearby overlays: off (the default), repeaters only, note blocks only, or both;
+- the interactive overlay on or off, which is what the overlay key toggles, and
+  which block types it answers for;
 - repeater control style: radial select (default) or directional scrolling;
 - inverted scrolling;
 - configurable radial focus delay from 0 to 20 ticks, defaulting to 5;
@@ -41,7 +65,7 @@ configuration button provides:
   one-interaction-per-client-tick speed;
 - optional server-confirmation waiting;
 - optional unobstructed line-of-sight enforcement;
-- resumable compositions with up to four independently named tracks;
+- resumable compositions with independently named tracks;
 - one instrument per track, including a Barrier instrument that mutes the
   track without removing it from synchronized preview timing;
 - sequencing edit protection: radials only, radials and ordinary interactions
@@ -86,7 +110,33 @@ direction, sequence edits that reset the cursor, and resuming the sequence. It
 never intercepts right-clicks. If the required item is not in the hotbar, the
 selected slot is left unchanged.
 
-The settings screen includes a complete `0` through `24` pitch-name guide.
+
+## Debug commands
+
+Off by default; the switch is on the Debug tab of the settings. It adds three
+subcommands. `/fastnoteblocks asciidiagram <from> <to> [view] [facing] [notes]`
+draws a region of the world as text, and `/fastnoteblocks debugpaste [on|off]`
+colours the next build by what laid each block -- dead wire red, wrong notes as
+lit copper bulbs, collisions in sea lantern -- or, bare, prints that colour key.
+
+The third is `/fastnoteblocks paste`, which builds a run of chords you type out
+rather than a song, for testing layouts:
+
+```
+/fastnoteblocks paste <width> <floors> [flat|up|down [turning] <columns to wall>] <chords>
+```
+
+`/fastnoteblocks paste 12 1 6 2 18` builds chords of six, two and eighteen in a
+corridor twelve wide. A chord may be repeated with `x`, given its own gap with
+`@`, and given instruments with a colon: `30x4`, `18@1`, `7:7b`. The instrument
+letters are `p` harp (air), `h` hi-hat (glass, will not carry power), `s` snare
+(sand, falls) and `b` bell (gold), with harp for any note not named.
+
+Naming a wall shape starts the walk as though it had already climbed there, and
+adding `turning` has it arrive with that wall's corners already on its route, so
+`36 1 flat turning 12` is a lane twelve columns short of a bend it is already
+committed to. Put `dry` first to report the layout without placing anything.
+Every note is the same pitch.
 
 ## Sound effects
 

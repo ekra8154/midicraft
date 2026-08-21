@@ -10,7 +10,7 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * The smallest {@code /fastnoteblockpaste} that leaves a run of wire past fifteen.
+ * The smallest {@code /fastnoteblocks paste} that leaves a run of wire past fifteen.
  *
  * <p>Guardian shows the fault at eighty-six thousand blocks, which is not something to stand in
  * front of. The shape to find is the same one: a run that crosses more than one staircase, or a
@@ -87,7 +87,7 @@ class DeadLineReproSearchTest {
 							if (longest <= 15) {
 								continue;
 							}
-							hits.add(new Hit("/fastnoteblockpaste " + width + " " + floors + " "
+							hits.add(new Hit("/fastnoteblocks paste " + width + " " + floors + " "
 								+ shape + " " + cols + " " + spec,
 								plan.commands().size(), longest,
 								diesAt[0] == null ? "?" : diesAt[0].getX() + " " + diesAt[0].getY()

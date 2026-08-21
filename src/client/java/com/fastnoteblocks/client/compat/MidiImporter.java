@@ -1,12 +1,6 @@
 package com.fastnoteblocks.client.compat;
 
-import com.fastnoteblocks.NotePitch;
 import com.fastnoteblocks.client.FastNoteblocksConfig;
-import com.fastnoteblocks.client.FastNoteblocksConfig.MidiQuantizeGrid;
-import com.fastnoteblocks.client.FastNoteblocksConfig.MidiRangeFit;
-import com.fastnoteblocks.client.FastNoteblocksConfig.MidiTempoFit;
-import com.fastnoteblocks.client.FastNoteblocksConfig.SavedSequence;
-import com.fastnoteblocks.client.FastNoteblocksConfig.SequenceTrack;
 import com.fastnoteblocks.client.composer.ComposerProject;
 import com.fastnoteblocks.client.composer.ComposerProject.Layer;
 import com.fastnoteblocks.client.composer.ComposerProject.NoteEvent;
@@ -17,10 +11,8 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Deque;
 import java.util.HashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.TreeMap;
 import javax.sound.midi.MetaMessage;
 import javax.sound.midi.MidiEvent;
 import javax.sound.midi.MidiMessage;
@@ -34,70 +26,6 @@ final class MidiImporter {
 	private static final int NOTE_BLOCK_BASE_MIDI_NOTE = 54;
 
 	private MidiImporter() {
-	}
-
-	static Result importFile(String path, FastNoteblocksConfig config) throws Exception {
-		javax.sound.midi.Sequence midi = MidiSystem.getSequence(new File(path));
-		if (midi.getDivisionType() != javax.sound.midi.Sequence.PPQ) {
-			throw new IllegalArgumentException("Only PPQ MIDI files are supported for now.");
-		}
-		int resolution = Math.max(1, midi.getResolution());
-		int tempoUsPerQuarter = firstTempo(midi);
-		List<Part> parts = collectParts(midi, config.midiIgnorePercussion());
-		parts = parts.stream()
-			.filter(part -> !part.notes().isEmpty())
-			.sorted(Comparator.comparingInt((Part part) -> part.notes().size()).reversed())
-			.limit(config.midiMaxImportedTracks())
-			.toList();
-		if (parts.isEmpty()) {
-			throw new IllegalArgumentException("No playable MIDI notes were found.");
-		}
-
-		int gridTicks = gridTicks(parts, resolution, config.midiQuantizeGrid());
-		int originalTempoUsPerQuarter = tempoUsPerQuarter;
-		tempoUsPerQuarter = fitTempo(tempoUsPerQuarter, gridTicks, resolution, config.midiTempoFit());
-		String instrument = PreviewInstrument.byId(config.midiDefaultInstrument()).id();
-		List<SequenceTrack> tracks = new ArrayList<>();
-		int skipped = 0;
-		int clamped = 0;
-		int quiet = 0;
-		for (int index = 0; index < parts.size(); index++) {
-			ConvertedPart converted = convertPart(
-				parts.get(index), gridTicks, resolution, tempoUsPerQuarter, config.midiRangeFit(),
-				config.midiVelocityCutoff()
-			);
-			skipped += converted.skipped();
-			clamped += converted.clamped();
-			quiet += converted.quiet();
-			if (!converted.sequence().isBlank()) {
-				Part part = parts.get(index);
-				String chosen = MidiInstruments.choose(config.midiInstrumentSource(), part.program(),
-					part.channel(), part.name(), instrument);
-				tracks.add(new SequenceTrack(trackName(index, part), converted.sequence(), chosen, 0));
-			}
-		}
-		if (tracks.isEmpty()) {
-			throw new IllegalArgumentException(quiet > 0
-				? "Every note fell below the velocity cutoff of " + config.midiVelocityCutoff() + "."
-				: "Every selected MIDI part was empty after range fitting.");
-		}
-
-		String name = fileName(path);
-		String report = "Imported " + tracks.size() + (tracks.size() == 1 ? " track" : " tracks")
-			+ " at " + gridLabel(gridTicks, resolution) + " quantize";
-		if (tempoUsPerQuarter != originalTempoUsPerQuarter) {
-			report += ", tempo snapped " + bpmLabel(originalTempoUsPerQuarter)
-				+ " to " + bpmLabel(tempoUsPerQuarter);
-		}
-		if (skipped > 0 || clamped > 0) {
-			report += " (" + skipped + " skipped, " + clamped + " clamped)";
-		}
-		if (quiet > 0) {
-			report += ", " + quiet + " below velocity " + config.midiVelocityCutoff();
-		}
-		return new Result(new SavedSequence(
-			name, tracks, 0, FastNoteblocksConfig.DEFAULT_SEQUENCE_DELAY_SCALE_QUARTERS
-		), report);
 	}
 
 	static ProjectResult importProject(String path, FastNoteblocksConfig config) throws Exception {
@@ -116,7 +44,10 @@ final class MidiImporter {
 		// treacherous one: a quiet intro can be its own sparse part, so trimming by note count can
 		// remove a stretch of time rather than a bit of texture. Hence reporting what was cut.
 		List<ExactPart> parts = playable.stream()
-			.limit(config.midiMaxImportedTracks())
+			// Capped only by what a project can physically hold. This used to be a setting that
+			// defaulted to 16, which silently dropped the sparsest tracks of any larger file --
+			// and NBS import never honoured it anyway, so the two importers disagreed.
+			.limit(ComposerProject.MAX_LAYERS)
 			.toList();
 		int droppedParts = playable.size() - parts.size();
 		if (parts.isEmpty()) {
@@ -198,7 +129,7 @@ final class MidiImporter {
 				double secondsLost = (firstKeptTick - firstDroppedTick)
 					* (tempo / 1_000_000.0 / resolution);
 				report += String.format(java.util.Locale.ROOT,
-					"; the first %.1fs are all below the cutoff - lower Import > Velocity cutoff to keep them",
+					"; the first %.1fs are all below the cutoff - lower Settings > MIDI Import > Velocity cutoff to keep them",
 					secondsLost);
 			}
 		}
@@ -208,8 +139,8 @@ final class MidiImporter {
 				.mapToLong(part -> part.notes().size())
 				.sum();
 			report += "; " + droppedParts + (droppedParts == 1 ? " sparser track" : " sparser tracks")
-				+ " (" + droppedNotes + " notes) left out by the "
-				+ config.midiMaxImportedTracks() + "-track limit - raise Import > Max tracks to keep them";
+				+ " (" + droppedNotes + " notes) left out - a composition holds "
+				+ ComposerProject.MAX_LAYERS + " layers at most";
 		}
 		return new ProjectResult(project, report);
 	}
@@ -313,177 +244,8 @@ final class MidiImporter {
 			.toList();
 	}
 
-	private static List<Part> collectParts(javax.sound.midi.Sequence midi, boolean ignorePercussion) {
-		Map<PartKey, MutablePart> parts = new HashMap<>();
-		Map<PartKey, Integer> programs = new HashMap<>();
-		Track[] midiTracks = midi.getTracks();
-		for (int trackIndex = 0; trackIndex < midiTracks.length; trackIndex++) {
-			int currentTrackIndex = trackIndex;
-			Track track = midiTracks[trackIndex];
-			String name = trackName(track);
-			for (int eventIndex = 0; eventIndex < track.size(); eventIndex++) {
-				MidiEvent event = track.get(eventIndex);
-				MidiMessage message = event.getMessage();
-				if (!(message instanceof ShortMessage shortMessage)) {
-					continue;
-				}
-				int channel = shortMessage.getChannel();
-				if (ignorePercussion && channel == MidiInstruments.PERCUSSION_CHANNEL) {
-					continue;
-				}
-				PartKey key = new PartKey(currentTrackIndex, channel);
-				if (shortMessage.getCommand() == ShortMessage.PROGRAM_CHANGE) {
-					programs.putIfAbsent(key, shortMessage.getData1());
-				} else if (shortMessage.getCommand() == ShortMessage.NOTE_ON
-						&& shortMessage.getData2() > 0) {
-					parts.computeIfAbsent(key, ignored -> new MutablePart(name, currentTrackIndex, channel))
-						.notes()
-						.add(new NoteStart(event.getTick(), shortMessage.getData1(), shortMessage.getData2()));
-				}
-			}
-		}
-		return parts.entrySet().stream()
-			.map(entry -> new Part(entry.getValue().name(), entry.getValue().trackIndex(),
-				entry.getValue().channel(), programs.getOrDefault(entry.getKey(), -1),
-				List.copyOf(entry.getValue().notes())))
-			.toList();
-	}
-
-	private static ConvertedPart convertPart(
-		Part part,
-		int gridTicks,
-		int resolution,
-		int tempoUsPerQuarter,
-		MidiRangeFit rangeFit,
-		int velocityCutoff
-	) {
-		List<NoteStart> audible = part.notes().stream()
-			.filter(note -> note.velocity() >= velocityCutoff)
-			.toList();
-		int quiet = part.notes().size() - audible.size();
-		int shift = rangeFit == MidiRangeFit.CLAMP ? 0 : bestOctaveShift(audible);
-		TreeMap<Long, LinkedHashSet<Integer>> groups = new TreeMap<>();
-		int skipped = 0;
-		int clamped = 0;
-		for (NoteStart note : audible) {
-			int pitch = note.midiNote() - NOTE_BLOCK_BASE_MIDI_NOTE + shift;
-			FittedNote fitted = fitPitch(pitch, rangeFit);
-			if (fitted.skipped()) {
-				skipped++;
-				continue;
-			}
-			if (fitted.clamped()) {
-				clamped++;
-			}
-			long quantizedTick = Math.round(note.tick() / (double)gridTicks) * (long)gridTicks;
-			groups.computeIfAbsent(quantizedTick, ignored -> new LinkedHashSet<>()).add(fitted.pitch());
-		}
-
-		List<String> tokens = new ArrayList<>();
-		int previousMinecraftTick = 0;
-		for (Map.Entry<Long, LinkedHashSet<Integer>> entry : groups.entrySet()) {
-			int minecraftTick = midiTickToMinecraftTick(entry.getKey(), resolution, tempoUsPerQuarter);
-			if (minecraftTick > previousMinecraftTick) {
-				int delay = minecraftTick - previousMinecraftTick;
-				addDelayTokens(tokens, delay);
-			}
-			entry.getValue().stream().sorted().forEach(pitch -> tokens.add(Integer.toString(pitch)));
-			previousMinecraftTick = minecraftTick;
-		}
-		return new ConvertedPart(String.join(", ", tokens), skipped, clamped, quiet);
-	}
-
-	private static int midiTickToMinecraftTick(long midiTick, int resolution, int tempoUsPerQuarter) {
-		return Math.max(0, (int)Math.round(
-			midiTick * tempoUsPerQuarter / (double)resolution / MINECRAFT_REPEATER_TICK_US
-		));
-	}
-
-	private static int fitTempo(int tempoUsPerQuarter, int gridTicks, int resolution, MidiTempoFit fit) {
-		if (fit != MidiTempoFit.SNAP_TO_REPEATERS) {
-			return tempoUsPerQuarter;
-		}
-		double originalGridRepeaterTicks = gridTicks * tempoUsPerQuarter
-			/ (double)resolution / MINECRAFT_REPEATER_TICK_US;
-		int nearestGridRepeaterTicks = Math.max(1, (int)Math.round(originalGridRepeaterTicks));
-		return Math.max(1, (int)Math.round(
-			nearestGridRepeaterTicks * MINECRAFT_REPEATER_TICK_US * resolution / (double)gridTicks
-		));
-	}
-
 	private static String bpmLabel(int tempoUsPerQuarter) {
 		return String.format(java.util.Locale.ROOT, "%.1f BPM", 60_000_000.0 / tempoUsPerQuarter);
-	}
-
-	private static FittedNote fitPitch(int pitch, MidiRangeFit rangeFit) {
-		if (pitch >= 0 && pitch < NotePitch.PITCH_COUNT) {
-			return new FittedNote(pitch, false, false);
-		}
-		return switch (rangeFit) {
-			case REJECT_OUT_OF_RANGE -> new FittedNote(0, false, true);
-			case OCTAVE_WRAP -> new FittedNote(wrapPitch(pitch), false, false);
-			case OCTAVE_SHIFT, CLAMP -> new FittedNote(
-				Math.max(0, Math.min(NotePitch.PITCH_COUNT - 1, pitch)), true, false
-			);
-		};
-	}
-
-	private static int bestOctaveShift(List<NoteStart> notes) {
-		int bestShift = 0;
-		int bestCount = -1;
-		for (int shift = -72; shift <= 72; shift += 12) {
-			int count = 0;
-			for (NoteStart note : notes) {
-				int pitch = note.midiNote() - NOTE_BLOCK_BASE_MIDI_NOTE + shift;
-				if (pitch >= 0 && pitch < NotePitch.PITCH_COUNT) {
-					count++;
-				}
-			}
-			if (count > bestCount || count == bestCount && Math.abs(shift) < Math.abs(bestShift)) {
-				bestCount = count;
-				bestShift = shift;
-			}
-		}
-		return bestShift;
-	}
-
-	private static int wrapPitch(int pitch) {
-		while (pitch < 0) {
-			pitch += 12;
-		}
-		while (pitch >= NotePitch.PITCH_COUNT) {
-			pitch -= 12;
-		}
-		return Math.max(0, Math.min(NotePitch.PITCH_COUNT - 1, pitch));
-	}
-
-	private static int gridTicks(List<Part> parts, int resolution, MidiQuantizeGrid grid) {
-		return switch (grid) {
-			case QUARTER -> resolution;
-			case EIGHTH -> Math.max(1, resolution / 2);
-			case SIXTEENTH -> Math.max(1, resolution / 4);
-			case AUTO -> autoGridTicks(parts, resolution);
-		};
-	}
-
-	private static int autoGridTicks(List<Part> parts, int resolution) {
-		long smallestGap = Long.MAX_VALUE;
-		for (Part part : parts) {
-			List<Long> ticks = part.notes().stream().map(NoteStart::tick).distinct().sorted().toList();
-			for (int index = 1; index < ticks.size(); index++) {
-				long gap = ticks.get(index) - ticks.get(index - 1);
-				if (gap > 0 && gap < smallestGap) {
-					smallestGap = gap;
-				}
-			}
-		}
-		if (smallestGap <= Math.max(1, resolution * 3L / 8L)) {
-			return Math.max(1, resolution / 4);
-		}
-		if (smallestGap <= Math.max(1, resolution * 3L / 4L)) {
-			return Math.max(1, resolution / 2);
-		}
-		return resolution;
 	}
 
 	private static int firstTempo(javax.sound.midi.Sequence midi) {
@@ -528,28 +290,6 @@ final class MidiImporter {
 		return dot <= 0 ? name : name.substring(0, dot);
 	}
 
-	private static String gridLabel(int gridTicks, int resolution) {
-		if (gridTicks <= Math.max(1, resolution / 4)) {
-			return "1/16";
-		}
-		if (gridTicks <= Math.max(1, resolution / 2)) {
-			return "1/8";
-		}
-		return "1/4";
-	}
-
-	private static void addDelayTokens(List<String> tokens, int delay) {
-		int remaining = delay;
-		while (remaining > 0) {
-			int chunk = Math.min(remaining, com.fastnoteblocks.NoteSequence.MAX_GROUPED_DELAY);
-			tokens.add(chunk + "d");
-			remaining -= chunk;
-		}
-	}
-
-	record Result(SavedSequence sequence, String report) {
-	}
-
 	record ProjectResult(ComposerProject project, String report) {
 	}
 
@@ -559,20 +299,8 @@ final class MidiImporter {
 	private record NoteStart(long tick, int midiNote, int velocity) {
 	}
 
-	private record MutablePart(String name, int trackIndex, int channel, List<NoteStart> notes) {
-		private MutablePart(String name, int trackIndex, int channel) {
-			this(name, trackIndex, channel, new ArrayList<>());
-		}
-	}
-
 	/** @param program the General MIDI program this part last selected, or -1 if it never said. */
 	private record Part(String name, int trackIndex, int channel, int program, List<NoteStart> notes) {
-	}
-
-	private record ConvertedPart(String sequence, int skipped, int clamped, int quiet) {
-	}
-
-	private record FittedNote(int pitch, boolean clamped, boolean skipped) {
 	}
 
 	private record PendingNote(long tick, int velocity) {
