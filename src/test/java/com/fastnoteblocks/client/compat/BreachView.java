@@ -73,9 +73,12 @@ final class BreachView {
 	 */
 	private static final Map<String, String> RENAMED = Map.of(
 		"guardian-w-25-chords", "guardian25",
-		// Renamed in the composer 2026-08-20: the chords were culled to 26 notes. The old
-		// file stays resolvable until the client saves under the new name.
+		// Renamed in the composer 2026-08-20: the chords were culled to 26 notes. Both ways,
+		// because the rename has happened in the composer and not yet on disk: the old name
+		// keeps resolving once the client saves, and the new one -- which is what the song is
+		// called in conversation now -- resolves to the old file until it does.
 		"deltarune-ch-4-guardian", "guardian26",
+		"guardian26", "deltarune-ch-4-guardian",
 		"adventure-of-a-lifetime", "adventure-lifetime-3",
 		"a-dark-zone-2-lanes-maybe", "a-dark-zone",
 		"am-i-dreaming", "am-i-dreaming-metro-boomin-from-spider-man-acros",
