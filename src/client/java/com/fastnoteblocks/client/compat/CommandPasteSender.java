@@ -157,6 +157,14 @@ public final class CommandPasteSender {
 	 * @param done run once the last command has been sent, or at once if there are none. Not run if
 	 *     the paste is cancelled: it describes a finished machine, and a cancelled one is not that.
 	 */
+	/**
+	 * What is wrong with the build being pasted, kept until the paste is over.
+	 *
+	 * <p>Empty for a clean one, and emptied again the moment it is said, so that a report belonging
+	 * to one paste cannot surface at the end of the next.</p>
+	 */
+	private static List<String> heldReport = List.of();
+
 	static void start(List<String> commands, List<String> faults, Runnable done) {
 		cancel(false);
 		for (String command : commands) {
@@ -173,19 +181,21 @@ public final class CommandPasteSender {
 		nags = 0;
 		heldFor = 0;
 		announced = false;
+		heldReport = List.of();
 		whenDone = done;
 		world = Minecraft.getInstance().level;
 		if (QUEUE.isEmpty()) {
 			finish();
 			return;
 		}
-		if (faults.isEmpty()) {
-			show(Component.literal("Placing sequence: 0/" + total));
-			return;
-		}
-		show(Component.literal(faults.size() + " note" + (faults.size() == 1 ? "" : "s")
-				+ " will be wrong. First: " + faults.get(0))
-			.withStyle(net.minecraft.ChatFormatting.YELLOW));
+		// Held to the end rather than said here. This line used to carry the report, and it was
+		// true and unread: the next tick writes "Placing sequence: 1/4531" over the top of it and
+		// nothing brings it back, so the one thing worth reading was the one thing guaranteed to
+		// be missed. It is the same line either way -- the overlay holds one message -- so the
+		// only question is which moment it gets, and the end of the paste is the moment when
+		// nothing else is about to be written after it.
+		heldReport = List.copyOf(faults);
+		show(Component.literal("Placing sequence: 0/" + total));
 	}
 
 	static void cancel(boolean notify) {
@@ -209,6 +219,7 @@ public final class CommandPasteSender {
 		credit = 0;
 		nags = 0;
 		heldFor = 0;
+		heldReport = List.of();
 		whenDone = null;
 	}
 
@@ -295,8 +306,18 @@ public final class CommandPasteSender {
 		if (QUEUE.isEmpty()) {
 			if (!announced) {
 				announced = true;
-				show(Component.literal("Sequence placement complete: " + sent + "/" + total
-					+ (skipped == 0 ? "" : " (" + skipped + " already air)")));
+				// Both facts on the one line the overlay has: that it finished, and what is wrong
+				// with what it built. The count is kept even when there is a report, because
+				// "complete" is the thing a player who walked away comes back to look for.
+				List<String> wrong = heldReport;
+				heldReport = List.of();
+				show(wrong.isEmpty()
+					? Component.literal("Sequence placement complete: " + sent + "/" + total
+						+ (skipped == 0 ? "" : " (" + skipped + " already air)"))
+					: Component.literal("Placed " + sent + "/" + total + " -- " + wrong.size()
+							+ " note" + (wrong.size() == 1 ? "" : "s") + " will be wrong. First: "
+							+ wrong.get(0))
+						.withStyle(net.minecraft.ChatFormatting.YELLOW));
 				finish();
 			}
 			return;
