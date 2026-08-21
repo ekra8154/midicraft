@@ -12190,40 +12190,119 @@ public final class SongBuilder {
 	 * is refused here rather than dropping the overflow on the floor.
 	 */
 	private static boolean foldbackRunFits(PlacementPlan placements, BlockPos firstStone,
-			Direction travel, Direction depth, int notes, int cellLimit, int flatCells, int riseCap,
-			int riseStep, int mutedCells, int time) {
-		int remaining = notes;
-		for (int cell = 0; cell < cellLimit && remaining > 0; cell++) {
+			Direction travel, Direction depth, List<EventNote> notes, int cellLimit, int flatCells,
+			int riseCap, int riseStep, int mutedCells, int harpCells, int noFallCells, int time) {
+		List<EventNote> left = new ArrayList<>(notes);
+		for (int cell = 0; cell < cellLimit && !left.isEmpty(); cell++) {
 			if (cell < mutedCells) {
 				continue;
 			}
 			BlockPos stone = foldbackRunStone(firstStone, travel, cell, flatCells, riseCap,
 				riseStep);
 			for (Direction out : List.of(depth.getOpposite(), depth)) {
-				if (remaining > 0 && railSlotTakes(placements, stone.relative(out), time)) {
-					remaining--;
+				if (left.isEmpty() || !railSlotTakes(placements, stone.relative(out), time)) {
+					continue;
+				}
+				int pick = suitedNote(placements, stone.relative(out), left, cell, harpCells, noFallCells);
+				if (pick >= 0) {
+					left.remove(pick);
 				}
 			}
 		}
-		return remaining == 0;
+		return left.isEmpty();
+	}
+
+	/**
+	 * What a note hanging on this column of a run has to be, by how far up the staircase it is.
+	 *
+	 * <p>The rules are the ones in-game testing states, and what they are about is the two cells
+	 * a note keeps underneath it: its instrument block one below, and for a falling instrument a
+	 * prop one below that. Reckoned off the lane the module opens on, the first rung's note sits
+	 * two up, so its instrument block would stand at that lane's own dust level beside the
+	 * repeater -- harps only, and a harp keeps nothing there at all. The second rung's note sits
+	 * three up, so a falling instrument's prop would reach down into the flank row at lane
+	 * level, which is ground the module behind owns -- anything that does not fall. From the
+	 * third rung up both cells beneath belong to the staircase's own columns, and anything
+	 * goes.</p>
+	 *
+	 * @param harpCells how many columns from the start are harp-only, and {@code noFallCells}
+	 *     how many after those refuse a falling instrument. Both nought for a run that is not a
+	 *     staircase.
+	 */
+	private static boolean rungTakes(EventNote note, int cell, int harpCells, int noFallCells) {
+		if (note.effect() != null) {
+			return cell >= harpCells + noFallCells;
+		}
+		if (cell < harpCells) {
+			return isHarpNote(note);
+		}
+		return cell >= harpCells + noFallCells
+			|| !FALLING_INSTRUMENT_BLOCKS.contains(note.instrumentBlock());
+	}
+
+	/**
+	 * Whether a falling instrument hung here would have anything to stand on.
+	 *
+	 * <p>Its prop goes two below the note, and {@link PlacementPlan#support} will not write over
+	 * whatever is planned there. Claimed air is the case that bites: every note keeps the cell
+	 * above it empty, and on a staircase the cell two below a rung's note is exactly the
+	 * headroom of a note the module behind hung two floors down. The prop is then quietly not
+	 * laid, the sand is pasted onto nothing, and it falls and takes its note's instrument with
+	 * it -- which no check the build makes can see, because gravity is not in the model. Found
+	 * by {@link FallingBlocksAreHeldUpTest} on the all-sand fixtures, five blocks in three
+	 * builds.</p>
+	 */
+	private static boolean propStands(PlacementPlan placements, BlockPos slot) {
+		String prop = placements.blockAt(slot.below().below());
+		return prop == null
+			|| !("minecraft:air".equals(prop) || prop.startsWith("minecraft:redstone_wire"));
+	}
+
+	/**
+	 * Whether this note may hang in this slot of a run: the rung's own rule, and somewhere for a
+	 * falling instrument's prop to stand.
+	 */
+	private static boolean slotTakes(PlacementPlan placements, BlockPos slot, EventNote note,
+			int cell, int harpCells, int noFallCells) {
+		return rungTakes(note, cell, harpCells, noFallCells)
+			&& (note.effect() != null
+				|| !FALLING_INSTRUMENT_BLOCKS.contains(note.instrumentBlock())
+				|| propStands(placements, slot));
+	}
+
+	/**
+	 * The next note of a run that this slot will take, or {@code -1}. Scanning forward rather
+	 * than taking the head of the list is what puts the chord's harps on the first rung: they sit
+	 * wherever the bus order left them, and only that rung can use one.
+	 */
+	private static int suitedNote(PlacementPlan placements, BlockPos slot, List<EventNote> notes,
+			int cell, int harpCells, int noFallCells) {
+		for (int index = 0; index < notes.size(); index++) {
+			if (slotTakes(placements, slot, notes.get(index), cell, harpCells, noFallCells)) {
+				return index;
+			}
+		}
+		return -1;
 	}
 
 	private static int layFoldbackRun(PlacementPlan placements, BlockPos firstStone,
 			Direction travel, Direction depth, List<EventNote> notes, int cellLimit, int bareCells,
-			int flatCells, int riseCap, int riseStep, int mutedCells, int time,
-			List<EventNote> leftover) {
-		int placed = 0;
+			int flatCells, int riseCap, int riseStep, int mutedCells, int harpCells,
+			int noFallCells, int time, List<EventNote> leftover) {
+		List<EventNote> left = new ArrayList<>(notes);
 		int cells = 0;
-		while (cells < cellLimit && (placed < notes.size() || cells < bareCells)) {
+		while (cells < cellLimit && (!left.isEmpty() || cells < bareCells)) {
 			BlockPos stone = foldbackRunStone(firstStone, travel, cells, flatCells, riseCap,
 				riseStep);
 			placements.powered(stone, "minecraft:stone", time);
 			set(placements, stone.above(), "minecraft:redstone_wire");
+			int cell = cells;
 			cells++;
-			if (cells <= mutedCells) {
+			if (cell < mutedCells) {
 				// A muted column carries the signal and nothing else: its stone stands beside
 				// wire that goes live on another module's tick, so a note hung here would sound
 				// with them. The ascent's first climb cell in front of a bus is the case.
+				placements.padded("foldbackRungMuted");
 				continue;
 			}
 			// The built side first, for the same reason a crowded bus reverses its pair: the slot
@@ -12231,16 +12310,27 @@ public final class SongBuilder {
 			// note of a chord goes where soundedByAnother can see what it stands against.
 			for (Direction out : List.of(depth.getOpposite(), depth)) {
 				BlockPos slot = stone.relative(out);
-				if (placed < notes.size() && placements.freeForNote(slot)
-						&& !soundedByAnother(placements, slot, time)) {
-					placeNote(placements, slot, notes.get(placed++));
+				if (left.isEmpty() || !placements.freeForNote(slot)
+						|| soundedByAnother(placements, slot, time)) {
+					continue;
+				}
+				int pick = suitedNote(placements, slot, left, cell, harpCells, noFallCells);
+				if (pick >= 0) {
+					if (cell < harpCells + noFallCells) {
+						// The staircase's own notes, counted apart: they are the slots that ride
+						// the climb for no columns at all, and the ones a chord without harps
+						// leaves empty.
+						placements.padded(cell < harpCells ? "foldbackRungHarp"
+							: "foldbackRungSolid");
+					}
+					placeNote(placements, slot, left.remove(pick));
 				}
 			}
 		}
-		if (placed < notes.size() && leftover != null) {
-			leftover.addAll(notes.subList(placed, notes.size()));
-		} else if (placed < notes.size()) {
-			placements.trouble((notes.size() - placed) + " notes of a chord at tick " + time
+		if (!left.isEmpty() && leftover != null) {
+			leftover.addAll(left);
+		} else if (!left.isEmpty()) {
+			placements.trouble(left.size() + " notes of a chord at tick " + time
 				+ " had nowhere to hang: a foldback run filled its columns without room for the rest");
 		}
 		return cells;
@@ -12350,13 +12440,18 @@ public final class SongBuilder {
 		// The run below, and the cell the next module opens on after it, both inside the far
 		// wall -- walked cell by cell with the builder's own asks, because the arithmetic alone
 		// cannot see a slot another lane holds, and a note past the run's limit is simply lost.
-		// The handover may land ON the far wall column -- a repeater against the wall is the
-		// wall descent's own opening -- and holding it a column short of that was refusing
-		// exactly the room-one folds, whose tails are the longest of all. In-game reading
-		// named the off-by-one: the tail may go one further.
+		//
+		// The last column this allows is the wall's own neighbour, and that is as deep as the
+		// tail may go: a bus hands over on the cell AFTER its last block, and the next module
+		// stands its repeater there. So a tail ending one column further -- on the wall itself,
+		// which is where it looks like it should reach -- opens the lane after it one column
+		// PAST the wall, which is a breach the moment that lane turns. The wall column is not
+		// wasted; it is where the next repeater goes. Measured both ways over the library: the
+		// extra cell changes not one block, because every tail today stops for want of notes
+		// long before it reaches either limit.
 		int inboundLimit = Math.min(DUST_RANGE - 2, availableBelow - 1);
 		if (inboundLimit < 1 || !foldbackRunFits(placements, opens.pos().below(2),
-				travel.getOpposite(), side, rest.size(), 1 + inboundLimit, 0, 1, -1, 0, time)) {
+				travel.getOpposite(), side, rest, 1 + inboundLimit, 0, 1, -1, 0, 0, 0, time)) {
 			LAST_FOLDBACK_REFUSAL = "NoRoomBelow";
 			return null;
 		}
@@ -12417,7 +12512,7 @@ public final class SongBuilder {
 		placements.placing("foldback wall run");
 		List<EventNote> spill = new ArrayList<>();
 		int wallCells = layFoldbackRun(placements, catchAt.below(), travel, depth,
-			fold.wallward(), fold.room(), fold.room(), 0, 2, 1, 0, time, spill);
+			fold.wallward(), fold.room(), fold.room(), 0, 2, 1, 0, 0, 0, time, spill);
 		placements.recessed(Math.max(0, fold.room() - wallCells));
 		// The fold and the inbound run in one: the column under the repeater a step down from
 		// the catch, another step down onto the floor below's bus height, and flat from there,
@@ -12429,7 +12524,7 @@ public final class SongBuilder {
 		folded.addAll(fold.stepdown());
 		folded.addAll(fold.inbound());
 		int foldCells = layFoldbackRun(placements, cursor.below(2), travel.getOpposite(), depth,
-			folded, 1 + fold.inboundLimit(), 2, 0, 1, -1, 0, time, null);
+			folded, 1 + fold.inboundLimit(), 2, 0, 1, -1, 0, 0, 0, time, null);
 		placements.padded("foldbackWallPairs" + Math.min(fold.wallward().size(), 30));
 		return cursor.below(CUBE_FLOOR_HEIGHT).relative(travel.getOpposite(), foldCells);
 	}
@@ -12521,6 +12616,18 @@ public final class SongBuilder {
 		EventNote pairB = !pool.isEmpty()
 				&& railSlotTakes(placements, conductorAt.relative(side), time)
 			? pool.remove(0) : null;
+		// The first rung's harps come out before anything else is served. That rung's two slots
+		// can hold a harp and nothing else, so a harp spent on the wall run -- where any
+		// instrument would have done -- is a slot lost outright, and the harps sit early in the
+		// bus order where the wall run reaches them first.
+		List<EventNote> rungHarps = new ArrayList<>();
+		for (int slot = 0; slot < 2; slot++) {
+			EventNote harp = takeFromTail(pool,
+				note -> note.effect() == null && isHarpNote(note));
+			if (harp != null) {
+				rungHarps.add(harp);
+			}
+		}
 		// Served exactly what the ground will grant: the wall-bound run rides the arriving
 		// lane's own bus rows, which the corridor alongside already hangs notes and claims in,
 		// and a note the run cannot hang would climb with the rest and could push the climb
@@ -12531,13 +12638,14 @@ public final class SongBuilder {
 			: 0;
 		List<EventNote> wallward = new ArrayList<>(
 			pool.subList(0, Math.min(wallFree, pool.size())));
-		List<EventNote> outbound = new ArrayList<>(pool.subList(wallward.size(), pool.size()));
+		List<EventNote> outbound = new ArrayList<>(rungHarps);
+		outbound.addAll(pool.subList(wallward.size(), pool.size()));
 		// The same off-by-one as the descent's tail: the climb's handover may land ON the far
 		// wall column, so the run has the whole corridor and not the corridor less one.
 		int outboundLimit = Math.min(DUST_RANGE - 1, availableBehind);
 		if (outboundLimit < 4 || !foldbackRunFits(placements, stand.above(2),
-				travel.getOpposite(), side, outbound.size(), outboundLimit, 0, 3, 1, muted,
-				time)) {
+				travel.getOpposite(), side, outbound, outboundLimit, 0, 3, 1, muted,
+				FOLDBACK_RUNG_HARPS, FOLDBACK_RUNG_NO_FALLING, time)) {
 			LAST_FOLDBACK_REFUSAL = "NoRoomAbove";
 			return null;
 		}
@@ -12575,7 +12683,7 @@ public final class SongBuilder {
 		List<EventNote> spill = new ArrayList<>();
 		int wallCells = fold.room() > 1
 			? layFoldbackRun(placements, cursor.relative(travel, 2).above(), travel, depth,
-				fold.wallward(), fold.room() - 1, fold.room() - 1, 0, 0, 1, 0, time, spill)
+				fold.wallward(), fold.room() - 1, fold.room() - 1, 0, 0, 1, 0, 0, 0, time, spill)
 			: 0;
 		placements.recessed(Math.max(0, fold.room() - 1 - wallCells));
 		// The climb, folding back over the repeater: three staircase cells and flat from there.
@@ -12588,7 +12696,8 @@ public final class SongBuilder {
 		List<EventNote> onward = new ArrayList<>(spill);
 		onward.addAll(fold.outbound());
 		int outCells = layFoldbackRun(placements, cursor.above(2), travel.getOpposite(), depth,
-			onward, fold.outboundLimit(), 4, 0, 3, 1, fold.mutedCells(), time, null);
+			onward, fold.outboundLimit(), 4, 0, 3, 1, fold.mutedCells(),
+			FOLDBACK_RUNG_HARPS, FOLDBACK_RUNG_NO_FALLING, time, null);
 		placements.padded("foldbackAscentWallPairs" + Math.min(fold.wallward().size(), 30));
 		return cursor.above(CUBE_FLOOR_HEIGHT).relative(travel.getOpposite(), outCells);
 	}
@@ -18232,6 +18341,15 @@ public final class SongBuilder {
 	 * keep the chords they were built for.
 	 */
 	static final int FOLDBACK_ABOVE_NOTES = 10;
+
+	/**
+	 * Columns of a climb foldback's staircase that take a harp and nothing else, and how many
+	 * after those refuse a falling instrument. See {@link #rungTakes} for what the geometry
+	 * makes of each; the numbers are the ones in-game testing states.
+	 */
+	private static final int FOLDBACK_RUNG_HARPS = 1;
+
+	private static final int FOLDBACK_RUNG_NO_FALLING = 1;
 
 	/**
 	 * Whether a sunken bus is measured as it will be built -- its four slots asked before the shape
