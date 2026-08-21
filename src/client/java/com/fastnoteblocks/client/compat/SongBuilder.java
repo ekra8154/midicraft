@@ -4241,7 +4241,9 @@ public final class SongBuilder {
 			FoldbackAscent rise = null;
 			boolean foldbackOffered = FOLDBACK_CUTS && layout.ultra() && cutOffered && index > 0
 				&& above >= 0 && above < floors;
-			if (foldbackOffered && (!FOLDBACK_LAST || room < FOLDBACK_PREFERRED_BELOW_ROOM)) {
+			if (foldbackOffered && (!FOLDBACK_LAST
+					|| (climb <= 0 || FOLDBACK_PREFERRED_FOR_CLIMBS)
+						&& room < FOLDBACK_PREFERRED_BELOW_ROOM)) {
 				FoldbackPick first = foldbackPick(placements, lane, event, room, delayColumns,
 					nearWall, farWall, forward, above, climb, floors, "AtTheWall");
 				fold = first.fold();
@@ -18569,6 +18571,23 @@ public final class SongBuilder {
 	 * See {@link #FOLDBACK_AT_ROOM_NOUGHT}.</p>
 	 */
 	static boolean FOLDBACK_LAST = true;
+
+	/**
+	 * Whether a climb prefers the foldback at a small room the way a descent does.
+	 *
+	 * <p>Off, and the rule it is off in service of was stated as "a room of nought <em>and a
+	 * descent</em>". When the preference was widened to a room of three it was widened in both
+	 * directions at once, and that was not measured against what it did to climbs: a climb cannot
+	 * fold at a room of nought at all ({@link #FOLDBACK_AT_ROOM_NOUGHT}), so all the widening did
+	 * for one was hand rooms of one and two to the fold -- and those are precisely the rooms the
+	 * three centre-fed climbing cuts were built for. In-game reading found it as glass staircases
+	 * that had stopped appearing.</p>
+	 *
+	 * <p>So the preference is a descent's. A climb asks the module shapes first and takes a fold
+	 * only where every one of them has refused, which is the order {@link #FOLDBACK_LAST} describes
+	 * and the reason it exists.</p>
+	 */
+	static boolean FOLDBACK_PREFERRED_FOR_CLIMBS = false;
 
 	/**
 	 * The room below which the foldback is preferred to every module shape rather than left to
