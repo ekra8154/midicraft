@@ -111,6 +111,36 @@ never intercepts right-clicks. If the required item is not in the hotbar, the
 selected slot is left unchanged.
 
 
+## Copying and repeating
+
+Dragging a box over a passage does two things. It selects the notes inside it,
+and it leaves a **selection range** behind: a tinted band across the roll with
+its length written in it, and a bracket with a handle at each end in the strip
+along the bottom of the ruler.
+
+The range is there because a set of notes is not a length. Notes end on the last
+note; a passage ends on silence, and nothing in a copy says how much. So the
+range is what Ctrl+V and Ctrl+D step by, and either end of it can be dragged --
+pull the right-hand one past the last note and watch the number change. That is
+how you say "and half a bar of rest". Right-click the strip to drop the range
+without dropping the selection.
+
+- **Ctrl+C, Ctrl+V** copy and paste. Paste lands at the playback marker and then
+  moves the marker on by the range, so pressing Ctrl+V again continues the
+  passage instead of laying a second copy on the first. Ctrl+Shift+V pastes back
+  where the copy was taken from. A copy keeps the length it was made with until
+  something else is copied.
+- **Ctrl+D** duplicates the selection immediately after itself and leaves the
+  selection on the copy, so pressing it again adds another repeat. No clipboard
+  is involved and every note stays on the layer it is already on -- a four-part
+  phrase comes back as four parts. A paste, by contrast, is aimed at a layer.
+
+Selections made without a box -- Ctrl+A, or the Select menu -- have no range, so
+the length is guessed from the notes: the last one, plus the tightest gap between
+any two of them. That is usually right for a phrase of even steps and it is
+always visible, drawn as a hairline in the same strip, before you commit to it.
+
+
 ## Markers
 
 A marker is a named position on the composer's timeline. Nothing is built from

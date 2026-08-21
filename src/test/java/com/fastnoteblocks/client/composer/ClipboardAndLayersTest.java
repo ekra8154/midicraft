@@ -471,6 +471,71 @@ class ClipboardAndLayersTest {
 		assertTrue(song.withMarkerAt(240L, "Here").sameContentAs(song.withMarkerAt(240L, "Here")));
 	}
 
+	/**
+	 * A duplicate leaves every note where it lives, which is what makes it not a paste.
+	 *
+	 * <p>A paste gathers a copy onto the layer it was aimed at and splits only what that layer's
+	 * instrument cannot hold. Ctrl+D is not aimed anywhere, so a four-part phrase has to come back
+	 * as four parts.</p>
+	 */
+	@Test
+	void duplicatingNotesKeepsEachOnItsOwnLayer() {
+		ComposerProject song = songOf(
+			layer("Lead", "HARP", 60, 62),
+			layer("Drums", "SNARE", 40));
+		Set<Long> all = song.layers().stream()
+			.flatMap(current -> current.notes().stream())
+			.map(NoteEvent::id)
+			.collect(Collectors.toCollection(LinkedHashSet::new));
+
+		PasteResult duplicated = song.duplicateNotes(all, 1920L);
+
+		assertEquals(2, duplicated.project().layers().size(), "no layer was needed for a duplicate");
+		assertEquals(0, duplicated.addedLayers());
+		assertEquals(3, duplicated.noteIds().size());
+		assertEquals(List.of(0L, 240L, 1920L, 2160L), startTicks(duplicated.project().layers().getFirst()));
+		assertEquals(List.of(0L, 1920L), startTicks(duplicated.project().layers().get(1)),
+			"the snare stayed a snare and stayed where it was");
+		assertTrue(duplicated.noteIds().stream().noneMatch(all::contains),
+			"the copies answer to their own ids");
+	}
+
+	/** Stepping nowhere is not a duplicate, and neither is duplicating nothing. */
+	@Test
+	void duplicatingNothingOrNowhereChangesNothing() {
+		ComposerProject song = songOf(layer("Lead", "HARP", 60));
+		long only = song.layers().getFirst().notes().getFirst().id();
+
+		assertEquals(song, song.duplicateNotes(Set.of(only), 0L).project());
+		assertEquals(song, song.duplicateNotes(Set.of(), 480L).project());
+		assertEquals(song, song.duplicateNotes(null, 480L).project());
+	}
+
+	/**
+	 * Repeating a duplicate builds a passage rather than a pile.
+	 *
+	 * <p>The screen re-selects the copies after each press, so the next one steps off them. Asserted
+	 * here because it is the whole claim of the gesture: four presses of Ctrl+D on a one-bar phrase
+	 * are five bars of it, evenly spaced.</p>
+	 */
+	@Test
+	void repeatedDuplicatesLandEndToEnd() {
+		ComposerProject song = songOf(new Layer("Lead", "HARP", false, true, true,
+			List.of(note(60, 0L), note(64, 960L))));
+		Set<Long> selected = song.layers().getFirst().notes().stream()
+			.map(NoteEvent::id)
+			.collect(Collectors.toCollection(LinkedHashSet::new));
+
+		for (int press = 0; press < 3; press++) {
+			PasteResult step = song.duplicateNotes(selected, 1920L);
+			song = step.project();
+			selected = new LinkedHashSet<>(step.noteIds());
+		}
+
+		assertEquals(List.of(0L, 960L, 1920L, 2880L, 3840L, 4800L, 5760L, 6720L),
+			startTicks(song.layers().getFirst()));
+	}
+
 	private static List<String> names(ComposerProject song) {
 		return song.layers().stream().map(Layer::name).toList();
 	}

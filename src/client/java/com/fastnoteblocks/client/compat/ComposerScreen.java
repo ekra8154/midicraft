@@ -493,6 +493,32 @@ public final class ComposerScreen extends Screen {
 	 */
 	private double boxOriginTick;
 	private double boxOriginMidi;
+	/**
+	 * The stretch of time a box select left behind, or -1 for none.
+	 *
+	 * <p>A box drag decides two different things and only ever kept one of them. Which notes were
+	 * taken is answered the moment the button comes up; how long the passage they came from
+	 * <em>is</em> is not answered at all, because a set of notes ends on its last note and a passage
+	 * ends on silence. So the drag's own span stays -- drawn, labelled and draggable at both ends --
+	 * and that is what a paste steps by. Pull the right-hand end past the last note and the number
+	 * changes; that is how you say "and half a bar of rest".</p>
+	 *
+	 * <p>Time only, with no pitch to it. The box's height decided which notes were selected and has
+	 * done its work; a length is a horizontal fact, so the band is drawn the full height of the roll
+	 * rather than as the rectangle that made it.</p>
+	 */
+	private long rangeStart = -1L;
+	private long rangeEnd = -1L;
+	/** Which end of the range is being dragged: 0 none, 1 the start, 2 the end. */
+	private int draggingRangeHandle;
+	/**
+	 * How far a paste steps, captured when the copy was made.
+	 *
+	 * <p>Held on the clipboard rather than read off the live range, because the range is a selection
+	 * and the selection moves on. What you copied keeps the length it was copied with until
+	 * something else is copied.</p>
+	 */
+	private long clipboardSpanTicks;
 	private ComposerProject dragBase;
 	private ComposerProject dragPreview;
 	private long dragTickDelta;
@@ -792,6 +818,7 @@ public final class ComposerScreen extends Screen {
 	 */
 	private void resetLayerView() {
 		selectedLayers.clear();
+		clearRange();
 		layerScroll = 0;
 		layerMenuOpen = false;
 	}
@@ -2067,6 +2094,7 @@ public final class ComposerScreen extends Screen {
 				|| projectStats().peakChord() > config.chordThinTarget();
 			case SELECT_NONE -> !selectedNotes.isEmpty() || !selectedLayers.isEmpty();
 			case RENAME_MARKER -> markerAtCursor() != null;
+			case DUPLICATE_SELECTION -> !selectedNotes.isEmpty();
 			case CLEAR_MARKERS -> !project().markers().isEmpty();
 			// Nothing to scan from the title screen, and the coordinate prompt would have no way
 			// to tell you that the region you typed reads as empty because there is no world.
@@ -2167,6 +2195,7 @@ public final class ComposerScreen extends Screen {
 			case TRANSPOSE_BEST_FIT -> transposeToBestFit();
 			case SNAP_TEMPO -> snapTempo(false);
 			case SNAP_TEMPO_GAME -> snapTempo(true);
+			case DUPLICATE_SELECTION -> duplicateSelection();
 			case ADD_MARKER -> toggleMarkerAtCursor();
 			case RENAME_MARKER -> renameMarker(markerAtCursor());
 			case CLEAR_MARKERS -> clearMarkers();
@@ -2200,8 +2229,9 @@ public final class ComposerScreen extends Screen {
 	 * @return whether anything was actually put down
 	 */
 	private boolean dropSelection() {
-		if (!selectedNotes.isEmpty()) {
+		if (!selectedNotes.isEmpty() || hasRange()) {
 			selectedNotes.clear();
+			clearRange();
 			contextMenuOpen = false;
 			updateButtonStates();
 			return true;
@@ -2350,6 +2380,10 @@ public final class ComposerScreen extends Screen {
 		Set<Long> previous = Set.copyOf(selectedNotes);
 		boolean narrowing = narrowExisting && !previous.isEmpty();
 		selectedNotes.clear();
+		// Nothing chosen by a rule has a passage behind it. These pick notes wherever in the song
+		// they happen to be, so a range left over from a box drag would be describing a stretch of
+		// time that has nothing to do with what is now selected.
+		clearRange();
 		for (int layerIndex : selectionLayers()) {
 			Layer layer = project().layers().get(layerIndex);
 			if (!layer.visible()) {
@@ -2399,6 +2433,7 @@ public final class ComposerScreen extends Screen {
 			ChordThinner.thin(project(), target, config.dedupeIdenticalNotes(), scope);
 		selectedNotes.clear();
 		selectedNotes.addAll(thinned.noteIds());
+		clearRange();
 		updateButtonStates();
 		int layerCount = project().layers().size();
 		// Scope first, before any number it qualifies. The likeliest way to be surprised by this is
@@ -2549,6 +2584,11 @@ public final class ComposerScreen extends Screen {
 				+ "Never the last of a pitch or the last of an instrument, so a chord keeps its "
 				+ "harmony and keeps its drum -- only how thickly they are scored changes. Takes "
 				+ "from the selected layers only; select them all to thin the whole song.";
+			case DUPLICATE_SELECTION -> "Lays the selected notes down again directly after "
+				+ "themselves, and leaves the selection on the copy -- so Ctrl+D again adds another "
+				+ "repeat. How far each one steps is the selection range drawn under the ruler, which a "
+				+ "box drag leaves behind and either end of which can be dragged. Every note stays on "
+				+ "its own layer.";
 			case ADD_MARKER -> "Puts a marker where the playback marker is standing, or takes away "
 				+ "the one already there. M does the same thing. A marker names a position and nothing "
 				+ "else: it is not built and it makes no sound.";
@@ -2619,6 +2659,7 @@ public final class ComposerScreen extends Screen {
 			case SELECT_ALL_NOTES -> "Ctrl+A";
 			case SELECT_NONE -> "Ctrl+Shift+A";
 			case ADD_MARKER -> "M";
+			case DUPLICATE_SELECTION -> "Ctrl+D";
 			default -> "";
 		};
 	}
@@ -3386,7 +3427,9 @@ public final class ComposerScreen extends Screen {
 			int labelX = Math.min(rollX + rollWidth - smallTextWidth(at) - 2, markerX + 5);
 			smallText(graphics, at, Math.max(rollX + 2, labelX), rulerY + 13, 0xFFFF8888);
 		}
-		if (mouseX >= rollX && mouseX < rollX + rollWidth && mouseY >= rulerY && mouseY < rollY) {
+		extractRangeStrip(graphics, mouseX, mouseY);
+		if (mouseX >= rollX && mouseX < rollX + rollWidth && mouseY >= rulerY && mouseY < rollY
+				&& !insideRangeStrip(mouseX, mouseY)) {
 			graphics.setTooltipForNextFrame(Component.literal(overEndMarker(mouseX, mouseY)
 				? "Drag to set where the song ends"
 				: "Drag to set playback start"), mouseX, mouseY);
@@ -3571,6 +3614,87 @@ public final class ComposerScreen extends Screen {
 			+ (count == 1 ? " marker" : " markers") + ". Ctrl+Z puts them back."));
 	}
 
+	/**
+	 * The range's bracket and its handles, and behind them the length the next paste will step.
+	 *
+	 * <p>Two brackets in one lane and they are deliberately different weights. The range is filled
+	 * and has handles, because it is a thing you take hold of. The paste length is a hairline with
+	 * end caps, because it is a consequence -- it says where Ctrl+V will leave the marker, and it is
+	 * there so that a length arrived at by a rule can be seen before it is committed to rather than
+	 * only after.</p>
+	 */
+	private void extractRangeStrip(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
+		int top = rollY - RANGE_STRIP_HEIGHT;
+		if (!clipboard.isEmpty() && clipboardSpanTicks > 0L) {
+			int from = tickX(playbackReturnTick);
+			int to = tickX(playbackReturnTick + clipboardSpanTicks);
+			if (to >= rollX && from <= rollX + rollWidth) {
+				int left = Math.max(rollX, from);
+				int right = Math.min(rollX + rollWidth, to);
+				graphics.fill(left, top + 1, right, top + 2, 0x88C8A85A);
+				graphics.fill(left, top + 1, left + 1, top + 4, 0xCCC8A85A);
+				graphics.fill(right - 1, top + 1, right, top + 4, 0xCCC8A85A);
+			}
+		}
+		if (!hasRange()) {
+			return;
+		}
+		int from = tickX(rangeStart);
+		int to = tickX(rangeEnd);
+		if (to < rollX || from > rollX + rollWidth) {
+			return;
+		}
+		int handle = rangeHandleAt(mouseX, mouseY);
+		graphics.fill(Math.max(rollX, from), top, Math.min(rollX + rollWidth, to), rollY,
+			0xFF2E5A6B);
+		if (from >= rollX) {
+			graphics.fill(from, top - 2, from + 2, rollY, handle == 1 ? 0xFFCFF3FF : 0xFF7FD8F0);
+		}
+		if (to <= rollX + rollWidth) {
+			graphics.fill(to - 2, top - 2, to, rollY, handle == 2 ? 0xFFCFF3FF : 0xFF7FD8F0);
+		}
+		if (insideRangeStrip(mouseX, mouseY)) {
+			graphics.setTooltipForNextFrame(Component.literal(
+				"Selection range: " + rangeLabel(rangeLength()) + "\nDrag either end to change it. "
+					+ "This is how far Ctrl+V and Ctrl+D step, so pull the right-hand end past the "
+					+ "last note to leave a rest between repeats."), mouseX, mouseY);
+		}
+	}
+
+	/**
+	 * The range across the roll, and its length written inside it.
+	 *
+	 * <p>Full height and time only: the box's height chose the notes and is finished, while a length
+	 * is a horizontal fact. Drawn over the notes rather than under them so that the tint says which
+	 * ones are inside it, and the label sits on a plate because it lands in the same corner the bar
+	 * numbers are drawn in.</p>
+	 */
+	private void extractRangeBand(GuiGraphicsExtractor graphics) {
+		if (!hasRange()) {
+			return;
+		}
+		int from = tickX(rangeStart);
+		int to = tickX(rangeEnd);
+		if (to < rollX || from > rollX + rollWidth) {
+			return;
+		}
+		graphics.fill(Math.max(rollX, from), rollY, Math.min(rollX + rollWidth, to),
+			rollY + rollHeight, 0x1444CCFF);
+		if (from >= rollX) {
+			graphics.fill(from, rollY, from + 1, rollY + rollHeight, 0x667FD8F0);
+		}
+		if (to <= rollX + rollWidth) {
+			graphics.fill(to - 1, rollY, to, rollY + rollHeight, 0x667FD8F0);
+		}
+		String label = rangeLabel(rangeLength());
+		int labelLeft = Math.max(rollX + 2, from + 3);
+		if (labelLeft + smallTextWidth(label) + 2 <= Math.min(rollX + rollWidth, to)) {
+			graphics.fill(labelLeft - 2, rollY + 1, labelLeft + smallTextWidth(label) + 2,
+				rollY + 9, 0xCC0E2028);
+			smallText(graphics, label, labelLeft, rollY + 2, 0xFF9FE8FF);
+		}
+	}
+
 	/** The biggest step that still divides {@code value} evenly, or 1 when it is prime. */
 	private static long largestProperDivisor(long value) {
 		for (long divisor = 2L; divisor * divisor <= value; divisor++) {
@@ -3674,6 +3798,7 @@ public final class ComposerScreen extends Screen {
 		mark = phase(PHASE_GRID, mark);
 		extractNotes(graphics, mouseX, mouseY);
 		mark = phase(PHASE_NOTES, mark);
+		extractRangeBand(graphics);
 		extractPlayhead(graphics);
 		if (selectingBox) {
 			// Held to the roll's edges. The anchor is a position in the song now, so once the view
@@ -4535,6 +4660,15 @@ public final class ComposerScreen extends Screen {
 				return true;
 			}
 		}
+		if (event.button() == 0 && rangeHandleAt(event.x(), event.y()) != 0) {
+			draggingRangeHandle = rangeHandleAt(event.x(), event.y());
+			return true;
+		}
+		if (event.button() == 1 && insideRangeStrip(event.x(), event.y()) && hasRange()) {
+			// The way out of a range without also having to put the selection down.
+			clearRange();
+			return true;
+		}
 		if (event.button() == 0 && overEndMarker(event.x(), event.y())) {
 			draggingEndMarker = true;
 			lastEndDragAt = 0L;
@@ -4866,6 +5000,18 @@ public final class ComposerScreen extends Screen {
 			}
 			return true;
 		}
+		if (draggingRangeHandle != 0) {
+			// Held one grid step apart at the least, because a range of nothing is a paste that never
+			// advances -- and dragging one end past the other is a gesture nobody means.
+			long grid = Math.max(1L, gridTicks());
+			long at = Math.max(0L, snapTick(mouseTick(event.x())));
+			if (draggingRangeHandle == 1) {
+				rangeStart = Math.min(at, rangeEnd - grid);
+			} else {
+				rangeEnd = Math.max(at, rangeStart + grid);
+			}
+			return true;
+		}
 		if (draggingEndMarker) {
 			setEndTick(snapTick(endMarkerTick(event.x())));
 			return true;
@@ -4948,6 +5094,10 @@ public final class ComposerScreen extends Screen {
 				return true;
 			}
 		}
+		if (draggingRangeHandle != 0) {
+			draggingRangeHandle = 0;
+			return true;
+		}
 		if (draggingEndMarker) {
 			draggingEndMarker = false;
 			return true;
@@ -4988,6 +5138,14 @@ public final class ComposerScreen extends Screen {
 				return true;
 			}
 			selectNotesInBox();
+			// The drag's span outlives the drag. Which notes it took is settled here; how long the
+			// passage they came from is stays on screen to be read and adjusted. A click that took
+			// nothing is how a selection is put down, so it puts the range down too.
+			if (selectedNotes.isEmpty()) {
+				clearRange();
+			} else if (travelled(event.x(), event.y())) {
+				setRangeFromBox(selectionEndX);
+			}
 			return true;
 		}
 		return super.mouseReleased(event);
@@ -5131,6 +5289,7 @@ public final class ComposerScreen extends Screen {
 		}
 		if (event.isSelectAll()) {
 			selectedNotes.clear();
+			clearRange();
 			for (int layerIndex : selectionLayers()) {
 				project().layers().get(layerIndex).notes()
 					.forEach(note -> selectedNotes.add(note.id()));
@@ -5187,6 +5346,10 @@ public final class ComposerScreen extends Screen {
 				}
 				case GLFW.GLFW_KEY_E -> {
 					mergeSelectedLayers();
+					return true;
+				}
+				case GLFW.GLFW_KEY_D -> {
+					duplicateSelection();
 					return true;
 				}
 				case GLFW.GLFW_KEY_I -> {
@@ -6367,8 +6530,21 @@ public final class ComposerScreen extends Screen {
 		}
 		selected.sort(Comparator.comparingLong((Copied copied) -> copied.note().startTick())
 			.thenComparingInt(copied -> copied.note().midiNote()));
-		clipboardOriginTick = selected.stream().mapToLong(copied -> copied.note().startTick()).min()
+		long firstNote = selected.stream().mapToLong(copied -> copied.note().startTick()).min()
 			.orElse(0L);
+		// The range is the length, when there is one. Its start is the origin as well as its end,
+		// which is what carries the silence at the *front* of a phrase -- a pickup, or a riff that
+		// begins off the downbeat, keeps its distance from the beat it was written against.
+		//
+		// Except for a straggler. A note is taken by the box if its trigger touches it, so one can
+		// start a pixel before the range does, and an offset the clipboard would clamp to zero is a
+		// note quietly moved. The origin gives way to it; the end does not, so the length grows by
+		// however far it reached back rather than the copy overlapping itself.
+		clipboardOriginTick = hasRange() ? Math.min(rangeStart, firstNote) : firstNote;
+		clipboardSpanTicks = hasRange()
+			? rangeEnd - clipboardOriginTick
+			: spanOfStarts(selected.stream().map(copied -> copied.note().startTick())
+				.distinct().sorted().toList());
 		clipboard = selected.stream()
 			.map(copied -> new ClipboardNote(copied.note().startTick() - clipboardOriginTick,
 				copied.note().midiNote(), copied.note().durationTicks(), copied.note().velocity(),
@@ -6427,6 +6603,11 @@ public final class ComposerScreen extends Screen {
 		}
 		selectedNotes.clear();
 		selectedNotes.addAll(result.noteIds());
+		// The range moves onto what was just pasted, because the selection did. Leaving it behind on
+		// the passage the copy was taken from would have the band describing one stretch of the song
+		// and the selection sitting in another.
+		rangeStart = startTick;
+		rangeEnd = startTick + clipboardSpan();
 		layersChanged();
 		rebuildMoveLayerButtons();
 		// Said out loud only when the paste had to change the shape of the composition. A paste that
@@ -6442,18 +6623,26 @@ public final class ComposerScreen extends Screen {
 	}
 
 	/**
-	 * How far a paste moves the marker on: the copy's own length, so pasting it again continues it.
+	 * How far a paste steps: the length the copy was made with.
 	 *
-	 * <p>A copy of some notes is not a length -- it ends on the last note's start, and where the
-	 * phrase stops is one step further on. Which step is read off the copy rather than off the Snap
-	 * control: the tightest gap between two of its own note starts is the resolution the material is
-	 * written in, and a phrase of even steps then comes out exactly its own length. Sixteen
-	 * sixteenths advance a whole bar. Snap only stands in for a copy with nothing to measure -- a
-	 * single chord, where there is one start tick and no gap at all.</p>
+	 * <p>Captured at copy time rather than worked out here, so it cannot change under a clipboard
+	 * that has not. See {@link #copySelection}.</p>
 	 */
 	private long clipboardSpan() {
-		List<Long> starts = clipboard.stream().map(ClipboardNote::tickOffset).distinct().sorted()
-			.toList();
+		return Math.max(1L, clipboardSpanTicks);
+	}
+
+	/**
+	 * A guess at the length of some notes, for when there is no range saying.
+	 *
+	 * <p>A set of notes ends on its last note's start, and where the passage stops is one step
+	 * further on. Which step is read off the notes rather than off the Snap control: the tightest
+	 * gap between two of their own starts is the resolution the material is written in, so a phrase
+	 * of even steps comes out exactly its own length and sixteen sixteenths make a bar. Snap only
+	 * stands in when there is nothing to measure -- a single chord, one start tick, no gap at all.
+	 * It is a guess either way, which is the whole reason the range exists and is drawn.</p>
+	 */
+	private long spanOfStarts(List<Long> starts) {
 		long step = Long.MAX_VALUE;
 		for (int index = 1; index < starts.size(); index++) {
 			step = Math.min(step, starts.get(index) - starts.get(index - 1));
@@ -6461,7 +6650,69 @@ public final class ComposerScreen extends Screen {
 		if (step == Long.MAX_VALUE || step <= 0L) {
 			step = Math.max(1L, gridTicks());
 		}
-		return starts.isEmpty() ? step : starts.getLast() + step;
+		return starts.isEmpty() ? step : starts.getLast() - starts.getFirst() + step;
+	}
+
+	/**
+	 * How far {@link #duplicateSelection} steps: the range, or the selection's own guessed length.
+	 */
+	private long selectionSpan() {
+		if (hasRange()) {
+			return rangeLength();
+		}
+		return spanOfStarts(project().layers().stream()
+			.flatMap(layer -> layer.notes().stream())
+			.filter(note -> selectedNotes.contains(note.id()))
+			.map(NoteEvent::startTick)
+			.distinct()
+			.sorted()
+			.toList());
+	}
+
+	/**
+	 * Lays the selection down again directly after itself, and leaves the selection on the copy.
+	 *
+	 * <p>The gesture for extending a passage, and the reason it is not Ctrl+V: no clipboard is
+	 * involved, so it neither reads nor overwrites what was copied, and pressing it again adds one
+	 * more repeat rather than the same repeat twice. Every note stays on the layer it was already
+	 * on, which is the other difference -- a paste gathers a copy onto the layer you aimed it at,
+	 * and a duplicate is not aimed anywhere.</p>
+	 */
+	private void duplicateSelection() {
+		if (selectedNotes.isEmpty()) {
+			showResult(Component.literal("Nothing selected to duplicate. Drag a box over a passage "
+				+ "first - the box also sets how far each repeat steps."));
+			return;
+		}
+		long span = selectionSpan();
+		PasteResult result = project().duplicateNotes(selectedNotes, span);
+		if (result.noteIds().isEmpty()) {
+			return;
+		}
+		long furthest = project().layers().stream()
+			.flatMap(layer -> layer.notes().stream())
+			.filter(note -> selectedNotes.contains(note.id()))
+			.mapToLong(NoteEvent::startTick)
+			.max()
+			.orElse(0L) + span;
+		ComposerProject duplicated = result.project()
+			.withEndTick(Math.max(result.project().endTick(), furthest));
+		apply("duplicate " + result.noteIds().size()
+			+ (result.noteIds().size() == 1 ? " note" : " notes"), duplicated);
+		selectedNotes.clear();
+		selectedNotes.addAll(result.noteIds());
+		// The range travels with the selection it describes, so a second press continues the passage
+		// instead of laying a second copy on the first.
+		if (hasRange()) {
+			rangeStart += span;
+			rangeEnd += span;
+			revealTick(rangeEnd);
+		} else {
+			revealTick(furthest);
+		}
+		layersChanged();
+		showResult(Component.literal(result.noteIds().size() + " notes duplicated "
+			+ rangeLabel(span) + " on. Ctrl+D again adds another."));
 	}
 
 	private void updateButtonStates() {
@@ -6598,6 +6849,79 @@ public final class ComposerScreen extends Screen {
 		} else if (tick > horizontalScroll + span) {
 			horizontalScroll = Math.max(0L, tick - span + margin);
 		}
+	}
+
+	private boolean hasRange() {
+		return rangeStart >= 0L && rangeEnd > rangeStart;
+	}
+
+	private long rangeLength() {
+		return hasRange() ? rangeEnd - rangeStart : 0L;
+	}
+
+	private void clearRange() {
+		rangeStart = -1L;
+		rangeEnd = -1L;
+		draggingRangeHandle = 0;
+	}
+
+	/**
+	 * Takes the range from the box that has just been drawn, widened to the nearest grid lines.
+	 *
+	 * <p>Outward rather than to the nearest, so the range always contains every note the box took --
+	 * a range that ended before a selected note would be a length that cannot hold its own copy. It
+	 * also means a box drawn roughly around sixteen sixteenths comes out exactly one bar, which is
+	 * the answer nearly every time and visible when it is not.</p>
+	 */
+	private void setRangeFromBox(double endX) {
+		long grid = Math.max(1L, gridTicks());
+		long from = Math.max(0L, Math.round(Math.min(boxOriginTick, mouseTick(endX))));
+		long to = Math.max(0L, Math.round(Math.max(boxOriginTick, mouseTick(endX))));
+		rangeStart = from / grid * grid;
+		rangeEnd = (to + grid - 1L) / grid * grid;
+		if (rangeEnd <= rangeStart) {
+			rangeEnd = rangeStart + grid;
+		}
+		draggingRangeHandle = 0;
+	}
+
+	/**
+	 * The thin strip along the bottom of the ruler the range's handles live in.
+	 *
+	 * <p>Its own lane rather than sharing the ruler's full height with the playback marker and the
+	 * end marker. Four draggable things in twenty-four pixels is a puzzle about which one a press
+	 * meant; the top of the ruler stays scrubbing and the bottom five pixels are the range.</p>
+	 */
+	private static final int RANGE_STRIP_HEIGHT = 5;
+
+	private boolean insideRangeStrip(double x, double y) {
+		return x >= rollX && x < rollX + rollWidth && y >= rollY - RANGE_STRIP_HEIGHT && y < rollY;
+	}
+
+	/** Which handle a press in the strip has hold of, or 0. */
+	private int rangeHandleAt(double x, double y) {
+		if (!hasRange() || !insideRangeStrip(x, y)) {
+			return 0;
+		}
+		double toStart = Math.abs(x - tickX(rangeStart));
+		double toEnd = Math.abs(x - tickX(rangeEnd));
+		if (Math.min(toStart, toEnd) > 5.0) {
+			return 0;
+		}
+		return toEnd <= toStart ? 2 : 1;
+	}
+
+	/** A tick count as the unit anyone actually thinks a loop in. */
+	private String rangeLabel(long ticks) {
+		double bars = ticks / (project().ppq() * 4.0);
+		if (bars >= 0.995 && Math.abs(bars - Math.round(bars)) < 0.005) {
+			long whole = Math.round(bars);
+			return whole + (whole == 1L ? " bar" : " bars");
+		}
+		if (bars >= 0.1) {
+			return String.format(java.util.Locale.ROOT, "%.2f bars", bars);
+		}
+		return ticks + " ticks";
 	}
 
 	/** The box's anchor corner, put back on the screen wherever the view has moved it to. */
@@ -6965,6 +7289,7 @@ public final class ComposerScreen extends Screen {
 		QUANTIZE_SIXTEENTH("Quantize to 1/16", true),
 		QUANTIZE_REPEATERS("Quantize to repeater ticks", true),
 		QUANTIZE_GAME_TICKS("Quantize to game ticks", true),
+		DUPLICATE_SELECTION("Duplicate selection"),
 		FIT_ALL_RANGE("Fit into range", true),
 		TRANSPOSE_BEST_FIT("Transpose to best fit"),
 		SNAP_TEMPO("Snap tempo (whole song)"),
@@ -6994,7 +7319,8 @@ public final class ComposerScreen extends Screen {
 		};
 		/** Quantize slots in at index 4 and End goes on the end; see {@link #menuRows}. */
 		private static final ToolbarAction[] EDIT_ACTIONS = {
-			UNDO, REDO, CONVERT, CONVERT_GAME_TICKS, MERGE_REPEATS, TRANSPOSE_BEST_FIT,
+			UNDO, REDO, DUPLICATE_SELECTION, CONVERT, CONVERT_GAME_TICKS, MERGE_REPEATS,
+			TRANSPOSE_BEST_FIT,
 			FIT_ALL_RANGE, SNAP_TEMPO, SNAP_TEMPO_GAME
 		};
 		private static final ToolbarAction[] BUILD_ACTIONS = {

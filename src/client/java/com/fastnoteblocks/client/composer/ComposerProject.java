@@ -1556,6 +1556,44 @@ public record ComposerProject(
 	}
 
 	/**
+	 * Copies the given notes {@code tickDelta} later, each one staying on the layer it is already on.
+	 *
+	 * <p>The difference from {@link #pasteNotes}: a paste arrives from a clipboard and is aimed at a
+	 * layer, gathering the copy there and splitting only what that layer's instrument cannot hold. A
+	 * duplicate is not aimed anywhere -- it is the same passage again, so a four-part phrase comes
+	 * out as four parts and not as one layer holding all of them.</p>
+	 *
+	 * <p>Fresh ids, for the reason a duplicated layer's notes get them: the two copies are selected
+	 * and moved by id, and shared ids would make the second a view of the first.</p>
+	 */
+	public PasteResult duplicateNotes(Set<Long> ids, long tickDelta) {
+		if (ids == null || ids.isEmpty() || tickDelta == 0L) {
+			return new PasteResult(this, Set.of(), 0);
+		}
+		long id = nextNoteId;
+		List<Layer> updated = new ArrayList<>(layers.size());
+		Set<Long> addedIds = new LinkedHashSet<>();
+		for (Layer layer : layers) {
+			List<NoteEvent> notes = null;
+			for (NoteEvent note : layer.notes()) {
+				if (!ids.contains(note.id())) {
+					continue;
+				}
+				if (notes == null) {
+					notes = new ArrayList<>(layer.notes());
+				}
+				NoteEvent copy = new NoteEvent(id++, note.midiNote(),
+					Math.max(0L, note.startTick() + tickDelta), note.durationTicks(),
+					note.velocity());
+				notes.add(copy);
+				addedIds.add(copy.id());
+			}
+			updated.add(notes == null ? layer : layer.withNotes(notes));
+		}
+		return new PasteResult(with(updated, activeLayerIndex, id), Set.copyOf(addedIds), 0);
+	}
+
+	/**
 	 * Copies a layer, putting the copy directly after the one it came from.
 	 *
 	 * <p>Next to its source rather than at the end of the list, because a duplicate is a variation
