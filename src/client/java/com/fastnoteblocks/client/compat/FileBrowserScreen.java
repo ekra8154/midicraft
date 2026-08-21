@@ -443,7 +443,8 @@ final class FileBrowserScreen extends Screen {
 		}
 		String footer = status.isEmpty()
 			? visible.size() + " item" + (visible.size() == 1 ? "" : "s")
-				+ "   -   double-click a file, or type a path and press Enter"
+				+ "   -   double-click a file, drag one in from anywhere, "
+				+ "or type a path and press Enter"
 			: status;
 		graphics.text(font, footer, 8, height - 42, status.isEmpty() ? 0xFF8A9098 : 0xFFFF6B6B, false);
 	}
