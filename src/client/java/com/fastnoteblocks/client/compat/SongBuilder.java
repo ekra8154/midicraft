@@ -4197,7 +4197,7 @@ public final class SongBuilder {
 			FoldbackAscent rise = null;
 			boolean foldbackOffered = FOLDBACK_CUTS && layout.ultra() && cutOffered && index > 0
 				&& above >= 0 && above < floors;
-			if (foldbackOffered && (!FOLDBACK_LAST || climb <= 0 && room == 0)) {
+			if (foldbackOffered && (!FOLDBACK_LAST || room < FOLDBACK_PREFERRED_BELOW_ROOM)) {
 				FoldbackPick first = foldbackPick(placements, lane, event, room, delayColumns,
 					nearWall, farWall, forward, above, climb, floors, "AtTheWall");
 				fold = first.fold();
@@ -18525,6 +18525,42 @@ public final class SongBuilder {
 	 * See {@link #FOLDBACK_AT_ROOM_NOUGHT}.</p>
 	 */
 	static boolean FOLDBACK_LAST = true;
+
+	/**
+	 * The room below which the foldback is preferred to every module shape rather than left to
+	 * last. Three: rooms of nought, one and two.
+	 *
+	 * <p>The rule this was written for is one: a room of nought, which is the descent that has no
+	 * other shape at all -- every module shape there wants a column to stand a staircase in and
+	 * there is none. A number rather than a boolean because the rest of the answer turned out to
+	 * be a measurement. The tightest corridors a song can be given -- a paste width at or below
+	 * the longest chord plus five, where {@code laneWidth} clamps to the chord's own length --
+	 * leave every lane a room of one or two, and those are exactly the builds that lose their
+	 * wall when the fold goes last. A climb at a room of nought is refused by {@link
+	 * #foldbackCloses} whatever this says, so raising this offers the fold to climbs from a room
+	 * of one up.</p>
+	 *
+	 * <p>Measured on two independently seeded grids of every song at widths eight to forty-eight
+	 * over one to six floors, breach blocks and depth:</p>
+	 *
+	 * <pre>
+	 *                    seed 7, 1,596 builds     seed 11, 1,824 builds
+	 *   fold first          32   261,539             32   270,086
+	 *   below room 1        64   244,835             76   253,518
+	 *   below room 2        90   244,904
+	 *   below room 3         4   245,485              8   254,168
+	 *   below room 4        16   246,208
+	 *   below room 5        12   247,270
+	 * </pre>
+	 *
+	 * <p>Three costs a quarter of a percent of depth against one and takes breach down ninefold on
+	 * both seeds; the bounce at two says the number is not a smooth dial but a routing threshold,
+	 * which is why it is measured on two seeds rather than argued from one. At the five census
+	 * sizes it is four blocks against one's nought -- one lane of illit-do-the-dance at 20x5, the
+	 * lane that has breached there through several shapes and walks out before the chord that ends
+	 * it. Nothing reads back dead, wrong, missing or collided at any value.</p>
+	 */
+	static int FOLDBACK_PREFERRED_BELOW_ROOM = 3;
 
 	/**
 	 * The smallest chord offered a foldback: the bus classes. The shape works from four notes
