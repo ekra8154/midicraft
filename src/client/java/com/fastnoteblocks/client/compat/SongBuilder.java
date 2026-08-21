@@ -5148,7 +5148,7 @@ public final class SongBuilder {
 						? addSplitBusDescent(placements, cursor, travel, descentSide, currentTime)
 						: addSpiralDescent(placements, cursor, travel, descentSide, currentTime);
 				if (solidMidRung && climbRungNote != null) {
-					placements.placing("stairExtras");
+					placements.placing("ascentRungExtra");
 					placeNote(placements, stairFoot.relative(depth.getOpposite()).above(3)
 						.relative(travel.getOpposite()), climbRungNote, true);
 					placements.padded("ascentRungExtra");

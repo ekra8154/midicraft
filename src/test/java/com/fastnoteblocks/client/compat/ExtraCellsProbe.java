@@ -66,6 +66,10 @@ class ExtraCellsProbe {
 				if (by.startsWith("stairExtras") && block.startsWith("minecraft:note_block")) {
 					found.computeIfAbsent("stair extra", unused -> new ArrayList<>())
 						.add(cell.getKey());
+				} else if (by.startsWith("ascentRungExtra")
+						&& block.startsWith("minecraft:note_block")) {
+					found.computeIfAbsent("ascent rung extra", unused -> new ArrayList<>())
+						.add(cell.getKey());
 				}
 			}
 			System.out.println("EXTRAS " + name + " " + width + "x" + floors
