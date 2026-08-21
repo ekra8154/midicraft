@@ -986,7 +986,8 @@ public record ComposerProject(
 	 */
 	private RepeaterGrid buildGrid(boolean gameTicks) {
 		long numerator = ppq * 100_000L * Math.max(1, speedQuarters);
-		long denominator = tempoMicrosPerQuarter * 4L * (gameTicks ? 2L : 1L);
+		long perBuildTick = gameTicks ? 2L : 1L;
+		long denominator = tempoMicrosPerQuarter * 4L * perBuildTick;
 		long divisor = greatestCommonDivisor(numerator, denominator);
 		long grid = Math.max(1L, numerator / divisor);
 		long repeaterTicks = Math.max(1L, denominator / divisor);
@@ -998,7 +999,16 @@ public record ComposerProject(
 		// lands either side of the grid -- and a span a hair wider than the grid makes every
 		// one-tick gap 0.999 of a tick, which reads as too frequent rather than as exact. Up
 		// puts the span just inside the grid instead, where the rounding is harmless.
-		return new RepeaterGrid(grid, 1L, Math.max(1, (int)Math.ceil(numerator / (4.0 * grid))));
+		//
+		// perBuildTick belongs here as well as in the denominator above, and did not used to. The
+		// tempo handed back was the one that makes `grid` a whole *repeater* tick, while `grid` had
+		// been measured in game ticks -- half as much. The two disagreed by exactly that factor of
+		// two, so quantizing to game ticks at any tempo reaching this branch halved the song and
+		// then landed it on the repeater grid: 128 BPM came back as 63.75, on the wrong grid, from
+		// the button whose only purpose is the other one. Every tempo tested took the exact branch
+		// above, where the arithmetic is shared and the fault cannot show.
+		return new RepeaterGrid(grid, 1L,
+			Math.max(1, (int)Math.ceil(numerator / (4.0 * perBuildTick * grid))));
 	}
 
 	public RepeaterQuantize withQuantizedToRepeaters(Set<Long> scope) {

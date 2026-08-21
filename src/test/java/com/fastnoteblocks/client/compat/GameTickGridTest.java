@@ -41,6 +41,74 @@ class GameTickGridTest {
 	 * and a game tick at 60. Notes are spaced in song ticks, so a spacing of 300 is 2.5 repeater
 	 * ticks and 5 game ticks.
 	 */
+	/**
+	 * Quantizing lands the song on the grid it named, whatever tempo it started at.
+	 *
+	 * <p>The claim both buttons make: repeater ticks leaves a song a single chain can place, game
+	 * ticks leaves one two lanes can, and afterwards the matching snap grid is exact so the notes
+	 * sit on the lines. 128 BPM is the case that matters -- its repeater tick is 102.4 composer
+	 * ticks, so neither grid is expressible and the tempo has to be nudged to make one. Every tempo
+	 * tested before this took the branch where it is already whole, which is why the game-tick
+	 * nudge could halve the tempo and land on the repeater grid without anything noticing.</p>
+	 */
+	@Test
+	void quantizingToEitherGridLandsOnThatGridWithoutMovingTheTempoFar() {
+		// 128 BPM at 480 PPQ: 468,750 microseconds a quarter, 102.4 composer ticks a repeater tick.
+		ComposerProject awkward = awkwardSong();
+		double startedAt = 60_000_000.0 / awkward.tempoMicrosPerQuarter();
+
+		for (boolean gameTicks : new boolean[] {false, true}) {
+			ComposerProject quantized =
+				awkward.withQuantizedToBuildTicks(Set.of(), gameTicks).project();
+			String which = gameTicks ? "game" : "repeater";
+
+			// Whole to within a thousandth, not exactly whole. The tempo is an integer number of
+			// microseconds and is deliberately rounded up, so the span it produces sits a hair
+			// inside the grid rather than a hair outside it -- outside would make every one-tick
+			// gap 0.999 of a tick and read as too frequent. The undershoot is about 2e-4 here.
+			double span = SongAnalysis.redstoneTickSpan(quantized);
+			double unit = gameTicks ? span / 2.0 : span;
+			assertTrue(Math.abs(unit - Math.rint(unit)) < 1.0e-3,
+				"a " + which + " tick came to " + unit + " composer ticks, which no note can sit on");
+
+			for (long start : starts(quantized)) {
+				double units = start / unit;
+				assertTrue(Math.abs(units - Math.rint(units)) < 1.0e-3,
+					"a note landed at " + start + ", which is " + units + " " + which + " ticks in");
+			}
+
+			assertTrue(SongAnalysis.of(quantized, true, gameTicks).buildable(),
+				"quantizing to " + which + " ticks should leave a song that build can place");
+
+			double now = 60_000_000.0 / quantized.tempoMicrosPerQuarter();
+			assertTrue(Math.abs(now - startedAt) / startedAt < 0.02,
+				"the tempo should be nudged, not moved: " + startedAt + " became " + now);
+		}
+	}
+
+	/** Repeater ticks are the stricter of the two, so nothing is left between them. */
+	@Test
+	void quantizingToRepeatersLeavesNothingNeedingASecondLane() {
+		ComposerProject quantized =
+			awkwardSong().withQuantizedToBuildTicks(Set.of(), false).project();
+
+		assertTrue(SongAnalysis.of(quantized, true, false).halfTickedNotes().isEmpty(),
+			"a repeater-quantized song has nothing sitting between repeater ticks");
+		assertEquals(1, SongAnalysis.of(quantized, true, false).lanesNeeded());
+	}
+
+	/** Notes at an awkward tempo, spaced so they cannot already be on either grid. */
+	private static ComposerProject awkwardSong() {
+		List<ComposerProject.NoteEvent> notes = new ArrayList<>();
+		long[] starts = {0L, 137L, 260L, 401L, 555L, 700L, 913L};
+		for (int index = 0; index < starts.length; index++) {
+			notes.add(new ComposerProject.NoteEvent(index + 1L, 60, starts[index], 1L, 100));
+		}
+		return new ComposerProject("awkward", 480, 468_750,
+			List.of(new ComposerProject.Layer("Test", "HARP", false, true, true, notes)),
+			0, 100L, 913L, 4);
+	}
+
 	private static ComposerProject song(long spacing, int count) {
 		List<ComposerProject.NoteEvent> notes = new ArrayList<>();
 		for (int index = 0; index < count; index++) {
