@@ -5,6 +5,7 @@ import com.fastnoteblocks.NoteSequence;
 import com.fastnoteblocks.client.compat.ComposerCommand;
 import com.fastnoteblocks.client.compat.ComposerScale;
 import com.fastnoteblocks.client.compat.ComposerScreen;
+import com.fastnoteblocks.client.compat.DebugCommandSuggestions;
 import com.fastnoteblocks.client.compat.PreviewInstrument;
 import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.blaze3d.vertex.PoseStack;
@@ -306,6 +307,7 @@ public final class NoteBlockOverlay {
 		}
 		ComposerCommand.tick(minecraft);
 		ComposerScale.tick(minecraft);
+		DebugCommandSuggestions.tick(minecraft);
 		FastNoteblocksConfig config = FastNoteblocksConfig.get();
 		while (toggleKey.consumeClick()) {
 			config.toggleInteractiveOverlays();
