@@ -12204,10 +12204,11 @@ public final class SongBuilder {
 			BlockPos stone = foldbackRunStone(firstStone, travel, cell, flatCells, riseCap,
 				riseStep);
 			for (Direction out : List.of(depth.getOpposite(), depth)) {
-				if (left.isEmpty() || !railSlotTakes(placements, stone.relative(out), time)) {
+				if (left.isEmpty()) {
 					continue;
 				}
-				int pick = suitedNote(placements, stone.relative(out), left, cell, harpCells, noFallCells);
+				int pick = suitedNote(placements, stone.relative(out), left, cell, harpCells,
+					noFallCells, time);
 				if (pick >= 0) {
 					left.remove(pick);
 				}
@@ -12263,27 +12264,52 @@ public final class SongBuilder {
 	}
 
 	/**
-	 * Whether this note may hang in this slot of a run: the rung's own rule, and somewhere for a
-	 * falling instrument's prop to stand.
+	 * Whether this note may hang in this slot of a run: the rung's own rule, room of the kind
+	 * this note needs underneath it, and somewhere for a falling instrument's prop to stand.
+	 *
+	 * <p>The two kinds of room are the whole of why a staircase's rungs were coming out empty. A
+	 * note that is not a harp keeps its instrument block in the cell below, so it needs that cell
+	 * outright; a harp keeps nothing there and will hang over a cell another note is holding
+	 * empty for its own headroom. Every rung of a climb stands over exactly such a cell -- the
+	 * module behind hangs its notes a level down and claims the air above each -- so asking
+	 * {@link PlacementPlan#freeForNote} of every slot refused the rungs to everything, harps
+	 * included, and the chord went up the flat run instead at two notes a column of corridor.</p>
 	 */
-	private static boolean slotTakes(PlacementPlan placements, BlockPos slot, EventNote note,
-			int cell, int harpCells, int noFallCells) {
-		return rungTakes(note, cell, harpCells, noFallCells)
+	private static boolean slotHolds(PlacementPlan placements, BlockPos slot, EventNote note) {
+		if (note.effect() == null && isHarpNote(note)) {
+			return placements.freeForHangingHarp(slot);
+		}
+		return placements.freeForNote(slot)
 			&& (note.effect() != null
 				|| !FALLING_INSTRUMENT_BLOCKS.contains(note.instrumentBlock())
 				|| propStands(placements, slot));
 	}
 
 	/**
-	 * The next note of a run that this slot will take, or {@code -1}. Scanning forward rather
-	 * than taking the head of the list is what puts the chord's harps on the first rung: they sit
-	 * wherever the bus order left them, and only that rung can use one.
+	 * The note of those left that this slot should take, or {@code -1}.
+	 *
+	 * <p>Anything but a harp first. A harp is the only note that will hang where the cell below
+	 * is spoken for, and the first rung takes nothing else at all -- so every harp spent on a
+	 * slot that would have held any note is a slot further up the staircase left empty, and the
+	 * run grows a column of corridor to make it up. Scanning rather than taking the next in
+	 * order is also what reaches a harp for the rungs that need one, wherever the bus order left
+	 * it.</p>
 	 */
 	private static int suitedNote(PlacementPlan placements, BlockPos slot, List<EventNote> notes,
-			int cell, int harpCells, int noFallCells) {
-		for (int index = 0; index < notes.size(); index++) {
-			if (slotTakes(placements, slot, notes.get(index), cell, harpCells, noFallCells)) {
-				return index;
+			int cell, int harpCells, int noFallCells, int time) {
+		if (soundedByAnother(placements, slot, time)) {
+			return -1;
+		}
+		for (boolean harps : new boolean[] {false, true}) {
+			for (int index = 0; index < notes.size(); index++) {
+				EventNote note = notes.get(index);
+				if (harps != (note.effect() == null && isHarpNote(note))) {
+					continue;
+				}
+				if (rungTakes(note, cell, harpCells, noFallCells)
+						&& slotHolds(placements, slot, note)) {
+					return index;
+				}
 			}
 		}
 		return -1;
@@ -12314,11 +12340,10 @@ public final class SongBuilder {
 			// note of a chord goes where soundedByAnother can see what it stands against.
 			for (Direction out : List.of(depth.getOpposite(), depth)) {
 				BlockPos slot = stone.relative(out);
-				if (left.isEmpty() || !placements.freeForNote(slot)
-						|| soundedByAnother(placements, slot, time)) {
+				if (left.isEmpty()) {
 					continue;
 				}
-				int pick = suitedNote(placements, slot, left, cell, harpCells, noFallCells);
+				int pick = suitedNote(placements, slot, left, cell, harpCells, noFallCells, time);
 				if (pick >= 0) {
 					if (cell < harpCells + noFallCells) {
 						// The staircase's own notes, counted apart: they are the slots that ride
