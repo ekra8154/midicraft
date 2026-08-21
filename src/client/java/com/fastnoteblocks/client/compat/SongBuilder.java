@@ -12171,6 +12171,37 @@ public final class SongBuilder {
 	 * and a note past the run's wire limit is simply lost. Counting first is what lets the oracle
 	 * hand each run exactly what it can carry.
 	 */
+	/**
+	 * How many slots of a staircase will take a harp and nothing else.
+	 *
+	 * <p>Two kinds, and both are slots no other note in the chord can use: the first rung, which
+	 * takes no other instrument at all, and any slot standing over a cell another note is keeping
+	 * empty, where there is nowhere to put an instrument block. Counted off the ground before the
+	 * wall-bound run is served, because that run is handed notes by position and a harp is worth
+	 * no more out there than anything else -- so a harp that goes to it is one of these slots left
+	 * empty, and the run grows a column of corridor to carry the note instead.</p>
+	 */
+	private static int foldbackHarpOnlySlots(PlacementPlan placements, BlockPos firstStone,
+			Direction travel, Direction depth, int cells, int flatCells, int riseCap, int riseStep,
+			int mutedCells, int harpCells, int time) {
+		int wanted = 0;
+		for (int cell = mutedCells; cell < cells; cell++) {
+			BlockPos stone = foldbackRunStone(firstStone, travel, cell, flatCells, riseCap,
+				riseStep);
+			for (Direction out : List.of(depth.getOpposite(), depth)) {
+				BlockPos slot = stone.relative(out);
+				if (!placements.freeForHangingHarp(slot)
+						|| soundedByAnother(placements, slot, time)) {
+					continue;
+				}
+				if (cell < harpCells || !placements.freeForNote(slot)) {
+					wanted++;
+				}
+			}
+		}
+		return wanted;
+	}
+
 	private static int foldbackRunSlotsFree(PlacementPlan placements, BlockPos firstStone,
 			Direction travel, Direction depth, int cells, int flatCells, int riseCap, int riseStep,
 			int mutedCells, int time) {
@@ -12655,17 +12686,26 @@ public final class SongBuilder {
 		EventNote pairB = !pool.isEmpty()
 				&& railSlotTakes(placements, conductorAt.relative(side), time)
 			? pool.remove(0) : null;
-		// The first rung's harps come out before anything else is served. That rung's two slots
-		// can hold a harp and nothing else, so a harp spent on the wall run -- where any
-		// instrument would have done -- is a slot lost outright, and the harps sit early in the
-		// bus order where the wall run reaches them first.
+		// The staircase's harp-only slots are served before anything else. The order a foldback
+		// fills in is head, then the wall-bound run, then the climb, then the flat run above --
+		// but the climb's hard slots have to jump that queue, because they are the only ones in
+		// the module that will take a harp and nothing else, and the wall-bound run is handed
+		// its notes by position and will spend harps on slots any note would have filled. So
+		// they are counted off the ground first and set aside; everything after fills as
+		// normal. Two were set aside before, whatever the staircase actually wanted, which left
+		// rungs standing empty with harps out on the wall run -- in-game reading, three modules
+		// named.
 		List<EventNote> rungHarps = new ArrayList<>();
-		for (int slot = 0; slot < 2; slot++) {
+		int wanted = foldbackHarpOnlySlots(placements, stand.above(2), travel.getOpposite(), side,
+			FOLDBACK_RUNG_HARPS + FOLDBACK_RUNG_NO_FALLING + 1, 0, 3, 1, muted,
+			FOLDBACK_RUNG_HARPS, time);
+		for (int slot = 0; slot < wanted; slot++) {
 			EventNote harp = takeFromTail(pool,
 				note -> note.effect() == null && isHarpNote(note));
-			if (harp != null) {
-				rungHarps.add(harp);
+			if (harp == null) {
+				break;
 			}
+			rungHarps.add(harp);
 		}
 		// Served exactly what the ground will grant: the wall-bound run rides the arriving
 		// lane's own bus rows, which the corridor alongside already hangs notes and claims in,
