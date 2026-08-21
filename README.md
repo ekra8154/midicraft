@@ -172,6 +172,23 @@ any two of them. That is usually right for a phrase of even steps and it is
 always visible, drawn as a hairline in the same strip, before you commit to it.
 
 
+## Dragging a file in
+
+Drag a `.mid`, `.midi`, `.nbs`, `.nbt`, `.schem` or `.litematic` file from your
+desktop onto the Minecraft window and it is imported. This works on the song
+library, in the composer, and in the file browser -- whichever is open takes it.
+
+The extension chooses the reader, so there is no need to pick the matching import
+button first. Dropping a folder onto the file browser opens that folder instead.
+Dropping several files takes the first one it can read and says so rather than
+guessing at a queue. Dropping something it cannot read says that too, because a
+drop that is silently ignored looks exactly like one the window never got.
+
+Onto the composer it goes through the same unsaved-changes check the Import menu
+entry does: a drop is easy to make by accident in a way that choosing a menu
+entry is not.
+
+
 ## Two panes, one keyboard
 
 The composer has two halves that own a selection: the layer panel and the piano

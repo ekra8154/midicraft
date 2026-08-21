@@ -5630,6 +5630,30 @@ public final class ComposerScreen extends Screen {
 		selectionEndY = lastMouseY;
 	}
 
+	/**
+	 * A song file dragged onto the window from the desktop.
+	 *
+	 * <p>An import replaces what is on screen, so it goes through the same unsaved check the Import
+	 * menu entry does. A drop is easy to make by accident in a way that choosing a menu entry is
+	 * not, and losing an hour's work to a slipped mouse is not a thing to find out about
+	 * afterwards.</p>
+	 */
+	@Override
+	public void onFilesDrop(List<Path> dropped) {
+		Path file = dropped == null ? null : dropped.stream()
+			.filter(Files::isRegularFile)
+			.filter(SongImports::importable)
+			.findFirst()
+			.orElse(null);
+		if (file == null) {
+			showResult(Component.literal(
+				"Drop a .mid, .midi, .nbs, .nbt, .schem or .litematic file to import it."));
+			return;
+		}
+		withUnsavedChangesChecked(() ->
+			SongImports.openDropped(this, config, file, this::applyImportedProject));
+	}
+
 	@Override
 	public void removed() {
 		setResizeCursor(false);

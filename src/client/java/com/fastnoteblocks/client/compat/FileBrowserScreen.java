@@ -254,6 +254,55 @@ final class FileBrowserScreen extends Screen {
 		chosen.accept(entry.path());
 	}
 
+	/**
+	 * Files dragged onto the window from the desktop.
+	 *
+	 * <p>Minecraft installs a GLFW drop callback and hands whatever lands to whichever screen is
+	 * open, so this needs nothing but the override. It is the shortest route there is between a file
+	 * you have just downloaded and a song: no navigating to the folder, no remembering where the
+	 * browser was last pointed.</p>
+	 *
+	 * <p>A dropped folder is opened rather than refused, since dragging one here plainly means "look
+	 * in that". A dropped file of the wrong kind says so instead of doing nothing, because a drop
+	 * that is silently ignored is indistinguishable from one the window never received.</p>
+	 */
+	@Override
+	public void onFilesDrop(List<Path> dropped) {
+		if (dropped == null || dropped.isEmpty()) {
+			return;
+		}
+		for (Path path : dropped) {
+			if (Files.isDirectory(path)) {
+				enter(path);
+				return;
+			}
+		}
+		List<Path> usable = dropped.stream()
+			.filter(Files::isRegularFile)
+			.filter(path -> matchesExtension(path.getFileName().toString()))
+			.toList();
+		if (usable.isEmpty()) {
+			status = dropped.size() == 1
+				? "That is not a " + String.join(" or ", extensions) + " file."
+				: "None of those " + dropped.size() + " files is a "
+					+ String.join(" or ", extensions) + ".";
+			return;
+		}
+		// One song at a time, because opening one is what the caller asked for and a queue of them
+		// would need somewhere to wait that this screen does not have.
+		Path file = usable.getFirst();
+		if (usable.size() > 1) {
+			status = "Opening " + file.getFileName() + "; the other "
+				+ (usable.size() - 1) + " were left.";
+		}
+		Path folder = file.toAbsolutePath().getParent();
+		if (folder != null) {
+			rememberDirectory.accept(folder);
+		}
+		minecraft.gui.setScreen(parent);
+		chosen.accept(file);
+	}
+
 	@Override
 	public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
 		List<Entry> visible = matches();
@@ -367,8 +416,8 @@ final class FileBrowserScreen extends Screen {
 
 		if (visible.isEmpty() && status.isEmpty()) {
 			graphics.text(font, entries.isEmpty()
-					? "No " + String.join(" or ", extensions) + " files here. Drop some in the "
-						+ "import folder, or browse to wherever they are."
+					? "No " + String.join(" or ", extensions) + " files here. Drag one onto the "
+						+ "window from anywhere, or browse to where they are."
 					: "Nothing matches that filter.",
 				14, LIST_TOP, 0xFF8A9098, false);
 		}

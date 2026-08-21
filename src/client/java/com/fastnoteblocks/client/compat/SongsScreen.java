@@ -4,6 +4,8 @@ import com.fastnoteblocks.client.FastNoteblocksConfig;
 import com.fastnoteblocks.client.composer.ComposerProject;
 import com.fastnoteblocks.client.composer.SongAnalysis;
 import com.fastnoteblocks.client.composer.SongLibrary;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -52,6 +54,28 @@ public final class SongsScreen extends Screen {
 	}
 
 	private record Row(String id, ComposerProject song) {
+	}
+
+	/**
+	 * A song file dragged onto the window from the desktop.
+	 *
+	 * <p>Minecraft hands whatever is dropped to the open screen, so accepting one costs an override.
+	 * Here it is the shortest path a song can take from outside: a file on the desktop becomes a
+	 * composition without visiting a folder, choosing a format, or knowing which of the three import
+	 * buttons matches what you are holding -- the extension answers that.</p>
+	 */
+	@Override
+	public void onFilesDrop(List<Path> dropped) {
+		Path file = dropped == null ? null : dropped.stream()
+			.filter(Files::isRegularFile)
+			.filter(SongImports::importable)
+			.findFirst()
+			.orElse(null);
+		if (file == null) {
+			status = "Drop a .mid, .midi, .nbs, .nbt, .schem or .litematic file to import it.";
+			return;
+		}
+		SongImports.openDropped(this, config, file, this::openImported);
 	}
 
 	/** Whether the paste mode in use lays a second lane, which is what reaches between ticks. */
