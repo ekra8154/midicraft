@@ -19485,6 +19485,44 @@ public final class SongBuilder {
 	 * is what settles the awkward chord of two harps and five instruments that do not conduct:
 	 * both harps become relays, and the centre goes unused.</p>
 	 */
+	/**
+	 * Whether the centre of a stacked module takes a note whenever it can hold one.
+	 *
+	 * <p>It used to be reached for only when the chord would not otherwise fit -- five notes in four
+	 * hangers, seven in six -- so a chord that filled its hangers exactly left the centre as a block
+	 * of stone. A chord of four does that, and so does a chord of six where the back pair is granted.
+	 * A stone centre is a cell that could have been carrying a note, and every note it carries is a
+	 * low slot the module does not hang. The low slots are the ones that come into contention with
+	 * the lane behind, so the emptier a module is underneath, the less often anything has to be
+	 * moved, shed or padded for.</p>
+	 *
+	 * <p><b>This is not a contest between notes, and nothing has a first claim on the centre.</b> The
+	 * notes of a chord all sound on the one tick, so which of them ends up where is free except for
+	 * what each cell can physically hold: the centre only ever takes a harp, because what sits under
+	 * it is the cross of dust that drives the module and a note block reads its instrument off
+	 * whatever is under it. So the question is never which note gets the centre. If the centre can
+	 * hold a note then it holds one, and the only decision left is how to arrange the notes that
+	 * remain.</p>
+	 *
+	 * <p>Which is also why the two side slots are settled first, and it is not that they outrank
+	 * anything. They are the tightest constraint in the module -- they relay the pulse outward, so
+	 * they need an instrument block that conducts, where the centre needs a harp and the low slots
+	 * take anything -- and the way to satisfy a set of constraints is to settle the tightest first
+	 * and fill the free cells out of what is left. A harp is held back ahead of them in one case
+	 * only: where the centre is the difference between a shape and no shape, because a module that
+	 * cannot fill its sides does not hang its notes lower down, it refuses outright and falls to a
+	 * bus.</p>
+	 *
+	 * <p><b>What this flag is for is the cell, not the note.</b> A centre with no note keeps the cell
+	 * above it as air, and that air is where {@link #CLIMB_OFF_A_STACKED_CENTRE} runs the dust that
+	 * hands a module over to a climb without the spare column a cut would need; an empty centre is
+	 * also where a contested low note is relocated to ({@link #RELOCATES_TO_CENTRE}). Neither of
+	 * those is a note wanting a slot -- both are other machinery wanting the cell empty -- and a note
+	 * standing there spends them. The numbers say the low slots freed are worth more than the two
+	 * moves, and this takes it back in one run if that stops being true.</p>
+	 */
+	static boolean CENTRE_TAKES_A_NOTE_WHEN_IT_CAN = true;
+
 	private static UltraSlots ultraSlots(List<EventNote> chord, boolean reachingBack) {
 		return ultraSlots(chord, reachingBack ? 2 : 0);
 	}
@@ -19504,9 +19542,25 @@ public final class SongBuilder {
 		if (snares > 2) {
 			return null;
 		}
-		boolean useCentre = chord.size() > hangers;
+		// The centre is the one cell in the module that costs no flank, so a chord that can fill
+		// it fills it. A chord that fills the hangers exactly -- four of them, or six where the
+		// back pair is granted -- used to leave it stone, and a stone centre is a cell going spare:
+		// every note standing in it is a low slot the module does not hang, and the low slots are
+		// where contention with the lane behind happens.
+		// See {@link #CENTRE_TAKES_A_NOTE_WHEN_IT_CAN}.
+		boolean needsCentre = chord.size() > hangers;
+		boolean wantsCentre = needsCentre || CENTRE_TAKES_A_NOTE_WHEN_IT_CAN;
+		// The sides are settled before the centre because they are the tighter constraint, not
+		// because they have any claim on a note. They relay the pulse outward, so they need an
+		// instrument block that conducts; the centre needs a harp; the low slots take anything.
+		// Settle the tightest cells first and fill the free ones out of what is left over.
+		//
+		// A harp is held back ahead of them in one case only -- where the centre is the difference
+		// between a shape and no shape. Held back for a centre that merely could be filled, it
+		// would leave a module unable to fill its sides at all, and such a module does not hang its
+		// notes lower down: it refuses outright and falls to a bus.
 		long spareHarps = chord.stream().filter(SongBuilder::isHarpNote).count()
-			- (useCentre ? 1 : 0);
+			- (needsCentre ? 1 : 0);
 		boolean[] used = new boolean[chord.size()];
 		List<EventNote> sides = new ArrayList<>(2);
 		for (int index = 0; index < chord.size() && sides.size() < 2; index++) {
@@ -19533,14 +19587,17 @@ public final class SongBuilder {
 			return null;
 		}
 		EventNote centre = null;
-		if (useCentre) {
+		if (wantsCentre) {
 			for (int index = 0; index < chord.size() && centre == null; index++) {
 				if (!used[index] && isHarpNote(chord.get(index))) {
 					centre = chord.get(index);
 					used[index] = true;
 				}
 			}
-			if (centre == null) {
+			// Only a chord that needed the centre is refused for want of a harp. Where the centre
+			// could have held a note and none is left over, there was no arrangement that filled
+			// it, and the chord hangs its notes exactly as it always did.
+			if (centre == null && needsCentre) {
 				return null;
 			}
 		}
