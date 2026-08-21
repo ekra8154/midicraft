@@ -20026,7 +20026,8 @@ public final class SongBuilder {
 			return;
 		}
 		String instrument = note.instrumentBlock();
-		String slab = laneHeight ? LANE_HEIGHT_SLABS.get(instrument) : null;
+		String slab = laneHeight || SLAB_INSTRUMENTS_EVERYWHERE
+			? INSTRUMENT_SLABS.get(instrument) : null;
 		set(placements, notePos.below(), slab == null ? instrument : slab);
 		if (FALLING_INSTRUMENT_BLOCKS.contains(instrument)) {
 			// Sand and friends drop the moment /setblock places them over air, taking the note
@@ -20059,6 +20060,25 @@ public final class SongBuilder {
 	private static final String UNDERFLOOR = "minecraft:stone_slab[type=top]";
 
 	/**
+	 * Whether an instrument block is laid as a half-block everywhere it can be, rather than only
+	 * where the note hangs at the lane's own floor level.
+	 *
+	 * <p>Half the material for the same voice, and a build you can see through rather than a solid
+	 * wall of it. Six of the twenty instruments have a half-block that plays their voice at all --
+	 * bass, bass drum and the four trumpets, asked of the registry rather than assumed
+	 * ({@link com.fastnoteblocks.client.compat.SlabVoicesProbe}) -- so this is a lookup and not a
+	 * rule, and the other fourteen stay full blocks and are none the worse for it.</p>
+	 *
+	 * <p><b>Except where the block is not decoration.</b> A slab cannot be strongly powered and does
+	 * not occlude, and some instrument blocks in this build are doing a second job: relaying a
+	 * module's pulse out to its flanks, or standing in the way of a diagonal that must not be
+	 * taken. Those cells are named by their shapes rather than found by rule -- see the callers that
+	 * pass {@code false} to {@link #placeNote} -- because what a cell is for is known where it is
+	 * laid and nowhere else.</p>
+	 */
+	static boolean SLAB_INSTRUMENTS_EVERYWHERE = true;
+
+	/**
 	 * The half-block an instrument sits on where its note hangs at the lane's own floor level.
 	 *
 	 * <p>Two reasons, and the second is the one that decides which slots are in here. Half a block is
@@ -20075,7 +20095,7 @@ public final class SongBuilder {
 	 * ({@link com.fastnoteblocks.client.compat.SlabInstrumentTest}); a slab that plays a different
 	 * instrument would be a whole line of a song retuned by a floor.</p>
 	 */
-	private static final Map<String, String> LANE_HEIGHT_SLABS = Map.of(
+	static final Map<String, String> INSTRUMENT_SLABS = Map.of(
 		"minecraft:oak_planks", "minecraft:oak_slab[type=top]",
 		"minecraft:stone", "minecraft:stone_slab[type=top]",
 		"minecraft:waxed_copper_block", "minecraft:waxed_cut_copper_slab[type=top]",

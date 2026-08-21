@@ -1,10 +1,13 @@
 package com.fastnoteblocks.client.compat;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 
 
 import net.minecraft.SharedConstants;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.EmptyBlockGetter;
 import net.minecraft.commands.arguments.blocks.BlockStateParser;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.Bootstrap;
@@ -38,6 +41,31 @@ class SlabInstrumentTest {
 		} catch (com.mojang.brigadier.exceptions.CommandSyntaxException unknown) {
 			throw new AssertionError("no such block: " + id, unknown);
 		}
+	}
+
+	/**
+	 * The map the builder actually reads, rather than a copy of it written out here.
+	 *
+	 * <p>The list below is the history of every substitution this file has made; this is the one
+	 * that is live. A slab added to {@link SongBuilder#INSTRUMENT_SLABS} and not to the list would
+	 * otherwise go into every build in the library untested, and a slab that plays a different
+	 * instrument is a whole line of a song retuned by a floor.</p>
+	 */
+	@Test
+	void everySlabTheBuilderLaysSoundsLikeTheBlockItStandsIn() {
+		assertFalse(SongBuilder.INSTRUMENT_SLABS.isEmpty(), "the builder lays no slabs at all, "
+			+ "which means this test is asserting nothing");
+		SongBuilder.INSTRUMENT_SLABS.forEach((block, slab) -> {
+			System.out.println("LAID " + block + " " + state(block).instrument()
+				+ "  ->  " + slab + " " + state(slab).instrument());
+			assertEquals(state(block).instrument(), state(slab).instrument(),
+				slab + " does not sound like " + block);
+			// The whole reason a half-block is safe under a note and not under a relay. If one ever
+			// conducts, the rule that keeps them off the wire has quietly stopped being needed --
+			// or, far more likely, something else has changed and this is the warning.
+			assertFalse(state(slab).isRedstoneConductor(EmptyBlockGetter.INSTANCE, BlockPos.ZERO),
+				slab + " conducts redstone, so it is not the inert floor the builder takes it for");
+		});
 	}
 
 	@Test
