@@ -79,6 +79,8 @@ class DebugPasteMarkTest {
 			case "minecraft:deepslate_tiles" -> "cut head";
 			case "minecraft:cobbled_deepslate" -> "stacked simple";
 			case "minecraft:smooth_basalt" -> "rail";
+			case "minecraft:polished_basalt[axis=x]" -> "foldback descent";
+			case "minecraft:polished_basalt[axis=y]" -> "foldback climb";
 			case "minecraft:stripped_crimson_hyphae[axis=x]" -> "breach";
 			case "minecraft:red_nether_bricks" -> "dead wire";
 			case "minecraft:waxed_copper_bulb[lit=true]" -> "wrong note";
