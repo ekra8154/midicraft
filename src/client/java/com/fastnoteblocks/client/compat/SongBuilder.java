@@ -12274,12 +12274,12 @@ public final class SongBuilder {
 	 * grow nowhere, which is the common case; the grading counters say how often it is not.
 	 */
 	private static int foldbackCarriedCells(List<EventNote> chord, int room) {
-		List<EventNote> rest = new ArrayList<>(busOrder(chord));
-		rest = new ArrayList<>(rest.subList(Math.min(2 * room, rest.size()), rest.size()));
+		List<EventNote> pool = new ArrayList<>(busOrder(chord));
 		for (int take = 0; take < 3; take++) {
-			takeFromTail(rest, note -> note.effect() == null && isHarpNote(note));
+			takeFromTail(pool, note -> note.effect() == null && isHarpNote(note));
 		}
-		int inboundNotes = Math.max(0, rest.size() - 2);
+		int inboundNotes = Math.max(0,
+			pool.size() - Math.min(2 * room, pool.size()) - 2);
 		return room + 1 + Math.max(1, (inboundNotes + 1) / 2);
 	}
 
@@ -12335,17 +12335,22 @@ public final class SongBuilder {
 		// shared with other lanes' flanks, and a note the run cannot hang would fold down and
 		// could push the folded run past its wire.
 		List<EventNote> pool = new ArrayList<>(busOrder(notes));
+		// The head's harps come out of the whole pool, before the wall-bound run is served. The
+		// head's cells cost no columns, so a harp moved into it can only shorten the folded
+		// tail, never lengthen anything -- where the chord has no surplus over the wall run,
+		// the run simply carries fewer and its bare cells still reach the wall. Taken from the
+		// rest instead, the harps all rode the wall run and the head stood empty.
+		EventNote centre = takeFromTail(pool,
+			note -> note.effect() == null && isHarpNote(note));
+		EventNote sideA = railSlotTakes(placements, centreAt.relative(side), time)
+			? takeFromTail(pool, note -> note.effect() == null && isHarpNote(note)) : null;
+		EventNote sideB = railSlotTakes(placements, centreAt.relative(side.getOpposite()), time)
+			? takeFromTail(pool, note -> note.effect() == null && isHarpNote(note)) : null;
 		int wallFree = foldbackRunSlotsFree(placements, opens.pos().relative(travel).below(),
 			travel, side, room, 1, 2, 1, 0, time);
 		List<EventNote> wallward = new ArrayList<>(
 			pool.subList(0, Math.min(wallFree, pool.size())));
 		List<EventNote> rest = new ArrayList<>(pool.subList(wallward.size(), pool.size()));
-		EventNote centre = takeFromTail(rest,
-			note -> note.effect() == null && isHarpNote(note));
-		EventNote sideA = railSlotTakes(placements, centreAt.relative(side), time)
-			? takeFromTail(rest, note -> note.effect() == null && isHarpNote(note)) : null;
-		EventNote sideB = railSlotTakes(placements, centreAt.relative(side.getOpposite()), time)
-			? takeFromTail(rest, note -> note.effect() == null && isHarpNote(note)) : null;
 		List<EventNote> stepdown = new ArrayList<>(rest.subList(0, Math.min(2, rest.size())));
 		List<EventNote> inbound = new ArrayList<>(rest.subList(stepdown.size(), rest.size()));
 		// The run below, and the cell the next module opens on after it, both inside the far
