@@ -1526,17 +1526,6 @@ public final class ComposerScreen extends Screen {
 		return "1/4";
 	}
 
-	private void cycleSnap() {
-		int at = 0;
-		for (int index = 0; index < SNAP_CHOICES.length; index++) {
-			if (SNAP_CHOICES[index] == snapSubdivision) {
-				at = index;
-				break;
-			}
-		}
-		setSnap(SNAP_CHOICES[(at + 1) % SNAP_CHOICES.length]);
-	}
-
 	private void setSnap(int subdivision) {
 		snapSubdivision = subdivision;
 		snapMenuOpen = false;
@@ -7324,9 +7313,9 @@ public final class ComposerScreen extends Screen {
 
 	/**
 	 * What one grid step is worth in repeater ticks moves with the tempo and with the speed slider,
-	 * so the label has to be rebuilt on every edit rather than only when the snap is cycled. It used
-	 * to be set in two places -- the constructor and cycleSnap -- which is exactly the pair that
-	 * misses a speed change, and a stale number here is worse than none.
+	 * so the label has to be rebuilt on every edit rather than only when the snap changes. It used
+	 * to be set in two places -- once where the screen is built and once where the setting moves --
+	 * which is exactly the pair that misses a speed change, and a stale number is worse than none.
 	 */
 	/**
 	 * The tempo the song is written at, the speed it is being played at, and what that comes to.
