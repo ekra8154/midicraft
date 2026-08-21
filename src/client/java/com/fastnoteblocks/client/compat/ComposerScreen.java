@@ -4008,9 +4008,22 @@ public final class ComposerScreen extends Screen {
 		long lastTick = horizontalScroll + (long)Math.ceil(rollWidth * ticksPerPixel);
 		long measureTicks = Math.max(1L, project().ppq() * 4L);
 
+		// The roll carries two grids that mean different things. One is the music: bars and beats,
+		// counted off the song's own resolution, which is what a phrase is written against. The
+		// other is the snap, and on a redstone setting that is real time -- where a build can
+		// actually put a note -- which lands wherever it lands with respect to the beat.
+		//
+		// Both at full strength is a haze. Two sets of lines at spacings that share no common
+		// factor read as one set at neither, which is the opposite of the reason to show the second
+		// one. So a redstone snap drops the beats and keeps the bars: the music stays readable at
+		// the grain a bar number is written at, and the machine grid is the only fine one on screen.
+		boolean redstoneSnap = snapSubdivision == SNAP_REPEATER || snapSubdivision == SNAP_GAME_TICK;
+
 		// Bars and beats are drawn whatever the snap is set to, so their step is settled first: the
 		// snap pass has to know which of its lines it must leave alone.
-		long beatTicks = readableStep(Math.max(1L, project().ppq()), measureTicks);
+		long beatTicks = redstoneSnap
+			? measureTicks
+			: readableStep(Math.max(1L, project().ppq()), measureTicks);
 		boolean showLabels = measureTicks / ticksPerPixel >= MIN_LABEL_PIXEL_SPACING;
 
 		// The snap grid first and dimmest, so bars and beats drawn over it win wherever they land on
@@ -4022,16 +4035,26 @@ public final class ComposerScreen extends Screen {
 		// colours are part transparent, so drawing both composites them: every beat and bar on a
 		// musical snap would come out darker than it does today, which is a difference nobody asked
 		// for in the one case where none of this was supposed to change anything.
+
+		// A wider floor for the redstone grids. Four pixels apart is fine for a grid that lines up
+		// with the beats either side of it and a moire pattern for one that does not, so the
+		// machine grid doubles its step one notch sooner as you zoom out rather than filling in.
+		int snapFloor = redstoneSnap ? MIN_GRID_PIXEL_SPACING * 2 : MIN_GRID_PIXEL_SPACING;
 		double snapSpan = readableSpan(snapSubdivision == 0
 			? Math.max(1.0, project().ppq() / 4.0)
-			: gridSpan());
-		if (snapSpan / ticksPerPixel >= MIN_GRID_PIXEL_SPACING) {
+			: gridSpan(), snapFloor);
+		// Its own colour when it is the machine's grid rather than the music's, so that two sets of
+		// lines on the same roll read as two things. Cooler and a shade stronger than the musical
+		// grey: it is the one you chose to look at, and it is the one you cannot work out from the
+		// bar numbers.
+		int snapColor = redstoneSnap ? 0x3C2E4756 : 0x242F343A;
+		if (snapSpan / ticksPerPixel >= snapFloor) {
 			for (long index = (long)Math.floor(horizontalScroll / snapSpan);
 					gridLineAt(index, snapSpan) <= lastTick + snapSpan; index++) {
 				long line = gridLineAt(index, snapSpan);
 				int x = tickX(line);
 				if (x >= rollX && x <= rollX + rollWidth && line % beatTicks != 0L) {
-					graphics.fill(x, rollY, x + 1, rollY + rollHeight, 0x242F343A);
+					graphics.fill(x, rollY, x + 1, rollY + rollHeight, snapColor);
 				}
 			}
 		}
@@ -4104,8 +4127,13 @@ public final class ComposerScreen extends Screen {
 	 * far enough there is nothing worth drawing and the caller stops.</p>
 	 */
 	private double readableSpan(double span) {
+		return readableSpan(span, MIN_GRID_PIXEL_SPACING);
+	}
+
+	/** The same, for a grid that wants more room between its lines than the musical one does. */
+	private double readableSpan(double span, int floorPixels) {
 		double step = Math.max(1.0, span);
-		while (step / ticksPerPixel < MIN_GRID_PIXEL_SPACING && step < Long.MAX_VALUE / 4) {
+		while (step / ticksPerPixel < floorPixels && step < Long.MAX_VALUE / 4) {
 			step *= 2.0;
 		}
 		return step;
