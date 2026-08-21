@@ -666,6 +666,11 @@ public final class SettingsScreen extends Screen {
 				// whatever that composition came from, and it applies to a song scanned out of the
 				// world exactly as it does to an imported MIDI. Filing these two under MIDI Import
 				// is how the quantize grid spent this long being taken for something import does.
+				//
+				// The heading is the button's own words, and it holds exactly the settings the
+				// button reads -- all three of them, and nothing else. A group named for an action
+				// is a claim about what that action consults, so the one row under it that Convert
+				// never looks at was making the same mistake one heading further on.
 				entries.add(Entry.heading("display"));
 				entries.add(Entry.of(stepper("composer_gui_scale",
 					FastNoteblocksConfig.MIN_COMPOSER_GUI_SCALE,
@@ -688,6 +693,12 @@ public final class SettingsScreen extends Screen {
 					FastNoteblocksConfig::repeatMergeTicks, config::setRepeatMergeTicks,
 					value -> value <= FastNoteblocksConfig.MIN_REPEAT_MERGE_TICKS
 						? "off (keep all)" : ticks(value))));
+				// Next to Convert but not under it. The two are reached for at the same moment --
+				// both answer "why will this song not build" -- and the row was filed with them for
+				// that reason. But Convert never reads it: it belongs to Select > Overloaded chords
+				// and to nothing else, and a heading naming a button is a claim about what that
+				// button consults.
+				entries.add(Entry.heading("chord_thinning"));
 				entries.add(Entry.of(slider("chord_thin_target",
 					FastNoteblocksConfig.MIN_CHORD_THIN_TARGET,
 					FastNoteblocksConfig.MAX_CHORD_THIN_TARGET,
