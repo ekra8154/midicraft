@@ -30,9 +30,11 @@ class WallDescentProbe {
 		boolean names = SongBuilder.NAME_EVERY_CELL;
 		SongBuilder.NAME_EVERY_CELL = true;
 		try {
-			String name = System.getProperty("wall.song", "guardian25");
-			int width = Integer.parseInt(System.getProperty("wall.width", "20"));
-			int floors = Integer.parseInt(System.getProperty("wall.floors", "5"));
+			// probe.* because only the fault., census. and probe. prefixes reach the test JVM;
+			// the wall.* names this first shipped with silently ran the defaults every time.
+			String name = System.getProperty("probe.song", "guardian25");
+			int width = Integer.parseInt(System.getProperty("probe.width", "20"));
+			int floors = Integer.parseInt(System.getProperty("probe.floors", "5"));
 			java.nio.file.Path file = java.nio.file.Path.of("run", "config", "fast-noteblocks",
 				"songs", name + ".json");
 			ComposerProject raw;
