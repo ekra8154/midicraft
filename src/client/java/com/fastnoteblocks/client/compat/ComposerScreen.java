@@ -599,6 +599,8 @@ public final class ComposerScreen extends Screen {
 	private double layerDragStartY;
 	private double layerDragY;
 	private boolean layerDragActive;
+	/** Whether the release of this press should still collapse a held-together multi-row selection. */
+	private boolean layerDragCollapse;
 
 	public ComposerScreen(Screen parent, FastNoteblocksConfig config) {
 		this(parent, config, () -> {
@@ -636,7 +638,7 @@ public final class ComposerScreen extends Screen {
 	@Override
 	protected void init() {
 		clearWidgets();
-		rollY = TOOLBAR_HEIGHT + 14 + TIMELINE_RULER_HEIGHT;
+		rollY = TOOLBAR_HEIGHT + TIMELINE_RULER_HEIGHT;
 		rollHeight = Math.max(40, height - rollY - 24);
 		centerMinecraftRange();
 		// The menus are drawn, not built: see extractMenuBar. Only the three controls are widgets,
@@ -722,22 +724,24 @@ public final class ComposerScreen extends Screen {
 		// Pinned to the bottom of the panel: with up to MAX_LAYERS rows the list scrolls, so this
 		// must not ride along with the last row or it drifts off screen.
 		int y = layerListBottom() + 4;
+		// An empty layer, always. This used to move whatever notes were selected into the new layer,
+		// which reads as a cut nobody asked for: a selection outlives the copy that was made from
+		// it, so copying a phrase and then adding a layer to paste it into took the phrase out of
+		// the layer it was copied from. Adding a layer is one thing and moving notes is another,
+		// and the second one now has to be asked for -- from a row's own menu, or Ctrl+1..0.
 		addLayerButton = addRenderableWidget(Button.builder(Component.literal("+ Layer"), button -> {
 			if (project().layers().size() < ComposerProject.MAX_LAYERS) {
 				ComposerProject added = project().addLayer();
-				int newLayer = added.layers().size() - 1;
-				if (!selectedNotes.isEmpty()) {
-					added = added.moveNotesToLayer(selectedNotes, newLayer);
-				}
-				apply(selectedNotes.isEmpty() ? "add layer" : "add layer for the selection", added);
-				selectOnlyLayer(newLayer);
+				apply("add layer", added);
+				selectOnlyLayer(added.layers().size() - 1);
 				layersChanged();
 				rebuildMoveLayerButtons();
 			}
 		}).bounds(8, y, layerPanelWidth() - 16, 18)
 			.tooltip(Tooltip.create(Component.literal(
-				"Add a layer and move the current selection into it (maximum "
-					+ ComposerProject.MAX_LAYERS + ")"
+				"Add an empty layer (maximum " + ComposerProject.MAX_LAYERS + ").\n"
+					+ "Nothing selected is moved into it: to do that, right-click the new row and "
+					+ "pick \"Move selected notes here\", or press Ctrl+1..0."
 			)))
 			.build());
 		moveLayerButtons.add(addLayerButton);
@@ -965,21 +969,40 @@ public final class ComposerScreen extends Screen {
 			: project().activeLayerIndex();
 	}
 
-	/** Copies the layer the menu was opened on, and moves onto the copy. */
-	private void duplicateLayer(int source) {
-		ComposerProject copied = project().duplicateLayer(source);
+	/**
+	 * Copies the layer the menu was opened on -- or every selected layer, if it is one of them --
+	 * and moves onto the copies.
+	 *
+	 * <p>Each copy goes directly after the layer it came from, so duplicating three parts of an
+	 * arrangement leaves the pairs read together rather than the copies stacked at the bottom in an
+	 * order nobody chose.</p>
+	 */
+	private void duplicateLayers(int source) {
+		List<Integer> sources = layersToEdit(source);
+		ComposerProject copied = project().duplicateLayers(Set.copyOf(sources));
 		if (copied.equals(project())) {
-			showResult(Component.literal("No room for another layer - "
-				+ ComposerProject.MAX_LAYERS + " is the limit."));
+			showResult(Component.literal("No room for " + (sources.size() == 1 ? "another layer"
+				: sources.size() + " more layers") + " - " + ComposerProject.MAX_LAYERS
+				+ " is the limit."));
 			return;
 		}
-		apply("duplicate layer " + (source + 1), copied);
-		// Onto the copy, not the original: a duplicate is made in order to change it.
-		selectOnlyLayer(source + 1);
+		int notes = sources.stream()
+			.mapToInt(index -> project().layers().get(index).notes().size()).sum();
+		String only = sources.size() == 1
+			? " \"" + project().layers().get(sources.getFirst()).name() + "\"" : "";
+		apply(sources.size() == 1 ? "duplicate layer " + (sources.getFirst() + 1)
+			: "duplicate " + sources.size() + " layers", copied);
+		// Onto the copies, not the originals: a duplicate is made in order to change it. The kth
+		// copy lands one past its source plus the k copies already inserted above it.
+		selectedLayers.clear();
+		for (int rank = 0; rank < sources.size(); rank++) {
+			selectedLayers.add(sources.get(rank) + rank + 1);
+		}
 		layersChanged();
 		rebuildMoveLayerButtons();
-		showResult(Component.literal("Duplicated \"" + project().layers().get(source).name() + "\" - "
-			+ project().layers().get(source + 1).notes().size() + " notes. The copy is selected."));
+		showResult(Component.literal("Duplicated " + layerCountLabel(sources.size()) + only + " - "
+			+ notes + " notes. The " + (sources.size() == 1 ? "copy is" : "copies are")
+			+ " selected."));
 	}
 
 	private void mergeSelectedLayers() {
@@ -1099,24 +1122,78 @@ public final class ComposerScreen extends Screen {
 		rebuildMoveLayerButtons();
 	}
 
-	private void moveLayer(int layerIndex, int direction) {
-		if (layerIndex < 0 || layerIndex >= project().layers().size() || direction == 0) {
+	/**
+	 * Steps the clicked layer, or the whole selection it belongs to, one row up or down.
+	 *
+	 * <p>The selection moves as a block: the gap it is aimed at is one past the end it is heading
+	 * for, so three rows with something unselected between them arrive together rather than each
+	 * hopping its own neighbour.</p>
+	 */
+	private void moveLayers(int clickedIndex, int direction) {
+		if (clickedIndex < 0 || clickedIndex >= project().layers().size() || direction == 0) {
+			return;
+		}
+		List<Integer> moving = layersToEdit(clickedIndex);
+		int first = moving.stream().mapToInt(Integer::intValue).min().orElse(clickedIndex);
+		int last = moving.stream().mapToInt(Integer::intValue).max().orElse(clickedIndex);
+		reorderLayers(moving, direction < 0 ? first - 1 : last + 2);
+	}
+
+	/**
+	 * Drops dragged layers into a gap.
+	 *
+	 * <p>{@code insertion} counts gaps, not rows, so dropping below where the block started lands
+	 * one row short of it once the block itself is out of the list -- which is arithmetic
+	 * {@link ComposerProject#layerOrderAfterMove} does, since it is the only thing that knows how
+	 * many of the moving rows were above the gap.</p>
+	 */
+	private void dropLayers(int from, int insertion) {
+		reorderLayers(layersToEdit(from), insertion);
+	}
+
+	/**
+	 * Rearranges the layers and carries every set of layer positions along with them.
+	 *
+	 * <p>Three things are held by position, not by identity: the composition's active layer, the
+	 * panel's selection and which layers are soloed. A reorder that renumbers only the first leaves
+	 * the other two pointing at whatever slid into the vacated rows -- so a drag would move the row
+	 * and leave the tick on the one below it, and could silence a part nobody touched.</p>
+	 */
+	private void reorderLayers(List<Integer> moving, int insertion) {
+		if (moving.isEmpty()) {
+			return;
+		}
+		List<Integer> order = project().layerOrderAfterMove(Set.copyOf(moving), insertion);
+		boolean unchanged = true;
+		for (int index = 0; index < order.size(); index++) {
+			unchanged &= order.get(index) == index;
+		}
+		if (unchanged) {
 			return;
 		}
 		instrumentMenuLayer = -1;
 		cancelLayerRename();
-		apply("reorder layers", project().moveLayer(layerIndex, direction));
+		apply(moving.size() == 1 ? "reorder layers" : "reorder " + moving.size() + " layers",
+			project().withLayerOrder(order));
+		int[] moved = new int[order.size()];
+		for (int placed = 0; placed < order.size(); placed++) {
+			moved[order.get(placed)] = placed;
+		}
+		remapLayerPositions(selectedLayers, moved);
+		remapLayerPositions(soloedLayers, moved);
 		layersChanged();
+		rebuildMoveLayerButtons();
 	}
 
-	/**
-	 * Drops a dragged layer into a gap.
-	 *
-	 * <p>{@code insertion} counts gaps, not rows, so dropping below where the layer started lands
-	 * one row short of it once the layer itself is out of the list.</p>
-	 */
-	private void dropLayer(int from, int insertion) {
-		moveLayer(from, (insertion > from ? insertion - 1 : insertion) - from);
+	/** Renumbers a set of layer positions through {@code moved}, old position to new. */
+	private static void remapLayerPositions(Set<Integer> positions, int[] moved) {
+		List<Integer> renumbered = positions.stream()
+			.filter(index -> index >= 0 && index < moved.length)
+			.map(index -> moved[index])
+			.sorted()
+			.toList();
+		positions.clear();
+		positions.addAll(renumbered);
 	}
 
 	private void transposeSelected(int semitones) {
@@ -1234,12 +1311,22 @@ public final class ComposerScreen extends Screen {
 				+ (conversion.duplicateLayers() > 0
 					? ", " + conversion.duplicateLayers() + " duplicate layers dropped ("
 						+ conversion.duplicateLayerNotes() + " notes)" : "");
+			// Every tempo change says by how much. Aligning to the repeater grid moves the tempo to
+			// whichever side is nearest, so a conversion speeds a song up about as often as it slows
+			// one down -- but only the slowdown ever carried a number, and the speed-up was reported
+			// as "tempo aligned to repeaters", which does not say that the song now plays faster,
+			// let alone by how much.
+			String tempoMove = tempoMove(source, conversion);
 			if (conversion.slowedDown()) {
 				report += String.format(java.util.Locale.ROOT,
-					", SLOWED %.2fx - song is faster than redstone can play (max 10 notes/sec)",
-					conversion.tempoFactor());
+					", SLOWED %.2fx%s - song is faster than redstone can play (max 10 notes/sec)",
+					conversion.tempoFactor(), tempoMove);
+			} else if (conversion.spedUp()) {
+				report += String.format(java.util.Locale.ROOT,
+					", SPED UP %.2fx%s - tempo aligned to repeaters",
+					conversion.speedFactor(), tempoMove);
 			} else if (conversion.tempoChanged()) {
-				report += ", tempo aligned to repeaters";
+				report += ", tempo aligned to repeaters" + tempoMove;
 			}
 			showResult(Component.literal(report));
 		} catch (IllegalStateException exception) {
@@ -1248,6 +1335,23 @@ public final class ComposerScreen extends Screen {
 				Component.literal(exception.getMessage()),
 				CommonComponents.GUI_BACK, CommonComponents.GUI_CANCEL));
 		}
+	}
+
+	/**
+	 * " (120 -> 150 BPM)", the tempo move a conversion made, or "" when it made none.
+	 *
+	 * <p>A factor says how far the song moved and a BPM pair says where it moved to, and the second
+	 * is the one you can act on: it is the number the source file was written in and the number the
+	 * next thing you do to this song will be working against.</p>
+	 */
+	private static String tempoMove(ComposerProject source, MinecraftConversion conversion) {
+		int before = source.tempoMicrosPerQuarter();
+		int after = conversion.project().tempoMicrosPerQuarter();
+		if (before == after) {
+			return "";
+		}
+		return String.format(java.util.Locale.ROOT, " (%.0f -> %.0f BPM)",
+			60_000_000.0 / before, 60_000_000.0 / after);
 	}
 
 	private int minecraftConversionGridTicks(ComposerProject source) {
@@ -1398,7 +1502,7 @@ public final class ComposerScreen extends Screen {
 		long frameStart = profiling ? System.nanoTime() : 0L;
 		updatePlayback();
 		rollX = layerPanelWidth() + PIANO_WIDTH;
-		rollY = TOOLBAR_HEIGHT + 14 + TIMELINE_RULER_HEIGHT;
+		rollY = TOOLBAR_HEIGHT + TIMELINE_RULER_HEIGHT;
 		rollWidth = Math.max(40, width - rollX - 8);
 		rollHeight = Math.max(40, height - rollY - 24);
 		long mark = frameStart;
@@ -1534,7 +1638,13 @@ public final class ComposerScreen extends Screen {
 
 	private String layerActionLabel(LayerAction action) {
 		int selected = selectedLayers.size();
+		int acting = layersToEdit(menuRow()).size();
 		return switch (action) {
+			case DUPLICATE -> acting == 1 ? action.label : "Duplicate " + acting + " layers";
+			case MOVE_UP -> acting == 1 ? action.label : "Move " + acting + " layers up";
+			case MOVE_DOWN -> acting == 1 ? action.label : "Move " + acting + " layers down";
+			case MOVE_NOTES_HERE -> "Move " + selectedNotes.size()
+				+ (selectedNotes.size() == 1 ? " note here" : " notes here");
 			case MERGE_SELECTED -> "Merge " + selected + " layers (Ctrl+E)";
 			case DELETE_SELECTED -> "Delete " + layerCountLabel(Math.max(1, selected));
 			case INCLUDE_SELECTED -> "Include " + layerCountLabel(Math.max(1, selected)) + " in sequence";
@@ -1562,7 +1672,15 @@ public final class ComposerScreen extends Screen {
 			// anything to pull forward" without having to click it and read the result.
 			case SNAP_TO_START -> project().firstNoteTick(Set.copyOf(selectedLayers)) > 0L;
 			case RENAME, SELECT_ALL -> true;
-			case DUPLICATE -> project().layers().size() < ComposerProject.MAX_LAYERS;
+			case DUPLICATE -> project().layers().size() + layersToEdit(menuRow()).size()
+				<= ComposerProject.MAX_LAYERS;
+			// Greyed out at the ends of the list, where the step has nowhere to land -- and the ends
+			// are the ends of the block, since a selection moves as one.
+			case MOVE_UP -> layersToEdit(menuRow()).stream().mapToInt(Integer::intValue).min()
+				.orElse(0) > 0;
+			case MOVE_DOWN -> layersToEdit(menuRow()).stream().mapToInt(Integer::intValue).max()
+				.orElse(0) < project().layers().size() - 1;
+			case MOVE_NOTES_HERE -> !selectedNotes.isEmpty();
 		};
 	}
 
@@ -1582,7 +1700,10 @@ public final class ComposerScreen extends Screen {
 		layerMenuOpen = false;
 		switch (action) {
 			case RENAME -> beginLayerRename(menuRow());
-			case DUPLICATE -> duplicateLayer(menuRow());
+			case DUPLICATE -> duplicateLayers(menuRow());
+			case MOVE_UP -> moveLayers(menuRow(), -1);
+			case MOVE_DOWN -> moveLayers(menuRow(), 1);
+			case MOVE_NOTES_HERE -> moveSelectionToLayer(menuRow());
 			case MERGE_SELECTED -> mergeSelectedLayers();
 			case SNAP_TO_START -> snapSelectedLayersToStart();
 			case DELETE_SELECTED -> deleteSelectedLayers();
@@ -2382,7 +2503,15 @@ public final class ComposerScreen extends Screen {
 			case RENAME -> "Renames this layer. Double-clicking its name does the same thing.";
 			case DUPLICATE -> "Copies this layer, notes and all, into a new one directly below it, "
 				+ "and selects the copy. The usual reason is to double a part on a second instrument, "
-				+ "so the copy is where the change goes.";
+				+ "so the copy is where the change goes. With several layers selected it copies all "
+				+ "of them, each copy under its own original.";
+			case MOVE_UP -> "Moves this layer one row up. With several selected they move together "
+				+ "as a block, keeping their order. Dragging a row by its name does the same thing.";
+			case MOVE_DOWN -> "Moves this layer one row down. With several selected they move "
+				+ "together as a block, keeping their order.";
+			case MOVE_NOTES_HERE -> "Moves the notes selected in the roll onto this layer, out of "
+				+ "whichever layers they are on now. Ctrl+1 to Ctrl+0 do the same for the first ten "
+				+ "layers.";
 			case MERGE_SELECTED -> "Folds the selected layers into the lowest-numbered one, which "
 				+ "keeps its name and instrument -- so merging across two instruments gives every "
 				+ "note the surviving one. Ctrl+E does the same thing.";
@@ -4075,7 +4204,16 @@ public final class ComposerScreen extends Screen {
 		if (event.button() == 0) {
 			int layerIndex = layerHeaderAt(event.x(), event.y());
 			if (layerIndex >= 0) {
-				selectLayer(layerIndex, controlDown(), shiftDown());
+				// A plain press on a row that is already one of several selected does not collapse
+				// the selection yet. It used to, which made a multi-row selection impossible to
+				// reorder: the press that should have picked up four layers put three of them down
+				// first, and the drag that followed carried one. The collapse is deferred to the
+				// release and only happens if the hand never moved.
+				boolean holding = selectedLayers.size() > 1 && selectedLayers.contains(layerIndex)
+					&& !controlDown() && !shiftDown();
+				if (!holding) {
+					selectLayer(layerIndex, controlDown(), shiftDown());
+				}
 				selectedNotes.clear();
 				// Armed, not started. A press on a header is nearly always a plain selection, so the
 				// reorder only takes over once the cursor has actually left the row it started on.
@@ -4083,6 +4221,7 @@ public final class ComposerScreen extends Screen {
 				layerDragStartY = event.y();
 				layerDragY = event.y();
 				layerDragActive = false;
+				layerDragCollapse = holding;
 				return true;
 			}
 		}
@@ -4512,10 +4651,18 @@ public final class ComposerScreen extends Screen {
 		if (layerDragIndex >= 0) {
 			int from = layerDragIndex;
 			boolean reordering = layerDragActive;
+			boolean collapse = layerDragCollapse;
 			layerDragIndex = -1;
 			layerDragActive = false;
+			layerDragCollapse = false;
 			if (reordering) {
-				dropLayer(from, layerDropIndex(event.y()));
+				dropLayers(from, layerDropIndex(event.y()));
+				return true;
+			}
+			if (collapse) {
+				// The press held the selection together in case this became a drag. It did not, so
+				// it was a plain click after all and means what a plain click means.
+				selectLayer(from, false, false);
 				return true;
 			}
 		}
@@ -6483,6 +6630,9 @@ public final class ComposerScreen extends Screen {
 	private enum LayerAction {
 		RENAME("Rename layer..."),
 		DUPLICATE("Duplicate layer"),
+		MOVE_UP("Move up"),
+		MOVE_DOWN("Move down"),
+		MOVE_NOTES_HERE("Move selected notes here"),
 		MERGE_SELECTED("Merge selected"),
 		SNAP_TO_START("Snap to song start"),
 		INCLUDE_SELECTED("Include selected layers in sequence"),

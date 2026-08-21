@@ -254,6 +254,29 @@ public record ComposerProject(
 		public boolean slowedDown() {
 			return tempoFactor > 1.01;
 		}
+
+		/**
+		 * Whether the converted song plays faster than the source did.
+		 *
+		 * <p>Aligning to the repeater grid moves the tempo in whichever direction is nearest, so
+		 * conversion speeds a song up about as often as it slows one down. Only the slowdown used
+		 * to be reported, which left the other half of the same event saying nothing more than
+		 * "tempo aligned" -- true, and no help at all to anyone wondering why the song they knew
+		 * now runs ahead of them.</p>
+		 */
+		public boolean spedUp() {
+			return tempoFactor < 0.99;
+		}
+
+		/**
+		 * How many times faster the converted song plays, the reciprocal of the tempo factor.
+		 *
+		 * <p>Tempo here is microseconds per quarter, so a smaller number is a faster song and the
+		 * raw factor reads backwards for a speed-up.</p>
+		 */
+		public double speedFactor() {
+			return tempoFactor <= 0.0 ? 1.0 : 1.0 / tempoFactor;
+		}
 	}
 
 	public static ComposerProject empty(String name) {
@@ -584,6 +607,111 @@ public record ComposerProject(
 			active++;
 		}
 		return with(updated, active, nextNoteId);
+	}
+
+	/**
+	 * Where every layer ends up if the given ones are lifted out and dropped into {@code insertion},
+	 * as a list of the positions they held before the move.
+	 *
+	 * <p>Handed back rather than kept inside {@link #moveLayersTo} because the screen holds two more
+	 * sets of layer positions -- which rows are selected and which are soloed -- and a reorder that
+	 * renumbers the layers without renumbering those leaves both of them pointing at whatever slid
+	 * into the vacated row.</p>
+	 *
+	 * <p>{@code insertion} counts the gaps between rows as they stand now, so it runs from zero to
+	 * the layer count and a block dropped below where it started lands short of that gap once the
+	 * block itself is out of the list.</p>
+	 */
+	public List<Integer> layerOrderAfterMove(Set<Integer> layerIndices, int insertion) {
+		List<Integer> unchanged = new ArrayList<>();
+		for (int index = 0; index < layers.size(); index++) {
+			unchanged.add(index);
+		}
+		if (layerIndices == null || layerIndices.isEmpty() || layers.size() <= 1) {
+			return unchanged;
+		}
+		List<Integer> moving = layerIndices.stream()
+			.filter(index -> index >= 0 && index < layers.size())
+			.distinct()
+			.sorted()
+			.toList();
+		if (moving.isEmpty() || moving.size() == layers.size()) {
+			return unchanged;
+		}
+		int gap = Math.max(0, Math.min(layers.size(), insertion));
+		List<Integer> order = new ArrayList<>();
+		for (int index = 0; index < layers.size(); index++) {
+			if (!moving.contains(index)) {
+				order.add(index);
+			}
+		}
+		int landing = gap - (int)moving.stream().filter(index -> index < gap).count();
+		order.addAll(Math.max(0, Math.min(order.size(), landing)), moving);
+		return order;
+	}
+
+	/**
+	 * Lifts the given layers out and drops them into one gap, keeping their order among themselves.
+	 *
+	 * <p>A selection reorders as a block. Moving them one at a time would be a different operation
+	 * -- three layers each stepping up one past whatever is above them turns them inside out the
+	 * moment anything unselected is between them -- and the reason to select several is that they
+	 * belong together.</p>
+	 */
+	public ComposerProject moveLayersTo(Set<Integer> layerIndices, int insertion) {
+		return withLayerOrder(layerOrderAfterMove(layerIndices, insertion));
+	}
+
+	/** Rearranges the layers into {@code order}, a permutation of their current positions. */
+	public ComposerProject withLayerOrder(List<Integer> order) {
+		if (order == null || order.size() != layers.size()) {
+			return this;
+		}
+		List<Layer> updated = new ArrayList<>(order.size());
+		for (int index : order) {
+			if (index < 0 || index >= layers.size()) {
+				return this;
+			}
+			updated.add(layers.get(index));
+		}
+		int active = order.indexOf(activeLayerIndex);
+		return with(updated, active < 0 ? activeLayerIndex : active, nextNoteId);
+	}
+
+	/**
+	 * Copies every given layer, each copy directly after the layer it came from.
+	 *
+	 * <p>All or nothing against the layer cap: half a duplication is a song with some parts doubled
+	 * and some not, which is harder to undo by hand than it is to not do.</p>
+	 */
+	public ComposerProject duplicateLayers(Set<Integer> layerIndices) {
+		if (layerIndices == null || layerIndices.isEmpty()) {
+			return this;
+		}
+		List<Integer> sources = layerIndices.stream()
+			.filter(index -> index >= 0 && index < layers.size())
+			.distinct()
+			.sorted()
+			.toList();
+		if (sources.isEmpty() || layers.size() + sources.size() > MAX_LAYERS) {
+			return this;
+		}
+		long nextId = nextNoteId;
+		List<Layer> updated = new ArrayList<>(layers.size() + sources.size());
+		for (int index = 0; index < layers.size(); index++) {
+			Layer source = layers.get(index);
+			updated.add(source);
+			if (!sources.contains(index)) {
+				continue;
+			}
+			List<NoteEvent> copied = new ArrayList<>(source.notes().size());
+			for (NoteEvent note : source.notes()) {
+				copied.add(new NoteEvent(nextId++, note.midiNote(), note.startTick(),
+					note.durationTicks(), note.velocity()));
+			}
+			updated.add(source.withName(source.name() + " copy").withNotes(copied));
+		}
+		return with(updated, sources.getFirst() + 1, nextId);
 	}
 
 	/**
