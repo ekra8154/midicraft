@@ -12417,7 +12417,13 @@ public final class SongBuilder {
 		// cannot turn after itself, and on a gap-one song there is no wait to buy the pad that
 		// would. Traced on a chord of 26 at a room of 14 -- thirteen cells, gate said "fits",
 		// the headed cut clashed, and the two chords after it walked out six past the wall.
-		return FOLDBACK_CUTS && room >= 1
+		// A room of nought is a fold too. The repeater stands on the wall column itself and the
+		// conductor one further, in the column of x a turn is allowed past it -- which is all
+		// the shape needs, because everything else it lays is underneath: the catch beneath the
+		// conductor, and the tail folding back below that. Held to a room of one until in-game
+		// reading found a chord walking out of a wall it could have folded at.
+		return FOLDBACK_CUTS
+			&& room >= (climbing || !FOLDBACK_AT_ROOM_NOUGHT ? 1 : 0)
 			&& room - 1 <= (chord.size() + 1) / 2
 			&& chord.size() >= FOLDBACK_ABOVE_NOTES;
 	}
@@ -18469,6 +18475,25 @@ public final class SongBuilder {
 	 * after those refuse a falling instrument. See {@link #rungTakes} for what the geometry
 	 * makes of each; the numbers are the ones in-game testing states.
 	 */
+	/**
+	 * Whether a descent folds at a room of nought -- its repeater on the wall column itself and
+	 * its conductor in the one column of x a turn is allowed past it.
+	 *
+	 * <p>Everything else the shape lays is underneath: the catch beneath the conductor, and the
+	 * tail folding back below that. So the wall column is enough, and a chord arriving there was
+	 * walking out of a wall it could have folded at -- in-game reading, guardian26 at eighteen
+	 * wide over four floors.</p>
+	 *
+	 * <p><b>Descents only, and the climbs are the reason.</b> A climb folds back <em>over</em> its
+	 * own repeater, so at a room of nought its staircase stands in the turn column and hangs its
+	 * notes in the flank rows either side of it -- which is where the next corridor's staircase
+	 * comes down. The walk cannot ask about that ground: the lane alongside has not been built
+	 * yet. Measured, it is 25 notes over the library re-sounded by a neighbouring descent at its
+	 * own tick. A descent's fold goes the other way, back under the repeater and away from the
+	 * turn, and reads back clean.</p>
+	 */
+	static boolean FOLDBACK_AT_ROOM_NOUGHT = true;
+
 	private static final int FOLDBACK_RUNG_HARPS = 1;
 
 	private static final int FOLDBACK_RUNG_NO_FALLING = 1;
@@ -18492,7 +18517,9 @@ public final class SongBuilder {
 
 	/** Columns of wall-bound run a foldback may lay: the room, and the turn's column with it. */
 	private static int foldbackWallCells(int room) {
-		return FOLDBACK_RUNS_PAST_THE_WALL ? room + 1 : room;
+		// Never nought: the first cell of that run carries the catch, and a fold with no catch
+		// is a fold with nothing to fold. At a room of nought it is the only cell there is.
+		return Math.max(1, FOLDBACK_RUNS_PAST_THE_WALL ? room + 1 : room);
 	}
 
 	/**
