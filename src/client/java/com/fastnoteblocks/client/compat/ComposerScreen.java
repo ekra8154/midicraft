@@ -470,6 +470,17 @@ public final class ComposerScreen extends Screen {
 	private double dragStartY;
 	private double selectionEndX;
 	private double selectionEndY;
+	/**
+	 * Where a box select began, in the song rather than on the screen.
+	 *
+	 * <p>A box is drawn over a view that moves. Held as pixels, its far corner stayed where it was
+	 * put on the glass while the song slid past underneath -- so scrolling or zooming mid-drag left
+	 * a box that had stopped describing any passage at all, and the notes it took were whatever
+	 * happened to be under a rectangle nobody had drawn. A tick and a pitch survive all four things
+	 * the view can do: scroll either way, and zoom either way.</p>
+	 */
+	private double boxOriginTick;
+	private double boxOriginMidi;
 	private ComposerProject dragBase;
 	private ComposerProject dragPreview;
 	private long dragTickDelta;
@@ -2036,7 +2047,7 @@ public final class ComposerScreen extends Screen {
 			case SELECT_OUT_OF_RANGE -> projectStats().outOfRange() > 0;
 			case SELECT_OVERLOADED_CHORDS -> projectStats().overloadedTicks() > 0
 				|| projectStats().peakChord() > config.chordThinTarget();
-			case SELECT_NONE -> !selectedNotes.isEmpty();
+			case SELECT_NONE -> !selectedNotes.isEmpty() || !selectedLayers.isEmpty();
 			// Nothing to scan from the title screen, and the coordinate prompt would have no way
 			// to tell you that the region you typed reads as empty because there is no world.
 			case SCAN_WORLD -> minecraft.level != null;
@@ -2150,11 +2161,33 @@ public final class ComposerScreen extends Screen {
 				(layer, note) -> layer.pitched() && !note.isBuildable(), true);
 			case SELECT_OVERLOADED_CHORDS -> selectOverloadedChordNotes();
 			case SELECT_ALL_NOTES -> selectNotesWhere("selected", note -> true, false);
-			case SELECT_NONE -> {
-				selectedNotes.clear();
-				updateButtonStates();
-			}
+			case SELECT_NONE -> dropSelection();
 		}
+	}
+
+	/**
+	 * Puts down whatever is selected, notes before layers.
+	 *
+	 * <p>Two selections live on this screen and only one of them had a way to be cleared from the
+	 * keyboard. They are not equals: a note selection is what the next edit acts on, and a layer
+	 * selection is where you are working -- so the first press drops the notes and leaves you in the
+	 * layer, and only a second one steps out of the layer as well. Clicking the empty run under the
+	 * layer list is the other way out of the second, and always was.</p>
+	 *
+	 * @return whether anything was actually put down
+	 */
+	private boolean dropSelection() {
+		if (!selectedNotes.isEmpty()) {
+			selectedNotes.clear();
+			contextMenuOpen = false;
+			updateButtonStates();
+			return true;
+		}
+		if (!selectedLayers.isEmpty()) {
+			clearLayerSelection();
+			return true;
+		}
+		return false;
 	}
 
 	/**
@@ -2494,7 +2527,9 @@ public final class ComposerScreen extends Screen {
 				+ "harmony and keeps its drum -- only how thickly they are scored changes. Takes "
 				+ "from the selected layers only; select them all to thin the whole song.";
 			case SELECT_ALL_NOTES -> "Selects every note on the active layers.";
-			case SELECT_NONE -> "Clears the selection.";
+			case SELECT_NONE -> "Puts down the selected notes. With none selected it steps out of "
+				+ "the selected layers instead, which is the same thing as clicking the empty run under "
+				+ "the layer list.";
 		};
 	}
 
@@ -2551,6 +2586,8 @@ public final class ComposerScreen extends Screen {
 			case COPY_AS_TEXT -> "Ctrl+Shift+C";
 			case UNDO -> "Ctrl+Z";
 			case REDO -> "Ctrl+Y";
+			case SELECT_ALL_NOTES -> "Ctrl+A";
+			case SELECT_NONE -> "Ctrl+Shift+A";
 			default -> "";
 		};
 	}
@@ -3430,10 +3467,13 @@ public final class ComposerScreen extends Screen {
 		mark = phase(PHASE_NOTES, mark);
 		extractPlayhead(graphics);
 		if (selectingBox) {
-			int left = (int)Math.min(dragStartX, selectionEndX);
-			int right = (int)Math.max(dragStartX, selectionEndX);
-			int top = (int)Math.min(dragStartY, selectionEndY);
-			int bottom = (int)Math.max(dragStartY, selectionEndY);
+			// Held to the roll's edges. The anchor is a position in the song now, so once the view
+			// has scrolled past it the corner is genuinely off to one side -- and the scissor here
+			// starts at the piano keys, which would have let the box spill over them.
+			int left = (int)Math.max(rollX, Math.min(boxOriginX(), selectionEndX));
+			int right = (int)Math.min(rollX + rollWidth, Math.max(boxOriginX(), selectionEndX));
+			int top = (int)Math.max(rollY, Math.min(boxOriginY(), selectionEndY));
+			int bottom = (int)Math.min(rollY + rollHeight, Math.max(boxOriginY(), selectionEndY));
 			graphics.fill(left, top, right, bottom, 0x3344CCFF);
 			graphics.fill(left, top, right, top + 1, 0xFF55FFFF);
 			graphics.fill(left, bottom - 1, right, bottom, 0xFF55FFFF);
@@ -4344,6 +4384,8 @@ public final class ComposerScreen extends Screen {
 		boxDroppedSelection = !boxAdditive && !selectedNotes.isEmpty();
 		dragStartX = selectionEndX = event.x();
 		dragStartY = selectionEndY = event.y();
+		boxOriginTick = horizontalScroll + (event.x() - rollX) * ticksPerPixel;
+		boxOriginMidi = topMidiNote - (event.y() - rollY) / (double)Math.max(1, rowHeight);
 		if (!boxAdditive) {
 			selectedNotes.clear();
 		}
@@ -4792,6 +4834,12 @@ public final class ComposerScreen extends Screen {
 			}
 			return super.keyPressed(event);
 		}
+		// Escape puts the selection down before it closes the screen. Standing on a screen with
+		// something selected, Escape means "never mind this", and leaving the composer is the last
+		// thing it can mean -- a second press, with nothing left to put down, still does that.
+		if (event.isEscape() && dropSelection()) {
+			return true;
+		}
 		if (event.key() == GLFW.GLFW_KEY_F9) {
 			profiling = !profiling;
 			java.util.Arrays.fill(phaseNanos, 0L);
@@ -4825,6 +4873,13 @@ public final class ComposerScreen extends Screen {
 		if (event.key() == GLFW.GLFW_KEY_R && !event.hasControlDownWithQuirk()
 				&& !event.hasShiftDown()) {
 			toggleRecording();
+			return true;
+		}
+		// The other half of Ctrl+A, and the shape every editor gives it. Ahead of isSelectAll, which
+		// does not look at Shift and would otherwise answer this one too.
+		if (event.hasControlDownWithQuirk() && event.hasShiftDown()
+				&& event.key() == GLFW.GLFW_KEY_A) {
+			dropSelection();
 			return true;
 		}
 		if (event.isSelectAll()) {
@@ -4982,9 +5037,7 @@ public final class ComposerScreen extends Screen {
 			double pixels = Math.signum(horizontal)
 				* edgeRamp(Math.abs(horizontal), runway, horizontalEdgeSince)
 				* BOX_SCROLL_MAX_PIXELS;
-			long previous = horizontalScroll;
 			horizontalScroll = Math.max(0L, horizontalScroll + Math.round(pixels * ticksPerPixel));
-			dragStartX -= (horizontalScroll - previous) / ticksPerPixel;
 		}
 
 		double vertical = below > 0 ? below : above > 0 ? -above : 0.0;
@@ -4995,10 +5048,8 @@ public final class ComposerScreen extends Screen {
 			double rows = Math.signum(vertical)
 				* edgeRamp(Math.abs(vertical), runway, verticalEdgeSince)
 				* BOX_SCROLL_MAX_ROWS;
-			int previous = topMidiNote;
 			topMidiNote = Math.max(MIN_MIDI_NOTE, Math.min(MAX_MIDI_NOTE,
 				topMidiNote - (int)Math.round(rows)));
-			dragStartY += (topMidiNote - previous) * (double)rowHeight;
 		}
 		selectionEndX = lastMouseX;
 		selectionEndY = lastMouseY;
@@ -5223,14 +5274,25 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private void setPlaybackStart(long tick, boolean preview) {
-		playbackReturnTick = Math.max(0L, Math.min(project().endTick(), snapTick(tick)));
+		movePlayheadTo(snapTick(tick));
+		if (preview) {
+			showResult(Component.literal("Playback start: tick " + playbackReturnTick));
+		}
+	}
+
+	/**
+	 * Puts the marker on an exact tick, without the snap the mouse gets.
+	 *
+	 * <p>Dragging the marker snaps because a hand cannot hit a tick. A tick arrived at by arithmetic
+	 * -- the end of a paste, say -- already is one, and snapping it to a grid chosen for something
+	 * else can only move it off the position it was computed to be.</p>
+	 */
+	private void movePlayheadTo(long tick) {
+		playbackReturnTick = Math.max(0L, Math.min(project().endTick(), tick));
 		playbackStartTick = playbackReturnTick;
 		if (playing) {
 			playbackStartedAt = Util.getMillis();
 			resetPlaybackSchedule();
-		}
-		if (preview) {
-			showResult(Component.literal("Playback start: tick " + playbackReturnTick));
 		}
 	}
 
@@ -6094,8 +6156,27 @@ public final class ComposerScreen extends Screen {
 		long startTick = inPlace ? clipboardOriginTick : snapTick(playbackReturnTick);
 		int before = project().layers().size();
 		PasteResult result = project().pasteNotes(project().activeLayerIndex(), clipboard, startTick);
+		ComposerProject pasted = result.project();
+		// The marker steps to the end of what was just pasted, so a second Ctrl+V lays the phrase
+		// down after the first rather than on top of it and a passage is built by holding the key.
+		// Not for paste-in-place, whose whole point is landing on the beat the copy left.
+		long cursor = inPlace ? -1L : startTick + clipboardSpan();
+		if (cursor >= 0L) {
+			// The end marker comes with it. It is floored at the last note, so pasting at the end of
+			// a song leaves it exactly on the note just laid -- and the next paste would then be
+			// clamped back onto that note instead of landing after it.
+			pasted = pasted.withEndTick(Math.max(pasted.endTick(), cursor));
+		}
 		apply("paste " + result.noteIds().size() + (result.noteIds().size() == 1 ? " note" : " notes"),
-			result.project());
+			pasted);
+		if (cursor >= 0L && playing) {
+			// Mid-playback the marker on screen is the playhead, not the tick a paste lands on, and
+			// throwing the running position across the song is not what Ctrl+V asked for. Only the
+			// return tick -- which is where the paste actually went -- steps on.
+			playbackReturnTick = Math.max(0L, Math.min(project().endTick(), cursor));
+		} else if (cursor >= 0L) {
+			movePlayheadTo(cursor);
+		}
 		selectedNotes.clear();
 		selectedNotes.addAll(result.noteIds());
 		layersChanged();
@@ -6110,6 +6191,29 @@ public final class ComposerScreen extends Screen {
 				+ (result.addedLayers() == 1 ? " layer was" : " layers were")
 				+ " added to keep them apart."));
 		}
+	}
+
+	/**
+	 * How far a paste moves the marker on: the copy's own length, so pasting it again continues it.
+	 *
+	 * <p>A copy of some notes is not a length -- it ends on the last note's start, and where the
+	 * phrase stops is one step further on. Which step is read off the copy rather than off the Snap
+	 * control: the tightest gap between two of its own note starts is the resolution the material is
+	 * written in, and a phrase of even steps then comes out exactly its own length. Sixteen
+	 * sixteenths advance a whole bar. Snap only stands in for a copy with nothing to measure -- a
+	 * single chord, where there is one start tick and no gap at all.</p>
+	 */
+	private long clipboardSpan() {
+		List<Long> starts = clipboard.stream().map(ClipboardNote::tickOffset).distinct().sorted()
+			.toList();
+		long step = Long.MAX_VALUE;
+		for (int index = 1; index < starts.size(); index++) {
+			step = Math.min(step, starts.get(index) - starts.get(index - 1));
+		}
+		if (step == Long.MAX_VALUE || step <= 0L) {
+			step = Math.max(1L, gridTicks());
+		}
+		return starts.isEmpty() ? step : starts.getLast() + step;
 	}
 
 	private void updateButtonStates() {
@@ -6182,10 +6286,10 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private void selectNotesInBox() {
-		int left = (int)Math.min(dragStartX, selectionEndX);
-		int right = (int)Math.max(dragStartX, selectionEndX);
-		int top = (int)Math.min(dragStartY, selectionEndY);
-		int bottom = (int)Math.max(dragStartY, selectionEndY);
+		int left = (int)Math.min(boxOriginX(), selectionEndX);
+		int right = (int)Math.max(boxOriginX(), selectionEndX);
+		int top = (int)Math.min(boxOriginY(), selectionEndY);
+		int bottom = (int)Math.max(boxOriginY(), selectionEndY);
 		for (int layerIndex : selectionLayers()) {
 			Layer layer = project().layers().get(layerIndex);
 			if (!layer.visible()) {
@@ -6229,6 +6333,15 @@ public final class ComposerScreen extends Screen {
 
 	private int tickX(long tick) {
 		return rollX + (int)Math.round((tick - horizontalScroll) / ticksPerPixel);
+	}
+
+	/** The box's anchor corner, put back on the screen wherever the view has moved it to. */
+	private double boxOriginX() {
+		return rollX + (boxOriginTick - horizontalScroll) / ticksPerPixel;
+	}
+
+	private double boxOriginY() {
+		return rollY + (topMidiNote - boxOriginMidi) * rowHeight;
 	}
 
 	private long mouseTick(double x) {
