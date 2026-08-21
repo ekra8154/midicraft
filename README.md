@@ -172,6 +172,28 @@ any two of them. That is usually right for a phrase of even steps and it is
 always visible, drawn as a hairline in the same strip, before you commit to it.
 
 
+## Tempo and speed
+
+Two numbers decide how fast a song plays, and they multiply.
+
+The **tempo** is the song's own, written in the file as microseconds per quarter
+note and shown as BPM. The **Speed** slider is a ratio on top of it, from 0.25x
+to 8.00x in quarter steps. It is not a preview: it is saved with the song and the
+build runs at it, so a song at 150 BPM and 2.00x really is a 300 BPM song.
+
+The status bar shows the sum -- `150 x 2.00 = 300 BPM` -- and the song's
+resolution beside it, `480 ticks/beat`. That last number, ticks per quarter note,
+is what the fraction grid is counted in: a 1/16 line is a quarter of it. It has
+no bearing on how long anything lasts, which is why two songs at the same BPM and
+different resolutions have the same 1/16 in real time.
+
+**Edit > Apply speed to the tempo** folds the slider into the tempo and puts it
+back to 1.00x. Nothing about the song changes -- 150 at 2.00x and 300 at 1.00x
+are the same song, note for note -- but the number written in the file becomes
+the one it plays at, and the slider is free to be a ratio of the new baseline.
+Convert does this as its first step; this is that step by itself.
+
+
 ## The snap grid
 
 The Snap control offers two different kinds of grid, and they are absolute about

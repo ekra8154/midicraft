@@ -730,10 +730,7 @@ public final class ComposerScreen extends Screen {
 			speedX, CONTROL_TOP, speedWidth, CONTROL_HEIGHT, project().speedQuarters(),
 			this::setDelayScale
 		));
-		delayScaleSlider.setTooltip(Tooltip.create(Component.literal(
-			"Playback speed, 0.25x to 8.00x. Higher is faster. Saving to the sequence bakes this "
-				+ "into the delays, so the build runs at the speed you hear here."
-		)));
+		refreshSpeedTooltip();
 		if (!layerViewInitialised) {
 			layerViewInitialised = true;
 			resetLayerView();
@@ -2157,6 +2154,8 @@ public final class ComposerScreen extends Screen {
 			case SELECT_NONE -> !selectedNotes.isEmpty() || !selectedLayers.isEmpty();
 			case RENAME_MARKER -> markerAtCursor() != null;
 			case DUPLICATE_SELECTION -> !selectedNotes.isEmpty();
+			case BAKE_SPEED ->
+				project().speedQuarters() != ComposerProject.DEFAULT_SPEED_QUARTERS;
 			case CLEAR_MARKERS -> !project().markers().isEmpty();
 			// Nothing to scan from the title screen, and the coordinate prompt would have no way
 			// to tell you that the region you typed reads as empty because there is no world.
@@ -2255,6 +2254,7 @@ public final class ComposerScreen extends Screen {
 			case FIT_ALL_RANGE -> applyStep("Fitted to range", "fit notes into range",
 				project().withAllFittedToRange(selectedNotes));
 			case TRANSPOSE_BEST_FIT -> transposeToBestFit();
+			case BAKE_SPEED -> bakeSpeed();
 			case SNAP_TEMPO -> snapTempo(false);
 			case SNAP_TEMPO_GAME -> snapTempo(true);
 			case DUPLICATE_SELECTION -> duplicateSelection();
@@ -2315,6 +2315,25 @@ public final class ComposerScreen extends Screen {
 	 * before. On the same songs it is now a no-op, which is the right answer for something already
 	 * aligned.</p>
 	 */
+	/**
+	 * Makes the speed the tempo, and the slider a ratio of the new one.
+	 *
+	 * <p>Only reachable inside Convert until now, which also quantizes, transposes, splits layers
+	 * and moves the end marker. Wanting the baseline written down is not wanting any of that.</p>
+	 */
+	private void bakeSpeed() {
+		if (project().speedQuarters() == ComposerProject.DEFAULT_SPEED_QUARTERS) {
+			return;
+		}
+		String was = tempoLabel();
+		apply("apply the speed to the tempo", project().withBakedSpeed());
+		// setScale moves the widget without firing its listener, so this cannot loop back into
+		// another history entry.
+		delayScaleSlider.setScale(ComposerProject.DEFAULT_SPEED_QUARTERS);
+		showResult(Component.literal(was + " is now " + tempoLabel()
+			+ ". The song sounds exactly as it did; only the number it is written at has moved."));
+	}
+
 	private void snapTempo(boolean gameTicks) {
 		ComposerProject baked = project().withBakedSpeed();
 		ComposerProject.NoteSpacing spacing = baked.noteSpacing();
@@ -2646,6 +2665,10 @@ public final class ComposerScreen extends Screen {
 				+ "Never the last of a pitch or the last of an instrument, so a chord keeps its "
 				+ "harmony and keeps its drum -- only how thickly they are scored changes. Takes "
 				+ "from the selected layers only; select them all to thin the whole song.";
+			case BAKE_SPEED -> "Folds the Speed slider into the song's own tempo and puts the slider "
+				+ "back to 1.00x. Nothing about the song changes -- 150 BPM at 2.00x and 300 BPM at "
+				+ "1.00x are the same song, note for note -- but the tempo written in the file becomes "
+				+ "the tempo it actually plays at, and the slider is free to be a ratio of the new one. Convert does this first thing; this is that step on its own.";
 			case DUPLICATE_SELECTION -> "Lays the selected notes down again directly after "
 				+ "themselves, and leaves the selection on the copy -- so Ctrl+D again adds another "
 				+ "repeat. How far each one steps is the selection range drawn under the ruler, which a "
@@ -4513,6 +4536,7 @@ public final class ComposerScreen extends Screen {
 		}
 		// The number the snap button has no room for. It moves with the tempo and the speed, so it
 		// belongs on screen rather than behind a hover.
+		segments.add(tempoLabel() + " · " + project().ppq() + " ticks/beat");
 		segments.add("grid " + snapLabel().getString().replace("Snap ", "") + " = " + snapDetail());
 		if (!selectedNotes.isEmpty()) {
 			segments.add(selectedNotes.size() + " selected");
@@ -6840,6 +6864,38 @@ public final class ComposerScreen extends Screen {
 	 * to be set in two places -- the constructor and cycleSnap -- which is exactly the pair that
 	 * misses a speed change, and a stale number here is worse than none.
 	 */
+	/**
+	 * The tempo the song is written at, the speed it is being played at, and what that comes to.
+	 *
+	 * <p>Two numbers doing one job, and only one of them was anywhere on screen -- the picker shows
+	 * a song's BPM and the composer then hides it, while the multiplier beside it is saved in the
+	 * file and goes into the build. Seven songs in a library of thirty-eight are playing at a tempo
+	 * that is not the tempo written in them. Shown as the sum rather than the answer, because the
+	 * baseline is worth keeping: it is what the slider is a ratio of.</p>
+	 */
+	private String tempoLabel() {
+		double base = 60_000_000.0 / Math.max(1, project().tempoMicrosPerQuarter());
+		double factor = Math.max(1, project().speedQuarters()) / 4.0;
+		String played = trimZeros(String.format(java.util.Locale.ROOT, "%.1f", base * factor));
+		if (Math.abs(factor - 1.0) < 1.0e-9) {
+			return played + " BPM";
+		}
+		return trimZeros(String.format(java.util.Locale.ROOT, "%.1f", base)) + " x "
+			+ trimZeros(String.format(java.util.Locale.ROOT, "%.2f", factor))
+			+ " = " + played + " BPM";
+	}
+
+	private void refreshSpeedTooltip() {
+		if (delayScaleSlider == null) {
+			return;
+		}
+		delayScaleSlider.setTooltip(Tooltip.create(Component.literal(
+			"Playback speed, 0.25x to 8.00x. Higher is faster."
+				+ "\n" + tempoLabel() + "."
+				+ "\nThe speed is part of the song: it is saved with it and the build runs at it. "
+				+ "Edit > Apply speed to the tempo folds it in and puts the slider back to 1.00x.")));
+	}
+
 	private void refreshSnapButton() {
 		if (snapButton == null) {
 			return;
@@ -6856,6 +6912,7 @@ public final class ComposerScreen extends Screen {
 
 	private void updateButtonStates() {
 		refreshSnapButton();
+		refreshSpeedTooltip();
 		if (recordButton != null) {
 			recordButton.setMessage(recordLabel());
 		}
@@ -7506,6 +7563,7 @@ public final class ComposerScreen extends Screen {
 		DUPLICATE_SELECTION("Duplicate selection"),
 		FIT_ALL_RANGE("Fit into range", true),
 		TRANSPOSE_BEST_FIT("Transpose to best fit"),
+		BAKE_SPEED("Apply speed to the tempo"),
 		SNAP_TEMPO("Snap tempo (whole song)"),
 		SNAP_TEMPO_GAME("Snap tempo to game ticks (whole song)"),
 		INCLUDE_SELECTED("Include selected layers in sequence"),
@@ -7535,7 +7593,7 @@ public final class ComposerScreen extends Screen {
 		private static final ToolbarAction[] EDIT_ACTIONS = {
 			UNDO, REDO, DUPLICATE_SELECTION, CONVERT, CONVERT_GAME_TICKS, MERGE_REPEATS,
 			TRANSPOSE_BEST_FIT,
-			FIT_ALL_RANGE, SNAP_TEMPO, SNAP_TEMPO_GAME
+			FIT_ALL_RANGE, BAKE_SPEED, SNAP_TEMPO, SNAP_TEMPO_GAME
 		};
 		private static final ToolbarAction[] BUILD_ACTIONS = {
 			INCLUDE_SELECTED, SET_INCLUDED_TO_SELECTION, TOGGLE_DEDUPE, PASTE_IN_WORLD, BUILD_CANCEL
