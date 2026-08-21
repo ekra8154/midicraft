@@ -1637,6 +1637,32 @@ public final class SongBuilder {
 	}
 
 	/**
+	 * The lane a paste of this width gives this song: the number the walk measures its walls at.
+	 *
+	 * <p>Not the width that was asked for, and the difference is the whole reason this exists. The
+	 * walls stand {@link #widthReserve} columns inside the paste, and the lane is never narrower than
+	 * the song's widest single event however narrow the paste -- so anything outside the builder that
+	 * wants to talk about a column in terms of "how far from the wall" has to ask, or it will be
+	 * wrong by the reserve on every build and by a great deal more on a clamped one.</p>
+	 *
+	 * <p>Which is exactly what the debug paster was: it seeded a walk at {@code width - 2}, a number
+	 * that was right for the first layout and has been three for v2 since the walls moved. Every
+	 * distance it was given landed a column past where it was meant to, so the one form of the
+	 * command meant for standing a chord at a chosen distance from the wall stood it outside.</p>
+	 */
+	static int laneWidthFor(PasteMode mode, List<EventNote> notes, int width, int floors,
+			BlockPos origin) {
+		Layout layout = switch (mode) {
+			case COMPACT_LANE -> Layout.STANDARD;
+			case ULTRA_COMPACT_LANE_V2 -> Layout.ultra(floors, origin).asV2();
+			default -> Layout.ultra(floors, origin);
+		};
+		int longest = eventGroups(notes, layout).stream().mapToInt(EventGroup::length).max()
+			.orElse(1);
+		return Math.max(longest + 2, width - widthReserve(mode));
+	}
+
+	/**
 	 * The second layout, planned and walked.
 	 *
 	 * <p>Built once, where {@link #bestUltraPlan} builds twice and keeps the winner. That pair exists

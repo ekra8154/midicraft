@@ -37,6 +37,8 @@ import net.minecraft.world.phys.Vec3;
  *   /fastnoteblocks paste 36 1 30x4                   four chords of thirty
  *   /fastnoteblocks paste dry 24 2 5x8@4 30@1         reported, not placed
  *   /fastnoteblocks paste 36 3 down 12 18 30          the next wall a descent, first chord twelve off
+ *   /fastnoteblocks paste 28 5 up 0 25x8              a chord hard against the wall it climbs at
+ *   /fastnoteblocks paste 28 5 up on 3 0 25x8         the same, from the third floor up
  *   /fastnoteblocks paste 28 5 up 25x8                a whole lane ending in a climb, every chord
  *                                                   placed where the walk itself wants it
  *   /fastnoteblocks paste 36 1 flat turning 12 30 5@1 5 5
@@ -44,15 +46,30 @@ import net.minecraft.world.phys.Vec3;
  *   /fastnoteblocks paste 40 1 7:7b 7:7h              the stacked seven over gold, then over glass
  * </pre>
  *
- * <p>Width and floors first, then the chords, which run to the end of the line. Between them may go
- * a wall shape -- {@code flat}, {@code up} or {@code down} -- and, optionally, how far from that
- * wall the first chord stands. With the distance the walk begins as though it had already got
- * there, which pins where the first chord lands -- the right tool for rebuilding one fault.
- * Without it the lane starts at its own origin with that wall ahead and the walk places the
- * chords itself, which is the only form that can sim a shape the walk has to choose -- a padded
- * approach, a cut at whatever room the lane arrives at. (A first token that is a lone integer
- * still binds as the distance; a single chord with no distance is said as {@code 18x1} or with a
- * gap, {@code 18@4}.) With no shape at all the build starts where a song does.</p>
+ * <p>Width and floors first, then the chords, which run to the end of the line. Those two numbers
+ * are the size of the whole paste and nothing else: how wide the corridor is and how many floors
+ * it folds through.</p>
+ *
+ * <p>Between them and the chords may go a wall shape -- {@code flat}, {@code up} or {@code down} --
+ * and then two things about where the lane is standing when it meets that wall. {@code on 3} is
+ * which floor it is on, counted from one, and left off it is the only floor that shape can turn
+ * from: the bottom for a climb, the top for a descent or a flat turn. Then, optionally, how far
+ * from the wall the first chord stands, counted in columns of the lane the build actually gets --
+ * so nought means hard against the wall, and it is the distance most worth asking for, because a
+ * room of nought is where the shapes with no staircase live.</p>
+ *
+ * <p>With a distance the walk begins as though it had already got there, which pins where the first
+ * chord lands -- the right tool for rebuilding one fault. Without it the lane starts at its own
+ * origin with that wall ahead and the walk places the chords itself, which is the only form that
+ * can sim a shape the walk has to choose -- a padded approach, a cut at whatever room the lane
+ * arrives at. (A first token that is a lone integer still binds as the distance; a single chord
+ * with no distance is said as {@code 18x1} or with a gap, {@code 18@4}.) With no shape at all the
+ * build starts where a song does.</p>
+ *
+ * <p>A shape the floor cannot give you is refused with the reason rather than quietly built as
+ * something else: there is nothing above the top floor to climb to, nothing below the first to
+ * descend to, and a flat turn is one whose step lands outside the build, so it happens only at an
+ * end of the stack.</p>
  *
  * <p>The dry form is the one that gets used most: it reports the faults, the size and where the
  * build would land without touching the world, so a dozen widths can be tried in as many seconds.
@@ -359,7 +376,7 @@ public final class DebugCommands {
 			.then(RequiredArgumentBuilder
 				.<FabricClientCommandSource, String>argument("chords",
 					StringArgumentType.greedyString())
-				.executes(context -> run(context, dry, null, 0, false, mode)));
+				.executes(context -> run(context, dry, null, 0, false, 0, mode)));
 		// The wall shapes, each optionally with its own distance to that wall. Literals rather
 		// than a word argument so that leaving them off is unambiguous: a chord spec always opens
 		// with a digit and a shape never does, and Brigadier tries its literal children first.
@@ -374,13 +391,25 @@ public final class DebugCommands {
 		// chord with no distance is said as "18x1" or given a gap, "18@4".
 		for (String shape : List.of("flat", "up", "down")) {
 			floors = floors.then(literal(shape)
-				.then(colsThenChords(dry, shape, false, mode))
-				.then(chordsFromTheOrigin(dry, shape, false, mode))
+				.then(colsThenChords(dry, shape, false, ON_ITS_OWN_FLOOR, mode))
+				.then(chordsFromTheOrigin(dry, shape, false, ON_ITS_OWN_FLOOR, mode))
+				// Which floor the lane is standing on, as {@code on 3}. A literal because the
+				// distance to the wall is a number too, and two bare numbers in a row have no
+				// reading that is obviously right -- the same reason the width and the floor count
+				// come before the chords rather than after them.
+				.then(literal("on").then(RequiredArgumentBuilder
+					.<FabricClientCommandSource, Integer>argument("onFloor",
+						IntegerArgumentType.integer(1, 16))
+					.then(colsThenChords(dry, shape, false, null, mode))
+					.then(chordsFromTheOrigin(dry, shape, false, null, mode))
+					.then(literal("turning")
+						.then(colsThenChords(dry, shape, true, null, mode))
+						.then(chordsFromTheOrigin(dry, shape, true, null, mode)))))
 				// And optionally with the lane already bending towards that wall, which is what a lane
 				// in the middle of a song is and what no run of chords can be written to produce.
 				.then(literal("turning")
-					.then(colsThenChords(dry, shape, true, mode))
-					.then(chordsFromTheOrigin(dry, shape, true, mode))));
+					.then(colsThenChords(dry, shape, true, ON_ITS_OWN_FLOOR, mode))
+					.then(chordsFromTheOrigin(dry, shape, true, ON_ITS_OWN_FLOOR, mode))));
 		}
 		return RequiredArgumentBuilder
 			.<FabricClientCommandSource, Integer>argument("width",
@@ -388,18 +417,37 @@ public final class DebugCommands {
 			.then(floors);
 	}
 
-	/** How far from that wall the first chord stands, and then the chords themselves. */
+	/**
+	 * How far from that wall the first chord stands, and then the chords themselves.
+	 *
+	 * <p>From nought, which is the distance most worth being able to ask for: a room of nought is
+	 * where the shapes that have no staircase live, and it used to be rejected by the argument
+	 * itself. Rejected is generous -- Brigadier fell through to the form with no distance and read
+	 * the nought as the first chord, so {@code up 0 25x8} quietly became a chord of no notes
+	 * followed by eight of twenty-five, starting from the origin, which builds no turn at all at
+	 * the place that was being asked about.</p>
+	 */
 	private static RequiredArgumentBuilder<FabricClientCommandSource, Integer> colsThenChords(
-			boolean dry, String shape, boolean turning, SongBuilder.PasteMode mode) {
+			boolean dry, String shape, boolean turning, Integer onFloor,
+			SongBuilder.PasteMode mode) {
 		return RequiredArgumentBuilder
 			.<FabricClientCommandSource, Integer>argument("columnsToWall",
-				IntegerArgumentType.integer(1, 512))
+				IntegerArgumentType.integer(0, 512))
 			.then(RequiredArgumentBuilder
 				.<FabricClientCommandSource, String>argument("chords",
 					StringArgumentType.greedyString())
 				.executes(context -> run(context, dry, shape,
-					IntegerArgumentType.getInteger(context, "columnsToWall"), turning, mode)));
+					IntegerArgumentType.getInteger(context, "columnsToWall"), turning,
+					floorOf(context, onFloor), mode)));
 	}
+
+	/** The floor the lane stands on, one-based, or the shape's own default where none was given. */
+	private static int floorOf(CommandContext<FabricClientCommandSource> context, Integer given) {
+		return given != null ? given : IntegerArgumentType.getInteger(context, "onFloor");
+	}
+
+	/** The floor meaning "whichever floor this shape starts from by itself". */
+	private static final Integer ON_ITS_OWN_FLOOR = 0;
 
 	/**
 	 * The chords alone: the lane starts at its own origin with the chosen wall ahead.
@@ -410,11 +458,13 @@ public final class DebugCommands {
 	 * what a real paste does.</p>
 	 */
 	private static RequiredArgumentBuilder<FabricClientCommandSource, String> chordsFromTheOrigin(
-			boolean dry, String shape, boolean turning, SongBuilder.PasteMode mode) {
+			boolean dry, String shape, boolean turning, Integer onFloor,
+			SongBuilder.PasteMode mode) {
 		return RequiredArgumentBuilder
 			.<FabricClientCommandSource, String>argument("chords",
 				StringArgumentType.greedyString())
-			.executes(context -> run(context, dry, shape, FROM_THE_ORIGIN, turning, mode));
+			.executes(context -> run(context, dry, shape, FROM_THE_ORIGIN, turning,
+				floorOf(context, onFloor), mode));
 	}
 
 	/** The distance meaning "no distance": the lane runs from its origin to the wall. */
@@ -428,23 +478,70 @@ public final class DebugCommands {
 	 * going down is a descent, and top going up is a step that lands outside the build, which is the
 	 * flat turn. There is no fourth combination, which is why there are three words.</p>
 	 */
-	private static SongBuilder.WalkStart seed(String shape, int floors, int width,
-			int columnsToWall, boolean turning) {
-		// The wall is two columns inside the width -- two of it go on the fold itself -- so a chord
-		// asked to stand twelve columns from the wall starts twelve short of there, not of the width.
+	private static SongBuilder.WalkStart seed(String shape, int floors, int laneWidth,
+			int columnsToWall, boolean turning, int onFloor) {
+		// Measured off the lane the walk will actually build, which is not the width that was typed:
+		// the walls stand a reserve inside it, and a lane is never narrower than the song's widest
+		// chord however narrow the paste. This used to subtract two from the width -- right for the
+		// first layout, and one short for v2 ever since its walls moved -- so every distance landed
+		// a column further on than it was asked for, and nought landed outside the wall altogether.
 		// No distance at all is the head of the lane: the walk crosses the whole corridor to reach
 		// the wall and places every chord itself.
 		int column = columnsToWall == FROM_THE_ORIGIN ? 0
-			: Math.max(0, width - 2 - columnsToWall);
+			: Math.max(0, laneWidth - columnsToWall);
+		// One-based, because a floor count is one-based everywhere else the player sees one.
+		int floor = onFloor > 0 ? onFloor - 1 : defaultFloor(shape, floors);
 		return switch (shape) {
-			case "up" -> new SongBuilder.WalkStart(column, 0, 1, turning);
-			case "down" -> new SongBuilder.WalkStart(column, floors - 1, -1, turning);
-			default -> new SongBuilder.WalkStart(column, floors - 1, 1, turning);
+			case "up" -> new SongBuilder.WalkStart(column, floor, 1, turning);
+			case "down" -> new SongBuilder.WalkStart(column, floor, -1, turning);
+			// A flat turn is one whose step lands outside the build, so which way it steps is
+			// decided by which end of the stack the lane is standing at rather than chosen.
+			default -> new SongBuilder.WalkStart(column, floor, floor == 0 && floors > 1 ? -1 : 1,
+				turning);
 		};
 	}
 
+	/** Where each shape starts when no floor is named: the only floor it can turn that way from. */
+	private static int defaultFloor(String shape, int floors) {
+		return "up".equals(shape) ? 0 : floors - 1;
+	}
+
+	/**
+	 * Whether the lane can turn that way from the floor it was put on, said before it is built.
+	 *
+	 * <p>A turn is a step to {@code floor + climb}, and it is a staircase when that lands inside the
+	 * build and a flat turn when it does not. So the three words are not free of the floor: there is
+	 * nothing above the top to climb to and nothing below the bottom to descend to, and a flat turn
+	 * happens only at an end of the stack. Refused with the reason rather than built as something
+	 * else, because a command that silently gives you a different turn from the one you asked for is
+	 * how an afternoon goes missing.</p>
+	 */
+	private static void checkFloor(String shape, int floors, int onFloor) {
+		if (onFloor <= 0) {
+			return;
+		}
+		if (onFloor > floors) {
+			throw new IllegalArgumentException("There is no floor " + onFloor + " in a build "
+				+ floors + " floors tall.");
+		}
+		if ("up".equals(shape) && onFloor == floors) {
+			throw new IllegalArgumentException("A lane on the top floor has nothing above it to "
+				+ "climb to, so its wall is a flat turn. Try a lower floor, or say flat.");
+		}
+		if ("down".equals(shape) && onFloor == 1) {
+			throw new IllegalArgumentException("A lane on floor one has nothing below it to "
+				+ "descend to, so its wall is a flat turn. Try a higher floor, or say flat.");
+		}
+		if ("flat".equals(shape) && onFloor != 1 && onFloor != floors) {
+			throw new IllegalArgumentException("A flat turn is one whose step lands outside the "
+				+ "build, so it only happens on the top or bottom floor. On floor " + onFloor
+				+ " of " + floors + " the wall is a staircase: say up or down.");
+		}
+	}
+
 	private static int run(CommandContext<FabricClientCommandSource> context, boolean dry,
-			String shape, int columnsToWall, boolean turning, SongBuilder.PasteMode mode) {
+			String shape, int columnsToWall, boolean turning, int onFloor,
+			SongBuilder.PasteMode mode) {
 		FabricClientCommandSource source = context.getSource();
 		if (debugCommandsOff(source)) {
 			return 0;
@@ -459,13 +556,21 @@ public final class DebugCommands {
 				throw new IllegalArgumentException("A " + shape + " staircase needs at least two "
 					+ "floors. On one floor every wall is a flat turn.");
 			}
+			if (shape != null) {
+				checkFloor(shape, floors, onFloor);
+			}
 			chords = DebugChords.parse(spec, DebugChords.DEFAULT_GAP);
 			// The mode the paste button would use, so that what this builds is what a song would get.
 			SongBuilder.PasteMode chosen = mode == null ? pasteMode() : mode;
-			plan = SongBuilder.createPastePlan(origin(source), DebugChords.notes(chords), chosen,
+			List<SongBuilder.EventNote> notes = DebugChords.notes(chords);
+			// Asked of the builder rather than worked out here, so a distance to the wall means the
+			// same column the walk will call the wall. See {@link SongBuilder#laneWidthFor}.
+			int laneWidth = SongBuilder.laneWidthFor(chosen, notes, wall, floors, origin(source));
+			plan = SongBuilder.createPastePlan(origin(source), notes, chosen,
 				new SongBuilder.BuildLimits(FastNoteblocksConfig.get().maxBuildFloors(), wall,
 					floors),
-				shape == null ? SongBuilder.WalkStart.HEAD : seed(shape, floors, wall, columnsToWall, turning));
+				shape == null ? SongBuilder.WalkStart.HEAD
+					: seed(shape, floors, laneWidth, columnsToWall, turning, onFloor));
 		} catch (IllegalArgumentException refused) {
 			source.sendError(Component.literal(refused.getMessage()));
 			return 0;
