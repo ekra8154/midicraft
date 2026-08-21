@@ -7,6 +7,7 @@ import com.fastnoteblocks.client.composer.SongLibrary;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -54,6 +55,25 @@ public final class SongsScreen extends Screen {
 	}
 
 	private record Row(String id, ComposerProject song) {
+	}
+
+	private String sortLabel() {
+		return config.listSortByName() ? "Sort: A to Z" : "Sort: newest";
+	}
+
+	/**
+	 * Newest first by default: the song you last saved is nearly always the one you came back for,
+	 * and a library sorted by name makes you remember what you called it before you can find it.
+	 */
+	private void sortRows() {
+		if (config.listSortByName()) {
+			rows.sort(Comparator.comparing(row -> row.song().name().toLowerCase(Locale.ROOT)));
+			return;
+		}
+		rows.sort(Comparator.comparingLong((Row row) -> SongLibrary.modifiedAt(row.id())).reversed()
+			// A stable second key, so two songs written in the same millisecond do not swap places
+			// between one opening of this screen and the next.
+			.thenComparing(row -> row.song().name().toLowerCase(Locale.ROOT)));
 	}
 
 	/**
@@ -110,10 +130,14 @@ public final class SongsScreen extends Screen {
 				config.dedupeIdenticalNotes(), twoLanes));
 		}
 
+		sortRows();
+
 		// Rebuilt rather than kept, because init runs again on every resize -- but its text survives,
 		// so deleting or copying a song out of a filtered list does not throw the filter away.
 		String query = searchBox == null ? "" : searchBox.getValue();
-		searchBox = new EditBox(font, 8, 40, width - 16, 18, Component.literal("Search"));
+		int sortWidth = 92;
+		searchBox = new EditBox(font, 8, 40, width - 16 - sortWidth - 4, 18,
+			Component.literal("Search"));
 		searchBox.setMaxLength(120);
 		searchBox.setHint(Component.literal("Search by name").withStyle(EditBox.SEARCH_HINT_STYLE));
 		searchBox.setValue(query);
@@ -122,6 +146,18 @@ public final class SongsScreen extends Screen {
 			rebuildRows();
 		});
 		addRenderableWidget(searchBox);
+		addRenderableWidget(Button.builder(Component.literal(sortLabel()), button -> {
+				config.setListSortByName(!config.listSortByName());
+				FastNoteblocksConfig.save();
+				scroll = 0;
+				init();
+			})
+			.bounds(width - 8 - sortWidth, 40, sortWidth, 18)
+			.tooltip(Tooltip.create(Component.literal(
+				"Newest first puts whatever you last saved at the top, which is nearly always what "
+					+ "you came back for. A to Z is for finding one you know the name of. The file "
+					+ "browser follows the same choice.")))
+			.build());
 
 		addRenderableWidget(Button.builder(Component.literal("+ New song"), button -> create())
 			.bounds(8, height - 26, 82, 20).build());
@@ -313,9 +349,43 @@ public final class SongsScreen extends Screen {
 	private String summary(Row row) {
 		SongAnalysis analysis = analyses.get(row.id());
 		ComposerProject song = row.song();
-		return String.format(Locale.ROOT, "%d notes - %d layer%s - %s - %s - %.2fx",
+		return String.format(Locale.ROOT, "%d notes - %d layer%s - %s - %s - %.2fx - %s",
 			analysis.totalNotes(), song.layers().size(), song.layers().size() == 1 ? "" : "s",
-			analysis.lengthLabel(), bpmLabel(song), song.speedQuarters() / 4.0);
+			analysis.lengthLabel(), bpmLabel(song), song.speedQuarters() / 4.0,
+			savedLabel(SongLibrary.modifiedAt(row.id())));
+	}
+
+	/**
+	 * When a song was last saved, as long ago rather than as a date.
+	 *
+	 * <p>Put on the row because the default order is by it, and an order you cannot see the key for
+	 * is one you have to take on trust. Relative because the question this answers is "is this the
+	 * one I was working on", and "2 hours ago" answers it where a timestamp has to be compared
+	 * against a clock first.</p>
+	 */
+	private static String savedLabel(long modifiedMillis) {
+		if (modifiedMillis <= 0L) {
+			return "never saved";
+		}
+		long minutes = Math.max(0L, (System.currentTimeMillis() - modifiedMillis) / 60_000L);
+		if (minutes < 1L) {
+			return "just now";
+		}
+		if (minutes < 60L) {
+			return minutes + (minutes == 1L ? " minute ago" : " minutes ago");
+		}
+		long hours = minutes / 60L;
+		if (hours < 24L) {
+			return hours + (hours == 1L ? " hour ago" : " hours ago");
+		}
+		long days = hours / 24L;
+		if (days < 30L) {
+			return days + (days == 1L ? " day ago" : " days ago");
+		}
+		long months = days / 30L;
+		return months < 12L
+			? months + (months == 1L ? " month ago" : " months ago")
+			: (days / 365L) + " year" + (days / 365L == 1L ? "" : "s") + " ago";
 	}
 
 	private static String bpmLabel(ComposerProject song) {

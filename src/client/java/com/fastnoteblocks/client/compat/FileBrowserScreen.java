@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
+import com.fastnoteblocks.client.FastNoteblocksConfig;
 import com.fastnoteblocks.client.composer.SongLibrary;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
@@ -93,7 +94,9 @@ final class FileBrowserScreen extends Screen {
 		listDirectory();
 
 		String filter = filterBox == null ? "" : filterBox.getValue();
-		filterBox = new EditBox(font, 8, 36, width - 16, 18, Component.literal("Filter"));
+		int sortWidth = 92;
+		filterBox = new EditBox(font, 8, 36, width - 16 - sortWidth - 4, 18,
+			Component.literal("Filter"));
 		filterBox.setMaxLength(260);
 		filterBox.setValue(filter);
 		filterBox.setResponder(value -> {
@@ -102,6 +105,15 @@ final class FileBrowserScreen extends Screen {
 			clampScroll();
 		});
 		addRenderableWidget(filterBox);
+		addRenderableWidget(Button.builder(Component.literal(sortLabel()), button -> {
+				FastNoteblocksConfig config = FastNoteblocksConfig.get();
+				config.setListSortByName(!config.listSortByName());
+				FastNoteblocksConfig.save();
+				scroll = 0;
+				selected = -1;
+				init();
+			})
+			.bounds(width - 8 - sortWidth, 36, sortWidth, 18).build());
 
 		addRenderableWidget(Button.builder(Component.literal("Up"), button -> enter(directory.getParent()))
 			.bounds(8, 58, 34, 18).build())
@@ -120,6 +132,10 @@ final class FileBrowserScreen extends Screen {
 		addRenderableWidget(Button.builder(CommonComponents.GUI_CANCEL, button -> onClose())
 			.bounds(width - 84, height - 26, 76, 18).build());
 		setInitialFocus(filterBox);
+	}
+
+	private static String sortLabel() {
+		return FastNoteblocksConfig.get().listSortByName() ? "Sort: A to Z" : "Sort: newest";
 	}
 
 	private void clampScroll() {
@@ -171,10 +187,14 @@ final class FileBrowserScreen extends Screen {
 		} catch (IOException | RuntimeException unreadable) {
 			status = "Cannot read this folder: " + unreadable.getMessage();
 		}
+		// Folders are always alphabetical. Their dates are about whatever was last written inside
+		// them, which is not a fact about the folder and is no help in finding one.
 		folders.sort(Comparator.comparing(entry -> entry.name().toLowerCase(Locale.ROOT)));
-		// Newest first. A folder of songs you keep is worth reading alphabetically, but the file you
-		// are looking for is nearly always the one that arrived most recently.
-		files.sort(Comparator.comparingLong(FileBrowserScreen::modifiedAt).reversed());
+		// Files default to newest first: the one you are looking for is nearly always the one that
+		// arrived most recently, and a Downloads folder sorted by name is a wall of strangers.
+		files.sort(FastNoteblocksConfig.get().listSortByName()
+			? Comparator.comparing(entry -> entry.name().toLowerCase(Locale.ROOT))
+			: Comparator.comparingLong(FileBrowserScreen::modifiedAt).reversed());
 		if (directory.getParent() == null) {
 			for (Path root : FileSystems.getDefault().getRootDirectories()) {
 				if (!root.equals(directory) && Files.isDirectory(root)) {

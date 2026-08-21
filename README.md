@@ -172,6 +172,22 @@ any two of them. That is usually right for a phrase of even steps and it is
 always visible, drawn as a hairline in the same strip, before you commit to it.
 
 
+## Sorting the lists
+
+The song library and the file browser both list **newest first** by default: the
+song you last saved, or the file you just downloaded, is nearly always the one
+you came back for. A **Sort** button beside the search box switches either to
+A to Z, and the choice sticks -- it is saved with the settings, because the file
+browser is built fresh on every import and a choice that reset itself would not
+be one. Both lists follow the same setting.
+
+Each song row says when it was last saved, in the same words the order is in --
+`2 hours ago`, `3 days ago` -- so the order has a visible key rather than one you
+take on trust. Folders in the browser stay alphabetical whichever way files are
+sorted: a folder's date is about whatever was last written inside it, which is no
+help in finding the folder.
+
+
 ## Dragging a file in
 
 Drag a `.mid`, `.midi`, `.nbs`, `.nbt`, `.schem` or `.litematic` file from your

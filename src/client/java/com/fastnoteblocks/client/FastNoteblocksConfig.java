@@ -364,6 +364,14 @@ public final class FastNoteblocksConfig {
 	private int composerGuiScale;
 	private int layerPanelWidth;
 	private boolean layerPanelCollapsed;
+	/**
+	 * Whether the song library and the file browser list by name rather than newest first.
+	 *
+	 * <p>Kept beside the panel width rather than offered on the settings screen: it is view state,
+	 * set where it applies. It has to persist because the file browser is built fresh on every
+	 * import, and a choice that reset itself each time would not be a choice.</p>
+	 */
+	private boolean listSortByName;
 	private int repeatMergeTicks;
 	private int conversionGapPercentile;
 	private double commandsPerTick;
@@ -556,6 +564,7 @@ public final class FastNoteblocksConfig {
 						: stored.layerPanelWidth
 				);
 				instance.layerPanelCollapsed = Boolean.TRUE.equals(stored.layerPanelCollapsed);
+				instance.listSortByName = Boolean.TRUE.equals(stored.listSortByName);
 			}
 		} catch (Exception ignored) {
 			instance = defaults();
@@ -1318,6 +1327,14 @@ public final class FastNoteblocksConfig {
 		this.layerPanelWidth = clampLayerPanelWidth(layerPanelWidth);
 	}
 
+	public boolean listSortByName() {
+		return listSortByName;
+	}
+
+	public void setListSortByName(boolean value) {
+		this.listSortByName = value;
+	}
+
 	public boolean layerPanelCollapsed() {
 		return layerPanelCollapsed;
 	}
@@ -1385,6 +1402,7 @@ public final class FastNoteblocksConfig {
 		config.composerGuiScale = DEFAULT_COMPOSER_GUI_SCALE;
 		config.layerPanelWidth = DEFAULT_LAYER_PANEL_WIDTH;
 		config.layerPanelCollapsed = false;
+		config.listSortByName = false;
 		config.repeatMergeTicks = DEFAULT_REPEAT_MERGE_TICKS;
 		config.conversionGapPercentile = DEFAULT_CONVERSION_GAP_PERCENTILE;
 		config.convertOctaveShifting = ComposerProject.OctaveShifting.NOTES_ONLY;
@@ -1551,6 +1569,7 @@ public final class FastNoteblocksConfig {
 		private Integer composerGuiScale;
 		private Integer layerPanelWidth;
 		private Boolean layerPanelCollapsed;
+		private Boolean listSortByName;
 		private Integer composerSpeedQuarters;
 		private Integer repeatMergeTicks;
 		private Integer conversionGapPercentile;
@@ -1613,6 +1632,7 @@ public final class FastNoteblocksConfig {
 			this.composerGuiScale = config.composerGuiScale;
 			this.layerPanelWidth = config.layerPanelWidth;
 			this.layerPanelCollapsed = config.layerPanelCollapsed;
+			this.listSortByName = config.listSortByName;
 			this.composerSpeedQuarters = config.composerSpeedQuarters;
 			this.repeatMergeTicks = config.repeatMergeTicks;
 			this.conversionGapPercentile = config.conversionGapPercentile;
