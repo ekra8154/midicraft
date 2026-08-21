@@ -4182,35 +4182,26 @@ public final class SongBuilder {
 			// made this worst, and the pin has gone; the ordering is the same either way.)
 			boolean stackedIsBehind = CUT_ASKS_WHAT_KIND_IS_BEHIND
 				? columnBehindBusy && lastStyle.stacked() : columnBehindBusy;
-			// The sixth cut, asked before every other: a chord of ten or more that overshoots a
-			// staircase folds back over its own repeater instead, and no staircase is built at
-			// all -- down through a top slab for a descent, up over the repeater for a climb.
-			// Capacity never refuses either -- head, wall-bound run and the folded run reach the
-			// simultaneous-note cap with no harps at all -- so where one is refused the ground
-			// said so, and the module shapes below take the chord instead.
+			// The sixth cut: a chord of ten or more that overshoots a staircase folds back over
+			// its own repeater instead, and no staircase is built at all -- down through a top
+			// slab for a descent, up over the repeater for a climb.
+			//
+			// Asked last of all the shapes, and once before any of them. A foldback takes the
+			// height of two lanes and spends it on one chord, so where any module shape can carry
+			// the chord instead it uses the same space better -- see {@link #FOLDBACK_LAST}. The
+			// exception is a descent at a room of nought, which every module shape refuses for the
+			// same reason: they each want a column to put a staircase in and there is none. The
+			// fold wants no staircase, so it is asked there first and the rest never run.
 			// See {@link #FOLDBACK_CUTS}.
 			Foldback fold = null;
 			FoldbackAscent rise = null;
-			if (FOLDBACK_CUTS && layout.ultra() && cutOffered && index > 0 && above >= 0
-					&& above < floors && foldbackCloses(event.notes(), room, climb > 0)) {
-				int oppositeWall = laneWall(nearWall, farWall, forward,
-					lane.travel().getOpposite(), above, climb, floors);
-				int availableBeyond = (lane.ahead(delayColumns).pos().getX() - oppositeWall)
-					* lane.travel().getStepX();
-				if (climb > 0) {
-					rise = foldbackAscentOf(placements, lane.ahead(delayColumns), event.notes(),
-						room, availableBeyond, event.time());
-				} else {
-					fold = foldbackOf(placements, lane.ahead(delayColumns), event.notes(), room,
-						availableBeyond, event.time());
-				}
-				placements.padded(fold != null || rise != null
-					? (climb > 0 ? "planFoldbackClimb" : "planFoldback")
-					: "foldbackRefused" + LAST_FOLDBACK_REFUSAL);
-				if (fold != null || rise != null) {
-					placements.padded("planFoldbackAt" + Math.min(event.notes().size(), 30)
-						+ "Notes");
-				}
+			boolean foldbackOffered = FOLDBACK_CUTS && layout.ultra() && cutOffered && index > 0
+				&& above >= 0 && above < floors;
+			if (foldbackOffered && (!FOLDBACK_LAST || climb <= 0 && room == 0)) {
+				FoldbackPick first = foldbackPick(placements, lane, event, room, delayColumns,
+					nearWall, farWall, forward, above, climb, floors, "AtTheWall");
+				fold = first.fold();
+				rise = first.rise();
 			}
 			// The stair extras' ground, asked once for every shape of this cut. The descent is
 			// pinned: it stands one past the wall whatever the pads and nudges do to the module,
@@ -4650,6 +4641,19 @@ public final class SongBuilder {
 				&& above < floors && !stackedFitsInstead && (fold != null || rise != null
 					|| headed != null || sunken != null || cross != null || wallCut != null
 					|| plainCut);
+			// And the foldback, where every one of them has been refused. What happens to a chord
+			// with no cut is that it is laid whole and the lane walks out past its wall, which is
+			// a breach the build counts and says out loud. Two lanes of height spent on one chord
+			// is dear; a breach is dearer. So the shape that never refuses on capacity is the last
+			// thing asked before that happens, and only then. See {@link #FOLDBACK_LAST}.
+			if (FOLDBACK_LAST && !couldSplit && foldbackOffered && wantsTurn && !stackedFitsInstead
+					&& fold == null && rise == null) {
+				FoldbackPick fallback = foldbackPick(placements, lane, event, room, delayColumns,
+					nearWall, farWall, forward, above, climb, floors, "AsTheLastResort");
+				fold = fallback.fold();
+				rise = fallback.rise();
+				couldSplit = fallback.any();
+			}
 			// Why the head went, where losing it costs the lane its wall.
 			//
 			// A refused head is the commonest way a v2 lane ends up outside its wall: a chord of
@@ -7950,18 +7954,22 @@ public final class SongBuilder {
 		if (room == 0 || last + 1 >= events.size()) {
 			return 0;
 		}
-		// Read off the same split the walk will build. A foldback carries the fold's own column
-		// and its inbound run, both on the floor below; a headed cut carries what the head and the
-		// near bus between them could not take, which is not the same as what a plain bus leaves.
-		if (layout.v2() && roomBehind
-				&& foldbackCloses(events.get(last + 1).notes(), room, climbing)) {
-			return climbing ? foldbackAscentCarriedCells(events.get(last + 1).notes(), room)
-				: foldbackCarriedCells(events.get(last + 1).notes(), room);
-		}
+		// Read off the same split the walk will build, and asked in the order the walk asks: a
+		// headed cut carries what the head and the near bus between them could not take, which is
+		// not the same as what a plain bus leaves, and the foldback -- which carries the fold's own
+		// column and its inbound run, both on the floor below -- is what is left when neither the
+		// head nor the plain cut is there. See {@link #FOLDBACK_LAST}.
 		StackedSplit headed = stackedSplitOf(events.get(last + 1).notes(), room, splitCells,
 			climbing, roomBehind, !roomBehind);
 		if (headed != null) {
 			return (headed.farTail().size() + 1) / 2;
+		}
+		int cells = (events.get(last + 1).notes().size() + 1) / 2;
+		boolean plainCut = room >= 2 && room - 1 < cells && cells + splitCells <= DUST_RANGE;
+		if (!plainCut && layout.v2() && roomBehind
+				&& foldbackCloses(events.get(last + 1).notes(), room, climbing)) {
+			return climbing ? foldbackAscentCarriedCells(events.get(last + 1).notes(), room)
+				: foldbackCarriedCells(events.get(last + 1).notes(), room);
 		}
 		int carried = events.get(last + 1).notes().size() - 2 * (room - 1);
 		return carried > 0 ? (carried + 1) / 2 : 0;
@@ -8062,17 +8070,6 @@ public final class SongBuilder {
 		// the rest of it, all off the one repeater. It closes a lane wherever the lane has got to, and
 		// costs nothing, because the columns it fills are filled with music.
 		int cells = (events.get(last + 1).notes().size() + 1) / 2;
-		// The foldback first, in the same order the walk offers it -- and only for the paster
-		// that has it: promised to v1 this zeroed a breach count a regression holds constant.
-		// Capacity never refuses one, so the planner may promise it on the numbers alone --
-		// gated on the room behind, because the walk refuses a fold in front of path-level wire
-		// and a stacked neighbour is what busy means here. The walk's remaining ground refusals
-		// are the only gap left between the two, and the grading counters say how often they
-		// bite.
-		if (layout.v2() && roomBehind
-				&& foldbackCloses(events.get(last + 1).notes(), room, climbing)) {
-			return true;
-		}
 		// The walk makes this same sum in {@code couldSplit}. They are one rule in two places and a
 		// disagreement between them is a lane closed on a cut that never happens -- so the head is
 		// offered here in the same order the walk offers it, and the plain sum is the fallback in
@@ -8082,7 +8079,17 @@ public final class SongBuilder {
 				!= null) {
 			return true;
 		}
-		return room >= 2 && room - 1 < cells && cells + splitCells <= DUST_RANGE;
+		if (room >= 2 && room - 1 < cells && cells + splitCells <= DUST_RANGE) {
+			return true;
+		}
+		// And the foldback last, which is where the walk asks it -- and only for the paster that
+		// has it: promised to v1 this zeroed a breach count a regression holds constant. Capacity
+		// never refuses one, so the planner may promise it on the numbers alone -- gated on the
+		// room behind, because the walk refuses a fold in front of path-level wire and a stacked
+		// neighbour is what busy means here. The walk's remaining ground refusals are the only gap
+		// left between the two, and the grading counters say how often they bite.
+		return layout.v2() && roomBehind
+			&& foldbackCloses(events.get(last + 1).notes(), room, climbing);
 	}
 
 	/** Books what the end of a lane cannot pay for into the latest gaps that can. */
@@ -12405,6 +12412,44 @@ public final class SongBuilder {
 				+ " had nowhere to hang: a foldback run filled its columns without room for the rest");
 		}
 		return cells;
+	}
+
+	/** Either shape of foldback, whichever way the lane happens to be going. */
+	private record FoldbackPick(Foldback fold, FoldbackAscent rise) {
+		boolean any() {
+			return fold != null || rise != null;
+		}
+	}
+
+	/**
+	 * Asks the ground for this chord's foldback, in whichever direction the lane is travelling.
+	 *
+	 * <p>The walk asks from two places -- once ahead of every other shape where a descent stands
+	 * at a room of nought, and once behind all of them as the last thing tried before the chord is
+	 * laid whole -- so the counting lives here, and {@code when} says which of the two it was.</p>
+	 */
+	private static FoldbackPick foldbackPick(PlacementPlan placements, Lane lane, EventGroup event,
+			int room, int delayColumns, int nearWall, int farWall, Direction forward, int above,
+			int climb, int floors, String when) {
+		if (!foldbackCloses(event.notes(), room, climb > 0)) {
+			return new FoldbackPick(null, null);
+		}
+		int oppositeWall = laneWall(nearWall, farWall, forward, lane.travel().getOpposite(), above,
+			climb, floors);
+		int availableBeyond = (lane.ahead(delayColumns).pos().getX() - oppositeWall)
+			* lane.travel().getStepX();
+		FoldbackPick picked = climb > 0
+			? new FoldbackPick(null, foldbackAscentOf(placements, lane.ahead(delayColumns),
+				event.notes(), room, availableBeyond, event.time()))
+			: new FoldbackPick(foldbackOf(placements, lane.ahead(delayColumns), event.notes(), room,
+				availableBeyond, event.time()), null);
+		placements.padded(picked.any() ? (climb > 0 ? "planFoldbackClimb" : "planFoldback")
+			: "foldbackRefused" + LAST_FOLDBACK_REFUSAL);
+		if (picked.any()) {
+			placements.padded("planFoldbackAt" + Math.min(event.notes().size(), 30) + "Notes");
+			placements.padded("planFoldback" + when);
+		}
+		return picked;
 	}
 
 	/**
@@ -18464,17 +18509,30 @@ public final class SongBuilder {
 	static boolean FOLDBACK_CUTS = true;
 
 	/**
+	 * Whether the foldback is the last shape tried rather than the first.
+	 *
+	 * <p>It was the first, on the strength of never refusing a chord on capacity. That is still
+	 * true and it is not the whole account: a foldback occupies the height of two lanes -- this
+	 * floor for its wall-bound run, the floor below (or above) for the folded one -- and lays a
+	 * single chord in them. Every module shape spends that space better, and the special cases
+	 * built for each room spend it better still: the three centre-fed climbs, the sunken bus, the
+	 * cross descent. So they are asked first and the foldback is what is left when they have all
+	 * been refused -- the last thing before the chord is laid whole and the lane breaches.</p>
+	 *
+	 * <p><b>With one exception, which is the room of nought on a descent.</b> Every module shape
+	 * there wants a column to stand a staircase in, and a lane at the wall has none; the foldback
+	 * wants no staircase at all. So it is asked first there and the rest never run.
+	 * See {@link #FOLDBACK_AT_ROOM_NOUGHT}.</p>
+	 */
+	static boolean FOLDBACK_LAST = true;
+
+	/**
 	 * The smallest chord offered a foldback: the bus classes. The shape works from four notes
 	 * up, and may yet be the way every cut is made; held to ten for now so the module shapes
 	 * keep the chords they were built for.
 	 */
 	static final int FOLDBACK_ABOVE_NOTES = 10;
 
-	/**
-	 * Columns of a climb foldback's staircase that take a harp and nothing else, and how many
-	 * after those refuse a falling instrument. See {@link #rungTakes} for what the geometry
-	 * makes of each; the numbers are the ones in-game testing states.
-	 */
 	/**
 	 * Whether a descent folds at a room of nought -- its repeater on the wall column itself and
 	 * its conductor in the one column of x a turn is allowed past it.
@@ -18494,6 +18552,11 @@ public final class SongBuilder {
 	 */
 	static boolean FOLDBACK_AT_ROOM_NOUGHT = true;
 
+	/**
+	 * Columns of a climb foldback's staircase that take a harp and nothing else, and how many
+	 * after those refuse a falling instrument. See {@link #rungTakes} for what the geometry
+	 * makes of each; the numbers are the ones in-game testing states.
+	 */
 	private static final int FOLDBACK_RUNG_HARPS = 1;
 
 	private static final int FOLDBACK_RUNG_NO_FALLING = 1;
