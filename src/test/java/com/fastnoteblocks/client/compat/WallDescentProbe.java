@@ -15,8 +15,7 @@ import org.junit.jupiter.api.Test;
 
 /**
  * Finds the wall descents (desc1) in a build and says where each one's repeater stands, so one
- * can be walked to in game -- including the empty cell where the mockup's stand flank would
- * hang, which is the note the shipped shape leaves out for want of a driver.
+ * can be walked to in game.
  */
 @Tag("sweep")
 class WallDescentProbe {

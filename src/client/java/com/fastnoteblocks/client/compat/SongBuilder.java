@@ -11850,12 +11850,19 @@ public final class SongBuilder {
 	 *
 	 * @param jogFlank beside the centre on the staircase side, harp only -- its instrument cell
 	 *     stands over the second rung's dust, and anything solid there cuts the descent line
-	 * @param awayFlank beside the centre on the open side, any instrument
+	 * @param awayFlank beside the centre on the open side, harp only -- it hangs with no
+	 *     instrument block, driven by the strongly powered centre the way the jog flank is. It
+	 *     used to be any instrument on a conducting relay block a level below, with a stand
+	 *     flank riding that block's power; in-game reading found the block weak-powered by a
+	 *     neighbouring lane's glass staircase dust, sounding both notes at the wrong tick, so
+	 *     the block and the stand flank went and the harp's air claim holds the cell empty
+	 * @param rungFlank beside the first rung on the open side, any instrument -- powered stone
+	 *     sounds what hangs beside it, the stair-extra mechanism at the head's own door
 	 * @param endNote on the border at the far half's own level, sounded by the far bus's first
 	 *     low -- the note the third rung's column gives back
 	 */
 	private record WallDescent(EventNote centre, EventNote jogFlank, EventNote awayFlank,
-			EventNote standFlank, EventNote endNote, List<EventNote> far) {
+			EventNote rungFlank, EventNote endNote, List<EventNote> far) {
 	}
 
 	/** Why the last {@link #wallDescentOf} came back with nothing. */
@@ -11914,27 +11921,22 @@ public final class SongBuilder {
 		EventNote jogFlank = !harps.isEmpty()
 				&& railSlotTakes(placements, centreAt.relative(descentSide), time)
 			? harps.remove(0) : null;
+		// A harp like the jog flank, and for the same reason: it hangs beside the centre with
+		// nothing under it, driven by the strongly powered conductor itself. The relay block
+		// that used to carry an any-instrument note here was weak-powered by a neighbouring
+		// lane's glass staircase dust and sounded its pair at the wrong tick -- in-game
+		// reading, from the reworked desc1 mockup -- so the side carries no conductor at all
+		// now, and the stand flank that rode the relay's power went with it.
+		EventNote awayFlank = !harps.isEmpty()
+				&& railSlotTakes(placements, centreAt.relative(away), time)
+			? harps.remove(0) : null;
 		List<EventNote> pool = new ArrayList<>(others);
 		pool.addAll(harps);
-		// The away flank's instrument has to conduct: the wire points into it and it relays the
-		// power on to the stand flank, and a wire pointing into glowstone powers nothing at all
-		// -- in-game reading found exactly that dead pair on illit. Same rule as the stacked
-		// module's relays: a solid conductor, a harp wearing the harp block, sand included.
-		EventNote awayFlank = null;
-		if (railSlotTakes(placements, centreAt.relative(away), time)) {
-			for (int index = 0; index < pool.size(); index++) {
-				if (conductsSideways(pool.get(index))) {
-					awayFlank = pool.remove(index);
-					break;
-				}
-			}
-		}
-		// The stand flank rides on the away flank: its driver is the away flank's instrument
-		// block, weak-powered by the wire pointing into it and standing x-adjacent -- in-game
-		// testing proved the chain when the dragon head the layout check had put on this note
-		// roared as the lane ran. No away flank, no instrument, no driver, no note.
-		EventNote standFlank = awayFlank != null && !pool.isEmpty()
-				&& railSlotTakes(placements, stand.relative(away), time)
+		// Beside the first rung on the open side: powered stone sounds what hangs beside it,
+		// the stair-extra mechanism at the head's own door. Any instrument.
+		EventNote rungFlank = !pool.isEmpty()
+				&& railSlotTakes(placements,
+					stand.relative(travel).below().relative(away), time)
 			? pool.remove(0) : null;
 		// The border's end note, live for the same in-game debugging as the stand flank: the
 		// census reads it re-sounded by a later module's instrument block across the corridor
@@ -11954,7 +11956,7 @@ public final class SongBuilder {
 				+ (3 + (pool.size() + 2) / 2 - DUST_RANGE);
 			return null;
 		}
-		return new WallDescent(centre, jogFlank, awayFlank, standFlank, endNote, pool);
+		return new WallDescent(centre, jogFlank, awayFlank, rungFlank, endNote, pool);
 	}
 
 	/**
@@ -11964,7 +11966,7 @@ public final class SongBuilder {
 	private static BlockPos addWallDescentHead(PlacementPlan placements, BlockPos cursor,
 			Direction travel, Direction descentSide, int triggerDelay, WallDescent cut, int time) {
 		placements.placing("wallDescent" + (5 - (cut.jogFlank() == null ? 1 : 0)
-			- (cut.awayFlank() == null ? 1 : 0) - (cut.standFlank() == null ? 1 : 0)
+			- (cut.awayFlank() == null ? 1 : 0) - (cut.rungFlank() == null ? 1 : 0)
 			- (cut.endNote() == null ? 1 : 0)) + "/far" + cut.far().size());
 		placements.turnedAt(cursor);
 		Direction away = descentSide.getOpposite();
@@ -11998,20 +12000,18 @@ public final class SongBuilder {
 			placeNote(placements, centreAt.relative(descentSide), cut.jogFlank());
 		}
 		if (cut.awayFlank() != null) {
-			// Laid the way a stacked module lays its relays: a conducting block, powered, with
-			// the note on top. The wire points into it, it sounds its own note and relays on to
-			// the stand flank beside it -- in-game testing proved the chain when the dragon head
-			// the layout check had put on that flank roared as the lane ran, and proved the
-			// conductor rule when a glowstone here left the pair dead on illit.
-			BlockPos instrument = centreAt.relative(away).below();
-			placements.powered(instrument, conductingInstrumentBlock(cut.awayFlank()), time);
-			if (FALLING_INSTRUMENT_BLOCKS.contains(cut.awayFlank().instrumentBlock())) {
-				placements.support(instrument.below(), UNDERFLOOR);
-			}
-			placeNoteBlock(placements, centreAt.relative(away), cut.awayFlank());
+			// A hanging harp driven by the strongly powered centre, exactly as the jog flank
+			// is. The conducting relay block that used to stand a level below -- with the
+			// stand flank riding its power -- was weak-powered by a neighbouring lane's glass
+			// staircase dust and sounded both notes at the wrong tick; in-game reading, from
+			// the reworked desc1 mockup. The harp's air claim holds the relay's old cell empty
+			// so nothing can ever stand there again.
+			placeNote(placements, centreAt.relative(away), cut.awayFlank(), true);
 		}
-		if (cut.standFlank() != null) {
-			placeNote(placements, cursor.relative(away), cut.standFlank());
+		if (cut.rungFlank() != null) {
+			// Beside the first rung, on the open side: powered stone sounds what hangs beside
+			// it, the stair-extra mechanism at the head's own door.
+			placeNote(placements, wire.below().relative(away), cut.rungFlank(), true);
 		}
 		if (cut.endNote() != null) {
 			// At the far bus's own low level -- one above the landing -- beside its first stone,
