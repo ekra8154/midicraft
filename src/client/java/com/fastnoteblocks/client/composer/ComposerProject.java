@@ -28,7 +28,8 @@ public record ComposerProject(
 	int activeLayerIndex,
 	long nextNoteId,
 	long endTick,
-	int speedQuarters
+	int speedQuarters,
+	List<Marker> markers
 ) {
 	public static final int DEFAULT_PPQ = 480;
 	public static final int DEFAULT_TEMPO_MICROS_PER_QUARTER = 500_000;
@@ -66,6 +67,27 @@ public record ComposerProject(
 	public static final int MIN_SPEED_QUARTERS = 1;
 	public static final int MAX_SPEED_QUARTERS = 32;
 	public static final int DEFAULT_SPEED_QUARTERS = 4;
+	/**
+	 * How many markers a composition may carry.
+	 *
+	 * <p>A guard against a runaway import or a stuck key, not a design limit. Markers name the parts
+	 * of a song -- intro, chorus, the bar the build goes wrong at -- and a song with more than a few
+	 * dozen of those has stopped using them as landmarks.</p>
+	 */
+	public static final int MAX_MARKERS = 256;
+
+	/**
+	 * Everything but the markers, for the callers written before there were any.
+	 *
+	 * <p>A record component reaches a hundred and more construction sites at once, most of them
+	 * probes and tests that build a song out of a handful of notes and have no opinion about
+	 * markers. This is what lets those go on saying what they mean.</p>
+	 */
+	public ComposerProject(String name, int ppq, int tempoMicrosPerQuarter, List<Layer> layers,
+			int activeLayerIndex, long nextNoteId, long endTick, int speedQuarters) {
+		this(name, ppq, tempoMicrosPerQuarter, layers, activeLayerIndex, nextNoteId, endTick,
+			speedQuarters, List.of());
+	}
 
 	public ComposerProject {
 		name = name == null || name.isBlank() ? "Untitled sequence" : name.trim();
@@ -93,6 +115,28 @@ public record ComposerProject(
 		endTick = lastNoteStart < 0L
 			? (endTick > 0L ? endTick : ppq * 4L)
 			: Math.max(endTick, lastNoteStart);
+		markers = normalizeMarkers(markers);
+	}
+
+	/**
+	 * In tick order, one to a tick, and never more than {@link #MAX_MARKERS} of them.
+	 *
+	 * <p>One to a tick because two names for the same instant is two flags drawn on top of each
+	 * other, and the one underneath can neither be read nor clicked. The first written wins, which
+	 * makes adding a marker where one already stands a rename rather than a second flag.</p>
+	 */
+	private static List<Marker> normalizeMarkers(List<Marker> value) {
+		if (value == null || value.isEmpty()) {
+			return List.of();
+		}
+		Map<Long, Marker> byTick = new TreeMap<>();
+		for (Marker marker : value) {
+			if (marker != null) {
+				byTick.putIfAbsent(marker.tick(), marker);
+			}
+		}
+		List<Marker> sorted = new ArrayList<>(byTick.values());
+		return List.copyOf(sorted.size() <= MAX_MARKERS ? sorted : sorted.subList(0, MAX_MARKERS));
 	}
 
 	/**
@@ -103,7 +147,87 @@ public record ComposerProject(
 	 */
 	private ComposerProject with(List<Layer> updatedLayers, int active, long nextId) {
 		return new ComposerProject(name, ppq, tempoMicrosPerQuarter, updatedLayers, active, nextId,
-			endTick, speedQuarters);
+			endTick, speedQuarters, markers);
+	}
+
+	/**
+	 * A named position on the timeline.
+	 *
+	 * <p>Nothing is built from a marker and nothing sounds at one. It is somewhere to write down
+	 * what a stretch of the song is -- where the chorus starts, which bar the build goes wrong at --
+	 * so that finding it again is reading a label rather than counting bars.</p>
+	 */
+	public record Marker(long tick, String label) {
+		public Marker {
+			tick = Math.max(0L, tick);
+			label = label == null || label.isBlank() ? "Marker" : label.trim();
+		}
+
+		public Marker named(String value) {
+			return new Marker(tick, value);
+		}
+
+		public Marker movedTo(long value) {
+			return new Marker(value, label);
+		}
+	}
+
+	/** The marker exactly on {@code tick}, or null. */
+	public Marker markerAt(long tick) {
+		for (Marker marker : markers) {
+			if (marker.tick() == tick) {
+				return marker;
+			}
+		}
+		return null;
+	}
+
+	/** The marker nearest {@code tick} within {@code tolerance}, or null when none is that close. */
+	public Marker markerNear(long tick, long tolerance) {
+		Marker nearest = null;
+		long best = Long.MAX_VALUE;
+		for (Marker marker : markers) {
+			long distance = Math.abs(marker.tick() - tick);
+			if (distance <= Math.max(0L, tolerance) && distance < best) {
+				best = distance;
+				nearest = marker;
+			}
+		}
+		return nearest;
+	}
+
+	/**
+	 * Puts a marker on a tick, replacing whatever was already named there.
+	 *
+	 * <p>Replacing rather than refusing: one tick holds one marker, so writing to an occupied tick
+	 * can only be a rename, and there is nothing else it could sensibly mean.</p>
+	 */
+	public ComposerProject withMarkerAt(long tick, String label) {
+		long at = Math.max(0L, tick);
+		List<Marker> updated = new ArrayList<>(markers.size() + 1);
+		for (Marker marker : markers) {
+			if (marker.tick() != at) {
+				updated.add(marker);
+			}
+		}
+		if (updated.size() >= MAX_MARKERS) {
+			return this;
+		}
+		updated.add(new Marker(at, label));
+		return withMarkers(updated);
+	}
+
+	/** Removes the marker on a tick, if there is one. */
+	public ComposerProject withoutMarkerAt(long tick) {
+		if (markerAt(tick) == null) {
+			return this;
+		}
+		return withMarkers(markers.stream().filter(marker -> marker.tick() != tick).toList());
+	}
+
+	public ComposerProject withMarkers(List<Marker> value) {
+		return new ComposerProject(name, ppq, tempoMicrosPerQuarter, layers, activeLayerIndex,
+			nextNoteId, endTick, speedQuarters, value);
 	}
 
 	public record NoteEvent(long id, int midiNote, long startTick, long durationTicks, int velocity) {
@@ -583,6 +707,7 @@ public record ComposerProject(
 			&& tempoMicrosPerQuarter == other.tempoMicrosPerQuarter
 			&& endTick == other.endTick
 			&& speedQuarters == other.speedQuarters
+			&& markers.equals(other.markers)
 			&& layers.equals(other.layers);
 	}
 
@@ -1075,7 +1200,7 @@ public record ComposerProject(
 
 	public ComposerProject withTempo(int value) {
 		return new ComposerProject(name, ppq, value, layers, activeLayerIndex, nextNoteId,
-			endTick, speedQuarters);
+			endTick, speedQuarters, markers);
 	}
 
 	/**
@@ -1097,7 +1222,7 @@ public record ComposerProject(
 
 	public ComposerProject withName(String value) {
 		return new ComposerProject(value, ppq, tempoMicrosPerQuarter, layers, activeLayerIndex, nextNoteId,
-			endTick, speedQuarters);
+			endTick, speedQuarters, markers);
 	}
 
 	public MinecraftConversion convertToMinecraft(int quantizeTicks, boolean snapTempo) {
@@ -1214,7 +1339,7 @@ public record ComposerProject(
 		// a 1/8, grid set to 1/16, tempo doubled, song halved. Asking the notes cannot do that,
 		// because after quantizing their spacing is always a whole number of grid steps.
 		ComposerProject shaped = new ComposerProject(name, ppq, tempoMicrosPerQuarter, convertedLayers,
-			convertedActiveLayer, nextNoteId, endTick, speedQuarters);
+			convertedActiveLayer, nextNoteId, endTick, speedQuarters, markers);
 		NoteSpacing spacing = shaped.noteSpacing();
 		int convertedTempo = snapTempo && spacing.gridTicks() > 0L
 			? shaped.alignedTempoFor(
@@ -1245,7 +1370,10 @@ public record ComposerProject(
 			convertedActiveLayer,
 			nextNoteId,
 			snappedEnd,
-			speedQuarters
+			speedQuarters,
+			// Left on the ticks they were written on, because the notes are: quantizing moves a note
+			// within the tick space rather than rescaling it, so a marker still names the same bar.
+			markers
 		);
 		return new MinecraftConversion(
 			converted,
@@ -1496,8 +1624,13 @@ public record ComposerProject(
 				.map(note -> note.movedTo(note.startTick() - earliest, note.midiNote()))
 				.toList()));
 		}
+		// The markers come forward too. They name positions in the music, and music that has moved
+		// leaves every one of them pointing a bar of silence away from what it was written on.
+		List<Marker> pulled = markers.stream()
+			.map(marker -> marker.movedTo(Math.max(0L, marker.tick() - earliest)))
+			.toList();
 		return new ComposerProject(name, ppq, tempoMicrosPerQuarter, updated, activeLayerIndex,
-			nextNoteId, Math.max(1L, endTick - earliest), speedQuarters);
+			nextNoteId, Math.max(1L, endTick - earliest), speedQuarters, pulled);
 	}
 
 	/** Where the notes actually stop, ignoring any trailing silence the marker adds. */
@@ -1517,12 +1650,12 @@ public record ComposerProject(
 	/** Moves the end marker. Values before the last note are pulled forward to it. */
 	public ComposerProject withEndTick(long value) {
 		return new ComposerProject(name, ppq, tempoMicrosPerQuarter, layers, activeLayerIndex,
-			nextNoteId, Math.max(0L, value), speedQuarters);
+			nextNoteId, Math.max(0L, value), speedQuarters, markers);
 	}
 
 	public ComposerProject withSpeedQuarters(int value) {
 		return new ComposerProject(name, ppq, tempoMicrosPerQuarter, layers, activeLayerIndex,
-			nextNoteId, endTick, value);
+			nextNoteId, endTick, value, markers);
 	}
 
 	/**

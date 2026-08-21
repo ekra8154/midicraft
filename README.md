@@ -111,6 +111,26 @@ never intercepts right-clicks. If the required item is not in the hotbar, the
 selected slot is left unchanged.
 
 
+## Markers
+
+A marker is a named position on the composer's timeline. Nothing is built from
+one and nothing sounds at one -- it is somewhere to write down what a stretch of
+the song is, so that finding the second chorus again is reading a label rather
+than counting bars.
+
+**M** puts one where the playback marker is standing, or takes away the one
+already there; **Edit > Markers** is the same three actions with the mouse. They
+appear in a strip above the ruler, which is only there while the song has
+markers -- with none, the ruler sits flush against the menu bar. Click a label to
+jump the playback marker to it, double-click to rename it, right-click to remove
+it, and click the empty part of the strip to add one where you clicked. A faint
+line drops from each one through the roll.
+
+One marker to a tick, so adding one where another already stands renames it.
+They are saved with the composition, they come forward when **Snap to song
+start** pulls the music forward, and Ctrl+Z takes back any of it.
+
+
 ## Debug commands
 
 Off by default; the switch is on the Debug tab of the settings, and takes effect

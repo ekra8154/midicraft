@@ -3,6 +3,7 @@ package com.fastnoteblocks.client.composer;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fastnoteblocks.client.composer.ComposerProject.ClipboardNote;
@@ -307,6 +308,146 @@ class ClipboardAndLayersTest {
 		assertEquals(1, merged.layers().size());
 		assertEquals(3, merged.layers().getFirst().notes().size(),
 			"the shared note is one note; the two that differ are their own");
+	}
+
+	/**
+	 * A block of layers arrives together and in its own order, however scattered it started.
+	 *
+	 * <p>The alternative -- each selected layer stepping one place on its own -- turns a selection
+	 * inside out the moment anything unselected sits between two of them.</p>
+	 */
+	@Test
+	void movingSeveralLayersKeepsThemInOrderAndTogether() {
+		ComposerProject song = songOf(
+			layer("A", "HARP", 60),
+			layer("B", "HARP", 61),
+			layer("C", "HARP", 62),
+			layer("D", "HARP", 63));
+
+		assertEquals(List.of("C", "A", "B", "D"), names(song.moveLayersTo(Set.of(0, 1), 3)),
+			"A and B step down past C as one block");
+		assertEquals(List.of("A", "B", "D", "C"), names(song.moveLayersTo(Set.of(3), 2)),
+			"D lands in the gap above C");
+		assertEquals(List.of("B", "D", "A", "C"), names(song.moveLayersTo(Set.of(1, 3), 0)),
+			"two rows with something between them arrive adjacent, in their own order");
+	}
+
+	/** A gap the block already fills is not a move, so the layers come back untouched. */
+	@Test
+	void movingLayersNowhereChangesNothing() {
+		ComposerProject song = songOf(layer("A", "HARP", 60), layer("B", "HARP", 61));
+
+		assertEquals(List.of("A", "B"), names(song.moveLayersTo(Set.of(0), 0)));
+		assertEquals(List.of("A", "B"), names(song.moveLayersTo(Set.of(0, 1), 0)),
+			"moving all of them is moving none of them");
+		assertEquals(List.of("A", "B"), names(song.moveLayersTo(Set.of(), 1)));
+	}
+
+	/**
+	 * The permutation is what the screen renumbers its own layer positions through, so it has to
+	 * describe the same rearrangement the project performed.
+	 */
+	@Test
+	void theLayerOrderMatchesTheMoveItDescribes() {
+		ComposerProject song = songOf(
+			layer("A", "HARP", 60),
+			layer("B", "HARP", 61),
+			layer("C", "HARP", 62));
+		List<Integer> order = song.layerOrderAfterMove(Set.of(2), 0);
+
+		assertEquals(List.of(2, 0, 1), order);
+		assertEquals(names(song.withLayerOrder(order)), names(song.moveLayersTo(Set.of(2), 0)));
+	}
+
+	/** Each copy under its own original, so duplicating three parts leaves three readable pairs. */
+	@Test
+	void duplicatingSeveralLayersPutsEachCopyUnderItsSource() {
+		ComposerProject song = songOf(
+			layer("A", "HARP", 60),
+			layer("B", "HARP", 61),
+			layer("C", "HARP", 62));
+
+		ComposerProject copied = song.duplicateLayers(Set.of(0, 2));
+
+		assertEquals(List.of("A", "A copy", "B", "C", "C copy"), names(copied));
+		assertEquals(1, copied.activeLayerIndex(), "onto the first copy");
+		Set<Long> sourceIds = song.layers().stream()
+			.flatMap(layer -> layer.notes().stream())
+			.map(NoteEvent::id)
+			.collect(Collectors.toCollection(LinkedHashSet::new));
+		assertTrue(copied.layers().get(4).notes().stream()
+				.noneMatch(note -> sourceIds.contains(note.id())),
+			"the second copy's notes are as new as the first's");
+	}
+
+	/**
+	 * A marker is one to a tick, kept in order, and survives every edit that does not name it.
+	 */
+	@Test
+	void markersAreOnePerTickAndInOrder() {
+		ComposerProject song = songOf(layer("A", "HARP", 60))
+			.withMarkerAt(960L, "Chorus")
+			.withMarkerAt(0L, "Intro");
+
+		assertEquals(List.of("Intro", "Chorus"), markerLabels(song), "sorted by tick, not by arrival");
+		assertEquals(List.of("Intro", "Bridge"), markerLabels(song.withMarkerAt(960L, "Bridge")),
+			"writing to an occupied tick is a rename, not a second flag");
+		assertEquals(List.of("Intro"), markerLabels(song.withoutMarkerAt(960L)));
+		assertEquals(song, song.withoutMarkerAt(123L), "nothing there is nothing to do");
+		assertEquals("Chorus", song.markerNear(950L, 20L).label());
+		assertNull(song.markerNear(950L, 5L), "outside the tolerance is not near");
+	}
+
+	/** The one thing that has to carry them: a layer edit is not an opinion about the timeline. */
+	@Test
+	void markersSurviveLayerEdits() {
+		ComposerProject song = songOf(layer("A", "HARP", 60), layer("B", "HARP", 61))
+			.withMarkerAt(480L, "Verse");
+
+		assertEquals(List.of("Verse"), markerLabels(song.moveLayersTo(Set.of(1), 0)));
+		assertEquals(List.of("Verse"), markerLabels(song.duplicateLayers(Set.of(0))));
+		assertEquals(List.of("Verse"), markerLabels(song.deleteLayers(Set.of(1))));
+		assertEquals(List.of("Verse"), markerLabels(song.withTempo(400_000)));
+		assertEquals(List.of("Verse"), markerLabels(song.withName("renamed")));
+	}
+
+	/**
+	 * Pulling a song forward pulls its markers with it: a marker names a position in the music, and
+	 * music that has moved leaves every one of them pointing a bar of silence away.
+	 */
+	@Test
+	void snappingToStartCarriesTheMarkers() {
+		ComposerProject song = songOf(new Layer("A", "HARP", false, true, true,
+			List.of(note(60, 960L), note(62, 1920L))))
+			.withMarkerAt(960L, "First note")
+			.withMarkerAt(1440L, "Middle")
+			.withMarkerAt(480L, "Count-in");
+
+		ComposerProject snapped = song.snappedToStart(Set.of(0));
+
+		assertEquals(List.of(0L, 480L), snapped.markers().stream()
+			.map(ComposerProject.Marker::tick).toList(),
+			"the two beyond the silence come back 960 with the notes, and the one inside it lands "
+				+ "on zero -- where the first of them already is, so the two become one");
+		assertEquals(List.of("Count-in", "Middle"), markerLabels(snapped),
+			"first written wins the shared tick");
+	}
+
+	/** An unmarked composition is not a marked one, whatever else the two agree about. */
+	@Test
+	void markersCountAsContent() {
+		ComposerProject song = songOf(layer("A", "HARP", 60));
+
+		assertFalse(song.sameContentAs(song.withMarkerAt(240L, "Here")));
+		assertTrue(song.withMarkerAt(240L, "Here").sameContentAs(song.withMarkerAt(240L, "Here")));
+	}
+
+	private static List<String> names(ComposerProject song) {
+		return song.layers().stream().map(Layer::name).toList();
+	}
+
+	private static List<String> markerLabels(ComposerProject song) {
+		return song.markers().stream().map(ComposerProject.Marker::label).toList();
 	}
 
 	private static Set<String> instrumentsHolding(PasteResult pasted, Set<Long> ids) {

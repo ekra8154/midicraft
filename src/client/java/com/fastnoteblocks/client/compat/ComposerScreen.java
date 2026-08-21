@@ -65,6 +65,18 @@ public final class ComposerScreen extends Screen {
 	/** Tall enough for a bar number with the clock time under it. */
 	private static final int TIMELINE_RULER_HEIGHT = 24;
 	/**
+	 * The strip of named positions above the ruler, and the colour they are drawn in.
+	 *
+	 * <p>Its own lane rather than a flag among the bar numbers: a marker's whole value is its name,
+	 * and a name has to be readable next to a bar number without either being mistaken for the
+	 * other. The lane is only there when the song has markers, so a composition with none keeps the
+	 * ruler flush against the menu bar.</p>
+	 */
+	private static final int MARKER_LANE_HEIGHT = 11;
+	private static final int MARKER_COLOR = 0xFFA294FF;
+	/** How near the cursor a marker counts as the one being pointed at, in pixels. */
+	private static final int MARKER_GRAB_PIXELS = 6;
+	/**
 	 * One height for every layer row.
 	 *
 	 * <p>Rows used to open into a 42-pixel panel of buttons, which is how a converted song ended up
@@ -649,7 +661,7 @@ public final class ComposerScreen extends Screen {
 	@Override
 	protected void init() {
 		clearWidgets();
-		rollY = TOOLBAR_HEIGHT + TIMELINE_RULER_HEIGHT;
+		rollY = TOOLBAR_HEIGHT + markerLaneHeight() + TIMELINE_RULER_HEIGHT;
 		rollHeight = Math.max(40, height - rollY - 24);
 		centerMinecraftRange();
 		// The menus are drawn, not built: see extractMenuBar. Only the three controls are widgets,
@@ -1513,13 +1525,14 @@ public final class ComposerScreen extends Screen {
 		long frameStart = profiling ? System.nanoTime() : 0L;
 		updatePlayback();
 		rollX = layerPanelWidth() + PIANO_WIDTH;
-		rollY = TOOLBAR_HEIGHT + TIMELINE_RULER_HEIGHT;
+		rollY = TOOLBAR_HEIGHT + markerLaneHeight() + TIMELINE_RULER_HEIGHT;
 		rollWidth = Math.max(40, width - rollX - 8);
 		rollHeight = Math.max(40, height - rollY - 24);
 		long mark = frameStart;
 		extractPanels(graphics);
 		mark = phase(PHASE_PANELS, mark);
 		extractTimeRuler(graphics, mouseX, mouseY);
+		extractMarkerLane(graphics, mouseX, mouseY);
 		mark = phase(PHASE_RULER, mark);
 		mark = extractPianoRoll(graphics, mouseX, mouseY, mark);
 		extractStatus(graphics);
@@ -1945,6 +1958,7 @@ public final class ComposerScreen extends Screen {
 			case EDIT -> {
 				addActionRows(rows, ToolbarAction.EDIT_ACTIONS);
 				rows.add(4, MenuRow.of(ToolbarSubmenu.QUANTIZE));
+				rows.add(MenuRow.of(ToolbarSubmenu.MARKERS));
 				rows.add(MenuRow.of(ToolbarSubmenu.END));
 			}
 			case BUILD -> addActionRows(rows, ToolbarAction.BUILD_ACTIONS);
@@ -2048,6 +2062,8 @@ public final class ComposerScreen extends Screen {
 			case SELECT_OVERLOADED_CHORDS -> projectStats().overloadedTicks() > 0
 				|| projectStats().peakChord() > config.chordThinTarget();
 			case SELECT_NONE -> !selectedNotes.isEmpty() || !selectedLayers.isEmpty();
+			case RENAME_MARKER -> markerAtCursor() != null;
+			case CLEAR_MARKERS -> !project().markers().isEmpty();
 			// Nothing to scan from the title screen, and the coordinate prompt would have no way
 			// to tell you that the region you typed reads as empty because there is no world.
 			case SCAN_WORLD -> minecraft.level != null;
@@ -2147,6 +2163,9 @@ public final class ComposerScreen extends Screen {
 			case TRANSPOSE_BEST_FIT -> transposeToBestFit();
 			case SNAP_TEMPO -> snapTempo(false);
 			case SNAP_TEMPO_GAME -> snapTempo(true);
+			case ADD_MARKER -> toggleMarkerAtCursor();
+			case RENAME_MARKER -> renameMarker(markerAtCursor());
+			case CLEAR_MARKERS -> clearMarkers();
 			case SNAP_END -> applyStep("End snapped", "snap the end to the grid", project().withEndTick(
 				snapEndToRepeaterGrid()));
 			case TRIM_END -> applyStep("Trimmed", "trim the end to the last note",
@@ -2526,6 +2545,13 @@ public final class ComposerScreen extends Screen {
 				+ "Never the last of a pitch or the last of an instrument, so a chord keeps its "
 				+ "harmony and keeps its drum -- only how thickly they are scored changes. Takes "
 				+ "from the selected layers only; select them all to thin the whole song.";
+			case ADD_MARKER -> "Puts a marker where the playback marker is standing, or takes away "
+				+ "the one already there. M does the same thing. A marker names a position and nothing "
+				+ "else: it is not built and it makes no sound.";
+			case RENAME_MARKER -> "Renames the marker the playback marker is standing on. "
+				+ "Double-clicking its label in the strip above the ruler does the same thing.";
+			case CLEAR_MARKERS -> "Removes every marker, and with them the strip they are drawn in. "
+				+ "Ctrl+Z puts them back.";
 			case SELECT_ALL_NOTES -> "Selects every note on the active layers.";
 			case SELECT_NONE -> "Puts down the selected notes. With none selected it steps out of "
 				+ "the selected layers instead, which is the same thing as clicking the empty run under "
@@ -2588,6 +2614,7 @@ public final class ComposerScreen extends Screen {
 			case REDO -> "Ctrl+Y";
 			case SELECT_ALL_NOTES -> "Ctrl+A";
 			case SELECT_NONE -> "Ctrl+Shift+A";
+			case ADD_MARKER -> "M";
 			default -> "";
 		};
 	}
@@ -3362,6 +3389,181 @@ public final class ComposerScreen extends Screen {
 		}
 	}
 
+	/** How tall the marker strip is: nothing at all until the song has a marker to put in it. */
+	private int markerLaneHeight() {
+		return project().markers().isEmpty() ? 0 : MARKER_LANE_HEIGHT;
+	}
+
+	private int markerLaneTop() {
+		return rollY - TIMELINE_RULER_HEIGHT - markerLaneHeight();
+	}
+
+	/**
+	 * The markers on screen, each with the run of pixels its name is allowed to occupy.
+	 *
+	 * <p>Worked out once and used by both the drawing and the clicking, because a label whose tab is
+	 * measured twice is a label you can see and cannot hit. A tab runs from its own tick to whatever
+	 * comes first: the width of its name, the next marker, or the end of the roll.</p>
+	 */
+	private List<MarkerTab> markerTabs() {
+		List<ComposerProject.Marker> markers = project().markers();
+		List<MarkerTab> tabs = new ArrayList<>();
+		for (int index = 0; index < markers.size(); index++) {
+			ComposerProject.Marker marker = markers.get(index);
+			int x = tickX(marker.tick());
+			if (x > rollX + rollWidth) {
+				break;
+			}
+			int next = index + 1 < markers.size()
+				? tickX(markers.get(index + 1).tick())
+				: Integer.MAX_VALUE;
+			int room = Math.min(Math.min(next, rollX + rollWidth) - x,
+				smallTextWidth(marker.label()) + 6);
+			if (room < 3 || x + room < rollX) {
+				continue;
+			}
+			tabs.add(new MarkerTab(marker, x, x + room));
+		}
+		return tabs;
+	}
+
+	private void extractMarkerLane(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
+		if (markerLaneHeight() <= 0) {
+			return;
+		}
+		int laneTop = markerLaneTop();
+		int laneBottom = laneTop + MARKER_LANE_HEIGHT;
+		graphics.fill(rollX, laneTop, rollX + rollWidth, laneBottom, 0xCC12161E);
+		graphics.fill(rollX, laneBottom - 1, rollX + rollWidth, laneBottom, 0xFF262B33);
+		for (MarkerTab tab : markerTabs()) {
+			boolean hovered = mouseY >= laneTop && mouseY < laneBottom
+				&& mouseX >= tab.left() && mouseX < tab.right();
+			if (tab.left() >= rollX) {
+				// Down through the ruler. The rest of the drop, over the roll itself, is drawn with the
+				// grid: the rows are washed with a near-opaque fill and anything under them is lost.
+				graphics.fill(tab.left(), laneBottom, tab.left() + 1, rollY,
+					hovered ? 0x66A294FF : 0x33A294FF);
+			}
+			graphics.fill(Math.max(rollX, tab.left()), laneTop + 1, tab.right(), laneBottom - 1,
+				hovered ? 0xFF3E3670 : 0xFF262042);
+			if (tab.left() >= rollX) {
+				graphics.fill(tab.left(), laneTop + 1, tab.left() + 1, laneBottom - 1, MARKER_COLOR);
+			}
+			smallText(graphics, smallFit(tab.marker().label(), tab.right() - tab.left() - 4),
+				Math.max(rollX + 1, tab.left() + 3), laneTop + 3,
+				hovered ? 0xFFFFFFFF : 0xFFCFC8FF);
+		}
+		// Not while a menu is hanging over the lane, which every one of them does: they start two
+		// pixels under the bar and the lane starts at it.
+		if (mouseY >= laneTop && mouseY < laneBottom && mouseX >= rollX
+				&& mouseX < rollX + rollWidth && !overOpenMenu(mouseX, mouseY)) {
+			ComposerProject.Marker hovered = markerAtPoint(mouseX, mouseY);
+			graphics.setTooltipForNextFrame(Component.literal(hovered == null
+				? "Click to add a marker here. M adds one at the playback marker."
+				: "\"" + hovered.label() + "\" at bar "
+					+ (hovered.tick() / Math.max(1L, project().ppq() * 4L) + 1L)
+					+ "\nClick to jump there, double-click to rename, right-click to remove"),
+				mouseX, mouseY);
+		}
+	}
+
+	/** The marker whose tab a point in the lane is on, or null. */
+	private ComposerProject.Marker markerAtPoint(double x, double y) {
+		if (!insideMarkerLane(x, y)) {
+			return null;
+		}
+		List<MarkerTab> tabs = markerTabs();
+		for (MarkerTab tab : tabs) {
+			if (x >= tab.left() && x < tab.right()) {
+				return tab.marker();
+			}
+		}
+		// Only then the nearest post within reach. Checking the slop first would hand a click on the
+		// left edge of one tab to the tab before it, whose own right edge stops just short of here.
+		for (MarkerTab tab : tabs) {
+			if (Math.abs(x - tab.left()) <= MARKER_GRAB_PIXELS) {
+				return tab.marker();
+			}
+		}
+		return null;
+	}
+
+	private boolean insideMarkerLane(double x, double y) {
+		return markerLaneHeight() > 0 && x >= rollX && x < rollX + rollWidth
+			&& y >= markerLaneTop() && y < markerLaneTop() + MARKER_LANE_HEIGHT;
+	}
+
+	/**
+	 * Puts a marker on the playback marker, or takes away the one already there.
+	 *
+	 * <p>One key for both, because there is no state to get wrong: the cursor either has a marker on
+	 * it or it does not, and that is visible before the key is pressed.</p>
+	 */
+	private void toggleMarkerAtCursor() {
+		long tick = playbackReturnTick;
+		if (project().markerAt(tick) != null) {
+			removeMarkerAt(tick);
+			return;
+		}
+		addMarkerAt(tick);
+	}
+
+	private void addMarkerAt(long tick) {
+		long at = Math.max(0L, tick);
+		if (project().markers().size() >= ComposerProject.MAX_MARKERS) {
+			showResult(Component.literal("That is " + ComposerProject.MAX_MARKERS
+				+ " markers, which is the limit."));
+			return;
+		}
+		// Named for the bar it lands on, which is the one thing about it that is already true. The
+		// name is the point of a marker, so it is a starting value rather than an answer -- but an
+		// unnamed flag on a ruler full of bar numbers says nothing at all.
+		String label = "Bar " + (at / Math.max(1L, project().ppq() * 4L) + 1L);
+		apply("add marker", project().withMarkerAt(at, label));
+		showResult(Component.literal("Marker \"" + label
+			+ "\" added. Double-click it to rename, right-click it to remove."));
+	}
+
+	private void removeMarkerAt(long tick) {
+		ComposerProject.Marker marker = project().markerAt(tick);
+		if (marker == null) {
+			return;
+		}
+		apply("remove marker", project().withoutMarkerAt(tick));
+		showResult(Component.literal("Removed marker \"" + marker.label()
+			+ "\". Ctrl+Z puts it back."));
+	}
+
+	private void renameMarker(ComposerProject.Marker marker) {
+		if (marker == null) {
+			return;
+		}
+		minecraft.gui.setScreen(new NamePromptScreen(this, "Rename marker",
+			"Name for the marker at bar "
+				+ (marker.tick() / Math.max(1L, project().ppq() * 4L) + 1L),
+			marker.label(), "Rename", name -> {
+				minecraft.gui.setScreen(this);
+				apply("rename marker", project().withMarkerAt(marker.tick(), name.trim()));
+				showResult(Component.literal("Marker renamed to \"" + name.trim() + "\"."));
+			}));
+	}
+
+	/** The marker the menu actions point at: whichever one the playback marker is standing on. */
+	private ComposerProject.Marker markerAtCursor() {
+		return project().markerNear(playbackReturnTick,
+			Math.max(1L, Math.round(MARKER_GRAB_PIXELS * ticksPerPixel)));
+	}
+
+	private void clearMarkers() {
+		int count = project().markers().size();
+		if (count == 0) {
+			return;
+		}
+		apply("clear markers", project().withMarkers(List.of()));
+		showResult(Component.literal("Removed " + count
+			+ (count == 1 ? " marker" : " markers") + ". Ctrl+Z puts them back."));
+	}
+
 	/** The biggest step that still divides {@code value} evenly, or 1 when it is prime. */
 	private static long largestProperDivisor(long value) {
 		for (long divisor = 2L; divisor * divisor <= value; divisor++) {
@@ -3568,6 +3770,14 @@ public final class ComposerScreen extends Screen {
 			int x = tickX(overloaded);
 			if (x >= rollX && x <= rollX + rollWidth) {
 				graphics.fill(x - 1, rollY, x + 2, rollY + rollHeight, 0x66FF3333);
+			}
+		}
+		// The markers drop through the roll as another kind of grid line, which is what they are
+		// being used as. Behind the notes, since a landmark is for finding the music by.
+		for (ComposerProject.Marker marker : project().markers()) {
+			int x = tickX(marker.tick());
+			if (x >= rollX && x <= rollX + rollWidth) {
+				graphics.fill(x, rollY, x + 1, rollY + rollHeight, 0x55A294FF);
 			}
 		}
 	}
@@ -4295,6 +4505,26 @@ public final class ComposerScreen extends Screen {
 			}
 			return true;
 		}
+		if (insideMarkerLane(event.x(), event.y())) {
+			ComposerProject.Marker hit = markerAtPoint(event.x(), event.y());
+			if (event.button() == 1) {
+				removeMarkerAt(hit == null ? -1L : hit.tick());
+				return true;
+			}
+			if (event.button() == 0) {
+				if (hit == null) {
+					// The empty run of the lane is where a marker goes. Only reachable once the song
+					// has one, which is what keeps a stray click on a marker-less song from putting
+					// a flag in a strip that was not there a moment ago.
+					addMarkerAt(snapTick(mouseTick(event.x())));
+				} else if (doubleClick) {
+					renameMarker(hit);
+				} else {
+					setPlaybackStart(hit.tick(), false);
+				}
+				return true;
+			}
+		}
 		if (event.button() == 0 && overEndMarker(event.x(), event.y())) {
 			draggingEndMarker = true;
 			lastEndDragAt = 0L;
@@ -4873,6 +5103,13 @@ public final class ComposerScreen extends Screen {
 		if (event.key() == GLFW.GLFW_KEY_R && !event.hasControlDownWithQuirk()
 				&& !event.hasShiftDown()) {
 			toggleRecording();
+			return true;
+		}
+		// M for marker, bare, next to the transport keys because it is aimed at the same thing they
+		// are: wherever the playback marker is standing.
+		if (event.key() == GLFW.GLFW_KEY_M && !event.hasControlDownWithQuirk()
+				&& !event.hasShiftDown()) {
+			toggleMarkerAtCursor();
 			return true;
 		}
 		// The other half of Ctrl+A, and the shape every editor gives it. Ahead of isSelectAll, which
@@ -6594,6 +6831,10 @@ public final class ComposerScreen extends Screen {
 	}
 
 	/** One row of an open menu: a thing to do, a setting to cycle, or a submenu to open. */
+	/** A marker and the run of pixels its name occupies in the lane. */
+	private record MarkerTab(ComposerProject.Marker marker, int left, int right) {
+	}
+
 	private record MenuRow(ToolbarAction action, ToolbarSubmenu submenu) {
 		static MenuRow of(ToolbarAction action) {
 			return new MenuRow(action, null);
@@ -6622,7 +6863,14 @@ public final class ComposerScreen extends Screen {
 			new String[] {"1/4 note", "1/8 note", "1/16 note", "Repeater ticks", "Game ticks"}, 3),
 		END("End", "Where the song stops, which is a delay the build has to place like any other.",
 			new ToolbarAction[] {ToolbarAction.SNAP_END, ToolbarAction.TRIM_END},
-			new String[] {"Snap to grid", "Trim to last note"}, -1);
+			new String[] {"Snap to grid", "Trim to last note"}, -1),
+		MARKERS("Markers", "Named positions on the timeline. Nothing is built from one and nothing "
+				+ "sounds at one -- they are somewhere to write down what a stretch of the song is, so "
+				+ "that finding it again is reading a label rather than counting bars.",
+			new ToolbarAction[] {
+				ToolbarAction.ADD_MARKER, ToolbarAction.RENAME_MARKER, ToolbarAction.CLEAR_MARKERS
+			},
+			new String[] {"Add / remove (M)", "Rename...", "Remove all"}, 2);
 
 		private final String label;
 		private final String description;
@@ -6698,6 +6946,9 @@ public final class ComposerScreen extends Screen {
 		PASTE_IN_WORLD("Paste current sequence in world (requires op)..."),
 		BUILD_CANCEL("Cancel paste"),
 		TOGGLE_DEDUPE("Dedupe identical notes"),
+		ADD_MARKER("Add or remove at the playback marker"),
+		RENAME_MARKER("Rename the marker here..."),
+		CLEAR_MARKERS("Remove every marker"),
 		SNAP_END("Snap end to grid"),
 		TRIM_END("Trim end to last note"),
 		SELECT_OFF_GRID("Off grid"),
