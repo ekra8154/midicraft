@@ -98,7 +98,6 @@ public final class DebugCommands {
 		LiteralArgumentBuilder<FabricClientCommandSource> paste = literal("paste")
 			// Checked here rather than by skipping registration, so that turning the setting on
 			// takes effect where it is turned on rather than at the next launch.
-			.requires(source -> FastNoteblocksConfig.get().debugCommandsEnabled())
 			.then(wall(false, null))
 			.then(literal("dry").then(wall(true, null)));
 		// And the same again under each paster's own name, so a spec can be built both ways
@@ -132,7 +131,6 @@ public final class DebugCommands {
 	/** The diagram, as {@code /fastnoteblocks asciidiagram}. */
 	static LiteralArgumentBuilder<FabricClientCommandSource> asciiDiagramCommand() {
 		return literal("asciidiagram")
-			.requires(source -> FastNoteblocksConfig.get().debugCommandsEnabled())
 			.then(corner("from").then(views()));
 	}
 
@@ -147,7 +145,6 @@ public final class DebugCommands {
 	 */
 	static LiteralArgumentBuilder<FabricClientCommandSource> debugPasteCommand() {
 		return literal("debugpaste")
-			.requires(source -> FastNoteblocksConfig.get().debugCommandsEnabled())
 			.executes(context -> colourKey(context.getSource()))
 			.then(literal("on").executes(context -> debugPaste(context.getSource(), true)))
 			.then(literal("off").executes(context -> debugPaste(context.getSource(), false)));
@@ -246,9 +243,33 @@ public final class DebugCommands {
 	 * is unreadable and, worse, unreadable in a way that looks like the build is wrong. What goes in
 	 * chat is the shape of the thing and two links; the diagram itself goes to the clipboard whole.</p>
 	 */
+	/**
+	 * Whether the debug commands are switched off, and says so if they are.
+	 *
+	 * <p>Asked here rather than through Brigadier's {@code requires}, which cannot answer it
+	 * honestly. Fabric copies the client commands into the suggestion tree when a world is joined
+	 * and does not consult {@code requires} again, so a predicate reading a live setting gives a
+	 * menu that offers what the parser will then refuse -- and a setting that appears to do nothing
+	 * until you leave the world and come back. Registering unconditionally and refusing here makes
+	 * the switch take effect where it is thrown, at the cost of the three names always being
+	 * listed.</p>
+	 */
+	private static boolean debugCommandsOff(FabricClientCommandSource source) {
+		if (FastNoteblocksConfig.get().debugCommandsEnabled()) {
+			return false;
+		}
+		source.sendFeedback(Component.literal("Debug commands are off. Turn them on in the Debug "
+				+ "tab of /fastnoteblocks settings.")
+			.withStyle(ChatFormatting.GRAY));
+		return true;
+	}
+
 	private static int diagram(CommandContext<FabricClientCommandSource> context,
 			AsciiDiagram.View view, Direction up, boolean numberNotes, boolean signs) {
 		FabricClientCommandSource source = context.getSource();
+		if (debugCommandsOff(source)) {
+			return 0;
+		}
 		ClientLevel level = Minecraft.getInstance().level;
 		if (level == null) {
 			source.sendError(Component.literal("No world loaded."));
@@ -425,6 +446,9 @@ public final class DebugCommands {
 	private static int run(CommandContext<FabricClientCommandSource> context, boolean dry,
 			String shape, int columnsToWall, boolean turning, SongBuilder.PasteMode mode) {
 		FabricClientCommandSource source = context.getSource();
+		if (debugCommandsOff(source)) {
+			return 0;
+		}
 		String spec = StringArgumentType.getString(context, "chords");
 		int wall = IntegerArgumentType.getInteger(context, "width");
 		int floors = IntegerArgumentType.getInteger(context, "floors");
@@ -525,6 +549,9 @@ public final class DebugCommands {
 	 * never come apart.</p>
 	 */
 	private static int colourKey(FabricClientCommandSource source) {
+		if (debugCommandsOff(source)) {
+			return 0;
+		}
 		boolean on = FastNoteblocksConfig.get().debugPasteEnabled();
 		source.sendFeedback(Component.literal("Debug paste is " + (on ? "on" : "off")
 			+ ". /fastnoteblocks debugpaste on|off to change it.")
@@ -540,6 +567,9 @@ public final class DebugCommands {
 	}
 
 	private static int debugPaste(FabricClientCommandSource source, boolean on) {
+		if (debugCommandsOff(source)) {
+			return 0;
+		}
 		FastNoteblocksConfig.get().setDebugPasteEnabled(on);
 		FastNoteblocksConfig.save();
 		source.sendFeedback(Component.literal(on

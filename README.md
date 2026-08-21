@@ -113,8 +113,11 @@ selected slot is left unchanged.
 
 ## Debug commands
 
-Off by default; the switch is on the Debug tab of the settings. It adds three
-subcommands. `/fastnoteblocks asciidiagram <from> <to> [view] [facing] [notes]`
+Off by default; the switch is on the Debug tab of the settings. The three
+subcommands are always listed under `/fastnoteblocks` -- Fabric copies the
+client command tree when you join a world and does not consult it again, so a
+command hidden by a setting is a command that only appears after a rejoin --
+but with the switch off each one says so rather than running. `/fastnoteblocks asciidiagram <from> <to> [view] [facing] [notes]`
 draws a region of the world as text, and `/fastnoteblocks debugpaste [on|off]`
 colours the next build by what laid each block -- dead wire red, wrong notes as
 lit copper bulbs, collisions in sea lantern -- or, bare, prints that colour key.
