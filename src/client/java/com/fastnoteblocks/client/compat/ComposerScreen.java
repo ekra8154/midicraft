@@ -629,6 +629,16 @@ public final class ComposerScreen extends Screen {
 	private long lastScaleChangeAt;
 	private Component toast;
 	private long toastShownAt;
+	/**
+	 * Where the last toast was drawn, so a click can be aimed at it.
+	 *
+	 * <p>Taken from the drawing rather than worked out again: the box is sized to wrapped text and
+	 * centred on the roll, and a second copy of that arithmetic is a second thing to keep right.</p>
+	 */
+	private int toastLeft;
+	private int toastTop;
+	private int toastRight;
+	private int toastBottom;
 	private long hoveredNoteId = -1L;
 	private long hoveredSince;
 	private ComposerProject cachedStatsProject;
@@ -4724,6 +4734,10 @@ public final class ComposerScreen extends Screen {
 		int top = y - 5;
 		int right = x + textWidth + 6;
 		int bottom = y + height + 4;
+		toastLeft = left;
+		toastTop = top;
+		toastRight = right;
+		toastBottom = bottom;
 		boolean held = mouseX >= left && mouseX < right && mouseY >= top && mouseY < bottom;
 		if (held) {
 			toastShownAt = Util.getMillis();
@@ -4913,6 +4927,15 @@ public final class ComposerScreen extends Screen {
 		// either of them closed the menu and then went on to erase the notes underneath.
 		if (event.button() == 1 && anyMenuOpen()) {
 			closeMenus();
+			return true;
+		}
+		// A result stays up for four and a half seconds, or for as long as you point at it, and
+		// there was no way to say you had read it. Clicking one puts it away -- and the click is
+		// spent on that, since it lands over the roll and would otherwise draw a note through the
+		// message it was dismissing.
+		if (toast != null && !anyMenuOpen() && event.x() >= toastLeft && event.x() < toastRight
+				&& event.y() >= toastTop && event.y() < toastBottom) {
+			toast = null;
 			return true;
 		}
 		ToolbarMenu title = menuTitleAt(event.x(), event.y());
