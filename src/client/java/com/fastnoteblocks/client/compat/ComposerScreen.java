@@ -1639,7 +1639,7 @@ public final class ComposerScreen extends Screen {
 			return;
 		}
 		LayerAction[] actions = LayerAction.values();
-		int menuHeight = actions.length * CONTEXT_MENU_ROW_HEIGHT + 4;
+		int menuHeight = layerMenuHeight();
 		int menuWidth = layerMenuWidth();
 		graphics.fill(layerMenuX, layerMenuY, layerMenuX + menuWidth, layerMenuY + menuHeight, 0xF0101115);
 		graphics.fill(layerMenuX, layerMenuY, layerMenuX + menuWidth, layerMenuY + 1, 0xFFAAAAAA);
@@ -1677,6 +1677,10 @@ public final class ComposerScreen extends Screen {
 			case SNAP_TO_START -> "Snap " + layerCountLabel(Math.max(1, selected)) + " to song start";
 			default -> action.label;
 		};
+	}
+
+	private int layerMenuHeight() {
+		return LayerAction.values().length * CONTEXT_MENU_ROW_HEIGHT + 4;
 	}
 
 	private int layerMenuWidth() {
@@ -3449,9 +3453,12 @@ public final class ComposerScreen extends Screen {
 			if (tab.left() >= rollX) {
 				graphics.fill(tab.left(), laneTop + 1, tab.left() + 1, laneBottom - 1, MARKER_COLOR);
 			}
-			smallText(graphics, smallFit(tab.marker().label(), tab.right() - tab.left() - 4),
-				Math.max(rollX + 1, tab.left() + 3), laneTop + 3,
-				hovered ? 0xFFFFFFFF : 0xFFCFC8FF);
+			// Fitted to where the name actually starts. A tab whose own tick has scrolled off the
+			// left is drawn from the roll's edge instead, and a name cut to the width of the whole
+			// tab would then run out past its right-hand end.
+			int textLeft = Math.max(rollX + 1, tab.left() + 3);
+			smallText(graphics, smallFit(tab.marker().label(), tab.right() - textLeft - 1), textLeft,
+				laneTop + 3, hovered ? 0xFFFFFFFF : 0xFFCFC8FF);
 		}
 		// Not while a menu is hanging over the lane, which every one of them does: they start two
 		// pixels under the bar and the lane starts at it.
@@ -4409,8 +4416,11 @@ public final class ComposerScreen extends Screen {
 				}
 				layerMenuOpen = true;
 				layerMenuRow = layerIndex;
-				layerMenuX = (int)event.x();
-				layerMenuY = (int)event.y();
+				// Held on screen. The menu hangs down and to the right of the press, and the panel it
+				// belongs to runs the full height of the window, so a right-click on a row near the
+				// bottom would put half of it past the edge.
+				layerMenuX = Math.max(0, Math.min((int)event.x(), width - layerMenuWidth()));
+				layerMenuY = Math.max(0, Math.min((int)event.y(), height - layerMenuHeight()));
 				contextMenuOpen = false;
 				return true;
 			}
@@ -6413,6 +6423,7 @@ public final class ComposerScreen extends Screen {
 			playbackReturnTick = Math.max(0L, Math.min(project().endTick(), cursor));
 		} else if (cursor >= 0L) {
 			movePlayheadTo(cursor);
+			revealTick(playbackReturnTick);
 		}
 		selectedNotes.clear();
 		selectedNotes.addAll(result.noteIds());
@@ -6570,6 +6581,23 @@ public final class ComposerScreen extends Screen {
 
 	private int tickX(long tick) {
 		return rollX + (int)Math.round((tick - horizontalScroll) / ticksPerPixel);
+	}
+
+	/**
+	 * Scrolls the roll only as far as it takes to put a tick back on screen.
+	 *
+	 * <p>Only when it is off, and only to the near edge with a margin: a view that recentres itself
+	 * every time is a view that moves when you did not ask it to. What this is for is the marker
+	 * walking off the right-hand side while a phrase is pasted over and over.</p>
+	 */
+	private void revealTick(long tick) {
+		long margin = Math.round(rollWidth * ticksPerPixel / 8.0);
+		long span = Math.round(rollWidth * ticksPerPixel);
+		if (tick < horizontalScroll) {
+			horizontalScroll = Math.max(0L, tick - margin);
+		} else if (tick > horizontalScroll + span) {
+			horizontalScroll = Math.max(0L, tick - span + margin);
+		}
 	}
 
 	/** The box's anchor corner, put back on the screen wherever the view has moved it to. */
