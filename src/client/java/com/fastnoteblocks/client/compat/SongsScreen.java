@@ -39,6 +39,8 @@ public final class SongsScreen extends Screen {
 	private final List<Row> shown = new ArrayList<>();
 	private final List<Button> rowButtons = new ArrayList<>();
 	private final Map<String, SongAnalysis> analyses = new LinkedHashMap<>();
+	/** Which build the cached analyses were judged against, so a mode change invalidates them. */
+	private Boolean analysedTwoLanes;
 	private EditBox searchBox;
 	private int scroll;
 	private String status = "";
@@ -52,17 +54,36 @@ public final class SongsScreen extends Screen {
 	private record Row(String id, ComposerProject song) {
 	}
 
+	/** Whether the paste mode in use lays a second lane, which is what reaches between ticks. */
+	private boolean buildsTwoLanes() {
+		try {
+			return SongBuilder.PasteMode.valueOf(config.pasteMode()).gameTicks();
+		} catch (IllegalArgumentException unknown) {
+			return SongBuilder.PasteMode.COMPACT_CUBE.gameTicks();
+		}
+	}
+
 	@Override
 	protected void init() {
 		clearWidgets();
 		rowButtons.clear();
 		rows.clear();
+		// Kept across an init so a resize does not re-analyse the whole library, but the verdict now
+		// depends on the paste mode, so a change of mode has to throw the cache away.
+		boolean twoLanes = buildsTwoLanes();
+		if (analysedTwoLanes == null || analysedTwoLanes != twoLanes) {
+			analyses.clear();
+			analysedTwoLanes = twoLanes;
+		}
 		SongLibrary library = FastNoteblocksConfig.songs();
 		for (String id : library.ids()) {
 			ComposerProject song = library.song(id);
 			rows.add(new Row(id, song));
-			analyses.computeIfAbsent(id,
-				ignored -> SongAnalysis.of(song, config.dedupeIdenticalNotes()));
+			// Judged against the build actually set, the same as the composer's own status line.
+			// The picker says "Minecraft ready" beside every song here, and it would be saying it
+			// about a two-lane build in a one-lane paste mode.
+			analyses.computeIfAbsent(id, ignored -> SongAnalysis.of(song,
+				config.dedupeIdenticalNotes(), twoLanes));
 		}
 
 		// Rebuilt rather than kept, because init runs again on every resize -- but its text survives,

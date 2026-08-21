@@ -172,6 +172,36 @@ any two of them. That is usually right for a phrase of even steps and it is
 always visible, drawn as a hairline in the same strip, before you commit to it.
 
 
+## The snap grid
+
+The Snap control offers two different kinds of grid, and they are absolute about
+different things.
+
+The **note values** -- 1/4, 1/8, 1/16, 1/32 -- are absolute in the *song*. A 1/16
+is a sixteenth of a quarter note whatever the tempo is doing. They are what bars
+and beats are made of, and they are what you want when you are writing music.
+
+**Repeater tick** and **game tick** are absolute in *real time*. A repeater tick
+is 100 ms, the shortest delay a repeater can add and so the closest two notes can
+be built; a game tick is half that, reachable only by a build laying a second
+lane. Their lines are drawn where those moments actually fall, which on a song
+whose tempo does not divide into them means visibly not on the beat. That is the
+information, not a fault: it is what an unconverted song looks like, and
+Edit > Convert for Minecraft is what moves the tempo until the two grids agree.
+
+Because they measure different things, the same setting means different amounts
+of time in different songs. `Snap 1/16` is one repeater tick at 150 BPM, two at
+75, three at 50, and a quarter of one at 300 BPM played at 2.00x. So the status
+bar carries the translation -- `grid 1/16 = 1 repeater tick` -- and it moves as
+the tempo and the speed slider move. The Snap button turns amber when its grid is
+not one the current paste mode can build on, and its tooltip says why.
+
+Bar lines and bar numbers are drawn whatever the snap is set to. They used to
+appear only where a snap line happened to land on one, so choosing a redstone
+grid on an unaligned song took the bars off the roll entirely -- which is the one
+thing that makes the roll readable.
+
+
 ## Markers
 
 A marker is a named position on the composer's timeline. Nothing is built from

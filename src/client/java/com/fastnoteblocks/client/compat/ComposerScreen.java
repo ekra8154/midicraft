@@ -573,6 +573,7 @@ public final class ComposerScreen extends Screen {
 	private ComposerProject cachedStatsProject;
 	private SongAnalysis cachedStats;
 	private boolean cachedStatsDedupe;
+	private boolean cachedStatsHalfTicks;
 	private List<FastNoteblocksConfig.SequenceTrack> cachedBlockTracks;
 	private SongBuilder.BlockCounts cachedBlockCounts;
 	private SongAnalysis cachedOverloadedStats;
@@ -723,8 +724,8 @@ public final class ComposerScreen extends Screen {
 			.build());
 		snapButton = addRenderableWidget(Button.builder(snapLabel(), button -> cycleSnap())
 			.bounds(snapX, CONTROL_TOP, snapWidth, CONTROL_HEIGHT)
-			.tooltip(Tooltip.create(Component.literal("Grid used when adding or dragging notes")))
 			.build());
+		refreshSnapButton();
 		delayScaleSlider = addRenderableWidget(new DelayScaleSlider(
 			speedX, CONTROL_TOP, speedWidth, CONTROL_HEIGHT, project().speedQuarters(),
 			this::setDelayScale
@@ -1465,7 +1466,62 @@ public final class ComposerScreen extends Screen {
 			case SNAP_GAME_TICK -> 0;
 			default -> 1;
 		};
-		snapButton.setMessage(snapLabel());
+		refreshSnapButton();
+	}
+
+	/**
+	 * How many repeater ticks one grid step covers, as a phrase.
+	 *
+	 * <p>The number nobody could get at. "Snap 1/16" is not an interpretable statement on its own --
+	 * across this library the same setting is anything from a quarter of a repeater tick to four of
+	 * them, because it is a note value and a repeater tick is a hundred milliseconds, and what stands
+	 * between them is the tempo. A whole number here means the musical grid and the machine's grid
+	 * are the same grid; a fraction means they are not, which is what an unconverted song looks
+	 * like.</p>
+	 */
+	/** "1.50" as "1.5", "0.50" as "0.5" -- a decimal place that says nothing is noise on a button. */
+	private static String trimZeros(String decimal) {
+		String trimmed = decimal;
+		while (trimmed.contains(".") && trimmed.endsWith("0")) {
+			trimmed = trimmed.substring(0, trimmed.length() - 1);
+		}
+		return trimmed.endsWith(".") ? trimmed.substring(0, trimmed.length() - 1) : trimmed;
+	}
+
+	private String snapDetail() {
+		double ticks = gridSpan() / Math.max(1.0e-6, SongAnalysis.redstoneTickSpan(project()));
+		String count = Math.abs(ticks - Math.rint(ticks)) < 0.005
+			? Long.toString(Math.round(ticks))
+			: trimZeros(String.format(java.util.Locale.ROOT, "%.2f", ticks));
+		return count + " repeater tick" + ("1".equals(count) ? "" : "s");
+	}
+
+	/**
+	 * Whether the lines of this grid are positions a build could actually place a note on.
+	 *
+	 * <p>Asked the way {@link SongAnalysis} asks it, in game ticks, because that is the finer of the
+	 * two things a build can be made of. A whole number of game ticks is placeable; an odd one needs
+	 * the second lane, so it is placeable only in a paste mode that has one. Anything else falls
+	 * between the delays a repeater can make and cannot be built at all.</p>
+	 */
+	private boolean snapOnRedstoneGrid() {
+		double gameTicks = gridSpan()
+			/ Math.max(1.0e-6, SongAnalysis.redstoneTickSpan(project()) / 2.0);
+		long whole = Math.round(gameTicks);
+		if (whole < 1L || Math.abs(gameTicks - whole) > 0.01) {
+			return false;
+		}
+		return whole % 2L == 0L || pasteMode().gameTicks();
+	}
+
+	private Tooltip snapTooltip() {
+		String where = snapOnRedstoneGrid()
+			? "That is a delay a build can place, so notes put on this grid are notes it can reach."
+			: "That is not a delay a build can place in " + pasteMode().label() + ", so notes put on "
+				+ "this grid fall between the ticks it can reach. Edit > Convert for Minecraft moves "
+				+ "the tempo until the two line up.";
+		return Tooltip.create(Component.literal("Grid used when adding or dragging notes."
+			+ "\nOne step is " + snapDetail() + ".\n" + where));
 	}
 
 	private Component snapLabel() {
@@ -3882,23 +3938,41 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private void extractTimeGrid(GuiGraphicsExtractor graphics) {
-		long subdivisionTicks = snapSubdivision == 0
-			? Math.max(1L, project().ppq() / 4L)
-			: gridTicks();
 		long lastTick = horizontalScroll + (long)Math.ceil(rollWidth * ticksPerPixel);
 		long measureTicks = Math.max(1L, project().ppq() * 4L);
-		long stepTicks = readableStep(subdivisionTicks, measureTicks);
-		boolean showLabels = Math.max(stepTicks, measureTicks) / ticksPerPixel >= MIN_LABEL_PIXEL_SPACING;
-		for (long tick = Math.max(0L, horizontalScroll / stepTicks * stepTicks);
-				tick <= lastTick + stepTicks; tick += stepTicks) {
+
+		// The snap grid first and dimmest, so the bars and beats drawn over it win wherever they
+		// land on the same pixel. Its lines are positions rather than multiples of a step, which is
+		// what lets the redstone grids be drawn where they actually are -- and on an unconverted song
+		// that means visibly not on the beat, which is the truth and the reason to look.
+		double snapSpan = readableSpan(snapSubdivision == 0
+			? Math.max(1.0, project().ppq() / 4.0)
+			: gridSpan());
+		if (snapSpan / ticksPerPixel >= MIN_GRID_PIXEL_SPACING) {
+			for (long index = (long)Math.floor(horizontalScroll / snapSpan);
+					gridLineAt(index, snapSpan) <= lastTick + snapSpan; index++) {
+				int x = tickX(gridLineAt(index, snapSpan));
+				if (x >= rollX && x <= rollX + rollWidth) {
+					graphics.fill(x, rollY, x + 1, rollY + rollHeight, 0x242F343A);
+				}
+			}
+		}
+
+		// Bars and beats, always, whatever the snap is set to. They used to be drawn only where a
+		// snap line happened to coincide with one, so choosing a redstone grid on a song whose tempo
+		// does not divide into it took every bar line and every bar number off the roll -- the two
+		// grids agree only every few hundred ticks. Losing the bars is losing the ability to read the
+		// music at all, and the whole point of showing a redstone grid is to see it against them.
+		long beatTicks = readableStep(Math.max(1L, project().ppq()), measureTicks);
+		boolean showLabels = measureTicks / ticksPerPixel >= MIN_LABEL_PIXEL_SPACING;
+		for (long tick = Math.max(0L, horizontalScroll / beatTicks * beatTicks);
+				tick <= lastTick + beatTicks; tick += beatTicks) {
 			int x = tickX(tick);
 			if (x < rollX || x > rollX + rollWidth) {
 				continue;
 			}
-			boolean beat = tick % project().ppq() == 0;
 			boolean measure = tick % measureTicks == 0;
-			graphics.fill(x, rollY, x + 1, rollY + rollHeight,
-				measure ? 0x66777777 : beat ? 0x443F444A : 0x242F343A);
+			graphics.fill(x, rollY, x + 1, rollY + rollHeight, measure ? 0x66777777 : 0x443F444A);
 			if (measure && showLabels) {
 				graphics.text(font, Long.toString(tick / measureTicks + 1),
 					x + 3, rollY + 2, 0xFFAAAAAA, false);
@@ -3946,6 +4020,21 @@ public final class ComposerScreen extends Screen {
 	 * coarse MIDI files — otherwise ask for a line every tick, which at low zoom means tens of
 	 * thousands of fills and measure labels every single frame.
 	 */
+	/**
+	 * The snap spacing, widened by doubling until its lines are far enough apart to look at.
+	 *
+	 * <p>Doubling rather than snapping to a coarser grid, so what is drawn stays a subset of what
+	 * notes land on: every line you can see is a line, even when most of them are hidden. Zoomed out
+	 * far enough there is nothing worth drawing and the caller stops.</p>
+	 */
+	private double readableSpan(double span) {
+		double step = Math.max(1.0, span);
+		while (step / ticksPerPixel < MIN_GRID_PIXEL_SPACING && step < Long.MAX_VALUE / 4) {
+			step *= 2.0;
+		}
+		return step;
+	}
+
 	private long readableStep(long stepTicks, long measureTicks) {
 		long step = Math.max(1L, stepTicks);
 		while (step / ticksPerPixel < MIN_GRID_PIXEL_SPACING) {
@@ -4376,6 +4465,12 @@ public final class ComposerScreen extends Screen {
 		if (!stats.offGridNotes().isEmpty()) {
 			segments.add(stats.offGridNotes().size() + " off grid");
 		}
+		// Only a fault in a one-lane mode, so it is named rather than counted silently: on two lanes
+		// these are ordinary notes and the verdict above says two lanes are needed.
+		if (!stats.unreachableHalfTicks().isEmpty()) {
+			segments.add(stats.unreachableHalfTicks().size() + " between ticks ("
+				+ pasteMode().label() + " builds one lane)");
+		}
 		// Named rather than counted: it is one thing, it is not a note, and saying "1 too
 		// frequent" sent you looking for a note that does not exist.
 		if (!stats.endMarkerProblem().isEmpty()) {
@@ -4407,6 +4502,9 @@ public final class ComposerScreen extends Screen {
 			segments.add(blocks.total() + " blocks (" + blocks.noteBlocks() + " note · "
 				+ blocks.repeaters() + " repeater)");
 		}
+		// The number the snap button has no room for. It moves with the tempo and the speed, so it
+		// belongs on screen rather than behind a hover.
+		segments.add("grid " + snapLabel().getString().replace("Snap ", "") + " = " + snapDetail());
 		if (!selectedNotes.isEmpty()) {
 			segments.add(selectedNotes.size() + " selected");
 		}
@@ -4462,13 +4560,18 @@ public final class ComposerScreen extends Screen {
 		ComposerProject current = project();
 		// The speed is part of the project, so identity covers everything the composition decides.
 		// Deduplication is a setting rather than part of the song, so it has to be checked too.
+		// The paste mode is in the key as well now: whether half ticks can be placed is a property
+		// of the build, so changing the mode re-judges the song without the song moving.
+		boolean halfTicks = pasteMode().gameTicks();
 		if (cachedStatsProject == current && cachedStats != null
-				&& cachedStatsDedupe == config.dedupeIdenticalNotes()) {
+				&& cachedStatsDedupe == config.dedupeIdenticalNotes()
+				&& cachedStatsHalfTicks == halfTicks) {
 			return cachedStats;
 		}
 		cachedStatsProject = current;
 		cachedStatsDedupe = config.dedupeIdenticalNotes();
-		cachedStats = SongAnalysis.of(current, cachedStatsDedupe);
+		cachedStatsHalfTicks = halfTicks;
+		cachedStats = SongAnalysis.of(current, cachedStatsDedupe, halfTicks);
 		return cachedStats;
 	}
 
@@ -5391,7 +5494,8 @@ public final class ComposerScreen extends Screen {
 			return true;
 		}
 		if (!selectedNotes.isEmpty() && (event.isLeft() || event.isRight() || event.isUp() || event.isDown())) {
-			long tickDelta = event.isLeft() ? -gridTicks() : event.isRight() ? gridTicks() : 0L;
+			long tickDelta = event.isLeft() ? -nudgeToNextLine(-1)
+				: event.isRight() ? nudgeToNextLine(1) : 0L;
 			int pitchDelta = event.isUp() ? (event.hasControlDownWithQuirk() ? 12 : 1)
 				: event.isDown() ? (event.hasControlDownWithQuirk() ? -12 : -1) : 0;
 			apply(pitchDelta != 0 ? "transpose notes" : "move notes",
@@ -6721,7 +6825,28 @@ public final class ComposerScreen extends Screen {
 			+ rangeLabel(span) + " on. Ctrl+D again adds another."));
 	}
 
+	/**
+	 * What one grid step is worth in repeater ticks moves with the tempo and with the speed slider,
+	 * so the label has to be rebuilt on every edit rather than only when the snap is cycled. It used
+	 * to be set in two places -- the constructor and cycleSnap -- which is exactly the pair that
+	 * misses a speed change, and a stale number here is worse than none.
+	 */
+	private void refreshSnapButton() {
+		if (snapButton == null) {
+			return;
+		}
+		// Amber rather than a longer caption. The toolbar's controls are sized to their widest
+		// possible label and pinned to the right edge, so spelling the number out on the button
+		// would push the whole cluster leftward on every song forever. The colour is the signal, the
+		// status bar carries the number, and the tooltip explains it.
+		snapButton.setMessage(snapOnRedstoneGrid()
+			? snapLabel()
+			: snapLabel().copy().withStyle(net.minecraft.ChatFormatting.GOLD));
+		snapButton.setTooltip(snapTooltip());
+	}
+
 	private void updateButtonStates() {
+		refreshSnapButton();
 		if (recordButton != null) {
 			recordButton.setMessage(recordLabel());
 		}
@@ -6972,22 +7097,61 @@ public final class ComposerScreen extends Screen {
 	 * with a repeater tick once every four quarter notes. {@code SNAP_REPEATER} snaps to the
 	 * repeater grid itself so every placement is directly buildable.</p>
 	 */
-	private long gridTicks() {
+	/**
+	 * The grid's spacing in composer ticks, unrounded.
+	 *
+	 * <p>Two families of grid and they are absolute about different things. The note values are
+	 * absolute in the <em>song</em>: a 1/16 is a sixteenth of a quarter note whatever the tempo does,
+	 * and it is a whole number of composer ticks because that is what PPQ is for. The two redstone
+	 * grids are absolute in <em>real time</em>: a repeater tick is 100 ms, and how many composer ticks
+	 * that covers depends on the tempo and the speed, so it is very often not a whole number at all.
+	 * At 128 BPM and 480 PPQ it is 102.4.</p>
+	 *
+	 * <p>Which is why this is a double and {@link #gridLineAt} rounds last. Rounding here and
+	 * multiplying out -- which is what the grid used to do -- puts every line at a multiple of 102 and
+	 * lets the error accumulate: three minutes in, the line claiming to be a repeater tick is seven
+	 * repeater ticks away from one. Rounding each line from its own index instead holds every one of
+	 * them within half a composer tick of the truth forever, which is under a millisecond.</p>
+	 */
+	private double gridSpan() {
 		if (snapSubdivision == SNAP_REPEATER) {
-			return Math.max(1L, Math.round(SongAnalysis.redstoneTickSpan(project())));
+			return Math.max(1.0, SongAnalysis.redstoneTickSpan(project()));
 		}
 		if (snapSubdivision == SNAP_GAME_TICK) {
-			// Half a repeater tick. Halved before rounding rather than after, because rounding the
-			// repeater span and then halving it puts the grid back on whole repeater ticks whenever
-			// that span is odd -- and the odd tick is the only thing this grid exists to reach.
-			return Math.max(1L, Math.round(SongAnalysis.redstoneTickSpan(project()) / 2.0));
+			return Math.max(1.0, SongAnalysis.redstoneTickSpan(project()) / 2.0);
 		}
-		return snapSubdivision == 0 ? 1L : Math.max(1L, project().ppq() / snapSubdivision);
+		return snapSubdivision == 0 ? 1.0 : Math.max(1.0, project().ppq() / (double)snapSubdivision);
+	}
+
+	/** Where the nth line of a grid falls, rounded once so the error cannot accumulate. */
+	static long gridLineAt(long index, double span) {
+		return Math.max(0L, Math.round(index * span));
+	}
+
+	/** Which line of the grid a tick is nearest. */
+	static long gridIndexNear(long tick, double span) {
+		return Math.max(0L, Math.round(tick / span));
+	}
+
+	/** Which cell of the grid a tick is inside, which is the line at or before it. */
+	static long gridIndexInside(long tick, double span) {
+		return Math.max(0L, (long)Math.floor(Math.max(0L, tick) / span));
+	}
+
+	/**
+	 * The rounded spacing, for the few places that want a length rather than a position.
+	 *
+	 * <p>Anything that lands a note belongs on {@link #gridLineAt}. This is for measuring: how far a
+	 * paste steps when there is nothing else to say, how wide to round a selection range.</p>
+	 */
+	private long gridTicks() {
+		return Math.max(1L, Math.round(gridSpan()));
 	}
 
 	/** The nearest grid line to a tick, for the things that are pointing at a line. */
 	private long snapTick(long tick) {
-		return nearestGridLine(tick, gridTicks());
+		double span = gridSpan();
+		return gridLineAt(gridIndexNear(tick, span), span);
 	}
 
 	static long nearestGridLine(long tick, long grid) {
@@ -7010,12 +7174,47 @@ public final class ComposerScreen extends Screen {
 	 * sits between two cells rather than in one -- and nearest is what pointing at a line means.</p>
 	 */
 	private long snapTickInto(long tick) {
-		return gridCellStart(tick, gridTicks());
+		double span = gridSpan();
+		return gridLineAt(gridIndexInside(tick, span), span);
+	}
+
+	/**
+	 * How far the arrow keys move the selection: to the next grid line, not by the grid's width.
+	 *
+	 * <p>Those are the same thing only when a grid line is a whole number of composer ticks apart
+	 * from the next, which the redstone grids very often are not. Adding a fixed width repeatedly
+	 * walks the notes off the grid the same way multiplying a rounded step out walks the lines off
+	 * it -- press right eight times at 128 BPM and the selection is three composer ticks adrift of
+	 * where the lines are drawn.</p>
+	 *
+	 * <p>Measured from the earliest selected note and applied to all of them, so the passage keeps
+	 * its own shape and its leading edge is what lands on the line.</p>
+	 */
+	private long nudgeToNextLine(int direction) {
+		double span = gridSpan();
+		long anchor = project().layers().stream()
+			.flatMap(layer -> layer.notes().stream())
+			.filter(note -> selectedNotes.contains(note.id()))
+			.mapToLong(NoteEvent::startTick)
+			.min()
+			.orElse(0L);
+		long here = gridIndexNear(anchor, span);
+		// A note sitting between lines steps onto the nearer one rather than past it, which is what
+		// makes the key a way back onto the grid as well as a way along it.
+		if (gridLineAt(here, span) != anchor) {
+			long onto = direction > 0
+				? (gridLineAt(here, span) > anchor ? here : here + 1)
+				: (gridLineAt(here, span) < anchor ? here : here - 1);
+			return Math.abs(gridLineAt(Math.max(0L, onto), span) - anchor);
+		}
+		return Math.abs(gridLineAt(Math.max(0L, here + direction), span) - anchor);
 	}
 
 	private long snapDelta(long tickDelta) {
-		long grid = gridTicks();
-		return Math.round(tickDelta / (double)grid) * grid;
+		// A delta, not a position: a drag moves everything by the same amount and the notes keep
+		// their spacing, so what is rounded is the distance travelled rather than where anyone lands.
+		double span = gridSpan();
+		return Math.round(Math.round(tickDelta / span) * span);
 	}
 
 	private boolean insideRoll(double x, double y) {

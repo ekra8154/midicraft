@@ -31,7 +31,15 @@ public record SongAnalysis(
 	long endTick,
 	double secondsLong,
 	int duplicateNotes,
-	int buildNotes
+	int buildNotes,
+	/**
+	 * Whether the build this song is judged against can reach between repeater ticks.
+	 *
+	 * <p>Two lanes started a game tick apart can; one lane cannot. It is a property of the paste
+	 * mode, not of the song, and leaving it out is what let a song be called ready for a build
+	 * nobody was making.</p>
+	 */
+	boolean halfTicksAvailable
 ) {
 	/** Two note blocks hang off each of redstone's 15 reachable bus blocks. */
 	public static final int MAX_SIMULTANEOUS_NOTES = 30;
@@ -42,6 +50,18 @@ public record SongAnalysis(
 	 *     the thirty a tick can carry, which can call a chord unbuildable that would have fitted.
 	 */
 	public static SongAnalysis of(ComposerProject project, boolean dedupeIdentical) {
+		return of(project, dedupeIdentical, true);
+	}
+
+	/**
+	 * @param halfTicksAvailable whether the paste mode in use builds two lanes. With one, a gap of
+	 *     an odd number of game ticks cannot be placed at all: the delay chain rounds it to the
+	 *     nearest whole repeater tick and the note plays late. This used to be assumed true for
+	 *     every song, so a one-lane build of a half-ticked song reported MINECRAFT READY and then
+	 *     quietly moved the notes.
+	 */
+	public static SongAnalysis of(ComposerProject project, boolean dedupeIdentical,
+			boolean halfTicksAvailable) {
 		Map<Long, Integer> counts = new HashMap<>();
 		Set<ComposerProject.NoteSound> heard = dedupeIdentical ? new java.util.HashSet<>() : null;
 		int outOfRange = 0;
@@ -122,7 +142,7 @@ public record SongAnalysis(
 		return new SongAnalysis(totalNotes, outOfRange, Map.copyOf(counts), peak, overloaded,
 			maximumNoteDuration, Set.copyOf(offGrid), Set.copyOf(crowded), Set.copyOf(halfTicked),
 			Map.copyOf(gaps), project.endTick(), project.endTick() / span / 10.0, duplicateNotes,
-			buildNotes);
+			buildNotes, halfTicksAvailable);
 	}
 
 	/**
@@ -145,7 +165,13 @@ public record SongAnalysis(
 
 	/** True when nothing left in the composition would misbuild or fail to build at all. */
 	public boolean buildable() {
-		return outOfRange == 0 && overloadedTicks == 0 && crowded.isEmpty() && offGrid.isEmpty();
+		return outOfRange == 0 && overloadedTicks == 0 && crowded.isEmpty() && offGrid.isEmpty()
+			&& (halfTicksAvailable || halfTickedNotes().isEmpty());
+	}
+
+	/** Half-ticked notes the build in use cannot place, which is all of them on one lane. */
+	public Set<Long> unreachableHalfTicks() {
+		return halfTicksAvailable ? Set.of() : halfTickedNotes();
 	}
 
 	/** True when the end marker's own trailing delay is not one a build can place. */
