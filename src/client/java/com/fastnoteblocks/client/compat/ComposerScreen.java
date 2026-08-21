@@ -3941,30 +3941,39 @@ public final class ComposerScreen extends Screen {
 		long lastTick = horizontalScroll + (long)Math.ceil(rollWidth * ticksPerPixel);
 		long measureTicks = Math.max(1L, project().ppq() * 4L);
 
-		// The snap grid first and dimmest, so the bars and beats drawn over it win wherever they
-		// land on the same pixel. Its lines are positions rather than multiples of a step, which is
-		// what lets the redstone grids be drawn where they actually are -- and on an unconverted song
-		// that means visibly not on the beat, which is the truth and the reason to look.
+		// Bars and beats are drawn whatever the snap is set to, so their step is settled first: the
+		// snap pass has to know which of its lines it must leave alone.
+		long beatTicks = readableStep(Math.max(1L, project().ppq()), measureTicks);
+		boolean showLabels = measureTicks / ticksPerPixel >= MIN_LABEL_PIXEL_SPACING;
+
+		// The snap grid first and dimmest, so bars and beats drawn over it win wherever they land on
+		// the same pixel. Its lines are positions rather than multiples of a step, which is what lets
+		// the redstone grids be drawn where they actually are -- and on an unconverted song that
+		// means visibly not on the beat, which is the truth and the reason to look.
+		//
+		// A line the beat pass is going to draw is skipped rather than drawn under it. All three
+		// colours are part transparent, so drawing both composites them: every beat and bar on a
+		// musical snap would come out darker than it does today, which is a difference nobody asked
+		// for in the one case where none of this was supposed to change anything.
 		double snapSpan = readableSpan(snapSubdivision == 0
 			? Math.max(1.0, project().ppq() / 4.0)
 			: gridSpan());
 		if (snapSpan / ticksPerPixel >= MIN_GRID_PIXEL_SPACING) {
 			for (long index = (long)Math.floor(horizontalScroll / snapSpan);
 					gridLineAt(index, snapSpan) <= lastTick + snapSpan; index++) {
-				int x = tickX(gridLineAt(index, snapSpan));
-				if (x >= rollX && x <= rollX + rollWidth) {
+				long line = gridLineAt(index, snapSpan);
+				int x = tickX(line);
+				if (x >= rollX && x <= rollX + rollWidth && line % beatTicks != 0L) {
 					graphics.fill(x, rollY, x + 1, rollY + rollHeight, 0x242F343A);
 				}
 			}
 		}
 
-		// Bars and beats, always, whatever the snap is set to. They used to be drawn only where a
-		// snap line happened to coincide with one, so choosing a redstone grid on a song whose tempo
-		// does not divide into it took every bar line and every bar number off the roll -- the two
-		// grids agree only every few hundred ticks. Losing the bars is losing the ability to read the
-		// music at all, and the whole point of showing a redstone grid is to see it against them.
-		long beatTicks = readableStep(Math.max(1L, project().ppq()), measureTicks);
-		boolean showLabels = measureTicks / ticksPerPixel >= MIN_LABEL_PIXEL_SPACING;
+		// They used to be drawn only where a snap line happened to coincide with one, so choosing a
+		// redstone grid on a song whose tempo does not divide into it took every bar line and every
+		// bar number off the roll -- the two grids agree only every few hundred ticks. Losing the
+		// bars is losing the ability to read the music at all, and the whole point of showing a
+		// redstone grid is to see it against them.
 		for (long tick = Math.max(0L, horizontalScroll / beatTicks * beatTicks);
 				tick <= lastTick + beatTicks; tick += beatTicks) {
 			int x = tickX(tick);
