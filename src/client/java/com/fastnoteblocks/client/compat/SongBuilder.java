@@ -4181,6 +4181,36 @@ public final class SongBuilder {
 			// made this worst, and the pin has gone; the ordering is the same either way.)
 			boolean stackedIsBehind = CUT_ASKS_WHAT_KIND_IS_BEHIND
 				? columnBehindBusy && lastStyle.stacked() : columnBehindBusy;
+			// The sixth cut, asked before every other: a chord of ten or more that overshoots a
+			// staircase folds back over its own repeater instead, and no staircase is built at
+			// all -- down through a top slab for a descent, up over the repeater for a climb.
+			// Capacity never refuses either -- head, wall-bound run and the folded run reach the
+			// simultaneous-note cap with no harps at all -- so where one is refused the ground
+			// said so, and the module shapes below take the chord instead.
+			// See {@link #FOLDBACK_CUTS}.
+			Foldback fold = null;
+			FoldbackAscent rise = null;
+			if (FOLDBACK_CUTS && layout.ultra() && cutOffered && index > 0 && above >= 0
+					&& above < floors && foldbackCloses(event.notes(), room, climb > 0)) {
+				int oppositeWall = laneWall(nearWall, farWall, forward,
+					lane.travel().getOpposite(), above, climb, floors);
+				int availableBeyond = (lane.ahead(delayColumns).pos().getX() - oppositeWall)
+					* lane.travel().getStepX();
+				if (climb > 0) {
+					rise = foldbackAscentOf(placements, lane.ahead(delayColumns), event.notes(),
+						room, availableBeyond, event.time());
+				} else {
+					fold = foldbackOf(placements, lane.ahead(delayColumns), event.notes(), room,
+						availableBeyond, event.time());
+				}
+				placements.padded(fold != null || rise != null
+					? (climb > 0 ? "planFoldbackClimb" : "planFoldback")
+					: "foldbackRefused" + LAST_FOLDBACK_REFUSAL);
+				if (fold != null || rise != null) {
+					placements.padded("planFoldbackAt" + Math.min(event.notes().size(), 30)
+						+ "Notes");
+				}
+			}
 			// The stair extras' ground, asked once for every shape of this cut. The descent is
 			// pinned: it stands one past the wall whatever the pads and nudges do to the module,
 			// so its two rung-side cells are the same cells for the plain ask, the busy pad's, the
@@ -4190,8 +4220,8 @@ public final class SongBuilder {
 			boolean stairTopFree = false;
 			boolean stairBottomFree = false;
 			boolean stairWallFree = false;
-			if (STAIR_EXTRAS && layout.ultra() && cutOffered && climb <= 0 && above >= 0
-					&& above < floors && CHEAP_SPLIT_DESCENT) {
+			if (STAIR_EXTRAS && layout.ultra() && cutOffered && fold == null && climb <= 0
+					&& above >= 0 && above < floors && CHEAP_SPLIT_DESCENT) {
 				BlockPos stairFoot = new BlockPos(wall + lane.travel().getStepX(),
 					lane.pos().getY(), lane.pos().getZ());
 				Direction stairAway = descentSide.getOpposite();
@@ -4214,8 +4244,8 @@ public final class SongBuilder {
 			// the pane's stone must not stand beside a note belonging to another tick (a cross
 			// descent's lowered flanks, most of all -- the two would mispower each other).
 			boolean climbRungFree = false;
-			if (ASCENT_RUNG_EXTRAS && STAIR_EXTRAS && layout.ultra() && cutOffered && climb > 0
-					&& above >= 0 && above < floors) {
+			if (ASCENT_RUNG_EXTRAS && STAIR_EXTRAS && layout.ultra() && cutOffered && rise == null
+					&& climb > 0 && above >= 0 && above < floors) {
 				BlockPos stairFoot = new BlockPos(wall + lane.travel().getStepX(),
 					lane.pos().getY(), lane.pos().getZ());
 				BlockPos rung = stairFoot.relative(depth.getOpposite()).above(3);
@@ -4223,8 +4253,8 @@ public final class SongBuilder {
 					rung.relative(lane.travel().getOpposite()), event.time())
 					&& !stoneWouldSoundAForeignNote(placements, rung, event.time());
 			}
-			StackedSplit headed = layout.ultra() && cutOffered && index > 0 && above >= 0
-				&& above < floors
+			StackedSplit headed = layout.ultra() && cutOffered && fold == null && rise == null
+				&& index > 0 && above >= 0 && above < floors
 				? stackedSplitOf(event.notes(), room, splitCells, climb > 0,
 					!columnBehindBusy || delayColumns > 0
 						|| CUT_ASKS_THE_BLOCKS_BEHIND
@@ -4257,7 +4287,7 @@ public final class SongBuilder {
 			// different thing from a pad to the wall: it buys a cut that is otherwise refused outright,
 			// where the pin bought a cut that was already happening a tidier place to stand.
 			int busyPad = 0;
-			if (BUSY_PAD_FREES_THE_BACK_FLANKS && headed == null
+			if (BUSY_PAD_FREES_THE_BACK_FLANKS && headed == null && fold == null && rise == null
 					&& layout.ultra() && cutOffered && index > 0 && above >= 0 && above < floors
 					// Only a column that is actually in the way. A delay already moves the opening, and a
 					// column that is not busy has nothing to free.
@@ -4566,8 +4596,8 @@ public final class SongBuilder {
 			boolean plainCut = room >= 2 && room - 1 < cells && cells + splitCells <= DUST_RANGE;
 			SunkenCut sunken = null;
 			if (SUNKEN_CUTS && layout.ultra() && cutOffered && index > 0 && above >= 0
-					&& above < floors && !stackedFitsInstead && headed == null && !plainCut
-					&& climb <= 0 && room >= 2 && room - 1 < cells) {
+					&& above < floors && !stackedFitsInstead && headed == null && fold == null
+					&& !plainCut && climb <= 0 && room >= 2 && room - 1 < cells) {
 				sunken = sunkenCutOf(placements, lane.ahead(delayColumns), event.notes(), room,
 					splitCells, descentSide, event.time(), stairTopFree, stairBottomFree,
 					stairWallFree);
@@ -4586,8 +4616,8 @@ public final class SongBuilder {
 			// and twenty-five sunken. See {@link #CROSS_DESCENTS}.
 			CrossDescent cross = null;
 			if (CROSS_DESCENTS && layout.ultra() && cutOffered && index > 0 && above >= 0
-					&& above < floors && !stackedFitsInstead && headed == null && !plainCut
-					&& sunken == null && climb <= 0 && room == 1 && room - 1 < cells) {
+					&& above < floors && !stackedFitsInstead && headed == null && fold == null
+					&& !plainCut && sunken == null && climb <= 0 && room == 1 && room - 1 < cells) {
 				cross = crossDescentOf(placements, lane.ahead(delayColumns), event.notes(),
 					splitCells, descentSide, event.time());
 				placements.padded(cross != null ? "planCrossDescent"
@@ -4604,8 +4634,8 @@ public final class SongBuilder {
 			// columns for want of this. In-game design, hand-built and signed first.
 			WallDescent wallCut = null;
 			if (WALL_DESCENTS && layout.ultra() && cutOffered && index > 0 && above >= 0
-					&& above < floors && !stackedFitsInstead && headed == null && !plainCut
-					&& sunken == null && cross == null && climb <= 0 && room == 0) {
+					&& above < floors && !stackedFitsInstead && headed == null && fold == null
+					&& !plainCut && sunken == null && cross == null && climb <= 0 && room == 0) {
 				wallCut = wallDescentOf(placements, lane.ahead(delayColumns), event.notes(),
 					splitCells, descentSide, event.time());
 				placements.padded(wallCut != null ? "planWallDescent"
@@ -4616,8 +4646,9 @@ public final class SongBuilder {
 				}
 			}
 			boolean couldSplit = layout.ultra() && cutOffered && index > 0 && above >= 0
-				&& above < floors && !stackedFitsInstead && (headed != null || sunken != null
-					|| cross != null || wallCut != null || plainCut);
+				&& above < floors && !stackedFitsInstead && (fold != null || rise != null
+					|| headed != null || sunken != null || cross != null || wallCut != null
+					|| plainCut);
 			// Why the head went, where losing it costs the lane its wall.
 			//
 			// A refused head is the commonest way a v2 lane ends up outside its wall: a chord of
@@ -4864,8 +4895,26 @@ public final class SongBuilder {
 				if (headed != null && HEADED_CUT_FALLS_TO_PLAIN) {
 					placements.beginTrial();
 				}
+				int foldLaid = 0;
 				try {
-				if (headed != null) {
+				if (fold != null || rise != null) {
+					// Everything -- head, both runs and the fold itself -- lies inside the module,
+					// and the walk's cursor lands on the next floor, after the folded run: there
+					// is no staircase and nothing for the turn step further on to lay.
+					cursor = fold != null
+						? addFoldbackCut(placements, trigger.cursor(), travel, depth,
+							trigger.triggerDelay(), fold, event.time())
+						: addFoldbackAscent(placements, trigger.cursor(), travel, depth,
+							trigger.triggerDelay(), rise, event.time());
+					far = List.of();
+					foldLaid = (trigger.cursor().getX() - cursor.getX()) * travel.getStepX();
+					placements.padded(fold != null ? "builtFoldback" : "builtFoldbackClimb");
+					if (TRACE) {
+						System.out.println("  FOLDBACK t=" + event.time() + " notes=" + chord.size()
+							+ " room=" + room + " laid=" + foldLaid
+							+ (fold != null ? " descent" : " climb"));
+					}
+				} else if (headed != null) {
 					BlockPos opening = trigger.cursor();
 					// Only the first cell of pad can be against the module behind, so only the first one
 					// asks. Whichever of the two comes first is that cell -- the busy pad where there is
@@ -5072,8 +5121,11 @@ public final class SongBuilder {
 				// Not for a centre-fed head. Its staircase reaches the border whatever column the
 				// module handed back -- a flanked-rung head stands its foot a column short because
 				// the staircase itself takes two -- so a nought here is the shape working, not a
-				// lane that turned early.
-				if (headed == null || headed.centreFeeds() == CentreFeed.NONE) {
+				// lane that turned early. And not for a foldback, whose cursor is already on the
+				// next floor: it recorded its own recess, the wall-bound run's shortfall, where
+				// the run was laid.
+				if (fold == null && rise == null
+						&& (headed == null || headed.centreFeeds() == CentreFeed.NONE)) {
 					placements.recessed(shortOfWall);
 					for (int cell = 0; cell < shortOfWall; cell++) {
 						placements.padded(headed != null ? "recessedCutHeaded" : "recessedCutPlain");
@@ -5137,7 +5189,7 @@ public final class SongBuilder {
 				}
 				// A wall descent laid its whole staircase inside the module and returned the
 				// landing; the walk's cursor is already where the far half opens.
-				cursor = wallCut != null ? cursor
+				cursor = fold != null || rise != null || wallCut != null ? cursor
 					: cross != null
 					? addCrossDescentSpiral(placements, cursor, travel, descentSide, currentTime)
 					: climb > 0
@@ -5242,9 +5294,20 @@ public final class SongBuilder {
 				// prediction the planner is going to search backwards on has to be checked against the
 				// walk before it is trusted, not after.
 				gradeLaneStart(placements, wallLeft, stepLeft,
-					far.isEmpty() ? 0 : (far.size() + 1) / 2, climb > 0, splitStepOff,
-					lane.pos().getX(), climb > 0 ? "SplitClimb" : "SplitDescent");
-				lastStyle = ChordStyle.BUS;
+					fold != null ? foldbackCarriedCells(event.notes(), room)
+						: rise != null ? foldbackAscentCarriedCells(event.notes(), room)
+						: far.isEmpty() ? 0 : (far.size() + 1) / 2, climb > 0, splitStepOff,
+					lane.pos().getX(),
+					climb > 0 ? (rise != null ? "FoldbackClimb" : "SplitClimb")
+						: fold != null ? "FoldbackDescent" : "SplitDescent");
+				// An ascent foldback's tail is NOT a bus, and saying it was cost a floor its
+				// signal: a bus stands a level above its lane, the ascent's flat run stands ON
+				// the floor above's path, and the climb at the next wall read "bus", took the
+				// two-rung discount, and started its staircase off ground that was not there --
+				// 19,155 notes dark behind one turn, read back the day the ascent shipped. SMALL
+				// is the honest description the consumers agree on: not stacked, not a bus, no
+				// climb discount.
+				lastStyle = rise != null ? ChordStyle.SMALL : ChordStyle.BUS;
 				// The whole run, not the half of it past the staircase. Both halves are dust from the
 				// one repeater this module opened with, and the near half does not stop costing wire
 				// because a staircase comes after it. Counting only the far half reported three
@@ -5252,13 +5315,20 @@ public final class SongBuilder {
 				// makes, which is the point: the planner closes a lane on the promise of a split, and
 				// a walk that charges the split more than the planner did refuses it and leaves the
 				// lane standing short of the wall it was measured for.
-				tipSignal = headed != null
+				tipSignal = fold != null || rise != null
+					// The cell the conductor lights is the run's first; the folded run is the
+					// rest of it. The wall-bound run spends the same fifteen the other way, but
+					// a repeater only ever stands after the folded side, so that is the run the
+					// tip is measured down.
+					? DUST_RANGE - 1 - foldLaid
+					: headed != null
 					? DUST_RANGE - headed.runCells(splitCells)
 					: wallCut != null
 					? DUST_RANGE - 3 - (wallCut.far().size() + 2) / 2
 					: DUST_RANGE - cells - splitCells;
 				gradeLaneTip(placements, turnCells, tipSignal,
-					climb > 0 ? "SplitClimb" : "SplitDescent");
+					climb > 0 ? (rise != null ? "FoldbackClimb" : "SplitClimb")
+						: fold != null ? "FoldbackDescent" : "SplitDescent");
 				// What the far half leaves behind it, asked of the shape it was built in rather than
 				// asserted.
 				//
@@ -5277,9 +5347,19 @@ public final class SongBuilder {
 				//
 				// An empty far half is the exception and stays busy: nothing was laid after the
 				// staircase, so what stands behind the next chord is the landing itself.
-				columnBehindBusy = far.isEmpty()
+				// A descent foldback's far half is its inbound run, a bus like any other -- its
+				// far list is empty only because the run was laid inside the module, so the
+				// empty-far exception must not read it as a bare landing. An ascent's is the
+				// opposite and stays busy: its flat run is the floor above's own path with the
+				// pairs hanging at path level, which is exactly the cells the next chord's back
+				// flanks would want.
+				columnBehindBusy = rise != null
+					|| (fold != null
+					? !CUT_FAR_HALF_FREES_THE_GAP
+						|| takesTheGapBehind(ChordStyle.BUS, foldLaid - 1)
+					: far.isEmpty()
 					|| !CUT_FAR_HALF_FREES_THE_GAP && true
-					|| takesTheGapBehind(ChordStyle.BUS, (far.size() + 1) / 2);
+					|| takesTheGapBehind(ChordStyle.BUS, (far.size() + 1) / 2));
 				laneStarted = true;
 				replan = layout.ultra();
 				continue;
@@ -7492,7 +7572,7 @@ public final class SongBuilder {
 				+ bare.past() + " ends=" + bare.ends() + " tips=" + bare.tips() + " room="
 				+ bare.room() + " closes="
 				+ (bare.last() >= from && closes(events, bare, from, bare.last(), wall, stepX,
-					turnCells, offBus, splitCells, climbing)));
+					turnCells, offBus, splitCells, climbing, layout)));
 		}
 		if (bare.last() < from) {
 			// Nothing this lane can do for itself: its own opening chord will not fit, and a pad only
@@ -7501,8 +7581,9 @@ public final class SongBuilder {
 			return Map.of();
 		}
 		boolean shuts = closes(events, bare, from, bare.last(), wall, stepX, turnCells, offBus,
-			splitCells, climbing);
-		int cut = carriedCells(events, bare, from, bare.last(), wall, stepX, splitCells, climbing);
+			splitCells, climbing, layout);
+		int cut = carriedCells(events, bare, from, bare.last(), wall, stepX, splitCells, climbing,
+			layout);
 		if (shuts && !strandsNext(events, from, bare.last(), wall, otherWall, stepX, turnCells,
 				offBus, stepOff, climbing, layout, cut)) {
 			return Map.of();
@@ -7564,7 +7645,7 @@ public final class SongBuilder {
 						break;
 					}
 					boolean shut = closes(events, shorter, from, last, wall, stepX, turnCells, offBus,
-						splitCells, climbing);
+						splitCells, climbing, layout);
 					// Which of the two refused, and what the cut was being asked about. A search that only
 					// says no leaves the reason to be inferred, and the reasons want opposite fixes: a chord
 					// that still fits wants more pad, one whose cut is out of wire wants none at all, and a
@@ -7583,13 +7664,14 @@ public final class SongBuilder {
 							+ " plainWire=" + (nextCells + splitCells) + "/" + DUST_RANGE
 							+ " closes=" + shut + " strands=" + strandsNext(events, from, last, wall, otherWall,
 								stepX, turnCells, offBus, stepOff, climbing, layout,
-								carriedCells(events, shorter, from, last, wall, stepX, splitCells, climbing))
+								carriedCells(events, shorter, from, last, wall, stepX, splitCells, climbing,
+									layout))
 							+ " pads=" + cutting);
 					}
 					if (shut
 						&& !strandsNext(events, from, last, wall, otherWall, stepX, turnCells, offBus,
 							stepOff, climbing, layout, carriedCells(events, shorter, from, last, wall, stepX,
-								splitCells, climbing))) {
+								splitCells, climbing, layout))) {
 						if (TRACE) {
 							System.out.println("  CUTPAD last=" + last + " columns=" + column
 								+ " pads=" + cutting);
@@ -7864,14 +7946,20 @@ public final class SongBuilder {
 	 * these are, and {@code near = 2 * (room - 1)} in the walk, which is where the split is built.</p>
 	 */
 	private static int carriedCells(List<EventGroup> events, Sweep sweep, int from, int last,
-			int wall, int stepX, int splitCells, boolean climbing) {
+			int wall, int stepX, int splitCells, boolean climbing, Layout layout) {
 		boolean roomBehind = last < from || !sweep.busy().get(last - from);
 		int room = (wall - sweep.ends().get(last - from)) * stepX;
 		if (room == 0 || last + 1 >= events.size()) {
 			return 0;
 		}
-		// Read off the same split the walk will build. A headed cut carries what the head and the
+		// Read off the same split the walk will build. A foldback carries the fold's own column
+		// and its inbound run, both on the floor below; a headed cut carries what the head and the
 		// near bus between them could not take, which is not the same as what a plain bus leaves.
+		if (layout.v2() && roomBehind
+				&& foldbackCloses(events.get(last + 1).notes(), room, climbing)) {
+			return climbing ? foldbackAscentCarriedCells(events.get(last + 1).notes(), room)
+				: foldbackCarriedCells(events.get(last + 1).notes(), room);
+		}
 		StackedSplit headed = stackedSplitOf(events.get(last + 1).notes(), room, splitCells,
 			climbing, roomBehind, !roomBehind);
 		if (headed != null) {
@@ -7962,7 +8050,7 @@ public final class SongBuilder {
 
 	/** Whether the lane can hand over after this event, either by filling it out or by a cut. */
 	private static boolean closes(List<EventGroup> events, Sweep sweep, int from, int last, int wall,
-			int stepX, int turnCells, int offBus, int splitCells, boolean climbing) {
+			int stepX, int turnCells, int offBus, int splitCells, boolean climbing, Layout layout) {
 		if (last + 1 >= events.size()) {
 			return true;
 		}
@@ -7976,6 +8064,17 @@ public final class SongBuilder {
 		// the rest of it, all off the one repeater. It closes a lane wherever the lane has got to, and
 		// costs nothing, because the columns it fills are filled with music.
 		int cells = (events.get(last + 1).notes().size() + 1) / 2;
+		// The foldback first, in the same order the walk offers it -- and only for the paster
+		// that has it: promised to v1 this zeroed a breach count a regression holds constant.
+		// Capacity never refuses one, so the planner may promise it on the numbers alone --
+		// gated on the room behind, because the walk refuses a fold in front of path-level wire
+		// and a stacked neighbour is what busy means here. The walk's remaining ground refusals
+		// are the only gap left between the two, and the grading counters say how often they
+		// bite.
+		if (layout.v2() && roomBehind
+				&& foldbackCloses(events.get(last + 1).notes(), room, climbing)) {
+			return true;
+		}
 		// The walk makes this same sum in {@code couldSplit}. They are one rule in two places and a
 		// disagreement between them is a lane closed on a cut that never happens -- so the head is
 		// offered here in the same order the walk offers it, and the plain sum is the fallback in
@@ -12021,6 +12120,473 @@ public final class SongBuilder {
 		}
 		placements.padded("builtWallDescent");
 		return cursor.below(CUBE_FLOOR_HEIGHT);
+	}
+
+	/**
+	 * A foldback cut, decided: the three head slots and the notes of each run, in the order the
+	 * runs are filled.
+	 *
+	 * @param centre the harp on the conductor itself, or {@code null} where the chord had none to
+	 *     spare and the conductor is plain stone
+	 * @param wallward the notes of the wall-bound run, two a column from the catch out to the wall
+	 * @param stepdown the pair on the column under the repeater, where the line folds
+	 * @param inbound the rest, a bus on the floor below running back the other way
+	 * @param room columns from the conductor to the wall inclusive, which is the wall-bound run's
+	 *     whole allowance
+	 * @param inboundLimit cells the inbound run may spend: the wire's own thirteen, or less where
+	 *     the corridor below runs out first
+	 */
+	private record Foldback(EventNote centre, EventNote sideA, EventNote sideB,
+			List<EventNote> wallward, List<EventNote> stepdown, List<EventNote> inbound,
+			int room, int inboundLimit) {
+	}
+
+	/** Why the last {@link #foldbackOf} or {@link #foldbackAscentOf} came back with nothing. */
+	static String LAST_FOLDBACK_REFUSAL = "";
+
+	/**
+	 * A run of powered stone with a pair of notes at each column and the dust that lights it,
+	 * following a height profile -- the foldback's runs climb and fall where {@link #layBus} only
+	 * runs flat. Each column stands {@code riseStep} higher than the column before once
+	 * {@code flatCells} columns have gone by, to a limit of {@code riseCap} steps; a negative
+	 * {@code flatCells} starts the run already stepping.
+	 *
+	 * <p>Lays at least {@code bareCells} columns whether or not any note rides them, because a
+	 * foldback's runs carry the signal somewhere as well as carrying notes: the fold's own column
+	 * must exist for the line to fold, and a climb that stops mid-rung reaches nothing. Every
+	 * slot is asked of the ground -- these runs cross other lanes' flank rows -- and a note whose
+	 * slot is refused spills into {@code leftover} for the run after this one.</p>
+	 *
+	 * @return how many columns it laid
+	 */
+	/** One run column's stone, the single definition of a foldback run's height profile. */
+	private static BlockPos foldbackRunStone(BlockPos firstStone, Direction travel, int cell,
+			int flatCells, int riseCap, int riseStep) {
+		return firstStone.relative(travel, cell)
+			.above(riseStep * Math.min(riseCap, Math.max(0, cell - flatCells)));
+	}
+
+	/**
+	 * How many of a foldback run's note slots the ground will actually grant, asked with the same
+	 * question the builder asks. The runs cross rows other lanes already hang notes and claims in,
+	 * so an oracle that assumes two a column sends the walk more notes than the run can hang --
+	 * and a note past the run's wire limit is simply lost. Counting first is what lets the oracle
+	 * hand each run exactly what it can carry.
+	 */
+	private static int foldbackRunSlotsFree(PlacementPlan placements, BlockPos firstStone,
+			Direction travel, Direction depth, int cells, int flatCells, int riseCap, int riseStep,
+			int mutedCells, int time) {
+		int free = 0;
+		for (int cell = mutedCells; cell < cells; cell++) {
+			BlockPos stone = foldbackRunStone(firstStone, travel, cell, flatCells, riseCap,
+				riseStep);
+			for (Direction out : List.of(depth.getOpposite(), depth)) {
+				if (railSlotTakes(placements, stone.relative(out), time)) {
+					free++;
+				}
+			}
+		}
+		return free;
+	}
+
+	/**
+	 * Whether a folded run can hang this many notes inside its wire limit, walked cell by cell
+	 * with the builder's own asks. The answer the capacity arithmetic alone cannot give: a slot
+	 * another lane holds makes the run grow a column, and a run that would grow past its limit
+	 * is refused here rather than dropping the overflow on the floor.
+	 */
+	private static boolean foldbackRunFits(PlacementPlan placements, BlockPos firstStone,
+			Direction travel, Direction depth, int notes, int cellLimit, int flatCells, int riseCap,
+			int riseStep, int mutedCells, int time) {
+		int remaining = notes;
+		for (int cell = 0; cell < cellLimit && remaining > 0; cell++) {
+			if (cell < mutedCells) {
+				continue;
+			}
+			BlockPos stone = foldbackRunStone(firstStone, travel, cell, flatCells, riseCap,
+				riseStep);
+			for (Direction out : List.of(depth.getOpposite(), depth)) {
+				if (remaining > 0 && railSlotTakes(placements, stone.relative(out), time)) {
+					remaining--;
+				}
+			}
+		}
+		return remaining == 0;
+	}
+
+	private static int layFoldbackRun(PlacementPlan placements, BlockPos firstStone,
+			Direction travel, Direction depth, List<EventNote> notes, int cellLimit, int bareCells,
+			int flatCells, int riseCap, int riseStep, int mutedCells, int time,
+			List<EventNote> leftover) {
+		int placed = 0;
+		int cells = 0;
+		while (cells < cellLimit && (placed < notes.size() || cells < bareCells)) {
+			BlockPos stone = foldbackRunStone(firstStone, travel, cells, flatCells, riseCap,
+				riseStep);
+			placements.powered(stone, "minecraft:stone", time);
+			set(placements, stone.above(), "minecraft:redstone_wire");
+			cells++;
+			if (cells <= mutedCells) {
+				// A muted column carries the signal and nothing else: its stone stands beside
+				// wire that goes live on another module's tick, so a note hung here would sound
+				// with them. The ascent's first climb cell in front of a bus is the case.
+				continue;
+			}
+			// The built side first, for the same reason a crowded bus reverses its pair: the slot
+			// facing ground the walk has not built yet is the one no ask can clear, so the odd
+			// note of a chord goes where soundedByAnother can see what it stands against.
+			for (Direction out : List.of(depth.getOpposite(), depth)) {
+				BlockPos slot = stone.relative(out);
+				if (placed < notes.size() && placements.freeForNote(slot)
+						&& !soundedByAnother(placements, slot, time)) {
+					placeNote(placements, slot, notes.get(placed++));
+				}
+			}
+		}
+		if (placed < notes.size() && leftover != null) {
+			leftover.addAll(notes.subList(placed, notes.size()));
+		} else if (placed < notes.size()) {
+			placements.trouble((notes.size() - placed) + " notes of a chord at tick " + time
+				+ " had nowhere to hang: a foldback run filled its columns without room for the rest");
+		}
+		return cells;
+	}
+
+	/**
+	 * Whether the walk will cut this chord as a foldback, which is the same question the planner
+	 * asks when it closes a lane on one. One definition, because the two have to be the same sum:
+	 * a lane the planner closes on a cut the walk refuses is a lane that runs on past its wall.
+	 */
+	private static boolean foldbackCloses(List<EventNote> chord, int room, boolean climbing) {
+		// At the boundary too: a chord filling exactly room - 1 cells lands flush and still
+		// cannot turn after itself, and on a gap-one song there is no wait to buy the pad that
+		// would. Traced on a chord of 26 at a room of 14 -- thirteen cells, gate said "fits",
+		// the headed cut clashed, and the two chords after it walked out six past the wall.
+		return FOLDBACK_CUTS && room >= 1
+			&& room - 1 <= (chord.size() + 1) / 2
+			&& chord.size() >= FOLDBACK_ABOVE_NOTES;
+	}
+
+	/**
+	 * How many cells of the floor below a foldback spends: the fold's own column, plus the inbound
+	 * run. The planner's {@link #carriedCells} and the walk's {@link #gradeLaneStart} both read
+	 * this, so the prediction is written once. It assumes the head gets its harps and the runs
+	 * grow nowhere, which is the common case; the grading counters say how often it is not.
+	 */
+	private static int foldbackCarriedCells(List<EventNote> chord, int room) {
+		List<EventNote> rest = new ArrayList<>(busOrder(chord));
+		rest = new ArrayList<>(rest.subList(Math.min(2 * room, rest.size()), rest.size()));
+		for (int take = 0; take < 3; take++) {
+			takeFromTail(rest, note -> note.effect() == null && isHarpNote(note));
+		}
+		int inboundNotes = Math.max(0, rest.size() - 2);
+		return room + 1 + Math.max(1, (inboundNotes + 1) / 2);
+	}
+
+	/**
+	 * Decides a foldback, the head's cells asked of the ground before a block is laid.
+	 *
+	 * <p>Capacity never refuses one -- the head, the wall-bound run, the fold's own pair and
+	 * thirteen inbound cells reach the simultaneous-note cap with no harps at all -- so the
+	 * refusals here are all about the ground: a contested conductor cell, or a corridor below too
+	 * short for the inbound run. The wall-bound run is filled first on purpose: its columns are
+	 * corridor this floor has already spent, where every inbound cell eats a fresh column off the
+	 * floor below.</p>
+	 *
+	 * @param opens the column the repeater stands in; the conductor is one further along
+	 * @param availableBelow columns from the repeater's own column back to the far wall, which is
+	 *     what the inbound run and its handover cell have to fit inside
+	 */
+	private static Foldback foldbackOf(PlacementPlan placements, Lane opens, List<EventNote> notes,
+			int room, int availableBelow, int time) {
+		LAST_FOLDBACK_REFUSAL = "";
+		Direction travel = opens.travel();
+		Direction side = opens.noteSide();
+		BlockPos centreAt = opens.pos().above().relative(travel);
+		// The conductor's cell, and what standing there would do. It is strongly powered at this
+		// module's tick, so a foreign note beside it would sound with this chord -- the same
+		// question every powered stone in a staircase is asked, and the one refusal that kills
+		// the shape outright: everything else can shrink, the conductor cannot move.
+		if (!placements.freeForNote(centreAt) || soundedByAnother(placements, centreAt, time)
+				|| stoneWouldSoundAForeignNote(placements, centreAt, time)) {
+			LAST_FOLDBACK_REFUSAL = "CentreContested";
+			return null;
+		}
+		// No fold directly in front of path-level wire. The fold's stepdown dust sits one down
+		// and one back from the cell behind the module, and the slab above it does not occlude
+		// -- that is the whole trick -- so any wire standing in that cell gains a real diagonal
+		// neighbour. A stacked module's cross is the common case: its shape is stated because
+		// nothing normally joins it, a real neighbour makes the game straighten it into a line,
+		// and the module's flank relays go dark -- 538 dead notes over 33 builds, read back the
+		// day this shipped. A delay column is safe (its stone occludes), and so is a bus (its
+		// blocks run a level up); the refusal falls the chord to the module shapes, whose
+		// parity machinery owns the crowded-back cases.
+		String behind = placements.blockAt(opens.pos().relative(travel.getOpposite()));
+		if (behind != null && behind.startsWith("minecraft:redstone_wire")) {
+			LAST_FOLDBACK_REFUSAL = "WireBehind";
+			return null;
+		}
+		// The wall-bound run is served before the head, not just before the inbound run. A cut
+		// fills the room it is given, and the overshoot gate guarantees the chord can: a chord
+		// allowed in here always has the two-a-column the run needs to land flush on the wall.
+		// Serving the head first left the marginal chords a column or two short of it -- a
+		// recess, which no descent is allowed -- for three notes that ride the fold as cheaply.
+		// And served exactly what the ground will grant, not two a column: the run's rows are
+		// shared with other lanes' flanks, and a note the run cannot hang would fold down and
+		// could push the folded run past its wire.
+		List<EventNote> pool = new ArrayList<>(busOrder(notes));
+		int wallFree = foldbackRunSlotsFree(placements, opens.pos().relative(travel).below(),
+			travel, side, room, 1, 2, 1, 0, time);
+		List<EventNote> wallward = new ArrayList<>(
+			pool.subList(0, Math.min(wallFree, pool.size())));
+		List<EventNote> rest = new ArrayList<>(pool.subList(wallward.size(), pool.size()));
+		EventNote centre = takeFromTail(rest,
+			note -> note.effect() == null && isHarpNote(note));
+		EventNote sideA = railSlotTakes(placements, centreAt.relative(side), time)
+			? takeFromTail(rest, note -> note.effect() == null && isHarpNote(note)) : null;
+		EventNote sideB = railSlotTakes(placements, centreAt.relative(side.getOpposite()), time)
+			? takeFromTail(rest, note -> note.effect() == null && isHarpNote(note)) : null;
+		List<EventNote> stepdown = new ArrayList<>(rest.subList(0, Math.min(2, rest.size())));
+		List<EventNote> inbound = new ArrayList<>(rest.subList(stepdown.size(), rest.size()));
+		// The run below, and the cell the next module opens on after it, both inside the far
+		// wall -- walked cell by cell with the builder's own asks, because the arithmetic alone
+		// cannot see a slot another lane holds, and a note past the run's limit is simply lost.
+		// The handover may land ON the far wall column -- a repeater against the wall is the
+		// wall descent's own opening -- and holding it a column short of that was refusing
+		// exactly the room-one folds, whose tails are the longest of all. In-game reading
+		// named the off-by-one: the tail may go one further.
+		int inboundLimit = Math.min(DUST_RANGE - 2, availableBelow - 1);
+		if (inboundLimit < 1 || !foldbackRunFits(placements, opens.pos().below(2),
+				travel.getOpposite(), side, rest.size(), 1 + inboundLimit, 0, 1, -1, 0, time)) {
+			LAST_FOLDBACK_REFUSAL = "NoRoomBelow";
+			return null;
+		}
+		return new Foldback(centre, sideA, sideB, wallward, stepdown, inbound, room, inboundLimit);
+	}
+
+	/**
+	 * Lays the whole foldback -- head, wall-bound run, the fold and the inbound run -- and hands
+	 * back the cell after the run's last block, on the floor below. There is no staircase and
+	 * nothing left for a descent builder to lay.
+	 *
+	 * <p>The repeater stands on a top slab and drives the conductor a column further on, which is
+	 * a note block when the chord spared a harp and plain stone when it did not: either way it is
+	 * strongly powered, sounds the two harps beside it, and lights the dust directly beneath it.
+	 * The slab is what makes that dust the fold: a slab cannot be strongly powered, so the
+	 * repeater's power stops where it should, and it does not block the catch's signal from
+	 * stepping down diagonally beneath it -- the one block that lets a line turn straight back
+	 * under its own repeater. From the catch the wire runs out to the wall at its own height and
+	 * back down two steps into a bus on the floor below, a pair of notes on every column of all
+	 * three runs.</p>
+	 */
+	private static BlockPos addFoldbackCut(PlacementPlan placements, BlockPos cursor,
+			Direction travel, Direction depth, int triggerDelay, Foldback fold, int time) {
+		placements.placing("foldback head" + (3 - (fold.centre() == null ? 1 : 0)
+			- (fold.sideA() == null ? 1 : 0) - (fold.sideB() == null ? 1 : 0)));
+		placements.turnedAt(cursor);
+		// The slab before the repeater on it: the paste runs its commands in build order, and a
+		// component set over air drops as an item the moment it lands.
+		set(placements, cursor, "minecraft:stone_slab[type=top]");
+		set(placements, cursor.above(),
+			"minecraft:repeater[facing=" + repeaterFacing(travel) + ",delay=" + triggerDelay + "]");
+		BlockPos catchAt = cursor.relative(travel);
+		BlockPos centreAt = catchAt.above();
+		// The conductor. A note block is bare, not through placeNote: its instrument is the wire
+		// it stands over. Recorded powered either way -- it is what sounds the side harps and
+		// what verify has to see driving the catch.
+		if (fold.centre() != null) {
+			placeNoteBlock(placements, centreAt, fold.centre());
+			placements.powered(centreAt, time);
+		} else {
+			placements.powered(centreAt, "minecraft:stone", time);
+		}
+		if (fold.sideA() != null) {
+			placeNote(placements, centreAt.relative(depth), fold.sideA());
+		}
+		if (fold.sideB() != null) {
+			placeNote(placements, centreAt.relative(depth.getOpposite()), fold.sideB());
+		}
+		// The wall-bound run. Its first two columns run at the catch's own height -- the centre
+		// standing on the catch blocks the diagonal a first-column step would need -- and from
+		// there it climbs staircase-style back up to the arriving lane's bus height and runs
+		// flat to the wall, so the stretch reads as a raised bus of the lane that fed it rather
+		// than a shelf wedged between the floors. Held to the room -- it may not grow past the
+		// wall -- and what it cannot hang folds down with everything else instead. The catch
+		// column is laid whether or not a note rides it: the fold needs that cell lit.
+		placements.placing("foldback wall run");
+		List<EventNote> spill = new ArrayList<>();
+		int wallCells = layFoldbackRun(placements, catchAt.below(), travel, depth,
+			fold.wallward(), fold.room(), fold.room(), 1, 2, 1, 0, time, spill);
+		placements.recessed(Math.max(0, fold.room() - wallCells));
+		// The fold and the inbound run in one: the column under the repeater a step down from
+		// the catch, another step down onto the floor below's bus height, and flat from there,
+		// running back the other way. Two columns are laid whether or not a note rides them --
+		// the fold's own, and the first bus cell -- because the next module's repeater reads
+		// the block behind it and that block has to exist and be lit.
+		placements.placing("foldback fold");
+		List<EventNote> folded = new ArrayList<>(spill);
+		folded.addAll(fold.stepdown());
+		folded.addAll(fold.inbound());
+		int foldCells = layFoldbackRun(placements, cursor.below(2), travel.getOpposite(), depth,
+			folded, 1 + fold.inboundLimit(), 2, 0, 1, -1, 0, time, null);
+		placements.padded("foldbackWallPairs" + Math.min(fold.wallward().size(), 30));
+		return cursor.below(CUBE_FLOOR_HEIGHT).relative(travel.getOpposite(), foldCells);
+	}
+
+	/**
+	 * A foldback across a climb, decided: the conductor's flank pair, the wall-bound run, and the
+	 * outbound climb that carries the rest up to the floor above.
+	 *
+	 * @param pairA the note beside the conductor away from the depth step, {@code pairB} the one
+	 *     toward it; either may be null where its cell was refused. Any instrument -- they hang
+	 *     beside a strongly powered block, not under wire.
+	 * @param mutedCells climb cells at the front that carry the signal and no notes: one where a
+	 *     bus ends directly behind the module, whose wire weakly powers the first climb stone at
+	 *     its own tick.
+	 */
+	private record FoldbackAscent(EventNote pairA, EventNote pairB, List<EventNote> wallward,
+			List<EventNote> outbound, int room, int outboundLimit, int mutedCells) {
+	}
+
+	/**
+	 * How many cells of the floor above an ascent foldback spends. The planner's
+	 * {@link #carriedCells} and the walk's {@link #gradeLaneStart} both read this.
+	 */
+	private static int foldbackAscentCarriedCells(List<EventNote> chord, int room) {
+		List<EventNote> rest = new ArrayList<>(busOrder(chord));
+		int served = Math.min(2 + 2 * (room - 1), rest.size());
+		// One climb cell charged as note-less: the first stone's pair cells are the arriving
+		// lane's own headroom claims more often than not, and a bus ending behind mutes them
+		// outright. Pessimism here is the safe direction -- a lane foretold deeper than it opens
+		// books pads it did not need, where the opposite strands the next lane's first chord.
+		return room - 1 + Math.max(3, 1 + (rest.size() - served + 1) / 2);
+	}
+
+	/**
+	 * Decides an ascent foldback, every cell asked of the ground before a block is laid.
+	 *
+	 * <p>The ascent is the descent's mirror with the slab traded away: the repeater opens on
+	 * plain stone and drives a conductor standing a column on at the lane's own height, the wire
+	 * lights on TOP of the strongly powered conductor, and the line folds by climbing back over
+	 * its own repeater -- two staircase cells and then flat along the floor above's path. No harp
+	 * is ever needed: the conductor cannot be a note block at all, because the wire on top of it
+	 * would mute it, so it is stone and its flank pair carries any two notes instead.</p>
+	 *
+	 * <p>One hazard is structural and one is asked. The second climb cell's stone stands directly
+	 * over the cell where a bus behind ends its wire, occluding the diagonal that would otherwise
+	 * let that wire drive the whole climb at its own tick -- the shape guards itself, which is why
+	 * the climb leans back over the repeater at all. What it cannot guard is the first climb
+	 * stone, which that same wire weakly powers at its own tick: its pair is muted instead.</p>
+	 */
+	private static FoldbackAscent foldbackAscentOf(PlacementPlan placements, Lane opens,
+			List<EventNote> notes, int room, int availableBehind, int time) {
+		LAST_FOLDBACK_REFUSAL = "";
+		Direction travel = opens.travel();
+		Direction side = opens.noteSide();
+		BlockPos stand = opens.pos();
+		BlockPos conductorAt = stand.above().relative(travel);
+		if (placements.blockAt(conductorAt) != null
+				|| placements.blockAt(conductorAt.above()) != null
+				|| stoneWouldSoundAForeignNote(placements, conductorAt, time)) {
+			LAST_FOLDBACK_REFUSAL = "ConductorContested";
+			return null;
+		}
+		// The three climb stones, mandatory the way a staircase's rungs are: each is powered at
+		// this module's tick and sounds whatever hangs beside it, so a foreign note beside any
+		// of them refuses the cut -- an honest fallback beats a silent wrong.
+		for (BlockPos rung : List.of(stand.above(2),
+				stand.relative(travel.getOpposite()).above(3),
+				stand.relative(travel.getOpposite(), 2).above(4))) {
+			if (placements.blockAt(rung) != null
+					|| stoneWouldSoundAForeignNote(placements, rung, time)) {
+				LAST_FOLDBACK_REFUSAL = "ClimbContested";
+				return null;
+			}
+		}
+		String behindUpper = placements.blockAt(stand.relative(travel.getOpposite()).above(2));
+		if (behindUpper != null && behindUpper.startsWith("minecraft:repeater")) {
+			// A repeater at that height would strongly power the first climb stone at its own
+			// tick, which is the whole far half fired early. Nothing occludes strong power.
+			LAST_FOLDBACK_REFUSAL = "RaisedRepeaterBehind";
+			return null;
+		}
+		int muted = behindUpper != null && behindUpper.startsWith("minecraft:redstone_wire")
+			? 1 : 0;
+		List<EventNote> pool = new ArrayList<>(busOrder(notes));
+		EventNote pairA = !pool.isEmpty()
+				&& railSlotTakes(placements, conductorAt.relative(side.getOpposite()), time)
+			? pool.remove(0) : null;
+		EventNote pairB = !pool.isEmpty()
+				&& railSlotTakes(placements, conductorAt.relative(side), time)
+			? pool.remove(0) : null;
+		// Served exactly what the ground will grant: the wall-bound run rides the arriving
+		// lane's own bus rows, which the corridor alongside already hangs notes and claims in,
+		// and a note the run cannot hang would climb with the rest and could push the climb
+		// past its wire.
+		int wallFree = room > 1
+			? foldbackRunSlotsFree(placements, stand.relative(travel, 2).above(), travel, side,
+				room - 1, 0, 0, 1, 0, time)
+			: 0;
+		List<EventNote> wallward = new ArrayList<>(
+			pool.subList(0, Math.min(wallFree, pool.size())));
+		List<EventNote> outbound = new ArrayList<>(pool.subList(wallward.size(), pool.size()));
+		// The same off-by-one as the descent's tail: the climb's handover may land ON the far
+		// wall column, so the run has the whole corridor and not the corridor less one.
+		int outboundLimit = Math.min(DUST_RANGE - 1, availableBehind);
+		if (outboundLimit < 3 || !foldbackRunFits(placements, stand.above(2),
+				travel.getOpposite(), side, outbound.size(), outboundLimit, 0, 2, 1, muted,
+				time)) {
+			LAST_FOLDBACK_REFUSAL = "NoRoomAbove";
+			return null;
+		}
+		return new FoldbackAscent(pairA, pairB, wallward, outbound, room, outboundLimit, muted);
+	}
+
+	/**
+	 * Lays the whole ascent foldback -- repeater, conductor and its pair, wall-bound run, and the
+	 * climb over the repeater onto the floor above -- and hands back the cell after the climb's
+	 * last block, on the floor above's path. There is no glass staircase and nothing left for a
+	 * climb builder to lay.
+	 */
+	private static BlockPos addFoldbackAscent(PlacementPlan placements, BlockPos cursor,
+			Direction travel, Direction depth, int triggerDelay, FoldbackAscent fold, int time) {
+		placements.placing("foldback ascent head" + ((fold.pairA() == null ? 0 : 1)
+			+ (fold.pairB() == null ? 0 : 1)));
+		placements.turnedAt(cursor);
+		set(placements, cursor, "minecraft:stone");
+		set(placements, cursor.above(),
+			"minecraft:repeater[facing=" + repeaterFacing(travel) + ",delay=" + triggerDelay + "]");
+		// The conductor: plain stone, always -- the wire on top of it would mute a note block --
+		// strongly powered by the repeater, sounding its flank pair and lighting the wire above.
+		BlockPos conductorAt = cursor.above().relative(travel);
+		placements.powered(conductorAt, "minecraft:stone", time);
+		if (fold.pairA() != null) {
+			placeNote(placements, conductorAt.relative(depth.getOpposite()), fold.pairA());
+		}
+		if (fold.pairB() != null) {
+			placeNote(placements, conductorAt.relative(depth), fold.pairB());
+		}
+		set(placements, conductorAt.above(), "minecraft:redstone_wire");
+		// The wall-bound run, flat at the lane's own bus height -- where a raised bus would
+		// stand anyway, which is why it needs no climb of its own.
+		placements.placing("foldback ascent wall run");
+		List<EventNote> spill = new ArrayList<>();
+		int wallCells = fold.room() > 1
+			? layFoldbackRun(placements, cursor.relative(travel, 2).above(), travel, depth,
+				fold.wallward(), fold.room() - 1, fold.room() - 1, 0, 0, 1, 0, time, spill)
+			: 0;
+		placements.recessed(Math.max(0, fold.room() - 1 - wallCells));
+		// The climb, folding back over the repeater: two staircase cells and flat along the
+		// floor above's path. Three cells are laid whether or not a note rides them -- a climb
+		// that stops mid-rung reaches nothing, and the second cell's stone is the occluder that
+		// severs a bus behind from the line.
+		placements.placing("foldback ascent climb");
+		List<EventNote> onward = new ArrayList<>(spill);
+		onward.addAll(fold.outbound());
+		int outCells = layFoldbackRun(placements, cursor.above(2), travel.getOpposite(), depth,
+			onward, fold.outboundLimit(), 3, 0, 2, 1, fold.mutedCells(), time, null);
+		placements.padded("foldbackAscentWallPairs" + Math.min(fold.wallward().size(), 30));
+		return cursor.above(CUBE_FLOOR_HEIGHT).relative(travel.getOpposite(), outCells);
 	}
 
 	/**
@@ -17622,6 +18188,37 @@ public final class SongBuilder {
 	 * first: "desc1 28 notes".</p>
 	 */
 	static boolean WALL_DESCENTS = true;
+
+	/**
+	 * v2: a chord of {@link #FOLDBACK_ABOVE_NOTES} or more that overshoots a descent is cut as a
+	 * foldback -- no staircase at all.
+	 *
+	 * <p>The sixth cut, and it is offered before every other because it generalizes to any room
+	 * from one upward. The repeater goes on a top slab and drives a conductor one column on: a
+	 * harp note block when the chord can spare one, plain stone when it cannot, a hanging harp
+	 * offered on each side of it. The conductor is strongly powered, so it lights the dust
+	 * directly beneath it -- the catch -- and the slab is what makes that cell worth lighting:
+	 * a slab cannot be strongly powered, so the repeater's power stops where it should, and it
+	 * does not block the catch's signal from stepping down beneath it, so the line folds
+	 * straight back on itself under its own repeater. From the catch the wire runs both ways at
+	 * once -- out to the wall at the catch's own height, and down two steps into a bus on the
+	 * floor below -- with a pair of notes on every column of both.</p>
+	 *
+	 * <p>In-game design, hand-built and signed first. Off three harps and a room of one it
+	 * carries thirty-three; with no harps at all, thirty -- the simultaneous-note cap with
+	 * nothing to spare -- so no chord it is offered can ever be too big for it, whatever its
+	 * instruments. The wall-bound run is filled before the inbound one on purpose: its columns
+	 * are corridor this floor has already spent, where every inbound cell eats a fresh column
+	 * off the floor below.</p>
+	 */
+	static boolean FOLDBACK_CUTS = true;
+
+	/**
+	 * The smallest chord offered a foldback: the bus classes. The shape works from four notes
+	 * up, and may yet be the way every cut is made; held to ten for now so the module shapes
+	 * keep the chords they were built for.
+	 */
+	static final int FOLDBACK_ABOVE_NOTES = 10;
 
 	/**
 	 * Whether a sunken bus is measured as it will be built -- its four slots asked before the shape
