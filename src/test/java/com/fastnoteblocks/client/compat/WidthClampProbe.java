@@ -40,6 +40,7 @@ class WidthClampProbe {
 			System.out.println("CLAMP " + name + " asked " + String.format("%2d", width)
 				+ " -> built x " + lowX + ".." + highX
 				+ " (" + (highX - lowX + 1) + " across)"
+				+ "  builtWidth " + plan.builtWidth()
 				+ "  depth " + (highZ - lowZ + 1)
 				+ "  blocks " + plan.commands().size());
 		}

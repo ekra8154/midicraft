@@ -1285,7 +1285,8 @@ public final class SongBuilder {
 		int longest = Math.max(
 			evenEvents.stream().mapToInt(EventGroup::length).max().orElse(1),
 			oddEvents.stream().mapToInt(EventGroup::length).max().orElse(1));
-		int laneWidth = Math.max(longest + 2, limits.laneWidth() - 2);
+		int laneWidth = Math.max(longest + 2,
+			limits.laneWidth() - widthReserve(PasteMode.ULTRA_HALF_TICK_LANE));
 		secondOrigin = origin.relative(forward, laneWidth + ULTRA_HALF_TICK_GAP);
 
 		PlacementPlan placements = new PlacementPlan();
@@ -1601,7 +1602,7 @@ public final class SongBuilder {
 		// and a corner carrying notes reaches one past that. The wall still has to clear the longest
 		// single event, or an event too big to fit would turn on every attempt and never advance.
 		int longest = events.stream().mapToInt(EventGroup::length).max().orElse(1);
-		int laneWidth = Math.max(longest + 2, width - 2);
+		int laneWidth = Math.max(longest + 2, width - widthReserve(mode));
 		PlacementPlan placements = new PlacementPlan();
 		// One floor is not a different kind of build, it is a build whose every turn is flat -- and
 		// walkWall already says so: with one floor the step above is never inside it, so the walk
@@ -1616,6 +1617,23 @@ public final class SongBuilder {
 			walkWall(events, origin, forward, laneWidth, floors, placements, layout, start);
 		}
 		return placements.finish(mode, origin, origin.getX(), origin.getX() + laneWidth);
+	}
+
+	/**
+	 * Columns of the chosen width that go on what stands outside the walls rather than between them.
+	 *
+	 * <p>Three for v2 and two for everything else, and the difference is the reason
+	 * {@link #V2_WIDTH_IS_THE_PASTE_WIDTH} exists: every v2 turn reaches exactly one column past its
+	 * wall, so the walls stand three apart from the paste and the number on the slider is the number
+	 * of blocks across. The first layout's turns poke out by different amounts and it keeps its
+	 * two.</p>
+	 *
+	 * <p>One definition, because the width is settled in three places -- the two lane walks and the
+	 * half-tick pair -- and {@link PastePlan#builtWidth} has to undo the same sum to say what the
+	 * build came out at.</p>
+	 */
+	private static int widthReserve(PasteMode mode) {
+		return mode == PasteMode.ULTRA_COMPACT_LANE_V2 && V2_WIDTH_IS_THE_PASTE_WIDTH ? 3 : 2;
 	}
 
 	/**
@@ -1643,7 +1661,7 @@ public final class SongBuilder {
 		// is {@code width} blocks across, which is what the slider said it would be. The first layout
 		// keeps its {@code width - 2}: its turns still poke out by different amounts, and it is not
 		// being changed. See {@link #V2_WIDTH_IS_THE_PASTE_WIDTH}.
-		int laneWidth = Math.max(longest + 2, width - (V2_WIDTH_IS_THE_PASTE_WIDTH ? 3 : 2));
+		int laneWidth = Math.max(longest + 2, width - widthReserve(PasteMode.ULTRA_COMPACT_LANE_V2));
 		// Which flat turns are armed a column early, by the index of the event that armed them. Empty
 		// to begin with; a turn is only put here once a walk has laid it the wide way and watched a
 		// note land past its corner. See {@link #FLAT_TURN_KEEPS_ITS_WIDTH}.
@@ -20533,6 +20551,23 @@ public final class SongBuilder {
 			List<Integer> breaches, List<Integer> recesses, Map<String, Integer> padding,
 			int nearWall, int farWall, Map<BlockPos, String> collisions, Set<BlockPos> poweredAt,
 			Map<BlockPos, String> laidBy, Map<BlockPos, Integer> noteTicks, FaultSites faultSites) {
+
+		/**
+		 * The width this build actually came out at, which is not always the width that was asked for.
+		 *
+		 * <p>A lane has to clear the song's widest single event or a chord too big to fit would turn on
+		 * every attempt and never advance, so the builder takes the larger of the two -- and a width
+		 * below that floor is not refused, it is raised. Every width below the floor produces the same
+		 * build, block for block. The player picked a number and got a different one, so something has
+		 * to be able to say which.</p>
+		 *
+		 * <p>Nought for a layout with no walls to measure between, which is every mode but the lanes.
+		 * The two walls are shifted together when the plan lands, so the gap between them survives
+		 * that.</p>
+		 */
+		int builtWidth() {
+			return farWall == nearWall ? 0 : farWall - nearWall + widthReserve(mode);
+		}
 
 		/**
 		 * Cells of lane filled with wire rather than with music, counted by what asked for them.

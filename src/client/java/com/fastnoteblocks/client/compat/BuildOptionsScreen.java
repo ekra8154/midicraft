@@ -56,6 +56,16 @@ final class BuildOptionsScreen extends Screen {
 	private double commandsPerTick;
 	private int laneWidth;
 	private int laneFloors;
+	/** The width control, so its line can be rewritten when a forecast says the width was raised. */
+	private Choice widthChoice;
+	/**
+	 * The built width the width line was last written for.
+	 *
+	 * <p>Nought while no forecast is in: the line falls back to saying what was asked for, which is
+	 * the truth for every width that is not raised and is what it said before any of this. Held so
+	 * the message is rewritten when the answer changes rather than once a frame.</p>
+	 */
+	private int labelledWidth;
 
 	/**
 	 * One background thread for forecasts, shared by every instance of this screen.
@@ -95,7 +105,7 @@ final class BuildOptionsScreen extends Screen {
 	 * @param error the reason there is no build at all, or {@code null} when there is one
 	 */
 	private record Forecast(int spanZ, int breachingLanes, int worstBreach, List<FaultLine> faults,
-			int above, int below, String error) {
+			int above, int below, String error, int builtWidth) {
 
 		/**
 		 * Whether anything is wrong with the machine itself, as opposed to with where it lands.
@@ -352,7 +362,8 @@ final class BuildOptionsScreen extends Screen {
 		}
 
 		if (hasLaneControls()) {
-			addRenderableWidget(new Choice(left, widthRow(top), width,
+			labelledWidth = 0;
+			widthChoice = addRenderableWidget(new Choice(left, widthRow(top), width,
 				FastNoteblocksConfig.MAX_BUILD_LANE_WIDTH - FastNoteblocksConfig.MIN_BUILD_LANE_WIDTH
 					+ 1,
 				laneWidth - FastNoteblocksConfig.MIN_BUILD_LANE_WIDTH,
@@ -462,14 +473,14 @@ final class BuildOptionsScreen extends Screen {
 					// warn that two billion levels are below the floor of a world that is not
 					// there.
 					(int) Math.max(0, (long) highest - worldTop),
-					(int) Math.max(0, (long) worldFloor - lowest), null);
+					(int) Math.max(0, (long) worldFloor - lowest), null, plan.builtWidth());
 			} catch (IllegalArgumentException refused) {
-				result = new Forecast(0, 0, 0, List.of(), 0, 0, refused.getMessage());
+				result = new Forecast(0, 0, 0, List.of(), 0, 0, refused.getMessage(), 0);
 			} catch (RuntimeException broken) {
 				// A forecast that throws must not take the paste down with it: the build itself may
 				// well be fine, and a screen that cannot tell you the depth is still a screen you
 				// can paste from.
-				result = new Forecast(0, 0, 0, List.of(), 0, 0, "could not work out the layout");
+				result = new Forecast(0, 0, 0, List.of(), 0, 0, "could not work out the layout", 0);
 			}
 			if (forecastGeneration.get() == generation) {
 				forecast = result;
@@ -607,8 +618,19 @@ final class BuildOptionsScreen extends Screen {
 		}
 	}
 
+	/**
+	 * What the width control says, which is not always the number it is set to.
+	 *
+	 * <p>A lane has to clear the song's widest single event, so the builder takes the larger of that
+	 * and the width chosen here -- and a width below the floor is not refused, it is quietly raised.
+	 * Every width below the floor then builds identically: on a song whose biggest chord wants
+	 * thirteen columns, six through eighteen are the same build down to the block. The slider still
+	 * goes wherever it likes; it just stops promising a footprint the build will not honour.</p>
+	 */
 	private String widthLine(int blocks) {
-		return blocks + " blocks wide before it folds back";
+		return labelledWidth > blocks
+			? blocks + " asked - built " + labelledWidth + " wide, the widest chord needs it"
+			: blocks + " blocks wide before it folds back";
 	}
 
 	private String floorLine(int floors) {
@@ -680,6 +702,15 @@ final class BuildOptionsScreen extends Screen {
 				"about %d blocks, roughly %s if you stay with it", commands, howLong(seconds)),
 			left, rateY + 24, 0xFF8A9098, false);
 		Forecast predicted = forecast;
+		// The width line is the one label on this screen that cannot be worked out from the setting it
+		// shows, so it waits for the forecast and is rewritten when the answer changes. While one is in
+		// flight the forecast is null, which puts the line back to plain rather than leaving a number
+		// from the width before this one standing under a slider that has moved.
+		int built = predicted == null ? 0 : predicted.builtWidth();
+		if (widthChoice != null && built != labelledWidth) {
+			labelledWidth = built;
+			widthChoice.updateMessage();
+		}
 		graphics.text(font, forecastLine(predicted), left, rateY + 36, forecastColour(predicted),
 			false);
 		// Always red. Everything on these lines takes music away, and the line above them can be green
