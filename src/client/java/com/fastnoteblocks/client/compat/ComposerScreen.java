@@ -594,11 +594,11 @@ public final class ComposerScreen extends Screen {
 	 * Where the notes stood relative to the cursor when they were copied, and how far a paste of
 	 * them moves the cursor on.
 	 *
-	 * <p>A copy is a phrase and a place to stand while looking at it. Keeping both means a paste can
-	 * put the phrase back exactly as it sat -- the run-up before the first note, or the tail of
-	 * silence after the last one -- against wherever the cursor is now. There is nothing else that
-	 * carries the silence at the edges of a passage, because a set of notes begins on its first
-	 * note and ends on its last.</p>
+	 * <p>A copy is a phrase and a place to stand while looking at it. The two together make a block
+	 * with a bound at each end, and it is the block that gets laid down: the run-up before the first
+	 * note, or the tail of silence after the last one, is inside it and comes with it. There is
+	 * nothing else that carries the silence at the edges of a passage, because a set of notes begins
+	 * on its first note and ends on its last.</p>
 	 */
 	private long clipboardCursorOffset;
 	private long clipboardStepTicks;
@@ -2887,10 +2887,10 @@ public final class ComposerScreen extends Screen {
 					+ "its own layer."
 				: "Lays the selected notes down again after themselves, and leaves the selection on "
 					+ "the copy -- so Ctrl+D again adds another repeat. How far each one steps is "
-					+ "read from where the time marker stands over the passage: before it, the "
-					+ "silence up to the first note is kept between the repeats; after it, the "
-					+ "silence past the last one is. The marker steps on with them. Every note "
-					+ "stays on its own layer.";
+					+ "the block the passage and the time marker make together, so the silence "
+					+ "between them is repeated along with the notes: park the marker a beat before "
+					+ "a phrase and every copy keeps that beat. The marker steps on with them. "
+					+ "Every note stays on its own layer.";
 			case ADD_MARKER -> "Puts a marker where the playback marker is standing, or takes away "
 				+ "the one already there. M does the same thing. A marker names a position and nothing "
 				+ "else: it is not built and it makes no sound.";
@@ -7161,11 +7161,11 @@ public final class ComposerScreen extends Screen {
 			? rangeEnd - clipboardOriginTick
 			: spanOfStarts(selected.stream().map(copied -> copied.note().startTick())
 				.distinct().sorted().toList());
-		long lastNote = selected.stream().mapToLong(copied -> copied.note().startTick()).max()
-			.orElse(firstNote);
+		List<Long> starts = selected.stream().map(copied -> copied.note().startTick())
+			.distinct().sorted().toList();
 		long cursor = playbackReturnTick;
-		clipboardCursorOffset = clipboardOriginTick - cursor;
-		clipboardStepTicks = cursorRelativeStep(cursor, firstNote, lastNote);
+		clipboardCursorOffset = blockLeadIn(cursor, firstNote);
+		clipboardStepTicks = blockStep(cursor, firstNote, starts.getLast(), stepOfStarts(starts));
 		clipboard = selected.stream()
 			.map(copied -> new ClipboardNote(copied.note().startTick() - clipboardOriginTick,
 				copied.note().midiNote(), copied.note().durationTicks(), copied.note().velocity(),
@@ -7241,11 +7241,12 @@ public final class ComposerScreen extends Screen {
 	 * one position the composer already treats as "here": it is drawn, it is draggable, playback
 	 * starts from it, and it does not move when you reach for a key.</p>
 	 *
-	 * <p>Against it rather than at it. The copy remembered where the marker stood over the notes, so
-	 * the phrase goes back at the same distances from wherever the marker is now -- which is the
-	 * only thing that carries the silence at the edges of a passage. A set of notes begins on its
-	 * first note and ends on its last, so a run-up before the phrase or a tail of rest after it
-	 * exists nowhere except in that relationship.</p>
+	 * <p>Against it rather than at it, and always in front of it. The copy remembered where the
+	 * marker stood over the notes, and the two of them make a block: the phrase plus whichever
+	 * silence lies between it and the marker. That block goes down starting at the marker, so a
+	 * run-up before the phrase keeps its distance and a tail of rest after it comes along behind.
+	 * Nothing else carries that silence, because a set of notes begins on its first note and ends
+	 * on its last.</p>
 	 *
 	 * <p>In place is the one paste that has no aim to take: doubling a part onto another instrument
 	 * or moving it between layers means landing on the same beat it left, and finding that beat by
@@ -7267,10 +7268,11 @@ public final class ComposerScreen extends Screen {
 		int before = project().layers().size();
 		PasteResult result = project().pasteNotes(project().activeLayerIndex(), clipboard, startTick);
 		ComposerProject pasted = result.project();
-		// The marker steps on, so a second Ctrl+V lays the phrase down after the first rather than
-		// on top of it and a passage is built by holding the key. Measured from where the cursor is
-		// rather than from where the notes went, since it is the cursor the phrase was placed
-		// against. Not for paste-in-place, whose whole point is landing on the beat the copy left.
+		// The marker steps to the far end of the block, so a second Ctrl+V lays the phrase down after
+		// the first rather than on top of it and a passage is built by holding the key. Measured
+		// from where the marker is rather than from where the notes went, since it is the marker the
+		// block was placed against. Not for paste-in-place, whose point is landing on the beat the
+		// copy left.
 		long cursor = inPlace ? -1L
 			: SELECTION_RANGE
 				? startTick + clipboardSpan()
@@ -7316,30 +7318,50 @@ public final class ComposerScreen extends Screen {
 	}
 
 	/**
-	 * How far the cursor moves after laying a passage down, given where it stood over it.
+	 * How far in front of the cursor the block starts, which is nothing unless the cursor is inside
+	 * it.
 	 *
-	 * <p>Think of the cursor and the notes as making a block with two bounds, and the cursor landing
-	 * on the far one.</p>
-	 *
-	 * <p>Standing before the phrase, the block runs from the cursor to the last note: the run-up is
-	 * inside it, the cursor lands on that last note, and the next paste lays its own run-up after
-	 * it. Hold Ctrl+V and the phrase repeats with its own spacing, which is the whole point.</p>
-	 *
-	 * <p>Standing after it, the block runs from the first note to the cursor and the tail of silence
-	 * is what is inside. The notes land behind the cursor and the cursor clears the tail, so
-	 * repeats tile with that silence between them.</p>
-	 *
-	 * <p>Standing inside it, there is no silence at either end to preserve, so the cursor goes to
-	 * the end of the notes rather than to the far bound. Repeats then overlap -- the next copy lands
-	 * partly behind the cursor and partly ahead of it -- which is what pasting from inside a phrase
-	 * asks for and not something to be protected from.</p>
-	 *
-	 * <p>Floored at a grid step. A single chord with the cursor sitting on it has no extent at all,
-	 * and a step of nothing means holding Ctrl+V stacks copies in one place forever.</p>
+	 * <p>The block always goes down in front of the cursor. Standing before the phrase, the run-up
+	 * is part of the block, so the first note keeps its distance and lands that far on. Standing
+	 * anywhere else -- inside the phrase or past the end of it -- the first note is the front of the
+	 * block and lands on the cursor itself.</p>
 	 */
-	private long cursorRelativeStep(long cursor, long first, long last) {
-		long step = cursor > last ? cursor - first : last - cursor;
-		return step > 0L ? step : Math.max(1L, Math.round(gridSpan()));
+	private static long blockLeadIn(long cursor, long first) {
+		return Math.max(0L, first - cursor);
+	}
+
+	/**
+	 * How far the cursor moves after laying a block down: the length of the block.
+	 *
+	 * <p>The cursor and the notes make a block with a bound at each end -- the nearer of the cursor
+	 * and the first note, and the further of the cursor and the last note. Whichever end the cursor
+	 * is at, its silence is inside the block and travels with it, and the cursor comes to rest on
+	 * the far bound ready for the next one.</p>
+	 *
+	 * <p>The one subtlety is what a bound made of a note is worth. Two positions {@code n} apart are
+	 * a run of {@code n} only if the far end is empty; a note standing on it occupies a slot of its
+	 * own, and the block is a slot longer than the distance across it. Miss that and every repeat
+	 * starts one slot early: a bar of rest-note-note-note tiled at three beats instead of four,
+	 * which comes out as an unbroken run of notes with the rest quietly eaten. So a block that ends
+	 * on a note is a step longer, and the step is the passage's own -- the tightest gap between two
+	 * of its starts, which is the resolution the material is written in.</p>
+	 *
+	 * <p>It also means the cursor never comes to rest exactly on a note, which is what stops the
+	 * next paste laying its first note on top of the last one.</p>
+	 */
+	private static long blockStep(long cursor, long first, long last, long unit) {
+		long lo = Math.min(cursor, first);
+		long hi = Math.max(cursor, last);
+		return Math.max(1L, hi - lo + (hi == last ? unit : 0L));
+	}
+
+	/** A passage's own resolution: the tightest gap between two of its starts, or a grid line. */
+	private long stepOfStarts(List<Long> starts) {
+		long step = Long.MAX_VALUE;
+		for (int index = 1; index < starts.size(); index++) {
+			step = Math.min(step, starts.get(index) - starts.get(index - 1));
+		}
+		return step == Long.MAX_VALUE || step <= 0L ? Math.max(1L, gridTicks()) : step;
 	}
 
 	/**
@@ -7363,13 +7385,7 @@ public final class ComposerScreen extends Screen {
 	 * It is a guess either way, which is the whole reason the range exists and is drawn.</p>
 	 */
 	private long spanOfStarts(List<Long> starts) {
-		long step = Long.MAX_VALUE;
-		for (int index = 1; index < starts.size(); index++) {
-			step = Math.min(step, starts.get(index) - starts.get(index - 1));
-		}
-		if (step == Long.MAX_VALUE || step <= 0L) {
-			step = Math.max(1L, gridTicks());
-		}
+		long step = stepOfStarts(starts);
 		return starts.isEmpty() ? step : starts.getLast() - starts.getFirst() + step;
 	}
 
@@ -7393,7 +7409,8 @@ public final class ComposerScreen extends Screen {
 		// The same rule a paste steps by, so the two keys agree about what a passage is worth. Ctrl+D
 		// is a copy and a paste with the cursor left where it is, and it would be strange for it to
 		// land somewhere Ctrl+C and Ctrl+V would not.
-		return cursorRelativeStep(playbackReturnTick, starts.getFirst(), starts.getLast());
+		return blockStep(playbackReturnTick, starts.getFirst(), starts.getLast(),
+			stepOfStarts(starts));
 	}
 
 	/**

@@ -10,38 +10,49 @@ import org.junit.jupiter.api.Test;
 /**
  * Where a phrase lands, and where the cursor goes afterwards.
  *
- * <p>A copy remembers two things: the notes, and where the cursor stood over them. A paste puts the
- * notes back at the same distances from wherever the cursor is now, which is the only way the
- * silence at the edges of a passage survives -- a set of notes begins on its first note and ends on
- * its last, so a run-up before the phrase or a tail after it exists nowhere else.</p>
+ * <p>The cursor and the notes make a block with a bound at each end: the nearer of the cursor and
+ * the first note, and the further of the cursor and the last note. Whichever end the cursor is at,
+ * the silence between it and the notes is inside the block. A paste lays the whole block down
+ * starting at the cursor, and the cursor comes to rest on its far bound.</p>
  *
- * <p>The cursor then goes to the far bound of the block the cursor and the notes make together,
- * except from inside the phrase, where it goes to the end of the notes. That is what makes holding
- * Ctrl+V lay a passage down rather than a heap.</p>
+ * <p>The subtlety worth having tests for is what a bound made of a note is worth. Two positions
+ * {@code n} apart are a run of {@code n} only if the far end is empty; a note standing on it takes a
+ * slot of its own, so the block is a slot longer than the distance across it.</p>
  */
 class CursorRelativePasteTest {
-	/** The rule under test, in the same terms {@code ComposerScreen.cursorRelativeStep} states it. */
-	private static long step(long cursor, long first, long last, long grid) {
-		long extent = cursor > last ? cursor - first : last - cursor;
-		return extent > 0L ? extent : Math.max(1L, grid);
+	private static final long BEAT = 480L;
+
+	/** The passage's own resolution: the tightest gap between two of its starts. */
+	private static long unitOf(long[] notes, long grid) {
+		long step = Long.MAX_VALUE;
+		for (int index = 1; index < notes.length; index++) {
+			step = Math.min(step, notes[index] - notes[index - 1]);
+		}
+		return step == Long.MAX_VALUE || step <= 0L ? Math.max(1L, grid) : step;
 	}
 
-	/**
-	 * Presses Ctrl+V {@code times} over, and returns the start tick of every note laid down.
-	 *
-	 * <p>The notes are held as offsets from the first of them, the way the clipboard holds them, and
-	 * the base each paste lands on is the cursor plus the distance the first note stood from it.</p>
-	 */
+	/** {@code ComposerScreen.blockStep}, restated. */
+	private static long step(long cursor, long first, long last, long unit) {
+		long lo = Math.min(cursor, first);
+		long hi = Math.max(cursor, last);
+		return Math.max(1L, hi - lo + (hi == last ? unit : 0L));
+	}
+
+	/** {@code ComposerScreen.blockLeadIn}, restated. */
+	private static long leadIn(long cursor, long first) {
+		return Math.max(0L, first - cursor);
+	}
+
+	/** Presses Ctrl+V {@code times} over, and returns the start tick of every note laid down. */
 	private static List<Long> repeatedPastes(long[] notes, long copyCursor, long from, int times,
 			long grid) {
 		long first = notes[0];
-		long last = notes[notes.length - 1];
-		long offsetToFirst = first - copyCursor;
-		long stride = step(copyCursor, first, last, grid);
+		long lead = leadIn(copyCursor, first);
+		long stride = step(copyCursor, first, notes[notes.length - 1], unitOf(notes, grid));
 		List<Long> laid = new ArrayList<>();
 		long cursor = from;
 		for (int press = 0; press < times; press++) {
-			long base = Math.max(0L, cursor + offsetToFirst);
+			long base = Math.max(0L, cursor + lead);
 			for (long note : notes) {
 				laid.add(base + (note - first));
 			}
@@ -51,63 +62,76 @@ class CursorRelativePasteTest {
 	}
 
 	/**
-	 * Cursor before the phrase: the run-up is kept, and repeats keep it between the copies.
+	 * A bar of rest then three notes, tiled, stays a bar of rest then three notes.
 	 *
-	 * <p>Four notes a beat apart starting a beat after the cursor. Every copy should sit a beat
-	 * after the one before it ends, which is the run-up doing its job.</p>
+	 * <p>This is the case that says why a block ending on a note is a step longer than the distance
+	 * across it. The bound-to-bound distance here is three beats; the block is a bar. Tiled at three
+	 * beats the rest is eaten and the result is an unbroken run of notes, one a beat, forever.</p>
 	 */
 	@Test
-	void aRunUpBeforeThePhraseIsKeptAndRepeats() {
-		long[] notes = { 480L, 960L, 1440L, 1920L };
+	void aBarOfRestAndThreeNotesTilesAsABar() {
+		long[] notes = { BEAT, 2 * BEAT, 3 * BEAT };
 		List<Long> laid = repeatedPastes(notes, 0L, 0L, 3, 120L);
 
-		assertEquals(List.of(480L, 960L, 1440L, 1920L,
-			2400L, 2880L, 3360L, 3840L,
-			4320L, 4800L, 5280L, 5760L), laid,
-			"three copies of a four-note phrase, evenly spaced, run-up and all");
-		assertEvenlySpaced(laid, 480L);
+		assertEquals(4 * BEAT, step(0L, BEAT, 3 * BEAT, BEAT), "a bar, not three beats");
+		assertEquals(List.of(BEAT, 2 * BEAT, 3 * BEAT,
+			5 * BEAT, 6 * BEAT, 7 * BEAT,
+			9 * BEAT, 10 * BEAT, 11 * BEAT), laid,
+			"three bars, each with its rest on the downbeat");
+	}
+
+	/** Cursor before the phrase: the run-up is kept in front, and the block starts at the cursor. */
+	@Test
+	void aRunUpBeforeThePhraseIsKeptInFront() {
+		long[] notes = { 2 * BEAT, 3 * BEAT, 4 * BEAT };
+		// Copied with the cursor a beat before the first note, then pasted somewhere else entirely.
+		List<Long> laid = repeatedPastes(notes, BEAT, 100 * BEAT, 1, 120L);
+
+		assertEquals(List.of(101 * BEAT, 102 * BEAT, 103 * BEAT), laid,
+			"the beat of run-up survives the move");
 	}
 
 	/**
-	 * Cursor after the phrase: the tail of silence is kept, and repeats keep it between the copies.
-	 *
-	 * <p>The notes land behind the cursor and the cursor clears the tail, so the same even spacing
-	 * comes out the other way round.</p>
+	 * Cursor after the phrase: the notes come forward so the first lands on the cursor, and the tail
+	 * of silence follows them.
 	 */
 	@Test
-	void aTailAfterThePhraseIsKeptAndRepeats() {
-		long[] notes = { 0L, 480L, 960L, 1440L };
-		long copyCursor = 1920L;
-		List<Long> laid = repeatedPastes(notes, copyCursor, copyCursor, 3, 120L);
+	void aPhraseCopiedFromBehindComesForwardToTheCursor() {
+		long[] notes = { 0L, BEAT, 2 * BEAT };
+		long copyCursor = 4 * BEAT;
+		List<Long> laid = repeatedPastes(notes, copyCursor, 10 * BEAT, 3, 120L);
 
-		assertEquals(List.of(0L, 480L, 960L, 1440L,
-			1920L, 2400L, 2880L, 3360L,
-			3840L, 4320L, 4800L, 5280L), laid,
-			"the notes land behind the cursor, and the tail separates the copies");
-		assertEvenlySpaced(laid, 480L);
+		assertEquals(4 * BEAT, step(copyCursor, 0L, 2 * BEAT, BEAT),
+			"first note to cursor, and no extra slot: the far bound is silence");
+		assertEquals(List.of(10 * BEAT, 11 * BEAT, 12 * BEAT,
+			14 * BEAT, 15 * BEAT, 16 * BEAT,
+			18 * BEAT, 19 * BEAT, 20 * BEAT), laid,
+			"the first note lands on the cursor and the two beats of tail separate the copies");
 	}
 
-	/** From inside the phrase the cursor goes to the end of the notes, and copies overlap. */
+	/** Cursor inside the phrase: the first note still lands on the cursor, and nothing overlaps. */
 	@Test
-	void fromInsideThePhraseTheCopiesOverlap() {
-		long[] notes = { 0L, 480L, 960L, 1440L };
-		long copyCursor = 960L;
+	void aPhraseCopiedFromInsideAlsoComesForward() {
+		long[] notes = { 0L, BEAT, 2 * BEAT, 3 * BEAT };
+		long copyCursor = 2 * BEAT;
+		List<Long> laid = repeatedPastes(notes, copyCursor, 10 * BEAT, 2, 120L);
 
-		assertEquals(480L, step(copyCursor, 0L, 1440L, 120L),
-			"to the last note, not to the far bound");
-
-		List<Long> laid = repeatedPastes(notes, copyCursor, copyCursor, 2, 120L);
-		assertEquals(List.of(0L, 480L, 960L, 1440L, 480L, 960L, 1440L, 1920L), laid,
-			"the second copy lands partly behind the cursor and partly ahead of it");
+		assertEquals(4 * BEAT, step(copyCursor, 0L, 3 * BEAT, BEAT),
+			"the whole phrase, plus the slot its last note stands in");
+		assertEquals(List.of(10 * BEAT, 11 * BEAT, 12 * BEAT, 13 * BEAT,
+			14 * BEAT, 15 * BEAT, 16 * BEAT, 17 * BEAT), laid,
+			"copies run on end to end with no note landing on another");
 	}
 
-	/** A copy pasted where it was copied from lands exactly on itself. */
+	/** Whatever the cursor was, no note ever lands behind it. */
 	@Test
-	void pastingWithoutMovingTheCursorLandsOnTheOriginal() {
-		long[] notes = { 300L, 700L, 1100L };
-		List<Long> laid = repeatedPastes(notes, 512L, 512L, 1, 120L);
-		assertEquals(List.of(300L, 700L, 1100L), laid,
-			"the offsets are exact, so nothing moves when the cursor has not");
+	void nothingEverLandsBehindTheCursor() {
+		long[] notes = { 3 * BEAT, 5 * BEAT, 6 * BEAT };
+		for (long copyCursor : new long[] { 0L, 2 * BEAT, 3 * BEAT, 4 * BEAT, 6 * BEAT, 9 * BEAT }) {
+			List<Long> laid = repeatedPastes(notes, copyCursor, 50 * BEAT, 1, 120L);
+			assertTrue(laid.getFirst() >= 50 * BEAT,
+				"cursor at " + copyCursor + " put a note at " + laid.getFirst());
+		}
 	}
 
 	/** Off the grid entirely, and it still tiles: nothing here rounds anything. */
@@ -115,9 +139,9 @@ class CursorRelativePasteTest {
 	void anOffGridPhraseStillTilesExactly() {
 		long[] notes = { 137L, 519L, 802L };
 		List<Long> laid = repeatedPastes(notes, 11L, 11L, 3, 120L);
-		long stride = step(11L, 137L, 802L, 120L);
+		long stride = step(11L, 137L, 802L, unitOf(notes, 120L));
 
-		assertEquals(791L, stride);
+		assertEquals(1074L, stride, "791 across the block, plus the 283 slot its last note holds");
 		for (int copy = 1; copy < 3; copy++) {
 			for (int note = 0; note < notes.length; note++) {
 				assertEquals(laid.get(note) + copy * stride, laid.get(copy * notes.length + note),
@@ -129,20 +153,13 @@ class CursorRelativePasteTest {
 	/**
 	 * A single chord with the cursor on it has no extent, so the step falls back to a grid line.
 	 *
-	 * <p>Without the floor, holding Ctrl+V stacks copies in one place for as long as the key is
-	 * down and the composition quietly grows by nothing anyone can see.</p>
+	 * <p>Without it, holding Ctrl+V stacks copies in one place for as long as the key is down and
+	 * the composition quietly grows by nothing anyone can see.</p>
 	 */
 	@Test
 	void aChordUnderTheCursorStepsByOneGridLine() {
-		assertEquals(120L, step(600L, 600L, 600L, 120L));
-		assertEquals(1L, step(600L, 600L, 600L, 0L), "and never by nothing at all");
-	}
-
-	private static void assertEvenlySpaced(List<Long> laid, long expected) {
-		for (int index = 1; index < laid.size(); index++) {
-			long gap = laid.get(index) - laid.get(index - 1);
-			assertTrue(gap == expected,
-				"gap " + index + " was " + gap + ", not " + expected + ": " + laid);
-		}
+		long[] chord = { 600L };
+		assertEquals(120L, step(600L, 600L, 600L, unitOf(chord, 120L)));
+		assertEquals(1L, step(600L, 600L, 600L, unitOf(chord, 0L)), "and never by nothing at all");
 	}
 }
