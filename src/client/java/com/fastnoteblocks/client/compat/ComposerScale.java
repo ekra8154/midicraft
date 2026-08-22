@@ -30,12 +30,50 @@ import net.minecraft.client.gui.screens.options.controls.KeyBindsScreen;
 public final class ComposerScale {
 	/** Whether the window is currently carrying our scale rather than the game's. */
 	private static boolean applied;
+	/**
+	 * Whether a screen is being laid out by this class right now.
+	 *
+	 * <p>Changing the scale re-lays out whatever is on screen, which runs the screen's own init --
+	 * and the hook that brought us here fires from inside init. Without this the two would call each
+	 * other. One pass is all that is wanted anyway: by the time the inner one arrives the scale is
+	 * already what it should be.</p>
+	 */
+	private static boolean laying;
 
 	private ComposerScale() {
 	}
 
 	public static void tick(Minecraft minecraft) {
-		Screen screen = minecraft.gui.screen();
+		update(minecraft, minecraft.gui.screen());
+	}
+
+	/**
+	 * The same decision, taken as a screen opens rather than at the end of the tick.
+	 *
+	 * <p>The tick is what makes this reliable -- a screen can be left by more routes than it can be
+	 * entered by, so nothing hung off an entry point can be trusted to cover every exit. But a tick
+	 * is up to a twentieth of a second away, and the composer is expensive enough to open that the
+	 * first few frames are slow ones: long enough to watch the whole screen sitting at the game's
+	 * scale and then jump to its own. Deciding here as well means the first frame drawn is already
+	 * the right size, and the tick goes on being the thing that cannot miss.</p>
+	 *
+	 * <p>The screen is passed in rather than read back off the client, because this runs from inside
+	 * that screen's own init and what the client is holding at that moment is not worth relying
+	 * on.</p>
+	 */
+	public static void screenOpened(Minecraft minecraft, Screen screen) {
+		if (laying) {
+			return;
+		}
+		laying = true;
+		try {
+			update(minecraft, screen);
+		} finally {
+			laying = false;
+		}
+	}
+
+	private static void update(Minecraft minecraft, Screen screen) {
 		if (isOurs(screen)) {
 			apply(minecraft);
 		} else if (!borrowsOurScale(screen)) {

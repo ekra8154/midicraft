@@ -18,6 +18,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
+import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.VanillaHudElements;
@@ -190,6 +191,11 @@ public final class NoteBlockOverlay {
 		}
 		rememberPlacementMoment();
 		ClientTickEvents.END_CLIENT_TICK.register(this::tick);
+		// The scale one of our screens wants, chosen as it opens rather than a tick later. The tick
+		// still owns it -- see ComposerScale -- this only stops the first frames being drawn at
+		// whatever size the last screen was.
+		ScreenEvents.BEFORE_INIT.register((client, screen, scaledWidth, scaledHeight) ->
+			ComposerScale.screenOpened(client, screen));
 		LevelRenderEvents.COLLECT_SUBMITS.register(this::render);
 		HudElementRegistry.attachElementBefore(
 			VanillaHudElements.OVERLAY_MESSAGE,
