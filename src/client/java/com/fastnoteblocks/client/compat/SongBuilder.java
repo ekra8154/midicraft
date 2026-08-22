@@ -2659,8 +2659,9 @@ public final class SongBuilder {
 				int liftAfter = raiseAfter(pad, climb > 0, above >= 0 && above < floors,
 					lastStyle.buses());
 				boolean raisedPad = liftAfter >= 0;
-				lane = emitPad(placements, lane, pad, "padClosing", liftAfter);
-				spentPadding = pad.delaySpent();
+				lane = emitPad(placements, lane, pad.withSpare(wait - pad.delaySpent()), "padClosing",
+					liftAfter);
+				spentPadding = pad.delaySpent() + spentOnTheTip;
 				if (above >= 0 && above < floors) {
 					// Asked of the shape the lane actually ended on, not of how many notes it held.
 					// A big chord used to mean a bus and now may mean a stacked module, which ends
@@ -5432,8 +5433,9 @@ public final class SongBuilder {
 				int liftAfter = raiseAfter(pad, climb > 0, above >= 0 && above < floors,
 					turnsOffBus);
 				boolean raisedPad = liftAfter >= 0;
-				lane = emitPad(placements, lane, pad, "padClosing", liftAfter);
-				spentPadding = pad.delaySpent();
+				lane = emitPad(placements, lane, pad.withSpare(wait - pad.delaySpent()), "padClosing",
+					liftAfter);
+				spentPadding = pad.delaySpent() + spentOnTheTip;
 				if (above >= 0 && above < floors) {
 					// Asked of the shape the lane actually ended on, not of how many notes it held.
 					// A big chord used to mean a bus and now may mean a stacked module, which ends
@@ -8420,9 +8422,18 @@ public final class SongBuilder {
 	 * @param delaySpent ticks taken from the wait before the next event, which its own repeater no
 	 *     longer has to hold
 	 */
-	private record Pad(List<Integer> cells, int signal, int delaySpent) {
+	private record Pad(List<Integer> cells, int signal, int delaySpent, int spare) {
+		Pad(List<Integer> cells, int signal, int delaySpent) {
+			this(cells, signal, delaySpent, 0);
+		}
+
 		static Pad none(int signal) {
 			return new Pad(List.of(), signal, 0);
+		}
+
+		/** The same pad, told how many ticks of the coming wait it has not spent. */
+		Pad withSpare(int spare) {
+			return new Pad(cells, signal, delaySpent, spare);
 		}
 	}
 
@@ -8708,6 +8719,28 @@ public final class SongBuilder {
 	}
 
 	/** Lays a planned pad down, and hands back the block the turn now starts on. */
+	/**
+	 * Whether a run's dust-driven opening column says it ended soft, so that the pad after it knows.
+	 *
+	 * <p>The closing pad reads {@link PlacementPlan#softTip()} to decide whether its first cell may
+	 * be dust, and only the stacked bus's simple tail ever set it. A run that ends on the column its
+	 * head's dust drives is the same fact in a different shape -- a block lit by dust sounds its
+	 * notes and hands on to a repeater, and hands nothing to dust -- and it was saying so in a
+	 * trouble line the census threw away rather than in the flag the pad reads. Every dead build at
+	 * eight wide was that: 277 runs of one column over the library, each handing to a cell of pad
+	 * dust.</p>
+	 *
+	 * <p>The pad's first cell becomes a repeater of one tick, paid out of the wait the next floor's
+	 * trigger was going to hold -- which is the tick the pad already spends on the same cell
+	 * whenever there is a wait to absorb. It is only where there was nothing to absorb that the cell
+	 * went down as dust, and this is that case. Where there is no tick at all the tip stays soft and
+	 * the build says so, as it did.</p>
+	 */
+	static boolean RAIL_TIP_IS_SOFT = true;
+
+	/** What the last pad spent on a repeater at its tip, for the trigger after it to hold one less. */
+	private static int spentOnTheTip;
+
 	private static Lane emitPad(PlacementPlan placements, Lane lane, Pad pad) {
 		return emitPad(placements, lane, pad, "padClosing");
 	}
@@ -8733,6 +8766,7 @@ public final class SongBuilder {
 		// block called itself. A pad's cells were coming out as "pad" -- the label a run of dust sets
 		// -- so a marked cell said a pad had wanted it and could not say which pad or from where.
 		placements.placing(why);
+		spentOnTheTip = 0;
 		int cell = -1;
 		for (int delay : pad.cells()) {
 			cell++;
@@ -8742,6 +8776,19 @@ public final class SongBuilder {
 				if (cell == 0 && (placements.softTip() || placements.softBehind())
 						&& undoTheSoftTailFor(placements, lane.pos())) {
 					placements.padded(why + "UndidTheTail");
+				} else if (cell == 0 && RAIL_TIP_IS_SOFT && placements.softTip()
+						&& pad.delaySpent() == 0 && pad.spare() >= 1) {
+					// A soft tip with no tail to undo: a run that ended on its dust-driven column.
+					// Dust here is dead wire, so the cell is a repeater of one tick instead, paid for
+					// out of the wait the next floor's trigger was going to hold. The trigger holds one
+					// less, which is what {@link Pad#delaySpent} already carries to it.
+					placements.padded(why + "RepeaterOffASoftRailTip");
+					lane = pastAnyCorner(placements, lane);
+					placements.powered(lane.pos(), "minecraft:stone", NO_BLANK);
+					set(placements, lane.pos().above(), "minecraft:repeater[facing="
+						+ repeaterFacing(lane.travel()) + ",delay=1]");
+					spentOnTheTip = 1;
+					placements.softTip(false);
 				} else if (raised) {
 					addRaisedPad(placements, lane.pos());
 				} else {
@@ -11137,8 +11184,19 @@ public final class SongBuilder {
 			// rather than trusting: dust powers this centre, and a block dust powers lights no dust of
 			// its own, so the padding the lane lays next is dead and the song stops there.
 			if (fromDust && nextDelay == 0) {
-				placements.trouble("a run at tick " + time
-					+ " ended on the column its head's dust drives, which cannot light the wire after it");
+				// The same electrical fact the stacked bus's simple tail states about itself, and for
+				// years only that tail said it. A column driven by dust is soft: it sounds its notes
+				// and hands a full signal to a repeater, and hands nothing at all to dust. The closing
+				// pad reads this flag and puts a repeater in its first cell where it finds it set --
+				// see {@link #RAIL_TIP_IS_SOFT}. Left unsaid, the pad laid dust there and every note
+				// after it was silent.
+				if (RAIL_TIP_IS_SOFT) {
+					placements.softTip(true);
+					placements.padded("railTipSoft");
+				} else {
+					placements.trouble("a run at tick " + time
+						+ " ended on the column its head's dust drives, which cannot light the wire after it");
+				}
 			}
 			// The centre goes to a harp note wherever the chord has one, the column a run opens on
 			// included. That column was excluded for a long time on the grounds that the head's dust
@@ -18638,7 +18696,7 @@ public final class SongBuilder {
 	 * only where every one of them has refused, which is the order {@link #FOLDBACK_LAST} describes
 	 * and the reason it exists.</p>
 	 */
-	static boolean FOLDBACK_PREFERRED_FOR_CLIMBS = false;
+	static boolean FOLDBACK_PREFERRED_FOR_CLIMBS = true;
 
 	/**
 	 * The room below which the foldback is preferred to every module shape rather than left to
@@ -18674,7 +18732,7 @@ public final class SongBuilder {
 	 * lane that has breached there through several shapes and walks out before the chord that ends
 	 * it. Nothing reads back dead, wrong, missing or collided at any value.</p>
 	 */
-	static int FOLDBACK_PREFERRED_BELOW_ROOM = 3;
+	static int FOLDBACK_PREFERRED_BELOW_ROOM = 1;
 
 	/**
 	 * The smallest chord offered a foldback: the bus classes. The shape works from four notes
