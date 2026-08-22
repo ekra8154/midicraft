@@ -4182,7 +4182,7 @@ public final class ComposerScreen extends Screen {
 		long beatTicks = readableStep(Math.max(1L, project().ppq()), measureTicks);
 		boolean showLabels = measureTicks / ticksPerPixel >= MIN_LABEL_PIXEL_SPACING;
 		if (drawSnap) {
-			int snapColor = crowdedGridColor(trueGrid ? 0x2ED9863C : 0x162A2F36,
+			int snapColor = crowdedGridColor(trueGrid ? 0x17D9863C : 0x0F2A2F36,
 				snapSpan / ticksPerPixel, MIN_GRID_PIXEL_SPACING);
 			for (long index = (long)Math.floor(horizontalScroll / snapSpan);
 					gridLineAt(index, snapSpan) <= lastTick + snapSpan; index++) {
@@ -4227,7 +4227,7 @@ public final class ComposerScreen extends Screen {
 			SongAnalysis.redstoneTickSpan(project()) * REPEATER_TICKS_PER_SECOND);
 		boolean drawSeconds = secondSpan / ticksPerPixel >= MIN_GRID_PIXEL_SPACING * 2;
 		if (drawSnap) {
-			int snapColor = crowdedGridColor(trueGrid ? 0x3CD98A3C : 0x2228343D,
+			int snapColor = crowdedGridColor(trueGrid ? 0x1ED98A3C : 0x1628343D,
 				snapSpan / ticksPerPixel, MIN_GRID_PIXEL_SPACING * 2);
 			for (long index = (long)Math.floor(horizontalScroll / snapSpan);
 					gridLineAt(index, snapSpan) <= lastTick + snapSpan; index++) {
@@ -4245,11 +4245,22 @@ public final class ComposerScreen extends Screen {
 			}
 		}
 		if (drawSeconds) {
+			// These went in as the landmark that replaced the bar line and then kept the bar line's
+			// weight, which a second does not deserve: bars come every four beats and seconds come
+			// as often as the tempo says, which on a quick song is twice a bar. Full height, opaque
+			// enough to read, and never faded -- they were the brightest thing on the roll and the
+			// only grid on screen that did not answer to how crowded it was.
+			//
+			// A wider floor than the lines it stands over, too. A second is only a landmark while
+			// there is room to see it as one; a second every twenty pixels is a picket fence, and
+			// this reaches full weight only once they are four times that far apart.
+			int secondColor = crowdedGridColor(0x44828C97, secondSpan / ticksPerPixel,
+				MIN_GRID_PIXEL_SPACING * 4);
 			for (long index = (long)Math.floor(horizontalScroll / secondSpan);
 					gridLineAt(index, secondSpan) <= lastTick + secondSpan; index++) {
 				int x = tickX(gridLineAt(index, secondSpan));
 				if (x >= rollX && x <= rollX + rollWidth) {
-					graphics.fill(x, rollY, x + 1, rollY + rollHeight, 0x77828C97);
+					graphics.fill(x, rollY, x + 1, rollY + rollHeight, secondColor);
 				}
 			}
 		}
@@ -7670,9 +7681,15 @@ public final class ComposerScreen extends Screen {
 	 * and the coarser grid that replaces them arrives at full strength with room around it. Held
 	 * off zero at the bottom, because a grid that disappears entirely for one notch of the wheel
 	 * reads as broken rather than as faint.</p>
+	 *
+	 * <p>The ramp runs to four times the floor rather than to twice it. Over the shorter run a
+	 * grid spent most of its zoom range at full strength and did all its fading in the last notch
+	 * before the jump, which is not a crossfade -- it is the same wall with a softer edge. Lines
+	 * only look open when there is several times their own width between them.</p>
 	 */
 	private static int crowdedGridColor(int color, double pixels, int floorPixels) {
-		double room = Math.max(0.25, Math.min(1.0, (pixels - floorPixels) / (double)floorPixels));
+		double run = 3.0 * floorPixels;
+		double room = Math.max(0.25, Math.min(1.0, (pixels - floorPixels) / run));
 		int alpha = (int)Math.round((color >>> 24) * room);
 		return alpha << 24 | color & 0xFFFFFF;
 	}
