@@ -278,7 +278,7 @@ public final class FastNoteblocksConfig {
 	 * as dragging goes before the panel folds instead.
 	 */
 	public static final int MIN_LAYER_PANEL_WIDTH = 34;
-	public static final int MAX_LAYER_PANEL_WIDTH = 420;
+	public static final int MAX_LAYER_PANEL_WIDTH = 900;
 	/**
 	 * GUI scale for the mod's own screens, or 0 to leave the game's alone.
 	 *

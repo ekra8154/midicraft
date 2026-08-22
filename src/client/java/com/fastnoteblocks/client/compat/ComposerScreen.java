@@ -68,6 +68,8 @@ public final class ComposerScreen extends Screen {
 	private static final int CONTROL_PADDING = 10;
 
 	private static final int PIANO_WIDTH = 48;
+	/** The least roll worth leaving: a couple of bars at an editing zoom, and somewhere to drop a note. */
+	private static final int NARROWEST_USEFUL_ROLL = 140;
 	/** Tall enough for a bar number with the clock time under it. */
 	private static final int TIMELINE_RULER_HEIGHT = 24;
 	/**
@@ -111,11 +113,10 @@ public final class ComposerScreen extends Screen {
 	private static final int LAYER_ROW_HEIGHT = 18;
 	/** Layer names are drawn at this fraction of the font's one size. */
 	private static final float LAYER_TEXT_SCALE = 0.75f;
-	private static final int LAYER_STATE_X = 15;
+	/** How far after the instrument icon a layer's name starts. */
+	private static final int LAYER_NAME_GAP = 19;
 	/** Side of the square button carrying a layer's state letter. */
 	private static final int LAYER_CHIP = 12;
-	private static final int LAYER_INSTRUMENT_X = 26;
-	private static final int LAYER_NAME_X = 45;
 	/** Filled means the layer goes into the build sequence, hollow means it is left out. */
 	/**
 	 * The grab strip on the panel's edge, and the cursor that says it can be grabbed.
@@ -197,12 +198,30 @@ public final class ComposerScreen extends Screen {
 	 * <p>Capped on the way out rather than clamped into the config, so the width survives being
 	 * looked at on a smaller window: drag the panel wide on a desktop, open the same song on a
 	 * laptop, and it comes back to what you chose once there is room for it again.</p>
+	 *
+	 * <p>What is left is the cap, not a quarter of the window. That was the first try and it was
+	 * the wrong shape: it stopped the panel eating a small window, which is what it was for, and it
+	 * also stopped anyone widening the panel on a large one -- and a layer with a long name is
+	 * exactly when you want to. A panel may take everything except the keyboard and a usable strip
+	 * of roll, which is the real thing being protected.</p>
 	 */
 	private int widestUsefulLayerPanel() {
-		return Math.max(ROW_NAME_AT, width / 4);
+		return Math.max(ROW_NAME_AT, width - PIANO_WIDTH - NARROWEST_USEFUL_ROLL);
 	}
 
-	/** Widest a layer's name may draw, which is whatever the panel leaves after the row number. */
+	/**
+	 * How much panel is left empty to the right of a row.
+	 *
+	 * <p>Wider than the gutter on the left, because it has a job the left one does not: clicking
+	 * beside a row is how a layer selection is put down, and the scrollbar's track was standing in
+	 * most of the space that gesture had. A card that stops short of the edge leaves somewhere to
+	 * aim that is plainly not a row.</p>
+	 */
+	private static int rightGutter(int inset) {
+		return inset + 6;
+	}
+
+	/** Widest a layer's name may draw, which is whatever the panel leaves after the note count. */
 	private int layerNameRight() {
 		return layerRowLayout().nameRight();
 	}
@@ -220,24 +239,37 @@ public final class ComposerScreen extends Screen {
 		int panel = layerPanelWidth();
 		boolean chip = panel >= ROW_CHIP_AT;
 		boolean name = panel >= ROW_NAME_AT;
+		boolean count = panel >= ROW_COUNT_AT;
 		int inset = chip ? 8 : 2;
-		int instrumentX = chip ? LAYER_INSTRUMENT_X : inset + 2;
-		// The number sits inside the row now. Out in the gutter it shared its pixels with the
-		// scrollbar, which drew over the top of it and left half a digit showing. Every row reserves
-		// the width of the largest number in the panel rather than its own, so the column does not
-		// jog left as you scroll past layer 9.
-		int ordinalRight = panel - inset - 3;
-		int ordinalLeft = ordinalRight
-			- smallTextWidth(Integer.toString(Math.max(1, project().layers().size())));
+		// The stripe is wide enough to write the row number in. It was two pixels of colour and the
+		// number was out at the far edge, which is the width a name wants and the one place the eye
+		// is not looking when it is asking "which layer is this".
+		int stripe = Math.max(4, smallTextWidth(Integer.toString(
+			Math.max(1, project().layers().size()))) + 4);
+		// Everything after the stripe is measured from it rather than from a fixed column, because
+		// the stripe is as wide as the largest row number in the panel and that is not a constant.
+		int stateX = inset + stripe + 3;
+		int instrumentX = chip ? stateX + LAYER_CHIP + 3 : inset + stripe + 3;
+		// What used to be the number's column is the note count's now. Every row reserves the width
+		// of the largest count in the panel rather than its own, so the column does not jog left as
+		// you scroll past a layer with four digits on it.
+		int ordinalRight = panel - rightGutter(inset) - 3;
+		int ordinalLeft = count
+			? ordinalRight - smallTextWidth(Integer.toString(Math.max(1,
+				project().layers().stream().mapToInt(layer -> layer.notes().size()).max().orElse(0))))
+			: ordinalRight;
 		return new LayerRowLayout(
 			inset,
+			stripe,
 			chip,
 			name,
+			count,
+			stateX,
 			instrumentX,
 			// A fixed gap after the instrument icon rather than a fixed column. Pinned to the
 			// column, the name held the pixels the state chip had vacated and spent them on
 			// nothing, which is most of the room a narrow panel has to give.
-			instrumentX + (LAYER_NAME_X - LAYER_INSTRUMENT_X),
+			instrumentX + LAYER_NAME_GAP,
 			ordinalLeft - 4,
 			ordinalLeft,
 			ordinalRight);
@@ -268,10 +300,28 @@ public final class ComposerScreen extends Screen {
 	 * narrowing the panel took the names off every row at once instead of shortening them -- and a
 	 * panel wide enough to read half a name showed none of it.</p>
 	 */
-	private static final int ROW_NAME_AT = 62;
-	/** Below this the scrollbar's track would sit on the row numbers, so it is not drawn. */
-	private static final int ROW_SCROLLBAR_AT = 96;
-	private static final int ROW_CHIP_AT = 76;
+	private static final int ROW_NAME_AT = 70;
+	/**
+	 * The note count goes before the name does.
+	 *
+	 * <p>Which layer this is beats how much is on it, and the count is a column of its own now
+	 * rather than a suffix -- so at a width where one of them has to go, it is the one that goes.
+	 * </p>
+	 */
+	private static final int ROW_COUNT_AT = 118;
+	/**
+	 * Below this there is not enough panel for a track to be worth the pixels it takes.
+	 *
+	 * <p>It used to be here because the track sat on the row numbers and drew over them. The
+	 * numbers are in the colour stripe now, at the other end of the row, so the two cannot meet --
+	 * what is left is only that a scrollbar on a panel this narrow is most of the panel.</p>
+	 */
+	private static final int ROW_SCROLLBAR_AT = 60;
+	/**
+	 * The state chip costs a name twenty pixels between its own width and the wider inset it brings,
+	 * so it arrives later than it used to -- late enough that the name it appears beside survives.
+	 */
+	private static final int ROW_CHIP_AT = 100;
 	private static final int LAYER_LIST_TOP = 48;
 	private static final int MIN_ROW_HEIGHT = 4;
 	private static final int MAX_ROW_HEIGHT = 26;
@@ -3219,7 +3269,7 @@ public final class ComposerScreen extends Screen {
 			// not be flying a full-strength flag in here, and one lit out there should not be dim.
 			int color = layerLit(index) ? vivid(layerColor(index)) : faded(layerColor(index));
 			int left = row.inset();
-			int right = layerPanelWidth() - row.inset();
+			int right = layerPanelWidth() - rightGutter(row.inset());
 			// Two saturations of one highlight rather than a third colour. The row already carries
 			// two states -- active, which is where a new note lands, and selected, which is what a
 			// layer action acts on -- and a panel that does not hold the keyboard draws both of them
@@ -3242,17 +3292,24 @@ public final class ComposerScreen extends Screen {
 			graphics.fill(left, y + rowHeight - 3, right, y + rowHeight - 2,
 				activeLayer ? color : 0x88383D44);
 			// The colour stripe is how a layer is recognised once its name is gone, so it stays at
-			// every width -- narrowed to two pixels rather than dropped.
-			graphics.fill(left, y - 2, left + (row.chip() ? 4 : 2), y + rowHeight - 2, color);
+			// every width -- and it is where the row number lives, because the number is the other
+			// answer to "which layer is this" and the two belong together. Black or white over it
+			// depending on how light the colour underneath came out, since the palette runs the
+			// whole way round the wheel and one ink cannot be read on all of it.
+			graphics.fill(left, y - 2, left + row.stripe(), y + rowHeight - 2, color);
+			String ordinal = Integer.toString(index + 1);
+			smallText(graphics, ordinal,
+				left + (row.stripe() - smallTextWidth(ordinal) + 1) / 2, y + 5,
+				luma(color) > STRIPE_DARK_INK_ABOVE ? 0xFF101318 : 0xFFF2F5F8);
 			if (activeLayer) {
-				graphics.fill(left + 4, y, right - 2, y + rowHeight - 4, 0x553D444D);
+				graphics.fill(left + row.stripe(), y, right - 2, y + rowHeight - 4, 0x553D444D);
 			}
 			Layer layer = project().layers().get(index);
 			LayerState state = layerState(index);
 			if (row.chip()) {
 				// Drawn as a bordered chip with a letter in it. Bare symbols read as decoration on a
 				// row that is mostly decoration already, and this one is the layer's only switch.
-				int chipLeft = LAYER_STATE_X - 2;
+				int chipLeft = row.stateX();
 				graphics.fill(chipLeft, y + 2, chipLeft + LAYER_CHIP, y + 2 + LAYER_CHIP, 0x66FFFFFF);
 				graphics.fill(chipLeft + 1, y + 3, chipLeft + LAYER_CHIP - 1, y + 1 + LAYER_CHIP,
 					state.chip);
@@ -3273,14 +3330,10 @@ public final class ComposerScreen extends Screen {
 					soloElsewhere ? 0x88E0544F : 0xFFE0544F);
 			}
 			if (row.name()) {
-				String mark = selected ? "✓ " : "";
-				// How many notes are on a layer is worth knowing and worth less than which layer it
-				// is, so the count is the first thing to go: a narrow panel spends what it has on
-				// the name and truncates that, rather than truncating the name to keep a number.
-				int room = row.nameRight() - row.nameLeft();
-				String counted = mark + layer.name() + "  (" + layer.notes().size() + ")";
-				String label = smallTextWidth(counted) <= room ? counted : mark + layer.name();
-				smallText(graphics, smallFit(label, room),
+				// The name and nothing else. A tick in front of it said what the row's own outline,
+				// tint and stripe already say three times over, and it said it in the pixels the
+				// name wanted; the note count moved out to a column of its own.
+				smallText(graphics, smallFit(layer.name(), row.nameRight() - row.nameLeft()),
 					row.nameLeft(), y + 5,
 					activeLayer ? 0xFFFFFFFF : selected ? 0xFFE8F4FF : 0xFFD6D8DD);
 			}
@@ -3295,14 +3348,17 @@ public final class ComposerScreen extends Screen {
 				// is dim and nameless the stripe is what is left to recognise it by.
 				// Inside the row's own border, so that a hidden layer you have selected still shows
 				// the outline saying so.
-				graphics.fill(left + (row.chip() ? 4 : 2), y - 1,
+				graphics.fill(left + row.stripe(), y - 1,
 					row.ordinalLeft() - 2, y + rowHeight - 3, 0xAA0E1014);
 			}
-			// The row number is for pointing at a layer out loud, nothing more, so it sits out at the
-			// edge in the smallest thing that can still be read rather than in front of the name.
-			String ordinal = Integer.toString(index + 1);
-			smallText(graphics, ordinal, row.ordinalRight() - smallTextWidth(ordinal), y + 5,
-				0xFF71767E);
+			// How much is on the layer, out at the edge in the smallest thing that can still be
+			// read. It used to be in brackets after the name, where it was the first thing a narrow
+			// panel dropped and the last thing anyone wanted truncated into.
+			if (row.count()) {
+				String count = Integer.toString(layer.notes().size());
+				smallText(graphics, count, row.ordinalRight() - smallTextWidth(count), y + 5,
+					0xFF71767E);
+			}
 		}
 		// The empty run under the last row is a control, and empty panel does not look like one. So
 		// it is labelled, quietly, exactly where the click that uses it lands.
@@ -3640,6 +3696,8 @@ public final class ComposerScreen extends Screen {
 	 * thirty. Both are floors on a whole palette rather than tuned to one colour: see
 	 * {@link #faded(int)} for the collision they exist to rule out.</p>
 	 */
+	/** Above this the stripe is light enough to want dark ink on it, below it light. */
+	private static final double STRIPE_DARK_INK_ABOVE = 140.0;
 	static final double SELECTED_LUMA_FLOOR = 150.0;
 	static final double UNSELECTED_LUMA_CEILING = 108.0;
 
@@ -7115,7 +7173,7 @@ public final class ComposerScreen extends Screen {
 	/** Which row a point is on, whatever part of the row it lands in. */
 	private int layerRowAt(double x, double y) {
 		int inset = layerRowLayout().inset();
-		return x < inset || x >= layerPanelWidth() - inset ? -1 : layerRowAtY(y);
+		return x < inset || x >= layerPanelWidth() - rightGutter(inset) ? -1 : layerRowAtY(y);
 	}
 
 	/** The row at a height, for gestures that have already decided which column they are in. */
@@ -7136,7 +7194,7 @@ public final class ComposerScreen extends Screen {
 	/** The one control that decides whether a layer is soloed, heard, silent or gone. */
 	private int layerStateAt(double x, double y) {
 		LayerRowLayout row = layerRowLayout();
-		return row.chip() && x >= LAYER_STATE_X - 2 && x < LAYER_INSTRUMENT_X
+		return row.chip() && x >= row.stateX() && x < row.stateX() + LAYER_CHIP + 2
 			? layerRowAt(x, y)
 			: -1;
 	}
@@ -7154,9 +7212,9 @@ public final class ComposerScreen extends Screen {
 	 */
 	private int layerHeaderAt(double x, double y) {
 		LayerRowLayout row = layerRowLayout();
-		int iconsFrom = row.chip() ? LAYER_STATE_X - 2 : row.instrumentX();
+		int iconsFrom = row.chip() ? row.stateX() : row.instrumentX();
 		boolean onIcons = x >= iconsFrom && x < row.instrumentX() + 17;
-		return !onIcons && x < layerPanelWidth() - 2 ? layerRowAt(x, y) : -1;
+		return !onIcons ? layerRowAt(x, y) : -1;
 	}
 
 	/**
@@ -8404,8 +8462,9 @@ public final class ComposerScreen extends Screen {
 	}
 
 	/** Where each part of a layer row goes, and whether the panel is wide enough to have it. */
-	private record LayerRowLayout(int inset, boolean chip, boolean name,
-			int instrumentX, int nameLeft, int nameRight, int ordinalLeft, int ordinalRight) {
+	private record LayerRowLayout(int inset, int stripe, boolean chip, boolean name, boolean count,
+			int stateX, int instrumentX, int nameLeft, int nameRight, int ordinalLeft,
+			int ordinalRight) {
 	}
 
 	/** One row of an open menu: a thing to do, a setting to cycle, or a submenu to open. */
