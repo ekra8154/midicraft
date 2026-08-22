@@ -698,7 +698,6 @@ public final class ComposerScreen extends Screen {
 	private ComposerProject cachedStatsProject;
 	private SongAnalysis cachedStats;
 	private boolean cachedStatsDedupe;
-	private boolean cachedStatsHalfTicks;
 	private List<FastNoteblocksConfig.SequenceTrack> cachedBlockTracks;
 	private SongBuilder.BlockCounts cachedBlockCounts;
 	private SongAnalysis cachedOverloadedStats;
@@ -1714,21 +1713,35 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private boolean snapOnRedstoneGrid(int subdivision) {
+		return snapGameTicks(subdivision) >= 1L;
+	}
+
+	/**
+	 * How many game ticks one step of a grid is, or 0 for a grid that is not a whole number of them.
+	 *
+	 * <p>Not asked of the paste mode. Whether the mode in hand happens to lay a second lane is a
+	 * fact about a build nobody has started yet, and one that changes in a screen the composer
+	 * cannot see; what is being described here is the grid. A whole number of game ticks is
+	 * placeable, an odd one wants both lanes to do it, and saying so is more use than refusing.</p>
+	 */
+	private long snapGameTicks(int subdivision) {
 		double gameTicks = gridSpan(subdivision)
 			/ Math.max(1.0e-6, SongAnalysis.redstoneTickSpan(project()) / 2.0);
 		long whole = Math.round(gameTicks);
-		if (whole < 1L || Math.abs(gameTicks - whole) > 0.01) {
-			return false;
-		}
-		return whole % 2L == 0L || pasteMode().gameTicks();
+		return whole >= 1L && Math.abs(gameTicks - whole) <= 0.01 ? whole : 0L;
 	}
 
 	private Tooltip snapTooltip() {
-		String where = snapOnRedstoneGrid()
-			? "That is a delay a build can place, so notes put on this grid are notes it can reach."
-			: "That is not a delay a build can place in " + pasteMode().label() + ", so notes put on "
-				+ "this grid fall between the ticks it can reach. Edit > Convert for Minecraft moves "
-				+ "the tempo until the two line up.";
+		long gameTicks = snapGameTicks(snapSubdivision);
+		String where = gameTicks == 0L
+			? "That is not a delay a build can place at all, so notes put on this grid fall between "
+				+ "the ticks it can reach. Edit > Convert for Minecraft moves the tempo until the "
+				+ "two line up."
+			: gameTicks % 2L == 0L
+				? "That is a whole number of repeater ticks, so a single chain places it and notes "
+					+ "put on this grid are notes any build can reach."
+				: "That is a whole number of game ticks and an odd one, so it lands between the "
+					+ "repeater ticks: placeable, and only by a build of two lanes.";
 		// Whether the lines on screen are the grid or a stand-in for it. Drawing every step at
 		// this zoom would be a wall of pixels, so the grid doubles until its lines are far
 		// enough apart -- which means "is that a game tick" sometimes answers no, and used to
@@ -4831,12 +4844,6 @@ public final class ComposerScreen extends Screen {
 		if (!stats.offGridNotes().isEmpty()) {
 			segments.add(stats.offGridNotes().size() + " off grid");
 		}
-		// Only a fault in a one-lane mode, so it is named rather than counted silently: on two lanes
-		// these are ordinary notes and the verdict above says two lanes are needed.
-		if (!stats.unreachableHalfTicks().isEmpty()) {
-			segments.add(stats.unreachableHalfTicks().size() + " between ticks ("
-				+ pasteMode().label() + " builds one lane)");
-		}
 		// Named rather than counted: it is one thing, it is not a note, and saying "1 too
 		// frequent" sent you looking for a note that does not exist.
 		if (!stats.endMarkerProblem().isEmpty()) {
@@ -4931,22 +4938,33 @@ public final class ComposerScreen extends Screen {
 		return cachedBlockCounts;
 	}
 
+	/**
+	 * What is true of the composition, judged against what a build can do rather than against the
+	 * paste mode last used.
+	 *
+	 * <p>The mode was in this for a while, so that a song with notes between the repeater ticks read
+	 * NOT BUILDABLE while a one-lane mode was selected. It is the wrong question asked at the wrong
+	 * moment: the bar is describing the song, the mode is a choice made later in another screen, and
+	 * a composition that two lanes play perfectly is not broken because the last thing pasted was
+	 * something else. It also could not be right for long -- nothing here knows what the next paste
+	 * will be made of.</p>
+	 *
+	 * <p>So the verdict says what the song needs and the lane count carries the answer: one lane is a
+	 * plain chain of repeaters, two is that chain and a second started half a tick later. Whether
+	 * the mode in hand can supply the second one is a question for the paste, which asks it there.
+	 * </p>
+	 */
 	private SongAnalysis projectStats() {
 		ComposerProject current = project();
 		// The speed is part of the project, so identity covers everything the composition decides.
 		// Deduplication is a setting rather than part of the song, so it has to be checked too.
-		// The paste mode is in the key as well now: whether half ticks can be placed is a property
-		// of the build, so changing the mode re-judges the song without the song moving.
-		boolean halfTicks = pasteMode().gameTicks();
 		if (cachedStatsProject == current && cachedStats != null
-				&& cachedStatsDedupe == config.dedupeIdenticalNotes()
-				&& cachedStatsHalfTicks == halfTicks) {
+				&& cachedStatsDedupe == config.dedupeIdenticalNotes()) {
 			return cachedStats;
 		}
 		cachedStatsProject = current;
 		cachedStatsDedupe = config.dedupeIdenticalNotes();
-		cachedStatsHalfTicks = halfTicks;
-		cachedStats = SongAnalysis.of(current, cachedStatsDedupe, halfTicks);
+		cachedStats = SongAnalysis.of(current, cachedStatsDedupe, true);
 		return cachedStats;
 	}
 
