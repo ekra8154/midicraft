@@ -292,6 +292,17 @@ public final class ComposerScreen extends Screen {
 		private static final int CHORD_WARNING_THRESHOLD = 24;
 	private static final int MAX_PREVIEW_SOUNDS_PER_FRAME = 64;
 	private static final int MIN_GRID_PIXEL_SPACING = 4;
+	/**
+	 * How close together the redstone grid is allowed to draw its lines before it doubles its step.
+	 *
+	 * <p>Tighter than the musical grid, on purpose, and it is the one grid that earns it. A repeater
+	 * tick is the unit a build is made of, so it is what says whether two notes are really as close
+	 * as they look -- and doubling the step at eight pixels meant that answer was gone by the time
+	 * a dozen bars were on screen, which is not far out at all. At three it survives to something
+	 * like thirty. Its floor on the crowding fade is higher for the same reason: a grid that is the
+	 * point of looking should thin out rather than disappear.</p>
+	 */
+	private static final int REDSTONE_GRID_PIXEL_SPACING = 3;
 	/** Ten repeater ticks to the second, which is the landmark a redstone grid is counted in. */
 	private static final int REPEATER_TICKS_PER_SECOND = 10;
 	private static final int MIN_LABEL_PIXEL_SPACING = 32;
@@ -4178,7 +4189,7 @@ public final class ComposerScreen extends Screen {
 		// ever one of them on screen. A hue is a thing you can read on its own.
 		double snapSpan = drawnGridSpan();
 		boolean trueGrid = snapSubdivision != 0 && snapSpan <= gridSpan() * 1.001;
-		int snapFloor = redstoneSnap() ? MIN_GRID_PIXEL_SPACING * 2 : MIN_GRID_PIXEL_SPACING;
+		int snapFloor = redstoneSnap() ? REDSTONE_GRID_PIXEL_SPACING : MIN_GRID_PIXEL_SPACING;
 		boolean drawSnap = snapSpan / ticksPerPixel >= snapFloor;
 
 		if (redstoneSnap()) {
@@ -4279,7 +4290,7 @@ public final class ComposerScreen extends Screen {
 		boolean drawSeconds = secondSpan / ticksPerPixel >= MIN_GRID_PIXEL_SPACING * 2;
 		if (drawSnap) {
 			int snapColor = crowdedGridColor(trueGrid ? 0x1ED98A3C : 0x1628343D,
-				snapSpan / ticksPerPixel, MIN_GRID_PIXEL_SPACING * 2);
+				snapSpan / ticksPerPixel, REDSTONE_GRID_PIXEL_SPACING, 0.55);
 			for (long index = (long)Math.floor(horizontalScroll / snapSpan);
 					gridLineAt(index, snapSpan) <= lastTick + snapSpan; index++) {
 				int x = tickX(gridLineAt(index, snapSpan));
@@ -7912,7 +7923,7 @@ public final class ComposerScreen extends Screen {
 	private double drawnGridSpan() {
 		return readableSpan(snapSubdivision == 0
 			? Math.max(1.0, project().ppq() / 4.0)
-			: gridSpan(), redstoneSnap() ? MIN_GRID_PIXEL_SPACING * 2 : MIN_GRID_PIXEL_SPACING);
+			: gridSpan(), redstoneSnap() ? REDSTONE_GRID_PIXEL_SPACING : MIN_GRID_PIXEL_SPACING);
 	}
 
 	/**
@@ -7954,8 +7965,19 @@ public final class ComposerScreen extends Screen {
 	 * only look open when there is several times their own width between them.</p>
 	 */
 	private static int crowdedGridColor(int color, double pixels, int floorPixels) {
+		return crowdedGridColor(color, pixels, floorPixels, 0.25);
+	}
+
+	/**
+	 * The same, for a grid that has to stay legible at its most crowded rather than get out of the
+	 * way.
+	 *
+	 * @param faintest the share of its own weight the grid keeps once its lines are as close
+	 *     together as they are allowed to get
+	 */
+	private static int crowdedGridColor(int color, double pixels, int floorPixels, double faintest) {
 		double run = 3.0 * floorPixels;
-		double room = Math.max(0.25, Math.min(1.0, (pixels - floorPixels) / run));
+		double room = Math.max(faintest, Math.min(1.0, (pixels - floorPixels) / run));
 		int alpha = (int)Math.round((color >>> 24) * room);
 		return alpha << 24 | color & 0xFFFFFF;
 	}
