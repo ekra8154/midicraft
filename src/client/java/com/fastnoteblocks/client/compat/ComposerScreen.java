@@ -1682,9 +1682,9 @@ public final class ComposerScreen extends Screen {
 		// the same thing in words, with how far out of true the drawing is.
 		double drawn = drawnGridSpan();
 		String zoom = drawn <= gridSpan() * 1.001
-			? "Every step is drawn at this zoom."
+			? "Every step is drawn at this zoom, which is what the amber lines mean."
 			: "Zoomed out: one line drawn per " + Math.round(drawn / gridSpan())
-				+ " steps, and drawn dimmer to say so.";
+				+ " steps. They are grey rather than amber to say they are not the grid itself.";
 		return Tooltip.create(Component.literal("Grid used when adding or dragging notes."
 			+ "\nOne step is " + snapDetail() + ".\n" + where + "\n" + zoom));
 	}
@@ -4177,8 +4177,10 @@ public final class ComposerScreen extends Screen {
 
 		// The grid drawn is the snap doubled until its lines are far enough apart to be lines, so
 		// most of the time you are looking at every second or every fourth step rather than at the
-		// step itself -- and nothing said which. Lines that are the grid are drawn brighter than
-		// lines that stand in for it, so "am I actually seeing game ticks" is answered by looking.
+		// step itself -- and nothing said which. Lines that are the grid are amber; lines standing
+		// in for it stay grey. A brightness difference was the first try and was not one: two greys
+		// a shade apart can only be told apart by comparing them to each other, and there is only
+		// ever one of them on screen. A hue is a thing you can read on its own.
 		double snapSpan = drawnGridSpan();
 		boolean trueGrid = snapSubdivision != 0 && snapSpan <= gridSpan() * 1.001;
 		int snapFloor = redstoneSnap() ? MIN_GRID_PIXEL_SPACING * 2 : MIN_GRID_PIXEL_SPACING;
@@ -4219,7 +4221,7 @@ public final class ComposerScreen extends Screen {
 		long beatTicks = readableStep(Math.max(1L, project().ppq()), measureTicks);
 		boolean showLabels = measureTicks / ticksPerPixel >= MIN_LABEL_PIXEL_SPACING;
 		if (drawSnap) {
-			int snapColor = trueGrid ? 0x40343C47 : 0x1E2A2F36;
+			int snapColor = trueGrid ? 0x44D9863C : 0x1E2A2F36;
 			for (long index = (long)Math.floor(horizontalScroll / snapSpan);
 					gridLineAt(index, snapSpan) <= lastTick + snapSpan; index++) {
 				long line = gridLineAt(index, snapSpan);
@@ -4263,7 +4265,7 @@ public final class ComposerScreen extends Screen {
 			SongAnalysis.redstoneTickSpan(project()) * REPEATER_TICKS_PER_SECOND);
 		boolean drawSeconds = secondSpan / ticksPerPixel >= MIN_GRID_PIXEL_SPACING * 2;
 		if (drawSnap) {
-			int snapColor = trueGrid ? 0x6A31505F : 0x2E28343D;
+			int snapColor = trueGrid ? 0x66D98A3C : 0x2E28343D;
 			for (long index = (long)Math.floor(horizontalScroll / snapSpan);
 					gridLineAt(index, snapSpan) <= lastTick + snapSpan; index++) {
 				int x = tickX(gridLineAt(index, snapSpan));
