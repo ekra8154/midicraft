@@ -194,7 +194,14 @@ public final class NoteBlockOverlay {
 		// The scale one of our screens wants, chosen as it opens rather than a tick later. The tick
 		// still owns it -- see ComposerScale -- this only stops the first frames being drawn at
 		// whatever size the last screen was.
-		ScreenEvents.BEFORE_INIT.register((client, screen, scaledWidth, scaledHeight) ->
+		//
+		// After the screen's own init and not before it. Before fires from inside init, after the
+		// width and height it was called with have been written onto the screen and before its own
+		// layout runs -- so changing the scale there re-lays the screen out correctly and then the
+		// call we interrupted carries on and writes the old size straight back over the top. The
+		// screen then draws at the new scale in the old window's shape, which is a composer with a
+		// strip of the world down two sides of it.
+		ScreenEvents.AFTER_INIT.register((client, screen, scaledWidth, scaledHeight) ->
 			ComposerScale.screenOpened(client, screen));
 		LevelRenderEvents.COLLECT_SUBMITS.register(this::render);
 		HudElementRegistry.attachElementBefore(

@@ -57,9 +57,13 @@ public final class ComposerScale {
 	 * scale and then jump to its own. Deciding here as well means the first frame drawn is already
 	 * the right size, and the tick goes on being the thing that cannot miss.</p>
 	 *
-	 * <p>The screen is passed in rather than read back off the client, because this runs from inside
-	 * that screen's own init and what the client is holding at that moment is not worth relying
-	 * on.</p>
+	 * <p>Called after the screen's own init has finished, never before it. Changing the scale
+	 * re-lays the screen out, and a relayout that happens part-way through init is undone by the
+	 * rest of it: the size init was called with gets written back over the corrected one, and the
+	 * screen draws at the new scale in the old window's shape.</p>
+	 *
+	 * <p>The screen is passed in rather than read back off the client, because the client's idea of
+	 * what is on screen during a transition is not worth relying on.</p>
 	 */
 	public static void screenOpened(Minecraft minecraft, Screen screen) {
 		if (laying) {
