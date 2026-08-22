@@ -8,6 +8,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.stream.Stream;
@@ -102,7 +103,8 @@ class FaultCensusProbe {
 	 */
 	private record Row(String song, int width, int floors, int dead, int dropped, int wrong,
 			int breachLanes, int breachBlocks, int depth, String refused, FaultView.Break broke,
-			List<String> wrongPairs, int severed, int collisions, int totalCols) {
+			List<String> wrongPairs, int severed, int collisions, int totalCols,
+			List<String> troubles) {
 
 		boolean clean() {
 			return refused == null && dead == 0 && dropped == 0 && wrong == 0 && breachBlocks == 0
@@ -130,6 +132,35 @@ class FaultCensusProbe {
 				TALLY.merge(key, (long) count, Long::sum);
 			}
 		});
+	}
+
+	/**
+	 * What a build says is wrong with itself, in its own words, less what already has a column.
+	 *
+	 * <p>A walk that catches itself doing something it knows is broken writes a line onto the plan
+	 * and carries on -- see the tripwire in {@code addRailNote} for the shape of it. Those lines
+	 * reach the paste screen, and until now they reached nothing else: this census read {@code
+	 * faults()} for the one entry it wanted and threw the rest away, so a whole class of fault that
+	 * the builder had already diagnosed was invisible to every sweep. The dead-note count picked up
+	 * the consequence and the census reported it as a mystery.</p>
+	 *
+	 * <p>Two are left out because they are already columns of their own, counted off the readback
+	 * rather than off the walk's opinion of itself.</p>
+	 */
+	private static List<String> troublesIn(SongBuilder.PastePlan plan) {
+		List<String> said = new ArrayList<>();
+		for (String fault : plan.faults()) {
+			if (fault.contains("had nowhere to hang") || fault.contains("would never be triggered")) {
+				continue;
+			}
+			said.add(fault);
+		}
+		return said;
+	}
+
+	/** The same line with its numbers taken out, so every instance of one fault tallies together. */
+	private static String troubleKind(String fault) {
+		return fault.replaceAll("-?\\d+", "#");
 	}
 
 	private static int droppedIn(SongBuilder.PastePlan plan) {
@@ -209,10 +240,11 @@ class FaultCensusProbe {
 							plan.breaches().size(),
 							plan.breaches().stream().mapToInt(Integer::intValue).sum(),
 							plan.spanZ(), null, null, List.of(), 0, plan.collisions().size(),
-							plan.totalColumns()));
+							plan.totalColumns(), troublesIn(plan)));
 					} catch (RuntimeException refused) {
 						rows.add(new Row(name, size[0], size[1], 0, 0, 0, 0, 0, 0,
-							String.valueOf(refused.getMessage()), null, List.of(), 0, 0, 0));
+							String.valueOf(refused.getMessage()), null, List.of(), 0, 0, 0,
+							List.of()));
 					}
 					continue;
 				}
@@ -233,10 +265,11 @@ class FaultCensusProbe {
 						// performance at the orphan: everything downstream counts as reached and
 						// unreachedNotes comes back nought on a build cut in half.
 						Math.max(0, built.reading().versions() - 1),
-						built.plan().collisions().size(), built.plan().totalColumns()));
+						built.plan().collisions().size(), built.plan().totalColumns(),
+						troublesIn(built.plan())));
 				} catch (RuntimeException refused) {
 					rows.add(new Row(name, size[0], size[1], 0, 0, 0, 0, 0, 0,
-						String.valueOf(refused.getMessage()), null, List.of(), 0, 0, 0));
+						String.valueOf(refused.getMessage()), null, List.of(), 0, 0, 0, List.of()));
 				}
 			}
 		}
@@ -389,6 +422,28 @@ class FaultCensusProbe {
 				String.format("DEPTH %-34s builds %5d  depth %9d  totalCols %10d", song, tally[1],
 					tally[0], tally[2])));
 		}
+		// What the builds said about themselves. Printed before the totals because a build that has
+		// already named its own fault is the cheapest fault in the report to go and fix.
+		Map<String, Integer> troubles = new TreeMap<>();
+		Map<String, String> firstTrouble = new TreeMap<>();
+		for (Row row : rows) {
+			for (String said : row.troubles()) {
+				String kind = troubleKind(said);
+				troubles.merge(kind, 1, Integer::sum);
+				firstTrouble.putIfAbsent(kind,
+					row.song() + " " + row.width() + "x" + row.floors());
+			}
+		}
+		if (!troubles.isEmpty()) {
+			System.out.println();
+			System.out.println("---- what the builds say is wrong with themselves ----");
+			troubles.entrySet().stream().sorted((a, b) -> b.getValue() - a.getValue())
+				.forEach(entry -> System.out.println(String.format("   %5d  %-96s first at %s",
+					entry.getValue(), entry.getKey(), firstTrouble.get(entry.getKey()))));
+		}
+		System.out.println("CENSUS troubles="
+			+ rows.stream().mapToLong(row -> row.troubles().size()).sum()
+			+ " inBuilds=" + rows.stream().filter(row -> !row.troubles().isEmpty()).count());
 		System.out.println("CENSUS severedBuilds="
 			+ faulty.stream().filter(row -> row.severed() > 0).count()
 			+ " severedLanes=" + faulty.stream().mapToLong(Row::severed).sum());

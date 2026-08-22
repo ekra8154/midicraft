@@ -10653,6 +10653,13 @@ public final class SongBuilder {
 			int blanks) {
 		String kind = floorNotes == 0 ? "Barren" : "Carried";
 		placements.padded("railRun" + kind);
+		// How long the run turned out to be, which is the number {@link #railOpens} was predicting
+		// when it let the run open. A run of one is the shape that cannot hand its signal on: its
+		// only column is the one the head's dust drives, and a block dust powers lights no dust.
+		placements.padded("railRunLength" + Math.min(9, columns));
+		if (columns <= 1) {
+			placements.padded("railRunOfOneBecause" + LAST_NO_PAIR);
+		}
 		placements.padded("railRunFloor" + Math.min(9, floorNotes));
 		for (int spent = 0; spent < columns; spent++) {
 			placements.padded("railRunColumns" + kind);
@@ -10854,7 +10861,7 @@ public final class SongBuilder {
 		// -- the run ends on this path column, the lane pads as the plan asked, and the next run
 		// opens on the far side.
 		if (railPadBooked(booked, index + 1) || railPadBooked(booked, index + 2)) {
-			return null;
+			return railNoPair(placements, "PadBooked");
 		}
 		EventGroup next = events.get(index + 1);
 		// The plain pair: the next chord on the floor column, and the one after it on the path column
@@ -10867,17 +10874,42 @@ public final class SongBuilder {
 				&& railDelay(pathLive, events.get(index + 2).time()) > 0) {
 			return new RailPair(false, next.time());
 		}
-		if (!railHolds(next, true) || railDelay(pathLive, next.time()) == 0
-				|| !RAIL_BLANKS_FOR_DELAY && railHolds(next, false)) {
-			return null;
+		if (!railHolds(next, true)) {
+			return railNoPair(placements, "ChordWillNotHold");
+		}
+		if (railDelay(pathLive, next.time()) == 0) {
+			return railNoPair(placements, "PathOutOfTick");
+		}
+		if (!RAIL_BLANKS_FOR_DELAY && railHolds(next, false)) {
+			return railNoPair(placements, "BlanksOff");
 		}
 		// As late as the floor rail can reach, so that whatever follows has the most room -- but
 		// never past the anchor after it, which has to be within a repeater of this one.
 		int latest = floorLive + 4;
 		int blankTime = index + 2 < events.size()
 			? Math.min(latest, events.get(index + 2).time() - 1) : latest;
-		return railDelay(floorLive, blankTime) > 0 ? new RailPair(true, blankTime) : null;
+		return railDelay(floorLive, blankTime) > 0 ? new RailPair(true, blankTime)
+			: railNoPair(placements, "BlankOutOfTick");
 	}
+
+	/**
+	 * No pair, and which question said so -- counted only where the walk is asking for real.
+	 *
+	 * <p>{@link #railMayStart} and {@link #railFloorChords} ask the same method with no placements
+	 * and no lane, and those are simulations of a run that may never be built. Counting them would
+	 * drown the answer that matters, which is why a run the walk actually laid stopped where it
+	 * did.</p>
+	 */
+	private static RailPair railNoPair(PlacementPlan placements, String why) {
+		if (placements != null) {
+			placements.padded("railNoPair" + why);
+			LAST_NO_PAIR = why;
+		}
+		return null;
+	}
+
+	/** Why the walk last found no pair, so that a run of one column can say what ended it. */
+	private static String LAST_NO_PAIR = "None";
 
 	/**
 	 * How many chords a run standing here would get onto its floor rail, counted up to {@code wanted}.
@@ -11080,6 +11112,11 @@ public final class SongBuilder {
 		String facing = repeaterFacing(at.travel());
 		List<EventNote> hanging = new ArrayList<>(chord);
 		if (phase == 0) {
+			// What drove this column and what it hands on to, counted for every path column a run
+			// lays. The pair is the whole of whether the column can carry the lane: a dust-driven
+			// column hands a full signal to a repeater and nothing at all to dust.
+			placements.padded("railPathColumn" + (fromDust ? "FromDust" : "FromRepeater")
+				+ (nextDelay == 0 ? "Ends" : "Continues"));
 			BlockPos centre = at.pos().above();
 			// The one shape of run that cannot hand its signal on. {@link #railOpens} is what keeps
 			// this from happening and it is arithmetic against a wall, so it is worth saying out loud
