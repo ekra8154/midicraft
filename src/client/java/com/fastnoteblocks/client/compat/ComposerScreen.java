@@ -3675,9 +3675,7 @@ public final class ComposerScreen extends Screen {
 			int labelX = Math.min(rollX + rollWidth - smallTextWidth(at) - 2, markerX + 5);
 			smallText(graphics, at, Math.max(rollX + 2, labelX), rulerY + 13, 0xFFFF8888);
 		}
-		extractRangeStrip(graphics, mouseX, mouseY);
-		if (mouseX >= rollX && mouseX < rollX + rollWidth && mouseY >= rulerY && mouseY < rollY
-				&& !insideRangeStrip(mouseX, mouseY)) {
+		if (mouseX >= rollX && mouseX < rollX + rollWidth && mouseY >= rulerY && mouseY < rollY) {
 			graphics.setTooltipForNextFrame(Component.literal(overEndMarker(mouseX, mouseY)
 				? "Drag to set where the song ends"
 				: "Drag to set playback start"), mouseX, mouseY);
@@ -3863,53 +3861,6 @@ public final class ComposerScreen extends Screen {
 	}
 
 	/**
-	 * The range's bracket and its handles, and behind them the length the next paste will step.
-	 *
-	 * <p>Two brackets in one lane and they are deliberately different weights. The range is filled
-	 * and has handles, because it is a thing you take hold of. The paste length is a hairline with
-	 * end caps, because it is a consequence -- it says where Ctrl+V will leave the marker, and it is
-	 * there so that a length arrived at by a rule can be seen before it is committed to rather than
-	 * only after.</p>
-	 */
-	private void extractRangeStrip(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
-		int top = rollY - RANGE_STRIP_HEIGHT;
-		if (!clipboard.isEmpty() && clipboardSpanTicks > 0L) {
-			int from = tickX(playbackReturnTick);
-			int to = tickX(playbackReturnTick + clipboardSpanTicks);
-			if (to >= rollX && from <= rollX + rollWidth) {
-				int left = Math.max(rollX, from);
-				int right = Math.min(rollX + rollWidth, to);
-				graphics.fill(left, top + 1, right, top + 2, 0x88C8A85A);
-				graphics.fill(left, top + 1, left + 1, top + 4, 0xCCC8A85A);
-				graphics.fill(right - 1, top + 1, right, top + 4, 0xCCC8A85A);
-			}
-		}
-		if (!hasRange()) {
-			return;
-		}
-		int from = tickX(rangeStart);
-		int to = tickX(rangeEnd);
-		if (to < rollX || from > rollX + rollWidth) {
-			return;
-		}
-		int handle = rangeHandleAt(mouseX, mouseY);
-		graphics.fill(Math.max(rollX, from), top, Math.min(rollX + rollWidth, to), rollY,
-			0xFF2E5A6B);
-		if (from >= rollX) {
-			graphics.fill(from, top - 2, from + 2, rollY, handle == 1 ? 0xFFCFF3FF : 0xFF7FD8F0);
-		}
-		if (to <= rollX + rollWidth) {
-			graphics.fill(to - 2, top - 2, to, rollY, handle == 2 ? 0xFFCFF3FF : 0xFF7FD8F0);
-		}
-		if (insideRangeStrip(mouseX, mouseY)) {
-			graphics.setTooltipForNextFrame(Component.literal(
-				"Selection range: " + rangeLabel(rangeLength()) + "\nDrag either end to change it. "
-					+ "This is how far Ctrl+V and Ctrl+D step, so pull the right-hand end past the "
-					+ "last note to leave a rest between repeats."), mouseX, mouseY);
-		}
-	}
-
-	/**
 	 * The range across the roll, and its length written inside it.
 	 *
 	 * <p>Full height and time only: the box's height chose the notes and is finished, while a length
@@ -3931,21 +3882,32 @@ public final class ComposerScreen extends Screen {
 		// on a few of its parts, and drawn around those it says so and leaves the rest alone. It
 		// falls back to the full height only with no selection left to measure, which is a range
 		// about to be put down anyway.
-		int[] pitches = rangePitchExtent();
-		int top = pitches == null ? rollY : Math.max(rollY, noteY(pitches[0]) - 1);
-		int bottom = pitches == null
-			? rollY + rollHeight
-			: Math.min(rollY + rollHeight, noteY(pitches[1]) + rowHeight);
+		int top = rangeBandTop();
+		int bottom = rangeBandBottom();
 		if (bottom <= top) {
 			return;
 		}
 		graphics.fill(Math.max(rollX, from), top, Math.min(rollX + rollWidth, to), bottom,
 			0x1444CCFF);
+		// The two edges are the handles now. They used to be a bracket in a strip of its own above
+		// the roll, which was a second drawing of a thing already drawn -- and once the band was
+		// trimmed to its notes there was nothing the bracket said that the band did not. Thicker
+		// and brighter under the cursor, because an edge you can take hold of has to look like one.
+		int handle = rangeHandleAt(lastMouseX, lastMouseY);
 		if (from >= rollX) {
-			graphics.fill(from, top, from + 1, bottom, 0x667FD8F0);
+			graphics.fill(from - (handle == 1 ? 1 : 0), top, from + (handle == 1 ? 2 : 1), bottom,
+				handle == 1 ? 0xFFCFF3FF : 0x667FD8F0);
 		}
 		if (to <= rollX + rollWidth) {
-			graphics.fill(to - 1, top, to, bottom, 0x667FD8F0);
+			graphics.fill(to - (handle == 2 ? 2 : 1), top, to + (handle == 2 ? 1 : 0), bottom,
+				handle == 2 ? 0xFFCFF3FF : 0x667FD8F0);
+		}
+		if (handle != 0) {
+			graphics.setTooltipForNextFrame(Component.literal(
+				"Selection range: " + rangeLabel(rangeLength()) + "\nDrag to change it, right-click "
+					+ "to drop it. This is how far Ctrl+V and Ctrl+D step, so pull the right-hand "
+					+ "end past the last note to leave a rest between repeats."),
+				(int)lastMouseX, (int)lastMouseY);
 		}
 		String label = rangeLabel(rangeLength());
 		int labelLeft = Math.max(rollX + 2, from + 3);
@@ -3956,6 +3918,19 @@ public final class ComposerScreen extends Screen {
 				labelTop + 8, 0xCC0E2028);
 			smallText(graphics, label, labelLeft, labelTop + 1, 0xFF9FE8FF);
 		}
+	}
+
+	/** The band's top edge: the highest selected note, or the top of the roll with none left. */
+	private int rangeBandTop() {
+		int[] pitches = rangePitchExtent();
+		return pitches == null ? rollY : Math.max(rollY, noteY(pitches[0]) - 1);
+	}
+
+	private int rangeBandBottom() {
+		int[] pitches = rangePitchExtent();
+		return pitches == null
+			? rollY + rollHeight
+			: Math.min(rollY + rollHeight, noteY(pitches[1]) + rowHeight);
 	}
 
 	/**
@@ -5145,8 +5120,10 @@ public final class ComposerScreen extends Screen {
 			draggingRangeHandle = rangeHandleAt(event.x(), event.y());
 			return true;
 		}
-		if (event.button() == 1 && insideRangeStrip(event.x(), event.y()) && hasRange()) {
-			// The way out of a range without also having to put the selection down.
+		if (event.button() == 1 && rangeHandleAt(event.x(), event.y()) != 0) {
+			// The way out of a range without also having to put the selection down. On the handles
+			// rather than anywhere in the band, since the rest of the band is roll and right-click
+			// on roll is the eraser.
 			clearRange();
 			return true;
 		}
@@ -7544,23 +7521,29 @@ public final class ComposerScreen extends Screen {
 	 * end marker. Four draggable things in twenty-four pixels is a puzzle about which one a press
 	 * meant; the top of the ruler stays scrubbing and the bottom five pixels are the range.</p>
 	 */
-	private static final int RANGE_STRIP_HEIGHT = 5;
+	/** How far either side of a band edge counts as having hold of it. */
+	private static final double RANGE_HANDLE_REACH = 4.0;
 
-	private boolean insideRangeStrip(double x, double y) {
-		return x >= rollX && x < rollX + rollWidth && y >= rollY - RANGE_STRIP_HEIGHT && y < rollY;
-	}
-
-	/** Which handle a press in the strip has hold of, or 0. */
+	/** Which edge of the band a point has hold of, or 0. */
 	private int rangeHandleAt(double x, double y) {
-		if (!hasRange() || !insideRangeStrip(x, y)) {
+		if (!hasRange() || x < rollX || x >= rollX + rollWidth) {
 			return 0;
 		}
-		double toStart = Math.abs(x - tickX(rangeStart));
-		double toEnd = Math.abs(x - tickX(rangeEnd));
-		if (Math.min(toStart, toEnd) > 5.0) {
+		if (y < rangeBandTop() || y >= rangeBandBottom()) {
 			return 0;
 		}
-		return toEnd <= toStart ? 2 : 1;
+		// Reach outward only. A range starts on a note, so the left edge sits on that note's own
+		// left edge -- a zone spreading both ways would take the click that was meant to pick the
+		// first note of the phrase and drag the range with it instead. Outside the band there is
+		// nothing else to hit.
+		double from = tickX(rangeStart);
+		double to = tickX(rangeEnd);
+		boolean onStart = x >= from - RANGE_HANDLE_REACH && x <= from + 1.0;
+		boolean onEnd = x >= to - 1.0 && x <= to + RANGE_HANDLE_REACH;
+		if (onEnd && (!onStart || Math.abs(x - to) <= Math.abs(x - from))) {
+			return 2;
+		}
+		return onStart ? 1 : 0;
 	}
 
 	/** A tick count as the unit anyone actually thinks a loop in. */
