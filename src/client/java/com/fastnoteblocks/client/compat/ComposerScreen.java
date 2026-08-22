@@ -3546,24 +3546,70 @@ public final class ComposerScreen extends Screen {
 	 * thing worth seeing in a converted song is which pieces used to be one part. Family comes from
 	 * the name, since that is what the split writes and what survives a save.</p>
 	 */
+	/**
+	 * A colour per voice, arranged so the octave a voice sounds in is the hue.
+	 *
+	 * <p>Colouring by position said nothing, and colouring by which part a layer was split from said
+	 * something true and useless -- on a composition of thirty layers the question being asked is
+	 * "I can hear that line, which row is it", and the answer anyone has is what it sounds like. A
+	 * note block's instrument is the block under it and the octave it plays in, and the octave is
+	 * the half you can hear from across the room.</p>
+	 *
+	 * <p>So the ramp runs cold to warm as the voice runs high to low: ice blue two octaves up, mint
+	 * one up, green in the middle, amber one down, red two down. Within a band each voice takes its
+	 * own place along the hue, near its neighbours and not on them, and alternates a shade lighter
+	 * so that five greens are five greens rather than one.</p>
+	 *
+	 * <p>The two families off the ramp are off it for a reason. Percussion has no pitch to place, so
+	 * it sits in violet where it cannot be mistaken for a melody. The trumpets are one voice at four
+	 * ages and read as a family in copper; where they sound relative to a harp is not something
+	 * worth guessing at, and grouping them by a guess would be worse than grouping them by what
+	 * they are.</p>
+	 */
+	private static final Map<String, Integer> INSTRUMENT_COLORS = Map.ofEntries(
+		// Two octaves up.
+		Map.entry("BELL", 0xFF6DD5E3),
+		Map.entry("CHIME", 0xFF90C9EA),
+		Map.entry("XYLOPHONE", 0xFF6D9BE3),
+		// One octave up.
+		Map.entry("FLUTE", 0xFF6DE3AA),
+		Map.entry("COW_BELL", 0xFF90EAD3),
+		// The middle, where a harp plays.
+		Map.entry("HARP", 0xFFD2E36D),
+		Map.entry("IRON_XYLOPHONE", 0xFFC9EA90),
+		Map.entry("BIT", 0xFF9EE36D),
+		Map.entry("BANJO", 0xFFA2EA90),
+		Map.entry("PLING", 0xFF6DE36F),
+		// One octave down.
+		Map.entry("GUITAR", 0xFFE3C66D),
+		// Two octaves down.
+		Map.entry("BASS", 0xFFE36D6D),
+		Map.entry("DIDGERIDOO", 0xFFEAA890),
+		// Copper, four ages of one voice.
+		Map.entry("TRUMPET", 0xFFE36DE3),
+		Map.entry("TRUMPET_EXPOSED", 0xFFEA90DB),
+		Map.entry("TRUMPET_WEATHERED", 0xFFE36DBC),
+		Map.entry("TRUMPET_OXIDIZED", 0xFFEA90BD),
+		// No pitch to place, so off the ramp entirely.
+		Map.entry("BASEDRUM", 0xFF796DE3),
+		Map.entry("SNARE", 0xFFB190EA),
+		Map.entry("HAT", 0xFFB86DE3));
+
 	private int[] layerColors() {
 		ComposerProject current = project();
 		if (cachedColorProject == current && cachedLayerColors != null) {
 			return cachedLayerColors;
 		}
 		List<Layer> layers = current.layers();
-		Map<String, Integer> hues = new java.util.LinkedHashMap<>();
 		Map<String, Integer> members = new java.util.LinkedHashMap<>();
 		int[] colors = new int[layers.size()];
 		for (int index = 0; index < layers.size(); index++) {
-			String family = layerFamily(layers.get(index).name());
-			Integer hue = hues.get(family);
-			if (hue == null) {
-				hue = hues.size();
-				hues.put(family, hue);
-			}
-			int member = members.merge(family, 1, Integer::sum) - 1;
-			colors[index] = shade(LAYER_COLORS[hue % LAYER_COLORS.length], member);
+			String instrument = layers.get(index).instrument();
+			// Two layers on one voice still have to be told apart, and the commonest reason for two
+			// is Convert splitting a part into the octaves it needed -- which is the one case where
+			// they ought to read as relatives rather than as strangers. One hue, stepped.
+			int member = members.merge(instrument, 1, Integer::sum) - 1;
+			colors[index] = shade(instrumentColor(instrument), member);
 		}
 		cachedColorProject = current;
 		cachedLayerColors = colors;
@@ -3578,9 +3624,17 @@ public final class ComposerScreen extends Screen {
 			: LAYER_COLORS[Math.floorMod(index, LAYER_COLORS.length)];
 	}
 
-	/** A layer's name with the suffix a Minecraft conversion added, if any, taken off. */
-	private static String layerFamily(String name) {
-		return name.replaceFirst("\\s*\\((in range|[+-]\\d+ oct)\\)$", "");
+	/**
+	 * The colour a voice is drawn in, or a rotation of the old palette for one nothing knows about.
+	 *
+	 * <p>The fallback is for a song written by a later version of the mod than the one reading it.
+	 * An instrument missing from the table still gets a colour, chosen off its own name, so it is
+	 * at least the same colour every time that song is opened.</p>
+	 */
+	private static int instrumentColor(String instrument) {
+		Integer known = INSTRUMENT_COLORS.get(instrument);
+		return known != null ? known
+			: LAYER_COLORS[Math.floorMod(instrument.hashCode(), LAYER_COLORS.length)];
 	}
 
 	/**
