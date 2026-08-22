@@ -6137,8 +6137,19 @@ public final class SongBuilder {
 			} else if (railPhase >= 0 || railOpens(events, index, lane, laneWall, layout, false,
 					reserve, wait, railStackSeed(placements, lane, lastStyle, currentTime, false),
 					booked)
-					|| railOpensOnACorner(events, index, lane, laneWall, layout, reserve,
-						steppedOffCorner != null, booked)) {
+					// A corner's say-so is for the reseed and for nothing else. The corner asks for
+					// less room on purpose -- a reseed spends one silent column where a head spends
+					// two and a wait in front of it -- and a run let in on the corner's word and then
+					// refused its reseed falls through to a head without ever being asked whether a
+					// head fits. At eight wide that was 623 heads laid on the reseed's arithmetic: a
+					// head at a room of three is two columns and the wall's, which leaves the run a
+					// single dust-driven column handing into the corner after it. In-game reading found
+					// it as a double rail seeded and never used, dead at the next corner. So the corner
+					// admits a run only where the head it falls back to would have been admitted too.
+					// See {@link #CORNER_SEED_NEEDS_ROOM_FOR_A_HEAD}.
+					|| !CORNER_SEED_NEEDS_ROOM_FOR_A_HEAD
+						&& railOpensOnACorner(events, index, lane, laneWall, layout, reserve,
+							steppedOffCorner != null, booked)) {
 				boolean opening = railPhase < 0;
 				boolean fromDust = false;
 				// A stacked bus's rail-ready tail is already this run's first path column, so there is nothing
@@ -9032,6 +9043,25 @@ public final class SongBuilder {
 	static boolean RUN_OPENS_ON_A_CORNER = true;
 
 	/**
+	 * Whether a run may be let in on a corner's word alone.
+	 *
+	 * <p>Off. {@link #railOpensOnACorner} asks for less room than {@link #railOpens} because the
+	 * reseed it admits spends one silent column where a head spends two and the wait in front of it.
+	 * That arithmetic is right for a reseed. It is wrong for what gets built when the reseed is then
+	 * refused -- which is a head, and which at eight wide is what happened 623 times out of 634: the
+	 * corner's dust straightens, or the chord will not hold, or the floor cell is taken, and the walk
+	 * falls through to the ordinary head with nobody having asked whether a head fits.</p>
+	 *
+	 * <p>With this off the corner is no longer a separate way in. A run opens where {@link #railOpens}
+	 * says a head fits, and where it does the reseed is still tried first and still preferred, so
+	 * nothing the reseed saved is lost -- only the runs that were going to be heads with no room for
+	 * one. Those were never runs: a head at a room of three lays a single dust-driven column and
+	 * hands into the corner's dust after it, which is the wire-stone-wire that killed 55 notes on
+	 * choral-chambers at eight wide on one floor.</p>
+	 */
+	static boolean CORNER_SEED_NEEDS_ROOM_FOR_A_HEAD = true;
+
+	/**
 	 * Whether a run already going may carry on into the corner its lane turns at.
 	 *
 	 * <p>What to expect of it was said in advance: a couple of collision builds from
@@ -9283,10 +9313,16 @@ public final class SongBuilder {
 			Layout layout, int reserve, boolean offACorner, Map<Integer, Integer> booked) {
 		// The reseed lays one column of its own -- the silent one after the corner -- so the run's own
 		// columns get the rest.
-		return RUN_OPENS_ON_A_CORNER && TWO_RAIL_RUNS && layout.ultra() && offACorner
+		boolean opens = RUN_OPENS_ON_A_CORNER && TWO_RAIL_RUNS && layout.ultra() && offACorner
 			&& !lane.bending()
 			&& railMayStart(events, index, NO_BLANK, railRoom(lane, wall) - 1 - reserve, booked)
 			&& railRoom(lane, wall) >= 3 + reserve;
+		if (TRACE_RAIL_HEADS && opens) {
+			System.out.println("RAILCORNER at " + lane.pos().getX() + " " + lane.pos().getY() + " "
+				+ lane.pos().getZ() + " wall=" + wall + " railRoom=" + railRoom(lane, wall)
+				+ " reserve=" + reserve + " index=" + index);
+		}
+		return opens;
 	}
 
 	private static Lane addRailFromCorner(PlacementPlan placements, Lane lane, int delay, int time) {
@@ -10629,6 +10665,9 @@ public final class SongBuilder {
 	/** The repeater and the dust in front of it, laid before the first note of a run. */
 	private static final int RAIL_HEAD_COLUMNS = 2;
 
+	/** Scratch: say where every run opens. */
+	static boolean TRACE_RAIL_HEADS = false;
+
 	/**
 	 * Whether this event could stand in a rail run at all, leaving aside where its neighbours are.
 	 *
@@ -10816,9 +10855,17 @@ public final class SongBuilder {
 		int held = RAIL_LEAVES_THE_WALL_COLUMN ? Math.max(reserve, 1) : reserve;
 		int room = railRoom(lane, wall)
 			- railHeadColumns(floorSeed, wait) - railPadColumns(wait) - held;
-		return TWO_RAIL_RUNS && layout.ultra() && !turning && !lane.bending()
+		boolean opens = TWO_RAIL_RUNS && layout.ultra() && !turning && !lane.bending()
 			&& railMayStart(events, index, floorSeed, room, booked)
 			&& room >= 2;
+		if (TRACE_RAIL_HEADS && opens) {
+			System.out.println("RAILOPENS at " + lane.pos().getX() + " " + lane.pos().getY() + " "
+				+ lane.pos().getZ() + " wall=" + wall + " railRoom=" + railRoom(lane, wall)
+				+ " head=" + railHeadColumns(floorSeed, wait) + " pad=" + railPadColumns(wait)
+				+ " held=" + held + " room=" + room + " wait=" + wait + " reserve=" + reserve
+				+ " index=" + index);
+		}
+		return opens;
 	}
 
 	/**
@@ -11140,6 +11187,11 @@ public final class SongBuilder {
 	private static Lane addRailHead(PlacementPlan placements, Lane lane, int delay, int time) {
 		placements.placing("rail:HEAD delay" + delay);
 		placements.padded("railHead");
+		if (TRACE_RAIL_HEADS) {
+			System.out.println("RAILHEAD at " + lane.pos().getX() + " " + lane.pos().getY() + " "
+				+ lane.pos().getZ() + " travel=" + lane.travel() + " time=" + time
+				+ " bending=" + lane.bending() + " onCorner=" + lane.onCorner());
+		}
 		lane = pastAnyCorner(placements, lane);
 		set(placements, lane.pos(), "minecraft:stone");
 		set(placements, lane.pos().above(),
