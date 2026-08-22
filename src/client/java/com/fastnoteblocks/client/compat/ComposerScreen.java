@@ -218,7 +218,7 @@ public final class ComposerScreen extends Screen {
 	 * aim that is plainly not a row.</p>
 	 */
 	private static int rightGutter(int inset) {
-		return inset + 6;
+		return inset + 3;
 	}
 
 	/** Widest a layer's name may draw, which is whatever the panel leaves after the note count. */
@@ -241,15 +241,17 @@ public final class ComposerScreen extends Screen {
 		boolean name = panel >= ROW_NAME_AT;
 		boolean count = panel >= ROW_COUNT_AT;
 		int inset = chip ? 8 : 2;
-		// The stripe is wide enough to write the row number in. It was two pixels of colour and the
-		// number was out at the far edge, which is the width a name wants and the one place the eye
-		// is not looking when it is asking "which layer is this".
+		// The stripe is wide enough to write the row number in and no wider. A digit is four and a
+		// half pixels at this size, so two of them are nine and the stripe cannot go back to the
+		// four it was without putting the number somewhere else -- but the padding can go, and it
+		// has. One pixel either side, which on a block of solid colour is enough to keep the digits
+		// off the edge and is not enough to notice.
 		int stripe = Math.max(4, smallTextWidth(Integer.toString(
-			Math.max(1, project().layers().size()))) + 4);
+			Math.max(1, project().layers().size()))) + 2);
 		// Everything after the stripe is measured from it rather than from a fixed column, because
 		// the stripe is as wide as the largest row number in the panel and that is not a constant.
-		int stateX = inset + stripe + 3;
-		int instrumentX = chip ? stateX + LAYER_CHIP + 3 : inset + stripe + 3;
+		int stateX = inset + stripe + 2;
+		int instrumentX = chip ? stateX + LAYER_CHIP + 3 : inset + stripe + 2;
 		// What used to be the number's column is the note count's now. Every row reserves the width
 		// of the largest count in the panel rather than its own, so the column does not jog left as
 		// you scroll past a layer with four digits on it.
