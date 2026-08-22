@@ -3695,7 +3695,7 @@ public final class ComposerScreen extends Screen {
 			smallText(graphics, at, Math.max(rollX + 2, labelX), rulerY + 13, 0xFFFF8888);
 		}
 		if (mouseX >= rollX && mouseX < rollX + rollWidth && mouseY >= rulerY && mouseY < rollY
-				&& !insideMarkerBand(mouseX, mouseY)) {
+				&& markerAtPoint(mouseX, mouseY) == null) {
 			graphics.setTooltipForNextFrame(Component.literal(overEndMarker(mouseX, mouseY)
 				? "Drag to set where the song ends"
 				: "Drag to set playback start"), mouseX, mouseY);
@@ -3767,9 +3767,6 @@ public final class ComposerScreen extends Screen {
 					+ (hovered.tick() / Math.max(1L, project().ppq() * 4L) + 1L)
 					+ "\n" + "Click to jump, double-click to rename, right-click to remove"),
 				mouseX, mouseY);
-		} else if (insideMarkerBand(mouseX, mouseY) && !overOpenMenu(mouseX, mouseY)) {
-			graphics.setTooltipForNextFrame(Component.literal(
-				"Click to add a marker here. M adds one at the playback marker."), mouseX, mouseY);
 		}
 	}
 
@@ -5083,21 +5080,21 @@ public final class ComposerScreen extends Screen {
 			}
 			return true;
 		}
-		if (insideMarkerBand(event.x(), event.y())) {
-			ComposerProject.Marker hit = markerAtPoint(event.x(), event.y());
+		// A tab, and only a tab. Clicking the empty part of the strip used to put a marker down,
+		// which made the bottom of the ruler a place you could not click without leaving something
+		// behind -- and the ruler is a thing you click all day to move the playhead. M is how a
+		// marker is added, which is one way rather than two and the one that says where it lands.
+		ComposerProject.Marker markerHit = markerAtPoint(event.x(), event.y());
+		if (markerHit != null) {
 			if (event.button() == 1) {
-				removeMarkerAt(hit == null ? -1L : hit.tick());
+				removeMarkerAt(markerHit.tick());
 				return true;
 			}
 			if (event.button() == 0) {
-				if (hit == null) {
-					// The empty foot of the ruler is where a marker goes. Seven pixels of it, so
-					// the rest of the ruler still moves the playhead.
-					addMarkerAt(snapTick(mouseTick(event.x())));
-				} else if (doubleClick) {
-					renameMarker(hit);
+				if (doubleClick) {
+					renameMarker(markerHit);
 				} else {
-					setPlaybackStart(hit.tick(), false);
+					setPlaybackStart(markerHit.tick(), false);
 				}
 				return true;
 			}
@@ -7779,9 +7776,7 @@ public final class ComposerScreen extends Screen {
 
 	/** The end marker's grab zone, a few pixels either side of it in the ruler. */
 	private boolean overEndMarker(double x, double y) {
-		// Not down in the marker band. The two used to be in strips of their own and now share the
-		// ruler, so a marker standing near the song's end would otherwise be unreachable.
-		return insideRuler(x, y) && !insideMarkerBand(x, y) && Math.abs(x - endMarkerX()) <= 4.0;
+		return insideRuler(x, y) && Math.abs(x - endMarkerX()) <= 4.0;
 	}
 
 	private boolean insideRuler(double x, double y) {
