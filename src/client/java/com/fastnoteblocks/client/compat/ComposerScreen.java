@@ -45,10 +45,16 @@ public final class ComposerScreen extends Screen {
 	 * five words, and a framed button that opens a nested menu is an odd object -- the frame says
 	 * "press me", the arrow says "there is more inside". Drawn titles with a hover highlight say
 	 * the second thing on their own, and give back twelve pixels of height to the roll.</p>
+	 *
+	 * <p>Settings ahead of Build, because it is the one title that has to be reachable when the bar
+	 * does not fit. The GUI scale is set in there, so at a scale too large for the window it is the
+	 * way out of the problem -- and it was last in the row, which is the first place a window runs
+	 * out of. Build is the one that can afford to go: it does nothing the composer cannot wait
+	 * for.</p>
 	 */
 	private static final ToolbarMenu[] MENU_BAR = {
-		ToolbarMenu.FILE, ToolbarMenu.EDIT, ToolbarMenu.SELECT, ToolbarMenu.BUILD,
-		ToolbarMenu.SETTINGS
+		ToolbarMenu.FILE, ToolbarMenu.EDIT, ToolbarMenu.SELECT, ToolbarMenu.SETTINGS,
+		ToolbarMenu.BUILD
 	};
 	private static final int MENU_BAR_LEFT = 6;
 	private static final int MENU_BAR_TOP = 3;
@@ -821,10 +827,10 @@ public final class ComposerScreen extends Screen {
 		// they are added to and the controls do not move; keeping the two apart means neither can
 		// push the other about. Each is measured against every caption it can ever show, so Snap
 		// does not jump a pixel when it reaches "repeater" or Speed when it reaches "0.25x".
-		int recordWidth = widestLabel(CONTROL_PADDING, "Record", "Recording");
+		int recordWidth = widestLabel(CONTROL_PADDING, "Rec", "\u25cf Rec");
 		int playWidth = widestLabel(CONTROL_PADDING, "Play", "Stop");
-		int snapWidth = widestLabel(CONTROL_PADDING, "Snap 1/4", "Snap 1/8", "Snap 1/16",
-			"Snap 1/32", "Snap repeater", "Snap game tick", "Snap off");
+		int snapWidth = widestLabel(CONTROL_PADDING, "1/4", "1/8", "1/16", "1/32", "Repeater",
+			"Game tick", "Off");
 		int speedWidth = widestLabel(CONTROL_PADDING + 8, "Speed 0.25x", "Speed 2.00x", "Speed 8.00x");
 		int speedX = width - 6 - speedWidth;
 		int snapX = speedX - CONTROL_GAP - snapWidth;
@@ -1602,7 +1608,7 @@ public final class ComposerScreen extends Screen {
 	private int snapMenuWidth() {
 		int widest = 0;
 		for (int choice : SNAP_CHOICES) {
-			widest = Math.max(widest, font.width(snapLabel(choice).getString())
+			widest = Math.max(widest, font.width(snapMenuLabel(choice).getString())
 				+ 14 + smallTextWidth(snapDetail(choice)));
 		}
 		return widest + 20;
@@ -1643,7 +1649,7 @@ public final class ComposerScreen extends Screen {
 			if (current) {
 				graphics.fill(left + 2, rowY, left + 4, rowY + CONTEXT_MENU_ROW_HEIGHT, 0xFF8FD3FF);
 			}
-			graphics.text(font, snapLabel(choice), left + 8, rowY + 4,
+			graphics.text(font, snapMenuLabel(choice), left + 8, rowY + 4,
 				current ? 0xFFFFFFFF : 0xFFCFD4DA, false);
 			// Off is the one setting with no step, so it has no number to carry.
 			if (choice != 0) {
@@ -1756,20 +1762,38 @@ public final class ComposerScreen extends Screen {
 			+ "\nOne step is " + snapDetail() + ".\n" + where + "\n" + zoom));
 	}
 
+	/**
+	 * What a grid is called, without the word Snap in front of it.
+	 *
+	 * <p>The button used to carry the word, which cost it the width of five characters at every
+	 * setting -- on a cluster pinned to the right-hand edge, sized to its longest possible caption,
+	 * so Snap game tick was being paid for while 1/4 was showing. The button sits under a list that
+	 * says Snap on every row and beside a status bar that says grid, so there was never much doubt
+	 * about what the number was.</p>
+	 */
 	private Component snapLabel() {
 		return snapLabel(snapSubdivision);
 	}
 
 	private Component snapLabel(int subdivision) {
-		return Component.literal(switch (subdivision) {
-			case 1 -> "Snap 1/4";
-			case 2 -> "Snap 1/8";
-			case 4 -> "Snap 1/16";
-			case 8 -> "Snap 1/32";
-			case SNAP_REPEATER -> "Snap repeater";
-			case SNAP_GAME_TICK -> "Snap game tick";
-			default -> "Snap off";
-		});
+		return Component.literal(gridName(subdivision));
+	}
+
+	/** The same, with the word, for the list where the settings are read one after another. */
+	private Component snapMenuLabel(int subdivision) {
+		return Component.literal("Snap " + gridName(subdivision).toLowerCase(java.util.Locale.ROOT));
+	}
+
+	private static String gridName(int subdivision) {
+		return switch (subdivision) {
+			case 1 -> "1/4";
+			case 2 -> "1/8";
+			case 4 -> "1/16";
+			case 8 -> "1/32";
+			case SNAP_REPEATER -> "Repeater";
+			case SNAP_GAME_TICK -> "Game tick";
+			default -> "Off";
+		};
 	}
 
 	private void importSong() {
@@ -4878,7 +4902,9 @@ public final class ComposerScreen extends Screen {
 		// The number the snap button has no room for. It moves with the tempo and the speed, so it
 		// belongs on screen rather than behind a hover.
 		segments.add(tempoLabel() + " · " + project().ppq() + " ticks/beat");
-		segments.add("grid " + snapLabel().getString().replace("Snap ", "") + " = " + snapDetail());
+		// Lower case here and capitalised on the button, because this one is inside a sentence.
+		segments.add("grid " + gridName(snapSubdivision).toLowerCase(java.util.Locale.ROOT)
+			+ " = " + snapDetail());
 		// The one place preview and build still disagree. Solo is a lens for listening around a
 		// part, so it deliberately does not change what gets built -- which means that while it is
 		// on, what you are hearing is not what would be placed. Said out loud rather than left to
@@ -6395,8 +6421,16 @@ public final class ComposerScreen extends Screen {
 			+ (recorded > 0 ? " into \"" + into + "\". Ctrl+Z takes them back." : " written.")));
 	}
 
+	/**
+	 * What the record button says, which is three letters wide either way.
+	 *
+	 * <p>It used to read Record and Recording, and a control is as wide as the longest thing it can
+	 * ever say -- so nine characters of caption were being paid for at every width, on a cluster
+	 * pinned to the right-hand edge where the room runs out first. Rec is not ambiguous next to
+	 * Play, and the dot is the mark every recorder has used for it.</p>
+	 */
 	private Component recordLabel() {
-		return Component.literal(recording ? "Recording" : "Record");
+		return Component.literal(recording ? "\u25cf Rec" : "Rec");
 	}
 
 	/** Plays from the top, which is the one place worth a key of its own. */
