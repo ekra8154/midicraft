@@ -4193,6 +4193,20 @@ public final class ComposerScreen extends Screen {
 				}
 			}
 		}
+		// The same crowding fade as everything else. These were the last grid drawn at one strength
+		// whatever the zoom, and they fail hardest of all of them: once the beat step outgrows a
+		// bar it is rounded up to whole bars, so every line on screen is a bar line and every one
+		// of them is drawn at the bright weight. Zoomed out to a whole song that is a picket fence
+		// at full contrast with the music behind it.
+		//
+		// Each judged by its own spacing rather than by the step of the loop. Bars are drawn every
+		// bar or every beat-step, whichever is coarser; beats are drawn at the step. Judging both
+		// by the step would dim the bars for the crowding of the beats between them, which is the
+		// one grid that has to survive being zoomed out.
+		double beatPixels = beatTicks / ticksPerPixel;
+		double barPixels = Math.max(measureTicks, beatTicks) / ticksPerPixel;
+		int barColor = crowdedGridColor(0x4C777777, barPixels, MIN_GRID_PIXEL_SPACING * 4);
+		int beatColor = crowdedGridColor(0x443F444A, beatPixels, MIN_GRID_PIXEL_SPACING * 2);
 		for (long tick = Math.max(0L, horizontalScroll / beatTicks * beatTicks);
 				tick <= lastTick + beatTicks; tick += beatTicks) {
 			int x = tickX(tick);
@@ -4200,7 +4214,7 @@ public final class ComposerScreen extends Screen {
 				continue;
 			}
 			boolean measure = tick % measureTicks == 0;
-			graphics.fill(x, rollY, x + 1, rollY + rollHeight, measure ? 0x66777777 : 0x443F444A);
+			graphics.fill(x, rollY, x + 1, rollY + rollHeight, measure ? barColor : beatColor);
 			if (measure && showLabels) {
 				graphics.text(font, Long.toString(tick / measureTicks + 1),
 					x + 3, rollY + 2, 0xFFAAAAAA, false);
