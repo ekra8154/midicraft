@@ -113,19 +113,6 @@ public final class ComposerScreen extends Screen {
 	private static final int LAYER_ROW_HEIGHT = 18;
 	/** Layer names are drawn at this fraction of the font's one size. */
 	private static final float LAYER_TEXT_SCALE = 0.75f;
-	/**
-	 * The row number's own size, which is smaller than everything else on the panel.
-	 *
-	 * <p>The number lives inside the colour stripe, so the stripe is as wide as the number and every
-	 * pixel of it is a pixel a layer's name does not get. At the panel's ordinary size two digits
-	 * are nine pixels and the stripe is eleven, which is most of what the stripe used to be worth as
-	 * colour. Half size takes the pair to six.</p>
-	 *
-	 * <p>Exactly a half rather than some other fraction, so that each glyph pixel is half a logical
-	 * one and lands on whole device pixels at any even GUI scale. It is a number two characters
-	 * long in a solid block of colour, which is about the easiest thing there is to read small.</p>
-	 */
-	private static final float ORDINAL_TEXT_SCALE = 0.5f;
 	/** How far after the instrument icon a layer's name starts. */
 	private static final int LAYER_NAME_GAP = 19;
 	/** Side of the square button carrying a layer's state letter. */
@@ -225,13 +212,13 @@ public final class ComposerScreen extends Screen {
 	/**
 	 * How much panel is left empty to the right of a row.
 	 *
-	 * <p>Wider than the gutter on the left, because it has a job the left one does not: clicking
-	 * beside a row is how a layer selection is put down, and the scrollbar's track was standing in
-	 * most of the space that gesture had. A card that stops short of the edge leaves somewhere to
-	 * aim that is plainly not a row.</p>
+	 * <p>Its own number rather than the left gutter's, which is as wide as the row number now. What
+	 * this one is for is clicking beside a row to put a layer selection down -- the scrollbar's
+	 * track was standing in most of the space that gesture had -- and a card that stops short of the
+	 * edge leaves somewhere to aim that is plainly not a row.</p>
 	 */
-	private static int rightGutter(int inset) {
-		return inset + 3;
+	private static int rightGutter(boolean chip) {
+		return chip ? 11 : 5;
 	}
 
 	/** Widest a layer's name may draw, which is whatever the panel leaves after the note count. */
@@ -253,13 +240,13 @@ public final class ComposerScreen extends Screen {
 		boolean chip = panel >= ROW_CHIP_AT;
 		boolean name = panel >= ROW_NAME_AT;
 		boolean count = panel >= ROW_COUNT_AT;
-		int inset = chip ? 8 : 2;
-		// The stripe is wide enough to write the row number in and no wider, and the number is drawn
-		// at half size for exactly that reason -- every pixel of stripe is a pixel the name does
-		// not get. Two digits come to six, and one pixel of padding either side keeps them off the
-		// edge without anyone seeing the pixel.
-		int stripe = Math.max(4, tinyTextWidth(Integer.toString(
-			Math.max(1, project().layers().size()))) + 2);
+		// The row number sits in the gutter to the left of the card, which was empty panel and had
+		// been since the number moved off it. That is what pays for it: the stripe goes back to the
+		// four pixels of pure colour it was, the number is at the size everything else on the panel
+		// is drawn at, and the two together cost what the empty gutter and the widened stripe cost
+		// between them. It is still beside the colour, which is the half of the reason it moved.
+		int inset = smallTextWidth(Integer.toString(Math.max(1, project().layers().size()))) + 3;
+		int stripe = chip ? 4 : 2;
 		// Everything after the stripe is measured from it rather than from a fixed column, because
 		// the stripe is as wide as the largest row number in the panel and that is not a constant.
 		int stateX = inset + stripe + 2;
@@ -267,7 +254,7 @@ public final class ComposerScreen extends Screen {
 		// What used to be the number's column is the note count's now. Every row reserves the width
 		// of the largest count in the panel rather than its own, so the column does not jog left as
 		// you scroll past a layer with four digits on it.
-		int ordinalRight = panel - rightGutter(inset) - 3;
+		int ordinalRight = panel - rightGutter(chip) - 3;
 		int ordinalLeft = count
 			? ordinalRight - smallTextWidth(Integer.toString(Math.max(1,
 				project().layers().stream().mapToInt(layer -> layer.notes().size()).max().orElse(0))))
@@ -3297,7 +3284,7 @@ public final class ComposerScreen extends Screen {
 			// not be flying a full-strength flag in here, and one lit out there should not be dim.
 			int color = layerLit(index) ? vivid(layerColor(index)) : faded(layerColor(index));
 			int left = row.inset();
-			int right = layerPanelWidth() - rightGutter(row.inset());
+			int right = layerPanelWidth() - rightGutter(row.chip());
 			// Two saturations of one highlight rather than a third colour. The row already carries
 			// two states -- active, which is where a new note lands, and selected, which is what a
 			// layer action acts on -- and a panel that does not hold the keyboard draws both of them
@@ -3319,16 +3306,14 @@ public final class ComposerScreen extends Screen {
 			graphics.fill(left, y - 2, right, y - 1, activeLayer ? color : 0x66383D44);
 			graphics.fill(left, y + rowHeight - 3, right, y + rowHeight - 2,
 				activeLayer ? color : 0x88383D44);
-			// The colour stripe is how a layer is recognised once its name is gone, so it stays at
-			// every width -- and it is where the row number lives, because the number is the other
-			// answer to "which layer is this" and the two belong together. Black or white over it
-			// depending on how light the colour underneath came out, since the palette runs the
-			// whole way round the wheel and one ink cannot be read on all of it.
-			graphics.fill(left, y - 2, left + row.stripe(), y + rowHeight - 2, color);
+			// The row number, right up against the stripe it belongs beside. The two are one answer
+			// to "which layer is this" -- what colour, and what number -- so they read together, and
+			// neither is standing in the space the name wanted.
 			String ordinal = Integer.toString(index + 1);
-			tinyText(graphics, ordinal,
-				left + (row.stripe() - tinyTextWidth(ordinal) + 1) / 2, y + 6,
-				luma(color) > STRIPE_DARK_INK_ABOVE ? 0xFF101318 : 0xFFF2F5F8);
+			smallText(graphics, ordinal, left - 2 - smallTextWidth(ordinal), y + 5, 0xFF71767E);
+			// The colour stripe is how a layer is recognised once its name is gone, so it stays at
+			// every width -- narrowed to two pixels rather than dropped.
+			graphics.fill(left, y - 2, left + row.stripe(), y + rowHeight - 2, color);
 			if (activeLayer) {
 				graphics.fill(left + row.stripe(), y, right - 2, y + rowHeight - 4, 0x553D444D);
 			}
@@ -3535,11 +3520,6 @@ public final class ComposerScreen extends Screen {
 		scaledText(graphics, text, x, y, color, LAYER_TEXT_SCALE);
 	}
 
-	/** The row number, at the one size on this screen that is smaller than the small one. */
-	private void tinyText(GuiGraphicsExtractor graphics, String text, int x, int y, int color) {
-		scaledText(graphics, text, x, y, color, ORDINAL_TEXT_SCALE);
-	}
-
 	private void scaledText(GuiGraphicsExtractor graphics, String text, int x, int y, int color,
 			float scale) {
 		graphics.pose().pushMatrix();
@@ -3551,10 +3531,6 @@ public final class ComposerScreen extends Screen {
 
 	private int smallTextWidth(String text) {
 		return Math.round(font.width(text) * LAYER_TEXT_SCALE);
-	}
-
-	private int tinyTextWidth(String text) {
-		return Math.round(font.width(text) * ORDINAL_TEXT_SCALE);
 	}
 
 	/** Cuts small text down to a width in real pixels, since the font measures its own size. */
@@ -3792,8 +3768,6 @@ public final class ComposerScreen extends Screen {
 	 * thirty. Both are floors on a whole palette rather than tuned to one colour: see
 	 * {@link #faded(int)} for the collision they exist to rule out.</p>
 	 */
-	/** Above this the stripe is light enough to want dark ink on it, below it light. */
-	private static final double STRIPE_DARK_INK_ABOVE = 140.0;
 	static final double SELECTED_LUMA_FLOOR = 150.0;
 	static final double UNSELECTED_LUMA_CEILING = 108.0;
 
@@ -7337,8 +7311,10 @@ public final class ComposerScreen extends Screen {
 
 	/** Which row a point is on, whatever part of the row it lands in. */
 	private int layerRowAt(double x, double y) {
-		int inset = layerRowLayout().inset();
-		return x < inset || x >= layerPanelWidth() - rightGutter(inset) ? -1 : layerRowAtY(y);
+		LayerRowLayout row = layerRowLayout();
+		return x < row.inset() || x >= layerPanelWidth() - rightGutter(row.chip())
+			? -1
+			: layerRowAtY(y);
 	}
 
 	/** The row at a height, for gestures that have already decided which column they are in. */
