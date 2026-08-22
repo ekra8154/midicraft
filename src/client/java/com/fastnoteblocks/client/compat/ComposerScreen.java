@@ -3853,11 +3853,12 @@ public final class ComposerScreen extends Screen {
 	 * numbers are drawn in.</p>
 	 */
 	private void extractRangeBand(GuiGraphicsExtractor graphics) {
+		syncRangeToSelection();
 		if (!hasRange()) {
 			return;
 		}
-		int from = tickX(rangeStart);
-		int to = tickX(rangeEnd);
+		int from = tickX(rangeStart + rangeDragDelta());
+		int to = tickX(rangeEnd + rangeDragDelta());
 		if (to < rollX || from > rollX + rollWidth) {
 			return;
 		}
@@ -3928,17 +3929,24 @@ public final class ComposerScreen extends Screen {
 		if (selectedNotes.isEmpty()) {
 			return null;
 		}
+		// Read off what is on screen rather than off what is saved. Mid-drag those differ: the notes
+		// being dragged are drawn from a preview and the composition still holds them where they
+		// started, so a band measured against the composition sat at the old pitches until the
+		// button came up and then jumped to the new ones.
+		ComposerProject shown = displayProject();
+		long from = rangeStart + rangeDragDelta();
+		long to = rangeEnd + rangeDragDelta();
 		int highest = Integer.MIN_VALUE;
 		int lowest = Integer.MAX_VALUE;
 		for (int layerIndex : selectionLayers()) {
-			Layer layer = project().layers().get(layerIndex);
+			Layer layer = shown.layers().get(layerIndex);
 			if (!layer.visible()) {
 				continue;
 			}
 			List<NoteEvent> notes = layer.notes();
-			for (int index = lowerBoundStart(notes, rangeStart); index < notes.size(); index++) {
+			for (int index = lowerBoundStart(notes, from); index < notes.size(); index++) {
 				NoteEvent note = notes.get(index);
-				if (note.startTick() > rangeEnd) {
+				if (note.startTick() > to) {
 					break;
 				}
 				if (selectedNotes.contains(note.id())) {
@@ -5586,9 +5594,17 @@ public final class ComposerScreen extends Screen {
 			return true;
 		}
 		if (draggingNotes) {
+			// The passage goes with the notes, so the range that measures it goes too. Taken while
+			// the drag is still on, because the clamp is worked out from where the notes are now
+			// and a moment later that is where they have gone.
+			long rangeShift = hasRange() ? rangeDragDelta() : 0L;
 			draggingNotes = false;
 			if (dragPreview != null) {
 				apply(dragAxis == DragAxis.PITCH ? "transpose notes" : "move notes", dragPreview);
+				if (rangeShift != 0L) {
+					rangeStart = Math.max(0L, rangeStart + rangeShift);
+					rangeEnd = Math.max(rangeStart + 1L, rangeEnd + rangeShift);
+				}
 			}
 			dragPreview = null;
 			dragBase = null;
@@ -5952,6 +5968,7 @@ public final class ComposerScreen extends Screen {
 		}
 		updateBoxScroll();
 		updateButtonStates();
+		syncRangeToSelection();
 		windowWasFocused = windowFocused();
 	}
 
@@ -7522,6 +7539,41 @@ public final class ComposerScreen extends Screen {
 		return hasRange() ? rangeEnd - rangeStart : 0L;
 	}
 
+	/**
+	 * How far the range is standing from where it is stored, which is only ever a drag in progress.
+	 *
+	 * <p>A drag does not touch the composition until the button comes up -- it draws from a preview
+	 * -- so the range cannot be moved as it goes without the two disagreeing about which one is
+	 * real. It is offset for drawing instead, and moved for good when the drag commits.</p>
+	 */
+	private long rangeDragDelta() {
+		if (!draggingNotes) {
+			return 0L;
+		}
+		// Clamped the way the move itself is clamped. A drag pushed past the start of the song moves
+		// the notes only as far as tick zero, so a band offset by the raw distance would slide out
+		// from under them and off the left-hand edge.
+		long earliest = earliestSelectedTick();
+		return earliest < 0L ? dragTickDelta : Math.max(dragTickDelta, -earliest);
+	}
+
+	/**
+	 * Drops a range whose selection has gone.
+	 *
+	 * <p>The range is a fact about a passage that is selected. Cut it, delete it, or put it down and
+	 * the range has nothing left to be about -- and it was drawn anyway, falling back to the full
+	 * height of the roll for want of any notes to measure, which is a pillar down the middle of the
+	 * window until the next click.</p>
+	 *
+	 * <p>Reconciled here rather than at each of the sixteen places that empty a selection, because
+	 * sixteen places is sixteen chances to add a seventeenth and not notice.</p>
+	 */
+	private void syncRangeToSelection() {
+		if (rangeStart >= 0L && selectedNotes.isEmpty()) {
+			clearRange();
+		}
+	}
+
 	private void clearRange() {
 		rangeStart = -1L;
 		rangeEnd = -1L;
@@ -7574,8 +7626,8 @@ public final class ComposerScreen extends Screen {
 		// left edge -- a zone spreading both ways would take the click that was meant to pick the
 		// first note of the phrase and drag the range with it instead. Outside the band there is
 		// nothing else to hit.
-		double from = tickX(rangeStart);
-		double to = tickX(rangeEnd);
+		double from = tickX(rangeStart + rangeDragDelta());
+		double to = tickX(rangeEnd + rangeDragDelta());
 		boolean onStart = x >= from - RANGE_HANDLE_REACH && x <= from + 1.0;
 		boolean onEnd = x >= to - 1.0 && x <= to + RANGE_HANDLE_REACH;
 		if (onEnd && (!onStart || Math.abs(x - to) <= Math.abs(x - from))) {
