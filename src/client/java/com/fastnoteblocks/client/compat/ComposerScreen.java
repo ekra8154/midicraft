@@ -113,6 +113,19 @@ public final class ComposerScreen extends Screen {
 	private static final int LAYER_ROW_HEIGHT = 18;
 	/** Layer names are drawn at this fraction of the font's one size. */
 	private static final float LAYER_TEXT_SCALE = 0.75f;
+	/**
+	 * The row number's own size, which is smaller than everything else on the panel.
+	 *
+	 * <p>The number lives inside the colour stripe, so the stripe is as wide as the number and every
+	 * pixel of it is a pixel a layer's name does not get. At the panel's ordinary size two digits
+	 * are nine pixels and the stripe is eleven, which is most of what the stripe used to be worth as
+	 * colour. Half size takes the pair to six.</p>
+	 *
+	 * <p>Exactly a half rather than some other fraction, so that each glyph pixel is half a logical
+	 * one and lands on whole device pixels at any even GUI scale. It is a number two characters
+	 * long in a solid block of colour, which is about the easiest thing there is to read small.</p>
+	 */
+	private static final float ORDINAL_TEXT_SCALE = 0.5f;
 	/** How far after the instrument icon a layer's name starts. */
 	private static final int LAYER_NAME_GAP = 19;
 	/** Side of the square button carrying a layer's state letter. */
@@ -241,12 +254,11 @@ public final class ComposerScreen extends Screen {
 		boolean name = panel >= ROW_NAME_AT;
 		boolean count = panel >= ROW_COUNT_AT;
 		int inset = chip ? 8 : 2;
-		// The stripe is wide enough to write the row number in and no wider. A digit is four and a
-		// half pixels at this size, so two of them are nine and the stripe cannot go back to the
-		// four it was without putting the number somewhere else -- but the padding can go, and it
-		// has. One pixel either side, which on a block of solid colour is enough to keep the digits
-		// off the edge and is not enough to notice.
-		int stripe = Math.max(4, smallTextWidth(Integer.toString(
+		// The stripe is wide enough to write the row number in and no wider, and the number is drawn
+		// at half size for exactly that reason -- every pixel of stripe is a pixel the name does
+		// not get. Two digits come to six, and one pixel of padding either side keeps them off the
+		// edge without anyone seeing the pixel.
+		int stripe = Math.max(4, tinyTextWidth(Integer.toString(
 			Math.max(1, project().layers().size()))) + 2);
 		// Everything after the stripe is measured from it rather than from a fixed column, because
 		// the stripe is as wide as the largest row number in the panel and that is not a constant.
@@ -3314,8 +3326,8 @@ public final class ComposerScreen extends Screen {
 			// whole way round the wheel and one ink cannot be read on all of it.
 			graphics.fill(left, y - 2, left + row.stripe(), y + rowHeight - 2, color);
 			String ordinal = Integer.toString(index + 1);
-			smallText(graphics, ordinal,
-				left + (row.stripe() - smallTextWidth(ordinal) + 1) / 2, y + 5,
+			tinyText(graphics, ordinal,
+				left + (row.stripe() - tinyTextWidth(ordinal) + 1) / 2, y + 6,
 				luma(color) > STRIPE_DARK_INK_ABOVE ? 0xFF101318 : 0xFFF2F5F8);
 			if (activeLayer) {
 				graphics.fill(left + row.stripe(), y, right - 2, y + rowHeight - 4, 0x553D444D);
@@ -3520,15 +3532,29 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private void smallText(GuiGraphicsExtractor graphics, String text, int x, int y, int color) {
+		scaledText(graphics, text, x, y, color, LAYER_TEXT_SCALE);
+	}
+
+	/** The row number, at the one size on this screen that is smaller than the small one. */
+	private void tinyText(GuiGraphicsExtractor graphics, String text, int x, int y, int color) {
+		scaledText(graphics, text, x, y, color, ORDINAL_TEXT_SCALE);
+	}
+
+	private void scaledText(GuiGraphicsExtractor graphics, String text, int x, int y, int color,
+			float scale) {
 		graphics.pose().pushMatrix();
 		graphics.pose().translate(x, y);
-		graphics.pose().scale(LAYER_TEXT_SCALE, LAYER_TEXT_SCALE);
+		graphics.pose().scale(scale, scale);
 		graphics.text(font, text, 0, 0, color, false);
 		graphics.pose().popMatrix();
 	}
 
 	private int smallTextWidth(String text) {
 		return Math.round(font.width(text) * LAYER_TEXT_SCALE);
+	}
+
+	private int tinyTextWidth(String text) {
+		return Math.round(font.width(text) * ORDINAL_TEXT_SCALE);
 	}
 
 	/** Cuts small text down to a width in real pixels, since the font measures its own size. */
