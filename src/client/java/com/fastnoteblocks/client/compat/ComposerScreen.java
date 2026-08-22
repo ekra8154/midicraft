@@ -5142,7 +5142,15 @@ public final class ComposerScreen extends Screen {
 			}
 		}
 		if (event.button() == 0 && overLayerPanelBlank(event.x(), event.y())) {
-			clearLayerSelection();
+			if (focusedPane == Pane.LAYERS) {
+				// Clicking off the rows while the panel holds the keyboard is how you let go of it,
+				// and that is all it is. Putting the selection down at the same time meant there was
+				// no way to stop working in the panel without also losing the layers you had picked
+				// -- and the way back was to find one of them and click it twice.
+				focusedPane = Pane.ROLL;
+			} else {
+				clearLayerSelection();
+			}
 			return true;
 		}
 		if (event.button() == 0 && overPianoKeys(event.x(), event.y())) {
