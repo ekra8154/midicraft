@@ -3653,11 +3653,13 @@ public final class ComposerScreen extends Screen {
 			? largestProperDivisor(labelBars) * measureTicks
 			: measureTicks / 4L;
 		if (minorStep > 0L && minorStep / ticksPerPixel >= MIN_GRID_PIXEL_SPACING * 2) {
+			int minorColor = crowdedGridColor(0xFF686D73, minorStep / ticksPerPixel,
+				MIN_GRID_PIXEL_SPACING * 2);
 			for (long tick = Math.max(0L, horizontalScroll / minorStep * minorStep);
 					tick <= lastTick + minorStep; tick += minorStep) {
 				int x = tickX(tick);
 				if (x >= rollX && x <= rollX + rollWidth && tick % labelStep != 0L) {
-					graphics.fill(x, rollY - 6, x + 1, rollY, 0xFF686D73);
+					graphics.fill(x, rollY - 6, x + 1, rollY, minorColor);
 				}
 			}
 		}
@@ -4180,7 +4182,8 @@ public final class ComposerScreen extends Screen {
 		long beatTicks = readableStep(Math.max(1L, project().ppq()), measureTicks);
 		boolean showLabels = measureTicks / ticksPerPixel >= MIN_LABEL_PIXEL_SPACING;
 		if (drawSnap) {
-			int snapColor = trueGrid ? 0x44D9863C : 0x1E2A2F36;
+			int snapColor = crowdedGridColor(trueGrid ? 0x2ED9863C : 0x162A2F36,
+				snapSpan / ticksPerPixel, MIN_GRID_PIXEL_SPACING);
 			for (long index = (long)Math.floor(horizontalScroll / snapSpan);
 					gridLineAt(index, snapSpan) <= lastTick + snapSpan; index++) {
 				long line = gridLineAt(index, snapSpan);
@@ -4224,7 +4227,8 @@ public final class ComposerScreen extends Screen {
 			SongAnalysis.redstoneTickSpan(project()) * REPEATER_TICKS_PER_SECOND);
 		boolean drawSeconds = secondSpan / ticksPerPixel >= MIN_GRID_PIXEL_SPACING * 2;
 		if (drawSnap) {
-			int snapColor = trueGrid ? 0x66D98A3C : 0x2E28343D;
+			int snapColor = crowdedGridColor(trueGrid ? 0x3CD98A3C : 0x2228343D,
+				snapSpan / ticksPerPixel, MIN_GRID_PIXEL_SPACING * 2);
 			for (long index = (long)Math.floor(horizontalScroll / snapSpan);
 					gridLineAt(index, snapSpan) <= lastTick + snapSpan; index++) {
 				int x = tickX(gridLineAt(index, snapSpan));
@@ -7651,6 +7655,26 @@ public final class ComposerScreen extends Screen {
 		// fine enough to demand that is one you are about to zoom into anyway.
 		return Math.max(2, Math.min(NOTE_TRIGGER_WIDTH,
 			(int)Math.floor(drawnGridSpan() / ticksPerPixel)));
+	}
+
+	/**
+	 * A grid colour faded by how crowded its lines are.
+	 *
+	 * <p>A grid doubles its step when its lines would fall closer together than the floor, so the
+	 * spacing runs from twice the floor down to the floor and then jumps back. Drawn at one
+	 * strength the whole way, that is a grid which thickens into a wall as you zoom out and then
+	 * pops back to open -- and the wall is the part you are looking at while you decide the zoom
+	 * is wrong.</p>
+	 *
+	 * <p>Fading across that run turns the jump into a crossfade: the lines thin out as they crowd,
+	 * and the coarser grid that replaces them arrives at full strength with room around it. Held
+	 * off zero at the bottom, because a grid that disappears entirely for one notch of the wheel
+	 * reads as broken rather than as faint.</p>
+	 */
+	private static int crowdedGridColor(int color, double pixels, int floorPixels) {
+		double room = Math.max(0.25, Math.min(1.0, (pixels - floorPixels) / (double)floorPixels));
+		int alpha = (int)Math.round((color >>> 24) * room);
+		return alpha << 24 | color & 0xFFFFFF;
 	}
 
 	/** Where the nth line of a grid falls, rounded once so the error cannot accumulate. */
