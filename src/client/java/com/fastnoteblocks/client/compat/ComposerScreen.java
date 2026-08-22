@@ -569,6 +569,15 @@ public final class ComposerScreen extends Screen {
 	 * done its work; a length is a horizontal fact, so the band is drawn the full height of the roll
 	 * rather than as the rectangle that made it.</p>
 	 */
+	/**
+	 * Whether a box drag leaves a range behind, and a paste steps by its length.
+	 *
+	 * <p>Off while the cursor-relative paste below is tried. The whole feature answers to this one
+	 * constant -- everything that draws it, grabs it or measures with it already asks
+	 * {@link #hasRange()} first -- so it stays built and stays compiled rather than being carried
+	 * around in comments, and turning it back on is one word.</p>
+	 */
+	private static final boolean SELECTION_RANGE = false;
 	private long rangeStart = -1L;
 	private long rangeEnd = -1L;
 	/** Which end of the range is being dragged: 0 none, 1 the start, 2 the end. */
@@ -581,6 +590,18 @@ public final class ComposerScreen extends Screen {
 	 * something else is copied.</p>
 	 */
 	private long clipboardSpanTicks;
+	/**
+	 * Where the notes stood relative to the cursor when they were copied, and how far a paste of
+	 * them moves the cursor on.
+	 *
+	 * <p>A copy is a phrase and a place to stand while looking at it. Keeping both means a paste can
+	 * put the phrase back exactly as it sat -- the run-up before the first note, or the tail of
+	 * silence after the last one -- against wherever the cursor is now. There is nothing else that
+	 * carries the silence at the edges of a passage, because a set of notes begins on its first
+	 * note and ends on its last.</p>
+	 */
+	private long clipboardCursorOffset;
+	private long clipboardStepTicks;
 	private ComposerProject dragBase;
 	private ComposerProject dragPreview;
 	private long dragTickDelta;
@@ -2858,11 +2879,18 @@ public final class ComposerScreen extends Screen {
 				+ "back to 1.00x. Nothing about the song changes -- 150 BPM at 2.00x and 300 BPM at "
 				+ "1.00x are the same song, note for note -- but the tempo written in the file becomes "
 				+ "the tempo it actually plays at, and the slider is free to be a ratio of the new one. Convert does this first thing; this is that step on its own.";
-			case DUPLICATE_SELECTION -> "Lays the selected notes down again directly after "
-				+ "themselves, and leaves the selection on the copy -- so Ctrl+D again adds another "
-				+ "repeat. How far each one steps is the selection range drawn under the ruler, which a "
-				+ "box drag leaves behind and either end of which can be dragged. Every note stays on "
-				+ "its own layer.";
+			case DUPLICATE_SELECTION -> SELECTION_RANGE
+				? "Lays the selected notes down again directly after themselves, and leaves the "
+					+ "selection on the copy -- so Ctrl+D again adds another repeat. How far each "
+					+ "one steps is the selection range drawn under the ruler, which a box drag "
+					+ "leaves behind and either end of which can be dragged. Every note stays on "
+					+ "its own layer."
+				: "Lays the selected notes down again after themselves, and leaves the selection on "
+					+ "the copy -- so Ctrl+D again adds another repeat. How far each one steps is "
+					+ "read from where the time marker stands over the passage: before it, the "
+					+ "silence up to the first note is kept between the repeats; after it, the "
+					+ "silence past the last one is. The marker steps on with them. Every note "
+					+ "stays on its own layer.";
 			case ADD_MARKER -> "Puts a marker where the playback marker is standing, or takes away "
 				+ "the one already there. M does the same thing. A marker names a position and nothing "
 				+ "else: it is not built and it makes no sound.";
@@ -7133,6 +7161,11 @@ public final class ComposerScreen extends Screen {
 			? rangeEnd - clipboardOriginTick
 			: spanOfStarts(selected.stream().map(copied -> copied.note().startTick())
 				.distinct().sorted().toList());
+		long lastNote = selected.stream().mapToLong(copied -> copied.note().startTick()).max()
+			.orElse(firstNote);
+		long cursor = playbackReturnTick;
+		clipboardCursorOffset = clipboardOriginTick - cursor;
+		clipboardStepTicks = cursorRelativeStep(cursor, firstNote, lastNote);
 		clipboard = selected.stream()
 			.map(copied -> new ClipboardNote(copied.note().startTick() - clipboardOriginTick,
 				copied.note().midiNote(), copied.note().durationTicks(), copied.note().velocity(),
@@ -7201,12 +7234,18 @@ public final class ComposerScreen extends Screen {
 	}
 
 	/**
-	 * Pastes at the time marker, or where it was copied from.
+	 * Pastes against the time marker, or where it was copied from.
 	 *
 	 * <p>It used to land at the mouse, which put the paste wherever the hand happened to be resting
 	 * -- Ctrl+V is a keyboard action and the keyboard has no idea where that is. The marker is the
 	 * one position the composer already treats as "here": it is drawn, it is draggable, playback
 	 * starts from it, and it does not move when you reach for a key.</p>
+	 *
+	 * <p>Against it rather than at it. The copy remembered where the marker stood over the notes, so
+	 * the phrase goes back at the same distances from wherever the marker is now -- which is the
+	 * only thing that carries the silence at the edges of a passage. A set of notes begins on its
+	 * first note and ends on its last, so a run-up before the phrase or a tail of rest after it
+	 * exists nowhere except in that relationship.</p>
 	 *
 	 * <p>In place is the one paste that has no aim to take: doubling a part onto another instrument
 	 * or moving it between layers means landing on the same beat it left, and finding that beat by
@@ -7216,14 +7255,26 @@ public final class ComposerScreen extends Screen {
 		if (clipboard.isEmpty()) {
 			return;
 		}
-		long startTick = inPlace ? clipboardOriginTick : snapTick(playbackReturnTick);
+		// Exact, and deliberately not snapped. The offsets are the whole substance of the copy, so
+		// rounding the place they are measured from would move every note in the phrase by up to
+		// half a grid step -- and a passage that is on the grid is on it because the cursor was,
+		// which is a thing you can see and line up before pressing the key.
+		long startTick = inPlace
+			? clipboardOriginTick
+			: SELECTION_RANGE
+				? snapTick(playbackReturnTick)
+				: Math.max(0L, playbackReturnTick + clipboardCursorOffset);
 		int before = project().layers().size();
 		PasteResult result = project().pasteNotes(project().activeLayerIndex(), clipboard, startTick);
 		ComposerProject pasted = result.project();
-		// The marker steps to the end of what was just pasted, so a second Ctrl+V lays the phrase
-		// down after the first rather than on top of it and a passage is built by holding the key.
-		// Not for paste-in-place, whose whole point is landing on the beat the copy left.
-		long cursor = inPlace ? -1L : startTick + clipboardSpan();
+		// The marker steps on, so a second Ctrl+V lays the phrase down after the first rather than
+		// on top of it and a passage is built by holding the key. Measured from where the cursor is
+		// rather than from where the notes went, since it is the cursor the phrase was placed
+		// against. Not for paste-in-place, whose whole point is landing on the beat the copy left.
+		long cursor = inPlace ? -1L
+			: SELECTION_RANGE
+				? startTick + clipboardSpan()
+				: playbackReturnTick + clipboardStepTicks;
 		if (cursor >= 0L) {
 			// The end marker comes with it. It is floored at the last note, so pasting at the end of
 			// a song leaves it exactly on the note just laid -- and the next paste would then be
@@ -7243,11 +7294,13 @@ public final class ComposerScreen extends Screen {
 		}
 		selectedNotes.clear();
 		selectedNotes.addAll(result.noteIds());
-		// The range moves onto what was just pasted, because the selection did. Leaving it behind on
-		// the passage the copy was taken from would have the band describing one stretch of the song
-		// and the selection sitting in another.
-		rangeStart = startTick;
-		rangeEnd = startTick + clipboardSpan();
+		if (SELECTION_RANGE) {
+			// The range moves onto what was just pasted, because the selection did. Leaving it behind
+			// on the passage the copy was taken from would have the band describing one stretch of
+			// the song and the selection sitting in another.
+			rangeStart = startTick;
+			rangeEnd = startTick + clipboardSpan();
+		}
 		layersChanged();
 		rebuildMoveLayerButtons();
 		// Said out loud only when the paste had to change the shape of the composition. A paste that
@@ -7260,6 +7313,33 @@ public final class ComposerScreen extends Screen {
 				+ (result.addedLayers() == 1 ? " layer was" : " layers were")
 				+ " added to keep them apart."));
 		}
+	}
+
+	/**
+	 * How far the cursor moves after laying a passage down, given where it stood over it.
+	 *
+	 * <p>Think of the cursor and the notes as making a block with two bounds, and the cursor landing
+	 * on the far one.</p>
+	 *
+	 * <p>Standing before the phrase, the block runs from the cursor to the last note: the run-up is
+	 * inside it, the cursor lands on that last note, and the next paste lays its own run-up after
+	 * it. Hold Ctrl+V and the phrase repeats with its own spacing, which is the whole point.</p>
+	 *
+	 * <p>Standing after it, the block runs from the first note to the cursor and the tail of silence
+	 * is what is inside. The notes land behind the cursor and the cursor clears the tail, so
+	 * repeats tile with that silence between them.</p>
+	 *
+	 * <p>Standing inside it, there is no silence at either end to preserve, so the cursor goes to
+	 * the end of the notes rather than to the far bound. Repeats then overlap -- the next copy lands
+	 * partly behind the cursor and partly ahead of it -- which is what pasting from inside a phrase
+	 * asks for and not something to be protected from.</p>
+	 *
+	 * <p>Floored at a grid step. A single chord with the cursor sitting on it has no extent at all,
+	 * and a step of nothing means holding Ctrl+V stacks copies in one place forever.</p>
+	 */
+	private long cursorRelativeStep(long cursor, long first, long last) {
+		long step = cursor > last ? cursor - first : last - cursor;
+		return step > 0L ? step : Math.max(1L, Math.round(gridSpan()));
 	}
 
 	/**
@@ -7300,13 +7380,20 @@ public final class ComposerScreen extends Screen {
 		if (hasRange()) {
 			return rangeLength();
 		}
-		return spanOfStarts(project().layers().stream()
+		List<Long> starts = project().layers().stream()
 			.flatMap(layer -> layer.notes().stream())
 			.filter(note -> selectedNotes.contains(note.id()))
 			.map(NoteEvent::startTick)
 			.distinct()
 			.sorted()
-			.toList());
+			.toList();
+		if (SELECTION_RANGE || starts.isEmpty()) {
+			return spanOfStarts(starts);
+		}
+		// The same rule a paste steps by, so the two keys agree about what a passage is worth. Ctrl+D
+		// is a copy and a paste with the cursor left where it is, and it would be strange for it to
+		// land somewhere Ctrl+C and Ctrl+V would not.
+		return cursorRelativeStep(playbackReturnTick, starts.getFirst(), starts.getLast());
 	}
 
 	/**
@@ -7320,8 +7407,11 @@ public final class ComposerScreen extends Screen {
 	 */
 	private void duplicateSelection() {
 		if (selectedNotes.isEmpty()) {
-			showResult(Component.literal("Nothing selected to duplicate. Drag a box over a passage "
-				+ "first - the box also sets how far each repeat steps."));
+			showResult(Component.literal(SELECTION_RANGE
+				? "Nothing selected to duplicate. Drag a box over a passage first - the box also "
+					+ "sets how far each repeat steps."
+				: "Nothing selected to duplicate. Select a passage first - how far each repeat "
+					+ "steps is read from where the time marker stands over it."));
 			return;
 		}
 		long span = selectionSpan();
@@ -7335,19 +7425,33 @@ public final class ComposerScreen extends Screen {
 			.mapToLong(NoteEvent::startTick)
 			.max()
 			.orElse(0L) + span;
-		ComposerProject duplicated = result.project()
-			.withEndTick(Math.max(result.project().endTick(), furthest));
+		// The end marker has to clear the cursor as well as the notes. Standing past the passage,
+		// the cursor steps further than the furthest note does -- and the marker is a ceiling on
+		// where the cursor may be, so a song that ended on its last note would catch it and every
+		// press after that would step from the same place.
+		long stepped = playbackReturnTick + span;
+		ComposerProject duplicated = result.project().withEndTick(
+			Math.max(result.project().endTick(), Math.max(furthest, hasRange() ? 0L : stepped)));
 		apply("duplicate " + result.noteIds().size()
 			+ (result.noteIds().size() == 1 ? " note" : " notes"), duplicated);
 		selectedNotes.clear();
 		selectedNotes.addAll(result.noteIds());
-		// The range travels with the selection it describes, so a second press continues the passage
-		// instead of laying a second copy on the first.
 		if (hasRange()) {
+			// The range travels with the selection it describes, so a second press continues the
+			// passage instead of laying a second copy on the first.
 			rangeStart += span;
 			rangeEnd += span;
 			revealTick(rangeEnd);
+		} else if (playing) {
+			// Mid-playback the marker on screen is the playhead, and throwing the running position
+			// across the song is not what Ctrl+D asked for. Only the return tick steps on.
+			playbackReturnTick = Math.max(0L, Math.min(project().endTick(), stepped));
+			revealTick(furthest);
 		} else {
+			// The cursor travels for the same reason the range does and by the same amount: the step
+			// is measured from where it stands over the notes, so leaving it behind while the notes
+			// moved would make every press step further than the last.
+			movePlayheadTo(stepped);
 			revealTick(furthest);
 		}
 		layersChanged();
@@ -7546,7 +7650,7 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private boolean hasRange() {
-		return rangeStart >= 0L && rangeEnd > rangeStart;
+		return SELECTION_RANGE && rangeStart >= 0L && rangeEnd > rangeStart;
 	}
 
 	private long rangeLength() {
@@ -7603,6 +7707,9 @@ public final class ComposerScreen extends Screen {
 	 * the answer nearly every time and visible when it is not.</p>
 	 */
 	private void setRangeFromBox(double endX) {
+		if (!SELECTION_RANGE) {
+			return;
+		}
 		// Grid lines, not multiples of a rounded width. Rounding the width first and stepping it out
 		// is the drift that took the drawn grid off the real one: a repeater tick at 128 BPM is
 		// 102.4 composer ticks, so a range measured in hundred-and-twos lands further and further
