@@ -303,6 +303,9 @@ public final class ComposerScreen extends Screen {
 	 * point of looking should thin out rather than disappear.</p>
 	 */
 	private static final int REDSTONE_GRID_PIXEL_SPACING = 3;
+	/** What one notch or one key press does to the time zoom, in and out. */
+	private static final double ZOOM_IN = 0.8;
+	private static final double ZOOM_OUT = 1.25;
 	/** Ten repeater ticks to the second, which is the landmark a redstone grid is counted in. */
 	private static final int REPEATER_TICKS_PER_SECOND = 10;
 	private static final int MIN_LABEL_PIXEL_SPACING = 32;
@@ -5734,11 +5737,7 @@ public final class ComposerScreen extends Screen {
 				&& mouseY >= rollY && mouseY < rollY + rollHeight) {
 			if (controlDown()) {
 				// Vertical zoom: shrink the rows to fit more of the pitch range on screen at once.
-				int anchoredMidi = mouseMidi(mouseY);
-				rowHeight = Math.max(MIN_ROW_HEIGHT, Math.min(MAX_ROW_HEIGHT,
-					rowHeight + (scrollY > 0 ? 1 : -1)));
-				topMidiNote = Math.max(MIN_MIDI_NOTE, Math.min(MAX_MIDI_NOTE,
-					anchoredMidi + (int)Math.floor((mouseY - rollY) / rowHeight)));
+				zoomPitch(scrollY > 0 ? 1 : -1, mouseY);
 				return true;
 			}
 			scrollPitch(scrollY);
@@ -5746,6 +5745,13 @@ public final class ComposerScreen extends Screen {
 		}
 		if (!insideRoll(mouseX, mouseY)) {
 			return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
+		}
+		if (altDown() && controlDown()) {
+			// The pitch zoom, without having to put the cursor on the strip of keys first -- the
+			// same reason Alt on its own scrolls pitch here. Ctrl is zoom and Alt is the pitch axis,
+			// so the two together are the pitch zoom and nothing has to be remembered.
+			zoomPitch(scrollY > 0 ? 1 : -1, mouseY);
+			return true;
 		}
 		if (altDown()) {
 			// Up and down the pitch range without having to put the cursor on the keyboard first.
@@ -5759,11 +5765,7 @@ public final class ComposerScreen extends Screen {
 			return true;
 		}
 		if (controlDown()) {
-			long anchoredTick = mouseTick(mouseX);
-			ticksPerPixel = Math.max(1.5, Math.min(maxTicksPerPixel(),
-				ticksPerPixel * (scrollY > 0 ? 0.8 : 1.25)));
-			horizontalScroll = Math.max(0L,
-				anchoredTick - Math.round((mouseX - rollX) * ticksPerPixel));
+			zoomTime(scrollY > 0 ? ZOOM_IN : ZOOM_OUT, mouseX);
 			return true;
 		}
 		if (shiftDown()) {
@@ -5801,6 +5803,29 @@ public final class ComposerScreen extends Screen {
 	private void scrollPitch(double scrollY) {
 		topMidiNote = Math.max(12, Math.min(MAX_MIDI_NOTE,
 			topMidiNote + (scrollY > 0 ? 3 : -3)));
+	}
+
+	/**
+	 * Zooms in time, holding whatever is at {@code anchorX} still.
+	 *
+	 * <p>Anchored rather than centred, so a zoom is a thing you aim: the tick under the anchor is
+	 * where it was before and after, and everything else moves around it. From the wheel that
+	 * anchor is the cursor; from the keyboard there is no cursor to speak of, so it is the middle
+	 * of the roll -- what you are looking at.</p>
+	 */
+	private void zoomTime(double factor, double anchorX) {
+		long anchoredTick = mouseTick(anchorX);
+		ticksPerPixel = Math.max(1.5, Math.min(maxTicksPerPixel(), ticksPerPixel * factor));
+		horizontalScroll = Math.max(0L,
+			anchoredTick - Math.round((anchorX - rollX) * ticksPerPixel));
+	}
+
+	/** Zooms in pitch -- taller or shorter rows -- holding the row at {@code anchorY} still. */
+	private void zoomPitch(int steps, double anchorY) {
+		int anchoredMidi = mouseMidi(anchorY);
+		rowHeight = Math.max(MIN_ROW_HEIGHT, Math.min(MAX_ROW_HEIGHT, rowHeight + steps));
+		topMidiNote = Math.max(MIN_MIDI_NOTE, Math.min(MAX_MIDI_NOTE,
+			anchoredMidi + (int)Math.floor((anchorY - rollY) / rowHeight)));
 	}
 
 	@Override
@@ -5889,6 +5914,23 @@ public final class ComposerScreen extends Screen {
 		if (event.key() == GLFW.GLFW_KEY_M && !event.hasControlDownWithQuirk()
 				&& !event.hasShiftDown()) {
 			toggleMarkerAtCursor();
+			return true;
+		}
+		// Zoom, on the keys every application puts it on. Ctrl is the zoom and Alt is the pitch axis,
+		// which is the same pair the wheel uses, so neither has to be learned twice. Ahead of the
+		// pane routing because a zoom is about the view and not about what is selected -- there is
+		// nothing in the layer panel it could mean instead.
+		//
+		// The middle of the roll is what is held still. The wheel anchors on the cursor because
+		// there is one; a key press has no cursor to speak of, and the middle of what you are
+		// looking at is the next best answer to "what am I zooming towards".
+		if (event.hasControlDownWithQuirk() && zoomKeyDirection(event.key()) != 0) {
+			int direction = zoomKeyDirection(event.key());
+			if (altDown()) {
+				zoomPitch(direction, rollY + rollHeight / 2.0);
+			} else {
+				zoomTime(direction > 0 ? ZOOM_IN : ZOOM_OUT, rollX + rollWidth / 2.0);
+			}
 			return true;
 		}
 		// The other half of Ctrl+A, and the shape every editor gives it. Ahead of isSelectAll, which
@@ -8170,6 +8212,22 @@ public final class ComposerScreen extends Screen {
 	private boolean shiftDown() {
 		return InputConstants.isKeyDown(minecraft.getWindow(), GLFW.GLFW_KEY_LEFT_SHIFT)
 			|| InputConstants.isKeyDown(minecraft.getWindow(), GLFW.GLFW_KEY_RIGHT_SHIFT);
+	}
+
+	/**
+	 * Which way a zoom key points, or nought for a key that is not one.
+	 *
+	 * <p>The number row and the keypad both, since a keypad's minus is the one within reach of the
+	 * hand that is not on the mouse. Plus is read off the unshifted key: on most layouts the plus is
+	 * the shift of equals, and asking for Ctrl+Shift+Equals to zoom in would be asking for a
+	 * three-finger chord to do what every other application does with two.</p>
+	 */
+	private static int zoomKeyDirection(int key) {
+		return switch (key) {
+			case GLFW.GLFW_KEY_EQUAL, GLFW.GLFW_KEY_KP_ADD -> 1;
+			case GLFW.GLFW_KEY_MINUS, GLFW.GLFW_KEY_KP_SUBTRACT -> -1;
+			default -> 0;
+		};
 	}
 
 	private boolean altDown() {
