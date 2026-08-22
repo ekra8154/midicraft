@@ -5672,13 +5672,31 @@ public final class ComposerScreen extends Screen {
 			// Fast scroll: a quarter of whatever is on screen per notch, rather than a fixed number
 			// of beats. A beat a notch is fine when the roll holds a few bars and useless when it
 			// holds four hundred -- and the whole reason to reach for this is that you are zoomed
-			// out. Floored at a bar so it can never end up slower than the plain scroll it modifies.
-			long span = Math.max(project().ppq() * 4L, Math.round(rollWidth * ticksPerPixel / 4.0));
+			// out. Floored at twice the plain step so it can never be slower than what it modifies;
+			// it used to be floored at a bar, which zoomed in is wider than the window, so the fast
+			// scroll moved past a whole screen of music in one notch and landed somewhere with
+			// nothing in common with where it started.
+			long span = Math.max(2L * scrollStepTicks(), Math.round(rollWidth * ticksPerPixel / 4.0));
 			horizontalScroll = Math.max(0L, horizontalScroll - Math.round(scrollY * span));
 			return true;
 		}
-		horizontalScroll = Math.max(0L, horizontalScroll - Math.round(scrollY * project().ppq()));
+		horizontalScroll = Math.max(0L,
+			horizontalScroll - Math.round(scrollY * scrollStepTicks()));
 		return true;
+	}
+
+	/**
+	 * How far one notch of the wheel moves the roll sideways.
+	 *
+	 * <p>A beat, capped at a tenth of what is on screen. A beat on its own is a fixed musical
+	 * amount and a wildly varying visual one: zoomed out it is two pixels, and zoomed all the way
+	 * in it is a third of the window, so three notches put you somewhere with nothing in common
+	 * with where you started and no way to tell what had happened. The cap only ever binds when
+	 * zoomed in, which is where a notch has to be small enough to follow.</p>
+	 */
+	private long scrollStepTicks() {
+		double beat = Math.max(1.0, project().ppq());
+		return Math.max(1L, Math.round(Math.min(beat, rollWidth * ticksPerPixel / 10.0)));
 	}
 
 	/** Moves the roll up and down the pitch range, from the keys or from the roll itself. */
