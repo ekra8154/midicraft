@@ -10874,6 +10874,20 @@ public final class SongBuilder {
 				&& railDelay(pathLive, events.get(index + 2).time()) > 0) {
 			return new RailPair(false, next.time());
 		}
+		// Which clause of the plain pair said no, for the walk's real asks only. The plain pair is
+		// where a run that was promised two columns comes to lay one: the blank branch below asks a
+		// stricter question of the same chord, so a plain pair lost here is often a pair lost
+		// altogether. Two of these six are answerable from the events alone and so are answered the
+		// same way by the prediction; the other four are not, and that is where the two part company.
+		if (placements != null) {
+			placements.padded("railPlainNo"
+				+ (!railHolds(next, false) ? "FloorChordTooBig"
+					: !railFloorTakes(placements, floor, next) ? "FloorGroundTaken"
+					: railDelay(floorLive, next.time()) <= 0 ? "FloorOutOfTick"
+					: index + 2 >= events.size() ? "SongEnds"
+					: !railHolds(events.get(index + 2), true) ? "PathChordTooBig"
+					: "PathOutOfTick"));
+		}
 		if (!railHolds(next, true)) {
 			return railNoPair(placements, "ChordWillNotHold");
 		}
