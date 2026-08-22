@@ -2368,7 +2368,8 @@ public final class ComposerScreen extends Screen {
 			case SELECT_OUT_OF_RANGE -> projectStats().outOfRange() > 0;
 			case SELECT_OVERLOADED_CHORDS -> projectStats().overloadedTicks() > 0
 				|| projectStats().peakChord() > config.chordThinTarget();
-			case SELECT_NONE -> !selectedNotes.isEmpty() || !selectedLayers.isEmpty();
+			case SELECT_NONE -> focusedPane == Pane.LAYERS
+				|| !selectedNotes.isEmpty() || !selectedLayers.isEmpty();
 			case RENAME_MARKER -> markerAtCursor() != null;
 			case DUPLICATE_SELECTION -> !selectedNotes.isEmpty();
 			case BAKE_SPEED ->
@@ -2499,21 +2500,22 @@ public final class ComposerScreen extends Screen {
 	 * <p>Two selections live on this screen and only one of them had a way to be cleared from the
 	 * keyboard. They are not equals: a note selection is what the next edit acts on, and a layer
 	 * selection is where you are working -- so the first press drops the notes and leaves you in the
-	 * layer, and only a second one steps out of the layer as well. Clicking the empty run under the
-	 * layer list is the other way out of the second, and always was.</p>
+	 * layer, and only a second one steps out of the layer as well.</p>
 	 *
-	 * @return whether anything was actually put down
+	 * <p>One ladder, and every way out walks it: Escape, Ctrl+Shift+A, and the Select menu's None
+	 * all take the same step from wherever you are. Which key you reached for should not change what
+	 * one press does.</p>
+	 *
+	 * @return whether anything was actually stepped out of or put down
 	 */
 	private boolean dropSelection() {
-		// The focused pane's selection goes first, because that is the one the keyboard is holding.
-		// With the roll focused it still falls through to the layers on a second press, which is how
-		// you get all the way back to nothing without reaching for the mouse.
+		// Out of the panel first, because holding the keyboard is the innermost thing to be out of.
+		// It is also the one step that costs nothing to take: the layers stay picked, so a press
+		// spent on it is a press and not a mistake. The same step the blank space under the rows
+		// takes when it is clicked.
 		if (focusedPane == Pane.LAYERS) {
-			if (!selectedLayers.isEmpty()) {
-				clearLayerSelection();
-				return true;
-			}
-			return false;
+			focusedPane = Pane.ROLL;
+			return true;
 		}
 		if (!selectedNotes.isEmpty() || hasRange()) {
 			selectedNotes.clear();
@@ -2910,9 +2912,10 @@ public final class ComposerScreen extends Screen {
 			case CLEAR_MARKERS -> "Removes every marker, and with them the strip they are drawn in. "
 				+ "Ctrl+Z puts them back.";
 			case SELECT_ALL_NOTES -> "Selects every note on the active layers.";
-			case SELECT_NONE -> "Puts down whatever the keyboard is holding: the selected notes if "
-				+ "you last clicked the roll, the selected layers if you last clicked the panel. From "
-				+ "the roll a second press steps out of the layers as well.";
+			case SELECT_NONE -> "One step out of wherever you are. Working in the layer panel, that "
+				+ "is the keyboard coming back to the roll with the layers still picked; on the roll "
+				+ "it is the selected notes, and then the selected layers. Escape walks the same "
+				+ "steps and then closes the composer.";
 		};
 	}
 
