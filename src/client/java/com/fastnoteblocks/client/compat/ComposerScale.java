@@ -2,6 +2,7 @@ package com.fastnoteblocks.client.compat;
 
 import com.fastnoteblocks.client.FastNoteblocksConfig;
 import com.mojang.blaze3d.platform.Window;
+import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.ConfirmScreen;
 import net.minecraft.client.gui.screens.Screen;
@@ -33,12 +34,11 @@ public final class ComposerScale {
 	/**
 	 * Whether a screen is being laid out by this class right now.
 	 *
-	 * <p>Changing the scale re-lays out whatever is on screen, which runs the screen's own init --
-	 * and the hook that brought us here fires from inside init. Without this the two would call each
-	 * other. One pass is all that is wanted anyway: by the time the inner one arrives the scale is
-	 * already what it should be.</p>
+	 * <p>See {@link #guarded}.</p>
 	 */
 	private static boolean laying;
+	/** The screen whose removal we are already waiting on, so it is only listened for once. */
+	private static Screen hooked;
 
 	private ComposerScale() {
 	}
@@ -66,12 +66,51 @@ public final class ComposerScale {
 	 * what is on screen during a transition is not worth relying on.</p>
 	 */
 	public static void screenOpened(Minecraft minecraft, Screen screen) {
+		guarded(() -> {
+			if (isOurs(screen) && hooked != screen) {
+				// Listened for once per screen, not once per init -- a screen inits again on every
+				// window resize, and each of those would leave another listener behind on it.
+				hooked = screen;
+				ScreenEvents.remove(screen).register(closed -> screenClosed(minecraft, closed));
+			}
+			update(minecraft, screen);
+		});
+	}
+
+	/**
+	 * Gives the game its scale back the moment one of our screens goes away.
+	 *
+	 * <p>Closing to the world opens nothing, so there is no init to hang this off -- the tick was
+	 * the only thing putting the scale back, and up to a twentieth of a second of frames were drawn
+	 * before it did. Nothing is on screen then except the HUD, so what that looked like was the
+	 * hotbar changing size a moment after the composer closed.</p>
+	 *
+	 * <p>Restoring even when the next screen is also ours, because at this point there is no way to
+	 * know that it is: the screen being removed is all anyone has been told. Its own init puts the
+	 * scale back, and both happen before a frame is drawn, so the only cost is a layout pass on a
+	 * screen that was about to be thrown away.</p>
+	 */
+	private static void screenClosed(Minecraft minecraft, Screen screen) {
+		if (hooked == screen) {
+			hooked = null;
+		}
+		guarded(() -> restore(minecraft));
+	}
+
+	/**
+	 * Runs one pass of the scale, and only one.
+	 *
+	 * <p>Changing it re-lays out whatever is on screen, which runs that screen's init, which fires
+	 * the hook that brought us here. Without this the two would call each other -- and worse, a
+	 * restore would be undone by the apply its own relayout triggered.</p>
+	 */
+	private static void guarded(Runnable work) {
 		if (laying) {
 			return;
 		}
 		laying = true;
 		try {
-			update(minecraft, screen);
+			work.run();
 		} finally {
 			laying = false;
 		}
