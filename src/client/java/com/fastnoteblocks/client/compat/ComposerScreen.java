@@ -6483,16 +6483,46 @@ public final class ComposerScreen extends Screen {
 	 */
 	private void undo() {
 		String label = history.undoLabel();
-		history.undo();
+		long cursor = history.undoCursor();
+		history.undo(playbackReturnTick);
 		afterHistoryMove();
+		restoreCursor(cursor);
 		showResult(Component.literal(label == null ? "Nothing left to undo." : "Undo: " + label));
 	}
 
 	private void redo() {
 		String label = history.redoLabel();
-		history.redo();
+		long cursor = history.redoCursor();
+		history.redo(playbackReturnTick);
 		afterHistoryMove();
+		restoreCursor(cursor);
 		showResult(Component.literal(label == null ? "Nothing left to redo." : "Redo: " + label));
+	}
+
+	/**
+	 * Puts the time marker back where the step being undone or redone found it.
+	 *
+	 * <p>A paste and a duplicate move the marker as part of what they do -- that is what makes
+	 * holding the key lay a passage down -- so taking one back and leaving the marker four bars on
+	 * takes back half of it. Every other edit leaves the marker alone and records nothing, so
+	 * undoing an old one does not drag you back to where you were standing at the time.</p>
+	 *
+	 * <p>After {@link #afterHistoryMove}, whose clamp is against the composition that has just been
+	 * restored: an undone paste may have shortened the song, and the marker cannot stand past its
+	 * end.</p>
+	 */
+	private void restoreCursor(long tick) {
+		if (tick == ComposerHistory.NO_CURSOR) {
+			return;
+		}
+		if (playing) {
+			// The marker on screen is the playhead while something is running, and throwing the
+			// running position across the song is not what Ctrl+Z asked for.
+			playbackReturnTick = Math.max(0L, Math.min(project().endTick(), tick));
+		} else {
+			movePlayheadTo(tick);
+			revealTick(playbackReturnTick);
+		}
 	}
 
 	private void afterHistoryMove() {
@@ -6518,8 +6548,13 @@ public final class ComposerScreen extends Screen {
 	 * about what would move.</p>
 	 */
 	private void apply(String label, ComposerProject project) {
+		apply(label, project, ComposerHistory.NO_CURSOR);
+	}
+
+	/** The same, for an edit that moves the time marker and should put it back when undone. */
+	private void apply(String label, ComposerProject project, long cursorBefore) {
 		anchorPlayhead();
-		history.apply(label, project);
+		history.apply(label, project, cursorBefore);
 		afterStateChange();
 	}
 
@@ -7284,7 +7319,7 @@ public final class ComposerScreen extends Screen {
 			pasted = pasted.withEndTick(Math.max(pasted.endTick(), cursor));
 		}
 		apply("paste " + result.noteIds().size() + (result.noteIds().size() == 1 ? " note" : " notes"),
-			pasted);
+			pasted, cursor >= 0L ? playbackReturnTick : ComposerHistory.NO_CURSOR);
 		if (cursor >= 0L && playing) {
 			// Mid-playback the marker on screen is the playhead, not the tick a paste lands on, and
 			// throwing the running position across the song is not what Ctrl+V asked for. Only the
@@ -7450,7 +7485,8 @@ public final class ComposerScreen extends Screen {
 		ComposerProject duplicated = result.project().withEndTick(
 			Math.max(result.project().endTick(), Math.max(furthest, hasRange() ? 0L : stepped)));
 		apply("duplicate " + result.noteIds().size()
-			+ (result.noteIds().size() == 1 ? " note" : " notes"), duplicated);
+			+ (result.noteIds().size() == 1 ? " note" : " notes"), duplicated,
+			hasRange() ? ComposerHistory.NO_CURSOR : playbackReturnTick);
 		selectedNotes.clear();
 		selectedNotes.addAll(result.noteIds());
 		if (hasRange()) {

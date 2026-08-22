@@ -14,8 +14,18 @@ public final class ComposerHistory {
 	 * produced, because that is the pairing both stacks need: the top of the undo stack is where
 	 * Ctrl+Z would land and its label is what Ctrl+Z would take back.</p>
 	 */
-	private record Step(ComposerProject project, String label) {
+	private record Step(ComposerProject project, String label, long cursor) {
 	}
+
+	/**
+	 * A step that did not move the time marker, and so has no opinion about where it should be.
+	 *
+	 * <p>Most edits are this. Undoing a note you deleted five minutes ago should not also throw the
+	 * marker back to wherever it stood then -- you have been somewhere else since, and that is not
+	 * part of what you asked to take back. Only the edits that move the marker themselves record
+	 * where it was, and only those put it back.</p>
+	 */
+	public static final long NO_CURSOR = -1L;
 
 	private final Deque<Step> undo = new ArrayDeque<>();
 	private final Deque<Step> redo = new ArrayDeque<>();
@@ -39,10 +49,21 @@ public final class ComposerHistory {
 	 * @param label a short verb phrase for what this edit did, as it would read after "Undo"
 	 */
 	public void apply(String label, ComposerProject next) {
+		apply(label, next, NO_CURSOR);
+	}
+
+	/**
+	 * Records a step that moved the time marker, and where the marker was before it did.
+	 *
+	 * @param cursorBefore the tick the marker stood on, or {@link #NO_CURSOR} for an edit that left
+	 *     it alone
+	 */
+	public void apply(String label, ComposerProject next, long cursorBefore) {
 		if (next == null || next.equals(current)) {
 			return;
 		}
-		undo.addLast(new Step(current, label == null || label.isBlank() ? UNNAMED_STEP : label));
+		undo.addLast(new Step(current, label == null || label.isBlank() ? UNNAMED_STEP : label,
+			cursorBefore));
 		while (undo.size() > MAX_HISTORY) {
 			undo.removeFirst();
 		}
@@ -98,19 +119,44 @@ public final class ComposerHistory {
 		return redo.isEmpty() ? null : redo.peekLast().label();
 	}
 
+	/** Where Ctrl+Z would put the time marker, or {@link #NO_CURSOR} to leave it where it is. */
+	public long undoCursor() {
+		return undo.isEmpty() ? NO_CURSOR : undo.peekLast().cursor();
+	}
+
+	/** Where Ctrl+Y would put the time marker, or {@link #NO_CURSOR} to leave it where it is. */
+	public long redoCursor() {
+		return redo.isEmpty() ? NO_CURSOR : redo.peekLast().cursor();
+	}
+
 	public ComposerProject undo() {
+		return undo(NO_CURSOR);
+	}
+
+	/**
+	 * Steps back, and hands the marker's present position to the redo that would come back here.
+	 *
+	 * @param cursorNow where the marker stands now, so redo can restore it
+	 */
+	public ComposerProject undo(long cursorNow) {
 		if (!undo.isEmpty()) {
 			Step step = undo.removeLast();
-			redo.addLast(new Step(current, step.label()));
+			redo.addLast(new Step(current, step.label(),
+				step.cursor() == NO_CURSOR ? NO_CURSOR : cursorNow));
 			current = step.project();
 		}
 		return current;
 	}
 
 	public ComposerProject redo() {
+		return redo(NO_CURSOR);
+	}
+
+	public ComposerProject redo(long cursorNow) {
 		if (!redo.isEmpty()) {
 			Step step = redo.removeLast();
-			undo.addLast(new Step(current, step.label()));
+			undo.addLast(new Step(current, step.label(),
+				step.cursor() == NO_CURSOR ? NO_CURSOR : cursorNow));
 			current = step.project();
 		}
 		return current;
