@@ -7795,12 +7795,7 @@ public final class ComposerScreen extends Screen {
 	 */
 	private long nudgeToNextLine(int direction) {
 		double span = gridSpan();
-		long anchor = project().layers().stream()
-			.flatMap(layer -> layer.notes().stream())
-			.filter(note -> selectedNotes.contains(note.id()))
-			.mapToLong(NoteEvent::startTick)
-			.min()
-			.orElse(0L);
+		long anchor = Math.max(0L, earliestSelectedTick());
 		long here = gridIndexNear(anchor, span);
 		// A note sitting between lines steps onto the nearer one rather than past it, which is what
 		// makes the key a way back onto the grid as well as a way along it.
@@ -7813,11 +7808,40 @@ public final class ComposerScreen extends Screen {
 		return Math.abs(gridLineAt(Math.max(0L, here + direction), span) - anchor);
 	}
 
+	/**
+	 * How far a drag actually moves the selection: onto the grid, not by the grid.
+	 *
+	 * <p>It used to round the distance travelled, which moves a passage by whole grid steps and
+	 * therefore never changes where it sits between them. A note that started off the grid stayed
+	 * off it at exactly the same offset, no matter how far it was dragged -- so the one gesture
+	 * anyone would reach for to fix an off-grid note was the one gesture that could not, and the
+	 * notes appeared to jump straight over the lines they were being aimed at.</p>
+	 *
+	 * <p>The earliest selected note is the one that lands. Everything else moves by the same amount,
+	 * so the passage keeps its own shape and its leading edge is what meets the line -- the same
+	 * rule the arrow keys use, see {@link #nudgeToNextLine}.</p>
+	 */
 	private long snapDelta(long tickDelta) {
-		// A delta, not a position: a drag moves everything by the same amount and the notes keep
-		// their spacing, so what is rounded is the distance travelled rather than where anyone lands.
 		double span = gridSpan();
-		return Math.round(Math.round(tickDelta / span) * span);
+		long anchor = earliestSelectedTick();
+		if (anchor < 0L) {
+			return Math.round(Math.round(tickDelta / span) * span);
+		}
+		long landed = Math.max(0L, anchor + tickDelta);
+		return gridLineAt(gridIndexNear(landed, span), span) - anchor;
+	}
+
+	/** The first tick anything selected stands on, or -1 with nothing selected. */
+	private long earliestSelectedTick() {
+		if (selectedNotes.isEmpty()) {
+			return -1L;
+		}
+		return project().layers().stream()
+			.flatMap(layer -> layer.notes().stream())
+			.filter(note -> selectedNotes.contains(note.id()))
+			.mapToLong(NoteEvent::startTick)
+			.min()
+			.orElse(-1L);
 	}
 
 	private boolean insideRoll(double x, double y) {
