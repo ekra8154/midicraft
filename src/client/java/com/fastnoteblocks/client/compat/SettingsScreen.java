@@ -8,6 +8,7 @@ import com.fastnoteblocks.client.FastNoteblocksConfig.OverlayMode;
 import com.fastnoteblocks.client.FastNoteblocksConfig.RepeaterControlStyle;
 import com.fastnoteblocks.client.FastNoteblocksConfig.SequencingEditProtection;
 import com.fastnoteblocks.client.NoteBlockOverlay;
+import com.fastnoteblocks.client.composer.ComposerProject;
 import com.fastnoteblocks.client.PasteRate;
 import java.util.ArrayList;
 import java.util.List;
@@ -666,6 +667,11 @@ public final class SettingsScreen extends Screen {
 				// whatever that composition came from, and it applies to a song scanned out of the
 				// world exactly as it does to an imported MIDI. Filing these two under MIDI Import
 				// is how the quantize grid spent this long being taken for something import does.
+				//
+				// The heading is the button's own words, and it holds exactly the settings the
+				// button reads -- all three of them, and nothing else. A group named for an action
+				// is a claim about what that action consults, so the one row under it that Convert
+				// never looks at was making the same mistake one heading further on.
 				entries.add(Entry.heading("display"));
 				entries.add(Entry.of(stepper("composer_gui_scale",
 					FastNoteblocksConfig.MIN_COMPOSER_GUI_SCALE,
@@ -682,12 +688,25 @@ public final class SettingsScreen extends Screen {
 					FastNoteblocksConfig::conversionGapPercentile,
 					config::setConversionGapPercentile,
 					value -> value <= 0 ? "none (strict)" : "ignore closest " + value + "%")));
+				// Both are buttons rather than sliders without being asked to be: a two-value option
+				// has max - min == 1, which is what flips() already tests for.
+				entries.add(Entry.of(choice("convert_octave_shifting",
+					ComposerProject.OctaveShifting.values(),
+					FastNoteblocksConfig::convertOctaveShifting, config::setConvertOctaveShifting)));
+				entries.add(Entry.of(toggle("convert_split_transposed",
+					FastNoteblocksConfig::convertSplitTransposed, config::setConvertSplitTransposed)));
 				entries.add(Entry.of(slider("repeat_merge_ticks",
 					FastNoteblocksConfig.MIN_REPEAT_MERGE_TICKS,
 					FastNoteblocksConfig.MAX_REPEAT_MERGE_TICKS,
 					FastNoteblocksConfig::repeatMergeTicks, config::setRepeatMergeTicks,
 					value -> value <= FastNoteblocksConfig.MIN_REPEAT_MERGE_TICKS
 						? "off (keep all)" : ticks(value))));
+				// Next to Convert but not under it. The two are reached for at the same moment --
+				// both answer "why will this song not build" -- and the row was filed with them for
+				// that reason. But Convert never reads it: it belongs to Select > Overloaded chords
+				// and to nothing else, and a heading naming a button is a claim about what that
+				// button consults.
+				entries.add(Entry.heading("chord_thinning"));
 				entries.add(Entry.of(slider("chord_thin_target",
 					FastNoteblocksConfig.MIN_CHORD_THIN_TARGET,
 					FastNoteblocksConfig.MAX_CHORD_THIN_TARGET,
@@ -774,5 +793,19 @@ public final class SettingsScreen extends Screen {
 			dirty = true;
 			refreshResets();
 		}
+	}
+
+	/**
+	 * Hands the game its GUI scale back the instant this screen goes, whatever it is going to.
+	 *
+	 * <p>Vanilla calls this from the middle of the screen swap, so it lands before anything is
+	 * drawn. If another of our screens is opening it puts the scale straight back in its own init,
+	 * and if nothing is, the HUD behind this one is already the right size on the very next frame
+	 * rather than a tick later.</p>
+	 */
+	@Override
+	public void removed() {
+		ComposerScale.screenClosed(this);
+		super.removed();
 	}
 }

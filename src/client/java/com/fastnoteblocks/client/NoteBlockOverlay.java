@@ -18,6 +18,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
+import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.VanillaHudElements;
@@ -190,6 +191,18 @@ public final class NoteBlockOverlay {
 		}
 		rememberPlacementMoment();
 		ClientTickEvents.END_CLIENT_TICK.register(this::tick);
+		// The scale one of our screens wants, chosen as it opens rather than a tick later. The tick
+		// still owns it -- see ComposerScale -- this only stops the first frames being drawn at
+		// whatever size the last screen was.
+		//
+		// After the screen's own init and not before it. Before fires from inside init, after the
+		// width and height it was called with have been written onto the screen and before its own
+		// layout runs -- so changing the scale there re-lays the screen out correctly and then the
+		// call we interrupted carries on and writes the old size straight back over the top. The
+		// screen then draws at the new scale in the old window's shape, which is a composer with a
+		// strip of the world down two sides of it.
+		ScreenEvents.AFTER_INIT.register((client, screen, scaledWidth, scaledHeight) ->
+			ComposerScale.screenOpened(client, screen));
 		LevelRenderEvents.COLLECT_SUBMITS.register(this::render);
 		HudElementRegistry.attachElementBefore(
 			VanillaHudElements.OVERLAY_MESSAGE,

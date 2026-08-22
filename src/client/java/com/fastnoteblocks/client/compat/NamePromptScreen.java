@@ -82,4 +82,18 @@ final class NamePromptScreen extends Screen {
 	public void onClose() {
 		minecraft.gui.setScreen(parent);
 	}
+
+	/**
+	 * Hands the game its GUI scale back the instant this screen goes, whatever it is going to.
+	 *
+	 * <p>Vanilla calls this from the middle of the screen swap, so it lands before anything is
+	 * drawn. If another of our screens is opening it puts the scale straight back in its own init,
+	 * and if nothing is, the HUD behind this one is already the right size on the very next frame
+	 * rather than a tick later.</p>
+	 */
+	@Override
+	public void removed() {
+		ComposerScale.screenClosed(this);
+		super.removed();
+	}
 }

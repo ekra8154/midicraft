@@ -140,6 +140,15 @@ final class NoteCellGrid {
 	 * @return how many quads were issued, which is what the frame profiler reports
 	 */
 	int draw(Quads quads) {
+		return draw(quads, 0xFFFFFFFF);
+	}
+
+	/**
+	 * @param haloColor what a selected note's surround is drawn in. Full white while the roll has
+	 *     the keyboard; dimmed when the layer panel has it, so that a selection which Delete can no
+	 *     longer reach does not go on looking like one it can.
+	 */
+	int draw(Quads quads, int haloColor) {
 		int issued = 0;
 		for (int index = 0; index < count; index++) {
 			int cellIndex = cell[index];
@@ -157,7 +166,7 @@ final class NoteCellGrid {
 			// where it was, so that anything painted between the two lands the same way round.
 			if ((noteFlags & SELECTED) != 0) {
 				issued += flush(quads, row);
-				quads.fill(noteLeft - 1, noteTop - 1, right + 1, noteTop + noteHeight + 1, 0xFFFFFFFF);
+				quads.fill(noteLeft - 1, noteTop - 1, right + 1, noteTop + noteHeight + 1, haloColor);
 				issued++;
 			}
 			if ((noteFlags & COVERED) != 0) {

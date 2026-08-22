@@ -30,12 +30,88 @@ import net.minecraft.client.gui.screens.options.controls.KeyBindsScreen;
 public final class ComposerScale {
 	/** Whether the window is currently carrying our scale rather than the game's. */
 	private static boolean applied;
+	/**
+	 * Whether a screen is being laid out by this class right now.
+	 *
+	 * <p>See {@link #guarded}.</p>
+	 */
+	private static boolean laying;
 
 	private ComposerScale() {
 	}
 
 	public static void tick(Minecraft minecraft) {
-		Screen screen = minecraft.gui.screen();
+		update(minecraft, minecraft.gui.screen());
+	}
+
+	/**
+	 * The same decision, taken as a screen opens rather than at the end of the tick.
+	 *
+	 * <p>The tick is what makes this reliable -- a screen can be left by more routes than it can be
+	 * entered by, so nothing hung off an entry point can be trusted to cover every exit. But a tick
+	 * is up to a twentieth of a second away, and the composer is expensive enough to open that the
+	 * first few frames are slow ones: long enough to watch the whole screen sitting at the game's
+	 * scale and then jump to its own. Deciding here as well means the first frame drawn is already
+	 * the right size, and the tick goes on being the thing that cannot miss.</p>
+	 *
+	 * <p>Called after the screen's own init has finished, never before it. Changing the scale
+	 * re-lays the screen out, and a relayout that happens part-way through init is undone by the
+	 * rest of it: the size init was called with gets written back over the corrected one, and the
+	 * screen draws at the new scale in the old window's shape.</p>
+	 *
+	 * <p>The screen is passed in rather than read back off the client, because the client's idea of
+	 * what is on screen during a transition is not worth relying on.</p>
+	 */
+	public static void screenOpened(Minecraft minecraft, Screen screen) {
+		guarded(() -> update(minecraft, screen));
+	}
+
+	/**
+	 * Gives the game its scale back the moment one of our screens goes away.
+	 *
+	 * <p>Closing to the world opens nothing, so there is no init to hang this off -- the tick was
+	 * the only thing putting the scale back, and up to a twentieth of a second of frames were drawn
+	 * before it did. Nothing is on screen then except the HUD, so what that looked like was the
+	 * hotbar changing size a moment after the composer closed.</p>
+	 *
+	 * <p>Restoring even when the next screen is also ours, because at this point there is no way to
+	 * know that it is: the screen being removed is all anyone has been told. Its own init puts the
+	 * scale back, and both happen before a frame is drawn, so the only cost is a layout pass on a
+	 * screen that was about to be thrown away.</p>
+	 *
+	 * <p>Called from each of our screens rather than from Fabric's screen-removed event, which
+	 * targets a method this version of the game does not have any more -- screens moved from the
+	 * client to the GUI, and the event has been quietly firing for nobody. {@code Screen.removed}
+	 * is vanilla, is called by the swap itself, and cannot go the same way.</p>
+	 */
+	public static void screenClosed(Screen screen) {
+		if (!isOurs(screen)) {
+			return;
+		}
+		Minecraft minecraft = Minecraft.getInstance();
+		guarded(() -> restore(minecraft));
+	}
+
+	/**
+	 * Runs one pass of the scale, and only one.
+	 *
+	 * <p>Changing it re-lays out whatever is on screen, which runs that screen's init, which fires
+	 * the hook that brought us here. Without this the two would call each other -- and worse, a
+	 * restore would be undone by the apply its own relayout triggered.</p>
+	 */
+	private static void guarded(Runnable work) {
+		if (laying) {
+			return;
+		}
+		laying = true;
+		try {
+			work.run();
+		} finally {
+			laying = false;
+		}
+	}
+
+	private static void update(Minecraft minecraft, Screen screen) {
 		if (isOurs(screen)) {
 			apply(minecraft);
 		} else if (!borrowsOurScale(screen)) {

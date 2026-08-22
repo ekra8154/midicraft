@@ -31,7 +31,15 @@ public record SongAnalysis(
 	long endTick,
 	double secondsLong,
 	int duplicateNotes,
-	int buildNotes
+	int buildNotes,
+	/**
+	 * Whether the build this song is judged against can reach between repeater ticks.
+	 *
+	 * <p>Two lanes started a game tick apart can; one lane cannot. It is a property of the paste
+	 * mode, not of the song, and leaving it out is what let a song be called ready for a build
+	 * nobody was making.</p>
+	 */
+	boolean halfTicksAvailable
 ) {
 	/** Two note blocks hang off each of redstone's 15 reachable bus blocks. */
 	public static final int MAX_SIMULTANEOUS_NOTES = 30;
@@ -42,6 +50,18 @@ public record SongAnalysis(
 	 *     the thirty a tick can carry, which can call a chord unbuildable that would have fitted.
 	 */
 	public static SongAnalysis of(ComposerProject project, boolean dedupeIdentical) {
+		return of(project, dedupeIdentical, true);
+	}
+
+	/**
+	 * @param halfTicksAvailable whether the paste mode in use builds two lanes. With one, a gap of
+	 *     an odd number of game ticks cannot be placed at all: the delay chain rounds it to the
+	 *     nearest whole repeater tick and the note plays late. This used to be assumed true for
+	 *     every song, so a one-lane build of a half-ticked song reported MINECRAFT READY and then
+	 *     quietly moved the notes.
+	 */
+	public static SongAnalysis of(ComposerProject project, boolean dedupeIdentical,
+			boolean halfTicksAvailable) {
 		Map<Long, Integer> counts = new HashMap<>();
 		Set<ComposerProject.NoteSound> heard = dedupeIdentical ? new java.util.HashSet<>() : null;
 		int outOfRange = 0;
@@ -52,7 +72,7 @@ public record SongAnalysis(
 			// Only included layers are judged. A layer left out of the sequence cannot stop a build
 			// it is not part of, and importing a song to keep one line of it should not leave the
 			// verdict red forever over notes nobody is going to place.
-			boolean included = layer.buildEnabled();
+			boolean included = layer.inBuild();
 			for (NoteEvent note : layer.notes()) {
 				totalNotes++;
 				maximumNoteDuration = Math.max(maximumNoteDuration, note.durationTicks());
@@ -89,28 +109,41 @@ public record SongAnalysis(
 		Set<Long> crowded = new LinkedHashSet<>();
 		Set<Long> halfTicked = new LinkedHashSet<>();
 		Map<Long, Double> gaps = new HashMap<>();
+		// Where a note stands, measured from the first event rather than from time zero.
+		//
+		// This used to ask of each consecutive pair whether the distance between them was a whole
+		// number of game ticks, on the grounds that a build is a chain of delays and only the gaps
+		// have to be expressible. True, and it names the wrong notes: one stray note makes two bad
+		// gaps, the one before it and the one after, so the note standing exactly on a line after a
+		// stray one was reported off the grid along with the stray. On a raw import that was 31 of
+		// 428 flagged notes, all of them in the right place, and the answer to "which notes do I
+		// need to move" had a tenth of the wrong notes in it.
+		//
+		// Measuring from the first event rather than from time zero is what makes this the same
+		// question and not a stricter one. Every note a whole number of ticks from the first is
+		// exactly every gap being whole; where the song sits relative to zero still does not
+		// matter, and a passage shifted bodily off the beat is as buildable as it ever was.
+		List<Long> sorted = checked.stream().sorted().toList();
+		long origin = sorted.isEmpty() ? 0L : sorted.get(0);
 		long previous = Long.MIN_VALUE;
-		for (long tick : checked.stream().sorted().toList()) {
+		for (long tick : sorted) {
+			// Measured in game ticks, because that is the finest a build can now place. A repeater
+			// still cannot delay by less than one repeater tick, but a second lane started half a
+			// tick late can, and the two together reach every game tick. So the grid this is held
+			// to is twice as fine as the repeaters laying it, and a note that falls between two
+			// repeater ticks is not an error any more -- it is the reason the second lane exists.
+			double fromOrigin = (tick - origin) / span * 2.0;
+			if (Math.abs(fromOrigin - Math.round(fromOrigin)) > 0.04) {
+				offGrid.add(tick);
+			}
 			if (previous != Long.MIN_VALUE) {
-				// A build is a chain of repeater delays, so only the gap between consecutive events
-				// has to be expressible. Where the song sits relative to time zero is irrelevant --
-				// an absolute-position test just flags every note when the musical grid and the
-				// repeater grid do not share a common multiple.
 				double gap = (tick - previous) / span;
 				gaps.put(tick, gap);
-				// Measured in game ticks, because that is the finest a build can now place. A
-				// repeater still cannot delay by less than one repeater tick, but a second lane
-				// started half a tick late can, and the two together reach every game tick. So the
-				// grid this is held to is twice as fine as the repeaters laying it, and the gaps
-				// that fall between two repeater ticks are not errors any more -- they are the
-				// reason the second lane exists.
 				double gameGap = gap * 2.0;
 				long whole = Math.round(gameGap);
 				if (gameGap < 1.0 - 1.0e-6) {
 					crowded.add(tick);
-				} else if (Math.abs(gameGap - whole) > 0.04) {
-					offGrid.add(tick);
-				} else if (whole % 2L != 0L) {
+				} else if (Math.abs(gameGap - whole) < 0.04 && whole % 2L != 0L) {
 					// A whole number of game ticks, and an odd one. Everything before this gap and
 					// everything after it are on opposite halves of the tick, so they cannot share
 					// a chain and the build needs both lanes.
@@ -122,7 +155,7 @@ public record SongAnalysis(
 		return new SongAnalysis(totalNotes, outOfRange, Map.copyOf(counts), peak, overloaded,
 			maximumNoteDuration, Set.copyOf(offGrid), Set.copyOf(crowded), Set.copyOf(halfTicked),
 			Map.copyOf(gaps), project.endTick(), project.endTick() / span / 10.0, duplicateNotes,
-			buildNotes);
+			buildNotes, halfTicksAvailable);
 	}
 
 	/**
@@ -145,7 +178,13 @@ public record SongAnalysis(
 
 	/** True when nothing left in the composition would misbuild or fail to build at all. */
 	public boolean buildable() {
-		return outOfRange == 0 && overloadedTicks == 0 && crowded.isEmpty() && offGrid.isEmpty();
+		return outOfRange == 0 && overloadedTicks == 0 && crowded.isEmpty() && offGrid.isEmpty()
+			&& (halfTicksAvailable || halfTickedNotes().isEmpty());
+	}
+
+	/** Half-ticked notes the build in use cannot place, which is all of them on one lane. */
+	public Set<Long> unreachableHalfTicks() {
+		return halfTicksAvailable ? Set.of() : halfTickedNotes();
 	}
 
 	/** True when the end marker's own trailing delay is not one a build can place. */

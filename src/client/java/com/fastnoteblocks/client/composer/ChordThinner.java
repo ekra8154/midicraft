@@ -108,7 +108,7 @@ public final class ChordThinner {
 			layerIndex++;
 			// Only what the build would place: a layer left out of the sequence cannot overload a
 			// tick it is not part of, and an out-of-range note is not placed at all.
-			if (!layer.buildEnabled()) {
+			if (!layer.inBuild()) {
 				continue;
 			}
 			boolean offered = fromLayers == null || fromLayers.contains(layerIndex);

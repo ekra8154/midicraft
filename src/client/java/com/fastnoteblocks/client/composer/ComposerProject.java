@@ -28,7 +28,8 @@ public record ComposerProject(
 	int activeLayerIndex,
 	long nextNoteId,
 	long endTick,
-	int speedQuarters
+	int speedQuarters,
+	List<Marker> markers
 ) {
 	public static final int DEFAULT_PPQ = 480;
 	public static final int DEFAULT_TEMPO_MICROS_PER_QUARTER = 500_000;
@@ -66,6 +67,27 @@ public record ComposerProject(
 	public static final int MIN_SPEED_QUARTERS = 1;
 	public static final int MAX_SPEED_QUARTERS = 32;
 	public static final int DEFAULT_SPEED_QUARTERS = 4;
+	/**
+	 * How many markers a composition may carry.
+	 *
+	 * <p>A guard against a runaway import or a stuck key, not a design limit. Markers name the parts
+	 * of a song -- intro, chorus, the bar the build goes wrong at -- and a song with more than a few
+	 * dozen of those has stopped using them as landmarks.</p>
+	 */
+	public static final int MAX_MARKERS = 256;
+
+	/**
+	 * Everything but the markers, for the callers written before there were any.
+	 *
+	 * <p>A record component reaches a hundred and more construction sites at once, most of them
+	 * probes and tests that build a song out of a handful of notes and have no opinion about
+	 * markers. This is what lets those go on saying what they mean.</p>
+	 */
+	public ComposerProject(String name, int ppq, int tempoMicrosPerQuarter, List<Layer> layers,
+			int activeLayerIndex, long nextNoteId, long endTick, int speedQuarters) {
+		this(name, ppq, tempoMicrosPerQuarter, layers, activeLayerIndex, nextNoteId, endTick,
+			speedQuarters, List.of());
+	}
 
 	public ComposerProject {
 		name = name == null || name.isBlank() ? "Untitled sequence" : name.trim();
@@ -93,6 +115,28 @@ public record ComposerProject(
 		endTick = lastNoteStart < 0L
 			? (endTick > 0L ? endTick : ppq * 4L)
 			: Math.max(endTick, lastNoteStart);
+		markers = normalizeMarkers(markers);
+	}
+
+	/**
+	 * In tick order, one to a tick, and never more than {@link #MAX_MARKERS} of them.
+	 *
+	 * <p>One to a tick because two names for the same instant is two flags drawn on top of each
+	 * other, and the one underneath can neither be read nor clicked. The first written wins, which
+	 * makes adding a marker where one already stands a rename rather than a second flag.</p>
+	 */
+	private static List<Marker> normalizeMarkers(List<Marker> value) {
+		if (value == null || value.isEmpty()) {
+			return List.of();
+		}
+		Map<Long, Marker> byTick = new TreeMap<>();
+		for (Marker marker : value) {
+			if (marker != null) {
+				byTick.putIfAbsent(marker.tick(), marker);
+			}
+		}
+		List<Marker> sorted = new ArrayList<>(byTick.values());
+		return List.copyOf(sorted.size() <= MAX_MARKERS ? sorted : sorted.subList(0, MAX_MARKERS));
 	}
 
 	/**
@@ -103,7 +147,87 @@ public record ComposerProject(
 	 */
 	private ComposerProject with(List<Layer> updatedLayers, int active, long nextId) {
 		return new ComposerProject(name, ppq, tempoMicrosPerQuarter, updatedLayers, active, nextId,
-			endTick, speedQuarters);
+			endTick, speedQuarters, markers);
+	}
+
+	/**
+	 * A named position on the timeline.
+	 *
+	 * <p>Nothing is built from a marker and nothing sounds at one. It is somewhere to write down
+	 * what a stretch of the song is -- where the chorus starts, which bar the build goes wrong at --
+	 * so that finding it again is reading a label rather than counting bars.</p>
+	 */
+	public record Marker(long tick, String label) {
+		public Marker {
+			tick = Math.max(0L, tick);
+			label = label == null || label.isBlank() ? "Marker" : label.trim();
+		}
+
+		public Marker named(String value) {
+			return new Marker(tick, value);
+		}
+
+		public Marker movedTo(long value) {
+			return new Marker(value, label);
+		}
+	}
+
+	/** The marker exactly on {@code tick}, or null. */
+	public Marker markerAt(long tick) {
+		for (Marker marker : markers) {
+			if (marker.tick() == tick) {
+				return marker;
+			}
+		}
+		return null;
+	}
+
+	/** The marker nearest {@code tick} within {@code tolerance}, or null when none is that close. */
+	public Marker markerNear(long tick, long tolerance) {
+		Marker nearest = null;
+		long best = Long.MAX_VALUE;
+		for (Marker marker : markers) {
+			long distance = Math.abs(marker.tick() - tick);
+			if (distance <= Math.max(0L, tolerance) && distance < best) {
+				best = distance;
+				nearest = marker;
+			}
+		}
+		return nearest;
+	}
+
+	/**
+	 * Puts a marker on a tick, replacing whatever was already named there.
+	 *
+	 * <p>Replacing rather than refusing: one tick holds one marker, so writing to an occupied tick
+	 * can only be a rename, and there is nothing else it could sensibly mean.</p>
+	 */
+	public ComposerProject withMarkerAt(long tick, String label) {
+		long at = Math.max(0L, tick);
+		List<Marker> updated = new ArrayList<>(markers.size() + 1);
+		for (Marker marker : markers) {
+			if (marker.tick() != at) {
+				updated.add(marker);
+			}
+		}
+		if (updated.size() >= MAX_MARKERS) {
+			return this;
+		}
+		updated.add(new Marker(at, label));
+		return withMarkers(updated);
+	}
+
+	/** Removes the marker on a tick, if there is one. */
+	public ComposerProject withoutMarkerAt(long tick) {
+		if (markerAt(tick) == null) {
+			return this;
+		}
+		return withMarkers(markers.stream().filter(marker -> marker.tick() != tick).toList());
+	}
+
+	public ComposerProject withMarkers(List<Marker> value) {
+		return new ComposerProject(name, ppq, tempoMicrosPerQuarter, layers, activeLayerIndex,
+			nextNoteId, endTick, speedQuarters, value);
 	}
 
 	public record NoteEvent(long id, int midiNote, long startTick, long durationTicks, int velocity) {
@@ -151,6 +275,25 @@ public record ComposerProject(
 		 * {@code SoundEffectVoiceTest} holds the palette to the naming, which is where a new voice
 		 * that forgot the prefix gets caught.</p>
 		 */
+		/**
+		 * Whether this layer goes into a build: it does if you can hear it and see it.
+		 *
+		 * <p>There used to be a flag of its own for this, set by a dot on each row, independent of
+		 * whether the layer was muted or hidden. Two switches for one question, and the composer had
+		 * two signal paths as a result -- preview played what was unmuted and a build placed what was
+		 * dotted, with nothing connecting them, so pressing Space was not a preview of the build and
+		 * there was no way to hear what would be built. A DAW does not have this problem because a
+		 * bounce is the same chain as the transport: what you heard is what you got. This is that,
+		 * and the flag it replaces stays on the record only so that older song files still load.</p>
+		 *
+		 * <p>Solo is not part of it. Soloing is a momentary lens for listening around a part, and it
+		 * is the one place preview and build can still disagree -- the screen says so while it is on
+		 * rather than quietly dropping four layers out of somebody's machine.</p>
+		 */
+		public boolean inBuild() {
+			return !muted && visible;
+		}
+
 		public boolean pitched() {
 			return pitched(instrument);
 		}
@@ -236,6 +379,38 @@ public record ComposerProject(
 		}
 	}
 
+	/**
+	 * What {@link #convertToMinecraft} moves when a layer will not fit the note-block range.
+	 *
+	 * <p>Both end with every note in range, because the second step of each is the same per-note
+	 * octave shift and that can never fail: the window is 25 semitones, so every pitch class has an
+	 * octave inside it. What differs is how much of the part moves together.</p>
+	 *
+	 * <p>Multiples of twelve throughout, and that is not a detail. A whole-song transpose may move
+	 * by any interval, because everything moves with it and the song simply lands in a new key. One
+	 * layer moved by three semitones is not in a different octave, it is in a different key from
+	 * every other part -- so a shift applied to a part is always an octave.</p>
+	 */
+	public enum OctaveShifting {
+		/**
+		 * Only the notes that are out of range move, each by its own nearest octave.
+		 *
+		 * <p>Nothing in range is touched, and a layer straddling the window splits once per distinct
+		 * octave the notes needed.</p>
+		 */
+		NOTES_ONLY,
+		/**
+		 * The layer moves as a unit to wherever the fewest of its notes are out of range, and then
+		 * whatever is still out moves note by note.
+		 *
+		 * <p>Fewer splits, because the bulk of the layer ends up needing one shift rather than two.
+		 * The cost is that notes with nothing wrong with them can move, when moving them catches
+		 * more strays than it creates -- a layer already wholly in range scores nothing at all at
+		 * shift zero, so it stays where it is.</p>
+		 */
+		LAYER_THEN_NOTES
+	}
+
 	public record MinecraftConversion(
 		ComposerProject project,
 		int shiftedNotes,
@@ -244,7 +419,9 @@ public record ComposerProject(
 		double tempoFactor,
 		int mergedRepeats,
 		int duplicateLayers,
-		int duplicateLayerNotes
+		int duplicateLayerNotes,
+		/** Notes that landed on a pitch and tick their layer already held, and so became one note. */
+		int mergedIntoExisting
 	) {
 		/**
 		 * How much slower the converted song plays. Greater than 1 means the source was faster than
@@ -253,6 +430,29 @@ public record ComposerProject(
 		 */
 		public boolean slowedDown() {
 			return tempoFactor > 1.01;
+		}
+
+		/**
+		 * Whether the converted song plays faster than the source did.
+		 *
+		 * <p>Aligning to the repeater grid moves the tempo in whichever direction is nearest, so
+		 * conversion speeds a song up about as often as it slows one down. Only the slowdown used
+		 * to be reported, which left the other half of the same event saying nothing more than
+		 * "tempo aligned" -- true, and no help at all to anyone wondering why the song they knew
+		 * now runs ahead of them.</p>
+		 */
+		public boolean spedUp() {
+			return tempoFactor < 0.99;
+		}
+
+		/**
+		 * How many times faster the converted song plays, the reciprocal of the tempo factor.
+		 *
+		 * <p>Tempo here is microseconds per quarter, so a smaller number is a faster song and the
+		 * raw factor reads backwards for a speed-up.</p>
+		 */
+		public double speedFactor() {
+			return tempoFactor <= 0.0 ? 1.0 : 1.0 / tempoFactor;
 		}
 	}
 
@@ -417,10 +617,8 @@ public record ComposerProject(
 		Set<NoteSound> heard = dedupeIdentical ? new java.util.HashSet<>() : null;
 		for (int index = 0; index < layers.size(); index++) {
 			Layer layer = layers.get(index);
-			// Mute is about listening, not building. Once solo exists, muting a layer to hear
-			// around it would otherwise drop it out of the build without saying so.
 			boolean chosen = layerIndices == null || layerIndices.isEmpty()
-				? layer.buildEnabled()
+				? layer.inBuild()
 				: layerIndices.contains(index);
 			if (!chosen) {
 				continue;
@@ -560,6 +758,7 @@ public record ComposerProject(
 			&& tempoMicrosPerQuarter == other.tempoMicrosPerQuarter
 			&& endTick == other.endTick
 			&& speedQuarters == other.speedQuarters
+			&& markers.equals(other.markers)
 			&& layers.equals(other.layers);
 	}
 
@@ -584,6 +783,111 @@ public record ComposerProject(
 			active++;
 		}
 		return with(updated, active, nextNoteId);
+	}
+
+	/**
+	 * Where every layer ends up if the given ones are lifted out and dropped into {@code insertion},
+	 * as a list of the positions they held before the move.
+	 *
+	 * <p>Handed back rather than kept inside {@link #moveLayersTo} because the screen holds two more
+	 * sets of layer positions -- which rows are selected and which are soloed -- and a reorder that
+	 * renumbers the layers without renumbering those leaves both of them pointing at whatever slid
+	 * into the vacated row.</p>
+	 *
+	 * <p>{@code insertion} counts the gaps between rows as they stand now, so it runs from zero to
+	 * the layer count and a block dropped below where it started lands short of that gap once the
+	 * block itself is out of the list.</p>
+	 */
+	public List<Integer> layerOrderAfterMove(Set<Integer> layerIndices, int insertion) {
+		List<Integer> unchanged = new ArrayList<>();
+		for (int index = 0; index < layers.size(); index++) {
+			unchanged.add(index);
+		}
+		if (layerIndices == null || layerIndices.isEmpty() || layers.size() <= 1) {
+			return unchanged;
+		}
+		List<Integer> moving = layerIndices.stream()
+			.filter(index -> index >= 0 && index < layers.size())
+			.distinct()
+			.sorted()
+			.toList();
+		if (moving.isEmpty() || moving.size() == layers.size()) {
+			return unchanged;
+		}
+		int gap = Math.max(0, Math.min(layers.size(), insertion));
+		List<Integer> order = new ArrayList<>();
+		for (int index = 0; index < layers.size(); index++) {
+			if (!moving.contains(index)) {
+				order.add(index);
+			}
+		}
+		int landing = gap - (int)moving.stream().filter(index -> index < gap).count();
+		order.addAll(Math.max(0, Math.min(order.size(), landing)), moving);
+		return order;
+	}
+
+	/**
+	 * Lifts the given layers out and drops them into one gap, keeping their order among themselves.
+	 *
+	 * <p>A selection reorders as a block. Moving them one at a time would be a different operation
+	 * -- three layers each stepping up one past whatever is above them turns them inside out the
+	 * moment anything unselected is between them -- and the reason to select several is that they
+	 * belong together.</p>
+	 */
+	public ComposerProject moveLayersTo(Set<Integer> layerIndices, int insertion) {
+		return withLayerOrder(layerOrderAfterMove(layerIndices, insertion));
+	}
+
+	/** Rearranges the layers into {@code order}, a permutation of their current positions. */
+	public ComposerProject withLayerOrder(List<Integer> order) {
+		if (order == null || order.size() != layers.size()) {
+			return this;
+		}
+		List<Layer> updated = new ArrayList<>(order.size());
+		for (int index : order) {
+			if (index < 0 || index >= layers.size()) {
+				return this;
+			}
+			updated.add(layers.get(index));
+		}
+		int active = order.indexOf(activeLayerIndex);
+		return with(updated, active < 0 ? activeLayerIndex : active, nextNoteId);
+	}
+
+	/**
+	 * Copies every given layer, each copy directly after the layer it came from.
+	 *
+	 * <p>All or nothing against the layer cap: half a duplication is a song with some parts doubled
+	 * and some not, which is harder to undo by hand than it is to not do.</p>
+	 */
+	public ComposerProject duplicateLayers(Set<Integer> layerIndices) {
+		if (layerIndices == null || layerIndices.isEmpty()) {
+			return this;
+		}
+		List<Integer> sources = layerIndices.stream()
+			.filter(index -> index >= 0 && index < layers.size())
+			.distinct()
+			.sorted()
+			.toList();
+		if (sources.isEmpty() || layers.size() + sources.size() > MAX_LAYERS) {
+			return this;
+		}
+		long nextId = nextNoteId;
+		List<Layer> updated = new ArrayList<>(layers.size() + sources.size());
+		for (int index = 0; index < layers.size(); index++) {
+			Layer source = layers.get(index);
+			updated.add(source);
+			if (!sources.contains(index)) {
+				continue;
+			}
+			List<NoteEvent> copied = new ArrayList<>(source.notes().size());
+			for (NoteEvent note : source.notes()) {
+				copied.add(new NoteEvent(nextId++, note.midiNote(), note.startTick(),
+					note.durationTicks(), note.velocity()));
+			}
+			updated.add(source.withName(source.name() + " copy").withNotes(copied));
+		}
+		return with(updated, sources.getFirst() + 1, nextId);
 	}
 
 	/**
@@ -682,7 +986,8 @@ public record ComposerProject(
 	 */
 	private RepeaterGrid buildGrid(boolean gameTicks) {
 		long numerator = ppq * 100_000L * Math.max(1, speedQuarters);
-		long denominator = tempoMicrosPerQuarter * 4L * (gameTicks ? 2L : 1L);
+		long perBuildTick = gameTicks ? 2L : 1L;
+		long denominator = tempoMicrosPerQuarter * 4L * perBuildTick;
 		long divisor = greatestCommonDivisor(numerator, denominator);
 		long grid = Math.max(1L, numerator / divisor);
 		long repeaterTicks = Math.max(1L, denominator / divisor);
@@ -694,7 +999,16 @@ public record ComposerProject(
 		// lands either side of the grid -- and a span a hair wider than the grid makes every
 		// one-tick gap 0.999 of a tick, which reads as too frequent rather than as exact. Up
 		// puts the span just inside the grid instead, where the rounding is harmless.
-		return new RepeaterGrid(grid, 1L, Math.max(1, (int)Math.ceil(numerator / (4.0 * grid))));
+		//
+		// perBuildTick belongs here as well as in the denominator above, and did not used to. The
+		// tempo handed back was the one that makes `grid` a whole *repeater* tick, while `grid` had
+		// been measured in game ticks -- half as much. The two disagreed by exactly that factor of
+		// two, so quantizing to game ticks at any tempo reaching this branch halved the song and
+		// then landed it on the repeater grid: 128 BPM came back as 63.75, on the wrong grid, from
+		// the button whose only purpose is the other one. Every tempo tested took the exact branch
+		// above, where the arithmetic is shared and the fault cannot show.
+		return new RepeaterGrid(grid, 1L,
+			Math.max(1, (int)Math.ceil(numerator / (4.0 * perBuildTick * grid))));
 	}
 
 	public RepeaterQuantize withQuantizedToRepeaters(Set<Long> scope) {
@@ -814,7 +1128,7 @@ public record ComposerProject(
 	/** @param melodyWeight what a top-voice note counts for; exposed so a probe can sweep it. */
 	public TransposeFit bestTransposeIntoRange(int melodyWeight) {
 		List<NoteEvent> measured = layers.stream()
-			.filter(Layer::buildEnabled)
+			.filter(Layer::inBuild)
 			.flatMap(layer -> layer.notes().stream())
 			.toList();
 		if (measured.isEmpty()) {
@@ -914,7 +1228,7 @@ public record ComposerProject(
 	 */
 	public NoteSpacing noteSpacing() {
 		List<Long> starts = layers.stream()
-			.filter(Layer::buildEnabled)
+			.filter(Layer::inBuild)
 			.flatMap(layer -> layer.notes().stream())
 			.map(NoteEvent::startTick)
 			.distinct()
@@ -947,7 +1261,7 @@ public record ComposerProject(
 
 	public ComposerProject withTempo(int value) {
 		return new ComposerProject(name, ppq, value, layers, activeLayerIndex, nextNoteId,
-			endTick, speedQuarters);
+			endTick, speedQuarters, markers);
 	}
 
 	/**
@@ -969,7 +1283,7 @@ public record ComposerProject(
 
 	public ComposerProject withName(String value) {
 		return new ComposerProject(value, ppq, tempoMicrosPerQuarter, layers, activeLayerIndex, nextNoteId,
-			endTick, speedQuarters);
+			endTick, speedQuarters, markers);
 	}
 
 	public MinecraftConversion convertToMinecraft(int quantizeTicks, boolean snapTempo) {
@@ -994,6 +1308,19 @@ public record ComposerProject(
 	 */
 	public MinecraftConversion convertToMinecraft(int quantizeTicks, boolean snapTempo,
 			int repeatMergeTicks, boolean gameTicks) {
+		return convertToMinecraft(quantizeTicks, snapTempo, repeatMergeTicks, gameTicks,
+			OctaveShifting.NOTES_ONLY, true);
+	}
+
+	/**
+	 * @param shifting what moves when a layer will not fit; see {@link OctaveShifting}
+	 * @param splitTransposed whether notes that took a different octave from the rest of their layer
+	 *     get a layer of their own. Off, the layer keeps them, and two source notes an octave apart
+	 *     that land on one pitch become one note rather than one dropped layer.
+	 */
+	public MinecraftConversion convertToMinecraft(int quantizeTicks, boolean snapTempo,
+			int repeatMergeTicks, boolean gameTicks, OctaveShifting shifting,
+			boolean splitTransposed) {
 		int grid = Math.max(1, quantizeTicks);
 		double repeatWindow = repeatMergeTicks <= 0
 			? 0.0
@@ -1001,6 +1328,7 @@ public record ComposerProject(
 		int mergedRepeats = 0;
 		int duplicateLayers = 0;
 		int duplicateLayerNotes = 0;
+		int mergedIntoExisting = 0;
 		List<Layer> convertedLayers = new ArrayList<>();
 		int convertedActiveLayer = 0;
 		int shiftedNotes = 0;
@@ -1016,11 +1344,27 @@ public record ComposerProject(
 			if (sourceNotes.isEmpty()) {
 				notesByShift.put(0, List.of());
 			}
+			// A sound effect is not transposed at all, by either mode. There is no range for it to
+			// be outside of -- toSteps does not filter an unpitched layer by range, so every note on
+			// one builds wherever it is drawn, and the row a hit sits on is only somewhere to put
+			// it. So the shift moved nothing and the split it caused was pure cost: a door written
+			// low came out as "Door (+2 oct)" and "Door (+1 oct)", two layers against the
+			// hundred-and-twenty-eight for a block that makes one noise.
+			boolean pitched = source.pitched();
+			// Where the layer sits before any note is looked at individually.
+			int base = pitched && shifting == OctaveShifting.LAYER_THEN_NOTES
+				? bestLayerOctaveShift(sourceNotes)
+				: 0;
 			for (NoteEvent note : sourceNotes) {
-				int shift = octaveShiftIntoNoteBlockRange(note.midiNote());
+				// Bucketed by what the note needed *after* the layer moved, so everything the base
+				// already fixed shares one bucket and one layer. Named by the total, because what a
+				// name has to answer is how far these notes are from where they were written.
+				int residual = pitched ? octaveShiftIntoNoteBlockRange(note.midiNote() + base) : 0;
+				int shift = base + residual;
 				long quantizedStart = Math.max(0L, Math.round(note.startTick() / (double)grid) * (long)grid);
 				NoteEvent converted = note.movedTo(quantizedStart, note.midiNote() + shift);
-				notesByShift.computeIfAbsent(shift, ignored -> new ArrayList<>()).add(converted);
+				notesByShift.computeIfAbsent(splitTransposed ? residual : 0,
+					ignored -> new ArrayList<>()).add(converted);
 				if (shift != 0) {
 					shiftedNotes++;
 				}
@@ -1064,18 +1408,25 @@ public record ComposerProject(
 				convertedActiveLayer = convertedLayers.size();
 			}
 			for (Map.Entry<Integer, List<NoteEvent>> entry : distinct) {
-				int shift = entry.getKey();
+				int shift = base + entry.getKey();
 				String convertedName = distinct.size() == 1 && shift == 0
 					? source.name()
 					: source.name() + octaveShiftSuffix(shift);
-				convertedLayers.add(new Layer(
+				Layer built = new Layer(
 					convertedName,
 					source.instrument(),
 					source.muted(),
 					source.buildEnabled(),
 					source.visible(),
 					entry.getValue()
-				));
+				);
+				// What the layer would not hold. A layer keeps one note per pitch per tick, so two
+				// source notes an octave apart that land on the same pitch become one -- the same
+				// dedupe the split reports as a dropped duplicate layer, arriving a note at a time
+				// because there is no second layer for it to arrive as. Counted rather than left
+				// silent: it is the one way this can take notes away, and it should say so.
+				mergedIntoExisting += entry.getValue().size() - built.notes().size();
+				convertedLayers.add(built);
 			}
 		}
 
@@ -1086,7 +1437,7 @@ public record ComposerProject(
 		// a 1/8, grid set to 1/16, tempo doubled, song halved. Asking the notes cannot do that,
 		// because after quantizing their spacing is always a whole number of grid steps.
 		ComposerProject shaped = new ComposerProject(name, ppq, tempoMicrosPerQuarter, convertedLayers,
-			convertedActiveLayer, nextNoteId, endTick, speedQuarters);
+			convertedActiveLayer, nextNoteId, endTick, speedQuarters, markers);
 		NoteSpacing spacing = shaped.noteSpacing();
 		int convertedTempo = snapTempo && spacing.gridTicks() > 0L
 			? shaped.alignedTempoFor(
@@ -1117,7 +1468,10 @@ public record ComposerProject(
 			convertedActiveLayer,
 			nextNoteId,
 			snappedEnd,
-			speedQuarters
+			speedQuarters,
+			// Left on the ticks they were written on, because the notes are: quantizing moves a note
+			// within the tick space rather than rescaling it, so a marker still names the same bar.
+			markers
 		);
 		return new MinecraftConversion(
 			converted,
@@ -1127,7 +1481,8 @@ public record ComposerProject(
 			convertedTempo / (double)tempoMicrosPerQuarter,
 			mergedRepeats,
 			duplicateLayers,
-			duplicateLayerNotes
+			duplicateLayerNotes,
+			mergedIntoExisting
 		);
 	}
 
@@ -1300,6 +1655,75 @@ public record ComposerProject(
 	}
 
 	/**
+	 * Puts copies of {@code incoming} into the list at {@code at}, with notes under fresh ids.
+	 *
+	 * <p>All or nothing against the layer cap, the same as duplicating: half a paste is a song with
+	 * some of what you asked for and no way to tell which half.</p>
+	 *
+	 * <p>Names are left exactly as they came. Pasting a layer called Bass gives a second layer
+	 * called Bass, which reads oddly for a copy and is exactly right for a cut being moved -- and
+	 * the clipboard cannot tell those apart at the moment it lands.</p>
+	 */
+	public ComposerProject withLayersInserted(int at, List<Layer> incoming) {
+		if (incoming == null || incoming.isEmpty()
+				|| layers.size() + incoming.size() > MAX_LAYERS) {
+			return this;
+		}
+		int landing = Math.max(0, Math.min(layers.size(), at));
+		long nextId = nextNoteId;
+		List<Layer> arriving = new ArrayList<>(incoming.size());
+		for (Layer layer : incoming) {
+			List<NoteEvent> copied = new ArrayList<>(layer.notes().size());
+			for (NoteEvent note : layer.notes()) {
+				copied.add(new NoteEvent(nextId++, note.midiNote(), note.startTick(),
+					note.durationTicks(), note.velocity()));
+			}
+			arriving.add(layer.withNotes(copied));
+		}
+		List<Layer> updated = new ArrayList<>(layers);
+		updated.addAll(landing, arriving);
+		return with(updated, landing, nextId);
+	}
+
+	/**
+	 * Copies the given notes {@code tickDelta} later, each one staying on the layer it is already on.
+	 *
+	 * <p>The difference from {@link #pasteNotes}: a paste arrives from a clipboard and is aimed at a
+	 * layer, gathering the copy there and splitting only what that layer's instrument cannot hold. A
+	 * duplicate is not aimed anywhere -- it is the same passage again, so a four-part phrase comes
+	 * out as four parts and not as one layer holding all of them.</p>
+	 *
+	 * <p>Fresh ids, for the reason a duplicated layer's notes get them: the two copies are selected
+	 * and moved by id, and shared ids would make the second a view of the first.</p>
+	 */
+	public PasteResult duplicateNotes(Set<Long> ids, long tickDelta) {
+		if (ids == null || ids.isEmpty() || tickDelta == 0L) {
+			return new PasteResult(this, Set.of(), 0);
+		}
+		long id = nextNoteId;
+		List<Layer> updated = new ArrayList<>(layers.size());
+		Set<Long> addedIds = new LinkedHashSet<>();
+		for (Layer layer : layers) {
+			List<NoteEvent> notes = null;
+			for (NoteEvent note : layer.notes()) {
+				if (!ids.contains(note.id())) {
+					continue;
+				}
+				if (notes == null) {
+					notes = new ArrayList<>(layer.notes());
+				}
+				NoteEvent copy = new NoteEvent(id++, note.midiNote(),
+					Math.max(0L, note.startTick() + tickDelta), note.durationTicks(),
+					note.velocity());
+				notes.add(copy);
+				addedIds.add(copy.id());
+			}
+			updated.add(notes == null ? layer : layer.withNotes(notes));
+		}
+		return new PasteResult(with(updated, activeLayerIndex, id), Set.copyOf(addedIds), 0);
+	}
+
+	/**
 	 * Copies a layer, putting the copy directly after the one it came from.
 	 *
 	 * <p>Next to its source rather than at the end of the list, because a duplicate is a variation
@@ -1368,8 +1792,13 @@ public record ComposerProject(
 				.map(note -> note.movedTo(note.startTick() - earliest, note.midiNote()))
 				.toList()));
 		}
+		// The markers come forward too. They name positions in the music, and music that has moved
+		// leaves every one of them pointing a bar of silence away from what it was written on.
+		List<Marker> pulled = markers.stream()
+			.map(marker -> marker.movedTo(Math.max(0L, marker.tick() - earliest)))
+			.toList();
 		return new ComposerProject(name, ppq, tempoMicrosPerQuarter, updated, activeLayerIndex,
-			nextNoteId, Math.max(1L, endTick - earliest), speedQuarters);
+			nextNoteId, Math.max(1L, endTick - earliest), speedQuarters, pulled);
 	}
 
 	/** Where the notes actually stop, ignoring any trailing silence the marker adds. */
@@ -1389,12 +1818,12 @@ public record ComposerProject(
 	/** Moves the end marker. Values before the last note are pulled forward to it. */
 	public ComposerProject withEndTick(long value) {
 		return new ComposerProject(name, ppq, tempoMicrosPerQuarter, layers, activeLayerIndex,
-			nextNoteId, Math.max(0L, value), speedQuarters);
+			nextNoteId, Math.max(0L, value), speedQuarters, markers);
 	}
 
 	public ComposerProject withSpeedQuarters(int value) {
 		return new ComposerProject(name, ppq, tempoMicrosPerQuarter, layers, activeLayerIndex,
-			nextNoteId, endTick, value);
+			nextNoteId, endTick, value, markers);
 	}
 
 	/**
@@ -1487,7 +1916,7 @@ public record ComposerProject(
 		List<Layer> chosen = new ArrayList<>();
 		Set<NoteSound> heard = dedupeIdentical ? new java.util.HashSet<>() : null;
 		for (Layer layer : layers) {
-			if (!layer.buildEnabled()) {
+			if (!layer.inBuild()) {
 				continue;
 			}
 			chosen.add(heard == null ? layer : withoutAlreadyHeard(layer, heard));
@@ -1611,6 +2040,48 @@ public record ComposerProject(
 		List<NoteEvent> result = new ArrayList<>(kept);
 		notes.stream().filter(note -> !scope.contains(note.id())).forEach(result::add);
 		return List.copyOf(result);
+	}
+
+	/**
+	 * The multiple of twelve that leaves the fewest of a layer's notes outside the note-block range.
+	 *
+	 * <p>Its own count, not the melody-weighted one {@link #bestTransposeIntoRange} uses. That weight
+	 * was measured for moving a whole song, where the top voice at each instant is the melody often
+	 * enough to steer by; the top voice of one accompaniment layer is not the melody, it is merely
+	 * that layer's highest note. A weight measured for one question is not evidence about a different
+	 * one, so this minimises the thing the mode is named after and nothing else.</p>
+	 *
+	 * <p>Ties go to the smaller move, which is what keeps a layer already wholly in range where it
+	 * is: it scores nought at nought, and nothing can beat that.</p>
+	 */
+	private static int bestLayerOctaveShift(List<NoteEvent> notes) {
+		if (notes.isEmpty()) {
+			return 0;
+		}
+		int lowest = notes.stream().mapToInt(NoteEvent::midiNote).min().orElse(0);
+		int highest = notes.stream().mapToInt(NoteEvent::midiNote).max().orElse(0);
+		int best = 0;
+		int fewest = Integer.MAX_VALUE;
+		for (int shift = -120; shift <= 120; shift += 12) {
+			// Only shifts that keep every note a MIDI note. NoteEvent clamps to 0..127, so a shift
+			// that ran off either end would not be rejected, it would silently retune the notes it
+			// pushed over the edge.
+			if (lowest + shift < 0 || highest + shift > 127) {
+				continue;
+			}
+			int outside = 0;
+			for (NoteEvent note : notes) {
+				int moved = note.midiNote() + shift;
+				if (moved < NOTE_BLOCK_BASE_MIDI_NOTE || moved > NOTE_BLOCK_MAX_MIDI_NOTE) {
+					outside++;
+				}
+			}
+			if (outside < fewest || outside == fewest && Math.abs(shift) < Math.abs(best)) {
+				fewest = outside;
+				best = shift;
+			}
+		}
+		return best;
 	}
 
 	private static int octaveShiftIntoNoteBlockRange(int midiNote) {

@@ -272,13 +272,13 @@ public final class FastNoteblocksConfig {
 	 * want to work, and having to make it again every time the composer opens would be a reason
 	 * not to bother.</p>
 	 */
-	public static final int DEFAULT_LAYER_PANEL_WIDTH = 196;
+	public static final int DEFAULT_LAYER_PANEL_WIDTH = 150;
 	/**
 	 * Narrow enough to hold an instrument icon and a row number and nothing else, which is as far
 	 * as dragging goes before the panel folds instead.
 	 */
 	public static final int MIN_LAYER_PANEL_WIDTH = 34;
-	public static final int MAX_LAYER_PANEL_WIDTH = 420;
+	public static final int MAX_LAYER_PANEL_WIDTH = 900;
 	/**
 	 * GUI scale for the mod's own screens, or 0 to leave the game's alone.
 	 *
@@ -350,6 +350,8 @@ public final class FastNoteblocksConfig {
 	private int activeTrackIndex;
 	private List<SavedSequence> savedSequences;
 	private MidiQuantizeGrid midiQuantizeGrid;
+	private ComposerProject.OctaveShifting convertOctaveShifting;
+	private boolean convertSplitTransposed;
 	private boolean midiIgnorePercussion;
 	private String midiDefaultInstrument;
 	private MidiInstrumentSource midiInstrumentSource;
@@ -362,6 +364,14 @@ public final class FastNoteblocksConfig {
 	private int composerGuiScale;
 	private int layerPanelWidth;
 	private boolean layerPanelCollapsed;
+	/**
+	 * Whether the song library and the file browser list by name rather than newest first.
+	 *
+	 * <p>Kept beside the panel width rather than offered on the settings screen: it is view state,
+	 * set where it applies. It has to persist because the file browser is built fresh on every
+	 * import, and a choice that reset itself each time would not be a choice.</p>
+	 */
+	private boolean listSortByName;
 	private int repeatMergeTicks;
 	private int conversionGapPercentile;
 	private double commandsPerTick;
@@ -523,6 +533,12 @@ public final class FastNoteblocksConfig {
 						? DEFAULT_CONVERSION_GAP_PERCENTILE
 						: stored.conversionGapPercentile
 				);
+				// A file written before these existed says nothing about them, which is the default.
+				instance.convertOctaveShifting = stored.convertOctaveShifting == null
+					? ComposerProject.OctaveShifting.NOTES_ONLY
+					: stored.convertOctaveShifting;
+				instance.convertSplitTransposed = stored.convertSplitTransposed == null
+					|| stored.convertSplitTransposed;
 				instance.repeatMergeTicks = clampRepeatMergeTicks(
 					stored.repeatMergeTicks == null
 						? DEFAULT_REPEAT_MERGE_TICKS
@@ -548,6 +564,7 @@ public final class FastNoteblocksConfig {
 						: stored.layerPanelWidth
 				);
 				instance.layerPanelCollapsed = Boolean.TRUE.equals(stored.layerPanelCollapsed);
+				instance.listSortByName = Boolean.TRUE.equals(stored.listSortByName);
 			}
 		} catch (Exception ignored) {
 			instance = defaults();
@@ -1243,6 +1260,24 @@ public final class FastNoteblocksConfig {
 		this.buildLaneFloors = clampBuildLaneFloors(buildLaneFloors);
 	}
 
+	public ComposerProject.OctaveShifting convertOctaveShifting() {
+		return convertOctaveShifting;
+	}
+
+	public void setConvertOctaveShifting(ComposerProject.OctaveShifting value) {
+		this.convertOctaveShifting = value == null
+			? ComposerProject.OctaveShifting.NOTES_ONLY
+			: value;
+	}
+
+	public boolean convertSplitTransposed() {
+		return convertSplitTransposed;
+	}
+
+	public void setConvertSplitTransposed(boolean value) {
+		this.convertSplitTransposed = value;
+	}
+
 	public int conversionGapPercentile() {
 		return conversionGapPercentile;
 	}
@@ -1290,6 +1325,14 @@ public final class FastNoteblocksConfig {
 
 	public void setLayerPanelWidth(int layerPanelWidth) {
 		this.layerPanelWidth = clampLayerPanelWidth(layerPanelWidth);
+	}
+
+	public boolean listSortByName() {
+		return listSortByName;
+	}
+
+	public void setListSortByName(boolean value) {
+		this.listSortByName = value;
 	}
 
 	public boolean layerPanelCollapsed() {
@@ -1359,8 +1402,11 @@ public final class FastNoteblocksConfig {
 		config.composerGuiScale = DEFAULT_COMPOSER_GUI_SCALE;
 		config.layerPanelWidth = DEFAULT_LAYER_PANEL_WIDTH;
 		config.layerPanelCollapsed = false;
+		config.listSortByName = false;
 		config.repeatMergeTicks = DEFAULT_REPEAT_MERGE_TICKS;
 		config.conversionGapPercentile = DEFAULT_CONVERSION_GAP_PERCENTILE;
+		config.convertOctaveShifting = ComposerProject.OctaveShifting.NOTES_ONLY;
+		config.convertSplitTransposed = true;
 		config.commandsPerTick = PasteRate.DEFAULT;
 		config.buildLaneWidth = DEFAULT_BUILD_LANE_WIDTH;
 		config.buildLaneFloors = DEFAULT_BUILD_LANE_FLOORS;
@@ -1523,9 +1569,12 @@ public final class FastNoteblocksConfig {
 		private Integer composerGuiScale;
 		private Integer layerPanelWidth;
 		private Boolean layerPanelCollapsed;
+		private Boolean listSortByName;
 		private Integer composerSpeedQuarters;
 		private Integer repeatMergeTicks;
 		private Integer conversionGapPercentile;
+		private ComposerProject.OctaveShifting convertOctaveShifting;
+		private Boolean convertSplitTransposed;
 		private Double commandsPerTick;
 		private Integer buildLaneWidth;
 		private Integer buildLaneFloors;
@@ -1583,9 +1632,12 @@ public final class FastNoteblocksConfig {
 			this.composerGuiScale = config.composerGuiScale;
 			this.layerPanelWidth = config.layerPanelWidth;
 			this.layerPanelCollapsed = config.layerPanelCollapsed;
+			this.listSortByName = config.listSortByName;
 			this.composerSpeedQuarters = config.composerSpeedQuarters;
 			this.repeatMergeTicks = config.repeatMergeTicks;
 			this.conversionGapPercentile = config.conversionGapPercentile;
+			this.convertOctaveShifting = config.convertOctaveShifting;
+			this.convertSplitTransposed = config.convertSplitTransposed;
 			this.commandsPerTick = config.commandsPerTick;
 			this.buildLaneWidth = config.buildLaneWidth;
 			this.buildLaneFloors = config.buildLaneFloors;

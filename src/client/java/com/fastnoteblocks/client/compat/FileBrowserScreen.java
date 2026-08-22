@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
+import com.fastnoteblocks.client.FastNoteblocksConfig;
 import com.fastnoteblocks.client.composer.SongLibrary;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
@@ -93,7 +94,9 @@ final class FileBrowserScreen extends Screen {
 		listDirectory();
 
 		String filter = filterBox == null ? "" : filterBox.getValue();
-		filterBox = new EditBox(font, 8, 36, width - 16, 18, Component.literal("Filter"));
+		int sortWidth = 92;
+		filterBox = new EditBox(font, 8, 36, width - 16 - sortWidth - 4, 18,
+			Component.literal("Filter"));
 		filterBox.setMaxLength(260);
 		filterBox.setValue(filter);
 		filterBox.setResponder(value -> {
@@ -102,6 +105,15 @@ final class FileBrowserScreen extends Screen {
 			clampScroll();
 		});
 		addRenderableWidget(filterBox);
+		addRenderableWidget(Button.builder(Component.literal(sortLabel()), button -> {
+				FastNoteblocksConfig config = FastNoteblocksConfig.get();
+				config.setListSortByName(!config.listSortByName());
+				FastNoteblocksConfig.save();
+				scroll = 0;
+				selected = -1;
+				init();
+			})
+			.bounds(width - 8 - sortWidth, 36, sortWidth, 18).build());
 
 		addRenderableWidget(Button.builder(Component.literal("Up"), button -> enter(directory.getParent()))
 			.bounds(8, 58, 34, 18).build())
@@ -120,6 +132,10 @@ final class FileBrowserScreen extends Screen {
 		addRenderableWidget(Button.builder(CommonComponents.GUI_CANCEL, button -> onClose())
 			.bounds(width - 84, height - 26, 76, 18).build());
 		setInitialFocus(filterBox);
+	}
+
+	private static String sortLabel() {
+		return FastNoteblocksConfig.get().listSortByName() ? "Sort: A to Z" : "Sort: newest";
 	}
 
 	private void clampScroll() {
@@ -171,10 +187,14 @@ final class FileBrowserScreen extends Screen {
 		} catch (IOException | RuntimeException unreadable) {
 			status = "Cannot read this folder: " + unreadable.getMessage();
 		}
+		// Folders are always alphabetical. Their dates are about whatever was last written inside
+		// them, which is not a fact about the folder and is no help in finding one.
 		folders.sort(Comparator.comparing(entry -> entry.name().toLowerCase(Locale.ROOT)));
-		// Newest first. A folder of songs you keep is worth reading alphabetically, but the file you
-		// are looking for is nearly always the one that arrived most recently.
-		files.sort(Comparator.comparingLong(FileBrowserScreen::modifiedAt).reversed());
+		// Files default to newest first: the one you are looking for is nearly always the one that
+		// arrived most recently, and a Downloads folder sorted by name is a wall of strangers.
+		files.sort(FastNoteblocksConfig.get().listSortByName()
+			? Comparator.comparing(entry -> entry.name().toLowerCase(Locale.ROOT))
+			: Comparator.comparingLong(FileBrowserScreen::modifiedAt).reversed());
 		if (directory.getParent() == null) {
 			for (Path root : FileSystems.getDefault().getRootDirectories()) {
 				if (!root.equals(directory) && Files.isDirectory(root)) {
@@ -252,6 +272,55 @@ final class FileBrowserScreen extends Screen {
 		rememberDirectory.accept(directory);
 		minecraft.gui.setScreen(parent);
 		chosen.accept(entry.path());
+	}
+
+	/**
+	 * Files dragged onto the window from the desktop.
+	 *
+	 * <p>Minecraft installs a GLFW drop callback and hands whatever lands to whichever screen is
+	 * open, so this needs nothing but the override. It is the shortest route there is between a file
+	 * you have just downloaded and a song: no navigating to the folder, no remembering where the
+	 * browser was last pointed.</p>
+	 *
+	 * <p>A dropped folder is opened rather than refused, since dragging one here plainly means "look
+	 * in that". A dropped file of the wrong kind says so instead of doing nothing, because a drop
+	 * that is silently ignored is indistinguishable from one the window never received.</p>
+	 */
+	@Override
+	public void onFilesDrop(List<Path> dropped) {
+		if (dropped == null || dropped.isEmpty()) {
+			return;
+		}
+		for (Path path : dropped) {
+			if (Files.isDirectory(path)) {
+				enter(path);
+				return;
+			}
+		}
+		List<Path> usable = dropped.stream()
+			.filter(Files::isRegularFile)
+			.filter(path -> matchesExtension(path.getFileName().toString()))
+			.toList();
+		if (usable.isEmpty()) {
+			status = dropped.size() == 1
+				? "That is not a " + String.join(" or ", extensions) + " file."
+				: "None of those " + dropped.size() + " files is a "
+					+ String.join(" or ", extensions) + ".";
+			return;
+		}
+		// One song at a time, because opening one is what the caller asked for and a queue of them
+		// would need somewhere to wait that this screen does not have.
+		Path file = usable.getFirst();
+		if (usable.size() > 1) {
+			status = "Opening " + file.getFileName() + "; the other "
+				+ (usable.size() - 1) + " were left.";
+		}
+		Path folder = file.toAbsolutePath().getParent();
+		if (folder != null) {
+			rememberDirectory.accept(folder);
+		}
+		minecraft.gui.setScreen(parent);
+		chosen.accept(file);
 	}
 
 	@Override
@@ -367,14 +436,15 @@ final class FileBrowserScreen extends Screen {
 
 		if (visible.isEmpty() && status.isEmpty()) {
 			graphics.text(font, entries.isEmpty()
-					? "No " + String.join(" or ", extensions) + " files here. Drop some in the "
-						+ "import folder, or browse to wherever they are."
+					? "No " + String.join(" or ", extensions) + " files here. Drag one onto the "
+						+ "window from anywhere, or browse to where they are."
 					: "Nothing matches that filter.",
 				14, LIST_TOP, 0xFF8A9098, false);
 		}
 		String footer = status.isEmpty()
 			? visible.size() + " item" + (visible.size() == 1 ? "" : "s")
-				+ "   -   double-click a file, or type a path and press Enter"
+				+ "   -   double-click a file, drag one in from anywhere, "
+				+ "or type a path and press Enter"
 			: status;
 		graphics.text(font, footer, 8, height - 42, status.isEmpty() ? 0xFF8A9098 : 0xFFFF6B6B, false);
 	}
@@ -393,5 +463,19 @@ final class FileBrowserScreen extends Screen {
 	@Override
 	public void onClose() {
 		minecraft.gui.setScreen(parent);
+	}
+
+	/**
+	 * Hands the game its GUI scale back the instant this screen goes, whatever it is going to.
+	 *
+	 * <p>Vanilla calls this from the middle of the screen swap, so it lands before anything is
+	 * drawn. If another of our screens is opening it puts the scale straight back in its own init,
+	 * and if nothing is, the HUD behind this one is already the right size on the very next frame
+	 * rather than a tick later.</p>
+	 */
+	@Override
+	public void removed() {
+		ComposerScale.screenClosed(this);
+		super.removed();
 	}
 }

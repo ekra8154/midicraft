@@ -79,6 +79,34 @@ final class SongImports {
 		}
 	}
 
+	/** Every extension a dropped file could be read as, for the screens that accept a drop. */
+	static final List<String> IMPORTABLE = java.util.stream.Stream
+		.concat(List.of(".mid", ".midi", ".nbs").stream(), SchematicReader.EXTENSIONS.stream())
+		.toList();
+
+	static boolean importable(Path file) {
+		String lower = file.getFileName().toString().toLowerCase(Locale.ROOT);
+		return IMPORTABLE.stream().anyMatch(lower::endsWith);
+	}
+
+	/**
+	 * Reads a file that arrived without anyone browsing for it, choosing the reader by extension.
+	 *
+	 * <p>What a drag-and-drop lands on. The browser knows which kind it went looking for; a file
+	 * dropped on the window announces only its own name, so the extension is all there is to go
+	 * on -- which is enough, and means one gesture covers all five formats rather than the player
+	 * having to pick the right menu entry first.</p>
+	 */
+	static void openDropped(Screen returnTo, FastNoteblocksConfig config, Path file,
+			Consumer<Imported> onDone) {
+		String lower = file.getFileName().toString().toLowerCase(Locale.ROOT);
+		if (SchematicReader.EXTENSIONS.stream().anyMatch(lower::endsWith)) {
+			readSchematic(returnTo, file, onDone);
+			return;
+		}
+		readSongFile(returnTo, config, file.toString(), onDone);
+	}
+
 	/** A saved build, read back into a song by following its redstone. */
 	static void chooseSchematic(Screen returnTo, FastNoteblocksConfig config,
 			Consumer<Imported> onDone) {

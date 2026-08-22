@@ -80,12 +80,17 @@ class TransposeFitTest {
 		assertTrue(fit.worthDoing());
 	}
 
-	/** Only what is being built has to fit, since a layer left out is not in the world. */
+	/**
+	 * Only what is being built has to fit, since a layer left out is not in the world.
+	 *
+	 * <p>Left out means muted or hidden. There used to be a flag of its own for it, which meant the
+	 * composer could be playing one set of layers while a build placed another.</p>
+	 */
 	@Test
 	void measuresOnlyTheLayersInTheBuild() {
 		ComposerProject song = songOf(
 			new Layer("Built", "HARP", false, true, true, List.of(note(LOW - 4, 0L))),
-			new Layer("Excluded", "HARP", false, false, true, List.of(note(120, 0L))));
+			new Layer("Excluded", "HARP", true, true, true, List.of(note(120, 0L))));
 
 		TransposeFit fit = song.bestTransposeIntoRange();
 
@@ -97,7 +102,7 @@ class TransposeFitTest {
 	void movesEveryLayerIncludingTheOnesLeftOut() {
 		ComposerProject song = songOf(
 			new Layer("Built", "HARP", false, true, true, List.of(note(60, 0L))),
-			new Layer("Excluded", "HARP", false, false, true, List.of(note(48, 0L))));
+			new Layer("Excluded", "HARP", true, true, true, List.of(note(48, 0L))));
 
 		ComposerProject moved = song.transposedBy(5);
 

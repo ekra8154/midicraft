@@ -93,4 +93,46 @@ class ComposerHistoryTest {
 
 		assertEquals(song, history.current());
 	}
+
+	/**
+	 * An edit that moved the time marker takes the marker back with it, and forward again.
+	 *
+	 * <p>A paste moves the marker as part of what it does -- that is what makes holding Ctrl+V lay a
+	 * passage down -- so taking one back and leaving the marker four bars on takes back half of
+	 * it.</p>
+	 */
+	@Test
+	void anEditThatMovedTheMarkerRestoresIt() {
+		ComposerProject song = ComposerProject.empty("Song");
+		ComposerHistory history = new ComposerHistory(song);
+
+		history.apply("paste 3 notes", song.addNote(0, 60, 1920L, 120L), 480L);
+
+		assertEquals(480L, history.undoCursor(), "where the marker stood before the paste");
+		history.undo(2400L);
+		assertEquals(2400L, history.redoCursor(), "and where it stood after it");
+
+		history.redo(480L);
+		assertEquals(480L, history.undoCursor(), "which undo can take back again");
+	}
+
+	/**
+	 * An edit that left the marker alone says nothing about where it should be.
+	 *
+	 * <p>Undoing a note deleted five minutes ago should not throw the marker back to wherever it
+	 * stood at the time. You have been somewhere else since, and that is not part of what Ctrl+Z
+	 * was asked to take back.</p>
+	 */
+	@Test
+	void anOrdinaryEditLeavesTheMarkerWhereItIs() {
+		ComposerProject song = ComposerProject.empty("Song");
+		ComposerHistory history = new ComposerHistory(song);
+
+		history.apply("add note", song.addNote(0, 60, 0L, 120L));
+
+		assertEquals(ComposerHistory.NO_CURSOR, history.undoCursor());
+		history.undo(9600L);
+		assertEquals(ComposerHistory.NO_CURSOR, history.redoCursor(),
+			"and the marker's present position is not smuggled onto the redo either");
+	}
 }

@@ -95,12 +95,29 @@ public final class SongLibrary {
 				// the same invariants a freshly built one has.
 				library.songs.put(id, new ComposerProject(song.name(), song.ppq(),
 					song.tempoMicrosPerQuarter(), song.layers(), song.activeLayerIndex(),
-					song.nextNoteId(), song.endTick(), song.speedQuarters()));
+					song.nextNoteId(), song.endTick(), song.speedQuarters(), song.markers()));
 			} catch (Exception unreadableSong) {
 				library.failures.add(id);
 			}
 		}
 		return library;
+	}
+
+	/**
+	 * When a song was last written, for a picker that lists newest first.
+	 *
+	 * <p>Asked of the file rather than kept on the composition, because it is a fact about the save
+	 * and not about the music -- a song carries no date of its own, and inventing one would mean
+	 * deciding whether opening a song counted as touching it.</p>
+	 *
+	 * @return milliseconds since the epoch, or 0 for a song whose file cannot be read
+	 */
+	public static long modifiedAt(String id) {
+		try {
+			return Files.getLastModifiedTime(DIRECTORY.resolve(id + ".json")).toMillis();
+		} catch (Exception unreadable) {
+			return 0L;
+		}
 	}
 
 	public List<String> ids() {

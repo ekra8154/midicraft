@@ -111,6 +111,231 @@ never intercepts right-clicks. If the required item is not in the hotbar, the
 selected slot is left unchanged.
 
 
+## Convert for Minecraft
+
+A note block plays two octaves and one semitone, MIDI 54 to 78, and most music
+does not fit in that. Convert brings every note into it by moving notes whole
+octaves -- always whole octaves, because a part moved by anything else is not in
+a different octave, it is in a different key from the rest of the song.
+
+Two settings under **Convert for Minecraft** decide how:
+
+- **Out-of-range notes** -- `Shift the notes` moves only the notes that are out
+  of range, each by its own nearest octave, and leaves everything else exactly
+  where it was written. `Shift the layer, then the notes` moves the whole layer
+  to wherever the fewest of its notes are out of range and then shifts whatever
+  is still out, note by note. The second splits fewer layers and keeps a part's
+  intervals together; the cost is that notes with nothing wrong with them can
+  move, when moving them catches more strays than it creates. A layer already
+  wholly in range scores nothing at all and stays where it is.
+- **Split transposed notes into layers** -- when a note takes a different octave
+  from the rest of its layer, give it a layer of its own, named with the octave
+  it moved. Nothing about a layer requires this: it is so you can see what
+  Convert moved, mute it, or put it back. Off keeps the layer whole and the layer
+  count down, and two notes an octave apart that land on one pitch become one
+  note instead of one dropped layer.
+
+Both modes end with every note in range, whichever way the split is set, because
+the last step of each is the same per-note octave shift and the window is wide
+enough that no pitch class can fail. A wide part still splits either way if no
+single octave holds it -- that is the part being wider than a note block, not a
+setting being wrong.
+
+
+## Copying and repeating
+
+Dragging a box over a passage does two things. It selects the notes inside it,
+and it leaves a **selection range** behind: a tinted band across the roll with
+its length written in it, and a bracket with a handle at each end in the strip
+along the bottom of the ruler.
+
+The range is there because a set of notes is not a length. Notes end on the last
+note; a passage ends on silence, and nothing in a copy says how much. So the
+range is what Ctrl+V and Ctrl+D step by, and either end of it can be dragged --
+pull the right-hand one past the last note and watch the number change. That is
+how you say "and half a bar of rest". Right-click the strip to drop the range
+without dropping the selection.
+
+- **Ctrl+C, Ctrl+V** copy and paste. Paste lands at the playback marker and then
+  moves the marker on by the range, so pressing Ctrl+V again continues the
+  passage instead of laying a second copy on the first. Ctrl+Shift+V pastes back
+  where the copy was taken from. A copy keeps the length it was made with until
+  something else is copied.
+- **Ctrl+D** duplicates the selection immediately after itself and leaves the
+  selection on the copy, so pressing it again adds another repeat. No clipboard
+  is involved and every note stays on the layer it is already on -- a four-part
+  phrase comes back as four parts. A paste, by contrast, is aimed at a layer.
+
+Selections made without a box -- Ctrl+A, or the Select menu -- have no range, so
+the length is guessed from the notes: the last one, plus the tightest gap between
+any two of them. That is usually right for a phrase of even steps and it is
+always visible, drawn as a hairline in the same strip, before you commit to it.
+
+
+## Sorting the lists
+
+The song library and the file browser both list **newest first** by default: the
+song you last saved, or the file you just downloaded, is nearly always the one
+you came back for. A **Sort** button beside the search box switches either to
+A to Z, and the choice sticks -- it is saved with the settings, because the file
+browser is built fresh on every import and a choice that reset itself would not
+be one. Both lists follow the same setting.
+
+Each song row says when it was last saved, in the same words the order is in --
+`2 hours ago`, `3 days ago` -- so the order has a visible key rather than one you
+take on trust. Folders in the browser stay alphabetical whichever way files are
+sorted: a folder's date is about whatever was last written inside it, which is no
+help in finding the folder.
+
+
+## Dragging a file in
+
+Drag a `.mid`, `.midi`, `.nbs`, `.nbt`, `.schem` or `.litematic` file from your
+desktop onto the Minecraft window and it is imported. This works on the song
+library, in the composer, and in the file browser -- whichever is open takes it.
+
+The extension chooses the reader, so there is no need to pick the matching import
+button first. Dropping a folder onto the file browser opens that folder instead.
+Dropping several files takes the first one it can read and says so rather than
+guessing at a queue. Dropping something it cannot read says that too, because a
+drop that is silently ignored looks exactly like one the window never got.
+
+Onto the composer it goes through the same unsaved-changes check the Import menu
+entry does: a drop is easy to make by accident in a way that choosing a menu
+entry is not.
+
+
+## Two panes, one keyboard
+
+The composer has two halves that own a selection: the layer panel and the piano
+roll. The keyboard points at whichever you clicked last, and that decides what
+Delete, Ctrl+A, Ctrl+C, Ctrl+X, Ctrl+V, Ctrl+D and Ctrl+E act on. Clicking into
+the roll leaves the layers selected -- it only stops the keyboard reaching them.
+
+You can see which has it. A selection in the pane holding the keyboard draws at
+full strength; the other pane's draws muted. Same highlight, two saturations, so
+"these are still selected and Delete will not reach them" needs nothing new to
+learn.
+
+This replaces a rule you could not see. Delete used to mean "the notes, or the
+layers if no note is selected", so reaching for it while believing a passage was
+selected took a layer instead. Five other keys had the opposite fault and were
+nailed to one pane whatever you were working in.
+
+With the panel holding the keyboard:
+
+- **Ctrl+C** takes the selected layers whole -- names, instruments, states and
+  notes. **Ctrl+X** takes them and removes them. **Ctrl+V** puts them back
+  directly below the lowest selected row, or on the end when nothing is selected.
+  Pasted layers get fresh note ids and keep their names.
+- **Ctrl+D** duplicates them, each copy under its own original.
+- **Ctrl+E** merges them. **Ctrl+A** selects every layer.
+- **Delete** and **Backspace** remove them.
+
+Undo and redo are not routed and never were: there is one history for the whole
+composition, and Ctrl+Z takes back the last thing you did whichever pane did it.
+
+
+## What gets built
+
+A layer goes into the build if you can hear it and see it. Muting a layer or
+hiding it takes it out; setting it back to Active puts it back. There is nothing
+else to set -- what you hear in the composer is what the machine plays.
+
+That used to be a separate flag, a dot on each row, independent of mute. It made
+the composer two things at once: preview played the unmuted layers and a build
+placed the dotted ones, with nothing connecting them, so pressing Space was not a
+preview of the build and there was no way to hear what would be built. A DAW does
+not have this problem, because a bounce is the same signal chain as the transport
+-- what you heard is what you got. This is that.
+
+**Solo is the exception, on purpose.** Soloing is a lens for listening around a
+part, not a decision about the song, so the layers it silences are still built.
+That is the one case where preview and build disagree, and the status bar says so
+while any layer is soloed.
+
+Muting a layer to hear around it and then pasting is the mistake this invites, so
+two things say the count: the status line reads `Build: 12 of 15 layers`, and
+starting a paste says `3 layers are muted or hidden, so they are not in this
+build.`
+
+Older songs carry the old flag in their files and it is ignored. Nothing is lost
+by it: a layer that was dotted but muted is now left out, and a layer that was
+undotted but audible is now built.
+
+
+## Tempo and speed
+
+Two numbers decide how fast a song plays, and they multiply.
+
+The **tempo** is the song's own, written in the file as microseconds per quarter
+note and shown as BPM. The **Speed** slider is a ratio on top of it, from 0.25x
+to 8.00x in quarter steps. It is not a preview: it is saved with the song and the
+build runs at it, so a song at 150 BPM and 2.00x really is a 300 BPM song.
+
+The status bar shows the sum -- `150 x 2.00 = 300 BPM` -- and the song's
+resolution beside it, `480 ticks/beat`. That last number, ticks per quarter note,
+is what the fraction grid is counted in: a 1/16 line is a quarter of it. It has
+no bearing on how long anything lasts, which is why two songs at the same BPM and
+different resolutions have the same 1/16 in real time.
+
+**Edit > Apply speed to the tempo** folds the slider into the tempo and puts it
+back to 1.00x. Nothing about the song changes -- 150 at 2.00x and 300 at 1.00x
+are the same song, note for note -- but the number written in the file becomes
+the one it plays at, and the slider is free to be a ratio of the new baseline.
+Convert does this as its first step; this is that step by itself.
+
+
+## The snap grid
+
+The Snap control offers two different kinds of grid, and they are absolute about
+different things.
+
+The **note values** -- 1/4, 1/8, 1/16, 1/32 -- are absolute in the *song*. A 1/16
+is a sixteenth of a quarter note whatever the tempo is doing. They are what bars
+and beats are made of, and they are what you want when you are writing music.
+
+**Repeater tick** and **game tick** are absolute in *real time*. A repeater tick
+is 100 ms, the shortest delay a repeater can add and so the closest two notes can
+be built; a game tick is half that, reachable only by a build laying a second
+lane. Their lines are drawn where those moments actually fall, which on a song
+whose tempo does not divide into them means visibly not on the beat. That is the
+information, not a fault: it is what an unconverted song looks like, and
+Edit > Convert for Minecraft is what moves the tempo until the two grids agree.
+
+Because they measure different things, the same setting means different amounts
+of time in different songs. `Snap 1/16` is one repeater tick at 150 BPM, two at
+75, three at 50, and a quarter of one at 300 BPM played at 2.00x. So the status
+bar carries the translation -- `grid 1/16 = 1 repeater tick` -- and it moves as
+the tempo and the speed slider move. The Snap button turns amber when its grid is
+not one the current paste mode can build on, and its tooltip says why.
+
+Bar lines and bar numbers are drawn whatever the snap is set to. They used to
+appear only where a snap line happened to land on one, so choosing a redstone
+grid on an unaligned song took the bars off the roll entirely -- which is the one
+thing that makes the roll readable.
+
+
+## Markers
+
+A marker is a named position on the composer's timeline. Nothing is built from
+one and nothing sounds at one -- it is somewhere to write down what a stretch of
+the song is, so that finding the second chorus again is reading a label rather
+than counting bars.
+
+**M** puts one where the playback marker is standing, or takes away the one
+already there; **Edit > Markers** is the same three actions with the mouse. They
+appear in a strip above the ruler, which is only there while the song has
+markers -- with none, the ruler sits flush against the menu bar. Click a label to
+jump the playback marker to it, double-click to rename it, right-click to remove
+it, and click the empty part of the strip to add one where you clicked. A faint
+line drops from each one through the roll.
+
+One marker to a tick, so adding one where another already stands renames it.
+They are saved with the composition, they come forward when **Snap to song
+start** pulls the music forward, and Ctrl+Z takes back any of it.
+
+
 ## Debug commands
 
 Off by default; the switch is on the Debug tab of the settings, and takes effect
@@ -153,7 +378,9 @@ There is no dispenser. An empty dispenser and an empty dropper both play
 
 A layer set to one of these is not tuned. Every hit sounds the same, so the row a
 hit is drawn on is only somewhere to put it, and two hits on the same tick are one
-hit. Nothing on such a layer is ever out of range.
+hit. Nothing on such a layer is ever out of range, and Convert leaves it exactly
+where it is -- there is no octave to move it to that would sound like anything
+different, so it is neither transposed nor split.
 
 Each effect names how far it can be heard, because they are not all alike. Most
 carry 16 blocks; a bell carries 32, a mob head note block 48, and a sculk shrieker
