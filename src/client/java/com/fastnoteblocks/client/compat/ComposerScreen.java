@@ -5476,14 +5476,17 @@ public final class ComposerScreen extends Screen {
 			return true;
 		}
 		if (draggingRangeHandle != 0) {
-			// Held one grid step apart at the least, because a range of nothing is a paste that never
-			// advances -- and dragging one end past the other is a gesture nobody means.
-			long grid = Math.max(1L, gridTicks());
+			// Held one grid line apart at the least, because a range of nothing is a paste that
+			// never advances -- and dragging one end past the other is a gesture nobody means. The
+			// line before or after the other end, rather than a rounded width off it, so both ends
+			// stay on the grid the box put them on.
+			double span = gridSpan();
 			long at = Math.max(0L, snapTick(mouseTick(event.x())));
 			if (draggingRangeHandle == 1) {
-				rangeStart = Math.min(at, rangeEnd - grid);
+				long limit = gridLineAt(Math.max(0L, gridIndexNear(rangeEnd, span) - 1L), span);
+				rangeStart = Math.min(at, limit);
 			} else {
-				rangeEnd = Math.max(at, rangeStart + grid);
+				rangeEnd = Math.max(at, gridLineAt(gridIndexNear(rangeStart, span) + 1L, span));
 			}
 			return true;
 		}
@@ -7533,14 +7536,18 @@ public final class ComposerScreen extends Screen {
 	 * the answer nearly every time and visible when it is not.</p>
 	 */
 	private void setRangeFromBox(double endX) {
-		long grid = Math.max(1L, gridTicks());
+		// Grid lines, not multiples of a rounded width. Rounding the width first and stepping it out
+		// is the drift that took the drawn grid off the real one: a repeater tick at 128 BPM is
+		// 102.4 composer ticks, so a range measured in hundred-and-twos lands further and further
+		// from the lines it is supposed to be sitting on, and a box drawn a minute into the song
+		// bound itself to positions between them. The lines are where they are; ask for one.
+		double span = gridSpan();
 		long from = Math.max(0L, Math.round(Math.min(boxOriginTick, mouseTick(endX))));
 		long to = Math.max(0L, Math.round(Math.max(boxOriginTick, mouseTick(endX))));
-		rangeStart = from / grid * grid;
-		rangeEnd = (to + grid - 1L) / grid * grid;
-		if (rangeEnd <= rangeStart) {
-			rangeEnd = rangeStart + grid;
-		}
+		long startIndex = gridIndexInside(from, span);
+		long endIndex = (long)Math.ceil(Math.max(0L, to) / span - 1.0e-9);
+		rangeStart = gridLineAt(startIndex, span);
+		rangeEnd = gridLineAt(Math.max(endIndex, startIndex + 1L), span);
 		draggingRangeHandle = 0;
 	}
 
