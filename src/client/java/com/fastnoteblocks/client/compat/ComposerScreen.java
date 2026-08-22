@@ -5000,20 +5000,34 @@ public final class ComposerScreen extends Screen {
 		// Every menu above has had its say and none of them is a pane, so whatever is left is a
 		// click on the composition itself and decides where the keyboard points.
 		//
-		// A press that arrives while the roll does not have the keyboard is spent on giving it the
-		// keyboard. The panel and the roll are two places to be, so clicking out of one and into
-		// the other is a move rather than an edit -- and the same is true of the click that brings
-		// the window back to the front, which used to leave a note behind wherever the cursor
-		// happened to be resting when you tabbed away.
-		pressClaimedFocus = !windowWasFocused
-			|| (focusedPane != Pane.ROLL && event.x() >= layerPanelWidth());
+		// The roll is where the keyboard lives. Picking a layer is something you do in the middle of
+		// writing notes -- to say which voice the next one goes on -- so a click on a row selects it
+		// and leaves the keyboard where it was. Any click on the panel taking the keyboard with it
+		// meant every one of those cost a click back, and Delete pointed at the wrong thing in
+		// between.
+		//
+		// The panel is asked for by clicking a row that is already selected. That is a press with no
+		// other job: the layer is picked, so the only thing left for it to mean is "and now I am
+		// working in here". Two clicks to reach the layer shortcuts, and none of them ambiguous.
+		int pressedRow = layerHeaderAt(event.x(), event.y());
+		Pane wanted = event.x() >= layerPanelWidth() ? Pane.ROLL
+			: pressedRow >= 0 && selectedLayers.contains(pressedRow) ? Pane.LAYERS
+			: focusedPane;
+		// A press that arrives while a pane does not have the keyboard is spent on giving it the
+		// keyboard. On the roll that means it may not write a note -- which is also true of the
+		// click that brings the window back to the front, and used to leave a note behind wherever
+		// the cursor happened to be resting when you tabbed away. On the panel it means the press
+		// may not collapse a selection of several rows down to the one under it, or asking for the
+		// keyboard would cost you the selection you wanted it for.
+		boolean claimingLayers = focusedPane != Pane.LAYERS && wanted == Pane.LAYERS;
+		pressClaimedFocus = !windowWasFocused || (focusedPane != Pane.ROLL && wanted == Pane.ROLL);
 		windowWasFocused = true;
 		// The box is drawn to wherever the mouse was last seen, and after a spell outside the window
 		// that is wherever it left. One frame of a selection box stretched across the whole song,
 		// every time you clicked back in.
 		lastMouseX = event.x();
 		lastMouseY = event.y();
-		focusedPane = event.x() < layerPanelWidth() ? Pane.LAYERS : Pane.ROLL;
+		focusedPane = wanted;
 		if (event.button() == 1) {
 			int stateLayer = layerStateAt(event.x(), event.y());
 			if (stateLayer >= 0) {
@@ -5084,7 +5098,7 @@ public final class ComposerScreen extends Screen {
 				layerDragStartY = event.y();
 				layerDragY = event.y();
 				layerDragActive = false;
-				layerDragCollapse = holding;
+				layerDragCollapse = holding && !claimingLayers;
 				return true;
 			}
 		}
