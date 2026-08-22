@@ -4229,18 +4229,6 @@ public final class ComposerScreen extends Screen {
 			double snapSpan, boolean trueGrid, boolean drawSnap) {
 		long beatTicks = readableStep(Math.max(1L, project().ppq()), measureTicks);
 		boolean showLabels = measureTicks / ticksPerPixel >= MIN_LABEL_PIXEL_SPACING;
-		if (drawSnap) {
-			int snapColor = crowdedGridColor(trueGrid ? 0x17D9863C : 0x0F2A2F36,
-				snapSpan / ticksPerPixel, MIN_GRID_PIXEL_SPACING);
-			for (long index = (long)Math.floor(horizontalScroll / snapSpan);
-					gridLineAt(index, snapSpan) <= lastTick + snapSpan; index++) {
-				long line = gridLineAt(index, snapSpan);
-				int x = tickX(line);
-				if (x >= rollX && x <= rollX + rollWidth && line % beatTicks != 0L) {
-					graphics.fill(x, rollY, x + 1, rollY + rollHeight, snapColor);
-				}
-			}
-		}
 		// The same crowding fade as everything else. These were the last grid drawn at one strength
 		// whatever the zoom, and they fail hardest of all of them: once the beat step outgrows a
 		// bar it is rounded up to whole bars, so every line on screen is a bar line and every one
@@ -4266,6 +4254,32 @@ public final class ComposerScreen extends Screen {
 			if (measure && showLabels) {
 				graphics.text(font, Long.toString(tick / measureTicks + 1),
 					x + 3, rollY + 2, 0xFFAAAAAA, false);
+			}
+		}
+
+		// The snap last, and over the beats rather than under them.
+		//
+		// It used to be drawn first and to skip any line the beat pass was going to draw, so that
+		// two part-transparent colours could not composite on the same pixel and come out darker
+		// than either. The cost of that only shows at the coarse settings: on Snap 1/4 every snap
+		// line is a beat, so every one of them was skipped and the setting had no colour on the roll
+		// at all. On 1/8 exactly half of them survived, which reads as the grid being every other
+		// line, and it is not.
+		//
+		// So the skip is now only for the bar lines. A bar is a landmark, it carries the number, and
+		// it is the one line worth keeping in its own colour. A beat that is also a snap line takes
+		// the amber over the top of it -- lighter rather than darker, since the amber is the
+		// brighter of the two -- and says what it is.
+		if (drawSnap) {
+			int snapColor = crowdedGridColor(trueGrid ? 0x17D9863C : 0x0F2A2F36,
+				snapSpan / ticksPerPixel, MIN_GRID_PIXEL_SPACING);
+			for (long index = (long)Math.floor(horizontalScroll / snapSpan);
+					gridLineAt(index, snapSpan) <= lastTick + snapSpan; index++) {
+				long line = gridLineAt(index, snapSpan);
+				int x = tickX(line);
+				if (x >= rollX && x <= rollX + rollWidth && line % measureTicks != 0L) {
+					graphics.fill(x, rollY, x + 1, rollY + rollHeight, snapColor);
+				}
 			}
 		}
 	}
