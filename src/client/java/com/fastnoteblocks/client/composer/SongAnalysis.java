@@ -109,28 +109,41 @@ public record SongAnalysis(
 		Set<Long> crowded = new LinkedHashSet<>();
 		Set<Long> halfTicked = new LinkedHashSet<>();
 		Map<Long, Double> gaps = new HashMap<>();
+		// Where a note stands, measured from the first event rather than from time zero.
+		//
+		// This used to ask of each consecutive pair whether the distance between them was a whole
+		// number of game ticks, on the grounds that a build is a chain of delays and only the gaps
+		// have to be expressible. True, and it names the wrong notes: one stray note makes two bad
+		// gaps, the one before it and the one after, so the note standing exactly on a line after a
+		// stray one was reported off the grid along with the stray. On a raw import that was 31 of
+		// 428 flagged notes, all of them in the right place, and the answer to "which notes do I
+		// need to move" had a tenth of the wrong notes in it.
+		//
+		// Measuring from the first event rather than from time zero is what makes this the same
+		// question and not a stricter one. Every note a whole number of ticks from the first is
+		// exactly every gap being whole; where the song sits relative to zero still does not
+		// matter, and a passage shifted bodily off the beat is as buildable as it ever was.
+		List<Long> sorted = checked.stream().sorted().toList();
+		long origin = sorted.isEmpty() ? 0L : sorted.get(0);
 		long previous = Long.MIN_VALUE;
-		for (long tick : checked.stream().sorted().toList()) {
+		for (long tick : sorted) {
+			// Measured in game ticks, because that is the finest a build can now place. A repeater
+			// still cannot delay by less than one repeater tick, but a second lane started half a
+			// tick late can, and the two together reach every game tick. So the grid this is held
+			// to is twice as fine as the repeaters laying it, and a note that falls between two
+			// repeater ticks is not an error any more -- it is the reason the second lane exists.
+			double fromOrigin = (tick - origin) / span * 2.0;
+			if (Math.abs(fromOrigin - Math.round(fromOrigin)) > 0.04) {
+				offGrid.add(tick);
+			}
 			if (previous != Long.MIN_VALUE) {
-				// A build is a chain of repeater delays, so only the gap between consecutive events
-				// has to be expressible. Where the song sits relative to time zero is irrelevant --
-				// an absolute-position test just flags every note when the musical grid and the
-				// repeater grid do not share a common multiple.
 				double gap = (tick - previous) / span;
 				gaps.put(tick, gap);
-				// Measured in game ticks, because that is the finest a build can now place. A
-				// repeater still cannot delay by less than one repeater tick, but a second lane
-				// started half a tick late can, and the two together reach every game tick. So the
-				// grid this is held to is twice as fine as the repeaters laying it, and the gaps
-				// that fall between two repeater ticks are not errors any more -- they are the
-				// reason the second lane exists.
 				double gameGap = gap * 2.0;
 				long whole = Math.round(gameGap);
 				if (gameGap < 1.0 - 1.0e-6) {
 					crowded.add(tick);
-				} else if (Math.abs(gameGap - whole) > 0.04) {
-					offGrid.add(tick);
-				} else if (whole % 2L != 0L) {
+				} else if (Math.abs(gameGap - whole) < 0.04 && whole % 2L != 0L) {
 					// A whole number of game ticks, and an odd one. Everything before this gap and
 					// everything after it are on opposite halves of the tick, so they cannot share
 					// a chain and the build needs both lanes.

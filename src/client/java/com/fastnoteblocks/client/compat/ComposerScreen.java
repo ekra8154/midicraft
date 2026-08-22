@@ -2839,8 +2839,9 @@ public final class ComposerScreen extends Screen {
 				+ "inaudible either way, but each costs a note block and one of the thirty a tick "
 				+ "can carry. Nothing is deleted: give one of those layers a different instrument "
 				+ "and both notes come back.";
-			case SELECT_OFF_GRID -> "Selects notes whose gap from the previous one is not a whole "
-				+ "repeater tick.";
+			case SELECT_OFF_GRID -> "Selects the notes that do not stand on a game tick, counting "
+				+ "from the first note in the song. These are the ones a build cannot place where "
+				+ "they are written, and the ones the grid lines are drawn to show.";
 			case SELECT_HALF_TICKED -> "Selects the notes that land between repeater ticks -- the "
 				+ "ones a single chain cannot place, and so the reason a song needs two lanes. Not "
 				+ "faults: a build of two lanes plays them exactly. Worth seeing when you would "
