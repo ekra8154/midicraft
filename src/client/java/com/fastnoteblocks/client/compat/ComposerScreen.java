@@ -6416,6 +6416,7 @@ public final class ComposerScreen extends Screen {
 
 	@Override
 	public void removed() {
+		ComposerScale.screenClosed(this);
 		setResizeCursor(false);
 		super.removed();
 	}

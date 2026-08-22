@@ -2,7 +2,6 @@ package com.fastnoteblocks.client.compat;
 
 import com.fastnoteblocks.client.FastNoteblocksConfig;
 import com.mojang.blaze3d.platform.Window;
-import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.ConfirmScreen;
 import net.minecraft.client.gui.screens.Screen;
@@ -37,8 +36,6 @@ public final class ComposerScale {
 	 * <p>See {@link #guarded}.</p>
 	 */
 	private static boolean laying;
-	/** The screen whose removal we are already waiting on, so it is only listened for once. */
-	private static Screen hooked;
 
 	private ComposerScale() {
 	}
@@ -66,15 +63,7 @@ public final class ComposerScale {
 	 * what is on screen during a transition is not worth relying on.</p>
 	 */
 	public static void screenOpened(Minecraft minecraft, Screen screen) {
-		guarded(() -> {
-			if (isOurs(screen) && hooked != screen) {
-				// Listened for once per screen, not once per init -- a screen inits again on every
-				// window resize, and each of those would leave another listener behind on it.
-				hooked = screen;
-				ScreenEvents.remove(screen).register(closed -> screenClosed(minecraft, closed));
-			}
-			update(minecraft, screen);
-		});
+		guarded(() -> update(minecraft, screen));
 	}
 
 	/**
@@ -89,11 +78,17 @@ public final class ComposerScale {
 	 * know that it is: the screen being removed is all anyone has been told. Its own init puts the
 	 * scale back, and both happen before a frame is drawn, so the only cost is a layout pass on a
 	 * screen that was about to be thrown away.</p>
+	 *
+	 * <p>Called from each of our screens rather than from Fabric's screen-removed event, which
+	 * targets a method this version of the game does not have any more -- screens moved from the
+	 * client to the GUI, and the event has been quietly firing for nobody. {@code Screen.removed}
+	 * is vanilla, is called by the swap itself, and cannot go the same way.</p>
 	 */
-	private static void screenClosed(Minecraft minecraft, Screen screen) {
-		if (hooked == screen) {
-			hooked = null;
+	public static void screenClosed(Screen screen) {
+		if (!isOurs(screen)) {
+			return;
 		}
+		Minecraft minecraft = Minecraft.getInstance();
 		guarded(() -> restore(minecraft));
 	}
 
