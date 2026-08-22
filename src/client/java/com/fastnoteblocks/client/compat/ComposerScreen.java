@@ -72,8 +72,27 @@ public final class ComposerScreen extends Screen {
 	 * other. The lane is only there when the song has markers, so a composition with none keeps the
 	 * ruler flush against the menu bar.</p>
 	 */
-	private static final int MARKER_LANE_HEIGHT = 11;
-	private static final int MARKER_COLOR = 0xFFA294FF;
+	/**
+	 * How tall a marker's tab is, at the foot of the ruler.
+	 *
+	 * <p>The markers had a strip of their own between the menu bar and the ruler, which cost every
+	 * song eleven pixels of roll to carry something most songs have none of, and put a second
+	 * timeline above the timeline. They live on the ruler now, alongside the playhead and the end
+	 * marker, because they are the same kind of thing: a place in the song you have named.</p>
+	 */
+	private static final int MARKER_TAB_HEIGHT = 5;
+	/**
+	 * A colour each, so a marker is recognisable before its name is read.
+	 *
+	 * <p>Picked off the tick rather than off the position in the list, so adding a marker in the
+	 * middle of a song does not recolour every marker after it. Mixed rather than taken modulo:
+	 * ticks land on bar lines and bar lines are all multiples of the same number, so straight
+	 * modulo gave every marker in a song the same colour.</p>
+	 */
+	private static final int[] MARKER_COLORS = {
+		0xFFA294FF, 0xFF6FD3F0, 0xFF6FE0A4, 0xFFE8C05A,
+		0xFFF08A8A, 0xFFE894D8, 0xFFB4E068, 0xFFF0A05A
+	};
 	/** How near the cursor a marker counts as the one being pointed at, in pixels. */
 	private static final int MARKER_GRAB_PIXELS = 6;
 	/**
@@ -758,7 +777,7 @@ public final class ComposerScreen extends Screen {
 	@Override
 	protected void init() {
 		clearWidgets();
-		rollY = TOOLBAR_HEIGHT + markerLaneHeight() + TIMELINE_RULER_HEIGHT;
+		rollY = TOOLBAR_HEIGHT + TIMELINE_RULER_HEIGHT;
 		rollHeight = Math.max(40, height - rollY - 24);
 		centerMinecraftRange();
 		// The menus are drawn, not built: see extractMenuBar. Only the three controls are widgets,
@@ -1783,14 +1802,13 @@ public final class ComposerScreen extends Screen {
 		long frameStart = profiling ? System.nanoTime() : 0L;
 		updatePlayback();
 		rollX = layerPanelWidth() + PIANO_WIDTH;
-		rollY = TOOLBAR_HEIGHT + markerLaneHeight() + TIMELINE_RULER_HEIGHT;
+		rollY = TOOLBAR_HEIGHT + TIMELINE_RULER_HEIGHT;
 		rollWidth = Math.max(40, width - rollX - 8);
 		rollHeight = Math.max(40, height - rollY - 24);
 		long mark = frameStart;
 		extractPanels(graphics);
 		mark = phase(PHASE_PANELS, mark);
 		extractTimeRuler(graphics, mouseX, mouseY);
-		extractMarkerLane(graphics, mouseX, mouseY);
 		mark = phase(PHASE_RULER, mark);
 		mark = extractPianoRoll(graphics, mouseX, mouseY, mark);
 		extractStatus(graphics);
@@ -3656,6 +3674,7 @@ public final class ComposerScreen extends Screen {
 				0xFFBFC4CA, false);
 			smallText(graphics, clockLabel(secondsAt(tick)), x + 3, rulerY + 13, 0xFF767C85);
 		}
+		extractMarkerTabs(graphics, mouseX, mouseY);
 		int endX = endMarkerX();
 		if (endX >= rollX && endX <= rollX + rollWidth) {
 			// Flag points back over the song, so the marker reads as the edge of something rather
@@ -3675,118 +3694,83 @@ public final class ComposerScreen extends Screen {
 			int labelX = Math.min(rollX + rollWidth - smallTextWidth(at) - 2, markerX + 5);
 			smallText(graphics, at, Math.max(rollX + 2, labelX), rulerY + 13, 0xFFFF8888);
 		}
-		if (mouseX >= rollX && mouseX < rollX + rollWidth && mouseY >= rulerY && mouseY < rollY) {
+		if (mouseX >= rollX && mouseX < rollX + rollWidth && mouseY >= rulerY && mouseY < rollY
+				&& !insideMarkerBand(mouseX, mouseY)) {
 			graphics.setTooltipForNextFrame(Component.literal(overEndMarker(mouseX, mouseY)
 				? "Drag to set where the song ends"
 				: "Drag to set playback start"), mouseX, mouseY);
 		}
 	}
 
-	/** How tall the marker strip is: nothing at all until the song has a marker to put in it. */
-	private int markerLaneHeight() {
-		return project().markers().isEmpty() ? 0 : MARKER_LANE_HEIGHT;
+	private int markerColor(ComposerProject.Marker marker) {
+		int mixed = Long.hashCode(marker.tick()) * 0x9E3779B1;
+		mixed ^= mixed >>> 15;
+		return MARKER_COLORS[Math.floorMod(mixed, MARKER_COLORS.length)];
 	}
 
-	private int markerLaneTop() {
-		return rollY - TIMELINE_RULER_HEIGHT - markerLaneHeight();
+	/** The strip of ruler the marker tabs hang in, which is the foot of it. */
+	private boolean insideMarkerBand(double x, double y) {
+		return x >= rollX && x < rollX + rollWidth
+			&& y >= rollY - MARKER_TAB_HEIGHT - 2 && y < rollY;
+	}
+
+	/** The marker whose tab a point in that strip is on, or null. */
+	private ComposerProject.Marker markerAtPoint(double x, double y) {
+		if (!insideMarkerBand(x, y)) {
+			return null;
+		}
+		ComposerProject.Marker nearest = null;
+		double best = MARKER_GRAB_PIXELS;
+		for (ComposerProject.Marker marker : project().markers()) {
+			double distance = Math.abs(x - tickX(marker.tick()));
+			if (distance <= best) {
+				best = distance;
+				nearest = marker;
+			}
+		}
+		return nearest;
 	}
 
 	/**
-	 * The markers on screen, each with the run of pixels its name is allowed to occupy.
+	 * The markers, as a coloured tab each, pointing down at the tick it stands on.
 	 *
-	 * <p>Worked out once and used by both the drawing and the clicking, because a label whose tab is
-	 * measured twice is a label you can see and cannot hit. A tab runs from its own tick to whatever
-	 * comes first: the width of its name, the next marker, or the end of the roll.</p>
+	 * <p>Drawn before the end marker and the playhead so those win where they overlap: one says
+	 * where the song stops and the other says what is sounding, and at the moment you need either
+	 * of them it is worth more than a landmark.</p>
 	 */
-	private List<MarkerTab> markerTabs() {
-		List<ComposerProject.Marker> markers = project().markers();
-		List<MarkerTab> tabs = new ArrayList<>();
-		for (int index = 0; index < markers.size(); index++) {
-			ComposerProject.Marker marker = markers.get(index);
+	private void extractMarkerTabs(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
+		ComposerProject.Marker hovered = overOpenMenu(mouseX, mouseY)
+			? null
+			: markerAtPoint(mouseX, mouseY);
+		int top = rollY - MARKER_TAB_HEIGHT - 1;
+		for (ComposerProject.Marker marker : project().markers()) {
 			int x = tickX(marker.tick());
-			if (x > rollX + rollWidth) {
-				break;
-			}
-			int next = index + 1 < markers.size()
-				? tickX(markers.get(index + 1).tick())
-				: Integer.MAX_VALUE;
-			int room = Math.min(Math.min(next, rollX + rollWidth) - x,
-				smallTextWidth(marker.label()) + 6);
-			if (room < 3 || x + room < rollX) {
+			if (x < rollX - MARKER_TAB_HEIGHT || x > rollX + rollWidth + MARKER_TAB_HEIGHT) {
 				continue;
 			}
-			tabs.add(new MarkerTab(marker, x, x + room));
-		}
-		return tabs;
-	}
-
-	private void extractMarkerLane(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
-		if (markerLaneHeight() <= 0) {
-			return;
-		}
-		int laneTop = markerLaneTop();
-		int laneBottom = laneTop + MARKER_LANE_HEIGHT;
-		graphics.fill(rollX, laneTop, rollX + rollWidth, laneBottom, 0xCC12161E);
-		graphics.fill(rollX, laneBottom - 1, rollX + rollWidth, laneBottom, 0xFF262B33);
-		for (MarkerTab tab : markerTabs()) {
-			boolean hovered = mouseY >= laneTop && mouseY < laneBottom
-				&& mouseX >= tab.left() && mouseX < tab.right();
-			if (tab.left() >= rollX) {
-				// Down through the ruler. The rest of the drop, over the roll itself, is drawn with the
-				// grid: the rows are washed with a near-opaque fill and anything under them is lost.
-				graphics.fill(tab.left(), laneBottom, tab.left() + 1, rollY,
-					hovered ? 0x66A294FF : 0x33A294FF);
+			int color = markerColor(marker);
+			// A triangle made of rows, narrowing onto the tick. Nothing in this screen draws
+			// anything but rectangles, and a shape that points is worth five of them.
+			for (int row = 0; row < MARKER_TAB_HEIGHT; row++) {
+				int reach = MARKER_TAB_HEIGHT - 1 - row;
+				graphics.fill(Math.max(rollX, x - reach), top + row,
+					Math.min(rollX + rollWidth, x + reach + 1), top + row + 1, color);
 			}
-			graphics.fill(Math.max(rollX, tab.left()), laneTop + 1, tab.right(), laneBottom - 1,
-				hovered ? 0xFF3E3670 : 0xFF262042);
-			if (tab.left() >= rollX) {
-				graphics.fill(tab.left(), laneTop + 1, tab.left() + 1, laneBottom - 1, MARKER_COLOR);
+			if (marker == hovered) {
+				graphics.fill(Math.max(rollX, x - MARKER_TAB_HEIGHT), top - 1,
+					Math.min(rollX + rollWidth, x + MARKER_TAB_HEIGHT), top, 0xFFFFFFFF);
 			}
-			// Fitted to where the name actually starts. A tab whose own tick has scrolled off the
-			// left is drawn from the roll's edge instead, and a name cut to the width of the whole
-			// tab would then run out past its right-hand end.
-			int textLeft = Math.max(rollX + 1, tab.left() + 3);
-			smallText(graphics, smallFit(tab.marker().label(), tab.right() - textLeft - 1), textLeft,
-				laneTop + 3, hovered ? 0xFFFFFFFF : 0xFFCFC8FF);
 		}
-		// Not while a menu is hanging over the lane, which every one of them does: they start two
-		// pixels under the bar and the lane starts at it.
-		if (mouseY >= laneTop && mouseY < laneBottom && mouseX >= rollX
-				&& mouseX < rollX + rollWidth && !overOpenMenu(mouseX, mouseY)) {
-			ComposerProject.Marker hovered = markerAtPoint(mouseX, mouseY);
-			graphics.setTooltipForNextFrame(Component.literal(hovered == null
-				? "Click to add a marker here. M adds one at the playback marker."
-				: "\"" + hovered.label() + "\" at bar "
+		if (hovered != null) {
+			graphics.setTooltipForNextFrame(Component.literal(
+				"\"" + hovered.label() + "\"" + " at bar "
 					+ (hovered.tick() / Math.max(1L, project().ppq() * 4L) + 1L)
-					+ "\nClick to jump there, double-click to rename, right-click to remove"),
+					+ "\n" + "Click to jump, double-click to rename, right-click to remove"),
 				mouseX, mouseY);
+		} else if (insideMarkerBand(mouseX, mouseY) && !overOpenMenu(mouseX, mouseY)) {
+			graphics.setTooltipForNextFrame(Component.literal(
+				"Click to add a marker here. M adds one at the playback marker."), mouseX, mouseY);
 		}
-	}
-
-	/** The marker whose tab a point in the lane is on, or null. */
-	private ComposerProject.Marker markerAtPoint(double x, double y) {
-		if (!insideMarkerLane(x, y)) {
-			return null;
-		}
-		List<MarkerTab> tabs = markerTabs();
-		for (MarkerTab tab : tabs) {
-			if (x >= tab.left() && x < tab.right()) {
-				return tab.marker();
-			}
-		}
-		// Only then the nearest post within reach. Checking the slop first would hand a click on the
-		// left edge of one tab to the tab before it, whose own right edge stops just short of here.
-		for (MarkerTab tab : tabs) {
-			if (Math.abs(x - tab.left()) <= MARKER_GRAB_PIXELS) {
-				return tab.marker();
-			}
-		}
-		return null;
-	}
-
-	private boolean insideMarkerLane(double x, double y) {
-		return markerLaneHeight() > 0 && x >= rollX && x < rollX + rollWidth
-			&& y >= markerLaneTop() && y < markerLaneTop() + MARKER_LANE_HEIGHT;
 	}
 
 	/**
@@ -4178,7 +4162,10 @@ public final class ComposerScreen extends Screen {
 		for (ComposerProject.Marker marker : project().markers()) {
 			int x = tickX(marker.tick());
 			if (x >= rollX && x <= rollX + rollWidth) {
-				graphics.fill(x, rollY, x + 1, rollY + rollHeight, 0x55A294FF);
+				// The tab's own colour carried down. Which line belongs to which tab is the thing a
+				// colour per marker buys, and it is only bought if the line is coloured too.
+				graphics.fill(x, rollY, x + 1, rollY + rollHeight,
+					0x55000000 | markerColor(marker) & 0xFFFFFF);
 			}
 		}
 	}
@@ -5096,7 +5083,7 @@ public final class ComposerScreen extends Screen {
 			}
 			return true;
 		}
-		if (insideMarkerLane(event.x(), event.y())) {
+		if (insideMarkerBand(event.x(), event.y())) {
 			ComposerProject.Marker hit = markerAtPoint(event.x(), event.y());
 			if (event.button() == 1) {
 				removeMarkerAt(hit == null ? -1L : hit.tick());
@@ -5104,9 +5091,8 @@ public final class ComposerScreen extends Screen {
 			}
 			if (event.button() == 0) {
 				if (hit == null) {
-					// The empty run of the lane is where a marker goes. Only reachable once the song
-					// has one, which is what keeps a stray click on a marker-less song from putting
-					// a flag in a strip that was not there a moment ago.
+					// The empty foot of the ruler is where a marker goes. Seven pixels of it, so
+					// the rest of the ruler still moves the playhead.
 					addMarkerAt(snapTick(mouseTick(event.x())));
 				} else if (doubleClick) {
 					renameMarker(hit);
@@ -7793,7 +7779,9 @@ public final class ComposerScreen extends Screen {
 
 	/** The end marker's grab zone, a few pixels either side of it in the ruler. */
 	private boolean overEndMarker(double x, double y) {
-		return insideRuler(x, y) && Math.abs(x - endMarkerX()) <= 4.0;
+		// Not down in the marker band. The two used to be in strips of their own and now share the
+		// ruler, so a marker standing near the song's end would otherwise be unreachable.
+		return insideRuler(x, y) && !insideMarkerBand(x, y) && Math.abs(x - endMarkerX()) <= 4.0;
 	}
 
 	private boolean insideRuler(double x, double y) {
@@ -7938,14 +7926,10 @@ public final class ComposerScreen extends Screen {
 	}
 
 	/** One row of an open menu: a thing to do, a setting to cycle, or a submenu to open. */
-	/** A marker and the run of pixels its name occupies in the lane. */
 	/** The two halves of the screen that own a selection and can hold the keyboard. */
 	private enum Pane {
 		ROLL,
 		LAYERS
-	}
-
-	private record MarkerTab(ComposerProject.Marker marker, int left, int right) {
 	}
 
 	private record MenuRow(ToolbarAction action, ToolbarSubmenu submenu) {
