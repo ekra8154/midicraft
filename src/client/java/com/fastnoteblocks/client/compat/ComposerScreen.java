@@ -749,7 +749,21 @@ public final class ComposerScreen extends Screen {
 	private int toastTop;
 	private int toastRight;
 	private int toastBottom;
+	/**
+	 * The note actually under the hand during a drag, and the pitch it was on when the drag began.
+	 *
+	 * <p>A drag can be carrying thirty notes and only one of them is the one you are holding. That
+	 * is the one worth hearing: a chord retuning under the cursor every time the hand crosses a row
+	 * is noise, and the note you took hold of is the one you are aiming.</p>
+	 */
+	private long dragHeldNoteId = -1L;
+	private int dragHeldMidi;
+	private int dragHeldLayer = -1;
+	private int dragHeardPitchDelta;
 	private long hoveredNoteId = -1L;
+	/** The key the cursor has been resting on, and since when, for the same dwell a note gets. */
+	private int hoveredKeyMidi = -1;
+	private long hoveredKeySince;
 	private long hoveredSince;
 	private ComposerProject cachedStatsProject;
 	private SongAnalysis cachedStats;
@@ -4196,6 +4210,7 @@ public final class ComposerScreen extends Screen {
 			}
 		}
 
+		extractKeyTooltip(graphics, mouseX, mouseY);
 		mark = phase(PHASE_KEYS, mark);
 		extractTimeGrid(graphics);
 		mark = phase(PHASE_GRID, mark);
@@ -4675,6 +4690,45 @@ public final class ComposerScreen extends Screen {
 		graphics.setComponentTooltipForNextFrame(font, lines, mouseX, mouseY);
 	}
 
+	/**
+	 * Names the key the cursor is resting on, after the same dwell a note takes to name itself.
+	 *
+	 * <p>Only every C is written on the keyboard -- there is no room for more at four pixels a row,
+	 * and a column of twelve names an octave would be unreadable anyway. That leaves counting up
+	 * from a C to answer "what note is this", which is a thing you should not have to do in a music
+	 * editor with a keyboard drawn down the side of it.</p>
+	 *
+	 * <p>The dwell matters as much as the tooltip. The cursor crosses this strip on the way to
+	 * everything, and a label that appeared the instant it did would be a label flickering under
+	 * the hand all day.</p>
+	 */
+	private void extractKeyTooltip(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
+		if (!overPianoKeys(mouseX, mouseY) || overOpenMenu(mouseX, mouseY)) {
+			hoveredKeyMidi = -1;
+			return;
+		}
+		int midi = mouseMidi(mouseY);
+		if (midi != hoveredKeyMidi) {
+			hoveredKeyMidi = midi;
+			hoveredKeySince = Util.getMillis();
+			return;
+		}
+		if (Util.getMillis() - hoveredKeySince < TOOLTIP_DWELL_MILLIS) {
+			return;
+		}
+		List<Component> lines = new ArrayList<>();
+		lines.add(Component.literal(midiName(midi)));
+		boolean buildable = midi >= ComposerProject.NOTE_BLOCK_BASE_MIDI_NOTE
+			&& midi <= ComposerProject.NOTE_BLOCK_MAX_MIDI_NOTE;
+		lines.add(buildable
+			? Component.literal("Note block pitch "
+					+ (midi - ComposerProject.NOTE_BLOCK_BASE_MIDI_NOTE))
+				.withStyle(net.minecraft.ChatFormatting.GRAY)
+			: Component.literal("Outside the note block range")
+				.withStyle(net.minecraft.ChatFormatting.RED));
+		graphics.setComponentTooltipForNextFrame(font, lines, mouseX, mouseY);
+	}
+
 	/** Nearest octave shift that would bring a note into the note-block range, or 0 if none does. */
 	private static int octaveShiftIntoRange(int midiNote) {
 		int best = 0;
@@ -4817,6 +4871,25 @@ public final class ComposerScreen extends Screen {
 	 *
 	 * @param midi the note in MIDI numbering, not the note block's 0-24
 	 */
+	/**
+	 * Plays the note being dragged at the pitch the drag has moved it to, so a drag can be tuned by
+	 * ear instead of by counting rows.
+	 *
+	 * <p>Clamped the way the move itself is clamped -- {@code moveNotes} will not push anything past
+	 * the ends of the range, so a drag held above the top plays the note it will actually leave
+	 * behind rather than one that does not exist.</p>
+	 */
+	private void soundHeldNote(int pitchDelta) {
+		if (dragHeldNoteId < 0L || dragHeldLayer < 0
+				|| dragHeldLayer >= project().layers().size()) {
+			return;
+		}
+		int midi = Math.max(MIN_MIDI_NOTE, Math.min(MAX_MIDI_NOTE, dragHeldMidi + pitchDelta));
+		soundNote(midi,
+			PreviewInstrument.byId(project().layers().get(dragHeldLayer).instrument()),
+			vivid(layerColor(dragHeldLayer)));
+	}
+
 	private void soundNote(int midi, PreviewInstrument instrument, int color) {
 		instrument.play(midi - ComposerProject.NOTE_BLOCK_BASE_MIDI_NOTE);
 		lightKey(midi, color);
@@ -5402,9 +5475,11 @@ public final class ComposerScreen extends Screen {
 				dragTickDelta = 0L;
 				dragPitchDelta = 0;
 				dragAxis = DragAxis.UNDECIDED;
-				soundNote(hitNote.midiNote(),
-					PreviewInstrument.byId(project().layers().get(hit.layerIndex()).instrument()),
-					vivid(layerColor(hit.layerIndex())));
+				dragHeldNoteId = hitNote.id();
+				dragHeldMidi = hitNote.midiNote();
+				dragHeldLayer = hit.layerIndex();
+				dragHeardPitchDelta = 0;
+				soundHeldNote(0);
 			}
 			return true;
 		}
@@ -5709,6 +5784,12 @@ public final class ComposerScreen extends Screen {
 				dragPitchDelta = pitchDelta;
 				dragPreview = dragBase.moveNotes(selectedNotes, tickDelta, pitchDelta);
 			}
+			// Once per row crossed, not once per frame: the pitch is what changed, and a note
+			// re-struck every frame while the hand sits still is a buzz rather than a pitch.
+			if (pitchDelta != dragHeardPitchDelta) {
+				dragHeardPitchDelta = pitchDelta;
+				soundHeldNote(pitchDelta);
+			}
 			return true;
 		}
 		if (selectingBox) {
@@ -5777,6 +5858,8 @@ public final class ComposerScreen extends Screen {
 			return true;
 		}
 		if (draggingNotes) {
+			dragHeldNoteId = -1L;
+			dragHeldLayer = -1;
 			// The passage goes with the notes, so the range that measures it goes too. Taken while
 			// the drag is still on, because the clamp is worked out from where the notes are now
 			// and a moment later that is where they have gone.
