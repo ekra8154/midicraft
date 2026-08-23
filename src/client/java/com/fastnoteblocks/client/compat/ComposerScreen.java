@@ -838,13 +838,25 @@ public final class ComposerScreen extends Screen {
 	/** The layer a press landed on, and whether it has moved far enough to be a reorder. */
 	private int layerDragIndex = -1;
 	/**
-	 * Dragging one end of a split voice's bracket in the keyboard strip: which voice, and which
+	 * Dragging one end of a split bracket in the keyboard strip: which bracket group, and which
 	 * end. The layer is not tracked because the brackets only show while exactly one split layer
 	 * is soloed, so the layer is whatever {@link #splitKeyboardLayerIndex} answers.
 	 */
-	private int bracketDragVoice = -1;
+	private int bracketDragGroup = -1;
 	private boolean bracketDragTop;
 	private long lastBracketDragAt;
+	/**
+	 * The per-bracket voice picker: which register it is for, or {@link Integer#MIN_VALUE} while
+	 * closed. The rows and anchor are copied out when it opens, so the picker survives its own
+	 * edits -- toggling a bracket's last voice off removes the bracket, and the picker has to go
+	 * on standing where it was for the voice to be toggled back on.
+	 */
+	private int tierMenuBase = Integer.MIN_VALUE;
+	private boolean tierMenuEffects;
+	private int tierMenuLo;
+	private int tierMenuHi;
+	private int tierMenuX;
+	private int tierMenuY;
 	/** Dragging the split between the layer panel and the roll, and whether the cursor says so. */
 	private boolean draggingSplitter;
 	private boolean resizeCursorShown;
@@ -1966,6 +1978,7 @@ public final class ComposerScreen extends Screen {
 		super.extractRenderState(graphics, mouseX, mouseY, partialTick);
 		mark = phase(PHASE_WIDGETS, mark);
 		extractInstrumentMenu(graphics, mouseX, mouseY);
+		extractTierMenu(graphics, mouseX, mouseY);
 		extractContextMenu(graphics, mouseX, mouseY);
 		extractLayerMenu(graphics, mouseX, mouseY);
 		extractToolbarMenu(graphics, mouseX, mouseY);
@@ -3520,6 +3533,10 @@ public final class ComposerScreen extends Screen {
 		if (palette != null && palette.contains(x, y)) {
 			return true;
 		}
+		NoteRect tierMenu = tierMenuRect();
+		if (tierMenu != null && tierMenu.contains(x, y)) {
+			return true;
+		}
 		if (layerMenuOpen && x >= layerMenuX && x < layerMenuX + layerMenuWidth()
 				&& y >= layerMenuY
 				&& y < layerMenuY + LayerAction.values().length * CONTEXT_MENU_ROW_HEIGHT + 4) {
@@ -4875,6 +4892,16 @@ public final class ComposerScreen extends Screen {
 				.withStyle(net.minecraft.ChatFormatting.GRAY)
 			: Component.literal("Outside the note block range")
 				.withStyle(net.minecraft.ChatFormatting.RED));
+		// The plain keyboard, but a split layer is picked: the brackets exist and are one solo
+		// away, which nothing else on screen says.
+		if (selectedLayers.size() == 1) {
+			int selected = selectedLayers.iterator().next();
+			if (selected < project().layers().size()
+					&& project().layers().get(selected).split() != null) {
+				lines.add(Component.literal("Solo this split layer to edit its brackets")
+					.withStyle(net.minecraft.ChatFormatting.AQUA));
+			}
+		}
 		graphics.setComponentTooltipForNextFrame(font, lines, mouseX, mouseY);
 	}
 
@@ -5389,6 +5416,19 @@ public final class ComposerScreen extends Screen {
 			snapMenuOpen = false;
 			return true;
 		}
+		NoteRect tierMenu = tierMenuRect();
+		if (tierMenu != null) {
+			if (event.button() == 0 && handleTierMenuClick(event.x(), event.y())) {
+				return true;
+			}
+			if (tierMenu.contains(event.x(), event.y())) {
+				return true;
+			}
+			// Spent on closing, like the palette below: putting the picker down must not also
+			// sound the key -- or re-open the bracket -- underneath it.
+			tierMenuBase = Integer.MIN_VALUE;
+			return true;
+		}
 		NoteRect palette = instrumentMenuRect();
 		if (palette != null) {
 			if (event.button() == 0 && handleInstrumentMenuClick(event.x(), event.y())) {
@@ -5479,8 +5519,14 @@ public final class ComposerScreen extends Screen {
 				instrumentMenuLayer = closing ? -1 : instrumentLayer;
 				if (!closing) {
 					// Opens on the tab the layer is already using, so the voice it has is the one
-					// under the cursor rather than one page away from it.
-					instrumentMenuEffects = !project().layers().get(instrumentLayer).pitched();
+					// under the cursor rather than one page away from it. A split layer is pitched
+					// whatever it holds, so its tab is read off the voices instead.
+					Layer opened = project().layers().get(instrumentLayer);
+					instrumentMenuEffects = opened.split() != null
+						? !opened.split().voices().isEmpty() && opened.split().voices().stream()
+							.allMatch(voice -> voice.instrument()
+								.startsWith(ComposerProject.SOUND_EFFECT_PREFIX))
+						: !opened.pitched();
 				}
 				return true;
 			}
@@ -5524,6 +5570,10 @@ public final class ComposerScreen extends Screen {
 		if (event.button() == 0 && overPianoKeys(event.x(), event.y())) {
 			// A bracket handle sits over the keys, and a press on one is a grab, not a note.
 			if (grabBracketHandle(event.x(), event.y())) {
+				return true;
+			}
+			// A bracket's body or icons open its picker: which of the register's instruments sound.
+			if (openTierMenu(event.x(), event.y())) {
 				return true;
 			}
 			// Where the marker is, is the cell -- but snapped to the nearest grid line rather than
@@ -5692,7 +5742,7 @@ public final class ComposerScreen extends Screen {
 		// and whichever branch answers it first leaves the other one latched -- a right-click during
 		// a box select used to be enough to strand the box on screen.
 		if (selectingBox || draggingNotes || draggingSplitter || draggingEndMarker || draggingPlayhead
-				|| layerDragIndex >= 0 || bracketDragVoice >= 0 || painting != LayerPaint.NONE) {
+				|| layerDragIndex >= 0 || bracketDragGroup >= 0 || painting != LayerPaint.NONE) {
 			return;
 		}
 		erasing = true;
@@ -5910,7 +5960,7 @@ public final class ComposerScreen extends Screen {
 			eraseAlong(event.x(), event.y());
 			return true;
 		}
-		if (bracketDragVoice >= 0) {
+		if (bracketDragGroup >= 0) {
 			dragBracketHandle(event.y());
 			return true;
 		}
@@ -6013,8 +6063,8 @@ public final class ComposerScreen extends Screen {
 			}
 			return true;
 		}
-		if (bracketDragVoice >= 0) {
-			bracketDragVoice = -1;
+		if (bracketDragGroup >= 0) {
+			bracketDragGroup = -1;
 			return true;
 		}
 		if (draggingSplitter) {
@@ -6934,20 +6984,60 @@ public final class ComposerScreen extends Screen {
 	}
 
 	/**
-	 * One bracket colour per voice, cycled. Telling five brackets apart is the whole job, so
+	 * One bracket colour per column, cycled. Telling five brackets apart is the whole job, so
 	 * these are picked far apart rather than tastefully.
 	 */
 	private static final int[] BRACKET_COLORS = {
 		0xFF5AB4E8, 0xFFE8C05A, 0xFF7ED67E, 0xFFE87A9E, 0xFFB48AE8, 0xFFE8925A
 	};
 
-	/** Each voice gets its own column in the key strip, walking left from the roll's edge. */
-	private int bracketX(int voiceIndex) {
-		return rollX - 10 - voiceIndex * 5;
+	/** Each bracket gets its own column in the key strip, walking left from the roll's edge. */
+	private int bracketX(int groupIndex) {
+		return rollX - 10 - groupIndex * 5;
 	}
 
-	/** A grabbed bracket end: which voice, and whether it is the top of it. */
-	private record BracketHandle(int voice, boolean top) {
+	/**
+	 * One bracket on the split keyboard: a register, and every voice that lives in it.
+	 *
+	 * <p>Voices sharing a register share a bracket -- bass and didgeridoo are one pair of
+	 * handles, because their 25 semitones genuinely are one range -- so the handles move the
+	 * whole tier together and the picker under the bracket chooses which of the register's
+	 * instruments sound. A sound effect voice has no register, so each band of rows is its own
+	 * bracket, shared only when two effects sit on exactly the same band.</p>
+	 */
+	private record BracketGroup(boolean effects, int base, int lo, int hi,
+		List<Integer> voiceIndices, List<String> instruments) {
+	}
+
+	/** The given split's brackets, in voice order -- lowest register first, bands after. */
+	private List<BracketGroup> bracketGroups(ComposerProject.Split split) {
+		java.util.Map<String, int[]> spans = new java.util.LinkedHashMap<>();
+		java.util.Map<String, List<Integer>> indices = new java.util.LinkedHashMap<>();
+		java.util.Map<String, List<String>> names = new java.util.LinkedHashMap<>();
+		for (int index = 0; index < split.voices().size(); index++) {
+			ComposerProject.Split.Voice voice = split.voices().get(index);
+			boolean effect = voice.instrument().startsWith(ComposerProject.SOUND_EFFECT_PREFIX);
+			int base = effect ? -1
+				: com.fastnoteblocks.InstrumentRanges.baseMidi(voice.instrument());
+			String key = effect ? "e" + voice.lo() + ":" + voice.hi() : "p" + base;
+			int[] span = spans.computeIfAbsent(key,
+				k -> new int[]{voice.lo(), voice.hi(), effect ? 1 : 0, base});
+			span[0] = Math.min(span[0], voice.lo());
+			span[1] = Math.max(span[1], voice.hi());
+			indices.computeIfAbsent(key, k -> new ArrayList<>()).add(index);
+			names.computeIfAbsent(key, k -> new ArrayList<>()).add(voice.instrument());
+		}
+		List<BracketGroup> groups = new ArrayList<>();
+		for (java.util.Map.Entry<String, int[]> entry : spans.entrySet()) {
+			int[] span = entry.getValue();
+			groups.add(new BracketGroup(span[2] != 0, span[3], span[0], span[1],
+				indices.get(entry.getKey()), names.get(entry.getKey())));
+		}
+		return groups;
+	}
+
+	/** A grabbed bracket end: which bracket, and whether it is the top of it. */
+	private record BracketHandle(int group, boolean top) {
 	}
 
 	/** The bracket end under the cursor, or null. The handles win over the keys beneath them. */
@@ -6956,14 +7046,15 @@ public final class ComposerScreen extends Screen {
 		if (split == null || !overPianoKeys(mouseX, mouseY)) {
 			return null;
 		}
-		for (int index = 0; index < split.voices().size(); index++) {
-			ComposerProject.Split.Voice voice = split.voices().get(index);
+		List<BracketGroup> groups = bracketGroups(split);
+		for (int index = 0; index < groups.size(); index++) {
+			BracketGroup group = groups.get(index);
 			int x = bracketX(index);
 			if (mouseX < x - 3 || mouseX >= x + 6) {
 				continue;
 			}
-			int top = noteY(voice.hi());
-			int bottom = noteY(voice.lo()) + rowHeight - 1;
+			int top = noteY(group.hi());
+			int bottom = noteY(group.lo()) + rowHeight - 1;
 			if (mouseY >= top - 2 && mouseY < top + 6) {
 				return new BracketHandle(index, true);
 			}
@@ -6974,32 +7065,70 @@ public final class ComposerScreen extends Screen {
 		return null;
 	}
 
+	/** Where a bracket's stack of instrument icons starts, centred on the bracket. */
+	private static int iconStackTop(BracketGroup group, int top, int bottom) {
+		return (top + bottom) / 2 - group.instruments().size() * 9;
+	}
+
+	/** The bracket whose body or icon stack the cursor is over, or -1. Handles are asked first. */
+	private int bracketBodyAt(double mouseX, double mouseY) {
+		ComposerProject.Split split = keyboardSplit();
+		if (split == null || !overPianoKeys(mouseX, mouseY)) {
+			return -1;
+		}
+		List<BracketGroup> groups = bracketGroups(split);
+		for (int index = 0; index < groups.size(); index++) {
+			BracketGroup group = groups.get(index);
+			int x = bracketX(index);
+			int top = noteY(group.hi());
+			int bottom = noteY(group.lo()) + rowHeight - 1;
+			boolean overColumn = mouseX >= x - 3 && mouseX < x + 6
+				&& mouseY >= top && mouseY < bottom;
+			int iconTop = iconStackTop(group, top, bottom);
+			boolean overIcons = mouseX >= x - 6 && mouseX < x + 10 && mouseY >= iconTop
+				&& mouseY < iconTop + group.instruments().size() * 18;
+			if (overColumn || overIcons) {
+				return index;
+			}
+		}
+		return -1;
+	}
+
 	/**
-	 * The split keyboard itself: one bracket per voice down the key strip, the instrument's icon
-	 * at its middle, a grabbable notch at each end.
+	 * The split keyboard itself: one bracket per register down the key strip, the instruments'
+	 * icons stacked at its middle, a grabbable notch at each end. The icons are also the way into
+	 * the bracket's own picker.
 	 */
 	private void extractSplitBrackets(GuiGraphicsExtractor graphics,
 			ComposerProject.Split split, int mouseX, int mouseY) {
-		BracketHandle hovered = bracketDragVoice >= 0
-			? new BracketHandle(bracketDragVoice, bracketDragTop)
+		List<BracketGroup> groups = bracketGroups(split);
+		BracketHandle hovered = bracketDragGroup >= 0
+			? new BracketHandle(bracketDragGroup, bracketDragTop)
 			: bracketHandleAt(mouseX, mouseY);
-		for (int index = 0; index < split.voices().size(); index++) {
-			ComposerProject.Split.Voice voice = split.voices().get(index);
+		int hoveredBody = hovered == null ? bracketBodyAt(mouseX, mouseY) : -1;
+		for (int index = 0; index < groups.size(); index++) {
+			BracketGroup group = groups.get(index);
 			int x = bracketX(index);
-			int top = noteY(voice.hi());
-			int bottom = noteY(voice.lo()) + rowHeight - 1;
+			int top = noteY(group.hi());
+			int bottom = noteY(group.lo()) + rowHeight - 1;
 			int color = BRACKET_COLORS[index % BRACKET_COLORS.length];
 			graphics.fill(x, top, x + 2, bottom, color);
-			boolean topHot = hovered != null && hovered.voice() == index && hovered.top();
-			boolean bottomHot = hovered != null && hovered.voice() == index && !hovered.top();
+			boolean topHot = hovered != null && hovered.group() == index && hovered.top();
+			boolean bottomHot = hovered != null && hovered.group() == index && !hovered.top();
 			graphics.fill(x - 2, top, x + 4, top + 3, topHot ? 0xFFFFFFFF : color);
 			graphics.fill(x - 2, bottom - 3, x + 4, bottom, bottomHot ? 0xFFFFFFFF : color);
-			graphics.item(new ItemStack(PreviewInstrument.byId(voice.instrument()).icon()),
-				x - 6, (top + bottom) / 2 - 8);
-			if (hovered != null && hovered.voice() == index) {
-				PreviewInstrument named = PreviewInstrument.byId(voice.instrument());
-				hoveredDescription = "Drag to trim where " + named.name() + " sounds. A bracket "
-					+ "can shrink and grow, but never past the instrument's own range.";
+			int iconTop = iconStackTop(group, top, bottom);
+			for (int icon = 0; icon < group.instruments().size(); icon++) {
+				graphics.item(new ItemStack(
+						PreviewInstrument.byId(group.instruments().get(icon)).icon()),
+					x - 6, iconTop + icon * 18);
+			}
+			if (hovered != null && hovered.group() == index) {
+				hoveredDescription = "Drag to trim where this bracket sounds. It moves the whole "
+					+ "register together, and never past where its instruments can play.";
+			} else if (hoveredBody == index) {
+				hoveredDescription = "Click to choose which of this register's instruments sound. "
+					+ "Drag the ends to trim the range.";
 			}
 		}
 	}
@@ -7010,44 +7139,51 @@ public final class ComposerScreen extends Screen {
 		if (handle == null) {
 			return false;
 		}
-		bracketDragVoice = handle.voice();
+		bracketDragGroup = handle.group();
 		bracketDragTop = handle.top();
 		lastBracketDragAt = 0L;
 		return true;
 	}
 
 	/**
-	 * Moves the held bracket end to the row under the cursor.
+	 * Moves the held bracket end to the row under the cursor, every voice in the register with it.
 	 *
 	 * <p>The end being held never crosses the other one -- crossing would swap which end the hand
-	 * is holding mid-drag -- and the voice's own constructor clamps the result to the register, so
-	 * the handle simply stops at the instrument's edge. One history step per gesture, the same
+	 * is holding mid-drag -- and each voice's own constructor clamps the result to the register,
+	 * so the handle simply stops at the instruments' edge. One history step per gesture, the same
 	 * coalescing as the speed slider.</p>
 	 */
 	private void dragBracketHandle(double mouseY) {
 		int layerIndex = splitKeyboardLayerIndex();
 		if (layerIndex < 0) {
-			bracketDragVoice = -1;
+			bracketDragGroup = -1;
 			return;
 		}
 		Layer layer = project().layers().get(layerIndex);
-		List<ComposerProject.Split.Voice> voices =
-			new ArrayList<>(layer.split().voices());
-		if (bracketDragVoice >= voices.size()) {
-			bracketDragVoice = -1;
+		List<BracketGroup> groups = bracketGroups(layer.split());
+		if (bracketDragGroup >= groups.size()) {
+			bracketDragGroup = -1;
 			return;
 		}
-		ComposerProject.Split.Voice voice = voices.get(bracketDragVoice);
+		BracketGroup group = groups.get(bracketDragGroup);
 		int midi = mouseMidi(mouseY);
-		ComposerProject.Split.Voice moved = bracketDragTop
-			? new ComposerProject.Split.Voice(voice.instrument(), voice.lo(),
-				Math.max(voice.lo(), midi))
-			: new ComposerProject.Split.Voice(voice.instrument(), Math.min(voice.hi(), midi),
-				voice.hi());
-		if (moved.equals(voice)) {
+		List<ComposerProject.Split.Voice> voices = new ArrayList<>(layer.split().voices());
+		boolean changed = false;
+		for (int index : group.voiceIndices()) {
+			ComposerProject.Split.Voice voice = voices.get(index);
+			ComposerProject.Split.Voice moved = bracketDragTop
+				? new ComposerProject.Split.Voice(voice.instrument(), voice.lo(),
+					Math.max(voice.lo(), midi))
+				: new ComposerProject.Split.Voice(voice.instrument(), Math.min(voice.hi(), midi),
+					voice.hi());
+			if (!moved.equals(voice)) {
+				voices.set(index, moved);
+				changed = true;
+			}
+		}
+		if (!changed) {
 			return;
 		}
-		voices.set(bracketDragVoice, moved);
 		ComposerProject next = project().withLayer(layerIndex,
 			layer.withSplit(new ComposerProject.Split(voices)));
 		long now = Util.getMillis();
@@ -7058,6 +7194,151 @@ public final class ComposerScreen extends Screen {
 			apply("trim a voice bracket", next);
 		}
 		lastBracketDragAt = now;
+	}
+
+	/** Opens the picker for the bracket under the cursor, if the press landed on one. */
+	private boolean openTierMenu(double mouseX, double mouseY) {
+		ComposerProject.Split split = keyboardSplit();
+		int body = bracketBodyAt(mouseX, mouseY);
+		if (split == null || body < 0) {
+			return false;
+		}
+		BracketGroup group = bracketGroups(split).get(body);
+		tierMenuBase = group.base();
+		tierMenuEffects = group.effects();
+		tierMenuLo = group.lo();
+		tierMenuHi = group.hi();
+		tierMenuX = rollX + 8;
+		tierMenuY = (noteY(group.hi()) + noteY(group.lo()) + rowHeight) / 2;
+		return true;
+	}
+
+	private static final int TIER_MENU_COLUMNS = 3;
+
+	/**
+	 * What the open bracket's picker offers: every pitched instrument sharing the register, or
+	 * the whole sound effect palette for a band.
+	 *
+	 * <p>The register rule is the only rule, which quietly includes the bass drum in the low tier
+	 * -- its virtual register starts where the bass's real one does. That is left in on purpose:
+	 * a kick doubling the bass line is a real arrangement, and the bracket already says exactly
+	 * which rows it would ride along on.</p>
+	 */
+	private List<PreviewInstrument> tierMenuCandidates() {
+		if (tierMenuEffects) {
+			return PreviewInstrument.EFFECTS;
+		}
+		List<PreviewInstrument> candidates = new ArrayList<>();
+		for (PreviewInstrument value : PreviewInstrument.VALUES) {
+			if (com.fastnoteblocks.InstrumentRanges.baseMidi(value.id()) == tierMenuBase) {
+				candidates.add(value);
+			}
+		}
+		return candidates;
+	}
+
+	/** The picker's box, or null while it is closed. Shared by drawing and hit testing. */
+	private NoteRect tierMenuRect() {
+		if (tierMenuBase == Integer.MIN_VALUE) {
+			return null;
+		}
+		int rows = (tierMenuCandidates().size() + TIER_MENU_COLUMNS - 1) / TIER_MENU_COLUMNS;
+		int menuWidth = TIER_MENU_COLUMNS * INSTRUMENT_CELL + 6;
+		int menuHeight = INSTRUMENT_HEADER + rows * INSTRUMENT_CELL + 6;
+		int left = Math.min(width - menuWidth - 4, tierMenuX);
+		int top = Math.max(TOOLBAR_HEIGHT + 4,
+			Math.min(height - menuHeight - 4, tierMenuY - menuHeight / 2));
+		return new NoteRect(left, top, left + menuWidth, top + menuHeight);
+	}
+
+	/** Whether the open bracket already holds this instrument's voice. */
+	private boolean tierMenuHolds(ComposerProject.Split split, String instrumentId) {
+		for (ComposerProject.Split.Voice voice : split.voices()) {
+			if (voice.instrument().equals(instrumentId)
+					&& (!tierMenuEffects
+						|| voice.lo() == tierMenuLo && voice.hi() == tierMenuHi)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private void extractTierMenu(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
+		NoteRect menu = tierMenuRect();
+		if (menu == null) {
+			return;
+		}
+		int layerIndex = splitKeyboardLayerIndex();
+		if (layerIndex < 0) {
+			// The brackets went away under it -- the layer was un-soloed or un-split -- so the
+			// picker for them goes too.
+			tierMenuBase = Integer.MIN_VALUE;
+			return;
+		}
+		ComposerProject.Split split = project().layers().get(layerIndex).split();
+		graphics.fill(menu.left(), menu.top(), menu.right(), menu.bottom(), 0xF0101115);
+		graphics.fill(menu.left(), menu.top(), menu.right(), menu.top() + 1, 0xFFAAAAAA);
+		String title = tierMenuEffects
+			? "This band's blocks"
+			: midiName(tierMenuBase) + "-" + midiName(tierMenuBase + 24) + " voices";
+		graphics.text(font, Component.literal(title), menu.left() + 4, menu.top() + 4,
+			0xFFD6D8DD, false);
+		List<PreviewInstrument> candidates = tierMenuCandidates();
+		for (int index = 0; index < candidates.size(); index++) {
+			PreviewInstrument value = candidates.get(index);
+			int cellX = menu.left() + 3 + index % TIER_MENU_COLUMNS * INSTRUMENT_CELL;
+			int cellY = menu.top() + 3 + INSTRUMENT_HEADER
+				+ index / TIER_MENU_COLUMNS * INSTRUMENT_CELL;
+			boolean hovered = mouseX >= cellX && mouseX < cellX + INSTRUMENT_CELL
+				&& mouseY >= cellY && mouseY < cellY + INSTRUMENT_CELL;
+			boolean lit = tierMenuHolds(split, value.id());
+			graphics.fill(cellX, cellY, cellX + INSTRUMENT_CELL - 2, cellY + INSTRUMENT_CELL - 2,
+				lit ? 0xFF356070 : hovered ? 0xFF44484F : 0xFF25282D);
+			graphics.item(new ItemStack(value.icon()), cellX + 5, cellY + 5);
+			if (hovered) {
+				graphics.setTooltipForNextFrame(Component.literal(value.name()), mouseX, mouseY);
+			}
+		}
+	}
+
+	private boolean handleTierMenuClick(double mouseX, double mouseY) {
+		NoteRect menu = tierMenuRect();
+		if (menu == null) {
+			return false;
+		}
+		int layerIndex = splitKeyboardLayerIndex();
+		if (layerIndex < 0) {
+			tierMenuBase = Integer.MIN_VALUE;
+			return false;
+		}
+		int gridTop = menu.top() + 3 + INSTRUMENT_HEADER;
+		int column = (int)(mouseX - menu.left() - 3) / INSTRUMENT_CELL;
+		int row = (int)(mouseY - gridTop) / INSTRUMENT_CELL;
+		if (mouseX < menu.left() + 3 || mouseY < gridTop
+				|| column < 0 || column >= TIER_MENU_COLUMNS || row < 0) {
+			return false;
+		}
+		int index = row * TIER_MENU_COLUMNS + column;
+		List<PreviewInstrument> candidates = tierMenuCandidates();
+		if (index >= candidates.size()) {
+			return false;
+		}
+		PreviewInstrument value = candidates.get(index);
+		value.play(12);
+		Layer layer = project().layers().get(layerIndex);
+		List<ComposerProject.Split.Voice> voices = new ArrayList<>(layer.split().voices());
+		boolean removed = voices.removeIf(voice -> voice.instrument().equals(value.id())
+			&& (!tierMenuEffects || voice.lo() == tierMenuLo && voice.hi() == tierMenuHi));
+		if (!removed) {
+			// On at the bracket's rows rather than the register's full span: joining a trimmed
+			// bracket means sounding where it sounds.
+			voices.add(new ComposerProject.Split.Voice(value.id(), tierMenuLo, tierMenuHi));
+		}
+		updateLayer(removed
+				? "drop the " + value.name() + " voice"
+				: "add the " + value.name() + " voice",
+			layerIndex, layer.withSplit(new ComposerProject.Split(voices)));
+		return true;
 	}
 
 	private void resetPlaybackSchedule() {
