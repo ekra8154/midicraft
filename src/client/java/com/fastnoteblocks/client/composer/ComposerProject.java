@@ -531,11 +531,39 @@ public record ComposerProject(
 			));
 		}
 
+		/**
+		 * The sound effect default: six voices in four-row bands stacked across the harp window,
+		 * so a drum-machine line of doors and pistons fits one layer without switching layers.
+		 *
+		 * <p>Nothing about the choice of six is load-bearing -- an effect voice's bracket is only a
+		 * band of rows, so the palette can swap any of them for any other. These are a starting
+		 * set, placed where the roll usually already is.</p>
+		 */
+		public static Split soundEffects() {
+			return new Split(List.of(
+				new Voice("FX_OAK_DOOR", 54, 57),
+				new Voice("FX_IRON_TRAPDOOR", 58, 61),
+				new Voice("FX_BELL", 62, 65),
+				new Voice("FX_COPPER_BULB", 66, 69),
+				new Voice("FX_DROPPER", 70, 73),
+				new Voice("FX_PISTON", 74, 77)
+			));
+		}
+
 		private static List<Voice> normalizeVoices(List<Voice> value) {
 			if (value == null || value.isEmpty()) {
 				return List.of();
 			}
-			return List.copyOf(value.stream().filter(java.util.Objects::nonNull).toList());
+			// Ordered by register, lowest voice first, and by name within a register. The order is
+			// what assigns brackets their columns in the keyboard, so it is pinned to the one thing
+			// a drag cannot change -- sorting by the bracket's own edge would make the columns trade
+			// places under the hand moving them.
+			return List.copyOf(value.stream()
+				.filter(java.util.Objects::nonNull)
+				.sorted(Comparator
+					.comparingInt((Voice voice) -> InstrumentRanges.baseMidi(voice.instrument()))
+					.thenComparing(Voice::instrument))
+				.toList());
 		}
 	}
 
