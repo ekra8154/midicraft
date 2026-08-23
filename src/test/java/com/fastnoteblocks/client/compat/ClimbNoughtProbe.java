@@ -1,6 +1,8 @@
 package com.fastnoteblocks.client.compat;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.TreeMap;
 import net.minecraft.SharedConstants;
@@ -29,6 +31,62 @@ class ClimbNoughtProbe {
 	private static String text(String key, String fallback) {
 		String given = System.getProperty("probe." + key);
 		return given == null || given.isBlank() ? fallback : given.strip();
+	}
+
+	/**
+	 * Where each dropped-repeater descent and raised-tail climb stands, read off the finished
+	 * plan rather than off the walk -- the plan slides after the walk, so a traced coordinate is
+	 * not a coordinate to stand on. Space-separated, to paste into /tp.
+	 */
+	static String where(FaultView.Build built) {
+		Map<String, List<BlockPos>> found = new TreeMap<>();
+		built.plan().laidBy().forEach((at, by) -> {
+			if (by != null && (by.startsWith("descentNought") || by.startsWith("climbNought"))) {
+				found.computeIfAbsent(by, key -> new ArrayList<>()).add(at);
+			}
+		});
+		StringBuilder said = new StringBuilder();
+		found.forEach((by, cells) -> {
+			BlockPos low = cells.stream().min((a, b) -> a.getY() != b.getY()
+				? Integer.compare(a.getY(), b.getY()) : Integer.compare(a.getX(), b.getX())).get();
+			BlockPos high = cells.stream().max((a, b) -> a.getY() != b.getY()
+				? Integer.compare(a.getY(), b.getY()) : Integer.compare(a.getX(), b.getX())).get();
+			said.append("   ").append(by).append("  ").append(cells.size()).append(" cells  tp ")
+				.append(low.getX()).append(' ').append(low.getY()).append(' ').append(low.getZ())
+				.append("  ..  ").append(high.getX()).append(' ').append(high.getY()).append(' ')
+				.append(high.getZ()).append(System.lineSeparator());
+		});
+		return said.length() == 0 ? "   (no nought shape in this build)" : said.toString().strip();
+	}
+
+	/**
+	 * The same question of a real song: where its dropped-repeater descents stand.
+	 * {@code -Dprobe.song=deltarune-ch-4-guardian -Dprobe.width=8 -Dprobe.floors=4}.
+	 */
+	@Test
+	void saysWhereASongsNoughtShapesStand() throws Exception {
+		String song = text("song", "");
+		if (song.isEmpty()) {
+			System.out.println("(no -Dprobe.song, nothing to look at)");
+			return;
+		}
+		Flags.Held held = Flags.set(text("set", ""));
+		try {
+			for (String pair : text("sizes", "8x4").split(",")) {
+				String[] half = pair.strip().toLowerCase(Locale.ROOT).split("x");
+				int width = Integer.parseInt(half[0]);
+				int floors = Integer.parseInt(half[1]);
+				FaultView.Build built = FaultView.of(song, SongBuilder.PasteMode.ULTRA_COMPACT_LANE_V2,
+					width, floors, 4, false);
+				System.out.println();
+				System.out.println("==== " + built.where() + "  breach="
+					+ built.plan().breaches().size() + " dead=" + built.reading().unreachedNotes()
+					+ " wrong=" + built.plan().wrongNotes() + " ====");
+				System.out.println(where(built));
+			}
+		} finally {
+			held.putBack();
+		}
 	}
 
 	@Test
@@ -69,6 +127,7 @@ class ClimbNoughtProbe {
 					+ " ====");
 				System.out.println("   shapes " + shapes);
 				System.out.println("   nought " + counters);
+				System.out.println(where(built));
 				FaultView.report(built, 1);
 				String at = text("at", "");
 				if (!at.isEmpty()) {
