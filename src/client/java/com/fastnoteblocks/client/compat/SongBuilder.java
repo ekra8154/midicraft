@@ -15739,6 +15739,9 @@ public final class SongBuilder {
 		Lane start = lane;
 		boolean nudge = false;
 		Relocation moved = null;
+		// The column the parity verdict was asked at, kept for the relocation that may be asked
+		// again below once the shift it chose is refused at the wire.
+		Lane askedAt = start;
 		int withoutTheMove = 0;
 		if (style.stacked()) {
 			UltraSlots slots = slotsFor(style, event.notes());
@@ -15759,6 +15762,7 @@ public final class SongBuilder {
 				}
 			}
 			Lane asking = behindShift ? onTheGround.ahead(1) : onTheGround;
+			askedAt = asking;
 			int verdict = parityVerdict(placements, asking, event.time(), slots, room);
 			if (TRACE) {
 				System.out.println("  SHAPE t=" + event.time() + " at " + asking.pos().getX() + ","
@@ -15944,10 +15948,31 @@ public final class SongBuilder {
 				+ " outOfWire=" + outOfWire);
 		}
 		if (nudge && (signal < NUDGE_REACH || outOfWire)) {
-			gaveUp = outOfWire ? "nudgePastTheWire" : "nudgeOutOfReach";
-			placements.padded(outOfWire ? "planBusForRunMeasured" : "planBusForSignal");
-			style = ChordStyle.BUS;
-			nudge = false;
+			// Before the shape goes: the contested note moved, not the module. A shift was the
+			// oracle's answer because relocation was refused first -- no harp for the centre and
+			// an even tail that a dropped note would grow by a cell. But the shift is refused
+			// here for the very column that cell would cost, so at this site the two are the same
+			// price and only one of them keeps the head. In-game reading found a chord of thirty
+			// at tip nought fall all the way to a sunken bus for this, grow an odd cell at the same
+			// loud slot, and die at the corner after it. See {@link #RELOCATES_WHEN_THE_SHIFT_CANNOT}.
+			Relocation kept = null;
+			if (RELOCATES_WHEN_THE_SHIFT_CANNOT && style.stacked() && moved == null) {
+				UltraSlots slots = slotsFor(style, event.notes());
+				kept = relocate(placements, askedAt, event.time(), style, event.notes(), slots,
+					new RelocationRoom(RELOCATES_TO_CENTRE && slots != null
+						&& slots.centre() == null, true));
+			}
+			if (kept != null) {
+				moved = kept;
+				nudge = false;
+				gaveUp = "relocatedInsteadOfShifting";
+				placements.padded("planRelocateInsteadOfShiftTo" + kept.where());
+			} else {
+				gaveUp = outOfWire ? "nudgePastTheWire" : "nudgeOutOfReach";
+				placements.padded(outOfWire ? "planBusForRunMeasured" : "planBusForSignal");
+				style = ChordStyle.BUS;
+				nudge = false;
+			}
 		}
 		// And last of all, because it is the one substitution nothing else has an opinion about: a
 		// plain bus becomes a sunken one wherever the chord has a harp to open with. Said here so that
@@ -16136,7 +16161,12 @@ public final class SongBuilder {
 		// the centre block was going to be placed either way, as stone if nothing sounded there, and
 		// the slot it came from is simply left empty. Nothing about the length can have changed, so
 		// there is nothing to measure -- and two trial builds a chord is not free.
-		if (moved != null && "Tail".equals(moved.where())) {
+		// Not where the move was taken because the shift could not be. That move accepted the
+		// cell on purpose -- it is the same column the shift would have spent -- and measuring it
+		// against the plain shape here hands it straight back to the nudge that was just refused
+		// at the wire, and the head with it. See {@link #RELOCATES_WHEN_THE_SHIFT_CANNOT}.
+		if (moved != null && "Tail".equals(moved.where())
+				&& !"relocatedInsteadOfShifting".equals(gaveUp)) {
 			int spent = trialCells(placements, lane, triggerDelay, event, style, start, gaveUp, moved);
 			int plain = trialCells(placements, lane, triggerDelay, event, style, start, gaveUp, null);
 			if (spent < 0 || plain < 0 || spent > plain) {
@@ -16669,6 +16699,19 @@ public final class SongBuilder {
 	 * bus cell the tail had spare.</p>
 	 */
 	static boolean RELOCATES_CONTESTED_NOTE = true;
+
+	/**
+	 * Whether a stacked chord whose parity shift is refused for wire relocates its contested note
+	 * instead of giving the shape up.
+	 *
+	 * <p>The oracle offers relocation before a shift, and refuses it where the note is not a harp
+	 * for the centre and the tail is even -- a dropped note would grow the bus by a cell. The shift
+	 * it settles on is then refused at the wire, for exactly the column that cell would have cost.
+	 * So at that site the tail is allowed to grow: same price, and the head stays. A chord of
+	 * thirty at tip nought fell to a sunken bus for want of this, hit the same loud slot, grew an odd
+	 * cell, and the cell died at the next corner.</p>
+	 */
+	static boolean RELOCATES_WHEN_THE_SHIFT_CANNOT = true;
 
 	/**
 	 * Whether a relocated note may take a free centre.
