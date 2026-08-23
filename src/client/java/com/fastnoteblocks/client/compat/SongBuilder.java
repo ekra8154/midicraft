@@ -11909,10 +11909,28 @@ public final class SongBuilder {
 		// The wire arrives level with the repeater that is not there, and climbs the side of the
 		// first stone onto the dust running over it. Crowded for the reason the near half is.
 		Lane half = Lane.straight(cursor.above(), travel, laneStep);
+		// Held to what is left of the one run. A crowded far half grows past every slot the
+		// ground refuses it, and it used to be allowed the whole fifteen to grow into -- as if
+		// the near half, the transition and the staircase had not already spent the same wire.
+		// In-game reading found a far half of fourteen notes grown to twelve columns against a
+		// neighbouring lane's sunken notes, its last cells past the repeater's reach, and fifteen
+		// thousand notes dead behind it. What the wire cannot carry is reported as having nowhere
+		// to hang, which is a missing note and says so; the dead line said nothing.
+		int spent = placements.runSinceRepeater();
+		int left = FAR_HALF_HELD_TO_THE_WIRE ? Math.max(1, DUST_RANGE - spent) : DUST_RANGE;
+		if (FAR_HALF_HELD_TO_THE_WIRE && (chord.size() + 1) / 2 > left) {
+			placements.padded("farHalfHeldToTheWire");
+		}
 		return cursor.relative(travel, layBus(placements,
 			HEADED_CUT_FALLS_TO_PLAIN && placements.answersWhatIsAhead() ? half.crowding() : half,
-			chord, chord.get(0).time()));
+			chord, chord.get(0).time(), Set.of(), left));
 	}
+
+	/**
+	 * Whether a dust-carried far half may spend only the wire its run has left, rather than a
+	 * fresh fifteen. See the note in {@link #addCarriedEventModule}.
+	 */
+	static boolean FAR_HALF_HELD_TO_THE_WIRE = true;
 
 	/**
 	 * The lane's last chord, cut so that what fits before the wall ends exactly on it.
@@ -15779,7 +15797,7 @@ public final class SongBuilder {
 				if (RELOCATION_REFUSED_ASKS_PARITY_AGAIN && shape.parityWithoutTheMove() < 0) {
 					placements.padded("planBusForRefusedMoveAndParity");
 					trace(event, lane, style, ChordStyle.BUS, "refusedMoveAndParity");
-					return layBus(placements, lane, triggerDelay, event, ChordStyle.BUS, true, layout);
+					return fallenBus(placements, lane, triggerDelay, event, layout);
 				}
 				nudge = !RELOCATION_REFUSED_ASKS_PARITY_AGAIN
 					|| shape.parityWithoutTheMove() == 1;
@@ -15792,7 +15810,7 @@ public final class SongBuilder {
 						&& placements.runSinceRepeater() + 1 > DUST_RANGE) {
 					placements.padded("planBusForRefusedMoveAndNoWire");
 					trace(event, lane, style, ChordStyle.BUS, "refusedMoveNudgePastTheWire");
-					return layBus(placements, lane, triggerDelay, event, ChordStyle.BUS, true, layout);
+					return fallenBus(placements, lane, triggerDelay, event, layout);
 				}
 			}
 		}
@@ -15825,7 +15843,7 @@ public final class SongBuilder {
 				placements.rollbackTrial();
 				placements.padded("planBusForStandingOnTheRoute");
 				trace(event, lane, style, ChordStyle.BUS, "onTheRoute");
-				return layBus(placements, lane, triggerDelay, event, ChordStyle.BUS, true, layout);
+				return fallenBus(placements, lane, triggerDelay, event, layout);
 			}
 			// And the corner rule asked of the footprint rather than of the column the module opens in.
 			//
@@ -15843,12 +15861,13 @@ public final class SongBuilder {
 			// and follows bends the lane has already armed, so a module laid before its lane decides to
 			// turn is measured against a route that runs straight past the corner it is about to make.
 			if (layout.v2() && NUDGE_ASKS_THE_CORNER_AGAIN && shape.nudge()
+					&& !(CORNER_GUESS_YIELDS_TO_THE_ROUTE && !lane.bends().isEmpty())
 					&& placements.trialNearACorner(STACKED_CLEAR_OF_CORNER)) {
 				placements.rollbackTrial();
 				placements.padded("planBusForNudgingIntoACorner");
 				placements.padded("nudgedIntoACornerAt" + Math.min(event.notes().size(), 30) + "Notes");
 				trace(event, lane, style, ChordStyle.BUS, "nudgedIntoACorner");
-				return layBus(placements, lane, triggerDelay, event, ChordStyle.BUS, true, layout);
+				return fallenBus(placements, lane, triggerDelay, event, layout);
 			}
 			// And the third thing the decision cannot settle, asked the same way. onTheFreeSlots tries
 			// to rearrange the low notes onto quiet cells and, when no arrangement works, hands the
@@ -15861,7 +15880,7 @@ public final class SongBuilder {
 				placements.rollbackTrial();
 				placements.padded("planBusForANoisySlot");
 				trace(event, lane, style, ChordStyle.BUS, "noisySlot");
-				return layBus(placements, lane, triggerDelay, event, ChordStyle.BUS, true, layout);
+				return fallenBus(placements, lane, triggerDelay, event, layout);
 			}
 			placements.commitTrial();
 			return placed;
@@ -15875,7 +15894,7 @@ public final class SongBuilder {
 			// Through the same move as every other bus, and this is the site that mattered: the shape
 			// collided, dropped to a bus, and the bus landed in the same occupied ground with nothing
 			// left to try. That is what ended the build rather than the first collision.
-			return layBus(placements, lane, triggerDelay, event, ChordStyle.BUS, true, layout);
+			return fallenBus(placements, lane, triggerDelay, event, layout);
 		}
 	}
 
@@ -15903,6 +15922,34 @@ public final class SongBuilder {
 	 * <p>v2 only, and asked of the layout rather than of a static, because this is shared with the
 	 * first layout and a chord that moves is a chord that lands somewhere else.</p>
 	 */
+	/**
+	 * The bus a stacked shape falls to, sunken where a plain one could not carry the chord.
+	 *
+	 * <p>At the cap a plain bus has no spare slot: thirty notes is fifteen cells exactly, and a
+	 * cell the ground refuses or a bend that takes the inner slot is a note with nowhere to hang.
+	 * The sunken bus carries three in its opening for no wire and rides a bend with a note to
+	 * spare, which is what {@link #straddleFits} promised the chord the turn on -- but the
+	 * promise was made of the shape the planner measured, and what fell out of the stacked trial
+	 * was laid plain. In-game reading found two notes of thirty missing, eight chords over, at
+	 * every width of the song. See {@link #FALLBACK_SINKS_AT_THE_CAP}.</p>
+	 */
+	private static Placed fallenBus(PlacementPlan placements, Lane lane, int triggerDelay,
+			EventGroup event, Layout layout) {
+		int notes = event.notes().size();
+		boolean sinks = FALLBACK_SINKS_AT_THE_CAP && layout.v2() && SUNKEN_BUSES
+			&& SUNKEN_MAY_OPEN_IN_A_TURN && (notes + 1) / 2 >= DUST_RANGE
+			&& notes >= SUNKEN_LOWEST_CHORD && sunkenFits(notes) && hasAHarp(event.notes())
+			&& (SUNKEN_OPENS_A_LANE || !placements.laneJustOpened());
+		if (sinks) {
+			placements.padded("fallenBusSunkAtTheCap");
+			placements.sunkenOffered(true);
+		}
+		return layBus(placements, lane, triggerDelay, event, ChordStyle.BUS, true, layout);
+	}
+
+	/** Whether a stacked shape that falls to a bus at the cap falls to a sunken one. */
+	static boolean FALLBACK_SINKS_AT_THE_CAP = true;
+
 	private static Placed layBus(PlacementPlan placements, Lane lane, int triggerDelay,
 			EventGroup event, ChordStyle style, boolean forceBus, Layout layout) {
 		if (!layout.v2() || !BUS_MOVES_OFF_A_COLLISION) {
@@ -17522,6 +17569,19 @@ public final class SongBuilder {
 	 * back, one missing note back, nothing dead either way.</p>
 	 */
 	static boolean NUDGE_ASKS_THE_CORNER_AGAIN = true;
+
+	/**
+	 * Whether the corner guess above stands down where the lane has already armed its bends.
+	 *
+	 * <p>The guess is a distance -- within three columns of a corner, give the shape up -- and it
+	 * exists because the exact question, whether the module stands on the route, cannot be asked
+	 * of a lane that has not yet decided to turn. A lane that has decided carries its bends, and
+	 * the route check a few lines up is then measured along the real corner and has already
+	 * answered. Asking the guess as well threw away the one shape that carries a chord of thirty
+	 * through a flat turn: a bus round a bend is a slot short at the cap, and in-game reading found
+	 * two notes of thirty with nowhere to hang, eight chords over, at every width of the song.</p>
+	 */
+	static boolean CORNER_GUESS_YIELDS_TO_THE_ROUTE = true;
 
 	/**
 	 * Whether a cut that would fall a column short takes a shorter head rather than no head.
