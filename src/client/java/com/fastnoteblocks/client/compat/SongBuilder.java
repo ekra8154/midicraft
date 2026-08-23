@@ -15958,9 +15958,15 @@ public final class SongBuilder {
 			Relocation kept = null;
 			if (RELOCATES_WHEN_THE_SHIFT_CANNOT && style.stacked() && moved == null) {
 				UltraSlots slots = slotsFor(style, event.notes());
+				// Tail room only where there is a tail. {@link #relocationRoom} grants it on
+				// {@code split != null && odd}, and the odd half is what this site is deliberately
+				// relaxing -- the whole point is to accept the cell an even tail would grow. The
+				// null half is not a preference: a stacked shape with no bus behind it has no tail
+				// to put the note in, and {@link #relocate} walks straight into it.
+				StackedBusSplit rehome = splitFor(style, event.notes());
 				kept = relocate(placements, askedAt, event.time(), style, event.notes(), slots,
 					new RelocationRoom(RELOCATES_TO_CENTRE && slots != null
-						&& slots.centre() == null, true));
+						&& slots.centre() == null, rehome != null));
 			}
 			if (kept != null) {
 				moved = kept;
