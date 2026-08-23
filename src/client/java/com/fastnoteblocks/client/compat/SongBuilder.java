@@ -4455,6 +4455,7 @@ public final class SongBuilder {
 						headed = shedded;
 					} else {
 						placements.padded("planStackedSplitClashed");
+						LAST_CUT_REFUSAL = "Clashed";
 						headed = null;
 						// And with the head goes the column bought for it. What follows is a plain cut,
 						// which fills the room it is given and needs nothing in front of it.
@@ -4480,6 +4481,7 @@ public final class SongBuilder {
 				if (upper != null && upper.startsWith("minecraft:redstone_wire")) {
 					// Level with the rung's own dust: a join no block can stand between.
 					placements.padded("corkscrewRefusedForWireBehind");
+					LAST_CUT_REFUSAL = "CorkscrewWireBehind";
 					headed = null;
 				} else if (lower != null && lower.startsWith("minecraft:redstone_wire")) {
 					// Two couplings from that wire, two answers. The horizontal -- their wire
@@ -4514,6 +4516,7 @@ public final class SongBuilder {
 						headed.centreToFront(), List.of(), cap);
 					if (bare.runCells(splitCells) > DUST_RANGE) {
 						placements.padded("corkscrewFlanklessOutOfWire");
+						LAST_CUT_REFUSAL = "CorkscrewFlanklessOutOfWire";
 						headed = null;
 					} else {
 						placements.padded("corkscrewRunsBareForWireBehind");
@@ -4621,6 +4624,7 @@ public final class SongBuilder {
 						}
 					}
 					if (gap > 0) {
+						LAST_CUT_REFUSAL = "FellShortBy" + gap;
 						headed = null;
 					}
 				}
@@ -13173,6 +13177,17 @@ public final class SongBuilder {
 		return cells;
 	}
 
+	/** The first note that is not a harp, or the first note where they all are. */
+	private static EventNote takeNonHarpFirst(List<EventNote> pool) {
+		for (int at = 0; at < pool.size(); at++) {
+			EventNote note = pool.get(at);
+			if (note.effect() != null || !isHarpNote(note)) {
+				return pool.remove(at);
+			}
+		}
+		return pool.remove(0);
+	}
+
 	/** Either shape of foldback, whichever way the lane happens to be going. */
 	private record FoldbackPick(Foldback fold, FoldbackAscent rise) {
 		boolean any() {
@@ -13530,12 +13545,18 @@ public final class SongBuilder {
 		// column it has to carry bare.
 		int muted = 0;
 		List<EventNote> pool = new ArrayList<>(busOrder(notes));
+		// The pair beside the conductor takes any instrument, so it takes a harp last. It used
+		// to take whatever the bus order put first, and where that was the chord's harps the
+		// rungs below -- which take harps and nothing else -- stood empty with the chord's two
+		// harps hanging where any note would have done. In-game reading found a chord of 28 with
+		// two harps refused the fold for "no room above" and walked out fourteen columns; served
+		// the other way round it fits to the slot.
 		EventNote pairA = !pool.isEmpty()
 				&& railSlotTakes(placements, conductorAt.relative(side.getOpposite()), time)
-			? pool.remove(0) : null;
+			? takeNonHarpFirst(pool) : null;
 		EventNote pairB = !pool.isEmpty()
 				&& railSlotTakes(placements, conductorAt.relative(side), time)
-			? pool.remove(0) : null;
+			? takeNonHarpFirst(pool) : null;
 		// The staircase's harp-only slots are served before anything else. The order a foldback
 		// fills in is head, then the wall-bound run, then the climb, then the flat run above --
 		// but the climb's hard slots have to jump that queue, because they are the only ones in
@@ -13570,6 +13591,14 @@ public final class SongBuilder {
 		// The same off-by-one as the descent's tail: the climb's handover may land ON the far
 		// wall column, so the run has the whole corridor and not the corridor less one.
 		int outboundLimit = Math.min(DUST_RANGE - 1, availableBehind);
+		if (TRACE) {
+			System.out.println("  FOLDASC t=" + time + " notes=" + notes.size() + " room=" + room
+				+ " pairA=" + (pairA == null ? "-" : pairA.instrumentBlock())
+				+ " pairB=" + (pairB == null ? "-" : pairB.instrumentBlock())
+				+ " rungHarpsWanted=" + wanted + " got=" + rungHarps.size()
+				+ " wallward=" + wallward.size() + " outbound=" + outbound.size()
+				+ " limit=" + outboundLimit + " muted=" + muted);
+		}
 		if (outboundLimit < 3 || !foldbackRunFits(placements, stand.above(2),
 				travel.getOpposite(), side, outbound, outboundLimit, 0, 3, 1, muted,
 				FOLDBACK_RUNG_HARPS, FOLDBACK_RUNG_NO_FALLING, time)) {
