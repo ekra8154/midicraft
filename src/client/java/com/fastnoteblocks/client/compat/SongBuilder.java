@@ -4889,8 +4889,17 @@ public final class SongBuilder {
 			// known. A negative count is a lane that walked out past the wall its width was promised
 			// at -- so the paste covers ground the player was told it would not, and that is the half
 			// worth stopping to ask about rather than merely listing.
-			if (layout.ultra() && wantsTurn && canTurn && columns < 0) {
-				placements.breached(-columns);
+			// Not where a cut takes the chord: the dropped-repeater descent stands its repeater on
+			// the turn column and lays nothing past it, and a lane it keeps inside the paste is
+			// not a lane that walked out. Charged before the cut was decided, it read one block
+			// out on every such build with the paste's span exactly what was promised.
+			// And the turn column is not out either. A chord straddling a flat turn from one past
+			// the wall stands its repeater on the turn column and the corner takes it from there,
+			// which is the column every turn in the build is allowed; what is past the promise is
+			// what lies beyond that.
+			int out = straddles ? -columns - 1 : -columns;
+			if (layout.ultra() && wantsTurn && canTurn && out > 0 && !split) {
+				placements.breached(out);
 			}
 			// Every chord standing outside the footprint, not only the ones that asked to turn. A chord that
 			// does not overshoot prints nothing on the old condition, and a lane already past its wall can
@@ -4956,14 +4965,21 @@ public final class SongBuilder {
 			// staircase and has no cut: the chord before's tail goes up instead, and this chord is
 			// laid whole on the floor above with a repeater of its own. See {@link #CLIMB_NOUGHT}.
 			boolean climbsNought = false;
+			// And at a room of one, where the lane stands on the wall column: the raised tail
+			// does not care what room the lane stands at, only that the cells behind it are a
+			// bus, and a chord that can neither climb bare nor be cut there walked out thirteen
+			// columns. A column of the floor above is spent against that, and only after every
+			// other shape has said no. See {@link #CLIMB_NOUGHT_AT_ROOM_ONE}.
 			if (CLIMB_NOUGHT && layout.v2() && climb > 0 && above >= 0 && above < floors
-					&& wantsTurn && !canTurn && !split && room == 0 && delayColumns == 0) {
+					&& wantsTurn && !canTurn && !split && delayColumns == 0
+					&& (room == 0 || CLIMB_NOUGHT_AT_ROOM_ONE && room == 1)) {
 				climbsNought = climbNoughtFits(placements, lane, depth);
 				placements.padded(climbsNought ? "planClimbNought"
 					: "climbNoughtRefused" + LAST_CLIMB_NOUGHT_REFUSAL);
 				if (climbsNought) {
 					placements.padded("planClimbNoughtAt" + Math.min(event.notes().size(), 30)
 						+ "Notes");
+					placements.padded("planClimbNoughtAtRoom" + room);
 				}
 			}
 			if (split) {
@@ -12823,6 +12839,15 @@ public final class SongBuilder {
 	 */
 	static boolean CLIMB_NOUGHT = true;
 
+	/**
+	 * Whether the raised-tail climb is also offered at a room of one, a column back from where it
+	 * was designed for, as the last thing before a chord is laid whole past its wall. In-game
+	 * reading found a chord of 28 with two harps at a room of one: the corkscrew ran its rungs bare
+	 * for the bus behind and was a cell out of wire, the fold had no slack and lost a slot to the
+	 * lane alongside, and three blocks of wire will not climb bare. Thirteen columns out.
+	 */
+	static boolean CLIMB_NOUGHT_AT_ROOM_ONE = true;
+
 	/** Why the last {@link #climbNoughtFits} came back false. */
 	static String LAST_CLIMB_NOUGHT_REFUSAL = "";
 
@@ -13041,6 +13066,15 @@ public final class SongBuilder {
 					noFallCells, time);
 				if (pick >= 0) {
 					left.remove(pick);
+				} else if (TRACE) {
+					BlockPos slot = stone.relative(out);
+					System.out.println("  FOLDRUN t=" + time + " cell=" + cell + " slot "
+						+ slot.getX() + " " + slot.getY() + " " + slot.getZ() + " refused: at="
+						+ placements.describeBlock(slot) + " below="
+						+ placements.describeBlock(slot.below()) + " above="
+						+ placements.describeBlock(slot.above()) + " free="
+						+ placements.freeForNote(slot) + " quiet="
+						+ !soundedByAnother(placements, slot, time) + " left=" + left.size());
 				}
 			}
 		}
