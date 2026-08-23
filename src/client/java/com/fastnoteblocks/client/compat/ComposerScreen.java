@@ -3376,8 +3376,11 @@ public final class ComposerScreen extends Screen {
 					chipLeft + (LAYER_CHIP - font.width(state.letter)) / 2, y + 4, state.color, false);
 			}
 			// The instrument as the block it sounds like, which is the same picture the palette uses
-			// and the only label short enough to leave the name any room.
-			graphics.item(new ItemStack(PreviewInstrument.byId(layer.instrument()).icon()),
+			// and the only label short enough to leave the name any room. A split layer has many
+			// blocks and one machine, so its row wears the note block itself.
+			graphics.item(new ItemStack(layer.split() != null
+					? net.minecraft.world.item.Items.NOTE_BLOCK
+					: PreviewInstrument.byId(layer.instrument()).icon()),
 				row.instrumentX(), y - 1);
 			// Whether you will hear this layer, marked on the thing that makes the sound -- and the
 			// one part of a row that survives every width, so a folded panel still answers it. A
