@@ -2592,7 +2592,7 @@ public final class ComposerScreen extends Screen {
 			case SELECT_TOO_FREQUENT -> selectNotesWhere("too frequent",
 				note -> projectStats().crowded().contains(note.startTick()), true);
 			case SELECT_OUT_OF_RANGE -> selectNotesWhere("out of range",
-				(layer, note) -> layer.pitched() && !note.isBuildable(), true);
+				(layer, note) -> layer.outOfRange(note), true);
 			case SELECT_OVERLOADED_CHORDS -> selectOverloadedChordNotes();
 			case SELECT_ALL_NOTES -> selectNotesWhere("selected", note -> true, false);
 			case SELECT_NONE -> dropSelection();
@@ -4615,7 +4615,9 @@ public final class ComposerScreen extends Screen {
 			// "this will not build", which you already knew, and stopped answering anything else.
 			int color = highlighted ? vivid(layerColor(layerIndex)) : faded(layerColor(layerIndex));
 			// A sound effect has no note block range to be outside of, so nothing on one of those
-			// layers is ever marked unbuildable, wherever on the roll it was drawn.
+			// layers is ever marked unbuildable, wherever on the roll it was drawn. The range that
+			// matters is the layer's own: a split layer holds its notes to its brackets rather than
+			// to the harp window, so a note at F#2 wears no red bar while a bass voice covers it.
 			boolean rangeMatters = layer.pitched();
 			List<NoteEvent> notes = layer.notes();
 			for (int noteIndex = lowerBoundStart(notes, firstVisibleTick);
@@ -4649,7 +4651,7 @@ public final class ComposerScreen extends Screen {
 				} else if (anyOffGrid && offGrid.contains(note.startTick())) {
 					flags |= NoteCellGrid.OFF_GRID;
 				}
-				if (rangeMatters && !note.isBuildable()) {
+				if (rangeMatters && layer.outOfRange(note)) {
 					flags |= NoteCellGrid.UNBUILDABLE;
 				}
 				cells.add(left, top, color, flags, midi);
@@ -4713,7 +4715,24 @@ public final class ComposerScreen extends Screen {
 		lines.add(Component.literal("Layer " + (layerIndex + 1) + "  "
 				+ project().layers().get(layerIndex).name())
 			.withStyle(net.minecraft.ChatFormatting.GRAY));
-		if (note.isBuildable()) {
+		Layer noteLayer = project().layers().get(layerIndex);
+		if (noteLayer.split() != null) {
+			// On a split layer the note's pitch is true pitch, and what matters is which voices'
+			// brackets cover it -- one instrument name per note block this note will place.
+			List<String> sounding = new ArrayList<>();
+			for (ComposerProject.Split.Voice voice : noteLayer.split().voices()) {
+				if (voice.covers(note.midiNote())) {
+					sounding.add(PreviewInstrument.byId(voice.instrument()).name());
+				}
+			}
+			if (sounding.isEmpty()) {
+				lines.add(Component.literal("Outside every voice's bracket")
+					.withStyle(net.minecraft.ChatFormatting.RED));
+			} else {
+				lines.add(Component.literal("Sounds " + String.join(", ", sounding))
+					.withStyle(net.minecraft.ChatFormatting.GRAY));
+			}
+		} else if (note.isBuildable()) {
 			lines.add(Component.literal("Note block pitch " + note.noteBlockPitch())
 				.withStyle(net.minecraft.ChatFormatting.GRAY));
 			long sustained = note.durationTicks();
@@ -6758,23 +6777,28 @@ public final class ComposerScreen extends Screen {
 			if (!audible(layerIndex)) {
 				continue;
 			}
-			PreviewInstrument instrument = PreviewInstrument.byId(layer.instrument());
-			if (!instrument.playable()) {
-				continue;
-			}
 			int color = vivid(layerColor(layerIndex));
-			List<NoteEvent> notes = layer.notes();
-			for (int index = lowerBoundStart(notes, playbackStartTick); index < notes.size(); index++) {
-				NoteEvent note = notes.get(index);
-				if (!takeNotes.isEmpty() && takeNotes.contains(note.id())) {
+			// Played from the same expansion the build reads, so a split layer previews as exactly
+			// the note blocks it will place: a doubled note sounds twice, an uncovered note not at
+			// all, and each voice's sample plays at the pitch value that sounds as written.
+			for (Layer voiceLayer : layer.buildVoices()) {
+				PreviewInstrument instrument = PreviewInstrument.byId(voiceLayer.instrument());
+				if (!instrument.playable()) {
 					continue;
 				}
-				events.add(new PlaybackEvent(
-					note.startTick(),
-					instrument,
-					note.midiNote() - ComposerProject.NOTE_BLOCK_BASE_MIDI_NOTE,
-					color
-				));
+				List<NoteEvent> notes = voiceLayer.notes();
+				for (int index = lowerBoundStart(notes, playbackStartTick); index < notes.size(); index++) {
+					NoteEvent note = notes.get(index);
+					if (!takeNotes.isEmpty() && takeNotes.contains(note.id())) {
+						continue;
+					}
+					events.add(new PlaybackEvent(
+						note.startTick(),
+						instrument,
+						note.midiNote() - ComposerProject.NOTE_BLOCK_BASE_MIDI_NOTE,
+						color
+					));
+				}
 			}
 		}
 		events.sort(Comparator.comparingLong(PlaybackEvent::tick)

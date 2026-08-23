@@ -111,18 +111,28 @@ public final class ChordThinner {
 			if (!layer.inBuild()) {
 				continue;
 			}
-			boolean offered = fromLayers == null || fromLayers.contains(layerIndex);
-			for (NoteEvent note : layer.notes()) {
-				if (!note.isBuildable()) {
-					continue;
-				}
-				Voice voice = new Voice(layer.instrument(), note.midiNote(),
-					dedupeIdentical ? 0L : note.id());
-				byTick.computeIfAbsent(note.startTick(), tick -> new LinkedHashMap<>())
-					.computeIfAbsent(voice, key -> new ArrayList<>())
-					.add(note);
-				if (!offered) {
-					blocked.computeIfAbsent(note.startTick(), tick -> new HashSet<>()).add(voice);
+			// A split layer's notes are never on offer, only counted. Deleting a note the document
+			// stores once removes every voice it doubles into at once, so taking "one sound" from a
+			// split layer could silently take two -- and the doubling on those layers is the point
+			// of them, not padding to spare. They still weigh their full expanded size against the
+			// thirty, so thinning the ordinary layers around them stays honest.
+			boolean offered = (fromLayers == null || fromLayers.contains(layerIndex))
+				&& layer.split() == null;
+			for (Layer voiceLayer : layer.buildVoices()) {
+				for (NoteEvent note : voiceLayer.notes()) {
+					// The same clause as the analysis: an out-of-range note is not placed at all,
+					// and a sound effect has no range to be outside of.
+					if (voiceLayer.pitched() && !note.isBuildable()) {
+						continue;
+					}
+					Voice voice = new Voice(voiceLayer.instrument(), note.midiNote(),
+						dedupeIdentical ? 0L : note.id());
+					byTick.computeIfAbsent(note.startTick(), tick -> new LinkedHashMap<>())
+						.computeIfAbsent(voice, key -> new ArrayList<>())
+						.add(note);
+					if (!offered) {
+						blocked.computeIfAbsent(note.startTick(), tick -> new HashSet<>()).add(voice);
+					}
 				}
 			}
 		}
