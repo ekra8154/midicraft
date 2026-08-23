@@ -4684,10 +4684,34 @@ public final class SongBuilder {
 						+ "Notes");
 				}
 			}
+			// The dropped-repeater descent, for the two rooms nothing else reaches: a room of
+			// nought where the wall descent wants a harp the chord has not got, and the room of
+			// minus one that a nudged chord landing flush on the wall leaves behind it. See
+			// {@link #DESCENT_NOUGHT}.
+			DescentNought nought = null;
+			if (DESCENT_NOUGHT && layout.v2() && cutOffered && index > 0 && above >= 0
+					&& above < floors && !stackedFitsInstead && headed == null && fold == null
+					&& !plainCut && sunken == null && cross == null && climb <= 0
+					&& room <= 0 && room >= -1 && delayColumns == 0
+					&& (wallCut == null || DESCENT_NOUGHT_FIRST)) {
+				nought = descentNoughtOf(placements, lane, event.notes(), room < 0, depth,
+					event.time());
+				placements.padded(nought != null ? "planDescentNought"
+					: "descentNoughtRefused" + LAST_DESCENT_NOUGHT_REFUSAL);
+				if (nought != null) {
+					placements.padded("planDescentNoughtAt" + Math.min(event.notes().size(), 30)
+						+ "Notes");
+					placements.padded(room < 0 ? "planDescentNoughtRaised" : "planDescentNoughtFlat");
+					if (wallCut != null) {
+						placements.padded("planDescentNoughtOverTheWallDescent");
+						wallCut = null;
+					}
+				}
+			}
 			boolean couldSplit = layout.ultra() && cutOffered && index > 0 && above >= 0
 				&& above < floors && !stackedFitsInstead && (fold != null || rise != null
 					|| headed != null || sunken != null || cross != null || wallCut != null
-					|| plainCut);
+					|| nought != null || plainCut);
 			// And the foldback, where every one of them has been refused. What happens to a chord
 			// with no cut is that it is laid whole and the lane walks out past its wall, which is
 			// a breach the build counts and says out loud. Two lanes of height spent on one chord
@@ -4924,6 +4948,20 @@ public final class SongBuilder {
 					+ " spare ticks to fill them with, and " + cells + " blocks of bus plus "
 					+ offBus + " for the turn is too much to cut across it");
 			}
+			// The raised-tail climb, for a climb at a room of nought that cannot afford the bare
+			// staircase and has no cut: the chord before's tail goes up instead, and this chord is
+			// laid whole on the floor above with a repeater of its own. See {@link #CLIMB_NOUGHT}.
+			boolean climbsNought = false;
+			if (CLIMB_NOUGHT && layout.v2() && climb > 0 && above >= 0 && above < floors
+					&& wantsTurn && !canTurn && !split && room == 0 && delayColumns == 0) {
+				climbsNought = climbNoughtFits(placements, lane, depth);
+				placements.padded(climbsNought ? "planClimbNought"
+					: "climbNoughtRefused" + LAST_CLIMB_NOUGHT_REFUSAL);
+				if (climbsNought) {
+					placements.padded("planClimbNoughtAt" + Math.min(event.notes().size(), 30)
+						+ "Notes");
+				}
+			}
 			if (split) {
 				Direction travel = lane.travel();
 				int wallLeft = wall;
@@ -5043,6 +5081,17 @@ public final class SongBuilder {
 						System.out.println("  WALLDESCENT t=" + event.time() + " notes="
 							+ chord.size() + " head=" + (chord.size() - far.size()) + " far="
 							+ far.size());
+					}
+				} else if (nought != null) {
+					// Head, staircase and landing in one, like the wall descent: the far half
+					// opens where the module says, and the descent step below has nothing to lay.
+					cursor = addDescentNought(placements, trigger.cursor(), travel, depth,
+						trigger.triggerDelay(), nought, event.time());
+					far = nought.far();
+					if (TRACE) {
+						System.out.println("  DESCENTNOUGHT t=" + event.time() + " notes="
+							+ chord.size() + " head=" + (chord.size() - far.size()) + " far="
+							+ far.size() + " raised=" + nought.raises() + " room=" + room);
 					}
 				} else if (sunken != null) {
 					cursor = addSunkenSplitNearHalf(placements, trigger.cursor(), travel, depth,
@@ -5175,8 +5224,10 @@ public final class SongBuilder {
 				// the staircase itself takes two -- so a nought here is the shape working, not a
 				// lane that turned early. And not for a foldback, whose cursor is already on the
 				// next floor: it recorded its own recess, the wall-bound run's shortfall, where
-				// the run was laid.
-				if (fold == null && rise == null
+				// the run was laid. Nor for the dropped-repeater descent: its staircase stands on
+				// the wall and turn columns and its landing is the column behind the repeater, a
+				// floor down -- further back by design, not a lane that turned early.
+				if (fold == null && rise == null && nought == null
 						&& (headed == null || headed.centreFeeds() == CentreFeed.NONE)) {
 					placements.recessed(shortOfWall);
 					for (int cell = 0; cell < shortOfWall; cell++) {
@@ -5241,7 +5292,8 @@ public final class SongBuilder {
 				}
 				// A wall descent laid its whole staircase inside the module and returned the
 				// landing; the walk's cursor is already where the far half opens.
-				cursor = fold != null || rise != null || wallCut != null ? cursor
+				cursor = fold != null || rise != null || wallCut != null || nought != null
+					? cursor
 					: cross != null
 					? addCrossDescentSpiral(placements, cursor, travel, descentSide, currentTime)
 					: climb > 0
@@ -5318,7 +5370,8 @@ public final class SongBuilder {
 				// its run, never grow it. The plain cut's capacity was decided without it, so
 				// this is a relocation and not a claim.
 				if (STAIR_EXTRAS && STAIR_WALL_EXTRAS && headed == null && sunken == null
-						&& cross == null && wallCut == null && climb <= 0 && CHEAP_SPLIT_DESCENT
+						&& cross == null && wallCut == null && nought == null && climb <= 0
+						&& CHEAP_SPLIT_DESCENT
 						&& far.size() > 1) {
 					BlockPos wallCell = stairFoot.relative(travel);
 					if (quietAndFreeForHarp(placements, wallCell, event.time())) {
@@ -5374,6 +5427,10 @@ public final class SongBuilder {
 					? DUST_RANGE - headed.runCells(splitCells)
 					: wallCut != null
 					? DUST_RANGE - 3 - (wallCut.far().size() + 2) / 2
+					// The conductor lights the first rung's dust; the second rung's and the far
+					// half's cells are the run, and a bare landing is a cell of it.
+					: nought != null
+					? DUST_RANGE - 2 - Math.max(1, (nought.far().size() + 1) / 2)
 					: DUST_RANGE - cells - splitCells;
 				gradeLaneTip(placements, turnCells, tipSignal,
 					climb > 0 ? (rise != null ? "FoldbackClimb" : "SplitClimb")
@@ -5413,7 +5470,37 @@ public final class SongBuilder {
 				replan = layout.ultra();
 				continue;
 			}
-			if (canTurn && wantsTurn) {
+			if (climbsNought) {
+				placements.padded("planLaneEndedOn" + lastStyle + "ClimbNought");
+				if (TRACE) {
+					System.out.println("  CLIMBNOUGHT t=" + event.time() + " notes="
+						+ event.notes().size() + " tip=" + tipSignal + " at " + lane.pos().getX()
+						+ " " + lane.pos().getY() + " " + lane.pos().getZ());
+				}
+				lane = crowdedIfUltra(addClimbNought(placements, lane, depth), layout);
+				floor = above;
+				// The tip is what it was. The dust on the glass carries what the chord's last
+				// cell carries, so the lane above opens on the same signal this one closed with --
+				// and it opens on a repeater, which hands out fifteen whatever arrives.
+				laneStarted = false;
+				// The column behind the repeater above is the glass and its dust, and the one
+				// behind that the raised tail: nothing there is a head's to hang a note in.
+				columnBehindBusy = true;
+				if (layout.ultra()) {
+					TurnCost next = turnCost(floor, climb, floors, slabStep);
+					booked = V2_BOOKS_PADS
+						? planLane(events, index, lane.pos().getX(), lane.travel().getStepX(),
+							laneWall(nearWall, farWall, forward, lane.travel(), floor, climb,
+								floors),
+							lane.travel() == forward ? nearWall : farWall,
+							currentTime + spentPadding,
+							tipSignal, columnBehindBusy, next.cells(), next.offBus(), next.stepOff(),
+							next.splitCells(), climb > 0, layout,
+							inTurn(placements, turning, leavingTurn, lane.pos(), lastCorner), parity)
+						: Map.of();
+					replan = false;
+				}
+			} else if (canTurn && wantsTurn) {
 				// The shape the lane actually came to rest on, against the wall it is turning at.
 				// This is the question that was asked -- not what shapes a lane holds, but what shape
 				// is standing in front of the staircase when it turns.
@@ -12332,6 +12419,471 @@ public final class SongBuilder {
 		}
 		placements.padded("builtWallDescent");
 		return cursor.below(CUBE_FLOOR_HEIGHT);
+	}
+
+	/**
+	 * Whether a descent at the wall's last column is cut with its repeater dropped to the lane's
+	 * own level -- the dropped-repeater descent, in-game design.
+	 *
+	 * <p>Two rooms had no descent at all. At a room of nought the repeater stands on the wall
+	 * column with the turn column free past it, and both shapes that reach there want a harp for
+	 * their conductor -- so a chord of five with none walked out whole. At a room of minus one
+	 * the chord before was nudged a column and came to rest on the wall itself, which puts this
+	 * chord's repeater on the turn column, the last column the paste has, and nothing was offered
+	 * below nought. Every breach left on the wide grid was one of the two.</p>
+	 *
+	 * <p>The shape. The repeater is laid a level down, at the lane's block level, where it reads
+	 * the bus block behind it: a block under live dust is weakly powered, and a repeater reads
+	 * weak power. It stands on a top slab, which holds a repeater up and does not occlude -- that
+	 * is the whole trick, because the descent's second cell of dust steps down diagonally past
+	 * that slab. What the repeater drives is the conductor, a column on at the same level:
+	 * strongly powered, so it sounds the two harps hanging beside it and lights the dust directly
+	 * beneath it, which steps down a column at a time and lands level with the floor below's own
+	 * wire two columns back from the conductor, where the far half opens as a plain bus. Two
+	 * cells of staircase and thirteen of bus against the fifteen: thirty-three notes, three of
+	 * them harps, and not a column past the conductor's.</p>
+	 *
+	 * <p>At a room of minus one the repeater has to go back a column, into the cell the chord
+	 * before ended on, so that chord's last cell is raised: its block goes up a level to where its
+	 * dust was and is end-powered by the dust of the cell behind instead of carrying dust of its
+	 * own, and its two notes go up with it, their instruments taking the cells the notes left.
+	 * A block pointed into by dust is powered exactly as one standing under it, so nothing the
+	 * chord sounds changes, and the cell the block left is where the repeater goes. In-game
+	 * testing built both rooms by hand and counted the notes through them.</p>
+	 */
+	static boolean DESCENT_NOUGHT = true;
+
+	/**
+	 * Whether the dropped-repeater descent is asked before the wall descent at a room of nought.
+	 *
+	 * <p>Off: the wall descent is the shape in-game design signed first, and this one is offered
+	 * where it and everything else has refused. Measured the other way round too -- see the
+	 * commit that brought this in.</p>
+	 */
+	static boolean DESCENT_NOUGHT_FIRST = false;
+
+	/**
+	 * The dropped-repeater descent, decided.
+	 *
+	 * @param raises whether the cell behind the repeater is the chord before's last, and goes up a
+	 *     level to make room for it
+	 * @param conductor the harp on the conductor, or null where the chord had none and it is stone
+	 * @param hanging the two harps beside the conductor, by side; null where none
+	 * @param rungFlanks the four notes beside the two rungs -- the first rung's pair, then the
+	 *     second's -- null where the ground refused one
+	 * @param far the rest, a bus on the floor below
+	 */
+	private record DescentNought(boolean raises, EventNote conductor, List<EventNote> hanging,
+			List<EventNote> rungFlanks, List<EventNote> far) {
+		int headNotes() {
+			int count = conductor == null ? 0 : 1;
+			for (EventNote note : hanging) {
+				count += note == null ? 0 : 1;
+			}
+			for (EventNote note : rungFlanks) {
+				count += note == null ? 0 : 1;
+			}
+			return count;
+		}
+	}
+
+	/** Why the last {@link #descentNoughtOf} came back with nothing. */
+	static String LAST_DESCENT_NOUGHT_REFUSAL = "";
+
+	/**
+	 * Whether a block here passes weak power on: what a repeater can read from, and what dust can
+	 * point into. Stone, a note block, an instrument block -- anything full and opaque. Not dust,
+	 * not a repeater, not glass, not a slab, and not nothing.
+	 */
+	private static boolean conductsWeakly(String block) {
+		return block != null && !"minecraft:air".equals(block)
+			&& !block.startsWith("minecraft:redstone_wire") && !block.startsWith("minecraft:repeater")
+			&& !block.startsWith("minecraft:glass") && !block.contains("slab");
+	}
+
+	private static boolean isWire(String block) {
+		return block != null && block.startsWith("minecraft:redstone_wire");
+	}
+
+	/** Whether nothing stands here, or only a claim of air. */
+	private static boolean emptyOrAir(PlacementPlan placements, BlockPos cell) {
+		String block = placements.blockAt(cell);
+		return block == null || "minecraft:air".equals(block);
+	}
+
+	/**
+	 * Whether a plain bus cell stands here, with its block at lane level and its dust over it,
+	 * and nothing beside it but notes or air. The one shape the raise knows how to lift.
+	 */
+	private static boolean plainBusCell(PlacementPlan placements, BlockPos stand, Direction depth) {
+		if (!"minecraft:stone".equals(placements.blockAt(stand.above()))
+				|| !isWire(placements.blockAt(stand.above(2)))) {
+			return false;
+		}
+		for (Direction side : List.of(depth.getOpposite(), depth)) {
+			String slot = placements.blockAt(stand.above().relative(side));
+			if (slot != null && !slot.startsWith("minecraft:note_block")) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	/**
+	 * Whether a bus cell could go up {@code by} levels: every cell it would move into is empty,
+	 * or holds only the claim of air its own notes left over themselves.
+	 */
+	private static boolean cellCanRise(PlacementPlan placements, BlockPos stand, Direction depth,
+			int by) {
+		for (int level = 3; level <= 2 + by; level++) {
+			if (!emptyOrAir(placements, stand.above(level))) {
+				return false;
+			}
+		}
+		for (Direction side : List.of(depth.getOpposite(), depth)) {
+			for (int level = 2; level <= 2 + by; level++) {
+				if (!emptyOrAir(placements, stand.above(level).relative(side))) {
+					return false;
+				}
+			}
+		}
+		return true;
+	}
+
+	/**
+	 * Lifts a plain bus cell {@code by} levels: its block to where it goes, its notes with it and
+	 * their instruments into the cells the notes left, and -- where the cell keeps its dust -- the
+	 * dust on top of the block again.
+	 *
+	 * <p>The notes are moved as the blocks they already are, with the tick they already belong
+	 * to: what is taken up is what is put down, one level higher. A falling instrument gets its
+	 * prop back under it the way {@link #placeNote} gave it one. Nothing here asks the ground;
+	 * {@link #cellCanRise} did, before a block was laid.</p>
+	 */
+	private static void raiseTheCell(PlacementPlan placements, BlockPos stand, Direction depth,
+			int by, boolean withDust) {
+		Integer live = placements.poweredTime(stand.above());
+		placements.take(stand.above());
+		placements.take(stand.above(2));
+		if (withDust) {
+			// The dust goes down again a level up: the same cell of the same run, not one more.
+			placements.resumeRun(Math.max(0, placements.runSinceRepeater() - 1));
+		}
+		if (live != null) {
+			placements.powered(stand.above(1 + by), "minecraft:stone", live);
+		} else {
+			set(placements, stand.above(1 + by), "minecraft:stone");
+		}
+		if (withDust) {
+			set(placements, stand.above(2 + by), "minecraft:redstone_wire");
+		}
+		for (Direction side : List.of(depth.getOpposite(), depth)) {
+			BlockPos slot = stand.above().relative(side);
+			String note = placements.blockAt(slot);
+			if (note == null) {
+				continue;
+			}
+			Integer when = placements.noteTime(slot);
+			String instrument = placements.blockAt(slot.below());
+			placements.take(slot);
+			placements.take(slot.below());
+			for (int level = 1; level <= by + 1; level++) {
+				if ("minecraft:air".equals(placements.blockAt(slot.above(level)))) {
+					placements.take(slot.above(level));
+				}
+			}
+			BlockPos raised = slot.above(by);
+			set(placements, raised.below(), instrument == null ? "minecraft:air" : instrument);
+			if (instrument != null && FALLING_INSTRUMENT_BLOCKS.contains(instrument)) {
+				placements.support(raised.below(2), UNDERFLOOR);
+			}
+			set(placements, raised, note);
+			if (when != null) {
+				placements.note(raised, when);
+			}
+			set(placements, raised.above(), "minecraft:air");
+		}
+	}
+
+	/**
+	 * Decides a dropped-repeater descent, every cell asked of the ground before a block is laid.
+	 *
+	 * <p>The one electrical fact it rests on is asked first: the cell behind the repeater has to
+	 * be a block under live dust, because that is what the repeater reads. Then the footing --
+	 * the repeater's cell free (or, raising, the chord before's last cell a plain bus cell that
+	 * can go up a level), a top slab or nothing under it -- then the conductor's column and the
+	 * two rungs' columns and the landing, all empty, and no rung beside a note belonging to
+	 * another tick. Harps go to the conductor and the two cells beside it, which can hold
+	 * nothing else; the rung flanks take anything; the rest is the far half, held to the
+	 * fifteen.</p>
+	 *
+	 * @param stands the column the walk stood the chord's repeater in: the wall column at a room
+	 *     of nought, the turn column past it at minus one
+	 * @param raises whether the repeater goes back a column into the chord before's last cell
+	 */
+	private static DescentNought descentNoughtOf(PlacementPlan placements, Lane stands,
+			List<EventNote> notes, boolean raises, Direction depth, int time) {
+		LAST_DESCENT_NOUGHT_REFUSAL = "";
+		if (stands.cornerAt(0)) {
+			LAST_DESCENT_NOUGHT_REFUSAL = "OnACorner";
+			return null;
+		}
+		Direction travel = stands.travel();
+		BlockPos stand = raises ? stands.pos().relative(travel.getOpposite()) : stands.pos();
+		BlockPos behind = stand.relative(travel.getOpposite());
+		if (!conductsWeakly(placements.blockAt(behind.above()))
+				|| !isWire(placements.blockAt(behind.above(2)))) {
+			LAST_DESCENT_NOUGHT_REFUSAL = "NoBusBehind";
+			return null;
+		}
+		if (raises) {
+			if (!plainBusCell(placements, stand, depth)) {
+				LAST_DESCENT_NOUGHT_REFUSAL = "LastCellNotABus";
+				return null;
+			}
+			if (!cellCanRise(placements, stand, depth, 1)) {
+				LAST_DESCENT_NOUGHT_REFUSAL = "NoRoomToRaise";
+				return null;
+			}
+		} else if (placements.blockAt(stand.above()) != null) {
+			LAST_DESCENT_NOUGHT_REFUSAL = "RepeaterCellTaken";
+			return null;
+		}
+		String footing = placements.blockAt(stand);
+		if (footing != null && !footing.endsWith("[type=top]")) {
+			LAST_DESCENT_NOUGHT_REFUSAL = "NoFootingForTheRepeater";
+			return null;
+		}
+		BlockPos conductorAt = stand.above().relative(travel);
+		BlockPos firstDust = conductorAt.below();
+		BlockPos firstRung = firstDust.below();
+		BlockPos secondDust = stand.below();
+		BlockPos secondRung = secondDust.below();
+		BlockPos landingDust = behind.below(2);
+		BlockPos landing = behind.below(3);
+		for (BlockPos cell : List.of(conductorAt, firstDust, firstRung, secondDust, secondRung,
+				landingDust, landing)) {
+			if (placements.blockAt(cell) != null) {
+				LAST_DESCENT_NOUGHT_REFUSAL = "GroundTaken";
+				return null;
+			}
+		}
+		// Over the conductor, which is a note block and needs the air; over the landing's dust,
+		// which the second rung's dust steps down past and which must not occlude.
+		if (!emptyOrAir(placements, conductorAt.above()) || !emptyOrAir(placements, behind.below())) {
+			LAST_DESCENT_NOUGHT_REFUSAL = "GroundTaken";
+			return null;
+		}
+		// Powered stone sounds whatever hangs beside it, at this module's tick -- the wall
+		// descent's rung guard, asked of the conductor and both rungs.
+		for (BlockPos live : List.of(conductorAt, firstRung, secondRung)) {
+			if (stoneWouldSoundAForeignNote(placements, live, time)) {
+				LAST_DESCENT_NOUGHT_REFUSAL = "RungWouldSoundANeighbour";
+				return null;
+			}
+		}
+		List<EventNote> harps = new ArrayList<>();
+		List<EventNote> others = new ArrayList<>();
+		for (EventNote note : busOrder(notes)) {
+			(isHarpNote(note) && note.effect() == null ? harps : others).add(note);
+		}
+		EventNote conductor = harps.isEmpty() ? null : harps.remove(0);
+		List<EventNote> hanging = new ArrayList<>();
+		for (Direction side : List.of(depth.getOpposite(), depth)) {
+			hanging.add(!harps.isEmpty()
+					&& quietAndFreeForHarp(placements, conductorAt.relative(side), time)
+				? harps.remove(0) : null);
+		}
+		List<EventNote> pool = new ArrayList<>(others);
+		pool.addAll(harps);
+		List<EventNote> rungFlanks = new ArrayList<>();
+		for (BlockPos rung : List.of(firstRung, secondRung)) {
+			for (Direction side : List.of(depth.getOpposite(), depth)) {
+				rungFlanks.add(!pool.isEmpty() && railSlotTakes(placements, rung.relative(side), time)
+					? pool.remove(0) : null);
+			}
+		}
+		int run = 2 + Math.max(1, (pool.size() + 1) / 2);
+		if (run > DUST_RANGE) {
+			LAST_DESCENT_NOUGHT_REFUSAL = "OutOfWireBy" + (run - DUST_RANGE);
+			return null;
+		}
+		return new DescentNought(raises, conductor, hanging, rungFlanks, pool);
+	}
+
+	/**
+	 * Lays the dropped-repeater descent -- the raise where there is one, the repeater on its slab,
+	 * the conductor and its harps, the two rungs and their flanks -- and hands back the landing
+	 * the far half opens on. With nothing to carry over, the landing cell is laid bare so the
+	 * lane below still has a live cell to open off, and the cursor is handed back one past it.
+	 */
+	private static BlockPos addDescentNought(PlacementPlan placements, BlockPos cursor,
+			Direction travel, Direction depth, int triggerDelay, DescentNought cut, int time) {
+		placements.placing("descentNought" + cut.headNotes() + "/far" + cut.far().size()
+			+ (cut.raises() ? "/raised" : ""));
+		placements.turnedAt(cursor);
+		BlockPos stand = cut.raises() ? cursor.relative(travel.getOpposite()) : cursor;
+		BlockPos behind = stand.relative(travel.getOpposite());
+		if (cut.raises()) {
+			raiseTheCell(placements, stand, depth, 1, false);
+			placements.padded("descentNoughtRaisedTheCellBehind");
+		}
+		placements.support(stand, UNDERFLOOR);
+		set(placements, stand.above(),
+			"minecraft:repeater[facing=" + repeaterFacing(travel) + ",delay=" + triggerDelay + "]");
+		BlockPos conductorAt = stand.above().relative(travel);
+		if (cut.conductor() != null) {
+			// Bare, not through placeNote: its instrument is the dust it stands on.
+			placeNoteBlock(placements, conductorAt, cut.conductor());
+		} else {
+			set(placements, conductorAt, "minecraft:stone");
+		}
+		placements.powered(conductorAt, time);
+		// Rungs before their dust: the paste runs its commands in build order, and a wire set over
+		// air pops off as an item the moment it lands.
+		BlockPos firstDust = conductorAt.below();
+		placements.powered(firstDust.below(), "minecraft:stone", time);
+		set(placements, firstDust, "minecraft:redstone_wire");
+		placements.powered(firstDust, time);
+		BlockPos secondDust = stand.below();
+		placements.powered(secondDust.below(), "minecraft:stone", time);
+		set(placements, secondDust, "minecraft:redstone_wire");
+		placements.powered(secondDust, time);
+		List<Direction> sides = List.of(depth.getOpposite(), depth);
+		for (int side = 0; side < 2; side++) {
+			if (cut.hanging().get(side) != null) {
+				// A hanging harp driven by the strongly powered conductor; its air claim beneath
+				// is the air the first rung's flank needs over it.
+				placeNote(placements, conductorAt.relative(sides.get(side)),
+					cut.hanging().get(side), true);
+			}
+		}
+		List<BlockPos> rungs = List.of(firstDust.below(), secondDust.below());
+		for (int slot = 0; slot < 4; slot++) {
+			EventNote note = cut.rungFlanks().get(slot);
+			if (note != null) {
+				placeNote(placements, rungs.get(slot / 2).relative(sides.get(slot % 2)), note);
+			}
+		}
+		placements.padded("builtDescentNought" + (cut.raises() ? "Raised" : ""));
+		if (cut.far().isEmpty()) {
+			placements.powered(behind.below(3), "minecraft:stone", time);
+			set(placements, behind.below(2), "minecraft:redstone_wire");
+			placements.padded("descentNoughtBareLanding");
+			return behind.relative(travel.getOpposite()).below(CUBE_FLOOR_HEIGHT);
+		}
+		return behind.below(CUBE_FLOOR_HEIGHT);
+	}
+
+	/**
+	 * Whether a climb at a room of nought is taken by raising the chord before's tail instead of
+	 * building a staircase -- the raised-tail climb, in-game design.
+	 *
+	 * <p>A climb's room of nought is this chord's repeater on the turn column, with the chord
+	 * before ending flush on the wall. A staircase would stand a column past the turn column,
+	 * and there is no such column; the fold wants a room of one; a chord that cannot afford the
+	 * bare climb out of the wire it has left walks out whole.</p>
+	 *
+	 * <p>The shape spends no column past the wall at all. The chord before's last three cells go
+	 * up a level each, staircase fashion, so its dust arrives at the floor above's own block
+	 * level on the wall column. That dust is the end of the line, but the cell before it is not:
+	 * from there the dust also steps up onto a block of glass standing over the first raised
+	 * cell, and the dust on the glass -- carrying one less than the cell it came from, which is
+	 * exactly what the chord's last cell carries -- feeds a repeater on the floor above, facing
+	 * back the way the lane came. A repeater reads any strength of signal and hands out fifteen,
+	 * so the lane above opens there with its own repeater and this chord is laid on it whole, by
+	 * the ordinary machinery, in whatever shape it wants: a stacked head and everything. The
+	 * glass is the trick, twice over -- it holds the dust up and, not being a conductor, it does
+	 * not cut the diagonal the raised dust beneath it steps up through.</p>
+	 *
+	 * <p>In-game design on a floor pitch of five, where the tail rises four cells; at this
+	 * file's pitch of four it rises three and the rest is the same.</p>
+	 */
+	static boolean CLIMB_NOUGHT = true;
+
+	/** Why the last {@link #climbNoughtFits} came back false. */
+	static String LAST_CLIMB_NOUGHT_REFUSAL = "";
+
+	/** How many cells of the chord before a raised-tail climb lifts. */
+	private static final int CLIMB_NOUGHT_RISE = CUBE_FLOOR_HEIGHT - 1;
+
+	/**
+	 * Whether the raised-tail climb can be built where the lane stands: the chord before's last
+	 * three cells plain bus cells that can each go up their level, a cell of dust behind them to
+	 * step up from, and the glass, its dust and the repeater's column on the floor above all
+	 * empty.
+	 *
+	 * @param stands the turn column, where the walk stood this chord's repeater
+	 */
+	private static boolean climbNoughtFits(PlacementPlan placements, Lane stands, Direction depth) {
+		LAST_CLIMB_NOUGHT_REFUSAL = "";
+		if (stands.cornerAt(0)) {
+			LAST_CLIMB_NOUGHT_REFUSAL = "OnACorner";
+			return false;
+		}
+		Direction back = stands.travel().getOpposite();
+		for (int cell = 1; cell <= CLIMB_NOUGHT_RISE; cell++) {
+			BlockPos stand = stands.pos().relative(back, cell);
+			if (!plainBusCell(placements, stand, depth)) {
+				LAST_CLIMB_NOUGHT_REFUSAL = "TailNotABus";
+				return false;
+			}
+			int rise = CLIMB_NOUGHT_RISE + 1 - cell;
+			// And the cell over its raised dust, which the dust of the cell before steps up
+			// through and must not occlude. Over the first raised cell that is the glass.
+			if (!cellCanRise(placements, stand, depth, rise)
+					|| !emptyOrAir(placements, stand.above(3 + rise))) {
+				LAST_CLIMB_NOUGHT_REFUSAL = "NoRoomToRaise";
+				return false;
+			}
+		}
+		// The cell the raised tail steps up from: dust, with air over it for the diagonal.
+		BlockPos feed = stands.pos().relative(back, CLIMB_NOUGHT_RISE + 1);
+		if (!isWire(placements.blockAt(feed.above(2))) || !emptyOrAir(placements, feed.above(3))) {
+			LAST_CLIMB_NOUGHT_REFUSAL = "NothingToStepUpFrom";
+			return false;
+		}
+		// The repeater's column on the floor above: its footing and the repeater's own cell.
+		String footing = placements.blockAt(feed.above(CUBE_FLOOR_HEIGHT));
+		if (footing != null && !"minecraft:stone".equals(footing)
+				|| placements.blockAt(feed.above(CUBE_FLOOR_HEIGHT + 1)) != null) {
+			LAST_CLIMB_NOUGHT_REFUSAL = "RepeaterColumnTaken";
+			return false;
+		}
+		// The glass over the first raised cell and the dust on it.
+		BlockPos glassAt = stands.pos().relative(back, CLIMB_NOUGHT_RISE).above(CUBE_FLOOR_HEIGHT);
+		if (!emptyOrAir(placements, glassAt) || !emptyOrAir(placements, glassAt.above())) {
+			LAST_CLIMB_NOUGHT_REFUSAL = "GlassCellTaken";
+			return false;
+		}
+		return true;
+	}
+
+	/**
+	 * Lays the raised-tail climb and hands back the lane above, standing where its first
+	 * repeater goes and facing back the way this one came. The chord itself is not laid here:
+	 * the walk carries on and lays it on the lane handed back, with a repeater of its own.
+	 */
+	private static Lane addClimbNought(PlacementPlan placements, Lane stands, Direction depth) {
+		placements.placing("climbNought");
+		placements.turnedAt(stands.pos());
+		Direction back = stands.travel().getOpposite();
+		int run = placements.runSinceRepeater();
+		for (int cell = CLIMB_NOUGHT_RISE; cell >= 1; cell--) {
+			raiseTheCell(placements, stands.pos().relative(back, cell), depth,
+				CLIMB_NOUGHT_RISE + 1 - cell, true);
+		}
+		BlockPos glassAt = stands.pos().relative(back, CLIMB_NOUGHT_RISE).above(CUBE_FLOOR_HEIGHT);
+		set(placements, glassAt, "minecraft:glass");
+		// The dust on the glass stands beside the run's last cell, not after it: it is fed by
+		// the cell before the last and carries what the last does.
+		placements.resumeRun(Math.max(0, run - 1));
+		set(placements, glassAt.above(), "minecraft:redstone_wire");
+		BlockPos footing = stands.pos().relative(back, CLIMB_NOUGHT_RISE + 1)
+			.above(CUBE_FLOOR_HEIGHT);
+		placements.support(footing, "minecraft:stone");
+		placements.padded("builtClimbNought");
+		return Lane.straight(footing, back, depth);
 	}
 
 	/**
@@ -21418,6 +21970,11 @@ public final class SongBuilder {
 		/** When the note that was here belonged, for putting it down again elsewhere. */
 		Integer noteTime(BlockPos position) {
 			return notes.get(position.immutable());
+		}
+
+		/** When the block here goes live, for laying it down again elsewhere; null where unrecorded. */
+		Integer poweredTime(BlockPos position) {
+			return powered.get(position.immutable());
 		}
 
 		/**

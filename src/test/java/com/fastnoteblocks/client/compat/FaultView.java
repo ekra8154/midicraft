@@ -97,6 +97,16 @@ final class FaultView {
 
 	static Build of(String name, List<SongBuilder.EventNote> notes, SongBuilder.PasteMode mode,
 			int width, int floors, int maxFloors, boolean nameShapes) {
+		return of(name, notes, mode, width, floors, maxFloors, nameShapes, null);
+	}
+
+	/**
+	 * @param start where the walk begins, the way the debug paste seeds it -- a chord a stated
+	 *     distance from its wall with nothing in front of it to push it there -- or null for the
+	 *     origin
+	 */
+	static Build of(String name, List<SongBuilder.EventNote> notes, SongBuilder.PasteMode mode,
+			int width, int floors, int maxFloors, boolean nameShapes, SongBuilder.WalkStart start) {
 		boolean marking = SongBuilder.MARK_UNREACHED;
 		boolean naming = SongBuilder.DEBUG_PASTE;
 		boolean labelling = SongBuilder.NAME_EVERY_CELL;
@@ -115,8 +125,11 @@ final class FaultView {
 			// that would draw a different machine -- it suppresses collisions, which in v2 skips every
 			// trial fallback. See SongBuilder.MARK_SHAPES.
 			SongBuilder.MARK_SHAPES = true;
-			plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0), notes, mode,
-				new SongBuilder.BuildLimits(maxFloors, width, floors));
+			plan = start == null
+				? SongBuilder.createPastePlan(new BlockPos(0, 64, 0), notes, mode,
+					new SongBuilder.BuildLimits(maxFloors, width, floors))
+				: SongBuilder.createPastePlan(new BlockPos(0, 64, 0), notes, mode,
+					new SongBuilder.BuildLimits(maxFloors, width, floors), start);
 		} finally {
 			SongBuilder.MARK_UNREACHED = marking;
 			SongBuilder.DEBUG_PASTE = naming;
