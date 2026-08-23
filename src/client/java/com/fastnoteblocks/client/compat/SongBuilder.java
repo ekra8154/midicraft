@@ -4986,6 +4986,24 @@ public final class SongBuilder {
 				Direction travel = lane.travel();
 				int wallLeft = wall;
 				int stepLeft = travel.getStepX();
+				// The fold held in reserve against a note the cut cannot hang. Decided here, off the
+				// ground the cut is about to be built on, because once the cut is down the fold's
+				// cells are under it; taken only if the cut's far half reports a note with nowhere to
+				// go, in which case the whole cut is taken back up and the fold laid in its place.
+				// The dropped-repeater descent is never wrapped: its raise takes blocks up outside
+				// any journal. See {@link #FOLD_CATCHES_A_DROPPED_NOTE}.
+				FoldbackPick foldInReserve = FOLD_CATCHES_A_DROPPED_NOTE && layout.v2() && fold == null
+						&& rise == null && nought == null && foldbackOffered && wantsTurn
+					? foldbackPick(placements, lane, event, room, delayColumns, nearWall, farWall,
+						forward, above, climb, floors, "InReserve")
+					: new FoldbackPick(null, null);
+				boolean foldCatches = foldInReserve.any();
+				PlacementPlan.Behind beforeTheCut = foldCatches ? placements.behind() : null;
+				int troublesBeforeTheCut = placements.troubleCount();
+				int timeBeforeTheCut = currentTime;
+				if (foldCatches) {
+					placements.beginTrial();
+				}
 				SpatialDelayTrigger trigger = addSpatialDelayBeforeEvent(placements, lane,
 					event.time() - currentTime);
 				currentTime = event.time();
@@ -5412,6 +5430,41 @@ public final class SongBuilder {
 				if (!far.isEmpty()) {
 					cursor = addCarriedEventModule(placements, cursor, travel, depth, far,
 						splitStepOff);
+				}
+				if (foldCatches) {
+					if (placements.troubleCount() > troublesBeforeTheCut) {
+						// The cut dropped a note. Up it comes, and the fold goes down where it stood:
+						// two lanes of height on one chord is dear, a note that never sounds is dearer.
+						placements.rollbackTrial();
+						placements.behind(beforeTheCut);
+						placements.padded("foldCaughtADroppedNote");
+						placements.padded("foldCaughtADroppedNoteAt"
+							+ Math.min(event.notes().size(), 30) + "Notes");
+						fold = foldInReserve.fold();
+						rise = foldInReserve.rise();
+						headed = null;
+						sunken = null;
+						cross = null;
+						wallCut = null;
+						Direction back = travel.getOpposite();
+						trigger = addSpatialDelayBeforeEvent(placements, lane,
+							event.time() - timeBeforeTheCut);
+						cursor = fold != null
+							? addFoldbackCut(placements, trigger.cursor(), back, depth,
+								trigger.triggerDelay(), fold, event.time())
+							: addFoldbackAscent(placements, trigger.cursor(), back, depth,
+								trigger.triggerDelay(), rise, event.time());
+						far = List.of();
+						foldLaid = (trigger.cursor().getX() - cursor.getX()) * back.getStepX();
+						placements.padded(fold != null ? "builtFoldback" : "builtFoldbackClimb");
+						if (TRACE) {
+							System.out.println("  FOLDBACK t=" + event.time() + " notes="
+								+ chord.size() + " room=" + room + " laid=" + foldLaid
+								+ (fold != null ? " descent" : " climb") + " for a dropped note");
+						}
+					} else {
+						placements.commitTrial();
+					}
 				}
 				lane = crowdedIfUltra(Lane.straight(cursor, travel, depth), layout);
 				// Graded against where the lane actually opened, because every hand-derivation of this
@@ -19488,6 +19541,21 @@ public final class SongBuilder {
 	static boolean FOLDBACK_AT_ROOM_NOUGHT = true;
 
 	/**
+	 * Whether a cut whose far half has a note with nowhere to hang is taken back up and laid as a
+	 * fold instead -- the fold as the last thing before a note is dropped, as it is the last thing
+	 * before a lane walks out.
+	 *
+	 * <p>A climbing cut's far half opens beside the staircase, and where the staircase hung an
+	 * extra beside itself the first far cell has one slot rather than two: the extra's headroom is
+	 * the instrument cell. A cut measured to the wire exactly then has one note over, and a chord
+	 * with no spare harp has nothing that can hang over claimed air. In-game reading found
+	 * twenty-three of those on the first composition at the cap, one cell each, every width.
+	 * The fold is decided before the cut is laid, off the same ground, and built only where the
+	 * cut's own far half says it dropped one.</p>
+	 */
+	static boolean FOLD_CATCHES_A_DROPPED_NOTE = true;
+
+	/**
 	 * Columns of a climb foldback's staircase that take a harp and nothing else, and how many
 	 * after those refuse a falling instrument. See {@link #rungTakes} for what the geometry
 	 * makes of each; the numbers are the ones in-game testing states.
@@ -22125,6 +22193,11 @@ public final class SongBuilder {
 			if (recording) {
 				moved.add(notes);
 			}
+		}
+
+		/** How many faults the build has said about itself so far. */
+		int troubleCount() {
+			return trouble.size();
 		}
 
 		void trouble(String what) {
