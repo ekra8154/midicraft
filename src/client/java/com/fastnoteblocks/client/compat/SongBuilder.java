@@ -1670,6 +1670,46 @@ public final class SongBuilder {
 	 * v2 does not call. Two identical builds and a comparison between them is not a guarantee, it is
 	 * fifteen milliseconds.</p>
 	 */
+	/**
+	 * Stands a stone block behind the head repeater with a button on top of it.
+	 *
+	 * <p>Laid after the walk rather than during it, because the head is not known until there is a
+	 * machine: it is the first repeater the walk put down. Nothing in the walk can be told about it
+	 * in advance and nothing in the walk needs to know about it afterwards -- the column is already
+	 * inside the width the paste promised, so this adds two blocks and no size.</p>
+	 *
+	 * <p>Skipped rather than forced where either cell is taken. The reserve says they are free, and
+	 * a build that has put something there has breached its own width, which is a fault worth
+	 * seeing on its own terms and not one to be turned into a layout collision here.</p>
+	 */
+	private static void addStarter(PlacementPlan placements, Direction forward) {
+		if (!V2_BUILDS_ITS_OWN_STARTER) {
+			return;
+		}
+		// Whatever the walk was in the middle of watching, it is not watching it any more. The guard
+		// that catches a note hung past a flat turn's corner compares one axis, so a starter laid at
+		// the head of the machine can look to it like a block hung outside a turn at the other end.
+		placements.stopWatchingTheTurn();
+		BlockPos head = placements.firstRepeater();
+		if (head == null) {
+			return;
+		}
+		BlockPos button = head.relative(forward.getOpposite());
+		if (placements.blockAt(button) != null) {
+			placements.padded("starterHadNowhereToStand");
+			return;
+		}
+		// Something to attach to, only if there is not something already. The reserved column is
+		// empty ground, but a build that has put its own floor through here has given the button a
+		// perfectly good thing to stand on and does not need a second one.
+		BlockPos stand = button.below();
+		if (placements.blockAt(stand) == null) {
+			placements.set(stand, STARTER_BLOCK);
+		}
+		placements.set(button,
+			String.format(java.util.Locale.ROOT, STARTER_BUTTON, forward.getName()));
+	}
+
 	static PastePlan createV2PastePlan(BlockPos origin, Direction forward, List<EventNote> notes,
 			int width, int floors, WalkStart start) {
 		// Without the lookahead, and measured rather than assumed. It is read only by planLane, and
@@ -1704,6 +1744,7 @@ public final class SongBuilder {
 					placements.padded("flatTurnRewalk");
 					placements.padded("flatTurnRewalkFor:" + shape);
 				}
+				addStarter(placements, forward);
 				return placements.finish(PasteMode.ULTRA_COMPACT_LANE_V2, origin, origin.getX(),
 					origin.getX() + laneWidth);
 			} catch (FlatTurnHungOutside outside) {
@@ -1737,6 +1778,32 @@ public final class SongBuilder {
 	 * width rather than two so the whole thing measures what it says.</p>
 	 */
 	static boolean V2_WIDTH_IS_THE_PASTE_WIDTH = true;
+
+	/**
+	 * v2: the build brings its own starter -- a stone block behind the head repeater, with a button
+	 * on top of it.
+	 *
+	 * <p>The head of a machine is a repeater with nothing behind it, and the column behind it has
+	 * always been reserved: it is one of the three blocks of the width that {@link #widthReserve}
+	 * holds back, and has been since the paste started measuring what the slider says. It was left
+	 * empty for the player to fill, which means every fresh build is a machine that does nothing
+	 * until you go and find its head and put a button on it -- and finding the head of a lane that
+	 * has folded eleven times is the one thing the layout makes hard.</p>
+	 *
+	 * <p>The button stands in the repeater's own input cell, at the repeater's height, on a block of
+	 * its own one level down. A repeater reads whatever power component sits directly behind it, and
+	 * a button is one -- so pressing it drives the repeater without anything in between. That is the
+	 * compact starter anyone would have built by hand, and it keeps the whole thing inside the
+	 * height the machine already occupies rather than standing a block above it.</p>
+	 *
+	 * <p>Only where the cell is genuinely clear: the reserve says it should be, and a build that has
+	 * breached into it has a worse problem than a missing button.</p>
+	 */
+	static boolean V2_BUILDS_ITS_OWN_STARTER = true;
+
+	/** The block the starter stands on, and the button that sits on top of it. */
+	private static final String STARTER_BLOCK = "minecraft:stone";
+	private static final String STARTER_BUTTON = "minecraft:oak_button[face=floor,facing=%s,powered=false]";
 
 	/**
 	 * v2: a lane ending in a climb runs one column further, and the glass stands there.
@@ -4973,7 +5040,7 @@ public final class SongBuilder {
 			if (CLIMB_NOUGHT && layout.v2() && climb > 0 && above >= 0 && above < floors
 					&& wantsTurn && !canTurn && !split && delayColumns == 0
 					&& (room == 0 || CLIMB_NOUGHT_AT_ROOM_ONE && room == 1)) {
-				climbsNought = climbNoughtFits(placements, lane, depth);
+				climbsNought = climbNoughtFits(placements, lane, depth, event.time());
 				placements.padded(climbsNought ? "planClimbNought"
 					: "climbNoughtRefused" + LAST_CLIMB_NOUGHT_REFUSAL);
 				if (climbsNought) {
@@ -12901,6 +12968,17 @@ public final class SongBuilder {
 	 */
 	static boolean CLIMB_NOUGHT_AT_ROOM_ONE = true;
 
+	/**
+	 * Whether the raised tail asks whether the cells it lifts its notes into are quiet, rather than
+	 * only whether they are empty.
+	 *
+	 * <p>A raise moves a note up to three levels, out of the row its own lane owns and into the one
+	 * above, where a cut head's shed flank stands. Emptiness was all that was asked, so a note could
+	 * land against a block that goes live on another tick and sound with it -- four of them, one per
+	 * build, on the first grid seed that visited those widths.</p>
+	 */
+	static boolean CLIMB_NOUGHT_ASKS_FOR_QUIET = true;
+
 	/** Why the last {@link #climbNoughtFits} came back false. */
 	static String LAST_CLIMB_NOUGHT_REFUSAL = "";
 
@@ -12915,7 +12993,8 @@ public final class SongBuilder {
 	 *
 	 * @param stands the turn column, where the walk stood this chord's repeater
 	 */
-	private static boolean climbNoughtFits(PlacementPlan placements, Lane stands, Direction depth) {
+	private static boolean climbNoughtFits(PlacementPlan placements, Lane stands, Direction depth,
+			int time) {
 		LAST_CLIMB_NOUGHT_REFUSAL = "";
 		if (stands.cornerAt(0)) {
 			LAST_CLIMB_NOUGHT_REFUSAL = "OnACorner";
@@ -12935,6 +13014,28 @@ public final class SongBuilder {
 					|| !emptyOrAir(placements, stand.above(3 + rise))) {
 				LAST_CLIMB_NOUGHT_REFUSAL = "NoRoomToRaise";
 				return false;
+			}
+			// Empty is not enough. A raised note lands a level or three above where it was, in
+			// ground this lane never owned -- the flank row of the lane above, where a cut head's
+			// shed flank stands. Beside a block that goes live on another tick it sounds with
+			// that tick instead of its own, which the reader counts and the wire does not. Asked
+			// of every slot the raise moves and of the block it moves, the same question every
+			// other shape asks of ground it is about to hang a note in.
+			if (CLIMB_NOUGHT_ASKS_FOR_QUIET) {
+				for (Direction side : List.of(depth.getOpposite(), depth)) {
+					BlockPos slot = stand.above().relative(side);
+					if (placements.blockAt(slot) == null) {
+						continue;
+					}
+					if (soundedByAnother(placements, slot.above(rise), time)) {
+						LAST_CLIMB_NOUGHT_REFUSAL = "RaisedNoteWouldSoundEarly";
+						return false;
+					}
+				}
+				if (stoneWouldSoundAForeignNote(placements, stand.above(1 + rise), time)) {
+					LAST_CLIMB_NOUGHT_REFUSAL = "RaisedBlockWouldSoundANeighbour";
+					return false;
+				}
 			}
 		}
 		// The cell the raised tail steps up from: dust, with air over it for the diagonal.
@@ -13282,6 +13383,30 @@ public final class SongBuilder {
 		return cells;
 	}
 
+	/**
+	 * Whether a climbing fold's head stands as a stacked module -- a cross under its conductor and
+	 * its flank pair relaying out -- so that the two low slots behind the relays carry notes.
+	 *
+	 * <p>Two notes is one cell off the climb, and the climb is the run that runs out: a chord of 29
+	 * with two harps was one slot short of folding at a room of one and walked out twenty-one
+	 * columns instead. Only the climbing fold. A descent's fold drops through the very column these
+	 * would stand in.</p>
+	 *
+	 * <p>Given up whole rather than nudged. A fold's opening is measured against its room, so there
+	 * is no column to pad with; where the parity question comes back against it the cross is not
+	 * laid at all and the head is the plain pair it always was.</p>
+	 */
+	static boolean FOLD_ASCENT_HAS_A_STACKED_HEAD = true;
+
+	/**
+	 * Whether this note's block can carry a module's pulse out to a low beside it. Harp is the odd
+	 * one out and gets the block it is named for; the rest have to conduct as they are.
+	 */
+	private static boolean relaysThePulse(EventNote note) {
+		return note.effect() == null && (isHarpNote(note)
+			|| CONDUCTING_INSTRUMENT_BLOCKS.contains(note.instrumentBlock()));
+	}
+
 	/** The first note that is not a harp, or the first note where they all are. */
 	private static EventNote takeNonHarpFirst(List<EventNote> pool) {
 		for (int at = 0; at < pool.size(); at++) {
@@ -13572,8 +13697,13 @@ public final class SongBuilder {
 	 *     bus ends directly behind the module, whose wire weakly powers the first climb stone at
 	 *     its own tick.
 	 */
-	private record FoldbackAscent(EventNote pairA, EventNote pairB, List<EventNote> wallward,
-			List<EventNote> outbound, int room, int outboundLimit, int mutedCells) {
+	private record FoldbackAscent(EventNote pairA, EventNote pairB, EventNote backA,
+			EventNote backB, List<EventNote> wallward, List<EventNote> outbound, int room,
+			int outboundLimit, int mutedCells) {
+		/** Whether the head stands as a stacked one: a cross under the conductor, relaying flanks. */
+		boolean stacked() {
+			return backA != null || backB != null;
+		}
 	}
 
 	/**
@@ -13671,6 +13801,58 @@ public final class SongBuilder {
 		// normal. Two were set aside before, whatever the staircase actually wanted, which left
 		// rungs standing empty with harps out on the wall run -- in-game reading, three modules
 		// named.
+		// The stacked head. A climbing fold's conductor is strongly powered stone with dust on
+		// top, which is exactly a stacked module's centre -- so the cell under it takes the same
+		// cross, the flank pair becomes the module's two relays, and the pair of low slots behind
+		// those relays comes free. Two notes, which is one cell off the climb, and the climb is
+		// the run that runs out. A descent fold gets none of it: its fold drops through the very
+		// column these would stand in. See {@link #FOLD_ASCENT_HAS_A_STACKED_HEAD}.
+		//
+		// Asked of the ground the way every stacked module is, and given up whole rather than
+		// nudged: a fold's opening is measured against its room, so there is no column to pad
+		// with, and a head that cannot stand where it is goes back to being the plain pair.
+		EventNote backA = null;
+		EventNote backB = null;
+		if (FOLD_ASCENT_HAS_A_STACKED_HEAD && (pairA != null || pairB != null)) {
+			List<EventNote> flanks = java.util.Arrays.asList(pairA, pairB);
+			List<Direction> outward = List.of(side.getOpposite(), side);
+			List<EventNote> lows = new ArrayList<>(java.util.Arrays.asList(null, null));
+			for (int slot = 0; slot < 2; slot++) {
+				EventNote flank = flanks.get(slot);
+				// Only where the flank above can carry the pulse out. A relay is what makes the
+				// low sound at all, and a harp's own block is the one it is named for.
+				if (flank == null || !relaysThePulse(flank) || pool.isEmpty()) {
+					continue;
+				}
+				BlockPos low = stand.relative(outward.get(slot));
+				if (!quietAndFree(placements, low, time)) {
+					continue;
+				}
+				lows.set(slot, takeNonHarpFirst(pool));
+			}
+			// And the parity question every stacked module is asked, with the flanks this one is
+			// actually going to hang. A clash here is the lane alongside, and the answer is not a
+			// column -- it is the plain head, which hangs nothing in the contested cells at all.
+			UltraSlots asStacked = new UltraSlots(null,
+				java.util.Collections.unmodifiableList(flanks),
+				java.util.Collections.unmodifiableList(java.util.Arrays.asList(null, null)),
+				java.util.Collections.unmodifiableList(lows));
+			if (stackedClashes(placements, opens, time, asStacked)) {
+				placements.padded("foldAscentHeadClashed");
+				for (EventNote low : lows) {
+					if (low != null) {
+						pool.add(0, low);
+					}
+				}
+			} else {
+				backA = lows.get(0);
+				backB = lows.get(1);
+				if (backA != null || backB != null) {
+					placements.padded("foldAscentStackedHead"
+						+ ((backA == null ? 0 : 1) + (backB == null ? 0 : 1)));
+				}
+			}
+		}
 		List<EventNote> rungHarps = new ArrayList<>();
 		int wanted = foldbackHarpOnlySlots(placements, stand.above(2), travel.getOpposite(), side,
 			FOLDBACK_RUNG_HARPS + FOLDBACK_RUNG_NO_FALLING + 1, 0, 3, 1, muted,
@@ -13710,7 +13892,8 @@ public final class SongBuilder {
 			LAST_FOLDBACK_REFUSAL = "NoRoomAbove";
 			return null;
 		}
-		return new FoldbackAscent(pairA, pairB, wallward, outbound, room, outboundLimit, muted);
+		return new FoldbackAscent(pairA, pairB, backA, backB, wallward, outbound, room,
+			outboundLimit, muted);
 	}
 
 	/**
@@ -13722,7 +13905,8 @@ public final class SongBuilder {
 	private static BlockPos addFoldbackAscent(PlacementPlan placements, BlockPos cursor,
 			Direction travel, Direction depth, int triggerDelay, FoldbackAscent fold, int time) {
 		placements.placing("foldback ascent head" + ((fold.pairA() == null ? 0 : 1)
-			+ (fold.pairB() == null ? 0 : 1)));
+			+ (fold.pairB() == null ? 0 : 1) + (fold.backA() == null ? 0 : 1)
+			+ (fold.backB() == null ? 0 : 1)) + (fold.stacked() ? " stacked" : ""));
 		placements.turnedAt(cursor);
 		set(placements, cursor, "minecraft:stone");
 		set(placements, cursor.above(),
@@ -13731,11 +13915,53 @@ public final class SongBuilder {
 		// strongly powered by the repeater, sounding its flank pair and lighting the wire above.
 		BlockPos conductorAt = cursor.above().relative(travel);
 		placements.powered(conductorAt, "minecraft:stone", time);
-		if (fold.pairA() != null) {
-			placeNote(placements, conductorAt.relative(depth.getOpposite()), fold.pairA());
-		}
-		if (fold.pairB() != null) {
-			placeNote(placements, conductorAt.relative(depth), fold.pairB());
+		if (fold.stacked()) {
+			// The cross, exactly as a stacked module lays it: dust on a floor slab directly under
+			// the strongly powered conductor, which lights it. Its four sides are walled in by the
+			// two relays, the repeater's own stand behind, and the wall run's first stone ahead --
+			// and where there is no wall run the cell ahead is the fold's own, which nothing else
+			// may take. See {@link #STACKED_CROSS} for why the shape is stated rather than left
+			// to the game.
+			BlockPos cross = conductorAt.below();
+			set(placements, cross.below(), UNDERFLOOR);
+			set(placements, cross, STACKED_CROSS);
+			List<Direction> outward = List.of(depth.getOpposite(), depth);
+			List<EventNote> flanks = java.util.Arrays.asList(fold.pairA(), fold.pairB());
+			List<EventNote> lows = java.util.Arrays.asList(fold.backA(), fold.backB());
+			for (int slot = 0; slot < 2; slot++) {
+				EventNote flank = flanks.get(slot);
+				if (flank == null) {
+					continue;
+				}
+				Direction out = outward.get(slot);
+				// Only the side that carries a low becomes a relay. A flank with no low under it
+				// is laid the way it always was: its instrument block stays whatever the note
+				// wants -- air for a harp, glass for a hi-hat -- and neither is a thing that can
+				// be powered. Making every flank a relay put a solid block where a harp had left
+				// air and called a pane of glass powered, and the line died at the pane.
+				if (lows.get(slot) == null) {
+					placeNote(placements, conductorAt.relative(out), flank);
+					continue;
+				}
+				BlockPos instrument = cross.relative(out);
+				placements.powered(instrument, conductingInstrumentBlock(flank), time);
+				if (FALLING_INSTRUMENT_BLOCKS.contains(flank.instrumentBlock())) {
+					placements.support(instrument.below(), UNDERFLOOR);
+				}
+				placeNoteBlock(placements, conductorAt.relative(out), flank);
+				if (lows.get(slot) != null) {
+					// At the lane's own floor level, beside the relay, in the column the repeater
+					// stands in -- the same cell a stacked module calls its back low.
+					placeNote(placements, cursor.relative(out), lows.get(slot), true);
+				}
+			}
+		} else {
+			if (fold.pairA() != null) {
+				placeNote(placements, conductorAt.relative(depth.getOpposite()), fold.pairA());
+			}
+			if (fold.pairB() != null) {
+				placeNote(placements, conductorAt.relative(depth), fold.pairB());
+			}
 		}
 		set(placements, conductorAt.above(), "minecraft:redstone_wire");
 		// The wall-bound run, flat at the lane's own bus height -- where a raised bus would
@@ -15422,6 +15648,44 @@ public final class SongBuilder {
 			behindShift = false;
 			placements.padded(style.busHeaded() ? "planBusForTurnStackedBus"
 				: "planBusForTurn");
+			style = ChordStyle.BUS;
+		}
+		// A stacked chord standing ON the corner. The bend-wrapping rule above judges a module by
+		// how far its centre stands from the corners, and walks off the corner before it asks --
+		// so a chord whose repeater would stand on the very corner is paved past it with a cell
+		// of dust, laid stacked a column on, and the two-swap turn is never offered: the swap is
+		// the bus builder's, and a stacked chord never reaches it. In-game reading found a line
+		// dead at exactly such a corner, where the sunken bus and the swap together carry the
+		// whole chord and leave the wire a cell to spare. So a chord opening on a corner is laid
+		// as the sunken bus where one fits, and the swap falls out of the bus builder as it
+		// always did. Only on the corner itself: a column past it the module is clear of the
+		// route, and the stacked shape is the denser one. See {@link #CORNER_CHORD_SINKS}.
+		if (CORNER_CHORD_SINKS && layout.v2() && style.stacked() && lane.cornerAt(0)
+				&& SUNKEN_BUSES && event.notes().size() >= SUNKEN_LOWEST_CHORD
+				&& sunkenFits(event.notes().size()) && hasAHarp(event.notes())
+				// And only where the swap has a note to trade. The swap wants the chord before to have
+				// left a note on the corner's inside diagonal, and a chord that ran the whole lane to
+				// land flush on the corner has left nothing there -- so it is the swap's own question,
+				// asked here as a question and not a placement.
+				&& planSwapTurn(placements, lane, event.notes(), true, false) != null
+				// And not where the sunken run would reach the far corner. A sunken bus has no
+				// flank to shed, so its last cell puts dust on the far corner's inside diagonal
+				// -- the one cell the next chord's swap needs a note in -- and that chord is then
+				// paved past its corner with nothing to trade. Counted off the blocks, after the
+				// arithmetic was wrong twice: the swap stands the repeater on the inside diagonal
+				// and opens the bus one further, then the opening, the dust cells and the handover
+				// cell after them -- and the corridor must still hold one more past that for the
+				// next chord to hang its swap note in. A sunken thirty at eight wide is fourteen
+				// cells of dust into a room of seventeen and fills it to the far diagonal exactly;
+				// read off the top view at 1 65 676, a line dead at the second bend.
+				&& roomAhead != Integer.MAX_VALUE
+				&& sunkenDustCells(event.notes().size()) + 4
+					<= roomAhead - handoverReserve(layout)) {
+			gaveUp = "onTheCorner";
+			behindShift = false;
+			placements.padded("planSunkenOnTheCorner");
+			placements.padded("planSunkenOnTheCornerAt" + Math.min(event.notes().size(), 30)
+				+ "Notes");
 			style = ChordStyle.BUS;
 		}
 		// And a chord of three or fewer drops too, if the ground will not take the notes where that
@@ -20062,6 +20326,19 @@ public final class SongBuilder {
 	static boolean SUNKEN_MAY_OPEN_IN_A_TURN = true;
 
 	/**
+	 * Whether a stacked chord whose repeater would stand on a corner is laid as a sunken bus
+	 * instead, so that the two-swap turn can take the corner.
+	 *
+	 * <p>The swap lives in the bus builder and trades a corner repeater for a note; a stacked
+	 * chord never reaches it, and the bend-wrapping rule paves the corner with a cell of dust
+	 * before it asks where the module stands. That cell is the one the wire did not have: a chord
+	 * of thirty on a sunken head through a swapped corner is fifteen cells and a note to spare,
+	 * where the stacked half a column on left the run one cell short at the next bend, and the
+	 * chord after it went dark. Hand-built first, in the world.</p>
+	 */
+	static boolean CORNER_CHORD_SINKS = true;
+
+	/**
 	 * Whether a two-swap turn builds the sunken shape the walk measured, instead of a plain bus.
 	 *
 	 * <p>The fault it is for: {@link #twoSwapTurn} ends in {@link #layBus} unconditionally, so a
@@ -22040,6 +22317,22 @@ public final class SongBuilder {
 		/** What is planned for this cell, or {@code null} where nothing is. */
 		String blockAt(BlockPos position) {
 			return blocks.get(position.immutable());
+		}
+
+		/**
+		 * The first repeater the walk laid, which is the head of the machine.
+		 *
+		 * <p>Insertion order, because the walk lays events in time order and the head is the first
+		 * event's trigger -- nothing stands in front of it, which is the whole of what makes it the
+		 * head. The map is a {@link LinkedHashMap} for exactly this kind of question.</p>
+		 */
+		BlockPos firstRepeater() {
+			for (Map.Entry<BlockPos, String> cell : blocks.entrySet()) {
+				if (cell.getValue().startsWith("minecraft:repeater")) {
+					return cell.getKey();
+				}
+			}
+			return null;
 		}
 
 		/** Places a block and records that the signal reaches it at {@code time}. */
