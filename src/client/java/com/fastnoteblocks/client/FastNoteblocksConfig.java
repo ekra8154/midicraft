@@ -372,6 +372,17 @@ public final class FastNoteblocksConfig {
 	 * import, and a choice that reset itself each time would not be a choice.</p>
 	 */
 	private boolean listSortByName;
+	/**
+	 * When each song was last opened, by id.
+	 *
+	 * <p>Here rather than in the song itself, because opening a song is not a change to it: writing
+	 * the time into the file would rewrite most of a megabyte to record that somebody looked, and
+	 * would move the very timestamp it was meant to replace.</p>
+	 *
+	 * <p>Ids that no longer name a song are dropped on the way out, so deleting a composition takes
+	 * its entry with it rather than leaving the map to grow for the life of the install.</p>
+	 */
+	private final Map<String, Long> songOpenedAt = new LinkedHashMap<>();
 	private int repeatMergeTicks;
 	private int conversionGapPercentile;
 	private double commandsPerTick;
@@ -565,6 +576,13 @@ public final class FastNoteblocksConfig {
 				);
 				instance.layerPanelCollapsed = Boolean.TRUE.equals(stored.layerPanelCollapsed);
 				instance.listSortByName = Boolean.TRUE.equals(stored.listSortByName);
+				if (stored.songOpenedAt != null) {
+					stored.songOpenedAt.forEach((id, at) -> {
+						if (id != null && at != null && at > 0L) {
+							instance.songOpenedAt.put(id, at);
+						}
+					});
+				}
 			}
 		} catch (Exception ignored) {
 			instance = defaults();
@@ -985,6 +1003,7 @@ public final class FastNoteblocksConfig {
 			return;
 		}
 		activeSongId = id;
+		songOpenedAt.put(id, System.currentTimeMillis());
 		documentGeneration++;
 		composerProject = songs.song(id);
 		activeSequenceName = composerProject.name();
@@ -1327,6 +1346,17 @@ public final class FastNoteblocksConfig {
 		this.layerPanelWidth = clampLayerPanelWidth(layerPanelWidth);
 	}
 
+	/**
+	 * When a song was last opened, or 0 for one that has not been since the mod started counting.
+	 *
+	 * <p>Every way into a composition goes through {@link #setActiveSongId}, so that is where the
+	 * time is written and this is the whole of the record.</p>
+	 */
+	public long songOpenedAt(String id) {
+		Long at = songOpenedAt.get(id);
+		return at == null ? 0L : at;
+	}
+
 	public boolean listSortByName() {
 		return listSortByName;
 	}
@@ -1403,6 +1433,7 @@ public final class FastNoteblocksConfig {
 		config.layerPanelWidth = DEFAULT_LAYER_PANEL_WIDTH;
 		config.layerPanelCollapsed = false;
 		config.listSortByName = false;
+		config.songOpenedAt.clear();
 		config.repeatMergeTicks = DEFAULT_REPEAT_MERGE_TICKS;
 		config.conversionGapPercentile = DEFAULT_CONVERSION_GAP_PERCENTILE;
 		config.convertOctaveShifting = ComposerProject.OctaveShifting.NOTES_ONLY;
@@ -1570,6 +1601,7 @@ public final class FastNoteblocksConfig {
 		private Integer layerPanelWidth;
 		private Boolean layerPanelCollapsed;
 		private Boolean listSortByName;
+		private Map<String, Long> songOpenedAt;
 		private Integer composerSpeedQuarters;
 		private Integer repeatMergeTicks;
 		private Integer conversionGapPercentile;
@@ -1633,6 +1665,14 @@ public final class FastNoteblocksConfig {
 			this.layerPanelWidth = config.layerPanelWidth;
 			this.layerPanelCollapsed = config.layerPanelCollapsed;
 			this.listSortByName = config.listSortByName;
+			// Only the songs that still exist. A library the player has been pruning would otherwise
+			// leave a line in the settings file for every composition ever opened.
+			this.songOpenedAt = new LinkedHashMap<>();
+			config.songOpenedAt.forEach((id, at) -> {
+				if (songs.song(id) != null) {
+					this.songOpenedAt.put(id, at);
+				}
+			});
 			this.composerSpeedQuarters = config.composerSpeedQuarters;
 			this.repeatMergeTicks = config.repeatMergeTicks;
 			this.conversionGapPercentile = config.conversionGapPercentile;

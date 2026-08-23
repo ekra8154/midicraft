@@ -58,22 +58,40 @@ public final class SongsScreen extends Screen {
 	}
 
 	private String sortLabel() {
-		return config.listSortByName() ? "Sort: A to Z" : "Sort: newest";
+		return config.listSortByName() ? "Sort: A to Z" : "Sort: recent";
 	}
 
 	/**
-	 * Newest first by default: the song you last saved is nearly always the one you came back for,
-	 * and a library sorted by name makes you remember what you called it before you can find it.
+	 * Most recently opened first by default, and a library sorted by name makes you remember what
+	 * you called something before you can find it.
+	 *
+	 * <p>Opened rather than saved. They are the same thing for a song you are working on and they
+	 * come apart for every other kind: a song you opened to listen to and closed is one you were
+	 * just looking at and did not save, and it belongs at the top; a song a conversion or a rename
+	 * touched last week is not. What the order is answering is "where was I", and being in a
+	 * composition is what puts you there.</p>
 	 */
 	private void sortRows() {
 		if (config.listSortByName()) {
 			rows.sort(Comparator.comparing(row -> row.song().name().toLowerCase(Locale.ROOT)));
 			return;
 		}
-		rows.sort(Comparator.comparingLong((Row row) -> SongLibrary.modifiedAt(row.id())).reversed()
-			// A stable second key, so two songs written in the same millisecond do not swap places
-			// between one opening of this screen and the next.
+		rows.sort(Comparator.comparingLong((Row row) -> lastSeen(row.id())).reversed()
+			// A stable second key, so two songs from the same millisecond do not swap places between
+			// one opening of this screen and the next.
 			.thenComparing(row -> row.song().name().toLowerCase(Locale.ROOT)));
+	}
+
+	/**
+	 * When a song was last opened, falling back to when its file was last written.
+	 *
+	 * <p>The fallback is for everything already in the library the first time this is asked, and for
+	 * anything that arrives without being opened. Without it a whole library would sort as one
+	 * undifferentiated block of never, which is a worse answer than the one this replaced.</p>
+	 */
+	private long lastSeen(String id) {
+		long opened = config.songOpenedAt(id);
+		return opened > 0L ? opened : SongLibrary.modifiedAt(id);
 	}
 
 	/**
@@ -352,20 +370,34 @@ public final class SongsScreen extends Screen {
 		return String.format(Locale.ROOT, "%d notes - %d layer%s - %s - %s - %.2fx - %s",
 			analysis.totalNotes(), song.layers().size(), song.layers().size() == 1 ? "" : "s",
 			analysis.lengthLabel(), bpmLabel(song), song.speedQuarters() / 4.0,
-			savedLabel(SongLibrary.modifiedAt(row.id())));
+			seenLabel(row.id()));
 	}
 
 	/**
-	 * When a song was last saved, as long ago rather than as a date.
+	 * What the default order sorted this row by, said in words.
 	 *
-	 * <p>Put on the row because the default order is by it, and an order you cannot see the key for
-	 * is one you have to take on trust. Relative because the question this answers is "is this the
-	 * one I was working on", and "2 hours ago" answers it where a timestamp has to be compared
-	 * against a clock first.</p>
+	 * <p>Put on the row because the order is by it, and an order you cannot see the key for is one
+	 * you have to take on trust. It names which of the two it is using, since a song that has not
+	 * been opened since the mod started keeping track falls back to when it was written, and "saved
+	 * 3 days ago" against "opened 3 days ago" is the difference between a row that is where you
+	 * left it and one that is only guessing.</p>
 	 */
-	private static String savedLabel(long modifiedMillis) {
+	private String seenLabel(String id) {
+		long opened = config.songOpenedAt(id);
+		return opened > 0L
+			? "opened " + agoLabel(opened)
+			: "saved " + agoLabel(SongLibrary.modifiedAt(id));
+	}
+
+	/**
+	 * How long ago something happened, as long ago rather than as a date.
+	 *
+	 * <p>Relative because the question this answers is "is this the one I was working on", and "2
+	 * hours ago" answers it where a timestamp has to be compared against a clock first.</p>
+	 */
+	private static String agoLabel(long modifiedMillis) {
 		if (modifiedMillis <= 0L) {
-			return "never saved";
+			return "never";
 		}
 		long minutes = Math.max(0L, (System.currentTimeMillis() - modifiedMillis) / 60_000L);
 		if (minutes < 1L) {
