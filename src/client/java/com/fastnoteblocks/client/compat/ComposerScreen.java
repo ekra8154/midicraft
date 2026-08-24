@@ -138,7 +138,9 @@ public final class ComposerScreen extends Screen {
 					0xFFCDE9FF);
 			}
 		}
-		setResizeCursor(lit);
+		if (lit) {
+			wantedCursorShape = GLFW.GLFW_HRESIZE_CURSOR;
+		}
 	}
 
 	/**
@@ -156,26 +158,29 @@ public final class ComposerScreen extends Screen {
 	}
 
 	/**
-	 * Swaps in the horizontal-resize cursor while the split is in reach.
+	 * Puts on the cursor this frame asked for: resize arrows over the split, a hand over a
+	 * bracket handle, the ordinary pointer everywhere else.
 	 *
-	 * <p>Only on the change, and put back on the way out and again when the screen closes: a cursor
-	 * is process-wide state, so leaving it set would follow the player back into the world.</p>
+	 * <p>Asked for during the frame and set once at the end of it, rather than set by each
+	 * thing that wants one. Two of those drawing in the same frame would otherwise take turns,
+	 * and whichever drew last would win however far away its own target was.</p>
+	 *
+	 * <p>Only on the change, and put back on the way out and again when the screen closes: a
+	 * cursor is process-wide state, so leaving it set would follow the player into the world.</p>
 	 */
-	private void setResizeCursor(boolean wanted) {
-		if (wanted == resizeCursorShown || minecraft == null || minecraft.getWindow() == null) {
+	private void setCursorShape(int shape) {
+		if (shape == cursorShape || minecraft == null || minecraft.getWindow() == null) {
 			return;
 		}
-		resizeCursorShown = wanted;
+		cursorShape = shape;
 		long window = minecraft.getWindow().handle();
-		if (!wanted) {
+		if (shape == 0) {
 			GLFW.glfwSetCursor(window, 0L);
 			return;
 		}
-		if (RESIZE_CURSOR == 0L) {
-			RESIZE_CURSOR = GLFW.glfwCreateStandardCursor(GLFW.GLFW_HRESIZE_CURSOR);
-		}
-		if (RESIZE_CURSOR != 0L) {
-			GLFW.glfwSetCursor(window, RESIZE_CURSOR);
+		long cursor = CURSORS.computeIfAbsent(shape, GLFW::glfwCreateStandardCursor);
+		if (cursor != 0L) {
+			GLFW.glfwSetCursor(window, cursor);
 		}
 	}
 
@@ -857,9 +862,19 @@ public final class ComposerScreen extends Screen {
 	private int tierMenuHi;
 	private int tierMenuX;
 	private int tierMenuY;
+	/**
+	 * Whether the brackets are folded away while their layer still holds the keyboard.
+	 *
+	 * <p>The screen's own state rather than the composition's: what a song is does not depend
+	 * on whether you happen to be looking at its brackets. It is not remembered between visits
+	 * either, so the keyboard always opens saying what the layer actually does.</p>
+	 */
+	private boolean splitBracketsHidden;
 	/** Dragging the split between the layer panel and the roll, and whether the cursor says so. */
 	private boolean draggingSplitter;
-	private boolean resizeCursorShown;
+	/** The GLFW cursor shape now set on the window, and the one this frame has asked for. */
+	private int cursorShape;
+	private int wantedCursorShape;
 	private double layerDragStartY;
 	private double layerDragY;
 	private boolean layerDragActive;
@@ -1957,6 +1972,7 @@ public final class ComposerScreen extends Screen {
 	@Override
 	public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
 		long frameStart = profiling ? System.nanoTime() : 0L;
+		wantedCursorShape = 0;
 		updatePlayback();
 		rollX = layerPanelWidth() + PIANO_WIDTH;
 		rollY = TOOLBAR_HEIGHT + TIMELINE_RULER_HEIGHT;
@@ -1968,6 +1984,7 @@ public final class ComposerScreen extends Screen {
 		extractTimeRuler(graphics, mouseX, mouseY);
 		mark = phase(PHASE_RULER, mark);
 		mark = extractPianoRoll(graphics, mouseX, mouseY, mark);
+		extractSplitToggle(graphics, mouseX, mouseY);
 		extractStatus(graphics);
 		extractToast(graphics, mouseX, mouseY);
 		mark = phase(PHASE_STATUS, mark);
@@ -1985,6 +2002,7 @@ public final class ComposerScreen extends Screen {
 		extractSnapMenu(graphics, mouseX, mouseY);
 		extractMenuDescription(graphics);
 		phase(PHASE_MENUS, mark);
+		setCursorShape(wantedCursorShape);
 		endProfiledFrame(graphics, frameStart);
 	}
 
@@ -4861,6 +4879,12 @@ public final class ComposerScreen extends Screen {
 			hoveredKeyMidi = -1;
 			return;
 		}
+		// A bracket standing on the keys answers for itself, and it is the more specific thing to
+		// be pointing at -- the row underneath is not what the hand is going for.
+		if (bracketHandleAt(mouseX, mouseY) != null || bracketBodyAt(mouseX, mouseY) >= 0) {
+			hoveredKeyMidi = -1;
+			return;
+		}
 		int midi = mouseMidi(mouseY);
 		if (midi != hoveredKeyMidi) {
 			hoveredKeyMidi = midi;
@@ -5564,6 +5588,16 @@ public final class ComposerScreen extends Screen {
 				focusedPane = Pane.ROLL;
 			} else {
 				clearLayerSelection();
+			}
+			return true;
+		}
+		NoteRect splitToggle = splitToggleRect();
+		if (event.button() == 0 && splitToggle != null
+				&& splitToggle.contains(event.x(), event.y())) {
+			splitBracketsHidden = !splitBracketsHidden;
+			// The picker belongs to a bracket, so it goes away with them.
+			if (splitBracketsHidden) {
+				tierMenuBase = Integer.MIN_VALUE;
 			}
 			return true;
 		}
@@ -6617,7 +6651,7 @@ public final class ComposerScreen extends Screen {
 	@Override
 	public void removed() {
 		ComposerScale.screenClosed(this);
-		setResizeCursor(false);
+		setCursorShape(0);
 		super.removed();
 	}
 
@@ -6988,7 +7022,59 @@ public final class ComposerScreen extends Screen {
 	/** The brackets the keyboard is currently wearing, or null for the plain keyboard. */
 	private ComposerProject.Split keyboardSplit() {
 		List<Integer> cohort = splitKeyboardLayers();
-		return cohort.isEmpty() ? null : project().layers().get(cohort.get(0)).split();
+		return cohort.isEmpty() || splitBracketsHidden
+			? null
+			: project().layers().get(cohort.get(0)).split();
+	}
+
+	/**
+	 * The button that puts the brackets away, in the corner over the keys, or null when there
+	 * are no brackets to put away.
+	 *
+	 * <p>The corner above the key strip is the one piece of the roll's frame that has never
+	 * drawn anything -- the ruler starts where the keys end -- and it is directly over the thing
+	 * it hides, which is where a fold control belongs.</p>
+	 */
+	private NoteRect splitToggleRect() {
+		if (splitKeyboardLayers().isEmpty()) {
+			return null;
+		}
+		// Clear of the splitter's grab zone, which reaches three pixels past the panel edge and
+		// is answered first: two pixels in, the button's own left column started a panel drag.
+		int left = layerPanelWidth() + SPLITTER_GRAB + 2;
+		int top = rollY - TIMELINE_RULER_HEIGHT + 4;
+		return new NoteRect(left, top, left + 16, top + 16);
+	}
+
+	/**
+	 * Draws that button: an arrow pointing the way the brackets are about to go.
+	 *
+	 * <p>Outside the roll's scissor, which is why it is not drawn with the brackets themselves
+	 * -- the strip is clipped to the rows, and this sits above the first of them.</p>
+	 */
+	private void extractSplitToggle(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
+		NoteRect button = splitToggleRect();
+		if (button == null) {
+			return;
+		}
+		boolean hovered = button.contains(mouseX, mouseY);
+		graphics.fill(button.left(), button.top(), button.right(), button.bottom(),
+			hovered ? 0xFF44484F : 0xCC22262C);
+		graphics.fill(button.left(), button.top(), button.right(), button.top() + 1, 0xFF3A414A);
+		int color = hovered ? 0xFFFFFFFF : 0xFF9AA0A8;
+		int middle = (button.top() + button.bottom()) / 2;
+		int arrowLeft = button.left() + 6;
+		// Pointing left to fold the brackets away, right to bring them back, like every other
+		// disclosure arrow: it shows which way the thing it controls is about to move.
+		for (int step = 0; step < 4; step++) {
+			int column = splitBracketsHidden ? arrowLeft + 3 - step : arrowLeft + step;
+			graphics.fill(column, middle - step, column + 1, middle + step + 1, color);
+		}
+		if (hovered) {
+			graphics.setTooltipForNextFrame(Component.literal(splitBracketsHidden
+				? "Show the split brackets"
+				: "Hide the split brackets"), mouseX, mouseY);
+		}
 	}
 
 	/**
@@ -7286,8 +7372,8 @@ public final class ComposerScreen extends Screen {
 				graphics.text(font, Component.literal("+"), bracketIconX(index) + 5,
 					(top + bottom) / 2 - 4, hot ? 0xFFFFFFFF : 0xAA000000 | color & 0xFFFFFF, false);
 				if (hot) {
-					hoveredDescription = "Nothing sounds in this register. Click to choose which of "
-						+ "its instruments do.";
+					graphics.setTooltipForNextFrame(Component.literal(
+						"Empty register - click to choose what sounds here"), mouseX, mouseY);
 				}
 				continue;
 			}
@@ -7304,11 +7390,15 @@ public final class ComposerScreen extends Screen {
 					iconX, iconTop + icon * 18);
 			}
 			if (hovered != null && hovered.group() == index) {
-				hoveredDescription = "Drag to trim where this bracket sounds. It moves the whole "
-					+ "register together, and never past where its instruments can play.";
+				// The hand only while a handle is actually under it, not anywhere on the bracket:
+				// what it promises is that a press here takes hold of something.
+				wantedCursorShape = GLFW.GLFW_POINTING_HAND_CURSOR;
+				graphics.setTooltipForNextFrame(Component.literal(
+					"Drag to trim this register - " + midiName(group.lo()) + " to "
+						+ midiName(group.hi())), mouseX, mouseY);
 			} else if (hoveredBody == index) {
-				hoveredDescription = "Click to choose which of this register's instruments sound. "
-					+ "Drag the ends to trim the range.";
+				graphics.setTooltipForNextFrame(Component.literal(
+					"Click to choose this register's instruments"), mouseX, mouseY);
 			}
 		}
 	}
@@ -9389,7 +9479,8 @@ public final class ComposerScreen extends Screen {
 
 	private static final String SUBMENU_ARROW = "▸";
 	/** Created once and kept: GLFW cursors are process-wide and there is no reason for two. */
-	private static long RESIZE_CURSOR;
+	/** The standard cursors asked for so far, by GLFW shape. Created once, never destroyed. */
+	private static final Map<Integer, Long> CURSORS = new java.util.HashMap<>();
 	/** Air around a submenu's rule, so the row after it does not sit on the line. */
 	private static final int SUBMENU_DIVIDER_GAP = 5;
 
