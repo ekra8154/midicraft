@@ -7043,13 +7043,16 @@ public final class ComposerScreen extends Screen {
 	 *
 	 * <p>Staggered rather than staircased. Adjacent registers overlap by an octave, so alternating
 	 * two lanes is exactly what keeps neighbouring brackets off each other -- and registers two
-	 * apart never share more than a single row, so a lane's own brackets barely touch. The lanes
-	 * sit either side of the strip's centre because each one's icons hang off its outer flank --
-	 * left lane's to the left, right lane's to the right -- which is what keeps two brackets'
-	 * icons from ever stacking on each other.</p>
+	 * apart never share more than a single row, so a lane's own brackets barely touch. Each
+	 * lane's icons hang off its outer flank -- left lane's to the left, right lane's to the
+	 * right -- which is what keeps two brackets' icons from ever stacking on each other.</p>
+	 *
+	 * <p>The whole apparatus is kept over the black keys, which are two thirds of the strip's
+	 * width. Everything past them is left clear, so the white keys' own stretch goes on being
+	 * somewhere to press a note rather than somewhere a bracket has taken.</p>
 	 */
 	private int bracketX(int groupIndex) {
-		return layerPanelWidth() + 19 + groupIndex % 2 * 7;
+		return layerPanelWidth() + 12 + groupIndex % 2 * 7;
 	}
 
 	/** Whether this bracket rides the left lane, which is where its icons hang to the left. */
@@ -7057,9 +7060,17 @@ public final class ComposerScreen extends Screen {
 		return groupIndex % 2 == 0;
 	}
 
-	/** The left edge of a bracket's icon column, on its lane's outer flank. */
+	/**
+	 * The left edge of a bracket's icon column: on its lane's outer flank, and sat on the
+	 * bracket rather than beside it.
+	 *
+	 * <p>An icon is sixteen pixels and the strip is forty-eight, so two lanes holding their
+	 * icons clear of their own lines spent the entire strip and left nowhere to press a key.
+	 * The overlap costs nothing to read: icons are drawn after the lines, and a bracket is
+	 * hidden only along the few rows its own icons occupy.</p>
+	 */
 	private int bracketIconX(int groupIndex) {
-		return leftLane(groupIndex) ? bracketX(groupIndex) - 18 : bracketX(groupIndex) + 6;
+		return leftLane(groupIndex) ? bracketX(groupIndex) - 12 : bracketX(groupIndex) - 3;
 	}
 
 	/**
