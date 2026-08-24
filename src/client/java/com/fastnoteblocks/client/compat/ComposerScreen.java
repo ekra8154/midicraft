@@ -839,8 +839,8 @@ public final class ComposerScreen extends Screen {
 	private int layerDragIndex = -1;
 	/**
 	 * Dragging one end of a split bracket in the keyboard strip: which bracket group, and which
-	 * end. The layer is not tracked because the brackets only show while exactly one split layer
-	 * is soloed, so the layer is whatever {@link #splitKeyboardLayerIndex} answers.
+	 * end. The layers are not tracked because the brackets only show while one agreeing set of
+	 * split layers holds the keyboard, so they are whatever {@link #splitKeyboardLayers} answers.
 	 */
 	private int bracketDragGroup = -1;
 	private boolean bracketDragTop;
@@ -6952,28 +6952,43 @@ public final class ComposerScreen extends Screen {
 	}
 
 	/**
-	 * The layer whose brackets the keyboard wears, or -1 while the plain keyboard shows.
+	 * The layers whose shared brackets the keyboard wears, or empty for the plain keyboard.
 	 *
-	 * <p>Whenever a split layer is the only layer <em>selected</em> -- that is the whole
-	 * condition. What else is audible does not matter: other layers may well be playing notes the
-	 * split keyboard says nothing about, and in-game use settled that this is fine -- the
-	 * keyboard describes the layer being worked on, not the mix. Selection is already how the
-	 * screen answers "whose notes am I editing", so it is also how it answers "whose keyboard
-	 * am I on".</p>
+	 * <p>Selection is the condition -- what else is audible does not matter: other layers may
+	 * well be playing notes the split keyboard says nothing about, and in-game use settled that
+	 * this is fine. One selected split layer is the plain case. Several selected layers that are
+	 * all split and agree exactly -- same voices, same trims -- wear their common brackets too,
+	 * and a bracket edit lands on all of them at once, which is what keeps them agreeing. With
+	 * nothing selected the whole project is asked the same question, so a song that is one split
+	 * signature throughout keeps its keyboard without any selection at all.</p>
 	 */
-	private int splitKeyboardLayerIndex() {
-		if (selectedLayers.size() != 1) {
-			return -1;
+	private List<Integer> splitKeyboardLayers() {
+		List<Integer> cohort = new ArrayList<>();
+		if (selectedLayers.isEmpty()) {
+			for (int index = 0; index < project().layers().size(); index++) {
+				cohort.add(index);
+			}
+		} else {
+			cohort.addAll(selectedLayers);
 		}
-		int index = selectedLayers.iterator().next();
-		return index >= 0 && index < project().layers().size()
-			&& project().layers().get(index).split() != null ? index : -1;
+		ComposerProject.Split shared = null;
+		for (int index : cohort) {
+			if (index < 0 || index >= project().layers().size()) {
+				return List.of();
+			}
+			ComposerProject.Split split = project().layers().get(index).split();
+			if (split == null || shared != null && !shared.equals(split)) {
+				return List.of();
+			}
+			shared = split;
+		}
+		return shared == null ? List.of() : cohort;
 	}
 
 	/** The brackets the keyboard is currently wearing, or null for the plain keyboard. */
 	private ComposerProject.Split keyboardSplit() {
-		int index = splitKeyboardLayerIndex();
-		return index < 0 ? null : project().layers().get(index).split();
+		List<Integer> cohort = splitKeyboardLayers();
+		return cohort.isEmpty() ? null : project().layers().get(cohort.get(0)).split();
 	}
 
 	/**
@@ -7091,13 +7106,25 @@ public final class ComposerScreen extends Screen {
 	private record BracketHandle(int group, boolean top) {
 	}
 
-	/** The bracket end under the cursor, or null. The handles win over the keys beneath them. */
+	/**
+	 * The bracket end under the cursor, or null. The handles win over the keys beneath them.
+	 *
+	 * <p>Two registers meeting on one row put a top handle and a bottom handle in the same place
+	 * -- harp's ceiling is bell's floor, on the same lane -- and "first match wins" made one of
+	 * them nearly ungrabbable there, worst zoomed out where a row is four pixels. So every handle
+	 * under the cursor is scored instead, by how far the cursor sits toward the handle's own
+	 * bracket's body: a pixel below the shared row grabs the lower bracket's top, a pixel above
+	 * grabs the upper bracket's bottom, and the hover highlight says which before the press
+	 * commits to it.</p>
+	 */
 	private BracketHandle bracketHandleAt(double mouseX, double mouseY) {
 		ComposerProject.Split split = keyboardSplit();
 		if (split == null || !overPianoKeys(mouseX, mouseY)) {
 			return null;
 		}
 		List<BracketGroup> groups = bracketGroups(split);
+		BracketHandle best = null;
+		double bestScore = -Double.MAX_VALUE;
 		for (int index = 0; index < groups.size(); index++) {
 			BracketGroup group = groups.get(index);
 			int x = bracketX(index);
@@ -7107,13 +7134,21 @@ public final class ComposerScreen extends Screen {
 			int top = noteY(group.hi());
 			int bottom = noteY(group.lo()) + rowHeight - 1;
 			if (mouseY >= top - 2 && mouseY < top + 6) {
-				return new BracketHandle(index, true);
+				double score = mouseY - top;
+				if (best == null || score > bestScore) {
+					best = new BracketHandle(index, true);
+					bestScore = score;
+				}
 			}
 			if (mouseY >= bottom - 6 && mouseY < bottom + 2) {
-				return new BracketHandle(index, false);
+				double score = bottom - mouseY;
+				if (best == null || score > bestScore) {
+					best = new BracketHandle(index, false);
+					bestScore = score;
+				}
 			}
 		}
-		return null;
+		return best;
 	}
 
 	/** Where a bracket's stack of instrument icons starts, centred on the bracket. */
@@ -7217,20 +7252,20 @@ public final class ComposerScreen extends Screen {
 	 * coalescing as the speed slider.</p>
 	 */
 	private void dragBracketHandle(double mouseY) {
-		int layerIndex = splitKeyboardLayerIndex();
-		if (layerIndex < 0) {
+		List<Integer> cohort = splitKeyboardLayers();
+		if (cohort.isEmpty()) {
 			bracketDragGroup = -1;
 			return;
 		}
-		Layer layer = project().layers().get(layerIndex);
-		List<BracketGroup> groups = bracketGroups(layer.split());
+		ComposerProject.Split shared = project().layers().get(cohort.get(0)).split();
+		List<BracketGroup> groups = bracketGroups(shared);
 		if (bracketDragGroup >= groups.size()) {
 			bracketDragGroup = -1;
 			return;
 		}
 		BracketGroup group = groups.get(bracketDragGroup);
 		int midi = mouseMidi(mouseY);
-		List<ComposerProject.Split.Voice> voices = new ArrayList<>(layer.split().voices());
+		List<ComposerProject.Split.Voice> voices = new ArrayList<>(shared.voices());
 		boolean changed = false;
 		for (int index : group.voiceIndices()) {
 			ComposerProject.Split.Voice voice = voices.get(index);
@@ -7247,8 +7282,13 @@ public final class ComposerScreen extends Screen {
 		if (!changed) {
 			return;
 		}
-		ComposerProject next = project().withLayer(layerIndex,
-			layer.withSplit(new ComposerProject.Split(voices)));
+		// Landed on every layer wearing these brackets, so an agreeing cohort goes on agreeing --
+		// otherwise the first drag would scatter the signatures and take the keyboard down with it.
+		ComposerProject.Split moved = new ComposerProject.Split(voices);
+		ComposerProject next = project();
+		for (int index : cohort) {
+			next = next.withLayer(index, next.layers().get(index).withSplit(moved));
+		}
 		long now = Util.getMillis();
 		if (now - lastBracketDragAt < SCALE_COALESCE_MILLIS) {
 			history.replaceCurrent(next);
@@ -7331,14 +7371,13 @@ public final class ComposerScreen extends Screen {
 		if (menu == null) {
 			return;
 		}
-		int layerIndex = splitKeyboardLayerIndex();
-		if (layerIndex < 0) {
-			// The brackets went away under it -- the layer was un-soloed or un-split -- so the
-			// picker for them goes too.
+		ComposerProject.Split split = keyboardSplit();
+		if (split == null) {
+			// The brackets went away under it -- the selection moved, or the layer was un-split
+			// -- so the picker for them goes too.
 			tierMenuBase = Integer.MIN_VALUE;
 			return;
 		}
-		ComposerProject.Split split = project().layers().get(layerIndex).split();
 		graphics.fill(menu.left(), menu.top(), menu.right(), menu.bottom(), 0xF0101115);
 		graphics.fill(menu.left(), menu.top(), menu.right(), menu.top() + 1, 0xFFAAAAAA);
 		String title = tierMenuEffects
@@ -7369,8 +7408,8 @@ public final class ComposerScreen extends Screen {
 		if (menu == null) {
 			return false;
 		}
-		int layerIndex = splitKeyboardLayerIndex();
-		if (layerIndex < 0) {
+		List<Integer> cohort = splitKeyboardLayers();
+		if (cohort.isEmpty()) {
 			tierMenuBase = Integer.MIN_VALUE;
 			return false;
 		}
@@ -7388,8 +7427,8 @@ public final class ComposerScreen extends Screen {
 		}
 		PreviewInstrument value = candidates.get(index);
 		value.play(12);
-		Layer layer = project().layers().get(layerIndex);
-		List<ComposerProject.Split.Voice> voices = new ArrayList<>(layer.split().voices());
+		ComposerProject.Split shared = project().layers().get(cohort.get(0)).split();
+		List<ComposerProject.Split.Voice> voices = new ArrayList<>(shared.voices());
 		boolean removed = voices.removeIf(voice -> voice.instrument().equals(value.id())
 			&& (!tierMenuEffects || voice.lo() == tierMenuLo && voice.hi() == tierMenuHi));
 		if (!removed) {
@@ -7397,10 +7436,17 @@ public final class ComposerScreen extends Screen {
 			// bracket means sounding where it sounds.
 			voices.add(new ComposerProject.Split.Voice(value.id(), tierMenuLo, tierMenuHi));
 		}
-		updateLayer(removed
+		// Every layer wearing these brackets takes the toggle, so the cohort goes on agreeing.
+		ComposerProject.Split toggled = new ComposerProject.Split(voices);
+		ComposerProject next = project();
+		for (int layerIndex : cohort) {
+			next = next.withLayer(layerIndex, next.layers().get(layerIndex).withSplit(toggled));
+		}
+		apply(removed
 				? "drop the " + value.name() + " voice"
 				: "add the " + value.name() + " voice",
-			layerIndex, layer.withSplit(new ComposerProject.Split(voices)));
+			next);
+		layersChanged();
 		return true;
 	}
 
