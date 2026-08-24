@@ -4902,18 +4902,6 @@ public final class ComposerScreen extends Screen {
 			lines.add(Component.literal("Outside the note block range")
 				.withStyle(net.minecraft.ChatFormatting.RED));
 		}
-		// The plain keyboard, but a split layer is picked: the brackets exist and are one quiet
-		// room away, which nothing else on screen says.
-		if (selectedLayers.size() == 1) {
-			int selected = selectedLayers.iterator().next();
-			if (selected < project().layers().size()
-					&& project().layers().get(selected).split() != null) {
-				lines.add(Component.literal(
-						"Make this the only layer playing - solo it, or mute the rest - "
-							+ "to edit its brackets")
-					.withStyle(net.minecraft.ChatFormatting.AQUA));
-			}
-		}
 		graphics.setComponentTooltipForNextFrame(font, lines, mouseX, mouseY);
 	}
 
@@ -6966,24 +6954,20 @@ public final class ComposerScreen extends Screen {
 	/**
 	 * The layer whose brackets the keyboard wears, or -1 while the plain keyboard shows.
 	 *
-	 * <p>Whenever a split layer is the only one you can hear -- soloed, or everything else muted
-	 * or hidden. No selection required: being alone on the air is the whole condition. The
-	 * keyboard is one strip shared by every audible layer, so while others can still be heard it
-	 * keeps describing the common ground; showing one layer's brackets over a mixed view would
-	 * claim the other layers' notes obey them too.</p>
+	 * <p>Whenever a split layer is the only layer <em>selected</em> -- that is the whole
+	 * condition. What else is audible does not matter: other layers may well be playing notes the
+	 * split keyboard says nothing about, and in-game use settled that this is fine -- the
+	 * keyboard describes the layer being worked on, not the mix. Selection is already how the
+	 * screen answers "whose notes am I editing", so it is also how it answers "whose keyboard
+	 * am I on".</p>
 	 */
 	private int splitKeyboardLayerIndex() {
-		int only = -1;
-		for (int index = 0; index < project().layers().size(); index++) {
-			if (!audible(index)) {
-				continue;
-			}
-			if (only >= 0) {
-				return -1;
-			}
-			only = index;
+		if (selectedLayers.size() != 1) {
+			return -1;
 		}
-		return only >= 0 && project().layers().get(only).split() != null ? only : -1;
+		int index = selectedLayers.iterator().next();
+		return index >= 0 && index < project().layers().size()
+			&& project().layers().get(index).split() != null ? index : -1;
 	}
 
 	/** The brackets the keyboard is currently wearing, or null for the plain keyboard. */
@@ -7040,15 +7024,27 @@ public final class ComposerScreen extends Screen {
 	};
 
 	/**
-	 * Where a bracket's column stands: two staggered lanes at the left of the key strip.
+	 * Where a bracket's column stands: two staggered lanes through the key strip's middle.
 	 *
 	 * <p>Staggered rather than staircased. Adjacent registers overlap by an octave, so alternating
 	 * two lanes is exactly what keeps neighbouring brackets off each other -- and registers two
-	 * apart never share more than a single row, so a lane's own brackets barely touch. A staircase
-	 * walked one column per bracket across the strip and spent its width saying nothing.</p>
+	 * apart never share more than a single row, so a lane's own brackets barely touch. The lanes
+	 * sit either side of the strip's centre because each one's icons hang off its outer flank --
+	 * left lane's to the left, right lane's to the right -- which is what keeps two brackets'
+	 * icons from ever stacking on each other.</p>
 	 */
 	private int bracketX(int groupIndex) {
-		return layerPanelWidth() + 3 + groupIndex % 2 * 7;
+		return layerPanelWidth() + 19 + groupIndex % 2 * 7;
+	}
+
+	/** Whether this bracket rides the left lane, which is where its icons hang to the left. */
+	private static boolean leftLane(int groupIndex) {
+		return groupIndex % 2 == 0;
+	}
+
+	/** The left edge of a bracket's icon column, on its lane's outer flank. */
+	private int bracketIconX(int groupIndex) {
+		return leftLane(groupIndex) ? bracketX(groupIndex) - 18 : bracketX(groupIndex) + 6;
 	}
 
 	/**
@@ -7105,7 +7101,7 @@ public final class ComposerScreen extends Screen {
 		for (int index = 0; index < groups.size(); index++) {
 			BracketGroup group = groups.get(index);
 			int x = bracketX(index);
-			if (mouseX < x - 3 || mouseX >= x + 6) {
+			if (mouseX < x - 3 || mouseX >= x + 7) {
 				continue;
 			}
 			int top = noteY(group.hi());
@@ -7137,10 +7133,11 @@ public final class ComposerScreen extends Screen {
 			int x = bracketX(index);
 			int top = noteY(group.hi());
 			int bottom = noteY(group.lo()) + rowHeight - 1;
-			boolean overColumn = mouseX >= x - 3 && mouseX < x + 6
+			boolean overColumn = mouseX >= x - 3 && mouseX < x + 7
 				&& mouseY >= top && mouseY < bottom;
 			int iconTop = iconStackTop(group, top, bottom);
-			boolean overIcons = mouseX >= x + 5 && mouseX < x + 21 && mouseY >= iconTop
+			int iconX = bracketIconX(index);
+			boolean overIcons = mouseX >= iconX && mouseX < iconX + 16 && mouseY >= iconTop
 				&& mouseY < iconTop + group.instruments().size() * 18;
 			if (overColumn || overIcons) {
 				return index;
@@ -7161,22 +7158,33 @@ public final class ComposerScreen extends Screen {
 			? new BracketHandle(bracketDragGroup, bracketDragTop)
 			: bracketHandleAt(mouseX, mouseY);
 		int hoveredBody = hovered == null ? bracketBodyAt(mouseX, mouseY) : -1;
+		int pianoX = layerPanelWidth();
+		// The tints first, in their own pass, so every line and icon stands on top of all of
+		// them. Each bracket washes its rows across the whole strip, translucently -- where two
+		// registers overlap the washes stack, so the mixture is the overlap made visible.
+		for (int index = 0; index < groups.size(); index++) {
+			BracketGroup group = groups.get(index);
+			graphics.fill(pianoX, noteY(group.hi()),
+				rollX, noteY(group.lo()) + rowHeight - 1,
+				0x26000000 | BRACKET_COLORS[index % BRACKET_COLORS.length] & 0xFFFFFF);
+		}
 		for (int index = 0; index < groups.size(); index++) {
 			BracketGroup group = groups.get(index);
 			int x = bracketX(index);
 			int top = noteY(group.hi());
 			int bottom = noteY(group.lo()) + rowHeight - 1;
 			int color = BRACKET_COLORS[index % BRACKET_COLORS.length];
-			graphics.fill(x, top, x + 2, bottom, color);
+			graphics.fill(x, top, x + 3, bottom, color);
 			boolean topHot = hovered != null && hovered.group() == index && hovered.top();
 			boolean bottomHot = hovered != null && hovered.group() == index && !hovered.top();
-			graphics.fill(x - 2, top, x + 4, top + 3, topHot ? 0xFFFFFFFF : color);
-			graphics.fill(x - 2, bottom - 3, x + 4, bottom, bottomHot ? 0xFFFFFFFF : color);
+			graphics.fill(x - 2, top, x + 5, top + 4, topHot ? 0xFFFFFFFF : color);
+			graphics.fill(x - 2, bottom - 4, x + 5, bottom, bottomHot ? 0xFFFFFFFF : color);
 			int iconTop = iconStackTop(group, top, bottom);
+			int iconX = bracketIconX(index);
 			for (int icon = 0; icon < group.instruments().size(); icon++) {
 				graphics.item(new ItemStack(
 						PreviewInstrument.byId(group.instruments().get(icon)).icon()),
-					x + 5, iconTop + icon * 18);
+					iconX, iconTop + icon * 18);
 			}
 			if (hovered != null && hovered.group() == index) {
 				hoveredDescription = "Drag to trim where this bracket sounds. It moves the whole "
