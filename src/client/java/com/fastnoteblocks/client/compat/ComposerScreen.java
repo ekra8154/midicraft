@@ -291,6 +291,8 @@ public final class ComposerScreen extends Screen {
 	private static final int COLLAPSED_LAYER_PANEL_WIDTH = 34;
 	/** Grab zone either side of the split, and how far left you must drag to fold it away. */
 	private static final int SPLITTER_GRAB = 3;
+	/** How big the brackets' fold arrow is. Small: it is a corner control, not a button. */
+	private static final int TOGGLE_SIZE = 9;
 	/**
 	 * How far left you must drag to fold it away, which is also how wide folded is.
 	 *
@@ -4356,7 +4358,7 @@ public final class ComposerScreen extends Screen {
 			}
 		}
 
-		if (keyboardSplit != null) {
+		if (keyboardSplit != null && !splitBracketsHidden) {
 			extractSplitBrackets(graphics, keyboardSplit, mouseX, mouseY);
 		}
 		extractKeyTooltip(graphics, mouseX, mouseY);
@@ -5400,6 +5402,18 @@ public final class ComposerScreen extends Screen {
 			}
 			return true;
 		}
+		// Before the splitter, which its corner overlaps: the arrow is the smaller and more
+		// specific target, and the panel edge is draggable along the whole rest of its height.
+		NoteRect splitToggle = splitToggleRect();
+		if (event.button() == 0 && splitToggle != null
+				&& splitToggle.contains(event.x(), event.y())) {
+			splitBracketsHidden = !splitBracketsHidden;
+			// The picker belongs to a bracket, so it goes away with them.
+			if (splitBracketsHidden) {
+				tierMenuBase = Integer.MIN_VALUE;
+			}
+			return true;
+		}
 		if (event.button() == 0 && overSplitter(event.x(), event.y())) {
 			draggingSplitter = true;
 			return true;
@@ -5588,16 +5602,6 @@ public final class ComposerScreen extends Screen {
 				focusedPane = Pane.ROLL;
 			} else {
 				clearLayerSelection();
-			}
-			return true;
-		}
-		NoteRect splitToggle = splitToggleRect();
-		if (event.button() == 0 && splitToggle != null
-				&& splitToggle.contains(event.x(), event.y())) {
-			splitBracketsHidden = !splitBracketsHidden;
-			// The picker belongs to a bracket, so it goes away with them.
-			if (splitBracketsHidden) {
-				tierMenuBase = Integer.MIN_VALUE;
 			}
 			return true;
 		}
@@ -7022,9 +7026,20 @@ public final class ComposerScreen extends Screen {
 	/** The brackets the keyboard is currently wearing, or null for the plain keyboard. */
 	private ComposerProject.Split keyboardSplit() {
 		List<Integer> cohort = splitKeyboardLayers();
-		return cohort.isEmpty() || splitBracketsHidden
-			? null
-			: project().layers().get(cohort.get(0)).split();
+		return cohort.isEmpty() ? null : project().layers().get(cohort.get(0)).split();
+	}
+
+	/**
+	 * Whether the brackets themselves are on screen and in reach.
+	 *
+	 * <p>Folding them away hides the brackets and nothing else. Which rows are in range is a
+	 * fact about the layer, not about the brackets being drawn, so the reds and whites stay
+	 * exactly where they were -- {@link #keyboardSplit} goes on answering while this does
+	 * not. Hiding them to see the keys underneath and finding every row repainted would be a
+	 * worse answer than leaving them up.</p>
+	 */
+	private boolean bracketsVisible() {
+		return !splitBracketsHidden && keyboardSplit() != null;
 	}
 
 	/**
@@ -7039,11 +7054,13 @@ public final class ComposerScreen extends Screen {
 		if (splitKeyboardLayers().isEmpty()) {
 			return null;
 		}
-		// Clear of the splitter's grab zone, which reaches three pixels past the panel edge and
-		// is answered first: two pixels in, the button's own left column started a panel drag.
-		int left = layerPanelWidth() + SPLITTER_GRAB + 2;
-		int top = rollY - TIMELINE_RULER_HEIGHT + 4;
-		return new NoteRect(left, top, left + 16, top + 16);
+		// Tucked into the bottom left of the corner, a pixel off each edge. It overlaps the
+		// splitter's grab zone there, which is why the press is answered before the splitter's --
+		// nine pixels of the panel edge stop being draggable, and none of them are ones anybody
+		// reaches for.
+		int left = layerPanelWidth() + 1;
+		int bottom = rollY - 1;
+		return new NoteRect(left, bottom - TOGGLE_SIZE, left + TOGGLE_SIZE, bottom);
 	}
 
 	/**
@@ -7063,11 +7080,11 @@ public final class ComposerScreen extends Screen {
 		graphics.fill(button.left(), button.top(), button.right(), button.top() + 1, 0xFF3A414A);
 		int color = hovered ? 0xFFFFFFFF : 0xFF9AA0A8;
 		int middle = (button.top() + button.bottom()) / 2;
-		int arrowLeft = button.left() + 6;
+		int arrowLeft = button.left() + 3;
 		// Pointing left to fold the brackets away, right to bring them back, like every other
 		// disclosure arrow: it shows which way the thing it controls is about to move.
-		for (int step = 0; step < 4; step++) {
-			int column = splitBracketsHidden ? arrowLeft + 3 - step : arrowLeft + step;
+		for (int step = 0; step < 3; step++) {
+			int column = splitBracketsHidden ? arrowLeft + 2 - step : arrowLeft + step;
 			graphics.fill(column, middle - step, column + 1, middle + step + 1, color);
 		}
 		if (hovered) {
@@ -7266,7 +7283,7 @@ public final class ComposerScreen extends Screen {
 	 */
 	private BracketHandle bracketHandleAt(double mouseX, double mouseY) {
 		ComposerProject.Split split = keyboardSplit();
-		if (split == null || !overPianoKeys(mouseX, mouseY)) {
+		if (split == null || !bracketsVisible() || !overPianoKeys(mouseX, mouseY)) {
 			return null;
 		}
 		List<BracketGroup> groups = bracketGroups(split);
@@ -7310,7 +7327,7 @@ public final class ComposerScreen extends Screen {
 	/** The bracket whose body or icon stack the cursor is over, or -1. Handles are asked first. */
 	private int bracketBodyAt(double mouseX, double mouseY) {
 		ComposerProject.Split split = keyboardSplit();
-		if (split == null || !overPianoKeys(mouseX, mouseY)) {
+		if (split == null || !bracketsVisible() || !overPianoKeys(mouseX, mouseY)) {
 			return -1;
 		}
 		List<BracketGroup> groups = bracketGroups(split);
@@ -7544,9 +7561,9 @@ public final class ComposerScreen extends Screen {
 			return;
 		}
 		ComposerProject.Split split = keyboardSplit();
-		if (split == null) {
-			// The brackets went away under it -- the selection moved, or the layer was un-split
-			// -- so the picker for them goes too.
+		if (split == null || !bracketsVisible()) {
+			// The brackets went away under it -- the selection moved, the layer was un-split, or
+			// they were folded away -- so the picker for them goes too.
 			tierMenuBase = Integer.MIN_VALUE;
 			return;
 		}
