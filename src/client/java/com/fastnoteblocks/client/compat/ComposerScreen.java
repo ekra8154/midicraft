@@ -6892,7 +6892,7 @@ public final class ComposerScreen extends Screen {
 			PlaybackEvent event = playbackEvents.get(playbackEventIndex++);
 			if (event.tick() >= staleBefore && soundsPlayed < MAX_PREVIEW_SOUNDS_PER_FRAME) {
 				event.instrument().play(event.note());
-				lightKey(event.note() + ComposerProject.NOTE_BLOCK_BASE_MIDI_NOTE, event.color());
+				lightKey(event.lightMidi(), event.color());
 				soundsPlayed++;
 			}
 		}
@@ -7072,11 +7072,13 @@ public final class ComposerScreen extends Screen {
 	 * bracket, shared only when two effects sit on exactly the same band.</p>
 	 */
 	private record BracketGroup(boolean effects, int base, int lo, int hi,
-		List<Integer> voiceIndices, List<String> instruments) {
+		List<Integer> voiceIndices, List<String> instruments,
+		/** A register with no voices on it: drawn faint, draggable by nothing, still clickable. */
+		boolean ghost) {
 	}
 
-	/** The given split's brackets, in voice order -- lowest register first, bands after. */
-	private List<BracketGroup> bracketGroups(ComposerProject.Split split) {
+	/** The brackets the voices themselves make, without the empty registers. */
+	private List<BracketGroup> voiceBrackets(ComposerProject.Split split) {
 		java.util.Map<String, int[]> spans = new java.util.LinkedHashMap<>();
 		java.util.Map<String, List<Integer>> indices = new java.util.LinkedHashMap<>();
 		java.util.Map<String, List<String>> names = new java.util.LinkedHashMap<>();
@@ -7097,9 +7099,57 @@ public final class ComposerScreen extends Screen {
 		for (java.util.Map.Entry<String, int[]> entry : spans.entrySet()) {
 			int[] span = entry.getValue();
 			groups.add(new BracketGroup(span[2] != 0, span[3], span[0], span[1],
-				indices.get(entry.getKey()), names.get(entry.getKey())));
+				indices.get(entry.getKey()), names.get(entry.getKey()), false));
 		}
 		return groups;
+	}
+
+	/** The registers a melodic split can use, lowest first. */
+	private static final int[] MELODIC_BASES = {30, 42, 54, 66, 78};
+	/** The three drums' virtual registers, which stack rather than overlap. */
+	private static final int[] PERCUSSION_BASES = {30, 55, 80};
+
+	/**
+	 * The given split's brackets, empty registers included, lowest first and bands last.
+	 *
+	 * <p>A register whose last voice was switched off leaves a ghost behind rather than
+	 * vanishing. Without one, emptying a bracket took the only way back to that register off
+	 * the screen with it -- the tier was gone and nothing on the keyboard offered it again. The
+	 * ghosts follow the family the layer is already in, so a melodic layer is offered the five
+	 * melodic registers and a drum layer its three; an effect layer gets none, since its bands
+	 * are wherever you put them rather than a fixed set.</p>
+	 */
+	private List<BracketGroup> bracketGroups(ComposerProject.Split split) {
+		List<BracketGroup> real = voiceBrackets(split);
+		boolean anyEffect = false;
+		boolean anyMelodic = false;
+		for (BracketGroup group : real) {
+			anyEffect |= group.effects();
+			anyMelodic |= !group.effects() && group.base() != 55 && group.base() != 80;
+		}
+		if (anyEffect) {
+			return real;
+		}
+		// An empty layer is offered the melodic registers: it is the family you are most likely
+		// rebuilding towards, and one click in any picker moves it to the other.
+		int[] family = anyMelodic || real.isEmpty() ? MELODIC_BASES : PERCUSSION_BASES;
+		List<BracketGroup> all = new ArrayList<>(real);
+		for (int base : family) {
+			boolean present = false;
+			for (BracketGroup group : real) {
+				present |= !group.effects() && group.base() == base;
+			}
+			if (!present) {
+				all.add(new BracketGroup(false, base, base,
+					base + com.fastnoteblocks.NotePitch.PITCH_COUNT - 1,
+					List.of(), List.of(), true));
+			}
+		}
+		// Sorted so the two staggered lanes still alternate by register with the ghosts in place.
+		all.sort(Comparator.comparingInt((BracketGroup group) -> group.effects() ? 1 : 0)
+			.thenComparingInt(BracketGroup::base)
+			.thenComparingInt(BracketGroup::lo));
+		return all;
 	}
 
 	/** A grabbed bracket end: which bracket, and whether it is the top of it. */
@@ -7127,6 +7177,10 @@ public final class ComposerScreen extends Screen {
 		double bestScore = -Double.MAX_VALUE;
 		for (int index = 0; index < groups.size(); index++) {
 			BracketGroup group = groups.get(index);
+			// A ghost has no voices to move, so it has no ends to grab -- only a picker to open.
+			if (group.ghost()) {
+				continue;
+			}
 			int x = bracketX(index);
 			if (mouseX < x - 3 || mouseX >= x + 7) {
 				continue;
@@ -7173,7 +7227,7 @@ public final class ComposerScreen extends Screen {
 			int iconTop = iconStackTop(group, top, bottom);
 			int iconX = bracketIconX(index);
 			boolean overIcons = mouseX >= iconX && mouseX < iconX + 16 && mouseY >= iconTop
-				&& mouseY < iconTop + group.instruments().size() * 18;
+				&& mouseY < iconTop + Math.max(1, group.instruments().size()) * 18;
 			if (overColumn || overIcons) {
 				return index;
 			}
@@ -7199,6 +7253,9 @@ public final class ComposerScreen extends Screen {
 		// registers overlap the washes stack, so the mixture is the overlap made visible.
 		for (int index = 0; index < groups.size(); index++) {
 			BracketGroup group = groups.get(index);
+			if (group.ghost()) {
+				continue;
+			}
 			graphics.fill(pianoX, noteY(group.hi()),
 				rollX, noteY(group.lo()) + rowHeight - 1,
 				0x26000000 | BRACKET_COLORS[index % BRACKET_COLORS.length] & 0xFFFFFF);
@@ -7209,6 +7266,20 @@ public final class ComposerScreen extends Screen {
 			int top = noteY(group.hi());
 			int bottom = noteY(group.lo()) + rowHeight - 1;
 			int color = BRACKET_COLORS[index % BRACKET_COLORS.length];
+			if (group.ghost()) {
+				boolean hot = hoveredBody == index;
+				int faint = (hot ? 0x99000000 : 0x40000000) | color & 0xFFFFFF;
+				graphics.fill(x + 1, top, x + 2, bottom, faint);
+				graphics.fill(x - 1, top, x + 4, top + 1, faint);
+				graphics.fill(x - 1, bottom - 1, x + 4, bottom, faint);
+				graphics.text(font, Component.literal("+"), bracketIconX(index) + 5,
+					(top + bottom) / 2 - 4, hot ? 0xFFFFFFFF : 0xAA000000 | color & 0xFFFFFF, false);
+				if (hot) {
+					hoveredDescription = "Nothing sounds in this register. Click to choose which of "
+						+ "its instruments do.";
+				}
+				continue;
+			}
 			graphics.fill(x, top, x + 3, bottom, color);
 			boolean topHot = hovered != null && hovered.group() == index && hovered.top();
 			boolean bottomHot = hovered != null && hovered.group() == index && !hovered.top();
@@ -7466,6 +7537,12 @@ public final class ComposerScreen extends Screen {
 				if (!instrument.playable()) {
 					continue;
 				}
+				// What the expansion moved this voice by, so the key that lights is the one the note
+				// is drawn on. A split layer's notes are transposed into the harp window to build, so
+				// lighting the built pitch lit a key octaves from the note you could see playing.
+				int written = layer.split() == null || !voiceLayer.pitched() ? 0
+					: ComposerProject.NOTE_BLOCK_BASE_MIDI_NOTE
+						- com.fastnoteblocks.InstrumentRanges.baseMidi(voiceLayer.instrument());
 				List<NoteEvent> notes = voiceLayer.notes();
 				for (int index = lowerBoundStart(notes, playbackStartTick); index < notes.size(); index++) {
 					NoteEvent note = notes.get(index);
@@ -7476,6 +7553,7 @@ public final class ComposerScreen extends Screen {
 						note.startTick(),
 						instrument,
 						note.midiNote() - ComposerProject.NOTE_BLOCK_BASE_MIDI_NOTE,
+						note.midiNote() - written,
 						color
 					));
 				}
@@ -9282,7 +9360,8 @@ public final class ComposerScreen extends Screen {
 	 * the event fires -- by then all that is left is a pitch. It takes no part in {@code sameSound},
 	 * which asks whether the build would collapse the two, and the build has no colours.</p>
 	 */
-	private record PlaybackEvent(long tick, PreviewInstrument instrument, int note, int color) {
+	private record PlaybackEvent(long tick, PreviewInstrument instrument, int note, int lightMidi,
+			int color) {
 		private boolean sameSound(PlaybackEvent other) {
 			return tick == other.tick && note == other.note && instrument.equals(other.instrument);
 		}
