@@ -3547,6 +3547,9 @@ public final class SongBuilder {
 		Direction descentSide = layout.ultra() ? depth.getOpposite() : depth;
 		int nearWall = origin.getX();
 		int farWall = origin.getX() + laneWidth;
+		// v2 only, and deliberately: the raise these columns are kept clear for is the
+		// dropped-repeater descent's, which no other walk builds. See {@link #standsUpAlone}.
+		placements.wallColumns(nearWall, farWall);
 		int currentTime = 0;
 		// Which floor the walk believes it is on and which way it is going, which together decide
 		// whether the wall ahead is a climb, a descent or a flat turn. Nought and up at the head of a
@@ -14464,6 +14467,9 @@ public final class SongBuilder {
 		// Only where the route bends. Down a straight lane the next repeater does stand on the bus's
 		// own last block, and giving up a cell there would cost a note pair for nothing.
 		int limit = cellLimit;
+		// Before the first block, while every note of the chord is still a candidate. See
+		// {@link #orderAwayFromTheWall}.
+		orderAwayFromTheWall(placements, anchor, ordered, limit);
 		while (placed < ordered.size() && cells < limit) {
 			Lane at = anchor.ahead(cells);
 			placements.powered(at.pos(), "minecraft:stone", time);
@@ -14530,7 +14536,19 @@ public final class SongBuilder {
 				if (placed < ordered.size() && !reserved.contains(slot)
 						&& (!crowded || placements.freeForNote(slot) && !soundedByAnother(
 							placements, slot, time))) {
-					placeNote(placements, slot, ordered.get(placed++));
+					// Asked here rather than of the order the chord arrived in, because it is a
+					// question about the cell and not about the music: the same note is fine one
+					// column along. See {@link #SAND_KEEPS_OFF_THE_WALL_COLUMNS}.
+					keepTheWallColumnClear(placements, slot, ordered, placed);
+					if (SAND_GIVES_UP_THE_WALL_SLOT && cells < limit
+							&& placements.insideTheWalls(at.ahead(1).pos())
+							&& !standsUpAlone(placements, slot, ordered.get(placed))) {
+						// Left empty on purpose: the run grows a block and hangs it a column in.
+						// See {@link #SAND_GIVES_UP_THE_WALL_SLOT}.
+						placements.padded("sandGaveUpTheWallSlot");
+					} else {
+						placeNote(placements, slot, ordered.get(placed++));
+					}
 				} else if (BUS_HARP_OVER_CLAIMED_AIR && crowded && placed < ordered.size()
 						&& !reserved.contains(slot)
 						&& !placements.freeForNote(slot)
@@ -18371,6 +18389,28 @@ public final class SongBuilder {
 		// cells as free. Two notes out of the far half is one cell off its run, which is what
 		// takes a tail split from twenty-four notes to twenty-six. The top cell takes nothing
 		// falling; the bottom takes anything, sand included. In-game design, hand-placed first.
+		// Which of the tail's notes crosses the staircase first is a free choice: the two halves are
+		// the same size, the same cells and the same run whichever note leads. So the far half is
+		// never opened with a note that needs propping where the chord has another to send.
+		//
+		// The far half lands on the floor below and opens at or beside the turn column, which is one
+		// of the two columns a raise on the floor under *that* wants clear -- and a far half of one
+		// note has nothing for the bus rule to swap with once it is down there. The choice has to be
+		// made here, where there are still two halves to choose between. See
+		// {@link #FAR_HALF_LEADS_WITH_A_NOTE_THAT_STANDS}.
+		if (FAR_HALF_LEADS_WITH_A_NOTE_THAT_STANDS && nearNotes < tail.size()
+				&& FALLING_INSTRUMENT_BLOCKS.contains(tail.get(nearNotes).instrumentBlock())) {
+			for (int look = nearNotes - 1; look >= 0; look--) {
+				if (!FALLING_INSTRUMENT_BLOCKS.contains(tail.get(look).instrumentBlock())) {
+					// A copy, because the tail handed over belongs to the split and the shed path
+					// below reads it again.
+					tail = new ArrayList<>(tail);
+					java.util.Collections.swap(tail, look, nearNotes);
+					FAR_HALVES_LED_BY_A_STANDING_NOTE++;
+					break;
+				}
+			}
+		}
 		List<EventNote> farPart = new ArrayList<>(tail.subList(nearNotes, tail.size()));
 		EventNote topExtra = null;
 		EventNote bottomExtra = null;
@@ -20240,6 +20280,176 @@ public final class SongBuilder {
 	 * extra's claimed air, by design.</p>
 	 */
 	static boolean BUS_HARP_OVER_CLAIMED_AIR = true;
+
+	/**
+	 * v2: a note that needs propping keeps out of the two columns a lane turns in, above the bottom
+	 * floor.
+	 *
+	 * <p>The one thing in a build that reaches <em>up</em> out of its own floor is
+	 * {@link #raiseTheCell}: the dropped-repeater descent at a room of minus one takes the chord
+	 * before's last cell and lifts it a level, so that the repeater can come back a column off the
+	 * turn column and stand inside the wall. The cells it lifts into are the three levels over that
+	 * cell, and they are asked for by {@link #cellCanRise} before a block is laid.</p>
+	 *
+	 * <p>A falling instrument on the floor above lands its prop in exactly one of them. Its note
+	 * hangs a block over its own lane, its instrument block is the lane level, and the prop is the
+	 * level below that -- which is three above the lane one floor down. So a single grain of sand at
+	 * the wall refuses every raise underneath it, the descent falls through to nothing, and the lane
+	 * walks out past its wall. In-game reading found it at 36 wide over five floors, a sand at
+	 * {@code 6 76 93} propped at {@code 6 75 93} by the lane above, and the lane below five columns
+	 * outside.</p>
+	 *
+	 * <p>Nothing is dropped for it and no cell is spent: the chord's own next note that stands up on
+	 * its own comes forward into the slot and the falling one takes its place further along the same
+	 * bus. Where the chord is all falling notes there is nothing to swap with and it hangs anyway --
+	 * the rule is what the chord can do, not what it must.</p>
+	 *
+	 * <p>The bottom floor is exempt because nothing is under it to raise. That is the whole of the
+	 * condition; it is asked as {@link PlacementPlan#floorBelow}, which is the same question
+	 * {@link #sinkable} asks for the same reason one level further down.</p>
+	 */
+	static boolean SAND_KEEPS_OFF_THE_WALL_COLUMNS = true;
+
+	/**
+	 * Whether a note that needs propping may hang here without stranding a raise on the floor below.
+	 *
+	 * <p>True for everything but a falling instrument, and true for one of those anywhere except the
+	 * two turn columns of a floor that has another underneath it. See
+	 * {@link #SAND_KEEPS_OFF_THE_WALL_COLUMNS}.</p>
+	 */
+	private static boolean standsUpAlone(PlacementPlan placements, BlockPos slot, EventNote note) {
+		return !SAND_KEEPS_OFF_THE_WALL_COLUMNS
+			|| !FALLING_INSTRUMENT_BLOCKS.contains(note.instrumentBlock())
+			|| !placements.floorBelow()
+			|| !placements.atAWall(slot);
+	}
+
+	/**
+	 * Arranges a run's notes so that the cell standing at a wall holds none that need propping,
+	 * before the first block of it is laid.
+	 *
+	 * <p>Decided up front, and that is the whole of what makes it work. Asked cell by cell as the run
+	 * goes down, the only notes left to trade with are the ones not yet placed -- and
+	 * {@link #busOrder} groups a chord by instrument, so the sand arrives in one run of consecutive
+	 * notes. A bus <em>arriving</em> at its wall puts that wall in its last cell, by which point there
+	 * is nothing ahead to trade with at all: asked that way the rule came back with nothing to swap
+	 * 28,827 times against 28,277 swaps, which is not a chord that is all sand, it is a question asked
+	 * too late. Here every note of the chord is still a candidate.</p>
+	 *
+	 * <p>A swap and nothing more: both notes are laid, in the same run, in the same cells, on the same
+	 * tick. All that moves is which of two interchangeable notes takes the slot at the wall, so the
+	 * run is the same length and the lane behind it does not move -- measured as an identical build,
+	 * block for block, on the song this was written for.</p>
+	 */
+	private static void orderAwayFromTheWall(PlacementPlan placements, Lane anchor,
+			List<EventNote> ordered, int limit) {
+		if (!SAND_KEEPS_OFF_THE_WALL_COLUMNS || !placements.floorBelow()) {
+			return;
+		}
+		// Two notes a cell, which is what a bus is. A run that grows past a slot the ground refuses
+		// puts its later notes a cell further along than this, and the mapping goes stale -- that is
+		// what {@link #keepTheWallColumnClear} is left in for.
+		java.util.BitSet atTheWall = new java.util.BitSet();
+		for (int cell = 0; cell < limit && 2 * cell < ordered.size(); cell++) {
+			if (placements.atAWall(anchor.ahead(cell).pos())) {
+				atTheWall.set(2 * cell);
+				atTheWall.set(2 * cell + 1);
+			}
+		}
+		if (atTheWall.isEmpty()) {
+			return;
+		}
+		for (int slot = atTheWall.nextSetBit(0); slot >= 0 && slot < ordered.size();
+				slot = atTheWall.nextSetBit(slot + 1)) {
+			if (!FALLING_INSTRUMENT_BLOCKS.contains(ordered.get(slot).instrumentBlock())) {
+				continue;
+			}
+			int free = -1;
+			for (int look = 0; look < ordered.size() && free < 0; look++) {
+				if (!atTheWall.get(look) && !FALLING_INSTRUMENT_BLOCKS.contains(
+						ordered.get(look).instrumentBlock())) {
+					free = look;
+				}
+			}
+			if (free < 0) {
+				// Nothing to be done and nothing given up: it hangs at the wall, and the raise below
+				// it is refused as it was before. Two quite different reasons to be here, told apart
+				// because only one of them is a chord's fault: a run whose every cell is the wall
+				// cell has no second cell to put anything in, however many harps it is carrying,
+				// and the answer for those is upstream -- see
+				// {@link #FAR_HALF_LEADS_WITH_A_NOTE_THAT_STANDS}.
+				placements.padded(atTheWall.nextClearBit(0) >= ordered.size()
+					? "sandStuckTheWallCellIsTheWholeRun" : "sandStuckEveryNoteFalls");
+				return;
+			}
+			java.util.Collections.swap(ordered, slot, free);
+			placements.padded("sandOffTheWallColumn");
+		}
+	}
+
+	/**
+	 * The same swap, asked again at the slot itself, for a run that has grown away from the plan.
+	 *
+	 * <p>{@link #orderAwayFromTheWall} settles the order against the cells the run expects to fill,
+	 * and a crowded run that skips a slot the ground has taken fills different ones. This catches
+	 * what that leaves, out of whatever notes are still in hand -- which is why its counters are kept
+	 * apart: the two answer the same question at different moments and adding them up would say the
+	 * rule fired twice.</p>
+	 */
+	private static void keepTheWallColumnClear(PlacementPlan placements, BlockPos slot,
+			List<EventNote> ordered, int next) {
+		if (standsUpAlone(placements, slot, ordered.get(next))) {
+			return;
+		}
+		for (int look = next + 1; look < ordered.size(); look++) {
+			if (standsUpAlone(placements, slot, ordered.get(look))) {
+				java.util.Collections.swap(ordered, next, look);
+				placements.padded("sandOffTheWallColumnLate");
+				return;
+			}
+		}
+		placements.padded("sandStuckOnTheWallColumnLate");
+	}
+
+	/**
+	 * A bus gives the wall slot up and grows a block instead. <b>Off, and it was a wrong turn.</b>
+	 *
+	 * <p>Written when the swap looked as though it usually had nothing to trade with -- 28,827 stuck
+	 * against 28,277 swapped. That number was an artefact of asking at the slot instead of before the
+	 * run: see {@link #orderAwayFromTheWall}. Asked at the right moment the chord nearly always has a
+	 * note to spare, and this has almost nothing left to do.</p>
+	 *
+	 * <p>It also does not belong here even when it fires. Leaving the slot empty makes the run a
+	 * block longer, and a longer run moves every chord behind it on the lane -- 24,310 grown cells
+	 * over the library. On the song this was written for that shifted the whole build and the breach
+	 * went away because the lane arrived somewhere else, with the raise it was supposed to buy never
+	 * built at all. A fix that works by moving the build is not a fix, it is a coincidence, and it
+	 * measured worse than the two rules that do work: 6,455 columns against 6,427.</p>
+	 *
+	 * <p>Kept switched off rather than deleted, because "the bus grows past a slot it may not use" is
+	 * a real move and the next rule that wants it should find the guards already written: never past
+	 * the run's limit, and never into a cell outside the walls.</p>
+	 */
+	static boolean SAND_GIVES_UP_THE_WALL_SLOT = false;
+
+	/**
+	 * v2: a cut sends a self-supporting note over the staircase first, where it has one to send.
+	 *
+	 * <p>The free version of {@link #SAND_KEEPS_OFF_THE_WALL_COLUMNS}, and the one that answers the
+	 * case the other two cannot. A cut's far half opens on the floor below at the turn column, so its
+	 * first note is at a wall -- and the measured fault was a far half of <b>exactly one note</b>,
+	 * which is sand: nothing to swap with once the bus is being laid, and giving the slot up grows
+	 * the run and moves every chord behind it.</p>
+	 *
+	 * <p>One column earlier there are still two halves to choose between, and the choice costs
+	 * nothing at all: the halves keep their sizes, their cells and their run, and all that moves is
+	 * which of two interchangeable notes crosses the staircase. The falling one stays in the near
+	 * half, where it hangs mid-lane on the floor above and props itself over ground nothing needs.</p>
+	 */
+	static boolean FAR_HALF_LEADS_WITH_A_NOTE_THAT_STANDS = true;
+
+	/** How often a cut swapped which note crosses the staircase to keep a prop off the wall. */
+	static int FAR_HALVES_LED_BY_A_STANDING_NOTE;
 
 	/**
 	 * v2: the cross descent's own pair of extras, from the desc2 reference mockup.
@@ -23043,6 +23253,40 @@ public final class SongBuilder {
 
 		boolean floorBelow() {
 			return floorBelow;
+		}
+
+		/**
+		 * The two columns every lane's turn stands in, or unset where the walk has not said.
+		 *
+		 * <p>A lane ends at one of these and the lane on the floor above begins at it, so they are the
+		 * one pair of columns in a build that two floors both reach into. Kept as a column rather than
+		 * as a room, because a room is measured against the wall the lane is running <em>at</em> and
+		 * the two lanes stacked here are running at opposite ones: the same block is a room of nought
+		 * to the one and the far end of the corridor to the other.</p>
+		 *
+		 * <p>Unset for any walk that does not say, which leaves {@link SongBuilder#standsUpAlone} true
+		 * everywhere and the rule inert.</p>
+		 */
+		private int nearWallColumn = Integer.MIN_VALUE;
+		private int farWallColumn = Integer.MIN_VALUE;
+
+		void wallColumns(int near, int far) {
+			nearWallColumn = near;
+			farWallColumn = far;
+		}
+
+		/** Whether this cell stands in one of the columns a lane turns in. */
+		boolean atAWall(BlockPos cell) {
+			return cell.getX() == nearWallColumn || cell.getX() == farWallColumn;
+		}
+
+		/**
+		 * Whether this cell is between the two walls, ends included. False where the walk has not
+		 * said where its walls are, which is the answer that makes every rule asking this stand down.
+		 */
+		boolean insideTheWalls(BlockPos cell) {
+			return nearWallColumn != Integer.MIN_VALUE
+				&& cell.getX() >= nearWallColumn && cell.getX() <= farWallColumn;
 		}
 
 		/**
