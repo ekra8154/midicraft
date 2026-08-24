@@ -4285,9 +4285,11 @@ public final class ComposerScreen extends Screen {
 	private long extractPianoRoll(GuiGraphicsExtractor graphics, int mouseX, int mouseY, long mark) {
 		int pianoX = layerPanelWidth();
 		long now = Util.getMillis();
-		// While one split layer is soloed the keyboard wears its brackets, and "buildable" means
-		// what it means there: covered by a voice, wherever on the six octaves that is.
+		// While one split layer is alone on the air the keyboard wears its brackets, and
+		// "buildable" means what it means there: covered by a voice, wherever on the six octaves
+		// that is. Otherwise the window widens to whatever bound an all-split selection shares.
 		ComposerProject.Split keyboardSplit = keyboardSplit();
+		int[] plainBounds = plainKeyboardBounds();
 		graphics.enableScissor(pianoX, rollY, rollX + rollWidth, rollY + rollHeight);
 		for (int midi = topMidiNote; midi >= MIN_MIDI_NOTE; midi--) {
 			int y = noteY(midi);
@@ -4300,8 +4302,7 @@ public final class ComposerScreen extends Screen {
 			boolean black = isBlackKey(midi);
 			boolean buildable = keyboardSplit != null
 				? keyboardSplit.covers(midi)
-				: midi >= ComposerProject.NOTE_BLOCK_BASE_MIDI_NOTE
-					&& midi <= ComposerProject.NOTE_BLOCK_MAX_MIDI_NOTE;
+				: midi >= plainBounds[0] && midi <= plainBounds[1];
 			// The two octaves a note block can play used to be tinted blue, which marked the part of
 			// the roll where nothing is wrong -- and on a converted song that is all of it, so the
 			// mark was on every row and said nothing. Inverted: the buildable rows are plain and the
@@ -4727,6 +4728,10 @@ public final class ComposerScreen extends Screen {
 				}
 				if (rangeMatters && layer.outOfRange(note)) {
 					flags |= NoteCellGrid.UNBUILDABLE;
+				} else if (layer.split() != null) {
+					// Not a warning: the mark that says "this pitch is a split layer's business",
+					// so a note standing outside the red wash reads as intended, not as a mistake.
+					flags |= NoteCellGrid.SPLIT;
 				}
 				cells.add(left, top, color, flags, midi);
 				if (mouseX >= left && mouseX < right && mouseY >= top && mouseY < bottom) {
@@ -4884,21 +4889,28 @@ public final class ComposerScreen extends Screen {
 			graphics.setComponentTooltipForNextFrame(font, lines, mouseX, mouseY);
 			return;
 		}
-		boolean buildable = midi >= ComposerProject.NOTE_BLOCK_BASE_MIDI_NOTE
-			&& midi <= ComposerProject.NOTE_BLOCK_MAX_MIDI_NOTE;
-		lines.add(buildable
-			? Component.literal("Note block pitch "
+		int[] plainBounds = plainKeyboardBounds();
+		if (midi >= ComposerProject.NOTE_BLOCK_BASE_MIDI_NOTE
+				&& midi <= ComposerProject.NOTE_BLOCK_MAX_MIDI_NOTE) {
+			lines.add(Component.literal("Note block pitch "
 					+ (midi - ComposerProject.NOTE_BLOCK_BASE_MIDI_NOTE))
-				.withStyle(net.minecraft.ChatFormatting.GRAY)
-			: Component.literal("Outside the note block range")
+				.withStyle(net.minecraft.ChatFormatting.GRAY));
+		} else if (midi >= plainBounds[0] && midi <= plainBounds[1]) {
+			lines.add(Component.literal("In range for the selected split layers")
+				.withStyle(net.minecraft.ChatFormatting.GRAY));
+		} else {
+			lines.add(Component.literal("Outside the note block range")
 				.withStyle(net.minecraft.ChatFormatting.RED));
-		// The plain keyboard, but a split layer is picked: the brackets exist and are one solo
-		// away, which nothing else on screen says.
+		}
+		// The plain keyboard, but a split layer is picked: the brackets exist and are one quiet
+		// room away, which nothing else on screen says.
 		if (selectedLayers.size() == 1) {
 			int selected = selectedLayers.iterator().next();
 			if (selected < project().layers().size()
 					&& project().layers().get(selected).split() != null) {
-				lines.add(Component.literal("Solo this split layer to edit its brackets")
+				lines.add(Component.literal(
+						"Make this the only layer playing - solo it, or mute the rest - "
+							+ "to edit its brackets")
 					.withStyle(net.minecraft.ChatFormatting.AQUA));
 			}
 		}
@@ -6954,33 +6966,69 @@ public final class ComposerScreen extends Screen {
 	/**
 	 * The layer whose brackets the keyboard wears, or -1 while the plain keyboard shows.
 	 *
-	 * <p>Only when exactly one layer is selected, it is a split layer, and nothing else is
-	 * audible -- soloing the layer is the usual way there. The keyboard is one strip shared by
-	 * every visible layer, so while others can still be heard it keeps describing the common
-	 * ground: showing one layer's brackets over a mixed view would claim the other layers' notes
-	 * obey them too.</p>
+	 * <p>Whenever a split layer is the only one you can hear -- soloed, or everything else muted
+	 * or hidden. No selection required: being alone on the air is the whole condition. The
+	 * keyboard is one strip shared by every audible layer, so while others can still be heard it
+	 * keeps describing the common ground; showing one layer's brackets over a mixed view would
+	 * claim the other layers' notes obey them too.</p>
 	 */
 	private int splitKeyboardLayerIndex() {
-		if (selectedLayers.size() != 1) {
-			return -1;
-		}
-		int index = selectedLayers.iterator().next();
-		if (index < 0 || index >= project().layers().size()
-				|| project().layers().get(index).split() == null) {
-			return -1;
-		}
-		for (int other = 0; other < project().layers().size(); other++) {
-			if (other != index && audible(other)) {
+		int only = -1;
+		for (int index = 0; index < project().layers().size(); index++) {
+			if (!audible(index)) {
+				continue;
+			}
+			if (only >= 0) {
 				return -1;
 			}
+			only = index;
 		}
-		return index;
+		return only >= 0 && project().layers().get(only).split() != null ? only : -1;
 	}
 
 	/** The brackets the keyboard is currently wearing, or null for the plain keyboard. */
 	private ComposerProject.Split keyboardSplit() {
 		int index = splitKeyboardLayerIndex();
 		return index < 0 ? null : project().layers().get(index).split();
+	}
+
+	/**
+	 * The rows the plain keyboard paints as in range, as {lowest, highest} in MIDI.
+	 *
+	 * <p>The harp window, unless everything selected is a split layer -- then the edges open out
+	 * to the most restrictive bound the selection shares on either side: the highest floor and the
+	 * lowest ceiling among the selected layers' spans, so the white rows are the ones every
+	 * selected layer can say something about. Never narrower than the harp window, though: a
+	 * bracket trimmed inside it should not paint the vanilla range red for everything else. One
+	 * ordinary layer in the selection, or none selected, and the window is just vanilla -- those
+	 * notes really are held to it.</p>
+	 */
+	private int[] plainKeyboardBounds() {
+		int lo = ComposerProject.NOTE_BLOCK_BASE_MIDI_NOTE;
+		int hi = ComposerProject.NOTE_BLOCK_MAX_MIDI_NOTE;
+		if (selectedLayers.isEmpty()) {
+			return new int[]{lo, hi};
+		}
+		int sharedLo = Integer.MIN_VALUE;
+		int sharedHi = Integer.MAX_VALUE;
+		for (int index : selectedLayers) {
+			if (index < 0 || index >= project().layers().size()) {
+				continue;
+			}
+			ComposerProject.Split split = project().layers().get(index).split();
+			if (split == null || split.voices().isEmpty()) {
+				return new int[]{lo, hi};
+			}
+			int spanLo = Integer.MAX_VALUE;
+			int spanHi = Integer.MIN_VALUE;
+			for (ComposerProject.Split.Voice voice : split.voices()) {
+				spanLo = Math.min(spanLo, voice.lo());
+				spanHi = Math.max(spanHi, voice.hi());
+			}
+			sharedLo = Math.max(sharedLo, spanLo);
+			sharedHi = Math.min(sharedHi, spanHi);
+		}
+		return new int[]{Math.min(lo, sharedLo), Math.max(hi, sharedHi)};
 	}
 
 	/**
@@ -6991,9 +7039,16 @@ public final class ComposerScreen extends Screen {
 		0xFF5AB4E8, 0xFFE8C05A, 0xFF7ED67E, 0xFFE87A9E, 0xFFB48AE8, 0xFFE8925A
 	};
 
-	/** Each bracket gets its own column in the key strip, walking left from the roll's edge. */
+	/**
+	 * Where a bracket's column stands: two staggered lanes at the left of the key strip.
+	 *
+	 * <p>Staggered rather than staircased. Adjacent registers overlap by an octave, so alternating
+	 * two lanes is exactly what keeps neighbouring brackets off each other -- and registers two
+	 * apart never share more than a single row, so a lane's own brackets barely touch. A staircase
+	 * walked one column per bracket across the strip and spent its width saying nothing.</p>
+	 */
 	private int bracketX(int groupIndex) {
-		return rollX - 10 - groupIndex * 5;
+		return layerPanelWidth() + 3 + groupIndex % 2 * 7;
 	}
 
 	/**
@@ -7085,7 +7140,7 @@ public final class ComposerScreen extends Screen {
 			boolean overColumn = mouseX >= x - 3 && mouseX < x + 6
 				&& mouseY >= top && mouseY < bottom;
 			int iconTop = iconStackTop(group, top, bottom);
-			boolean overIcons = mouseX >= x - 6 && mouseX < x + 10 && mouseY >= iconTop
+			boolean overIcons = mouseX >= x + 5 && mouseX < x + 21 && mouseY >= iconTop
 				&& mouseY < iconTop + group.instruments().size() * 18;
 			if (overColumn || overIcons) {
 				return index;
@@ -7121,7 +7176,7 @@ public final class ComposerScreen extends Screen {
 			for (int icon = 0; icon < group.instruments().size(); icon++) {
 				graphics.item(new ItemStack(
 						PreviewInstrument.byId(group.instruments().get(icon)).icon()),
-					x - 6, iconTop + icon * 18);
+					x + 5, iconTop + icon * 18);
 			}
 			if (hovered != null && hovered.group() == index) {
 				hoveredDescription = "Drag to trim where this bracket sounds. It moves the whole "
