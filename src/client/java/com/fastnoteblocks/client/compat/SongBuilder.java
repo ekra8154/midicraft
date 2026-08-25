@@ -18927,6 +18927,17 @@ public final class SongBuilder {
 			java.util.Collections.unmodifiableList(sides),
 			java.util.Collections.unmodifiableList(front),
 			java.util.Collections.unmodifiableList(back));
+		// NOT quiet, and the reason is verify rather than redstone. Flipping this to quiet was
+		// tried three times on 2026-08-25 and the last attempt finally got a readback: the reader
+		// says every note still fires (dead 0, missing 0) -- the cross-powered path cells drive the
+		// flanks exactly as the quiet-sides physics says. What breaks is the bookkeeping: verify
+		// credits a note to an adjacent cell RECORDED powered at its tick, and a quiet module's
+		// front cell is somebody else's block at somebody else's tick -- the powered map holds one
+		// tick per cell, so the cross's claim on it at this module's tick cannot be recorded
+		// without erasing theirs. 79 phantom "nothing to set it off" per four builds, on notes
+		// that play. Until powered can hold two ticks, or verify learns the cross geometry, the
+		// centre-fed sides keep relaying and the last few second-soundings stay.
+		// See FrontCellProbe, which maps the front cells and found zero flanks without a driver.
 		StackedSplit fed = new StackedSplit(dusted, head, List.of(), tail, false, shape, toFront,
 			java.util.Collections.unmodifiableList(java.util.Arrays.asList(rungs)));
 		if (fed.runCells(splitCells) > DUST_RANGE) {
@@ -19679,6 +19690,17 @@ public final class SongBuilder {
 		return new Body(afterHead.ahead(1 + cells), cells);
 	}
 
+	/**
+	 * Scratch, probe-only: one row per stacked module laid, so a probe can ask the finished plan
+	 * what stood in front of each cross and what drove each flank. Cleared and read by
+	 * {@link FrontCellProbe}-style tests; never on in a real paste.
+	 */
+	static boolean LOG_MODULES = false;
+	/** The slide the last finished plan applied, for mapping logged walk positions into it. */
+	static int LAST_SHIFT_X;
+	static int LAST_SHIFT_Z;
+	static final List<Object[]> MODULE_LOG = new ArrayList<>();
+
 	private static Lane addStackedEventModule(PlacementPlan placements, Lane lane,
 			int triggerDelay, int time, UltraSlots slots) {
 		// Asked of the slots, never of the caller. The picker, the builder and the parity check have
@@ -19688,6 +19710,10 @@ public final class SongBuilder {
 		// everywhere. See {@link #STACKED_SIDES_MAY_GO_QUIET}.
 		boolean quietSides = STACKED_SIDES_MAY_GO_QUIET && slots.quietSides();
 		lane = pastAnyCorner(placements, lane);
+		if (LOG_MODULES) {
+			MODULE_LOG.add(new Object[] {lane.pos().immutable(), lane.travel(), lane.noteSide(),
+				quietSides, placements.placing(), time, slots});
+		}
 		// Past the corner and after every rebuild: the one moment the slots and the cell are both
 		// final, which the traced fault says the plan-time ask is not.
 		// See {@link #SIDES_DODGE_THE_NEIGHBOURS_NOTE}.
@@ -24595,6 +24621,12 @@ public final class SongBuilder {
 			// height is left alone, because that is measured from your feet and not from a wall.
 			int shiftX = minimumX == Integer.MAX_VALUE ? 0 : origin.getX() - minimumX;
 			int shiftZ = minimumZ == Integer.MAX_VALUE ? 0 : origin.getZ() - minimumZ;
+			// For the probes that log walk-space positions and read them back against the finished
+			// commands, which are paste-space. Walk coords are not paste coords, and a probe that
+			// compares them unshifted reads the wrong cells and tables nonsense -- FrontCellProbe
+			// did, convincingly, before these two lines.
+			LAST_SHIFT_X = shiftX;
+			LAST_SHIFT_Z = shiftZ;
 			if (TRACE) {
 				System.out.println("SHIFT x+" + shiftX + " z+" + shiftZ
 					+ " (add these to any position the walk trace prints)");
