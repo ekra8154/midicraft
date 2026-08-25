@@ -548,6 +548,26 @@ public final class SongBuilder {
 	 */
 	static boolean MARK_UNREACHED = true;
 
+	/**
+	 * The key a layout records its machine count under, and the one the severed check reads.
+	 *
+	 * <p>In the padding map because that is where this file already keeps the numbers a walk wants
+	 * to hand to something that runs after it. It is not padding and the name says so.</p>
+	 */
+	static final String WAYS_IN = "waysIn";
+
+	/**
+	 * How many of a half-tick build's two lanes actually get built.
+	 *
+	 * <p>Two, normally, and one when the song sits entirely on one parity -- which is not a corner
+	 * case but the ordinary state of most of the library, since a song already on the repeater grid
+	 * puts every note on an even game tick. An empty lane lays no block and so has no way in, and
+	 * excusing a lever it never built would excuse a real severed repeater somewhere else.</p>
+	 */
+	private static int waysIn(List<EventNote> even, List<EventNote> odd) {
+		return (even.isEmpty() ? 0 : 1) + (odd.isEmpty() ? 0 : 1);
+	}
+
 	/** The same plan with the wire the signal never reaches turned red, on a marked paste. */
 	private static PastePlan withUnreachedMarked(PastePlan plan) {
 		if (!MARK_UNREACHED) {
@@ -583,8 +603,9 @@ public final class SongBuilder {
 		// never fire and everything downstream of it is silent -- but startingPoints treats exactly
 		// that shape as another way into the machine, starts a fresh performance at it, and counts
 		// all of it as reached. Over the library that hid 182 severed lanes, 178 of them on one song
-		// that every number called clean. One starved repeater is expected: it is where the player
-		// throws the lever.
+		// that every number called clean. One starved repeater is expected per machine: it is where
+		// the player throws that machine's lever, and the half-tick layouts build two machines that
+		// share no block, so a healthy one of those has two.
 		List<BlockPos> starved = new ArrayList<>();
 		for (Map.Entry<BlockPos, net.minecraft.world.level.block.state.BlockState> cell
 				: world.entrySet()) {
@@ -596,11 +617,14 @@ public final class SongBuilder {
 		}
 		List<String> severed = new ArrayList<>();
 		List<BlockPos> severedSites = List.of();
-		if (starved.size() > 1) {
+		int levers = Math.max(1, plan.padding().getOrDefault(WAYS_IN, 1));
+		if (starved.size() > levers) {
 			starved.sort(FaultSites.ORDER);
-			// All but the first, which is the lever. These are carried as positions as well as named in
-			// the sentence, because the sentence only has room for one of them.
-			severedSites = List.copyOf(starved.subList(1, starved.size()));
+			// All but the levers, which are the first of them: a machine's way in stands at the end it
+			// is built from, so on any layout in here the levers are the ones nearest the origin and a
+			// repeater starved partway down a lane is further along than all of them. These are carried
+			// as positions as well as named in the sentence, because the sentence only has room for one.
+			severedSites = List.copyOf(starved.subList(levers, starved.size()));
 			BlockPos cut = severedSites.getFirst();
 			severed.add(severedSites.size() + " repeaters have nothing behind them to read, so the "
 				+ "lane is cut there and everything after it is silent. The first is at "
@@ -1106,6 +1130,30 @@ public final class SongBuilder {
 	static boolean MIRRORS_THE_OTHER_LANE = true;
 
 	/**
+	 * Whether the mirror waits until a lane is out of tolerance instead of levelling at every event.
+	 *
+	 * <p>Off is what shipped first, and it is lockstep: after every event both lanes stand in the
+	 * same column. That reads as the strictest possible reading of "keep the two pulses together"
+	 * and it is the most expensive thing this mode does, because the two lanes are alternately the
+	 * one that pushes the mark and the one that chases it. Guardian's even lane lays a chord, the
+	 * odd lane lays wire the same length to come level, the odd lane lays its own chord, the even
+	 * lane lays wire to come level again -- so each lane ends up holding its own chords and a copy
+	 * of the other lane's length in dust, and the build is as long as both lanes put together
+	 * instead of as long as the longer one.</p>
+	 *
+	 * <p>On, the mark is only chased from further away than {@link #HALF_TICK_LANE_TOLERANCE}, which
+	 * is the distance the pads were ever for: two pulses inside it are both audible from one place,
+	 * and a listener cannot tell a level pair from a pair sixteen blocks apart. The denser lane
+	 * never pads at all, which is the point -- padding it moves the target the quiet lane is trying
+	 * to reach, so the lockstep rule made the catching-up harder as well as longer.</p>
+	 *
+	 * <p>Which lane is which is not a property of the song, it is a property of the moment: a
+	 * passage whose even ticks are busy is chased by the odd lane, and the roles swap when the
+	 * writing does. Nothing here decides in advance who leads.</p>
+	 */
+	static boolean MIRRORS_ONLY_WHEN_BEHIND = true;
+
+	/**
 	 * Two straight lanes running side by side, one for each parity of the game tick.
 	 *
 	 * <p>Redstone's floor is one repeater tick, which is two game ticks, and that is what caps a
@@ -1146,10 +1194,12 @@ public final class SongBuilder {
 		// the machine starting a moment after the button, and a shift one of them takes alone is
 		// every note on that lane landing on the wrong side of the note it was written between.
 		int bias = MIRRORS_THE_OTHER_LANE ? 2 : 1;
-		HalfTickLane right = new HalfTickLane(origin, parity(notes, 0), bias);
+		List<EventNote> even = parity(notes, 0);
+		List<EventNote> odd = parity(notes, 1);
+		placements.waysIn(waysIn(even, odd));
+		HalfTickLane right = new HalfTickLane(origin, even, bias);
 		HalfTickLane left = new HalfTickLane(
-			origin.relative(forward.getCounterClockWise(), HALF_TICK_LANE_GAP),
-			parity(notes, 1), bias);
+			origin.relative(forward.getCounterClockWise(), HALF_TICK_LANE_GAP), odd, bias);
 		int padded = 0;
 		int short_ = 0;
 		int mirrored = 0;
@@ -1177,15 +1227,17 @@ public final class SongBuilder {
 				// placing it is what moves the lane off it. Both lanes date their mirrored stretch
 				// from here, so neither can spend a repeater tick it has not yet reached.
 				int now = next.nextTime();
-				int before = Math.max(right.cursor(), left.cursor());
 				next.placeNextEvent(placements, forward, 0);
-				// Whichever is further along sets the mark, and both come up to it -- usually only
-				// one of them has anywhere to go. Taking the maximum rather than the placer's own
-				// cursor is what lets a lane that fell short once make the ground up later.
+				// Whichever is further along sets the mark, and a lane comes up to it only once it
+				// is further behind than the tolerance allows. Taking the maximum rather than the
+				// placer's own cursor is what lets a lane that fell short once make the ground up
+				// later.
 				int target = Math.max(right.cursor(), left.cursor());
-				int shortfall = right.mirrorTo(placements, forward, target, now)
-					+ left.mirrorTo(placements, forward, target, now);
-				mirrored += Math.max(0, target - before);
+				int rightBefore = right.cursor();
+				int leftBefore = left.cursor();
+				int shortfall = mirrorIfBehind(right, placements, forward, target, now)
+					+ mirrorIfBehind(left, placements, forward, target, now);
+				mirrored += right.cursor() - rightBefore + (left.cursor() - leftBefore);
 				if (shortfall > 0) {
 					stalled++;
 				}
@@ -1214,6 +1266,35 @@ public final class SongBuilder {
 		placements.padded("halfTickMirror", mirrored);
 		placements.padded("halfTickMirrorStalled", stalled);
 		return alongTheBuild(placements.finish(PasteMode.HALF_TICK_LANE, origin));
+	}
+
+	/**
+	 * One lane brought up to the mark, but only if it has fallen off the back of it.
+	 *
+	 * <p>The whole of the density fix is the comparison in here. Both lanes coming up at every event
+	 * is a build as long as the two lanes' contents added together: whichever lane just laid a chord
+	 * pushes the mark forward, the other one lays that many columns of wire to reach it, and then
+	 * the roles swap at the next event and the first lane lays wire for the second. Every chord ends
+	 * up with the other lane's last chord padded out beside it, and that is what the padding between
+	 * every chord and the next actually was.</p>
+	 *
+	 * <p>Nothing was buying anything for those columns. The reason to hold the lanes together is
+	 * that a note block carries 48 blocks and a listener cannot stand in two places, so the only
+	 * question a pad has to answer is whether the two pulses are close enough to hear at once.
+	 * Within {@link #HALF_TICK_LANE_TOLERANCE} they are, and the lane that is ahead is ahead because
+	 * it is carrying more song -- padding it out only moves the mark the other lane is chasing.</p>
+	 *
+	 * <p>So the leader never pads, and the lane behind pads all the way up rather than to the edge
+	 * of the tolerance. Coming up level is what buys the quiet: the next chord either lane lays is
+	 * at most a bus's fifteen columns long, so from level the pair cannot get further apart than the
+	 * tolerance before the next event asks again, and a lane that is merely a chord behind is left
+	 * alone.</p>
+	 */
+	private static int mirrorIfBehind(HalfTickLane lane, PlacementPlan placements, Direction forward,
+			int target, int now) {
+		return MIRRORS_ONLY_WHEN_BEHIND && target - lane.cursor() <= HALF_TICK_LANE_TOLERANCE
+			? 0
+			: lane.mirrorTo(placements, forward, target, now);
 	}
 
 	/**
@@ -1298,6 +1379,7 @@ public final class SongBuilder {
 		secondOrigin = origin.relative(forward, laneWidth + ULTRA_HALF_TICK_GAP);
 
 		PlacementPlan placements = new PlacementPlan();
+		placements.waysIn(waysIn(even, odd));
 		walkWall(evenEvents, origin, forward, laneWidth, limits.laneFloors(), placements,
 			Layout.ultra(limits.laneFloors(), origin), start);
 		// A fresh corridor, and nothing about its opening follows from the last cell of the one
@@ -23188,6 +23270,24 @@ public final class SongBuilder {
 		void padded(String reason, int cells) {
 			if (recording && cells != 0) {
 				padding.merge(reason, cells, Integer::sum);
+			}
+		}
+
+		/**
+		 * How many separate machines this plan lays, which is how many levers it has.
+		 *
+		 * <p>Recorded rather than inferred, because the check that wants it is downstream of every
+		 * layout and cannot ask any of them. A repeater with nothing behind it is a lane cut in two
+		 * everywhere except at the one place it is the way in, and "the one place" is a count of
+		 * machines: the half-tick layouts build two chains that share no block and no signal, so a
+		 * healthy build of one has two repeaters reading air and neither is a fault.</p>
+		 *
+		 * <p>Set, not summed, and the plan's default is one. A layout that says nothing gets the
+		 * single lever every other layout in here has always had.</p>
+		 */
+		void waysIn(int machines) {
+			if (recording) {
+				padding.put(WAYS_IN, machines);
 			}
 		}
 
