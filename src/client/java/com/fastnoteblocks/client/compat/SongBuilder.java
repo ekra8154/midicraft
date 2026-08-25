@@ -16554,7 +16554,8 @@ public final class SongBuilder {
 				Body grown = addStackedBusModule(placements, start, triggerDelay, event.time(),
 					onTheFreeSlots(placements, start.pos(), start.travel(), start.noteSide(),
 						event.time(), rehomed.slots(), flankTaken),
-					List.of(rehomed.toBus()));
+					// Mutable, because the side dodge may trade a relay into the tail it is handed.
+					java.util.Arrays.asList(rehomed.toBus()));
 				return new Placed(grown.lane(), style, grown.busCells(), nudge);
 			} else {
 				placements.padded(standing.slot(flankTaken) == null
@@ -19431,7 +19432,7 @@ public final class SongBuilder {
 
 	/** The lay-time trade: each side that stepped aside, and each that had no quiet note to take. */
 	private static UltraSlots sidesDodgeTheNeighboursNote(PlacementPlan placements, Lane lane,
-			int time, UltraSlots slots) {
+			int time, UltraSlots slots, List<EventNote> tail) {
 		if (!SIDES_DODGE_THE_NEIGHBOURS_NOTE || !STACKED_SIDES_MAY_GO_QUIET
 				|| !slots.quietSides()) {
 			return slots;
@@ -19477,6 +19478,30 @@ public final class SongBuilder {
 						java.util.Collections.unmodifiableList(sides),
 						slots.front(), slots.back(), slots.quietSides()).with(slot, relay);
 					placements.padded("sideDodgedANeighboursNote");
+					dodged = true;
+				}
+			}
+			// The third move, and the only one a falling side has: trade with the module's own
+			// tail. A sand pair fills both sides -- the sides are the one place in the module a
+			// falling note can stand -- so neither of the first two moves can ever free one; but
+			// the bus behind the head props a sand at floor level all day, and a quiet note
+			// sitting in that bus is a side going to waste. In-game reading found exactly this
+			// shape: a contested sand side, a harp two cells along on the tail, and a second
+			// sounding that either of them standing in the other's cell would have prevented.
+			// Same notes, same tick, same run length either way -- only which cell each hangs in
+			// moves, which is the dodge's own rule. {@link #quietestInTail} keeps the harp-last
+			// order the head trade uses, and the callers that reach here hand in the tail they
+			// are about to lay, so the swapped-out relay is built where the quiet note stood.
+			if (!dodged && tail != null) {
+				int from = quietestInTail(tail);
+				if (from >= 0) {
+					List<EventNote> sides = new ArrayList<>(slots.sides());
+					sides.set(side, tail.get(from));
+					slots = new UltraSlots(slots.centre(),
+						java.util.Collections.unmodifiableList(sides),
+						slots.front(), slots.back(), slots.quietSides());
+					tail.set(from, relay);
+					placements.padded("sideTradedWithItsOwnTail");
 					dodged = true;
 				}
 			}
@@ -19537,8 +19562,9 @@ public final class SongBuilder {
 	private static Body addStackedBusModule(PlacementPlan placements, Lane lane, int triggerDelay,
 			int time, UltraSlots slots, List<EventNote> tail, boolean mayGoSimple) {
 		// The one shape that always lays a block in the cell two along the lane -- the handover, a
-		// few lines down -- which is what let splitAt ask for quiet sides in the first place.
-		Lane afterHead = addStackedEventModule(placements, lane, triggerDelay, time, slots);
+		// few lines down -- which is what let splitAt ask for quiet sides in the first place. The
+		// tail rides along so a contested side can trade a relay into it.
+		Lane afterHead = addStackedEventModule(placements, lane, triggerDelay, time, slots, tail);
 		// The cell the centre lights. Stone with dust over it, in the column the head came to rest
 		// in -- beside the centre and level with it, never above, because above the centre is the
 		// air a note block there insists on.
@@ -19704,6 +19730,17 @@ public final class SongBuilder {
 
 	private static Lane addStackedEventModule(PlacementPlan placements, Lane lane,
 			int triggerDelay, int time, UltraSlots slots) {
+		return addStackedEventModule(placements, lane, triggerDelay, time, slots, null);
+	}
+
+	/**
+	 * @param tail the notes the caller is about to lay behind this head, offered to the side
+	 *     dodge as trade partners, or null where the module has none. Must be the very list the
+	 *     bus will be built from -- the dodge swaps a relay into it in place -- which is why only
+	 *     the callers that own their tail pass one.
+	 */
+	private static Lane addStackedEventModule(PlacementPlan placements, Lane lane,
+			int triggerDelay, int time, UltraSlots slots, List<EventNote> tail) {
 		// Asked of the slots, never of the caller. The picker, the builder and the parity check have
 		// to give the same answer about a side, and a boolean threaded through call sites is the one
 		// that gets forgotten: QUIET_SIDES_RELAX_PARITY shipped inert because not one of eleven
@@ -19718,7 +19755,7 @@ public final class SongBuilder {
 		// Past the corner and after every rebuild: the one moment the slots and the cell are both
 		// final, which the traced fault says the plan-time ask is not.
 		// See {@link #SIDES_DODGE_THE_NEIGHBOURS_NOTE}.
-		slots = sidesDodgeTheNeighboursNote(placements, lane, time, slots);
+		slots = sidesDodgeTheNeighboursNote(placements, lane, time, slots, tail);
 		BlockPos cursor = lane.pos();
 		Direction travel = lane.travel();
 		Direction across = lane.noteSide();
