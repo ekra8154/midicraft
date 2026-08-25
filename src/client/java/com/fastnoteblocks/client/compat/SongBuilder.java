@@ -18926,17 +18926,18 @@ public final class SongBuilder {
 		UltraSlots dusted = new UltraSlots(null,
 			java.util.Collections.unmodifiableList(sides),
 			java.util.Collections.unmodifiableList(front),
-			java.util.Collections.unmodifiableList(back));
-		// NOT quiet, and the reason is verify rather than redstone. Flipping this to quiet was
-		// tried three times on 2026-08-25 and the last attempt finally got a readback: the reader
-		// says every note still fires (dead 0, missing 0) -- the cross-powered path cells drive the
-		// flanks exactly as the quiet-sides physics says. What breaks is the bookkeeping: verify
-		// credits a note to an adjacent cell RECORDED powered at its tick, and a quiet module's
-		// front cell is somebody else's block at somebody else's tick -- the powered map holds one
-		// tick per cell, so the cross's claim on it at this module's tick cannot be recorded
-		// without erasing theirs. 79 phantom "nothing to set it off" per four builds, on notes
-		// that play. Until powered can hold two ticks, or verify learns the cross geometry, the
-		// centre-fed sides keep relaying and the last few second-soundings stay.
+			java.util.Collections.unmodifiableList(back), true);
+		// Quiet, at the fourth asking. The first three flips died on bookkeeping rather than
+		// redstone: the reader said every note still fires (dead 0, missing 0) -- the cross-powered
+		// path cells drive the flanks exactly as the quiet-sides physics says -- but verify
+		// credits a note to an adjacent cell recorded powered at its tick, and a quiet module's
+		// front cell is somebody else's block at somebody else's tick. The powered map holds one
+		// tick per cell, so the cross's claim on it could not be recorded without erasing theirs:
+		// 79 phantom "nothing to set it off" per four builds, on notes that play. Verify now asks
+		// the cross geometry itself -- {@link PlacementPlan#crossDriven} -- so the front cell
+		// stays the other module's and the flanks are credited without a record. Quiet is what
+		// routes these heads through the side dodge, which is where the last second-soundings
+		// were coming from: a conducting side laid against the lane alongside.
 		// See FrontCellProbe, which maps the front cells and found zero flanks without a driver.
 		StackedSplit fed = new StackedSplit(dusted, head, List.of(), tail, false, shape, toFront,
 			java.util.Collections.unmodifiableList(java.util.Arrays.asList(rungs)));
@@ -23520,6 +23521,9 @@ public final class SongBuilder {
 					}
 				}
 				if (!triggered) {
+					triggered = crossDriven(note.getKey(), time);
+				}
+				if (!triggered) {
 					missedNotesAt.add(note.getKey());
 					faults.add("the note at " + describe(note.getKey(), shiftX, shiftZ)
 						+ " has nothing to set it off");
@@ -23527,6 +23531,53 @@ public final class SongBuilder {
 			}
 			faults.sort(null);
 			return faults;
+		}
+
+		/**
+		 * Whether a stated cross firing at this note's tick points into a conductor beside it.
+		 *
+		 * <p>The one driver {@link #powered} cannot carry. A quiet module's flanks are sounded by
+		 * the two path cells the cross points into, and the cell in front of the cross belongs to
+		 * another module at another tick -- the map holds one tick per cell, so the cross's claim
+		 * on it cannot be recorded without erasing the owner's. Recording it anyway was also ruled
+		 * out the day the room-two head recorded its own cross: every parity answer in this file
+		 * was measured with the cross unrecorded, and {@link #liveAt} feeds them all. So the
+		 * geometry is asked here instead, at verify time, where it changes what is reported and
+		 * nothing about what is built or refused: a conductor beside the note, a stated cross
+		 * beside the conductor, and the cross's own column recorded at the note's tick -- the
+		 * centre above it on a stacked module, the corner stone beneath it on a rail seed. A cross
+		 * whose column carries another tick proves nothing and credits nothing.</p>
+		 */
+		private boolean crossDriven(BlockPos at, int time) {
+			for (Direction toConductor : Direction.Plane.HORIZONTAL) {
+				BlockPos conductor = at.relative(toConductor);
+				if (!crossCanDrive(blocks.get(conductor))) {
+					continue;
+				}
+				for (Direction toCross : Direction.Plane.HORIZONTAL) {
+					BlockPos cross = conductor.relative(toCross);
+					if (!STACKED_CROSS.equals(blocks.get(cross))) {
+						continue;
+					}
+					Integer above = powered.get(cross.above());
+					Integer below = powered.get(cross.below());
+					if ((above != null && above == time) || (below != null && below == time)) {
+						return true;
+					}
+				}
+			}
+			return false;
+		}
+
+		/**
+		 * Whether this block passes the cross's power on to a note block beside it: a full solid
+		 * block, which in front of a cross is always the path's stone, a note block, or a
+		 * conducting instrument. Slabs, glass and air end the reach exactly as they do in game.
+		 */
+		private static boolean crossCanDrive(String block) {
+			return block != null && (block.startsWith("minecraft:note_block")
+				|| "minecraft:stone".equals(block)
+				|| CONDUCTING_INSTRUMENT_BLOCKS.contains(block));
 		}
 
 		/**
