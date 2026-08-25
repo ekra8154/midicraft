@@ -21374,11 +21374,16 @@ public final class SongBuilder {
 			return slots;
 		}
 		HEAD_SIDES_SWAPPED++;
+		// The quiet grant rides along. This rebuild predates the field, and the four-arg
+		// constructor defaults it off -- so a bus head whose low notes were rehomed lost its
+		// quiet sides on the way to the builder and laid conducting relays it had been granted
+		// leave not to. One oak plank laid exactly there, against the lane behind's flank, was
+		// the whole of the jvp second-soundings.
 		return new UltraSlots(slots.centre(), slots.sides(),
 			java.util.Collections.unmodifiableList(
 				java.util.Arrays.asList(placed[0], placed[1])),
 			java.util.Collections.unmodifiableList(
-				java.util.Arrays.asList(placed[2], placed[3])));
+				java.util.Arrays.asList(placed[2], placed[3])), slots.quietSides());
 	}
 
 	private static boolean quietAndFree(PlacementPlan placements, BlockPos cell, int time) {
