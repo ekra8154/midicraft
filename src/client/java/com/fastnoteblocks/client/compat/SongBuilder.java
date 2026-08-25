@@ -1369,6 +1369,9 @@ public final class SongBuilder {
 				LaneRoute.serpentine(floors, head.floor(), head.climb()),
 				PasteMode.INTERLEAVED_HALF_TICK);
 		}
+		// Which frame machine B runs in: see the comb-route notes below. Odd floor counts put
+		// its trunk on the far wall so the two machines' starts stand together.
+		boolean adjacentStarts = floors % 2 == 1;
 		BlockPos originA = origin.relative(forward, 1);
 		Layout layoutA = Layout.ultraAlong(floors, coordAlong(axis, originA)).asV2();
 		List<EventGroup> evenEvents = eventGroups(even, layoutA);
@@ -1382,7 +1385,11 @@ public final class SongBuilder {
 		// machine's finger tips end short of the other's trunk.
 		int laneWidth = Math.max(longest + 2, limits.laneWidth() - 7);
 		BlockPos trunkB = origin.relative(forward, laneWidth + 5);
-		Layout layoutB = Layout.ultraAlong(floors, coordAlong(axis, trunkB)).asV2();
+		// The parity anchor follows machine B's own origin: five along in the trunk-on-far
+		// frame, the trunk corner in the mirrored one.
+		Layout layoutB = Layout.ultraAlong(floors, adjacentStarts
+			? coordAlong(axis, origin) + 5 * stepAlong(axis, forward)
+			: coordAlong(axis, trunkB)).asV2();
 		List<EventGroup> oddEvents = eventGroups(odd, layoutB);
 		int spacing = Math.max(
 			laneSpacing(laneReach(evenEvents, 0, evenEvents.size()),
@@ -1395,25 +1402,29 @@ public final class SongBuilder {
 		// partner sits exactly between them.
 		int trunk = (floors % 2 == 1 ? 3 : 2) * spacing;
 		int phase = floors % 2 == 1 ? 2 * spacing : spacing;
-		// A top-started walk grows DOWNWARD from its origin -- both starts lay their first lane
-		// at the origin's own height -- so machine B's origin stands a building's height up, and
-		// its floors come out level with machine A's. Without this the two machines shared only
-		// one plane, and it was the plane both their trunk runs lived on.
-		BlockPos originB = trunkB.relative(depth, phase)
-			.above((floors - 1) * CUBE_FLOOR_HEIGHT);
-		// The stagger: machine A starts at the bottom, so its long trunk runs lie on the bottom
-		// floor; machine B starts at the top and lays its own on the top floor. Each machine's
-		// clear pairs then extend toward the other's trunk, over and under the other's turns --
-		// the only thing of the partner that crosses this machine's rows out there is the
-		// partner's trunk runs, and the stagger pins those to one floor each. Three of the four
-		// clearance columns are reclaimed; the fourth stays so an extended turn pokes only to
-		// the partner's wall column. Odd floor counts only: an even zigzag lays trunk runs on
-		// both its extreme floors, and there is no clear floor to extend into.
+		// Both machines start on the floor the setting names, and their starts stand together:
+		// machine B is not mirrored any more -- it walks the same direction as A with its trunk as
+		// its FAR wall, so its opening lane begins beside A's opening (one lane pitch before it,
+		// two blocks between the centres, buttons a column apart) and runs across to its trunk.
+		// The frame flip is also what keeps the stagger with both machines starting level: for a
+		// given start floor, a trunk-on-far comb lays its long trunk runs on the OPPOSITE extreme
+		// floor from a trunk-on-near one, so each machine's clear pairs still extend toward the
+		// other's trunk, over and under its turns. Odd floor counts only; an even zigzag lays
+		// trunk runs on both extremes either way round, so even counts keep the mirrored frame
+		// and their far-corner start.
 		int extension = floors >= 3 && floors % 2 == 1 ? INTERLEAVE_TIP_EXTENSION : 0;
-		WalkStart headA = start == WalkStart.HEAD ? new WalkStart(0, 0, 1) : start;
-		WalkStart headB = start == WalkStart.HEAD ? new WalkStart(0, floors - 1, -1) : start;
-		LaneRoute routeA = combRoute(floors, headA, spacing, trunk, false, extension, floors - 1);
-		LaneRoute routeB = combRoute(floors, headB, spacing, trunk, true, extension, 0);
+		int trunkFloorA = head.climb() > 0 ? 0 : floors - 1;
+		WalkStart headB = adjacentStarts
+			? new WalkStart(-4, head.floor(), head.climb(), head.turning())
+			: head;
+		BlockPos originB = adjacentStarts
+			? origin.relative(forward, 5).relative(depth, -spacing)
+			: trunkB.relative(depth, phase);
+		Direction forwardB = adjacentStarts ? forward : forward.getOpposite();
+		LaneRoute routeA = combRoute(floors, head, spacing, trunk, false, false, extension,
+			extension > 0 ? floors - 1 - trunkFloorA : -1);
+		LaneRoute routeB = combRoute(floors, headB, spacing, trunk, adjacentStarts,
+			!adjacentStarts, extension, extension > 0 ? trunkFloorA : -1);
 		Set<Integer> tightA = new HashSet<>();
 		Set<Integer> tightB = new HashSet<>();
 		int rewalks = 0;
@@ -1422,16 +1433,16 @@ public final class SongBuilder {
 			boolean walkingB = false;
 			try {
 				walkRouted(evenEvents, originA, forward, laneWidth, floors, placements, layoutA,
-					routeA, headA, tightA);
+					routeA, head, tightA);
 				addStarter(placements, forward);
 				int laidByA = placements.laidCells();
 				// A fresh corridor: nothing about machine B's opening follows from machine A's last
 				// cell, least of all how much dust has gone down since a repeater it is not wired to.
 				placements.startFreshRun();
 				walkingB = true;
-				walkRouted(oddEvents, originB, forward.getOpposite(), laneWidth, floors, placements,
+				walkRouted(oddEvents, originB, forwardB, laneWidth, floors, placements,
 					layoutB, routeB, headB, tightB);
-				addStarter(placements, forward.getOpposite(),
+				addStarter(placements, forwardB,
 					placements.firstRepeaterAfter(laidByA));
 				return placements.finish(PasteMode.INTERLEAVED_HALF_TICK, origin,
 					coordAlong(axis, origin),
@@ -1450,17 +1461,31 @@ public final class SongBuilder {
 	}
 
 	/**
-	 * The comb as a route: tip turns at the walk's spacing, trunk turns long, mirrored for B.
+	 * The comb as a route: turns toward the trunk run long, turns at the finger tips short.
 	 *
-	 * @param extension columns a clear pair's tip runs past the base far wall, toward the
-	 *     partner's trunk
+	 * @param trunkOnFar whether the trunk is the far wall rather than the origin side. Machine B
+	 *     runs this way round so both machines walk the same direction: its opening lane starts
+	 *     beside machine A's and runs across to its trunk, and for a given start floor its long
+	 *     trunk runs land on the opposite extreme floor from A's -- the stagger, for free.
+	 * @param extension columns a clear pair's tip reaches toward the partner's trunk -- past the
+	 *     far wall when the trunk is near, behind the near wall when the trunk is far
 	 * @param avoidFloor the floor the partner's long trunk runs cross, which no extended pair
-	 *     may touch -- the partner's start floor, since that is where its trunk flats lie
+	 *     may touch; -1 for no extension at all
 	 */
 	private static LaneRoute combRoute(int floors, WalkStart start, int spacing, int trunk,
-			boolean mirrored, int extension, int avoidFloor) {
+			boolean trunkOnFar, boolean mirrored, int extension, int avoidFloor) {
 		LaneRoute base = LaneRoute.serpentine(floors, start.floor(), start.climb());
 		return new LaneRoute() {
+			private int pairExtension(int leg) {
+				if (extension == 0) {
+					return 0;
+				}
+				// Both legs of a pair share the tip; the pair is named by its even leg.
+				int pair = leg - Math.floorMod(leg, 2);
+				return base.floorOf(pair) == avoidFloor || base.floorOf(pair + 1) == avoidFloor
+					? 0 : extension;
+			}
+
 			@Override
 			public int floorOf(int leg) {
 				return base.floorOf(leg);
@@ -1473,20 +1498,20 @@ public final class SongBuilder {
 
 			@Override
 			public int linkOf(int leg) {
-				// Legs travelling forward end at the finger-tip wall, legs travelling back at the
-				// trunk; a flat turn only ever reads the link for its own end.
-				return leg % 2 == 1 ? trunk : spacing;
+				// A flat turn only ever reads the link for its own end: legs travelling forward
+				// end at the far wall, legs travelling back at the near one.
+				boolean trunkLeg = trunkOnFar ? leg % 2 == 0 : leg % 2 == 1;
+				return trunkLeg ? trunk : spacing;
 			}
 
 			@Override
 			public int tipExtension(int leg) {
-				if (extension == 0) {
-					return 0;
-				}
-				// Both legs of a pair share the tip; the pair is named by its even leg.
-				int pair = leg - Math.floorMod(leg, 2);
-				return base.floorOf(pair) == avoidFloor || base.floorOf(pair + 1) == avoidFloor
-					? 0 : extension;
+				return trunkOnFar ? 0 : pairExtension(leg);
+			}
+
+			@Override
+			public int nearExtension(int leg) {
+				return trunkOnFar ? pairExtension(leg) : 0;
 			}
 
 			@Override
@@ -2252,6 +2277,11 @@ public final class SongBuilder {
 	/** A direction's step projected onto the lane axis: {@code getStepX()} generalised. */
 	private static int stepAlong(Direction.Axis axis, Direction direction) {
 		return axis == Direction.Axis.X ? direction.getStepX() : direction.getStepZ();
+	}
+
+	/** The near wall as a leg sees it: the base, less whatever the route reaches behind it. */
+	private static int nearWallAt(LaneRoute route, int leg, int nearWall, int step) {
+		return nearWall - route.nearExtension(leg) * step;
 	}
 
 	/** The tip wall of a leg's pair: the base far wall plus whatever the route extends it by. */
@@ -7576,6 +7606,13 @@ public final class SongBuilder {
 		if (walkTipExtension > 0) {
 			placements.alsoAWall(farWall + walkTipExtension * tipStep);
 		}
+		int walkNearExtension = 0;
+		for (int probeLeg = 0; probeLeg <= 2 * floors + 2; probeLeg++) {
+			walkNearExtension = Math.max(walkNearExtension, route.nearExtension(probeLeg));
+		}
+		if (walkNearExtension > 0) {
+			placements.alsoAWall(nearWall - walkNearExtension * tipStep);
+		}
 		placements.laneDepth(depth);
 		int currentTime = 0;
 		// Which floor the walk believes it is on and which way it is going, which together decide
@@ -7749,7 +7786,8 @@ public final class SongBuilder {
 			int turnOffBusCells = centreFeedsTheClimb && !endsOnBus(lastStyle, lastBusCells)
 				? offBus + 1 : offBus;
 			// The column this lane's turn stands in: the wall, or one past it for a climb.
-			int wall = laneWall(axis, nearWall, tipWall(route, leg, farWall, tipStep), forward,
+			int wall = laneWall(axis, nearWallAt(route, leg, nearWall, tipStep),
+					tipWall(route, leg, farWall, tipStep), forward,
 				lane.travel(), floor, climb, floors);
 			int stepOffAhead = turn.stepOff();
 			int splitCells = turn.splitCells();
@@ -7775,7 +7813,8 @@ public final class SongBuilder {
 				// would rather close differently -- and the lookahead pair above it.
 				booked = V2_BOOKS_PADS && above >= 0 && above < floors
 					? planLane(events, index, coordAlong(axis, lane.pos()), stepAlong(axis, lane.travel()), wall,
-						lane.travel() == forward ? nearWall : tipWall(route, leg, farWall, tipStep),
+						lane.travel() == forward ? nearWallAt(route, leg, nearWall, tipStep)
+						: tipWall(route, leg, farWall, tipStep),
 						currentTime, tipSignal,
 						PLAN_ASKS_THE_BLOCKS_BEHIND
 							? columnBehindBusy && !backPairIsFree(placements, lane, event.time())
@@ -8145,7 +8184,8 @@ public final class SongBuilder {
 					&& railOpens(axis, events, index + 1,
 						Lane.straight(atAlong(axis, lane.pos(), wall)
 							.relative(seedNext, 2).above(CUBE_FLOOR_HEIGHT), seedNext, depth),
-						laneWall(axis, nearWall, tipWall(route, leg + 1, farWall, tipStep), forward,
+						laneWall(axis, nearWallAt(route, leg + 1, nearWall, tipStep),
+					tipWall(route, leg + 1, farWall, tipStep), forward,
 							seedNext, above, climb, floors),
 						layout, false,
 						turnReserve(events.get(index + 1),
@@ -8230,7 +8270,8 @@ public final class SongBuilder {
 					.below(CUBE_FLOOR_HEIGHT).relative(below), below, depth);
 				boolean holds = railHolds(event, true);
 				boolean opens = railOpens(axis, events, index, willRun,
-					below == forward ? tipWall(route, leg + 1, farWall, tipStep) : nearWall,
+					below == forward ? tipWall(route, leg + 1, farWall, tipStep)
+						: nearWallAt(route, leg + 1, nearWall, tipStep),
 					layout, false,
 					turnReserve(event, turnCost(above, climb, floors, flatLink(route, leg + 1, slabStep)).offBus(), layout),
 					0, event.time(), booked);
@@ -8348,7 +8389,8 @@ public final class SongBuilder {
 					|| (climb <= 0 || FOLDBACK_PREFERRED_FOR_CLIMBS)
 						&& room < FOLDBACK_PREFERRED_BELOW_ROOM)) {
 				FoldbackPick first = foldbackPick(axis, placements, lane, event, room, delayColumns,
-					nearWall, tipWall(route, leg, farWall, tipStep), forward, above, climb, floors,
+					nearWallAt(route, leg, nearWall, tipStep),
+					tipWall(route, leg, farWall, tipStep), forward, above, climb, floors,
 					"AtTheWall");
 				fold = first.fold();
 				rise = first.rise();
@@ -8825,7 +8867,8 @@ public final class SongBuilder {
 			if (FOLDBACK_LAST && !couldSplit && foldbackOffered && wantsTurn && !stackedFitsInstead
 					&& fold == null && rise == null) {
 				FoldbackPick fallback = foldbackPick(axis, placements, lane, event, room, delayColumns,
-					nearWall, tipWall(route, leg, farWall, tipStep), forward, above, climb, floors,
+					nearWallAt(route, leg, nearWall, tipStep),
+					tipWall(route, leg, farWall, tipStep), forward, above, climb, floors,
 					"AsTheLastResort");
 				fold = fallback.fold();
 				rise = fallback.rise();
@@ -9096,7 +9139,8 @@ public final class SongBuilder {
 				// any journal. See {@link #FOLD_CATCHES_A_DROPPED_NOTE}.
 				FoldbackPick foldInReserve = FOLD_CATCHES_A_DROPPED_NOTE && layout.v2() && fold == null
 						&& rise == null && nought == null && foldbackOffered && wantsTurn
-					? foldbackPick(axis, placements, lane, event, room, delayColumns, nearWall,
+					? foldbackPick(axis, placements, lane, event, room, delayColumns,
+						nearWallAt(route, leg, nearWall, tipStep),
 						tipWall(route, leg, farWall, tipStep),
 						forward, above, climb, floors, "InReserve")
 					: new FoldbackPick(null, null);
@@ -9681,10 +9725,12 @@ public final class SongBuilder {
 					TurnCost next = turnCost(floor, climb, floors, flatLink(route, leg, slabStep));
 					booked = V2_BOOKS_PADS
 						? planLane(events, index, coordAlong(axis, lane.pos()), stepAlong(axis, lane.travel()),
-							laneWall(axis, nearWall, tipWall(route, leg, farWall, tipStep), forward,
+							laneWall(axis, nearWallAt(route, leg, nearWall, tipStep),
+					tipWall(route, leg, farWall, tipStep), forward,
 							lane.travel(), floor, climb,
 								floors),
-							lane.travel() == forward ? nearWall : tipWall(route, leg, farWall, tipStep),
+							lane.travel() == forward ? nearWallAt(route, leg, nearWall, tipStep)
+						: tipWall(route, leg, farWall, tipStep),
 							currentTime + spentPadding,
 							tipSignal, columnBehindBusy, next.cells(), next.offBus(), next.stepOff(),
 							next.splitCells(), climb > 0, layout,
@@ -9835,7 +9881,8 @@ public final class SongBuilder {
 							&& railHolds(event, false)
 							&& railFloorTakes(placements, willRun, event)
 							&& railOpens(axis, events, index, willRun,
-								laneWall(axis, nearWall, tipWall(route, leg + 1, farWall, tipStep), forward,
+								laneWall(axis, nearWallAt(route, leg + 1, nearWall, tipStep),
+					tipWall(route, leg + 1, farWall, tipStep), forward,
 								next, above, climb, floors),
 								layout, false,
 								turnReserve(event,
@@ -9945,10 +9992,12 @@ public final class SongBuilder {
 						// by that much. Otherwise it counts columns of delay the walk will not place.
 						booked = V2_BOOKS_PADS
 							? planLane(events, index, coordAlong(axis, lane.pos()), stepAlong(axis, lane.travel()),
-								laneWall(axis, nearWall, tipWall(route, leg, farWall, tipStep), forward,
+								laneWall(axis, nearWallAt(route, leg, nearWall, tipStep),
+					tipWall(route, leg, farWall, tipStep), forward,
 							lane.travel(), floor, climb,
 									floors),
-								lane.travel() == forward ? nearWall : tipWall(route, leg, farWall, tipStep),
+								lane.travel() == forward ? nearWallAt(route, leg, nearWall, tipStep)
+						: tipWall(route, leg, farWall, tipStep),
 								currentTime + spentPadding,
 								tipSignal, columnBehindBusy, next.cells(), next.offBus(), next.stepOff(),
 								next.splitCells(), climb > 0, layout,
@@ -10283,7 +10332,8 @@ public final class SongBuilder {
 				}
 				Direction travel = lane.travel();
 				BlockPos cursor = lane.pos();
-				int laneWall = laneWall(axis, nearWall, tipWall(route, leg, farWall, tipStep), forward,
+				int laneWall = laneWall(axis, nearWallAt(route, leg, nearWall, tipStep),
+					tipWall(route, leg, farWall, tipStep), forward,
 					travel, floor, climb, floors);
 				// Where this event really ends and what it really leaves. Asked of a second piece of
 				// arithmetic before, and that one measured every chord in the shape it was sorted into
@@ -10409,7 +10459,8 @@ public final class SongBuilder {
 			// -- which is why a run used to take several chords to come back after a floor change,
 			// when it can open on the very first one. Only a flat turn is a reason to wait, and that
 			// is the bending test: its sideways run lies across the way both rails go.
-			int laneWall = laneWall(axis, nearWall, tipWall(route, leg, farWall, tipStep), forward,
+			int laneWall = laneWall(axis, nearWallAt(route, leg, nearWall, tipStep),
+					tipWall(route, leg, farWall, tipStep), forward,
 				lane.travel(), floor, climb, floors);
 			// A run already going, only. Opening one mid-turn is a different question and railOpens
 			// still refuses it; what this allows is the run a lane already has reaching the corner it
@@ -10992,7 +11043,8 @@ public final class SongBuilder {
 			// words -- {@code laneWall} -- because the answer from before the turn is about a lane that
 			// no longer exists. This is the other half of that.
 			int wallAhead = ROOM_AHEAD_ASKS_THE_WALL_IT_FACES
-				? laneWall(axis, nearWall, tipWall(route, leg, farWall, tipStep), forward,
+				? laneWall(axis, nearWallAt(route, leg, nearWall, tipStep),
+					tipWall(route, leg, farWall, tipStep), forward,
 					opening.travel(), floor, climb, floors)
 				: wall;
 			int ahead = turning ? Integer.MAX_VALUE

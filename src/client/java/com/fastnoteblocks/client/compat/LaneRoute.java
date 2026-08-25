@@ -70,6 +70,15 @@ interface LaneRoute {
 	}
 
 	/**
+	 * Columns this leg's near-wall reach runs past the machine's base near wall -- the mirror of
+	 * {@link #tipExtension} for a machine whose trunk is its far wall, so its hairpin tips point
+	 * back toward the origin side and the reclaimed ground lies behind it.
+	 */
+	default int nearExtension(int leg) {
+		return 0;
+	}
+
+	/**
 	 * Whether this machine's slab creeps the other way round -- depth counterclockwise from
 	 * forward instead of clockwise.
 	 *

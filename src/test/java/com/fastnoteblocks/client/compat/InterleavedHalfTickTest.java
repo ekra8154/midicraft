@@ -60,9 +60,20 @@ class InterleavedHalfTickTest {
 			new BlockPos(0, 64, 0), Direction.EAST, notes,
 			new SongBuilder.BuildLimits(16, 24, 1), SongBuilder.WalkStart.HEAD);
 
-		long starters = plan.commands().stream()
-			.filter(command -> command.contains("minecraft:oak_button")).count();
-		assertEquals(2, starters, "each machine brings its own way in");
+		List<BlockPos> buttons = plan.commands().stream()
+			.filter(command -> command.contains("minecraft:oak_button"))
+			.map(command -> {
+				String[] token = command.split(" ", 5);
+				return new BlockPos(Integer.parseInt(token[1]), Integer.parseInt(token[2]),
+					Integer.parseInt(token[3]));
+			})
+			.toList();
+		assertEquals(2, buttons.size(), "each machine brings its own way in");
+		// And the two ways in stand together: one lane pitch apart in depth, the same column,
+		// so the opening notes sound side by side and one contraption can drive both.
+		BlockPos gap = buttons.get(1).subtract(buttons.get(0));
+		assertTrue(Math.abs(gap.getX()) <= 1 && Math.abs(gap.getZ()) == 3 && gap.getY() == 0,
+			"the two starts should stand a lane pitch apart: " + buttons);
 		assertEquals(0, plan.wrongNotes(), "notes sounding on a foreign tick: " + plan.faults());
 		assertEquals(0, plan.missingNotes(), "notes with nowhere to hang: " + plan.faults());
 
