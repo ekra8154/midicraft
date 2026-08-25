@@ -323,7 +323,8 @@ final class BuildOptionsScreen extends Screen {
 		return mode == SongBuilder.PasteMode.COMPACT_LANE
 			|| mode == SongBuilder.PasteMode.ULTRA_COMPACT_LANE
 			|| mode == SongBuilder.PasteMode.ULTRA_COMPACT_LANE_V2
-			|| mode == SongBuilder.PasteMode.ULTRA_HALF_TICK_LANE;
+			|| mode == SongBuilder.PasteMode.ULTRA_HALF_TICK_LANE
+			|| mode == SongBuilder.PasteMode.INTERLEAVED_HALF_TICK;
 	}
 
 	@Override
@@ -677,6 +678,11 @@ final class BuildOptionsScreen extends Screen {
 				+ "and the left the odd. Plays the song at double speed and twice the timing "
 				+ "precision. You wire the head yourself: the left lane must start exactly one game "
 				+ "tick after the right.";
+			case INTERLEAVED_HALF_TICK -> "The two half-tick machines woven through one region: "
+				+ "each one a serpentine whose long trunk turns leave room, and the other's fingers "
+				+ "reach into it, mirrored, half a cycle along. Both halves of every bar play within "
+				+ "a few blocks of each other. You wire the heads yourself: the second machine must "
+				+ "start exactly one game tick after the first. Experimental.";
 		};
 	}
 

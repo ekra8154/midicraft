@@ -1,0 +1,109 @@
+package com.fastnoteblocks.client.compat;
+
+import com.fastnoteblocks.client.composer.ComposerProject;
+import com.google.gson.Gson;
+import java.io.Reader;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Set;
+import java.util.stream.Stream;
+import net.minecraft.SharedConstants;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.server.Bootstrap;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
+
+/**
+ * Every song in the library through the interleaved half-tick builder, faults ranked worst first.
+ *
+ * <p>The cross-machine adjacency census: foreign lanes stand a lane spacing apart everywhere in
+ * this layout, and whether that is company or contention is a number, not an argument. Prints and
+ * asserts nothing, in the census tradition -- the library has whatever faults it has, and a probe
+ * that fails on the first is a probe nobody can point at the second.</p>
+ *
+ * <pre>
+ * gradlew sweepTest --tests "*InterleavedCensusProbe" -Dprobe.sizes=24x1,32x3
+ * </pre>
+ */
+@Tag("sweep")
+class InterleavedCensusProbe {
+	@BeforeAll
+	static void bootstrapMinecraft() {
+		SharedConstants.tryDetectVersion();
+		Bootstrap.bootStrap();
+	}
+
+	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
+
+	private static List<int[]> sizes() {
+		String given = System.getProperty("probe.sizes", "24x1,32x1,20x2,24x3");
+		List<int[]> sizes = new ArrayList<>();
+		for (String size : given.split(",")) {
+			String[] part = size.strip().split("x");
+			sizes.add(new int[] {Integer.parseInt(part[0]), Integer.parseInt(part[1])});
+		}
+		return sizes;
+	}
+
+	@Test
+	void faultsOverTheLibrary() throws Exception {
+		List<String> rows = new ArrayList<>();
+		int builds = 0;
+		int clean = 0;
+		int totalWrong = 0;
+		int totalMissing = 0;
+		int totalCollisions = 0;
+		int threw = 0;
+		List<Path> files;
+		try (Stream<Path> listed = Files.list(SONGS)) {
+			files = listed.filter(file -> file.toString().endsWith(".json")).sorted().toList();
+		}
+		for (Path file : files) {
+			List<SongBuilder.EventNote> notes;
+			try (Reader reader = Files.newBufferedReader(file)) {
+				ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
+				ComposerProject project = new ComposerProject(raw.name(), raw.ppq(),
+					raw.tempoMicrosPerQuarter(), raw.layers(), raw.activeLayerIndex(),
+					raw.nextNoteId(), raw.endTick(), raw.speedQuarters());
+				notes = SongBuilder.eventNotes(project.toSequenceTracks(Set.of(), true));
+			}
+			String song = file.getFileName().toString().replace(".json", "");
+			for (int[] size : sizes()) {
+				builds++;
+				try {
+					SongBuilder.PastePlan plan = SongBuilder.createInterleavedHalfTickPastePlan(
+						new BlockPos(0, 64, 0), Direction.EAST, notes,
+						new SongBuilder.BuildLimits(16, size[0], size[1]),
+						SongBuilder.WalkStart.HEAD);
+					int wrong = plan.wrongNotes();
+					int missing = plan.missingNotes();
+					int clashes = plan.collisions().size();
+					totalWrong += wrong;
+					totalMissing += missing;
+					totalCollisions += clashes;
+					if (wrong == 0 && missing == 0 && clashes == 0) {
+						clean++;
+					} else {
+						rows.add(String.format("%6d %s %dx%d wrong=%d missing=%d collisions=%d"
+							+ " span=%d", wrong * 3 + missing * 5 + clashes, song, size[0],
+							size[1], wrong, missing, clashes, plan.spanX()));
+					}
+				} catch (Exception refused) {
+					threw++;
+					rows.add(String.format("%6d %s %dx%d THREW %s: %.120s", 999999, song,
+						size[0], size[1], refused.getClass().getSimpleName(),
+						String.valueOf(refused.getMessage())));
+				}
+			}
+		}
+		rows.sort(java.util.Comparator.reverseOrder());
+		rows.forEach(row -> System.out.println("  " + row));
+		System.out.println("INTERLEAVED CENSUS: " + builds + " builds, " + clean + " clean, "
+			+ threw + " threw, wrong=" + totalWrong + " missing=" + totalMissing
+			+ " collisions=" + totalCollisions);
+	}
+}

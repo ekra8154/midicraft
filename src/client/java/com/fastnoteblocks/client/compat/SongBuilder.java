@@ -530,6 +530,8 @@ public final class SongBuilder {
 			case HALF_TICK_LANE -> createHalfTickPastePlan(origin, forward, notes);
 			case ULTRA_HALF_TICK_LANE ->
 				createUltraHalfTickPastePlan(origin, forward, notes, limits, start);
+			case INTERLEAVED_HALF_TICK ->
+				createInterleavedHalfTickPastePlan(origin, forward, notes, limits, start);
 		}), title, mode, limits);
 	}
 
@@ -1314,6 +1316,133 @@ public final class SongBuilder {
 	}
 
 	/**
+	 * Two mirrored comb machines in one region, one for each half of the game tick.
+	 *
+	 * <p>The same parity split as the other half-tick layouts, and a different answer to where the
+	 * second machine stands: inside the first. Each machine is an ordinary serpentine whose
+	 * trunk-side flat turns run long, so its fingers leave room, and the other machine -- mirrored,
+	 * walked from the far side of the span, displaced half a cycle down the slab -- puts its fingers
+	 * exactly there. Lanes of the two machines end up a lane spacing apart everywhere, which is what
+	 * a listener's ears asked for: both halves of every bar within a few blocks of each other,
+	 * instead of a corridor to the left playing the evens and a corridor to the right the odds.</p>
+	 *
+	 * <p>The two machines share no block and no signal; they share only the plan, so every occupancy
+	 * question and the whole layout check see across them. Their leg positions are fixed by the
+	 * routes before either walk starts -- a leg's depth is turn geometry, not song content -- so the
+	 * machines cannot drift into each other however different the two halves of the song are.</p>
+	 *
+	 * <p>The span is carved symmetrically: each machine's walls sit one column in from its own edge
+	 * of the paste, both lanes are {@code laneWidth} long, and the finger-tip envelope of each ends
+	 * two clear columns short of the other's trunk wire. Whether a lane spacing of clearance between
+	 * foreign lanes is enough company is this layout's open question, and the layout check is the
+	 * instrument that answers it.</p>
+	 */
+	static PastePlan createInterleavedHalfTickPastePlan(BlockPos origin, Direction forward,
+			List<EventNote> notes, BuildLimits limits, WalkStart start) {
+		// For probes that come in here directly rather than through the mode dispatch.
+		QUIET_SIDES_THIS_LAYOUT = true;
+		Direction.Axis axis = forward.getAxis();
+		Direction depth = forward.getClockWise();
+		int floors = limits.laneFloors();
+		WalkStart head = start == WalkStart.HEAD && limits.startTop()
+			? new WalkStart(0, floors - 1, -1)
+			: start;
+		List<EventNote> even = laneTimes(parity(notes, 0));
+		List<EventNote> odd = laneTimes(parity(notes, 1));
+		BlockPos originA = origin.relative(forward, 1);
+		Layout layoutA = Layout.ultraAlong(floors, coordAlong(axis, originA)).asV2();
+		List<EventGroup> evenEvents = eventGroups(even, layoutA);
+		// Sized to the longest single event of either half, like the side-by-side layout: the two
+		// machines' lanes are the same length so the comb's clearances hold at every row.
+		int longest = Math.max(
+			evenEvents.stream().mapToInt(EventGroup::length).max().orElse(1),
+			eventGroups(odd, layoutA).stream().mapToInt(EventGroup::length).max().orElse(1));
+		// Seven columns of the paste stand outside the two walls' spans: each machine's button
+		// column and turn overhang at its own edge, and the two-column clearances where each
+		// machine's finger tips end short of the other's trunk.
+		int laneWidth = Math.max(longest + 2, limits.laneWidth() - 7);
+		BlockPos trunkB = origin.relative(forward, laneWidth + 5);
+		Layout layoutB = Layout.ultraAlong(floors, coordAlong(axis, trunkB)).asV2();
+		List<EventGroup> oddEvents = eventGroups(odd, layoutB);
+		int spacing = Math.max(
+			laneSpacing(laneReach(evenEvents, 0, evenEvents.size()),
+				laneReach(evenEvents, 0, evenEvents.size())),
+			laneSpacing(laneReach(oddEvents, 0, oddEvents.size()),
+				laneReach(oddEvents, 0, oddEvents.size())));
+		// With an odd floor count the flat turns alternate ends, so a cycle is a finger pair (two
+		// rows a spacing apart) plus the trunk link: the trunk runs three spacings and the partner
+		// sits two in. With an even count every flat turn is a trunk turn, rows stand alone, and the
+		// partner sits exactly between them.
+		int trunk = (floors % 2 == 1 ? 3 : 2) * spacing;
+		int phase = floors % 2 == 1 ? 2 * spacing : spacing;
+		BlockPos originB = trunkB.relative(depth, phase);
+		LaneRoute routeA = combRoute(floors, head, spacing, trunk, false);
+		LaneRoute routeB = combRoute(floors, head, spacing, trunk, true);
+		Set<Integer> tightA = new HashSet<>();
+		Set<Integer> tightB = new HashSet<>();
+		int rewalks = 0;
+		while (true) {
+			PlacementPlan placements = new PlacementPlan();
+			boolean walkingB = false;
+			try {
+				walkRouted(evenEvents, originA, forward, laneWidth, floors, placements, layoutA,
+					routeA, head, tightA);
+				addStarter(placements, forward);
+				int laidByA = placements.laidCells();
+				// A fresh corridor: nothing about machine B's opening follows from machine A's last
+				// cell, least of all how much dust has gone down since a repeater it is not wired to.
+				placements.startFreshRun();
+				walkingB = true;
+				walkRouted(oddEvents, originB, forward.getOpposite(), laneWidth, floors, placements,
+					layoutB, routeB, head, tightB);
+				addStarter(placements, forward.getOpposite(),
+					placements.firstRepeaterAfter(laidByA));
+				return placements.finish(PasteMode.INTERLEAVED_HALF_TICK, origin,
+					coordAlong(axis, origin),
+					coordAlong(axis, origin) + limits.laneWidth() * stepAlong(axis, forward));
+			} catch (FlatTurnHungOutside outside) {
+				// Each machine settles its own tight turns, one per pass, exactly as the single walk
+				// does; a pass replays deterministically up to the turn it settles.
+				Set<Integer> tight = walkingB ? tightB : tightA;
+				if (!tight.add(outside.index())
+						|| ++rewalks > evenEvents.size() + oddEvents.size()) {
+					throw new IllegalStateException("a flat turn armed tight still hung a note past "
+						+ "its corner at " + outside.getMessage());
+				}
+			}
+		}
+	}
+
+	/** The comb as a route: tip turns at the walk's spacing, trunk turns long, mirrored for B. */
+	private static LaneRoute combRoute(int floors, WalkStart start, int spacing, int trunk,
+			boolean mirrored) {
+		LaneRoute base = LaneRoute.serpentine(floors, start.floor(), start.climb());
+		return new LaneRoute() {
+			@Override
+			public int floorOf(int leg) {
+				return base.floorOf(leg);
+			}
+
+			@Override
+			public int climbOf(int leg) {
+				return base.climbOf(leg);
+			}
+
+			@Override
+			public int linkOf(int leg) {
+				// Legs travelling forward end at the finger-tip wall, legs travelling back at the
+				// trunk; a flat turn only ever reads the link for its own end.
+				return leg % 2 == 1 ? trunk : spacing;
+			}
+
+			@Override
+			public boolean mirrored() {
+				return mirrored;
+			}
+		};
+	}
+
+	/**
 	 * One parity's notes with their times put on that lane's own clock.
 	 *
 	 * <p>{@code time / 2} for the same reason the straight version uses it: two events sharing a
@@ -1695,6 +1824,14 @@ public final class SongBuilder {
 	 * seeing on its own terms and not one to be turned into a layout collision here.</p>
 	 */
 	private static void addStarter(PlacementPlan placements, Direction forward) {
+		addStarter(placements, forward, placements.firstRepeater());
+	}
+
+	/**
+	 * @param head the repeater this machine is entered through. The plan's first for a plan of one
+	 *     machine; a plan holding two machines names each machine's own.
+	 */
+	private static void addStarter(PlacementPlan placements, Direction forward, BlockPos head) {
 		if (!V2_BUILDS_ITS_OWN_STARTER) {
 			return;
 		}
@@ -1702,7 +1839,6 @@ public final class SongBuilder {
 		// that catches a note hung past a flat turn's corner compares one axis, so a starter laid at
 		// the head of the machine can look to it like a block hung outside a turn at the other end.
 		placements.stopWatchingTheTurn();
-		BlockPos head = placements.firstRepeater();
 		if (head == null) {
 			return;
 		}
@@ -7318,7 +7454,8 @@ public final class SongBuilder {
 			int laneWidth, int floors, PlacementPlan placements, Layout layout, LaneRoute route,
 			WalkStart start, Set<Integer> tightTurns) {
 		// Where chords grow, and the direction the whole slab creeps once a sweep is done.
-		Direction depth = forward.getClockWise();
+		Direction depth = route.mirrored()
+			? forward.getCounterClockWise() : forward.getClockWise();
 		// The lane axis. Every wall below is a coordinate along it, every distance a difference of
 		// such coordinates, so the same walk lays the same build whichever way forward points.
 		final Direction.Axis axis = forward.getAxis();
@@ -26558,7 +26695,14 @@ public final class SongBuilder {
 		ULTRA_COMPACT_LANE_V2("Ultra compact lane v2"),
 		LANE("Lane"),
 		HALF_TICK_LANE("Half-tick lane", true),
-		ULTRA_HALF_TICK_LANE("Ultra half-tick lane", true);
+		ULTRA_HALF_TICK_LANE("Ultra half-tick lane", true),
+		/**
+		 * Two mirrored ultra machines whose fingers interdigitate, one per half of the game tick.
+		 * The same split as the half-tick lanes; the shape is what changes -- one region, the two
+		 * machines' lanes three apart, so a listener stands inside both halves of the song at
+		 * once instead of beside one of them.
+		 */
+		INTERLEAVED_HALF_TICK("Interleaved half-tick lane", true);
 
 		private final String label;
 		/**
@@ -26988,7 +27132,6 @@ public final class SongBuilder {
 
 		/** Sends these two cells at the head of the queue, the stand first. */
 		void starterAt(BlockPos stand, BlockPos button) {
-			starterCells.clear();
 			starterCells.add(stand.immutable());
 			starterCells.add(button.immutable());
 		}
@@ -27165,6 +27308,25 @@ public final class SongBuilder {
 		 * event's trigger -- nothing stands in front of it, which is the whole of what makes it the
 		 * head. The map is a {@link LinkedHashMap} for exactly this kind of question.</p>
 		 */
+		int laidCells() {
+			return blocks.size();
+		}
+
+		/** The first repeater among the cells laid after the first {@code laid} -- the second
+		 * machine's head, when the count is taken between the two walks. */
+		BlockPos firstRepeaterAfter(int laid) {
+			int index = 0;
+			for (Map.Entry<BlockPos, String> cell : blocks.entrySet()) {
+				if (index++ < laid) {
+					continue;
+				}
+				if (cell.getValue().startsWith("minecraft:repeater")) {
+					return cell.getKey();
+				}
+			}
+			return null;
+		}
+
 		BlockPos firstRepeater() {
 			for (Map.Entry<BlockPos, String> cell : blocks.entrySet()) {
 				if (cell.getValue().startsWith("minecraft:repeater")) {

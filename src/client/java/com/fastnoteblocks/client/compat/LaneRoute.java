@@ -55,6 +55,19 @@ interface LaneRoute {
 	}
 
 	/**
+	 * Whether this machine's slab creeps the other way round -- depth counterclockwise from
+	 * forward instead of clockwise.
+	 *
+	 * <p>The interleaved paste's second machine is the first one MIRRORED, not rotated: its lanes
+	 * run the opposite way but its slab must creep the same way, or the two combs part company a
+	 * link at a time. A reflection flips handedness, and handedness is exactly one fact: which side
+	 * of forward the depth is on.</p>
+	 */
+	default boolean mirrored() {
+		return false;
+	}
+
+	/**
 	 * The serpentine the walk has always laid, as a route.
 	 *
 	 * <p>The transition rule is copied from the walk, not paraphrased: a lane whose
