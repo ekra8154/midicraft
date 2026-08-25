@@ -1337,6 +1337,16 @@ public final class SongBuilder {
 	 * foreign lanes is enough company is this layout's open question, and the layout check is the
 	 * instrument that answers it.</p>
 	 */
+	/**
+	 * Columns a clear pair's tip runs past its base wall, toward the partner's trunk.
+	 *
+	 * <p>A dial, measured on guardian25 doubled at 20 wide over three floors: two columns took
+	 * the corridor from 738 to 690 deep with the library census clean; the third took it to 678
+	 * and put one note on the partner's tick at the seam. So two, until the seam fault is
+	 * understood -- the last column is bought with a wrong note today.</p>
+	 */
+	static int INTERLEAVE_TIP_EXTENSION = 2;
+
 	static PastePlan createInterleavedHalfTickPastePlan(BlockPos origin, Direction forward,
 			List<EventNote> notes, BuildLimits limits, WalkStart start) {
 		// For probes that come in here directly rather than through the mode dispatch.
@@ -1385,9 +1395,25 @@ public final class SongBuilder {
 		// partner sits exactly between them.
 		int trunk = (floors % 2 == 1 ? 3 : 2) * spacing;
 		int phase = floors % 2 == 1 ? 2 * spacing : spacing;
-		BlockPos originB = trunkB.relative(depth, phase);
-		LaneRoute routeA = combRoute(floors, head, spacing, trunk, false);
-		LaneRoute routeB = combRoute(floors, head, spacing, trunk, true);
+		// A top-started walk grows DOWNWARD from its origin -- both starts lay their first lane
+		// at the origin's own height -- so machine B's origin stands a building's height up, and
+		// its floors come out level with machine A's. Without this the two machines shared only
+		// one plane, and it was the plane both their trunk runs lived on.
+		BlockPos originB = trunkB.relative(depth, phase)
+			.above((floors - 1) * CUBE_FLOOR_HEIGHT);
+		// The stagger: machine A starts at the bottom, so its long trunk runs lie on the bottom
+		// floor; machine B starts at the top and lays its own on the top floor. Each machine's
+		// clear pairs then extend toward the other's trunk, over and under the other's turns --
+		// the only thing of the partner that crosses this machine's rows out there is the
+		// partner's trunk runs, and the stagger pins those to one floor each. Three of the four
+		// clearance columns are reclaimed; the fourth stays so an extended turn pokes only to
+		// the partner's wall column. Odd floor counts only: an even zigzag lays trunk runs on
+		// both its extreme floors, and there is no clear floor to extend into.
+		int extension = floors >= 3 && floors % 2 == 1 ? INTERLEAVE_TIP_EXTENSION : 0;
+		WalkStart headA = start == WalkStart.HEAD ? new WalkStart(0, 0, 1) : start;
+		WalkStart headB = start == WalkStart.HEAD ? new WalkStart(0, floors - 1, -1) : start;
+		LaneRoute routeA = combRoute(floors, headA, spacing, trunk, false, extension, floors - 1);
+		LaneRoute routeB = combRoute(floors, headB, spacing, trunk, true, extension, 0);
 		Set<Integer> tightA = new HashSet<>();
 		Set<Integer> tightB = new HashSet<>();
 		int rewalks = 0;
@@ -1396,7 +1422,7 @@ public final class SongBuilder {
 			boolean walkingB = false;
 			try {
 				walkRouted(evenEvents, originA, forward, laneWidth, floors, placements, layoutA,
-					routeA, head, tightA);
+					routeA, headA, tightA);
 				addStarter(placements, forward);
 				int laidByA = placements.laidCells();
 				// A fresh corridor: nothing about machine B's opening follows from machine A's last
@@ -1404,7 +1430,7 @@ public final class SongBuilder {
 				placements.startFreshRun();
 				walkingB = true;
 				walkRouted(oddEvents, originB, forward.getOpposite(), laneWidth, floors, placements,
-					layoutB, routeB, head, tightB);
+					layoutB, routeB, headB, tightB);
 				addStarter(placements, forward.getOpposite(),
 					placements.firstRepeaterAfter(laidByA));
 				return placements.finish(PasteMode.INTERLEAVED_HALF_TICK, origin,
@@ -1423,9 +1449,16 @@ public final class SongBuilder {
 		}
 	}
 
-	/** The comb as a route: tip turns at the walk's spacing, trunk turns long, mirrored for B. */
+	/**
+	 * The comb as a route: tip turns at the walk's spacing, trunk turns long, mirrored for B.
+	 *
+	 * @param extension columns a clear pair's tip runs past the base far wall, toward the
+	 *     partner's trunk
+	 * @param avoidFloor the floor the partner's long trunk runs cross, which no extended pair
+	 *     may touch -- the partner's start floor, since that is where its trunk flats lie
+	 */
 	private static LaneRoute combRoute(int floors, WalkStart start, int spacing, int trunk,
-			boolean mirrored) {
+			boolean mirrored, int extension, int avoidFloor) {
 		LaneRoute base = LaneRoute.serpentine(floors, start.floor(), start.climb());
 		return new LaneRoute() {
 			@Override
@@ -1443,6 +1476,17 @@ public final class SongBuilder {
 				// Legs travelling forward end at the finger-tip wall, legs travelling back at the
 				// trunk; a flat turn only ever reads the link for its own end.
 				return leg % 2 == 1 ? trunk : spacing;
+			}
+
+			@Override
+			public int tipExtension(int leg) {
+				if (extension == 0) {
+					return 0;
+				}
+				// Both legs of a pair share the tip; the pair is named by its even leg.
+				int pair = leg - Math.floorMod(leg, 2);
+				return base.floorOf(pair) == avoidFloor || base.floorOf(pair + 1) == avoidFloor
+					? 0 : extension;
 			}
 
 			@Override
@@ -2208,6 +2252,11 @@ public final class SongBuilder {
 	/** A direction's step projected onto the lane axis: {@code getStepX()} generalised. */
 	private static int stepAlong(Direction.Axis axis, Direction direction) {
 		return axis == Direction.Axis.X ? direction.getStepX() : direction.getStepZ();
+	}
+
+	/** The tip wall of a leg's pair: the base far wall plus whatever the route extends it by. */
+	private static int tipWall(LaneRoute route, int leg, int farWall, int step) {
+		return farWall + route.tipExtension(leg) * step;
 	}
 
 	/** The link of the flat turn ending a leg: the route's word, or the walk's own spacing. */
@@ -7519,6 +7568,14 @@ public final class SongBuilder {
 		// v2 only, and deliberately: the raise these columns are kept clear for is the
 		// dropped-repeater descent's, which no other walk builds. See {@link #standsUpAlone}.
 		placements.wallColumns(nearWall, farWall, axis);
+		int tipStep = stepAlong(axis, forward);
+		int walkTipExtension = 0;
+		for (int probeLeg = 0; probeLeg <= 2 * floors + 2; probeLeg++) {
+			walkTipExtension = Math.max(walkTipExtension, route.tipExtension(probeLeg));
+		}
+		if (walkTipExtension > 0) {
+			placements.alsoAWall(farWall + walkTipExtension * tipStep);
+		}
 		placements.laneDepth(depth);
 		int currentTime = 0;
 		// Which floor the walk believes it is on and which way it is going, which together decide
@@ -7568,7 +7625,8 @@ public final class SongBuilder {
 		// the right distance from a wall or in a bending lane, never both.
 		if (start.turning() && layout.ultra()) {
 			lane = armTurn(placements, lane, depth,
-				(farWall - coordAlong(axis, lane.pos())) * stepAlong(axis, forward), flatLink(route, 0, slabStep));
+				(tipWall(route, 0, farWall, tipStep) - coordAlong(axis, lane.pos()))
+					* stepAlong(axis, forward), flatLink(route, 0, slabStep));
 			turning = true;
 		}
 		// Pad this lane has to lay before it reaches its last chord, settled when the lane starts.
@@ -7691,7 +7749,8 @@ public final class SongBuilder {
 			int turnOffBusCells = centreFeedsTheClimb && !endsOnBus(lastStyle, lastBusCells)
 				? offBus + 1 : offBus;
 			// The column this lane's turn stands in: the wall, or one past it for a climb.
-			int wall = laneWall(axis, nearWall, farWall, forward, lane.travel(), floor, climb, floors);
+			int wall = laneWall(axis, nearWall, tipWall(route, leg, farWall, tipStep), forward,
+				lane.travel(), floor, climb, floors);
 			int stepOffAhead = turn.stepOff();
 			int splitCells = turn.splitCells();
 			if (replan) {
@@ -7716,7 +7775,7 @@ public final class SongBuilder {
 				// would rather close differently -- and the lookahead pair above it.
 				booked = V2_BOOKS_PADS && above >= 0 && above < floors
 					? planLane(events, index, coordAlong(axis, lane.pos()), stepAlong(axis, lane.travel()), wall,
-						lane.travel() == forward ? nearWall : farWall,
+						lane.travel() == forward ? nearWall : tipWall(route, leg, farWall, tipStep),
 						currentTime, tipSignal,
 						PLAN_ASKS_THE_BLOCKS_BEHIND
 							? columnBehindBusy && !backPairIsFree(placements, lane, event.time())
@@ -8086,7 +8145,8 @@ public final class SongBuilder {
 					&& railOpens(axis, events, index + 1,
 						Lane.straight(atAlong(axis, lane.pos(), wall)
 							.relative(seedNext, 2).above(CUBE_FLOOR_HEIGHT), seedNext, depth),
-						laneWall(axis, nearWall, farWall, forward, seedNext, above, climb, floors),
+						laneWall(axis, nearWall, tipWall(route, leg + 1, farWall, tipStep), forward,
+							seedNext, above, climb, floors),
 						layout, false,
 						turnReserve(events.get(index + 1),
 							turnCost(above, climb, floors, flatLink(route, leg + 1, slabStep)).offBus(), layout),
@@ -8170,7 +8230,8 @@ public final class SongBuilder {
 					.below(CUBE_FLOOR_HEIGHT).relative(below), below, depth);
 				boolean holds = railHolds(event, true);
 				boolean opens = railOpens(axis, events, index, willRun,
-					below == forward ? farWall : nearWall, layout, false,
+					below == forward ? tipWall(route, leg + 1, farWall, tipStep) : nearWall,
+					layout, false,
 					turnReserve(event, turnCost(above, climb, floors, flatLink(route, leg + 1, slabStep)).offBus(), layout),
 					0, event.time(), booked);
 				// Counted the way the climb's are: each answer a different piece of work. The chord
@@ -8287,7 +8348,8 @@ public final class SongBuilder {
 					|| (climb <= 0 || FOLDBACK_PREFERRED_FOR_CLIMBS)
 						&& room < FOLDBACK_PREFERRED_BELOW_ROOM)) {
 				FoldbackPick first = foldbackPick(axis, placements, lane, event, room, delayColumns,
-					nearWall, farWall, forward, above, climb, floors, "AtTheWall");
+					nearWall, tipWall(route, leg, farWall, tipStep), forward, above, climb, floors,
+					"AtTheWall");
 				fold = first.fold();
 				rise = first.rise();
 			}
@@ -8763,7 +8825,8 @@ public final class SongBuilder {
 			if (FOLDBACK_LAST && !couldSplit && foldbackOffered && wantsTurn && !stackedFitsInstead
 					&& fold == null && rise == null) {
 				FoldbackPick fallback = foldbackPick(axis, placements, lane, event, room, delayColumns,
-					nearWall, farWall, forward, above, climb, floors, "AsTheLastResort");
+					nearWall, tipWall(route, leg, farWall, tipStep), forward, above, climb, floors,
+					"AsTheLastResort");
 				fold = fallback.fold();
 				rise = fallback.rise();
 				couldSplit = fallback.any();
@@ -9033,7 +9096,8 @@ public final class SongBuilder {
 				// any journal. See {@link #FOLD_CATCHES_A_DROPPED_NOTE}.
 				FoldbackPick foldInReserve = FOLD_CATCHES_A_DROPPED_NOTE && layout.v2() && fold == null
 						&& rise == null && nought == null && foldbackOffered && wantsTurn
-					? foldbackPick(axis, placements, lane, event, room, delayColumns, nearWall, farWall,
+					? foldbackPick(axis, placements, lane, event, room, delayColumns, nearWall,
+						tipWall(route, leg, farWall, tipStep),
 						forward, above, climb, floors, "InReserve")
 					: new FoldbackPick(null, null);
 				boolean foldCatches = foldInReserve.any();
@@ -9617,9 +9681,10 @@ public final class SongBuilder {
 					TurnCost next = turnCost(floor, climb, floors, flatLink(route, leg, slabStep));
 					booked = V2_BOOKS_PADS
 						? planLane(events, index, coordAlong(axis, lane.pos()), stepAlong(axis, lane.travel()),
-							laneWall(axis, nearWall, farWall, forward, lane.travel(), floor, climb,
+							laneWall(axis, nearWall, tipWall(route, leg, farWall, tipStep), forward,
+							lane.travel(), floor, climb,
 								floors),
-							lane.travel() == forward ? nearWall : farWall,
+							lane.travel() == forward ? nearWall : tipWall(route, leg, farWall, tipStep),
 							currentTime + spentPadding,
 							tipSignal, columnBehindBusy, next.cells(), next.offBus(), next.stepOff(),
 							next.splitCells(), climb > 0, layout,
@@ -9770,7 +9835,8 @@ public final class SongBuilder {
 							&& railHolds(event, false)
 							&& railFloorTakes(placements, willRun, event)
 							&& railOpens(axis, events, index, willRun,
-								laneWall(axis, nearWall, farWall, forward, next, above, climb, floors),
+								laneWall(axis, nearWall, tipWall(route, leg + 1, farWall, tipStep), forward,
+								next, above, climb, floors),
 								layout, false,
 								turnReserve(event,
 									turnCost(above, climb, floors, flatLink(route, leg + 1, slabStep)).offBus(), layout),
@@ -9879,9 +9945,10 @@ public final class SongBuilder {
 						// by that much. Otherwise it counts columns of delay the walk will not place.
 						booked = V2_BOOKS_PADS
 							? planLane(events, index, coordAlong(axis, lane.pos()), stepAlong(axis, lane.travel()),
-								laneWall(axis, nearWall, farWall, forward, lane.travel(), floor, climb,
+								laneWall(axis, nearWall, tipWall(route, leg, farWall, tipStep), forward,
+							lane.travel(), floor, climb,
 									floors),
-								lane.travel() == forward ? nearWall : farWall,
+								lane.travel() == forward ? nearWall : tipWall(route, leg, farWall, tipStep),
 								currentTime + spentPadding,
 								tipSignal, columnBehindBusy, next.cells(), next.offBus(), next.stepOff(),
 								next.splitCells(), climb > 0, layout,
@@ -10216,7 +10283,8 @@ public final class SongBuilder {
 				}
 				Direction travel = lane.travel();
 				BlockPos cursor = lane.pos();
-				int laneWall = laneWall(axis, nearWall, farWall, forward, travel, floor, climb, floors);
+				int laneWall = laneWall(axis, nearWall, tipWall(route, leg, farWall, tipStep), forward,
+					travel, floor, climb, floors);
 				// Where this event really ends and what it really leaves. Asked of a second piece of
 				// arithmetic before, and that one measured every chord in the shape it was sorted into
 				// rather than the shape it gets built in -- so a stacked module the walk was about to
@@ -10341,7 +10409,8 @@ public final class SongBuilder {
 			// -- which is why a run used to take several chords to come back after a floor change,
 			// when it can open on the very first one. Only a flat turn is a reason to wait, and that
 			// is the bending test: its sideways run lies across the way both rails go.
-			int laneWall = laneWall(axis, nearWall, farWall, forward, lane.travel(), floor, climb, floors);
+			int laneWall = laneWall(axis, nearWall, tipWall(route, leg, farWall, tipStep), forward,
+				lane.travel(), floor, climb, floors);
 			// A run already going, only. Opening one mid-turn is a different question and railOpens
 			// still refuses it; what this allows is the run a lane already has reaching the corner it
 			// used to be cut off a column short of.
@@ -10923,7 +10992,8 @@ public final class SongBuilder {
 			// words -- {@code laneWall} -- because the answer from before the turn is about a lane that
 			// no longer exists. This is the other half of that.
 			int wallAhead = ROOM_AHEAD_ASKS_THE_WALL_IT_FACES
-				? laneWall(axis, nearWall, farWall, forward, opening.travel(), floor, climb, floors)
+				? laneWall(axis, nearWall, tipWall(route, leg, farWall, tipStep), forward,
+					opening.travel(), floor, climb, floors)
 				: wall;
 			int ahead = turning ? Integer.MAX_VALUE
 				: (wallAhead - coordAlong(axis, opening.pos())) * stepAlong(axis, opening.travel());
@@ -28086,6 +28156,12 @@ public final class SongBuilder {
 		private int farWallColumn = Integer.MIN_VALUE;
 
 		private Direction.Axis wallAxis = Direction.Axis.X;
+		private final Set<Integer> extraWallColumns = new java.util.HashSet<>();
+
+		/** A turning column outside the two walls -- an extended tip, in the interleaved comb. */
+		void alsoAWall(int column) {
+			extraWallColumns.add(column);
+		}
 
 		/**
 		 * The direction the slab creeps -- the side of a lane the walk has not built yet. The
@@ -28117,7 +28193,8 @@ public final class SongBuilder {
 		/** Whether this cell stands in one of the columns a lane turns in. */
 		boolean atAWall(BlockPos cell) {
 			return coordAlong(wallAxis, cell) == nearWallColumn
-				|| coordAlong(wallAxis, cell) == farWallColumn;
+				|| coordAlong(wallAxis, cell) == farWallColumn
+				|| extraWallColumns.contains(coordAlong(wallAxis, cell));
 		}
 
 		/**
@@ -28125,9 +28202,15 @@ public final class SongBuilder {
 		 * said where its walls are, which is the answer that makes every rule asking this stand down.
 		 */
 		boolean insideTheWalls(BlockPos cell) {
+			int nearest = nearWallColumn;
+			int farthest = farWallColumn;
+			for (int extra : extraWallColumns) {
+				nearest = Math.min(nearest, extra);
+				farthest = Math.max(farthest, extra);
+			}
 			return nearWallColumn != Integer.MIN_VALUE
-				&& coordAlong(wallAxis, cell) >= nearWallColumn
-				&& coordAlong(wallAxis, cell) <= farWallColumn;
+				&& coordAlong(wallAxis, cell) >= nearest
+				&& coordAlong(wallAxis, cell) <= farthest;
 		}
 
 		/**

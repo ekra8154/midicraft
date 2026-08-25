@@ -74,6 +74,7 @@ class InterleavedCensusProbe {
 		int totalMissing = 0;
 		int totalCollisions = 0;
 		int threw = 0;
+		long totalDepth = 0;
 		List<Path> files;
 		try (Stream<Path> listed = Files.list(SONGS)) {
 			files = listed.filter(file -> file.toString().endsWith(".json")).sorted().toList();
@@ -114,6 +115,7 @@ class InterleavedCensusProbe {
 					int wrong = plan.wrongNotes();
 					int missing = plan.missingNotes();
 					int clashes = plan.collisions().size();
+					totalDepth += plan.spanZ();
 					totalWrong += wrong;
 					totalMissing += missing;
 					totalCollisions += clashes;
@@ -142,6 +144,6 @@ class InterleavedCensusProbe {
 		System.out.println("INTERLEAVED CENSUS: " + builds + " builds (" + dualBuilds
 			+ " dual, " + (builds - dualBuilds) + " solo), " + clean + " clean, "
 			+ threw + " threw, wrong=" + totalWrong + " missing=" + totalMissing
-			+ " collisions=" + totalCollisions);
+			+ " collisions=" + totalCollisions + " corridor=" + totalDepth);
 	}
 }

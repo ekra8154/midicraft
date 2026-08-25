@@ -55,6 +55,21 @@ interface LaneRoute {
 	}
 
 	/**
+	 * Columns this leg's tip reaches past the machine's base far wall. Nought for a lane that
+	 * stops at the wall, which is every lane of a plain serpentine.
+	 *
+	 * <p>The interleaved layout's reclaimed ground: the only thing of the partner machine that
+	 * crosses this machine's depth rows near the partner's trunk is the partner's long
+	 * perpendicular runs, and those lie only on the floors that host its flat turns. On every
+	 * other floor the columns are empty at this machine's rows, and a lane may run through them --
+	 * over and under the neighbour's turns. Both legs of a finger pair share one tip, so both
+	 * answer with the same number.</p>
+	 */
+	default int tipExtension(int leg) {
+		return 0;
+	}
+
+	/**
 	 * Whether this machine's slab creeps the other way round -- depth counterclockwise from
 	 * forward instead of clockwise.
 	 *
