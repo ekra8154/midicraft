@@ -43,12 +43,34 @@ class FlankParityTest {
 		Bootstrap.bootStrap();
 	}
 
+	/**
+	 * The values as this class found them, put back after every method -- not the values the class
+	 * believes are the defaults. Two of the four hard-coded ones had rotted: the file ships
+	 * {@code FRONT_HEAD_WHEN_BEHIND_BUSY} and {@code REPLAN_ON_DRIFT} false, both measured off
+	 * after this restore was written, so every class alphabetically after this one ran with two
+	 * non-default flags. That is what let {@code doesNotDisturbTheFirstLayout} pass in company
+	 * while failing alone: the leaked flags happened to push the guard song's v1 build back to its
+	 * historical 88, cancelling the disturbance the guard existed to catch.</p>
+	 */
+	private static boolean flankAwareWas;
+	private static boolean relocatesWas;
+	private static boolean frontHeadWas;
+	private static boolean replanWas;
+
+	@BeforeAll
+	static void rememberTheFlags() {
+		flankAwareWas = SongBuilder.FLANK_AWARE_PARITY;
+		relocatesWas = SongBuilder.RELOCATES_CONTESTED_NOTE;
+		frontHeadWas = SongBuilder.FRONT_HEAD_WHEN_BEHIND_BUSY;
+		replanWas = SongBuilder.REPLAN_ON_DRIFT;
+	}
+
 	@AfterEach
 	void restore() {
-		SongBuilder.FLANK_AWARE_PARITY = true;
-		SongBuilder.RELOCATES_CONTESTED_NOTE = true;
-		SongBuilder.FRONT_HEAD_WHEN_BEHIND_BUSY = true;
-		SongBuilder.REPLAN_ON_DRIFT = true;
+		SongBuilder.FLANK_AWARE_PARITY = flankAwareWas;
+		SongBuilder.RELOCATES_CONTESTED_NOTE = relocatesWas;
+		SongBuilder.FRONT_HEAD_WHEN_BEHIND_BUSY = frontHeadWas;
+		SongBuilder.REPLAN_ON_DRIFT = replanWas;
 	}
 
 	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
