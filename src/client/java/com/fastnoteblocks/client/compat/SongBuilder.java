@@ -507,6 +507,14 @@ public final class SongBuilder {
 		// The sign last of all, after the marking pass has finished rewriting blocks. It is the one
 		// command in a build that is not a block of the machine, and the one command with spaces in
 		// it, which every pass that reads the list back by splitting on those would choke on.
+		// The quiet-sides family is scoped to the one layout it was measured on, and the scope is
+		// set here because the decisions it changes are made in pure functions -- ultraSlots, the
+		// split pickers -- that no walk parameter reaches. Left unscoped it disturbed the first
+		// layout, which doesNotDisturbTheFirstLayout caught as the all-25 guard song going from its
+		// 88 breach blocks to nought: every side of an all-harp module is quiet, so v1's parity
+		// decisions moved. Set both ways on every entry rather than defaulted, and again by
+		// createV2PastePlan for the probes that call the v2 walk directly.
+		QUIET_SIDES_THIS_LAYOUT = mode == PasteMode.ULTRA_COMPACT_LANE_V2;
 		return withTitleSign(withUnreachedMarked(switch (mode) {
 			case COMPACT_CUBE -> createCubePastePlan(origin, forward, notes, limits.maxFloors());
 			case COMPACT -> createCompactPastePlan(origin, forward, notes);
@@ -1712,6 +1720,8 @@ public final class SongBuilder {
 
 	static PastePlan createV2PastePlan(BlockPos origin, Direction forward, List<EventNote> notes,
 			int width, int floors, WalkStart start) {
+		// For the probes that come in here directly rather than through the mode dispatch.
+		QUIET_SIDES_THIS_LAYOUT = true;
 		// Without the lookahead, and measured rather than assumed. It is read only by planLane, and
 		// the first layout builds both ways and keeps the winner -- so turning it on here looked like
 		// the obvious fix for Guardian. It is not: with it on, the all-25 song breaks too, a lane
@@ -2597,6 +2607,11 @@ public final class SongBuilder {
 						trigger.triggerDelay(), headed, event.time());
 					far = headed.farTail();
 					placements.padded("planStackedSplit" + (climb > 0 ? "Climb" : "Descent"));
+					if (headed.farTail().isEmpty()) {
+						placements.padded("splitCompletedOnTheStaircase");
+					} else if (headed.farTail().size() == 1) {
+						placements.padded("splitLeftOneNoteOver");
+					}
 					if (headed.nearTail().isEmpty()) {
 						placements.padded("planStackedSplitHeadOnly");
 						HEAD_ONLY_AT = cursor;
@@ -5162,6 +5177,11 @@ public final class SongBuilder {
 						headDelay, headed, event.time());
 					far = headed.farTail();
 					placements.padded("planStackedSplit" + (climb > 0 ? "Climb" : "Descent"));
+					if (headed.farTail().isEmpty()) {
+						placements.padded("splitCompletedOnTheStaircase");
+					} else if (headed.farTail().size() == 1) {
+						placements.padded("splitLeftOneNoteOver");
+					}
 					if (headed.nearTail().isEmpty()) {
 						placements.padded("planStackedSplitHeadOnly");
 						HEAD_ONLY_AT = cursor;
@@ -5500,6 +5520,12 @@ public final class SongBuilder {
 				if (!far.isEmpty()) {
 					cursor = addCarriedEventModule(placements, cursor, travel, depth, far,
 						splitStepOff);
+				} else if (splitStepOff > 0) {
+					// The far half used to lay these on its way in. The columns are reserved for the
+					// spiral in every corridor whether or not a note follows, so a cut that completed
+					// on the staircase still steps past them -- dust, exactly as the far half laid it.
+					cursor = emitDust(placements, Lane.straight(cursor, travel, depth),
+						splitStepOff, false, "farHalfStepOff").pos();
 				}
 				if (foldCatches) {
 					if (placements.troubleCount() > troublesBeforeTheCut) {
@@ -17798,6 +17824,17 @@ public final class SongBuilder {
 	 */
 	static boolean STACKED_SIDES_MAY_GO_QUIET = true;
 
+	/**
+	 * Whether the build being planned is one the quiet-sides family applies to at all.
+	 *
+	 * <p>Not a preference -- a scope. Set by {@link #createPastePlan} from the mode (and by
+	 * {@link #createV2PastePlan} for direct callers), because the side pick happens in pure
+	 * functions shared by every walk and nothing else distinguishes them down there. The first
+	 * layout and the half-tick pair keep conducting sides until they are measured; the half-tick
+	 * pair is unmeasured, not refused.</p>
+	 */
+	static boolean QUIET_SIDES_THIS_LAYOUT = true;
+
 	/** Sides laid as the note's own block rather than as a relay, and the ones that had to relay. */
 	static int QUIET_STACKED_SIDES = 0;
 	static int RELAYING_STACKED_SIDES = 0;
@@ -18128,6 +18165,28 @@ public final class SongBuilder {
 	 * is a recess, counted as one where the split is built.</p>
 	 */
 	static boolean CUTS_A_CHORD_THAT_FITS = true;
+
+	/**
+	 * v2: a cut whose whole tail fits before the wall carries no far half at all.
+	 *
+	 * <p>v2 only in effect: the sizing is gated on the {@code centreFeed} argument, which only
+	 * v2's walk passes -- the first layout stays exactly as it was, which
+	 * {@code doesNotDisturbTheFirstLayout} checks by the numbers.</p>
+	 *
+	 * <p>{@link #CUTS_A_CHORD_THAT_FITS} sent exactly one note over the staircase, deliberately --
+	 * the cut exists to spend a repeater so the climb has wire, and refusing it laid the chord whole
+	 * and breached. But the note it sent was ballast: the run is priced per half, so the whole tail
+	 * before the staircase is never more wire than a tail split n-1 and 1, and the chord that
+	 * follows opens on the new floor immediately instead of behind a one-note bus and its step-off.
+	 * In-game reading found the one-note tails "absurd" in number on jackpot, on every turn family
+	 * at once. The closing-dress design deferred on 2026-08-20 is this, revived.</p>
+	 *
+	 * <p>The walk keeps two obligations the far half used to meet: a descent's step-off dust -- the
+	 * reserved columns the spiral climbs back through -- is laid by the walk itself where no far
+	 * half is left to lay it, and the landing stays live for the next chord's repeater exactly as
+	 * it does behind a foldback, which has returned an empty far list since it was written.</p>
+	 */
+	static boolean CUT_COMPLETES_ON_THE_STAIRCASE = true;
 
 	/**
 	 * Whether a closing pad holds the coming wait, instead of the next floor spending columns on it.
@@ -18557,11 +18616,32 @@ public final class SongBuilder {
 		// check below still holds to fifteen -- and the far half opens past the climb with a fresh
 		// fifteen behind it. That is the difference between a lane that ends on its wall and a lane
 		// that cannot turn at all.
+		boolean wholeTail = false;
 		if (nearNotes >= tail.size()) {
 			if (!CUTS_A_CHORD_THAT_FITS || tail.size() < 2) {
 				LAST_CUT_REFUSAL = "NothingToCarryOver";
 				return null;
 			}
+			// The whole tail before the staircase and nothing after it, so the next chord opens at
+			// the top the moment the wire arrives. The far half of one was never load-bearing: the
+			// run this shape spends is (nearTail+1)/2 + (farTail+1)/2 + splitCells, so carrying the
+			// whole tail is the same wire on an odd tail and a cell less on an even one -- any cut
+			// the far-of-one passed, this passes. The two-notes-over disaster does not apply: that
+			// was the far half's first cell sharing something unmodelled with the staircase's last
+			// rung, and here there is no far first cell. What a far half of nought forgoes is the
+			// far half's own fresh cells on the new floor; what it buys is the next chord starting
+			// there instead. In-game reading asked for it by name: an absurd number of ascents
+			// leaving exactly one note on the next floor. See {@link #CUT_COMPLETES_ON_THE_STAIRCASE};
+			// the walk lays the descent's step-off dust itself where no far half is left to.
+			//
+			// Behind {@code centreFeed} for the same reason the centre-fed heads are: that flag is
+			// true only from v2's walk, and false from the first layout and from the planner helpers
+			// that close lanes by arithmetic. Ungated, the first layout's target song went from its
+			// 88 breach blocks to nought -- an improvement, and still a disturbance, which
+			// doesNotDisturbTheFirstLayout exists to refuse. The helpers keep pricing the far-of-one,
+			// which is never LESS wire than the whole tail, so every close the plan approves the walk
+			// can build.
+			wholeTail = CUT_COMPLETES_ON_THE_STAIRCASE && centreFeed;
 			// One note over the staircase, and not two.
 			//
 			// Two is arithmetically better and does not work. A tail of twenty divided 19/1 leaves
@@ -18575,7 +18655,9 @@ public final class SongBuilder {
 			// the change looked like a fix. Whatever the far half's first cell shares with the
 			// staircase's last rung, it is not what {@code runCells} models, and until that is read off
 			// the blocks a second note over the staircase is not safe to lay.
-			nearNotes = tail.size() - 1;
+			if (!wholeTail) {
+				nearNotes = tail.size() - 1;
+			}
 		}
 		// The stair extras: a descent's own rungs are powered stone, and powered stone sounds
 		// whatever hangs beside it -- so the cell beside the first rung and the cell beside the
@@ -18592,7 +18674,7 @@ public final class SongBuilder {
 		// note has nothing for the bus rule to swap with once it is down there. The choice has to be
 		// made here, where there are still two halves to choose between. See
 		// {@link #FAR_HALF_LEADS_WITH_A_NOTE_THAT_STANDS}.
-		if (FAR_HALF_LEADS_WITH_A_NOTE_THAT_STANDS && nearNotes < tail.size()
+		if (FAR_HALF_LEADS_WITH_A_NOTE_THAT_STANDS && centreFeed && nearNotes < tail.size()
 				&& FALLING_INSTRUMENT_BLOCKS.contains(tail.get(nearNotes).instrumentBlock())) {
 			for (int look = nearNotes - 1; look >= 0; look--) {
 				if (!FALLING_INSTRUMENT_BLOCKS.contains(tail.get(look).instrumentBlock())) {
@@ -18614,11 +18696,13 @@ public final class SongBuilder {
 		// which the hanging harp claims and guards. See {@link #ASCENT_RUNG_EXTRAS}.
 		EventNote climbExtra = null;
 		if (STAIR_EXTRAS && ASCENT_RUNG_EXTRAS && climbing && centreFeed && climbExtraFree) {
-			climbExtra = takeFromTail(farPart, note -> note.effect() == null && isHarpNote(note));
+			climbExtra = takeFromTail(farPart, note -> note.effect() == null && isHarpNote(note),
+				CUT_COMPLETES_ON_THE_STAIRCASE);
 		}
 		if (STAIR_EXTRAS && !climbing && centreFeed) {
 			if (bottomExtraFree) {
-				bottomExtra = takeFromTail(farPart, note -> note.effect() == null);
+				bottomExtra = takeFromTail(farPart, note -> note.effect() == null,
+					CUT_COMPLETES_ON_THE_STAIRCASE);
 			}
 			// Never for a shed head: it hands over on the staircase's own first rung, so its
 			// remaining front flank already stands in the top extra's cell -- the shed cut's top
@@ -18626,13 +18710,15 @@ public final class SongBuilder {
 			// coming home from the builder's re-ask.
 			if (topExtraFree && !shed) {
 				topExtra = takeFromTail(farPart, note -> note.effect() == null
-					&& !FALLING_INSTRUMENT_BLOCKS.contains(note.instrumentBlock()));
+					&& !FALLING_INSTRUMENT_BLOCKS.contains(note.instrumentBlock()),
+					CUT_COMPLETES_ON_THE_STAIRCASE);
 			}
 			// The border cell level with the first rung, harp-only -- an instrument block below
 			// it would sever the descent line. See {@link #STAIR_WALL_EXTRAS}.
 			if (wallExtraFree) {
 				wallExtra = takeFromTail(farPart,
-					note -> note.effect() == null && isHarpNote(note));
+					note -> note.effect() == null && isHarpNote(note),
+					CUT_COMPLETES_ON_THE_STAIRCASE);
 			}
 		}
 		// The transition cell drops out of the run as well as out of the columns when the head hands
@@ -18774,7 +18860,7 @@ public final class SongBuilder {
 				centreSpent = true;
 			}
 			if (harp == null) {
-				harp = takeFromTail(tail, SongBuilder::isHarpNote);
+				harp = takeFromTail(tail, SongBuilder::isHarpNote, CUT_COMPLETES_ON_THE_STAIRCASE);
 				if (harp != null) {
 					head.add(harp);
 				}
@@ -18786,7 +18872,8 @@ public final class SongBuilder {
 			if (harp == null && shape == CentreFeed.FLANKED_RUNGS && slot >= 2) {
 				// The second stone rung's flanks stand over nothing but their own instrument
 				// block and open air, so when the harps run out they take any instrument at all.
-				harp = takeFromTail(tail, note -> note.effect() == null);
+				harp = takeFromTail(tail, note -> note.effect() == null,
+					CUT_COMPLETES_ON_THE_STAIRCASE);
 				if (harp != null) {
 					head.add(harp);
 				}
@@ -18803,14 +18890,16 @@ public final class SongBuilder {
 		EventNote toFront = null;
 		if (shape != CentreFeed.CORKSCREW) {
 			toFront = takeFromTail(tail, note -> note.effect() == null && !isHarpNote(note)
-				&& !FALLING_INSTRUMENT_BLOCKS.contains(note.instrumentBlock()));
+				&& !FALLING_INSTRUMENT_BLOCKS.contains(note.instrumentBlock()),
+				CUT_COMPLETES_ON_THE_STAIRCASE);
 			if (toFront == null && centreNote != null && !centreSpent) {
 				toFront = centreNote;
 				centreSpent = true;
 			}
 			if (toFront == null) {
 				toFront = takeFromTail(tail, note -> note.effect() == null
-					&& !FALLING_INSTRUMENT_BLOCKS.contains(note.instrumentBlock()));
+					&& !FALLING_INSTRUMENT_BLOCKS.contains(note.instrumentBlock()),
+					CUT_COMPLETES_ON_THE_STAIRCASE);
 			}
 			if (toFront != null && !head.contains(toFront)) {
 				head.add(toFront);
@@ -18821,7 +18910,9 @@ public final class SongBuilder {
 			head.remove(centreNote);
 			tail.add(0, centreNote);
 		}
-		if (tail.isEmpty()) {
+		if (tail.isEmpty() && !CUT_COMPLETES_ON_THE_STAIRCASE) {
+			// The staircase's own slots held everything. The far half is empty, the walk skips the
+			// carried module, and the next chord opens where the climb arrives.
 			LAST_CUT_REFUSAL = "NothingToCarryOver";
 			return null;
 		}
@@ -18869,7 +18960,8 @@ public final class SongBuilder {
 				EventNote swap = takeFromTail(tail, candidate -> candidate.effect() == null
 					&& !isHarpNote(candidate)
 					&& (side ? conductsSideways(candidate)
-						: !FALLING_INSTRUMENT_BLOCKS.contains(candidate.instrumentBlock())));
+						: !FALLING_INSTRUMENT_BLOCKS.contains(candidate.instrumentBlock())),
+					CUT_COMPLETES_ON_THE_STAIRCASE);
 				if (swap != null) {
 					slotList.set(slot, swap);
 					head.add(swap);
@@ -18883,7 +18975,20 @@ public final class SongBuilder {
 	/** Pulls the first tail note the test accepts, or null. Never the last -- a cut has to cross. */
 	private static EventNote takeFromTail(List<EventNote> tail,
 			java.util.function.Predicate<EventNote> suits) {
-		for (int index = 0; tail.size() > 1 && index < tail.size(); index++) {
+		return takeFromTail(tail, suits, false);
+	}
+
+	/**
+	 * @param mayEmpty whether the last note may be taken too. "A cut has to cross" was law while a
+	 *     far half of nought was illegal, and it is what left one note on the next floor of every
+	 *     staircase whose own slots could have held it -- the extras, the rungs and the centre-fed
+	 *     assembly all pull through here, and every one of them stopped at the last note however
+	 *     free the slot. Passed as {@link #CUT_COMPLETES_ON_THE_STAIRCASE} from the v2 sizing paths
+	 *     and false everywhere else, so the first layout and the planner helpers keep the axiom.
+	 */
+	private static EventNote takeFromTail(List<EventNote> tail,
+			java.util.function.Predicate<EventNote> suits, boolean mayEmpty) {
+		for (int index = 0; (mayEmpty || tail.size() > 1) && index < tail.size(); index++) {
 			if (suits.test(tail.get(index))) {
 				return tail.remove(index);
 			}
@@ -19225,8 +19330,8 @@ public final class SongBuilder {
 	 * would have been anyway.</p>
 	 */
 	private static void headTradesForQuietSides(List<EventNote> head, List<EventNote> tail) {
-		if (!STACKED_SIDES_MAY_GO_QUIET || !QUIET_SIDES_PICK_TRANSPARENT
-				|| !HEAD_TRADES_FOR_QUIET_SIDES) {
+		if (!STACKED_SIDES_MAY_GO_QUIET || !QUIET_SIDES_THIS_LAYOUT
+				|| !QUIET_SIDES_PICK_TRANSPARENT || !HEAD_TRADES_FOR_QUIET_SIDES) {
 			return;
 		}
 		int falling = 0;
@@ -21460,7 +21565,8 @@ public final class SongBuilder {
 	 */
 	private static UltraSlots ultraSlots(List<EventNote> chord, int backFlanks,
 			boolean quietSidesAsked) {
-		boolean quietSides = STACKED_SIDES_MAY_GO_QUIET && quietSidesAsked;
+		boolean quietSides = STACKED_SIDES_MAY_GO_QUIET && QUIET_SIDES_THIS_LAYOUT
+			&& quietSidesAsked;
 		int hangers = 4 + backFlanks;
 		// No floor on the size. A chord of three or fewer is built as the small shape because that is
 		// cheaper, not because the stacked one could not hold it -- fewer notes than hangers simply
