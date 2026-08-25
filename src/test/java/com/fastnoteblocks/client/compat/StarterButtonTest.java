@@ -87,8 +87,8 @@ class StarterButtonTest {
 	 *
 	 * <p>That is the cell a repeater reads, so pressing the button drives it with nothing in
 	 * between. Found through the button rather than by looking for stone: a build is full of stone
-	 * for other reasons -- it is what a wire stands on -- and the first one in the command list is
-	 * not the starter.</p>
+	 * for other reasons -- it is what a wire stands on -- so the button is the only cell that names
+	 * itself, and every other cell of the starter is found by stepping off it.</p>
 	 */
 	@Test
 	void theButtonIsLevelWithTheHeadRepeater() {
@@ -158,6 +158,44 @@ class StarterButtonTest {
 		assertEquals(without.width(), with.width(), "width");
 		assertEquals(without.depth(), with.depth(), "depth");
 		assertEquals(without.height(), with.height(), "height");
+	}
+
+	/**
+	 * The starter is sent first, and what holds it up is sent before it.
+	 *
+	 * <p>A paste is a stream of setblocks paced over seconds or minutes, so the end of the queue is
+	 * a long wait for the one block the player is actually waiting for. The starter is worked out
+	 * last -- the head of the machine is not known until there is a machine -- and sent first,
+	 * which are separate questions and now have separate answers.</p>
+	 *
+	 * <p>The order within the pair is the part that would break rather than merely disappoint: a
+	 * button is placed against the block under it and pops as an item the moment that block is
+	 * missing, so a button sent ahead of its stand is a starter that arrives as a dropped item and
+	 * a machine with nothing to press. Asserted as indices rather than as "somewhere near the
+	 * front", because the failure this guards is the two swapping places.</p>
+	 */
+	@Test
+	void theStarterLeadsTheQueue() {
+		List<String> commands = build().commands();
+		String stand = commands.get(0).split("\\s+")[4];
+		String button = commands.get(1).split("\\s+")[4];
+		assertEquals("minecraft:stone", stand, "the stand is the first command: " + commands.get(0));
+		assertTrue(button.startsWith("minecraft:oak_button"),
+			"the button is the second: " + commands.get(1));
+
+		String[] standAt = commands.get(0).split("\\s+");
+		String[] buttonAt = commands.get(1).split("\\s+");
+		assertEquals(standAt[1], buttonAt[1], "same column, x");
+		assertEquals(standAt[3], buttonAt[3], "same column, z");
+		assertEquals(Integer.parseInt(standAt[2]) + 1, Integer.parseInt(buttonAt[2]),
+			"and the button directly on top of it");
+
+		// Moved rather than copied. The cell is written once however it is ordered -- a setblock is
+		// a setblock and first-writer-wins upstream of this -- so a starter that led the queue and
+		// also stayed at the end would be a second command for a cell that already has one.
+		assertEquals(1, commands.stream()
+				.filter(command -> command.contains("minecraft:oak_button")).count(),
+			"the button is sent once");
 	}
 
 	/** The starter is v2's. The first layout is not being changed. */

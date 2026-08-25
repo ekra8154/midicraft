@@ -1716,6 +1716,13 @@ public final class SongBuilder {
 		}
 		placements.set(button,
 			String.format(java.util.Locale.ROOT, STARTER_BUTTON, forward.getName()));
+		// Laid last and sent first. Everything above works out where the starter goes, which cannot
+		// be known until the machine exists; where it goes in the queue is a separate question, and
+		// the answer is the front. A paste is a stream of setblocks paced over seconds or minutes,
+		// so the last command is the last thing to arrive -- and the starter arriving last is the
+		// one block the player is waiting for arriving after everything else they are not.
+		// See {@link PlacementPlan#starterCells} for why the stand goes ahead of the button.
+		placements.starterAt(stand, button);
 	}
 
 	static PastePlan createV2PastePlan(BlockPos origin, Direction forward, List<EventNote> notes,
@@ -23120,6 +23127,29 @@ public final class SongBuilder {
 		private final Set<BlockPos> corners = new java.util.HashSet<>();
 
 		/**
+		 * The starter's cells, in the order they have to be sent, ahead of the whole build.
+		 *
+		 * <p>The stand before the button, always. A button is placed against the block under it and
+		 * pops as an item the moment that block is missing, so sending it first means sending what
+		 * holds it up first -- and the stand is a floor block, which needs nothing underneath it
+		 * and so cannot be broken by arriving sooner. The same argument {@link #propsFirst} makes
+		 * for a prop under sand, and the same failure it exists to prevent.</p>
+		 *
+		 * <p>Kept as positions rather than commands because the stand is not always the starter's
+		 * own block: a build whose floor already runs through that cell keeps its floor, and what
+		 * moves to the front is then somebody else's block, which is fine and is why the cell is
+		 * named here rather than the block.</p>
+		 */
+		private final List<BlockPos> starterCells = new ArrayList<>();
+
+		/** Sends these two cells at the head of the queue, the stand first. */
+		void starterAt(BlockPos stand, BlockPos button) {
+			starterCells.clear();
+			starterCells.add(stand.immutable());
+			starterCells.add(button.immutable());
+		}
+
+		/**
 		 * How far this cell is from the nearest corner on its own level, in blocks along the floor.
 		 *
 		 * <p>Both corners of a bend rather than the last one recorded, which is what
@@ -24693,8 +24723,21 @@ public final class SongBuilder {
 		private List<BlockPos> propsFirst() {
 			List<BlockPos> order = new ArrayList<>(blocks.size());
 			Set<BlockPos> sent = new HashSet<>(blocks.size() * 2);
-			for (BlockPos at : blocks.keySet()) {
-				if (falls(blocks.get(at)) && blocks.containsKey(at.below()) && sent.add(at.below())) {
+			// The starter ahead of the build it starts, and everything else in the walk's own order
+			// behind it. Named cells rather than a second pass, so the prop rule below covers them
+			// as it covers every other cell: whatever the stand turns out to be, if it is a thing
+			// that falls it gets its own support ahead of it. Duplicates cost nothing -- these two
+			// come round again with the rest and {@code sent} drops them.
+			// See {@link #starterCells}.
+			List<BlockPos> queue = new ArrayList<>(blocks.size() + starterCells.size());
+			queue.addAll(starterCells);
+			queue.addAll(blocks.keySet());
+			for (BlockPos at : queue) {
+				String block = blocks.get(at);
+				if (block == null) {
+					continue;
+				}
+				if (falls(block) && blocks.containsKey(at.below()) && sent.add(at.below())) {
 					order.add(at.below());
 				}
 				if (sent.add(at)) {
