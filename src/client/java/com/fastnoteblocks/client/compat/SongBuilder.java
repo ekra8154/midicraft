@@ -1783,6 +1783,65 @@ public final class SongBuilder {
 	}
 
 	/**
+	 * {@link #createV2PastePlan}, but walked by {@link #walkRouted} along an explicit {@link
+	 * LaneRoute}. Everything else -- the re-walk loop, the starter, the width -- is kept
+	 * identical, because the plan this returns is asserted equal to v2's command for command.
+	 */
+	static PastePlan createRoutedPastePlan(BlockPos origin, Direction forward, List<EventNote> notes,
+			int width, int floors, WalkStart start) {
+		// For the probes that come in here directly rather than through the mode dispatch.
+		QUIET_SIDES_THIS_LAYOUT = true;
+		// Without the lookahead, and measured rather than assumed. It is read only by planLane, and
+		// the first layout builds both ways and keeps the winner -- so turning it on here looked like
+		// the obvious fix for Guardian. It is not: with it on, the all-25 song breaks too, a lane
+		// twenty-five columns past its wall on the first chord it meets. The lookahead books pads for
+		// a lane that closes on overshoot, and v2's lanes close a column earlier.
+		Layout layout = Layout.ultra(floors, origin).asV2();
+		List<EventGroup> events = eventGroups(notes, layout);
+		int longest = events.stream().mapToInt(EventGroup::length).max().orElse(1);
+		// Three blocks of the width go on what stands past the walls, and only three: every turn in
+		// the build now reaches exactly one column past its wall -- a descent's outer rung, a climb's
+		// glass, a flat turn's corner or the notes hanging off it -- and the column behind the first
+		// repeater is where the button goes. So the walls stand {@code width - 3} apart and the paste
+		// is {@code width} blocks across, which is what the slider said it would be. The first layout
+		// keeps its {@code width - 2}: its turns still poke out by different amounts, and it is not
+		// being changed. See {@link #V2_WIDTH_IS_THE_PASTE_WIDTH}.
+		int laneWidth = Math.max(longest + 2, width - widthReserve(PasteMode.ULTRA_COMPACT_LANE_V2));
+		// Which flat turns are armed a column early, by the index of the event that armed them. Empty
+		// to begin with; a turn is only put here once a walk has laid it the wide way and watched a
+		// note land past its corner. See {@link #FLAT_TURN_KEEPS_ITS_WIDTH}.
+		Set<Integer> tightTurns = new HashSet<>();
+		List<String> rewalkedFor = new ArrayList<>();
+		LaneRoute route = LaneRoute.serpentine(floors, start.floor(), start.climb());
+		while (true) {
+			PlacementPlan placements = new PlacementPlan();
+			try {
+				walkRouted(events, origin, forward, laneWidth, floors, placements, layout, route,
+					start, tightTurns);
+				// What each pass before this one was for, by the shape that hung the note -- the guess
+				// that was wrong, and how it was wrong, is what the guess is tuned on.
+				for (String shape : rewalkedFor) {
+					placements.padded("flatTurnRewalk");
+					placements.padded("flatTurnRewalkFor:" + shape);
+				}
+				addStarter(placements, forward);
+				return placements.finish(PasteMode.ULTRA_COMPACT_LANE_V2, origin, origin.getX(),
+					origin.getX() + laneWidth);
+			} catch (FlatTurnHungOutside outside) {
+				// A wide turn hung a note past its corner. The walk is deterministic, so a walk told
+				// to arm that one turn tight replays exactly up to it and diverges only after -- which
+				// is why the decisions already made stay right and each pass settles one more turn.
+				// Bounded by the number of turns a song can hold, since every pass adds an index.
+				if (!tightTurns.add(outside.index()) || rewalkedFor.size() > events.size()) {
+					throw new IllegalStateException("a flat turn armed tight still hung a note past "
+						+ "its corner at " + outside.getMessage());
+				}
+				rewalkedFor.add(outside.shape());
+			}
+		}
+	}
+
+	/**
 	 * v2: the paste is exactly as wide as the paste screen said.
 	 *
 	 * <p>The width the slider shows was the distance between the walls plus two, from when the flat
@@ -6035,6 +6094,3699 @@ public final class SongBuilder {
 						columnBehindBusy = true;
 					}
 					climb = -climb;
+				}
+			}
+			if (carried) {
+				// The pad's repeater has already held this event's whole wait, and everything between
+				// it and here is dust. Nothing left to time it with, and nothing needed.
+				currentTime = event.time();
+				lane = Lane.straight(addCarriedEventModule(placements, lane.pos(), lane.travel(), depth,
+					event.notes(), stepOff), lane.travel(), depth).crowding();
+				lastStyle = ChordStyle.BUS;
+				tipSignal = pad.signal() - turnCells - stepOff - (event.notes().size() + 1) / 2;
+				// A carried bus starts where the turn left off, so its first pair of notes stands where
+				// the turn's own run of powered stone does. Nothing behind the next module is free.
+				columnBehindBusy = true;
+				laneStarted = true;
+				replan = layout.ultra();
+				continue;
+			}
+			// Pad this lane was told to lay early rather than at its end, in front of the event's own
+			// repeater so that repeater stands between it and the wall.
+			int owing = booked != null ? booked.getOrDefault(index, 0) : 0;
+			// Both clamps below aim the chord's far end at the wall. That is a column too far: the
+			// column after the far end is where the lane hands over, so a chord landing flush leaves
+			// the staircase outside the footprint. They aim a column short of it instead -- which is
+			// the same place for the off-bus discount, since what earns that is nothing standing
+			// between the bus and the staircase, and the staircase simply moves back with the bus.
+			int padWall = wall - lane.travel().getStepX() * handoverReserve(layout);
+			// Never past the wall, though. The pad is booked to land the lane flush on its wall, so a
+			// booking that would carry the chord over it is a booking that has already failed at its
+			// own job -- and the column it spends is the column the lane comes to rest outside by.
+			// Every breach of exactly one left in Do The Dance was this: a bus of twenty that fitted
+			// its eleven columns to the block, one column of pad booked in front of it, and the lane
+			// a column out. The plan is worked out ahead of the walk from an arithmetic that cannot
+			// see everything the walk does, so it is checked here against the one thing it must never
+			// do rather than trusted.
+			// Only where the pad is what carries it over. A chord that lands outside the wall with no
+			// pad at all is a chord with a different problem, and taking its pad away does not fix
+			// that one -- it just moves the lane, and a lane moved for no reason lands its notes
+			// against somebody else's tick. Measured both ways: clamping regardless cost 11 wrong
+			// notes to save 2 breaches.
+			if (owing > 0 && (landingOf(lane.pos().getX(), lane.travel().getStepX(), event,
+					wait - spentPadding, columnBehindBusy, wall, layout,
+					inTurn(placements, turning, leavingTurn, lane.pos(), lastCorner),
+					parity).end() - padWall)
+					* lane.travel().getStepX() <= 0) {
+				while (owing > 0 && (landingOf(lane.pos().getX() + lane.travel().getStepX() * owing,
+						lane.travel().getStepX(), event, wait - spentPadding, columnBehindBusy, wall,
+						layout, inTurn(placements, turning, leavingTurn, lane.pos(), lastCorner), parity).end() - padWall)
+						* lane.travel().getStepX() > 0) {
+					owing--;
+				}
+			}
+			// And up, where the plan asked for a pad and the walk still lands the chord short.
+			//
+			// The sweep and the walk do not always agree about where a chord ends -- the walk spends
+			// columns on things the arithmetic did not model -- so a pad booked to land a lane flush
+			// can arrive a column or two short of doing it. One column short is not a small miss here:
+			// a climb taken straight off a bus skips two rungs, and what decides "off a bus" is whether
+			// anything stands between the bus and the staircase. Land flush and the climb costs offBus;
+			// stop one short and the lane has to cover that column with dust, which costs the column
+			// *and* the discount -- turnCells instead of offBus, two blocks more than it just spent one
+			// to lose. A lane that could have afforded the first cannot afford the second, so it does
+			// not turn at all, lays the chord that beat it whole, and comes to rest past its wall.
+			//
+			// In-game reading showed exactly that as a breach of eleven: one column short with five blocks
+			// of wire, wanting one and five where landing flush wants one and three.
+			//
+			// Only upward from a pad the plan already asked for, and only while the wire covers it, so
+			// this can move a lane onto its wall and never off it.
+			// How far this loop is allowed to run past what the plan actually booked, and how much
+			// wire it must leave behind it. Both were unbounded: the only brakes were the plan's own
+			// landing arithmetic and "can the wire pay for one more column", so a lane standing on
+			// eleven blocks of wire could spend ten of them on bare dust to buy a two-cell discount.
+			// See {@link #PREPAD_GROWTH_CAP}.
+			int grownFrom = owing;
+			boolean unsticksTheNext = false;
+			int unstickFrom = 1;
+			// A chord that fits, a column or two short of the wall, in front of a chord that cannot:
+			// cannot fit, cannot be cut, and cannot turn either, because the wire this chord leaves
+			// has to cover the columns it left *and* the staircase, and with no spare tick there is no
+			// repeater to put in them. That is the breach of eleven: Guardian 20x5 at tick 1480, a
+			// stacked bus of twenty-four ending two short on five blocks of wire, the next chord of
+			// twenty-four wanting two and four, {@code pad=1c/4s}, laid whole twelve columns out. The
+			// off-bus prepad was written for exactly this lane and grew without a brake; this asks
+			// only whether the chord after is stuck as things stand and whether landing flush frees
+			// it, and lays the fewest columns that do. See {@link #V2_PREPADS_A_STUCK_NEXT}.
+			if (V2_PREPADS_A_STUCK_NEXT && layout.ultra() && !turning && !wantsTurn && laneStarted
+					&& railPhase < 0 && owing == 0 && index + 1 < events.size()
+					&& above >= 0 && above < floors) {
+				int step = lane.travel().getStepX();
+				int shortBy = (wall - here.end()) * step;
+				EventGroup next = events.get(index + 1);
+				int nextWait = next.time() - event.time();
+				boolean onBus = endsOnBus(here.style(), sunkenDustCells(event.notes().size()));
+				if (shortBy > 0 && shortBy <= V2_STUCK_PREPAD_CAP
+						&& tipSignal - shortBy >= 1) {
+					Lane nextOpens = lane.ahead((here.end() - lane.pos().getX()) * step);
+					boolean stuck = nextChordIsStuck(placements, nextOpens, next, nextWait, shortBy,
+						here.tip(), onBus, here.busy(), here.style().stacked(), turnCells, offBus,
+						splitCells, climb > 0);
+					boolean freed = stuck && !nextChordIsStuck(placements, nextOpens.ahead(shortBy),
+						next, nextWait, 0, here.tip(), onBus, here.busy(), here.style().stacked(),
+						turnCells, offBus, splitCells, climb > 0);
+					if (stuck) {
+						placements.padded(freed ? "v2StuckNextFreedBy" + shortBy
+							: "v2StuckNextNotFreed");
+					}
+					if (TRACE) {
+						System.out.println("  STUCK t=" + event.time() + " shortBy=" + shortBy
+							+ " tip=" + tipSignal + " leaves=" + here.tip() + " stuck=" + stuck
+							+ " freed=" + freed);
+					}
+					// Not the columns: the shape is decided again where it opens, and a pad in front
+					// of it changes the column, the parity and the pair behind, so the chord that was
+					// foretold one short can come out one short again a column later -- Guardian 16x4
+					// tick 611 did, a stacked bus that went half behind a pad of one. The columns are
+					// settled where the chord is built, by building it.
+					if (V2_UNSTICK_BY_TRIAL) {
+						unsticksTheNext = freed;
+						unstickFrom = V2_UNSTICK_TRIES_EVERY_WIDTH ? 1 : shortBy;
+					} else if (freed) {
+						owing = shortBy;
+					}
+				}
+			}
+			// Whether the event after this one still has somewhere to go at the booking as it stands.
+			// If it is already stranded there, the growth below is not what stranded it.
+			boolean strandedAlready = PREPAD_NEVER_STRANDS_THE_NEXT
+				&& strandsTheEventAfter(events, index, event, owing, lane, wait - spentPadding,
+					columnBehindBusy, wall, layout,
+					inTurn(placements, turning, leavingTurn, lane.pos(), lastCorner), parity, splitCells);
+			while (PREPADS_FOR_THE_OFF_BUS_DISCOUNT && owing > 0 && tipSignal >= owing + 1
+					&& owing - grownFrom < PREPAD_GROWTH_CAP
+					&& tipSignal - owing >= PREPAD_LEAVES_WIRE
+					&& (landingOf(lane.pos().getX() + lane.travel().getStepX() * owing,
+						lane.travel().getStepX(), event, wait - spentPadding, columnBehindBusy, wall,
+						layout, inTurn(placements, turning, leavingTurn, lane.pos(), lastCorner), parity).end() - padWall)
+						* lane.travel().getStepX() < 0) {
+				// One column further is one column the next chord has not got. Taken only where the
+				// next chord can still do something with what is left.
+				if (PREPAD_NEVER_STRANDS_THE_NEXT && !strandedAlready
+						&& strandsTheEventAfter(events, index, event, owing + 1, lane,
+							wait - spentPadding, columnBehindBusy, wall, layout,
+							inTurn(placements, turning, leavingTurn, lane.pos(), lastCorner), parity, splitCells)) {
+					placements.padded("prepadWouldStrandTheNext");
+					break;
+				}
+				owing++;
+			}
+			if (TRACE && booked != null && booked.getOrDefault(index, 0) > 0) {
+				System.out.println("  PADBOOK index=" + index + " booked=" + booked.get(index) + " owing=" + owing + " tip=" + tipSignal + " at " + lane.pos().getX());
+			}
+			if (owing > 0) {
+				Pad early = planPad(owing, tipSignal, 0, Math.max(0, wait - 1 - spentPadding));
+				lane = emitPad(placements, lane, early, "padBooked");
+				spentPadding += early.delaySpent();
+				tipSignal = early.signal();
+			}
+			// One event of lookahead. If the next one will not fit after this one, this is the last
+			// event of its lane, and the pad that fills the lane out to the wall is better spent in
+			// front of it than behind it: in front, this event's own repeater stands between the pad
+			// and the staircase and hands it a full fifteen, where behind, the pad has to be paid for
+			// out of whatever the event left -- and a lane ending on a long bus has left almost
+			// nothing. It also costs no time at all, where a pad behind may have to buy a repeater
+			// with a tick borrowed from the wait.
+			// Never in front of the first event of all, which has no wire arriving to lay dust from:
+			// the head of a machine is a repeater with nothing behind it, and that is how you can tell
+			// where to put the lever -- and how the reader tells where the song starts.
+			// And never mid-turn, where the wire runs across the corridor and a wall means nothing.
+			// The flat turn's second corner, once the walk has stepped off it. See below.
+			BlockPos steppedOffCorner = null;
+			if (layout.ultra() && !turning && index > 0 && index + 1 < events.size()
+				&& (event.notes().size() + 1) / 2 + offBus <= DUST_RANGE) {
+				// Off the corner before a column of this is measured. A pad that opens with a repeater cannot
+				// stand one on a corner -- the repeater moves along and dust takes the corner -- so a pad
+				// planned for eleven columns spends twelve, and the chord in front of it lands a column past
+				// the wall it was padded to meet. That column is spent either way: this walks off the corner
+				// now, where the arithmetic can see it, instead of inside emitPad where it cannot. In-game
+				// testing found it as two breaches of exactly one on Kick Back, both on the event coming out of
+				// a turn, which is the only place a lane stands on a corner with a pad still to lay. Off the
+				// corner before a column of this is measured, and charged for. A pad that opens with a repeater
+				// cannot stand one on a corner -- the repeater moves along and dust takes the corner -- so a
+				// pad planned for eleven columns spends twelve, and the chord in front of it lands a column
+				// past the wall it was padded to meet. In-game testing found that as two breaches of exactly
+				// one on Kick Back, both on the event coming out of a turn, which is the only place a lane
+				// stands on a corner with a pad still to lay. The charge is the point. Walking off the corner
+				// here and *not* taking it off the wire only moves the error: the column is still spent, the
+				// next pad is still planned as though it were not, and what was a breach becomes a run of
+				// sixteen. Measured both ways over the library -- nine breaches traded for nine dead builds,
+				// which is the wrong way round. Unless the wire cannot afford it and the two-swap turn can take
+				// the corner instead. That trade spends no column -- the corner ends up holding a note rather
+				// than dust -- so where the cell walked off here is the one that runs the wire out, the swap is
+				// the difference between a lane that plays and a lane that does not. In-game testing found it
+				// on the one-floor build of {@code ultra-limit-two-thirties}: a chord of thirty riding a
+				// turnaround, tip worth nought, and the cell spent here taking it to sixteen blocks of wire
+				// with the last at nothing.
+				//
+				// Asked only when the tip cannot pay, and that restraint is the whole of it. The swap
+				// is free in wire and not free in everything else: it moves a note onto a cell two
+				// lanes touch and rebuilds the chord after it as a bus. Offered wherever it would fit,
+				// it takes four and a half thousand corners the old route was walking off perfectly
+				// well and buys sixty-one wrong notes in real songs for three dead builds. Offered only
+				// where the alternative is dead wire, the library trades one corner net -- two taken
+				// here, two given back where the layout downstream moved -- and comes out the same
+				// size to the block.
+				//
+				// And only where the wire arrives without a repeater in front of it. The delay keeps
+				// the corner intact for the swap already, but a wait long enough to want a repeater of
+				// its own lays one on the way past, and then there is no corner left to trade.
+				BlockPos onCorner = lane.pos();
+				boolean stoodOnACorner = lane.cornerAt(0) && !lane.bending();
+				if (tipSignal > 0 || event.time() - currentTime - spentPadding > 4
+						|| planSwapTurn(placements, lane, event.notes(), false, false) == null) {
+					lane = pastAnyCorner(placements, lane);
+					tipSignal -= Math.abs(lane.pos().getX() - onCorner.getX())
+						+ Math.abs(lane.pos().getZ() - onCorner.getZ());
+				}
+				// And the corner it has just left, for the run that may want to open off it.
+				//
+				// {@link #pastAnyCorner} lays {@link #addParityPad} on a corner it walks off -- stone
+				// with dust over it -- and that is {@link #addRailHead}'s second column exactly, which is
+				// to say it is the reseed, already built and already paid for by the turn. What was
+				// missing was never the shape: it was that the rail branch is asked three hundred lines
+				// below this, by which point the cursor has stepped off and {@code cornerAt(0)} is false.
+				// Over the library the walk sits on a second corner 2127 times, knows it every time, and
+				// the rail branch saw 27 of them.
+				if (stoodOnACorner && !lane.pos().equals(onCorner)) {
+					steppedOffCorner = onCorner;
+				}
+				Direction travel = lane.travel();
+				BlockPos cursor = lane.pos();
+				int laneWall = laneWall(nearWall, farWall, forward, travel, floor, climb, floors);
+				// Where this event really ends and what it really leaves. Asked of a second piece of
+				// arithmetic before, and that one measured every chord in the shape it was sorted into
+				// rather than the shape it gets built in -- so a stacked module the walk was about to
+				// drop to a bus was measured two columns long when it was going to be five, and the pad
+				// laid to land it on the wall landed the lane two columns past the wall instead.
+				// Asked here and not reused from the turn decision above, because the pad this lane was
+				// booked to lay early has moved the cursor since, and the ticks it spent have come off
+				// the wait -- so the event no longer starts where it did or carries the delay it did.
+				Landing reached = landingOf(cursor.getX(), travel.getStepX(), event,
+					wait - spentPadding, columnBehindBusy, laneWall, layout,
+					inTurn(placements, turning, leavingTurn, cursor, lastCorner), parity);
+				int end = reached.end();
+				EventGroup next = events.get(index + 1);
+				int beyond = landingOf(end, travel.getStepX(), next, next.time() - event.time(),
+					reached.busy(), laneWall, layout, false, parity).end()
+					+ travel.getStepX() * turnReserve(next, turnCells, layout);
+				// Unless the chord that will not fit can be cut across the turn, in which case the gap
+				// is its to fill. A cut costs nothing and fills the columns with music; a pad fills the
+				// same columns with wire and then charges the staircase for it. Padding first left the
+				// lane flush against its wall with no gap left, so the cut had nothing to do and never
+				// happened -- two of it in a build of a hundred and forty-six turns.
+				int nextCells = (next.notes().size() + 1) / 2;
+				int gap = (laneWall - end) * travel.getStepX()
+					- Math.max(0, (next.time() - event.time() - 1) / 4);
+				boolean cuttable = gap >= 2 && gap - 1 < nextCells
+					&& nextCells + offBus + stepOffAhead <= DUST_RANGE;
+				// And the next chord may simply lie across the turn, in which case the gap is its to
+				// fill and filling it with wire first is exactly the mistake this pad exists to avoid.
+				// Measured from where the chord in front of it ends, which is where it will start.
+				boolean nextStraddles = !(above >= 0 && above < floors)
+					&& straddleFits(next.notes().size(), (laneWall - end) * travel.getStepX(),
+						slabStep);
+				// And only when the pad behind could not have done it. Both pads fill the same gap
+				// with the same columns; the one in front is preferred because this event's own
+				// repeater then stands between the pad and the staircase and hands it a fresh
+				// fifteen, where the pad behind is paid for out of whatever the event left. That is
+				// a real reason, but it is only a reason where the event has left too little -- and
+				// the pad in front was taken whenever it was available rather than whenever it was
+				// needed.
+				//
+				// Which is not free, because a pad in front is not only wire. planPad buys a
+				// repeater when dust alone will not reach, and a repeater costs a tick out of the
+				// wait -- 1,071 of them over the library. Every one changes spentPadding, and so the
+				// next event's wait, and so where it lands. The reading: chord one pads, chord
+				// two sees the room that bought and pads in turn, and a preference cascades down the
+				// lane as though it were a requirement.
+				Pad behind = planPad((laneWall - end) * travel.getStepX(), reached.tip(),
+					endsOnBus(reached.style(), sunkenDustCells(event.notes().size())) ? offBus : turnCells,
+					Math.max(0, next.time() - event.time() - 1));
+				boolean behindReaches = (laneWall - end) * travel.getStepX() >= 0
+					&& behind.cells().size() == (laneWall - end) * travel.getStepX()
+					&& behind.signal() >= (endsOnBus(reached.style(), sunkenDustCells(event.notes().size())) ? offBus : turnCells);
+				if (V2_PADS_AHEAD && !cuttable && !nextStraddles && !behindReaches
+						&& (beyond - laneWall) * travel.getStepX() > 0) {
+					int ahead = prePad(cursor.getX(), travel.getStepX(), event, wait - spentPadding,
+						columnBehindBusy, layout, laneWall,
+						(laneWall - cursor.getX()) * travel.getStepX(),
+						inTurn(placements, turning, leavingTurn, cursor, lastCorner), parity);
+					// Planned like the pad behind, and for the same reason: dust in front of an event
+					// spends the same wire dust behind it does, so a lane wanting a dozen columns off a
+					// wire worth eight laid what it could and stopped short of the wall anyway. What is
+					// kept back here is one cell rather than a staircase, for the column a stacked
+					// module may take between the pad and its own repeater to land on its beat.
+					Pad front = planPad(ahead, tipSignal, 1,
+						Math.max(0, wait - 1 - spentPadding));
+					// Counted three ways, because the guard above has already decided a front pad is
+					// wanted and the two ways it can still not happen want opposite fixes. Asked for
+					// nothing at all means {@link #prePad} and the run disagree about how many columns
+					// short the wire is; asked for more than the wire could lay means the pad is
+					// abandoned wholesale where laying what it can would still have moved the chord.
+					// In-game testing has watched a lane die on a staircase with a gap in front of it, and this
+					// says which of the two was standing in the way.
+					placements.padded("padAheadWanted");
+					if (ahead == 0) {
+						placements.padded("padAheadAskedForNothing");
+					} else if (front.cells().size() != ahead) {
+						// Not "one column too long", which is what this said before planPad was read:
+						// planPad never returns more cells than it is asked for, so a negative
+						// difference is prePad handing back -1 for want of an exact landing.
+						placements.padded(ahead < 0 ? "padAheadNoExactFit"
+							: "padAheadWireShort" + Math.min(ahead - front.cells().size(), 6));
+					}
+					// All of it, or as much of it as the wire reaches.
+					//
+					// The pad behind already lays what it can -- {@link #planPad} stops where the wire
+					// stops and hands back a short pad rather than none, and the comment above says why.
+					// The pad in front demanded the whole thing and dropped it otherwise, which is 633
+					// of 817 wanted pads over the library. Both faults are the same one: a perfect pad
+					// or nothing, where a partial pad still moves the chord towards its wall and still
+					// takes those columns off the run that has to cross the staircase.
+					if (ahead > 0 && (front.cells().size() == ahead
+							|| PREPAD_LAYS_WHAT_IT_CAN && !front.cells().isEmpty())) {
+						if (front.cells().size() < ahead) {
+							placements.padded("padAheadPartial");
+						}
+						lane = emitPad(placements, lane, front, "padAhead");
+						spentPadding += front.delaySpent();
+					}
+				}
+			}
+			if (TRACE) {
+				System.out.println("WALK i=" + index + " t=" + event.time() + " n="
+					+ event.notes().size() + " x=" + lane.pos().getX() + " z=" + lane.pos().getZ()
+					+ " travel=" + lane.travel() + " wall=" + wall + " cols=" + columns
+					+ " wants=" + wantsTurn + " can=" + canTurn + " straddle=" + straddles
+					+ " pad=" + pad.cells().size() + " owing=" + owing + " turning=" + turning
+					+ " tip=" + tipSignal + " spent=" + spentPadding + " style=" + event.style());
+			}
+			BlockPos before = lane.pos();
+			// A run of small chords, one column a chord instead of two. Ported from walkWall rather
+			// than re-derived: the shape is measured, the physics under it was measured rather than
+			// reasoned about, and every geometry in this file that was worked out a second time has
+			// been wrong at least once.
+			//
+			// A turn ends a run: the far side of a staircase is a fresh lane and wants a head of its
+			// own. Only ever reached from the path rail, because the floor rail refuses to turn, so
+			// the wire is already at path level and there is nothing to undo.
+			// Asked again here rather than taken from the top of the event, because by this point a
+			// staircase may already have been built: the lane stands somewhere else, running the
+			// other way, with the other wall in front of it. The answer from before the turn is
+			// about a lane that no longer exists, and measured against the old wall it is always no
+			// -- which is why a run used to take several chords to come back after a floor change,
+			// when it can open on the very first one. Only a flat turn is a reason to wait, and that
+			// is the bending test: its sideways run lies across the way both rails go.
+			int laneWall = laneWall(nearWall, farWall, forward, lane.travel(), floor, climb, floors);
+			// A run already going, only. Opening one mid-turn is a different question and railOpens
+			// still refuses it; what this allows is the run a lane already has reaching the corner it
+			// used to be cut off a column short of.
+			boolean intoTheCorner = RUN_RUNS_INTO_A_CORNER && railPhase >= 0
+				&& (turning || lane.bending());
+			if (!V2_RUNS_ON_RAILS || (turning || lane.bending()) && !intoTheCorner) {
+				if (railPhase >= 0) {
+					railRunEnded(placements, railRunFloorNotes, railRunColumns, railRunBlanks);
+				}
+				railPhase = -1;
+			} else if (railPhase >= 0 || railOpens(events, index, lane, laneWall, layout, false,
+					reserve, wait, railStackSeed(placements, lane, lastStyle, currentTime, false),
+					booked)
+					// A corner's say-so is for the reseed and for nothing else. The corner asks for
+					// less room on purpose -- a reseed spends one silent column where a head spends
+					// two and a wait in front of it -- and a run let in on the corner's word and then
+					// refused its reseed falls through to a head without ever being asked whether a
+					// head fits. At eight wide that was 623 heads laid on the reseed's arithmetic: a
+					// head at a room of three is two columns and the wall's, which leaves the run a
+					// single dust-driven column handing into the corner after it. In-game reading found
+					// it as a double rail seeded and never used, dead at the next corner. So the corner
+					// admits a run only where the head it falls back to would have been admitted too.
+					// See {@link #CORNER_SEED_NEEDS_ROOM_FOR_A_HEAD}.
+					|| !CORNER_SEED_NEEDS_ROOM_FOR_A_HEAD
+						&& railOpensOnACorner(events, index, lane, laneWall, layout, reserve,
+							steppedOffCorner != null, booked)) {
+				boolean opening = railPhase < 0;
+				boolean fromDust = false;
+				// A stacked bus's rail-ready tail is already this run's first path column, so there is nothing
+				// to open with: the floor rail's repeater goes in the free cell under that tail and the run
+				// picks up on the floor rail. Asked before the head, because a head laid here would be two
+				// columns spent on a column that already exists. Never where the lane is closing. The tail is
+				// already down as this run's first path column, so a run opened here cannot be given up later
+				// -- and a lane that closes puts the repeater that would carry the run on at the top of a
+				// staircase, a floor away, which is the same thing that stranded the tail one layer down. Asked
+				// of the same {@code reaches} the tail asks, so the two cannot disagree about when a lane ends.
+				// And asked the floor rail's own three questions about the chord it is about to lay there,
+				// which is the one floor column in a run that nobody asks. Every other one is committed to by
+				// {@link #railPairAfter} at the path column behind it; this one has no path column behind it --
+				// the tail is it -- so it inherited only {@link #railMayStart}'s head test. That test is asked
+				// of the *head*, which is a path column, and its {@code RAIL_FLOOR_SLOTS} limit is a
+				// coincidence of the two being two. The gravity rule is not: a floor note hangs at the lane's
+				// own floor level, so sand under it wants propping from the level below that, which is the cell
+				// the floor underneath keeps empty over its own path notes. In-game reading showed exactly that
+				// off all of the lights at 40 by 5 -- "it put a sand block on the lower rail, which is not
+				// allowed. then its support block below collided with the mandatory air block above every
+				// noteblock".
+				//
+				// All three, not just the gravity one. {@link #railFloorTakes} is the wrong-note test --
+				// a floor note hangs where the lane alongside hangs a stacked module's low half -- and
+				// dropping it here sounds four notes at the wrong tick across three rows of
+				// {@code HandoverStartProbeTest}, for 38 columns on the harp song at 40 by 5. It refuses
+				// 10 of 32 openings there, which is the price. {@code railDelay} fired nought times in
+				// that sweep and is here for the set to be complete: a delay out of a repeater's range
+				// would reach {@link #addRailFromHandover} as {@code delay=0} and fail to parse.
+				// A climb that seeded this lane laid the run's first column at its landing, so what is
+				// owed here is the bottom rail's repeater and nothing else. Asked before the tail and
+				// before the head, both of which would lay a column over a seed already down.
+				// Not asked of {@code wantsTurn}, which the tail below is. That flag belongs to the
+				// event as it was measured on the lane it has just left -- a lane this event turned
+				// off the end of -- and it is still standing when the walk falls through to build the
+				// chord on the far side of the staircase. The tail wants it because a tail stranded by
+				// a closing lane is the fault it was written for; a seed is the opening of a lane and
+				// has nothing to do with the turn that made it.
+				boolean offClimb = RAIL_SEEDS_OFF_THE_CLIMB && opening
+					&& lane.pos().equals(placements.railSeed());
+				if (offClimb) {
+					// Not a column, and there is no builder for it. The seed's own landing column is
+					// all there is; this column is the run's first note column, which the rail lays for
+					// itself. Anything laid here was a second repeater in a row -- the run started a
+					// column further along than the seed had been built for, and the column the seed
+					// drives held nothing at all.
+					placements.padded(placements.railSeedOnPath() ? "railFromDescent" : "railFromClimb");
+					railBlanksRunning = 0;
+					railFloorCarried = false;
+					railRunColumns = 0;
+					railRunFloorNotes = 0;
+					railRunBlanks = 0;
+					fromDust = true;
+					if (placements.railSeedOnPath()) {
+						// A descent's seed is a head's second column: a block with dust over it and no
+						// repeater in it at all. So the run opens the way it opens off a head -- on the
+						// path rail, driven by that dust -- and both rails go live together, the path
+						// through the dust and the floor off the stone the dust makes live.
+						railPhase = 0;
+						railLive[0] = event.time();
+						railLive[1] = event.time();
+					} else {
+						// A climb's carries the run's first repeater at the lane's own level, and a
+						// repeater drives the next note on the *other* rail. So this column is a floor
+						// column; opened on the path rail instead, the run asked for a floor note
+						// nothing was going to drive. The bottom rail waits on that repeater and is
+						// live at this chord's tick, the top from the wire over the seed's block, which
+						// went live when the staircase did.
+						railPhase = 1;
+						railLive[0] = currentTime;
+						railLive[1] = event.time();
+					}
+					opening = false;
+				}
+				// The corner reseed. Asked before the tail and before the head, both of which
+				// would step past this corner and spend two columns getting back to it.
+				//
+				// The wait has to fit one repeater, because the column after the corner is the only
+				// cell that can hold it and a path column holds one repeater. And the chord has to be
+				// one a *floor* column can take, because the column after the corner is spoken for --
+				// it is the silent one -- so the run's first real note lands on the floor rail.
+				int cornerWait = event.time() - currentTime - spentPadding;
+				// Counted because the answer is nought and that is the whole finding: over the
+				// library not one event reaches this branch standing on a corner, opening or running.
+				// So the reseed below is not being refused, it is never being asked -- and what has to
+				// change is where the walk is when the rail branch runs, not the shape it lays.
+				placements.padded(lane.cornerAt(0) ? "cornerSeedReachedACorner"
+					: "cornerSeedReachedAPlainCell");
+				boolean fromCorner = RUN_OPENS_ON_A_CORNER && opening && lane.cornerAt(0)
+					&& railDelay(0, cornerWait) > 0
+					&& railHolds(event, false)
+					&& railFloorTakes(placements, lane.ahead(2), event);
+				if (opening && lane.cornerAt(0) && !fromCorner) {
+					placements.padded(railDelay(0, cornerWait) <= 0 ? "cornerSeedWaitTooLong"
+						: !railHolds(event, false) ? "cornerSeedChordTooBig" : "cornerSeedTaken");
+				}
+				if (fromCorner) {
+					lane = addRailFromCorner(placements, lane, railDelay(0, cornerWait),
+						currentTime + spentPadding);
+					railPhase = 1;
+					railBlanksRunning = 0;
+					railFloorCarried = false;
+					railRunColumns = 0;
+					railRunFloorNotes = 0;
+					railRunBlanks = 0;
+					// The path rail went live with the chord before the corner, since dust carries no
+					// delay; the floor rail with this chord, which the silent column's repeater times.
+					railLive[0] = currentTime + spentPadding;
+					railLive[1] = event.time();
+					opening = false;
+				}
+				// And the same seed where the walk has already stepped off the corner and left the two
+				// blocks standing on it. Asked in the same words as the branch above and off the same
+				// wait, so the two cannot answer differently about one corner. The first real note lands
+				// one cell nearer than it does above, because the cursor is already past the corner: the
+				// silent column is the cell the walk is standing on.
+				boolean fromSteppedCorner = RUN_OPENS_ON_A_CORNER && opening && !fromCorner
+					&& steppedOffCorner != null
+					&& cornerDustCrosses(placements, steppedOffCorner.above())
+					&& railDelay(0, cornerWait) > 0
+					&& railHolds(event, false)
+					&& railFloorTakes(placements, lane.ahead(1), event);
+				if (steppedOffCorner != null && opening && !fromSteppedCorner) {
+					placements.padded(!cornerDustCrosses(placements, steppedOffCorner.above())
+						? "railCornerSeedDustStraightens"
+						: railDelay(0, cornerWait) <= 0 ? "railCornerSeedWaitTooLong"
+							: !railHolds(event, false) ? "railCornerSeedChordTooBig"
+								: "railCornerSeedFloorTaken");
+				}
+				if (fromSteppedCorner) {
+					lane = addRailFromSteppedCorner(placements, lane, steppedOffCorner,
+						railDelay(0, cornerWait), currentTime + spentPadding);
+					railPhase = 1;
+					railBlanksRunning = 0;
+					railFloorCarried = false;
+					railRunColumns = 0;
+					railRunFloorNotes = 0;
+					railRunBlanks = 0;
+					railLive[0] = currentTime + spentPadding;
+					railLive[1] = event.time();
+					opening = false;
+				}
+				BlockPos openOffTail = !offClimb && RAIL_FROM_HANDOVER && opening
+						&& !reaches && !wantsTurn
+						&& railHolds(event, false)
+						&& railFloorTakes(placements, lane, event)
+						&& railDelay(currentTime, event.time()) > 0
+						&& placements.railTail() != null
+						&& lane.pos().equals(placements.railTail().relative(lane.travel()))
+					? placements.railTail() : null;
+				if (openOffTail != null) {
+					addRailFromHandover(placements, openOffTail, lane.travel(),
+						railDelay(currentTime, event.time()));
+					railPhase = 1;
+					railBlanksRunning = 0;
+					railFloorCarried = false;
+					railRunColumns = 0;
+					railRunFloorNotes = 0;
+					railRunBlanks = 0;
+					// Both rails live at the module's tick: the tail sounded with the head, and the
+					// handover's stone went live with it.
+					railLive[0] = currentTime;
+					railLive[1] = currentTime;
+					opening = false;
+				} else if (opening) {
+					int seed = railStackSeed(placements, lane, lastStyle, currentTime, false);
+					// The wait in front of the run, laid the way every other module lays it: a repeater
+					// for every four ticks of it, and the remainder in the head's own. Clamping it to
+					// four instead is right only while no gap exceeds four, which is true of every
+					// synthetic song here and of no real one -- song of storms opened a run on a wait
+					// of eight and sounded its whole first phrase early.
+					SpatialDelayTrigger opener = addSpatialDelayBeforeEvent(placements, lane,
+						event.time() - currentTime - spentPadding, layout.ultra());
+					// Off a stacked chord only where the padding did not move the lane on: the cross
+					// has to be the cell behind the trigger, and a column of wire in between puts the
+					// whole thing out of reach.
+					boolean offStack = seed != NO_BLANK && opener.lane().pos().equals(lane.pos());
+					fromDust = !offStack;
+					lane = offStack
+						? addRailFromStack(placements, opener.lane(), opener.triggerDelay(), seed)
+						: addRailHead(placements, opener.lane(), opener.triggerDelay(), event.time());
+					railPhase = 0;
+					railBlanksRunning = 0;
+					railFloorCarried = false;
+					railRunColumns = 0;
+					railRunFloorNotes = 0;
+					railRunBlanks = 0;
+					// The head's own stone and the stone under its dust both go live with this chord,
+					// so both rails are timed from here.
+					railLive[0] = event.time();
+					// The floor rail is live from whatever seeded it: this chord where a head was
+					// built, and the stacked chord behind it where one was inherited.
+					railLive[1] = offStack ? seed : event.time();
+				} else if (railPhase == 1 && railBlank != NO_BLANK) {
+					// The floor column this chord would have taken, laid empty: either the chord is a
+					// three and the floor rail has no centre for it, or the pair of gaps behind it is
+					// too long for one repeater. Either way the chord takes the path column after it
+					// and the two rails come out swapped over.
+					lane = addRailBlank(placements, lane, railBlank,
+						railDelay(railLive[0], event.time()));
+					railRunColumns++;
+					railRunBlanks++;
+					railLive[1] = railBlank;
+					railPhase = 0;
+				}
+				railBlank = NO_BLANK;
+				int nextDelay;
+				// Nought except where the run ends on a floor column, which is the one place it has to
+				// leave something behind for the lane to read. See below.
+				int handUp = 0;
+				if (railPhase == 0) {
+					// The path rail is the only place a run may end, so a column here only carries on
+					// where the whole pair after it fits -- both its columns, and whatever the lane
+					// keeps back for its turn. Measured against the wall rather than against the
+					// turn's cells: those are a wire budget, and every column of a run holds a
+					// repeater.
+					// The turn's reserve is not spare, and a flat turn does not release it. Tried:
+					// letting a run heading for a flat turn spend that column took depth from 22342 to
+					// 22295 and breach blocks from 1106 to 1410, which is 304 blocks outside the
+					// promised width for 47 of depth. The column is keeping lanes inside their wall.
+					//
+					// And it bought no corner either, because a corner is not short of the wall -- it
+					// is one column *past* it. {@link #armTurn} sets it at {@code ahead(columns + 1)}
+					// while a run measures its room against the wall itself, so no run can stand on one
+					// however much room it is given. That is the line for the next attempt.
+					//
+					// Never past a corner all the same. A run that does reach one ends on it, which is
+					// what keeps a repeater off it: both branches of addRailNote lay theirs only to
+					// carry the run on.
+					// The parity, read and never picked: carry the double rail to the corner column and
+					// ask what that column would have been. From a path column an even number of cells lands
+					// on another path column, so an even distance to the corner is model 1 -- the run's last
+					// note stands on the corner, the sideways leg is ordinary lane, and the reseed opens the
+					// next run off the corner's own dust. An odd one means the last path note lands one short,
+					// which is model 2 and a different shape.
+					//
+					// The ground this asks for is the corner and not the wall, and that is not the turn's
+					// reserve being spent. The reserve keeps back a column for the lane to hand over on; a
+					// turn already armed has bought that column and stood a corner in it, and the run hands
+					// over there. A lane whose turn is not yet armed still pays, which is why this asks the
+					// route for its bends rather than asking the wall how far off it is.
+					int toCorner = cellsToCorner(lane);
+					// Where the corner will stand once the turn is armed, for a run whose turn is not armed
+					// yet. A flat turn armed tight puts its corner on the wall column itself -- see
+					// {@link #FLAT_TURN_KEEPS_ITS_WIDTH} -- and nearly every flat turn in the library is
+					// armed tight, so a run heading for one is measured as though the wall column were the
+					// corner. That is the safe assumption: read as ordinary lane, the wall column takes a
+					// path column with two flanks, and the arm then turns the lane on that very cell and the
+					// flanks go down along the sideways run -- one into the floor column just laid, one past
+					// the corner. Every wrong note the tight turn first cost was that pair of flanks, and a
+					// note on the corner is a corner column: a centre and nothing else, which is what
+					// {@link #railCornerTakes} asks below. Where the turn ends up wide the run has kept one
+					// column it could have spent, and no more.
+					boolean cornerAssumedOnTheWall = FLAT_TURN_KEEPS_ITS_WIDTH && flatAhead
+						&& toCorner == 0;
+					if (cornerAssumedOnTheWall) {
+						toCorner = railRoom(lane, laneWall);
+					}
+					// Two or three, which is one pair either way. A wide corner stands one column past the
+					// wall, so the distance to it is the room plus one, and the ordinary test already passes
+					// at four -- room three, which is a pair and the reserve. Two and three are the two it
+					// refuses, and they are the two halves of the parity:
+					//
+					//   two    the pair lands a floor column on the wall and a path column on the corner. The
+					//          run's last note stands on the bend, the sideways leg is ordinary lane, and the
+					//          reseed opens the next run off the corner's own dust.
+					//   three  the pair lands a floor column one short of the wall and a path column on it.
+					//          The run comes to rest one column short of the corner and the turn is laid the
+					//          way it always was.
+					//
+					// Three was left out at first as "model 2", on the reading that a run stopping one short of
+					// a corner had to carry both rails round the bend to be worth anything. With the two laid
+					// side by side, model 1 alone turned out easier and just as compact: the only optimisation
+					// wanted is the notes leading into the turn, one extra note, with no reason to drop the
+					// bottom lane early. The bend does not have to change
+					// at all. What the run buys is the last pair before it: two columns holding two notes where
+					// the ordinary module standing there holds one.
+					boolean ontoTheCorner = RUN_RUNS_TO_THE_CORNER && flatAhead
+						&& toCorner >= 2 && toCorner <= 3;
+					// What the run may still spend, and what it must keep back. See
+					// {@link #RUN_SPENDS_THE_FLAT_RESERVE}: a flat turn's handover is the corner, which is not
+					// a column of this lane at all, so a run heading for one keeps nothing back and a run
+					// whose turn is already armed may spend the corner as well.
+					//
+					// Asked of the wall rather than of the bends, because a run comes to rest two columns
+					// short of its wall and a turn is not armed until a chord overshoots one. So at the
+					// moment this matters the route carries no corner yet and {@code cellsToCorner} is
+					// nought -- which is why asking the bends for it fired ten times over the library.
+					int keep = flatAhead && RUN_SPENDS_THE_FLAT_RESERVE ? 0 : reserve;
+					// And ahead of a staircase, the wall column itself: the staircase stands on it, so the
+					// pair's path column has to come to rest a column short of it, which is room three and
+					// not two. This was two, and it read right for as long as the handover column was
+					// reserved -- {@link #RESERVES_THE_HANDOVER_COLUMN} kept the reserve at one and two plus
+					// one is three. Letting lanes land flush took the reserve to nought, and every run
+					// heading for a staircase then laid its last path column on the wall column and stood
+					// the staircase a column out: 31 breach blocks on lady brown alone, one per lane, none
+					// of them a chord. See {@link #RAIL_LEAVES_THE_WALL_COLUMN}.
+					if (RAIL_LEAVES_THE_WALL_COLUMN && !flatAhead) {
+						keep = Math.max(keep, 1);
+					}
+					// The corner's own column, where the corner stands past the wall; a tight corner is on
+					// the wall column and the room already counts it.
+					int cornerPastTheWall = Math.max(0, Math.min(1, toCorner - railRoom(lane, laneWall)));
+					int ground = railRoom(lane, laneWall)
+						+ (ontoTheCorner && toCorner == 2 ? cornerPastTheWall : 0);
+					if (flatAhead && ground >= 2 + keep && toCorner >= 2 && toCorner <= 3) {
+						placements.padded(toCorner == 2 ? "railPairOntoTheCorner" : "railPairIntoTheTurn");
+					}
+					RailPair pair = !lane.cornerAt(0) && ground >= 2 + keep
+						? railPairAfter(events, index, event.time(), railLive[1], placements,
+							lane.ahead(1), booked)
+						: null;
+					// And the chord that would land on the corner has to be one a corner can hold. Asked of
+					// the pair rather than of the event two along, because a blank moves the chord up a column
+					// and the corner would then be holding a different one.
+					//
+					// Only where the pair really does reach the corner, which is the distance of two. At three
+					// the run comes to rest on the wall, a column short of the bend, and its last column is an
+					// ordinary path column with the two flanks any other one has.
+					//
+					// Asked of the distance to the corner alone. It used to ask the room against the wall as
+					// well, which said the same thing while every corner stood one past the wall -- a
+					// distance of two was a room of one -- and says the opposite of a corner assumed on the
+					// wall, where a distance of two is a room of two: the pair landed on the corner and the
+					// question was never put.
+					if (pair != null && ontoTheCorner && toCorner == 2) {
+						int cornerEvent = index + (pair.blank() ? 1 : 2);
+						if (cornerEvent >= events.size()
+								|| !railCornerTakes(events.get(cornerEvent))) {
+							placements.padded("railCornerRefusedChord");
+							pair = null;
+						} else {
+							placements.padded("railCornerTookChord");
+						}
+					}
+					// And a floor rail that keeps taking blanks is not carrying anything: a chord and a
+					// blank between them cost the two columns the plain lane charges for the chord
+					// alone, so a stretch of them is the head's two columns thrown away and nothing
+					// gained. The run stops instead and the lane carries on plainly, which is what
+					// what was asked for: the lane may simply continue where it does not know whether a
+					// note can be placed there later.
+					// The opening question asked again, because the walk can find the answer has changed:
+					// {@link #railFloorChords} reads with no placements, so a floor column it counted on may
+					// turn out to be a cell a stacked module alongside has already taken.
+					//
+					// One chord, not {@link #RAIL_FLOOR_CHORDS_WANTED}, because the head is already spent
+					// and a spent head is not a reason to spend more. At the margin a blank pair is two
+					// columns for one chord, which is exactly what the plain lane charges -- so carrying on
+					// through blanks costs no depth at all, and costs a repeater a column. That is the whole
+					// of the complaint, and it is why this is asked where a blank is about to be laid
+					// rather than where the run opened.
+					//
+					// Only while the floor rail has carried nothing at all. A run that has carried once has
+					// beaten the plain lane already, and ending it would only make the next one pay for
+					// another head.
+					//
+					// The reserve is not taken off the room here, which makes the horizon a column longer
+					// than the run really has. That errs towards carrying on, which is the direction a guess
+					// should err in: what this way costs is a column, and what the other way costs is a run
+					// that was about to start earning.
+					if (pair != null && pair.blank() && !railFloorCarried && RUN_WANTS_ITS_FLOOR_RAIL
+							&& railFloorChords(events, index, railLive[1], railRoom(lane, laneWall), 1,
+								booked) < 1) {
+						placements.padded("railStoppedBarren");
+						pair = null;
+					}
+					if (pair != null && pair.blank() && !railFloorCarried
+							&& railBlanksRunning >= RAIL_BLANKS_IN_A_ROW) {
+						placements.padded("railStoppedForBlanks");
+						pair = null;
+					}
+					railBlanksRunning = pair == null || !pair.blank() ? 0 : railBlanksRunning + 1;
+					nextDelay = pair == null ? 0 : railDelay(railLive[1], pair.floorTime());
+					railBlank = pair != null && pair.blank() ? pair.floorTime() : NO_BLANK;
+				} else {
+					// A floor column always carries on: the pair it belongs to was committed to at the
+					// path column behind it. Its repeater is the path rail's, measured from the path
+					// rail's last anchor.
+					nextDelay = railNextDelay(events, index, railLive[0]);
+					// Except that it does not, and nothing said so. railNextDelay comes back nought
+					// three ways -- the song ends, the next chord is too big for a rail column, or the
+					// path hop is outside one to four -- and two of those leave the run ending here, on
+					// a floor column. A floor column fills the floor and only lays the path cell above
+					// it when it has a repeater to put there, so an ending one leaves that cell as air:
+					// the lane resumes at path level, its next trigger reads the gap, and the song stops.
+					// The path branch of addRailNote fills the other rail's cell when it stops for
+					// exactly this reason and carries a tripwire besides. This half had neither.
+					// A floor column that ends the run has to hand the path rail up before it goes.
+					// It fills the floor and lays the cell above it only when it has a repeater to put
+					// there, so an ending one leaves that cell as air -- and the lane resumes at path
+					// level and reads exactly that cell. Measured rather than reasoned about: 182 runs
+					// over the library end this way and the same 182 repeaters are left reading air,
+					// one for one (OrphanRepeaterProbe).
+					//
+					// The repeater that closes it is timed to leave the cell live at this chord's own
+					// tick, because that is what the lane's next trigger is measured from. The path
+					// rail last went live two events back, so the span is this tick less that one.
+					if (nextDelay == 0 && index + 1 < events.size()) {
+						placements.padded("railEndedOnAFloorColumn"
+							+ (railFits(events.get(index + 1)) ? "PathHop" : "ChordTooBig"));
+						handUp = RAIL_HANDS_THE_PATH_UP ? railDelay(railLive[0], event.time()) : 0;
+						placements.padded(handUp > 0 ? "railHandedThePathUp" : "railHandUpTooLong");
+					}
+				}
+				if (TRACE) {
+					System.out.println("RAIL t=" + event.time() + " at " + lane.pos().getX() + ","
+						+ lane.pos().getY() + "," + lane.pos().getZ() + " phase=" + railPhase
+						+ " opening=" + opening + " nextDelay=" + nextDelay
+						+ " wall=" + laneWall + " room=" + railRoom(lane, laneWall)
+						+ " travel=" + lane.travel());
+				}
+				// The run's last column, closing the way a small module closes: centre given up to the
+				// wire, notes hung either side of it a level down.
+				//
+				// This is where the instant seed is actually won or lost. A path column's centre is a note
+				// block at path+1 with nothing under it, and that is the one shape a mirrored ladder cannot
+				// start from -- a powered block lights only the dust it stands square against, and the ladder's
+				// bottom rung is diagonal from it. In-game reading showed exactly that off ultra-ones-mixed at
+				// 26 wide, and the fix was drawn there: with stone in that cell and the note on the side,
+				// it could have run a mirrored double-rail staircase and seeded instantly.
+				//
+				// Only where this column really is the one the staircase reads from, which is one
+				// column short of the wall: the climb is pinned there, so nothing goes between them.
+				// And only where the run ends here anyway ({@code nextDelay == 0}) -- a column that
+				// still has to drive the next one needs its repeater, and this shape has no repeater
+				// in it.
+				// How far short of its wall a run comes to rest, and whether what it is short of is a
+				// staircase or a flat turn. Counted because "two or three columns" was a guess and the
+				// fix depends on the number.
+				if (railPhase == 0 && nextDelay == 0) {
+					placements.padded("railEndedRoom"
+						+ Math.max(0, Math.min(9, railRoom(lane, laneWall)))
+						+ (above >= 0 && above < floors ? "Staircase" : "Flat"));
+				}
+				// The parity, read where the run gives up rather than guessed.
+				// A corner stands one column past the wall, so it is railRoom + 1 columns further on,
+				// and the phase there is this one flipped that many times. A path column on the corner
+				// is model 1; a floor column there means the last path note landed one short, model 2.
+				if (nextDelay == 0 && flatAhead) {
+					int toCorner = railRoom(lane, laneWall) + 1;
+					placements.padded("railFlatEnd"
+						+ ((railPhase + toCorner) % 2 == 0 ? "Model1Path" : "Model2Floor")
+						+ "Room" + Math.max(0, Math.min(9, railRoom(lane, laneWall)))
+						+ "Step" + slabStep);
+				}
+				// And it stops there. The model 1 is that the last top-rail note lands on the
+				// corner and the sideways run after it is ordinary lane; carrying both rails round the
+				// bend is model 2, which is a different shape -- a repeater each, staggered -- and not
+				// this. A repeater may not stand on a corner either way, and ending here is what keeps
+				// one off it: both branches of addRailNote lay theirs only when the run carries on.
+				if (lane.cornerAt(0)) {
+					if (railPhase == 1 && nextDelay > 0) {
+						handUp = RAIL_HANDS_THE_PATH_UP ? railDelay(railLive[0], event.time()) : 0;
+					}
+					nextDelay = 0;
+					railBlank = NO_BLANK;
+				}
+				boolean closesTheLane = railPhase == 0 && nextDelay == 0
+					&& RAIL_SEEDS_OFF_THE_CLIMB
+					&& placements.climbAhead() && railRoom(lane, laneWall) == 1
+					&& closesOnTheFlanks(placements, event.notes(), lane, event.time(), false);
+				// A floor column that is not a blank is the floor rail earning its keep.
+				railFloorCarried |= railPhase == 1;
+				if (railPhase == 1) {
+					railRunFloorNotes++;
+				}
+				if (closesTheLane) {
+					layFlankedClose(placements, lane, event.notes(), event.time(), "rail:CLOSING");
+					lane = lane.ahead(1);
+				} else {
+					lane = addRailNote(placements, lane, railPhase, event.notes(), event.time(),
+						nextDelay, fromDust, handUp);
+				}
+				RAIL_COLUMNS++;
+				railRunColumns++;
+				railLive[railPhase] = event.time();
+				if (nextDelay <= 0) {
+					railRunEnded(placements, railRunFloorNotes, railRunColumns, railRunBlanks);
+				}
+				railPhase = nextDelay > 0 ? 1 - railPhase : -1;
+				currentTime = event.time();
+				// Every column of a run holds a repeater bar the one it opens on, so the wire never
+				// runs: whatever touches the end of one is reading a block a repeater drives directly.
+				// The opening column is the exception and it is not allowed to be the last, which is
+				// what {@link #railOpens} asks its room for.
+				tipSignal = DUST_RANGE;
+				columnBehindBusy = true;
+				lastStyle = ChordStyle.SMALL;
+				laneStarted = true;
+				leavingTurn = false;
+				continue;
+			}
+			// What the planner would say this chord does, asked at the moment the walk is about to do
+			// it. Kept as a counter rather than a fault because a gap here is not wrong in itself --
+			// a nudge is decided against blocks on the ground and no arithmetic can foresee it -- but
+			// every one of these is a column the plan spent somewhere the walk did not, and the two
+			// disagreeing is the bug shape this file keeps producing. The corner-bus gap showed up
+			// here as two columns on the opening chord of every lane leaving a flat turn.
+			// Asked the same way the walk is about to ask it, or this counter reports a gap it made
+			// up itself. Where a pad moves the opening the walk answers free by the other clause and
+			// the cells here are not the ones it will use -- but then the pad has already made the
+			// answer yes, so the two still agree.
+			boolean foretoldBusy = columnBehindBusy
+				&& !backPairIsFree(placements, lane, event.time());
+			int foretold = layout.ultra() && !turning
+				? landingOf(before.getX(), lane.travel().getStepX(), event,
+					event.time() - currentTime - spentPadding, foretoldBusy, wall, layout,
+					leavingTurn, parity).end()
+				: Integer.MIN_VALUE;
+			// Columns of dust the wait in front of this chord is going to lay anyway. A module that
+			// has to shift a column to agree with the lane behind can slide inside those for
+			// nothing; with none of them the shift is a fresh column. Counted so the difference
+			// between the two is known before anything is built on the guess that it matters.
+			int slackColumns = Math.max(0, (event.time() - currentTime - spentPadding - 1) / 4);
+			SpatialDelayTrigger trigger = addSpatialDelayBeforeEvent(placements, lane,
+				event.time() - currentTime - spentPadding, layout.ultra());
+			currentTime = event.time();
+			// Already clear of any corner: the delay hands back a cell a repeater may stand on, which
+			// is the one rule every repeater in the build obeys and so is applied where they are laid.
+			Lane opening = trigger.lane();
+			// Which way the wall at the end of this lane goes, recorded against the shape the chord
+			// came out as. In-game testing noticed heads seemed never to appear on a lane ending in a climb,
+			// and a shape that can only be built going one way is a shape half of whose value is
+			// missing -- so it is counted rather than argued about.
+			boolean climbingLane = climb > 0;
+			// Placed against the blocks, not against a rule about where the walk is.
+			//
+			// v2 asks the permissive question first -- may this chord take the denser shape here --
+			// and lets the world answer. A shape whose blocks overlap something throws, and a throw
+			// here is not a broken build: it is the answer. The trial is rolled back and the chord is
+			// laid again with the conservative answer, exactly as if the ban had been in force.
+			//
+			// This is the piece both of today's bans were standing in for. The small-chord turn ban
+			// refuses 1,733 chords out of 1,733 that had a denser shape available, and the bend ban
+			// refuses a stacked bus the room to wrap a corner it fits round -- and neither can simply
+			// be deleted, because deleting them collides. Asking is what makes deleting them safe.
+			int slack = slackColumns;
+			boolean behind = !columnBehindBusy || !opening.pos().equals(before)
+				|| backPairIsFree(placements, opening, event.time());
+			// Against the wall this chord is actually facing, which after a staircase is the other one.
+			//
+			// {@code wall} is worked out once at the top of the event, from the travel the lane had then. A
+			// descent or a climb built further up this same iteration turns the lane round and sets it down
+			// on the next floor, and the chord is laid straight after -- so the wall in front of it is the
+			// far one where the old wall was the near one. Measured against the old one, {@code (wall - x) *
+			// step} is nought or less on every such chord, and the room test below hands every stacked and
+			// headed shape on the first chord of every descended lane to a plain bus: {@code
+			// gaveUp=roomAhead-1<5} with twenty-two columns of empty lane in front of it. In-game testing
+			// found it on adventure-of-a-lifetime at 25x5, a chord of five measured for a stacked bus and
+			// built as a plain one.
+			//
+			// The rails a hundred lines up already ask this question again and say why in the same
+			// words -- {@code laneWall} -- because the answer from before the turn is about a lane that
+			// no longer exists. This is the other half of that.
+			int wallAhead = ROOM_AHEAD_ASKS_THE_WALL_IT_FACES
+				? laneWall(nearWall, farWall, forward, opening.travel(), floor, climb, floors)
+				: wall;
+			int ahead = turning ? Integer.MAX_VALUE
+				: (wallAhead - opening.pos().getX()) * opening.travel().getStepX();
+			// The shape the walk decided when it measured this chord, if the chord is still standing
+			// where it was measured. Every other route to here has moved it -- a pad the lane laid, a
+			// turn it took -- and a shape decided for one column is not an answer about another, so
+			// those ask again from where the chord actually is.
+			//
+			// This is what makes the decision the decision. The measurement above and the build below
+			// are one call apart rather than two rule sets apart, so the length the lane was closed on
+			// is the length that goes down.
+			// The pad that frees the chord after this one, sized by building. Each candidate is laid
+			// and the chord built behind it in a trial, and the first that lands this chord flush on
+			// its wall with the next chord no longer stuck is kept; the rest is rolled back. See
+			// {@link #V2_PREPADS_A_STUCK_NEXT}.
+			if (unsticksTheNext && !turning && index + 1 < events.size()) {
+				EventGroup next = events.get(index + 1);
+				int nextWait = next.time() - event.time();
+				int step = opening.travel().getStepX();
+				int chosen = 0;
+				for (int k = unstickFrom; k <= V2_STUCK_PREPAD_CAP && chosen == 0
+						&& tipSignal - k >= 1; k++) {
+					Pad candidate = planPad(k, tipSignal, 0, 0);
+					if (candidate.cells().size() != k) {
+						break;
+					}
+					PlacementPlan.Behind was = placements.behind();
+					placements.beginTrial();
+					try {
+						Lane padded = emitPad(placements, opening, candidate, "padUnsticksTheNext");
+						Placed tried = addChordModule(placements, padded, trigger.triggerDelay(), event,
+							slack, true,
+							inTurn(placements, turning, leavingTurn, padded.pos(), lastCorner),
+							(wallAhead - padded.pos().getX()) * step, candidate.signal(), layout);
+						int leaves = tried.style() == ChordStyle.BUS
+								|| tried.style() == ChordStyle.SUNKEN_BUS
+							? DUST_RANGE - tried.busCells()
+							: tried.style().busHeaded()
+								? DUST_RANGE - STACKED_BUS_TRANSITION - tried.busCells()
+								: DUST_RANGE;
+						boolean flush = (wallAhead - tried.lane().pos().getX()) * step == 0;
+						if (flush && !nextChordIsStuck(placements, tried.lane(), next, nextWait, 0,
+								leaves, endsOnBus(tried.style(), tried.busCells()),
+								takesTheGapBehind(tried.style(), tried.busCells()),
+								tried.style().stacked(), turnCells, offBus, splitCells, climb > 0)) {
+							chosen = k;
+						}
+					} catch (IllegalArgumentException collided) {
+						// Nothing to keep.
+					} finally {
+						placements.rollbackTrial();
+						placements.behind(was);
+					}
+				}
+				placements.padded(chosen > 0 ? "v2UnstuckBy" + chosen : "v2UnstuckNoPadFits");
+				if (chosen > 0) {
+					Pad unsticking = planPad(chosen, tipSignal, 0, 0);
+					opening = emitPad(placements, opening, unsticking, "padUnsticksTheNext");
+					tipSignal = unsticking.signal();
+					behind = true;
+					ahead = turning ? Integer.MAX_VALUE
+						: (wallAhead - opening.pos().getX()) * opening.travel().getStepX();
+				}
+			}
+			Shape shape = opening.pos().equals(willOpenOn.pos()) && !turning
+				? shaped
+				: shapeFor(placements, opening, event, slack, behind,
+					inTurn(placements, turning, leavingTurn, opening.pos(), lastCorner), ahead,
+					tipSignal, layout);
+			if (shape != shaped) {
+				placements.padded("v2ShapeAskedAgain");
+			}
+			Placed placed;
+			placements.beginTrial();
+			try {
+				placed = buildShaped(placements, opening, trigger.triggerDelay(), event, shape, layout);
+				placements.commitTrial();
+			} catch (IllegalArgumentException collided) {
+				placements.rollbackTrial();
+				placements.padded("v2ShapeCollidedFellBack");
+				placed = addChordModule(placements, opening, trigger.triggerDelay(), event, slack,
+					behind, true, ahead, tipSignal, layout);
+			}
+			// The disagreement the one-decision walk exists to remove, counted rather than assumed
+			// gone. What the lane was measured for against what went into the ground -- and if those
+			// two are ever different, the lane was closed on a length that is not the length it got.
+			if (placed.style() != shape.style()) {
+				placements.padded("v2Built" + placed.style() + "Decided" + shape.style());
+			}
+			if (placed.nudged() && !shape.nudge()) {
+				placements.padded("v2NudgedAfterDeciding");
+			}
+			// And the length, which is the number the lane was actually closed on. The style agreeing
+			// is not the same as the length agreeing: a bus that finds a note's cell taken carries the
+			// run a block further and comes out longer in the shape it was measured in.
+			int predicted = here.end();
+			int actual = placed.lane().pos().getX();
+			int over = (actual - predicted) * lane.travel().getStepX();
+			if (over != 0) {
+				placements.padded("v2Built" + (over > 0 ? "Longer" : "Shorter") + Math.abs(over)
+					+ "Than" + shape.style());
+			}
+			if (event.style().busHeaded()) {
+				placements.padded("planStackedBusWanted" + (climbingLane ? "Climb" : "Descent"));
+				placements.padded("planStackedBusGot" + placed.style()
+					+ (climbingLane ? "Climb" : "Descent"));
+			}
+			// Where the chord did not land where the plan said it would, and why, as far as the walk
+			// can tell. Almost all of it is the nudge, which already re-plans and which no arithmetic
+			// could have foreseen -- it is decided against blocks on the ground. What is left is a bus
+			// that had to skip an occupied slot and so came out a column or three longer than its note
+			// count implies. Re-planning after those as well was tried and changed nothing measurable,
+			// so this stays a counter: it is the cheapest way to notice the next time the two drift
+			// apart, which is the bug shape this file keeps producing.
+			if (foretold != Integer.MIN_VALUE && foretold != placed.lane().pos().getX()) {
+				int off = (placed.lane().pos().getX() - foretold) * lane.travel().getStepX();
+				if (TRACE) {
+					System.out.println("  DRIFT t=" + event.time() + " n=" + event.notes().size()
+						+ " from=" + before.getX() + " foretold=" + foretold
+						+ " landed=" + placed.lane().pos().getX() + " off=" + off
+						+ " style=" + placed.style() + " nudged=" + placed.nudged()
+						+ " foretoldBusy=" + foretoldBusy + " busy=" + columnBehindBusy);
+				}
+				placements.padded("plan" + (off > 0 ? "Short" : "Long") + Math.min(Math.abs(off), 4)
+					+ (placed.nudged() ? "Nudged" : "") + placed.style());
+				// And re-plan on it, not only count it. Everything the plan still owes this lane is
+				// owed from the column the chord actually ended in, and a plan that keeps handing out
+				// pad measured from a column three back spends wire the next repeater is never told
+				// about -- which is a run of sixteen and a lane that stops.
+				//
+				// This was tried once before and reported as changing nothing measurable. It was
+				// true then: the only thing that drifted was the nudge, which already re-plans here.
+				// What drifts now is the shape, because whether the pair beside a module is free is
+				// answered from blocks and predicted from arithmetic, and shedding a back flank moves
+				// the answer without moving the arithmetic.
+				if (REPLAN_ON_DRIFT) {
+					replan = layout.ultra();
+				}
+			}
+			leavingTurn = false;
+			lane = placed.lane();
+			columnBehindBusy = takesTheGapBehind(placed.style(), placed.busCells());
+			lastStyle = placed.style();
+			lastBusCells = placed.busCells();
+			// A nudge spends a column the plan was not told about, so everything the plan still owes
+			// this lane is owed from a column further along than it thinks. Left alone, the lane
+			// arrives carrying pad that was measured to close a gap the nudge has already closed --
+			// and lands past the wall by exactly the columns nudged. In-game testing found it on Big Shot at
+			// thirty-six wide: a stacked chord of six nudged, four chords later a pad of one was laid
+			// for a shortfall that no longer existed, and the bus behind it came to rest a column out.
+			//
+			// Re-planning is the answer rather than predicting the nudge, because a nudge is decided
+			// against blocks already on the ground and the planner has only arithmetic. What it cannot
+			// foresee it can at least be told about afterwards.
+			if (placed.nudged()) {
+				replan = layout.ultra();
+			}
+			// And whenever the ground answered a question the plan had to guess at.
+			//
+			// Whether the pair of slots behind a module is free is answered from blocks by the walk and
+			// predicted from arithmetic by the plan, and the arithmetic is pessimistic: it says busy far
+			// more often than the ground does. Where the two differ the walk builds a shape the plan did
+			// not price -- a head of seven where a plain bus was booked -- and every column the plan still
+			// owes this lane is owed against the wrong length.
+			//
+			// The drift counter above cannot see it. That compares where a chord landed against where
+			// {@link #landingOf} said it would, and the walk asks landingOf with the same blocks-based
+			// answer it built with, so the two agree exactly and nothing is reported. What went stale is
+			// the sweep, which ran before any of this was on the ground, and nothing compares against
+			// that.
+			//
+			// So the trigger is the disagreement itself rather than its consequences: the guess said
+			// busy, the blocks said free, and from here the plan is answering about a lane that no longer
+			// exists.
+			if (REPLAN_WHEN_BLOCKS_DISAGREE && columnBehindBusy && !foretoldBusy) {
+				placements.padded("planReplanBlocksDisagreed");
+				replan = layout.ultra();
+			}
+			// A bus is the one module that hands the next thing along a wire rather than a block: its
+			// stones are lit by the dust running over them, and that dust has been counting down since
+			// the repeater at the head of it. A chord of three or fewer ends on a block the repeater
+			// drives directly, which is worth the full fifteen to whatever touches it.
+			// Charged at the blocks the bus actually laid, not at the blocks its note count implies.
+			// A bus that had to skip slots is longer than that, and the difference is wire the next
+			// repeater never gets told about.
+			// A stacked module is neither. It ends on a cell of dust -- the relay its outer column
+			// reads through -- and that cell is the first of the fifteen, not a free block in front of
+			// them. Handing on the whole fifteen let a lane lay fifteen more cells after it and land
+			// the last one at nought, which is the exact width of a dead line: sixteen blocks of wire
+			// where the budget said fifteen. In-game testing found it on Do The Dance.
+			// A stacked module hands on the whole fifteen, exactly as a chord of three does. Its one
+			// cell of dust is the cross *underneath* the centre block, feeding the two side relays;
+			// the signal path over the top is repeater, centre block, next cell, and a centre block
+			// driven by a repeater is a solid block strongly powered, so the cell after it reads
+			// fifteen. In-game testing measured it with lamps: fifteen lit from the module, in and out.
+			// A stacked-bus is the one shape that is both. Its head hands on the full fifteen the way
+			// any module does, and then its own transition and bus spend out of that before the next
+			// chord ever sees it -- so reading it as a module, which is what {@code !BUS} used to
+			// mean, told the lane it had fifteen when it had four. That is dead wire, and the sweep
+			// found 260 builds of it. The same sum as {@link #landingOf}, which had it right.
+			// A sunken bus is a bus for this sum, and saying so is not decoration: it spends a cell of
+			// dust on its lowered column and one on every bus cell after, and Body.busCells carries that
+			// total. Left out of this test it fell through to the module arm and handed the lane a full
+			// fifteen it had already spent -- which is the very fault the comment above records at 260
+			// builds, in the same line, for a different shape.
+			tipSignal = placed.style() == ChordStyle.BUS || placed.style() == ChordStyle.SUNKEN_BUS
+				? DUST_RANGE - placed.busCells()
+				: placed.style().busHeaded()
+					? DUST_RANGE - STACKED_BUS_TRANSITION - placed.busCells()
+					: DUST_RANGE;
+			laneStarted = true;
+			placedWhileTurning |= turning;
+		}
+	}
+
+	/**
+	 * The routed walk: {@link #walkV2} with the floor state machine replaced by a {@link
+	 * LaneRoute} it follows.
+	 *
+	 * <p>A near-copy on purpose, the way v2 itself began as a copy of the first walk: the routed
+	 * paste has to be provably the same build before it can be allowed to become a different one,
+	 * and a copy can be diffed where a rewrite cannot. The gate is identity -- this walk on the
+	 * serpentine route lays every song block for block as {@link #walkV2} lays it, held by
+	 * {@code RouteWalkIdentityTest} -- so a change to one of the two walks is a change to both
+	 * until the day they are meant to diverge, and the identity test is what says so.</p>
+	 */
+	static void walkRouted(List<EventGroup> events, BlockPos origin, Direction forward,
+			int laneWidth, int floors, PlacementPlan placements, Layout layout, LaneRoute route,
+			WalkStart start) {
+		walkRouted(events, origin, forward, laneWidth, floors, placements, layout, route, start,
+			Set.of());
+	}
+
+	/**
+	 * @param tightTurns the events at which a flat turn is to be armed a column early, because a
+	 *     walk before this one laid it wide and watched a note land past its corner. See
+	 *     {@link #FLAT_TURN_KEEPS_ITS_WIDTH}.
+	 */
+	static void walkRouted(List<EventGroup> events, BlockPos origin, Direction forward,
+			int laneWidth, int floors, PlacementPlan placements, Layout layout, LaneRoute route,
+			WalkStart start, Set<Integer> tightTurns) {
+		// Where chords grow, and the direction the whole slab creeps once a sweep is done.
+		Direction depth = forward.getClockWise();
+		// The walk's whole position: where it stands, which way the wire is running, and any corners
+		// still ahead of it. One object rather than a cursor and a heading, because a turn is now a
+		// stretch of this route with two bends in it -- the walk carries on through a corner the same
+		// way it carries on through anything else, and the route is what remembers that it bent.
+		// Marked crowded for ultra from the very first cell. Ultra is the mode that packs lanes until
+		// they touch, so no lane in one owns the ground its notes hang over: the cells beside it belong
+		// to the lane before, to the turn it came round, or to the corridor alongside. Every note it
+		// hangs is therefore offered rather than assumed, and a bus that finds a slot taken carries on
+		// a block further and hangs it there. The other modes leave a clear column and can assume.
+		// Started partway along the lane where a debug build asks for it, so a chord can be put a
+		// stated distance from the wall without a song in front of it to push it there. The walls
+		// below are measured from the origin and not from here, which is the whole point: the
+		// corridor is the width it would be, and the walk simply begins further down it.
+		Lane lane = layout.ultra()
+			? Lane.straight(origin.relative(forward, start.column()), forward, depth).crowding()
+			: Lane.straight(origin.relative(forward, start.column()), forward, depth);
+		// Whether those bends are the ones a turn put there, so that the walk knows to re-pin the
+		// note side and start a new lane the moment it comes out the far side.
+		boolean turning = false;
+		// And whether the chord about to be placed is the first one after coming out. The stated
+		// reason was that a stacked module there is still perpendicular to the ones along the
+		// sideways run it has just left -- the corner behind it rather than under it, near enough to
+		// be the same problem -- so the restriction outlasts the turn by exactly one chord.
+		//
+		// That reason is doubtful, and the blocks agree. A turn's bus comes out of the
+		// second bend running the new lane's way, so by the time this chord is placed the cells
+		// behind it are collinear with it, not across it: Kick Back's turn at tick 340 is nine cells,
+		// bends after one and after four, so its last five run along x on the new z and the chord at
+		// tick 344 follows them in line. The sideways run is three cells further back. Gated by
+		// {@link #TURN_BAN_OUTLASTS} so the claim can be measured rather than argued.
+		boolean leavingTurn = false;
+		// The last corner the route took, for the distance form of the rule above.
+		BlockPos lastCorner = null;
+		// A descent is the one thing in a build that steps a column off its own centre line, and
+		// it steps back the way the slabs came. The slab behind this one is climbing where this one
+		// descends -- they alternate -- and a climb keeps to the centre line, so that column is the
+		// one with nothing in it. Stepping the other way would put live stone against the notes of
+		// the slab not yet built.
+		Direction descentSide = layout.ultra() ? depth.getOpposite() : depth;
+		int nearWall = origin.getX();
+		int farWall = origin.getX() + laneWidth;
+		// v2 only, and deliberately: the raise these columns are kept clear for is the
+		// dropped-repeater descent's, which no other walk builds. See {@link #standsUpAlone}.
+		placements.wallColumns(nearWall, farWall);
+		int currentTime = 0;
+		// Which floor the walk believes it is on and which way it is going, which together decide
+		// whether the wall ahead is a climb, a descent or a flat turn. Nought and up at the head of a
+		// song; anything else is a debug build asking to start in the middle of one, because the
+		// shape of a wall is not a thing you can ask for directly -- you arrive at it.
+		int leg = 0;
+		int floor = route.floorOf(0);
+		int climb = route.climbOf(0);
+		boolean laneStarted = false;
+		/** Whether a chord has been laid on the bend the walk is currently going round. */
+		boolean placedWhileTurning = false;
+		// Whether the column a stacked module would want behind it is already spoken for -- either
+		// by the module before it, whose relays reach into it, or by a turn, whose run of powered
+		// stone lies right alongside it at the same level.
+		boolean columnBehindBusy = false;
+		ChordStyle lastStyle = ChordStyle.SMALL;
+		// Only ever read when lastStyle is SUNKEN_BUS, and that style can only come from the one
+		// assignment off Placed below -- so one update site is enough and a stale value is unreachable.
+		int lastBusCells = 0;
+		// What the wire at the end of the lane is still worth. Every module opens with a repeater, so
+		// this only ever counts what the module just built spent: nothing, unless it was a bus.
+		int tipSignal = DUST_RANGE;
+		// Which rail the next column of a run belongs to: 0 for the path, 1 for the floor, -1 for no
+		// run under way. The same state walkWall keeps, ported rather than re-derived -- every
+		// geometry in this file that was worked out a second time has been wrong at least once.
+		int railPhase = -1;
+		// When each rail last went live. Held apart because a blank swaps the rails over, and after a
+		// swap they no longer line up with the event order.
+		int[] railLive = new int[2];
+		// The tick a blank owes the next floor column, or {@link #NO_BLANK}.
+		int railBlank = NO_BLANK;
+		int railBlanksRunning = 0;
+		// And whether the floor rail has held a chord yet at all, rather than only blanks: that is
+		// what says the run is earning the head it paid for.
+		boolean railFloorCarried = false;
+		// MEASURE(barren): what this run has spent and what it has to show for it.
+		int railRunColumns = 0;
+		int railRunFloorNotes = 0;
+		int railRunBlanks = 0;
+		LaneReach reach = laneReach(events, 0, events.size());
+		int slabStep = laneSpacing(reach, reach);
+		// A seeded walk may also start mid-turn, with the corners at the end of the lane already on
+		// its route. That is the ordinary state of a lane in the middle of a song and the one thing a
+		// run of chords cannot be written to produce: a lane arms its turn once, when it starts, and
+		// a spec can only choose what stands in it afterwards. Without this the seed can put a chord
+		// the right distance from a wall or in a bending lane, never both.
+		if (start.turning() && layout.ultra()) {
+			lane = armTurn(placements, lane, depth,
+				(farWall - lane.pos().getX()) * forward.getStepX(), slabStep);
+			turning = true;
+		}
+		// Pad this lane has to lay before it reaches its last chord, settled when the lane starts.
+		// See planLane: by the time a lane finds out it cannot fill the gap in front of it, the
+		// chords that could have filled it are built.
+		Map<Integer, Integer> booked = Map.of();
+		boolean replan = layout.ultra();
+		// Anchored on the lane, not the cursor: ahead(n) from here reaches every column of
+		// this lane, and a lane's travel and depth do not change once it has begun.
+		ParityOracle parity = layout.ultra() ? parityOracle(placements, lane) : null;
+		for (int index = 0; index < events.size(); index++) {
+			EventGroup event = events.get(index);
+			// Where the last corner is, in the world, kept while the route still carries the bend --
+			// once it is taken there is nothing left to ask. Bend offsets are relative and shift as
+			// the lane advances, so the position has to be read now rather than reconstructed later.
+			if (lane.bending()) {
+				int furthest = 0;
+				for (Lane.Bend bend : lane.bends()) {
+					furthest = Math.max(furthest, bend.after());
+				}
+				lastCorner = lane.ahead(furthest).pos();
+			}
+			// Out the far side of a turn. The route stops bending of its own accord once the walk has
+			// passed both corners, so there is nothing to count down and nothing to ask how long a turn
+			// was: the moment no corner is left, this is a new lane. Its note side is re-pinned to the
+			// slab's own depth, because a chord riding a corner turns with the path -- which is what
+			// makes a bend nothing but more lane -- while a lane's chords all grow the same way in the
+			// world, whichever way that lane happens to run.
+			if (turning && !lane.bending()) {
+				lane = lane.pinned(depth);
+				turning = false;
+				leavingTurn = TURN_BAN_OUTLASTS;
+				// What the turn just walked did past its corner. A wide turn that hung nothing there
+				// was rightly left wide; a tight one that hung nothing at the column it was tightened
+				// to protect was very likely tightened for nothing, and that is the number to watch.
+				if (placements.watchingATurn()) {
+					String verdict = placements.turnWasWide() ? "flatTurnWideClean"
+						: placements.turnHungBeyond() ? "flatTurnTightNeeded" : "flatTurnTightUnneeded";
+					placements.padded(verdict);
+					if (TRACE_TURNS) {
+						System.out.println("FLATEXIT " + verdict + " t=" + event.time() + " at "
+							+ lane.pos().getX() + " " + lane.pos().getY() + " " + lane.pos().getZ());
+					}
+					placements.stopWatchingTheTurn();
+				}
+				// Unless the turn itself held music, in which case this lane has already started.
+				//
+				// The rule this clears is "a lane must hold something before it can end", and it is
+				// there so a turn landing short does not turn again at once. A walked turn *is* lane
+				// -- that is the whole of the flat-turn design -- so a bend that carried a chord has
+				// already satisfied it, and clearing the flag anyway exempts the event after the bend
+				// from ever noticing it does not fit. On Kick Back at twelve wide over three floors
+				// that is a chord of twenty-four landing flush against the wall with the column its
+				// own turn reserve asked for already spent, three blocks of wire left, and a
+				// staircase wanting five: the lane cannot turn, cannot cut, and runs seven columns
+				// out. In-game testing found it in a vertical slice.
+				laneStarted = placedWhileTurning;
+				placedWhileTurning = false;
+				// How far from the corner, not whether the last chord was in the bend.
+				//
+				// What fills the pair behind the first chord of a new lane is not the turn's own run,
+				// which lies perpendicular to it. It is the chord standing *on* the turn -- the one
+				// inTurn converts to a plain bus -- hanging its notes along the corner. So how far
+				// that reaches is a distance, and asking "did the route just stop bending" answers a
+				// question about the route rather than about the blocks. In practice this chord is already
+				// well out of the bend, and four blocks clear of a flat corner is enough for any chord
+				// to stand without collisions.
+				//
+				// The same shape as the turn ban's own STACKED_CLEAR_OF_CORNER test, and set on the
+				// one variable both the planner and the walk read, so neither can answer it
+				// differently from the other.
+				columnBehindBusy = true;
+				replan = layout.ultra();
+			}
+			// Settled before the event is placed rather than after it. A turn hands back a cursor at
+			// the same point along the wall the last event reached, so an event that overshoots
+			// leaves the next lane starting outside the wall -- and nothing measured afterwards can
+			// help, because by then the overshoot is built. Asking first costs a lane its last event
+			// and keeps the wall a wall.
+			TurnCost turn = turnCost(floor, climb, floors, slabStep);
+			int above = turn.above();
+			int turnCells = turn.cells();
+			int offBus = turn.offBus();
+			// Whether this lane ends by climbing, which is the one turn a stacked centre can feed.
+			//
+			// Set here, before shapeFor is called, and that is the whole point. It used to be set beside
+			// turnAhead a hundred and thirty lines further down, so the room test read the previous
+			// event's answer while the builder read this one -- the dust went down and the shape never
+			// changed. Exactly the trap turnAhead is documented for, walked into twice.
+			//
+			// Without the reaches term, which cannot be had this early: it needs the landing, the landing
+			// needs the shape, and the shape is what this is for. It costs nothing to leave out. The room
+			// test only bites when the wall is within two columns, which is the same thing reaches says,
+			// and the dust is only ever claimed by a climb standing in the cell that reads it.
+			placements.climbAhead(above >= 0 && above < floors && climb > 0);
+			// The floors stand CUBE_FLOOR_HEIGHT apart and the lowest lane runs at the origin's height,
+			// so a floor is under this lane exactly when it stands a floor or more above the origin.
+			placements.floorBelow(lane.pos().getY() - CUBE_FLOOR_HEIGHT >= origin.getY());
+			// Whether the module behind left dust on its empty centre for this climb to start from --
+			// and whether that dust is in the cell this climb would actually read.
+			//
+			// Asked by position, not by flag. A flag says "somebody did this" and relies on everything
+			// else remembering to unsay it: rollSoftTip clears it, but a rail column never goes through
+			// buildShaped, so a run of rails after a stacked module carried the answer along and handed a
+			// climb two free rungs it had nothing to stand on. 115 dead builds, and the render named it in
+			// one line -- rail:HEAD -> rail:HEAD.
+			//
+			// A stacked module ends two columns past its own opening and puts the dust one column past it,
+			// a level above the centre. So the cell this climb wants is one column back from where the
+			// lane now stands, two levels up. Anything else, whoever laid it, is not this module's.
+			boolean centreFeedsTheClimb = (CLIMB_OFF_A_STACKED_CENTRE || CLIMB_FED_FROM_A_FLUSH_CENTRE)
+				&& climb > 0 && above >= 0 && above < floors
+				&& lane.pos().relative(lane.travel().getOpposite()).above(2)
+					.equals(placements.climbFedFromCentre());
+			// Such a climb joins two rungs in exactly as one off a bus does, so it is off-bus for every
+			// question the turn asks -- and it costs one cell more, because the dust on the centre is part
+			// of the run where a bus's own last dust is not. The ascent costs four and not three, and
+			// comes out the same for the two flanks gained at the bottom.
+			boolean turnsOffBus = endsOnBus(lastStyle, lastBusCells) || centreFeedsTheClimb;
+			int turnOffBusCells = centreFeedsTheClimb && !endsOnBus(lastStyle, lastBusCells)
+				? offBus + 1 : offBus;
+			// The column this lane's turn stands in: the wall, or one past it for a climb.
+			int wall = laneWall(nearWall, farWall, forward, lane.travel(), floor, climb, floors);
+			int stepOffAhead = turn.stepOff();
+			int splitCells = turn.splitCells();
+			if (replan) {
+				parity = layout.ultra() ? parityOracle(placements, lane) : null;
+				// Only worth doing ahead of a staircase. The plan's whole job is to work out how much
+				// pad each chord owes so the lane arrives flush at its wall, and a lane that ends in a
+				// flat turn does not need to arrive flush at anything -- the chord that meets the corner
+				// carries on across it. Planning one anyway is where most of the pad in a build came
+				// from: a song of nothing but chords of twenty-two, on one floor, has no staircase in it
+				// at all and should lay no pad anywhere.
+				// The booking search, kept as a last resort rather than the way a lane closes.
+				//
+				// v2 closes on a cut, and with chords capped at 25 a cut is always arithmetically
+				// available. What is not always available is the *head* it needs -- a plain cut of 25 is
+				// 13 cells against 11 descending and 12 climbing -- and a head can be refused for parity
+				// or for the cells behind it being taken. Without this the first such refusal walked a
+				// lane nine columns past its wall and the build refused itself: "13 blocks of bus plus 3
+				// for the turn is too much to cut across it".
+				//
+				// So it stays until head refusal is fixed rather than caught, which is what the occupancy
+				// model is for. What has gone from v2 is the veto -- the plan no longer forbids a cut it
+				// would rather close differently -- and the lookahead pair above it.
+				booked = V2_BOOKS_PADS && above >= 0 && above < floors
+					? planLane(events, index, lane.pos().getX(), lane.travel().getStepX(), wall,
+						lane.travel() == forward ? nearWall : farWall,
+						currentTime, tipSignal,
+						PLAN_ASKS_THE_BLOCKS_BEHIND
+							? columnBehindBusy && !backPairIsFree(placements, lane, event.time())
+							: columnBehindBusy,
+						turnCells, offBus, stepOffAhead,
+						splitCells, climb > 0, layout,
+						inTurn(placements, turning, leavingTurn, lane.pos(), lastCorner), parity)
+					: Map.of();
+				replan = false;
+			}
+			// A lane that ends flush with the wall on a wire too weak to reach the top of a staircase
+			// has nowhere left to stand the repeater that would revive it, and a lane that cannot turn
+			// runs on past the wall instead. So an event that would leave the wire that weak is asked
+			// to fit a column short, and the pad puts a repeater in the column that buys.
+			// Whether what lies ahead is a flat turn rather than a staircase, and so whether it is
+			// walked or crossed. A staircase is still a gap in the path that the lane must arrive flush
+			// at; a flat turn is more lane, and a chord meeting one simply carries on round it.
+			boolean flatAhead = !(above >= 0 && above < floors);
+			// A chord small enough to lie across a flat turn needs nothing done for it at all. It is
+			// built where it stands and runs on into the corner, and the turn lays whatever is left --
+			// which is the same columns filled with music instead of with wire. Padding the lane out to
+			// meet the turn is what makes a run too long for the repeater at the end of it to clear,
+			// and it was buying nothing: the chord was going to cover that ground anyway.
+			boolean straddles = layout.ultra() && flatAhead
+				&& straddleFits(event.notes().size(),
+					(wall - lane.pos().getX()) * lane.travel().getStepX(), slabStep,
+					SUNKEN_MAY_OPEN_IN_A_TURN && layout.v2() && SUNKEN_BUSES
+						&& event.notes().size() >= SUNKEN_LOWEST_CHORD
+						&& sunkenFits(event.notes().size()) && hasAHarp(event.notes()));
+			int reserve = turnReserve(event, offBus, layout);
+			int wait = event.time() - currentTime;
+			// Measured with the same arithmetic the planner uses, and not with a length taken from
+			// the shape the chord was measured in. A stacked chord that finds the pair of slots
+			// behind it spoken for is built as a bus instead, and a bus is longer -- so a lane could
+			// be told a chord fitted, build it, and land a column past its own wall.
+			// Decided once, here, and then measured from the decision.
+			//
+			// This is the whole of the complaint about v1 in one place. A chord's shape used to be
+			// answered three times: {@link #chooseStyle} guessing at grouping time, {@link #landingOf}
+			// predicting from a different set of rules, and {@link #addChordModule} deciding for real
+			// when it came to build. Any two of them disagreeing is a lane measured for one shape and
+			// built as another, which is a lane outside its wall -- and there is no planner in v2 to
+			// blame, because there is no planner in v2. The decision is the decision.
+			//
+			// So the walk asks {@link #shapeFor} at the column the chord will actually open on -- past
+			// the delay, which is where the module's repeater goes -- and {@link #landingFrom} works out
+			// where that shape ends. The same record is handed to {@link #buildShaped} below, so what is
+			// built is the shape that was measured, by construction rather than by agreement.
+			int delayAhead = Math.max(0, (wait - 1) / 4);
+			Lane willOpenOn = lane.ahead(delayAhead);
+			// The same slack the build site works out, which at this point in the lane is the whole wait
+			// less the pad already spent -- nothing has been spent yet when a chord is measured.
+			int slackAhead = Math.max(0, (event.time() - currentTime - 1) / 4);
+			// Whether this chord opens its lane, which a sunken bus is refused on -- see
+			// {@link #SUNKEN_OPENS_A_LANE}. Set before the shape is decided so the decision and the
+			// build read the same answer.
+			placements.laneJustOpened(!laneStarted);
+			Shape shaped = shapeFor(placements, willOpenOn, event, slackAhead,
+				!columnBehindBusy || delayAhead > 0
+					|| backPairIsFree(placements, willOpenOn, event.time()),
+				inTurn(placements, turning, leavingTurn, willOpenOn.pos(), lastCorner),
+				turning ? Integer.MAX_VALUE
+					: (wall - willOpenOn.pos().getX()) * lane.travel().getStepX(),
+				tipSignal, layout);
+			// The columns a corner takes before the module starts.
+			//
+			// A repeater may not stand on a corner, so every shape walks past one first -- that is what
+			// {@link #pastAnyCorner} is, and it is applied inside the builders where no prediction can
+			// see it. The chord is then a column or two longer than the walk measured, in the shape the
+			// walk measured, which is the one disagreement deciding once cannot fix by itself: it is
+			// not a disagreement about the shape, it is a term missing from the arithmetic.
+			//
+			// Counted the same way the builder walks it, off the same lane, so the two cannot drift.
+			int cornerWalk = 0;
+			for (Lane probe = willOpenOn; probe.cornerAt(0) && cornerWalk < 4; probe = probe.ahead(1)) {
+				cornerWalk++;
+			}
+			Landing here = landingFrom(shaped,
+				lane.pos().getX() + lane.travel().getStepX() * cornerWalk,
+				lane.travel().getStepX(), event, wait);
+			// Against the prediction v2 used to make, while both exist. The old one deliberately erred
+			// towards the bus -- "the safe way round", because a lane measured long and built short
+			// lands inside its wall -- so where the two differ is where that safety was being spent.
+			if (TRACE_ONE_DECISION) {
+				Landing was = landingOf(lane.pos().getX(), lane.travel().getStepX(), event, wait,
+					columnBehindBusy, wall, layout,
+					inTurn(placements, turning, leavingTurn, lane.pos(), lastCorner), parity);
+				int drift = (here.end() - was.end()) * lane.travel().getStepX();
+				if (drift != 0) {
+					placements.padded("v2Landing" + (drift > 0 ? "Longer" : "Shorter")
+						+ Math.abs(drift));
+					placements.padded("v2LandingWas" + was.style() + "Now" + here.style());
+				}
+			}
+			// A cell of a rail run is one column, and the column that opens one is three -- the
+			// repeater, the dust, then the note. Overridden here rather than taught to
+			// {@link #landingFrom}, because whether a run is under way is a fact about the walk rather
+			// than about the chord: the same event opens a run in one lane and continues one in the
+			// next. The same override walkWall makes, and for the same reason.
+			//
+			// It does mean {@link #shapeFor} has already decided a shape for a chord a rail column will
+			// take instead, which puts a decision in the census that nothing built. A miscount, not a
+			// misbuild -- the run lays its own notes and never asks for the shape -- but it is the one
+			// place v2's "the decision is the decision" does not hold, and it is worth closing by
+			// asking the rail question before the shape one.
+			boolean railContinues = V2_RUNS_ON_RAILS && railPhase >= 0;
+			// Two where a chord of three has landed on the floor rail, which has no centre to give it:
+			// the blank column that gets it onto the path rail, and then its own.
+			int railColumns = railContinues
+				? railPhase == 1 && railBlank != NO_BLANK ? 2 : 1
+				: V2_RUNS_ON_RAILS
+					&& railOpens(events, index, lane, wall, layout, turning, reserve, wait,
+						railStackSeed(placements, lane, lastStyle, currentTime, turning), booked)
+					// The head's columns, its chord, and the repeater a four-tick stretch of the wait in
+					// front of it costs -- the same sum the plain path makes of it.
+					? railHeadColumns(railStackSeed(placements, lane, lastStyle, currentTime, turning),
+						wait) + 1 + railPadColumns(wait) : 0;
+			int landing = railColumns > 0
+				? lane.pos().getX() + lane.travel().getStepX() * (railColumns + reserve)
+				: here.end() + lane.travel().getStepX() * reserve;
+			// A chord that fits and leaves the lane unable to pay for its own turn does not fit.
+			//
+			// This is what deciding once exposed rather than caused. While the prediction erred towards the
+			// bus, every lane carried a column or two of slack it never used, and that slack was what paid
+			// for the staircase. Measuring honestly spends it on music -- builds come out 2.6% shorter --
+			// and the lane arrives at its wall with the wire gone.
+			//
+			// v1 answered this inside the pad search, with strandsNext booking a column so the lane could
+			// close. v2 has no search and does not need one: it can close the lane a chord earlier and let
+			// this chord open the next. No pad, no booking, and no looking further ahead than the chord in
+			// hand.
+			//
+			// Asked of the wire the chord hands on, which is what canTurn asks for when the lane does end.
+			// A lane holding nothing is exempt -- it has nothing to close on, and a lane that turned the
+			// moment it opened would never lay a note.
+			// Room, and not wire, is what a lane runs out of.
+			//
+			// v2 closes every lane by cutting the chord that reaches its wall, and a cut needs somewhere
+			// to put the head that makes it: the head's own columns and the cell it hands over on. A
+			// lane packed so tight that the chord reaching the wall has two columns left cannot be cut
+			// at all, and a lane that cannot cut and cannot pay for a turn walks out past its wall
+			// carrying the chord whole. That is every long breach on the all-25 song.
+			//
+			// Asked of the wire and not of the room, because the room was measured and is not it. Closing
+			// a lane whose next chord would have too few columns left to cut fires 98 times on the
+			// all-25 song and moves its breach count by nothing at all, and takes Guardian from 62 to
+			// 95. Whatever leaves those lanes unable to close, it is not that they were one chord too
+			// greedy about the columns.
+			// Priced the way the turn itself is priced, which is the third place in this walk to put a
+			// number on one staircase and the only one never told about the discount.
+			//
+			// A lane coming to rest on a bus hands the climb its own last block, so the ladder starts
+			// three cells up rather than five -- {@code offBus} against {@code turnCells}. {@link
+			// #canTurn} takes that discount and says in its own comment what happens when an arm does
+			// not: "a lane holding four and needing three was refused its turn by the arm that had not
+			// been told". This was that arm. A chord ending on a bus, leaving three, needing three,
+			// read as stranding the turn.
+			//
+			// In-game testing found it on Guardian 24x3 at {@code 25 69 127}: thirteen columns of acacia and
+			// a stacked bus of twenty-four carried up to the next floor, which they then moved down by hand
+			// -- "it turns out the whole thing fits just perfectly. no modifications needed. it even
+			// connects onto the glass 3-ascent perfectly."
+			//
+			// Written the same way the wall-reach test writes it fifteen hundred lines down, off the
+			// landing's own style and the sunken cell count, so the two cannot drift.
+			int strandPrice = STRAND_PRICES_THE_BUS_DISCOUNT
+				&& endsOnBus(here.style(), sunkenDustCells(event.notes().size()))
+				? offBus : turnCells;
+			boolean strandsTheTurn = STRANDED_LANE_CLOSES_EARLY && !turning && layout.ultra()
+				&& laneStarted && !flatAhead && here.tip() < strandPrice;
+			if (strandsTheTurn) {
+				placements.padded("v2ClosedBeforeStranding");
+			}
+			// A rigid stacked module that would land flush on the wall ahead of a flat turn hangs its
+			// front pair in the wall column, and a tight turn's sideways run wants one of those cells
+			// -- see {@link #FLAT_TURN_FLANK_SLOT}. The module sheds that note where it can do so for
+			// nothing: onto its centre, a spare harp's slot, or a low slot it left empty. Where it
+			// cannot, the shed grows a tail, and a tail on a module measured to land flush is two
+			// columns past the wall: 157 of them over the library, every one a breach of exactly two.
+			// So a module that could only shed by growing does not land here at all. The lane turns
+			// first, and this chord rides the corner as the bus it would become in a turn anyway --
+			// which hangs its notes one past the wall and no further, and spends no column it was not
+			// going to spend. Asked of the shape the walk decided and the slots it would hang, before
+			// the overshoot test, so that the turn is armed as it is for any other chord that will not
+			// fit.
+			//
+			// And the same for a descent, which takes the other front slot and has grown the same tail
+			// for the same reason since the flush flank was first shed -- five times over the library
+			// then, thirty once every lane opened on its wall column. See
+			// {@link #FLUSH_HEAD_TURNS_BEFORE_A_DESCENT}.
+			// And a climb, which the climb standing a column out brought to the same place: the glass
+			// climb's second column is the cell beside its own, a level up -- sideways, against the
+			// slabs -- and a rigid module landing flush against the climb hangs a front note exactly
+			// under it. Glass over a note block is a note that cannot sound and, as the plan sees it, a
+			// collision: Guardian 24x4 at 25 65 138, a head's front flank under the staircase.
+			//
+			// The answer, where the module's centre holds no note: climb straight off the centre.
+			// Dust on the centre carries the run diagonally up onto the first rung, the climb skips
+			// the two rungs a bus skips, the glass over the note is never laid, and the run costs four
+			// rather than three for the cell of dust. That is {@link #CLIMB_FED_FROM_A_FLUSH_CENTRE},
+			// told to the builder here. Where the centre does hold a note the module sheds that flank
+			// the way it sheds a descent's -- the same slot, because the climb steps the same way the
+			// spiral does -- and where it could only shed by growing it turns first, as below.
+			boolean flushBeforeAClimb = layout.ultra() && !turning && railPhase < 0 && laneStarted
+				&& above >= 0 && above < floors && climb > 0
+				&& (here.style() == ChordStyle.STACKED_FULL
+					|| here.style() == ChordStyle.STACKED_FRONT)
+				&& (wall - here.end()) * lane.travel().getStepX() == 0;
+			UltraSlots flushSlots = flushBeforeAClimb
+				? (shaped.moved() != null ? shaped.moved().slots()
+					: slotsFor(here.style(), event.notes()))
+				: null;
+			boolean centreFeedsThisClimb = CLIMB_FED_FROM_A_FLUSH_CENTRE && flushBeforeAClimb
+				&& flushSlots != null && flushSlots.centre() == null;
+			placements.climbFedByCentre(centreFeedsThisClimb);
+			if (flushBeforeAClimb) {
+				placements.padded(centreFeedsThisClimb ? "climbOffAFlushCentre"
+					: "climbTakesAFlushFlank");
+			}
+			boolean flushHeadWouldGrow = false;
+			if (SHEDS_A_FLUSH_MODULES_FLANK && layout.ultra() && !turning && railPhase < 0
+					&& laneStarted
+					&& (here.style() == ChordStyle.STACKED_FULL
+						|| here.style() == ChordStyle.STACKED_FRONT)) {
+				int flankAhead = -1;
+				if (FLAT_TURN_KEEPS_ITS_WIDTH && flatAhead
+						&& (wall - here.end()) * lane.travel().getStepX() == 0) {
+					flankAhead = FLAT_TURN_FLANK_SLOT;
+				} else if (FLUSH_HEAD_TURNS_BEFORE_A_DESCENT && !flatAhead && climb <= 0
+						&& (wall - landing) * lane.travel().getStepX() == 0) {
+					flankAhead = DESCENT_FLANK_SLOT;
+				} else if (flushBeforeAClimb && !centreFeedsThisClimb) {
+					flankAhead = DESCENT_FLANK_SLOT;
+				}
+				if (flankAhead >= 0) {
+					boolean full = here.style() == ChordStyle.STACKED_FULL;
+					// With the slots the module will actually hang -- after relocation has lifted a
+					// contested note into the centre, the centre is no longer a place to shed to --
+					// and the ground it will hang them over, so a slot relocation emptied on purpose
+					// is not offered back. Asked at the column the chord opens on, which is the
+					// column the build asks at unless a corner or a nudge moves it.
+					UltraSlots willHang = shaped.moved() != null ? shaped.moved().slots()
+						: ultraSlots(event.notes(), full);
+					flushHeadWouldGrow = shedTurnFlank(willHang, full ? 2 : 0, false, flankAhead,
+						quietLowSlots(placements, willOpenOn.pos(), willOpenOn.travel(),
+							willOpenOn.noteSide(), event.time())) == null;
+					if (flushHeadWouldGrow) {
+						placements.padded("v2ClosedBeforeAFlushHeadWouldGrow"
+							+ (flatAhead ? "Flat" : "Descent"));
+					}
+				}
+			}
+			// The shape the walk decided, stood on the ground before the lane is measured by it.
+			//
+			// A stacked shape is decided by arithmetic and built in a trial, and the trial can still refuse
+			// it: a collision with the floor above's props, a low note beside a block the lane behind
+			// drives at another tick. The fallback is a bus, and a bus is longer -- so a chord measured to
+			// land flush was built two or three columns past the wall, and the lane read as breaching by
+			// exactly that. adventure-of-a-lifetime, every width up to twelve, one lane out by two. That is
+			// the one disagreement "the decision is the decision" left: the decision was never asked of the
+			// ground the trial asks of. So where the fallback would not fit, the shape is built now, in a
+			// trial inside no trial, and rolled back -- and if it fell, this chord does not fit here and
+			// the lane turns or cuts before it as it would for any other chord that will not fit. Only
+			// where it matters: a chord whose bus would land inside the wall pays nothing for being
+			// wrong, and asking costs a build of the module.
+			boolean shapeWouldFall = false;
+			if (STACKED_SHAPE_TRIED_BEFORE_MEASURING && layout.ultra() && !turning && railPhase < 0
+					&& laneStarted && shaped.style().stacked() && shaped.style() == here.style()
+					&& (here.end() - wall) * lane.travel().getStepX() <= 0) {
+				// What the fallback would end on: the repeater, a bus of the chord, and the column a
+				// nudge may add. Past the wall, and the answer matters.
+				int busEnd = willOpenOn.pos().getX() + lane.travel().getStepX()
+					* (2 + (event.notes().size() + 1) / 2);
+				if ((busEnd - wall) * lane.travel().getStepX() > 0) {
+					PlacementPlan.Behind was = placements.behind();
+					placements.beginTrial();
+					try {
+						Placed tried = buildShaped(placements, willOpenOn, 1, event, shaped, layout);
+						shapeWouldFall = tried.style() != shaped.style()
+							|| tried.lane().pos().getX() != here.end();
+					} catch (IllegalArgumentException collided) {
+						shapeWouldFall = true;
+					} finally {
+						placements.rollbackTrial();
+						placements.behind(was);
+					}
+					placements.padded(shapeWouldFall ? "v2ShapeTriedAndFell" : "v2ShapeTriedAndStood");
+				}
+			}
+			// Never while the route is still bending. Inside a turn the wire runs across the corridor
+			// rather than along it, so every one of these measurements is taken down the wrong axis --
+			// and there is nothing to decide anyway, because the walk has already committed to the
+			// corner it is standing in. A turn ends when the route runs out of corners, not when some
+			// arithmetic about walls says so.
+			// Whether this event will not fit before the wall, which is a different question from
+			// whether the lane may end here.
+			// Never while a run owes its next column. A run that has laid a repeater has promised the
+			// column in front of it a note, and every way a lane can be interrupted takes that column
+			// away: the note ends up on the far side of a staircase, a floor down and running the other
+			// way, while the repeater meant to drive it stays at the wall driving the staircase.
+			//
+			// This invariant broke twice in v1, both times because it was said on the turn rather than
+			// on the overshoot. It matters more here than there: v1 offers the cut on the overshoot and
+			// v2 offers it a column earlier, on {@code reaches}, so in v2 the reach test is a live way
+			// into the cut rather than a flag-gated one.
+			// Except where the turn ahead is flat. The promise this guard protects is that the
+			// column in front of a run's last repeater gets its note, and it is a *staircase* that breaks
+			// it: the note lands a floor down running the other way while the repeater stays at the wall
+			// driving the staircase. A flat turn takes nothing away -- the route bends at that very
+			// column, so the promised cell is the corner and the note stands on it, which is the
+			// model 1 exactly. Whether everything downstream of wantsTurn copes with a live rail is the
+			// thing to measure; none of it has ever been asked to.
+			boolean overshoots = !turning && (railPhase < 0 || flatAhead)
+				&& ((landing - wall) * lane.travel().getStepX() > 0 || strandsTheTurn
+					|| flushHeadWouldGrow || shapeWouldFall);
+			// And whether it merely gets there. A chord ending on the wall, or one column short of
+			// it, has not overshot and so was never offered a cut -- which leaves the lane holding a
+			// long bus, no near half to cut, and a turn to pay for out of the two cells that bus left
+			// it. That is the case the whole pad layer was built around. See
+			// {@link #CUTS_THE_CHORD_THAT_REACHES}.
+			boolean reaches = !turning && railPhase < 0
+				&& (wall - landing) * lane.travel().getStepX() <= 1;
+			// A lane has to hold something before it can end, or a turn that lands short would turn
+			// again at once and the walk would climb the whole build without laying a note.
+			boolean wantsTurn = laneStarted && overshoots;
+			// Said to the builders, for the one shape that has to know. A simple tail is read by the
+			// repeater standing in front of it, and a lane that turns does not put one there -- it
+			// climbs, and the repeater is built at the top of the staircase, leaving the tail driving
+			// nothing. In-game reading showed exactly that off a paste at 16 wide over three floors.
+			//
+			// Asked of {@code reaches} and not only of {@code wantsTurn}, which is a whole event too
+			// late: wantsTurn says *this* chord overshoots and so the lane turns before laying it, and
+			// a tail laid now is stranded by the turn decided at the *next* event, when it is already
+			// down. reaches is the same fact one event earlier -- this chord ends on the wall or a
+			// column short of it, so the lane closes after it -- and it is the moment the tail can
+			// still choose to be a bus.
+			placements.turnAhead(wantsTurn || reaches);
+			// And whether this chord in particular is the one that will end up against the staircase.
+			//
+			// Not merely "a climb is coming": the flanked closing shape gives up a cell of wire to
+			// leave its centre to the dust, and that buys nothing at all unless this chord's own body
+			// is the column the staircase reads from. Offered to every closing chord ahead of a climb
+			// it fired 1169 times and cost 161 blocks of depth, because most of those lanes close on a
+			// pad or a pin, which is already the dust the ladder wants.
+			//
+			// So: this chord is laid on this lane ({@code reaches}, not {@code wantsTurn}, which is a
+			// chord the lane turns before laying), and it comes to rest exactly one column short of
+			// the wall, which is where the staircase stands. Then nothing goes between them -- the
+			// next event measures {@code columns} as nought, plans no pad and pins nothing.
+			boolean closesOnTheSeed = CLOSING_CHORD_HANGS_ON_THE_FLANKS && RAIL_SEEDS_OFF_THE_CLIMB
+				&& V2_RUNS_ON_RAILS && layout.ultra()
+				&& above >= 0 && above < floors && climb > 0
+				&& reaches && (wall - landing) * lane.travel().getStepX() == 1;
+			// And only where the seed is going to be used. The geometry above says a ladder could
+			// read this chord's column; whether one will is a question about the lane the climb
+			// lands on, and it is the climb's own question -- {@link #railOpens}, blanks and all --
+			// asked here of the same events with the landing lane built from the two things the
+			// staircase settles, exactly as the climb builds it. In-game reading found the shape
+			// dressed for a ladder behind a corkscrew: a centre-fed cut lays its own staircase and
+			// never seeds, so the chord had paid a cell of wire and hung two notes on the floor --
+			// the cells every later parity question contends for -- for nothing at all. The climb
+			// still decides the seed itself; a wrong yes here costs what it always cost, and a
+			// wrong no is counted so it can be seen.
+			if (closesOnTheSeed) {
+				Direction seedNext = lane.travel().getOpposite();
+				closesOnTheSeed = index + 1 < events.size()
+					&& railOpens(events, index + 1,
+						Lane.straight(new BlockPos(wall, lane.pos().getY(), lane.pos().getZ())
+							.relative(seedNext, 2).above(CUBE_FLOOR_HEIGHT), seedNext, depth),
+						laneWall(nearWall, farWall, forward, seedNext, above, climb, floors),
+						layout, false,
+						turnReserve(events.get(index + 1),
+							turnCost(above, climb, floors, slabStep).offBus(), layout),
+						events.get(index + 1).time() - event.time(), event.time(), booked);
+				if (!closesOnTheSeed) {
+					placements.padded("closingKeptItsAnchorNoRunAbove");
+				}
+			}
+			placements.seedAhead(closesOnTheSeed);
+			// And the same question for a descent, which wants the opposite thing: not the centre's
+			// dust but the low slot beside it.
+			//
+			// A descent spirals round the four cells of a two-by-two column anchored where the lane comes to
+			// rest, a block down at each, and its second rung is {@code cursor.relative(depth)} -- which is
+			// one of the front pair a stacked module hangs in its own landing column. So a module that lands
+			// flush and a staircase that starts on it want the same two cells, and {@link #set} is
+			// first-writer-wins: the note gets there, the rung is silently skipped, and the wire steps two
+			// levels in one go into air. In-game reading found the pair of sea lanterns on Guardian at 24x3,
+			// {@code 33 68 171} and {@code 33 67 171}, with 13,254 notes dark behind them, and named the
+			// answer -- the flank is shed, not the shape.
+			//
+			// Nought rather than the climb's one, because the two staircases meet the lane differently:
+			// a climb reads the dust in the column *before* the wall, a descent is anchored on the wall
+			// column itself. Before lanes were allowed to land flush there was always a pad in between
+			// and this could not arise.
+			boolean descentTakesTheFlank = SHEDS_A_FLUSH_MODULES_FLANK && layout.ultra()
+				&& above >= 0 && above < floors && climb <= 0
+				&& reaches && (wall - landing) * lane.travel().getStepX() == 0;
+			// And a flat turn armed tight wants the other one. Its corner stands on the wall column and
+			// its sideways run leaves the corner towards the next slab -- so the run's first cell is the
+			// wall column one along in depth, which is exactly where a module landing flush hangs the
+			// near-side note of its front pair. Left there, the run's first bus cell finds a note block
+			// standing in it, the chord walks off the collision, and the wire has a note block with air
+			// over it in the middle of it: 111 dead builds over the library, every one of them a bus
+			// breaking on the sideways run. Shed before the turn is armed, because whether the turn
+			// will be tight is decided a chord later and a note is cheap where a dead line is not.
+			// Asked of the chord's own end rather than the landing, which for a bus short of wire
+			// carries the reserve: this is about where the front pair hangs, and that is the end.
+			boolean flatTurnTakesTheFlank = FLAT_TURN_KEEPS_ITS_WIDTH && SHEDS_A_FLUSH_MODULES_FLANK
+				&& layout.ultra() && flatAhead && reaches
+				&& (wall - here.end()) * lane.travel().getStepX() == 0;
+			placements.turnTakesTheFlank(descentTakesTheFlank ? DESCENT_FLANK_SLOT
+				: flatTurnTakesTheFlank ? FLAT_TURN_FLANK_SLOT
+				: flushBeforeAClimb && !centreFeedsThisClimb ? DESCENT_FLANK_SLOT : -1);
+			// And the other fact the chord cannot see for itself: how soon the next event arrives. A pad
+			// laid in front of it can only be spent as a repeater where there are two ticks to split, so
+			// a gap of one is the case a simple tail with a note-block middle cannot survive being padded
+			// into. The last event has nothing after it to be padded for.
+			placements.gapAhead(index + 1 < events.size()
+				? events.get(index + 1).time() - event.time() : Integer.MAX_VALUE);
+			// And that the two above were answered at all. Everything the simple tail's safety rests on
+			// is handed down from here, and walkWall hands down none of it -- where this walk says
+			// "there is a turn ahead" or "the next event is a tick away", the older one says nothing and
+			// the fields read false, which is the answer that keeps the shape rather than the answer
+			// that gives it up. So v1 was taking a shape whose guards were all switched off.
+			placements.answersWhatIsAhead(true);
+			// What the cut is offered on. The same question in v1, one column earlier in v2.
+			boolean cutOffered = reaches;
+			// One tick has to be left for the next event's own repeater, which is the only thing that
+			// can drive the module it stands in front of.
+			int columns = (wall - lane.pos().getX()) * lane.travel().getStepX();
+			// Whether the descent at the end of this lane is going to seed the run below it, asked
+			// before the pad is planned because the pad is the only thing that can pay for it.
+			//
+			// This is the descent's whole difference from the climb's seed: what lands is a
+			// block with dust over it and no repeater, so the wait has to have been spent *above* the
+			// drop. The pad is where it goes -- dust carries no delay down four rungs -- and the pad
+			// is told to keep back a tick for "the next event's own repeater", which is the very
+			// repeater this deletes. So where a run is coming, it may spend the lot.
+			//
+			// Askable this early because a descent is pinned: it stands at the wall whatever the pad
+			// could afford, so its landing is the wall's column four levels down, and the lane below
+			// runs at the other wall. Neither depends on anything planned after this line.
+			boolean seedsDescent = false;
+			if (RAIL_SEEDS_OFF_THE_CLIMB && V2_RUNS_ON_RAILS && layout.ultra() && wantsTurn
+					&& !straddles && climb < 0 && above >= 0 && above < floors) {
+				placements.padded("descentSeedAsked");
+				Direction below = lane.travel().getOpposite();
+				Lane willRun = Lane.straight(lane.pos()
+					.relative(lane.travel(), Math.max(0, columns))
+					.below(CUBE_FLOOR_HEIGHT).relative(below), below, depth);
+				boolean holds = railHolds(event, true);
+				boolean opens = railOpens(events, index, willRun,
+					below == forward ? farWall : nearWall, layout, false,
+					turnReserve(event, turnCost(above, climb, floors, slabStep).offBus(), layout),
+					0, event.time(), booked);
+				// Counted the way the climb's are: each answer a different piece of work. The chord
+				// is the commonest refusal by far and it is the honest one -- what lands on a seed is
+				// a path column, and a path column holds a chord of two, or of three with a harp in
+				// it to sound its centre.
+				if (wait <= 0) {
+					placements.padded("descentSeedNoWait");
+				} else if (!holds) {
+					placements.padded("descentSeedChordTooBig");
+				} else if (!opens) {
+					placements.padded("descentSeedNoRunBelow");
+				} else {
+					seedsDescent = true;
+				}
+			}
+			Pad pad = layout.ultra() && wantsTurn && !straddles
+				? planTurnPad(columns, tipSignal, turnCells, offBus,
+					seedsDescent ? wait : Math.max(0, wait - 1),
+					climb > 0, above >= 0 && above < floors,
+					endsOnBus(lastStyle, lastBusCells), seedsDescent)
+				: Pad.none(tipSignal);
+			// Claimed against offered, because a rule that lays a block and never uses it reads exactly
+			// like a rule that works.
+			if ((CLIMB_OFF_A_STACKED_CENTRE || CLIMB_FED_FROM_A_FLUSH_CENTRE) && climb > 0
+					&& above >= 0 && above < floors && placements.climbFedFromCentre() != null) {
+				placements.padded(centreFeedsTheClimb ? "climbCentreClaimed" : "climbCentreOutOfReach");
+				if (centreFeedsTheClimb) {
+					// What stands between the module and the staircase, which is the whole of why the
+					// discount never applies: turnPrice and addGlassClimb both want an empty pad, and a
+					// raised one only counts if every cell of it is plain dust.
+					placements.padded("climbCentrePad" + Math.min(pad.cells().size(), 6));
+					if (!pad.cells().isEmpty() && pad.cells().stream().allMatch(cell -> cell == 0)) {
+						placements.padded("climbCentrePadAllDust");
+					}
+				}
+			}
+			// A split comes before any of that. The event that will not fit is cut in two: as much of
+			// it as reaches the wall, then the staircase, then the rest -- one repeater, one tick, one
+			// chord, because dust takes no time however far it runs or however many levels it climbs.
+			// It fills the lane with the music that was going to be built anyway, where a pad fills it
+			// with wire it then has to pay for, so it is tried first and padding is what is left when
+			// the chord is too big to cut: a run from a repeater is fifteen blocks, a staircase takes
+			// four of them off a bus, and a bus carries two notes a block.
+			int delayColumns = Math.max(0, (event.time() - currentTime - 1) / 4);
+			int room = columns - delayColumns;
+			int cells = (event.notes().size() + 1) / 2;
+			// A descent lands where it cannot be built on straight away and spends a block stepping
+			// off, which is a block the chord could have used.
+			int stepOff = stepOffAhead;
+			// Only ahead of a staircase now. A flat turn is walked rather than crossed, so a chord that will
+			// not fit before it is not cut in two: the walk takes the corner and carries on laying the same
+			// chord along the sideways run, which is the cut done by the ordinary machinery and without a
+			// near half and a far half to keep in step. The whole run and nothing more: both halves of the
+			// chord, and the staircase between them, reaching from the repeater this module opens with to
+			// the next one. There is no further cell to charge at the far end. A carried module hands back
+			// the cell after its last bus block, and the next module stands its repeater on that cell a
+			// level up -- which puts the repeater against the bus, not a block short of it. This once
+			// carried a cell for that gap and the gap is not there; it cost 256 lanes their wall to buy
+			// nothing. In-game testing built the descent by hand and counted the wire through it: eight
+			// cells of bus, six of staircase, one cell more, and the last of them still reads one. Asked of
+			// the overshoot and not of {@code wantsTurn}, which is the same question plus "and this lane
+			// already holds something". That extra clause is there to stop a lane turning the instant it
+			// opens, and it has no business here: a split *builds* -- it fills the columns to the wall with
+			// the near half of the chord before it turns -- so it always makes progress and can never loop.
+			// Charging it that clause meant the first event of a lane could not be cut, and the first event
+			// of a lane is exactly the one that lands wherever the staircase happened to put it. A chord
+			// needing eight columns opened on a lane with seven and was laid anyway, a column past the wall.
+			// In-game testing found it as the second of two breaches on Kick Back, and it is the same
+			// exemption that put the old build seven columns out. Charged at what a split's own crossing
+			// costs, which is not the turn plus the step off any more. A split always arrives on a bus, and
+			// a descent that may assume that is four cells rather than six -- see {@link
+			// #addSplitBusDescent}. The same sum is made in {@link #closes}, and the two have to be the same
+			// sum: a lane the planner closes by a cut and the walk refuses to cut is a lane that runs on
+			// past its wall. The head carries seven for nothing, so a chord too big to cut as a plain bus
+			// may still be cuttable with one. Asked first, and the plain sum is what is left when the chord
+			// cannot take a head -- too many falling instruments, no harp for the centre, or no room for a
+			// head and a cell of bus before the wall. What kind of thing is behind, which is not the same
+			// question as whether the column is taken. That last argument says in its own docstring that it
+			// means *another stacked module's centre* -- the one case where both slots behind are gone
+			// rather than one -- and the walk was handing it {@code columnBehindBusy}, which is also true
+			// after a rail column, after a carried chord, after a staircase landing and anywhere within
+			// reach of a corner. So a cut standing behind a plain bus was refused the head of six that
+			// {@link #HEAD_KEEPS_ONE_BACK_FLANK} exists to give it, fell through to a head of five, could
+			// not make one of those either, and was laid whole. Both of Guardian's remaining breaches at 20
+			// wide over three floors were that: {@code last=BUS behindBusy=true}, {@code
+			// refused=NoHeadFromTheFront}, a chord of 24 with nine columns of room -- which a head of six
+			// cuts flush, at fourteen cells of the fifteen.
+			//
+			// The ground cannot be asked here, and that was tried first. A head's back flanks stand in
+			// the column it opens on, and a cut may open a column further along than this -- the busy
+			// pad, decided below out of the head this line is choosing. Asked at
+			// {@code lane.ahead(delayColumns)} it is the wrong cell and comes back yes every time:
+			// measured, it changed not one decision in 1,054 builds. (It was the pin's columns that
+			// made this worst, and the pin has gone; the ordering is the same either way.)
+			boolean stackedIsBehind = CUT_ASKS_WHAT_KIND_IS_BEHIND
+				? columnBehindBusy && lastStyle.stacked() : columnBehindBusy;
+			// The sixth cut: a chord of ten or more that overshoots a staircase folds back over
+			// its own repeater instead, and no staircase is built at all -- down through a top
+			// slab for a descent, up over the repeater for a climb.
+			//
+			// Asked last of all the shapes, and once before any of them. A foldback takes the
+			// height of two lanes and spends it on one chord, so where any module shape can carry
+			// the chord instead it uses the same space better -- see {@link #FOLDBACK_LAST}. The
+			// exception is a descent at a room of nought, which every module shape refuses for the
+			// same reason: they each want a column to put a staircase in and there is none. The
+			// fold wants no staircase, so it is asked there first and the rest never run.
+			// See {@link #FOLDBACK_CUTS}.
+			Foldback fold = null;
+			FoldbackAscent rise = null;
+			boolean foldbackOffered = FOLDBACK_CUTS && layout.ultra() && cutOffered && index > 0
+				&& above >= 0 && above < floors;
+			if (foldbackOffered && (!FOLDBACK_LAST
+					|| (climb <= 0 || FOLDBACK_PREFERRED_FOR_CLIMBS)
+						&& room < FOLDBACK_PREFERRED_BELOW_ROOM)) {
+				FoldbackPick first = foldbackPick(placements, lane, event, room, delayColumns,
+					nearWall, farWall, forward, above, climb, floors, "AtTheWall");
+				fold = first.fold();
+				rise = first.rise();
+			}
+			// The stair extras' ground, asked once for every shape of this cut. The descent is
+			// pinned: it stands one past the wall whatever the pads and nudges do to the module,
+			// so its two rung-side cells are the same cells for the plain ask, the busy pad's, the
+			// nudge's and the shortened head's -- and the oracle may count the notes they will
+			// carry before the wire refusal is made. The builder walks to the same cells off the
+			// blocks and re-asks before it hangs anything. See {@link #STAIR_EXTRAS}.
+			boolean stairTopFree = false;
+			boolean stairBottomFree = false;
+			boolean stairWallFree = false;
+			if (STAIR_EXTRAS && layout.ultra() && cutOffered && fold == null && climb <= 0
+					&& above >= 0 && above < floors && CHEAP_SPLIT_DESCENT) {
+				BlockPos stairFoot = new BlockPos(wall + lane.travel().getStepX(),
+					lane.pos().getY(), lane.pos().getZ());
+				Direction stairAway = descentSide.getOpposite();
+				stairTopFree = quietAndFree(placements, stairFoot.relative(stairAway),
+					event.time());
+				stairBottomFree = quietAndFree(placements,
+					stairFoot.relative(lane.travel()).below(CUBE_FLOOR_HEIGHT - 1)
+						.relative(stairAway), event.time());
+				// The wall extra's cell is a harp's: its below cell may be claimed air, and the
+				// claim is a guard rather than an occupant. See {@link #STAIR_WALL_EXTRAS}.
+				if (STAIR_WALL_EXTRAS) {
+					stairWallFree = quietAndFreeForHarp(placements,
+						stairFoot.relative(lane.travel()), event.time());
+				}
+			}
+			// The ascent rung extra's ground. The climb is as pinned as the descent -- a cut
+			// fills the room it is given, so the ladder's near column is the same turn column --
+			// and the middle pane leans back onto the jog row, over ground already built. Two
+			// asks, both answerable off the blocks: the harp's cell must be quiet and free, and
+			// the pane's stone must not stand beside a note belonging to another tick (a cross
+			// descent's lowered flanks, most of all -- the two would mispower each other).
+			boolean climbRungFree = false;
+			if (ASCENT_RUNG_EXTRAS && STAIR_EXTRAS && layout.ultra() && cutOffered && rise == null
+					&& climb > 0 && above >= 0 && above < floors) {
+				BlockPos stairFoot = new BlockPos(wall + lane.travel().getStepX(),
+					lane.pos().getY(), lane.pos().getZ());
+				BlockPos rung = stairFoot.relative(depth.getOpposite()).above(3);
+				climbRungFree = quietAndFreeForHarp(placements,
+					rung.relative(lane.travel().getOpposite()), event.time())
+					&& !stoneWouldSoundAForeignNote(placements, rung, event.time());
+			}
+			StackedSplit headed = layout.ultra() && cutOffered && fold == null && rise == null
+				&& index > 0 && above >= 0 && above < floors
+				? stackedSplitOf(event.notes(), room, splitCells, climb > 0,
+					!columnBehindBusy || delayColumns > 0
+						|| CUT_ASKS_THE_BLOCKS_BEHIND
+							&& backPairIsFree(placements, lane.ahead(delayColumns), event.time()),
+					stackedIsBehind, true, stairTopFree, stairBottomFree, stairWallFree,
+					climbRungFree)
+				: null;
+			// Busy padding: one column spent so a chord can be cut at all.
+			//
+			// This is a different thing from a parity pad even though it lays the same cell.
+			// A parity pad moves a module so its slots land on a beat that works. This moves a module off
+			// the chord behind it, so the pair of slots behind comes free -- and with them the bigger head
+			// that is the difference between a chord that can be cut across the staircase and one that is
+			// laid whole and puts its lane outside the wall.
+			//
+			// Only where it buys the cut, which is the whole of the rule. Asked after the head has already
+			// been refused, and only when the plain cut is gone too -- so a chord that can be cut where it
+			// stands is never moved, and a chord that cannot be cut even with the slots behind is never
+			// moved for nothing. On Guardian at 28 wide over seven floors that is the chord of 24 whose
+			// head is refused because a stacked centre holds the column behind it.
+			//
+			// It costs a column and hands it straight back: the head asked for here is the same head in a
+			// room one smaller, so the near half is one cell shorter and the lane still comes to rest on
+			// its wall.
+			//
+			// It lays its own column, which it did not have to while the cut pinned its staircase -- the
+			// pin was already laying columns in front of the module and one of them could be this one.
+			// With the pin gone there is nothing else laying anything in front of a cut, so the rule
+			// carries its own cell or it does not work at all. Kept when the pin went because it is a
+			// different thing from a pad to the wall: it buys a cut that is otherwise refused outright,
+			// where the pin bought a cut that was already happening a tidier place to stand.
+			int busyPad = 0;
+			if (BUSY_PAD_FREES_THE_BACK_FLANKS && headed == null && fold == null && rise == null
+					&& layout.ultra() && cutOffered && index > 0 && above >= 0 && above < floors
+					// Only a column that is actually in the way. A delay already moves the opening, and a
+					// column that is not busy has nothing to free.
+					&& columnBehindBusy && delayColumns == 0
+					// Only for a chord that has to be cut. A cut is *offered* to every chord that
+					// reaches its wall, and most of those simply fit -- so "no plain cut available"
+					// is true of a chord of five that needs nothing at all, and asking only that
+					// fired this 563 times over the library, 385 of them on chords of five. The chord
+					// must actually overshoot, which is the same gate the refusal counter uses.
+					&& wantsTurn
+					// And big enough that a column is the only thing left to try. The
+					// reason is that everything smaller has other moves: it can cut plain, it can take
+					// a shorter head, it can be laid as a bus and let the lane turn after it. Gated on
+					// wantsTurn alone this still fired 211 times and only 11 of those were chords the
+					// rule was written for -- the rest were chords of five and six that strand the
+					// turn, which is a real refusal but not one worth spending ground on.
+					&& event.notes().size() >= BUSY_PAD_ABOVE_NOTES
+					// And only where there is no other way to close: a chord that cuts plain is left alone.
+					&& !(room >= 2 && room - 1 < cells && cells + splitCells <= DUST_RANGE)
+					// A column to spend, and the wire to lay it with. Both are what the pin will charge.
+					&& room >= 2 && placements.runSinceRepeater() + 1 <= DUST_RANGE) {
+				StackedSplit freed = stackedSplitOf(event.notes(), room - 1, splitCells, climb > 0,
+					true, false, true, stairTopFree, stairBottomFree, stairWallFree, false);
+				if (freed != null) {
+					placements.padded("busyPadBoughtTheCut");
+					placements.padded("busyPadBoughtTheCutAt" + Math.min(event.notes().size(), 30) + "Notes");
+					headed = freed;
+					busyPad = 1;
+				} else {
+					// Refused for something the column behind was not responsible for. Counted, because a
+					// pad that would not have helped is the interesting half of this rule.
+					placements.padded("busyPadWouldNotHaveHelped");
+				}
+			}
+			// A cut is built straight from the module rather than through {@link #addChordModule},
+			// so none of that method's guards are applied to it -- and the one that matters is the
+			// parity check. Without it a head can land its low notes against a live block of the
+			// lane behind, which sounds them at that lane's tick: one BELL of a hundred and fifty
+			// events read twenty-one ticks early, and nothing else in the build said a word.
+			//
+			// Refused rather than nudged. A nudge moves the module a column and the near half is
+			// measured to land on the wall exactly, so shifting it is how a cut ends up outside the
+			// footprint. Giving the head up falls back to the plain sum below, which is what the
+			// walk did before any of this and is always safe.
+			// Two guards, and both are ones {@link #addChordModule} applies that a cut never went
+			// through. The head hangs a pair of low notes in the column *behind* it, so it needs
+			// that column free -- the same rule {@link #landingOf} states as reachesBack and busy.
+			// Without it the head's instrument block lands in the air a note of the chord before it
+			// insists on, and the build refuses outright.
+			// Counted, not refused. The cut is asked for above knowing whether the column behind is
+			// free, so what arrives here is already a head of five where it had to be -- and a chord
+			// that could not make even that has no headed cut at all.
+			if (headed != null && columnBehindBusy && delayColumns == 0) {
+				placements.padded("planStackedSplitShortHead");
+			}
+			// A headed cut used to be walked out to its wall by columns of pad, in front of the module
+			// and behind its near half -- {@code CUT_PINS_ITS_STAIRCASE}, removed at the word on
+			// 2026-08-16: cut pinning is a fossil from the v1 paster. Any chord can be split anywhere
+			// now, so it is unneeded, and all it does is add unused space.
+			// Nothing replaced it and nothing is allowed to: a pad in front of the cut and a pad behind
+			// its near half are the same wire in the same corridor as the pin, whatever they are called.
+			//
+			// The rule the pin served is not repealed with it -- every climb, every descent and every
+			// flat turn stands at the wall, and it was restated the same day as absolute. What fills
+			// the columns instead is the chord itself, decided a few lines below where the shape is
+			// measured against the room it has to fill.
+			// A cut whose head lands on the wrong parity is moved a column, not given up.
+			//
+			// It used to be given up, on the grounds that a cut's near half is measured to land
+			// flush on the wall and shifting it a column puts it past. True of the shift alone --
+			// but the near half is not rigid. Cut it for one column less and the pad in front makes
+			// the difference up: one column of wire, a head, a transition and a bus one cell
+			// shorter is exactly the same total, so the lane still comes to rest on its wall and
+			// nothing the planner worked out has to change. The two notes that no longer fit the
+			// near half simply ride over the staircase with the rest of the far half, which is
+			// where they were always going anyway.
+			//
+			// A cut opens on a repeater and is handed the whole fifteen, so there is no question of
+			// the wire reaching -- which is the other thing that stops an ordinary chord nudging.
+			// In-game testing found this on Do The Dance at forty wide over eight floors: a chord of
+			// twenty-four that would not cut, and a lane five columns past its wall for want of one.
+			boolean splitNudge = false;
+			boolean splitClashed = false;
+			// Asked at the column the module will actually open in, which is a column further along
+			// where a busy pad bought one. That offset used to be the pin's, and the busy pad is what
+			// is left of it.
+			if (headed != null && stackedClashes(placements, lane.ahead(delayColumns + busyPad),
+					event.time(), headed.slots())) {
+				splitClashed = true;
+				// And the same question the chord nudge is asked: does the wire still reach. This
+				// nudge lays a cell of dust where the head's repeater would have stood, on top of the
+				// delay about to be laid in front of it -- so what has to fit is the run so far, the
+				// delay, and the pad. In-game testing found this one from the blocks: the module really did
+				// have to move, and moving it put its repeater a cell past the wire.
+				//
+				// Asked before the delay exists, so the delay is added by hand. Where a repeater
+				// falls inside that delay the run resets and this is too careful by however much it
+				// reset, which is the safe way to be wrong about a nudge.
+				boolean splitOutOfWire = MEASURED_NUDGE_REACH
+					&& placements.runSinceRepeater() + delayColumns + busyPad + 1 > DUST_RANGE;
+				if (splitOutOfWire) {
+					placements.padded("planSplitNudgePastTheWire");
+				}
+				StackedSplit shifted = !SPLIT_NUDGES || splitOutOfWire
+					|| stackedClashes(placements, lane.ahead(delayColumns + busyPad + 1), event.time(),
+						headed.slots())
+					? null : stackedSplitOf(event.notes(), room - busyPad - 1, splitCells, climb > 0,
+						!columnBehindBusy || delayColumns + busyPad + 1 > 0
+							|| CUT_ASKS_THE_BLOCKS_BEHIND
+								&& backPairIsFree(placements, lane.ahead(delayColumns + busyPad + 1), event.time()),
+						stackedIsBehind, true, stairTopFree, stairBottomFree, stairWallFree, false);
+				if (shifted == null) {
+					// Both cells wrong, or nothing left to cut once a column is spent. Before the head
+					// goes: shed the clashing slot instead, which costs no column and no wire -- the
+					// move a lane at tip nought still has. In-game reading found every guardian25
+					// breach at 20x5 was a cut given up here that one shed flank would have kept.
+					// Centre-fed heads keep the old give-up: their slots carry the climb and are not
+					// this method's to shed.
+					StackedSplit shedded = SHEDS_THE_CLASHING_SLOTS
+							&& headed.centreFeeds() == CentreFeed.NONE
+						? shedTheClashingSlots(placements, lane.ahead(delayColumns + busyPad),
+							event.time(), headed, splitCells)
+						: null;
+					if (shedded != null) {
+						placements.padded("planStackedSplitShedTheClash");
+						headed = shedded;
+					} else {
+						placements.padded("planStackedSplitClashed");
+						LAST_CUT_REFUSAL = "Clashed";
+						headed = null;
+						// And with the head goes the column bought for it. What follows is a plain cut,
+						// which fills the room it is given and needs nothing in front of it.
+						busyPad = 0;
+					}
+				} else {
+					placements.padded("planStackedSplitNudged");
+					headed = shifted;
+					splitNudge = true;
+				}
+			}
+			// A corkscrew's first rung stands over the module's own repeater, and the dust on
+			// it sits at floor+3 -- one diagonal step from any raised wire the module behind
+			// left at floor+2. Wire joins wire diagonally, so a live tail behind would carry
+			// the rung's flanks at its own tick. Asked of the blocks, and the head given up
+			// rather than nudged: a corkscrew exists only at a room of one, so there is no
+			// column to move into.
+			if (headed != null && headed.centreFeeds() == CentreFeed.CORKSCREW) {
+				BlockPos behindUp = lane.ahead(delayColumns + busyPad + (splitNudge ? 1 : 0))
+					.pos().relative(lane.travel().getOpposite()).above(2);
+				String lower = placements.blockAt(behindUp);
+				String upper = placements.blockAt(behindUp.above());
+				if (upper != null && upper.startsWith("minecraft:redstone_wire")) {
+					// Level with the rung's own dust: a join no block can stand between.
+					placements.padded("corkscrewRefusedForWireBehind");
+					LAST_CUT_REFUSAL = "CorkscrewWireBehind";
+					headed = null;
+				} else if (lower != null && lower.startsWith("minecraft:redstone_wire")) {
+					// Two couplings from that wire, two answers. The horizontal -- their wire
+					// weakly powering the rung stone itself -- only ever reaches the rung's flank
+					// notes, so those two slots ride over the staircase instead and the rung runs
+					// bare. A corkscrew of twenty-four still beats the pad this used to lose to:
+					// 256 refusals against 239 built, library-wide. The diagonal -- their wire
+					// stepping up into the rung's dust, which would carry the whole far half at
+					// their tick without ever waiting on this module's repeater -- is blocked by
+					// filling the cell over their wire. In-game testing confirmed the skip and
+					// the fix, and found the filler need not be stone: a harp note there is
+					// sounded by the rung's own dust at the module's own tick, its instrument the
+					// wire it stands over. A harp from the tail takes the cell when one can be
+					// spared; plain stone when the harps have run out.
+					List<EventNote> kept = new ArrayList<>();
+					for (EventNote rung : headed.rungNotes()) {
+						if (rung != null) {
+							kept.add(rung);
+						}
+					}
+					List<EventNote> bareHead = new ArrayList<>(headed.head());
+					bareHead.removeAll(kept);
+					List<EventNote> fullerFar = new ArrayList<>(headed.farTail());
+					fullerFar.addAll(0, kept);
+					EventNote cap = takeFromTail(fullerFar,
+						note -> note.effect() == null && isHarpNote(note));
+					if (cap != null) {
+						bareHead.add(cap);
+					}
+					StackedSplit bare = new StackedSplit(headed.slots(), bareHead,
+						headed.nearTail(), fullerFar, false, CentreFeed.CORKSCREW,
+						headed.centreToFront(), List.of(), cap);
+					if (bare.runCells(splitCells) > DUST_RANGE) {
+						placements.padded("corkscrewFlanklessOutOfWire");
+						LAST_CUT_REFUSAL = "CorkscrewFlanklessOutOfWire";
+						headed = null;
+					} else {
+						placements.padded("corkscrewRunsBareForWireBehind");
+						headed = bare;
+					}
+				}
+			}
+			// A cut is how a chord that does not fit is made to fit, and this one does fit.
+			//
+			// The whole cut decision is made on {@code cells}, which is the length of a <em>bus</em> --
+			// and the walk may not be building a bus. A chord of four is two bus cells and one stacked
+			// module, and where the module lands inside the wall there is nothing for a cut to be around.
+			// Cutting anyway spends the same two columns on a bus of two notes and sends the other two
+			// over the staircase; the module lands flush in them and carries all four.
+			//
+			// Only where the centre is empty and a climb follows, because that is the one case where the
+			// module can hand over without the spare column a cut would have given it -- the dust on its
+			// centre is the handover. See {@link #CLIMB_OFF_A_STACKED_CENTRE}.
+			//
+			// In-game testing found it by repasting am-i-dreaming three times: still a chord of four,
+			// still being cut, still coming out a plain bus. The room test was never what refused it.
+			// This was.
+			boolean stackedFitsInstead = CLIMB_OFF_A_STACKED_CENTRE && placements.climbAhead()
+				&& shaped.style().stacked() && !shaped.style().busHeaded()
+				&& (wall - here.end()) * lane.travel().getStepX() >= 0;
+			if (stackedFitsInstead) {
+				UltraSlots insteadOfCutting = slotsFor(shaped.style(), event.notes());
+				stackedFitsInstead = insteadOfCutting != null && insteadOfCutting.centre() == null;
+			}
+			if (stackedFitsInstead) {
+				placements.padded("cutSkippedForAStackedClimb");
+			}
+			// A cut fills the room it is given, or it is not this chord's cut.
+			//
+			// 2026-08-16, and it is the rule the pin used to serve, stated without the pin and
+			// without anything else laying a column either: a lane may not turn before it is allowed
+			// to, and no wire is to be spent buying it the right to. A headed cut sizes its near half
+			// out of what the chord had left after the head, so a chord whose tail runs out before the
+			// room does leaves its module short of the wall -- and the staircase then gets built where
+			// the module ended, in a column no other corridor's turn stands in.
+			//
+			// So the shape is measured against the room before it is kept. What fills the gap is music
+			// or nothing: a plain cut sizes its near half at {@code room - 1} cells and fills every one
+			// of them, so where the chord is small enough for one it lands flush and carries more notes
+			// on this floor than the headed cut would have. Where it is not, the chord is laid whole and
+			// the lane breaches, which the build counts and says out loud.
+			//
+			// Both of those are allowed and a recessed staircase is not. Padding the gap is what this
+			// deliberately does not do -- see the removed pin, and {@link #V2_PADS_AHEAD} for the same
+			// reasoning about the lane in front.
+			//
+			// Asked here rather than where the head was chosen, because the nudge moves the module a
+			// column and the busy pad moves it another, and what has to fill the room is what is left
+			// after both. The pin asked before them and kept {@code recessMispredicted} to find out
+			// when that had been wrong.
+			// Never of a centre-fed head. Its shape is chosen by the room itself -- a flanked-rung
+			// head's module ends a column short of the border because the staircase takes two
+			// columns and fills both -- so measuring the module's columns against the room reads
+			// the staircase's own ground as a gap and throws the one cut this room has away.
+			if (headed != null && headed.centreFeeds() == CentreFeed.NONE) {
+				int roomLeft = room - busyPad - (splitNudge ? 1 : 0);
+				int gap = roomLeft - headed.columns();
+				if (gap > 0) {
+					// Counted by how far short it fell and how big the chord was, because those two say
+					// which lever is worth reaching for.
+					placements.padded("cutFellShortBy" + Math.min(gap, 6));
+					placements.padded("cutFellShortAt" + Math.min(event.notes().size(), 30) + "Notes");
+					// A shorter head, which is how a cut fills a column with music instead of wire.
+					//
+					// The head carries seven notes in the two columns a module takes; the near half
+					// carries two a column. So every pair of notes taken out of the head and left to the
+					// tail lengthens the near half by exactly one column, and the whole shape still ends
+					// on the same repeater with the same run. A head of five is a head of seven that has
+					// handed one column back to the music.
+					//
+					// Which is why this is not padding and is not a smaller cut: the columns between the
+					// module and the wall get filled with the chord's own notes. It reaches a gap of one
+					// and no further -- and a gap of one is 594 of the library's 1,574 short cuts,
+					// including the chords of twenty and twenty-four where losing the head means losing
+					// the cut altogether.
+					//
+					// Asked of {@link #stackedSplitOf} by telling it less than the truth about the ground
+					// behind: the back pair is what a head of seven hangs its last two notes in, so a
+					// shape asked for with no room behind is exactly the shape with those notes in the
+					// tail instead. Pessimism is always safe here -- it can only put notes on the bus.
+					//
+					// Never less conservative than the ground actually is, though. Where a stacked centre
+					// stands behind, both back slots are gone rather than one, and a head of six asked
+					// for as though only one were spoken for hangs a note in that centre's cell -- a
+					// wrong note, which is worse than the recess this is avoiding. So a real stacked
+					// neighbour is carried into every ask and only the shortest head is on offer.
+					//
+					// Behind {@link #CUT_SHORTENS_ITS_HEAD}, because it is a trade and not a win.
+					for (boolean stackedBehind : !CUT_SHORTENS_ITS_HEAD ? new boolean[] {}
+							: stackedIsBehind ? new boolean[] {true} : new boolean[] {false, true}) {
+						StackedSplit shorter = stackedSplitOf(event.notes(), roomLeft, splitCells,
+							climb > 0, false, stackedBehind, true, stairTopFree, stairBottomFree,
+							stairWallFree, false);
+						if (shorter != null && roomLeft - shorter.columns() == 0) {
+							placements.padded("cutShortenedItsHead");
+							placements.padded("cutShortenedTo" + shorter.head().size());
+							headed = shorter;
+							gap = 0;
+							break;
+						}
+					}
+					if (gap > 0) {
+						LAST_CUT_REFUSAL = "FellShortBy" + gap;
+						headed = null;
+					}
+				}
+			}
+			// The third cut, for the chord that can be cut neither plain nor with a head: open it with a
+			// sunken note block instead. The repeater strongly powers the note block, the note block hands
+			// the next cell a fresh fifteen, and that cell is the descent's first rung -- so the opening
+			// costs one column and no wire, carries three notes, and the run is 3 + 2 * (15 - 4) = 25 on a
+			// descent. Guardian 20x5 tick 1480: a chord of 24 with two columns, head found and clashing with
+			// nowhere to nudge, laid whole twelve columns out; in-game testing built the sunken cut by hand
+			// inside the emerald. See {@link #SUNKEN_CUTS}.
+			boolean plainCut = room >= 2 && room - 1 < cells && cells + splitCells <= DUST_RANGE;
+			SunkenCut sunken = null;
+			if (SUNKEN_CUTS && layout.ultra() && cutOffered && index > 0 && above >= 0
+					&& above < floors && !stackedFitsInstead && headed == null && fold == null
+					&& !plainCut && climb <= 0 && room >= 2 && room - 1 < cells) {
+				sunken = sunkenCutOf(placements, lane.ahead(delayColumns), event.notes(), room,
+					splitCells, descentSide, event.time(), stairTopFree, stairBottomFree,
+					stairWallFree);
+				placements.padded(sunken != null ? "planSunkenCut"
+					: "sunkenCutRefused" + LAST_SUNKEN_CUT_REFUSAL);
+				if (sunken != null) {
+					placements.padded("planSunkenCutAt" + Math.min(event.notes().size(), 30)
+						+ "Notes");
+				}
+			}
+			// The fourth cut, for the room of one: repeater, centre on the wall column, and the
+			// front flanks on the border. No transition cell, so no head; no column for a sunken
+			// opening. The head's cross is the staircase's first rung -- one level below where the
+			// rung's dust would stand, on the centre column -- and the ring turns under the head from
+			// there. Twenty-eight notes across a descent, against twenty-seven for a stacked-bus head
+			// and twenty-five sunken. See {@link #CROSS_DESCENTS}.
+			CrossDescent cross = null;
+			if (CROSS_DESCENTS && layout.ultra() && cutOffered && index > 0 && above >= 0
+					&& above < floors && !stackedFitsInstead && headed == null && fold == null
+					&& !plainCut && sunken == null && climb <= 0 && room == 1 && room - 1 < cells) {
+				cross = crossDescentOf(placements, lane.ahead(delayColumns), event.notes(),
+					splitCells, descentSide, event.time());
+				placements.padded(cross != null ? "planCrossDescent"
+					: "crossDescentRefused" + LAST_CROSS_DESCENT_REFUSAL);
+				if (cross != null) {
+					placements.padded("planCrossDescentAt" + Math.min(event.notes().size(), 30)
+						+ "Notes");
+				}
+			}
+			// The fifth cut, for the room of nought: the repeater on the wall column itself, the
+			// note-block conductor on the border, and a three-rung jog of a staircase in the one
+			// column of x a turn is allowed past the wall. The last shapeless arrival -- a cap
+			// chord landing flush had no cut at any room below one, and walked out thirteen
+			// columns for want of this. In-game design, hand-built and signed first.
+			WallDescent wallCut = null;
+			if (WALL_DESCENTS && layout.ultra() && cutOffered && index > 0 && above >= 0
+					&& above < floors && !stackedFitsInstead && headed == null && fold == null
+					&& !plainCut && sunken == null && cross == null && climb <= 0 && room == 0) {
+				wallCut = wallDescentOf(placements, lane.ahead(delayColumns), event.notes(),
+					splitCells, descentSide, event.time());
+				placements.padded(wallCut != null ? "planWallDescent"
+					: "wallDescentRefused" + LAST_WALL_DESCENT_REFUSAL);
+				if (wallCut != null) {
+					placements.padded("planWallDescentAt" + Math.min(event.notes().size(), 30)
+						+ "Notes");
+				}
+			}
+			// The dropped-repeater descent, for the two rooms nothing else reaches: a room of
+			// nought where the wall descent wants a harp the chord has not got, and the room of
+			// minus one that a nudged chord landing flush on the wall leaves behind it. See
+			// {@link #DESCENT_NOUGHT}.
+			DescentNought nought = null;
+			if (DESCENT_NOUGHT && layout.v2() && cutOffered && index > 0 && above >= 0
+					&& above < floors && !stackedFitsInstead && headed == null && fold == null
+					&& !plainCut && sunken == null && cross == null && climb <= 0
+					&& room <= 0 && room >= -1 && delayColumns == 0
+					&& (wallCut == null || DESCENT_NOUGHT_FIRST)) {
+				nought = descentNoughtOf(placements, lane, event.notes(), room < 0, depth,
+					event.time());
+				placements.padded(nought != null ? "planDescentNought"
+					: "descentNoughtRefused" + LAST_DESCENT_NOUGHT_REFUSAL);
+				if (nought != null) {
+					placements.padded("planDescentNoughtAt" + Math.min(event.notes().size(), 30)
+						+ "Notes");
+					placements.padded(room < 0 ? "planDescentNoughtRaised" : "planDescentNoughtFlat");
+					if (wallCut != null) {
+						placements.padded("planDescentNoughtOverTheWallDescent");
+						wallCut = null;
+					}
+				}
+			}
+			boolean couldSplit = layout.ultra() && cutOffered && index > 0 && above >= 0
+				&& above < floors && !stackedFitsInstead && (fold != null || rise != null
+					|| headed != null || sunken != null || cross != null || wallCut != null
+					|| nought != null || plainCut);
+			// And the foldback, where every one of them has been refused. What happens to a chord
+			// with no cut is that it is laid whole and the lane walks out past its wall, which is
+			// a breach the build counts and says out loud. Two lanes of height spent on one chord
+			// is dear; a breach is dearer. So the shape that never refuses on capacity is the last
+			// thing asked before that happens, and only then. See {@link #FOLDBACK_LAST}.
+			if (FOLDBACK_LAST && !couldSplit && foldbackOffered && wantsTurn && !stackedFitsInstead
+					&& fold == null && rise == null) {
+				FoldbackPick fallback = foldbackPick(placements, lane, event, room, delayColumns,
+					nearWall, farWall, forward, above, climb, floors, "AsTheLastResort");
+				fold = fallback.fold();
+				rise = fallback.rise();
+				couldSplit = fallback.any();
+			}
+			// Why the head went, where losing it costs the lane its wall.
+			//
+			// A refused head is the commonest way a v2 lane ends up outside its wall: a chord of
+			// twenty-four is twelve cells and cannot be cut plain against a staircase, so a head is the
+			// only cut it has, and the trace could only ever say {@code headed=no}.
+			// {@link #LAST_CUT_REFUSAL} says which of the four refusals it was, and nothing overwrites
+			// it between there and here: everything that asks again asks only when a head came back.
+			//
+			// Counted here rather than at the call, and only where the plain cut has gone too. Every
+			// chord that reaches its wall is offered a head and most are small enough to cut plain and
+			// have no use for one -- counted at the call this is 14,496 refusals over the library, of
+			// which the great majority cost nothing at all.
+			if (!couldSplit && wantsTurn && layout.ultra() && cutOffered && index > 0
+					&& above >= 0 && above < floors) {
+				placements.padded("cutRefused" + LAST_CUT_REFUSAL);
+				placements.padded("cutRefusedAt" + Math.min(event.notes().size(), 30) + "Notes");
+			}
+			// Counted where it bites rather than where it is decided. The planner books the veto on a
+			// lane it is only considering, and most of those plans are thrown away; what matters is how
+			// often a split the walk was about to build actually got stopped, because that is the number
+			// the regression has to be paid for out of.
+				// The veto stays while the booking search does, and for the same reason: the two have to
+				// agree about where a lane closes. The plan books pads on the understanding that a chord
+				// is cut when it overshoots; the walk cuts when it reaches. Removing the veto and keeping
+				// the plan let the walk cut where the plan had not, and Guardian walked a lane five columns
+				// past its wall on a chord of 14 -- a chord whose cut is 7 cells against a budget of 11.
+				// Nothing was too big; the two halves were answering different questions.
+				boolean vetoed = V2_PAD_CLOSE_VETOES_THE_CUT
+					&& couldSplit && booked != null && booked.containsKey(NO_SPLIT - index)
+					// A centre-fed climbing cut is never vetoed for a pad-close. The pad spends
+					// columns on wire; the cut hangs notes in cells no other shape has and every
+					// one of them shortens the far half's bus on the floor above -- so where both
+					// are possible the cut is the better lane, and the plan's booking stands for
+					// the events after this one either way. See {@link #CENTRE_FED_CUT_OUTRANKS_THE_PAD}.
+					&& !(CENTRE_FED_CUT_OUTRANKS_THE_PAD && headed != null
+						&& headed.centreFeeds() != CentreFeed.NONE);
+				if (vetoed) {
+					placements.padded("planVetoBit");
+				}
+				boolean split = couldSplit && !vetoed;
+			// Unless leaving that tick is what stops the pad reaching the wall. Then spend the whole
+			// wait on the pad and carry the event over the turn on the wire instead, which is the one
+			// way a lane whose next event is a single tick away can still end where it is meant to.
+			boolean carried = false;
+			// Asked only when carrying is still on the table. This plans a pad that fills the lane to
+			// the wall so the next chord can be carried over a staircase without a repeater -- and it
+			// used to plan it whatever, then have the carry rejected further down for want of a
+			// staircase to cross. The carry went away and the pad stayed, which is a lane padded flush
+			// for a reason that no longer existed: four blocks of wire in front of a chord that was
+			// about to lie across the corner by itself.
+			if (layout.ultra() && wantsTurn && !straddles && above >= 0 && above < floors
+					&& pad.cells().size() < columns) {
+				Pad whole = spending(planPad(columns, tipSignal, turnCells, wait), wait);
+				if (whole != null && whole.cells().size() == columns
+					&& whole.signal() >= turnCells + stepOff + cells) {
+					pad = whole;
+					carried = true;
+				}
+			}
+			// The old rule asked the last event whether a turn would still be in range. It answers for
+			// the wire it laid and nothing else, so a lane ending on a long bus could not turn at all
+			// and ran on until one ending on a short chord came along -- which is most of why the
+			// staircases were scattered rather than merely off by a column. The pad can put a repeater
+			// in and make the range question go away; when it cannot, the lane still has to run on.
+			// And on the wall or not at all. A turn is the one thing in a build that steps off its own
+			// centre line, so a turn standing anywhere else stands beside whatever that column happens
+			// to hold. A lane that cannot reach its wall carries on to the next chord and tries again;
+			// the only turn allowed elsewhere is one on a lane already past its wall, where carrying on
+			// would never bring it back.
+			boolean onWall = pad.cells().size() == columns;
+			// What the wire must still be worth to take the turn. A staircase has to be crossed in one
+			// run and costs its whole length; a flat turn only has to be *reached*, because the chord
+			// standing on it opens with a repeater of its own that hands out a fresh fifteen. Charging
+			// a walked turn as though it were a staircase is what made lanes give up and run on while a
+			// perfectly good corner was two blocks away.
+			// A straddling chord has nothing to reach. Its repeater goes down where the lane has got
+			// to, and a repeater hands out a fresh fifteen however dead the wire arriving was, so the
+			// only run that matters is the one inside the chord itself. Charging it for a staircase it
+			// is not going to cross is what made a lane give up with a usable corner in front of it.
+			// A flat turn may only be taken by a chord that can actually get across it. The straddle
+			// test used to decide only whether to pad, which left the chord itself free to be laid
+			// over both corners regardless -- and a chord of thirty cannot be: two corners cost it two
+			// slots, sixteen blocks of bus, and the last of them is past what its repeater reaches. It
+			// runs on instead and turns in front of a chord that fits, which breaches the footprint
+			// and says so, rather than building a tail that never fires and saying nothing.
+			// And where a descent is pinned, the wire has to reach the wall as well as the staircase.
+			// Pinning makes the turn absolute: the lane walks out to the wall whether the pad paid for
+			// those columns or not, so a lane allowed to hand over without the signal to cross them
+			// hands over onto dead wire. The rule the planner has always used is the one to match --
+			// {@link #closes} will only end a lane at its wall or by a cut, never on a pad that got
+			// most of the way -- and a lane refused here simply lays one more chord, whose repeater
+			// hands out a fresh fifteen, and turns after that. It costs footprint, which says so, and
+			// not a tail that never fires, which does not.
+			int unpaid = Math.max(0, columns - pad.cells().size());
+			// Priced through the one place that knows whether the pad can be lifted onto the climb.
+			// A lane that could not afford five may well afford three, and this is the test that
+			// decides whether it turns here at all -- so it has to ask the same question the pad was
+			// planned with and the same one the walk will charge itself when it builds the staircase.
+			// Ungated, and it has to be: this prices the staircase the walk is about to build, and the
+			// walk builds a raised pad whether or not the search was allowed to plan for one. Gating
+			// it here also took the empty-pad bus discount out with it, which predates all of this.
+			int turnPrice = turnPrice(pad, climb > 0, above >= 0 && above < floors,
+				turnsOffBus, turnCells, turnOffBusCells);
+			// Priced after the line above, because this is the second place the same turn is priced
+			// and the two were answering differently. {@link #turnPrice} knows a pad standing on a bus
+			// can be lifted onto the climb and charges three; this knew only the older discount, for a
+			// pad with no cells at all, and charged five for everything else -- so a lane holding four
+			// and needing three was refused its turn by the arm that had not been told.
+			int turnCost = unpaid == 0
+				? Math.min(WALL_REACH_PRICES_THE_RAISED_PAD ? turnPrice : turnCells,
+					pad.cells().isEmpty() && turnsOffBus ? turnOffBusCells : turnCells)
+				: turnCells;
+			boolean reachesWall = !PIN_DESCENTS || flatAhead
+				|| pad.signal() - unpaid >= turnCost;
+			// A straddling chord is charged for wire it is not going to use. The comment fifteen lines
+			// above already says why it should not be -- "its repeater goes down where the lane has got
+			// to, and a repeater hands out a fresh fifteen however dead the wire arriving was" -- and
+			// then the test asks for a block of wire anyway. See {@link #STRADDLE_NEEDS_NO_WIRE}.
+			boolean straddleAffordable = STRADDLE_NEEDS_NO_WIRE || pad.signal() >= 1;
+			boolean canTurn = layout.ultra()
+				? index > 0 && reachesWall && (flatAhead ? straddles && straddleAffordable
+					: pad.signal() >= turnPrice)
+				: index > 0 && events.get(index - 1).maxSafeTurnDistance() >= MAX_LANE_SPACING;
+			// Every turn the lane asks for, split by what lies ahead and by whether a run is still
+			// live when it asks. This is what said a live run does reach a flat turn -- 463 of
+			// them -- and that every flat turn in the library steps by three.
+			if (layout.ultra() && wantsTurn) {
+				placements.padded("turnAsked" + (flatAhead ? "Flat" : "Stair")
+					+ (railPhase >= 0 ? "RunLive" : "NoRun") + (canTurn ? "Can" : "Cannot"));
+				if (flatAhead) {
+					placements.padded("turnFlatStep" + slabStep);
+				}
+			}
+			// A veto is a preference, not a prohibition.
+			//
+			// The plan forbids a cut where it has found a way to close the lane on a pad instead, so
+			// that the walk -- which decides to split on its own arithmetic -- does not quietly close a
+			// chord earlier than the plan did. That is the right instinct where the pad close works.
+			// Where it does not, the lane has been told it may not cut *and* cannot turn, so it does
+			// neither and walks out past its wall carrying the chord whole.
+			//
+			// In-game testing found one at Guardian 16 wide over four floors, {@code 20 77 148}: a chord of
+			// 24 at {@code x=13} with the wall at 15, {@code headed=0+18} and {@code couldSplit=true} -- the
+			// cut was there, already shed, and the veto threw it away for a pad of one cell with four blocks
+			// of wire, which {@code reachesWall} then refused. Ten columns outside.
+			//
+			// Asked here rather than where {@code split} is first worked out, because this is the
+			// first line at which the walk knows whether the plan's alternative is open to it.
+			int spentPadding = 0;
+			// Ahead of a staircase only, for the same reason a split is. A chord that would have been
+			// carried across a flat turn on bare wire is now simply built on the turn.
+			carried &= canTurn && !split && above >= 0 && above < floors;
+			// On the wall or not at all -- except that a machine you cannot paste is a machine you
+			// cannot go and look at. So a lane that will not reach its wall turns where it stands and
+			// says so, on the same overlay a wrong note would appear on, naming the chord that beat it
+			// and what it had left to work with. Every one of these is a thing to go and fix.
+			// Counted where the lane actually hands over, which is the only moment its final extent is
+			// known. A negative count is a lane that walked out past the wall its width was promised
+			// at -- so the paste covers ground the player was told it would not, and that is the half
+			// worth stopping to ask about rather than merely listing.
+			// Not where a cut takes the chord: the dropped-repeater descent stands its repeater on
+			// the turn column and lays nothing past it, and a lane it keeps inside the paste is
+			// not a lane that walked out. Charged before the cut was decided, it read one block
+			// out on every such build with the paste's span exactly what was promised.
+			// And the turn column is not out either. A chord straddling a flat turn from one past
+			// the wall stands its repeater on the turn column and the corner takes it from there,
+			// which is the column every turn in the build is allowed; what is past the promise is
+			// what lies beyond that.
+			int out = straddles ? -columns - 1 : -columns;
+			if (layout.ultra() && wantsTurn && canTurn && out > 0 && !split) {
+				placements.breached(out);
+			}
+			// Every chord standing outside the footprint, not only the ones that asked to turn. A chord that
+			// does not overshoot prints nothing on the old condition, and a lane already past its wall can
+			// lay several of those in a row -- which is exactly the run in-game testing has been reading in
+			// game and the old trace could not see.
+			if (TRACE_TURNS && layout.ultra() && (wantsTurn || columns < 0)) {
+				System.out.println("PAST t=" + event.time() + " notes=" + event.notes().size()
+					+ " columns=" + columns + " overshoots=" + overshoots
+					+ " wantsTurn=" + wantsTurn + " canTurn=" + canTurn + " turning=" + turning
+					+ " laneStarted=" + laneStarted + " straddles=" + straddles
+					+ " split=" + split + " carried=" + carried + " tip=" + tipSignal
+					+ " flatAhead=" + flatAhead + " reachesWall=" + reachesWall
+					+ " at " + lane.pos().getX() + " " + lane.pos().getY() + " "
+					+ lane.pos().getZ());
+			}
+			if (TRACE_TURNS && layout.ultra() && wantsTurn) {
+				// Why the head went, when it went. A cut is refused either because the chord cannot
+				// make a head at all or because the far half would be out of reach, and the two want
+				// completely different fixes.
+				StackedBusSplit why = stackedBusSplit(event.notes(), true);
+				String head = why == null ? "noHead"
+					: "head" + why.head().size() + "+tail" + why.tail().size()
+						+ "/run" + (STACKED_BUS_TRANSITION + (why.tail().size() + 1) / 2
+							+ splitCells);
+				// Coordinates space-separated, so the line can be pasted straight into /tp.
+				System.out.println("TURN t=" + event.time() + " notes=" + event.notes().size()
+					+ " at " + lane.pos().getX() + " " + lane.pos().getY() + " " + lane.pos().getZ()
+					+ " wall=" + wall + " columns=" + columns
+					+ " | flatAhead=" + flatAhead + " straddles=" + straddles
+					+ " canTurn=" + canTurn + " onWall=" + onWall + " split=" + split
+					+ " carried=" + carried
+					+ " | cells=" + cells + " tip=" + tipSignal + " wait=" + wait
+					+ " pad=" + pad.cells().size() + "c/" + pad.signal() + "s"
+					+ " turnCells=" + turnCells + " offBus=" + offBus
+					+ " last=" + lastStyle
+					+ " | room=" + room + " splitCells=" + splitCells
+					+ " headed=" + (headed == null ? "no"
+						: headed.nearTail().size() + "+" + headed.farTail().size())
+					+ " couldSplit=" + couldSplit + " vetoed=" + vetoed
+					+ " reachesWall=" + reachesWall + " unpaid=" + unpaid
+					+ " why=" + head + " refused=" + LAST_CUT_REFUSAL
+					+ " clashed=" + splitClashed
+					+ " nudged=" + splitNudge + " behindBusy=" + columnBehindBusy
+					+ " delayColumns=" + delayColumns);
+			}
+			// And the other side of the same measurement. A lane that hands over short of its wall
+			// leaves that many columns of corridor holding nothing, and puts its staircase or its
+			// sideways run somewhere no other lane's is -- which is the recessed turn that reaches
+			// into the neighbour it was never meant to touch. Counted in columns rather than in lanes,
+			// because one lane eleven columns short and eleven lanes one column short are the same
+			// number of wasted columns and nothing like the same problem. Recorded here beside the
+			// breach for the reason the breach is recorded here: it is the moment the lane's extent
+			// stops changing.
+			if (layout.ultra() && wantsTurn && canTurn && !onWall && !split && !carried
+					&& !straddles) {
+				placements.trouble("a lane turned " + columns + " columns short of its wall at tick "
+					+ event.time() + ", where a chord of " + event.notes().size()
+					+ " would not fit: " + tipSignal + " blocks of wire and " + (wait - 1)
+					+ " spare ticks to fill them with, and " + cells + " blocks of bus plus "
+					+ offBus + " for the turn is too much to cut across it");
+			}
+			// The raised-tail climb, for a climb at a room of nought that cannot afford the bare
+			// staircase and has no cut: the chord before's tail goes up instead, and this chord is
+			// laid whole on the floor above with a repeater of its own. See {@link #CLIMB_NOUGHT}.
+			boolean climbsNought = false;
+			// And at a room of one, where the lane stands on the wall column: the raised tail
+			// does not care what room the lane stands at, only that the cells behind it are a
+			// bus, and a chord that can neither climb bare nor be cut there walked out thirteen
+			// columns. A column of the floor above is spent against that, and only after every
+			// other shape has said no. See {@link #CLIMB_NOUGHT_AT_ROOM_ONE}.
+			if (CLIMB_NOUGHT && layout.v2() && climb > 0 && above >= 0 && above < floors
+					&& wantsTurn && !canTurn && !split && delayColumns == 0
+					&& (room == 0 || CLIMB_NOUGHT_AT_ROOM_ONE && room == 1)) {
+				climbsNought = climbNoughtFits(placements, lane, depth, event.time());
+				placements.padded(climbsNought ? "planClimbNought"
+					: "climbNoughtRefused" + LAST_CLIMB_NOUGHT_REFUSAL);
+				if (climbsNought) {
+					placements.padded("planClimbNoughtAt" + Math.min(event.notes().size(), 30)
+						+ "Notes");
+					placements.padded("planClimbNoughtAtRoom" + room);
+				}
+			}
+			if (split) {
+				Direction travel = lane.travel();
+				int wallLeft = wall;
+				int stepLeft = travel.getStepX();
+				// The fold held in reserve against a note the cut cannot hang. Decided here, off the
+				// ground the cut is about to be built on, because once the cut is down the fold's
+				// cells are under it; taken only if the cut's far half reports a note with nowhere to
+				// go, in which case the whole cut is taken back up and the fold laid in its place.
+				// The dropped-repeater descent is never wrapped: its raise takes blocks up outside
+				// any journal. See {@link #FOLD_CATCHES_A_DROPPED_NOTE}.
+				FoldbackPick foldInReserve = FOLD_CATCHES_A_DROPPED_NOTE && layout.v2() && fold == null
+						&& rise == null && nought == null && foldbackOffered && wantsTurn
+					? foldbackPick(placements, lane, event, room, delayColumns, nearWall, farWall,
+						forward, above, climb, floors, "InReserve")
+					: new FoldbackPick(null, null);
+				boolean foldCatches = foldInReserve.any();
+				PlacementPlan.Behind beforeTheCut = foldCatches ? placements.behind() : null;
+				int troublesBeforeTheCut = placements.troubleCount();
+				int timeBeforeTheCut = currentTime;
+				if (foldCatches) {
+					placements.beginTrial();
+				}
+				SpatialDelayTrigger trigger = addSpatialDelayBeforeEvent(placements, lane,
+					event.time() - currentTime);
+				currentTime = event.time();
+				List<EventNote> chord = busOrder(event.notes());
+				int near = 2 * (room - 1);
+				List<EventNote> far;
+				BlockPos cursor;
+				// A headed cut built in a trial, because its head's side notes stand where they stand:
+				// two cells beside the centre, a level up, with air wanted over each. What can be over
+				// them is the floor above -- a sunken bus there hangs its lowered notes two levels down,
+				// and their instrument blocks land exactly in that air. A head that meets one used to
+				// collide outright, and a collision is a build the player is offered with a note that
+				// cannot sound. Now it is rolled back and the chord cut plain, where the plain cut can
+				// carry it; a plain cut's halves are buses, and a bus asks the ground for every slot and
+				// grows past one it cannot have. Every collision left in the library at the sizes
+				// was this one shape against that one slab. See {@link #HEADED_CUT_FALLS_TO_PLAIN}.
+				if (headed != null && HEADED_CUT_FALLS_TO_PLAIN) {
+					placements.beginTrial();
+				}
+				int foldLaid = 0;
+				try {
+				if (fold != null || rise != null) {
+					// Everything -- head, both runs and the fold itself -- lies inside the module,
+					// and the walk's cursor lands on the next floor, after the folded run: there
+					// is no staircase and nothing for the turn step further on to lay.
+					cursor = fold != null
+						? addFoldbackCut(placements, trigger.cursor(), travel, depth,
+							trigger.triggerDelay(), fold, event.time())
+						: addFoldbackAscent(placements, trigger.cursor(), travel, depth,
+							trigger.triggerDelay(), rise, event.time());
+					far = List.of();
+					foldLaid = (trigger.cursor().getX() - cursor.getX()) * travel.getStepX();
+					placements.padded(fold != null ? "builtFoldback" : "builtFoldbackClimb");
+					if (TRACE) {
+						System.out.println("  FOLDBACK t=" + event.time() + " notes=" + chord.size()
+							+ " room=" + room + " laid=" + foldLaid
+							+ (fold != null ? " descent" : " climb"));
+					}
+				} else if (headed != null) {
+					BlockPos opening = trigger.cursor();
+					// Only the first cell of pad can be against the module behind, so only the first one
+					// asks. Whichever of the two comes first is that cell -- the busy pad where there is
+					// one, the nudge otherwise -- and the delay it spends comes off the head's own
+					// trigger.
+					int headDelay = trigger.triggerDelay();
+					boolean firstCell = true;
+					// The one column a cut still lays in front of itself: the column that freed the pair
+					// of slots behind and bought this cut at all. Never more than one, and only where the
+					// cut does not exist without it -- see {@link #BUSY_PAD_FREES_THE_BACK_FLANKS}. Every
+					// other column that used to stand here was the pin walking the module out to a wall
+					// it is no longer allowed to buy.
+					for (int cell = 0; cell < busyPad; cell++) {
+						placements.placing("busyPad");
+						placements.padded("busyPad");
+						headDelay = padCellOrSplitRepeater(placements, opening, travel, headDelay,
+							firstCell && placements.softTip(), false, "busyPad");
+						firstCell = false;
+						opening = opening.relative(travel);
+					}
+					if (splitNudge) {
+						// The column the shortened cut gave back. Laid as the parity pad an ordinary
+						// chord uses, so the head starts one further along and meets the lane behind
+						// on the parity it wants. Named for the marker: addParityPad does not name itself
+						// and the label it would otherwise wear belongs to whatever ran before it.
+						placements.placing("cutNudgePad");
+						placements.padded("parity");
+						headDelay = padCellOrSplitRepeater(placements, opening, travel, headDelay,
+							firstCell && placements.softTip(), false, "cutNudgePad");
+						firstCell = false;
+						opening = opening.relative(travel);
+					}
+					if (headed.head().size() < STACKED_HEAD_NOTES) {
+						SHORT_HEAD_CUT_AT = opening;
+					}
+					headed = new StackedSplit(
+						onTheFreeSlots(placements, opening, travel, depth, event.time(),
+							headed.slots(), headed.shed() ? DESCENT_FLANK_SLOT : -1),
+						headed.head(), headed.nearTail(), headed.farTail(), headed.shed(),
+						headed.centreFeeds(), headed.centreToFront(), headed.rungNotes(),
+						headed.severNote(), headed.stairExtras());
+					if (headed.centreFeeds() != CentreFeed.NONE) {
+						headed = lowsToppedUpFromTheTail(placements, opening, travel, depth,
+							event.time(), headed);
+					}
+					cursor = addStackedSplitModule(placements, opening, travel, depth,
+						headDelay, headed, event.time());
+					far = headed.farTail();
+					placements.padded("planStackedSplit" + (climb > 0 ? "Climb" : "Descent"));
+					if (headed.farTail().isEmpty()) {
+						placements.padded("splitCompletedOnTheStaircase");
+					} else if (headed.farTail().size() == 1) {
+						placements.padded("splitLeftOneNoteOver");
+					}
+					if (headed.nearTail().isEmpty()) {
+						placements.padded("planStackedSplitHeadOnly");
+						HEAD_ONLY_AT = cursor;
+					}
+					if (HEADED_CUT_FALLS_TO_PLAIN) {
+						placements.commitTrial();
+					}
+				} else if (cross != null) {
+					cursor = addCrossDescentHead(placements, trigger.cursor(), travel, depth,
+						descentSide, trigger.triggerDelay(), cross, event.time());
+					far = cross.far();
+					placements.padded("builtCrossDescent");
+					if (TRACE) {
+						System.out.println("  CROSSDESCENT t=" + event.time() + " notes="
+							+ chord.size() + " head=" + (chord.size() - far.size()) + " far="
+							+ far.size());
+					}
+				} else if (wallCut != null) {
+					// Head, staircase and landing in one: the module returns the cell the far
+					// half opens on, and the walk's descent step below has nothing left to lay.
+					cursor = addWallDescentHead(placements, trigger.cursor(), travel,
+						descentSide, trigger.triggerDelay(), wallCut, event.time());
+					far = wallCut.far();
+					if (TRACE) {
+						System.out.println("  WALLDESCENT t=" + event.time() + " notes="
+							+ chord.size() + " head=" + (chord.size() - far.size()) + " far="
+							+ far.size());
+					}
+				} else if (nought != null) {
+					// Head, staircase and landing in one, like the wall descent: the far half
+					// opens where the module says, and the descent step below has nothing to lay.
+					cursor = addDescentNought(placements, trigger.cursor(), travel, depth,
+						trigger.triggerDelay(), nought, event.time());
+					far = nought.far();
+					if (TRACE) {
+						System.out.println("  DESCENTNOUGHT t=" + event.time() + " notes="
+							+ chord.size() + " head=" + (chord.size() - far.size()) + " far="
+							+ far.size() + " raised=" + nought.raises() + " room=" + room);
+					}
+				} else if (sunken != null) {
+					cursor = addSunkenSplitNearHalf(placements, trigger.cursor(), travel, depth,
+						trigger.triggerDelay(), sunken, event.time());
+					far = sunken.far();
+					placements.padded("builtSunkenCut");
+					if (TRACE) {
+						System.out.println("  SUNKENCUT t=" + event.time() + " notes=" + chord.size()
+							+ " opening=" + (1 + sunken.open().size()) + " low=" + sunken.low().size()
+							+ " raised=" + sunken.raised().size()
+							+ " rung=" + (sunken.onTheRung() == null ? 0 : 1) + " far=" + far.size()
+							+ " room=" + room);
+					}
+				} else {
+					List<EventNote> handedOn = new ArrayList<>();
+					cursor = HEADED_CUT_FALLS_TO_PLAIN && NEAR_HALF_KEEPS_ITS_NOTES_FOR_THE_WIRE
+						? addPlainNearHalf(placements, trigger.cursor(), travel, depth,
+							trigger.triggerDelay(), chord, near, Math.max(1, room - 1), splitCells,
+							handedOn)
+						: HEADED_CUT_FALLS_TO_PLAIN
+						? addSplitNearHalf(placements, trigger.cursor(), travel, depth,
+							trigger.triggerDelay(), chord.subList(0, near), Math.max(1, room - 1),
+							handedOn)
+						: addSplitEventModule(placements, trigger.cursor(), travel, depth,
+							trigger.triggerDelay(), chord.subList(0, near));
+					List<EventNote> farRest = new ArrayList<>(handedOn);
+					if (near < chord.size()) {
+						farRest.addAll(chord.subList(near, chord.size()));
+					}
+					far = farRest;
+				}
+				} catch (IllegalArgumentException collided) {
+					if (headed == null || !HEADED_CUT_FALLS_TO_PLAIN) {
+						throw collided;
+					}
+					placements.rollbackTrial();
+					if (TRACE) {
+						System.out.println("  CUT HEAD COLLIDED " + collided.getMessage());
+					}
+					// Only where the plain cut can carry the chord across: both halves and the staircase
+					// off one repeater. A chord too big for that keeps its head and its collision, which
+					// the paste then says in red, as it did.
+					if (cells + splitCells > DUST_RANGE || near < 2) {
+						// The next rung: a chord the plain cut cannot carry may still go over as a
+						// sunken cut, which is a column shorter than the head and asks nothing of the
+						// cells the head collided in. Tried in a trial; if it collides too, the head's
+						// collision stands as before.
+						SunkenCut rescue = SUNKEN_CUTS && climb <= 0
+							? sunkenCutOf(placements, Lane.straight(trigger.cursor(), travel, depth),
+								event.notes(), room, splitCells, descentSide, event.time(),
+								stairTopFree, stairBottomFree, stairWallFree)
+							: null;
+						if (rescue == null) {
+							placements.padded("cutHeadCollidedAndStayed");
+							placements.padded("cutHeadNoSunkenRescue" + LAST_SUNKEN_CUT_REFUSAL);
+							if (TRACE) {
+								System.out.println("  NO SUNKEN RESCUE t=" + event.time() + " room="
+									+ room + " why=" + LAST_SUNKEN_CUT_REFUSAL);
+							}
+							throw collided;
+						}
+						placements.beginTrial();
+						try {
+							cursor = addSunkenSplitNearHalf(placements, trigger.cursor(), travel, depth,
+								trigger.triggerDelay(), rescue, event.time());
+							placements.commitTrial();
+						} catch (IllegalArgumentException again) {
+							placements.rollbackTrial();
+							placements.padded("cutHeadCollidedAndStayed");
+							throw collided;
+						}
+						placements.padded("cutHeadFellToSunken");
+						headed = null;
+						sunken = rescue;
+						far = rescue.far();
+						if (TRACE) {
+							System.out.println("  SUNKENCUT(rescue) t=" + event.time() + " notes="
+								+ chord.size() + " far=" + far.size() + " room=" + room);
+						}
+					} else {
+					placements.padded("cutHeadFellToPlain");
+					headed = null;
+					List<EventNote> handedOn = new ArrayList<>();
+					cursor = HEADED_CUT_FALLS_TO_PLAIN && NEAR_HALF_KEEPS_ITS_NOTES_FOR_THE_WIRE
+						? addPlainNearHalf(placements, trigger.cursor(), travel, depth,
+							trigger.triggerDelay(), chord, near, Math.max(1, room - 1), splitCells,
+							handedOn)
+						: HEADED_CUT_FALLS_TO_PLAIN
+						? addSplitNearHalf(placements, trigger.cursor(), travel, depth,
+							trigger.triggerDelay(), chord.subList(0, near), Math.max(1, room - 1),
+							handedOn)
+						: addSplitEventModule(placements, trigger.cursor(), travel, depth,
+							trigger.triggerDelay(), chord.subList(0, near));
+					List<EventNote> farRest = new ArrayList<>(handedOn);
+					if (near < chord.size()) {
+						farRest.addAll(chord.subList(near, chord.size()));
+					}
+					far = farRest;
+					}
+				}
+				// A cut chord is built here and not by {@link #addChordModule}, so none of it ever reached
+				// the CHORD line -- the one place the trace says what a chord was planned as, what it came
+				// out as, and why it gave the shape up. Every chord laid across a staircase was therefore
+				// invisible, which is a whole class of the build: the shape that carries ten cells on one
+				// floor and one on the next is exactly the shape a lane closes on. One was pointed at and
+				// it could not be found at all, through three separate readings of the trace.
+				if (TRACE) {
+					System.out.println("SPLIT t=" + event.time() + " at " + trigger.cursor().getX() + ","
+						+ trigger.cursor().getY() + "," + trigger.cursor().getZ() + " travel=" + travel
+						+ " notes=" + chord.size() + " near=" + near + " far=" + far.size()
+						+ " headed=" + (headed == null ? "no"
+							: headed.head().size() + "+" + headed.nearTail().size()
+								+ "/" + headed.farTail().size())
+						+ " planned=" + event.style()
+						+ " built=" + (headed == null ? "BUS" : "head" + headed.head().size())
+						+ " depth=" + depth);
+				}
+				// Measured from where the staircase actually lands, which for a split is past the near
+				// half of the chord rather than where the lane stood when it decided to split.
+				//
+				// Told apart by the shape that left the gap, because the two have quite different causes.
+				// A plain cut sizes its near half at {@code room - 1} cells and fills every one of them,
+				// so it lands flush. A headed cut sizes its near half from what the chord had left over
+				// after the head, and is walked out to the wall above where it fell short. Either way
+				// this should now read nought, and a build where it does not is a lane that turned
+				// before it was allowed to.
+				int shortOfWall = (wall - cursor.getX()) * travel.getStepX();
+				// Not for a centre-fed head. Its staircase reaches the border whatever column the
+				// module handed back -- a flanked-rung head stands its foot a column short because
+				// the staircase itself takes two -- so a nought here is the shape working, not a
+				// lane that turned early. And not for a foldback, whose cursor is already on the
+				// next floor: it recorded its own recess, the wall-bound run's shortfall, where
+				// the run was laid. Nor for the dropped-repeater descent: its staircase stands on
+				// the wall and turn columns and its landing is the column behind the repeater, a
+				// floor down -- further back by design, not a lane that turned early.
+				if (fold == null && rise == null && nought == null
+						&& (headed == null || headed.centreFeeds() == CentreFeed.NONE)) {
+					placements.recessed(shortOfWall);
+					for (int cell = 0; cell < shortOfWall; cell++) {
+						placements.padded(headed != null ? "recessedCutHeaded" : "recessedCutPlain");
+					}
+				}
+				// And the same number worked out from the shape rather than read off the block it landed
+				// on. A recess that can be predicted can be paid for before the module is laid; one that
+				// cannot has some other cause. Counted rather than asserted because it is asked of every
+				// cut in the build, including the ones nothing is going to be done about.
+				if (headed != null && room - busyPad - (splitNudge ? 1 : 0)
+						- headed.columns() != shortOfWall) {
+					placements.padded("recessMispredicted");
+				}
+				// The near half is a bus by construction, so the descent may take the short way down
+				// and there is nothing to step off onto: the far half opens on the column the spiral
+				// started from, which is exactly where the old landing plus its step off arrived.
+				int splitStepOff = climb > 0 || CHEAP_SPLIT_DESCENT ? stepOff : stepOff;
+				splitStepOff = climb > 0 ? stepOff : (CHEAP_SPLIT_DESCENT ? 0 : stepOff);
+				// A flanked-rung or corkscrew head laid its own staircase -- stone rungs carrying
+				// notes, a backward first step -- so there is nothing left for addGlassClimb to
+				// lay, and calling it anyway would put glass where the module put stone. What
+				// remains is the bookkeeping and the landing.
+				boolean climbedAlready = headed != null
+					&& (headed.centreFeeds() == CentreFeed.FLANKED_RUNGS
+						|| headed.centreFeeds() == CentreFeed.CORKSCREW);
+				BlockPos stairFoot = cursor;
+				// The ascent rung extra: decided by the oracle for a headed climb cut, pulled
+				// from the far half here for a plain one. Re-asked off the blocks either way --
+				// the harp's cell quiet and free, the pane's row clear of foreign notes -- and
+				// a refused harp goes back over the staircase with the far half. The pane is
+				// laid solid by the climb itself and the harp hung after it, before the far
+				// half is laid, so the harp's claims steer the bus over it.
+				EventNote climbRungNote = climb > 0 && !climbedAlready && headed != null
+					&& !headed.stairExtras().isEmpty() ? headed.stairExtras().get(0) : null;
+				boolean solidMidRung = false;
+				if (climb > 0 && !climbedAlready
+						&& (climbRungNote != null
+							|| ASCENT_RUNG_EXTRAS && STAIR_EXTRAS && headed == null
+								&& climbRungFree && far.size() > 1)) {
+					BlockPos rung = stairFoot.relative(depth.getOpposite()).above(3);
+					BlockPos extraCell = rung.relative(travel.getOpposite());
+					boolean takes = quietAndFreeForHarp(placements, extraCell, event.time())
+						&& !stoneWouldSoundAForeignNote(placements, rung, event.time());
+					if (takes && climbRungNote == null) {
+						List<EventNote> shorterFar = new ArrayList<>(far);
+						climbRungNote = takeFromTail(shorterFar,
+							note -> note.effect() == null && isHarpNote(note));
+						if (climbRungNote != null) {
+							far = shorterFar;
+							placements.padded("ascentRungExtraOnAPlainCut");
+						}
+					}
+					if (takes && climbRungNote != null) {
+						solidMidRung = true;
+					} else if (climbRungNote != null) {
+						far = new ArrayList<>(far);
+						far.add(0, climbRungNote);
+						climbRungNote = null;
+						placements.padded("stairExtraCameHome");
+					}
+				}
+				// A wall descent laid its whole staircase inside the module and returned the
+				// landing; the walk's cursor is already where the far half opens.
+				cursor = fold != null || rise != null || wallCut != null || nought != null
+					? cursor
+					: cross != null
+					? addCrossDescentSpiral(placements, cursor, travel, descentSide, currentTime)
+					: climb > 0
+					? (climbedAlready ? climbLaidByTheModule(placements, cursor, travel)
+						: addGlassClimb(placements, cursor, travel, depth, true, currentTime, 0,
+							false, solidMidRung))
+					: CHEAP_SPLIT_DESCENT
+						? addSplitBusDescent(placements, cursor, travel, descentSide, currentTime)
+						: addSpiralDescent(placements, cursor, travel, descentSide, currentTime);
+				if (solidMidRung && climbRungNote != null) {
+					placements.placing("ascentRungExtra");
+					placeNote(placements, stairFoot.relative(depth.getOpposite()).above(3)
+						.relative(travel.getOpposite()), climbRungNote, true);
+					placements.padded("ascentRungExtra");
+				}
+				// The stair extras, hung off the rungs the descent just laid. The cells are asked
+				// again off the blocks -- the oracle asked them at plan time from the pinned
+				// descent's arithmetic, and the two should always agree; where they do not, the
+				// note goes back over the staircase with the far half and the growth is counted,
+				// because a silently grown far half is a run past its fifteen.
+				List<EventNote> hungExtras = headed != null ? headed.stairExtras()
+					: sunken != null ? sunken.stairExtras()
+					: cross != null ? cross.stairExtras() : List.of();
+				if (!hungExtras.isEmpty() && climb <= 0
+						&& (cross != null || CHEAP_SPLIT_DESCENT)) {
+					placements.placing("stairExtras");
+					Direction stairAway = descentSide.getOpposite();
+					BlockPos topCell = stairFoot.relative(stairAway);
+					// The same two cells for the cross descent: its spiral starts on the cross --
+					// the walk's cursor here either way -- and its landing rung stands where the
+					// tail split's does, one over in the travel and three down.
+					BlockPos bottomCell = stairFoot.relative(travel)
+						.below(CUBE_FLOOR_HEIGHT - 1).relative(stairAway);
+					EventNote topNote = hungExtras.get(0);
+					EventNote bottomNote = hungExtras.size() > 1 ? hungExtras.get(1) : null;
+					EventNote wallNote = hungExtras.size() > 2 ? hungExtras.get(2) : null;
+					if (topNote != null) {
+						if (quietAndFree(placements, topCell, event.time())) {
+							placeNote(placements, topCell, topNote, true);
+							placements.padded("stairExtraTop");
+						} else {
+							far = new ArrayList<>(far);
+							far.add(0, topNote);
+							placements.padded("stairExtraCameHome");
+						}
+					}
+					if (bottomNote != null) {
+						if (quietAndFree(placements, bottomCell, event.time())) {
+							placeNote(placements, bottomCell, bottomNote, true);
+							placements.padded("stairExtraBottom");
+						} else {
+							far = new ArrayList<>(far);
+							far.add(0, bottomNote);
+							placements.padded("stairExtraCameHome");
+						}
+					}
+					// The wall extra: on the border level with the first rung, a hanging harp
+					// whose below-air claim guards the diagonal the descent's last wire steps
+					// down through. See {@link #STAIR_WALL_EXTRAS}.
+					if (wallNote != null) {
+						BlockPos wallCell = stairFoot.relative(travel);
+						if (quietAndFreeForHarp(placements, wallCell, event.time())) {
+							placeNote(placements, wallCell, wallNote, true);
+							placements.padded("stairExtraWall");
+						} else {
+							far = new ArrayList<>(far);
+							far.add(0, wallNote);
+							placements.padded("stairExtraCameHome");
+						}
+					}
+				}
+				// The wall extra on a plain cut: same cell, same rung, no oracle record to ride
+				// in -- the harp is taken from the far half here instead, which can only shorten
+				// its run, never grow it. The plain cut's capacity was decided without it, so
+				// this is a relocation and not a claim.
+				if (STAIR_EXTRAS && STAIR_WALL_EXTRAS && headed == null && sunken == null
+						&& cross == null && wallCut == null && nought == null && climb <= 0
+						&& CHEAP_SPLIT_DESCENT
+						&& far.size() > 1) {
+					BlockPos wallCell = stairFoot.relative(travel);
+					if (quietAndFreeForHarp(placements, wallCell, event.time())) {
+						List<EventNote> shorterFar = new ArrayList<>(far);
+						EventNote wallHarp = takeFromTail(shorterFar,
+							note -> note.effect() == null && isHarpNote(note));
+						if (wallHarp != null) {
+							placements.placing("stairExtras");
+							placeNote(placements, wallCell, wallHarp, true);
+							placements.padded("stairExtraWall");
+							placements.padded("stairExtraWallOnAPlainCut");
+							far = shorterFar;
+						}
+					}
+				}
+				leg++;
+				floor = route.floorOf(leg);
+				climb = route.climbOf(leg);
+				travel = travel.getOpposite();
+				if (!far.isEmpty()) {
+					cursor = addCarriedEventModule(placements, cursor, travel, depth, far,
+						splitStepOff);
+				} else if (splitStepOff > 0) {
+					// The far half used to lay these on its way in. The columns are reserved for the
+					// spiral in every corridor whether or not a note follows, so a cut that completed
+					// on the staircase still steps past them -- dust, exactly as the far half laid it.
+					cursor = emitDust(placements, Lane.straight(cursor, travel, depth),
+						splitStepOff, false, "farHalfStepOff").pos();
+				}
+				if (foldCatches) {
+					if (placements.troubleCount() > troublesBeforeTheCut) {
+						// The cut dropped a note. Up it comes, and the fold goes down where it stood:
+						// two lanes of height on one chord is dear, a note that never sounds is dearer.
+						placements.rollbackTrial();
+						placements.behind(beforeTheCut);
+						placements.padded("foldCaughtADroppedNote");
+						placements.padded("foldCaughtADroppedNoteAt"
+							+ Math.min(event.notes().size(), 30) + "Notes");
+						fold = foldInReserve.fold();
+						rise = foldInReserve.rise();
+						headed = null;
+						sunken = null;
+						cross = null;
+						wallCut = null;
+						Direction back = travel.getOpposite();
+						trigger = addSpatialDelayBeforeEvent(placements, lane,
+							event.time() - timeBeforeTheCut);
+						cursor = fold != null
+							? addFoldbackCut(placements, trigger.cursor(), back, depth,
+								trigger.triggerDelay(), fold, event.time())
+							: addFoldbackAscent(placements, trigger.cursor(), back, depth,
+								trigger.triggerDelay(), rise, event.time());
+						far = List.of();
+						foldLaid = (trigger.cursor().getX() - cursor.getX()) * back.getStepX();
+						placements.padded(fold != null ? "builtFoldback" : "builtFoldbackClimb");
+						if (TRACE) {
+							System.out.println("  FOLDBACK t=" + event.time() + " notes="
+								+ chord.size() + " room=" + room + " laid=" + foldLaid
+								+ (fold != null ? " descent" : " climb") + " for a dropped note");
+						}
+					} else {
+						placements.commitTrial();
+					}
+				}
+				lane = crowdedIfUltra(Lane.straight(cursor, travel, depth), layout);
+				// Graded against where the lane actually opened, because every hand-derivation of this
+				// arithmetic in the session that found it was off by one, in both directions. A
+				// prediction the planner is going to search backwards on has to be checked against the
+				// walk before it is trusted, not after.
+				gradeLaneStart(placements, wallLeft, stepLeft,
+					fold != null ? foldbackCarriedCells(event.notes(), room)
+						: rise != null ? foldbackAscentCarriedCells(event.notes(), room)
+						: far.isEmpty() ? 0 : (far.size() + 1) / 2, climb > 0, splitStepOff,
+					lane.pos().getX(),
+					climb > 0 ? (rise != null ? "FoldbackClimb" : "SplitClimb")
+						: fold != null ? "FoldbackDescent" : "SplitDescent");
+				// A climb foldback ends on a bus only if it got that high. Stopping on its
+				// third cell leaves the lane standing on the floor above's own path, which is
+				// not a bus and must not be told it is: what reads this is the discount the
+				// next staircase takes for starting off one.
+				lastStyle = rise != null && foldLaid < 4 ? ChordStyle.SMALL : ChordStyle.BUS;
+				// The whole run, not the half of it past the staircase. Both halves are dust from the
+				// one repeater this module opened with, and the near half does not stop costing wire
+				// because a staircase comes after it. Counting only the far half reported three
+				// blocks left on a run that had already overspent by one. The same sum {@link #closes}
+				// makes, which is the point: the planner closes a lane on the promise of a split, and
+				// a walk that charges the split more than the planner did refuses it and leaves the
+				// lane standing short of the wall it was measured for.
+				tipSignal = fold != null || rise != null
+					// The cell the conductor lights is the run's first; the folded run is the
+					// rest of it. The wall-bound run spends the same fifteen the other way, but
+					// a repeater only ever stands after the folded side, so that is the run the
+					// tip is measured down.
+					? DUST_RANGE - 1 - foldLaid
+					: headed != null
+					? DUST_RANGE - headed.runCells(splitCells)
+					: wallCut != null
+					? DUST_RANGE - 3 - (wallCut.far().size() + 2) / 2
+					// The conductor lights the first rung's dust; the second rung's and the far
+					// half's cells are the run, and a bare landing is a cell of it.
+					: nought != null
+					? DUST_RANGE - 2 - Math.max(1, (nought.far().size() + 1) / 2)
+					: DUST_RANGE - cells - splitCells;
+				gradeLaneTip(placements, turnCells, tipSignal,
+					climb > 0 ? (rise != null ? "FoldbackClimb" : "SplitClimb")
+						: fold != null ? "FoldbackDescent" : "SplitDescent");
+				// What the far half leaves behind it, asked of the shape it was built in rather than
+				// asserted.
+				//
+				// This said {@code true} unconditionally, on the grounds that the far half's first
+				// pair of notes stands alongside the staircase's powered stone. That is a fact about
+				// the far half's own position; {@code columnBehindBusy} is read by the chord *after*
+				// it, and asks a different question -- whether that chord may hang notes in the pair
+				// of slots behind its own repeater.
+				//
+				// The rule: after a cut the first chord's back flanks are always free, because a
+				// stacked head is never placed at the bottom of a cut. The code agrees everywhere
+				// else -- {@link #takesTheGapBehind} is {@code style.stacked() && ...} and the far half
+				// is laid as {@link ChordStyle#BUS} four lines above -- so every other site would
+				// answer false here. Two places deciding one thing, which is the bug this file keeps
+				// producing.
+				//
+				// An empty far half is the exception and stays busy: nothing was laid after the
+				// staircase, so what stands behind the next chord is the landing itself.
+				// A descent foldback's far half is its inbound run, a bus like any other -- its
+				// far list is empty only because the run was laid inside the module, so the
+				// empty-far exception must not read it as a bare landing. An ascent's is the
+				// opposite and stays busy: its flat run is the floor above's own path with the
+				// pairs hanging at path level, which is exactly the cells the next chord's back
+				// flanks would want.
+				columnBehindBusy = rise != null
+					|| (fold != null
+					? !CUT_FAR_HALF_FREES_THE_GAP
+						|| takesTheGapBehind(ChordStyle.BUS, foldLaid - 1)
+					: far.isEmpty()
+					|| !CUT_FAR_HALF_FREES_THE_GAP && true
+					|| takesTheGapBehind(ChordStyle.BUS, (far.size() + 1) / 2));
+				laneStarted = true;
+				replan = layout.ultra();
+				continue;
+			}
+			if (climbsNought) {
+				placements.padded("planLaneEndedOn" + lastStyle + "ClimbNought");
+				if (TRACE) {
+					System.out.println("  CLIMBNOUGHT t=" + event.time() + " notes="
+						+ event.notes().size() + " tip=" + tipSignal + " at " + lane.pos().getX()
+						+ " " + lane.pos().getY() + " " + lane.pos().getZ());
+				}
+				lane = crowdedIfUltra(addClimbNought(placements, lane, depth), layout);
+				leg++;
+				floor = route.floorOf(leg);
+				climb = route.climbOf(leg);
+				// The tip is what it was. The dust on the glass carries what the chord's last
+				// cell carries, so the lane above opens on the same signal this one closed with --
+				// and it opens on a repeater, which hands out fifteen whatever arrives.
+				laneStarted = false;
+				// The column behind the repeater above is the glass and its dust, and the one
+				// behind that the raised tail: nothing there is a head's to hang a note in.
+				columnBehindBusy = true;
+				if (layout.ultra()) {
+					TurnCost next = turnCost(floor, climb, floors, slabStep);
+					booked = V2_BOOKS_PADS
+						? planLane(events, index, lane.pos().getX(), lane.travel().getStepX(),
+							laneWall(nearWall, farWall, forward, lane.travel(), floor, climb,
+								floors),
+							lane.travel() == forward ? nearWall : farWall,
+							currentTime + spentPadding,
+							tipSignal, columnBehindBusy, next.cells(), next.offBus(), next.stepOff(),
+							next.splitCells(), climb > 0, layout,
+							inTurn(placements, turning, leavingTurn, lane.pos(), lastCorner), parity)
+						: Map.of();
+					replan = false;
+				}
+			} else if (canTurn && wantsTurn) {
+				// The shape the lane actually came to rest on, against the wall it is turning at.
+				// This is the question that was asked -- not what shapes a lane holds, but what shape
+				// is standing in front of the staircase when it turns.
+				placements.padded("planLaneEndedOn" + lastStyle
+					+ (above >= 0 && above < floors ? (climb > 0 ? "Climb" : "Descent") : "Flat"));
+				// A chord carried whole to the next lane, where the lane it left had to be filled with
+				// wire instead. Reported because it is the thing worth being annoyed about: every one of
+				// these is a chord that could have filled those columns itself.
+				if (!pad.cells().isEmpty()) {
+					placements.moved(event.notes().size());
+				}
+				// Where the rest of the lane is nothing but wire up to the wall and then a
+				// climb, run that wire at bus height. It costs the same columns and the staircase then
+				// starts off a bus, which is two cells cheaper. Off a bus the run simply stays up; off
+				// anything else the first cell has to hold the path so the rest has a live wire to
+				// climb from, and a pad of one column has no cell to spare for that.
+				int liftAfter = raiseAfter(pad, climb > 0, above >= 0 && above < floors,
+					turnsOffBus);
+				boolean raisedPad = liftAfter >= 0;
+				lane = emitPad(placements, lane, pad.withSpare(wait - pad.delaySpent()), "padClosing",
+					liftAfter);
+				spentPadding = pad.delaySpent() + spentOnTheTip;
+				if (above >= 0 && above < floors) {
+					// Asked of the shape the lane actually ended on, not of how many notes it held.
+					// A big chord used to mean a bus and now may mean a stacked module, which ends
+					// on its centre block a level lower -- and a climb that skips the two rungs it
+					// needs starts a floor above the signal and never gets it. A pad puts the wire
+					// back down on the path either way, so a padded lane never skips them.
+					Direction travel = lane.travel();
+					// A staircase is built where the walk is standing, so this is the one turn that can
+					// be recessed. A flat turn cannot: its corner is pinned to the wall however far
+					// short the lane has got, and the chords still to come fill the gap in between. A
+					// staircase set back from the wall stands in a column no other corridor's turn
+					// stands in, which is what reaches into the lane alongside.
+					int shortBy = (wall - lane.pos().getX()) * travel.getStepX();
+					// Pinned: a descent is walked out to the wall whether the pad could afford it or
+					// not, so that every descent in the build stands in the same column as every
+					// other. What the pad would not pay for is laid as bare dust here, which is wire
+					// the signal has to cross with nothing to revive it -- so this is the experiment
+					// and the fallout is whatever the wire does about it.
+					int pinned = 0;
+					// Ultra only. The other lane modes share this walk once they have more than one
+					// floor, and their corridors are spaced on the promise that a turn is bare -- so
+					// walking one out to the wall puts powered stone where a neighbour's notes are
+					// entitled to be. COMPACT_LANE read one of its own notes back wrong the moment
+					// this was let loose on it.
+					if (PIN_DESCENTS && layout.ultra() && shortBy > 0) {
+						pinned = shortBy;
+						for (int cell = 0; cell < pinned; cell++) {
+							placements.padded("padPinned" + (raisedPad ? "Raised" : ""));
+						}
+						// At the height the pad in front of it is running at. This block is not gated
+						// on the direction of the turn -- the comment below says only descents are
+						// pinned and the condition does not say so -- so a climb reaches here too, and
+						// a pin that came back down to the path while the staircase had been told it
+						// was starting off a bus is a staircase with nothing under its first rung.
+						lane = emitDust(placements, lane, pinned, raisedPad,
+							raisedPad ? "pinToWallRaised" : "pinToWall");
+					}
+					// Recorded after the pin and not before it, so this is where the staircase actually
+					// stands rather than where the lane would have left it. Told apart by direction as
+					// well: only descents are pinned, so a recessed climb is a real one and a recessed
+					// descent, on this branch, should not exist at all.
+					placements.recessed(shortBy - pinned);
+					if (shortBy - pinned > 0) {
+						placements.padded(climb > 0 ? "recessedClimb" : "recessedDescent");
+					}
+					// What this staircase leaves the next lane, worked out before it is built because
+					// the seed below has to be paid for out of it. Nothing in it depends on the climb:
+					// it is the pad's own wire, less the pin, less what the turn spends.
+					int wouldTip = pad.signal() - pinned - turnPrice(pad, climb > 0,
+						above >= 0 && above < floors, turnsOffBus, turnCells, turnOffBusCells);
+					// And what a *mirrored* staircase leaves, which is a different sum and has to be
+					// priced as one. A mirrored ladder is five rungs whatever the lane arrived on --
+					// the rung a bus would have skipped is the one the seed's own repeater reads -- so
+					// the off-bus three {@link #turnPrice} may hand out above is not available to it,
+					// and the dust over the seed's landing block is one more on top of the five.
+					// Worked out here and handed on below as the tip, so the wire this climb spends
+					// and the wire the next lane is told it has cannot be two different sums.
+					int seedTip = pad.signal() - pinned - turnCells - RAIL_SEED_CLIMB_STEPS - 1;
+					// The cell the mirrored ladder starts from, asked of the blocks rather than worked
+					// out from what the pad and the pin were supposed to have laid.
+					//
+					// A mirrored climb has no lift of its own, so its bottom rung is reached from the
+					// column behind and only from there: dust at path+1 steps up into it, dust at
+					// path+2 is already level with it, and a *block* -- the note block or bus stone a
+					// lane that closed flush comes to rest on -- reaches it not at all, because a
+					// powered block lights only the dust it stands square against. By position and not
+					// by flag, for the reason {@code centreFeedsTheClimb} is: a pin can skip its first
+					// cell to undo a soft tail, a pad's last cell can be a repeater rather than dust,
+					// and a rule that remembers all of that is a rule that stops being true.
+					BlockPos behindTheClimb = lane.pos().relative(travel.getOpposite());
+					boolean arrivesOnDust = placements.describeBlock(behindTheClimb.above())
+							.startsWith("minecraft:redstone_wire")
+						|| placements.describeBlock(behindTheClimb.above(2))
+							.startsWith("minecraft:redstone_wire");
+					// The wait the seed's repeater has to carry, which is the wait the closing pad has
+					// not already spent. A pad may hold repeaters, and ticks spent in those are ticks
+					// the chord has already waited -- every other module in this file subtracts them,
+					// {@link #addSpatialDelayBeforeEvent} taking {@code - spentPadding} -- and a seed
+					// that did not would delay the whole gap a second time and sound its lane late.
+					int seedWait = event.time() - currentTime - spentPadding;
+					boolean seedsRail = false;
+					// Offered to any climb, off a bus or off the path. It was gated to bus climbs for
+					// a while, to dodge the collision at the foot of the staircase -- a climb starting
+					// on the path laid its own stone and dust in the lane's column a block up, and the
+					// mirrored first rung's glass wanted that same cell. In-game testing, which read the wire in
+					// game: the signal travels through there correctly. And the gate cost the feature
+					// its whole reason for existing, since a song of chords of one to three never
+					// builds a bus to climb off -- which is exactly the song a free seed is for. The
+					// collision is gone now, laid rather than gated: a mirrored climb builds no lift.
+					if (RAIL_SEEDS_OFF_THE_CLIMB && V2_RUNS_ON_RAILS && layout.ultra() && climb > 0
+							&& railDelay(0, seedWait) > 0) {
+						// The lookahead. A climb only pays for a seed the lane above is going to use,
+						// and that lane does not exist yet -- so it is built here, out of the two
+						// things a staircase settles: where it lands, and which wall the lane it lands
+						// on runs at. Measured from the column *after* the landing, because the landing
+						// itself is the seed; a run measured against the wall from a column it does not
+						// have is a run that ends where it opened, which is a dead wire rather than a
+						// wasted column.
+						Direction next = travel.getOpposite();
+						Lane willRun = Lane.straight(
+							lane.pos().relative(next).relative(next).above(CUBE_FLOOR_HEIGHT),
+							next, depth);
+						// The wait is asked as well as the room, because a seed only survives a wait
+						// that lays nothing: a column of the wait's own wire between the seed and the
+						// run puts the two out of reach of each other and the run builds a head
+						// anyway, which is a column of stone and dust standing in the lane for
+						// nothing.
+						//
+						// And the floor rail's own two questions about the chord that will stand in the
+						// seed's first column, which is a floor column nobody else asks about. Every
+						// other floor column in a run is committed to by railPairAfter at the path
+						// column behind it; this one has no path column behind it -- the seed is it --
+						// exactly as the handover's opening does, and that one asks these. Left out, a
+						// seed opened runs a head would never have opened and hung their low notes
+						// where the lane alongside had already put a cut head's: 19 wrong notes across
+						// the library, all of them a cut head or a stacked front meeting rail:FLOOR.
+						boolean roomForRun = railPadColumns(seedWait) == 0
+							&& railHolds(event, false)
+							&& railFloorTakes(placements, willRun, event)
+							&& railOpens(events, index, willRun,
+								laneWall(nearWall, farWall, forward, next, above, climb, floors),
+								layout, false,
+								turnReserve(event,
+									turnCost(above, climb, floors, slabStep).offBus(), layout),
+								seedWait, currentTime, booked);
+						seedsRail = roomForRun && arrivesOnDust && seedTip >= 1;
+						// Asked in the order that makes each answer a piece of work rather than a
+						// tally. The room is asked first and of every climb, because a climb the next
+						// lane was never going to run on is not a seed anybody lost; what is left
+						// after it is the seeds that were there for the taking, and which of the two
+						// prices turned them down. climbSeedOnlyWantedDust is the one a column would
+						// buy -- the lane came to rest on a block, and a block does not reach the
+						// mirrored ladder's bottom rung.
+						if (!roomForRun) {
+							placements.padded("climbSeedNoRunToSeed");
+						} else if (!arrivesOnDust) {
+							placements.padded("climbSeedOnlyWantedDust");
+							// And what is actually standing there, asked of the blocks. "The lane came
+							// to rest on a block" is one sentence and several different shapes, and
+							// which shape it is decides whose builder has to learn to leave dust.
+							placements.padded("climbSeedBlockedBy:"
+								+ placements.describeBlock(behindTheClimb.above())
+									.replace("minecraft:", "").replaceAll("\\[.*", "")
+								+ "/" + placements.describeBlock(behindTheClimb)
+									.replace("minecraft:", "").replaceAll("\\[.*", ""));
+						} else if (seedTip < 1) {
+							placements.padded("climbSeedOnlyWantedWire");
+						}
+					}
+					// A raised pad leaves exactly what a bus leaves -- stone at path+1 with dust on top,
+					// one column back from here -- so the staircase joins it two rungs in just the same.
+					// And a lane that ended on a bus keeps its discount through a raised pad, which it
+					// never could through a pad laid on the path.
+					// The climb stays where the lane left it, mirrored or not. In-game reading found the mirror
+					// as ending the lane a block earlier and it does -- the cell the lift used to hold
+					// is glass now -- but moving the staircase back to take that column is not the way
+					// out: the lane had already measured itself as owning it and laid music into a
+					// staircase that was by then rising, 22 breaks of rail:PATH into climb. So the
+					// mirror asks for what is behind it instead of taking it, which costs no column at
+					// all wherever the lane closes on a pad, a pin, or a bus.
+					BlockPos landed = climb > 0
+						? addGlassClimb(placements, lane.pos(),
+							travel, depth,
+							raisedPad || turnsOffBus && pad.cells().isEmpty(), currentTime,
+							seedsRail ? RAIL_SEED_CLIMB_STEPS : 0, seedsRail)
+						: descend(placements, lane.pos(), travel, descentSide, currentTime);
+					leg++;
+					floor = route.floorOf(leg);
+					climb = route.climbOf(leg);
+					// What the staircase leaves the next lane. It matters because the next lane may
+					// want to lay dust of its own before its first repeater, and a staircase is the one
+					// handover in a build that spends wire without a repeater at either end of it.
+					// Charged at what it actually spends: a climb taken straight off a bus skips two
+					// rungs, and counting them anyway left every lane after one two blocks poorer.
+					// Through the same one place canTurn asked, so the wire this lane books itself and
+					// the wire it demanded before turning cannot be two different sums.
+					tipSignal = seedsRail ? seedTip : wouldTip;
+					lane = crowdedIfUltra(Lane.straight(landed, travel.getOpposite(), depth), layout);
+					if (seedsRail) {
+						// The rungs past the floor and the seed's own cell of wire are already off it,
+						// in {@code seedTip} above, which is where the same sum has to be made -- the
+						// seed is only offered if what is left after paying for it is worth something,
+						// and a staircase that charged one price to decide and handed on another is
+						// the whole of the raised-ascent regression.
+						lane = addRailSeed(placements, lane, railDelay(0, seedWait), currentTime);
+					}
+					// The descent's, and it is offered on one condition the climb's is not: the pad
+					// above had to swallow the wait whole. It was asked to -- {@code seedsDescent} is
+					// what let it spend the last tick -- but asking is not getting, and a pad of two
+					// cells cannot hold nine ticks. What arrives at the landing then is a chord's worth
+					// of delay with nothing left to spend it in, so the seed is dropped and the lane
+					// below opens with the head it would have had. Read off {@link Pad#delaySpent}
+					// rather than assumed, for the reason everything else here is read off the blocks.
+					if (seedsDescent && spentPadding == wait) {
+						// The dust over the landing block, which is a cell of the descent's own run and
+						// is not among the four the spiral is charged.
+						tipSignal -= 1;
+						lane = addDescentRailSeed(placements, lane, event.time());
+					} else if (seedsDescent) {
+						placements.padded("descentSeedPadKeptTicks");
+					}
+					gradeLaneStart(placements, wall, travel.getStepX(), 0, climb > 0, stepOffAhead,
+						lane.pos().getX(), climb > 0 ? "Climb" : "Descent");
+					gradeLaneTip(placements, turnCells, tipSignal, climb > 0 ? "Climb" : "Descent");
+					laneStarted = false;
+					// A staircase leaves the pair beside the landing free. Only a flat turn takes it,
+					// and what makes a turn take it is that it hangs notes along its own run of
+					// powered stone -- not that it bends. A climb is glass and dust up two columns of
+					// the lane's own centre line; a descent spirals round a two-by-two column. Both
+					// carry the signal and neither hangs a note, so there is nothing there to be in
+					// the way. .
+					columnBehindBusy = !BACK_PAIR_FREE_AFTER_A_STAIRCASE;
+					// Planned here and not at the top of the next event, because this event is about to
+					// be built on the far side of the staircase -- it is the new lane's first chord.
+					// Deferring the plan by one left every lane's opening chord outside its own plan's
+					// reach: the search could book a pad in front of any chord but that one, so a lane
+					// whose opening chord was the thing that had to move came back with nothing and
+					// turned wherever it stood. The turn ahead of the new lane is a different turn from
+					// the one just built -- the floor and the direction of climb have both moved on --
+					// so it is asked again.
+					if (layout.ultra()) {
+						TurnCost next = turnCost(floor, climb, floors, slabStep);
+						// The pad before the staircase has already held some of the wait this event was
+						// going to spend on its own repeater, so the plan is told the clock has moved on
+						// by that much. Otherwise it counts columns of delay the walk will not place.
+						// going to spend on its own repeater, so the plan is told the clock has moved on
+						// by that much. Otherwise it counts columns of delay the walk will not place.
+						booked = V2_BOOKS_PADS
+							? planLane(events, index, lane.pos().getX(), lane.travel().getStepX(),
+								laneWall(nearWall, farWall, forward, lane.travel(), floor, climb,
+									floors),
+								lane.travel() == forward ? nearWall : farWall,
+								currentTime + spentPadding,
+								tipSignal, columnBehindBusy, next.cells(), next.offBus(), next.stepOff(),
+								next.splitCells(), climb > 0, layout,
+								inTurn(placements, turning, leavingTurn, lane.pos(), lastCorner), parity)
+							: Map.of();
+						replan = false;
+					}
+				} else {
+					// Out of floors: step the slab sideways once, and come back the way we climbed.
+					// Sized from the widest chord in the whole song rather than from the lane we
+					// happen to be leaving. A sideways step separates two slabs, and every floor of
+					// one sits beside the matching floor of the other -- so a quiet lane at the top
+					// is no promise about the chord four floors down that it would be answering for.
+					//
+					// And in ultra, no turn is built here at all. The route is given the two corners and
+					// the walk carries straight on into them, so this event -- and every one after it
+					// until the corners run out -- is laid along the turn by the ordinary machinery, as
+					// a chord in a lane that happens to bend. What used to be a run of dead wire paid
+					// for out of the lane's signal is now the lane, and it holds music.
+					//
+					// Ultra only, because the other lane modes are spaced on the promise that a turn is
+					// bare: their corridors sit as close as they do precisely because nothing hangs off
+					// the sideways run, and putting notes there reaches straight into the neighbour.
+					if (layout.ultra()) {
+						if (slabStep < 1 || slabStep > 13) {
+							throw new IllegalArgumentException("Compact turn distance " + slabStep
+								+ " exceeds the safe redstone range");
+						}
+						// The corner stands at the wall, however far short of it the lane has got. What
+						// fills the gap is the chord about to be built: it opens where the walk is
+						// standing, runs on into the corner and comes out the far side -- the same
+						// columns covered with music instead of with the wire a pad would have laid,
+						// and wire the next repeater would then have had to reach across.
+						//
+						// At the wall and not at the cursor. Turning where the lane happens to have got
+						// to is the version that does not work: every corridor's sideways run then sits
+						// at a different column, and the whole reason a turn can never reach a
+						// neighbouring corridor's notes is that turns occupy the same reserved columns
+						// in every corridor.
+						// Tight where the notes riding this turn would otherwise hang two columns past
+						// the wall, wide where they would not -- guessed from the chords ahead and, where
+						// the guess is wide, checked against the blocks as they go down. See
+						// {@link #FLAT_TURN_KEEPS_ITS_WIDTH}. A turn a walk before this one watched hang
+						// a note past its corner is armed tight without asking.
+						boolean rewalked = FLAT_TURN_KEEPS_ITS_WIDTH && tightTurns.contains(index);
+						boolean tight = FLAT_TURN_KEEPS_ITS_WIDTH && (rewalked
+							|| flatTurnHangsOutside(events, index, delayAhead,
+								(here.end() - lane.pos().getX()) * lane.travel().getStepX(), columns,
+								slabStep));
+						// A probe's question: what would this one turn do if it were armed wide? Asked with
+						// the re-walk off, so the answer is a build with the outside notes left in it.
+						if (FLAT_TURN_FORCE_WIDE_AT == index) {
+							tight = false;
+							placements.padded("flatTurnForcedWide");
+						}
+						// Only where the sideways run has its column. A tight run goes down the wall
+						// column, and the chord that closed this lane may already have hung something
+						// there -- its front pair is shed for exactly this, but a shed can fail and
+						// other shapes reach the wall column too. A run laid into a note block is a
+						// dead line, so where the ground says no the turn stays wide and says so, and
+						// what is standing in the way is named so the next shed can be built.
+						boolean stuckWide = false;
+						if (tight && !flatRunIsClear(placements, lane, depth, wall, columns, slabStep)) {
+							tight = false;
+							stuckWide = true;
+							placements.padded("flatTurnCouldNotTighten");
+						}
+						// Which way is out, read before the arm: a lane turning tight on its own cell is
+						// handed back already facing the sideways run.
+						int outward = lane.travel().getStepX();
+						lane = armTurn(placements, lane, depth, columns, slabStep, tight);
+						turning = true;
+						if (FLAT_TURN_KEEPS_ITS_WIDTH) {
+							int cornerX = lane.cornerAt(0) ? lane.pos().getX()
+								: lane.ahead(cellsToCorner(lane)).pos().getX();
+							placements.watchFlatTurn(index, cornerX, outward, !tight && !stuckWide);
+							placements.padded(rewalked ? "flatTurnTightRewalked"
+								: tight ? "flatTurnTightGuessed" : "flatTurnWideGuessed");
+							if (TRACE_TURNS) {
+								System.out.println("FLAT i=" + index + " t=" + event.time() + " notes="
+									+ event.notes().size() + " columns=" + columns + " tight=" + tight
+									+ " rewalked=" + rewalked + " cornerX=" + cornerX + " at "
+									+ lane.pos().getX() + " " + lane.pos().getY() + " "
+									+ lane.pos().getZ());
+							}
+						}
+						// Nothing is spent on the corner itself: the wire crossing it is whatever the
+						// chords standing on it lay, and each of those opens with a repeater worth
+						// fifteen.
+						tipSignal = pad.signal();
+						// The plan belonged to the lane that has just ended. Inside the turn the walk
+						// places what it can where it stands, and the next lane is planned when it
+						// begins.
+						booked = Map.of();
+					} else {
+						lane = Lane.straight(addCompactTurn(placements, lane.pos(), lane.travel(), depth,
+							slabStep, currentTime), lane.travel().getOpposite(), depth);
+						tipSignal = pad.signal() - turnCells;
+						laneStarted = false;
+						columnBehindBusy = true;
+					}
+					leg++;
+					floor = route.floorOf(leg);
+					climb = route.climbOf(leg);
 				}
 			}
 			if (carried) {
