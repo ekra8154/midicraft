@@ -110,6 +110,27 @@ class InterleavedHalfTickTest {
 	}
 
 	@Test
+	void aDoubledSongInterleavesForReal() throws Exception {
+		// A one-lane song at double speed: times halved, exact because every time is even. The
+		// synthetic two-lane copy the census sweeps, given the full wire readback once.
+		List<SongBuilder.EventNote> notes = notes("illit-do-the-dance").stream()
+			.map(note -> new SongBuilder.EventNote(note.time() / 2, note.trackNumber(),
+				note.order(), note.pitch(), note.instrumentBlock()))
+			.toList();
+		long evens = notes.stream().filter(note -> note.time() % 2 == 0).count();
+		assertTrue(evens > 0 && evens < notes.size(),
+			"the doubled song must live on both parities: " + evens + " of " + notes.size());
+		SongBuilder.PastePlan plan = SongBuilder.createInterleavedHalfTickPastePlan(
+			new BlockPos(0, 64, 0), Direction.EAST, notes,
+			new SongBuilder.BuildLimits(16, 24, 1), SongBuilder.WalkStart.HEAD);
+		assertEquals(2, plan.commands().stream()
+			.filter(command -> command.contains("minecraft:oak_button")).count(),
+			"two machines, two ways in");
+		assertEquals(0, plan.wrongNotes(), "wrong notes: " + plan.faults());
+		assertEquals(0, plan.missingNotes(), "missing notes: " + plan.faults());
+	}
+
+	@Test
 	void aOneParitySongGetsOneMachineOnItsOwnClock() throws Exception {
 		// A song written on repeater ticks lives entirely on one parity of the game tick, so there
 		// is nothing for a second machine to play and no trunk should be stretched waiting for it.

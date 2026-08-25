@@ -39,6 +39,21 @@ class InterleavedCensusProbe {
 
 	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
 
+	/**
+	 * Solo songs the census also builds at double speed, as a synthetic two-lane copy.
+	 *
+	 * <p>A one-lane song's game-tick times are all even, so double speed is exactly a halving --
+	 * no rounding, which is the same fact that makes the half-tick layouts worth building at all.
+	 * The halved copy lives on both parities and interleaves for real, which is what the library
+	 * is otherwise too honest to provide many of.</p>
+	 */
+	private static Set<String> doubled() {
+		return Set.of(System.getProperty("probe.double",
+			"guardian25,guardian30,illit-do-the-dance,moonlight-sonata-3rd-movement,"
+				+ "harder-better-faster-stronger-daft-punk,hopes-and-dreams,he-s-a-pirate,"
+				+ "zoltraak,wellerman,jackpot-thefatrat").split(","));
+	}
+
 	private static List<int[]> sizes() {
 		String given = System.getProperty("probe.sizes", "24x1,32x1,20x2,24x3");
 		List<int[]> sizes = new ArrayList<>();
@@ -73,13 +88,27 @@ class InterleavedCensusProbe {
 				notes = SongBuilder.gameTickEventNotes(project, true);
 			}
 			String song = file.getFileName().toString().replace(".json", "");
+			List<List<SongBuilder.EventNote>> variants = new ArrayList<>();
+			List<String> labels = new ArrayList<>();
+			variants.add(notes);
+			labels.add(song);
 			long evens = notes.stream().filter(note -> note.time() % 2 == 0).count();
-			boolean dual = evens > 0 && evens < notes.size();
+			if ((evens == 0 || evens == notes.size()) && doubled().contains(song)) {
+				variants.add(notes.stream().map(note -> new SongBuilder.EventNote(
+					note.time() / 2, note.trackNumber(), note.order(), note.pitch(),
+					note.instrumentBlock())).toList());
+				labels.add(song + " 2x-2-lane");
+			}
+			for (int variant = 0; variant < variants.size(); variant++) {
+			List<SongBuilder.EventNote> built = variants.get(variant);
+			String label = labels.get(variant);
+			long builtEvens = built.stream().filter(note -> note.time() % 2 == 0).count();
+			boolean dual = builtEvens > 0 && builtEvens < built.size();
 			for (int[] size : sizes()) {
 				builds++;
 				try {
 					SongBuilder.PastePlan plan = SongBuilder.createInterleavedHalfTickPastePlan(
-						new BlockPos(0, 64, 0), Direction.EAST, notes,
+						new BlockPos(0, 64, 0), Direction.EAST, built,
 						new SongBuilder.BuildLimits(16, size[0], size[1]),
 						SongBuilder.WalkStart.HEAD);
 					int wrong = plan.wrongNotes();
@@ -95,16 +124,17 @@ class InterleavedCensusProbe {
 						clean++;
 					} else {
 						rows.add(String.format("%6d %s %dx%d %s wrong=%d missing=%d collisions=%d"
-							+ " span=%d", wrong * 3 + missing * 5 + clashes, song, size[0],
+							+ " span=%d", wrong * 3 + missing * 5 + clashes, label, size[0],
 							size[1], dual ? "dual" : "solo", wrong, missing, clashes,
 							plan.spanX()));
 					}
 				} catch (Exception refused) {
 					threw++;
-					rows.add(String.format("%6d %s %dx%d THREW %s: %.120s", 999999, song,
+					rows.add(String.format("%6d %s %dx%d THREW %s: %.120s", 999999, label,
 						size[0], size[1], refused.getClass().getSimpleName(),
 						String.valueOf(refused.getMessage())));
 				}
+			}
 			}
 		}
 		rows.sort(java.util.Comparator.reverseOrder());
