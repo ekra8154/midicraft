@@ -16562,17 +16562,62 @@ public final class SongBuilder {
 	 * <p>Two cells out and not one, because one cell out is this module's own outer column. What
 	 * sits beyond that is the neighbour.</p>
 	 */
+	/** Scratch: prints every parity ask for one tick, with the cells it probed and their answers. */
+	static int TRACE_PARITY_TICK = -1;
+
 	private static boolean stackedClashes(PlacementPlan placements, Lane lane, int time,
 			UltraSlots slots) {
+		// The same fact the builder reads, off the same object, so the shape that is priced and the
+		// shape that is laid cannot disagree about whether a side is live.
+		boolean quietSides = STACKED_SIDES_MAY_GO_QUIET && slots != null && slots.quietSides();
+		if (time == TRACE_PARITY_TICK) {
+			BlockPos crossAt = lane.ahead(1).pos();
+			StringBuilder line = new StringBuilder("PARITY t=" + time
+				+ " lane=" + lane.pos().getX() + " " + lane.pos().getY() + " " + lane.pos().getZ()
+				+ " cross=" + crossAt.getX() + " " + crossAt.getY() + " " + crossAt.getZ()
+				+ " quiet=" + quietSides
+				+ " sides=" + (slots == null ? "-" : slots.sides().stream()
+					.map(side -> side == null ? "null" : side.instrumentBlock()
+						+ (quietSideConducts(side) ? "!" : "~"))
+					.collect(java.util.stream.Collectors.joining(","))));
+			for (Direction out : List.of(lane.noteSide(), lane.noteSide().getOpposite())) {
+				BlockPos beyond = crossAt.relative(out, 2);
+				line.append(" | ").append(out).append(" beyond=").append(beyond.getX()).append(" ")
+					.append(beyond.getY()).append(" ").append(beyond.getZ())
+					.append(" note=").append(placements.noteAt(beyond, time))
+					.append(" live=").append(placements.liveAt(beyond, time))
+					.append(" fwd=").append(placements.liveAt(beyond.relative(lane.travel()), time))
+					.append(" back=").append(
+						placements.liveAt(beyond.relative(lane.travel().getOpposite()), time));
+			}
+			System.out.println(line);
+		}
 		BlockPos cross = lane.ahead(1).pos();
 		Direction travel = lane.travel();
 		List<Direction> outward = List.of(lane.noteSide(), lane.noteSide().getOpposite());
 		for (int side = 0; side < outward.size(); side++) {
 			Direction out = outward.get(side);
 			BlockPos beyond = cross.relative(out, 2);
-			// The block this module would relay through, against a note of the lane behind. Always
-			// asked: both relays are built whatever the chord holds, and both are live.
-			if (placements.noteAt(beyond, time)) {
+			// The block this module would relay through, against a note of the lane behind. Asked
+			// wherever that block is live -- which used to be always, because both relays were built
+			// live whatever the chord held. A side laid as the note it is has nothing live in it and
+			// reaches into nothing, so this refusal simply is not there to make.
+			//
+			// <b>This one direction only.</b> A quiet side is no reason to skip anything else here:
+			// the three asks below are about the lane behind reaching into <em>this</em> module's
+			// flanks, and what the neighbour is made of has nothing to do with what this module is
+			// made of. A loud module still mispowers a quiet one's flanks and a quiet module's flanks
+			// are still mispowered by a loud one -- the parity nudge is not what quiet sides replace.
+			//
+			// Asked of the whole pair rather than of this side, on purpose. The builder steps past a
+			// corner before it works out which side is which ({@code pastAnyCorner}) and this does
+			// not, so an index read here is not certainly the index that gets built -- and reading it
+			// wrong stands down the refusal for a side that does relay, which is exactly the fault
+			// this shipped with. Both sides quiet is the same answer whichever way round they are.
+			// See {@link #STACKED_SIDES_MAY_GO_QUIET}.
+			boolean relays = !quietSides || !QUIET_SIDES_RELAX_PARITY || slots == null
+				|| anySideRelays(slots);
+			if (relays && placements.noteAt(beyond, time)) {
 				return true;
 			}
 			// And this module's own low notes, against a live block of the lane behind -- but only the
@@ -16679,7 +16724,7 @@ public final class SongBuilder {
 		}
 		StackedSplit reduced = new StackedSplit(new UltraSlots(slots.centre(), slots.sides(),
 			java.util.Collections.unmodifiableList(front),
-			java.util.Collections.unmodifiableList(back)),
+			java.util.Collections.unmodifiableList(back), slots.quietSides()),
 			head, split.nearTail(), far, split.shed(), split.centreFeeds(),
 			split.centreToFront(), split.rungNotes(), split.severNote(), split.stairExtras());
 		if (reduced.runCells(splitCells) > DUST_RANGE) {
@@ -17406,9 +17451,23 @@ public final class SongBuilder {
 		// The handover's cross was shaped for a middle that does not join it. A bus cell in the very
 		// next column does join, so it goes back to plain wire -- which is what the bus tail has always
 		// been handed.
-		set(placements, tail.handoverDust(), "minecraft:redstone_wire");
+		//
+		// The stone under it goes back too, and it took a floating item of dust in-game to learn it
+		// ever left. The journal opens before the handover is laid, so the undo takes the stone up
+		// with the tail -- and this re-laid only the dust, over a cell that now held nothing: a wire
+		// that pops on paste, and a front pair whose only remaining driver was the conducting side
+		// instrument. The reader never saw it -- it does not ask whether wire is supported -- and the
+		// note always played anyway, right up until quiet sides made the side instrument silent and
+		// the redundancy this was leaning on went away. Recorded live, because driving the front pair
+		// is the handover stone's whole job. See {@link #STACKED_SIDES_MAY_GO_QUIET}.
+		// Under the tail's own label from the first block, not from layBus onward. The handover pair
+		// re-laid above went down while the caller's pad label was still current, so a debug paste
+		// dressed the stacked bus's own handover in the closing pad's colour -- in-game reading asked
+		// why the bus had an acacia block in it. The label is sticky; these cells are the tail's.
 		String was = placements.placing();
 		placements.placing("chord:STACKED_BUS+busTailAfterAPad");
+		placements.powered(tail.handoverDust().below(), "minecraft:stone", tail.time());
+		set(placements, tail.handoverDust(), "minecraft:redstone_wire");
 		layBus(placements, tail.at(), tail.notes(), tail.time());
 		// Put back, for the reason pastAnyCorner puts it back: a label is sticky, and every cell the
 		// caller lays after this would otherwise be reported as part of a tail laid a chord ago.
@@ -17704,6 +17763,141 @@ public final class SongBuilder {
 
 	/** Cuts refused a head only because the near half would have been the head and nothing else. */
 	static int HEAD_ONLY_NEAR_HALVES = 0;
+
+	/**
+	 * v2: a stacked head with a handover in front of it lays its sides as the notes they are,
+	 * instead of as relays.
+	 *
+	 * <p>In-game reading found that a stacked module's low notes are not driven by the two side
+	 * instrument blocks at all, or need not be. The {@link #STACKED_CROSS} is a stated cross, so it
+	 * points into all four of its neighbours -- both side instruments <em>and</em> the two cells of
+	 * the lane's own path either side of it. The path block behind is the stone the module's repeater
+	 * stands on, and that block is directly beside both <b>back</b> flanks. The path block in front is
+	 * the handover, and that one is beside both <b>front</b> flanks. Neither of them is the side
+	 * instrument, and both are live at the module's own tick.</p>
+	 *
+	 * <p>So the side instrument has one job left -- being the voice of the note above it -- and
+	 * {@link #conductingInstrumentBlock} can stop swapping a harp's air for a block. Two things follow,
+	 * and the second is the reason this was wanted:</p>
+	 *
+	 * <ul>
+	 * <li>A harp side costs no block at all, and a transparent instrument keeps its own.</li>
+	 * <li><b>A side that does not conduct cannot mispower the lane alongside.</b> The first thing
+	 * {@link #stackedClashes} asks is whether the neighbour has a note in the cell this module would
+	 * relay through into -- the refusal no arrangement of this module's own slots escapes, because
+	 * both relays are built live whatever the chord holds. A quiet side is not live, so there is
+	 * nothing to escape.</li>
+	 * </ul>
+	 *
+	 * <p><b>Only in front of a handover.</b> The back flanks are covered by the repeater's own stand
+	 * on every stacked shape there is, but the front pair needs a block at the cell two along the
+	 * lane, and a plain stacked module does not lay one -- it comes to rest there and leaves the cell
+	 * to the next chord, which is a different tick and, after a bus, not even at lane level. A stacked
+	 * <em>bus</em> lays its handover there, stone with dust over it, and the centre-fed cuts lay the
+	 * same thing as their extension. Those are the shapes this is offered to and no others.</p>
+	 */
+	static boolean STACKED_SIDES_MAY_GO_QUIET = true;
+
+	/** Sides laid as the note's own block rather than as a relay, and the ones that had to relay. */
+	static int QUIET_STACKED_SIDES = 0;
+	static int RELAYING_STACKED_SIDES = 0;
+
+	/**
+	 * Whether a quiet side is also allowed to stand the parity refusal down.
+	 *
+	 * <p>Its own flag because it is its own claim. {@link #STACKED_SIDES_MAY_GO_QUIET} is about what
+	 * blocks go down; this is about what the walk is then allowed to decide, and the two fail in
+	 * different ways -- the first as a note nothing sounds, the second as a build that was offered
+	 * ground it should have been refused. Bisecting a regression between them is worth a flag.</p>
+	 *
+	 * <p><b>On, with a known fault in the implementation and not in the idea.</b> The optimisation is
+	 * correct -- a side that is not live reaches into nothing, and there is no refusal to make about
+	 * it -- and the corridor says so: 14,972,984 columns against 15,145,194, better than one per
+	 * cent. What is wrong is this code, and it costs <b>143 wrong notes across 101 builds</b> until
+	 * somebody finds it.</p>
+	 *
+	 * <p>The pattern says the reasoning behind it was too narrow. The refusal stood down is "my live
+	 * relay against their note", and a quiet side has no live relay, so that much holds. But the
+	 * faults are the <em>other</em> direction: the victim is the stacked bus whose sides went quiet,
+	 * the aggressor is a <b>cut head</b> -- which still relays, because cut heads are never offered
+	 * quiet sides -- and the note sounds a second time, too late for the first pulse to cover it.
+	 * 104 of the 143 are those two pairs. So refusing that cell was doing something beyond what it
+	 * says it does: standing there at all is what the module was being kept away from, and the
+	 * remaining checks ({@link #CLASH_ASKS_IF_THE_NEIGHBOUR_IS_LIVE} and the two flank asks) do not
+	 * cover it. Whether that is the neighbour arriving after this module was priced, or a cell the
+	 * asks simply do not name, is not known.</p>
+	 *
+	 * <p>Worth noting for whoever takes it up: this shipped <b>inert</b> first. Every one of the
+	 * eleven {@link #stackedClashes} callers used the overload that passed false, so the flag read
+	 * true and did nothing, and a whole library measurement was taken of a change that was not
+	 * running. In-game reading caught it -- padding that should have come off had not moved. The fact
+	 * lives on {@link UltraSlots} now for that reason.</p>
+	 */
+	static boolean QUIET_SIDES_RELAX_PARITY = true;
+
+	/**
+	 * Whether a head whose sides may go quiet also <em>prefers</em> notes that cannot relay for them.
+	 *
+	 * <p>Split from the laying for the same reason the parity arm is: it is a different claim with a
+	 * different failure. Turning it off leaves the shape of every module exactly where the old order
+	 * put it and changes only what the sides are built out of, which is the one arrangement in which
+	 * the physics of a quiet side can be measured at all -- with it on, every stacked head in the
+	 * library holds different notes and no two builds can be compared block for block.</p>
+	 *
+	 * <p><b>Off, and it is unfinished rather than unwanted.</b> On three illit builds it costs 31 dead
+	 * notes and <em>more</em> corridor than leaving the order alone: 19,178 columns against 19,155
+	 * with only the laying changed, and 19,184 with nothing changed. Every break is the same shape --
+	 * {@code cutHead5/near0/far1}, a cut head whose near half is nothing and whose far half is one
+	 * note -- which the library never picked until the side choice moved. So the dead line is almost
+	 * certainly a latent fault in that shape rather than in this preference; it was not the dot
+	 * handover ({@link #HANDOVER_CROSSES_WITH_NO_TAIL} changes nothing), and it has not been found.
+	 * Two other things were tried first and are ruled out: the parity arm on its own is free, and
+	 * demoting falling instruments below the transparent pick is its own separate fault -- sand has
+	 * to be on the sides, because in a low slot its prop lands in the floor below's air.</p>
+	 */
+	static boolean QUIET_SIDES_PICK_TRANSPARENT = true;
+
+	/**
+	 * Whether a handover with no tail behind it names its dust a cross.
+	 *
+	 * <p>Nothing to do with quiet sides -- it is a latent dead line the quiet-sides measurement
+	 * walked into, and it is on its own flag so it can be priced on its own. A stacked bus with an
+	 * empty tail lays the handover and returns, so the cell in front of the dust stays empty; dust
+	 * with nothing to join takes the dot shape, a dot powers only the block beneath it, and the line
+	 * stops there. {@link #STACKED_CROSS} exists for exactly this and was already being named for the
+	 * simple tail, whose middle is a cell the dust does not connect to either.</p>
+	 *
+	 * <p>Reached only by a cut head whose near half is nothing and whose far half is one note, which
+	 * is why it has gone unseen: the shape is rare and the library never picked it until the side
+	 * choice moved.</p>
+	 *
+	 * <p><b>Off, because it is a guess that did not pay.</b> It was written to explain the dead line
+	 * under {@link #QUIET_SIDES_PICK_TRANSPARENT} and it does not: the three builds break in exactly
+	 * the same places with it on. On the library as it stands it is a no-op either way -- 19,184
+	 * columns and nothing faulty in both arms -- so what it says about a dot may still be true and is
+	 * simply not what is wrong there. Kept, off, so the next person to reach for this explanation can
+	 * see it has already been tried.</p>
+	 */
+	static boolean HANDOVER_CROSSES_WITH_NO_TAIL = false;
+
+	/**
+	 * v2: the cell in front of a stacked cross always holds a block, note or stone.
+	 *
+	 * <p>The cell two along the lane is the one the cross points into on the travel side, and it is
+	 * therefore what sounds the module's two <b>front</b> flanks -- the same job the stone under the
+	 * repeater does for the back pair. Every shape that carries the line onward puts something there
+	 * without thinking about it: a stacked bus lays its handover, a plain module comes to rest on it
+	 * and the next chord's repeater stands there, the flanked-rung climb lays its extension. The
+	 * centre-fed head that leaves upward is the exception -- the line does not go that way -- and it
+	 * fills the cell only when it has a note evicted from the centre to put there.</p>
+	 *
+	 * <p>With nothing there the cross points into air, and the front pair is left driven by the two
+	 * side instruments alone. That was true and harmless for as long as a side was guaranteed to
+	 * conduct. It stopped being harmless the moment the sides were allowed to be the notes they are,
+	 * and it showed up in game as a single silent note on an ascent at room two. The cell costs one
+	 * block and it is the one block that makes a quiet-sided head safe.</p>
+	 */
+	static boolean FRONT_CELL_IS_ALWAYS_FILLED = true;
 
 	/** Where the last head-only cut handed over to its staircase, for the probe to dump around. */
 	static BlockPos HEAD_ONLY_AT = null;
@@ -18772,6 +18966,17 @@ public final class SongBuilder {
 				// cross unrecorded and nothing else stands next to this one: past it is the
 				// staircase, and past that the wall.
 				placements.powered(cursor.relative(travel), time);
+			} else if (FRONT_CELL_IS_ALWAYS_FILLED) {
+				// With no note to rehome, stone -- because the cell is not decoration. The cross
+				// points into it, so it is what carries this module's tick out to the two front
+				// flanks beside it; leave it air and the cross points at nothing and the pair is
+				// driven by the side instruments alone. That was invisible for as long as the sides
+				// were guaranteed to conduct, and it stopped being guaranteed the moment they were
+				// allowed to be the notes they are. Found in game as one silent note on an ascent
+				// at room two. See {@link #STACKED_SIDES_MAY_GO_QUIET}.
+				placements.powered(cursor.relative(travel, 2), "minecraft:stone", time);
+				placements.powered(cursor.relative(travel), time);
+				placements.padded("frontCellStoned");
 			}
 			placements.padded("cutHeadFeedsTheClimb");
 			return afterHead.pos();
@@ -18999,6 +19204,175 @@ public final class SongBuilder {
 	 */
 	static int MIN_STACKED_HEAD_NOTES = 4;
 
+	/**
+	 * Trades notes the head cannot use for ones its sides can, without changing either size.
+	 *
+	 * <p>The head is filled by position -- the first {@code headSize} notes of the chord -- and
+	 * {@link #ultraSlots} then picks the sides out of whatever that window happened to catch. So a
+	 * chord whose transparent notes and harps are listed after the window relays anyway and hangs
+	 * them on the bus, with the very notes that would have made its sides quiet sitting a column
+	 * along. Found in game as stacked buses relaying while their tails carried glass and harps.</p>
+	 *
+	 * <p>A trade and nothing more: one note out of the head, one in, same head, same tail, same
+	 * cells, same run. Three things are never traded away, and each is a rule that already exists
+	 * here. A falling instrument stays -- the sides are the only place in the module it can stand,
+	 * which is what the {@code falling >= 2} clause above is for. A harp stays, because the centre is
+	 * taken from an unused harp and from nothing else. And a note that is already quiet stays, since
+	 * trading it for another would buy nothing.</p>
+	 *
+	 * <p>Only as many as there are slots to fill: two sides, less whatever the falling notes have
+	 * already claimed. A third quiet note in the head is a note on a low slot, which is where it
+	 * would have been anyway.</p>
+	 */
+	private static void headTradesForQuietSides(List<EventNote> head, List<EventNote> tail) {
+		if (!STACKED_SIDES_MAY_GO_QUIET || !QUIET_SIDES_PICK_TRANSPARENT
+				|| !HEAD_TRADES_FOR_QUIET_SIDES) {
+			return;
+		}
+		int falling = 0;
+		int quiet = 0;
+		for (EventNote note : head) {
+			if (FALLING_INSTRUMENT_BLOCKS.contains(note.instrumentBlock())) {
+				falling++;
+			} else if (!quietSideConducts(note)) {
+				quiet++;
+			}
+		}
+		int wanted = 2 - Math.min(2, falling) - quiet;
+		for (int filled = 0; filled < wanted; filled++) {
+			int from = quietestInTail(tail);
+			if (from < 0) {
+				return;
+			}
+			int out = -1;
+			for (int index = 0; index < head.size() && out < 0; index++) {
+				EventNote note = head.get(index);
+				if (!FALLING_INSTRUMENT_BLOCKS.contains(note.instrumentBlock())
+						&& quietSideConducts(note)) {
+					out = index;
+				}
+			}
+			if (out < 0) {
+				return;
+			}
+			EventNote taken = tail.remove(from);
+			tail.add(head.set(out, taken));
+			HEADS_TRADED_FOR_A_QUIET_SIDE++;
+		}
+	}
+
+	/**
+	 * The tail note that would make the best quiet side, or -1 where the tail holds none.
+	 *
+	 * <p>Anything but a harp first. A harp is wanted in more places than this one -- a centre, a
+	 * relay, a hanging slot over claimed air -- so it is taken for a side only where nothing else
+	 * in the tail will do, which is the same order {@link #ultraSlots} picks in.</p>
+	 */
+	private static int quietestInTail(List<EventNote> tail) {
+		int harp = -1;
+		for (int index = 0; index < tail.size(); index++) {
+			EventNote note = tail.get(index);
+			if (FALLING_INSTRUMENT_BLOCKS.contains(note.instrumentBlock())
+					|| quietSideConducts(note)) {
+				continue;
+			}
+			if (!isHarpNote(note)) {
+				return index;
+			}
+			if (harp < 0) {
+				harp = index;
+			}
+		}
+		return harp;
+	}
+
+	/** Whether a stacked bus head swaps a relaying note out for one that can go quiet. */
+	static boolean HEAD_TRADES_FOR_QUIET_SIDES = true;
+
+	/**
+	 * v2: a relaying side about to be laid beside a neighbour's note takes a quiet note instead.
+	 *
+	 * <p>The lay-time half of the parity answer, and the reason it has to exist here is that the
+	 * plan-time ask cannot be trusted to have seen this shape at this cell. Traced on electroman at
+	 * 24x5, tick 676: the arrangement {@link #stackedClashes} passed had oak and stone for sides --
+	 * both quiet, nothing to refuse, and rightly so -- and the arrangement that got <em>built</em>
+	 * wore hay, because a cut is re-resolved against the room after its parity was asked and the
+	 * verdict does not travel with the rebuild. It was also asked a column short of where the module
+	 * landed, because the builder steps past a corner and the cut path's ask does not. Every one of
+	 * the second-soundings the parity relaxation shipped with was this: a shape cleared quiet,
+	 * rebuilt loud, laid unasked.</p>
+	 *
+	 * <p>So the last thing done before the sides go down, at the module's true position: each side
+	 * that would relay, standing beside a note of another tick, trades places with a quiet note from
+	 * this module's own low slots. The notes are the same chord, so nothing musical moves -- the
+	 * hay hangs on a flank and the oak stands beside the centre, which is the arrangement the
+	 * neighbour needed and the plan already approved once. A sand side never dodges: the sides are
+	 * the one place a falling note can stand. A side with no quiet partner left relays where it is,
+	 * as it always did, and is counted.</p>
+	 */
+	static boolean SIDES_DODGE_THE_NEIGHBOURS_NOTE = true;
+
+	/** The lay-time trade: each side that stepped aside, and each that had no quiet note to take. */
+	private static UltraSlots sidesDodgeTheNeighboursNote(PlacementPlan placements, Lane lane,
+			int time, UltraSlots slots) {
+		if (!SIDES_DODGE_THE_NEIGHBOURS_NOTE || !STACKED_SIDES_MAY_GO_QUIET
+				|| !slots.quietSides()) {
+			return slots;
+		}
+		BlockPos cross = lane.ahead(1).pos();
+		List<Direction> outward = List.of(lane.noteSide(), lane.noteSide().getOpposite());
+		for (int side = 0; side < outward.size() && side < slots.sides().size(); side++) {
+			EventNote relay = slots.sides().get(side);
+			if (relay == null || !quietSideConducts(relay)) {
+				continue;
+			}
+			if (!placements.noteAt(cross.relative(outward.get(side), 2), time)) {
+				continue;
+			}
+			// The two sides trade places first: the quiet one takes the contested flank and the
+			// relay faces the other way -- but only where the other way is clear, which is also
+			// what stops the pair swapping back and forth. The one move a falling side can make,
+			// since a side stays a side. The head this was found on had exactly this shape: a lone
+			// oak among hay, sitting on the uncontested side.
+			int other = 1 - side;
+			EventNote otherSide = other < slots.sides().size() ? slots.sides().get(other) : null;
+			if (otherSide != null && !quietSideConducts(otherSide)
+					&& !placements.noteAt(cross.relative(outward.get(other), 2), time)) {
+				List<EventNote> sides = new ArrayList<>(slots.sides());
+				sides.set(side, otherSide);
+				sides.set(other, relay);
+				slots = new UltraSlots(slots.centre(),
+					java.util.Collections.unmodifiableList(sides),
+					slots.front(), slots.back(), slots.quietSides());
+				placements.padded("sidesSwappedForTheQuietOne");
+				continue;
+			}
+			boolean dodged = false;
+			if (!FALLING_INSTRUMENT_BLOCKS.contains(relay.instrumentBlock())) {
+				for (int slot = 0; slot < 4 && !dodged; slot++) {
+					EventNote low = slots.slot(slot);
+					if (low == null || quietSideConducts(low)) {
+						continue;
+					}
+					List<EventNote> sides = new ArrayList<>(slots.sides());
+					sides.set(side, low);
+					slots = new UltraSlots(slots.centre(),
+						java.util.Collections.unmodifiableList(sides),
+						slots.front(), slots.back(), slots.quietSides()).with(slot, relay);
+					placements.padded("sideDodgedANeighboursNote");
+					dodged = true;
+				}
+			}
+			if (!dodged) {
+				placements.padded("sideHadNoQuietNoteToDodgeWith");
+			}
+		}
+		return slots;
+	}
+
+	/** How often a head traded a note with its own tail to buy a quiet side. */
+	static int HEADS_TRADED_FOR_A_QUIET_SIDE = 0;
+
 	private static StackedBusSplit splitAt(List<EventNote> chord, int headSize, int backFlanks) {
 		List<EventNote> head = new ArrayList<>();
 		List<EventNote> tail = new ArrayList<>();
@@ -19014,7 +19388,10 @@ public final class SongBuilder {
 				tail.add(note);
 			}
 		}
-		UltraSlots slots = ultraSlots(head, backFlanks);
+		headTradesForQuietSides(head, tail);
+		// A stacked bus by construction -- there is a tail, so there is a handover -- so the sides are
+		// offered the quiet shape. See {@link #STACKED_SIDES_MAY_GO_QUIET}.
+		UltraSlots slots = ultraSlots(head, backFlanks, true);
 		return slots == null || tail.isEmpty() ? null : new StackedBusSplit(slots, head, tail);
 	}
 
@@ -19042,6 +19419,8 @@ public final class SongBuilder {
 	 */
 	private static Body addStackedBusModule(PlacementPlan placements, Lane lane, int triggerDelay,
 			int time, UltraSlots slots, List<EventNote> tail, boolean mayGoSimple) {
+		// The one shape that always lays a block in the cell two along the lane -- the handover, a
+		// few lines down -- which is what let splitAt ask for quiet sides in the first place.
 		Lane afterHead = addStackedEventModule(placements, lane, triggerDelay, time, slots);
 		// The cell the centre lights. Stone with dust over it, in the column the head came to rest
 		// in -- beside the centre and level with it, never above, because above the centre is the
@@ -19083,8 +19462,21 @@ public final class SongBuilder {
 			placements.beginSoftTail(new PlacementPlan.SoftTail(afterHead.ahead(1).above(),
 				List.copyOf(tail), time, afterHead.pos().above()));
 		}
-		set(placements, afterHead.pos(), "minecraft:stone");
-		set(placements, afterHead.pos().above(), simple ? STACKED_CROSS : "minecraft:redstone_wire");
+		// Said to be live, and not only laid. The dust over it lights it either way -- that has always
+		// been true and is what a floor rail reads off it -- but with quiet sides this stone is the
+		// only thing driving the head's front pair, and a block nothing has recorded as live is a
+		// block the bookkeeping calls silent. Same fix, same reason, as the cross under a
+		// centre-fed head's evicted note.
+		placements.powered(afterHead.pos(), "minecraft:stone", time);
+		// An empty tail wants the cross for the very reason a simple tail does, and it is the same
+		// sentence: a bus tail joins this dust into a line because its stone stands in the very next
+		// cell, and where there is no tail at all there is no stone to join. Left to itself the dust
+		// collapses to a dot, a dot powers only the block beneath it, and everything downstream goes
+		// silent. Read off three illit builds as a dead line at a cut head of five with near nought
+		// and far one -- the one shape that reaches here with nothing to lay behind the handover.
+		set(placements, afterHead.pos().above(),
+			simple || (HANDOVER_CROSSES_WITH_NO_TAIL && tail.isEmpty())
+				? STACKED_CROSS : "minecraft:redstone_wire");
 		// Said out loud, because these two blocks are also what a corner is and what a cell of pad is,
 		// and the rail's floor seed was telling them apart by looking at them.
 		placements.handover(afterHead.pos());
@@ -19184,13 +19576,34 @@ public final class SongBuilder {
 
 	private static Lane addStackedEventModule(PlacementPlan placements, Lane lane,
 			int triggerDelay, int time, UltraSlots slots) {
+		// Asked of the slots, never of the caller. The picker, the builder and the parity check have
+		// to give the same answer about a side, and a boolean threaded through call sites is the one
+		// that gets forgotten: QUIET_SIDES_RELAX_PARITY shipped inert because not one of eleven
+		// stackedClashes callers passed it. One fact, set where the sides are chosen, read
+		// everywhere. See {@link #STACKED_SIDES_MAY_GO_QUIET}.
+		boolean quietSides = STACKED_SIDES_MAY_GO_QUIET && slots.quietSides();
 		lane = pastAnyCorner(placements, lane);
+		// Past the corner and after every rebuild: the one moment the slots and the cell are both
+		// final, which the traced fault says the plan-time ask is not.
+		// See {@link #SIDES_DODGE_THE_NEIGHBOURS_NOTE}.
+		slots = sidesDodgeTheNeighboursNote(placements, lane, time, slots);
 		BlockPos cursor = lane.pos();
 		Direction travel = lane.travel();
 		Direction across = lane.noteSide();
 		set(placements, cursor, "minecraft:stone");
 		set(placements, cursor.above(),
 			"minecraft:repeater[facing=" + repeaterFacing(travel) + ",delay=" + triggerDelay + "]");
+		if (quietSides) {
+			// The stone the repeater stands on, said to be live. The cross points into it -- a stated
+			// cross points into all four of its neighbours -- so it has been live at this module's
+			// tick for as long as the shape has existed, and it is what sounds the two back flanks
+			// beside it. Nothing recorded it, because until the sides went quiet the flanks were
+			// credited to the side instrument and the answer came out the same either way. It stops
+			// coming out the same once the sides are the notes they are: verify credits a note to a
+			// neighbour it has been told about, and an untold block reads as no driver at all.
+			// See {@link #STACKED_SIDES_MAY_GO_QUIET}.
+			placements.powered(cursor, time);
+		}
 		BlockPos centre = cursor.relative(travel).above();
 		BlockPos cross = centre.below();
 		set(placements, cross.below(), UNDERFLOOR);
@@ -19222,7 +19635,21 @@ public final class SongBuilder {
 			Direction out = sides.get(side);
 			EventNote relay = slots.sides().get(side);
 			BlockPos instrument = cross.relative(out);
-			placements.powered(instrument, conductingInstrumentBlock(relay), time);
+			// Quiet where it may be and where the note allows it: the block the note is actually
+			// built over anywhere else, which for a harp is no block at all. Not recorded as live,
+			// because it is not -- and that is the point of it. The note above still sounds: the
+			// centre beside it is strongly powered by the repeater and sounds both its neighbours,
+			// whatever stands underneath them. See {@link #STACKED_SIDES_MAY_GO_QUIET}.
+			if (quietSides && !quietSideConducts(relay)) {
+				String block = quietSideBlock(relay);
+				if (!"minecraft:air".equals(block)) {
+					set(placements, instrument, block);
+				}
+				QUIET_STACKED_SIDES++;
+			} else {
+				placements.powered(instrument, conductingInstrumentBlock(relay), time);
+				RELAYING_STACKED_SIDES++;
+			}
 			if (FALLING_INSTRUMENT_BLOCKS.contains(relay.instrumentBlock())) {
 				placements.support(instrument.below(), UNDERFLOOR);
 			}
@@ -19254,7 +19681,17 @@ public final class SongBuilder {
 
 	/** The note in each slot of a stacked module; {@code centre} is null when the chord fits without it. */
 	private record UltraSlots(EventNote centre, List<EventNote> sides, List<EventNote> front,
-			List<EventNote> back) {
+			List<EventNote> back, boolean quietSides) {
+		/**
+		 * The same module, relaying. Every shape that builds its slots from scratch rather than out
+		 * of another module's gets this one, because a side goes quiet only where something is
+		 * guaranteed to stand in front of the cross and only the shape itself knows that.
+		 */
+		UltraSlots(EventNote centre, List<EventNote> sides, List<EventNote> front,
+				List<EventNote> back) {
+			this(centre, sides, front, back, false);
+		}
+
 		/**
 		 * The low note hanging at the far end of the outer column on this side, or {@code null}.
 		 *
@@ -19291,26 +19728,26 @@ public final class SongBuilder {
 		UltraSlots without(int index) {
 			return new UltraSlots(centre, sides,
 				index < 2 ? leaving(front, index) : front,
-				index < 2 ? back : leaving(back, index - 2));
+				index < 2 ? back : leaving(back, index - 2), quietSides);
 		}
 
 		/** The same module with its back pair the other way round. Same size, same columns. */
 		UltraSlots mirroredBack() {
 			return new UltraSlots(centre, sides, front,
 				java.util.Collections.unmodifiableList(
-					java.util.Arrays.asList(back.get(1), back.get(0))));
+					java.util.Arrays.asList(back.get(1), back.get(0))), quietSides);
 		}
 
 		/** The same module with a note in the centre, which is where a rehomed harp goes for free. */
 		UltraSlots withCentre(EventNote note) {
-			return new UltraSlots(note, sides, front, back);
+			return new UltraSlots(note, sides, front, back, quietSides);
 		}
 
 		/** The same module with one low slot holding a different note. */
 		UltraSlots with(int index, EventNote note) {
 			return new UltraSlots(centre, sides,
 				index < 2 ? holding(front, index, note) : front,
-				index < 2 ? back : holding(back, index - 2, note));
+				index < 2 ? back : holding(back, index - 2, note), quietSides);
 		}
 
 		private static List<EventNote> holding(List<EventNote> pair, int side, EventNote note) {
@@ -20897,7 +21334,7 @@ public final class SongBuilder {
 		}
 		return new StackedSplit(new UltraSlots(slots.centre(), slots.sides(),
 			java.util.Collections.unmodifiableList(front),
-			java.util.Collections.unmodifiableList(back)),
+			java.util.Collections.unmodifiableList(back), slots.quietSides()),
 			head, split.nearTail(), tail, split.shed(), split.centreFeeds(),
 			split.centreToFront(), split.rungNotes(), split.severNote(), split.stairExtras());
 	}
@@ -21013,6 +21450,17 @@ public final class SongBuilder {
 	}
 
 	private static UltraSlots ultraSlots(List<EventNote> chord, int backFlanks) {
+		return ultraSlots(chord, backFlanks, false);
+	}
+
+	/**
+	 * @param quietSides whether this module's sides may be laid as the notes they are rather than as
+	 *     relays, which is true only where a handover will stand in front of the cross to drive the
+	 *     front pair. See {@link #STACKED_SIDES_MAY_GO_QUIET}.
+	 */
+	private static UltraSlots ultraSlots(List<EventNote> chord, int backFlanks,
+			boolean quietSidesAsked) {
+		boolean quietSides = STACKED_SIDES_MAY_GO_QUIET && quietSidesAsked;
 		int hangers = 4 + backFlanks;
 		// No floor on the size. A chord of three or fewer is built as the small shape because that is
 		// cheaper, not because the stacked one could not hold it -- fewer notes than hangers simply
@@ -21048,10 +21496,37 @@ public final class SongBuilder {
 			- (needsCentre ? 1 : 0);
 		boolean[] used = new boolean[chord.size()];
 		List<EventNote> sides = new ArrayList<>(2);
+		// Falling instruments first, and this order is not a preference -- it is the low pair's rule
+		// standing on its head. A sand in a low slot hangs at the lane's own level, so its prop lands
+		// two below that, which is the air the floor below's notes want; the sides are the one place
+		// in the module where it can stand. Demoting it below the transparent pick was measured on
+		// three illit builds as 45 dead notes and more corridor than leaving it alone, which is the
+		// low pair's rule saying so out loud.
 		for (int index = 0; index < chord.size() && sides.size() < 2; index++) {
 			if (FALLING_INSTRUMENT_BLOCKS.contains(chord.get(index).instrumentBlock())) {
 				sides.add(chord.get(index));
 				used[index] = true;
+			}
+		}
+		// Then, where the sides do not have to relay, the ones that cannot. A side whose own block is
+		// transparent cannot reach into the lane alongside, and every one taken here is a parity
+		// refusal that never gets asked. Harps come after them and only out of the spare ones -- a
+		// harp is wanted in a good many places and this is the cheapest of them, not the most
+		// important. See {@link #STACKED_SIDES_MAY_GO_QUIET}.
+		if (quietSides && QUIET_SIDES_PICK_TRANSPARENT) {
+			for (int index = 0; index < chord.size() && sides.size() < 2; index++) {
+				EventNote note = chord.get(index);
+				if (!used[index] && !isHarpNote(note) && !quietSideConducts(note)) {
+					sides.add(note);
+					used[index] = true;
+				}
+			}
+			for (int index = 0; index < chord.size() && sides.size() < 2 && spareHarps > 0; index++) {
+				if (!used[index] && isHarpNote(chord.get(index))) {
+					sides.add(chord.get(index));
+					used[index] = true;
+					spareHarps--;
+				}
 			}
 		}
 		for (int index = 0; index < chord.size() && sides.size() < 2; index++) {
@@ -21094,7 +21569,7 @@ public final class SongBuilder {
 		}
 		return new UltraSlots(centre, List.copyOf(sides),
 			pair(hanging.subList(0, Math.min(2, hanging.size()))),
-			backPair(hanging.subList(Math.min(2, hanging.size()), hanging.size())));
+			backPair(hanging.subList(Math.min(2, hanging.size()), hanging.size())), quietSides);
 	}
 
 	private static boolean isHarpNote(EventNote note) {
@@ -21105,6 +21580,62 @@ public final class SongBuilder {
 	private static boolean conductsSideways(EventNote note) {
 		return note.effect() == null
 			&& (isHarpNote(note) || CONDUCTING_INSTRUMENT_BLOCKS.contains(note.instrumentBlock()));
+	}
+
+	/**
+	 * The block a quiet side stands on: the instrument's half-block where it has one, and otherwise
+	 * the block it is built over anywhere else -- which for a harp is no block at all.
+	 *
+	 * <p>{@link #INSTRUMENT_SLABS} was written for the low slots and stopped short of the sides,
+	 * because the sides had to relay and a slab cannot be strongly powered. That was the right rule
+	 * for the wrong reason: the sides do not have to relay, so the very thing that disqualified the
+	 * slab is what makes it wanted -- bass, bass drum and the four coppers can all stand beside the
+	 * centre as half-blocks and reach into nothing. Same voice either way, which the game was asked
+	 * directly (SlabInstrumentTest). See {@link #STACKED_SIDES_MAY_GO_QUIET}.</p>
+	 */
+	private static String quietSideBlock(EventNote note) {
+		String slab = INSTRUMENT_SLABS.get(note.instrumentBlock());
+		return slab != null ? slab : note.instrumentBlock();
+	}
+
+	/**
+	 * Whether a side laid the quiet way would still carry power to a note beside it.
+	 *
+	 * <p>The difference from {@link #conductsSideways} is the harp and the slab, and both are the
+	 * point. That one answers "could this note relay if we gave it a block that conducts", which is
+	 * what {@link #conductingInstrumentBlock} then lays. This answers "does it relay if we lay what
+	 * {@link #quietSideBlock} would lay" -- a harp over air, a bass over an oak slab -- and neither
+	 * of those relays anything.</p>
+	 */
+	/**
+	 * Whether either side of this module would be laid live.
+	 *
+	 * <p>Asked of the pair because which side is which is not settled until the builder has stepped
+	 * past any corner in front of it, so an index is not something two places can agree on -- and
+	 * this answer does not depend on the order.</p>
+	 */
+	private static boolean anySideRelays(UltraSlots slots) {
+		for (EventNote side : slots.sides()) {
+			if (side == null || quietSideConducts(side)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private static boolean quietSideConducts(EventNote note) {
+		return note.effect() != null || sideWouldConduct(note.instrumentBlock());
+	}
+
+	/** The same question of an instrument block on its own, for the probe that lists the voices. */
+	static boolean sideWouldConduct(String instrumentBlock) {
+		return !INSTRUMENT_SLABS.containsKey(instrumentBlock)
+			&& CONDUCTING_INSTRUMENT_BLOCKS.contains(instrumentBlock);
+	}
+
+	/** The block an instrument builds over, exposed for probes. */
+	static String instrumentBlockFor(String instrument) {
+		return instrumentBlockId(instrument);
 	}
 
 	/** Whether anything in this chord is a block that sounds for itself rather than a note block. */

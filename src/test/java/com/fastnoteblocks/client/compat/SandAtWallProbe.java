@@ -62,6 +62,9 @@ class SandAtWallProbe {
 		Flags.Held held = Flags.set(System.getProperty("probe.set", ""));
 		try {
 			SongBuilder.FAR_HALVES_LED_BY_A_STANDING_NOTE = 0;
+			SongBuilder.QUIET_STACKED_SIDES = 0;
+			SongBuilder.RELAYING_STACKED_SIDES = 0;
+			SongBuilder.HEADS_TRADED_FOR_A_QUIET_SIDE = 0;
 			// maxFloors from the config rather than the floor count, because the two are different
 			// numbers and a build given its own floor count as the ceiling is not the build pasted.
 			report(song, mode, width, floors, SongBuilder.createPastePlan(new BlockPos(0, 64, 0),
@@ -80,7 +83,10 @@ class SandAtWallProbe {
 			+ " breachLanes=" + plan.breaches().stream().filter(lane -> lane > 0).count()
 			+ " worst=" + plan.worstBreach() + " wrong=" + plan.wrongNotes());
 		System.out.println("PROBE farHalvesLedByAStandingNote = "
-			+ SongBuilder.FAR_HALVES_LED_BY_A_STANDING_NOTE);
+			+ SongBuilder.FAR_HALVES_LED_BY_A_STANDING_NOTE
+			+ " quietSides = " + SongBuilder.QUIET_STACKED_SIDES
+			+ " relayingSides = " + SongBuilder.RELAYING_STACKED_SIDES
+			+ " headsTraded = " + SongBuilder.HEADS_TRADED_FOR_A_QUIET_SIDE);
 		for (String fault : plan.faults()) {
 			System.out.println("PROBE fault: " + fault);
 		}
