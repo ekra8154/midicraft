@@ -1,5 +1,6 @@
 package com.fastnoteblocks.client.composer;
 
+import com.fastnoteblocks.InstrumentRanges;
 import com.fastnoteblocks.NotePitch;
 import com.fastnoteblocks.NoteSequence;
 import com.fastnoteblocks.NoteSequence.Step;
@@ -258,12 +259,22 @@ public record ComposerProject(
 		boolean muted,
 		boolean buildEnabled,
 		boolean visible,
-		List<NoteEvent> notes
+		List<NoteEvent> notes,
+		/** How a split layer voices its notes, or null for the ordinary one-instrument layer. */
+		Split split
 	) {
 		public Layer {
 			name = name == null || name.isBlank() ? "Layer" : name.trim();
 			instrument = instrument == null || instrument.isBlank() ? "HARP" : instrument;
-			notes = notes == null ? List.of() : oneNotePerCell(notes, pitched(instrument));
+			// A split layer always keeps the pitch in the cell, whatever its vestigial instrument
+			// says: the row decides which voices sound, so two rows are never the same note.
+			notes = notes == null ? List.of() : oneNotePerCell(notes, pitched(instrument) || split != null);
+		}
+
+		/** Everything but the split, for the callers written before there was one. */
+		public Layer(String name, String instrument, boolean muted, boolean buildEnabled,
+				boolean visible, List<NoteEvent> notes) {
+			this(name, instrument, muted, buildEnabled, visible, notes, null);
 		}
 
 		/**
@@ -295,11 +306,67 @@ public record ComposerProject(
 		}
 
 		public boolean pitched() {
-			return pitched(instrument);
+			// A split layer's rows always mean something, even when every voice on it is a sound
+			// effect: the row is what picks the voice.
+			return split != null || pitched(instrument);
 		}
 
 		private static boolean pitched(String instrument) {
 			return !instrument.startsWith(SOUND_EFFECT_PREFIX);
+		}
+
+		/**
+		 * Whether this note is one the layer cannot build.
+		 *
+		 * <p>The one question the roll's red bar, the status counter and Select > out of range all
+		 * ask, and it depends on the layer: an ordinary pitched layer holds its notes to the harp
+		 * window, a sound effect layer has no range at all, and a split layer holds them to its
+		 * own brackets -- a note at F#2 is out of range on a harp layer and squarely inside a bass
+		 * voice on a split one.</p>
+		 */
+		public boolean outOfRange(NoteEvent note) {
+			if (split != null) {
+				return !split.covers(note.midiNote());
+			}
+			return pitched() && !note.isBuildable();
+		}
+
+		/**
+		 * The single-instrument layers a build and a preview see, one per split voice.
+		 *
+		 * <p>An ordinary layer is its own only voice. A split layer expands here and nowhere else:
+		 * each voice takes the notes its bracket covers, transposed into the harp window by the
+		 * voice's own register, so that everything downstream -- steps, sequence tracks, the
+		 * builder, the analysis -- keeps its one-instrument-per-layer world view and the note
+		 * lands on the block at the pitch value that sounds as written. A note under two brackets
+		 * appears in both voices, which is the doubling the overlap is for.</p>
+		 *
+		 * <p>Voices with nothing covered are left out rather than emitted empty: an empty track
+		 * still costs a build a lane, and a bracket nothing reaches has nothing to say.</p>
+		 */
+		public List<Layer> buildVoices() {
+			if (split == null) {
+				return List.of(this);
+			}
+			List<Layer> voices = new ArrayList<>();
+			for (Split.Voice voice : split.voices()) {
+				int shift = pitched(voice.instrument())
+					? NOTE_BLOCK_BASE_MIDI_NOTE - InstrumentRanges.baseMidi(voice.instrument())
+					: 0;
+				List<NoteEvent> covered = new ArrayList<>();
+				for (NoteEvent note : notes) {
+					if (voice.covers(note.midiNote())) {
+						covered.add(shift == 0
+							? note
+							: note.movedTo(note.startTick(), note.midiNote() + shift));
+					}
+				}
+				if (!covered.isEmpty()) {
+					voices.add(new Layer(name + " (" + voice.instrument() + ")",
+						voice.instrument(), muted, buildEnabled, visible, covered));
+				}
+			}
+			return List.copyOf(voices);
 		}
 
 		/**
@@ -355,27 +422,148 @@ public record ComposerProject(
 		}
 
 		public Layer withNotes(List<NoteEvent> value) {
-			return new Layer(name, instrument, muted, buildEnabled, visible, value);
+			return new Layer(name, instrument, muted, buildEnabled, visible, value, split);
 		}
 
 		public Layer withName(String value) {
-			return new Layer(value, instrument, muted, buildEnabled, visible, notes);
+			return new Layer(value, instrument, muted, buildEnabled, visible, notes, split);
 		}
 
 		public Layer withInstrument(String value) {
-			return new Layer(name, value, muted, buildEnabled, visible, notes);
+			return new Layer(name, value, muted, buildEnabled, visible, notes, split);
 		}
 
 		public Layer withMuted(boolean value) {
-			return new Layer(name, instrument, value, buildEnabled, visible, notes);
+			return new Layer(name, instrument, value, buildEnabled, visible, notes, split);
 		}
 
 		public Layer withBuildEnabled(boolean value) {
-			return new Layer(name, instrument, muted, value, visible, notes);
+			return new Layer(name, instrument, muted, value, visible, notes, split);
 		}
 
 		public Layer withVisible(boolean value) {
-			return new Layer(name, instrument, muted, buildEnabled, value, notes);
+			return new Layer(name, instrument, muted, buildEnabled, value, notes, split);
+		}
+
+		public Layer withSplit(Split value) {
+			return new Layer(name, instrument, muted, buildEnabled, visible, notes, value);
+		}
+	}
+
+	/**
+	 * A split layer's palette: which instruments sound, and over which stretch of the keyboard.
+	 *
+	 * <p>The one rule of a split layer lives here: a note sounds <em>every</em> voice whose
+	 * bracket covers it. Everything the feature does falls out of that -- a note under two
+	 * overlapping brackets doubles, dragging a bracket in gets single notes back, and a note no
+	 * bracket reaches is out of range the same way a note outside the harp window is on an
+	 * ordinary layer. On a split layer written pitch is true pitch: C3 means C3, and the brackets
+	 * decide which instruments can say it.</p>
+	 */
+	public record Split(List<Voice> voices) {
+		public Split {
+			voices = normalizeVoices(voices);
+		}
+
+		/**
+		 * One instrument's bracket: both ends inclusive, in MIDI.
+		 *
+		 * <p>Clamped to where the instrument can actually sound -- the handles in the keyboard can
+		 * shrink a range but never grow it past the register the sample lives in, and this is the
+		 * clamp that guarantees the transposed note always lands on a real pitch value. A sound
+		 * effect voice has no register, so its bracket is only a band of rows and clamps to MIDI
+		 * itself.</p>
+		 */
+		public record Voice(String instrument, int lo, int hi) {
+			public Voice {
+				instrument = instrument == null || instrument.isBlank() ? "HARP" : instrument;
+				int lowest = instrument.startsWith(SOUND_EFFECT_PREFIX)
+					? 0 : InstrumentRanges.lowestMidi(instrument);
+				int highest = instrument.startsWith(SOUND_EFFECT_PREFIX)
+					? 127 : InstrumentRanges.highestMidi(instrument);
+				int floor = Math.min(lo, hi);
+				int ceiling = Math.max(lo, hi);
+				lo = Math.max(lowest, Math.min(highest, floor));
+				hi = Math.max(lowest, Math.min(highest, ceiling));
+			}
+
+			/** The whole register the instrument has, which is what a fresh bracket starts as. */
+			public static Voice fullRange(String instrument) {
+				return new Voice(instrument, InstrumentRanges.lowestMidi(instrument),
+					InstrumentRanges.highestMidi(instrument));
+			}
+
+			public boolean covers(int midiNote) {
+				return midiNote >= lo && midiNote <= hi;
+			}
+		}
+
+		/** Whether any voice sounds this note. */
+		public boolean covers(int midiNote) {
+			for (Voice voice : voices) {
+				if (voice.covers(midiNote)) {
+					return true;
+				}
+			}
+			return false;
+		}
+
+		/**
+		 * The melodic default: one voice per tier at its full register, F#1 to F#7 with every
+		 * adjacent pair overlapping by an octave.
+		 */
+		public static Split melodic() {
+			return new Split(List.of(
+				Voice.fullRange("BASS"),
+				Voice.fullRange("GUITAR"),
+				Voice.fullRange("HARP"),
+				Voice.fullRange("FLUTE"),
+				Voice.fullRange("BELL")
+			));
+		}
+
+		/** The percussion default: kick, snare and hats stacked low to high, no gaps, no overlap. */
+		public static Split percussion() {
+			return new Split(List.of(
+				Voice.fullRange("BASEDRUM"),
+				Voice.fullRange("SNARE"),
+				Voice.fullRange("HAT")
+			));
+		}
+
+		/**
+		 * The sound effect default: six voices in four-row bands stacked across the harp window,
+		 * so a drum-machine line of doors and pistons fits one layer without switching layers.
+		 *
+		 * <p>Nothing about the choice of six is load-bearing -- an effect voice's bracket is only a
+		 * band of rows, so the palette can swap any of them for any other. These are a starting
+		 * set, placed where the roll usually already is.</p>
+		 */
+		public static Split soundEffects() {
+			return new Split(List.of(
+				new Voice("FX_OAK_DOOR", 54, 57),
+				new Voice("FX_IRON_TRAPDOOR", 58, 61),
+				new Voice("FX_BELL", 62, 65),
+				new Voice("FX_COPPER_BULB", 66, 69),
+				new Voice("FX_DROPPER", 70, 73),
+				new Voice("FX_PISTON", 74, 77)
+			));
+		}
+
+		private static List<Voice> normalizeVoices(List<Voice> value) {
+			if (value == null || value.isEmpty()) {
+				return List.of();
+			}
+			// Ordered by register, lowest voice first, and by name within a register. The order is
+			// what assigns brackets their columns in the keyboard, so it is pinned to the one thing
+			// a drag cannot change -- sorting by the bracket's own edge would make the columns trade
+			// places under the hand moving them.
+			return List.copyOf(value.stream()
+				.filter(java.util.Objects::nonNull)
+				.sorted(Comparator
+					.comparingInt((Voice voice) -> InstrumentRanges.baseMidi(voice.instrument()))
+					.thenComparing(Voice::instrument))
+				.toList());
 		}
 	}
 
@@ -623,8 +811,12 @@ public record ComposerProject(
 			if (!chosen) {
 				continue;
 			}
-			Layer projected = heard == null ? layer : withoutAlreadyHeard(layer, heard);
-			result.add(new SequenceTrack(layer.name(), toText(projected), layer.instrument(), 0, true));
+			// A split layer is several tracks: one per voice, expanded before the deduplication so
+			// that a doubled note two split layers agree on collapses the way any other sound does.
+			for (Layer voice : layer.buildVoices()) {
+				Layer projected = heard == null ? voice : withoutAlreadyHeard(voice, heard);
+				result.add(new SequenceTrack(voice.name(), toText(projected), voice.instrument(), 0, true));
+			}
 		}
 		return List.copyOf(result);
 	}
@@ -1073,8 +1265,11 @@ public record ComposerProject(
 	 * shifts, so intervals across such a layer change. It is the quick fix, not the faithful one.</p>
 	 */
 	public ComposerProject withAllFittedToRange(Set<Long> scope) {
+		// A split layer's notes are not held to the harp window at all -- true pitch is the whole
+		// point of one -- so folding them into it would wreck exactly the notes the layer exists
+		// to keep. They are left alone; a note outside every bracket is the handles' business.
 		List<Layer> updated = layers.stream()
-			.map(layer -> layer.withNotes(layer.notes().stream()
+			.map(layer -> layer.split() != null ? layer : layer.withNotes(layer.notes().stream()
 				.map(note -> note.isBuildable() || !inScope(note, scope)
 					? note
 					: note.movedTo(note.startTick(),
@@ -1127,8 +1322,12 @@ public record ComposerProject(
 
 	/** @param melodyWeight what a top-voice note counts for; exposed so a probe can sweep it. */
 	public TransposeFit bestTransposeIntoRange(int melodyWeight) {
+		// Split layers are left out of the measurement: their notes are not judged against the
+		// harp window, so counting them would charge the shift for notes that were never out of
+		// range. The transpose itself still moves them -- a key change is the whole song or it is
+		// two songs -- and any note it pushes outside a bracket shows up as out of range after.
 		List<NoteEvent> measured = layers.stream()
-			.filter(Layer::inBuild)
+			.filter(layer -> layer.inBuild() && layer.split() == null)
 			.flatMap(layer -> layer.notes().stream())
 			.toList();
 		if (measured.isEmpty()) {
@@ -1350,7 +1549,12 @@ public record ComposerProject(
 			// it. So the shift moved nothing and the split it caused was pure cost: a door written
 			// low came out as "Door (+2 oct)" and "Door (+1 oct)", two layers against the
 			// hundred-and-twenty-eight for a block that makes one noise.
-			boolean pitched = source.pitched();
+			//
+			// A split layer is not transposed either, for the opposite reason: its notes are
+			// already true pitch and its brackets already reach them, so octave-folding it into
+			// the harp window would undo the layer's whole purpose. Quantizing and repeat merging
+			// still apply -- a split layer's notes live in time like anyone else's.
+			boolean pitched = source.pitched() && source.split() == null;
 			// Where the layer sits before any note is looked at individually.
 			int base = pitched && shifting == OctaveShifting.LAYER_THEN_NOTES
 				? bestLayerOctaveShift(sourceNotes)
@@ -1412,14 +1616,9 @@ public record ComposerProject(
 				String convertedName = distinct.size() == 1 && shift == 0
 					? source.name()
 					: source.name() + octaveShiftSuffix(shift);
-				Layer built = new Layer(
-					convertedName,
-					source.instrument(),
-					source.muted(),
-					source.buildEnabled(),
-					source.visible(),
-					entry.getValue()
-				);
+				// Copied off the source rather than rebuilt, so a split layer's brackets survive
+				// the conversion along with everything else about it.
+				Layer built = source.withName(convertedName).withNotes(entry.getValue());
 				// What the layer would not hold. A layer keeps one note per pitch per tick, so two
 				// source notes an octave apart that land on the same pitch become one -- the same
 				// dedupe the split reports as a dropped duplicate layer, arriving a note at a time
@@ -1836,6 +2035,11 @@ public record ComposerProject(
 		// A sound effect has no range to fall outside of and no pitch to carry, so every note builds
 		// and each one is written as pitch 0 -- a number the sequence text can hold and read back,
 		// standing for the one sound the block makes.
+		//
+		// A split layer never arrives here whole: buildVoices expands it first, so what this sees
+		// is always a one-instrument layer whose notes already sit in the harp window. Handed a
+		// split layer directly this would quietly keep only the harp-window slice, which is why
+		// every build path goes through the expansion.
 		boolean pitched = layer.pitched();
 		List<NoteEvent> buildable = pitched
 			? layer.notes().stream().filter(NoteEvent::isBuildable).toList()
@@ -1919,7 +2123,11 @@ public record ComposerProject(
 			if (!layer.inBuild()) {
 				continue;
 			}
-			chosen.add(heard == null ? layer : withoutAlreadyHeard(layer, heard));
+			// Split layers arrive already expanded into their voices, so every layer this returns
+			// is a plain one-instrument layer and downstream readers need no new case.
+			for (Layer voice : layer.buildVoices()) {
+				chosen.add(heard == null ? voice : withoutAlreadyHeard(voice, heard));
+			}
 		}
 		return List.copyOf(chosen);
 	}
@@ -1930,7 +2138,7 @@ public record ComposerProject(
 			for (Layer layer : source) {
 				if (layer != null && normalized.size() < MAX_LAYERS) {
 					normalized.add(new Layer(layer.name(), layer.instrument(), layer.muted(),
-						layer.buildEnabled(), layer.visible(), layer.notes()));
+						layer.buildEnabled(), layer.visible(), layer.notes(), layer.split()));
 				}
 			}
 		}

@@ -45,15 +45,19 @@ public final class SongBuilder {
 			if (!layer.buildEnabled()) {
 				continue;
 			}
-			String instrumentBlock = instrumentBlockId(layer.instrument());
-			PreviewInstrument.Effect effect = effectOf(layer.instrument());
-			int time = 0;
+			// A split layer is placed as its voices, each a plain one-instrument layer. The order
+			// counter runs across all of them so two voices striking together stay deterministic.
 			int order = 0;
-			for (Step step : project.toSteps(layer)) {
-				if (step.type() == StepType.NOTE) {
-					notes.add(new EventNote(time, layerIndex + 1, order++, step.value(), instrumentBlock, effect));
-				} else {
-					time += step.value();
+			for (Layer voice : layer.buildVoices()) {
+				String instrumentBlock = instrumentBlockId(voice.instrument());
+				PreviewInstrument.Effect effect = effectOf(voice.instrument());
+				int time = 0;
+				for (Step step : project.toSteps(voice)) {
+					if (step.type() == StepType.NOTE) {
+						notes.add(new EventNote(time, layerIndex + 1, order++, step.value(), instrumentBlock, effect));
+					} else {
+						time += step.value();
+					}
 				}
 			}
 		}

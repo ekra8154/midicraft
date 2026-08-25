@@ -29,6 +29,15 @@ final class NoteCellGrid {
 	static final int OFF_GRID = 8;
 	/** Out of the note block's range: this note cannot be built until the song is converted. */
 	static final int UNBUILDABLE = 32;
+	/**
+	 * On a split layer, where written pitch is true pitch and the harp window does not apply.
+	 *
+	 * <p>An identity, not a warning -- it is drawn whatever is selected, so that a note standing
+	 * in the red-washed rows can say "I am a split note and this is fine" instead of looking like
+	 * an out-of-range mistake waiting for a fix. A real warning on the same note still wins the
+	 * bar; the identity only shows on notes with nothing wrong with them.</p>
+	 */
+	static final int SPLIT = 64;
 	/** Set on a note once a later note has taken its cell. */
 	private static final int COVERED = 16;
 	/** How wide the warning bar down a flagged note's left edge is. */
@@ -172,7 +181,7 @@ final class NoteCellGrid {
 			if ((noteFlags & COVERED) != 0) {
 				continue;
 			}
-			int kind = noteFlags & (CROWDED | OFF_GRID | UNBUILDABLE);
+			int kind = noteFlags & (CROWDED | OFF_GRID | UNBUILDABLE | SPLIT);
 			boolean highlighted = (noteFlags & HIGHLIGHTED) != 0;
 			// A selected note is the one thing that cannot weld: its halo is pinned to its own
 			// edges, so it draws alone and leaves the row closed behind it.
@@ -253,6 +262,11 @@ final class NoteCellGrid {
 		if ((kind & CROWDED) != 0) {
 			return highlighted ? 0xFFFF9A2E : 0x55FF9A2E;
 		}
-		return highlighted ? 0xFFFFE45C : 0x55FFE45C;
+		if ((kind & OFF_GRID) != 0) {
+			return highlighted ? 0xFFFFE45C : 0x55FFE45C;
+		}
+		// The split identity, last: teal, because every warning here is a heat colour and this is
+		// the one bar that means nothing is wrong.
+		return highlighted ? 0xFF4FD8C8 : 0x554FD8C8;
 	}
 }

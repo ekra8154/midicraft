@@ -138,7 +138,9 @@ public final class ComposerScreen extends Screen {
 					0xFFCDE9FF);
 			}
 		}
-		setResizeCursor(lit);
+		if (lit) {
+			wantedCursorShape = GLFW.GLFW_HRESIZE_CURSOR;
+		}
 	}
 
 	/**
@@ -156,26 +158,29 @@ public final class ComposerScreen extends Screen {
 	}
 
 	/**
-	 * Swaps in the horizontal-resize cursor while the split is in reach.
+	 * Puts on the cursor this frame asked for: resize arrows over the split, a hand over a
+	 * bracket handle, the ordinary pointer everywhere else.
 	 *
-	 * <p>Only on the change, and put back on the way out and again when the screen closes: a cursor
-	 * is process-wide state, so leaving it set would follow the player back into the world.</p>
+	 * <p>Asked for during the frame and set once at the end of it, rather than set by each
+	 * thing that wants one. Two of those drawing in the same frame would otherwise take turns,
+	 * and whichever drew last would win however far away its own target was.</p>
+	 *
+	 * <p>Only on the change, and put back on the way out and again when the screen closes: a
+	 * cursor is process-wide state, so leaving it set would follow the player into the world.</p>
 	 */
-	private void setResizeCursor(boolean wanted) {
-		if (wanted == resizeCursorShown || minecraft == null || minecraft.getWindow() == null) {
+	private void setCursorShape(int shape) {
+		if (shape == cursorShape || minecraft == null || minecraft.getWindow() == null) {
 			return;
 		}
-		resizeCursorShown = wanted;
+		cursorShape = shape;
 		long window = minecraft.getWindow().handle();
-		if (!wanted) {
+		if (shape == 0) {
 			GLFW.glfwSetCursor(window, 0L);
 			return;
 		}
-		if (RESIZE_CURSOR == 0L) {
-			RESIZE_CURSOR = GLFW.glfwCreateStandardCursor(GLFW.GLFW_HRESIZE_CURSOR);
-		}
-		if (RESIZE_CURSOR != 0L) {
-			GLFW.glfwSetCursor(window, RESIZE_CURSOR);
+		long cursor = CURSORS.computeIfAbsent(shape, GLFW::glfwCreateStandardCursor);
+		if (cursor != 0L) {
+			GLFW.glfwSetCursor(window, cursor);
 		}
 	}
 
@@ -286,6 +291,8 @@ public final class ComposerScreen extends Screen {
 	private static final int COLLAPSED_LAYER_PANEL_WIDTH = 34;
 	/** Grab zone either side of the split, and how far left you must drag to fold it away. */
 	private static final int SPLITTER_GRAB = 3;
+	/** How big the brackets' fold arrow is. Small: it is a corner control, not a button. */
+	private static final int TOGGLE_SIZE = 9;
 	/**
 	 * How far left you must drag to fold it away, which is also how wide folded is.
 	 *
@@ -837,9 +844,39 @@ public final class ComposerScreen extends Screen {
 	private String profileSummary = "";
 	/** The layer a press landed on, and whether it has moved far enough to be a reorder. */
 	private int layerDragIndex = -1;
+	/**
+	 * Dragging one end of a split bracket in the keyboard strip: which bracket group, and which
+	 * end. The layers are not tracked because the brackets only show while one agreeing set of
+	 * split layers holds the keyboard, so they are whatever {@link #splitKeyboardLayers} answers.
+	 */
+	private int bracketDragGroup = -1;
+	private boolean bracketDragTop;
+	private long lastBracketDragAt;
+	/**
+	 * The per-bracket voice picker: which register it is for, or {@link Integer#MIN_VALUE} while
+	 * closed. The rows and anchor are copied out when it opens, so the picker survives its own
+	 * edits -- toggling a bracket's last voice off removes the bracket, and the picker has to go
+	 * on standing where it was for the voice to be toggled back on.
+	 */
+	private int tierMenuBase = Integer.MIN_VALUE;
+	private boolean tierMenuEffects;
+	private int tierMenuLo;
+	private int tierMenuHi;
+	private int tierMenuX;
+	private int tierMenuY;
+	/**
+	 * Whether the brackets are folded away while their layer still holds the keyboard.
+	 *
+	 * <p>The screen's own state rather than the composition's: what a song is does not depend
+	 * on whether you happen to be looking at its brackets. It is not remembered between visits
+	 * either, so the keyboard always opens saying what the layer actually does.</p>
+	 */
+	private boolean splitBracketsHidden;
 	/** Dragging the split between the layer panel and the roll, and whether the cursor says so. */
 	private boolean draggingSplitter;
-	private boolean resizeCursorShown;
+	/** The GLFW cursor shape now set on the window, and the one this frame has asked for. */
+	private int cursorShape;
+	private int wantedCursorShape;
 	private double layerDragStartY;
 	private double layerDragY;
 	private boolean layerDragActive;
@@ -1937,6 +1974,7 @@ public final class ComposerScreen extends Screen {
 	@Override
 	public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
 		long frameStart = profiling ? System.nanoTime() : 0L;
+		wantedCursorShape = 0;
 		updatePlayback();
 		rollX = layerPanelWidth() + PIANO_WIDTH;
 		rollY = TOOLBAR_HEIGHT + TIMELINE_RULER_HEIGHT;
@@ -1948,6 +1986,7 @@ public final class ComposerScreen extends Screen {
 		extractTimeRuler(graphics, mouseX, mouseY);
 		mark = phase(PHASE_RULER, mark);
 		mark = extractPianoRoll(graphics, mouseX, mouseY, mark);
+		extractSplitToggle(graphics, mouseX, mouseY);
 		extractStatus(graphics);
 		extractToast(graphics, mouseX, mouseY);
 		mark = phase(PHASE_STATUS, mark);
@@ -1958,12 +1997,14 @@ public final class ComposerScreen extends Screen {
 		super.extractRenderState(graphics, mouseX, mouseY, partialTick);
 		mark = phase(PHASE_WIDGETS, mark);
 		extractInstrumentMenu(graphics, mouseX, mouseY);
+		extractTierMenu(graphics, mouseX, mouseY);
 		extractContextMenu(graphics, mouseX, mouseY);
 		extractLayerMenu(graphics, mouseX, mouseY);
 		extractToolbarMenu(graphics, mouseX, mouseY);
 		extractSnapMenu(graphics, mouseX, mouseY);
 		extractMenuDescription(graphics);
 		phase(PHASE_MENUS, mark);
+		setCursorShape(wantedCursorShape);
 		endProfiledFrame(graphics, frameStart);
 	}
 
@@ -2119,6 +2160,11 @@ public final class ComposerScreen extends Screen {
 			case MOVE_DOWN -> layersToEdit(menuRow()).stream().mapToInt(Integer::intValue).max()
 				.orElse(0) < project().layers().size() - 1;
 			case MOVE_NOTES_HERE -> !selectedNotes.isEmpty();
+			case SPLIT_MELODIC, SPLIT_PERCUSSION, SPLIT_SFX -> true;
+			// Greyed out when nothing acted on wears brackets, so the row answers "is any of this
+			// split" the way Move up answers "is there anywhere to go".
+			case UNSPLIT -> layersToEdit(menuRow()).stream()
+				.anyMatch(index -> project().layers().get(index).split() != null);
 		};
 	}
 
@@ -2145,6 +2191,14 @@ public final class ComposerScreen extends Screen {
 			case MERGE_SELECTED -> mergeSelectedLayers();
 			case SNAP_TO_START -> snapSelectedLayersToStart();
 			case DELETE_SELECTED -> deleteSelectedLayers();
+			case SPLIT_MELODIC -> updateLayers("make a melodic split layer", menuRow(),
+				layer -> layer.withSplit(ComposerProject.Split.melodic()));
+			case SPLIT_PERCUSSION -> updateLayers("make a percussion split layer", menuRow(),
+				layer -> layer.withSplit(ComposerProject.Split.percussion()));
+			case SPLIT_SFX -> updateLayers("make a sound effect split layer", menuRow(),
+				layer -> layer.withSplit(ComposerProject.Split.soundEffects()));
+			case UNSPLIT -> updateLayers("put the layer back on one instrument", menuRow(),
+				layer -> layer.withSplit(null));
 			case SELECT_ALL -> {
 				selectedLayers.clear();
 				for (int index = 0; index < project().layers().size(); index++) {
@@ -2592,7 +2646,7 @@ public final class ComposerScreen extends Screen {
 			case SELECT_TOO_FREQUENT -> selectNotesWhere("too frequent",
 				note -> projectStats().crowded().contains(note.startTick()), true);
 			case SELECT_OUT_OF_RANGE -> selectNotesWhere("out of range",
-				(layer, note) -> layer.pitched() && !note.isBuildable(), true);
+				(layer, note) -> layer.outOfRange(note), true);
 			case SELECT_OVERLOADED_CHORDS -> selectOverloadedChordNotes();
 			case SELECT_ALL_NOTES -> selectNotesWhere("selected", note -> true, false);
 			case SELECT_NONE -> dropSelection();
@@ -3051,6 +3105,19 @@ public final class ComposerScreen extends Screen {
 				+ "all move by the same amount, so parts that did not start together still do not. "
 				+ "Select one layer to move that one alone.";
 			case SELECT_ALL -> "Selects every layer.";
+			case SPLIT_MELODIC -> "Turns this into a split layer: written pitch becomes true pitch "
+				+ "across six octaves, and each note sounds every instrument whose bracket covers "
+				+ "it -- bass low, guitar, harp, flute, bell high, overlapping by an octave. No "
+				+ "note moves. Solo the layer to see the brackets on the keyboard.";
+			case SPLIT_PERCUSSION -> "Turns this into a split drum layer: kick at the bottom of "
+				+ "the keyboard, snare in the middle, hi-hats on top, each still tunable across "
+				+ "its own 25 pitches. No note moves.";
+			case SPLIT_SFX -> "Turns this into a split sound effect layer: bands of rows, one "
+				+ "sound effect each, so a rhythm of doors and pistons fits one layer. The "
+				+ "palette swaps any band's block. No note moves.";
+			case UNSPLIT -> "Takes the brackets off and puts the layer back on its single "
+				+ "instrument. Notes keep their written pitches, so anything outside F#3-F#5 "
+				+ "shows out of range again.";
 		};
 	}
 
@@ -3160,7 +3227,9 @@ public final class ComposerScreen extends Screen {
 		graphics.fill(menu.left(), menu.top(), menu.right(), menu.bottom(), 0xF0101115);
 		graphics.fill(menu.left(), menu.top(), menu.right(), menu.top() + 1, 0xFFAAAAAA);
 		extractInstrumentTabs(graphics, menu, mouseX, mouseY);
-		PreviewInstrument selected = PreviewInstrument.byId(project().layers().get(instrumentMenuLayer).instrument());
+		Layer menuLayer = project().layers().get(instrumentMenuLayer);
+		ComposerProject.Split menuSplit = menuLayer.split();
+		PreviewInstrument selected = PreviewInstrument.byId(menuLayer.instrument());
 		List<PreviewInstrument> palette = instrumentMenuPalette();
 		for (int index = 0; index < palette.size(); index++) {
 			PreviewInstrument value = palette.get(index);
@@ -3168,8 +3237,14 @@ public final class ComposerScreen extends Screen {
 			int cellY = instrumentMenuGridTop(menu) + index / INSTRUMENT_COLUMNS * INSTRUMENT_CELL;
 			boolean hovered = mouseX >= cellX && mouseX < cellX + INSTRUMENT_CELL
 				&& mouseY >= cellY && mouseY < cellY + INSTRUMENT_CELL;
+			// On a split layer the palette is a set, not a choice: every voice currently on the
+			// layer is lit, and a click toggles the one it lands on.
+			boolean lit = menuSplit != null
+				? menuSplit.voices().stream()
+					.anyMatch(voice -> voice.instrument().equals(value.id()))
+				: value.equals(selected);
 			graphics.fill(cellX, cellY, cellX + INSTRUMENT_CELL - 2, cellY + INSTRUMENT_CELL - 2,
-				value.equals(selected) ? 0xFF356070 : hovered ? 0xFF44484F : 0xFF25282D);
+				lit ? 0xFF356070 : hovered ? 0xFF44484F : 0xFF25282D);
 			graphics.item(new ItemStack(value.icon()), cellX + 5, cellY + 5);
 			if (hovered) {
 				// Effects carry how far they reach. The pitched half is every one of them 48, so
@@ -3183,9 +3258,13 @@ public final class ComposerScreen extends Screen {
 		// it opened under, changing five layers at once is indistinguishable from a bug.
 		int landing = layersToEdit(instrumentMenuLayer).size();
 		graphics.text(font,
-			landing > 1
-				? "Sets all " + landing + " selected layers"
-				: "Sets layer " + (instrumentMenuLayer + 1),
+			menuSplit != null
+				? (landing > 1
+					? "Toggles voices on " + landing + " selected layers"
+					: "Toggles a voice on the split layer")
+				: (landing > 1
+					? "Sets all " + landing + " selected layers"
+					: "Sets layer " + (instrumentMenuLayer + 1)),
 			menu.left() + 4, menu.bottom() - INSTRUMENT_FOOTER + 2,
 			landing > 1 ? 0xFF8FD3FF : 0xFF8A9098, false);
 	}
@@ -3330,8 +3409,11 @@ public final class ComposerScreen extends Screen {
 					chipLeft + (LAYER_CHIP - font.width(state.letter)) / 2, y + 4, state.color, false);
 			}
 			// The instrument as the block it sounds like, which is the same picture the palette uses
-			// and the only label short enough to leave the name any room.
-			graphics.item(new ItemStack(PreviewInstrument.byId(layer.instrument()).icon()),
+			// and the only label short enough to leave the name any room. A split layer has many
+			// blocks and one machine, so its row wears the note block itself.
+			graphics.item(new ItemStack(layer.split() != null
+					? net.minecraft.world.item.Items.NOTE_BLOCK
+					: PreviewInstrument.byId(layer.instrument()).icon()),
 				row.instrumentX(), y - 1);
 			// Whether you will hear this layer, marked on the thing that makes the sound -- and the
 			// one part of a row that survives every width, so a folded panel still answers it. A
@@ -3469,6 +3551,10 @@ public final class ComposerScreen extends Screen {
 	private boolean overOpenMenu(double x, double y) {
 		NoteRect palette = instrumentMenuRect();
 		if (palette != null && palette.contains(x, y)) {
+			return true;
+		}
+		NoteRect tierMenu = tierMenuRect();
+		if (tierMenu != null && tierMenu.contains(x, y)) {
 			return true;
 		}
 		if (layerMenuOpen && x >= layerMenuX && x < layerMenuX + layerMenuWidth()
@@ -4219,6 +4305,11 @@ public final class ComposerScreen extends Screen {
 	private long extractPianoRoll(GuiGraphicsExtractor graphics, int mouseX, int mouseY, long mark) {
 		int pianoX = layerPanelWidth();
 		long now = Util.getMillis();
+		// While one split layer is alone on the air the keyboard wears its brackets, and
+		// "buildable" means what it means there: covered by a voice, wherever on the six octaves
+		// that is. Otherwise the window widens to whatever bound an all-split selection shares.
+		ComposerProject.Split keyboardSplit = keyboardSplit();
+		int[] plainBounds = plainKeyboardBounds();
 		graphics.enableScissor(pianoX, rollY, rollX + rollWidth, rollY + rollHeight);
 		for (int midi = topMidiNote; midi >= MIN_MIDI_NOTE; midi--) {
 			int y = noteY(midi);
@@ -4229,8 +4320,9 @@ public final class ComposerScreen extends Screen {
 				continue;
 			}
 			boolean black = isBlackKey(midi);
-			boolean buildable = midi >= ComposerProject.NOTE_BLOCK_BASE_MIDI_NOTE
-				&& midi <= ComposerProject.NOTE_BLOCK_MAX_MIDI_NOTE;
+			boolean buildable = keyboardSplit != null
+				? keyboardSplit.covers(midi)
+				: midi >= plainBounds[0] && midi <= plainBounds[1];
 			// The two octaves a note block can play used to be tinted blue, which marked the part of
 			// the roll where nothing is wrong -- and on a converted song that is all of it, so the
 			// mark was on every row and said nothing. Inverted: the buildable rows are plain and the
@@ -4266,6 +4358,9 @@ public final class ComposerScreen extends Screen {
 			}
 		}
 
+		if (keyboardSplit != null && !splitBracketsHidden) {
+			extractSplitBrackets(graphics, keyboardSplit, mouseX, mouseY);
+		}
 		extractKeyTooltip(graphics, mouseX, mouseY);
 		mark = phase(PHASE_KEYS, mark);
 		extractTimeGrid(graphics);
@@ -4615,7 +4710,9 @@ public final class ComposerScreen extends Screen {
 			// "this will not build", which you already knew, and stopped answering anything else.
 			int color = highlighted ? vivid(layerColor(layerIndex)) : faded(layerColor(layerIndex));
 			// A sound effect has no note block range to be outside of, so nothing on one of those
-			// layers is ever marked unbuildable, wherever on the roll it was drawn.
+			// layers is ever marked unbuildable, wherever on the roll it was drawn. The range that
+			// matters is the layer's own: a split layer holds its notes to its brackets rather than
+			// to the harp window, so a note at F#2 wears no red bar while a bass voice covers it.
 			boolean rangeMatters = layer.pitched();
 			List<NoteEvent> notes = layer.notes();
 			for (int noteIndex = lowerBoundStart(notes, firstVisibleTick);
@@ -4649,8 +4746,12 @@ public final class ComposerScreen extends Screen {
 				} else if (anyOffGrid && offGrid.contains(note.startTick())) {
 					flags |= NoteCellGrid.OFF_GRID;
 				}
-				if (rangeMatters && !note.isBuildable()) {
+				if (rangeMatters && layer.outOfRange(note)) {
 					flags |= NoteCellGrid.UNBUILDABLE;
+				} else if (layer.split() != null) {
+					// Not a warning: the mark that says "this pitch is a split layer's business",
+					// so a note standing outside the red wash reads as intended, not as a mistake.
+					flags |= NoteCellGrid.SPLIT;
 				}
 				cells.add(left, top, color, flags, midi);
 				if (mouseX >= left && mouseX < right && mouseY >= top && mouseY < bottom) {
@@ -4713,7 +4814,24 @@ public final class ComposerScreen extends Screen {
 		lines.add(Component.literal("Layer " + (layerIndex + 1) + "  "
 				+ project().layers().get(layerIndex).name())
 			.withStyle(net.minecraft.ChatFormatting.GRAY));
-		if (note.isBuildable()) {
+		Layer noteLayer = project().layers().get(layerIndex);
+		if (noteLayer.split() != null) {
+			// On a split layer the note's pitch is true pitch, and what matters is which voices'
+			// brackets cover it -- one instrument name per note block this note will place.
+			List<String> sounding = new ArrayList<>();
+			for (ComposerProject.Split.Voice voice : noteLayer.split().voices()) {
+				if (voice.covers(note.midiNote())) {
+					sounding.add(PreviewInstrument.byId(voice.instrument()).name());
+				}
+			}
+			if (sounding.isEmpty()) {
+				lines.add(Component.literal("Outside every voice's bracket")
+					.withStyle(net.minecraft.ChatFormatting.RED));
+			} else {
+				lines.add(Component.literal("Sounds " + String.join(", ", sounding))
+					.withStyle(net.minecraft.ChatFormatting.GRAY));
+			}
+		} else if (note.isBuildable()) {
 			lines.add(Component.literal("Note block pitch " + note.noteBlockPitch())
 				.withStyle(net.minecraft.ChatFormatting.GRAY));
 			long sustained = note.durationTicks();
@@ -4763,6 +4881,12 @@ public final class ComposerScreen extends Screen {
 			hoveredKeyMidi = -1;
 			return;
 		}
+		// A bracket standing on the keys answers for itself, and it is the more specific thing to
+		// be pointing at -- the row underneath is not what the hand is going for.
+		if (bracketHandleAt(mouseX, mouseY) != null || bracketBodyAt(mouseX, mouseY) >= 0) {
+			hoveredKeyMidi = -1;
+			return;
+		}
 		int midi = mouseMidi(mouseY);
 		if (midi != hoveredKeyMidi) {
 			hoveredKeyMidi = midi;
@@ -4774,14 +4898,36 @@ public final class ComposerScreen extends Screen {
 		}
 		List<Component> lines = new ArrayList<>();
 		lines.add(Component.literal(midiName(midi)));
-		boolean buildable = midi >= ComposerProject.NOTE_BLOCK_BASE_MIDI_NOTE
-			&& midi <= ComposerProject.NOTE_BLOCK_MAX_MIDI_NOTE;
-		lines.add(buildable
-			? Component.literal("Note block pitch "
+		ComposerProject.Split keyboardSplit = keyboardSplit();
+		if (keyboardSplit != null) {
+			// The split keyboard is up, so a key's answer is which voices a note here would sound.
+			List<String> sounding = new ArrayList<>();
+			for (ComposerProject.Split.Voice voice : keyboardSplit.voices()) {
+				if (voice.covers(midi)) {
+					sounding.add(PreviewInstrument.byId(voice.instrument()).name());
+				}
+			}
+			lines.add(sounding.isEmpty()
+				? Component.literal("No voice reaches this row")
+					.withStyle(net.minecraft.ChatFormatting.RED)
+				: Component.literal("Sounds " + String.join(", ", sounding))
+					.withStyle(net.minecraft.ChatFormatting.GRAY));
+			graphics.setComponentTooltipForNextFrame(font, lines, mouseX, mouseY);
+			return;
+		}
+		int[] plainBounds = plainKeyboardBounds();
+		if (midi >= ComposerProject.NOTE_BLOCK_BASE_MIDI_NOTE
+				&& midi <= ComposerProject.NOTE_BLOCK_MAX_MIDI_NOTE) {
+			lines.add(Component.literal("Note block pitch "
 					+ (midi - ComposerProject.NOTE_BLOCK_BASE_MIDI_NOTE))
-				.withStyle(net.minecraft.ChatFormatting.GRAY)
-			: Component.literal("Outside the note block range")
+				.withStyle(net.minecraft.ChatFormatting.GRAY));
+		} else if (midi >= plainBounds[0] && midi <= plainBounds[1]) {
+			lines.add(Component.literal("In range for the selected split layers")
+				.withStyle(net.minecraft.ChatFormatting.GRAY));
+		} else {
+			lines.add(Component.literal("Outside the note block range")
 				.withStyle(net.minecraft.ChatFormatting.RED));
+		}
 		graphics.setComponentTooltipForNextFrame(font, lines, mouseX, mouseY);
 	}
 
@@ -4907,13 +5053,6 @@ public final class ComposerScreen extends Screen {
 			+ "drawing one starts a new layer."));
 	}
 
-	/** What a click on the keys or on a new note sounds like: the layer's voice, or a plain harp. */
-	private PreviewInstrument previewInstrument() {
-		return noLayerSelected()
-			? PreviewInstrument.byId("HARP")
-			: PreviewInstrument.byId(activeLayer().instrument());
-	}
-
 	/** What colour that click lights its key in: the layer's, or a plain grey with no layer. */
 	private int previewColor() {
 		return noLayerSelected() ? 0xFFBCC3CC : vivid(layerColor(project().activeLayerIndex()));
@@ -4941,14 +5080,45 @@ public final class ComposerScreen extends Screen {
 			return;
 		}
 		int midi = Math.max(MIN_MIDI_NOTE, Math.min(MAX_MIDI_NOTE, dragHeldMidi + pitchDelta));
-		soundNote(midi,
-			PreviewInstrument.byId(project().layers().get(dragHeldLayer).instrument()),
-			vivid(layerColor(dragHeldLayer)));
+		soundLayerNote(dragHeldLayer, midi, vivid(layerColor(dragHeldLayer)));
 	}
 
 	private void soundNote(int midi, PreviewInstrument instrument, int color) {
 		instrument.play(midi - ComposerProject.NOTE_BLOCK_BASE_MIDI_NOTE);
 		lightKey(midi, color);
+	}
+
+	/**
+	 * Plays a note the way the given layer would voice it.
+	 *
+	 * <p>On an ordinary layer that is the layer's instrument at the harp-window offset, as ever.
+	 * On a split layer it is every voice whose bracket covers the row, each at its own register --
+	 * the same sounds a preview or a paste of that row would make -- and a row nothing covers
+	 * plays nothing, because nothing is what it would build. The key still lights, so the click
+	 * visibly landed.</p>
+	 */
+	private void soundLayerNote(int layerIndex, int midi, int color) {
+		Layer layer = layerIndex >= 0 && layerIndex < project().layers().size()
+			? project().layers().get(layerIndex)
+			: null;
+		if (layer == null || layer.split() == null) {
+			soundNote(midi, layer == null
+				? PreviewInstrument.byId("HARP")
+				: PreviewInstrument.byId(layer.instrument()), color);
+			return;
+		}
+		for (ComposerProject.Split.Voice voice : layer.split().voices()) {
+			if (voice.covers(midi)) {
+				PreviewInstrument.byId(voice.instrument())
+					.play(midi - com.fastnoteblocks.InstrumentRanges.baseMidi(voice.instrument()));
+			}
+		}
+		lightKey(midi, color);
+	}
+
+	/** The note a click means on whichever layer new notes land on, or a plain harp with none. */
+	private void soundActiveNote(int midi) {
+		soundLayerNote(noLayerSelected() ? -1 : project().activeLayerIndex(), midi, previewColor());
 	}
 
 	/** Marks a key as having just sounded. It goes out on its own; see {@link #keyLitAt}. */
@@ -5232,6 +5402,18 @@ public final class ComposerScreen extends Screen {
 			}
 			return true;
 		}
+		// Before the splitter, which its corner overlaps: the arrow is the smaller and more
+		// specific target, and the panel edge is draggable along the whole rest of its height.
+		NoteRect splitToggle = splitToggleRect();
+		if (event.button() == 0 && splitToggle != null
+				&& splitToggle.contains(event.x(), event.y())) {
+			splitBracketsHidden = !splitBracketsHidden;
+			// The picker belongs to a bracket, so it goes away with them.
+			if (splitBracketsHidden) {
+				tierMenuBase = Integer.MIN_VALUE;
+			}
+			return true;
+		}
 		if (event.button() == 0 && overSplitter(event.x(), event.y())) {
 			draggingSplitter = true;
 			return true;
@@ -5270,6 +5452,19 @@ public final class ComposerScreen extends Screen {
 			// putting away -- and that includes the button it came from, which would otherwise
 			// take the press and open it straight back up.
 			snapMenuOpen = false;
+			return true;
+		}
+		NoteRect tierMenu = tierMenuRect();
+		if (tierMenu != null) {
+			if (event.button() == 0 && handleTierMenuClick(event.x(), event.y())) {
+				return true;
+			}
+			if (tierMenu.contains(event.x(), event.y())) {
+				return true;
+			}
+			// Spent on closing, like the palette below: putting the picker down must not also
+			// sound the key -- or re-open the bracket -- underneath it.
+			tierMenuBase = Integer.MIN_VALUE;
 			return true;
 		}
 		NoteRect palette = instrumentMenuRect();
@@ -5362,8 +5557,14 @@ public final class ComposerScreen extends Screen {
 				instrumentMenuLayer = closing ? -1 : instrumentLayer;
 				if (!closing) {
 					// Opens on the tab the layer is already using, so the voice it has is the one
-					// under the cursor rather than one page away from it.
-					instrumentMenuEffects = !project().layers().get(instrumentLayer).pitched();
+					// under the cursor rather than one page away from it. A split layer is pitched
+					// whatever it holds, so its tab is read off the voices instead.
+					Layer opened = project().layers().get(instrumentLayer);
+					instrumentMenuEffects = opened.split() != null
+						? !opened.split().voices().isEmpty() && opened.split().voices().stream()
+							.allMatch(voice -> voice.instrument()
+								.startsWith(ComposerProject.SOUND_EFFECT_PREFIX))
+						: !opened.pitched();
 				}
 				return true;
 			}
@@ -5405,6 +5606,14 @@ public final class ComposerScreen extends Screen {
 			return true;
 		}
 		if (event.button() == 0 && overPianoKeys(event.x(), event.y())) {
+			// A bracket handle sits over the keys, and a press on one is a grab, not a note.
+			if (grabBracketHandle(event.x(), event.y())) {
+				return true;
+			}
+			// A bracket's body or icons open its picker: which of the register's instruments sound.
+			if (openTierMenu(event.x(), event.y())) {
+				return true;
+			}
 			// Where the marker is, is the cell -- but snapped to the nearest grid line rather than
 			// into the cell the marker is inside, which is the opposite of what a click on the roll
 			// wants. A click points at a cell and belongs in it. A note played by hand lands *near* a
@@ -5426,7 +5635,7 @@ public final class ComposerScreen extends Screen {
 					takeNotes.add(newestNoteId());
 				}
 			} else {
-				soundNote(mouseMidi(event.y()), previewInstrument(), previewColor());
+				soundActiveNote(mouseMidi(event.y()));
 			}
 			return true;
 		}
@@ -5571,7 +5780,7 @@ public final class ComposerScreen extends Screen {
 		// and whichever branch answers it first leaves the other one latched -- a right-click during
 		// a box select used to be enough to strand the box on screen.
 		if (selectingBox || draggingNotes || draggingSplitter || draggingEndMarker || draggingPlayhead
-				|| layerDragIndex >= 0 || painting != LayerPaint.NONE) {
+				|| layerDragIndex >= 0 || bracketDragGroup >= 0 || painting != LayerPaint.NONE) {
 			return;
 		}
 		erasing = true;
@@ -5640,7 +5849,7 @@ public final class ComposerScreen extends Screen {
 		// going down and anything being audible. Nothing here needs the edit to have happened: the
 		// pitch is the one that was asked for, since mouseMidi and NoteEvent clamp to the same range,
 		// and the voice is the selected layer's, which is what a new layer would take anyway.
-		soundNote(midi, previewInstrument(), previewColor());
+		soundActiveNote(midi);
 		if (noLayerSelected()) {
 			ComposerProject started = before.addLayer();
 			int layer = started.layers().size() - 1;
@@ -5683,10 +5892,31 @@ public final class ComposerScreen extends Screen {
 		// Picking an instrument says nothing about whether the layer is heard. It used to, because
 		// silence was one of the instruments; the state letter answers that now.
 		// Left open on purpose: every pick plays its sound, so the palette is how you audition one
-		// instrument against another. Clicking away is what puts it down.
-		updateLayers("set instrument to " + value.name(), instrumentMenuLayer,
-			target -> target.withInstrument(value.id()));
+		// instrument against another. Clicking away is what puts it down. For a split layer being
+		// open is also what makes it a set: several voices go on or off in one visit.
+		boolean splitTarget = project().layers().get(instrumentMenuLayer).split() != null;
+		updateLayers(splitTarget
+				? "toggle the " + value.name() + " voice"
+				: "set instrument to " + value.name(),
+			instrumentMenuLayer, target -> toggledVoice(target, value.id()));
 		return true;
+	}
+
+	/**
+	 * What one palette click means to one layer: on an ordinary layer it sets the instrument the
+	 * way it always has, and on a split layer it toggles that instrument's voice -- off if the
+	 * layer has it, on at the instrument's full register if it does not. A voice toggled off and
+	 * on again comes back untrimmed; the bracket was part of the voice, not of the layer.
+	 */
+	private static Layer toggledVoice(Layer layer, String instrumentId) {
+		if (layer.split() == null) {
+			return layer.withInstrument(instrumentId);
+		}
+		List<ComposerProject.Split.Voice> voices = new ArrayList<>(layer.split().voices());
+		if (!voices.removeIf(voice -> voice.instrument().equals(instrumentId))) {
+			voices.add(ComposerProject.Split.Voice.fullRange(instrumentId));
+		}
+		return layer.withSplit(new ComposerProject.Split(voices));
 	}
 
 	private void openContextMenu(double mouseX, double mouseY) {
@@ -5766,6 +5996,10 @@ public final class ComposerScreen extends Screen {
 		lastMouseY = event.y();
 		if (erasing) {
 			eraseAlong(event.x(), event.y());
+			return true;
+		}
+		if (bracketDragGroup >= 0) {
+			dragBracketHandle(event.y());
 			return true;
 		}
 		if (draggingSplitter) {
@@ -5865,6 +6099,10 @@ public final class ComposerScreen extends Screen {
 			if (erased > 1) {
 				showResult(Component.literal("Erased " + erased + " notes. Ctrl+Z puts them back."));
 			}
+			return true;
+		}
+		if (bracketDragGroup >= 0) {
+			bracketDragGroup = -1;
 			return true;
 		}
 		if (draggingSplitter) {
@@ -6417,7 +6655,7 @@ public final class ComposerScreen extends Screen {
 	@Override
 	public void removed() {
 		ComposerScale.screenClosed(this);
-		setResizeCursor(false);
+		setCursorShape(0);
 		super.removed();
 	}
 
@@ -6692,7 +6930,7 @@ public final class ComposerScreen extends Screen {
 			PlaybackEvent event = playbackEvents.get(playbackEventIndex++);
 			if (event.tick() >= staleBefore && soundsPlayed < MAX_PREVIEW_SOUNDS_PER_FRAME) {
 				event.instrument().play(event.note());
-				lightKey(event.note() + ComposerProject.NOTE_BLOCK_BASE_MIDI_NOTE, event.color());
+				lightKey(event.lightMidi(), event.color());
 				soundsPlayed++;
 			}
 		}
@@ -6751,6 +6989,656 @@ public final class ComposerScreen extends Screen {
 		return !project().layers().get(layerIndex).muted();
 	}
 
+	/**
+	 * The layers whose shared brackets the keyboard wears, or empty for the plain keyboard.
+	 *
+	 * <p>Selection is the condition -- what else is audible does not matter: other layers may
+	 * well be playing notes the split keyboard says nothing about, and in-game use settled that
+	 * this is fine. One selected split layer is the plain case. Several selected layers that are
+	 * all split and agree exactly -- same voices, same trims -- wear their common brackets too,
+	 * and a bracket edit lands on all of them at once, which is what keeps them agreeing. With
+	 * nothing selected the whole project is asked the same question, so a song that is one split
+	 * signature throughout keeps its keyboard without any selection at all.</p>
+	 */
+	private List<Integer> splitKeyboardLayers() {
+		List<Integer> cohort = new ArrayList<>();
+		if (selectedLayers.isEmpty()) {
+			for (int index = 0; index < project().layers().size(); index++) {
+				cohort.add(index);
+			}
+		} else {
+			cohort.addAll(selectedLayers);
+		}
+		ComposerProject.Split shared = null;
+		for (int index : cohort) {
+			if (index < 0 || index >= project().layers().size()) {
+				return List.of();
+			}
+			ComposerProject.Split split = project().layers().get(index).split();
+			if (split == null || shared != null && !shared.equals(split)) {
+				return List.of();
+			}
+			shared = split;
+		}
+		return shared == null ? List.of() : cohort;
+	}
+
+	/** The brackets the keyboard is currently wearing, or null for the plain keyboard. */
+	private ComposerProject.Split keyboardSplit() {
+		List<Integer> cohort = splitKeyboardLayers();
+		return cohort.isEmpty() ? null : project().layers().get(cohort.get(0)).split();
+	}
+
+	/**
+	 * Whether the brackets themselves are on screen and in reach.
+	 *
+	 * <p>Folding them away hides the brackets and nothing else. Which rows are in range is a
+	 * fact about the layer, not about the brackets being drawn, so the reds and whites stay
+	 * exactly where they were -- {@link #keyboardSplit} goes on answering while this does
+	 * not. Hiding them to see the keys underneath and finding every row repainted would be a
+	 * worse answer than leaving them up.</p>
+	 */
+	private boolean bracketsVisible() {
+		return !splitBracketsHidden && keyboardSplit() != null;
+	}
+
+	/**
+	 * The button that puts the brackets away, in the corner over the keys, or null when there
+	 * are no brackets to put away.
+	 *
+	 * <p>The corner above the key strip is the one piece of the roll's frame that has never
+	 * drawn anything -- the ruler starts where the keys end -- and it is directly over the thing
+	 * it hides, which is where a fold control belongs.</p>
+	 */
+	private NoteRect splitToggleRect() {
+		if (splitKeyboardLayers().isEmpty()) {
+			return null;
+		}
+		// Tucked into the bottom left of the corner, a pixel off each edge. It overlaps the
+		// splitter's grab zone there, which is why the press is answered before the splitter's --
+		// nine pixels of the panel edge stop being draggable, and none of them are ones anybody
+		// reaches for.
+		int left = layerPanelWidth() + 1;
+		int bottom = rollY - 1;
+		return new NoteRect(left, bottom - TOGGLE_SIZE, left + TOGGLE_SIZE, bottom);
+	}
+
+	/**
+	 * Draws that button: an arrow pointing the way the brackets are about to go.
+	 *
+	 * <p>Outside the roll's scissor, which is why it is not drawn with the brackets themselves
+	 * -- the strip is clipped to the rows, and this sits above the first of them.</p>
+	 */
+	private void extractSplitToggle(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
+		NoteRect button = splitToggleRect();
+		if (button == null) {
+			return;
+		}
+		boolean hovered = button.contains(mouseX, mouseY);
+		graphics.fill(button.left(), button.top(), button.right(), button.bottom(),
+			hovered ? 0xFF44484F : 0xCC22262C);
+		graphics.fill(button.left(), button.top(), button.right(), button.top() + 1, 0xFF3A414A);
+		int color = hovered ? 0xFFFFFFFF : 0xFF9AA0A8;
+		int middle = (button.top() + button.bottom()) / 2;
+		int arrowLeft = button.left() + 3;
+		// Pointing left to fold the brackets away, right to bring them back, like every other
+		// disclosure arrow: it shows which way the thing it controls is about to move.
+		for (int step = 0; step < 3; step++) {
+			int column = splitBracketsHidden ? arrowLeft + 2 - step : arrowLeft + step;
+			graphics.fill(column, middle - step, column + 1, middle + step + 1, color);
+		}
+		if (hovered) {
+			graphics.setTooltipForNextFrame(Component.literal(splitBracketsHidden
+				? "Show the split brackets"
+				: "Hide the split brackets"), mouseX, mouseY);
+		}
+	}
+
+	/**
+	 * The rows the plain keyboard paints as in range, as {lowest, highest} in MIDI.
+	 *
+	 * <p>The harp window, unless everything selected is a split layer -- then the edges open out
+	 * to the most restrictive bound the selection shares on either side: the highest floor and the
+	 * lowest ceiling among the selected layers' spans, so the white rows are the ones every
+	 * selected layer can say something about. Never narrower than the harp window, though: a
+	 * bracket trimmed inside it should not paint the vanilla range red for everything else. One
+	 * ordinary layer in the selection, or none selected, and the window is just vanilla -- those
+	 * notes really are held to it.</p>
+	 */
+	private int[] plainKeyboardBounds() {
+		int lo = ComposerProject.NOTE_BLOCK_BASE_MIDI_NOTE;
+		int hi = ComposerProject.NOTE_BLOCK_MAX_MIDI_NOTE;
+		if (selectedLayers.isEmpty()) {
+			return new int[]{lo, hi};
+		}
+		int sharedLo = Integer.MIN_VALUE;
+		int sharedHi = Integer.MAX_VALUE;
+		for (int index : selectedLayers) {
+			if (index < 0 || index >= project().layers().size()) {
+				continue;
+			}
+			ComposerProject.Split split = project().layers().get(index).split();
+			if (split == null || split.voices().isEmpty()) {
+				return new int[]{lo, hi};
+			}
+			int spanLo = Integer.MAX_VALUE;
+			int spanHi = Integer.MIN_VALUE;
+			for (ComposerProject.Split.Voice voice : split.voices()) {
+				spanLo = Math.min(spanLo, voice.lo());
+				spanHi = Math.max(spanHi, voice.hi());
+			}
+			sharedLo = Math.max(sharedLo, spanLo);
+			sharedHi = Math.min(sharedHi, spanHi);
+		}
+		return new int[]{Math.min(lo, sharedLo), Math.max(hi, sharedHi)};
+	}
+
+	/**
+	 * One bracket colour per column, cycled. Telling five brackets apart is the whole job, so
+	 * these are picked far apart rather than tastefully.
+	 */
+	private static final int[] BRACKET_COLORS = {
+		0xFF5AB4E8, 0xFFE8C05A, 0xFF7ED67E, 0xFFE87A9E, 0xFFB48AE8, 0xFFE8925A
+	};
+
+	/**
+	 * Where a bracket's column stands: two staggered lanes through the key strip's middle.
+	 *
+	 * <p>Staggered rather than staircased. Adjacent registers overlap by an octave, so alternating
+	 * two lanes is exactly what keeps neighbouring brackets off each other -- and registers two
+	 * apart never share more than a single row, so a lane's own brackets barely touch. Each
+	 * lane's icons hang off its outer flank -- left lane's to the left, right lane's to the
+	 * right -- which is what keeps two brackets' icons from ever stacking on each other.</p>
+	 *
+	 * <p>The whole apparatus is kept over the black keys, which are two thirds of the strip's
+	 * width. Everything past them is left clear, so the white keys' own stretch goes on being
+	 * somewhere to press a note rather than somewhere a bracket has taken.</p>
+	 */
+	private int bracketX(int groupIndex) {
+		return layerPanelWidth() + 12 + groupIndex % 2 * 7;
+	}
+
+	/** Whether this bracket rides the left lane, which is where its icons hang to the left. */
+	private static boolean leftLane(int groupIndex) {
+		return groupIndex % 2 == 0;
+	}
+
+	/**
+	 * The left edge of a bracket's icon column: on its lane's outer flank, and sat on the
+	 * bracket rather than beside it.
+	 *
+	 * <p>An icon is sixteen pixels and the strip is forty-eight, so two lanes holding their
+	 * icons clear of their own lines spent the entire strip and left nowhere to press a key.
+	 * The overlap costs nothing to read: icons are drawn after the lines, and a bracket is
+	 * hidden only along the few rows its own icons occupy.</p>
+	 */
+	private int bracketIconX(int groupIndex) {
+		return leftLane(groupIndex) ? bracketX(groupIndex) - 12 : bracketX(groupIndex) - 3;
+	}
+
+	/**
+	 * One bracket on the split keyboard: a register, and every voice that lives in it.
+	 *
+	 * <p>Voices sharing a register share a bracket -- bass and didgeridoo are one pair of
+	 * handles, because their 25 semitones genuinely are one range -- so the handles move the
+	 * whole tier together and the picker under the bracket chooses which of the register's
+	 * instruments sound. A sound effect voice has no register, so each band of rows is its own
+	 * bracket, shared only when two effects sit on exactly the same band.</p>
+	 */
+	private record BracketGroup(boolean effects, int base, int lo, int hi,
+		List<Integer> voiceIndices, List<String> instruments,
+		/** A register with no voices on it: drawn faint, draggable by nothing, still clickable. */
+		boolean ghost) {
+	}
+
+	/** The brackets the voices themselves make, without the empty registers. */
+	private List<BracketGroup> voiceBrackets(ComposerProject.Split split) {
+		java.util.Map<String, int[]> spans = new java.util.LinkedHashMap<>();
+		java.util.Map<String, List<Integer>> indices = new java.util.LinkedHashMap<>();
+		java.util.Map<String, List<String>> names = new java.util.LinkedHashMap<>();
+		for (int index = 0; index < split.voices().size(); index++) {
+			ComposerProject.Split.Voice voice = split.voices().get(index);
+			boolean effect = voice.instrument().startsWith(ComposerProject.SOUND_EFFECT_PREFIX);
+			int base = effect ? -1
+				: com.fastnoteblocks.InstrumentRanges.baseMidi(voice.instrument());
+			String key = effect ? "e" + voice.lo() + ":" + voice.hi() : "p" + base;
+			int[] span = spans.computeIfAbsent(key,
+				k -> new int[]{voice.lo(), voice.hi(), effect ? 1 : 0, base});
+			span[0] = Math.min(span[0], voice.lo());
+			span[1] = Math.max(span[1], voice.hi());
+			indices.computeIfAbsent(key, k -> new ArrayList<>()).add(index);
+			names.computeIfAbsent(key, k -> new ArrayList<>()).add(voice.instrument());
+		}
+		List<BracketGroup> groups = new ArrayList<>();
+		for (java.util.Map.Entry<String, int[]> entry : spans.entrySet()) {
+			int[] span = entry.getValue();
+			groups.add(new BracketGroup(span[2] != 0, span[3], span[0], span[1],
+				indices.get(entry.getKey()), names.get(entry.getKey()), false));
+		}
+		return groups;
+	}
+
+	/** The registers a melodic split can use, lowest first. */
+	private static final int[] MELODIC_BASES = {30, 42, 54, 66, 78};
+	/** The three drums' virtual registers, which stack rather than overlap. */
+	private static final int[] PERCUSSION_BASES = {30, 55, 80};
+
+	/**
+	 * The given split's brackets, empty registers included, lowest first and bands last.
+	 *
+	 * <p>A register whose last voice was switched off leaves a ghost behind rather than
+	 * vanishing. Without one, emptying a bracket took the only way back to that register off
+	 * the screen with it -- the tier was gone and nothing on the keyboard offered it again. The
+	 * ghosts follow the family the layer is already in, so a melodic layer is offered the five
+	 * melodic registers and a drum layer its three; an effect layer gets none, since its bands
+	 * are wherever you put them rather than a fixed set.</p>
+	 */
+	private List<BracketGroup> bracketGroups(ComposerProject.Split split) {
+		List<BracketGroup> real = voiceBrackets(split);
+		boolean anyEffect = false;
+		boolean anyMelodic = false;
+		for (BracketGroup group : real) {
+			anyEffect |= group.effects();
+			anyMelodic |= !group.effects() && group.base() != 55 && group.base() != 80;
+		}
+		if (anyEffect) {
+			return real;
+		}
+		// An empty layer is offered the melodic registers: it is the family you are most likely
+		// rebuilding towards, and one click in any picker moves it to the other.
+		int[] family = anyMelodic || real.isEmpty() ? MELODIC_BASES : PERCUSSION_BASES;
+		List<BracketGroup> all = new ArrayList<>(real);
+		for (int base : family) {
+			boolean present = false;
+			for (BracketGroup group : real) {
+				present |= !group.effects() && group.base() == base;
+			}
+			if (!present) {
+				all.add(new BracketGroup(false, base, base,
+					base + com.fastnoteblocks.NotePitch.PITCH_COUNT - 1,
+					List.of(), List.of(), true));
+			}
+		}
+		// Sorted so the two staggered lanes still alternate by register with the ghosts in place.
+		all.sort(Comparator.comparingInt((BracketGroup group) -> group.effects() ? 1 : 0)
+			.thenComparingInt(BracketGroup::base)
+			.thenComparingInt(BracketGroup::lo));
+		return all;
+	}
+
+	/** A grabbed bracket end: which bracket, and whether it is the top of it. */
+	private record BracketHandle(int group, boolean top) {
+	}
+
+	/**
+	 * The bracket end under the cursor, or null. The handles win over the keys beneath them.
+	 *
+	 * <p>Two registers meeting on one row put a top handle and a bottom handle in the same place
+	 * -- harp's ceiling is bell's floor, on the same lane -- and "first match wins" made one of
+	 * them nearly ungrabbable there, worst zoomed out where a row is four pixels. So every handle
+	 * under the cursor is scored instead, by how far the cursor sits toward the handle's own
+	 * bracket's body: a pixel below the shared row grabs the lower bracket's top, a pixel above
+	 * grabs the upper bracket's bottom, and the hover highlight says which before the press
+	 * commits to it.</p>
+	 */
+	private BracketHandle bracketHandleAt(double mouseX, double mouseY) {
+		ComposerProject.Split split = keyboardSplit();
+		if (split == null || !bracketsVisible() || !overPianoKeys(mouseX, mouseY)) {
+			return null;
+		}
+		List<BracketGroup> groups = bracketGroups(split);
+		BracketHandle best = null;
+		double bestScore = -Double.MAX_VALUE;
+		for (int index = 0; index < groups.size(); index++) {
+			BracketGroup group = groups.get(index);
+			// A ghost has no voices to move, so it has no ends to grab -- only a picker to open.
+			if (group.ghost()) {
+				continue;
+			}
+			int x = bracketX(index);
+			if (mouseX < x - 3 || mouseX >= x + 7) {
+				continue;
+			}
+			int top = noteY(group.hi());
+			int bottom = noteY(group.lo()) + rowHeight - 1;
+			if (mouseY >= top - 2 && mouseY < top + 6) {
+				double score = mouseY - top;
+				if (best == null || score > bestScore) {
+					best = new BracketHandle(index, true);
+					bestScore = score;
+				}
+			}
+			if (mouseY >= bottom - 6 && mouseY < bottom + 2) {
+				double score = bottom - mouseY;
+				if (best == null || score > bestScore) {
+					best = new BracketHandle(index, false);
+					bestScore = score;
+				}
+			}
+		}
+		return best;
+	}
+
+	/** Where a bracket's stack of instrument icons starts, centred on the bracket. */
+	private static int iconStackTop(BracketGroup group, int top, int bottom) {
+		return (top + bottom) / 2 - group.instruments().size() * 9;
+	}
+
+	/** The bracket whose body or icon stack the cursor is over, or -1. Handles are asked first. */
+	private int bracketBodyAt(double mouseX, double mouseY) {
+		ComposerProject.Split split = keyboardSplit();
+		if (split == null || !bracketsVisible() || !overPianoKeys(mouseX, mouseY)) {
+			return -1;
+		}
+		List<BracketGroup> groups = bracketGroups(split);
+		for (int index = 0; index < groups.size(); index++) {
+			BracketGroup group = groups.get(index);
+			int x = bracketX(index);
+			int top = noteY(group.hi());
+			int bottom = noteY(group.lo()) + rowHeight - 1;
+			boolean overColumn = mouseX >= x - 3 && mouseX < x + 7
+				&& mouseY >= top && mouseY < bottom;
+			int iconTop = iconStackTop(group, top, bottom);
+			int iconX = bracketIconX(index);
+			boolean overIcons = mouseX >= iconX && mouseX < iconX + 16 && mouseY >= iconTop
+				&& mouseY < iconTop + Math.max(1, group.instruments().size()) * 18;
+			if (overColumn || overIcons) {
+				return index;
+			}
+		}
+		return -1;
+	}
+
+	/**
+	 * The split keyboard itself: one bracket per register down the key strip, the instruments'
+	 * icons stacked at its middle, a grabbable notch at each end. The icons are also the way into
+	 * the bracket's own picker.
+	 */
+	private void extractSplitBrackets(GuiGraphicsExtractor graphics,
+			ComposerProject.Split split, int mouseX, int mouseY) {
+		List<BracketGroup> groups = bracketGroups(split);
+		BracketHandle hovered = bracketDragGroup >= 0
+			? new BracketHandle(bracketDragGroup, bracketDragTop)
+			: bracketHandleAt(mouseX, mouseY);
+		int hoveredBody = hovered == null ? bracketBodyAt(mouseX, mouseY) : -1;
+		int pianoX = layerPanelWidth();
+		// The tints first, in their own pass, so every line and icon stands on top of all of
+		// them. Each bracket washes its rows across the whole strip, translucently -- where two
+		// registers overlap the washes stack, so the mixture is the overlap made visible.
+		for (int index = 0; index < groups.size(); index++) {
+			BracketGroup group = groups.get(index);
+			if (group.ghost()) {
+				continue;
+			}
+			graphics.fill(pianoX, noteY(group.hi()),
+				rollX, noteY(group.lo()) + rowHeight - 1,
+				0x26000000 | BRACKET_COLORS[index % BRACKET_COLORS.length] & 0xFFFFFF);
+		}
+		for (int index = 0; index < groups.size(); index++) {
+			BracketGroup group = groups.get(index);
+			int x = bracketX(index);
+			int top = noteY(group.hi());
+			int bottom = noteY(group.lo()) + rowHeight - 1;
+			int color = BRACKET_COLORS[index % BRACKET_COLORS.length];
+			if (group.ghost()) {
+				boolean hot = hoveredBody == index;
+				int faint = (hot ? 0x99000000 : 0x40000000) | color & 0xFFFFFF;
+				graphics.fill(x + 1, top, x + 2, bottom, faint);
+				graphics.fill(x - 1, top, x + 4, top + 1, faint);
+				graphics.fill(x - 1, bottom - 1, x + 4, bottom, faint);
+				graphics.text(font, Component.literal("+"), bracketIconX(index) + 5,
+					(top + bottom) / 2 - 4, hot ? 0xFFFFFFFF : 0xAA000000 | color & 0xFFFFFF, false);
+				if (hot) {
+					graphics.setTooltipForNextFrame(Component.literal(
+						"Empty register - click to choose what sounds here"), mouseX, mouseY);
+				}
+				continue;
+			}
+			graphics.fill(x, top, x + 3, bottom, color);
+			boolean topHot = hovered != null && hovered.group() == index && hovered.top();
+			boolean bottomHot = hovered != null && hovered.group() == index && !hovered.top();
+			graphics.fill(x - 2, top, x + 5, top + 4, topHot ? 0xFFFFFFFF : color);
+			graphics.fill(x - 2, bottom - 4, x + 5, bottom, bottomHot ? 0xFFFFFFFF : color);
+			int iconTop = iconStackTop(group, top, bottom);
+			int iconX = bracketIconX(index);
+			for (int icon = 0; icon < group.instruments().size(); icon++) {
+				graphics.item(new ItemStack(
+						PreviewInstrument.byId(group.instruments().get(icon)).icon()),
+					iconX, iconTop + icon * 18);
+			}
+			if (hovered != null && hovered.group() == index) {
+				// The hand only while a handle is actually under it, not anywhere on the bracket:
+				// what it promises is that a press here takes hold of something.
+				wantedCursorShape = GLFW.GLFW_POINTING_HAND_CURSOR;
+				graphics.setTooltipForNextFrame(Component.literal(
+					"Drag to trim this register - " + midiName(group.lo()) + " to "
+						+ midiName(group.hi())), mouseX, mouseY);
+			} else if (hoveredBody == index) {
+				graphics.setTooltipForNextFrame(Component.literal(
+					"Click to choose this register's instruments"), mouseX, mouseY);
+			}
+		}
+	}
+
+	/** Puts a hand on a bracket end, if the press landed on one. */
+	private boolean grabBracketHandle(double mouseX, double mouseY) {
+		BracketHandle handle = bracketHandleAt(mouseX, mouseY);
+		if (handle == null) {
+			return false;
+		}
+		bracketDragGroup = handle.group();
+		bracketDragTop = handle.top();
+		lastBracketDragAt = 0L;
+		return true;
+	}
+
+	/**
+	 * Moves the held bracket end to the row under the cursor, every voice in the register with it.
+	 *
+	 * <p>The end being held never crosses the other one -- crossing would swap which end the hand
+	 * is holding mid-drag -- and each voice's own constructor clamps the result to the register,
+	 * so the handle simply stops at the instruments' edge. One history step per gesture, the same
+	 * coalescing as the speed slider.</p>
+	 */
+	private void dragBracketHandle(double mouseY) {
+		List<Integer> cohort = splitKeyboardLayers();
+		if (cohort.isEmpty()) {
+			bracketDragGroup = -1;
+			return;
+		}
+		ComposerProject.Split shared = project().layers().get(cohort.get(0)).split();
+		List<BracketGroup> groups = bracketGroups(shared);
+		if (bracketDragGroup >= groups.size()) {
+			bracketDragGroup = -1;
+			return;
+		}
+		BracketGroup group = groups.get(bracketDragGroup);
+		int midi = mouseMidi(mouseY);
+		List<ComposerProject.Split.Voice> voices = new ArrayList<>(shared.voices());
+		boolean changed = false;
+		for (int index : group.voiceIndices()) {
+			ComposerProject.Split.Voice voice = voices.get(index);
+			ComposerProject.Split.Voice moved = bracketDragTop
+				? new ComposerProject.Split.Voice(voice.instrument(), voice.lo(),
+					Math.max(voice.lo(), midi))
+				: new ComposerProject.Split.Voice(voice.instrument(), Math.min(voice.hi(), midi),
+					voice.hi());
+			if (!moved.equals(voice)) {
+				voices.set(index, moved);
+				changed = true;
+			}
+		}
+		if (!changed) {
+			return;
+		}
+		// Landed on every layer wearing these brackets, so an agreeing cohort goes on agreeing --
+		// otherwise the first drag would scatter the signatures and take the keyboard down with it.
+		ComposerProject.Split moved = new ComposerProject.Split(voices);
+		ComposerProject next = project();
+		for (int index : cohort) {
+			next = next.withLayer(index, next.layers().get(index).withSplit(moved));
+		}
+		long now = Util.getMillis();
+		if (now - lastBracketDragAt < SCALE_COALESCE_MILLIS) {
+			history.replaceCurrent(next);
+			afterStateChange();
+		} else {
+			apply("trim a voice bracket", next);
+		}
+		lastBracketDragAt = now;
+	}
+
+	/** Opens the picker for the bracket under the cursor, if the press landed on one. */
+	private boolean openTierMenu(double mouseX, double mouseY) {
+		ComposerProject.Split split = keyboardSplit();
+		int body = bracketBodyAt(mouseX, mouseY);
+		if (split == null || body < 0) {
+			return false;
+		}
+		BracketGroup group = bracketGroups(split).get(body);
+		tierMenuBase = group.base();
+		tierMenuEffects = group.effects();
+		tierMenuLo = group.lo();
+		tierMenuHi = group.hi();
+		tierMenuX = rollX + 8;
+		tierMenuY = (noteY(group.hi()) + noteY(group.lo()) + rowHeight) / 2;
+		return true;
+	}
+
+	private static final int TIER_MENU_COLUMNS = 3;
+
+	/**
+	 * What the open bracket's picker offers: every pitched instrument sharing the register, or
+	 * the whole sound effect palette for a band.
+	 *
+	 * <p>The register rule is the only rule, which quietly includes the bass drum in the low tier
+	 * -- its virtual register starts where the bass's real one does. That is left in on purpose:
+	 * a kick doubling the bass line is a real arrangement, and the bracket already says exactly
+	 * which rows it would ride along on.</p>
+	 */
+	private List<PreviewInstrument> tierMenuCandidates() {
+		if (tierMenuEffects) {
+			return PreviewInstrument.EFFECTS;
+		}
+		List<PreviewInstrument> candidates = new ArrayList<>();
+		for (PreviewInstrument value : PreviewInstrument.VALUES) {
+			if (com.fastnoteblocks.InstrumentRanges.baseMidi(value.id()) == tierMenuBase) {
+				candidates.add(value);
+			}
+		}
+		return candidates;
+	}
+
+	/** The picker's box, or null while it is closed. Shared by drawing and hit testing. */
+	private NoteRect tierMenuRect() {
+		if (tierMenuBase == Integer.MIN_VALUE) {
+			return null;
+		}
+		int rows = (tierMenuCandidates().size() + TIER_MENU_COLUMNS - 1) / TIER_MENU_COLUMNS;
+		int menuWidth = TIER_MENU_COLUMNS * INSTRUMENT_CELL + 6;
+		int menuHeight = INSTRUMENT_HEADER + rows * INSTRUMENT_CELL + 6;
+		int left = Math.min(width - menuWidth - 4, tierMenuX);
+		int top = Math.max(TOOLBAR_HEIGHT + 4,
+			Math.min(height - menuHeight - 4, tierMenuY - menuHeight / 2));
+		return new NoteRect(left, top, left + menuWidth, top + menuHeight);
+	}
+
+	/** Whether the open bracket already holds this instrument's voice. */
+	private boolean tierMenuHolds(ComposerProject.Split split, String instrumentId) {
+		for (ComposerProject.Split.Voice voice : split.voices()) {
+			if (voice.instrument().equals(instrumentId)
+					&& (!tierMenuEffects
+						|| voice.lo() == tierMenuLo && voice.hi() == tierMenuHi)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private void extractTierMenu(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
+		NoteRect menu = tierMenuRect();
+		if (menu == null) {
+			return;
+		}
+		ComposerProject.Split split = keyboardSplit();
+		if (split == null || !bracketsVisible()) {
+			// The brackets went away under it -- the selection moved, the layer was un-split, or
+			// they were folded away -- so the picker for them goes too.
+			tierMenuBase = Integer.MIN_VALUE;
+			return;
+		}
+		graphics.fill(menu.left(), menu.top(), menu.right(), menu.bottom(), 0xF0101115);
+		graphics.fill(menu.left(), menu.top(), menu.right(), menu.top() + 1, 0xFFAAAAAA);
+		String title = tierMenuEffects
+			? "This band's blocks"
+			: midiName(tierMenuBase) + "-" + midiName(tierMenuBase + 24) + " voices";
+		graphics.text(font, Component.literal(title), menu.left() + 4, menu.top() + 4,
+			0xFFD6D8DD, false);
+		List<PreviewInstrument> candidates = tierMenuCandidates();
+		for (int index = 0; index < candidates.size(); index++) {
+			PreviewInstrument value = candidates.get(index);
+			int cellX = menu.left() + 3 + index % TIER_MENU_COLUMNS * INSTRUMENT_CELL;
+			int cellY = menu.top() + 3 + INSTRUMENT_HEADER
+				+ index / TIER_MENU_COLUMNS * INSTRUMENT_CELL;
+			boolean hovered = mouseX >= cellX && mouseX < cellX + INSTRUMENT_CELL
+				&& mouseY >= cellY && mouseY < cellY + INSTRUMENT_CELL;
+			boolean lit = tierMenuHolds(split, value.id());
+			graphics.fill(cellX, cellY, cellX + INSTRUMENT_CELL - 2, cellY + INSTRUMENT_CELL - 2,
+				lit ? 0xFF356070 : hovered ? 0xFF44484F : 0xFF25282D);
+			graphics.item(new ItemStack(value.icon()), cellX + 5, cellY + 5);
+			if (hovered) {
+				graphics.setTooltipForNextFrame(Component.literal(value.name()), mouseX, mouseY);
+			}
+		}
+	}
+
+	private boolean handleTierMenuClick(double mouseX, double mouseY) {
+		NoteRect menu = tierMenuRect();
+		if (menu == null) {
+			return false;
+		}
+		List<Integer> cohort = splitKeyboardLayers();
+		if (cohort.isEmpty()) {
+			tierMenuBase = Integer.MIN_VALUE;
+			return false;
+		}
+		int gridTop = menu.top() + 3 + INSTRUMENT_HEADER;
+		int column = (int)(mouseX - menu.left() - 3) / INSTRUMENT_CELL;
+		int row = (int)(mouseY - gridTop) / INSTRUMENT_CELL;
+		if (mouseX < menu.left() + 3 || mouseY < gridTop
+				|| column < 0 || column >= TIER_MENU_COLUMNS || row < 0) {
+			return false;
+		}
+		int index = row * TIER_MENU_COLUMNS + column;
+		List<PreviewInstrument> candidates = tierMenuCandidates();
+		if (index >= candidates.size()) {
+			return false;
+		}
+		PreviewInstrument value = candidates.get(index);
+		value.play(12);
+		ComposerProject.Split shared = project().layers().get(cohort.get(0)).split();
+		List<ComposerProject.Split.Voice> voices = new ArrayList<>(shared.voices());
+		boolean removed = voices.removeIf(voice -> voice.instrument().equals(value.id())
+			&& (!tierMenuEffects || voice.lo() == tierMenuLo && voice.hi() == tierMenuHi));
+		if (!removed) {
+			// On at the bracket's rows rather than the register's full span: joining a trimmed
+			// bracket means sounding where it sounds.
+			voices.add(new ComposerProject.Split.Voice(value.id(), tierMenuLo, tierMenuHi));
+		}
+		// Every layer wearing these brackets takes the toggle, so the cohort goes on agreeing.
+		ComposerProject.Split toggled = new ComposerProject.Split(voices);
+		ComposerProject next = project();
+		for (int layerIndex : cohort) {
+			next = next.withLayer(layerIndex, next.layers().get(layerIndex).withSplit(toggled));
+		}
+		apply(removed
+				? "drop the " + value.name() + " voice"
+				: "add the " + value.name() + " voice",
+			next);
+		layersChanged();
+		return true;
+	}
+
 	private void resetPlaybackSchedule() {
 		List<PlaybackEvent> events = new ArrayList<>();
 		for (int layerIndex = 0; layerIndex < project().layers().size(); layerIndex++) {
@@ -6758,23 +7646,35 @@ public final class ComposerScreen extends Screen {
 			if (!audible(layerIndex)) {
 				continue;
 			}
-			PreviewInstrument instrument = PreviewInstrument.byId(layer.instrument());
-			if (!instrument.playable()) {
-				continue;
-			}
 			int color = vivid(layerColor(layerIndex));
-			List<NoteEvent> notes = layer.notes();
-			for (int index = lowerBoundStart(notes, playbackStartTick); index < notes.size(); index++) {
-				NoteEvent note = notes.get(index);
-				if (!takeNotes.isEmpty() && takeNotes.contains(note.id())) {
+			// Played from the same expansion the build reads, so a split layer previews as exactly
+			// the note blocks it will place: a doubled note sounds twice, an uncovered note not at
+			// all, and each voice's sample plays at the pitch value that sounds as written.
+			for (Layer voiceLayer : layer.buildVoices()) {
+				PreviewInstrument instrument = PreviewInstrument.byId(voiceLayer.instrument());
+				if (!instrument.playable()) {
 					continue;
 				}
-				events.add(new PlaybackEvent(
-					note.startTick(),
-					instrument,
-					note.midiNote() - ComposerProject.NOTE_BLOCK_BASE_MIDI_NOTE,
-					color
-				));
+				// What the expansion moved this voice by, so the key that lights is the one the note
+				// is drawn on. A split layer's notes are transposed into the harp window to build, so
+				// lighting the built pitch lit a key octaves from the note you could see playing.
+				int written = layer.split() == null || !voiceLayer.pitched() ? 0
+					: ComposerProject.NOTE_BLOCK_BASE_MIDI_NOTE
+						- com.fastnoteblocks.InstrumentRanges.baseMidi(voiceLayer.instrument());
+				List<NoteEvent> notes = voiceLayer.notes();
+				for (int index = lowerBoundStart(notes, playbackStartTick); index < notes.size(); index++) {
+					NoteEvent note = notes.get(index);
+					if (!takeNotes.isEmpty() && takeNotes.contains(note.id())) {
+						continue;
+					}
+					events.add(new PlaybackEvent(
+						note.startTick(),
+						instrument,
+						note.midiNote() - ComposerProject.NOTE_BLOCK_BASE_MIDI_NOTE,
+						note.midiNote() - written,
+						color
+					));
+				}
 			}
 		}
 		events.sort(Comparator.comparingLong(PlaybackEvent::tick)
@@ -8578,7 +9478,8 @@ public final class ComposerScreen extends Screen {
 	 * the event fires -- by then all that is left is a pitch. It takes no part in {@code sameSound},
 	 * which asks whether the build would collapse the two, and the build has no colours.</p>
 	 */
-	private record PlaybackEvent(long tick, PreviewInstrument instrument, int note, int color) {
+	private record PlaybackEvent(long tick, PreviewInstrument instrument, int note, int lightMidi,
+			int color) {
 		private boolean sameSound(PlaybackEvent other) {
 			return tick == other.tick && note == other.note && instrument.equals(other.instrument);
 		}
@@ -8595,7 +9496,8 @@ public final class ComposerScreen extends Screen {
 
 	private static final String SUBMENU_ARROW = "▸";
 	/** Created once and kept: GLFW cursors are process-wide and there is no reason for two. */
-	private static long RESIZE_CURSOR;
+	/** The standard cursors asked for so far, by GLFW shape. Created once, never destroyed. */
+	private static final Map<Integer, Long> CURSORS = new java.util.HashMap<>();
 	/** Air around a submenu's rule, so the row after it does not sit on the line. */
 	private static final int SUBMENU_DIVIDER_GAP = 5;
 
@@ -8782,6 +9684,10 @@ public final class ComposerScreen extends Screen {
 		MERGE_SELECTED("Merge selected"),
 		SNAP_TO_START("Snap to song start"),
 		SELECT_ALL("Select all layers"),
+		SPLIT_MELODIC("Split layer: melodic"),
+		SPLIT_PERCUSSION("Split layer: percussion"),
+		SPLIT_SFX("Split layer: sound effects"),
+		UNSPLIT("Back to one instrument"),
 		// Last, and not next to Merge. The two read alike in a hurry and only one of them can be
 		// reached by a slip of the hand from a row you meant to rename.
 		DELETE_SELECTED("Delete selected");

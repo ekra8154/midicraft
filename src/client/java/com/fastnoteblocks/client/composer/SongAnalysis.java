@@ -76,19 +76,32 @@ public record SongAnalysis(
 			for (NoteEvent note : layer.notes()) {
 				totalNotes++;
 				maximumNoteDuration = Math.max(maximumNoteDuration, note.durationTicks());
-				if (!included) {
-					continue;
-				}
-				if (heard != null && !heard.add(ComposerProject.NoteSound.of(layer, note))) {
-					duplicateNotes++;
-					continue;
-				}
-				// A sound effect layer has no range: the row is somewhere to put a hit, not a pitch,
-				// so every note on one counts towards the build rather than towards the verdict.
-				if (layer.pitched() && !note.isBuildable()) {
+				// A split layer's out-of-range notes are the ones no bracket covers, and they are
+				// counted here off the stored notes: the expansion below only ever sees covered
+				// ones, so an uncovered note would otherwise vanish from the verdict entirely.
+				if (included && layer.split() != null && layer.outOfRange(note)) {
 					outOfRange++;
-				} else {
-					counts.merge(note.startTick(), 1, Integer::sum);
+				}
+			}
+			if (!included) {
+				continue;
+			}
+			// Judged as the build will place it: a split layer expands into its voices first, so a
+			// note two brackets cover counts twice against the thirty a tick can carry -- it is two
+			// note blocks in the machine, whatever the document stores it as.
+			for (Layer voice : layer.buildVoices()) {
+				for (NoteEvent note : voice.notes()) {
+					if (heard != null && !heard.add(ComposerProject.NoteSound.of(voice, note))) {
+						duplicateNotes++;
+						continue;
+					}
+					// A sound effect layer has no range: the row is somewhere to put a hit, not a
+					// pitch, so every note on one counts towards the build rather than the verdict.
+					if (voice.pitched() && !note.isBuildable()) {
+						outOfRange++;
+					} else {
+						counts.merge(note.startTick(), 1, Integer::sum);
+					}
 				}
 			}
 		}
