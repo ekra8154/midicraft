@@ -26,15 +26,11 @@ class InterleavedFaultProbe {
 	@Test
 	void nameTheWrongNotes() throws Exception {
 		SongBuilder.NAME_EVERY_CELL = true;
-		String[][] failing = {
-			{"jvp-raise-up-your-bat-deltarune-chapter-3-wip", "24", "3"},
-			{"sunset-of-seven-suns", "20", "2"},
-			{"guardian30", "24", "3"},
-			{"from-now-on-battle-2", "24", "3"},
-			{"from-now-on-battle-2", "20", "2"},
-			{"deltarune-ch-4-guardian", "24", "3"},
-			{"all-my-fellas-remastered-finished", "20", "2"},
-		};
+		// song:widthxfloors triples, from the census's own rows.
+		String[][] failing = java.util.Arrays.stream(System.getProperty("probe.builds",
+				"neverending-night-2-lanes:24x1,neverending-night-2-lanes:24x3").split(","))
+			.map(spec -> spec.strip().split("[:x]"))
+			.toArray(String[][]::new);
 		for (String[] build : failing) {
 			List<SongBuilder.EventNote> notes;
 			try (Reader reader = Files.newBufferedReader(BreachView.songFile(build[0]))) {
@@ -42,7 +38,7 @@ class InterleavedFaultProbe {
 				ComposerProject project = new ComposerProject(raw.name(), raw.ppq(),
 					raw.tempoMicrosPerQuarter(), raw.layers(), raw.activeLayerIndex(),
 					raw.nextNoteId(), raw.endTick(), raw.speedQuarters());
-				notes = SongBuilder.eventNotes(project.toSequenceTracks(Set.of(), true));
+				notes = SongBuilder.gameTickEventNotes(project, true);
 			}
 			SongBuilder.PastePlan plan = SongBuilder.createInterleavedHalfTickPastePlan(
 				new BlockPos(0, 64, 0), Direction.EAST, notes,

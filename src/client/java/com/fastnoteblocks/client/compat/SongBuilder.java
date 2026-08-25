@@ -1349,6 +1349,16 @@ public final class SongBuilder {
 			: start;
 		List<EventNote> even = laneTimes(parity(notes, 0));
 		List<EventNote> odd = laneTimes(parity(notes, 1));
+		// A song that lives on one parity of the game tick -- which is every song written on
+		// repeater ticks, since a repeater tick is two game ticks -- has nothing for a second
+		// machine to play. It gets one plain machine at the full width, no trunk stretched for a
+		// partner that never comes: exactly the serpentine, on the song's own clock.
+		if (even.isEmpty() || odd.isEmpty()) {
+			List<EventNote> whole = even.isEmpty() ? odd : even;
+			return createRoutedPastePlan(origin, forward, whole, limits.laneWidth(), floors, head,
+				LaneRoute.serpentine(floors, head.floor(), head.climb()),
+				PasteMode.INTERLEAVED_HALF_TICK);
+		}
 		BlockPos originA = origin.relative(forward, 1);
 		Layout layoutA = Layout.ultraAlong(floors, coordAlong(axis, originA)).asV2();
 		List<EventGroup> evenEvents = eventGroups(even, layoutA);
@@ -1931,6 +1941,12 @@ public final class SongBuilder {
 
 	static PastePlan createRoutedPastePlan(BlockPos origin, Direction forward, List<EventNote> notes,
 			int width, int floors, WalkStart start, LaneRoute route) {
+		return createRoutedPastePlan(origin, forward, notes, width, floors, start, route,
+			PasteMode.ULTRA_COMPACT_LANE_V2);
+	}
+
+	static PastePlan createRoutedPastePlan(BlockPos origin, Direction forward, List<EventNote> notes,
+			int width, int floors, WalkStart start, LaneRoute route, PasteMode stamp) {
 		// For the probes that come in here directly rather than through the mode dispatch.
 		QUIET_SIDES_THIS_LAYOUT = true;
 		// Without the lookahead, and measured rather than assumed. It is read only by planLane, and
@@ -1967,7 +1983,7 @@ public final class SongBuilder {
 					placements.padded("flatTurnRewalkFor:" + shape);
 				}
 				addStarter(placements, forward);
-				return placements.finish(PasteMode.ULTRA_COMPACT_LANE_V2, origin,
+				return placements.finish(stamp, origin,
 					coordAlong(forward.getAxis(), origin),
 					coordAlong(forward.getAxis(), origin)
 						+ laneWidth * stepAlong(forward.getAxis(), forward));

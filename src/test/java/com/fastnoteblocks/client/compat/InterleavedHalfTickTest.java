@@ -40,20 +40,24 @@ class InterleavedHalfTickTest {
 		Bootstrap.bootStrap();
 	}
 
-	private static List<SongBuilder.EventNote> notes() throws Exception {
-		try (Reader reader = Files.newBufferedReader(BreachView.songFile("illit-do-the-dance"))) {
+	private static List<SongBuilder.EventNote> notes(String song) throws Exception {
+		try (Reader reader = Files.newBufferedReader(BreachView.songFile(song))) {
 			ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
 			ComposerProject project = new ComposerProject(raw.name(), raw.ppq(),
 				raw.tempoMicrosPerQuarter(), raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(),
 				raw.endTick(), raw.speedQuarters());
-			return SongBuilder.eventNotes(project.toSequenceTracks(Set.of(), true));
+			return SongBuilder.gameTickEventNotes(project, true);
 		}
 	}
 
 	@Test
 	void twoMachinesInterleaveAndBothPlay() throws Exception {
+		List<SongBuilder.EventNote> notes = notes("neverending-night-2-lanes");
+		long evens = notes.stream().filter(note -> note.time() % 2 == 0).count();
+		assertTrue(evens > 0 && evens < notes.size(),
+			"the two-lane song must live on both parities: " + evens + " of " + notes.size());
 		SongBuilder.PastePlan plan = SongBuilder.createInterleavedHalfTickPastePlan(
-			new BlockPos(0, 64, 0), Direction.EAST, notes(),
+			new BlockPos(0, 64, 0), Direction.EAST, notes,
 			new SongBuilder.BuildLimits(16, 24, 1), SongBuilder.WalkStart.HEAD);
 
 		long starters = plan.commands().stream()
@@ -94,7 +98,7 @@ class InterleavedHalfTickTest {
 		// and the reader must have seen them to have cleared them.
 		int heard = reading.project().layers().stream()
 			.mapToInt(layer -> layer.notes().size()).sum();
-		assertTrue(heard > 3000, "the reader only found " + heard + " notes");
+		assertTrue(heard > 500, "the reader only found " + heard + " notes");
 		// And the comb was really stretched -- long trunk turns were laid, not defaulted away.
 		assertTrue(plan.padding().keySet().stream()
 				.anyMatch(key -> key.equals("turnFlatStep9")),
@@ -103,6 +107,28 @@ class InterleavedHalfTickTest {
 		// The paste stays inside the width it promised, breaches aside -- and this build has none.
 		assertTrue(plan.spanX() <= 24, "span " + plan.spanX() + " for a 24-wide paste, breaches="
 			+ plan.breaches());
+	}
+
+	@Test
+	void aOneParitySongGetsOneMachineOnItsOwnClock() throws Exception {
+		// A song written on repeater ticks lives entirely on one parity of the game tick, so there
+		// is nothing for a second machine to play and no trunk should be stretched waiting for it.
+		List<SongBuilder.EventNote> notes = notes("illit-do-the-dance");
+		long evens = notes.stream().filter(note -> note.time() % 2 == 0).count();
+		assertTrue(evens == 0 || evens == notes.size(),
+			"a repeater-tick song must live on one parity: " + evens + " of " + notes.size());
+		SongBuilder.PastePlan plan = SongBuilder.createInterleavedHalfTickPastePlan(
+			new BlockPos(0, 64, 0), Direction.EAST, notes,
+			new SongBuilder.BuildLimits(16, 24, 1), SongBuilder.WalkStart.HEAD);
+		assertEquals(1, plan.commands().stream()
+			.filter(command -> command.contains("minecraft:oak_button")).count(),
+			"one machine, one way in");
+		assertEquals(0, plan.wrongNotes(), "wrong notes: " + plan.faults());
+		assertEquals(0, plan.missingNotes(), "missing notes: " + plan.faults());
+		assertTrue(plan.padding().keySet().stream()
+				.noneMatch(key -> key.equals("turnFlatStep9")),
+			"a solo build stretched its trunk for nobody: " + plan.padding().keySet().stream()
+				.filter(key -> key.startsWith("turnFlatStep")).toList());
 	}
 
 	private static BlockState parse(String blockState) {

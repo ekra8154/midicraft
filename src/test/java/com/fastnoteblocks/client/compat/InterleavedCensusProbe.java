@@ -53,6 +53,7 @@ class InterleavedCensusProbe {
 	void faultsOverTheLibrary() throws Exception {
 		List<String> rows = new ArrayList<>();
 		int builds = 0;
+		int dualBuilds = 0;
 		int clean = 0;
 		int totalWrong = 0;
 		int totalMissing = 0;
@@ -69,9 +70,11 @@ class InterleavedCensusProbe {
 				ComposerProject project = new ComposerProject(raw.name(), raw.ppq(),
 					raw.tempoMicrosPerQuarter(), raw.layers(), raw.activeLayerIndex(),
 					raw.nextNoteId(), raw.endTick(), raw.speedQuarters());
-				notes = SongBuilder.eventNotes(project.toSequenceTracks(Set.of(), true));
+				notes = SongBuilder.gameTickEventNotes(project, true);
 			}
 			String song = file.getFileName().toString().replace(".json", "");
+			long evens = notes.stream().filter(note -> note.time() % 2 == 0).count();
+			boolean dual = evens > 0 && evens < notes.size();
 			for (int[] size : sizes()) {
 				builds++;
 				try {
@@ -85,12 +88,16 @@ class InterleavedCensusProbe {
 					totalWrong += wrong;
 					totalMissing += missing;
 					totalCollisions += clashes;
+					if (dual) {
+						dualBuilds++;
+					}
 					if (wrong == 0 && missing == 0 && clashes == 0) {
 						clean++;
 					} else {
-						rows.add(String.format("%6d %s %dx%d wrong=%d missing=%d collisions=%d"
+						rows.add(String.format("%6d %s %dx%d %s wrong=%d missing=%d collisions=%d"
 							+ " span=%d", wrong * 3 + missing * 5 + clashes, song, size[0],
-							size[1], wrong, missing, clashes, plan.spanX()));
+							size[1], dual ? "dual" : "solo", wrong, missing, clashes,
+							plan.spanX()));
 					}
 				} catch (Exception refused) {
 					threw++;
@@ -102,7 +109,8 @@ class InterleavedCensusProbe {
 		}
 		rows.sort(java.util.Comparator.reverseOrder());
 		rows.forEach(row -> System.out.println("  " + row));
-		System.out.println("INTERLEAVED CENSUS: " + builds + " builds, " + clean + " clean, "
+		System.out.println("INTERLEAVED CENSUS: " + builds + " builds (" + dualBuilds
+			+ " dual, " + (builds - dualBuilds) + " solo), " + clean + " clean, "
 			+ threw + " threw, wrong=" + totalWrong + " missing=" + totalMissing
 			+ " collisions=" + totalCollisions);
 	}
