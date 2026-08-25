@@ -42,6 +42,19 @@ interface LaneRoute {
 	int climbOf(int leg);
 
 	/**
+	 * The perpendicular advance of the flat turn that ends leg {@code leg}, in cells -- or nought,
+	 * meaning the walk's own lane spacing, which is what every turn in a plain serpentine takes.
+	 *
+	 * <p>This is the stretched flat turn: the interleaved shape runs long links down its trunk so
+	 * the other machine's finger can pass between two of its own, and how long is a fact about the
+	 * route, not about the walk. Only a flat turn reads it; a staircase advances no depth and asks
+	 * nothing.</p>
+	 */
+	default int linkOf(int leg) {
+		return 0;
+	}
+
+	/**
 	 * The serpentine the walk has always laid, as a route.
 	 *
 	 * <p>The transition rule is copied from the walk, not paraphrased: a lane whose
