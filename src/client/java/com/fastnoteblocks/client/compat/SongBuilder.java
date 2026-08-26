@@ -1475,15 +1475,34 @@ public final class SongBuilder {
 		BlockPos originB = originA.relative(depth, spacing);
 		LaneRoute routeA = nestedRoute(floors, head, spacing, longLink, true);
 		LaneRoute routeB = nestedRoute(floors, head, spacing, longLink, false);
+		// The pacing pass: each machine dry-walked alone for its natural pulse positions, the two
+		// records simulated against each other once, and the stretches each wait owes handed to
+		// the real walks. The tolerance is a whole lane of path: two pulses within a leg of each
+		// other stand at worst a lane plus a link apart in the world, inside the 48 a note block
+		// carries at every width this mode builds.
+		Pace paceA = null;
+		Pace paceB = null;
+		if (INTERLEAVED_PACES_THE_LANES) {
+			int[] dryA = dryProgress(evenEvents, originA, forward, laneWidth, floors, layoutA,
+				routeA, headA);
+			int[] dryB = dryProgress(oddEvents, originB, forward, laneWidth, floors, layoutB,
+				routeB, head);
+			int[][] stretches = paceStretches(evenEvents, oddEvents, dryA, dryB, laneWidth);
+			paceA = new Pace(new int[evenEvents.size()], stretches[0]);
+			paceB = new Pace(new int[oddEvents.size()], stretches[1]);
+		}
 		Set<Integer> tightA = new HashSet<>();
 		Set<Integer> tightB = new HashSet<>();
 		int rewalks = 0;
 		while (true) {
 			PlacementPlan placements = new PlacementPlan();
+			// Two machines, two buttons: the severed check excuses one starved repeater per way in,
+			// and until this was recorded every dual build's second button read as a severed lane.
+			placements.waysIn(2);
 			boolean walkingB = false;
 			try {
 				walkRouted(evenEvents, originA, forward, laneWidth, floors, placements, layoutA,
-					routeA, headA, tightA);
+					routeA, headA, tightA, paceA);
 				addStarter(placements, forward);
 				int laidByA = placements.laidCells();
 				// A fresh corridor: nothing about machine B's opening follows from machine A's last
@@ -1491,7 +1510,7 @@ public final class SongBuilder {
 				placements.startFreshRun();
 				walkingB = true;
 				walkRouted(oddEvents, originB, forward, laneWidth, floors, placements,
-					layoutB, routeB, head, tightB);
+					layoutB, routeB, head, tightB, paceB);
 				addStarter(placements, forward,
 					placements.firstRepeaterAfter(laidByA));
 				return placements.finish(PasteMode.INTERLEAVED_HALF_TICK, origin,
@@ -1508,6 +1527,94 @@ public final class SongBuilder {
 				}
 			}
 		}
+	}
+
+	/**
+	 * Whether the interleaved mode's two machines are paced against each other.
+	 *
+	 * <p>Off, each machine folds its waits to their minimum and the two pulses drift as far as the
+	 * song's imbalance takes them -- moonlight's sparse half measured 1,116 blocks from its
+	 * partner at the worst moment, with a note block audible for 48. On, the machine that falls
+	 * more than a lane of path behind its partner spends dust to keep up, and the machine that is
+	 * ahead never pads at all: it is ahead because it is carrying more song, and padding it only
+	 * moves the mark the other one is chasing -- the lockstep mistake the straight half-tick mode
+	 * measured at 29 percent of its whole length. See {@link Pace}.</p>
+	 */
+	static boolean INTERLEAVED_PACES_THE_LANES = true;
+
+	/**
+	 * One machine walked alone against a throwaway plan, for its natural pulse positions.
+	 *
+	 * <p>Alone is an approximation the tolerance absorbs: in the real build the two machines share
+	 * one plan and a contested cell here and there moves a chord a column. The rewalk loop is the
+	 * same one every routed walk needs, because a dry walk arms wide turns and watches them like
+	 * any other.</p>
+	 */
+	private static int[] dryProgress(List<EventGroup> events, BlockPos origin, Direction forward,
+			int laneWidth, int floors, Layout layout, LaneRoute route, WalkStart start) {
+		Set<Integer> tight = new HashSet<>();
+		while (true) {
+			Pace pace = new Pace(new int[events.size()], null);
+			try {
+				walkRouted(events, origin, forward, laneWidth, floors, new PlacementPlan(), layout,
+					route, start, tight, pace);
+				return pace.progress();
+			} catch (FlatTurnHungOutside outside) {
+				if (!tight.add(outside.index()) || tight.size() > events.size()) {
+					throw new IllegalStateException("a dry pacing walk could not settle its turns: "
+						+ outside.getMessage());
+				}
+			}
+		}
+	}
+
+	/**
+	 * The two machines' natural records simulated against each other, once, ahead of both walks.
+	 *
+	 * <p>The chase cannot be decided inside the walks: they run one after the other, and every
+	 * column of padding inserted early in a machine shifts all of its later positions -- so a
+	 * machine chasing the other's <em>natural</em> record under-chases by everything already
+	 * inserted. Simulated jointly, the shifts are carried as they accrue and the prescription is
+	 * exact by construction: at each event, in time order, the machine placing it is brought up to
+	 * its partner's paced position less the tolerance -- if it is behind by more than that, and
+	 * only as far as the wait's ticks can anchor dust, ten cells to a repeater.</p>
+	 */
+	private static int[][] paceStretches(List<EventGroup> even, List<EventGroup> odd,
+			int[] dryA, int[] dryB, int tolerance) {
+		int[] stretchA = new int[even.size()];
+		int[] stretchB = new int[odd.size()];
+		long posA = 0;
+		long posB = 0;
+		long addedA = 0;
+		long addedB = 0;
+		int ia = 0;
+		int ib = 0;
+		while (ia < even.size() || ib < odd.size()) {
+			boolean takeA = ib >= odd.size()
+				|| ia < even.size() && even.get(ia).time() <= odd.get(ib).time();
+			if (takeA) {
+				long natural = dryA[ia] + addedA;
+				int wait = ia == 0 ? even.get(ia).time()
+					: even.get(ia).time() - even.get(ia - 1).time();
+				int capacity = Math.max(0, wait - 1) * 5 / 2;
+				int add = (int)Math.max(0, Math.min(posB - tolerance - natural, capacity));
+				stretchA[ia] = add;
+				addedA += add;
+				posA = natural + add;
+				ia++;
+			} else {
+				long natural = dryB[ib] + addedB;
+				int wait = ib == 0 ? odd.get(ib).time()
+					: odd.get(ib).time() - odd.get(ib - 1).time();
+				int capacity = Math.max(0, wait - 1) * 5 / 2;
+				int add = (int)Math.max(0, Math.min(posA - tolerance - natural, capacity));
+				stretchB[ib] = add;
+				addedB += add;
+				posB = natural + add;
+				ib++;
+			}
+		}
+		return new int[][] {stretchA, stretchB};
 	}
 
 	/**
@@ -2358,6 +2465,21 @@ public final class SongBuilder {
 	/** The tip wall of a leg's pair: the base far wall plus whatever the route extends it by. */
 	private static int tipWall(LaneRoute route, int leg, int farWall, int step) {
 		return farWall + route.tipExtension(leg) * step;
+	}
+
+	/**
+	 * How far along its whole path a walk has come, in columns: full legs plus the way into this
+	 * one. The pacing pass compares two machines' pulses through this one number, so both walks
+	 * must make it the same way; a leg is charged its lane plus one link whether the link there is
+	 * long or short, which is noise against a tolerance of a whole lane.
+	 */
+	private static int paceProgress(Direction.Axis axis, Lane lane, Direction forward, int leg,
+			int laneWidth, int slabStep, int nearWall, int farWall) {
+		int into = lane.travel().getAxis() != axis ? laneWidth
+			: lane.travel() == forward
+				? (coordAlong(axis, lane.pos()) - nearWall) * stepAlong(axis, forward)
+				: (farWall - coordAlong(axis, lane.pos())) * stepAlong(axis, forward);
+		return leg * (laneWidth + slabStep) + Math.max(0, Math.min(laneWidth, into));
 	}
 
 	/** The link of the flat turn ending a leg: the route's word, or the walk's own spacing. */
@@ -7611,14 +7733,40 @@ public final class SongBuilder {
 			Set.of());
 	}
 
+	static void walkRouted(List<EventGroup> events, BlockPos origin, Direction forward,
+			int laneWidth, int floors, PlacementPlan placements, Layout layout, LaneRoute route,
+			WalkStart start, Set<Integer> tightTurns) {
+		walkRouted(events, origin, forward, laneWidth, floors, placements, layout, route, start,
+			tightTurns, null);
+	}
+
+	/**
+	 * A machine's pulse positions, and the padding that keeps it within earshot of its partner.
+	 *
+	 * <p>Two half-tick machines advance at their own rates -- columns are spent on the chords each
+	 * one happens to carry -- so a song whose halves carry unequal weight stands its two pulses in
+	 * different parts of the slab at the same moment, and a note block is only audible for 48
+	 * blocks. The walk cannot see its partner, so the coupling is split in two: a dry walk records
+	 * where each event's chord lands ({@code progress}, in path columns), the assembly simulates
+	 * the two records against each other once, and the real walk is handed how many columns over
+	 * its minimum each wait must spend ({@code stretch}) so its pulse keeps up. The lane that is
+	 * ahead is never stretched -- it is ahead because it is carrying more song, and padding it
+	 * only moves the mark the other machine is chasing, which is the lockstep mistake the straight
+	 * half-tick mode measured at 29 percent of its whole length.</p>
+	 */
+	record Pace(int[] progress, int[] stretch) {
+	}
+
 	/**
 	 * @param tightTurns the events at which a flat turn is to be armed a column early, because a
 	 *     walk before this one laid it wide and watched a note land past its corner. See
 	 *     {@link #FLAT_TURN_KEEPS_ITS_WIDTH}.
+	 * @param pace where this walk's pulse positions go and what its waits owe the partner machine,
+	 *     or null for a machine walking alone. See {@link Pace}.
 	 */
 	static void walkRouted(List<EventGroup> events, BlockPos origin, Direction forward,
 			int laneWidth, int floors, PlacementPlan placements, Layout layout, LaneRoute route,
-			WalkStart start, Set<Integer> tightTurns) {
+			WalkStart start, Set<Integer> tightTurns, Pace pace) {
 		// Where chords grow, and the direction the whole slab creeps once a sweep is done.
 		Direction depth = route.mirrored()
 			? forward.getCounterClockWise() : forward.getClockWise();
@@ -7823,16 +7971,25 @@ public final class SongBuilder {
 			if (layout.ultra() && route.foldsWaits() && railPhase < 0) {
 				int foldSignal = tipSignal;
 				boolean folded = false;
+				// Columns this wait owes the partner machine over its own minimum, so the two pulses
+				// stay within earshot; spent as dust anchored on the chain's repeaters, ten cells to
+				// a repeater at most so the trigger at the end never reads a dead wire. Abandoned,
+				// not owed, where the ticks to anchor it run out. See {@link Pace}.
+				int stretchLeft = pace != null && pace.stretch() != null ? pace.stretch()[index] : 0;
+				int dustRun = 0;
 				while (true) {
 					int foldRepeaters = Math.max(0, (event.time() - currentTime - 1) / 4);
+					int want = foldRepeaters + stretchLeft;
 					if (turning || lane.bending()) {
 						int toExit = 0;
 						for (Lane.Bend bend : lane.bends()) {
 							toExit = Math.max(toExit, bend.after() + 1);
 						}
 						// The wait ends inside the turn or just past it. The delay layer already bends
-						// through an armed corner on its own, so there is nothing left to fold.
-						if (foldRepeaters <= toExit) {
+						// through an armed corner on its own, so there is nothing left to fold. And a
+						// stretch may only pull the chain through when the ticks can keep it alive: a
+						// repeater every eleventh cell is the thinnest live chain there is.
+						if (want <= toExit || foldRepeaters <= toExit / 8) {
 							break;
 						}
 						// Walk the turn out, spending the wait: a repeater wherever ticks remain, a
@@ -7841,20 +7998,32 @@ public final class SongBuilder {
 						while (lane.bending()) {
 							BlockPos beforeCorner = lane.pos();
 							lane = pastAnyCorner(placements, lane);
-							foldSignal -= Math.abs(lane.pos().getX() - beforeCorner.getX())
+							int walked = Math.abs(lane.pos().getX() - beforeCorner.getX())
 								+ Math.abs(lane.pos().getZ() - beforeCorner.getZ());
+							foldSignal -= walked;
+							dustRun += walked;
+							stretchLeft = Math.max(0, stretchLeft - walked);
 							if (!lane.bending()) {
 								break;
 							}
-							if (event.time() - currentTime > 4) {
+							// A stretched chain leans on dust -- those are the columns the pacing is
+							// buying -- and takes a repeater only where the run must be revived; a
+							// chain with nothing to stretch is the old one, a repeater per four ticks.
+							if (event.time() - currentTime > 4
+									&& (stretchLeft == 0 || dustRun >= 10)) {
 								set(placements, lane.pos(), "minecraft:stone");
 								set(placements, lane.pos().above(), "minecraft:repeater[facing="
 									+ repeaterFacing(lane.travel()) + ",delay=4]");
 								currentTime += 4;
 								foldSignal = DUST_RANGE;
+								dustRun = 0;
 							} else {
 								addParityPad(placements, lane.pos());
 								foldSignal--;
+								dustRun++;
+								if (stretchLeft > 0) {
+									stretchLeft--;
+								}
 							}
 							lane = lane.ahead(1);
 						}
@@ -7895,8 +8064,50 @@ public final class SongBuilder {
 					int foldColumns = (foldWall - coordAlong(axis, lane.pos()))
 						* stepAlong(axis, lane.travel());
 					// The wait fits in the lane ahead of it. Whatever overshoot is left belongs to the
-					// chord, which has always known how to turn on one.
-					if (foldRepeaters <= foldColumns) {
+					// chord, which has always known how to turn on one. The stretch is spent before
+					// breaking: the minimum chain is the machinery's to lay as it always has, but the
+					// machinery knows nothing of the partner, so the extra cells go down here and the
+					// ordinary delay finishes whatever ticks are left in front of the chord. A
+					// stretch that would cross the turn ahead needs the ticks to keep its chain
+					// alive over there -- a repeater every eleventh cell -- and one that cannot
+					// afford the crossing is clamped to this leg instead of attempting it.
+					if (foldRepeaters <= foldColumns
+							&& foldRepeaters <= Math.max(1, foldColumns / 8)) {
+						stretchLeft = Math.min(stretchLeft,
+							Math.max(0, foldColumns - foldRepeaters));
+					}
+					if (want <= foldColumns
+							|| foldRepeaters <= foldColumns
+								&& foldRepeaters <= Math.max(1, foldColumns / 8)) {
+						while (stretchLeft > 0) {
+							placements.placing("delayBeforeChord");
+							if (dustRun >= 10) {
+								if (event.time() - currentTime <= 4) {
+									// No tick left to anchor more dust on: the rest of the stretch
+									// is abandoned rather than owed, the shortfall the straight
+									// mode's mirror accepts for the same reason.
+									placements.padded("paceStretchShort");
+									break;
+								}
+								set(placements, lane.pos(), "minecraft:stone");
+								set(placements, lane.pos().above(), "minecraft:repeater[facing="
+									+ repeaterFacing(lane.travel()) + ",delay=4]");
+								currentTime += 4;
+								foldSignal = DUST_RANGE;
+								dustRun = 0;
+							} else {
+								addParityPad(placements, lane.pos());
+								foldSignal--;
+								dustRun++;
+								stretchLeft--;
+								placements.padded("paceStretchCell");
+							}
+							lane = lane.ahead(1);
+							folded = true;
+							// The chain is content the lane holds, for the reason the fold exits say
+							// so: its chord may land flush on the wall and must be allowed its turn.
+							laneStarted = true;
+						}
 						break;
 					}
 					if (!(foldTurn.above() >= 0 && foldTurn.above() < floors)) {
@@ -7958,11 +8169,22 @@ public final class SongBuilder {
 					// with a fresh repeater right behind them, which crosses any staircase here.
 					placements.placing("delayBeforeChord");
 					for (int cell = 0; cell < foldColumns; cell++) {
-						set(placements, lane.pos(), "minecraft:stone");
-						set(placements, lane.pos().above(), "minecraft:repeater[facing="
-							+ repeaterFacing(lane.travel()) + ",delay=4]");
-						currentTime += 4;
-						foldSignal = DUST_RANGE;
+						if (event.time() - currentTime > 4
+								&& (stretchLeft == 0 || dustRun >= 10)) {
+							set(placements, lane.pos(), "minecraft:stone");
+							set(placements, lane.pos().above(), "minecraft:repeater[facing="
+								+ repeaterFacing(lane.travel()) + ",delay=4]");
+							currentTime += 4;
+							foldSignal = DUST_RANGE;
+							dustRun = 0;
+						} else {
+							addParityPad(placements, lane.pos());
+							foldSignal--;
+							dustRun++;
+							if (stretchLeft > 0) {
+								stretchLeft--;
+							}
+						}
 						lane = lane.ahead(1);
 					}
 					BlockPos landed = climb > 0
@@ -7971,6 +8193,7 @@ public final class SongBuilder {
 						: descend(placements, lane.pos(), lane.travel(), descentSide, currentTime);
 					placements.padded(climb > 0 ? "waitFoldedClimb" : "waitFoldedDescent");
 					foldSignal = Math.max(1, foldSignal - foldTurn.cells());
+					dustRun += foldTurn.cells();
 					lane = crowdedIfUltra(Lane.straight(landed, lane.travel().getOpposite(), depth),
 						layout);
 					leg++;
@@ -7993,6 +8216,14 @@ public final class SongBuilder {
 							+ coordAcross(axis, lane.pos()));
 					}
 				}
+			}
+			// Where this event's pulse stands, for the pacing pass: whole legs walked plus the way
+			// into this one, in path columns. Approximate on purpose -- extensions and turn pokes
+			// are noise against a tolerance of a whole lane -- and taken after the fold, so the
+			// wait's own columns are inside it: this is where the chord is about to sound from.
+			if (pace != null) {
+				pace.progress()[index] = paceProgress(axis, lane, forward, leg, laneWidth, slabStep,
+					nearWall, farWall);
 			}
 			// Settled before the event is placed rather than after it. A turn hands back a cursor at
 			// the same point along the wall the last event reached, so an event that overshoots
