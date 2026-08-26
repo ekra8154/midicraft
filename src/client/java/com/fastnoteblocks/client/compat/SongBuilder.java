@@ -1356,23 +1356,19 @@ public final class SongBuilder {
 		if (even.isEmpty() || odd.isEmpty()) {
 			List<EventNote> whole = even.isEmpty() ? odd : even;
 			return createRoutedPastePlan(origin, forward, whole, limits.laneWidth(), floors, head,
-				LaneRoute.serpentine(floors, head.floor(), head.climb()),
+				LaneRoute.folding(LaneRoute.serpentine(floors, head.floor(), head.climb())),
 				PasteMode.INTERLEAVED_HALF_TICK);
 		}
 		BlockPos originA = origin.relative(forward, 1);
 		Layout layoutA = Layout.ultraAlong(floors, coordAlong(axis, originA)).asV2();
 		List<EventGroup> evenEvents = eventGroups(even, layoutA);
-		// Sized to the longest single event of either half -- the chord AND the wait in front of
-		// it, like every lane mode so far. The wait half of that is a debt, not a law: a wait is a
-		// repeater chain, and the delay layer already bends one around any corner the route has
-		// armed -- but nothing yet arms a run of corners for a wait longer than a lane, so a wait
-		// still has to fit in one lane and a sparse half can demand a wide build. The width the
-		// player is told is at least honest about it now. When waits learn to arm their own turns,
-		// this clamp drops to EventGroup::chordLength and a four-note song builds ten wide however
-		// sparse its halves.
+		// Sized to the widest chord of either half, and to nothing else. A wait is a repeater
+		// chain -- each repeater hands out a fresh fifteen and nothing hangs off it -- and the
+		// routed walk folds one through as many turns as it needs, so the one thing that cannot
+		// split across two turns, a chord, is the one thing that dictates the thinnest build.
 		int longest = Math.max(
-			evenEvents.stream().mapToInt(EventGroup::length).max().orElse(1),
-			eventGroups(odd, layoutA).stream().mapToInt(EventGroup::length).max().orElse(1));
+			evenEvents.stream().mapToInt(EventGroup::chordLength).max().orElse(1),
+			eventGroups(odd, layoutA).stream().mapToInt(EventGroup::chordLength).max().orElse(1));
 		// The full v2 width for both machines: the nested shape has no corridors. Each machine
 		// gives up two columns at one end of one floor -- where the partner's long link runs --
 		// and owns the whole span everywhere else.
@@ -1500,6 +1496,11 @@ public final class SongBuilder {
 				// The short links, on both machines: a wide corner there would stand its dust
 				// beside the partner's hanging notes.
 				return (base.climbOf(leg) == start.climb()) != firstMachine;
+			}
+
+			@Override
+			public boolean foldsWaits() {
+				return true;
 			}
 		};
 	}
@@ -2010,7 +2011,11 @@ public final class SongBuilder {
 		Layout layout = Layout.ultraAlong(floors,
 			coordAlong(forward.getAxis(), origin)).asV2();
 		List<EventGroup> events = eventGroups(notes, layout);
-		int longest = events.stream().mapToInt(EventGroup::length).max().orElse(1);
+		// A folding route's waits take turns on their own, so only the chords bound the lane; a
+		// route without the fold needs the whole event -- chord and wait -- to fit in one lane.
+		int longest = events.stream()
+			.mapToInt(route.foldsWaits() ? EventGroup::chordLength : EventGroup::length)
+			.max().orElse(1);
 		// Three blocks of the width go on what stands past the walls, and only three: every turn in
 		// the build now reaches exactly one column past its wall -- a descent's outer rung, a climb's
 		// glass, a flat turn's corner or the notes hanging off it -- and the column behind the first
@@ -7721,6 +7726,191 @@ public final class SongBuilder {
 				// differently from the other.
 				columnBehindBusy = true;
 				replan = layout.ultra();
+			}
+			// A wait folds like the lane it rides. A wait is a repeater chain -- each repeater hands
+			// out a fresh fifteen, nothing hangs off it, and dust turns any corner -- so a wait longer
+			// than the lane in front of it never has to broaden the build. The walk arms the turn
+			// early and spends the wait walking through it, corner after corner and staircase after
+			// staircase, until what is left fits in one lane; the chord machinery then takes over on
+			// whatever leg the wait ran out in. This is what lets the assembly clamp its lane width to
+			// the widest chord rather than the longest event. Folding routes only: the identity gates
+			// hold this walk to walkV2 block for block, and v2 has no fold -- its waits run straight
+			// and its clamp still counts them. Never while a two-rail run is live, and none ever is
+			// here: a run only survives a gap its own repeaters can hold, and a wait worth folding is
+			// far past that.
+			if (layout.ultra() && route.foldsWaits() && railPhase < 0) {
+				int foldSignal = tipSignal;
+				boolean folded = false;
+				while (true) {
+					int foldRepeaters = Math.max(0, (event.time() - currentTime - 1) / 4);
+					if (turning || lane.bending()) {
+						int toExit = 0;
+						for (Lane.Bend bend : lane.bends()) {
+							toExit = Math.max(toExit, bend.after() + 1);
+						}
+						// The wait ends inside the turn or just past it. The delay layer already bends
+						// through an armed corner on its own, so there is nothing left to fold.
+						if (foldRepeaters <= toExit) {
+							break;
+						}
+						// Walk the turn out, spending the wait: a repeater wherever ticks remain, a
+						// plain pad cell where they do not, and the corner cells as corner cells.
+						placements.placing("delayBeforeChord");
+						while (lane.bending()) {
+							BlockPos beforeCorner = lane.pos();
+							lane = pastAnyCorner(placements, lane);
+							foldSignal -= Math.abs(lane.pos().getX() - beforeCorner.getX())
+								+ Math.abs(lane.pos().getZ() - beforeCorner.getZ());
+							if (!lane.bending()) {
+								break;
+							}
+							if (event.time() - currentTime > 4) {
+								set(placements, lane.pos(), "minecraft:stone");
+								set(placements, lane.pos().above(), "minecraft:repeater[facing="
+									+ repeaterFacing(lane.travel()) + ",delay=4]");
+								currentTime += 4;
+								foldSignal = DUST_RANGE;
+							} else {
+								addParityPad(placements, lane.pos());
+								foldSignal--;
+							}
+							lane = lane.ahead(1);
+						}
+						// The exit the walk does at the top of an event, done here because the fold is
+						// still mid-event and may have more legs to spend the wait in.
+						lane = lane.pinned(depth);
+						turning = false;
+						leavingTurn = TURN_BAN_OUTLASTS;
+						if (placements.watchingATurn()) {
+							placements.padded(placements.turnWasWide() ? "flatTurnWideClean"
+								: placements.turnHungBeyond() ? "flatTurnTightNeeded"
+								: "flatTurnTightUnneeded");
+							placements.stopWatchingTheTurn();
+						}
+						// Started, not empty: the fold only walks out after laying repeaters through,
+						// so this lane already holds the wait's own chain. The no-instant-turn rule
+						// exists to stop a turn that laid nothing turning again at once, and a chain
+						// is not nothing -- while a first chord landing flush on the wall, which the
+						// fold's exact spending produces routinely, must be allowed its turn or it
+						// walks out. Field of Hopes and Dreams lost six columns and its partner's
+						// ground to exactly that refusal.
+						laneStarted = true;
+						placedWhileTurning = false;
+						columnBehindBusy = true;
+						replan = layout.ultra();
+						folded = true;
+						if (TRACE_TURNS) {
+							System.out.println("FOLDOUT t=" + event.time() + " leg=" + leg
+								+ " travel=" + lane.travel() + " at " + coordAlong(axis, lane.pos())
+								+ " " + lane.pos().getY() + " " + coordAcross(axis, lane.pos()));
+						}
+						continue;
+					}
+					TurnCost foldTurn = turnCost(floor, climb, floors, flatLink(route, leg, slabStep));
+					int foldWall = laneWall(axis, nearWallAt(route, leg, nearWall, tipStep),
+						tipWall(route, leg, farWall, tipStep), forward, lane.travel(), floor, climb,
+						floors);
+					int foldColumns = (foldWall - coordAlong(axis, lane.pos()))
+						* stepAlong(axis, lane.travel());
+					// The wait fits in the lane ahead of it. Whatever overshoot is left belongs to the
+					// chord, which has always known how to turn on one.
+					if (foldRepeaters <= foldColumns) {
+						break;
+					}
+					if (!(foldTurn.above() >= 0 && foldTurn.above() < floors)) {
+						// A flat turn: armed exactly as a chord would arm it, and walked out by the
+						// branch above -- or left armed for the delay layer, where the wait ends
+						// inside the bend. Tight wherever the lane already stands at or past its
+						// wall: a chord that lands flush hands back the column after itself, and a
+						// wide arm from there stands the corner a column further out again --
+						// moonlight at 24 wide wore its corners at 25 for exactly that. Where even
+						// the tight run's ground is taken -- the flush chord may have hung a note
+						// in it -- the wide fallback below stands, and the column it costs is the
+						// honest residue of turning out of a cell the lane never promised to be in.
+						boolean foldRewalked = FLAT_TURN_KEEPS_ITS_WIDTH && tightTurns.contains(index);
+						boolean tight = FLAT_TURN_KEEPS_ITS_WIDTH
+							&& (foldRewalked || route.linkArmsTight(leg))
+							|| foldColumns < 0;
+						boolean stuckWide = false;
+						if (tight && !flatRunIsClear(placements, lane, depth, foldWall, foldColumns,
+								flatLink(route, leg, slabStep))) {
+							tight = false;
+							stuckWide = true;
+							placements.padded("flatTurnCouldNotTighten");
+						}
+						int outward = stepAlong(axis, lane.travel());
+						if (TRACE_TURNS) {
+							System.out.println("FOLDARM t=" + event.time() + " leg=" + leg
+								+ " wall=" + foldWall + " cols=" + foldColumns + " link="
+								+ flatLink(route, leg, slabStep) + " tight=" + tight
+								+ " travel=" + lane.travel() + " at "
+								+ coordAlong(axis, lane.pos()) + " " + lane.pos().getY() + " "
+								+ coordAcross(axis, lane.pos()));
+						}
+						lane = armTurn(placements, lane, depth, foldColumns,
+							flatLink(route, leg, slabStep), tight);
+						turning = true;
+						// Watched like any chord-armed turn. The fold may break with this turn still
+						// armed, and the chord that then rides it can hang a note past a wide corner
+						// -- the one thing that widens a v2 paste -- so the watch and the rewalk
+						// must cover fold turns too. Moonlight wore three notes at two past its wall
+						// before this, every one on an unwatched fold corner.
+						if (FLAT_TURN_KEEPS_ITS_WIDTH) {
+							int cornerAlong = lane.cornerAt(0) ? coordAlong(axis, lane.pos())
+								: coordAlong(axis, lane.ahead(cellsToCorner(lane)).pos());
+							placements.watchFlatTurn(index, cornerAlong, outward,
+								!tight && !stuckWide, axis);
+							placements.padded(foldRewalked ? "flatTurnTightRewalked"
+								: tight ? "flatTurnTightGuessed" : "flatTurnWideGuessed");
+						}
+						booked = Map.of();
+						leg++;
+						floor = route.floorOf(leg);
+						climb = route.climbOf(leg);
+						placements.padded("waitFoldedFlat");
+						folded = true;
+						continue;
+					}
+					// A staircase is crossed rather than walked: repeaters up to the turn column, the
+					// bare staircase, and the wait carries on from the landing. The rungs are dust
+					// with a fresh repeater right behind them, which crosses any staircase here.
+					placements.placing("delayBeforeChord");
+					for (int cell = 0; cell < foldColumns; cell++) {
+						set(placements, lane.pos(), "minecraft:stone");
+						set(placements, lane.pos().above(), "minecraft:repeater[facing="
+							+ repeaterFacing(lane.travel()) + ",delay=4]");
+						currentTime += 4;
+						foldSignal = DUST_RANGE;
+						lane = lane.ahead(1);
+					}
+					BlockPos landed = climb > 0
+						? addGlassClimb(placements, lane.pos(), lane.travel(), depth, false,
+							currentTime, 0, false)
+						: descend(placements, lane.pos(), lane.travel(), descentSide, currentTime);
+					placements.padded(climb > 0 ? "waitFoldedClimb" : "waitFoldedDescent");
+					foldSignal = Math.max(1, foldSignal - foldTurn.cells());
+					lane = crowdedIfUltra(Lane.straight(landed, lane.travel().getOpposite(), depth),
+						layout);
+					leg++;
+					floor = route.floorOf(leg);
+					climb = route.climbOf(leg);
+					// Started for the reason the flat exit above is: the repeater chain crossing
+					// the staircase is the lane's content, and its first chord may land flush.
+					laneStarted = true;
+					columnBehindBusy = !BACK_PAIR_FREE_AFTER_A_STAIRCASE;
+					replan = layout.ultra();
+					folded = true;
+				}
+				if (folded) {
+					tipSignal = Math.max(1, foldSignal);
+					lastStyle = ChordStyle.SMALL;
+					lastBusCells = 0;
+					if (TRACE_TURNS) {
+						System.out.println("FOLD t=" + event.time() + " spentTo=" + currentTime
+							+ " at " + coordAlong(axis, lane.pos()) + " " + lane.pos().getY() + " "
+							+ coordAcross(axis, lane.pos()));
+					}
+				}
 			}
 			// Settled before the event is placed rather than after it. A turn hands back a cursor at
 			// the same point along the wall the last event reached, so an event that overshoots

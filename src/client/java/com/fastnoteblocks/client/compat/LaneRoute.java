@@ -92,6 +92,21 @@ interface LaneRoute {
 	}
 
 	/**
+	 * Whether a wait too long for the lane in front of it folds through the turns ahead instead of
+	 * running straight past the wall.
+	 *
+	 * <p>A wait is a repeater chain: every repeater hands out a fresh fifteen, nothing hangs off
+	 * it, and dust turns any corner -- so a wait never has to broaden a build. A route that says so
+	 * lets the walk arm turns for its delay chains and lets the assembly clamp its lane width to
+	 * the widest <em>chord</em> rather than the longest event. Off by default because the identity
+	 * gates hold the routed walk to walkV2 block for block, and v2 has no fold: its waits run
+	 * straight and its width clamp still counts them.</p>
+	 */
+	default boolean foldsWaits() {
+		return false;
+	}
+
+	/**
 	 * Whether this machine's slab creeps the other way round -- depth counterclockwise from
 	 * forward instead of clockwise.
 	 *
@@ -113,6 +128,51 @@ interface LaneRoute {
 	 * and the next leg runs on the same floor with the climb reversed. Seeded with the walk's own
 	 * starting state so a debug build started mid-snake follows the same snake.</p>
 	 */
+	/** The same route with {@link #foldsWaits} switched on. */
+	static LaneRoute folding(LaneRoute base) {
+		return new LaneRoute() {
+			@Override
+			public int floorOf(int leg) {
+				return base.floorOf(leg);
+			}
+
+			@Override
+			public int climbOf(int leg) {
+				return base.climbOf(leg);
+			}
+
+			@Override
+			public int linkOf(int leg) {
+				return base.linkOf(leg);
+			}
+
+			@Override
+			public int tipExtension(int leg) {
+				return base.tipExtension(leg);
+			}
+
+			@Override
+			public int nearExtension(int leg) {
+				return base.nearExtension(leg);
+			}
+
+			@Override
+			public boolean linkArmsTight(int leg) {
+				return base.linkArmsTight(leg);
+			}
+
+			@Override
+			public boolean mirrored() {
+				return base.mirrored();
+			}
+
+			@Override
+			public boolean foldsWaits() {
+				return true;
+			}
+		};
+	}
+
 	static LaneRoute serpentine(int floors, int startFloor, int startClimb) {
 		List<int[]> legs = new ArrayList<>();
 		legs.add(new int[] {startFloor, startClimb});

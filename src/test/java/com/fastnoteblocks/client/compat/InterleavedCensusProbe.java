@@ -73,6 +73,7 @@ class InterleavedCensusProbe {
 		int totalWrong = 0;
 		int totalMissing = 0;
 		int totalCollisions = 0;
+		int widthOver = 0;
 		int threw = 0;
 		long totalDepth = 0;
 		List<Path> files;
@@ -115,20 +116,27 @@ class InterleavedCensusProbe {
 					int wrong = plan.wrongNotes();
 					int missing = plan.missingNotes();
 					int clashes = plan.collisions().size();
+					// The width promise, now that waits fold: a build wider than the width it
+					// REPORTS is a fault of its own kind, whatever its notes did. The reported
+					// width may exceed the asked one -- that is the chord clamp, and it is honest.
+					int over = plan.spanX() - plan.builtWidth();
 					totalDepth += plan.spanZ();
 					totalWrong += wrong;
 					totalMissing += missing;
 					totalCollisions += clashes;
+					if (over > 0) {
+						widthOver++;
+					}
 					if (dual) {
 						dualBuilds++;
 					}
-					if (wrong == 0 && missing == 0 && clashes == 0) {
+					if (wrong == 0 && missing == 0 && clashes == 0 && over <= 0) {
 						clean++;
 					} else {
 						rows.add(String.format("%6d %s %dx%d %s wrong=%d missing=%d collisions=%d"
-							+ " span=%d", wrong * 3 + missing * 5 + clashes, label, size[0],
-							size[1], dual ? "dual" : "solo", wrong, missing, clashes,
-							plan.spanX()));
+							+ " span=%d over=%d", wrong * 3 + missing * 5 + clashes + Math.max(0,
+							over), label, size[0], size[1], dual ? "dual" : "solo", wrong, missing,
+							clashes, plan.spanX(), Math.max(0, over)));
 					}
 				} catch (Exception refused) {
 					threw++;
@@ -144,6 +152,7 @@ class InterleavedCensusProbe {
 		System.out.println("INTERLEAVED CENSUS: " + builds + " builds (" + dualBuilds
 			+ " dual, " + (builds - dualBuilds) + " solo), " + clean + " clean, "
 			+ threw + " threw, wrong=" + totalWrong + " missing=" + totalMissing
-			+ " collisions=" + totalCollisions + " corridor=" + totalDepth);
+			+ " collisions=" + totalCollisions + " overWidth=" + widthOver
+			+ " corridor=" + totalDepth);
 	}
 }
