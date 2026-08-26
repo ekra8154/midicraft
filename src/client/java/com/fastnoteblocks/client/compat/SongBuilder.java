@@ -1362,8 +1362,14 @@ public final class SongBuilder {
 		BlockPos originA = origin.relative(forward, 1);
 		Layout layoutA = Layout.ultraAlong(floors, coordAlong(axis, originA)).asV2();
 		List<EventGroup> evenEvents = eventGroups(even, layoutA);
-		// Sized to the longest single event of either half: the machines share both walls, so
-		// their lanes are the same length by construction.
+		// Sized to the longest single event of either half -- the chord AND the wait in front of
+		// it, like every lane mode so far. The wait half of that is a debt, not a law: a wait is a
+		// repeater chain, and the delay layer already bends one around any corner the route has
+		// armed -- but nothing yet arms a run of corners for a wait longer than a lane, so a wait
+		// still has to fit in one lane and a sparse half can demand a wide build. The width the
+		// player is told is at least honest about it now. When waits learn to arm their own turns,
+		// this clamp drops to EventGroup::chordLength and a four-note song builds ten wide however
+		// sparse its halves.
 		int longest = Math.max(
 			evenEvents.stream().mapToInt(EventGroup::length).max().orElse(1),
 			eventGroups(odd, layoutA).stream().mapToInt(EventGroup::length).max().orElse(1));
@@ -1411,8 +1417,8 @@ public final class SongBuilder {
 				addStarter(placements, forward,
 					placements.firstRepeaterAfter(laidByA));
 				return placements.finish(PasteMode.INTERLEAVED_HALF_TICK, origin,
-					coordAlong(axis, origin),
-					coordAlong(axis, origin) + limits.laneWidth() * stepAlong(axis, forward));
+					coordAlong(axis, originA),
+					coordAlong(axis, originA) + laneWidth * stepAlong(axis, forward));
 			} catch (FlatTurnHungOutside outside) {
 				// Each machine settles its own tight turns, one per pass, exactly as the single walk
 				// does; a pass replays deterministically up to the turn it settles.
@@ -1830,7 +1836,8 @@ public final class SongBuilder {
 	 * build came out at.</p>
 	 */
 	private static int widthReserve(PasteMode mode) {
-		return mode == PasteMode.ULTRA_COMPACT_LANE_V2 && V2_WIDTH_IS_THE_PASTE_WIDTH ? 3 : 2;
+		return (mode == PasteMode.ULTRA_COMPACT_LANE_V2 || mode == PasteMode.INTERLEAVED_HALF_TICK)
+			&& V2_WIDTH_IS_THE_PASTE_WIDTH ? 3 : 2;
 	}
 
 	/**
@@ -14173,7 +14180,7 @@ public final class SongBuilder {
 				: style.busHeaded() ? Math.max(0, 13 - tailCells)
 				: 13;
 			result.add(new EventGroup(time, List.copyOf(chord), delayRepeaters + eventLength,
-				maxSafeTurnDistance, style, laneReachOf(layout, style, chord)));
+				eventLength, maxSafeTurnDistance, style, laneReachOf(layout, style, chord)));
 			currentTime = time;
 			previousTookTheGap = takesTheGapBehind(style, tailCells);
 		}
@@ -26756,8 +26763,8 @@ public final class SongBuilder {
 		}
 	}
 
-	private record EventGroup(int time, List<EventNote> notes, int length, int maxSafeTurnDistance,
-			ChordStyle style, LaneReach reach) {
+	private record EventGroup(int time, List<EventNote> notes, int length, int chordLength,
+			int maxSafeTurnDistance, ChordStyle style, LaneReach reach) {
 	}
 
 	private record ChordStats(int peak, int peakTime, int overloadedTimes) {
