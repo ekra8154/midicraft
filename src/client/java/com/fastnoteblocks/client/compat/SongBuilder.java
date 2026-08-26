@@ -1596,7 +1596,7 @@ public final class SongBuilder {
 				long natural = dryA[ia] + addedA;
 				int wait = ia == 0 ? even.get(ia).time()
 					: even.get(ia).time() - even.get(ia - 1).time();
-				int capacity = Math.max(0, wait - 1) * 5 / 2;
+				int capacity = Math.max(0, wait - 1) * 2;
 				int add = (int)Math.max(0, Math.min(posB - tolerance - natural, capacity));
 				stretchA[ia] = add;
 				addedA += add;
@@ -1606,7 +1606,7 @@ public final class SongBuilder {
 				long natural = dryB[ib] + addedB;
 				int wait = ib == 0 ? odd.get(ib).time()
 					: odd.get(ib).time() - odd.get(ib - 1).time();
-				int capacity = Math.max(0, wait - 1) * 5 / 2;
+				int capacity = Math.max(0, wait - 1) * 2;
 				int add = (int)Math.max(0, Math.min(posA - tolerance - natural, capacity));
 				stretchB[ib] = add;
 				addedB += add;
@@ -7976,7 +7976,11 @@ public final class SongBuilder {
 				// a repeater at most so the trigger at the end never reads a dead wire. Abandoned,
 				// not owed, where the ticks to anchor it run out. See {@link Pace}.
 				int stretchLeft = pace != null && pace.stretch() != null ? pace.stretch()[index] : 0;
-				int dustRun = 0;
+				// What already hangs off the last repeater behind. Started at nought, a stretch
+				// opening on a weak wire ran its dust past the fifteen and the line died without a
+				// single starved repeater to say so -- field of hopes at twenty over two floors,
+				// 168 notes unreached.
+				int dustRun = Math.max(0, DUST_RANGE - foldSignal);
 				while (true) {
 					int foldRepeaters = Math.max(0, (event.time() - currentTime - 1) / 4);
 					int want = foldRepeaters + stretchLeft;
@@ -8010,7 +8014,7 @@ public final class SongBuilder {
 							// buying -- and takes a repeater only where the run must be revived; a
 							// chain with nothing to stretch is the old one, a repeater per four ticks.
 							if (event.time() - currentTime > 4
-									&& (stretchLeft == 0 || dustRun >= 10)) {
+									&& (stretchLeft == 0 || dustRun >= 8)) {
 								set(placements, lane.pos(), "minecraft:stone");
 								set(placements, lane.pos().above(), "minecraft:repeater[facing="
 									+ repeaterFacing(lane.travel()) + ",delay=4]");
@@ -8079,9 +8083,23 @@ public final class SongBuilder {
 					if (want <= foldColumns
 							|| foldRepeaters <= foldColumns
 								&& foldRepeaters <= Math.max(1, foldColumns / 8)) {
+						if (stretchLeft > 0) {
+							// Off any corner first, for the reason the staircase approach walks off
+							// one: the fold may be standing on the corner it just exited, and no
+							// repeater -- nor the stretch's first anchored dust -- may open there.
+							placements.placing("delayBeforeChord");
+							BlockPos beforeCorner = lane.pos();
+							lane = pastAnyCorner(placements, lane);
+							int walked = Math.abs(lane.pos().getX() - beforeCorner.getX())
+								+ Math.abs(lane.pos().getZ() - beforeCorner.getZ());
+							foldSignal -= walked;
+							dustRun += walked;
+							stretchLeft = Math.max(0, stretchLeft - walked);
+							folded |= walked > 0;
+						}
 						while (stretchLeft > 0) {
 							placements.placing("delayBeforeChord");
-							if (dustRun >= 10) {
+							if (dustRun >= 8) {
 								if (event.time() - currentTime <= 4) {
 									// No tick left to anchor more dust on: the rest of the stretch
 									// is abandoned rather than owed, the shortfall the straight
@@ -8168,9 +8186,26 @@ public final class SongBuilder {
 					// bare staircase, and the wait carries on from the landing. The rungs are dust
 					// with a fresh repeater right behind them, which crosses any staircase here.
 					placements.placing("delayBeforeChord");
-					for (int cell = 0; cell < foldColumns; cell++) {
+					// By distance rather than by count, because the walk may be standing on the
+					// corner it just came out of -- a route leaves a turn standing on the second
+					// corner -- and the first thing to do with a corner is walk off it. A repeater
+					// laid on one is fed from a direction nothing comes from, and everything past
+					// it is silent: moonlight at ten wide over three floors wore forty-two of them,
+					// every one a delay chain opening on the corner its fold had just exited.
+					while (true) {
+						BlockPos beforeCorner = lane.pos();
+						lane = pastAnyCorner(placements, lane);
+						int walked = Math.abs(lane.pos().getX() - beforeCorner.getX())
+							+ Math.abs(lane.pos().getZ() - beforeCorner.getZ());
+						foldSignal -= walked;
+						dustRun += walked;
+						stretchLeft = Math.max(0, stretchLeft - walked);
+						if ((foldWall - coordAlong(axis, lane.pos()))
+								* stepAlong(axis, lane.travel()) <= 0) {
+							break;
+						}
 						if (event.time() - currentTime > 4
-								&& (stretchLeft == 0 || dustRun >= 10)) {
+								&& (stretchLeft == 0 || dustRun >= 8)) {
 							set(placements, lane.pos(), "minecraft:stone");
 							set(placements, lane.pos().above(), "minecraft:repeater[facing="
 								+ repeaterFacing(lane.travel()) + ",delay=4]");
@@ -28955,6 +28990,18 @@ public final class SongBuilder {
 			// standing on a corner is a broken machine however it came to be there.
 			if (block.startsWith("minecraft:repeater") && corners.contains(position.below())) {
 				padded("REPEATER-ON-CORNER");
+				// And who laid it, because the rule is enforced at every laying site separately
+				// and the counter alone cannot say which one forgot.
+				padded("REPEATER-ON-CORNER:" + (placing == null ? "?" : placing));
+				if (NAME_EVERY_CELL) {
+					padded("REPEATER-ON-CORNER@" + position.getX() + " " + position.getY() + " "
+						+ position.getZ());
+				}
+				if (TRACE_TURNS) {
+					System.out.println("DEADREPEATER " + position.getX() + " " + position.getY()
+						+ " " + position.getZ() + " " + block + " by "
+						+ (placing == null ? "?" : placing));
+				}
 			}
 			// A block past the corner of the flat turn under way, which is a note hung outside the
 			// width the paste was promised at. Air is the space over a note and stands nowhere.

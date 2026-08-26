@@ -54,6 +54,32 @@ class InterleavedCensusProbe {
 				+ "zoltraak,wellerman,jackpot-thefatrat").split(","));
 	}
 
+	/** Repeaters whose input cell holds no block at all, counted straight off the commands. */
+	static int starvedRepeaters(SongBuilder.PastePlan plan) {
+		Set<BlockPos> filled = new java.util.HashSet<>();
+		List<BlockPos[]> repeaters = new ArrayList<>();
+		for (String command : plan.commands()) {
+			String[] token = command.split(" ", 5);
+			BlockPos at = new BlockPos(Integer.parseInt(token[1]), Integer.parseInt(token[2]),
+				Integer.parseInt(token[3]));
+			filled.add(at);
+			if (token[4].startsWith("minecraft:repeater")) {
+				String facing = token[4].substring(token[4].indexOf("facing=") + "facing=".length());
+				facing = facing.substring(0, facing.indexOf(','));
+				// A repeater's FACING points at its input side.
+				Direction input = Direction.valueOf(facing.toUpperCase(java.util.Locale.ROOT));
+				repeaters.add(new BlockPos[] {at, at.relative(input)});
+			}
+		}
+		int starved = 0;
+		for (BlockPos[] repeater : repeaters) {
+			if (!filled.contains(repeater[1])) {
+				starved++;
+			}
+		}
+		return starved;
+	}
+
 	private static List<int[]> sizes() {
 		String given = System.getProperty("probe.sizes", "24x1,32x1,20x2,24x3");
 		List<int[]> sizes = new ArrayList<>();
@@ -74,6 +100,7 @@ class InterleavedCensusProbe {
 		int totalMissing = 0;
 		int totalCollisions = 0;
 		int widthOver = 0;
+		int totalCornerRepeaters = 0;
 		int threw = 0;
 		long totalDepth = 0;
 		List<Path> files;
@@ -116,6 +143,13 @@ class InterleavedCensusProbe {
 					int wrong = plan.wrongNotes();
 					int missing = plan.missingNotes();
 					int clashes = plan.collisions().size();
+					// A starved repeater -- nothing in the cell it reads -- is a lane cut in two,
+					// and it is the one fault the note-level numbers cannot see: the reader treats
+					// it as another way in and counts everything after it as reached. Asked of the
+					// commands directly, facing parsed from the block text; a whole build has
+					// nought, because even the head repeaters read the stone their buttons sit on.
+					// Forty-two of these shipped in one build while every other number said clean.
+					int cornerRepeaters = starvedRepeaters(plan);
 					// The width promise, now that waits fold: a build wider than the width it
 					// REPORTS is a fault of its own kind, whatever its notes did. The reported
 					// width may exceed the asked one -- that is the chord clamp, and it is honest.
@@ -130,13 +164,17 @@ class InterleavedCensusProbe {
 					if (dual) {
 						dualBuilds++;
 					}
-					if (wrong == 0 && missing == 0 && clashes == 0 && over <= 0) {
+					totalCornerRepeaters += cornerRepeaters;
+					if (wrong == 0 && missing == 0 && clashes == 0 && over <= 0
+							&& cornerRepeaters == 0) {
 						clean++;
 					} else {
 						rows.add(String.format("%6d %s %dx%d %s wrong=%d missing=%d collisions=%d"
-							+ " span=%d over=%d", wrong * 3 + missing * 5 + clashes + Math.max(0,
-							over), label, size[0], size[1], dual ? "dual" : "solo", wrong, missing,
-							clashes, plan.spanX(), Math.max(0, over)));
+							+ " span=%d over=%d deadRepeaters=%d",
+							wrong * 3 + missing * 5 + clashes + Math.max(0, over)
+								+ cornerRepeaters * 5,
+							label, size[0], size[1], dual ? "dual" : "solo", wrong, missing,
+							clashes, plan.spanX(), Math.max(0, over), cornerRepeaters));
 					}
 				} catch (Exception refused) {
 					threw++;
@@ -153,6 +191,7 @@ class InterleavedCensusProbe {
 			+ " dual, " + (builds - dualBuilds) + " solo), " + clean + " clean, "
 			+ threw + " threw, wrong=" + totalWrong + " missing=" + totalMissing
 			+ " collisions=" + totalCollisions + " overWidth=" + widthOver
+			+ " deadRepeaters=" + totalCornerRepeaters
 			+ " corridor=" + totalDepth);
 	}
 }
