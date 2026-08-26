@@ -1337,16 +1337,6 @@ public final class SongBuilder {
 	 * foreign lanes is enough company is this layout's open question, and the layout check is the
 	 * instrument that answers it.</p>
 	 */
-	/**
-	 * Columns a clear pair's tip runs past its base wall, toward the partner's trunk.
-	 *
-	 * <p>A dial, measured on guardian25 doubled at 20 wide over three floors: two columns took
-	 * the corridor from 738 to 690 deep with the library census clean; the third took it to 678
-	 * and put one note on the partner's tick at the seam. So two, until the seam fault is
-	 * understood -- the last column is bought with a wrong note today.</p>
-	 */
-	static int INTERLEAVE_TIP_EXTENSION = 2;
-
 	static PastePlan createInterleavedHalfTickPastePlan(BlockPos origin, Direction forward,
 			List<EventNote> notes, BuildLimits limits, WalkStart start) {
 		// For probes that come in here directly rather than through the mode dispatch.
@@ -1369,62 +1359,38 @@ public final class SongBuilder {
 				LaneRoute.serpentine(floors, head.floor(), head.climb()),
 				PasteMode.INTERLEAVED_HALF_TICK);
 		}
-		// Which frame machine B runs in: see the comb-route notes below. Odd floor counts put
-		// its trunk on the far wall so the two machines' starts stand together.
-		boolean adjacentStarts = floors % 2 == 1;
 		BlockPos originA = origin.relative(forward, 1);
 		Layout layoutA = Layout.ultraAlong(floors, coordAlong(axis, originA)).asV2();
 		List<EventGroup> evenEvents = eventGroups(even, layoutA);
-		// Sized to the longest single event of either half, like the side-by-side layout: the two
-		// machines' lanes are the same length so the comb's clearances hold at every row.
+		// Sized to the longest single event of either half: the machines share both walls, so
+		// their lanes are the same length by construction.
 		int longest = Math.max(
 			evenEvents.stream().mapToInt(EventGroup::length).max().orElse(1),
 			eventGroups(odd, layoutA).stream().mapToInt(EventGroup::length).max().orElse(1));
-		// Seven columns of the paste stand outside the two walls' spans: each machine's button
-		// column and turn overhang at its own edge, and the two-column clearances where each
-		// machine's finger tips end short of the other's trunk.
-		int laneWidth = Math.max(longest + 2, limits.laneWidth() - 7);
-		BlockPos trunkB = origin.relative(forward, laneWidth + 5);
-		// The parity anchor follows machine B's own origin: five along in the trunk-on-far
-		// frame, the trunk corner in the mirrored one.
-		Layout layoutB = Layout.ultraAlong(floors, adjacentStarts
-			? coordAlong(axis, origin) + 5 * stepAlong(axis, forward)
-			: coordAlong(axis, trunkB)).asV2();
+		// The full v2 width for both machines: the nested shape has no corridors. Each machine
+		// gives up two columns at one end of one floor -- where the partner's long link runs --
+		// and owns the whole span everywhere else.
+		int laneWidth = Math.max(longest + 2, limits.laneWidth() - 3);
+		// One frame for both: same walls, same direction, same start floor. Machine B runs one
+		// lane pitch further down the slab, and the interleave is purely in depth -- rows come out
+		// A B B A A B B A at the lane spacing, because A's long links jump B's pairs and B's long
+		// links jump A's.
+		Layout layoutB = layoutA;
 		List<EventGroup> oddEvents = eventGroups(odd, layoutB);
 		int spacing = Math.max(
 			laneSpacing(laneReach(evenEvents, 0, evenEvents.size()),
 				laneReach(evenEvents, 0, evenEvents.size())),
 			laneSpacing(laneReach(oddEvents, 0, oddEvents.size()),
 				laneReach(oddEvents, 0, oddEvents.size())));
-		// With an odd floor count the flat turns alternate ends, so a cycle is a finger pair (two
-		// rows a spacing apart) plus the trunk link: the trunk runs three spacings and the partner
-		// sits two in. With an even count every flat turn is a trunk turn, rows stand alone, and the
-		// partner sits exactly between them.
-		int trunk = (floors % 2 == 1 ? 3 : 2) * spacing;
-		int phase = floors % 2 == 1 ? 2 * spacing : spacing;
-		// Both machines start on the floor the setting names, and their starts stand together:
-		// machine B is not mirrored any more -- it walks the same direction as A with its trunk as
-		// its FAR wall, so its opening lane begins beside A's opening (one lane pitch before it,
-		// two blocks between the centres, buttons a column apart) and runs across to its trunk.
-		// The frame flip is also what keeps the stagger with both machines starting level: for a
-		// given start floor, a trunk-on-far comb lays its long trunk runs on the OPPOSITE extreme
-		// floor from a trunk-on-near one, so each machine's clear pairs still extend toward the
-		// other's trunk, over and under its turns. Odd floor counts only; an even zigzag lays
-		// trunk runs on both extremes either way round, so even counts keep the mirrored frame
-		// and their far-corner start.
-		int extension = floors >= 3 && floors % 2 == 1 ? INTERLEAVE_TIP_EXTENSION : 0;
-		int trunkFloorA = head.climb() > 0 ? 0 : floors - 1;
-		WalkStart headB = adjacentStarts
-			? new WalkStart(-4, head.floor(), head.climb(), head.turning())
-			: head;
-		BlockPos originB = adjacentStarts
-			? origin.relative(forward, 5).relative(depth, -spacing)
-			: trunkB.relative(depth, phase);
-		Direction forwardB = adjacentStarts ? forward : forward.getOpposite();
-		LaneRoute routeA = combRoute(floors, head, spacing, trunk, false, false, extension,
-			extension > 0 ? floors - 1 - trunkFloorA : -1);
-		LaneRoute routeB = combRoute(floors, headB, spacing, trunk, adjacentStarts,
-			!adjacentStarts, extension, extension > 0 ? trunkFloorA : -1);
+		int longLink = 3 * spacing;
+		// Machine A opens on its own shortened start-floor wall, two columns in; machine B on the
+		// shared near wall, a pitch along, as if joining its long link partway. The two buttons
+		// come out a couple of blocks apart at the same corner, whatever the floor count.
+		WalkStart headA = new WalkStart(head.column() + 2, head.floor(), head.climb(),
+			head.turning());
+		BlockPos originB = originA.relative(depth, spacing);
+		LaneRoute routeA = nestedRoute(floors, head, spacing, longLink, true);
+		LaneRoute routeB = nestedRoute(floors, head, spacing, longLink, false);
 		Set<Integer> tightA = new HashSet<>();
 		Set<Integer> tightB = new HashSet<>();
 		int rewalks = 0;
@@ -1433,16 +1399,16 @@ public final class SongBuilder {
 			boolean walkingB = false;
 			try {
 				walkRouted(evenEvents, originA, forward, laneWidth, floors, placements, layoutA,
-					routeA, head, tightA);
+					routeA, headA, tightA);
 				addStarter(placements, forward);
 				int laidByA = placements.laidCells();
 				// A fresh corridor: nothing about machine B's opening follows from machine A's last
 				// cell, least of all how much dust has gone down since a repeater it is not wired to.
 				placements.startFreshRun();
 				walkingB = true;
-				walkRouted(oddEvents, originB, forwardB, laneWidth, floors, placements,
-					layoutB, routeB, headB, tightB);
-				addStarter(placements, forwardB,
+				walkRouted(oddEvents, originB, forward, laneWidth, floors, placements,
+					layoutB, routeB, head, tightB);
+				addStarter(placements, forward,
 					placements.firstRepeaterAfter(laidByA));
 				return placements.finish(PasteMode.INTERLEAVED_HALF_TICK, origin,
 					coordAlong(axis, origin),
@@ -1461,31 +1427,35 @@ public final class SongBuilder {
 	}
 
 	/**
-	 * The comb as a route: turns toward the trunk run long, turns at the finger tips short.
+	 * The nested route: two machines sharing both walls, interleaved purely in depth.
 	 *
-	 * @param trunkOnFar whether the trunk is the far wall rather than the origin side. Machine B
-	 *     runs this way round so both machines walk the same direction: its opening lane starts
-	 *     beside machine A's and runs across to its trunk, and for a given start floor its long
-	 *     trunk runs land on the opposite extreme floor from A's -- the stagger, for free.
-	 * @param extension columns a clear pair's tip reaches toward the partner's trunk -- past the
-	 *     far wall when the trunk is near, behind the near wall when the trunk is far
-	 * @param avoidFloor the floor the partner's long trunk runs cross, which no extended pair
-	 *     may touch; -1 for no extension at all
+	 * <p>Each machine is the plain full-width serpentine -- staircases at the shared walls,
+	 * alternating ends, any floor count -- and only the flat turns tell the two apart. The first
+	 * machine's long link runs at the extreme floor opposite its start, jumping the partner's
+	 * pair of rows; its short link, on the start floor, hops to its own next row with nothing
+	 * between. The second machine is the same shape flipped in height and depth: long link at the
+	 * start-floor extreme, short link at the other. A long link turns at the full wall and its
+	 * run stands the column past it; a short link turns tight on the shortened wall, because one
+	 * column further out stands the partner's hanging notes.</p>
+	 *
+	 * <p>The shortenings are the whole coexistence contract: a machine gives up two columns at
+	 * one end of the legs on exactly one floor -- the floor the partner's long link crosses --
+	 * and owns the full span everywhere else. The sides follow from the walk itself: a cycle's
+	 * last leg always travels backward, so a long link at the start extreme stands at the near
+	 * wall, and one at the opposite extreme lands by floor-count parity. The staircases never
+	 * contend: a staircase is a point in plan view, each machine's stand at its own rows, and a
+	 * long link crossing the partner's rows at a wall column passes a full floor above the
+	 * highest staircase the partner has there, because the link stands at the edge opposite the
+	 * partner's last climb.</p>
 	 */
-	private static LaneRoute combRoute(int floors, WalkStart start, int spacing, int trunk,
-			boolean trunkOnFar, boolean mirrored, int extension, int avoidFloor) {
+	private static LaneRoute nestedRoute(int floors, WalkStart start, int spacing, int longLink,
+			boolean firstMachine) {
 		LaneRoute base = LaneRoute.serpentine(floors, start.floor(), start.climb());
+		int startFloor = start.floor();
+		int oppositeFloor = startFloor == 0 ? floors - 1 : 0;
+		// Where the opposite-extreme flat lands: forward's end when the floor count is odd.
+		boolean oppositeFlatFar = floors % 2 == 1;
 		return new LaneRoute() {
-			private int pairExtension(int leg) {
-				if (extension == 0) {
-					return 0;
-				}
-				// Both legs of a pair share the tip; the pair is named by its even leg.
-				int pair = leg - Math.floorMod(leg, 2);
-				return base.floorOf(pair) == avoidFloor || base.floorOf(pair + 1) == avoidFloor
-					? 0 : extension;
-			}
-
 			@Override
 			public int floorOf(int leg) {
 				return base.floorOf(leg);
@@ -1498,25 +1468,32 @@ public final class SongBuilder {
 
 			@Override
 			public int linkOf(int leg) {
-				// A flat turn only ever reads the link for its own end: legs travelling forward
-				// end at the far wall, legs travelling back at the near one.
-				boolean trunkLeg = trunkOnFar ? leg % 2 == 0 : leg % 2 == 1;
-				return trunkLeg ? trunk : spacing;
+				// The flat reached climbing the start direction is at the opposite extreme: the
+				// first machine jumps the partner there and hops at home; the second, the other
+				// way round.
+				boolean atOpposite = base.climbOf(leg) == start.climb();
+				return atOpposite == firstMachine ? longLink : spacing;
 			}
 
 			@Override
 			public int tipExtension(int leg) {
-				return trunkOnFar ? 0 : pairExtension(leg);
+				return !firstMachine && oppositeFlatFar && base.floorOf(leg) == oppositeFloor
+					? -3 : 0;
 			}
 
 			@Override
 			public int nearExtension(int leg) {
-				return trunkOnFar ? pairExtension(leg) : 0;
+				if (firstMachine) {
+					return base.floorOf(leg) == startFloor ? -3 : 0;
+				}
+				return !oppositeFlatFar && base.floorOf(leg) == oppositeFloor ? -3 : 0;
 			}
 
 			@Override
-			public boolean mirrored() {
-				return mirrored;
+			public boolean linkArmsTight(int leg) {
+				// The short links, on both machines: a wide corner there would stand its dust
+				// beside the partner's hanging notes.
+				return (base.climbOf(leg) == start.climb()) != firstMachine;
 			}
 		};
 	}
@@ -10044,6 +10021,7 @@ public final class SongBuilder {
 						// a note past its corner is armed tight without asking.
 						boolean rewalked = FLAT_TURN_KEEPS_ITS_WIDTH && tightTurns.contains(index);
 						boolean tight = FLAT_TURN_KEEPS_ITS_WIDTH && (rewalked
+							|| route.linkArmsTight(leg)
 							|| flatTurnHangsOutside(events, index, delayAhead,
 								(here.end() - coordAlong(axis, lane.pos())) * stepAlong(axis, lane.travel()), columns,
 								flatLink(route, leg, slabStep)));

@@ -79,6 +79,19 @@ interface LaneRoute {
 	}
 
 	/**
+	 * Whether the flat turn ending this leg must arm tight -- corner on the wall, run down the
+	 * wall column -- rather than letting the walk guess.
+	 *
+	 * <p>In the nested interleave the short links turn on a shortened wall, and a wide corner
+	 * there stands its dust one column further out, which is where the partner machine hangs its
+	 * notes. Told rather than guessed, because the guess measures the machine's own chords and
+	 * cannot see the neighbour.</p>
+	 */
+	default boolean linkArmsTight(int leg) {
+		return false;
+	}
+
+	/**
 	 * Whether this machine's slab creeps the other way round -- depth counterclockwise from
 	 * forward instead of clockwise.
 	 *
