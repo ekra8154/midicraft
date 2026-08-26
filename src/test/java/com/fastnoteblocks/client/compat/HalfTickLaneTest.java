@@ -309,6 +309,68 @@ class HalfTickLaneTest {
 	}
 
 	/**
+	 * The lane carrying the song does not lay a single column for the sake of the one that is not.
+	 *
+	 * <p>Keeping the two pulses together was first done by levelling them at every event, and that
+	 * is the same requirement read far too strictly. Whichever lane has just laid a chord is the one
+	 * in front, so under that rule the other lays the same number of columns in dust to come level,
+	 * and then the roles swap at the next event -- each lane ends up carrying its own chords plus a
+	 * copy of the other lane's length, and the build is as long as the two of them added together.
+	 * In the world that reads as a pad between every chord and the next, which is what it is.</p>
+	 *
+	 * <p>So the measurement is against the busy lane on its own: the same even ticks built with no
+	 * second lane at all, which is the shortest this song's chords can possibly be laid. A two-lane
+	 * build of the whole song has to come out near that and not near twice it. The quiet lane is
+	 * sixteen notes to two, so under the old rule it added most of its partner's length again.</p>
+	 */
+	@Test
+	void leavesTheLaneInFrontUnpadded() {
+		List<SongBuilder.EventNote> song = new ArrayList<>();
+		List<SongBuilder.EventNote> busyLaneAlone = new ArrayList<>();
+		for (int event = 0; event < 300; event++) {
+			int gameTick = event * 2;
+			for (int index = 0; index < 16; index++) {
+				SongBuilder.EventNote big = new SongBuilder.EventNote(gameTick, 1, index,
+					index % 25, "minecraft:gold_block");
+				song.add(big);
+				busyLaneAlone.add(big);
+			}
+			for (int index = 0; index < 2; index++) {
+				song.add(new SongBuilder.EventNote(gameTick + 1, 1, index, index % 25,
+					"minecraft:gold_block"));
+			}
+		}
+		int both = build(song).spanX();
+		int busyAlone = build(busyLaneAlone).spanX();
+
+		// A fifth again, which is room for catching up and no room for a copy of the busy lane. The
+		// numbers either side of it are not close: levelling at every event builds this song 3,000
+		// blocks long against the busy lane's own 2,400, and padding only when behind builds it at
+		// 2,400 exactly -- the quiet lane never gets in front here, so the busy one never pads.
+		assertTrue(both < busyAlone * 6 / 5,
+			"the busy lane alone is " + busyAlone + " blocks and the two lanes together came to "
+				+ both + "; the lane in front is padding itself out for the one behind");
+	}
+
+	/**
+	 * Two lanes are two machines, and a machine's own way in is not a lane that has been cut.
+	 *
+	 * <p>A repeater with nothing behind it can only be one of two things: the place a signal is put
+	 * in, or a break that silences everything past it. Telling them apart is a count -- one lever per
+	 * machine -- and this layout is the first that builds two machines, so the check that allowed
+	 * exactly one lever called the second lane's own input a severed lane on every two-lane build
+	 * there is. Nothing was wrong with any of them: the same builds read back with every note
+	 * reached and the performance exact.</p>
+	 */
+	@Test
+	void doesNotCallTheSecondLanesWayInASeveredLane() {
+		SongBuilder.PastePlan plan = build(List.of(note(0, 0), note(1, 1), note(2, 2), note(3, 3)));
+		assertEquals(0, plan.severedLanes(),
+			"a two-lane build has two ways in and neither is a fault: " + plan.faults());
+		assertEquals(0, plan.deadNotes(), "and nothing downstream of them is silent");
+	}
+
+	/**
 	 * A lane that spends its whole opening waiting is still a machine with a way into it.
 	 *
 	 * <p>Mirroring lays wire before it lays notes, so a lane whose first note is late begins with a

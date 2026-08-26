@@ -193,8 +193,139 @@ class LaneDriftProbe {
 			+ worstEver + " blocks");
 	}
 
-	/** How far apart two lanes get, and how often that is further than a note can be heard. */
-	private record Apart(int worst, int worstTick, long beyond, long pairs) {
+	/**
+	 * What holding the lanes level at every event costs, against holding them only within earshot.
+	 *
+	 * <p>Both arms in the same run, because the library grows between sessions and a number
+	 * remembered from an hour ago is not comparable to one taken now. The question is a trade with
+	 * two sides and both have to be printed: {@code spanX} is what the build costs, and the worst
+	 * gap is what it buys. A shorter build that puts the two pulses out of earshot is not an
+	 * improvement, it is the fault this padding exists to prevent.</p>
+	 */
+	@Test
+	void weighsLockstepLanesAgainstPaddingOnlyWhenBehind() throws Exception {
+		java.nio.file.Path songs = java.nio.file.Path.of("run", "config", "fast-noteblocks", "songs");
+		List<java.nio.file.Path> files = new ArrayList<>();
+		try (var listing = java.nio.file.Files.list(songs)) {
+			listing.filter(file -> file.toString().endsWith(".json")).sorted().forEach(files::add);
+		}
+		System.out.println();
+		System.out.println("==== lockstep lanes vs padding only when behind ====");
+		System.out.println(String.format("  %-38s %-5s %-11s %-11s %-8s %-13s %-13s %s",
+			"", "speed", "lockstep", "when behind", "shorter", "worst lk / bhd",
+			"mean lk / bhd", "% of pairs past 16"));
+		long lockstepSpan = 0;
+		long behindSpan = 0;
+		int worstLockstep = 0;
+		int worstBehind = 0;
+		int pastEarshotBehind = 0;
+		int builds = 0;
+		long pastTolerance = 0;
+		long pairs = 0;
+		boolean restore = SongBuilder.MIRRORS_ONLY_WHEN_BEHIND;
+		try {
+			for (java.nio.file.Path file : files) {
+				String name = file.getFileName().toString().replace(".json", "");
+				for (int speedFactor : new int[] {1, 2}) {
+					com.fastnoteblocks.client.composer.ComposerProject project = BreachView.project(name);
+					if (speedFactor != 1) {
+						project = project.withSpeedQuarters(
+							Math.max(1, project.speedQuarters()) * speedFactor);
+					}
+					List<SongBuilder.EventNote> song = SongBuilder.notesFor(
+						SongBuilder.PasteMode.HALF_TICK_LANE,
+						project.toSequenceTracks(java.util.Set.of(), true), project, true);
+					if (song.isEmpty()) {
+						continue;
+					}
+					long odd = song.stream().filter(note -> Math.floorMod(note.time(), 2) == 1).count();
+					if (odd == 0 || odd == song.size()) {
+						continue;
+					}
+					SongBuilder.MIRRORS_ONLY_WHEN_BEHIND = false;
+					Arm lockstep = arm(song);
+					SongBuilder.MIRRORS_ONLY_WHEN_BEHIND = true;
+					Arm behind = arm(song);
+					if (lockstep == null || behind == null) {
+						continue;
+					}
+					builds++;
+					lockstepSpan += lockstep.spanX();
+					behindSpan += behind.spanX();
+					worstLockstep = Math.max(worstLockstep, lockstep.worst());
+					worstBehind = Math.max(worstBehind, behind.worst());
+					pastEarshotBehind += behind.worst() > 48 ? 1 : 0;
+					pastTolerance += behind.pastTolerance();
+					pairs += behind.pairs();
+					System.out.println(String.format(
+						"  %-38s %-5s %-11s %-11s %-8s %-13s %-13s %s",
+						name.length() > 37 ? name.substring(0, 37) : name,
+						speedFactor + "x",
+						lockstep.spanX() + " blk", behind.spanX() + " blk",
+						String.format("%.1f%%",
+							100.0 * (lockstep.spanX() - behind.spanX())
+								/ Math.max(1, lockstep.spanX())),
+						lockstep.worst() + " / " + behind.worst(),
+						String.format("%.1f / %.1f", lockstep.mean(), behind.mean()),
+						String.format("%.2f%%", 100.0 * behind.pastTolerance()
+							/ Math.max(1, behind.pairs()))));
+				}
+			}
+		} finally {
+			SongBuilder.MIRRORS_ONLY_WHEN_BEHIND = restore;
+		}
+		System.out.println();
+		System.out.println("  " + builds + " two-lane builds");
+		System.out.println("  total length  lockstep " + lockstepSpan + " -> when behind "
+			+ behindSpan + String.format("  (%.1f%% shorter)",
+				100.0 * (lockstepSpan - behindSpan) / Math.max(1, lockstepSpan)));
+		System.out.println("  worst gap between simultaneous notes  lockstep " + worstLockstep
+			+ " -> when behind " + worstBehind + " blocks (earshot is 48; "
+			+ pastEarshotBehind + " builds past it)");
+		System.out.println("  when behind: " + pastTolerance + " of " + pairs
+			+ String.format(" simultaneous pairs (%.3f%%) sit further apart than the %d-block "
+				+ "tolerance", 100.0 * pastTolerance / Math.max(1, pairs),
+				SongBuilder.HALF_TICK_LANE_TOLERANCE));
+	}
+
+	/** One build under whichever rule is set, and the numbers the trade is made of. */
+	private record Arm(int spanX, int worst, int mirrored, long pairs, long pastTolerance,
+			long total) {
+		double mean() {
+			return total / (double)Math.max(1, pairs);
+		}
+	}
+
+	private static Arm arm(List<SongBuilder.EventNote> song) {
+		SongBuilder.PastePlan plan;
+		try {
+			plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0), song,
+				SongBuilder.PasteMode.HALF_TICK_LANE, new SongBuilder.BuildLimits(4, 44, 3));
+		} catch (RuntimeException refused) {
+			return null;
+		}
+		double split = laneSplit(plan);
+		List<Pulse> right = pulses(plan, song, 0, split, true);
+		List<Pulse> left = pulses(plan, song, 1, split, false);
+		if (right.isEmpty() || left.isEmpty()) {
+			return null;
+		}
+		Apart gap = apart(right, left);
+		return new Arm(plan.spanX(), gap.worst(),
+			plan.padding().getOrDefault("halfTickMirror", 0), gap.pairs(), gap.pastTolerance(),
+			gap.total());
+	}
+
+	/**
+	 * How far apart two lanes get, and how often that is further than a note can be heard.
+	 *
+	 * @param pastTolerance pairs further apart than the tolerance padding aims at, which is the
+	 *     number that says whether the rule is being held rather than merely aimed at
+	 * @param total the sum of every gap, for a mean -- a worst case is one pair out of thousands and
+	 *     says nothing about where the two pulses usually stand
+	 */
+	private record Apart(int worst, int worstTick, long beyond, long pairs, long pastTolerance,
+			long total) {
 		String summary() {
 			return String.format("%d blocks apart at worst (game tick %d), past earshot for %.2f%% "
 				+ "of %d simultaneous pairs", worst, worstTick, 100.0 * beyond / Math.max(1, pairs),
@@ -224,6 +355,8 @@ class LaneDriftProbe {
 		int worstTick = 0;
 		long beyond = 0;
 		long pairs = 0;
+		long pastTolerance = 0;
+		long total = 0;
 		int at = 0;
 		for (Pulse pulse : right) {
 			while (at + 1 < left.size()
@@ -242,9 +375,13 @@ class LaneDriftProbe {
 			if (gap > 48) {
 				beyond++;
 			}
+			if (gap > SongBuilder.HALF_TICK_LANE_TOLERANCE) {
+				pastTolerance++;
+			}
+			total += gap;
 			pairs++;
 		}
-		return new Apart(worst, worstTick, beyond, pairs);
+		return new Apart(worst, worstTick, beyond, pairs, pastTolerance, total);
 	}
 
 	/**
