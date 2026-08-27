@@ -1258,10 +1258,10 @@ public final class SongBuilder {
 		boolean sharedInput = HALF_TICK_SHARED_INPUT
 			&& !rightNotes.isEmpty() && !leftNotes.isEmpty();
 		BlockPos rightOrigin = sharedInput
-			? origin.relative(forward, rightOdd ? 6 : 4) : origin;
+			? origin.relative(forward, rightOdd ? 6 : 3) : origin;
 		BlockPos leftOrigin = origin.relative(forward.getCounterClockWise(), HALF_TICK_LANE_GAP);
 		if (sharedInput) {
-			leftOrigin = leftOrigin.relative(forward, leftOdd ? 6 : 4);
+			leftOrigin = leftOrigin.relative(forward, leftOdd ? 6 : 3);
 		}
 		if (sharedInput) {
 			// One press for both, so the plan's own offset is the one that happens.
@@ -1676,7 +1676,7 @@ public final class SongBuilder {
 		boolean oddOpensA = Math.floorMod(gtA.get(0).time(), 2) == 1;
 		boolean oddOpensB = Math.floorMod(gtB.get(0).time(), 2) == 1;
 		WalkStart headA = INTERLEAVED_SHARED_INPUT
-			? new WalkStart(head.column() + (oddOpensA ? 6 : 4), head.floor(),
+			? new WalkStart(head.column() + (oddOpensA ? 6 : 3), head.floor(),
 				head.climb(), head.turning())
 			: new WalkStart(head.column() + 2, head.floor(), head.climb(), head.turning());
 		// The machine on the odd half of the tick opens two columns further out, because its feed
@@ -1688,7 +1688,7 @@ public final class SongBuilder {
 		// cells reach that much further. Both counted from the same wall, so the spine stands in
 		// one straight column whatever mix of halves the two machines open on.
 		WalkStart headB = INTERLEAVED_SHARED_INPUT
-			? new WalkStart(head.column() + (oddOpensB ? 6 : 4), head.floor(),
+			? new WalkStart(head.column() + (oddOpensB ? 6 : 3), head.floor(),
 				head.climb(), head.turning())
 			: head;
 		BlockPos originB = originA.relative(depth, spacing);
@@ -1930,11 +1930,34 @@ public final class SongBuilder {
 	 *
 	 * <p>Two pistons in a row do, always: whichever phase the edge arrives in, one piston of the
 	 * pair absorbs it and the other pays the full three, so the pair costs five game ticks from
-	 * any source at all. The seam is a repeater (the sunken-cross feed, two ticks), the first
-	 * piston shoving its block into the empty cell behind the second, and the second shoving its
-	 * own block out to the wire: seven game ticks, odd from anywhere.</p>
+	 * any source at all.</p>
+	 *
+	 * <p>And the repeater in front of the pair is set to three, which is what makes the machine
+	 * replayable rather than merely correct once. <b>Every double piston shortens the pulse that
+	 * goes through it.</b> A repeater lengthens a pulse back out to its own delay, so within a
+	 * stretch of lane the pulse settles at the longest repeater in it -- and if a pulse reaches a
+	 * pair already down to a tick or two, the pistons spit their blocks instead of extending and
+	 * retracting cleanly, and the machine cannot be played again. A delay of three immediately in
+	 * front of every pair is the guarantee, and it is why this is eleven game ticks rather than
+	 * seven: six for the repeater, five for the pair. Nothing in {@link NoteMachineReader} can
+	 * see this -- it follows edges and knows nothing of how long a pulse is.</p>
 	 */
-	static final int PARITY_SEAM_GAME_TICKS = 7;
+	static final int PARITY_SEAM_GAME_TICKS = 11;
+
+	/**
+	 * The delay every repeater standing in front of a double piston is set to, in redstone ticks.
+	 *
+	 * <p>The rule is only that <em>some</em> repeater of three or more stands between one pair and
+	 * the next -- it need not be the one touching the piston. So a seam whose delay chain already
+	 * holds a repeater of four, which any long wait lays, could keep its own opener at one and
+	 * save four game ticks. That is not done, on purpose: the plan decides {@code seamEat} before
+	 * the walk lays anything, so the two would have to agree in advance about which repeaters the
+	 * chain is going to hold, and a chain that came out all short repeaters -- which padding does
+	 * produce -- would spit its blocks with nothing in the numbers to say so. Four game ticks a
+	 * seam is a few dozen columns a song; a machine that cannot be played twice is worth more than
+	 * that.</p>
+	 */
+	static final int PARITY_SEAM_REPEATER = 3;
 
 	/**
 	 * Whether both machines are started from one spine instead of a button each.
@@ -1990,8 +2013,8 @@ public final class SongBuilder {
 		// through the double piston (the pair, two blocks and two landing cells). The spine is
 		// one straight column, so the deeper need decides it for both.
 		int wall = step > 0
-			? Math.min(alongA - (oddA ? 6 : 4), alongB - (oddB ? 6 : 4))
-			: Math.max(alongA + (oddA ? 6 : 4), alongB + (oddB ? 6 : 4));
+			? Math.min(alongA - (oddA ? 6 : 3), alongB - (oddB ? 6 : 3))
+			: Math.max(alongA + (oddA ? 6 : 3), alongB + (oddB ? 6 : 3));
 		BlockPos[] heads = {headA, headB};
 		boolean[] odd = {oddA, oddB};
 		Direction across = forward.getClockWise();
@@ -2029,7 +2052,8 @@ public final class SongBuilder {
 				continue;
 			}
 			set(placements, at, row == repeaterRow
-				? "minecraft:repeater[facing=" + repeaterFacing(towardPiston) + ",delay=1]"
+				? "minecraft:repeater[facing=" + repeaterFacing(towardPiston) + ",delay="
+					+ PARITY_SEAM_REPEATER + "]"
 				: "minecraft:redstone_wire");
 		}
 		// And the button on the far end of the spine's ground run, on the wall of it, at the end
@@ -2077,22 +2101,23 @@ public final class SongBuilder {
 				}
 				placements.padded("twoLaneInputPiston");
 			} else {
-				// Straight off the spine, through three of its own repeaters: six game ticks
-				// against the seven the other side spends -- the spine's repeater at two and the
-				// piston pair at five -- so the two machines leave exactly one game tick apart,
-				// which is the offset the two halves of the song are written against. Repeaters
-				// deliver their whole even delay from any phase and hand the edge on
-				// phase-normalised, which makes this side as indifferent to whatever contraption
-				// pressed the button as the pair makes the other.
-				for (int leg = 1; leg <= 3; leg++) {
+				// Straight off the spine, through two of its own repeaters: five redstone ticks,
+				// ten game ticks, against the eleven the other side spends -- its repeater of
+				// three at six and the piston pair at five -- so the two machines leave exactly
+				// one game tick apart, which is the offset the two halves of the song are written
+				// against. Repeaters deliver their whole even delay from any phase and hand the
+				// edge on phase-normalised, which makes this side as indifferent to whatever
+				// contraption pressed the button as the pair makes the other.
+				int[] delays = {4, 1};
+				for (int leg = 1; leg <= delays.length; leg++) {
 					BlockPos at = spine.relative(forward, leg);
 					set(placements, at.below(), "minecraft:stone");
 					set(placements, at, "minecraft:repeater[facing=" + repeaterFacing(forward)
-						+ ",delay=1]");
+						+ ",delay=" + delays[leg - 1] + "]");
 				}
 				// And plain wire the rest of the way, which costs no ticks at all, for a machine
 				// whose own opening stands further out than its partner's.
-				for (int column = 4; column < columns; column++) {
+				for (int column = 3; column < columns; column++) {
 					BlockPos at = spine.relative(forward, column);
 					set(placements, at.below(), "minecraft:stone");
 					set(placements, at, "minecraft:redstone_wire");
@@ -2179,11 +2204,11 @@ public final class SongBuilder {
 	/**
 	 * Game ticks a lane sits silent across a parity seam.
 	 *
-	 * <p>The element is seven -- see {@link #PARITY_SEAM_GAME_TICKS} -- and the first module
+	 * <p>The element is eleven -- see {@link #PARITY_SEAM_GAME_TICKS} -- and the first module
 	 * after it opens on a repeater, stacked heads must and the rest may, which is two more.
-	 * Scheduling every seam at nine keeps the walk free to lay whatever module comes next.</p>
+	 * Scheduling every seam at thirteen keeps the walk free to lay whatever module comes next.</p>
 	 */
-	static int PARITY_SEAM_GT = 9;
+	static int PARITY_SEAM_GT = 13;
 
 	/**
 	 * Which machine plays each tick of the song, when a machine may change parity mid-song.
@@ -2743,7 +2768,8 @@ public final class SongBuilder {
 			// behind a repeater is pulled even by the tick's phase order; the pair is five game
 			// ticks from any phase, and the repeater ahead of it is the sunken-cross feed.
 			String[] cells = {
-				"minecraft:repeater[facing=" + repeaterFacing(forward) + ",delay=1]",
+				"minecraft:repeater[facing=" + repeaterFacing(forward) + ",delay="
+					+ PARITY_SEAM_REPEATER + "]",
 				"minecraft:sticky_piston[facing=" + forward.getName() + "]",
 				"minecraft:redstone_block",
 				"minecraft:air",
@@ -9316,7 +9342,8 @@ public final class SongBuilder {
 				// one piston behind a repeater is pulled even by the tick's phase order and never
 				// flips parity at all; a pair costs five game ticks from any phase whatever.
 				String[] seamCells2 = {
-					"minecraft:repeater[facing=" + repeaterFacing(lane.travel()) + ",delay=1]",
+					"minecraft:repeater[facing=" + repeaterFacing(lane.travel()) + ",delay="
+						+ PARITY_SEAM_REPEATER + "]",
 					"minecraft:sticky_piston[facing=" + lane.travel().getName() + "]",
 					"minecraft:redstone_block",
 					"minecraft:air",
