@@ -1258,10 +1258,10 @@ public final class SongBuilder {
 		boolean sharedInput = HALF_TICK_SHARED_INPUT
 			&& !rightNotes.isEmpty() && !leftNotes.isEmpty();
 		BlockPos rightOrigin = sharedInput
-			? origin.relative(forward, rightOdd ? 6 : 3) : origin;
+			? origin.relative(forward, rightOdd ? 6 : 4) : origin;
 		BlockPos leftOrigin = origin.relative(forward.getCounterClockWise(), HALF_TICK_LANE_GAP);
 		if (sharedInput) {
-			leftOrigin = leftOrigin.relative(forward, leftOdd ? 6 : 3);
+			leftOrigin = leftOrigin.relative(forward, leftOdd ? 6 : 4);
 		}
 		if (sharedInput) {
 			// One press for both, so the plan's own offset is the one that happens.
@@ -1676,7 +1676,7 @@ public final class SongBuilder {
 		boolean oddOpensA = Math.floorMod(gtA.get(0).time(), 2) == 1;
 		boolean oddOpensB = Math.floorMod(gtB.get(0).time(), 2) == 1;
 		WalkStart headA = INTERLEAVED_SHARED_INPUT
-			? new WalkStart(head.column() + (oddOpensA ? 6 : 3), head.floor(),
+			? new WalkStart(head.column() + (oddOpensA ? 6 : 4), head.floor(),
 				head.climb(), head.turning())
 			: new WalkStart(head.column() + 2, head.floor(), head.climb(), head.turning());
 		// The machine on the odd half of the tick opens two columns further out, because its feed
@@ -1688,7 +1688,7 @@ public final class SongBuilder {
 		// cells reach that much further. Both counted from the same wall, so the spine stands in
 		// one straight column whatever mix of halves the two machines open on.
 		WalkStart headB = INTERLEAVED_SHARED_INPUT
-			? new WalkStart(head.column() + (oddOpensB ? 6 : 3), head.floor(),
+			? new WalkStart(head.column() + (oddOpensB ? 6 : 4), head.floor(),
 				head.climb(), head.turning())
 			: head;
 		BlockPos originB = originA.relative(depth, spacing);
@@ -1985,13 +1985,13 @@ public final class SongBuilder {
 		int step = stepAlong(axis, forward);
 		int alongA = coordAlong(axis, headA);
 		int alongB = coordAlong(axis, headB);
-		// Behind whichever machine's feed reaches furthest back: three columns for a machine
-		// taken straight off the spine (its two repeaters and the spine itself), six for one fed
+		// Behind whichever machine's feed reaches furthest back: four columns for a machine taken
+		// straight off the spine (its three repeaters and the spine itself), six for one fed
 		// through the double piston (the pair, two blocks and two landing cells). The spine is
 		// one straight column, so the deeper need decides it for both.
 		int wall = step > 0
-			? Math.min(alongA - (oddA ? 6 : 3), alongB - (oddB ? 6 : 3))
-			: Math.max(alongA + (oddA ? 6 : 3), alongB + (oddB ? 6 : 3));
+			? Math.min(alongA - (oddA ? 6 : 4), alongB - (oddB ? 6 : 4))
+			: Math.max(alongA + (oddA ? 6 : 4), alongB + (oddB ? 6 : 4));
 		BlockPos[] heads = {headA, headB};
 		boolean[] odd = {oddA, oddB};
 		Direction across = forward.getClockWise();
@@ -2011,21 +2011,37 @@ public final class SongBuilder {
 				pistonRow = Math.abs(coordAcross(axis, heads[machine]) - coordAcross(axis, headA));
 			}
 		}
-		// The spine itself, between the two rows: stone all the way, redstone over the top of it,
-		// and the button standing in that run one row in from the far end so a single press
-		// releases both machines on the same tick.
-		int buttonRow = Math.max(0, rows - 1);
+		// The spine, at the machines' own level: ground beneath, wire on top of that. A block
+		// lower than it used to sit, and the drop is what makes room for the one thing the pair
+		// cannot do without -- a repeater standing in the spine pointing straight into the
+		// piston. Fed from a button with no repeater in front of them, both pistons of a pair
+		// take the full three game ticks and the pair cancels to six: an even number, and the
+		// half tick simply is not there. Fed from a repeater the first piston catches the same
+		// tick's block events and costs two, the second pays three, and the pair is five.
+		int repeaterRow = pistonRow < 0 ? -1 : pistonRow == 0 ? 1 : pistonRow - 1;
+		Direction towardPiston = pistonRow == 0 ? toB.getOpposite() : toB;
 		for (int row = 0; row <= rows; row++) {
 			BlockPos at = spineA.relative(toB, row);
 			placements.placing("twoLaneInput");
-			set(placements, at, "minecraft:stone");
-			if (row == buttonRow) {
-				set(placements, at.above(),
-					String.format(java.util.Locale.ROOT, STARTER_BUTTON, forward.getName()));
-			} else if (row != pistonRow) {
-				set(placements, at.above(), "minecraft:redstone_wire");
+			set(placements, at.below(), "minecraft:stone");
+			if (row == pistonRow) {
+				// The piston stands here; its machine's own run lays it.
+				continue;
 			}
+			set(placements, at, row == repeaterRow
+				? "minecraft:repeater[facing=" + repeaterFacing(towardPiston) + ",delay=1]"
+				: "minecraft:redstone_wire");
 		}
+		// And the button on the far end of the spine's ground run, on the wall of it, at the end
+		// away from the piston -- pressed, it powers that block and the block powers the wire
+		// standing on it. Beside the piston instead it would power the piston's own floor and
+		// fire it without ever going through the repeater.
+		int buttonEnd = pistonRow == 0 ? rows + 1 : -1;
+		Direction buttonFacing = pistonRow == 0 ? toB : toB.getOpposite();
+		placements.placing("twoLaneInput");
+		set(placements, spineA.relative(toB, buttonEnd).below(),
+			String.format(java.util.Locale.ROOT, "minecraft:oak_button[face=wall,facing=%s,"
+				+ "powered=false]", buttonFacing.getName()));
 		for (int machine = 0; machine < 2; machine++) {
 			BlockPos head = heads[machine];
 			int columns = (coordAlong(axis, head) - wall) * step;
@@ -2061,14 +2077,14 @@ public final class SongBuilder {
 				}
 				placements.padded("twoLaneInputPiston");
 			} else {
-				// Straight off the spine, through two of its own repeaters: four game ticks
-				// against the pair's five, so the two machines leave one game tick apart -- the
-				// offset the two halves of the song are written against. Two repeaters rather
-				// than one so the difference is exactly one: repeaters deliver their whole even
-				// delay from any phase and hand the edge on phase-normalised, which is what makes
-				// this side as indifferent to the player's contraption as the pair makes the
-				// other.
-				for (int leg = 1; leg <= 2; leg++) {
+				// Straight off the spine, through three of its own repeaters: six game ticks
+				// against the seven the other side spends -- the spine's repeater at two and the
+				// piston pair at five -- so the two machines leave exactly one game tick apart,
+				// which is the offset the two halves of the song are written against. Repeaters
+				// deliver their whole even delay from any phase and hand the edge on
+				// phase-normalised, which makes this side as indifferent to whatever contraption
+				// pressed the button as the pair makes the other.
+				for (int leg = 1; leg <= 3; leg++) {
 					BlockPos at = spine.relative(forward, leg);
 					set(placements, at.below(), "minecraft:stone");
 					set(placements, at, "minecraft:repeater[facing=" + repeaterFacing(forward)
@@ -2076,7 +2092,7 @@ public final class SongBuilder {
 				}
 				// And plain wire the rest of the way, which costs no ticks at all, for a machine
 				// whose own opening stands further out than its partner's.
-				for (int column = 3; column < columns; column++) {
+				for (int column = 4; column < columns; column++) {
 					BlockPos at = spine.relative(forward, column);
 					set(placements, at.below(), "minecraft:stone");
 					set(placements, at, "minecraft:redstone_wire");
