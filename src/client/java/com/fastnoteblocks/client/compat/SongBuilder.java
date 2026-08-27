@@ -1236,10 +1236,10 @@ public final class SongBuilder {
 		if (!leftNotes.isEmpty() && Math.floorMod(leftNotes.get(0).time(), 2) == 0) {
 			placements.padded("leftLaneStartsEven");
 		}
-		HalfTickLane right = new HalfTickLane(origin, rightNotes, bias, rightSeams);
+		HalfTickLane right = new HalfTickLane(origin, rightNotes, bias, rightSeams, 0);
 		HalfTickLane left = new HalfTickLane(
 			origin.relative(forward.getCounterClockWise(), HALF_TICK_LANE_GAP), leftNotes, bias,
-			leftSeams);
+			leftSeams, 1);
 		int padded = 0;
 		int short_ = 0;
 		int mirrored = 0;
@@ -1386,22 +1386,29 @@ public final class SongBuilder {
 	 * no rail run to close and no turn to settle. The dial is the same one:
 	 * {@link #PARITY_MIN_DELAY_BEFORE_RESEED}.</p>
 	 *
-	 * <p><b>Off: the saving is large and the timing is not settled.</b> Measured over the
-	 * library's six two-parity songs it takes the span from 17,605 columns to 12,256, a third
-	 * shorter, and almost all of it comes from the mirror having nothing to make up -- field of
-	 * hopes goes from 3,718 columns of mirrored wire to 110. Every structural check is clean:
-	 * no wrong note, no note without a home, no collision, nothing unreached.</p>
+	 * <p><b>On, and known to be out of tune.</b> A thing that cannot be pasted cannot be listened
+	 * to, and a fault nobody can hear is a fault nobody can find -- so this stays on while the
+	 * timing is worked out, rather than sitting behind a flag that has to be flipped before
+	 * anyone can look at it. <b>Six of {@code HalfTickLaneTest}'s regressions fail while it is,
+	 * and that is expected</b>: four have simply learned the fixed split by heart, but two are
+	 * real -- a lane comes out with its times running backwards ("two repeater ticks apart, was
+	 * -2"), and notes land off the game tick they were written on. Do not read those six as a
+	 * new breakage; read the other suites.</p>
 	 *
-	 * <p>What is not clean is the music. Six of {@code HalfTickLaneTest}'s own regressions fail
-	 * with this on, and two of them are musical rather than merely out of date: a lane comes out
-	 * with its times running backwards ("two repeater ticks apart, was -2"), and notes land off
-	 * the game tick they were written on. Field of hopes also reads back 274 notes short of its
-	 * 7,380 while claiming every one of them is reached, which is the signature of two notes
-	 * arriving on one tick. The straight lane's clock is not the routed walk's -- it counts in
-	 * {@code floorDiv} halves with a {@code paid} account the mirror draws on -- and the seam's
-	 * five game ticks have to be reconciled against that account, not just subtracted from it.</p>
+	 * <p>What it buys, over the library's six two-parity songs: span 17,605 columns to 12,256, a
+	 * third shorter, and almost all of it is the mirror having nothing left to make up -- field
+	 * of hopes goes from 3,718 columns of mirrored wire to 110. Every structural check is clean
+	 * at the same time: no wrong note, no note without a home, no collision, nothing unreached.
+	 * The one number that disagrees is the read-back's, which finds field of hopes 274 notes
+	 * short of its 7,380 while calling all of them reached -- two notes arriving on one tick.</p>
+	 *
+	 * <p>Where to look: the straight lane does not keep the routed walk's clock. It counts in
+	 * {@code floorDiv} halves against a {@code paid} account that {@link HalfTickLane#mirrorTo}
+	 * draws down, and a seam spends against that same gap. Subtracting the seam's five game
+	 * ticks from the account is not enough -- both were tried, and the span moved while the note
+	 * count did not. The two spenders have to be reconciled, not merely ordered.</p>
 	 */
-	static boolean HALF_TICK_TRADES_HALVES = false;
+	static boolean HALF_TICK_TRADES_HALVES = true;
 
 	/** The game ticks a lane's flips fall on, from indices into its own tick-groups. */
 	private static Set<Integer> seamTimes(List<EventNote> lane, List<Integer> flips) {
@@ -2546,16 +2553,25 @@ public final class SongBuilder {
 		 */
 		private final Set<Integer> seams;
 
-		HalfTickLane(BlockPos origin, List<EventNote> notes, int bias) {
-			this(origin, notes, bias, Set.of());
-		}
+		/** Which of the two lanes this is, and which half of the tick it is playing right now --
+		 * for the marked paste, so a build being read on the ground says both. */
+		private final int machine;
+		private int half;
 
-		HalfTickLane(BlockPos origin, List<EventNote> notes, int bias, Set<Integer> seams) {
+		HalfTickLane(BlockPos origin, List<EventNote> notes, int bias, Set<Integer> seams,
+				int machine) {
 			this.origin = origin;
 			this.notes = notes;
 			this.currentTime = -bias;
 			this.pulseTick = 2 * -bias;
 			this.seams = seams;
+			this.machine = machine;
+			this.half = notes.isEmpty() ? 0 : Math.floorMod(notes.get(0).time(), 2);
+		}
+
+		/** Says whose cells the next ones are, and on which half. See {@link PlacementPlan#laneTint}. */
+		private void tint(PlacementPlan placements) {
+			placements.laneTint(machine, half);
 		}
 
 		/**
@@ -2586,6 +2602,8 @@ public final class SongBuilder {
 				cursor++;
 			}
 			currentTime += Math.floorMod(time, 2) == 1 ? 2 : 3;
+			half = Math.floorMod(time, 2);
+			tint(placements);
 			sinceRepeater = 0;
 			placements.resumeRun(0);
 			// The module after it may not hang low notes back into the cell the block is being
@@ -2615,6 +2633,7 @@ public final class SongBuilder {
 		 */
 		int placeNextEvent(PlacementPlan placements, Direction forward, int wantedPad) {
 			placements.resumeRun(sinceRepeater);
+			tint(placements);
 			opened = true;
 			int time = notes.get(index).time();
 			// Laid before the wait is worked out, so the ticks it eats come off what this event
@@ -2684,6 +2703,7 @@ public final class SongBuilder {
 				return 0;
 			}
 			placements.resumeRun(sinceRepeater);
+			tint(placements);
 			// Ticks the seam in front of this lane is going to want, held back from the mirror.
 			// The mirror spends against the gap to the next event, and a seam spends against the
 			// same gap -- so without this the two spend it twice and the note lands early.
