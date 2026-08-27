@@ -42,6 +42,15 @@ class InterleavedDriftProbe {
 
 	@Test
 	void measuresDriftAcrossTheLibrary() throws Exception {
+		Flags.Held held = Flags.set(System.getProperty("probe.set", ""));
+		try {
+			sweep(held);
+		} finally {
+			held.putBack();
+		}
+	}
+
+	private void sweep(Flags.Held held) throws Exception {
 		String[] size = System.getProperty("probe.size", "24x1").split("x");
 		int width = Integer.parseInt(size[0]);
 		int floors = Integer.parseInt(size[1]);
@@ -51,7 +60,7 @@ class InterleavedDriftProbe {
 		}
 		System.out.println();
 		System.out.println("==== drift across the library, interleaved half-tick, " + width + "x"
-			+ floors + " ====");
+			+ floors + held.said() + " ====");
 		System.out.println(String.format("  %-46s %-7s %-9s %s",
 			"", "worst", "mean", "% of moments past 48"));
 		int duals = 0;

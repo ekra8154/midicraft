@@ -20026,6 +20026,11 @@ public final class SongBuilder {
 			"a sunken bus -- a bus whose opening cell is a note block, so it carries three notes free");
 		key.put("minecraft:andesite", "a standard stacked chord -- or, where two machines share one "
 			+ "region, the second machine's plain ground");
+		key.put("minecraft:sticky_piston", "a parity seam: the piston shoves its spacer and the "
+			+ "redstone block through the air cell, three game ticks that move this lane to the "
+			+ "other half of the game tick");
+		key.put("minecraft:smooth_stone", "a parity seam's spacer -- keeps the redstone block off "
+			+ "the piston's face, or the piston would fire at paste time");
 		key.put("minecraft:deepslate", "a stacked bus");
 		key.put("minecraft:deepslate_tiles",
 			"a cut chord's stacked head, with its tail across the staircase");
