@@ -177,6 +177,24 @@ class FoldFaultProbe {
 					+ row.getKey() + " stone=" + row.getValue()[0] + " andesite="
 					+ row.getValue()[1]));
 			}
+			if (Boolean.getBoolean("probe.padding")) {
+				// What the build spent, biggest first: the delay chain, the pacing dust and the
+				// seams are all counted here, and which of them is "a ton" is not a guess.
+				plan.padding().entrySet().stream()
+					.filter(entry -> entry.getValue() > 20)
+					.sorted(java.util.Map.Entry.<String, Integer>comparingByValue().reversed())
+					.limit(24)
+					.forEach(entry -> System.out.println("   PAD " + entry.getKey() + " = "
+						+ entry.getValue()));
+				long wire = plan.commands().stream()
+					.filter(command -> command.contains("minecraft:redstone_wire")).count();
+				long repeaters = plan.commands().stream()
+					.filter(command -> command.contains("minecraft:repeater")).count();
+				long noteBlocks = plan.commands().stream()
+					.filter(command -> command.contains("minecraft:note_block")).count();
+				System.out.println("   CELLS wire=" + wire + " repeaters=" + repeaters
+					+ " notes=" + noteBlocks + " commands=" + plan.commands().size());
+			}
 			if (Boolean.getBoolean("probe.pistons")) {
 				for (String command : plan.commands()) {
 					if (command.contains("sticky_piston")) {

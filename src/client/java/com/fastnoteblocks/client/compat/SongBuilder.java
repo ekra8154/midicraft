@@ -1512,7 +1512,17 @@ public final class SongBuilder {
 		// carries at every width this mode builds.
 		Pace paceA = null;
 		Pace paceB = null;
-		if (INTERLEAVED_PACES_THE_LANES) {
+		// Pacing and dynamic parity are two answers to one question -- keeping the two pulses
+		// within earshot -- and the scheduler's answer is the structural one: it keeps the lanes
+		// the same length by giving them the same amount of music, where pacing lets one lane run
+		// short and then buys the difference back in dust. With the schedule doing it, the dust
+		// earns almost nothing and costs a great deal. Measured at 24x1 over the library: the
+		// fixed split paces to 19 builds of 32 holding some moment past earshot, the schedule
+		// alone reaches 13, and pacing on top of the schedule reaches 11 -- two builds, for 380
+		// to 460 cells of dust per build and every dead line the mode has. So the dust stands
+		// down where the schedule is running, and comes back the moment it is not.
+		if (INTERLEAVED_PACES_THE_LANES && !(INTERLEAVED_DYNAMIC_PARITY
+				&& flipsA.size() + flipsB.size() > 0)) {
 			int[] dryA = dryProgress(evenEvents, originA, forward, laneWidth, floors, layoutA,
 				routeA, headA);
 			int[] dryB = dryProgress(oddEvents, originB, forward, laneWidth, floors, layoutB,
@@ -1594,7 +1604,8 @@ public final class SongBuilder {
 	 * which leaves a machine idle through every stretch the song spends on one parity, and the
 	 * corridor as deep as the busy one. On, {@link #scheduleParities} decides tick ownership and a
 	 * sticky piston's three game ticks move a lane to the other half wherever the imbalance
-	 * outprices the seam; {@link #PARITY_SEAM_COST} is the dial between pistons spent and balance
+	 * outprices the seam; {@link #PARITY_MIN_DELAY_BEFORE_RESEED} is the dial between pistons
+	 * spent and balance
 	 * bought. Measured over the library's mixed-parity songs at the default cost: the longer lane
 	 * shrinks 14 percent and the worst momentary imbalance halves, for 66 pistons across 13
 	 * songs.</p>
@@ -1677,25 +1688,97 @@ public final class SongBuilder {
 	}
 
 	/**
-	 * Blocks of lane a parity seam stands on: the sticky piston, the spacer it shoves, the
-	 * redstone block behind that, and the air cell the pair extends into.
+	 * Blocks of lane a parity seam stands on: the sticky piston, the redstone block on its face,
+	 * and the air cell the block extends into.
 	 *
-	 * <p>The spacer is not decoration: a redstone block directly on a piston's face powers the
-	 * piston, which would fire it at paste time and oscillate it ever after -- the reader's own
-	 * model states a retracted piston with one on its face is not a thing that can exist. And the
-	 * cell past the block must be air, or the wire beyond would read the block's power before the
-	 * piston ever moved.</p>
+	 * <p>The block sits on the face and does not fire the piston, because <b>a piston is not
+	 * activated by the block directly in front of it</b> -- the one adjacency excluded from a
+	 * piston's power check, and the whole reason this shape is three cells rather than four. A
+	 * spacer was built here first, on the strength of a comment in {@link NoteMachineReader}
+	 * describing the straight half-tick lane's own element; that comment is about a block beside
+	 * a piston, not in front of one.</p>
+	 *
+	 * <p>The cell past the block must be air, or the wire beyond would read the block's power
+	 * before the piston ever moved -- which is the whole delay.</p>
+	 *
+	 * <p>A repeater opens the element, which is the fourth cell. Every shape in this codebase
+	 * picks the lane up with one, and for the reason this needed: a chord does not always hand
+	 * the signal on at the level the next thing stands at -- a stacked cross runs sunken, with
+	 * its centre stone above the wire and nothing powered at component level. A piston laid
+	 * straight onto that reads an unpowered block, never fires, and silences everything after it
+	 * while every repeater in the build still has something behind it. A repeater is two game
+	 * ticks, which is even, so it leaves the parity the piston changes exactly as it was.</p>
 	 */
 	static int PARITY_SEAM_CELLS = 4;
 
+	/** Game ticks of waiting that fold into one column of delay chain, at a repeater's longest. */
+	private static final int GAME_TICKS_PER_PAD_COLUMN = 8;
+
 	/**
-	 * Cells of imbalance one parity seam is worth to the scheduler.
+	 * Whether a parity seam's three cells are nobody else's yet.
 	 *
-	 * <p>The hysteresis knob: a seam is taken only when the lanes' estimated lengths have drifted
-	 * further apart than this, so a two-note excursion on the other parity does not buy two pistons
-	 * to chase it. Priced in the same estimated cells the balance is measured in.</p>
+	 * <p>Asked because the chord behind may have reached forward into them -- reaching forward is
+	 * free in this codebase, the module ahead simply finds the cells taken -- and
+	 * {@link PlacementPlan#set} is first-writer-wins, so laying a piston over one is a silent
+	 * no-op. The lane then never gains its three game ticks and every note after it sounds on the
+	 * parity it was supposed to have left, which reads as a dead line rather than a wrong note
+	 * because the shapes downstream are built around a signal that is not there.</p>
+	 *
+	 * <p>Only the component level is asked. The ground under a lane is shared with whatever ran
+	 * along it, and always was; what may not be shared is the cell the piston stands in, the cell
+	 * its block starts in, and the cell the block is going to.</p>
 	 */
-	static int PARITY_SEAM_COST = 32;
+	private static boolean paritySeamHasRoom(PlacementPlan placements, Lane lane) {
+		Lane at = lane;
+		for (int cell = 0; cell < PARITY_SEAM_CELLS; cell++) {
+			if (at.bending() || placements.blockAt(at.pos().above()) != null) {
+				return false;
+			}
+			at = at.ahead(1);
+		}
+		return true;
+	}
+
+	/**
+	 * What a seam is priced at, in the estimated cells the lane balance is measured in.
+	 *
+	 * <p>The setting says how much padding a lane may lay before it gives up its parity, and
+	 * padding is what the balance term measures -- so the price of a piston is exactly that much
+	 * waiting, converted at the rate a delay chain folds it.</p>
+	 */
+	private static long seamPrice() {
+		return Math.max(1,
+			PARITY_MIN_DELAY_BEFORE_RESEED / GAME_TICKS_PER_PAD_COLUMN);
+	}
+
+	/**
+	 * Game ticks a lane may pad through to keep its parity before it reseeds instead.
+	 *
+	 * <p>The setting, and the only dial here worth a person's time. A lane whose own half of the
+	 * game tick has nothing to play does not stop consuming corridor: it lays delay chain to span
+	 * the silence and pacing dust to stay in earshot of its partner, and that is depth spent on
+	 * nothing. Past this much waiting it gives its parity up instead -- a piston, and then both
+	 * lanes on the busy half splitting its ticks between them, which carries the same music in
+	 * half the depth.</p>
+	 *
+	 * <p>Measured over the library's mixed-parity songs, as seams laid, the shortening of the
+	 * longer lane, and the worst momentary imbalance in cells:</p>
+	 *
+	 * <pre>
+	 *    16 gt   544 seams   -18.1%   5,716
+	 *    32 gt   513 seams   -18.6%   6,207
+	 *    64 gt   381 seams   -22.4%   3,809   &lt;- default
+	 *   128 gt   177 seams   -16.0%   8,609
+	 *   256 gt     4 seams    -1.0%  21,254
+	 * </pre>
+	 *
+	 * <p>Sixty-four is best on both counts and not merely cheapest, which is why it is the
+	 * default. Note the curve is not monotonic: pistons priced too low make the scheduler take
+	 * flips the events after them do not want, and it thrashes -- 16 buys 163 more seams than 64
+	 * and gives back four points of depth for them. A threshold no silence reaches leaves the
+	 * fixed parity split, which {@code INTERLEAVED_DYNAMIC_PARITY = false} gives outright.</p>
+	 */
+	static int PARITY_MIN_DELAY_BEFORE_RESEED = 64;
 
 	/**
 	 * Game ticks a lane sits silent across a parity seam.
@@ -1755,18 +1838,6 @@ public final class SongBuilder {
 				chord.add(notes.get(index++));
 			}
 			events.add(chord);
-		}
-		// What a seam is for: every event in the single-parity stretch ahead of this one can split
-		// across two lanes once both are on its parity, so a flip's worth is half that stretch --
-		// a horizon the one-step greedy cannot see from the event in front of it.
-		int[] lengths = new int[events.size()];
-		long[] stretchAhead = new long[events.size()];
-		for (int index = events.size() - 1; index >= 0; index--) {
-			int size = events.get(index).size();
-			lengths[index] = size <= 2 ? 2 : 1 + (size + 1) / 2;
-			boolean sameParity = index + 1 < events.size()
-				&& (events.get(index + 1).get(0).time() - events.get(index).get(0).time()) % 2 == 0;
-			stretchAhead[index] = lengths[index] + (sameParity ? stretchAhead[index + 1] : 0);
 		}
 		// A lane's picks and its running cell estimate, kept exactly through inserts and removals
 		// so the candidate sweep can try an assignment, read the score, and put everything back.
@@ -1889,12 +1960,14 @@ public final class SongBuilder {
 						// A flip taken on the event itself is credited with the stretch it opens
 						// up, less the seam it will owe on the way back; the seams a handback
 						// shuffles into existence get no credit, only the price.
-						long credit = receiver.seamAt(receiver.picks.size() - 1) == 0 ? 0
-							: Math.max(0, stretchAhead[next] / 2 - PARITY_SEAM_COST);
+						// Balance against the price of the pistons that bought it, and nothing
+						// else. A lookahead crediting each flip with the single-parity stretch
+						// it opened was tried here and measured worse than none -- the balance
+						// term already carries that stretch, one event at a time, and crediting
+						// it again bought flips the following events did not want.
 						long score = 2 * Math.max(receiver.cells, projected)
 							+ receiver.cells + projected
-							+ (long)PARITY_SEAM_COST * (lanes[0].seams + lanes[1].seams)
-							- credit;
+							+ seamPrice() * (lanes[0].seams + lanes[1].seams);
 						if (legal && score < bestScore) {
 							bestScore = score;
 							bestReceiver = side;
@@ -1988,7 +2061,10 @@ public final class SongBuilder {
 		List<EventGroup> result = new ArrayList<>(groups);
 		for (int flip : flips) {
 			EventGroup group = groups.get(flip);
-			int eat = Math.floorMod(groupTimes.get(flip), 2) == 1 ? 1 : 2;
+			// The piston's three game ticks, floored into the halved clock the way laneTimes
+			// floors everything -- one entering the odd half, two coming back -- plus the whole
+			// machine tick the opening repeater costs.
+			int eat = (Math.floorMod(groupTimes.get(flip), 2) == 1 ? 1 : 2) + 1;
 			int delay = group.time() - groups.get(flip - 1).time() - eat;
 			int delayRepeaters = Math.max(0, (delay - 1) / 4);
 			ChordStyle style = chooseStyle(layout, group.notes(), delayRepeaters >= 2);
@@ -8657,15 +8733,15 @@ public final class SongBuilder {
 					}
 				}
 			}
-			// The parity seam itself: a sticky piston facing down the lane, the spacer it shoves,
-			// the redstone block behind that, and the air cell the pair extends into -- three game
-			// ticks of delay, which is how a lane changes which half of the tick it plays. These
-			// are one-shot machines, so the "switch" has no state: everything downstream is on the
-			// other parity. Laid after the fold so any turn the wait crossed is behind it, and
-			// never in a bend nor on a corner -- a piston in a bend would push its blocks across
-			// the turn's own run. The block lands handing out a fresh fifteen, so the chain behind
-			// only has to reach the piston alive; where the bend walk would run the wire out
-			// first, a short repeater revives it from whatever ticks the gap still holds.
+			// The parity seam itself: a sticky piston facing down the lane, the redstone block on
+			// its face, and the air cell the block extends into -- three game ticks of delay,
+			// which is how a lane changes which half of the tick it plays. These are one-shot
+			// machines, so the "switch" has no state: everything downstream is on the other
+			// parity. Laid after the fold so any turn the wait crossed is behind it, and never in
+			// a bend nor on a corner -- a piston in a bend would push its block across the turn's
+			// own run. The block lands handing out a fresh fifteen, so the chain behind only has
+			// to reach the piston alive; where the bend walk would run the wire out first, a
+			// short repeater revives it from whatever ticks the gap still holds.
 			if (event.seamEat() > 0) {
 				placements.placing("paritySeam");
 				// Any turn still open is walked out first, and closed the way the fold closes
@@ -8712,12 +8788,31 @@ public final class SongBuilder {
 					placements.placing("paritySeam");
 				}
 				lane = pastAnyCorner(placements, lane);
+				// And it stands where all three cells are its own. The chord behind reaches
+				// forward for free, so the cells in front of one are not always empty; walked
+				// past rather than fought over, a column at a time, because a column of dust is
+				// the cheapest thing in the build and a piston that fails to lay is the most
+				// expensive -- the lane keeps the parity it was leaving and every shape after it
+				// is built around a signal that never arrives.
+				int shoved = 0;
+				while (shoved < laneWidth && !paritySeamHasRoom(placements, lane)) {
+					addParityPad(placements, lane.pos());
+					tipSignal--;
+					lane = lane.ahead(1);
+					shoved++;
+				}
+				if (shoved > 0) {
+					placements.padded("paritySeamShovedForRoom", shoved);
+				}
+				// The repeater that picks the lane up, exactly as every chord's opening does --
+				// see PARITY_SEAM_CELLS for the sunken cross that made it necessary.
+				set(placements, lane.pos(), "minecraft:stone");
+				set(placements, lane.pos().above(), "minecraft:repeater[facing="
+					+ repeaterFacing(lane.travel()) + ",delay=1]");
+				lane = lane.ahead(1);
 				set(placements, lane.pos(), "minecraft:stone");
 				set(placements, lane.pos().above(), "minecraft:sticky_piston[facing="
 					+ lane.travel().getName() + "]");
-				lane = lane.ahead(1);
-				set(placements, lane.pos(), "minecraft:stone");
-				set(placements, lane.pos().above(), "minecraft:smooth_stone");
 				lane = lane.ahead(1);
 				set(placements, lane.pos(), "minecraft:stone");
 				set(placements, lane.pos().above(), "minecraft:redstone_block");
@@ -20026,11 +20121,9 @@ public final class SongBuilder {
 			"a sunken bus -- a bus whose opening cell is a note block, so it carries three notes free");
 		key.put("minecraft:andesite", "a standard stacked chord -- or, where two machines share one "
 			+ "region, the second machine's plain ground");
-		key.put("minecraft:sticky_piston", "a parity seam: the piston shoves its spacer and the "
-			+ "redstone block through the air cell, three game ticks that move this lane to the "
-			+ "other half of the game tick");
-		key.put("minecraft:smooth_stone", "a parity seam's spacer -- keeps the redstone block off "
-			+ "the piston's face, or the piston would fire at paste time");
+		key.put("minecraft:sticky_piston", "a parity seam: the piston shoves the redstone block on "
+			+ "its face into the air cell, three game ticks that move this lane to the other half "
+			+ "of the game tick");
 		key.put("minecraft:deepslate", "a stacked bus");
 		key.put("minecraft:deepslate_tiles",
 			"a cut chord's stacked head, with its tail across the staircase");
