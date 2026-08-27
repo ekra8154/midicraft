@@ -1563,7 +1563,9 @@ public final class SongBuilder {
 			PlacementPlan placements = new PlacementPlan();
 			// Two machines, two buttons: the severed check excuses one starved repeater per way in,
 			// and until this was recorded every dual build's second button read as a severed lane.
-			placements.waysIn(2);
+			// One button on a shared spine, or one each. The severed check excuses a starved
+			// repeater per way in, and with the spine feeding both heads neither is starved.
+			placements.waysIn(INTERLEAVED_SHARED_INPUT ? 1 : 2);
 			// What the schedule decided, on the plan for whoever reads it: how many pistons, and
 			// which half of the tick each machine's input must fire on -- the one fact the starter
 			// buttons cannot carry themselves.
@@ -1771,7 +1773,7 @@ public final class SongBuilder {
 	 * world. Turning this on is one line once the spine's own wiring is settled; every other part
 	 * of it is done and measured.</p>
 	 */
-	static boolean INTERLEAVED_SHARED_INPUT = false;
+	static boolean INTERLEAVED_SHARED_INPUT = true;
 
 	/**
 	 * One input for both machines, in place of a starter button each.
@@ -1815,13 +1817,29 @@ public final class SongBuilder {
 		Direction toB = coordAcross(axis, headB.relative(across, 1)) == rowB + 1
 			? (rowB > rowA ? across : across.getOpposite())
 			: (rowB > rowA ? across.getOpposite() : across);
-		// The spine itself, between the two rows, stone with redstone over it so every block of
-		// it is live at once and a single trigger anywhere releases both machines.
+		// Which row the piston stands in, if the two machines open on opposite halves. Its spine
+		// block is the piston itself and carries no redstone over it -- dust there would run into
+		// the cell the block is being shoved through.
+		int pistonRow = -1;
+		for (int machine = 0; machine < 2; machine++) {
+			if (odd[machine]) {
+				pistonRow = Math.abs(coordAcross(axis, heads[machine]) - coordAcross(axis, headA));
+			}
+		}
+		// The spine itself, between the two rows: stone all the way, redstone over the top of it,
+		// and the button standing in that run one row in from the far end so a single press
+		// releases both machines on the same tick.
+		int buttonRow = Math.max(0, rows - 1);
 		for (int row = 0; row <= rows; row++) {
 			BlockPos at = spineA.relative(toB, row);
 			placements.placing("twoLaneInput");
 			set(placements, at, "minecraft:stone");
-			set(placements, at.above(), "minecraft:redstone_wire");
+			if (row == buttonRow) {
+				set(placements, at.above(),
+					String.format(java.util.Locale.ROOT, STARTER_BUTTON, forward.getName()));
+			} else if (row != pistonRow) {
+				set(placements, at.above(), "minecraft:redstone_wire");
+			}
 		}
 		for (int machine = 0; machine < 2; machine++) {
 			BlockPos head = heads[machine];
@@ -1834,14 +1852,14 @@ public final class SongBuilder {
 				// cell would read the block's power before the piston ever moved, which is the
 				// whole of the delay.
 				placements.take(spine);
-				placements.take(spine.above());
 				set(placements, spine, "minecraft:sticky_piston[facing=" + forward.getName() + "]");
+				// At the piston's own level, which is where it shoves: the block beside it and
+				// the empty cell that block is going to. The ground beneath is the lane's own and
+				// is left alone.
 				for (int column = 1; column < columns; column++) {
 					BlockPos at = spine.relative(forward, column);
 					placements.take(at);
-					placements.take(at.above());
-					set(placements, at, "minecraft:stone");
-					set(placements, at.above(),
+					set(placements, at,
 						column == 1 ? "minecraft:redstone_block" : "minecraft:air");
 				}
 				placements.padded("twoLaneInputPiston");
@@ -1856,16 +1874,6 @@ public final class SongBuilder {
 				placements.padded("twoLaneInputStraight");
 			}
 		}
-		// And the one thing that presses it. A row past the far end so it stands clear of both
-		// machines, on its own block, with the spine's redstone running up to it -- one press
-		// releases both machines on the same tick, which is the whole reason this replaced a
-		// button each. It is also the reader's way in: with the heads now fed off the spine,
-		// nothing else in the build is a repeater with nothing behind it.
-		BlockPos trigger = spineA.relative(toB, rows + 1);
-		placements.placing("twoLaneInput");
-		set(placements, trigger, "minecraft:stone");
-		set(placements, trigger.above(),
-			String.format(java.util.Locale.ROOT, STARTER_BUTTON, forward.getName()));
 		placements.padded("twoLaneInputRows", rows + 1);
 	}
 

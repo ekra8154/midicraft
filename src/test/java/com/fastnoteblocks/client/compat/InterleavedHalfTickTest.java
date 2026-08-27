@@ -68,12 +68,11 @@ class InterleavedHalfTickTest {
 					Integer.parseInt(token[3]));
 			})
 			.toList();
-		assertEquals(2, buttons.size(), "each machine brings its own way in");
-		// And the two ways in stand together at one corner: a lane pitch apart in depth, a
-		// couple of columns apart, level -- close enough for one contraption to drive both.
-		BlockPos gap = buttons.get(1).subtract(buttons.get(0));
-		assertTrue(Math.abs(gap.getX()) <= 3 && Math.abs(gap.getZ()) == 3 && gap.getY() == 0,
-			"the two starts should stand together: " + buttons);
+		// One way in for both machines. It used to be one each, which no player could press on
+		// the same tick -- so whatever offset the plan worked out for the two halves, the hand
+		// on the buttons decided it instead. The single spine is what makes the plan's answer
+		// the one that happens. See SongBuilder.addTwoLaneInput.
+		assertEquals(1, buttons.size(), "both machines share one way in: " + buttons);
 		assertEquals(0, plan.wrongNotes(), "notes sounding on a foreign tick: " + plan.faults());
 		assertEquals(0, plan.missingNotes(), "notes with nowhere to hang: " + plan.faults());
 
@@ -134,9 +133,14 @@ class InterleavedHalfTickTest {
 		SongBuilder.PastePlan plan = SongBuilder.createInterleavedHalfTickPastePlan(
 			new BlockPos(0, 64, 0), Direction.EAST, notes,
 			new SongBuilder.BuildLimits(16, 24, 1), SongBuilder.WalkStart.HEAD);
-		assertEquals(2, plan.commands().stream()
+		assertEquals(1, plan.commands().stream()
 			.filter(command -> command.contains("minecraft:oak_button")).count(),
-			"two machines, two ways in");
+			"two machines, one shared way in");
+		// The piston that puts the two machines a game tick apart, where they open on opposite
+		// halves. It is the input's, not a mid-song seam's: it stands in the spine itself.
+		assertTrue(plan.commands().stream()
+			.anyMatch(command -> command.contains("minecraft:sticky_piston")),
+			"the odd machine should be fed through a piston");
 		assertEquals(0, plan.wrongNotes(), "wrong notes: " + plan.faults());
 		assertEquals(0, plan.missingNotes(), "missing notes: " + plan.faults());
 	}
