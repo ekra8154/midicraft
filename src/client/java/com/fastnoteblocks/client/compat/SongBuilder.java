@@ -1778,7 +1778,7 @@ public final class SongBuilder {
 	 * and gives back four points of depth for them. A threshold no silence reaches leaves the
 	 * fixed parity split, which {@code INTERLEAVED_DYNAMIC_PARITY = false} gives outright.</p>
 	 */
-	static int PARITY_MIN_DELAY_BEFORE_RESEED = 64;
+	public static int PARITY_MIN_DELAY_BEFORE_RESEED = 64;
 
 	/**
 	 * Game ticks a lane sits silent across a parity seam.

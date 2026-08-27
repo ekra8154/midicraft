@@ -241,6 +241,21 @@ public final class FastNoteblocksConfig {
 	public static final int DEFAULT_BUILD_LANE_FLOORS = 1;
 	public static final int MIN_BUILD_LANE_FLOORS = 1;
 	public static final int MAX_BUILD_LANE_FLOORS = 16;
+	/**
+	 * Game ticks a half-tick lane may pad through before it reseeds onto the other parity.
+	 *
+	 * <p>Only the Interleaved half-tick paste reads this. Both its machines run the whole song,
+	 * and a machine whose half of the game tick has nothing to play still spends corridor: delay
+	 * chain to cross the silence, and dust to stay within earshot of its partner. Past this much
+	 * waiting it gives its half up instead -- a sticky piston's three game ticks -- and both
+	 * machines share the busy half, which carries the same music in half the depth.</p>
+	 *
+	 * <p>Lower spends more pistons to save more space. The maximum leaves each machine on one
+	 * half of the tick for the whole song, which is what this mode did before reseeding.</p>
+	 */
+	public static final int DEFAULT_PARITY_RESEED_DELAY = 64;
+	public static final int MIN_PARITY_RESEED_DELAY = 16;
+	public static final int MAX_PARITY_RESEED_DELAY = 512;
 	/** Repeats of a pitch closer than this many repeater ticks collapse on convert. 0 disables. */
 	public static final int DEFAULT_REPEAT_MERGE_TICKS = 1;
 	public static final int MIN_REPEAT_MERGE_TICKS = 0;
@@ -388,6 +403,7 @@ public final class FastNoteblocksConfig {
 	private double commandsPerTick;
 	private int buildLaneWidth;
 	private int buildLaneFloors;
+	private int parityReseedDelay;
 	private boolean ultraLaneStartTop;
 	private String importDirectory;
 	private int maxBuildFloors;
@@ -535,6 +551,10 @@ public final class FastNoteblocksConfig {
 				);
 				instance.buildLaneFloors = clampBuildLaneFloors(
 					stored.buildLaneFloors == null ? DEFAULT_BUILD_LANE_FLOORS : stored.buildLaneFloors
+				);
+				instance.setParityReseedDelay(
+					stored.parityReseedDelay == null
+						? DEFAULT_PARITY_RESEED_DELAY : stored.parityReseedDelay
 				);
 				instance.ultraLaneStartTop = stored.ultraLaneStartTop != null
 					&& stored.ultraLaneStartTop;
@@ -1279,6 +1299,22 @@ public final class FastNoteblocksConfig {
 		this.buildLaneFloors = clampBuildLaneFloors(buildLaneFloors);
 	}
 
+	/** @see #DEFAULT_PARITY_RESEED_DELAY */
+	public int parityReseedDelay() {
+		return parityReseedDelay;
+	}
+
+	/**
+	 * Sets the setting and the builder's copy of it together, as
+	 * {@link #setDebugPasteEnabled} does and for the same reason: the tests and the census
+	 * probes drive the scheduler with no config file to read.
+	 */
+	public void setParityReseedDelay(int parityReseedDelay) {
+		this.parityReseedDelay = clampParityReseedDelay(parityReseedDelay);
+		com.fastnoteblocks.client.compat.SongBuilder.PARITY_MIN_DELAY_BEFORE_RESEED =
+			this.parityReseedDelay;
+	}
+
 	public ComposerProject.OctaveShifting convertOctaveShifting() {
 		return convertOctaveShifting;
 	}
@@ -1441,6 +1477,7 @@ public final class FastNoteblocksConfig {
 		config.commandsPerTick = PasteRate.DEFAULT;
 		config.buildLaneWidth = DEFAULT_BUILD_LANE_WIDTH;
 		config.buildLaneFloors = DEFAULT_BUILD_LANE_FLOORS;
+		config.parityReseedDelay = DEFAULT_PARITY_RESEED_DELAY;
 		config.ultraLaneStartTop = false;
 		config.maxBuildFloors = DEFAULT_MAX_BUILD_FLOORS;
 		config.pasteMode = "COMPACT_CUBE";
@@ -1487,6 +1524,10 @@ public final class FastNoteblocksConfig {
 
 	private static int clampBuildLaneFloors(int floors) {
 		return Math.max(MIN_BUILD_LANE_FLOORS, Math.min(MAX_BUILD_LANE_FLOORS, floors));
+	}
+
+	private static int clampParityReseedDelay(int ticks) {
+		return Math.max(MIN_PARITY_RESEED_DELAY, Math.min(MAX_PARITY_RESEED_DELAY, ticks));
 	}
 
 	private static double clampCommandsPerTick(double commands) {
@@ -1610,6 +1651,7 @@ public final class FastNoteblocksConfig {
 		private Double commandsPerTick;
 		private Integer buildLaneWidth;
 		private Integer buildLaneFloors;
+		private Integer parityReseedDelay;
 		private Boolean ultraLaneStartTop;
 		private String importDirectory;
 		private Integer maxBuildFloors;
@@ -1681,6 +1723,7 @@ public final class FastNoteblocksConfig {
 			this.commandsPerTick = config.commandsPerTick;
 			this.buildLaneWidth = config.buildLaneWidth;
 			this.buildLaneFloors = config.buildLaneFloors;
+			this.parityReseedDelay = config.parityReseedDelay;
 			this.ultraLaneStartTop = config.ultraLaneStartTop;
 			this.importDirectory = config.importDirectory;
 			this.maxBuildFloors = config.maxBuildFloors;

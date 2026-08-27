@@ -56,6 +56,7 @@ final class BuildOptionsScreen extends Screen {
 	private double commandsPerTick;
 	private int laneWidth;
 	private int laneFloors;
+	private int reseedDelay;
 	/** The width control, so its line can be rewritten when a forecast says the width was raised. */
 	private Choice widthChoice;
 	/**
@@ -298,6 +299,7 @@ final class BuildOptionsScreen extends Screen {
 		this.commandsPerTick = FastNoteblocksConfig.get().commandsPerTick();
 		this.laneWidth = FastNoteblocksConfig.get().buildLaneWidth();
 		this.laneFloors = FastNoteblocksConfig.get().buildLaneFloors();
+		this.reseedDelay = FastNoteblocksConfig.get().parityReseedDelay();
 	}
 
 	/** Rows the layout control takes: the chosen one, plus every option while the list is open. */
@@ -314,8 +316,50 @@ final class BuildOptionsScreen extends Screen {
 		return widthRow(top) + 22;
 	}
 
+	private int reseedRow(int top) {
+		return floorRow(top) + 22;
+	}
+
 	private int rateRow(int top) {
-		return widthRow(top) + (hasLaneControls() ? 48 : 0) + 10;
+		return widthRow(top) + (hasLaneControls() ? 48 : 0)
+			+ (hasReseedControl() ? 22 : 0) + 10;
+	}
+
+	/**
+	 * Whether this layout runs two machines that may trade halves of the game tick.
+	 *
+	 * <p>Only the interleaved paste does. The other half-tick layouts give each machine one
+	 * parity for the whole song, so there is no reseed for a threshold to govern.</p>
+	 */
+	private boolean hasReseedControl() {
+		return mode == SongBuilder.PasteMode.INTERLEAVED_HALF_TICK;
+	}
+
+	/**
+	 * The reseed thresholds offered, in game ticks, coarsely enough to be a choice.
+	 *
+	 * <p>A range of 16 to 512 one tick at a time is five hundred rungs of a slider nobody would
+	 * turn. These are the points the measurement actually distinguishes.</p>
+	 */
+	private static final List<Integer> RESEED_DELAYS =
+		List.of(16, 24, 32, 48, 64, 96, 128, 192, 256, 384, 512);
+
+	private static int reseedRung(int ticks) {
+		int best = 0;
+		for (int rung = 1; rung < RESEED_DELAYS.size(); rung++) {
+			if (Math.abs(RESEED_DELAYS.get(rung) - ticks)
+					< Math.abs(RESEED_DELAYS.get(best) - ticks)) {
+				best = rung;
+			}
+		}
+		return best;
+	}
+
+	private String reseedLine(int ticks) {
+		if (ticks >= FastNoteblocksConfig.MAX_PARITY_RESEED_DELAY) {
+			return "never swap halves - each machine keeps one, and pads";
+		}
+		return ticks + " ticks of waiting before a machine swaps halves";
 	}
 
 	/** Whether this layout folds inside a width you choose, and so has a width and a floor count. */
@@ -378,6 +422,13 @@ final class BuildOptionsScreen extends Screen {
 				rung -> laneFloors = FastNoteblocksConfig.MIN_BUILD_LANE_FLOORS + rung));
 		}
 
+		if (hasReseedControl()) {
+			addRenderableWidget(new Choice(left, reseedRow(top), width, RESEED_DELAYS.size(),
+				reseedRung(reseedDelay),
+				rung -> reseedLine(RESEED_DELAYS.get(rung)),
+				rung -> reseedDelay = RESEED_DELAYS.get(rung)));
+		}
+
 		y = rateRow(top);
 		addRenderableWidget(new Choice(left, y, width, PasteRate.RATES.size(),
 			PasteRate.index(commandsPerTick),
@@ -388,6 +439,7 @@ final class BuildOptionsScreen extends Screen {
 			FastNoteblocksConfig.get().setCommandsPerTick(commandsPerTick);
 			FastNoteblocksConfig.get().setBuildLaneWidth(laneWidth);
 			FastNoteblocksConfig.get().setBuildLaneFloors(laneFloors);
+			FastNoteblocksConfig.get().setParityReseedDelay(reseedDelay);
 			FastNoteblocksConfig.get().setPasteMode(mode.name());
 			FastNoteblocksConfig.save();
 			confirm.accept(mode);
