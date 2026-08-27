@@ -1620,6 +1620,286 @@ public final class SongBuilder {
 		return new int[][] {stretchA, stretchB};
 	}
 
+	/** Blocks of lane a parity seam stands on: the sticky piston, its redstone block, and the air
+	 * cell the block extends into -- which must be air, or the wire beyond would read the block's
+	 * power before the piston ever moved. */
+	static int PARITY_SEAM_CELLS = 3;
+
+	/**
+	 * Cells of imbalance one parity seam is worth to the scheduler.
+	 *
+	 * <p>The hysteresis knob: a seam is taken only when the lanes' estimated lengths have drifted
+	 * further apart than this, so a two-note excursion on the other parity does not buy two pistons
+	 * to chase it. Priced in the same estimated cells the balance is measured in.</p>
+	 */
+	static int PARITY_SEAM_COST = 32;
+
+	/**
+	 * Game ticks a lane sits silent across a parity seam.
+	 *
+	 * <p>The piston itself is three, and the first module after it opens on a repeater -- stacked
+	 * heads must, and the rest may -- which is two more. Scheduling every seam at five keeps the
+	 * walk free to lay whatever module comes next.</p>
+	 */
+	static int PARITY_SEAM_GT = 5;
+
+	/**
+	 * Which machine plays each tick of the song, when a machine may change parity mid-song.
+	 *
+	 * <p>The fixed split hands one machine the even ticks and the other the odd, which leaves one
+	 * machine nearly idle through any stretch the song spends on a single parity -- and the nested
+	 * layout's corridor is as deep as its <em>longer</em> machine, so an idle machine is not saved
+	 * space, it is spent space. Here a machine's parity is a thing it changes: a sticky piston with
+	 * a redstone block on its face is an odd three game ticks of delay, and everything downstream
+	 * of one is on the other half of the tick. These are one-shot machines, so a "switch" has no
+	 * state -- it is a point on the lane past which the times are odd.</p>
+	 *
+	 * <p>Lane times stay in game ticks here; {@link #laneTimes} halves them for the walk as ever,
+	 * which stays exact because consecutive events on one lane either share a parity (an even gap)
+	 * or sit at least {@link #PARITY_SEAM_GT} apart across a seam.</p>
+	 *
+	 * <p>{@code flipsA}/{@code flipsB} index the lane's tick-groups: an entry {@code i} means the
+	 * lane changes parity in the silence before its {@code i}th event, and the walk owes that run
+	 * a piston. Every flip is scheduled with at least {@link #PARITY_SEAM_GT} game ticks of lane
+	 * silence around it.</p>
+	 */
+	record ParitySchedule(List<EventNote> laneA, List<EventNote> laneB,
+			List<Integer> flipsA, List<Integer> flipsB) {
+	}
+
+	/**
+	 * The greedy that decides tick ownership: every event goes to whichever lane leaves the two
+	 * most even, and a seam is bought only when the imbalance outprices it.
+	 *
+	 * <p>Feasibility is never in question -- the fixed parity split is itself a legal assignment
+	 * with no seams at all -- so all this optimises is balance, and balance is both prizes at
+	 * once: the corridor is as deep as the longer lane, and the two playheads stand as far apart
+	 * as the lanes' laid lengths differ. One number, minimised, buys depth and earshot together.</p>
+	 *
+	 * <p>The one rule with teeth is the seam gap: a lane changing parity is silent for
+	 * {@link #PARITY_SEAM_GT} game ticks, so an event whose only takers played too recently is
+	 * resolved by handing a taker's most recent events to its partner -- legal whenever they share
+	 * a parity, which is the only situation that forces it. The candidate sweep tries each lane
+	 * with up to two such handbacks and scores what results; a forced seam that still cannot open
+	 * a window widens the sweep before giving up, which no library song has needed.</p>
+	 */
+	static ParitySchedule scheduleParities(List<EventNote> notes) {
+		List<List<EventNote>> events = new ArrayList<>();
+		for (int index = 0; index < notes.size();) {
+			int time = notes.get(index).time();
+			List<EventNote> chord = new ArrayList<>();
+			while (index < notes.size() && notes.get(index).time() == time) {
+				chord.add(notes.get(index++));
+			}
+			events.add(chord);
+		}
+		// What a seam is for: every event in the single-parity stretch ahead of this one can split
+		// across two lanes once both are on its parity, so a flip's worth is half that stretch --
+		// a horizon the one-step greedy cannot see from the event in front of it.
+		int[] lengths = new int[events.size()];
+		long[] stretchAhead = new long[events.size()];
+		for (int index = events.size() - 1; index >= 0; index--) {
+			int size = events.get(index).size();
+			lengths[index] = size <= 2 ? 2 : 1 + (size + 1) / 2;
+			boolean sameParity = index + 1 < events.size()
+				&& (events.get(index + 1).get(0).time() - events.get(index).get(0).time()) % 2 == 0;
+			stretchAhead[index] = lengths[index] + (sameParity ? stretchAhead[index + 1] : 0);
+		}
+		// A lane's picks and its running cell estimate, kept exactly through inserts and removals
+		// so the candidate sweep can try an assignment, read the score, and put everything back.
+		final class Ledger {
+			final List<Integer> picks = new ArrayList<>();
+			long cells;
+			int seams;
+
+			int timeAt(int position) {
+				return events.get(picks.get(position)).get(0).time();
+			}
+
+			// The estimate, not the measurement: a chord at bus-ish length, a wait at its folded
+			// repeater count, and a parity change at its footprint. Only balance decisions read
+			// this; the probe measures real builds.
+			int contribution(int position) {
+				int size = events.get(picks.get(position)).size();
+				int length = size <= 2 ? 2 : 1 + (size + 1) / 2;
+				if (position == 0) {
+					return length;
+				}
+				int gap = timeAt(position) - timeAt(position - 1);
+				int repeaters = Math.max(0, (gap / 2 - 1) / 4);
+				return length + repeaters + (gap % 2 != 0 ? PARITY_SEAM_CELLS : 0);
+			}
+
+			// The wait this lane will lay whenever it next plays. Sunk, not spent: charging it to
+			// the event that happens to trigger it made an idle lane look ever more expensive to
+			// feed, and the greedy starved one lane completely on the first song it met.
+			long pendingAt(int time) {
+				return picks.isEmpty() ? 0
+					: Math.max(0, ((time - timeAt(picks.size() - 1)) / 2 - 1) / 4);
+			}
+
+			int seamAt(int position) {
+				return position > 0 && position < picks.size()
+					&& (timeAt(position) - timeAt(position - 1)) % 2 != 0 ? 1 : 0;
+			}
+
+			int insert(int event) {
+				int time = events.get(event).get(0).time();
+				int position = picks.size();
+				while (position > 0 && timeAt(position - 1) > time) {
+					position--;
+				}
+				if (position < picks.size()) {
+					cells -= contribution(position);
+					seams -= seamAt(position);
+				}
+				picks.add(position, event);
+				cells += contribution(position);
+				seams += seamAt(position);
+				if (position + 1 < picks.size()) {
+					cells += contribution(position + 1);
+					seams += seamAt(position + 1);
+				}
+				return position;
+			}
+
+			int removeAt(int position) {
+				int event = picks.get(position);
+				cells -= contribution(position);
+				seams -= seamAt(position);
+				if (position + 1 < picks.size()) {
+					cells -= contribution(position + 1);
+					seams -= seamAt(position + 1);
+				}
+				picks.remove(position);
+				if (position < picks.size()) {
+					cells += contribution(position);
+					seams += seamAt(position);
+				}
+				return event;
+			}
+
+			boolean legalAt(int position) {
+				if (position <= 0 || position >= picks.size()) {
+					return true;
+				}
+				int gap = timeAt(position) - timeAt(position - 1);
+				return gap % 2 == 0 || gap >= PARITY_SEAM_GT;
+			}
+		}
+		Ledger[] lanes = {new Ledger(), new Ledger()};
+		for (int next = 0; next < events.size(); next++) {
+			int bestReceiver = -1;
+			int bestMoves = -1;
+			long bestScore = Long.MAX_VALUE;
+			for (int maxMoves = 2; bestReceiver < 0; maxMoves += 6) {
+				for (int side = 0; side < 2; side++) {
+					Ledger receiver = lanes[side];
+					Ledger other = lanes[1 - side];
+					for (int moves = 0; moves <= Math.min(maxMoves, receiver.picks.size());
+							moves++) {
+						int[] moved = new int[moves];
+						List<Integer> touched = new ArrayList<>();
+						for (int m = 0; m < moves; m++) {
+							moved[m] = receiver.removeAt(receiver.picks.size() - 1);
+							int at = other.insert(moved[m]);
+							for (int t = 0; t < touched.size(); t++) {
+								if (touched.get(t) >= at) {
+									touched.set(t, touched.get(t) + 1);
+								}
+							}
+							touched.add(at);
+						}
+						receiver.insert(next);
+						boolean legal = receiver.legalAt(receiver.picks.size() - 1);
+						for (int at : touched) {
+							legal = legal && other.legalAt(at) && other.legalAt(at + 1);
+						}
+						// Scored on projected position -- laid cells plus the wait a lane will
+						// pay whenever it next plays -- so an idle lane's accrued wait, which is
+						// owed under every assignment, does not bias whose turn it is. Max for
+						// depth and drift, sum so a seam is never free just because it lands on
+						// the shorter lane, and every seam anywhere at the hysteresis price, so
+						// a handback cannot smuggle one in for its footprint alone.
+						int time = events.get(next).get(0).time();
+						long projected = other.cells + other.pendingAt(time);
+						// A flip taken on the event itself is credited with the stretch it opens
+						// up, less the seam it will owe on the way back; the seams a handback
+						// shuffles into existence get no credit, only the price.
+						long credit = receiver.seamAt(receiver.picks.size() - 1) == 0 ? 0
+							: Math.max(0, stretchAhead[next] / 2 - PARITY_SEAM_COST);
+						long score = 2 * Math.max(receiver.cells, projected)
+							+ receiver.cells + projected
+							+ (long)PARITY_SEAM_COST * (lanes[0].seams + lanes[1].seams)
+							- credit;
+						if (legal && score < bestScore) {
+							bestScore = score;
+							bestReceiver = side;
+							bestMoves = moves;
+						}
+						receiver.removeAt(receiver.picks.size() - 1);
+						for (int m = moves - 1; m >= 0; m--) {
+							other.removeAt(other.picks.lastIndexOf(moved[m]));
+							receiver.insert(moved[m]);
+						}
+					}
+				}
+				if (bestReceiver < 0 && maxMoves > events.size()) {
+					throw new IllegalStateException("no legal parity assignment for the event at "
+						+ "game tick " + events.get(next).get(0).time());
+				}
+			}
+			Ledger receiver = lanes[bestReceiver];
+			Ledger other = lanes[1 - bestReceiver];
+			for (int m = 0; m < bestMoves; m++) {
+				other.insert(receiver.removeAt(receiver.picks.size() - 1));
+			}
+			receiver.insert(next);
+		}
+		List<EventNote> laneA = new ArrayList<>();
+		List<EventNote> laneB = new ArrayList<>();
+		List<Integer> flipsA = new ArrayList<>();
+		List<Integer> flipsB = new ArrayList<>();
+		for (int side = 0; side < 2; side++) {
+			Ledger lane = lanes[side];
+			List<EventNote> flat = side == 0 ? laneA : laneB;
+			List<Integer> flips = side == 0 ? flipsA : flipsB;
+			for (int position = 0; position < lane.picks.size(); position++) {
+				if (position > 0
+						&& (lane.timeAt(position) - lane.timeAt(position - 1)) % 2 != 0) {
+					flips.add(position);
+				}
+				flat.addAll(events.get(lane.picks.get(position)));
+			}
+		}
+		return new ParitySchedule(List.copyOf(laneA), List.copyOf(laneB),
+			List.copyOf(flipsA), List.copyOf(flipsB));
+	}
+
+	/**
+	 * A lane's running cell count after each of its events, measured through the real grouping.
+	 *
+	 * <p>For probes to hold two lanes against each other: the corridor is as deep as the longer
+	 * lane's total, and the playheads stand apart by the difference at each moment. Times come out
+	 * in the walk's machine ticks, cells cumulative; seam footprints are not in here, they are the
+	 * caller's three cells per flip.</p>
+	 */
+	static int[][] laneCellTrajectory(List<EventNote> gtNotes) {
+		if (gtNotes.isEmpty()) {
+			return new int[][] {{}, {}};
+		}
+		List<EventGroup> groups = eventGroups(laneTimes(gtNotes), Layout.ultraAlong(1, 0).asV2());
+		int[] times = new int[groups.size()];
+		int[] cells = new int[groups.size()];
+		int total = 0;
+		for (int index = 0; index < groups.size(); index++) {
+			total += groups.get(index).length();
+			times[index] = groups.get(index).time();
+			cells[index] = total;
+		}
+		return new int[][] {times, cells};
+	}
+
 	/**
 	 * The nested route: two machines sharing both walls, interleaved purely in depth.
 	 *
