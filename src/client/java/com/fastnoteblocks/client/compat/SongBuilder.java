@@ -1735,6 +1735,15 @@ public final class SongBuilder {
 			// buttons cannot carry themselves.
 			if (flipsA.size() + flipsB.size() > 0) {
 				placements.padded("paritySeams", flipsA.size() + flipsB.size());
+				// How many of them went without a repeater of their own, which is the only
+				// number the back search produces and the one to check a paste against: a seam
+				// counted here is one trusting the lane behind it to hold the pulse open.
+				int bare = (int)Stream.concat(evenEvents.stream(), oddEvents.stream())
+					.filter(event -> event.seamEat() > 0 && event.seamRepeater() == 0)
+					.count();
+				if (bare > 0) {
+					placements.padded("paritySeamsWithoutARepeater", bare);
+				}
 			}
 			if (Math.floorMod(gtA.get(0).time(), 2) == 1) {
 				placements.padded("machineAStartsOdd");
@@ -1960,6 +1969,52 @@ public final class SongBuilder {
 	static int PARITY_SEAM_REPEATER = 3;
 
 	/**
+	 * The cells of a parity seam, in the order the lane walks them.
+	 *
+	 * <p>Seven with the opening repeater, six without. Dropping it is what a repeater of three
+	 * already standing further back in the same stretch would allow -- the pair needs a scheduled
+	 * edge and a long enough pulse, and neither has to come from the cell touching the piston. The
+	 * saving is a column of element and six game ticks less of the wait absorbed, which is a
+	 * column of delay chain given back: see {@link #PARITY_SEAM_CELLS}.</p>
+	 */
+	private static String[] seamElement(Direction travel, int repeater) {
+		String piston = "minecraft:sticky_piston[facing=" + travel.getName() + "]";
+		String[] pair = {
+			piston, "minecraft:redstone_block", "minecraft:air",
+			piston, "minecraft:redstone_block", "minecraft:air",
+		};
+		if (repeater <= 0) {
+			return pair;
+		}
+		String[] cells = new String[pair.length + 1];
+		cells[0] = "minecraft:repeater[facing=" + repeaterFacing(travel) + ",delay="
+			+ repeater + "]";
+		System.arraycopy(pair, 0, cells, 1, pair.length);
+		return cells;
+	}
+
+	/** The two pistons, their blocks and the cells those blocks are going to. */
+	static final int PARITY_SEAM_PAIR_CELLS = 6;
+
+	/** What the pair alone costs, from any phase at all. */
+	static final int PARITY_SEAM_PAIR_GAME_TICKS = 5;
+
+	/**
+	 * Whether a seam may drop its own repeater where the lane already holds one.
+	 *
+	 * <p>The repeater does two jobs and the search asks after both -- a repeater of three or more
+	 * since the last pair, so the pulse is still wide enough to shove with, and a previous chord
+	 * that hands the lane on at component level rather than sunken, so there is something to fire
+	 * the piston. Where both are already true the cell is spent for nothing.</p>
+	 *
+	 * <p>Worth a little: the six game ticks the shorter element stops absorbing come back as
+	 * delay chain, which nearly cancels the cell saved. Measured over the library it is about
+	 * seven columns in a hundred seams. Kept because it is free once decided in the plan, and
+	 * because the two questions are exactly the ones a person would ask.</p>
+	 */
+	static boolean PARITY_SEAM_BACK_SEARCH = true;
+
+	/**
 	 * Whether both machines are started from one spine instead of a button each.
 	 *
 	 * <p><b>Off: built, laid in the right shape, and not conducting.</b> The geometry comes out
@@ -2145,9 +2200,9 @@ public final class SongBuilder {
 	 * along it, and always was; what may not be shared is the cell the piston stands in, the cell
 	 * its block starts in, and the cell the block is going to.</p>
 	 */
-	private static boolean paritySeamHasRoom(PlacementPlan placements, Lane lane) {
+	private static boolean paritySeamHasRoom(PlacementPlan placements, Lane lane, int cells) {
 		Lane at = lane;
-		for (int cell = 0; cell < PARITY_SEAM_CELLS; cell++) {
+		for (int cell = 0; cell < cells; cell++) {
 			if (at.bending() || placements.blockAt(at.pos().above()) != null) {
 				return false;
 			}
@@ -2282,7 +2337,7 @@ public final class SongBuilder {
 				}
 				int gap = timeAt(position) - timeAt(position - 1);
 				int repeaters = Math.max(0, (gap / 2 - 1) / 4);
-				return length + repeaters + (gap % 2 != 0 ? PARITY_SEAM_CELLS : 0);
+				return length + repeaters + (gap % 2 != 0 ? PARITY_SEAM_PAIR_CELLS : 0);
 			}
 
 			// The wait this lane will lay whenever it next plays. Sunk, not spent: charging it to
@@ -2505,13 +2560,42 @@ public final class SongBuilder {
 			}
 		}
 		List<EventGroup> result = new ArrayList<>(groups);
+		int lastFlip = -1;
 		for (int flip : flips) {
 			EventGroup group = groups.get(flip);
-			// The element's seven game ticks, floored into the halved clock the way laneTimes
-			// floors everything: three machine ticks entering the odd half, four coming back.
+			// Whether this seam has to bring its own repeater, or whether the lane already holds
+			// what the repeater is there for. Two separate jobs, and it is only free of the cell
+			// when both are already answered:
+			//
+			// The pulse. A pair is spat rather than shoved unless a repeater of three or more
+			// stands somewhere between it and the pair before it -- anywhere in that stretch,
+			// not necessarily touching the piston. A wait long enough to fold lays repeaters of
+			// four, so a chain of one or more of them is that guarantee. Counted strictly before
+			// this event, because the straight lane lays its element ahead of its own delay
+			// chain and only the interleaved walk lays it behind: the stretch both agree on is
+			// the one that ends at the previous event.
+			//
+			// The level. A stacked chord hands the lane on sunken -- wire at ground level, its
+			// centre stone above -- and a piston laid straight onto that reads an unpowered block
+			// and never fires. The repeater is what picks the lane up. Read off the style the
+			// plan chose, which is safe in the one direction that matters: the walk only ever
+			// drops a chord to a simpler shape and never raises one, so a plain shape predicted
+			// here cannot turn into a stacked cross by the time the seam is laid.
+			boolean pulseHeld = false;
+			for (int back = Math.max(lastFlip, 0) + 1; back < flip; back++) {
+				pulseHeld |= groups.get(back).length() - groups.get(back).chordLength() >= 1;
+			}
+			boolean sunkenBehind = groups.get(flip - 1).style().stacked()
+				|| groups.get(flip - 1).style().busHeaded();
+			int repeater = PARITY_SEAM_BACK_SEARCH && pulseHeld && !sunkenBehind
+				? 0 : PARITY_SEAM_REPEATER;
+			lastFlip = flip;
+			// The element's game ticks, floored into the halved clock the way laneTimes floors
+			// everything -- one less entering the odd half than coming back.
+			int seamTicks = PARITY_SEAM_PAIR_GAME_TICKS + 2 * repeater;
 			int eat = Math.floorMod(groupTimes.get(flip), 2) == 1
-				? (PARITY_SEAM_GAME_TICKS - 1) / 2
-				: (PARITY_SEAM_GAME_TICKS + 1) / 2;
+				? (seamTicks - 1) / 2
+				: (seamTicks + 1) / 2;
 			int delay = group.time() - groups.get(flip - 1).time() - eat;
 			int delayRepeaters = Math.max(0, (delay - 1) / 4);
 			ChordStyle style = chooseStyle(layout, group.notes(), delayRepeaters >= 2);
@@ -2529,8 +2613,9 @@ public final class SongBuilder {
 				: style.busHeaded() ? Math.max(0, 13 - tailCells)
 				: 13;
 			result.set(flip, new EventGroup(group.time(), group.notes(),
-				delayRepeaters + eventLength + PARITY_SEAM_CELLS, eventLength,
-				maxSafeTurnDistance, style, laneReachOf(layout, style, group.notes()), eat));
+				delayRepeaters + eventLength + PARITY_SEAM_PAIR_CELLS + (repeater > 0 ? 1 : 0),
+				eventLength, maxSafeTurnDistance, style,
+				laneReachOf(layout, style, group.notes()), eat, repeater));
 		}
 		return List.copyOf(result);
 	}
@@ -2766,17 +2851,14 @@ public final class SongBuilder {
 			placements.placing("paritySeam");
 			// The double piston, for the phase rule -- see PARITY_SEAM_GAME_TICKS. One piston
 			// behind a repeater is pulled even by the tick's phase order; the pair is five game
-			// ticks from any phase, and the repeater ahead of it is the sunken-cross feed.
-			String[] cells = {
-				"minecraft:repeater[facing=" + repeaterFacing(forward) + ",delay="
-					+ PARITY_SEAM_REPEATER + "]",
-				"minecraft:sticky_piston[facing=" + forward.getName() + "]",
-				"minecraft:redstone_block",
-				"minecraft:air",
-				"minecraft:sticky_piston[facing=" + forward.getName() + "]",
-				"minecraft:redstone_block",
-				"minecraft:air",
-			};
+			// ticks from any phase, and the repeater ahead of it holds the pulse wide enough to
+			// shove with.
+			//
+			// Always its own repeater here. The back search that lets a seam go without one is
+			// decided in {@link #withParitySeams}, over event groups this walk does not build --
+			// it carries its seams as a set of game ticks and settles their arithmetic as it
+			// reaches them. So this lane spends the cell every time, which is the safe way round.
+			String[] cells = seamElement(forward, PARITY_SEAM_REPEATER);
 			for (String cell : cells) {
 				BlockPos pos = at(origin, forward, cursor, 0, 0);
 				set(placements, pos, "minecraft:stone");
@@ -8994,7 +9076,7 @@ public final class SongBuilder {
 					int foldRepeaters = Math.max(0, (event.time() - currentTime - 1) / 4);
 					// A pending seam's element wants three straight cells of this leg too, so every
 					// fit question the fold asks counts them alongside the repeaters.
-					int seamCells = event.seamEat() > 0 ? PARITY_SEAM_CELLS : 0;
+					int seamCells = event.seamCells();
 					int want = foldRepeaters + stretchLeft + seamCells;
 					if (turning || lane.bending()) {
 						int toExit = 0;
@@ -9326,7 +9408,8 @@ public final class SongBuilder {
 				// expensive -- the lane keeps the parity it was leaving and every shape after it
 				// is built around a signal that never arrives.
 				int shoved = 0;
-				while (shoved < laneWidth && !paritySeamHasRoom(placements, lane)) {
+				while (shoved < laneWidth
+						&& !paritySeamHasRoom(placements, lane, event.seamCells())) {
 					addParityPad(placements, lane.pos());
 					tipSignal--;
 					lane = lane.ahead(1);
@@ -9341,16 +9424,7 @@ public final class SongBuilder {
 				// the wire. Two pistons because of the phase rule -- see PARITY_SEAM_GAME_TICKS:
 				// one piston behind a repeater is pulled even by the tick's phase order and never
 				// flips parity at all; a pair costs five game ticks from any phase whatever.
-				String[] seamCells2 = {
-					"minecraft:repeater[facing=" + repeaterFacing(lane.travel()) + ",delay="
-						+ PARITY_SEAM_REPEATER + "]",
-					"minecraft:sticky_piston[facing=" + lane.travel().getName() + "]",
-					"minecraft:redstone_block",
-					"minecraft:air",
-					"minecraft:sticky_piston[facing=" + lane.travel().getName() + "]",
-					"minecraft:redstone_block",
-					"minecraft:air",
-				};
+				String[] seamCells2 = seamElement(lane.travel(), event.seamRepeater());
 				for (String cell : seamCells2) {
 					set(placements, lane.pos(), "minecraft:stone");
 					set(placements, lane.pos().above(), cell);
@@ -28450,11 +28524,23 @@ public final class SongBuilder {
 	 *     halved clocks floor per parity, so the walk charges one whole tick entering the odd half
 	 *     and two coming back, and the arithmetic stays whole in both directions.
 	 */
+	/**
+	 * @param seamRepeater the delay of the repeater opening this event's parity seam, or nought
+	 *     where the seam opens on its pair directly. Decided with {@code seamEat}, because the two
+	 *     are the same fact: the repeater is what makes the element eleven game ticks instead of
+	 *     five, and the plan settles both before the walk lays a block.
+	 */
 	private record EventGroup(int time, List<EventNote> notes, int length, int chordLength,
-			int maxSafeTurnDistance, ChordStyle style, LaneReach reach, int seamEat) {
+			int maxSafeTurnDistance, ChordStyle style, LaneReach reach, int seamEat,
+			int seamRepeater) {
 		EventGroup(int time, List<EventNote> notes, int length, int chordLength,
 				int maxSafeTurnDistance, ChordStyle style, LaneReach reach) {
-			this(time, notes, length, chordLength, maxSafeTurnDistance, style, reach, 0);
+			this(time, notes, length, chordLength, maxSafeTurnDistance, style, reach, 0, 0);
+		}
+
+		/** Cells of lane this event's seam stands on, or nought where it holds no seam. */
+		int seamCells() {
+			return seamEat == 0 ? 0 : PARITY_SEAM_PAIR_CELLS + (seamRepeater > 0 ? 1 : 0);
 		}
 	}
 

@@ -70,6 +70,7 @@ class FoldFaultProbe {
 				+ " repeatersOnCorners=" + plan.padding().getOrDefault("REPEATER-ON-CORNER", 0)
 				+ " paritySeams=" + plan.padding().getOrDefault("paritySeams", 0)
 				+ " seamsLaid=" + plan.padding().getOrDefault("paritySeam", 0)
+				+ " bare=" + plan.padding().getOrDefault("paritySeamsWithoutARepeater", 0)
 				+ " aOdd=" + plan.padding().getOrDefault("machineAStartsOdd", 0)
 				+ " bEven=" + plan.padding().getOrDefault("machineBStartsEven", 0));
 			plan.padding().entrySet().stream()
