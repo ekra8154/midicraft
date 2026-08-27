@@ -2109,10 +2109,18 @@ public final class SongBuilder {
 				for (int column = 1; column < columns; column++) {
 					BlockPos at = spine.relative(forward, column);
 					placements.take(at);
+					// Ground under the pair as well as under the wire past it. Nothing in the
+					// machine needs it -- a redstone block hangs in the air quite happily and the
+					// pistons stand on the spine's own floor -- but a build with a hole in its
+					// bottom layer is a build that has to be selected in two pieces, and the pair
+					// is five cells of hole right at the end you start the selection from. It
+					// cannot change what the machine does: a redstone block does not power the
+					// block it stands on, so the floor stays as inert here as it is everywhere
+					// else the lane runs over it.
+					set(placements, at.below(), "minecraft:stone");
 					if (column <= run.length) {
 						set(placements, at, run[column - 1]);
 					} else {
-						set(placements, at.below(), "minecraft:stone");
 						set(placements, at, "minecraft:redstone_wire");
 					}
 				}
