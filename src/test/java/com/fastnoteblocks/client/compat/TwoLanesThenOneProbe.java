@@ -38,9 +38,16 @@ class TwoLanesThenOneProbe {
 		Bootstrap.bootStrap();
 	}
 
-	/** Ultra ones at gap 2, with the opening third made to need both halves of the tick. */
+	/**
+	 * Ultra ones at gap 2, with the opening third made to need both halves of the tick.
+	 *
+	 * <p>Read from the library rather than made here: the same shape is saved as
+	 * {@code ultra ones gap2 odd third}, so what this probe argues about and what can be pasted
+	 * and listened to are one file. {@code -Dprobe.song=} points it elsewhere.</p>
+	 */
 	private static List<SongBuilder.EventNote> twoLanesThenOne() throws Exception {
-		Path file = Path.of("run", "config", "fast-noteblocks", "songs", "ultra-ones-gap2.json");
+		Path file = Path.of("run", "config", "fast-noteblocks", "songs",
+			System.getProperty("probe.song", "ultra-ones-gap2-odd-third") + ".json");
 		List<SongBuilder.EventNote> notes;
 		try (Reader reader = Files.newBufferedReader(file)) {
 			ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
@@ -49,20 +56,7 @@ class TwoLanesThenOneProbe {
 				raw.nextNoteId(), raw.endTick(), raw.speedQuarters());
 			notes = SongBuilder.gameTickEventNotes(project, true);
 		}
-		int last = notes.stream().mapToInt(SongBuilder.EventNote::time).max().orElse(0);
-		int cut = last / 3;
-		List<SongBuilder.EventNote> made = new ArrayList<>();
-		int seen = 0;
-		for (SongBuilder.EventNote note : notes) {
-			boolean shift = note.time() <= cut && seen % 2 == 1;
-			made.add(shift
-				? new SongBuilder.EventNote(note.time() + 1, note.trackNumber(), note.order(),
-					note.pitch(), note.instrumentBlock())
-				: note);
-			seen++;
-		}
-		made.sort(java.util.Comparator.comparingInt(SongBuilder.EventNote::time));
-		return List.copyOf(made);
+		return notes;
 	}
 
 	private static String share(List<SongBuilder.EventNote> a, List<SongBuilder.EventNote> b,
