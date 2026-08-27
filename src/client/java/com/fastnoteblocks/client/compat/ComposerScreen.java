@@ -778,6 +778,10 @@ public final class ComposerScreen extends Screen {
 	private boolean cachedStatsDedupe;
 	private List<FastNoteblocksConfig.SequenceTrack> cachedBlockTracks;
 	private SongBuilder.BlockCounts cachedBlockCounts;
+	private ComposerProject cachedParityProject;
+	private boolean cachedParityDedupe;
+	private Map<Long, Integer> cachedParityTicks;
+	private int[] cachedParityCounts;
 	private SongAnalysis cachedOverloadedStats;
 	private long[] cachedOverloadedTicks = new long[0];
 	/**
@@ -2523,6 +2527,10 @@ public final class ComposerScreen extends Screen {
 			case TRANSPOSE_BEST_FIT -> project().bestTransposeIntoRange().worthDoing();
 			case SELECT_OFF_GRID -> !projectStats().offGridNotes().isEmpty();
 			case SELECT_HALF_TICKED -> !projectStats().halfTickedNotes().isEmpty();
+			// Greyed out where the song is all one half, because there the answer is the whole
+			// song or nothing and neither is worth a click.
+			case SELECT_EVEN_TICKS -> parityCounts()[0] > 0 && parityCounts()[1] > 0;
+			case SELECT_ODD_TICKS -> parityCounts()[1] > 0 && parityCounts()[0] > 0;
 			case SELECT_TOO_FREQUENT -> !projectStats().crowdedNotes().isEmpty();
 			case SELECT_OUT_OF_RANGE -> projectStats().outOfRange() > 0;
 			case SELECT_OVERLOADED_CHORDS -> projectStats().overloadedTicks() > 0
@@ -2643,6 +2651,8 @@ public final class ComposerScreen extends Screen {
 				note -> projectStats().offGrid().contains(note.startTick()), true);
 			case SELECT_HALF_TICKED -> selectNotesWhere("half-ticked",
 				note -> projectStats().halfTicked().contains(note.startTick()), true);
+			case SELECT_EVEN_TICKS -> selectNotesOnHalf(0);
+			case SELECT_ODD_TICKS -> selectNotesOnHalf(1);
 			case SELECT_TOO_FREQUENT -> selectNotesWhere("too frequent",
 				note -> projectStats().crowded().contains(note.startTick()), true);
 			case SELECT_OUT_OF_RANGE -> selectNotesWhere("out of range",
@@ -2871,6 +2881,34 @@ public final class ComposerScreen extends Screen {
 	}
 
 	/**
+	 * The notes a build would sound on one half of the game tick.
+	 *
+	 * <p>Not routed through {@link #selectNotesWhere}: that judges a note at a time from the note
+	 * itself, and which half a note lands on is a fact about the whole layer in front of it. It
+	 * also picks from every layer going into the build rather than from the layers being edited,
+	 * because the halves are a property of the build and hiding a layer does not move the notes on
+	 * the others.</p>
+	 *
+	 * @param half 0 for even game ticks, 1 for odd
+	 */
+	private void selectNotesOnHalf(int half) {
+		Map<Long, Integer> ticks = parityTicks();
+		selectedNotes.clear();
+		clearRange();
+		for (Layer layer : project().layers()) {
+			for (NoteEvent note : layer.notes()) {
+				Integer time = ticks.get(note.id());
+				if (time != null && Math.floorMod(time, 2) == half) {
+					selectedNotes.add(note.id());
+				}
+			}
+		}
+		updateButtonStates();
+		showResult(Component.literal(selectedNotes.size() + " notes on "
+			+ (half == 0 ? "even" : "odd") + " game ticks"));
+	}
+
+	/**
 	 * Selects what a chord could lose to fit, without deleting any of it.
 	 *
 	 * <p>Selecting rather than applying because this is the one edit here whose result has to be
@@ -3039,6 +3077,13 @@ public final class ComposerScreen extends Screen {
 				+ "ones a single chain cannot place, and so the reason a song needs two lanes. Not "
 				+ "faults: a build of two lanes plays them exactly. Worth seeing when you would "
 				+ "rather nudge a handful of notes than carry a second lane for them.";
+			case SELECT_EVEN_TICKS, SELECT_ODD_TICKS -> "Selects the notes a build would sound on "
+				+ (action == ToolbarAction.SELECT_EVEN_TICKS ? "even" : "odd") + " game ticks. The "
+				+ "two halves of the tick are what the half-tick layouts are made of: one machine "
+				+ "can only play one of them, and a song that uses both needs two. Asked of the "
+				+ "builder rather than of the clock, so it is the half the notes would actually "
+				+ "land on. Notes deduplication leaves out of the build are on neither half and "
+				+ "are never selected.";
 			case SELECT_TOO_FREQUENT -> "Selects notes arriving less than one repeater tick after "
 				+ "the previous one -- faster than redstone can retrigger.";
 			case SELECT_OUT_OF_RANGE -> "Selects notes outside the note-block range of F#3-F#5.";
@@ -4572,6 +4617,20 @@ public final class ComposerScreen extends Screen {
 		if (drawSnap) {
 			int snapColor = crowdedGridColor(trueGrid ? 0x1ED98A3C : 0x1628343D,
 				snapSpan / ticksPerPixel, REDSTONE_GRID_PIXEL_SPACING, 0.55);
+			// The two halves of the game tick, in two colours, on the grid whose lines are the
+			// game ticks themselves. Which half two notes land on is the one thing this view
+			// exists to show and the one thing a single colour cannot say: a run of identical
+			// amber lines tells you the spacing and nothing about whether the notes either side
+			// of a gap are on the same machine or on opposite ones. Amber stays the even half,
+			// so tick nought -- where every song starts -- is the colour this grid always was.
+			//
+			// Only when the lines drawn ARE the game ticks. The grid doubles its span as it gets
+			// crowded, and at every doubling each drawn line is the same parity as the last, so
+			// two colours would alternate over a fact that had stopped alternating. Also only on
+			// the game-tick snap: on the repeater grid every line is an even game tick.
+			boolean byHalves = trueGrid && snapSubdivision == SNAP_GAME_TICK;
+			int oddColor = crowdedGridColor(0x1E4C9BD9, snapSpan / ticksPerPixel,
+				REDSTONE_GRID_PIXEL_SPACING, 0.55);
 			for (long index = (long)Math.floor(horizontalScroll / snapSpan);
 					gridLineAt(index, snapSpan) <= lastTick + snapSpan; index++) {
 				int x = tickX(gridLineAt(index, snapSpan));
@@ -4584,7 +4643,8 @@ public final class ComposerScreen extends Screen {
 						secondSpan)) == x) {
 					continue;
 				}
-				graphics.fill(x, rollY, x + 1, rollY + rollHeight, snapColor);
+				graphics.fill(x, rollY, x + 1, rollY + rollHeight,
+					byHalves && Math.floorMod(index, 2L) == 1L ? oddColor : snapColor);
 			}
 		}
 		if (drawSeconds) {
@@ -5262,6 +5322,16 @@ public final class ComposerScreen extends Screen {
 		// Lower case here and capitalised on the button, because this one is inside a sentence.
 		segments.add("grid " + gridName(snapSubdivision).toLowerCase(java.util.Locale.ROOT)
 			+ " = " + snapDetail());
+		// How the song divides between the two halves of the game tick, which is what decides
+		// whether a half-tick build is one machine's work or two -- and, where it is two, how
+		// evenly the two are loaded. A song wholly on one half says so in one word rather than
+		// with a nought, because "0 odd" reads as a count that failed rather than as a fact.
+		int[] halves = parityCounts();
+		if (halves[0] + halves[1] > 0) {
+			segments.add(halves[1] == 0 ? "all on even game ticks"
+				: halves[0] == 0 ? "all on odd game ticks"
+				: "game ticks " + halves[0] + " even : " + halves[1] + " odd");
+		}
 		// The one place preview and build still disagree. Solo is a lens for listening around a
 		// part, so it deliberately does not change what gets built -- which means that while it is
 		// on, what you are hearing is not what would be placed. Said out loud rather than left to
@@ -5349,6 +5419,48 @@ public final class ComposerScreen extends Screen {
 		cachedStatsDedupe = config.dedupeIdenticalNotes();
 		cachedStats = SongAnalysis.of(current, cachedStatsDedupe, true);
 		return cachedStats;
+	}
+
+	/**
+	 * Which game tick a build would sound each note on, keyed by note id.
+	 *
+	 * <p>The builder's own walk, not a second copy of its arithmetic. A note's game tick is the
+	 * running sum of its layer's gaps rounded one at a time, which is not the same definition as
+	 * rounding the note's own start -- though over the library the two come out identical on all
+	 * 235,500 notes. Asking the builder is free and cannot drift; keeping a second answer here
+	 * would only be waiting to.</p>
+	 *
+	 * <p>Cached on the project the same way the analysis is. It is walked for the status bar, which
+	 * runs once a frame, and a dense song is thousands of notes.</p>
+	 */
+	private Map<Long, Integer> parityTicks() {
+		ComposerProject current = project();
+		if (cachedParityProject == current && cachedParityTicks != null
+				&& cachedParityDedupe == config.dedupeIdenticalNotes()) {
+			return cachedParityTicks;
+		}
+		cachedParityProject = current;
+		cachedParityDedupe = config.dedupeIdenticalNotes();
+		cachedParityTicks = SongBuilder.buildGameTickByNoteId(current, cachedParityDedupe);
+		cachedParityCounts = new int[2];
+		for (int time : cachedParityTicks.values()) {
+			cachedParityCounts[Math.floorMod(time, 2)]++;
+		}
+		return cachedParityTicks;
+	}
+
+	/**
+	 * How the song divides between the two halves of the game tick, as {@code {even, odd}}.
+	 *
+	 * <p>Notes deduplication left out of the build are in neither: they are not placed, so they
+	 * are on no half of anything.</p>
+	 */
+	private int[] parityCounts() {
+		// Counted with the walk and kept, not recounted. The Select menu asks twice per entry per
+		// frame while it is open and the status bar asks again under it, and Guardian is 27,896
+		// notes -- a sum nobody sees, four times over, sixty times a second.
+		parityTicks();
+		return cachedParityCounts;
 	}
 
 	/** Whether anything is hanging open over the composition: a menu, a context menu, the palette. */
@@ -9636,6 +9748,8 @@ public final class ComposerScreen extends Screen {
 		TRIM_END("Trim end to last note"),
 		SELECT_OFF_GRID("Off grid"),
 		SELECT_HALF_TICKED("Half-ticked"),
+		SELECT_EVEN_TICKS("On even game ticks"),
+		SELECT_ODD_TICKS("On odd game ticks"),
 		SELECT_TOO_FREQUENT("Too frequent"),
 		SELECT_OUT_OF_RANGE("Out of range"),
 		SELECT_OVERLOADED_CHORDS("Overloaded chords"),
@@ -9657,7 +9771,8 @@ public final class ComposerScreen extends Screen {
 			TOGGLE_DEDUPE, PASTE_IN_WORLD, BUILD_CANCEL
 		};
 		private static final ToolbarAction[] SELECT_ACTIONS = {
-			SELECT_OFF_GRID, SELECT_HALF_TICKED, SELECT_TOO_FREQUENT, SELECT_OUT_OF_RANGE,
+			SELECT_OFF_GRID, SELECT_HALF_TICKED, SELECT_EVEN_TICKS, SELECT_ODD_TICKS,
+			SELECT_TOO_FREQUENT, SELECT_OUT_OF_RANGE,
 			SELECT_OVERLOADED_CHORDS, SELECT_ALL_NOTES, SELECT_NONE
 		};
 		private final String label;
