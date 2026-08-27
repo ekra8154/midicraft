@@ -1218,10 +1218,21 @@ public final class SongBuilder {
 		if (HALF_TICK_TRADES_HALVES && !even.isEmpty() && !odd.isEmpty()) {
 			ParitySchedule schedule = scheduleParities(notes);
 			if (!schedule.laneA().isEmpty() && !schedule.laneB().isEmpty()) {
-				rightNotes = schedule.laneA();
-				leftNotes = schedule.laneB();
-				rightSeams = seamTimes(schedule.laneA(), schedule.flipsA());
-				leftSeams = seamTimes(schedule.laneB(), schedule.flipsB());
+				// The lane that opens on the odd half goes LEFT, because that is the input
+				// contract this mode has always had: the left lane's trigger fires one game tick
+				// after the right's, and whoever built the contraption built it that way round.
+				// Handed out blindly instead, the one game tick lands on the wrong lane and every
+				// note it plays stands a tick off its partner -- audibly clumped pairs, loudest
+				// wherever the song is dense. The blocks were exactly right the whole time.
+				boolean aOpensOdd = Math.floorMod(schedule.laneA().get(0).time(), 2) == 1;
+				List<EventNote> oddOpener = aOpensOdd ? schedule.laneA() : schedule.laneB();
+				List<EventNote> evenOpener = aOpensOdd ? schedule.laneB() : schedule.laneA();
+				List<Integer> oddFlips = aOpensOdd ? schedule.flipsA() : schedule.flipsB();
+				List<Integer> evenFlips = aOpensOdd ? schedule.flipsB() : schedule.flipsA();
+				rightNotes = evenOpener;
+				leftNotes = oddOpener;
+				rightSeams = seamTimes(evenOpener, evenFlips);
+				leftSeams = seamTimes(oddOpener, oddFlips);
 				placements.padded("paritySeams", rightSeams.size() + leftSeams.size());
 			}
 		}
@@ -1236,10 +1247,28 @@ public final class SongBuilder {
 		if (!leftNotes.isEmpty() && Math.floorMod(leftNotes.get(0).time(), 2) == 0) {
 			placements.padded("leftLaneStartsEven");
 		}
-		HalfTickLane right = new HalfTickLane(origin, rightNotes, bias, rightSeams, 0);
-		HalfTickLane left = new HalfTickLane(
-			origin.relative(forward.getCounterClockWise(), HALF_TICK_LANE_GAP), leftNotes, bias,
-			leftSeams, 1);
+		// Room for the shared input, taken in front of each lane rather than behind the origin:
+		// three columns for a lane fed straight off the spine (its two repeaters and the spine
+		// itself) and six for one fed through the double piston. Both lanes still start from the
+		// same column, so the spine stands straight whatever halves they open on.
+		boolean rightOdd = !rightNotes.isEmpty()
+			&& Math.floorMod(rightNotes.get(0).time(), 2) == 1;
+		boolean leftOdd = !leftNotes.isEmpty()
+			&& Math.floorMod(leftNotes.get(0).time(), 2) == 1;
+		boolean sharedInput = HALF_TICK_SHARED_INPUT
+			&& !rightNotes.isEmpty() && !leftNotes.isEmpty();
+		BlockPos rightOrigin = sharedInput
+			? origin.relative(forward, rightOdd ? 6 : 3) : origin;
+		BlockPos leftOrigin = origin.relative(forward.getCounterClockWise(), HALF_TICK_LANE_GAP);
+		if (sharedInput) {
+			leftOrigin = leftOrigin.relative(forward, leftOdd ? 6 : 3);
+		}
+		if (sharedInput) {
+			// One press for both, so the plan's own offset is the one that happens.
+			placements.waysIn(1);
+		}
+		HalfTickLane right = new HalfTickLane(rightOrigin, rightNotes, bias, rightSeams, 0);
+		HalfTickLane left = new HalfTickLane(leftOrigin, leftNotes, bias, leftSeams, 1);
 		int padded = 0;
 		int short_ = 0;
 		int mirrored = 0;
@@ -1262,7 +1291,7 @@ public final class SongBuilder {
 				? right
 				: left;
 			HalfTickLane other = next == right ? left : right;
-			if (MIRRORS_THE_OTHER_LANE) {
+			if (MIRRORS_THE_OTHER_LANE && HALF_TICK_KEEPS_EARSHOT) {
 				// The game tick the pair is standing on, taken before the event is placed, because
 				// placing it is what moves the lane off it. Both lanes date their mirrored stretch
 				// from here, so neither can spend a repeater tick it has not yet reached.
@@ -1285,7 +1314,8 @@ public final class SongBuilder {
 			}
 			// Only while both are still playing. Once one has run out there is no second pulse to
 			// keep up with, and padding the survivor would buy nothing and cost columns.
-			int wanted = other.hasMore() || next.hasMore() && other.cursor() > next.cursor()
+			int wanted = HALF_TICK_KEEPS_EARSHOT
+					&& (other.hasMore() || next.hasMore() && other.cursor() > next.cursor())
 				? other.cursor() - next.cursor() - HALF_TICK_LANE_TOLERANCE
 				: 0;
 			int given = next.placeNextEvent(placements, forward, Math.max(0, wanted));
@@ -1300,6 +1330,15 @@ public final class SongBuilder {
 					short_++;
 				}
 			}
+		}
+		// The one input for both lanes, laid after both walks because it reaches from the spine to
+		// wherever each lane actually opens. The spine spans the two rows, so this layout's pitch
+		// of four simply makes it one cell longer than the nested layout's three.
+		if (sharedInput) {
+			// One level up from each lane's origin: a straight lane's origin is its ground, and
+			// the spine reaches the machines at the level their repeaters stand on.
+			addTwoLaneInput(placements, forward, rightOrigin.above(), leftOrigin.above(),
+				rightOdd, leftOdd);
 		}
 		placements.padded("halfTickCatchUp", padded);
 		placements.padded("halfTickCatchUpShort", short_);
@@ -1386,29 +1425,63 @@ public final class SongBuilder {
 	 * no rail run to close and no turn to settle. The dial is the same one:
 	 * {@link #PARITY_MIN_DELAY_BEFORE_RESEED}.</p>
 	 *
-	 * <p><b>On, and known to be out of tune.</b> A thing that cannot be pasted cannot be listened
-	 * to, and a fault nobody can hear is a fault nobody can find -- so this stays on while the
-	 * timing is worked out, rather than sitting behind a flag that has to be flipped before
-	 * anyone can look at it. <b>Six of {@code HalfTickLaneTest}'s regressions fail while it is,
-	 * and that is expected</b>: four have simply learned the fixed split by heart, but two are
-	 * real -- a lane comes out with its times running backwards ("two repeater ticks apart, was
-	 * -2"), and notes land off the game tick they were written on. Do not read those six as a
-	 * new breakage; read the other suites.</p>
+	 * <p><b>The clumps were never in the blocks.</b> Counted delay-for-delay, every lane matched
+	 * its written times exactly; what was wrong was which <em>side</em> each lane stood on. This
+	 * mode's input contract has always been "the left lane's trigger fires one game tick after
+	 * the right's", and the schedule's lanes were handed to sides blindly -- so whenever the
+	 * odd-opening lane came out right, the contraption's one game tick landed on the wrong lane
+	 * and every pair of notes stood a tick closer than written. The odd-opening lane now always
+	 * goes left. Field of hopes read back 7,106 of 7,380 before the normalisation and 7,376
+	 * after; the last four are still being chased, and the reader cannot model the external one
+	 * game tick at all, so in-game listening outranks it here.</p>
 	 *
-	 * <p>What it buys, over the library's six two-parity songs: span 17,605 columns to 12,256, a
-	 * third shorter, and almost all of it is the mirror having nothing left to make up -- field
-	 * of hopes goes from 3,718 columns of mirrored wire to 110. Every structural check is clean
-	 * at the same time: no wrong note, no note without a home, no collision, nothing unreached.
-	 * The one number that disagrees is the read-back's, which finds field of hopes 274 notes
-	 * short of its 7,380 while calling all of them reached -- two notes arriving on one tick.</p>
-	 *
-	 * <p>Where to look: the straight lane does not keep the routed walk's clock. It counts in
-	 * {@code floorDiv} halves against a {@code paid} account that {@link HalfTickLane#mirrorTo}
-	 * draws down, and a seam spends against that same gap. Subtracting the seam's five game
-	 * ticks from the account is not enough -- both were tried, and the span moved while the note
-	 * count did not. The two spenders have to be reconciled, not merely ordered.</p>
+	 * <p>What trading buys, over the library's seven two-parity songs: span 16,531 columns to
+	 * 11,545, with the earshot padding off in both arms -- field of hopes 3,923 to 2,244.
+	 * <b>Three {@code HalfTickLaneTest} methods are expected red</b> while things stand this
+	 * way: {@code keepsTheTwoPulsesWithinEarshotWhenTheChordsAreLopsided} and
+	 * {@code keepsSimultaneousNotesInTheSameColumn} assert the mirror that
+	 * {@link #HALF_TICK_KEEPS_EARSHOT} currently disables, and
+	 * {@code readsBackALaneThatOpensByWaiting} asserts the fixed split itself -- it requires the
+	 * odd lane to hold nothing but odd chords, which trading rightly no longer promises.</p>
 	 */
 	static boolean HALF_TICK_TRADES_HALVES = true;
+
+	/**
+	 * Whether the straight half-tick lane pads its lanes to stay within earshot of each other.
+	 *
+	 * <p>Off for now, deliberately, while half trading is tuned: the mirror and the catch-up pad
+	 * both lay columns whose only job is keeping the pair together, and while the note timing
+	 * itself is being listened to, every column of padding is another thing between the listener
+	 * and the fault. With the schedule balancing what each lane carries, the lanes stay close by
+	 * construction anyway; what remains to measure is how close, and that is easier to hear
+	 * without dust in the way. Turn it back on when the timing is settled.</p>
+	 */
+	static boolean HALF_TICK_KEEPS_EARSHOT = false;
+
+	/**
+	 * Whether the straight half-tick lane's two lanes share one input.
+	 *
+	 * <p>The same spine the nested layout uses -- one button, both lanes released together, the
+	 * odd-opening one fed through the double piston so its game tick comes from the plan rather
+	 * than from how fast a hand can move. This layout leaves its pitch at four where the nested
+	 * one uses three, so the spine simply spans one row more.</p>
+	 *
+	 * <p>Before this the mode built no input at all: it declared however many ways in the two
+	 * lanes needed and left the wiring to whoever pasted it, which meant the half tick between
+	 * the lanes was theirs to get right by hand.</p>
+	 *
+	 * <p><b>On, and it costs something that is not yet understood.</b> The geometry is right --
+	 * spine spanning both rows at the level the lanes' repeaters stand on, one press, the
+	 * odd-opening lane through the pair and the other through two repeaters, which is the one
+	 * game tick {@code floorDiv} has always assumed. But it takes {@code HalfTickLaneTest} from
+	 * three reds to seven, and two of the four new ones are not merely out of date:
+	 * {@code soundsNotesOneAndThreeGameTicksApart} is a musical assertion that was green an hour
+	 * ago, and {@code doesNotCallTheSecondLanesWayInASeveredLane} follows {@code waysIn} dropping
+	 * to one. Field of hopes also reads back 7,264 of 7,380 where it read 7,376 without the
+	 * input. Left on because a starter nobody can paste is a starter nobody can hear, and the
+	 * numbers above are the scoreboard for fixing it.</p>
+	 */
+	static boolean HALF_TICK_SHARED_INPUT = true;
 
 	/** The game ticks a lane's flips fall on, from indices into its own tick-groups. */
 	private static Set<Integer> seamTimes(List<EventNote> lane, List<Integer> flips) {
@@ -1602,17 +1675,20 @@ public final class SongBuilder {
 		// or the spine lands outside the wall and the build is wider than it reports.
 		boolean oddOpensA = Math.floorMod(gtA.get(0).time(), 2) == 1;
 		boolean oddOpensB = Math.floorMod(gtB.get(0).time(), 2) == 1;
-		boolean splitOpen = oddOpensA != oddOpensB;
 		WalkStart headA = INTERLEAVED_SHARED_INPUT
-			? new WalkStart(head.column() + (splitOpen && oddOpensA ? 3 : 2), head.floor(),
+			? new WalkStart(head.column() + (oddOpensA ? 6 : 3), head.floor(),
 				head.climb(), head.turning())
 			: new WalkStart(head.column() + 2, head.floor(), head.climb(), head.turning());
 		// The machine on the odd half of the tick opens two columns further out, because its feed
 		// is a piston and a piston needs its block's landing cell empty -- the same two columns
 		// the mid-lane seam spends. Only where the two differ: on one parity both take the spine
 		// straight and neither owes anything. See {@link #addTwoLaneInput}.
+		// Three columns in for a machine taken straight off the spine -- itself plus its two
+		// repeaters -- and six for one fed through the double piston, whose pair and landing
+		// cells reach that much further. Both counted from the same wall, so the spine stands in
+		// one straight column whatever mix of halves the two machines open on.
 		WalkStart headB = INTERLEAVED_SHARED_INPUT
-			? new WalkStart(head.column() + (splitOpen && oddOpensB ? 3 : 2), head.floor(),
+			? new WalkStart(head.column() + (oddOpensB ? 6 : 3), head.floor(),
 				head.climb(), head.turning())
 			: head;
 		BlockPos originB = originA.relative(depth, spacing);
@@ -1842,7 +1918,23 @@ public final class SongBuilder {
 	 * while every repeater in the build still has something behind it. A repeater is two game
 	 * ticks, which is even, so it leaves the parity the piston changes exactly as it was.</p>
 	 */
-	static int PARITY_SEAM_CELLS = 4;
+	static int PARITY_SEAM_CELLS = 7;
+
+	/**
+	 * The phase rule, measured by the user with command blocks and the reason every seam is a
+	 * DOUBLE piston: within a game tick, scheduled ticks (repeaters, torches, observers,
+	 * comparators) process before block events (piston extensions). A piston whose edge arrives
+	 * from the scheduled phase starts extending the same tick -- its three game ticks become an
+	 * effective two -- and dust is instant, so any repeater anywhere upstream pins every
+	 * downstream piston even. One piston behind a repeater therefore NEVER flips parity.
+	 *
+	 * <p>Two pistons in a row do, always: whichever phase the edge arrives in, one piston of the
+	 * pair absorbs it and the other pays the full three, so the pair costs five game ticks from
+	 * any source at all. The seam is a repeater (the sunken-cross feed, two ticks), the first
+	 * piston shoving its block into the empty cell behind the second, and the second shoving its
+	 * own block out to the wire: seven game ticks, odd from anywhere.</p>
+	 */
+	static final int PARITY_SEAM_GAME_TICKS = 7;
 
 	/**
 	 * Whether both machines are started from one spine instead of a button each.
@@ -1893,10 +1985,13 @@ public final class SongBuilder {
 		int step = stepAlong(axis, forward);
 		int alongA = coordAlong(axis, headA);
 		int alongB = coordAlong(axis, headB);
-		// Two columns behind whichever machine opens nearest the origin: the spine itself, and the
-		// cell in front of it that every machine's feed owns -- a repeater for one taken straight
-		// off the spine, the pushed block for one fed through the piston.
-		int wall = (step > 0 ? Math.min(alongA, alongB) : Math.max(alongA, alongB)) - 2 * step;
+		// Behind whichever machine's feed reaches furthest back: three columns for a machine
+		// taken straight off the spine (its two repeaters and the spine itself), six for one fed
+		// through the double piston (the pair, two blocks and two landing cells). The spine is
+		// one straight column, so the deeper need decides it for both.
+		int wall = step > 0
+			? Math.min(alongA - (oddA ? 6 : 3), alongB - (oddB ? 6 : 3))
+			: Math.max(alongA + (oddA ? 6 : 3), alongB + (oddB ? 6 : 3));
 		BlockPos[] heads = {headA, headB};
 		boolean[] odd = {oddA, oddB};
 		Direction across = forward.getClockWise();
@@ -1937,22 +2032,28 @@ public final class SongBuilder {
 			BlockPos spine = head.relative(forward, -columns);
 			placements.placing("twoLaneInput");
 			if (odd[machine]) {
-				// The piston stands in the spine and takes the row's first two columns with it:
-				// its block, and the empty cell that block is going to. Anything left in that
-				// cell would read the block's power before the piston ever moved, which is the
-				// whole of the delay.
+				// The DOUBLE piston, phase-proof by the rule in PARITY_SEAM_GAME_TICKS: five game
+				// ticks from any input phase whatever, because whichever phase the edge arrives
+				// in, one piston of the pair absorbs it and the other pays the full three. A
+				// single piston here read three game ticks only when the player's own hand fed
+				// it; hooked into a contraption with a repeater anywhere in the line, it was
+				// pulled even and the offset vanished. The first piston stands in the spine and
+				// shoves its block into the cell behind the second; the second fires off that
+				// landing and shoves its own block out to the wire.
 				placements.take(spine);
 				set(placements, spine, "minecraft:sticky_piston[facing=" + forward.getName() + "]");
-				// At the piston's own level, which is where it shoves: the block beside it, then
-				// the empty cell that block is going to. The ground beneath is the lane's own and
-				// is left alone. Anything further is plain wire out to this machine's opening --
-				// it costs no ticks, so the three the piston spends stay the whole of the offset.
+				String[] run = {
+					"minecraft:redstone_block",
+					"minecraft:air",
+					"minecraft:sticky_piston[facing=" + forward.getName() + "]",
+					"minecraft:redstone_block",
+					"minecraft:air",
+				};
 				for (int column = 1; column < columns; column++) {
 					BlockPos at = spine.relative(forward, column);
 					placements.take(at);
-					if (column <= 2) {
-						set(placements, at,
-							column == 1 ? "minecraft:redstone_block" : "minecraft:air");
+					if (column <= run.length) {
+						set(placements, at, run[column - 1]);
 					} else {
 						set(placements, at.below(), "minecraft:stone");
 						set(placements, at, "minecraft:redstone_wire");
@@ -1960,19 +2061,22 @@ public final class SongBuilder {
 				}
 				placements.padded("twoLaneInputPiston");
 			} else {
-				// Straight off the spine, and through a repeater of its own -- which is the
-				// whole of the half tick. A repeater at its shortest is two game ticks and the
-				// piston is three, so the pair leave the spine one game tick apart, and one game
-				// tick is the offset the two halves of the song are written against. Leave this
-				// repeater out and the piston's machine is not one game tick late but three:
-				// a redstone tick of drift that has to be dialled back out by hand.
-				BlockPos first = spine.relative(forward, 1);
-				set(placements, first.below(), "minecraft:stone");
-				set(placements, first, "minecraft:repeater[facing=" + repeaterFacing(forward)
-					+ ",delay=1]");
+				// Straight off the spine, through two of its own repeaters: four game ticks
+				// against the pair's five, so the two machines leave one game tick apart -- the
+				// offset the two halves of the song are written against. Two repeaters rather
+				// than one so the difference is exactly one: repeaters deliver their whole even
+				// delay from any phase and hand the edge on phase-normalised, which is what makes
+				// this side as indifferent to the player's contraption as the pair makes the
+				// other.
+				for (int leg = 1; leg <= 2; leg++) {
+					BlockPos at = spine.relative(forward, leg);
+					set(placements, at.below(), "minecraft:stone");
+					set(placements, at, "minecraft:repeater[facing=" + repeaterFacing(forward)
+						+ ",delay=1]");
+				}
 				// And plain wire the rest of the way, which costs no ticks at all, for a machine
 				// whose own opening stands further out than its partner's.
-				for (int column = 2; column < columns; column++) {
+				for (int column = 3; column < columns; column++) {
 					BlockPos at = spine.relative(forward, column);
 					set(placements, at.below(), "minecraft:stone");
 					set(placements, at, "minecraft:redstone_wire");
@@ -2059,11 +2163,11 @@ public final class SongBuilder {
 	/**
 	 * Game ticks a lane sits silent across a parity seam.
 	 *
-	 * <p>The piston itself is three, and the first module after it opens on a repeater -- stacked
-	 * heads must, and the rest may -- which is two more. Scheduling every seam at five keeps the
-	 * walk free to lay whatever module comes next.</p>
+	 * <p>The element is seven -- see {@link #PARITY_SEAM_GAME_TICKS} -- and the first module
+	 * after it opens on a repeater, stacked heads must and the rest may, which is two more.
+	 * Scheduling every seam at nine keeps the walk free to lay whatever module comes next.</p>
 	 */
-	static int PARITY_SEAM_GT = 5;
+	static int PARITY_SEAM_GT = 9;
 
 	/**
 	 * Which machine plays each tick of the song, when a machine may change parity mid-song.
@@ -2362,10 +2466,11 @@ public final class SongBuilder {
 		List<EventGroup> result = new ArrayList<>(groups);
 		for (int flip : flips) {
 			EventGroup group = groups.get(flip);
-			// The piston's three game ticks, floored into the halved clock the way laneTimes
-			// floors everything -- one entering the odd half, two coming back -- plus the whole
-			// machine tick the opening repeater costs.
-			int eat = (Math.floorMod(groupTimes.get(flip), 2) == 1 ? 1 : 2) + 1;
+			// The element's seven game ticks, floored into the halved clock the way laneTimes
+			// floors everything: three machine ticks entering the odd half, four coming back.
+			int eat = Math.floorMod(groupTimes.get(flip), 2) == 1
+				? (PARITY_SEAM_GAME_TICKS - 1) / 2
+				: (PARITY_SEAM_GAME_TICKS + 1) / 2;
 			int delay = group.time() - groups.get(flip - 1).time() - eat;
 			int delayRepeaters = Math.max(0, (delay - 1) / 4);
 			ChordStyle style = chooseStyle(layout, group.notes(), delayRepeaters >= 2);
@@ -2618,8 +2723,14 @@ public final class SongBuilder {
 		 */
 		private void layParitySeam(PlacementPlan placements, Direction forward, int time) {
 			placements.placing("paritySeam");
+			// The double piston, for the phase rule -- see PARITY_SEAM_GAME_TICKS. One piston
+			// behind a repeater is pulled even by the tick's phase order; the pair is five game
+			// ticks from any phase, and the repeater ahead of it is the sunken-cross feed.
 			String[] cells = {
 				"minecraft:repeater[facing=" + repeaterFacing(forward) + ",delay=1]",
+				"minecraft:sticky_piston[facing=" + forward.getName() + "]",
+				"minecraft:redstone_block",
+				"minecraft:air",
 				"minecraft:sticky_piston[facing=" + forward.getName() + "]",
 				"minecraft:redstone_block",
 				"minecraft:air",
@@ -2630,7 +2741,9 @@ public final class SongBuilder {
 				set(placements, pos.above(), cell);
 				cursor++;
 			}
-			currentTime += Math.floorMod(time, 2) == 1 ? 2 : 3;
+			currentTime += Math.floorMod(time, 2) == 1
+				? (PARITY_SEAM_GAME_TICKS - 1) / 2
+				: (PARITY_SEAM_GAME_TICKS + 1) / 2;
 			half = Math.floorMod(time, 2);
 			tint(placements);
 			sinceRepeater = 0;
@@ -2737,7 +2850,9 @@ public final class SongBuilder {
 			// The mirror spends against the gap to the next event, and a seam spends against the
 			// same gap -- so without this the two spend it twice and the note lands early.
 			int seamReserve = seams.contains(nextTime())
-				? Math.floorMod(nextTime(), 2) == 1 ? 2 : 3
+				? Math.floorMod(nextTime(), 2) == 1
+					? (PARITY_SEAM_GAME_TICKS - 1) / 2
+					: (PARITY_SEAM_GAME_TICKS + 1) / 2
 				: 0;
 			int allowance = Math.max(0, Math.min(Math.floorDiv(now, 2),
 				Math.floorDiv(nextTime(), 2) - 1) - currentTime - paid - seamReserve);
@@ -9178,22 +9293,26 @@ public final class SongBuilder {
 				if (shoved > 0) {
 					placements.padded("paritySeamShovedForRoom", shoved);
 				}
-				// The repeater that picks the lane up, exactly as every chord's opening does --
-				// see PARITY_SEAM_CELLS for the sunken cross that made it necessary.
-				set(placements, lane.pos(), "minecraft:stone");
-				set(placements, lane.pos().above(), "minecraft:repeater[facing="
-					+ repeaterFacing(lane.travel()) + ",delay=1]");
-				lane = lane.ahead(1);
-				set(placements, lane.pos(), "minecraft:stone");
-				set(placements, lane.pos().above(), "minecraft:sticky_piston[facing="
-					+ lane.travel().getName() + "]");
-				lane = lane.ahead(1);
-				set(placements, lane.pos(), "minecraft:stone");
-				set(placements, lane.pos().above(), "minecraft:redstone_block");
-				lane = lane.ahead(1);
-				set(placements, lane.pos(), "minecraft:stone");
-				set(placements, lane.pos().above(), "minecraft:air");
-				lane = lane.ahead(1);
+				// The repeater that picks the lane up (the sunken cross made it necessary), then
+				// the DOUBLE piston: the first shoves its block into the empty cell behind the
+				// second, which that block then fires, and the second shoves its own block out to
+				// the wire. Two pistons because of the phase rule -- see PARITY_SEAM_GAME_TICKS:
+				// one piston behind a repeater is pulled even by the tick's phase order and never
+				// flips parity at all; a pair costs five game ticks from any phase whatever.
+				String[] seamCells2 = {
+					"minecraft:repeater[facing=" + repeaterFacing(lane.travel()) + ",delay=1]",
+					"minecraft:sticky_piston[facing=" + lane.travel().getName() + "]",
+					"minecraft:redstone_block",
+					"minecraft:air",
+					"minecraft:sticky_piston[facing=" + lane.travel().getName() + "]",
+					"minecraft:redstone_block",
+					"minecraft:air",
+				};
+				for (String cell : seamCells2) {
+					set(placements, lane.pos(), "minecraft:stone");
+					set(placements, lane.pos().above(), cell);
+					lane = lane.ahead(1);
+				}
 				tipSignal = DUST_RANGE;
 				// The element is lane content -- its chord may land flush on the wall and must be
 				// allowed its turn -- and the cells behind the next module are piston works, which

@@ -317,7 +317,9 @@ final class BuildOptionsScreen extends Screen {
 	}
 
 	private int reseedRow(int top) {
-		return floorRow(top) + 22;
+		// Under the width and floor rows where a layout has them, and in their place where it does
+		// not -- the straight half-tick lane folds nowhere and so shows neither.
+		return hasLaneControls() ? floorRow(top) + 22 : widthRow(top);
 	}
 
 	private int rateRow(int top) {
@@ -328,11 +330,13 @@ final class BuildOptionsScreen extends Screen {
 	/**
 	 * Whether this layout runs two machines that may trade halves of the game tick.
 	 *
-	 * <p>Only the interleaved paste does. The other half-tick layouts give each machine one
-	 * parity for the whole song, so there is no reseed for a threshold to govern.</p>
+	 * <p>The interleaved paste and the straight half-tick lane both do. The ultra half-tick
+	 * layout still gives each machine one parity for the whole song, so there is no reseed there
+	 * for a threshold to govern.</p>
 	 */
 	private boolean hasReseedControl() {
-		return mode == SongBuilder.PasteMode.INTERLEAVED_HALF_TICK;
+		return mode == SongBuilder.PasteMode.INTERLEAVED_HALF_TICK
+			|| mode == SongBuilder.PasteMode.HALF_TICK_LANE;
 	}
 
 	/**

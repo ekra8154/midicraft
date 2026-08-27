@@ -7,7 +7,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import net.minecraft.SharedConstants;
+import net.minecraft.core.BlockPos;
 import net.minecraft.server.Bootstrap;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
@@ -106,5 +108,100 @@ class TwoLanesThenOneProbe {
 		int cellsB = trackB[1].length == 0 ? 0 : trackB[1][trackB[1].length - 1];
 		System.out.println("  cells A=" + cellsA + " B=" + cellsB + " longer="
 			+ Math.max(cellsA, cellsB));
+
+		// The build the schedule becomes, read back for when every note actually fires. Both
+		// lists aligned at their own first note -- a shift the whole song shares is the machine
+		// starting a moment after the button, and a shift part of it takes alone is the fault.
+		SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0), notes,
+			SongBuilder.PasteMode.HALF_TICK_LANE, new SongBuilder.BuildLimits(16, 24, 1));
+		Map<BlockPos, net.minecraft.world.level.block.state.BlockState> world =
+			new java.util.HashMap<>();
+		int[] min = {Integer.MAX_VALUE, Integer.MAX_VALUE, Integer.MAX_VALUE};
+		int[] max = {Integer.MIN_VALUE, Integer.MIN_VALUE, Integer.MIN_VALUE};
+		for (String command : plan.commands()) {
+			String[] token = command.split(" ", 5);
+			BlockPos pos = new BlockPos(Integer.parseInt(token[1]), Integer.parseInt(token[2]),
+				Integer.parseInt(token[3]));
+			String text = token[4].substring(0, token[4].length() - " replace".length());
+			if (text.startsWith("minecraft:oak_button")) {
+				text = "minecraft:lever[face=floor,facing=east,powered=true]";
+			}
+			world.put(pos, net.minecraft.commands.arguments.blocks.BlockStateParser
+				.parseForBlock(net.minecraft.core.registries.BuiltInRegistries.BLOCK, text, false)
+				.blockState());
+			for (int axis = 0; axis < 3; axis++) {
+				int value = axis == 0 ? pos.getX() : axis == 1 ? pos.getY() : pos.getZ();
+				min[axis] = Math.min(min[axis], value);
+				max[axis] = Math.max(max[axis], value);
+			}
+		}
+		for (String command : plan.commands()) {
+			String[] token = command.split(" ", 5);
+			if ((token[4].contains("repeater") || token[4].contains("note_block")
+						|| token[4].contains("piston") || token[4].contains("redstone_block")
+						|| token[4].contains("button"))) {
+				System.out.println("    " + command.replace(" replace", ""));
+			}
+		}
+		NoteMachineReader.Reading reading = NoteMachineReader.read("TwoLanesThenOne",
+			new BlockPos(min[0] - 1, min[1] - 1, min[2] - 1),
+			new BlockPos(max[0] + 1, max[1] + 1, max[2] + 1),
+			pos -> world.getOrDefault(pos,
+				net.minecraft.world.level.block.Blocks.AIR.defaultBlockState()));
+		// Fire times in game ticks: the reading's fixed clock puts sixty composer ticks in one.
+		List<Integer> heard = new ArrayList<>();
+		for (var layer : reading.project().layers()) {
+			List<Integer> ticks = layer.notes().stream()
+				.map(note -> (int)(note.startTick()
+					/ (NoteMachineReader.TICKS_PER_REDSTONE_TICK / 2)))
+				.sorted().toList();
+			System.out.println("  LAYER " + layer.instrument() + " " + ticks.size() + " raw "
+				+ ticks.subList(0, Math.min(14, ticks.size())));
+			heard.addAll(ticks);
+		}
+		heard.sort(null);
+		List<Integer> wrote = notes.stream().map(SongBuilder.EventNote::time).sorted().toList();
+		System.out.println("  WROTE " + wrote.subList(0, Math.min(24, wrote.size())));
+		System.out.println("  HEARD " + heard.subList(0, Math.min(24, heard.size())));
+		int seamAt = 262;
+		System.out.println("  WROTE@switch " + wrote.stream()
+			.filter(t -> t > seamAt - 8 && t < seamAt + 60).toList());
+		System.out.println("  HEARD@switch " + heard.stream()
+			.filter(t -> t > seamAt - 8 && t < seamAt + 60).toList());
+		System.out.println("  laneA@switch " + schedule.laneA().stream()
+			.map(SongBuilder.EventNote::time).distinct()
+			.filter(t -> t > seamAt - 16 && t < seamAt + 60).toList());
+		System.out.println("  laneB@switch " + schedule.laneB().stream()
+			.map(SongBuilder.EventNote::time).distinct()
+			.filter(t -> t > seamAt - 16 && t < seamAt + 60).toList());
+		int shiftHeard = heard.isEmpty() ? 0 : heard.get(0);
+		int shiftWrote = wrote.get(0);
+		System.out.println("  TIMING heard " + heard.size() + " of " + wrote.size()
+			+ " (a clump is two on one tick, and the reader keeps one)");
+		int shown = 0;
+		int at = 0;
+		for (int index = 0; index < wrote.size() && at < heard.size(); index++) {
+			int expected = wrote.get(index) - shiftWrote;
+			int actual = heard.get(at) - shiftHeard;
+			if (actual == expected) {
+				at++;
+				continue;
+			}
+			if (shown++ < 12) {
+				System.out.println("    note " + index + " written gt " + expected
+					+ " heard gt " + (actual < expected ? actual + " EARLY" : actual + " LATE"));
+			}
+			if (actual > expected) {
+				continue;
+			}
+			at++;
+			index--;
+		}
+		if (shown > 12) {
+			System.out.println("    ... and " + (shown - 12) + " more");
+		}
+		if (shown == 0) {
+			System.out.println("    every heard note on its written tick");
+		}
 	}
 }

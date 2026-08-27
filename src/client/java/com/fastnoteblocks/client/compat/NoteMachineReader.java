@@ -246,8 +246,17 @@ public final class NoteMachineReader {
 	 * does not reach -- reading a machine as if every wire were infinite would connect two halves
 	 * that in the world are separate.</p>
 	 */
+	/**
+	 * @param scheduled whether this edge was born in the scheduled-tick phase -- a repeater's
+	 *     release -- rather than later in the tick. Within a game tick, scheduled ticks process
+	 *     before block events, so a piston reached by a scheduled edge starts extending the same
+	 *     tick and costs two game ticks instead of three; its landing then hands the edge on in
+	 *     the other phase. Measured with command blocks in the world: one piston behind a
+	 *     repeater is four game ticks with the repeater, not five, and two pistons in a row are
+	 *     five from any phase at all. Dust and blocks are instant and carry the phase unchanged.
+	 */
 	private record Pulse(int time, BlockPos position, int strength, boolean dust, BlockPos from,
-		BlockPos origin) {
+		BlockPos origin, boolean scheduled) {
 	}
 
 	/**
@@ -281,10 +290,11 @@ public final class NoteMachineReader {
 				// machine arrives here, and the song begins when this repeater lets go.
 				queue.add(new Pulse(2 * state.getValue(RepeaterBlock.DELAY),
 					start.relative(state.getValue(RepeaterBlock.FACING).getOpposite()), 15, false,
-					start, start));
+					start, start, true));
 			} else {
 				for (Direction direction : Direction.values()) {
-					queue.add(new Pulse(0, start.relative(direction), 15, false, start, start));
+					queue.add(new Pulse(0, start.relative(direction), 15, false, start, start,
+						false));
 				}
 			}
 		}
@@ -329,19 +339,21 @@ public final class NoteMachineReader {
 				dustTime.put(position, pulse.time());
 				dustStrength.put(position, pulse.strength());
 				spreadFromDust(region, queue, position, pulse.time(), pulse.strength(),
-					firedAt, noteBlocks, repeaterInput, pulse.origin(), feeds);
+					pulse.scheduled(), firedAt, noteBlocks, repeaterInput, pulse.origin(), feeds);
 				continue;
 			}
 			if (state.is(Blocks.REDSTONE_WIRE)) {
 				// Strong power lands on a wire as a full-strength pulse rather than as block power.
-				queue.add(new Pulse(pulse.time(), position, 15, true, pulse.from(), pulse.origin()));
+				queue.add(new Pulse(pulse.time(), position, 15, true, pulse.from(), pulse.origin(),
+					pulse.scheduled()));
 				continue;
 			}
 			if (noteBlocks.contains(position)) {
 				firedAt.merge(position, pulse.time(), Math::min);
 			}
 			if (state.is(Blocks.PISTON) || state.is(Blocks.STICKY_PISTON)) {
-				push(region, queue, position, state, pulse.time(), pulse.origin(), pushed);
+				push(region, queue, position, state, pulse.time(), pulse.scheduled(),
+					pulse.origin(), pushed);
 				// A piston is not a conductor and hands nothing on by wire. What it hands on is the
 				// block it shoves, three game ticks later and a cell further out.
 				continue;
@@ -367,7 +379,7 @@ public final class NoteMachineReader {
 			}
 			strongAt.put(position, pulse.time());
 			spreadFromPoweredBlock(region, queue, position, pulse.time(), pulse.strength() > 0,
-				firedAt, noteBlocks, repeaterInput, pulse.origin(), feeds);
+				pulse.scheduled(), firedAt, noteBlocks, repeaterInput, pulse.origin(), feeds);
 		}
 		Set<BlockPos> reached = new HashSet<>(dustTime.keySet());
 		reached.addAll(strongAt.keySet());
@@ -390,7 +402,8 @@ public final class NoteMachineReader {
 	 * is the only part a repeater could not have said.</p>
 	 */
 	private static void push(Region region, PriorityQueue<Pulse> queue, BlockPos piston,
-			BlockState state, int time, BlockPos origin, Set<BlockPos> pushed) {
+			BlockState state, int time, boolean scheduled, BlockPos origin,
+			Set<BlockPos> pushed) {
 		if (!pushed.add(piston)) {
 			return;
 		}
@@ -421,10 +434,16 @@ public final class NoteMachineReader {
 			}
 			// Only a block of redstone changes what the machine does by moving. Shove a stone block
 			// and the wire either side of it is where it was.
+			//
+			// The phase rule, measured in the world: an edge from the scheduled phase catches the
+			// same tick's block events, so the push costs two game ticks instead of three -- and
+			// the landing hands the edge on in the other phase, which is why two pistons in a row
+			// cost five from anywhere while one alone flips nothing behind a repeater.
 			BlockPos landing = block.relative(facing);
 			for (Direction direction : Direction.values()) {
-				queue.add(new Pulse(time + PISTON_PUSH_GAME_TICKS, landing.relative(direction), 15,
-					false, landing, origin));
+				queue.add(new Pulse(
+					time + (scheduled ? PISTON_PUSH_GAME_TICKS - 1 : PISTON_PUSH_GAME_TICKS),
+					landing.relative(direction), 15, false, landing, origin, !scheduled));
 			}
 		}
 	}
@@ -476,8 +495,8 @@ public final class NoteMachineReader {
 	 *     less of
 	 */
 	private static void spreadFromDust(Region region, PriorityQueue<Pulse> queue, BlockPos position,
-			int time, int strength, Map<BlockPos, Integer> firedAt, Set<BlockPos> noteBlocks,
-			Map<BlockPos, Integer> repeaterInput, BlockPos origin,
+			int time, int strength, boolean scheduled, Map<BlockPos, Integer> firedAt,
+			Set<BlockPos> noteBlocks, Map<BlockPos, Integer> repeaterInput, BlockPos origin,
 			Map<BlockPos, Set<BlockPos>> feeds) {
 		// Dust powers the block it sits on, and any block it runs into. Those are the two ways a
 		// note block ever hears about it -- dust does not reach through a block to the far side.
@@ -489,12 +508,12 @@ public final class NoteMachineReader {
 		// re-power that wire to fifteen, which is a loop the game avoids by ignoring wires entirely
 		// while it works out what a wire is carrying.
 		if (isConductor(region.at(below)) || isPiston(region.at(below))) {
-			queue.add(new Pulse(time, below, 0, false, position, origin));
+			queue.add(new Pulse(time, below, 0, false, position, origin, scheduled));
 		}
 		Set<Direction> pointsAt = pointsAt(region, position);
 		for (Direction direction : Direction.Plane.HORIZONTAL) {
 			for (BlockPos next : dustNeighbours(region, position, direction)) {
-				queue.add(new Pulse(time, next, strength - 1, true, position, origin));
+				queue.add(new Pulse(time, next, strength - 1, true, position, origin, scheduled));
 			}
 			if (!pointsAt.contains(direction)) {
 				continue;
@@ -515,7 +534,7 @@ public final class NoteMachineReader {
 			// A piston is the other way round: not a conductor at all, but it does take power. Left
 			// out, dust lying against one never tells it anything.
 			if (isConductor(region.at(side)) || isPiston(region.at(side))) {
-				queue.add(new Pulse(time, side, 0, false, position, origin));
+				queue.add(new Pulse(time, side, 0, false, position, origin, scheduled));
 			}
 			feedRepeater(region, queue, side, position, time, repeaterInput, origin, feeds);
 		}
@@ -647,8 +666,9 @@ public final class NoteMachineReader {
 	 *     not a second source of that same wire's signal.
 	 */
 	private static void spreadFromPoweredBlock(Region region, PriorityQueue<Pulse> queue,
-			BlockPos position, int time, boolean fromSource, Map<BlockPos, Integer> firedAt,
-			Set<BlockPos> noteBlocks, Map<BlockPos, Integer> repeaterInput, BlockPos origin,
+			BlockPos position, int time, boolean fromSource, boolean scheduled,
+			Map<BlockPos, Integer> firedAt, Set<BlockPos> noteBlocks,
+			Map<BlockPos, Integer> repeaterInput, BlockPos origin,
 			Map<BlockPos, Set<BlockPos>> feeds) {
 		for (Direction direction : Direction.values()) {
 			BlockPos side = position.relative(direction);
@@ -656,10 +676,10 @@ public final class NoteMachineReader {
 				firedAt.merge(side, time, Math::min);
 			}
 			if (fromSource && region.at(side).is(Blocks.REDSTONE_WIRE)) {
-				queue.add(new Pulse(time, side, 15, true, position, origin));
+				queue.add(new Pulse(time, side, 15, true, position, origin, scheduled));
 			}
 			if (isPiston(region.at(side))) {
-				queue.add(new Pulse(time, side, 0, false, position, origin));
+				queue.add(new Pulse(time, side, 0, false, position, origin, scheduled));
 			}
 			feedRepeater(region, queue, side, position, time, repeaterInput, origin, feeds);
 		}
@@ -701,8 +721,11 @@ public final class NoteMachineReader {
 		// A repeater holds the signal for its delay and then hands it to the block in front. That
 		// hold is the only thing in a machine that makes time pass, so the whole song's rhythm is
 		// this one addition, repeated.
+		// The repeater's release is a scheduled tick, whatever phase fed it: the delay comes out
+		// exact and the edge is handed on phase-normalised. This is why any repeater anywhere in
+		// a line pins every piston after it.
 		queue.add(new Pulse(time + 2 * state.getValue(RepeaterBlock.DELAY),
-			candidate.relative(facing.getOpposite()), 15, false, candidate, candidate));
+			candidate.relative(facing.getOpposite()), 15, false, candidate, candidate, true));
 	}
 
 	/** How many ways in to follow one at a time before giving up and running them all together. */

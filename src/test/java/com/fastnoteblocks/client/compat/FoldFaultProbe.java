@@ -125,7 +125,11 @@ class FoldFaultProbe {
 				}
 				System.out.println("   READBACK unreached=" + reading.unreachedNotes()
 					+ " heard=" + heard + " starved=" + starved.size() + " (levers="
-					+ plan.padding().getOrDefault("waysIn", 1) + ")");
+					+ plan.padding().getOrDefault("waysIn", 1) + ", versions="
+					+ reading.versions() + ")");
+				reading.unreachedAt().stream().limit(4).forEach(pos ->
+					System.out.println("     unreached at " + pos.getX() + " " + pos.getY()
+						+ " " + pos.getZ()));
 				starved.stream().limit(8).forEach(pos -> System.out.println("     starved at "
 					+ pos.getX() + " " + pos.getY() + " " + pos.getZ()));
 				// The break itself: dead wire touching live wire, which is where the signal
@@ -143,6 +147,23 @@ class FoldFaultProbe {
 					.sorted(SongBuilder.FaultSites.ORDER)
 					.toList();
 				System.out.println("     deadWire=" + dead.size() + " breaks=" + breaks.size());
+				String[] reachSpot = System.getProperty("probe.reached", "").split(",");
+				if (reachSpot.length == 3) {
+					BlockPos centre = new BlockPos(Integer.parseInt(reachSpot[0]),
+						Integer.parseInt(reachSpot[1]), Integer.parseInt(reachSpot[2]));
+					for (String command : plan.commands()) {
+						String[] token = command.split(" ", 5);
+						BlockPos pos = new BlockPos(Integer.parseInt(token[1]),
+							Integer.parseInt(token[2]), Integer.parseInt(token[3]));
+						if (Math.abs(pos.getX() - centre.getX()) <= 3
+								&& Math.abs(pos.getY() - centre.getY()) <= 2
+								&& Math.abs(pos.getZ() - centre.getZ()) <= 3) {
+							System.out.println("     "
+								+ (reading.reachedAt().contains(pos) ? "LIVE " : "dead ")
+								+ command.replace(" replace", ""));
+						}
+					}
+				}
 				breaks.stream().limit(6).forEach(pos -> System.out.println("     break at "
 					+ pos.getX() + " " + pos.getY() + " " + pos.getZ()));
 			}
