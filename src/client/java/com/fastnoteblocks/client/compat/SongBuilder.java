@@ -1429,38 +1429,68 @@ public final class SongBuilder {
 		WalkStart head = start == WalkStart.HEAD && limits.startTop()
 			? new WalkStart(0, floors - 1, -1)
 			: start;
-		List<EventNote> even = laneTimes(parity(notes, 0));
-		List<EventNote> odd = laneTimes(parity(notes, 1));
+		List<EventNote> gtEven = parity(notes, 0);
+		List<EventNote> gtOdd = parity(notes, 1);
 		// A song that lives on one parity of the game tick -- which is every song written on
 		// repeater ticks, since a repeater tick is two game ticks -- has nothing for a second
 		// machine to play. It gets one plain machine at the full width, no trunk stretched for a
 		// partner that never comes: exactly the serpentine, on the song's own clock.
-		if (even.isEmpty() || odd.isEmpty()) {
-			List<EventNote> whole = even.isEmpty() ? odd : even;
+		if (gtEven.isEmpty() || gtOdd.isEmpty()) {
+			List<EventNote> whole = laneTimes(gtEven.isEmpty() ? gtOdd : gtEven);
 			return createRoutedPastePlan(origin, forward, whole, limits.laneWidth(), floors, head,
 				LaneRoute.folding(LaneRoute.serpentine(floors, head.floor(), head.climb())),
 				PasteMode.INTERLEAVED_HALF_TICK);
 		}
+		// Which machine plays which ticks. Fixed, it is the parity split; scheduled, a machine
+		// changes parity at a piston wherever the imbalance outprices the seam, and each lane
+		// carries its flips out as tick-group indices. Machine A keeps the even start whenever the
+		// two open on different halves, so whatever starts the machines keeps its convention.
+		List<EventNote> gtA = gtEven;
+		List<EventNote> gtB = gtOdd;
+		List<Integer> flipsA = List.of();
+		List<Integer> flipsB = List.of();
+		if (INTERLEAVED_DYNAMIC_PARITY) {
+			ParitySchedule schedule = scheduleParities(notes);
+			if (!schedule.laneA().isEmpty() && !schedule.laneB().isEmpty()) {
+				gtA = schedule.laneA();
+				gtB = schedule.laneB();
+				flipsA = schedule.flipsA();
+				flipsB = schedule.flipsB();
+				if (Math.floorMod(gtA.get(0).time(), 2) == 1
+						&& Math.floorMod(gtB.get(0).time(), 2) == 0) {
+					List<EventNote> notesSwap = gtA;
+					gtA = gtB;
+					gtB = notesSwap;
+					List<Integer> flipSwap = flipsA;
+					flipsA = flipsB;
+					flipsB = flipSwap;
+				}
+			}
+		}
+		List<EventNote> even = laneTimes(gtA);
+		List<EventNote> odd = laneTimes(gtB);
 		BlockPos originA = origin.relative(forward, 1);
 		Layout layoutA = Layout.ultraAlong(floors, coordAlong(axis, originA)).asV2();
-		List<EventGroup> evenEvents = eventGroups(even, layoutA);
+		List<EventGroup> evenEvents = withParitySeams(eventGroups(even, layoutA), flipsA, gtA,
+			layoutA);
+		// One frame for both: same walls, same direction, same start floor. Machine B runs one
+		// lane pitch further down the slab, and the interleave is purely in depth -- rows come out
+		// A B B A A B B A at the lane spacing, because A's long links jump B's pairs and B's long
+		// links jump A's.
+		Layout layoutB = layoutA;
+		List<EventGroup> oddEvents = withParitySeams(eventGroups(odd, layoutB), flipsB, gtB,
+			layoutB);
 		// Sized to the widest chord of either half, and to nothing else. A wait is a repeater
 		// chain -- each repeater hands out a fresh fifteen and nothing hangs off it -- and the
 		// routed walk folds one through as many turns as it needs, so the one thing that cannot
 		// split across two turns, a chord, is the one thing that dictates the thinnest build.
 		int longest = Math.max(
 			evenEvents.stream().mapToInt(EventGroup::chordLength).max().orElse(1),
-			eventGroups(odd, layoutA).stream().mapToInt(EventGroup::chordLength).max().orElse(1));
+			oddEvents.stream().mapToInt(EventGroup::chordLength).max().orElse(1));
 		// The full v2 width for both machines: the nested shape has no corridors. Each machine
 		// gives up two columns at one end of one floor -- where the partner's long link runs --
 		// and owns the whole span everywhere else.
 		int laneWidth = Math.max(longest + 2, limits.laneWidth() - 3);
-		// One frame for both: same walls, same direction, same start floor. Machine B runs one
-		// lane pitch further down the slab, and the interleave is purely in depth -- rows come out
-		// A B B A A B B A at the lane spacing, because A's long links jump B's pairs and B's long
-		// links jump A's.
-		Layout layoutB = layoutA;
-		List<EventGroup> oddEvents = eventGroups(odd, layoutB);
 		int spacing = Math.max(
 			laneSpacing(laneReach(evenEvents, 0, evenEvents.size()),
 				laneReach(evenEvents, 0, evenEvents.size())),
@@ -1499,6 +1529,18 @@ public final class SongBuilder {
 			// Two machines, two buttons: the severed check excuses one starved repeater per way in,
 			// and until this was recorded every dual build's second button read as a severed lane.
 			placements.waysIn(2);
+			// What the schedule decided, on the plan for whoever reads it: how many pistons, and
+			// which half of the tick each machine's input must fire on -- the one fact the starter
+			// buttons cannot carry themselves.
+			if (flipsA.size() + flipsB.size() > 0) {
+				placements.padded("paritySeams", flipsA.size() + flipsB.size());
+			}
+			if (Math.floorMod(gtA.get(0).time(), 2) == 1) {
+				placements.padded("machineAStartsOdd");
+			}
+			if (Math.floorMod(gtB.get(0).time(), 2) == 0) {
+				placements.padded("machineBStartsEven");
+			}
 			boolean walkingB = false;
 			try {
 				walkRouted(evenEvents, originA, forward, laneWidth, floors, placements, layoutA,
@@ -1544,6 +1586,20 @@ public final class SongBuilder {
 	 * measured at 29 percent of its whole length. See {@link Pace}.</p>
 	 */
 	static boolean INTERLEAVED_PACES_THE_LANES = true;
+
+	/**
+	 * Whether the interleaved mode's machines may change parity mid-song.
+	 *
+	 * <p>Off, each machine owns one half of the game tick for the whole song -- the fixed split,
+	 * which leaves a machine idle through every stretch the song spends on one parity, and the
+	 * corridor as deep as the busy one. On, {@link #scheduleParities} decides tick ownership and a
+	 * sticky piston's three game ticks move a lane to the other half wherever the imbalance
+	 * outprices the seam; {@link #PARITY_SEAM_COST} is the dial between pistons spent and balance
+	 * bought. Measured over the library's mixed-parity songs at the default cost: the longer lane
+	 * shrinks 14 percent and the worst momentary imbalance halves, for 66 pistons across 13
+	 * songs.</p>
+	 */
+	static boolean INTERLEAVED_DYNAMIC_PARITY = true;
 
 	/**
 	 * One machine walked alone against a throwaway plan, for its natural pulse positions.
@@ -1620,10 +1676,17 @@ public final class SongBuilder {
 		return new int[][] {stretchA, stretchB};
 	}
 
-	/** Blocks of lane a parity seam stands on: the sticky piston, its redstone block, and the air
-	 * cell the block extends into -- which must be air, or the wire beyond would read the block's
-	 * power before the piston ever moved. */
-	static int PARITY_SEAM_CELLS = 3;
+	/**
+	 * Blocks of lane a parity seam stands on: the sticky piston, the spacer it shoves, the
+	 * redstone block behind that, and the air cell the pair extends into.
+	 *
+	 * <p>The spacer is not decoration: a redstone block directly on a piston's face powers the
+	 * piston, which would fire it at paste time and oscillate it ever after -- the reader's own
+	 * model states a retracted piston with one on its face is not a thing that can exist. And the
+	 * cell past the block must be air, or the wire beyond would read the block's power before the
+	 * piston ever moved.</p>
+	 */
+	static int PARITY_SEAM_CELLS = 4;
 
 	/**
 	 * Cells of imbalance one parity seam is worth to the scheduler.
@@ -1898,6 +1961,55 @@ public final class SongBuilder {
 			cells[index] = total;
 		}
 		return new int[][] {times, cells};
+	}
+
+	/**
+	 * Rebuilds the groups a parity schedule flips, charging each its piston.
+	 *
+	 * <p>The halved clock lost the parity, so the flip's game tick decides how much of the gap the
+	 * piston eats -- one whole tick entering the odd half, two coming back. The group's length
+	 * grows by the element's three cells and its delay repeaters shrink by what the piston covers,
+	 * so the planner and the walk still agree on where everything lands. The style is re-chosen
+	 * with the room behind honest: the pair behind the module is piston works unless at least two
+	 * repeater columns stand between, and no shape may reach back into a cell a block extends
+	 * through.</p>
+	 */
+	private static List<EventGroup> withParitySeams(List<EventGroup> groups, List<Integer> flips,
+			List<EventNote> gtNotes, Layout layout) {
+		if (flips.isEmpty()) {
+			return groups;
+		}
+		List<Integer> groupTimes = new ArrayList<>();
+		for (EventNote note : gtNotes) {
+			if (groupTimes.isEmpty() || groupTimes.get(groupTimes.size() - 1) != note.time()) {
+				groupTimes.add(note.time());
+			}
+		}
+		List<EventGroup> result = new ArrayList<>(groups);
+		for (int flip : flips) {
+			EventGroup group = groups.get(flip);
+			int eat = Math.floorMod(groupTimes.get(flip), 2) == 1 ? 1 : 2;
+			int delay = group.time() - groups.get(flip - 1).time() - eat;
+			int delayRepeaters = Math.max(0, (delay - 1) / 4);
+			ChordStyle style = chooseStyle(layout, group.notes(), delayRepeaters >= 2);
+			int busLength = (group.notes().size() + 1) / 2;
+			int tailCells = 0;
+			if (style.busHeaded()) {
+				StackedBusSplit split = splitFor(style, group.notes());
+				tailCells = split == null ? 0 : stackedBusTailColumns(split.tail());
+			}
+			int eventLength = style == ChordStyle.BUS ? 1 + busLength
+				: style.busHeaded()
+					? STACKED_CELLS + STACKED_BUS_TRANSITION + tailCells
+					: 2;
+			int maxSafeTurnDistance = style == ChordStyle.BUS ? Math.max(0, 13 - busLength)
+				: style.busHeaded() ? Math.max(0, 13 - tailCells)
+				: 13;
+			result.set(flip, new EventGroup(group.time(), group.notes(),
+				delayRepeaters + eventLength + PARITY_SEAM_CELLS, eventLength,
+				maxSafeTurnDistance, style, laneReachOf(layout, style, group.notes()), eat));
+		}
+		return List.copyOf(result);
 	}
 
 	/**
@@ -8240,6 +8352,13 @@ public final class SongBuilder {
 				columnBehindBusy = true;
 				replan = layout.ultra();
 			}
+			// A parity seam's ticks are charged before any of this event's delay is spent -- the
+			// fold and the delay layer both read what remains, and a piston laid after repeaters
+			// that already spent the whole gap would sound the event late. The element itself goes
+			// down after the fold, so any turn the wait crosses is behind it.
+			if (event.seamEat() > 0) {
+				currentTime += event.seamEat();
+			}
 			// A wait folds like the lane it rides. A wait is a repeater chain -- each repeater hands
 			// out a fresh fifteen, nothing hangs off it, and dust turns any corner -- so a wait longer
 			// than the lane in front of it never has to broaden the build. The walk arms the turn
@@ -8266,7 +8385,10 @@ public final class SongBuilder {
 				int dustRun = Math.max(0, DUST_RANGE - foldSignal);
 				while (true) {
 					int foldRepeaters = Math.max(0, (event.time() - currentTime - 1) / 4);
-					int want = foldRepeaters + stretchLeft;
+					// A pending seam's element wants three straight cells of this leg too, so every
+					// fit question the fold asks counts them alongside the repeaters.
+					int seamCells = event.seamEat() > 0 ? PARITY_SEAM_CELLS : 0;
+					int want = foldRepeaters + stretchLeft + seamCells;
 					if (turning || lane.bending()) {
 						int toExit = 0;
 						for (Lane.Bend bend : lane.bends()) {
@@ -8358,13 +8480,13 @@ public final class SongBuilder {
 					// stretch that would cross the turn ahead needs the ticks to keep its chain
 					// alive over there -- a repeater every eleventh cell -- and one that cannot
 					// afford the crossing is clamped to this leg instead of attempting it.
-					if (foldRepeaters <= foldColumns
+					if (foldRepeaters + seamCells <= foldColumns
 							&& foldRepeaters <= Math.max(1, foldColumns / 8)) {
 						stretchLeft = Math.min(stretchLeft,
-							Math.max(0, foldColumns - foldRepeaters));
+							Math.max(0, foldColumns - foldRepeaters - seamCells));
 					}
 					if (want <= foldColumns
-							|| foldRepeaters <= foldColumns
+							|| foldRepeaters + seamCells <= foldColumns
 								&& foldRepeaters <= Math.max(1, foldColumns / 8)) {
 						if (stretchLeft > 0) {
 							// Off any corner first, for the reason the staircase approach walks off
@@ -8534,6 +8656,87 @@ public final class SongBuilder {
 							+ coordAcross(axis, lane.pos()));
 					}
 				}
+			}
+			// The parity seam itself: a sticky piston facing down the lane, the spacer it shoves,
+			// the redstone block behind that, and the air cell the pair extends into -- three game
+			// ticks of delay, which is how a lane changes which half of the tick it plays. These
+			// are one-shot machines, so the "switch" has no state: everything downstream is on the
+			// other parity. Laid after the fold so any turn the wait crossed is behind it, and
+			// never in a bend nor on a corner -- a piston in a bend would push its blocks across
+			// the turn's own run. The block lands handing out a fresh fifteen, so the chain behind
+			// only has to reach the piston alive; where the bend walk would run the wire out
+			// first, a short repeater revives it from whatever ticks the gap still holds.
+			if (event.seamEat() > 0) {
+				placements.placing("paritySeam");
+				// Any turn still open is walked out first, and closed the way the fold closes
+				// one -- pinned cursor, watch verdict, ban and busy flags. The first version
+				// walked the corner cells and left the turn open, and the walk re-armed a
+				// phantom leg for every seam laid near one: machine B of moonlight at
+				// twenty-four wide came out twenty-two legs long of itself.
+				if (turning || lane.bending()) {
+					while (lane.bending()) {
+						BlockPos beforeCorner = lane.pos();
+						lane = pastAnyCorner(placements, lane);
+						tipSignal -= Math.abs(lane.pos().getX() - beforeCorner.getX())
+							+ Math.abs(lane.pos().getZ() - beforeCorner.getZ());
+						if (!lane.bending()) {
+							break;
+						}
+						if (tipSignal <= 2 && event.time() - currentTime > 1) {
+							int revive = Math.min(4, event.time() - currentTime - 1);
+							set(placements, lane.pos(), "minecraft:stone");
+							set(placements, lane.pos().above(), "minecraft:repeater[facing="
+								+ repeaterFacing(lane.travel()) + ",delay=" + revive + "]");
+							currentTime += revive;
+							tipSignal = DUST_RANGE;
+						} else {
+							if (tipSignal <= 0) {
+								placements.padded("paritySeamStarved");
+							}
+							addParityPad(placements, lane.pos());
+							tipSignal--;
+						}
+						lane = lane.ahead(1);
+					}
+					lane = lane.pinned(depth);
+					turning = false;
+					leavingTurn = TURN_BAN_OUTLASTS;
+					if (placements.watchingATurn()) {
+						placements.padded(placements.turnWasWide() ? "flatTurnWideClean"
+							: placements.turnHungBeyond() ? "flatTurnTightNeeded"
+							: "flatTurnTightUnneeded");
+						placements.stopWatchingTheTurn();
+					}
+					placedWhileTurning = false;
+					placements.padded("paritySeamWalkedItsTurn");
+					placements.placing("paritySeam");
+				}
+				lane = pastAnyCorner(placements, lane);
+				set(placements, lane.pos(), "minecraft:stone");
+				set(placements, lane.pos().above(), "minecraft:sticky_piston[facing="
+					+ lane.travel().getName() + "]");
+				lane = lane.ahead(1);
+				set(placements, lane.pos(), "minecraft:stone");
+				set(placements, lane.pos().above(), "minecraft:smooth_stone");
+				lane = lane.ahead(1);
+				set(placements, lane.pos(), "minecraft:stone");
+				set(placements, lane.pos().above(), "minecraft:redstone_block");
+				lane = lane.ahead(1);
+				set(placements, lane.pos(), "minecraft:stone");
+				set(placements, lane.pos().above(), "minecraft:air");
+				lane = lane.ahead(1);
+				tipSignal = DUST_RANGE;
+				// The element is lane content -- its chord may land flush on the wall and must be
+				// allowed its turn -- and the cells behind the next module are piston works, which
+				// no shape may reach back into. And the lane has moved three cells nothing else
+				// knows about, so whatever pads were booked are booked from the wrong place: the
+				// first leg that planned across a seam without this ran nine columns past its
+				// wall before its turn armed.
+				laneStarted = true;
+				columnBehindBusy = true;
+				booked = Map.of();
+				replan = layout.ultra();
+				placements.padded("paritySeam");
 			}
 			// Where this event's pulse stands, for the pacing pass: whole legs walked plus the way
 			// into this one, in path columns. Approximate on purpose -- extensions and turn pokes
@@ -15841,7 +16044,10 @@ public final class SongBuilder {
 	 * chord takes the path column after it.</p>
 	 */
 	private static boolean railFits(EventGroup event) {
-		return railHolds(event, RAIL_BLANKS);
+		// A parity seam never rides a rail: its piston works stand where the run's columns and
+		// hanging notes would, so the run closes before one and may reopen after it. The seam is
+		// laid before the rail machinery looks at the event, which is what "after" means here.
+		return event.seamEat() == 0 && railHolds(event, RAIL_BLANKS);
 	}
 
 	/** Off, a run refuses any chord the floor rail cannot hold rather than blanking a column for it. */
@@ -15948,6 +16154,11 @@ public final class SongBuilder {
 	private static boolean railMayStart(List<EventGroup> events, int index, int floorSeed, int room,
 			Map<Integer, Integer> booked) {
 		if (!TWO_RAIL_RUNS || index + 2 >= events.size()) {
+			return false;
+		}
+		// Not on a parity seam: the head column would stand right after the piston works and hang
+		// its notes back into them -- the air cell the blocks extend through most of all.
+		if (events.get(index).seamEat() > 0) {
 			return false;
 		}
 		EventGroup head = events.get(index);
@@ -16132,6 +16343,13 @@ public final class SongBuilder {
 		// opens on the far side.
 		if (railPadBooked(booked, index + 1) || railPadBooked(booked, index + 2)) {
 			return railNoPair(placements, "PadBooked");
+		}
+		// A parity seam breaks the chain the way a booked pad does: its piston works land between
+		// the run's columns, so no pair is committed across one -- the run ends and the seam and
+		// whatever follows go down as plain lane.
+		if (events.get(index + 1).seamEat() > 0
+				|| index + 2 < events.size() && events.get(index + 2).seamEat() > 0) {
+			return railNoPair(placements, "ParitySeam");
 		}
 		EventGroup next = events.get(index + 1);
 		// The plain pair: the next chord on the floor column, and the one after it on the path column
@@ -27585,8 +27803,18 @@ public final class SongBuilder {
 		}
 	}
 
+	/**
+	 * @param seamEat machine ticks of this event's delay the parity seam's piston eats, nought for
+	 *     the ordinary event. The piston is three game ticks, which is one and a half of these; the
+	 *     halved clocks floor per parity, so the walk charges one whole tick entering the odd half
+	 *     and two coming back, and the arithmetic stays whole in both directions.
+	 */
 	private record EventGroup(int time, List<EventNote> notes, int length, int chordLength,
-			int maxSafeTurnDistance, ChordStyle style, LaneReach reach) {
+			int maxSafeTurnDistance, ChordStyle style, LaneReach reach, int seamEat) {
+		EventGroup(int time, List<EventNote> notes, int length, int chordLength,
+				int maxSafeTurnDistance, ChordStyle style, LaneReach reach) {
+			this(time, notes, length, chordLength, maxSafeTurnDistance, style, reach, 0);
+		}
 	}
 
 	private record ChordStats(int peak, int peakTime, int overloadedTimes) {

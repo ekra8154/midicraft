@@ -92,6 +92,15 @@ class InterleavedCensusProbe {
 
 	@Test
 	void faultsOverTheLibrary() throws Exception {
+		Flags.Held held = Flags.set(System.getProperty("probe.set", ""));
+		try {
+			sweep(held);
+		} finally {
+			held.putBack();
+		}
+	}
+
+	private void sweep(Flags.Held held) throws Exception {
 		List<String> rows = new ArrayList<>();
 		int builds = 0;
 		int dualBuilds = 0;
@@ -187,7 +196,7 @@ class InterleavedCensusProbe {
 		}
 		rows.sort(java.util.Comparator.reverseOrder());
 		rows.forEach(row -> System.out.println("  " + row));
-		System.out.println("INTERLEAVED CENSUS: " + builds + " builds (" + dualBuilds
+		System.out.println("INTERLEAVED CENSUS" + held.said() + ": " + builds + " builds (" + dualBuilds
 			+ " dual, " + (builds - dualBuilds) + " solo), " + clean + " clean, "
 			+ threw + " threw, wrong=" + totalWrong + " missing=" + totalMissing
 			+ " collisions=" + totalCollisions + " overWidth=" + widthOver

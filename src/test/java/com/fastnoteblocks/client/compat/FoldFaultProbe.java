@@ -25,11 +25,22 @@ class FoldFaultProbe {
 
 	@Test
 	void nameTheCollisions() throws Exception {
+		Flags.Held held = Flags.set(System.getProperty("probe.set", ""));
+		try {
+			dissect();
+		} finally {
+			held.putBack();
+		}
+	}
+
+	private void dissect() throws Exception {
 		// Real conditions unless asked: a debug build tolerates collisions, which suppresses the
 		// tight-turn rewalks, which is a DIFFERENT build -- its faults are artifacts as often as
 		// facts, and this probe has tabled them as facts twice.
 		boolean debug = !Boolean.getBoolean("probe.real");
-		SongBuilder.NAME_EVERY_CELL = debug;
+		// Naming ships the real build -- it records who laid each cell and changes nothing --
+		// so it stays on even under probe.real, where only the collision tolerance goes.
+		SongBuilder.NAME_EVERY_CELL = true;
 		SongBuilder.DEBUG_PASTE = debug;
 		SongBuilder.TRACE_TURNS = Boolean.getBoolean("probe.trace");
 		SongBuilder.INTERLEAVED_PACES_THE_LANES = !Boolean.getBoolean("probe.nopace");
@@ -56,7 +67,11 @@ class FoldFaultProbe {
 				+ " collisions=" + plan.collisions().size()
 				+ " span=" + plan.spanX() + " built=" + plan.builtWidth()
 				+ " walls=" + plan.nearWall() + ".." + plan.farWall()
-				+ " repeatersOnCorners=" + plan.padding().getOrDefault("REPEATER-ON-CORNER", 0));
+				+ " repeatersOnCorners=" + plan.padding().getOrDefault("REPEATER-ON-CORNER", 0)
+				+ " paritySeams=" + plan.padding().getOrDefault("paritySeams", 0)
+				+ " seamsLaid=" + plan.padding().getOrDefault("paritySeam", 0)
+				+ " aOdd=" + plan.padding().getOrDefault("machineAStartsOdd", 0)
+				+ " bEven=" + plan.padding().getOrDefault("machineBStartsEven", 0));
 			plan.padding().entrySet().stream()
 				.filter(entry -> entry.getKey().startsWith("REPEATER-ON-CORNER:")
 					|| entry.getKey().startsWith("REPEATER-ON-CORNER@"))
@@ -161,6 +176,13 @@ class FoldFaultProbe {
 				perRow.entrySet().stream().limit(10).forEach(row -> System.out.println("     z="
 					+ row.getKey() + " stone=" + row.getValue()[0] + " andesite="
 					+ row.getValue()[1]));
+			}
+			if (Boolean.getBoolean("probe.pistons")) {
+				for (String command : plan.commands()) {
+					if (command.contains("sticky_piston")) {
+						System.out.println("   " + command);
+					}
+				}
 			}
 			String[] spot = System.getProperty("probe.at", "").split(",");
 			if (spot.length == 3) {
