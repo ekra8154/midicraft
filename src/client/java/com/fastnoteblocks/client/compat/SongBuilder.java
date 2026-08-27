@@ -2052,6 +2052,10 @@ public final class SongBuilder {
 	 */
 	public static int PARITY_MIN_DELAY_BEFORE_RESEED = 64;
 
+	/** One line per candidate the parity chooser weighs, over a window of game ticks. */
+	static boolean TRACE_PARITY = false;
+	static int TRACE_PARITY_FROM = 0;
+
 	/**
 	 * Game ticks a lane sits silent across a parity seam.
 	 *
@@ -2198,6 +2202,12 @@ public final class SongBuilder {
 			int bestReceiver = -1;
 			int bestMoves = -1;
 			long bestScore = Long.MAX_VALUE;
+			// Seams already standing, so that only the ones a candidate actually buys are priced.
+			// Charged in full every time instead, a standing seam makes its own undoing look like
+			// a saving: the chooser took each event onto the woken lane and handed the previous
+			// one straight back, which erased the seam, scored best, and left that lane holding
+			// one event for the rest of the song.
+			int seamsStanding = lanes[0].seams + lanes[1].seams;
 			for (int maxMoves = 2; bestReceiver < 0; maxMoves += 6) {
 				for (int side = 0; side < 2; side++) {
 					Ledger receiver = lanes[side];
@@ -2221,25 +2231,44 @@ public final class SongBuilder {
 						for (int at : touched) {
 							legal = legal && other.legalAt(at) && other.legalAt(at + 1);
 						}
-						// Scored on projected position -- laid cells plus the wait a lane will
-						// pay whenever it next plays -- so an idle lane's accrued wait, which is
-						// owed under every assignment, does not bias whose turn it is. Max for
-						// depth and drift, sum so a seam is never free just because it lands on
-						// the shorter lane, and every seam anywhere at the hysteresis price, so
-						// a handback cannot smuggle one in for its footprint alone.
 						int time = events.get(next).get(0).time();
-						long projected = other.cells + other.pendingAt(time);
-						// A flip taken on the event itself is credited with the stretch it opens
-						// up, less the seam it will owe on the way back; the seams a handback
-						// shuffles into existence get no credit, only the price.
-						// Balance against the price of the pistons that bought it, and nothing
-						// else. A lookahead crediting each flip with the single-parity stretch
-						// it opened was tried here and measured worse than none -- the balance
-						// term already carries that stretch, one event at a time, and crediting
-						// it again bought flips the following events did not want.
-						long score = 2 * Math.max(receiver.cells, projected)
-							+ receiver.cells + projected
-							+ seamPrice() * (lanes[0].seams + lanes[1].seams);
+						// What the partner has actually laid, and not a tick more. Adding the
+						// wait it would owe *if* it played again reads a lane that has stopped as
+						// though it were still consuming corridor -- which is why a lane whose
+						// half of the tick ran out was never woken again: waking it looked to buy
+						// nothing, because it was already being charged for its own silence.
+						long projected = other.cells;
+						long worst = Math.max(receiver.cells, projected);
+						long bill = seamPrice()
+							* Math.max(0, lanes[0].seams + lanes[1].seams - seamsStanding);
+						// A lane that has sat longer than a lane is allowed to sit does not pay
+						// for the seam that puts it back to work. That is what the setting means:
+						// past this much silence a lane should be carrying something, so the
+						// piston is the price of the rule rather than a cost weighed against it.
+						// Waived, never refunded: a candidate that takes a seam away must not be
+						// paid for it, or the chooser learns to take an event onto the woken lane
+						// and hand the previous one back, which erases the seam and scores best
+						// every time.
+						if (bill > 0 && receiver.seamAt(receiver.picks.size() - 1) != 0
+								&& receiver.picks.size() >= 2
+								&& time - receiver.timeAt(receiver.picks.size() - 2)
+									>= PARITY_MIN_DELAY_BEFORE_RESEED) {
+							bill = 0;
+						}
+						// The corridor is the longer lane and nothing else, so that is what the
+						// score is; the two lengths added are a tie-break underneath it, too
+						// small to outvote a single column of depth. Weighed evenly instead --
+						// which is how this was written -- the catch-up a woken lane must lay
+						// reads as pure loss, and no lane is ever woken.
+						long score = 1000L * (worst + bill) + receiver.cells + projected;
+						if (TRACE_PARITY && time >= TRACE_PARITY_FROM
+								&& time <= TRACE_PARITY_FROM + 40) {
+							System.out.println("PARITY t=" + time + " side=" + side + " moves="
+								+ moves + " legal=" + legal + " recv=" + receiver.cells
+								+ " other=" + projected + " worst=" + worst + " bill=" + bill
+								+ " seams=" + (lanes[0].seams + lanes[1].seams)
+								+ " score=" + score);
+						}
 						if (legal && score < bestScore) {
 							bestScore = score;
 							bestReceiver = side;
