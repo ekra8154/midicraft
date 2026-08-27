@@ -157,25 +157,38 @@ class FoldFaultProbe {
 						Integer.parseInt(token[2]), z);
 					// Stacked chords wear andesite in the shape table, in either machine, so the
 					// tint can only be read off the cells the table leaves plain.
+					// Only the ground the shape table leaves plain. Every chord family owns a
+					// colour of its own -- tuff is a bus, andesite a stacked chord -- so counting
+					// a chord's cell reads its shape as a machine. Filtering only the stacked
+					// family last time made a solo build report 246 rows of machine B.
 					String who = plan.laidBy().getOrDefault(pos, "");
-					if (who.startsWith("chord:STACKED")) {
+					if (who.startsWith("chord:") || who.startsWith("rail:")) {
 						continue;
 					}
+					// A: stone / stone_bricks. B: tuff / tuff_bricks. Bricks are the odd half.
 					if (token[4].startsWith("minecraft:stone ")) {
-						perRow.computeIfAbsent(z, row -> new int[2])[0]++;
-					} else if (token[4].startsWith("minecraft:andesite ")) {
-						perRow.computeIfAbsent(z, row -> new int[2])[1]++;
+						perRow.computeIfAbsent(z, row -> new int[4])[0]++;
+					} else if (token[4].startsWith("minecraft:stone_bricks ")) {
+						perRow.computeIfAbsent(z, row -> new int[4])[1]++;
+					} else if (token[4].startsWith("minecraft:tuff ")) {
+						perRow.computeIfAbsent(z, row -> new int[4])[2]++;
+					} else if (token[4].startsWith("minecraft:tuff_bricks ")) {
+						perRow.computeIfAbsent(z, row -> new int[4])[3]++;
 					}
 				}
-				long mixed = perRow.values().stream()
-					.filter(count -> count[0] > 0 && count[1] > 0).count();
-				long stoneRows = perRow.values().stream().filter(count -> count[1] == 0).count();
-				long andesiteRows = perRow.values().stream().filter(count -> count[0] == 0).count();
-				System.out.println("   TINT rows stoneOnly=" + stoneRows + " andesiteOnly="
-					+ andesiteRows + " mixed=" + mixed);
-				perRow.entrySet().stream().limit(10).forEach(row -> System.out.println("     z="
-					+ row.getKey() + " stone=" + row.getValue()[0] + " andesite="
-					+ row.getValue()[1]));
+				long aRows = perRow.values().stream()
+					.filter(c -> c[0] + c[1] > 0 && c[2] + c[3] == 0).count();
+				long bRows = perRow.values().stream()
+					.filter(c -> c[2] + c[3] > 0 && c[0] + c[1] == 0).count();
+				long mixedMachines = perRow.values().stream()
+					.filter(c -> c[0] + c[1] > 0 && c[2] + c[3] > 0).count();
+				long oddSeen = perRow.values().stream().filter(c -> c[1] + c[3] > 0).count();
+				System.out.println("   TINT rows A=" + aRows + " B=" + bRows + " mixed="
+					+ mixedMachines + " rowsShowingOddHalf=" + oddSeen);
+				perRow.entrySet().stream().limit(8).forEach(row -> System.out.println("     z="
+					+ row.getKey() + " stone=" + row.getValue()[0] + " stoneBricks="
+					+ row.getValue()[1] + " tuff=" + row.getValue()[2] + " tuffBricks="
+					+ row.getValue()[3]));
 			}
 			if (Boolean.getBoolean("probe.padding")) {
 				// What the build spent, biggest first: the delay chain, the pacing dust and the

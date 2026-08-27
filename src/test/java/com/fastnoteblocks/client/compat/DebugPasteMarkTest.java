@@ -74,6 +74,19 @@ class DebugPasteMarkTest {
 	private static String markOf(String block) {
 		return switch (block) {
 			case "minecraft:tuff" -> "bus";
+			case "minecraft:polished_tuff" -> "sunken bus";
+			// The two machines' plain ground on a two-machine plan, brick for the odd half of the
+			// game tick. Plain stone and plain tuff are already here as the lane and the bus.
+			case "minecraft:stone_bricks" -> "machine A, odd half";
+			case "minecraft:tuff_bricks" -> "machine B, odd half";
+			// The pad family, added 2026-08-16 and never taught to this switch -- which is why
+			// this method was failing on some 398 spruce and acacia cells long before either of
+			// the marks above existed. See SongBuilder.padPlanks for the table.
+			case "minecraft:spruce_planks" -> "parity pad";
+			case "minecraft:dark_oak_planks" -> "busy pad";
+			case "minecraft:birch_planks" -> "corner";
+			case "minecraft:acacia_planks" -> "closing pad";
+			case "minecraft:bamboo_planks" -> "pad";
 			case "minecraft:andesite" -> "stacked chord";
 			case "minecraft:deepslate" -> "stacked bus";
 			case "minecraft:deepslate_tiles" -> "cut head";

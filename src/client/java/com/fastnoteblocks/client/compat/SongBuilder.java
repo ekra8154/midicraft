@@ -926,6 +926,9 @@ public final class SongBuilder {
 		"minecraft:andesite", "minecraft:deepslate", "minecraft:cobbled_deepslate",
 		"minecraft:deepslate_tiles", "minecraft:smooth_basalt",
 		"minecraft:polished_basalt[axis=x]", "minecraft:polished_basalt[axis=y]",
+		// The two machines' odd-half ground. Overwritable like every other shape colour, or a
+		// fault mark would stop landing on half the lane the moment a seam changed its parity.
+		"minecraft:stone_bricks", "minecraft:tuff_bricks",
 		"minecraft:stripped_crimson_hyphae[axis=x]");
 
 	/**
@@ -1321,11 +1324,21 @@ public final class SongBuilder {
 	 * and the collision markers stay at the end, where they are meant to win.</p>
 	 */
 	private static PastePlan alongTheBuild(PastePlan plan) {
+		return alongTheBuild(plan, 1);
+	}
+
+	/**
+	 * @param token which coordinate of {@code setblock X Y Z} the build advances along -- 1 for x,
+	 *     3 for z. The straight half-tick lane runs its two lanes out along x; the interleaved
+	 *     mode serpentines along the lane and advances in depth, so its two machines are side by
+	 *     side across the depth axis and it is depth that says how far in a cell is.
+	 */
+	private static PastePlan alongTheBuild(PastePlan plan, int token) {
 		int markers = plan.collisions().size();
 		List<String> laid = new ArrayList<>(plan.commands().subList(0,
 			plan.commands().size() - markers));
 		laid.sort(Comparator.comparingInt(command ->
-			Integer.parseInt(command.split(" ")[1])));
+			Integer.parseInt(command.split(" ")[token])));
 		laid.addAll(plan.commands().subList(plan.commands().size() - markers,
 			plan.commands().size()));
 		return new PastePlan(List.copyOf(laid), plan.width(), plan.depth(), plan.height(),
@@ -1553,6 +1566,7 @@ public final class SongBuilder {
 			}
 			boolean walkingB = false;
 			try {
+				placements.laneTint(0, Math.floorMod(gtA.get(0).time(), 2));
 				walkRouted(evenEvents, originA, forward, laneWidth, floors, placements, layoutA,
 					routeA, headA, tightA, paceA);
 				addStarter(placements, forward);
@@ -1562,15 +1576,21 @@ public final class SongBuilder {
 				placements.startFreshRun();
 				// And everything from here is machine B's, which is how a marked paste tells the
 				// two apart on the ground.
-				placements.secondMachine();
+				placements.laneTint(1, Math.floorMod(gtB.get(0).time(), 2));
 				walkingB = true;
 				walkRouted(oddEvents, originB, forward, laneWidth, floors, placements,
 					layoutB, routeB, head, tightB, paceB);
 				addStarter(placements, forward,
 					placements.firstRepeaterAfter(laidByA));
-				return placements.finish(PasteMode.INTERLEAVED_HALF_TICK, origin,
+				// Both machines pasted together rather than one whole and then the other. They
+				// stand a lane pitch apart and a player walks between them, so a stream that
+				// builds all of A and then comes back for B puts half the build outside the
+				// chunks anyone has loaded -- the same reason the straight half-tick lane sorts
+				// its own. Nothing about the machines depends on the order.
+				return alongTheBuild(placements.finish(PasteMode.INTERLEAVED_HALF_TICK, origin,
 					coordAlong(axis, originA),
-					coordAlong(axis, originA) + laneWidth * stepAlong(axis, forward));
+					coordAlong(axis, originA) + laneWidth * stepAlong(axis, forward)),
+					depth.getAxis() == Direction.Axis.X ? 1 : 3);
 			} catch (FlatTurnHungOutside outside) {
 				// Each machine settles its own tight turns, one per pass, exactly as the single walk
 				// does; a pass replays deterministically up to the turn it settles.
@@ -8831,6 +8851,9 @@ public final class SongBuilder {
 				columnBehindBusy = true;
 				booked = Map.of();
 				replan = layout.ultra();
+				// Everything past the piston is on the other half of the tick, and on a marked
+				// paste the ground says so from here on.
+				placements.flipLaneTint();
 				placements.padded("paritySeam");
 			}
 			// Where this event's pulse stands, for the pacing pass: whole legs walked plus the way
@@ -20116,11 +20139,15 @@ public final class SongBuilder {
 			"the closing pad -- wire out to the wall, laid where a chord could not be cut");
 		key.put("minecraft:bamboo_planks",
 			"padding of any other kind, which v2 is not supposed to need");
-		key.put("minecraft:tuff", "a standard bus");
+		key.put("minecraft:tuff", "a standard bus -- or, where two machines share one region, "
+			+ "machine B's plain ground on the even half of the game tick");
 		key.put("minecraft:polished_tuff",
 			"a sunken bus -- a bus whose opening cell is a note block, so it carries three notes free");
-		key.put("minecraft:andesite", "a standard stacked chord -- or, where two machines share one "
-			+ "region, the second machine's plain ground");
+		key.put("minecraft:andesite", "a standard stacked chord");
+		key.put("minecraft:stone_bricks", "machine A's plain ground while it plays the odd half of "
+			+ "the game tick -- stone is machine A on the even half");
+		key.put("minecraft:tuff_bricks", "machine B's plain ground while it plays the odd half of "
+			+ "the game tick -- tuff is machine B on the even half");
 		key.put("minecraft:sticky_piston", "a parity seam: the piston shoves the redstone block on "
 			+ "its face into the air cell, three game ticks that move this lane to the other half "
 			+ "of the game tick");
@@ -28332,19 +28359,32 @@ public final class SongBuilder {
 		 * stays so -- a cell is claimed by whoever got there first, which is the same rule
 		 * {@code putIfAbsent} enforces for the blocks themselves.</p>
 		 */
-		private boolean secondMachine;
-		private final Set<BlockPos> secondMachineCells = new java.util.HashSet<>();
+		private int laneTint = -1;
+		private final Map<BlockPos, Integer> laneTintAt = new java.util.HashMap<>();
 
 		/**
-		 * Says that the machine being walked from here on is the second one.
+		 * Says which machine is being walked from here on, and which half of the tick it is on.
 		 *
-		 * <p>For the marked paste alone: an interleaved build winds two machines through one region
-		 * a lane pitch apart, and standing inside one there is nothing to say which rows are which.
-		 * The plain ground of the second comes out andesite so that the two read apart at a glance
-		 * -- see {@link #marked}. Nothing else reads it, and a plain paste is unaffected.</p>
+		 * <p>For the marked paste alone. An interleaved build winds two machines through one
+		 * region a lane pitch apart, and each of them may change parity at a piston, so standing
+		 * inside one there are two things you cannot see: whose row this is, and what it is
+		 * playing right now. The ground answers both -- machine A wears stone, machine B tuff, and
+		 * each goes to its brick form on the odd half of the tick -- so the family says whose it
+		 * is and the cut says what it is doing. See {@link #marked}.</p>
+		 *
+		 * <p>Set between the two walks and again at every seam. Everything already written keeps
+		 * the tint it was written under, which is the same rule {@code putIfAbsent} enforces for
+		 * the blocks themselves.</p>
 		 */
-		void secondMachine() {
-			secondMachine = true;
+		void laneTint(int machine, int parity) {
+			laneTint = machine * 2 + parity;
+		}
+
+		/** The other half of the tick, from a seam's piston onward. */
+		void flipLaneTint() {
+			if (laneTint >= 0) {
+				laneTint ^= 1;
+			}
 		}
 
 		/**
@@ -29650,8 +29690,8 @@ public final class SongBuilder {
 			}
 			BlockPos key = position.immutable();
 			String existing = blocks.putIfAbsent(key, block);
-			if (existing == null && secondMachine) {
-				secondMachineCells.add(key);
+			if (existing == null && laneTint >= 0) {
+				laneTintAt.put(key, laneTint);
 			}
 			if (existing == null && trial != null) {
 				trial.blocksAdded().add(key);
@@ -30013,13 +30053,21 @@ public final class SongBuilder {
 				return "minecraft:stripped_crimson_hyphae[axis=x]";
 			}
 			String stone = shapeStone(placedBy.get(at));
-			// The second machine's plain ground, so that two machines wound through one region can
-			// be told apart from inside one of them. Only the ground the table has no colour for:
-			// every shape keeps the colour it wears in either machine, andesite among them, because
-			// what a cell IS matters more than whose it is and the two questions are asked from
-			// different distances -- the shapes up close, the rows from across the build.
-			return secondMachineCells.contains(at) && "minecraft:stone".equals(stone)
-				? "minecraft:andesite" : stone;
+			// Whose row this is and what half of the tick it is playing, on the ground the shape
+			// table has no colour for. Every shape keeps the colour it wears in either machine,
+			// because what a cell IS matters more than whose it is, and the two questions are
+			// asked from different distances -- the shapes up close, the rows from across the
+			// build. The family names the machine and the cut names the parity, so a seam reads
+			// as the moment the floor changes cut without changing stone.
+			if (!"minecraft:stone".equals(stone)) {
+				return stone;
+			}
+			return switch (laneTintAt.getOrDefault(at, 0)) {
+				case 1 -> "minecraft:stone_bricks";
+				case 2 -> "minecraft:tuff";
+				case 3 -> "minecraft:tuff_bricks";
+				default -> stone;
+			};
 		}
 
 		/**
