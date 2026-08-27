@@ -1942,7 +1942,7 @@ public final class SongBuilder {
 	 * seven: six for the repeater, five for the pair. Nothing in {@link NoteMachineReader} can
 	 * see this -- it follows edges and knows nothing of how long a pulse is.</p>
 	 */
-	static final int PARITY_SEAM_GAME_TICKS = 11;
+	static int PARITY_SEAM_GAME_TICKS = 11;
 
 	/**
 	 * The delay every repeater standing in front of a double piston is set to, in redstone ticks.
@@ -1957,7 +1957,7 @@ public final class SongBuilder {
 	 * seam is a few dozen columns a song; a machine that cannot be played twice is worth more than
 	 * that.</p>
 	 */
-	static final int PARITY_SEAM_REPEATER = 3;
+	static int PARITY_SEAM_REPEATER = 3;
 
 	/**
 	 * Whether both machines are started from one spine instead of a button each.
