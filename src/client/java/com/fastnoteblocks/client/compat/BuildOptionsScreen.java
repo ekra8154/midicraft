@@ -105,8 +105,8 @@ final class BuildOptionsScreen extends Screen {
 	 *     vanilla would be wrong in exactly the worlds that have a reason to need it.
 	 * @param error the reason there is no build at all, or {@code null} when there is one
 	 */
-	private record Forecast(int spanZ, int breachingLanes, int worstBreach, List<FaultLine> faults,
-			int above, int below, String error, int builtWidth) {
+	private record Forecast(int longSide, int shortSide, int breachingLanes, int worstBreach,
+			List<FaultLine> faults, int above, int below, String error, int builtWidth) {
 
 		/**
 		 * Whether anything is wrong with the machine itself, as opposed to with where it lands.
@@ -480,7 +480,11 @@ final class BuildOptionsScreen extends Screen {
 	 * and nothing at all about what gets built.</p>
 	 */
 	private void requestForecast() {
-		String key = mode.name() + " " + laneWidth + " " + laneFloors;
+		// The reseed threshold is in the key because it changes what gets built: past it a lane
+		// gives up its parity to a piston instead of padding across the silence, and a build that
+		// swaps halves is a different length from one that waits. Left out, the screen answered
+		// every position of that slider with the forecast it had already made for the first.
+		String key = mode.name() + " " + laneWidth + " " + laneFloors + " " + reseedDelay;
 		if (key.equals(forecastKey)) {
 			return;
 		}
@@ -494,9 +498,13 @@ final class BuildOptionsScreen extends Screen {
 		// Read here with the origin, for the same reason: the level is the render thread's.
 		int worldTop = minecraft.level == null ? Integer.MAX_VALUE : minecraft.level.getMaxY();
 		int worldFloor = minecraft.level == null ? Integer.MIN_VALUE : minecraft.level.getMinY();
+		// The threshold travels on the limits rather than being written to the builder's static:
+		// this runs on the forecasting thread while a paste may be planning on the render thread,
+		// and a setting one of them has to write down first is a setting the other can read
+		// half-written.
 		SongBuilder.BuildLimits limits = new SongBuilder.BuildLimits(
 			FastNoteblocksConfig.get().maxBuildFloors(), laneWidth, laneFloors,
-			FastNoteblocksConfig.get().ultraLaneStartTop());
+			FastNoteblocksConfig.get().ultraLaneStartTop(), reseedDelay);
 		FORECASTER.execute(() -> {
 			// Dropped before it is worked out, not after. A press asked for one forecast; a drag
 			// across the width slider asks for a hundred and twenty, and planning a big song is tens
@@ -518,12 +526,34 @@ final class BuildOptionsScreen extends Screen {
 				// the first that refuses one.
 				int highest = Integer.MIN_VALUE;
 				int lowest = Integer.MAX_VALUE;
+				// The ground spans come off the blocks for the same reason the height does. The
+				// plan's own spanX and spanZ are what the walk believes it covered, and on some
+				// builds that is a block short of what it laid -- the starter and the button stand
+				// outside the corridor the walk was measuring. Off the commands there is nothing
+				// left to be short of.
+				int eastmost = Integer.MIN_VALUE;
+				int westmost = Integer.MAX_VALUE;
+				int southmost = Integer.MIN_VALUE;
+				int northmost = Integer.MAX_VALUE;
 				for (String command : plan.commands()) {
-					int y = Integer.parseInt(command.split(" ", 5)[2]);
+					String[] parts = command.split(" ", 5);
+					int x = Integer.parseInt(parts[1]);
+					int y = Integer.parseInt(parts[2]);
+					int z = Integer.parseInt(parts[3]);
 					highest = Math.max(highest, y);
 					lowest = Math.min(lowest, y);
+					eastmost = Math.max(eastmost, x);
+					westmost = Math.min(westmost, x);
+					southmost = Math.max(southmost, z);
+					northmost = Math.min(northmost, z);
 				}
-				result = new Forecast(plan.spanZ(), plan.breaches().size(),
+				// Longer side first. Which world axis each one is depends on which way you were
+				// facing when the forecast was taken, so naming them would be naming something
+				// that changes when you turn round; the pair of numbers does not.
+				int acrossX = eastmost - westmost + 1;
+				int acrossZ = southmost - northmost + 1;
+				result = new Forecast(Math.max(acrossX, acrossZ), Math.min(acrossX, acrossZ),
+					plan.breaches().size(),
 					plan.worstBreach(), faultLines(plan),
 					// In long, because the no-world sentinels are the int extremes and
 					// MIN_VALUE minus a height wraps round to a large positive -- which would
@@ -532,12 +562,12 @@ final class BuildOptionsScreen extends Screen {
 					(int) Math.max(0, (long) highest - worldTop),
 					(int) Math.max(0, (long) worldFloor - lowest), null, plan.builtWidth());
 			} catch (IllegalArgumentException refused) {
-				result = new Forecast(0, 0, 0, List.of(), 0, 0, refused.getMessage(), 0);
+				result = new Forecast(0, 0, 0, 0, List.of(), 0, 0, refused.getMessage(), 0);
 			} catch (RuntimeException broken) {
 				// A forecast that throws must not take the paste down with it: the build itself may
 				// well be fine, and a screen that cannot tell you the depth is still a screen you
 				// can paste from.
-				result = new Forecast(0, 0, 0, List.of(), 0, 0, "could not work out the layout", 0);
+				result = new Forecast(0, 0, 0, 0, List.of(), 0, 0, "could not work out the layout", 0);
 			}
 			if (forecastGeneration.get() == generation) {
 				forecast = result;
@@ -548,9 +578,12 @@ final class BuildOptionsScreen extends Screen {
 	/**
 	 * The one line that says what these settings come out as.
 	 *
-	 * <p>Depth first, because it is the only dimension of the three that is not already a setting on
-	 * this screen: the width is chosen above, the height falls out of the floor count, and how deep
-	 * it ends up is the builder's answer rather than the player's.</p>
+	 * <p>Both ground sides, because which of the two grows is the layout's business and not
+	 * something this line can assume. A folded lane is held to the width chosen above and grows
+	 * across; a straight lane has no width to be held to and grows along, so the one number this
+	 * used to print was the two lanes' own thickness -- three blocks, for every song, however long
+	 * the build. The height is left out: it falls out of the floor count and is the one dimension
+	 * of the three already answered by a setting on this screen.</p>
 	 */
 	private static String forecastLine(Forecast predicted) {
 		if (predicted == null) {
@@ -566,7 +599,7 @@ final class BuildOptionsScreen extends Screen {
 			? "nothing outside the footprint"
 			: predicted.breachingLanes() + (predicted.breachingLanes() == 1 ? " lane" : " lanes")
 				+ " breach, worst " + predicted.worstBreach();
-		return predicted.spanZ() + " blocks deep - " + verdict;
+		return predicted.longSide() + " x " + predicted.shortSide() + " blocks - " + verdict;
 	}
 
 	/**

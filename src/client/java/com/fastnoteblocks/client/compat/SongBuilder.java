@@ -396,16 +396,33 @@ public final class SongBuilder {
 	 *     better one way round than the other. Both start their first lane at the origin, so a
 	 *     top start grows downward from where you stand and wants clear ground below rather
 	 *     than above. At one floor the two are the same build: every turn is flat already.
+	 * @param reseedDelay game ticks of waiting a lane may pad through before it swaps halves, or
+	 *     nought to take {@link #PARITY_MIN_DELAY_BEFORE_RESEED} as it stands. It travels with the
+	 *     build rather than being read off the static because two threads plan at once: the paste
+	 *     runs on the render thread and the forecast on its own, and a setting the forecast had to
+	 *     write down first would be a setting the paste could read mid-write. Nought and not the
+	 *     current value as a default because a probe flips the static after it has made its limits,
+	 *     and a value copied at construction would quietly ignore the flip.
 	 */
-	record BuildLimits(int maxFloors, int laneWidth, int laneFloors, boolean startTop) {
+	record BuildLimits(int maxFloors, int laneWidth, int laneFloors, boolean startTop,
+			int reseedDelay) {
 		BuildLimits(int maxFloors, int laneWidth, int laneFloors) {
 			this(maxFloors, laneWidth, laneFloors, false);
+		}
+
+		BuildLimits(int maxFloors, int laneWidth, int laneFloors, boolean startTop) {
+			this(maxFloors, laneWidth, laneFloors, startTop, 0);
+		}
+
+		/** The threshold this build is planned against, which is the static unless one was stated. */
+		int reseedTicks() {
+			return reseedDelay > 0 ? reseedDelay : PARITY_MIN_DELAY_BEFORE_RESEED;
 		}
 
 		static BuildLimits fromConfig() {
 			FastNoteblocksConfig config = FastNoteblocksConfig.get();
 			return new BuildLimits(config.maxBuildFloors(), config.buildLaneWidth(),
-				config.buildLaneFloors(), config.ultraLaneStartTop());
+				config.buildLaneFloors(), config.ultraLaneStartTop(), config.parityReseedDelay());
 		}
 	}
 
@@ -527,7 +544,7 @@ public final class SongBuilder {
 			case ULTRA_COMPACT_LANE -> bestUltraPlan(origin, forward, notes, limits, start);
 			case ULTRA_COMPACT_LANE_V2 -> UltraLaneV2.plan(origin, forward, notes, limits, start);
 			case LANE -> createStraightPastePlan(origin, forward, notes);
-			case HALF_TICK_LANE -> createHalfTickPastePlan(origin, forward, notes);
+			case HALF_TICK_LANE -> createHalfTickPastePlan(origin, forward, notes, limits);
 			case ULTRA_HALF_TICK_LANE ->
 				createUltraHalfTickPastePlan(origin, forward, notes, limits, start);
 			case INTERLEAVED_HALF_TICK ->
@@ -1192,7 +1209,7 @@ public final class SongBuilder {
 	 * world out of a plan that cannot measure it.</p>
 	 */
 	private static PastePlan createHalfTickPastePlan(BlockPos origin, Direction forward,
-			List<EventNote> notes) {
+			List<EventNote> notes, BuildLimits limits) {
 		PlacementPlan placements = new PlacementPlan();
 		// Note times are game ticks here, so two blocks live beside each other for half as long as
 		// the check assumes. The button that starts the machine has not changed length.
@@ -1216,7 +1233,7 @@ public final class SongBuilder {
 		Set<Integer> rightSeams = Set.of();
 		Set<Integer> leftSeams = Set.of();
 		if (HALF_TICK_TRADES_HALVES && !even.isEmpty() && !odd.isEmpty()) {
-			ParitySchedule schedule = scheduleParities(notes);
+			ParitySchedule schedule = scheduleParities(notes, limits.reseedTicks());
 			if (!schedule.laneA().isEmpty() && !schedule.laneB().isEmpty()) {
 				// The lane that opens on the odd half goes LEFT, because that is the input
 				// contract this mode has always had: the left lane's trigger fires one game tick
@@ -1617,7 +1634,7 @@ public final class SongBuilder {
 		List<Integer> flipsA = List.of();
 		List<Integer> flipsB = List.of();
 		if (INTERLEAVED_DYNAMIC_PARITY) {
-			ParitySchedule schedule = scheduleParities(notes);
+			ParitySchedule schedule = scheduleParities(notes, limits.reseedTicks());
 			if (!schedule.laneA().isEmpty() && !schedule.laneB().isEmpty()) {
 				gtA = schedule.laneA();
 				gtB = schedule.laneB();
@@ -2163,9 +2180,8 @@ public final class SongBuilder {
 	 * padding is what the balance term measures -- so the price of a piston is exactly that much
 	 * waiting, converted at the rate a delay chain folds it.</p>
 	 */
-	private static long seamPrice() {
-		return Math.max(1,
-			PARITY_MIN_DELAY_BEFORE_RESEED / GAME_TICKS_PER_PAD_COLUMN);
+	private static long seamPrice(int reseedTicks) {
+		return Math.max(1, reseedTicks / GAME_TICKS_PER_PAD_COLUMN);
 	}
 
 	/**
@@ -2251,6 +2267,10 @@ public final class SongBuilder {
 	 * a window widens the sweep before giving up, which no library song has needed.</p>
 	 */
 	static ParitySchedule scheduleParities(List<EventNote> notes) {
+		return scheduleParities(notes, PARITY_MIN_DELAY_BEFORE_RESEED);
+	}
+
+	static ParitySchedule scheduleParities(List<EventNote> notes, int reseedTicks) {
 		List<List<EventNote>> events = new ArrayList<>();
 		for (int index = 0; index < notes.size();) {
 			int time = notes.get(index).time();
@@ -2384,7 +2404,7 @@ public final class SongBuilder {
 						// nothing, because it was already being charged for its own silence.
 						long projected = other.cells;
 						long worst = Math.max(receiver.cells, projected);
-						long bill = seamPrice()
+						long bill = seamPrice(reseedTicks)
 							* Math.max(0, lanes[0].seams + lanes[1].seams - seamsStanding);
 						// A lane that has sat longer than a lane is allowed to sit does not pay
 						// for the seam that puts it back to work. That is what the setting means:
@@ -2397,7 +2417,7 @@ public final class SongBuilder {
 						if (bill > 0 && receiver.seamAt(receiver.picks.size() - 1) != 0
 								&& receiver.picks.size() >= 2
 								&& time - receiver.timeAt(receiver.picks.size() - 2)
-									>= PARITY_MIN_DELAY_BEFORE_RESEED) {
+									>= reseedTicks) {
 							bill = 0;
 						}
 						// The corridor is the longer lane and nothing else, so that is what the
