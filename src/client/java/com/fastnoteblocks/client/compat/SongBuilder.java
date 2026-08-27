@@ -1513,20 +1513,27 @@ public final class SongBuilder {
 		// Machine A opens on its own shortened start-floor wall, two columns in; machine B on the
 		// shared near wall, a pitch along, as if joining its long link partway. The two buttons
 		// come out a couple of blocks apart at the same corner, whatever the floor count.
-		WalkStart headA = new WalkStart(head.column() + 2, head.floor(), head.climb(),
-			head.turning());
+		// Where the two machines open, which the shared input decides between them. The spine
+		// stands two columns behind the nearer opening -- itself, and the cell that machine's
+		// repeater stands in -- so both openings are held two columns in and the whole input sits
+		// inside the near wall. The machine on the odd half takes a third, for the empty cell its
+		// pushed block is going to; whichever machine that is, it must be the further of the two,
+		// or the spine lands outside the wall and the build is wider than it reports.
+		boolean oddOpensA = Math.floorMod(gtA.get(0).time(), 2) == 1;
+		boolean oddOpensB = Math.floorMod(gtB.get(0).time(), 2) == 1;
+		boolean splitOpen = oddOpensA != oddOpensB;
+		WalkStart headA = INTERLEAVED_SHARED_INPUT
+			? new WalkStart(head.column() + (splitOpen && oddOpensA ? 3 : 2), head.floor(),
+				head.climb(), head.turning())
+			: new WalkStart(head.column() + 2, head.floor(), head.climb(), head.turning());
 		// The machine on the odd half of the tick opens two columns further out, because its feed
 		// is a piston and a piston needs its block's landing cell empty -- the same two columns
 		// the mid-lane seam spends. Only where the two differ: on one parity both take the spine
 		// straight and neither owes anything. See {@link #addTwoLaneInput}.
-		// Two columns past machine A's own opening, not level with it: A sits against the spine
-		// and the odd machine needs the two cells between -- its block, and the empty one that
-		// block is going to.
-		WalkStart headB = !INTERLEAVED_SHARED_INPUT
-				|| Math.floorMod(gtA.get(0).time(), 2)
-					== Math.floorMod(gtB.get(0).time(), 2)
-			? head
-			: new WalkStart(headA.column() + 2, head.floor(), head.climb(), head.turning());
+		WalkStart headB = INTERLEAVED_SHARED_INPUT
+			? new WalkStart(head.column() + (splitOpen && oddOpensB ? 3 : 2), head.floor(),
+				head.climb(), head.turning())
+			: head;
 		BlockPos originB = originA.relative(depth, spacing);
 		LaneRoute routeA = nestedRoute(floors, head, spacing, longLink, true);
 		LaneRoute routeB = nestedRoute(floors, head, spacing, longLink, false);
@@ -1805,8 +1812,10 @@ public final class SongBuilder {
 		int step = stepAlong(axis, forward);
 		int alongA = coordAlong(axis, headA);
 		int alongB = coordAlong(axis, headB);
-		// One column behind whichever machine opens nearest the origin.
-		int wall = (step > 0 ? Math.min(alongA, alongB) : Math.max(alongA, alongB)) - step;
+		// Two columns behind whichever machine opens nearest the origin: the spine itself, and the
+		// cell in front of it that every machine's feed owns -- a repeater for one taken straight
+		// off the spine, the pushed block for one fed through the piston.
+		int wall = (step > 0 ? Math.min(alongA, alongB) : Math.max(alongA, alongB)) - 2 * step;
 		BlockPos[] heads = {headA, headB};
 		boolean[] odd = {oddA, oddB};
 		Direction across = forward.getClockWise();
@@ -1853,23 +1862,39 @@ public final class SongBuilder {
 				// whole of the delay.
 				placements.take(spine);
 				set(placements, spine, "minecraft:sticky_piston[facing=" + forward.getName() + "]");
-				// At the piston's own level, which is where it shoves: the block beside it and
+				// At the piston's own level, which is where it shoves: the block beside it, then
 				// the empty cell that block is going to. The ground beneath is the lane's own and
-				// is left alone.
+				// is left alone. Anything further is plain wire out to this machine's opening --
+				// it costs no ticks, so the three the piston spends stay the whole of the offset.
 				for (int column = 1; column < columns; column++) {
 					BlockPos at = spine.relative(forward, column);
 					placements.take(at);
-					set(placements, at,
-						column == 1 ? "minecraft:redstone_block" : "minecraft:air");
+					if (column <= 2) {
+						set(placements, at,
+							column == 1 ? "minecraft:redstone_block" : "minecraft:air");
+					} else {
+						set(placements, at.below(), "minecraft:stone");
+						set(placements, at, "minecraft:redstone_wire");
+					}
 				}
 				placements.padded("twoLaneInputPiston");
 			} else {
-				// Straight off the spine: the run out to this machine's head, empty for the near
-				// one, whose own opening repeater already stands against the spine.
-				for (int column = 1; column < columns; column++) {
+				// Straight off the spine, and through a repeater of its own -- which is the
+				// whole of the half tick. A repeater at its shortest is two game ticks and the
+				// piston is three, so the pair leave the spine one game tick apart, and one game
+				// tick is the offset the two halves of the song are written against. Leave this
+				// repeater out and the piston's machine is not one game tick late but three:
+				// a redstone tick of drift that has to be dialled back out by hand.
+				BlockPos first = spine.relative(forward, 1);
+				set(placements, first.below(), "minecraft:stone");
+				set(placements, first, "minecraft:repeater[facing=" + repeaterFacing(forward)
+					+ ",delay=1]");
+				// And plain wire the rest of the way, which costs no ticks at all, for a machine
+				// whose own opening stands further out than its partner's.
+				for (int column = 2; column < columns; column++) {
 					BlockPos at = spine.relative(forward, column);
-					set(placements, at, "minecraft:stone");
-					set(placements, at.above(), "minecraft:redstone_wire");
+					set(placements, at.below(), "minecraft:stone");
+					set(placements, at, "minecraft:redstone_wire");
 				}
 				placements.padded("twoLaneInputStraight");
 			}
