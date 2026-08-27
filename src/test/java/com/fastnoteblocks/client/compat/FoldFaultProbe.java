@@ -131,6 +131,37 @@ class FoldFaultProbe {
 				breaks.stream().limit(6).forEach(pos -> System.out.println("     break at "
 					+ pos.getX() + " " + pos.getY() + " " + pos.getZ()));
 			}
+			if (Boolean.getBoolean("probe.tint")) {
+				// Plain ground per row: a row belongs to one machine, so each should be all stone
+				// or all andesite, and a dual build should show both.
+				Map<Integer, int[]> perRow = new java.util.TreeMap<>();
+				for (String command : plan.commands()) {
+					String[] token = command.split(" ", 5);
+					int z = Integer.parseInt(token[3]);
+					BlockPos pos = new BlockPos(Integer.parseInt(token[1]),
+						Integer.parseInt(token[2]), z);
+					// Stacked chords wear andesite in the shape table, in either machine, so the
+					// tint can only be read off the cells the table leaves plain.
+					String who = plan.laidBy().getOrDefault(pos, "");
+					if (who.startsWith("chord:STACKED")) {
+						continue;
+					}
+					if (token[4].startsWith("minecraft:stone ")) {
+						perRow.computeIfAbsent(z, row -> new int[2])[0]++;
+					} else if (token[4].startsWith("minecraft:andesite ")) {
+						perRow.computeIfAbsent(z, row -> new int[2])[1]++;
+					}
+				}
+				long mixed = perRow.values().stream()
+					.filter(count -> count[0] > 0 && count[1] > 0).count();
+				long stoneRows = perRow.values().stream().filter(count -> count[1] == 0).count();
+				long andesiteRows = perRow.values().stream().filter(count -> count[0] == 0).count();
+				System.out.println("   TINT rows stoneOnly=" + stoneRows + " andesiteOnly="
+					+ andesiteRows + " mixed=" + mixed);
+				perRow.entrySet().stream().limit(10).forEach(row -> System.out.println("     z="
+					+ row.getKey() + " stone=" + row.getValue()[0] + " andesite="
+					+ row.getValue()[1]));
+			}
 			String[] spot = System.getProperty("probe.at", "").split(",");
 			if (spot.length == 3) {
 				BlockPos centre = new BlockPos(Integer.parseInt(spot[0]), Integer.parseInt(spot[1]),

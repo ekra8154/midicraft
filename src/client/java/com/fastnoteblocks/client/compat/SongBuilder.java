@@ -1508,6 +1508,9 @@ public final class SongBuilder {
 				// A fresh corridor: nothing about machine B's opening follows from machine A's last
 				// cell, least of all how much dust has gone down since a repeater it is not wired to.
 				placements.startFreshRun();
+				// And everything from here is machine B's, which is how a marked paste tells the
+				// two apart on the ground.
+				placements.secondMachine();
 				walkingB = true;
 				walkRouted(oddEvents, originB, forward, laneWidth, floors, placements,
 					layoutB, routeB, head, tightB, paceB);
@@ -27716,6 +27719,28 @@ public final class SongBuilder {
 		}
 
 		/**
+		 * Whether cells written from here on belong to the second machine of a two-machine plan.
+		 *
+		 * <p>Set once, between the two walks. Everything already written is the first machine's and
+		 * stays so -- a cell is claimed by whoever got there first, which is the same rule
+		 * {@code putIfAbsent} enforces for the blocks themselves.</p>
+		 */
+		private boolean secondMachine;
+		private final Set<BlockPos> secondMachineCells = new java.util.HashSet<>();
+
+		/**
+		 * Says that the machine being walked from here on is the second one.
+		 *
+		 * <p>For the marked paste alone: an interleaved build winds two machines through one region
+		 * a lane pitch apart, and standing inside one there is nothing to say which rows are which.
+		 * The plain ground of the second comes out andesite so that the two read apart at a glance
+		 * -- see {@link #marked}. Nothing else reads it, and a plain paste is unaffected.</p>
+		 */
+		void secondMachine() {
+			secondMachine = true;
+		}
+
+		/**
 		 * Puts the count back to what the wire about to be built on has itself laid.
 		 *
 		 * <p>For a plan holding two machines built a piece at a time each, which is the half-tick
@@ -29018,6 +29043,9 @@ public final class SongBuilder {
 			}
 			BlockPos key = position.immutable();
 			String existing = blocks.putIfAbsent(key, block);
+			if (existing == null && secondMachine) {
+				secondMachineCells.add(key);
+			}
 			if (existing == null && trial != null) {
 				trial.blocksAdded().add(key);
 			}
@@ -29377,7 +29405,14 @@ public final class SongBuilder {
 					|| at.getX() > farWall + WALL_OVERSHOOT)) {
 				return "minecraft:stripped_crimson_hyphae[axis=x]";
 			}
-			return shapeStone(placedBy.get(at));
+			String stone = shapeStone(placedBy.get(at));
+			// The second machine's plain ground, so that two machines wound through one region can
+			// be told apart from inside one of them. Only the ground the table has no colour for:
+			// every shape keeps the colour it wears in either machine, andesite among them, because
+			// what a cell IS matters more than whose it is and the two questions are asked from
+			// different distances -- the shapes up close, the rows from across the build.
+			return secondMachineCells.contains(at) && "minecraft:stone".equals(stone)
+				? "minecraft:andesite" : stone;
 		}
 
 		/**
