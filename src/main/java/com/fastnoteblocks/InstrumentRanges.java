@@ -16,8 +16,8 @@ import java.util.Map;
  * <p>The tiers, verified against in-game measurement:</p>
  * <pre>
  *   F#1-F#3 (30-54)  BASS, DIDGERIDOO
- *   F#2-F#4 (42-66)  GUITAR
- *   F#3-F#5 (54-78)  HARP, IRON_XYLOPHONE, BIT, BANJO, PLING
+ *   F#2-F#4 (42-66)  GUITAR, TRUMPET_WEATHERED, TRUMPET_OXIDIZED
+ *   F#3-F#5 (54-78)  HARP, IRON_XYLOPHONE, BIT, BANJO, PLING, TRUMPET, TRUMPET_EXPOSED
  *   F#4-F#6 (66-90)  FLUTE, COW_BELL
  *   F#5-F#7 (78-102) BELL, CHIME, XYLOPHONE
  * </pre>
@@ -45,14 +45,17 @@ public final class InstrumentRanges {
 		Map.entry("BIT", 54),
 		Map.entry("BANJO", 54),
 		Map.entry("PLING", 54),
-		// The four trumpets are one voice at four weathering ages. Their register is written down
-		// as the harp tier but has not been verified against the game the way the classic
-		// instruments have -- if in-game testing puts the sample elsewhere, this is the one row
-		// to correct.
+		// The four trumpets are one voice at four weathering ages, and they do not walk down a
+		// register as they age. Measured with a pitch detector rather than taken from the table
+		// the rest of this came from: copper and exposed copper both bottom out at F#3, and
+		// weathered and oxidized both bottom out at F#2. Two ages to a register, not one step
+		// per age -- exposed is a dirtier copper playing the same notes, and oxidized is a
+		// dirtier weathered. So the first pair sits with the harp and the second with the
+		// guitar, and anybody tempted to make this a four-rung ladder should go and listen.
 		Map.entry("TRUMPET", 54),
 		Map.entry("TRUMPET_EXPOSED", 54),
-		Map.entry("TRUMPET_WEATHERED", 54),
-		Map.entry("TRUMPET_OXIDIZED", 54),
+		Map.entry("TRUMPET_WEATHERED", 42),
+		Map.entry("TRUMPET_OXIDIZED", 42),
 		Map.entry("FLUTE", 66),
 		Map.entry("COW_BELL", 66),
 		Map.entry("BELL", 78),
