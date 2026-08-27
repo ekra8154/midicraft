@@ -1206,9 +1206,40 @@ public final class SongBuilder {
 		List<EventNote> even = parity(notes, 0);
 		List<EventNote> odd = parity(notes, 1);
 		placements.waysIn(waysIn(even, odd));
-		HalfTickLane right = new HalfTickLane(origin, even, bias);
+		// Which lane plays which ticks. Fixed, it is the parity split and each lane idles through
+		// every stretch the song spends on the other half -- and this layout pays for an idle
+		// lane twice, once in the columns it lays to span the silence and again in the mirrored
+		// wire that keeps it beside its partner. Traded, both lanes carry half of whatever is
+		// sounding and the mirror has far less to make up.
+		List<EventNote> rightNotes = even;
+		List<EventNote> leftNotes = odd;
+		Set<Integer> rightSeams = Set.of();
+		Set<Integer> leftSeams = Set.of();
+		if (HALF_TICK_TRADES_HALVES && !even.isEmpty() && !odd.isEmpty()) {
+			ParitySchedule schedule = scheduleParities(notes);
+			if (!schedule.laneA().isEmpty() && !schedule.laneB().isEmpty()) {
+				rightNotes = schedule.laneA();
+				leftNotes = schedule.laneB();
+				rightSeams = seamTimes(schedule.laneA(), schedule.flipsA());
+				leftSeams = seamTimes(schedule.laneB(), schedule.flipsB());
+				placements.padded("paritySeams", rightSeams.size() + leftSeams.size());
+			}
+		}
+		// Which half each lane opens on, which is the one thing whatever starts the pair has to
+		// know and the blocks cannot say: a lane opening on the odd half wants its trigger one
+		// game tick after the other's. Under the fixed split that was always the left lane.
+		// A song may leave a lane empty outright, which is why these are asked of a lane that has
+		// something to open on rather than of the list.
+		if (!rightNotes.isEmpty() && Math.floorMod(rightNotes.get(0).time(), 2) == 1) {
+			placements.padded("rightLaneStartsOdd");
+		}
+		if (!leftNotes.isEmpty() && Math.floorMod(leftNotes.get(0).time(), 2) == 0) {
+			placements.padded("leftLaneStartsEven");
+		}
+		HalfTickLane right = new HalfTickLane(origin, rightNotes, bias, rightSeams);
 		HalfTickLane left = new HalfTickLane(
-			origin.relative(forward.getCounterClockWise(), HALF_TICK_LANE_GAP), odd, bias);
+			origin.relative(forward.getCounterClockWise(), HALF_TICK_LANE_GAP), leftNotes, bias,
+			leftSeams);
 		int padded = 0;
 		int short_ = 0;
 		int mirrored = 0;
@@ -1345,6 +1376,49 @@ public final class SongBuilder {
 			plan.spanX(), plan.spanZ(), plan.mode(), plan.faults(), plan.turns(), plan.moved(),
 			plan.breaches(), plan.recesses(), plan.padding(), plan.nearWall(), plan.farWall(),
 			plan.collisions(), plan.poweredAt(), plan.laidBy(), plan.noteTicks(), plan.faultSites());
+	}
+
+	/**
+	 * Whether the straight half-tick lane's two lanes may trade halves of the game tick.
+	 *
+	 * <p>The same scheduler the interleaved mode uses, on a layout that is nothing but two
+	 * straight lines -- so a seam here is four more columns of run, with no corner to walk off,
+	 * no rail run to close and no turn to settle. The dial is the same one:
+	 * {@link #PARITY_MIN_DELAY_BEFORE_RESEED}.</p>
+	 *
+	 * <p><b>Off: the saving is large and the timing is not settled.</b> Measured over the
+	 * library's six two-parity songs it takes the span from 17,605 columns to 12,256, a third
+	 * shorter, and almost all of it comes from the mirror having nothing to make up -- field of
+	 * hopes goes from 3,718 columns of mirrored wire to 110. Every structural check is clean:
+	 * no wrong note, no note without a home, no collision, nothing unreached.</p>
+	 *
+	 * <p>What is not clean is the music. Six of {@code HalfTickLaneTest}'s own regressions fail
+	 * with this on, and two of them are musical rather than merely out of date: a lane comes out
+	 * with its times running backwards ("two repeater ticks apart, was -2"), and notes land off
+	 * the game tick they were written on. Field of hopes also reads back 274 notes short of its
+	 * 7,380 while claiming every one of them is reached, which is the signature of two notes
+	 * arriving on one tick. The straight lane's clock is not the routed walk's -- it counts in
+	 * {@code floorDiv} halves with a {@code paid} account the mirror draws on -- and the seam's
+	 * five game ticks have to be reconciled against that account, not just subtracted from it.</p>
+	 */
+	static boolean HALF_TICK_TRADES_HALVES = false;
+
+	/** The game ticks a lane's flips fall on, from indices into its own tick-groups. */
+	private static Set<Integer> seamTimes(List<EventNote> lane, List<Integer> flips) {
+		if (flips.isEmpty()) {
+			return Set.of();
+		}
+		List<Integer> groupTimes = new ArrayList<>();
+		for (EventNote note : lane) {
+			if (groupTimes.isEmpty() || groupTimes.get(groupTimes.size() - 1) != note.time()) {
+				groupTimes.add(note.time());
+			}
+		}
+		Set<Integer> times = new HashSet<>();
+		for (int flip : flips) {
+			times.add(groupTimes.get(flip));
+		}
+		return Set.copyOf(times);
 	}
 
 	private static List<EventNote> parity(List<EventNote> notes, int odd) {
@@ -2464,11 +2538,60 @@ public final class SongBuilder {
 		 */
 		private int pulseTick;
 
+		/**
+		 * Game ticks at which this lane changes which half of the tick it plays.
+		 *
+		 * <p>Empty under the fixed split, where a lane owns one half for the whole song. See
+		 * {@link #HALF_TICK_TRADES_HALVES}.</p>
+		 */
+		private final Set<Integer> seams;
+
 		HalfTickLane(BlockPos origin, List<EventNote> notes, int bias) {
+			this(origin, notes, bias, Set.of());
+		}
+
+		HalfTickLane(BlockPos origin, List<EventNote> notes, int bias, Set<Integer> seams) {
 			this.origin = origin;
 			this.notes = notes;
 			this.currentTime = -bias;
 			this.pulseTick = 2 * -bias;
+			this.seams = seams;
+		}
+
+		/**
+		 * The parity seam, in a lane that is nothing but straight line.
+		 *
+		 * <p>The same four cells the interleaved mode lays -- a repeater to pick the signal up,
+		 * the sticky piston, the block of redstone on its face, and the empty cell that block is
+		 * going to -- and here they are simply four more columns of a straight run. None of what
+		 * made it delicate over there applies: there is no corner to walk off, no run to close,
+		 * no turn to settle.</p>
+		 *
+		 * <p>Five game ticks: the repeater's two and the piston's three. In the halved clock this
+		 * lane counts in that is two entering the odd half and three coming back, which is the
+		 * same rounding {@code floorDiv} does to the times themselves.</p>
+		 */
+		private void layParitySeam(PlacementPlan placements, Direction forward, int time) {
+			placements.placing("paritySeam");
+			String[] cells = {
+				"minecraft:repeater[facing=" + repeaterFacing(forward) + ",delay=1]",
+				"minecraft:sticky_piston[facing=" + forward.getName() + "]",
+				"minecraft:redstone_block",
+				"minecraft:air",
+			};
+			for (String cell : cells) {
+				BlockPos pos = at(origin, forward, cursor, 0, 0);
+				set(placements, pos, "minecraft:stone");
+				set(placements, pos.above(), cell);
+				cursor++;
+			}
+			currentTime += Math.floorMod(time, 2) == 1 ? 2 : 3;
+			sinceRepeater = 0;
+			placements.resumeRun(0);
+			// The module after it may not hang low notes back into the cell the block is being
+			// shoved through, which is what this column standing as the last flank column says.
+			frontFlanks = cursor;
+			placements.padded("paritySeam");
 		}
 
 		boolean hasMore() {
@@ -2494,6 +2617,11 @@ public final class SongBuilder {
 			placements.resumeRun(sinceRepeater);
 			opened = true;
 			int time = notes.get(index).time();
+			// Laid before the wait is worked out, so the ticks it eats come off what this event
+			// still owes rather than being spent twice.
+			if (seams.contains(time)) {
+				layParitySeam(placements, forward, time);
+			}
 			int laneTime = Math.floorDiv(time, 2);
 			// Less whatever the mirror already spent on this lane's behalf while it waited. The
 			// repeaters are out there in the wire behind us and they have already run.
@@ -2556,8 +2684,14 @@ public final class SongBuilder {
 				return 0;
 			}
 			placements.resumeRun(sinceRepeater);
+			// Ticks the seam in front of this lane is going to want, held back from the mirror.
+			// The mirror spends against the gap to the next event, and a seam spends against the
+			// same gap -- so without this the two spend it twice and the note lands early.
+			int seamReserve = seams.contains(nextTime())
+				? Math.floorMod(nextTime(), 2) == 1 ? 2 : 3
+				: 0;
 			int allowance = Math.max(0, Math.min(Math.floorDiv(now, 2),
-				Math.floorDiv(nextTime(), 2) - 1) - currentTime - paid);
+				Math.floorDiv(nextTime(), 2) - 1) - currentTime - paid - seamReserve);
 			for (int placed = 0; placed < columns; placed++) {
 				// Ticks that must stay in hand for the repeaters the rest of this stretch will be
 				// forced into, so that shedding eagerly now cannot strand the wire later.
