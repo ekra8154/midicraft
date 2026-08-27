@@ -1515,6 +1515,18 @@ public final class SongBuilder {
 		// come out a couple of blocks apart at the same corner, whatever the floor count.
 		WalkStart headA = new WalkStart(head.column() + 2, head.floor(), head.climb(),
 			head.turning());
+		// The machine on the odd half of the tick opens two columns further out, because its feed
+		// is a piston and a piston needs its block's landing cell empty -- the same two columns
+		// the mid-lane seam spends. Only where the two differ: on one parity both take the spine
+		// straight and neither owes anything. See {@link #addTwoLaneInput}.
+		// Two columns past machine A's own opening, not level with it: A sits against the spine
+		// and the odd machine needs the two cells between -- its block, and the empty one that
+		// block is going to.
+		WalkStart headB = !INTERLEAVED_SHARED_INPUT
+				|| Math.floorMod(gtA.get(0).time(), 2)
+					== Math.floorMod(gtB.get(0).time(), 2)
+			? head
+			: new WalkStart(headA.column() + 2, head.floor(), head.climb(), head.turning());
 		BlockPos originB = originA.relative(depth, spacing);
 		LaneRoute routeA = nestedRoute(floors, head, spacing, longLink, true);
 		LaneRoute routeB = nestedRoute(floors, head, spacing, longLink, false);
@@ -1539,7 +1551,7 @@ public final class SongBuilder {
 			int[] dryA = dryProgress(evenEvents, originA, forward, laneWidth, floors, layoutA,
 				routeA, headA);
 			int[] dryB = dryProgress(oddEvents, originB, forward, laneWidth, floors, layoutB,
-				routeB, head);
+				routeB, headB);
 			int[][] stretches = paceStretches(evenEvents, oddEvents, dryA, dryB, laneWidth);
 			paceA = new Pace(new int[evenEvents.size()], stretches[0]);
 			paceB = new Pace(new int[oddEvents.size()], stretches[1]);
@@ -1569,7 +1581,7 @@ public final class SongBuilder {
 				placements.laneTint(0, Math.floorMod(gtA.get(0).time(), 2));
 				walkRouted(evenEvents, originA, forward, laneWidth, floors, placements, layoutA,
 					routeA, headA, tightA, paceA);
-				addStarter(placements, forward);
+				BlockPos inputA = placements.firstRepeater();
 				int laidByA = placements.laidCells();
 				// A fresh corridor: nothing about machine B's opening follows from machine A's last
 				// cell, least of all how much dust has gone down since a repeater it is not wired to.
@@ -1579,9 +1591,20 @@ public final class SongBuilder {
 				placements.laneTint(1, Math.floorMod(gtB.get(0).time(), 2));
 				walkingB = true;
 				walkRouted(oddEvents, originB, forward, laneWidth, floors, placements,
-					layoutB, routeB, head, tightB, paceB);
-				addStarter(placements, forward,
-					placements.firstRepeaterAfter(laidByA));
+					layoutB, routeB, headB, tightB, paceB);
+				// One input for both, in place of a button each -- two buttons cannot be pressed
+				// on the same tick, so the machines could never be started in the step the plan
+				// worked out for them. See {@link #addTwoLaneInput}.
+				if (INTERLEAVED_SHARED_INPUT) {
+					addTwoLaneInput(placements, forward, inputA,
+						placements.firstRepeaterAfter(laidByA),
+						Math.floorMod(gtA.get(0).time(), 2) == 1,
+						Math.floorMod(gtB.get(0).time(), 2) == 1);
+				} else {
+					addStarter(placements, forward, inputA);
+					addStarter(placements, forward,
+						placements.firstRepeaterAfter(laidByA));
+				}
 				// Both machines pasted together rather than one whole and then the other. They
 				// stand a lane pitch apart and a player walks between them, so a stream that
 				// builds all of A and then comes back for B puts half the build outside the
@@ -1730,6 +1753,121 @@ public final class SongBuilder {
 	 * ticks, which is even, so it leaves the parity the piston changes exactly as it was.</p>
 	 */
 	static int PARITY_SEAM_CELLS = 4;
+
+	/**
+	 * Whether both machines are started from one spine instead of a button each.
+	 *
+	 * <p><b>Off: built, laid in the right shape, and not conducting.</b> The geometry comes out
+	 * exactly as asked -- spine along the wall column, the odd machine's piston standing in it,
+	 * its block and the empty cell in front, and machine A's opening repeater flush against the
+	 * spine -- and the machines read back dead all the same: a-dark-zone at 20 wide loses 280
+	 * notes, moonlight at 24 loses 490.</p>
+	 *
+	 * <p>What is not settled is the one thing the drawing does not show. The spine is stone with
+	 * redstone running over the top of it, and both machines' openings read the stone from the
+	 * side. Dust lying on a block does not power that block, so nothing drives those repeaters,
+	 * and adding a button to the spine did not change the number -- the reader's model and my own
+	 * reading of the rule agree here, and both may be missing whatever makes it work in the
+	 * world. Turning this on is one line once the spine's own wiring is settled; every other part
+	 * of it is done and measured.</p>
+	 */
+	static boolean INTERLEAVED_SHARED_INPUT = false;
+
+	/**
+	 * One input for both machines, in place of a starter button each.
+	 *
+	 * <p>Two buttons cannot be pressed on the same tick, so a build with one per machine could
+	 * never be started in step: whatever the plan says about their parities, the player decides
+	 * the offset by hand and gets it wrong. This is the spine that fixes it -- a run of stone
+	 * along the wall column with redstone over it, spanning both machines' rows, so one trigger
+	 * anywhere on it releases both.</p>
+	 *
+	 * <p>And the half tick lives here. Where the two machines open on opposite halves of the game
+	 * tick, the odd one is fed through a sticky piston instead of taken straight off the spine:
+	 * the piston shoves a block of redstone into the empty cell in front of it, three game ticks
+	 * against the repeater's two, and one game tick is the whole of half ticking. Where both open
+	 * on the same half -- which dynamic parity makes ordinary -- both take the spine straight and
+	 * fire together.</p>
+	 *
+	 * <p>The two machines do not open at the same column: machine A starts two columns in, because
+	 * the nested route shortens its start-floor wall for the partner's long link. So the spine
+	 * reaches each machine along its own row, and the nearer one's run is empty.</p>
+	 */
+	private static void addTwoLaneInput(PlacementPlan placements, Direction forward,
+			BlockPos headA, BlockPos headB, boolean oddA, boolean oddB) {
+		if (headA == null || headB == null) {
+			placements.padded("twoLaneInputNoHead");
+			return;
+		}
+		Direction.Axis axis = forward.getAxis();
+		int step = stepAlong(axis, forward);
+		int alongA = coordAlong(axis, headA);
+		int alongB = coordAlong(axis, headB);
+		// One column behind whichever machine opens nearest the origin.
+		int wall = (step > 0 ? Math.min(alongA, alongB) : Math.max(alongA, alongB)) - step;
+		BlockPos[] heads = {headA, headB};
+		boolean[] odd = {oddA, oddB};
+		Direction across = forward.getClockWise();
+		int rowA = coordAcross(axis, headA);
+		int rowB = coordAcross(axis, headB);
+		int rows = Math.abs(rowB - rowA);
+		BlockPos spineA = headA.relative(forward, (wall - alongA) * step);
+		Direction toB = coordAcross(axis, headB.relative(across, 1)) == rowB + 1
+			? (rowB > rowA ? across : across.getOpposite())
+			: (rowB > rowA ? across.getOpposite() : across);
+		// The spine itself, between the two rows, stone with redstone over it so every block of
+		// it is live at once and a single trigger anywhere releases both machines.
+		for (int row = 0; row <= rows; row++) {
+			BlockPos at = spineA.relative(toB, row);
+			placements.placing("twoLaneInput");
+			set(placements, at, "minecraft:stone");
+			set(placements, at.above(), "minecraft:redstone_wire");
+		}
+		for (int machine = 0; machine < 2; machine++) {
+			BlockPos head = heads[machine];
+			int columns = (coordAlong(axis, head) - wall) * step;
+			BlockPos spine = head.relative(forward, -columns);
+			placements.placing("twoLaneInput");
+			if (odd[machine]) {
+				// The piston stands in the spine and takes the row's first two columns with it:
+				// its block, and the empty cell that block is going to. Anything left in that
+				// cell would read the block's power before the piston ever moved, which is the
+				// whole of the delay.
+				placements.take(spine);
+				placements.take(spine.above());
+				set(placements, spine, "minecraft:sticky_piston[facing=" + forward.getName() + "]");
+				for (int column = 1; column < columns; column++) {
+					BlockPos at = spine.relative(forward, column);
+					placements.take(at);
+					placements.take(at.above());
+					set(placements, at, "minecraft:stone");
+					set(placements, at.above(),
+						column == 1 ? "minecraft:redstone_block" : "minecraft:air");
+				}
+				placements.padded("twoLaneInputPiston");
+			} else {
+				// Straight off the spine: the run out to this machine's head, empty for the near
+				// one, whose own opening repeater already stands against the spine.
+				for (int column = 1; column < columns; column++) {
+					BlockPos at = spine.relative(forward, column);
+					set(placements, at, "minecraft:stone");
+					set(placements, at.above(), "minecraft:redstone_wire");
+				}
+				placements.padded("twoLaneInputStraight");
+			}
+		}
+		// And the one thing that presses it. A row past the far end so it stands clear of both
+		// machines, on its own block, with the spine's redstone running up to it -- one press
+		// releases both machines on the same tick, which is the whole reason this replaced a
+		// button each. It is also the reader's way in: with the heads now fed off the spine,
+		// nothing else in the build is a repeater with nothing behind it.
+		BlockPos trigger = spineA.relative(toB, rows + 1);
+		placements.placing("twoLaneInput");
+		set(placements, trigger, "minecraft:stone");
+		set(placements, trigger.above(),
+			String.format(java.util.Locale.ROOT, STARTER_BUTTON, forward.getName()));
+		placements.padded("twoLaneInputRows", rows + 1);
+	}
 
 	/** Game ticks of waiting that fold into one column of delay chain, at a repeater's longest. */
 	private static final int GAME_TICKS_PER_PAD_COLUMN = 8;
