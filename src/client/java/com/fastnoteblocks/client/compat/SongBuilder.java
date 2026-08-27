@@ -19526,7 +19526,8 @@ public final class SongBuilder {
 		key.put("minecraft:tuff", "a standard bus");
 		key.put("minecraft:polished_tuff",
 			"a sunken bus -- a bus whose opening cell is a note block, so it carries three notes free");
-		key.put("minecraft:andesite", "a standard stacked chord");
+		key.put("minecraft:andesite", "a standard stacked chord -- or, where two machines share one "
+			+ "region, the second machine's plain ground");
 		key.put("minecraft:deepslate", "a stacked bus");
 		key.put("minecraft:deepslate_tiles",
 			"a cut chord's stacked head, with its tail across the staircase");
