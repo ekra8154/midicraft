@@ -2567,10 +2567,18 @@ public final class SongBuilder {
 						break;
 					}
 					// The window: everything the partner took between the seam's new place and
-					// the flip's old one, priced while this lane still looked dear to wake.
-					// Re-dealt one event at a time, kept whenever taking it does not deepen the
-					// corridor -- the same objective the chooser scores, now with the seam sunk.
+					// the flip's old one, priced while this lane still looked dear to wake. The
+					// corridor cannot referee this stretch: the pass runs after the greedy has
+					// balanced the whole song, so lane.cells against partner.cells is a
+					// comparison of two finished totals, and any move at all reads as deepening
+					// the longer one by a cell. Judged that way -- which is how this was first
+					// written -- every move was refused, and a lane woken twenty ticks early sat
+					// out those twenty ticks anyway, one note and then silence. Work in a
+					// shared-parity stretch is conserved wherever it lands, so the window is
+					// dealt the way the settled schedule deals everything after it: alternately,
+					// starting with the partner, since this lane has just played the seam event.
 					int seamTime = lane.timeAt(seamPos);
+					boolean mine = false;
 					int q = 0;
 					while (q < partner.picks.size() && partner.picks.size() > 1) {
 						int candidate = partner.timeAt(q);
@@ -2584,14 +2592,12 @@ public final class SongBuilder {
 							q++;
 							continue;
 						}
-						long worst = Math.max(lane.cells, partner.cells);
-						int event = partner.removeAt(q);
-						int where = lane.insert(event);
-						if (Math.max(lane.cells, partner.cells) > worst) {
-							lane.removeAt(where);
-							partner.insert(event);
+						if (mine) {
+							lane.insert(partner.removeAt(q));
+						} else {
 							q++;
 						}
+						mine = !mine;
 					}
 				}
 			}

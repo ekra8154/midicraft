@@ -143,6 +143,19 @@ class SeamPadProbe {
 		System.out.println("  LAID " + laidRepeaters + " rt of repeater across every seam;"
 			+ " flipping as early as legal would drop " + savedRepeaters + " more");
 
+		// A stretch of the schedule laid side by side, for looking at one junction with eyes.
+		String window = System.getProperty("probe.window", "");
+		if (!window.isBlank()) {
+			int from = Integer.parseInt(window.split(":")[0]);
+			int to = Integer.parseInt(window.split(":")[1]);
+			for (int side = 0; side < 2; side++) {
+				List<SongBuilder.EventNote> lane = side == 0 ? schedule.laneA() : schedule.laneB();
+				System.out.println("  lane" + (side == 0 ? "A" : "B") + "[" + from + ":" + to
+					+ "] " + lane.stream().map(SongBuilder.EventNote::time).distinct()
+						.filter(t -> t >= from && t <= to).toList());
+			}
+		}
+
 		// And the blocks, which is what can be walked up to in the world.
 		SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0), notes,
 			SongBuilder.PasteMode.HALF_TICK_LANE,
