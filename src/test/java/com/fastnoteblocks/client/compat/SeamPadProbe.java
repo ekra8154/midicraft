@@ -143,6 +143,42 @@ class SeamPadProbe {
 		System.out.println("  LAID " + laidRepeaters + " rt of repeater across every seam;"
 			+ " flipping as early as legal would drop " + savedRepeaters + " more");
 
+		// The other kind of dead lane: a stretch one machine sleeps through with no seam at all,
+		// laying nothing but delay chain while its partner works. For each lane, the biggest
+		// gaps, with what the partner held in them -- the events this lane could have been
+		// sharing, split by whether taking them would have needed a parity swap.
+		for (int side = 0; side < 2; side++) {
+			List<SongBuilder.EventNote> lane = side == 0 ? schedule.laneA() : schedule.laneB();
+			List<SongBuilder.EventNote> partner = side == 0 ? schedule.laneB() : schedule.laneA();
+			List<Integer> times = lane.stream().map(SongBuilder.EventNote::time)
+				.distinct().sorted().toList();
+			List<Integer> theirs = partner.stream().map(SongBuilder.EventNote::time)
+				.distinct().sorted().toList();
+			record Idle(int gap, int from, int to) { }
+			List<Idle> idles = new ArrayList<>();
+			for (int index = 1; index < times.size(); index++) {
+				idles.add(new Idle(times.get(index) - times.get(index - 1),
+					times.get(index - 1), times.get(index)));
+			}
+			idles.sort((a, b) -> b.gap() - a.gap());
+			for (Idle idle : idles.subList(0, Math.min(3, idles.size()))) {
+				if (idle.gap() < 32) {
+					continue;
+				}
+				long sameParity = theirs.stream()
+					.filter(t -> t > idle.from() && t < idle.to()
+						&& (t - idle.from()) % 2 == 0).count();
+				long crossParity = theirs.stream()
+					.filter(t -> t > idle.from() && t < idle.to()
+						&& (t - idle.from()) % 2 != 0).count();
+				System.out.println("  IDLE lane" + (side == 0 ? "A" : "B") + " gt " + idle.from()
+					+ " -> " + idle.to() + ": " + idle.gap() + " gt ("
+					+ ((idle.gap() / 2 - 1) / 4) + " repeaters), "
+					+ (idle.gap() % 2 == 0 ? "no seam" : "seam") + "; partner played "
+					+ sameParity + " same-parity + " + crossParity + " cross-parity events in it");
+			}
+		}
+
 		// A stretch of the schedule laid side by side, for looking at one junction with eyes.
 		String window = System.getProperty("probe.window", "");
 		if (!window.isBlank()) {

@@ -2289,6 +2289,29 @@ public final class SongBuilder {
 	 */
 	static boolean PARITY_FLIPS_EARLY = true;
 
+	/**
+	 * Whether a lane may sleep through work it could be sharing.
+	 *
+	 * <p>The greedy has a ratchet in it that {@link #PARITY_FLIPS_EARLY} cannot reach, because no
+	 * seam is involved at all. A lane's accumulated wait is deliberately not charged until it
+	 * plays again -- charging it as it grew starved a lane on the first song tried -- but that
+	 * means every "wake it now" candidate carries the whole wait at once, while "give the busy
+	 * lane one more" costs a couple of cells. The busy lane wins every step, the wait grows, and
+	 * waking grows dearer still: dorian-concept-hide slept one machine through 324 game ticks --
+	 * forty columns of pure delay chain -- while its partner played 53 events the sleeper could
+	 * have taken <em>with no seam whatever</em>, both lanes being on the same half throughout.</p>
+	 *
+	 * <p>So a third pass, after the flips have settled: every silence on a lane longer than the
+	 * reseed threshold is dealt from the partner, alternately. An event on the lane's own parity
+	 * is taken freely -- the work is conserved wherever it lands. An event on the other parity is
+	 * an excursion, a seam in and a seam back, and it is kept only where the ledger says the
+	 * corridor does not deepen: those seams are real cells, and a sparse song offered an
+	 * excursion into every gap would drown in pistons. One parity block per silence, the
+	 * partner's own seam neighbours never touched, and whatever remains after that is the song's
+	 * own rest, which delay chain is the honest way to span.</p>
+	 */
+	static boolean PARITY_FILLS_IDLE = true;
+
 	/** One line per candidate the parity chooser weighs, over a window of game ticks. */
 	static boolean TRACE_PARITY = false;
 	static int TRACE_PARITY_FROM = 0;
@@ -2599,6 +2622,80 @@ public final class SongBuilder {
 						}
 						mine = !mine;
 					}
+				}
+			}
+		}
+		// Silences longer than the threshold, dealt from the partner. See PARITY_FILLS_IDLE for
+		// the ratchet that leaves them: this is the hole with no seam in it, which the pass
+		// above cannot see.
+		if (PARITY_FILLS_IDLE) {
+			for (int side = 0; side < 2; side++) {
+				Ledger lane = lanes[side];
+				Ledger partner = lanes[1 - side];
+				for (int pos = 1; pos < lane.picks.size(); pos++) {
+					int prev = lane.timeAt(pos - 1);
+					int next = lane.timeAt(pos);
+					if (next - prev <= reseedTicks) {
+						continue;
+					}
+					int last = prev;
+					boolean mine = false;
+					int inserted = 0;
+					int q = 0;
+					while (q < partner.picks.size() && partner.picks.size() > 1) {
+						int candidate = partner.timeAt(q);
+						if (candidate >= next) {
+							break;
+						}
+						if (candidate <= prev) {
+							q++;
+							continue;
+						}
+						int in = candidate - last;
+						int out = next - candidate;
+						// One parity block per silence: a cross-parity take is allowed only as
+						// the block's opening, so a filled gap holds at most a seam in and the
+						// seam back out, never a chain of flips.
+						boolean legalIn = in % 2 == 0 || last == prev && in >= PARITY_SEAM_GT;
+						boolean legalOut = out % 2 == 0 || out >= PARITY_SEAM_GT;
+						if (!legalIn || !legalOut
+								|| partner.seamAt(q) != 0
+								|| (q + 1 < partner.picks.size()
+									&& partner.seamAt(q + 1) != 0)) {
+							q++;
+							continue;
+						}
+						if (mine) {
+							boolean seamIn = in % 2 != 0;
+							long worst = Math.max(lane.cells, partner.cells);
+							int event = partner.removeAt(q);
+							int where = lane.insert(event);
+							// A free take is NOT asked to pay in the ledger, deliberately, and
+							// the ledger would often say no: music costs about a cell per three
+							// game ticks where delay chain costs one per eight, so a sleeper
+							// that is already the longer lane deepens the corridor a little by
+							// waking. It wakes anyway. The threshold is a promise about
+							// waiting, and the whole library prices that promise at fifteen
+							// cells of corridor and a fraction of a percent of span. An
+							// excursion is different -- its two pistons are cells no music
+							// pays back -- so it alone must satisfy the ledger, and one that
+							// cannot pay at its earliest chance will not pay a column later:
+							// the rest of the gap keeps its delay chain.
+							if (seamIn && Math.max(lane.cells, partner.cells) > worst) {
+								lane.removeAt(where);
+								partner.insert(event);
+								break;
+							}
+							last = candidate;
+							inserted++;
+						} else {
+							q++;
+						}
+						mine = !mine;
+					}
+					// Past what was just dealt, not through it again: a second scan of the same
+					// silence would take the events alternation deliberately left.
+					pos += inserted;
 				}
 			}
 		}
