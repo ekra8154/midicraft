@@ -88,6 +88,15 @@ class HalfTickTradeProbe {
 
 	@Test
 	void tradingHalvesAgainstTheFixedSplit() throws Exception {
+		Flags.Held held = Flags.set(System.getProperty("probe.set", ""));
+		try {
+			run(held);
+		} finally {
+			held.putBack();
+		}
+	}
+
+	private void run(Flags.Held held) throws Exception {
 		boolean readback = Boolean.getBoolean("probe.readback");
 		List<Path> files;
 		try (Stream<Path> listed = Files.list(SONGS)) {
@@ -143,7 +152,8 @@ class HalfTickTradeProbe {
 		rows.sort(java.util.Comparator.reverseOrder());
 		rows.forEach(row -> System.out.println("  " + row));
 		System.out.println(String.format(
-			"HALF TICK TRADE: %d two-parity songs, %d broken, seams=%d, span %d -> %d (%.1f%%)",
+			"HALF TICK TRADE" + held.said()
+				+ ": %d two-parity songs, %d broken, seams=%d, span %d -> %d (%.1f%%)",
 			dual, broken, seamTotal, fixedTotal, tradedTotal,
 			fixedTotal == 0 ? 0.0 : 100.0 * (tradedTotal - fixedTotal) / fixedTotal));
 	}

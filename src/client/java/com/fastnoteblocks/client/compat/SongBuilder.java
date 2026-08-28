@@ -2266,6 +2266,29 @@ public final class SongBuilder {
 	 */
 	public static int PARITY_MIN_DELAY_BEFORE_RESEED = 64;
 
+	/**
+	 * Whether a settled schedule's flips are pulled back to the first event each could legally
+	 * stand before.
+	 *
+	 * <p>The greedy prices a seam into every candidate right up to the moment it is finally
+	 * bought, so a lane whose half of the tick has run out is kept idle while its partner carries
+	 * events the pair should have been splitting: handing the idle lane an event costs its module
+	 * plus {@link #PARITY_SEAM_CELLS}, handing the busy lane the same event costs a couple, and
+	 * the greedy feeds the busy lane until the imbalance outgrows the difference. By then the
+	 * silence the flip has to span has grown too, and the walk pays for all of it in delay
+	 * repeaters laid against the seam -- five to seven redstone ticks of them on the test song,
+	 * on almost every switch. Waiting to flip is what made flipping dear.</p>
+	 *
+	 * <p>Once the greedy has settled, every seam is a fact and its price is sunk, so both halves
+	 * of the decision can be re-taken for what they now cost: the flip moves to the earliest
+	 * event with {@link #PARITY_SEAM_GT} of clearance and the right parity, and the window it
+	 * vacated is re-dealt on balance alone. Neither touches the seam count -- a candidate beside
+	 * the partner's own seam is refused, because taking its post-seam opener moves that seam
+	 * later and taking its pre-seam closer widens the silence it spans, which is this very fault
+	 * handed to the other machine.</p>
+	 */
+	static boolean PARITY_FLIPS_EARLY = true;
+
 	/** One line per candidate the parity chooser weighs, over a window of game ticks. */
 	static boolean TRACE_PARITY = false;
 	static int TRACE_PARITY_FROM = 0;
@@ -2510,6 +2533,68 @@ public final class SongBuilder {
 				other.insert(receiver.removeAt(receiver.picks.size() - 1));
 			}
 			receiver.insert(next);
+		}
+		// Each flip pulled to the first event it could legally stand before, and the window it
+		// starved re-dealt. See PARITY_FLIPS_EARLY for why the greedy leaves both wrong.
+		if (PARITY_FLIPS_EARLY) {
+			for (int side = 0; side < 2; side++) {
+				Ledger lane = lanes[side];
+				Ledger partner = lanes[1 - side];
+				for (int pos = 1; pos < lane.picks.size(); pos++) {
+					if (lane.seamAt(pos) == 0) {
+						continue;
+					}
+					int prev = lane.timeAt(pos - 1);
+					int flipTime = lane.timeAt(pos);
+					// The earliest event the flip could stand before instead. Everything between
+					// two consecutive picks of this lane is on the partner, so the partner's list
+					// is the whole search; and never the partner's last event, or the schedule
+					// hands back a lane the callers would read as never having opened.
+					int seamPos = pos;
+					for (int q = 0; q < partner.picks.size() && partner.picks.size() > 1; q++) {
+						int candidate = partner.timeAt(q);
+						if (candidate >= flipTime) {
+							break;
+						}
+						int gap = candidate - prev;
+						if (gap < PARITY_SEAM_GT || gap % 2 == 0
+								|| partner.seamAt(q) != 0
+								|| (q + 1 < partner.picks.size()
+									&& partner.seamAt(q + 1) != 0)) {
+							continue;
+						}
+						seamPos = lane.insert(partner.removeAt(q));
+						break;
+					}
+					// The window: everything the partner took between the seam's new place and
+					// the flip's old one, priced while this lane still looked dear to wake.
+					// Re-dealt one event at a time, kept whenever taking it does not deepen the
+					// corridor -- the same objective the chooser scores, now with the seam sunk.
+					int seamTime = lane.timeAt(seamPos);
+					int q = 0;
+					while (q < partner.picks.size() && partner.picks.size() > 1) {
+						int candidate = partner.timeAt(q);
+						if (candidate >= flipTime) {
+							break;
+						}
+						if (candidate <= seamTime || (candidate - seamTime) % 2 != 0
+								|| partner.seamAt(q) != 0
+								|| (q + 1 < partner.picks.size()
+									&& partner.seamAt(q + 1) != 0)) {
+							q++;
+							continue;
+						}
+						long worst = Math.max(lane.cells, partner.cells);
+						int event = partner.removeAt(q);
+						int where = lane.insert(event);
+						if (Math.max(lane.cells, partner.cells) > worst) {
+							lane.removeAt(where);
+							partner.insert(event);
+							q++;
+						}
+					}
+				}
+			}
 		}
 		List<EventNote> laneA = new ArrayList<>();
 		List<EventNote> laneB = new ArrayList<>();

@@ -54,6 +54,15 @@ class SeamPadProbe {
 
 	@Test
 	void whatStandsAfterEverySeam() throws Exception {
+		Flags.Held held = Flags.set(System.getProperty("probe.set", ""));
+		try {
+			run(held);
+		} finally {
+			held.putBack();
+		}
+	}
+
+	private void run(Flags.Held held) throws Exception {
 		boolean quiet = Boolean.getBoolean("probe.quiet");
 		String name = System.getProperty("probe.song", "ultra-ones-gap2-odd-third-short");
 		int reseed = Integer.getInteger("probe.reseed", 16);
@@ -67,11 +76,12 @@ class SeamPadProbe {
 		}
 		List<SongBuilder.EventNote> notes = SongBuilder.gameTickEventNotes(project, true);
 		SongBuilder.ParitySchedule schedule = SongBuilder.scheduleParities(notes, reseed);
-		System.out.println("SONG " + name + " reseed=" + reseed + " notes=" + notes.size()
+		System.out.println("SONG " + name + held.said() + " reseed=" + reseed + " notes=" + notes.size()
 			+ " laneA=" + schedule.laneA().size() + " laneB=" + schedule.laneB().size()
 			+ " seams=" + (schedule.flipsA().size() + schedule.flipsB().size()));
 
 		int savedRepeaters = 0;
+		int laidRepeaters = 0;
 		for (int side = 0; side < 2; side++) {
 			List<SongBuilder.EventNote> lane = side == 0 ? schedule.laneA() : schedule.laneB();
 			List<Integer> flips = side == 0 ? schedule.flipsA() : schedule.flipsB();
@@ -116,6 +126,7 @@ class SeamPadProbe {
 				int couldDelay = soonest < 0 ? 0
 					: Math.floorDiv(soonest, 2) - Math.floorDiv(prev, 2) - couldEat;
 				savedRepeaters += Math.max(0, delay) - Math.max(0, couldDelay);
+				laidRepeaters += Math.max(0, delay);
 				if (!quiet) {
 					System.out.println("    seam at gt " + at + " after gt " + prev + ": gap " + gap
 					+ " gt, element eats " + (2 * eat) + " gt, walk lays " + Math.max(0, delay)
@@ -129,8 +140,8 @@ class SeamPadProbe {
 			}
 		}
 
-		System.out.println("  flipping as early as legal would drop " + savedRepeaters
-			+ " repeater columns across every seam in this song");
+		System.out.println("  LAID " + laidRepeaters + " rt of repeater across every seam;"
+			+ " flipping as early as legal would drop " + savedRepeaters + " more");
 
 		// And the blocks, which is what can be walked up to in the world.
 		SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0), notes,
