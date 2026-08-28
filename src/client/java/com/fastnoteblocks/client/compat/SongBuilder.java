@@ -2312,6 +2312,34 @@ public final class SongBuilder {
 	 */
 	static boolean PARITY_FILLS_IDLE = true;
 
+	/**
+	 * Whether the threshold outranks the corridor when the two disagree.
+	 *
+	 * <p>They disagree more often than the setting's wording suggests, and the reason is that the
+	 * corridor is the longer lane rather than the two added together. Both lanes span the same
+	 * duration, and there are only two ways to spend it: music, at something under two game ticks
+	 * a cell, or delay chain, at eight. So a lane's length is very nearly the amount of music it
+	 * carries, and a silence is the cheapest thing a lane can hold. Filling one always lengthens
+	 * that lane and always shortens its partner -- which helps only when the lane being woken is
+	 * the shorter of the two.</p>
+	 *
+	 * <p>On dorian-concept-hide it is not. The sleeper there is already the longer lane, so
+	 * dealing it 46 events moved 128 cells off the short lane and put 75 onto the long one: the
+	 * two lanes added together got 53 cells shorter, the corridor got 75 longer, and the
+	 * imbalance went from 47 cells to 250. The pad that looks like waste is that lane covering
+	 * 324 game ticks at the best rate anything can.</p>
+	 *
+	 * <p>Off, which is the default, a take must also not deepen the corridor: silences are filled
+	 * where filling pays and left where it does not, and a long pad left standing is then a fact
+	 * about the schedule being near its floor rather than a fault. That is the better build on
+	 * every measure taken -- across the library it is 70,319 cells of corridor against 70,367
+	 * with no filler at all and 70,382 with this on, and it is the arm where the filler earns its
+	 * place instead of merely honouring its own wording. On, every silence past the threshold is
+	 * dealt and a build may come out longer for it. Excursions pay in the ledger either way;
+	 * their pistons are cells no music gives back.</p>
+	 */
+	static boolean PARITY_FILL_OUTRANKS_CORRIDOR = false;
+
 	/** One line per candidate the parity chooser weighs, over a window of game ticks. */
 	static boolean TRACE_PARITY = false;
 	static int TRACE_PARITY_FROM = 0;
@@ -2681,7 +2709,8 @@ public final class SongBuilder {
 							// pays back -- so it alone must satisfy the ledger, and one that
 							// cannot pay at its earliest chance will not pay a column later:
 							// the rest of the gap keeps its delay chain.
-							if (seamIn && Math.max(lane.cells, partner.cells) > worst) {
+							if ((seamIn || !PARITY_FILL_OUTRANKS_CORRIDOR)
+									&& Math.max(lane.cells, partner.cells) > worst) {
 								lane.removeAt(where);
 								partner.insert(event);
 								break;

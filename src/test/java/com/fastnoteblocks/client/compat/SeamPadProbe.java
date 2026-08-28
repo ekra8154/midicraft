@@ -143,6 +143,28 @@ class SeamPadProbe {
 		System.out.println("  LAID " + laidRepeaters + " rt of repeater across every seam;"
 			+ " flipping as early as legal would drop " + savedRepeaters + " more");
 
+		// Where each lane's cells go. The corridor is the longer lane, so what matters is not
+		// how much work a lane does but how densely it covers time: a repeater column spans
+		// eight game ticks, and a module spans only the gap to the next event.
+		int[][] trackA = SongBuilder.laneCellTrajectory(schedule.laneA());
+		int[][] trackB = SongBuilder.laneCellTrajectory(schedule.laneB());
+		int cellsA = trackA[1].length == 0 ? 0 : trackA[1][trackA[1].length - 1];
+		int cellsB = trackB[1].length == 0 ? 0 : trackB[1][trackB[1].length - 1];
+		int eventsA = (int) schedule.laneA().stream().map(SongBuilder.EventNote::time)
+			.distinct().count();
+		int eventsB = (int) schedule.laneB().stream().map(SongBuilder.EventNote::time)
+			.distinct().count();
+		int spanA = schedule.laneA().isEmpty() ? 0
+			: schedule.laneA().get(schedule.laneA().size() - 1).time();
+		int spanB = schedule.laneB().isEmpty() ? 0
+			: schedule.laneB().get(schedule.laneB().size() - 1).time();
+		System.out.println(String.format(
+			"  CELLS A=%d (%d events, %d gt, %.2f gt/cell)  B=%d (%d events, %d gt, %.2f gt/cell)"
+				+ "  longer=%d",
+			cellsA, eventsA, spanA, cellsA == 0 ? 0.0 : (double) spanA / cellsA,
+			cellsB, eventsB, spanB, cellsB == 0 ? 0.0 : (double) spanB / cellsB,
+			Math.max(cellsA, cellsB)));
+
 		// The other kind of dead lane: a stretch one machine sleeps through with no seam at all,
 		// laying nothing but delay chain while its partner works. For each lane, the biggest
 		// gaps, with what the partner held in them -- the events this lane could have been
