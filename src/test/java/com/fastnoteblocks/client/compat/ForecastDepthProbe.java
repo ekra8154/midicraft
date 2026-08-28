@@ -30,7 +30,7 @@ class ForecastDepthProbe {
 	void whatTheDepthLineSays() throws Exception {
 		List<Path> files;
 		try (Stream<Path> listing = Files.list(SONGS)) {
-			files = listing.filter(p -> p.toString().endsWith(".json")).sorted().limit(8).toList();
+			files = listing.filter(p -> p.toString().endsWith(".json")).sorted().filter(f -> f.getFileName().toString().contains(System.getProperty("probe.song", ""))).toList();
 		}
 		for (SongBuilder.PasteMode mode : List.of(SongBuilder.PasteMode.HALF_TICK_LANE,
 				SongBuilder.PasteMode.INTERLEAVED_HALF_TICK)) {
@@ -50,11 +50,11 @@ class ForecastDepthProbe {
 					continue;
 				}
 				StringBuilder line = new StringBuilder("  " + name + " notes=" + notes.size());
-				for (int delay : List.of(16, 64, 512)) {
+				for (int delay : List.of(16, 24, 32, 48, 64, 512)) {
 					SongBuilder.PastePlan plan;
 					try {
 						plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0), notes, mode,
-							new SongBuilder.BuildLimits(4, 32, 4, false, delay));
+							new SongBuilder.BuildLimits(4, 32, 3, false, delay));
 					} catch (RuntimeException broken) {
 						line.append(" | ").append(delay).append(": threw ").append(broken);
 						continue;
