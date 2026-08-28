@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.fastnoteblocks.InstrumentRanges;
 import com.fastnoteblocks.NoteSequence.Step;
 import com.fastnoteblocks.NoteSequence.StepType;
 import com.fastnoteblocks.client.FastNoteblocksConfig.SequenceTrack;
@@ -41,6 +42,36 @@ class SplitLayerTest {
 		return new ComposerProject("Split", ComposerProject.DEFAULT_PPQ,
 			ComposerProject.DEFAULT_TEMPO_MICROS_PER_QUARTER, List.of(layers), 0, nextId,
 			0L, ComposerProject.DEFAULT_SPEED_QUARTERS);
+	}
+
+	/**
+	 * Where the trumpets really sound, measured in game with a pitch detector.
+	 *
+	 * <p>The one row of the table that was guessed rather than measured, and half of the guess
+	 * was wrong. Copper does not drop a register per weathering age: copper and exposed share
+	 * F#3, weathered and oxidized share F#2. Pinned here because the obvious assumption -- four
+	 * ages, four registers -- is wrong in a way that only listening catches.</p>
+	 */
+	@Test
+	void trumpetsSitTwoAgesToARegister() {
+		assertEquals(54, InstrumentRanges.baseMidi("TRUMPET"), "F#3, with the harp");
+		assertEquals(54, InstrumentRanges.baseMidi("TRUMPET_EXPOSED"), "F#3, a dirtier copper");
+		assertEquals(42, InstrumentRanges.baseMidi("TRUMPET_WEATHERED"), "F#2, with the guitar");
+		assertEquals(42, InstrumentRanges.baseMidi("TRUMPET_OXIDIZED"), "F#2, a dirtier weathered");
+	}
+
+	/** A weathered trumpet answers the guitar's bracket, not the harp's, once the table moved. */
+	@Test
+	void aWeatheredTrumpetJoinsTheGuitarRegister() {
+		Split split = new Split(List.of(Split.Voice.fullRange("TRUMPET_WEATHERED")));
+		Layer layer = splitLayer(split, note(50, 0L));
+
+		assertFalse(layer.outOfRange(layer.notes().get(0)),
+			"MIDI 50 is inside F#2-F#4 and would have been outside the harp window");
+		List<Layer> voices = layer.buildVoices();
+		assertEquals(1, voices.size());
+		assertEquals(50 + 12, voices.get(0).notes().get(0).midiNote(),
+			"the guitar register sits 12 below the harp window, so the note rides 12 up");
 	}
 
 	/** The clamp: a handle can shrink a bracket but never drag it past the instrument's register. */
