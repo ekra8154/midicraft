@@ -226,8 +226,12 @@ class FaultCensusProbe {
 					raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(), raw.endTick(),
 					raw.speedQuarters());
 			}
+			// Through the one dispatcher, not the sequence reading: a half-tick layout is planned
+			// from the composition in game ticks, and handed sequence events it builds a different
+			// song than the paste would -- at the wrong speed, with the two tick parities scrambled.
+			// Asking eventNotes directly is how a probe answers for a machine nobody can paste.
 			List<SongBuilder.EventNote> notes =
-				SongBuilder.eventNotes(song.toSequenceTracks(Set.of(), true));
+				SongBuilder.notesFor(mode, song.toSequenceTracks(Set.of(), true), song, true);
 			if (notes.isEmpty()) {
 				continue;
 			}

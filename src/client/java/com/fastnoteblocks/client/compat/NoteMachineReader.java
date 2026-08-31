@@ -17,7 +17,9 @@ import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.level.EmptyBlockGetter;
+import net.minecraft.world.level.block.BasePressurePlateBlock;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.ButtonBlock;
 import net.minecraft.world.level.block.ComparatorBlock;
 import net.minecraft.world.level.block.NoteBlock;
 import net.minecraft.world.level.block.RedStoneWireBlock;
@@ -228,13 +230,26 @@ public final class NoteMachineReader {
 		return survey;
 	}
 
+	/**
+	 * Whether a block makes power of its own -- the thing a player throws, or a block of redstone.
+	 *
+	 * <p>Asked of the block's own class rather than of a tag. {@code BlockTags.BUTTONS} and
+	 * {@code BlockTags.PRESSURE_PLATES} are datapack contents: in game the server has loaded them
+	 * and both read true, and outside one -- every probe, every test, every census -- they are
+	 * empty and both read false. So the reader answered one way in the world and another way on
+	 * the bench, which is the worst property a checker can have. It cost a whole layout: the
+	 * interleaved build starts on an oak button, no other layout does, and every interleaved build
+	 * in the library came back with one of its two machines reporting <em>every note dead</em> --
+	 * 24,412 notes over nine builds -- because the bench could not see the thing that starts it.
+	 * The block classes are compiled in and say the same in both places.</p>
+	 */
 	private static boolean isSource(BlockState state) {
 		return state.is(Blocks.REDSTONE_BLOCK)
 			|| state.is(Blocks.LEVER)
 			|| state.is(Blocks.REDSTONE_TORCH)
 			|| state.is(Blocks.REDSTONE_WALL_TORCH)
-			|| state.is(net.minecraft.tags.BlockTags.BUTTONS)
-			|| state.is(net.minecraft.tags.BlockTags.PRESSURE_PLATES);
+			|| state.getBlock() instanceof ButtonBlock
+			|| state.getBlock() instanceof BasePressurePlateBlock;
 	}
 
 	// ------------------------------------------------------------------ following the signal

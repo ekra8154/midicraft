@@ -92,7 +92,10 @@ final class FaultView {
 	 */
 	static Build of(String song, SongBuilder.PasteMode mode, int width, int floors, int maxFloors,
 			boolean nameShapes) throws Exception {
-		return of(song, BreachView.song(song), mode, width, floors, maxFloors, nameShapes);
+		// Read at the resolution the mode builds at. The no-mode overload answers for the sequence,
+		// which for a game-tick layout is a different song at twice the speed -- and a fault drawn off
+		// that is a fault in a machine the paste would never lay.
+		return of(song, BreachView.song(song, mode), mode, width, floors, maxFloors, nameShapes);
 	}
 
 	static Build of(String name, List<SongBuilder.EventNote> notes, SongBuilder.PasteMode mode,
