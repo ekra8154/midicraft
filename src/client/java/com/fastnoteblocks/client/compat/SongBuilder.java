@@ -340,6 +340,31 @@ public final class SongBuilder {
 			: new LaneReach(1, 1, margin, false);
 	}
 
+	/**
+	 * Whether a stacked module declares itself live at the low level, which costs its lanes a
+	 * column of separation.
+	 *
+	 * <p>{@link LaneReach#lowLive} was written for exactly this and nothing else -- its own
+	 * documentation names the stacked module as the one layout that hangs notes and live relays
+	 * side by side on the same low level, and says that two lanes both using it need a column
+	 * between them. Nothing ever set it. Every constructor in this file passed {@code false}, so
+	 * the arm of {@link #laneSpacing} that reads it has never once run: the rule was written down,
+	 * wired up, and asked of nothing. It is the shape behind the interleaved layout's remaining
+	 * wrong notes, where two rows of stacked modules three columns apart stand a live low block
+	 * one column from a foreign low note.
+	 *
+	 * <p><b>Off, because switched on as written it loses.</b> Measured over the three two-machine
+	 * songs at seventy sizes: wrong notes 11 to 2, and for that, ground the build promised not to
+	 * take goes 3 blocks to 16 and the footprint 21% deeper -- a spacing of four makes the whole
+	 * interleaved depth a third again, and pushes lanes past their walls. Nine of eleven wrong
+	 * notes for five times the breaches is not a trade to make on anybody's behalf.</p>
+	 *
+	 * <p>So it is a dial rather than a silent falsehood. What it wants is a narrower claim than
+	 * "every stacked lane, always" -- the low block is live for the ticks around its own chord,
+	 * not for the whole lane -- and that is a measurement nobody has taken.</p>
+	 */
+	static boolean STACKED_LANES_KEEP_THE_LOW_COLUMN = false;
+
 	/** The reach of the widest chord in a run of events. */
 	private static LaneReach laneReach(List<EventGroup> events, int from, int to) {
 		LaneReach reach = LaneReach.NONE;
@@ -16670,7 +16695,10 @@ public final class SongBuilder {
 			// The two blocks a cross hands its signal to sit one either side of the centre line,
 			// at the same level as the four low notes. A chord measured as this and then dropped
 			// to a bus keeps the wider claim, which is the harmless direction to be wrong in.
-			return new LaneReach(1, 1, margin, false);
+			//
+			// Whether it also declares itself live at the low level: see
+			// STACKED_LANES_KEEP_THE_LOW_COLUMN, which is off, and why.
+			return new LaneReach(1, 1, margin, STACKED_LANES_KEEP_THE_LOW_COLUMN);
 		}
 		if (style == ChordStyle.BUS) {
 			return new LaneReach(1, 1, margin, false);
