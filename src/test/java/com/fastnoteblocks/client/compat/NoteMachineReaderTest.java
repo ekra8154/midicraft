@@ -91,7 +91,7 @@ class NoteMachineReaderTest {
 	 */
 	@ParameterizedTest
 	@EnumSource(value = SongBuilder.PasteMode.class, mode = EnumSource.Mode.EXCLUDE,
-		names = {"COMPACT_CUBE", "HALF_TICK_LANE", "ULTRA_HALF_TICK_LANE"})
+		names = {"COMPACT_CUBE", "ULTRA_HALF_TICK_LANE"})
 	void readsBackEveryNoteOfItsOwnBuild(SongBuilder.PasteMode mode) {
 		List<SongBuilder.EventNote> notes = sampleSong();
 		SongBuilder.PastePlan plan =
@@ -100,35 +100,44 @@ class NoteMachineReaderTest {
 
 		NoteMachineReader.Reading reading = readAll(world, "Round trip");
 
-		assertEquals("", difference(sounds(notes), sounds(reading.project())),
+		// In the mode's own unit. The events handed to the walk are read as game ticks by a
+		// game-tick layout and as repeater ticks by every other, so the reading has to be divided
+		// by whichever the build was counting in or the two clocks never meet.
+		assertEquals("", difference(sounds(notes), sounds(reading.project(),
+				mode.gameTicks() ? NoteMachineReader.TICKS_PER_GAME_TICK
+					: NoteMachineReader.TICKS_PER_REDSTONE_TICK)),
 			mode + ": the machine did not read back as the song it was built from");
 		assertEquals(0, reading.unreachedNotes(), mode + ": some note blocks were never triggered");
 	}
 
 	/**
-	 * What the round trip above can still ask of a half-tick build, on the same sample song.
+	 * That the half-tick lane's two machines are started as one, and by one thing.
 	 *
-	 * <p>Two things, and they are the two that do not depend on a shared clock. Every note block has
-	 * to be reachable, which is the check no plan can make for itself. And the two lanes have to
-	 * read as <em>two</em> machines: the reader keeps a way in only when it reaches something no
-	 * other way in does, so a lane whose signal got into the other's note blocks would swallow it
-	 * and come back as one. That is this file's version of asking whether lanes a single column
-	 * apart leave each other alone.</p>
+	 * <p>This used to be the whole of what could be asked of this mode, on the grounds that a
+	 * half-tick build is two machines the reader times separately, so no single clock holds both.
+	 * That stopped being true when {@code HALF_TICK_SHARED_INPUT} gave the two lanes one input --
+	 * two buttons cannot be pressed on the same game tick, so the halves could never be started in
+	 * the step the plan worked out for them. One way in is one performance and one clock, and the
+	 * round trip above covers the mode outright: every note at the game tick it was built for,
+	 * which is a far stronger answer to "do two lanes a column apart leave each other alone" than
+	 * counting ways in ever was. A lane reaching into the other's note blocks moves notes in time,
+	 * and that shows up there.</p>
 	 *
-	 * <p>Where every note lands is asserted in {@code HalfTickLaneTest}, which puts the two lanes
-	 * back on one clock the only way that is meaningful -- by counting each lane's lead-in off the
-	 * blocks and offsetting the odd lane by the game tick its wiring owes it.</p>
+	 * <p>What is left here is the fact the round trip cannot state: that there is exactly one way
+	 * in, and so exactly one thing for a player to press. The assertion read {@code 2} for as long
+	 * as it took anyone to notice, and a test that says the opposite of the design is worse than
+	 * no test -- it makes the shared input look like the regression.</p>
 	 */
 	@Test
-	void readsBackBothLanesOfAHalfTickBuild() {
+	void readsBackBothLanesOfAHalfTickBuildAsOneMachine() {
 		SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0),
 			sampleSong(), SongBuilder.PasteMode.HALF_TICK_LANE, LIMITS);
 
 		NoteMachineReader.Reading reading = readAll(placeInWorld(plan), "Half-tick");
 
 		assertEquals(0, reading.unreachedNotes(), "some note blocks were never triggered");
-		assertEquals(2, reading.versions(),
-			"the two lanes must share nothing, or one is setting off the other's notes");
+		assertEquals(1, reading.versions(),
+			"one shared input drives both lanes, so this is one performance: " + reading.report());
 	}
 
 	/** And the folded pair, which is the same two questions asked of two whole corridors. */
@@ -858,12 +867,24 @@ class NoteMachineReaderTest {
 	}
 
 	private static java.util.SortedMap<Sound, Integer> sounds(ComposerProject project) {
+		return sounds(project, NoteMachineReader.TICKS_PER_REDSTONE_TICK);
+	}
+
+	/**
+	 * What was heard, in the unit the mode counts in.
+	 *
+	 * <p>A song's own times are whatever unit the layout was handed them in, and the reader answers
+	 * in its own fine ticks; comparing them means dividing by the right one. Every layout but the
+	 * half-tick family is timed in repeater ticks, so that was the only divisor here and the
+	 * parameter did not need to exist. A game-tick layout read at the repeater's scale comes back
+	 * at exactly half its own times -- every note off by a factor of two, 1,873 of them, which
+	 * reads as a machine playing the wrong song rather than as a test using the wrong ruler.</p>
+	 */
+	private static java.util.SortedMap<Sound, Integer> sounds(ComposerProject project, int per) {
 		java.util.SortedMap<Sound, Integer> counts = new TreeMap<>();
 		for (ComposerProject.Layer layer : project.layers()) {
 			for (ComposerProject.NoteEvent note : layer.notes()) {
-				counts.merge(new Sound(
-					(int)(note.startTick() / NoteMachineReader.TICKS_PER_REDSTONE_TICK),
-					layer.instrument(),
+				counts.merge(new Sound((int)(note.startTick() / per), layer.instrument(),
 					note.midiNote() - ComposerProject.NOTE_BLOCK_BASE_MIDI_NOTE), 1, Integer::sum);
 			}
 		}
