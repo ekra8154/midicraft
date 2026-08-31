@@ -625,6 +625,26 @@ public final class SongBuilder {
 	static final String WAYS_IN = "waysIn";
 
 	/**
+	 * Where the first machine's turns stop and the second's begin, in a two-machine plan.
+	 *
+	 * <p>A plan reports one corridor length for the whole build, and for the interleaved layout that
+	 * is two machines added together -- which cannot say whether the two came out the same length or
+	 * whether one ran twice as far as the other. The turns are recorded in walk order and the two
+	 * walks are consecutive, so one index splits them, and every per-lane number follows from that
+	 * split. Beside {@link #WAYS_IN} because it is the same kind of thing: a fact the walk knows and
+	 * nothing downstream could work out for itself.</p>
+	 *
+	 * <p>Absent on a plan that built one machine, which is what a single-parity song gets.</p>
+	 */
+	static final String MACHINE_A_TURNS = "machineATurns";
+
+	/** How many events each machine of a two-machine plan was handed, after the parity schedule. */
+	static final String MACHINE_A_NOTES = "machineANotes";
+
+	/** @see #MACHINE_A_NOTES */
+	static final String MACHINE_B_NOTES = "machineBNotes";
+
+	/**
 	 * How many of a half-tick build's two lanes actually get built.
 	 *
 	 * <p>Two, normally, and one when the song sits entirely on one parity -- which is not a corner
@@ -1792,6 +1812,11 @@ public final class SongBuilder {
 			// One button on a shared spine, or one each. The severed check excuses a starved
 			// repeater per way in, and with the spine feeding both heads neither is starved.
 			placements.waysIn(INTERLEAVED_SHARED_INPUT ? 1 : 2);
+			// How the music was divided, before anything is walked. The schedule may move events
+			// between the machines, so the two halves are not the parity split and cannot be
+			// recovered from the song afterwards.
+			placements.padded(MACHINE_A_NOTES, even.size());
+			placements.padded(MACHINE_B_NOTES, odd.size());
 			// What the schedule decided, on the plan for whoever reads it: how many pistons, and
 			// which half of the tick each machine's input must fire on -- the one fact the starter
 			// buttons cannot carry themselves.
@@ -1811,6 +1836,9 @@ public final class SongBuilder {
 					routeA, headA, tightA, paceA);
 				BlockPos inputA = placements.firstRepeater();
 				int laidByA = placements.laidCells();
+				// The boundary in the turn list, for the same reason the cell count is taken here:
+				// from the next line on, everything recorded belongs to the other machine.
+				placements.padded(MACHINE_A_TURNS, placements.turnsSoFar());
 				// A fresh corridor: nothing about machine B's opening follows from machine A's last
 				// cell, least of all how much dust has gone down since a repeater it is not wired to.
 				placements.startFreshRun();
@@ -29467,6 +29495,18 @@ public final class SongBuilder {
 		 */
 		int laidCells() {
 			return blocks.size();
+		}
+
+		/**
+		 * How many turns have been recorded so far, taken between two walks to tell them apart.
+		 *
+		 * <p>The turn list is the only record of how far each lane ran, and a two-machine plan holds
+		 * both machines' turns in one list in the order they were walked. So the count at the moment
+		 * the first machine finishes is the boundary, and everything after it is the second's --
+		 * the same trick {@link #laidCells()} plays for the blocks.</p>
+		 */
+		int turnsSoFar() {
+			return turns.size();
 		}
 
 		/** The first repeater among the cells laid after the first {@code laid} -- the second
