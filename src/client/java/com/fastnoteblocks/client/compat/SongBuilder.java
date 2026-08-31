@@ -2011,6 +2011,23 @@ public final class SongBuilder {
 	static int PARITY_SEAM_CELLS = 7;
 
 	/**
+	 * The cell past the element that the leg must also hold: the one that reads its landing.
+	 *
+	 * <p>A seam occupies {@link #PARITY_SEAM_CELLS} cells and <em>needs</em> one more. Its last
+	 * block of redstone is shoved into the seventh and hands out a fresh fifteen from there; what
+	 * reads that stands in the eighth. Book seven and the element may end flush against the wall,
+	 * where it lays perfectly and both pistons fire and the landing drives nothing -- the lane
+	 * turns and climbs away above it, out of reach, and every note after it is silent. Dorian at
+	 * twenty-four wide: 754 notes, one machine, from the first seam in the build.</p>
+	 *
+	 * <p>Its own name rather than a {@code + 1} because the two numbers answer different questions
+	 * and only one of them is a length. {@link #PARITY_SEAM_CELLS} is how much a seam occupies,
+	 * which is what lays it; this is how much a leg must have free before one may be put there,
+	 * which is what books it. Set to nought to measure what the seam costs.</p>
+	 */
+	static int PARITY_SEAM_LANDING_READER = 1;
+
+	/**
 	 * The phase rule, measured by the user with command blocks and the reason every seam is a
 	 * DOUBLE piston: within a game tick, scheduled ticks (repeaters, torches, observers,
 	 * comparators) process before block events (piston extensions). A piston whose edge arrives
@@ -2245,6 +2262,11 @@ public final class SongBuilder {
 	 */
 	private static boolean paritySeamHasRoom(PlacementPlan placements, Lane lane) {
 		Lane at = lane;
+		// The element's own cells and no more. Whether there is room for the cell that <em>reads</em>
+		// the element is not askable here: the thing that takes it -- the glass of the climb the
+		// lane makes at the wall -- is not laid until after this has answered, so extending this
+		// loop by one catches nothing and reports a guard where there is none. That question is
+		// asked where it can be, in {@link #PARITY_SEAM_LANDING_READER}'s one caller.
 		for (int cell = 0; cell < PARITY_SEAM_CELLS; cell++) {
 			if (at.bending() || placements.blockAt(at.pos().above()) != null) {
 				return false;
@@ -2846,6 +2868,13 @@ public final class SongBuilder {
 			int maxSafeTurnDistance = style == ChordStyle.BUS ? Math.max(0, 13 - busLength)
 				: style.busHeaded() ? Math.max(0, 13 - tailCells)
 				: 13;
+			// The element plus the cell that reads its landing. What this length books is the room
+			// the seam event needs, and a seam needs one cell more than it occupies: the last
+			// block of redstone is shoved into the seventh cell and whatever reads it stands in
+			// the eighth. Booked one short, the element lands flush against the wall, both
+			// pistons fire, and the landing drives nothing -- the lane climbs away above it and
+			// the machine is silent from there. Dorian at twenty-four wide, 754 notes, at the
+			// first seam in the build.
 			result.set(flip, new EventGroup(group.time(), group.notes(),
 				delayRepeaters + eventLength + PARITY_SEAM_CELLS, eventLength,
 				maxSafeTurnDistance, style, laneReachOf(layout, style, group.notes()), eat));
@@ -9310,9 +9339,15 @@ public final class SongBuilder {
 				int dustRun = Math.max(0, DUST_RANGE - foldSignal);
 				while (true) {
 					int foldRepeaters = Math.max(0, (event.time() - currentTime - 1) / 4);
-					// A pending seam's element wants three straight cells of this leg too, so every
-					// fit question the fold asks counts them alongside the repeaters.
-					int seamCells = event.seamEat() > 0 ? PARITY_SEAM_CELLS : 0;
+					// A pending seam's element wants straight cells of this leg too, so every fit
+					// question the fold asks counts them alongside the repeaters -- and one more
+					// than the element is long. The last block of redstone is shoved into the
+					// seventh cell and whatever reads it stands in the eighth; booked seven, the
+					// element can end flush against the wall, both pistons fire, and the landing
+					// drives nothing at all. The lane turns and climbs away above it, and every
+					// note after it is silent.
+					int seamCells = event.seamEat() > 0
+						? PARITY_SEAM_CELLS + PARITY_SEAM_LANDING_READER : 0;
 					int want = foldRepeaters + stretchLeft + seamCells;
 					if (turning || lane.bending()) {
 						int toExit = 0;
@@ -9428,7 +9463,11 @@ public final class SongBuilder {
 							folded |= walked > 0;
 						}
 						while (stretchLeft > 0) {
-							placements.placing("delayBeforeChord");
+							// Named for what it is. These cells are the pacing stretch, not the
+							// spatial delay, and a label is sticky: every one of them read as a
+							// fault in the delay chain, which is the same trap parityPad and
+							// pastAnyCorner each cost an afternoon to.
+							placements.placing("paceStretch");
 							if (dustRun >= 8) {
 								if (event.time() - currentTime <= 4) {
 									// No tick left to anchor more dust on: the rest of the stretch
@@ -9444,9 +9483,37 @@ public final class SongBuilder {
 								foldSignal = DUST_RANGE;
 								dustRun = 0;
 							} else {
-								addParityPad(placements, lane.pos());
-								foldSignal--;
-								dustRun++;
+								// Through the one helper the other five pad sites go through. A
+								// simple tail's note-block middle is lit by its handover and by
+								// nothing else, so it drives a repeater and cannot light dust --
+								// and a stretch opening on one with a plain cell of dust is a dead
+								// line. The pacing stretch was the sixth place in the walk to lay
+								// dust straight after a module and the only one that never asked;
+								// it arrived after the other five were gathered up, which is how
+								// it came to be the one exception.
+								//
+								// Spent as r1 the trade costs nothing: the same column, the tick
+								// comes off the chord's own trigger because currentTime carries it,
+								// and the thing standing against the soft middle is a repeater,
+								// which is the one thing that reads it. Both flags, and the
+								// geometry decides -- a stretch is laid between buildShaped's roll
+								// and the next one, so which copy holds the answer is exactly the
+								// thing this file keeps being wrong about.
+								int ticks = event.time() - currentTime;
+								int leftOver = padCellOrSplitRepeater(placements, lane.pos(),
+									lane.travel(), ticks,
+									placements.softTip() || placements.softBehind(), false,
+									"paceStretch");
+								if (leftOver < ticks) {
+									// A repeater went down instead of the pad, so the run is
+									// revived and the ticks it took are the chord's no longer.
+									currentTime += ticks - leftOver;
+									foldSignal = DUST_RANGE;
+									dustRun = 0;
+								} else {
+									foldSignal--;
+									dustRun++;
+								}
 								stretchLeft--;
 								placements.padded("paceStretchCell");
 							}
