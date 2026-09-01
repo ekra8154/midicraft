@@ -2337,7 +2337,75 @@ public final class SongBuilder {
 	 * along it, and always was; what may not be shared is the cell the piston stands in, the cell
 	 * its block starts in, and the cell the block is going to.</p>
 	 */
+	/** Whether a seam may be laid through a turn instead of waiting for a straight run. */
+	static boolean SEAM_RIDES_A_TURN = true;
+
+	/**
+	 * Whether a corner may fall on this cell of a seam's element.
+	 *
+	 * <p>Three cells cannot take one. The opening repeater reads the cell behind it along its
+	 * own travel, and on a corner that is not where the lane came from. And each block of
+	 * redstone must be collinear with the piston behind it and the landing in front, or the
+	 * piston is not pushing it where it needs to go.</p>
+	 *
+	 * <p>Every other cell can. A piston on a corner pushes the way the lane leaves it, block and
+	 * landing following on the new heading. A landing on a corner is read from the side -- a
+	 * block of redstone powers every cell touching it, so whatever stands in the turn beside the
+	 * landing sees it just as well as a cell beyond it would. And the reader itself may stand on
+	 * a corner, reading back the way the lane came. This is what lets a seam end flush on its
+	 * wall and turn, instead of standing its next repeater two columns outside.</p>
+	 */
+	private static boolean paritySeamCornerAllowedAt(int cell) {
+		return cell != 0 && cell != 2 && cell != 5 && cell <= PARITY_SEAM_CELLS;
+	}
+
+	/** How far ahead a corner must be before the seam stops trying to bring it onto itself. */
+	private static final int SEAM_CORNER_REACH = PARITY_SEAM_CELLS + PARITY_SEAM_LANDING_READER + 1;
+
+	/**
+	 * The corners within reach fall only where the element can carry them.
+	 *
+	 * <p>Within reach and not merely within the element. A corner one or two cells past the
+	 * reader is one the shove loop can still bring onto a landing or a piston, and left where
+	 * it is the element lays straight with its reader on the wall and the next module's
+	 * repeater beyond it -- exactly the shape a ride exists to replace. So a corner at eight or
+	 * nine counts as out of place, the loop shoves until it is on the element, and the seam
+	 * turns with a piston or a landing on the corner. Beyond that reach the corner is simply a
+	 * corner further down the leg, and none of this applies.</p>
+	 */
+	private static boolean paritySeamCornersAlign(Lane lane) {
+		for (Lane.Bend bend : lane.bends()) {
+			if (bend.after() > SEAM_CORNER_REACH) {
+				continue;
+			}
+			if (!paritySeamCornerAllowedAt(bend.after())) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	/**
+	 * Whether some shove forward puts every corner ahead where the element can carry it.
+	 *
+	 * <p>Asked before the walk-out, because the walk-out spends the corners and leaves nothing
+	 * to ride. The shove loop does the aligning a cell at a time; this only settles whether any
+	 * shove short of the first corner will do.</p>
+	 */
+	private static boolean paritySeamCanRideTurn(Lane lane) {
+		int first = cellsToCorner(lane);
+		for (int shove = 0; shove < first; shove++) {
+			if (paritySeamCornersAlign(lane.ahead(shove))) {
+				return true;
+			}
+		}
+		return false;
+	}
+
 	private static boolean paritySeamHasRoom(PlacementPlan placements, Lane lane) {
+		if (!paritySeamCornersAlign(lane)) {
+			return false;
+		}
 		Lane at = lane;
 		// The element's own cells and no more. Whether there is room for the cell that <em>reads</em>
 		// the element is not askable here: the thing that takes it -- the glass of the climb the
@@ -2345,7 +2413,7 @@ public final class SongBuilder {
 		// loop by one catches nothing and reports a guard where there is none. That question is
 		// asked where it can be, in {@link #PARITY_SEAM_LANDING_READER}'s one caller.
 		for (int cell = 0; cell < PARITY_SEAM_CELLS; cell++) {
-			if (at.bending() || placements.blockAt(at.pos().above()) != null) {
+			if (placements.blockAt(at.pos().above()) != null) {
 				return false;
 			}
 			at = at.ahead(1);
@@ -2952,9 +3020,21 @@ public final class SongBuilder {
 			// pistons fire, and the landing drives nothing -- the lane climbs away above it and
 			// the machine is silent from there. Dorian at twenty-four wide, 754 notes, at the
 			// first seam in the build.
+			// The turn machinery reads maxSafeTurnDistance and nothing else, and until now a seam
+			// event handed it the chord's number -- 13, the bare constant, on every seam in every
+			// build. So the one check that keeps the rest of the lane inside its walls was being
+			// told that a seam is a two-cell chord, and a lane would break where a seam then
+			// needed eight straight cells it did not have. The length has always carried the
+			// element; this is the length arriving where the decision is made.
+			//
+			// Charged the way a bus charges itself: what a turn may still cost once this event has
+			// spent its cells. The element plus the cell that reads its landing, because that cell
+			// is the leg's too -- see PARITY_SEAM_LANDING_READER.
+			int seamTurnDistance = Math.min(maxSafeTurnDistance,
+				Math.max(0, DUST_RANGE - 2 - (PARITY_SEAM_CELLS + PARITY_SEAM_LANDING_READER)));
 			result.set(flip, new EventGroup(group.time(), group.notes(),
 				delayRepeaters + eventLength + PARITY_SEAM_CELLS, eventLength,
-				maxSafeTurnDistance, style, laneReachOf(layout, style, group.notes()), eat));
+				seamTurnDistance, style, laneReachOf(layout, style, group.notes()), eat));
 		}
 		return List.copyOf(result);
 	}
@@ -9737,12 +9817,25 @@ public final class SongBuilder {
 			// short repeater revives it from whatever ticks the gap still holds.
 			if (event.seamEat() > 0) {
 				placements.placing("paritySeam");
+				// Only where the turn is actually in the way. A corner further off than the
+				// element is one the lane can simply walk out and lay the seam beyond, which is
+				// what every seam did before riding existed and what most of the library wants:
+				// ridden by default, all 43 of moonlight's seams took a corner they had no need
+				// of and 16 of its 86 pistons ended up outside a wall.
+				// Gated at the element plus the reader plus one: far enough to take a corner the
+				// shove loop can still bring onto a piston, and no further. Gated at the element
+				// alone, a corner eight or nine cells off was walked out instead, and it was the
+				// walk-out that breached -- moonlight at ten wide came out of two of them four
+				// columns past its wall.
+				boolean ridesTheTurn = SEAM_RIDES_A_TURN && lane.bending()
+					&& cellsToCorner(lane) <= SEAM_CORNER_REACH
+					&& paritySeamCanRideTurn(lane);
 				// Any turn still open is walked out first, and closed the way the fold closes
 				// one -- pinned cursor, watch verdict, ban and busy flags. The first version
 				// walked the corner cells and left the turn open, and the walk re-armed a
 				// phantom leg for every seam laid near one: machine B of moonlight at
 				// twenty-four wide came out twenty-two legs long of itself.
-				if (turning || lane.bending()) {
+				if ((turning || lane.bending()) && !ridesTheTurn) {
 					while (lane.bending()) {
 						BlockPos beforeCorner = lane.pos();
 						lane = pastAnyCorner(placements, lane);
@@ -9797,26 +9890,82 @@ public final class SongBuilder {
 				if (shoved > 0) {
 					placements.padded("paritySeamShovedForRoom", shoved);
 				}
+				// The element must end at or before the wall. Its seven cells finish on the
+				// landing, and what READS that landing may be the corner beside it -- a block of
+				// redstone powers every cell touching it -- so the leg owes the element and not
+				// the reader. Nothing ever checked this: the old room guard refused any pending
+				// corner, and near a wall a turn is normally armed already, so that refusal stood
+				// in for a wall check nobody wrote. Where the lane is straight the element simply
+				// runs out through the wall, because the cells past it are empty and empty is all
+				// the room guard ever asked.
+				//
+				// Where it will not fit, the turn is armed AT the wall and the lane shoved again
+				// until the corner stands on the element's first piston, so the seam rides its own
+				// turn with a piston on each corner rather than breaching past it.
+				if (SEAM_RIDES_A_TURN && !lane.bending() && lane.travel().getAxis() == axis) {
+					TurnCost seamTurn = turnCost(floor, climb, floors,
+						flatLink(route, leg, slabStep));
+					int seamWall = laneWall(axis, nearWallAt(route, leg, nearWall, tipStep),
+						tipWall(route, leg, farWall, tipStep), forward, lane.travel(), floor,
+						climb, floors);
+					int seamColumns = (seamWall - coordAlong(axis, lane.pos()))
+						* stepAlong(axis, lane.travel());
+					// Cells, not columns: the element opens in the cell the lane stands in, so
+					// seven cells reach the wall when there are six columns left to it.
+					boolean crosses = seamColumns >= 0 && seamColumns < PARITY_SEAM_CELLS - 1;
+					if (crosses && !(seamTurn.above() >= 0 && seamTurn.above() < floors)) {
+						boolean tight = FLAT_TURN_KEEPS_ITS_WIDTH
+							&& (tightTurns.contains(index) || route.linkArmsTight(leg));
+						if (tight && !flatRunIsClear(placements, lane, depth, seamWall,
+								seamColumns, flatLink(route, leg, slabStep))) {
+							tight = false;
+							placements.padded("flatTurnCouldNotTighten");
+						}
+						lane = armTurn(placements, lane, depth, seamColumns,
+							flatLink(route, leg, slabStep), tight);
+						turning = true;
+						booked = Map.of();
+						leg++;
+						floor = route.floorOf(leg);
+						climb = route.climbOf(leg);
+						ridesTheTurn = true;
+						placements.padded("paritySeamArmedItsWall");
+						int aligned = 0;
+						while (aligned < laneWidth && !paritySeamHasRoom(placements, lane)) {
+							addParityPad(placements, lane.pos());
+							tipSignal--;
+							lane = lane.ahead(1);
+							aligned++;
+						}
+						placements.padded("paritySeamAlignedToItsCorner", aligned);
+					}
+				}
 				// The repeater that picks the lane up (the sunken cross made it necessary), then
 				// the DOUBLE piston: the first shoves its block into the empty cell behind the
 				// second, which that block then fires, and the second shoves its own block out to
 				// the wire. Two pistons because of the phase rule -- see PARITY_SEAM_GAME_TICKS:
 				// one piston behind a repeater is pulled even by the tick's phase order and never
 				// flips parity at all; a pair costs five game ticks from any phase whatever.
-				String[] seamCells2 = {
-					"minecraft:repeater[facing=" + repeaterFacing(lane.travel()) + ",delay="
-						+ PARITY_SEAM_REPEATER + "]",
-					"minecraft:sticky_piston[facing=" + lane.travel().getName() + "]",
-					"minecraft:redstone_block",
-					"minecraft:air",
-					"minecraft:sticky_piston[facing=" + lane.travel().getName() + "]",
-					"minecraft:redstone_block",
-					"minecraft:air",
-				};
-				for (String cell : seamCells2) {
+				for (int cell = 0; cell < PARITY_SEAM_CELLS; cell++) {
+					String block = switch (cell) {
+						case 0 -> "minecraft:repeater[facing=" + repeaterFacing(lane.travel())
+							+ ",delay=" + PARITY_SEAM_REPEATER + "]";
+						case 1, 4 -> "minecraft:sticky_piston[facing="
+							+ lane.travel().getName() + "]";
+						case 2, 5 -> "minecraft:redstone_block";
+						default -> "minecraft:air";
+					};
 					set(placements, lane.pos(), "minecraft:stone");
-					set(placements, lane.pos().above(), cell);
+					set(placements, lane.pos().above(), block);
 					lane = lane.ahead(1);
+				}
+				if (ridesTheTurn) {
+					// And nothing else. A chord that rides a turn does not close it -- the walk
+					// closes it at the top of the next event, the moment the route stops bending,
+					// and that is the only place a turn has ever been closed. Closing it here as
+					// well took the watch verdict a whole event early and cleared `turning` while
+					// the walk still had corners to account for.
+					placements.padded("paritySeamRodeItsTurn");
 				}
 				tipSignal = DUST_RANGE;
 				// The element is lane content -- its chord may land flush on the wall and must be
