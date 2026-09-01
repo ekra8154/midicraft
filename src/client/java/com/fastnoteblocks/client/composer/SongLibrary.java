@@ -15,7 +15,7 @@ import java.util.stream.Stream;
 import net.fabricmc.loader.api.FabricLoader;
 
 /**
- * The songs on disk, one composition per file under {@code config/fast-noteblocks/songs}.
+ * The songs on disk, one composition per file under {@code config/midicraft/songs}.
  *
  * <p>Songs used to live inside the settings file, which coupled two things that fail very
  * differently. Settings are a few dozen small values; a song is most of a megabyte and is rewritten
@@ -28,7 +28,7 @@ public final class SongLibrary {
 	private static final Gson GSON = new Gson();
 	private static final Path DIRECTORY = FabricLoader.getInstance()
 		.getConfigDir()
-		.resolve("fast-noteblocks")
+		.resolve("midicraft")
 		.resolve("songs");
 
 	private final Map<String, ComposerProject> songs = new LinkedHashMap<>();
@@ -56,7 +56,7 @@ public final class SongLibrary {
 			Files.createDirectories(folder);
 			Files.writeString(folder.resolve("README.txt"),
 				"""
-				Put .mid, .midi and .nbs files here to import them into Fast Noteblocks.
+				Put .mid, .midi and .nbs files here to import them into Midicraft.
 
 				The composer's Import opens this folder first. Nothing in here is read
 				automatically and nothing is ever written to or deleted from it -- importing

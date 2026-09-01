@@ -309,7 +309,7 @@ public final class FastNoteblocksConfig {
 	public static final int MIN_CHORD_THIN_TARGET = ChordThinner.MIN_TARGET;
 	public static final int MAX_CHORD_THIN_TARGET = ChordThinner.MAX_TARGET;
 	private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
-	private static final Path CONFIG_PATH = FabricLoader.getInstance().getConfigDir().resolve("fast-noteblocks.json");
+	private static final Path CONFIG_PATH = FabricLoader.getInstance().getConfigDir().resolve("midicraft.json");
 	private static SongLibrary songs = SongLibrary.load();
 	private static FastNoteblocksConfig instance = defaults();
 

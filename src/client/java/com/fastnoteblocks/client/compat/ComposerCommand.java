@@ -91,7 +91,7 @@ public final class ComposerCommand {
 		ticksUntilNotice = -1;
 		FastNoteblocksConfig.get().setSeenWelcome(true);
 		FastNoteblocksConfig.save();
-		minecraft.player.sendSystemMessage(Component.literal("Fast Noteblocks: ")
+		minecraft.player.sendSystemMessage(Component.literal("Midicraft: ")
 			.withStyle(ChatFormatting.GRAY)
 			.append(Component.literal("open composer and settings with "))
 			.append(Component.literal("/fastnoteblocks")

@@ -893,7 +893,7 @@ public final class ComposerScreen extends Screen {
 	}
 
 	public ComposerScreen(Screen parent, FastNoteblocksConfig config, Runnable onReturn) {
-		super(Component.literal("Fast Noteblocks Composer"));
+		super(Component.literal("Midicraft Composer"));
 		this.parent = parent;
 		this.config = config;
 		this.onReturn = onReturn == null ? () -> {

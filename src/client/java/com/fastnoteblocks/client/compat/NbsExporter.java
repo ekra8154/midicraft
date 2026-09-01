@@ -142,7 +142,7 @@ final class NbsExporter {
 
 		NbsSong.Header header = new NbsSong.Header(5, NbsWriter.VANILLA_INSTRUMENT_COUNT,
 			(int)endTick, layers.size(), project.name(), "", "",
-			"Exported from Fast Noteblocks", tempoHundredths, false, 0, 0);
+			"Exported from Midicraft", tempoHundredths, false, 0, 0);
 		NbsWriter.write(path, new NbsSong(header, List.copyOf(notes), List.copyOf(layers), List.of()));
 
 		StringBuilder report = new StringBuilder()

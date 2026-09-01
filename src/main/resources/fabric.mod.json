@@ -2,11 +2,12 @@
   "schemaVersion": 1,
   "id": "fast-noteblocks",
   "version": "${version}",
-  "name": "Fast Noteblocks",
+  "name": "Midicraft",
   "description": "Client-side note block pitch controls rendered in the world.",
   "authors": ["ekra8154"],
   "contact": {},
   "license": "MIT",
+  "icon": "assets/fast-noteblocks/icon.png",
   "environment": "client",
   "entrypoints": {
     "client": [
@@ -22,7 +23,7 @@
   "accessWidener": "fast-noteblocks.accesswidener",
   "depends": {
     "fabricloader": ">=0.19.3",
-    "minecraft": "26.2",
+    "minecraft": "${minecraft_version_predicate}",
     "java": ">=25",
     "fabric-api": "*"
   },

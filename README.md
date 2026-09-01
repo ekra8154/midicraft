@@ -1,4 +1,4 @@
-# Fast Noteblocks
+# Midicraft
 
 A fully client-side Fabric mod for Minecraft Java Edition 26.2 that displays
 interactive pitch and delay controls above nearby note blocks and repeaters.

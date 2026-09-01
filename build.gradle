@@ -3,11 +3,50 @@ plugins {
 	id 'maven-publish'
 }
 
+// The support range is a label as much as a version predicate, and it shows up in a filename, so
+// normalise how it reads: an x-range is written lowercase ("26.2.X" -> "26.2.x"), and each side of
+// an "A-B" range is trimmed independently.
+def toLowercaseXRange = { String part ->
+	return part.toLowerCase().endsWith('.x') ? part.substring(0, part.length() - 1) + 'x' : part
+}
+
+def formatMinecraftSupportLabel = { String supportRange ->
+	def normalizedRange = supportRange.trim()
+	if (normalizedRange.contains('-')) {
+		return normalizedRange.split('-', 2).collect { toLowercaseXRange(it.trim()) }.join('-')
+	}
+	return toLowercaseXRange(normalizedRange)
+}
+
+// Normalised once, here, and read everywhere below. The label and the predicate derived from it
+// therefore cannot end up spelling the same range two ways, which is half of what this property is
+// for.
+def minecraftSupportRange = formatMinecraftSupportLabel(project.minecraft_support_range)
+
+// midicraft-fabric-26.2.x-v0.1.0.jar -- loader, then the versions it serves, then the mod's
+// own version. Which build you are holding is unambiguous.
+def buildArchiveName = "${project.archives_base_name}-fabric-${minecraftSupportRange}"
+
+// The same property has to satisfy two grammars: a filename label, and a Fabric version predicate.
+// "1.21.9-1.21.10" reads fine in a filename but is NOT a valid predicate -- Fabric wants
+// ">=1.21.9 <=1.21.10" -- so derive it rather than hand-maintaining a second copy. Two copies is how
+// a jar ends up declaring a range it was not built for, which is the whole thing this property
+// exists to prevent. Exact versions ("26.2") and x-ranges ("26.2.x") are already valid predicates
+// and pass through untouched.
+def toVersionPredicate = { String supportRange ->
+	def normalizedRange = supportRange.trim()
+	if (normalizedRange.contains('-')) {
+		def bounds = normalizedRange.split('-', 2)
+		return ">=${bounds[0].trim()} <=${bounds[1].trim()}"
+	}
+	return normalizedRange
+}
+
 version = project.mod_version
 group = project.maven_group
 
 base {
-	archivesName = project.archives_base_name
+	archivesName = buildArchiveName
 }
 
 loom {
@@ -48,8 +87,12 @@ dependencies {
 
 processResources {
 	inputs.property "version", project.version
+	inputs.property "minecraft_version_predicate", toVersionPredicate(minecraftSupportRange)
 	filesMatching("fabric.mod.json") {
-		expand "version": inputs.properties.version
+		expand(
+			"version": inputs.properties.version,
+			"minecraft_version_predicate": inputs.properties.minecraft_version_predicate
+		)
 	}
 }
 
@@ -62,6 +105,21 @@ java {
 	toolchain {
 		languageVersion = JavaLanguageVersion.of(25)
 	}
+}
+
+jar {
+	archiveVersion = "v${project.version}"
+}
+
+tasks.named("sourcesJar") {
+	archiveVersion = "v${project.version}"
+}
+
+// The remapped jars are what actually ship, and they would otherwise re-derive the version and drop
+// the v-prefix set above. Matched by name rather than referenced directly so the script still
+// evaluates if loom stops registering them.
+tasks.matching { it.name in ["remapJar", "remapSourcesJar"] }.configureEach {
+	archiveVersion = "v${project.version}"
 }
 
 // Console only. The config Loom gives the game rolls latest.log on a new day or on startup and on
