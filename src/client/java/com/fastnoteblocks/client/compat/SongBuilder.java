@@ -30966,14 +30966,23 @@ public final class SongBuilder {
 			if (!DEBUG_PASTE && !MARK_SHAPES) {
 				return block;
 			}
-			// Silent, and lit so it is findable down a corridor. Nothing downstream loses anything by
-			// it: a note hangs off the side of the wire and never carries it, so a note block swapped
-			// for something that conducts nothing still leaves every note after it sounding.
+			// Silent, and lit so it is findable down a corridor.
+			//
+			// Never where the walk is relying on that note block to carry the signal. The old
+			// reasoning here was that "a note hangs off the side of the wire and never carries it",
+			// which is true of every layout that had been written when it was written and false of
+			// the half-tick family: those run repeater, note block, repeater, note block straight
+			// along the corridor, and the note blocks are the relay. A copper bulb conducts
+			// nothing, so marking one cut the lane -- moonlight at 48x1 reported nine notes the
+			// signal never reached, all nine of them downstream of the mark and none of them in
+			// the build that ships. A checker whose marking invents the fault it is looking for is
+			// worse than no checker; the coordinates still go to chat either way.
 			//
 			// Note blocks only. A sound effect is two cells that belong together -- a door has a top
 			// half, a piston has something to push -- and replacing the lower one leaves the other
 			// half of it standing on nothing.
-			if (block.startsWith("minecraft:note_block") && wrongNotesAt.contains(at)) {
+			if (block.startsWith("minecraft:note_block") && wrongNotesAt.contains(at)
+					&& !powered.containsKey(at)) {
 				return "minecraft:waxed_copper_bulb[lit=true]";
 			}
 			// The air a note block insists on, which a head may stand in without silencing it. Only
