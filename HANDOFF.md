@@ -167,7 +167,7 @@ hundred megabytes of heap each and had to be killed.
 
 ## Running any of this in a fresh worktree
 
-The probes read `run/config/fast-noteblocks/songs`, which is gitignored and lives in the main
+The probes read `run/config/midicraft/songs`, which is gitignored and lives in the main
 checkout. A worktree has no `run` at all, and every probe dies on `NoSuchFileException` until it does.
 
 **Do NOT junction `run` in.** On 2026-08-19 an automated worktree cleanup recursed through a
@@ -175,5 +175,5 @@ leftover worktree's `run` junction and deleted the real library, worlds and mods
 instead — they are small, and a copy cannot be deleted through:
 
 ```bash
-cmd //c robocopy "D:/Documents/modding/fast-noteblocks/run/config/fast-noteblocks/songs" "run/config/fast-noteblocks/songs" //E
+cmd //c robocopy "D:/Documents/modding/fast-noteblocks/run/config/midicraft/songs" "run/config/midicraft/songs" //E
 ```

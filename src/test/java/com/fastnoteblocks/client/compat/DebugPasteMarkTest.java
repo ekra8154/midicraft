@@ -55,7 +55,7 @@ class DebugPasteMarkTest {
 	private static final SongBuilder.BuildLimits LIMITS = new SongBuilder.BuildLimits(16, 40, 3);
 
 	private static List<SongBuilder.EventNote> song(String file) throws Exception {
-		Path songs = Path.of("run", "config", "fast-noteblocks", "songs");
+		Path songs = Path.of("run", "config", "midicraft", "songs");
 		try (Reader reader = Files.newBufferedReader(BreachView.songFile(file.replace(".json", "")))) {
 			ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
 			ComposerProject song = new ComposerProject(raw.name(), raw.ppq(),

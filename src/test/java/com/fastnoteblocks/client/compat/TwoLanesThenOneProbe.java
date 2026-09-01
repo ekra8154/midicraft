@@ -48,7 +48,7 @@ class TwoLanesThenOneProbe {
 	 * and listened to are one file. {@code -Dprobe.song=} points it elsewhere.</p>
 	 */
 	private static List<SongBuilder.EventNote> twoLanesThenOne() throws Exception {
-		Path file = Path.of("run", "config", "fast-noteblocks", "songs",
+		Path file = Path.of("run", "config", "midicraft", "songs",
 			System.getProperty("probe.song", "ultra-ones-gap2-odd-third") + ".json");
 		List<SongBuilder.EventNote> notes;
 		try (Reader reader = Files.newBufferedReader(file)) {

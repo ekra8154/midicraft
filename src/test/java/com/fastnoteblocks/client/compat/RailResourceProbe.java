@@ -57,7 +57,7 @@ class RailResourceProbe {
 		Bootstrap.bootStrap();
 	}
 
-	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
+	private static final Path SONGS = Path.of("run", "config", "midicraft", "songs");
 
 	private static String text(String key, String fallback) {
 		// "probe.", not "rail.": build.gradle forwards three prefixes to the test JVM and that is

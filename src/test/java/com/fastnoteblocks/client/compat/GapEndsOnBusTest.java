@@ -41,7 +41,7 @@ class GapEndsOnBusTest {
 		SongBuilder.FRONT_ONLY_HEADS = true;
 	}
 
-	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
+	private static final Path SONGS = Path.of("run", "config", "midicraft", "songs");
 
 	private record Score(long breaches, long breachBlocks, long worst, long spanZ, long length,
 			long stackedBuses, long parity) {

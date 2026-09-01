@@ -77,7 +77,7 @@ final class BuildOptionsScreen extends Screen {
 	 * picked up whenever it arrives.</p>
 	 */
 	private static final ExecutorService FORECASTER = Executors.newSingleThreadExecutor(job -> {
-		Thread thread = new Thread(job, "fast-noteblocks-forecast");
+		Thread thread = new Thread(job, "midicraft-forecast");
 		thread.setDaemon(true);
 		return thread;
 	});

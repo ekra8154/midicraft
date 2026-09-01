@@ -46,7 +46,7 @@ class UniversalDescentTest {
 		SongBuilder.UNIVERSAL_FOUR_DESCENT = true;
 	}
 
-	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
+	private static final Path SONGS = Path.of("run", "config", "midicraft", "songs");
 
 	@Test
 	void pricesItAndReadsTheMachinesBack() throws Exception {

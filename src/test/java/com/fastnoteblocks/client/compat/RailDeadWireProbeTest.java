@@ -36,7 +36,7 @@ class RailDeadWireProbeTest {
 		Bootstrap.bootStrap();
 	}
 
-	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
+	private static final Path SONGS = Path.of("run", "config", "midicraft", "songs");
 
 	/** The build under the glass. Whichever one is leaving the most of itself silent today. */
 	private static final String SONG = "all-of-the-lights-kanye-west";

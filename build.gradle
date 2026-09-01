@@ -51,10 +51,10 @@ base {
 
 loom {
 	splitEnvironmentSourceSets()
-	accessWidenerPath = file("src/main/resources/fast-noteblocks.accesswidener")
+	accessWidenerPath = file("src/main/resources/midicraft.accesswidener")
 
 	mods {
-		"fast-noteblocks" {
+		"midicraft" {
 			sourceSet sourceSets.main
 			sourceSet sourceSets.client
 		}
@@ -126,7 +126,7 @@ tasks.matching { it.name in ["remapJar", "remapSourcesJar"] }.configureEach {
 // nothing else, so a day of sweeps that print a line per song per config simply grows it -- it
 // reached eighteen gigabytes that way. Gradle captures test output regardless, so the file appenders
 // were never what anyone read. The working directory stays the project root: every probe here reads
-// run/config/fast-noteblocks/songs by relative path.
+// run/config/midicraft/songs by relative path.
 def consoleOnlyLogging = { Test task ->
 	task.systemProperty 'log4j2.configurationFile', file('gradle/log4j2-test.xml').toURI().toString()
 	task.systemProperty 'log4j.configurationFile', file('gradle/log4j2-test.xml').toURI().toString()

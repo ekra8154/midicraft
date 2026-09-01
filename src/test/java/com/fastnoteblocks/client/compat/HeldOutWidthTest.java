@@ -37,7 +37,7 @@ class HeldOutWidthTest {
 		Bootstrap.bootStrap();
 	}
 
-	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
+	private static final Path SONGS = Path.of("run", "config", "midicraft", "songs");
 
 	/** The same held-out widths without the both-ways choice, to see whether it generalises at all. */
 	@Test

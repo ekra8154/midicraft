@@ -37,7 +37,7 @@ class RealSongDeadWireTest {
 		Bootstrap.bootStrap();
 	}
 
-	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
+	private static final Path SONGS = Path.of("run", "config", "midicraft", "songs");
 
 	private record Hit(String song, int width, int floors, int blocks, int longest, int unreached,
 			String where) {

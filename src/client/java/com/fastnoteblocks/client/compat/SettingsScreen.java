@@ -105,7 +105,7 @@ public final class SettingsScreen extends Screen {
 	private boolean dirty;
 
 	public SettingsScreen(Screen parent) {
-		super(Component.translatable("title.fast-noteblocks.config"));
+		super(Component.translatable("title.midicraft.config"));
 		this.parent = parent;
 	}
 
@@ -132,7 +132,7 @@ public final class SettingsScreen extends Screen {
 		}
 
 		Component title() {
-			return Component.translatable("category.fast-noteblocks." + key);
+			return Component.translatable("category.midicraft." + key);
 		}
 	}
 
@@ -151,7 +151,7 @@ public final class SettingsScreen extends Screen {
 		}
 
 		Component label() {
-			return Component.translatable("option.fast-noteblocks." + key);
+			return Component.translatable("option.midicraft." + key);
 		}
 
 		Component caption(int value) {
@@ -159,7 +159,7 @@ public final class SettingsScreen extends Screen {
 		}
 
 		Tooltip tooltip() {
-			return Tooltip.create(Component.translatable("tooltip.fast-noteblocks." + key));
+			return Tooltip.create(Component.translatable("tooltip.midicraft." + key));
 		}
 
 		/**
@@ -237,16 +237,16 @@ public final class SettingsScreen extends Screen {
 			int y = LIST_TOP + (index - scroll) * ROW_HEIGHT;
 			if (entry.heading() != null) {
 				headings.add(new Heading(
-					Component.translatable("category.fast-noteblocks." + entry.heading()), y));
+					Component.translatable("category.midicraft." + entry.heading()), y));
 			} else if (entry.key() != null) {
 				addKeyRow(entry.key(), y, listWidth);
 			} else if (entry.link() != null) {
 				addRenderableWidget(Button.builder(
-						Component.translatable("option.fast-noteblocks." + entry.link()),
+						Component.translatable("option.midicraft." + entry.link()),
 						pressed -> entry.action().run())
 					.bounds(LIST_LEFT, y, listWidth, CONTROL_HEIGHT)
 					.tooltip(Tooltip.create(
-						Component.translatable("tooltip.fast-noteblocks." + entry.link())))
+						Component.translatable("tooltip.midicraft." + entry.link())))
 					.build());
 			} else {
 				addRow(entry.option(), y, listWidth);
@@ -555,7 +555,7 @@ public final class SettingsScreen extends Screen {
 		return new Option(key, 0, values.length - 1,
 			source -> Math.max(0, offered.indexOf(read.apply(source))),
 			value -> write.accept(values[value]),
-			value -> Component.translatable("option.fast-noteblocks." + key + "."
+			value -> Component.translatable("option.midicraft." + key + "."
 				+ values[value].name().toLowerCase(Locale.ROOT)));
 	}
 

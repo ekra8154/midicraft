@@ -30,7 +30,7 @@ class GuardianBreachReproProbe {
 	}
 
 	private static List<SongBuilder.EventNote> guardian() throws Exception {
-		java.nio.file.Path songs = java.nio.file.Path.of("run", "config", "fast-noteblocks", "songs");
+		java.nio.file.Path songs = java.nio.file.Path.of("run", "config", "midicraft", "songs");
 		try (java.io.Reader reader = java.nio.file.Files.newBufferedReader(
 				BreachView.songFile("deltarune-ch-4-guardian"))) {
 			com.fastnoteblocks.client.composer.ComposerProject raw =
@@ -242,7 +242,7 @@ class GuardianBreachReproProbe {
 		Map<String, Integer> total = new java.util.TreeMap<>();
 		List<java.nio.file.Path> files;
 		try (java.util.stream.Stream<java.nio.file.Path> listing = java.nio.file.Files.list(
-				java.nio.file.Path.of("run", "config", "fast-noteblocks", "songs"))) {
+				java.nio.file.Path.of("run", "config", "midicraft", "songs"))) {
 			files = listing.filter(path -> path.toString().endsWith(".json")).sorted().toList();
 		}
 		for (java.nio.file.Path file : files) {
@@ -299,7 +299,7 @@ class GuardianBreachReproProbe {
 	void pricesTheShedFlankOverTheWholeLibrary() throws Exception {
 		List<java.nio.file.Path> files;
 		try (java.util.stream.Stream<java.nio.file.Path> listing = java.nio.file.Files.list(
-				java.nio.file.Path.of("run", "config", "fast-noteblocks", "songs"))) {
+				java.nio.file.Path.of("run", "config", "midicraft", "songs"))) {
 			files = listing.filter(path -> path.toString().endsWith(".json")).sorted().toList();
 		}
 		Map<String, int[]> perSong = new LinkedHashMap<>();
@@ -382,7 +382,7 @@ class GuardianBreachReproProbe {
 	void findsTheBandWhereTheLibraryIsClean() throws Exception {
 		List<java.nio.file.Path> files;
 		try (java.util.stream.Stream<java.nio.file.Path> listing = java.nio.file.Files.list(
-				java.nio.file.Path.of("run", "config", "fast-noteblocks", "songs"))) {
+				java.nio.file.Path.of("run", "config", "midicraft", "songs"))) {
 			files = listing.filter(path -> path.toString().endsWith(".json")).sorted().toList();
 		}
 		// Bands worth telling apart: everything, then what somebody would actually paste.
@@ -522,7 +522,7 @@ class GuardianBreachReproProbe {
 	void pricesTheRaisedPadThreeWays() throws Exception {
 		List<java.nio.file.Path> files;
 		try (java.util.stream.Stream<java.nio.file.Path> listing = java.nio.file.Files.list(
-				java.nio.file.Path.of("run", "config", "fast-noteblocks", "songs"))) {
+				java.nio.file.Path.of("run", "config", "midicraft", "songs"))) {
 			files = listing.filter(path -> path.toString().endsWith(".json")).sorted().toList();
 		}
 		String[] names = {"off                    ", "build only             ",

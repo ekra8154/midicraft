@@ -39,7 +39,7 @@ final class BreachView {
 	private BreachView() {
 	}
 
-	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
+	private static final Path SONGS = Path.of("run", "config", "midicraft", "songs");
 
 	static List<SongBuilder.EventNote> song(String name) throws Exception {
 		return song(name, SongBuilder.PasteMode.ULTRA_COMPACT_LANE);

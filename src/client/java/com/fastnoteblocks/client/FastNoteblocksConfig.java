@@ -692,7 +692,7 @@ public final class FastNoteblocksConfig {
 			parsePlacementSequence(value);
 			return Optional.empty();
 		} catch (IllegalArgumentException exception) {
-			return Optional.of(Component.translatable("error.fast-noteblocks.sequence"));
+			return Optional.of(Component.translatable("error.midicraft.sequence"));
 		}
 	}
 

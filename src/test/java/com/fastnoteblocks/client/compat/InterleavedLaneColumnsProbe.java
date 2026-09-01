@@ -46,7 +46,7 @@ class InterleavedLaneColumnsProbe {
 		Bootstrap.bootStrap();
 	}
 
-	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
+	private static final Path SONGS = Path.of("run", "config", "midicraft", "songs");
 
 	/**
 	 * The corridor one machine's turns account for, measured the way the whole-build number is.

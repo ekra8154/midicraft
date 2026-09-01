@@ -118,7 +118,7 @@ class HandoverCollisionProbe {
 	}
 
 	private static List<SongBuilder.EventNote> guardian() throws Exception {
-		java.nio.file.Path songs = java.nio.file.Path.of("run", "config", "fast-noteblocks", "songs");
+		java.nio.file.Path songs = java.nio.file.Path.of("run", "config", "midicraft", "songs");
 		try (java.io.Reader reader = java.nio.file.Files.newBufferedReader(
 				BreachView.songFile("deltarune-ch-4-guardian"))) {
 			com.fastnoteblocks.client.composer.ComposerProject raw =

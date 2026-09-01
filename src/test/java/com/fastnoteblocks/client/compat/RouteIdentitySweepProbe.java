@@ -37,7 +37,7 @@ class RouteIdentitySweepProbe {
 		Bootstrap.bootStrap();
 	}
 
-	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
+	private static final Path SONGS = Path.of("run", "config", "midicraft", "songs");
 
 	private static List<int[]> sizes() {
 		String given = System.getProperty("probe.sizes", "40x3,24x3,20x5,16x1,32x2");

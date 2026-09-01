@@ -38,7 +38,7 @@ class CorkscrewShapeProbe {
 		SongBuilder.MARK_SHAPES = true;
 		try {
 			int drawn = 0;
-			java.nio.file.Path songs = java.nio.file.Path.of("run", "config", "fast-noteblocks",
+			java.nio.file.Path songs = java.nio.file.Path.of("run", "config", "midicraft",
 				"songs");
 			List<java.nio.file.Path> files;
 			try (java.util.stream.Stream<java.nio.file.Path> listing =

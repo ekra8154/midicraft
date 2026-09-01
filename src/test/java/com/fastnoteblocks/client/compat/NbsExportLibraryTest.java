@@ -26,7 +26,7 @@ import org.junit.jupiter.api.io.TempDir;
  */
 @Tag("sweep")
 class NbsExportLibraryTest {
-	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
+	private static final Path SONGS = Path.of("run", "config", "midicraft", "songs");
 
 	@Test
 	void everySongInTheLibraryReadsBackAsItself(@TempDir Path folder) throws Exception {

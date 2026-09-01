@@ -27,7 +27,7 @@ class BigShotMapTest {
 
 	@Test
 	void dumps() throws Exception {
-		Path file = Path.of("run", "config", "fast-noteblocks", "songs", "big-shot.json");
+		Path file = Path.of("run", "config", "midicraft", "songs", "big-shot.json");
 		ComposerProject song;
 		try (Reader reader = Files.newBufferedReader(file)) {
 			ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);

@@ -38,7 +38,7 @@ class HalfTickTradeProbe {
 		Bootstrap.bootStrap();
 	}
 
-	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
+	private static final Path SONGS = Path.of("run", "config", "midicraft", "songs");
 
 	private record Built(int span, int seams, int mirrored, int unreached, int notes,
 			int wrong, int missing, int collisions) { }

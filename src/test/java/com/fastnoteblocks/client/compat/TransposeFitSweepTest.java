@@ -32,7 +32,7 @@ import org.junit.jupiter.api.Test;
  */
 @Tag("sweep")
 class TransposeFitSweepTest {
-	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
+	private static final Path SONGS = Path.of("run", "config", "midicraft", "songs");
 	private static final int LOW = ComposerProject.NOTE_BLOCK_BASE_MIDI_NOTE;
 	private static final int HIGH = ComposerProject.NOTE_BLOCK_MAX_MIDI_NOTE;
 	private static final Pattern SHIFT = Pattern.compile("\\((in range|([+-]\\d+) oct)\\)$");

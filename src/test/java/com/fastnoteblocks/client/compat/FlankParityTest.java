@@ -73,7 +73,7 @@ class FlankParityTest {
 		SongBuilder.REPLAN_ON_DRIFT = replanWas;
 	}
 
-	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
+	private static final Path SONGS = Path.of("run", "config", "midicraft", "songs");
 
 	/** One arm's running totals, so the two are added up over exactly the same builds. */
 	private static final class Totals {

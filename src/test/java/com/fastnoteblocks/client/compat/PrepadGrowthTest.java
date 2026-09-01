@@ -32,7 +32,7 @@ class PrepadGrowthTest {
 		Bootstrap.bootStrap();
 	}
 
-	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
+	private static final Path SONGS = Path.of("run", "config", "midicraft", "songs");
 
 	private static final List<String> PICKED = List.of(
 		"deltarune-ch-4-guardian",

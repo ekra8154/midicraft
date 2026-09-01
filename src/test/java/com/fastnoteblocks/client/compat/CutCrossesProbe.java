@@ -52,7 +52,7 @@ class CutCrossesProbe {
 
 	@Test
 	void doesAHeadedCutAlwaysCross() throws Exception {
-		Path songs = Path.of("run", "config", "fast-noteblocks", "songs");
+		Path songs = Path.of("run", "config", "midicraft", "songs");
 		SongBuilder.DEBUG_PASTE = true;
 		int[][] sizes = {{40, 3}, {16, 4}, {12, 3}, {24, 6}};
 		int differing = 0;

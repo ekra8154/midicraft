@@ -66,7 +66,7 @@ class SeamPadProbe {
 		boolean quiet = Boolean.getBoolean("probe.quiet");
 		String name = System.getProperty("probe.song", "ultra-ones-gap2-odd-third-short");
 		int reseed = Integer.getInteger("probe.reseed", 16);
-		Path file = Path.of("run", "config", "fast-noteblocks", "songs", name + ".json");
+		Path file = Path.of("run", "config", "midicraft", "songs", name + ".json");
 		ComposerProject project;
 		try (Reader reader = Files.newBufferedReader(file)) {
 			ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);

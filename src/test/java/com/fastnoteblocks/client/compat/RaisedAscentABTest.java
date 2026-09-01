@@ -34,7 +34,7 @@ class RaisedAscentABTest {
 		Bootstrap.bootStrap();
 	}
 
-	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
+	private static final Path SONGS = Path.of("run", "config", "midicraft", "songs");
 
 	/** Real songs, not the {@code ultra-*} stress files, with Guardian first because it is the case. */
 	private static final List<String> PICKED = List.of(
@@ -120,7 +120,7 @@ class RaisedAscentABTest {
 		return configs;
 	}
 
-	/** The live build limits, read off {@code run/config/fast-noteblocks.json}. */
+	/** The live build limits, read off {@code run/config/midicraft.json}. */
 	private static final List<int[]> REAL = List.of(new int[] {40, 5, 16});
 
 	private static Map<String, Tally> arm(boolean raised, List<int[]> configs) throws Exception {

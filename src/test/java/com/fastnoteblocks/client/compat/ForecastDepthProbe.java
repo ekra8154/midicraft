@@ -24,7 +24,7 @@ class ForecastDepthProbe {
 		Bootstrap.bootStrap();
 	}
 
-	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
+	private static final Path SONGS = Path.of("run", "config", "midicraft", "songs");
 
 	@Test
 	void whatTheDepthLineSays() throws Exception {

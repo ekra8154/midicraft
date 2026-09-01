@@ -33,7 +33,7 @@ class StackedReachTest {
 		Bootstrap.bootStrap();
 	}
 
-	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
+	private static final Path SONGS = Path.of("run", "config", "midicraft", "songs");
 
 	/** Every counter that ends with a chord not being built in the shape it asked for. */
 	private static final List<String> REFUSALS = List.of(

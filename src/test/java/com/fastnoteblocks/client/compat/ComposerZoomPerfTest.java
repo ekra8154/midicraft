@@ -216,12 +216,12 @@ class ComposerZoomPerfTest {
 
 	/** A worktree has no {@code run} of its own, so fall back to the checkout the client uses. */
 	private static Path songsDirectory() {
-		Path local = Path.of("run", "config", "fast-noteblocks", "songs");
+		Path local = Path.of("run", "config", "midicraft", "songs");
 		if (Files.isDirectory(local)) {
 			return local;
 		}
 		return Path.of("D:", "Documents", "modding", "fast-noteblocks",
-			"run", "config", "fast-noteblocks", "songs");
+			"run", "config", "midicraft", "songs");
 	}
 
 	private static ComposerProject load(String name) throws Exception {

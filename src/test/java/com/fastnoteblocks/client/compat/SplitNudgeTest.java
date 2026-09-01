@@ -43,7 +43,7 @@ class SplitNudgeTest {
 		SongBuilder.SPLIT_NUDGES = true;
 	}
 
-	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
+	private static final Path SONGS = Path.of("run", "config", "midicraft", "songs");
 
 	@Test
 	void pricesTheNudgeAndReadsEveryBuildBack() throws Exception {

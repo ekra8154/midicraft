@@ -26,7 +26,7 @@ class ParityDivergenceProbe {
 	@Test
 	void overTheWholeLibrary() throws Exception {
 		List<Path> files;
-		try (Stream<Path> listing = Files.list(Path.of("run", "config", "fast-noteblocks", "songs"))) {
+		try (Stream<Path> listing = Files.list(Path.of("run", "config", "midicraft", "songs"))) {
 			files = listing.filter(p -> p.toString().endsWith(".json")).sorted().toList();
 		}
 		long notes = 0;

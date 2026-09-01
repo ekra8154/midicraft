@@ -25,7 +25,7 @@ class TopFirstTurnTest {
 
 	@Test
 	void showsTheFirstTurn() throws Exception {
-		Path file = Path.of("run", "config", "fast-noteblocks", "songs",
+		Path file = Path.of("run", "config", "midicraft", "songs",
 			"deltarune-ch-4-guardian.json");
 		ComposerProject song;
 		try (Reader reader = Files.newBufferedReader(file)) {

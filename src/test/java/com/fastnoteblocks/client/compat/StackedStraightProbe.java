@@ -30,7 +30,7 @@ class StackedStraightProbe {
 
 	@Test
 	void pricesTheStackedShapes() throws Exception {
-		java.nio.file.Path songs = java.nio.file.Path.of("run", "config", "fast-noteblocks", "songs");
+		java.nio.file.Path songs = java.nio.file.Path.of("run", "config", "midicraft", "songs");
 		List<java.nio.file.Path> files = new ArrayList<>();
 		try (var listing = java.nio.file.Files.list(songs)) {
 			listing.filter(file -> file.toString().endsWith(".json")).sorted().forEach(files::add);

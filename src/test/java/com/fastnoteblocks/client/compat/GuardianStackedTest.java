@@ -45,7 +45,7 @@ class GuardianStackedTest {
 		SongBuilder.PREPADS_FOR_THE_OFF_BUS_DISCOUNT = false;
 	}
 
-	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
+	private static final Path SONGS = Path.of("run", "config", "midicraft", "songs");
 
 	/**
 	 * Both changes, each way round, because they turned out to interact.

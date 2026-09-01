@@ -59,7 +59,7 @@ class ParityOrderProbe {
 	}
 
 	private void read() throws Exception {
-		Path songs = Path.of("run", "config", "fast-noteblocks", "songs");
+		Path songs = Path.of("run", "config", "midicraft", "songs");
 		List<SongBuilder.EventNote> notes;
 		try (Reader reader = Files.newBufferedReader(
 				BreachView.songFile(text("song", "golden-brown-2xspeed")))) {

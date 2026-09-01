@@ -30,7 +30,7 @@ class BreachPickTest {
 		Bootstrap.bootStrap();
 	}
 
-	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
+	private static final Path SONGS = Path.of("run", "config", "midicraft", "songs");
 
 	private record Case(String song, int width, int floors, int worst, int lanes, String fault)
 			implements Comparable<Case> {

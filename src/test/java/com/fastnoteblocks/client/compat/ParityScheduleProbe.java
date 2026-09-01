@@ -37,7 +37,7 @@ class ParityScheduleProbe {
 		Bootstrap.bootStrap();
 	}
 
-	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
+	private static final Path SONGS = Path.of("run", "config", "midicraft", "songs");
 
 	/** The census's synthetic mixed-parity stress: solo songs replayed at double speed. */
 	private static Set<String> doubled() {

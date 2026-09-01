@@ -96,7 +96,7 @@ class RaisedPadReadBackTest {
 	 */
 	@Test
 	void readsBackGuardianWithTheBudgetBothWays() throws Exception {
-		java.nio.file.Path songs = java.nio.file.Path.of("run", "config", "fast-noteblocks", "songs");
+		java.nio.file.Path songs = java.nio.file.Path.of("run", "config", "midicraft", "songs");
 		List<SongBuilder.EventNote> notes;
 		try (java.io.Reader reader = java.nio.file.Files.newBufferedReader(
 				BreachView.songFile("deltarune-ch-4-guardian"))) {

@@ -42,7 +42,7 @@ class ShortHeadCutDiagramTest {
 		SongBuilder.SHORT_HEAD_CUT_AT = null;
 	}
 
-	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
+	private static final Path SONGS = Path.of("run", "config", "midicraft", "songs");
 
 	private static List<SongBuilder.EventNote> load(String name) throws Exception {
 		try (Reader reader = Files.newBufferedReader(BreachView.songFile(name))) {

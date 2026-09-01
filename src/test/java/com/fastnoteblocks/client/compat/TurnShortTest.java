@@ -39,7 +39,7 @@ class TurnShortTest {
 		SongBuilder.TRACE_TURNS = false;
 	}
 
-	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
+	private static final Path SONGS = Path.of("run", "config", "midicraft", "songs");
 
 	private static List<SongBuilder.EventNote> load(String name) throws Exception {
 		try (Reader reader = Files.newBufferedReader(BreachView.songFile(name))) {

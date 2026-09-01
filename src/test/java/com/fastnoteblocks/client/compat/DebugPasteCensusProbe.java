@@ -44,7 +44,7 @@ class DebugPasteCensusProbe {
 	}
 
 	private static List<SongBuilder.EventNote> song(String file) throws Exception {
-		Path songs = Path.of("run", "config", "fast-noteblocks", "songs");
+		Path songs = Path.of("run", "config", "midicraft", "songs");
 		try (Reader reader = Files.newBufferedReader(BreachView.songFile(file.replace(".json", "")))) {
 			ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
 			ComposerProject project = new ComposerProject(raw.name(), raw.ppq(),
@@ -82,7 +82,7 @@ class DebugPasteCensusProbe {
 	@Test
 	void whereTheRareMarksLive() throws Exception {
 		SongBuilder.DEBUG_PASTE = true;
-		Path songs = Path.of("run", "config", "fast-noteblocks", "songs");
+		Path songs = Path.of("run", "config", "midicraft", "songs");
 		int found = 0;
 		try (var listing = Files.list(songs)) {
 			for (Path file : listing.filter(path -> path.toString().endsWith(".json")).sorted()

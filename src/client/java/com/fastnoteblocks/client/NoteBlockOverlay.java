@@ -101,7 +101,7 @@ public final class NoteBlockOverlay {
 	private static List<FastNoteblocksConfig.SequenceTrack> flattenedFrom;
 	private static List<NoteSequence.Placement> flattened = List.of();
 	private static final KeyMapping.Category CATEGORY = KeyMapping.Category.register(
-		Identifier.fromNamespaceAndPath("fast-noteblocks", "controls")
+		Identifier.fromNamespaceAndPath("midicraft", "controls")
 	);
 	public static final NoteBlockOverlay INSTANCE = new NoteBlockOverlay();
 
@@ -113,15 +113,15 @@ public final class NoteBlockOverlay {
 	// Unbound. Taking a letter key from someone who plays with a lot of mods is a rude default,
 	// and the setting it toggles is reachable in the settings screen either way.
 	private final KeyMapping toggleKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
-		"key.fast-noteblocks.toggle", InputConstants.Type.KEYSYM, -1, CATEGORY
+		"key.midicraft.toggle", InputConstants.Type.KEYSYM, -1, CATEGORY
 	));
 	private final KeyMapping placementSequenceKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
-		"key.fast-noteblocks.toggle_placement_sequence", InputConstants.Type.KEYSYM, -1, CATEGORY
+		"key.midicraft.toggle_placement_sequence", InputConstants.Type.KEYSYM, -1, CATEGORY
 	));
 	// Unbound, like the other two. /fastnoteblocks is the way in that costs nobody a key, and
 	// Brigadier listing it as you type is better discovery than a letter you have to be told.
 	private final KeyMapping composerKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
-		"key.fast-noteblocks.open_composer", InputConstants.Type.KEYSYM, -1, CATEGORY
+		"key.midicraft.open_composer", InputConstants.Type.KEYSYM, -1, CATEGORY
 	));
 
 	/**
@@ -206,7 +206,7 @@ public final class NoteBlockOverlay {
 		LevelRenderEvents.COLLECT_SUBMITS.register(this::render);
 		HudElementRegistry.attachElementBefore(
 			VanillaHudElements.OVERLAY_MESSAGE,
-			Identifier.fromNamespaceAndPath("fast-noteblocks", "sequence_window"),
+			Identifier.fromNamespaceAndPath("midicraft", "sequence_window"),
 			this::renderSequenceHud
 		);
 		UseBlockCallback.EVENT.register(this::watchForSequencePlacement);
@@ -334,7 +334,7 @@ public final class NoteBlockOverlay {
 			if (minecraft.player != null) {
 				minecraft.gui.hud.setOverlayMessage(Component.translatable(
 					config.interactiveOverlays()
-						? "message.fast-noteblocks.enabled" : "message.fast-noteblocks.disabled"
+						? "message.midicraft.enabled" : "message.midicraft.disabled"
 				), true);
 			}
 		}
@@ -466,11 +466,11 @@ public final class NoteBlockOverlay {
 				cancelPlacementSequenceWork();
 			}
 			if (config.placementSequenceEnabled()) {
-				showSequenceHud(minecraft, "message.fast-noteblocks.sequence_resumed");
+				showSequenceHud(minecraft, "message.midicraft.sequence_resumed");
 			} else if (minecraft.player != null) {
 				sequenceHudTicks = 0;
 				minecraft.gui.hud.setOverlayMessage(Component.translatable(
-					"message.fast-noteblocks.sequence_paused"
+					"message.midicraft.sequence_paused"
 				), true);
 			}
 		} else if (releasedNow && !sequenceGestureConsumed) {
@@ -626,7 +626,7 @@ public final class NoteBlockOverlay {
 		if (sequence.isEmpty()) {
 			drawSequenceHudHeader(graphics, centerX, y);
 			graphics.centeredText(minecraft.font, Component.translatable(
-				"message.fast-noteblocks.sequence_hud_empty"
+				"message.midicraft.sequence_hud_empty"
 			), centerX, y, 0xFFFF5555);
 			return;
 		}

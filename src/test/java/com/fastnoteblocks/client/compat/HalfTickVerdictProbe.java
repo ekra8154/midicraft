@@ -25,7 +25,7 @@ import org.junit.jupiter.api.Test;
  */
 @Tag("sweep")
 class HalfTickVerdictProbe {
-	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
+	private static final Path SONGS = Path.of("run", "config", "midicraft", "songs");
 
 	private static ComposerProject load(Path file) throws Exception {
 		try (Reader reader = Files.newBufferedReader(file)) {

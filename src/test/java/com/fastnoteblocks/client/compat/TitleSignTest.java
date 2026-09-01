@@ -134,7 +134,7 @@ class TitleSignTest {
 	 */
 	@Test
 	void theSignGoesUpWithTheStartOfTheSong() throws Exception {
-		Path songs = Path.of("run", "config", "fast-noteblocks", "songs");
+		Path songs = Path.of("run", "config", "midicraft", "songs");
 		List<String> late = new ArrayList<>();
 		for (String file : List.of("illit-do-the-dance.json", "deltarune-ch-4-guardian.json",
 				"all-of-the-lights-kanye-west.json", "big-shot.json")) {
@@ -174,7 +174,7 @@ class TitleSignTest {
 	 */
 	@Test
 	void theSignNeverStandsWhereTheBuildDoes() throws Exception {
-		Path songs = Path.of("run", "config", "fast-noteblocks", "songs");
+		Path songs = Path.of("run", "config", "midicraft", "songs");
 		List<String> clashes = new ArrayList<>();
 		int checked = 0;
 		try (var listing = Files.list(songs)) {
@@ -244,7 +244,7 @@ class TitleSignTest {
 	 */
 	@Test
 	void everySongGetsItsSign() throws Exception {
-		Path songs = Path.of("run", "config", "fast-noteblocks", "songs");
+		Path songs = Path.of("run", "config", "midicraft", "songs");
 		List<String> missing = new ArrayList<>();
 		int built = 0;
 		try (var listing = Files.list(songs)) {

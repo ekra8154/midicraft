@@ -45,7 +45,7 @@ class OrphanRepeaterProbe {
 		Bootstrap.bootStrap();
 	}
 
-	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
+	private static final Path SONGS = Path.of("run", "config", "midicraft", "songs");
 
 	private static String text(String key, String fallback) {
 		String given = System.getProperty("census." + key);

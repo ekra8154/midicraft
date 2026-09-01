@@ -33,7 +33,7 @@ class LaneEntryWireProbeTest {
 
 	@Test
 	void dumpsTheBlocksAroundTheBreachingLane() throws Exception {
-		Path file = Path.of("run", "config", "fast-noteblocks", "songs",
+		Path file = Path.of("run", "config", "midicraft", "songs",
 			"illit-do-the-dance.json");
 		ComposerProject song;
 		try (Reader reader = Files.newBufferedReader(file)) {

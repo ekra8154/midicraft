@@ -37,7 +37,7 @@ class CrossCountingTest {
 	void counts() throws Exception {
 		List<Path> files;
 		try (Stream<Path> listing = Files.list(
-				Path.of("run", "config", "fast-noteblocks", "songs"))) {
+				Path.of("run", "config", "midicraft", "songs"))) {
 			files = listing.filter(path -> path.toString().endsWith(".json")).sorted().toList();
 		}
 		Gson gson = new Gson();

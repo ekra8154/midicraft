@@ -45,7 +45,7 @@ class WriteRailBaitSongTest {
 		Bootstrap.bootStrap();
 	}
 
-	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
+	private static final Path SONGS = Path.of("run", "config", "midicraft", "songs");
 
 	/** Composer ticks per redstone tick at ppq 480, tempo 500000 and speed 4. Measured, not derived. */
 	private static final long TICK = 96L;

@@ -32,7 +32,7 @@ class StackedBusCostTest {
 		SongBuilder.STACKED_BUS_HEADS = true;
 	}
 
-	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
+	private static final Path SONGS = Path.of("run", "config", "midicraft", "songs");
 
 	private static ComposerProject load(Path file) throws Exception {
 		try (Reader reader = Files.newBufferedReader(file)) {

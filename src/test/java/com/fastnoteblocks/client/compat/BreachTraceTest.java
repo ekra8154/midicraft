@@ -22,7 +22,7 @@ class BreachTraceTest {
 	}
 
 	private static void trace(String name, int floors, int width) throws Exception {
-		Path file = Path.of("run", "config", "fast-noteblocks", "songs", name + ".json");
+		Path file = Path.of("run", "config", "midicraft", "songs", name + ".json");
 		ComposerProject song;
 		try (Reader reader = Files.newBufferedReader(file)) {
 			ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
@@ -59,7 +59,7 @@ class BreachTraceTest {
 		List<String> breaches = new java.util.ArrayList<>();
 		List<Path> files;
 		try (java.util.stream.Stream<Path> listing =
-				Files.list(Path.of("run", "config", "fast-noteblocks", "songs"))) {
+				Files.list(Path.of("run", "config", "midicraft", "songs"))) {
 			files = listing.filter(path -> path.toString().endsWith(".json")).sorted().toList();
 		}
 		for (Path file : files) {

@@ -37,7 +37,7 @@ class InterleavedCensusProbe {
 		Bootstrap.bootStrap();
 	}
 
-	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
+	private static final Path SONGS = Path.of("run", "config", "midicraft", "songs");
 
 	/**
 	 * Solo songs the census also builds at double speed, as a synthetic two-lane copy.

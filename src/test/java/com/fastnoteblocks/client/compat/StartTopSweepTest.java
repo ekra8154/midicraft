@@ -31,7 +31,7 @@ class StartTopSweepTest {
 		Bootstrap.bootStrap();
 	}
 
-	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
+	private static final Path SONGS = Path.of("run", "config", "midicraft", "songs");
 
 	private record Tally(int breaches, int breachBlocks, int worst, int wrong, int dropped,
 			int refused, long volume, long length) {

@@ -27,7 +27,7 @@ import org.junit.jupiter.api.Test;
  */
 @Tag("sweep")
 class TransposeWeightSweepTest {
-	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
+	private static final Path SONGS = Path.of("run", "config", "midicraft", "songs");
 	private static final Pattern SHIFT = Pattern.compile("\\((in range|([+-]\\d+) oct)\\)$");
 
 	@Test

@@ -47,7 +47,7 @@ class HeadOnlyNearHalfTest {
 		SongBuilder.HEAD_ONLY_NEAR_HALF = true;
 	}
 
-	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
+	private static final Path SONGS = Path.of("run", "config", "midicraft", "songs");
 
 	/** A run of chords too big to fit, on a corridor narrow enough that the near half is just a head. */
 	private static List<SongBuilder.EventNote> bigChords(int size, int count) {

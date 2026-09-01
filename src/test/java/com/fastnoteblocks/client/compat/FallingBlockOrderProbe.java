@@ -49,7 +49,7 @@ class FallingBlockOrderProbe {
 		Bootstrap.bootStrap();
 	}
 
-	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
+	private static final Path SONGS = Path.of("run", "config", "midicraft", "songs");
 
 	/** Commands a tick at the default rate, which sets how many commands two ticks is worth. */
 	private static final int DEFAULT_RATE = 32;

@@ -33,7 +33,7 @@ class ExtraCellsProbe {
 			String name = System.getProperty("probe.song", "guardian25");
 			int width = Integer.parseInt(System.getProperty("probe.width", "20"));
 			int floors = Integer.parseInt(System.getProperty("probe.floors", "5"));
-			java.nio.file.Path file = java.nio.file.Path.of("run", "config", "fast-noteblocks",
+			java.nio.file.Path file = java.nio.file.Path.of("run", "config", "midicraft",
 				"songs", name + ".json");
 			ComposerProject raw;
 			try (java.io.Reader reader = java.nio.file.Files.newBufferedReader(file)) {

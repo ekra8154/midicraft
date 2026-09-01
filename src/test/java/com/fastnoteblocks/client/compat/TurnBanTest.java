@@ -52,7 +52,7 @@ class TurnBanTest {
 		return mode == 1 ? "cutsWithoutShortHead" : "cutsWithShortHead" + mode;
 	}
 
-	private static final Path SONGS = Path.of("run", "config", "fast-noteblocks", "songs");
+	private static final Path SONGS = Path.of("run", "config", "midicraft", "songs");
 
 	@Test
 	void pricesTheRuleAndReadsTheMachinesBack() throws Exception {
