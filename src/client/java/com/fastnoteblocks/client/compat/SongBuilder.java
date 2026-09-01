@@ -9777,6 +9777,20 @@ public final class SongBuilder {
 				columnBehindBusy = true;
 				booked = Map.of();
 				replan = layout.ultra();
+				// And the module behind the lane is the seam now, not whatever chord was there
+				// before it. The turn asks endsOnBus(lastStyle, lastBusCells) to decide how long a
+				// staircase to build: off a bus the ladder skips its step-off cell and its first
+				// rung, because a bus already stands a level up with dust on top and reaches the
+				// second rung on its own. A seam leaves nothing of the kind -- what it hands the
+				// turn is a repeater at path level, whose output is the cell a full ladder starts
+				// in. Left saying "bus", the climb came out three rungs where five were needed and
+				// the repeater faced into air: sunset-of-seven-suns at 20x5, ten notes, read off
+				// the paste in game.
+				//
+				// The same two lines the fold sets for the same reason, and the fold is the only
+				// other thing here that walks the lane somewhere the chord machinery did not.
+				lastStyle = ChordStyle.SMALL;
+				lastBusCells = 0;
 				// Everything past the piston is on the other half of the tick, and on a marked
 				// paste the ground says so from here on.
 				placements.flipLaneTint();
