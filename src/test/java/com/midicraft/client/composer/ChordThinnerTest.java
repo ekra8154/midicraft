@@ -269,7 +269,7 @@ class ChordThinnerTest {
 		if (java.nio.file.Files.isDirectory(local)) {
 			return local;
 		}
-		return java.nio.file.Path.of("D:", "Documents", "modding", "fast-noteblocks",
+		return java.nio.file.Path.of("D:", "Documents", "modding", "midicraft", "midicraft",
 			"run", "config", "midicraft", "songs");
 	}
 

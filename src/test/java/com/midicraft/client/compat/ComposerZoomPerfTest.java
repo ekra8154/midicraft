@@ -220,7 +220,7 @@ class ComposerZoomPerfTest {
 		if (Files.isDirectory(local)) {
 			return local;
 		}
-		return Path.of("D:", "Documents", "modding", "fast-noteblocks",
+		return Path.of("D:", "Documents", "modding", "midicraft", "midicraft",
 			"run", "config", "midicraft", "songs");
 	}
 

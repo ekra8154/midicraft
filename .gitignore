@@ -8,3 +8,7 @@ run/
 # Client and test logs. The test runtime pipes every System.out line from the probe
 # tests through log4j into here, which is how latest.log reached eighteen gigabytes.
 logs/
+
+# Handoff notes are written for whoever is at this machine, and carry
+# absolute paths from it. Local scratch, not repo content.
+HANDOFF.md
