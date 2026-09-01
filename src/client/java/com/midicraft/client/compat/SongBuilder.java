@@ -1877,8 +1877,14 @@ public final class SongBuilder {
 				// on the same tick, so the machines could never be started in the step the plan
 				// worked out for them. See {@link #addTwoLaneInput}.
 				if (INTERLEAVED_SHARED_INPUT) {
-					addTwoLaneInput(placements, forward, inputA,
-						placements.firstRepeaterAfter(laidByA),
+					// Aimed at the cell each opening repeater reads, not at the repeater. See
+					// {@link #feedTarget}: a machine that turns before it lays a module stands its
+					// first repeater on the far side of the bend, reading across the rows, and a
+					// feed laid to the repeater's own row delivers to its side.
+					addTwoLaneInput(placements, forward,
+						feedTarget(placements, forward, inputA),
+						feedTarget(placements, forward,
+							placements.firstRepeaterAfter(laidByA)),
 						Math.floorMod(gtA.get(0).time(), 2) == 1,
 						Math.floorMod(gtB.get(0).time(), 2) == 1);
 				} else {
@@ -2130,6 +2136,52 @@ public final class SongBuilder {
 	 * the nested route shortens its start-floor wall for the partner's long link. So the spine
 	 * reaches each machine along its own row, and the nearer one's run is empty.</p>
 	 */
+	/**
+	 * The cell a machine's opening repeater reads, which is where its feed has to end.
+	 *
+	 * <p>{@link #addTwoLaneInput} lays the spine and the run along {@code forward}, so it has
+	 * always assumed a head takes its input from one column back that way. Every build that works
+	 * does: the head is the first module of the opening leg and it reads back down the lane.</p>
+	 *
+	 * <p>A machine whose opening column lands past its own shortened tip has no room for that
+	 * module. It turns first, and the module it then lays stands on the far side of the bend
+	 * reading <em>across</em> the rows -- so a feed laid to the repeater's own row runs one row too
+	 * far and delivers its block of redstone to the repeater's side, which is nothing to a
+	 * repeater. That is every dead line the nested layout has produced: three songs, four to
+	 * eleven wide, one floor, where {@code oppositeFloor == startFloor} makes the tip shortening
+	 * of three apply to every leg instead of one floor's worth.</p>
+	 *
+	 * <p>Feeding the cell it reads fixes both shapes with one rule, because a block of redstone
+	 * powers dust beside it to fifteen: the run ends one column short of the corner, the corner
+	 * lights, and the module reads the corner exactly as the lane meant it to. Asked of the
+	 * repeater's own facing rather than of the route -- the route says where the lane goes, and
+	 * this asks what one block reads.</p>
+	 *
+	 * <p>Where the head does read back along {@code forward} this hands back the head itself, so
+	 * every feed that works today is laid cell for cell as it was.</p>
+	 */
+	private static BlockPos feedTarget(PlacementPlan placements, Direction forward, BlockPos head) {
+		if (head == null) {
+			return null;
+		}
+		String block = placements.blockAt(head);
+		if (block == null || !block.startsWith("minecraft:repeater")) {
+			return head;
+		}
+		for (Direction reads : Direction.Plane.HORIZONTAL) {
+			if (!block.contains("facing=" + directionName(reads))) {
+				continue;
+			}
+			// The ordinary head: the feed already ends in the cell it reads.
+			if (reads == forward.getOpposite()) {
+				return head;
+			}
+			placements.padded("twoLaneInputPastACorner");
+			return head.relative(reads);
+		}
+		return head;
+	}
+
 	private static void addTwoLaneInput(PlacementPlan placements, Direction forward,
 			BlockPos headA, BlockPos headB, boolean oddA, boolean oddB) {
 		if (headA == null || headB == null) {
