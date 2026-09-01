@@ -22,7 +22,7 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * The same picture {@code /fastnoteblocks asciidiagram} draws, of a cut that opens with a head of five.
+ * The same picture {@code /midicraft asciidiagram} draws, of a cut that opens with a head of five.
  *
  * <p>{@code FRONT_ONLY_CUTS} costs 3,353 note blocks the signal never reaches, and the flag is off
  * on main until that is understood. This renders the blocks either side of the change at the same

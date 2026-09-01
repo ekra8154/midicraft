@@ -33,17 +33,17 @@ import net.minecraft.world.phys.Vec3;
  * one variable, because corridor width and floor count are sized from the whole song.</p>
  *
  * <pre>
- *   /fastnoteblocks paste 12 1 6 2 18                 three chords, corridor twelve wide, one floor
- *   /fastnoteblocks paste 36 1 30x4                   four chords of thirty
- *   /fastnoteblocks paste dry 24 2 5x8@4 30@1         reported, not placed
- *   /fastnoteblocks paste 36 3 down 12 18 30          the next wall a descent, first chord twelve off
- *   /fastnoteblocks paste 28 5 up 0 25x8              a chord hard against the wall it climbs at
- *   /fastnoteblocks paste 28 5 up on 3 0 25x8         the same, from the third floor up
- *   /fastnoteblocks paste 28 5 up 25x8                a whole lane ending in a climb, every chord
+ *   /midicraft paste 12 1 6 2 18                 three chords, corridor twelve wide, one floor
+ *   /midicraft paste 36 1 30x4                   four chords of thirty
+ *   /midicraft paste dry 24 2 5x8@4 30@1         reported, not placed
+ *   /midicraft paste 36 3 down 12 18 30          the next wall a descent, first chord twelve off
+ *   /midicraft paste 28 5 up 0 25x8              a chord hard against the wall it climbs at
+ *   /midicraft paste 28 5 up on 3 0 25x8         the same, from the third floor up
+ *   /midicraft paste 28 5 up 25x8                a whole lane ending in a climb, every chord
  *                                                   placed where the walk itself wants it
- *   /fastnoteblocks paste 36 1 flat turning 12 30 5@1 5 5
+ *   /midicraft paste 36 1 flat turning 12 30 5@1 5 5
  *                                                   the thirty-chord turnaround, as a single line
- *   /fastnoteblocks paste 40 1 7:7b 7:7h              the stacked seven over gold, then over glass
+ *   /midicraft paste 40 1 7:7b 7:7h              the stacked seven over gold, then over glass
  * </pre>
  *
  * <p>Width and floors first, then the chords, which run to the end of the line. Those two numbers
@@ -78,11 +78,11 @@ import net.minecraft.world.phys.Vec3;
  * <p>And the other half of the same job, reading a build rather than making one:</p>
  *
  * <pre>
- *   /fastnoteblocks asciidiagram 13 72 108 15 76 113 east    that box, sliced west to east
- *   /fastnoteblocks asciidiagram ~-8 ~ ~-8 ~8 ~4 ~8          the ground around you, sliced downwards
- *   /fastnoteblocks asciidiagram ~-8 ~ ~-8 ~8 ~4 ~8 top south      the same, turned so south is up the page
- *   /fastnoteblocks asciidiagram ~-8 ~ ~-8 ~8 ~4 ~8 top south true and with every note block saying which note
- *   /fastnoteblocks asciidiagram ~-8 ~ ~-8 ~8 ~4 ~8 south false true    signs become footnotes: S1 in the grid,
+ *   /midicraft asciidiagram 13 72 108 15 76 113 east    that box, sliced west to east
+ *   /midicraft asciidiagram ~-8 ~ ~-8 ~8 ~4 ~8          the ground around you, sliced downwards
+ *   /midicraft asciidiagram ~-8 ~ ~-8 ~8 ~4 ~8 top south      the same, turned so south is up the page
+ *   /midicraft asciidiagram ~-8 ~ ~-8 ~8 ~4 ~8 top south true and with every note block saying which note
+ *   /midicraft asciidiagram ~-8 ~ ~-8 ~8 ~4 ~8 south false true    signs become footnotes: S1 in the grid,
  *                                                                        the words in the legend
  * </pre>
  *
@@ -104,7 +104,7 @@ public final class DebugCommands {
 	}
 
 	/**
-	 * The paster, as {@code /fastnoteblocks paste}.
+	 * The paster, as {@code /midicraft paste}.
 	 *
 	 * <p>Handed to {@link ComposerCommand} to hang under the mod's own command rather than
 	 * registered here, so the mod owns one name in a list everybody's mods are competing for. The
@@ -145,14 +145,14 @@ public final class DebugCommands {
 		return paste;
 	}
 
-	/** The diagram, as {@code /fastnoteblocks asciidiagram}. */
+	/** The diagram, as {@code /midicraft asciidiagram}. */
 	static LiteralArgumentBuilder<FabricClientCommandSource> asciiDiagramCommand() {
 		return literal("asciidiagram")
 			.then(corner("from").then(views()));
 	}
 
 	/**
-	 * The collision marking, as {@code /fastnoteblocks debugpaste}.
+	 * The collision marking, as {@code /midicraft debugpaste}.
 	 *
 	 * <p>A toggle rather than an argument to the paste, because the builds worth looking at this
 	 * way are songs pasted from the build screen, which takes no arguments. On its own it says what
@@ -276,7 +276,7 @@ public final class DebugCommands {
 			return false;
 		}
 		source.sendFeedback(Component.literal("Debug commands are off. Turn them on in the Debug "
-				+ "tab of /fastnoteblocks settings.")
+				+ "tab of /midicraft settings.")
 			.withStyle(ChatFormatting.GRAY));
 		return true;
 	}
@@ -650,7 +650,7 @@ public final class DebugCommands {
 	 * What the blocks of a marked build mean, and whether the next one will be marked.
 	 *
 	 * <p>Read off {@link SongBuilder#DEBUG_PASTE_KEY}, which is the same table the builder colours
-	 * from and the same one an {@code /fastnoteblocks asciidiagram} legend explains itself with, so the three can
+	 * from and the same one an {@code /midicraft asciidiagram} legend explains itself with, so the three can
 	 * never come apart.</p>
 	 */
 	private static int colourKey(FabricClientCommandSource source) {
@@ -659,7 +659,7 @@ public final class DebugCommands {
 		}
 		boolean on = FastNoteblocksConfig.get().debugPasteEnabled();
 		source.sendFeedback(Component.literal("Debug paste is " + (on ? "on" : "off")
-			+ ". /fastnoteblocks debugpaste on|off to change it.")
+			+ ". /midicraft debugpaste on|off to change it.")
 			.withStyle(on ? ChatFormatting.YELLOW : ChatFormatting.GRAY));
 		SongBuilder.DEBUG_PASTE_KEY.forEach((block, means) -> source.sendFeedback(Component
 			.literal("  " + block.substring(block.indexOf(':') + 1) + "  ")

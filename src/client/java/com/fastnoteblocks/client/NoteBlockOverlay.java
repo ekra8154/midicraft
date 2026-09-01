@@ -118,7 +118,7 @@ public final class NoteBlockOverlay {
 	private final KeyMapping placementSequenceKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
 		"key.midicraft.toggle_placement_sequence", InputConstants.Type.KEYSYM, -1, CATEGORY
 	));
-	// Unbound, like the other two. /fastnoteblocks is the way in that costs nobody a key, and
+	// Unbound, like the other two. /midicraft is the way in that costs nobody a key, and
 	// Brigadier listing it as you type is better discovery than a letter you have to be told.
 	private final KeyMapping composerKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
 		"key.midicraft.open_composer", InputConstants.Type.KEYSYM, -1, CATEGORY

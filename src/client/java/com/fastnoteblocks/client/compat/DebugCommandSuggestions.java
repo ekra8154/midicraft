@@ -66,7 +66,7 @@ public final class DebugCommandSuggestions {
 		lastRoot = root;
 		lastEnabled = enabled;
 
-		CommandNode<?> ours = root.getChild("fastnoteblocks");
+		CommandNode<?> ours = root.getChild("midicraft");
 		if (ours == null) {
 			return;
 		}

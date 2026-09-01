@@ -154,7 +154,7 @@ public final class AsciiDiagram {
 			Math.max(from.getZ(), to.getZ())};
 		// Shrunk to what is actually in the box, so a box can be thrown around a build rather than
 		// measured to it, and the point is that
-		// {@code /fastnoteblocks asciidiagram ~10 ~10 ~10 ~-10 ~-10 ~-10} draws whatever is inside without anybody
+		// {@code /midicraft asciidiagram ~10 ~10 ~10 ~-10 ~-10 ~-10} draws whatever is inside without anybody
 		// reading six numbers off the debug screen first.
 		//
 		// Only whole empty layers go. Air *between* blocks is most of what a diagram is read for --

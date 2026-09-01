@@ -3,9 +3,9 @@
 A fully client-side Fabric mod for Minecraft Java Edition 26.2 that displays
 interactive pitch and delay controls above nearby note blocks and repeaters.
 
-Run **`/fastnoteblocks`** to open the Composer -- or `/fastnoteblocks composer`,
+Run **`/midicraft`** to open the Composer -- or `/midicraft composer`,
 which does the same thing and is easier to find by tab-completing. Settings are
-at **`/fastnoteblocks settings`**. The mod binds no keys by
+at **`/midicraft settings`**. The mod binds no keys by
 default -- taking a letter key from someone who plays with a lot of mods is a
 rude way to introduce yourself -- so the Composer, the interactive overlay and
 the placement sequence control are all unbound until you say otherwise. Bind
@@ -340,19 +340,19 @@ start** pulls the music forward, and Ctrl+Z takes back any of it.
 
 Off by default; the switch is on the Debug tab of the settings, and takes effect
 the moment you throw it -- the three subcommands come and go from tab-completion
-without a rejoin, and refuse to run while it is off. `/fastnoteblocks asciidiagram <from> <to> [view] [facing] [notes]`
-draws a region of the world as text, and `/fastnoteblocks debugpaste [on|off]`
+without a rejoin, and refuse to run while it is off. `/midicraft asciidiagram <from> <to> [view] [facing] [notes]`
+draws a region of the world as text, and `/midicraft debugpaste [on|off]`
 colours the next build by what laid each block -- dead wire red, wrong notes as
 lit copper bulbs, collisions in sea lantern -- or, bare, prints that colour key.
 
-The third is `/fastnoteblocks paste`, which builds a run of chords you type out
+The third is `/midicraft paste`, which builds a run of chords you type out
 rather than a song, for testing layouts:
 
 ```
-/fastnoteblocks paste <width> <floors> [flat|up|down [turning] <columns to wall>] <chords>
+/midicraft paste <width> <floors> [flat|up|down [turning] <columns to wall>] <chords>
 ```
 
-`/fastnoteblocks paste 12 1 6 2 18` builds chords of six, two and eighteen in a
+`/midicraft paste 12 1 6 2 18` builds chords of six, two and eighteen in a
 corridor twelve wide. A chord may be repeated with `x`, given its own gap with
 `@`, and given instruments with a colon: `30x4`, `18@1`, `7:7b`. The instrument
 letters are `p` harp (air), `h` hi-hat (glass, will not carry power), `s` snare

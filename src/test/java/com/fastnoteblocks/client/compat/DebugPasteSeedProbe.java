@@ -11,7 +11,7 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * Scratch: what {@code /fastnoteblocks paste ... up ...} builds, seeded the way the command seeds
+ * Scratch: what {@code /midicraft paste ... up ...} builds, seeded the way the command seeds
  * it, so "it will not do an ascent" can be read as a list of what it did instead.
  */
 @Tag("sweep")

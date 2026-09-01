@@ -16,7 +16,7 @@
   "option.midicraft.mod_enabled": "Enable in-world tools",
   "tooltip.midicraft.mod_enabled": "Master switch for everything the mod does out in the world: the labels over note blocks and repeaters, scrolling to retune them, and the placement sequence. The Composer is not affected and its key still opens it with this off.",
   "option.midicraft.debug_commands": "Debug commands",
-  "tooltip.midicraft.debug_commands": "Adds three subcommands: /fastnoteblocks paste builds a run of chords you type out rather than a song, asciidiagram draws a region as text, and debugpaste colours a build by what laid each block. They appear and disappear from tab-completion as this moves, and refuse to run while it is off. The README has the syntax.",
+  "tooltip.midicraft.debug_commands": "Adds three subcommands: /midicraft paste builds a run of chords you type out rather than a song, asciidiagram draws a region as text, and debugpaste colours a build by what laid each block. They appear and disappear from tab-completion as this moves, and refuse to run while it is off. The README has the syntax.",
   "option.midicraft.radial_focus_delay": "Radial focus delay (ticks)",
   "tooltip.midicraft.radial_focus_delay": "Ticks the center label must stay under the crosshair before its radial opens and accepts scrolling. 0 opens immediately.",
   "option.midicraft.repeater_control_style": "Repeater control style",

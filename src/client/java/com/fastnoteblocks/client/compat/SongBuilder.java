@@ -21057,7 +21057,7 @@ public final class SongBuilder {
 	 *
 	 * <p>Here rather than in a comment because three separate things have to explain this table and
 	 * none of them should be holding its own copy: the chat key the command prints, the legend under
-	 * an {@code /fastnoteblocks asciidiagram}, and {@link #shapeStone}, which is the thing that actually decides.
+	 * an {@code /midicraft asciidiagram}, and {@link #shapeStone}, which is the thing that actually decides.
 	 * The diagram is the one that matters most and is the easiest to forget -- a slice pasted into a
 	 * conversation is often all anybody has of a build, and "TU = minecraft:tuff" tells a reader
 	 * nothing at all unless it goes on to say that tuff is how a bus looks.</p>

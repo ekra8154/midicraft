@@ -19,7 +19,7 @@ import org.junit.jupiter.api.Test;
  *
  * <p>Sweeps the song library for v2 builds where {@code cutCorkscrewsAtTheWall} fires -- the
  * synthetic limit songs never produce one -- then renders the first modules found in the same view
- * an in-game {@code /fastnoteblocks asciidiagram} gives, which is the form the target designs arrive in, so
+ * an in-game {@code /midicraft asciidiagram} gives, which is the form the target designs arrive in, so
  * current and intended can be diffed cell for cell.</p>
  */
 @Tag("sweep")

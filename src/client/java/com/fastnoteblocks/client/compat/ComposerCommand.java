@@ -12,7 +12,7 @@ import net.minecraft.ChatFormatting;
 
 
 /**
- * {@code /fastnoteblocks} -- the door to the Composer that is always there.
+ * {@code /midicraft} -- the door to the Composer that is always there.
  *
  * <p>The key that opens it is unbound by default, on the grounds that a mod helping itself to a
  * letter key is a rude thing to install. That leaves the problem of how anyone finds the Composer
@@ -40,11 +40,11 @@ public final class ComposerCommand {
 	public static void register() {
 		ClientCommandRegistrationCallback.EVENT.register((dispatcher, registry) ->
 			dispatcher.register(LiteralArgumentBuilder.<FabricClientCommandSource>literal(
-					"fastnoteblocks")
+					"midicraft")
 				.executes(context -> open(new ComposerScreen(null, FastNoteblocksConfig.get())))
 				// Spelled out as well as bare. The name on its own opening the Composer is only
 				// obvious once you know it, and someone who has tab-completed as far as
-				// "/fastnoteblocks " is looking at a list for the thing they came for.
+				// "/midicraft " is looking at a list for the thing they came for.
 				.then(LiteralArgumentBuilder.<FabricClientCommandSource>literal("composer")
 					.executes(context ->
 						open(new ComposerScreen(null, FastNoteblocksConfig.get()))))
@@ -94,10 +94,10 @@ public final class ComposerCommand {
 		minecraft.player.sendSystemMessage(Component.literal("Midicraft: ")
 			.withStyle(ChatFormatting.GRAY)
 			.append(Component.literal("open composer and settings with "))
-			.append(Component.literal("/fastnoteblocks")
+			.append(Component.literal("/midicraft")
 				.withStyle(style -> style
 					.withColor(ChatFormatting.AQUA)
-					.withClickEvent(new ClickEvent.SuggestCommand("/fastnoteblocks"))))
+					.withClickEvent(new ClickEvent.SuggestCommand("/midicraft"))))
 			.append(Component.literal(", with a keybind, or through Mod Menu.")
 				.withStyle(ChatFormatting.GRAY)));
 	}

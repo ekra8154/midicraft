@@ -371,7 +371,7 @@ public final class FastNoteblocksConfig {
 	private String midiDefaultInstrument;
 	private MidiInstrumentSource midiInstrumentSource;
 	private boolean debugCommandsEnabled;
-	/** Whether the one-time "the Composer is behind /fastnoteblocks" line has been said. */
+	/** Whether the one-time "the Composer is behind /midicraft" line has been said. */
 	private boolean seenWelcome;
 	private boolean debugPasteEnabled;
 	private int midiVelocityCutoff;
