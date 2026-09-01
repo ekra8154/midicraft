@@ -395,6 +395,19 @@ class InterleavedDeadProbe {
 			}
 			System.out.println("   sources in the build: " + buttons + " levers/buttons, "
 				+ redstoneBlocks + " blocks of redstone");
+			// Landmarks, so whoever pastes this can check they are in the same frame before they
+			// walk to a coordinate. A plan slides after it is walked and a paste lands wherever the
+			// player is standing, so a number quoted from here is only worth what the frame is.
+			StringBuilder marks = new StringBuilder();
+			for (Map.Entry<BlockPos, BlockState> cell : built.world().entrySet()) {
+				if (cell.getValue().getBlock() instanceof net.minecraft.world.level.block.ButtonBlock
+						|| cell.getValue().is(Blocks.LEVER)) {
+					marks.append("  button/lever at ").append(cell.getKey().toShortString());
+				}
+			}
+			System.out.println("   span x " + built.plan().spanX() + " y " + built.plan().height()
+				+ " z " + built.plan().spanZ() + "   walls x=" + built.plan().nearWall() + ".."
+				+ built.plan().farWall() + marks);
 		} finally {
 			held.putBack();
 		}
