@@ -162,7 +162,7 @@ that is where the eighteen-gigabyte `latest.log` came from. Two runs of the whol
 hundred megabytes of heap each and had to be killed.
 
 ```bash
-./gradlew.bat test --offline --tests "com.fastnoteblocks.client.compat.BreachTraceTest.listsTheRealBreachesLeft"
+./gradlew.bat test --offline --tests "com.midicraft.client.compat.BreachTraceTest.listsTheRealBreachesLeft"
 ```
 
 ## Running any of this in a fresh worktree

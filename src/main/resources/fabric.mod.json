@@ -11,10 +11,10 @@
   "environment": "client",
   "entrypoints": {
     "client": [
-      "com.fastnoteblocks.client.FastNoteblocksClient"
+      "com.midicraft.client.MidicraftClient"
     ],
     "modmenu": [
-      "com.fastnoteblocks.client.compat.FastNoteblocksModMenuIntegration"
+      "com.midicraft.client.compat.MidicraftModMenuIntegration"
     ]
   },
   "mixins": [
