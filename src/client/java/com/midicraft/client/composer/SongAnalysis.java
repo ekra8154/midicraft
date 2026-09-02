@@ -186,7 +186,7 @@ public record SongAnalysis(
 	 */
 	public static double redstoneTickSpan(ComposerProject project) {
 		double span = project.ppq() * 100_000.0 / project.tempoMicrosPerQuarter();
-		return Math.max(1.0e-6, span * Math.max(1, project.speedQuarters()) / 4.0);
+		return Math.max(1.0e-6, span * project.speedFactor());
 	}
 
 	/** True when nothing left in the composition would misbuild or fail to build at all. */

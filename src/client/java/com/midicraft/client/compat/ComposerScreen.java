@@ -559,6 +559,7 @@ public final class ComposerScreen extends Screen {
 	private int snapMenuX;
 	private int snapMenuY;
 	private DelayScaleSlider delayScaleSlider;
+	private Button bakeSpeedButton;
 	private Button addLayerButton;
 	private EditBox layerNameBox;
 	private boolean playing;
@@ -938,7 +939,12 @@ public final class ComposerScreen extends Screen {
 		int snapWidth = widestLabel(CONTROL_PADDING, "1/4", "1/8", "1/16", "1/32", "Repeater",
 			"Game tick", "Off");
 		int speedWidth = widestLabel(CONTROL_PADDING + 8, "Speed 0.25x", "Speed 2.00x", "Speed 8.00x");
-		int speedX = width - 6 - speedWidth;
+		// The bake sits against the slider rather than only in the menu, because it is the
+		// slider's own verb: the number the slider holds is the one thing baking moves. A square
+		// the height of the row, carved off the right end so nothing else shifts.
+		int bakeWidth = widestLabel(CONTROL_PADDING, "Bake");
+		int speedX = width - 6 - bakeWidth - 2 - speedWidth;
+		int bakeX = speedX + speedWidth + 2;
 		int snapX = speedX - CONTROL_GAP - snapWidth;
 		int playX = snapX - CONTROL_GAP - playWidth;
 		int recordX = playX - CONTROL_GAP - recordWidth;
@@ -964,9 +970,13 @@ public final class ComposerScreen extends Screen {
 		snapMenuY = CONTROL_TOP + CONTROL_HEIGHT + 1;
 		refreshSnapButton();
 		delayScaleSlider = addRenderableWidget(new DelayScaleSlider(
-			speedX, CONTROL_TOP, speedWidth, CONTROL_HEIGHT, project().speedQuarters(),
+			speedX, CONTROL_TOP, speedWidth, CONTROL_HEIGHT, project().speedEighths(),
 			this::setDelayScale
 		));
+		bakeSpeedButton = addRenderableWidget(Button.builder(Component.literal("Bake"),
+				button -> bakeSpeed())
+			.bounds(bakeX, CONTROL_TOP, bakeWidth, CONTROL_HEIGHT)
+			.build());
 		refreshSpeedTooltip();
 		if (!layerViewInitialised) {
 			layerViewInitialised = true;
@@ -1603,7 +1613,7 @@ public final class ComposerScreen extends Screen {
 				? converted.withSpeedQuarters(ComposerProject.DEFAULT_SPEED_QUARTERS)
 				: converted);
 			if (config.convertBakesSpeed()) {
-				delayScaleSlider.setScale(ComposerProject.DEFAULT_SPEED_QUARTERS);
+				delayScaleSlider.setScale(ComposerProject.DEFAULT_SPEED_EIGHTHS);
 			}
 			selectedNotes.clear();
 			instrumentMenuLayer = -1;
@@ -2612,7 +2622,7 @@ public final class ComposerScreen extends Screen {
 			case RENAME_MARKER -> markerAtCursor() != null;
 			case DUPLICATE_SELECTION -> !selectedNotes.isEmpty();
 			case BAKE_SPEED ->
-				project().speedQuarters() != ComposerProject.DEFAULT_SPEED_QUARTERS;
+				project().speedEighths() != ComposerProject.DEFAULT_SPEED_EIGHTHS;
 			case CLEAR_MARKERS -> !project().markers().isEmpty();
 			// Nothing to scan from the title screen, and the coordinate prompt would have no way
 			// to tell you that the region you typed reads as empty because there is no world.
@@ -2788,14 +2798,14 @@ public final class ComposerScreen extends Screen {
 	 * and moves the end marker. Wanting the baseline written down is not wanting any of that.</p>
 	 */
 	private void bakeSpeed() {
-		if (project().speedQuarters() == ComposerProject.DEFAULT_SPEED_QUARTERS) {
+		if (project().speedEighths() == ComposerProject.DEFAULT_SPEED_EIGHTHS) {
 			return;
 		}
 		String was = tempoLabel();
 		apply("apply the speed to the tempo", project().withBakedSpeed());
 		// setScale moves the widget without firing its listener, so this cannot loop back into
 		// another history entry.
-		delayScaleSlider.setScale(ComposerProject.DEFAULT_SPEED_QUARTERS);
+		delayScaleSlider.setScale(ComposerProject.DEFAULT_SPEED_EIGHTHS);
 		showResult(Component.literal(was + " is now " + tempoLabel()
 			+ ". The song sounds exactly as it did; only the number it is written at has moved."));
 	}
@@ -2873,7 +2883,7 @@ public final class ComposerScreen extends Screen {
 	private void applyTimingStep(String label, String step, ComposerProject updated) {
 		applyStep(label, step, updated);
 		if (delayScaleSlider != null) {
-			delayScaleSlider.setScale(delayScaleQuarters());
+			delayScaleSlider.setScale(songSpeedEighths());
 		}
 	}
 
@@ -7173,7 +7183,7 @@ public final class ComposerScreen extends Screen {
 	 * can actually play, which is useless if you cannot hear its effect.</p>
 	 */
 	private double timescaleFactor() {
-		return Math.max(1, delayScaleQuarters()) / (double)ComposerProject.DEFAULT_SPEED_QUARTERS;
+		return project().speedFactor();
 	}
 
 	private long playbackTick() {
@@ -7979,7 +7989,7 @@ public final class ComposerScreen extends Screen {
 		// setScale only moves the widget; it does not fire the listener, so this cannot loop back
 		// into another history entry.
 		if (delayScaleSlider != null) {
-			delayScaleSlider.setScale(delayScaleQuarters());
+			delayScaleSlider.setScale(songSpeedEighths());
 		}
 		syncProject();
 		layersChanged();
@@ -8060,7 +8070,7 @@ public final class ComposerScreen extends Screen {
 		showResult(Component.literal(String.format(java.util.Locale.ROOT,
 			"Saved \"%s\" - %d notes, %d layers, %s at %s",
 			project().name(), stats.totalNotes(), project().layers().size(),
-			stats.lengthLabel(), MidicraftConfig.delayScaleLabel(delayScaleQuarters()))));
+			stats.lengthLabel(), MidicraftConfig.speedLabel(songSpeedEighths()))));
 	}
 
 	/**
@@ -8144,7 +8154,7 @@ public final class ComposerScreen extends Screen {
 		SongAnalysis stats = projectStats();
 		String report = "Copied the sequence - " + sequence.size()
 			+ (sequence.size() == 1 ? " layer, " : " layers, ") + text.length() + " characters at "
-			+ MidicraftConfig.delayScaleLabel(delayScaleQuarters());
+			+ MidicraftConfig.speedLabel(songSpeedEighths());
 		if (stats.outOfRange() > 0) {
 			report += ", " + stats.outOfRange() + " out-of-range notes left out";
 		}
@@ -8365,7 +8375,7 @@ public final class ComposerScreen extends Screen {
 		return true;
 	}
 
-	private void setDelayScale(int scaleQuarters) {
+	private void setDelayScale(int scaleEighths) {
 		// Re-anchor first: the playhead is derived from elapsed real time, so changing the factor
 		// without pinning the current tick would make playback jump.
 		if (playing) {
@@ -8374,7 +8384,7 @@ public final class ComposerScreen extends Screen {
 		}
 		// The slider fires on every increment of a drag. Record one step for the gesture and fold
 		// the rest into it, or a single drag would push dozens of entries and evict real edits.
-		ComposerProject next = project().withSpeedQuarters(scaleQuarters);
+		ComposerProject next = project().withSpeedEighths(scaleEighths);
 		long now = Util.getMillis();
 		if (now - lastScaleChangeAt < SCALE_COALESCE_MILLIS) {
 			history.replaceCurrent(next);
@@ -8979,7 +8989,7 @@ public final class ComposerScreen extends Screen {
 	 */
 	private String tempoLabel() {
 		double base = 60_000_000.0 / Math.max(1, project().tempoMicrosPerQuarter());
-		double factor = Math.max(1, project().speedQuarters()) / 4.0;
+		double factor = project().speedFactor();
 		String played = trimZeros(String.format(java.util.Locale.ROOT, "%.1f", base * factor));
 		if (Math.abs(factor - 1.0) < 1.0e-9) {
 			return played + " BPM";
@@ -8994,10 +9004,22 @@ public final class ComposerScreen extends Screen {
 			return;
 		}
 		delayScaleSlider.setTooltip(Tooltip.create(Component.literal(
-			"Playback speed, 0.25x to 8.00x. Higher is faster."
+			"Playback speed, 0.25x to 8.00x in eighth steps. Higher is faster."
 				+ "\n" + tempoLabel() + "."
 				+ "\nThe speed is part of the song: it is saved with it and the build runs at it. "
-				+ "Edit > Apply speed to the tempo folds it in and puts the slider back to 1.00x.")));
+				+ "The button beside this folds it into the tempo and puts the slider back to "
+				+ "1.00x.")));
+		if (bakeSpeedButton != null) {
+			bakeSpeedButton.active =
+				project().speedEighths() != ComposerProject.DEFAULT_SPEED_EIGHTHS;
+			bakeSpeedButton.setTooltip(Tooltip.create(Component.literal(
+				"Apply speed to the tempo."
+					+ "\n" + tempoLabel() + " at " + MidicraftConfig.speedLabel(
+						project().speedEighths()) + "."
+					+ "\nThe song sounds exactly as it does now; only the number it is "
+					+ "written at moves, and the slider goes back to 1.00x. Greyed out at "
+					+ "1.00x, where there is nothing to fold in.")));
+		}
 	}
 
 	private void refreshSnapButton() {
@@ -9034,8 +9056,8 @@ public final class ComposerScreen extends Screen {
 		return history.current();
 	}
 
-	private int delayScaleQuarters() {
-		return project().speedQuarters();
+	private int songSpeedEighths() {
+		return project().speedEighths();
 	}
 
 	private ComposerProject displayProject() {
@@ -9626,47 +9648,51 @@ public final class ComposerScreen extends Screen {
 		return names[Math.floorMod(midi, 12)] + (midi / 12 - 1);
 	}
 
+	/** The speed slider, counting eighths so it can stop between two quarters. */
 	private static final class DelayScaleSlider extends AbstractSliderButton {
 		private final java.util.function.IntConsumer listener;
-		private int scaleQuarters;
+		private int scaleEighths;
 
 		DelayScaleSlider(
 			int x,
 			int y,
 			int width,
 			int height,
-			int scaleQuarters,
+			int scaleEighths,
 			java.util.function.IntConsumer listener
 		) {
 			super(x, y, width, height, Component.empty(), 0.0);
 			this.listener = listener;
-			setScale(scaleQuarters);
+			setScale(scaleEighths);
 		}
 
-		private void setScale(int scaleQuarters) {
-			this.scaleQuarters = MidicraftConfig.clampSequenceDelayScale(scaleQuarters);
-			value = (this.scaleQuarters - MidicraftConfig.MIN_SEQUENCE_DELAY_SCALE_QUARTERS)
-				/ (double)(MidicraftConfig.MAX_SEQUENCE_DELAY_SCALE_QUARTERS
-					- MidicraftConfig.MIN_SEQUENCE_DELAY_SCALE_QUARTERS);
+		private static int clamp(int eighths) {
+			return Math.max(ComposerProject.MIN_SPEED_EIGHTHS,
+				Math.min(ComposerProject.MAX_SPEED_EIGHTHS, eighths));
+		}
+
+		private void setScale(int scaleEighths) {
+			this.scaleEighths = clamp(scaleEighths);
+			value = (this.scaleEighths - ComposerProject.MIN_SPEED_EIGHTHS)
+				/ (double)(ComposerProject.MAX_SPEED_EIGHTHS
+					- ComposerProject.MIN_SPEED_EIGHTHS);
 			updateMessage();
 		}
 
 		@Override
 		protected void updateMessage() {
-			setMessage(Component.literal("Speed " + MidicraftConfig.delayScaleLabel(scaleQuarters)));
+			setMessage(Component.literal("Speed " + MidicraftConfig.speedLabel(scaleEighths)));
 		}
 
 		@Override
 		protected void applyValue() {
-			int range = MidicraftConfig.MAX_SEQUENCE_DELAY_SCALE_QUARTERS
-				- MidicraftConfig.MIN_SEQUENCE_DELAY_SCALE_QUARTERS;
-			int updated = MidicraftConfig.MIN_SEQUENCE_DELAY_SCALE_QUARTERS
-				+ Math.round((float)(value * range));
-			updated = MidicraftConfig.clampSequenceDelayScale(updated);
-			if (updated != scaleQuarters) {
-				scaleQuarters = updated;
+			int range = ComposerProject.MAX_SPEED_EIGHTHS - ComposerProject.MIN_SPEED_EIGHTHS;
+			int updated = clamp(ComposerProject.MIN_SPEED_EIGHTHS
+				+ Math.round((float)(value * range)));
+			if (updated != scaleEighths) {
+				scaleEighths = updated;
 				updateMessage();
-				listener.accept(scaleQuarters);
+				listener.accept(scaleEighths);
 			}
 		}
 	}

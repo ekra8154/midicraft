@@ -51,7 +51,7 @@ class SplitRangeFitProbe {
 		ComposerProject.Layer layer = new ComposerProject.Layer(
 			"Melodic", "HARP", false, true, true, List.copyOf(notes), melodic);
 		ComposerProject project = new ComposerProject("split-range", 96, 500_000,
-			List.of(layer), 0, id, tick, 4, List.of());
+			List.of(layer), 0, id, tick, 4, 8, List.of());
 
 		System.out.println("  before:");
 		for (ComposerProject.NoteEvent note : project.layers().get(0).notes()) {
@@ -89,7 +89,7 @@ class SplitRangeFitProbe {
 		ComposerProject.Layer layer = new ComposerProject.Layer(
 			"Harp", "HARP", false, true, true, List.copyOf(notes), null);
 		ComposerProject project = new ComposerProject("plain-range", 96, 500_000,
-			List.of(layer), 0, id, tick, 4, List.of());
+			List.of(layer), 0, id, tick, 4, 8, List.of());
 		long outBefore = project.layers().get(0).notes().stream()
 			.filter(n -> project.layers().get(0).outOfRange(n)).count();
 		ComposerProject.MinecraftConversion fitted = project.convertToMinecraft(

@@ -369,7 +369,7 @@ public final class SongsScreen extends Screen {
 		ComposerProject song = row.song();
 		return String.format(Locale.ROOT, "%d notes - %d layer%s - %s - %s - %.2fx - %s",
 			analysis.totalNotes(), song.layers().size(), song.layers().size() == 1 ? "" : "s",
-			analysis.lengthLabel(), bpmLabel(song), song.speedQuarters() / 4.0,
+			analysis.lengthLabel(), bpmLabel(song), song.speedFactor(),
 			seenLabel(row.id()));
 	}
 

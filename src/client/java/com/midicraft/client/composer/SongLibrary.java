@@ -95,7 +95,8 @@ public final class SongLibrary {
 				// the same invariants a freshly built one has.
 				library.songs.put(id, new ComposerProject(song.name(), song.ppq(),
 					song.tempoMicrosPerQuarter(), song.layers(), song.activeLayerIndex(),
-					song.nextNoteId(), song.endTick(), song.speedQuarters(), song.markers()));
+					song.nextNoteId(), song.endTick(), song.speedQuarters(), song.speedEighths(),
+					song.markers()));
 			} catch (Exception unreadableSong) {
 				library.failures.add(id);
 			}

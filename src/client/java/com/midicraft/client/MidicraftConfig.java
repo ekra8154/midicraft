@@ -1585,6 +1585,21 @@ public final class MidicraftConfig {
 		return String.format(java.util.Locale.ROOT, "%.2fx", clampSequenceDelayScale(delayScaleQuarters) / 4.0F);
 	}
 
+	/**
+	 * The composer speed, which counts in eighths and so needs a third decimal to say 1.125x.
+	 *
+	 * <p>Only where it earns one: a whole quarter reads "1.25x" as it always has, and the extra
+	 * digit appears on the half-steps between them and nowhere else. A slider whose every label
+	 * grew a decimal to accommodate the ones that needed it would be harder to read at every
+	 * setting to be honest at half of them.</p>
+	 */
+	public static String speedLabel(int speedEighths) {
+		int clamped = Math.max(ComposerProject.MIN_SPEED_EIGHTHS,
+			Math.min(ComposerProject.MAX_SPEED_EIGHTHS, speedEighths));
+		return String.format(java.util.Locale.ROOT,
+			clamped % 2 == 0 ? "%.2fx" : "%.3fx", clamped / 8.0F);
+	}
+
 
 	private static int clampMaxBuildFloors(int floors) {
 		return Math.max(MIN_MAX_BUILD_FLOORS, Math.min(MAX_MAX_BUILD_FLOORS, floors));

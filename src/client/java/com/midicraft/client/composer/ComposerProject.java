@@ -30,6 +30,13 @@ public record ComposerProject(
 	long nextNoteId,
 	long endTick,
 	int speedQuarters,
+	/**
+	 * The speed in eighths, which is the one that counts. Nought means a file written before the
+	 * slider gained half-steps, and the compact constructor reads {@code speedQuarters} instead --
+	 * the two are kept in step from then on, so a song saved here still opens at the right speed
+	 * in a build that only knows quarters, merely rounded to the nearest one it can express.
+	 */
+	int speedEighths,
 	List<Marker> markers
 ) {
 	public static final int DEFAULT_PPQ = 480;
@@ -68,6 +75,9 @@ public record ComposerProject(
 	public static final int MIN_SPEED_QUARTERS = 1;
 	public static final int MAX_SPEED_QUARTERS = 32;
 	public static final int DEFAULT_SPEED_QUARTERS = 4;
+	public static final int MIN_SPEED_EIGHTHS = 2;
+	public static final int MAX_SPEED_EIGHTHS = 64;
+	public static final int DEFAULT_SPEED_EIGHTHS = 8;
 	/**
 	 * How many markers a composition may carry.
 	 *
@@ -87,7 +97,7 @@ public record ComposerProject(
 	public ComposerProject(String name, int ppq, int tempoMicrosPerQuarter, List<Layer> layers,
 			int activeLayerIndex, long nextNoteId, long endTick, int speedQuarters) {
 		this(name, ppq, tempoMicrosPerQuarter, layers, activeLayerIndex, nextNoteId, endTick,
-			speedQuarters, List.of());
+			speedQuarters, 0, List.of());
 	}
 
 	public ComposerProject {
@@ -102,9 +112,15 @@ public record ComposerProject(
 			.max()
 			.orElse(0L);
 		nextNoteId = Math.max(highestId + 1L, nextNoteId);
-		speedQuarters = speedQuarters <= 0
-			? DEFAULT_SPEED_QUARTERS
-			: Math.max(MIN_SPEED_QUARTERS, Math.min(MAX_SPEED_QUARTERS, speedQuarters));
+		// Eighths are the truth; quarters are kept in step behind them. A file with no eighths in
+		// it was written in quarters, so it says twice its quarters -- which is the same speed,
+		// expressed in the finer unit. A file with neither is new and runs at 1.00x.
+		speedEighths = speedEighths <= 0
+			? (speedQuarters <= 0 ? DEFAULT_SPEED_EIGHTHS : speedQuarters * 2)
+			: speedEighths;
+		speedEighths = Math.max(MIN_SPEED_EIGHTHS, Math.min(MAX_SPEED_EIGHTHS, speedEighths));
+		speedQuarters = Math.max(MIN_SPEED_QUARTERS,
+			Math.min(MAX_SPEED_QUARTERS, speedEighths / 2));
 		// The end marker can sit past the last note but never before it: placing a note beyond the
 		// end drags the end along, which is the whole invariant expressed in one line. Zero means a
 		// document saved before the marker existed, so it falls back to the content it describes.
@@ -148,7 +164,7 @@ public record ComposerProject(
 	 */
 	private ComposerProject with(List<Layer> updatedLayers, int active, long nextId) {
 		return new ComposerProject(name, ppq, tempoMicrosPerQuarter, updatedLayers, active, nextId,
-			endTick, speedQuarters, markers);
+			endTick, speedQuarters, speedEighths, markers);
 	}
 
 	/**
@@ -228,7 +244,7 @@ public record ComposerProject(
 
 	public ComposerProject withMarkers(List<Marker> value) {
 		return new ComposerProject(name, ppq, tempoMicrosPerQuarter, layers, activeLayerIndex,
-			nextNoteId, endTick, speedQuarters, value);
+			nextNoteId, endTick, speedQuarters, speedEighths, value);
 	}
 
 	public record NoteEvent(long id, int midiNote, long startTick, long durationTicks, int velocity) {
@@ -943,13 +959,18 @@ public record ComposerProject(
 	 * <p>Note ids do count. Two documents with the same notes under different ids are two different
 	 * files, and the one on screen is the one that has not been written.</p>
 	 */
+	/** The speed as a multiplier, and the only place the unit is divided out. */
+	public double speedFactor() {
+		return Math.max(MIN_SPEED_EIGHTHS, speedEighths) / 8.0;
+	}
+
 	public boolean sameContentAs(ComposerProject other) {
 		return other != null
 			&& name.equals(other.name)
 			&& ppq == other.ppq
 			&& tempoMicrosPerQuarter == other.tempoMicrosPerQuarter
 			&& endTick == other.endTick
-			&& speedQuarters == other.speedQuarters
+			&& speedEighths == other.speedEighths
 			&& markers.equals(other.markers)
 			&& layers.equals(other.layers);
 	}
@@ -1177,9 +1198,9 @@ public record ComposerProject(
 	 *     is the whole of what a second lane buys the composer.
 	 */
 	private RepeaterGrid buildGrid(boolean gameTicks) {
-		long numerator = ppq * 100_000L * Math.max(1, speedQuarters);
+		long numerator = ppq * 100_000L * Math.max(MIN_SPEED_EIGHTHS, speedEighths);
 		long perBuildTick = gameTicks ? 2L : 1L;
-		long denominator = tempoMicrosPerQuarter * 4L * perBuildTick;
+		long denominator = tempoMicrosPerQuarter * 8L * perBuildTick;
 		long divisor = greatestCommonDivisor(numerator, denominator);
 		long grid = Math.max(1L, numerator / divisor);
 		long repeaterTicks = Math.max(1L, denominator / divisor);
@@ -1460,7 +1481,7 @@ public record ComposerProject(
 
 	public ComposerProject withTempo(int value) {
 		return new ComposerProject(name, ppq, value, layers, activeLayerIndex, nextNoteId,
-			endTick, speedQuarters, markers);
+			endTick, speedQuarters, speedEighths, markers);
 	}
 
 	/**
@@ -1482,7 +1503,7 @@ public record ComposerProject(
 
 	public ComposerProject withName(String value) {
 		return new ComposerProject(value, ppq, tempoMicrosPerQuarter, layers, activeLayerIndex, nextNoteId,
-			endTick, speedQuarters, markers);
+			endTick, speedQuarters, speedEighths, markers);
 	}
 
 	public MinecraftConversion convertToMinecraft(int quantizeTicks, boolean snapTempo) {
@@ -1658,7 +1679,7 @@ public record ComposerProject(
 		// a 1/8, grid set to 1/16, tempo doubled, song halved. Asking the notes cannot do that,
 		// because after quantizing their spacing is always a whole number of grid steps.
 		ComposerProject shaped = new ComposerProject(name, ppq, tempoMicrosPerQuarter, convertedLayers,
-			convertedActiveLayer, nextNoteId, endTick, speedQuarters, markers);
+			convertedActiveLayer, nextNoteId, endTick, speedQuarters, speedEighths, markers);
 		NoteSpacing spacing = shaped.noteSpacing();
 		int convertedTempo = snapTempo && spacing.gridTicks() > 0L
 			? shaped.alignedTempoFor(
@@ -1676,7 +1697,7 @@ public record ComposerProject(
 			.max()
 			.orElse(0L);
 		double convertedSpan = ppq * 100_000.0 / convertedTempo
-			* Math.max(1, speedQuarters) / 4.0;
+			* speedFactor();
 		long trailingGap = Math.max(0L, movedEnd - convertedContentEnd);
 		long snappedEnd = convertedContentEnd
 			+ Math.round(Math.round(trailingGap / convertedSpan) * convertedSpan);
@@ -1690,6 +1711,7 @@ public record ComposerProject(
 			nextNoteId,
 			snappedEnd,
 			speedQuarters,
+			speedEighths,
 			// Left on the ticks they were written on, because the notes are: quantizing moves a note
 			// within the tick space rather than rescaling it, so a marker still names the same bar.
 			markers
@@ -2019,7 +2041,7 @@ public record ComposerProject(
 			.map(marker -> marker.movedTo(Math.max(0L, marker.tick() - earliest)))
 			.toList();
 		return new ComposerProject(name, ppq, tempoMicrosPerQuarter, updated, activeLayerIndex,
-			nextNoteId, Math.max(1L, endTick - earliest), speedQuarters, pulled);
+			nextNoteId, Math.max(1L, endTick - earliest), speedQuarters, speedEighths, pulled);
 	}
 
 	/** Where the notes actually stop, ignoring any trailing silence the marker adds. */
@@ -2039,12 +2061,17 @@ public record ComposerProject(
 	/** Moves the end marker. Values before the last note are pulled forward to it. */
 	public ComposerProject withEndTick(long value) {
 		return new ComposerProject(name, ppq, tempoMicrosPerQuarter, layers, activeLayerIndex,
-			nextNoteId, Math.max(0L, value), speedQuarters, markers);
+			nextNoteId, Math.max(0L, value), speedQuarters, speedEighths, markers);
 	}
 
+	/** Kept for callers that speak in quarters; a quarter is two eighths. */
 	public ComposerProject withSpeedQuarters(int value) {
+		return withSpeedEighths(value * 2);
+	}
+
+	public ComposerProject withSpeedEighths(int value) {
 		return new ComposerProject(name, ppq, tempoMicrosPerQuarter, layers, activeLayerIndex,
-			nextNoteId, endTick, value, markers);
+			nextNoteId, endTick, 0, value, markers);
 	}
 
 	/**
@@ -2108,7 +2135,7 @@ public record ComposerProject(
 		double physical = composerTicksToMinecraftTicks(
 			Math.max(0L, composerTicks), ppq, tempoMicrosPerQuarter
 		);
-		return (int)Math.max(0L, Math.round(physical * 4.0 / Math.max(1, speedQuarters)));
+		return (int)Math.max(0L, Math.round(physical / speedFactor()));
 	}
 
 	/**
@@ -2127,7 +2154,7 @@ public record ComposerProject(
 		double physical = composerTicksToMinecraftTicks(
 			Math.max(0L, composerTicks), ppq, tempoMicrosPerQuarter
 		);
-		return (int)Math.max(0L, Math.round(physical * 2.0 * 4.0 / Math.max(1, speedQuarters)));
+		return (int)Math.max(0L, Math.round(physical * 2.0 / speedFactor()));
 	}
 
 	/**
@@ -2202,7 +2229,7 @@ public record ComposerProject(
 	 *     speed either way -- where in game ticks it is 2.5 and becomes 2 or 3, a tenth.
 	 */
 	private int alignedTempo(int gridTicks, boolean gameTicks) {
-		double speedFactor = Math.max(1, speedQuarters) / 4.0;
+		double speedFactor = speedFactor();
 		double perBuildTick = gameTicks ? 2.0 : 1.0;
 		double gridBuildTicks = gridTicks * tempoMicrosPerQuarter
 			/ (double)ppq / 100_000.0 / speedFactor * perBuildTick;
