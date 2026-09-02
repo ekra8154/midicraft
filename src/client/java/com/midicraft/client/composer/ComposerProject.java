@@ -1555,6 +1555,11 @@ public record ComposerProject(
 			// the harp window would undo the layer's whole purpose. Quantizing and repeat merging
 			// still apply -- a split layer's notes live in time like anyone else's.
 			boolean pitched = source.pitched() && source.split() == null;
+			// A split layer is fitted to its OWN brackets rather than skipped. Not to the harp
+			// window -- that would undo the layer -- and not by moving the layer as a unit, which
+			// means nothing when its voices already span five octaves. Only a note no voice can
+			// reach moves, and only far enough that one can.
+			boolean fitsToSplit = source.split() != null && source.pitched();
 			// Where the layer sits before any note is looked at individually.
 			int base = pitched && shifting == OctaveShifting.LAYER_THEN_NOTES
 				? bestLayerOctaveShift(sourceNotes)
@@ -1563,7 +1568,10 @@ public record ComposerProject(
 				// Bucketed by what the note needed *after* the layer moved, so everything the base
 				// already fixed shares one bucket and one layer. Named by the total, because what a
 				// name has to answer is how far these notes are from where they were written.
-				int residual = pitched ? octaveShiftIntoNoteBlockRange(note.midiNote() + base) : 0;
+				int residual = pitched ? octaveShiftIntoNoteBlockRange(note.midiNote() + base)
+					: fitsToSplit && !source.split().covers(note.midiNote())
+						? octaveShiftIntoSplit(source.split(), note.midiNote())
+					: 0;
 				int shift = base + residual;
 				long quantizedStart = Math.max(0L, Math.round(note.startTick() / (double)grid) * (long)grid);
 				NoteEvent converted = note.movedTo(quantizedStart, note.midiNote() + shift);
@@ -2290,6 +2298,35 @@ public record ComposerProject(
 			}
 		}
 		return best;
+	}
+
+	/**
+	 * The nearest octave shift that lands a note inside a split's own brackets.
+	 *
+	 * <p>{@link #octaveShiftIntoNoteBlockRange} aims at the harp window, which is the wrong target
+	 * for a split layer: its whole purpose is that its notes are true pitch, reaching wherever its
+	 * voices reach -- the melodic default is F#1 to F#7, five octaves rather than two. So a split
+	 * layer was excluded from range fitting entirely, and that was right about the window and wrong
+	 * about the consequence. A note outside <em>every</em> bracket is out of range by the layer's
+	 * own definition, {@link Layer#outOfRange} says so, the roll draws it as such -- and nothing
+	 * moved it, so "Fit into range" left notes visibly out of range and Convert built a layer that
+	 * could not sound them.</p>
+	 *
+	 * <p>Nought where nothing helps, which leaves the note where it is: a bracket set can have
+	 * holes, and a note in one is no better off an octave away.</p>
+	 */
+	private static int octaveShiftIntoSplit(Split split, int midiNote) {
+		int bestShift = 0;
+		int bestDistance = Integer.MAX_VALUE;
+		for (int shift = -120; shift <= 120; shift += 12) {
+			int shifted = midiNote + shift;
+			if (shifted >= 0 && shifted <= 127 && split.covers(shifted)
+					&& Math.abs(shift) < bestDistance) {
+				bestShift = shift;
+				bestDistance = Math.abs(shift);
+			}
+		}
+		return bestShift;
 	}
 
 	private static int octaveShiftIntoNoteBlockRange(int midiNote) {

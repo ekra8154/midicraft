@@ -2683,8 +2683,7 @@ public final class ComposerScreen extends Screen {
 			case QUANTIZE_SIXTEENTH -> quantizeTo(Math.max(1, project().ppq() / 4));
 			case QUANTIZE_REPEATERS -> quantizeToBuildTicks(false);
 			case QUANTIZE_GAME_TICKS -> quantizeToBuildTicks(true);
-			case FIT_ALL_RANGE -> applyStep("Fitted to range", "fit notes into range",
-				project().withAllFittedToRange(selectedNotes));
+			case FIT_ALL_RANGE -> fitIntoRange();
 			case TRANSPOSE_BEST_FIT -> transposeToBestFit();
 			case BAKE_SPEED -> bakeSpeed();
 			case SNAP_TEMPO -> snapTempo(false);
@@ -2862,6 +2861,41 @@ public final class ComposerScreen extends Screen {
 	 * @param label how the result reads in the toast, past tense: "Merged 12 selected notes"
 	 * @param step how the step reads after "Undo", present tense: "Undo merge repeated notes"
 	 */
+	/**
+	 * Convert's range fitting, on its own.
+	 *
+	 * <p>The same call Convert makes, with everything else turned off: a grid of one moves no note
+	 * in time, no repeat merging, no tempo snap. What is left is the octave shifting and the layer
+	 * splitting that follows it, under the settings Convert reads -- so the two can never disagree
+	 * about what "in range" means or what to do about it, which they did while this was a separate
+	 * implementation that knew only how to fold a note into the harp window.</p>
+	 *
+	 * <p>Whole composition, never a selection. It used to take one, and moving a note is scopeable
+	 * in a way splitting the layer it lives on is not: the split is a fact about the whole layer,
+	 * so a scoped version would have to either refuse to split or split on the strength of the
+	 * notes that happened to be selected. The end tick is put back because the conversion snaps a
+	 * trailing gap to the grid, which is the timing this is promising not to touch.</p>
+	 */
+	private void fitIntoRange() {
+		ComposerProject source = project();
+		ComposerProject.MinecraftConversion fitted = source.convertToMinecraft(
+			1, false, 0, false, config.convertOctaveShifting(), config.convertSplitTransposed());
+		ComposerProject updated = fitted.project().withEndTick(source.endTick());
+		if (updated.equals(source)) {
+			showResult(Component.literal("Nothing to change."));
+			return;
+		}
+		apply("fit notes into range", updated);
+		selectedNotes.clear();
+		layersChanged();
+		rebuildMoveLayerButtons();
+		showResult(Component.literal("Fitted to range: " + fitted.shiftedNotes()
+			+ " pitch-shifted"
+			+ (fitted.addedLayers() > 0 ? ", +" + fitted.addedLayers() + " layers" : "")
+			+ (fitted.duplicateLayers() > 0
+				? ", " + fitted.duplicateLayers() + " duplicate layers dropped" : "")));
+	}
+
 	private void applyStep(String label, String step, ComposerProject updated) {
 		int before = project().noteCount();
 		int beforeTempo = project().tempoMicrosPerQuarter();
@@ -3098,8 +3132,10 @@ public final class ComposerScreen extends Screen {
 				+ "so half the worst a note has to move, and notes a single game tick apart stay "
 				+ "apart instead of folding together. Costs the second lane -- anything landing "
 				+ "between repeater ticks needs the Half-tick lane layout to play it.";
-			case FIT_ALL_RANGE -> "Octave-shifts notes outside F#3-F#5 into it. Quick rather than "
-				+ "faithful: intervals across a layer can change.";
+			case FIT_ALL_RANGE -> "Octave-shifts notes that no instrument on their layer can reach "
+				+ "until it can, and splits a layer that needed more than one shift. Exactly the "
+				+ "step Convert does, on its own and without touching the timing: same settings, "
+				+ "same result. Quick rather than faithful -- intervals across a layer can change.";
 			case SNAP_TEMPO -> "Moves the tempo as little as it can while making the spacing the "
 				+ "song already has land on whole repeater ticks, folding the speed slider in first. "
 				+ "Leaves every note where it is, so it does nothing for a song whose notes share no "
@@ -9783,7 +9819,7 @@ public final class ComposerScreen extends Screen {
 		QUANTIZE_REPEATERS("Quantize to repeater ticks", true),
 		QUANTIZE_GAME_TICKS("Quantize to game ticks", true),
 		DUPLICATE_SELECTION("Duplicate selection"),
-		FIT_ALL_RANGE("Fit into range", true),
+		FIT_ALL_RANGE("Fit into range"),
 		TRANSPOSE_BEST_FIT("Transpose to best fit"),
 		BAKE_SPEED("Apply speed to the tempo"),
 		SNAP_TEMPO("Snap tempo (whole song)"),
