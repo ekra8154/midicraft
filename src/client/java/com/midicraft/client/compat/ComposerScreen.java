@@ -1679,7 +1679,18 @@ public final class ComposerScreen extends Screen {
 			? source.withMergedRepeats(config.repeatMergeTicks(), Set.of())
 			: source;
 		SongAnalysis stats = SongAnalysis.of(merged, config.dedupeIdenticalNotes(), gameTicks);
-		if (stats.offGrid().isEmpty()) {
+		// Held to the grid this button is about to use, which is not the one the status bar
+		// reports. SongAnalysis measures off-grid in GAME ticks always -- halfTicksAvailable
+		// changes what it says about lanes, not what it calls off grid -- so a song with odd gaps
+		// is on that grid and genuinely not on the repeater grid, which is twice as coarse. Asked
+		// only about offGrid, the one-lane button handed such a song the repeater grid and
+		// collapsed it: aria-math-4x-speed lost 552 of its 1,415 distinct moments, moonlight's
+		// melodic two-lane cut 172. A half-ticked note is exactly one whose gap is an odd number
+		// of game ticks, so requiring none of them is requiring the song to be on the repeater
+		// grid already.
+		boolean onTheGridItWillUse = stats.offGrid().isEmpty()
+			&& (gameTicks || stats.halfTickedNotes().isEmpty());
+		if (onTheGridItWillUse) {
 			return (int)Math.max(1L, merged.buildGridTicks(gameTicks));
 		}
 		return minecraftConversionGridTicks(source);
