@@ -1556,6 +1556,14 @@ public final class ComposerScreen extends Screen {
 	 */
 	private void convertToMinecraft(boolean gameTicks) {
 		stopPlayback();
+		// Asked before anything happens, because Convert is six operations and which of them run
+		// is a decision, not a constant. The popup writes the answers straight to the config, so
+		// this is also where those settings live. See {@link ConvertOptionsScreen}.
+		minecraft.gui.setScreen(new ConvertOptionsScreen(this, gameTicks,
+			() -> runConversion(gameTicks)));
+	}
+
+	private void runConversion(boolean gameTicks) {
 		// Bake the timescale into the tempo first, so converting at 2.00x produces a project that
 		// genuinely runs that fast rather than one that still depends on a slider.
 		//
@@ -1564,25 +1572,39 @@ public final class ComposerScreen extends Screen {
 		// speed-dependent step inside ran at the speed squared while the result was stamped back to
 		// 1.00x. At 1.00x the two agree and nothing looked wrong, which is why converting a fresh
 		// import worked and converting again after nudging the speed left the song off grid.
-		ComposerProject source = project().withBakedSpeed();
-		int gridTicks = conversionGridTicks(source, gameTicks);
+		// Every step reads its own switch. Five of the six decline through an argument the
+		// conversion already had -- a grid of one moves no note, a merge window of nought merges
+		// nothing, snapTempo is its own flag, and the end tick is simply put back afterwards --
+		// so only the range fitting needed a parameter of its own.
+		ComposerProject before = project();
+		ComposerProject source = config.convertBakesSpeed() ? before.withBakedSpeed() : before;
+		int gridTicks = config.convertQuantizes() ? conversionGridTicks(source, gameTicks) : 1;
 		try {
 			// Always aligned, and to the grid the button named. Whether to align used to be a
 			// setting, from before there were two Convert buttons -- but landing the song on a
 			// redstone grid is the whole of what Convert is for, and Edit > Quantize is there for
 			// anyone who wants the notes moved without the tempo following.
 			MinecraftConversion conversion = source.convertToMinecraft(
-				gridTicks, true, config.repeatMergeTicks(), gameTicks,
-				config.convertOctaveShifting(), config.convertSplitTransposed());
+				gridTicks, config.convertSnapsTempo(),
+				config.convertMergesRepeats() ? config.repeatMergeTicks() : 0, gameTicks,
+				config.convertOctaveShifting(), config.convertSplitTransposed(),
+				config.convertFitsRange());
 			if (conversion.project().equals(project())) {
 				showResult(
 					Component.literal("This composition is already Minecraft-ready."));
 				return;
 			}
-			// Convert bakes the speed into the tempo, so the result plays at its own pace.
-			apply("convert to Minecraft",
-				conversion.project().withSpeedQuarters(ComposerProject.DEFAULT_SPEED_QUARTERS));
-			delayScaleSlider.setScale(ComposerProject.DEFAULT_SPEED_QUARTERS);
+			// Convert bakes the speed into the tempo, so the result plays at its own pace -- and
+			// where it was told not to bake, the slider keeps whatever it was set to.
+			ComposerProject converted = config.convertSnapsEnd()
+				? conversion.project()
+				: conversion.project().withEndTick(before.endTick());
+			apply("convert to Minecraft", config.convertBakesSpeed()
+				? converted.withSpeedQuarters(ComposerProject.DEFAULT_SPEED_QUARTERS)
+				: converted);
+			if (config.convertBakesSpeed()) {
+				delayScaleSlider.setScale(ComposerProject.DEFAULT_SPEED_QUARTERS);
+			}
 			selectedNotes.clear();
 			instrumentMenuLayer = -1;
 			resetLayerView();

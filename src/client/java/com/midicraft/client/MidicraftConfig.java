@@ -367,6 +367,12 @@ public final class MidicraftConfig {
 	private MidiQuantizeGrid midiQuantizeGrid;
 	private ComposerProject.OctaveShifting convertOctaveShifting;
 	private boolean convertSplitTransposed;
+	private boolean convertBakesSpeed;
+	private boolean convertMergesRepeats;
+	private boolean convertQuantizes;
+	private boolean convertFitsRange;
+	private boolean convertSnapsTempo;
+	private boolean convertSnapsEnd;
 	private boolean midiIgnorePercussion;
 	private String midiDefaultInstrument;
 	private MidiInstrumentSource midiInstrumentSource;
@@ -570,6 +576,12 @@ public final class MidicraftConfig {
 					: stored.convertOctaveShifting;
 				instance.convertSplitTransposed = stored.convertSplitTransposed == null
 					|| stored.convertSplitTransposed;
+				instance.convertBakesSpeed = stored.convertBakesSpeed == null || stored.convertBakesSpeed;
+				instance.convertMergesRepeats = stored.convertMergesRepeats == null || stored.convertMergesRepeats;
+				instance.convertQuantizes = stored.convertQuantizes == null || stored.convertQuantizes;
+				instance.convertFitsRange = stored.convertFitsRange == null || stored.convertFitsRange;
+				instance.convertSnapsTempo = stored.convertSnapsTempo == null || stored.convertSnapsTempo;
+				instance.convertSnapsEnd = stored.convertSnapsEnd == null || stored.convertSnapsEnd;
 				instance.repeatMergeTicks = clampRepeatMergeTicks(
 					stored.repeatMergeTicks == null
 						? DEFAULT_REPEAT_MERGE_TICKS
@@ -1333,6 +1345,60 @@ public final class MidicraftConfig {
 		this.convertSplitTransposed = value;
 	}
 
+	/** Whether Convert folds the speed slider into the tempo. See {@link com.midicraft.client.compat.ConvertOptionsScreen}. */
+	public boolean convertBakesSpeed() {
+		return convertBakesSpeed;
+	}
+
+	public void setConvertBakesSpeed(boolean value) {
+		this.convertBakesSpeed = value;
+	}
+
+	/** Whether Convert collapses re-triggered notes. See {@link com.midicraft.client.compat.ConvertOptionsScreen}. */
+	public boolean convertMergesRepeats() {
+		return convertMergesRepeats;
+	}
+
+	public void setConvertMergesRepeats(boolean value) {
+		this.convertMergesRepeats = value;
+	}
+
+	/** Whether Convert lands note starts on a grid. See {@link com.midicraft.client.compat.ConvertOptionsScreen}. */
+	public boolean convertQuantizes() {
+		return convertQuantizes;
+	}
+
+	public void setConvertQuantizes(boolean value) {
+		this.convertQuantizes = value;
+	}
+
+	/** Whether Convert octave-shifts notes their layer cannot reach, and splits it. See {@link com.midicraft.client.compat.ConvertOptionsScreen}. */
+	public boolean convertFitsRange() {
+		return convertFitsRange;
+	}
+
+	public void setConvertFitsRange(boolean value) {
+		this.convertFitsRange = value;
+	}
+
+	/** Whether Convert moves the tempo until the spacing lands on build ticks. See {@link com.midicraft.client.compat.ConvertOptionsScreen}. */
+	public boolean convertSnapsTempo() {
+		return convertSnapsTempo;
+	}
+
+	public void setConvertSnapsTempo(boolean value) {
+		this.convertSnapsTempo = value;
+	}
+
+	/** Whether Convert lands the end marker on the grid. See {@link com.midicraft.client.compat.ConvertOptionsScreen}. */
+	public boolean convertSnapsEnd() {
+		return convertSnapsEnd;
+	}
+
+	public void setConvertSnapsEnd(boolean value) {
+		this.convertSnapsEnd = value;
+	}
+
 	public int conversionGapPercentile() {
 		return conversionGapPercentile;
 	}
@@ -1474,6 +1540,12 @@ public final class MidicraftConfig {
 		config.conversionGapPercentile = DEFAULT_CONVERSION_GAP_PERCENTILE;
 		config.convertOctaveShifting = ComposerProject.OctaveShifting.NOTES_ONLY;
 		config.convertSplitTransposed = true;
+		config.convertBakesSpeed = true;
+		config.convertMergesRepeats = true;
+		config.convertQuantizes = true;
+		config.convertFitsRange = true;
+		config.convertSnapsTempo = true;
+		config.convertSnapsEnd = true;
 		config.commandsPerTick = PasteRate.DEFAULT;
 		config.buildLaneWidth = DEFAULT_BUILD_LANE_WIDTH;
 		config.buildLaneFloors = DEFAULT_BUILD_LANE_FLOORS;
@@ -1648,6 +1720,12 @@ public final class MidicraftConfig {
 		private Integer conversionGapPercentile;
 		private ComposerProject.OctaveShifting convertOctaveShifting;
 		private Boolean convertSplitTransposed;
+		private Boolean convertBakesSpeed;
+		private Boolean convertMergesRepeats;
+		private Boolean convertQuantizes;
+		private Boolean convertFitsRange;
+		private Boolean convertSnapsTempo;
+		private Boolean convertSnapsEnd;
 		private Double commandsPerTick;
 		private Integer buildLaneWidth;
 		private Integer buildLaneFloors;
@@ -1720,6 +1798,12 @@ public final class MidicraftConfig {
 			this.conversionGapPercentile = config.conversionGapPercentile;
 			this.convertOctaveShifting = config.convertOctaveShifting;
 			this.convertSplitTransposed = config.convertSplitTransposed;
+			this.convertBakesSpeed = config.convertBakesSpeed;
+			this.convertMergesRepeats = config.convertMergesRepeats;
+			this.convertQuantizes = config.convertQuantizes;
+			this.convertFitsRange = config.convertFitsRange;
+			this.convertSnapsTempo = config.convertSnapsTempo;
+			this.convertSnapsEnd = config.convertSnapsEnd;
 			this.commandsPerTick = config.commandsPerTick;
 			this.buildLaneWidth = config.buildLaneWidth;
 			this.buildLaneFloors = config.buildLaneFloors;

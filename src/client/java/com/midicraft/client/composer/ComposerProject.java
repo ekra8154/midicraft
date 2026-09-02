@@ -1520,6 +1520,20 @@ public record ComposerProject(
 	public MinecraftConversion convertToMinecraft(int quantizeTicks, boolean snapTempo,
 			int repeatMergeTicks, boolean gameTicks, OctaveShifting shifting,
 			boolean splitTransposed) {
+		return convertToMinecraft(quantizeTicks, snapTempo, repeatMergeTicks, gameTicks, shifting,
+			splitTransposed, true);
+	}
+
+	/**
+	 * @param fitRange whether a note its layer cannot reach is octave-shifted until the layer can.
+	 *     Off, every note keeps the pitch it was written at and no layer splits -- which leaves
+	 *     notes no note block can sound, so it is only ever what someone asked for. The other five
+	 *     steps decline through arguments they already had: a grid of one moves nothing, a merge
+	 *     window of nought merges nothing, and {@code snapTempo} is its own switch.
+	 */
+	public MinecraftConversion convertToMinecraft(int quantizeTicks, boolean snapTempo,
+			int repeatMergeTicks, boolean gameTicks, OctaveShifting shifting,
+			boolean splitTransposed, boolean fitRange) {
 		int grid = Math.max(1, quantizeTicks);
 		double repeatWindow = repeatMergeTicks <= 0
 			? 0.0
@@ -1554,12 +1568,12 @@ public record ComposerProject(
 			// already true pitch and its brackets already reach them, so octave-folding it into
 			// the harp window would undo the layer's whole purpose. Quantizing and repeat merging
 			// still apply -- a split layer's notes live in time like anyone else's.
-			boolean pitched = source.pitched() && source.split() == null;
+			boolean pitched = fitRange && source.pitched() && source.split() == null;
 			// A split layer is fitted to its OWN brackets rather than skipped. Not to the harp
 			// window -- that would undo the layer -- and not by moving the layer as a unit, which
 			// means nothing when its voices already span five octaves. Only a note no voice can
 			// reach moves, and only far enough that one can.
-			boolean fitsToSplit = source.split() != null && source.pitched();
+			boolean fitsToSplit = fitRange && source.split() != null && source.pitched();
 			// Where the layer sits before any note is looked at individually.
 			int base = pitched && shifting == OctaveShifting.LAYER_THEN_NOTES
 				? bestLayerOctaveShift(sourceNotes)
