@@ -1565,7 +1565,7 @@ public final class ComposerScreen extends Screen {
 		// 1.00x. At 1.00x the two agree and nothing looked wrong, which is why converting a fresh
 		// import worked and converting again after nudging the speed left the song off grid.
 		ComposerProject source = project().withBakedSpeed();
-		int gridTicks = minecraftConversionGridTicks(source);
+		int gridTicks = conversionGridTicks(source, gameTicks);
 		try {
 			// Always aligned, and to the grid the button named. Whether to align used to be a
 			// setting, from before there were two Convert buttons -- but landing the song on a
@@ -1644,6 +1644,45 @@ public final class ComposerScreen extends Screen {
 		}
 		return String.format(java.util.Locale.ROOT, " (%.0f -> %.0f BPM)",
 			60_000_000.0 / before, 60_000_000.0 / after);
+	}
+
+	/**
+	 * The grid Convert quantizes to, which is the build's own wherever the song already sits on it.
+	 *
+	 * <p>{@link #minecraftConversionGridTicks} answers with a <em>musical</em> grid -- a 1/4, 1/8
+	 * or 1/16 -- and that is the right answer for a raw import, whose notes carry a performance's
+	 * jitter and want landing on a beat before anything else is decided. It is the wrong answer for
+	 * a song that has already been quantized, because a musical grid is often <em>coarser</em> than
+	 * the one the build can place: at 480 ppq and tempo 352942 a game tick is 68 composer ticks and
+	 * the 1/4 is 120, so quantizing to the 1/4 rounds every start onto a grid nearly twice as wide
+	 * as the one it was already on.</p>
+	 *
+	 * <p>What that costs is not a wrong rhythm -- nothing collapses and no note moves relative to
+	 * its neighbours -- but a coarser one, and then the tempo snap has to slow the song to fit it.
+	 * Measured on geometry-dash-electroman-adventures-2, quantized to game ticks and reporting
+	 * nothing off grid: 5,924 starts moved, every gap of one game tick became two and every gap of
+	 * three became four, every odd gap in the song disappeared, and it came out 1.1335x longer.
+	 * Odd gaps are the only reason a build needs two lanes, so the game-ticks button was quantizing
+	 * away the capability it is named after. Nine of the library's fifty-seven songs did this.</p>
+	 *
+	 * <p>So a song already on the grid is handed that grid instead, which makes the quantize a
+	 * no-op and leaves the tempo snap -- which asks the notes, and for such a song answers with the
+	 * tempo it already has -- nothing to do either. Convert still does everything else it does.
+	 * Nothing changes for a song that is off grid, which is every raw import and the case the
+	 * musical grid was chosen for.</p>
+	 */
+	private int conversionGridTicks(ComposerProject source, boolean gameTicks) {
+		// Asked of the song Convert is about to read, and with the repeat merging it is about to
+		// do: merging changes where the notes are, so a song that is on the grid only after it
+		// would be dragged off by a musical grid all the same.
+		ComposerProject merged = config.repeatMergeTicks() > 0
+			? source.withMergedRepeats(config.repeatMergeTicks(), Set.of())
+			: source;
+		SongAnalysis stats = SongAnalysis.of(merged, config.dedupeIdenticalNotes(), gameTicks);
+		if (stats.offGrid().isEmpty()) {
+			return (int)Math.max(1L, merged.buildGridTicks(gameTicks));
+		}
+		return minecraftConversionGridTicks(source);
 	}
 
 	private int minecraftConversionGridTicks(ComposerProject source) {
