@@ -1220,8 +1220,13 @@ public record ComposerProject(
 		// then landed it on the repeater grid: 128 BPM came back as 63.75, on the wrong grid, from
 		// the button whose only purpose is the other one. Every tempo tested took the exact branch
 		// above, where the arithmetic is shared and the fault cannot show.
+		// Eight, matching the numerator's unit. The numerator counts eighths of the speed, and
+		// this read four -- so the tempo it handed back was twice what the grid wanted and every
+		// song reaching this branch came out at half speed. 128 BPM returned as 63.75, which is
+		// the same shape of fault the comment above records, one unit change later. The exact
+		// branch shares its arithmetic with the numerator and could not show it.
 		return new RepeaterGrid(grid, 1L,
-			Math.max(1, (int)Math.ceil(numerator / (4.0 * perBuildTick * grid))));
+			Math.max(1, (int)Math.ceil(numerator / (8.0 * perBuildTick * grid))));
 	}
 
 	public RepeaterQuantize withQuantizedToRepeaters(Set<Long> scope) {
