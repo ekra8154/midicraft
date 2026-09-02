@@ -89,5 +89,36 @@ class SpeedEighthsProbe {
 		}
 		System.out.println("  " + checked + " songs: " + wrongFactor
 			+ " with the wrong speed factor, " + wrongDelay + " with the wrong build delay");
+
+		// Baking at a half-step. Asked in quarters this is where it went wrong: 1.125x rounds to
+		// the default and bakes nothing, 1.375x rounds to 1.25x and bakes the wrong tempo.
+		ComposerProject base = new ComposerProject("speed", 96, 500_000,
+			List.of(new ComposerProject.Layer("L", "HARP", false, true, true,
+				List.of(new ComposerProject.NoteEvent(1, 60, 0, 24L, 100)), null)),
+			0, 2, 96, 4, 8, List.of());
+		int wrongBake = 0;
+		for (int eighths = ComposerProject.MIN_SPEED_EIGHTHS;
+				eighths <= ComposerProject.MAX_SPEED_EIGHTHS; eighths++) {
+			ComposerProject at = base.withSpeedEighths(eighths);
+			ComposerProject baked = at.withBakedSpeed();
+			// Baking may not change how the song sounds: same real time for the same music.
+			double beforeTicks = at.buildDelayGameTicks(base.ppq());
+			double afterTicks = baked.buildDelayGameTicks(base.ppq());
+			boolean speedReset = baked.speedEighths() == ComposerProject.DEFAULT_SPEED_EIGHTHS;
+			if (!speedReset || Math.abs(beforeTicks - afterTicks) > 1.0) {
+				wrongBake++;
+				System.out.println(String.format(Locale.ROOT,
+					"    %s: %d game ticks -> %d, speed now %d",
+					MidicraftConfigSpeedLabel(eighths), (long)beforeTicks, (long)afterTicks,
+					baked.speedEighths()));
+			}
+		}
+		System.out.println("  baking at every one of the "
+			+ (ComposerProject.MAX_SPEED_EIGHTHS - ComposerProject.MIN_SPEED_EIGHTHS + 1)
+			+ " speeds: " + wrongBake + " changed the song");
+	}
+
+	private static String MidicraftConfigSpeedLabel(int eighths) {
+		return com.midicraft.client.MidicraftConfig.speedLabel(eighths);
 	}
 }

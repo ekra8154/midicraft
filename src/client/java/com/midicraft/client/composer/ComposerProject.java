@@ -1493,12 +1493,16 @@ public record ComposerProject(
 	 * question about a speed the song is not being played at.</p>
 	 */
 	public ComposerProject withBakedSpeed() {
-		if (speedQuarters == DEFAULT_SPEED_QUARTERS) {
+		// Eighths, not quarters. Asked in quarters, a speed of 1.125x reads as the default and
+		// baking returns the song untouched while the slider still says 1.125x, and 1.375x reads
+		// as 1.25x and bakes the wrong factor into the tempo -- the one way this can change how a
+		// song sounds rather than only how it is written.
+		if (speedEighths == DEFAULT_SPEED_EIGHTHS) {
 			return this;
 		}
-		double factor = Math.max(1, speedQuarters) / (double)DEFAULT_SPEED_QUARTERS;
+		double factor = speedFactor();
 		return withTempo(Math.max(1, (int)Math.round(tempoMicrosPerQuarter / factor)))
-			.withSpeedQuarters(DEFAULT_SPEED_QUARTERS);
+			.withSpeedEighths(DEFAULT_SPEED_EIGHTHS);
 	}
 
 	public ComposerProject withName(String value) {
