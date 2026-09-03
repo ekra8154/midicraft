@@ -9797,12 +9797,16 @@ public final class ComposerScreen extends Screen {
 			new String[] {"Redstone ticks, 1 lane", "Game ticks, 2 lanes"}, -1),
 		QUANTIZE("Quantize", "Snaps note starts onto a grid, so their gaps become whole repeater "
 				+ "delays instead of whatever the source file happened to hold.",
+			// The machine's own grids first. They are what this mod quantizes for -- a note on a
+			// repeater or game tick is a note a build can place, and a note on a 1/16 only might
+			// be -- so they are the two anyone reaches for and the note values are the fallback
+			// for shaping a source file before either.
 			new ToolbarAction[] {
+				ToolbarAction.QUANTIZE_REPEATERS, ToolbarAction.QUANTIZE_GAME_TICKS,
 				ToolbarAction.QUANTIZE_QUARTER, ToolbarAction.QUANTIZE_EIGHTH,
-				ToolbarAction.QUANTIZE_SIXTEENTH, ToolbarAction.QUANTIZE_REPEATERS,
-				ToolbarAction.QUANTIZE_GAME_TICKS
+				ToolbarAction.QUANTIZE_SIXTEENTH
 			},
-			new String[] {"1/4 note", "1/8 note", "1/16 note", "Repeater ticks", "Game ticks"}, 3),
+			new String[] {"Repeater ticks", "Game ticks", "1/4 note", "1/8 note", "1/16 note"}, 2),
 		END("End", "Where the song stops, which is a delay the build has to place like any other.",
 			new ToolbarAction[] {ToolbarAction.SNAP_END, ToolbarAction.TRIM_END},
 			new String[] {"Snap to grid", "Trim to last note"}, -1),
@@ -9821,10 +9825,11 @@ public final class ComposerScreen extends Screen {
 		/**
 		 * Row to rule off above, or -1.
 		 *
-		 * <p>Repeater ticks is not a fourth note value and cannot be sorted among them: it is the
-		 * machine's grid, and it slides as the speed slider moves -- 240 ticks at 2.00x, which is
-		 * exactly a 1/8, and 120 at 1.00x, which is exactly a 1/16. Ordering it by coarseness would
-		 * be right at one speed and wrong at the next, so it is set apart instead.</p>
+		 * <p>The machine's grids are not two more note values and cannot be sorted among them:
+		 * they slide as the speed slider moves -- a repeater tick is 240 composer ticks at 2.00x,
+		 * which is exactly a 1/8, and 120 at 1.00x, which is exactly a 1/16. Ordering them by
+		 * coarseness would be right at one speed and wrong at the next, so they are set apart
+		 * instead, above the rule rather than below it.</p>
 		 */
 		private final int dividerBefore;
 
