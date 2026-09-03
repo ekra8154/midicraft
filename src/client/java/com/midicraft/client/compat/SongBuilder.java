@@ -4218,9 +4218,35 @@ public final class SongBuilder {
 			Direction travel, int floor, int climb, int floors) {
 		int wall = travel == forward ? farWall : nearWall;
 		int above = floor + climb;
-		return CLIMB_STANDS_A_COLUMN_OUT && above >= 0 && above < floors && climb > 0
-			? wall + stepAlong(axis, travel) : wall;
+		boolean staircase = above >= 0 && above < floors;
+		if (CLIMB_STANDS_A_COLUMN_OUT && staircase && climb > 0) {
+			return wall + stepAlong(axis, travel);
+		}
+		if (DESCENT_STANDS_A_COLUMN_IN && staircase && climb < 0) {
+			return wall - stepAlong(axis, travel);
+		}
+		return wall;
 	}
+
+	/**
+	 * A descending leg ends a column short of its wall, so the staircase stands inside the footprint.
+	 *
+	 * <p>The four-cell descent is anchored where the lane comes to rest and spirals round the column
+	 * beyond it. A lane that fills exactly to its wall rests one past it, so the spiral stands two
+	 * past -- outside the one column the paste promises on either side -- at every descent in the
+	 * library: 208 of the outer-wall cells over the songs marked "2 lanes", every one of them
+	 * {@code descent4}. HBFS at eight wide over two floors, three of them, read in game as the chord
+	 * before each having breached. The mirror of {@link #CLIMB_STANDS_A_COLUMN_OUT}: the glass climb
+	 * stands one column out and the chord may end there; the descent stands two, so the chord ends
+	 * one in. Costs a descending leg one column of chord room, which is what it always owed.</p>
+	 *
+	 * <p><b>Off, measured.</b> Moving the wall moves everything measured against it, and the descent
+	 * is anchored where the lane comes to rest, not at the wall: over the thirteen songs at
+	 * eighteen sizes, reseed 16, the interleave went from 157 clean to 93 and 36 wrong notes to
+	 * 405, and v2 from 234 clean to 167 with 461 wrong notes. Where the spiral stands has to be
+	 * decided where the descent is built, not by lying to the chords about the wall.</p>
+	 */
+	static boolean DESCENT_STANDS_A_COLUMN_IN = false;
 
 	/**
 	 * Folds upward instead of sideways, so the build only ever grows one way.
