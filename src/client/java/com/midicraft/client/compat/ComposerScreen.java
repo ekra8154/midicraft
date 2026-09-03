@@ -2509,6 +2509,10 @@ public final class ComposerScreen extends Screen {
 			case FILE -> addActionRows(rows, ToolbarAction.FILE_ACTIONS);
 			case EDIT -> {
 				addActionRows(rows, ToolbarAction.EDIT_ACTIONS);
+				// Where the two Convert entries used to sit, as one row that opens into them.
+				rows.add(3, MenuRow.of(ToolbarSubmenu.CONVERT));
+				// Directly under Convert, where it was before the two Convert rows became one --
+				// the two are read together, since Convert quantizes and this is that step alone.
 				rows.add(4, MenuRow.of(ToolbarSubmenu.QUANTIZE));
 				rows.add(MenuRow.of(ToolbarSubmenu.MARKERS));
 				rows.add(MenuRow.of(ToolbarSubmenu.END));
@@ -3134,18 +3138,16 @@ public final class ComposerScreen extends Screen {
 				+ "at any moment counts triple, so the window goes where the melody is rather than "
 				+ "where the most notes are. Greyed out when nothing beats where the song already "
 				+ "sits.";
-			case CONVERT -> "Runs every fix in order: bake the speed into the tempo and reset the "
-				+ "slider to 1.00x; collapse same-pitch repeats closer than the merge window; "
-				+ "quantize note starts onto the chosen grid; octave-shift out-of-range notes in, "
-				+ "splitting a layer per shift it needs; snap the tempo so the grid lands on whole "
-				+ "repeater ticks; snap the end marker to match.";
-			case CONVERT_GAME_TICKS -> "The same conversion, aimed at game ticks instead of "
-				+ "repeater ticks. A game tick is half a repeater tick, so the grid the notes land "
-				+ "on is half as coarse and the tempo moves at most half as far to reach it -- a "
-				+ "song that had to be slowed or swung to fit often needs neither. The build then "
-				+ "needs the Half-tick lane layout, which plays the even game ticks down one lane "
-				+ "and the odd ones down a second beside it. The status bar says how many lanes a "
-				+ "song wants once this has run.";
+			case CONVERT -> "Aimed at repeater ticks, which one lane can place. The steps it takes "
+				+ "-- bake the speed, merge repeats, quantize, fit the range, snap the tempo, snap "
+				+ "the end -- are asked when you press it, and each is a box you can untick.";
+			case CONVERT_GAME_TICKS -> "The same conversion, aimed at game ticks. A game tick is "
+				+ "half a repeater tick, so the grid the notes land on is half as coarse and the "
+				+ "tempo moves at most half as far to reach it -- a song that had to be slowed or "
+				+ "swung to fit often needs neither. The build then needs the Half-tick lane "
+				+ "layout, which plays the even game ticks down one lane and the odd ones down a "
+				+ "second beside it. The status bar says how many lanes a song wants once this has "
+				+ "run.";
 			case MERGE_REPEATS -> "Collapses a pitch that re-triggers faster than the repeat "
 				+ "window. Songs fake sustain this way, and note blocks cannot sustain.";
 			case QUANTIZE_QUARTER, QUANTIZE_EIGHTH, QUANTIZE_SIXTEENTH ->
@@ -9782,6 +9784,17 @@ public final class ComposerScreen extends Screen {
 	 * the flat list hard to scan in the first place.</p>
 	 */
 	private enum ToolbarSubmenu {
+		CONVERT("Convert for Minecraft", "Everything a song needs before a build can hold it -- "
+				+ "merging repeats, landing the notes on a grid, folding notes into a range a note "
+				+ "block can sound, and moving the tempo until the spacing is whole build ticks. "
+				+ "Which of those actually run is asked when you press it. The two entries differ "
+				+ "only in which tick they aim at: a game tick is half a repeater tick, so the "
+				+ "two-lane grid moves the tempo at most half as far, and pays for it with a build "
+				+ "of two machines offset by half a tick.",
+			new ToolbarAction[] {
+				ToolbarAction.CONVERT, ToolbarAction.CONVERT_GAME_TICKS
+			},
+			new String[] {"Redstone ticks, 1 lane", "Game ticks, 2 lanes"}, -1),
 		QUANTIZE("Quantize", "Snaps note starts onto a grid, so their gaps become whole repeater "
 				+ "delays instead of whatever the source file happened to hold.",
 			new ToolbarAction[] {
@@ -9896,8 +9909,9 @@ public final class ComposerScreen extends Screen {
 			CLOSE_TO_GAME
 		};
 		/** Quantize slots in at index 4 and End goes on the end; see {@link #menuRows}. */
+		/** Convert is a submenu now; see {@link ComposerScreen#menuRows}. */
 		private static final ToolbarAction[] EDIT_ACTIONS = {
-			UNDO, REDO, DUPLICATE_SELECTION, CONVERT, CONVERT_GAME_TICKS, MERGE_REPEATS,
+			UNDO, REDO, DUPLICATE_SELECTION, MERGE_REPEATS,
 			TRANSPOSE_BEST_FIT,
 			FIT_ALL_RANGE, BAKE_SPEED, SNAP_TEMPO, SNAP_TEMPO_GAME
 		};
