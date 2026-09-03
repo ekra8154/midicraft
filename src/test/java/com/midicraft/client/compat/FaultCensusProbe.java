@@ -104,18 +104,30 @@ class FaultCensusProbe {
 	private record Row(String song, int width, int floors, int dead, int dropped, int wrong,
 			int breachLanes, int breachBlocks, int depth, String refused, FaultView.Break broke,
 			List<String> wrongPairs, int severed, int collisions, int totalCols,
-			List<String> troubles) {
+			List<String> troubles, int innerWalls, int outerWalls, int worstWall) {
 
 		boolean clean() {
 			return refused == null && dead == 0 && dropped == 0 && wrong == 0 && breachBlocks == 0
-				&& severed == 0 && collisions == 0;
+				&& severed == 0 && collisions == 0 && innerWalls == 0 && outerWalls == 0;
 		}
 
-		/** Dead first, then missing notes, then wrong ones, then ground the build promised not to take. */
+		/**
+		 * Dead first, then missing notes, then legs past a wall, then wrong ones, then ground the
+		 * build promised not to take. A wall crossed outranks a wrong note because an inner wall
+		 * crossed is the two machines colliding, and that is where the dead lines come from.
+		 */
 		long weight() {
-			return (dead + severed * 1_000L) * 1_000_000L + dropped * 10_000L + wrong * 100L
-				+ breachBlocks;
+			return (dead + severed * 1_000L) * 1_000_000L + dropped * 10_000L
+				+ (innerWalls + outerWalls) * 1_000L + wrong * 100L + breachBlocks;
 		}
+	}
+
+	private static int innerWalls(SongBuilder.PastePlan plan) {
+		return (int) plan.innerWallBreaches();
+	}
+
+	private static int outerWalls(SongBuilder.PastePlan plan) {
+		return (int) plan.outerWallBreaches();
 	}
 
 	/** A substring of the padding keys to total over the run, or blank for none. */
@@ -187,6 +199,11 @@ class FaultCensusProbe {
 		SongBuilder.PasteMode mode = mode();
 		List<int[]> sizes = sizes();
 		String only = text("songs", "");
+		// -Dcensus.name=<substring> filters on the song's own name field rather than its filename, so a
+		// mark a composer types into the name -- "2 lanes" -- selects every song they gave it, whatever
+		// each file happens to be called. Case-insensitive. Checked inside the loop, once the JSON is
+		// parsed, because the name is not in the path.
+		String named = text("name", "").toLowerCase(Locale.ROOT);
 		// -Dcensus.real=true leaves the synthetic limit songs out: they are the ones named ultra-*,
 		// built to carry chords of thirty, and the scope is chords to twenty-five.
 		boolean realOnly = Boolean.parseBoolean(text("real", "false"));
@@ -226,6 +243,10 @@ class FaultCensusProbe {
 					raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(), raw.endTick(),
 					raw.speedQuarters());
 			}
+			if (!named.isEmpty() && (song.name() == null
+					|| !song.name().toLowerCase(Locale.ROOT).contains(named))) {
+				continue;
+			}
 			// Through the one dispatcher, not the sequence reading: a half-tick layout is planned
 			// from the composition in game ticks, and handed sequence events it builds a different
 			// song than the paste would -- at the wrong speed, with the two tick parities scrambled.
@@ -244,11 +265,12 @@ class FaultCensusProbe {
 							plan.breaches().size(),
 							plan.breaches().stream().mapToInt(Integer::intValue).sum(),
 							plan.spanZ(), null, null, List.of(), 0, plan.collisions().size(),
-							plan.totalColumns(), troublesIn(plan)));
+							plan.totalColumns(), troublesIn(plan), innerWalls(plan), outerWalls(plan),
+							plan.worstWallBreach()));
 					} catch (RuntimeException refused) {
 						rows.add(new Row(name, size[0], size[1], 0, 0, 0, 0, 0, 0,
 							String.valueOf(refused.getMessage()), null, List.of(), 0, 0, 0,
-							List.of()));
+							List.of(), 0, 0, 0));
 					}
 					continue;
 				}
@@ -270,12 +292,26 @@ class FaultCensusProbe {
 						// unreachedNotes comes back nought on a build cut in half.
 						Math.max(0, built.reading().versions() - 1),
 						built.plan().collisions().size(), built.plan().totalColumns(),
-						troublesIn(built.plan())));
+						troublesIn(built.plan()), innerWalls(built.plan()), outerWalls(built.plan()),
+						built.plan().worstWallBreach()));
 				} catch (RuntimeException refused) {
 					rows.add(new Row(name, size[0], size[1], 0, 0, 0, 0, 0, 0,
-						String.valueOf(refused.getMessage()), null, List.of(), 0, 0, 0, List.of()));
+						String.valueOf(refused.getMessage()), null, List.of(), 0, 0, 0, List.of(),
+						0, 0, 0));
 				}
 			}
+		}
+		// The same trap as the filename filter above, one level in: a mark that matches no song's
+		// name is a typo, and the report for it is a page saying everything is clean.
+		if (!named.isEmpty() && rows.isEmpty()) {
+			List<String> names = new ArrayList<>();
+			for (Path file : files) {
+				try (Reader reader = Files.newBufferedReader(file)) {
+					names.add(String.valueOf(gson.fromJson(reader, ComposerProject.class).name()));
+				}
+			}
+			throw new IllegalArgumentException("census.name=\"" + named
+				+ "\" matches none of the " + names.size() + " song names: " + names);
 		}
 		report(mode, sizes, rows, System.currentTimeMillis() - started, held);
 	}
@@ -318,34 +354,40 @@ class FaultCensusProbe {
 		System.out.println("---- worst first (fault.song / fault.width / fault.floors) ----");
 		for (Row row : faulty) {
 			System.out.println(String.format(
-				"   %-34s %2dw x %df  severed %d  dead %5d  missing %4d  wrong %3d  breach %2d lanes %3d blocks  collisions %2d%s",
+				"   %-34s %2dw x %df  severed %d  dead %5d  missing %4d  wrong %3d  breach %2d lanes %3d blocks  walls in %2d out %2d worst %d  collisions %2d%s",
 				row.song(), row.width(), row.floors(), row.severed(), row.dead(), row.dropped(),
-				row.wrong(), row.breachLanes(), row.breachBlocks(), row.collisions(),
+				row.wrong(), row.breachLanes(), row.breachBlocks(), row.innerWalls(),
+				row.outerWalls(), row.worstWall(), row.collisions(),
 				row.refused() == null ? "" : "   REFUSED: " + row.refused()));
 		}
 		// By song and by kind, because one song at five sizes is one bug five times and reads as five
 		// in a list sorted by weight.
 		TreeMap<String, long[]> bySong = new TreeMap<>();
 		for (Row row : faulty) {
-			long[] tally = bySong.computeIfAbsent(row.song(), key -> new long[5]);
+			long[] tally = bySong.computeIfAbsent(row.song(), key -> new long[7]);
 			tally[0] += row.dead();
 			tally[1] += row.dropped();
 			tally[2] += row.wrong();
 			tally[3] += row.breachBlocks();
 			tally[4] += row.refused() == null ? 0 : 1;
+			tally[5] += row.innerWalls();
+			tally[6] += row.outerWalls();
 		}
 		System.out.println();
 		System.out.println("---- by song ----");
 		bySong.entrySet().stream()
 			.sorted((a, b) -> Long.compare(
-				b.getValue()[0] * 1_000_000 + b.getValue()[1] * 10_000 + b.getValue()[2] * 100
+				b.getValue()[0] * 1_000_000 + b.getValue()[1] * 10_000
+					+ (b.getValue()[5] + b.getValue()[6]) * 1_000 + b.getValue()[2] * 100
 					+ b.getValue()[3],
-				a.getValue()[0] * 1_000_000 + a.getValue()[1] * 10_000 + a.getValue()[2] * 100
+				a.getValue()[0] * 1_000_000 + a.getValue()[1] * 10_000
+					+ (a.getValue()[5] + a.getValue()[6]) * 1_000 + a.getValue()[2] * 100
 					+ a.getValue()[3]))
 			.forEach(entry -> System.out.println(String.format(
-				"   %-34s dead %6d  missing %4d  wrong %3d  breach %4d  refused %d",
+				"   %-34s dead %6d  missing %4d  wrong %3d  breach %4d  walls in %3d out %3d  refused %d",
 				entry.getKey(), entry.getValue()[0], entry.getValue()[1], entry.getValue()[2],
-				entry.getValue()[3], entry.getValue()[4])));
+				entry.getValue()[3], entry.getValue()[5], entry.getValue()[6],
+				entry.getValue()[4])));
 		}
 		// The shapes that meet at each break, which is what says whether twenty dead builds are twenty
 		// bugs or one. Nothing else here can tell those apart, and a session that guesses wrong spends
@@ -453,6 +495,14 @@ class FaultCensusProbe {
 			+ " severedLanes=" + faulty.stream().mapToLong(Row::severed).sum());
 		System.out.println("CENSUS collisions=" + rows.stream().mapToLong(Row::collisions).sum()
 			+ " inBuilds=" + rows.stream().filter(row -> row.collisions() > 0).count());
+		// Legs past their own wall, the plan's geometric reading. Inner and outer apart, because an
+		// inner wall crossed is the two machines of a dual build colliding and an outer one is the
+		// build wider than it promised -- see SongBuilder.WallBreach.
+		System.out.println("CENSUS innerWalls=" + rows.stream().mapToLong(Row::innerWalls).sum()
+			+ " outerWalls=" + rows.stream().mapToLong(Row::outerWalls).sum()
+			+ " inBuilds=" + rows.stream()
+				.filter(row -> row.innerWalls() + row.outerWalls() > 0).count()
+			+ " worst=" + rows.stream().mapToInt(Row::worstWall).max().orElse(0));
 		System.out.println("CENSUS builds=" + rows.size()
 			+ " deadBuilds=" + faulty.stream().filter(row -> row.dead() > 0).count()
 			+ " dead=" + dead + " missing=" + missing + " wrong=" + wrong

@@ -553,8 +553,10 @@ final class BuildOptionsScreen extends Screen {
 				int acrossX = eastmost - westmost + 1;
 				int acrossZ = southmost - northmost + 1;
 				result = new Forecast(Math.max(acrossX, acrossZ), Math.min(acrossX, acrossZ),
-					plan.breaches().size(),
-					plan.worstBreach(), faultLines(plan),
+					// The walk's own breaches and the plan's wall reading together: a lane the
+					// walk did not know was outside is still outside. See SongBuilder.WallBreach.
+					plan.breaches().size() + plan.wallBreaches().size(),
+					Math.max(plan.worstBreach(), plan.worstWallBreach()), faultLines(plan),
 					// In long, because the no-world sentinels are the int extremes and
 					// MIN_VALUE minus a height wraps round to a large positive -- which would
 					// warn that two billion levels are below the floor of a world that is not

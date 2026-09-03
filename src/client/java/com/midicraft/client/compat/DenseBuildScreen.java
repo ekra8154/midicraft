@@ -27,6 +27,9 @@ final class DenseBuildScreen extends Screen {
 	private final int wrongNotes;
 	private final int breaches;
 	private final int worstBreach;
+	private final int innerWalls;
+	private final int outerWalls;
+	private final int worstWall;
 	private final int missingNotes;
 	private final int deadNotes;
 	private final int collisions;
@@ -39,6 +42,9 @@ final class DenseBuildScreen extends Screen {
 		this.wrongNotes = plan.wrongNotes();
 		this.breaches = plan.breaches().size();
 		this.worstBreach = plan.worstBreach();
+		this.innerWalls = (int) plan.innerWallBreaches();
+		this.outerWalls = (int) plan.outerWallBreaches();
+		this.worstWall = plan.worstWallBreach();
 		this.missingNotes = plan.missingNotes();
 		this.deadNotes = plan.deadNotes();
 		this.collisions = plan.collisions().size();
@@ -60,6 +66,7 @@ final class DenseBuildScreen extends Screen {
 	 */
 	static boolean needsAsking(SongBuilder.PastePlan plan) {
 		return plan.wrongNotes() > 0 || !plan.breaches().isEmpty()
+			|| !plan.wallBreaches().isEmpty()
 			|| plan.missingNotes() > 0 || plan.deadNotes() > 0 || !plan.collisions().isEmpty()
 			|| plan.severedLanes() > 0;
 	}
@@ -100,6 +107,19 @@ final class DenseBuildScreen extends Screen {
 		if (missingNotes > 0) {
 			lines.add("- " + count(missingNotes, "note") + " had nowhere to hang and would be left");
 			lines.add("  out of the build entirely.");
+		}
+		// The walls, measured off the blocks rather than off the walk's opinion of itself. An inner
+		// wall crossed is one machine of a dual build standing in the other's ground -- the two
+		// collide there, and that is what most of the dead lines above come from. An outer wall
+		// crossed is the build wider than it said, which the footprint line below also says where
+		// the walk noticed it; this one says it where the walk did not.
+		if (innerWalls > 0) {
+			lines.add("- " + count(innerWalls, "lane") + " would run into the other machine's ground,");
+			lines.add("  by at most " + count(worstWall, "block") + ". The two collide there.");
+		}
+		if (outerWalls > 0) {
+			lines.add("- " + count(outerWalls, "lane") + " would run past the outer wall, by at most "
+				+ count(worstWall, "block") + ".");
 		}
 		if (breaches > 0) {
 			lines.add("- it would breach its footprint " + count(breaches, "time")

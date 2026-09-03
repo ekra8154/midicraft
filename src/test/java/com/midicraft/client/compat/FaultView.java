@@ -537,6 +537,9 @@ final class FaultView {
 		System.out.println("   walls x=" + build.plan().nearWall() + ".." + build.plan().farWall()
 			+ "   spans x " + build.plan().spanX() + " z " + build.plan().spanZ()
 			+ "   breach blocks=" + build.plan().breaches().stream().mapToInt(Integer::intValue).sum()
+			+ " walls=" + build.plan().wallBreaches().size()
+			+ " (inner " + build.plan().innerWallBreaches() + ", worst "
+			+ build.plan().worstWallBreach() + ")"
 			+ " wrong=" + build.plan().wrongNotes()
 			+ " dead=" + build.reading().unreachedNotes());
 		if (build.named()) {
@@ -629,6 +632,26 @@ final class FaultView {
 	}
 
 	private static void outside(Build build, int perKind) {
+		// The plan's own reading first: every cell measured against the wall of the leg that laid it,
+		// inner walls included, which is the one reading that sees a seam or a walk-out standing in
+		// the partner's ground. The turn-based reading below is the walk's opinion of itself.
+		List<SongBuilder.WallBreach> walls = build.plan().wallBreaches();
+		if (walls.isEmpty()) {
+			System.out.println("   no wall breach: every leg stayed inside its own two walls");
+		}
+		for (SongBuilder.WallBreach one : walls.subList(0, Math.min(perKind, walls.size()))) {
+			System.out.println();
+			System.out.println("#### WALL BREACH -- " + one);
+			BlockPos at = one.furthest();
+			// Out to the far wall of the build, so both walls and the partner's rows are in frame.
+			BlockPos wallward = new BlockPos(
+				one.nearSide() ? build.plan().farWall() : build.plan().nearWall(),
+				at.getY(), at.getZ());
+			System.out.println("   from above, the leg, its furthest cell and both walls:");
+			System.out.println(around(build, at, wallward, AsciiDiagram.View.TOP, 2, 3, 0, 3));
+			BlockPos[] box = box(build, at, wallward, 2, 3, 0, 3);
+			System.out.println(shapesIn(build, box[0], box[1]));
+		}
 		List<Breach> breaches = breaches(build);
 		if (breaches.isEmpty()) {
 			System.out.println("   no breach: every lane stayed inside the width it promised");

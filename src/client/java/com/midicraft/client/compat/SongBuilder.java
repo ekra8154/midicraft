@@ -809,7 +809,8 @@ public final class SongBuilder {
 				: ""));
 		return new PastePlan(List.copyOf(commands), plan.width(), plan.depth(), plan.height(),
 			plan.spanX(), plan.spanZ(), plan.mode(), List.copyOf(faults), plan.turns(), plan.moved(),
-			plan.breaches(), plan.recesses(), plan.padding(), plan.nearWall(), plan.farWall(),
+			plan.breaches(), plan.wallBreaches(), plan.recesses(), plan.padding(), plan.nearWall(),
+			plan.farWall(),
 			plan.collisions(), plan.poweredAt(), plan.laidBy(), plan.noteTicks(),
 			// The break where it can be found, and the first quiet note where it cannot. A reading that
 			// says notes are unreached while no powered cell went dark is a disagreement this pass
@@ -825,7 +826,8 @@ public final class SongBuilder {
 		faults.addAll(extra);
 		return new PastePlan(plan.commands(), plan.width(), plan.depth(), plan.height(),
 			plan.spanX(), plan.spanZ(), plan.mode(), List.copyOf(faults), plan.turns(), plan.moved(),
-			plan.breaches(), plan.recesses(), plan.padding(), plan.nearWall(), plan.farWall(),
+			plan.breaches(), plan.wallBreaches(), plan.recesses(), plan.padding(), plan.nearWall(),
+			plan.farWall(),
 			plan.collisions(), plan.poweredAt(), plan.laidBy(), plan.noteTicks(), sites);
 	}
 
@@ -905,7 +907,8 @@ public final class SongBuilder {
 		commands.add(Math.min(after + 1, commands.size()), sign);
 		return new PastePlan(List.copyOf(commands), plan.width(), plan.depth(), plan.height(),
 			plan.spanX(), plan.spanZ(), plan.mode(), plan.faults(), plan.turns(), plan.moved(),
-			plan.breaches(), plan.recesses(), plan.padding(), plan.nearWall(), plan.farWall(),
+			plan.breaches(), plan.wallBreaches(), plan.recesses(), plan.padding(), plan.nearWall(),
+			plan.farWall(),
 			plan.collisions(), plan.poweredAt(), plan.laidBy(), plan.noteTicks(), plan.faultSites());
 	}
 
@@ -1520,7 +1523,8 @@ public final class SongBuilder {
 			plan.commands().size()));
 		return new PastePlan(List.copyOf(laid), plan.width(), plan.depth(), plan.height(),
 			plan.spanX(), plan.spanZ(), plan.mode(), plan.faults(), plan.turns(), plan.moved(),
-			plan.breaches(), plan.recesses(), plan.padding(), plan.nearWall(), plan.farWall(),
+			plan.breaches(), plan.wallBreaches(), plan.recesses(), plan.padding(), plan.nearWall(),
+			plan.farWall(),
 			plan.collisions(), plan.poweredAt(), plan.laidBy(), plan.noteTicks(), plan.faultSites());
 	}
 
@@ -1829,9 +1833,20 @@ public final class SongBuilder {
 		}
 		Set<Integer> tightA = new HashSet<>();
 		Set<Integer> tightB = new HashSet<>();
+		// Events each machine must turn in front of, and whether its inner walls are still hard.
+		// See INNER_WALLS_ARE_HARD.
+		Set<Integer> turnBeforeA = new HashSet<>();
+		Set<Integer> turnBeforeB = new HashSet<>();
+		Set<Integer> softA = new HashSet<>();
+		Set<Integer> softB = new HashSet<>();
+		boolean hardA = true;
+		boolean hardB = true;
 		int rewalks = 0;
 		while (true) {
 			PlacementPlan placements = new PlacementPlan();
+			placements.padded("innerWallForcedTurn", turnBeforeA.size() + turnBeforeB.size());
+			placements.padded("innerWallGaveUp", softA.size() + softB.size());
+			placements.padded("innerWallMachineSoft", (hardA ? 0 : 1) + (hardB ? 0 : 1));
 			// Two machines, two buttons: the severed check excuses one starved repeater per way in,
 			// and until this was recorded every dual build's second button read as a severed lane.
 			// One button on a shared spine, or one each. The severed check excuses a starved
@@ -1857,8 +1872,11 @@ public final class SongBuilder {
 			boolean walkingB = false;
 			try {
 				placements.laneTint(0, Math.floorMod(gtA.get(0).time(), 2));
+				placements.hardInnerWalls(hardA);
+				placements.softEvents(softA);
 				walkRouted(evenEvents, originA, forward, laneWidth, floors, placements, layoutA,
-					routeA, headA, tightA, paceA);
+					routeA, headA, tightA, paceA, turnBeforeA);
+				placements.stopWatchingLegWalls();
 				BlockPos inputA = placements.firstRepeater();
 				int laidByA = placements.laidCells();
 				// The boundary in the turn list, for the same reason the cell count is taken here:
@@ -1871,8 +1889,11 @@ public final class SongBuilder {
 				// two apart on the ground.
 				placements.laneTint(1, Math.floorMod(gtB.get(0).time(), 2));
 				walkingB = true;
+				placements.hardInnerWalls(hardB);
+				placements.softEvents(softB);
 				walkRouted(oddEvents, originB, forward, laneWidth, floors, placements,
-					layoutB, routeB, headB, tightB, paceB);
+					layoutB, routeB, headB, tightB, paceB, turnBeforeB);
+				placements.stopWatchingLegWalls();
 				// One input for both, in place of a button each -- two buttons cannot be pressed
 				// on the same tick, so the machines could never be started in the step the plan
 				// worked out for them. See {@link #addTwoLaneInput}.
@@ -1909,6 +1930,30 @@ public final class SongBuilder {
 						|| ++rewalks > evenEvents.size() + oddEvents.size()) {
 					throw new IllegalStateException("a flat turn armed tight still hung a note past "
 						+ "its corner at " + outside.getMessage());
+				}
+			} catch (InnerWallCrossed crossed) {
+				// A machine that crossed its inner wall is walked again with a turn forced in
+				// front of the event that crossed it. The same event crossing twice, or the
+				// rewalk budget spent, softens that machine's inner walls for the pass that
+				// finally builds -- a build with the breach on it beats no build, and the census
+				// counts the give-up. See INNER_WALLS_ARE_HARD.
+				Set<Integer> forced = walkingB ? turnBeforeB : turnBeforeA;
+				if (TRACE_TURNS) {
+					System.out.println("INNERWALL rewalk " + rewalks + " machine " + (walkingB ? "B" : "A")
+						+ " event " + crossed.index() + " forced=" + forced.size() + " hard="
+						+ (walkingB ? hardB : hardA) + " : " + crossed.getMessage());
+				}
+				if (!forced.add(crossed.index())) {
+					// Forced and crossed again: that event alone goes soft, and every other wall
+					// of the machine stays hard.
+					(walkingB ? softB : softA).add(crossed.index());
+				}
+				if (++rewalks > 2 * (evenEvents.size() + oddEvents.size())) {
+					if (walkingB) {
+						hardB = false;
+					} else {
+						hardA = false;
+					}
 				}
 			}
 		}
@@ -1956,7 +2001,10 @@ public final class SongBuilder {
 		while (true) {
 			Pace pace = new Pace(new int[events.size()], null);
 			try {
-				walkRouted(events, origin, forward, laneWidth, floors, new PlacementPlan(), layout,
+				// A dry walk measures pace and nothing else; its walls stay soft.
+				PlacementPlan dry = new PlacementPlan();
+				dry.hardInnerWalls(false);
+				walkRouted(events, origin, forward, laneWidth, floors, dry, layout,
 					route, start, tight, pace);
 				return pace.progress();
 			} catch (FlatTurnHungOutside outside) {
@@ -2339,6 +2387,72 @@ public final class SongBuilder {
 	 */
 	/** Whether a seam may be laid through a turn instead of waiting for a straight run. */
 	static boolean SEAM_RIDES_A_TURN = true;
+
+	/**
+	 * How many columns a lane may stand past its own wall before that counts as a breach, on each
+	 * kind of wall.
+	 *
+	 * <p>An <b>outer</b> wall is a wall of the whole build, and the paste footprint already reaches
+	 * one column past it on both sides: a corner's dust and a staircase's step stand there by
+	 * construction, and {@link #widthReserve} promises the player those columns. An <b>inner</b>
+	 * wall is a wall of one machine against the other -- the shortened wall a leg turns on where the
+	 * partner's long link runs past its end, see {@link #nestedRoute} -- and one column past it is
+	 * the column the partner hangs its notes in. Nothing of this machine may stand there at all. A
+	 * dual build has four walls, two of each kind, and the same leg can answer to one of each.</p>
+	 *
+	 * <p>Measured rather than argued: every cell a leg lays is checked against that leg's own two
+	 * walls as it goes down, whatever laid it -- see {@link PlacementPlan#set} -- because the
+	 * breaches the walk files itself are only the chords it refused to turn, and the ones that
+	 * severed both machines of every dual build drawn so far were laid by seams and walk-outs the
+	 * walk never priced. Dorian at eight wide, machine B's leg at z=988: a seam, its reader on the
+	 * shortened wall, and a chord of thirteen laid straight on through to four past the full wall,
+	 * with the plan reporting nought. Read off {@link PastePlan#wallBreaches}.</p>
+	 */
+	static int WALL_BREACH_OUTER_ALLOWANCE = 1;
+	static int WALL_BREACH_INNER_ALLOWANCE = 0;
+
+	/**
+	 * Whether an inner wall is a hard wall: a block laid past it stops the walk, which is run again
+	 * with a turn forced in front of the event that laid it.
+	 *
+	 * <p>The walk already steers by the shortened wall -- the leg that ran seven past it in dorian
+	 * at eight wide was decided against {@code wall=8} -- but nothing made that number binding:
+	 * the decision skips the wall while the route still bends, {@code layBus} pads a collided bus
+	 * forward on the assumption that what it hit "is not a wall", and pads and corner dust ask no
+	 * wall at all. The one hard limit the walk has is the flat-turn watch, whose
+	 * {@link FlatTurnHungOutside} rewalks the machine with the turn armed tight. This is that
+	 * mechanism for the inner wall: {@link PlacementPlan#set} throws {@link InnerWallCrossed} on
+	 * the first cell past it, ground included, the planner adds the event to that machine's
+	 * {@code turnBefore} set and walks again; at that event the wait walks the pending bend out
+	 * whatever its length, the turn is closed, and the chord is decided against the wall it is
+	 * actually standing at. A machine that crosses the same wall at the same event twice is walked
+	 * once more with the wall soft, so a build is always produced. Counted as
+	 * {@code innerWallForcedTurn} and {@code innerWallGaveUp}.</p>
+	 */
+	static boolean INNER_WALLS_ARE_HARD = true;
+
+	/**
+	 * Whether a seam whose reader would land on or past the wall arms its turn at the wall, rather
+	 * than only one whose element would.
+	 *
+	 * <p>A seam does not have to be followed by a repeater. What follows its last block of redstone
+	 * is whatever reads it, and dust reads it as well as a repeater does and turns a corner where a
+	 * repeater cannot. So a seam ending at its wall is not a seam that needs two more columns past
+	 * the wall for its reader and the next opener -- it is a seam that needs its corner on the
+	 * element, dust round the corner, and the next repeater after that: the same corner padding every
+	 * other shape gets. Off, the old bound: the element alone is measured against the wall.</p>
+	 *
+	 * <p><b>Off, because it was measured and it is not the fault.</b> Over the thirteen songs marked
+	 * "2 lanes" at eighteen sizes, reseed 16: on, {@code paritySeamArmedItsWall} fires 34 times where
+	 * it fired nought, and dead, wrong and collisions do not move -- 10140, 162, 247 either way --
+	 * while inner wall breaches go 174 to 180. The drawings say why: in dorian at eight wide and grim
+	 * at eight, the seam rides its corner correctly and lays its reader as dust; it is the
+	 * <em>chord after it</em> that runs through the shortened wall, because {@code canTurn} on a flat
+	 * turn wants a chord that straddles the corner, and a bus of ten or thirteen cannot. What is
+	 * missing is an empty flat turn -- dust round the corner with nothing riding it -- not an earlier
+	 * one. Kept as a knob so the measurement can be repeated.</p>
+	 */
+	static boolean SEAM_TURNS_FOR_ITS_READER = false;
 
 	/**
 	 * Whether a corner may fall on this cell of a seam's element.
@@ -3729,6 +3843,7 @@ public final class SongBuilder {
 			try {
 				walkRouted(events, origin, forward, laneWidth, floors, placements, layout, route,
 					start, tightTurns);
+				placements.stopWatchingLegWalls();
 				// What each pass before this one was for, by the shape that hung the note -- the guess
 				// that was wrong, and how it was wrong, is what the guess is tuned on.
 				for (String shape : rewalkedFor) {
@@ -3875,6 +3990,26 @@ public final class SongBuilder {
 	static int FLAT_TURN_FORCE_WIDE_AT = -1;
 
 	/**
+	 * A block was laid past an inner wall: the walk stops here and is run again with a turn forced
+	 * in front of the event that laid it. Not an {@link IllegalArgumentException}, for the reason
+	 * {@link FlatTurnHungOutside} is not: every trial catches that as its fallback, and this must
+	 * reach the planner. See {@link #INNER_WALLS_ARE_HARD}.
+	 */
+	static final class InnerWallCrossed extends RuntimeException {
+		private static final long serialVersionUID = 1L;
+		private final int index;
+
+		InnerWallCrossed(int index, String where) {
+			super(where);
+			this.index = index;
+		}
+
+		int index() {
+			return index;
+		}
+	}
+
+	/**
 	 * v2: a rigid stacked module that would land flush ahead of a descent, and could only give the
 	 * staircase its flank by growing a tail, is not laid there -- the lane turns first.
 	 *
@@ -3966,6 +4101,19 @@ public final class SongBuilder {
 	/** The near wall as a leg sees it: the base, less whatever the route reaches behind it. */
 	private static int nearWallAt(LaneRoute route, int leg, int nearWall, int step) {
 		return nearWall - route.nearExtension(leg) * step;
+	}
+
+	/**
+	 * Tells the plan the wall this leg is heading for, so that a cell laid past it is a breach the
+	 * plan can see. The wall is the one the walk steers by, and it is an inner wall where the route
+	 * pulled it in against the partner machine. See {@link PlacementPlan#wallAhead}.
+	 */
+	private static void watchWallAhead(PlacementPlan placements, LaneRoute route, int leg,
+			int wall, Direction forward, Direction travel, Direction.Axis axis, int event) {
+		boolean towardsFar = travel == forward;
+		placements.wallAhead(wall, stepAlong(axis, travel),
+			towardsFar ? route.tipExtension(leg) != 0 : route.nearExtension(leg) != 0,
+			!towardsFar, leg, axis, event);
 	}
 
 	/** The tip wall of a leg's pair: the base far wall plus whatever the route extends it by. */
@@ -9246,6 +9394,13 @@ public final class SongBuilder {
 			tightTurns, null);
 	}
 
+	static void walkRouted(List<EventGroup> events, BlockPos origin, Direction forward,
+			int laneWidth, int floors, PlacementPlan placements, Layout layout, LaneRoute route,
+			WalkStart start, Set<Integer> tightTurns, Pace pace) {
+		walkRouted(events, origin, forward, laneWidth, floors, placements, layout, route, start,
+			tightTurns, pace, Set.of());
+	}
+
 	/**
 	 * A machine's pulse positions, and the padding that keeps it within earshot of its partner.
 	 *
@@ -9270,9 +9425,15 @@ public final class SongBuilder {
 	 * @param pace where this walk's pulse positions go and what its waits owe the partner machine,
 	 *     or null for a machine walking alone. See {@link Pace}.
 	 */
+	/**
+	 * @param turnBefore events in front of which a turn is forced: the wait walks any pending bend
+	 *     out whatever its length, the turn is closed, and the chord is decided against the wall it
+	 *     stands at. Filled by the planner from {@link InnerWallCrossed}; see
+	 *     {@link #INNER_WALLS_ARE_HARD}.
+	 */
 	static void walkRouted(List<EventGroup> events, BlockPos origin, Direction forward,
 			int laneWidth, int floors, PlacementPlan placements, Layout layout, LaneRoute route,
-			WalkStart start, Set<Integer> tightTurns, Pace pace) {
+			WalkStart start, Set<Integer> tightTurns, Pace pace, Set<Integer> turnBefore) {
 		// Where chords grow, and the direction the whole slab creeps once a sweep is done.
 		Direction depth = route.mirrored()
 			? forward.getCounterClockWise() : forward.getClockWise();
@@ -9347,6 +9508,7 @@ public final class SongBuilder {
 		int leg = 0;
 		int floor = route.floorOf(0);
 		int climb = route.climbOf(0);
+		placements.stopWatchingLegWalls();
 		boolean laneStarted = false;
 		/** Whether a chord has been laid on the bend the walk is currently going round. */
 		boolean placedWhileTurning = false;
@@ -9484,6 +9646,10 @@ public final class SongBuilder {
 			if (layout.ultra() && route.foldsWaits() && railPhase < 0) {
 				int foldSignal = tipSignal;
 				boolean folded = false;
+				// A turn forced in front of this event walks out the bend pending as the event
+				// begins -- once -- and never the turns the fold arms after it. See
+				// INNER_WALLS_ARE_HARD; without the once, the fold armed a hundred thousand legs.
+				boolean forcedWalkOut = turnBefore.contains(index) && lane.bending();
 				// Columns this wait owes the partner machine over its own minimum, so the two pulses
 				// stay within earshot; spent as dust anchored on the chain's repeaters, ten cells to
 				// a repeater at most so the trigger at the end never reads a dead wire. Abandoned,
@@ -9515,9 +9681,13 @@ public final class SongBuilder {
 						// through an armed corner on its own, so there is nothing left to fold. And a
 						// stretch may only pull the chain through when the ticks can keep it alive: a
 						// repeater every eleventh cell is the thinnest live chain there is.
-						if (want <= toExit || foldRepeaters <= toExit / 8) {
+						// Unless a turn is forced in front of this event: then the bend is walked
+						// out whatever the wait is worth, so the chord is decided on a straight
+						// lane against its wall. See INNER_WALLS_ARE_HARD.
+						if (!forcedWalkOut && (want <= toExit || foldRepeaters <= toExit / 8)) {
 							break;
 						}
+						forcedWalkOut = false;
 						// Walk the turn out, spending the wait: a repeater wherever ticks remain, a
 						// plain pad cell where they do not, and the corner cells as corner cells.
 						placements.placing("delayBeforeChord");
@@ -9732,6 +9902,7 @@ public final class SongBuilder {
 						leg++;
 						floor = route.floorOf(leg);
 						climb = route.climbOf(leg);
+						placements.stopWatchingLegWalls();
 						placements.padded("waitFoldedFlat");
 						folded = true;
 						continue;
@@ -9788,6 +9959,7 @@ public final class SongBuilder {
 					leg++;
 					floor = route.floorOf(leg);
 					climb = route.climbOf(leg);
+					placements.stopWatchingLegWalls();
 					// Started for the reason the flat exit above is: the repeater chain crossing
 					// the staircase is the lane's content, and its first chord may land flush.
 					laneStarted = true;
@@ -9912,7 +10084,21 @@ public final class SongBuilder {
 						* stepAlong(axis, lane.travel());
 					// Cells, not columns: the element opens in the cell the lane stands in, so
 					// seven cells reach the wall when there are six columns left to it.
-					boolean crosses = seamColumns >= 0 && seamColumns < PARITY_SEAM_CELLS - 1;
+					//
+					// And the reader counts. An element whose last cell stands on the wall lays
+					// perfectly and puts its reader one past it, and the module after that puts its
+					// repeater two past -- or, with the reader exactly on the wall, one past. Neither
+					// was "crossing" by the old bound, so no turn was armed, the seam lay straight,
+					// and the chord after it had a wall it could not turn at and ran on through.
+					// Dorian at eight wide, machine B at z=988: seam at x=1..7, reader on its
+					// shortened wall at 8, a chord of thirteen laid to x=15. With the reader counted
+					// the turn is armed at the wall and the shove below puts the corner on a piston,
+					// a landing or the reader itself -- all of which may take one -- so the seam
+					// turns, dust carries the signal round the corner, and the next repeater stands
+					// past it, where pastAnyCorner has always put it. See SEAM_TURNS_FOR_ITS_READER.
+					int seamReach = SEAM_TURNS_FOR_ITS_READER
+						? PARITY_SEAM_CELLS + PARITY_SEAM_LANDING_READER : PARITY_SEAM_CELLS - 1;
+					boolean crosses = seamColumns >= 0 && seamColumns < seamReach;
 					if (crosses && !(seamTurn.above() >= 0 && seamTurn.above() < floors)) {
 						boolean tight = FLAT_TURN_KEEPS_ITS_WIDTH
 							&& (tightTurns.contains(index) || route.linkArmsTight(leg));
@@ -9928,6 +10114,7 @@ public final class SongBuilder {
 						leg++;
 						floor = route.floorOf(leg);
 						climb = route.climbOf(leg);
+						placements.stopWatchingLegWalls();
 						ridesTheTurn = true;
 						placements.padded("paritySeamArmedItsWall");
 						int aligned = 0;
@@ -10010,6 +10197,25 @@ public final class SongBuilder {
 			// leaves the next lane starting outside the wall -- and nothing measured afterwards can
 			// help, because by then the overshoot is built. Asking first costs a lane its last event
 			// and keeps the wall a wall.
+			// A turn forced in front of this event, with its bend now walked out: closed here, the
+			// same close as the top of the event, so the chord is asked on a straight lane. See
+			// INNER_WALLS_ARE_HARD.
+			if (turnBefore.contains(index) && turning && !lane.bending()) {
+				lane = lane.pinned(depth);
+				turning = false;
+				leavingTurn = TURN_BAN_OUTLASTS;
+				if (placements.watchingATurn()) {
+					placements.padded(placements.turnWasWide() ? "flatTurnWideClean"
+						: placements.turnHungBeyond() ? "flatTurnTightNeeded"
+						: "flatTurnTightUnneeded");
+					placements.stopWatchingTheTurn();
+				}
+				laneStarted = placedWhileTurning;
+				placedWhileTurning = false;
+				columnBehindBusy = true;
+				replan = layout.ultra();
+				placements.padded("innerWallClosedTheBend");
+			}
 			TurnCost turn = turnCost(floor, climb, floors, flatLink(route, leg, slabStep));
 			int above = turn.above();
 			int turnCells = turn.cells();
@@ -10056,6 +10262,9 @@ public final class SongBuilder {
 			int wall = laneWall(axis, nearWallAt(route, leg, nearWall, tipStep),
 					tipWall(route, leg, farWall, tipStep), forward,
 				lane.travel(), floor, climb, floors);
+			// And the plan is told the same wall, so a block laid past it by anything below is a
+			// breach whether or not the arm that laid it knew. See WALL_BREACH_OUTER_ALLOWANCE.
+			watchWallAhead(placements, route, leg, wall, forward, lane.travel(), axis, index);
 			int stepOffAhead = turn.stepOff();
 			int splitCells = turn.splitCells();
 			if (replan) {
@@ -10394,7 +10603,12 @@ public final class SongBuilder {
 			// column, so the promised cell is the corner and the note stands on it, which is the
 			// model 1 exactly. Whether everything downstream of wantsTurn copes with a live rail is the
 			// thing to measure; none of it has ever been asked to.
-			boolean overshoots = !turning && (railPhase < 0 || flatAhead)
+			// A forced turn is decided whether or not the route still says turning -- the bend
+			// has been walked out and closed above -- but only until the turn is armed: an event
+			// re-asked once its turn is open must not turn again, and the lane must still have
+			// held something first, or the walk would climb the whole build without laying a note.
+			boolean forcedTurn = turnBefore.contains(index) && !turning;
+			boolean overshoots = (!turning || forcedTurn) && (railPhase < 0 || flatAhead)
 				&& ((landing - wall) * stepAlong(axis, lane.travel()) > 0 || strandsTheTurn
 					|| flushHeadWouldGrow || shapeWouldFall);
 			// And whether it merely gets there. A chord ending on the wall, or one column short of
@@ -11847,6 +12061,7 @@ public final class SongBuilder {
 				leg++;
 				floor = route.floorOf(leg);
 				climb = route.climbOf(leg);
+				placements.stopWatchingLegWalls();
 				travel = travel.getOpposite();
 				if (!far.isEmpty()) {
 					cursor = addCarriedEventModule(placements, cursor, travel, depth, far,
@@ -11981,6 +12196,7 @@ public final class SongBuilder {
 				leg++;
 				floor = route.floorOf(leg);
 				climb = route.climbOf(leg);
+				placements.stopWatchingLegWalls();
 				// The tip is what it was. The dust on the glass carries what the chord's last
 				// cell carries, so the lane above opens on the same signal this one closed with --
 				// and it opens on a repeater, which hands out fifteen whatever arrives.
@@ -12199,6 +12415,7 @@ public final class SongBuilder {
 					leg++;
 					floor = route.floorOf(leg);
 					climb = route.climbOf(leg);
+					placements.stopWatchingLegWalls();
 					// What the staircase leaves the next lane. It matters because the next lane may
 					// want to lay dust of its own before its first repeater, and a staircase is the one
 					// handover in a build that spends wire without a repeater at either end of it.
@@ -12370,6 +12587,7 @@ public final class SongBuilder {
 					leg++;
 					floor = route.floorOf(leg);
 					climb = route.climbOf(leg);
+					placements.stopWatchingLegWalls();
 				}
 			}
 			if (carried) {
@@ -29251,9 +29469,39 @@ public final class SongBuilder {
 		}
 	}
 
+	/**
+	 * One leg of one machine that laid something past its own wall, and the furthest cell it got.
+	 *
+	 * <p>Not the same fault as an entry in {@link PastePlan#breaches}. That is a chord the walk
+	 * refused to turn at its wall, filed by the walk about itself; this is any cell at all found past
+	 * the wall the leg answered to, filed by the plan as the cell went down. The two overlap where a
+	 * refused chord's blocks are what stand outside, and disagree everywhere the walk did not know it
+	 * was outside -- which, drawn, has been every dead dual build so far.</p>
+	 *
+	 * @param machine which machine laid it, {@code 0} or {@code 1} in a dual build, {@code -1} alone
+	 * @param leg the leg of that machine's route, counted from its opening
+	 * @param nearSide whether the wall crossed is the near one, in the walk's own terms
+	 * @param inner whether that wall is a shortened wall against the partner machine, where the
+	 *     allowance is {@link #WALL_BREACH_INNER_ALLOWANCE} rather than the outer one
+	 * @param past how many columns past the wall the furthest cell stands
+	 * @param furthest that cell, in paste coordinates once the plan has landed
+	 * @param placing the shape that laid it, as {@link PlacementPlan#placing} named itself
+	 */
+	record WallBreach(int machine, int leg, boolean nearSide, boolean inner, int past,
+			BlockPos furthest, String placing) {
+		@Override
+		public String toString() {
+			return (machine < 0 ? "a lane" : "machine " + (char) ('A' + machine) + " leg " + leg)
+				+ " ran " + past + " past its " + (inner ? "inner" : "outer") + " "
+				+ (nearSide ? "near" : "far") + " wall, to " + furthest.getX() + " "
+				+ furthest.getY() + " " + furthest.getZ() + ", laid by " + placing;
+		}
+	}
+
 	record PastePlan(List<String> commands, int width, int depth, int height, int spanX, int spanZ,
 			PasteMode mode, List<String> faults, List<BlockPos> turns, List<Integer> moved,
-			List<Integer> breaches, List<Integer> recesses, Map<String, Integer> padding,
+			List<Integer> breaches, List<WallBreach> wallBreaches, List<Integer> recesses,
+			Map<String, Integer> padding,
 			int nearWall, int farWall, Map<BlockPos, String> collisions, Set<BlockPos> poweredAt,
 			Map<BlockPos, String> laidBy, Map<BlockPos, Integer> noteTicks, FaultSites faultSites) {
 
@@ -29390,6 +29638,21 @@ public final class SongBuilder {
 		/** How far past the promised width the worst-behaved lane went, in blocks. */
 		int worstBreach() {
 			return breaches.stream().mapToInt(Integer::intValue).max().orElse(0);
+		}
+
+		/** How far past its own wall the worst leg stood, in columns. See {@link WallBreach}. */
+		int worstWallBreach() {
+			return wallBreaches.stream().mapToInt(WallBreach::past).max().orElse(0);
+		}
+
+		/** Legs that crossed a wall shared with the other machine -- the ones that collide. */
+		long innerWallBreaches() {
+			return wallBreaches.stream().filter(WallBreach::inner).count();
+		}
+
+		/** Legs that crossed a wall of the whole build. */
+		long outerWallBreaches() {
+			return wallBreaches.stream().filter(one -> !one.inner()).count();
 		}
 
 		/**
@@ -29590,6 +29853,12 @@ public final class SongBuilder {
 		private final Map<String, Integer> padding = new java.util.LinkedHashMap<>();
 		/** Route cells the wire changes direction on, where a repeater can never work. */
 		private final Set<BlockPos> corners = new java.util.HashSet<>();
+		/**
+		 * Every cell laid past the wall of the leg that laid it, in the order laid. One entry a
+		 * cell, so a trial can trim it like every other list here; folded to one entry a leg and
+		 * side when the plan is finished. See {@link WallBreach}.
+		 */
+		private final List<WallBreach> wallBreachCells = new ArrayList<>();
 
 		/**
 		 * The starter's cells, in the order they have to be sent, ahead of the whole build.
@@ -29678,7 +29947,8 @@ public final class SongBuilder {
 				Map<BlockPos, Integer> poweredBefore, Map<BlockPos, String> blocksBefore,
 				Map<BlockPos, String> namesBefore, List<BlockPos> cornersAdded,
 				List<BlockPos> collisionsAdded,
-				int turnCount, int movedCount, int troubleCount, int breachCount, int recessCount,
+				int turnCount, int movedCount, int troubleCount, int breachCount,
+				int wallBreachCount, int recessCount,
 				Map<String, Integer> padding,
 				int minX, int minY, int minZ, int maxX, int maxY, int maxZ) {
 		}
@@ -30368,7 +30638,7 @@ public final class SongBuilder {
 			softTail = what;
 			tailJournal = new Trial(new ArrayList<>(), new LinkedHashMap<>(), new LinkedHashMap<>(),
 				new LinkedHashMap<>(), new LinkedHashMap<>(),
-				new ArrayList<>(), new ArrayList<>(), 0, 0, 0, 0, 0, Map.of(), 0, 0, 0, 0, 0, 0);
+				new ArrayList<>(), new ArrayList<>(), 0, 0, 0, 0, 0, 0, Map.of(), 0, 0, 0, 0, 0, 0);
 		}
 
 		/** Stops recording, keeping what was recorded. The tail is down; the question comes later. */
@@ -30577,6 +30847,73 @@ public final class SongBuilder {
 		private int farWallColumn = Integer.MIN_VALUE;
 
 		private Direction.Axis wallAxis = Direction.Axis.X;
+
+		/**
+		 * The wall the leg now being laid is travelling towards, or nothing between legs and outside
+		 * a routed walk.
+		 *
+		 * <p>One wall and not two. A leg begins wherever the turn before it came to rest, so the wall
+		 * behind it is the previous leg's business and says nothing about this one; the wall ahead is
+		 * the one it must turn at, and every cell past that is a breach. Set by the walk at the head
+		 * of every event from the same {@code laneWall} it steers by -- the leg's own wall, pulled in
+		 * where the route says the partner's long link crosses, a column out where the leg ends in a
+		 * climb -- and cleared at each leg change until the next event sets it again, because between
+		 * the two the lane has turned and the old wall is behind it. While set, {@link #set} measures
+		 * every block against it -- the same shape as the flat-turn watch above, and for the same
+		 * reason: the only way to catch the shape nobody thought to guard is to notice after.</p>
+		 *
+		 * <p>Two walls, measured naively, flooded: 231 of 234 dual builds, eleven thousand inner
+		 * breaches, most of them a leg's first three columns read against the shortened wall it had
+		 * just left.</p>
+		 */
+		private boolean watchingLegWalls;
+		private int legWall;
+		/** {@code +1} if the leg travels up the axis towards its wall, {@code -1} down it. */
+		private int legStep;
+		private boolean legInner;
+		private boolean legNearSide;
+		private int legIndex;
+		private Direction.Axis legAxis = Direction.Axis.X;
+		/** The event being laid, for the throw that names it; {@code -1} between events. */
+		private int legEvent = -1;
+		/** Whether a cell past an inner wall stops the walk, or is merely recorded. */
+		private boolean hardInnerWalls = true;
+		/**
+		 * Events whose crossing the walk has given up on: the same event crossed twice with a turn
+		 * forced in front of it. Soft for that event alone -- machine B's opening at eleven wide and
+		 * one floor stands on a corner by a geometry defect nothing here can turn out of, and
+		 * softening the whole machine for it left every wall after it unguarded.
+		 */
+		private Set<Integer> softEvents = Set.of();
+
+		void hardInnerWalls(boolean hard) {
+			hardInnerWalls = hard;
+		}
+
+		void softEvents(Set<Integer> events) {
+			softEvents = events;
+		}
+
+		void wallAhead(int wall, int step, boolean inner, boolean nearSide, int leg,
+				Direction.Axis axis, int event) {
+			watchingLegWalls = true;
+			legWall = wall;
+			legStep = step;
+			legInner = inner;
+			legNearSide = nearSide;
+			legIndex = leg;
+			legAxis = axis;
+			legEvent = event;
+		}
+
+		/**
+		 * Between legs, and for the cells laid after a walk is done -- the input, the sign -- which
+		 * answer to no wall.
+		 */
+		void stopWatchingLegWalls() {
+			watchingLegWalls = false;
+			legEvent = -1;
+		}
 		private final Set<Integer> extraWallColumns = new java.util.HashSet<>();
 
 		/** A turning column outside the two walls -- an extended tip, in the interleaved comb. */
@@ -30844,6 +31181,27 @@ public final class SongBuilder {
 				}
 				turnHungBeyond = true;
 			}
+			// A block past the wall of the leg laying it, whoever laid it. Air is a landing and stands
+			// nowhere, as above. Recorded a cell at a time so a trial rolls it back with the cell; the
+			// finished plan folds it to a leg and a side. See {@link #WALL_BREACH_OUTER_ALLOWANCE}.
+			if (watchingLegWalls && !"minecraft:air".equals(block)) {
+				int past = (coordAlong(legAxis, position) - legWall) * legStep;
+				if (past > (legInner ? WALL_BREACH_INNER_ALLOWANCE : WALL_BREACH_OUTER_ALLOWANCE)) {
+					String by = placing == null ? "?" : placing;
+					// A hard inner wall stops the walk here, before the cell is recorded: the plan is
+					// abandoned and walked again with a turn forced. See INNER_WALLS_ARE_HARD.
+					if (legInner && hardInnerWalls && INNER_WALLS_ARE_HARD && legEvent >= 0
+							&& !softEvents.contains(legEvent)) {
+						throw new InnerWallCrossed(legEvent, describe(position) + " " + block
+							+ " laid by " + by + ", " + past + " past the inner wall");
+					}
+					// The tint is machine and parity together, see laneTint(int, int); the breach
+					// wants the machine alone.
+					wallBreachCells.add(new WallBreach(laneTint < 0 ? -1 : laneTint / 2, legIndex,
+						legNearSide, legInner, past, position.immutable(), by));
+					padded("WALL-BREACH:" + (legInner ? "inner" : "outer") + ":" + by);
+				}
+			}
 			BlockPos key = position.immutable();
 			String existing = blocks.putIfAbsent(key, block);
 			if (existing == null && laneTint >= 0) {
@@ -30986,7 +31344,7 @@ public final class SongBuilder {
 			trial = new Trial(new ArrayList<>(), new LinkedHashMap<>(), new LinkedHashMap<>(),
 				new LinkedHashMap<>(), new LinkedHashMap<>(), new ArrayList<>(), new ArrayList<>(),
 				turns.size(), moved.size(), trouble.size(), breaches.size(),
-				recesses.size(), new LinkedHashMap<>(padding),
+				wallBreachCells.size(), recesses.size(), new LinkedHashMap<>(padding),
 				minimumX, minimumY, minimumZ, maximumX, maximumY, maximumZ);
 		}
 
@@ -31144,6 +31502,7 @@ public final class SongBuilder {
 			trim(moved, undo.movedCount());
 			trim(trouble, undo.troubleCount());
 			trim(breaches, undo.breachCount());
+			trim(wallBreachCells, undo.wallBreachCount());
 			trim(recesses, undo.recessCount());
 			padding.clear();
 			padding.putAll(undo.padding());
@@ -31155,6 +31514,30 @@ public final class SongBuilder {
 			maximumZ = undo.maxZ();
 			trial = outer;
 			trialRun = outerRun;
+		}
+
+		/**
+		 * The wall breaches folded to one a leg and side -- the furthest cell of each -- shifted to
+		 * where the plan lands, worst first.
+		 *
+		 * <p>Folded here and not as they are laid, because a trial trims the cell list by count and a
+		 * running "worst so far" cannot be trimmed. A leg that stands two cells outside is one breach
+		 * of however many columns the further cell is, which is how the walk's own breaches count.</p>
+		 */
+		private List<WallBreach> wallBreachesLanded(int shiftX, int shiftZ) {
+			Map<String, WallBreach> worst = new LinkedHashMap<>();
+			for (WallBreach cell : wallBreachCells) {
+				String key = cell.machine() + "/" + cell.leg() + "/" + cell.nearSide();
+				WallBreach held = worst.get(key);
+				if (held == null || cell.past() > held.past()) {
+					worst.put(key, cell);
+				}
+			}
+			return worst.values().stream()
+				.sorted((a, b) -> Integer.compare(b.past(), a.past()))
+				.map(one -> new WallBreach(one.machine(), one.leg(), one.nearSide(), one.inner(),
+					one.past(), one.furthest().offset(shiftX, 0, shiftZ), one.placing()))
+				.toList();
 		}
 
 		private static void trim(List<?> list, int to) {
@@ -31367,6 +31750,28 @@ public final class SongBuilder {
 			}
 			List<String> faults = new ArrayList<>(trouble);
 			faults.addAll(verify(shiftX, shiftZ));
+			// One line a leg and side, worst first, so the paste screen names the wall and the cell
+			// to go and stand at. "a lane ran" rather than "a lane turned", which is what the walk's
+			// own breaches say, so a reader can tell which of the two found it.
+			List<WallBreach> landedWalls = wallBreachesLanded(shiftX, shiftZ);
+			for (WallBreach one : landedWalls) {
+				faults.add(one.toString());
+			}
+			// Repeaters standing on registered corner cells in the build as it will be pasted. The
+			// tripwire in {@link #set} counts every laying, trials included, and a trial that is rolled
+			// back takes its repeater with it -- so that number says how often the rule is broken and
+			// this one says how many are actually going out. A census key and not a fault, for now:
+			// three thousand of these stand in 234 dual builds of which twenty-one die, so {@code
+			// corners} plainly keeps cells the turn was later shoved off, and a count that cannot yet
+			// tell a stale corner from a live one is not a line to put in front of the player.
+			int onCorners = 0;
+			for (Map.Entry<BlockPos, String> cell : blocks.entrySet()) {
+				if (cell.getValue().startsWith("minecraft:repeater")
+						&& corners.contains(cell.getKey().below())) {
+					onCorners++;
+				}
+			}
+			padded("repeatersOnCorners", onCorners);
 			// Every fault a build has travels on the build. It used to be that the two lane layouts
 			// still being worked out went up and said what was wrong with them, and every other layout
 			// refused -- on the reasoning that a finished layout with a fault in it has a bug, so there
@@ -31410,7 +31815,7 @@ public final class SongBuilder {
 				widthX, widthZ,
 				mode, List.copyOf(faults),
 				turns.stream().map(turn -> turn.offset(shiftX, 0, shiftZ)).toList(),
-				List.copyOf(moved), List.copyOf(breaches), List.copyOf(recesses),
+				List.copyOf(moved), List.copyOf(breaches), landedWalls, List.copyOf(recesses),
 				Map.copyOf(padding), nearWall + shiftX, farWall + shiftX, Map.copyOf(marked),
 				poweredAt(shiftX, shiftZ), laidBy(shiftX, shiftZ), noteTicks(shiftX, shiftZ),
 				// Shifted with everything else, because a coordinate that is not one you can walk to is
