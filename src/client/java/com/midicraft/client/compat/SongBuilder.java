@@ -9704,6 +9704,10 @@ public final class SongBuilder {
 			// and its clamp still counts them. Never while a two-rail run is live, and none ever is
 			// here: a run only survives a gap its own repeaters can hold, and a wait worth folding is
 			// far past that.
+			// Whether the fold walked a bend out for this event: the cells it laid on the new leg
+			// are lane content, and the chord after them must be allowed to notice it does not
+			// fit. See the close below the seam block.
+			boolean foldWalkedTheBend = false;
 			if (layout.ultra() && route.foldsWaits() && railPhase < 0) {
 				int foldSignal = tipSignal;
 				boolean folded = false;
@@ -9765,6 +9769,7 @@ public final class SongBuilder {
 							foldSignal -= walked;
 							dustRun += walked;
 							stretchLeft = Math.max(0, stretchLeft - walked);
+							foldWalkedTheBend = true;
 							if (!lane.bending()) {
 								break;
 							}
@@ -9853,6 +9858,7 @@ public final class SongBuilder {
 							foldSignal -= walked;
 							dustRun += walked;
 							stretchLeft = Math.max(0, stretchLeft - walked);
+							foldWalkedTheBend = true;
 							folded |= walked > 0;
 						}
 						while (stretchLeft > 0) {
@@ -10034,6 +10040,7 @@ public final class SongBuilder {
 					folded = true;
 				}
 				if (folded) {
+					foldWalkedTheBend = true;
 					tipSignal = Math.max(1, foldSignal);
 					lastStyle = ChordStyle.SMALL;
 					lastBusCells = 0;
@@ -10288,7 +10295,23 @@ public final class SongBuilder {
 						: "flatTurnTightUnneeded");
 					placements.stopWatchingTheTurn();
 				}
-				laneStarted = placedWhileTurning;
+				// The bend the fold walked out is lane the lane holds -- repeaters and pads on the
+				// new leg -- so the chord behind it may notice it does not fit. Left false, HBFS at
+				// eight wide over two floors decided its head of four at one column of room with
+				// started=false: no turn, no shed, no cut, a bus two past the wall.
+				// And a forced event is, by construction, one that must be allowed to turn: the
+				// planner has seen it cross a wall or contest a cell, and the rule against turning
+				// on a lane that holds nothing is what left HBFS deciding its head of four at one
+				// column of room with started=false -- no turn, no shed, no cut, a bus two past the
+				// wall. The spin that rule exists to stop is held off by forcedTurn lapsing the
+				// moment the turn is armed, and by the rewalk budget.
+				laneStarted = placedWhileTurning || foldWalkedTheBend || turnBefore.contains(index);
+				if (TRACE) {
+					System.out.println("CLOSE i=" + index + " t=" + event.time() + " forced="
+						+ turnBefore.contains(index) + " placedWhileTurning=" + placedWhileTurning
+						+ " foldWalked=" + foldWalkedTheBend + " at " + coordAlong(axis, lane.pos())
+						+ " " + lane.pos().getY() + " " + coordAcross(axis, lane.pos()));
+				}
 				placedWhileTurning = false;
 				columnBehindBusy = true;
 				replan = layout.ultra();
@@ -13011,6 +13034,7 @@ public final class SongBuilder {
 					+ " travel=" + lane.travel() + " wall=" + wall + " cols=" + columns
 					+ " wants=" + wantsTurn + " can=" + canTurn + " straddle=" + straddles
 					+ " pad=" + pad.cells().size() + " owing=" + owing + " turning=" + turning
+					+ " started=" + laneStarted + " rail=" + railPhase + " overshoots=" + overshoots
 					+ " tip=" + tipSignal + " spent=" + spentPadding + " style=" + event.style());
 			}
 			BlockPos before = lane.pos();
