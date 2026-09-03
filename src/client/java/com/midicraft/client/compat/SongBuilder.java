@@ -4279,13 +4279,35 @@ public final class SongBuilder {
 	 * <p><b>Off, measured twice.</b> Taken off {@code columns} wholesale it puts the three HBFS
 	 * descents on the wall and halves the library's descent4 outer cells (208 to 76), and hands
 	 * Moonlight at 24x2 and 40x3 twelve hundred dead notes each with wrong notes 36 to 135. Taken
-	 * off the pad's arithmetic alone it moves no descent and still kills the same two Moonlight
-	 * builds. So the pad is not what puts the descent one past the wall by accident; the descent
-	 * anchored one past, with the next floor landing there, is what the staircase and its landing
-	 * are built around, and a descent moved onto the wall breaks the floor below. Where the ring
-	 * stands is a decision for {@code addSplitBusDescent} and the landing together.</p>
+	 * off the pad's arithmetic alone it moves no descent (the pin to the wall fills the column the
+	 * pad left). The Moonlight deaths turned out to be a latent fault the shift exposed -- a pad
+	 * laid as dust after a simple tail, see {@link #SOFT_TIP_PAD_SPENDS_A_SPARE_TICK} -- and with
+	 * that fixed both canaries are clean: HBFS with its three descents on the wall and Moonlight
+	 * 24x2 with none dead. Library-wide the shift still exposes more: 157 clean to 149, wrong
+	 * notes 36 to 143, Moonlight 16x5 and Jackpot 40x5 newly dead. Off until those are run down;
+	 * the shape it produces is the right one.</p>
 	 */
 	static boolean PAD_COUNTS_THE_CORNER = false;
+
+	/**
+	 * Whether the first cell of a pad laid after any soft tip is spent as a repeater of one where
+	 * the wait has a tick to spare, rather than only after a rail's. See {@link #emitPad}.
+	 */
+	static boolean SOFT_TIP_PAD_SPENDS_A_SPARE_TICK = true;
+
+	/**
+	 * The two halves of the soft-tip pad's widening, apart, both measured, both off.
+	 *
+	 * <p>Asking {@code softBehind} as well is the half that cures Moonlight at 24x2 with the corner
+	 * counted -- a nudge lays its pad before buildShaped rolls the flags, so the tail behind it is
+	 * still in {@code softTip} there -- and the same half kills Moonlight at 16x5 and Jackpot at
+	 * 40x5 outright (1567 and 1098 notes), where {@code softBehind} is stale and the repeater of
+	 * one it buys takes a tick the trigger did not have. Ignoring {@code delaySpent} changes
+	 * nothing at all: four pads either way. The right fix is to roll the flags before a nudge's
+	 * pad is laid, so that {@code softTip} means what the helper's own warning says it means.</p>
+	 */
+	static boolean SOFT_TIP_PAD_ASKS_BEHIND = false;
+	static boolean SOFT_TIP_PAD_IGNORES_DELAY_SPENT = false;
 
 	/**
 	 * Folds upward instead of sideways, so the build only ever grows one way.
@@ -10925,6 +10947,11 @@ public final class SongBuilder {
 					cornerCells++;
 				}
 				padColumns -= cornerCells;
+				// And the columns themselves: the narrowed form, pad only, moves no descent -- the
+				// pin to the wall fills the column the pad left -- and shifts every chord after it
+				// just the same. Measured both ways; only the whole count puts the descent on the
+				// wall.
+				columns = padColumns;
 			}
 			// Whether the descent at the end of this lane is going to seed the run below it, asked
 			// before the pad is planned because the pad is the only thing that can pay for it.
@@ -15823,8 +15850,15 @@ public final class SongBuilder {
 				if (cell == 0 && (placements.softTip() || placements.softBehind())
 						&& undoTheSoftTailFor(placements, lane.pos())) {
 					placements.padded(why + "UndidTheTail");
-				} else if (cell == 0 && RAIL_TIP_IS_SOFT && placements.softTip()
-						&& pad.delaySpent() == 0 && pad.spare() >= 1) {
+				} else if (cell == 0 && RAIL_TIP_IS_SOFT && pad.spare() >= 1
+						&& (placements.softTip()
+							|| SOFT_TIP_PAD_ASKS_BEHIND && placements.softBehind())
+						&& (pad.delaySpent() == 0 || SOFT_TIP_PAD_IGNORES_DELAY_SPENT)) {
+					// Any soft tip, not only a rail's: a simple tail's middle drives a repeater and
+					// lights no dust, and a cell of dust laid straight after one is a dead line.
+					// Moonlight at 24x2 with the corner counted, z=115: the pad after a simple tail
+					// of three came out as dust and 1146 notes went dark, while the same pad one row
+					// over, laid through parityPadOrSplitRepeater, came out as the split repeater.
 					// A soft tip with no tail to undo: a run that ended on its dust-driven column.
 					// Dust here is dead wire, so the cell is a repeater of one tick instead, paid for
 					// out of the wait the next floor's trigger was going to hold. The trigger holds one
@@ -24210,6 +24244,8 @@ public final class SongBuilder {
 		// spatial delay when the pad is what laid the block. See pastAnyCorner for the same trap.
 		placements.placing("parityPad");
 		placements.padded("parity");
+		// softBehind and not softTip, and not both: asking both was measured over the songs
+		// marked "2 lanes" and put two wrong notes into three builds that were clean.
 		return padCellOrSplitRepeater(placements, at.pos(), at.travel(), triggerDelay,
 			placements.softBehind(), true, "parityPad");
 	}
