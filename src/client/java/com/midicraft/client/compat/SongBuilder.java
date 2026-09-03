@@ -559,9 +559,20 @@ public final class SongBuilder {
 	 */
 	static final class LayoutCollision extends IllegalArgumentException {
 		private static final long serialVersionUID = 1L;
+		/** The event being laid when the second shape wrote, or {@code -1} outside a routed walk. */
+		private final int event;
 
 		LayoutCollision(String message) {
+			this(message, -1);
+		}
+
+		LayoutCollision(String message, int event) {
 			super(message);
+			this.event = event;
+		}
+
+		int event() {
+			return event;
 		}
 	}
 
@@ -1842,9 +1853,11 @@ public final class SongBuilder {
 		boolean hardA = true;
 		boolean hardB = true;
 		int rewalks = 0;
+		int collisionsForced = 0;
 		while (true) {
 			PlacementPlan placements = new PlacementPlan();
 			placements.padded("innerWallForcedTurn", turnBeforeA.size() + turnBeforeB.size());
+			placements.padded("collisionForcedTurn", collisionsForced);
 			placements.padded("innerWallGaveUp", softA.size() + softB.size());
 			placements.padded("innerWallMachineSoft", (hardA ? 0 : 1) + (hardB ? 0 : 1));
 			// Two machines, two buttons: the severed check excuses one starved repeater per way in,
@@ -1954,6 +1967,23 @@ public final class SongBuilder {
 					} else {
 						hardA = false;
 					}
+				}
+			} catch (LayoutCollision stuck) {
+				// A chord no trial could place is walked again with a turn forced in front of it --
+				// most of what one machine collides with is the other, standing where the chord was
+				// carried past its wall -- once per event. Where that has been tried, or the walk is
+				// not one that names its events, the collision goes up to the tolerant pass exactly
+				// as it always did. Same shape as the inner wall, for the same reason: the cell is
+				// the proof, and the arithmetic that put the chord there is what was wrong.
+				Set<Integer> forced = walkingB ? turnBeforeB : turnBeforeA;
+				if (!INNER_WALLS_ARE_HARD || stuck.event() < 0 || !forced.add(stuck.event())
+						|| ++rewalks > 2 * (evenEvents.size() + oddEvents.size())) {
+					throw stuck;
+				}
+				collisionsForced++;
+				if (TRACE_TURNS) {
+					System.out.println("COLLISION rewalk " + rewalks + " machine " + (walkingB ? "B" : "A")
+						+ " event " + stuck.event() + " : " + stuck.getMessage());
 				}
 			}
 		}
@@ -2430,6 +2460,21 @@ public final class SongBuilder {
 	 * {@code innerWallForcedTurn} and {@code innerWallGaveUp}.</p>
 	 */
 	static boolean INNER_WALLS_ARE_HARD = true;
+
+	/**
+	 * Whether a turn the wait has walked out is closed before the chord behind it is decided,
+	 * rather than at the top of the next event.
+	 *
+	 * <p>The turn closes at the head of an event once the route has stopped bending. A wait that
+	 * folds through a turn walks the whole bend out inside its own event, so the chord after it is
+	 * decided on a straight lane with {@code turning} still set -- and everything a chord may do
+	 * at a wall short of running on is gated on not turning: the flush head shedding its flank
+	 * before a descent, the stair extras, the cut. HBFS at eight wide over two floors, event 403,
+	 * traced: {@code WALK x=7 wall=8 cols=1 turning=true wants=false style=STACKED_FRONT}, then
+	 * its front pair collides with {@code descent4} and 125 notes go dark. Seam rides are left to
+	 * the top of the next event, where the seam's own comment says they must close.</p>
+	 */
+	static boolean TURN_CLOSES_WHEN_WALKED_OUT = true;
 
 	/**
 	 * Whether a seam whose reader would land on or past the wall arms its turn at the wall, rather
@@ -9649,7 +9694,12 @@ public final class SongBuilder {
 				// A turn forced in front of this event walks out the bend pending as the event
 				// begins -- once -- and never the turns the fold arms after it. See
 				// INNER_WALLS_ARE_HARD; without the once, the fold armed a hundred thousand legs.
-				boolean forcedWalkOut = turnBefore.contains(index) && lane.bending();
+				//
+				// Forced events only. Walking every pending bend out was tried for the chord decided
+				// as though it rode a bend it was about to be carried out of -- HBFS at eight wide
+				// over two floors, event 403 -- and it works, and it costs: no chord ever rides a
+				// fold-armed corner again, and that build went from 677 columns deep to 863.
+				boolean forcedWalkOut = lane.bending() && turnBefore.contains(index);
 				// Columns this wait owes the partner machine over its own minimum, so the two pulses
 				// stay within earshot; spent as dust anchored on the chain's repeaters, ten cells to
 				// a repeater at most so the trigger at the end never reads a dead wire. Abandoned,
@@ -9987,6 +10037,9 @@ public final class SongBuilder {
 			// own run. The block lands handing out a fresh fifteen, so the chain behind only has
 			// to reach the piston alive; where the bend walk would run the wire out first, a
 			// short repeater revives it from whatever ticks the gap still holds.
+			// Whether this event's seam rode a turn: that turn is closed at the top of the next
+			// event and nowhere earlier -- see the seam's own comment on paritySeamRodeItsTurn.
+			boolean seamRodeThisEvent = false;
 			if (event.seamEat() > 0) {
 				placements.placing("paritySeam");
 				// Only where the turn is actually in the way. A corner further off than the
@@ -10153,6 +10206,7 @@ public final class SongBuilder {
 					// well took the watch verdict a whole event early and cleared `turning` while
 					// the walk still had corners to account for.
 					placements.padded("paritySeamRodeItsTurn");
+					seamRodeThisEvent = true;
 				}
 				tipSignal = DUST_RANGE;
 				// The element is lane content -- its chord may land flush on the wall and must be
@@ -10200,7 +10254,15 @@ public final class SongBuilder {
 			// A turn forced in front of this event, with its bend now walked out: closed here, the
 			// same close as the top of the event, so the chord is asked on a straight lane. See
 			// INNER_WALLS_ARE_HARD.
-			if (turnBefore.contains(index) && turning && !lane.bending()) {
+			// And for any event, not only a forced one: a wait that folded a turn and walked the
+			// whole bend out leaves the route straight and turning still true, and every shed the
+			// chord ahead of a staircase is entitled to -- the flush head's flank, the stair
+			// extras, the cut -- is gated on not turning. HBFS at eight wide over two floors,
+			// event 403: a head of four decided one column from its wall with turning=true, no
+			// shed asked, its front pair laid where the descent's second rung goes. See
+			// TURN_CLOSES_WHEN_WALKED_OUT.
+			if ((turnBefore.contains(index) || TURN_CLOSES_WHEN_WALKED_OUT && !seamRodeThisEvent)
+					&& turning && !lane.bending()) {
 				lane = lane.pinned(depth);
 				turning = false;
 				leavingTurn = TURN_BAN_OUTLASTS;
@@ -10214,7 +10276,8 @@ public final class SongBuilder {
 				placedWhileTurning = false;
 				columnBehindBusy = true;
 				replan = layout.ultra();
-				placements.padded("innerWallClosedTheBend");
+				placements.padded(turnBefore.contains(index) ? "innerWallClosedTheBend"
+					: "turnClosedAfterTheWait");
 			}
 			TurnCost turn = turnCost(floor, climb, floors, flatLink(route, leg, slabStep));
 			int above = turn.above();
@@ -31243,7 +31306,7 @@ public final class SongBuilder {
 				if (!DEBUG_PASTE && !toleratingCollisions()) {
 					throw new LayoutCollision("Placement layout collision at "
 						+ describe(key) + ": " + existing + " is already there and " + block
-						+ " wants the same block");
+						+ " wants the same block", legEvent);
 				}
 				// What was standing wins, so the rest of the walk carries on over the layout it would
 				// have had anyway. Only the first claim on a cell is remembered: a column that gets
