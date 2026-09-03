@@ -79,11 +79,13 @@ class ConvertLeavesGridProbe {
 				.map(p -> p.getFileName().toString().replace(".json", ""))
 				.sorted().toList();
 		}
+		for (boolean snapTempo : new boolean[] {true, false}) {
 		for (boolean gameTicks : new boolean[] {true, false}) {
 			int dirty = 0;
 			int checked = 0;
 			System.out.println("==== Convert for Minecraft ("
-				+ (gameTicks ? "game ticks, 2 lanes" : "redstone ticks, 1 lane") + ")");
+				+ (gameTicks ? "game ticks, 2 lanes" : "redstone ticks, 1 lane") + ")"
+				+ (snapTempo ? "" : "  WITH SNAP TEMPO OFF"));
 			for (String song : songs) {
 				ComposerProject raw;
 				try (Reader reader = Files.newBufferedReader(SONGS.resolve(song + ".json"))) {
@@ -97,7 +99,7 @@ class ConvertLeavesGridProbe {
 				checked++;
 				ComposerProject source = raw.withBakedSpeed();
 				ComposerProject.MinecraftConversion conversion = source.convertToMinecraft(
-					convertGrid(source, gameTicks), true, 0, gameTicks);
+					convertGrid(source, gameTicks), snapTempo, 0, gameTicks);
 				ComposerProject after = conversion.project()
 					.withSpeedQuarters(ComposerProject.DEFAULT_SPEED_QUARTERS);
 				SongAnalysis stats = SongAnalysis.of(after, true, true);
@@ -111,6 +113,7 @@ class ConvertLeavesGridProbe {
 			}
 			System.out.println("  " + dirty + " of " + checked
 				+ " songs are still not Minecraft-ready after Convert");
+		}
 		}
 	}
 }
