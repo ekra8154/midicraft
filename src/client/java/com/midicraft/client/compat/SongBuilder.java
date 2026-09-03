@@ -1907,6 +1907,22 @@ public final class SongBuilder {
 				walkRouted(oddEvents, originB, forward, laneWidth, floors, placements,
 					layoutB, routeB, headB, tightB, paceB, turnBeforeB);
 				placements.stopWatchingLegWalls();
+				// A collision the walk recorded rather than threw -- under DEBUG_PASTE, which is how
+				// every marked paste and its preview plan, none is thrown -- is walked again with a
+				// turn forced in front of its event, once, the same as a thrown one below.
+				int[] contested = INNER_WALLS_ARE_HARD
+					? placements.firstCollisionNotForced(turnBeforeA, turnBeforeB) : null;
+				if (contested != null
+						&& ++rewalks <= 2 * (evenEvents.size() + oddEvents.size())) {
+					(contested[0] == 1 ? turnBeforeB : turnBeforeA).add(contested[1]);
+					collisionsForced++;
+					if (TRACE_TURNS) {
+						System.out.println("COLLISION rewalk " + rewalks + " machine "
+							+ (contested[0] == 1 ? "B" : "A") + " event " + contested[1]
+							+ " : recorded, not thrown");
+					}
+					continue;
+				}
 				// One input for both, in place of a button each -- two buttons cannot be pressed
 				// on the same tick, so the machines could never be started in the step the plan
 				// worked out for them. See {@link #addTwoLaneInput}.
@@ -29787,6 +29803,26 @@ public final class SongBuilder {
 		/** Cells two shapes both wanted, and what each pair was, when {@link #DEBUG_PASTE}. */
 		private final Map<BlockPos, String> collisions = new LinkedHashMap<>();
 		/**
+		 * The machine and event being laid when each of those cells was contested, for the planner
+		 * that walks again with a turn forced in front of the event. Kept beside the collision
+		 * rather than thrown with it, because under {@link #DEBUG_PASTE} -- which is how every
+		 * marked paste and its preview plan -- a collision is recorded and never thrown.
+		 */
+		private final Map<BlockPos, int[]> collisionEvents = new LinkedHashMap<>();
+
+		/**
+		 * The first contested cell laid under an event the planner has not yet forced a turn in
+		 * front of, as {@code {machine, event}}, or null. See INNER_WALLS_ARE_HARD.
+		 */
+		int[] firstCollisionNotForced(Set<Integer> forcedA, Set<Integer> forcedB) {
+			for (int[] at : collisionEvents.values()) {
+				if (at[1] >= 0 && !(at[0] == 1 ? forcedB : forcedA).contains(at[1])) {
+					return at;
+				}
+			}
+			return null;
+		}
+		/**
 		 * What is being built right now, and what built each cell, when {@link #DEBUG_PASTE}.
 		 *
 		 * <p>The pair of blocks in a collision message says a note block met a staircase, which is one
@@ -31317,7 +31353,10 @@ public final class SongBuilder {
 						+ placing + ")");
 				}
 				if (collisions.putIfAbsent(key, existing + " (" + placedBy.getOrDefault(key, "?")
-						+ ") held off " + block + " (" + placing + ")") == null && trial != null) {
+						+ ") held off " + block + " (" + placing + ")") == null) {
+					collisionEvents.put(key, new int[] {laneTint < 0 ? -1 : laneTint / 2, legEvent});
+				}
+				if (collisions.containsKey(key) && trial != null) {
 					// Journalled like everything else a trial writes, so a shape that is given up takes
 					// its collision back with it. See {@link #trialCollided}: a marked build gives the
 					// shape up exactly where an unmarked one throws, and a mark left behind by a shape
@@ -31551,6 +31590,7 @@ public final class SongBuilder {
 			// And the marks with them, for the same reason: a sea lantern standing where a shape was
 			// given up says two shapes wanted a cell that only one of them ever reached.
 			undo.collisionsAdded().forEach(collisions::remove);
+			undo.collisionsAdded().forEach(collisionEvents::remove);
 			undo.notesBefore().forEach((at, was) -> {
 				if (was == null) {
 					notes.remove(at);
