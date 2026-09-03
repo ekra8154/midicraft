@@ -10608,7 +10608,12 @@ public final class SongBuilder {
 			// re-asked once its turn is open must not turn again, and the lane must still have
 			// held something first, or the walk would climb the whole build without laying a note.
 			boolean forcedTurn = turnBefore.contains(index) && !turning;
-			boolean overshoots = (!turning || forcedTurn) && (railPhase < 0 || flatAhead)
+			// A forced turn does not re-run the landing arithmetic: the wall was crossed, on the
+			// blocks, by whatever the trial actually built -- a stacked shape measured to land
+			// flush whose fallback is a bus with a handover a column past the wall, Choral at
+			// forty-eight wide -- and the arithmetic that said it fit is the thing that was wrong.
+			boolean overshoots = forcedTurn && (railPhase < 0 || flatAhead)
+				|| !turning && (railPhase < 0 || flatAhead)
 				&& ((landing - wall) * stepAlong(axis, lane.travel()) > 0 || strandsTheTurn
 					|| flushHeadWouldGrow || shapeWouldFall);
 			// And whether it merely gets there. A chord ending on the wall, or one column short of
