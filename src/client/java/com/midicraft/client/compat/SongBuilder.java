@@ -4249,6 +4249,45 @@ public final class SongBuilder {
 	static boolean DESCENT_STANDS_A_COLUMN_IN = false;
 
 	/**
+	 * The same intent as {@link #DESCENT_STANDS_A_COLUMN_IN}, applied where it belongs: to the
+	 * chord's room at the event decision in the routed walk, and not to {@code laneWall}, which
+	 * the fold, the seam and the next lane's arithmetic all read for their own purposes. The
+	 * fold's staircase crossing already stops on the wall and anchors the descent there; the
+	 * chord-turn path filled the wall column with its closing pad and anchored one past. Now
+	 * both agree: content ends a column short, the ring stands on the wall and one past it.
+	 *
+	 * <p><b>Off, measured, and worse than the global version:</b> 157 clean to 72, wrong notes 36
+	 * to 379, outer breaches 77 to 734, HBFS 8x2 from clean to 530 dead. The trace under the flag
+	 * shows the leg <em>after</em> the descent decided against the wrong wall from its first chord
+	 * ({@code WALK x=7 wall=7 cols=1 wants=true} on a west-bound lower leg), so what a moved
+	 * descent breaks is the landing and the next leg's state, not the ring's neighbours. The
+	 * chord-turn path that pads to the wall and descends has to be changed as a whole -- pad,
+	 * anchor, landing, leg -- and that path has not been read yet.</p>
+	 */
+	static boolean DESCENT_ROOM_ENDS_A_COLUMN_IN = false;
+
+	/**
+	 * Whether the columns to the wall are counted from the cell after the corner the lane stands
+	 * on, rather than from the corner itself.
+	 *
+	 * <p>A repeater may not stand on a corner, so every pad and every shape walks off one first --
+	 * {@link #pastAnyCorner}, inside the builders. The chord's landing has that term; the columns
+	 * that size the closing pad, the cut's room and the breach count did not, so a lane asked while
+	 * standing on a corner laid its pad one cell long, rested a column past the wall, and the
+	 * descent after it stood two past. Every staircase reached off a flat turn's exit corner.</p>
+	 *
+	 * <p><b>Off, measured twice.</b> Taken off {@code columns} wholesale it puts the three HBFS
+	 * descents on the wall and halves the library's descent4 outer cells (208 to 76), and hands
+	 * Moonlight at 24x2 and 40x3 twelve hundred dead notes each with wrong notes 36 to 135. Taken
+	 * off the pad's arithmetic alone it moves no descent and still kills the same two Moonlight
+	 * builds. So the pad is not what puts the descent one past the wall by accident; the descent
+	 * anchored one past, with the next floor landing there, is what the staircase and its landing
+	 * are built around, and a descent moved onto the wall breaks the floor below. Where the ring
+	 * stands is a decision for {@code addSplitBusDescent} and the landing together.</p>
+	 */
+	static boolean PAD_COUNTS_THE_CORNER = false;
+
+	/**
 	 * Folds upward instead of sideways, so the build only ever grows one way.
 	 *
 	 * <p>The same walk as everywhere else with two of its axes swapped. Lanes still run across the
@@ -10390,6 +10429,13 @@ public final class SongBuilder {
 			int wall = laneWall(axis, nearWallAt(route, leg, nearWall, tipStep),
 					tipWall(route, leg, farWall, tipStep), forward,
 				lane.travel(), floor, climb, floors);
+			// On a descending leg the chord and its closing pad stop a column short, so the
+			// staircase stands on the wall and its ring one past -- inside the footprint -- the
+			// way the fold's own crossing already anchors it. Here and nowhere else: this is the
+			// chord's room, not the leg's wall. See DESCENT_ROOM_ENDS_A_COLUMN_IN.
+			if (DESCENT_ROOM_ENDS_A_COLUMN_IN && above >= 0 && above < floors && climb < 0) {
+				wall -= stepAlong(axis, lane.travel());
+			}
 			// And the plan is told the same wall, so a block laid past it by anything below is a
 			// breach whether or not the arm that laid it knew. See WALL_BREACH_OUTER_ALLOWANCE.
 			watchWallAhead(placements, route, leg, wall, forward, lane.travel(), axis, index);
@@ -10862,6 +10908,24 @@ public final class SongBuilder {
 			// One tick has to be left for the next event's own repeater, which is the only thing that
 			// can drive the module it stands in front of.
 			int columns = (wall - coordAlong(axis, lane.pos())) * stepAlong(axis, lane.travel());
+			// Less the corner cells the lane stands on. The landing already subtracts them -- "a
+			// term missing from the arithmetic" -- but the columns that size the closing pad, the
+			// room and the breach were still counted from the corner, so a lane asked on one laid
+			// its pad a cell long and rested a column past its wall: the descent then stood two
+			// past, at every staircase reached from a corner. HBFS at eight wide over two floors,
+			// three of them: TURN at 4 68 78 columns=4, PAD at 4 by corner, TURNEDAT 9 68 78.
+			// See PAD_COUNTS_THE_CORNER.
+			// Only the pad's own arithmetic: the room a cut gets, the breach count and the straddle
+			// test keep the full count -- taking the corner off all of them was measured, and it
+			// handed Moonlight at forty wide over three floors twelve hundred dead notes.
+			int padColumns = columns;
+			if (PAD_COUNTS_THE_CORNER) {
+				int cornerCells = 0;
+				for (Lane probe = lane; probe.cornerAt(0) && cornerCells < 4; probe = probe.ahead(1)) {
+					cornerCells++;
+				}
+				padColumns -= cornerCells;
+			}
 			// Whether the descent at the end of this lane is going to seed the run below it, asked
 			// before the pad is planned because the pad is the only thing that can pay for it.
 			//
@@ -10904,7 +10968,7 @@ public final class SongBuilder {
 				}
 			}
 			Pad pad = layout.ultra() && wantsTurn && !straddles
-				? planTurnPad(columns, tipSignal, turnCells, offBus,
+				? planTurnPad(padColumns, tipSignal, turnCells, offBus,
 					seedsDescent ? wait : Math.max(0, wait - 1),
 					climb > 0, above >= 0 && above < floors,
 					endsOnBus(lastStyle, lastBusCells), seedsDescent)
@@ -11557,7 +11621,7 @@ public final class SongBuilder {
 			// to hold. A lane that cannot reach its wall carries on to the next chord and tries again;
 			// the only turn allowed elsewhere is one on a lane already past its wall, where carrying on
 			// would never bring it back.
-			boolean onWall = pad.cells().size() == columns;
+			boolean onWall = pad.cells().size() == padColumns;
 			// What the wire must still be worth to take the turn. A staircase has to be crossed in one
 			// run and costs its whole length; a flat turn only has to be *reached*, because the chord
 			// standing on it opens with a repeater of its own that hands out a fresh fifteen. Charging
@@ -11581,7 +11645,7 @@ public final class SongBuilder {
 			// most of the way -- and a lane refused here simply lays one more chord, whose repeater
 			// hands out a fresh fifteen, and turns after that. It costs footprint, which says so, and
 			// not a tail that never fires, which does not.
-			int unpaid = Math.max(0, columns - pad.cells().size());
+			int unpaid = Math.max(0, padColumns - pad.cells().size());
 			// Priced through the one place that knows whether the pad can be lifted onto the climb.
 			// A lane that could not afford five may well afford three, and this is the test that
 			// decides whether it turns here at all -- so it has to ask the same question the pad was
