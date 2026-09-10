@@ -4036,6 +4036,23 @@ public final class SongBuilder {
 	static boolean TURNS_ON_THE_CELL_BEHIND = true;
 
 	/**
+	 * v2: a chord riding a bend out is held to the exit leg's wall exactly, outer wall or not.
+	 *
+	 * <p>A chord decided inside a bend is never asked whether it overshoots -- there is nothing to
+	 * decide, the walk is committed to the corner it stands in -- so a bus of eight that comes out
+	 * the far side runs as far as it runs. Past an inner wall the exit-leg watch stops the walk and
+	 * the planner forces a turn in front of the chord, which walks the bend out first and decides
+	 * the chord on the leg it will stand on: it overshoots, turns at the wall, and rides the corner.
+	 * Past an outer wall by one it was inside the allowance and nothing happened; the fold behind
+	 * then turned on the cell it stood on, which is the wall plus one, and the run's notes hung two
+	 * out. HBFS at eight wide over one floor, 8 65 829 in game: a sunken bus of eight, the wall at
+	 * 12 and the lane at 13. So a chord riding out is held to nought past the exit wall whichever
+	 * wall it is, and gets the same forced turn -- the thing that should have happened, which is
+	 * the last bus cell standing in the turn like any other chord that will not fit.</p>
+	 */
+	static boolean EXIT_WALLS_ARE_HARD = true;
+
+	/**
 	 * v2: a stacked shape that would land inside the wall, but whose fallback would not, is stood on
 	 * the ground in a trial before the lane is measured by it.
 	 *
@@ -4191,10 +4208,22 @@ public final class SongBuilder {
 	 */
 	private static void watchWallAhead(PlacementPlan placements, LaneRoute route, int leg,
 			int wall, Direction forward, Direction travel, Direction.Axis axis, int event) {
+		watchWallAhead(placements, route, leg, wall, forward, travel, axis, event, false);
+	}
+
+	/**
+	 * @param exit whether the lane is still inside a bend and the wall is the one of the leg the
+	 *     bend exits to. A chord riding out is held to that wall exactly, outer or not: a bus
+	 *     ending a column past it is the case the walk-out was built for, and one the outer
+	 *     allowance would otherwise wave through. See {@link #EXIT_WALLS_ARE_HARD}.
+	 */
+	private static void watchWallAhead(PlacementPlan placements, LaneRoute route, int leg,
+			int wall, Direction forward, Direction travel, Direction.Axis axis, int event,
+			boolean exit) {
 		boolean towardsFar = travel == forward;
 		placements.wallAhead(wall, stepAlong(axis, travel),
 			towardsFar ? route.tipExtension(leg) != 0 : route.nearExtension(leg) != 0,
-			!towardsFar, leg, axis, event);
+			!towardsFar, leg, axis, event, exit);
 	}
 
 	/** The tip wall of a leg's pair: the base far wall plus whatever the route extends it by. */
@@ -10518,7 +10547,8 @@ public final class SongBuilder {
 			int watchedWall = exitTravel == lane.travel() ? wall
 				: laneWall(axis, nearWallAt(route, leg, nearWall, tipStep),
 					tipWall(route, leg, farWall, tipStep), forward, exitTravel, floor, climb, floors);
-			watchWallAhead(placements, route, leg, watchedWall, forward, exitTravel, axis, index);
+			watchWallAhead(placements, route, leg, watchedWall, forward, exitTravel, axis, index,
+				exitTravel != lane.travel());
 			int stepOffAhead = turn.stepOff();
 			int splitCells = turn.splitCells();
 			if (replan) {
@@ -31347,6 +31377,14 @@ public final class SongBuilder {
 
 		void wallAhead(int wall, int step, boolean inner, boolean nearSide, int leg,
 				Direction.Axis axis, int event) {
+			wallAhead(wall, step, inner, nearSide, leg, axis, event, false);
+		}
+
+		/** Whether the watched wall is the one a bend exits to; see {@link #EXIT_WALLS_ARE_HARD}. */
+		private boolean legExit;
+
+		void wallAhead(int wall, int step, boolean inner, boolean nearSide, int leg,
+				Direction.Axis axis, int event, boolean exit) {
 			watchingLegWalls = true;
 			legWall = wall;
 			legStep = step;
@@ -31355,6 +31393,7 @@ public final class SongBuilder {
 			legIndex = leg;
 			legAxis = axis;
 			legEvent = event;
+			legExit = exit;
 		}
 
 		/**
@@ -31652,20 +31691,27 @@ public final class SongBuilder {
 			// finished plan folds it to a leg and a side. See {@link #WALL_BREACH_OUTER_ALLOWANCE}.
 			if (watchingLegWalls && !"minecraft:air".equals(block)) {
 				int past = (coordAlong(legAxis, position) - legWall) * legStep;
-				if (past > (legInner ? WALL_BREACH_INNER_ALLOWANCE : WALL_BREACH_OUTER_ALLOWANCE)) {
+				int allowance = legInner ? WALL_BREACH_INNER_ALLOWANCE : WALL_BREACH_OUTER_ALLOWANCE;
+				// The wall a bend exits to is held exactly, outer or not: a chord riding out that
+				// lands a column past it is what the forced turn is for. See EXIT_WALLS_ARE_HARD.
+				boolean hard = legInner || legExit && EXIT_WALLS_ARE_HARD;
+				if (past > allowance || hard && past > 0) {
 					String by = placing == null ? "?" : placing;
 					// A hard inner wall stops the walk here, before the cell is recorded: the plan is
 					// abandoned and walked again with a turn forced. See INNER_WALLS_ARE_HARD.
-					if (legInner && hardInnerWalls && INNER_WALLS_ARE_HARD && legEvent >= 0
+					if (hard && hardInnerWalls && INNER_WALLS_ARE_HARD && legEvent >= 0
 							&& !softEvents.contains(legEvent)) {
 						throw new InnerWallCrossed(legEvent, describe(position) + " " + block
-							+ " laid by " + by + ", " + past + " past the inner wall");
+							+ " laid by " + by + ", " + past + " past the "
+							+ (legInner ? "inner" : "exit") + " wall");
 					}
 					// The tint is machine and parity together, see laneTint(int, int); the breach
 					// wants the machine alone.
-					wallBreachCells.add(new WallBreach(laneTint < 0 ? -1 : laneTint / 2, legIndex,
-						legNearSide, legInner, past, position.immutable(), by));
-					padded("WALL-BREACH:" + (legInner ? "inner" : "outer") + ":" + by);
+					if (past > allowance) {
+						wallBreachCells.add(new WallBreach(laneTint < 0 ? -1 : laneTint / 2, legIndex,
+							legNearSide, legInner, past, position.immutable(), by));
+						padded("WALL-BREACH:" + (legInner ? "inner" : "outer") + ":" + by);
+					}
 				}
 			}
 			BlockPos key = position.immutable();
