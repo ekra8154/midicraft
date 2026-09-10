@@ -4016,6 +4016,26 @@ public final class SongBuilder {
 	static boolean FLAT_TURN_REWALKS = true;
 
 	/**
+	 * v2: a fold that finds the lane already past its wall turns on the cell behind it.
+	 *
+	 * <p>A chord that lands flush hands back the column after itself, so the fold that follows
+	 * stands one past the wall with nothing left to arm a turn in: tight from there put the corner
+	 * on the cursor, which is one past, and the sideways run's notes two past. The cell behind the
+	 * cursor is the chord's last cell -- a bus block with dust over it, or the lowered dust of a
+	 * sunken bus -- and it carries the signal already. A repeater standing beside it on the wall
+	 * column reads it: a block under dust is weakly powered, and a repeater is driven by a weakly
+	 * powered block. So the corner goes there, on the wall, and the walk is handed back on the
+	 * run's first cell, already round the bend; the corner takes no dust of its own. HBFS at eight
+	 * wide over one floor, 4 65 148: a sunken bus of six ending on the wall, the fold turning one
+	 * out, and the next bus opening against the partner's note. Only where the run beside that cell
+	 * is free, or holds nothing but the bus's own last note -- an even tail hangs it there, and it
+	 * is lifted and put down in the corner's outside slot, the cursor's own cell, which the same
+	 * bus block drives; {@code turnBehindShedTheFlank} counts those and {@code turnBehindBlockedBy}
+	 * says what stood in the way everywhere else.</p>
+	 */
+	static boolean TURNS_ON_THE_CELL_BEHIND = true;
+
+	/**
 	 * v2: a stacked shape that would land inside the wall, but whose fallback would not, is stood on
 	 * the ground in a trial before the lane is measured by it.
 	 *
@@ -10041,9 +10061,22 @@ public final class SongBuilder {
 								+ coordAlong(axis, lane.pos()) + " " + lane.pos().getY() + " "
 								+ coordAcross(axis, lane.pos()));
 						}
-						lane = armTurn(placements, lane, depth, foldColumns,
-							flatLink(route, leg, slabStep), tight);
+						Direction leaving = lane.travel();
+						Lane behindTurn = TURNS_ON_THE_CELL_BEHIND && foldColumns < 0
+							? turnOnTheCellBehind(placements, lane, depth,
+								flatLink(route, leg, slabStep))
+							: null;
+						if (behindTurn != null) {
+							lane = behindTurn;
+							tight = true;
+							stuckWide = false;
+							placements.padded("flatTurnOnTheCellBehind");
+						} else {
+							lane = armTurn(placements, lane, depth, foldColumns,
+								flatLink(route, leg, slabStep), tight);
+						}
 						turning = true;
+						noteCornerPastWall(placements, route, leg, foldWall, forward, leaving, axis, lane);
 						// Watched like any chord-armed turn. The fold may break with this turn still
 						// armed, and the chord that then rides it can hang a note past a wide corner
 						// -- the one thing that widens a v2 paste -- so the watch and the rewalk
@@ -10270,9 +10303,11 @@ public final class SongBuilder {
 							tight = false;
 							placements.padded("flatTurnCouldNotTighten");
 						}
+						Direction leaving = lane.travel();
 						lane = armTurn(placements, lane, depth, seamColumns,
 							flatLink(route, leg, slabStep), tight);
 						turning = true;
+						noteCornerPastWall(placements, route, leg, seamWall, forward, leaving, axis, lane);
 						booked = Map.of();
 						leg++;
 						floor = route.floorOf(leg);
@@ -12823,8 +12858,10 @@ public final class SongBuilder {
 						// Which way is out, read before the arm: a lane turning tight on its own cell is
 						// handed back already facing the sideways run.
 						int outward = stepAlong(axis, lane.travel());
+						Direction leaving = lane.travel();
 						lane = armTurn(placements, lane, depth, columns, flatLink(route, leg, slabStep), tight);
 						turning = true;
+						noteCornerPastWall(placements, route, leg, wall, forward, leaving, axis, lane);
 						if (FLAT_TURN_KEEPS_ITS_WIDTH) {
 							int cornerX = lane.cornerAt(0) ? coordAlong(axis, lane.pos())
 								: coordAlong(axis, lane.ahead(cellsToCorner(lane)).pos());
@@ -14188,6 +14225,120 @@ public final class SongBuilder {
 		placements.corner(lane.ahead(toCorner + slabStep).pos());
 		return lane.bending(List.of(new Lane.Bend(toCorner, clockwise),
 			new Lane.Bend(toCorner + slabStep, clockwise))).crowding();
+	}
+
+	/**
+	 * Arms a flat turn on the cell behind the walk, for a lane standing past its wall on the heels
+	 * of a chord that ended on the wall column. See {@link #TURNS_ON_THE_CELL_BEHIND}.
+	 *
+	 * <p>The cell behind has to carry the signal on its own -- a bus block with dust over it, or
+	 * dust at lane level -- and the run beside it, down the depth for the link's length at lane
+	 * level and the two above, has to be free. Handed back standing on the run's first cell, facing
+	 * along it, with the second corner the link's length from the corner: the corner is a laid cell
+	 * and {@link #pastAnyCorner} must not lay dust on it. {@code null} where the geometry is not that,
+	 * and the caller arms the turn where it always did.</p>
+	 */
+	private static Lane turnOnTheCellBehind(PlacementPlan placements, Lane lane, Direction depth,
+			int slabStep) {
+		if (slabStep < 2) {
+			return null;
+		}
+		BlockPos behind = lane.pos().relative(lane.travel().getOpposite());
+		String atLane = placements.describeBlock(behind.above(1));
+		String overBus = placements.describeBlock(behind.above(2));
+		boolean busCell = !"-".equals(atLane) && !atLane.startsWith("minecraft:repeater")
+			&& !atLane.startsWith("minecraft:note_block") && !atLane.startsWith("minecraft:air")
+			&& overBus.startsWith("minecraft:redstone_wire");
+		boolean dustCell = atLane.startsWith("minecraft:redstone_wire");
+		if (!busCell && !dustCell) {
+			placements.padded("turnBehindNotACarrier");
+			return null;
+		}
+		// An even tail hangs the bus's last note in the run's first cell. That note goes to the
+		// corner's outside slot -- the cell the walk is standing on, which nothing has claimed and
+		// the same bus block drives -- so the run can have its cell. Only the exact shape a bus
+		// flank has, a note block over its instrument with air claimed above, and only once the
+		// rest of the run has been found free, so a refusal moves nothing.
+		BlockPos first = behind.relative(depth);
+		BlockPos outside = lane.pos();
+		boolean shed = placements.describeBlock(first.above(1)).startsWith("minecraft:note_block")
+			&& !"-".equals(placements.describeBlock(first))
+			&& ("-".equals(placements.describeBlock(first.above(2)))
+				|| "minecraft:air".equals(placements.describeBlock(first.above(2))))
+			&& "-".equals(placements.describeBlock(outside))
+			&& "-".equals(placements.describeBlock(outside.above(1)))
+			&& "-".equals(placements.describeBlock(outside.above(2)));
+		for (int along = shed ? 2 : 1; along <= slabStep; along++) {
+			BlockPos cell = behind.relative(depth, along);
+			for (int up = 0; up <= 2; up++) {
+				if (!"-".equals(placements.describeBlock(cell.above(up)))) {
+					placements.padded("turnBehindBlockedBy:" + placements.describeBlock(cell.above(up))
+						.replace("minecraft:", "").replaceAll("\\[.*", "") + "@" + along + "+" + up);
+					return null;
+				}
+			}
+		}
+		if (shed) {
+			Integer time = placements.noteTime(first.above(1));
+			String instrument = placements.take(first);
+			String noteBlock = placements.take(first.above(1));
+			placements.take(first.above(2));
+			String was = placements.placing();
+			placements.placing("shedToTheCorner");
+			placements.set(outside, instrument);
+			placements.set(outside.above(1), noteBlock);
+			placements.set(outside.above(2), "minecraft:air");
+			if (time != null) {
+				placements.note(outside.above(1), time);
+			}
+			if (FALLING_BLOCKS.contains(instrument)) {
+				placements.support(outside.below(), UNDERFLOOR);
+			}
+			placements.placing(was);
+			placements.padded("turnBehindShedTheFlank");
+			if (TRACE_TURNS) {
+				System.out.println("TURNBEHIND shed " + noteBlock + " from " + first.getX() + " "
+					+ (first.getY() + 1) + " " + first.getZ() + " to " + outside.getX() + " "
+					+ (outside.getY() + 1) + " " + outside.getZ());
+			}
+		}
+		placements.placing("corner");
+		boolean clockwise = lane.travel().getClockWise() == depth;
+		Direction side = clockwise
+			? lane.noteSide().getClockWise() : lane.noteSide().getCounterClockWise();
+		placements.turnedAt(behind.relative(lane.travel().getOpposite()));
+		placements.corner(behind);
+		placements.corner(behind.relative(depth, slabStep));
+		if (TRACE_TURNS) {
+			System.out.println("TURNBEHIND corner " + behind.getX() + " " + behind.getY() + " "
+				+ behind.getZ() + " on " + atLane.replaceAll("\\[.*", "") + " run " + depth
+				+ " link=" + slabStep);
+		}
+		return new Lane(behind.relative(depth), depth, side,
+			List.of(new Lane.Bend(slabStep - 1, clockwise)), false, true);
+	}
+
+	/**
+	 * Files the corner of a flat turn just armed as a breach where it stands past the wall of the
+	 * leg it is leaving. The sideways run goes down the corner's column, so a corner one out is a
+	 * whole link of lane one out -- and the notes the run hangs a column further are the ordinary
+	 * shape of a tight turn, which is why the run's cells are not watched one by one: the leg's
+	 * own watch is stopped at the arm, the next event's looks at the leg the bend exits to, and
+	 * the inner allowance of nought was never meant for the notes a turn hangs. Filed once, never
+	 * thrown: the turn is already armed, and a turn forced in front of the event would arm the same
+	 * one. HBFS at eight wide over one floor, 4 65 148, read in game as a lane a column into the
+	 * partner's with the preview saying nothing. See {@link #WALL_BREACH_INNER_ALLOWANCE}.
+	 */
+	private static void noteCornerPastWall(PlacementPlan placements, LaneRoute route, int leg,
+			int wall, Direction forward, Direction leaving, Direction.Axis axis, Lane armed) {
+		BlockPos corner = armed.cornerAt(0) ? armed.pos()
+			: armed.ahead(cellsToCorner(armed)).pos();
+		int past = (coordAlong(axis, corner) - wall) * stepAlong(axis, leaving);
+		boolean towardsFar = leaving == forward;
+		boolean inner = towardsFar ? route.tipExtension(leg) != 0 : route.nearExtension(leg) != 0;
+		if (past > (inner ? WALL_BREACH_INNER_ALLOWANCE : WALL_BREACH_OUTER_ALLOWANCE)) {
+			placements.cornerPastWall(past, inner, !towardsFar, leg, corner);
+		}
 	}
 
 	/**
@@ -31213,6 +31364,21 @@ public final class SongBuilder {
 		void stopWatchingLegWalls() {
 			watchingLegWalls = false;
 			legEvent = -1;
+		}
+
+		/**
+		 * A flat turn's corner standing past the wall of the leg it leaves, filed by the walk as it
+		 * arms the turn. The leg's own watch stops at the arm and the next event's looks at the exit
+		 * leg, so the corner and the link down from it answered to nothing. See
+		 * {@link #noteCornerPastWall}.
+		 */
+		void cornerPastWall(int past, boolean inner, boolean nearSide, int leg, BlockPos corner) {
+			if (!recording) {
+				return;
+			}
+			wallBreachCells.add(new WallBreach(laneTint < 0 ? -1 : laneTint / 2, leg, nearSide,
+				inner, past, corner.immutable(), "corner"));
+			padded("WALL-BREACH:corner:" + (inner ? "inner" : "outer"));
 		}
 		private final Set<Integer> extraWallColumns = new java.util.HashSet<>();
 
