@@ -10135,7 +10135,16 @@ public final class SongBuilder {
 								flatLink(route, leg, slabStep), tight);
 						}
 						turning = true;
-						noteCornerPastWall(placements, route, leg, foldWall, forward, leaving, axis, lane);
+						// Not the opening's corner: it stands on the input's landing, whose column the
+						// input fixes -- the spine held inside the near wall, five cells to the head.
+						// The wall it is measured against is the leg's shortened tip, kept for the
+						// partner's long link, and that link does not run on the opening's rows; the
+						// read-back finds nothing of the partner's there. Filing it read as an inner
+						// breach on a build with nothing wrong at that cell.
+						if (!(behindTurn != null && index == 0 && !laneStarted)) {
+							noteCornerPastWall(placements, route, leg, foldWall, forward, leaving,
+								axis, lane);
+						}
 						// Watched like any chord-armed turn. The fold may break with this turn still
 						// armed, and the chord that then rides it can hang a note past a wide corner
 						// -- the one thing that widens a v2 paste -- so the watch and the rewalk
