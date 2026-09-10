@@ -4369,6 +4369,15 @@ public final class SongBuilder {
 	static boolean PAD_COUNTS_THE_CORNER = false;
 
 	/**
+	 * The same count, only where a staircase is ahead. A flat turn's arithmetic already walks
+	 * its own corner; a staircase is pinned to the wall and rings past it, so a closing pad
+	 * planned a cell long from a corner stands the descent two out -- every outer wall cell
+	 * HBFS at eight wide over two floors has. Measured apart from the whole count, which is
+	 * what regressed Moonlight and Jackpot.
+	 */
+	static boolean PAD_COUNTS_THE_CORNER_AT_STAIRS = true;
+
+	/**
 	 * Whether the first cell of a pad laid after any soft tip is spent as a repeater of one where
 	 * the wait has a tick to spare, rather than only after a rail's. See {@link #emitPad}.
 	 */
@@ -10808,8 +10817,21 @@ public final class SongBuilder {
 			int strandPrice = STRAND_PRICES_THE_BUS_DISCOUNT
 				&& endsOnBus(here.style(), sunkenDustCells(event.notes().size()))
 				? offBus : turnCells;
+			// Unless a column is left inside the wall for the repeater that revives it. The next
+			// event's closing pad stands a repeater there -- a cell of pad on a weak wire is a
+			// repeater, see planTurnPad -- and hands the staircase a fresh fifteen. Closing early
+			// where every cut and the fold have been refused is not a chord earlier: it is the whole
+			// room padded and the chord carried down. Rather Be at eight wide over three floors,
+			// 18 72 69: a chord of twenty-eight, sixteen cells of acacia, the wire dead before the
+			// staircase -- and the chord's bus fitting the lane with a column to spare.
+			boolean revivable = STRANDED_LANE_REVIVES_ON_A_SPARE_COLUMN && index + 1 < events.size()
+				&& (wall - here.end()) * stepAlong(axis, lane.travel()) >= 1;
 			boolean strandsTheTurn = STRANDED_LANE_CLOSES_EARLY && !turning && layout.ultra()
-				&& laneStarted && !flatAhead && here.tip() < strandPrice;
+				&& laneStarted && !flatAhead && here.tip() < strandPrice && !revivable;
+			if (STRANDED_LANE_CLOSES_EARLY && !turning && layout.ultra() && laneStarted && !flatAhead
+					&& here.tip() < strandPrice && revivable) {
+				placements.padded("v2StrandRevivedOnASpareColumn");
+			}
 			if (strandsTheTurn) {
 				placements.padded("v2ClosedBeforeStranding");
 			}
@@ -11094,7 +11116,8 @@ public final class SongBuilder {
 			// test keep the full count -- taking the corner off all of them was measured, and it
 			// handed Moonlight at forty wide over three floors twelve hundred dead notes.
 			int padColumns = columns;
-			if (PAD_COUNTS_THE_CORNER) {
+			if (PAD_COUNTS_THE_CORNER
+					|| PAD_COUNTS_THE_CORNER_AT_STAIRS && above >= 0 && above < floors) {
 				int cornerCells = 0;
 				for (Lane probe = lane; probe.cornerAt(0) && cornerCells < 4; probe = probe.ahead(1)) {
 					cornerCells++;
@@ -25528,6 +25551,19 @@ public final class SongBuilder {
 	 * hand, which is what v2 is for.</p>
 	 */
 	static boolean STRANDED_LANE_CLOSES_EARLY = true;
+
+	/**
+	 * v2: a chord that leaves the wire too weak for the staircase still fits where it leaves a
+	 * column inside the wall, because the next event's pad stands a repeater in it.
+	 *
+	 * <p>{@link #STRANDED_LANE_CLOSES_EARLY} closes the lane a chord early rather than take one
+	 * that strands the turn, on the reading that the chord then opens the next lane. Where every
+	 * cut and the fold have been refused that reading is wrong: the lane is padded to its wall
+	 * and the chord is carried down whole, and a pad long enough to reach the wall is a pad the
+	 * wire does not survive. A column to spare is a repeater's column, and a repeater hands the
+	 * staircase fifteen whatever the chord left. So the strand test stands down there.</p>
+	 */
+	static boolean STRANDED_LANE_REVIVES_ON_A_SPARE_COLUMN = true;
 
 	/**
 	 * v2: a stacked module may not stand where its own lane is going to walk.
