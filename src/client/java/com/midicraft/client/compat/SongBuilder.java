@@ -10135,13 +10135,16 @@ public final class SongBuilder {
 								flatLink(route, leg, slabStep), tight);
 						}
 						turning = true;
-						// Not the opening's corner: it stands on the input's landing, whose column the
-						// input fixes -- the spine held inside the near wall, five cells to the head.
-						// The wall it is measured against is the leg's shortened tip, kept for the
-						// partner's long link, and that link does not run on the opening's rows; the
-						// read-back finds nothing of the partner's there. Filing it read as an inner
-						// breach on a build with nothing wrong at that cell.
-						if (!(behindTurn != null && index == 0 && !laneStarted)) {
+						// Not the opening's first turn. It stands where the input put the opening --
+						// on the landing, or on the note of one the head drives -- and the wall it is
+						// measured against is the opening leg's shortened tip, kept for the partner's
+						// long link, which does not run on the opening's rows; the read-back finds
+						// nothing of the partner's there. Filed, it read as an inner breach on builds
+						// with nothing wrong at that cell, and so did the cell the turn stands on,
+						// which the leg's own watch had already filed: both are let go.
+						if (behindTurn != null && leg == 0) {
+							placements.forgiveLegWall(leg, leaving != forward);
+						} else {
 							noteCornerPastWall(placements, route, leg, foldWall, forward, leaving,
 								axis, lane);
 						}
@@ -14344,7 +14347,17 @@ public final class SongBuilder {
 		// input will push its block of redstone: the corner goes there, unlaid, and the first
 		// repeater on the run reads the block when it lands. See {@link #addTwoLaneInput}.
 		boolean landing = opening && "-".equals(atLane) && "-".equals(overBus);
-		if (!busCell && !dustCell && !landing) {
+		// A small chord's note block is the path: the repeater behind it drives it directly, so
+		// it is strongly powered and a repeater beside it reads it. A note hung off a bus is not
+		// -- the block beside it is weakly powered and hands nothing on -- which is why the bus
+		// case above asks for the dust and this one asks for the repeater. HBFS at twelve wide
+		// over one floor, 10 64 4: machine B's first turn, a note of one on the wall.
+		String beforeNote = placements.describeBlock(
+			behind.relative(lane.travel().getOpposite()).above(1));
+		boolean drivenNote = atLane.startsWith("minecraft:note_block")
+			&& beforeNote.startsWith("minecraft:repeater")
+			&& beforeNote.contains("facing=" + repeaterFacing(lane.travel()));
+		if (!busCell && !dustCell && !landing && !drivenNote) {
 			placements.padded("turnBehindNotACarrier");
 			return null;
 		}
@@ -31493,6 +31506,18 @@ public final class SongBuilder {
 		 * leg, so the corner and the link down from it answered to nothing. See
 		 * {@link #noteCornerPastWall}.
 		 */
+		/** Drops what this machine's leg filed against one wall; see the opening's first turn. */
+		void forgiveLegWall(int leg, boolean nearSide) {
+			if (!recording) {
+				return;
+			}
+			int machine = laneTint < 0 ? -1 : laneTint / 2;
+			if (wallBreachCells.removeIf(cell -> cell.machine() == machine && cell.leg() == leg
+					&& cell.nearSide() == nearSide)) {
+				padded("openingWallForgiven");
+			}
+		}
+
 		void cornerPastWall(int past, boolean inner, boolean nearSide, int leg, BlockPos corner) {
 			if (!recording) {
 				return;
