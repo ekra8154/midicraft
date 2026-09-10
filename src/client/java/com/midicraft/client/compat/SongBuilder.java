@@ -14082,6 +14082,27 @@ public final class SongBuilder {
 					: DUST_RANGE;
 			laneStarted = true;
 			placedWhileTurning |= turning;
+			// A chord decided inside a bend and laid out onto the exit leg was never asked whether
+			// it fits there. Where it has left the lane standing past that leg's wall it did not,
+			// and the exit-leg watch may have seen nothing: a stacked module whose one column is
+			// the wall column lays no cell past it and still hands back the column after. A leg
+			// would have called that landing an overshoot and turned in front of the chord; this is
+			// the same call, made after the fact, and it gets the same answer -- the planner forces
+			// a turn before the chord, the fold walks the bend out, and the chord is decided on the
+			// leg it stands on, where it turns at the wall and rides the corner. Not where the cell
+			// behind carries the signal and the lane is one out: the fold turns on that cell, on the
+			// wall, without a rewalk. HBFS at eight wide over one floor, 8 65 1237 in game: a
+			// stacked chord of four after a parity seam, the wall at 10 and the corner at 11.
+			if (EXIT_WALLS_ARE_HARD && layout.ultra() && turning && !lane.bending()) {
+				int exitWall = laneWall(axis, nearWallAt(route, leg, nearWall, tipStep),
+					tipWall(route, leg, farWall, tipStep), forward, lane.travel(), floor, climb,
+					floors);
+				int past = (coordAlong(axis, lane.pos()) - exitWall)
+					* stepAlong(axis, lane.travel());
+				if (past > 1 || past == 1 && !endsOnBus(lastStyle, lastBusCells)) {
+					placements.exitOvershot(index, past, lane.pos());
+				}
+			}
 		}
 	}
 
@@ -31373,6 +31394,24 @@ public final class SongBuilder {
 
 		void softEvents(Set<Integer> events) {
 			softEvents = events;
+		}
+
+		/**
+		 * The lane came out of a bend standing past the exit leg's wall, by its landing alone. Stops
+		 * the walk the way a cell past a hard inner wall does, so the planner forces a turn in front
+		 * of the chord that did it; counted where that chord has already been given up on. See
+		 * {@link #EXIT_WALLS_ARE_HARD}.
+		 */
+		void exitOvershot(int event, int past, BlockPos at) {
+			if (!recording) {
+				return;
+			}
+			if (hardInnerWalls && INNER_WALLS_ARE_HARD && EXIT_WALLS_ARE_HARD && event >= 0
+					&& !softEvents.contains(event)) {
+				throw new InnerWallCrossed(event, describe(at) + " the lane, " + past
+					+ " past the exit wall");
+			}
+			padded("exitOvershotGivenUp");
 		}
 
 		void wallAhead(int wall, int step, boolean inner, boolean nearSide, int leg,
