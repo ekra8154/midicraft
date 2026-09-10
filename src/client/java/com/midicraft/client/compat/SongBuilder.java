@@ -10460,7 +10460,30 @@ public final class SongBuilder {
 			}
 			// And the plan is told the same wall, so a block laid past it by anything below is a
 			// breach whether or not the arm that laid it knew. See WALL_BREACH_OUTER_ALLOWANCE.
-			watchWallAhead(placements, route, leg, wall, forward, lane.travel(), axis, index);
+			//
+			// Told the wall of the leg the lane is heading for, which inside a bend is not the leg it
+			// stands on. A chord decided in a bend rides the corner and comes out onto the next leg
+			// -- the leg counter already names it, the fold moved it on when it armed the turn -- and
+			// it is that leg's wall the chord can run past. Watched down the link's travel the wall
+			// has a step of nought along the lane axis, so nothing laid on the way out was ever past
+			// it: the overrun was found by the *next* event's first cell and charged to that event,
+			// whose forced turn could do nothing for a lane already standing two past the wall.
+			// HBFS at eight wide, machine B at z=687: a sunken bus of eight out of a fold corner ran
+			// to two past the inner wall, the fold behind it could not tighten and went wide into
+			// the partner, 259 notes dead. Charged to the chord that made it, the forced turn walks
+			// the bend out first and decides the chord on the leg it will actually stand on.
+			Direction exitTravel = lane.travel();
+			if (lane.bending()) {
+				int toExit = 0;
+				for (Lane.Bend bend : lane.bends()) {
+					toExit = Math.max(toExit, bend.after() + 1);
+				}
+				exitTravel = lane.ahead(toExit).travel();
+			}
+			int watchedWall = exitTravel == lane.travel() ? wall
+				: laneWall(axis, nearWallAt(route, leg, nearWall, tipStep),
+					tipWall(route, leg, farWall, tipStep), forward, exitTravel, floor, climb, floors);
+			watchWallAhead(placements, route, leg, watchedWall, forward, exitTravel, axis, index);
 			int stepOffAhead = turn.stepOff();
 			int splitCells = turn.splitCells();
 			if (replan) {
@@ -10536,7 +10559,29 @@ public final class SongBuilder {
 			// where that shape ends. The same record is handed to {@link #buildShaped} below, so what is
 			// built is the shape that was measured, by construction rather than by agreement.
 			int delayAhead = Math.max(0, (wait - 1) / 4);
-			Lane willOpenOn = lane.ahead(delayAhead);
+			// The corner the delay walks off first. A wait long enough for a repeater of its own lays
+			// that repeater where the lane stands, and where the lane stands on a corner the build
+			// walks off it before anything goes down -- the "off the corner before a column of this
+			// is measured" branch below: dust on the corner, the repeater a cell along. So the chord
+			// opens a cell later than {@code lane.ahead(delayAhead)} says, and cornerWalk, counted
+			// from that cell, cannot see it: the cell it stands on is not a corner, the one behind
+			// it was. Every shape was then asked its room a column early. HBFS at eight wide, machine
+			// B at z=222: a stacked chord of five measured with three columns to its wall and built
+			// with two fell to a bus and landed past the wall, and the fold behind it turned on the
+			// cursor, two columns out. Counted under the gate the walk-off itself has, so the two
+			// cannot drift; a wait of five or more is what makes that gate's own wait clause true.
+			int delayWalkOff = 0;
+			if (delayAhead > 0 && layout.ultra() && !turning && index > 0
+					&& index + 1 < events.size()
+					&& (event.notes().size() + 1) / 2 + offBus <= DUST_RANGE) {
+				for (Lane probe = lane; probe.cornerAt(0) && delayWalkOff < 4; probe = probe.ahead(1)) {
+					delayWalkOff++;
+				}
+				if (delayWalkOff > 0) {
+					placements.padded("delayWalkedOffACorner");
+				}
+			}
+			Lane willOpenOn = lane.ahead(delayWalkOff + delayAhead);
 			// The same slack the build site works out, which at this point in the lane is the whole wait
 			// less the pad already spent -- nothing has been spent yet when a chord is measured.
 			int slackAhead = Math.max(0, (event.time() - currentTime - 1) / 4);
@@ -10565,7 +10610,8 @@ public final class SongBuilder {
 				cornerWalk++;
 			}
 			Landing here = landingFrom(shaped,
-				coordAlong(axis, lane.pos()) + stepAlong(axis, lane.travel()) * cornerWalk,
+				coordAlong(axis, lane.pos())
+					+ stepAlong(axis, lane.travel()) * (delayWalkOff + cornerWalk),
 				stepAlong(axis, lane.travel()), event, wait);
 			// Against the prediction v2 used to make, while both exist. The old one deliberately erred
 			// towards the bus -- "the safe way round", because a lane measured long and built short
