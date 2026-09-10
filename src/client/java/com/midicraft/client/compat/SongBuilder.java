@@ -1931,12 +1931,14 @@ public final class SongBuilder {
 					// {@link #feedTarget}: a machine that turns before it lays a module stands its
 					// first repeater on the far side of the bend, reading across the rows, and a
 					// feed laid to the repeater's own row delivers to its side.
-					addTwoLaneInput(placements, forward,
-						feedTarget(placements, forward, inputA),
-						feedTarget(placements, forward,
-							placements.firstRepeaterAfter(laidByA)),
+					BlockPos inputB = placements.firstRepeaterAfter(laidByA);
+					BlockPos targetA = feedTarget(placements, forward, inputA);
+					BlockPos targetB = feedTarget(placements, forward, inputB);
+					addTwoLaneInput(placements, forward, targetA, targetB,
 						Math.floorMod(gtA.get(0).time(), 2) == 1,
-						Math.floorMod(gtB.get(0).time(), 2) == 1);
+						Math.floorMod(gtB.get(0).time(), 2) == 1,
+						targetA != null && !targetA.equals(inputA),
+						targetB != null && !targetB.equals(inputB));
 				} else {
 					addStarter(placements, forward, inputA);
 					addStarter(placements, forward,
@@ -2278,6 +2280,20 @@ public final class SongBuilder {
 
 	private static void addTwoLaneInput(PlacementPlan placements, Direction forward,
 			BlockPos headA, BlockPos headB, boolean oddA, boolean oddB) {
+		addTwoLaneInput(placements, forward, headA, headB, oddA, oddB, false, false);
+	}
+
+	/**
+	 * @param acrossA whether machine A's head reads across the rows -- it opened on a corner -- so
+	 *     the cell fed is the corner itself, which the walk left as air for the block of redstone
+	 *     to land in: the odd run is then five cells to the head, not six, and the head is the
+	 *     landing. See {@link #feedTarget} and {@link #turnOnTheCellBehind}.
+	 * @param acrossB the same of machine B, which at four to eleven wide on one floor is the one
+	 *     that opens on a corner
+	 */
+	private static void addTwoLaneInput(PlacementPlan placements, Direction forward,
+			BlockPos headA, BlockPos headB, boolean oddA, boolean oddB, boolean acrossA,
+			boolean acrossB) {
 		if (headA == null || headB == null) {
 			placements.padded("twoLaneInputNoHead");
 			return;
@@ -2290,9 +2306,12 @@ public final class SongBuilder {
 		// straight off the spine (its three repeaters and the spine itself), six for one fed
 		// through the double piston (the pair, two blocks and two landing cells). The spine is
 		// one straight column, so the deeper need decides it for both.
+		// Five where the head is the landing itself -- read across the rows, see acrossA.
+		int reachA = oddA ? acrossA ? 5 : 6 : 3;
+		int reachB = oddB ? acrossB ? 5 : 6 : 3;
 		int wall = step > 0
-			? Math.min(alongA - (oddA ? 6 : 3), alongB - (oddB ? 6 : 3))
-			: Math.max(alongA + (oddA ? 6 : 3), alongB + (oddB ? 6 : 3));
+			? Math.min(alongA - reachA, alongB - reachB)
+			: Math.max(alongA + reachA, alongB + reachB);
 		BlockPos[] heads = {headA, headB};
 		boolean[] odd = {oddA, oddB};
 		Direction across = forward.getClockWise();
@@ -2384,6 +2403,17 @@ public final class SongBuilder {
 					} else {
 						set(placements, at, "minecraft:redstone_wire");
 					}
+				}
+				// A head read across the rows is the landing itself: the run stops a cell short of
+				// it and the block of redstone is pushed into the head, which the walk left as air
+				// for exactly this. Claimed as air so nothing hangs a note in it later.
+				if (columns <= run.length) {
+					BlockPos landing = spine.relative(forward, columns);
+					if ("-".equals(placements.describeBlock(landing))) {
+						set(placements, landing.below(), "minecraft:stone");
+						set(placements, landing, "minecraft:air");
+					}
+					placements.padded("twoLaneInputLandsOnTheHead");
 				}
 				placements.padded("twoLaneInputPiston");
 			} else {
@@ -10093,7 +10123,7 @@ public final class SongBuilder {
 						Direction leaving = lane.travel();
 						Lane behindTurn = TURNS_ON_THE_CELL_BEHIND && foldColumns < 0
 							? turnOnTheCellBehind(placements, lane, depth,
-								flatLink(route, leg, slabStep))
+								flatLink(route, leg, slabStep), index == 0 && !laneStarted)
 							: null;
 						if (behindTurn != null) {
 							lane = behindTurn;
@@ -14290,7 +14320,7 @@ public final class SongBuilder {
 	 * and the caller arms the turn where it always did.</p>
 	 */
 	private static Lane turnOnTheCellBehind(PlacementPlan placements, Lane lane, Direction depth,
-			int slabStep) {
+			int slabStep, boolean opening) {
 		if (slabStep < 2) {
 			return null;
 		}
@@ -14301,7 +14331,11 @@ public final class SongBuilder {
 			&& !atLane.startsWith("minecraft:note_block") && !atLane.startsWith("minecraft:air")
 			&& overBus.startsWith("minecraft:redstone_wire");
 		boolean dustCell = atLane.startsWith("minecraft:redstone_wire");
-		if (!busCell && !dustCell) {
+		// At a machine's opening nothing is laid yet, and the cell behind is where the shared
+		// input will push its block of redstone: the corner goes there, unlaid, and the first
+		// repeater on the run reads the block when it lands. See {@link #addTwoLaneInput}.
+		boolean landing = opening && "-".equals(atLane) && "-".equals(overBus);
+		if (!busCell && !dustCell && !landing) {
 			placements.padded("turnBehindNotACarrier");
 			return null;
 		}
