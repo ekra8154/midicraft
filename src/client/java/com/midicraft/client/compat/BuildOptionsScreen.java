@@ -168,6 +168,17 @@ final class BuildOptionsScreen extends Screen {
 				+ at(plan.collisions().keySet().iterator().next(), plan.collisions().size()),
 				contested(plan)));
 		}
+		// The inner walls next, for the same reason: a machine of a dual build standing in the
+		// other's ground is what the contested cells and the dead lines under them come from, and
+		// unlike an outer breach nothing about it sticks out of the footprint to be seen from
+		// outside. The coordinate is the furthest cell of the worst lane; the tooltip has every
+		// lane, worst first.
+		List<SongBuilder.WallBreach> inner = plan.wallBreaches().stream()
+			.filter(SongBuilder.WallBreach::inner).toList();
+		if (!inner.isEmpty()) {
+			lines.add(new FaultLine(many(inner.size(), "lane", "runs into the other machine's ground")
+				+ at(inner.getFirst().furthest(), inner.size()), crossings(inner, "inner")));
+		}
 		if (plan.severedLanes() > 0) {
 			lines.add(new FaultLine(many(plan.severedLanes(), "repeater", "reads nothing behind it")
 				+ at(first(sites.severed()), plan.severedLanes())));
@@ -195,6 +206,12 @@ final class BuildOptionsScreen extends Screen {
 		if (plan.wrongNotes() > 0) {
 			lines.add(new FaultLine(many(plan.wrongNotes(), "note", "sounds twice")
 				+ at(first(sites.wrongNotes()), plan.wrongNotes())));
+		}
+		List<SongBuilder.WallBreach> outer = plan.wallBreaches().stream()
+			.filter(one -> !one.inner()).toList();
+		if (!outer.isEmpty()) {
+			lines.add(new FaultLine(many(outer.size(), "lane", "runs past the outer wall")
+				+ at(outer.getFirst().furthest(), outer.size()), crossings(outer, "outer")));
 		}
 		if (lines.size() > FAULT_LINES) {
 			// Trimmed rather than truncated. A list that simply stopped at three would say a build has
@@ -247,7 +264,33 @@ final class BuildOptionsScreen extends Screen {
 	private static String many(int count, String noun, String said) {
 		return count == 1 ? "1 " + noun + " " + said
 			: count + " " + noun + "s " + said.replaceFirst("^reads\\b", "read")
-				.replaceFirst("^sounds\\b", "sound");
+				.replaceFirst("^sounds\\b", "sound").replaceFirst("^runs\\b", "run");
+	}
+
+	/**
+	 * Every lane that crossed a wall, worst first, each with the cell to stand on.
+	 *
+	 * <p>One entry a lane -- the plan already keeps only the furthest cell of each -- so a lane a
+	 * whole link out reads as one line and not as thirty. Which machine and which leg, because a
+	 * dual build's two machines interleave and the coordinate alone does not say whose ground
+	 * you are looking at; how far, because one column is a hung note and three is a lane.</p>
+	 */
+	private static List<String> crossings(List<SongBuilder.WallBreach> lanes, String which) {
+		List<String> detail = new ArrayList<>();
+		detail.add(lanes.size() == 1 ? "Where it crosses the " + which + " wall:"
+			: "Where each crosses the " + which + " wall, worst first:");
+		for (SongBuilder.WallBreach lane : lanes) {
+			if (detail.size() > CELLS_LISTED) {
+				detail.add("...and " + (lanes.size() - CELLS_LISTED) + " more");
+				break;
+			}
+			detail.add("  " + coords(lane.furthest()) + "  "
+				+ (lane.machine() < 0 ? "lane" : "machine " + (char) ('A' + lane.machine()))
+				+ " leg " + lane.leg() + ", " + lane.past()
+				+ (lane.past() == 1 ? " block" : " blocks") + " out, laid by "
+				+ lane.placing().replace("chord:", ""));
+		}
+		return List.copyOf(detail);
 	}
 
 	/**

@@ -30,6 +30,9 @@ final class DenseBuildScreen extends Screen {
 	private final int innerWalls;
 	private final int outerWalls;
 	private final int worstWall;
+	/** The furthest cell of the worst lane over each kind of wall, for /tp; empty where none. */
+	private final String innerAt;
+	private final String outerAt;
 	private final int missingNotes;
 	private final int deadNotes;
 	private final int collisions;
@@ -45,6 +48,8 @@ final class DenseBuildScreen extends Screen {
 		this.innerWalls = (int) plan.innerWallBreaches();
 		this.outerWalls = (int) plan.outerWallBreaches();
 		this.worstWall = plan.worstWallBreach();
+		this.innerAt = worstAt(plan, true);
+		this.outerAt = worstAt(plan, false);
 		this.missingNotes = plan.missingNotes();
 		this.deadNotes = plan.deadNotes();
 		this.collisions = plan.collisions().size();
@@ -115,11 +120,12 @@ final class DenseBuildScreen extends Screen {
 		// the walk noticed it; this one says it where the walk did not.
 		if (innerWalls > 0) {
 			lines.add("- " + count(innerWalls, "lane") + " would run into the other machine's ground,");
-			lines.add("  by at most " + count(worstWall, "block") + ". The two collide there.");
+			lines.add("  by at most " + count(worstWall, "block") + ". The two collide there"
+				+ (innerAt.isEmpty() ? "." : ", worst at " + innerAt + "."));
 		}
 		if (outerWalls > 0) {
 			lines.add("- " + count(outerWalls, "lane") + " would run past the outer wall, by at most "
-				+ count(worstWall, "block") + ".");
+				+ count(worstWall, "block") + (outerAt.isEmpty() ? "." : ", worst at " + outerAt + "."));
 		}
 		if (breaches > 0) {
 			lines.add("- it would breach its footprint " + count(breaches, "time")
@@ -132,6 +138,16 @@ final class DenseBuildScreen extends Screen {
 		}
 		lines.add("Try a greater width, a different floor count, or another paste type.");
 		return lines;
+	}
+
+	/** {@code x y z} of the worst crossing of the inner or outer walls -- the plan lists worst first. */
+	private static String worstAt(SongBuilder.PastePlan plan, boolean inner) {
+		return plan.wallBreaches().stream()
+			.filter(one -> one.inner() == inner)
+			.findFirst()
+			.map(one -> one.furthest().getX() + " " + one.furthest().getY() + " "
+				+ one.furthest().getZ())
+			.orElse("");
 	}
 
 	private static String count(int many, String noun) {
