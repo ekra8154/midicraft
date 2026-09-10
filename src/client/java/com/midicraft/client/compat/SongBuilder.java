@@ -31837,7 +31837,12 @@ public final class SongBuilder {
 				int allowance = legInner ? WALL_BREACH_INNER_ALLOWANCE : WALL_BREACH_OUTER_ALLOWANCE;
 				// The wall a bend exits to is held exactly, outer or not: a chord riding out that
 				// lands a column past it is what the forced turn is for. See EXIT_WALLS_ARE_HARD.
-				boolean hard = legInner || legExit && EXIT_WALLS_ARE_HARD;
+				// The chord's own cells, and not the staircase the leg ends in: a descent's outer
+				// rung stands one past the wall by design, and a lane still in its bend when the
+				// event was decided had that descent filed as the chord riding out -- Moonlight at
+				// eight wide over three floors, a chord of two forced to turn eleven columns early.
+				boolean hard = legInner || legExit && EXIT_WALLS_ARE_HARD
+					&& placing != null && placing.startsWith("chord");
 				if (past > allowance || hard && past > 0) {
 					String by = placing == null ? "?" : placing;
 					// A hard inner wall stops the walk here, before the cell is recorded: the plan is
