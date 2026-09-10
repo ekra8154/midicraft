@@ -11114,6 +11114,15 @@ public final class SongBuilder {
 			// into. The last event has nothing after it to be padded for.
 			placements.gapAhead(index + 1 < events.size()
 				? events.get(index + 1).time() - event.time() : Integer.MAX_VALUE);
+			// And whether a staircase closes the lane on this chord's heels, which is the case a
+			// simple tail's note-block middle cannot survive either: the next event's repeater,
+			// the one thing that reads a soft-powered block, goes down the staircase instead and
+			// the staircase's first dust reads nothing. Off the landing arithmetic rather than
+			// {@code reaches}, which is silent while the walk counts itself as turning -- and a
+			// chord decided on a seam's exit corner still is. Choral at eight wide over three
+			// floors, 1 71 174: a tail of three, a harp in the middle, dead from the descent.
+			placements.stairsCloseTheLane(above >= 0 && above < floors
+				&& (wall - landing) * stepAlong(axis, lane.travel()) <= 1);
 			// And that the two above were answered at all. Everything the simple tail's safety rests on
 			// is handed down from here, and walkWall hands down none of it -- where this walk says
 			// "there is a turn ahead" or "the next event is a tick away", the older one says nothing and
@@ -17544,6 +17553,15 @@ public final class SongBuilder {
 	 * columns.</p>
 	 */
 	static boolean SIMPLE_TAIL_GIVES_WAY_TO_A_TIGHT_GAP = true;
+
+	/**
+	 * Whether a simple tail with a note-block middle is laid as a bus where a staircase closes the
+	 * lane on the chord's heels. The middle is soft powered and lights a repeater and nothing
+	 * else; the next event's repeater is the thing that was going to read it, and where the lane
+	 * closes it goes down the staircase instead, so the staircase's first dust reads a note block.
+	 * The tight-gap rule is the same fact about a pad; this is the same fact about a turn.
+	 */
+	static boolean SIMPLE_TAIL_GIVES_WAY_TO_A_STAIRCASE = true;
 
 	/**
 	 * The gap above which a simple tail is allowed to keep a note block in its middle.
@@ -26799,12 +26817,16 @@ public final class SongBuilder {
 		// lower. The: the handover sits at the height of the lane rather than raised, so a middle
 		// standing right there is driven by it, where a bus cell has to be a level up. A tail of
 		// three is two cells of bus and one column of this.
+		boolean stairsClose = SIMPLE_TAIL_GIVES_WAY_TO_A_STAIRCASE && noteBlockInTheMiddle(tail)
+			&& placements.stairsCloseTheLane();
 		boolean simple = mayGoSimple && placements.answersWhatIsAhead() && simpleTail(tail)
+			&& !stairsClose
 			&& !(SIMPLE_TAIL_GIVES_WAY_TO_A_TIGHT_GAP && noteBlockInTheMiddle(tail)
 				&& (NOTE_BLOCK_MIDDLE_ALWAYS_BUSES
 					|| placements.gapAhead() <= SIMPLE_TAIL_KEEPS_A_NOTE_MIDDLE_ABOVE));
 		if (mayGoSimple && simpleTail(tail) && !simple) {
-			placements.padded("simpleTailBusedForATightGap");
+			placements.padded(stairsClose ? "simpleTailBusedBeforeAStaircase"
+				: "simpleTailBusedForATightGap");
 		}
 		// The handover is dust over stone either way, but its *shape* is not the same either way.
 		//
@@ -31693,6 +31715,23 @@ public final class SongBuilder {
 
 		void turnAhead(boolean ahead) {
 			turnAhead = ahead;
+		}
+
+		/**
+		 * Whether a staircase closes the lane right after this chord: one is ahead and the chord's
+		 * measured landing reaches the wall. Read by the simple tail, whose note-block middle can
+		 * light a repeater and not the staircase's dust. Answered from the landing arithmetic, which
+		 * the walk has even while it still counts itself as turning. See
+		 * {@link #SIMPLE_TAIL_GIVES_WAY_TO_A_STAIRCASE}.
+		 */
+		private boolean stairsCloseTheLane;
+
+		void stairsCloseTheLane(boolean close) {
+			stairsCloseTheLane = close;
+		}
+
+		boolean stairsCloseTheLane() {
+			return stairsCloseTheLane;
 		}
 
 		/**
