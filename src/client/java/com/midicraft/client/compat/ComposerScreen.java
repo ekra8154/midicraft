@@ -1624,6 +1624,17 @@ public final class ComposerScreen extends Screen {
 			String report = "Converted at " + conversionGridLabel(gridTicks)
 				+ (gameTicks ? " on game ticks (2 lanes)" : " on repeater ticks")
 				+ ": " + conversion.shiftedNotes() + " pitch-shifted"
+				// Said separately from the pitch shifts because it is the opposite of one: these
+				// notes are still at the pitch they were written at, and what moved was which
+				// layer plays them. Rolling the two into one number would report the mode that
+				// changes the least music as though it had changed the most.
+				//
+				// Layers as well as notes, because Convert to melodic adds no layer at all -- so
+				// the count below says nothing, and a song-wide change would otherwise be reported
+				// as no change.
+				+ (conversion.melodicNotes() > 0
+					? ", " + conversion.melodicNotes() + " notes onto "
+						+ conversion.melodicLayers() + " melodic layers" : "")
 				+ (conversion.addedLayers() > 0 ? ", +" + conversion.addedLayers() + " layers" : "")
 				+ (conversion.mergedRepeats() > 0
 					? ", " + conversion.mergedRepeats() + " repeats merged" : "")
@@ -2927,6 +2938,9 @@ public final class ComposerScreen extends Screen {
 		rebuildMoveLayerButtons();
 		showResult(Component.literal("Fitted to range: " + fitted.shiftedNotes()
 			+ " pitch-shifted"
+			+ (fitted.melodicNotes() > 0
+				? ", " + fitted.melodicNotes() + " notes onto "
+					+ fitted.melodicLayers() + " melodic layers" : "")
 			+ (fitted.addedLayers() > 0 ? ", +" + fitted.addedLayers() + " layers" : "")
 			+ (fitted.duplicateLayers() > 0
 				? ", " + fitted.duplicateLayers() + " duplicate layers dropped" : "")));
@@ -3166,10 +3180,12 @@ public final class ComposerScreen extends Screen {
 				+ "so half the worst a note has to move, and notes a single game tick apart stay "
 				+ "apart instead of folding together. Costs the second lane -- anything landing "
 				+ "between repeater ticks needs the Half-tick lane layout to play it.";
-			case FIT_ALL_RANGE -> "Octave-shifts notes that no instrument on their layer can reach "
-				+ "until it can, and splits a layer that needed more than one shift. Exactly the "
-				+ "step Convert does, on its own and without touching the timing: same settings, "
-				+ "same result. Quick rather than faithful -- intervals across a layer can change.";
+			case FIT_ALL_RANGE -> "Brings notes no instrument on their layer can reach into range, "
+				+ "by whichever of the four routes Settings > Out-of-range notes names: shift the "
+				+ "notes, shift the layer and then the notes, split the strays onto a melodic "
+				+ "layer, or turn the whole part into one. The last two reach F#1-F#7 without "
+				+ "changing a pitch, and the last adds no layer at all. Exactly the step Convert "
+				+ "does, on its own and without touching the timing: same setting, same result.";
 			case SNAP_TEMPO -> "Moves the tempo as little as it can while making the spacing the "
 				+ "song already has land on whole repeater ticks, folding the speed slider in first. "
 				+ "Leaves every note where it is, so it does nothing for a song whose notes share no "

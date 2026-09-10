@@ -1,6 +1,7 @@
 package com.midicraft;
 
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Where each note block instrument actually sounds, as the lowest MIDI note its 25 pitches reach.
@@ -67,7 +68,22 @@ public final class InstrumentRanges {
 		Map.entry("HAT", 80)
 	);
 
+	/** The three whose entries above are virtual; see the class comment. */
+	private static final Set<String> PERCUSSION = Set.of("BASEDRUM", "SNARE", "HAT");
+
 	private InstrumentRanges() {
+	}
+
+	/**
+	 * Whether this instrument's register is a stack of timbres rather than a stretch of pitches.
+	 *
+	 * <p>A snare's 25 pitches are 25 ways of hitting one drum, so the entries for these three are
+	 * chosen to stack without overlapping rather than measured off a sample. Anything reading the
+	 * table as a claim about where a sound sits in the music has to ask this first: moving a snare
+	 * into the bass register does not make it a lower snare, it makes it a kick.</p>
+	 */
+	public static boolean isPercussion(String instrumentId) {
+		return PERCUSSION.contains(instrumentId);
 	}
 
 	/**

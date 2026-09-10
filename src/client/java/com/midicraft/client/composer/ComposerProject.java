@@ -586,9 +586,10 @@ public record ComposerProject(
 	/**
 	 * What {@link #convertToMinecraft} moves when a layer will not fit the note-block range.
 	 *
-	 * <p>Both end with every note in range, because the second step of each is the same per-note
+	 * <p>All three end with every note in range, because the last step of each is the same per-note
 	 * octave shift and that can never fail: the window is 25 semitones, so every pitch class has an
-	 * octave inside it. What differs is how much of the part moves together.</p>
+	 * octave inside it. What differs is what moves -- how much of the part travels together, or
+	 * whether a note moves layer rather than pitch.</p>
 	 *
 	 * <p>Multiples of twelve throughout, and that is not a detail. A whole-song transpose may move
 	 * by any interval, because everything moves with it and the song simply lands in a new key. One
@@ -612,7 +613,56 @@ public record ComposerProject(
 		 * more strays than it creates -- a layer already wholly in range scores nothing at all at
 		 * shift zero, so it stays where it is.</p>
 		 */
-		LAYER_THEN_NOTES
+		LAYER_THEN_NOTES,
+		/**
+		 * Out-of-range notes move to a melodic split layer beside their own, and only what no
+		 * bracket there reaches is shifted.
+		 *
+		 * <p>The other two answer a note outside the harp window by folding it into the window,
+		 * which is the one repair that cannot be made without changing the music: a bass line an
+		 * octave under the tune comes back sitting on top of it. This moves the note rather than
+		 * the pitch. A melodic split reads written pitch as true pitch across F#1 to F#7
+		 * ({@link Split#melodic}), so the note keeps what it was written at and sounds on the tier
+		 * that actually lives there -- bass low, bell high.</p>
+		 *
+		 * <p>One companion layer per source layer, catching both ends at once. The transposing
+		 * modes give the notes under the window one layer and the notes over it another, each
+		 * named by the octave it took; here there is no octave to name, because nothing inside six
+		 * octaves moves at all. A layer with nothing left in the window becomes the melodic layer
+		 * itself rather than emptying out beside one.</p>
+		 *
+		 * <p>What it costs is blocks. A split layer sounds every voice whose bracket covers the
+		 * note and the melodic tiers overlap by an octave, so a note in an overlap builds twice, on
+		 * two lanes. That is what the overlap is for and a surprise when nobody asked for it: drag
+		 * a bracket in afterwards to get single notes back.</p>
+		 */
+		SPLIT_INTO_MELODIC,
+		/**
+		 * A layer that has a note out of range becomes a melodic split layer, whole and in place.
+		 *
+		 * <p>The same repair as {@link #SPLIT_INTO_MELODIC} without the second layer. That one
+		 * keeps the part's instrument for the notes the harp window can hold and puts the rest on a
+		 * companion, which is two rows for one part and two timbres inside it -- a piano whose low
+		 * notes come back as a bass. This asks the question the other way round: if the part needs
+		 * a layer that reaches six octaves, give the part that layer. Nothing is added, nothing is
+		 * split, and the part is one thing again.</p>
+		 *
+		 * <p>What it gives up is the instrument. A pling layer that strays once stops being a pling
+		 * layer and starts being bass, guitar, harp, flute and bell by register -- so the part's
+		 * timbre now follows its pitch, which is a musical decision and not always the wanted one.
+		 * The layer count is the compensation: this is the only mode that can bring a whole song
+		 * into range without adding a single layer, which is what a song already near the
+		 * {@value ComposerProject#MAX_LAYERS}-layer limit needs.</p>
+		 *
+		 * <p>Doubling costs more here than it does next door, and for the same reason: the notes
+		 * that were always in range are on the split too now, and the harp window sits under the
+		 * guitar and flute brackets as well as the harp one. Left alone, most of a converted layer
+		 * builds twice. Dragging the brackets apart is the fix, and it is worth doing.</p>
+		 *
+		 * <p>Layers that already fit are not touched. The mode answers a part that cannot be
+		 * built, not every part in the song.</p>
+		 */
+		CONVERT_TO_MELODIC
 	}
 
 	public record MinecraftConversion(
@@ -625,7 +675,20 @@ public record ComposerProject(
 		int duplicateLayers,
 		int duplicateLayerNotes,
 		/** Notes that landed on a pitch and tick their layer already held, and so became one note. */
-		int mergedIntoExisting
+		int mergedIntoExisting,
+		/**
+		 * Notes moved onto a melodic split layer instead of being folded into the harp window; see
+		 * {@link OctaveShifting#SPLIT_INTO_MELODIC}. Nearly all of them keep the pitch they were written
+		 * at, which is the point of the mode and the reason they are not in {@link #shiftedNotes}.
+		 */
+		int melodicNotes,
+		/**
+		 * How many layers came out with a melodic split on them -- added by
+		 * {@link OctaveShifting#SPLIT_INTO_MELODIC}, or converted in place by
+		 * {@link OctaveShifting#CONVERT_TO_MELODIC}, which adds none and would otherwise report
+		 * a song-wide change as no change at all.
+		 */
+		int melodicLayers
 	) {
 		/**
 		 * How much slower the converted song plays. Greater than 1 means the source was faster than
@@ -1572,6 +1635,8 @@ public record ComposerProject(
 		int duplicateLayers = 0;
 		int duplicateLayerNotes = 0;
 		int mergedIntoExisting = 0;
+		int melodicNotes = 0;
+		int melodicLayers = 0;
 		List<Layer> convertedLayers = new ArrayList<>();
 		int convertedActiveLayer = 0;
 		int shiftedNotes = 0;
@@ -1604,6 +1669,104 @@ public record ComposerProject(
 			// means nothing when its voices already span five octaves. Only a note no voice can
 			// reach moves, and only far enough that one can.
 			boolean fitsToSplit = fitRange && source.split() != null && source.pitched();
+			// Percussion is left out for the reason a sound effect is, one step further along. Its
+			// 25 pitches are 25 timbres of one drum rather than notes on a scale, so the melodic
+			// tiers say nothing about it: a snare that will not fit the window wants the window,
+			// not a bell. Those layers fall through to the per-note shift below, which is what
+			// they got before these modes existed and still the right answer for them.
+			boolean melodic = pitched
+				&& (shifting == OctaveShifting.SPLIT_INTO_MELODIC
+					|| shifting == OctaveShifting.CONVERT_TO_MELODIC)
+				&& !InstrumentRanges.isPercussion(source.instrument());
+			// The two answers that leave the music alone: rather than fold a note into the harp
+			// window, hand it to a layer whose brackets already reach it. Their own block because
+			// they share nothing with the two transposing modes below -- no base shift, no
+			// bucketing by octave, and what comes out is a split layer rather than a copy of the
+			// source at a different pitch.
+			//
+			// One block for both, because they differ in exactly one decision: which notes go onto
+			// the split. Split takes the ones the window cannot hold and leaves the rest on their
+			// own instrument; Convert takes the lot the moment one note needs it, so the part stays
+			// one layer with one voice-set. Everything after the partition -- the shift for what no
+			// bracket reaches, the naming, the counting -- is the same question either way.
+			// See OctaveShifting.SPLIT_INTO_MELODIC and CONVERT_TO_MELODIC.
+			if (melodic) {
+				Split melodicSplit = Split.melodic();
+				boolean wholeLayer = shifting == OctaveShifting.CONVERT_TO_MELODIC;
+				// Convert moves a layer or it does not, and one stray decides. Asked up front
+				// rather than per note, because the answer for the first note has to be the answer
+				// for the last: a part half on its instrument and half on a split is the thing
+				// this mode exists to not produce.
+				boolean anyOutOfRange = sourceNotes.stream().anyMatch(note -> !note.isBuildable());
+				List<NoteEvent> kept = new ArrayList<>();
+				List<NoteEvent> relocated = new ArrayList<>();
+				for (NoteEvent note : sourceNotes) {
+					long quantizedStart =
+						Math.max(0L, Math.round(note.startTick() / (double)grid) * (long)grid);
+					if (!anyOutOfRange || (!wholeLayer && note.isBuildable())) {
+						kept.add(note.movedTo(quantizedStart, note.midiNote()));
+						continue;
+					}
+					// Six octaves of brackets, so this only moves a note written outside F#1 to
+					// F#7 at all -- and it moves that one by a whole octave, like everywhere else.
+					int shift = melodicSplit.covers(note.midiNote())
+						? 0
+						: octaveShiftIntoSplit(melodicSplit, note.midiNote());
+					relocated.add(note.movedTo(quantizedStart, note.midiNote() + shift));
+					if (shift != 0) {
+						shiftedNotes++;
+					}
+				}
+				melodicNotes += relocated.size();
+				if (!relocated.isEmpty()) {
+					melodicLayers++;
+				}
+				// Parallel to emitted: how many notes each layer was handed, so that what the
+				// layer dropped as a duplicate cell can be counted the way the buckets below do.
+				List<Layer> emitted = new ArrayList<>();
+				List<Integer> fed = new ArrayList<>();
+				if (relocated.isEmpty()) {
+					// Nothing was out, so nothing is added -- and a source layer with no notes at
+					// all lands here and stays a layer, because that is a part someone has yet to
+					// write rather than a part that dissolved.
+					emitted.add(source.withNotes(kept));
+					fed.add(kept.size());
+				} else if (kept.isEmpty()) {
+					// Where Convert always lands, and where Split lands for a part written wholly
+					// under or over the window -- a bass line, usually. Splitting that would leave
+					// an empty layer beside a full one for one part, so either way the layer
+					// becomes the melodic one in place and keeps its name.
+					emitted.add(source.withNotes(relocated).withSplit(melodicSplit));
+					fed.add(relocated.size());
+				} else {
+					emitted.add(source.withNotes(kept));
+					fed.add(kept.size());
+					emitted.add(source.withName(source.name() + MELODIC_SUFFIX)
+						.withNotes(relocated).withSplit(melodicSplit));
+					fed.add(relocated.size());
+				}
+				if (convertedLayers.size() + emitted.size() > MAX_LAYERS) {
+					throw new IllegalStateException(
+						"Conversion needs " + (convertedLayers.size() + emitted.size())
+							+ " layers but the limit is " + MAX_LAYERS
+							+ ". Split into melodic adds one layer per part that straddles the "
+							+ "note-block range; Convert to melodic adds none at all, and is the "
+							+ "mode to reach for at this layer count."
+					);
+				}
+				if (layerIndex == activeLayerIndex) {
+					convertedActiveLayer = convertedLayers.size();
+				}
+				for (int emittedIndex = 0; emittedIndex < emitted.size(); emittedIndex++) {
+					Layer built = emitted.get(emittedIndex);
+					// Two notes an octave apart can still land on one cell, where both were
+					// outside the brackets and the same octave brought them in. A layer keeps one
+					// note per cell, and this is the one way the mode can take a note away.
+					mergedIntoExisting += fed.get(emittedIndex) - built.notes().size();
+					convertedLayers.add(built);
+				}
+				continue;
+			}
 			// Where the layer sits before any note is looked at individually.
 			int base = pitched && shifting == OctaveShifting.LAYER_THEN_NOTES
 				? bestLayerOctaveShift(sourceNotes)
@@ -1734,7 +1897,9 @@ public record ComposerProject(
 			mergedRepeats,
 			duplicateLayers,
 			duplicateLayerNotes,
-			mergedIntoExisting
+			mergedIntoExisting,
+			melodicNotes,
+			melodicLayers
 		);
 	}
 
@@ -2392,6 +2557,14 @@ public record ComposerProject(
 		}
 		return bestShift;
 	}
+
+	/**
+	 * What a melodic companion layer is called: the part's own name and what was done to it.
+	 *
+	 * <p>Not an octave, unlike {@link #octaveShiftSuffix}, because the notes on it did not take
+	 * one -- they are at the pitch they were written at, on a layer that can reach them.</p>
+	 */
+	private static final String MELODIC_SUFFIX = " (melodic)";
 
 	private static String octaveShiftSuffix(int shift) {
 		if (shift == 0) {

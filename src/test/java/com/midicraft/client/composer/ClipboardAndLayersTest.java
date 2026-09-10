@@ -551,8 +551,7 @@ class ClipboardAndLayersTest {
 			ComposerProject converted =
 				song.convertToMinecraft(480, false, 0, false, mode, true).project();
 			assertEquals(1, converted.layers().size(), mode + " needed no split");
-			assertTrue(converted.layers().getFirst().notes().stream().allMatch(NoteEvent::isBuildable),
-				mode + " left a note out of range");
+			assertTrue(everyNoteInRange(converted), mode + " left a note out of range");
 		}
 	}
 
@@ -598,8 +597,10 @@ class ClipboardAndLayersTest {
 	/**
 	 * Whatever one octave cannot reach still moves note by note, so the result is always buildable.
 	 *
-	 * <p>The guarantee that makes every mode safe to leave on: the second step is the same per-note
-	 * shift as the first mode, and the window is 25 semitones wide, so no pitch class can fail.</p>
+	 * <p>The guarantee that makes every mode safe to leave on: the last step of each is a per-note
+	 * octave shift, aimed at a window at least 25 semitones wide, so no pitch class can fail. In
+	 * range means in range <em>for the layer the note ended on</em> -- which for the melodic mode
+	 * is six octaves of brackets rather than the harp window, and is why this asks the layer.</p>
 	 */
 	@Test
 	void notesTheLayerShiftCannotReachAreStillBroughtIntoRange() {
@@ -609,11 +610,214 @@ class ClipboardAndLayersTest {
 		for (ComposerProject.OctaveShifting mode : ComposerProject.OctaveShifting.values()) {
 			ComposerProject converted =
 				song.convertToMinecraft(480, false, 0, false, mode, true).project();
-			assertTrue(converted.layers().stream()
+			assertTrue(everyNoteInRange(converted),
+				mode + " left something its layer cannot reach");
+		}
+	}
+
+	/**
+	 * Split into melodic's whole claim: the notes move layer, and not one of them moves pitch.
+	 *
+	 * <p>Both ends of the part go to the same companion, which is the difference from the
+	 * transposing modes -- there, low and high are two layers named for the two octaves they took.
+	 * Here there is no octave to name, so there is one layer, named for what it is.</p>
+	 */
+	@Test
+	void splitIntoMelodicMovesStraysToOneLayerWithoutRetuningThem() {
+		ComposerProject song = songOf(new Layer("Piano", "HARP", false, true, true,
+			List.of(note(36, 0L), note(60, 480L), note(84, 960L))));
+
+		ComposerProject.MinecraftConversion converted = song.convertToMinecraft(480, false, 0, false,
+			ComposerProject.OctaveShifting.SPLIT_INTO_MELODIC, true);
+		ComposerProject result = converted.project();
+
+		assertEquals(List.of("Piano", "Piano (melodic)"), names(result),
+			"one companion, catching both ends");
+		assertEquals(List.of(60), pitches(result.layers().getFirst()), "the window keeps its own");
+		assertEquals(List.of(36, 84), pitches(result.layers().get(1)),
+			"and the strays arrive at the pitch they were written at");
+		assertNull(result.layers().getFirst().split(), "the source layer is still one instrument");
+		assertEquals(ComposerProject.Split.melodic(), result.layers().get(1).split(),
+			"the companion is the same melodic split the layer menu makes");
+		assertTrue(everyNoteInRange(result));
+		assertEquals(0, converted.shiftedNotes(), "nothing was retuned");
+		assertEquals(2, converted.melodicNotes(), "and the move is counted where it happened");
+		assertEquals(1, converted.melodicLayers(), "onto the one layer that was added");
+	}
+
+	/**
+	 * A part written wholly outside the window becomes the melodic layer rather than emptying out.
+	 *
+	 * <p>The split would otherwise leave an empty layer beside a full one for a single part, which
+	 * is two rows saying what one says. It keeps its name for the same reason: nothing was taken
+	 * off it, so there is no companion to tell it apart from.</p>
+	 */
+	@Test
+	void aPartWhollyOutOfTheWindowBecomesTheMelodicLayerInPlace() {
+		ComposerProject song = songOf(new Layer("Bass", "HARP", false, true, true,
+			List.of(note(30, 0L), note(34, 480L), note(37, 960L))));
+
+		ComposerProject result = song.convertToMinecraft(480, false, 0, false,
+			ComposerProject.OctaveShifting.SPLIT_INTO_MELODIC, true).project();
+
+		assertEquals(List.of("Bass"), names(result), "one part, one layer, its own name");
+		assertEquals(List.of(30, 34, 37), pitches(result.layers().getFirst()),
+			"and a bass line stays where a bass line was written");
+		assertEquals(ComposerProject.Split.melodic(), result.layers().getFirst().split());
+		assertTrue(everyNoteInRange(result));
+	}
+
+	/**
+	 * Six octaves is not all of MIDI, so the last step is still an octave shift.
+	 *
+	 * <p>What makes this mode as safe to leave on as the other two: a note under F#1 or over F#7 is
+	 * outside every bracket, and moves by whole octaves until one covers it. Whole octaves, because
+	 * a part moved by anything else is in a different key from the rest of the song.</p>
+	 */
+	@Test
+	void notesOutsideEvenTheBracketsAreStillOctaveShiftedUnderThem() {
+		ComposerProject song = songOf(new Layer("Piano", "HARP", false, true, true,
+			List.of(note(18, 0L), note(60, 480L), note(120, 960L))));
+
+		ComposerProject.MinecraftConversion converted = song.convertToMinecraft(480, false, 0, false,
+			ComposerProject.OctaveShifting.SPLIT_INTO_MELODIC, true);
+		Layer companion = converted.project().layers().get(1);
+
+		assertTrue(everyNoteInRange(converted.project()), "both ends were brought under a bracket");
+		assertEquals(List.of(30, 96), pitches(companion).stream().sorted().toList(),
+			"18 up one octave; 120 down two, because 108 is over the top of the bell");
+		assertEquals(2, converted.shiftedNotes(), "and these two really were retuned");
+		assertEquals(2, converted.melodicNotes());
+	}
+
+	/** A part the window already holds gets no companion and is not made a split. */
+	@Test
+	void aPartAlreadyInRangeGetsNoMelodicCompanion() {
+		ComposerProject song = songOf(new Layer("Lead", "HARP", false, true, true,
+			List.of(note(60, 0L), note(64, 480L), note(67, 960L))));
+
+		ComposerProject.MinecraftConversion converted = song.convertToMinecraft(480, false, 0, false,
+			ComposerProject.OctaveShifting.SPLIT_INTO_MELODIC, true);
+
+		assertEquals(List.of("Lead"), names(converted.project()));
+		assertNull(converted.project().layers().getFirst().split());
+		assertEquals(0, converted.melodicNotes());
+		assertEquals(0, converted.addedLayers());
+	}
+
+	/**
+	 * A layer that is already split is still fitted to its own brackets, whatever the mode says.
+	 *
+	 * <p>The mode answers what to do with a layer that cannot reach its notes. A split layer that
+	 * already reaches them is not that layer, and giving it a melodic companion would move notes
+	 * off a bracket that covers them onto one that covers them no better.</p>
+	 */
+	@Test
+	void aLayerThatIsAlreadySplitIsLeftToItsOwnBrackets() {
+		ComposerProject song = songOf(new Layer("Keys", "HARP", false, true, true,
+			List.of(note(36, 0L), note(60, 480L), note(84, 960L)),
+			ComposerProject.Split.melodic()));
+
+		ComposerProject.MinecraftConversion converted = song.convertToMinecraft(480, false, 0, false,
+			ComposerProject.OctaveShifting.SPLIT_INTO_MELODIC, true);
+
+		assertEquals(List.of("Keys"), names(converted.project()));
+		assertEquals(List.of(36, 60, 84), pitches(converted.project().layers().getFirst()));
+		assertEquals(0, converted.melodicNotes(), "it was already the layer this mode makes");
+	}
+
+	/**
+	 * A drum layer is folded into the window like always, not handed a melodic companion.
+	 *
+	 * <p>The exclusion sound effects get, one step further along. A snare's 25 pitches are 25
+	 * timbres of one drum, so the melodic tiers have nothing to say about where one belongs --
+	 * moving a snare into the bass register does not make it a lower snare, it makes it a kick.
+	 * The same notes on a harp are the control: there, the companion is the whole point.</p>
+	 */
+	@Test
+	void aDrumLayerIsShiftedIntoTheWindowRatherThanGivenAMelodicLayer() {
+		List<NoteEvent> line = List.of(note(36, 0L), note(60, 480L), note(84, 960L));
+		ComposerProject drums = songOf(new Layer("Snare", "SNARE", false, true, true, line));
+		ComposerProject harp = songOf(new Layer("Lead", "HARP", false, true, true, line));
+
+		for (ComposerProject.OctaveShifting mode : List.of(
+				ComposerProject.OctaveShifting.SPLIT_INTO_MELODIC,
+				ComposerProject.OctaveShifting.CONVERT_TO_MELODIC)) {
+			ComposerProject.MinecraftConversion beaten =
+				drums.convertToMinecraft(480, false, 0, false, mode, true);
+
+			assertEquals(0, beaten.melodicNotes(), mode + " sent a drum to a bell");
+			assertTrue(beaten.project().layers().stream().allMatch(layer -> layer.split() == null),
+				mode + " made a drum layer a split");
+			assertTrue(beaten.project().layers().stream()
 					.flatMap(layer -> layer.notes().stream())
 					.allMatch(NoteEvent::isBuildable),
-				mode + " left something outside the note-block range");
+				mode + " left a drum outside the window, which is where a drum layer belongs");
+			assertTrue(harp.convertToMinecraft(480, false, 0, false, mode, true).melodicNotes() > 0,
+				"the same notes on a pitched instrument do go melodic under " + mode);
 		}
+	}
+
+	/**
+	 * Convert to melodic takes the whole part and adds nothing.
+	 *
+	 * <p>The layer count is the point. Split into melodic leaves the notes the window can hold on
+	 * their own instrument and gives the strays a companion, so the part ends up as two rows in two
+	 * timbres; this gives the part the layer it needed and stops there. What it costs is the
+	 * instrument -- the part now plays by register -- and the two are set side by side here rather
+	 * than apart, because choosing between them is choosing between exactly this.</p>
+	 */
+	@Test
+	void convertToMelodicTakesTheWholePartWhereSplitTakesOnlyTheStrays() {
+		ComposerProject song = songOf(new Layer("Piano", "PLING", false, true, true,
+			List.of(note(36, 0L), note(60, 480L), note(84, 960L))));
+
+		ComposerProject.MinecraftConversion split = song.convertToMinecraft(480, false, 0, false,
+			ComposerProject.OctaveShifting.SPLIT_INTO_MELODIC, true);
+		ComposerProject.MinecraftConversion whole = song.convertToMinecraft(480, false, 0, false,
+			ComposerProject.OctaveShifting.CONVERT_TO_MELODIC, true);
+
+		assertEquals(List.of("Piano", "Piano (melodic)"), names(split.project()));
+		assertEquals(1, split.addedLayers(), "one companion for the two strays");
+
+		assertEquals(List.of("Piano"), names(whole.project()), "one part, still one layer");
+		assertEquals(0, whole.addedLayers(), "which is the whole of why you would pick it");
+		assertEquals(List.of(36, 60, 84), pitches(whole.project().layers().getFirst()),
+			"and every note is where it was written, the in-range one included");
+		assertEquals(ComposerProject.Split.melodic(), whole.project().layers().getFirst().split(),
+			"the part gave up PLING for the register it actually spans");
+		assertEquals(3, whole.melodicNotes(), "all three are on the split now, not just the strays");
+		assertEquals(1, whole.melodicLayers(), "and the layer count is what says so");
+		assertEquals(0, whole.shiftedNotes());
+		assertTrue(everyNoteInRange(whole.project()));
+	}
+
+	/**
+	 * Convert to melodic answers a part that cannot be built, not every part in the song.
+	 *
+	 * <p>A layer already inside the window is left on its instrument. Converting it would trade a
+	 * timbre somebody chose for a fix to a problem it does not have -- and, because the harp window
+	 * sits under three of the melodic brackets, would double most of its notes for nothing.</p>
+	 */
+	@Test
+	void convertToMelodicLeavesAPartThatAlreadyFits() {
+		ComposerProject song = songOf(
+			new Layer("Lead", "PLING", false, true, true,
+				List.of(note(60, 0L), note(64, 480L), note(67, 960L))),
+			new Layer("Bass", "HARP", false, true, true,
+				List.of(note(36, 0L), note(40, 480L))));
+
+		ComposerProject.MinecraftConversion converted = song.convertToMinecraft(480, false, 0, false,
+			ComposerProject.OctaveShifting.CONVERT_TO_MELODIC, true);
+
+		assertNull(converted.project().layers().getFirst().split(),
+			"the part that fits keeps its instrument");
+		assertEquals(List.of(60, 64, 67), pitches(converted.project().layers().getFirst()));
+		assertEquals(ComposerProject.Split.melodic(), converted.project().layers().get(1).split(),
+			"and the part that does not is converted, on its own");
+		assertEquals(2, converted.melodicNotes());
+		assertEquals(1, converted.melodicLayers(), "one layer of the two needed it");
+		assertEquals(0, converted.addedLayers());
 	}
 
 	/** Off, the octaves land in the layer they came from and nothing is split off it. */
@@ -766,6 +970,18 @@ class ClipboardAndLayersTest {
 		}
 		assertEquals(song, song.withLayersInserted(0, tooMany),
 			"one over the cap and none of them arrive");
+	}
+
+	/**
+	 * Whether every note is one its own layer can build.
+	 *
+	 * <p>Deliberately asks the layer rather than {@link NoteEvent#isBuildable}, which only knows
+	 * the harp window. A note at F#2 is out of range on a harp layer and squarely inside a bass
+	 * voice on a split one, and the melodic mode's whole output is the second kind.</p>
+	 */
+	private static boolean everyNoteInRange(ComposerProject song) {
+		return song.layers().stream()
+			.allMatch(layer -> layer.notes().stream().noneMatch(layer::outOfRange));
 	}
 
 	private static List<Integer> pitches(Layer layer) {
