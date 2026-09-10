@@ -4066,6 +4066,17 @@ public final class SongBuilder {
 	static boolean TURNS_ON_THE_CELL_BEHIND = true;
 
 	/**
+	 * v2: a machine whose head stands on its opening wall turns before its first chord.
+	 *
+	 * <p>The opening leg's wall is shortened for the partner's long link, and at some widths the
+	 * shared input puts the head exactly on it. The walk would not turn a lane that held nothing
+	 * yet -- the rule that stops a lane turning twice at once -- so the first chord went down on
+	 * the wall column, into the link. Turned first, on the input's landing behind the head, the
+	 * chord opens on the run the way the eight-wide opening already does.</p>
+	 */
+	static boolean OPENING_TURNS_ON_ITS_WALL = true;
+
+	/**
 	 * v2: a chord riding a bend out is held to the exit leg's wall exactly, outer wall or not.
 	 *
 	 * <p>A chord decided inside a bend is never asked whether it overshoots -- there is nothing to
@@ -10018,9 +10029,17 @@ public final class SongBuilder {
 						stretchLeft = Math.min(stretchLeft,
 							Math.max(0, foldColumns - foldRepeaters - seamCells));
 					}
-					if (want <= foldColumns
+					// A head standing on its opening wall turns before it lays anything. The walk's
+					// rule that a lane must hold something before it can end is what stops a lane
+					// turning again at once, and at the opening it did the opposite: the first
+					// chord went down on the wall column and ran into the partner's long link,
+					// which is the whole reason that wall is where it is. Jackpot at twelve wide
+					// over one floor, machine B's first chord dead from its second note.
+					boolean openingOnTheWall = OPENING_TURNS_ON_ITS_WALL && index == 0
+						&& !laneStarted && foldColumns <= 0;
+					if (!openingOnTheWall && (want <= foldColumns
 							|| foldRepeaters + seamCells <= foldColumns
-								&& foldRepeaters <= Math.max(1, foldColumns / 8)) {
+								&& foldRepeaters <= Math.max(1, foldColumns / 8))) {
 						if (stretchLeft > 0) {
 							// Off any corner first, for the reason the staircase approach walks off
 							// one: the fold may be standing on the corner it just exited, and no
@@ -10130,7 +10149,8 @@ public final class SongBuilder {
 								+ coordAcross(axis, lane.pos()));
 						}
 						Direction leaving = lane.travel();
-						Lane behindTurn = TURNS_ON_THE_CELL_BEHIND && foldColumns < 0
+						Lane behindTurn = TURNS_ON_THE_CELL_BEHIND
+								&& (foldColumns < 0 || openingOnTheWall)
 							? turnOnTheCellBehind(placements, lane, depth,
 								flatLink(route, leg, slabStep), index == 0 && !laneStarted)
 							: null;
