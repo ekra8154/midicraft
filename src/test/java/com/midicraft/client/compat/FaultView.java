@@ -550,6 +550,27 @@ final class FaultView {
 					: ""));
 		}
 		deadLines(build, perKind);
+		// Repeaters with nothing behind them, which the reader cannot see: it starts a fresh
+		// performance at each and calls everything after it reached. Listed with their cells,
+		// because the census counts them and nothing else here said where they were.
+		// And what the reader itself counted as ways in -- the census's "severed" column is its
+		// versions less one -- with whatever it warned about them.
+		if (build.reading().versions() > 1 || !build.reading().warnings().isEmpty()) {
+			System.out.println();
+			System.out.println("#### VERSIONS -- the reader found " + build.reading().versions()
+				+ " performances");
+			for (String warning : build.reading().warnings()) {
+				System.out.println("   " + warning);
+			}
+		}
+		if (!build.plan().faultSites().severed().isEmpty()) {
+			System.out.println();
+			System.out.println("#### SEVERED -- " + build.plan().faultSites().severed().size()
+				+ " repeaters have nothing behind them to read, at "
+				+ build.plan().faultSites().severed().stream()
+					.map(at -> at.getX() + " " + at.getY() + " " + at.getZ())
+					.collect(java.util.stream.Collectors.joining(" | ")));
+		}
 		gone(build, perKind);
 		wrong(build, perKind);
 		outside(build, perKind);

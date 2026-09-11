@@ -2564,6 +2564,49 @@ public final class SongBuilder {
 		return cell != 0 && cell != 2 && cell != 5 && cell <= PARITY_SEAM_CELLS;
 	}
 
+	/**
+	 * v2: a seam whose second block of redstone would land on a corner is cut there instead.
+	 *
+	 * <p>The element's two stages need not touch. Between the first landing and the second
+	 * piston the lane may run plain dust -- dust costs no ticks, so the two three-tick stages
+	 * keep the phase arithmetic exactly -- and the pushed block hands that dust a fresh fifteen.
+	 * What a corner needs is one solid block: dust on a corner powers nothing beside it, but dust
+	 * pointing into a block soft-powers the block, and a soft-powered block does drive a piston.
+	 * So the corner cell takes stone at piston level, the second piston stands on the cell after
+	 * it on the new heading, and its block and landing follow. One corner a cut, because a
+	 * soft-powered block lights no dust on its far side: the piston must come straight after it.
+	 * Where it applies the element is a cell longer and needs no shove; the corners past the cut
+	 * sit one cell further along the element than they would have.</p>
+	 */
+	static boolean SEAM_CUTS_AT_A_CORNER = true;
+
+	/**
+	 * v2: a seam decided while the lane is still in a bend is measured against the leg the bend
+	 * exits to, and where its element will not fit there a turn is armed at that leg's wall.
+	 *
+	 * <p>The seam's own wall check asks only on the leg's axis, so an element that starts down a
+	 * link was never asked and ran to wherever seven cells put it -- its landing on the exit
+	 * leg's wall, its reader one past, and the chord after it turning on its own cell two past.
+	 * Now the cells past the exit corner are counted against the columns to that wall, and where
+	 * they do not fit the wall gets its corner before the element is laid: the shove then lines the
+	 * element up so the wall corner is a piston, a landing, or the cut, and stage two goes down the
+	 * next link. See {@link #SEAM_CUTS_AT_A_CORNER}.</p>
+	 */
+	static boolean SEAM_ARMS_ITS_EXIT_WALL = true;
+
+	/** The element index of the corner the cut absorbs -- the second block's -- or -1. */
+	private static int paritySeamCutAt(Lane lane) {
+		if (!SEAM_CUTS_AT_A_CORNER) {
+			return -1;
+		}
+		for (Lane.Bend bend : lane.bends()) {
+			if (bend.after() == 5) {
+				return 5;
+			}
+		}
+		return -1;
+	}
+
 	/** How far ahead a corner must be before the seam stops trying to bring it onto itself. */
 	private static final int SEAM_CORNER_REACH = PARITY_SEAM_CELLS + PARITY_SEAM_LANDING_READER + 1;
 
@@ -2579,11 +2622,18 @@ public final class SongBuilder {
 	 * corner further down the leg, and none of this applies.</p>
 	 */
 	private static boolean paritySeamCornersAlign(Lane lane) {
+		int cut = paritySeamCutAt(lane);
 		for (Lane.Bend bend : lane.bends()) {
-			if (bend.after() > SEAM_CORNER_REACH) {
+			if (bend.after() > SEAM_CORNER_REACH + (cut >= 0 ? 1 : 0)) {
 				continue;
 			}
-			if (!paritySeamCornerAllowedAt(bend.after())) {
+			if (bend.after() == cut) {
+				// The corner the cut absorbs: stone on it, the second piston after it.
+				continue;
+			}
+			// Past a cut the element is a cell longer, so a corner there meets the cell before.
+			int index = cut >= 0 && bend.after() > cut ? bend.after() - 1 : bend.after();
+			if (!paritySeamCornerAllowedAt(index)) {
 				return false;
 			}
 		}
@@ -2617,7 +2667,8 @@ public final class SongBuilder {
 		// lane makes at the wall -- is not laid until after this has answered, so extending this
 		// loop by one catches nothing and reports a guard where there is none. That question is
 		// asked where it can be, in {@link #PARITY_SEAM_LANDING_READER}'s one caller.
-		for (int cell = 0; cell < PARITY_SEAM_CELLS; cell++) {
+		int cells = PARITY_SEAM_CELLS + (paritySeamCutAt(lane) >= 0 ? 1 : 0);
+		for (int cell = 0; cell < cells; cell++) {
 			if (placements.blockAt(at.pos().above()) != null) {
 				return false;
 			}
@@ -4075,6 +4126,17 @@ public final class SongBuilder {
 	 * chord opens on the run the way the eight-wide opening already does.</p>
 	 */
 	static boolean OPENING_TURNS_ON_ITS_WALL = true;
+
+	/**
+	 * v2: a parity seam whose element ends on or past the wall turns there, on its landing.
+	 *
+	 * <p>The seam's own wall check is asked before the element and only on the leg's axis; an
+	 * element that starts down a link is never asked, and ends wherever seven cells put it. Where
+	 * that is the wall or past it, the reader used to go down one past and the chord after it
+	 * turned on its own cell, two past. Now the landing is the corner, the block of redstone
+	 * lands in it, and the run's first cell reads it -- the openings' shape.</p>
+	 */
+	static boolean SEAM_TURNS_ON_ITS_LANDING = true;
 
 	/**
 	 * v2: a chord riding a bend out is held to the exit leg's wall exactly, outer wall or not.
@@ -10342,6 +10404,57 @@ public final class SongBuilder {
 					placements.placing("paritySeam");
 				}
 				lane = pastAnyCorner(placements, lane);
+				// Still in a bend: the element comes out onto the leg the bend exits to, and it is
+				// that leg's wall it has to fit under. Where the cells past the exit corner will not,
+				// the wall gets its corner now, so the alignment below sees both corners and the
+				// cut carries stage two down the next link. See SEAM_ARMS_ITS_EXIT_WALL.
+				if (SEAM_ARMS_ITS_EXIT_WALL && lane.bending()) {
+					int toCorner = 0;
+					for (Lane.Bend bend : lane.bends()) {
+						toCorner = Math.max(toCorner, bend.after());
+					}
+					Lane atCorner = lane.ahead(toCorner);
+					Direction exitTravel = atCorner.travel();
+					TurnCost exitTurn = turnCost(floor, climb, floors,
+						flatLink(route, leg, slabStep));
+					if (exitTravel.getAxis() == axis
+							&& !(exitTurn.above() >= 0 && exitTurn.above() < floors)) {
+						int exitWall = laneWall(axis, nearWallAt(route, leg, nearWall, tipStep),
+							tipWall(route, leg, farWall, tipStep), forward, exitTravel, floor,
+							climb, floors);
+						int columnsPast = (exitWall - coordAlong(axis, atCorner.pos()))
+							* stepAlong(axis, exitTravel);
+						int cellsPast = PARITY_SEAM_CELLS + PARITY_SEAM_LANDING_READER - 1
+							- toCorner;
+						if (columnsPast >= 1 && cellsPast > columnsPast) {
+							boolean clockwise = exitTravel.getClockWise() == depth;
+							int link = flatLink(route, leg, slabStep);
+							List<Lane.Bend> bends = new ArrayList<>(lane.bends());
+							bends.add(new Lane.Bend(toCorner + columnsPast, clockwise));
+							Lane firstArmed = lane.bending(bends);
+							bends.add(new Lane.Bend(toCorner + columnsPast + link, clockwise));
+							placements.turnedAt(firstArmed.ahead(toCorner + columnsPast - 1).pos());
+							placements.corner(firstArmed.ahead(toCorner + columnsPast).pos());
+							placements.corner(firstArmed.ahead(toCorner + columnsPast + link).pos());
+							lane = lane.bending(bends).crowding();
+							turning = true;
+							booked = Map.of();
+							leg++;
+							floor = route.floorOf(leg);
+							climb = route.climbOf(leg);
+							placements.stopWatchingLegWalls();
+							ridesTheTurn = true;
+							placements.padded("paritySeamArmedItsExitWall");
+							if (TRACE_TURNS) {
+								System.out.println("SEAMEXIT t=" + event.time() + " leg=" + leg
+									+ " wall=" + exitWall + " columnsPast=" + columnsPast
+									+ " cellsPast=" + cellsPast + " at "
+									+ coordAlong(axis, lane.pos()) + " " + lane.pos().getY() + " "
+									+ coordAcross(axis, lane.pos()));
+							}
+						}
+					}
+				}
 				// And it stands where all three cells are its own. The chord behind reaches
 				// forward for free, so the cells in front of one are not always empty; walked
 				// past rather than fought over, a column at a time, because a column of dust is
@@ -10432,6 +10545,26 @@ public final class SongBuilder {
 				// one piston behind a repeater is pulled even by the tick's phase order and never
 				// flips parity at all; a pair costs five game ticks from any phase whatever.
 				for (int cell = 0; cell < PARITY_SEAM_CELLS; cell++) {
+					// The cut: the second block of redstone would land on the corner, so the cell
+					// the second piston would have taken runs dust, the corner takes stone at
+					// piston level -- soft-powered by that dust, which is what fires the piston --
+					// and the second stage goes down on the new heading from the cell after. See
+					// SEAM_CUTS_AT_A_CORNER.
+					if (SEAM_CUTS_AT_A_CORNER && cell == 4 && lane.cornerAt(1)) {
+						placements.placing("paritySeamCut");
+						addParityPad(placements, lane.pos());
+						lane = lane.ahead(1);
+						set(placements, lane.pos(), "minecraft:stone");
+						set(placements, lane.pos().above(), "minecraft:stone");
+						lane = lane.ahead(1);
+						placements.padded("paritySeamCutAtACorner");
+						placements.placing("paritySeam");
+						if (TRACE_TURNS) {
+							System.out.println("SEAMCUT t=" + event.time() + " stage two at "
+								+ lane.pos().getX() + " " + lane.pos().getY() + " "
+								+ lane.pos().getZ() + " heading " + lane.travel());
+						}
+					}
 					String block = switch (cell) {
 						case 0 -> "minecraft:repeater[facing=" + repeaterFacing(lane.travel())
 							+ ",delay=" + PARITY_SEAM_REPEATER + "]";
@@ -10452,6 +10585,42 @@ public final class SongBuilder {
 					// the walk still had corners to account for.
 					placements.padded("paritySeamRodeItsTurn");
 					seamRodeThisEvent = true;
+				}
+				// An element laid down a link cannot be measured against a wall -- the check above
+				// asks only on the leg's own axis -- and one that comes out of the link along the
+				// leg ends wherever seven cells put it. Where that is on or past the wall the lane
+				// turns here, on the landing: the block of redstone lands in the corner and the
+				// run's first cell reads it, exactly as the openings do. Left alone, the reader
+				// went down one past the wall and the chord after it turned on the cell it stood
+				// on, two past. Song of Storms at eight wide over one floor, 2 65 115.
+				if (SEAM_TURNS_ON_ITS_LANDING && !lane.bending()
+						&& lane.travel().getAxis() == axis) {
+					TurnCost afterTurn = turnCost(floor, climb, floors,
+						flatLink(route, leg, slabStep));
+					int afterWall = laneWall(axis, nearWallAt(route, leg, nearWall, tipStep),
+						tipWall(route, leg, farWall, tipStep), forward, lane.travel(), floor,
+						climb, floors);
+					int afterColumns = (afterWall - coordAlong(axis, lane.pos()))
+						* stepAlong(axis, lane.travel());
+					// The landing on the wall exactly, and no further: an element already past it is
+					// the hard inner wall's to send back with a turn forced in front of the seam,
+					// and turning on a landing past the wall took that cure away -- Moonlight at
+					// eight to twelve wide, two wrong notes and two contested cells a build.
+					if (afterColumns == -1
+							&& !(afterTurn.above() >= 0 && afterTurn.above() < floors)) {
+						Lane onTheLanding = turnOnTheCellBehind(placements, lane, depth,
+							flatLink(route, leg, slabStep), true);
+						if (onTheLanding != null) {
+							lane = onTheLanding;
+							turning = true;
+							booked = Map.of();
+							leg++;
+							floor = route.floorOf(leg);
+							climb = route.climbOf(leg);
+							placements.stopWatchingLegWalls();
+							placements.padded("paritySeamTurnedOnItsLanding");
+						}
+					}
 				}
 				tipSignal = DUST_RANGE;
 				// The element is lane content -- its chord may land flush on the wall and must be
@@ -12983,7 +13152,21 @@ public final class SongBuilder {
 						// handed back already facing the sideways run.
 						int outward = stepAlong(axis, lane.travel());
 						Direction leaving = lane.travel();
-						lane = armTurn(placements, lane, depth, columns, flatLink(route, leg, slabStep), tight);
+						// A lane already past its wall turns on the cell behind it where that cell
+						// carries the signal, as the fold does; see TURNS_ON_THE_CELL_BEHIND.
+						Lane behindTurn = TURNS_ON_THE_CELL_BEHIND && columns < 0
+							? turnOnTheCellBehind(placements, lane, depth,
+								flatLink(route, leg, slabStep), false)
+							: null;
+						if (behindTurn != null) {
+							lane = behindTurn;
+							tight = true;
+							stuckWide = false;
+							placements.padded("flatTurnOnTheCellBehind");
+						} else {
+							lane = armTurn(placements, lane, depth, columns,
+								flatLink(route, leg, slabStep), tight);
+						}
 						turning = true;
 						noteCornerPastWall(placements, route, leg, wall, forward, leaving, axis, lane);
 						if (FLAT_TURN_KEEPS_ITS_WIDTH) {
@@ -14398,7 +14581,8 @@ public final class SongBuilder {
 		// At a machine's opening nothing is laid yet, and the cell behind is where the shared
 		// input will push its block of redstone: the corner goes there, unlaid, and the first
 		// repeater on the run reads the block when it lands. See {@link #addTwoLaneInput}.
-		boolean landing = opening && "-".equals(atLane) && "-".equals(overBus);
+		boolean landing = opening && ("-".equals(atLane) || "minecraft:air".equals(atLane))
+			&& "-".equals(overBus);
 		// A small chord's note block is the path: the repeater behind it drives it directly, so
 		// it is strongly powered and a repeater beside it reads it. A note hung off a bus is not
 		// -- the block beside it is weakly powered and hands nothing on -- which is why the bus

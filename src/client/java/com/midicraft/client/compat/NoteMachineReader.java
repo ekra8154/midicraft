@@ -328,6 +328,7 @@ public final class NoteMachineReader {
 		// and must change nothing here, or a piston reached twice would push its block twice and
 		// walk it off down the lane.
 		Set<BlockPos> pushed = new HashSet<>();
+		region.landed.clear();
 
 		while (!queue.isEmpty()) {
 			Pulse pulse = queue.poll();
@@ -455,6 +456,7 @@ public final class NoteMachineReader {
 			// the landing hands the edge on in the other phase, which is why two pistons in a row
 			// cost five from anywhere while one alone flips nothing behind a repeater.
 			BlockPos landing = block.relative(facing);
+			region.landed.add(landing.immutable());
 			for (Direction direction : Direction.values()) {
 				queue.add(new Pulse(
 					time + (scheduled ? PISTON_PUSH_GAME_TICKS - 1 : PISTON_PUSH_GAME_TICKS),
@@ -580,8 +582,16 @@ public final class NoteMachineReader {
 	private static Set<Direction> pointsAt(Region region, BlockPos position) {
 		Set<Direction> joined = new LinkedHashSet<>();
 		for (Direction direction : Direction.Plane.HORIZONTAL) {
+			BlockPos beside = position.relative(direction);
+			// A block of redstone is a signal source and the wire joins it -- the one on a seam's
+			// landing most of all, which is air in the paste and a block by the time its pulse
+			// reaches this wire. A wire between a landing and a stone straightens into a line when
+			// the block lands and powers the stone on its far side; read as a dot it powered nothing,
+			// and the piston that stone drives never fired.
 			if (!dustNeighbours(region, position, direction).isEmpty()
-					|| acceptsWire(region.at(position.relative(direction)), direction)) {
+					|| acceptsWire(region.at(beside), direction)
+					|| region.at(beside).is(Blocks.REDSTONE_BLOCK)
+					|| region.landed.contains(beside)) {
 				joined.add(direction);
 			}
 		}
@@ -1098,6 +1108,14 @@ public final class NoteMachineReader {
 		private final int maxY;
 		private final int maxZ;
 		private final BlockLookup blocks;
+		/**
+		 * Where a piston has put its block of redstone down during the walk in progress. The
+		 * region's own blocks are read as pasted, with every landing still air; a wire beside a
+		 * landing has nothing to join until the block arrives, and once it has, the game joins the
+		 * wire to it -- a block of redstone is a signal source, and RedStoneWireBlock.shouldConnectTo
+		 * says yes to those. Kept here so {@link #pointsAt} can say the same.
+		 */
+		final Set<BlockPos> landed = new HashSet<>();
 
 		Region(BlockPos from, BlockPos to, BlockLookup blocks) {
 			this.minX = Math.min(from.getX(), to.getX());
