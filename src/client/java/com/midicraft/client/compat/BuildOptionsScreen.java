@@ -608,10 +608,15 @@ final class BuildOptionsScreen extends Screen {
 					(int) Math.max(0, (long) worldFloor - lowest), null, plan.builtWidth());
 			} catch (IllegalArgumentException refused) {
 				result = new Forecast(0, 0, 0, 0, List.of(), 0, 0, refused.getMessage(), 0);
-			} catch (RuntimeException broken) {
+			} catch (RuntimeException | LinkageError broken) {
 				// A forecast that throws must not take the paste down with it: the build itself may
 				// well be fine, and a screen that cannot tell you the depth is still a screen you
 				// can paste from.
+				// LinkageError as well: a forecast that dies of an uncaught error leaves the screen
+				// waiting for a result that never comes. Seen as a ClassNotFoundException for the
+				// FaultLine record after a rebuild under a running dev client -- the class is first
+				// loaded when a plan has something wrong, and the class directory had been rewritten
+				// underneath the game -- and the preview sat on "assessing" for minutes.
 				result = new Forecast(0, 0, 0, 0, List.of(), 0, 0, "could not work out the layout", 0);
 			}
 			if (forecastGeneration.get() == generation) {

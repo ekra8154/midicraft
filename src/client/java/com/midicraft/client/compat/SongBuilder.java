@@ -2523,6 +2523,46 @@ public final class SongBuilder {
 	static boolean TURN_CLOSES_WHEN_WALKED_OUT = true;
 
 	/**
+	 * v2: a turn a parity seam rode is closed the same way once the seam's element has walked
+	 * the bend out and left the route straight.
+	 *
+	 * <p>A ridden seam was excused from {@link #TURN_CLOSES_WHEN_WALKED_OUT} because closing a turn
+	 * inside the seam took the watch verdict early and cleared {@code turning} with corners still
+	 * ahead. The close here asks {@code !lane.bending()} first, so no corner is left to account for;
+	 * what was left was the chord after the seam decided with {@code turning} still true -- which
+	 * is every shed it is owed switched off. Moonlight at eight wide over four floors, 13 76 18:
+	 * a seam rode the flat turn onto the leg, the head of four behind it landed flush on the wall
+	 * with its front pair unshed, and the descent's second rung went where the harp already stood.
+	 * The lane is started either way -- the seam's element is lane content -- so the close keeps
+	 * that.</p>
+	 *
+	 * <p>Off: it is the general form, and it changes every decision the chord after a ridden seam
+	 * makes. Over the library it fixed moonlight and two other rows and cost jackpot at eight wide
+	 * over three floors a wrong note and a breach -- a bus decided where a stacked bus front had
+	 * been, and the reshuffled machine paying for it fifteen hundred ticks on. The rule that ships
+	 * is {@link #RIDDEN_SEAM_CLOSES_BEFORE_A_FLUSH_HEAD}, which closes for the one chord the dead
+	 * build needed and changed exactly that one row.</p>
+	 */
+	static boolean RIDDEN_SEAM_CLOSES_WHEN_WALKED_OUT = false;
+
+	/**
+	 * v2: a turn a parity seam rode is closed once the seam has walked it out and left the route
+	 * straight -- but only where the chord ahead would be a rigid stacked head landing flush
+	 * against a descent, which is the chord whose flank the descent's rung wants.
+	 *
+	 * <p>The middle ground between {@link #RIDDEN_SEAM_CLOSES_WHEN_WALKED_OUT}, which changed every
+	 * decision after every ridden seam, and telling only the builder, which was tried and had the
+	 * build-time shed grow a tail into the staircase when no low slot was quiet -- the decision-time
+	 * shed, the one that turns first where the head would grow, is gated on not turning and was
+	 * never asked. Closed here, the chord is decided on a straight lane and gets every shed a head
+	 * decided on a closed lane gets. Asked with the decision's own shape and landing rather than
+	 * the older predictor, which said bus-past-the-wall where the decision says a head landing
+	 * flush, so the two agree on the shape and where it ends. Moonlight at eight wide over four
+	 * floors: dead 120 to clean, and no other row in the library moved.</p>
+	 */
+	static boolean RIDDEN_SEAM_CLOSES_BEFORE_A_FLUSH_HEAD = true;
+
+	/**
 	 * Whether a seam whose reader would land on or past the wall arms its turn at the wall, rather
 	 * than only one whose element would.
 	 *
@@ -10680,7 +10720,51 @@ public final class SongBuilder {
 			// event 403: a head of four decided one column from its wall with turning=true, no
 			// shed asked, its front pair laid where the descent's second rung goes. See
 			// TURN_CLOSES_WHEN_WALKED_OUT.
-			if ((turnBefore.contains(index) || TURN_CLOSES_WHEN_WALKED_OUT && !seamRodeThisEvent)
+			// And after a seam that rode the turn and came out straight, for the same reason: the
+			// chord behind it is the one ahead of the staircase. See RIDDEN_SEAM_CLOSES_WHEN_WALKED_OUT.
+			boolean riddenSeamWalkedOut = RIDDEN_SEAM_CLOSES_WHEN_WALKED_OUT && seamRodeThisEvent;
+			if (TRACE && seamRodeThisEvent) {
+				System.out.println("RIDDEN i=" + index + " t=" + event.time() + " turning=" + turning
+					+ " bending=" + lane.bending() + " railPhase=" + railPhase + " travel="
+					+ lane.travel() + " climb=" + climb + " above="
+					+ turnCost(floor, climb, floors, slabStep).above());
+			}
+			if (!riddenSeamWalkedOut && RIDDEN_SEAM_CLOSES_BEFORE_A_FLUSH_HEAD && seamRodeThisEvent
+					&& turning && !lane.bending() && railPhase < 0 && layout.ultra()
+					&& lane.travel().getAxis() == axis) {
+				TurnCost ahead = turnCost(floor, climb, floors, slabStep);
+				if (ahead.above() >= 0 && ahead.above() < floors && climb <= 0) {
+					int legWall = laneWall(axis, nearWallAt(route, leg, nearWall, tipStep),
+						tipWall(route, leg, farWall, tipStep), forward, lane.travel(), floor, climb,
+						floors);
+					int step = stepAlong(axis, lane.travel());
+					// The decision's own shape and landing, asked as the closed lane will ask them:
+					// at the column the delay opens on, with the real room to the wall. landingOf
+					// is the older predictor and says bus-past-the-wall where the decision says
+					// a head landing flush, so it is not asked.
+					int delayAheadNow = Math.max(0, (event.time() - currentTime - 1) / 4);
+					Lane opens = lane.ahead(delayAheadNow);
+					Shape wouldShape = shapeFor(placements, opens, event, delayAheadNow,
+						!columnBehindBusy || delayAheadNow > 0
+							|| backPairIsFree(placements, opens, event.time()),
+						inTurn(placements, false, TURN_BAN_OUTLASTS, opens.pos(), lastCorner),
+						(legWall - coordAlong(axis, opens.pos())) * step, tipSignal, layout);
+					Landing would = landingFrom(wouldShape, coordAlong(axis, lane.pos()), step, event,
+						event.time() - currentTime);
+					boolean rigid = wouldShape.style() == ChordStyle.STACKED_FULL
+						|| wouldShape.style() == ChordStyle.STACKED_FRONT;
+					if (TRACE) {
+						System.out.println("RIDDEN i=" + index + " would=" + would.style() + " end="
+							+ would.end() + " legWall=" + legWall + " step=" + step);
+					}
+					if (rigid && (legWall - would.end()) * step == 0) {
+						riddenSeamWalkedOut = true;
+						placements.padded("riddenSeamClosedBeforeAFlushHead");
+					}
+				}
+			}
+			if ((turnBefore.contains(index)
+					|| TURN_CLOSES_WHEN_WALKED_OUT && (!seamRodeThisEvent || riddenSeamWalkedOut))
 					&& turning && !lane.bending()) {
 				lane = lane.pinned(depth);
 				turning = false;
@@ -10701,7 +10785,8 @@ public final class SongBuilder {
 				// column of room with started=false -- no turn, no shed, no cut, a bus two past the
 				// wall. The spin that rule exists to stop is held off by forcedTurn lapsing the
 				// moment the turn is armed, and by the rewalk budget.
-				laneStarted = placedWhileTurning || foldWalkedTheBend || turnBefore.contains(index);
+				laneStarted = placedWhileTurning || foldWalkedTheBend || turnBefore.contains(index)
+					|| riddenSeamWalkedOut;
 				if (TRACE) {
 					System.out.println("CLOSE i=" + index + " t=" + event.time() + " forced="
 						+ turnBefore.contains(index) + " placedWhileTurning=" + placedWhileTurning
@@ -10712,7 +10797,7 @@ public final class SongBuilder {
 				columnBehindBusy = true;
 				replan = layout.ultra();
 				placements.padded(turnBefore.contains(index) ? "innerWallClosedTheBend"
-					: "turnClosedAfterTheWait");
+					: riddenSeamWalkedOut ? "turnClosedAfterARiddenSeam" : "turnClosedAfterTheWait");
 			}
 			TurnCost turn = turnCost(floor, climb, floors, flatLink(route, leg, slabStep));
 			int above = turn.above();
@@ -11188,6 +11273,15 @@ public final class SongBuilder {
 			// {@link #CUTS_THE_CHORD_THAT_REACHES}.
 			boolean reaches = !turning && railPhase < 0
 				&& (wall - landing) * stepAlong(axis, lane.travel()) <= 1;
+			if (TRACE) {
+				System.out.println("DECIDE i=" + index + " t=" + event.time() + " lane=" + lane.pos()
+					.toShortString() + "/" + lane.travel() + " bends=" + lane.bends() + " opens="
+					+ willOpenOn.pos().toShortString() + "/" + willOpenOn.travel() + " bends="
+					+ willOpenOn.bends() + " style=" + here.style() + " end=" + here.end()
+					+ " wall=" + wall + " landing=" + landing + " turning=" + turning + " reaches="
+					+ reaches + " above=" + above + " climb=" + climb + " floors=" + floors
+					+ " walkOff=" + delayWalkOff + " ahead=" + delayAhead);
+			}
 			// A lane has to hold something before it can end, or a turn that lands short would turn
 			// again at once and the walk would climb the whole build without laying a note.
 			boolean wantsTurn = laneStarted && overshoots;
@@ -11282,6 +11376,12 @@ public final class SongBuilder {
 			placements.turnTakesTheFlank(descentTakesTheFlank ? DESCENT_FLANK_SLOT
 				: flatTurnTakesTheFlank ? FLAT_TURN_FLANK_SLOT
 				: flushBeforeAClimb && !centreFeedsThisClimb ? DESCENT_FLANK_SLOT : -1);
+			if (TRACE) {
+				System.out.println("FLANK i=" + index + " t=" + event.time() + " seamRode="
+					+ seamRodeThisEvent
+					+ " descentTakes=" + descentTakesTheFlank + " flatTakes=" + flatTurnTakesTheFlank
+					+ " flushBeforeAClimb=" + flushBeforeAClimb + " style=" + here.style());
+			}
 			// And the other fact the chord cannot see for itself: how soon the next event arrives. A pad
 			// laid in front of it can only be spent as a repeater where there are two ticks to split, so
 			// a gap of one is the case a simple tail with a note-block middle cannot survive being padded
