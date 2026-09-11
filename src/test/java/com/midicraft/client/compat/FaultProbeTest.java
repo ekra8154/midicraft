@@ -132,6 +132,9 @@ class FaultProbeTest {
 					AsciiDiagram.View.of(text("view", "top"))));
 				System.out.println(FaultView.shapesIn(built, from, to));
 				System.out.println(FaultView.notesIn(built, from, to));
+				// The drawing shows a wire only as its power, so the exact state of the cell
+				// someone is standing on is said in full -- a cross and a dot draw the same.
+				System.out.println("   block at " + FaultView.say(centre) + ": " + built.at(centre));
 				return;
 			}
 			FaultView.report(built, perKind);

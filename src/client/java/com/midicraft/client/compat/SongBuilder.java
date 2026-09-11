@@ -10552,7 +10552,12 @@ public final class SongBuilder {
 					// SEAM_CUTS_AT_A_CORNER.
 					if (SEAM_CUTS_AT_A_CORNER && cell == 4 && lane.cornerAt(1)) {
 						placements.placing("paritySeamCut");
-						addParityPad(placements, lane.pos());
+						// Written as a cross, not a dot. A bare wire between a landing that is still
+						// air and a stone has nothing to join and lands as a dot, which powers no block
+						// beside it; the block landing beside it updates it into a line soon enough, but
+						// the shape the paste puts down should be the one that works from the start.
+						set(placements, lane.pos(), "minecraft:stone");
+						set(placements, lane.pos().above(), STACKED_CROSS);
 						lane = lane.ahead(1);
 						set(placements, lane.pos(), "minecraft:stone");
 						set(placements, lane.pos().above(), "minecraft:stone");
