@@ -135,6 +135,30 @@ class FaultProbeTest {
 				// The drawing shows a wire only as its power, so the exact state of the cell
 				// someone is standing on is said in full -- a cross and a dot draw the same.
 				System.out.println("   block at " + FaultView.say(centre) + ": " + built.at(centre));
+				// A small window is also listed cell by cell -- what stands there, whether the plan
+				// marked it live, and what laid it -- which is what a "sounded by another" refusal
+				// has to be read off.
+				if (AsciiDiagram.volume(from, to) <= 125) {
+					for (int y = from.getY(); y <= to.getY(); y++) {
+						for (int z = from.getZ(); z <= to.getZ(); z++) {
+							for (int x = from.getX(); x <= to.getX(); x++) {
+								net.minecraft.core.BlockPos cell = new net.minecraft.core.BlockPos(x, y, z);
+								String state = built.at(cell).toString();
+								boolean live = built.plan().poweredAt().contains(cell);
+								String by = built.plan().laidBy().get(cell);
+								if (!state.contains("minecraft:air") || live || by != null) {
+									boolean reached = built.reading().reachedAt().contains(cell);
+									boolean unreached = built.reading().unreachedAt().contains(cell);
+									System.out.println("      " + FaultView.say(cell) + "  "
+										+ state.replace("Block{", "").replace("}", "")
+										+ (live ? "  LIVE" : "") + (reached ? "  reached" : "")
+										+ (unreached ? "  UNREACHED" : "")
+										+ (by == null ? "" : "  by " + by));
+								}
+							}
+						}
+					}
+				}
 				return;
 			}
 			FaultView.report(built, perKind);

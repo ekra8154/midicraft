@@ -2563,6 +2563,116 @@ public final class SongBuilder {
 	static boolean RIDDEN_SEAM_CLOSES_BEFORE_A_FLUSH_HEAD = true;
 
 	/**
+	 * v2: the chord after a parity seam is planned with its back pair, like any other chord.
+	 *
+	 * <p>The seam planner re-chose the style with the room behind refused unless two repeater
+	 * columns stood between, on the story that the pair behind the module is piston works. It is
+	 * not: the element's last cell is the landing, the module's repeater stands on the cell after
+	 * it, and the back flanks hang beside that repeater -- diagonal to the landed block, touching
+	 * nothing of the element, and nowhere near the floor rail the seam never uses. The planner only
+	 * ever offers a shape and the walk only ever drops one, so with the pair refused here no chord
+	 * after a seam could use its back flanks at all: jackpot at eight wide over two floors laid a
+	 * stacked bus of seven where a full head of seven fit with two columns to spare, and the tail
+	 * ran past the wall. The walk still asks the blocks ({@code backPairIsFree}) before it hangs
+	 * the pair.</p>
+	 */
+	static boolean SEAM_LEAVES_THE_BACK_PAIR_FREE = true;
+
+	/**
+	 * v2: the turn a parity seam rode is also closed where the chord after the seam would land
+	 * past the wall, so it is cut or turns first like any other chord. The other half of
+	 * {@link #RIDDEN_SEAM_CLOSES_BEFORE_A_FLUSH_HEAD}: decided with turning still true, a stacked
+	 * bus of seven on jackpot at eight wide over two floors was never asked whether it overshot,
+	 * landed one past its wall, and the descent off it two past. Ahead of any turn, and only while
+	 * the lane itself still stands on or inside the wall.
+	 */
+	static boolean RIDDEN_SEAM_CLOSES_BEFORE_AN_OVERSHOOT = true;
+
+	/**
+	 * v2: a chord decided inside a bend that leaves the lane one past the exit wall on a bus is
+	 * still an overshoot where that leg ends in a descent.
+	 *
+	 * <p>{@link #EXIT_WALLS_ARE_HARD} forgives one out on a bus because the fold turns on the cell
+	 * behind, on the wall -- which is what a flat turn does. A descent is anchored at the cursor's
+	 * column back, and its spiral's far column stands one past the anchor, so a lane one out puts
+	 * the staircase two out. dorian-hide at eight wide over three floors: a sunken bus of eleven
+	 * decided one cell short of the exit corner, measured along the link where the descent's
+	 * reserve is nought, ran to the wall; the fold's descent went down outside it and its rung
+	 * re-sounded the stair extra of the lane before (1 71 377). Rewalked with the turn forced, the
+	 * fold walks the bend out first and the chord is decided straight, cut across the descent
+	 * with its stair extras.</p>
+	 */
+	static boolean EXIT_DESCENT_NEEDS_ITS_COLUMN = true;
+
+	/**
+	 * v2: a plain close whose remaining wait would fill the new leg hands the event back to the
+	 * top of the loop instead of laying the chain straight out through the wall.
+	 *
+	 * <p>A chord that overshoots turns at its wall, spends what pad fits before the turn, and lays
+	 * the rest of its wait and then itself on the new leg -- on the decision made against the old
+	 * wall, and with no look at the new one. The fold catches a long wait only at the top of an
+	 * event; a wait that is only long once the staircase has eaten the first leg's columns is
+	 * nobody's. dorian-hide at eight wide over two floors, machine A at leg 179: forty-one ticks,
+	 * three repeaters before the descent, seven after it onto a seven-column leg, and the chord
+	 * one past the inner wall. Re-asked on the new leg the chain reaches the wall, the chord
+	 * decides its turn there, and the corner is the one cell of dust a chain needs.</p>
+	 */
+	static boolean REASKS_WHEN_THE_WAIT_OUTRUNS_THE_LEG = true;
+
+	/**
+	 * v2: an event with a turn forced in front of it also walks out a bend the fold armed during
+	 * the event itself, once.
+	 *
+	 * <p>The forced walk-out covered only the bend pending as the event began. Where the wait
+	 * folds a flat turn and then fits, the fold breaks with the lane in the link it just armed, and
+	 * the chord is decided there: measured along the link the landing has no step, so it cannot
+	 * overshoot, and it comes out onto the exit leg as long as it likes. The exit-wall check
+	 * forces the rewalk, the rewalk arms the same link and decides the same chord on its corner,
+	 * and gives up. jackpot at eight wide over two floors, machine B at leg 154: a bus of five
+	 * decided on the corner ran to the wall and the descent off it two past. Once per event, on
+	 * the bend the fold has not yet walked, so the fold cannot arm and walk legs forever.</p>
+	 */
+	static boolean FORCED_TURN_WALKS_OUT_THE_FOLDS_BEND = true;
+
+	/**
+	 * v2: the wait-fold carries a wait through the turn ahead where the chord after it would not
+	 * fit and the lane is not yet started.
+	 *
+	 * <p>The fold's fit test asks only whether the wait fits the leg; whatever overshoot is left
+	 * belongs to the chord, which turns on it. An unstarted lane may not turn -- the rule that
+	 * stops a turn that laid nothing turning again at once -- so its chord cannot, and it was laid
+	 * through the wall: Song of Storms at eight wide over four floors, machine B's first event
+	 * after the starter seam, two repeaters to the wall, a chord of two past it, the climb two out.
+	 * A repeater chain can be split anywhere, so the fold takes it: repeaters to the wall, the
+	 * staircase, the rest and the chord on the leg beyond, where the lane counts as started.</p>
+	 */
+	static boolean FOLD_CARRIES_AN_UNSTARTED_LANES_CHORD = true;
+
+	/**
+	 * v2: a lane whose delay will lay repeaters on it counts as started for the turn decision.
+	 *
+	 * <p>{@code wantsTurn} asked that the lane hold something first -- the guard against a turn
+	 * that laid nothing turning again at once. It counted chords only, so a lane holding a chain
+	 * of repeaters could not turn on an overshoot and its chord went through the wall: the
+	 * starter-seam breaches on Song of Storms and yo-ho at eight wide, six rows of them. A chain
+	 * can be split anywhere, and it spends ticks on every leg it turns off, so the spin the guard
+	 * exists for cannot come back through it. {@link #FOLD_CARRIES_AN_UNSTARTED_LANES_CHORD} is
+	 * the same fact told to the fold; this is it told to the ordinary close.</p>
+	 */
+	static boolean CHAIN_STARTS_A_LANE = true;
+
+	/**
+	 * v2: a headed cut's parity is asked at the column its trigger will open on, past any corner
+	 * the lane stands on, as the ordinary chord's is.
+	 *
+	 * <p>The trigger walks off a corner before it opens, so a head asked on the corner was asked
+	 * one column short of where it was built, and the shift that cleared the ask put the head
+	 * straight into the cell the ask had found. yo-ho at eight wide over three floors, 2 72 9:
+	 * machine B's relay against machine A's front flank, sounding it fourteen ticks early.</p>
+	 */
+	static boolean SPLIT_PARITY_WALKS_OFF_THE_CORNER = true;
+
+	/**
 	 * Whether a seam whose reader would land on or past the wall arms its turn at the wall, rather
 	 * than only one whose element would.
 	 *
@@ -2621,6 +2731,122 @@ public final class SongBuilder {
 	static boolean SEAM_CUTS_AT_A_CORNER = true;
 
 	/**
+	 * v2: a seam is cut across a staircase, first stage above and second stage below.
+	 *
+	 * <p>The same fact as {@link #SEAM_CUTS_AT_A_CORNER}: the two stages need not touch, dust
+	 * between them costs no ticks, and the landed block hands the dust a fresh fifteen. A
+	 * staircase is dust, so the first stage's landed block can drive its dust to the wall, down
+	 * the rungs and onto the landing, where a stated cross points it into a block that
+	 * soft-powers the second piston. Laid by the fold, in its staircase branch, because that is
+	 * where a wait that will not fit is already being carried across -- and a seam of eight cells
+	 * never fits a leg of seven, so on an eight-wide build every leg ending in a staircase used to
+	 * push the seam another floor down: Song of Storms at eight wide over four floors folded three
+	 * floors of dust looking for a leg the whole element fit, and the chain was dead long before
+	 * it found one. No repeater goes down between the stages.</p>
+	 */
+	static boolean SEAM_CUTS_A_STAIRCASE = true;
+
+	/**
+	 * v2: a seam's first cell, the repeater, never stands on a corner.
+	 *
+	 * <p>{@link #paritySeamCornersAlign} asks the bends ahead of the lane; the corner the lane
+	 * is standing on is {@code onCorner}, not a bend, and was never asked. A repeater on a corner
+	 * is fed from the side, which is fed by nothing, so the seam never fires. The shove loop
+	 * pads the corner with dust and opens the element a cell along, as it does for any other
+	 * misalignment.</p>
+	 */
+	static boolean SEAM_NEVER_OPENS_ON_A_CORNER = true;
+
+	/**
+	 * v2: a seam ending on the last cell before a staircase is read by the staircase's own dust,
+	 * so it owes no reader cell of its own there.
+	 *
+	 * <p>The eighth cell exists so the landed block drives something; a descent's anchor and a
+	 * climb's foot both stand on the wall column with dust, and dust beside a block of redstone
+	 * reads fifteen. Booked eight, a seven-cell seam was refused the seven-column leg it fit and
+	 * carried up a climb the chain did not survive.</p>
+	 */
+	static boolean SEAM_READS_OFF_THE_STAIRCASE = true;
+
+	/** What {@link #laySeamCells} put down: the lane after it, the next cell owed, the feed cell. */
+	private record SeamLaid(Lane lane, int next, BlockPos feedNext, int laid) {
+	}
+
+	/**
+	 * Lays as much of a seam as fits in {@code available} straight cells from the lane, leaving
+	 * {@code reserveAfter} of them untouched.
+	 *
+	 * <p>The element in its general form: the repeater on its own, then twice a piston with its
+	 * block of redstone and landing, which are laid as a group because the piston shoves the block
+	 * and the landing is where it lands. Between the groups any run of dust will do -- it costs no
+	 * ticks, the repeater and each landed block hand it a fresh fifteen -- and so will a staircase.
+	 * A piston standing directly after the repeater or after the landing before it is fed by that;
+	 * one anywhere else is fed by a block in front of it at piston level, soft-powered by the dust
+	 * that points into it, which is the one thing dust on a corner or dust off a staircase could
+	 * not do for the piston itself.</p>
+	 */
+	private static SeamLaid laySeamCells(PlacementPlan placements, Lane lane, int next,
+			BlockPos feedNext, int available, int reserveAfter, boolean feederStraight) {
+		int laid = 0;
+		while (next < PARITY_SEAM_CELLS) {
+			if (next == 0) {
+				// With its first stage, never alone: the repeater is the last thing that can
+				// revive the chain before the landed block does, so the piston it feeds stands
+				// right behind it and the chain's next refresh is that stage's own landing.
+				if (available - 4 < reserveAfter) {
+					break;
+				}
+				set(placements, lane.pos(), "minecraft:stone");
+				set(placements, lane.pos().above(), "minecraft:repeater[facing="
+					+ repeaterFacing(lane.travel()) + ",delay=" + PARITY_SEAM_REPEATER + "]");
+				lane = lane.ahead(1);
+				feedNext = lane.pos();
+				available--;
+				laid++;
+				next = 1;
+				continue;
+			}
+			boolean adjacent = lane.pos().equals(feedNext);
+			// A soft-powered block is lit by dust pointing into it, and dust on a corner points
+			// along its own line and into nothing beside it -- so where the cell behind is a
+			// corner, one straight cell of dust goes down first. jackpot at eight wide over three
+			// floors: the second stage's block laid straight off a corner, the piston never fired,
+			// 2,680 notes dark.
+			int need = adjacent ? 3 : feederStraight ? 4 : 5;
+			if (available - need < reserveAfter) {
+				break;
+			}
+			if (!adjacent) {
+				if (!feederStraight) {
+					addParityPad(placements, lane.pos());
+					lane = lane.ahead(1);
+					laid++;
+				}
+				set(placements, lane.pos(), "minecraft:stone");
+				set(placements, lane.pos().above(), "minecraft:stone");
+				lane = lane.ahead(1);
+				laid++;
+			}
+			feederStraight = true;
+			set(placements, lane.pos(), "minecraft:stone");
+			set(placements, lane.pos().above(), "minecraft:sticky_piston[facing="
+				+ lane.travel().getName() + "]");
+			lane = lane.ahead(1);
+			set(placements, lane.pos(), "minecraft:stone");
+			set(placements, lane.pos().above(), "minecraft:redstone_block");
+			lane = lane.ahead(1);
+			set(placements, lane.pos(), "minecraft:stone");
+			set(placements, lane.pos().above(), "minecraft:air");
+			lane = lane.ahead(1);
+			feedNext = lane.pos();
+			available -= need;
+			laid += 3;
+			next += 3;
+		}
+		return new SeamLaid(lane, next, feedNext, laid);
+	}
+
+	/**
 	 * v2: a seam decided while the lane is still in a bend is measured against the leg the bend
 	 * exits to, and where its element will not fit there a turn is armed at that leg's wall.
 	 *
@@ -2662,6 +2888,14 @@ public final class SongBuilder {
 	 * corner further down the leg, and none of this applies.</p>
 	 */
 	private static boolean paritySeamCornersAlign(Lane lane) {
+		// The cell the lane stands on is a corner too, and it is the one the bends list does not
+		// hold. A seam aligned only by the corners ahead of it laid its repeater on the corner
+		// under it, fed from the side -- which is a repeater fed by nothing: jackpot at eight
+		// wide, 1 65 136, the seam never fired and every note after it was silent, and the
+		// reader could not see it while the seam's own blocks of redstone counted as ways in.
+		if (SEAM_NEVER_OPENS_ON_A_CORNER && lane.cornerAt(0)) {
+			return false;
+		}
 		int cut = paritySeamCutAt(lane);
 		for (Lane.Bend bend : lane.bends()) {
 			if (bend.after() > SEAM_CORNER_REACH + (cut >= 0 ? 1 : 0)) {
@@ -3295,7 +3529,12 @@ public final class SongBuilder {
 				: (PARITY_SEAM_GAME_TICKS + 1) / 2;
 			int delay = group.time() - groups.get(flip - 1).time() - eat;
 			int delayRepeaters = Math.max(0, (delay - 1) / 4);
-			ChordStyle style = chooseStyle(layout, group.notes(), delayRepeaters >= 2);
+			// The back pair is offered: it hangs beside the module's own repeater column, and the
+			// element ends a cell before that -- the landed block is diagonal to both flanks and
+			// touches neither. The walk still asks the blocks before it hangs them. See
+			// SEAM_LEAVES_THE_BACK_PAIR_FREE.
+			ChordStyle style = chooseStyle(layout, group.notes(),
+				SEAM_LEAVES_THE_BACK_PAIR_FREE || delayRepeaters >= 2);
 			int busLength = (group.notes().size() + 1) / 2;
 			int tailCells = 0;
 			if (style.busHeaded()) {
@@ -9907,6 +10146,14 @@ public final class SongBuilder {
 		// chords that could have filled it are built.
 		Map<Integer, Integer> booked = Map.of();
 		boolean replan = layout.ultra();
+		// The event a plain close has already handed back to the top of the loop once, so a wait
+		// that outruns every leg cannot re-ask forever. See REASKS_WHEN_THE_WAIT_OUTRUNS_THE_LEG.
+		int reaskedAt = -1;
+		// The seam an event owes, kept across a re-ask of that event: a stage laid before the
+		// staircase is still laid after it. See the note where these are reset.
+		int seamNext = PARITY_SEAM_CELLS;
+		BlockPos seamFeedNext = null;
+		int seamOfEvent = -1;
 		// Anchored on the lane, not the cursor: ahead(n) from here reaches every column of
 		// this lane, and a lane's travel and depth do not change once it has begun.
 		ParityOracle parity = layout.ultra() ? parityOracle(axis, placements, lane) : null;
@@ -9996,6 +10243,18 @@ public final class SongBuilder {
 			// are lane content, and the chord after them must be allowed to notice it does not
 			// fit. See the close below the seam block.
 			boolean foldWalkedTheBend = false;
+			// The seam this event owes, as the next element cell still to lay: 0 the repeater, 1
+			// and 4 a piston with its block and landing behind it, PARITY_SEAM_CELLS when it is
+			// down or there is none. The fold lays what fits before each wall and after each
+			// landing, and the seam block lays whatever is left. seamFeedNext is the cell a piston
+			// would stand on to be fed directly by the repeater or the landed block behind it;
+			// anywhere else a piston needs a soft-powered block in front of it first. See
+			// SEAM_CUTS_A_STAIRCASE.
+			if (seamOfEvent != index) {
+				seamNext = event.seamEat() > 0 ? 0 : PARITY_SEAM_CELLS;
+				seamFeedNext = null;
+				seamOfEvent = index;
+			}
 			if (layout.ultra() && route.foldsWaits() && railPhase < 0) {
 				int foldSignal = tipSignal;
 				boolean folded = false;
@@ -10027,8 +10286,23 @@ public final class SongBuilder {
 					// element can end flush against the wall, both pistons fire, and the landing
 					// drives nothing at all. The lane turns and climbs away above it, and every
 					// note after it is silent.
-					int seamCells = event.seamEat() > 0
-						? PARITY_SEAM_CELLS + PARITY_SEAM_LANDING_READER : 0;
+					// The reader cell is only owed where nothing else will read the landing. A leg
+					// that ends in a staircase puts dust on its wall column -- the descent's anchor,
+					// the climb's foot -- and dust beside the landed block reads it as well as any
+					// repeater. Booked eight, a seven-cell seam was walked off a seven-column leg
+					// it fit, up a climb the chain could not survive (Song of Storms at eight wide
+					// over four floors, 2 73 52). See SEAM_READS_OFF_THE_STAIRCASE.
+					TurnCost legTurn = turnCost(floor, climb, floors, flatLink(route, leg, slabStep));
+					int readerCells = SEAM_READS_OFF_THE_STAIRCASE
+						&& legTurn.above() >= 0 && legTurn.above() < floors
+						? 0 : PARITY_SEAM_LANDING_READER;
+					int seamCells = seamNext == 0
+						? PARITY_SEAM_CELLS + readerCells
+						: seamNext < PARITY_SEAM_CELLS
+							? PARITY_SEAM_CELLS - seamNext + 2 + readerCells : 0;
+					// Between the stages: no repeater may go down anywhere, and the chain has to
+					// reach the second stage on what the first stage's landed block gave it.
+					boolean seamMid = seamNext > 0 && seamNext < PARITY_SEAM_CELLS;
 					int want = foldRepeaters + stretchLeft + seamCells;
 					if (turning || lane.bending()) {
 						int toExit = 0;
@@ -10042,7 +10316,16 @@ public final class SongBuilder {
 						// Unless a turn is forced in front of this event: then the bend is walked
 						// out whatever the wait is worth, so the chord is decided on a straight
 						// lane against its wall. See INNER_WALLS_ARE_HARD.
-						if (!forcedWalkOut && (want <= toExit || foldRepeaters <= toExit / 8)) {
+						// And a bend the fold itself armed a moment ago, once, where the turn is
+						// forced: the forced event's chord must be decided on a straight lane, and
+						// a fold-armed link it is left standing in is the same trap as a pending
+						// one. jackpot at eight wide over two floors: the rewalk re-armed the same
+						// link, decided the same bus of five on its corner, and gave up with the
+						// descent two past the wall. See FORCED_TURN_WALKS_OUT_THE_FOLDS_BEND.
+						boolean walkOutNow = forcedWalkOut
+							|| FORCED_TURN_WALKS_OUT_THE_FOLDS_BEND && turnBefore.contains(index)
+								&& !foldWalkedTheBend;
+						if (!walkOutNow && (want <= toExit || foldRepeaters <= toExit / 8)) {
 							break;
 						}
 						forcedWalkOut = false;
@@ -10064,7 +10347,7 @@ public final class SongBuilder {
 							// A stretched chain leans on dust -- those are the columns the pacing is
 							// buying -- and takes a repeater only where the run must be revived; a
 							// chain with nothing to stretch is the old one, a repeater per four ticks.
-							if (event.time() - currentTime > 4
+							if (!seamMid && event.time() - currentTime > 4
 									&& (stretchLeft == 0 || dustRun >= 8)) {
 								set(placements, lane.pos(), "minecraft:stone");
 								set(placements, lane.pos().above(), "minecraft:repeater[facing="
@@ -10139,7 +10422,21 @@ public final class SongBuilder {
 					// over one floor, machine B's first chord dead from its second note.
 					boolean openingOnTheWall = OPENING_TURNS_ON_ITS_WALL && index == 0
 						&& !laneStarted && foldColumns <= 0;
-					if (!openingOnTheWall && (want <= foldColumns
+					// A lane that holds nothing yet may not turn, so its chord cannot turn on an
+					// overshoot the way a started lane's does -- and the wait fits, so the fold
+					// used to leave it there: two repeaters to the wall and the chord laid straight
+					// through it. Song of Storms at eight wide over four floors, machine B's first
+					// event after the starter seam, the climb two past the wall. The chain is what
+					// a fold carries: repeaters to the wall, the staircase, the rest and the chord
+					// on the leg beyond, where the lane counts as started. Repeaters are never the
+					// reason for a breach. See FOLD_CARRIES_AN_UNSTARTED_LANES_CHORD.
+					int chordCellsAhead = (event.notes().size() + 1) / 2 + 1;
+					boolean chordCannotTurn = FOLD_CARRIES_AN_UNSTARTED_LANES_CHORD && !laneStarted
+						&& foldRepeaters > 0 && want + chordCellsAhead > foldColumns;
+					if (chordCannotTurn) {
+						placements.padded("foldCarriedAnUnstartedLanesChord");
+					}
+					if (!openingOnTheWall && !chordCannotTurn && (want <= foldColumns
 							|| foldRepeaters + seamCells <= foldColumns
 								&& foldRepeaters <= Math.max(1, foldColumns / 8))) {
 						if (stretchLeft > 0) {
@@ -10157,7 +10454,7 @@ public final class SongBuilder {
 							foldWalkedTheBend = true;
 							folded |= walked > 0;
 						}
-						while (stretchLeft > 0) {
+						while (stretchLeft > 0 && !seamMid) {
 							// Named for what it is. These cells are the pacing stretch, not the
 							// spatial delay, and a label is sticky: every one of them read as a
 							// fault in the delay chain, which is the same trap parityPad and
@@ -10221,6 +10518,12 @@ public final class SongBuilder {
 						break;
 					}
 					if (!(foldTurn.above() >= 0 && foldTurn.above() < floors)) {
+						if (SEAM_CUTS_A_STAIRCASE && seamMid && foldSignal
+								- (foldColumns + flatLink(route, leg, slabStep) + 1) < 1) {
+							// The second stage goes down on this leg instead, by the seam block.
+							placements.padded("paritySeamCannotCrossAlive");
+							break;
+						}
 						// A flat turn: armed exactly as a chord would arm it, and walked out by the
 						// branch above -- or left armed for the delay layer, where the wait ends
 						// inside the bend. Tight wherever the lane already stands at or past its
@@ -10305,12 +10608,84 @@ public final class SongBuilder {
 					// bare staircase, and the wait carries on from the landing. The rungs are dust
 					// with a fresh repeater right behind them, which crosses any staircase here.
 					placements.placing("delayBeforeChord");
-					// By distance rather than by count, because the walk may be standing on the
-					// corner it just came out of -- a route leaves a turn standing on the second
-					// corner -- and the first thing to do with a corner is walk off it. A repeater
-					// laid on one is fed from a direction nothing comes from, and everything past
-					// it is silent: moonlight at ten wide over three floors wore forty-two of them,
-					// every one a delay chain opening on the corner its fold had just exited.
+					// A seam still owed is cut across this staircase where its first stage fits
+					// before the wall: repeater, piston, block, landing on this leg, dust from the
+					// landed block down the rungs, and the second stage on the leg below off a
+					// block that dust soft-powers. See SEAM_CUTS_A_STAIRCASE.
+					// A seam still owed goes down here as far as it fits before the wall: the
+					// repeater first, then each piston with its block and landing as a group. Dust
+					// carries the signal between them and down the rungs, the repeater and every
+					// landed block hand out a fresh fifteen, and no repeater goes down between the
+					// stages. See SEAM_CUTS_A_STAIRCASE.
+					boolean seamMidElement = seamMid;
+					boolean seamCannotCross = false;
+					if (SEAM_CUTS_A_STAIRCASE && seamNext == 0) {
+						BlockPos beforeCorner = lane.pos();
+						lane = pastAnyCorner(placements, lane);
+						int walked = Math.abs(lane.pos().getX() - beforeCorner.getX())
+							+ Math.abs(lane.pos().getZ() - beforeCorner.getZ());
+						foldSignal -= walked;
+						dustRun += walked;
+						stretchLeft = Math.max(0, stretchLeft - walked);
+						int cellsToWall = (foldWall - coordAlong(axis, lane.pos()))
+							* stepAlong(axis, lane.travel());
+						// Only where the whole seam is certain: the first stage before this wall,
+						// the chain alive down the rungs, and the second stage on the landing leg
+						// with the wait's repeaters and two columns to spare. A first stage laid on
+						// its own commits the chain to reaching the second on dust alone, through
+						// whatever the fold does next -- and a bend walked out with no repeater
+						// allowed killed it (neverending night at eight wide over two floors).
+						Direction newTravel = lane.travel().getOpposite();
+						int landingColumn = nextLaneStart(foldWall, stepAlong(axis, lane.travel()),
+							0, climb > 0, 0);
+						int newWall = laneWall(axis, nearWallAt(route, leg + 1, nearWall, tipStep),
+							tipWall(route, leg + 1, farWall, tipStep), forward, newTravel,
+							route.floorOf(leg + 1), route.climbOf(leg + 1), floors);
+						int newColumns = (newWall - landingColumn) * stepAlong(axis, newTravel);
+						boolean stageOneFits = cellsToWall >= 4;
+						boolean stageTwoFits = newColumns - 1 - 5 >= foldRepeaters + 2;
+						boolean alive = DUST_RANGE - (Math.max(0, cellsToWall - 4)
+							+ foldTurn.cells() + 1) >= 1;
+						// Or the whole element before the wall, read by the staircase's own dust.
+						boolean wholeFits = SEAM_READS_OFF_THE_STAIRCASE
+							&& cellsToWall >= PARITY_SEAM_CELLS;
+						placements.placing("paritySeamFold");
+						SeamLaid laid = wholeFits || stageOneFits && stageTwoFits && alive
+							? laySeamCells(placements, lane, seamNext, seamFeedNext, cellsToWall, 0,
+								walked == 0)
+							: new SeamLaid(lane, seamNext, seamFeedNext, 0);
+						placements.placing("delayBeforeChord");
+						if (laid.laid() > 0) {
+							lane = laid.lane();
+							seamNext = laid.next();
+							seamFeedNext = laid.feedNext();
+							foldSignal = DUST_RANGE;
+							dustRun = 0;
+							placements.padded("paritySeamCutAStaircase");
+							if (TRACE_TURNS) {
+								System.out.println("SEAMSTAIR t=" + event.time() + " laid up to cell "
+									+ seamNext + " before the wall at " + coordAlong(axis, lane.pos())
+									+ " " + lane.pos().getY() + " " + coordAcross(axis, lane.pos()));
+							}
+						}
+						seamMidElement = seamNext > 0 && seamNext < PARITY_SEAM_CELLS;
+						seamMid = seamMidElement;
+						// Between the stages nothing can revive the chain, so it has to reach the
+						// landing alive on what the last refresh left it: the dust to the wall, the
+						// rungs, and the landing cell.
+						int dustToWall = (foldWall - coordAlong(axis, lane.pos()))
+							* stepAlong(axis, lane.travel());
+						if (seamMidElement
+								&& foldSignal - (dustToWall + foldTurn.cells() + 1) < 1) {
+							seamCannotCross = true;
+							placements.padded("paritySeamCannotCrossAlive");
+						}
+					}
+					if (seamCannotCross) {
+						// The rest of the element is laid where the chain still lives, by the seam
+						// block below, and the lane turns after it as it would for any chord.
+						break;
+					}
 					while (true) {
 						BlockPos beforeCorner = lane.pos();
 						lane = pastAnyCorner(placements, lane);
@@ -10323,7 +10698,7 @@ public final class SongBuilder {
 								* stepAlong(axis, lane.travel()) <= 0) {
 							break;
 						}
-						if (event.time() - currentTime > 4
+						if (!seamMidElement && event.time() - currentTime > 4
 								&& (stretchLeft == 0 || dustRun >= 8)) {
 							set(placements, lane.pos(), "minecraft:stone");
 							set(placements, lane.pos().above(), "minecraft:repeater[facing="
@@ -10360,6 +10735,45 @@ public final class SongBuilder {
 					columnBehindBusy = !BACK_PAIR_FREE_AFTER_A_STAIRCASE;
 					replan = layout.ultra();
 					folded = true;
+					if (SEAM_CUTS_A_STAIRCASE && seamNext < PARITY_SEAM_CELLS) {
+						// The staircase's last dust steps down onto the landing cell; its dust is
+						// stated as a cross so it points into whatever the seam puts after it.
+						// Then what fits, leaving the wait's repeaters and two columns before the
+						// wall: the reader's, and one for the chord to stand short of the wall --
+						// a chord opening on the wall column collides with the corner the next
+						// event puts there (neverending night at eight wide over two floors).
+						int newWall = laneWall(axis, nearWallAt(route, leg, nearWall, tipStep),
+							tipWall(route, leg, farWall, tipStep), forward, lane.travel(), floor,
+							climb, floors);
+						int newColumns = (newWall - coordAlong(axis, lane.pos()))
+							* stepAlong(axis, lane.travel());
+						placements.placing("paritySeamFoldLanding");
+						set(placements, lane.pos(), "minecraft:stone");
+						set(placements, lane.pos().above(), STACKED_CROSS);
+						lane = lane.ahead(1);
+						foldSignal--;
+						dustRun++;
+						SeamLaid laid = laySeamCells(placements, lane, seamNext, seamFeedNext,
+							newColumns - 1, foldRepeaters + 2, true);
+						placements.placing("delayBeforeChord");
+						if (laid.laid() > 0) {
+							lane = laid.lane();
+							seamNext = laid.next();
+							seamFeedNext = laid.feedNext();
+							foldSignal = DUST_RANGE;
+							dustRun = 0;
+							if (TRACE_TURNS) {
+								System.out.println("SEAMSTAIR t=" + event.time() + " laid up to cell "
+									+ seamNext + " on the landing at " + coordAlong(axis, lane.pos())
+									+ " " + lane.pos().getY() + " " + coordAcross(axis, lane.pos())
+									+ " heading " + lane.travel());
+							}
+						}
+						if (seamNext >= PARITY_SEAM_CELLS) {
+							placements.flipLaneTint();
+							placements.padded("paritySeamCutAStaircaseLanded");
+						}
+					}
 				}
 				if (folded) {
 					foldWalkedTheBend = true;
@@ -10385,7 +10799,80 @@ public final class SongBuilder {
 			// Whether this event's seam rode a turn: that turn is closed at the top of the next
 			// event and nowhere earlier -- see the seam's own comment on paritySeamRodeItsTurn.
 			boolean seamRodeThisEvent = false;
-			if (event.seamEat() > 0) {
+			if (event.seamEat() > 0 && seamNext >= PARITY_SEAM_CELLS) {
+				// Laid across a staircase by the fold; only the bookkeeping is left. The tip is
+				// whatever the fold's chain left after the second landing.
+				laneStarted = true;
+				columnBehindBusy = true;
+				booked = Map.of();
+				replan = layout.ultra();
+				lastStyle = ChordStyle.SMALL;
+				lastBusCells = 0;
+				placements.padded("paritySeam");
+			} else if (event.seamEat() > 0 && seamNext > 0) {
+				// The fold laid the repeater and perhaps a stage; the rest goes down here, on
+				// straight cells, with a soft-powered block in front of the next piston where it
+				// does not stand directly behind its feed. Pads only on the way there: no
+				// repeater may stand between the stages.
+				placements.placing("paritySeamRest");
+				while (lane.bending()) {
+					BlockPos beforeCorner = lane.pos();
+					lane = pastAnyCorner(placements, lane);
+					tipSignal -= Math.abs(lane.pos().getX() - beforeCorner.getX())
+						+ Math.abs(lane.pos().getZ() - beforeCorner.getZ());
+					if (!lane.bending()) {
+						break;
+					}
+					addParityPad(placements, lane.pos());
+					tipSignal--;
+					lane = lane.ahead(1);
+				}
+				if (turning) {
+					lane = lane.pinned(depth);
+					turning = false;
+					leavingTurn = TURN_BAN_OUTLASTS;
+					if (placements.watchingATurn()) {
+						placements.padded(placements.turnWasWide() ? "flatTurnWideClean"
+							: placements.turnHungBeyond() ? "flatTurnTightNeeded"
+							: "flatTurnTightUnneeded");
+						placements.stopWatchingTheTurn();
+					}
+					placedWhileTurning = false;
+				}
+				BlockPos beforeTheWalk = lane.pos();
+				lane = pastAnyCorner(placements, lane);
+				int remainder = PARITY_SEAM_CELLS - seamNext + 3 + PARITY_SEAM_LANDING_READER;
+				int shoved = 0;
+				while (shoved < laneWidth
+						&& (lane.cornerAt(0) || lane.bending() && cellsToCorner(lane) < remainder)) {
+					addParityPad(placements, lane.pos());
+					tipSignal--;
+					lane = lane.ahead(1);
+					shoved++;
+				}
+				if (tipSignal <= 0) {
+					placements.padded("paritySeamStarved");
+				}
+				SeamLaid laid = laySeamCells(placements, lane, seamNext, seamFeedNext,
+					Integer.MAX_VALUE / 2, 0, shoved > 0 || lane.pos().equals(beforeTheWalk));
+				lane = laid.lane();
+				seamNext = laid.next();
+				placements.padded("paritySeamRemainderLaid", shoved);
+				if (TRACE_TURNS) {
+					System.out.println("SEAMREST t=" + event.time() + " remainder laid, shoved "
+						+ shoved + ", at " + coordAlong(axis, lane.pos()) + " " + lane.pos().getY()
+						+ " " + coordAcross(axis, lane.pos()));
+				}
+				tipSignal = DUST_RANGE;
+				laneStarted = true;
+				columnBehindBusy = true;
+				booked = Map.of();
+				replan = layout.ultra();
+				lastStyle = ChordStyle.SMALL;
+				lastBusCells = 0;
+				placements.flipLaneTint();
+				placements.padded("paritySeam");
+			} else if (event.seamEat() > 0) {
 				placements.placing("paritySeam");
 				// Only where the turn is actually in the way. A corner further off than the
 				// element is one the lane can simply walk out and lay the seam beyond, which is
@@ -10622,6 +11109,10 @@ public final class SongBuilder {
 					set(placements, lane.pos().above(), block);
 					lane = lane.ahead(1);
 				}
+				// Down in full: a re-ask of this event lays nothing more. Left at nought, the
+				// re-asked event laid a second element over the first and the ride lost its
+				// repeater (Song of Storms at eight wide over four floors, 59 notes dark).
+				seamNext = PARITY_SEAM_CELLS;
 				if (ridesTheTurn) {
 					// And nothing else. A chord that rides a turn does not close it -- the walk
 					// closes it at the top of the next event, the moment the route stops bending,
@@ -10733,11 +11224,17 @@ public final class SongBuilder {
 					&& turning && !lane.bending() && railPhase < 0 && layout.ultra()
 					&& lane.travel().getAxis() == axis) {
 				TurnCost ahead = turnCost(floor, climb, floors, slabStep);
-				if (ahead.above() >= 0 && ahead.above() < floors && climb <= 0) {
-					int legWall = laneWall(axis, nearWallAt(route, leg, nearWall, tipStep),
-						tipWall(route, leg, farWall, tipStep), forward, lane.travel(), floor, climb,
-						floors);
-					int step = stepAlong(axis, lane.travel());
+				boolean descentAhead = ahead.above() >= 0 && ahead.above() < floors && climb <= 0;
+				int legWall = laneWall(axis, nearWallAt(route, leg, nearWall, tipStep),
+					tipWall(route, leg, farWall, tipStep), forward, lane.travel(), floor, climb,
+					floors);
+				int step = stepAlong(axis, lane.travel());
+				// Only while the lane itself still stands on or inside its wall. A seam that came
+				// out past the wall leaves nothing a close can fix: closed, the lane turned on the
+				// spot with negative room and the descent's spiral went down outside the wall --
+				// jackpot at eight wide over three floors, machine B at 0 72 90. Left open, the
+				// walk's own past-the-wall handling takes it, as it always did.
+				if ((legWall - coordAlong(axis, lane.pos())) * step >= 0) {
 					// The decision's own shape and landing, asked as the closed lane will ask them:
 					// at the column the delay opens on, with the real room to the wall. landingOf
 					// is the older predictor and says bus-past-the-wall where the decision says
@@ -10757,9 +11254,21 @@ public final class SongBuilder {
 						System.out.println("RIDDEN i=" + index + " would=" + would.style() + " end="
 							+ would.end() + " legWall=" + legWall + " step=" + step);
 					}
-					if (rigid && (legWall - would.end()) * step == 0) {
+					// A rigid head landing flush: closed so its flank is shed. Any chord landing
+					// past the wall: closed so it is cut, or turns first, as every other chord is
+					// -- decided with turning still true it was never asked, and jackpot at eight
+					// wide over two floors laid a stacked bus of seven one past its wall and the
+					// descent off it two past. See RIDDEN_SEAM_CLOSES_BEFORE_A_FLUSH_HEAD.
+					int shortOfTheWall = (legWall - would.end()) * step;
+					if (descentAhead && rigid && shortOfTheWall == 0) {
 						riddenSeamWalkedOut = true;
 						placements.padded("riddenSeamClosedBeforeAFlushHead");
+					} else if (RIDDEN_SEAM_CLOSES_BEFORE_AN_OVERSHOOT && shortOfTheWall < 0) {
+						// Ahead of any turn: a climb or a flat turn wants the cut or the turn-first
+						// as much as a descent does. Song of Storms at twelve wide, a full head of
+						// six three past its wall ahead of a climb.
+						riddenSeamWalkedOut = true;
+						placements.padded("riddenSeamClosedBeforeAnOvershoot");
 					}
 				}
 			}
@@ -11284,7 +11793,15 @@ public final class SongBuilder {
 			}
 			// A lane has to hold something before it can end, or a turn that lands short would turn
 			// again at once and the walk would climb the whole build without laying a note.
-			boolean wantsTurn = laneStarted && overshoots;
+			// Or one whose delay is about to lay repeaters on it: a chain is content, it can be
+			// split anywhere, and a lane holding one has something to close on. The rule above
+			// is a spin guard for a turn that laid nothing; a chain spends ticks on every leg it
+			// turns off, and the wait is finite. See CHAIN_STARTS_A_LANE.
+			boolean chainStartsTheLane = CHAIN_STARTS_A_LANE && !laneStarted && delayAhead > 0;
+			if (chainStartsTheLane && overshoots) {
+				placements.padded("chainStartedTheLane");
+			}
+			boolean wantsTurn = (laneStarted || chainStartsTheLane) && overshoots;
 			// Said to the builders, for the one shape that has to know. A simple tail is read by the
 			// repeater standing in front of it, and a lane that turns does not put one there -- it
 			// climbs, and the repeater is built at the top of the staircase, leaving the tail driving
@@ -11380,7 +11897,10 @@ public final class SongBuilder {
 				System.out.println("FLANK i=" + index + " t=" + event.time() + " seamRode="
 					+ seamRodeThisEvent
 					+ " descentTakes=" + descentTakesTheFlank + " flatTakes=" + flatTurnTakesTheFlank
-					+ " flushBeforeAClimb=" + flushBeforeAClimb + " style=" + here.style());
+					+ " flushBeforeAClimb=" + flushBeforeAClimb + " style=" + here.style()
+					+ " behindBusy=" + columnBehindBusy + " backFree="
+					+ backPairIsFree(placements, willOpenOn, event.time())
+					+ whyBackPairBusy(placements, willOpenOn, event.time()));
 			}
 			// And the other fact the chord cannot see for itself: how soon the next event arrives. A pad
 			// laid in front of it can only be spent as a repeater where there are two ticks to split, so
@@ -11737,10 +12257,25 @@ public final class SongBuilder {
 			// twenty-four that would not cut, and a lane five columns past its wall for want of one.
 			boolean splitNudge = false;
 			boolean splitClashed = false;
+			// And a column further again for every corner the lane stands on: the trigger walks
+			// off a corner before it opens -- dust on the corner, the repeater a cell along -- so
+			// a head asked here and built there was asked one column short. yo-ho at eight wide
+			// over three floors: machine B's head, standing on the second corner of a flat turn,
+			// was asked at the corner, shifted one, and built two along -- its relay against
+			// machine A's flank, which the ask at the corner had found and the shift had cleared.
+			// See SPLIT_PARITY_WALKS_OFF_THE_CORNER.
+			int splitCornerWalk = 0;
+			if (SPLIT_PARITY_WALKS_OFF_THE_CORNER) {
+				for (Lane probe = lane.ahead(delayColumns + busyPad);
+						probe.cornerAt(0) && splitCornerWalk < 4; probe = probe.ahead(1)) {
+					splitCornerWalk++;
+				}
+			}
+			int splitOpensAt = delayColumns + busyPad + splitCornerWalk;
 			// Asked at the column the module will actually open in, which is a column further along
 			// where a busy pad bought one. That offset used to be the pin's, and the busy pad is what
 			// is left of it.
-			if (headed != null && stackedClashes(placements, lane.ahead(delayColumns + busyPad),
+			if (headed != null && stackedClashes(placements, lane.ahead(splitOpensAt),
 					event.time(), headed.slots())) {
 				splitClashed = true;
 				// And the same question the chord nudge is asked: does the wire still reach. This
@@ -11758,12 +12293,12 @@ public final class SongBuilder {
 					placements.padded("planSplitNudgePastTheWire");
 				}
 				StackedSplit shifted = !SPLIT_NUDGES || splitOutOfWire
-					|| stackedClashes(placements, lane.ahead(delayColumns + busyPad + 1), event.time(),
+					|| stackedClashes(placements, lane.ahead(splitOpensAt + 1), event.time(),
 						headed.slots())
 					? null : stackedSplitOf(event.notes(), room - busyPad - 1, splitCells, climb > 0,
-						!columnBehindBusy || delayColumns + busyPad + 1 > 0
+						!columnBehindBusy || splitOpensAt + 1 > 0
 							|| CUT_ASKS_THE_BLOCKS_BEHIND
-								&& backPairIsFree(placements, lane.ahead(delayColumns + busyPad + 1), event.time()),
+								&& backPairIsFree(placements, lane.ahead(splitOpensAt + 1), event.time()),
 						stackedIsBehind, true, stairTopFree, stairBottomFree, stairWallFree, false);
 				if (shifted == null) {
 					// Both cells wrong, or nothing left to cut once a column is spent. Before the head
@@ -12418,6 +12953,21 @@ public final class SongBuilder {
 					if (headed.centreFeeds() != CentreFeed.NONE) {
 						headed = lowsToppedUpFromTheTail(placements, opening, travel, depth,
 							event.time(), headed);
+					}
+					// Every low slot the head will fill, asked of the ground it will hang over.
+					// The descent-flank shed rehomes a note without looking, and onTheFreeSlots
+					// hands the module back untouched where not every note finds a quiet slot --
+					// so a rehomed note could land in the one cell the parity ask had already
+					// found beside the neighbour's live relay. Refused here, inside the trial, the
+					// plain cut takes over. See CUT_HEAD_ASKS_ITS_LOW_SLOTS.
+					if (CUT_HEAD_ASKS_ITS_LOW_SLOTS) {
+						int loud = loudLowSlot(placements, opening, travel, depth, event.time(),
+							headed.slots());
+						if (loud >= 0) {
+							placements.padded("cutHeadLowSlotLoud");
+							throw new IllegalArgumentException("cut head's low slot " + loud
+								+ " at " + opening.toShortString() + " is beside another tick's live block");
+						}
 					}
 					cursor = addStackedSplitModule(placements, opening, travel, depth,
 						headDelay, headed, event.time());
@@ -13191,6 +13741,70 @@ public final class SongBuilder {
 								inTurn(placements, turning, leavingTurn, lane.pos(), lastCorner), parity)
 							: Map.of();
 						replan = false;
+						// The rest of the wait goes down this new leg with the chord after it, on
+						// the decision made against the old leg's wall. Where the chain alone would
+						// reach this leg's wall there is nothing left for the chord or its turn, and
+						// the chain ran straight out through the wall: dorian-hide at eight wide
+						// over two floors, seven repeaters onto a seven-column leg and the chord one
+						// past the inner wall. So the event is handed back to the top of the loop
+						// instead, with the closing pad's ticks spent: the wait is re-measured
+						// against this leg, the chord is decided here, and it turns at this wall
+						// with its chain in front of it like any other. The chain is lane content,
+						// so the lane counts as started. See REASKS_WHEN_THE_WAIT_OUTRUNS_THE_LEG.
+						if (REASKS_WHEN_THE_WAIT_OUTRUNS_THE_LEG && reaskedAt != index) {
+							int legWall = laneWall(axis, nearWallAt(route, leg, nearWall, tipStep),
+								tipWall(route, leg, farWall, tipStep), forward, lane.travel(), floor,
+								climb, floors);
+							int legColumns = (legWall - coordAlong(axis, lane.pos()))
+								* stepAlong(axis, lane.travel());
+							int leftRepeaters = Math.max(0,
+								(event.time() - currentTime - spentPadding - 1) / 4);
+							int chordCells = (event.notes().size() + 1) / 2 + 1;
+							TurnCost nextTurn = turnCost(floor, climb, floors,
+								flatLink(route, leg, slabStep));
+							if (leftRepeaters > 0
+									&& leftRepeaters + chordCells + nextTurn.cells() > legColumns) {
+								// The landing keeps its cell of dust: the staircase's last rung steps
+								// its dust down onto it, and a re-asked chord whose wait is spent would
+								// otherwise open with its repeater standing there, fed by nothing --
+								// jackpot at eight wide over two floors, 569 notes dark.
+								// A descent's landing only: a climb's top dust already stands on the
+								// landing cell, over glass, and stone under a pad there is what stops
+								// the dust below from stepping up (clean bandit at eight wide over two
+								// floors, 617 notes dark).
+								if (route.climbOf(leg - 1) <= 0) {
+									placements.placing("delayBeforeChord");
+									addParityPad(placements, lane.pos());
+									lane = lane.ahead(1);
+									tipSignal--;
+								}
+								currentTime += spentPadding;
+								spentPadding = 0;
+								laneStarted = true;
+								replan = layout.ultra();
+								booked = Map.of();
+								reaskedAt = index;
+								// The pacing stretch is the top of the event's to lay and the close
+								// never laid it, so a re-asked event would lay it now and open its
+								// chord five columns further along than the close would have --
+								// geometry dash at eight wide over three floors, a wrong note off
+								// the shifted head. The close's answer to the stretch stands: none.
+								if (pace != null && pace.stretch() != null) {
+									pace.stretch()[index] = 0;
+								}
+								placements.padded("waitOutranTheLegReasked");
+								if (TRACE_TURNS) {
+									System.out.println("REASK t=" + event.time() + " leg=" + leg
+										+ " wall=" + legWall + " columns=" + legColumns
+										+ " repeaters=" + leftRepeaters + " chord=" + chordCells
+										+ " turn=" + nextTurn.cells() + " at "
+										+ coordAlong(axis, lane.pos()) + " " + lane.pos().getY() + " "
+										+ coordAcross(axis, lane.pos()));
+								}
+								index--;
+								continue;
+							}
+						}
 					}
 				} else {
 					// Out of floors: step the slab sideways once, and come back the way we climbed.
@@ -14481,8 +15095,23 @@ public final class SongBuilder {
 					floors);
 				int past = (coordAlong(axis, lane.pos()) - exitWall)
 					* stepAlong(axis, lane.travel());
-				if (past > 1 || past == 1 && !endsOnBus(lastStyle, lastBusCells)) {
-					placements.exitOvershot(index, past, lane.pos());
+				// One out on a bus is forgiven only where the leg ends flat: the fold turns on the
+				// cell behind, on the wall. Where the leg ends in a descent the fold descends at
+				// the cursor, and the spiral's far column stands one past its anchor -- so the
+				// staircase goes down two out. See EXIT_DESCENT_NEEDS_ITS_COLUMN.
+				TurnCost exitTurn = turnCost(floor, climb, floors, slabStep);
+				boolean descentAtTheExit = EXIT_DESCENT_NEEDS_ITS_COLUMN
+					&& exitTurn.above() >= 0 && exitTurn.above() < floors && climb <= 0;
+				// And a rigid head that lands exactly on the wall ahead of a descent: decided in
+				// the bend, no shed was asked, and its front flank stands where the descent's
+				// second rung goes. Rewalked with the turn forced, the chord is decided straight
+				// and sheds it. jackpot at eight wide over two floors, 9 68 438, 569 notes dark.
+				boolean flushHeadUnshed = EXIT_DESCENT_NEEDS_ITS_COLUMN && past == 0
+					&& descentAtTheExit && lastStyle.stacked() && !lastStyle.busHeaded();
+				if (past > 1 || past == 1
+						&& (!endsOnBus(lastStyle, lastBusCells) || descentAtTheExit)
+						|| flushHeadUnshed) {
+					placements.exitOvershot(index, Math.max(past, 1), lane.pos());
 				}
 			}
 		}
@@ -28902,6 +29531,41 @@ public final class SongBuilder {
 	}
 
 	/**
+	 * v2: a cut head refuses itself where one of the low slots it fills is not quiet.
+	 *
+	 * <p>The head's parity is asked of the slots the split planned; the descent-flank shed then
+	 * rehomes a note into a back slot without looking, and {@link #onTheFreeSlots} hands the
+	 * module back untouched where the notes do not all fit the free slots. So a rehomed note could
+	 * hang in the very cell the parity ask had found beside the neighbouring lane's live relay.
+	 * HBFS at eight wide over three floors, 7 69 357 in game: machine B's head of five rehomed
+	 * its flank beside machine A's stacked chord from four hundred ticks earlier, and sounded
+	 * early on every one of A's pulses. Asked of every filled slot at the column the head opens
+	 * on, inside the headed cut's trial, so the refusal falls to the plain cut like a collision.</p>
+	 */
+	static boolean CUT_HEAD_ASKS_ITS_LOW_SLOTS = true;
+
+	/** The first filled low slot whose cell is not quiet and free at this opening, or -1. */
+	private static int loudLowSlot(PlacementPlan placements, BlockPos pos, Direction travel,
+			Direction noteSide, int time, UltraSlots slots) {
+		if (slots == null) {
+			return -1;
+		}
+		BlockPos cross = pos.relative(travel);
+		for (int side = 0; side < 2; side++) {
+			BlockPos instrument = cross.relative(side == 0 ? noteSide : noteSide.getOpposite());
+			if (slots.slot(side) != null
+					&& !quietAndFree(placements, instrument.relative(travel), time)) {
+				return side;
+			}
+			if (slots.slot(2 + side) != null
+					&& !quietAndFree(placements, instrument.relative(travel.getOpposite()), time)) {
+				return 2 + side;
+			}
+		}
+		return -1;
+	}
+
+	/**
 	 * @param banned a slot this module may not hang a note in whatever the ground says, or -1.
 	 *     A head that shed the flank the staircase wants has an empty slot that reads perfectly free
 	 *     -- the staircase is not built yet -- and this would fill it straight back in, silently
@@ -29056,6 +29720,26 @@ public final class SongBuilder {
 
 	/** Whether a stacked shape puts its low notes on the free slots instead of assuming. */
 	static boolean HEAD_LOOKS_FOR_ITS_FREE_SIDE = true;
+
+	/** Scratch, for {@link #TRACE}: what stands on and beside each back-flank cell. */
+	private static String whyBackPairBusy(PlacementPlan placements, Lane opening, int time) {
+		StringBuilder why = new StringBuilder();
+		BlockPos cursor = opening.pos();
+		for (Direction out : List.of(opening.noteSide(), opening.noteSide().getOpposite())) {
+			BlockPos flank = cursor.relative(out);
+			why.append(' ').append(flank.toShortString()).append(" at=")
+				.append(placements.describeBlock(flank)).append(" free=")
+				.append(placements.freeForNote(flank));
+			for (Direction direction : Direction.values()) {
+				BlockPos beside = flank.relative(direction);
+				if (placements.liveAt(beside, time)) {
+					why.append(" live:").append(direction.getName()).append('=')
+						.append(placements.describeBlock(beside));
+				}
+			}
+		}
+		return why.toString();
+	}
 
 	private static boolean backPairIsFree(PlacementPlan placements, Lane opening, int time) {
 		if (!BACK_PAIR_ASKS_THE_BLOCKS) {

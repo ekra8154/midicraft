@@ -871,14 +871,31 @@ public final class NoteMachineReader {
 	 * reaches, or nothing at all, and falls out on its own either way.</p>
 	 */
 	private static List<BlockPos> startingPoints(Region region, Survey survey) {
-		List<BlockPos> heads = new ArrayList<>(survey.sources);
+		// Except a block of redstone a piston faces: that is the piston's freight, moved into
+		// place when the chain fires the piston, not a way the signal gets in. Offered as a way in
+		// it hid every dead chain that ended at a parity seam -- and a build with more than
+		// MAX_TRACED_STARTS ways in is traced from all of them at once, so with two such blocks
+		// per seam nothing after any seam could ever read as unreached. Song of Storms at eight
+		// wide over four floors: seventeen cells of dust into a seam, read as clean.
+		List<BlockPos> heads = new ArrayList<>(survey.sources.size());
+		for (BlockPos source : survey.sources) {
+			if (region.at(source).is(Blocks.REDSTONE_BLOCK) && pistonFaces(region, source)) {
+				continue;
+			}
+			heads.add(source);
+		}
 		for (BlockPos repeater : survey.repeaters) {
 			BlockPos behind = repeater.relative(region.at(repeater).getValue(RepeaterBlock.FACING));
 			BlockState input = region.at(behind);
 			// A repeater fed by a lever is fed, and counting it as a beginning as well would offer
 			// the same chain twice under two names.
+			// Or by a landing: air now, a block of redstone once the piston beside it fires. A
+			// seam's reader stands behind exactly that, and counted as a way in it read every
+			// seam as a second machine -- and a chain that died before the seam as two clean
+			// performances instead of one dead one.
 			boolean fed = !input.isAir() && (isConductor(input) || input.is(Blocks.REDSTONE_WIRE)
-				|| input.is(Blocks.REPEATER) || isSource(input));
+				|| input.is(Blocks.REPEATER) || isSource(input))
+				|| input.isAir() && pistonLandsOn(region, behind);
 			if (!fed) {
 				heads.add(repeater);
 			}
@@ -895,6 +912,35 @@ public final class NoteMachineReader {
 					+ "this way -- include the lever or button that starts it.");
 		}
 		return heads;
+	}
+
+	/** Whether a piston two cells away aims a block of redstone into this cell. */
+	private static boolean pistonLandsOn(Region region, BlockPos cell) {
+		for (Direction direction : Direction.values()) {
+			if (!region.at(cell.relative(direction)).is(Blocks.REDSTONE_BLOCK)) {
+				continue;
+			}
+			BlockState piston = region.at(cell.relative(direction, 2));
+			if (isPiston(piston)
+					&& piston.getValue(net.minecraft.world.level.block.DirectionalBlock.FACING)
+						== direction.getOpposite()) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/** Whether a piston stands beside this block with its head towards it. */
+	private static boolean pistonFaces(Region region, BlockPos block) {
+		for (Direction direction : Direction.values()) {
+			BlockState beside = region.at(block.relative(direction));
+			if (isPiston(beside)
+					&& beside.getValue(net.minecraft.world.level.block.DirectionalBlock.FACING)
+						== direction.getOpposite()) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	// ------------------------------------------------------------------ turning it into a song
@@ -979,6 +1025,14 @@ public final class NoteMachineReader {
 
 		List<String> warnings = new ArrayList<>();
 		int versions = trace.versions().size();
+		// Where each way in stands, so a build read as several machines can be looked at where
+		// it splits rather than guessed at.
+		String waysIn = trace.versions().stream()
+			.map(version -> version.entry().toShortString())
+			.collect(java.util.stream.Collectors.joining(" | "));
+		if (versions > 1) {
+			warnings.add("ways in at " + waysIn);
+		}
 		if (versions > 1 && trace.overlapping()) {
 			// Both are real performances and both are here, which is the only answer that loses no
 			// music -- but they cannot both be playing, so what arrives is two songs on top of each
