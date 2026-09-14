@@ -2888,6 +2888,20 @@ public final class SongBuilder {
 	static boolean SEAM_CUTS_A_STAIRCASE = true;
 
 	/**
+	 * Whether a wait crossing a staircase puts its repeaters as far forward as they can go on the
+	 * floor it is on, rather than at the front of the leg.
+	 *
+	 * <p>Off, the crossing lays a repeater at every column while more than four ticks remain and
+	 * plain dust from wherever the ticks run out to the wall, however far that is: two repeaters
+	 * side by side at the head of the leg, then seventeen cells of dust into the descent's rungs,
+	 * on wellerman at twenty-four wide over two floors -- the user's reading, and avoidable with
+	 * the repeaters it already had. On, a repeater goes down at the last cell before the wall
+	 * column, right at the staircase's foot, and before that only where the run behind it would
+	 * otherwise die; whatever ticks the crossing does not need are laid on the leg below.</p>
+	 */
+	static boolean STAIRCASE_REPEATERS_AS_FAR_FORWARD_AS_THEY_CAN = true;
+
+	/**
 	 * v2: a seam's first cell, the repeater, never stands on a corner.
 	 *
 	 * <p>{@link #paritySeamCornersAlign} asks the bends ahead of the lane; the corner the lane
@@ -11144,13 +11158,23 @@ public final class SongBuilder {
 						foldSignal -= walked;
 						dustRun += walked;
 						stretchLeft = Math.max(0, stretchLeft - walked);
-						if ((foldWall - coordAlong(axis, lane.pos()))
-								* stepAlong(axis, lane.travel()) <= 0) {
+						int cellsBeforeWall = (foldWall - coordAlong(axis, lane.pos()))
+							* stepAlong(axis, lane.travel());
+						if (cellsBeforeWall <= 0) {
 							break;
 						}
 						int paceRefresh = stretchLeft > 0 ? paceRefreshDelay() : 4;
-						if (!seamMidElement && event.time() - currentTime > paceRefresh
-								&& (stretchLeft == 0 || dustRun >= paceDustRun())) {
+						boolean canRepeat = !seamMidElement
+							&& event.time() - currentTime > paceRefresh;
+						// Where the repeater goes: as far forward as it can on this floor -- the
+						// cell before the wall column, at the staircase's foot -- or here, where
+						// one more cell of dust would be the fifteenth since the last. The old
+						// rule spent every tick at the head of the leg and left the rungs to
+						// whatever dust was left. See STAIRCASE_REPEATERS_AS_FAR_FORWARD_AS_THEY_CAN.
+						boolean repeatHere = STAIRCASE_REPEATERS_AS_FAR_FORWARD_AS_THEY_CAN
+							? cellsBeforeWall == 1 || dustRun >= DUST_RANGE - 1
+							: stretchLeft == 0 || dustRun >= paceDustRun();
+						if (canRepeat && repeatHere) {
 							set(placements, lane.pos(), "minecraft:stone");
 							set(placements, lane.pos().above(), "minecraft:repeater[facing="
 								+ repeaterFacing(lane.travel()) + ",delay=" + paceRefresh + "]");
