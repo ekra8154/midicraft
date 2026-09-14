@@ -2094,8 +2094,14 @@ public final class SongBuilder {
 	 * <p>On, which is how it was measured in 2026-08: the schedule balances the lanes and pacing
 	 * only covers songs it could not seam. A song with a seam or two can still drift hundreds of
 	 * blocks between them (HBFS at eight wide, one floor), so off lets pacing chase there too.</p>
+	 *
+	 * <p>Off since 2026-09-14, with the joint walk: the schedule evens the two lanes' totals but
+	 * a lane still runs a hundred cells ahead between the moments a seam is legal, and only pacing
+	 * against the partner's real position closes that. Measured on the earshot census as moments
+	 * with the two machines more than twenty blocks apart: 36 percent standing down, 7 percent
+	 * not.</p>
 	 */
-	static boolean PACING_STANDS_DOWN_FOR_SEAMS = true;
+	static boolean PACING_STANDS_DOWN_FOR_SEAMS = false;
 
 	/**
 	 * Whether pacing brings the lane that is behind level with its partner, rather than to within a
@@ -10706,6 +10712,12 @@ public final class SongBuilder {
 						for (Lane.Bend bend : lane.bends()) {
 							toExit = Math.max(toExit, bend.after() + 1);
 						}
+						// The stretch does not count here. A pacing stretch is laid on straight
+						// lane and nowhere else -- through a bend it is dust round corners with
+						// no repeater allowed mid-seam, and it was walking bends out that the wait
+						// alone would have ridden. Whatever it cannot buy on this leg the next
+						// event asks for again, against where the partner then stands.
+						int wantToExit = foldRepeaters + seamCells;
 						// The wait ends inside the turn or just past it. The delay layer already bends
 						// through an armed corner on its own, so there is nothing left to fold. And a
 						// stretch may only pull the chain through when the ticks can keep it alive: a
@@ -10722,7 +10734,7 @@ public final class SongBuilder {
 						boolean walkOutNow = forcedWalkOut
 							|| FORCED_TURN_WALKS_OUT_THE_FOLDS_BEND && turnBefore.contains(index)
 								&& !foldWalkedTheBend;
-						if (!walkOutNow && (want <= toExit || foldRepeaters <= toExit / 8)) {
+						if (!walkOutNow && (wantToExit <= toExit || foldRepeaters <= toExit / 8)) {
 							break;
 						}
 						forcedWalkOut = false;
@@ -10852,6 +10864,34 @@ public final class SongBuilder {
 							foldWalkedTheBend = true;
 							folded |= walked > 0;
 						}
+						// A stretch opens on a repeater, as the delay chain does, never on dust. The
+						// module behind may end on a cell only a repeater reads -- a simple tail's
+						// middle, a sunken bus's end, a rail's path -- and asking a flag for that
+						// was wrong often enough to kill five builds in one census. The tick it
+						// costs comes off the chord's trigger, so a wait with no tick to spare
+						// buys nothing this event.
+						if (stretchLeft > 0 && !seamMid) {
+							if (event.time() - currentTime < 2) {
+								placements.padded("paceStretchNoTickToOpen");
+								stretchLeft = 0;
+							} else {
+								placements.placing("paceStretch");
+								set(placements, lane.pos(), "minecraft:stone");
+								set(placements, lane.pos().above(), "minecraft:repeater[facing="
+									+ repeaterFacing(lane.travel()) + ",delay=1]");
+								currentTime += 1;
+								foldSignal = DUST_RANGE;
+								dustRun = 0;
+								lane = lane.ahead(1);
+								// The repeater is one of the stretch's cells, not one more: the
+								// stretch was clamped to the leg, and a cell past that stands the
+								// chord on the wall (1,512 outer-wall cells over one census).
+								stretchLeft--;
+								folded = true;
+								laneStarted = true;
+								placements.padded("paceStretchOpenedOnARepeater");
+							}
+						}
 						while (stretchLeft > 0 && !seamMid) {
 							// Named for what it is. These cells are the pacing stretch, not the
 							// spatial delay, and a label is sticky: every one of them read as a
@@ -10894,10 +10934,11 @@ public final class SongBuilder {
 								// and the pair sounded off it -- 24 wrong notes over the census
 								// once the joint walk stretched more, the same fault the parity
 								// pad found when it asked both.
+								// Behind this cell is the stretch's own repeater or its own dust,
+								// never a soft module, so the pad is plain dust.
 								int ticks = event.time() - currentTime;
 								int leftOver = padCellOrSplitRepeater(placements, lane.pos(),
-									lane.travel(), ticks, placements.softTip(), false,
-									"paceStretch");
+									lane.travel(), ticks, false, false, "paceStretch");
 								if (leftOver < ticks) {
 									// A repeater went down instead of the pad, so the run is
 									// revived and the ticks it took are the chord's no longer.
@@ -11010,6 +11051,13 @@ public final class SongBuilder {
 					// bare staircase, and the wait carries on from the landing. The rungs are dust
 					// with a fresh repeater right behind them, which crosses any staircase here.
 					placements.placing("delayBeforeChord");
+					// No stretch across a staircase: its dust ran the chain down before the rungs
+					// (song of storms at eight wide, three dead builds at one cell) and the wall
+					// column is the descent's anchor. The next event asks again, on the leg below.
+					if (stretchLeft > 0) {
+						placements.padded("paceStretchNotAcrossAStaircase");
+						stretchLeft = 0;
+					}
 					// A seam still owed is cut across this staircase where its first stage fits
 					// before the wall: repeater, piston, block, landing on this leg, dust from the
 					// landed block down the rungs, and the second stage on the leg below off a
