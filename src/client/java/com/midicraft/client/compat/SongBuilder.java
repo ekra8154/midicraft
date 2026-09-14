@@ -11150,6 +11150,12 @@ public final class SongBuilder {
 						// block below, and the lane turns after it as it would for any chord.
 						break;
 					}
+					// The first cell of the crossing may stand against a module that ended on a cell
+					// only a repeater reads -- a simple tail's harp middle -- and dust there is a
+					// dead line. The unrolled copy, as the stretch opener asks: at the top of the
+					// event the module immediately behind is softTip.
+					boolean crossingOpensOnSoft = placements.softTip();
+					boolean laidInCrossing = false;
 					while (true) {
 						BlockPos beforeCorner = lane.pos();
 						lane = pastAnyCorner(placements, lane);
@@ -11166,13 +11172,18 @@ public final class SongBuilder {
 						int paceRefresh = stretchLeft > 0 ? paceRefreshDelay() : 4;
 						boolean canRepeat = !seamMidElement
 							&& event.time() - currentTime > paceRefresh;
+						boolean firstAfterSoft = !laidInCrossing && crossingOpensOnSoft
+							&& walked == 0;
 						// Where the repeater goes: as far forward as it can on this floor -- the
 						// cell before the wall column, at the staircase's foot -- or here, where
-						// one more cell of dust would be the fifteenth since the last. The old
-						// rule spent every tick at the head of the leg and left the rungs to
-						// whatever dust was left. See STAIRCASE_REPEATERS_AS_FAR_FORWARD_AS_THEY_CAN.
+						// one more cell of dust would be the fifteenth since the last, or where
+						// the cell behind is a soft middle that dust cannot read (wellerman at
+						// sixteen wide over five floors: the r4 deferred off a harp middle, four
+						// cells of dust nothing lit). The old rule spent every tick at the head
+						// of the leg and left the rungs to whatever dust was left. See
+						// STAIRCASE_REPEATERS_AS_FAR_FORWARD_AS_THEY_CAN.
 						boolean repeatHere = STAIRCASE_REPEATERS_AS_FAR_FORWARD_AS_THEY_CAN
-							? cellsBeforeWall == 1 || dustRun >= DUST_RANGE - 1
+							? cellsBeforeWall == 1 || dustRun >= DUST_RANGE - 1 || firstAfterSoft
 							: stretchLeft == 0 || dustRun >= paceDustRun();
 						if (canRepeat && repeatHere) {
 							set(placements, lane.pos(), "minecraft:stone");
@@ -11181,6 +11192,21 @@ public final class SongBuilder {
 							currentTime += paceRefresh;
 							foldSignal = DUST_RANGE;
 							dustRun = 0;
+						} else if (firstAfterSoft && !seamMidElement
+								&& event.time() - currentTime >= 2) {
+							// Too few ticks for an r4: the one-tick split the pads use, which
+							// reads the soft middle and hands a fresh fifteen on.
+							int ticks = event.time() - currentTime;
+							int leftOver = padCellOrSplitRepeater(placements, lane.pos(),
+								lane.travel(), ticks, true, false, "delayBeforeChord");
+							currentTime += ticks - leftOver;
+							if (leftOver < ticks) {
+								foldSignal = DUST_RANGE;
+								dustRun = 0;
+							} else {
+								foldSignal--;
+								dustRun++;
+							}
 						} else {
 							addParityPad(placements, lane.pos());
 							foldSignal--;
@@ -11189,6 +11215,7 @@ public final class SongBuilder {
 								stretchLeft--;
 							}
 						}
+						laidInCrossing = true;
 						lane = lane.ahead(1);
 					}
 					BlockPos landed = climb > 0
