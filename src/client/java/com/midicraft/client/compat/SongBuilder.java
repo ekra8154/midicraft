@@ -24834,8 +24834,9 @@ public final class SongBuilder {
 	private static Placed buildShaped(PlacementPlan placements, Lane lane, int triggerDelay,
 			EventGroup event, Shape shape, Layout layout) {
 		// Cleared here and set by the one shape that ends soft, so the flag always describes the module
-		// that just went down rather than some earlier one.
-		placements.rollSoftTip();
+		// that just went down rather than some earlier one. Once per event: a retry for the same
+		// event keeps the module behind's answer.
+		placements.rollSoftTip(event);
 		ChordStyle style = shape.style();
 		boolean nudge = shape.nudge();
 		Relocation moved = shape.moved();
@@ -32290,7 +32291,7 @@ public final class SongBuilder {
 		 * walkers at once.</p>
 		 */
 		static final Set<String> WALKER_FIELDS = Set.of(
-			"placing", "runSinceRepeater", "trialRun", "laneTint",
+			"placing", "runSinceRepeater", "trialRun", "laneTint", "rolledFor",
 			"trial", "tailJournal", "tailJournalBehind", "softTail", "softTailBehind",
 			"turnIndex", "turnCornerX", "turnStepX", "turnWide", "turnHungBeyond", "turnAxis",
 			"softTip", "softBehind",
@@ -32889,7 +32890,27 @@ public final class SongBuilder {
 		 * Clearing a single flag at the top of the build read the module's own answer -- which is nought,
 		 * because it has not been built yet -- and the split never fired once.</p>
 		 */
-		void rollSoftTip() {
+		/**
+		 * The event the last roll was for. A shape is built more than once for one event -- a
+		 * behind-busy retry, a nudge -- and every entry rolled: after the second the module behind's
+		 * answer had been handed back two steps and read as nought, and the nudge pad went down as
+		 * dust on a simple tail's note middle (moonlight at forty wide over five floors, the user's
+		 * reading: wire, note, wire). The module behind does not change between attempts at the same
+		 * event, so its answer stays; only this module's own is started fresh.
+		 */
+		private Object rolledFor;
+
+		void rollSoftTip(Object module) {
+			if (module != null && module == rolledFor) {
+				climbFedFromCentre = null;
+				softTip = false;
+				railTail = null;
+				handover = null;
+				tailJournal = null;
+				softTail = null;
+				return;
+			}
+			rolledFor = module;
 			climbFedFromCentre = null;
 			softBehind = softTip;
 			softTip = false;
