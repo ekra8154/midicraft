@@ -10676,7 +10676,10 @@ public final class SongBuilder {
 			// before the wait lays anything in front of it. See SOFT_TIP_GETS_ITS_REPEATER_FIRST.
 			if (SOFT_TIP_GETS_ITS_REPEATER_FIRST && layout.ultra() && route.foldsWaits()
 					&& railPhase < 0 && placements.softTip() && event.time() - currentTime >= 2
-					&& seamNext != 0 && !lane.cornerAt(0)) {
+					// No seam pending at all: one about to open has its own repeater, and between
+					// the stages of one cut across a staircase no repeater may go down anywhere
+					// (moonlight at sixteen wide over two floors, dead at its second stage).
+					&& seamNext >= PARITY_SEAM_CELLS && !lane.cornerAt(0)) {
 				placements.placing("repeaterOffASoftTip");
 				placements.powered(lane.pos(), "minecraft:stone", NO_BLANK);
 				set(placements, lane.pos().above(), "minecraft:repeater[facing="
