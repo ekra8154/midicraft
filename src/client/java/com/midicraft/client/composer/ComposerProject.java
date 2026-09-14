@@ -2304,6 +2304,28 @@ public record ComposerProject(
 	}
 
 	/**
+	 * Lengthens or shortens a set of notes by one amount, each stopping at a length of one tick.
+	 *
+	 * <p>The resize drag's edit. Unlike a move there is no shape to keep against an edge: a note
+	 * dragged shorter than nothing stops at its own shortest, and the others go on changing, since
+	 * every note's start stays exactly where it was either way.</p>
+	 */
+	public ComposerProject withNotesResized(Set<Long> ids, long durationDelta) {
+		if (ids == null || ids.isEmpty() || durationDelta == 0L) {
+			return this;
+		}
+		List<Layer> updated = layers.stream()
+			.map(layer -> layer.withNotes(layer.notes().stream()
+				.map(note -> ids.contains(note.id())
+					? new NoteEvent(note.id(), note.midiNote(), note.startTick(),
+						Math.max(1L, note.durationTicks() + durationDelta), note.velocity())
+					: note)
+				.toList()))
+			.toList();
+		return with(updated, activeLayerIndex, nextNoteId);
+	}
+
+	/**
 	 * Moves a set of notes, keeping its shape when it runs into an edge.
 	 *
 	 * <p>The limits are applied to the move, once, rather than to each note as it arrives at one.

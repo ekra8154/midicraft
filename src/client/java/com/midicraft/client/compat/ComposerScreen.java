@@ -54,7 +54,7 @@ public final class ComposerScreen extends Screen {
 	 */
 	private static final ToolbarMenu[] MENU_BAR = {
 		ToolbarMenu.FILE, ToolbarMenu.EDIT, ToolbarMenu.SELECT, ToolbarMenu.SETTINGS,
-		ToolbarMenu.BUILD
+		ToolbarMenu.SONG
 	};
 	private static final int MENU_BAR_LEFT = 6;
 	private static final int MENU_BAR_TOP = 3;
@@ -620,6 +620,15 @@ public final class ComposerScreen extends Screen {
 	private int topMidiNote = 91;
 	private double ticksPerPixel = DEFAULT_TICKS_PER_PIXEL;
 	private boolean draggingNotes;
+	/** A press on a note's far end: every selected note is changing length together. */
+	private boolean resizingNotes;
+	/** The composition as the resize found it, so each frame's preview is built from scratch. */
+	private ComposerProject resizeBase;
+	private long resizeHeldStart;
+	private long resizeHeldEnd;
+	private long resizeDelta;
+	/** How many pixels either side of a note's far end take hold of it. */
+	private static final int TRAIL_GRAB_PIXELS = 3;
 	private boolean selectingBox;
 	private long horizontalEdgeSince;
 	private long verticalEdgeSince;
@@ -2460,7 +2469,7 @@ public final class ComposerScreen extends Screen {
 			case FILE -> "File";
 			case EDIT -> "Edit";
 			case SELECT -> "Select";
-			case BUILD -> "Build";
+			case SONG -> "Song";
 			case SETTINGS -> "Settings";
 			case NONE -> "";
 		};
@@ -2532,7 +2541,7 @@ public final class ComposerScreen extends Screen {
 				rows.add(MenuRow.of(ToolbarSubmenu.MARKERS));
 				rows.add(MenuRow.of(ToolbarSubmenu.END));
 			}
-			case BUILD -> addActionRows(rows, ToolbarAction.BUILD_ACTIONS);
+			case SONG -> addActionRows(rows, ToolbarAction.SONG_ACTIONS);
 			case SELECT -> addActionRows(rows, ToolbarAction.SELECT_ACTIONS);
 			// Settings opens a screen from the bar, so it never hangs a panel of its own.
 			case SETTINGS, NONE -> {
@@ -2718,6 +2727,13 @@ public final class ComposerScreen extends Screen {
 				showResult(Component.literal(config.dedupeIdenticalNotes()
 					? "Identical simultaneous notes will be built once."
 					: "Identical simultaneous notes will each be built."));
+			}
+			case TOGGLE_NOTE_TRAILS -> {
+				config.setShowNoteTrails(!config.showNoteTrails());
+				MidicraftConfig.save();
+				showResult(Component.literal(config.showNoteTrails()
+					? "Note trails shown: each note draws how long it lasts."
+					: "Note trails hidden. A note's right edge still drags its length."));
 			}
 			case SAVE_COMPOSITION -> saveComposition();
 			case SAVE_COMPOSITION_AS -> saveCompositionAs();
@@ -3211,6 +3227,9 @@ public final class ComposerScreen extends Screen {
 				+ "of those layers a different instrument and both notes come back. An instrument "
 				+ "stacked with a count in the palette is never merged, because the count is how "
 				+ "you ask for a louder note.";
+			case TOGGLE_NOTE_TRAILS -> "Draws how long each note lasts as a dark trail behind it. "
+				+ "A trail changes nothing in the build: a note block is struck once. Drag a "
+				+ "trail's end to change a note's length. Hidden, a note's right edge still does.";
 			case SELECT_OFF_GRID -> "Selects the notes that do not stand on a game tick, counting "
 				+ "from the first note in the song. These are the ones a build cannot place where "
 				+ "they are written, and the ones the grid lines are drawn to show.";
@@ -3349,6 +3368,9 @@ public final class ComposerScreen extends Screen {
 		}
 		if (action == ToolbarAction.TOGGLE_DEDUPE) {
 			return action.label + ": " + (config.dedupeIdenticalNotes() ? "On" : "Off");
+		}
+		if (action == ToolbarAction.TOGGLE_NOTE_TRAILS) {
+			return action.label + ": " + (config.showNoteTrails() ? "On" : "Off");
 		}
 		return action.label;
 	}
@@ -4973,6 +4995,8 @@ public final class ComposerScreen extends Screen {
 		notesDrawn = 0;
 		long layoutStart = profiling ? System.nanoTime() : 0L;
 		int noteWidth = noteWidth();
+		boolean showTrails = config.showNoteTrails();
+		int trailHeight = Math.max(2, (rowHeight - 2) / 3);
 		cells.begin(rollX, rollWidth, noteWidth, rowHeight - 2);
 		for (int layerIndex : noteDrawOrder(shown)) {
 			Layer layer = shown.layers().get(layerIndex);
@@ -5003,12 +5027,26 @@ public final class ComposerScreen extends Screen {
 				}
 				int left = tickX(note.startTick());
 				int right = left + noteWidth;
-				if (right <= rollX || left >= rollRight) {
+				int trailEnd = showTrails ? trailEndX(note, left, noteWidth) : right;
+				if (Math.max(right, trailEnd) <= rollX || left >= rollRight) {
 					continue;
 				}
 				int top = rollY + (topMidiNote - midi) * rowHeight + 1;
 				int bottom = top + rowHeight - 2;
 				if (bottom <= rollY || top >= rollBottom) {
+					continue;
+				}
+				if (trailEnd > right) {
+					// Drawn now, before a single note, so every trail sits behind every note. It is
+					// how long the note lasts, and until a layer sustains it that is all it is: dark,
+					// thin, and never in the way of a strike -- its own or anybody else's.
+					int trailTop = top + (rowHeight - 2 - trailHeight) / 2;
+					graphics.fill(Math.max(right, rollX), trailTop, Math.min(trailEnd, rollRight),
+						trailTop + trailHeight,
+						trailColor(color, anySelected && selectedNotes.contains(note.id())));
+				}
+				if (right <= rollX) {
+					// Only its trail reaches the roll.
 					continue;
 				}
 				notesDrawn++;
@@ -5053,6 +5091,73 @@ public final class ComposerScreen extends Screen {
 		}
 		extractHoveredNoteTooltip(graphics, hoveredCandidate, hoveredCandidateLayer,
 			crowded, offGrid, mouseX, mouseY);
+		// The resize arrows over a note's far end, and for the whole of a resize.
+		if (resizingNotes || !draggingNotes && !selectingBox && !erasing
+				&& !overOpenMenu(mouseX, mouseY) && trailEndAt(mouseX, mouseY) != null) {
+			wantedCursorShape = GLFW.GLFW_HRESIZE_CURSOR;
+		}
+	}
+
+	/** Where a note's trail ends on screen: its last tick, and never short of its own trigger. */
+	private int trailEndX(NoteEvent note, int left, int noteWidth) {
+		double pixels = (note.startTick() + note.durationTicks() - horizontalScroll) / ticksPerPixel;
+		long x = rollX + Math.round(Math.min(pixels, Integer.MAX_VALUE / 4.0));
+		return (int)Math.max(left + noteWidth, x);
+	}
+
+	/** A dormant trail: the layer's colour, dimmed, and a little less so behind a selected note. */
+	private static int trailColor(int color, boolean selected) {
+		return (selected ? 0x99000000 : 0x55000000) | (color & 0x00FFFFFF);
+	}
+
+	/**
+	 * The note whose far end is under the cursor, looked for the way {@link #noteAt} looks: only in
+	 * the layers the roll lets you touch, topmost first.
+	 *
+	 * <p>The end is the trail's end, or the trigger's right edge while trails are hidden -- a note
+	 * can always be made longer, whether or not you can see how long it is. Asked before the note's
+	 * body on a press, so the last pixels of a note are the handle; the first two stay the body,
+	 * so even the shortest note can still be moved.</p>
+	 */
+	private NoteHit trailEndAt(double mouseX, double mouseY) {
+		if (!insideRoll(mouseX, mouseY)) {
+			return null;
+		}
+		boolean showTrails = config.showNoteTrails();
+		int noteWidth = noteWidth();
+		long cursorTick = Math.round(horizontalScroll + (mouseX - rollX) * ticksPerPixel);
+		long grab = Math.round((noteWidth + TRAIL_GRAB_PIXELS) * ticksPerPixel) + 1L;
+		long reach = showTrails ? projectStats().maximumNoteDuration() : 0L;
+		int midi = mouseMidi(mouseY);
+		List<Integer> reachable = selectionLayers();
+		List<Integer> order = noteDrawOrder(project());
+		for (int position = order.size() - 1; position >= 0; position--) {
+			int layerIndex = order.get(position);
+			if (!reachable.contains(layerIndex)) {
+				continue;
+			}
+			Layer layer = project().layers().get(layerIndex);
+			if (!layer.visible()) {
+				continue;
+			}
+			List<NoteEvent> notes = layer.notes();
+			for (int index = lowerBoundStart(notes, Math.max(0L, cursorTick - reach - grab));
+					index < notes.size(); index++) {
+				NoteEvent note = notes.get(index);
+				if (note.startTick() > cursorTick + grab) {
+					break;
+				}
+				if (note.midiNote() != midi) {
+					continue;
+				}
+				int left = tickX(note.startTick());
+				int end = showTrails ? trailEndX(note, left, noteWidth) : left + noteWidth;
+				if (Math.abs(mouseX - end) <= TRAIL_GRAB_PIXELS && mouseX >= left + 2) {
+					return new NoteHit(layerIndex, note);
+				}
+			}
+		}
+		return null;
 	}
 
 	/**
@@ -5114,7 +5219,7 @@ public final class ComposerScreen extends Screen {
 				double seconds = sustained * project().tempoMicrosPerQuarter()
 					/ (double)project().ppq() / 1_000_000.0 / timescaleFactor();
 				lines.add(Component.literal(String.format(java.util.Locale.ROOT,
-						"Spans %.2fs - struck once, note blocks do not sustain", seconds))
+						"Lasts %.2fs - struck once", seconds))
 					.withStyle(net.minecraft.ChatFormatting.DARK_GRAY));
 			}
 		} else {
@@ -6041,6 +6146,29 @@ public final class ComposerScreen extends Screen {
 		if (event.button() != 0 || !insideRoll(event.x(), event.y())) {
 			return super.mouseClicked(event, doubleClick);
 		}
+		NoteHit end = trailEndAt(event.x(), event.y());
+		if (end != null) {
+			// A note's far end is its length. What joins the selection follows a press on the body,
+			// and every selected note changes length by the same amount, as they move together.
+			NoteEvent held = end.note();
+			if (noLayerSelected() && !selectedNotes.contains(held.id())) {
+				selectedNotes.clear();
+				selectLayer(end.layerIndex(), false, false);
+			}
+			if (!selectedNotes.contains(held.id())) {
+				if (!event.hasControlDownWithQuirk()) {
+					selectedNotes.clear();
+				}
+				selectedNotes.add(held.id());
+			}
+			resizingNotes = true;
+			resizeBase = project();
+			resizeHeldStart = held.startTick();
+			resizeHeldEnd = held.startTick() + held.durationTicks();
+			resizeDelta = 0L;
+			dragPreview = null;
+			return true;
+		}
 		NoteHit hit = noteAt(event.x(), event.y());
 		if (hit != null) {
 			NoteEvent hitNote = hit.note();
@@ -6113,7 +6241,8 @@ public final class ComposerScreen extends Screen {
 		// Not while another button is already dragging something. Two live drags share one release,
 		// and whichever branch answers it first leaves the other one latched -- a right-click during
 		// a box select used to be enough to strand the box on screen.
-		if (selectingBox || draggingNotes || draggingSplitter || draggingEndMarker || draggingPlayhead
+		if (selectingBox || draggingNotes || resizingNotes || draggingSplitter || draggingEndMarker
+				|| draggingPlayhead
 				|| layerDragIndex >= 0 || bracketDragGroup >= 0 || painting != LayerPaint.NONE) {
 			return;
 		}
@@ -6188,14 +6317,25 @@ public final class ComposerScreen extends Screen {
 			ComposerProject started = before.addLayer();
 			int layer = started.layers().size() - 1;
 			apply("start layer " + (layer + 1) + " with a note",
-				started.addNote(layer, midi, tick, started.ppq() / 4L));
+				started.addNote(layer, midi, tick, newNoteLength()));
 			selectOnlyLayer(layer);
 			layersChanged();
 			rebuildMoveLayerButtons();
 		} else {
-			apply("add note", before.addNote(before.activeLayerIndex(), midi, tick, before.ppq() / 4L));
+			apply("add note", before.addNote(before.activeLayerIndex(), midi, tick, newNoteLength()));
 		}
 		selectedNotes.clear();
+	}
+
+	/**
+	 * How long a note drawn by hand is: one step of the snap, so its trail reaches the next line.
+	 *
+	 * <p>It used to be a sixteenth whatever the grid, which cost nothing while length was invisible
+	 * and would now draw a trail across three cells of a game-tick grid. With the snap off there is
+	 * no step to take, so it stays a sixteenth.</p>
+	 */
+	private long newNoteLength() {
+		return snapSubdivision == 0 ? project().ppq() / 4L : gridTicks();
 	}
 
 	private boolean handleInstrumentMenuClick(double mouseX, double mouseY) {
@@ -6377,6 +6517,21 @@ public final class ComposerScreen extends Screen {
 			setPlaybackStart(mouseTick(event.x()), false);
 			return true;
 		}
+		if (resizingNotes) {
+			// The held note's end goes to the grid line nearest the cursor, and never back to its own
+			// start or before it: there it stops one step long. Every other selected note changes
+			// length by the same amount.
+			long wanted = snapTick(mouseTick(event.x()));
+			if (wanted <= resizeHeldStart) {
+				wanted = resizeHeldStart + gridTicks();
+			}
+			long delta = wanted - resizeHeldEnd;
+			if (delta != resizeDelta) {
+				resizeDelta = delta;
+				dragPreview = delta == 0L ? null : resizeBase.withNotesResized(selectedNotes, delta);
+			}
+			return true;
+		}
 		if (draggingNotes) {
 			long tickDelta = snapDelta(Math.round((event.x() - dragStartX) * ticksPerPixel));
 			int pitchDelta = (int)Math.round((dragStartY - event.y()) / rowHeight);
@@ -6471,6 +6626,15 @@ public final class ComposerScreen extends Screen {
 		}
 		if (draggingPlayhead) {
 			draggingPlayhead = false;
+			return true;
+		}
+		if (resizingNotes) {
+			resizingNotes = false;
+			if (dragPreview != null) {
+				apply(resizeDelta > 0L ? "lengthen notes" : "shorten notes", dragPreview);
+			}
+			dragPreview = null;
+			resizeBase = null;
 			return true;
 		}
 		if (draggingNotes) {
@@ -9242,12 +9406,12 @@ public final class ComposerScreen extends Screen {
 	}
 
 	/**
-	 * Notes draw as fixed-width triggers rather than bars spanning their length.
+	 * A note's hit box: the trigger, never the trail.
 	 *
-	 * <p>Nothing downstream reads a note's duration: preview schedules one sound at its start and
-	 * the build places one note block there. A note block cannot sustain at all. Drawing a long bar
-	 * showed a note holding for a length that never sounds, which read as sustain that does not
-	 * exist -- most misleadingly after a repeat merge, where the absorbed span became a bar.</p>
+	 * <p>The trail shows how long a note lasts and is drawn behind every note on purpose. A bar
+	 * that took clicks along its whole length would make the notes under a long one unreachable,
+	 * and until a layer sustains its notes the length does not sound anyway. Only a trail's far
+	 * end takes hold of anything, as the resize handle; see {@link #trailEndAt}.</p>
 	 */
 	private NoteRect noteRect(NoteEvent note) {
 		int left = tickX(note.startTick());
@@ -9980,7 +10144,8 @@ public final class ComposerScreen extends Screen {
 
 	private enum ToolbarMenu {
 		NONE,
-		BUILD,
+		/** The song as a whole: how it builds, and how the roll shows it. Called Build once. */
+		SONG,
 		FILE,
 		EDIT,
 		SELECT,
@@ -10019,6 +10184,7 @@ public final class ComposerScreen extends Screen {
 		PASTE_IN_WORLD("Paste current sequence in world (requires op)..."),
 		BUILD_CANCEL("Cancel paste"),
 		TOGGLE_DEDUPE("Dedupe identical notes"),
+		TOGGLE_NOTE_TRAILS("Show note trails"),
 		ADD_MARKER("Add or remove at the playback marker"),
 		RENAME_MARKER("Rename the marker here..."),
 		CLEAR_MARKERS("Remove every marker"),
@@ -10046,8 +10212,8 @@ public final class ComposerScreen extends Screen {
 			TRANSPOSE_BEST_FIT,
 			FIT_ALL_RANGE, BAKE_SPEED, SNAP_TEMPO, SNAP_TEMPO_GAME
 		};
-		private static final ToolbarAction[] BUILD_ACTIONS = {
-			TOGGLE_DEDUPE, PASTE_IN_WORLD, BUILD_CANCEL
+		private static final ToolbarAction[] SONG_ACTIONS = {
+			TOGGLE_DEDUPE, TOGGLE_NOTE_TRAILS, PASTE_IN_WORLD, BUILD_CANCEL
 		};
 		private static final ToolbarAction[] SELECT_ACTIONS = {
 			SELECT_OFF_GRID, SELECT_HALF_TICKED, SELECT_EVEN_TICKS, SELECT_ODD_TICKS,

@@ -385,6 +385,8 @@ public final class MidicraftConfig {
 	private int composerGuiScale;
 	private int layerPanelWidth;
 	private boolean layerPanelCollapsed;
+	/** Whether the composer's roll draws how long each note lasts, as a dark trail behind it. */
+	private boolean showNoteTrails;
 	/**
 	 * Whether the song library and the file browser list by name rather than newest first.
 	 *
@@ -607,6 +609,7 @@ public final class MidicraftConfig {
 						: stored.layerPanelWidth
 				);
 				instance.layerPanelCollapsed = Boolean.TRUE.equals(stored.layerPanelCollapsed);
+				instance.showNoteTrails = stored.showNoteTrails == null || stored.showNoteTrails;
 				instance.listSortByName = Boolean.TRUE.equals(stored.listSortByName);
 				if (stored.songOpenedAt != null) {
 					stored.songOpenedAt.forEach((id, at) -> {
@@ -1475,6 +1478,14 @@ public final class MidicraftConfig {
 		this.layerPanelCollapsed = layerPanelCollapsed;
 	}
 
+	public boolean showNoteTrails() {
+		return showNoteTrails;
+	}
+
+	public void setShowNoteTrails(boolean showNoteTrails) {
+		this.showNoteTrails = showNoteTrails;
+	}
+
 	/**
 	 * A config nobody is using, holding what every setting is worth before anyone touches it.
 	 *
@@ -1534,6 +1545,7 @@ public final class MidicraftConfig {
 		config.composerGuiScale = DEFAULT_COMPOSER_GUI_SCALE;
 		config.layerPanelWidth = DEFAULT_LAYER_PANEL_WIDTH;
 		config.layerPanelCollapsed = false;
+		config.showNoteTrails = true;
 		config.listSortByName = false;
 		config.songOpenedAt.clear();
 		config.repeatMergeTicks = DEFAULT_REPEAT_MERGE_TICKS;
@@ -1728,6 +1740,7 @@ public final class MidicraftConfig {
 		private Integer composerGuiScale;
 		private Integer layerPanelWidth;
 		private Boolean layerPanelCollapsed;
+		private Boolean showNoteTrails;
 		private Boolean listSortByName;
 		private Map<String, Long> songOpenedAt;
 		private Integer composerSpeedQuarters;
@@ -1799,6 +1812,7 @@ public final class MidicraftConfig {
 			this.composerGuiScale = config.composerGuiScale;
 			this.layerPanelWidth = config.layerPanelWidth;
 			this.layerPanelCollapsed = config.layerPanelCollapsed;
+			this.showNoteTrails = config.showNoteTrails;
 			this.listSortByName = config.listSortByName;
 			// Only the songs that still exist. A library the player has been pruning would otherwise
 			// leave a line in the settings file for every composition ever opened.
