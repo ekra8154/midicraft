@@ -25029,8 +25029,19 @@ public final class SongBuilder {
 	private static Placed fallenBus(PlacementPlan placements, Lane lane, int triggerDelay,
 			EventGroup event, Layout layout) {
 		int notes = event.notes().size();
+		// The cap counts the corners the bus rides: a bend spends one of a cell's pair on the run,
+		// so twenty-eight notes are fourteen cells straight and fifteen round one bend -- the whole
+		// of a repeater's reach, with the step off the bus onto the lane one past it. Rather Be at
+		// twenty wide, the user's reading: a stacked bus collided in a bend, fell to a plain bus of
+		// fifteen, and the corner dust after it read nought; sunk, the same chord has a cell to spare.
+		int corners = 0;
+		for (Lane.Bend bend : lane.bends()) {
+			if (bend.after() < (notes + 1) / 2 + 1) {
+				corners++;
+			}
+		}
 		boolean sinks = FALLBACK_SINKS_AT_THE_CAP && layout.v2() && SUNKEN_BUSES
-			&& SUNKEN_MAY_OPEN_IN_A_TURN && (notes + 1) / 2 >= DUST_RANGE
+			&& SUNKEN_MAY_OPEN_IN_A_TURN && (notes + 1 + corners) / 2 >= DUST_RANGE
 			&& notes >= SUNKEN_LOWEST_CHORD && sunkenFits(notes) && hasAHarp(event.notes())
 			&& (SUNKEN_OPENS_A_LANE || !placements.laneJustOpened());
 		if (sinks) {
