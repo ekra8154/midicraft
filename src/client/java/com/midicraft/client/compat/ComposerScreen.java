@@ -335,6 +335,10 @@ public final class ComposerScreen extends Screen {
 	private static final int MAX_ROW_HEIGHT = 26;
 	private static final int INSTRUMENT_COLUMNS = 6;
 	private static final int INSTRUMENT_CELL = 28;
+	/** The instrument palette's cells: wider than the tier menu's, for the count strip on each tile. */
+	private static final int PALETTE_CELL = 32;
+	/** The strip down a palette tile's right edge: an up arrow, the count, a down arrow. */
+	private static final int PALETTE_STRIP = 11;
 	/** A strip under the palette's grid naming what a pick would land on. */
 	private static final int INSTRUMENT_FOOTER = 12;
 	/** The two tabs over the palette's grid: pitched instruments, or blocks that make their own noise. */
@@ -3202,10 +3206,11 @@ public final class ComposerScreen extends Screen {
 				+ "overwrites whatever is standing there.";
 			case BUILD_CANCEL -> "Stops a paste part-way. Blocks already placed stay put.";
 			case TOGGLE_DEDUPE -> "When two included layers ask for the same instrument and pitch at "
-				+ "the same tick, build it once. Preview has always collapsed these, so they are "
-				+ "inaudible either way, but each costs a note block and one of the thirty a tick "
-				+ "can carry. Nothing is deleted: give one of those layers a different instrument "
-				+ "and both notes come back.";
+				+ "the same tick, build it once. Each copy costs a note block and one of the thirty "
+				+ "a tick can carry, and preview follows this setting. Nothing is deleted: give one "
+				+ "of those layers a different instrument and both notes come back. An instrument "
+				+ "stacked with a count in the palette is never merged, because the count is how "
+				+ "you ask for a louder note.";
 			case SELECT_OFF_GRID -> "Selects the notes that do not stand on a game tick, counting "
 				+ "from the first note in the song. These are the ones a build cannot place where "
 				+ "they are written, and the ones the grid lines are drawn to show.";
@@ -3393,8 +3398,8 @@ public final class ComposerScreen extends Screen {
 			return null;
 		}
 		int rows = (instrumentMenuPalette().size() + INSTRUMENT_COLUMNS - 1) / INSTRUMENT_COLUMNS;
-		int menuWidth = INSTRUMENT_COLUMNS * INSTRUMENT_CELL + 6;
-		int menuHeight = INSTRUMENT_HEADER + rows * INSTRUMENT_CELL + 6 + INSTRUMENT_FOOTER;
+		int menuWidth = INSTRUMENT_COLUMNS * PALETTE_CELL + 6;
+		int menuHeight = INSTRUMENT_HEADER + rows * PALETTE_CELL + 6 + INSTRUMENT_FOOTER;
 		int top = Math.max(TOOLBAR_HEIGHT + 4, Math.min(height - menuHeight - 24,
 			layerY(instrumentMenuLayer) + LAYER_ROW_HEIGHT));
 		return new NoteRect(8, top, 8 + menuWidth, top + menuHeight);
@@ -3409,29 +3414,32 @@ public final class ComposerScreen extends Screen {
 		graphics.fill(menu.left(), menu.top(), menu.right(), menu.top() + 1, 0xFFAAAAAA);
 		extractInstrumentTabs(graphics, menu, mouseX, mouseY);
 		Layer menuLayer = project().layers().get(instrumentMenuLayer);
-		ComposerProject.Split menuSplit = menuLayer.split();
-		PreviewInstrument selected = PreviewInstrument.byId(menuLayer.instrument());
 		List<PreviewInstrument> palette = instrumentMenuPalette();
+		PaletteHit hover = paletteHit(mouseX, mouseY);
+		int tile = PALETTE_CELL - 2;
 		for (int index = 0; index < palette.size(); index++) {
 			PreviewInstrument value = palette.get(index);
-			int cellX = menu.left() + 3 + index % INSTRUMENT_COLUMNS * INSTRUMENT_CELL;
-			int cellY = instrumentMenuGridTop(menu) + index / INSTRUMENT_COLUMNS * INSTRUMENT_CELL;
-			boolean hovered = mouseX >= cellX && mouseX < cellX + INSTRUMENT_CELL
-				&& mouseY >= cellY && mouseY < cellY + INSTRUMENT_CELL;
-			// On a split layer the palette is a set, not a choice: every voice currently on the
-			// layer is lit, and a click toggles the one it lands on.
-			boolean lit = menuSplit != null
-				? menuSplit.voices().stream()
-					.anyMatch(voice -> voice.instrument().equals(value.id()))
-				: value.equals(selected);
-			graphics.fill(cellX, cellY, cellX + INSTRUMENT_CELL - 2, cellY + INSTRUMENT_CELL - 2,
-				lit ? 0xFF356070 : hovered ? 0xFF44484F : 0xFF25282D);
-			graphics.item(new ItemStack(value.icon()), cellX + 5, cellY + 5);
-			if (hovered) {
+			int cellX = paletteCellX(menu, index);
+			int cellY = paletteCellY(menu, index);
+			boolean hovered = hover != null && hover.index() == index;
+			// Lit is sounding. The palette is a set on every layer now, not only a split one: each
+			// lit tile carries how many note blocks it places a note, and the tile under the
+			// cursor shows its arrows so an instrument that is not sounding can be stacked on.
+			int count = menuLayer.countOf(value.id());
+			graphics.fill(cellX, cellY, cellX + tile, cellY + tile,
+				count > 0 ? 0xFF356070 : hovered ? 0xFF44484F : 0xFF25282D);
+			graphics.item(new ItemStack(value.icon()), cellX + 3, cellY + 7);
+			if (count > 0 || hovered) {
+				extractCountStrip(graphics, cellX, cellY, count, menuLayer.restingCountOf(value.id()),
+					hovered ? hover.part() : PalettePart.BODY);
+			}
+			if (hovered && hover.part() == PalettePart.BODY) {
 				// Effects carry how far they reach. The pitched half is every one of them 48, so
 				// saying so on twenty cells would be twenty copies of one fact.
-				graphics.setTooltipForNextFrame(
-					Component.literal(value.pitched() ? value.name() : value.label()), mouseX, mouseY);
+				String name = value.pitched() ? value.name() : value.label();
+				graphics.setTooltipForNextFrame(Component.literal(count > 1
+					? name + " ×" + count + ", " + count + " note blocks a note"
+					: name), mouseX, mouseY);
 			}
 		}
 		// Whose instrument is about to change. Picking one has always landed on the whole selection,
@@ -3439,15 +3447,79 @@ public final class ComposerScreen extends Screen {
 		// it opened under, changing five layers at once is indistinguishable from a bug.
 		int landing = layersToEdit(instrumentMenuLayer).size();
 		graphics.text(font,
-			menuSplit != null
-				? (landing > 1
-					? "Toggles voices on " + landing + " selected layers"
-					: "Toggles a voice on the split layer")
-				: (landing > 1
-					? "Sets all " + landing + " selected layers"
-					: "Sets layer " + (instrumentMenuLayer + 1)),
+			landing > 1
+				? "Changes all " + landing + " selected layers"
+				: menuLayer.sounding().size() > 1
+					? "Click toggles, arrows stack"
+					: "Click swaps, arrows stack",
 			menu.left() + 4, menu.bottom() - INSTRUMENT_FOOTER + 2,
 			landing > 1 ? 0xFF8FD3FF : 0xFF8A9098, false);
+	}
+
+	/**
+	 * The strip down a palette tile's right edge: an up arrow, the count, a down arrow.
+	 *
+	 * <p>On every lit tile so a layer's counts read at a glance, and on the tile under the cursor
+	 * so an instrument that is not sounding shows where to stack it. A silent tile shows, faintly,
+	 * the count it would come back at when it remembers one.</p>
+	 */
+	private void extractCountStrip(GuiGraphicsExtractor graphics, int cellX, int cellY, int count,
+			int remembered, PalettePart hot) {
+		int tile = PALETTE_CELL - 2;
+		int left = cellX + tile - PALETTE_STRIP;
+		int centre = left + PALETTE_STRIP / 2;
+		graphics.fill(left, cellY, cellX + tile, cellY + tile, 0x55000000);
+		int up = hot == PalettePart.UP ? 0xFFFFFFFF : 0xFFB8C4CC;
+		int down = count > 1 ? (hot == PalettePart.DOWN ? 0xFFFFFFFF : 0xFFB8C4CC) : 0x44B8C4CC;
+		for (int step = 0; step < 3; step++) {
+			graphics.fill(centre - step, cellY + 3 + step, centre + step + 1, cellY + 4 + step, up);
+			graphics.fill(centre - step, cellY + tile - 4 - step, centre + step + 1,
+				cellY + tile - 3 - step, down);
+		}
+		int shown = count > 0 ? count : remembered;
+		if (shown > 0) {
+			String label = Integer.toString(shown);
+			int labelWidth = smallTextWidth(label);
+			int labelX = Math.min(centre - labelWidth / 2, cellX + tile - 1 - labelWidth);
+			smallText(graphics, label, labelX, cellY + tile / 2 - 3,
+				count > 0 ? 0xFFFFFFFF : 0x88FFFFFF);
+		}
+	}
+
+	private static int paletteCellX(NoteRect menu, int index) {
+		return menu.left() + 3 + index % INSTRUMENT_COLUMNS * PALETTE_CELL;
+	}
+
+	private static int paletteCellY(NoteRect menu, int index) {
+		return instrumentMenuGridTop(menu) + index / INSTRUMENT_COLUMNS * PALETTE_CELL;
+	}
+
+	/** Which palette tile a point is over, and which part of it: shared by drawing, clicks and the wheel. */
+	private PaletteHit paletteHit(double mouseX, double mouseY) {
+		NoteRect menu = instrumentMenuRect();
+		if (menu == null) {
+			return null;
+		}
+		int gridTop = instrumentMenuGridTop(menu);
+		if (mouseX < menu.left() + 3 || mouseY < gridTop || mouseX >= menu.right() || mouseY >= menu.bottom()) {
+			return null;
+		}
+		int column = (int)(mouseX - menu.left() - 3) / PALETTE_CELL;
+		int row = (int)(mouseY - gridTop) / PALETTE_CELL;
+		int index = row * INSTRUMENT_COLUMNS + column;
+		if (column >= INSTRUMENT_COLUMNS || index >= instrumentMenuPalette().size()) {
+			return null;
+		}
+		int tile = PALETTE_CELL - 2;
+		double x = mouseX - paletteCellX(menu, index);
+		double y = mouseY - paletteCellY(menu, index);
+		// The two-pixel gutter between tiles belongs to the body, as the whole cell always did.
+		PalettePart part = x < tile - PALETTE_STRIP || x >= tile || y >= tile
+			? PalettePart.BODY
+			: y < tile / 3.0 ? PalettePart.UP
+			: y >= tile * 2 / 3.0 ? PalettePart.DOWN
+			: PalettePart.COUNT;
+		return new PaletteHit(index, part);
 	}
 
 	/** Where the grid starts, once the tabs above it have had their strip. */
@@ -3596,6 +3668,13 @@ public final class ComposerScreen extends Screen {
 					? net.minecraft.world.item.Items.NOTE_BLOCK
 					: PreviewInstrument.byId(layer.instrument()).icon()),
 				row.instrumentX(), y - 1);
+			// A stacked layer says so on its icon: the count when one instrument sounds several
+			// times, a plus when several instruments sound.
+			if (layer.split() == null && !layer.mix().isEmpty()) {
+				String badge = layer.mix().size() > 1 ? "+" : "×" + layer.mix().get(0).count();
+				smallText(graphics, badge, row.instrumentX() + 16 - smallTextWidth(badge), y + 9,
+					0xFFFFFFFF);
+			}
 			// Whether you will hear this layer, marked on the thing that makes the sound -- and the
 			// one part of a row that survives every width, so a folded panel still answers it. A
 			// layer another layer's solo has quieted gets a fainter slash than one you muted
@@ -5297,6 +5376,13 @@ public final class ComposerScreen extends Screen {
 		Layer layer = layerIndex >= 0 && layerIndex < project().layers().size()
 			? project().layers().get(layerIndex)
 			: null;
+		if (layer != null && layer.split() == null && !layer.mix().isEmpty()) {
+			// Every instrument the layer stacks, once each: an audition of the blend, not its volume.
+			for (ComposerProject.Split.Voice voice : layer.mix()) {
+				soundNote(midi, PreviewInstrument.byId(voice.instrument()), color);
+			}
+			return;
+		}
 		if (layer == null || layer.split() == null) {
 			soundNote(midi, layer == null
 				? PreviewInstrument.byId("HARP")
@@ -6124,47 +6210,35 @@ public final class ComposerScreen extends Screen {
 			instrumentMenuEffects = mouseX >= instrumentTabSplit(menu);
 			return true;
 		}
-		int column = (int)(mouseX - menu.left() - 3) / INSTRUMENT_CELL;
-		int row = (int)(mouseY - gridTop) / INSTRUMENT_CELL;
-		if (mouseX < menu.left() + 3 || mouseY < gridTop
-				|| column < 0 || column >= INSTRUMENT_COLUMNS || row < 0) {
+		PaletteHit hit = paletteHit(mouseX, mouseY);
+		if (hit == null) {
 			return false;
 		}
-		int index = row * INSTRUMENT_COLUMNS + column;
-		List<PreviewInstrument> palette = instrumentMenuPalette();
-		if (index < 0 || index >= palette.size()) {
-			return false;
+		if (hit.part() == PalettePart.COUNT) {
+			// The number between the arrows. Taken, so that a near miss of an arrow does not
+			// switch the instrument off instead.
+			return true;
 		}
-		PreviewInstrument value = palette.get(index);
+		PreviewInstrument value = instrumentMenuPalette().get(hit.index());
 		value.play(12);
 		// Picking an instrument says nothing about whether the layer is heard. It used to, because
 		// silence was one of the instruments; the state letter answers that now.
 		// Left open on purpose: every pick plays its sound, so the palette is how you audition one
-		// instrument against another. Clicking away is what puts it down. For a split layer being
-		// open is also what makes it a set: several voices go on or off in one visit.
-		boolean splitTarget = project().layers().get(instrumentMenuLayer).split() != null;
-		updateLayers(splitTarget
-				? "toggle the " + value.name() + " voice"
-				: "set instrument to " + value.name(),
-			instrumentMenuLayer, target -> toggledVoice(target, value.id()));
+		// instrument against another. Clicking away is what puts it down. Being open is also what
+		// makes it a set: several instruments go on, off or up in one visit.
+		String id = value.id();
+		switch (hit.part()) {
+			case UP -> updateLayers("stack " + value.name(), instrumentMenuLayer,
+				target -> target.withCountStepped(id, 1));
+			case DOWN -> updateLayers("unstack " + value.name(), instrumentMenuLayer,
+				target -> target.withCountStepped(id, -1));
+			default -> updateLayers(
+				project().layers().get(instrumentMenuLayer).sounding().size() > 1
+					? "toggle " + value.name()
+					: "set instrument to " + value.name(),
+				instrumentMenuLayer, target -> target.withInstrumentPicked(id));
+		}
 		return true;
-	}
-
-	/**
-	 * What one palette click means to one layer: on an ordinary layer it sets the instrument the
-	 * way it always has, and on a split layer it toggles that instrument's voice -- off if the
-	 * layer has it, on at the instrument's full register if it does not. A voice toggled off and
-	 * on again comes back untrimmed; the bracket was part of the voice, not of the layer.
-	 */
-	private static Layer toggledVoice(Layer layer, String instrumentId) {
-		if (layer.split() == null) {
-			return layer.withInstrument(instrumentId);
-		}
-		List<ComposerProject.Split.Voice> voices = new ArrayList<>(layer.split().voices());
-		if (!voices.removeIf(voice -> voice.instrument().equals(instrumentId))) {
-			voices.add(ComposerProject.Split.Voice.fullRange(instrumentId));
-		}
-		return layer.withSplit(new ComposerProject.Split(voices));
 	}
 
 	private void openContextMenu(double mouseX, double mouseY) {
@@ -6456,6 +6530,21 @@ public final class ComposerScreen extends Screen {
 
 	@Override
 	public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+		PaletteHit wheelHit = instrumentMenuLayer >= 0 ? paletteHit(mouseX, mouseY) : null;
+		if (wheelHit != null) {
+			// The wheel over a sounding tile turns its count. Over a silent one it does nothing:
+			// adding an instrument is a click, not something a scroll across the palette does on
+			// its way past.
+			PreviewInstrument value = instrumentMenuPalette().get(wheelHit.index());
+			String id = value.id();
+			if (scrollY != 0 && project().layers().get(instrumentMenuLayer).countOf(id) > 0) {
+				int step = scrollY > 0 ? 1 : -1;
+				updateLayers(step > 0 ? "stack " + value.name() : "unstack " + value.name(),
+					instrumentMenuLayer,
+					target -> target.countOf(id) > 0 ? target.withCountStepped(id, step) : target);
+			}
+			return true;
+		}
 		if (mouseX < layerPanelWidth() && mouseY >= LAYER_LIST_TOP - 2 && mouseY <= layerListBottom()) {
 			scrollLayers(scrollY > 0 ? -LAYER_ROW_HEIGHT : LAYER_ROW_HEIGHT);
 			return true;
@@ -7707,10 +7796,8 @@ public final class ComposerScreen extends Screen {
 		for (int index : group.voiceIndices()) {
 			ComposerProject.Split.Voice voice = voices.get(index);
 			ComposerProject.Split.Voice moved = bracketDragTop
-				? new ComposerProject.Split.Voice(voice.instrument(), voice.lo(),
-					Math.max(voice.lo(), midi))
-				: new ComposerProject.Split.Voice(voice.instrument(), Math.min(voice.hi(), midi),
-					voice.hi());
+				? voice.withBracket(voice.lo(), Math.max(voice.lo(), midi))
+				: voice.withBracket(Math.min(voice.hi(), midi), voice.hi());
 			if (!moved.equals(voice)) {
 				voices.set(index, moved);
 				changed = true;
@@ -7910,18 +7997,24 @@ public final class ComposerScreen extends Screen {
 					: ComposerProject.NOTE_BLOCK_BASE_MIDI_NOTE
 						- com.midicraft.InstrumentRanges.baseMidi(voiceLayer.instrument());
 				List<NoteEvent> notes = voiceLayer.notes();
+				// A counted voice plays one sound per copy, which is what its note blocks do: a
+				// single sound cannot be louder than full volume, several at once can.
+				int copies = voiceLayer.copies();
 				for (int index = lowerBoundStart(notes, playbackStartTick); index < notes.size(); index++) {
 					NoteEvent note = notes.get(index);
 					if (!takeNotes.isEmpty() && takeNotes.contains(note.id())) {
 						continue;
 					}
-					events.add(new PlaybackEvent(
-						note.startTick(),
-						instrument,
-						note.midiNote() - ComposerProject.NOTE_BLOCK_BASE_MIDI_NOTE,
-						note.midiNote() - written,
-						color
-					));
+					for (int copy = 0; copy < copies; copy++) {
+						events.add(new PlaybackEvent(
+							note.startTick(),
+							instrument,
+							note.midiNote() - ComposerProject.NOTE_BLOCK_BASE_MIDI_NOTE,
+							note.midiNote() - written,
+							color,
+							copies > 1
+						));
+					}
 				}
 			}
 		}
@@ -7940,6 +8033,11 @@ public final class ComposerScreen extends Screen {
 		List<PlaybackEvent> deduplicated = new ArrayList<>(events.size());
 		PlaybackEvent previous = null;
 		for (PlaybackEvent event : events) {
+			if (event.counted()) {
+				// Never collapsed, and never what collapses the next one; see toSequenceTracks.
+				deduplicated.add(event);
+				continue;
+			}
 			if (previous == null || !event.sameSound(previous)) {
 				deduplicated.add(event);
 				previous = event;
@@ -9742,14 +9840,26 @@ public final class ComposerScreen extends Screen {
 	 * the event fires -- by then all that is left is a pitch. It takes no part in {@code sameSound},
 	 * which asks whether the build would collapse the two, and the build has no colours.</p>
 	 */
+	/** One preview sound. {@code counted} marks a copy of a voice with a count, which dedupe leaves alone. */
 	private record PlaybackEvent(long tick, PreviewInstrument instrument, int note, int lightMidi,
-			int color) {
+			int color, boolean counted) {
 		private boolean sameSound(PlaybackEvent other) {
 			return tick == other.tick && note == other.note && instrument.equals(other.instrument);
 		}
 	}
 
 	private record NoteHit(int layerIndex, NoteEvent note) {
+	}
+
+	/** The parts of a palette tile a click can land on. */
+	private enum PalettePart {
+		BODY,
+		UP,
+		COUNT,
+		DOWN
+	}
+
+	private record PaletteHit(int index, PalettePart part) {
 	}
 
 	/** What a drag down the layer panel is setting on every row it crosses. */

@@ -54,13 +54,6 @@ final class NbsExporter {
 				culledEffects++;
 				continue;
 			}
-			int instrument = instrumentId(layer.instrument());
-			if (instrument < 0) {
-				// Beyond the sixteen Note Block Studio knows. Written as a piano so the file opens
-				// everywhere, and counted so the report can say so.
-				instrument = 0;
-				remappedInstruments++;
-			}
 			// NBS holds one note per layer per tick, and a composer layer holds chords. So a layer
 			// here becomes as many layers there as its thickest chord has notes: the first voice in
 			// the layer proper, the rest in layers beside it. That is what Note Block Studio does
@@ -74,25 +67,47 @@ final class NbsExporter {
 			int base = layers.size();
 			int voices = 0;
 			java.util.Map<Integer, Integer> takenAt = new java.util.HashMap<>();
-			for (ComposerProject.NoteEvent note : layer.notes()) {
-				long tick = note.startTick() / scale;
-				if (tick > NbsWriter.maxTick()) {
-					pastTheEnd++;
+			// Written the way the build places it: a split or stacked layer as its voices, each note
+			// at the pitch value its voice builds it on, and a counted voice as that many copies.
+			// NBS has no count, and its velocity is already the note's own loudness, so a note
+			// stacked three times is three notes -- which Note Block Studio plays three times as
+			// loud, the same as the machine does.
+			for (ComposerProject.Layer voiceLayer : layer.buildVoices()) {
+				if (!voiceLayer.pitched()) {
+					// A door stacked onto a tuned layer: left out, and counted, for the reason a
+					// whole sound effect layer is.
+					culledEffects++;
 					continue;
 				}
-				int voice = takenAt.merge((int)tick, 1, Integer::sum) - 1;
-				if (voice > 0) {
-					spilled++;
+				int instrument = instrumentId(voiceLayer.instrument());
+				if (instrument < 0) {
+					// Beyond the sixteen Note Block Studio knows. Written as a piano so the file
+					// opens everywhere, and counted so the report can say so.
+					instrument = 0;
+					remappedInstruments++;
 				}
-				voices = Math.max(voices, voice + 1);
-				int key = note.midiNote() - NBS_LOWEST_MIDI_NOTE;
-				if (key < 0 || key > NBS_HIGHEST_KEY) {
-					outsideKeyRange++;
+				for (int copy = 0; copy < voiceLayer.copies(); copy++) {
+					for (ComposerProject.NoteEvent note : voiceLayer.notes()) {
+						long tick = note.startTick() / scale;
+						if (tick > NbsWriter.maxTick()) {
+							pastTheEnd++;
+							continue;
+						}
+						int voice = takenAt.merge((int)tick, 1, Integer::sum) - 1;
+						if (voice > 0) {
+							spilled++;
+						}
+						voices = Math.max(voices, voice + 1);
+						int key = note.midiNote() - NBS_LOWEST_MIDI_NOTE;
+						if (key < 0 || key > NBS_HIGHEST_KEY) {
+							outsideKeyRange++;
+						}
+						notes.add(new NbsSong.Note((int)tick, base + voice, instrument,
+							Math.max(0, Math.min(255, key)),
+							Math.max(0, Math.min(100, Math.round(note.velocity() * 100.0f / 127.0f))),
+							100, 0));
+					}
 				}
-				notes.add(new NbsSong.Note((int)tick, base + voice, instrument,
-					Math.max(0, Math.min(255, key)),
-					Math.max(0, Math.min(100, Math.round(note.velocity() * 100.0f / 127.0f))),
-					100, 0));
 			}
 			for (int voice = 0; voice < Math.max(1, voices); voice++) {
 				layers.add(new NbsSong.Layer(base + voice,

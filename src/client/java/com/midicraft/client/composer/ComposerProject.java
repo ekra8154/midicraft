@@ -277,20 +277,54 @@ public record ComposerProject(
 		boolean visible,
 		List<NoteEvent> notes,
 		/** How a split layer voices its notes, or null for the ordinary one-instrument layer. */
-		Split split
+		Split split,
+		/**
+		 * The instruments an ordinary layer sounds together, each at its own count, or empty for
+		 * the one {@link #instrument} sounding once.
+		 *
+		 * <p>Voices rather than names so that a count means the same thing here as on a split
+		 * layer. Their brackets mean nothing on an ordinary layer: every voice plays every note at
+		 * the pitch value it is written at, which is what the layer's one instrument always did.
+		 * A split layer's voices are its split's, so on one this is always empty.</p>
+		 */
+		List<Split.Voice> mix,
+		/**
+		 * Instruments switched off in the palette, kept with their counts and brackets so that
+		 * switching one back on gives back what it was. Never holds an instrument that is sounding.
+		 */
+		List<Split.Voice> resting
 	) {
 		public Layer {
 			name = name == null || name.isBlank() ? "Layer" : name.trim();
 			instrument = instrument == null || instrument.isBlank() ? "HARP" : instrument;
+			// One instrument sounding once is the ordinary layer and is stored as one, so every song
+			// written before counts, and every layer nobody stacks, stays the same document. When
+			// several sound, the first is the instrument: the row's icon, and what a reader that
+			// predates the mix sees.
+			mix = split != null ? List.of() : distinctByInstrument(mix);
+			if (mix.size() == 1 && mix.get(0).count() == 1) {
+				instrument = mix.get(0).instrument();
+				mix = List.of();
+			} else if (!mix.isEmpty()) {
+				instrument = mix.get(0).instrument();
+			}
+			resting = restingOnly(resting, split, mix, instrument);
 			// A split layer always keeps the pitch in the cell, whatever its vestigial instrument
 			// says: the row decides which voices sound, so two rows are never the same note.
-			notes = notes == null ? List.of() : oneNotePerCell(notes, pitched(instrument) || split != null);
+			notes = notes == null ? List.of()
+				: oneNotePerCell(notes, split != null || pitched(instrument, mix));
 		}
 
 		/** Everything but the split, for the callers written before there was one. */
 		public Layer(String name, String instrument, boolean muted, boolean buildEnabled,
 				boolean visible, List<NoteEvent> notes) {
-			this(name, instrument, muted, buildEnabled, visible, notes, null);
+			this(name, instrument, muted, buildEnabled, visible, notes, null, null, null);
+		}
+
+		/** Everything but the counts, for the callers written before there were any. */
+		public Layer(String name, String instrument, boolean muted, boolean buildEnabled,
+				boolean visible, List<NoteEvent> notes, Split split) {
+			this(name, instrument, muted, buildEnabled, visible, notes, split, null, null);
 		}
 
 		/**
@@ -324,11 +358,18 @@ public record ComposerProject(
 		public boolean pitched() {
 			// A split layer's rows always mean something, even when every voice on it is a sound
 			// effect: the row is what picks the voice.
-			return split != null || pitched(instrument);
+			return split != null || pitched(instrument, mix);
 		}
 
 		private static boolean pitched(String instrument) {
 			return !instrument.startsWith(SOUND_EFFECT_PREFIX);
+		}
+
+		/** Whether an ordinary layer's rows mean anything: they do if any voice sounding is tuned. */
+		private static boolean pitched(String instrument, List<Split.Voice> mix) {
+			return mix.isEmpty()
+				? pitched(instrument)
+				: mix.stream().anyMatch(voice -> pitched(voice.instrument()));
 		}
 
 		/**
@@ -359,10 +400,23 @@ public record ComposerProject(
 		 *
 		 * <p>Voices with nothing covered are left out rather than emitted empty: an empty track
 		 * still costs a build a lane, and a bracket nothing reaches has nothing to say.</p>
+		 *
+		 * <p>An ordinary layer sounding several instruments expands here too, one layer per
+		 * instrument, each holding every note as written. Every layer this returns carries its
+		 * voice's count, read with {@link #copies}; turning a count into note blocks is
+		 * {@link #asCopies}, which comes after deduplication.</p>
 		 */
 		public List<Layer> buildVoices() {
-			if (split == null) {
+			if (split == null && mix.isEmpty()) {
 				return List.of(this);
+			}
+			if (split == null) {
+				List<Layer> stacked = new ArrayList<>(mix.size());
+				for (Split.Voice voice : mix) {
+					stacked.add(new Layer(mix.size() == 1 ? name : name + " (" + voice.instrument() + ")",
+						voice.instrument(), muted, buildEnabled, visible, notes, null, List.of(voice), null));
+				}
+				return List.copyOf(stacked);
 			}
 			List<Layer> voices = new ArrayList<>();
 			for (Split.Voice voice : split.voices()) {
@@ -379,7 +433,8 @@ public record ComposerProject(
 				}
 				if (!covered.isEmpty()) {
 					voices.add(new Layer(name + " (" + voice.instrument() + ")",
-						voice.instrument(), muted, buildEnabled, visible, covered));
+						voice.instrument(), muted, buildEnabled, visible, covered, null,
+						List.of(voice), null));
 				}
 			}
 			return List.copyOf(voices);
@@ -392,7 +447,7 @@ public record ComposerProject(
 		 * sound twice. The build already collapsed them and preview already played them once; keeping
 		 * them in the document only meant the roll had a cell you could put notes into forever, with
 		 * nothing to show that you had. Wanting a doubled note is a real thing to want -- it is how
-		 * you make one louder -- and it is two layers, which says so.</p>
+		 * you make one louder -- and it is a count on the instrument, in the palette, which says so.</p>
 		 *
 		 * <p>Enforced here, in the constructor, rather than at the places that add notes. Every edit
 		 * in this file goes through {@code with}, and a rule about what a layer <em>is</em> cannot be
@@ -438,31 +493,225 @@ public record ComposerProject(
 		}
 
 		public Layer withNotes(List<NoteEvent> value) {
-			return new Layer(name, instrument, muted, buildEnabled, visible, value, split);
+			return new Layer(name, instrument, muted, buildEnabled, visible, value, split, mix, resting);
 		}
 
 		public Layer withName(String value) {
-			return new Layer(value, instrument, muted, buildEnabled, visible, notes, split);
+			return new Layer(value, instrument, muted, buildEnabled, visible, notes, split, mix, resting);
 		}
 
+		/** One instrument, sounding once: whatever the layer was stacking, it stops. */
 		public Layer withInstrument(String value) {
-			return new Layer(name, value, muted, buildEnabled, visible, notes, split);
+			return new Layer(name, value, muted, buildEnabled, visible, notes, split, null, resting);
 		}
 
 		public Layer withMuted(boolean value) {
-			return new Layer(name, instrument, value, buildEnabled, visible, notes, split);
+			return new Layer(name, instrument, value, buildEnabled, visible, notes, split, mix, resting);
 		}
 
 		public Layer withBuildEnabled(boolean value) {
-			return new Layer(name, instrument, muted, value, visible, notes, split);
+			return new Layer(name, instrument, muted, value, visible, notes, split, mix, resting);
 		}
 
 		public Layer withVisible(boolean value) {
-			return new Layer(name, instrument, muted, buildEnabled, value, notes, split);
+			return new Layer(name, instrument, muted, buildEnabled, value, notes, split, mix, resting);
 		}
 
 		public Layer withSplit(Split value) {
-			return new Layer(name, instrument, muted, buildEnabled, visible, notes, value);
+			return new Layer(name, instrument, muted, buildEnabled, visible, notes, value, mix, resting);
+		}
+
+		public Layer withMix(List<Split.Voice> value) {
+			return new Layer(name, instrument, muted, buildEnabled, visible, notes, split, value, resting);
+		}
+
+		public Layer withResting(List<Split.Voice> value) {
+			return new Layer(name, instrument, muted, buildEnabled, visible, notes, split, mix, value);
+		}
+
+		/**
+		 * What this layer sounds, one entry per voice with its count: the split's voices, the mix,
+		 * or the single instrument once.
+		 */
+		public List<Split.Voice> sounding() {
+			if (split != null) {
+				return split.voices();
+			}
+			return mix.isEmpty() ? List.of(Split.Voice.fullRange(instrument)) : mix;
+		}
+
+		/** How many times this instrument sounds on each note, or 0 when it is not sounding. */
+		public int countOf(String instrumentId) {
+			return firstCount(sounding(), instrumentId);
+		}
+
+		/** The count a switched-off instrument would come back at, or 0 when none is remembered. */
+		public int restingCountOf(String instrumentId) {
+			return firstCount(resting, instrumentId);
+		}
+
+		private static int firstCount(List<Split.Voice> voices, String instrumentId) {
+			for (Split.Voice voice : voices) {
+				if (voice.instrument().equals(instrumentId)) {
+					return voice.count();
+				}
+			}
+			return 0;
+		}
+
+		/**
+		 * How many note blocks each note of a one-voice layer places.
+		 *
+		 * <p>Asked of what {@link #buildVoices} returns, where every layer is one voice. A layer
+		 * sounding several instruments has no single answer and says 1: expand it first.</p>
+		 */
+		public int copies() {
+			List<Split.Voice> voices = sounding();
+			return voices.size() == 1 ? voices.get(0).count() : 1;
+		}
+
+		/**
+		 * A counted voice as the note blocks it places: one plain layer per copy, each sounding once.
+		 *
+		 * <p>Deliberately the last step, after deduplication. Copies of one voice are the same
+		 * sound on purpose, and collapsing them is exactly what a count exists to prevent.</p>
+		 */
+		public List<Layer> asCopies() {
+			int copies = copies();
+			if (copies == 1 && split == null && mix.isEmpty()) {
+				return List.of(this);
+			}
+			return java.util.Collections.nCopies(copies,
+				new Layer(name, instrument, muted, buildEnabled, visible, notes));
+		}
+
+		/**
+		 * A click on an instrument's tile in the palette.
+		 *
+		 * <p>With one instrument sounding it swaps that one for this one. The count goes with it,
+		 * because how loud the part is belongs to the part -- unless this instrument remembers a
+		 * count of its own from before, which wins. With two or more sounding it toggles this one:
+		 * off keeps its count and bracket, on gives them back. The last instrument sounding can
+		 * only be swapped, never switched off.</p>
+		 */
+		public Layer withInstrumentPicked(String instrumentId) {
+			List<Split.Voice> lit = new ArrayList<>(sounding());
+			List<Split.Voice> kept = new ArrayList<>(resting);
+			boolean sounding = lit.stream().anyMatch(voice -> voice.instrument().equals(instrumentId));
+			if (lit.size() <= 1) {
+				if (sounding) {
+					return this;
+				}
+				int count = lit.isEmpty() ? 1 : lit.get(0).count();
+				if (!lit.isEmpty() && remembers(lit.get(0))) {
+					kept.add(lit.get(0));
+				}
+				return withSounding(takeResting(kept, instrumentId, count), kept);
+			}
+			if (sounding) {
+				List<Split.Voice> off = lit.stream()
+					.filter(voice -> voice.instrument().equals(instrumentId)).toList();
+				if (off.size() == lit.size()) {
+					return this;
+				}
+				lit.removeAll(off);
+				off.stream().filter(this::remembers).forEach(kept::add);
+			} else {
+				lit.addAll(takeResting(kept, instrumentId, 1));
+			}
+			return withSounding(lit, kept);
+		}
+
+		/**
+		 * An arrow on an instrument's tile: its count up or down by {@code delta}, never below one.
+		 * Up on an instrument that is not sounding adds it, at the count it remembers or once.
+		 */
+		public Layer withCountStepped(String instrumentId, int delta) {
+			List<Split.Voice> lit = new ArrayList<>(sounding());
+			boolean found = false;
+			boolean changed = false;
+			for (int index = 0; index < lit.size(); index++) {
+				Split.Voice voice = lit.get(index);
+				if (!voice.instrument().equals(instrumentId)) {
+					continue;
+				}
+				found = true;
+				int next = (int)Math.max(1L, Math.min(Integer.MAX_VALUE, (long)voice.count() + delta));
+				if (next != voice.count()) {
+					lit.set(index, voice.withCount(next));
+					changed = true;
+				}
+			}
+			if (found) {
+				return changed ? withSounding(lit, resting) : this;
+			}
+			if (delta <= 0) {
+				return this;
+			}
+			List<Split.Voice> kept = new ArrayList<>(resting);
+			lit.addAll(takeResting(kept, instrumentId, 1));
+			return withSounding(lit, kept);
+		}
+
+		/**
+		 * Whether a voice switched off has anything to remember. A split voice has its bracket;
+		 * an ordinary layer's voice only has its count, and a count of one is what a fresh one gets.
+		 */
+		private boolean remembers(Split.Voice voice) {
+			return split != null || voice.count() > 1;
+		}
+
+		/** Takes an instrument's remembered voices out of {@code kept}, or a fresh one at {@code count}. */
+		private static List<Split.Voice> takeResting(List<Split.Voice> kept, String instrumentId,
+				int count) {
+			List<Split.Voice> back = kept.stream()
+				.filter(voice -> voice.instrument().equals(instrumentId)).toList();
+			if (back.isEmpty()) {
+				return List.of(Split.Voice.fullRange(instrumentId).withCount(count));
+			}
+			kept.removeAll(back);
+			return back;
+		}
+
+		private Layer withSounding(List<Split.Voice> voices, List<Split.Voice> restingVoices) {
+			return split != null
+				? new Layer(name, instrument, muted, buildEnabled, visible, notes, new Split(voices),
+					null, restingVoices)
+				: new Layer(name, instrument, muted, buildEnabled, visible, notes, null, voices,
+					restingVoices);
+		}
+
+		private static List<Split.Voice> distinctByInstrument(List<Split.Voice> voices) {
+			if (voices == null || voices.isEmpty()) {
+				return List.of();
+			}
+			Set<String> seen = new java.util.HashSet<>();
+			List<Split.Voice> kept = new ArrayList<>(voices.size());
+			for (Split.Voice voice : voices) {
+				if (voice != null && seen.add(voice.instrument())) {
+					kept.add(voice);
+				}
+			}
+			return List.copyOf(kept);
+		}
+
+		private static List<Split.Voice> restingOnly(List<Split.Voice> voices, Split split,
+				List<Split.Voice> mix, String instrument) {
+			if (voices == null || voices.isEmpty()) {
+				return List.of();
+			}
+			Set<String> soundingNow = new java.util.HashSet<>();
+			if (split != null) {
+				split.voices().forEach(voice -> soundingNow.add(voice.instrument()));
+			} else if (mix.isEmpty()) {
+				soundingNow.add(instrument);
+			} else {
+				mix.forEach(voice -> soundingNow.add(voice.instrument()));
+			}
+			return voices.stream()
+				.filter(java.util.Objects::nonNull)
+				.filter(voice -> !soundingNow.contains(voice.instrument()))
+				.toList();
 		}
 	}
 
@@ -489,9 +738,14 @@ public record ComposerProject(
 		 * clamp that guarantees the transposed note always lands on a real pitch value. A sound
 		 * effect voice has no register, so its bracket is only a band of rows and clamps to MIDI
 		 * itself.</p>
+		 *
+		 * <p>The count is how many note blocks the voice places for each note it sounds -- the
+		 * palette's volume control. A note block has no volume of its own, so louder is more of
+		 * them struck together. Never below one; a song saved before counts reads 0 and gets 1.</p>
 		 */
-		public record Voice(String instrument, int lo, int hi) {
+		public record Voice(String instrument, int lo, int hi, int count) {
 			public Voice {
+				count = Math.max(1, count);
 				instrument = instrument == null || instrument.isBlank() ? "HARP" : instrument;
 				int lowest = instrument.startsWith(SOUND_EFFECT_PREFIX)
 					? 0 : InstrumentRanges.lowestMidi(instrument);
@@ -501,6 +755,19 @@ public record ComposerProject(
 				int ceiling = Math.max(lo, hi);
 				lo = Math.max(lowest, Math.min(highest, floor));
 				hi = Math.max(lowest, Math.min(highest, ceiling));
+			}
+
+			/** A voice sounding once per note, which is what every voice was before counts. */
+			public Voice(String instrument, int lo, int hi) {
+				this(instrument, lo, hi, 1);
+			}
+
+			public Voice withCount(int value) {
+				return new Voice(instrument, lo, hi, value);
+			}
+
+			public Voice withBracket(int low, int high) {
+				return new Voice(instrument, low, high, count);
 			}
 
 			/** The whole register the instrument has, which is what a fresh bracket starts as. */
@@ -864,6 +1131,9 @@ public record ComposerProject(
 	 *
 	 * <p>Velocity and duration are deliberately not part of it. A note block has no volume and no
 	 * sustain, so two notes agreeing on these three things build as one sound played twice.</p>
+	 *
+	 * <p>A voice with a count is the exception, and not through this record: its notes skip
+	 * deduplication altogether, see {@link #toSequenceTracks}.</p>
 	 */
 	public record NoteSound(String instrument, int midiNote, long startTick) {
 		public static NoteSound of(Layer layer, NoteEvent note) {
@@ -892,9 +1162,18 @@ public record ComposerProject(
 			}
 			// A split layer is several tracks: one per voice, expanded before the deduplication so
 			// that a doubled note two split layers agree on collapses the way any other sound does.
+			//
+			// A counted voice is left out of the deduplication both ways: none of its notes are
+			// dropped, and none of them count as heard. The count is somebody asking for a louder
+			// note, and collapsing it -- or letting it collapse a note on another layer -- would
+			// quietly undo that. Its copies are expanded only after.
 			for (Layer voice : layer.buildVoices()) {
-				Layer projected = heard == null ? voice : withoutAlreadyHeard(voice, heard);
-				result.add(new SequenceTrack(voice.name(), toText(projected), voice.instrument(), 0, true));
+				Layer projected = heard == null || voice.copies() > 1
+					? voice : withoutAlreadyHeard(voice, heard);
+				String text = toText(projected);
+				for (Layer copy : projected.asCopies()) {
+					result.add(new SequenceTrack(copy.name(), text, copy.instrument(), 0, true));
+				}
 			}
 		}
 		return List.copyOf(result);
@@ -2348,8 +2627,12 @@ public record ComposerProject(
 			}
 			// Split layers arrive already expanded into their voices, so every layer this returns
 			// is a plain one-instrument layer and downstream readers need no new case.
+			// A counted voice skips the deduplication both ways and arrives as one layer per copy;
+			// see toSequenceTracks.
 			for (Layer voice : layer.buildVoices()) {
-				chosen.add(heard == null ? voice : withoutAlreadyHeard(voice, heard));
+				Layer projected = heard == null || voice.copies() > 1
+					? voice : withoutAlreadyHeard(voice, heard);
+				chosen.addAll(projected.asCopies());
 			}
 		}
 		return List.copyOf(chosen);
@@ -2361,7 +2644,8 @@ public record ComposerProject(
 			for (Layer layer : source) {
 				if (layer != null && normalized.size() < MAX_LAYERS) {
 					normalized.add(new Layer(layer.name(), layer.instrument(), layer.muted(),
-						layer.buildEnabled(), layer.visible(), layer.notes(), layer.split()));
+						layer.buildEnabled(), layer.visible(), layer.notes(), layer.split(), layer.mix(),
+						layer.resting()));
 				}
 			}
 		}

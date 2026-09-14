@@ -80,7 +80,8 @@ public final class ChordThinner {
 	 * With it off each note stands on its own and counts against the thirty by itself, so the note
 	 * id goes in the key instead. Thinning has to count the way the thing it is feeding counts.</p>
 	 */
-	private record Voice(String instrument, int midiNote, long distinct) {
+	/** One sound in a chord. {@code copy} tells a counted voice's copies apart, and is 0 otherwise. */
+	private record Voice(String instrument, int midiNote, long distinct, int copy) {
 	}
 
 	/** Thins using anything in the composition, which is what the whole song being fixed means. */
@@ -119,19 +120,27 @@ public final class ChordThinner {
 			boolean offered = (fromLayers == null || fromLayers.contains(layerIndex))
 				&& layer.split() == null;
 			for (Layer voiceLayer : layer.buildVoices()) {
+				// A counted voice places a note block per copy, so every copy is its own sound in
+				// the chord: never merged by deduplication, and never on offer. The count is a
+				// choice about loudness somebody made in the palette, not doubling to spare.
+				int copies = voiceLayer.copies();
 				for (NoteEvent note : voiceLayer.notes()) {
 					// The same clause as the analysis: an out-of-range note is not placed at all,
 					// and a sound effect has no range to be outside of.
 					if (voiceLayer.pitched() && !note.isBuildable()) {
 						continue;
 					}
-					Voice voice = new Voice(voiceLayer.instrument(), note.midiNote(),
-						dedupeIdentical ? 0L : note.id());
-					byTick.computeIfAbsent(note.startTick(), tick -> new LinkedHashMap<>())
-						.computeIfAbsent(voice, key -> new ArrayList<>())
-						.add(note);
-					if (!offered) {
-						blocked.computeIfAbsent(note.startTick(), tick -> new HashSet<>()).add(voice);
+					for (int copy = 0; copy < copies; copy++) {
+						Voice voice = copies > 1
+							? new Voice(voiceLayer.instrument(), note.midiNote(), note.id(), copy + 1)
+							: new Voice(voiceLayer.instrument(), note.midiNote(),
+								dedupeIdentical ? 0L : note.id(), 0);
+						byTick.computeIfAbsent(note.startTick(), tick -> new LinkedHashMap<>())
+							.computeIfAbsent(voice, key -> new ArrayList<>())
+							.add(note);
+						if (!offered || copies > 1) {
+							blocked.computeIfAbsent(note.startTick(), tick -> new HashSet<>()).add(voice);
+						}
 					}
 				}
 			}

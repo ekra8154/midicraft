@@ -89,9 +89,13 @@ public record SongAnalysis(
 			// Judged as the build will place it: a split layer expands into its voices first, so a
 			// note two brackets cover counts twice against the thirty a tick can carry -- it is two
 			// note blocks in the machine, whatever the document stores it as.
+			// A counted voice is as many note blocks as its count, and is never deduplicated
+			// either way, exactly as the build places it.
 			for (Layer voice : layer.buildVoices()) {
+				int copies = voice.copies();
 				for (NoteEvent note : voice.notes()) {
-					if (heard != null && !heard.add(ComposerProject.NoteSound.of(voice, note))) {
+					if (heard != null && copies == 1
+							&& !heard.add(ComposerProject.NoteSound.of(voice, note))) {
 						duplicateNotes++;
 						continue;
 					}
@@ -100,7 +104,7 @@ public record SongAnalysis(
 					if (voice.pitched() && !note.isBuildable()) {
 						outOfRange++;
 					} else {
-						counts.merge(note.startTick(), 1, Integer::sum);
+						counts.merge(note.startTick(), copies, Integer::sum);
 					}
 				}
 			}

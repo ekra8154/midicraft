@@ -46,10 +46,12 @@ public final class SongBuilder {
 			if (!layer.buildEnabled()) {
 				continue;
 			}
-			// A split layer is placed as its voices, each a plain one-instrument layer. The order
-			// counter runs across all of them so two voices striking together stay deterministic.
+			// A split layer is placed as its voices, each a plain one-instrument layer, and a
+			// counted voice as one layer per copy. The order counter runs across all of them so two
+			// voices striking together stay deterministic.
 			int order = 0;
-			for (Layer voice : layer.buildVoices()) {
+			for (Layer voice : layer.buildVoices().stream()
+					.flatMap(each -> each.asCopies().stream()).toList()) {
 				String instrumentBlock = instrumentBlockId(voice.instrument());
 				PreviewInstrument.Effect effect = effectOf(voice.instrument());
 				int time = 0;
