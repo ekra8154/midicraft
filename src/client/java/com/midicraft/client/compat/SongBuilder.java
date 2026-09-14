@@ -823,6 +823,7 @@ public final class SongBuilder {
 			plan.breaches(), plan.wallBreaches(), plan.recesses(), plan.padding(), plan.nearWall(),
 			plan.farWall(),
 			plan.collisions(), plan.poweredAt(), plan.laidBy(), plan.noteTicks(),
+			plan.noteMachines(),
 			// The break where it can be found, and the first quiet note where it cannot. A reading that
 			// says notes are unreached while no powered cell went dark is a disagreement this pass
 			// cannot explain, and sending the player to the first silent note is at least sending them
@@ -839,7 +840,8 @@ public final class SongBuilder {
 			plan.spanX(), plan.spanZ(), plan.mode(), List.copyOf(faults), plan.turns(), plan.moved(),
 			plan.breaches(), plan.wallBreaches(), plan.recesses(), plan.padding(), plan.nearWall(),
 			plan.farWall(),
-			plan.collisions(), plan.poweredAt(), plan.laidBy(), plan.noteTicks(), sites);
+			plan.collisions(), plan.poweredAt(), plan.laidBy(), plan.noteTicks(),
+			plan.noteMachines(), sites);
 	}
 
 	/** What a build with no name to put on it is called. */
@@ -920,7 +922,8 @@ public final class SongBuilder {
 			plan.spanX(), plan.spanZ(), plan.mode(), plan.faults(), plan.turns(), plan.moved(),
 			plan.breaches(), plan.wallBreaches(), plan.recesses(), plan.padding(), plan.nearWall(),
 			plan.farWall(),
-			plan.collisions(), plan.poweredAt(), plan.laidBy(), plan.noteTicks(), plan.faultSites());
+			plan.collisions(), plan.poweredAt(), plan.laidBy(), plan.noteTicks(),
+			plan.noteMachines(), plan.faultSites());
 	}
 
 	/**
@@ -1536,7 +1539,8 @@ public final class SongBuilder {
 			plan.spanX(), plan.spanZ(), plan.mode(), plan.faults(), plan.turns(), plan.moved(),
 			plan.breaches(), plan.wallBreaches(), plan.recesses(), plan.padding(), plan.nearWall(),
 			plan.farWall(),
-			plan.collisions(), plan.poweredAt(), plan.laidBy(), plan.noteTicks(), plan.faultSites());
+			plan.collisions(), plan.poweredAt(), plan.laidBy(), plan.noteTicks(),
+			plan.noteMachines(), plan.faultSites());
 	}
 
 	/**
@@ -1823,6 +1827,9 @@ public final class SongBuilder {
 		// carries at every width this mode builds.
 		Pace paceA = null;
 		Pace paceB = null;
+		int[] dryPaceA = null;
+		int[] dryPaceB = null;
+		LAST_PACE = null;
 		// Pacing and dynamic parity are two answers to one question -- keeping the two pulses
 		// within earshot -- and the scheduler's answer is the structural one: it keeps the lanes
 		// the same length by giving them the same amount of music, where pacing lets one lane run
@@ -1832,15 +1839,18 @@ public final class SongBuilder {
 		// alone reaches 13, and pacing on top of the schedule reaches 11 -- two builds, for 380
 		// to 460 cells of dust per build and every dead line the mode has. So the dust stands
 		// down where the schedule is running, and comes back the moment it is not.
-		if (INTERLEAVED_PACES_THE_LANES && !(INTERLEAVED_DYNAMIC_PARITY
-				&& flipsA.size() + flipsB.size() > 0)) {
+		if (INTERLEAVED_PACES_THE_LANES && !(PACING_STANDS_DOWN_FOR_SEAMS
+				&& INTERLEAVED_DYNAMIC_PARITY && flipsA.size() + flipsB.size() > 0)) {
 			int[] dryA = dryProgress(evenEvents, originA, forward, laneWidth, floors, layoutA,
 				routeA, headA);
 			int[] dryB = dryProgress(oddEvents, originB, forward, laneWidth, floors, layoutB,
 				routeB, headB);
-			int[][] stretches = paceStretches(evenEvents, oddEvents, dryA, dryB, laneWidth);
+			int[][] stretches = paceStretches(evenEvents, oddEvents, dryA, dryB,
+				PACE_AIMS_LEVEL ? 0 : laneWidth);
 			paceA = new Pace(new int[evenEvents.size()], stretches[0]);
 			paceB = new Pace(new int[oddEvents.size()], stretches[1]);
+			dryPaceA = dryA;
+			dryPaceB = dryB;
 		}
 		Set<Integer> tightA = new HashSet<>();
 		Set<Integer> tightB = new HashSet<>();
@@ -1949,6 +1959,13 @@ public final class SongBuilder {
 				// builds all of A and then comes back for B puts half the build outside the
 				// chunks anyone has loaded -- the same reason the straight half-tick lane sorts
 				// its own. Nothing about the machines depends on the order.
+				if (paceA != null) {
+					LAST_PACE = new PaceRecord(
+						evenEvents.stream().mapToInt(EventGroup::time).toArray(),
+						oddEvents.stream().mapToInt(EventGroup::time).toArray(),
+						dryPaceA, dryPaceB, paceA.stretch().clone(), paceB.stretch().clone(),
+						paceA.progress().clone(), paceB.progress().clone());
+				}
 				return alongTheBuild(placements.finish(PasteMode.INTERLEAVED_HALF_TICK, origin,
 					coordAlong(axis, originA),
 					coordAlong(axis, originA) + laneWidth * stepAlong(axis, forward)),
@@ -2017,8 +2034,80 @@ public final class SongBuilder {
 	 * ahead never pads at all: it is ahead because it is carrying more song, and padding it only
 	 * moves the mark the other one is chasing -- the lockstep mistake the straight half-tick mode
 	 * measured at 29 percent of its whole length. See {@link Pace}.</p>
+	 *
+	 * <p>Briefly off on 2026-09-13 for the uncoloured dust it lays, and back on the same day: the
+	 * earshot census (EarshotCensusProbe) showed it is the only drift control a song gets when both
+	 * halves of the tick are too busy for a seam -- sunset, illit, electroman -- and off, those
+	 * drifted furthest.</p>
 	 */
 	static boolean INTERLEAVED_PACES_THE_LANES = true;
+
+	/**
+	 * Whether pacing stands down on a song the parity schedule laid any seam in.
+	 *
+	 * <p>On, which is how it was measured in 2026-08: the schedule balances the lanes and pacing
+	 * only covers songs it could not seam. A song with a seam or two can still drift hundreds of
+	 * blocks between them (HBFS at eight wide, one floor), so off lets pacing chase there too.</p>
+	 */
+	static boolean PACING_STANDS_DOWN_FOR_SEAMS = true;
+
+	/**
+	 * Whether pacing brings the lane that is behind level with its partner, rather than to within a
+	 * lane of path of it.
+	 *
+	 * <p>A lane of tolerance was sized for the 48 blocks a note block carries. Level is the ask
+	 * once two pulses a lane apart already stand further than a player hears them both clearly
+	 * (the earshot census measures at twenty).</p>
+	 */
+	static boolean PACE_AIMS_LEVEL = false;
+
+	/**
+	 * Whether a pace stretch is budgeted and laid as dust refreshed by one-tick repeaters.
+	 *
+	 * <p>Off, the stretch refreshes with a delay-4 repeater after eight dust and the planner allows
+	 * two cells per spare tick, so a wait of one or two repeater ticks can buy nothing -- and that
+	 * is most of the waits in a busy song. Dust costs no time; only the refresh does. On, each spare
+	 * tick is a one-tick repeater and {@link #PACE_WIRE_RUN} dust after it, which is what a redstone
+	 * line can actually keep up with.</p>
+	 */
+	static boolean PACE_BUDGETS_THE_WIRE = false;
+
+	/** Dust a wire-budgeted stretch lays after each refresh. See {@link #PACE_BUDGETS_THE_WIRE}. */
+	static int PACE_WIRE_RUN = 10;
+
+	/**
+	 * The last paced interleaved build's pacing, for probes, or null when the last one did not pace:
+	 * each machine's event times, its dry-walk positions, the stretch it was handed, and the
+	 * positions its real walk recorded. The planner's model of a machine is its dry position plus
+	 * the stretch handed so far; this is how a probe holds that model against the build.
+	 */
+	static PaceRecord LAST_PACE = null;
+
+	record PaceRecord(int[] timesA, int[] timesB, int[] dryA, int[] dryB, int[] stretchA,
+			int[] stretchB, int[] realA, int[] realB) {
+	}
+
+	/** Dust a stretch runs before it takes a refresh repeater. */
+	private static int paceDustRun() {
+		return PACE_BUDGETS_THE_WIRE ? PACE_WIRE_RUN : 8;
+	}
+
+	/** The delay of a stretch's refresh repeater, which is the tick it costs. */
+	private static int paceRefreshDelay() {
+		return PACE_BUDGETS_THE_WIRE ? 1 : 4;
+	}
+
+	/**
+	 * Cells a wait of this many repeater ticks can stretch by, keeping one tick for the chord's own
+	 * trigger. Budgeted as the wire lays it: a refresh per spare tick and a run after each, plus
+	 * half a run off whatever signal the module behind hands on.
+	 */
+	private static int paceCapacity(int wait) {
+		if (!PACE_BUDGETS_THE_WIRE) {
+			return Math.max(0, wait - 1) * 2;
+		}
+		return Math.max(0, wait - 1) * (PACE_WIRE_RUN + 1) + PACE_WIRE_RUN / 2;
+	}
 
 	/**
 	 * Whether the interleaved mode's machines may change parity mid-song.
@@ -2092,7 +2181,7 @@ public final class SongBuilder {
 				long natural = dryA[ia] + addedA;
 				int wait = ia == 0 ? even.get(ia).time()
 					: even.get(ia).time() - even.get(ia - 1).time();
-				int capacity = Math.max(0, wait - 1) * 2;
+				int capacity = paceCapacity(wait);
 				int add = (int)Math.max(0, Math.min(posB - tolerance - natural, capacity));
 				stretchA[ia] = add;
 				addedA += add;
@@ -2102,7 +2191,7 @@ public final class SongBuilder {
 				long natural = dryB[ib] + addedB;
 				int wait = ib == 0 ? odd.get(ib).time()
 					: odd.get(ib).time() - odd.get(ib - 1).time();
-				int capacity = Math.max(0, wait - 1) * 2;
+				int capacity = paceCapacity(wait);
 				int add = (int)Math.max(0, Math.min(posA - tolerance - natural, capacity));
 				stretchB[ib] = add;
 				addedB += add;
@@ -10347,12 +10436,13 @@ public final class SongBuilder {
 							// A stretched chain leans on dust -- those are the columns the pacing is
 							// buying -- and takes a repeater only where the run must be revived; a
 							// chain with nothing to stretch is the old one, a repeater per four ticks.
-							if (!seamMid && event.time() - currentTime > 4
-									&& (stretchLeft == 0 || dustRun >= 8)) {
+							int paceRefresh = stretchLeft > 0 ? paceRefreshDelay() : 4;
+							if (!seamMid && event.time() - currentTime > paceRefresh
+									&& (stretchLeft == 0 || dustRun >= paceDustRun())) {
 								set(placements, lane.pos(), "minecraft:stone");
 								set(placements, lane.pos().above(), "minecraft:repeater[facing="
-									+ repeaterFacing(lane.travel()) + ",delay=4]");
-								currentTime += 4;
+									+ repeaterFacing(lane.travel()) + ",delay=" + paceRefresh + "]");
+								currentTime += paceRefresh;
 								foldSignal = DUST_RANGE;
 								dustRun = 0;
 							} else {
@@ -10460,8 +10550,8 @@ public final class SongBuilder {
 							// fault in the delay chain, which is the same trap parityPad and
 							// pastAnyCorner each cost an afternoon to.
 							placements.placing("paceStretch");
-							if (dustRun >= 8) {
-								if (event.time() - currentTime <= 4) {
+							if (dustRun >= paceDustRun()) {
+								if (event.time() - currentTime <= paceRefreshDelay()) {
 									// No tick left to anchor more dust on: the rest of the stretch
 									// is abandoned rather than owed, the shortfall the straight
 									// mode's mirror accepts for the same reason.
@@ -10470,8 +10560,9 @@ public final class SongBuilder {
 								}
 								set(placements, lane.pos(), "minecraft:stone");
 								set(placements, lane.pos().above(), "minecraft:repeater[facing="
-									+ repeaterFacing(lane.travel()) + ",delay=4]");
-								currentTime += 4;
+									+ repeaterFacing(lane.travel()) + ",delay=" + paceRefreshDelay()
+									+ "]");
+								currentTime += paceRefreshDelay();
 								foldSignal = DUST_RANGE;
 								dustRun = 0;
 							} else {
@@ -10698,12 +10789,13 @@ public final class SongBuilder {
 								* stepAlong(axis, lane.travel()) <= 0) {
 							break;
 						}
-						if (!seamMidElement && event.time() - currentTime > 4
-								&& (stretchLeft == 0 || dustRun >= 8)) {
+						int paceRefresh = stretchLeft > 0 ? paceRefreshDelay() : 4;
+						if (!seamMidElement && event.time() - currentTime > paceRefresh
+								&& (stretchLeft == 0 || dustRun >= paceDustRun())) {
 							set(placements, lane.pos(), "minecraft:stone");
 							set(placements, lane.pos().above(), "minecraft:repeater[facing="
-								+ repeaterFacing(lane.travel()) + ",delay=4]");
-							currentTime += 4;
+								+ repeaterFacing(lane.travel()) + ",delay=" + paceRefresh + "]");
+							currentTime += paceRefresh;
 							foldSignal = DUST_RANGE;
 							dustRun = 0;
 						} else {
@@ -31092,7 +31184,8 @@ public final class SongBuilder {
 			List<Integer> breaches, List<WallBreach> wallBreaches, List<Integer> recesses,
 			Map<String, Integer> padding,
 			int nearWall, int farWall, Map<BlockPos, String> collisions, Set<BlockPos> poweredAt,
-			Map<BlockPos, String> laidBy, Map<BlockPos, Integer> noteTicks, FaultSites faultSites) {
+			Map<BlockPos, String> laidBy, Map<BlockPos, Integer> noteTicks,
+			Map<BlockPos, Integer> noteMachines, FaultSites faultSites) {
 
 		/**
 		 * The width this build actually came out at, which is not always the width that was asked for.
@@ -31422,6 +31515,12 @@ public final class SongBuilder {
 
 		/** Note block positions and the event tick each one belongs to. */
 		private final Map<BlockPos, Integer> notes = new LinkedHashMap<>();
+		/**
+		 * Which machine laid each note block, 0 or 1, or -1 on a plan that never named one. The tint
+		 * without its parity: a note's position and tick cannot say whose it is once a seam has moved
+		 * a machine to the other half of the tick, and the earshot census has to pair the two.
+		 */
+		private final Map<BlockPos, Integer> noteMachine = new java.util.HashMap<>();
 		/**
 		 * Positions that receive direct power, and when.
 		 *
@@ -31814,6 +31913,7 @@ public final class SongBuilder {
 					tailJournal.notesBefore().put(key, notes.get(key));
 				}
 				notes.put(key, time);
+				noteMachine.put(key, laneTint < 0 ? -1 : laneTint / 2);
 			}
 		}
 
@@ -33330,6 +33430,14 @@ public final class SongBuilder {
 			return Map.copyOf(when);
 		}
 
+		/** The machine behind each entry of {@link #noteTicks}, in the same world space. */
+		Map<BlockPos, Integer> noteMachines(int shiftX, int shiftZ) {
+			Map<BlockPos, Integer> whose = new java.util.HashMap<>();
+			notes.keySet().forEach(at -> whose.put(at.offset(shiftX, 0, shiftZ),
+				noteMachine.getOrDefault(at, -1)));
+			return Map.copyOf(whose);
+		}
+
 		/**
 		 * A set of walk positions as a world-space list in a settled order.
 		 *
@@ -33514,6 +33622,7 @@ public final class SongBuilder {
 				List.copyOf(moved), List.copyOf(breaches), landedWalls, List.copyOf(recesses),
 				Map.copyOf(padding), nearWall + shiftX, farWall + shiftX, Map.copyOf(marked),
 				poweredAt(shiftX, shiftZ), laidBy(shiftX, shiftZ), noteTicks(shiftX, shiftZ),
+				noteMachines(shiftX, shiftZ),
 				// Shifted with everything else, because a coordinate that is not one you can walk to is
 				// not worth carrying. The dead line's own two lists are filled in later, by the pass
 				// that reads the blocks back -- it is the only thing that knows where the signal
