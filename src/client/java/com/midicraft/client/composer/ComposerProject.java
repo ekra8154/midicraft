@@ -292,7 +292,12 @@ public record ComposerProject(
 		 * Instruments switched off in the palette, kept with their counts and brackets so that
 		 * switching one back on gives back what it was. Never holds an instrument that is sounding.
 		 */
-		List<Split.Voice> resting
+		List<Split.Voice> resting,
+		/**
+		 * Whether this layer turns its long notes into repeated strikes, and how; null when never
+		 * set, which reads as off. See {@link Sustain}.
+		 */
+		Sustain sustain
 	) {
 		public Layer {
 			name = name == null || name.isBlank() ? "Layer" : name.trim();
@@ -318,13 +323,13 @@ public record ComposerProject(
 		/** Everything but the split, for the callers written before there was one. */
 		public Layer(String name, String instrument, boolean muted, boolean buildEnabled,
 				boolean visible, List<NoteEvent> notes) {
-			this(name, instrument, muted, buildEnabled, visible, notes, null, null, null);
+			this(name, instrument, muted, buildEnabled, visible, notes, null, null, null, null);
 		}
 
 		/** Everything but the counts, for the callers written before there were any. */
 		public Layer(String name, String instrument, boolean muted, boolean buildEnabled,
 				boolean visible, List<NoteEvent> notes, Split split) {
-			this(name, instrument, muted, buildEnabled, visible, notes, split, null, null);
+			this(name, instrument, muted, buildEnabled, visible, notes, split, null, null, null);
 		}
 
 		/**
@@ -414,7 +419,7 @@ public record ComposerProject(
 				List<Layer> stacked = new ArrayList<>(mix.size());
 				for (Split.Voice voice : mix) {
 					stacked.add(new Layer(mix.size() == 1 ? name : name + " (" + voice.instrument() + ")",
-						voice.instrument(), muted, buildEnabled, visible, notes, null, List.of(voice), null));
+						voice.instrument(), muted, buildEnabled, visible, notes, null, List.of(voice), null, null));
 				}
 				return List.copyOf(stacked);
 			}
@@ -434,7 +439,7 @@ public record ComposerProject(
 				if (!covered.isEmpty()) {
 					voices.add(new Layer(name + " (" + voice.instrument() + ")",
 						voice.instrument(), muted, buildEnabled, visible, covered, null,
-						List.of(voice), null));
+						List.of(voice), null, null));
 				}
 			}
 			return List.copyOf(voices);
@@ -493,40 +498,54 @@ public record ComposerProject(
 		}
 
 		public Layer withNotes(List<NoteEvent> value) {
-			return new Layer(name, instrument, muted, buildEnabled, visible, value, split, mix, resting);
+			return new Layer(name, instrument, muted, buildEnabled, visible, value, split, mix, resting, sustain);
 		}
 
 		public Layer withName(String value) {
-			return new Layer(value, instrument, muted, buildEnabled, visible, notes, split, mix, resting);
+			return new Layer(value, instrument, muted, buildEnabled, visible, notes, split, mix, resting, sustain);
 		}
 
 		/** One instrument, sounding once: whatever the layer was stacking, it stops. */
 		public Layer withInstrument(String value) {
-			return new Layer(name, value, muted, buildEnabled, visible, notes, split, null, resting);
+			return new Layer(name, value, muted, buildEnabled, visible, notes, split, null, resting, sustain);
 		}
 
 		public Layer withMuted(boolean value) {
-			return new Layer(name, instrument, value, buildEnabled, visible, notes, split, mix, resting);
+			return new Layer(name, instrument, value, buildEnabled, visible, notes, split, mix, resting, sustain);
 		}
 
 		public Layer withBuildEnabled(boolean value) {
-			return new Layer(name, instrument, muted, value, visible, notes, split, mix, resting);
+			return new Layer(name, instrument, muted, value, visible, notes, split, mix, resting, sustain);
 		}
 
 		public Layer withVisible(boolean value) {
-			return new Layer(name, instrument, muted, buildEnabled, value, notes, split, mix, resting);
+			return new Layer(name, instrument, muted, buildEnabled, value, notes, split, mix, resting, sustain);
 		}
 
 		public Layer withSplit(Split value) {
-			return new Layer(name, instrument, muted, buildEnabled, visible, notes, value, mix, resting);
+			return new Layer(name, instrument, muted, buildEnabled, visible, notes, value, mix, resting, sustain);
 		}
 
 		public Layer withMix(List<Split.Voice> value) {
-			return new Layer(name, instrument, muted, buildEnabled, visible, notes, split, value, resting);
+			return new Layer(name, instrument, muted, buildEnabled, visible, notes, split, value, resting, sustain);
 		}
 
 		public Layer withResting(List<Split.Voice> value) {
-			return new Layer(name, instrument, muted, buildEnabled, visible, notes, split, mix, value);
+			return new Layer(name, instrument, muted, buildEnabled, visible, notes, split, mix, value, sustain);
+		}
+
+		public Layer withSustain(Sustain value) {
+			return new Layer(name, instrument, muted, buildEnabled, visible, notes, split, mix, resting, value);
+		}
+
+		/** Whether this layer's long notes strike again for as long as they last. */
+		public boolean sustains() {
+			return sustain != null && sustain.on();
+		}
+
+		/** The layer's sustain settings, with the defaults standing in for settings never made. */
+		public Sustain sustainOrDefault() {
+			return sustain == null ? Sustain.DEFAULT : sustain;
 		}
 
 		/**
@@ -676,9 +695,9 @@ public record ComposerProject(
 		private Layer withSounding(List<Split.Voice> voices, List<Split.Voice> restingVoices) {
 			return split != null
 				? new Layer(name, instrument, muted, buildEnabled, visible, notes, new Split(voices),
-					null, restingVoices)
+					null, restingVoices, sustain)
 				: new Layer(name, instrument, muted, buildEnabled, visible, notes, null, voices,
-					restingVoices);
+					restingVoices, sustain);
 		}
 
 		private static List<Split.Voice> distinctByInstrument(List<Split.Voice> voices) {
@@ -847,6 +866,124 @@ public record ComposerProject(
 					.comparingInt((Voice voice) -> InstrumentRanges.baseMidi(voice.instrument()))
 					.thenComparing(Voice::instrument))
 				.toList());
+		}
+	}
+
+	/**
+	 * A length a sustain setting is picked in: a redstone tick, a note value, or the finest step
+	 * the song will really play.
+	 */
+	public enum SustainLength {
+		FINEST("Finest"),
+		GAME_TICK("Game tick"),
+		REPEATER_TICK("Repeater tick"),
+		THIRTY_SECOND("1/32"),
+		SIXTEENTH("1/16"),
+		EIGHTH("1/8"),
+		QUARTER("1/4"),
+		HALF("1/2"),
+		BAR("1 bar");
+
+		/** What "Sustain after" offers: every length but Finest, which is a rate and not a length. */
+		public static final List<SustainLength> AFTER_CHOICES = List.of(GAME_TICK, REPEATER_TICK,
+			THIRTY_SECOND, SIXTEENTH, EIGHTH, QUARTER, HALF, BAR);
+		/** What "Strike every" offers. */
+		public static final List<SustainLength> EVERY_CHOICES = List.of(FINEST, GAME_TICK,
+			REPEATER_TICK, THIRTY_SECOND, SIXTEENTH, EIGHTH, QUARTER);
+
+		public final String label;
+
+		SustainLength(String label) {
+			this.label = label;
+		}
+	}
+
+	/**
+	 * How a layer turns long notes into repeated strikes.
+	 *
+	 * <p>A note block cannot hold a note, so a sustained note is that note struck again and again
+	 * for as long as it lasts. {@code after} is how long a note must be before it does that at all
+	 * -- shorter notes stay single strikes -- and {@code every} is how far apart the strikes fall.
+	 * Nothing is stored per note: the strikes are worked out from each note's length whenever
+	 * something needs them, see {@link Strikes}.</p>
+	 */
+	public record Sustain(boolean on, SustainLength after, SustainLength every) {
+		public static final Sustain DEFAULT = new Sustain(false, SustainLength.QUARTER, SustainLength.FINEST);
+
+		public Sustain {
+			after = after == null || after == SustainLength.FINEST ? SustainLength.QUARTER : after;
+			every = every == null ? SustainLength.FINEST : every;
+		}
+
+		public Sustain withOn(boolean value) {
+			return new Sustain(value, after, every);
+		}
+
+		public Sustain withAfter(SustainLength value) {
+			return new Sustain(on, value, every);
+		}
+
+		public Sustain withEvery(SustainLength value) {
+			return new Sustain(on, after, value);
+		}
+	}
+
+	/**
+	 * Where one layer's notes strike again: a grid shared by the whole song, and the length a note
+	 * needs before it sustains at all.
+	 *
+	 * <p>The grid is counted from the song's first note, the same origin the analysis measures the
+	 * redstone grid from, and every note on every layer with the same step shares it. Counting from
+	 * each note's own start would space a note's strikes more evenly and scatter the song's: two
+	 * sustains a tick apart would never strike together, and every strike that shares no time with
+	 * another is one more event a build has to place.</p>
+	 *
+	 * @param origin the composer tick the grid is counted from
+	 * @param step composer ticks between strikes, never below one
+	 * @param after composer ticks a note must last before it strikes again
+	 */
+	public record Strikes(double origin, double step, double after) {
+		public Strikes {
+			step = Math.max(1.0, step);
+		}
+
+		/** Whether a note is long enough to sustain. */
+		public boolean sustained(NoteEvent note) {
+			return note.durationTicks() + 1.0e-6 >= after;
+		}
+
+		/**
+		 * Every tick a note strikes again, in order, from {@code from} to {@code to} inclusive.
+		 *
+		 * <p>The first is the first grid line at least one step after the note starts, and the last
+		 * falls before the note ends, never on it. The note's own start is not one of them: that
+		 * strike is the note.</p>
+		 */
+		public void forEach(NoteEvent note, long from, long to, java.util.function.LongConsumer strike) {
+			if (!sustained(note)) {
+				return;
+			}
+			long start = note.startTick();
+			long end = start + note.durationTicks();
+			long first = (long)Math.ceil((start + step - origin) / step - 1.0e-9);
+			// Floored, and the tick itself checked: a line just under from can round onto it.
+			long window = (long)Math.floor((from - origin) / step);
+			for (long index = Math.max(first, window); ; index++) {
+				long tick = Math.round(origin + index * step);
+				if (tick >= end || tick > to) {
+					return;
+				}
+				if (tick > start && tick >= from) {
+					strike.accept(tick);
+				}
+			}
+		}
+
+		/** How many times a note sounds: its own strike, and every one after it. */
+		public int soundings(NoteEvent note) {
+			int[] count = {1};
+			forEach(note, 0L, Long.MAX_VALUE, tick -> count[0]++);
+			return count[0];
 		}
 	}
 
@@ -2660,6 +2797,133 @@ public record ComposerProject(
 		return List.copyOf(chosen);
 	}
 
+	/**
+	 * How many composer ticks a sustain length is in this song.
+	 *
+	 * @param finest what Finest is in this song, from {@link #finestSustainStep}
+	 */
+	public double sustainTicks(SustainLength length, double finest) {
+		double repeater = SongAnalysis.redstoneTickSpan(this);
+		return switch (length) {
+			case GAME_TICK -> repeater / 2.0;
+			case REPEATER_TICK -> repeater;
+			case THIRTY_SECOND -> ppq / 8.0;
+			case SIXTEENTH -> ppq / 4.0;
+			case EIGHTH -> ppq / 2.0;
+			case QUARTER -> ppq;
+			case HALF -> ppq * 2.0;
+			case BAR -> ppq * 4.0;
+			case FINEST -> finest;
+		};
+	}
+
+	/** Where a layer's notes strike again in this song; see {@link Strikes}. */
+	public Strikes sustainStrikes(Layer layer, double finest) {
+		Sustain settings = layer.sustainOrDefault();
+		return new Strikes(sustainOrigin(), sustainTicks(settings.every(), finest),
+			sustainTicks(settings.after(), finest));
+	}
+
+	/**
+	 * What Finest means in this song: the finest step it is already written at.
+	 *
+	 * <p>A song ready to paste -- nothing off the redstone grid, no gap under a game tick -- is
+	 * already written in redstone ticks, so its finest step is the one its build uses: a repeater
+	 * tick when it builds on one lane, a game tick when it needs two. Interleaved paste makes that
+	 * choice by itself from the same question, whether anything half-ticks, so this follows the
+	 * build without asking which layout was used last.</p>
+	 *
+	 * <p>Any other song has not been written for redstone yet, and its finest step is the finest
+	 * note value its notes already stand on; see {@link #noteGridTicks}.</p>
+	 *
+	 * @param stats this song's analysis; only its grid questions are asked
+	 */
+	public double finestSustainStep(SongAnalysis stats) {
+		if (stats.offGridNotes().isEmpty() && stats.crowdedNotes().isEmpty()) {
+			double repeater = SongAnalysis.redstoneTickSpan(this);
+			return stats.lanesNeeded() == 2 ? repeater / 2.0 : repeater;
+		}
+		return noteGridTicks();
+	}
+
+	/**
+	 * The coarsest note value the song's notes start on: the granularity it is written at.
+	 *
+	 * <p>Tried from the quarter down to the 1/128, with the triplet values between, and measured
+	 * from tick zero where the bars start. A grid holds the song when 98 in every hundred distinct
+	 * starts stand on it, so a few stray notes in a quantized song do not drag the answer down to the
+	 * finest value there is. A performance nothing holds, never quantized, gets a thirty-second
+	 * note.</p>
+	 */
+	public long noteGridTicks() {
+		java.util.TreeSet<Long> starts = new java.util.TreeSet<>();
+		for (Layer layer : layers) {
+			for (NoteEvent note : layer.notes()) {
+				starts.add(note.startTick());
+			}
+		}
+		long fallback = Math.max(1, ppq / 8);
+		if (starts.isEmpty()) {
+			return fallback;
+		}
+		for (int division : new int[] {1, 2, 3, 4, 6, 8, 12, 16, 24, 32}) {
+			if (ppq % division != 0) {
+				continue;
+			}
+			long grid = ppq / division;
+			long on = starts.stream().filter(tick -> tick % grid == 0L).count();
+			if (on * 100L >= starts.size() * 98L) {
+				return grid;
+			}
+		}
+		return fallback;
+	}
+
+	/**
+	 * A sustaining layer with its strikes written out as notes, for whatever plays or measures it.
+	 *
+	 * <p>Each strike is a one-tick note on its grid line, carrying the id, pitch and velocity of the
+	 * note it belongs to. A strike that lands where the layer already has that note is left out --
+	 * the note that was written wins -- and so is a strike on a cell another sustain already struck.
+	 * The layer that comes back no longer sustains, so expanding it again changes nothing, and a
+	 * layer that does not sustain comes back as it is.</p>
+	 */
+	public Layer withSustainsExpanded(Layer layer, double finest) {
+		if (!layer.sustains()) {
+			return layer;
+		}
+		Strikes strikes = sustainStrikes(layer, finest);
+		boolean pitched = layer.pitched();
+		Set<Long> taken = new java.util.HashSet<>();
+		for (NoteEvent note : layer.notes()) {
+			taken.add(sustainCell(note.startTick(), pitched ? note.midiNote() : 0));
+		}
+		List<NoteEvent> expanded = new ArrayList<>(layer.notes());
+		for (NoteEvent note : layer.notes()) {
+			strikes.forEach(note, 0L, Long.MAX_VALUE, tick -> {
+				if (taken.add(sustainCell(tick, pitched ? note.midiNote() : 0))) {
+					expanded.add(new NoteEvent(note.id(), note.midiNote(), tick, 1L, note.velocity()));
+				}
+			});
+		}
+		return layer.withNotes(expanded).withSustain(null);
+	}
+
+	private static long sustainCell(long tick, int midiNote) {
+		return tick * 128L + midiNote;
+	}
+
+	/** The song's first note, which the sustain grid is counted from. */
+	private long sustainOrigin() {
+		long first = Long.MAX_VALUE;
+		for (Layer layer : layers) {
+			if (!layer.notes().isEmpty()) {
+				first = Math.min(first, layer.notes().get(0).startTick());
+			}
+		}
+		return first == Long.MAX_VALUE ? 0L : first;
+	}
+
 	private static List<Layer> normalizeLayers(List<Layer> source) {
 		List<Layer> normalized = new ArrayList<>();
 		if (source != null) {
@@ -2667,7 +2931,7 @@ public record ComposerProject(
 				if (layer != null && normalized.size() < MAX_LAYERS) {
 					normalized.add(new Layer(layer.name(), layer.instrument(), layer.muted(),
 						layer.buildEnabled(), layer.visible(), layer.notes(), layer.split(), layer.mix(),
-						layer.resting()));
+						layer.resting(), layer.sustain()));
 				}
 			}
 		}

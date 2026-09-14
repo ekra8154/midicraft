@@ -629,6 +629,11 @@ public final class ComposerScreen extends Screen {
 	private long resizeDelta;
 	/** How many pixels either side of a note's far end take hold of it. */
 	private static final int TRAIL_GRAB_PIXELS = 3;
+	/** The tick drawn on a sustained trail at every strike. */
+	private static final int SUSTAIN_TICK_COLOR = 0xFFFFD27A;
+	/** The composition {@link #cachedFinest} was worked out for. */
+	private ComposerProject cachedFinestProject;
+	private double cachedFinest;
 	private boolean selectingBox;
 	private long horizontalEdgeSince;
 	private long verticalEdgeSince;
@@ -2237,6 +2242,7 @@ public final class ComposerScreen extends Screen {
 			case MERGE_SELECTED -> "Merge " + selected + " layers (Ctrl+E)";
 			case DELETE_SELECTED -> "Delete " + layerCountLabel(Math.max(1, selected));
 			case SNAP_TO_START -> "Snap " + layerCountLabel(Math.max(1, selected)) + " to song start";
+			case SUSTAIN -> allSustain(menuRow()) ? "Disable sustained notes" : action.label;
 			default -> action.label;
 		};
 	}
@@ -2271,6 +2277,7 @@ public final class ComposerScreen extends Screen {
 				.orElse(0) < project().layers().size() - 1;
 			case MOVE_NOTES_HERE -> !selectedNotes.isEmpty();
 			case SPLIT_MELODIC, SPLIT_PERCUSSION, SPLIT_SFX -> true;
+			case SUSTAIN, SUSTAIN_SETTINGS -> true;
 			// Greyed out when nothing acted on wears brackets, so the row answers "is any of this
 			// split" the way Move up answers "is there anywhere to go".
 			case UNSPLIT -> layersToEdit(menuRow()).stream()
@@ -2309,6 +2316,12 @@ public final class ComposerScreen extends Screen {
 				layer -> layer.withSplit(ComposerProject.Split.soundEffects()));
 			case UNSPLIT -> updateLayers("put the layer back on one instrument", menuRow(),
 				layer -> layer.withSplit(null));
+			case SUSTAIN -> {
+				boolean on = !allSustain(menuRow());
+				updateLayers(on ? "enable sustained notes" : "disable sustained notes", menuRow(),
+					layer -> layer.withSustain(layer.sustainOrDefault().withOn(on)));
+			}
+			case SUSTAIN_SETTINGS -> openSustainSettings(menuRow());
 			case SELECT_ALL -> {
 				selectedLayers.clear();
 				for (int index = 0; index < project().layers().size(); index++) {
@@ -2319,6 +2332,45 @@ public final class ComposerScreen extends Screen {
 		layersChanged();
 		rebuildMoveLayerButtons();
 		return true;
+	}
+
+	/** Whether every layer a menu row acts on already sustains, which makes that row an off switch. */
+	private boolean allSustain(int row) {
+		var acting = layersToEdit(row);
+		return !acting.isEmpty()
+			&& acting.stream().allMatch(index -> project().layers().get(index).sustains());
+	}
+
+	/** Opens the sustain settings for the layers a menu row acts on, starting from that row's own. */
+	private void openSustainSettings(int row) {
+		if (row < 0 || row >= project().layers().size()) {
+			return;
+		}
+		ComposerProject.Sustain start = project().layers().get(row).sustainOrDefault();
+		int count = layersToEdit(row).size();
+		minecraft.gui.setScreen(new SustainSettingsScreen(this, start, count, chosen -> {
+			updateLayers("change sustain settings", row, layer -> layer.withSustain(
+				layer.sustainOrDefault().withAfter(chosen.after()).withEvery(chosen.every())));
+			layersChanged();
+		}));
+	}
+
+	/** Where a layer's notes strike again as the editor shows and plays it. */
+	private ComposerProject.Strikes editorStrikes(ComposerProject song, Layer layer) {
+		return song.sustainStrikes(layer, finestSustainStep());
+	}
+
+	/**
+	 * The song's Finest, worked out once an edit rather than once a frame: it reads every note's
+	 * start, and the roll asks for it on every sustaining layer it draws.
+	 */
+	private double finestSustainStep() {
+		ComposerProject current = project();
+		if (cachedFinestProject != current) {
+			cachedFinestProject = current;
+			cachedFinest = current.finestSustainStep(projectStats());
+		}
+		return cachedFinest;
 	}
 
 	private void extractToolbarMenu(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
@@ -3323,6 +3375,14 @@ public final class ComposerScreen extends Screen {
 			case UNSPLIT -> "Takes the brackets off and puts the layer back on its single "
 				+ "instrument. Notes keep their written pitches, so anything outside F#3-F#5 "
 				+ "shows out of range again.";
+			case SUSTAIN -> "Makes this layer's long notes strike again and again for as long as "
+				+ "they last, which is how a note block holds a note. Their trails turn bright, with "
+				+ "a tick at every strike. Sustain settings chooses how long a note must be and how "
+				+ "often it strikes. With several layers selected it changes all of them.";
+			case SUSTAIN_SETTINGS -> "Chooses how long a note must last before it sustains, and how "
+				+ "often a sustained note strikes. Finest follows the song: on a song ready to paste, "
+				+ "a repeater tick when it builds on one lane and a game tick when it needs two; on "
+				+ "any other, the finest note value its notes are already written on.";
 		};
 	}
 
@@ -5014,6 +5074,10 @@ public final class ComposerScreen extends Screen {
 			// to the harp window, so a note at F#2 wears no red bar while a bass voice covers it.
 			boolean rangeMatters = layer.pitched();
 			List<NoteEvent> notes = layer.notes();
+			// A sustaining layer's long notes have live trails: bright, drawn whether trails are
+			// shown or not, with a tick at every strike. They sound now, so hiding them would hide
+			// part of the song.
+			ComposerProject.Strikes strikes = layer.sustains() ? editorStrikes(shown, layer) : null;
 			for (int noteIndex = lowerBoundStart(notes, firstVisibleTick);
 					noteIndex < notes.size(); noteIndex++) {
 				NoteEvent note = notes.get(noteIndex);
@@ -5027,7 +5091,8 @@ public final class ComposerScreen extends Screen {
 				}
 				int left = tickX(note.startTick());
 				int right = left + noteWidth;
-				int trailEnd = showTrails ? trailEndX(note, left, noteWidth) : right;
+				boolean live = strikes != null && strikes.sustained(note);
+				int trailEnd = showTrails || live ? trailEndX(note, left, noteWidth) : right;
 				if (Math.max(right, trailEnd) <= rollX || left >= rollRight) {
 					continue;
 				}
@@ -5040,10 +5105,14 @@ public final class ComposerScreen extends Screen {
 					// Drawn now, before a single note, so every trail sits behind every note. It is
 					// how long the note lasts, and until a layer sustains it that is all it is: dark,
 					// thin, and never in the way of a strike -- its own or anybody else's.
-					int trailTop = top + (rowHeight - 2 - trailHeight) / 2;
-					graphics.fill(Math.max(right, rollX), trailTop, Math.min(trailEnd, rollRight),
-						trailTop + trailHeight,
-						trailColor(color, anySelected && selectedNotes.contains(note.id())));
+					if (live) {
+						extractLiveTrail(graphics, note, strikes, right, trailEnd, top, bottom, color);
+					} else {
+						int trailTop = top + (rowHeight - 2 - trailHeight) / 2;
+						graphics.fill(Math.max(right, rollX), trailTop, Math.min(trailEnd, rollRight),
+							trailTop + trailHeight,
+							trailColor(color, anySelected && selectedNotes.contains(note.id())));
+					}
 				}
 				if (right <= rollX) {
 					// Only its trail reaches the roll.
@@ -5105,6 +5174,31 @@ public final class ComposerScreen extends Screen {
 		return (int)Math.max(left + noteWidth, x);
 	}
 
+	/**
+	 * A sustained note's trail: solid in the layer's colour, with a tick at every strike.
+	 *
+	 * <p>Ticks closer together than three pixels are left off, and the bar reads as solid -- which
+	 * at that zoom is what a note striking on every tick looks like.</p>
+	 */
+	private void extractLiveTrail(GuiGraphicsExtractor graphics, NoteEvent note,
+			ComposerProject.Strikes strikes, int right, int trailEnd, int top, int bottom, int color) {
+		int rollRight = rollX + rollWidth;
+		int inset = (bottom - top) / 4;
+		graphics.fill(Math.max(right, rollX), top + inset, Math.min(trailEnd, rollRight), bottom - inset,
+			0xFF000000 | color);
+		if (strikes.step() / ticksPerPixel < 3.0) {
+			return;
+		}
+		long from = Math.max(0L, horizontalScroll);
+		long to = horizontalScroll + (long)Math.ceil(rollWidth * ticksPerPixel);
+		strikes.forEach(note, from, to, tick -> {
+			int x = tickX(tick);
+			if (x >= rollX && x < rollRight) {
+				graphics.fill(x, top, x + 1, bottom, SUSTAIN_TICK_COLOR);
+			}
+		});
+	}
+
 	/** A dormant trail: the layer's colour, dimmed, and a little less so behind a selected note. */
 	private static int trailColor(int color, boolean selected) {
 		return (selected ? 0x99000000 : 0x55000000) | (color & 0x00FFFFFF);
@@ -5127,7 +5221,7 @@ public final class ComposerScreen extends Screen {
 		int noteWidth = noteWidth();
 		long cursorTick = Math.round(horizontalScroll + (mouseX - rollX) * ticksPerPixel);
 		long grab = Math.round((noteWidth + TRAIL_GRAB_PIXELS) * ticksPerPixel) + 1L;
-		long reach = showTrails ? projectStats().maximumNoteDuration() : 0L;
+		long reach = projectStats().maximumNoteDuration();
 		int midi = mouseMidi(mouseY);
 		List<Integer> reachable = selectionLayers();
 		List<Integer> order = noteDrawOrder(project());
@@ -5141,6 +5235,7 @@ public final class ComposerScreen extends Screen {
 				continue;
 			}
 			List<NoteEvent> notes = layer.notes();
+			ComposerProject.Strikes strikes = layer.sustains() ? editorStrikes(project(), layer) : null;
 			for (int index = lowerBoundStart(notes, Math.max(0L, cursorTick - reach - grab));
 					index < notes.size(); index++) {
 				NoteEvent note = notes.get(index);
@@ -5151,7 +5246,8 @@ public final class ComposerScreen extends Screen {
 					continue;
 				}
 				int left = tickX(note.startTick());
-				int end = showTrails ? trailEndX(note, left, noteWidth) : left + noteWidth;
+				int end = showTrails || strikes != null && strikes.sustained(note)
+					? trailEndX(note, left, noteWidth) : left + noteWidth;
 				if (Math.abs(mouseX - end) <= TRAIL_GRAB_PIXELS && mouseX >= left + 2) {
 					return new NoteHit(layerIndex, note);
 				}
@@ -5215,12 +5311,15 @@ public final class ComposerScreen extends Screen {
 			lines.add(Component.literal("Note block pitch " + note.noteBlockPitch())
 				.withStyle(net.minecraft.ChatFormatting.GRAY));
 			long sustained = note.durationTicks();
-			if (sustained > project().ppq() / 4L) {
+			ComposerProject.Strikes strikes = noteLayer.sustains() ? editorStrikes(project(), noteLayer) : null;
+			boolean live = strikes != null && strikes.sustained(note);
+			if (live || sustained > project().ppq() / 4L) {
 				double seconds = sustained * project().tempoMicrosPerQuarter()
 					/ (double)project().ppq() / 1_000_000.0 / timescaleFactor();
-				lines.add(Component.literal(String.format(java.util.Locale.ROOT,
-						"Lasts %.2fs - struck once", seconds))
-					.withStyle(net.minecraft.ChatFormatting.DARK_GRAY));
+				int times = live ? strikes.soundings(note) : 1;
+				lines.add(Component.literal(String.format(java.util.Locale.ROOT, "Lasts %.2fs - %s",
+						seconds, times == 1 ? "struck once" : "strikes " + times + " times"))
+					.withStyle(live ? net.minecraft.ChatFormatting.GOLD : net.minecraft.ChatFormatting.DARK_GRAY));
 			}
 		} else {
 			int shift = octaveShiftIntoRange(note.midiNote());
@@ -8149,7 +8248,10 @@ public final class ComposerScreen extends Screen {
 			// Played from the same expansion the build reads, so a split layer previews as exactly
 			// the note blocks it will place: a doubled note sounds twice, an uncovered note not at
 			// all, and each voice's sample plays at the pitch value that sounds as written.
-			for (Layer voiceLayer : layer.buildVoices()) {
+			// A sustaining layer plays its strikes as well as its notes, from the same expansion the
+			// tick marks are drawn from.
+			Layer heard = project().withSustainsExpanded(layer, finestSustainStep());
+			for (Layer voiceLayer : heard.buildVoices()) {
 				PreviewInstrument instrument = PreviewInstrument.byId(voiceLayer.instrument());
 				if (!instrument.playable()) {
 					continue;
@@ -10248,6 +10350,8 @@ public final class ComposerScreen extends Screen {
 		SPLIT_PERCUSSION("Split layer: percussion"),
 		SPLIT_SFX("Split layer: sound effects"),
 		UNSPLIT("Back to one instrument"),
+		SUSTAIN("Enable sustained notes"),
+		SUSTAIN_SETTINGS("Sustain settings..."),
 		// Last, and not next to Merge. The two read alike in a hurry and only one of them can be
 		// reached by a slip of the hand from a row you meant to rename.
 		DELETE_SELECTED("Delete selected");
