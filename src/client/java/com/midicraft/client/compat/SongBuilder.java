@@ -10672,6 +10672,22 @@ public final class SongBuilder {
 				seamFeedNext = null;
 				seamOfEvent = index;
 			}
+			// The module behind ended on a cell only a repeater reads: the repeater goes down now,
+			// before the wait lays anything in front of it. See SOFT_TIP_GETS_ITS_REPEATER_FIRST.
+			if (SOFT_TIP_GETS_ITS_REPEATER_FIRST && layout.ultra() && route.foldsWaits()
+					&& railPhase < 0 && placements.softTip() && event.time() - currentTime >= 2
+					&& seamNext != 0 && !lane.cornerAt(0)) {
+				placements.placing("repeaterOffASoftTip");
+				placements.powered(lane.pos(), "minecraft:stone", NO_BLANK);
+				set(placements, lane.pos().above(), "minecraft:repeater[facing="
+					+ repeaterFacing(lane.travel()) + ",delay=1]");
+				currentTime += 1;
+				lane = lane.ahead(1);
+				tipSignal = DUST_RANGE;
+				placements.softTip(false);
+				laneStarted = true;
+				placements.padded("softTipRepeaterFirst");
+			}
 			if (layout.ultra() && route.foldsWaits() && railPhase < 0) {
 				int foldSignal = tipSignal;
 				boolean folded = false;
@@ -17599,6 +17615,23 @@ public final class SongBuilder {
 	 * the build says so, as it did.</p>
 	 */
 	static boolean RAIL_TIP_IS_SOFT = true;
+
+	/**
+	 * Whether a module that ended on a cell only a repeater reads gets that repeater as the very
+	 * next cell, before anything else the wait would lay in front of it.
+	 *
+	 * <p>The user's rule, from moonlight at forty wide over five floors: a stacked bus with a
+	 * simple tail of three, its note-block middle lit by the handover and by nothing else, and the
+	 * wait's dust laid straight after it -- wire, note, wire -- with the wait's repeater carried
+	 * eleven cells on, past the corner. Five sites lay the first cell after a module (the stretch,
+	 * the bend walk-out, the staircase crossing, the delay chain, the pads) and each had to remember
+	 * the soft middle for itself. Now none of them has to: at the top of the event the repeater goes
+	 * down first, one tick off the wait, and whatever is laid after it is laid after a repeater.
+	 * Only where the wait has a tick to spare -- a wait of one is the chord's own trigger, which
+	 * reads the middle itself -- and not where a seam element is about to open with its own
+	 * repeater, nor on a corner, where no repeater may stand.</p>
+	 */
+	static boolean SOFT_TIP_GETS_ITS_REPEATER_FIRST = true;
 
 	/** What the last pad spent on a repeater at its tip, for the trigger after it to hold one less. */
 	private static int spentOnTheTip;
