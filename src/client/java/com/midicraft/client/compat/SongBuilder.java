@@ -1839,8 +1839,11 @@ public final class SongBuilder {
 		// alone reaches 13, and pacing on top of the schedule reaches 11 -- two builds, for 380
 		// to 460 cells of dust per build and every dead line the mode has. So the dust stands
 		// down where the schedule is running, and comes back the moment it is not.
-		if (INTERLEAVED_PACES_THE_LANES && !(PACING_STANDS_DOWN_FOR_SEAMS
-				&& INTERLEAVED_DYNAMIC_PARITY && flipsA.size() + flipsB.size() > 0)) {
+		boolean paced = INTERLEAVED_PACES_THE_LANES && !(PACING_STANDS_DOWN_FOR_SEAMS
+			&& INTERLEAVED_DYNAMIC_PARITY && flipsA.size() + flipsB.size() > 0);
+		// The joint walk needs no dry walk: its stretches are decided in the walks themselves,
+		// against positions the build really has. See INTERLEAVED_JOINT_WALK.
+		if (paced && !INTERLEAVED_JOINT_WALK) {
 			int[] dryA = dryProgress(evenEvents, originA, forward, laneWidth, floors, layoutA,
 				routeA, headA);
 			int[] dryB = dryProgress(oddEvents, originB, forward, laneWidth, floors, layoutB,
@@ -1894,29 +1897,74 @@ public final class SongBuilder {
 			}
 			boolean walkingB = false;
 			try {
-				placements.laneTint(0, Math.floorMod(gtA.get(0).time(), 2));
-				placements.hardInnerWalls(hardA);
-				placements.softEvents(softA);
-				walkRouted(evenEvents, originA, forward, laneWidth, floors, placements, layoutA,
-					routeA, headA, tightA, paceA, turnBeforeA);
-				placements.stopWatchingLegWalls();
-				BlockPos inputA = placements.firstRepeater();
-				int laidByA = placements.laidCells();
-				// The boundary in the turn list, for the same reason the cell count is taken here:
-				// from the next line on, everything recorded belongs to the other machine.
-				placements.padded(MACHINE_A_TURNS, placements.turnsSoFar());
-				// A fresh corridor: nothing about machine B's opening follows from machine A's last
-				// cell, least of all how much dust has gone down since a repeater it is not wired to.
-				placements.startFreshRun();
-				// And everything from here is machine B's, which is how a marked paste tells the
-				// two apart on the ground.
-				placements.laneTint(1, Math.floorMod(gtB.get(0).time(), 2));
-				walkingB = true;
-				placements.hardInnerWalls(hardB);
-				placements.softEvents(softB);
-				walkRouted(oddEvents, originB, forward, laneWidth, floors, placements,
-					layoutB, routeB, headB, tightB, paceB, turnBeforeB);
-				placements.stopWatchingLegWalls();
+				BlockPos inputA;
+				BlockPos inputB;
+				if (paced && INTERLEAVED_JOINT_WALK) {
+					// Both machines on one plan, taking turns in the order of the song, each pacing
+					// itself against where the other really stands. Each walker's context is set
+					// up here and handed to the baton, which swaps it in whenever that walker
+					// runs. See Baton.
+					placements.laneTint(0, Math.floorMod(gtA.get(0).time(), 2));
+					placements.hardInnerWalls(hardA);
+					placements.softEvents(softA);
+					Object stateA = placements.snapshot();
+					placements.laneTint(1, Math.floorMod(gtB.get(0).time(), 2));
+					placements.hardInnerWalls(hardB);
+					placements.softEvents(softB);
+					Object stateB = placements.snapshot();
+					Baton baton = new Baton(placements, stateA, stateB);
+					Pace jointA = new Pace(new int[evenEvents.size()], new int[evenEvents.size()],
+						new boolean[evenEvents.size()], baton, 0);
+					Pace jointB = new Pace(new int[oddEvents.size()], new int[oddEvents.size()],
+						new boolean[oddEvents.size()], baton, 1);
+					paceA = jointA;
+					paceB = jointB;
+					try {
+						baton.run(
+							() -> walkRouted(evenEvents, originA, forward, laneWidth, floors,
+								placements, layoutA, routeA, headA, tightA, jointA, turnBeforeA),
+							() -> walkRouted(oddEvents, originB, forward, laneWidth, floors,
+								placements, layoutB, routeB, headB, tightB, jointB, turnBeforeB),
+							evenEvents.get(0).time(), oddEvents.get(0).time());
+					} catch (RuntimeException failed) {
+						// Whose walk failed, for the catches below, which settle that machine's
+						// turns and walls and walk both again.
+						walkingB = baton.failedMachine() == 1;
+						throw failed;
+					}
+					placements.stopWatchingLegWalls();
+					// The turn list is handed out with A's turns first whatever order they were
+					// walked in, so the boundary is A's count. See PlacementPlan.turnsByMachine.
+					placements.padded(MACHINE_A_TURNS, placements.turnsOf(0));
+					inputA = placements.firstRepeaterOf(0);
+					inputB = placements.firstRepeaterOf(1);
+				} else {
+					placements.laneTint(0, Math.floorMod(gtA.get(0).time(), 2));
+					placements.hardInnerWalls(hardA);
+					placements.softEvents(softA);
+					walkRouted(evenEvents, originA, forward, laneWidth, floors, placements, layoutA,
+						routeA, headA, tightA, paceA, turnBeforeA);
+					placements.stopWatchingLegWalls();
+					inputA = placements.firstRepeater();
+					int laidByA = placements.laidCells();
+					// The boundary in the turn list, for the same reason the cell count is taken
+					// here: from the next line on, everything recorded belongs to the other machine.
+					placements.padded(MACHINE_A_TURNS, placements.turnsSoFar());
+					// A fresh corridor: nothing about machine B's opening follows from machine A's
+					// last cell, least of all how much dust has gone down since a repeater it is
+					// not wired to.
+					placements.startFreshRun();
+					// And everything from here is machine B's, which is how a marked paste tells
+					// the two apart on the ground.
+					placements.laneTint(1, Math.floorMod(gtB.get(0).time(), 2));
+					walkingB = true;
+					placements.hardInnerWalls(hardB);
+					placements.softEvents(softB);
+					walkRouted(oddEvents, originB, forward, laneWidth, floors, placements,
+						layoutB, routeB, headB, tightB, paceB, turnBeforeB);
+					placements.stopWatchingLegWalls();
+					inputB = placements.firstRepeaterAfter(laidByA);
+				}
 				// A collision the walk recorded rather than threw -- under DEBUG_PASTE, which is how
 				// every marked paste and its preview plan, none is thrown -- is walked again with a
 				// turn forced in front of its event, once, the same as a thrown one below.
@@ -1941,7 +1989,6 @@ public final class SongBuilder {
 					// {@link #feedTarget}: a machine that turns before it lays a module stands its
 					// first repeater on the far side of the bend, reading across the rows, and a
 					// feed laid to the repeater's own row delivers to its side.
-					BlockPos inputB = placements.firstRepeaterAfter(laidByA);
 					BlockPos targetA = feedTarget(placements, forward, inputA);
 					BlockPos targetB = feedTarget(placements, forward, inputB);
 					addTwoLaneInput(placements, forward, targetA, targetB,
@@ -1951,8 +1998,7 @@ public final class SongBuilder {
 						targetB != null && !targetB.equals(inputB));
 				} else {
 					addStarter(placements, forward, inputA);
-					addStarter(placements, forward,
-						placements.firstRepeaterAfter(laidByA));
+					addStarter(placements, forward, inputB);
 				}
 				// Both machines pasted together rather than one whole and then the other. They
 				// stand a lane pitch apart and a player walks between them, so a stream that
@@ -8104,19 +8150,23 @@ public final class SongBuilder {
 					}
 				} else {
 					List<EventNote> handedOn = new ArrayList<>();
+					// Never shorter than the near half here -- a plain cut is chosen because the
+					// chord does not fit -- but clamped like the fallback below, so a chord that
+					// somehow is cannot throw out of a subList.
+					int nearNotes = Math.min(near, chord.size());
 					cursor = HEADED_CUT_FALLS_TO_PLAIN && NEAR_HALF_KEEPS_ITS_NOTES_FOR_THE_WIRE
 						? addPlainNearHalf(placements, trigger.cursor(), travel, depth,
-							trigger.triggerDelay(), chord, near, Math.max(1, room - 1), splitCells,
-							handedOn)
+							trigger.triggerDelay(), chord, nearNotes, Math.max(1, room - 1),
+							splitCells, handedOn)
 						: HEADED_CUT_FALLS_TO_PLAIN
 						? addSplitNearHalf(placements, trigger.cursor(), travel, depth,
-							trigger.triggerDelay(), chord.subList(0, near), Math.max(1, room - 1),
-							handedOn)
+							trigger.triggerDelay(), chord.subList(0, nearNotes),
+							Math.max(1, room - 1), handedOn)
 						: addSplitEventModule(placements, trigger.cursor(), travel, depth,
-							trigger.triggerDelay(), chord.subList(0, near));
+							trigger.triggerDelay(), chord.subList(0, nearNotes));
 					List<EventNote> farRest = new ArrayList<>(handedOn);
-					if (near < chord.size()) {
-						farRest.addAll(chord.subList(near, chord.size()));
+					if (nearNotes < chord.size()) {
+						farRest.addAll(chord.subList(nearNotes, chord.size()));
 					}
 					far = farRest;
 				}
@@ -8172,19 +8222,24 @@ public final class SongBuilder {
 					placements.padded("cutHeadFellToPlain");
 					headed = null;
 					List<EventNote> handedOn = new ArrayList<>();
+					// A headed cut is chosen by the staircase, not by the chord's size, so the
+					// chord may be shorter than the near half it falls back to: eleven notes in a
+					// room of seven (illit at eight wide over two floors) asked for twelve and
+					// threw. The whole chord goes in the near half, and nothing crosses.
+					int nearNotes = Math.min(near, chord.size());
 					cursor = HEADED_CUT_FALLS_TO_PLAIN && NEAR_HALF_KEEPS_ITS_NOTES_FOR_THE_WIRE
 						? addPlainNearHalf(placements, trigger.cursor(), travel, depth,
-							trigger.triggerDelay(), chord, near, Math.max(1, room - 1), splitCells,
-							handedOn)
+							trigger.triggerDelay(), chord, nearNotes, Math.max(1, room - 1),
+							splitCells, handedOn)
 						: HEADED_CUT_FALLS_TO_PLAIN
 						? addSplitNearHalf(placements, trigger.cursor(), travel, depth,
-							trigger.triggerDelay(), chord.subList(0, near), Math.max(1, room - 1),
-							handedOn)
+							trigger.triggerDelay(), chord.subList(0, nearNotes),
+							Math.max(1, room - 1), handedOn)
 						: addSplitEventModule(placements, trigger.cursor(), travel, depth,
-							trigger.triggerDelay(), chord.subList(0, near));
+							trigger.triggerDelay(), chord.subList(0, nearNotes));
 					List<EventNote> farRest = new ArrayList<>(handedOn);
-					if (near < chord.size()) {
-						farRest.addAll(chord.subList(near, chord.size()));
+					if (nearNotes < chord.size()) {
+						farRest.addAll(chord.subList(nearNotes, chord.size()));
 					}
 					far = farRest;
 					}
@@ -10092,7 +10147,241 @@ public final class SongBuilder {
 	 * only moves the mark the other machine is chasing, which is the lockstep mistake the straight
 	 * half-tick mode measured at 29 percent of its whole length.</p>
 	 */
-	record Pace(int[] progress, int[] stretch) {
+	record Pace(int[] progress, int[] stretch, boolean[] asked, Baton baton, int machine) {
+		/** The open-loop pacing: stretches planned ahead of the walk, no partner to ask. */
+		Pace(int[] progress, int[] stretch) {
+			this(progress, stretch, null, null, -1);
+		}
+	}
+
+	/**
+	 * Whether the interleaved mode walks its two machines together, in the order their events fall
+	 * in the song, so that each pacing decision is taken against where the partner really stands.
+	 *
+	 * <p>Off, the machines are walked one after the other and pacing is planned ahead of both from
+	 * a dry walk of each: a model of where every event would land. The real walk does not land
+	 * there -- turns, staircases and refused shapes move every event after them -- and the error
+	 * grows with the very stretch the plan adds, so the plan pads toward positions the build never
+	 * has. Measured 2026-09-13 on sunset at eight wide: the plan believed it had closed the two
+	 * lanes to seven cells while the build stood them 259 apart, and every attempt to pace harder
+	 * (level, or wire-budgeted) came out further apart than pacing gently.</p>
+	 *
+	 * <p>On, the walks take turns on one plan through a {@link Baton}: whichever machine's next
+	 * event comes first in the song walks it, then hands over. A machine deciding its wait sees the
+	 * column its partner's last chord actually sounded from and the column it stands on itself,
+	 * and pads exactly the difference, capped by what its wait can carry. There is no model to be
+	 * wrong, and no dry walk to run.</p>
+	 */
+	static boolean INTERLEAVED_JOINT_WALK = true;
+
+	/**
+	 * Columns a jointly-walked machine may stand behind its partner's last chord without padding.
+	 *
+	 * <p>Nought is level, and it is safe to aim for here where the open-loop planner needed a whole
+	 * lane: a machine aims its chord at the column the partner's last chord started from, not at
+	 * the partner's cursor, so two level machines never take turns padding a chord's length after
+	 * each other -- the lockstep the straight half-tick mode measured at 29 percent of its own
+	 * length.</p>
+	 */
+	static int JOINT_PACE_TOLERANCE = 0;
+
+	/** Thrown inside a walker whose partner failed, to unwind it; never seen outside the baton. */
+	static final class WalkAbandoned extends RuntimeException {
+		private static final long serialVersionUID = 1L;
+
+		WalkAbandoned() {
+			super("the partner's walk failed, so this one is abandoned", null, false, false);
+		}
+	}
+
+	/**
+	 * Two walks taking turns on one plan, in the order their events fall in the song.
+	 *
+	 * <p>{@link #walkRouted} is one machine's walk from its first event to its last, and it keeps
+	 * everything it knows on its own stack. Two of them cannot be merged into one loop without
+	 * rewriting the walk, and the plan they share carries the current walker's context -- soft
+	 * tips, rail seeds, turn and wall watches -- in the same object as the world. So each walk runs
+	 * on a thread of its own and this hands one baton between them: a walker arriving at an event
+	 * parks until its event is the earliest unwalked one in the song, and the plan's walker context
+	 * is swapped at every handover. Exactly one walker runs at any moment, so there is no
+	 * concurrency in the plan, only a suspended stack; the threads are the coroutine Java does not
+	 * have.</p>
+	 *
+	 * <p>The pacing decision lives here because here is the only place both machines' real
+	 * positions exist at once: {@link #laid} records the column a machine's chord sounded from, and
+	 * {@link #arrive} hands the partner's last such column to whoever is about to decide a wait.</p>
+	 *
+	 * <p>A walker that throws fails the whole pass: the exception is kept, the other walker is
+	 * woken with {@link WalkAbandoned} to unwind, and {@link #run} rethrows the real one on the
+	 * driver's thread so the rewalk loop catches it exactly as it did when the walks ran one after
+	 * the other.</p>
+	 */
+	static final class Baton {
+		private static final int NOT_ARRIVED = Integer.MIN_VALUE;
+
+		private final PlacementPlan placements;
+		private final Object[] states = new Object[2];
+		private final int[] nextTime = {NOT_ARRIVED, NOT_ARRIVED};
+		private final boolean[] done = new boolean[2];
+		/** Where each machine's last chord sounded from, in path columns, or -1 before its first. */
+		private final int[] lastChord = {-1, -1};
+		private int running = -1;
+		private Throwable failure;
+		private int failedMachine = -1;
+		private boolean abandoned;
+
+		Baton(PlacementPlan placements, Object stateA, Object stateB) {
+			this.placements = placements;
+			states[0] = stateA;
+			states[1] = stateB;
+		}
+
+		/** Which machine may walk now: the one whose next event is earlier, A on a tie. */
+		private int turn() {
+			if (abandoned) {
+				return -1;
+			}
+			if (done[0]) {
+				return done[1] ? -1 : 1;
+			}
+			if (done[1]) {
+				return 0;
+			}
+			if (nextTime[0] == NOT_ARRIVED || nextTime[1] == NOT_ARRIVED) {
+				return -1;
+			}
+			return nextTime[1] < nextTime[0] ? 1 : 0;
+		}
+
+		/**
+		 * Machine {@code machine} is at an event at {@code time}, standing at {@code progressNow}
+		 * path columns; parks until it is that machine's turn, then hands it the column its
+		 * partner's last chord sounded from, or -1 where the partner has none to give -- nothing
+		 * laid yet, or finished, in which case there is nothing left to stay level with.
+		 */
+		synchronized int arrive(int machine, int time, int progressNow) {
+			if (running == machine) {
+				states[machine] = placements.snapshot();
+				running = -1;
+			}
+			nextTime[machine] = time;
+			notifyAll();
+			while (turn() != machine) {
+				if (abandoned) {
+					throw new WalkAbandoned();
+				}
+				try {
+					wait();
+				} catch (InterruptedException interrupted) {
+					Thread.currentThread().interrupt();
+					throw new WalkAbandoned();
+				}
+			}
+			running = machine;
+			placements.resume(states[machine]);
+			int partner = 1 - machine;
+			return done[partner] ? -1 : lastChord[partner];
+		}
+
+		/** Machine {@code machine}'s chord for its current event sounds from this path column. */
+		synchronized void laid(int machine, int progress) {
+			lastChord[machine] = progress;
+		}
+
+		private synchronized void finished(int machine, Throwable thrown) {
+			// A walk that ended on its own hands its context back, for the driver to leave in
+			// place. A failed one's is not taken: it may be mid-trial -- a hard wall throws from
+			// inside a shape's trial -- and snapshot refuses that. Nothing here may get past the
+			// notify below, or the partner parks for ever.
+			if (thrown == null && running == machine) {
+				try {
+					states[machine] = placements.snapshot();
+				} catch (RuntimeException leaked) {
+					thrown = leaked;
+				}
+			}
+			if (thrown != null && !(thrown instanceof WalkAbandoned) && failure == null) {
+				failure = thrown;
+				failedMachine = machine;
+				abandoned = true;
+			}
+			if (running == machine) {
+				running = -1;
+			}
+			done[machine] = true;
+			nextTime[machine] = Integer.MAX_VALUE;
+			notifyAll();
+		}
+
+		/** The machine whose walk failed the last {@link #run}, or -1. */
+		int failedMachine() {
+			return failedMachine;
+		}
+
+		/**
+		 * Runs both walks to the end, or to the first failure, and leaves the plan holding machine
+		 * B's walker context -- what a sequential pair of walks leaves it holding.
+		 *
+		 * @throws RuntimeException whatever the failing walk threw, on this thread
+		 */
+		void run(Runnable walkA, Runnable walkB, int firstTimeA, int firstTimeB) {
+			boolean tolerating = toleratingCollisions();
+			Thread[] walkers = new Thread[2];
+			for (int machine = 0; machine < 2; machine++) {
+				int m = machine;
+				Runnable walk = m == 0 ? walkA : walkB;
+				int firstTime = m == 0 ? firstTimeA : firstTimeB;
+				// A generous stack: the walk is deep, and a thread of its own is not the test
+				// worker or the render thread whose stack it has always had.
+				walkers[m] = new Thread(null, () -> {
+					Throwable thrown = null;
+					try {
+						// The tolerant pass is a property of the thread that runs it, so the
+						// driver's answer is carried onto this one.
+						TOLERATING_COLLISIONS.set(tolerating);
+						// The baton is taken before the walk starts, not at its first event: the
+						// walk sets the plan's walls and depth ahead of its loop, and those are
+						// not to be written by two threads at once.
+						arrive(m, firstTime, 0);
+						walk.run();
+					} catch (Throwable failed) {
+						thrown = failed;
+					} finally {
+						TOLERATING_COLLISIONS.remove();
+						finished(m, thrown);
+					}
+				}, "midicraft walk " + (m == 0 ? "A" : "B"), 64L << 20);
+				walkers[m].setDaemon(true);
+			}
+			walkers[0].start();
+			walkers[1].start();
+			for (Thread walker : walkers) {
+				try {
+					walker.join();
+				} catch (InterruptedException interrupted) {
+					synchronized (this) {
+						abandoned = true;
+						notifyAll();
+					}
+					Thread.currentThread().interrupt();
+					throw new IllegalStateException("interrupted while the two machines walked");
+				}
+			}
+			if (failure != null) {
+				if (failure instanceof RuntimeException runtime) {
+					throw runtime;
+				}
+				if (failure instanceof Error error) {
+					throw error;
+				}
+				throw new IllegalStateException(failure);
+			}
+			// Both finished on their own: the plan's fields hold whichever walker ran last, and B's
+			// own taken context is what a sequential pair of walks leaves in place.
+			if (states[1] != null) {
+				placements.resume(states[1]);
+			}
+		}
 	}
 
 	/**
@@ -10248,6 +10537,25 @@ public final class SongBuilder {
 		ParityOracle parity = layout.ultra() ? parityOracle(axis, placements, lane) : null;
 		for (int index = 0; index < events.size(); index++) {
 			EventGroup event = events.get(index);
+			// The joint walk: wait for this event's turn in the song, and decide the wait's stretch
+			// against where the partner's last chord really sounded from. Asked once per event -- a
+			// re-asked event keeps the answer the close gave it, which is none. See Baton.
+			if (pace != null && pace.baton() != null) {
+				int here = paceProgress(axis, lane, forward, leg, laneWidth, slabStep, nearWall,
+					farWall);
+				int partnerChord = pace.baton().arrive(pace.machine(), event.time(), here);
+				if (!pace.asked()[index]) {
+					pace.asked()[index] = true;
+					int wait = index == 0 ? event.time()
+						: event.time() - events.get(index - 1).time();
+					// The wait's own minimum, a repeater every four ticks: the chord lands past
+					// that whatever the stretch, so the stretch buys only what is left.
+					int minimum = Math.max(0, (wait - 1) / 4);
+					int behind = partnerChord < 0 ? 0
+						: partnerChord - JOINT_PACE_TOLERANCE - (here + minimum);
+					pace.stretch()[index] = Math.max(0, Math.min(behind, paceCapacity(wait)));
+				}
+			}
 			// Where the last corner is, in the world, kept while the route still carries the bend --
 			// once it is taken there is nothing left to ask. Bend offsets are relative and shift as
 			// the lane advances, so the position has to be read now rather than reconstructed later.
@@ -10578,14 +10886,17 @@ public final class SongBuilder {
 								// Spent as r1 the trade costs nothing: the same column, the tick
 								// comes off the chord's own trigger because currentTime carries it,
 								// and the thing standing against the soft middle is a repeater,
-								// which is the one thing that reads it. Both flags, and the
-								// geometry decides -- a stretch is laid between buildShaped's roll
-								// and the next one, so which copy holds the answer is exactly the
-								// thing this file keeps being wrong about.
+								// which is the one thing that reads it. The unrolled copy alone: a
+								// stretch is laid at the top of the event, before buildShaped rolls
+								// the flags for it, so the module immediately behind is softTip
+								// and softBehind is the one before that. Asking both laid an r1 on
+								// a powered stone in the column a stacked chord's low pair flanks,
+								// and the pair sounded off it -- 24 wrong notes over the census
+								// once the joint walk stretched more, the same fault the parity
+								// pad found when it asked both.
 								int ticks = event.time() - currentTime;
 								int leftOver = padCellOrSplitRepeater(placements, lane.pos(),
-									lane.travel(), ticks,
-									placements.softTip() || placements.softBehind(), false,
+									lane.travel(), ticks, placements.softTip(), false,
 									"paceStretch");
 								if (leftOver < ticks) {
 									// A repeater went down instead of the pad, so the run is
@@ -11287,6 +11598,9 @@ public final class SongBuilder {
 			if (pace != null) {
 				pace.progress()[index] = paceProgress(axis, lane, forward, leg, laneWidth, slabStep,
 					nearWall, farWall);
+				if (pace.baton() != null) {
+					pace.baton().laid(pace.machine(), pace.progress()[index]);
+				}
 			}
 			// Settled before the event is placed rather than after it. A turn hands back a cursor at
 			// the same point along the wall the last event reached, so an event that overshoots
@@ -13123,19 +13437,23 @@ public final class SongBuilder {
 					}
 				} else {
 					List<EventNote> handedOn = new ArrayList<>();
+					// Never shorter than the near half here -- a plain cut is chosen because the
+					// chord does not fit -- but clamped like the fallback below, so a chord that
+					// somehow is cannot throw out of a subList.
+					int nearNotes = Math.min(near, chord.size());
 					cursor = HEADED_CUT_FALLS_TO_PLAIN && NEAR_HALF_KEEPS_ITS_NOTES_FOR_THE_WIRE
 						? addPlainNearHalf(placements, trigger.cursor(), travel, depth,
-							trigger.triggerDelay(), chord, near, Math.max(1, room - 1), splitCells,
-							handedOn)
+							trigger.triggerDelay(), chord, nearNotes, Math.max(1, room - 1),
+							splitCells, handedOn)
 						: HEADED_CUT_FALLS_TO_PLAIN
 						? addSplitNearHalf(placements, trigger.cursor(), travel, depth,
-							trigger.triggerDelay(), chord.subList(0, near), Math.max(1, room - 1),
-							handedOn)
+							trigger.triggerDelay(), chord.subList(0, nearNotes),
+							Math.max(1, room - 1), handedOn)
 						: addSplitEventModule(placements, trigger.cursor(), travel, depth,
-							trigger.triggerDelay(), chord.subList(0, near));
+							trigger.triggerDelay(), chord.subList(0, nearNotes));
 					List<EventNote> farRest = new ArrayList<>(handedOn);
-					if (near < chord.size()) {
-						farRest.addAll(chord.subList(near, chord.size()));
+					if (nearNotes < chord.size()) {
+						farRest.addAll(chord.subList(nearNotes, chord.size()));
 					}
 					far = farRest;
 				}
@@ -13191,19 +13509,24 @@ public final class SongBuilder {
 					placements.padded("cutHeadFellToPlain");
 					headed = null;
 					List<EventNote> handedOn = new ArrayList<>();
+					// A headed cut is chosen by the staircase, not by the chord's size, so the
+					// chord may be shorter than the near half it falls back to: eleven notes in a
+					// room of seven (illit at eight wide over two floors) asked for twelve and
+					// threw. The whole chord goes in the near half, and nothing crosses.
+					int nearNotes = Math.min(near, chord.size());
 					cursor = HEADED_CUT_FALLS_TO_PLAIN && NEAR_HALF_KEEPS_ITS_NOTES_FOR_THE_WIRE
 						? addPlainNearHalf(placements, trigger.cursor(), travel, depth,
-							trigger.triggerDelay(), chord, near, Math.max(1, room - 1), splitCells,
-							handedOn)
+							trigger.triggerDelay(), chord, nearNotes, Math.max(1, room - 1),
+							splitCells, handedOn)
 						: HEADED_CUT_FALLS_TO_PLAIN
 						? addSplitNearHalf(placements, trigger.cursor(), travel, depth,
-							trigger.triggerDelay(), chord.subList(0, near), Math.max(1, room - 1),
-							handedOn)
+							trigger.triggerDelay(), chord.subList(0, nearNotes),
+							Math.max(1, room - 1), handedOn)
 						: addSplitEventModule(placements, trigger.cursor(), travel, depth,
-							trigger.triggerDelay(), chord.subList(0, near));
+							trigger.triggerDelay(), chord.subList(0, nearNotes));
 					List<EventNote> farRest = new ArrayList<>(handedOn);
-					if (near < chord.size()) {
-						farRest.addAll(chord.subList(near, chord.size()));
+					if (nearNotes < chord.size()) {
+						farRest.addAll(chord.subList(nearNotes, chord.size()));
 					}
 					far = farRest;
 					}
@@ -31533,6 +31856,24 @@ public final class SongBuilder {
 		private final Map<BlockPos, Integer> powered = new LinkedHashMap<>();
 		/** Where each lane handed over to the next one, in the order they were built. */
 		private final List<BlockPos> turns = new ArrayList<>();
+		/** Which machine recorded each of {@link #turns}, so the list can be read a machine at a time. */
+		private final List<Integer> turnMachines = new ArrayList<>();
+
+		/**
+		 * The turns with machine A's first and B's after, each in walk order: what the plan's readers
+		 * expect of the list, and what two walks taking turns on one plan no longer record it as.
+		 */
+		private List<BlockPos> turnsByMachine() {
+			List<BlockPos> ordered = new ArrayList<>(turns.size());
+			for (int machine : new int[] {-1, 0, 1}) {
+				for (int i = 0; i < turns.size(); i++) {
+					if (turnMachines.get(i) == machine) {
+						ordered.add(turns.get(i));
+					}
+				}
+			}
+			return ordered;
+		}
 		/** How big each chord was that a lane gave up on and padded round instead of cutting. */
 		private final List<Integer> moved = new ArrayList<>();
 		/** Lanes that could not be landed on their wall, and what defeated them. */
@@ -31797,6 +32138,121 @@ public final class SongBuilder {
 			return turns.size();
 		}
 
+		/** How many turns this machine has recorded, whatever order the two were walked in. */
+		int turnsOf(int machine) {
+			int count = 0;
+			for (int recorded : turnMachines) {
+				if (recorded == machine) {
+					count++;
+				}
+			}
+			return count;
+		}
+
+		/**
+		 * The first repeater this machine laid -- its head -- whichever order the two machines
+		 * laid their cells in. Read off the blocks that stand, so a repeater a trial laid and took
+		 * back is not it.
+		 */
+		BlockPos firstRepeaterOf(int machine) {
+			for (Map.Entry<BlockPos, String> cell : blocks.entrySet()) {
+				if (cell.getValue().startsWith("minecraft:repeater")
+						&& laneTintAt.getOrDefault(cell.getKey(), -2) / 2 == machine) {
+					return cell.getKey();
+				}
+			}
+			return null;
+		}
+
+		/** The machine being walked, 0 or 1, or -1 on a plan that never named one. */
+		private int machine() {
+			return laneTint < 0 ? -1 : laneTint / 2;
+		}
+
+		/**
+		 * The fields that are the current walker's context rather than the world, by name.
+		 *
+		 * <p>Two machines walk one plan, and under the joint walk they take turns on it, so every
+		 * handover swaps these out and in ({@link #snapshot}, {@link #resume}). The list is the one
+		 * place the split is written down: {@code PlacementPlanFieldsTest} checks that every field
+		 * of this class is named here, in {@link #WORLD_FIELDS}, or in
+		 * {@link #EMPTY_AT_HANDOFF_FIELDS}, so a field added later cannot quietly belong to both
+		 * walkers at once.</p>
+		 */
+		static final Set<String> WALKER_FIELDS = Set.of(
+			"placing", "runSinceRepeater", "trialRun", "laneTint",
+			"trial", "tailJournal", "tailJournalBehind", "softTail", "softTailBehind",
+			"turnIndex", "turnCornerX", "turnStepX", "turnWide", "turnHungBeyond", "turnAxis",
+			"softTip", "softBehind",
+			"railTail", "railTailBehind", "railSeed", "railSeedTime", "railSeedOnPath",
+			"handover", "handoverBehind",
+			"turnAhead", "sunkenOffered", "laneJustOpened", "climbAhead", "seedAhead",
+			"flankTaken", "climbFedFromCentre", "climbFedByCentre", "floorBelow",
+			"watchingLegWalls", "legWall", "legStep", "legInner", "legNearSide", "legIndex",
+			"legAxis", "legEvent", "hardInnerWalls", "softEvents", "legExit",
+			"stairsCloseTheLane", "gapAhead", "answersWhatIsAhead");
+
+		/** The world both machines build in, shared and never swapped. See {@link #WALKER_FIELDS}. */
+		static final Set<String> WORLD_FIELDS = Set.of(
+			"recording", "blocks", "collisions", "collisionEvents", "placedBy", "laneTintAt",
+			"notes", "noteMachine", "powered", "turns", "turnMachines", "moved", "trouble",
+			"breaches", "recesses", "padding", "corners", "wallBreachCells", "starterCells",
+			"minimumX", "minimumY", "minimumZ", "maximumX", "maximumY", "maximumZ",
+			"wrongNotesAt", "missedNotesAt", "pulseWindow",
+			"nearWallColumn", "farWallColumn", "wallAxis", "extraWallColumns", "laneDepth");
+
+		/**
+		 * Walker context that must be empty at a handover: a trial spans one shape, and a handover
+		 * happens between events, so a walker with a trial open at one is a broken walk rather than
+		 * something to swap. See {@link #WALKER_FIELDS}.
+		 */
+		static final Set<String> EMPTY_AT_HANDOFF_FIELDS = Set.of("outerTrials", "outerTrialRuns");
+
+		private static final java.lang.reflect.Field[] WALKER = walkerFields();
+
+		private static java.lang.reflect.Field[] walkerFields() {
+			List<java.lang.reflect.Field> found = new ArrayList<>();
+			for (String name : WALKER_FIELDS.stream().sorted().toList()) {
+				try {
+					java.lang.reflect.Field field = PlacementPlan.class.getDeclaredField(name);
+					field.setAccessible(true);
+					found.add(field);
+				} catch (NoSuchFieldException gone) {
+					throw new IllegalStateException("WALKER_FIELDS names a field PlacementPlan "
+						+ "no longer has: " + name, gone);
+				}
+			}
+			return found.toArray(new java.lang.reflect.Field[0]);
+		}
+
+		/** The current walker's context, to {@link #resume} later; the world is left in place. */
+		Object snapshot() {
+			if (trial != null || !outerTrials.isEmpty()) {
+				throw new IllegalStateException("a walker handed the plan over with a trial open");
+			}
+			Object[] values = new Object[WALKER.length];
+			try {
+				for (int i = 0; i < WALKER.length; i++) {
+					values[i] = WALKER[i].get(this);
+				}
+			} catch (IllegalAccessException impossible) {
+				throw new IllegalStateException(impossible);
+			}
+			return values;
+		}
+
+		/** Puts a walker's context back, exactly as {@link #snapshot} took it. */
+		void resume(Object state) {
+			Object[] values = (Object[]) state;
+			try {
+				for (int i = 0; i < WALKER.length; i++) {
+					WALKER[i].set(this, values[i]);
+				}
+			} catch (IllegalAccessException impossible) {
+				throw new IllegalStateException(impossible);
+			}
+		}
+
 		/** The first repeater among the cells laid after the first {@code laid} -- the second
 		 * machine's head, when the count is taken between the two walks. */
 		BlockPos firstRepeaterAfter(int laid) {
@@ -31966,6 +32422,7 @@ public final class SongBuilder {
 						+ position.getZ() + "  " + placing);
 				}
 				turns.add(position.immutable());
+				turnMachines.add(machine());
 			}
 		}
 
@@ -33295,6 +33752,7 @@ public final class SongBuilder {
 			});
 			corners.removeAll(undo.cornersAdded());
 			trim(turns, undo.turnCount());
+			trim(turnMachines, undo.turnCount());
 			trim(moved, undo.movedCount());
 			trim(trouble, undo.troubleCount());
 			trim(breaches, undo.breachCount());
@@ -33618,7 +34076,7 @@ public final class SongBuilder {
 			return new PastePlan(commands, Math.max(widthX, widthZ), Math.min(widthX, widthZ), height,
 				widthX, widthZ,
 				mode, List.copyOf(faults),
-				turns.stream().map(turn -> turn.offset(shiftX, 0, shiftZ)).toList(),
+				turnsByMachine().stream().map(turn -> turn.offset(shiftX, 0, shiftZ)).toList(),
 				List.copyOf(moved), List.copyOf(breaches), landedWalls, List.copyOf(recesses),
 				Map.copyOf(padding), nearWall + shiftX, farWall + shiftX, Map.copyOf(marked),
 				poweredAt(shiftX, shiftZ), laidBy(shiftX, shiftZ), noteTicks(shiftX, shiftZ),

@@ -288,6 +288,15 @@ class DriftCauseProbe {
 									+ "   world %4.0f (%3.0f)", where, label, world[0], world[1]));
 								continue;
 							}
+							if (pace.dryA() == null) {
+								// The joint walk has no model to hold against the build: its
+								// stretches were decided from the build itself.
+								System.out.println(String.format("   %-40.40s %-12s %8d %8d | joint walk, no model"
+									+ "   world %4.0f (%3.0f)", where, label,
+									java.util.Arrays.stream(pace.stretchA()).sum(),
+									java.util.Arrays.stream(pace.stretchB()).sum(), world[0], world[1]));
+								continue;
+							}
 							long[] modelA = model(pace.dryA(), pace.stretchA());
 							long[] modelB = model(pace.dryB(), pace.stretchB());
 							double[] gaps = gaps(pace, modelA, modelB);
