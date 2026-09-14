@@ -908,10 +908,14 @@ public record ComposerProject(
 	 * something needs them, see {@link Strikes}.</p>
 	 */
 	public record Sustain(boolean on, SustainLength after, SustainLength every) {
-		public static final Sustain DEFAULT = new Sustain(false, SustainLength.QUARTER, SustainLength.FINEST);
+		// A half note before a note sustains, striking at Finest. Priced on 2026-09-14 over the 24
+		// two-lane songs at six sizes with every layer sustaining: after a quarter refused 12 builds
+		// and added 2 dead ones; after a half refused 6 (one song that overloads at every setting),
+		// added no dead build, and came in at 1.0 to 2.6 times the depth.
+		public static final Sustain DEFAULT = new Sustain(false, SustainLength.HALF, SustainLength.FINEST);
 
 		public Sustain {
-			after = after == null || after == SustainLength.FINEST ? SustainLength.QUARTER : after;
+			after = after == null || after == SustainLength.FINEST ? SustainLength.HALF : after;
 			every = every == null ? SustainLength.FINEST : every;
 		}
 
@@ -1289,6 +1293,9 @@ public record ComposerProject(
 	public List<SequenceTrack> toSequenceTracks(Set<Integer> layerIndices, boolean dedupeIdentical) {
 		List<SequenceTrack> result = new ArrayList<>();
 		Set<NoteSound> heard = dedupeIdentical ? new java.util.HashSet<>() : null;
+		// Sustains become strikes before anything is deduplicated or rounded: a strike is a note the
+		// build places, and every gap is rounded once, on its own.
+		double finest = layers.stream().anyMatch(Layer::sustains) ? finestSustainStep() : 0.0;
 		for (int index = 0; index < layers.size(); index++) {
 			Layer layer = layers.get(index);
 			boolean chosen = layerIndices == null || layerIndices.isEmpty()
@@ -1304,7 +1311,7 @@ public record ComposerProject(
 			// dropped, and none of them count as heard. The count is somebody asking for a louder
 			// note, and collapsing it -- or letting it collapse a note on another layer -- would
 			// quietly undo that. Its copies are expanded only after.
-			for (Layer voice : layer.buildVoices()) {
+			for (Layer voice : (finest > 0.0 ? withSustainsExpanded(layer, finest) : layer).buildVoices()) {
 				Layer projected = heard == null || voice.copies() > 1
 					? voice : withoutAlreadyHeard(voice, heard);
 				String text = toText(projected);
@@ -1591,7 +1598,7 @@ public record ComposerProject(
 		if (repeatMergeTicks <= 0) {
 			return this;
 		}
-		double window = repeatMergeTicks * ppq * 100_000.0 / tempoMicrosPerQuarter;
+		double window = repeatMergeTicks * SongAnalysis.redstoneTickSpan(this);
 		List<Layer> updated = layers.stream()
 			.map(layer -> layer.withNotes(mergeRepeats(layer.notes(), window, scope)))
 			.toList();
@@ -2046,7 +2053,7 @@ public record ComposerProject(
 		int grid = Math.max(1, quantizeTicks);
 		double repeatWindow = repeatMergeTicks <= 0
 			? 0.0
-			: repeatMergeTicks * ppq * 100_000.0 / tempoMicrosPerQuarter;
+			: repeatMergeTicks * SongAnalysis.redstoneTickSpan(this);
 		int mergedRepeats = 0;
 		int duplicateLayers = 0;
 		int duplicateLayerNotes = 0;
@@ -2328,7 +2335,7 @@ public record ComposerProject(
 	public List<Long> mergedStartTicks(int repeatMergeTicks) {
 		double window = repeatMergeTicks <= 0
 			? 0.0
-			: repeatMergeTicks * ppq * 100_000.0 / tempoMicrosPerQuarter;
+			: repeatMergeTicks * SongAnalysis.redstoneTickSpan(this);
 		return layers.stream()
 			.flatMap(layer -> mergeRepeats(layer.notes(), window).stream())
 			.map(NoteEvent::startTick)
@@ -2780,6 +2787,8 @@ public record ComposerProject(
 	public List<Layer> buildLayers(boolean dedupeIdentical) {
 		List<Layer> chosen = new ArrayList<>();
 		Set<NoteSound> heard = dedupeIdentical ? new java.util.HashSet<>() : null;
+		// Sustains become strikes first, for the reason toSequenceTracks gives.
+		double finest = anyBuildLayerSustains() ? finestSustainStep() : 0.0;
 		for (Layer layer : layers) {
 			if (!layer.inBuild()) {
 				continue;
@@ -2788,7 +2797,7 @@ public record ComposerProject(
 			// is a plain one-instrument layer and downstream readers need no new case.
 			// A counted voice skips the deduplication both ways and arrives as one layer per copy;
 			// see toSequenceTracks.
-			for (Layer voice : layer.buildVoices()) {
+			for (Layer voice : (finest > 0.0 ? withSustainsExpanded(layer, finest) : layer).buildVoices()) {
 				Layer projected = heard == null || voice.copies() > 1
 					? voice : withoutAlreadyHeard(voice, heard);
 				chosen.addAll(projected.asCopies());
@@ -2844,6 +2853,31 @@ public record ComposerProject(
 			return stats.lanesNeeded() == 2 ? repeater / 2.0 : repeater;
 		}
 		return noteGridTicks();
+	}
+
+	/** What Finest is in this song, read off the song as written. */
+	public double finestSustainStep() {
+		return finestSustainStep(SongAnalysis.ofWritten(this, true));
+	}
+
+	/** Whether any layer the build places turns its long notes into strikes. */
+	public boolean anyBuildLayerSustains() {
+		return layers.stream().anyMatch(layer -> layer.inBuild() && layer.sustains());
+	}
+
+	/** How many strikes this song's sustains add to the notes its build places. */
+	public int sustainStrikeCount() {
+		if (!anyBuildLayerSustains()) {
+			return 0;
+		}
+		double finest = finestSustainStep();
+		int added = 0;
+		for (Layer layer : layers) {
+			if (layer.inBuild() && layer.sustains()) {
+				added += withSustainsExpanded(layer, finest).notes().size() - layer.notes().size();
+			}
+		}
+		return added;
 	}
 
 	/**

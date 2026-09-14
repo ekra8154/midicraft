@@ -104,6 +104,7 @@ public final class ChordThinner {
 		// deleting that copy too, and reaching into layers nobody selected is not thinning, it is
 		// editing something else.
 		Map<Long, Set<Voice>> blocked = new HashMap<>();
+		double finest = project.anyBuildLayerSustains() ? project.finestSustainStep() : 0.0;
 		int layerIndex = -1;
 		for (Layer layer : project.layers()) {
 			layerIndex++;
@@ -119,7 +120,12 @@ public final class ChordThinner {
 			// thirty, so thinning the ordinary layers around them stays honest.
 			boolean offered = (fromLayers == null || fromLayers.contains(layerIndex))
 				&& layer.split() == null;
-			for (Layer voiceLayer : layer.buildVoices()) {
+			// Sustains are weighed as the build places them, strikes and all, but a strike is never
+			// on offer: it carries its note's id, and taking it would delete the whole held note to
+			// lighten one tick of it.
+			Layer placed = finest > 0.0 ? project.withSustainsExpanded(layer, finest) : layer;
+			Map<Long, Long> writtenStart = placed == layer ? null : SongAnalysis.writtenStarts(layer);
+			for (Layer voiceLayer : placed.buildVoices()) {
 				// A counted voice places a note block per copy, so every copy is its own sound in
 				// the chord: never merged by deduplication, and never on offer. The count is a
 				// choice about loudness somebody made in the palette, not doubling to spare.
@@ -130,6 +136,8 @@ public final class ChordThinner {
 					if (voiceLayer.pitched() && !note.isBuildable()) {
 						continue;
 					}
+					boolean strike = writtenStart != null
+						&& writtenStart.getOrDefault(note.id(), note.startTick()) != note.startTick();
 					for (int copy = 0; copy < copies; copy++) {
 						Voice voice = copies > 1
 							? new Voice(voiceLayer.instrument(), note.midiNote(), note.id(), copy + 1)
@@ -138,7 +146,7 @@ public final class ChordThinner {
 						byTick.computeIfAbsent(note.startTick(), tick -> new LinkedHashMap<>())
 							.computeIfAbsent(voice, key -> new ArrayList<>())
 							.add(note);
-						if (!offered || copies > 1) {
+						if (!offered || copies > 1 || strike) {
 							blocked.computeIfAbsent(note.startTick(), tick -> new HashSet<>()).add(voice);
 						}
 					}

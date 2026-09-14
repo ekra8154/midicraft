@@ -86,6 +86,24 @@ class FaultCensusProbe {
 		return found;
 	}
 
+	/**
+	 * {@code -Dcensus.sustain=EVERY} or {@code EVERY/AFTER}, in {@code SustainLength} names ({@code AFTER}
+	 * defaults to QUARTER): every layer of every song sustains, which is what prices sustained notes
+	 * against the library. Empty leaves the songs as written.
+	 */
+	private static List<ComposerProject.Layer> sustained(List<ComposerProject.Layer> layers) {
+		String given = text("sustain", "");
+		if (given.isEmpty()) {
+			return layers;
+		}
+		String[] parts = given.toUpperCase(Locale.ROOT).split("/");
+		ComposerProject.Sustain held = new ComposerProject.Sustain(true,
+			parts.length > 1 ? ComposerProject.SustainLength.valueOf(parts[1])
+				: ComposerProject.SustainLength.QUARTER,
+			ComposerProject.SustainLength.valueOf(parts[0]));
+		return layers.stream().map(layer -> layer.withSustain(held)).toList();
+	}
+
 	private static SongBuilder.PasteMode mode() {
 		return switch (text("mode", "v2").toLowerCase(Locale.ROOT)) {
 			case "v2", "ultra2", "ultra_compact_lane_v2" -> SongBuilder.PasteMode.ULTRA_COMPACT_LANE_V2;
@@ -240,7 +258,7 @@ class FaultCensusProbe {
 			try (Reader reader = Files.newBufferedReader(file)) {
 				ComposerProject raw = gson.fromJson(reader, ComposerProject.class);
 				song = new ComposerProject(raw.name(), raw.ppq(), raw.tempoMicrosPerQuarter(),
-					raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(), raw.endTick(),
+					sustained(raw.layers()), raw.activeLayerIndex(), raw.nextNoteId(), raw.endTick(),
 					raw.speedQuarters());
 			}
 			if (!named.isEmpty() && (song.name() == null

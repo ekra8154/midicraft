@@ -62,6 +62,26 @@ public record SongAnalysis(
 	 */
 	public static SongAnalysis of(ComposerProject project, boolean dedupeIdentical,
 			boolean halfTicksAvailable) {
+		// A song with no sustaining layer in its build is measured once, as written. One with a
+		// sustain is measured twice: as written, which is what says what Finest is, and then with
+		// the strikes that Finest places -- they are note blocks the build will place, and a strike
+		// can overload a chord or land off the grid like any note.
+		SongAnalysis written = measure(project, dedupeIdentical, halfTicksAvailable, 0.0);
+		return project.anyBuildLayerSustains()
+			? measure(project, dedupeIdentical, halfTicksAvailable, project.finestSustainStep(written))
+			: written;
+	}
+
+	/**
+	 * The song as written, with no sustain expanded: what the song's Finest is read from.
+	 */
+	public static SongAnalysis ofWritten(ComposerProject project, boolean dedupeIdentical) {
+		return measure(project, dedupeIdentical, true, 0.0);
+	}
+
+	/** @param finest what Finest is, to expand sustains with; 0 measures the song as written */
+	private static SongAnalysis measure(ComposerProject project, boolean dedupeIdentical,
+			boolean halfTicksAvailable, double finest) {
 		Map<Long, Integer> counts = new HashMap<>();
 		Set<ComposerProject.NoteSound> heard = dedupeIdentical ? new java.util.HashSet<>() : null;
 		int outOfRange = 0;
@@ -91,7 +111,12 @@ public record SongAnalysis(
 			// note blocks in the machine, whatever the document stores it as.
 			// A counted voice is as many note blocks as its count, and is never deduplicated
 			// either way, exactly as the build places it.
-			for (Layer voice : layer.buildVoices()) {
+			// Sustains are expanded first, on the layer as written, so every strike is judged as the
+			// note block it is. A strike of an out-of-range note is not counted out of range again:
+			// the note it belongs to already was.
+			Layer placed = finest > 0.0 ? project.withSustainsExpanded(layer, finest) : layer;
+			Map<Long, Long> writtenStart = placed == layer ? null : writtenStarts(layer);
+			for (Layer voice : placed.buildVoices()) {
 				int copies = voice.copies();
 				for (NoteEvent note : voice.notes()) {
 					if (heard != null && copies == 1
@@ -102,7 +127,10 @@ public record SongAnalysis(
 					// A sound effect layer has no range: the row is somewhere to put a hit, not a
 					// pitch, so every note on one counts towards the build rather than the verdict.
 					if (voice.pitched() && !note.isBuildable()) {
-						outOfRange++;
+						if (writtenStart == null
+								|| writtenStart.getOrDefault(note.id(), note.startTick()) == note.startTick()) {
+							outOfRange++;
+						}
 					} else {
 						counts.merge(note.startTick(), copies, Integer::sum);
 					}
@@ -173,6 +201,18 @@ public record SongAnalysis(
 			maximumNoteDuration, Set.copyOf(offGrid), Set.copyOf(crowded), Set.copyOf(halfTicked),
 			Map.copyOf(gaps), project.endTick(), project.endTick() / span / 10.0, duplicateNotes,
 			buildNotes, halfTicksAvailable);
+	}
+
+	/**
+	 * Each written note's start by id, which is how a strike -- the same id at a later tick -- is
+	 * told apart from the note it belongs to.
+	 */
+	static Map<Long, Long> writtenStarts(Layer layer) {
+		Map<Long, Long> starts = new HashMap<>();
+		for (NoteEvent note : layer.notes()) {
+			starts.putIfAbsent(note.id(), note.startTick());
+		}
+		return starts;
 	}
 
 	/**

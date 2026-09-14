@@ -45,6 +45,10 @@ final class NbsExporter {
 		int culledEffects = 0;
 
 		int spilled = 0;
+		// A sustaining layer is written with its strikes, as the repeated notes Note Block Studio
+		// uses for a held note anyway.
+		double finest = project.layers().stream().anyMatch(ComposerProject.Layer::sustains)
+			? project.finestSustainStep() : 0.0;
 		for (ComposerProject.Layer layer : project.layers()) {
 			// A sound effect layer has nothing to become here. NBS numbers note block instruments,
 			// and a door is not one of those -- writing it as a harp would put a wrong note in the
@@ -72,7 +76,8 @@ final class NbsExporter {
 			// NBS has no count, and its velocity is already the note's own loudness, so a note
 			// stacked three times is three notes -- which Note Block Studio plays three times as
 			// loud, the same as the machine does.
-			for (ComposerProject.Layer voiceLayer : layer.buildVoices()) {
+			for (ComposerProject.Layer voiceLayer
+					: (finest > 0.0 ? project.withSustainsExpanded(layer, finest) : layer).buildVoices()) {
 				if (!voiceLayer.pitched()) {
 					// A door stacked onto a tuned layer: left out, and counted, for the reason a
 					// whole sound effect layer is.

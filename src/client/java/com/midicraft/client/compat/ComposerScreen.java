@@ -2368,7 +2368,7 @@ public final class ComposerScreen extends Screen {
 		ComposerProject current = project();
 		if (cachedFinestProject != current) {
 			cachedFinestProject = current;
-			cachedFinest = current.finestSustainStep(projectStats());
+			cachedFinest = current.finestSustainStep();
 		}
 		return cachedFinest;
 	}

@@ -41,6 +41,8 @@ public final class SongBuilder {
 	 */
 	static List<EventNote> eventNotes(ComposerProject project) {
 		List<EventNote> notes = new ArrayList<>();
+		double finest = project.layers().stream().anyMatch(Layer::sustains)
+			? project.finestSustainStep() : 0.0;
 		for (int layerIndex = 0; layerIndex < project.layers().size(); layerIndex++) {
 			Layer layer = project.layers().get(layerIndex);
 			if (!layer.buildEnabled()) {
@@ -50,7 +52,8 @@ public final class SongBuilder {
 			// counted voice as one layer per copy. The order counter runs across all of them so two
 			// voices striking together stay deterministic.
 			int order = 0;
-			for (Layer voice : layer.buildVoices().stream()
+			Layer placed = finest > 0.0 ? project.withSustainsExpanded(layer, finest) : layer;
+			for (Layer voice : placed.buildVoices().stream()
 					.flatMap(each -> each.asCopies().stream()).toList()) {
 				String instrumentBlock = instrumentBlockId(voice.instrument());
 				PreviewInstrument.Effect effect = effectOf(voice.instrument());
