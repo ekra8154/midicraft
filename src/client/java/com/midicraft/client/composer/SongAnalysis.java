@@ -39,7 +39,9 @@ public record SongAnalysis(
 	 * mode, not of the song, and leaving it out is what let a song be called ready for a build
 	 * nobody was making.</p>
 	 */
-	boolean halfTicksAvailable
+	boolean halfTicksAvailable,
+	/** What the chord limit left out to fit the thinning target; see {@link ChordSkips}. */
+	ChordSkips skips
 ) {
 	/** Two note blocks hang off each of redstone's 15 reachable bus blocks. */
 	public static final int MAX_SIMULTANEOUS_NOTES = 30;
@@ -62,33 +64,53 @@ public record SongAnalysis(
 	 */
 	public static SongAnalysis of(ComposerProject project, boolean dedupeIdentical,
 			boolean halfTicksAvailable) {
-		// A song with no sustaining layer in its build is measured once, as written. One with a
-		// sustain is measured twice: as written, which is what says what Finest is, and then with
-		// the strikes that Finest places -- they are note blocks the build will place, and a strike
-		// can overload a chord or land off the grid like any note.
-		SongAnalysis written = measure(project, dedupeIdentical, halfTicksAvailable, 0.0);
-		return project.anyBuildLayerSustains()
-			? measure(project, dedupeIdentical, halfTicksAvailable, project.finestSustainStep(written))
-			: written;
+		return of(project, dedupeIdentical, halfTicksAvailable, MAX_SIMULTANEOUS_NOTES);
+	}
+
+	/**
+	 * @param thinTarget the chord thinning preference: a tick over it leaves out strikes and extra
+	 *     copies before it is judged, as preview and the build do. The cap, where nothing asked.
+	 */
+	public static SongAnalysis of(ComposerProject project, boolean dedupeIdentical,
+			boolean halfTicksAvailable, int thinTarget) {
+		return of(project, dedupeIdentical, halfTicksAvailable, ChordSkips.Rules.at(thinTarget));
+	}
+
+	/** @param thinning what the chord limit may leave out, and above how many note blocks */
+	public static SongAnalysis of(ComposerProject project, boolean dedupeIdentical,
+			boolean halfTicksAvailable, ChordSkips.Rules thinning) {
+		// A song with no sustaining layer in its build is measured once. One with a sustain is
+		// measured twice: as written, which is what says what Finest is, and then with the strikes
+		// that Finest places -- they are note blocks the build will place, and a strike can overload
+		// a chord or land off the grid like any note.
+		if (!project.anyBuildLayerSustains()) {
+			return measure(project, dedupeIdentical, halfTicksAvailable, 0.0, thinning);
+		}
+		SongAnalysis written = measure(project, dedupeIdentical, halfTicksAvailable, 0.0,
+			ChordSkips.Rules.NONE);
+		return measure(project, dedupeIdentical, halfTicksAvailable, project.finestSustainStep(written),
+			thinning);
 	}
 
 	/**
 	 * The song as written, with no sustain expanded: what the song's Finest is read from.
 	 */
 	public static SongAnalysis ofWritten(ComposerProject project, boolean dedupeIdentical) {
-		return measure(project, dedupeIdentical, true, 0.0);
+		return measure(project, dedupeIdentical, true, 0.0, ChordSkips.Rules.NONE);
 	}
 
 	/** @param finest what Finest is, to expand sustains with; 0 measures the song as written */
 	private static SongAnalysis measure(ComposerProject project, boolean dedupeIdentical,
-			boolean halfTicksAvailable, double finest) {
+			boolean halfTicksAvailable, double finest, ChordSkips.Rules thinning) {
 		Map<Long, Integer> counts = new HashMap<>();
+		ChordSkips skips = ChordSkips.of(project, dedupeIdentical, thinning, finest);
 		Set<ComposerProject.NoteSound> heard = dedupeIdentical ? new java.util.HashSet<>() : null;
 		int outOfRange = 0;
 		int totalNotes = 0;
 		int duplicateNotes = 0;
 		long maximumNoteDuration = 1L;
-		for (Layer layer : project.layers()) {
+		for (int layerIndex = 0; layerIndex < project.layers().size(); layerIndex++) {
+			Layer layer = project.layers().get(layerIndex);
 			// Only included layers are judged. A layer left out of the sequence cannot stop a build
 			// it is not part of, and importing a song to keep one line of it should not leave the
 			// verdict red forever over notes nobody is going to place.
@@ -116,7 +138,9 @@ public record SongAnalysis(
 			// the note it belongs to already was.
 			Layer placed = finest > 0.0 ? project.withSustainsExpanded(layer, finest) : layer;
 			Map<Long, Long> writtenStart = placed == layer ? null : writtenStarts(layer);
-			for (Layer voice : placed.buildVoices()) {
+			List<Layer> voices = placed.buildVoices();
+			for (int voiceIndex = 0; voiceIndex < voices.size(); voiceIndex++) {
+				Layer voice = voices.get(voiceIndex);
 				int copies = voice.copies();
 				for (NoteEvent note : voice.notes()) {
 					if (heard != null && copies == 1
@@ -131,8 +155,10 @@ public record SongAnalysis(
 								|| writtenStart.getOrDefault(note.id(), note.startTick()) == note.startTick()) {
 							outOfRange++;
 						}
-					} else {
-						counts.merge(note.startTick(), copies, Integer::sum);
+					} else if (!skips.skips(layerIndex, note.id(), note.startTick())) {
+						counts.merge(note.startTick(),
+							skips.copiesAt(layerIndex, voiceIndex, note.id(), note.startTick(), copies),
+							Integer::sum);
 					}
 				}
 			}
@@ -200,7 +226,7 @@ public record SongAnalysis(
 		return new SongAnalysis(totalNotes, outOfRange, Map.copyOf(counts), peak, overloaded,
 			maximumNoteDuration, Set.copyOf(offGrid), Set.copyOf(crowded), Set.copyOf(halfTicked),
 			Map.copyOf(gaps), project.endTick(), project.endTick() / span / 10.0, duplicateNotes,
-			buildNotes, halfTicksAvailable);
+			buildNotes, halfTicksAvailable, skips);
 	}
 
 	/**

@@ -3,6 +3,7 @@ package com.midicraft.client;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.midicraft.NoteSequence;
+import com.midicraft.client.composer.ChordSkips;
 import com.midicraft.client.composer.ChordThinner;
 import com.midicraft.client.composer.ComposerProject;
 import com.midicraft.client.composer.SongLibrary;
@@ -382,6 +383,10 @@ public final class MidicraftConfig {
 	private boolean debugPasteEnabled;
 	private int midiVelocityCutoff;
 	private int chordThinTarget;
+	/** Whether a chord over the target may play a counted instrument with fewer copies. */
+	private boolean thinChordsByVolume;
+	/** Whether a chord over the target may skip a sustain strike. */
+	private boolean thinChordsByStrikes;
 	private int composerGuiScale;
 	private int layerPanelWidth;
 	private boolean layerPanelCollapsed;
@@ -600,6 +605,8 @@ public final class MidicraftConfig {
 						? DEFAULT_CHORD_THIN_TARGET
 						: stored.chordThinTarget
 				);
+				instance.thinChordsByVolume = stored.thinChordsByVolume == null || stored.thinChordsByVolume;
+				instance.thinChordsByStrikes = stored.thinChordsByStrikes == null || stored.thinChordsByStrikes;
 				instance.setComposerGuiScale(stored.composerGuiScale == null
 					? DEFAULT_COMPOSER_GUI_SCALE
 					: stored.composerGuiScale);
@@ -1012,7 +1019,7 @@ public final class MidicraftConfig {
 		ComposerProject project = composerProject();
 		if (cachedSequenceProject != project || cachedSequence == null) {
 			cachedSequenceProject = project;
-			cachedSequence = project.toSequenceTracks(java.util.Set.of(), dedupeIdenticalNotes);
+			cachedSequence = project.toSequenceTracks(java.util.Set.of(), dedupeIdenticalNotes, chordFitRules());
 		}
 		return cachedSequence;
 	}
@@ -1441,6 +1448,34 @@ public final class MidicraftConfig {
 
 	public void setChordThinTarget(int chordThinTarget) {
 		this.chordThinTarget = clampChordThinTarget(chordThinTarget);
+		// The sequence leaves out what the chord limit does at this target, so it is stale now.
+		cachedSequence = null;
+	}
+
+	public boolean thinChordsByVolume() {
+		return thinChordsByVolume;
+	}
+
+	public void setThinChordsByVolume(boolean thinChordsByVolume) {
+		this.thinChordsByVolume = thinChordsByVolume;
+		cachedSequence = null;
+	}
+
+	public boolean thinChordsByStrikes() {
+		return thinChordsByStrikes;
+	}
+
+	public void setThinChordsByStrikes(boolean thinChordsByStrikes) {
+		this.thinChordsByStrikes = thinChordsByStrikes;
+		cachedSequence = null;
+	}
+
+	/**
+	 * The chord limit as preview, the analysis and the build apply it: the target, and whether volume
+	 * and strikes may give way to reach it.
+	 */
+	public ChordSkips.Rules chordFitRules() {
+		return new ChordSkips.Rules(chordThinTarget, thinChordsByVolume, thinChordsByStrikes);
 	}
 
 	public int layerPanelWidth() {
@@ -1542,6 +1577,8 @@ public final class MidicraftConfig {
 		config.composerSpeedQuarters = DEFAULT_COMPOSER_SPEED_QUARTERS;
 		config.midiVelocityCutoff = DEFAULT_MIDI_VELOCITY_CUTOFF;
 		config.chordThinTarget = DEFAULT_CHORD_THIN_TARGET;
+		config.thinChordsByVolume = true;
+		config.thinChordsByStrikes = true;
 		config.composerGuiScale = DEFAULT_COMPOSER_GUI_SCALE;
 		config.layerPanelWidth = DEFAULT_LAYER_PANEL_WIDTH;
 		config.layerPanelCollapsed = false;
@@ -1737,6 +1774,8 @@ public final class MidicraftConfig {
 		private MidiInstrumentSource midiInstrumentSource;
 		private Integer midiVelocityCutoff;
 		private Integer chordThinTarget;
+		private Boolean thinChordsByVolume;
+		private Boolean thinChordsByStrikes;
 		private Integer composerGuiScale;
 		private Integer layerPanelWidth;
 		private Boolean layerPanelCollapsed;
@@ -1809,6 +1848,8 @@ public final class MidicraftConfig {
 			this.midiInstrumentSource = config.midiInstrumentSource;
 			this.midiVelocityCutoff = config.midiVelocityCutoff;
 			this.chordThinTarget = config.chordThinTarget;
+			this.thinChordsByVolume = config.thinChordsByVolume;
+			this.thinChordsByStrikes = config.thinChordsByStrikes;
 			this.composerGuiScale = config.composerGuiScale;
 			this.layerPanelWidth = config.layerPanelWidth;
 			this.layerPanelCollapsed = config.layerPanelCollapsed;

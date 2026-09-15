@@ -36,6 +36,17 @@ final class NbsExporter {
 	}
 
 	static Result export(ComposerProject project, Path path) throws IOException {
+		return export(project, path, true,
+			com.midicraft.client.composer.ChordSkips.Rules.at(com.midicraft.client.composer.SongAnalysis.MAX_SIMULTANEOUS_NOTES));
+	}
+
+	/**
+	 * @param thinning the chord thinning settings, so the file plays what preview and the build
+	 *     play: strikes and copies the chord limit leaves out are left out of it too
+	 */
+	static Result export(ComposerProject project, Path path, boolean dedupeIdentical,
+			com.midicraft.client.composer.ChordSkips.Rules thinning)
+			throws IOException {
 		int scale = tickScale(project);
 		List<NbsSong.Note> notes = new ArrayList<>();
 		List<NbsSong.Layer> layers = new ArrayList<>();
@@ -49,7 +60,11 @@ final class NbsExporter {
 		// uses for a held note anyway.
 		double finest = project.layers().stream().anyMatch(ComposerProject.Layer::sustains)
 			? project.finestSustainStep() : 0.0;
+		com.midicraft.client.composer.ChordSkips skips =
+			com.midicraft.client.composer.ChordSkips.of(project, dedupeIdentical, thinning, finest);
+		int layerIndex = -1;
 		for (ComposerProject.Layer layer : project.layers()) {
+			layerIndex++;
 			// A sound effect layer has nothing to become here. NBS numbers note block instruments,
 			// and a door is not one of those -- writing it as a harp would put a wrong note in the
 			// file where the composition has a door, which is worse than leaving it out. Left out
@@ -76,8 +91,10 @@ final class NbsExporter {
 			// NBS has no count, and its velocity is already the note's own loudness, so a note
 			// stacked three times is three notes -- which Note Block Studio plays three times as
 			// loud, the same as the machine does.
-			for (ComposerProject.Layer voiceLayer
-					: (finest > 0.0 ? project.withSustainsExpanded(layer, finest) : layer).buildVoices()) {
+			List<ComposerProject.Layer> voiceLayers =
+				(finest > 0.0 ? project.withSustainsExpanded(layer, finest) : layer).buildVoices();
+			for (int voiceIndex = 0; voiceIndex < voiceLayers.size(); voiceIndex++) {
+				ComposerProject.Layer voiceLayer = voiceLayers.get(voiceIndex);
 				if (!voiceLayer.pitched()) {
 					// A door stacked onto a tuned layer: left out, and counted, for the reason a
 					// whole sound effect layer is.
@@ -93,6 +110,11 @@ final class NbsExporter {
 				}
 				for (int copy = 0; copy < voiceLayer.copies(); copy++) {
 					for (ComposerProject.NoteEvent note : voiceLayer.notes()) {
+						if (skips.skips(layerIndex, note.id(), note.startTick())
+								|| copy >= skips.copiesAt(layerIndex, voiceIndex, note.id(),
+									note.startTick(), voiceLayer.copies())) {
+							continue;
+						}
 						long tick = note.startTick() / scale;
 						if (tick > NbsWriter.maxTick()) {
 							pastTheEnd++;

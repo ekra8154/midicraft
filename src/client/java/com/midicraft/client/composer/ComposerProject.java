@@ -1291,11 +1291,27 @@ public record ComposerProject(
 	 *     moment the layers stop agreeing, which is what changing one layer's instrument does.
 	 */
 	public List<SequenceTrack> toSequenceTracks(Set<Integer> layerIndices, boolean dedupeIdentical) {
+		return toSequenceTracks(layerIndices, dedupeIdentical, SongAnalysis.MAX_SIMULTANEOUS_NOTES);
+	}
+
+	/**
+	 * @param thinTarget the most note blocks a tick may hold before its strikes and extra copies are
+	 *     left out; see {@link ChordSkips}. The chord thinning preference, or the cap.
+	 */
+	public List<SequenceTrack> toSequenceTracks(Set<Integer> layerIndices, boolean dedupeIdentical,
+			int thinTarget) {
+		return toSequenceTracks(layerIndices, dedupeIdentical, ChordSkips.Rules.at(thinTarget));
+	}
+
+	/** @param thinning what the chord limit may leave out, and above how many note blocks */
+	public List<SequenceTrack> toSequenceTracks(Set<Integer> layerIndices, boolean dedupeIdentical,
+			ChordSkips.Rules thinning) {
 		List<SequenceTrack> result = new ArrayList<>();
 		Set<NoteSound> heard = dedupeIdentical ? new java.util.HashSet<>() : null;
 		// Sustains become strikes before anything is deduplicated or rounded: a strike is a note the
 		// build places, and every gap is rounded once, on its own.
 		double finest = layers.stream().anyMatch(Layer::sustains) ? finestSustainStep() : 0.0;
+		ChordSkips skips = ChordSkips.of(this, dedupeIdentical, thinning, finest);
 		for (int index = 0; index < layers.size(); index++) {
 			Layer layer = layers.get(index);
 			boolean chosen = layerIndices == null || layerIndices.isEmpty()
@@ -1311,12 +1327,16 @@ public record ComposerProject(
 			// dropped, and none of them count as heard. The count is somebody asking for a louder
 			// note, and collapsing it -- or letting it collapse a note on another layer -- would
 			// quietly undo that. Its copies are expanded only after.
-			for (Layer voice : (finest > 0.0 ? withSustainsExpanded(layer, finest) : layer).buildVoices()) {
+			List<Layer> voices = (finest > 0.0 ? withSustainsExpanded(layer, finest) : layer).buildVoices();
+			for (int voiceIndex = 0; voiceIndex < voices.size(); voiceIndex++) {
+				Layer voice = voices.get(voiceIndex);
 				Layer projected = heard == null || voice.copies() > 1
 					? voice : withoutAlreadyHeard(voice, heard);
-				String text = toText(projected);
-				for (Layer copy : projected.asCopies()) {
-					result.add(new SequenceTrack(copy.name(), text, copy.instrument(), 0, true));
+				// What the chord limit leaves out comes off last, after deduplication, so it is
+				// weighed against the chord the build really places: a skipped strike, and the
+				// copies a crowded tick has no room for.
+				for (Layer copy : skips.copiesOf(index, voiceIndex, projected)) {
+					result.add(new SequenceTrack(copy.name(), toText(copy), copy.instrument(), 0, true));
 				}
 			}
 		}
@@ -2785,11 +2805,23 @@ public record ComposerProject(
 	 * swallows a wholly deduplicated event rounds differently from the two it replaces.</p>
 	 */
 	public List<Layer> buildLayers(boolean dedupeIdentical) {
+		return buildLayers(dedupeIdentical, SongAnalysis.MAX_SIMULTANEOUS_NOTES);
+	}
+
+	/** @param thinTarget see {@link #toSequenceTracks(Set, boolean, int)} */
+	public List<Layer> buildLayers(boolean dedupeIdentical, int thinTarget) {
+		return buildLayers(dedupeIdentical, ChordSkips.Rules.at(thinTarget));
+	}
+
+	/** @param thinning what the chord limit may leave out, and above how many note blocks */
+	public List<Layer> buildLayers(boolean dedupeIdentical, ChordSkips.Rules thinning) {
 		List<Layer> chosen = new ArrayList<>();
 		Set<NoteSound> heard = dedupeIdentical ? new java.util.HashSet<>() : null;
 		// Sustains become strikes first, for the reason toSequenceTracks gives.
 		double finest = anyBuildLayerSustains() ? finestSustainStep() : 0.0;
-		for (Layer layer : layers) {
+		ChordSkips skips = ChordSkips.of(this, dedupeIdentical, thinning, finest);
+		for (int layerIndex = 0; layerIndex < layers.size(); layerIndex++) {
+			Layer layer = layers.get(layerIndex);
 			if (!layer.inBuild()) {
 				continue;
 			}
@@ -2797,10 +2829,12 @@ public record ComposerProject(
 			// is a plain one-instrument layer and downstream readers need no new case.
 			// A counted voice skips the deduplication both ways and arrives as one layer per copy;
 			// see toSequenceTracks.
-			for (Layer voice : (finest > 0.0 ? withSustainsExpanded(layer, finest) : layer).buildVoices()) {
+			List<Layer> voices = (finest > 0.0 ? withSustainsExpanded(layer, finest) : layer).buildVoices();
+			for (int voiceIndex = 0; voiceIndex < voices.size(); voiceIndex++) {
+				Layer voice = voices.get(voiceIndex);
 				Layer projected = heard == null || voice.copies() > 1
 					? voice : withoutAlreadyHeard(voice, heard);
-				chosen.addAll(projected.asCopies());
+				chosen.addAll(skips.copiesOf(layerIndex, voiceIndex, projected));
 			}
 		}
 		return List.copyOf(chosen);

@@ -712,6 +712,12 @@ public final class SettingsScreen extends Screen {
 					MidicraftConfig.MAX_CHORD_THIN_TARGET,
 					MidicraftConfig::chordThinTarget, config::setChordThinTarget,
 					value -> value + " per chord")));
+				// Volume first, the order the chord limit uses them: a copy less is less noticed
+				// than a skipped strike.
+				entries.add(Entry.of(toggle("chord_thin_volume",
+					MidicraftConfig::thinChordsByVolume, config::setThinChordsByVolume)));
+				entries.add(Entry.of(toggle("chord_thin_strikes",
+					MidicraftConfig::thinChordsByStrikes, config::setThinChordsByStrikes)));
 
 				// What is left of import: which instrument a track arrives as, and the one setting
 				// that still drops notes on the way in. Everything else an import used to decide

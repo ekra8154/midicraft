@@ -38,6 +38,8 @@ final class NoteCellGrid {
 	 * bar; the identity only shows on notes with nothing wrong with them.</p>
 	 */
 	static final int SPLIT = 64;
+	/** Played quieter than asked, or with strikes left out, to fit the chord thinning target. */
+	static final int THINNED = 128;
 	/** Set on a note once a later note has taken its cell. */
 	private static final int COVERED = 16;
 	/** How wide the warning bar down a flagged note's left edge is. */
@@ -181,7 +183,7 @@ final class NoteCellGrid {
 			if ((noteFlags & COVERED) != 0) {
 				continue;
 			}
-			int kind = noteFlags & (CROWDED | OFF_GRID | UNBUILDABLE | SPLIT);
+			int kind = noteFlags & (CROWDED | OFF_GRID | UNBUILDABLE | SPLIT | THINNED);
 			boolean highlighted = (noteFlags & HIGHLIGHTED) != 0;
 			// A selected note is the one thing that cannot weld: its halo is pinned to its own
 			// edges, so it draws alone and leaves the row closed behind it.
@@ -264,6 +266,11 @@ final class NoteCellGrid {
 		}
 		if ((kind & OFF_GRID) != 0) {
 			return highlighted ? 0xFFFFE45C : 0x55FFE45C;
+		}
+		// Violet for a note the chord limit thins: not a heat colour either, because nothing is
+		// wrong with it. It plays -- only less of it, where its chord has no room.
+		if ((kind & THINNED) != 0) {
+			return highlighted ? 0xFFB98CFF : 0x55B98CFF;
 		}
 		// The split identity, last: teal, because every warning here is a heat colour and this is
 		// the one bar that means nothing is wrong.

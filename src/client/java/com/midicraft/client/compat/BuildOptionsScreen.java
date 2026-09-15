@@ -538,6 +538,8 @@ final class BuildOptionsScreen extends Screen {
 		// and neither is a thing to be touching from another thread.
 		BlockPos origin = SongBuilder.pasteOrigin(minecraft);
 		SongBuilder.PasteMode planned = mode;
+		// Read here with the rest of what the forecast needs, on the render thread.
+		com.midicraft.client.composer.ChordSkips.Rules thinning = MidicraftConfig.get().chordFitRules();
 		// Read here with the origin, for the same reason: the level is the render thread's.
 		int worldTop = minecraft.level == null ? Integer.MAX_VALUE : minecraft.level.getMaxY();
 		int worldFloor = minecraft.level == null ? Integer.MIN_VALUE : minecraft.level.getMinY();
@@ -562,7 +564,7 @@ final class BuildOptionsScreen extends Screen {
 				// means the composition rather than the sequence -- forecasting the sequence there
 				// would predict a build at twice the speed of the one it is about to make.
 				SongBuilder.PastePlan plan = SongBuilder.createPastePlan(origin,
-					SongBuilder.notesFor(planned, sequence, project, dedupeIdenticalNotes),
+					SongBuilder.notesFor(planned, sequence, project, dedupeIdenticalNotes, thinning),
 					planned, limits);
 				// Off the blocks rather than off the height, which is a span and says nothing
 				// about where the span sits. getMaxY is the highest cell that takes a block, not

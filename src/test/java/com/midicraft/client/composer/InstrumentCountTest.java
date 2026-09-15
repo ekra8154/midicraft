@@ -88,10 +88,14 @@ class InstrumentCountTest {
 		for (int index = 0; index < chord.length; index++) {
 			chord[index] = note(54 + index, 0L);
 		}
-		SongAnalysis stats = SongAnalysis.of(songOf(plain("HARP", chord).withCountStepped("HARP", 1)), true);
+		ComposerProject song = songOf(plain("HARP", chord).withCountStepped("HARP", 1));
 
-		assertEquals(32, stats.peakChord());
-		assertEquals(1L, stats.overloadedTicks(), "sixteen notes twice is two over the thirty");
+		assertEquals(32, SongAnalysis.of(song, true, true, Integer.MAX_VALUE).peakChord(),
+			"with nothing thinned, sixteen notes twice is thirty-two");
+		SongAnalysis stats = SongAnalysis.of(song, true);
+		assertEquals(30, stats.peakChord(), "at the cap two copies give way");
+		assertEquals(0L, stats.overloadedTicks());
+		assertEquals(2, stats.skips().blocksRemoved());
 	}
 
 	@Test
@@ -178,14 +182,18 @@ class InstrumentCountTest {
 		NoteEvent doubledHarp = note(60, 0L);
 		ComposerProject song = songOf(
 			plain("HARP", counted).withCountStepped("HARP", 5),
-			plain("HARP", doubledHarp, note(62, 0L), note(64, 0L)),
+			plain("HARP", doubledHarp, note(62, 0L), note(64, 0L), note(65, 0L), note(67, 0L),
+				note(69, 0L), note(71, 0L), note(72, 0L)),
 			plain("BASS", note(60, 0L)));
 
+		// Fifteen sounds against eight: the chord limit first takes the harp's copies down to one,
+		// which leaves ten, and only those ten are the thinner's to weigh.
+		assertEquals(1, ChordSkips.of(song, true, 8, 0.0).copiesAt(0, 0, counted.id(), 0L, 6));
 		ChordThinner.Result thinned = ChordThinner.thin(song, 8, true);
 
 		assertEquals(Set.of(doubledHarp.id()), thinned.noteIds(),
-			"only the plain doubled harp can go; the bass is the only bass");
-		assertEquals(1, thinned.chordsStillOver(), "six copies plus three pitches stay over eight");
+			"only the plain doubled harp can go; the counted harp's copy never does, and the bass is the only bass");
+		assertEquals(1, thinned.chordsStillOver(), "nine left of fifteen is still over eight");
 	}
 
 	/** A song saved before counts reads as counts of one, and a counted one survives the disk. */

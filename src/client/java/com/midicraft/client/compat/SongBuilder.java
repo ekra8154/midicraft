@@ -86,8 +86,14 @@ public final class SongBuilder {
 	 * the same deduplication, the same one-rounding-per-gap. Only the unit is finer.</p>
 	 */
 	static List<EventNote> gameTickEventNotes(ComposerProject project, boolean dedupeIdentical) {
+		return gameTickEventNotes(project, dedupeIdentical, com.midicraft.client.composer.ChordSkips.Rules.at(MAX_SIMULTANEOUS_NOTES));
+	}
+
+	/** @param thinning the chord thinning settings; see ComposerProject.buildLayers */
+	static List<EventNote> gameTickEventNotes(ComposerProject project, boolean dedupeIdentical,
+			com.midicraft.client.composer.ChordSkips.Rules thinning) {
 		List<EventNote> notes = new ArrayList<>();
-		walkGameTicks(project, dedupeIdentical, (time, layerIndex, order, note, instrumentBlock) ->
+		walkGameTicks(project, dedupeIdentical, thinning, (time, layerIndex, order, note, instrumentBlock) ->
 			notes.add(new EventNote(time, layerIndex + 1, order, note.noteBlockPitch(),
 				instrumentBlock)));
 		notes.sort(Comparator.comparingInt(EventNote::time)
@@ -114,8 +120,8 @@ public final class SongBuilder {
 	 * came out wrong.</p>
 	 */
 	private static void walkGameTicks(ComposerProject project, boolean dedupeIdentical,
-			GameTickVisitor visitor) {
-		List<ComposerProject.Layer> layers = project.buildLayers(dedupeIdentical);
+			com.midicraft.client.composer.ChordSkips.Rules thinning, GameTickVisitor visitor) {
+		List<ComposerProject.Layer> layers = project.buildLayers(dedupeIdentical, thinning);
 		for (int layerIndex = 0; layerIndex < layers.size(); layerIndex++) {
 			ComposerProject.Layer layer = layers.get(layerIndex);
 			String instrumentBlock = instrumentBlockId(layer.instrument());
@@ -151,8 +157,8 @@ public final class SongBuilder {
 	static Map<Long, Integer> buildGameTickByNoteId(ComposerProject project,
 			boolean dedupeIdentical) {
 		Map<Long, Integer> ticks = new HashMap<>();
-		walkGameTicks(project, dedupeIdentical, (time, layerIndex, order, note, instrumentBlock) ->
-			ticks.putIfAbsent(note.id(), time));
+		walkGameTicks(project, dedupeIdentical, com.midicraft.client.composer.ChordSkips.Rules.at(MAX_SIMULTANEOUS_NOTES),
+			(time, layerIndex, order, note, instrumentBlock) -> ticks.putIfAbsent(note.id(), time));
 		return ticks;
 	}
 
@@ -244,11 +250,12 @@ public final class SongBuilder {
 	 * consulted for the one thing the projection to repeater ticks has already thrown away.</p>
 	 */
 	static PastePlan plan(Minecraft minecraft, List<MidicraftConfig.SequenceTrack> tracks,
-			PasteMode mode, ComposerProject project, boolean dedupeIdentical) {
+			PasteMode mode, ComposerProject project, boolean dedupeIdentical,
+			com.midicraft.client.composer.ChordSkips.Rules thinning) {
 		// The composition's name goes on the sign too. This overload arrived while the sign did
 		// not exist and quietly dropped it on the way back in, which would have left every
 		// half-ticked build in the world as the one anonymous machine among them.
-		return createPastePlan(minecraft, notesFor(mode, tracks, project, dedupeIdentical), mode,
+		return createPastePlan(minecraft, notesFor(mode, tracks, project, dedupeIdentical, thinning), mode,
 			project == null ? null : project.name());
 	}
 
@@ -263,8 +270,17 @@ public final class SongBuilder {
 	 */
 	static List<EventNote> notesFor(PasteMode mode, List<MidicraftConfig.SequenceTrack> tracks,
 			ComposerProject project, boolean dedupeIdentical) {
+		return notesFor(mode, tracks, project, dedupeIdentical, com.midicraft.client.composer.ChordSkips.Rules.at(MAX_SIMULTANEOUS_NOTES));
+	}
+
+	/**
+	 * @param thinning the chord thinning settings, for the modes built from the composition. The
+	 *     sequence the other modes are handed was made with it already.
+	 */
+	static List<EventNote> notesFor(PasteMode mode, List<MidicraftConfig.SequenceTrack> tracks,
+			ComposerProject project, boolean dedupeIdentical, com.midicraft.client.composer.ChordSkips.Rules thinning) {
 		return mode.gameTicks() && project != null
-			? gameTickEventNotes(project, dedupeIdentical)
+			? gameTickEventNotes(project, dedupeIdentical, thinning)
 			: eventNotes(tracks);
 	}
 

@@ -72,8 +72,11 @@ class SustainBuildTest {
 		ComposerProject song = songOf(layer("HARP", EVERY_SIXTEENTH, held), layer("BELL", null, landing));
 
 		assertEquals(0L, SongAnalysis.ofWritten(song, true).overloadedTicks(), "as written, nothing is over");
-		assertTrue(SongAnalysis.of(song, true).overloadedTicks() >= 1L,
+		assertTrue(SongAnalysis.of(song, true, true, Integer.MAX_VALUE).overloadedTicks() >= 1L,
 			"twenty strikes and twelve notes on one tick are thirty-two note blocks");
+		SongAnalysis fitted = SongAnalysis.of(song, true);
+		assertEquals(0L, fitted.overloadedTicks(), "at the cap, two strikes give way");
+		assertEquals(2, fitted.skips().strikesSkipped());
 	}
 
 	@Test

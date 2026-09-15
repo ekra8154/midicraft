@@ -1,6 +1,7 @@
 package com.midicraft.client.compat;
 
 import com.midicraft.client.MidicraftConfig;
+import com.midicraft.client.composer.ChordSkips;
 import com.midicraft.client.composer.ChordThinner;
 import com.midicraft.client.composer.ComposerHistory;
 import com.midicraft.client.composer.ComposerProject;
@@ -631,6 +632,8 @@ public final class ComposerScreen extends Screen {
 	private static final int TRAIL_GRAB_PIXELS = 3;
 	/** The tick drawn on a sustained trail at every strike. */
 	private static final int SUSTAIN_TICK_COLOR = 0xFFFFD27A;
+	/** A strike the chord limit leaves out, still drawn, faintly, so it reads as asked for. */
+	private static final int SUSTAIN_TICK_SKIPPED_COLOR = 0x40FFD27A;
 	/** The composition {@link #cachedFinest} was worked out for. */
 	private ComposerProject cachedFinestProject;
 	private double cachedFinest;
@@ -795,6 +798,8 @@ public final class ComposerScreen extends Screen {
 	private ComposerProject cachedStatsProject;
 	private SongAnalysis cachedStats;
 	private boolean cachedStatsDedupe;
+	/** The chord thinning settings the cached analysis was judged under. */
+	private ChordSkips.Rules cachedStatsRules;
 	private List<MidicraftConfig.SequenceTrack> cachedBlockTracks;
 	private SongBuilder.BlockCounts cachedBlockCounts;
 	private ComposerProject cachedParityProject;
@@ -2058,7 +2063,8 @@ public final class ComposerScreen extends Screen {
 					Path folder = Path.of(config.importDirectory());
 					Files.createDirectories(folder);
 					NbsExporter.Result written = NbsExporter.export(project(),
-						folder.resolve(safeFileName(wanted) + ".nbs"));
+						folder.resolve(safeFileName(wanted) + ".nbs"), config.dedupeIdenticalNotes(),
+						config.chordFitRules());
 					showResult(Component.literal("Exported to " + written.path()
 						+ " - " + written.report()));
 				} catch (Exception failed) {
@@ -2109,6 +2115,12 @@ public final class ComposerScreen extends Screen {
 		// The bar last of the backgrounds and first of the foregrounds: it has to cover the roll,
 		// and its own controls and the composition name have to sit on top of it.
 		extractMenuBar(graphics, mouseX, mouseY);
+		// The panel's own buttons stand down while a menu hangs over the panel. Drawn beneath it,
+		// they still answered the pointer -- their tooltip over the menu's bottom rows, and their
+		// click in place of the row's.
+		for (Button button : moveLayerButtons) {
+			button.visible = !layerMenuOpen && !contextMenuOpen;
+		}
 		super.extractRenderState(graphics, mouseX, mouseY, partialTick);
 		mark = phase(PHASE_WIDGETS, mark);
 		extractInstrumentMenu(graphics, mouseX, mouseY);
@@ -2185,21 +2197,43 @@ public final class ComposerScreen extends Screen {
 		}
 	}
 
-	/** Draws the hovered menu row's explanation in a strip along the bottom of the screen. */
+	/**
+	 * Draws the hovered menu row's explanation in a strip along the bottom of the screen -- or,
+	 * while a menu that can reach the bottom is open, beside that menu, so the explanation never
+	 * sits over the rows it is explaining.
+	 */
 	private void extractMenuDescription(GuiGraphicsExtractor graphics) {
 		if (hoveredDescription.isEmpty()) {
 			return;
 		}
+		NoteRect menu = layerMenuOpen
+			? new NoteRect(layerMenuX, layerMenuY, layerMenuX + layerMenuWidth(), layerMenuY + layerMenuHeight())
+			: contextMenuOpen
+				? new NoteRect(contextMenuX, contextMenuY, contextMenuX + CONTEXT_MENU_WIDTH,
+					contextMenuY + ContextAction.values().length * CONTEXT_MENU_ROW_HEIGHT + 4)
+				: null;
+		int left = 6;
 		int maxWidth = Math.max(160, width - 32);
+		if (menu != null && width - menu.right() - 20 >= 160) {
+			left = menu.right() + 8;
+			maxWidth = width - left - 12;
+		}
 		List<net.minecraft.util.FormattedCharSequence> lines =
 			font.split(Component.literal(hoveredDescription), maxWidth);
 		int textWidth = lines.stream().mapToInt(font::width).max().orElse(0);
 		int height = lines.size() * (font.lineHeight + 2);
 		int top = this.height - 26 - height;
-		graphics.fill(6, top - 4, 14 + textWidth, top + height, 0xF0101115);
-		graphics.fill(6, top - 4, 14 + textWidth, top - 3, 0xFF8FD3FF);
+		if (menu != null && left > 6) {
+			// Level with the menu's foot, where the pointer was when the lower rows got hard to reach.
+			top = Math.max(TOOLBAR_HEIGHT + 8, Math.min(this.height - 26 - height, menu.bottom() - height));
+		} else if (menu != null && menu.intersects(left - 2, top - 4, left + 8 + textWidth, top + height)) {
+			// No room beside it: over the top of the screen instead, above the menu.
+			top = TOOLBAR_HEIGHT + 8;
+		}
+		graphics.fill(left, top - 4, left + 8 + textWidth, top + height, 0xF0101115);
+		graphics.fill(left, top - 4, left + 8 + textWidth, top - 3, 0xFF8FD3FF);
 		for (int index = 0; index < lines.size(); index++) {
-			graphics.text(font, lines.get(index), 10, top + index * (font.lineHeight + 2),
+			graphics.text(font, lines.get(index), left + 4, top + index * (font.lineHeight + 2),
 				0xFFD6D8DD, false);
 		}
 	}
@@ -2371,6 +2405,21 @@ public final class ComposerScreen extends Screen {
 			cachedFinest = current.finestSustainStep();
 		}
 		return cachedFinest;
+	}
+
+	/**
+	 * Selects every note the chord limit thins anywhere: a strike left out, or a sounding played with
+	 * fewer copies than it asks for.
+	 */
+	private void selectThinnedNotes() {
+		ChordSkips thinning = projectStats().skips();
+		selectedNotes.clear();
+		selectedNotes.addAll(thinning.thinnedNoteIds());
+		clearRange();
+		updateButtonStates();
+		showResult(Component.literal(thinning.thinnedNoteIds().size() + " notes thinned to fit "
+			+ config.chordThinTarget() + ": " + thinning.strikesSkipped() + " strikes skipped, "
+			+ thinning.blocksRemoved() + " note blocks left out altogether."));
 	}
 
 	private void extractToolbarMenu(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
@@ -2697,6 +2746,7 @@ public final class ComposerScreen extends Screen {
 			case SELECT_OUT_OF_RANGE -> projectStats().outOfRange() > 0;
 			case SELECT_OVERLOADED_CHORDS -> projectStats().overloadedTicks() > 0
 				|| projectStats().peakChord() > config.chordThinTarget();
+			case SELECT_THINNED -> !projectStats().skips().thinnedNoteIds().isEmpty();
 			case SELECT_NONE -> focusedPane == Pane.LAYERS
 				|| !selectedNotes.isEmpty() || !selectedLayers.isEmpty();
 			case RENAME_MARKER -> markerAtCursor() != null;
@@ -2826,6 +2876,7 @@ public final class ComposerScreen extends Screen {
 			case SELECT_OUT_OF_RANGE -> selectNotesWhere("out of range",
 				(layer, note) -> layer.outOfRange(note), true);
 			case SELECT_OVERLOADED_CHORDS -> selectOverloadedChordNotes();
+			case SELECT_THINNED -> selectThinnedNotes();
 			case SELECT_ALL_NOTES -> selectNotesWhere("selected", note -> true, false);
 			case SELECT_NONE -> dropSelection();
 		}
@@ -3140,7 +3191,7 @@ public final class ComposerScreen extends Screen {
 			}
 		}
 		ChordThinner.Result thinned =
-			ChordThinner.thin(project(), target, config.dedupeIdenticalNotes(), scope);
+			ChordThinner.thin(project(), config.chordFitRules(), config.dedupeIdenticalNotes(), scope);
 		selectedNotes.clear();
 		selectedNotes.addAll(thinned.noteIds());
 		clearRange();
@@ -3304,6 +3355,9 @@ public final class ComposerScreen extends Screen {
 				+ "Never the last of a pitch or the last of an instrument, so a chord keeps its "
 				+ "harmony and keeps its drum -- only how thickly they are scored changes. Takes "
 				+ "from the selected layers only; select them all to thin the whole song.";
+			case SELECT_THINNED -> "Selects every note the chord limit plays quieter or skips strikes "
+				+ "of, to fit the chord thinning target in Settings. Nothing is deleted: the song still "
+				+ "asks for every copy and every strike, and they come back wherever a chord has room.";
 			case BAKE_SPEED -> "Folds the Speed slider into the song's own tempo and puts the slider "
 				+ "back to 1.00x. Nothing about the song changes -- 150 BPM at 2.00x and 300 BPM at "
 				+ "1.00x are the same song, note for note -- but the tempo written in the file becomes "
@@ -3756,6 +3810,14 @@ public final class ComposerScreen extends Screen {
 				String badge = layer.mix().size() > 1 ? "+" : "×" + layer.mix().get(0).count();
 				smallText(graphics, badge, row.instrumentX() + 16 - smallTextWidth(badge), y + 9,
 					0xFFFFFFFF);
+			}
+			// A sustaining layer's icon wears the roll's own mark for it: an amber line with its ticks.
+			if (layer.sustains()) {
+				int markLeft = row.instrumentX();
+				graphics.fill(markLeft, y + 14, markLeft + 16, y + 15, SUSTAIN_TICK_COLOR);
+				for (int tick = 2; tick < 16; tick += 6) {
+					graphics.fill(markLeft + tick, y + 12, markLeft + tick + 1, y + 15, SUSTAIN_TICK_COLOR);
+				}
 			}
 			// Whether you will hear this layer, marked on the thing that makes the sound -- and the
 			// one part of a row that survives every width, so a folded panel still answers it. A
@@ -5042,6 +5104,8 @@ public final class ComposerScreen extends Screen {
 		boolean anyCrowded = !crowded.isEmpty();
 		boolean anyOffGrid = !offGrid.isEmpty();
 		boolean anySelected = !selectedNotes.isEmpty();
+		ChordSkips thinning = stats.skips();
+		boolean anyThinned = !thinning.isEmpty();
 		NoteEvent hoveredCandidate = null;
 		int hoveredCandidateLayer = -1;
 		long firstVisibleTick = Math.max(0L, horizontalScroll - stats.maximumNoteDuration());
@@ -5057,6 +5121,14 @@ public final class ComposerScreen extends Screen {
 		int noteWidth = noteWidth();
 		boolean showTrails = config.showNoteTrails();
 		int trailHeight = Math.max(2, (rowHeight - 2) / 3);
+		// A selected layer that sustains is drawn after everything else: its live trails over the
+		// notes of every other layer, and its own notes over its trails. The layer being worked on
+		// is the one whose held notes matter, and under a busy song they were buried.
+		boolean liftSustains = !noLayerSelected() && selectedLayers.stream()
+			.anyMatch(index -> index >= 0 && index < shown.layers().size()
+				&& shown.layers().get(index).sustains());
+		List<Runnable> liftedTrails = new ArrayList<>();
+		List<int[]> liftedCells = new ArrayList<>();
 		cells.begin(rollX, rollWidth, noteWidth, rowHeight - 2);
 		for (int layerIndex : noteDrawOrder(shown)) {
 			Layer layer = shown.layers().get(layerIndex);
@@ -5078,6 +5150,10 @@ public final class ComposerScreen extends Screen {
 			// shown or not, with a tick at every strike. They sound now, so hiding them would hide
 			// part of the song.
 			ComposerProject.Strikes strikes = layer.sustains() ? editorStrikes(shown, layer) : null;
+			boolean lifted = liftSustains && highlighted;
+			// Dormant trails belong to the layers you are working on, or to all of them while none
+			// is selected -- the same rule that decides which notes are lit and can be picked up.
+			boolean trailsHere = showTrails && highlighted;
 			for (int noteIndex = lowerBoundStart(notes, firstVisibleTick);
 					noteIndex < notes.size(); noteIndex++) {
 				NoteEvent note = notes.get(noteIndex);
@@ -5092,7 +5168,7 @@ public final class ComposerScreen extends Screen {
 				int left = tickX(note.startTick());
 				int right = left + noteWidth;
 				boolean live = strikes != null && strikes.sustained(note);
-				int trailEnd = showTrails || live ? trailEndX(note, left, noteWidth) : right;
+				int trailEnd = trailsHere || live ? trailEndX(note, left, noteWidth) : right;
 				if (Math.max(right, trailEnd) <= rollX || left >= rollRight) {
 					continue;
 				}
@@ -5105,8 +5181,12 @@ public final class ComposerScreen extends Screen {
 					// Drawn now, before a single note, so every trail sits behind every note. It is
 					// how long the note lasts, and until a layer sustains it that is all it is: dark,
 					// thin, and never in the way of a strike -- its own or anybody else's.
-					if (live) {
-						extractLiveTrail(graphics, note, strikes, right, trailEnd, top, bottom, color);
+					if (live && lifted) {
+						liftedTrails.add(() -> extractLiveTrail(graphics, note, strikes, right, trailEnd,
+							top, bottom, color, layerIndex, thinning));
+					} else if (live) {
+						extractLiveTrail(graphics, note, strikes, right, trailEnd, top, bottom, color, layerIndex,
+							thinning);
 					} else {
 						int trailTop = top + (rowHeight - 2 - trailHeight) / 2;
 						graphics.fill(Math.max(right, rollX), trailTop, Math.min(trailEnd, rollRight),
@@ -5135,7 +5215,15 @@ public final class ComposerScreen extends Screen {
 					// so a note standing outside the red wash reads as intended, not as a mistake.
 					flags |= NoteCellGrid.SPLIT;
 				}
-				cells.add(left, top, color, flags, midi);
+				if (anyThinned && thinning.thinned(layerIndex, note.id())) {
+					// Played quieter than asked, or with strikes left out, to fit the thinning target.
+					flags |= NoteCellGrid.THINNED;
+				}
+				if (lifted) {
+					liftedCells.add(new int[] {left, top, color, flags, midi});
+				} else {
+					cells.add(left, top, color, flags, midi);
+				}
 				if (mouseX >= left && mouseX < right && mouseY >= top && mouseY < bottom) {
 					// Topmost wins: draw order runs back to front, so a later hit overwrites.
 					hoveredCandidate = note;
@@ -5147,7 +5235,18 @@ public final class ComposerScreen extends Screen {
 		quads.graphics = graphics;
 		// Dimmed while the layer panel holds the keyboard, for the same reason and in the other
 		// direction: a note selection Delete can no longer reach should not look like one it can.
-		noteQuads = cells.draw(quads, focusedPane == Pane.ROLL ? 0xFFFFFFFF : 0xFF6E7A83);
+		int halo = focusedPane == Pane.ROLL ? 0xFFFFFFFF : 0xFF6E7A83;
+		noteQuads = cells.draw(quads, halo);
+		if (!liftedTrails.isEmpty() || !liftedCells.isEmpty()) {
+			for (Runnable trail : liftedTrails) {
+				trail.run();
+			}
+			cells.begin(rollX, rollWidth, noteWidth, rowHeight - 2);
+			for (int[] cell : liftedCells) {
+				cells.add(cell[0], cell[1], cell[2], cell[3], cell[4]);
+			}
+			noteQuads += cells.draw(quads, halo);
+		}
 		quads.graphics = null;
 		if (profiling) {
 			long now = System.nanoTime();
@@ -5181,7 +5280,8 @@ public final class ComposerScreen extends Screen {
 	 * at that zoom is what a note striking on every tick looks like.</p>
 	 */
 	private void extractLiveTrail(GuiGraphicsExtractor graphics, NoteEvent note,
-			ComposerProject.Strikes strikes, int right, int trailEnd, int top, int bottom, int color) {
+			ComposerProject.Strikes strikes, int right, int trailEnd, int top, int bottom, int color,
+			int layerIndex, ChordSkips thinning) {
 		int rollRight = rollX + rollWidth;
 		int inset = (bottom - top) / 4;
 		graphics.fill(Math.max(right, rollX), top + inset, Math.min(trailEnd, rollRight), bottom - inset,
@@ -5194,7 +5294,8 @@ public final class ComposerScreen extends Screen {
 		strikes.forEach(note, from, to, tick -> {
 			int x = tickX(tick);
 			if (x >= rollX && x < rollRight) {
-				graphics.fill(x, top, x + 1, bottom, SUSTAIN_TICK_COLOR);
+				graphics.fill(x, top, x + 1, bottom, thinning.skips(layerIndex, note.id(), tick)
+					? SUSTAIN_TICK_SKIPPED_COLOR : SUSTAIN_TICK_COLOR);
 			}
 		});
 	}
@@ -5339,6 +5440,27 @@ public final class ComposerScreen extends Screen {
 					+ timing.gapLabel(note.startTick())
 					+ " repeater ticks after the previous note, not a whole number")
 				.withStyle(net.minecraft.ChatFormatting.YELLOW));
+		}
+		ChordSkips thinning = timing.skips();
+		int[] played = thinning.playedAt(layerIndex, note.id(), note.startTick());
+		if (played != null) {
+			lines.add(Component.literal("Plays " + played[1] + " of " + played[0]
+					+ " note blocks here - the chord is over the thinning target of "
+					+ config.chordThinTarget())
+				.withStyle(net.minecraft.ChatFormatting.LIGHT_PURPLE));
+		}
+		int skippedStrikes = thinning.skippedStrikes(layerIndex, note.id());
+		int quieterStrikes = thinning.quieterStrikes(layerIndex, note.id());
+		if (skippedStrikes > 0 || quieterStrikes > 0) {
+			List<String> said = new ArrayList<>();
+			if (skippedStrikes > 0) {
+				said.add(skippedStrikes + (skippedStrikes == 1 ? " strike" : " strikes") + " skipped");
+			}
+			if (quieterStrikes > 0) {
+				said.add(quieterStrikes + (quieterStrikes == 1 ? " strike" : " strikes") + " played quieter");
+			}
+			lines.add(Component.literal(String.join(", ", said) + " to fit the thinning target")
+				.withStyle(net.minecraft.ChatFormatting.LIGHT_PURPLE));
 		}
 		graphics.setComponentTooltipForNextFrame(font, lines, mouseX, mouseY);
 	}
@@ -5722,6 +5844,19 @@ public final class ComposerScreen extends Screen {
 		segments.add("peak " + peakChord + "/" + SongAnalysis.MAX_SIMULTANEOUS_NOTES
 			+ (config.dedupeIdenticalNotes() ? " merged" : " unmerged")
 			+ (overloaded > 0 ? " (" + overloaded + " over)" : ""));
+		// What fitting the chords to the thinning preference cost, beside the peak it produced.
+		ChordSkips thinning = stats.skips();
+		if (thinning.blocksRemoved() > 0 || !thinning.stillOver().isEmpty()) {
+			List<String> fit = new ArrayList<>();
+			if (thinning.blocksRemoved() > 0) {
+				fit.add("thinned to " + config.chordThinTarget() + ": " + thinning.blocksRemoved()
+					+ " blocks left out");
+			}
+			if (!thinning.stillOver().isEmpty()) {
+				fit.add(thinning.stillOver().size() + " chords over " + config.chordThinTarget());
+			}
+			segments.add(String.join(", ", fit));
+		}
 		// Leads with the number that will be standing in the world. "6354 notes (788 deduped)" was
 		// arithmetically fine and still misread -- a count in brackets after a count reads as the
 		// remainder, not as the difference, and nothing on the line was the 5566 that got placed.
@@ -5838,12 +5973,14 @@ public final class ComposerScreen extends Screen {
 		// The speed is part of the project, so identity covers everything the composition decides.
 		// Deduplication is a setting rather than part of the song, so it has to be checked too.
 		if (cachedStatsProject == current && cachedStats != null
-				&& cachedStatsDedupe == config.dedupeIdenticalNotes()) {
+				&& cachedStatsDedupe == config.dedupeIdenticalNotes()
+				&& config.chordFitRules().equals(cachedStatsRules)) {
 			return cachedStats;
 		}
 		cachedStatsProject = current;
 		cachedStatsDedupe = config.dedupeIdenticalNotes();
-		cachedStats = SongAnalysis.of(current, cachedStatsDedupe, true);
+		cachedStatsRules = config.chordFitRules();
+		cachedStats = SongAnalysis.of(current, cachedStatsDedupe, true, cachedStatsRules);
 		return cachedStats;
 	}
 
@@ -8251,7 +8388,12 @@ public final class ComposerScreen extends Screen {
 			// A sustaining layer plays its strikes as well as its notes, from the same expansion the
 			// tick marks are drawn from.
 			Layer heard = project().withSustainsExpanded(layer, finestSustainStep());
-			for (Layer voiceLayer : heard.buildVoices()) {
+			// What the chord limit leaves out is left out of preview too, from the same answer the
+			// build reads: a harp played seven times of ten sounds seven times here.
+			ChordSkips skips = projectStats().skips();
+			List<Layer> voiceLayers = heard.buildVoices();
+			for (int voiceIndex = 0; voiceIndex < voiceLayers.size(); voiceIndex++) {
+				Layer voiceLayer = voiceLayers.get(voiceIndex);
 				PreviewInstrument instrument = PreviewInstrument.byId(voiceLayer.instrument());
 				if (!instrument.playable()) {
 					continue;
@@ -8271,7 +8413,11 @@ public final class ComposerScreen extends Screen {
 					if (!takeNotes.isEmpty() && takeNotes.contains(note.id())) {
 						continue;
 					}
-					for (int copy = 0; copy < copies; copy++) {
+					if (skips.skips(layerIndex, note.id(), note.startTick())) {
+						continue;
+					}
+					int played = skips.copiesAt(layerIndex, voiceIndex, note.id(), note.startTick(), copies);
+					for (int copy = 0; copy < played; copy++) {
 						events.add(new PlaybackEvent(
 							note.startTick(),
 							instrument,
@@ -8620,7 +8766,7 @@ public final class ComposerScreen extends Screen {
 			SongBuilder.PastePlan plan;
 			try {
 				plan = SongBuilder.plan(minecraft, config.tracks(), mode, project(),
-					config.dedupeIdenticalNotes());
+					config.dedupeIdenticalNotes(), config.chordFitRules());
 			} catch (IllegalArgumentException refused) {
 				minecraft.gui.setScreen(this);
 				showResult(Component.literal(refused.getMessage())
@@ -10299,6 +10445,7 @@ public final class ComposerScreen extends Screen {
 		SELECT_TOO_FREQUENT("Too frequent"),
 		SELECT_OUT_OF_RANGE("Out of range"),
 		SELECT_OVERLOADED_CHORDS("Overloaded chords"),
+		SELECT_THINNED("Thinned to fit"),
 		SELECT_ALL_NOTES("Everything"),
 		SELECT_NONE("Nothing");
 
@@ -10320,7 +10467,7 @@ public final class ComposerScreen extends Screen {
 		private static final ToolbarAction[] SELECT_ACTIONS = {
 			SELECT_OFF_GRID, SELECT_HALF_TICKED, SELECT_EVEN_TICKS, SELECT_ODD_TICKS,
 			SELECT_TOO_FREQUENT, SELECT_OUT_OF_RANGE,
-			SELECT_OVERLOADED_CHORDS, SELECT_ALL_NOTES, SELECT_NONE
+			SELECT_OVERLOADED_CHORDS, SELECT_THINNED, SELECT_ALL_NOTES, SELECT_NONE
 		};
 		private final String label;
 		/** Whether the action can be limited to the selected notes. Tempo is a property of the

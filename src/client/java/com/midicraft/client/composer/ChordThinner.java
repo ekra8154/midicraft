@@ -47,7 +47,7 @@ public final class ChordThinner {
 	 * Below the limit rather than on it, because a chord sitting exactly on thirty leaves the world
 	 * paste no room to work with.
 	 */
-	public static final int DEFAULT_TARGET = 24;
+	public static final int DEFAULT_TARGET = 25;
 
 	private ChordThinner() {
 	}
@@ -98,13 +98,26 @@ public final class ChordThinner {
 	 */
 	public static Result thin(ComposerProject project, int target, boolean dedupeIdentical,
 			Set<Integer> fromLayers) {
-		int cap = Math.max(MIN_TARGET, Math.min(MAX_TARGET, target));
+		return thin(project, ChordSkips.Rules.at(target), dedupeIdentical, fromLayers);
+	}
+
+	/**
+	 * The same, weighing each chord after what the chord limit leaves out under {@code thinning},
+	 * whose target is also the size thinned to.
+	 */
+	public static Result thin(ComposerProject project, ChordSkips.Rules thinning,
+			boolean dedupeIdentical, Set<Integer> fromLayers) {
+		int cap = Math.max(MIN_TARGET, Math.min(MAX_TARGET, thinning.target()));
 		Map<Long, Map<Voice, List<NoteEvent>>> byTick = new TreeMap<>();
 		// A sound with a copy in a layer that is not on offer cannot go: removing it would mean
 		// deleting that copy too, and reaching into layers nobody selected is not thinning, it is
 		// editing something else.
 		Map<Long, Set<Voice>> blocked = new HashMap<>();
 		double finest = project.anyBuildLayerSustains() ? project.finestSustainStep() : 0.0;
+		// Chords are weighed after what the chord limit leaves out at this same target, the way
+		// preview and the build hear them: a tick the skips already fit has nothing to thin.
+		ChordSkips skips = ChordSkips.of(project, dedupeIdentical,
+			new ChordSkips.Rules(cap, thinning.volume(), thinning.strikes()), finest);
 		int layerIndex = -1;
 		for (Layer layer : project.layers()) {
 			layerIndex++;
@@ -125,7 +138,9 @@ public final class ChordThinner {
 			// lighten one tick of it.
 			Layer placed = finest > 0.0 ? project.withSustainsExpanded(layer, finest) : layer;
 			Map<Long, Long> writtenStart = placed == layer ? null : SongAnalysis.writtenStarts(layer);
-			for (Layer voiceLayer : placed.buildVoices()) {
+			List<Layer> voiceLayers = placed.buildVoices();
+			for (int voiceIndex = 0; voiceIndex < voiceLayers.size(); voiceIndex++) {
+				Layer voiceLayer = voiceLayers.get(voiceIndex);
 				// A counted voice places a note block per copy, so every copy is its own sound in
 				// the chord: never merged by deduplication, and never on offer. The count is a
 				// choice about loudness somebody made in the palette, not doubling to spare.
@@ -136,9 +151,13 @@ public final class ChordThinner {
 					if (voiceLayer.pitched() && !note.isBuildable()) {
 						continue;
 					}
+					if (skips.skips(layerIndex, note.id(), note.startTick())) {
+						continue;
+					}
+					int played = skips.copiesAt(layerIndex, voiceIndex, note.id(), note.startTick(), copies);
 					boolean strike = writtenStart != null
 						&& writtenStart.getOrDefault(note.id(), note.startTick()) != note.startTick();
-					for (int copy = 0; copy < copies; copy++) {
+					for (int copy = 0; copy < played; copy++) {
 						Voice voice = copies > 1
 							? new Voice(voiceLayer.instrument(), note.midiNote(), note.id(), copy + 1)
 							: new Voice(voiceLayer.instrument(), note.midiNote(),
