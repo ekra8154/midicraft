@@ -2995,6 +2995,20 @@ public final class SongBuilder {
 	static boolean SEAM_REPEATER_CROSSES_ALONE = true;
 
 	/**
+	 * A first stage laid on a landing, with its second stage owed round the flat turn at the
+	 * end of the leg, stands forward by exactly the cells the dust would otherwise fall short.
+	 *
+	 * <p>The user's rule, from a dark zone at eight wide over two floors. The repeater crossed
+	 * the descent alone, the first stage went down flush against the landing, and its landed
+	 * block had to carry the rest of the leg, both corners and the link, and the straight cell
+	 * before the second piston: sixteen cells, one more than dust carries, dead on the second
+	 * corner. Nothing between the stages may revive it, so the only cell that can move is the
+	 * first stage's, and the landing's own wire has cells to spare for the pads that move it.
+	 * Bounded by that wire, and by the room the stage and the wait's repeaters still need.</p>
+	 */
+	static boolean SEAM_STAGE_ONE_STANDS_FORWARD = true;
+
+	/**
 	 * A seam opening off a soft tip lays its repeater first, on the cell the module handed over.
 	 *
 	 * <p>The user's rule, from a dark zone at forty-eight wide: a stacked bus with a simple tail
@@ -11470,8 +11484,37 @@ public final class SongBuilder {
 						lane = lane.ahead(1);
 						foldSignal--;
 						dustRun++;
+						int available = newColumns - 1;
+						// Where only the first stage fits on this leg, it stands as far forward as
+						// the landing's wire allows, so the dust from its landed block still reaches
+						// the second piston: the rest of the leg, the flat turn, and the straight
+						// cell before that piston. See SEAM_STAGE_ONE_STANDS_FORWARD.
+						if (SEAM_STAGE_ONE_STANDS_FORWARD && seamNext == 1) {
+							TurnCost turnAfter = turnCost(floor, climb, floors,
+								flatLink(route, leg, slabStep));
+							boolean flatAfter = !(turnAfter.above() >= 0 && turnAfter.above() < floors);
+							boolean stageTwoFitsHere = available - 6 >= foldRepeaters + 2;
+							if (flatAfter && !stageTwoFitsHere) {
+								// The cells after the stage's landing to the wall column, the wall
+								// column itself, and the turn: both corners, the link, and the
+								// straight cell before the second piston.
+								int dust = available - 3 + 1 + turnAfter.cells();
+								int shove = Math.min(dust - DUST_RANGE,
+									Math.min(foldSignal - 1, available - 3 - (foldRepeaters + 2)));
+								for (int cell = 0; cell < shove; cell++) {
+									addParityPad(placements, lane.pos());
+									lane = lane.ahead(1);
+									foldSignal--;
+									dustRun++;
+									available--;
+								}
+								if (shove > 0) {
+									placements.padded("paritySeamStageOneStoodForward", shove);
+								}
+							}
+						}
 						SeamLaid laid = laySeamCells(placements, lane, seamNext, seamFeedNext,
-							newColumns - 1, foldRepeaters + 2, true);
+							available, foldRepeaters + 2, true);
 						placements.placing("delayBeforeChord");
 						if (laid.laid() > 0) {
 							lane = laid.lane();
