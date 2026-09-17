@@ -2960,6 +2960,20 @@ public final class SongBuilder {
 	 */
 	static boolean SEAM_REPEATER_CROSSES_ALONE = true;
 
+	/**
+	 * A seam opening off a soft tip lays its repeater first, on the cell the module handed over.
+	 *
+	 * <p>The user's rule, from a dark zone at forty-eight wide: a stacked bus with a simple tail
+	 * of three ends on a note middle that only a repeater reads, and the seam's every way in --
+	 * the bend walk-out, the ride's shove for a corner, the pads -- laid dust on the cell after
+	 * it. Wire, note, wire, and the element's own repeater one cell on with nothing behind it.
+	 * The top-of-event rule ({@link #SOFT_TIP_GETS_ITS_REPEATER_FIRST}) stands down for a seam
+	 * because the element has its own repeater; this is that repeater going down where the rule
+	 * would have put one. The rest of the element follows as it does behind a staircase's
+	 * repeater: on dust, shoved and aligned as before, the pistons straight off the dust.</p>
+	 */
+	static boolean SEAM_OPENS_ON_A_SOFT_TIP_WITH_ITS_REPEATER = true;
+
 	/** What {@link #laySeamCells} put down: the lane after it, the next cell owed, the feed cell. */
 	private record SeamLaid(Lane lane, int next, BlockPos feedNext, int laid) {
 	}
@@ -2999,23 +3013,21 @@ public final class SongBuilder {
 				continue;
 			}
 			boolean adjacent = lane.pos().equals(feedNext);
-			// A soft-powered block is lit by dust pointing into it, and dust on a corner points
-			// along its own line and into nothing beside it -- so where the cell behind is a
-			// corner, one straight cell of dust goes down first. jackpot at eight wide over three
-			// floors: the second stage's block laid straight off a corner, the piston never fired,
-			// 2,680 notes dark.
-			int need = adjacent ? 3 : feederStraight ? 4 : 5;
+			// The piston stands straight off whatever feeds it -- the landed block, the repeater,
+			// or a line of dust, which fires a piston it points into. Dust on a corner points
+			// along its own line and into nothing beside it, so where the cell behind is a corner
+			// one straight cell of dust goes down first (jackpot at eight wide over three floors:
+			// the second stage laid straight off a corner, the piston never fired, 2,680 notes
+			// dark). The soft-powered stone that used to stand in front of a piston not adjacent
+			// to its feed is gone, by the user's rule from faded at sixteen wide over five: a
+			// block lit only by dust is the wire-block-wire shape every dead line is made of, and
+			// the piston reads the dust as well without it.
+			int need = adjacent || feederStraight ? 3 : 4;
 			if (available - need < reserveAfter) {
 				break;
 			}
-			if (!adjacent) {
-				if (!feederStraight) {
-					addParityPad(placements, lane.pos());
-					lane = lane.ahead(1);
-					laid++;
-				}
-				set(placements, lane.pos(), "minecraft:stone");
-				set(placements, lane.pos().above(), "minecraft:stone");
+			if (!adjacent && !feederStraight) {
+				addParityPad(placements, lane.pos());
 				lane = lane.ahead(1);
 				laid++;
 			}
@@ -3053,12 +3065,12 @@ public final class SongBuilder {
 	static boolean SEAM_ARMS_ITS_EXIT_WALL = true;
 
 	/** The element index of the corner the cut absorbs -- the second block's -- or -1. */
-	private static int paritySeamCutAt(Lane lane) {
+	private static int paritySeamCutAt(Lane lane, int from) {
 		if (!SEAM_CUTS_AT_A_CORNER) {
 			return -1;
 		}
 		for (Lane.Bend bend : lane.bends()) {
-			if (bend.after() == 5) {
+			if (bend.after() + from == 5) {
 				return 5;
 			}
 		}
@@ -3079,26 +3091,33 @@ public final class SongBuilder {
 	 * turns with a piston or a landing on the corner. Beyond that reach the corner is simply a
 	 * corner further down the leg, and none of this applies.</p>
 	 */
-	private static boolean paritySeamCornersAlign(Lane lane) {
+	/**
+	 * @param from the element cell standing on {@code lane}'s own cell: nought for a whole
+	 *     element, one where the repeater already went down behind it off a soft tip. The
+	 *     corners ahead are then met by cells that much further along the element.
+	 */
+	private static boolean paritySeamCornersAlign(Lane lane, int from) {
 		// The cell the lane stands on is a corner too, and it is the one the bends list does not
 		// hold. A seam aligned only by the corners ahead of it laid its repeater on the corner
 		// under it, fed from the side -- which is a repeater fed by nothing: jackpot at eight
 		// wide, 1 65 136, the seam never fired and every note after it was silent, and the
 		// reader could not see it while the seam's own blocks of redstone counted as ways in.
-		if (SEAM_NEVER_OPENS_ON_A_CORNER && lane.cornerAt(0)) {
+		if (lane.cornerAt(0) && (from == 0 ? SEAM_NEVER_OPENS_ON_A_CORNER
+				: !paritySeamCornerAllowedAt(from))) {
 			return false;
 		}
-		int cut = paritySeamCutAt(lane);
+		int cut = paritySeamCutAt(lane, from);
 		for (Lane.Bend bend : lane.bends()) {
-			if (bend.after() > SEAM_CORNER_REACH + (cut >= 0 ? 1 : 0)) {
+			int at = bend.after() + from;
+			if (at > SEAM_CORNER_REACH + (cut >= 0 ? 1 : 0)) {
 				continue;
 			}
-			if (bend.after() == cut) {
+			if (at == cut) {
 				// The corner the cut absorbs: stone on it, the second piston after it.
 				continue;
 			}
 			// Past a cut the element is a cell longer, so a corner there meets the cell before.
-			int index = cut >= 0 && bend.after() > cut ? bend.after() - 1 : bend.after();
+			int index = cut >= 0 && at > cut ? at - 1 : at;
 			if (!paritySeamCornerAllowedAt(index)) {
 				return false;
 			}
@@ -3113,18 +3132,18 @@ public final class SongBuilder {
 	 * to ride. The shove loop does the aligning a cell at a time; this only settles whether any
 	 * shove short of the first corner will do.</p>
 	 */
-	private static boolean paritySeamCanRideTurn(Lane lane) {
+	private static boolean paritySeamCanRideTurn(Lane lane, int from) {
 		int first = cellsToCorner(lane);
 		for (int shove = 0; shove < first; shove++) {
-			if (paritySeamCornersAlign(lane.ahead(shove))) {
+			if (paritySeamCornersAlign(lane.ahead(shove), from)) {
 				return true;
 			}
 		}
 		return false;
 	}
 
-	private static boolean paritySeamHasRoom(PlacementPlan placements, Lane lane) {
-		if (!paritySeamCornersAlign(lane)) {
+	private static boolean paritySeamHasRoom(PlacementPlan placements, Lane lane, int from) {
+		if (!paritySeamCornersAlign(lane, from)) {
 			return false;
 		}
 		Lane at = lane;
@@ -3133,7 +3152,7 @@ public final class SongBuilder {
 		// lane makes at the wall -- is not laid until after this has answered, so extending this
 		// loop by one catches nothing and reports a guard where there is none. That question is
 		// asked where it can be, in {@link #PARITY_SEAM_LANDING_READER}'s one caller.
-		int cells = PARITY_SEAM_CELLS + (paritySeamCutAt(lane) >= 0 ? 1 : 0);
+		int cells = PARITY_SEAM_CELLS - from + (paritySeamCutAt(lane, from) >= 0 ? 1 : 0);
 		for (int cell = 0; cell < cells; cell++) {
 			if (placements.blockAt(at.pos().above()) != null) {
 				return false;
@@ -5736,6 +5755,7 @@ public final class SongBuilder {
 					// the signal has to cross with nothing to revive it -- so this is the experiment
 					// and the fallout is whatever the wire does about it.
 					int pinned = 0;
+					int pinRepeater = 0;
 					// Ultra only. The other lane modes share this walk once they have more than one
 					// floor, and their corridors are spaced on the promise that a turn is bare -- so
 					// walking one out to the wall puts powered stone where a neighbour's notes are
@@ -8692,6 +8712,7 @@ public final class SongBuilder {
 					// the signal has to cross with nothing to revive it -- so this is the experiment
 					// and the fallout is whatever the wire does about it.
 					int pinned = 0;
+					int pinRepeater = 0;
 					// Ultra only. The other lane modes share this walk once they have more than one
 					// floor, and their corridors are spaced on the promise that a turn is bare -- so
 					// walking one out to the wall puts powered stone where a neighbour's notes are
@@ -8707,8 +8728,26 @@ public final class SongBuilder {
 						// pinned and the condition does not say so -- so a climb reaches here too, and
 						// a pin that came back down to the path while the staircase had been told it
 						// was starting off a bus is a staircase with nothing under its first rung.
-						lane = emitDust(placements, lane, pinned, raisedPad,
-							raisedPad ? "pinToWallRaised" : "pinToWall");
+						// Or a repeater in the pin's last cell, where the bare dust would not reach
+						// the landing and the wait can pay for one. See PIN_REPEATS_BEFORE_THE_WALL.
+						int pinPrice = turnPrice(pad, climb > 0, above >= 0 && above < floors,
+							turnsOffBus, turnCells, turnOffBusCells);
+						int pinSpare = wait - spentPadding;
+						if (PIN_REPEATS_BEFORE_THE_WALL && !raisedPad
+								&& pad.signal() - pinned - pinPrice < 1 && pinSpare >= 2) {
+							pinRepeater = Math.min(4, pinSpare - 1);
+							lane = emitDust(placements, lane, pinned - 1, false, "pinToWall");
+							placements.placing("pinToWall");
+							set(placements, lane.pos(), "minecraft:stone");
+							set(placements, lane.pos().above(), "minecraft:repeater[facing="
+								+ repeaterFacing(travel) + ",delay=" + pinRepeater + "]");
+							lane = lane.ahead(1);
+							spentPadding += pinRepeater;
+							placements.padded("pinToWallRepeater");
+						} else {
+							lane = emitDust(placements, lane, pinned, raisedPad,
+								raisedPad ? "pinToWallRaised" : "pinToWall");
+						}
 					}
 					// Recorded after the pin and not before it, so this is where the staircase actually
 					// stands rather than where the lane would have left it. Told apart by direction as
@@ -8721,7 +8760,8 @@ public final class SongBuilder {
 					// What this staircase leaves the next lane, worked out before it is built because
 					// the seed below has to be paid for out of it. Nothing in it depends on the climb:
 					// it is the pad's own wire, less the pin, less what the turn spends.
-					int wouldTip = pad.signal() - pinned - turnPrice(pad, climb > 0,
+					int wouldTip = (pinRepeater > 0 ? DUST_RANGE : pad.signal() - pinned)
+						- turnPrice(pad, climb > 0,
 						above >= 0 && above < floors, turnsOffBus, turnCells, turnOffBusCells);
 					// And what a *mirrored* staircase leaves, which is a different sum and has to be
 					// priced as one. A mirrored ladder is five rungs whatever the lane arrived on --
@@ -8730,7 +8770,8 @@ public final class SongBuilder {
 					// and the dust over the seed's landing block is one more on top of the five.
 					// Worked out here and handed on below as the tip, so the wire this climb spends
 					// and the wire the next lane is told it has cannot be two different sums.
-					int seedTip = pad.signal() - pinned - turnCells - RAIL_SEED_CLIMB_STEPS - 1;
+					int seedTip = (pinRepeater > 0 ? DUST_RANGE : pad.signal() - pinned) - turnCells
+						- RAIL_SEED_CLIMB_STEPS - 1;
 					// The cell the mirrored ladder starts from, asked of the blocks rather than worked
 					// out from what the pad and the pin were supposed to have laid.
 					//
@@ -11183,7 +11224,7 @@ public final class SongBuilder {
 						// wall cell; from there the repeater's own fifteen carries the rungs.
 						if (SEAM_REPEATER_CROSSES_ALONE && laid.laid() == 0 && seamNext == 0
 								&& cellsToWall >= 1 && foldSignal - (cellsToWall - 1) >= 1
-								&& newColumns - 1 - 7 >= foldRepeaters + 2) {
+								&& newColumns - 1 - 6 >= foldRepeaters + 2) {
 							seamRepeaterAtTheWall = true;
 							placements.padded("paritySeamRepeaterCrossesAlone");
 						}
@@ -11468,6 +11509,30 @@ public final class SongBuilder {
 				placements.padded("paritySeam");
 			} else if (event.seamEat() > 0) {
 				placements.placing("paritySeam");
+				// Off a soft tip the element's own repeater goes down first, on the cell the
+				// module handed over, and the rest of this branch -- the ride, the shoves, the
+				// walk-out with its revives, the element loop -- carries on from cell one. See
+				// SEAM_OPENS_ON_A_SOFT_TIP_WITH_ITS_REPEATER.
+				int seamFrom = 0;
+				if (SEAM_OPENS_ON_A_SOFT_TIP_WITH_ITS_REPEATER && placements.softTip()
+						&& !lane.cornerAt(0)) {
+					placements.placing("paritySeamRepeaterOffASoftTip");
+					set(placements, lane.pos(), "minecraft:stone");
+					set(placements, lane.pos().above(), "minecraft:repeater[facing="
+						+ repeaterFacing(lane.travel()) + ",delay=" + PARITY_SEAM_REPEATER + "]");
+					lane = lane.ahead(1);
+					seamFrom = 1;
+					tipSignal = DUST_RANGE;
+					placements.softTip(false);
+					placements.padded("paritySeamRepeaterOffASoftTip");
+					placements.placing("paritySeam");
+					if (TRACE_TURNS) {
+						System.out.println("SEAMSOFT t=" + event.time()
+							+ " repeater first off a soft tip, element from cell one at "
+							+ coordAlong(axis, lane.pos()) + " " + lane.pos().getY() + " "
+							+ coordAcross(axis, lane.pos()));
+					}
+				}
 				// Only where the turn is actually in the way. A corner further off than the
 				// element is one the lane can simply walk out and lay the seam beyond, which is
 				// what every seam did before riding existed and what most of the library wants:
@@ -11480,7 +11545,7 @@ public final class SongBuilder {
 				// columns past its wall.
 				boolean ridesTheTurn = SEAM_RIDES_A_TURN && lane.bending()
 					&& cellsToCorner(lane) <= SEAM_CORNER_REACH
-					&& paritySeamCanRideTurn(lane);
+					&& paritySeamCanRideTurn(lane, seamFrom);
 				// Any turn still open is walked out first, and closed the way the fold closes
 				// one -- pinned cursor, watch verdict, ban and busy flags. The first version
 				// walked the corner cells and left the turn open, and the walk re-armed a
@@ -11524,7 +11589,13 @@ public final class SongBuilder {
 					placements.padded("paritySeamWalkedItsTurn");
 					placements.placing("paritySeam");
 				}
-				lane = pastAnyCorner(placements, lane);
+				// Not stepped past where the cell is a corner the element may carry -- a piston,
+				// once the repeater is down behind it. Stepping past laid dust on the corner and
+				// the piston one on, and dust on a corner points along its own line and into
+				// nothing beside it, least of all a piston: a dark zone at eight wide, 1 65 1015.
+				if (seamFrom == 0 || !lane.cornerAt(0) || !paritySeamCornerAllowedAt(seamFrom)) {
+					lane = pastAnyCorner(placements, lane);
+				}
 				// Still in a bend: the element comes out onto the leg the bend exits to, and it is
 				// that leg's wall it has to fit under. Where the cells past the exit corner will not,
 				// the wall gets its corner now, so the alignment below sees both corners and the
@@ -11545,7 +11616,7 @@ public final class SongBuilder {
 							climb, floors);
 						int columnsPast = (exitWall - coordAlong(axis, atCorner.pos()))
 							* stepAlong(axis, exitTravel);
-						int cellsPast = PARITY_SEAM_CELLS + PARITY_SEAM_LANDING_READER - 1
+						int cellsPast = PARITY_SEAM_CELLS - seamFrom + PARITY_SEAM_LANDING_READER - 1
 							- toCorner;
 						if (columnsPast >= 1 && cellsPast > columnsPast) {
 							boolean clockwise = exitTravel.getClockWise() == depth;
@@ -11583,7 +11654,7 @@ public final class SongBuilder {
 				// expensive -- the lane keeps the parity it was leaving and every shape after it
 				// is built around a signal that never arrives.
 				int shoved = 0;
-				while (shoved < laneWidth && !paritySeamHasRoom(placements, lane)) {
+				while (shoved < laneWidth && !paritySeamHasRoom(placements, lane, seamFrom)) {
 					addParityPad(placements, lane.pos());
 					tipSignal--;
 					lane = lane.ahead(1);
@@ -11626,8 +11697,9 @@ public final class SongBuilder {
 					// a landing or the reader itself -- all of which may take one -- so the seam
 					// turns, dust carries the signal round the corner, and the next repeater stands
 					// past it, where pastAnyCorner has always put it. See SEAM_TURNS_FOR_ITS_READER.
-					int seamReach = SEAM_TURNS_FOR_ITS_READER
-						? PARITY_SEAM_CELLS + PARITY_SEAM_LANDING_READER : PARITY_SEAM_CELLS - 1;
+					int seamReach = (SEAM_TURNS_FOR_ITS_READER
+						? PARITY_SEAM_CELLS + PARITY_SEAM_LANDING_READER : PARITY_SEAM_CELLS - 1)
+						- seamFrom;
 					boolean crosses = seamColumns >= 0 && seamColumns < seamReach;
 					if (crosses && !(seamTurn.above() >= 0 && seamTurn.above() < floors)) {
 						boolean tight = FLAT_TURN_KEEPS_ITS_WIDTH
@@ -11650,7 +11722,8 @@ public final class SongBuilder {
 						ridesTheTurn = true;
 						placements.padded("paritySeamArmedItsWall");
 						int aligned = 0;
-						while (aligned < laneWidth && !paritySeamHasRoom(placements, lane)) {
+						while (aligned < laneWidth
+								&& !paritySeamHasRoom(placements, lane, seamFrom)) {
 							addParityPad(placements, lane.pos());
 							tipSignal--;
 							lane = lane.ahead(1);
@@ -11665,7 +11738,7 @@ public final class SongBuilder {
 				// the wire. Two pistons because of the phase rule -- see PARITY_SEAM_GAME_TICKS:
 				// one piston behind a repeater is pulled even by the tick's phase order and never
 				// flips parity at all; a pair costs five game ticks from any phase whatever.
-				for (int cell = 0; cell < PARITY_SEAM_CELLS; cell++) {
+				for (int cell = seamFrom; cell < PARITY_SEAM_CELLS; cell++) {
 					// The cut: the second block of redstone would land on the corner, so the cell
 					// the second piston would have taken runs dust, the corner takes stone at
 					// piston level -- soft-powered by that dust, which is what fires the piston --
@@ -14122,6 +14195,7 @@ public final class SongBuilder {
 					// the signal has to cross with nothing to revive it -- so this is the experiment
 					// and the fallout is whatever the wire does about it.
 					int pinned = 0;
+					int pinRepeater = 0;
 					// Ultra only. The other lane modes share this walk once they have more than one
 					// floor, and their corridors are spaced on the promise that a turn is bare -- so
 					// walking one out to the wall puts powered stone where a neighbour's notes are
@@ -14137,8 +14211,26 @@ public final class SongBuilder {
 						// pinned and the condition does not say so -- so a climb reaches here too, and
 						// a pin that came back down to the path while the staircase had been told it
 						// was starting off a bus is a staircase with nothing under its first rung.
-						lane = emitDust(placements, lane, pinned, raisedPad,
-							raisedPad ? "pinToWallRaised" : "pinToWall");
+						// Or a repeater in the pin's last cell, where the bare dust would not reach
+						// the landing and the wait can pay for one. See PIN_REPEATS_BEFORE_THE_WALL.
+						int pinPrice = turnPrice(pad, climb > 0, above >= 0 && above < floors,
+							turnsOffBus, turnCells, turnOffBusCells);
+						int pinSpare = wait - spentPadding;
+						if (PIN_REPEATS_BEFORE_THE_WALL && !raisedPad
+								&& pad.signal() - pinned - pinPrice < 1 && pinSpare >= 2) {
+							pinRepeater = Math.min(4, pinSpare - 1);
+							lane = emitDust(placements, lane, pinned - 1, false, "pinToWall");
+							placements.placing("pinToWall");
+							set(placements, lane.pos(), "minecraft:stone");
+							set(placements, lane.pos().above(), "minecraft:repeater[facing="
+								+ repeaterFacing(travel) + ",delay=" + pinRepeater + "]");
+							lane = lane.ahead(1);
+							spentPadding += pinRepeater;
+							placements.padded("pinToWallRepeater");
+						} else {
+							lane = emitDust(placements, lane, pinned, raisedPad,
+								raisedPad ? "pinToWallRaised" : "pinToWall");
+						}
 					}
 					// Recorded after the pin and not before it, so this is where the staircase actually
 					// stands rather than where the lane would have left it. Told apart by direction as
@@ -14151,7 +14243,8 @@ public final class SongBuilder {
 					// What this staircase leaves the next lane, worked out before it is built because
 					// the seed below has to be paid for out of it. Nothing in it depends on the climb:
 					// it is the pad's own wire, less the pin, less what the turn spends.
-					int wouldTip = pad.signal() - pinned - turnPrice(pad, climb > 0,
+					int wouldTip = (pinRepeater > 0 ? DUST_RANGE : pad.signal() - pinned)
+						- turnPrice(pad, climb > 0,
 						above >= 0 && above < floors, turnsOffBus, turnCells, turnOffBusCells);
 					// And what a *mirrored* staircase leaves, which is a different sum and has to be
 					// priced as one. A mirrored ladder is five rungs whatever the lane arrived on --
@@ -14160,7 +14253,8 @@ public final class SongBuilder {
 					// and the dust over the seed's landing block is one more on top of the five.
 					// Worked out here and handed on below as the tip, so the wire this climb spends
 					// and the wire the next lane is told it has cannot be two different sums.
-					int seedTip = pad.signal() - pinned - turnCells - RAIL_SEED_CLIMB_STEPS - 1;
+					int seedTip = (pinRepeater > 0 ? DUST_RANGE : pad.signal() - pinned) - turnCells
+						- RAIL_SEED_CLIMB_STEPS - 1;
 					// The cell the mirrored ladder starts from, asked of the blocks rather than worked
 					// out from what the pad and the pin were supposed to have laid.
 					//
@@ -23797,6 +23891,21 @@ public final class SongBuilder {
 	 * notes to one twice. Pinning it costs whatever the wire cannot pay for.</p>
 	 */
 	static boolean PIN_DESCENTS = true;
+
+	/**
+	 * A pin whose bare dust would not reach the landing puts a repeater in its last cell.
+	 *
+	 * <p>The pin is wire the pad never budgeted for -- laid, as its comment said, as bare dust
+	 * the signal has to cross with nothing to revive it, "the experiment and the fallout is
+	 * whatever the wire does about it". What it did on faded at sixteen wide over five floors
+	 * was die on the third rung of the descent, one cell short of the landing: the pad had
+	 * spent its wire to exactly the turn's price and the pin took one more. So where the tip
+	 * the staircase would leave is nothing, and the wait still holds a tick beyond the one its
+	 * own repeater must keep, the pin's last cell -- the one before the wall, as far forward as
+	 * the floor allows, the user's staircase rule -- is a repeater paid out of that wait, and
+	 * the rungs run on a fresh fifteen.</p>
+	 */
+	static boolean PIN_REPEATS_BEFORE_THE_WALL = true;
 
 	/**
 	 * Whether a chord can simply be laid across a flat turn, needing nothing done for it.
