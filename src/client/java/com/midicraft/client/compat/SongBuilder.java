@@ -1957,8 +1957,8 @@ public final class SongBuilder {
 					// The turn list is handed out with A's turns first whatever order they were
 					// walked in, so the boundary is A's count. See PlacementPlan.turnsByMachine.
 					placements.padded(MACHINE_A_TURNS, placements.turnsOf(0));
-					inputA = placements.firstRepeaterOf(0);
-					inputB = placements.firstRepeaterOf(1);
+					inputA = placements.openingFeedOf(0);
+					inputB = placements.openingFeedOf(1);
 				} else {
 					placements.laneTint(0, Math.floorMod(gtA.get(0).time(), 2));
 					placements.hardInnerWalls(hardA);
@@ -1966,7 +1966,7 @@ public final class SongBuilder {
 					walkRouted(evenEvents, originA, forward, laneWidth, floors, placements, layoutA,
 						routeA, headA, tightA, paceA, turnBeforeA);
 					placements.stopWatchingLegWalls();
-					inputA = placements.firstRepeater();
+					inputA = placements.openingFeedOf(0);
 					int laidByA = placements.laidCells();
 					// The boundary in the turn list, for the same reason the cell count is taken
 					// here: from the next line on, everything recorded belongs to the other machine.
@@ -1984,7 +1984,7 @@ public final class SongBuilder {
 					walkRouted(oddEvents, originB, forward, laneWidth, floors, placements,
 						layoutB, routeB, headB, tightB, paceB, turnBeforeB);
 					placements.stopWatchingLegWalls();
-					inputB = placements.firstRepeaterAfter(laidByA);
+					inputB = placements.openingFeedOf(1);
 				}
 				// A collision the walk recorded rather than threw -- under DEBUG_PASTE, which is how
 				// every marked paste and its preview plan, none is thrown -- is walked again with a
@@ -32330,6 +32330,41 @@ public final class SongBuilder {
 				}
 			}
 			return null;
+		}
+
+		/**
+		 * The cell the shared input feeds for a machine.
+		 *
+		 * <p>Its first repeater, as it always was -- except where that repeater does not stand on
+		 * the floor the machine opened on. A machine fed through the piston pair opens six columns
+		 * in, and at eight wide that is the far wall: its opening leg is one cell, no module fits,
+		 * and the walk climbs off that cell before it lays a repeater at all. The first repeater is
+		 * then a floor up, and a feed laid to it lands the pair on that floor, pointing the way the
+		 * lane ran below -- against the lane it now stands in, through the rail head it just
+		 * overwrote. Force theme two lanes at 8x4, and 8x3, dead from the first cell.</p>
+		 *
+		 * <p>So where the opening floor holds no repeater, the feed goes to the machine's first cell
+		 * of lane instead: the foot of the climb, a wire, which a block of redstone landed beside it
+		 * powers to fifteen exactly as it would power a repeater's input. The climb carries it up,
+		 * and the first repeater reads it from there, no further from the landing in ticks than it
+		 * would be one cell away.</p>
+		 */
+		BlockPos openingFeedOf(int machine) {
+			BlockPos first = null;
+			for (Map.Entry<BlockPos, String> cell : blocks.entrySet()) {
+				if (laneTintAt.getOrDefault(cell.getKey(), -2) / 2 != machine) {
+					continue;
+				}
+				String block = cell.getValue();
+				if (block.startsWith("minecraft:repeater")) {
+					return first == null || first.getY() == cell.getKey().getY()
+						? cell.getKey() : first;
+				}
+				if (first == null && block.startsWith("minecraft:redstone_wire")) {
+					first = cell.getKey();
+				}
+			}
+			return first;
 		}
 
 		/** The machine being walked, 0 or 1, or -1 on a plan that never named one. */
