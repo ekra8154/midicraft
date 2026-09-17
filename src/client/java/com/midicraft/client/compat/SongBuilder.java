@@ -2002,6 +2002,22 @@ public final class SongBuilder {
 					}
 					continue;
 				}
+				// A chord that opened inside a turn and stranded the staircase at the end of the
+				// leg is walked again with a turn forced in front of it: the bend is walked out
+				// with the wait first and the chord opens on the leg, where it can fold back.
+				// See FOLDBACK_PADDING.
+				int[] stranded = FOLDBACK_PADDING
+					? placements.firstStrandNotForced(turnBeforeA, turnBeforeB) : null;
+				if (stranded != null
+						&& ++rewalks <= 2 * (evenEvents.size() + oddEvents.size())) {
+					(stranded[0] == 1 ? turnBeforeB : turnBeforeA).add(stranded[1]);
+					if (TRACE_TURNS) {
+						System.out.println("STRAND rewalk " + rewalks + " machine "
+							+ (stranded[0] == 1 ? "B" : "A") + " event " + stranded[1]
+							+ " : padded out of its turn");
+					}
+					continue;
+				}
 				// One input for both, in place of a button each -- two buttons cannot be pressed
 				// on the same tick, so the machines could never be started in the step the plan
 				// worked out for them. See {@link #addTwoLaneInput}.
@@ -2921,6 +2937,24 @@ public final class SongBuilder {
 	 * otherwise die; whatever ticks the crossing does not need are laid on the leg below.</p>
 	 */
 	static boolean STAIRCASE_REPEATERS_AS_FAR_FORWARD_AS_THEY_CAN = true;
+
+	/**
+	 * A wait is folded across a staircase only where the chain reaches the landing alive.
+	 *
+	 * <p>The crossing used to clamp the signal to one at the foot of the stairs and carry on,
+	 * and the loop before it laid a repeater only where the wait held more than four ticks. So
+	 * a chord that came to rest flush against the wall with one left -- faded at sixteen wide
+	 * over two floors, a sunken bus of twenty-eight straddling a flat turn and running the next
+	 * row out to its wall -- had its wait folded up the climb on dust that died on the third
+	 * rung. Now the crossing asks: the cells to the wall, the rungs and the landing against
+	 * what the wire holds. Where they would not be reached and a cell before the wall can take
+	 * a repeater the wait can pay for, one goes down there whatever the wait holds, as short as
+	 * the ticks allow. Where there is no such cell the wait is not folded across at all, and
+	 * the event's own turn logic -- which refuses a turn it cannot pay for and offers the cut
+	 * and the foldback instead -- takes it from there, which is the user's rule: a chord that
+	 * would die on the staircase falls back to the foldback.</p>
+	 */
+	static boolean FOLD_CROSSES_ALIVE = true;
 
 	/**
 	 * v2: a seam's first cell, the repeater, never stands on a corner.
@@ -10574,6 +10608,10 @@ public final class SongBuilder {
 		int climb = route.climbOf(0);
 		placements.stopWatchingLegWalls();
 		boolean laneStarted = false;
+		// The event of the last chord measured while the lane was still in a turn -- its
+		// repeater on the perpendicular run -- which is the one a staircase it then strands is
+		// charged to. See FOLDBACK_PADDING.
+		int lastInTurn = -1;
 		/** Whether a chord has been laid on the bend the walk is currently going round. */
 		boolean placedWhileTurning = false;
 		// Whether the column a stacked module would want behind it is already spoken for -- either
@@ -10868,12 +10906,21 @@ public final class SongBuilder {
 							// buying -- and takes a repeater only where the run must be revived; a
 							// chain with nothing to stretch is the old one, a repeater per four ticks.
 							int paceRefresh = stretchLeft > 0 ? paceRefreshDelay() : 4;
-							if (!seamMid && event.time() - currentTime > paceRefresh
-									&& (stretchLeft == 0 || dustRun >= paceDustRun())) {
+							int ticks = event.time() - currentTime;
+							boolean refreshHere = !seamMid && ticks > paceRefresh
+								&& (stretchLeft == 0 || dustRun >= paceDustRun());
+							// Or the last moment before the dust dies, with whatever the wait can
+							// spare: a walk-out padding a chord out of a turn rides the arriving
+							// wire, and that wire is what the padding exists to save. See
+							// FOLD_CROSSES_ALIVE.
+							boolean reviveHere = FOLD_CROSSES_ALIVE && !seamMid && !refreshHere
+								&& foldSignal <= 1 && ticks >= 2;
+							if (refreshHere || reviveHere) {
+								int refresh = refreshHere ? paceRefresh : Math.min(4, ticks - 1);
 								set(placements, lane.pos(), "minecraft:stone");
 								set(placements, lane.pos().above(), "minecraft:repeater[facing="
-									+ repeaterFacing(lane.travel()) + ",delay=" + paceRefresh + "]");
-								currentTime += paceRefresh;
+									+ repeaterFacing(lane.travel()) + ",delay=" + refresh + "]");
+								currentTime += refresh;
 								foldSignal = DUST_RANGE;
 								dustRun = 0;
 							} else {
@@ -11260,6 +11307,33 @@ public final class SongBuilder {
 						// block below, and the lane turns after it as it would for any chord.
 						break;
 					}
+					// And the wait itself has to reach the landing alive. See FOLD_CROSSES_ALIVE.
+					int toWall = (foldWall - coordAlong(axis, lane.pos()))
+						* stepAlong(axis, lane.travel());
+					if (FOLD_CROSSES_ALIVE && !seamMidElement
+							&& foldSignal - (toWall + foldTurn.cells() + 1) < 1
+							&& !(toWall >= 1 && event.time() - currentTime >= 2)) {
+						placements.padded("waitCannotCrossAlive");
+						// Charged to the chord before, where it opened inside a turn and came to
+						// rest flush at this wall with nothing able to fold there: the planner
+						// walks again with a turn forced in front of it, which walks the bend out
+						// with the wait -- the padding -- and lays the chord on the leg, where the
+						// strand check sees this staircase and offers the foldback. See
+						// FOLDBACK_PADDING.
+						if (FOLDBACK_PADDING && lastInTurn == index - 1
+								&& !turnBefore.contains(lastInTurn)) {
+							placements.stranded(lastInTurn);
+							placements.padded("foldbackPaddingAsked");
+						}
+						if (TRACE_TURNS) {
+							System.out.println("FOLDDEAD t=" + event.time() + " index=" + index
+								+ " lastInTurn=" + lastInTurn + " signal=" + foldSignal
+								+ " toWall=" + toWall + " rungs=" + foldTurn.cells() + " at "
+								+ coordAlong(axis, lane.pos()) + " " + lane.pos().getY() + " "
+								+ coordAcross(axis, lane.pos()));
+						}
+						break;
+					}
 					// The first cell of the crossing may stand against a module that ended on a cell
 					// only a repeater reads -- a simple tail's harp middle -- and dust there is a
 					// dead line. The unrolled copy, as the stretch opener asks: at the top of the
@@ -11282,6 +11356,14 @@ public final class SongBuilder {
 						int paceRefresh = stretchLeft > 0 ? paceRefreshDelay() : 4;
 						boolean canRepeat = !seamMidElement
 							&& event.time() - currentTime > paceRefresh;
+						// Or a shorter one, where the dust from here would not reach the landing
+						// and the wait holds any tick beyond the one its own repeater keeps. See
+						// FOLD_CROSSES_ALIVE.
+						boolean mustRevive = FOLD_CROSSES_ALIVE && !seamMidElement && !canRepeat
+							&& foldSignal - (cellsBeforeWall + foldTurn.cells() + 1) < 1
+							&& event.time() - currentTime >= 2;
+						int refresh = canRepeat ? paceRefresh
+							: Math.min(4, event.time() - currentTime - 1);
 						boolean firstAfterSoft = !laidInCrossing && crossingOpensOnSoft
 							&& walked == 0;
 						// Where the repeater goes: as far forward as it can on this floor -- the
@@ -11318,11 +11400,11 @@ public final class SongBuilder {
 									+ coordAlong(axis, lane.pos()) + " " + lane.pos().getY() + " "
 									+ coordAcross(axis, lane.pos()));
 							}
-						} else if (canRepeat && repeatHere) {
+						} else if ((canRepeat || mustRevive) && repeatHere) {
 							set(placements, lane.pos(), "minecraft:stone");
 							set(placements, lane.pos().above(), "minecraft:repeater[facing="
-								+ repeaterFacing(lane.travel()) + ",delay=" + paceRefresh + "]");
-							currentTime += paceRefresh;
+								+ repeaterFacing(lane.travel()) + ",delay=" + refresh + "]");
+							currentTime += refresh;
 							foldSignal = DUST_RANGE;
 							dustRun = 0;
 						} else if (firstAfterSoft && !seamMidElement
@@ -12293,6 +12375,13 @@ public final class SongBuilder {
 			if (strandsTheTurn) {
 				placements.padded("v2ClosedBeforeStranding");
 			}
+			if (TRACE_TURNS && layout.ultra() && !turning && !flatAhead && laneStarted) {
+				System.out.println("STRAND t=" + event.time() + " notes=" + event.notes().size()
+					+ " style=" + here.style() + " tip=" + here.tip() + " price=" + strandPrice
+					+ " end=" + here.end() + " wall=" + wall + " revivable=" + revivable
+					+ " strands=" + strandsTheTurn + " at " + coordAlong(axis, lane.pos()) + " "
+					+ lane.pos().getY() + " " + coordAcross(axis, lane.pos()));
+			}
 			// A rigid stacked module that would land flush on the wall ahead of a flat turn hangs its
 			// front pair in the wall column, and a tight turn's sideways run wants one of those cells
 			// -- see {@link #FLAT_TURN_FLANK_SLOT}. The module sheds that note where it can do so for
@@ -12436,6 +12525,11 @@ public final class SongBuilder {
 			// has been walked out and closed above -- but only until the turn is armed: an event
 			// re-asked once its turn is open must not turn again, and the lane must still have
 			// held something first, or the walk would climb the whole build without laying a note.
+			// Remembered for the staircase this chord may strand: a chord measured inside a turn
+			// stands its repeater on the perpendicular run and cannot fold back where it ends.
+			if (turning) {
+				lastInTurn = index;
+			}
 			boolean forcedTurn = turnBefore.contains(index) && !turning;
 			// A forced turn does not re-run the landing arithmetic: the wall was crossed, on the
 			// blocks, by whatever the trial actually built -- a stacked shape measured to land
@@ -29332,6 +29426,24 @@ public final class SongBuilder {
 	static boolean FOLDBACK_LAST = true;
 
 	/**
+	 * Foldback padding: a chord that would ride a flat turn out onto the next leg and come to rest
+	 * against that leg's staircase, with too little wire to climb it and no column left to revive
+	 * it in, is padded out of the turn first and laid on the leg -- where it can fold back.
+	 *
+	 * <p>The user's rule, from faded at sixteen wide over two floors. A sunken bus of twenty-eight
+	 * opened while the lane was still in the turn a ten-note chord had ridden, its repeater on
+	 * the perpendicular run, and ran the leg to its wall: flush there with two of wire against a
+	 * climb that costs three, dead on the third rung -- and once the crossing refused to carry
+	 * the wait up dead wire, a walk of eleven past the wall instead, because nothing could fold
+	 * there: the chord after it had a room of minus one. A chord that opens in a turn cannot fold
+	 * back; one that opens on the leg can. So the dead crossing charges the chord that opened in
+	 * the turn, and the planner walks again with a turn forced in front of it -- which walks the
+	 * bend out with the wait, the padding, and lays the chord on the leg, where the strand check
+	 * sees the staircase and offers the cut and the foldback.</p>
+	 */
+	static boolean FOLDBACK_PADDING = true;
+
+	/**
 	 * Whether a climb prefers the foldback at a small room the way a descent does.
 	 *
 	 * <p>Off, and the rule it is off in service of was stated as "a room of nought <em>and a
@@ -32059,6 +32171,26 @@ public final class SongBuilder {
 		 * marked paste and its preview plan -- a collision is recorded and never thrown.
 		 */
 		private final Map<BlockPos, int[]> collisionEvents = new LinkedHashMap<>();
+		/**
+		 * Events whose chord opened inside a turn and stranded the staircase at the end of the leg
+		 * it came out on, as {@code {machine, event}}: the planner walks again with a turn forced
+		 * in front of each, which pads the chord out of the turn. See FOLDBACK_PADDING.
+		 */
+		private final List<int[]> strands = new ArrayList<>();
+
+		void stranded(int event) {
+			strands.add(new int[] {machine(), event});
+		}
+
+		/** The first strand the planner has not yet forced a turn for, as {@code {machine, event}}, or null. */
+		int[] firstStrandNotForced(Set<Integer> forcedA, Set<Integer> forcedB) {
+			for (int[] at : strands) {
+				if (!(at[0] == 1 ? forcedB : forcedA).contains(at[1])) {
+					return at;
+				}
+			}
+			return null;
+		}
 
 		/**
 		 * The first contested cell laid under an event the planner has not yet forced a turn in
@@ -32558,7 +32690,7 @@ public final class SongBuilder {
 
 		/** The world both machines build in, shared and never swapped. See {@link #WALKER_FIELDS}. */
 		static final Set<String> WORLD_FIELDS = Set.of(
-			"recording", "blocks", "collisions", "collisionEvents", "placedBy", "laneTintAt",
+			"recording", "blocks", "collisions", "collisionEvents", "strands", "placedBy", "laneTintAt",
 			"notes", "noteMachine", "powered", "turns", "turnMachines", "moved", "trouble",
 			"breaches", "recesses", "padding", "corners", "wallBreachCells", "starterCells",
 			"minimumX", "minimumY", "minimumZ", "maximumX", "maximumY", "maximumZ",
