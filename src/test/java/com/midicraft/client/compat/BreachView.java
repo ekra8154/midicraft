@@ -60,8 +60,8 @@ final class BreachView {
 	 */
 	static List<SongBuilder.EventNote> song(String name, SongBuilder.PasteMode mode)
 			throws Exception {
-		ComposerProject project = project(name);
-		return SongBuilder.notesFor(mode, project.toSequenceTracks(Set.of(), true), project, true);
+		// With the game's own dedupe and thinning, off its config. See GameSettings.
+		return GameSettings.get().notes(project(name), mode);
 	}
 
 	/**
@@ -114,12 +114,8 @@ final class BreachView {
 	}
 
 	static ComposerProject project(String name) throws Exception {
-		try (Reader reader = Files.newBufferedReader(songFile(name))) {
-			ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
-			return new ComposerProject(raw.name(), raw.ppq(),
-				raw.tempoMicrosPerQuarter(), raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(),
-				raw.endTick(), raw.speedQuarters());
-		}
+		// Loaded as the game's library loads it, every field kept. See GameSettings.
+		return GameSettings.project(songFile(name));
 	}
 
 	/** A plan and the winning walk's trace, which is the only half worth reading. */
@@ -135,7 +131,7 @@ final class BreachView {
 			SongBuilder.TRACE_TURNS = true;
 			plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0), notes,
 				SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
-				new SongBuilder.BuildLimits(maxFloors, width, floors));
+				GameSettings.get().limits(maxFloors, width, floors));
 		} finally {
 			SongBuilder.TRACE_TURNS = false;
 			System.setOut(saved);

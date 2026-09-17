@@ -128,11 +128,12 @@ final class FaultView {
 			// that would draw a different machine -- it suppresses collisions, which in v2 skips every
 			// trial fallback. See SongBuilder.MARK_SHAPES.
 			SongBuilder.MARK_SHAPES = true;
+			// The game's limits -- its reseed delay and start floor travel on them -- with the cap
+			// the caller names, which only the cube layout reads. See GameSettings.
+			SongBuilder.BuildLimits limits = GameSettings.get().limits(maxFloors, width, floors);
 			plan = start == null
-				? SongBuilder.createPastePlan(new BlockPos(0, 64, 0), notes, mode,
-					new SongBuilder.BuildLimits(maxFloors, width, floors))
-				: SongBuilder.createPastePlan(new BlockPos(0, 64, 0), notes, mode,
-					new SongBuilder.BuildLimits(maxFloors, width, floors), start);
+				? SongBuilder.createPastePlan(new BlockPos(0, 64, 0), notes, mode, limits)
+				: SongBuilder.createPastePlan(new BlockPos(0, 64, 0), notes, mode, limits, start);
 		} finally {
 			SongBuilder.MARK_UNREACHED = marking;
 			SongBuilder.DEBUG_PASTE = naming;

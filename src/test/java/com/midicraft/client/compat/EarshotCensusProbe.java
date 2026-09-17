@@ -119,19 +119,14 @@ class EarshotCensusProbe {
 		try (Stream<Path> listing = Files.list(SONGS)) {
 			files = listing.filter(path -> path.toString().endsWith(".json")).sorted().toList();
 		}
+		// The game's own settings, so the notes and the limits are the paste's. See GameSettings.
+		GameSettings.Values game = GameSettings.get();
 		for (Path file : files) {
-			ComposerProject song;
-			try (Reader reader = Files.newBufferedReader(file)) {
-				ComposerProject raw = gson.fromJson(reader, ComposerProject.class);
-				song = new ComposerProject(raw.name(), raw.ppq(), raw.tempoMicrosPerQuarter(),
-					raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(), raw.endTick(),
-					raw.speedQuarters());
-			}
+			ComposerProject song = GameSettings.project(file);
 			if (song.name() == null || !song.name().toLowerCase(Locale.ROOT).contains(named)) {
 				continue;
 			}
-			List<SongBuilder.EventNote> notes =
-				SongBuilder.notesFor(mode, song.toSequenceTracks(Set.of(), true), song, true);
+			List<SongBuilder.EventNote> notes = game.notes(song, mode);
 			if (!notes.isEmpty()) {
 				songs.add(new Song(file.getFileName().toString().replace(".json", ""), notes));
 			}
@@ -143,7 +138,8 @@ class EarshotCensusProbe {
 		boolean wasMarking = SongBuilder.MARK_UNREACHED;
 		List<Summary> summaries = new ArrayList<>();
 		try {
-			SongBuilder.DEBUG_PASTE = Boolean.parseBoolean(text("debug", "true"));
+			SongBuilder.DEBUG_PASTE = Boolean.parseBoolean(text("debug",
+				String.valueOf(GameSettings.get().debugPaste())));
 			SongBuilder.MARK_UNREACHED = false;
 			for (String config : text("configs", CONFIGS).split(";")) {
 				if (config.isBlank()) {
@@ -165,7 +161,7 @@ class EarshotCensusProbe {
 		}
 		System.out.println();
 		System.out.println("==== earshot census, reach " + fmt(reach) + ", " + songs.size() + " songs x "
-			+ sizes.size() + " sizes, every config ====");
+			+ sizes.size() + " sizes, every config " + GameSettings.get().said() + " ====");
 		System.out.println(String.format("   %-24s %6s %5s %7s %13s %18s %9s %7s %6s %8s %9s %6s %5s  %s",
 			"config", "window", "dual", "refused", "builds past", "moments past", "own past", "worst",
 			"mean", "depth", "corridor", "wrong", "coll", "worst at"));
@@ -200,7 +196,7 @@ class EarshotCensusProbe {
 				SongBuilder.PastePlan plan;
 				try {
 					plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0), song.notes(), mode,
-						new SongBuilder.BuildLimits(16, size[0], size[1]));
+						GameSettings.get().limits(size[0], size[1]));
 					cost[0] += plan.spanZ();
 					cost[1] += plan.totalColumns();
 					cost[2] += plan.wrongNotes();

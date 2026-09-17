@@ -57,8 +57,12 @@ class FaultProbeTest {
 		SongBuilder.PasteMode mode = mode(text("mode", "v2"));
 		int width = number("width", 20);
 		int floors = number("floors", 5);
-		int maxFloors = number("maxFloors", 4);
-		boolean names = Boolean.parseBoolean(text("names", "false"));
+		// The game's settings unless a property says otherwise: its floor cap, and whether a
+		// collision is recorded rather than thrown (debugPasteEnabled), which changes the walk.
+		// Its reseed delay and thinning travel on the limits and the notes. See GameSettings.
+		GameSettings.Values game = GameSettings.get();
+		int maxFloors = number("maxFloors", game.maxBuildFloors());
+		boolean names = Boolean.parseBoolean(text("names", String.valueOf(game.debugPaste())));
 		int perKind = number("each", 2);
 		// The runs, off as well as on. Two reasons worth the property: a fault that appears with them
 		// on wants to be seen with them off before it is blamed on them, and the plain lane has faults
@@ -72,7 +76,7 @@ class FaultProbeTest {
 			SongBuilder.TWO_RAIL_RUNS = rails;
 			SongBuilder.V2_RUNS_ON_RAILS = rails;
 			System.out.println();
-			System.out.println("runs " + (rails ? "on" : "OFF"));
+			System.out.println("runs " + (rails ? "on" : "OFF") + "   " + game.said());
 			// What the song says, before any of this touched it. -Dfault.ticks=795-825
 			//
 			// The other half of every "is the build faithful" question, and the half nothing here

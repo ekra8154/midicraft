@@ -228,10 +228,15 @@ class FaultCensusProbe {
 		// -Dcensus.readback=false plans and stops: breaches and collisions both come out of the walk,
 		// and the readback that finds dead, wrong and missing notes is most of a build's cost.
 		boolean readback = Boolean.parseBoolean(text("readback", "true"));
+		// -Dcensus.songs=a,b,c: any of the substrings, so a handful of songs can be asked for at once.
+		List<String> wanted = only.isEmpty() ? List.of()
+			: java.util.Arrays.stream(only.split(",")).map(String::strip)
+				.filter(each -> !each.isEmpty()).toList();
 		List<Path> files;
 		try (Stream<Path> listing = Files.list(SONGS)) {
 			files = listing.filter(path -> path.toString().endsWith(".json"))
-				.filter(path -> only.isEmpty() || path.getFileName().toString().contains(only))
+				.filter(path -> wanted.isEmpty()
+					|| wanted.stream().anyMatch(each -> path.getFileName().toString().contains(each)))
 				.filter(path -> !realOnly || !path.getFileName().toString().startsWith("ultra-"))
 				.sorted().toList();
 		}
@@ -250,16 +255,18 @@ class FaultCensusProbe {
 				+ "\" matches none of the " + library.size() + " songs in " + SONGS + ": " + library);
 		}
 		Gson gson = new Gson();
+		// The game's own paste settings: its project loading, dedupe, thinning, limits and whether
+		// a collision is recorded rather than thrown. What is pasted has to be what is simulated.
+		GameSettings.Values game = GameSettings.get();
 		List<Row> rows = new ArrayList<>();
 		long started = System.currentTimeMillis();
 		for (Path file : files) {
 			String name = file.getFileName().toString().replace(".json", "");
-			ComposerProject song;
-			try (Reader reader = Files.newBufferedReader(file)) {
-				ComposerProject raw = gson.fromJson(reader, ComposerProject.class);
-				song = new ComposerProject(raw.name(), raw.ppq(), raw.tempoMicrosPerQuarter(),
-					sustained(raw.layers()), raw.activeLayerIndex(), raw.nextNoteId(), raw.endTick(),
-					raw.speedQuarters());
+			ComposerProject song = GameSettings.project(file);
+			if (!text("sustain", "").isEmpty()) {
+				song = new ComposerProject(song.name(), song.ppq(), song.tempoMicrosPerQuarter(),
+					sustained(song.layers()), song.activeLayerIndex(), song.nextNoteId(),
+					song.endTick(), song.speedQuarters(), song.speedEighths(), song.markers());
 			}
 			if (!named.isEmpty() && (song.name() == null
 					|| !song.name().toLowerCase(Locale.ROOT).contains(named))) {
@@ -269,8 +276,7 @@ class FaultCensusProbe {
 			// from the composition in game ticks, and handed sequence events it builds a different
 			// song than the paste would -- at the wrong speed, with the two tick parities scrambled.
 			// Asking eventNotes directly is how a probe answers for a machine nobody can paste.
-			List<SongBuilder.EventNote> notes =
-				SongBuilder.notesFor(mode, song.toSequenceTracks(Set.of(), true), song, true);
+			List<SongBuilder.EventNote> notes = game.notes(song, mode);
 			if (notes.isEmpty()) {
 				continue;
 			}
@@ -293,7 +299,8 @@ class FaultCensusProbe {
 					continue;
 				}
 				try {
-					FaultView.Build built = FaultView.of(name, notes, mode, size[0], size[1], 4, false);
+					FaultView.Build built = FaultView.of(name, notes, mode, size[0], size[1],
+						game.maxBuildFloors(), game.debugPaste());
 					tally(built.plan());
 					rows.add(new Row(name, size[0], size[1], built.reading().unreachedNotes(),
 						droppedIn(built.plan()), built.plan().wrongNotes(),
@@ -341,7 +348,7 @@ class FaultCensusProbe {
 		try {
 			SongBuilder.MARK_UNREACHED = false;
 			return SongBuilder.createPastePlan(new net.minecraft.core.BlockPos(0, 64, 0), notes, mode,
-				new SongBuilder.BuildLimits(4, width, floors));
+				GameSettings.get().limits(width, floors));
 		} finally {
 			SongBuilder.MARK_UNREACHED = marking;
 		}
@@ -351,7 +358,7 @@ class FaultCensusProbe {
 			long millis, Flags.Held held) {
 		System.out.println();
 		System.out.println("==== " + mode.label() + " over " + rows.size() + " builds, "
-			+ sizes.size() + " sizes" + held.said() + " ====");
+			+ sizes.size() + " sizes" + held.said() + " " + GameSettings.get().said() + " ====");
 		List<Row> faulty = new ArrayList<>(rows.stream().filter(row -> !row.clean()).toList());
 		faulty.sort((a, b) -> Long.compare(b.weight(), a.weight()));
 		System.out.println("   " + (rows.size() - faulty.size()) + " clean, " + faulty.size()
