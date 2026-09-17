@@ -11642,7 +11642,26 @@ public final class SongBuilder {
 						if (!lane.bending()) {
 							break;
 						}
-						if (tipSignal <= 2 && event.time() - currentTime > 1) {
+						if (SEAM_REPEATER_CROSSES_ALONE && seamFrom == 0 && tipSignal <= 2) {
+							// The element's own repeater, sent into the turn ahead of its pistons:
+							// a revive that costs the wait nothing, because the seam's ticks are
+							// its own, and the rule the element is built on asks only that a
+							// repeater of three stand between one pair and the next. The user's
+							// rule, from wellerman at forty wide over five floors: a stretch had
+							// spent the wait on this leg, the seam walked its turn out on the
+							// seven of wire that were left, and the link starved two cells short
+							// of the corner with the r3 waiting on the far side of it. The rest
+							// of the element follows from cell one, on dust.
+							placements.placing("paritySeamRepeaterInTheTurn");
+							set(placements, lane.pos(), "minecraft:stone");
+							set(placements, lane.pos().above(), "minecraft:repeater[facing="
+								+ repeaterFacing(lane.travel()) + ",delay=" + PARITY_SEAM_REPEATER
+								+ "]");
+							seamFrom = 1;
+							tipSignal = DUST_RANGE;
+							placements.padded("paritySeamRepeaterInTheTurn");
+							placements.placing("paritySeam");
+						} else if (tipSignal <= 2 && event.time() - currentTime > 1) {
 							int revive = Math.min(4, event.time() - currentTime - 1);
 							set(placements, lane.pos(), "minecraft:stone");
 							set(placements, lane.pos().above(), "minecraft:repeater[facing="
