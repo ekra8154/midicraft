@@ -2944,6 +2944,22 @@ public final class SongBuilder {
 	 */
 	static boolean SEAM_READS_OFF_THE_STAIRCASE = true;
 
+	/**
+	 * A seam that fits neither whole nor by its first stage before a staircase sends its repeater
+	 * ahead alone: the last cell before the wall, then dust down the rungs to the pistons.
+	 *
+	 * <p>The user's rule, from faded at sixteen wide over five floors. Three cells before a
+	 * descent, no stage fit, and the whole element was deferred to the landing leg -- so the one
+	 * repeater the wait held went down the stairs with the pistons, and the chain, at one after
+	 * a stacked bus, died on the second rung. The rule the element is built on says only that a
+	 * repeater of three stands somewhere between one pair and the next, not that it touches the
+	 * piston: a repeater as far forward as the floor allows revives the chain for the crossing,
+	 * a plain line carries it the rest of the way, and the pistons stand on the landing leg
+	 * behind the landing's own dust. Nothing revives it between the two, which the crossing loop
+	 * already guarantees for a seam mid-element.</p>
+	 */
+	static boolean SEAM_REPEATER_CROSSES_ALONE = true;
+
 	/** What {@link #laySeamCells} put down: the lane after it, the next cell owed, the feed cell. */
 	private record SeamLaid(Lane lane, int next, BlockPos feedNext, int laid) {
 	}
@@ -11123,6 +11139,9 @@ public final class SongBuilder {
 					// stages. See SEAM_CUTS_A_STAIRCASE.
 					boolean seamMidElement = seamMid;
 					boolean seamCannotCross = false;
+					// The seam's repeater goes at the last cell before the wall, on its own; the
+					// crossing loop lays it there. See SEAM_REPEATER_CROSSES_ALONE.
+					boolean seamRepeaterAtTheWall = false;
 					if (SEAM_CUTS_A_STAIRCASE && seamNext == 0) {
 						BlockPos beforeCorner = lane.pos();
 						lane = pastAnyCorner(placements, lane);
@@ -11158,6 +11177,16 @@ public final class SongBuilder {
 							? laySeamCells(placements, lane, seamNext, seamFeedNext, cellsToWall, 0,
 								walked == 0)
 							: new SeamLaid(lane, seamNext, seamFeedNext, 0);
+						// Or the repeater alone at the wall, with the whole element bar it on the
+						// landing leg: the landing's dust, a block and three cells a stage, and
+						// the wait's reserve past that. Only where the dust still reaches the
+						// wall cell; from there the repeater's own fifteen carries the rungs.
+						if (SEAM_REPEATER_CROSSES_ALONE && laid.laid() == 0 && seamNext == 0
+								&& cellsToWall >= 1 && foldSignal - (cellsToWall - 1) >= 1
+								&& newColumns - 1 - 7 >= foldRepeaters + 2) {
+							seamRepeaterAtTheWall = true;
+							placements.padded("paritySeamRepeaterCrossesAlone");
+						}
 						placements.placing("delayBeforeChord");
 						if (laid.laid() > 0) {
 							lane = laid.lane();
@@ -11223,9 +11252,32 @@ public final class SongBuilder {
 						// of the leg and left the rungs to whatever dust was left. See
 						// STAIRCASE_REPEATERS_AS_FAR_FORWARD_AS_THEY_CAN.
 						boolean repeatHere = STAIRCASE_REPEATERS_AS_FAR_FORWARD_AS_THEY_CAN
-							? cellsBeforeWall == 1 || dustRun >= DUST_RANGE - 1 || firstAfterSoft
+							? cellsBeforeWall == (seamRepeaterAtTheWall ? 2 : 1)
+								|| dustRun >= DUST_RANGE - 1 || firstAfterSoft
 							: stretchLeft == 0 || dustRun >= paceDustRun();
-						if (canRepeat && repeatHere) {
+						if (seamRepeaterAtTheWall && cellsBeforeWall == 1) {
+							// The seam's own repeater, sent ahead of its pistons: the last cell
+							// this floor has. From here the element is mid-way, so no repeater
+							// of the wait may follow it before the pistons -- canRepeat says so.
+							placements.placing("paritySeamRepeaterAlone");
+							set(placements, lane.pos(), "minecraft:stone");
+							set(placements, lane.pos().above(), "minecraft:repeater[facing="
+								+ repeaterFacing(lane.travel()) + ",delay=" + PARITY_SEAM_REPEATER
+								+ "]");
+							seamNext = 1;
+							seamFeedNext = lane.ahead(1).pos();
+							seamMidElement = true;
+							seamMid = true;
+							foldSignal = DUST_RANGE;
+							dustRun = 0;
+							placements.placing("delayBeforeChord");
+							if (TRACE_TURNS) {
+								System.out.println("SEAMSTAIR t=" + event.time()
+									+ " repeater alone before the wall at "
+									+ coordAlong(axis, lane.pos()) + " " + lane.pos().getY() + " "
+									+ coordAcross(axis, lane.pos()));
+							}
+						} else if (canRepeat && repeatHere) {
 							set(placements, lane.pos(), "minecraft:stone");
 							set(placements, lane.pos().above(), "minecraft:repeater[facing="
 								+ repeaterFacing(lane.travel()) + ",delay=" + paceRefresh + "]");
