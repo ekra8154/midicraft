@@ -716,11 +716,8 @@ public final class DebugCommands {
 		return source.getPlayer().blockPosition().relative(Direction.EAST).immutable();
 	}
 
+	/** What the paste button would build, so a bare {@code /midicraft paste} never disagrees. */
 	private static SongBuilder.PasteMode pasteMode() {
-		try {
-			return SongBuilder.PasteMode.valueOf(MidicraftConfig.get().pasteMode());
-		} catch (IllegalArgumentException unknown) {
-			return SongBuilder.PasteMode.ULTRA_COMPACT_LANE;
-		}
+		return SongBuilder.PasteMode.offered(MidicraftConfig.get().pasteMode());
 	}
 }

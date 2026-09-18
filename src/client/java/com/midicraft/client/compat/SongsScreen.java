@@ -118,11 +118,7 @@ public final class SongsScreen extends Screen {
 
 	/** Whether the paste mode in use lays a second lane, which is what reaches between ticks. */
 	private boolean buildsTwoLanes() {
-		try {
-			return SongBuilder.PasteMode.valueOf(config.pasteMode()).gameTicks();
-		} catch (IllegalArgumentException unknown) {
-			return SongBuilder.PasteMode.COMPACT_CUBE.gameTicks();
-		}
+		return SongBuilder.PasteMode.offered(config.pasteMode()).gameTicks();
 	}
 
 	@Override

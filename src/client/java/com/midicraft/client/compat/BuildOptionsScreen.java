@@ -338,7 +338,8 @@ final class BuildOptionsScreen extends Screen {
 		this.project = project;
 		this.dedupeIdenticalNotes = dedupeIdenticalNotes;
 		this.confirm = confirm;
-		this.mode = initialMode;
+		this.mode = SongBuilder.PasteMode.OFFERED.contains(initialMode)
+			? initialMode : SongBuilder.PasteMode.OFFERED.getFirst();
 		this.commandsPerTick = MidicraftConfig.get().commandsPerTick();
 		this.laneWidth = MidicraftConfig.get().buildLaneWidth();
 		this.laneFloors = MidicraftConfig.get().buildLaneFloors();
@@ -347,7 +348,7 @@ final class BuildOptionsScreen extends Screen {
 
 	/** Rows the layout control takes: the chosen one, plus every option while the list is open. */
 	private int layoutRows() {
-		return layoutsShowing ? 1 + SongBuilder.PasteMode.values().length : 1;
+		return layoutsShowing ? 1 + SongBuilder.PasteMode.OFFERED.size() : 1;
 	}
 
 	/** Top of the width row, which only a lane build has. */
@@ -426,8 +427,10 @@ final class BuildOptionsScreen extends Screen {
 		int top = topRow();
 
 		int y = top + 14;
-		addRenderableWidget(Button.builder(
-				Component.literal(mode.label() + (layoutsShowing ? "  ^" : "  v")),
+		// A list of one is not a choice, so with a single layout offered the row only names it.
+		boolean choosing = SongBuilder.PasteMode.OFFERED.size() > 1;
+		Button layout = addRenderableWidget(Button.builder(
+				Component.literal(mode.label() + (!choosing ? "" : layoutsShowing ? "  ^" : "  v")),
 				clicked -> {
 					layoutsShowing = !layoutsShowing;
 					init();
@@ -435,9 +438,10 @@ final class BuildOptionsScreen extends Screen {
 			.bounds(left, y, width, 20)
 			.tooltip(Tooltip.create(Component.literal(describe(mode))))
 			.build());
+		layout.active = choosing;
 		y += 22;
 		if (layoutsShowing) {
-			for (SongBuilder.PasteMode option : SongBuilder.PasteMode.values()) {
+			for (SongBuilder.PasteMode option : SongBuilder.PasteMode.OFFERED) {
 				Button button = addRenderableWidget(Button.builder(
 						Component.literal((option == mode ? "> " : "  ") + option.label()),
 						clicked -> {
@@ -771,7 +775,7 @@ final class BuildOptionsScreen extends Screen {
 	 */
 	private String widthLine(int blocks) {
 		return labelledWidth > blocks
-			? blocks + " asked - built " + labelledWidth + " wide, the widest chord needs it"
+			? labelledWidth + " blocks wide - raised from " + blocks + " to fit the largest chord"
 			: blocks + " blocks wide before it folds back";
 	}
 

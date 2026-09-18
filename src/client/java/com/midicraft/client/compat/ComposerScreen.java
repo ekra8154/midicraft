@@ -114,6 +114,25 @@ public final class ComposerScreen extends Screen {
 	private static final int LAYER_ROW_HEIGHT = 18;
 	/** Layer names are drawn at this fraction of the font's one size. */
 	private static final float LAYER_TEXT_SCALE = 0.75f;
+	/** The status line's text, the same size as a layer's name. */
+	private static final float STATUS_TEXT_SCALE = 0.75f;
+	/** How fast a hovered status line walks along, in screen pixels a second. */
+	private static final float STATUS_SCROLL_PIXELS_PER_SECOND = 40f;
+	/** How long it waits at either end before moving on. */
+	private static final long STATUS_SCROLL_HOLD_MILLIS = 1200L;
+	/** The strip kept clear at an end of the status line for its chevron. */
+	private static final int STATUS_CHEVRON_WIDTH = 10;
+	/** How far one notch of the wheel moves the status line. */
+	private static final float STATUS_WHEEL_PIXELS = 24f;
+	/** How far the status line has been walked along, in screen pixels. */
+	private float statusScroll;
+	/** How much of the status line does not fit, as of the last frame drawn. */
+	private float statusOverflow;
+	/** When the status line may next move on its own. */
+	private long statusHoldUntil;
+	private long statusLastFrame;
+	/** Set by the wheel, so the line stays where it was put until the pointer leaves the bar. */
+	private boolean statusScrolledByHand;
 	/** How far after the instrument icon a layer's name starts. */
 	private static final int LAYER_NAME_GAP = 19;
 	/** Side of the square button carrying a layer's state letter. */
@@ -2108,7 +2127,7 @@ public final class ComposerScreen extends Screen {
 		mark = phase(PHASE_RULER, mark);
 		mark = extractPianoRoll(graphics, mouseX, mouseY, mark);
 		extractSplitToggle(graphics, mouseX, mouseY);
-		extractStatus(graphics);
+		extractStatus(graphics, mouseX, mouseY);
 		extractToast(graphics, mouseX, mouseY);
 		mark = phase(PHASE_STATUS, mark);
 		hoveredDescription = "";
@@ -3288,9 +3307,8 @@ public final class ComposerScreen extends Screen {
 			case CONVERT_GAME_TICKS -> "The same conversion, aimed at game ticks. A game tick is "
 				+ "half a repeater tick, so the grid the notes land on is half as coarse and the "
 				+ "tempo moves at most half as far to reach it -- a song that had to be slowed or "
-				+ "swung to fit often needs neither. The build then needs the Half-tick lane "
-				+ "layout, which plays the even game ticks down one lane and the odd ones down a "
-				+ "second beside it. The status bar says how many lanes a song wants once this has "
+				+ "swung to fit often needs neither. The build then runs as two machines woven "
+				+ "together, one playing the even game ticks and one the odd. The status bar says how many lanes a song wants once this has "
 				+ "run.";
 			case MERGE_REPEATS -> "Collapses a pitch that re-triggers faster than the repeat "
 				+ "window. Songs fake sustain this way, and note blocks cannot sustain.";
@@ -5816,7 +5834,7 @@ public final class ComposerScreen extends Screen {
 		}
 	}
 
-	private void extractStatus(GuiGraphicsExtractor graphics) {
+	private void extractStatus(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
 		SongAnalysis stats = projectStats();
 		int peakChord = stats.peakChord();
 		long overloaded = stats.overloadedTicks();
@@ -5912,33 +5930,85 @@ public final class ComposerScreen extends Screen {
 			segments.add(selectedNotes.size() + " selected");
 		}
 
-		// Drop trailing detail instead of running off the edge.
-		int available = width - 16;
-		StringBuilder status = new StringBuilder();
-		for (String segment : segments) {
-			String candidate = status.isEmpty() ? segment : status + "   " + segment;
-			if (font.width(candidate) > available) {
-				break;
-			}
-			status.setLength(0);
-			status.append(candidate);
-		}
 		int color = ready
 			? 0xFF5AD46A
 			: peakChord >= CHORD_WARNING_THRESHOLD || overloaded > 0 ? 0xFFFF7777 : 0xFFFFAA00;
-		graphics.text(font, status.toString(), 8, height - 16, color, false);
-		// Amber after the green, in its own draw, because it is neither a problem nor part of the
-		// verdict: the song builds, and it builds as two machines rather than one. A reader who
-		// takes in only the colour should come away with "fine, but there is something to know",
-		// which is exactly what a second colour after a green one says.
-		if (ready && !stats.halfTickedNotes().isEmpty()) {
-			String note = "   half-ticked: " + stats.halfTickedNotes().size()
-				+ " notes land between repeater ticks, so the build uses 2 lanes";
-			int after = 8 + font.width(status.toString());
-			if (after + font.width(note) <= width - 8) {
-				graphics.text(font, note, after, height - 16, 0xFFFFAA00, false);
+		String status = String.join("   ", segments);
+		// Amber after the green, because it is neither a problem nor part of the verdict: the song
+		// builds, and it builds as two machines rather than one. A reader who takes in only the
+		// colour should come away with "fine, but there is something to know", which is exactly
+		// what a second colour after a green one says.
+		String note = ready && !stats.halfTickedNotes().isEmpty()
+			? "   half-ticked: " + stats.halfTickedNotes().size()
+				+ " notes land between repeater ticks, so the build uses 2 lanes"
+			: "";
+		extractStatusLine(graphics, status, color, note, mouseX, mouseY);
+	}
+
+	/**
+	 * The status line, small, and scrolled rather than cut short.
+	 *
+	 * <p>It used to drop whole segments off the end to fit the window, so what a narrow window
+	 * showed depended on the order they were listed in and nothing said anything was missing. Now
+	 * the whole line is always there: a chevron at the edge says there is more, hovering the bar
+	 * walks it along, and the wheel over it moves it by hand. Leaving the bar puts it back to the
+	 * verdict, which is the part that matters most.</p>
+	 */
+	private void extractStatusLine(GuiGraphicsExtractor graphics, String status, int color,
+			String note, int mouseX, int mouseY) {
+		int left = 8;
+		int right = width - 8;
+		int y = height - 15;
+		float lineWidth = (font.width(status) + font.width(note)) * STATUS_TEXT_SCALE;
+		statusOverflow = Math.max(0f, lineWidth - (right - left));
+		long now = Util.getMillis();
+		long elapsed = statusLastFrame == 0L ? 0L : Math.min(100L, now - statusLastFrame);
+		statusLastFrame = now;
+		boolean hovered = overStatusBar(mouseX, mouseY);
+		if (!hovered || statusOverflow <= 0f) {
+			statusScroll = 0f;
+			statusScrolledByHand = false;
+			statusHoldUntil = now + STATUS_SCROLL_HOLD_MILLIS;
+		} else if (!statusScrolledByHand && now >= statusHoldUntil) {
+			// Walked along, held at the far end, then back to the start and round again.
+			if (statusScroll >= statusOverflow) {
+				statusScroll = 0f;
+				statusHoldUntil = now + STATUS_SCROLL_HOLD_MILLIS;
+			} else {
+				statusScroll = Math.min(statusOverflow,
+					statusScroll + elapsed * STATUS_SCROLL_PIXELS_PER_SECOND / 1000f);
+				if (statusScroll >= statusOverflow) {
+					statusHoldUntil = now + STATUS_SCROLL_HOLD_MILLIS;
+				}
 			}
 		}
+		statusScroll = Math.max(0f, Math.min(statusOverflow, statusScroll));
+
+		// Which way there is more to read, in a strip at either end that the text is clipped short
+		// of, so a chevron never sits on top of a word.
+		boolean moreRight = statusScroll < statusOverflow;
+		boolean moreLeft = statusScroll > 0f;
+		graphics.enableScissor(moreLeft ? left + STATUS_CHEVRON_WIDTH : left, y - 2,
+			moreRight ? right - STATUS_CHEVRON_WIDTH : right, y + 10);
+		int x = Math.round(left - statusScroll);
+		scaledText(graphics, status, x, y, color, STATUS_TEXT_SCALE);
+		if (!note.isEmpty()) {
+			scaledText(graphics, note, x + Math.round(font.width(status) * STATUS_TEXT_SCALE), y,
+				0xFFFFAA00, STATUS_TEXT_SCALE);
+		}
+		graphics.disableScissor();
+		if (moreRight) {
+			scaledText(graphics, ">>", right - STATUS_CHEVRON_WIDTH + 2, y, 0xFF8A9098,
+				STATUS_TEXT_SCALE);
+		}
+		if (moreLeft) {
+			scaledText(graphics, "<<", left, y, 0xFF8A9098, STATUS_TEXT_SCALE);
+		}
+	}
+
+	/** Whether the pointer is on the status line, below the roll. */
+	private boolean overStatusBar(double mouseX, double mouseY) {
+		return mouseY >= rollY + rollHeight + 2 && mouseY < height && mouseX >= 0 && mouseX < width;
 	}
 
 	/**
@@ -6951,6 +7021,13 @@ public final class ComposerScreen extends Screen {
 					instrumentMenuLayer,
 					target -> target.countOf(id) > 0 ? target.withCountStepped(id, step) : target);
 			}
+			return true;
+		}
+		if (overStatusBar(mouseX, mouseY) && statusOverflow > 0f) {
+			double wheel = scrollY != 0 ? scrollY : scrollX;
+			statusScroll = Math.max(0f, Math.min(statusOverflow,
+				statusScroll - (float)(wheel * STATUS_WHEEL_PIXELS)));
+			statusScrolledByHand = true;
 			return true;
 		}
 		if (mouseX < layerPanelWidth() && mouseY >= LAYER_LIST_TOP - 2 && mouseY <= layerListBottom()) {
@@ -8797,11 +8874,7 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private SongBuilder.PasteMode pasteMode() {
-		try {
-			return SongBuilder.PasteMode.valueOf(config.pasteMode());
-		} catch (IllegalArgumentException unknown) {
-			return SongBuilder.PasteMode.COMPACT_CUBE;
-		}
+		return SongBuilder.PasteMode.offered(config.pasteMode());
 	}
 
 	/**

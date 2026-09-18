@@ -32129,6 +32129,26 @@ public final class SongBuilder {
 			return label;
 		}
 
+		/**
+		 * The layouts the paste screen offers. The rest are still here and still build -- the debug
+		 * paste command reaches every one of them by name -- but only the interleaved layout is
+		 * being kept up, so it is the only one a player is shown.
+		 */
+		static final List<PasteMode> OFFERED = List.of(INTERLEAVED_HALF_TICK);
+
+		/**
+		 * The layout a stored name stands for, as the paste button will build it: a layout no longer
+		 * offered, an unknown name or none at all all come back as the first offered one.
+		 */
+		static PasteMode offered(String name) {
+			try {
+				PasteMode stored = name == null ? null : valueOf(name);
+				return OFFERED.contains(stored) ? stored : OFFERED.getFirst();
+			} catch (IllegalArgumentException unknown) {
+				return OFFERED.getFirst();
+			}
+		}
+
 		/** Whether a build of this mode has to be planned from the composition, not the sequence. */
 		boolean gameTicks() {
 			return gameTicks;
