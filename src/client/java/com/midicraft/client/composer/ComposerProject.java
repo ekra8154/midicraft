@@ -877,11 +877,13 @@ public record ComposerProject(
 		FINEST("Finest"),
 		GAME_TICK("Game tick"),
 		REPEATER_TICK("Repeater tick"),
-		THIRTY_SECOND("1/32"),
-		SIXTEENTH("1/16"),
-		EIGHTH("1/8"),
-		QUARTER("1/4"),
-		HALF("1/2"),
+		// Note values, said as notes: "1/4" alone read as a quarter of a bar. A bar is four quarter
+		// notes, since the composer has no time signature and counts every song in 4/4.
+		THIRTY_SECOND("1/32 note"),
+		SIXTEENTH("1/16 note"),
+		EIGHTH("1/8 note"),
+		QUARTER("1/4 note"),
+		HALF("1/2 note"),
 		BAR("1 bar");
 
 		/** What "Sustain after" offers: every length but Finest, which is a rate and not a length. */
@@ -908,15 +910,17 @@ public record ComposerProject(
 	 * something needs them, see {@link Strikes}.</p>
 	 */
 	public record Sustain(boolean on, SustainLength after, SustainLength every) {
-		// A half note before a note sustains, striking at Finest. Priced on 2026-09-14 over the 24
-		// two-lane songs at six sizes with every layer sustaining: after a quarter refused 12 builds
-		// and added 2 dead ones; after a half refused 6 (one song that overloads at every setting),
-		// added no dead build, and came in at 1.0 to 2.6 times the depth.
-		public static final Sustain DEFAULT = new Sustain(false, SustainLength.HALF, SustainLength.FINEST);
+		// A quarter note before a note sustains, striking every repeater tick: the user's choice on
+		// 2026-09-18, over the half note at Finest the census had picked. What it costs, priced on
+		// 2026-09-14 over the 24 two-lane songs at six sizes with every layer sustaining: repeater
+		// tick after a quarter refused 12 builds and added 4 dead ones, where Finest after a half
+		// refused 6 and added none.
+		public static final Sustain DEFAULT = new Sustain(false, SustainLength.QUARTER,
+			SustainLength.REPEATER_TICK);
 
 		public Sustain {
-			after = after == null || after == SustainLength.FINEST ? SustainLength.HALF : after;
-			every = every == null ? SustainLength.FINEST : every;
+			after = after == null || after == SustainLength.FINEST ? SustainLength.QUARTER : after;
+			every = every == null ? SustainLength.REPEATER_TICK : every;
 		}
 
 		public Sustain withOn(boolean value) {

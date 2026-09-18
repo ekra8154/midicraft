@@ -13,8 +13,8 @@ import net.minecraft.network.chat.Component;
 import org.lwjgl.glfw.GLFW;
 
 /**
- * The two numbers a sustaining layer needs: how long a note must last before it strikes again, and
- * how often it does.
+ * Sustained notes for a layer: whether its long notes strike again at all, how long a note must last
+ * before it does, and how often.
  *
  * <p>In the shape of the Convert popup, because it is the same kind of question about the song
  * behind it: small, dismissible, escape leaves and enter confirms. Each row is a button that steps
@@ -36,7 +36,7 @@ public final class SustainSettingsScreen extends Screen {
 
 	public SustainSettingsScreen(Screen parent, Sustain start, int layerCount, Consumer<Sustain> onConfirm) {
 		super(Component.literal(layerCount > 1
-			? "Sustain settings for " + layerCount + " layers" : "Sustain settings"));
+			? "Sustained notes for " + layerCount + " layers" : "Sustained notes"));
 		this.parent = parent;
 		this.chosen = start == null ? Sustain.DEFAULT : start;
 		this.onConfirm = onConfirm;
@@ -44,12 +44,18 @@ public final class SustainSettingsScreen extends Screen {
 
 	@Override
 	protected void init() {
-		panelHeight = PADDING + 12 + 6 + 2 * ROW_HEIGHT + 24 + BUTTON_HEIGHT + PADDING;
+		panelHeight = PADDING + 12 + 6 + 3 * ROW_HEIGHT + 24 + BUTTON_HEIGHT + PADDING;
 		panelLeft = (width - PANEL_WIDTH) / 2;
 		panelTop = (height - panelHeight) / 2;
 		int rowWidth = PANEL_WIDTH - PADDING * 2;
 		int y = panelTop + PADDING + 12 + 6;
 
+		addRenderableWidget(Button.builder(onLabel(), pressed -> {
+				chosen = chosen.withOn(!chosen.on());
+				pressed.setMessage(onLabel());
+			})
+			.bounds(panelLeft + PADDING, y, rowWidth, BUTTON_HEIGHT).build());
+		y += ROW_HEIGHT;
 		addRenderableWidget(Button.builder(afterLabel(), pressed -> {
 				chosen = chosen.withAfter(next(SustainLength.AFTER_CHOICES, chosen.after()));
 				pressed.setMessage(afterLabel());
@@ -70,6 +76,10 @@ public final class SustainSettingsScreen extends Screen {
 			.bounds(panelLeft + PADDING + buttonWidth + 6, buttonY, buttonWidth, BUTTON_HEIGHT).build());
 	}
 
+	private Component onLabel() {
+		return Component.literal("Sustained notes: " + (chosen.on() ? "On" : "Off"));
+	}
+
 	private Component afterLabel() {
 		return Component.literal("Sustain after: " + chosen.after().label);
 	}
@@ -86,6 +96,9 @@ public final class SustainSettingsScreen extends Screen {
 
 	/** The settings in a sentence, so the two buttons read as one rule. */
 	private String summary() {
+		if (!chosen.on()) {
+			return "Off: every note strikes once.";
+		}
 		String rate = chosen.every() == SustainLength.FINEST
 			? "at the song's finest step"
 			: "every " + chosen.every().label.toLowerCase(java.util.Locale.ROOT);

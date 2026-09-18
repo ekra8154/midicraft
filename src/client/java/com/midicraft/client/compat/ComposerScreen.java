@@ -2276,7 +2276,6 @@ public final class ComposerScreen extends Screen {
 			case MERGE_SELECTED -> "Merge " + selected + " layers (Ctrl+E)";
 			case DELETE_SELECTED -> "Delete " + layerCountLabel(Math.max(1, selected));
 			case SNAP_TO_START -> "Snap " + layerCountLabel(Math.max(1, selected)) + " to song start";
-			case SUSTAIN -> allSustain(menuRow()) ? "Disable sustained notes" : action.label;
 			default -> action.label;
 		};
 	}
@@ -2311,7 +2310,7 @@ public final class ComposerScreen extends Screen {
 				.orElse(0) < project().layers().size() - 1;
 			case MOVE_NOTES_HERE -> !selectedNotes.isEmpty();
 			case SPLIT_MELODIC, SPLIT_PERCUSSION, SPLIT_SFX -> true;
-			case SUSTAIN, SUSTAIN_SETTINGS -> true;
+			case SUSTAIN_SETTINGS -> true;
 			// Greyed out when nothing acted on wears brackets, so the row answers "is any of this
 			// split" the way Move up answers "is there anywhere to go".
 			case UNSPLIT -> layersToEdit(menuRow()).stream()
@@ -2350,11 +2349,6 @@ public final class ComposerScreen extends Screen {
 				layer -> layer.withSplit(ComposerProject.Split.soundEffects()));
 			case UNSPLIT -> updateLayers("put the layer back on one instrument", menuRow(),
 				layer -> layer.withSplit(null));
-			case SUSTAIN -> {
-				boolean on = !allSustain(menuRow());
-				updateLayers(on ? "enable sustained notes" : "disable sustained notes", menuRow(),
-					layer -> layer.withSustain(layer.sustainOrDefault().withOn(on)));
-			}
 			case SUSTAIN_SETTINGS -> openSustainSettings(menuRow());
 			case SELECT_ALL -> {
 				selectedLayers.clear();
@@ -2375,16 +2369,29 @@ public final class ComposerScreen extends Screen {
 			&& acting.stream().allMatch(index -> project().layers().get(index).sustains());
 	}
 
-	/** Opens the sustain settings for the layers a menu row acts on, starting from that row's own. */
+	/**
+	 * Opens the sustained notes popup for the layers a menu row acts on, starting from that row's
+	 * lengths.
+	 *
+	 * <p>It opens on only where every one of those layers already sustains. The switch is applied only
+	 * if it was moved, so a mixed selection opened to change a length keeps each layer on or off as it
+	 * was.</p>
+	 */
 	private void openSustainSettings(int row) {
 		if (row < 0 || row >= project().layers().size()) {
 			return;
 		}
-		ComposerProject.Sustain start = project().layers().get(row).sustainOrDefault();
+		boolean wasOn = allSustain(row);
+		ComposerProject.Sustain start = project().layers().get(row).sustainOrDefault().withOn(wasOn);
 		int count = layersToEdit(row).size();
 		minecraft.gui.setScreen(new SustainSettingsScreen(this, start, count, chosen -> {
-			updateLayers("change sustain settings", row, layer -> layer.withSustain(
-				layer.sustainOrDefault().withAfter(chosen.after()).withEvery(chosen.every())));
+			boolean switched = chosen.on() != wasOn;
+			updateLayers(switched ? (chosen.on() ? "enable sustained notes" : "disable sustained notes")
+					: "change sustained notes", row, layer -> {
+				ComposerProject.Sustain own = layer.sustainOrDefault();
+				return layer.withSustain(own.withOn(switched ? chosen.on() : own.on())
+					.withAfter(chosen.after()).withEvery(chosen.every()));
+			});
 			layersChanged();
 		}));
 	}
@@ -3429,14 +3436,12 @@ public final class ComposerScreen extends Screen {
 			case UNSPLIT -> "Takes the brackets off and puts the layer back on its single "
 				+ "instrument. Notes keep their written pitches, so anything outside F#3-F#5 "
 				+ "shows out of range again.";
-			case SUSTAIN -> "Makes this layer's long notes strike again and again for as long as "
-				+ "they last, which is how a note block holds a note. Their trails turn bright, with "
-				+ "a tick at every strike. Sustain settings chooses how long a note must be and how "
-				+ "often it strikes. With several layers selected it changes all of them.";
-			case SUSTAIN_SETTINGS -> "Chooses how long a note must last before it sustains, and how "
-				+ "often a sustained note strikes. Finest follows the song: on a song ready to paste, "
-				+ "a repeater tick when it builds on one lane and a game tick when it needs two; on "
-				+ "any other, the finest note value its notes are already written on.";
+			case SUSTAIN_SETTINGS -> "Turns sustained notes on or off for this layer: its long notes "
+				+ "strike again and again for as long as they last, which is how a note block holds a "
+				+ "note. Their trails turn bright, with a tick at every strike, and their ends can be "
+				+ "dragged to lengthen them. Also chooses how long a note must last before it "
+				+ "sustains, and how often it strikes. With several layers selected it changes all "
+				+ "of them.";
 		};
 	}
 
@@ -5309,10 +5314,11 @@ public final class ComposerScreen extends Screen {
 	 * The note whose far end is under the cursor, looked for the way {@link #noteAt} looks: only in
 	 * the layers the roll lets you touch, topmost first.
 	 *
-	 * <p>The end is the trail's end, or the trigger's right edge while trails are hidden -- a note
-	 * can always be made longer, whether or not you can see how long it is. Asked before the note's
-	 * body on a press, so the last pixels of a note are the handle; the first two stay the body,
-	 * so even the shortest note can still be moved.</p>
+	 * <p>Only on a layer that sustains. Anywhere else a note's length is struck once whatever it is,
+	 * so there is nothing to gain by changing it and a handle there only ever got in the way of
+	 * moving the note. The end is the trail's end, or the trigger's right edge for a note with none.
+	 * A note's body always wins over a handle: the handle is never inside the trigger it belongs to,
+	 * and never over another note's.</p>
 	 */
 	private NoteHit trailEndAt(double mouseX, double mouseY) {
 		if (!insideRoll(mouseX, mouseY)) {
@@ -5332,11 +5338,11 @@ public final class ComposerScreen extends Screen {
 				continue;
 			}
 			Layer layer = project().layers().get(layerIndex);
-			if (!layer.visible()) {
+			if (!layer.visible() || !layer.sustains()) {
 				continue;
 			}
 			List<NoteEvent> notes = layer.notes();
-			ComposerProject.Strikes strikes = layer.sustains() ? editorStrikes(project(), layer) : null;
+			ComposerProject.Strikes strikes = editorStrikes(project(), layer);
 			for (int index = lowerBoundStart(notes, Math.max(0L, cursorTick - reach - grab));
 					index < notes.size(); index++) {
 				NoteEvent note = notes.get(index);
@@ -5347,10 +5353,11 @@ public final class ComposerScreen extends Screen {
 					continue;
 				}
 				int left = tickX(note.startTick());
-				int end = showTrails || strikes != null && strikes.sustained(note)
+				int end = showTrails || strikes.sustained(note)
 					? trailEndX(note, left, noteWidth) : left + noteWidth;
-				if (Math.abs(mouseX - end) <= TRAIL_GRAB_PIXELS && mouseX >= left + 2) {
-					return new NoteHit(layerIndex, note);
+				if (Math.abs(mouseX - end) <= TRAIL_GRAB_PIXELS && mouseX >= left + noteWidth) {
+					// Asked last, and only of a handle found: it walks every note of every layer.
+					return noteAt(mouseX, mouseY) == null ? new NoteHit(layerIndex, note) : null;
 				}
 			}
 		}
@@ -6564,14 +6571,15 @@ public final class ComposerScreen extends Screen {
 	}
 
 	/**
-	 * How long a note drawn by hand is: one step of the snap, so its trail reaches the next line.
+	 * How long a note drawn by hand is: a single tick, so it has no trail at all.
 	 *
-	 * <p>It used to be a sixteenth whatever the grid, which cost nothing while length was invisible
-	 * and would now draw a trail across three cells of a game-tick grid. With the snap off there is
-	 * no step to take, so it stays a sixteenth.</p>
+	 * <p>It was one step of the snap, which drew a trail to the next grid line behind every note
+	 * placed -- and a trail's end is a handle, so at any ordinary zoom a freshly placed note was
+	 * mostly handle and could not be picked up to move. A note block strikes once whatever length it
+	 * is written at; a note is made longer, on a layer that sustains, by dragging its end.</p>
 	 */
 	private long newNoteLength() {
-		return snapSubdivision == 0 ? project().ppq() / 4L : gridTicks();
+		return 1L;
 	}
 
 	private boolean handleInstrumentMenuClick(double mouseX, double mouseY) {
@@ -10497,8 +10505,7 @@ public final class ComposerScreen extends Screen {
 		SPLIT_PERCUSSION("Split layer: percussion"),
 		SPLIT_SFX("Split layer: sound effects"),
 		UNSPLIT("Back to one instrument"),
-		SUSTAIN("Enable sustained notes"),
-		SUSTAIN_SETTINGS("Sustain settings..."),
+		SUSTAIN_SETTINGS("Sustained notes..."),
 		// Last, and not next to Merge. The two read alike in a hurry and only one of them can be
 		// reached by a slip of the hand from a row you meant to rename.
 		DELETE_SELECTED("Delete selected");
