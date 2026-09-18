@@ -14816,7 +14816,8 @@ public final class SongBuilder {
 							if (TRACE_TURNS) {
 								System.out.println("FLAT i=" + index + " t=" + event.time() + " notes="
 									+ event.notes().size() + " columns=" + columns + " tight=" + tight
-									+ " rewalked=" + rewalked + " cornerX=" + cornerX + " at "
+									+ " rewalked=" + rewalked + " cornerX=" + cornerX + " link="
+									+ flatLink(route, leg, slabStep) + " straddles=" + straddles + " at "
 									+ coordAlong(axis, lane.pos()) + " " + lane.pos().getY() + " "
 									+ coordAcross(axis, lane.pos()));
 							}
