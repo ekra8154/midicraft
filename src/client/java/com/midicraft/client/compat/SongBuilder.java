@@ -32769,38 +32769,30 @@ public final class SongBuilder {
 		}
 
 		/**
-		 * The cell the shared input feeds for a machine.
+		 * The cell the shared input feeds for a machine: the first cell of lane it laid, wire or
+		 * repeater.
 		 *
-		 * <p>Its first repeater, as it always was -- except where that repeater does not stand on
-		 * the floor the machine opened on. A machine fed through the piston pair opens six columns
-		 * in, and at eight wide that is the far wall: its opening leg is one cell, no module fits,
-		 * and the walk climbs off that cell before it lays a repeater at all. The first repeater is
-		 * then a floor up, and a feed laid to it lands the pair on that floor, pointing the way the
-		 * lane ran below -- against the lane it now stands in, through the rail head it just
-		 * overwrote. Force theme two lanes at 8x4, and 8x3, dead from the first cell.</p>
-		 *
-		 * <p>So where the opening floor holds no repeater, the feed goes to the machine's first cell
-		 * of lane instead: the foot of the climb, a wire, which a block of redstone landed beside it
-		 * powers to fifteen exactly as it would power a repeater's input. The climb carries it up,
-		 * and the first repeater reads it from there, no further from the landing in ticks than it
-		 * would be one cell away.</p>
+		 * <p>It was the first repeater, and then the first repeater on the opening floor, and both
+		 * were wrong the same way: a machine that opens on something other than a repeater -- a
+		 * climb off its first cell (force theme at eight wide over four floors), a wait of dust
+		 * before its first chord (on the floor, sustained, at eight wide over two) -- has its first
+		 * repeater cells down the lane, and the feed laid to it runs its pistons and blocks over
+		 * the machine's own cells on the way: two contested cells and a dead line from the first
+		 * note. The block of redstone the run lands powers dust beside it as it powers a
+		 * repeater's input, so the first cell is the right target whatever it is.</p>
 		 */
 		BlockPos openingFeedOf(int machine) {
-			BlockPos first = null;
 			for (Map.Entry<BlockPos, String> cell : blocks.entrySet()) {
 				if (laneTintAt.getOrDefault(cell.getKey(), -2) / 2 != machine) {
 					continue;
 				}
 				String block = cell.getValue();
-				if (block.startsWith("minecraft:repeater")) {
-					return first == null || first.getY() == cell.getKey().getY()
-						? cell.getKey() : first;
-				}
-				if (first == null && block.startsWith("minecraft:redstone_wire")) {
-					first = cell.getKey();
+				if (block.startsWith("minecraft:repeater")
+						|| block.startsWith("minecraft:redstone_wire")) {
+					return cell.getKey();
 				}
 			}
-			return first;
+			return null;
 		}
 
 		/** The machine being walked, 0 or 1, or -1 on a plan that never named one. */
