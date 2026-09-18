@@ -89,7 +89,9 @@ final class MidiImporter {
 			layers.add(new Layer(
 				trackName(index, new Part(part.name(), part.trackIndex(), part.channel(),
 					part.program(), List.of())),
-				instrumentFor(part, config, defaultInstrument), false, true, true, notes));
+				instrumentFor(part, config, defaultInstrument), false, true, true, notes)
+				// A track that doubles a note has one note there, not a stack.
+				.withStacksMerged());
 		}
 		if (layers.isEmpty()) {
 			throw new IllegalArgumentException(

@@ -317,7 +317,7 @@ public record ComposerProject(
 			// A split layer always keeps the pitch in the cell, whatever its vestigial instrument
 			// says: the row decides which voices sound, so two rows are never the same note.
 			notes = notes == null ? List.of()
-				: oneNotePerCell(notes, split != null || pitched(instrument, mix));
+				: ordered(notes, split != null || pitched(instrument, mix));
 		}
 
 		/** Everything but the split, for the callers written before there was one. */
@@ -446,32 +446,87 @@ public record ComposerProject(
 		}
 
 		/**
-		 * A layer's notes in order, with at most one on any pitch at any tick.
+		 * A layer's notes in order: by tick, then pitch, then id, so a stack sits together with the
+		 * note that was there first at the bottom of it.
 		 *
-		 * <p>A layer has one instrument, so two notes on the same pitch at the same tick are the same
-		 * sound twice. The build already collapsed them and preview already played them once; keeping
-		 * them in the document only meant the roll had a cell you could put notes into forever, with
-		 * nothing to show that you had. Wanting a doubled note is a real thing to want -- it is how
-		 * you make one louder -- and it is a count on the instrument, in the palette, which says so.</p>
+		 * <p>A layer may hold more than one note in a cell -- a stack. Nothing makes one by clicking:
+		 * {@link ComposerProject#addNote} refuses an occupied cell. They come from pasting onto notes
+		 * and dragging onto them, and they have to survive, or pasting in place onto the layer a copy
+		 * came from threw the paste away on arrival and there was nothing left to drag off.</p>
 		 *
-		 * <p>Enforced here, in the constructor, rather than at the places that add notes. Every edit
-		 * in this file goes through {@code with}, and a rule about what a layer <em>is</em> cannot be
-		 * left to each caller to remember: quantizing two neighbours onto one tick, transposing two
-		 * pitches onto one, pasting, merging layers and importing a MIDI whose track doubles a note
-		 * all arrive at the same cell by different roads.</p>
-		 *
-		 * <p>The survivor is the lowest id, which is the one that was there first. Deliberately not
-		 * the newest: a phrase dragged across an existing note would otherwise lose one of its own
-		 * notes to every note it passed, and a drag is rebuilt from its starting point each frame, so
-		 * only where it comes to rest can cost anything.</p>
+		 * <p>A stack is always built and played once, whatever Merge duplicate notes is set to; see
+		 * {@link ComposerProject#placedForBuild}.</p>
 		 *
 		 * <p>On a sound effect layer the cell is the tick alone. A door cannot be tuned, so the row a
-		 * hit is drawn on says nothing about how it sounds, and two hits on one tick would be one door
-		 * opening twice in the same instant -- which is one door opening. The row is still yours to
-		 * use: drawing a part across the roll to keep it readable costs nothing, it just cannot mean
-		 * two of anything. Note that switching a layer onto an effect collapses whatever chords it
-		 * already had; that is an edit like any other and undo puts them back.</p>
+		 * hit is drawn on says nothing about how it sounds, and two hits on one tick are a stack
+		 * however far apart their rows are.</p>
 		 */
+		private static List<NoteEvent> ordered(List<NoteEvent> notes, boolean pitched) {
+			Comparator<NoteEvent> order = pitched
+				? Comparator.comparingLong(NoteEvent::startTick)
+					.thenComparingInt(NoteEvent::midiNote)
+					.thenComparingLong(NoteEvent::id)
+				: Comparator.comparingLong(NoteEvent::startTick)
+					.thenComparingLong(NoteEvent::id);
+			List<NoteEvent> sorted = notes.stream()
+				.filter(java.util.Objects::nonNull)
+				.sorted(order)
+				.toList();
+			return sorted;
+		}
+
+		/** Whether this layer tells two rows at one tick apart, which is what makes them one cell. */
+		public boolean pitchedCells() {
+			return split != null || pitched();
+		}
+
+		/**
+		 * This layer with every stack reduced to the note at the bottom of it, the one there first.
+		 *
+		 * <p>For the edits that squash notes together on purpose -- quantizing neighbours onto one
+		 * tick, folding octaves into range, a conversion, an import whose track doubles a note -- where
+		 * two notes landing on one cell have become one note, not a stack anybody asked for.</p>
+		 */
+		public Layer withStacksMerged() {
+			List<NoteEvent> kept = oneNotePerCell(notes, pitchedCells());
+			return kept.size() == notes.size() ? this : withNotes(kept);
+		}
+
+		/** How many notes share this note's cell, itself included: 1 for a note on its own. */
+		public int stackSize(NoteEvent note) {
+			boolean pitched = pitchedCells();
+			int size = 0;
+			for (NoteEvent other : notes) {
+				if (other.startTick() > note.startTick()) {
+					break;
+				}
+				if (other.startTick() == note.startTick()
+						&& (!pitched || other.midiNote() == note.midiNote())) {
+					size++;
+				}
+			}
+			return Math.max(1, size);
+		}
+
+		/**
+		 * Every note in a stack but the one at the bottom of it: the copies a paste or a drag left on
+		 * top of notes already there, in the order they sit.
+		 */
+		public List<NoteEvent> stackedExtras() {
+			boolean pitched = pitchedCells();
+			List<NoteEvent> extras = new ArrayList<>();
+			NoteEvent previous = null;
+			for (NoteEvent note : notes) {
+				if (previous != null && previous.startTick() == note.startTick()
+						&& (!pitched || previous.midiNote() == note.midiNote())) {
+					extras.add(note);
+				}
+				previous = note;
+			}
+			return extras;
+		}
+
+		/** The notes with at most one per cell, the lowest id surviving. */
 		private static List<NoteEvent> oneNotePerCell(List<NoteEvent> notes, boolean pitched) {
 			// Unpitched layers leave the pitch out of the ordering as well as out of the cell, or the
 			// survivor would be the lowest row rather than the note that was there first.
@@ -1331,7 +1386,7 @@ public record ComposerProject(
 			// dropped, and none of them count as heard. The count is somebody asking for a louder
 			// note, and collapsing it -- or letting it collapse a note on another layer -- would
 			// quietly undo that. Its copies are expanded only after.
-			List<Layer> voices = (finest > 0.0 ? withSustainsExpanded(layer, finest) : layer).buildVoices();
+			List<Layer> voices = placedForBuild(layer, finest).buildVoices();
 			for (int voiceIndex = 0; voiceIndex < voices.size(); voiceIndex++) {
 				Layer voice = voices.get(voiceIndex);
 				Layer projected = heard == null || voice.copies() > 1
@@ -1345,6 +1400,25 @@ public record ComposerProject(
 			}
 		}
 		return List.copyOf(result);
+	}
+
+	/**
+	 * A layer as the build starts from it, before its voices are expanded: sustains struck out, and
+	 * every stack as the one note at the bottom of it.
+	 *
+	 * <p>Always, whatever Merge duplicate notes is set to. A stack is a copy that landed on a note --
+	 * a paste, a drag -- not a way of asking for more of it: louder is a count in the palette, or the
+	 * note on a second layer, and both of those say so where you can see them. So a stack never
+	 * changes what is heard, and a stack of two on a harp played three times is three note blocks.</p>
+	 *
+	 * <p>The one place a stack is merged, so preview, the analysis, the chord limit, the build and
+	 * the export cannot disagree about it.</p>
+	 *
+	 * @param finest what Finest is, or 0 for a song with no sustain
+	 */
+	public Layer placedForBuild(Layer layer, double finest) {
+		Layer placed = finest > 0.0 ? withSustainsExpanded(layer, finest) : layer;
+		return placed.withStacksMerged();
 	}
 
 	private static Layer withoutAlreadyHeard(Layer layer, Set<NoteSound> heard) {
@@ -1425,7 +1499,9 @@ public record ComposerProject(
 		for (int index = 0; index < layers.size(); index++) {
 			if (index == target) {
 				mergedIndex = updated.size();
-				updated.add(layers.get(index).withNotes(merged));
+				// Two layers playing the same note merge into one note, not a stack: merging is
+				// asking for one part, and the stack would only ever have played once anyway.
+				updated.add(layers.get(index).withNotes(merged).withStacksMerged());
 			} else if (!sorted.contains(index)) {
 				updated.add(layers.get(index));
 			}
@@ -1780,12 +1856,13 @@ public record ComposerProject(
 	/** Snaps note starts onto the given grid, within {@code scope} or everywhere if it is empty. */
 	public ComposerProject withQuantized(int gridTicks, Set<Long> scope) {
 		int grid = Math.max(1, gridTicks);
+		// Neighbours quantized onto one tick at one pitch have become one note, not a stack.
 		List<Layer> updated = layers.stream()
 			.map(layer -> layer.withNotes(layer.notes().stream()
 				.map(note -> !inScope(note, scope) ? note : note.movedTo(
 					Math.max(0L, Math.round(note.startTick() / (double)grid) * (long)grid),
 					note.midiNote()))
-				.toList()))
+				.toList()).withStacksMerged())
 			.toList();
 		return with(updated, activeLayerIndex, nextNoteId);
 	}
@@ -1810,7 +1887,7 @@ public record ComposerProject(
 					? note
 					: note.movedTo(note.startTick(),
 						note.midiNote() + octaveShiftIntoNoteBlockRange(note.midiNote())))
-				.toList()))
+				.toList()).withStacksMerged())
 			.toList();
 		return with(updated, activeLayerIndex, nextNoteId);
 	}
@@ -2205,10 +2282,10 @@ public record ComposerProject(
 					convertedActiveLayer = convertedLayers.size();
 				}
 				for (int emittedIndex = 0; emittedIndex < emitted.size(); emittedIndex++) {
-					Layer built = emitted.get(emittedIndex);
+					Layer built = emitted.get(emittedIndex).withStacksMerged();
 					// Two notes an octave apart can still land on one cell, where both were
-					// outside the brackets and the same octave brought them in. A layer keeps one
-					// note per cell, and this is the one way the mode can take a note away.
+					// outside the brackets and the same octave brought them in. They are merged into
+					// one, and this is the one way the mode can take a note away.
 					mergedIntoExisting += fed.get(emittedIndex) - built.notes().size();
 					convertedLayers.add(built);
 				}
@@ -2280,9 +2357,10 @@ public record ComposerProject(
 					: source.name() + octaveShiftSuffix(shift);
 				// Copied off the source rather than rebuilt, so a split layer's brackets survive
 				// the conversion along with everything else about it.
-				Layer built = source.withName(convertedName).withNotes(entry.getValue());
-				// What the layer would not hold. A layer keeps one note per pitch per tick, so two
-				// source notes an octave apart that land on the same pitch become one -- the same
+				Layer built = source.withName(convertedName).withNotes(entry.getValue())
+					.withStacksMerged();
+				// What the layer merges. A stack only ever plays once, so two source notes an octave
+				// apart that land on the same pitch are merged into one -- the same
 				// dedupe the split reports as a dropped duplicate layer, arriving a note at a time
 				// because there is no second layer for it to arrive as. Counted rather than left
 				// silent: it is the one way this can take notes away, and it should say so.
@@ -2371,18 +2449,20 @@ public record ComposerProject(
 	/**
 	 * Adds one note, or hands back the same composition if that cell is already taken.
 	 *
-	 * <p>The constructor would drop the duplicate either way -- see {@link Layer#oneNotePerCell} --
-	 * but going through it would still spend an id and hand back a record that differs, which is an
-	 * undo step for an edit that changed nothing. Refusing here is what makes clicking an occupied
-	 * cell a no-op rather than something Ctrl+Z has to be pressed to get past.</p>
+	 * <p>A layer can hold a stack, but clicking never makes one: a stack is a copy that landed on a
+	 * note, and a click on a note is not asking for a second. Refusing here is also what makes
+	 * clicking an occupied cell a no-op rather than an undo step for nothing. On a sound effect
+	 * layer the cell is the tick alone, so any row at that tick counts as taken.</p>
 	 */
 	public ComposerProject addNote(int layerIndex, int midiNote, long startTick, long durationTicks) {
 		int target = Math.max(0, Math.min(layers.size() - 1, layerIndex));
 		Layer layer = layers.get(target);
 		int clampedNote = Math.max(0, Math.min(127, midiNote));
 		long clampedTick = Math.max(0L, startTick);
+		boolean pitched = layer.pitchedCells();
 		for (NoteEvent existing : layer.notes()) {
-			if (existing.startTick() == clampedTick && existing.midiNote() == clampedNote) {
+			if (existing.startTick() == clampedTick
+					&& (!pitched || existing.midiNote() == clampedNote)) {
 				return this;
 			}
 			if (existing.startTick() > clampedTick) {
@@ -2833,7 +2913,7 @@ public record ComposerProject(
 			// is a plain one-instrument layer and downstream readers need no new case.
 			// A counted voice skips the deduplication both ways and arrives as one layer per copy;
 			// see toSequenceTracks.
-			List<Layer> voices = (finest > 0.0 ? withSustainsExpanded(layer, finest) : layer).buildVoices();
+			List<Layer> voices = placedForBuild(layer, finest).buildVoices();
 			for (int voiceIndex = 0; voiceIndex < voices.size(); voiceIndex++) {
 				Layer voice = voices.get(voiceIndex);
 				Layer projected = heard == null || voice.copies() > 1

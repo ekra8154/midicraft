@@ -155,7 +155,7 @@ public final class ChordSkips {
 			if (!layer.inBuild()) {
 				continue;
 			}
-			Layer placed = finest > 0.0 ? project.withSustainsExpanded(layer, finest) : layer;
+			Layer placed = project.placedForBuild(layer, finest);
 			Map<Long, Long> writtenStart = placed == layer ? null : SongAnalysis.writtenStarts(layer);
 			List<Layer> voices = placed.buildVoices();
 			for (int voiceIndex = 0; voiceIndex < voices.size(); voiceIndex++) {

@@ -92,7 +92,7 @@ final class NbsExporter {
 			// stacked three times is three notes -- which Note Block Studio plays three times as
 			// loud, the same as the machine does.
 			List<ComposerProject.Layer> voiceLayers =
-				(finest > 0.0 ? project.withSustainsExpanded(layer, finest) : layer).buildVoices();
+				project.placedForBuild(layer, finest).buildVoices();
 			for (int voiceIndex = 0; voiceIndex < voiceLayers.size(); voiceIndex++) {
 				ComposerProject.Layer voiceLayer = voiceLayers.get(voiceIndex);
 				if (!voiceLayer.pitched()) {

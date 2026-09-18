@@ -161,7 +161,8 @@ final class NbsImporter {
 			String layerName = group.sourceNames.size() == 1
 				? group.sourceNames.iterator().next()
 				: PreviewInstrument.byId(group.instrument).name();
-			layers.add(new Layer(layerName, group.instrument, false, true, true, notes));
+			layers.add(new Layer(layerName, group.instrument, false, true, true, notes)
+				.withStacksMerged());
 		}
 
 		int ppq = ComposerProject.DEFAULT_PPQ;

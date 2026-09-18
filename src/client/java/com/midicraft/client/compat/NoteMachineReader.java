@@ -993,8 +993,8 @@ public final class NoteMachineReader {
 			String layerName = slash < 0
 				? label
 				: label + " " + (Integer.parseInt(entry.getKey().substring(0, slash)) + 1);
-			// One layer per voice, not one per instrument. A layer holds at most one note per pitch
-			// per tick, so a machine that really does stand two note blocks of one instrument on one
+			// One layer per voice, not one per instrument. A stack on one layer always plays once,
+			// so a machine that really does stand two note blocks of one instrument on one
 			// pitch and fire them together -- which is how a build makes a note louder, and what
 			// dedupe being off leaves in -- cannot be described by a single layer. Reading it into
 			// one silently dropped the second, and this is the path everything else is checked

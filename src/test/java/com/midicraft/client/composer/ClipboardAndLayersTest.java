@@ -252,48 +252,61 @@ class ClipboardAndLayersTest {
 	}
 
 	/**
-	 * A layer holds at most one note on a pitch at a tick, whichever road arrives at the cell.
+	 * A layer keeps a stack -- notes sharing a pitch and a tick -- but only the gestures that land a
+	 * copy on a note make one, and the edits that squash notes together on purpose merge it.
 	 *
-	 * <p>Asserted through the operations rather than on the constructor alone, because the point of
-	 * putting the rule in the constructor is that no caller has to remember it -- and the way that
-	 * claim fails is a new operation building its layers some other way.</p>
+	 * <p>Asserted through the operations, because what used to be one rule in the constructor is now
+	 * a rule about which roads arrive at a shared cell and what each leaves there.</p>
 	 */
 	@Test
-	void aLayerNeverHoldsTwoNotesInOneCell() {
+	void stacksComeFromCopiesAndSquashingEditsMergeThem() {
 		ComposerProject song = songOf(new Layer("One", "HARP", false, true, true,
 			List.of(note(60, 0L), note(60, 0L), note(60, 0L), note(64, 0L))));
-		assertEquals(2, song.layers().getFirst().notes().size(),
-			"three notes on one pitch at one tick are one note; the other pitch survives");
+		Layer stacked = song.layers().getFirst();
+		assertEquals(4, stacked.notes().size(), "a layer keeps all three notes of a stack");
+		assertEquals(3, stacked.stackSize(stacked.notes().getFirst()));
+		assertEquals(2, stacked.stackedExtras().size(), "two of them sit on top of the first");
+		assertEquals(2, stacked.withStacksMerged().notes().size(),
+			"merged, the stack is one note and the other pitch survives");
 
 		ComposerProject placed = song.addNote(0, 60, 0L, 120L);
 		assertEquals(song, placed, "placing into a taken cell changes nothing at all, not even an id");
-
 		ComposerProject free = song.addNote(0, 62, 0L, 120L);
-		assertEquals(3, free.layers().getFirst().notes().size(), "an empty cell still takes a note");
+		assertEquals(5, free.layers().getFirst().notes().size(), "an empty cell still takes a note");
 
-		// Dragged on top of each other: one gesture, and the note that was there first survives.
+		// Dragged on top of each other: both stay, the later one on top.
 		ComposerProject spread = songOf(layer("One", "HARP", 60, 60));
-		assertEquals(List.of(0L, 240L), startTicks(spread.layers().getFirst()));
 		long later = spread.layers().getFirst().notes().get(1).id();
 		ComposerProject collided = spread.moveNotes(Set.of(later), -240L, 0);
-		assertEquals(1, collided.layers().getFirst().notes().size(),
-			"dragging one onto the other leaves one note");
-		assertTrue(collided.layers().getFirst().notes().getFirst().id() < later,
-			"and it is the one that was already there");
+		assertEquals(2, collided.layers().getFirst().notes().size(),
+			"dragging one onto the other keeps both, as a stack");
+		assertEquals(later, collided.layers().getFirst().notes().getLast().id(),
+			"with the one that was dragged on top");
 
-		// Transposed onto each other: two pitches a tone apart, moved a tone.
-		ComposerProject chord = songOf(new Layer("Chord", "HARP", false, true, true,
-			List.of(note(60, 0L), note(62, 0L))));
-		long lower = chord.layers().getFirst().notes().getFirst().id();
-		assertEquals(1, chord.moveNotes(Set.of(lower), 0L, 2).layers().getFirst().notes().size(),
-			"transposing one onto the other leaves one note");
-
-		// Quantized onto each other: two neighbours inside one grid cell.
+		// Quantized onto each other: two neighbours inside one grid cell have become one note.
 		ComposerProject offGrid = songOf(new Layer("One", "HARP", false, true, true,
 			List.of(note(60, 0L), note(60, 30L))));
 		assertEquals(2, offGrid.layers().getFirst().notes().size(), "30 ticks apart they are two");
 		assertEquals(1, offGrid.withQuantized(480, Set.of()).layers().getFirst().notes().size(),
 			"quantized to a quarter they are one");
+
+		// And a stack always plays once, with the merge setting on or off.
+		for (boolean merge : new boolean[] {true, false}) {
+			SongAnalysis stats = SongAnalysis.of(song, merge);
+			assertEquals(2, stats.buildNotes(), "a stack builds one note block (merge " + merge + ")");
+			assertEquals(2, stats.duplicateNotes(), "and says the other two were merged");
+		}
+	}
+
+	/** A stack on a counted layer is one note played the count's number of times, not more. */
+	@Test
+	void aStackOnACountedLayerPlaysTheCountOnce() {
+		Layer harp = new Layer("One", "HARP", false, true, true,
+			List.of(note(60, 0L), note(60, 0L))).withCountStepped("HARP", 2);
+		assertEquals(3, harp.copies());
+		SongAnalysis stats = SongAnalysis.of(songOf(harp), false);
+		assertEquals(3, stats.buildNotes(), "two stacked notes at three copies are three blocks");
+		assertEquals(3, stats.duplicateNotes(), "the stack's second note was three blocks merged");
 	}
 
 	/** Merging two layers that play the same note at the same time gives one note, not two. */

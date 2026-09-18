@@ -136,7 +136,7 @@ public final class ChordThinner {
 			// Sustains are weighed as the build places them, strikes and all, but a strike is never
 			// on offer: it carries its note's id, and taking it would delete the whole held note to
 			// lighten one tick of it.
-			Layer placed = finest > 0.0 ? project.withSustainsExpanded(layer, finest) : layer;
+			Layer placed = project.placedForBuild(layer, finest);
 			Map<Long, Long> writtenStart = placed == layer ? null : SongAnalysis.writtenStarts(layer);
 			List<Layer> voiceLayers = placed.buildVoices();
 			for (int voiceIndex = 0; voiceIndex < voiceLayers.size(); voiceIndex++) {

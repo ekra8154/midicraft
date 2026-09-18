@@ -136,8 +136,14 @@ public record SongAnalysis(
 			// Sustains are expanded first, on the layer as written, so every strike is judged as the
 			// note block it is. A strike of an out-of-range note is not counted out of range again:
 			// the note it belongs to already was.
-			Layer placed = finest > 0.0 ? project.withSustainsExpanded(layer, finest) : layer;
-			Map<Long, Long> writtenStart = placed == layer ? null : writtenStarts(layer);
+			Layer expanded = finest > 0.0 ? project.withSustainsExpanded(layer, finest) : layer;
+			Map<Long, Long> writtenStart = expanded == layer ? null : writtenStarts(layer);
+			// A stack merged as the build always merges it, and counted as merged duplicates: every
+			// note block the rest of the stack would have been, a counted voice's copies included.
+			Layer placed = project.placedForBuild(expanded, 0.0);
+			if (placed != expanded) {
+				duplicateNotes += blocks(expanded) - blocks(placed);
+			}
 			List<Layer> voices = placed.buildVoices();
 			for (int voiceIndex = 0; voiceIndex < voices.size(); voiceIndex++) {
 				Layer voice = voices.get(voiceIndex);
@@ -227,6 +233,15 @@ public record SongAnalysis(
 			maximumNoteDuration, Set.copyOf(offGrid), Set.copyOf(crowded), Set.copyOf(halfTicked),
 			Map.copyOf(gaps), project.endTick(), project.endTick() / span / 10.0, duplicateNotes,
 			buildNotes, halfTicksAvailable, skips);
+	}
+
+	/** The note blocks a layer's voices place, before anything is deduplicated or thinned. */
+	private static int blocks(Layer layer) {
+		int blocks = 0;
+		for (Layer voice : layer.buildVoices()) {
+			blocks += voice.notes().size() * voice.copies();
+		}
+		return blocks;
 	}
 
 	/**

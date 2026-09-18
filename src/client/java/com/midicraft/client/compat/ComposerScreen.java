@@ -691,12 +691,12 @@ public final class ComposerScreen extends Screen {
 	/**
 	 * Whether a box drag leaves a range behind, and a paste steps by its length.
 	 *
-	 * <p>Off while the cursor-relative paste below is tried. The whole feature answers to this one
-	 * constant -- everything that draws it, grabs it or measures with it already asks
-	 * {@link #hasRange()} first -- so it stays built and stays compiled rather than being carried
-	 * around in comments, and turning it back on is one word.</p>
+	 * <p>On again after a stretch off while a cursor-relative paste was tried, which left the player
+	 * unable to tell where a paste would land. The whole feature answers to this one constant --
+	 * everything that draws it, grabs it or measures with it already asks {@link #hasRange()} first
+	 * -- so switching it is one word.</p>
 	 */
-	private static final boolean SELECTION_RANGE = false;
+	private static final boolean SELECTION_RANGE = true;
 	private long rangeStart = -1L;
 	private long rangeEnd = -1L;
 	/** Which end of the range is being dragged: 0 none, 1 the start, 2 the end. */
@@ -2437,6 +2437,25 @@ public final class ComposerScreen extends Screen {
 	 * Selects every note the chord limit thins anywhere: a strike left out, or a sounding played with
 	 * fewer copies than it asks for.
 	 */
+	/** Selects every note in a stack but the one at the bottom of it, on the layers in view. */
+	private void selectStackedNotes() {
+		selectedNotes.clear();
+		int stacks = 0;
+		for (Layer layer : project().layers()) {
+			if (!layer.visible()) {
+				continue;
+			}
+			List<NoteEvent> extras = layer.stackedExtras();
+			extras.forEach(note -> selectedNotes.add(note.id()));
+			stacks += extras.size();
+		}
+		clearRange();
+		updateButtonStates();
+		showResult(Component.literal(stacks == 0 ? "No stacked notes."
+			: stacks + (stacks == 1 ? " extra note" : " extra notes") + " selected on top of "
+				+ "notes already there. Delete to clear them; a stack plays once either way."));
+	}
+
 	private void selectThinnedNotes() {
 		ChordSkips thinning = projectStats().skips();
 		selectedNotes.clear();
@@ -2773,6 +2792,8 @@ public final class ComposerScreen extends Screen {
 			case SELECT_OVERLOADED_CHORDS -> projectStats().overloadedTicks() > 0
 				|| projectStats().peakChord() > config.chordThinTarget();
 			case SELECT_THINNED -> !projectStats().skips().thinnedNoteIds().isEmpty();
+			case SELECT_STACKED -> project().layers().stream()
+				.anyMatch(layer -> layer.visible() && !layer.stackedExtras().isEmpty());
 			case SELECT_NONE -> focusedPane == Pane.LAYERS
 				|| !selectedNotes.isEmpty() || !selectedLayers.isEmpty();
 			case RENAME_MARKER -> markerAtCursor() != null;
@@ -2904,6 +2925,7 @@ public final class ComposerScreen extends Screen {
 				(layer, note) -> layer.outOfRange(note), true);
 			case SELECT_OVERLOADED_CHORDS -> selectOverloadedChordNotes();
 			case SELECT_THINNED -> selectThinnedNotes();
+			case SELECT_STACKED -> selectStackedNotes();
 			case SELECT_ALL_NOTES -> selectNotesWhere("selected", note -> true, false);
 			case SELECT_NONE -> dropSelection();
 		}
@@ -3385,6 +3407,10 @@ public final class ComposerScreen extends Screen {
 				+ "Never the last of a pitch or the last of an instrument, so a chord keeps its "
 				+ "harmony and keeps its drum -- only how thickly they are scored changes. Takes "
 				+ "from the selected layers only; select them all to thin the whole song.";
+			case SELECT_STACKED -> "Selects the extra notes in every stack -- copies a paste or a drag "
+				+ "left on top of a note already there -- so Delete clears them and leaves one note "
+				+ "in each place. A stack always plays once, so deleting them changes nothing you "
+				+ "hear. For a louder note, give the instrument a count or put it on a second layer.";
 			case SELECT_THINNED -> "Selects every note the chord limit plays quieter or skips strikes "
 				+ "of, to fit the chord thinning target in Settings. Nothing is deleted: the song still "
 				+ "asks for every copy and every strike, and they come back wherever a chord has room.";
@@ -5417,7 +5443,13 @@ public final class ComposerScreen extends Screen {
 		// One Component per line: the single-Component overload does not break on newlines, it
 		// renders them as missing-glyph boxes.
 		List<Component> lines = new ArrayList<>();
-		lines.add(Component.literal(midiName(note.midiNote()) + "   tick " + note.startTick()));
+		// A stack said on the name itself, since it is about this note. In notes rather than as "x3",
+		// which is how a count is written in the palette: a stack on a harp counted three times is
+		// three notes merged into one note, and that one note is still played three times.
+		int stacked = project().layers().get(layerIndex).stackSize(note);
+		lines.add(Component.literal(midiName(note.midiNote())
+			+ (stacked > 1 ? " (" + stacked + " stacked, merged into 1)" : "")
+			+ "   tick " + note.startTick()));
 		lines.add(Component.literal("Layer " + (layerIndex + 1) + "  "
 				+ project().layers().get(layerIndex).name())
 			.withStyle(net.minecraft.ChatFormatting.GRAY));
@@ -8434,7 +8466,8 @@ public final class ComposerScreen extends Screen {
 			// all, and each voice's sample plays at the pitch value that sounds as written.
 			// A sustaining layer plays its strikes as well as its notes, from the same expansion the
 			// tick marks are drawn from.
-			Layer heard = project().withSustainsExpanded(layer, finestSustainStep());
+			// And a stack as one note, the way the build places it.
+			Layer heard = project().placedForBuild(layer, finestSustainStep());
 			// What the chord limit leaves out is left out of preview too, from the same answer the
 			// build reads: a harp played seven times of ten sounds seven times here.
 			ChordSkips skips = projectStats().skips();
@@ -9670,7 +9703,8 @@ public final class ComposerScreen extends Screen {
 		}
 		int strikes = project().sustainStrikeCount();
 		int composite = compositeExtraNotes();
-		int merged = config.dedupeIdenticalNotes() ? stats.duplicateNotes() : 0;
+		// Stacks are merged whatever the setting says, so this can be more than nought with it off.
+		int merged = stats.duplicateNotes();
 		// The chord limit, in the order it thins: a copy less first, then a skipped strike.
 		ChordSkips thinning = stats.skips();
 		int thinnedCopies = thinning.copiesRemoved();
@@ -9683,8 +9717,8 @@ public final class ComposerScreen extends Screen {
 		// Paired where two lines are two halves of one thing, so the receipt stays short: a pair
 		// with one half at nought reads as that half alone, and one with both at nought is left off.
 		adjustmentPair(lines, "Added", "sustained notes", strikes, "composite", composite);
-		lines.add(SongInfoScreen.Line.adjustment("Merged as duplicates",
-			config.dedupeIdenticalNotes() ? (merged > 0 ? "-" + merged : "0") : "off"));
+		lines.add(SongInfoScreen.Line.adjustment("Merged as duplicates", merged > 0 ? "-" + merged
+			: config.dedupeIdenticalNotes() ? "0" : "off"));
 		adjustmentPair(lines, "Thinning", "fewer copies", -thinnedCopies,
 			"strikes skipped", -thinnedStrikes);
 		// Out of range can only take notes away. A remainder that adds some is something none of
@@ -10636,6 +10670,7 @@ public final class ComposerScreen extends Screen {
 		SELECT_OUT_OF_RANGE("Out of range"),
 		SELECT_OVERLOADED_CHORDS("Overloaded chords"),
 		SELECT_THINNED("Thinned to fit"),
+		SELECT_STACKED("Stacked notes"),
 		SELECT_ALL_NOTES("Everything"),
 		SELECT_NONE("Nothing");
 
@@ -10657,7 +10692,7 @@ public final class ComposerScreen extends Screen {
 		private static final ToolbarAction[] SELECT_ACTIONS = {
 			SELECT_OFF_GRID, SELECT_HALF_TICKED, SELECT_EVEN_TICKS, SELECT_ODD_TICKS,
 			SELECT_TOO_FREQUENT, SELECT_OUT_OF_RANGE,
-			SELECT_OVERLOADED_CHORDS, SELECT_THINNED, SELECT_ALL_NOTES, SELECT_NONE
+			SELECT_OVERLOADED_CHORDS, SELECT_THINNED, SELECT_STACKED, SELECT_ALL_NOTES, SELECT_NONE
 		};
 		private final String label;
 		/** Whether the action can be limited to the selected notes. Tempo is a property of the
