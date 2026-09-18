@@ -152,8 +152,17 @@ final class FaultView {
 			laid.putIfAbsent(at, index++);
 			ground = Math.min(ground, at.getY());
 		}
-		return new Build(name, mode, width, floors, plan, world, laid,
-			BreachView.readBack(name, plan), ground, nameShapes);
+		// A build the reader refuses -- no way in, or a loop -- is still a build worth drawing:
+		// the refusal is the fault, and the blocks round the input are where it is read off.
+		NoteMachineReader.Reading reading;
+		try {
+			reading = BreachView.readBack(name, plan);
+		} catch (NoteMachineReader.UnreadableException refused) {
+			System.out.println("#### REFUSED -- " + refused.getMessage());
+			reading = new NoteMachineReader.Reading(null, 0, 0, List.of(), Set.of(), 0, 0, 1,
+				List.of("REFUSED: " + refused.getMessage()));
+		}
+		return new Build(name, mode, width, floors, plan, world, laid, reading, ground, nameShapes);
 	}
 
 	// ---- the three faults -------------------------------------------------------------------

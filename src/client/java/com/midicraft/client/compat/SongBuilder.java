@@ -2028,6 +2028,12 @@ public final class SongBuilder {
 					// feed laid to the repeater's own row delivers to its side.
 					BlockPos targetA = feedTarget(placements, forward, inputA);
 					BlockPos targetB = feedTarget(placements, forward, inputB);
+					if (TRACE_TURNS) {
+						System.out.println("INPUT A=" + inputA + " -> " + targetA + " ("
+							+ (inputA == null ? "-" : placements.describeBlock(inputA)) + ")  B="
+							+ inputB + " -> " + targetB + " ("
+							+ (inputB == null ? "-" : placements.describeBlock(inputB)) + ")");
+					}
 					addTwoLaneInput(placements, forward, targetA, targetB,
 						Math.floorMod(gtA.get(0).time(), 2) == 1,
 						Math.floorMod(gtB.get(0).time(), 2) == 1,
@@ -4377,7 +4383,13 @@ public final class SongBuilder {
 	 * seeing on its own terms and not one to be turned into a layout collision here.</p>
 	 */
 	private static void addStarter(PlacementPlan placements, Direction forward) {
-		addStarter(placements, forward, placements.firstRepeater());
+		// The opening cell, not the first repeater wherever it stands: a machine whose first
+		// module is a wait of dust, or a sunken bus, has its first repeater cells down the lane
+		// with dust behind it, and a button aimed there had nowhere to stand -- so it was skipped
+		// and the machine had no way in at all (coldplay paradise, sustained, every size that
+		// opened on dust). A button beside the opening wire lights it as well as it drives a
+		// repeater. See PlacementPlan.openingCell.
+		addStarter(placements, forward, placements.openingCell());
 	}
 
 	/**
@@ -4396,6 +4408,10 @@ public final class SongBuilder {
 			return;
 		}
 		BlockPos button = head.relative(forward.getOpposite());
+		if (TRACE_TURNS) {
+			System.out.println("STARTER head=" + head + " (" + placements.describeBlock(head)
+				+ ") button=" + button + " (" + placements.blockAt(button) + ")");
+		}
 		if (placements.blockAt(button) != null) {
 			placements.padded("starterHadNowhereToStand");
 			return;
@@ -10824,6 +10840,11 @@ public final class SongBuilder {
 			if (layout.ultra() && route.foldsWaits() && railPhase < 0) {
 				int foldSignal = tipSignal;
 				boolean folded = false;
+				// Whether the module behind ended on a note middle only a repeater reads, asked
+				// before anything is laid: a seam pending off one puts its own repeater down as
+				// the first cell of any walk-out. See SEAM_OPENS_ON_A_SOFT_TIP_WITH_ITS_REPEATER.
+				boolean foldOpensOnSoft = placements.softTip();
+				boolean foldLaidFirst = false;
 				// A turn forced in front of this event walks out the bend pending as the event
 				// begins -- once -- and never the turns the fold arms after it. See
 				// INNER_WALLS_ARE_HARD; without the once, the fold armed a hundred thousand legs.
@@ -10921,13 +10942,40 @@ public final class SongBuilder {
 							// chain with nothing to stretch is the old one, a repeater per four ticks.
 							int paceRefresh = stretchLeft > 0 ? paceRefreshDelay() : 4;
 							int ticks = event.time() - currentTime;
-							boolean refreshHere = !seamMid && ticks > paceRefresh
+							if (SEAM_OPENS_ON_A_SOFT_TIP_WITH_ITS_REPEATER && event.seamEat() > 0
+									&& seamNext == 0 && foldOpensOnSoft && !foldLaidFirst) {
+								// The seam's own repeater, first: the cell after a simple tail's
+								// note middle is one only a repeater reads, and the wait's dust
+								// there is a dead line -- grim grinning ghosts at twenty-four wide
+								// over two floors and at twenty over one, both off a tail of three
+								// into a walk-out. The rest of the element follows on dust, no
+								// repeater of the wait between, which seamMid now says.
+								placements.placing("paritySeamRepeaterOffASoftTip");
+								set(placements, lane.pos(), "minecraft:stone");
+								set(placements, lane.pos().above(), "minecraft:repeater[facing="
+									+ repeaterFacing(lane.travel()) + ",delay=" + PARITY_SEAM_REPEATER
+									+ "]");
+								seamNext = 1;
+								seamFeedNext = lane.ahead(1).pos();
+								seamMid = true;
+								foldSignal = DUST_RANGE;
+								dustRun = 0;
+								foldLaidFirst = true;
+								placements.softTip(false);
+								placements.padded("paritySeamRepeaterOffASoftTipInTheFold");
+								placements.placing("delayBeforeChord");
+								lane = lane.ahead(1);
+								continue;
+							}
+							foldLaidFirst = true;
+							boolean betweenStages = seamNext > 1 && seamNext < PARITY_SEAM_CELLS;
+							boolean refreshHere = !betweenStages && ticks > paceRefresh
 								&& (stretchLeft == 0 || dustRun >= paceDustRun());
 							// Or the last moment before the dust dies, with whatever the wait can
 							// spare: a walk-out padding a chord out of a turn rides the arriving
 							// wire, and that wire is what the padding exists to save. See
 							// FOLD_CROSSES_ALIVE.
-							boolean reviveHere = FOLD_CROSSES_ALIVE && !seamMid && !refreshHere
+							boolean reviveHere = FOLD_CROSSES_ALIVE && !betweenStages && !refreshHere
 								&& foldSignal <= 1 && ticks >= 2;
 							if (refreshHere || reviveHere) {
 								int refresh = refreshHere ? paceRefresh : Math.min(4, ticks - 1);
@@ -11324,7 +11372,7 @@ public final class SongBuilder {
 					// And the wait itself has to reach the landing alive. See FOLD_CROSSES_ALIVE.
 					int toWall = (foldWall - coordAlong(axis, lane.pos()))
 						* stepAlong(axis, lane.travel());
-					if (FOLD_CROSSES_ALIVE && !seamMidElement
+					if (FOLD_CROSSES_ALIVE && !(seamNext > 1 && seamNext < PARITY_SEAM_CELLS)
 							&& foldSignal - (toWall + foldTurn.cells() + 1) < 1
 							&& !(toWall >= 1 && event.time() - currentTime >= 2)) {
 						placements.padded("waitCannotCrossAlive");
@@ -11368,12 +11416,19 @@ public final class SongBuilder {
 							break;
 						}
 						int paceRefresh = stretchLeft > 0 ? paceRefreshDelay() : 4;
-						boolean canRepeat = !seamMidElement
+						// No repeater of the wait between a seam's stages -- but between its
+						// repeater, sent ahead, and its first piston one is harmless: a repeater
+						// lengthens a short pulse and shortens nothing, and the ticks are the
+						// wait's own. Grim grinning ghosts at twenty-four wide over two floors:
+						// the r3 off a soft tip, then twenty-two cells of dust to the wall with
+						// the wait's six repeaters refused, dead at the fourteenth.
+						boolean betweenStages = seamNext > 1 && seamNext < PARITY_SEAM_CELLS;
+						boolean canRepeat = !betweenStages
 							&& event.time() - currentTime > paceRefresh;
 						// Or a shorter one, where the dust from here would not reach the landing
 						// and the wait holds any tick beyond the one its own repeater keeps. See
 						// FOLD_CROSSES_ALIVE.
-						boolean mustRevive = FOLD_CROSSES_ALIVE && !seamMidElement && !canRepeat
+						boolean mustRevive = FOLD_CROSSES_ALIVE && !betweenStages && !canRepeat
 							&& foldSignal - (cellsBeforeWall + foldTurn.cells() + 1) < 1
 							&& event.time() - currentTime >= 2;
 						int refresh = canRepeat ? paceRefresh
@@ -11392,10 +11447,14 @@ public final class SongBuilder {
 							? cellsBeforeWall == (seamRepeaterAtTheWall ? 2 : 1)
 								|| dustRun >= DUST_RANGE - 1 || firstAfterSoft
 							: stretchLeft == 0 || dustRun >= paceDustRun();
-						if (seamRepeaterAtTheWall && cellsBeforeWall == 1) {
+						if (seamRepeaterAtTheWall && (cellsBeforeWall == 1 || firstAfterSoft)) {
 							// The seam's own repeater, sent ahead of its pistons: the last cell
-							// this floor has. From here the element is mid-way, so no repeater
-							// of the wait may follow it before the pistons -- canRepeat says so.
+							// this floor has -- or the first, where the module behind ended on a
+							// note middle only a repeater reads (sunset of seven suns at twenty
+							// wide over five floors: two cells of dust off a simple tail's harp,
+							// the r3 at the wall reading nothing). From here the element is
+							// mid-way, so no repeater of the wait may follow it before the
+							// pistons -- canRepeat says so.
 							placements.placing("paritySeamRepeaterAlone");
 							set(placements, lane.pos(), "minecraft:stone");
 							set(placements, lane.pos().above(), "minecraft:repeater[facing="
@@ -11569,8 +11628,8 @@ public final class SongBuilder {
 				lastStyle = ChordStyle.SMALL;
 				lastBusCells = 0;
 				placements.padded("paritySeam");
-			} else if (event.seamEat() > 0 && seamNext > 0) {
-				// The fold laid the repeater and perhaps a stage; the rest goes down here, on
+			} else if (event.seamEat() > 0 && seamNext > 1) {
+				// The fold laid a stage; the rest goes down here, on
 				// straight cells, with a soft-powered block in front of the next piston where it
 				// does not stand directly behind its feed. Pads only on the way there: no
 				// repeater may stand between the stages.
@@ -11638,9 +11697,13 @@ public final class SongBuilder {
 				// module handed over, and the rest of this branch -- the ride, the shoves, the
 				// walk-out with its revives, the element loop -- carries on from cell one. See
 				// SEAM_OPENS_ON_A_SOFT_TIP_WITH_ITS_REPEATER.
-				int seamFrom = 0;
-				if (SEAM_OPENS_ON_A_SOFT_TIP_WITH_ITS_REPEATER && placements.softTip()
-						&& !lane.cornerAt(0)) {
+				// Or already down, by the fold's walk-out off a soft tip: then the element is
+				// laid from cell one by this branch and not the remainder's, because this is
+				// the branch that knows about walls -- the remainder's ran an element through
+				// one and turned two past it (a dark zone at twelve wide, 1 64 679).
+				int seamFrom = seamNext == 1 ? 1 : 0;
+				if (seamFrom == 0 && SEAM_OPENS_ON_A_SOFT_TIP_WITH_ITS_REPEATER
+						&& placements.softTip() && !lane.cornerAt(0)) {
 					placements.placing("paritySeamRepeaterOffASoftTip");
 					set(placements, lane.pos(), "minecraft:stone");
 					set(placements, lane.pos().above(), "minecraft:repeater[facing="
@@ -32681,6 +32744,24 @@ public final class SongBuilder {
 			for (Map.Entry<BlockPos, String> cell : blocks.entrySet()) {
 				if (cell.getValue().startsWith("minecraft:repeater")
 						&& laneTintAt.getOrDefault(cell.getKey(), -2) / 2 == machine) {
+					return cell.getKey();
+				}
+			}
+			return null;
+		}
+
+		/**
+		 * The first cell of lane the plan laid: a wire or a repeater, whichever came first.
+		 *
+		 * <p>What a starter stands behind. A button beside the opening wire lights it as a button
+		 * behind the opening repeater drives it; the first repeater wherever it stands is neither,
+		 * once a wait of dust or a sunken bus has opened the machine ahead of it.</p>
+		 */
+		BlockPos openingCell() {
+			for (Map.Entry<BlockPos, String> cell : blocks.entrySet()) {
+				String block = cell.getValue();
+				if (block.startsWith("minecraft:repeater")
+						|| block.startsWith("minecraft:redstone_wire")) {
 					return cell.getKey();
 				}
 			}
