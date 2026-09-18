@@ -18375,7 +18375,9 @@ public final class SongBuilder {
 		// And the top rail's first column above it: a block, never a note, with wire over it. The wire
 		// is fed by the dust on the staircase's tallest glass, a level above the path, which is the
 		// one thing the extra rung exists for.
+		placements.placing("rail:SEED delay" + delay + TOP_RAIL);
 		placements.powered(lane.pos().above(), "minecraft:stone", time);
+		placements.placing("rail:SEED delay" + delay);
 		set(placements, lane.pos().above(2), "minecraft:redstone_wire");
 		lane = lane.ahead(1);
 		placements.railSeed(lane.pos(), time, false);
@@ -20648,13 +20650,16 @@ public final class SongBuilder {
 			// being that it cannot have something on top -- and the air above every centre is laid for
 			// exactly that reason.
 			EventNote harp = takeHarpNote(hanging);
-			placements.placing("rail:PATH notes" + chord.size()
-				+ (harp == null ? " sidesOnly" : " centred") + (fromDust ? " head" : ""));
+			String path = "rail:PATH notes" + chord.size()
+				+ (harp == null ? " sidesOnly" : " centred") + (fromDust ? " head" : "");
+			placements.placing(path);
 			placements.padded("railPath" + (harp == null
 				? chord.stream().anyMatch(SongBuilder::isHarpNote) ? "SidesWithAHarp" : "SidesOnly"
 				: "Centred"));
 			if (harp == null) {
+				placements.placing(path + TOP_RAIL);
 				placements.powered(centre, "minecraft:stone", time);
+				placements.placing(path);
 			} else {
 				placeNoteBlock(placements, centre, harp);
 				placements.powered(centre, time);
@@ -23948,6 +23953,37 @@ public final class SongBuilder {
 	 * turns it on for every build it draws.</p>
 	 */
 	public static boolean MARK_SHAPES = false;
+
+	/**
+	 * A plain build with its chord blocks swapped for redstone lamps, so the song lights up as it
+	 * plays.
+	 *
+	 * <p>The colour-coded paste's third setting, and the opposite of the other two in the one way
+	 * that matters: this is a build meant to be heard. So it takes none of {@link #DEBUG_PASTE}'s
+	 * tolerance -- a collision refuses it exactly as it refuses a plain one -- and none of its
+	 * diagnostics either. What it takes is the shape table: every cell {@link #shapeStone} gives a
+	 * chord's colour becomes a lamp, which is every bus, every stacked chord's centre, every cut and
+	 * foldback, and the top rail of a double rail. Plain lane, padding and the floor rail keep their
+	 * stone, which is what makes the lit cells read as a line.</p>
+	 *
+	 * <p>A lamp is the same machine as the stone it replaces. Both are full conducting blocks --
+	 * {@code isRedstoneConductor} answers alike -- so a strongly powered lamp sets off the notes
+	 * beside it exactly as stone does, and lighting up is the only thing it adds. Never under a note,
+	 * where the block is the instrument; {@code PlacementPlan.marked} leaves those alone already.</p>
+	 */
+	public static boolean LIGHT_SHOW = false;
+
+	/**
+	 * Tacked onto a rail's label for the one cell of it that stands on the top rail and is not a
+	 * note, so {@link #LIGHT_SHOW} can light the top rail and leave the floor rail be.
+	 *
+	 * <p>A label rather than a height because the two rails are not a height apart everywhere: a run's
+	 * last path column stands its stone centre on a second stone at the floor rail's own level, under
+	 * the same {@code rail:PATH} label, and only the walk knows which of the pair is which.</p>
+	 */
+	static final String TOP_RAIL = " topRail";
+
+	private static final String LAMP = "minecraft:redstone_lamp";
 
 	/**
 	 * Whether every cell remembers which shape laid it, without any of the debug paste's other doing.
@@ -34259,7 +34295,8 @@ public final class SongBuilder {
 			// answer, and without it the fault reads "? held off ?". Naming cells changes nothing a walk
 			// decides -- see {@link #NAME_EVERY_CELL} -- so the second pass builds the same machine it
 			// would have built anyway, and it is the only pass that pays for the map.
-			if ((DEBUG_PASTE || NAME_EVERY_CELL || toleratingCollisions()) && existing == null) {
+			if ((DEBUG_PASTE || NAME_EVERY_CELL || LIGHT_SHOW || toleratingCollisions())
+					&& existing == null) {
 				placedBy.put(key, placing);
 			}
 			if (existing == null) {
@@ -34608,7 +34645,7 @@ public final class SongBuilder {
 		 */
 		private String marked(BlockPos at, String block, int nearWall, int farWall, boolean walled) {
 			if (!DEBUG_PASTE && !MARK_SHAPES) {
-				return block;
+				return LIGHT_SHOW ? lamp(at, block) : block;
 			}
 			// Silent, and lit so it is findable down a corridor.
 			//
@@ -34662,6 +34699,32 @@ public final class SongBuilder {
 				case 3 -> "minecraft:tuff_bricks";
 				default -> stone;
 			};
+		}
+
+		/**
+		 * A chord's stone as a redstone lamp, for {@link #LIGHT_SHOW}, and every other cell as it was.
+		 *
+		 * <p>Asked of the same things {@link #marked} asks before it colours a shape: stone only, and
+		 * never the block under a note, which is that note's instrument. A lamp there would retune a
+		 * bass drum to a harp.</p>
+		 */
+		private String lamp(BlockPos at, String block) {
+			if (!"minecraft:stone".equals(block) || notes.containsKey(at.above())) {
+				return block;
+			}
+			String laidBy = placedBy.get(at);
+			if (laidBy == null) {
+				return block;
+			}
+			// The rails are one colour in the shape table and two things here: the top rail is the
+			// line the song runs along, and the floor rail is lane.
+			if (laidBy.startsWith("rail:")) {
+				return laidBy.endsWith(TOP_RAIL) ? LAMP : block;
+			}
+			String stone = shapeStone(laidBy);
+			// Plain lane and padding stay stone. Everything else the table has a colour for is a
+			// chord: bus, sunken bus, stacked, stacked bus, simple tail, cut head, foldback.
+			return "minecraft:stone".equals(stone) || stone.endsWith("_planks") ? block : LAMP;
 		}
 
 		/**

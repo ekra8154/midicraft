@@ -384,7 +384,7 @@ public final class AsciiDiagram {
 		// meaning -- what that block is telling you. A slice pasted into a conversation is often all
 		// anybody has of a build, and "TU = minecraft:tuff" says nothing on its own.
 		String id = SongBuilder.DEBUG_PASTE_KEY.containsKey(raw)
-			? raw + " (debug paste: " + SongBuilder.DEBUG_PASTE_KEY.get(raw) + ")"
+			? raw + " (color-coded paste: " + SongBuilder.DEBUG_PASTE_KEY.get(raw) + ")"
 			: raw;
 		String path = raw.substring(raw.indexOf(':') + 1);
 		if (state.hasProperty(RedStoneWireBlock.POWER)) {

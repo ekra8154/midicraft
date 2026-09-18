@@ -285,7 +285,7 @@ class DebugPasteMarkTest {
 			.map(Map.Entry::getKey).toList();
 		assertTrue(silent.isEmpty(), "the legend names these blocks without saying what they "
 			+ "mean: " + silent);
-		assertTrue(legend.contains("debug paste:"),
+		assertTrue(legend.contains("color-coded paste:"),
 			"a slice of a marked build should explain its colours: " + legend);
 	}
 

@@ -174,6 +174,19 @@ public final class MidicraftConfig {
 		}
 	}
 
+	/**
+	 * What a paste is built from, beyond what the machine needs. See {@link #colorCodedPaste()}.
+	 *
+	 * <p>{@code NORMAL} is the old debug paste: every shape coloured, and a collision built through
+	 * rather than refused. {@code LIGHT_SHOW} is none of that -- a plain build that plays, with the
+	 * chord blocks swapped for redstone lamps so the song lights up as it runs.</p>
+	 */
+	public enum ColorCodedPaste {
+		OFF,
+		NORMAL,
+		LIGHT_SHOW
+	}
+
 	public enum MidiQuantizeGrid {
 		AUTO,
 		QUARTER,
@@ -380,7 +393,7 @@ public final class MidicraftConfig {
 	private boolean debugCommandsEnabled;
 	/** Whether the one-time "the Composer is behind /midicraft" line has been said. */
 	private boolean seenWelcome;
-	private boolean debugPasteEnabled;
+	private ColorCodedPaste colorCodedPaste;
 	private int midiVelocityCutoff;
 	private int chordThinTarget;
 	/** Whether a chord over the target may play a counted instrument with fewer copies. */
@@ -544,7 +557,10 @@ public final class MidicraftConfig {
 				instance.debugCommandsEnabled = Boolean.TRUE.equals(stored.debugCommandsEnabled);
 				// An existing config means an existing player, who does not need introducing.
 				instance.seenWelcome = stored.seenWelcome == null || stored.seenWelcome;
-				instance.setDebugPasteEnabled(Boolean.TRUE.equals(stored.debugPasteEnabled));
+				// Read off the old on/off where the file predates the choice, which is what "on" was.
+				instance.setColorCodedPaste(stored.colorCodedPaste != null ? stored.colorCodedPaste
+					: Boolean.TRUE.equals(stored.debugPasteEnabled)
+						? ColorCodedPaste.NORMAL : ColorCodedPaste.OFF);
 				instance.midiDefaultInstrument = stored.midiDefaultInstrument == null || stored.midiDefaultInstrument.isBlank()
 					? "HARP"
 					: stored.midiDefaultInstrument;
@@ -1214,27 +1230,30 @@ public final class MidicraftConfig {
 	}
 
 	/**
-	 * Whether a paste comes out marked up rather than plain.
+	 * Whether a paste comes out marked up, lit up, or plain.
 	 *
 	 * <p>Remembered between sessions because it is a way of working rather than a one-off: the
 	 * builds worth marking are the ones being read over several evenings, and having to turn it back
 	 * on after every launch is how a build gets pasted plain by accident and read for an hour before
 	 * anybody notices the colours are missing.</p>
 	 */
-	public boolean debugPasteEnabled() {
-		return debugPasteEnabled;
+	public ColorCodedPaste colorCodedPaste() {
+		return colorCodedPaste;
 	}
 
 	/**
-	 * Sets the flag and the builder's copy of it together.
+	 * Sets the setting and the builder's copies of it together.
 	 *
-	 * <p>The builder holds its own {@code static} because the tests drive it without a config file
-	 * and the walk reads it per block. Setting them apart is how the two drift, so nothing outside
-	 * this method writes either one.</p>
+	 * <p>The builder holds its own {@code static}s because the tests drive it without a config file
+	 * and the walk reads them per block. Setting them apart is how the two drift, so nothing outside
+	 * this method writes any of them.</p>
 	 */
-	public void setDebugPasteEnabled(boolean debugPasteEnabled) {
-		this.debugPasteEnabled = debugPasteEnabled;
-		com.midicraft.client.compat.SongBuilder.DEBUG_PASTE = debugPasteEnabled;
+	public void setColorCodedPaste(ColorCodedPaste colorCodedPaste) {
+		this.colorCodedPaste = colorCodedPaste == null ? ColorCodedPaste.OFF : colorCodedPaste;
+		com.midicraft.client.compat.SongBuilder.DEBUG_PASTE =
+			this.colorCodedPaste == ColorCodedPaste.NORMAL;
+		com.midicraft.client.compat.SongBuilder.LIGHT_SHOW =
+			this.colorCodedPaste == ColorCodedPaste.LIGHT_SHOW;
 	}
 
 
@@ -1328,7 +1347,7 @@ public final class MidicraftConfig {
 
 	/**
 	 * Sets the setting and the builder's copy of it together, as
-	 * {@link #setDebugPasteEnabled} does and for the same reason: the tests and the census
+	 * {@link #setColorCodedPaste} does and for the same reason: the tests and the census
 	 * probes drive the scheduler with no config file to read.
 	 */
 	public void setParityReseedDelay(int parityReseedDelay) {
@@ -1567,11 +1586,11 @@ public final class MidicraftConfig {
 		config.midiIgnorePercussion = false;
 		config.debugCommandsEnabled = false;
 		config.seenWelcome = false;
-		// The field, not the setter: setDebugPasteEnabled also writes SongBuilder.DEBUG_PASTE,
-		// which is global. defaults() builds a throwaway config every time the settings screen
-		// asks what a value would go back to, and going through the setter meant opening the
-		// settings quietly switched the debug paste off underneath whoever had turned it on.
-		config.debugPasteEnabled = false;
+		// The field, not the setter: setColorCodedPaste also writes SongBuilder.DEBUG_PASTE and
+		// LIGHT_SHOW, which are global. defaults() builds a throwaway config every time the
+		// settings screen asks what a value would go back to, and going through the setter meant
+		// opening the settings quietly switched the marking off underneath whoever had turned it on.
+		config.colorCodedPaste = ColorCodedPaste.OFF;
 		config.midiDefaultInstrument = "HARP";
 		config.midiInstrumentSource = MidiInstrumentSource.FROM_FILE_THEN_NAME;
 		config.composerSpeedQuarters = DEFAULT_COMPOSER_SPEED_QUARTERS;
@@ -1769,7 +1788,9 @@ public final class MidicraftConfig {
 		private Boolean midiIgnorePercussion;
 		private Boolean debugCommandsEnabled;
 		private Boolean seenWelcome;
+		/** Only ever read: the on/off this was before it had three values. Never written back. */
 		private Boolean debugPasteEnabled;
+		private ColorCodedPaste colorCodedPaste;
 		private String midiDefaultInstrument;
 		private MidiInstrumentSource midiInstrumentSource;
 		private Integer midiVelocityCutoff;
@@ -1843,7 +1864,7 @@ public final class MidicraftConfig {
 			this.midiIgnorePercussion = config.midiIgnorePercussion;
 			this.debugCommandsEnabled = config.debugCommandsEnabled;
 			this.seenWelcome = config.seenWelcome;
-			this.debugPasteEnabled = config.debugPasteEnabled;
+			this.colorCodedPaste = config.colorCodedPaste;
 			this.midiDefaultInstrument = config.midiDefaultInstrument;
 			this.midiInstrumentSource = config.midiInstrumentSource;
 			this.midiVelocityCutoff = config.midiVelocityCutoff;

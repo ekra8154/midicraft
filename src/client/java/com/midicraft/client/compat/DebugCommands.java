@@ -152,7 +152,11 @@ public final class DebugCommands {
 	}
 
 	/**
-	 * The collision marking, as {@code /midicraft debugpaste}.
+	 * The collision marking, as {@code /midicraft colorcodepaste}.
+	 *
+	 * <p>Not behind the debug-commands setting, unlike its neighbours here: the same switch sits on
+	 * the Build Pasting tab of the settings for anyone, and a command that refused what the screen
+	 * allows would only be a second, stricter copy of it.</p>
 	 *
 	 * <p>A toggle rather than an argument to the paste, because the builds worth looking at this
 	 * way are songs pasted from the build screen, which takes no arguments. On its own it says what
@@ -160,8 +164,8 @@ public final class DebugCommands {
 	 * often than turning the marking on, and a toggle you have to read the state of afterwards is a
 	 * toggle that gets pressed twice by accident.</p>
 	 */
-	static LiteralArgumentBuilder<FabricClientCommandSource> debugPasteCommand() {
-		return literal("debugpaste")
+	static LiteralArgumentBuilder<FabricClientCommandSource> colorCodePasteCommand() {
+		return literal("colorcodepaste")
 			.executes(context -> colourKey(context.getSource()))
 			.then(literal("on").executes(context -> debugPaste(context.getSource(), true)))
 			.then(literal("off").executes(context -> debugPaste(context.getSource(), false)));
@@ -268,7 +272,7 @@ public final class DebugCommands {
 	 * and does not consult {@code requires} again, so a predicate reading a live setting gives a
 	 * menu that offers what the parser will then refuse -- and a setting that appears to do nothing
 	 * until you leave the world and come back. Registering unconditionally and refusing here makes
-	 * the switch take effect where it is thrown, at the cost of the three names always being
+	 * the switch take effect where it is thrown, at the cost of the two names always being
 	 * listed.</p>
 	 */
 	private static boolean debugCommandsOff(FabricClientCommandSource source) {
@@ -654,12 +658,16 @@ public final class DebugCommands {
 	 * never come apart.</p>
 	 */
 	private static int colourKey(FabricClientCommandSource source) {
-		if (debugCommandsOff(source)) {
-			return 0;
-		}
-		boolean on = MidicraftConfig.get().debugPasteEnabled();
-		source.sendFeedback(Component.literal("Debug paste is " + (on ? "on" : "off")
-			+ ". /midicraft debugpaste on|off to change it.")
+		MidicraftConfig.ColorCodedPaste mode = MidicraftConfig.get().colorCodedPaste();
+		boolean on = mode != MidicraftConfig.ColorCodedPaste.OFF;
+		source.sendFeedback(Component.literal("Color-coded paste is "
+			+ switch (mode) {
+				case OFF -> "off";
+				case NORMAL -> "on";
+				case LIGHT_SHOW -> "set to Light show on the Build Pasting tab, so the next build "
+					+ "comes out in lamps rather than in these colours";
+			}
+			+ ". /midicraft colorcodepaste on|off to change it.")
 			.withStyle(on ? ChatFormatting.YELLOW : ChatFormatting.GRAY));
 		SongBuilder.DEBUG_PASTE_KEY.forEach((block, means) -> source.sendFeedback(Component
 			.literal("  " + block.substring(block.indexOf(':') + 1) + "  ")
@@ -671,18 +679,20 @@ public final class DebugCommands {
 		return 1;
 	}
 
+	/**
+	 * Off or normal, and nothing else. The light show is a way to build a song for keeps, chosen
+	 * once on the Build Pasting tab; this is the switch for reading a build, flipped far more often.
+	 */
 	private static int debugPaste(FabricClientCommandSource source, boolean on) {
-		if (debugCommandsOff(source)) {
-			return 0;
-		}
-		MidicraftConfig.get().setDebugPasteEnabled(on);
+		MidicraftConfig.get().setColorCodedPaste(on
+			? MidicraftConfig.ColorCodedPaste.NORMAL : MidicraftConfig.ColorCodedPaste.OFF);
 		MidicraftConfig.save();
 		source.sendFeedback(Component.literal(on
-			? "Debug paste on. Stone is coloured by the shape that laid it, dead wire goes red, "
+			? "Color-coded paste on. Stone is coloured by the shape that laid it, dead wire goes red, "
 				+ "wrong notes become lit copper bulbs and missed ones wear a dragon head. "
 				+ "Collisions build through and light up in sea lantern, which is broken on purpose "
 				+ "-- turn this off before building anything you want to hear."
-			: "Debug paste off. Builds come out plain and a collision refuses them again.")
+			: "Color-coded paste off. Builds come out plain and a collision refuses them again.")
 			.withStyle(on ? ChatFormatting.YELLOW : ChatFormatting.GRAY));
 		return 1;
 	}

@@ -44,7 +44,9 @@ final class GameSettings {
 		Integer maxBuildFloors;
 		Integer parityReseedDelay;
 		Boolean ultraLaneStartTop;
+		/** The old on/off, read where a file predates {@link #colorCodedPaste}. */
 		Boolean debugPasteEnabled;
+		String colorCodedPaste;
 		Integer buildLaneWidth;
 		Integer buildLaneFloors;
 		String pasteMode;
@@ -53,8 +55,9 @@ final class GameSettings {
 	/**
 	 * @param dedupe {@code dedupeIdenticalNotes}
 	 * @param thinning {@code chordFitRules()}: the target with both kinds of thinning as set
-	 * @param debugPaste {@code debugPasteEnabled}, which is {@code SongBuilder.DEBUG_PASTE} in the
-	 *     game: a collision is recorded rather than thrown, and the walk that follows differs
+	 * @param debugPaste {@code colorCodedPaste} at {@code NORMAL}, which is
+	 *     {@code SongBuilder.DEBUG_PASTE} in the game: a collision is recorded rather than thrown, and
+	 *     the walk that follows differs. The light show changes no walk and reads as false.
 	 */
 	record Values(boolean dedupe, ChordSkips.Rules thinning, int maxBuildFloors, int reseedDelay,
 			boolean startTop, boolean debugPaste, int laneWidth, int laneFloors, String pasteMode) {
@@ -122,7 +125,8 @@ final class GameSettings {
 					? MidicraftConfig.DEFAULT_PARITY_RESEED_DELAY : stored.parityReseedDelay,
 				MidicraftConfig.MIN_PARITY_RESEED_DELAY, MidicraftConfig.MAX_PARITY_RESEED_DELAY),
 			stored.ultraLaneStartTop != null && stored.ultraLaneStartTop,
-			stored.debugPasteEnabled != null && stored.debugPasteEnabled,
+			stored.colorCodedPaste != null ? "NORMAL".equals(stored.colorCodedPaste)
+				: stored.debugPasteEnabled != null && stored.debugPasteEnabled,
 			stored.buildLaneWidth == null ? MidicraftConfig.DEFAULT_BUILD_LANE_WIDTH
 				: stored.buildLaneWidth,
 			stored.buildLaneFloors == null ? MidicraftConfig.DEFAULT_BUILD_LANE_FLOORS

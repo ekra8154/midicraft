@@ -31,7 +31,7 @@ public final class DebugCommandSuggestions {
 	private static final Logger LOGGER = LogUtils.getLogger();
 	/** Brigadier files a child in {@code children} and again in one of the other two. */
 	private static final String[] CHILD_MAPS = {"children", "literals", "arguments"};
-	private static final List<String> GATED = List.of("paste", "asciidiagram", "debugpaste");
+	private static final List<String> GATED = List.of("paste", "asciidiagram");
 
 	/** Nodes taken out of the current connection's tree, waiting to go back. */
 	private static final Map<String, CommandNode<?>> detached = new HashMap<>();
