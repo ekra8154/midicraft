@@ -6,6 +6,7 @@ import com.midicraft.client.composer.ComposerProject.Layer;
 import com.midicraft.NoteSequence.Step;
 import com.midicraft.NoteSequence.StepType;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -1801,10 +1802,16 @@ public final class SongBuilder {
 		int longest = Math.max(
 			evenEvents.stream().mapToInt(EventGroup::chordLength).max().orElse(1),
 			oddEvents.stream().mapToInt(EventGroup::chordLength).max().orElse(1));
+		// And to the widest chord as the plain bus it may fall to, with the cell it steps off
+		// onto, on the legs that give up their columns. See WIDTH_HOLDS_THE_WIDEST_BUS.
+		int widestBus = WIDTH_HOLDS_THE_WIDEST_BUS
+			? Math.max(widestBusColumns(evenEvents), widestBusColumns(oddEvents)) + 1
+				+ NESTED_SHORTENING
+			: 0;
 		// The full v2 width for both machines: the nested shape has no corridors. Each machine
-		// gives up two columns at one end of one floor -- where the partner's long link runs --
+		// gives up three columns at one end of one floor -- where the partner's long link runs --
 		// and owns the whole span everywhere else.
-		int laneWidth = Math.max(longest + 2, limits.laneWidth() - 3);
+		int laneWidth = Math.max(Math.max(longest + 2, widestBus), limits.laneWidth() - 3);
 		int spacing = Math.max(
 			laneSpacing(laneReach(evenEvents, 0, evenEvents.size()),
 				laneReach(evenEvents, 0, evenEvents.size())),
@@ -3891,15 +3898,15 @@ public final class SongBuilder {
 			@Override
 			public int tipExtension(int leg) {
 				return !firstMachine && oppositeFlatFar && base.floorOf(leg) == oppositeFloor
-					? -3 : 0;
+					? -NESTED_SHORTENING : 0;
 			}
 
 			@Override
 			public int nearExtension(int leg) {
 				if (firstMachine) {
-					return base.floorOf(leg) == startFloor ? -3 : 0;
+					return base.floorOf(leg) == startFloor ? -NESTED_SHORTENING : 0;
 				}
-				return !oppositeFlatFar && base.floorOf(leg) == oppositeFloor ? -3 : 0;
+				return !oppositeFlatFar && base.floorOf(leg) == oppositeFloor ? -NESTED_SHORTENING : 0;
 			}
 
 			@Override
@@ -4528,7 +4535,11 @@ public final class SongBuilder {
 		// is {@code width} blocks across, which is what the slider said it would be. The first layout
 		// keeps its {@code width - 2}: its turns still poke out by different amounts, and it is not
 		// being changed. See {@link #V2_WIDTH_IS_THE_PASTE_WIDTH}.
-		int laneWidth = Math.max(longest + 2, width - widthReserve(PasteMode.ULTRA_COMPACT_LANE_V2));
+		// And the widest chord as the plain bus it may fall to, with its step-off cell. See
+		// WIDTH_HOLDS_THE_WIDEST_BUS.
+		int widestBus = WIDTH_HOLDS_THE_WIDEST_BUS ? widestBusColumns(events) + 1 : 0;
+		int laneWidth = Math.max(Math.max(longest + 2, widestBus),
+			width - widthReserve(PasteMode.ULTRA_COMPACT_LANE_V2));
 		// Which flat turns are armed a column early, by the index of the event that armed them. Empty
 		// to begin with; a turn is only put here once a walk has laid it the wide way and watched a
 		// note land past its corner. See {@link #FLAT_TURN_KEEPS_ITS_WIDTH}.
@@ -12238,6 +12249,23 @@ public final class SongBuilder {
 			if (DESCENT_ROOM_ENDS_A_COLUMN_IN && above >= 0 && above < floors && climb < 0) {
 				wall -= stepAlong(axis, lane.travel());
 			}
+			// The tight link ahead, kept clear of hanging notes while the lane is still on this
+			// leg. See LINK_KEEPS_ITS_GROUND.
+			if (LINK_KEEPS_ITS_GROUND && layout.ultra() && !turning && route.foldsWaits()
+					&& route.linkArmsTight(leg) && !(above >= 0 && above < floors)) {
+				List<BlockPos> kept = new ArrayList<>();
+				BlockPos corner = atAlong(axis, lane.pos(), wall);
+				int link = flatLink(route, leg, slabStep);
+				for (int along = 1; along <= link; along++) {
+					BlockPos cell = corner.relative(depth, along);
+					for (int up = 0; up <= 2; up++) {
+						kept.add(cell.above(up));
+					}
+				}
+				placements.keepForTheLink(kept);
+			} else {
+				placements.keepForTheLink(List.of());
+			}
 			// And the plan is told the same wall, so a block laid past it by anything below is a
 			// breach whether or not the arm that laid it knew. See WALL_BREACH_OUTER_ALLOWANCE.
 			//
@@ -12314,12 +12342,13 @@ public final class SongBuilder {
 			// which is the same columns filled with music instead of with wire. Padding the lane out to
 			// meet the turn is what makes a run too long for the repeater at the end of it to clear,
 			// and it was buying nothing: the chord was going to cover that ground anyway.
+			boolean sunkenStraddle = SUNKEN_MAY_OPEN_IN_A_TURN && layout.v2() && SUNKEN_BUSES
+				&& event.notes().size() >= SUNKEN_LOWEST_CHORD
+				&& sunkenFits(event.notes().size()) && hasAHarp(event.notes());
 			boolean straddles = layout.ultra() && flatAhead
 				&& straddleFits(event.notes().size(),
 					(wall - coordAlong(axis, lane.pos())) * stepAlong(axis, lane.travel()), flatLink(route, leg, slabStep),
-					SUNKEN_MAY_OPEN_IN_A_TURN && layout.v2() && SUNKEN_BUSES
-						&& event.notes().size() >= SUNKEN_LOWEST_CHORD
-						&& sunkenFits(event.notes().size()) && hasAHarp(event.notes()));
+					sunkenStraddle);
 			int reserve = turnReserve(event, offBus, layout);
 			int wait = event.time() - currentTime;
 			// Measured with the same arithmetic the planner uses, and not with a length taken from
@@ -12691,6 +12720,39 @@ public final class SongBuilder {
 				placements.padded("chainStartedTheLane");
 			}
 			boolean wantsTurn = (laneStarted || chainStartsTheLane) && overshoots;
+			// A chord that overshoots a flat turn it cannot lie across from here, but could from a
+			// little further on, is walked there on dust and asked again. Not off a soft tip,
+			// where dust is dead wire, and only inside the wire the lane holds: the chord's own
+			// repeater reads the last cell of the pad. See STRADDLE_PADDING.
+			if (STRADDLE_PADDING && layout.ultra() && wantsTurn && flatAhead && !straddles
+					&& !turning && !forcedTurn && railPhase < 0 && !placements.softTip()) {
+				int fromHere = (wall - coordAlong(axis, lane.pos())) * stepAlong(axis, lane.travel());
+				int link = flatLink(route, leg, slabStep);
+				int shove = 0;
+				for (int cells = 1; cells < fromHere && cells < tipSignal; cells++) {
+					if (straddleFits(event.notes().size(), fromHere - cells, link, sunkenStraddle)) {
+						shove = cells;
+						break;
+					}
+				}
+				if (shove > 0) {
+					placements.placing("straddlePadding");
+					for (int cell = 0; cell < shove; cell++) {
+						addParityPad(placements, lane.pos());
+						lane = lane.ahead(1);
+					}
+					tipSignal -= shove;
+					placements.padded("straddlePadding", shove);
+					if (TRACE_TURNS) {
+						System.out.println("STRADDLEPAD t=" + event.time() + " notes="
+							+ event.notes().size() + " columns=" + fromHere + " shove=" + shove
+							+ " tip=" + tipSignal + " at " + coordAlong(axis, lane.pos()) + " "
+							+ lane.pos().getY() + " " + coordAcross(axis, lane.pos()));
+					}
+					index--;
+					continue;
+				}
+			}
 			// Said to the builders, for the one shape that has to know. A simple tail is read by the
 			// repeater standing in front of it, and a lane that turns does not put one there -- it
 			// climbs, and the repeater is built at the top of the staircase, leaving the tail driving
@@ -29570,6 +29632,74 @@ public final class SongBuilder {
 	static boolean FOLDBACK_PADDING = true;
 
 	/**
+	 * The lane is wide enough for the widest chord as the plain bus it may fall to -- its repeater,
+	 * a cell per pair of notes, and the cell it steps off onto -- on the legs that give up their
+	 * columns to the partner's link.
+	 *
+	 * <p>The width used to be sized to the widest chord as it was measured, which for a big chord is
+	 * the stacked module, and the stacked module is what a chord falls out of when it opens in a
+	 * turn. HOTMK, the stress song, has a chord on every game tick and twenty-eight notes in the
+	 * biggest: measured at sixteen, so eighteen wide at every request up to twenty. On the leg the
+	 * machine gives up three columns on that is fifteen, and a bus of twenty-eight out of the link
+	 * is exactly fifteen cells of dust from its repeater's block -- the link cell, the corner and
+	 * thirteen along the row -- ending one short of the far wall with the corner dust after it at
+	 * nought. The next chord straddled that corner and stood its repeater after the dead dust:
+	 * 42,487 notes dead from the first row, at five of the seven sizes. A build one column wider
+	 * leaves the next chord a cell to stand its repeater on before the corner, reading the bus's
+	 * last dust.</p>
+	 */
+	static boolean WIDTH_HOLDS_THE_WIDEST_BUS = true;
+
+	/**
+	 * Straddle padding: a chord that overshoots a flat turn and cannot lie across it from where the
+	 * lane stands, but could from a column or two further on, walks that far on dust first and is
+	 * asked again there.
+	 *
+	 * <p>A flat turn is only ever taken by a chord that straddles it, and whether one does is a
+	 * question of where it starts: a bus of twenty-eight twelve columns from a three-cell link is
+	 * fifteen cells that end on the second corner, where no repeater can stand, and the same bus
+	 * eleven columns out comes off the link onto the next leg with its repeater on the end of it.
+	 * Refused the turn, the lane laid the chord straight and ran two columns past its wall into the
+	 * partner's bus -- HOTMK at eight wide over two floors, machine B at z=304, seven cells held by
+	 * whoever got there first and 18,919 notes dead. One cell of dust would have done it, and the
+	 * lane had fourteen of wire to pay for it with. So the walk looks for the nearest column the
+	 * chord straddles from, within the wire it holds, pads to it and asks the event again; the
+	 * fold at the head of the re-ask sees the same lane a little further on and the chord goes
+	 * across the corner as any straddling chord does.</p>
+	 */
+	static boolean STRADDLE_PADDING = true;
+
+	/**
+	 * A tight link's cells are kept clear of hanging notes while the lane is still on the leg
+	 * before it.
+	 *
+	 * <p>A short link on a nested machine turns tight on the shortened wall because one column
+	 * further out stands the partner's hanging notes. Where the tight run's ground is found taken
+	 * the arming falls back to the wide corner, which on such a leg is exactly the column that
+	 * costs: HOTMK at forty wide, machine B at z=1768, a stacked front of four hung a low note in
+	 * the wall column a cell down the link, the turn went wide into the partner's flank column,
+	 * two cells held by whoever got there first and 1,120 notes dead. The shapes ask
+	 * {@link PlacementPlan#freeForNote} before they hang anything, so the walk tells the plan which
+	 * cells the link is going to want -- the wall column from a cell past the corner to the far
+	 * corner, at the lane's level and the two above it, the same cells {@link #flatRunIsClear}
+	 * reads -- and a note is hung elsewhere or the shape gives way, exactly as it does for any
+	 * other cell that is spoken for.</p>
+	 */
+	static boolean LINK_KEEPS_ITS_GROUND = true;
+
+	/**
+	 * The columns a nested machine gives up at one end of its legs on the floor the partner's long
+	 * link crosses: the partner's link column and the notes hanging off it. See
+	 * {@link #nestedRoute}.
+	 */
+	private static final int NESTED_SHORTENING = 3;
+
+	/** The columns the widest chord takes as a plain bus: its repeater and a cell per pair of notes. */
+	private static int widestBusColumns(List<EventGroup> events) {
+		return events.stream().mapToInt(event -> 1 + (event.notes().size() + 1) / 2).max().orElse(1);
+	}
+
+	/**
 	 * Whether a climb prefers the foldback at a small room the way a descent does.
 	 *
 	 * <p>Off, and the rule it is off in service of was stated as "a room of nought <em>and a
@@ -32822,7 +32952,7 @@ public final class SongBuilder {
 			"flankTaken", "climbFedFromCentre", "climbFedByCentre", "floorBelow",
 			"watchingLegWalls", "legWall", "legStep", "legInner", "legNearSide", "legIndex",
 			"legAxis", "legEvent", "hardInnerWalls", "softEvents", "legExit",
-			"stairsCloseTheLane", "gapAhead", "answersWhatIsAhead");
+			"stairsCloseTheLane", "gapAhead", "answersWhatIsAhead", "linkKept");
 
 		/** The world both machines build in, shared and never swapped. See {@link #WALKER_FIELDS}. */
 		static final Set<String> WORLD_FIELDS = Set.of(
@@ -32952,9 +33082,19 @@ public final class SongBuilder {
 			return blocks.getOrDefault(position.immutable(), "-");
 		}
 
+		/** The cells the tight link ahead is going to want, which no note may hang in. See LINK_KEEPS_ITS_GROUND. */
+		private Set<BlockPos> linkKept = Set.of();
+
+		void keepForTheLink(Collection<BlockPos> cells) {
+			linkKept = Set.copyOf(cells);
+		}
+
 		boolean freeForNote(BlockPos position) {
 			if (!recording) {
 				return true;
+			}
+			if (linkKept.contains(position.immutable())) {
+				return false;
 			}
 			// The cell above may be claimed as air and still be free: claimed air is somebody's
 			// guarantee of emptiness, which is exactly what a note wants over it. In-game reading
