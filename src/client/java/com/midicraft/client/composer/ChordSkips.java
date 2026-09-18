@@ -40,7 +40,7 @@ import java.util.TreeSet;
 public final class ChordSkips {
 	/** Nothing left out. */
 	public static final ChordSkips NONE = new ChordSkips(Set.of(), Map.of(), Set.of(), Map.of(),
-		Map.of(), Map.of(), Set.of(), 0, 0);
+		Map.of(), Map.of(), Set.of(), 0, 0, 0);
 
 	/**
 	 * What the chord limit may leave out, and above how many note blocks: the thinning settings.
@@ -105,11 +105,12 @@ public final class ChordSkips {
 	private final Set<Long> stillOver;
 	private final int strikesSkipped;
 	private final int blocksRemoved;
+	private final int copiesRemoved;
 
 	private ChordSkips(Set<Sounding> skipped, Map<Copies, Integer> kept, Set<VoiceKey> reducedVoices,
 			Map<Sounding, int[]> quieter, Map<LayerNote, Integer> skippedPerNote,
 			Map<LayerNote, Integer> quieterStrikesPerNote, Set<Long> stillOver, int strikesSkipped,
-			int blocksRemoved) {
+			int blocksRemoved, int copiesRemoved) {
 		this.skipped = skipped;
 		this.kept = kept;
 		this.reducedVoices = reducedVoices;
@@ -122,6 +123,7 @@ public final class ChordSkips {
 		this.stillOver = stillOver;
 		this.strikesSkipped = strikesSkipped;
 		this.blocksRemoved = blocksRemoved;
+		this.copiesRemoved = copiesRemoved;
 	}
 
 	/**
@@ -197,6 +199,7 @@ public final class ChordSkips {
 		Map<LayerNote, Boolean> lastSkipped = new HashMap<>();
 		int strikesSkipped = 0;
 		int blocksRemoved = 0;
+		int copiesRemoved = 0;
 		for (Map.Entry<Long, List<Sound>> entry : byTick.entrySet()) {
 			long tick = entry.getKey();
 			List<Sound> sounds = entry.getValue();
@@ -225,6 +228,7 @@ public final class ChordSkips {
 					most.played--;
 					size--;
 					blocksRemoved++;
+					copiesRemoved++;
 				}
 				// Then strikes, where the copies were not enough or may not be touched.
 				if (rules.strikes() && size > target) {
@@ -290,7 +294,7 @@ public final class ChordSkips {
 		return new ChordSkips(Set.copyOf(skipped), Map.copyOf(kept), Set.copyOf(reducedVoices),
 			Collections.unmodifiableMap(quieter), Map.copyOf(skippedPerNote),
 			Map.copyOf(quieterStrikesPerNote), Collections.unmodifiableSet(stillOver), strikesSkipped,
-			blocksRemoved);
+			blocksRemoved, copiesRemoved);
 	}
 
 	/** The smallest strike that clears the excess, or the biggest when none does. Later layers first on a tie. */
@@ -423,6 +427,16 @@ public final class ChordSkips {
 	/** Note blocks left out altogether, strikes and copies together. */
 	public int blocksRemoved() {
 		return blocksRemoved;
+	}
+
+	/** Note blocks left out by playing a counted instrument with fewer copies. */
+	public int copiesRemoved() {
+		return copiesRemoved;
+	}
+
+	/** Note blocks left out by skipping sustain strikes, every copy of each strike included. */
+	public int strikeBlocksRemoved() {
+		return blocksRemoved - copiesRemoved;
 	}
 
 	/** Whether nothing is left out and nothing is still over. */

@@ -103,6 +103,43 @@ public final class SongBuilder {
 		return List.copyOf(notes);
 	}
 
+	/**
+	 * Game ticks from pressing a single machine's starter button to a note at game tick nought:
+	 * the head repeater's one repeater tick.
+	 */
+	static final int PRESS_TO_START_ONE_MACHINE = 2;
+
+	/**
+	 * The same through the shared input two interleaved machines start from: the button, the spine,
+	 * and the piston that puts the odd machine half a tick behind. Measured with the reader over
+	 * five two-lane songs at three sizes, twelve every time; {@code PressTimingTest} holds it.
+	 */
+	static final int PRESS_TO_START_TWO_MACHINES = 12;
+
+	/**
+	 * How many game ticks an interleaved build plays for, from the button press to its last note,
+	 * or -1 for a song with no notes to build.
+	 *
+	 * <p>Two machines exactly where the interleaved layout builds two: where the song has notes on
+	 * both halves of the game tick. A song on one half gets one plain machine and its own head.</p>
+	 *
+	 * @param notes the song as {@link #gameTickEventNotes} times it
+	 */
+	static int gameTicksFromPress(List<EventNote> notes) {
+		if (notes.isEmpty()) {
+			return -1;
+		}
+		int last = 0;
+		boolean even = false;
+		boolean odd = false;
+		for (EventNote note : notes) {
+			last = Math.max(last, note.time());
+			even |= note.time() % 2 == 0;
+			odd |= note.time() % 2 != 0;
+		}
+		return last + (even && odd ? PRESS_TO_START_TWO_MACHINES : PRESS_TO_START_ONE_MACHINE);
+	}
+
 	/** One note of the composition, at the game tick a build would sound it on. */
 	private interface GameTickVisitor {
 		void note(int time, int layerIndex, int order, ComposerProject.NoteEvent note,

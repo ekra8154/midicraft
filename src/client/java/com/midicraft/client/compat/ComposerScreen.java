@@ -2844,6 +2844,7 @@ public final class ComposerScreen extends Screen {
 			case RENAME_COMPOSITION -> renameComposition();
 			case EXPORT_NBS -> exportAsNbs();
 			case COPY_AS_TEXT -> copySequenceAsText();
+			case SONG_INFO -> openSongInfo();
 			case PASTE_IN_WORLD -> pasteInWorld();
 			case BUILD_CANCEL -> CommandPasteSender.cancel(true);
 			case TOGGLE_DEDUPE -> {
@@ -2853,8 +2854,8 @@ public final class ComposerScreen extends Screen {
 					resetPlaybackSchedule();
 				}
 				showResult(Component.literal(config.dedupeIdenticalNotes()
-					? "Identical simultaneous notes will be built once."
-					: "Identical simultaneous notes will each be built."));
+					? "Duplicate notes merged: each is built once. Counted notes still build every copy."
+					: "Duplicate notes no longer merged: every copy is built."));
 			}
 			case TOGGLE_NOTE_TRAILS -> {
 				config.setShowNoteTrails(!config.showNoteTrails());
@@ -3346,15 +3347,19 @@ public final class ComposerScreen extends Screen {
 				+ "repeater ticks.";
 			case TRIM_END -> "Pulls the end marker back to the last note, discarding trailing "
 				+ "silence.";
+			case SONG_INFO -> "How long the song is, its tempo, how many notes it has and how many "
+				+ "the build places, the blocks that takes, and how its notes fall across the two "
+				+ "halves of the game tick. Read-only.";
 			case PASTE_IN_WORLD -> "Builds the sequence with /setblock. Needs permission, and "
 				+ "overwrites whatever is standing there.";
 			case BUILD_CANCEL -> "Stops a paste part-way. Blocks already placed stay put.";
 			case TOGGLE_DEDUPE -> "When two included layers ask for the same instrument and pitch at "
 				+ "the same tick, build it once. Each copy costs a note block and one of the thirty "
 				+ "a tick can carry, and preview follows this setting. Nothing is deleted: give one "
-				+ "of those layers a different instrument and both notes come back. An instrument "
-				+ "stacked with a count in the palette is never merged, because the count is how "
-				+ "you ask for a louder note.";
+				+ "of those layers a different instrument and both notes come back. Counted notes "
+				+ "are never merged: an instrument given a count in the palette, like harp x3, "
+				+ "always builds every copy, because the count is how you ask for a louder note. "
+				+ "Song info shows how many notes this merged.";
 			case TOGGLE_NOTE_TRAILS -> "Draws how long each note lasts as a dark trail behind it. "
 				+ "A trail changes nothing in the build: a note block is struck once. Drag a "
 				+ "trail's end to change a note's length. Hidden, a note's right edge still does.";
@@ -5882,41 +5887,11 @@ public final class ComposerScreen extends Screen {
 			}
 			segments.add(String.join(", ", fit));
 		}
-		// Leads with the number that will be standing in the world. "6354 notes (788 deduped)" was
-		// arithmetically fine and still misread -- a count in brackets after a count reads as the
-		// remainder, not as the difference, and nothing on the line was the 5566 that got placed.
-		segments.add((stats.buildNotes() == stats.totalNotes()
-				? stats.totalNotes() + " notes"
-				: stats.buildNotes() + " of " + stats.totalNotes() + " notes build"
-					+ (stats.duplicateNotes() > 0 ? " (" + stats.duplicateNotes() + " deduped)" : ""))
-			+ " · " + project().layers().size() + " layers");
-		int included = (int)project().layers().stream()
-			.filter(Layer::inBuild)
-			.count();
-		if (included == 0) {
+		// Counts, tempo, the grid and the game-tick split live in Song > Song info now. The bar is
+		// read at a glance for one thing -- will this build, and if not, why -- and those were
+		// pushing that answer off the edge of a narrow window.
+		if (project().layers().stream().noneMatch(Layer::inBuild)) {
 			segments.add("every layer muted or hidden");
-		} else {
-			// Counted off the sequence rather than off the composition, so it agrees with what the
-			// paste would place -- including which notes deduplication left out of it.
-			SongBuilder.BlockCounts blocks = blockCounts();
-			segments.add(blocks.total() + " blocks (" + blocks.noteBlocks() + " note · "
-				+ blocks.repeaters() + " repeater)");
-		}
-		// The number the snap button has no room for. It moves with the tempo and the speed, so it
-		// belongs on screen rather than behind a hover.
-		segments.add(tempoLabel() + " · " + project().ppq() + " ticks/beat");
-		// Lower case here and capitalised on the button, because this one is inside a sentence.
-		segments.add("grid " + gridName(snapSubdivision).toLowerCase(java.util.Locale.ROOT)
-			+ " = " + snapDetail());
-		// How the song divides between the two halves of the game tick, which is what decides
-		// whether a half-tick build is one machine's work or two -- and, where it is two, how
-		// evenly the two are loaded. A song wholly on one half says so in one word rather than
-		// with a nought, because "0 odd" reads as a count that failed rather than as a fact.
-		int[] halves = parityCounts();
-		if (halves[0] + halves[1] > 0) {
-			segments.add(halves[1] == 0 ? "all on even game ticks"
-				: halves[0] == 0 ? "all on odd game ticks"
-				: "game ticks " + halves[0] + " even : " + halves[1] + " odd");
 		}
 		// The one place preview and build still disagree. Solo is a lens for listening around a
 		// part, so it deliberately does not change what gets built -- which means that while it is
@@ -5933,16 +5908,7 @@ public final class ComposerScreen extends Screen {
 		int color = ready
 			? 0xFF5AD46A
 			: peakChord >= CHORD_WARNING_THRESHOLD || overloaded > 0 ? 0xFFFF7777 : 0xFFFFAA00;
-		String status = String.join("   ", segments);
-		// Amber after the green, because it is neither a problem nor part of the verdict: the song
-		// builds, and it builds as two machines rather than one. A reader who takes in only the
-		// colour should come away with "fine, but there is something to know", which is exactly
-		// what a second colour after a green one says.
-		String note = ready && !stats.halfTickedNotes().isEmpty()
-			? "   half-ticked: " + stats.halfTickedNotes().size()
-				+ " notes land between repeater ticks, so the build uses 2 lanes"
-			: "";
-		extractStatusLine(graphics, status, color, note, mouseX, mouseY);
+		extractStatusLine(graphics, String.join("   ", segments), color, mouseX, mouseY);
 	}
 
 	/**
@@ -5955,11 +5921,11 @@ public final class ComposerScreen extends Screen {
 	 * verdict, which is the part that matters most.</p>
 	 */
 	private void extractStatusLine(GuiGraphicsExtractor graphics, String status, int color,
-			String note, int mouseX, int mouseY) {
+			int mouseX, int mouseY) {
 		int left = 8;
 		int right = width - 8;
 		int y = height - 15;
-		float lineWidth = (font.width(status) + font.width(note)) * STATUS_TEXT_SCALE;
+		float lineWidth = font.width(status) * STATUS_TEXT_SCALE;
 		statusOverflow = Math.max(0f, lineWidth - (right - left));
 		long now = Util.getMillis();
 		long elapsed = statusLastFrame == 0L ? 0L : Math.min(100L, now - statusLastFrame);
@@ -5992,10 +5958,6 @@ public final class ComposerScreen extends Screen {
 			moreRight ? right - STATUS_CHEVRON_WIDTH : right, y + 10);
 		int x = Math.round(left - statusScroll);
 		scaledText(graphics, status, x, y, color, STATUS_TEXT_SCALE);
-		if (!note.isEmpty()) {
-			scaledText(graphics, note, x + Math.round(font.width(status) * STATUS_TEXT_SCALE), y,
-				0xFFFFAA00, STATUS_TEXT_SCALE);
-		}
 		graphics.disableScissor();
 		if (moreRight) {
 			scaledText(graphics, ">>", right - STATUS_CHEVRON_WIDTH + 2, y, 0xFF8A9098,
@@ -9608,6 +9570,152 @@ public final class ComposerScreen extends Screen {
 			+ " = " + played + " BPM";
 	}
 
+	/**
+	 * The note blocks the build's layers place beyond one per note: a counted instrument's extra
+	 * copies, a composite layer's extra instruments, and a split layer's notes that more than one
+	 * bracket covers. Counted on the notes as the build places them, sustain strikes included, so a
+	 * held note on a doubled layer is doubled at every strike.
+	 */
+	private int compositeExtraNotes() {
+		int extra = 0;
+		for (Layer layer : project().layers()) {
+			if (!layer.inBuild()) {
+				continue;
+			}
+			Layer placed = layer.sustains()
+				? project().withSustainsExpanded(layer, finestSustainStep()) : layer;
+			int blocks = 0;
+			// By id and tick, since a strike carries the id of the note it belongs to.
+			Set<String> notes = new java.util.HashSet<>();
+			for (Layer voice : placed.buildVoices()) {
+				blocks += voice.notes().size() * voice.copies();
+				for (NoteEvent note : voice.notes()) {
+					notes.add(note.id() + "@" + note.startTick());
+				}
+			}
+			extra += blocks - notes.size();
+		}
+		return extra;
+	}
+
+	/**
+	 * Two receipt lines that belong together, as one: "Thinning: fewer copies | strikes skipped"
+	 * over "-12 | -30". Where only one half has anything to say, the line is that half alone.
+	 *
+	 * @param first signed: what that half adds, or takes away as a negative
+	 */
+	private static void adjustmentPair(List<SongInfoScreen.Line> lines, String group,
+			String firstName, int first, String secondName, int second) {
+		if (first == 0 && second == 0) {
+			return;
+		}
+		if (first == 0 || second == 0) {
+			String name = first != 0 ? firstName : secondName;
+			lines.add(SongInfoScreen.Line.adjustment(group + ": " + name,
+				signed(first != 0 ? first : second)));
+			return;
+		}
+		lines.add(SongInfoScreen.Line.adjustment(group + ": " + firstName + " | " + secondName,
+			signed(first) + " | " + signed(second)));
+	}
+
+	private static String signed(int value) {
+		return (value > 0 ? "+" : "-") + Math.abs(value);
+	}
+
+	/** Opens Song > Song info on the song as it stands. */
+	private void openSongInfo() {
+		stopPlayback();
+		minecraft.gui.setScreen(new SongInfoScreen(this, project().name(), songInfoLines()));
+	}
+
+	/** What Song info shows, worked out once when it opens: it is read-only, so it cannot go stale. */
+	private List<SongInfoScreen.Line> songInfoLines() {
+		SongAnalysis stats = projectStats();
+		List<SongInfoScreen.Line> lines = new ArrayList<>();
+		lines.add(SongInfoScreen.Line.heading("Timing"));
+		// Timed off the build rather than the roll: from pressing the start button to the last note,
+		// with each gap rounded the way the build rounds it. The end marker's trailing silence is
+		// not in it, since nothing sounds there.
+		int gameTicks = SongBuilder.gameTicksFromPress(SongBuilder.gameTickEventNotes(project(),
+			config.dedupeIdenticalNotes(), config.chordFitRules()));
+		lines.add(SongInfoScreen.Line.of("Duration from button press", gameTicks < 0 ? "-"
+			: String.format(java.util.Locale.ROOT, "%d:%02d", gameTicks / 20 / 60,
+					gameTicks / 20 % 60)));
+		if (gameTicks >= 0) {
+			lines.add(SongInfoScreen.Line.of("Repeater ticks | game ticks",
+				(gameTicks % 2 == 0 ? Integer.toString(gameTicks / 2) : gameTicks / 2 + ".5")
+					+ " | " + gameTicks));
+		}
+		lines.add(SongInfoScreen.Line.of("Tempo | ticks per beat",
+			tempoLabel() + " | " + project().ppq()));
+
+		lines.add(SongInfoScreen.Line.heading("Notes"));
+		lines.add(SongInfoScreen.Line.of("Biggest chord",
+			stats.peakChord() + " of " + SongAnalysis.MAX_SIMULTANEOUS_NOTES));
+		long included = project().layers().stream().filter(Layer::inBuild).count();
+		lines.add(SongInfoScreen.Line.of("Layers", project().layers().size()
+			+ (included == project().layers().size() ? "" : " (" + included + " in the build)")));
+		// A receipt: what the roll holds, what changes it on the way to the build, and the note
+		// blocks the paste places as the total at the bottom. Out of range is what is left once the
+		// named lines are taken off, so the receipt always adds up: it is worked out as the
+		// remainder rather than counted, because an out-of-range note may be several blocks that
+		// never happen -- every voice of a composite layer, every strike of a sustained one.
+		int fromRoll = stats.totalNotes();
+		int leftOut = 0;
+		for (Layer layer : project().layers()) {
+			if (!layer.inBuild()) {
+				leftOut += layer.notes().size();
+			}
+		}
+		int strikes = project().sustainStrikeCount();
+		int composite = compositeExtraNotes();
+		int merged = config.dedupeIdenticalNotes() ? stats.duplicateNotes() : 0;
+		// The chord limit, in the order it thins: a copy less first, then a skipped strike.
+		ChordSkips thinning = stats.skips();
+		int thinnedCopies = thinning.copiesRemoved();
+		int thinnedStrikes = thinning.strikeBlocksRemoved();
+		int other = stats.buildNotes() - (fromRoll - leftOut + strikes + composite - merged
+			- thinnedCopies - thinnedStrikes);
+		// Set apart from Biggest chord and Layers above it, which are not part of the sum.
+		lines.add(SongInfoScreen.Line.spacer());
+		lines.add(SongInfoScreen.Line.of("From roll", Integer.toString(fromRoll)));
+		// Paired where two lines are two halves of one thing, so the receipt stays short: a pair
+		// with one half at nought reads as that half alone, and one with both at nought is left off.
+		adjustmentPair(lines, "Added", "sustained notes", strikes, "composite", composite);
+		lines.add(SongInfoScreen.Line.adjustment("Merged as duplicates",
+			config.dedupeIdenticalNotes() ? (merged > 0 ? "-" + merged : "0") : "off"));
+		adjustmentPair(lines, "Thinning", "fewer copies", -thinnedCopies,
+			"strikes skipped", -thinnedStrikes);
+		// Out of range can only take notes away. A remainder that adds some is something none of
+		// these lines knows about, and is said as that rather than miscalled.
+		adjustmentPair(lines, "Not built", "muted or hidden", -leftOut, "out of range",
+			Math.min(0, other));
+		if (other > 0) {
+			lines.add(SongInfoScreen.Line.adjustment("Other adjustments", "+" + other));
+		}
+		lines.add(SongInfoScreen.Line.total("Total Minecraft notes",
+			Integer.toString(stats.buildNotes())));
+
+		lines.add(SongInfoScreen.Line.heading("Build"));
+		lines.add(SongInfoScreen.Line.of("Lanes", Integer.toString(stats.lanesNeeded())));
+		if (included > 0) {
+			// Counted off the sequence rather than off the composition, so it agrees with what the
+			// paste would place -- including which notes deduplication left out of it.
+			SongBuilder.BlockCounts blocks = blockCounts();
+			lines.add(SongInfoScreen.Line.of("Repeaters", Integer.toString(blocks.repeaters())));
+		}
+		// How the song divides between the two halves of the game tick: whether a two-lane build
+		// is one machine's work or two, and where it is two, how evenly the two are loaded.
+		int[] halves = parityCounts();
+		lines.add(SongInfoScreen.Line.of("Game ticks, even : odd",
+			halves[0] + halves[1] == 0 ? "-"
+				: halves[1] == 0 ? "all even"
+				: halves[0] == 0 ? "all odd"
+				: halves[0] + " : " + halves[1]));
+		return lines;
+	}
+
 	private void refreshSpeedTooltip() {
 		if (delayScaleSlider == null) {
 			return;
@@ -10510,9 +10618,10 @@ public final class ComposerScreen extends Screen {
 		BAKE_SPEED("Apply speed to the tempo"),
 		SNAP_TEMPO("Snap tempo (whole song)"),
 		SNAP_TEMPO_GAME("Snap tempo to game ticks (whole song)"),
+		SONG_INFO("Song info..."),
 		PASTE_IN_WORLD("Paste current sequence in world (requires op)..."),
 		BUILD_CANCEL("Cancel paste"),
-		TOGGLE_DEDUPE("Dedupe identical notes"),
+		TOGGLE_DEDUPE("Merge duplicate notes"),
 		TOGGLE_NOTE_TRAILS("Show note trails"),
 		ADD_MARKER("Add or remove at the playback marker"),
 		RENAME_MARKER("Rename the marker here..."),
@@ -10543,7 +10652,7 @@ public final class ComposerScreen extends Screen {
 			FIT_ALL_RANGE, BAKE_SPEED, SNAP_TEMPO, SNAP_TEMPO_GAME
 		};
 		private static final ToolbarAction[] SONG_ACTIONS = {
-			TOGGLE_DEDUPE, TOGGLE_NOTE_TRAILS, PASTE_IN_WORLD, BUILD_CANCEL
+			SONG_INFO, TOGGLE_DEDUPE, TOGGLE_NOTE_TRAILS, PASTE_IN_WORLD, BUILD_CANCEL
 		};
 		private static final ToolbarAction[] SELECT_ACTIONS = {
 			SELECT_OFF_GRID, SELECT_HALF_TICKED, SELECT_EVEN_TICKS, SELECT_ODD_TICKS,
