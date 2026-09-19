@@ -932,6 +932,11 @@ public record ComposerProject(
 		FINEST("Finest"),
 		GAME_TICK("Game tick"),
 		REPEATER_TICK("Repeater tick"),
+		// Coarser redstone steps, for a held note that should pulse rather than buzz. Whole repeater
+		// ticks, so like the two above they always land on the build's own grid, which a note value
+		// only does where the tempo happens to divide it.
+		TWO_REPEATER_TICKS("2 repeater ticks"),
+		FOUR_REPEATER_TICKS("4 repeater ticks"),
 		// Note values, said as notes: "1/4" alone read as a quarter of a bar. A bar is four quarter
 		// notes, since the composer has no time signature and counts every song in 4/4.
 		THIRTY_SECOND("1/32 note"),
@@ -943,10 +948,10 @@ public record ComposerProject(
 
 		/** What "Sustain after" offers: every length but Finest, which is a rate and not a length. */
 		public static final List<SustainLength> AFTER_CHOICES = List.of(GAME_TICK, REPEATER_TICK,
-			THIRTY_SECOND, SIXTEENTH, EIGHTH, QUARTER, HALF, BAR);
+			TWO_REPEATER_TICKS, FOUR_REPEATER_TICKS, THIRTY_SECOND, SIXTEENTH, EIGHTH, QUARTER, HALF, BAR);
 		/** What "Strike every" offers. */
 		public static final List<SustainLength> EVERY_CHOICES = List.of(FINEST, GAME_TICK,
-			REPEATER_TICK, THIRTY_SECOND, SIXTEENTH, EIGHTH, QUARTER);
+			REPEATER_TICK, TWO_REPEATER_TICKS, FOUR_REPEATER_TICKS, THIRTY_SECOND, SIXTEENTH, EIGHTH, QUARTER);
 
 		public final String label;
 
@@ -1005,9 +1010,15 @@ public record ComposerProject(
 	 * @param step composer ticks between strikes, never below one
 	 * @param after composer ticks a note must last before it strikes again
 	 */
-	public record Strikes(double origin, double step, double after) {
+	public record Strikes(double origin, double step, double after, double grid) {
 		public Strikes {
 			step = Math.max(1.0, step);
+			grid = Math.max(0.0, grid);
+		}
+
+		/** Strikes where the step puts them, aligned to nothing. */
+		public Strikes(double origin, double step, double after) {
+			this(origin, step, after, 0.0);
 		}
 
 		/** Whether a note is long enough to sustain. */
@@ -1021,6 +1032,11 @@ public record ComposerProject(
 		 * <p>The first is the first grid line at least one step after the note starts, and the last
 		 * falls before the note ends, never on it. The note's own start is not one of them: that
 		 * strike is the note.</p>
+		 *
+		 * <p>With a {@code grid}, each strike then moves to the nearest line of it -- the build's own
+		 * ticks, counted from the same origin -- so a note value the tempo does not divide still
+		 * lands where a repeater can put it. Two strikes moved onto one line are one strike, and one
+		 * moved onto the note's start or its end is left out, as it would have been there anyway.</p>
 		 */
 		public void forEach(NoteEvent note, long from, long to, java.util.function.LongConsumer strike) {
 			if (!sustained(note)) {
@@ -1029,15 +1045,21 @@ public record ComposerProject(
 			long start = note.startTick();
 			long end = start + note.durationTicks();
 			long first = (long)Math.ceil((start + step - origin) / step - 1.0e-9);
-			// Floored, and the tick itself checked: a line just under from can round onto it.
-			long window = (long)Math.floor((from - origin) / step);
+			// Floored, and the tick itself checked: a line just under from can round onto it. A grid
+			// can move a strike back by half its line, so the window opens that much earlier.
+			long window = (long)Math.floor((from - grid - origin) / step);
+			long last = Long.MIN_VALUE;
 			for (long index = Math.max(first, window); ; index++) {
 				long tick = Math.round(origin + index * step);
-				if (tick >= end || tick > to) {
+				if (tick >= end || tick > to + grid) {
 					return;
 				}
-				if (tick > start && tick >= from) {
+				if (grid > 0.0) {
+					tick = Math.round(origin + Math.round((tick - origin) / grid) * grid);
+				}
+				if (tick > start && tick < end && tick >= from && tick <= to && tick != last) {
 					strike.accept(tick);
+					last = tick;
 				}
 			}
 		}
@@ -2934,6 +2956,8 @@ public record ComposerProject(
 		return switch (length) {
 			case GAME_TICK -> repeater / 2.0;
 			case REPEATER_TICK -> repeater;
+			case TWO_REPEATER_TICKS -> repeater * 2.0;
+			case FOUR_REPEATER_TICKS -> repeater * 4.0;
 			case THIRTY_SECOND -> ppq / 8.0;
 			case SIXTEENTH -> ppq / 4.0;
 			case EIGHTH -> ppq / 2.0;
@@ -2948,8 +2972,51 @@ public record ComposerProject(
 	public Strikes sustainStrikes(Layer layer, double finest) {
 		Sustain settings = layer.sustainOrDefault();
 		return new Strikes(sustainOrigin(), sustainTicks(settings.every(), finest),
-			sustainTicks(settings.after(), finest));
+			sustainTicks(settings.after(), finest), ALIGN_SUSTAINED_NOTES ? sustainGrid() : 0.0);
 	}
+
+	/**
+	 * Whether sustained notes strike on the build's own grid rather than wherever their note value
+	 * falls. Song > Align sustained notes; the config writes it, as it writes the builder's switches,
+	 * so the tests and the probes read the same default the game starts with.
+	 */
+	public static boolean ALIGN_SUSTAINED_NOTES = true;
+
+	/**
+	 * The grid a strike is aligned to: what the song builds on with its sustains left out. A
+	 * repeater tick where that is one lane, a game tick where it needs two.
+	 *
+	 * <p>Asked of the song as written, never of the song with its strikes in, or the strikes would
+	 * decide the grid they are being put on -- and a strike put between repeater ticks would talk the
+	 * whole song into a second lane.</p>
+	 *
+	 * <p>Remembered for the last few songs asked about, by identity: a song is immutable, the grid
+	 * costs a pass over every note, and every sustaining layer asks for it on every expansion.</p>
+	 */
+	public double sustainGrid() {
+		synchronized (SUSTAIN_GRIDS) {
+			for (Map.Entry<ComposerProject, Double> entry : SUSTAIN_GRIDS) {
+				if (entry.getKey() == this) {
+					return entry.getValue();
+				}
+			}
+		}
+		double repeater = SongAnalysis.redstoneTickSpan(this);
+		double grid = SongAnalysis.ofWritten(this, true).lanesNeeded() == 2 ? repeater / 2.0 : repeater;
+		synchronized (SUSTAIN_GRIDS) {
+			SUSTAIN_GRIDS.add(Map.entry(this, grid));
+			if (SUSTAIN_GRIDS.size() > 4) {
+				SUSTAIN_GRIDS.removeFirst();
+			}
+		}
+		return grid;
+	}
+
+	/**
+	 * Looked up by identity, in a list: two equal songs have the same grid, but hashing a whole song
+	 * to find out is a pass over every note, which is the cost this is here to save.
+	 */
+	private static final List<Map.Entry<ComposerProject, Double>> SUSTAIN_GRIDS = new ArrayList<>();
 
 	/**
 	 * What Finest means in this song: the finest step it is already written at.

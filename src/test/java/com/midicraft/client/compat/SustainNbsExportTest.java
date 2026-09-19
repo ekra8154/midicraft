@@ -14,6 +14,18 @@ import org.junit.jupiter.api.io.TempDir;
 
 /** A sustained note leaves for Note Block Studio as the repeated notes it already uses for one. */
 class SustainNbsExportTest {
+
+	// These pin the exact strike arithmetic, so they measure it with alignment off. Aligning is
+	// tested on its own in SustainAlignTest.
+	@org.junit.jupiter.api.BeforeEach
+	void strikeExactly() {
+		com.midicraft.client.composer.ComposerProject.ALIGN_SUSTAINED_NOTES = false;
+	}
+
+	@org.junit.jupiter.api.AfterEach
+	void alignAgain() {
+		com.midicraft.client.composer.ComposerProject.ALIGN_SUSTAINED_NOTES = true;
+	}
 	@Test
 	void writesEveryStrikeAsANote(@TempDir Path folder) throws Exception {
 		// A sixteenth is 120 composer ticks, which is one NBS tick, so a quarter held on sixteenths

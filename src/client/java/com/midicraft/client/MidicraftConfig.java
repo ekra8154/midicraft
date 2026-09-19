@@ -405,6 +405,7 @@ public final class MidicraftConfig {
 	private boolean layerPanelCollapsed;
 	/** Whether the composer's roll draws how long each note lasts, as a dark trail behind it. */
 	private boolean showNoteTrails;
+	private boolean alignSustainedNotes;
 	/**
 	 * Whether the song library and the file browser list by name rather than newest first.
 	 *
@@ -633,6 +634,8 @@ public final class MidicraftConfig {
 				);
 				instance.layerPanelCollapsed = Boolean.TRUE.equals(stored.layerPanelCollapsed);
 				instance.showNoteTrails = stored.showNoteTrails == null || stored.showNoteTrails;
+				instance.setAlignSustainedNotes(stored.alignSustainedNotes == null
+					|| stored.alignSustainedNotes);
 				instance.listSortByName = Boolean.TRUE.equals(stored.listSortByName);
 				if (stored.songOpenedAt != null) {
 					stored.songOpenedAt.forEach((id, at) -> {
@@ -1540,6 +1543,21 @@ public final class MidicraftConfig {
 		this.showNoteTrails = showNoteTrails;
 	}
 
+	/** Whether sustained notes strike on the build's grid; see ComposerProject.ALIGN_SUSTAINED_NOTES. */
+	public boolean alignSustainedNotes() {
+		return alignSustainedNotes;
+	}
+
+	/**
+	 * Sets the setting and the composer's copy of it together, as {@link #setColorCodedPaste} does,
+	 * and drops the cached build sequence, which the strikes are part of.
+	 */
+	public void setAlignSustainedNotes(boolean alignSustainedNotes) {
+		this.alignSustainedNotes = alignSustainedNotes;
+		ComposerProject.ALIGN_SUSTAINED_NOTES = alignSustainedNotes;
+		cachedSequence = null;
+	}
+
 	/**
 	 * A config nobody is using, holding what every setting is worth before anyone touches it.
 	 *
@@ -1602,6 +1620,8 @@ public final class MidicraftConfig {
 		config.layerPanelWidth = DEFAULT_LAYER_PANEL_WIDTH;
 		config.layerPanelCollapsed = false;
 		config.showNoteTrails = true;
+		// The field, not the setter, for the reason colorCodedPaste gives.
+		config.alignSustainedNotes = true;
 		config.listSortByName = false;
 		config.songOpenedAt.clear();
 		config.repeatMergeTicks = DEFAULT_REPEAT_MERGE_TICKS;
@@ -1801,6 +1821,7 @@ public final class MidicraftConfig {
 		private Integer layerPanelWidth;
 		private Boolean layerPanelCollapsed;
 		private Boolean showNoteTrails;
+		private Boolean alignSustainedNotes;
 		private Boolean listSortByName;
 		private Map<String, Long> songOpenedAt;
 		private Integer composerSpeedQuarters;
@@ -1875,6 +1896,7 @@ public final class MidicraftConfig {
 			this.layerPanelWidth = config.layerPanelWidth;
 			this.layerPanelCollapsed = config.layerPanelCollapsed;
 			this.showNoteTrails = config.showNoteTrails;
+			this.alignSustainedNotes = config.alignSustainedNotes;
 			this.listSortByName = config.listSortByName;
 			// Only the songs that still exist. A library the player has been pruning would otherwise
 			// leave a line in the settings file for every composition ever opened.

@@ -54,4 +54,19 @@ class DragAxisLockTest {
 		assertEquals(DragAxis.TIME, ComposerScreen.lockedAxis(DragAxis.TIME, 0.0, 0.0),
 			"including when the cursor comes back to where it started");
 	}
+
+	/**
+	 * A one-row move decides the moment it crosses into the row, before the four-pixel wait is up,
+	 * and it decides pitch unless the hand really went further sideways.
+	 */
+	@Test
+	void crossingARowDecidesAtOnce() {
+		assertEquals(DragAxis.PITCH, ComposerScreen.lockedAxis(DragAxis.UNDECIDED, 2.0, 3.0, true));
+		assertEquals(DragAxis.PITCH, ComposerScreen.lockedAxis(DragAxis.UNDECIDED, 3.0, 3.0, true),
+			"a tie on a crossed row goes to pitch, which is what just moved");
+		assertEquals(DragAxis.TIME, ComposerScreen.lockedAxis(DragAxis.UNDECIDED, 6.0, 3.0, true));
+		assertEquals(DragAxis.UNDECIDED,
+			ComposerScreen.lockedAxis(DragAxis.UNDECIDED, 3.0, 2.0, false),
+			"no row crossed and under the threshold is still undecided");
+	}
 }

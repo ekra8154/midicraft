@@ -799,15 +799,14 @@ public final class ComposerScreen extends Screen {
 	private int toastRight;
 	private int toastBottom;
 	/**
-	 * The note actually under the hand during a drag, and the pitch it was on when the drag began.
+	 * What a drag sounds as it moves: the selection's first chord, as {layer, midi} pairs at the
+	 * pitches they had when the drag began, or empty with no drag.
 	 *
-	 * <p>A drag can be carrying thirty notes and only one of them is the one you are holding. That
-	 * is the one worth hearing: a chord retuning under the cursor every time the hand crosses a row
-	 * is noise, and the note you took hold of is the one you are aiming.</p>
+	 * <p>The first chord rather than the note under the hand, so a phrase dragged by any of its notes
+	 * -- or by the band around it -- is auditioned by how it opens, the same every time. A single note
+	 * is a chord of one.</p>
 	 */
-	private long dragHeldNoteId = -1L;
-	private int dragHeldMidi;
-	private int dragHeldLayer = -1;
+	private List<int[]> dragHeldChord = List.of();
 	private int dragHeardPitchDelta;
 	private long hoveredNoteId = -1L;
 	/** The key the cursor has been resting on, and since when, for the same dwell a note gets. */
@@ -2878,6 +2877,20 @@ public final class ComposerScreen extends Screen {
 					? "Duplicate notes merged: each is built once. Counted notes still build every copy."
 					: "Duplicate notes no longer merged: every copy is built."));
 			}
+			case TOGGLE_ALIGN_SUSTAIN -> {
+				config.setAlignSustainedNotes(!config.alignSustainedNotes());
+				MidicraftConfig.save();
+				// A setting, not an edit, so the song is the same object and nothing keyed on it
+				// knows the strikes moved.
+				cachedStatsProject = null;
+				cachedParityProject = null;
+				if (playing) {
+					resetPlaybackSchedule();
+				}
+				showResult(Component.literal(config.alignSustainedNotes()
+					? "Sustained notes strike on the build's own ticks."
+					: "Sustained notes strike exactly on their note value, on the build's ticks or not."));
+			}
 			case TOGGLE_NOTE_TRAILS -> {
 				config.setShowNoteTrails(!config.showNoteTrails());
 				MidicraftConfig.save();
@@ -3382,6 +3395,11 @@ public final class ComposerScreen extends Screen {
 				+ "are never merged: an instrument given a count in the palette, like harp x3, "
 				+ "always builds every copy, because the count is how you ask for a louder note. "
 				+ "Song info shows how many notes this merged.";
+			case TOGGLE_ALIGN_SUSTAIN -> "Moves every strike of a sustained note to the nearest tick "
+				+ "the build can place: a repeater tick when the song without its sustains builds on "
+				+ "one lane, a game tick when it needs two. A note value the tempo does not divide, "
+				+ "like 1/16 at most tempos, then strikes slightly unevenly instead of off the grid. "
+				+ "Off, strikes land exactly on the note value and may be unbuildable.";
 			case TOGGLE_NOTE_TRAILS -> "Draws how long each note lasts as a dark trail behind it. "
 				+ "A trail changes nothing in the build: a note block is struck once. Drag a "
 				+ "trail's end to change a note's length. Hidden, a note's right edge still does.";
@@ -3539,6 +3557,9 @@ public final class ComposerScreen extends Screen {
 		}
 		if (action == ToolbarAction.TOGGLE_NOTE_TRAILS) {
 			return action.label + ": " + (config.showNoteTrails() ? "On" : "Off");
+		}
+		if (action == ToolbarAction.TOGGLE_ALIGN_SUSTAIN) {
+			return action.label + ": " + (config.alignSustainedNotes() ? "On" : "Off");
 		}
 		return action.label;
 	}
@@ -4348,8 +4369,30 @@ public final class ComposerScreen extends Screen {
 	 * this zoom and a pixel down is half a row.</p>
 	 */
 	static DragAxis lockedAxis(DragAxis current, double acrossPixels, double downPixels) {
-		if (current != DragAxis.UNDECIDED
-				|| Math.max(acrossPixels, downPixels) <= DRAG_AXIS_THRESHOLD) {
+		return lockedAxis(current, acrossPixels, downPixels, false);
+	}
+
+	/**
+	 * The same, decided early the moment the drag crosses into another row.
+	 *
+	 * <p>A small vertical move is the one the four-pixel wait got wrong. At an ordinary zoom a row
+	 * is six to ten pixels, so a note dragged down one row has crossed into it after three or four --
+	 * before the lock had decided anything -- and an undecided lock locked nothing, so whatever the
+	 * hand did sideways in that time went in too. So a row crossed is a decision on its own, taken
+	 * by the same pixel comparison, with a tie going to pitch since pitch is what has just moved.
+	 * Nothing moves at all while it is undecided; see the drag.</p>
+	 *
+	 * @param rowCrossed whether the pointer has come far enough to move the notes a row
+	 */
+	static DragAxis lockedAxis(DragAxis current, double acrossPixels, double downPixels,
+			boolean rowCrossed) {
+		if (current != DragAxis.UNDECIDED) {
+			return current;
+		}
+		if (rowCrossed) {
+			return acrossPixels > downPixels ? DragAxis.TIME : DragAxis.PITCH;
+		}
+		if (Math.max(acrossPixels, downPixels) <= DRAG_AXIS_THRESHOLD) {
 			return current;
 		}
 		// A tie goes to time, which is the edit people reach for a drag to make.
@@ -4633,6 +4676,14 @@ public final class ComposerScreen extends Screen {
 		// trimmed to its notes there was nothing the bracket said that the band did not. Thicker
 		// and brighter under the cursor, because an edge you can take hold of has to look like one.
 		int handle = rangeHandleAt(lastMouseX, lastMouseY);
+		if (handle != 0) {
+			wantedCursorShape = GLFW.GLFW_HRESIZE_CURSOR;
+		} else if (overRangeBand(lastMouseX, lastMouseY) && !overOpenMenu(lastMouseX, lastMouseY)
+				&& trailEndAt(lastMouseX, lastMouseY) == null) {
+			// Anywhere in it, notes and gaps alike: a press there takes hold of the selection. Not
+			// over a sustained note's end, where a press still takes hold of its length.
+			wantedCursorShape = GLFW.GLFW_RESIZE_ALL_CURSOR;
+		}
 		if (from >= rollX) {
 			graphics.fill(from - (handle == 1 ? 1 : 0), top, from + (handle == 1 ? 2 : 1), bottom,
 				handle == 1 ? 0xFFCFF3FF : 0x667FD8F0);
@@ -5237,10 +5288,10 @@ public final class ComposerScreen extends Screen {
 					// thin, and never in the way of a strike -- its own or anybody else's.
 					if (live && lifted) {
 						liftedTrails.add(() -> extractLiveTrail(graphics, note, strikes, right, trailEnd,
-							top, bottom, color, layerIndex, thinning));
+							top, bottom, color, layerIndex, thinning, highlighted));
 					} else if (live) {
 						extractLiveTrail(graphics, note, strikes, right, trailEnd, top, bottom, color, layerIndex,
-							thinning);
+							thinning, highlighted);
 					} else {
 						int trailTop = top + (rowHeight - 2 - trailHeight) / 2;
 						graphics.fill(Math.max(right, rollX), trailTop, Math.min(trailEnd, rollRight),
@@ -5313,6 +5364,9 @@ public final class ComposerScreen extends Screen {
 		}
 		extractHoveredNoteTooltip(graphics, hoveredCandidate, hoveredCandidateLayer,
 			crowded, offGrid, mouseX, mouseY);
+		if (draggingNotes) {
+			wantedCursorShape = GLFW.GLFW_RESIZE_ALL_CURSOR;
+		}
 		// The resize arrows over a note's far end, and for the whole of a resize.
 		if (resizingNotes || !draggingNotes && !selectingBox && !erasing
 				&& !overOpenMenu(mouseX, mouseY) && trailEndAt(mouseX, mouseY) != null) {
@@ -5332,15 +5386,18 @@ public final class ComposerScreen extends Screen {
 	 *
 	 * <p>Ticks closer together than three pixels are left off, and the bar reads as solid -- which
 	 * at that zoom is what a note striking on every tick looks like.</p>
+	 *
+	 * @param ticks whether to mark the strikes at all: only on the layers being worked on, since a
+	 *     busy song's other sustains turned the roll into a comb
 	 */
 	private void extractLiveTrail(GuiGraphicsExtractor graphics, NoteEvent note,
 			ComposerProject.Strikes strikes, int right, int trailEnd, int top, int bottom, int color,
-			int layerIndex, ChordSkips thinning) {
+			int layerIndex, ChordSkips thinning, boolean ticks) {
 		int rollRight = rollX + rollWidth;
 		int inset = (bottom - top) / 4;
 		graphics.fill(Math.max(right, rollX), top + inset, Math.min(trailEnd, rollRight), bottom - inset,
 			0xFF000000 | color);
-		if (strikes.step() / ticksPerPixel < 3.0) {
+		if (!ticks || strikes.step() / ticksPerPixel < 3.0) {
 			return;
 		}
 		long from = Math.max(0L, horizontalScroll);
@@ -5738,12 +5795,40 @@ public final class ComposerScreen extends Screen {
 	 * behind rather than one that does not exist.</p>
 	 */
 	private void soundHeldNote(int pitchDelta) {
-		if (dragHeldNoteId < 0L || dragHeldLayer < 0
-				|| dragHeldLayer >= project().layers().size()) {
-			return;
+		for (int[] held : dragHeldChord) {
+			int layerIndex = held[0];
+			if (layerIndex < 0 || layerIndex >= project().layers().size()) {
+				continue;
+			}
+			int midi = Math.max(MIN_MIDI_NOTE, Math.min(MAX_MIDI_NOTE, held[1] + pitchDelta));
+			soundLayerNote(layerIndex, midi, vivid(layerColor(layerIndex)));
 		}
-		int midi = Math.max(MIN_MIDI_NOTE, Math.min(MAX_MIDI_NOTE, dragHeldMidi + pitchDelta));
-		soundLayerNote(dragHeldLayer, midi, vivid(layerColor(dragHeldLayer)));
+	}
+
+	/**
+	 * The selection's first chord: every selected note on its earliest tick, one per layer and
+	 * pitch, so a stack or a doubled layer is not struck twice.
+	 */
+	private List<int[]> firstSelectedChord() {
+		long first = Long.MAX_VALUE;
+		for (Layer layer : project().layers()) {
+			for (NoteEvent note : layer.notes()) {
+				if (selectedNotes.contains(note.id())) {
+					first = Math.min(first, note.startTick());
+				}
+			}
+		}
+		List<int[]> chord = new ArrayList<>();
+		Set<Long> struck = new java.util.HashSet<>();
+		for (int index = 0; index < project().layers().size(); index++) {
+			for (NoteEvent note : project().layers().get(index).notes()) {
+				if (note.startTick() == first && selectedNotes.contains(note.id())
+						&& struck.add(index * 128L + note.midiNote())) {
+					chord.add(new int[] {index, note.midiNote()});
+				}
+			}
+		}
+		return List.copyOf(chord);
 	}
 
 	private void soundNote(int midi, PreviewInstrument instrument, int color) {
@@ -6509,13 +6594,31 @@ public final class ComposerScreen extends Screen {
 				dragTickDelta = 0L;
 				dragPitchDelta = 0;
 				dragAxis = DragAxis.UNDECIDED;
-				dragHeldNoteId = hitNote.id();
-				dragHeldMidi = hitNote.midiNote();
-				dragHeldLayer = hit.layerIndex();
+				dragHeldChord = firstSelectedChord();
 				dragHeardPitchDelta = 0;
 				soundHeldNote(0);
 			}
 			return true;
+		}
+		if (!event.hasControlDownWithQuirk() && !selectedNotes.isEmpty()
+				&& overRangeBand(event.x(), event.y())) {
+			// Empty roll inside the band: the selection's own handle. Held by its first note, so the
+			// note sounded on the way is one of the notes being moved.
+			NoteHit first = firstSelectedNote();
+			if (first != null) {
+				draggingNotes = true;
+				dragStartX = event.x();
+				dragStartY = event.y();
+				dragBase = project();
+				dragPreview = null;
+				dragTickDelta = 0L;
+				dragPitchDelta = 0;
+				dragAxis = DragAxis.UNDECIDED;
+				dragHeldChord = firstSelectedChord();
+				dragHeardPitchDelta = 0;
+				soundHeldNote(0);
+				return true;
+			}
 		}
 		if (doubleClick && !pressClaimedFocus) {
 			placeNote(mouseMidi(event.y()), snapTickInto(mouseTick(event.x())));
@@ -6847,10 +6950,13 @@ public final class ComposerScreen extends Screen {
 			// axis it picked is remembered in case you take hold of it again.
 			if (shiftDown()) {
 				dragAxis = lockedAxis(dragAxis, Math.abs(event.x() - dragStartX),
-					Math.abs(event.y() - dragStartY));
-				if (dragAxis == DragAxis.TIME) {
+					Math.abs(event.y() - dragStartY), pitchDelta != 0);
+				// Undecided holds both still. Letting either through before the lock chose was how
+				// a one-row move under Shift came out a grid step sideways as well.
+				if (dragAxis != DragAxis.PITCH) {
 					pitchDelta = 0;
-				} else if (dragAxis == DragAxis.PITCH) {
+				}
+				if (dragAxis != DragAxis.TIME) {
 					tickDelta = 0L;
 				}
 			}
@@ -6946,8 +7052,7 @@ public final class ComposerScreen extends Screen {
 			return true;
 		}
 		if (draggingNotes) {
-			dragHeldNoteId = -1L;
-			dragHeldLayer = -1;
+			dragHeldChord = List.of();
 			// The passage goes with the notes, so the range that measures it goes too. Taken while
 			// the drag is still on, because the clamp is worked out from where the notes are now
 			// and a moment later that is where they have gone.
@@ -10011,6 +10116,21 @@ public final class ComposerScreen extends Screen {
 	/** How far either side of a band edge counts as having hold of it. */
 	private static final double RANGE_HANDLE_REACH = 4.0;
 
+	/**
+	 * Whether a point is inside the band, between its edges and within the rows it covers.
+	 *
+	 * <p>A press there on empty roll takes hold of the whole selection and drags it, the way a press
+	 * on one of its notes does. The band is what the selection looks like, and aiming at a single
+	 * small note to move a phrase was the one way to pick it up.</p>
+	 */
+	private boolean overRangeBand(double x, double y) {
+		if (!hasRange() || x < rollX || x >= rollX + rollWidth
+				|| y < rangeBandTop() || y >= rangeBandBottom()) {
+			return false;
+		}
+		return x >= tickX(rangeStart + rangeDragDelta()) && x <= tickX(rangeEnd + rangeDragDelta());
+	}
+
 	/** Which edge of the band a point has hold of, or 0. */
 	private int rangeHandleAt(double x, double y) {
 		if (!hasRange() || x < rollX || x >= rollX + rollWidth) {
@@ -10297,6 +10417,22 @@ public final class ComposerScreen extends Screen {
 		}
 		long landed = Math.max(0L, anchor + tickDelta);
 		return gridLineAt(gridIndexNear(landed, span), span) - anchor;
+	}
+
+	/** The earliest selected note, lowest pitch first on a tie, with its layer; or null. */
+	private NoteHit firstSelectedNote() {
+		NoteHit first = null;
+		for (int index = 0; index < project().layers().size(); index++) {
+			for (NoteEvent note : project().layers().get(index).notes()) {
+				if (selectedNotes.contains(note.id()) && (first == null
+						|| note.startTick() < first.note().startTick()
+						|| note.startTick() == first.note().startTick()
+							&& note.midiNote() < first.note().midiNote())) {
+					first = new NoteHit(index, note);
+				}
+			}
+		}
+		return first;
 	}
 
 	/** The first tick anything selected stands on, or -1 with nothing selected. */
@@ -10657,6 +10793,7 @@ public final class ComposerScreen extends Screen {
 		BUILD_CANCEL("Cancel paste"),
 		TOGGLE_DEDUPE("Merge duplicate notes"),
 		TOGGLE_NOTE_TRAILS("Show note trails"),
+		TOGGLE_ALIGN_SUSTAIN("Align sustained notes"),
 		ADD_MARKER("Add or remove at the playback marker"),
 		RENAME_MARKER("Rename the marker here..."),
 		CLEAR_MARKERS("Remove every marker"),
@@ -10687,7 +10824,8 @@ public final class ComposerScreen extends Screen {
 			FIT_ALL_RANGE, BAKE_SPEED, SNAP_TEMPO, SNAP_TEMPO_GAME
 		};
 		private static final ToolbarAction[] SONG_ACTIONS = {
-			SONG_INFO, TOGGLE_DEDUPE, TOGGLE_NOTE_TRAILS, PASTE_IN_WORLD, BUILD_CANCEL
+			SONG_INFO, TOGGLE_DEDUPE, TOGGLE_NOTE_TRAILS, TOGGLE_ALIGN_SUSTAIN, PASTE_IN_WORLD,
+			BUILD_CANCEL
 		};
 		private static final ToolbarAction[] SELECT_ACTIONS = {
 			SELECT_OFF_GRID, SELECT_HALF_TICKED, SELECT_EVEN_TICKS, SELECT_ODD_TICKS,

@@ -24,6 +24,18 @@ import org.junit.jupiter.api.Test;
  * which is where the shared grid is counted from.</p>
  */
 class SustainTest {
+
+	// These pin the exact strike arithmetic, so they measure it with alignment off. Aligning is
+	// tested on its own in SustainAlignTest.
+	@org.junit.jupiter.api.BeforeEach
+	void strikeExactly() {
+		com.midicraft.client.composer.ComposerProject.ALIGN_SUSTAINED_NOTES = false;
+	}
+
+	@org.junit.jupiter.api.AfterEach
+	void alignAgain() {
+		com.midicraft.client.composer.ComposerProject.ALIGN_SUSTAINED_NOTES = true;
+	}
 	private static final Sustain EVERY_SIXTEENTH =
 		new Sustain(true, SustainLength.QUARTER, SustainLength.SIXTEENTH);
 	/** What Finest stands for in tests that never pick it. */
