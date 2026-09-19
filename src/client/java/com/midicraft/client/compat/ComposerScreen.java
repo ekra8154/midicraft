@@ -354,8 +354,10 @@ public final class ComposerScreen extends Screen {
 	private static final int MIN_ROW_HEIGHT = 4;
 	private static final int MAX_ROW_HEIGHT = 26;
 	private static final int INSTRUMENT_COLUMNS = 6;
-	private static final int INSTRUMENT_CELL = 28;
-	/** The instrument palette's cells: wider than the tier menu's, for the count strip on each tile. */
+	/**
+	 * The cells of both instrument pickers, the layer palette and a bracket's: wide enough for the
+	 * count strip on each tile.
+	 */
 	private static final int PALETTE_CELL = 32;
 	/** The strip down a palette tile's right edge: an up arrow, the count, a down arrow. */
 	private static final int PALETTE_STRIP = 11;
@@ -7085,6 +7087,15 @@ public final class ComposerScreen extends Screen {
 
 	@Override
 	public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+		PaletteHit tierHit = tierMenuHit(mouseX, mouseY);
+		if (tierHit != null) {
+			ComposerProject.Split split = keyboardSplit();
+			PreviewInstrument value = tierMenuCandidates().get(tierHit.index());
+			if (scrollY != 0 && split != null && tierVoiceCount(split, value.id()) > 0) {
+				stepTierVoice(value, scrollY > 0 ? 1 : -1);
+			}
+			return true;
+		}
 		PaletteHit wheelHit = instrumentMenuLayer >= 0 ? paletteHit(mouseX, mouseY) : null;
 		if (wheelHit != null) {
 			// The wheel over a sounding tile turns its count. Over a silent one it does nothing:
@@ -8403,6 +8414,8 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private static final int TIER_MENU_COLUMNS = 3;
+	/** Two small lines under a bracket picker's grid: what a click does, and what the arrows do. */
+	private static final int TIER_MENU_FOOTER = 16;
 
 	/**
 	 * What the open bracket's picker offers: every pitched instrument sharing the register, or
@@ -8432,8 +8445,8 @@ public final class ComposerScreen extends Screen {
 			return null;
 		}
 		int rows = (tierMenuCandidates().size() + TIER_MENU_COLUMNS - 1) / TIER_MENU_COLUMNS;
-		int menuWidth = TIER_MENU_COLUMNS * INSTRUMENT_CELL + 6;
-		int menuHeight = INSTRUMENT_HEADER + rows * INSTRUMENT_CELL + 6;
+		int menuWidth = TIER_MENU_COLUMNS * PALETTE_CELL + 6;
+		int menuHeight = INSTRUMENT_HEADER + rows * PALETTE_CELL + 6 + TIER_MENU_FOOTER;
 		int left = Math.min(width - menuWidth - 4, tierMenuX);
 		int top = Math.max(TOOLBAR_HEIGHT + 4,
 			Math.min(height - menuHeight - 4, tierMenuY - menuHeight / 2));
@@ -8442,14 +8455,118 @@ public final class ComposerScreen extends Screen {
 
 	/** Whether the open bracket already holds this instrument's voice. */
 	private boolean tierMenuHolds(ComposerProject.Split split, String instrumentId) {
+		return tierVoiceCount(split, instrumentId) > 0;
+	}
+
+	/**
+	 * Whether a voice belongs to the open bracket: shares its register, or for a sound effect band,
+	 * its rows exactly.
+	 */
+	private boolean inOpenBracket(ComposerProject.Split.Voice voice) {
+		boolean effect = voice.instrument().startsWith(ComposerProject.SOUND_EFFECT_PREFIX);
+		return tierMenuEffects
+			? effect && voice.lo() == tierMenuLo && voice.hi() == tierMenuHi
+			: !effect && com.midicraft.InstrumentRanges.baseMidi(voice.instrument()) == tierMenuBase;
+	}
+
+	/** How many voices the open bracket has sounding. */
+	private int openBracketVoices(ComposerProject.Split split) {
+		int voices = 0;
 		for (ComposerProject.Split.Voice voice : split.voices()) {
-			if (voice.instrument().equals(instrumentId)
-					&& (!tierMenuEffects
-						|| voice.lo() == tierMenuLo && voice.hi() == tierMenuHi)) {
-				return true;
+			if (inOpenBracket(voice)) {
+				voices++;
 			}
 		}
-		return false;
+		return voices;
+	}
+
+	/** Whether a voice is the open bracket's voice of this instrument. */
+	private boolean inOpenBracket(ComposerProject.Split.Voice voice, String instrumentId) {
+		return voice.instrument().equals(instrumentId)
+			&& (!tierMenuEffects || voice.lo() == tierMenuLo && voice.hi() == tierMenuHi);
+	}
+
+	/** How many note blocks the open bracket's voice of this instrument places a note, or 0. */
+	private int tierVoiceCount(ComposerProject.Split split, String instrumentId) {
+		for (ComposerProject.Split.Voice voice : split.voices()) {
+			if (inOpenBracket(voice, instrumentId)) {
+				return voice.count();
+			}
+		}
+		return 0;
+	}
+
+	/** The tile of the open picker under a point, and which part of it, or null. */
+	private PaletteHit tierMenuHit(double mouseX, double mouseY) {
+		NoteRect menu = tierMenuRect();
+		if (menu == null) {
+			return null;
+		}
+		int gridTop = menu.top() + 3 + INSTRUMENT_HEADER;
+		if (mouseX < menu.left() + 3 || mouseY < gridTop || mouseX >= menu.right()
+				|| mouseY >= menu.bottom()) {
+			return null;
+		}
+		int column = (int)(mouseX - menu.left() - 3) / PALETTE_CELL;
+		int row = (int)(mouseY - gridTop) / PALETTE_CELL;
+		int index = row * TIER_MENU_COLUMNS + column;
+		if (column >= TIER_MENU_COLUMNS || index >= tierMenuCandidates().size()) {
+			return null;
+		}
+		int tile = PALETTE_CELL - 2;
+		double x = mouseX - (menu.left() + 3 + column * PALETTE_CELL);
+		double y = mouseY - (gridTop + row * PALETTE_CELL);
+		// The same strip, split the same way, as the layer palette's -- see paletteHit.
+		PalettePart part = x < tile - PALETTE_STRIP || x >= tile || y >= tile
+			? PalettePart.BODY
+			: y < tile / 3.0 ? PalettePart.UP
+			: y >= tile * 2 / 3.0 ? PalettePart.DOWN
+			: PalettePart.COUNT;
+		return new PaletteHit(index, part);
+	}
+
+	/**
+	 * Steps the open bracket's voice of this instrument up or down a copy, on every layer wearing
+	 * these brackets. Up on one not sounding here adds it, at the bracket's rows, once; down never
+	 * goes below one -- the tile's body is what switches a voice off.
+	 */
+	private void stepTierVoice(PreviewInstrument value, int delta) {
+		List<Integer> cohort = splitKeyboardLayers();
+		if (cohort.isEmpty()) {
+			return;
+		}
+		ComposerProject.Split shared = project().layers().get(cohort.get(0)).split();
+		List<ComposerProject.Split.Voice> voices = new ArrayList<>(shared.voices());
+		boolean found = false;
+		boolean changed = false;
+		for (int index = 0; index < voices.size(); index++) {
+			ComposerProject.Split.Voice voice = voices.get(index);
+			if (!inOpenBracket(voice, value.id())) {
+				continue;
+			}
+			found = true;
+			int next = (int)Math.max(1L, Math.min(Integer.MAX_VALUE, (long)voice.count() + delta));
+			if (next != voice.count()) {
+				voices.set(index, voice.withCount(next));
+				changed = true;
+			}
+		}
+		if (!found && delta > 0) {
+			voices.add(new ComposerProject.Split.Voice(value.id(), tierMenuLo, tierMenuHi));
+			changed = true;
+		}
+		if (!changed) {
+			return;
+		}
+		ComposerProject.Split stepped = new ComposerProject.Split(voices);
+		ComposerProject next = project();
+		for (int layerIndex : cohort) {
+			next = next.withLayer(layerIndex, next.layers().get(layerIndex).withSplit(stepped));
+		}
+		apply(!found ? "add the " + value.name() + " voice"
+				: delta > 0 ? "stack " + value.name() : "unstack " + value.name(),
+			next);
+		layersChanged();
 	}
 
 	private void extractTierMenu(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
@@ -8472,19 +8589,34 @@ public final class ComposerScreen extends Screen {
 		graphics.text(font, Component.literal(title), menu.left() + 4, menu.top() + 4,
 			0xFFD6D8DD, false);
 		List<PreviewInstrument> candidates = tierMenuCandidates();
+		PaletteHit hover = tierMenuHit(mouseX, mouseY);
+		int tile = PALETTE_CELL - 2;
+		// The layer palette's rule and its words: a bracket of one voice swaps it, a bracket of more
+		// toggles each, and the arrows stack either way.
+		smallText(graphics, openBracketVoices(split) > 1 ? "Click toggles," : "Click swaps,",
+			menu.left() + 4, menu.bottom() - TIER_MENU_FOOTER + 1, 0xFF8A9098);
+		smallText(graphics, "arrows stack", menu.left() + 4, menu.bottom() - TIER_MENU_FOOTER + 8,
+			0xFF8A9098);
 		for (int index = 0; index < candidates.size(); index++) {
 			PreviewInstrument value = candidates.get(index);
-			int cellX = menu.left() + 3 + index % TIER_MENU_COLUMNS * INSTRUMENT_CELL;
+			int cellX = menu.left() + 3 + index % TIER_MENU_COLUMNS * PALETTE_CELL;
 			int cellY = menu.top() + 3 + INSTRUMENT_HEADER
-				+ index / TIER_MENU_COLUMNS * INSTRUMENT_CELL;
-			boolean hovered = mouseX >= cellX && mouseX < cellX + INSTRUMENT_CELL
-				&& mouseY >= cellY && mouseY < cellY + INSTRUMENT_CELL;
-			boolean lit = tierMenuHolds(split, value.id());
-			graphics.fill(cellX, cellY, cellX + INSTRUMENT_CELL - 2, cellY + INSTRUMENT_CELL - 2,
-				lit ? 0xFF356070 : hovered ? 0xFF44484F : 0xFF25282D);
-			graphics.item(new ItemStack(value.icon()), cellX + 5, cellY + 5);
-			if (hovered) {
-				graphics.setTooltipForNextFrame(Component.literal(value.name()), mouseX, mouseY);
+				+ index / TIER_MENU_COLUMNS * PALETTE_CELL;
+			boolean hovered = hover != null && hover.index() == index;
+			// Laid out as the layer palette is, count strip and all, so a bracket's voice is made
+			// louder the same way a layer's instrument is: the arrows down the tile's right edge.
+			int count = tierVoiceCount(split, value.id());
+			graphics.fill(cellX, cellY, cellX + tile, cellY + tile,
+				count > 0 ? 0xFF356070 : hovered ? 0xFF44484F : 0xFF25282D);
+			graphics.item(new ItemStack(value.icon()), cellX + 3, cellY + 7);
+			if (count > 0 || hovered) {
+				extractCountStrip(graphics, cellX, cellY, count, 0,
+					hovered ? hover.part() : PalettePart.BODY);
+			}
+			if (hovered && hover.part() == PalettePart.BODY) {
+				graphics.setTooltipForNextFrame(Component.literal(count > 1
+					? value.name() + " ×" + count + ", " + count + " note blocks a note"
+					: value.name()), mouseX, mouseY);
 			}
 		}
 	}
@@ -8499,39 +8631,56 @@ public final class ComposerScreen extends Screen {
 			tierMenuBase = Integer.MIN_VALUE;
 			return false;
 		}
-		int gridTop = menu.top() + 3 + INSTRUMENT_HEADER;
-		int column = (int)(mouseX - menu.left() - 3) / INSTRUMENT_CELL;
-		int row = (int)(mouseY - gridTop) / INSTRUMENT_CELL;
-		if (mouseX < menu.left() + 3 || mouseY < gridTop
-				|| column < 0 || column >= TIER_MENU_COLUMNS || row < 0) {
+		PaletteHit hit = tierMenuHit(mouseX, mouseY);
+		if (hit == null) {
 			return false;
 		}
-		int index = row * TIER_MENU_COLUMNS + column;
-		List<PreviewInstrument> candidates = tierMenuCandidates();
-		if (index >= candidates.size()) {
-			return false;
+		if (hit.part() == PalettePart.COUNT) {
+			// The number between the arrows, taken so a near miss does not switch the voice off.
+			return true;
 		}
-		PreviewInstrument value = candidates.get(index);
+		PreviewInstrument value = tierMenuCandidates().get(hit.index());
 		value.play(12);
+		if (hit.part() == PalettePart.UP || hit.part() == PalettePart.DOWN) {
+			stepTierVoice(value, hit.part() == PalettePart.UP ? 1 : -1);
+			return true;
+		}
+		// The layer palette's rule. A bracket sounding one voice swaps it for the one clicked -- its
+		// rows and its count go with the bracket, so a louder part stays louder on its new sound.
+		// A bracket sounding several toggles the one clicked, and never takes the last away: a
+		// bracket with no voice leaves its rows out of range, which is the layer palette's to do.
+		// Stacking a second voice onto a bracket of one is the up arrow, as it is in the palette.
 		ComposerProject.Split shared = project().layers().get(cohort.get(0)).split();
 		List<ComposerProject.Split.Voice> voices = new ArrayList<>(shared.voices());
-		boolean removed = voices.removeIf(voice -> voice.instrument().equals(value.id())
-			&& (!tierMenuEffects || voice.lo() == tierMenuLo && voice.hi() == tierMenuHi));
-		if (!removed) {
+		List<ComposerProject.Split.Voice> members = voices.stream().filter(this::inOpenBracket).toList();
+		boolean sounding = members.stream().anyMatch(voice -> voice.instrument().equals(value.id()));
+		String step;
+		if (sounding && members.size() <= 1) {
+			showResult(Component.literal("The last voice in a bracket stays. Click another to swap "
+				+ "it, or switch it off from the layer's instrument palette."));
+			return true;
+		} else if (sounding) {
+			voices.removeIf(voice -> inOpenBracket(voice, value.id()));
+			step = "drop the " + value.name() + " voice";
+		} else if (members.size() == 1) {
+			ComposerProject.Split.Voice swapped = members.getFirst();
+			voices.set(voices.indexOf(swapped), new ComposerProject.Split.Voice(value.id(),
+				swapped.lo(), swapped.hi(), swapped.count()));
+			step = "swap the " + PreviewInstrument.byId(swapped.instrument()).name() + " voice for "
+				+ value.name();
+		} else {
 			// On at the bracket's rows rather than the register's full span: joining a trimmed
 			// bracket means sounding where it sounds.
 			voices.add(new ComposerProject.Split.Voice(value.id(), tierMenuLo, tierMenuHi));
+			step = "add the " + value.name() + " voice";
 		}
-		// Every layer wearing these brackets takes the toggle, so the cohort goes on agreeing.
-		ComposerProject.Split toggled = new ComposerProject.Split(voices);
+		// Every layer wearing these brackets takes the change, so the cohort goes on agreeing.
+		ComposerProject.Split changed = new ComposerProject.Split(voices);
 		ComposerProject next = project();
 		for (int layerIndex : cohort) {
-			next = next.withLayer(layerIndex, next.layers().get(layerIndex).withSplit(toggled));
+			next = next.withLayer(layerIndex, next.layers().get(layerIndex).withSplit(changed));
 		}
-		apply(removed
-				? "drop the " + value.name() + " voice"
-				: "add the " + value.name() + " voice",
-			next);
+		apply(step, next);
 		layersChanged();
 		return true;
 	}
@@ -8902,10 +9051,9 @@ public final class ComposerScreen extends Screen {
 
 	/** Pastes the build sequence with commands, for when you have op and would rather not place it by hand. */
 	private void pasteInWorld() {
-		if (CommandPasteSender.isRunning()) {
-			CommandPasteSender.cancel(true);
-			return;
-		}
+		// Opening the dialog leaves a build that is still going alone. It used to cancel it, so
+		// reaching for the dialog to check a setting stopped a paste halfway -- and Song > Cancel
+		// paste is the way to stop one on purpose. Confirming a new paste is what replaces it.
 		if (minecraft.player == null || minecraft.level == null) {
 			showResult(Component.literal("Join a world before pasting."));
 			return;
@@ -8923,6 +9071,10 @@ public final class ComposerScreen extends Screen {
 			showResult(Component.literal(leftOut + (leftOut == 1 ? " layer is" : " layers are")
 				+ " muted or hidden, so " + (leftOut == 1 ? "it is" : "they are")
 				+ " not in this build."));
+		}
+		if (CommandPasteSender.isRunning()) {
+			showResult(Component.literal("A build is still being placed. It carries on unless you "
+				+ "confirm this paste, which stops it and starts the new one."));
 		}
 		minecraft.gui.setScreen(new BuildOptionsScreen(this, project().name(), config.tracks(),
 				project(), config.dedupeIdenticalNotes(), pasteMode(), mode -> {

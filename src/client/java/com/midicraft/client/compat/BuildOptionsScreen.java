@@ -116,7 +116,9 @@ final class BuildOptionsScreen extends Screen {
 		 * everything counted here would be wrong wherever you put it.</p>
 		 */
 		boolean broken() {
-			return !faults.isEmpty();
+			// A warning is not a break: a lane past the outer wall is the footprint question the
+			// size line already answers in amber, not music the build loses.
+			return faults.stream().anyMatch(fault -> !fault.warning());
 		}
 	}
 
@@ -130,8 +132,14 @@ final class BuildOptionsScreen extends Screen {
 	 *
 	 * @param detail empty where there is nothing further to say, which is every fault but the
 	 *     collision so far
+	 * @param warning drawn amber rather than red: the build still plays everything, it only stands
+	 *     somewhere it was not meant to
 	 */
-	record FaultLine(String text, List<String> detail) {
+	record FaultLine(String text, List<String> detail, boolean warning) {
+		FaultLine(String text, List<String> detail) {
+			this(text, detail, false);
+		}
+
 		FaultLine(String text) {
 			this(text, List.of());
 		}
@@ -210,8 +218,10 @@ final class BuildOptionsScreen extends Screen {
 		List<SongBuilder.WallBreach> outer = plan.wallBreaches().stream()
 			.filter(one -> !one.inner()).toList();
 		if (!outer.isEmpty()) {
+			// Amber, the colour of a lane past the footprint on the line above, because it is the same
+			// thing: the machine still plays every note, it only reaches further than asked.
 			lines.add(new FaultLine(many(outer.size(), "lane", "runs past the outer wall")
-				+ at(outer.getFirst().furthest(), outer.size()), crossings(outer, "outer")));
+				+ at(outer.getFirst().furthest(), outer.size()), crossings(outer, "outer"), true));
 		}
 		if (lines.size() > FAULT_LINES) {
 			// Trimmed rather than truncated. A list that simply stopped at three would say a build has
@@ -220,7 +230,7 @@ final class BuildOptionsScreen extends Screen {
 			lines = new ArrayList<>(lines.subList(0, FAULT_LINES));
 			FaultLine last = lines.get(FAULT_LINES - 1);
 			lines.set(FAULT_LINES - 1,
-				new FaultLine(last.text() + " (+" + hidden + " more)", last.detail()));
+				new FaultLine(last.text() + " (+" + hidden + " more)", last.detail(), last.warning()));
 		}
 		return List.copyOf(lines);
 	}
@@ -864,14 +874,15 @@ final class BuildOptionsScreen extends Screen {
 		}
 		graphics.text(font, forecastLine(predicted), left, rateY + 36, forecastColour(predicted),
 			false);
-		// Always red. Everything on these lines takes music away, and the line above them can be green
-		// at the same time -- a build that lands entirely inside its footprint and plays half the song
-		// is exactly the case worth catching before pasting rather than after.
+		// Red, but for a warning. Everything else on these lines takes music away, and the line above
+		// them can be green at the same time -- a build that lands entirely inside its footprint and
+		// plays half the song is exactly the case worth catching before pasting rather than after. A
+		// lane past the outer wall takes nothing away, and is amber like a breach of the footprint.
 		List<FaultLine> faults = predicted == null ? List.of() : predicted.faults();
 		for (int line = 0; line < faults.size(); line++) {
 			FaultLine fault = faults.get(line);
 			int y = rateY + 47 + line * 11;
-			graphics.text(font, fault.text(), left, y, 0xFFFF5555, false);
+			graphics.text(font, fault.text(), left, y, fault.warning() ? 0xFFFFAA00 : 0xFFFF5555, false);
 			// Hit-tested against the text rather than against the row, because these are drawn rather
 			// than laid out: a row-wide target on a line that ends halfway across would put a tooltip up
 			// over blank space with nothing under the pointer to explain it.
