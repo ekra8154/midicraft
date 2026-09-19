@@ -29,7 +29,8 @@ final class MidiImporter {
 	}
 
 	static ProjectResult importProject(String path, MidicraftConfig config) throws Exception {
-		javax.sound.midi.Sequence midi = MidiSystem.getSequence(new File(path));
+		List<String> unreadable = new ArrayList<>();
+		javax.sound.midi.Sequence midi = readSequence(path, unreadable);
 		if (midi.getDivisionType() != javax.sound.midi.Sequence.PPQ) {
 			throw new IllegalArgumentException("Only PPQ MIDI files are supported for now.");
 		}
@@ -143,6 +144,11 @@ final class MidiImporter {
 			report += "; " + droppedParts + (droppedParts == 1 ? " sparser track" : " sparser tracks")
 				+ " (" + droppedNotes + " notes) left out - a composition holds "
 				+ ComposerProject.MAX_LAYERS + " layers at most";
+		}
+		if (!unreadable.isEmpty()) {
+			report += "; " + unreadable.size() + (unreadable.size() == 1 ? " track" : " tracks")
+				+ " could not be read and " + (unreadable.size() == 1 ? "was" : "were")
+				+ " left out: " + String.join(", ", unreadable);
 		}
 		return new ProjectResult(project, report);
 	}
@@ -293,6 +299,31 @@ final class MidiImporter {
 	}
 
 	record ProjectResult(ComposerProject project, String report) {
+	}
+
+	/**
+	 * The file as Java reads it, or -- where Java refuses it -- with the tracks it cannot read left
+	 * out, each named in {@code unreadable}. See {@link MidiRepair}. A file past saving is refused
+	 * with Java's own reason, as it always was.
+	 */
+	private static javax.sound.midi.Sequence readSequence(String path, List<String> unreadable)
+			throws Exception {
+		try {
+			return MidiSystem.getSequence(new File(path));
+		} catch (javax.sound.midi.InvalidMidiDataException | java.io.IOException refused) {
+			MidiRepair.Result repaired = MidiRepair.repair(java.nio.file.Files.readAllBytes(Path.of(path)));
+			if (repaired == null) {
+				throw refused;
+			}
+			try {
+				javax.sound.midi.Sequence sequence = MidiSystem.getSequence(
+					new java.io.ByteArrayInputStream(repaired.bytes()));
+				unreadable.addAll(repaired.skipped());
+				return sequence;
+			} catch (javax.sound.midi.InvalidMidiDataException | java.io.IOException stillRefused) {
+				throw refused;
+			}
+		}
 	}
 
 	private record PartKey(int trackIndex, int channel) {

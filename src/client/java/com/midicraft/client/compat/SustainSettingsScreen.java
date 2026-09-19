@@ -34,7 +34,7 @@ public final class SustainSettingsScreen extends ModalPanelScreen {
 
 	@Override
 	protected void init() {
-		panel(PANEL_WIDTH, PADDING + TITLE_HEIGHT + 3 * ROW_HEIGHT + 24 + BUTTON_HEIGHT + PADDING);
+		panel(PANEL_WIDTH, PADDING + TITLE_HEIGHT + 4 * ROW_HEIGHT + 24 + BUTTON_HEIGHT + PADDING);
 		int y = contentTop();
 
 		addRenderableWidget(Button.builder(onLabel(), pressed -> {
@@ -54,6 +54,19 @@ public final class SustainSettingsScreen extends ModalPanelScreen {
 				pressed.setMessage(everyLabel());
 			})
 			.bounds(panelLeft + PADDING, y, rowWidth(), BUTTON_HEIGHT).build());
+		y += ROW_HEIGHT;
+		addRenderableWidget(Button.builder(alignLabel(), pressed -> {
+				chosen = chosen.withAlign(!chosen.aligned());
+				pressed.setMessage(alignLabel());
+			})
+			.bounds(panelLeft + PADDING, y, rowWidth(), BUTTON_HEIGHT)
+			.tooltip(net.minecraft.client.gui.components.Tooltip.create(Component.literal(
+				"Moves every strike to the nearest tick the build can place: a repeater tick when "
+					+ "the song without its sustains builds on one lane, a game tick when it needs "
+					+ "two. A note value the tempo does not divide, like 1/16 at most tempos, then "
+					+ "strikes slightly unevenly instead of off the grid. Off, strikes land exactly "
+					+ "on the note value and may not build.")))
+			.build());
 
 		int buttonWidth = (rowWidth() - 6) / 2;
 		addRenderableWidget(Button.builder(Component.literal("Done (Enter)"), pressed -> confirm())
@@ -75,6 +88,10 @@ public final class SustainSettingsScreen extends ModalPanelScreen {
 		return Component.literal("Strike every: " + chosen.every().label);
 	}
 
+	private Component alignLabel() {
+		return Component.literal("Align to build ticks: " + (chosen.aligned() ? "On" : "Off"));
+	}
+
 	/** The length after {@code current} in {@code choices}, wrapping round to the first. */
 	private static SustainLength next(List<SustainLength> choices, SustainLength current) {
 		int at = choices.indexOf(current);
@@ -90,7 +107,7 @@ public final class SustainSettingsScreen extends ModalPanelScreen {
 			? "at the song's finest step"
 			: "every " + chosen.every().label.toLowerCase(java.util.Locale.ROOT);
 		return "Notes " + chosen.after().label.toLowerCase(java.util.Locale.ROOT)
-			+ " or longer strike " + rate + ".";
+			+ " or longer strike " + rate + (chosen.aligned() ? ", on build ticks." : ".");
 	}
 
 	@Override

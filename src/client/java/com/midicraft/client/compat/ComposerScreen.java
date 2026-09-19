@@ -2408,7 +2408,7 @@ public final class ComposerScreen extends Screen {
 					: "change sustained notes", row, layer -> {
 				ComposerProject.Sustain own = layer.sustainOrDefault();
 				return layer.withSustain(own.withOn(switched ? chosen.on() : own.on())
-					.withAfter(chosen.after()).withEvery(chosen.every()));
+					.withAfter(chosen.after()).withEvery(chosen.every()).withAlign(chosen.aligned()));
 			});
 			layersChanged();
 		}));
@@ -2876,20 +2876,6 @@ public final class ComposerScreen extends Screen {
 				showResult(Component.literal(config.dedupeIdenticalNotes()
 					? "Duplicate notes merged: each is built once. Counted notes still build every copy."
 					: "Duplicate notes no longer merged: every copy is built."));
-			}
-			case TOGGLE_ALIGN_SUSTAIN -> {
-				config.setAlignSustainedNotes(!config.alignSustainedNotes());
-				MidicraftConfig.save();
-				// A setting, not an edit, so the song is the same object and nothing keyed on it
-				// knows the strikes moved.
-				cachedStatsProject = null;
-				cachedParityProject = null;
-				if (playing) {
-					resetPlaybackSchedule();
-				}
-				showResult(Component.literal(config.alignSustainedNotes()
-					? "Sustained notes strike on the build's own ticks."
-					: "Sustained notes strike exactly on their note value, on the build's ticks or not."));
 			}
 			case TOGGLE_NOTE_TRAILS -> {
 				config.setShowNoteTrails(!config.showNoteTrails());
@@ -3395,11 +3381,6 @@ public final class ComposerScreen extends Screen {
 				+ "are never merged: an instrument given a count in the palette, like harp x3, "
 				+ "always builds every copy, because the count is how you ask for a louder note. "
 				+ "Song info shows how many notes this merged.";
-			case TOGGLE_ALIGN_SUSTAIN -> "Moves every strike of a sustained note to the nearest tick "
-				+ "the build can place: a repeater tick when the song without its sustains builds on "
-				+ "one lane, a game tick when it needs two. A note value the tempo does not divide, "
-				+ "like 1/16 at most tempos, then strikes slightly unevenly instead of off the grid. "
-				+ "Off, strikes land exactly on the note value and may be unbuildable.";
 			case TOGGLE_NOTE_TRAILS -> "Draws how long each note lasts as a dark trail behind it. "
 				+ "A trail changes nothing in the build: a note block is struck once. Drag a "
 				+ "trail's end to change a note's length. Hidden, a note's right edge still does.";
@@ -3507,8 +3488,8 @@ public final class ComposerScreen extends Screen {
 				+ "strike again and again for as long as they last, which is how a note block holds a "
 				+ "note. Their trails turn bright, with a tick at every strike, and their ends can be "
 				+ "dragged to lengthen them. Also chooses how long a note must last before it "
-				+ "sustains, and how often it strikes. With several layers selected it changes all "
-				+ "of them.";
+				+ "sustains, how often it strikes, and whether the strikes are moved onto ticks the "
+				+ "build can place. With several layers selected it changes all of them.";
 		};
 	}
 
@@ -3557,9 +3538,6 @@ public final class ComposerScreen extends Screen {
 		}
 		if (action == ToolbarAction.TOGGLE_NOTE_TRAILS) {
 			return action.label + ": " + (config.showNoteTrails() ? "On" : "Off");
-		}
-		if (action == ToolbarAction.TOGGLE_ALIGN_SUSTAIN) {
-			return action.label + ": " + (config.alignSustainedNotes() ? "On" : "Off");
 		}
 		return action.label;
 	}
@@ -10793,7 +10771,6 @@ public final class ComposerScreen extends Screen {
 		BUILD_CANCEL("Cancel paste"),
 		TOGGLE_DEDUPE("Merge duplicate notes"),
 		TOGGLE_NOTE_TRAILS("Show note trails"),
-		TOGGLE_ALIGN_SUSTAIN("Align sustained notes"),
 		ADD_MARKER("Add or remove at the playback marker"),
 		RENAME_MARKER("Rename the marker here..."),
 		CLEAR_MARKERS("Remove every marker"),
@@ -10824,8 +10801,7 @@ public final class ComposerScreen extends Screen {
 			FIT_ALL_RANGE, BAKE_SPEED, SNAP_TEMPO, SNAP_TEMPO_GAME
 		};
 		private static final ToolbarAction[] SONG_ACTIONS = {
-			SONG_INFO, TOGGLE_DEDUPE, TOGGLE_NOTE_TRAILS, TOGGLE_ALIGN_SUSTAIN, PASTE_IN_WORLD,
-			BUILD_CANCEL
+			SONG_INFO, TOGGLE_DEDUPE, TOGGLE_NOTE_TRAILS, PASTE_IN_WORLD, BUILD_CANCEL
 		};
 		private static final ToolbarAction[] SELECT_ACTIONS = {
 			SELECT_OFF_GRID, SELECT_HALF_TICKED, SELECT_EVEN_TICKS, SELECT_ODD_TICKS,

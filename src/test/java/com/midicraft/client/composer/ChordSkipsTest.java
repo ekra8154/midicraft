@@ -19,8 +19,9 @@ import org.junit.jupiter.api.Test;
  * and never a written note.
  */
 class ChordSkipsTest {
+	// Struck exactly, not aligned: these pin which strikes land together on which ticks.
 	private static final Sustain EVERY_SIXTEENTH =
-		new Sustain(true, SustainLength.QUARTER, SustainLength.SIXTEENTH);
+		new Sustain(true, SustainLength.QUARTER, SustainLength.SIXTEENTH, false);
 	private static long nextId = 1L;
 
 	private static NoteEvent note(int midi, long tick, long length) {

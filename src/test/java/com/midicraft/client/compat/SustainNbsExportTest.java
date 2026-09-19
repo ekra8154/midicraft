@@ -14,25 +14,13 @@ import org.junit.jupiter.api.io.TempDir;
 
 /** A sustained note leaves for Note Block Studio as the repeated notes it already uses for one. */
 class SustainNbsExportTest {
-
-	// These pin the exact strike arithmetic, so they measure it with alignment off. Aligning is
-	// tested on its own in SustainAlignTest.
-	@org.junit.jupiter.api.BeforeEach
-	void strikeExactly() {
-		com.midicraft.client.composer.ComposerProject.ALIGN_SUSTAINED_NOTES = false;
-	}
-
-	@org.junit.jupiter.api.AfterEach
-	void alignAgain() {
-		com.midicraft.client.composer.ComposerProject.ALIGN_SUSTAINED_NOTES = true;
-	}
 	@Test
 	void writesEveryStrikeAsANote(@TempDir Path folder) throws Exception {
 		// A sixteenth is 120 composer ticks, which is one NBS tick, so a quarter held on sixteenths
 		// is four notes on four ticks.
 		ComposerProject.Layer pad = new ComposerProject.Layer("Pad", "HARP", false, true, true,
 			List.of(new ComposerProject.NoteEvent(1, 60, 0, 480, 100)))
-			.withSustain(new Sustain(true, SustainLength.QUARTER, SustainLength.SIXTEENTH));
+			.withSustain(new Sustain(true, SustainLength.QUARTER, SustainLength.SIXTEENTH, false));
 		ComposerProject song = new ComposerProject("Held", ComposerProject.DEFAULT_PPQ,
 			ComposerProject.DEFAULT_TEMPO_MICROS_PER_QUARTER, List.of(pad), 0, 2L, 0L,
 			ComposerProject.DEFAULT_SPEED_QUARTERS);

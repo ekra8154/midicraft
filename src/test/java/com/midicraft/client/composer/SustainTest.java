@@ -24,20 +24,8 @@ import org.junit.jupiter.api.Test;
  * which is where the shared grid is counted from.</p>
  */
 class SustainTest {
-
-	// These pin the exact strike arithmetic, so they measure it with alignment off. Aligning is
-	// tested on its own in SustainAlignTest.
-	@org.junit.jupiter.api.BeforeEach
-	void strikeExactly() {
-		com.midicraft.client.composer.ComposerProject.ALIGN_SUSTAINED_NOTES = false;
-	}
-
-	@org.junit.jupiter.api.AfterEach
-	void alignAgain() {
-		com.midicraft.client.composer.ComposerProject.ALIGN_SUSTAINED_NOTES = true;
-	}
 	private static final Sustain EVERY_SIXTEENTH =
-		new Sustain(true, SustainLength.QUARTER, SustainLength.SIXTEENTH);
+		new Sustain(true, SustainLength.QUARTER, SustainLength.SIXTEENTH, false);
 	/** What Finest stands for in tests that never pick it. */
 	private static final double FINE = 60.0;
 	private static long nextId = 1L;
@@ -93,7 +81,7 @@ class SustainTest {
 	void aWrittenNoteKeepsItsCell() {
 		NoteEvent held = new NoteEvent(1, 60, 0, 960, 90);
 		NoteEvent written = new NoteEvent(7, 60, 480, 120, 40);
-		Layer pad = layer(new Sustain(true, SustainLength.QUARTER, SustainLength.EIGHTH), held, written);
+		Layer pad = layer(new Sustain(true, SustainLength.QUARTER, SustainLength.EIGHTH, false), held, written);
 		Layer expanded = songOf(pad).withSustainsExpanded(pad, FINE);
 
 		assertEquals(List.of(0L, 240L, 480L, 720L), ticksOf(expanded, 60));
@@ -195,9 +183,9 @@ class SustainTest {
 		assertNull(loaded.sustain());
 		assertFalse(loaded.sustains());
 
-		ComposerProject song = songOf(layer(new Sustain(true, SustainLength.HALF, SustainLength.GAME_TICK),
+		ComposerProject song = songOf(layer(new Sustain(true, SustainLength.HALF, SustainLength.GAME_TICK, false),
 			new NoteEvent(1, 60, 0, 960, 90)));
 		Layer reloaded = gson.fromJson(gson.toJson(song), ComposerProject.class).layers().get(0);
-		assertEquals(new Sustain(true, SustainLength.HALF, SustainLength.GAME_TICK), reloaded.sustain());
+		assertEquals(new Sustain(true, SustainLength.HALF, SustainLength.GAME_TICK, false), reloaded.sustain());
 	}
 }

@@ -969,30 +969,50 @@ public record ComposerProject(
 	 * Nothing is stored per note: the strikes are worked out from each note's length whenever
 	 * something needs them, see {@link Strikes}.</p>
 	 */
-	public record Sustain(boolean on, SustainLength after, SustainLength every) {
+	public record Sustain(boolean on, SustainLength after, SustainLength every, Boolean align) {
 		// A quarter note before a note sustains, striking every repeater tick: the user's choice on
 		// 2026-09-18, over the half note at Finest the census had picked. What it costs, priced on
 		// 2026-09-14 over the 24 two-lane songs at six sizes with every layer sustaining: repeater
 		// tick after a quarter refused 12 builds and added 4 dead ones, where Finest after a half
 		// refused 6 and added none.
 		public static final Sustain DEFAULT = new Sustain(false, SustainLength.QUARTER,
-			SustainLength.REPEATER_TICK);
+			SustainLength.REPEATER_TICK, true);
 
+		/**
+		 * @param align whether every strike moves to the nearest tick the build can place; see
+		 *     {@link ComposerProject#sustainGrid}. Boxed so a layer saved before the choice existed
+		 *     reads as null and comes in aligned, which is what it had been getting.
+		 */
 		public Sustain {
 			after = after == null || after == SustainLength.FINEST ? SustainLength.QUARTER : after;
 			every = every == null ? SustainLength.REPEATER_TICK : every;
+			align = align == null || align;
+		}
+
+		/** Aligned to the build's ticks, which is what a layer wants unless it says otherwise. */
+		public Sustain(boolean on, SustainLength after, SustainLength every) {
+			this(on, after, every, true);
+		}
+
+		/** Whether strikes land on the build's ticks rather than exactly on the note value. */
+		public boolean aligned() {
+			return align;
 		}
 
 		public Sustain withOn(boolean value) {
-			return new Sustain(value, after, every);
+			return new Sustain(value, after, every, align);
 		}
 
 		public Sustain withAfter(SustainLength value) {
-			return new Sustain(on, value, every);
+			return new Sustain(on, value, every, align);
 		}
 
 		public Sustain withEvery(SustainLength value) {
-			return new Sustain(on, after, value);
+			return new Sustain(on, after, value, align);
+		}
+
+		public Sustain withAlign(boolean value) {
+			return new Sustain(on, after, every, value);
 		}
 	}
 
@@ -2972,15 +2992,8 @@ public record ComposerProject(
 	public Strikes sustainStrikes(Layer layer, double finest) {
 		Sustain settings = layer.sustainOrDefault();
 		return new Strikes(sustainOrigin(), sustainTicks(settings.every(), finest),
-			sustainTicks(settings.after(), finest), ALIGN_SUSTAINED_NOTES ? sustainGrid() : 0.0);
+			sustainTicks(settings.after(), finest), settings.aligned() ? sustainGrid() : 0.0);
 	}
-
-	/**
-	 * Whether sustained notes strike on the build's own grid rather than wherever their note value
-	 * falls. Song > Align sustained notes; the config writes it, as it writes the builder's switches,
-	 * so the tests and the probes read the same default the game starts with.
-	 */
-	public static boolean ALIGN_SUSTAINED_NOTES = true;
 
 	/**
 	 * The grid a strike is aligned to: what the song builds on with its sustains left out. A
