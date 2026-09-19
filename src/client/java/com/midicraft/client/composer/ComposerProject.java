@@ -1696,7 +1696,12 @@ public record ComposerProject(
 	}
 
 	/**
-	 * Copies every given layer, each copy directly after the layer it came from.
+	 * Copies every given layer, the copies together as one block directly after the lowest of them,
+	 * in the order their sources stand.
+	 *
+	 * <p>A block rather than each copy under its own source, because a selection is duplicated in
+	 * order to do something to all of it at once -- move it, re-voice it, merge it -- and copies
+	 * interleaved with their sources had to be picked out one at a time to be worked on together.</p>
 	 *
 	 * <p>All or nothing against the layer cap: half a duplication is a song with some parts doubled
 	 * and some not, which is harder to undo by hand than it is to not do.</p>
@@ -1714,21 +1719,25 @@ public record ComposerProject(
 			return this;
 		}
 		long nextId = nextNoteId;
-		List<Layer> updated = new ArrayList<>(layers.size() + sources.size());
-		for (int index = 0; index < layers.size(); index++) {
+		List<Layer> copies = new ArrayList<>(sources.size());
+		Set<String> taken = new java.util.HashSet<>();
+		layers.forEach(layer -> taken.add(layer.name()));
+		for (int index : sources) {
 			Layer source = layers.get(index);
-			updated.add(source);
-			if (!sources.contains(index)) {
-				continue;
-			}
 			List<NoteEvent> copied = new ArrayList<>(source.notes().size());
 			for (NoteEvent note : source.notes()) {
 				copied.add(new NoteEvent(nextId++, note.midiNote(), note.startTick(),
 					note.durationTicks(), note.velocity()));
 			}
-			updated.add(source.withName(source.name() + " copy").withNotes(copied));
+			String name = copyName(source.name(), taken);
+			taken.add(name);
+			copies.add(source.withName(name).withNotes(copied));
 		}
-		return with(updated, sources.getFirst() + 1, nextId);
+		int at = sources.getLast() + 1;
+		List<Layer> updated = new ArrayList<>(layers);
+		updated.addAll(at, copies);
+		// Onto the first copy: a duplicate is made in order to change it.
+		return with(updated, at, nextId);
 	}
 
 	/**
@@ -2751,8 +2760,37 @@ public record ComposerProject(
 				note.velocity()));
 		}
 		List<Layer> updated = new ArrayList<>(layers);
-		updated.add(index + 1, source.withName(source.name() + " copy").withNotes(copied));
+		Set<String> taken = new java.util.HashSet<>();
+		layers.forEach(layer -> taken.add(layer.name()));
+		updated.add(index + 1, source.withName(copyName(source.name(), taken)).withNotes(copied));
 		return with(updated, index + 1, nextId);
+	}
+
+	/** A name already ending in " copy" or " copy (N)", with that ending taken off. */
+	private static final java.util.regex.Pattern COPY_SUFFIX =
+		java.util.regex.Pattern.compile("^(.*?) copy(?: \\((\\d+)\\))?$");
+
+	/**
+	 * The name a copy of a layer gets: "A copy", then "A copy (1)", "A copy (2)" as those are taken.
+	 *
+	 * <p>Counted from the original's own name, so copying a copy is another copy of the original
+	 * rather than "A copy copy" -- a name that grew a word every time was the thing to fix.</p>
+	 *
+	 * @param taken every name already in use, which the copy must not repeat
+	 */
+	static String copyName(String source, Set<String> taken) {
+		java.util.regex.Matcher suffix = COPY_SUFFIX.matcher(source);
+		String base = (suffix.matches() && !suffix.group(1).isBlank() ? suffix.group(1) : source)
+			+ " copy";
+		if (!taken.contains(base)) {
+			return base;
+		}
+		for (int number = 1; ; number++) {
+			String candidate = base + " (" + number + ")";
+			if (!taken.contains(candidate)) {
+				return candidate;
+			}
+		}
 	}
 
 	/**

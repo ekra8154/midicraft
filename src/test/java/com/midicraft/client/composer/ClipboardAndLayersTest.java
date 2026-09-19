@@ -372,9 +372,9 @@ class ClipboardAndLayersTest {
 		assertEquals(names(song.withLayerOrder(order)), names(song.moveLayersTo(Set.of(2), 0)));
 	}
 
-	/** Each copy under its own original, so duplicating three parts leaves three readable pairs. */
+	/** The copies as one block under the lowest source, in their sources' order. */
 	@Test
-	void duplicatingSeveralLayersPutsEachCopyUnderItsSource() {
+	void duplicatingSeveralLayersPutsTheCopiesInABlockUnderTheLowest() {
 		ComposerProject song = songOf(
 			layer("A", "HARP", 60),
 			layer("B", "HARP", 61),
@@ -382,8 +382,8 @@ class ClipboardAndLayersTest {
 
 		ComposerProject copied = song.duplicateLayers(Set.of(0, 2));
 
-		assertEquals(List.of("A", "A copy", "B", "C", "C copy"), names(copied));
-		assertEquals(1, copied.activeLayerIndex(), "onto the first copy");
+		assertEquals(List.of("A", "B", "C", "A copy", "C copy"), names(copied));
+		assertEquals(3, copied.activeLayerIndex(), "onto the first copy");
 		Set<Long> sourceIds = song.layers().stream()
 			.flatMap(layer -> layer.notes().stream())
 			.map(NoteEvent::id)
@@ -391,6 +391,24 @@ class ClipboardAndLayersTest {
 		assertTrue(copied.layers().get(4).notes().stream()
 				.noneMatch(note -> sourceIds.contains(note.id())),
 			"the second copy's notes are as new as the first's");
+	}
+
+	/** Copies are numbered rather than growing a word each time, a copy of a copy included. */
+	@Test
+	void copiesAreNumberedNotRenamedAgain() {
+		ComposerProject song = songOf(layer("A", "HARP", 60));
+		ComposerProject once = song.duplicateLayer(0);
+		assertEquals(List.of("A", "A copy"), names(once));
+		ComposerProject twice = once.duplicateLayer(0);
+		assertEquals(List.of("A", "A copy (1)", "A copy"), names(twice));
+		ComposerProject ofACopy = twice.duplicateLayer(2);
+		assertEquals(List.of("A", "A copy (1)", "A copy", "A copy (2)"), names(ofACopy),
+			"a copy of a copy is another copy of A");
+		ComposerProject block = song.duplicateLayers(Set.of(0));
+		assertEquals(List.of("A", "A copy (1)", "A copy"),
+			names(block.duplicateLayers(Set.of(0))), "and the block duplicate numbers the same way");
+		assertEquals("A copy", ComposerProject.copyName("A copy", Set.of("A")),
+			"the plain name is used while it is free");
 	}
 
 	/**

@@ -205,32 +205,33 @@ entry does: a drop is easy to make by accident in a way that choosing a menu
 entry is not.
 
 
-## Two panes, one keyboard
+## Notes and layers on one keyboard
 
-The composer has two halves that own a selection: the layer panel and the piano
-roll. The keyboard points at whichever you clicked last, and that decides what
-Delete, Ctrl+A, Ctrl+C, Ctrl+X, Ctrl+V, Ctrl+D and Ctrl+E act on. Clicking into
-the roll leaves the layers selected -- it only stops the keyboard reaching them.
+No pane holds the keyboard. Each shortcut says what it acts on, so nothing
+depends on which half of the composer you clicked last:
 
-You can see which has it. A selection in the pane holding the keyboard draws at
-full strength; the other pane's draws muted. Same highlight, two saturations, so
-"these are still selected and Delete will not reach them" needs nothing new to
-learn.
+- **Ctrl+A** always selects notes: every note on the selected layers, or on
+  every layer while none is selected. To select every layer, click the first
+  and shift-click the last.
+- **Ctrl+E** always merges the selected layers, from anywhere.
+- **Ctrl+C**, **Ctrl+X** and **Ctrl+D** act on the selected notes when any are
+  selected, and on the selected layers when none are. Copying says which it
+  took. Layers are copied whole -- names, instruments, states and notes -- and
+  duplicated layers land together as one block under the lowest selected layer.
+- **Ctrl+V** puts back whatever was copied last. There is one clipboard, so
+  copying layers replaces copied notes and the other way round. Pasted layers go
+  directly below the lowest selected row, or on the end when none is selected;
+  pasted notes go at the playback marker. **Ctrl+Shift+V** is for notes only
+  and does nothing when layers were copied last.
+- **Delete** and **Backspace** remove notes and never layers. A layer is
+  deleted from its right-click menu, where the row going is the row you are
+  pointing at.
+- **Escape** drops the selected notes first, then the selected layers.
 
-This replaces a rule you could not see. Delete used to mean "the notes, or the
-layers if no note is selected", so reaching for it while believing a passage was
-selected took a layer instead. Five other keys had the opposite fault and were
-nailed to one pane whatever you were working in.
-
-With the panel holding the keyboard:
-
-- **Ctrl+C** takes the selected layers whole -- names, instruments, states and
-  notes. **Ctrl+X** takes them and removes them. **Ctrl+V** puts them back
-  directly below the lowest selected row, or on the end when nothing is selected.
-  Pasted layers get fresh note ids and keep their names.
-- **Ctrl+D** duplicates them, each copy under its own original.
-- **Ctrl+E** merges them. **Ctrl+A** selects every layer.
-- **Delete** and **Backspace** remove them.
+Changing which layers are selected drops the note selection, so a note picked
+earlier cannot be what Ctrl+C takes when it was layers you just picked. The one
+exception is right-clicking a layer, which keeps the notes so that **Move notes
+here** has something to move.
 
 Undo and redo are not routed and never were: there is one history for the whole
 composition, and Ctrl+Z takes back the last thing you did whichever pane did it.
