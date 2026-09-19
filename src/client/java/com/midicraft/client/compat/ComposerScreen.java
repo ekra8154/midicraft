@@ -517,6 +517,17 @@ public final class ComposerScreen extends Screen {
 	private final MidicraftConfig config;
 	private final ComposerHistory history;
 	private final Set<Long> selectedNotes = new LinkedHashSet<>();
+	/**
+	 * Preview only the selected notes, for as long as they stay selected.
+	 *
+	 * <p>Not a property of the song and not saved with it: a phrase held up on its own for a few
+	 * passes is a thing you do while listening, like soloing a layer, except that what it holds up
+	 * is a selection and a selection is already the thing you are working on. So it ends when the
+	 * selection does rather than waiting to be switched off and forgotten.</p>
+	 */
+	private boolean soloingSelection;
+	/** What the selection looked like when the schedule was last built under a selection solo. */
+	private long soloedSelectionSignature;
 	private final List<Button> moveLayerButtons = new ArrayList<>();
 	private final Set<Integer> selectedLayers = new LinkedHashSet<>();
 	private int rowHeight = ROW_HEIGHT;
@@ -612,6 +623,13 @@ public final class ComposerScreen extends Screen {
 	 * while you work on it, not a property of the song, and it has no bearing on what builds.</p>
 	 */
 	private final Set<Integer> soloedLayers = new LinkedHashSet<>();
+	/**
+	 * What M, S and H found each layer doing, so that pressing the same letter again puts it back.
+	 *
+	 * <p>Not part of the composition and not saved with it: it is the memory of a keypress, and it
+	 * lasts as long as the state that keypress set.</p>
+	 */
+	private final Map<Integer, RememberedState> stateBeforeKey = new java.util.HashMap<>();
 	/**
 	 * What the menu row under the cursor does, drawn beneath the menu rather than as a tooltip.
 	 *
@@ -1123,6 +1141,10 @@ public final class ComposerScreen extends Screen {
 	 * that had to open to hold them. They are really one question -- how much do I want this layer
 	 * in the way -- and hiding is only muting that also leaves the piano roll.</p>
 	 */
+	/** A layer's state before a key moved it, with the name that says it is still the same layer. */
+	private record RememberedState(String layerName, LayerState state) {
+	}
+
 	private enum LayerState {
 		ACTIVE("A", "Active", 0xFFE8EAEE, 0xFF3A4048,
 			"you hear it, it is in the piano roll, and it is in the build."),
@@ -1182,6 +1204,67 @@ public final class ComposerScreen extends Screen {
 
 	private void setLayerState(List<Integer> indices, LayerState state) {
 		setLayerState(indices, state, false);
+	}
+
+	/**
+	 * M, S and H: one of the dial's states as a toggle on the selected layers.
+	 *
+	 * <p>A mixed selection goes to the state: with some of them muted and some not, the press that
+	 * means anything is the one that mutes the rest. Pressed again, with all of them there, each
+	 * layer goes back to whatever it was doing before the key moved it -- not to active. A layer
+	 * hidden an hour ago, muted to hear something and then unmuted, is hidden again rather than
+	 * quietly turned on, and a mixed selection comes apart the way it went together.</p>
+	 *
+	 * <p>Nothing is remembered from anywhere else. Pressing a letter that was never pressed, or
+	 * whose layer has been moved or renamed under it since, puts the layer back to active, which is
+	 * the only answer that is always true.</p>
+	 */
+	private void toggleLayerState(LayerState wanted) {
+		List<Integer> targets = sortedSelectedLayers();
+		if (targets.isEmpty()) {
+			showResult(Component.literal(wanted.letter + " sets a layer to "
+				+ wanted.title.toLowerCase(java.util.Locale.ROOT)
+				+ ". Click a layer in the panel first."));
+			return;
+		}
+		if (!targets.stream().allMatch(index -> layerState(index) == wanted)) {
+			for (int index : targets) {
+				stateBeforeKey.put(index,
+					new RememberedState(project().layers().get(index).name(), layerState(index)));
+			}
+			setLayerState(targets, wanted);
+			showResult(Component.literal((targets.size() == 1 ? "Layer" : targets.size() + " layers")
+				+ " set to " + wanted.title.toLowerCase(java.util.Locale.ROOT) + "."));
+			return;
+		}
+		// Back the way they came, which may be several places at once. One undo step for the lot:
+		// the press was one thing the user did.
+		Map<LayerState, List<Integer>> groups = new java.util.LinkedHashMap<>();
+		for (int index : targets) {
+			groups.computeIfAbsent(stateBeforeKey(index), state -> new ArrayList<>()).add(index);
+		}
+		boolean first = true;
+		for (Map.Entry<LayerState, List<Integer>> group : groups.entrySet()) {
+			setLayerState(group.getValue(), group.getKey(), !first);
+			first = false;
+		}
+		targets.forEach(stateBeforeKey::remove);
+		String what = targets.size() == 1 ? "Layer" : targets.size() + " layers";
+		showResult(Component.literal(groups.size() == 1
+			? what + " set back to "
+				+ groups.keySet().iterator().next().title.toLowerCase(java.util.Locale.ROOT) + "."
+			: what + " set back to what they were."));
+	}
+
+	/** What a layer was doing before the key moved it, or active when there is nothing to go on. */
+	private LayerState stateBeforeKey(int index) {
+		RememberedState remembered = stateBeforeKey.get(index);
+		// Checked against the name because a layer is known here by its position, and positions are
+		// moved, deleted and inserted under a memory that has no way to hear about it.
+		return remembered != null && index >= 0 && index < project().layers().size()
+				&& remembered.layerName().equals(project().layers().get(index).name())
+			? remembered.state()
+			: LayerState.ACTIVE;
 	}
 
 	/**
@@ -3414,7 +3497,7 @@ public final class ComposerScreen extends Screen {
 					+ "a phrase and every copy keeps that beat. The marker steps on with them. "
 					+ "Every note stays on its own layer.";
 			case ADD_MARKER -> "Puts a marker where the playback marker is standing, or takes away "
-				+ "the one already there. M does the same thing. A marker names a position and nothing "
+				+ "the one already there. B does the same thing. A marker names a position and nothing "
 				+ "else: it is not built and it makes no sound.";
 			case RENAME_MARKER -> "Renames the marker the playback marker is standing on. "
 				+ "Double-clicking its label in the strip above the ruler does the same thing.";
@@ -3477,8 +3560,20 @@ public final class ComposerScreen extends Screen {
 		};
 	}
 
+	/** The rows that say what they will do rather than what they are, which is the toggle. */
+	private String contextActionLabel(ContextAction action) {
+		if (action == ContextAction.SOLO_SELECTION && soloingSelection) {
+			return "Stop soloing";
+		}
+		return action.label;
+	}
+
 	private static String contextActionTooltip(ContextAction action) {
 		return switch (action) {
+			case SOLO_SELECTION -> "Plays only the selected notes, so a phrase can be heard out of "
+				+ "the song around it. It lasts while the selection does: putting the selection down "
+				+ "ends it, and so does this row a second time. It is about listening only -- what "
+				+ "gets built does not change.";
 			case OCTAVE_DOWN -> "Drops the selected notes an octave.";
 			case OCTAVE_UP -> "Raises the selected notes an octave.";
 			case FIT_RANGE -> "Octave-shifts the selected notes into F#3-F#5, the range note "
@@ -3501,7 +3596,7 @@ public final class ComposerScreen extends Screen {
 			case REDO -> "Ctrl+Y";
 			case SELECT_ALL_NOTES -> "Ctrl+A";
 			case SELECT_NONE -> "Ctrl+Shift+A";
-			case ADD_MARKER -> "M";
+			case ADD_MARKER -> "B";
 			case DUPLICATE_SELECTION -> "Ctrl+D";
 			default -> "";
 		};
@@ -3555,8 +3650,10 @@ public final class ComposerScreen extends Screen {
 			if (hovered) {
 				hoveredDescription = contextActionTooltip(actions[index]);
 			}
-			graphics.text(font, Component.literal(actions[index].label), contextMenuX + 6, rowY + 4,
-				0xFFFFFFFF, false);
+			graphics.text(font, Component.literal(contextActionLabel(actions[index])),
+				contextMenuX + 6, rowY + 4,
+				soloingSelection && actions[index] == ContextAction.SOLO_SELECTION
+					? 0xFFFFD65A : 0xFFFFFFFF, false);
 		}
 	}
 
@@ -3966,7 +4063,8 @@ public final class ComposerScreen extends Screen {
 			+ (silence == null ? "" : "\n" + silence)
 			+ "\n\nClick for " + dial[Math.floorMod(state.ordinal() + 1, dial.length)].title
 			+ ", right-click for " + dial[Math.floorMod(state.ordinal() - 1, dial.length)].title + "."
-			+ "\nNone of the four decide what gets built. That is the dot at the end of the row.";
+			+ "\nM, S and H set the selected layers to muted, solo or hidden. The same letter again "
+			+ "puts each one back to what it was doing before.";
 	}
 
 	/**
@@ -4217,7 +4315,7 @@ public final class ComposerScreen extends Screen {
 	 * variants lost to the brightest unselected one. Banding the two ranges cannot regress.</p>
 	 */
 	static int faded(int color) {
-		int dimmed = mix(color, 0xFF4E525A, 0.76);
+		int dimmed = mix(color, 0xFF4E525A, 0.82);
 		double bright = luma(dimmed);
 		return bright <= UNSELECTED_LUMA_CEILING
 			? dimmed
@@ -4292,12 +4390,17 @@ public final class ComposerScreen extends Screen {
 	 * The two bands a layer's colour must fall into, so the answer to "is that note mine" is not a
 	 * matter of which family member it happens to be.
 	 *
-	 * <p>Forty-one points of luminance apart, on a scale where the roll's own background sits around
+	 * <p>Sixty-two points of luminance apart, on a scale where the roll's own background sits around
 	 * thirty. Both are floors on a whole palette rather than tuned to one colour: see
 	 * {@link #faded(int)} for the collision they exist to rule out.</p>
+	 *
+	 * <p>The gap is widened from the bottom rather than the top. Lifting the selected floor further
+	 * runs every layer toward white, and telling one layer from another is the other thing these
+	 * colours do; a layer you are not on only has to read as present, so it can go on toward the
+	 * background instead.</p>
 	 */
 	static final double SELECTED_LUMA_FLOOR = 150.0;
-	static final double UNSELECTED_LUMA_CEILING = 108.0;
+	static final double UNSELECTED_LUMA_CEILING = 88.0;
 
 	/** How finely an eraser sweep is sampled along its path, in pixels. Under a note's width. */
 	private static final double ERASE_STEP_PIXELS = 3.0;
@@ -5271,21 +5374,28 @@ public final class ComposerScreen extends Screen {
 				if (anySelected && selectedNotes.contains(note.id())) {
 					flags |= NoteCellGrid.SELECTED;
 				}
-				if (anyCrowded && crowded.contains(note.startTick())) {
-					flags |= NoteCellGrid.CROWDED;
-				} else if (anyOffGrid && offGrid.contains(note.startTick())) {
-					flags |= NoteCellGrid.OFF_GRID;
-				}
-				if (rangeMatters && layer.outOfRange(note)) {
-					flags |= NoteCellGrid.UNBUILDABLE;
-				} else if (layer.split() != null) {
-					// Not a warning: the mark that says "this pitch is a split layer's business",
-					// so a note standing outside the red wash reads as intended, not as a mistake.
-					flags |= NoteCellGrid.SPLIT;
-				}
-				if (anyThinned && thinning.thinned(layerIndex, note.id())) {
-					// Played quieter than asked, or with strikes left out, to fit the thinning target.
-					flags |= NoteCellGrid.THINNED;
+				// Marks only on the layers being worked on. A song's warnings are answered one layer
+				// at a time, and a roll that bars every note of every layer at once reads as a wall of
+				// marks with no layer colour left underneath it -- which is also the thing that says
+				// which notes are yours. The layers you are not on keep their plain colour and the
+				// marks come back with them the moment they are selected.
+				if (highlighted) {
+					if (anyCrowded && crowded.contains(note.startTick())) {
+						flags |= NoteCellGrid.CROWDED;
+					} else if (anyOffGrid && offGrid.contains(note.startTick())) {
+						flags |= NoteCellGrid.OFF_GRID;
+					}
+					if (rangeMatters && layer.outOfRange(note)) {
+						flags |= NoteCellGrid.UNBUILDABLE;
+					} else if (layer.split() != null) {
+						// Not a warning: the mark that says "this pitch is a split layer's business",
+						// so a note standing outside the red wash reads as intended, not as a mistake.
+						flags |= NoteCellGrid.SPLIT;
+					}
+					if (anyThinned && thinning.thinned(layerIndex, note.id())) {
+						// Played quieter than asked, or with strikes left out, to fit the thinning target.
+						flags |= NoteCellGrid.THINNED;
+					}
 				}
 				if (lifted) {
 					liftedCells.add(new int[] {left, top, color, flags, midi});
@@ -6757,6 +6867,7 @@ public final class ComposerScreen extends Screen {
 
 	private void performContextAction(ContextAction action) {
 		switch (action) {
+			case SOLO_SELECTION -> toggleSoloSelection();
 			case OCTAVE_DOWN -> transposeSelected(-12);
 			case OCTAVE_UP -> transposeSelected(12);
 			case FIT_RANGE -> fitSelectedToMinecraft();
@@ -7256,11 +7367,25 @@ public final class ComposerScreen extends Screen {
 			toggleRecording();
 			return true;
 		}
-		// M for marker, bare, next to the transport keys because it is aimed at the same thing they
-		// are: wherever the playback marker is standing.
-		if (event.key() == GLFW.GLFW_KEY_M && !event.hasControlDownWithQuirk()
+		// B for bookmark, bare, next to the transport keys because it is aimed at the same thing they
+		// are: wherever the playback marker is standing. It was M until the layer dial took that
+		// letter: a marker is one thing you drop now and then, and muting is a thing you do all day.
+		if (event.key() == GLFW.GLFW_KEY_B && !event.hasControlDownWithQuirk()
 				&& !event.hasShiftDown()) {
 			toggleMarkerAtCursor();
+			return true;
+		}
+		// The layer dial's three away-from-active states, each on the letter its own chip shows, so
+		// the key and the chip say the same word. Bare, like the transport keys, because they are
+		// pressed as often.
+		LayerState dialled = switch (event.key()) {
+			case GLFW.GLFW_KEY_M -> LayerState.MUTED;
+			case GLFW.GLFW_KEY_S -> LayerState.SOLO;
+			case GLFW.GLFW_KEY_H -> LayerState.HIDDEN;
+			default -> null;
+		};
+		if (dialled != null && !event.hasControlDownWithQuirk() && !event.hasShiftDown()) {
+			toggleLayerState(dialled);
 			return true;
 		}
 		// Zoom, on the keys every application puts it on. Ctrl is the zoom and Alt is the pitch axis,
@@ -7428,6 +7553,7 @@ public final class ComposerScreen extends Screen {
 	@Override
 	public void tick() {
 		updateCountIn();
+		updateSelectionSolo();
 		updatePlayback();
 		// The marker running is the whole of record mode, so the take ends when it stops -- at the end
 		// marker, or because Stop was pressed.
@@ -7746,6 +7872,63 @@ public final class ComposerScreen extends Screen {
 		if (!playing && anythingAudible()) {
 			togglePlayback();
 		}
+	}
+
+	/** The right-click menu's Solo selection row, both ways. */
+	private void toggleSoloSelection() {
+		if (soloingSelection) {
+			soloingSelection = false;
+			showResult(Component.literal("Solo off. The whole song plays again."));
+		} else {
+			if (selectedNotes.isEmpty()) {
+				return;
+			}
+			soloingSelection = true;
+			soloedSelectionSignature = selectionSignature();
+			showResult(Component.literal("Soloing " + selectedNotes.size()
+				+ (selectedNotes.size() == 1 ? " note" : " notes")
+				+ ". Putting the selection down ends it."));
+		}
+		if (playing) {
+			resetPlaybackSchedule();
+		}
+	}
+
+	/**
+	 * Whether a selection solo is still standing, and whether its schedule is still the right one.
+	 *
+	 * <p>Asked once a frame rather than hooked into every place a note is selected. The selection is
+	 * changed from a dozen places -- a click, a box, a menu, Ctrl+A, an undo -- and a solo that is a
+	 * view of the selection rather than a copy of it has to follow all of them.</p>
+	 */
+	private void updateSelectionSolo() {
+		if (!soloingSelection) {
+			return;
+		}
+		if (selectedNotes.isEmpty()) {
+			soloingSelection = false;
+			showResult(Component.literal("Solo off: the selection it was following is gone."));
+			if (playing) {
+				resetPlaybackSchedule();
+			}
+			return;
+		}
+		long signature = selectionSignature();
+		if (signature != soloedSelectionSignature) {
+			soloedSelectionSignature = signature;
+			if (playing) {
+				resetPlaybackSchedule();
+			}
+		}
+	}
+
+	/** Cheap enough to take every frame, and it only has to notice that the set changed. */
+	private long selectionSignature() {
+		long signature = selectedNotes.size();
+		for (long id : selectedNotes) {
+			signature = signature * 31L + id;
+		}
+		return signature;
 	}
 
 	private void setPlaybackStart(long tick, boolean preview) {
@@ -8682,6 +8865,11 @@ public final class ComposerScreen extends Screen {
 				for (int index = lowerBoundStart(notes, playbackStartTick); index < notes.size(); index++) {
 					NoteEvent note = notes.get(index);
 					if (!takeNotes.isEmpty() && takeNotes.contains(note.id())) {
+						continue;
+					}
+					// A note's strikes carry its own id, so soloing a sustained note solos the whole
+					// of it rather than its first tick.
+					if (soloingSelection && !selectedNotes.contains(note.id())) {
 						continue;
 					}
 					if (skips.skips(layerIndex, note.id(), note.startTick())) {
@@ -10959,6 +11147,7 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private enum ContextAction {
+		SOLO_SELECTION("Solo selection"),
 		OCTAVE_DOWN("-12"),
 		OCTAVE_UP("+12"),
 		FIT_RANGE("Fit range"),

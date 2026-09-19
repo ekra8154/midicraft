@@ -243,6 +243,12 @@ A layer goes into the build if you can hear it and see it. Muting a layer or
 hiding it takes it out; setting it back to Active puts it back. There is nothing
 else to set -- what you hear in the composer is what the machine plays.
 
+**M**, **S** and **H** set the selected layers to muted, solo or hidden, the same
+three letters their chips show. Each is a toggle: pressing the letter again, once
+they are all there, puts each layer back to what it was doing before the key
+moved it. Muting a hidden layer to hear it and then pressing M again hides it
+again rather than leaving it on.
+
 That used to be a separate flag, a dot on each row, independent of mute. It made
 the composer two things at once: preview played the unmuted layers and a build
 placed the dotted ones, with nothing connecting them, so pressing Space was not a
@@ -254,6 +260,11 @@ not have this problem, because a bounce is the same signal chain as the transpor
 part, not a decision about the song, so the layers it silences are still built.
 That is the one case where preview and build disagree, and the status bar says so
 while any layer is soloed.
+
+Right-clicking a note selection offers **Solo selection**, which is the same lens
+held over a phrase instead of a layer: only the selected notes play. It lasts as
+long as the selection does, so putting the selection down ends it, and the row
+reads **Stop soloing** while it is on.
 
 Muting a layer to hear around it and then pasting is the mistake this invites, so
 two things say the count: the status line reads `Build: 12 of 15 layers`, and
@@ -324,7 +335,7 @@ one and nothing sounds at one -- it is somewhere to write down what a stretch of
 the song is, so that finding the second chorus again is reading a label rather
 than counting bars.
 
-**M** puts one where the playback marker is standing, or takes away the one
+**B** puts one where the playback marker is standing, or takes away the one
 already there; **Edit > Markers** is the same three actions with the mouse. They
 appear in a strip above the ruler, which is only there while the song has
 markers -- with none, the ruler sits flush against the menu bar. Click a label to

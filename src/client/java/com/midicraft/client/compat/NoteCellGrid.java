@@ -79,6 +79,8 @@ final class NoteCellGrid {
 	private final int[] runColor = new int[ROWS];
 	private final int[] runKind = new int[ROWS];
 	private final boolean[] runHighlighted = new boolean[ROWS];
+	/** How many notes the open run has taken in, which is what decides whether it wears a bar. */
+	private final int[] runNotes = new int[ROWS];
 
 	/**
 	 * Starts a frame.
@@ -192,6 +194,7 @@ final class NoteCellGrid {
 						&& runHighlighted[row] == highlighted
 						&& noteLeft >= runLeft[row] && noteLeft <= runRight[row]) {
 					runRight[row] = Math.max(runRight[row], right);
+					runNotes[row]++;
 					continue;
 				}
 				issued += flush(quads, row);
@@ -202,10 +205,11 @@ final class NoteCellGrid {
 				runColor[row] = color[index];
 				runKind[row] = kind;
 				runHighlighted[row] = highlighted;
+				runNotes[row] = 1;
 				continue;
 			}
 			issued += flush(quads, row);
-			issued += paint(quads, noteLeft, noteTop, right, color[index], kind, highlighted);
+			issued += paint(quads, noteLeft, noteTop, right, color[index], kind, highlighted, 1);
 		}
 		for (int row = 0; row < ROWS; row++) {
 			issued += flush(quads, row);
@@ -221,7 +225,7 @@ final class NoteCellGrid {
 		}
 		runOpen[row] = false;
 		return paint(quads, runLeft[row], runTop[row], runRight[row], runColor[row], runKind[row],
-			runHighlighted[row]);
+			runHighlighted[row], runNotes[row]);
 	}
 
 	/**
@@ -240,40 +244,48 @@ final class NoteCellGrid {
 	 * means out of the note block's range; orange means arrives-too-soon-to-build; yellow means
 	 * lands-between-ticks. One bar, so a note that is two of those at once shows the worst.</p>
 	 *
-	 * <p>The bar goes at the stretch's left edge, not at every note in it, since the notes welded
-	 * into it no longer exist separately by this point. A run of one repeated pitch therefore takes
-	 * one bar however long it is. That is the price of the weld, which is what keeps a raw import
-	 * from asking for twenty-six thousand quads a frame.</p>
+	 * <p>A welded stretch takes no bar at all: only a rectangle that is one note wears one. The
+	 * notes in a stretch no longer exist separately by this point, so a bar at its left edge marks
+	 * the stretch and not any note in it, and a roll zoomed out far enough to weld is a roll where
+	 * every mark it could make is a guess at which note it meant.</p>
 	 */
 	private int paint(Quads quads, int left, int top, int right, int color, int kind,
-			boolean highlighted) {
+			boolean highlighted, int notes) {
 		int bottom = top + noteHeight;
 		quads.fill(left, top, right, bottom, color);
-		if (kind == 0) {
+		// Bars only on the layers being worked on. A dim bar on every other layer's notes was still
+		// a mark, and a song with thousands of them turned the roll into marks with no layer colour
+		// left to read -- so a note that is not yours stays a plain rectangle.
+		// And only on a rectangle that is one note. A welded stretch is several notes the zoom has
+		// run together, and a bar at its left edge marks the stretch rather than any note in it: it
+		// cannot say which of them is wrong, or how many are, and it takes two of the rectangle's
+		// columns whatever the rectangle is worth. Zoom in until the notes stand apart and each one
+		// answers for itself.
+		if (kind == 0 || !highlighted || notes > 1) {
 			return 1;
 		}
-		quads.fill(left, top, Math.min(right, left + WARNING_BAR), bottom, warning(kind, highlighted));
+		quads.fill(left, top, Math.min(right, left + WARNING_BAR), bottom, warning(kind));
 		return 2;
 	}
 
 	/** The worst of what is wrong with a note, in the colour that says which. */
-	private static int warning(int kind, boolean highlighted) {
+	private static int warning(int kind) {
 		if ((kind & UNBUILDABLE) != 0) {
-			return highlighted ? 0xFFFF6B6B : 0x55FF6B6B;
+			return 0xFFFF6B6B;
 		}
 		if ((kind & CROWDED) != 0) {
-			return highlighted ? 0xFFFF9A2E : 0x55FF9A2E;
+			return 0xFFFF9A2E;
 		}
 		if ((kind & OFF_GRID) != 0) {
-			return highlighted ? 0xFFFFE45C : 0x55FFE45C;
+			return 0xFFFFE45C;
 		}
 		// Violet for a note the chord limit thins: not a heat colour either, because nothing is
 		// wrong with it. It plays -- only less of it, where its chord has no room.
 		if ((kind & THINNED) != 0) {
-			return highlighted ? 0xFFB98CFF : 0x55B98CFF;
+			return 0xFFB98CFF;
 		}
 		// The split identity, last: teal, because every warning here is a heat colour and this is
 		// the one bar that means nothing is wrong.
-		return highlighted ? 0xFF4FD8C8 : 0x554FD8C8;
+		return 0xFF4FD8C8;
 	}
 }

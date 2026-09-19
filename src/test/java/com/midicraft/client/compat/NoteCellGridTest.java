@@ -34,14 +34,14 @@ class NoteCellGridTest {
 	};
 
 	/** The grid's warning colours, restated here so the test is an independent answer. */
-	private static int warningColor(int kind, boolean highlighted) {
+	private static int warningColor(int kind) {
 		if ((kind & NoteCellGrid.UNBUILDABLE) != 0) {
-			return highlighted ? 0xFFFF6B6B : 0x55FF6B6B;
+			return 0xFFFF6B6B;
 		}
 		if ((kind & NoteCellGrid.CROWDED) != 0) {
-			return highlighted ? 0xFFFF9A2E : 0x55FF9A2E;
+			return 0xFFFF9A2E;
 		}
-		return highlighted ? 0xFFFFE45C : 0x55FFE45C;
+		return 0xFFFFE45C;
 	}
 
 	private record Note(int left, int top, int color, int flags, int midi) {
@@ -171,11 +171,13 @@ class NoteCellGridTest {
 		for (int kind : new int[] {
 			NoteCellGrid.CROWDED, NoteCellGrid.OFF_GRID, NoteCellGrid.UNBUILDABLE
 		}) {
+			// Marked on the layers being worked on and nowhere else: a note on a layer you are not
+			// on is a plain rectangle however wrong it is, so a busy song's other layers stay
+			// colour rather than turning into a field of bars.
 			for (boolean highlighted : new boolean[] {false, true}) {
 				for (int noteHeight : new int[] {2, 3, 6, 24}) {
 					int flags = kind | (highlighted ? NoteCellGrid.HIGHLIGHTED : 0);
-					int warn = warningColor(kind, highlighted);
-					int bar = Canvas.blend(color, warn, warn >>> 24);
+					int bar = highlighted ? warningColor(kind) : color;
 
 					Canvas canvas = new Canvas();
 					NoteCellGrid grid = new NoteCellGrid();
@@ -185,7 +187,8 @@ class NoteCellGridTest {
 
 					String where = "kind " + kind + ", highlighted " + highlighted
 						+ ", " + noteHeight + "px tall";
-					assertEquals(2, issued, where + " should cost a body and a bar");
+					assertEquals(highlighted ? 2 : 1, issued,
+						where + (highlighted ? " should cost a body and a bar" : " is a body alone"));
 					for (int row = 0; row < noteHeight; row++) {
 						for (int column = 0; column < NOTE_WIDTH; column++) {
 							assertEquals(column < WARNING_BAR ? bar : color,
@@ -230,15 +233,15 @@ class NoteCellGridTest {
 	}
 
 	/**
-	 * A stretch of off-grid notes takes one bar at the front of the stretch, not one per note.
+	 * A stretch of off-grid notes welded into one rectangle takes no bar at all.
 	 *
-	 * <p>The cost of the weld, stated so that it is a decision and not a surprise: a run of one
-	 * repeated pitch is marked once however long it is. Runs break on a change of pitch, colour or
-	 * warning and on any gap wider than a note, so a phrase is marked many times over -- but a held
-	 * repeat is marked at its start and nowhere else.</p>
+	 * <p>A bar is a mark on a note, so it is drawn only where a rectangle is a note. Once the zoom
+	 * runs several of them together the rectangle cannot say which note was wrong or how many were,
+	 * and the mark it would make is two columns of a stretch that is mostly other notes. Zooming in
+	 * until the notes stand apart brings every bar back.</p>
 	 */
 	@Test
-	void weldsFlaggedNeighboursUnderOneBar() {
+	void aWeldedStretchWearsNoBar() {
 		NoteCellGrid grid = new NoteCellGrid();
 		grid.begin(ORIGIN_X, WIDTH, NOTE_WIDTH, NOTE_HEIGHT);
 		for (int index = 0; index < 12; index++) {
@@ -246,13 +249,26 @@ class NoteCellGridTest {
 				NoteCellGrid.OFF_GRID | NoteCellGrid.HIGHLIGHTED, 60);
 		}
 		Canvas canvas = new Canvas();
-		assertEquals(2, grid.draw(canvas), "the run's body and one bar");
+		assertEquals(1, grid.draw(canvas), "the run's body, and nothing marking it");
 		int right = 11 * 5 + NOTE_WIDTH;
-		assertEquals(0xFFFFE45C, canvas.pixels[0], "the bar starts at the run's left edge");
-		assertEquals(0xFFFFE45C, canvas.pixels[WARNING_BAR - 1], "and is as wide as a bar");
-		assertEquals(0xFF35D7E5, canvas.pixels[WARNING_BAR], "the layer colour starts beside it");
-		assertEquals(0xFF35D7E5, canvas.pixels[right - 1], "and reaches the run's right edge");
+		assertEquals(0xFF35D7E5, canvas.pixels[0], "the layer colour reaches the run's left edge");
+		assertEquals(0xFF35D7E5, canvas.pixels[right - 1], "and its right edge");
 		assertEquals(0, canvas.pixels[right], "and nothing is painted past the last note");
+	}
+
+	/** A note standing on its own is a note, so it is marked however far out the roll is zoomed. */
+	@Test
+	void aNoteThatWeldedWithNothingKeepsItsBar() {
+		NoteCellGrid grid = new NoteCellGrid();
+		grid.begin(ORIGIN_X, WIDTH, NOTE_WIDTH, NOTE_HEIGHT);
+		grid.add(ORIGIN_X, ORIGIN_Y, 0xFF35D7E5,
+			NoteCellGrid.OFF_GRID | NoteCellGrid.HIGHLIGHTED, 60);
+		grid.add(ORIGIN_X + NOTE_WIDTH + 4, ORIGIN_Y, 0xFF35D7E5,
+			NoteCellGrid.OFF_GRID | NoteCellGrid.HIGHLIGHTED, 60);
+		Canvas canvas = new Canvas();
+		assertEquals(4, grid.draw(canvas), "two bodies, each with its own bar");
+		assertEquals(0xFFFFE45C, canvas.pixels[0], "the first note is marked");
+		assertEquals(0xFFFFE45C, canvas.pixels[NOTE_WIDTH + 4], "and so is the second");
 	}
 
 	/** Too frequent and off grid are different warnings, so they never share a bar. */
@@ -260,8 +276,10 @@ class NoteCellGridTest {
 	void willNotWeldTwoKindsOfWarningTogether() {
 		NoteCellGrid grid = new NoteCellGrid();
 		grid.begin(ORIGIN_X, WIDTH, NOTE_WIDTH, NOTE_HEIGHT);
-		grid.add(ORIGIN_X, ORIGIN_Y, 0xFF35D7E5, NoteCellGrid.CROWDED, 60);
-		grid.add(ORIGIN_X + 3, ORIGIN_Y, 0xFF35D7E5, NoteCellGrid.OFF_GRID, 60);
+		grid.add(ORIGIN_X, ORIGIN_Y, 0xFF35D7E5,
+			NoteCellGrid.CROWDED | NoteCellGrid.HIGHLIGHTED, 60);
+		grid.add(ORIGIN_X + 3, ORIGIN_Y, 0xFF35D7E5,
+			NoteCellGrid.OFF_GRID | NoteCellGrid.HIGHLIGHTED, 60);
 		assertEquals(4, grid.draw(new Canvas()), "two runs of a body and a bar");
 	}
 
@@ -270,8 +288,9 @@ class NoteCellGridTest {
 	void willNotWeldAFlaggedNoteToACleanOne() {
 		NoteCellGrid grid = new NoteCellGrid();
 		grid.begin(ORIGIN_X, WIDTH, NOTE_WIDTH, NOTE_HEIGHT);
-		grid.add(ORIGIN_X, ORIGIN_Y, 0xFF35D7E5, NoteCellGrid.OFF_GRID, 60);
-		grid.add(ORIGIN_X + 3, ORIGIN_Y, 0xFF35D7E5, 0, 60);
+		grid.add(ORIGIN_X, ORIGIN_Y, 0xFF35D7E5,
+			NoteCellGrid.OFF_GRID | NoteCellGrid.HIGHLIGHTED, 60);
+		grid.add(ORIGIN_X + 3, ORIGIN_Y, 0xFF35D7E5, NoteCellGrid.HIGHLIGHTED, 60);
 		assertEquals(3, grid.draw(new Canvas()), "a marked run of two and a bare one");
 	}
 
@@ -425,11 +444,10 @@ class NoteCellGridTest {
 			}
 			canvas.fill(left, top, right, bottom, note.color());
 			int kind = note.flags() & WARNINGS;
-			if (kind == 0) {
+			if (kind == 0 || (note.flags() & NoteCellGrid.HIGHLIGHTED) == 0) {
 				continue;
 			}
-			canvas.fill(left, top, left + WARNING_BAR, bottom,
-				warningColor(kind, (note.flags() & NoteCellGrid.HIGHLIGHTED) != 0));
+			canvas.fill(left, top, left + WARNING_BAR, bottom, warningColor(kind));
 		}
 	}
 }
