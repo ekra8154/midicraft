@@ -6734,6 +6734,8 @@ public final class SongBuilder {
 		// song; anything else is a debug build asking to start in the middle of one, because the
 		// shape of a wall is not a thing you can ask for directly -- you arrive at it.
 		int floor = start.floor();
+		// The height the bottom floor's lanes run at: the origin is the first lane, not the lowest.
+		int lowestLaneY = origin.getY() - floor * CUBE_FLOOR_HEIGHT;
 		int climb = start.climb();
 		boolean laneStarted = false;
 		/** Whether a chord has been laid on the bend the walk is currently going round. */
@@ -6871,9 +6873,11 @@ public final class SongBuilder {
 			// test only bites when the wall is within two columns, which is the same thing reaches says,
 			// and the dust is only ever claimed by a climb standing in the cell that reads it.
 			placements.climbAhead(above >= 0 && above < floors && climb > 0);
-			// The floors stand CUBE_FLOOR_HEIGHT apart and the lowest lane runs at the origin's height,
-			// so a floor is under this lane exactly when it stands a floor or more above the origin.
-			placements.floorBelow(lane.pos().getY() - CUBE_FLOOR_HEIGHT >= origin.getY());
+			// The floors stand CUBE_FLOOR_HEIGHT apart, so a floor is under this lane exactly when it
+			// stands a floor or more above the lowest lane -- which is the origin's height only for a
+			// bottom start. Measured from the origin, a top start had no floor under any lane, and its
+			// sunken buses sank sand into the air over the floor below's notes.
+			placements.floorBelow(lane.pos().getY() - CUBE_FLOOR_HEIGHT >= lowestLaneY);
 			// Whether the module behind left dust on its empty centre for this climb to start from --
 			// and whether that dust is in the cell this climb would actually read.
 			//
@@ -10742,6 +10746,9 @@ public final class SongBuilder {
 		// shape of a wall is not a thing you can ask for directly -- you arrive at it.
 		int leg = 0;
 		int floor = route.floorOf(0);
+		// The height the bottom floor's lanes run at. The origin is the first lane's height, which is
+		// the bottom floor only where the snake starts there: a top start stands floors above it.
+		int lowestLaneY = origin.getY() - floor * CUBE_FLOOR_HEIGHT;
 		int climb = route.climbOf(0);
 		placements.stopWatchingLegWalls();
 		boolean laneStarted = false;
@@ -12346,9 +12353,11 @@ public final class SongBuilder {
 			// test only bites when the wall is within two columns, which is the same thing reaches says,
 			// and the dust is only ever claimed by a climb standing in the cell that reads it.
 			placements.climbAhead(above >= 0 && above < floors && climb > 0);
-			// The floors stand CUBE_FLOOR_HEIGHT apart and the lowest lane runs at the origin's height,
-			// so a floor is under this lane exactly when it stands a floor or more above the origin.
-			placements.floorBelow(lane.pos().getY() - CUBE_FLOOR_HEIGHT >= origin.getY());
+			// The floors stand CUBE_FLOOR_HEIGHT apart, so a floor is under this lane exactly when it
+			// stands a floor or more above the lowest lane -- which is the origin's height only for a
+			// bottom start. Measured from the origin, a top start had no floor under any lane, and its
+			// sunken buses sank sand into the air over the floor below's notes.
+			placements.floorBelow(lane.pos().getY() - CUBE_FLOOR_HEIGHT >= lowestLaneY);
 			// Whether the module behind left dust on its empty centre for this climb to start from --
 			// and whether that dust is in the cell this climb would actually read.
 			//
