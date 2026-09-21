@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 
@@ -201,34 +202,57 @@ final class FaultView {
 		}
 	}
 
+	/**
+	 * The frontier, not the earliest-laid dead cell.
+	 *
+	 * <p>The earliest-laid cell the reader never reached was the rule until 2026-09-20, and for a
+	 * whole census it named the wrong cell: a closing pad's descent is laid before the chords of
+	 * the leg it closes, so a dead seam at the head of that leg was reported as
+	 * {@code delayBeforeChord -> descent4}; and a stone under a repeater, recorded live and powered
+	 * by nothing, stood in for every break laid after it -- {@code noteMiddle ->
+	 * repeaterOffASoftTip}, five builds of thriller, a family that did not exist. So the break is
+	 * the dead cell that touches a live one, earliest laid among those, and {@code before} is the
+	 * live neighbour's shape: the one that failed to hand the signal on. Where no dead cell touches
+	 * a live one at all the old rule stands, so a build the reader never entered still names a
+	 * cell.</p>
+	 */
 	static Break firstBreak(Build build) {
+		Set<BlockPos> reached = build.reading().reachedAt();
 		BlockPos first = null;
+		BlockPos liveBehind = null;
 		int bestOrder = Integer.MAX_VALUE;
+		BlockPos earliest = null;
+		int earliestOrder = Integer.MAX_VALUE;
 		for (BlockPos at : build.plan().poweredAt()) {
-			if (build.reading().reachedAt().contains(at)) {
+			if (reached.contains(at)) {
 				continue;
 			}
 			int order = order(build, at);
-			if (order < bestOrder) {
-				bestOrder = order;
-				first = at;
+			if (order < earliestOrder) {
+				earliestOrder = order;
+				earliest = at;
+			}
+			if (order >= bestOrder) {
+				continue;
+			}
+			for (Direction direction : Direction.values()) {
+				BlockPos beside = at.relative(direction);
+				if (reached.contains(beside)) {
+					bestOrder = order;
+					first = at;
+					liveBehind = beside;
+					break;
+				}
 			}
 		}
 		if (first == null) {
-			return null;
-		}
-		// What was laid immediately before it, which is nearly always the shape that failed to hand
-		// the signal on. Read out of the walk order rather than out of the geometry: the cell behind
-		// in space may belong to the lane before, and the question is who was building at the time.
-		String before = "?";
-		int bestBefore = -1;
-		for (Map.Entry<BlockPos, Integer> cell : build.laid().entrySet()) {
-			if (cell.getValue() < bestOrder && cell.getValue() > bestBefore) {
-				bestBefore = cell.getValue();
-				before = build.plan().laidBy().getOrDefault(cell.getKey(), "?");
+			if (earliest == null) {
+				return null;
 			}
+			return new Break(earliest, build.plan().laidBy().getOrDefault(earliest, "?"), "nothing live");
 		}
-		return new Break(first, build.plan().laidBy().getOrDefault(first, "?"), before);
+		return new Break(first, build.plan().laidBy().getOrDefault(first, "?"),
+			build.plan().laidBy().getOrDefault(liveBehind, "?"));
 	}
 
 	static List<Dead> deadWires(Build build) {

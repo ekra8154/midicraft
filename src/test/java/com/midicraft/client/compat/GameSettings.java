@@ -84,7 +84,8 @@ final class GameSettings {
 		String said() {
 			return "[game: thin " + thinning.target() + (thinning.volume() ? " volume" : "")
 				+ (thinning.strikes() ? " strikes" : "") + ", dedupe " + dedupe + ", reseed "
-				+ reseedDelay + ", debugPaste " + debugPaste + ", maxFloors " + maxBuildFloors + "]";
+				+ reseedDelay + ", debugPaste " + debugPaste + ", maxFloors " + maxBuildFloors
+				+ ", lanes start " + (startTop ? "top" : "bottom") + "]";
 		}
 	}
 
@@ -92,9 +93,38 @@ final class GameSettings {
 
 	static synchronized Values get() {
 		if (loaded == null) {
-			loaded = read();
+			loaded = overridden(read());
 		}
 		return loaded;
+	}
+
+	/**
+	 * The two paste settings a probe wants to hold still while the config moves under it, given as
+	 * {@code -Dcensus.startTop=false} or {@code -Dfault.debugPaste=false}.
+	 *
+	 * <p>A census is only comparable to the one before it if the build it asked for is the same
+	 * build, and both of these change the walk rather than the song: the lanes going up instead of
+	 * down, and a collision recorded rather than thrown. Reading them off the live file means a
+	 * player who toggled either one between two runs gets two answers to different questions with
+	 * nothing in the report to say so -- which is why {@link Values#said()} now names them. These
+	 * overrides are for asking the other question on purpose, and nothing else reads them.</p>
+	 */
+	private static Values overridden(Values read) {
+		boolean startTop = flag("startTop", read.startTop());
+		boolean debugPaste = flag("debugPaste", read.debugPaste());
+		if (startTop == read.startTop() && debugPaste == read.debugPaste()) {
+			return read;
+		}
+		return new Values(read.dedupe(), read.thinning(), read.maxBuildFloors(), read.reseedDelay(),
+			startTop, debugPaste, read.laneWidth(), read.laneFloors(), read.pasteMode());
+	}
+
+	private static boolean flag(String key, boolean fallback) {
+		String given = System.getProperty("census." + key);
+		if (given == null || given.isBlank()) {
+			given = System.getProperty("fault." + key);
+		}
+		return given == null || given.isBlank() ? fallback : Boolean.parseBoolean(given.strip());
 	}
 
 	private static Values read() {

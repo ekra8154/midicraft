@@ -2863,6 +2863,43 @@ public final class SongBuilder {
 	static boolean FORCED_TURN_WALKS_OUT_THE_FOLDS_BEND = true;
 
 	/**
+	 * v2: an event with a turn forced in front of it, standing short of a flat corner its chord
+	 * cannot lie across, pads the lane out to the corner and is asked again on the far side.
+	 *
+	 * <p>The forced walk-out takes a bend the lane is already standing in, and only that. A chord
+	 * decided short of a flat corner is standing in no bend: the fold breaks with the lane
+	 * straight, and the decision then asks a flat turn's one question -- can the chord straddle it
+	 * -- which a chord of twenty-nine cannot, on this rewalk or any other. So the forced turn was
+	 * refused twice, the wall went soft, and the chord was laid through it. Thriller at twenty wide
+	 * over two floors, machine B at z=591: a stacked bus of head six and tail twenty-three decided
+	 * six columns from its inner wall ran nine past it, into the corner column machine A hangs its
+	 * notes in, and the two machines share the cells from there. The pad was planned and flush --
+	 * six cells, ten of wire, on the wall -- and the flat branch's refusal to take it for a chord
+	 * that does not straddle was all that stood between the lane and its corner. In-game testing
+	 * rebuilt the corner by hand with the chord taking the turn, and it played.</p>
+	 *
+	 * <p>So a forced event ahead of a flat turn it cannot straddle may turn on a pad that reaches
+	 * the wall, and once the turn is armed the event is handed back to the top of the loop rather
+	 * than laid into the corner: the lane is bending now, the forced walk-out takes the bend as it
+	 * always has, and the chord is decided on the new leg as any chord is -- the forced turn is
+	 * spent by the corner, because a forced event is one that overshoots whatever the arithmetic
+	 * says, and left in force on the far side it padded sixteen columns to the next wall and took
+	 * a descent with nothing left for the landing (thriller at twenty wide over two floors again,
+	 * 1631 notes dark off {@code 22 65 595}) for a chord that fit the leg with a column to spare.
+	 * Once per event, on the guard the wait's re-ask uses, so a chord that fits no leg still gives
+	 * up the way it did; and only where the fold is the thing that will walk it out, which is never
+	 * while a run is live. The corner is measured again once the pad has moved the lane: armed at wall
+	 * minus cursor off a cursor the pad had just carried six columns, it went six past the wall
+	 * into machine A's corner column, which is the fault this exists to stop.</p>
+	 *
+	 * <p>Thriller over the census's twenty-five sizes, bottom-start: inner-wall breaches eight to
+	 * none, collisions and severed lanes to none, dead builds seven to four. The four left break
+	 * at a simple tail's note middle against a repeater off a soft tip, which is another fault
+	 * and stood before this one.</p>
+	 */
+	static boolean FORCED_TURN_PADS_TO_A_FLAT_CORNER = true;
+
+	/**
 	 * v2: the wait-fold carries a wait through the turn ahead where the chord after it would not
 	 * fit and the lane is not yet started.
 	 *
@@ -2957,6 +2994,28 @@ public final class SongBuilder {
 	 * sit one cell further along the element than they would have.</p>
 	 */
 	static boolean SEAM_CUTS_AT_A_CORNER = true;
+
+	/**
+	 * v2: a seam's piston laid straight after a corner stands off a block on that corner, not
+	 * off the corner's dust.
+	 *
+	 * <p>The cut above is this rule for the second piston, where the element itself meets the
+	 * corner. The first piston met one another way and nothing asked: the element's repeater went
+	 * down on the leg before, the fold walked the bend out in dust, and the seam -- from cell one,
+	 * no soft tip, no bend left to ride -- laid its piston in the first cell of the new leg. Dust
+	 * on a corner joins the link and runs along it; it does not turn into a piston. linkin park at
+	 * thirty-eight wide over two floors, machine B at {@code 5 69 163}, and at thirty-three over
+	 * three at {@code 28 73 127}: corner, piston, block of redstone, and 263 notes dark from there,
+	 * in four builds of the census. In-game testing: this is exactly what the block before a seam
+	 * is for, and it did not fire when it mattered.</p>
+	 *
+	 * <p>So where a piston is about to stand behind a corner carrying plain dust, the dust is
+	 * taken up and stone goes down at piston level. The link's last dust points into it, which
+	 * soft-powers it, and a soft-powered block drives the piston beside it. No column is spent, so
+	 * the element is as long as it was measured. A corner already written as a cross is left: a
+	 * cross points every way, the piston included.</p>
+	 */
+	static boolean SEAM_PISTON_OFF_A_CORNER_STANDS_ON_A_BLOCK = true;
 
 	/**
 	 * v2: a seam is cut across a staircase, first stage above and second stage below.
@@ -10741,6 +10800,10 @@ public final class SongBuilder {
 		// The event a plain close has already handed back to the top of the loop once, so a wait
 		// that outruns every leg cannot re-ask forever. See REASKS_WHEN_THE_WAIT_OUTRUNS_THE_LEG.
 		int reaskedAt = -1;
+		// Forced events whose turn has been taken by padding to a flat corner: on the far side the
+		// chord is decided as any chord is, not against the next wall as well. See
+		// FORCED_TURN_PADS_TO_A_FLAT_CORNER.
+		Set<Integer> forcedSpent = new HashSet<>();
 		// The seam an event owes, kept across a re-ask of that event: a stage laid before the
 		// staircase is still laid after it. See the note where these are reset.
 		int seamNext = PARITY_SEAM_CELLS;
@@ -10875,7 +10938,9 @@ public final class SongBuilder {
 					// (moonlight at sixteen wide over two floors, dead at its second stage).
 					&& seamNext >= PARITY_SEAM_CELLS && !lane.cornerAt(0)) {
 				placements.placing("repeaterOffASoftTip");
-				placements.powered(lane.pos(), "minecraft:stone", NO_BLANK);
+				// The stone under a repeater is laid, not live: nothing powers it, and a cell the walk
+				// calls live that the reader never reaches is what the census names as a break.
+				set(placements, lane.pos(), "minecraft:stone");
 				set(placements, lane.pos().above(), "minecraft:repeater[facing="
 					+ repeaterFacing(lane.travel()) + ",delay=1]");
 				currentTime += 1;
@@ -12019,6 +12084,38 @@ public final class SongBuilder {
 								+ lane.pos().getZ() + " heading " + lane.travel());
 						}
 					}
+					// A piston standing straight off a corner: the corner's dust runs along the link
+					// and points into nothing beside it, so the corner takes a block at piston level
+					// instead -- the link's dust points into that, and a soft-powered block fires
+					// the piston. See SEAM_PISTON_OFF_A_CORNER_STANDS_ON_A_BLOCK.
+					if (SEAM_PISTON_OFF_A_CORNER_STANDS_ON_A_BLOCK && (cell == 1 || cell == 4)) {
+						BlockPos behind = lane.pos().relative(lane.travel().getOpposite());
+						String wire = placements.describeBlock(behind.above());
+						// Asked of the blocks and not of the corner list, which a turn the fold armed
+						// never joined: dust runs straight into the piston only where the cell behind
+						// it again carries the line -- wire level, a step up or a step down, or the
+						// repeater or landed block that feeds it.
+						BlockPos further = behind.relative(lane.travel().getOpposite());
+						boolean straight = false;
+						for (int lift = 0; lift <= 2 && !straight; lift++) {
+							String feeds = placements.describeBlock(further.above(lift));
+							straight = feeds.startsWith("minecraft:redstone_wire")
+								|| lift == 1 && (feeds.startsWith("minecraft:repeater")
+									|| feeds.startsWith("minecraft:redstone_block"));
+						}
+						if (!straight && wire.startsWith("minecraft:redstone_wire")
+								&& !STACKED_CROSS.equals(wire)) {
+							placements.take(behind.above());
+							placements.powered(behind.above(), "minecraft:stone", NO_BLANK);
+							placements.padded("paritySeamBlockOnTheCorner");
+							if (TRACE_TURNS) {
+								System.out.println("SEAMCORNER t=" + event.time() + " block at "
+									+ behind.getX() + " " + (behind.getY() + 1) + " " + behind.getZ()
+									+ " for the piston at " + lane.pos().getX() + " "
+									+ (lane.pos().getY() + 1) + " " + lane.pos().getZ());
+							}
+						}
+					}
 					String block = switch (cell) {
 						case 0 -> "minecraft:repeater[facing=" + repeaterFacing(lane.travel())
 							+ ",delay=" + PARITY_SEAM_REPEATER + "]";
@@ -12460,6 +12557,22 @@ public final class SongBuilder {
 				coordAlong(axis, lane.pos())
 					+ stepAlong(axis, lane.travel()) * (delayWalkOff + cornerWalk),
 				stepAlong(axis, lane.travel()), event, wait);
+			// A stacked bus straddles where a plain one cannot: its head carries six notes in
+			// three columns of straight lane and only the tail rides the bend, on the handover's
+			// fresh fifteen. Asked once the shape is known, of the shape that will be built. See
+			// STACKED_BUS_STRADDLES_BY_ITS_TAIL.
+			if (STACKED_BUS_STRADDLES_BY_ITS_TAIL && layout.ultra() && flatAhead && !straddles
+					&& !turning && shaped.style() == ChordStyle.STACKED_BUS && !shaped.nudge()
+					&& shaped.moved() == null && delayAhead == 0 && delayWalkOff == 0
+					&& cornerWalk == 0) {
+				StackedBusSplit wraps = splitFor(shaped.style(), event.notes());
+				if (wraps != null && stackedStraddleFits(wraps.tail().size(),
+						(wall - coordAlong(axis, lane.pos())) * stepAlong(axis, lane.travel()),
+						flatLink(route, leg, slabStep))) {
+					straddles = true;
+					placements.padded("stackedBusStraddlesByItsTail");
+				}
+			}
 			// Against the prediction v2 used to make, while both exist. The old one deliberately erred
 			// towards the bus -- "the safe way round", because a lane measured long and built short
 			// lands inside its wall -- so where the two differ is where that safety was being spent.
@@ -12677,6 +12790,7 @@ public final class SongBuilder {
 					PlacementPlan.Behind was = placements.behind();
 					placements.beginTrial();
 					try {
+						placements.wireAtTheTip(tipSignal);
 						Placed tried = buildShaped(placements, willOpenOn, 1, event, shaped, layout);
 						shapeWouldFall = tried.style() != shaped.style()
 							|| coordAlong(axis, tried.lane().pos()) != here.end();
@@ -12721,7 +12835,8 @@ public final class SongBuilder {
 			if (turning) {
 				lastInTurn = index;
 			}
-			boolean forcedTurn = turnBefore.contains(index) && !turning;
+			boolean forcedTurn = turnBefore.contains(index) && !turning
+				&& !forcedSpent.contains(index);
 			// A forced turn does not re-run the landing arithmetic: the wall was crossed, on the
 			// blocks, by whatever the trial actually built -- a stacked shape measured to land
 			// flush whose fallback is a bus with a handover a column past the wall, Choral at
@@ -12916,6 +13031,9 @@ public final class SongBuilder {
 			// One tick has to be left for the next event's own repeater, which is the only thing that
 			// can drive the module it stands in front of.
 			int columns = (wall - coordAlong(axis, lane.pos())) * stepAlong(axis, lane.travel());
+			// The whole distance to the wall, before the corner cells come off the pad's count:
+			// what the pad does not cover the pin does, in bare dust. See DESCENT_LANDING_MUST_BE_LIVE.
+			int rawColumns = columns;
 			// Less the corner cells the lane stands on. The landing already subtracts them -- "a
 			// term missing from the arithmetic" -- but the columns that size the closing pad, the
 			// room and the breach were still counted from the corner, so a lane asked on one laid
@@ -13693,15 +13811,37 @@ public final class SongBuilder {
 				? Math.min(WALL_REACH_PRICES_THE_RAISED_PAD ? turnPrice : turnCells,
 					pad.cells().isEmpty() && turnsOffBus ? turnOffBusCells : turnCells)
 				: turnCells;
-			boolean reachesWall = !PIN_DESCENTS || flatAhead
-				|| pad.signal() - unpaid >= turnCost;
+			// A descent whose landing the wire would not reach is no turn at all. The pad spends
+			// to the staircase's exact price -- which is enough, the last rung's dust still lights
+			// the block under it -- and then the pin takes a cell the pad never budgeted, and the
+			// last rung goes down dead -- the line PIN_REPEATS_BEFORE_THE_WALL revives where the wait can pay for
+			// a repeater, and where it cannot the lane used to descend anyway. Refused instead, so
+			// the chord is laid on the leg it fits and the event after it turns on a fresh fifteen.
+			// See DESCENT_LANDING_MUST_BE_LIVE.
+			int pinAhead = Math.max(0, rawColumns - pad.cells().size());
+			boolean landingStarves = DESCENT_LANDING_MUST_BE_LIVE && !flatAhead && climb < 0
+				&& pinAhead > 0 && pad.signal() - pinAhead < turnCost
+				&& wait - pad.delaySpent() < 2;
+			if (landingStarves) {
+				placements.padded("descentRefusedForADeadLanding");
+			}
+			boolean reachesWall = (!PIN_DESCENTS || flatAhead
+				|| pad.signal() - unpaid >= turnCost) && !landingStarves;
 			// A straddling chord is charged for wire it is not going to use. The comment fifteen lines
 			// above already says why it should not be -- "its repeater goes down where the lane has got
 			// to, and a repeater hands out a fresh fifteen however dead the wire arriving was" -- and
 			// then the test asks for a block of wire anyway. See {@link #STRADDLE_NEEDS_NO_WIRE}.
 			boolean straddleAffordable = STRADDLE_NEEDS_NO_WIRE || pad.signal() >= 1;
+			// A forced event short of a flat corner its chord cannot lie across turns on its pad
+			// and is asked again beyond the bend. On the wall only: the walk-out lays the corner
+			// where the lane has got to, and a corner off the wall column is the recessed turn
+			// that reaches into the neighbour. See FORCED_TURN_PADS_TO_A_FLAT_CORNER.
+			boolean padsToTheCorner = FORCED_TURN_PADS_TO_A_FLAT_CORNER && layout.ultra()
+				&& forcedTurn && flatAhead && !straddles && onWall && railPhase < 0
+				&& route.foldsWaits() && reaskedAt != index;
 			boolean canTurn = layout.ultra()
-				? index > 0 && reachesWall && (flatAhead ? straddles && straddleAffordable
+				? index > 0 && reachesWall && (flatAhead
+					? straddles && straddleAffordable || padsToTheCorner
 					: pad.signal() >= turnPrice)
 				: index > 0 && events.get(index - 1).maxSafeTurnDistance() >= MAX_LANE_SPACING;
 			// Every turn the lane asks for, split by what lies ahead and by whether a run is still
@@ -14861,6 +15001,13 @@ public final class SongBuilder {
 						// the guess is wide, checked against the blocks as they go down. See
 						// {@link #FLAT_TURN_KEEPS_ITS_WIDTH}. A turn a walk before this one watched hang
 						// a note past its corner is armed tight without asking.
+						// Measured again where the closing pad has moved the lane: the corner is
+						// armed at wall minus cursor, and a cursor the pad has just carried to the
+						// wall read six columns short of it -- so the corner went six past. See
+						// FORCED_TURN_PADS_TO_A_FLAT_CORNER.
+						if (padsToTheCorner) {
+							columns = (wall - coordAlong(axis, lane.pos())) * stepAlong(axis, lane.travel());
+						}
 						boolean rewalked = FLAT_TURN_KEEPS_ITS_WIDTH && tightTurns.contains(index);
 						boolean tight = FLAT_TURN_KEEPS_ITS_WIDTH && (rewalked
 							|| route.linkArmsTight(leg)
@@ -14940,6 +15087,33 @@ public final class SongBuilder {
 					floor = route.floorOf(leg);
 					climb = route.climbOf(leg);
 					placements.stopWatchingLegWalls();
+					// A chord that cannot lie across the corner is not laid into it. The event goes
+					// back to the top of the loop with the turn armed: the lane is bending, so the
+					// forced walk-out takes the bend, and the chord is decided on the leg beyond
+					// against that leg's wall. The pad's ticks are spent the way the wait's re-ask
+					// spends them, and the stretch stands at none for the reason it does there.
+					// See FORCED_TURN_PADS_TO_A_FLAT_CORNER.
+					if (padsToTheCorner && turning) {
+						currentTime += spentPadding;
+						spentPadding = 0;
+						laneStarted = true;
+						replan = layout.ultra();
+						booked = Map.of();
+						reaskedAt = index;
+						forcedSpent.add(index);
+						if (pace != null && pace.stretch() != null) {
+							pace.stretch()[index] = 0;
+						}
+						placements.padded("forcedTurnPaddedToTheCorner");
+						if (TRACE_TURNS) {
+							System.out.println("CORNERPAD t=" + event.time() + " notes="
+								+ event.notes().size() + " leg=" + leg + " pad=" + pad.cells().size()
+								+ "c/" + pad.signal() + "s at " + coordAlong(axis, lane.pos()) + " "
+								+ lane.pos().getY() + " " + coordAcross(axis, lane.pos()));
+						}
+						index--;
+						continue;
+					}
 				}
 			}
 			if (carried) {
@@ -15960,6 +16134,7 @@ public final class SongBuilder {
 			Placed placed;
 			placements.beginTrial();
 			try {
+				placements.wireAtTheTip(tipSignal);
 				placed = buildShaped(placements, opening, trigger.triggerDelay(), event, shape, layout);
 				placements.commitTrial();
 			} catch (IllegalArgumentException collided) {
@@ -18175,7 +18350,9 @@ public final class SongBuilder {
 					// less, which is what {@link Pad#delaySpent} already carries to it.
 					placements.padded(why + "RepeaterOffASoftRailTip");
 					lane = pastAnyCorner(placements, lane);
-					placements.powered(lane.pos(), "minecraft:stone", NO_BLANK);
+					// The stone under a repeater is laid, not live: nothing powers it, and a cell the walk
+				// calls live that the reader never reaches is what the census names as a break.
+				set(placements, lane.pos(), "minecraft:stone");
 					set(placements, lane.pos().above(), "minecraft:repeater[facing="
 						+ repeaterFacing(lane.travel()) + ",delay=1]");
 					spentOnTheTip = 1;
@@ -24263,6 +24440,31 @@ public final class SongBuilder {
 	static boolean PIN_REPEATS_BEFORE_THE_WALL = true;
 
 	/**
+	 * A closing pad may not take a descent it cannot light the landing of.
+	 *
+	 * <p>{@code reachesWall} asks for the staircase's price and no more, and the price is right: a
+	 * pad arriving with exactly four lights the block under the fourth rung, and let it happen at
+	 * twenty wide over two floors plays thirty thousand notes through such a descent. What it does
+	 * not count is the pin. The pad's columns have the corner cells the lane stands on taken off
+	 * them, the pin fills the column that leaves in bare dust, and four becomes three: the rule
+	 * above puts a repeater in the pin where the wait holds a tick to spare, and where it does not
+	 * the lane descended onto dead wire and said nothing. (Refusing every exact-price descent was
+	 * tried first and killed that whole build, which is how the pin was found to be the cell.) Thriller at twenty wide over two floors,
+	 * machine B at z=594: a chord of twenty-nine that would have stranded the turn after it was
+	 * closed early instead -- sixteen columns of closing pad to four of wire on a wait of two with
+	 * one tick already spent -- and 1631 notes went dark from the landing at {@code 22 65 595}.
+	 * In-game testing read the run of red nether brick from the staircase down and said the chord
+	 * would have fit the leg had it simply been laid there.</p>
+	 *
+	 * <p>So a descent the pad and the wait between them cannot deliver a live landing for is not
+	 * offered: {@code reachesWall} says no, the chord is laid whole on the leg it fits, and the
+	 * event after it -- which has its own wait to spend -- turns at the wall on a repeater. Where
+	 * that chord itself overshoots, this changes nothing: the lane runs on past its wall exactly as
+	 * a lane refused its turn always has, and the breach says so.</p>
+	 */
+	static boolean DESCENT_LANDING_MUST_BE_LIVE = true;
+
+	/**
 	 * Whether a chord can simply be laid across a flat turn, needing nothing done for it.
 	 *
 	 * <p>A bus is the sturdy shape: it wants nothing of its surroundings but somewhere to put the
@@ -24311,6 +24513,61 @@ public final class SongBuilder {
 	private static boolean straddleFits(int notes, int columns, int slabStep) {
 		return straddleFits(notes, columns, slabStep, false);
 	}
+
+	/**
+	 * v2: a stacked bus may take a flat turn its tail can ride, where the same chord as a plain bus
+	 * could not lie across it.
+	 *
+	 * <p>{@link #straddleFits} measures every chord as a plain bus -- an opening and a cell for each
+	 * pair -- so a chord of twenty-eight is fourteen cells, fifteen round a bend, and a corner past
+	 * a repeater's reach: refused, at any distance from the wall. But the walk had already decided
+	 * that chord was a stacked bus, head six and tail twenty-two, and a stacked bus is a different
+	 * length of wire: the head stands in three columns of straight lane, the handover hands the
+	 * tail a fresh fifteen, and eleven or twelve cells of tail ride both corners with room. HOTMK
+	 * at twenty-seven wide over four floors, machine B at z=436: two chords of twenty-eight a tick
+	 * apart, the second twelve columns from its inner wall on no wire and no ticks -- no pad, no
+	 * cut across a flat turn, no straddle by the plain sum -- laid whole through the wall into
+	 * machine A, on every width of the song from nineteen to twenty-seven. In-game testing: "a
+	 * stacked bus is much more likely to have been able to make a flat turn like that."</p>
+	 *
+	 * <p>Asked only of the shape the walk has decided and will build, standing where it will be
+	 * built -- no delay ahead of it, no nudge, no relocation -- and only where the head is clear of
+	 * the corner by the distance a stacked module must be. The tail's cells are counted the way a
+	 * bus riding a bend counts them, a slot lost to each corner, against the handover's reach.</p>
+	 */
+	static boolean STACKED_BUS_STRADDLES_BY_ITS_TAIL = true;
+
+	/**
+	 * @param tail the notes the stacked head leaves for the bus behind it
+	 * @param columns from the cell the module opens on to the wall
+	 */
+	private static boolean stackedStraddleFits(int tail, int columns, int slabStep) {
+		int head = STACKED_CELLS + STACKED_BUS_TRANSITION;
+		int room = columns - head;
+		// The centre stands a column in; it must be as clear of the corner as any stacked module.
+		if (tail <= 0 || room < 1 || columns - 1 < STACKED_CLEAR_OF_CORNER) {
+			return false;
+		}
+		for (int corners = 0; corners <= 2; corners++) {
+			int cells = (tail + corners + 1) / 2;
+			int crossed = cells <= room ? 0 : cells <= room + slabStep ? 1 : 2;
+			int nextCorner = switch (crossed) {
+				case 0 -> room;
+				case 1 -> room + slabStep;
+				default -> Integer.MAX_VALUE;
+			};
+			int run = STACKED_BUS_TRANSITION + cells
+				+ (cells + CORNER_AHEAD >= nextCorner ? CORNER_AHEAD : 0);
+			if (run > DUST_RANGE) {
+				continue;
+			}
+			if (crossed <= corners) {
+				return true;
+			}
+		}
+		return false;
+	}
+
 
 	/**
 	 * @param sunken whether this chord would take the {@link ChordStyle#SUNKEN_BUS} shape, which
@@ -25635,6 +25892,16 @@ public final class SongBuilder {
 			return new Placed(body.lane(), body.sunken() ? ChordStyle.SUNKEN_BUS : style,
 				body.busCells(), false);
 		}
+		// As far as the wire carries and no further. The move is dust, and the bus's own repeater
+		// moves with it: a cell the wire does not reach is a repeater reading nothing, which is a
+		// dead line where a contested cell would only have been a sea lantern. See
+		// BUS_MOVES_ONLY_ON_LIVE_WIRE.
+		int most = BUS_MOVES_ONLY_ON_LIVE_WIRE
+			? Math.min(BUS_MOVES_AT_MOST, Math.max(0, placements.wireAtTheTip() - 1))
+			: BUS_MOVES_AT_MOST;
+		if (most < BUS_MOVES_AT_MOST) {
+			placements.padded("busMoveHeldToTheWire" + most);
+		}
 		for (int shifted = 0; ; shifted++) {
 			placements.beginTrial();
 			try {
@@ -25657,7 +25924,7 @@ public final class SongBuilder {
 				// Guardian 20 wide over four floors at all: the whole reason to mark a build is to have
 				// something to stand in. Out of attempts, the cell goes to whoever got there first and wears a
 				// sea lantern saying so.
-				if (placements.trialCollided() && shifted < BUS_MOVES_AT_MOST) {
+				if (placements.trialCollided() && shifted < most) {
 					throw new IllegalArgumentException("marked: this bus lost ground, trying the next column");
 				}
 				placements.commitTrial();
@@ -25680,7 +25947,7 @@ public final class SongBuilder {
 						+ " travel=" + lane.travel() + " notes=" + event.notes().size()
 						+ " : " + collided.getMessage());
 				}
-				if (shifted >= BUS_MOVES_AT_MOST) {
+				if (shifted >= most) {
 					placements.padded("planBusStuckAfter" + shifted);
 					throw collided;
 				}
@@ -26658,7 +26925,7 @@ public final class SongBuilder {
 			int triggerDelay, boolean soft, boolean rolled, String why) {
 		if (soft && SPLIT_THE_PAD_REPEATER && triggerDelay >= 2) {
 			placements.padded(why + "SplitRepeater");
-			placements.powered(at, "minecraft:stone", NO_BLANK);
+			set(placements, at, "minecraft:stone");
 			set(placements, at.above(), "minecraft:repeater[facing="
 				+ repeaterFacing(travel) + ",delay=1]");
 			return triggerDelay - 1;
@@ -27584,6 +27851,27 @@ public final class SongBuilder {
 
 	/** How many columns a colliding bus may walk before the build gives up on it. */
 	private static final int BUS_MOVES_AT_MOST = 3;
+
+	/**
+	 * v2: a bus moves off a collision only as far as the wire behind it is live.
+	 *
+	 * <p>"Moving costs a cell of dust and no ticks" -- and a cell of wire, which nobody asked
+	 * about. The move is laid in {@link #layBus}, below the walk, and the walk's count of what the
+	 * lane still holds never reached it. HOTMK at twenty-seven wide over four floors, machine B at
+	 * z=436: the far half of a cut came off its climb on ten of wire and ran nine cells of bus, the
+	 * chord after it -- twenty-eight notes, one tick on -- was decided at {@code tip=0 pad=0c/0s},
+	 * and its bus collided and moved three columns on bamboo anyway. The last block of the bus
+	 * behind was live and a repeater standing against it would have fired; three cells on, it read
+	 * nothing, and 8,985 notes went dark. In-game testing: "it would have made it if it didn't pad
+	 * forward ... it should know this."</p>
+	 *
+	 * <p>So the walk says what the tip holds before it builds a shape, and the move stops a cell
+	 * short of it -- the moved repeater reads the block under the last dust, which needs one. Out
+	 * of wire the bus stands where it collided, as it does out of attempts: marked, the cell goes to
+	 * whoever got there first and wears a sea lantern; unmarked the collision goes up as it always
+	 * has. A contested cell is a fault that says so. A dead line says nothing.</p>
+	 */
+	static boolean BUS_MOVES_ONLY_ON_LIVE_WIRE = true;
 
 	/** Scratch: every column a colliding bus tried, and what it met there. */
 	static boolean TRACE_BUS_MOVE = false;
@@ -33632,6 +33920,17 @@ public final class SongBuilder {
 		 * walk and never rolls, so during a cut the module behind is still this. Asking the wrong one
 		 * is a guard that never fires.</p>
 		 */
+		/** What the lane's wire is still worth where the next shape opens; see BUS_MOVES_ONLY_ON_LIVE_WIRE. */
+		private int wireAtTheTip = Integer.MAX_VALUE;
+
+		void wireAtTheTip(int wire) {
+			wireAtTheTip = wire;
+		}
+
+		int wireAtTheTip() {
+			return wireAtTheTip;
+		}
+
 		boolean softTip() {
 			return softTip;
 		}

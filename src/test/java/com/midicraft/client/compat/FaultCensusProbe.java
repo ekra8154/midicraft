@@ -1,6 +1,7 @@
 package com.midicraft.client.compat;
 
 import com.midicraft.client.composer.ComposerProject;
+import com.midicraft.client.composer.SongAnalysis;
 import com.google.gson.Gson;
 import java.io.Reader;
 import java.nio.file.Files;
@@ -153,6 +154,12 @@ class FaultCensusProbe {
 
 	private static final TreeMap<String, Long> TALLY = new TreeMap<>();
 
+	/** How many lanes each song surveyed wants, so the report can say which builds were two-lane. */
+	private static final TreeMap<String, Integer> LANES = new TreeMap<>();
+
+	/** What each file's song calls itself, which is what the picker shows and the filename is not. */
+	private static final TreeMap<String, String> NAMES = new TreeMap<>();
+
 	private static void tally(SongBuilder.PastePlan plan) {
 		if (COUNTED.isEmpty()) {
 			return;
@@ -225,9 +232,35 @@ class FaultCensusProbe {
 		// -Dcensus.real=true leaves the synthetic limit songs out: they are the ones named ultra-*,
 		// built to carry chords of thirty, and the scope is chords to twenty-five.
 		boolean realOnly = Boolean.parseBoolean(text("real", "false"));
+		// -Dcensus.lanes=2 keeps only the songs the game itself calls two-lane, which is a property of
+		// the music -- a gap of an odd number of game ticks somewhere in it -- and not of the filename.
+		// Half the library is named "...-2-lanes" by hand and some of those songs want one lane, while
+		// songs named nothing of the sort want two. Asking SongAnalysis the way the picker asks it is
+		// the only reading that agrees with what a player is told before they paste.
+		int wantLanes = Integer.parseInt(text("lanes", "0"));
 		// -Dcensus.readback=false plans and stops: breaches and collisions both come out of the walk,
 		// and the readback that finds dead, wrong and missing notes is most of a build's cost.
 		boolean readback = Boolean.parseBoolean(text("readback", "true"));
+		// -Dcensus.builds=thriller:20x2+32x2,linkin:38x2 -- a song's own sizes rather than the
+		// cross product, for the round of fixing where the question is whether the twenty-seven
+		// builds that were dead last time are dead now. Each name is a substring as census.songs
+		// takes them, and the song is built only at the sizes after its colon.
+		Map<String, List<int[]>> builds = new java.util.LinkedHashMap<>();
+		for (String entry : text("builds", "").split(",")) {
+			if (entry.isBlank()) {
+				continue;
+			}
+			String[] half = entry.strip().split(":");
+			List<int[]> own = new ArrayList<>();
+			for (String pair : half[1].toLowerCase(Locale.ROOT).split("[+]")) {
+				String[] size = pair.strip().split("x");
+				own.add(new int[] {Integer.parseInt(size[0]), Integer.parseInt(size[1])});
+			}
+			builds.put(half[0].strip(), own);
+		}
+		if (!builds.isEmpty()) {
+			only = String.join(",", builds.keySet());
+		}
 		// -Dcensus.songs=a,b,c: any of the substrings, so a handful of songs can be asked for at once.
 		List<String> wanted = only.isEmpty() ? List.of()
 			: java.util.Arrays.stream(only.split(",")).map(String::strip)
@@ -276,11 +309,20 @@ class FaultCensusProbe {
 			// from the composition in game ticks, and handed sequence events it builds a different
 			// song than the paste would -- at the wrong speed, with the two tick parities scrambled.
 			// Asking eventNotes directly is how a probe answers for a machine nobody can paste.
+			int lanes = SongAnalysis.of(song, game.dedupe(), true, game.thinning()).lanesNeeded();
+			if (wantLanes != 0 && lanes != wantLanes) {
+				continue;
+			}
+			LANES.put(name, lanes);
+			NAMES.put(name, song.name() == null ? name : song.name());
 			List<SongBuilder.EventNote> notes = game.notes(song, mode);
 			if (notes.isEmpty()) {
 				continue;
 			}
-			for (int[] size : sizes) {
+			List<int[]> ownSizes = builds.isEmpty() ? sizes
+				: builds.entrySet().stream().filter(entry -> name.contains(entry.getKey()))
+					.map(Map.Entry::getValue).findFirst().orElse(sizes);
+			for (int[] size : ownSizes) {
 				if (!readback) {
 					try {
 						SongBuilder.PastePlan plan = planOnly(notes, mode, size[0], size[1]);
@@ -363,6 +405,11 @@ class FaultCensusProbe {
 		faulty.sort((a, b) -> Long.compare(b.weight(), a.weight()));
 		System.out.println("   " + (rows.size() - faulty.size()) + " clean, " + faulty.size()
 			+ " with something wrong, " + millis / 1000 + "s");
+		long twoLane = LANES.values().stream().filter(lanes -> lanes == 2).count();
+		System.out.println("   " + LANES.size() + " songs surveyed: " + twoLane + " two-lane, "
+			+ (LANES.size() - twoLane) + " one-lane");
+		System.out.println("   two-lane: " + LANES.entrySet().stream()
+			.filter(entry -> entry.getValue() == 2).map(Map.Entry::getKey).toList());
 		// A clean run still has something to say.
 		//
 		// This used to return here, which took the census keys and the totals with it -- so the one
@@ -409,10 +456,11 @@ class FaultCensusProbe {
 					+ (a.getValue()[5] + a.getValue()[6]) * 1_000 + a.getValue()[2] * 100
 					+ a.getValue()[3]))
 			.forEach(entry -> System.out.println(String.format(
-				"   %-34s dead %6d  missing %4d  wrong %3d  breach %4d  walls in %3d out %3d  refused %d",
-				entry.getKey(), entry.getValue()[0], entry.getValue()[1], entry.getValue()[2],
+				"   %-34s %dL  dead %6d  missing %4d  wrong %3d  breach %4d  walls in %3d out %3d  refused %d   \"%s\"",
+				entry.getKey(), LANES.getOrDefault(entry.getKey(), 0), entry.getValue()[0],
+				entry.getValue()[1], entry.getValue()[2],
 				entry.getValue()[3], entry.getValue()[5], entry.getValue()[6],
-				entry.getValue()[4])));
+				entry.getValue()[4], NAMES.getOrDefault(entry.getKey(), entry.getKey()))));
 		}
 		// The shapes that meet at each break, which is what says whether twenty dead builds are twenty
 		// bugs or one. Nothing else here can tell those apart, and a session that guesses wrong spends
