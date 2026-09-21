@@ -32012,6 +32012,20 @@ public final class SongBuilder {
 	private static final String UNDERFLOOR = "minecraft:stone_slab[type=top]";
 
 	/**
+	 * The player's blocks for the two machines' lanes, the climbs and the supports, from the Build
+	 * Pasting settings. Stone, stone, glass and {@link #UNDERFLOOR} unless changed.
+	 *
+	 * <p>Never read by the walk. It plans in the defaults and these are swapped in on the way out,
+	 * in {@code marked}, so no rule the walk applies can be moved by a choice of block. Written only
+	 * by the config's setters, for the same reason as {@link #DEBUG_PASTE}: the tests drive the
+	 * builder with no config, and get the defaults.</p>
+	 */
+	public static String LANE_ONE_BLOCK = "minecraft:stone";
+	public static String LANE_TWO_BLOCK = "minecraft:stone";
+	public static String TRANSPARENT_BLOCK = "minecraft:glass";
+	public static String SUPPORT_BLOCK = UNDERFLOOR;
+
+	/**
 	 * Whether an instrument block is laid as a half-block everywhere it can be, rather than only
 	 * where the note hangs at the lane's own floor level.
 	 *
@@ -35010,7 +35024,7 @@ public final class SongBuilder {
 		 */
 		private String marked(BlockPos at, String block, int nearWall, int farWall, boolean walled) {
 			if (!DEBUG_PASTE && !MARK_SHAPES) {
-				return LIGHT_SHOW ? lamp(at, block) : block;
+				return material(at, LIGHT_SHOW ? lamp(at, block) : block, true);
 			}
 			// Silent, and lit so it is findable down a corridor.
 			//
@@ -35037,7 +35051,9 @@ public final class SongBuilder {
 				return "minecraft:dragon_head[rotation=8]";
 			}
 			if (!"minecraft:stone".equals(block)) {
-				return block;
+				// The colours are all on stone, so the climbs and the supports still take the
+				// player's blocks. The lane does not: its stone is a colour in the key.
+				return material(at, block, false);
 			}
 			// Never the block under a note. The instrument is read off it, so recolouring one is
 			// retuning it -- and stripped hyphae under a note block is not a marked kick, it is a bass.
@@ -35064,6 +35080,37 @@ public final class SongBuilder {
 				case 3 -> "minecraft:tuff_bricks";
 				default -> stone;
 			};
+		}
+
+		/**
+		 * The player's block in place of the default one, where a cell is plain lane, climb or support.
+		 *
+		 * <p>Never the block under a note. Stone, a top stone slab and glass are all instruments too
+		 * -- bass drum, bass drum and hat -- and the same string under a note block is that note's
+		 * voice, not lane. Asked of the note block itself as well as of the walk's note record, so a
+		 * note the record does not know about is still not retuned.</p>
+		 *
+		 * @param lanes whether plain stone is swapped as well, which a colour-coded build does not
+		 *     want: there stone is one of the colours in the key
+		 */
+		private String material(BlockPos at, String block, boolean lanes) {
+			BlockPos over = at.above();
+			if (notes.containsKey(over)
+					|| blocks.getOrDefault(over, "").startsWith("minecraft:note_block")) {
+				return block;
+			}
+			if (lanes && "minecraft:stone".equals(block)) {
+				// The tint is machine and parity together, see laneTint(int, int). A cell laid with
+				// no machine being walked -- the starter, or a one-machine layout -- is lane one.
+				return laneTintAt.getOrDefault(at, 0) / 2 == 1 ? LANE_TWO_BLOCK : LANE_ONE_BLOCK;
+			}
+			if ("minecraft:glass".equals(block)) {
+				return TRANSPARENT_BLOCK;
+			}
+			if (UNDERFLOOR.equals(block)) {
+				return SUPPORT_BLOCK;
+			}
+			return block;
 		}
 
 		/**

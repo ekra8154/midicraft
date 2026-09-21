@@ -41,7 +41,7 @@ bottom. An optional single-number scroll style cycles delays directionally.
 The Settings tab in the Composer's menu bar opens them, and so does the
 configuration button beside the mod in Mod Menu's list if that mod is installed.
 Neither route needs anything beyond Fabric API. Settings are grouped into
-Composer, Placement Sequence, In-world tools, Keys, Server
+Composer, Build Pasting, Placement Sequence, In-world tools, Keys, Server
 Friendliness and Debug; any one of them can be put back with the arrow beside it, and a whole tab
 or the whole mod can be reset from the buttons underneath. Resetting the whole
 mod leaves key bindings alone.
@@ -51,6 +51,11 @@ labels over blocks and scrolling to retune them are tools you turn on when you
 want them, rather than the first thing a new world greets you with. What the
 settings cover:
 
+- the blocks a paste is built from: each machine's lane (stone), the climbs
+  between floors (glass) and the supports under a floor (stone slab). Each is
+  typed as a block id and refused if it would break the machine: a lane block
+  has to conduct redstone, a transparent one must not, and a support needs a
+  solid top. The block under a note is its instrument and is never swapped;
 - a GUI scale for the mod's own screens, separate from Minecraft's, since a piano
   roll wants more pixels than a hotbar does;
 - a master switch for the in-world tools, which does not touch the Composer;

@@ -3,6 +3,7 @@ package com.midicraft.client;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.midicraft.NoteSequence;
+import com.midicraft.client.compat.LaneMaterials;
 import com.midicraft.client.composer.ChordSkips;
 import com.midicraft.client.composer.ChordThinner;
 import com.midicraft.client.composer.ComposerProject;
@@ -396,6 +397,10 @@ public final class MidicraftConfig {
 	/** Whether the one-time "the Composer is behind /midicraft" line has been said. */
 	private boolean seenWelcome;
 	private ColorCodedPaste colorCodedPaste;
+	private String laneOneBlock;
+	private String laneTwoBlock;
+	private String transparentBlock;
+	private String supportBlock;
 	private int midiVelocityCutoff;
 	private int chordThinTarget;
 	/** Whether a chord over the target may play a counted instrument with fewer copies. */
@@ -563,6 +568,16 @@ public final class MidicraftConfig {
 				instance.setColorCodedPaste(stored.colorCodedPaste != null ? stored.colorCodedPaste
 					: Boolean.TRUE.equals(stored.debugPasteEnabled)
 						? ColorCodedPaste.NORMAL : ColorCodedPaste.OFF);
+				// Checked on the way in, since a file can be edited by hand: a block that will not do
+				// for its role goes back to the default rather than into every paste.
+				instance.setLaneOneBlock(LaneMaterials.accepted(LaneMaterials.Role.LANE,
+					stored.laneOneBlock));
+				instance.setLaneTwoBlock(LaneMaterials.accepted(LaneMaterials.Role.LANE,
+					stored.laneTwoBlock));
+				instance.setTransparentBlock(LaneMaterials.accepted(LaneMaterials.Role.TRANSPARENT,
+					stored.transparentBlock));
+				instance.setSupportBlock(LaneMaterials.accepted(LaneMaterials.Role.SUPPORT,
+					stored.supportBlock));
 				instance.midiDefaultInstrument = stored.midiDefaultInstrument == null || stored.midiDefaultInstrument.isBlank()
 					? "HARP"
 					: stored.midiDefaultInstrument;
@@ -1261,6 +1276,54 @@ public final class MidicraftConfig {
 			this.colorCodedPaste == ColorCodedPaste.LIGHT_SHOW;
 	}
 
+	/**
+	 * The blocks a paste is built from where the machine does not care which block it is: each
+	 * machine's plain lane, the climbs, and the level under a floor. See {@link LaneMaterials}.
+	 *
+	 * <p>Stored as typed, once it has been normalised and checked. The setters write the builder's
+	 * copies, as {@link #setColorCodedPaste} does and for the same reason, and are handed values
+	 * that have already been checked: nothing here asks the registry.</p>
+	 */
+	public String laneOneBlock() {
+		return laneOneBlock;
+	}
+
+	public void setLaneOneBlock(String block) {
+		this.laneOneBlock = block;
+		com.midicraft.client.compat.SongBuilder.LANE_ONE_BLOCK =
+			LaneMaterials.placed(LaneMaterials.Role.LANE, block);
+	}
+
+	public String laneTwoBlock() {
+		return laneTwoBlock;
+	}
+
+	public void setLaneTwoBlock(String block) {
+		this.laneTwoBlock = block;
+		com.midicraft.client.compat.SongBuilder.LANE_TWO_BLOCK =
+			LaneMaterials.placed(LaneMaterials.Role.LANE, block);
+	}
+
+	public String transparentBlock() {
+		return transparentBlock;
+	}
+
+	public void setTransparentBlock(String block) {
+		this.transparentBlock = block;
+		com.midicraft.client.compat.SongBuilder.TRANSPARENT_BLOCK =
+			LaneMaterials.placed(LaneMaterials.Role.TRANSPARENT, block);
+	}
+
+	public String supportBlock() {
+		return supportBlock;
+	}
+
+	public void setSupportBlock(String block) {
+		this.supportBlock = block;
+		com.midicraft.client.compat.SongBuilder.SUPPORT_BLOCK =
+			LaneMaterials.placed(LaneMaterials.Role.SUPPORT, block);
+	}
+
 
 	public String midiDefaultInstrument() {
 		return midiDefaultInstrument;
@@ -1596,6 +1659,11 @@ public final class MidicraftConfig {
 		// settings screen asks what a value would go back to, and going through the setter meant
 		// opening the settings quietly switched the marking off underneath whoever had turned it on.
 		config.colorCodedPaste = ColorCodedPaste.OFF;
+		// Fields, not setters, for the same reason: the setters write the builder's statics.
+		config.laneOneBlock = LaneMaterials.Role.LANE.fallback();
+		config.laneTwoBlock = LaneMaterials.Role.LANE.fallback();
+		config.transparentBlock = LaneMaterials.Role.TRANSPARENT.fallback();
+		config.supportBlock = LaneMaterials.Role.SUPPORT.fallback();
 		config.midiDefaultInstrument = "HARP";
 		config.midiInstrumentSource = MidiInstrumentSource.FROM_FILE_THEN_NAME;
 		config.composerSpeedQuarters = DEFAULT_COMPOSER_SPEED_QUARTERS;
@@ -1796,6 +1864,10 @@ public final class MidicraftConfig {
 		/** Only ever read: the on/off this was before it had three values. Never written back. */
 		private Boolean debugPasteEnabled;
 		private ColorCodedPaste colorCodedPaste;
+		private String laneOneBlock;
+		private String laneTwoBlock;
+		private String transparentBlock;
+		private String supportBlock;
 		private String midiDefaultInstrument;
 		private MidiInstrumentSource midiInstrumentSource;
 		private Integer midiVelocityCutoff;
@@ -1872,6 +1944,10 @@ public final class MidicraftConfig {
 			this.debugCommandsEnabled = config.debugCommandsEnabled;
 			this.seenWelcome = config.seenWelcome;
 			this.colorCodedPaste = config.colorCodedPaste;
+			this.laneOneBlock = config.laneOneBlock;
+			this.laneTwoBlock = config.laneTwoBlock;
+			this.transparentBlock = config.transparentBlock;
+			this.supportBlock = config.supportBlock;
 			this.midiDefaultInstrument = config.midiDefaultInstrument;
 			this.midiInstrumentSource = config.midiInstrumentSource;
 			this.midiVelocityCutoff = config.midiVelocityCutoff;
