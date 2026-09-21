@@ -2,7 +2,6 @@ package com.midicraft.client.compat;
 
 import com.midicraft.client.MidicraftConfig;
 import com.midicraft.client.MidicraftConfig.ChordPlaceOrder;
-import com.midicraft.client.MidicraftConfig.ColorCodedPaste;
 import com.midicraft.client.MidicraftConfig.MidiInstrumentSource;
 import com.midicraft.client.MidicraftConfig.MidiQuantizeGrid;
 import com.midicraft.client.MidicraftConfig.OverlayMode;
@@ -120,9 +119,6 @@ public final class SettingsScreen extends Screen {
 		// Composer first and open first: it is what the mod is for, and the tab someone arriving
 		// from its own menu bar has already told you they were looking at.
 		COMPOSER("composer"),
-		// Straight under the Composer, because a build is where a composition goes next: these
-		// are the settings that change what the Paste button lays down.
-		BUILD_PASTING("build_pasting"),
 		PLACEMENT("placement"),
 		IN_WORLD("in_world"),
 		KEYS("keys"),
@@ -632,15 +628,6 @@ public final class SettingsScreen extends Screen {
 					config::setWaitForServerAcknowledgement)));
 				entries.add(Entry.of(toggle("require_line_of_sight",
 					MidicraftConfig::requireLineOfSight, config::setRequireLineOfSight)));
-			}
-			case BUILD_PASTING -> {
-				entries.add(Entry.of(toggle("ultra_lane_start_top",
-					MidicraftConfig::ultraLaneStartTop, config::setUltraLaneStartTop)));
-				// The same setting as /midicraft colorcodepaste, and not behind the debug-commands
-				// setting any more: reading a build by its colours is a way of working, not a test.
-				// The command only flips between off and normal; the light show is chosen here.
-				entries.add(Entry.of(choice("color_coded_paste", ColorCodedPaste.values(),
-					MidicraftConfig::colorCodedPaste, config::setColorCodedPaste)));
 			}
 			case PLACEMENT -> {
 				entries.add(Entry.of(choice("sequencing_edit_protection",

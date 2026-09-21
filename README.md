@@ -41,7 +41,7 @@ bottom. An optional single-number scroll style cycles delays directionally.
 The Settings tab in the Composer's menu bar opens them, and so does the
 configuration button beside the mod in Mod Menu's list if that mod is installed.
 Neither route needs anything beyond Fabric API. Settings are grouped into
-Composer, Build Pasting, Placement Sequence, In-world tools, Keys, Server
+Composer, Placement Sequence, In-world tools, Keys, Server
 Friendliness and Debug; any one of them can be put back with the arrow beside it, and a whole tab
 or the whole mod can be reset from the buttons underneath. Resetting the whole
 mod leaves key bindings alone.
@@ -355,16 +355,17 @@ the moment you throw it -- the two subcommands come and go from tab-completion
 without a rejoin, and refuse to run while it is off. `/midicraft asciidiagram <from> <to> [view] [facing] [notes]`
 draws a region of the world as text.
 
-Color-coded paste is not behind that switch: it is a setting on the Build
-Pasting tab with three values. **Normal** colours the next build by what laid
-each block -- dead wire red, wrong notes as lit copper bulbs, collisions in sea
-lantern -- and is broken on purpose wherever two shapes collided. **Light show**
-is a plain build that plays, with every bus, stacked chord centre and top rail
-block made a redstone lamp, so the song draws a glowing line as it runs; the
-lane's own floor, its padding and the floor rail stay stone, and nothing under a
-note changes, since that block is the note's instrument.
-`/midicraft colorcodepaste [on|off]` switches between off and normal from chat,
-and the bare command prints the colour key.
+Color-coded paste is not behind that switch: it is picked per paste on the
+paste screen, alongside whether the build starts at the top or the bottom, and
+the last choice is remembered. **Normal** is plain stone. **Light show** is a
+plain build that plays, with every bus, stacked chord centre and top rail block
+made a redstone lamp, so the song draws a glowing line as it runs; the lane's own
+floor, its padding and the floor rail stay stone, and nothing under a note
+changes, since that block is the note's instrument. **Color coded** colours the
+build by what laid each block -- dead wire red, wrong notes as lit copper bulbs,
+collisions in sea lantern -- and is broken on purpose wherever two shapes
+collided. `/midicraft colorcodepaste [on|off]` switches between color coded and
+normal from chat, and the bare command prints the colour key.
 
 The other is `/midicraft paste`, which builds a run of chords you type out
 rather than a song, for testing layouts:

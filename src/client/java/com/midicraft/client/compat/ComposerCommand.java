@@ -52,7 +52,7 @@ public final class ComposerCommand {
 					.executes(context -> open(new SettingsScreen(null))))
 				// Everything the mod adds hangs here, so it holds one name in a command list that
 				// every other mod is also competing for. The first two carry their own gate; the
-				// third is a setting anyone can reach from the Build Pasting tab, so it has none.
+				// third is a choice anyone can make on the paste screen, so it has none.
 				.then(DebugCommands.pasteCommand())
 				.then(DebugCommands.asciiDiagramCommand())
 				.then(DebugCommands.colorCodePasteCommand())));

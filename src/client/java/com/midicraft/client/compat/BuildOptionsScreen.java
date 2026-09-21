@@ -43,16 +43,31 @@ final class BuildOptionsScreen extends Screen {
 	private final com.midicraft.client.composer.ComposerProject project;
 	private final boolean dedupeIdenticalNotes;
 	private final Consumer<SongBuilder.PasteMode> confirm;
-	private SongBuilder.PasteMode mode;
 	/**
-	 * Whether the layout list is showing.
+	 * The layout being pasted, which is no longer asked for.
 	 *
-	 * <p>A list of every layout was fine while there were four of them. Since layouts are meant to
-	 * keep being added rather than replaced -- an old one still suits the song it was made for --
-	 * the list has to stop being the thing you look at first, so it folds away into the one line
-	 * that says which layout is chosen.</p>
+	 * <p>Only the interleaved layout is kept up, so there is nothing to choose between and no row
+	 * that names it. Still carried, because the forecast and the paste both plan by it.</p>
 	 */
-	private boolean layoutsShowing;
+	private final SongBuilder.PasteMode mode;
+	/**
+	 * Whether the build starts on its top floor and works down.
+	 *
+	 * <p>Asked here rather than in the settings, because it is a question about the ground you are
+	 * standing on: you start from the top when what is under the origin is what you cannot dig. The
+	 * last answer is remembered like the width is, as where the next paste starts from.</p>
+	 */
+	private boolean startTop;
+	/**
+	 * What the blocks are made of: plain stone, lamps, or coloured by what laid them.
+	 *
+	 * <p>Put into effect the moment it is picked rather than on Paste, because the colour-coded build
+	 * also changes what gets built -- a collision is built through instead of refused -- and the
+	 * forecast plans off the builder's copies of it. {@link #coloursOnOpen} is what goes back if the
+	 * screen is left without pasting.</p>
+	 */
+	private MidicraftConfig.ColorCodedPaste colours;
+	private final MidicraftConfig.ColorCodedPaste coloursOnOpen;
 	private double commandsPerTick;
 	private int laneWidth;
 	private int laneFloors;
@@ -350,20 +365,18 @@ final class BuildOptionsScreen extends Screen {
 		this.confirm = confirm;
 		this.mode = SongBuilder.PasteMode.OFFERED.contains(initialMode)
 			? initialMode : SongBuilder.PasteMode.OFFERED.getFirst();
+		this.startTop = MidicraftConfig.get().pasteStartTop();
+		this.colours = MidicraftConfig.get().colorCodedPaste();
+		this.coloursOnOpen = colours;
 		this.commandsPerTick = MidicraftConfig.get().commandsPerTick();
 		this.laneWidth = MidicraftConfig.get().buildLaneWidth();
 		this.laneFloors = MidicraftConfig.get().buildLaneFloors();
 		this.reseedDelay = MidicraftConfig.get().parityReseedDelay();
 	}
 
-	/** Rows the layout control takes: the chosen one, plus every option while the list is open. */
-	private int layoutRows() {
-		return layoutsShowing ? 1 + SongBuilder.PasteMode.OFFERED.size() : 1;
-	}
-
-	/** Top of the width row, which only a lane build has. */
+	/** Top of the width row, which only a lane build has. Under the start and block rows. */
 	private int widthRow(int top) {
-		return top + 14 + layoutRows() * 22 + 6;
+		return top + 14 + 2 * 22 + 6;
 	}
 
 	private int floorRow(int top) {
@@ -437,35 +450,33 @@ final class BuildOptionsScreen extends Screen {
 		int top = topRow();
 
 		int y = top + 14;
-		// A list of one is not a choice, so with a single layout offered the row only names it.
-		boolean choosing = SongBuilder.PasteMode.OFFERED.size() > 1;
-		Button layout = addRenderableWidget(Button.builder(
-				Component.literal(mode.label() + (!choosing ? "" : layoutsShowing ? "  ^" : "  v")),
-				clicked -> {
-					layoutsShowing = !layoutsShowing;
-					init();
-				})
+		// A button that flips rather than a slider of two rungs: there are two answers, and the one
+		// showing is the one chosen.
+		addRenderableWidget(Button.builder(Component.literal(startLine(startTop)), clicked -> {
+				startTop = !startTop;
+				clicked.setMessage(Component.literal(startLine(startTop)));
+				requestForecast();
+			})
 			.bounds(left, y, width, 20)
-			.tooltip(Tooltip.create(Component.literal(describe(mode))))
+			.tooltip(Tooltip.create(Component.literal("Where the build is put down. From the bottom "
+				+ "it starts on the bottom floor and climbs; from the top it starts at the top and "
+				+ "works down, wanting clear ground below the origin rather than above. Not "
+				+ "mirror images: a descent is the dearer turn, so a song can come out better one way "
+				+ "round. At one floor they are the same build.")))
 			.build());
-		layout.active = choosing;
 		y += 22;
-		if (layoutsShowing) {
-			for (SongBuilder.PasteMode option : SongBuilder.PasteMode.OFFERED) {
-				Button button = addRenderableWidget(Button.builder(
-						Component.literal((option == mode ? "> " : "  ") + option.label()),
-						clicked -> {
-							mode = option;
-							layoutsShowing = false;
-							init();
-						})
-					.bounds(left, y, width, 20)
-					.tooltip(Tooltip.create(Component.literal(describe(option))))
-					.build());
-				button.active = option != mode;
-				y += 22;
-			}
-		}
+		// Cycles in the order offered, plain first: the ordinary build is the one most pastes want.
+		addRenderableWidget(Button.builder(Component.literal(blocksLine(colours)), clicked -> {
+				MidicraftConfig.ColorCodedPaste[] all = MidicraftConfig.ColorCodedPaste.values();
+				colours = all[(colours.ordinal() + 1) % all.length];
+				MidicraftConfig.get().setColorCodedPaste(colours);
+				clicked.setMessage(Component.literal(blocksLine(colours)));
+				clicked.setTooltip(Tooltip.create(Component.literal(blocksTooltip(colours))));
+				requestForecast();
+			})
+			.bounds(left, y, width, 20)
+			.tooltip(Tooltip.create(Component.literal(blocksTooltip(colours))))
+			.build());
 
 		if (hasLaneControls()) {
 			labelledWidth = 0;
@@ -501,6 +512,8 @@ final class BuildOptionsScreen extends Screen {
 			MidicraftConfig.get().setBuildLaneWidth(laneWidth);
 			MidicraftConfig.get().setBuildLaneFloors(laneFloors);
 			MidicraftConfig.get().setParityReseedDelay(reseedDelay);
+			// Written down before the confirm, like the rest: the paste plans off the config.
+			MidicraftConfig.get().setPasteStartTop(startTop);
 			MidicraftConfig.get().setPasteMode(mode.name());
 			MidicraftConfig.save();
 			confirm.accept(mode);
@@ -527,7 +540,8 @@ final class BuildOptionsScreen extends Screen {
 	 * lowest thing on the screen and they were already close to the bottom of a small window.</p>
 	 */
 	private int topRow() {
-		return Math.max(40, height / 2 - 96 - (BUTTON_ROW - 46));
+		// Twenty-two higher again for the block row, which went in under the start row.
+		return Math.max(40, height / 2 - 96 - (BUTTON_ROW - 46) - 22);
 	}
 
 	/**
@@ -541,7 +555,8 @@ final class BuildOptionsScreen extends Screen {
 		// gives up its parity to a piston instead of padding across the silence, and a build that
 		// swaps halves is a different length from one that waits. Left out, the screen answered
 		// every position of that slider with the forecast it had already made for the first.
-		String key = mode.name() + " " + laneWidth + " " + laneFloors + " " + reseedDelay;
+		String key = mode.name() + " " + laneWidth + " " + laneFloors + " " + reseedDelay + " "
+			+ startTop + " " + colours;
 		if (key.equals(forecastKey)) {
 			return;
 		}
@@ -563,7 +578,7 @@ final class BuildOptionsScreen extends Screen {
 		// half-written.
 		SongBuilder.BuildLimits limits = new SongBuilder.BuildLimits(
 			MidicraftConfig.get().maxBuildFloors(), laneWidth, laneFloors,
-			MidicraftConfig.get().ultraLaneStartTop(), reseedDelay);
+			startTop, reseedDelay);
 		FORECASTER.execute(() -> {
 			// Dropped before it is worked out, not after. A press asked for one forecast; a drag
 			// across the width slider asks for a hundred and twenty, and planning a big song is tens
@@ -789,6 +804,31 @@ final class BuildOptionsScreen extends Screen {
 			: blocks + " blocks wide before it folds back";
 	}
 
+	private static String startLine(boolean fromTop) {
+		return fromTop ? "Starts at the top and works down" : "Starts at the bottom and climbs";
+	}
+
+	private static String blocksLine(MidicraftConfig.ColorCodedPaste colours) {
+		return switch (colours) {
+			case OFF -> "Normal - plain stone";
+			case LIGHT_SHOW -> "Light show - lamps along the song";
+			case NORMAL -> "Color coded - marked for reading";
+		};
+	}
+
+	private static String blocksTooltip(MidicraftConfig.ColorCodedPaste colours) {
+		return switch (colours) {
+			case OFF -> "The ordinary build: plain stone, and a build that plays.";
+			case LIGHT_SHOW -> "A plain build that plays, with every bus, stacked chord centre and "
+				+ "top rail block made a redstone lamp, so the song draws a glowing line as it runs. "
+				+ "Nothing under a note changes, since that block is the note's instrument.";
+			case NORMAL -> "Colours the build by what laid each block: stone by the shape that "
+				+ "placed it, dead wire in red, wrong notes as lit copper bulbs, missed ones wearing a "
+				+ "dragon head. Collisions build through and light up in sea lantern, so a build with "
+				+ "any of those is broken on purpose. /midicraft colorcodepaste prints the colour key.";
+		};
+	}
+
 	private String floorLine(int floors) {
 		return floors == 1
 			? "1 floor - flat, and folds sideways instead"
@@ -805,42 +845,6 @@ final class BuildOptionsScreen extends Screen {
 		};
 	}
 
-	private static String describe(SongBuilder.PasteMode option) {
-		return switch (option) {
-			case COMPACT_CUBE -> "Folds onto stacked floors joined by a glass redstone riser. "
-				+ "Smallest footprint, and the only layout that keeps a long song inside earshot.";
-			case COMPACT -> "Folds back and forth on one level into a square. Compact, but a long "
-				+ "song still reaches past the 48-block range note blocks can be heard from.";
-			case COMPACT_LANE -> "Folds up and down inside a width you set, and creeps away from you "
-				+ "one step at a time. The only layout you can follow in a straight line: walk it, "
-				+ "or lay a rail. More floors make it taller and shorter.";
-			case ULTRA_COMPACT_LANE -> "The Compact lane, packed harder. A chord of four to seven "
-				+ "stacks around a single repeater instead of stringing out along a bus, and lanes "
-				+ "sit three apart rather than four wherever their notes can touch safely. Same "
-				+ "width and floor controls.";
-			case ULTRA_COMPACT_LANE_V2 -> "The same shapes, decided again from scratch. Every lane "
-				+ "ends by cutting whichever chord reaches its wall, so nothing is padded out to get "
-				+ "there. Chords above 25 notes are not built. Experimental: try it against the "
-				+ "layout above rather than instead of it.";
-			case LANE -> "One straight line. Easiest to read and repair, largest footprint.";
-			case ULTRA_HALF_TICK_LANE -> "Two Ultra compact lane snakes side by side, one playing "
-				+ "the even game ticks and one the odd, with four blocks between their corridors. "
-				+ "Same width and floor controls, applied to each. You wire the head yourself: the "
-				+ "second snake must start exactly one game tick after the first. Experimental -- "
-				+ "the two are not yet paced against each other, so they drift apart as the song "
-				+ "goes on.";
-			case HALF_TICK_LANE -> "Two straight lines, the right one playing the even game ticks "
-				+ "and the left the odd. Plays the song at double speed and twice the timing "
-				+ "precision. You wire the head yourself: the left lane must start exactly one game "
-				+ "tick after the right.";
-			case INTERLEAVED_HALF_TICK -> "The two half-tick machines woven through one region: "
-				+ "each one a serpentine whose long trunk turns leave room, and the other's fingers "
-				+ "reach into it, mirrored, half a cycle along. Both halves of every bar play within "
-				+ "a few blocks of each other. You wire the heads yourself: the second machine must "
-				+ "start exactly one game tick after the first. Experimental.";
-		};
-	}
-
 	@Override
 	public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
 		super.extractRenderState(graphics, mouseX, mouseY, partialTick);
@@ -850,7 +854,7 @@ final class BuildOptionsScreen extends Screen {
 
 		graphics.text(font, "Paste the build sequence of \"" + songName + "\" with /setblock",
 			left, top - 14, 0xFFFFFFFF, false);
-		graphics.text(font, "Layout", left, top + 2, 0xFF8A9098, false);
+		graphics.text(font, "Build", left, top + 2, 0xFF8A9098, false);
 
 		int rateY = rateRow(top);
 		SongBuilder.BlockCounts blocks = SongBuilder.blockCounts(sequence);
@@ -915,6 +919,9 @@ final class BuildOptionsScreen extends Screen {
 
 	@Override
 	public void onClose() {
+		// Left without pasting, so the block choice made here goes back to what it was: it took
+		// effect when it was picked, for the forecast's sake, not because it was meant.
+		MidicraftConfig.get().setColorCodedPaste(coloursOnOpen);
 		minecraft.gui.setScreen(parent);
 	}
 

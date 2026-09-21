@@ -551,7 +551,7 @@ public final class SongBuilder {
 		static BuildLimits fromConfig() {
 			MidicraftConfig config = MidicraftConfig.get();
 			return new BuildLimits(config.maxBuildFloors(), config.buildLaneWidth(),
-				config.buildLaneFloors(), config.ultraLaneStartTop(), config.parityReseedDelay());
+				config.buildLaneFloors(), config.pasteStartTop(), config.parityReseedDelay());
 		}
 	}
 

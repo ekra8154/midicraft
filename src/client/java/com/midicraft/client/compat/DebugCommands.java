@@ -154,8 +154,8 @@ public final class DebugCommands {
 	/**
 	 * The collision marking, as {@code /midicraft colorcodepaste}.
 	 *
-	 * <p>Not behind the debug-commands setting, unlike its neighbours here: the same switch sits on
-	 * the Build Pasting tab of the settings for anyone, and a command that refused what the screen
+	 * <p>Not behind the debug-commands setting, unlike its neighbours here: the same choice sits on
+	 * the paste screen for anyone, and a command that refused what the screen
 	 * allows would only be a second, stricter copy of it.</p>
 	 *
 	 * <p>A toggle rather than an argument to the paste, because the builds worth looking at this
@@ -664,8 +664,8 @@ public final class DebugCommands {
 			+ switch (mode) {
 				case OFF -> "off";
 				case NORMAL -> "on";
-				case LIGHT_SHOW -> "set to Light show on the Build Pasting tab, so the next build "
-					+ "comes out in lamps rather than in these colours";
+				case LIGHT_SHOW -> "off, with Light show picked on the paste screen, so the next "
+					+ "build comes out in lamps rather than in these colours";
 			}
 			+ ". /midicraft colorcodepaste on|off to change it.")
 			.withStyle(on ? ChatFormatting.YELLOW : ChatFormatting.GRAY));
@@ -680,8 +680,8 @@ public final class DebugCommands {
 	}
 
 	/**
-	 * Off or normal, and nothing else. The light show is a way to build a song for keeps, chosen
-	 * once on the Build Pasting tab; this is the switch for reading a build, flipped far more often.
+	 * Plain or colour coded, and nothing else. The light show is a way to build a song for keeps,
+	 * chosen on the paste screen; this is the switch for reading a build, flipped far more often.
 	 */
 	private static int debugPaste(FabricClientCommandSource source, boolean on) {
 		MidicraftConfig.get().setColorCodedPaste(on

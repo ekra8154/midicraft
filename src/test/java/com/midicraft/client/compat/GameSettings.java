@@ -43,6 +43,8 @@ final class GameSettings {
 		Boolean thinChordsByStrikes;
 		Integer maxBuildFloors;
 		Integer parityReseedDelay;
+		Boolean pasteStartTop;
+		/** The old name of {@link #pasteStartTop}, read where a file predates it. */
 		Boolean ultraLaneStartTop;
 		/** The old on/off, read where a file predates {@link #colorCodedPaste}. */
 		Boolean debugPasteEnabled;
@@ -154,7 +156,8 @@ final class GameSettings {
 			clamp(stored.parityReseedDelay == null
 					? MidicraftConfig.DEFAULT_PARITY_RESEED_DELAY : stored.parityReseedDelay,
 				MidicraftConfig.MIN_PARITY_RESEED_DELAY, MidicraftConfig.MAX_PARITY_RESEED_DELAY),
-			stored.ultraLaneStartTop != null && stored.ultraLaneStartTop,
+			stored.pasteStartTop != null ? stored.pasteStartTop
+				: stored.ultraLaneStartTop != null && stored.ultraLaneStartTop,
 			stored.colorCodedPaste != null ? "NORMAL".equals(stored.colorCodedPaste)
 				: stored.debugPasteEnabled != null && stored.debugPasteEnabled,
 			stored.buildLaneWidth == null ? MidicraftConfig.DEFAULT_BUILD_LANE_WIDTH

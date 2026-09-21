@@ -177,14 +177,16 @@ public final class MidicraftConfig {
 	/**
 	 * What a paste is built from, beyond what the machine needs. See {@link #colorCodedPaste()}.
 	 *
-	 * <p>{@code NORMAL} is the old debug paste: every shape coloured, and a collision built through
-	 * rather than refused. {@code LIGHT_SHOW} is none of that -- a plain build that plays, with the
-	 * chord blocks swapped for redstone lamps so the song lights up as it runs.</p>
+	 * <p>{@code OFF} is the ordinary build, all stone, and is what the paste screen calls Normal.
+	 * {@code LIGHT_SHOW} is that same plain build with the chord blocks swapped for redstone lamps so
+	 * the song lights up as it runs. {@code NORMAL} is the old debug paste, shown as Color coded:
+	 * every shape coloured, and a collision built through rather than refused. The constant names are
+	 * what the config file stores, so they stay; the order is the order the paste screen offers.</p>
 	 */
 	public enum ColorCodedPaste {
 		OFF,
-		NORMAL,
-		LIGHT_SHOW
+		LIGHT_SHOW,
+		NORMAL
 	}
 
 	public enum MidiQuantizeGrid {
@@ -430,7 +432,7 @@ public final class MidicraftConfig {
 	private int buildLaneWidth;
 	private int buildLaneFloors;
 	private int parityReseedDelay;
-	private boolean ultraLaneStartTop;
+	private boolean pasteStartTop;
 	private String importDirectory;
 	private int maxBuildFloors;
 	private String pasteMode;
@@ -585,8 +587,11 @@ public final class MidicraftConfig {
 					stored.parityReseedDelay == null
 						? DEFAULT_PARITY_RESEED_DELAY : stored.parityReseedDelay
 				);
-				instance.ultraLaneStartTop = stored.ultraLaneStartTop != null
-					&& stored.ultraLaneStartTop;
+				// Read under its old name too, from before there was one layout and the setting
+				// stopped being about the Ultra lane.
+				Boolean startTop = stored.pasteStartTop != null ? stored.pasteStartTop
+					: stored.ultraLaneStartTop;
+				instance.pasteStartTop = startTop != null && startTop;
 				instance.importDirectory = stored.importDirectory;
 				instance.conversionGapPercentile = clampConversionGapPercentile(
 					stored.conversionGapPercentile == null
@@ -1230,12 +1235,12 @@ public final class MidicraftConfig {
 	}
 
 	/**
-	 * Whether a paste comes out marked up, lit up, or plain.
+	 * Whether a paste comes out plain, lit up, or marked up.
 	 *
-	 * <p>Remembered between sessions because it is a way of working rather than a one-off: the
-	 * builds worth marking are the ones being read over several evenings, and having to turn it back
-	 * on after every launch is how a build gets pasted plain by accident and read for an hour before
-	 * anybody notices the colours are missing.</p>
+	 * <p>Chosen per paste on the paste screen, and remembered as where the next one starts from:
+	 * the builds worth marking are the ones being read over several evenings, and having to pick it
+	 * again after every launch is how a build gets pasted plain by accident and read for an hour
+	 * before anybody notices the colours are missing.</p>
 	 */
 	public ColorCodedPaste colorCodedPaste() {
 		return colorCodedPaste;
@@ -1322,18 +1327,18 @@ public final class MidicraftConfig {
 	}
 
 	/**
-	 * Whether an Ultra compact lane build starts on its top floor and works down.
+	 * Whether a paste starts on its top floor and works down.
 	 *
 	 * <p>Off by default, which is where every build made so far started. Remembered between
 	 * pastes like the lane width is, because it is a property of the plot rather than of the
 	 * song -- you start from the top when the ground under the origin is what you cannot dig.</p>
 	 */
-	public boolean ultraLaneStartTop() {
-		return ultraLaneStartTop;
+	public boolean pasteStartTop() {
+		return pasteStartTop;
 	}
 
-	public void setUltraLaneStartTop(boolean ultraLaneStartTop) {
-		this.ultraLaneStartTop = ultraLaneStartTop;
+	public void setPasteStartTop(boolean pasteStartTop) {
+		this.pasteStartTop = pasteStartTop;
 	}
 
 	public void setBuildLaneFloors(int buildLaneFloors) {
@@ -1618,7 +1623,7 @@ public final class MidicraftConfig {
 		config.buildLaneWidth = DEFAULT_BUILD_LANE_WIDTH;
 		config.buildLaneFloors = DEFAULT_BUILD_LANE_FLOORS;
 		config.parityReseedDelay = DEFAULT_PARITY_RESEED_DELAY;
-		config.ultraLaneStartTop = false;
+		config.pasteStartTop = false;
 		config.maxBuildFloors = DEFAULT_MAX_BUILD_FLOORS;
 		config.pasteMode = "COMPACT_CUBE";
 		return config;
@@ -1818,6 +1823,8 @@ public final class MidicraftConfig {
 		private Integer buildLaneWidth;
 		private Integer buildLaneFloors;
 		private Integer parityReseedDelay;
+		private Boolean pasteStartTop;
+		/** The old name of {@link #pasteStartTop}, read and never written. */
 		private Boolean ultraLaneStartTop;
 		private String importDirectory;
 		private Integer maxBuildFloors;
@@ -1899,7 +1906,7 @@ public final class MidicraftConfig {
 			this.buildLaneWidth = config.buildLaneWidth;
 			this.buildLaneFloors = config.buildLaneFloors;
 			this.parityReseedDelay = config.parityReseedDelay;
-			this.ultraLaneStartTop = config.ultraLaneStartTop;
+			this.pasteStartTop = config.pasteStartTop;
 			this.importDirectory = config.importDirectory;
 			this.maxBuildFloors = config.maxBuildFloors;
 			this.pasteMode = config.pasteMode;
