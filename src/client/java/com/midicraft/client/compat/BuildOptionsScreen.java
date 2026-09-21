@@ -825,7 +825,7 @@ final class BuildOptionsScreen extends Screen {
 			case NORMAL -> "Colours the build by what laid each block: stone by the shape that "
 				+ "placed it, dead wire in red, wrong notes as lit copper bulbs, missed ones wearing a "
 				+ "dragon head. Collisions build through and light up in sea lantern, so a build with "
-				+ "any of those is broken on purpose. /midicraft colorcodepaste prints the colour key.";
+				+ "any of those is broken on purpose. The README has the colour key.";
 		};
 	}
 

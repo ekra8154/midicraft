@@ -51,11 +51,9 @@ public final class ComposerCommand {
 				.then(LiteralArgumentBuilder.<FabricClientCommandSource>literal("settings")
 					.executes(context -> open(new SettingsScreen(null))))
 				// Everything the mod adds hangs here, so it holds one name in a command list that
-				// every other mod is also competing for. The first two carry their own gate; the
-				// third is a choice anyone can make on the paste screen, so it has none.
+				// every other mod is also competing for. Both carry their own gate.
 				.then(DebugCommands.pasteCommand())
-				.then(DebugCommands.asciiDiagramCommand())
-				.then(DebugCommands.colorCodePasteCommand())));
+				.then(DebugCommands.asciiDiagramCommand())));
 	}
 
 	/**

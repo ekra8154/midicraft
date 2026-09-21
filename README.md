@@ -369,8 +369,38 @@ floor, its padding and the floor rail stay stone, and nothing under a note
 changes, since that block is the note's instrument. **Color coded** colours the
 build by what laid each block -- dead wire red, wrong notes as lit copper bulbs,
 collisions in sea lantern -- and is broken on purpose wherever two shapes
-collided. `/midicraft colorcodepaste [on|off]` switches between color coded and
-normal from chat, and the bare command prints the colour key.
+collided.
+
+The colour key for a color-coded build:
+
+| Block | Means |
+|---|---|
+| `stone` | the lane: wire, repeaters, corners, staircases |
+| `spruce_planks` | parity padding: a module moved to land on its beat |
+| `dark_oak_planks` | busy padding: a column spent to free the slots behind, so a chord can be cut |
+| `birch_planks` | corner padding: the columns a bend costs |
+| `acacia_planks` | the closing pad: wire out to the wall, laid where a chord could not be cut |
+| `bamboo_planks` | padding of any other kind, which v2 is not supposed to need |
+| `tuff` | a standard bus; also, where two machines share one region, machine B's plain ground on the even half of the game tick |
+| `polished_tuff` | a sunken bus: a bus whose opening cell is a note block, so it carries three notes free |
+| `andesite` | a standard stacked chord |
+| `stone_bricks` | machine A's plain ground while it plays the odd half of the game tick (stone is machine A on the even half) |
+| `tuff_bricks` | machine B's plain ground while it plays the odd half of the game tick (tuff is machine B on the even half) |
+| `sticky_piston` | a parity seam: the piston shoves the redstone block on its face into the air cell, three game ticks that move this lane to the other half of the game tick |
+| `deepslate` | a stacked bus |
+| `deepslate_tiles` | a cut chord's stacked head, with its tail across the staircase |
+| `cobbled_deepslate` | a stacked simple tail |
+| `smooth_basalt` | a double rail |
+| `polished_basalt` | a foldback cut: laid along x for the descent, along y for the climb |
+| `stripped_crimson_hyphae` | a lane standing outside its wall |
+| `red_nether_bricks` | wire the signal never reaches |
+| `waxed_copper_bulb` | a note that would sound at the wrong moment |
+| `dragon_head` | a note with nothing to set it off |
+| `sea_lantern` | a cell two shapes both wanted |
+
+Stripped crimson hyphae and red nether brick replace whichever stone colour a cell
+had, and dead wire wins over a breach. The block under a note is its instrument
+and is never recoloured.
 
 The other is `/midicraft paste`, which builds a run of chords you type out
 rather than a song, for testing layouts:

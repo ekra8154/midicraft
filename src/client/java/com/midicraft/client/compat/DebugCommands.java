@@ -152,26 +152,6 @@ public final class DebugCommands {
 	}
 
 	/**
-	 * The collision marking, as {@code /midicraft colorcodepaste}.
-	 *
-	 * <p>Not behind the debug-commands setting, unlike its neighbours here: the same choice sits on
-	 * the paste screen for anyone, and a command that refused what the screen
-	 * allows would only be a second, stricter copy of it.</p>
-	 *
-	 * <p>A toggle rather than an argument to the paste, because the builds worth looking at this
-	 * way are songs pasted from the build screen, which takes no arguments. On its own it says what
-	 * the colours mean rather than toggling: reading a marked build is the thing you do far more
-	 * often than turning the marking on, and a toggle you have to read the state of afterwards is a
-	 * toggle that gets pressed twice by accident.</p>
-	 */
-	static LiteralArgumentBuilder<FabricClientCommandSource> colorCodePasteCommand() {
-		return literal("colorcodepaste")
-			.executes(context -> colourKey(context.getSource()))
-			.then(literal("on").executes(context -> debugPaste(context.getSource(), true)))
-			.then(literal("off").executes(context -> debugPaste(context.getSource(), false)));
-	}
-
-	/**
 	 * A corner, as the same argument {@code /setblock} takes.
 	 *
 	 * <p>Which is worth it for the suggestions alone. Fabric mixes its client command source into
@@ -638,63 +618,6 @@ public final class DebugCommands {
 			source.sendFeedback(Component.literal("    " + at.getX() + " " + at.getY() + " "
 				+ at.getZ() + "  " + clash.getValue()).withStyle(ChatFormatting.YELLOW));
 		}
-	}
-
-	/**
-	 * Paste marked up, or paste plain, and remember which.
-	 *
-	 * <p>What comes back marked is a machine you can read standing in it: the stone says which shape
-	 * laid it, wire the signal never gets to is red, a note that sounds at the wrong moment is a lit
-	 * bulb and one with nothing to set it off wears a dragon head. All of that is still a machine
-	 * that runs. The one part that is not is the collisions -- the block that got there first is
-	 * kept, whatever wanted it second is dropped, and the cell is a sea lantern -- so a build with
-	 * any of those in it is wrong on purpose and meant to be walked round rather than heard.</p>
-	 */
-	/**
-	 * What the blocks of a marked build mean, and whether the next one will be marked.
-	 *
-	 * <p>Read off {@link SongBuilder#DEBUG_PASTE_KEY}, which is the same table the builder colours
-	 * from and the same one an {@code /midicraft asciidiagram} legend explains itself with, so the three can
-	 * never come apart.</p>
-	 */
-	private static int colourKey(FabricClientCommandSource source) {
-		MidicraftConfig.ColorCodedPaste mode = MidicraftConfig.get().colorCodedPaste();
-		boolean on = mode != MidicraftConfig.ColorCodedPaste.OFF;
-		source.sendFeedback(Component.literal("Color-coded paste is "
-			+ switch (mode) {
-				case OFF -> "off";
-				case NORMAL -> "on";
-				case LIGHT_SHOW -> "off, with Light show picked on the paste screen, so the next "
-					+ "build comes out in lamps rather than in these colours";
-			}
-			+ ". /midicraft colorcodepaste on|off to change it.")
-			.withStyle(on ? ChatFormatting.YELLOW : ChatFormatting.GRAY));
-		SongBuilder.DEBUG_PASTE_KEY.forEach((block, means) -> source.sendFeedback(Component
-			.literal("  " + block.substring(block.indexOf(':') + 1) + "  ")
-			.withStyle(ChatFormatting.WHITE)
-			.append(Component.literal(means).withStyle(ChatFormatting.GRAY))));
-		source.sendFeedback(Component.literal("  hyphae and red nether brick replace whichever stone "
-			+ "colour a cell had, and dead wire wins over a breach")
-			.withStyle(ChatFormatting.DARK_GRAY));
-		return 1;
-	}
-
-	/**
-	 * Plain or colour coded, and nothing else. The light show is a way to build a song for keeps,
-	 * chosen on the paste screen; this is the switch for reading a build, flipped far more often.
-	 */
-	private static int debugPaste(FabricClientCommandSource source, boolean on) {
-		MidicraftConfig.get().setColorCodedPaste(on
-			? MidicraftConfig.ColorCodedPaste.NORMAL : MidicraftConfig.ColorCodedPaste.OFF);
-		MidicraftConfig.save();
-		source.sendFeedback(Component.literal(on
-			? "Color-coded paste on. Stone is coloured by the shape that laid it, dead wire goes red, "
-				+ "wrong notes become lit copper bulbs and missed ones wear a dragon head. "
-				+ "Collisions build through and light up in sea lantern, which is broken on purpose "
-				+ "-- turn this off before building anything you want to hear."
-			: "Color-coded paste off. Builds come out plain and a collision refuses them again.")
-			.withStyle(on ? ChatFormatting.YELLOW : ChatFormatting.GRAY));
-		return 1;
 	}
 
 	/** Where a real paste would land, so a debug build stands where a song would. */
