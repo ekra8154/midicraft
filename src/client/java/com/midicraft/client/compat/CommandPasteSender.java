@@ -188,12 +188,10 @@ public final class CommandPasteSender {
 			finish();
 			return;
 		}
-		// Held to the end rather than said here. This line used to carry the report, and it was
-		// true and unread: the next tick writes "Placing sequence: 1/4531" over the top of it and
-		// nothing brings it back, so the one thing worth reading was the one thing guaranteed to
-		// be missed. It is the same line either way -- the overlay holds one message -- so the
-		// only question is which moment it gets, and the end of the paste is the moment when
-		// nothing else is about to be written after it.
+		// Held to the end rather than said here. The overlay line used to carry the report, and it
+		// was true and unread: the next tick writes "Placing sequence: 1/4531" over the top of it
+		// and nothing brings it back, so the one thing worth reading was the one thing guaranteed
+		// to be missed. At the end it goes to chat with the completion line, where it stays.
 		heldReport = List.copyOf(faults);
 		show(Component.literal("Placing sequence: 0/" + total));
 	}
@@ -306,12 +304,13 @@ public final class CommandPasteSender {
 		if (QUEUE.isEmpty()) {
 			if (!announced) {
 				announced = true;
-				// Both facts on the one line the overlay has: that it finished, and what is wrong
-				// with what it built. The count is kept even when there is a report, because
-				// "complete" is the thing a player who walked away comes back to look for.
+				// Both facts on one line: that it finished, and what is wrong with what it built.
+				// The count is kept even when there is a report, because "complete" is the thing a
+				// player who walked away comes back to look for -- which is also why it goes to
+				// chat, where it waits for them, rather than to an overlay that fades.
 				List<String> wrong = heldReport;
 				heldReport = List.of();
-				show(wrong.isEmpty()
+				say(wrong.isEmpty()
 					? Component.literal("Sequence placement complete: " + sent + "/" + total
 						+ (skipped == 0 ? "" : " (" + skipped + " already air)"))
 					: Component.literal("Placed " + sent + "/" + total + " -- " + wrong.size()
@@ -526,12 +525,12 @@ public final class CommandPasteSender {
 	/** Said only when the reading back found something, since finding nothing is the ordinary case. */
 	private static void report() {
 		if (changed > 0) {
-			show(Component.literal(changed + " block" + (changed == 1 ? "" : "s")
+			say(Component.literal(changed + " block" + (changed == 1 ? "" : "s")
 					+ " changed after placing. First: " + firstChanged.getX() + " "
 					+ firstChanged.getY() + " " + firstChanged.getZ())
 				.withStyle(net.minecraft.ChatFormatting.YELLOW));
 		} else if (repaired > 0) {
-			show(Component.literal("Replaced " + repaired + " block"
+			say(Component.literal("Replaced " + repaired + " block"
 				+ (repaired == 1 ? "" : "s") + " the server dropped"));
 		}
 		repaired = 0;
@@ -553,6 +552,20 @@ public final class CommandPasteSender {
 		Minecraft minecraft = Minecraft.getInstance();
 		if (minecraft.player != null) {
 			minecraft.gui.hud.setOverlayMessage(message, true);
+		}
+	}
+
+	/**
+	 * A line for chat rather than the overlay, for what is said once a paste is over.
+	 *
+	 * <p>The overlay is right for progress, which is rewritten every half second and worth nothing
+	 * a moment later. The outcome is the opposite: said once, and read whenever you get back to it,
+	 * so it goes where it is kept.</p>
+	 */
+	private static void say(Component message) {
+		Minecraft minecraft = Minecraft.getInstance();
+		if (minecraft.player != null) {
+			minecraft.player.sendSystemMessage(message);
 		}
 	}
 }
