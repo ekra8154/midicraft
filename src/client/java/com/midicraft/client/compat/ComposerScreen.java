@@ -3933,16 +3933,14 @@ public final class ComposerScreen extends Screen {
 					chipLeft + (LAYER_CHIP - font.width(state.letter)) / 2, y + 4, state.color, false);
 			}
 			// The instrument as the block it sounds like, which is the same picture the palette uses
-			// and the only label short enough to leave the name any room. A split layer has many
-			// blocks and one machine, so its row wears the note block itself.
-			graphics.item(new ItemStack(layer.split() != null
-					? net.minecraft.world.item.Items.NOTE_BLOCK
-					: PreviewInstrument.byId(layer.instrument()).icon()),
-				row.instrumentX(), y - 1);
-			// A stacked layer says so on its icon: the count when one instrument sounds several
-			// times, a plus when several instruments sound.
-			if (layer.split() == null && !layer.mix().isEmpty()) {
-				String badge = layer.mix().size() > 1 ? "+" : "×" + layer.mix().get(0).count();
+			// and the only label short enough to leave the name any room. A layer of several
+			// instruments stacks them in the same square. See extractLayerIcon.
+			extractLayerIcon(graphics, layer, row.instrumentX(), y - 1);
+			// What kind of several, in the corner the stack leaves empty: a plus when every note
+			// sounds all of them, a note when each note goes to the one whose register it is in,
+			// and the count when one instrument sounds several times.
+			String badge = layerIconBadge(layer);
+			if (badge != null) {
 				smallText(graphics, badge, row.instrumentX() + 16 - smallTextWidth(badge), y + 9,
 					0xFFFFFFFF);
 			}
@@ -4033,12 +4031,29 @@ public final class ComposerScreen extends Screen {
 			// The slash is drawn on this icon, so this is where someone points to ask about it.
 			String silence = audibilityNote(instrumentLayer);
 			int landing = layersToEdit(instrumentLayer).size();
-			PreviewInstrument voice =
-				PreviewInstrument.byId(project().layers().get(instrumentLayer).instrument());
-			text = Component.literal(
-				(voice.pitched() ? voice.name() : voice.label())
+			Layer hoveredLayer = project().layers().get(instrumentLayer);
+			PreviewInstrument voice = PreviewInstrument.byId(hoveredLayer.instrument());
+			// A stacked icon names everything in the stack, and says how they share the notes,
+			// since the pictures get small and the badge is one character.
+			List<String> stacked = hoveredLayer.split() != null || hoveredLayer.mix().size() > 1
+				? layerIconInstruments(hoveredLayer) : List.of();
+			String what;
+			if (stacked.isEmpty()) {
+				what = (voice.pitched() ? voice.name() : voice.label())
 					+ (voice.pitched() ? " - click to change the note-block instrument"
-						: " - click to change the voice")
+						: " - click to change the voice");
+			} else {
+				List<String> names = new ArrayList<>();
+				for (String id : stacked) {
+					PreviewInstrument one = PreviewInstrument.byId(id);
+					names.add(one.pitched() ? one.name() : one.label());
+				}
+				what = String.join(", ", names) + " - click to change the instruments\n"
+					+ (hoveredLayer.split() != null
+						? "Split: each note plays the one whose register it falls in."
+						: "Stacked: every note plays all of them.");
+			}
+			text = Component.literal(what
 					+ (landing > 1 ? "\nPicks land on all " + landing + " selected layers." : "")
 					+ (silence == null ? "" : "\n" + silence));
 		}
@@ -4140,6 +4155,98 @@ public final class ComposerScreen extends Screen {
 			graphics.fill(px, py + 1, px + 3, py + 4, 0xAA05070A);
 			graphics.fill(px, py, px + 3, py + 3, color);
 		}
+	}
+
+	/** The most instruments a layer's icon stacks. A melodic split has five registers. */
+	private static final int LAYER_ICON_STACK_MAX = 5;
+	/**
+	 * How far each icon behind the front one peeks out, as a share of its own size.
+	 *
+	 * <p>The stack always fills the same sixteen pixels, so the icons shrink as more are added: at
+	 * this share two come out at twelve pixels, three at ten, five at seven. Larger shows more of
+	 * each icon behind and makes them all smaller.</p>
+	 */
+	private static final float LAYER_ICON_STACK_STEP = 0.3f;
+
+	/**
+	 * The instruments a layer's icon shows, front first, or empty for a split with no voices yet.
+	 *
+	 * <p>A split layer shows one per register, lowest first, which is the first voice of each
+	 * bracket on the keyboard. A layer sounding several instruments at once shows each of them. Any
+	 * other layer is its one instrument.</p>
+	 */
+	private List<String> layerIconInstruments(Layer layer) {
+		List<String> shown = new ArrayList<>();
+		if (layer.split() != null) {
+			List<BracketGroup> groups = new ArrayList<>(voiceBrackets(layer.split()));
+			groups.sort(Comparator.comparingInt((BracketGroup group) -> group.effects() ? 1 : 0)
+				.thenComparingInt(BracketGroup::base)
+				.thenComparingInt(BracketGroup::lo));
+			for (BracketGroup group : groups) {
+				if (!group.instruments().isEmpty() && !shown.contains(group.instruments().getFirst())) {
+					shown.add(group.instruments().getFirst());
+				}
+			}
+		} else if (layer.mix().size() > 1) {
+			for (ComposerProject.Split.Voice voice : layer.mix()) {
+				if (!shown.contains(voice.instrument())) {
+					shown.add(voice.instrument());
+				}
+			}
+		} else {
+			shown.add(layer.instrument());
+		}
+		return shown.size() > LAYER_ICON_STACK_MAX ? shown.subList(0, LAYER_ICON_STACK_MAX) : shown;
+	}
+
+	/**
+	 * A layer's icon in the sixteen-pixel square at {@code x, y}: its one instrument, or several
+	 * stacked diagonally, shrinking to fit.
+	 *
+	 * <p>The front one sits bottom-left and each after it peeks out above and to the right of the
+	 * last, so on a split layer the higher registers are the ones further up. Drawn back to front.
+	 * A split with nothing in it yet wears the note block, as every split used to.</p>
+	 */
+	private void extractLayerIcon(GuiGraphicsExtractor graphics, Layer layer, int x, int y) {
+		List<String> instruments = layerIconInstruments(layer);
+		if (instruments.isEmpty()) {
+			graphics.item(new ItemStack(net.minecraft.world.item.Items.NOTE_BLOCK), x, y);
+			return;
+		}
+		if (instruments.size() == 1) {
+			graphics.item(new ItemStack(PreviewInstrument.byId(instruments.getFirst()).icon()), x, y);
+			return;
+		}
+		int count = instruments.size();
+		float size = 16f / (1 + (count - 1) * LAYER_ICON_STACK_STEP);
+		float step = size * LAYER_ICON_STACK_STEP;
+		for (int index = count - 1; index >= 0; index--) {
+			graphics.pose().pushMatrix();
+			graphics.pose().translate(x + index * step, y + 16 - size - index * step);
+			graphics.pose().scale(size / 16f, size / 16f);
+			graphics.item(new ItemStack(PreviewInstrument.byId(instruments.get(index)).icon()), 0, 0);
+			graphics.pose().popMatrix();
+		}
+	}
+
+	/**
+	 * The mark in the corner of a layer's icon, or null for none.
+	 *
+	 * <p>A stack of instruments says there are several; this says how they share the notes, which
+	 * the pictures cannot. A drum split goes unmarked: stone, sand and glass already read as the
+	 * kit, and nothing else stacks those.</p>
+	 */
+	private static String layerIconBadge(Layer layer) {
+		if (layer.split() != null) {
+			boolean melodic = layer.split().voices().stream().anyMatch(voice ->
+				!voice.instrument().startsWith(ComposerProject.SOUND_EFFECT_PREFIX)
+					&& !com.midicraft.InstrumentRanges.isPercussion(voice.instrument()));
+			return melodic ? "♪" : null;
+		}
+		if (layer.mix().isEmpty()) {
+			return null;
+		}
+		return layer.mix().size() > 1 ? "+" : "×" + layer.mix().get(0).count();
 	}
 
 	private void smallText(GuiGraphicsExtractor graphics, String text, int x, int y, int color) {
@@ -7160,8 +7267,9 @@ public final class ComposerScreen extends Screen {
 		if (tierHit != null) {
 			ComposerProject.Split split = keyboardSplit();
 			PreviewInstrument value = tierMenuCandidates().get(tierHit.index());
-			if (scrollY != 0 && split != null && tierVoiceCount(split, value.id()) > 0) {
-				stepTierVoice(value, scrollY > 0 ? 1 : -1);
+			int steps = wheelSteps("tier", scrollY);
+			if (steps != 0 && split != null && tierVoiceCount(split, value.id()) > 0) {
+				stepTierVoice(value, steps > 0 ? 1 : -1);
 			}
 			return true;
 		}
@@ -7172,8 +7280,9 @@ public final class ComposerScreen extends Screen {
 			// its way past.
 			PreviewInstrument value = instrumentMenuPalette().get(wheelHit.index());
 			String id = value.id();
-			if (scrollY != 0 && project().layers().get(instrumentMenuLayer).countOf(id) > 0) {
-				int step = scrollY > 0 ? 1 : -1;
+			int steps = wheelSteps("count", scrollY);
+			if (steps != 0 && project().layers().get(instrumentMenuLayer).countOf(id) > 0) {
+				int step = steps > 0 ? 1 : -1;
 				updateLayers(step > 0 ? "stack " + value.name() : "unstack " + value.name(),
 					instrumentMenuLayer,
 					target -> target.countOf(id) > 0 ? target.withCountStepped(id, step) : target);
@@ -7188,17 +7297,18 @@ public final class ComposerScreen extends Screen {
 			return true;
 		}
 		if (mouseX < layerPanelWidth() && mouseY >= LAYER_LIST_TOP - 2 && mouseY <= layerListBottom()) {
-			scrollLayers(scrollY > 0 ? -LAYER_ROW_HEIGHT : LAYER_ROW_HEIGHT);
+			scrollLayers(-wheelSteps("layers", scrollY * LAYER_ROW_HEIGHT));
 			return true;
 		}
 		if (mouseX >= layerPanelWidth() && mouseX < rollX
 				&& mouseY >= rollY && mouseY < rollY + rollHeight) {
 			if (controlDown()) {
 				// Vertical zoom: shrink the rows to fit more of the pitch range on screen at once.
-				zoomPitch(scrollY > 0 ? 1 : -1, mouseY);
+				zoomPitch(wheelSteps("pitchZoom", scrollY), mouseY);
 				return true;
 			}
 			scrollPitch(scrollY);
+			panTime(scrollX);
 			return true;
 		}
 		if (!insideRoll(mouseX, mouseY)) {
@@ -7208,7 +7318,7 @@ public final class ComposerScreen extends Screen {
 			// The pitch zoom, without having to put the cursor on the strip of keys first -- the
 			// same reason Alt on its own scrolls pitch here. Ctrl is zoom and Alt is the pitch axis,
 			// so the two together are the pitch zoom and nothing has to be remembered.
-			zoomPitch(scrollY > 0 ? 1 : -1, mouseY);
+			zoomPitch(wheelSteps("pitchZoom", scrollY), mouseY);
 			return true;
 		}
 		if (altDown()) {
@@ -7223,7 +7333,10 @@ public final class ComposerScreen extends Screen {
 			return true;
 		}
 		if (controlDown()) {
-			zoomTime(scrollY > 0 ? ZOOM_IN : ZOOM_OUT, mouseX);
+			// Proportional, so a pinch -- which Windows sends as Ctrl and a stream of small scrolls --
+			// zooms as far as the fingers move rather than a whole notch per event. A notch is one
+			// unit, which is the same factor as before.
+			zoomTime(scrollY > 0 ? Math.pow(ZOOM_IN, scrollY) : Math.pow(ZOOM_OUT, -scrollY), mouseX);
 			return true;
 		}
 		if (shiftDown()) {
@@ -7238,9 +7351,71 @@ public final class ComposerScreen extends Screen {
 			horizontalScroll = Math.max(0L, horizontalScroll - Math.round(scrollY * span));
 			return true;
 		}
-		horizontalScroll = Math.max(0L,
-			horizontalScroll - Math.round(scrollY * scrollStepTicks()));
+		if (touchpadScrolling(scrollX, scrollY)) {
+			// Two fingers move the roll the way they move: sideways through time, up and down
+			// through pitch. A wheel has only the one axis, so there it stays time.
+			panTime(scrollX);
+			scrollPitch(scrollY);
+			return true;
+		}
+		panTime(scrollY);
 		return true;
+	}
+
+	/** Sideways through time by a scroll amount, a beat or so a notch. See scrollStepTicks. */
+	private void panTime(double amount) {
+		if (amount != 0) {
+			horizontalScroll = Math.max(0L,
+				horizontalScroll - Math.round(amount * scrollStepTicks()));
+		}
+	}
+
+	/**
+	 * How long after the last touchpad-looking scroll the roll still treats scrolling as the touchpad.
+	 *
+	 * <p>A swipe is a stream of events and not every one of them looks like a touchpad on its own --
+	 * one can come out a whole unit with no sideways part -- so the answer is held across the gaps.</p>
+	 */
+	private static final long TOUCHPAD_HOLD_MILLIS = 400L;
+	private long touchpadUntil;
+
+	/**
+	 * Whether this scroll came from two fingers rather than a wheel.
+	 *
+	 * <p>The game is not told which device it was, so it is read off the numbers. A wheel notch is a
+	 * whole unit on one axis. A touchpad sends fractions, and sends a sideways part whenever the
+	 * fingers drift, so either of those marks the swipe as a touchpad. A mouse that scrolls smoothly
+	 * also sends fractions, and would be read as a touchpad too.</p>
+	 */
+	private boolean touchpadScrolling(double scrollX, double scrollY) {
+		long now = Util.getMillis();
+		if (scrollX != 0 || scrollY != Math.rint(scrollY)) {
+			touchpadUntil = now + TOUCHPAD_HOLD_MILLIS;
+		}
+		return now < touchpadUntil;
+	}
+
+	/** What a stepped wheel action has built up but not yet spent. See wheelSteps. */
+	private double wheelCarry;
+	private String wheelCarryFor;
+
+	/**
+	 * Whole steps out of a scroll amount, keeping the fraction for next time.
+	 *
+	 * <p>A wheel notch is one unit and comes out as one step, as it always did. A touchpad sends a
+	 * swipe as dozens of small fractions, and taking the sign of each one made every fraction a whole
+	 * step -- three semitones, a zoom level, a layer row -- so the smallest touch flew. The carry
+	 * belongs to one action at a time, and starts over when the scroll moves on to another.</p>
+	 */
+	private int wheelSteps(String action, double amount) {
+		if (!action.equals(wheelCarryFor)) {
+			wheelCarryFor = action;
+			wheelCarry = 0;
+		}
+		wheelCarry += amount;
+		int steps = (int) wheelCarry;
+		wheelCarry -= steps;
+		return steps;
 	}
 
 	/**
@@ -7259,8 +7434,11 @@ public final class ComposerScreen extends Screen {
 
 	/** Moves the roll up and down the pitch range, from the keys or from the roll itself. */
 	private void scrollPitch(double scrollY) {
-		topMidiNote = Math.max(12, Math.min(MAX_MIDI_NOTE,
-			topMidiNote + (scrollY > 0 ? 3 : -3)));
+		// Three semitones a notch, in whole semitones as they build up.
+		int semitones = wheelSteps("pitch", scrollY * 3);
+		if (semitones != 0) {
+			topMidiNote = Math.max(12, Math.min(MAX_MIDI_NOTE, topMidiNote + semitones));
+		}
 	}
 
 	/**
@@ -7280,6 +7458,9 @@ public final class ComposerScreen extends Screen {
 
 	/** Zooms in pitch -- taller or shorter rows -- holding the row at {@code anchorY} still. */
 	private void zoomPitch(int steps, double anchorY) {
+		if (steps == 0) {
+			return;
+		}
 		int anchoredMidi = mouseMidi(anchorY);
 		rowHeight = Math.max(MIN_ROW_HEIGHT, Math.min(MAX_ROW_HEIGHT, rowHeight + steps));
 		topMidiNote = Math.max(MIN_MIDI_NOTE, Math.min(MAX_MIDI_NOTE,
