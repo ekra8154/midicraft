@@ -8366,7 +8366,8 @@ public final class SongBuilder {
 					}
 					headed = new StackedSplit(
 						onTheFreeSlots(placements, opening, travel, depth, event.time(),
-							headed.slots(), headed.shed() ? DESCENT_FLANK_SLOT : -1),
+							headed.slots(), headed.shed() ? DESCENT_FLANK_SLOT : -1,
+							headed.centreFeeds() == CentreFeed.CORKSCREW),
 						headed.head(), headed.nearTail(), headed.farTail(), headed.shed(),
 						headed.centreFeeds(), headed.centreToFront(), headed.rungNotes(),
 						headed.severNote(), headed.stairExtras());
@@ -10850,6 +10851,12 @@ public final class SongBuilder {
 		int seamNext = PARITY_SEAM_CELLS;
 		BlockPos seamFeedNext = null;
 		int seamOfEvent = -1;
+		// The floor slots a rail pair has committed to and not yet laid, claimed in the plan so
+		// the machine walking alongside sees them coming, and released at this machine's next
+		// event. On this walk's own stack, so two machines never release each other's.
+		// See RAIL_CLAIMS_ITS_COMMITTED_FLOOR.
+		List<BlockPos> railClaims = new ArrayList<>();
+		int railClaimTime = -1;
 		// Anchored on the lane, not the cursor: ahead(n) from here reaches every column of
 		// this lane, and a lane's travel and depth do not change once it has begun.
 		ParityOracle parity = layout.ultra() ? parityOracle(axis, placements, lane) : null;
@@ -10873,6 +10880,14 @@ public final class SongBuilder {
 						: partnerChord - JOINT_PACE_TOLERANCE - (here + minimum);
 					pace.stretch()[index] = Math.max(0, Math.min(behind, paceCapacity(wait)));
 				}
+			}
+			// The claims of the last path column: this event lays the floor column over them, or
+			// lays something else and owes nothing. Either way nothing else is coming for them.
+			if (!railClaims.isEmpty()) {
+				for (BlockPos claim : railClaims) {
+					placements.releaseNoteClaim(claim, railClaimTime);
+				}
+				railClaims.clear();
 			}
 			// Where the last corner is, in the world, kept while the route still carries the bend --
 			// once it is taken there is nothing left to ask. Bend offsets are relative and shift as
@@ -14143,7 +14158,8 @@ public final class SongBuilder {
 					}
 					headed = new StackedSplit(
 						onTheFreeSlots(placements, opening, travel, depth, event.time(),
-							headed.slots(), headed.shed() ? DESCENT_FLANK_SLOT : -1),
+							headed.slots(), headed.shed() ? DESCENT_FLANK_SLOT : -1,
+							headed.centreFeeds() == CentreFeed.CORKSCREW),
 						headed.head(), headed.nearTail(), headed.farTail(), headed.shed(),
 						headed.centreFeeds(), headed.centreToFront(), headed.rungNotes(),
 						headed.severNote(), headed.stairExtras());
@@ -16042,6 +16058,26 @@ public final class SongBuilder {
 				} else {
 					lane = addRailNote(placements, lane, railPhase, event.notes(), event.time(),
 						nextDelay, fromDust, handUp);
+					// The floor column this pair has committed to stands on the cell the run just
+					// stepped onto. Its slots are claimed now, the way the floor rail will fill
+					// them -- towards the lane behind first -- so the machine walking alongside
+					// meanwhile refuses the ground rather than sounding them a tick early.
+					// See RAIL_CLAIMS_ITS_COMMITTED_FLOOR.
+					if (RAIL_CLAIMS_ITS_COMMITTED_FLOOR && railPhase == 0 && nextDelay > 0
+							&& railBlank == NO_BLANK && index + 1 < events.size()) {
+						EventGroup floorChord = events.get(index + 1);
+						Direction near = lane.noteSide().getOpposite();
+						List<Direction> sides = List.of(near, near.getOpposite());
+						railClaimTime = floorChord.time();
+						for (int slot = 0; slot < floorChord.notes().size() && slot < sides.size();
+								slot++) {
+							BlockPos cell = lane.pos().relative(sides.get(slot));
+							if (placements.claimNote(cell, railClaimTime)) {
+								railClaims.add(cell);
+							}
+						}
+						placements.padded("railClaimedItsFloor", railClaims.size());
+					}
 				}
 				RAIL_COLUMNS++;
 				railRunColumns++;
@@ -20313,6 +20349,23 @@ public final class SongBuilder {
 	private static final int RAIL_HEAD_COLUMNS = 2;
 
 	/** Scratch: say where every run opens. */
+	/**
+	 * A run claims the floor slots its pair has committed to before the floor column is laid.
+	 *
+	 * <p>The pair is decided at the path column and its floor column goes down one event later,
+	 * and in the interleaved layout the other machine walks in between. Its stacked module asks
+	 * {@link #stackedClashes} about the notes of the lane alongside, finds the committed slot
+	 * still empty, lays a relaying side instrument beside it, and the floor note then goes down
+	 * against a block live at another tick: moonlight sonata at eight wide over two floors,
+	 * machine A's path column at block 23353, machine B's ask and module at 23361, A's floor
+	 * note at 23388, one tick early from the south. Every {@code chord:STACKED_* -> rail:FLOOR}
+	 * wrong note in the census was this race, some 470 of 850 a run. So the committed slots are
+	 * recorded as notes at their tick the moment the pair is decided, which is the only fact the
+	 * neighbour's parity check reads, and released again at the run's next event -- by then the
+	 * floor column has laid the real notes over them, or laid something else and owes nothing.</p>
+	 */
+	static boolean RAIL_CLAIMS_ITS_COMMITTED_FLOOR = true;
+
 	static boolean TRACE_RAIL_HEADS = false;
 
 	/**
@@ -26183,18 +26236,28 @@ public final class SongBuilder {
 		if (time == TRACE_PARITY_TICK) {
 			BlockPos crossAt = lane.ahead(1).pos();
 			StringBuilder line = new StringBuilder("PARITY t=" + time
+				+ (placements.recording ? " real" : " dry")
 				+ " lane=" + lane.pos().getX() + " " + lane.pos().getY() + " " + lane.pos().getZ()
 				+ " cross=" + crossAt.getX() + " " + crossAt.getY() + " " + crossAt.getZ()
 				+ " quiet=" + quietSides
 				+ " sides=" + (slots == null ? "-" : slots.sides().stream()
 					.map(side -> side == null ? "null" : side.instrumentBlock()
 						+ (quietSideConducts(side) ? "!" : "~"))
+					.collect(java.util.stream.Collectors.joining(",")))
+				+ " front=" + (slots == null ? "-" : slots.front().stream()
+					.map(low -> low == null ? "null" : low.instrumentBlock())
+					.collect(java.util.stream.Collectors.joining(",")))
+				+ " back=" + (slots == null ? "-" : slots.back().stream()
+					.map(low -> low == null ? "null" : low.instrumentBlock())
 					.collect(java.util.stream.Collectors.joining(","))));
 			for (Direction out : List.of(lane.noteSide(), lane.noteSide().getOpposite())) {
 				BlockPos beyond = crossAt.relative(out, 2);
 				line.append(" | ").append(out).append(" beyond=").append(beyond.getX()).append(" ")
 					.append(beyond.getY()).append(" ").append(beyond.getZ())
 					.append(" note=").append(placements.noteAt(beyond, time))
+					.append("/tick=").append(placements.notes.get(beyond.immutable()))
+					.append("/notes=").append(placements.notes.size())
+					.append("/blocks=").append(placements.blocks.size())
 					.append(" live=").append(placements.liveAt(beyond, time))
 					.append(" fwd=").append(placements.liveAt(beyond.relative(lane.travel()), time))
 					.append(" back=").append(
@@ -29371,6 +29434,17 @@ public final class SongBuilder {
 		// everywhere. See {@link #STACKED_SIDES_MAY_GO_QUIET}.
 		boolean quietSides = STACKED_SIDES_MAY_GO_QUIET && slots.quietSides();
 		lane = pastAnyCorner(placements, lane);
+		if (time == TRACE_PARITY_TICK) {
+			System.out.println("LAY t=" + time + " stacked at " + lane.pos().getX() + " "
+				+ lane.pos().getY() + " " + lane.pos().getZ() + " blocks=" + placements.blocks.size()
+				+ " placing=" + placements.placing() + " quiet=" + quietSides
+				+ " sides=" + slots.sides().stream().map(n -> n == null ? "null" : n.instrumentBlock())
+					.collect(java.util.stream.Collectors.joining(","))
+				+ " front=" + slots.front().stream().map(n -> n == null ? "null" : n.instrumentBlock())
+					.collect(java.util.stream.Collectors.joining(","))
+				+ " back=" + slots.back().stream().map(n -> n == null ? "null" : n.instrumentBlock())
+					.collect(java.util.stream.Collectors.joining(",")));
+		}
 		if (LOG_MODULES) {
 			MODULE_LOG.add(new Object[] {lane.pos().immutable(), lane.travel(), lane.noteSide(),
 				quietSides, placements.placing(), time, slots});
@@ -31116,6 +31190,21 @@ public final class SongBuilder {
 	 */
 	private static UltraSlots onTheFreeSlots(PlacementPlan placements, BlockPos pos, Direction travel,
 			Direction noteSide, int time, UltraSlots slots, int banned) {
+		return onTheFreeSlots(placements, pos, travel, noteSide, time, slots, banned, false);
+	}
+
+	/**
+	 * @param noFront whether the front pair may take no note at all, however quiet its cells: a
+	 *     corkscrew's centre stands on the border and nothing in front of it is ever laid, so a
+	 *     low note rehomed there hangs over air with nothing to set it off. The oracle empties
+	 *     the pair for that shape ({@link #centreFedCut}) and {@link #lowsToppedUpFromTheTail}
+	 *     leaves it empty; this rebuild filled it front-first from whatever was hanging, which
+	 *     is how HOTMK to end all at sixty-three wide over five floors, top-start, laid two
+	 *     white wool notes at the border with nothing to sound them -- the census's last dead
+	 *     build.
+	 */
+	private static UltraSlots onTheFreeSlots(PlacementPlan placements, BlockPos pos, Direction travel,
+			Direction noteSide, int time, UltraSlots slots, int banned, boolean noFront) {
 		if (!HEAD_LOOKS_FOR_ITS_FREE_SIDE || slots == null) {
 			return slots;
 		}
@@ -31146,7 +31235,7 @@ public final class SongBuilder {
 		EventNote[] placed = new EventNote[4];
 		int next = 0;
 		for (int slot : new int[] {0, 1, 3, 2}) {
-			if (slot != banned && next < hanging.size()
+			if (slot != banned && !(noFront && slot < 2) && next < hanging.size()
 					&& quietAndFree(placements, cell[slot], time)) {
 				placed[slot] = hanging.get(next++);
 			}
@@ -33604,6 +33693,10 @@ public final class SongBuilder {
 		void note(BlockPos position, int time) {
 			if (recording) {
 				BlockPos key = position.immutable();
+				if (Math.abs(time - TRACE_PARITY_TICK) <= 1) {
+					System.out.println("NOTE t=" + time + " at " + key.getX() + " " + key.getY() + " "
+						+ key.getZ() + " blocks=" + blocks.size() + " placing=" + placing);
+				}
 				if (trial != null && !trial.notesBefore().containsKey(key)) {
 					trial.notesBefore().put(key, notes.get(key));
 				}
@@ -33612,6 +33705,44 @@ public final class SongBuilder {
 				}
 				notes.put(key, time);
 				noteMachine.put(key, laneTint < 0 ? -1 : laneTint / 2);
+			}
+		}
+
+		/**
+		 * Records a note the walk has committed to but not laid, so the machine alongside sees it
+		 * when it asks {@link #noteAt}. Only into an empty cell, and never over a note already
+		 * there. See {@link #RAIL_CLAIMS_ITS_COMMITTED_FLOOR}.
+		 *
+		 * @return whether the claim went down, so the caller knows what to release
+		 */
+		boolean claimNote(BlockPos position, int time) {
+			if (!recording) {
+				return false;
+			}
+			BlockPos key = position.immutable();
+			if (notes.containsKey(key) || blocks.containsKey(key)) {
+				return false;
+			}
+			notes.put(key, time);
+			noteMachine.put(key, laneTint < 0 ? -1 : laneTint / 2);
+			return true;
+		}
+
+		/**
+		 * Takes a claim back where nothing made good on it: the cell holds no note block, and the
+		 * tick recorded is still the claim's own. A note laid over the claim keeps its record.
+		 */
+		void releaseNoteClaim(BlockPos position, int time) {
+			if (!recording) {
+				return;
+			}
+			BlockPos key = position.immutable();
+			Integer when = notes.get(key);
+			String block = blocks.get(key);
+			if (when != null && when == time
+					&& (block == null || !block.startsWith("minecraft:note_block"))) {
+				notes.remove(key);
+				noteMachine.remove(key);
 			}
 		}
 
