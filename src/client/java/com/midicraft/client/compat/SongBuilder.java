@@ -14174,7 +14174,7 @@ public final class SongBuilder {
 					// the border column, one cell from this head's second rung flank (all my
 					// fellas at twenty-seven wide over six floors, top-start, 26 63 32 against the
 					// rung at 26 63 33). A loud flank rides over the staircase with the far half;
-					// where that puts the run past its wire the head is refused like a loud low.
+					// where that puts the run past its wire the flank stays and is counted.
 					// See CUT_HEAD_ASKS_ITS_RUNG_FLANKS.
 					if (CUT_HEAD_ASKS_ITS_RUNG_FLANKS && !headed.rungNotes().isEmpty()) {
 						headed = rungFlanksOffLoudGround(placements, opening, travel, depth,
@@ -31251,10 +31251,12 @@ public final class SongBuilder {
 			split.shed(), split.centreFeeds(), split.centreToFront(),
 			java.util.Collections.unmodifiableList(rungs), split.severNote(), split.stairExtras());
 		if (thinner.runCells(splitCells) > DUST_RANGE) {
-			// Refused inside the trial, the same way a loud low slot is: the plain cut takes over.
-			placements.padded("cutHeadRungFlankLoudOutOfWire");
-			throw new IllegalArgumentException("cut head's rung flank at " + cursor.toShortString()
-				+ " is beside another tick's live block and the far half has no wire for it");
+			// Not refused. A refusal here goes the way a loud low slot's does -- to the plain cut --
+			// and where the plain cut cannot carry the chord either the whole build is refused,
+			// which sixteen illit and jack johnson builds were for one early note. The flank stays
+			// where the oracle put it and the census says so.
+			placements.padded("cutHeadRungFlankLoudKept");
+			return split;
 		}
 		return thinner;
 	}
