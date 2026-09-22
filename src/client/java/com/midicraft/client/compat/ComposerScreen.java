@@ -4163,10 +4163,11 @@ public final class ComposerScreen extends Screen {
 	 * How far each icon behind the front one peeks out, as a share of its own size.
 	 *
 	 * <p>The stack always fills the same sixteen pixels, so the icons shrink as more are added: at
-	 * this share two come out at twelve pixels, three at ten, five at seven. Larger shows more of
-	 * each icon behind and makes them all smaller.</p>
+	 * this share two come out at fourteen pixels, three at twelve, five at ten. Larger shows more of
+	 * each icon behind and makes them all smaller. Half this looked tiny for nothing: a sliver of a
+	 * block is enough to tell which block it is.</p>
 	 */
-	private static final float LAYER_ICON_STACK_STEP = 0.3f;
+	private static final float LAYER_ICON_STACK_STEP = 0.15f;
 
 	/**
 	 * The instruments a layer's icon shows, front first, or empty for a split with no voices yet.
@@ -4203,9 +4204,9 @@ public final class ComposerScreen extends Screen {
 	 * A layer's icon in the sixteen-pixel square at {@code x, y}: its one instrument, or several
 	 * stacked diagonally, shrinking to fit.
 	 *
-	 * <p>The front one sits bottom-left and each after it peeks out above and to the right of the
-	 * last, so on a split layer the higher registers are the ones further up. Drawn back to front.
-	 * A split with nothing in it yet wears the note block, as every split used to.</p>
+	 * <p>The front one sits top-left and each after it peeks out below and to the right of the last,
+	 * so on a split layer the lowest register is the one in full view. Drawn back to front. A split
+	 * with nothing in it yet wears the note block, as every split used to.</p>
 	 */
 	private void extractLayerIcon(GuiGraphicsExtractor graphics, Layer layer, int x, int y) {
 		List<String> instruments = layerIconInstruments(layer);
@@ -4222,7 +4223,7 @@ public final class ComposerScreen extends Screen {
 		float step = size * LAYER_ICON_STACK_STEP;
 		for (int index = count - 1; index >= 0; index--) {
 			graphics.pose().pushMatrix();
-			graphics.pose().translate(x + index * step, y + 16 - size - index * step);
+			graphics.pose().translate(x + index * step, y + index * step);
 			graphics.pose().scale(size / 16f, size / 16f);
 			graphics.item(new ItemStack(PreviewInstrument.byId(instruments.get(index)).icon()), 0, 0);
 			graphics.pose().popMatrix();
@@ -8968,21 +8969,18 @@ public final class ComposerScreen extends Screen {
 			stepTierVoice(value, hit.part() == PalettePart.UP ? 1 : -1);
 			return true;
 		}
-		// The layer palette's rule. A bracket sounding one voice swaps it for the one clicked -- its
-		// rows and its count go with the bracket, so a louder part stays louder on its new sound.
-		// A bracket sounding several toggles the one clicked, and never takes the last away: a
-		// bracket with no voice leaves its rows out of range, which is the layer palette's to do.
-		// Stacking a second voice onto a bracket of one is the up arrow, as it is in the palette.
+		// The layer palette's rule. Clicking a voice that sounds switches it off, the last one too:
+		// a bracket with no voice is a register left empty on purpose, and its notes go silent. The
+		// keyboard keeps the empty register as a faint bracket, so the way back is a click on it.
+		// A bracket sounding one voice swaps it for another one clicked -- its rows and its count go
+		// with the bracket, so a louder part stays louder on its new sound. Stacking a second voice
+		// onto a bracket of one is the up arrow, as it is in the palette.
 		ComposerProject.Split shared = project().layers().get(cohort.get(0)).split();
 		List<ComposerProject.Split.Voice> voices = new ArrayList<>(shared.voices());
 		List<ComposerProject.Split.Voice> members = voices.stream().filter(this::inOpenBracket).toList();
 		boolean sounding = members.stream().anyMatch(voice -> voice.instrument().equals(value.id()));
 		String step;
-		if (sounding && members.size() <= 1) {
-			showResult(Component.literal("The last voice in a bracket stays. Click another to swap "
-				+ "it, or switch it off from the layer's instrument palette."));
-			return true;
-		} else if (sounding) {
+		if (sounding) {
 			voices.removeIf(voice -> inOpenBracket(voice, value.id()));
 			step = "drop the " + value.name() + " voice";
 		} else if (members.size() == 1) {

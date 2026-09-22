@@ -1,16 +1,16 @@
 package com.midicraft.client.compat;
 
 import java.util.Locale;
+import net.minecraft.commands.arguments.blocks.BlockStateParser;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.level.EmptyBlockGetter;
-import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.FallingBlock;
-import net.minecraft.world.level.block.SlabBlock;
+import net.minecraft.world.level.block.SupportType;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.block.state.properties.SlabType;
 
 /**
  * The blocks a paste is built from where the machine does not care which block it is.
@@ -21,9 +21,10 @@ import net.minecraft.world.level.block.state.properties.SlabType;
  * which cells collide, which carry power -- is decided against the defaults it was written for.</p>
  *
  * <p>Which is also why each role is checked here against the one property the machine does need
- * from it. A lane block relays pulses, so it has to conduct. A climb has dust running up over it
- * and must not, or the diagonal is cut and the wire powers what stands beside it. A support
- * holds up dust and repeaters, so it needs a solid top.</p>
+ * from it. A relay block carries pulses, so it has to conduct. A lane block only holds up dust and
+ * repeaters, so it needs a solid top and may be glass or a slab. A climb has dust running up over
+ * it and must not conduct, or the diagonal is cut and the wire powers what stands beside it. A
+ * support holds up dust and repeaters, so it needs a solid top.</p>
  */
 public final class LaneMaterials {
 	private LaneMaterials() {
@@ -31,6 +32,7 @@ public final class LaneMaterials {
 
 	public enum Role {
 		LANE("minecraft:stone"),
+		RELAY("minecraft:stone"),
 		TRANSPARENT("minecraft:glass"),
 		SUPPORT("minecraft:stone_slab");
 
@@ -75,8 +77,14 @@ public final class LaneMaterials {
 	/**
 	 * Why a block will not do for a role, or {@code null} when it will.
 	 *
-	 * <p>Asked of the registry, so only once the game is up. Judged on the block's default state --
-	 * a slab as its top half, since that is how a support is laid -- whatever state was typed.</p>
+	 * <p>Judged on exactly the state that will be pasted -- what {@link #placed} makes of it, parsed
+	 * the way {@code /setblock} parses it -- so a slab is judged as the top half it is laid as, and a
+	 * slab typed as {@code [type=bottom]} is judged as the bottom half it asked for. Asked of the
+	 * registry, so only once the game is up.</p>
+	 *
+	 * <p>The support rules are the game's own: dust stays on a block with a sturdy top, or on a
+	 * hopper ({@code RedStoneWireBlock.canSurviveOn}), and a repeater on one whose top is sturdy for
+	 * a rigid block ({@code DiodeBlock.canSurviveOn}).</p>
 	 */
 	public static String problem(Role role, String normalised) {
 		if (normalised == null) {
@@ -87,26 +95,35 @@ public final class LaneMaterials {
 		if (id == null || !BuiltInRegistries.BLOCK.containsKey(id)) {
 			return "No such block";
 		}
-		Block block = BuiltInRegistries.BLOCK.getValue(id);
-		BlockState state = block.defaultBlockState();
-		if (block instanceof SlabBlock) {
-			state = state.setValue(SlabBlock.TYPE, SlabType.TOP);
+		BlockState state;
+		try {
+			state = BlockStateParser.parseForBlock(BuiltInRegistries.BLOCK, placed(role, normalised),
+				false).blockState();
+		} catch (com.mojang.brigadier.exceptions.CommandSyntaxException wrongState) {
+			return "Not a state that block has";
 		}
 		if (state.isAir()) {
 			return "Air holds nothing up";
 		}
-		if (block instanceof FallingBlock) {
+		if (state.getBlock() instanceof FallingBlock) {
 			return "Falls when anything under it is gone";
 		}
 		boolean conducts = state.isRedstoneConductor(EmptyBlockGetter.INSTANCE, BlockPos.ZERO);
-		boolean solidTop = state.isFaceSturdy(EmptyBlockGetter.INSTANCE, BlockPos.ZERO, Direction.UP);
+		boolean holdsDust = state.isFaceSturdy(EmptyBlockGetter.INSTANCE, BlockPos.ZERO, Direction.UP)
+			|| state.is(Blocks.HOPPER);
+		boolean holdsRepeaters = state.isFaceSturdy(EmptyBlockGetter.INSTANCE, BlockPos.ZERO,
+			Direction.UP, SupportType.RIGID);
 		return switch (role) {
-			case LANE -> conducts ? null
-				: "Does not conduct redstone, so the chords that relay through it go silent";
+			case LANE -> holdsDust && holdsRepeaters ? null
+				: "Redstone dust and repeaters cannot stand on top of it";
+			case RELAY -> !conducts
+				? "Does not conduct redstone, so the chords that relay through it go silent"
+				: !holdsDust || !holdsRepeaters ? "Redstone cannot stand on top of it" : null;
 			case TRANSPARENT -> conducts
 				? "Conducts redstone, which cuts the wire climbing over it"
-				: solidTop ? null : "Dust cannot sit on top of it";
-			case SUPPORT -> solidTop ? null : "Has no solid top for dust and repeaters to stand on";
+				: holdsDust ? null : "Redstone dust cannot sit on top of it";
+			case SUPPORT -> holdsDust && holdsRepeaters ? null
+				: "Redstone dust and repeaters cannot stand on top of it";
 		};
 	}
 
@@ -129,15 +146,24 @@ public final class LaneMaterials {
 	}
 
 	/**
-	 * What actually goes into the setblock for a role: a support slab laid as its top half.
+	 * What actually goes into the setblock for a role: a slab laid as its top half.
 	 *
-	 * <p>A bottom slab has no top face to stand a repeater on, and a slab is what the default is,
-	 * so a slab named without a state is given the one the default carries.</p>
+	 * <p>In every role, because in every role something stands on it. A bottom slab has no top face
+	 * for dust or a repeater, and the game's default slab is the bottom one, so a slab named without
+	 * a {@code type} is given the top. One named with a type keeps it, and {@link #problem} judges
+	 * it as that. Read off the name rather than the registry, so it can run before the game is up;
+	 * a slab whose name does not end in {@code _slab} is left as the bottom half, and refused.</p>
 	 */
 	public static String placed(Role role, String value) {
-		if (role == Role.SUPPORT && value.indexOf('[') < 0 && value.endsWith("_slab")) {
+		int bracket = value.indexOf('[');
+		String id = bracket < 0 ? value : value.substring(0, bracket);
+		if (!id.endsWith("_slab") || value.contains("type=")) {
+			return value;
+		}
+		if (bracket < 0) {
 			return value + "[type=top]";
 		}
-		return value;
+		String state = value.substring(bracket + 1, value.length() - 1);
+		return id + "[" + (state.isEmpty() ? "" : state + ",") + "type=top]";
 	}
 }

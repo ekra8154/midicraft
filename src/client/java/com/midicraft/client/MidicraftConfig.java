@@ -399,6 +399,7 @@ public final class MidicraftConfig {
 	private ColorCodedPaste colorCodedPaste;
 	private String laneOneBlock;
 	private String laneTwoBlock;
+	private String relayBlock;
 	private String transparentBlock;
 	private String supportBlock;
 	private int midiVelocityCutoff;
@@ -574,6 +575,8 @@ public final class MidicraftConfig {
 					stored.laneOneBlock));
 				instance.setLaneTwoBlock(LaneMaterials.accepted(LaneMaterials.Role.LANE,
 					stored.laneTwoBlock));
+				instance.setRelayBlock(LaneMaterials.accepted(LaneMaterials.Role.RELAY,
+					stored.relayBlock));
 				instance.setTransparentBlock(LaneMaterials.accepted(LaneMaterials.Role.TRANSPARENT,
 					stored.transparentBlock));
 				instance.setSupportBlock(LaneMaterials.accepted(LaneMaterials.Role.SUPPORT,
@@ -1304,6 +1307,16 @@ public final class MidicraftConfig {
 			LaneMaterials.placed(LaneMaterials.Role.LANE, block);
 	}
 
+	public String relayBlock() {
+		return relayBlock;
+	}
+
+	public void setRelayBlock(String block) {
+		this.relayBlock = block;
+		com.midicraft.client.compat.SongBuilder.RELAY_BLOCK =
+			LaneMaterials.placed(LaneMaterials.Role.RELAY, block);
+	}
+
 	public String transparentBlock() {
 		return transparentBlock;
 	}
@@ -1662,6 +1675,7 @@ public final class MidicraftConfig {
 		// Fields, not setters, for the same reason: the setters write the builder's statics.
 		config.laneOneBlock = LaneMaterials.Role.LANE.fallback();
 		config.laneTwoBlock = LaneMaterials.Role.LANE.fallback();
+		config.relayBlock = LaneMaterials.Role.RELAY.fallback();
 		config.transparentBlock = LaneMaterials.Role.TRANSPARENT.fallback();
 		config.supportBlock = LaneMaterials.Role.SUPPORT.fallback();
 		config.midiDefaultInstrument = "HARP";
@@ -1866,6 +1880,7 @@ public final class MidicraftConfig {
 		private ColorCodedPaste colorCodedPaste;
 		private String laneOneBlock;
 		private String laneTwoBlock;
+		private String relayBlock;
 		private String transparentBlock;
 		private String supportBlock;
 		private String midiDefaultInstrument;
@@ -1946,6 +1961,7 @@ public final class MidicraftConfig {
 			this.colorCodedPaste = config.colorCodedPaste;
 			this.laneOneBlock = config.laneOneBlock;
 			this.laneTwoBlock = config.laneTwoBlock;
+			this.relayBlock = config.relayBlock;
 			this.transparentBlock = config.transparentBlock;
 			this.supportBlock = config.supportBlock;
 			this.midiDefaultInstrument = config.midiDefaultInstrument;

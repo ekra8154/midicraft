@@ -59,7 +59,7 @@ final class BuildOptionsScreen extends Screen {
 	 */
 	private boolean startTop;
 	/**
-	 * What the blocks are made of: plain stone, lamps, or coloured by what laid them.
+	 * What the blocks are made of: the Build Pasting blocks, lamps, or coloured by what laid them.
 	 *
 	 * <p>Put into effect the moment it is picked rather than on Paste, because the colour-coded build
 	 * also changes what gets built -- a collision is built through instead of refused -- and the
@@ -810,7 +810,7 @@ final class BuildOptionsScreen extends Screen {
 
 	private static String blocksLine(MidicraftConfig.ColorCodedPaste colours) {
 		return switch (colours) {
-			case OFF -> "Normal - plain stone";
+			case OFF -> "Normal - plain build";
 			case LIGHT_SHOW -> "Light show - lamps along the song";
 			case NORMAL -> "Color coded - marked for reading";
 		};
@@ -818,14 +818,18 @@ final class BuildOptionsScreen extends Screen {
 
 	private static String blocksTooltip(MidicraftConfig.ColorCodedPaste colours) {
 		return switch (colours) {
-			case OFF -> "The ordinary build: plain stone, and a build that plays.";
-			case LIGHT_SHOW -> "A plain build that plays, with every bus, stacked chord centre and "
+			case OFF -> "The ordinary build, and a build that plays. Made of the blocks set on the "
+				+ "Build Pasting tab of the settings: stone, glass and stone slabs unless changed there.";
+			case LIGHT_SHOW -> "The plain build, with every bus, stacked chord centre and "
 				+ "top rail block made a redstone lamp, so the song draws a glowing line as it runs. "
-				+ "Nothing under a note changes, since that block is the note's instrument.";
+				+ "The rest is the Build Pasting blocks, and nothing under a note changes, since that "
+				+ "block is the note's instrument.";
 			case NORMAL -> "Colours the build by what laid each block: stone by the shape that "
 				+ "placed it, dead wire in red, wrong notes as lit copper bulbs, missed ones wearing a "
 				+ "dragon head. Collisions build through and light up in sea lantern, so a build with "
-				+ "any of those is broken on purpose. The README has the colour key.";
+				+ "any of those is broken on purpose. The lanes and relay blocks stay stone, since stone "
+				+ "is one of the colours; the climbs and supports keep your blocks. The README has the "
+				+ "colour key.";
 		};
 	}
 

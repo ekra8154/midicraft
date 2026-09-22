@@ -51,11 +51,16 @@ labels over blocks and scrolling to retune them are tools you turn on when you
 want them, rather than the first thing a new world greets you with. What the
 settings cover:
 
-- the blocks a paste is built from: each machine's lane (stone), the climbs
-  between floors (glass) and the supports under a floor (stone slab). Each is
-  typed as a block id and refused if it would break the machine: a lane block
-  has to conduct redstone, a transparent one must not, and a support needs a
-  solid top. The block under a note is its instrument and is never swapped;
+- the blocks a paste is built from: each machine's lane (stone), the relay block
+  (stone), the climbs between floors (glass) and the supports under a floor
+  (stone slab). The relay block takes every cell that has to carry power, such as
+  buses, stacked chords, double rails and a descent's powered rungs, plus any
+  cell over or beside dust that keeps the wire from stepping where it should
+  not; the lanes take the rest, so they may be glass or slabs. Each is typed as
+  a block id and refused if it would break the machine: the relay block has to
+  conduct redstone, a transparent block must not, and lanes and supports need a
+  top that dust and repeaters can stand on. The block under a note is its
+  instrument and is never swapped;
 - a GUI scale for the mod's own screens, separate from Minecraft's, since a piano
   roll wants more pixels than a hotbar does;
 - a master switch for the in-world tools, which does not touch the Composer;
@@ -362,7 +367,7 @@ draws a region of the world as text.
 
 Color-coded paste is not behind that switch: it is picked per paste on the
 paste screen, alongside whether the build starts at the top or the bottom, and
-the last choice is remembered. **Normal** is plain stone. **Light show** is a
+the last choice is remembered. **Normal** is the plain build, made of the Build Pasting blocks. **Light show** is a
 plain build that plays, with every bus, stacked chord centre and top rail block
 made a redstone lamp, so the song draws a glowing line as it runs; the lane's own
 floor, its padding and the floor rail stay stone, and nothing under a note

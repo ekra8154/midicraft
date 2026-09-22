@@ -773,6 +773,34 @@ public final class SongBuilder {
 		if (world.isEmpty()) {
 			return plan;
 		}
+		// What the game would knock off before anything played: dust or a repeater with nothing under
+		// it that can hold it up pops off as an item the moment it lands. The reader only follows the
+		// signal and would carry on along a wire that is not there, so the wire is taken away first
+		// and whatever it fed reads as silent. The rules are the game's own, the same ones
+		// LaneMaterials checks a block against -- this catches what gets past that check, and any
+		// support the walk itself got wrong.
+		List<BlockPos> unsupported = new ArrayList<>();
+		net.minecraft.world.level.EmptyBlockGetter nothing =
+			net.minecraft.world.level.EmptyBlockGetter.INSTANCE;
+		for (Map.Entry<BlockPos, net.minecraft.world.level.block.state.BlockState> cell
+				: world.entrySet()) {
+			net.minecraft.world.level.block.state.BlockState state = cell.getValue();
+			boolean wire = state.is(net.minecraft.world.level.block.Blocks.REDSTONE_WIRE);
+			if (!wire && !state.is(net.minecraft.world.level.block.Blocks.REPEATER)) {
+				continue;
+			}
+			net.minecraft.world.level.block.state.BlockState under = world.getOrDefault(
+				cell.getKey().below(), net.minecraft.world.level.block.Blocks.AIR.defaultBlockState());
+			boolean held = wire
+				? under.isFaceSturdy(nothing, BlockPos.ZERO, Direction.UP)
+					|| under.is(net.minecraft.world.level.block.Blocks.HOPPER)
+				: under.isFaceSturdy(nothing, BlockPos.ZERO, Direction.UP,
+					net.minecraft.world.level.block.SupportType.RIGID);
+			if (!held) {
+				unsupported.add(cell.getKey());
+			}
+		}
+		unsupported.forEach(world::remove);
 		BlockPos low = new BlockPos(
 			world.keySet().stream().mapToInt(BlockPos::getX).min().orElse(0),
 			world.keySet().stream().mapToInt(BlockPos::getY).min().orElse(0),
@@ -32022,6 +32050,12 @@ public final class SongBuilder {
 	 */
 	public static String LANE_ONE_BLOCK = "minecraft:stone";
 	public static String LANE_TWO_BLOCK = "minecraft:stone";
+	/**
+	 * The relay block: the stone that has to conduct, in either machine: what carries a chord's pulse, and what
+	 * stands over or beside dust to keep its diagonal steps cut. See {@code mustConduct}. Everything
+	 * else that was stone takes its lane's block, which is then free not to conduct.
+	 */
+	public static String RELAY_BLOCK = "minecraft:stone";
 	public static String TRANSPARENT_BLOCK = "minecraft:glass";
 	public static String SUPPORT_BLOCK = UNDERFLOOR;
 
@@ -35100,6 +35134,9 @@ public final class SongBuilder {
 				return block;
 			}
 			if (lanes && "minecraft:stone".equals(block)) {
+				if (mustConduct(at)) {
+					return RELAY_BLOCK;
+				}
 				// The tint is machine and parity together, see laneTint(int, int). A cell laid with
 				// no machine being walked -- the starter, or a one-machine layout -- is lane one.
 				return laneTintAt.getOrDefault(at, 0) / 2 == 1 ? LANE_TWO_BLOCK : LANE_ONE_BLOCK;
@@ -35111,6 +35148,74 @@ public final class SongBuilder {
 				return SUPPORT_BLOCK;
 			}
 			return block;
+		}
+
+		/**
+		 * Whether a cell of plain stone is doing a relay's job, so it takes the relay block
+		 * rather than its lane's, which need not conduct at all.
+		 *
+		 * <p>A conductor does three things a lane block of glass or slab would not, and each is asked
+		 * of the blocks around the cell with the game's own rules ({@code RedStoneWireBlock},
+		 * {@code DiodeBlock}):</p>
+		 * <ul>
+		 *   <li>it carries power: a repeater facing into it or reading out of it, dust on it that a
+		 *   note beside it hears, or whatever the walk itself recorded as powered -- the bus, the
+		 *   stacked chord, the double rail, a descent's powered rungs;</li>
+		 *   <li>it cuts the step up from dust directly under it, which the game allows only past a
+		 *   block that does not conduct;</li>
+		 *   <li>it cuts the step down from dust beside it into dust under it, the same rule the other
+		 *   way.</li>
+		 * </ul>
+		 * <p>And anything a button or a piston stands against, which take and give power through the
+		 * block they touch. Erring towards conducting is the safe side: a conductor where a lane block
+		 * would have done is only the wrong colour.</p>
+		 */
+		private boolean mustConduct(BlockPos at) {
+			if (powered.containsKey(at) || isWire(at.below())) {
+				return true;
+			}
+			boolean dustOnTop = isWire(at.above());
+			for (Direction side : Direction.values()) {
+				BlockPos next = at.relative(side);
+				String there = blocks.getOrDefault(next, "");
+				if (there.contains("_button") || there.contains("piston")) {
+					return true;
+				}
+				if (side.getAxis().isVertical()) {
+					continue;
+				}
+				if (dustOnTop && there.startsWith("minecraft:note_block")) {
+					return true;
+				}
+				if (there.startsWith("minecraft:repeater")) {
+					Direction facing = repeaterFacing(there);
+					if (facing == null || facing.getAxis() == side.getAxis()) {
+						return true;
+					}
+				}
+				if (isWire(next) && isWire(at.below())) {
+					return true;
+				}
+			}
+			return false;
+		}
+
+		private boolean isWire(BlockPos at) {
+			return blocks.getOrDefault(at, "").startsWith("minecraft:redstone_wire");
+		}
+
+		/** The facing a repeater's block string names, or null if it names none. */
+		private static Direction repeaterFacing(String repeater) {
+			int from = repeater.indexOf("facing=");
+			if (from < 0) {
+				return null;
+			}
+			int to = from + "facing=".length();
+			int end = to;
+			while (end < repeater.length() && Character.isLetter(repeater.charAt(end))) {
+				end++;
+			}
+			return Direction.byName(repeater.substring(to, end));
 		}
 
 		/**

@@ -738,6 +738,8 @@ public final class SettingsScreen extends Screen {
 					MidicraftConfig::laneOneBlock, config::setLaneOneBlock)));
 				entries.add(Entry.of(new Text("lane_two_block", LaneMaterials.Role.LANE,
 					MidicraftConfig::laneTwoBlock, config::setLaneTwoBlock)));
+				entries.add(Entry.of(new Text("relay_block", LaneMaterials.Role.RELAY,
+					MidicraftConfig::relayBlock, config::setRelayBlock)));
 				entries.add(Entry.of(new Text("transparent_block", LaneMaterials.Role.TRANSPARENT,
 					MidicraftConfig::transparentBlock, config::setTransparentBlock)));
 				entries.add(Entry.of(new Text("support_block", LaneMaterials.Role.SUPPORT,
