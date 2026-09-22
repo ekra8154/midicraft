@@ -14167,6 +14167,19 @@ public final class SongBuilder {
 						headed = lowsToppedUpFromTheTail(placements, opening, travel, depth,
 							event.time(), headed);
 					}
+					// The rung flanks, asked of the ground the same way. The oracle filled them at
+					// plan time and the module lays them without looking, so a flank beside a
+					// block another lane has since put live sounds at that lane's tick: the lane
+					// three over climbs at the same wall, and its solid mid rung stands three up on
+					// the border column, one cell from this head's second rung flank (all my
+					// fellas at twenty-seven wide over six floors, top-start, 26 63 32 against the
+					// rung at 26 63 33). A loud flank rides over the staircase with the far half;
+					// where that puts the run past its wire the head is refused like a loud low.
+					// See CUT_HEAD_ASKS_ITS_RUNG_FLANKS.
+					if (CUT_HEAD_ASKS_ITS_RUNG_FLANKS && !headed.rungNotes().isEmpty()) {
+						headed = rungFlanksOffLoudGround(placements, opening, travel, depth,
+							event.time(), headed, splitCells);
+					}
 					// Every low slot the head will fill, asked of the ground it will hang over.
 					// The descent-flank shed rehomes a note without looking, and onTheFreeSlots
 					// hands the module back untouched where not every note finds a quiet slot --
@@ -22839,6 +22852,35 @@ public final class SongBuilder {
 			Direction travel, Direction depth, List<EventNote> notes, int cellLimit, int bareCells,
 			int flatCells, int riseCap, int riseStep, int mutedCells, int harpCells,
 			int noFallCells, int time, List<EventNote> leftover) {
+		return layFoldbackRun(placements, firstStone, travel, depth, notes, cellLimit, bareCells,
+			flatCells, riseCap, riseStep, mutedCells, harpCells, noFallCells, time, leftover, false);
+	}
+
+	/**
+	 * A descent foldback's catch column, standing on a wall column, hangs no note on the side of
+	 * the lane not yet built.
+	 *
+	 * <p>The catch sits a level below the lane. The lane three over turns at the same wall, and
+	 * where it descends its spiral's second rung is powered stone a level below its own lane and
+	 * one cell towards this one -- the cell beside the catch's far-side note, which then sounds
+	 * again at that rung's tick. Nothing at the descent's end can move: a contested rung yielding
+	 * as glass was a dead line (dust cannot step down past glass). So the note goes over the fold
+	 * with the rest instead. Every {@code descent4 -> foldback wall run} "would sound again" in
+	 * the census was this cell: a dark zone at twenty-five wide over eight floors, top-start,
+	 * 23 55 62 against the rung at 23 55 63; HOTMK to end all at forty-six wide over four,
+	 * 1 59 326 against 1 59 327.</p>
+	 */
+	static boolean FOLDBACK_CATCH_KEEPS_OFF_THE_DESCENT_ROW = true;
+
+	/**
+	 * @param wallCatch whether the first column is a descent foldback's catch, a level below the
+	 *     lane, so that on a wall column it keeps its far-side slot empty. See
+	 *     {@link #FOLDBACK_CATCH_KEEPS_OFF_THE_DESCENT_ROW}.
+	 */
+	private static int layFoldbackRun(PlacementPlan placements, BlockPos firstStone,
+			Direction travel, Direction depth, List<EventNote> notes, int cellLimit, int bareCells,
+			int flatCells, int riseCap, int riseStep, int mutedCells, int harpCells,
+			int noFallCells, int time, List<EventNote> leftover, boolean wallCatch) {
 		List<EventNote> left = new ArrayList<>(notes);
 		int cells = 0;
 		while (cells < cellLimit && (!left.isEmpty() || cells < bareCells)) {
@@ -22861,6 +22903,11 @@ public final class SongBuilder {
 			for (Direction out : List.of(depth.getOpposite(), depth)) {
 				BlockPos slot = stone.relative(out);
 				if (left.isEmpty()) {
+					continue;
+				}
+				if (FOLDBACK_CATCH_KEEPS_OFF_THE_DESCENT_ROW && wallCatch && cell == 0
+						&& out == depth && placements.atAWall(stone)) {
+					placements.padded("foldbackCatchKeptOffTheDescentRow");
 					continue;
 				}
 				int pick = suitedNote(placements, slot, left, cell, harpCells, noFallCells, time);
@@ -23179,7 +23226,8 @@ public final class SongBuilder {
 		// the wall, and no turn either. The fold is the turn, and it stands where the module
 		// opens.
 		layFoldbackRun(placements, catchAt.below(), travel, depth,
-			fold.wallward(), foldbackWallCells(fold.room()), 1, 0, 2, 1, 0, 0, 0, time, spill);
+			fold.wallward(), foldbackWallCells(fold.room()), 1, 0, 2, 1, 0, 0, 0, time, spill,
+			true);
 		// The fold and the inbound run in one: the column under the repeater a step down from
 		// the catch, another step down onto the floor below's bus height, and flat from there,
 		// running back the other way. Two columns are laid whether or not a note rides them --
@@ -31161,6 +31209,74 @@ public final class SongBuilder {
 	static boolean CUT_HEAD_ASKS_ITS_LOW_SLOTS = true;
 
 	/** The first filled low slot whose cell is not quiet and free at this opening, or -1. */
+	/**
+	 * A centre-fed head's rung flanks are asked of the ground before the head goes down.
+	 *
+	 * <p>The oracle fills them at plan time from the chord and {@link #addStackedSplitModule} lays
+	 * them without looking. The ground can change between the two: in the interleaved layout the
+	 * lane three over turns at the same wall, and where it climbs its solid mid rung is powered
+	 * stone three up on the border column, one cell from this head's second rung flank. Laid
+	 * first, that rung sounds the flank at its own tick -- the {@code climb -> cutHead} family,
+	 * 168 wrong notes in the top-start census. Laid second, the climb already asks
+	 * {@link #stoneWouldSoundAForeignNote} and yields as glass; this is the other order.</p>
+	 */
+	static boolean CUT_HEAD_ASKS_ITS_RUNG_FLANKS = true;
+
+	/** The same split with every rung flank that would stand beside another tick's live block sent over the staircase. */
+	private static StackedSplit rungFlanksOffLoudGround(PlacementPlan placements, BlockPos cursor,
+			Direction travel, Direction laneStep, int time, StackedSplit split, int splitCells) {
+		BlockPos[] cells = rungCellsOf(cursor, travel, laneStep, split.centreFeeds());
+		if (cells.length == 0) {
+			return split;
+		}
+		List<EventNote> rungs = new ArrayList<>(split.rungNotes());
+		List<EventNote> head = new ArrayList<>(split.head());
+		List<EventNote> far = new ArrayList<>(split.farTail());
+		boolean moved = false;
+		for (int slot = 0; slot < cells.length && slot < rungs.size(); slot++) {
+			EventNote note = rungs.get(slot);
+			if (note == null || quietAndFree(placements, cells[slot], time)) {
+				continue;
+			}
+			rungs.set(slot, null);
+			head.remove(note);
+			far.add(0, note);
+			moved = true;
+			placements.padded("cutHeadRungFlankLoud");
+		}
+		if (!moved) {
+			return split;
+		}
+		StackedSplit thinner = new StackedSplit(split.slots(), head, split.nearTail(), far,
+			split.shed(), split.centreFeeds(), split.centreToFront(),
+			java.util.Collections.unmodifiableList(rungs), split.severNote(), split.stairExtras());
+		if (thinner.runCells(splitCells) > DUST_RANGE) {
+			// Refused inside the trial, the same way a loud low slot is: the plain cut takes over.
+			placements.padded("cutHeadRungFlankLoudOutOfWire");
+			throw new IllegalArgumentException("cut head's rung flank at " + cursor.toShortString()
+				+ " is beside another tick's live block and the far half has no wire for it");
+		}
+		return thinner;
+	}
+
+	/** The cells a centre-fed head's rung flanks hang in, in the oracle's slot order, or none. */
+	private static BlockPos[] rungCellsOf(BlockPos cursor, Direction travel, Direction laneStep,
+			CentreFeed shape) {
+		if (shape == CentreFeed.FLANKED_RUNGS) {
+			BlockPos foot = cursor.relative(travel, 2);
+			BlockPos border = cursor.relative(travel, 3);
+			return new BlockPos[] {
+				foot.above(2).relative(laneStep), foot.above(2).relative(laneStep.getOpposite()),
+				border.above(3).relative(laneStep),
+				border.above(3).relative(laneStep.getOpposite())};
+		}
+		if (shape == CentreFeed.CORKSCREW) {
+			return new BlockPos[] {cursor.above(2).relative(laneStep),
+				cursor.above(2).relative(laneStep.getOpposite())};
+		}
+		return new BlockPos[0];
+	}
+
 	private static int loudLowSlot(PlacementPlan placements, BlockPos pos, Direction travel,
 			Direction noteSide, int time, UltraSlots slots) {
 		if (slots == null) {
