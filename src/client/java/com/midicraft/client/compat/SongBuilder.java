@@ -3142,6 +3142,12 @@ public final class SongBuilder {
 	 * corner. Nothing between the stages may revive it, so the only cell that can move is the
 	 * first stage's, and the landing's own wire has cells to spare for the pads that move it.
 	 * Bounded by that wire, and by the room the stage and the wait's repeaters still need.</p>
+	 *
+	 * <p>And the same where the repeater did not cross alone but goes down on the landing with
+	 * its stage: Song of Storms at eight wide over three floors, top-start, the one shape the
+	 * first version of this rule did not ask about, and the same sixteen cells dead on the
+	 * straight cell before the second piston. There the repeater is laid first and the pads
+	 * run on its fifteen, so the landing's leftover wire no longer bounds the shove.</p>
 	 */
 	static boolean SEAM_STAGE_ONE_STANDS_FORWARD = true;
 
@@ -11696,18 +11702,44 @@ public final class SongBuilder {
 						// the landing's wire allows, so the dust from its landed block still reaches
 						// the second piston: the rest of the leg, the flat turn, and the straight
 						// cell before that piston. See SEAM_STAGE_ONE_STANDS_FORWARD.
-						if (SEAM_STAGE_ONE_STANDS_FORWARD && seamNext == 1) {
+						if (SEAM_STAGE_ONE_STANDS_FORWARD && seamNext <= 1) {
 							TurnCost turnAfter = turnCost(floor, climb, floors,
 								flatLink(route, leg, slabStep));
 							boolean flatAfter = !(turnAfter.above() >= 0 && turnAfter.above() < floors);
-							boolean stageTwoFitsHere = available - 6 >= foldRepeaters + 2;
+							// The stage's own cells: three, or four with the repeater, where it
+							// did not cross the staircase alone.
+							int stageOne = seamNext == 0 ? 4 : 3;
+							boolean stageTwoFitsHere = available - (stageOne + 3) >= foldRepeaters + 2;
 							if (flatAfter && !stageTwoFitsHere) {
 								// The cells after the stage's landing to the wall column, the wall
 								// column itself, and the turn: both corners, the link, and the
 								// straight cell before the second piston.
-								int dust = available - 3 + 1 + turnAfter.cells();
+								int dust = available - stageOne + 1 + turnAfter.cells();
+								if (dust > DUST_RANGE && seamNext == 0
+										&& available - 4 >= foldRepeaters + 2) {
+									// The repeater first, so the pads that move the stage run on
+									// its fresh fifteen rather than on whatever the staircase
+									// left. Song of Storms at eight wide over three floors,
+									// top-start: the whole first stage went down flush against
+									// the landing because the repeater had not crossed alone, the
+									// old rule asked only about a stage of three, and the landed
+									// block's dust died on the straight cell before the second
+									// piston -- sixteen cells, one more than dust carries.
+									set(placements, lane.pos(), "minecraft:stone");
+									set(placements, lane.pos().above(), "minecraft:repeater[facing="
+										+ repeaterFacing(lane.travel()) + ",delay="
+										+ PARITY_SEAM_REPEATER + "]");
+									lane = lane.ahead(1);
+									seamNext = 1;
+									seamFeedNext = lane.pos();
+									available--;
+									foldSignal = DUST_RANGE;
+									dustRun = 0;
+									stageOne = 3;
+									placements.padded("paritySeamRepeaterAheadOfItsShove");
+								}
 								int shove = Math.min(dust - DUST_RANGE,
-									Math.min(foldSignal - 1, available - 3 - (foldRepeaters + 2)));
+									Math.min(foldSignal - 1, available - stageOne - (foldRepeaters + 2)));
 								for (int cell = 0; cell < shove; cell++) {
 									addParityPad(placements, lane.pos());
 									lane = lane.ahead(1);
