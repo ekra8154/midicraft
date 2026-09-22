@@ -2764,6 +2764,23 @@ public final class SongBuilder {
 	static boolean INNER_WALLS_ARE_HARD = true;
 
 	/**
+	 * Whether a chord laid more than {@link #WALL_BREACH_OUTER_ALLOWANCE} past an outer wall is
+	 * treated the way one past an inner wall is: the walk stops and runs again with a turn forced
+	 * in front of that event.
+	 *
+	 * <p>Thriller at thirty-three wide over one floor, bottom-start: machine B's stacked bus of
+	 * twenty-nine (head six, tail twenty-three) arrived on its outer near wall column with no
+	 * columns left, could not straddle the flat turn, had no staircase to be cut across, and was
+	 * laid whole -- fourteen columns past the wall, twelve of them into the side of the paste the
+	 * other machine works in. Twelve to nineteen builds a census, all thriller. Forced to turn in
+	 * front of that event, the wait pads to the corner and the chord opens on the next leg with
+	 * the whole lane in front of it. Outer walls keep their allowance of one for everything else
+	 * -- a descent's outer rung, a corner -- which is why this asks for a chord and for more than
+	 * the allowance.</p>
+	 */
+	static boolean OUTER_WALLS_ARE_HARD = true;
+
+	/**
 	 * Whether a turn the wait has walked out is closed before the chord behind it is decided,
 	 * rather than at the top of the next event.
 	 *
@@ -34953,7 +34970,12 @@ public final class SongBuilder {
 				// event was decided had that descent filed as the chord riding out -- Moonlight at
 				// eight wide over three floors, a chord of two forced to turn eleven columns early.
 				boolean hard = legInner || legExit && EXIT_WALLS_ARE_HARD
-					&& placing != null && placing.startsWith("chord");
+					&& placing != null && placing.startsWith("chord")
+					// A chord past the outer wall by more than the allowance: the same rewalk with
+					// a turn forced, so the chord opens on the next leg instead of running out
+					// of the paste. See OUTER_WALLS_ARE_HARD.
+					|| OUTER_WALLS_ARE_HARD && !legInner && past > allowance
+						&& placing != null && placing.startsWith("chord");
 				if (past > allowance || hard && past > 0) {
 					String by = placing == null ? "?" : placing;
 					// A hard inner wall stops the walk here, before the cell is recorded: the plan is
@@ -34962,7 +34984,7 @@ public final class SongBuilder {
 							&& !softEvents.contains(legEvent)) {
 						throw new InnerWallCrossed(legEvent, describe(position) + " " + block
 							+ " laid by " + by + ", " + past + " past the "
-							+ (legInner ? "inner" : "exit") + " wall");
+							+ (legInner ? "inner" : legExit ? "exit" : "outer") + " wall");
 					}
 					// The tint is machine and parity together, see laneTint(int, int); the breach
 					// wants the machine alone.
