@@ -24122,6 +24122,50 @@ public final class SongBuilder {
 			// down against it. Not free, though -- the bend exception it overrides is there because the
 			// two-swap turn wants a note on the inside diagonal, so this can cost a swap where the odd
 			// note is that diagonal. Measured either way; see {@link #BUS_ODD_NOTE_AWAY_FROM_NEXT_LANE}.
+			// The cell behind the first cell, where nothing stands. A bus opened off a repeater in
+			// line has the repeater there; one opened by a two-swap turn has its repeater off to the
+			// side, on the inside diagonal, and the cell behind is empty ground beside powered
+			// stone -- a slot like a corner's third, never offered because the first cell is not a
+			// corner. Asked of the ground whatever the lane's crowding, since nothing about the
+			// route promised it. See BUS_OPENS_WITH_ITS_BACK_SLOT.
+			if (BUS_OPENS_WITH_ITS_BACK_SLOT && cells == 1 && !at.cornerAt(0)) {
+				BlockPos behind = at.pos().relative(at.travel().getOpposite());
+				// And only on settled ground: every other side of the cell already built or claimed,
+				// so nothing laid later can stand against it. The route the lane has yet to walk
+				// often comes back past a two-swap turn's first cell -- all my fellas at eight wide
+				// over one floor, 16 65 149 hung there and the next bus down came through 15 65 149
+				// beside it, sounding it again twenty-four ticks later.
+				boolean settled = true;
+				for (Direction side : BACK_SLOT_WANTS_SETTLED_GROUND ? Direction.Plane.HORIZONTAL
+						: List.<Direction>of()) {
+					BlockPos next = behind.relative(side);
+					if (!next.equals(at.pos()) && placements.blockAt(next) == null) {
+						settled = false;
+					}
+				}
+				if (TRACE_BACK_SLOT) {
+					StringBuilder around = new StringBuilder();
+					for (Direction side : Direction.Plane.HORIZONTAL) {
+						BlockPos next = behind.relative(side);
+						around.append(' ').append(side.getName()).append('=')
+							.append(next.equals(at.pos()) ? "BUS" : placements.blockAt(next));
+					}
+					System.out.println("BACKASK t=" + time + " at " + behind.getX() + " "
+						+ behind.getY() + " " + behind.getZ() + " travel=" + at.travel()
+						+ " self=" + placements.blockAt(behind) + " free="
+						+ placements.freeForNote(behind) + around);
+				}
+				if (settled && placements.blockAt(behind) == null && !reserved.contains(behind)
+						&& placements.freeForNote(behind) && !soundedByAnother(placements, behind, time)) {
+					slots = new ArrayList<>(slots);
+					slots.add(behind);
+					placements.padded("busOpenedWithItsBackSlot");
+					if (TRACE_BACK_SLOT) {
+						System.out.println("BACKSLOT t=" + time + " at " + behind.getX() + " "
+							+ behind.getY() + " " + behind.getZ());
+					}
+				}
+			}
 			if (BUS_ODD_NOTE_AWAY_FROM_NEXT_LANE && ordered.size() - placed == 1 && slots.size() >= 2
 					&& placements.awayFromTheNextLane(slots.get(1), slots.get(0))) {
 				List<BlockPos> lowFirst = new ArrayList<>(slots);
@@ -30455,6 +30499,28 @@ public final class SongBuilder {
 	 * note left there is a note whose neighbour does not exist to be checked against.</p>
 	 */
 	static boolean BUS_ODD_NOTE_AWAY_FROM_NEXT_LANE = true;
+
+	/**
+	 * A bus whose first cell has empty ground behind it hangs a note there.
+	 *
+	 * <p>A corner cell offers three slots -- the pair either side of the way the wire leaves, and
+	 * the cell opposite, which the wire turned away from. The first cell of a bus opened by a
+	 * two-swap turn is the same shape without being a corner: its repeater stands on the inside
+	 * diagonal, one of the pair is that repeater's own cell, and the cell behind is empty ground
+	 * beside powered stone. HOTMK to end all at thirty-eight wide over one floor: a plain bus of
+	 * twenty-eight at tick 806, fifteen cells, out of wire at the last one, one note with nowhere
+	 * to hang and 3 65 1305 standing empty behind its first cell. Only where that cell is empty,
+	 * quiet and free, and every other side of it is already built or claimed so nothing laid
+	 * later can stand against it -- a bus opened in line has its repeater there and is
+	 * unchanged.</p>
+	 */
+	static boolean BUS_OPENS_WITH_ITS_BACK_SLOT = true;
+
+	/** Scratch switch for the settled-ground half of {@link #BUS_OPENS_WITH_ITS_BACK_SLOT}. */
+	static boolean BACK_SLOT_WANTS_SETTLED_GROUND = true;
+
+	/** Scratch: prints every back slot offered. */
+	static boolean TRACE_BACK_SLOT = false;
 
 	/**
 	 * Whether the plan asks the blocks behind a chord the way the walk does.
