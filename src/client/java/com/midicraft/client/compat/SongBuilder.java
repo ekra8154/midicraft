@@ -2764,6 +2764,12 @@ public final class SongBuilder {
 	static boolean INNER_WALLS_ARE_HARD = true;
 
 	/**
+	 * A forced turn in front of a lane's first chord is taken on a flat turn, rather than refused
+	 * because the lane has held nothing yet. See the note where {@code wantsTurn} is decided.
+	 */
+	static boolean FORCED_TURN_OPENS_A_LANE = true;
+
+	/**
 	 * Whether a chord laid more than {@link #WALL_BREACH_OUTER_ALLOWANCE} past an outer wall is
 	 * treated the way one past an inner wall is: the walk stops and runs again with a turn forced
 	 * in front of that event.
@@ -12972,7 +12978,20 @@ public final class SongBuilder {
 			if (chainStartsTheLane && overshoots) {
 				placements.padded("chainStartedTheLane");
 			}
-			boolean wantsTurn = (laneStarted || chainStartsTheLane) && overshoots;
+			// And a lane that has held nothing may still turn where the planner forced it, on a flat
+			// turn: the spin the rule above guards against cannot happen, because a forced turn is
+			// spent once per event. A machine's very first leg is the case -- michael jackson bad at
+			// eight wide over one floor, machine B opening on the input and a parity seam, five
+			// columns gone before its first chord, a stacked bus of seventeen, laid whole through
+			// the inner wall into machine A's corner on every rewalk because the forced turn in
+			// front of event nought was refused for an empty lane. See FORCED_TURN_OPENS_A_LANE.
+			boolean forcedOpensTheLane = FORCED_TURN_OPENS_A_LANE && !laneStarted && forcedTurn
+				&& flatAhead;
+			if (forcedOpensTheLane && overshoots) {
+				placements.padded("forcedTurnOpenedTheLane");
+			}
+			boolean wantsTurn = (laneStarted || chainStartsTheLane || forcedOpensTheLane)
+				&& overshoots;
 			// A chord that overshoots a flat turn it cannot lie across from here, but could from a
 			// little further on, is walked there on dust and asked again. Not off a soft tip,
 			// where dust is dead wire, and only inside the wire the lane holds: the chord's own
@@ -13941,7 +13960,7 @@ public final class SongBuilder {
 				&& forcedTurn && flatAhead && !straddles && onWall && railPhase < 0
 				&& route.foldsWaits() && reaskedAt != index;
 			boolean canTurn = layout.ultra()
-				? index > 0 && reachesWall && (flatAhead
+				? (index > 0 || forcedOpensTheLane) && reachesWall && (flatAhead
 					? straddles && straddleAffordable || padsToTheCorner
 					: pad.signal() >= turnPrice)
 				: index > 0 && events.get(index - 1).maxSafeTurnDistance() >= MAX_LANE_SPACING;
@@ -35391,6 +35410,20 @@ public final class SongBuilder {
 				return;
 			}
 			for (BlockPos at : undo.blocksAdded()) {
+				// And the two cells a module names for whatever is laid after it: a simple tail's rail
+				// slot and a stacked bus's handover. A rollback that takes up the cell leaves the name
+				// pointing at air, and the next event opens a floor rail off a tail that was never
+				// built -- michael jackson bad at eight wide over one floor, a stacked bus tried with a
+				// simple tail, collided, fallen to a plain bus, and a FROM-HANDOVER repeater at
+				// 13 64 958 reading the air beside it: the rest of the lane a second machine.
+				if (railTail != null && at.equals(railTail.above())) {
+					railTail = null;
+					padded("railTailRolledBack");
+				}
+				if (handover != null && at.equals(handover)) {
+					handover = null;
+					padded("handoverRolledBack");
+				}
 				blocks.remove(at);
 				// The name goes back with the block. A stacked module that will not fit is rolled back
 				// and a bus built over the same cells, and a label left behind from the shape that was
