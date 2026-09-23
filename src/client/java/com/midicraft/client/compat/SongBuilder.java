@@ -23973,9 +23973,26 @@ public final class SongBuilder {
 	}
 
 	/**
+	 * A bus stops where its dust runs out, not after a fixed count of cells.
+	 *
+	 * <p>The count assumed every cell costs a point of signal, which holds on a straight run and
+	 * not round a tight turn: two corners a cell apart put four bus cells in a two-by-two square,
+	 * and the dust on the first cell steps straight into the one after the bend, so the two corner
+	 * cells are a side loop that costs nothing. HOTMK to end all at fifty-four wide over one floor:
+	 * a plain bus of twenty-eight at tick 864, fifteen cells and still three of signal at its last
+	 * one, reported two notes as having nowhere to hang -- every missing note in the dense census
+	 * was a bus like it. Now each cell's strength is one less than the strongest cell of the same
+	 * bus beside it, the run carries on while that is at least one, and the wire the walk is told
+	 * it spent is what the last cell actually has left. With no shortcut the two are the same
+	 * number, so every straight bus is built exactly as before.</p>
+	 */
+	static boolean BUS_MEASURES_ITS_WIRE = true;
+
+	/**
 	 * A run of powered stone with a note down each side of it, and the dust that lights the run.
 	 *
-	 * @return how many blocks of it there are, which is also how much wire it spends
+	 * @return how many blocks of it there are, which is also how much wire it spends -- except
+	 *     where the run doubles back on itself; then {@link PlacementPlan#lastBusWire} is the wire
 	 */
 	private static int layBus(PlacementPlan placements, Lane anchor, List<EventNote> chord,
 			int time) {
@@ -24041,8 +24058,31 @@ public final class SongBuilder {
 		// Before the first block, while every note of the chord is still a candidate. See
 		// {@link #orderAwayFromTheWall}.
 		orderAwayFromTheWall(placements, anchor, ordered, limit);
-		while (placed < ordered.size() && cells < limit) {
+		// Each cell's dust strength, off the strongest cell of this bus beside it at the same
+		// level. The first is the whole budget the caller gave, which is what the count assumed
+		// too. See BUS_MEASURES_ITS_WIRE.
+		Map<BlockPos, Integer> strength = new HashMap<>();
+		int lastStrength = limit;
+		while (placed < ordered.size() && cells < limit + (BUS_MEASURES_ITS_WIRE ? limit : 0)) {
 			Lane at = anchor.ahead(cells);
+			int here = limit;
+			if (cells > 0) {
+				here = 0;
+				for (Direction side : Direction.Plane.HORIZONTAL) {
+					Integer beside = strength.get(at.pos().relative(side));
+					if (beside != null) {
+						here = Math.max(here, beside - 1);
+					}
+				}
+			}
+			if (BUS_MEASURES_ITS_WIRE ? here < 1 : cells >= limit) {
+				break;
+			}
+			strength.put(at.pos().immutable(), here);
+			lastStrength = here;
+			if (BUS_MEASURES_ITS_WIRE && cells >= limit) {
+				placements.padded("busGrewOnAShortcut");
+			}
 			placements.powered(at.pos(), "minecraft:stone", time);
 			set(placements, at.pos().above(), "minecraft:redstone_wire");
 			cells++;
@@ -24148,6 +24188,9 @@ public final class SongBuilder {
 				+ " at tick " + time + " had nowhere to hang: a bus is fifteen blocks at the most, "
 				+ "and this one filled them without room for the rest");
 		}
+		// The wire spent, as the walk counts it: the budget less what the last cell has left, plus
+		// the cell itself. Equal to the cell count wherever the run never doubles back.
+		placements.lastBusWire = Math.max(1, Math.min(cells, limit - lastStrength + 1));
 		return Math.max(1, cells);
 	}
 
@@ -25086,11 +25129,12 @@ public final class SongBuilder {
 			busCells = layBus(placements, opening.ahead(2).above(),
 				rest, time, reserved, DUST_RANGE - 1);
 		}
+		int busWire = busCells == 0 ? 0 : placements.lastBusWire;
 		// The opening column, the lowered one, and the bus after them -- so the column after the
 		// module is two past the opening plus whatever the tail spent. Measured from the opening
 		// rather than from the repeater, because a two-swap turn's repeater stands on the inside
 		// diagonal of a corner and is not on the route at all.
-		return new Body(opening.ahead(2 + busCells), 1 + busCells, true);
+		return new Body(opening.ahead(2 + busCells), 1 + busWire, true);
 	}
 
 	/**
@@ -25181,7 +25225,7 @@ public final class SongBuilder {
 			placements.placing("chord:BUS notes" + chord.size());
 		}
 		int cells = layBus(placements, lane.ahead(1).above(), chord, time);
-		return new Body(lane.ahead(1 + cells), cells);
+		return new Body(lane.ahead(1 + cells), placements.lastBusWire);
 	}
 
 	/**
@@ -29465,7 +29509,7 @@ public final class SongBuilder {
 			return new Body(afterHead.ahead(2), dusted ? 1 : 0);
 		}
 		int cells = layBus(placements, afterHead.ahead(1).above(), tail, time);
-		return new Body(afterHead.ahead(1 + cells), cells);
+		return new Body(afterHead.ahead(1 + cells), placements.lastBusWire);
 	}
 
 	/**
@@ -33111,6 +33155,8 @@ public final class SongBuilder {
 		}
 
 		private boolean recording = true;
+		/** What the last bus laid actually spent of its wire. See {@link #BUS_MEASURES_ITS_WIRE}. */
+		int lastBusWire;
 		private final Map<BlockPos, String> blocks = new LinkedHashMap<>();
 		/** Cells two shapes both wanted, and what each pair was, when {@link #DEBUG_PASTE}. */
 		private final Map<BlockPos, String> collisions = new LinkedHashMap<>();
