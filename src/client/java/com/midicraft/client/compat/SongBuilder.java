@@ -2801,6 +2801,15 @@ public final class SongBuilder {
 	static boolean OUTER_WALLS_ARE_HARD = true;
 
 	/**
+	 * A staircase more than the outer allowance past its wall stops the walk the same way a chord
+	 * does. A descent's outer rung stands one past by design, which the allowance is for; two past
+	 * means the lane reached its staircase a column late -- sunset of seven suns at nineteen wide
+	 * over three floors, top-start: a sunken bus of four measured to land on the wall grew a bus
+	 * cell for a slot the ground refused, and the descent after it anchored one out.
+	 */
+	static boolean STAIRCASES_PAST_THE_OUTER_ALLOWANCE_REWALK = true;
+
+	/**
 	 * Whether a turn the wait has walked out is closed before the chord behind it is decided,
 	 * rather than at the top of the next event.
 	 *
@@ -35163,7 +35172,9 @@ public final class SongBuilder {
 					// a turn forced, so the chord opens on the next leg instead of running out
 					// of the paste. See OUTER_WALLS_ARE_HARD.
 					|| OUTER_WALLS_ARE_HARD && outerWallsRewalk && !legInner && past > allowance
-						&& placing != null && placing.startsWith("chord");
+						&& placing != null && (placing.startsWith("chord")
+							|| STAIRCASES_PAST_THE_OUTER_ALLOWANCE_REWALK
+								&& (placing.startsWith("descent") || placing.startsWith("climb")));
 				if (TRACE_WALL_THROW && (past > allowance || legInner && past > 0)) {
 					System.out.println((legInner ? "INNERWALLCELL at " : "OUTERWALL at ") + describe(position) + " past=" + past
 						+ " by=" + placing + " hard=" + hard + " hardWalls=" + hardInnerWalls
