@@ -16099,6 +16099,20 @@ public final class SongBuilder {
 						Direction near = lane.noteSide().getOpposite();
 						List<Direction> sides = List.of(near, near.getOpposite());
 						railClaimTime = floorChord.time();
+						// The side hangRailNotes will actually use, asked the same way: a chord
+						// smaller than the pair goes across where the near slot is noisy and the
+						// far one is not. Claiming the near slot regardless protected a cell the
+						// note was never going to use, the machine alongside built beside the far
+						// one, and the note fell back to the noisy near slot -- a dark zone at
+						// fifty-eight wide over three floors, top-start, 34 56 36 sounded 178
+						// ticks early by a stacked module's side instrument.
+						if (RAIL_MOVES_FOR_STACKS && floorChord.notes().size() < sides.size()
+								&& !railSlotTakes(placements, lane.pos().relative(near),
+									railClaimTime)
+								&& railSlotTakes(placements, lane.pos().relative(near.getOpposite()),
+									railClaimTime)) {
+							sides = List.of(near.getOpposite(), near);
+						}
 						for (int slot = 0; slot < floorChord.notes().size() && slot < sides.size();
 								slot++) {
 							BlockPos cell = lane.pos().relative(sides.get(slot));
