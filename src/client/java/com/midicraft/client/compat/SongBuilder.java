@@ -1962,6 +1962,9 @@ public final class SongBuilder {
 		int collisionsForced = 0;
 		while (true) {
 			PlacementPlan placements = new PlacementPlan();
+			// This planner catches InnerWallCrossed and walks again; nothing else does. See
+			// OUTER_WALLS_ARE_HARD.
+			placements.outerWallsRewalk = true;
 			placements.padded("innerWallForcedTurn", turnBeforeA.size() + turnBeforeB.size());
 			placements.padded("collisionForcedTurn", collisionsForced);
 			placements.padded("innerWallGaveUp", softA.size() + softB.size());
@@ -2769,8 +2772,15 @@ public final class SongBuilder {
 	 */
 	static boolean FORCED_TURN_OPENS_A_LANE = true;
 
+	/**
+	 * A stacked module that comes to rest on its leg's wall column hangs nothing in the cells a
+	 * tight turn off that wall would run through; one that would falls back to a bus. See the note
+	 * in {@link #buildShaped}.
+	 */
+	static boolean FLUSH_CHORD_KEEPS_THE_TURN_RUN_CLEAR = true;
 
-	/** Scratch: every cell laid past an outer wall, with the gates the hard-wall throw asks. */
+
+	/** Scratch: every cell laid past a wall, with the gates the hard-wall throw asks. */
 	static boolean TRACE_WALL_THROW = false;
 
 	/**
@@ -26081,6 +26091,28 @@ public final class SongBuilder {
 				trace(event, lane, style, ChordStyle.BUS, "onTheRoute");
 				return fallenBus(placements, lane, triggerDelay, event, layout);
 			}
+			// And the run a tight turn off the wall would take, for a module that comes to rest on its
+			// wall column: the next lane's side of that column, the two cells the turn walks through
+			// at the lane's level and the wire over them. A module hanging a low note there leaves a
+			// fold nothing to turn tight on, and the wide turn stands its first corner one past the
+			// wall -- wellerman at eight wide over one floor, a stacked chord of machine A on its inner
+			// near wall with a low note at 4 64 11, the fold turning at 3. See
+			// FLUSH_CHORD_KEEPS_THE_TURN_RUN_CLEAR.
+			if (layout.v2() && FLUSH_CHORD_KEEPS_THE_TURN_RUN_CLEAR
+					&& placements.landsOnTheLegWall(placed.lane().pos())) {
+				Set<BlockPos> run = new HashSet<>();
+				for (int along = 1; along <= 2; along++) {
+					BlockPos cell = placed.lane().pos().relative(placed.lane().noteSide(), along);
+					run.add(cell.immutable());
+					run.add(cell.above().immutable());
+				}
+				if (placements.trialTouches(run)) {
+					placements.rollbackTrial();
+					placements.padded("planBusForTheTurnRunOffTheWall");
+					trace(event, lane, style, ChordStyle.BUS, "turnRunOffTheWall");
+					return fallenBus(placements, lane, triggerDelay, event, layout);
+				}
+			}
 			// And the corner rule asked of the footprint rather than of the column the module opens in.
 			//
 			// Only for a nudged module, and only because the nudge is what moved it: the turn ban
@@ -33258,6 +33290,13 @@ public final class SongBuilder {
 		}
 
 		private boolean recording = true;
+		/**
+		 * Whether a chord past an outer wall may stop the walk. Only the interleaved planner catches
+		 * the throw and walks again; a one-lane build has walls too, and there the throw refused the
+		 * whole build (all my fellas at fifty-eight wide over three floors). See
+		 * {@link #OUTER_WALLS_ARE_HARD}.
+		 */
+		boolean outerWallsRewalk;
 		/** What the last bus laid actually spent of its wire. See {@link #BUS_MEASURES_ITS_WIRE}. */
 		int lastBusWire;
 		private final Map<BlockPos, String> blocks = new LinkedHashMap<>();
@@ -35123,10 +35162,10 @@ public final class SongBuilder {
 					// A chord past the outer wall by more than the allowance: the same rewalk with
 					// a turn forced, so the chord opens on the next leg instead of running out
 					// of the paste. See OUTER_WALLS_ARE_HARD.
-					|| OUTER_WALLS_ARE_HARD && !legInner && past > allowance
+					|| OUTER_WALLS_ARE_HARD && outerWallsRewalk && !legInner && past > allowance
 						&& placing != null && placing.startsWith("chord");
-				if (TRACE_WALL_THROW && past > allowance && !legInner) {
-					System.out.println("OUTERWALL at " + describe(position) + " past=" + past
+				if (TRACE_WALL_THROW && (past > allowance || legInner && past > 0)) {
+					System.out.println((legInner ? "INNERWALLCELL at " : "OUTERWALL at ") + describe(position) + " past=" + past
 						+ " by=" + placing + " hard=" + hard + " hardWalls=" + hardInnerWalls
 						+ " legEvent=" + legEvent + " soft=" + softEvents.contains(legEvent)
 						+ " legIndex=" + legIndex + " exit=" + legExit);
@@ -35227,6 +35266,12 @@ public final class SongBuilder {
 		 * has landed anywhere it should not have -- which is the only form of the question that can
 		 * be put to a shape whose footprint nobody has written down.</p>
 		 */
+		/** Whether this cell stands on the wall column of the leg being watched. */
+		boolean landsOnTheLegWall(BlockPos cell) {
+			return watchingLegWalls && legAxis != null
+				&& coordAlong(legAxis, cell) == legWall;
+		}
+
 		boolean trialTouches(Set<BlockPos> cells) {
 			if (trial == null) {
 				return false;
