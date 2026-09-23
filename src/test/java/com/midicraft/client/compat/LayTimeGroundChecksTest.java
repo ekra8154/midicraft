@@ -59,6 +59,28 @@ class LayTimeGroundChecksTest {
 		SongBuilder.FORCED_TURN_OPENS_A_LANE = true;
 		SongBuilder.FLUSH_CHORD_KEEPS_THE_TURN_RUN_CLEAR = true;
 		SongBuilder.STAIRCASES_PAST_THE_OUTER_ALLOWANCE_REWALK = true;
+		SongBuilder.FOLDBACK_DESCENT_RESCUES_A_DEAD_FOLD = true;
+	}
+
+	/**
+	 * A wait that cannot reach the bottom of its descent, with no cell for a repeater before it,
+	 * goes down the compact foldback descent. The user's design, from this build.
+	 */
+	@Test
+	void illitFortyFourBySevenBottomStartKeepsInsideItsWalls() throws Exception {
+		Built built = build("illit-do-the-dance-2-lanes", 44, 7, false);
+		assertTrue(built.plan().wallBreaches().isEmpty(), "walls: " + built.plan().wallBreaches());
+		assertEquals(0, built.reading().unreachedNotes(),
+			"notes the signal never reached: " + built.reading().unreachedAt());
+		assertEquals(1, built.reading().versions(), "ways in: " + built.reading().warnings());
+	}
+
+	@Test
+	void withoutTheFoldbackDescentTheChordRunsPastTheWall() throws Exception {
+		SongBuilder.FOLDBACK_DESCENT_RESCUES_A_DEAD_FOLD = false;
+		Built built = build("illit-do-the-dance-2-lanes", 44, 7, false);
+		assertTrue(!built.plan().wallBreaches().isEmpty(),
+			"the fault this test guards is no longer reproduced with the fix off");
 	}
 
 	// ---- 2026-09-23, breaches -------------------------------------------------------------------

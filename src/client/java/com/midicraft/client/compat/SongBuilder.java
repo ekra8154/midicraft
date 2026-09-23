@@ -11597,6 +11597,44 @@ public final class SongBuilder {
 						// with the wait -- the padding -- and lays the chord on the leg, where the
 						// strand check sees this staircase and offers the foldback. See
 						// FOLDBACK_PADDING.
+						// Or, where the lane stands on the staircase's own column with no cell before
+						// it for a repeater and the wait holds two ticks or more, the compact foldback
+						// descent: one repeater at the top on this cell, the rest of the wait as the
+						// trigger on the floor below. See FOLDBACK_DESCENT_RESCUES_A_DEAD_FOLD.
+						int waitLeft = event.time() - currentTime;
+						if (FOLDBACK_DESCENT_RESCUES_A_DEAD_FOLD && climb < 0 && toWall == 0
+								&& waitLeft >= 2 && !(seamNext > 0 && seamNext < PARITY_SEAM_CELLS)
+								&& !lane.bending()) {
+							int top = Math.min(4, waitLeft - 1);
+							BlockPos landed = addFoldbackDescent(placements, lane.pos(), lane.travel(),
+								top, currentTime + top);
+							if (landed != null) {
+								currentTime += top;
+								placements.padded("foldbackDescentRescuedADeadFold");
+								if (TRACE_TURNS) {
+									System.out.println("FOLDBACKDESCENT t=" + event.time() + " index="
+										+ index + " top=" + top + " signal=" + foldSignal + " at "
+										+ coordAlong(axis, lane.pos()) + " " + lane.pos().getY() + " "
+										+ coordAcross(axis, lane.pos()));
+								}
+								// The bottom's first repeater reads the block the stair's last dust
+								// stands on; nothing else is owed, so the lane after is full wire.
+								foldSignal = DUST_RANGE;
+								dustRun = 0;
+								lane = crowdedIfUltra(Lane.straight(landed, lane.travel().getOpposite(),
+									depth), layout);
+								leg++;
+								floor = route.floorOf(leg);
+								climb = route.climbOf(leg);
+								placements.stopWatchingLegWalls();
+								laneStarted = true;
+								columnBehindBusy = !BACK_PAIR_FREE_AFTER_A_STAIRCASE;
+								replan = layout.ultra();
+								folded = true;
+								continue;
+							}
+							placements.padded("foldbackDescentRefusedTheGround");
+						}
 						if (FOLDBACK_PADDING && lastInTurn == index - 1
 								&& !turnBefore.contains(lastInTurn)) {
 							placements.stranded(lastInTurn);
@@ -19132,6 +19170,96 @@ public final class SongBuilder {
 	 * no step ever lands directly beneath the one before last. That is why a descent comes out a
 	 * block further along than a climb, and a block to the side as well.</p>
 	 */
+	/**
+	 * A wait that cannot cross its descent alive, with the lane already on the staircase's column,
+	 * goes down the compact foldback descent instead of being laid past the wall.
+	 *
+	 * <p>The user's design, from illit at forty-four wide over seven floors, bottom-start: a chord of
+	 * twenty-six filled machine B's leg to the wall with three of wire, the next wait held six ticks,
+	 * a descent wants four, and there was no cell before the staircase for a repeater -- the wait's
+	 * two repeaters went down in a row past the wall and the next chord with them, eight out. The
+	 * foldback's own trick fixes it without a chord: the first repeater stands on this cell on a top
+	 * slab and drives a conductor block on the next column, the conductor lights the dust under
+	 * it, and that dust steps straight back down under the lane, one level a column, to a block the
+	 * floor below reads with the wait's second repeater. Nothing stands further out than the outer
+	 * rung of an ordinary descent, and the chain never runs on the dead wire at all.</p>
+	 */
+	static boolean FOLDBACK_DESCENT_RESCUES_A_DEAD_FOLD = true;
+
+	/**
+	 * Lays the compact foldback descent from a lane standing at {@code cursor}, or lays nothing and
+	 * answers null where the ground will not have it.
+	 *
+	 * <p>With the lane at level {@code y} and travel {@code +t}: slab at the cursor and a repeater of
+	 * {@code delay} over it; the conductor at {@code +1t, y+1}; the catch dust under it at
+	 * {@code +1t, y} on a block; dust at {@code 0, y-1} and {@code -1t, y-2}, each on a block. The
+	 * floor below's lane starts at {@code -2t, y-4}, where its first repeater reads the last block.
+	 * The slab under the repeater is what lets the catch step down past it: a slab is not a
+	 * conductor, so the diagonal is not cut.</p>
+	 *
+	 * @param time the tick the chain passes the top repeater, which every powered block here holds
+	 * @return the floor below's first cell, where the chord's trigger goes
+	 */
+	private static BlockPos addFoldbackDescent(PlacementPlan placements, BlockPos cursor,
+			Direction travel, int delay, int time) {
+		if (CUBE_FLOOR_HEIGHT != 4 || delay < 1 || delay > 4) {
+			return null;
+		}
+		Direction back = travel.getOpposite();
+		BlockPos repeaterAt = cursor.above();
+		BlockPos conductor = cursor.relative(travel).above();
+		BlockPos catchDust = cursor.relative(travel);
+		BlockPos catchBlock = catchDust.below();
+		BlockPos midDust = cursor.below();
+		BlockPos midBlock = midDust.below();
+		BlockPos lowDust = cursor.relative(back).below(2);
+		BlockPos lowBlock = lowDust.below();
+		BlockPos landing = cursor.relative(back, 2).below(4);
+		// Every cell the shape and the trigger after it will want, empty.
+		List<BlockPos> laid = List.of(cursor, repeaterAt, conductor, catchDust, catchBlock, midDust,
+			midBlock, lowDust, lowBlock, landing, landing.above());
+		for (BlockPos cell : laid) {
+			if (placements.blockAt(cell) != null) {
+				return null;
+			}
+		}
+		// The two cells over the lower dusts, which the diagonals pass under: a conductor there
+		// would cut the step. The first is the slab laid here; the second must not be solid.
+		String overLow = placements.blockAt(lowDust.above());
+		if (overLow != null && !"minecraft:air".equals(overLow)) {
+			return null;
+		}
+		// Nothing of another tick beside a block this strongly or weakly powers, nor in front of
+		// either end of the dust line.
+		for (BlockPos block : List.of(conductor, catchBlock, midBlock, lowBlock)) {
+			if (stoneWouldSoundAForeignNote(placements, block, time)
+					|| placements.noteAt(block.above(), time) || placements.noteAt(block.below(), time)) {
+				return null;
+			}
+		}
+		for (BlockPos end : List.of(catchDust.relative(travel), lowDust.relative(back))) {
+			String there = placements.blockAt(end);
+			if (there != null && there.startsWith("minecraft:note_block")) {
+				return null;
+			}
+		}
+		String was = placements.placing();
+		placements.placing("foldback descent1");
+		placements.turnedAt(cursor);
+		set(placements, cursor, "minecraft:stone_slab[type=top]");
+		set(placements, repeaterAt, "minecraft:repeater[facing=" + repeaterFacing(travel)
+			+ ",delay=" + delay + "]");
+		placements.powered(conductor, "minecraft:stone", time);
+		placements.powered(catchBlock, "minecraft:stone", time);
+		set(placements, catchDust, "minecraft:redstone_wire");
+		placements.powered(midBlock, "minecraft:stone", time);
+		set(placements, midDust, "minecraft:redstone_wire");
+		placements.powered(lowBlock, "minecraft:stone", time);
+		set(placements, lowDust, "minecraft:redstone_wire");
+		placements.placing(was);
+		return landing;
+	}
+
 	/**
 	 * The same descent, four cells instead of six, for a lane arriving on a bus.
 	 *
