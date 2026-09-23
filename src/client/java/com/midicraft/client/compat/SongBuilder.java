@@ -2769,6 +2769,10 @@ public final class SongBuilder {
 	 */
 	static boolean FORCED_TURN_OPENS_A_LANE = true;
 
+
+	/** Scratch: every cell laid past an outer wall, with the gates the hard-wall throw asks. */
+	static boolean TRACE_WALL_THROW = false;
+
 	/**
 	 * Whether a chord laid more than {@link #WALL_BREACH_OUTER_ALLOWANCE} past an outer wall is
 	 * treated the way one past an inner wall is: the walk stops and runs again with a turn forced
@@ -35121,6 +35125,12 @@ public final class SongBuilder {
 					// of the paste. See OUTER_WALLS_ARE_HARD.
 					|| OUTER_WALLS_ARE_HARD && !legInner && past > allowance
 						&& placing != null && placing.startsWith("chord");
+				if (TRACE_WALL_THROW && past > allowance && !legInner) {
+					System.out.println("OUTERWALL at " + describe(position) + " past=" + past
+						+ " by=" + placing + " hard=" + hard + " hardWalls=" + hardInnerWalls
+						+ " legEvent=" + legEvent + " soft=" + softEvents.contains(legEvent)
+						+ " legIndex=" + legIndex + " exit=" + legExit);
+				}
 				if (past > allowance || hard && past > 0) {
 					String by = placing == null ? "?" : placing;
 					// A hard inner wall stops the walk here, before the cell is recorded: the plan is

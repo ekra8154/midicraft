@@ -53,6 +53,85 @@ class LayTimeGroundChecksTest {
 		SongBuilder.RAIL_CLAIMS_ITS_COMMITTED_FLOOR = true;
 		SongBuilder.CUT_HEAD_ASKS_ITS_RUNG_FLANKS = true;
 		SongBuilder.FOLDBACK_CATCH_KEEPS_OFF_THE_DESCENT_ROW = true;
+		SongBuilder.BUS_MEASURES_ITS_WIRE = true;
+		SongBuilder.BUS_OPENS_WITH_ITS_BACK_SLOT = true;
+		SongBuilder.BACK_SLOT_WANTS_SETTLED_GROUND = true;
+		SongBuilder.FORCED_TURN_OPENS_A_LANE = true;
+	}
+
+	// ---- 2026-09-23 ----------------------------------------------------------------------------
+
+	/** A bus round a two-corner turn carries on while its dust does. See BUS_MEASURES_ITS_WIRE. */
+	@Test
+	void hotmkFiftyFourByOneHangsEveryNoteOfItsCornerBus() throws Exception {
+		Built built = build("hall-of-the-mountain-king-2-lanes-insane-copy", 54, 1, false);
+		assertEquals(0, built.plan().missingNotes(), "missing: " + built.plan().faults());
+		assertEquals(0, built.reading().unreachedNotes(),
+			"notes the signal never reached: " + built.reading().unreachedAt());
+	}
+
+	@Test
+	void withoutTheWireMeasureTheCornerBusDropsTwo() throws Exception {
+		SongBuilder.BUS_MEASURES_ITS_WIRE = false;
+		Built built = build("hall-of-the-mountain-king-2-lanes-insane-copy", 54, 1, false);
+		assertTrue(built.plan().missingNotes() > 0,
+			"the fault this test guards is no longer reproduced with the fix off");
+	}
+
+	/** A two-swap turn's first bus cell hangs a note behind it. See BUS_OPENS_WITH_ITS_BACK_SLOT. */
+	@Test
+	void hotmkThirtyEightByOneHangsEveryNote() throws Exception {
+		Built built = build("hall-of-the-mountain-king-2-lanes-insane-copy", 38, 1, false);
+		assertEquals(0, built.plan().missingNotes(), "missing: " + built.plan().faults());
+	}
+
+	@Test
+	void withoutTheBackSlotTheBusDropsOne() throws Exception {
+		SongBuilder.BUS_OPENS_WITH_ITS_BACK_SLOT = false;
+		Built built = build("hall-of-the-mountain-king-2-lanes-insane-copy", 38, 1, false);
+		assertTrue(built.plan().missingNotes() > 0,
+			"the fault this test guards is no longer reproduced with the fix off");
+	}
+
+	/** The back slot only on settled ground: all my fellas 8x1 sounded it again otherwise. */
+	@Test
+	void allMyFellasEightByOneSoundsNothingTwice() throws Exception {
+		Built built = build("all-my-fellas-remastered-finished-2", 8, 1, false);
+		assertEquals(0, built.plan().wrongNotes(), "wrong notes: " + built.plan().faults());
+	}
+
+	@Test
+	void withoutSettledGroundTheBackSlotIsSoundedAgain() throws Exception {
+		SongBuilder.BACK_SLOT_WANTS_SETTLED_GROUND = false;
+		Built built = build("all-my-fellas-remastered-finished-2", 8, 1, false);
+		assertTrue(built.plan().wrongNotes() > 0,
+			"the fault this test guards is no longer reproduced with the fix off");
+	}
+
+	/** The rail's claim takes the side its note will hang on (c02d47b). */
+	@Test
+	void darkZoneFiftyEightByThreeTopStartSoundsNothingEarly() throws Exception {
+		Built built = build("a-dark-zone-2-lanes", 58, 3, true);
+		assertEquals(0, built.plan().wrongNotes(), "wrong notes: " + built.plan().faults());
+	}
+
+	/**
+	 * A forced turn opens an empty lane, and a rollback forgets the rail tail it undid: michael
+	 * jackson bad 8x1 was two machines with twelve collisions. See FORCED_TURN_OPENS_A_LANE.
+	 */
+	@Test
+	void michaelJacksonBadEightByOneIsOneMachine() throws Exception {
+		Built built = build("michael-jackson-bad", 8, 1, false);
+		assertTrue(built.plan().collisions().isEmpty(), "collisions: " + built.plan().collisions());
+		assertEquals(1, built.reading().versions(), "ways in: " + built.reading().warnings());
+	}
+
+	@Test
+	void withoutTheForcedOpeningTheFirstChordCollides() throws Exception {
+		SongBuilder.FORCED_TURN_OPENS_A_LANE = false;
+		Built built = build("michael-jackson-bad", 8, 1, false);
+		assertTrue(!built.plan().collisions().isEmpty(),
+			"the fault this test guards is no longer reproduced with the fix off");
 	}
 
 	@Test
