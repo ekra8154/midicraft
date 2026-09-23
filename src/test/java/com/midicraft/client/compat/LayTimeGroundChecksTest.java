@@ -57,6 +57,47 @@ class LayTimeGroundChecksTest {
 		SongBuilder.BUS_OPENS_WITH_ITS_BACK_SLOT = true;
 		SongBuilder.BACK_SLOT_WANTS_SETTLED_GROUND = true;
 		SongBuilder.FORCED_TURN_OPENS_A_LANE = true;
+		SongBuilder.FLUSH_CHORD_KEEPS_THE_TURN_RUN_CLEAR = true;
+		SongBuilder.STAIRCASES_PAST_THE_OUTER_ALLOWANCE_REWALK = true;
+	}
+
+	// ---- 2026-09-23, breaches -------------------------------------------------------------------
+
+	/** A chord landing on its wall keeps the tight turn's run clear. */
+	@Test
+	void wellermanEightByOneKeepsInsideItsWalls() throws Exception {
+		Built built = build("sea-shanty-wellerman", 8, 1, false);
+		assertEquals(0, built.plan().innerWallBreaches(), "walls: " + built.plan().wallBreaches());
+	}
+
+	@Test
+	void withoutTheClearRunTheCornerStandsPastTheInnerWall() throws Exception {
+		SongBuilder.FLUSH_CHORD_KEEPS_THE_TURN_RUN_CLEAR = false;
+		Built built = build("sea-shanty-wellerman", 8, 1, false);
+		assertTrue(built.plan().innerWallBreaches() > 0,
+			"the fault this test guards is no longer reproduced with the fix off");
+	}
+
+	/** A staircase two past its outer wall forces a turn. */
+	@Test
+	void sunsetNineteenByThreeTopStartKeepsInsideItsWalls() throws Exception {
+		Built built = build("sunset-of-seven-suns", 19, 3, true);
+		assertTrue(built.plan().wallBreaches().isEmpty(), "walls: " + built.plan().wallBreaches());
+	}
+
+	@Test
+	void withoutTheStaircaseRewalkTheDescentStandsTwoOut() throws Exception {
+		SongBuilder.STAIRCASES_PAST_THE_OUTER_ALLOWANCE_REWALK = false;
+		Built built = build("sunset-of-seven-suns", 19, 3, true);
+		assertTrue(!built.plan().wallBreaches().isEmpty(),
+			"the fault this test guards is no longer reproduced with the fix off");
+	}
+
+	/** A one-lane build is not refused by a hard outer wall nothing catches (13623e1). */
+	@Test
+	void aOneLaneBuildWithAChordPastItsOuterWallIsStillBuilt() throws Exception {
+		Built built = build("all-my-fellas-remastered-finished", 58, 3, true);
+		assertTrue(!built.plan().commands().isEmpty(), "the build was refused");
 	}
 
 	// ---- 2026-09-23 ----------------------------------------------------------------------------
