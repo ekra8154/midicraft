@@ -61,6 +61,28 @@ class LayTimeGroundChecksTest {
 		SongBuilder.STAIRCASES_PAST_THE_OUTER_ALLOWANCE_REWALK = true;
 		SongBuilder.FOLDBACK_DESCENT_RESCUES_A_DEAD_FOLD = true;
 		SongBuilder.SWAP_SINKS_A_BUS_THAT_RUNS_OUT = true;
+		SongBuilder.SWAP_DOUBLE_SINKS_A_LOUD_OPENING = true;
+	}
+
+	/**
+	 * A two-swap turn whose repeater would drive a block against the other machine's note opens on
+	 * dust, both cells sunk. The user's design, from this build. See SWAP_DOUBLE_SINKS_A_LOUD_OPENING.
+	 */
+	@Test
+	void grimGrinningGhostsNineteenByTwoTopStartSoundsNothingTwice() throws Exception {
+		Built built = build("buddy-baker-xavier-atencio-grim-grinning-ghosts", 19, 2, true);
+		assertEquals(0, built.plan().wrongNotes(), "wrong: " + built.plan().faults());
+		assertEquals(0, built.plan().missingNotes(), "missing: " + built.plan().faults());
+		assertEquals(0, built.reading().unreachedNotes(),
+			"notes the signal never reached: " + built.reading().unreachedAt());
+	}
+
+	@Test
+	void withoutTheDoubleSinkTheSwapBlockSoundsTheOtherLane() throws Exception {
+		SongBuilder.SWAP_DOUBLE_SINKS_A_LOUD_OPENING = false;
+		Built built = build("buddy-baker-xavier-atencio-grim-grinning-ghosts", 19, 2, true);
+		assertTrue(built.plan().wrongNotes() > 0,
+			"the fault this test guards is no longer reproduced with the fix off");
 	}
 
 	/**
@@ -79,6 +101,8 @@ class LayTimeGroundChecksTest {
 	@Test
 	void withoutSinkingTheSwappedBusDropsOne() throws Exception {
 		SongBuilder.SWAP_SINKS_A_BUS_THAT_RUNS_OUT = false;
+		// An earlier corner double-sinks and the walk never meets this chord in a swap at all.
+		SongBuilder.SWAP_DOUBLE_SINKS_A_LOUD_OPENING = false;
 		Built built = build("hall-of-the-mountain-king-2-lanes-insane-copy", 25, 1, false);
 		assertTrue(built.plan().missingNotes() > 0,
 			"the fault this test guards is no longer reproduced with the fix off");

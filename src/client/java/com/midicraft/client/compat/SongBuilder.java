@@ -21698,6 +21698,83 @@ public final class SongBuilder {
 		// the repeater faces, and sink the bus cell beside it. Which is the opening and the lowered
 		// column, so it is this shape's own builder, handed the column rather than left to work it out
 		// from a lane the swap has moved off the route.
+		// Whatever the repeater faces is strongly powered, a note block as much as a bus block, and
+		// sounds every note block square against it. Where one of those is another tick's, the
+		// opening is laid as dust instead. See SWAP_DOUBLE_SINKS_A_LOUD_OPENING.
+		int chordTime = chord.get(0).time();
+		BlockPos faced = opening.pos();
+		if (SWAP_DOUBLE_SINKS_A_LOUD_OPENING
+				&& (stoneWouldSoundAForeignNote(placements, faced, chordTime)
+					|| placements.noteAt(faced.above(), chordTime)
+					|| placements.noteAt(faced.below(), chordTime))) {
+			Lane openingAt = new Lane(opening.pos().below(), opening.travel(), opening.noteSide(),
+				opening.bends(), opening.cornerAt(0), lane.crowded());
+			Set<BlockPos> spokenFor = new java.util.HashSet<>(route(opening, DUST_RANGE + 2));
+			spokenFor.add(inside.immutable());
+			String was = placements.placing();
+			// What the swap lays otherwise, built and taken away again, because that is what the walk
+			// measured this chord as. The double sink spends two cells of wire on the few notes its
+			// lowered slots hold, where a bus spends one on two, so a big chord comes out longer --
+			// sweater weather at eight wide, a chord of twenty-seven, and the corner after it dead.
+			// It is taken only where it is no longer and no dearer than what it replaces.
+			PlacementPlan.Behind before = placements.behind();
+			Body instead;
+			placements.beginTrial();
+			try {
+				instead = laySwappedBus(placements, lane, chord, forceBus, opening, inside);
+			} catch (IllegalArgumentException collided) {
+				instead = null;
+			}
+			placements.rollbackTrial();
+			placements.behind(before);
+			placements.placing(was);
+			placements.beginTrial();
+			int troubleBefore = placements.troubleCount();
+			Body sunk;
+			try {
+				placements.placing("chord:SUNKEN_BUS doubleSink notes" + chord.size());
+				sunk = addDoubleSunkBus(placements, openingAt, chord, chordTime, spokenFor, inside);
+			} catch (IllegalArgumentException collided) {
+				sunk = null;
+			}
+			boolean noLonger = sunk != null && instead != null
+				&& sunk.busCells() <= instead.busCells()
+				&& stepsAlong(openingAt, sunk.lane()) <= stepsAlong(openingAt, instead.lane());
+			if (sunk != null && !noLonger) {
+				placements.rollbackTrial();
+				placements.placing(was);
+				placements.padded("swapDoubleSinkWouldRunLonger");
+				return laySwappedBus(placements, lane, chord, forceBus, opening, inside);
+			}
+			if (sunk != null && placements.troubleCount() == troubleBefore
+					&& !placements.trialCollided()) {
+				placements.commitTrial();
+				placements.padded("swapDoubleSankALoudOpening");
+				return sunk;
+			}
+			placements.rollbackTrial();
+			placements.placing(was);
+			placements.padded("swapDoubleSinkRefused");
+		}
+		return laySwappedBus(placements, lane, chord, forceBus, opening, inside);
+	}
+
+	/** How many cells along a route a landing stands, or as good as never where it is not on it. */
+	private static int stepsAlong(Lane from, Lane landed) {
+		for (int step = 0; step <= 4 * DUST_RANGE; step++) {
+			if (from.ahead(step).pos().equals(landed.pos())) {
+				return step;
+			}
+		}
+		return Integer.MAX_VALUE;
+	}
+
+	/**
+	 * The chord after a two-swap turn as it was always laid: sunken where the chord was offered
+	 * that shape, sunken on a plain opening where a plain bus would run out, plain otherwise.
+	 */
+	private static Body laySwappedBus(PlacementPlan placements, Lane lane, List<EventNote> chord,
+			boolean forceBus, Lane opening, BlockPos inside) {
 		if (SWAP_KEEPS_THE_SUNKEN_SHAPE && placements.sunkenOffered() && forceBus) {
 			Lane openingAt = new Lane(opening.pos().below(), opening.travel(), opening.noteSide(),
 				opening.bends(), opening.cornerAt(0), lane.crowded());
@@ -25431,6 +25508,160 @@ public final class SongBuilder {
 		// rather than from the repeater, because a two-swap turn's repeater stands on the inside
 		// diagonal of a corner and is not on the route at all.
 		return new Body(opening.ahead(2 + busCells), 1 + busWire, true);
+	}
+
+	/**
+	 * The double sink: a sunken bus whose opening is dust too, so nothing the repeater drives is a
+	 * block.
+	 *
+	 * <p>The user's design, from Grim Grinning Ghosts at nineteen wide over two floors, top-start:
+	 * a two-swap turn's repeater drove the bus block in front of it, and that block stood square
+	 * against a note of the other machine's stacked bus, sounding it again twelve ticks late. A
+	 * repeater strongly powers whatever it faces, so no block there is safe -- but dust is. The
+	 * repeater drives dust at the lane's own level, on a block one down, and that dust runs on to
+	 * the lowered cell's dust beside it; each turns the corner between its two neighbours and
+	 * points at nothing else. The two blocks under them are what sound the chord, at the level
+	 * below, and the notes that stood beside the opening sink a level with it.</p>
+	 *
+	 * <p>Refused before a block is laid wherever either block under the dust would sound a note of
+	 * another tick or light somebody's wire, either dust would join a wire that is not its own, or
+	 * the chord ends on the lowered cell with a climb ahead: a climb off a bus is priced from bus
+	 * height, and this one ends a level lower.</p>
+	 *
+	 * @param opening the column the repeater faces, at the lane's own level
+	 * @param reserved the route the walk carries on through and the repeater's own cell
+	 * @param repeaterAt the two-swap turn's repeater, which is the dust's own
+	 */
+	private static Body addDoubleSunkBus(PlacementPlan placements, Lane opening,
+			List<EventNote> chord, int time, Set<BlockPos> reserved, BlockPos repeaterAt) {
+		BlockPos firstStone = opening.pos().immutable();
+		BlockPos firstDust = firstStone.above();
+		Lane low = opening.ahead(1);
+		BlockPos lowStone = low.pos().immutable();
+		BlockPos lowDust = lowStone.above();
+		Lane bus = opening.ahead(2);
+		BlockPos busStone = bus.pos().above().immutable();
+		BlockPos busDust = busStone.above();
+		Set<BlockPos> ours = Set.of(firstStone, firstDust, lowStone, lowDust, busStone, busDust,
+			repeaterAt.immutable());
+		for (BlockPos cell : List.of(firstStone, firstDust, lowStone, lowDust)) {
+			if (placements.blockAt(cell) != null) {
+				return null;
+			}
+		}
+		// The lowered dust may climb onto the bus: nothing over it to cut the step.
+		String overLow = placements.blockAt(lowDust.above());
+		if (overLow != null && !"minecraft:air".equals(overLow)) {
+			return null;
+		}
+		for (BlockPos stone : List.of(firstStone, lowStone)) {
+			if (stoneWouldSoundAForeignNote(placements, stone, time)
+					|| placements.noteAt(stone.below(), time)) {
+				placements.padded("doubleSinkStoneLoud");
+				return null;
+			}
+			for (Direction out : Direction.values()) {
+				BlockPos next = stone.relative(out);
+				if (out != Direction.UP && !ours.contains(next) && isRedstone(placements, next)) {
+					placements.padded("doubleSinkStoneLightsAWire");
+					return null;
+				}
+			}
+		}
+		for (BlockPos dust : List.of(firstDust, lowDust)) {
+			for (Direction out : Direction.Plane.HORIZONTAL) {
+				BlockPos next = dust.relative(out);
+				for (BlockPos cell : List.of(next, next.above(), next.below())) {
+					if (!ours.contains(cell) && isRedstone(placements, cell)) {
+						placements.padded("doubleSinkDustJoinsAWire");
+						return null;
+					}
+				}
+			}
+		}
+		// The lowered slots: every cell beside either block that nothing else is standing in or
+		// has spoken for, and whose cell above is not the route's. The opening's first, which is
+		// where the notes beside the repeater's block would have hung.
+		List<BlockPos> slots = new ArrayList<>();
+		for (BlockPos stone : List.of(firstStone, lowStone)) {
+			// Straight on from the cell the signal came in by first: past the repeater's footing for
+			// the opening, past the opening for the lowered cell. The side cells tuck into the turn.
+			BlockPos cameFrom = stone.equals(firstStone) ? repeaterAt.below() : firstStone;
+			List<BlockPos> around = new ArrayList<>();
+			around.add(stone.offset(stone.subtract(cameFrom)).immutable());
+			for (Direction out : Direction.Plane.HORIZONTAL) {
+				around.add(stone.relative(out).immutable());
+			}
+			for (BlockPos slot : around) {
+				if (slot.equals(firstStone) || slot.equals(lowStone) || slots.contains(slot)
+						|| reserved.contains(slot) || reserved.contains(slot.above())
+						|| slot.equals(bus.pos()) || placements.blockAt(slot) != null
+						|| !placements.freeForNote(slot) || soundedByAnother(placements, slot, time)) {
+					continue;
+				}
+				slots.add(slot);
+			}
+		}
+		List<EventNote> rest = new ArrayList<>(busOrder(chord));
+		List<BlockPos> hung = new ArrayList<>();
+		List<EventNote> lowered = new ArrayList<>();
+		for (BlockPos slot : slots) {
+			EventNote pick = null;
+			for (EventNote note : rest) {
+				if (note.effect() == null && sinksHere(placements, slot, note)) {
+					pick = note;
+					break;
+				}
+			}
+			if (pick != null) {
+				rest.remove(pick);
+				hung.add(slot);
+				lowered.add(pick);
+			}
+		}
+		if (rest.isEmpty() && placements.climbAhead()) {
+			placements.padded("doubleSinkEndsLowBeforeAClimb");
+			return null;
+		}
+		// Decided. Now build it.
+		placements.powered(firstStone, "minecraft:stone", time);
+		set(placements, firstDust, "minecraft:redstone_wire");
+		placements.powered(lowStone, "minecraft:stone", time);
+		set(placements, lowDust, "minecraft:redstone_wire");
+		for (int at = 0; at < hung.size(); at++) {
+			placeNote(placements, hung.get(at), lowered.get(at), true);
+		}
+		int busCells = 0;
+		if (!rest.isEmpty()) {
+			busCells = layBus(placements, bus.above(), rest, time, reserved, DUST_RANGE - 2);
+		}
+		int busWire = busCells == 0 ? 0 : placements.lastBusWire;
+		return new Body(opening.ahead(2 + busCells), 2 + busWire, true);
+	}
+
+	/** Whether redstone of any kind is planned here: wire, a diode, or a block that powers. */
+	private static boolean isRedstone(PlacementPlan placements, BlockPos cell) {
+		String there = placements.blockAt(cell);
+		return there != null && (there.startsWith("minecraft:redstone_wire")
+			|| there.startsWith("minecraft:repeater") || there.startsWith("minecraft:comparator")
+			|| there.startsWith("minecraft:redstone_block")
+			|| there.startsWith("minecraft:redstone_torch") || there.startsWith("minecraft:observer"));
+	}
+
+	/**
+	 * Whether a note may hang in this lowered slot. A falling instrument wants a support two below
+	 * the lane, which over a floor is the air over the floor below's notes, so it sinks only where
+	 * that cell is empty and no note stands under it -- asked of the cell rather than refused
+	 * outright as {@link #sinkable} does, because the double sink has no bus to send it to.
+	 */
+	private static boolean sinksHere(PlacementPlan placements, BlockPos slot, EventNote note) {
+		if (!FALLING_INSTRUMENT_BLOCKS.contains(note.instrumentBlock()) || !placements.floorBelow()) {
+			return true;
+		}
+		BlockPos support = slot.below(2);
+		String under = placements.blockAt(support.below());
+		return placements.blockAt(support) == null
+			&& (under == null || !under.startsWith("minecraft:note_block"));
 	}
 
 	/**
@@ -31478,6 +31709,14 @@ public final class SongBuilder {
 	 * fits is laid exactly as it always was.</p>
 	 */
 	static boolean SWAP_SINKS_A_BUS_THAT_RUNS_OUT = true;
+
+	/**
+	 * A two-swap turn whose repeater would drive a block standing against another tick's note
+	 * opens on dust instead: {@link #addDoubleSunkBus}. The user's design, from Grim Grinning
+	 * Ghosts at nineteen wide over two floors, top-start, where the bus block in front of the
+	 * repeater sounded the other machine's note twelve ticks late.
+	 */
+	static boolean SWAP_DOUBLE_SINKS_A_LOUD_OPENING = true;
 
 	/**
 	 * The smallest chord a busy pad will spend a column on.
