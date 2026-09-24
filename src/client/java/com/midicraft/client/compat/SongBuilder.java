@@ -21716,6 +21716,51 @@ public final class SongBuilder {
 			}
 			placements.padded("swapSunkenGaveWay");
 		}
+		// A plain bus that would run out of wire sinks after all, opening on a plain block where the
+		// chord has no harp to open with. See SWAP_SINKS_A_BUS_THAT_RUNS_OUT.
+		if (SWAP_SINKS_A_BUS_THAT_RUNS_OUT && forceBus) {
+			List<EventNote> dropped = new ArrayList<>();
+			placements.beginTrial();
+			int tried;
+			try {
+				tried = layBus(placements, opening, chord, chord.get(0).time(),
+					route(opening, DUST_RANGE + 2), DUST_RANGE, dropped);
+			} catch (IllegalArgumentException collided) {
+				placements.rollbackTrial();
+				throw collided;
+			}
+			if (dropped.isEmpty()) {
+				placements.commitTrial();
+				Lane landed = opening.ahead(tried);
+				return new Body(new Lane(landed.pos().below(), landed.travel(), landed.noteSide(),
+					landed.bends(), landed.cornerAt(0), lane.crowded()), tried);
+			}
+			placements.rollbackTrial();
+			Lane openingAt = new Lane(opening.pos().below(), opening.travel(), opening.noteSide(),
+				opening.bends(), opening.cornerAt(0), lane.crowded());
+			Set<BlockPos> spokenFor = new java.util.HashSet<>(route(opening, DUST_RANGE + 2));
+			spokenFor.add(inside.immutable());
+			String was = placements.placing();
+			placements.beginTrial();
+			int troubleBefore = placements.troubleCount();
+			Body sunk = null;
+			try {
+				placements.placing("chord:SUNKEN_BUS notes" + chord.size());
+				sunk = addSunkenBusModule(placements, openingAt, chord, chord.get(0).time(),
+					spokenFor, true);
+			} catch (IllegalArgumentException collided) {
+				sunk = null;
+			}
+			if (sunk != null && placements.troubleCount() == troubleBefore
+					&& !placements.trialCollided()) {
+				placements.commitTrial();
+				placements.padded("swapSankABusThatRanOut");
+				return sunk;
+			}
+			placements.rollbackTrial();
+			placements.placing(was);
+			placements.padded("swapSinkingDidNotHelp");
+		}
 		int cells = layBus(placements, opening, chord, chord.get(0).time(),
 			route(opening, DUST_RANGE + 2));
 		Lane landed = opening.ahead(cells);
@@ -25109,6 +25154,17 @@ public final class SongBuilder {
 	 */
 	private static Body addSunkenBusModule(PlacementPlan placements, Lane opening,
 			List<EventNote> chord, int time, Set<BlockPos> reserved) {
+		return addSunkenBusModule(placements, opening, chord, time, reserved, false);
+	}
+
+	/**
+	 * @param plainOpening whether a chord with no harp may open on a plain block instead of being
+	 *     refused. The repeater strongly powers stone as well as it does a note block, so the dust
+	 *     beside it still reads fifteen and the opening's flanks still sound; the chord gives up only
+	 *     the centre note. See {@link #SWAP_SINKS_A_BUS_THAT_RUNS_OUT}.
+	 */
+	private static Body addSunkenBusModule(PlacementPlan placements, Lane opening,
+			List<EventNote> chord, int time, Set<BlockPos> reserved, boolean plainOpening) {
 		List<EventNote> ordered = new ArrayList<>(busOrder(chord));
 		EventNote centre = null;
 		for (EventNote note : ordered) {
@@ -25119,12 +25175,20 @@ public final class SongBuilder {
 				break;
 			}
 		}
-		if (centre == null) {
+		if (centre == null && !plainOpening) {
 			return null;
 		}
 		ordered.remove(centre);
 		Direction side = opening.noteSide();
 		BlockPos centreAt = opening.pos().above();
+		// A plain opening is live stone, which sounds every note block square against it -- so none
+		// of another tick may stand there.
+		if (centre == null && (stoneWouldSoundAForeignNote(placements, centreAt, time)
+				|| placements.noteAt(centreAt.above(), time)
+				|| placements.noteAt(centreAt.below(), time))) {
+			placements.padded("sunkenPlainOpeningLoud");
+			return null;
+		}
 		Lane low = opening.ahead(1);
 		// Every question first, and not one block before them.
 		//
@@ -25319,11 +25383,15 @@ public final class SongBuilder {
 			}
 		}
 		// Decided. Now build it.
-		placeNote(placements, centreAt, centre);
-		// Said out loud, the way the small module says it: the repeater drives this block, and a note
-		// block is full and solid, so it passes that power to everything beside it -- the two flanks,
-		// and the dust in the next column.
-		placements.powered(centreAt, time);
+		if (centre == null) {
+			placements.powered(centreAt, "minecraft:stone", time);
+		} else {
+			placeNote(placements, centreAt, centre);
+			// Said out loud, the way the small module says it: the repeater drives this block, and a
+			// note block is full and solid, so it passes that power to everything beside it -- the two
+			// flanks, and the dust in the next column.
+			placements.powered(centreAt, time);
+		}
 		List<EventNote> rest = new ArrayList<>(ordered);
 		for (Direction out : openSides) {
 			if (!rest.isEmpty()) {
@@ -31392,6 +31460,24 @@ public final class SongBuilder {
 	 * tried, worth one note in 44,000 -- but one slot given up.</p>
 	 */
 	static boolean SWAP_KEEPS_THE_SUNKEN_SHAPE = true;
+
+	/**
+	 * A two-swap turn whose plain bus would run out of wire before its chord does lays the sunken
+	 * shape instead, opening on a plain block where the chord has no harp.
+	 *
+	 * <p>The user's design, from the hall of the mountain king at twenty-five wide over one floor,
+	 * 23 65 2582: a chord of twenty-eight with no harp in it swapped round a corner, and the bus
+	 * came to its fifteenth cell at a strength of one with a note still in hand. Swap two opens the
+	 * bus one cell off the route, so the first cell of dust sits at the corner the route bends
+	 * round and spends a cell carrying nothing. Sunk, the repeater drives a plain block, the dust
+	 * beside it runs a level down and reads it at fifteen, and that lowered cell hangs two notes at
+	 * the lane's level and steps up onto an ordinary bus. The cell saved is the one the chord was
+	 * short.</p>
+	 *
+	 * <p>Tried as a trial first and taken only where the plain bus drops a note, so a bus that
+	 * fits is laid exactly as it always was.</p>
+	 */
+	static boolean SWAP_SINKS_A_BUS_THAT_RUNS_OUT = true;
 
 	/**
 	 * The smallest chord a busy pad will spend a column on.

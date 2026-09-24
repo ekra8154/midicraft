@@ -60,6 +60,28 @@ class LayTimeGroundChecksTest {
 		SongBuilder.FLUSH_CHORD_KEEPS_THE_TURN_RUN_CLEAR = true;
 		SongBuilder.STAIRCASES_PAST_THE_OUTER_ALLOWANCE_REWALK = true;
 		SongBuilder.FOLDBACK_DESCENT_RESCUES_A_DEAD_FOLD = true;
+		SongBuilder.SWAP_SINKS_A_BUS_THAT_RUNS_OUT = true;
+	}
+
+	/**
+	 * A two-swap turn whose plain bus runs out of wire sinks instead, on a plain opening where the
+	 * chord has no harp. The user's design, from this build. See SWAP_SINKS_A_BUS_THAT_RUNS_OUT.
+	 */
+	@Test
+	void hotmkTwentyFiveByOneHangsTheTwentyEighthNote() throws Exception {
+		Built built = build("hall-of-the-mountain-king-2-lanes-insane-copy", 25, 1, false);
+		assertEquals(0, built.plan().missingNotes(), "missing: " + built.plan().faults());
+		assertEquals(0, built.reading().unreachedNotes(),
+			"notes the signal never reached: " + built.reading().unreachedAt());
+		assertEquals(0, built.plan().wrongNotes(), "wrong: " + built.plan().faults());
+	}
+
+	@Test
+	void withoutSinkingTheSwappedBusDropsOne() throws Exception {
+		SongBuilder.SWAP_SINKS_A_BUS_THAT_RUNS_OUT = false;
+		Built built = build("hall-of-the-mountain-king-2-lanes-insane-copy", 25, 1, false);
+		assertTrue(built.plan().missingNotes() > 0,
+			"the fault this test guards is no longer reproduced with the fix off");
 	}
 
 	/**
@@ -136,6 +158,8 @@ class LayTimeGroundChecksTest {
 	@Test
 	void withoutTheWireMeasureTheCornerBusDropsTwo() throws Exception {
 		SongBuilder.BUS_MEASURES_ITS_WIRE = false;
+		// Or the sunk swap rescues the same note and the fix off proves nothing.
+		SongBuilder.SWAP_SINKS_A_BUS_THAT_RUNS_OUT = false;
 		Built built = build("hall-of-the-mountain-king-2-lanes-insane-copy", 54, 1, false);
 		assertTrue(built.plan().missingNotes() > 0,
 			"the fault this test guards is no longer reproduced with the fix off");
@@ -151,6 +175,8 @@ class LayTimeGroundChecksTest {
 	@Test
 	void withoutTheBackSlotTheBusDropsOne() throws Exception {
 		SongBuilder.BUS_OPENS_WITH_ITS_BACK_SLOT = false;
+		// Or the sunk swap rescues the same note and the fix off proves nothing.
+		SongBuilder.SWAP_SINKS_A_BUS_THAT_RUNS_OUT = false;
 		Built built = build("hall-of-the-mountain-king-2-lanes-insane-copy", 38, 1, false);
 		assertTrue(built.plan().missingNotes() > 0,
 			"the fault this test guards is no longer reproduced with the fix off");
