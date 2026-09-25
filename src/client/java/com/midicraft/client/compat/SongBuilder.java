@@ -22941,7 +22941,17 @@ public final class SongBuilder {
 	 */
 	private record Foldback(EventNote centre, EventNote sideA, EventNote sideB,
 			List<EventNote> wallward, List<EventNote> stepdown, List<EventNote> inbound,
-			int room, int inboundLimit) {
+			int room, int inboundLimit, boolean padFirst) {
+		Foldback(EventNote centre, EventNote sideA, EventNote sideB, List<EventNote> wallward,
+				List<EventNote> stepdown, List<EventNote> inbound, int room, int inboundLimit) {
+			this(centre, sideA, sideB, wallward, stepdown, inbound, room, inboundLimit, false);
+		}
+
+		/** The same fold, a column on, with a parity pad laid in the column it stepped off. */
+		Foldback padded() {
+			return new Foldback(centre, sideA, sideB, wallward, stepdown, inbound, room,
+				inboundLimit, true);
+		}
 	}
 
 	/** Why the last {@link #foldbackOf} or {@link #foldbackAscentOf} came back with nothing. */
@@ -23328,6 +23338,11 @@ public final class SongBuilder {
 				availableBeyond, event.time()), null);
 		placements.padded(picked.any() ? (climb > 0 ? "planFoldbackClimb" : "planFoldback")
 			: "foldbackRefused" + LAST_FOLDBACK_REFUSAL);
+		if (TRACE_TURNS) {
+			System.out.println("FOLDPICK t=" + event.time() + " notes=" + event.notes().size()
+				+ " room=" + room + " beyond=" + availableBeyond + " climb=" + climb + " when=" + when
+				+ " -> " + (picked.any() ? "taken" : "refused " + LAST_FOLDBACK_REFUSAL));
+		}
 		if (picked.any()) {
 			placements.padded("planFoldbackAt" + Math.min(event.notes().size(), 30) + "Notes");
 			placements.padded("planFoldback" + when);
@@ -23416,7 +23431,27 @@ public final class SongBuilder {
 		// blocks run a level up); the refusal falls the chord to the module shapes, whose
 		// parity machinery owns the crowded-back cases.
 		String behind = placements.blockAt(opens.pos().relative(travel.getOpposite()));
-		if (behind != null && behind.startsWith("minecraft:redstone_wire")) {
+		if (FOLDBACK_REFUSES_WIRE_BEHIND && behind != null
+				&& behind.startsWith("minecraft:redstone_wire")) {
+			// Or a column on, over a parity pad. The pad's dust stands at repeater height and reads
+			// the block the repeater would have read, so it spends no tick; the block it reads stands
+			// between it and the wire below and cuts that diagonal, and the pad's own stone is a
+			// conductor, so the wire cannot step up onto it either. The fold's stepdown then sits
+			// beside the pad's stone rather than the wire. The user's answer, from let it happen at
+			// nineteen wide over three floors: a chord of thirty behind a stacked module's cross,
+			// refused here, walked nine past its wall. See FOLDBACK_PADS_PAST_WIRE_BEHIND.
+			if (FOLDBACK_PADS_PAST_WIRE_BEHIND
+					&& room - 1 >= (FOLDBACK_AT_ROOM_NOUGHT ? 0 : 1)
+					&& padPastTheWireFits(placements, opens)) {
+				Foldback moved = foldbackOf(placements, opens.ahead(1), notes, room - 1,
+					availableBelow + 1, time);
+				if (moved != null) {
+					placements.padded("foldbackPaddedPastTheWireBehind");
+					return moved.padded();
+				}
+				LAST_FOLDBACK_REFUSAL = "WireBehindPaddedThen" + LAST_FOLDBACK_REFUSAL;
+				return null;
+			}
 			LAST_FOLDBACK_REFUSAL = "WireBehind";
 			return null;
 		}
@@ -23486,6 +23521,47 @@ public final class SongBuilder {
 	}
 
 	/**
+	 * Whether a parity pad may stand in the column a fold would have opened on: both its cells
+	 * empty, the block behind its dust live -- which is what it reads, at that block's own tick --
+	 * its stone sounding no note of another tick, and nothing of redstone around its dust or
+	 * beside its stone but the block it reads and the wire behind it that the pad is there for.
+	 */
+	private static boolean padPastTheWireFits(PlacementPlan placements, Lane opens) {
+		Direction travel = opens.travel();
+		BlockPos padStone = opens.pos().immutable();
+		BlockPos padDust = padStone.above();
+		BlockPos reads = padDust.relative(travel.getOpposite());
+		BlockPos wire = padStone.relative(travel.getOpposite());
+		Integer live = placements.poweredTime(reads);
+		if (live == null || placements.blockAt(padStone) != null
+				|| placements.blockAt(padDust) != null) {
+			return false;
+		}
+		if (stoneWouldSoundAForeignNote(placements, padStone, live)
+				|| placements.noteAt(padStone.below(), live)) {
+			return false;
+		}
+		for (Direction out : Direction.Plane.HORIZONTAL) {
+			BlockPos side = padDust.relative(out);
+			if (side.equals(reads) || out == travel) {
+				continue;
+			}
+			for (BlockPos cell : List.of(side, side.above(), side.below())) {
+				if (!cell.equals(wire) && isRedstone(placements, cell)) {
+					return false;
+				}
+			}
+		}
+		for (Direction out : Direction.values()) {
+			BlockPos next = padStone.relative(out);
+			if (out != Direction.UP && !next.equals(wire) && isRedstone(placements, next)) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	/**
 	 * Lays the whole foldback -- head, wall-bound run, the fold and the inbound run -- and hands
 	 * back the cell after the run's last block, on the floor below. There is no staircase and
 	 * nothing left for a descent builder to lay.
@@ -23502,6 +23578,11 @@ public final class SongBuilder {
 	 */
 	private static BlockPos addFoldbackCut(PlacementPlan placements, BlockPos cursor,
 			Direction travel, Direction depth, int triggerDelay, Foldback fold, int time) {
+		if (fold.padFirst()) {
+			placements.placing("foldback pad");
+			addParityPad(placements, cursor);
+			cursor = cursor.relative(travel);
+		}
 		int headNotes = 3 - (fold.centre() == null ? 1 : 0)
 			- (fold.sideA() == null ? 1 : 0) - (fold.sideB() == null ? 1 : 0);
 		placements.placing("foldback head" + headNotes);
@@ -30756,6 +30837,16 @@ public final class SongBuilder {
 	 * off the floor below.</p>
 	 */
 	static boolean FOLDBACK_CUTS = true;
+
+	/** Whether a foldback refuses to stand directly in front of path-level wire. See foldbackOf. */
+	static boolean FOLDBACK_REFUSES_WIRE_BEHIND = true;
+
+	/**
+	 * A foldback refused for the wire behind it stands a column on instead, over a parity pad
+	 * that spends no tick. The user's design, from let it happen at nineteen wide over three
+	 * floors, where a chord of thirty behind a stacked module's cross walked nine past its wall.
+	 */
+	static boolean FOLDBACK_PADS_PAST_WIRE_BEHIND = true;
 
 	/**
 	 * Whether the foldback is the last shape tried rather than the first.

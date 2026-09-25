@@ -62,6 +62,30 @@ class LayTimeGroundChecksTest {
 		SongBuilder.FOLDBACK_DESCENT_RESCUES_A_DEAD_FOLD = true;
 		SongBuilder.SWAP_SINKS_A_BUS_THAT_RUNS_OUT = true;
 		SongBuilder.SWAP_DOUBLE_SINKS_A_LOUD_OPENING = true;
+		SongBuilder.FOLDBACK_PADS_PAST_WIRE_BEHIND = true;
+	}
+
+	/**
+	 * A foldback refused for the wire behind it stands a column on over a parity pad instead of
+	 * walking the chord past the wall. The user's design, from this build.
+	 * See FOLDBACK_PADS_PAST_WIRE_BEHIND.
+	 */
+	@Test
+	void letItHappenNineteenByThreeBottomStartKeepsInsideItsWalls() throws Exception {
+		Built built = build("let-it-happen-tame-impala", 19, 3, false);
+		assertTrue(built.plan().wallBreaches().isEmpty(), "walls: " + built.plan().wallBreaches());
+		assertEquals(0, built.plan().wrongNotes(), "wrong: " + built.plan().faults());
+		assertEquals(0, built.plan().missingNotes(), "missing: " + built.plan().faults());
+		assertEquals(0, built.reading().unreachedNotes(),
+			"notes the signal never reached: " + built.reading().unreachedAt());
+	}
+
+	@Test
+	void withoutTheFoldPadTheChordRunsPastTheWall() throws Exception {
+		SongBuilder.FOLDBACK_PADS_PAST_WIRE_BEHIND = false;
+		Built built = build("let-it-happen-tame-impala", 19, 3, false);
+		assertTrue(!built.plan().wallBreaches().isEmpty(),
+			"the fault this test guards is no longer reproduced with the fix off");
 	}
 
 	/**
