@@ -668,8 +668,8 @@ class ClipboardAndLayersTest {
 		assertEquals(List.of(36, 84), pitches(result.layers().get(1)),
 			"and the strays arrive at the pitch they were written at");
 		assertNull(result.layers().getFirst().split(), "the source layer is still one instrument");
-		assertEquals(ComposerProject.Split.melodic(), result.layers().get(1).split(),
-			"the companion is the same melodic split the layer menu makes");
+		assertEquals(List.of("BASS", "FLUTE", "BELL"), voiceNames(result.layers().get(1)),
+			"the companion has every tier its two notes sound on, and no other");
 		assertTrue(everyNoteInRange(result));
 		assertEquals(0, converted.shiftedNotes(), "nothing was retuned");
 		assertEquals(2, converted.melodicNotes(), "and the move is counted where it happened");
@@ -694,7 +694,8 @@ class ClipboardAndLayersTest {
 		assertEquals(List.of("Bass"), names(result), "one part, one layer, its own name");
 		assertEquals(List.of(30, 34, 37), pitches(result.layers().getFirst()),
 			"and a bass line stays where a bass line was written");
-		assertEquals(ComposerProject.Split.melodic(), result.layers().getFirst().split());
+		assertEquals(List.of("BASS"), voiceNames(result.layers().getFirst()),
+			"a bass line needs the bass tier and nothing else");
 		assertTrue(everyNoteInRange(result));
 	}
 
@@ -793,10 +794,10 @@ class ClipboardAndLayersTest {
 	 * Convert to melodic takes the whole part and adds nothing.
 	 *
 	 * <p>The layer count is the point. Split into melodic leaves the notes the window can hold on
-	 * their own instrument and gives the strays a companion, so the part ends up as two rows in two
-	 * timbres; this gives the part the layer it needed and stops there. What it costs is the
-	 * instrument -- the part now plays by register -- and the two are set side by side here rather
-	 * than apart, because choosing between them is choosing between exactly this.</p>
+	 * their own instrument and gives the strays a companion, so the part ends up as two rows; this
+	 * gives the part the layer it needed and stops there. The part's own instrument keeps its tier
+	 * on the split either way, and the two are set side by side here rather than apart, because
+	 * choosing between them is choosing between exactly this.</p>
 	 */
 	@Test
 	void convertToMelodicTakesTheWholePartWhereSplitTakesOnlyTheStrays() {
@@ -815,8 +816,9 @@ class ClipboardAndLayersTest {
 		assertEquals(0, whole.addedLayers(), "which is the whole of why you would pick it");
 		assertEquals(List.of(36, 60, 84), pitches(whole.project().layers().getFirst()),
 			"and every note is where it was written, the in-range one included");
-		assertEquals(ComposerProject.Split.melodic(), whole.project().layers().getFirst().split(),
-			"the part gave up PLING for the register it actually spans");
+		assertEquals(List.of("BASS", "GUITAR", "PLING", "FLUTE", "BELL"),
+			voiceNames(whole.project().layers().getFirst()),
+			"the part keeps PLING on its own tier, in place of the harp");
 		assertEquals(3, whole.melodicNotes(), "all three are on the split now, not just the strays");
 		assertEquals(1, whole.melodicLayers(), "and the layer count is what says so");
 		assertEquals(0, whole.shiftedNotes());
@@ -844,11 +846,31 @@ class ClipboardAndLayersTest {
 		assertNull(converted.project().layers().getFirst().split(),
 			"the part that fits keeps its instrument");
 		assertEquals(List.of(60, 64, 67), pitches(converted.project().layers().getFirst()));
-		assertEquals(ComposerProject.Split.melodic(), converted.project().layers().get(1).split(),
+		assertEquals(List.of("BASS"), voiceNames(converted.project().layers().get(1)),
 			"and the part that does not is converted, on its own");
 		assertEquals(2, converted.melodicNotes());
 		assertEquals(1, converted.melodicLayers(), "one layer of the two needed it");
 		assertEquals(0, converted.addedLayers());
+	}
+
+	/** A counted voice keeps its count on the melodic layer: three chimes stay three chimes. */
+	@Test
+	void convertToMelodicKeepsTheLayersCounts() {
+		ComposerProject song = songOf(new Layer("Ice", "CHIME", false, true, true,
+			List.of(note(90, 0L), note(100, 480L)))
+			.withMix(List.of(ComposerProject.Split.Voice.fullRange("CHIME").withCount(3))));
+
+		Layer converted = song.convertToMinecraft(480, false, 0, false,
+			ComposerProject.OctaveShifting.CONVERT_TO_MELODIC, true).project().layers().getFirst();
+
+		assertEquals(List.of("FLUTE", "CHIME"), voiceNames(converted),
+			"chime takes the bell's tier, and the flute sounds the note they share");
+		assertEquals(3, converted.countOf("CHIME"), "at the count the layer had");
+		assertEquals(1, converted.countOf("FLUTE"), "and a default tier sounds once");
+	}
+
+	private static List<String> voiceNames(Layer layer) {
+		return layer.split().voices().stream().map(ComposerProject.Split.Voice::instrument).toList();
 	}
 
 	/** Off, the octaves land in the layer they came from and nothing is split off it. */

@@ -2431,7 +2431,8 @@ public final class ComposerScreen extends Screen {
 			case SNAP_TO_START -> snapSelectedLayersToStart();
 			case DELETE_SELECTED -> deleteSelectedLayers();
 			case SPLIT_MELODIC -> updateLayers("make a melodic split layer", menuRow(),
-				layer -> layer.withSplit(ComposerProject.Split.melodic()));
+				layer -> layer.withSplit(
+					ComposerProject.Split.melodicFor(layer.sounding(), layer.notes())));
 			case SPLIT_PERCUSSION -> updateLayers("make a percussion split layer", menuRow(),
 				layer -> layer.withSplit(ComposerProject.Split.percussion()));
 			case SPLIT_SFX -> updateLayers("make a sound effect split layer", menuRow(),
@@ -3540,8 +3541,10 @@ public final class ComposerScreen extends Screen {
 			case SELECT_ALL -> "Selects every layer.";
 			case SPLIT_MELODIC -> "Turns this into a split layer: written pitch becomes true pitch "
 				+ "across six octaves, and each note sounds every instrument whose bracket covers "
-				+ "it -- bass low, guitar, harp, flute, bell high, overlapping by an octave. No "
-				+ "note moves. Solo the layer to see the brackets on the keyboard.";
+				+ "it -- bass low, guitar, harp, flute, bell high, overlapping by an octave. The "
+				+ "layer's own instruments keep their tier in place of those, and a layer with notes "
+				+ "gets every tier its notes sound on; tiers no note reaches stay empty. No note "
+				+ "moves. Solo the layer to see the brackets on the keyboard.";
 			case SPLIT_PERCUSSION -> "Turns this into a split drum layer: kick at the bottom of "
 				+ "the keyboard, snare in the middle, hi-hats on top, each still tunable across "
 				+ "its own 25 pitches. No note moves.";
@@ -4172,16 +4175,16 @@ public final class ComposerScreen extends Screen {
 	/**
 	 * The instruments a layer's icon shows, front first, or empty for a split with no voices yet.
 	 *
-	 * <p>A split layer shows one per register, lowest first, which is the first voice of each
-	 * bracket on the keyboard. A layer sounding several instruments at once shows each of them. Any
-	 * other layer is its one instrument.</p>
+	 * <p>A split layer shows one per register, highest first, which is the first voice of each
+	 * bracket on the keyboard: the stack reads like the keyboard, high at the top. A layer sounding
+	 * several instruments at once shows each of them. Any other layer is its one instrument.</p>
 	 */
 	private List<String> layerIconInstruments(Layer layer) {
 		List<String> shown = new ArrayList<>();
 		if (layer.split() != null) {
 			List<BracketGroup> groups = new ArrayList<>(voiceBrackets(layer.split()));
 			groups.sort(Comparator.comparingInt((BracketGroup group) -> group.effects() ? 1 : 0)
-				.thenComparingInt(BracketGroup::base)
+				.thenComparing(Comparator.comparingInt(BracketGroup::base).reversed())
 				.thenComparingInt(BracketGroup::lo));
 			for (BracketGroup group : groups) {
 				if (!group.instruments().isEmpty() && !shown.contains(group.instruments().getFirst())) {
@@ -4205,7 +4208,7 @@ public final class ComposerScreen extends Screen {
 	 * stacked diagonally, shrinking to fit.
 	 *
 	 * <p>The front one sits top-left and each after it peeks out below and to the right of the last,
-	 * so on a split layer the lowest register is the one in full view. Drawn back to front. A split
+	 * so on a split layer the highest register is the one in full view. Drawn back to front. A split
 	 * with nothing in it yet wears the note block, as every split used to.</p>
 	 */
 	private void extractLayerIcon(GuiGraphicsExtractor graphics, Layer layer, int x, int y) {

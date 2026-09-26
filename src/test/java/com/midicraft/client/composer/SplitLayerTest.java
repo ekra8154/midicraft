@@ -84,6 +84,65 @@ class SplitLayerTest {
 		assertTrue(new Split.Voice("BASS", 54, 30).covers(42), "swapped ends still make a bracket");
 	}
 
+	private static List<String> instruments(Split split) {
+		return split.voices().stream().map(Split.Voice::instrument).toList();
+	}
+
+	/** A copper layer made melodic has copper in the middle rather than the harp. */
+	@Test
+	void aLayerMadeMelodicKeepsItsInstrumentOnItsTier() {
+		Layer copper = new Layer("Lead", "TRUMPET", false, true, true, List.of());
+
+		Split split = Split.melodicKeeping(copper.sounding());
+
+		assertEquals(List.of("BASS", "GUITAR", "TRUMPET", "FLUTE", "BELL"), instruments(split));
+		Split.Voice trumpet = split.voices().get(2);
+		assertEquals(54, trumpet.lo(), "at its full register, like any fresh bracket");
+		assertEquals(78, trumpet.hi());
+	}
+
+	/** A stacked layer keeps every instrument, each on its own tier, counts and all. */
+	@Test
+	void aStackedLayerMadeMelodicKeepsEveryInstrument() {
+		Layer stacked = new Layer("Lead", "TRUMPET", false, true, true, List.of())
+			.withMix(List.of(Split.Voice.fullRange("TRUMPET"), Split.Voice.fullRange("PLING"),
+				Split.Voice.fullRange("DIDGERIDOO").withCount(2)));
+
+		Split split = Split.melodicKeeping(stacked.sounding());
+
+		assertEquals(List.of("DIDGERIDOO", "GUITAR", "PLING", "TRUMPET", "FLUTE", "BELL"),
+			instruments(split), "the bass and the harp stood aside for the layer's own");
+		assertEquals(2, split.voices().get(0).count());
+	}
+
+	/** A layer with notes gets only the tiers they use; the rest stay empty. */
+	@Test
+	void aLayerWithNotesGetsOnlyTheTiersItUses() {
+		Layer copper = new Layer("Lead", "TRUMPET", false, true, true, List.of());
+
+		assertEquals(List.of("GUITAR", "TRUMPET"), instruments(Split.melodicFor(copper.sounding(),
+			List.of(note(58, 0L), note(62, 0L)))), "the overlap keeps both tiers that sound it");
+		assertEquals(List.of("BASS", "GUITAR", "TRUMPET"), instruments(Split.melodicFor(
+			copper.sounding(), List.of(note(36, 0L), note(60, 0L)))),
+			"flute and bell reach no note, so they are the ones left off");
+		assertEquals(List.of("BASS", "BELL"), instruments(Split.melodicFor(copper.sounding(),
+			List.of(note(36, 0L), note(96, 0L)))), "copper reaches neither, so it is left off");
+		assertEquals(List.of("BASS", "GUITAR", "TRUMPET", "FLUTE", "BELL"),
+			instruments(Split.melodicFor(copper.sounding(), List.of())),
+			"an empty layer still gets every tier");
+	}
+
+	/** A drum or an effect has no tier to keep, so the melodic default is untouched. */
+	@Test
+	void drumsAndEffectsKeepNothingOnAMelodicSplit() {
+		assertEquals(Split.melodic(), Split.melodicKeeping(
+			new Layer("Kit", "SNARE", false, true, true, List.of()).sounding()));
+		assertEquals(Split.melodic(), Split.melodicKeeping(Split.soundEffects().voices()));
+		assertEquals(Split.melodic(), Split.melodicKeeping(
+			new Layer("Lead", "HARP", false, true, true, List.of()).sounding()),
+			"and a harp layer gets exactly what it always got");
+	}
+
 	/** Covered notes are in range wherever they sit; uncovered ones are out wherever they sit. */
 	@Test
 	void rangeIsTheBracketsNotTheHarpWindow() {

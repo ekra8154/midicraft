@@ -879,6 +879,49 @@ public record ComposerProject(
 			));
 		}
 
+		/**
+		 * The melodic default with a layer's own instruments kept on it: each tuned voice the layer
+		 * already sounds takes its tier at full register and at its count, and the default voices on
+		 * that tier step aside. A copper trumpet layer made melodic has copper in the middle, not
+		 * harp; a harp-and-pling layer has both there.
+		 *
+		 * <p>Drums and sound effects keep nothing -- their registers are not where they sound -- so a
+		 * layer with only those gets the plain default.</p>
+		 */
+		public static Split melodicKeeping(List<Voice> sounding) {
+			List<Voice> kept = sounding.stream()
+				.filter(voice -> !voice.instrument().startsWith(SOUND_EFFECT_PREFIX)
+					&& !InstrumentRanges.isPercussion(voice.instrument()))
+				.map(voice -> Voice.fullRange(voice.instrument()).withCount(voice.count()))
+				.toList();
+			Set<Integer> taken = new java.util.HashSet<>();
+			kept.forEach(voice -> taken.add(InstrumentRanges.baseMidi(voice.instrument())));
+			List<Voice> voices = new ArrayList<>(kept);
+			for (Voice voice : melodic().voices()) {
+				if (!taken.contains(InstrumentRanges.baseMidi(voice.instrument()))) {
+					voices.add(voice);
+				}
+			}
+			return new Split(voices);
+		}
+
+		/**
+		 * {@link #melodicKeeping} cut down to the tiers a layer's notes actually sound on, the rest
+		 * left as empty registers for the keyboard to offer back.
+		 *
+		 * <p>Every voice that covers at least one note stays, overlaps included: a note in the octave
+		 * two tiers share keeps both, exactly as it would sound on the full split. Only a tier no
+		 * note reaches is dropped. An empty layer has nothing to measure and gets every tier; so
+		 * does a layer whose notes no tier reaches at all.</p>
+		 */
+		public static Split melodicFor(List<Voice> sounding, List<NoteEvent> notes) {
+			Split full = melodicKeeping(sounding);
+			List<Voice> used = full.voices().stream()
+				.filter(voice -> notes.stream().anyMatch(note -> voice.covers(note.midiNote())))
+				.toList();
+			return used.isEmpty() ? full : new Split(used);
+		}
+
 		/** The percussion default: kick, snare and hats stacked low to high, no gaps, no overlap. */
 		public static Split percussion() {
 			return new Split(List.of(
@@ -2266,7 +2309,7 @@ public record ComposerProject(
 			// bracket reaches, the naming, the counting -- is the same question either way.
 			// See OctaveShifting.SPLIT_INTO_MELODIC and CONVERT_TO_MELODIC.
 			if (melodic) {
-				Split melodicSplit = Split.melodic();
+				Split melodicSplit = Split.melodicKeeping(source.sounding());
 				boolean wholeLayer = shifting == OctaveShifting.CONVERT_TO_MELODIC;
 				// Convert moves a layer or it does not, and one stray decides. Asked up front
 				// rather than per note, because the answer for the first note has to be the answer
@@ -2295,6 +2338,9 @@ public record ComposerProject(
 				melodicNotes += relocated.size();
 				if (!relocated.isEmpty()) {
 					melodicLayers++;
+					// Every tier was on offer while the notes were placed; the layer keeps only the
+					// ones they landed under.
+					melodicSplit = Split.melodicFor(source.sounding(), relocated);
 				}
 				// Parallel to emitted: how many notes each layer was handed, so that what the
 				// layer dropped as a duplicate cell can be counted the way the buckets below do.
