@@ -3156,26 +3156,43 @@ public final class ComposerScreen extends Screen {
 	 * about what "in range" means or what to do about it, which they did while this was a separate
 	 * implementation that knew only how to fold a note into the harp window.</p>
 	 *
-	 * <p>Whole composition, never a selection. It used to take one, and moving a note is scopeable
-	 * in a way splitting the layer it lives on is not: the split is a fact about the whole layer,
-	 * so a scoped version would have to either refuse to split or split on the strength of the
-	 * notes that happened to be selected. The end tick is put back because the conversion snaps a
-	 * trailing gap to the grid, which is the timing this is promising not to touch.</p>
+	 * <p>Scoped the way the finer selection says: the selected notes if there are any, else the
+	 * selected layers, else the whole composition. A note outside the scope keeps its pitch and its
+	 * layer, which means splitting on the strength of the notes that happened to be selected -- the
+	 * strays you picked get their layer, the rest of the part stays put. The end tick is put back
+	 * because the conversion snaps a trailing gap to the grid, which is the timing this is
+	 * promising not to touch.</p>
 	 */
 	private void fitIntoRange() {
 		ComposerProject source = project();
+		Set<Long> noteScope = selectedNotes.isEmpty() ? null : Set.copyOf(selectedNotes);
+		Set<Integer> layerScope = noteScope != null || noLayerSelected()
+			? null : Set.copyOf(selectedLayers);
 		ComposerProject.MinecraftConversion fitted = source.convertToMinecraft(
-			1, false, 0, false, config.convertOctaveShifting(), config.convertSplitTransposed());
+			1, false, 0, false, config.convertOctaveShifting(), config.convertSplitTransposed(),
+			true, layerScope, noteScope);
 		ComposerProject updated = fitted.project().withEndTick(source.endTick());
+		String scope = noteScope != null ? noteScope.size() + " selected notes"
+			: layerScope != null ? layerScope.size() + " selected layers" : "whole composition";
 		if (updated.equals(source)) {
-			showResult(Component.literal("Nothing to change."));
+			showResult(Component.literal("Nothing to change in the " + scope + "."));
 			return;
 		}
 		apply("fit notes into range", updated);
-		selectedNotes.clear();
+		// The selection follows its layers past the ones fitting added, so a second press works on
+		// the same part rather than on whatever slid into its old positions.
+		if (!noLayerSelected()) {
+			Set<Integer> before = Set.copyOf(selectedLayers);
+			selectedLayers.clear();
+			for (int index = 0; index < fitted.sourceLayers().size(); index++) {
+				if (before.contains(fitted.sourceLayers().get(index))) {
+					selectedLayers.add(index);
+				}
+			}
+		}
 		layersChanged();
 		rebuildMoveLayerButtons();
-		showResult(Component.literal("Fitted to range: " + fitted.shiftedNotes()
+		showResult(Component.literal("Fitted " + scope + " to range: " + fitted.shiftedNotes()
 			+ " pitch-shifted"
 			+ (fitted.melodicNotes() > 0
 				? ", " + fitted.melodicNotes() + " notes onto "
@@ -3423,7 +3440,9 @@ public final class ComposerScreen extends Screen {
 				+ "notes, shift the layer and then the notes, split the strays onto a melodic "
 				+ "layer, or turn the whole part into one. The last two reach F#1-F#7 without "
 				+ "changing a pitch, and the last adds no layer at all. Exactly the step Convert "
-				+ "does, on its own and without touching the timing: same setting, same result.";
+				+ "does, on its own and without touching the timing: same setting, same result. Works "
+				+ "on the selected notes if any are selected, else on the selected layers, else on "
+				+ "the whole song.";
 			case SNAP_TEMPO -> "Moves the tempo as little as it can while making the spacing the "
 				+ "song already has land on whole repeater ticks, folding the speed slider in first. "
 				+ "Leaves every note where it is, so it does nothing for a song whose notes share no "

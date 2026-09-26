@@ -1240,7 +1240,12 @@ public record ComposerProject(
 		 * {@link OctaveShifting#CONVERT_TO_MELODIC}, which adds none and would otherwise report
 		 * a song-wide change as no change at all.
 		 */
-		int melodicLayers
+		int melodicLayers,
+		/**
+		 * For each layer of {@link #project}, the index of the layer it came from, so a selection of
+		 * layers can follow them past the layers a conversion adds.
+		 */
+		List<Integer> sourceLayers
 	) {
 		/**
 		 * How much slower the converted song plays. Greater than 1 means the source was faster than
@@ -2245,6 +2250,23 @@ public record ComposerProject(
 	public MinecraftConversion convertToMinecraft(int quantizeTicks, boolean snapTempo,
 			int repeatMergeTicks, boolean gameTicks, OctaveShifting shifting,
 			boolean splitTransposed, boolean fitRange) {
+		return convertToMinecraft(quantizeTicks, snapTempo, repeatMergeTicks, gameTicks, shifting,
+			splitTransposed, fitRange, null, null);
+	}
+
+	/**
+	 * @param layerScope the layers to convert, or null for all of them. A layer outside it comes
+	 *     through exactly as it was.
+	 * @param noteScope the notes whose range is fitted, or null for all of them. A note outside it
+	 *     keeps its pitch and stays on its own layer, and a layer holding none of them comes through
+	 *     exactly as it was. Only the range fitting reads it, so it is for a run that does nothing
+	 *     else -- a scoped Fit into range. What it cannot scope is a decision about the whole layer:
+	 *     Shift the layer measures the octave from the scoped notes and moves only them, but Convert
+	 *     to melodic, once a scoped note needs it, still turns the whole part into the melodic layer.
+	 */
+	public MinecraftConversion convertToMinecraft(int quantizeTicks, boolean snapTempo,
+			int repeatMergeTicks, boolean gameTicks, OctaveShifting shifting,
+			boolean splitTransposed, boolean fitRange, Set<Integer> layerScope, Set<Long> noteScope) {
 		int grid = Math.max(1, quantizeTicks);
 		double repeatWindow = repeatMergeTicks <= 0
 			? 0.0
@@ -2256,6 +2278,7 @@ public record ComposerProject(
 		int melodicNotes = 0;
 		int melodicLayers = 0;
 		List<Layer> convertedLayers = new ArrayList<>();
+		List<Integer> sourceLayers = new ArrayList<>();
 		int convertedActiveLayer = 0;
 		int shiftedNotes = 0;
 
@@ -2264,6 +2287,18 @@ public record ComposerProject(
 			.thenComparingInt(Integer::intValue);
 		for (int layerIndex = 0; layerIndex < layers.size(); layerIndex++) {
 			Layer source = layers.get(layerIndex);
+			if ((layerScope != null && !layerScope.contains(layerIndex))
+					|| (noteScope != null
+						&& source.notes().stream().noneMatch(note -> noteScope.contains(note.id())))) {
+				if (layerIndex == activeLayerIndex) {
+					convertedActiveLayer = convertedLayers.size();
+				}
+				convertedLayers.add(source);
+				sourceLayers.add(layerIndex);
+				continue;
+			}
+			java.util.function.Predicate<NoteEvent> inScope =
+				note -> noteScope == null || noteScope.contains(note.id());
 			List<NoteEvent> sourceNotes = mergeRepeats(source.notes(), repeatWindow);
 			mergedRepeats += source.notes().size() - sourceNotes.size();
 			Map<Integer, List<NoteEvent>> notesByShift = new TreeMap<>(shiftsNearestFirst);
@@ -2315,19 +2350,21 @@ public record ComposerProject(
 				// rather than per note, because the answer for the first note has to be the answer
 				// for the last: a part half on its instrument and half on a split is the thing
 				// this mode exists to not produce.
-				boolean anyOutOfRange = sourceNotes.stream().anyMatch(note -> !note.isBuildable());
+				boolean anyOutOfRange = sourceNotes.stream()
+					.anyMatch(note -> inScope.test(note) && !note.isBuildable());
 				List<NoteEvent> kept = new ArrayList<>();
 				List<NoteEvent> relocated = new ArrayList<>();
 				for (NoteEvent note : sourceNotes) {
 					long quantizedStart =
 						Math.max(0L, Math.round(note.startTick() / (double)grid) * (long)grid);
-					if (!anyOutOfRange || (!wholeLayer && note.isBuildable())) {
+					if (!anyOutOfRange || (!wholeLayer && (note.isBuildable() || !inScope.test(note)))) {
 						kept.add(note.movedTo(quantizedStart, note.midiNote()));
 						continue;
 					}
 					// Six octaves of brackets, so this only moves a note written outside F#1 to
 					// F#7 at all -- and it moves that one by a whole octave, like everywhere else.
-					int shift = melodicSplit.covers(note.midiNote())
+					// A note outside the scope rides along with its layer but is never retuned.
+					int shift = melodicSplit.covers(note.midiNote()) || !inScope.test(note)
 						? 0
 						: octaveShiftIntoSplit(melodicSplit, note.midiNote());
 					relocated.add(note.movedTo(quantizedStart, note.midiNote() + shift));
@@ -2385,14 +2422,24 @@ public record ComposerProject(
 					// one, and this is the one way the mode can take a note away.
 					mergedIntoExisting += fed.get(emittedIndex) - built.notes().size();
 					convertedLayers.add(built);
+					sourceLayers.add(layerIndex);
 				}
 				continue;
 			}
 			// Where the layer sits before any note is looked at individually.
 			int base = pitched && shifting == OctaveShifting.LAYER_THEN_NOTES
-				? bestLayerOctaveShift(sourceNotes)
+				? bestLayerOctaveShift(sourceNotes.stream().filter(inScope).toList())
 				: 0;
 			for (NoteEvent note : sourceNotes) {
+				if (!inScope.test(note)) {
+					// Left where it is: the bucket whose total shift is nought, the one that keeps
+					// the layer's own name when the layer moved nowhere.
+					long quantizedStart =
+						Math.max(0L, Math.round(note.startTick() / (double)grid) * (long)grid);
+					notesByShift.computeIfAbsent(splitTransposed ? -base : 0,
+						ignored -> new ArrayList<>()).add(note.movedTo(quantizedStart, note.midiNote()));
+					continue;
+				}
 				// Bucketed by what the note needed *after* the layer moved, so everything the base
 				// already fixed shares one bucket and one layer. Named by the total, because what a
 				// name has to answer is how far these notes are from where they were written.
@@ -2463,6 +2510,7 @@ public record ComposerProject(
 				// silent: it is the one way this can take notes away, and it should say so.
 				mergedIntoExisting += entry.getValue().size() - built.notes().size();
 				convertedLayers.add(built);
+				sourceLayers.add(layerIndex);
 			}
 		}
 
@@ -2521,7 +2569,8 @@ public record ComposerProject(
 			duplicateLayerNotes,
 			mergedIntoExisting,
 			melodicNotes,
-			melodicLayers
+			melodicLayers,
+			List.copyOf(sourceLayers)
 		);
 	}
 

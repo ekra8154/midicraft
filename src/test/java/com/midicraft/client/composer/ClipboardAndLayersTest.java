@@ -853,6 +853,57 @@ class ClipboardAndLayersTest {
 		assertEquals(0, converted.addedLayers());
 	}
 
+	/** A layer scope leaves every other layer exactly as it was, out-of-range notes and all. */
+	@Test
+	void fitIntoRangeScopedToLayersLeavesTheOthersAlone() {
+		ComposerProject song = songOf(
+			new Layer("Left", "HARP", false, true, true, List.of(note(36, 0L), note(60, 480L))),
+			new Layer("Right", "HARP", false, true, true, List.of(note(36, 0L), note(60, 480L))));
+
+		ComposerProject.MinecraftConversion fitted = song.convertToMinecraft(1, false, 0, false,
+			ComposerProject.OctaveShifting.NOTES_ONLY, true, true, Set.of(1), null);
+
+		assertEquals(song.layers().getFirst(), fitted.project().layers().getFirst(),
+			"the unselected layer is untouched");
+		assertEquals(List.of("Left", "Right (in range)", "Right (+2 oct)"), names(fitted.project()));
+		assertEquals(List.of(0, 1, 1), fitted.sourceLayers(),
+			"and each output layer knows which layer it came from");
+	}
+
+	/** A note scope fits only the selected notes; the rest of their layer keeps its pitch. */
+	@Test
+	void fitIntoRangeScopedToNotesMovesOnlyThoseNotes() {
+		NoteEvent picked = note(36, 0L);
+		NoteEvent leftAlone = note(30, 480L);
+		ComposerProject song = songOf(new Layer("Piano", "HARP", false, true, true,
+			List.of(picked, leftAlone, note(60, 960L))));
+
+		ComposerProject.MinecraftConversion fitted = song.convertToMinecraft(1, false, 0, false,
+			ComposerProject.OctaveShifting.NOTES_ONLY, true, true, null, Set.of(picked.id()));
+
+		assertEquals(List.of("Piano (in range)", "Piano (+2 oct)"), names(fitted.project()));
+		assertEquals(List.of(30, 60), pitches(fitted.project().layers().getFirst()),
+			"the unselected stray stays out of range, where it was written");
+		assertEquals(List.of(60), pitches(fitted.project().layers().get(1)));
+		assertEquals(1, fitted.shiftedNotes());
+	}
+
+	/** Shift the layer measures its octave from the selected notes, and moves only them. */
+	@Test
+	void shiftTheLayerScopedToNotesMovesOnlyTheSelection() {
+		NoteEvent low = note(36, 0L);
+		NoteEvent lower = note(40, 480L);
+		ComposerProject song = songOf(new Layer("Bass", "HARP", false, true, true,
+			List.of(low, lower, note(84, 960L))));
+
+		ComposerProject.MinecraftConversion fitted = song.convertToMinecraft(1, false, 0, false,
+			ComposerProject.OctaveShifting.LAYER_THEN_NOTES, false, true, null,
+			Set.of(low.id(), lower.id()));
+
+		assertEquals(List.of(60, 64, 84), pitches(fitted.project().layers().getFirst()),
+			"the selected pair rose two octaves together; the high note was not asked about");
+	}
+
 	/** A counted voice keeps its count on the melodic layer: three chimes stay three chimes. */
 	@Test
 	void convertToMelodicKeepsTheLayersCounts() {
