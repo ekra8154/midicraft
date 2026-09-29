@@ -654,6 +654,18 @@ public final class ComposerScreen extends Screen {
 	private long resizeDelta;
 	/** How many pixels either side of a note's far end take hold of it. */
 	private static final int TRAIL_GRAB_PIXELS = 3;
+	/** A press on a strike tick: every selected note's strike pattern is sliding together. */
+	private boolean shiftingStrikes;
+	/** The composition as the strike drag found it, so each frame's preview is built from scratch. */
+	private ComposerProject strikeShiftBase;
+	/** The strike that was taken hold of, and where it was when it was. */
+	private long strikeHeldTick;
+	private int strikeHeldLayer;
+	private long strikeShiftDelta;
+	/** The strike the cursor is over this frame, drawn as a handle; null for none. */
+	private StrikeHit hoveredStrike;
+	/** A strike tick drawn as something to take hold of: hovered, or sliding under the hand. */
+	private static final int SUSTAIN_TICK_HANDLE_COLOR = 0xFFFFFFFF;
 	/** The tick drawn on a sustained trail at every strike. */
 	private static final int SUSTAIN_TICK_COLOR = 0xFFFFD27A;
 	/** A strike the chord limit leaves out, still drawn, faintly, so it reads as asked for. */
@@ -3578,7 +3590,9 @@ public final class ComposerScreen extends Screen {
 			case SUSTAIN_SETTINGS -> "Turns sustained notes on or off for this layer: its long notes "
 				+ "strike again and again for as long as they last, which is how a note block holds a "
 				+ "note. Their trails turn bright, with a tick at every strike, and their ends can be "
-				+ "dragged to lengthen them. Also chooses how long a note must last before it "
+				+ "dragged to lengthen them. Dragging a tick slides that note's strikes, and every "
+				+ "selected note's, by game ticks: half a chord moved half a step strikes between the "
+				+ "other half. Also chooses how long a note must last before it "
 				+ "sustains, how often it strikes, and whether the strikes are moved onto ticks the "
 				+ "build can place. With several layers selected it changes all of them.";
 		};
@@ -5398,6 +5412,9 @@ public final class ComposerScreen extends Screen {
 	 * where the answer is known to be no, and pitch culled on an int comparison.</p>
 	 */
 	private void extractNotes(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
+		// Found before anything is drawn, so the trail it sits on can draw it as a handle.
+		hoveredStrike = shiftingStrikes || draggingNotes || resizingNotes || selectingBox || erasing
+			|| overOpenMenu(mouseX, mouseY) ? null : strikeTickAt(mouseX, mouseY);
 		ComposerProject shown = displayProject();
 		SongAnalysis stats = projectStats();
 		Set<Long> offGrid = stats.offGrid();
@@ -5577,6 +5594,10 @@ public final class ComposerScreen extends Screen {
 				&& !overOpenMenu(mouseX, mouseY) && trailEndAt(mouseX, mouseY) != null) {
 			wantedCursorShape = GLFW.GLFW_HRESIZE_CURSOR;
 		}
+		// The same arrows over a strike tick, which slides sideways the way a far end does.
+		if (shiftingStrikes || hoveredStrike != null) {
+			wantedCursorShape = GLFW.GLFW_HRESIZE_CURSOR;
+		}
 	}
 
 	/** Where a note's trail ends on screen: its last tick, and never short of its own trigger. */
@@ -5607,11 +5628,21 @@ public final class ComposerScreen extends Screen {
 		}
 		long from = Math.max(0L, horizontalScroll);
 		long to = horizontalScroll + (long)Math.ceil(rollWidth * ticksPerPixel);
+		// A handle is a tick you can take hold of: the one under the cursor, or every tick of the
+		// patterns sliding under the hand. Drawn wider and white, so it reads as grabbable.
+		boolean sliding = shiftingStrikes && selectedNotes.contains(note.id());
+		StrikeHit hovered = hoveredStrike;
 		strikes.forEach(note, from, to, tick -> {
 			int x = tickX(tick);
 			if (x >= rollX && x < rollRight) {
-				graphics.fill(x, top, x + 1, bottom, thinning.skips(layerIndex, note.id(), tick)
-					? SUSTAIN_TICK_SKIPPED_COLOR : SUSTAIN_TICK_COLOR);
+				boolean handle = sliding || hovered != null && hovered.layerIndex() == layerIndex
+					&& hovered.note().id() == note.id() && hovered.tick() == tick;
+				if (handle) {
+					graphics.fill(x - 1, top - 1, x + 2, bottom + 1, SUSTAIN_TICK_HANDLE_COLOR);
+				} else {
+					graphics.fill(x, top, x + 1, bottom, thinning.skips(layerIndex, note.id(), tick)
+						? SUSTAIN_TICK_SKIPPED_COLOR : SUSTAIN_TICK_COLOR);
+				}
 			}
 		});
 	}
@@ -5673,6 +5704,73 @@ public final class ComposerScreen extends Screen {
 			}
 		}
 		return null;
+	}
+
+	/**
+	 * The strike tick under the cursor, looked for where {@link #trailEndAt} looks: the layers the
+	 * roll lets you touch, topmost first, and only where the ticks are drawn at all -- a tick too
+	 * close to its neighbours to be drawn is not one to take hold of. A note's body and its far
+	 * end both win over a strike: those were handles first.
+	 */
+	private StrikeHit strikeTickAt(double mouseX, double mouseY) {
+		if (!insideRoll(mouseX, mouseY)) {
+			return null;
+		}
+		long cursorTick = mouseTick(mouseX);
+		long grab = Math.round(TRAIL_GRAB_PIXELS * ticksPerPixel) + 1L;
+		long reach = projectStats().maximumNoteDuration();
+		int midi = mouseMidi(mouseY);
+		List<Integer> reachable = selectionLayers();
+		List<Integer> order = noteDrawOrder(project());
+		for (int position = order.size() - 1; position >= 0; position--) {
+			int layerIndex = order.get(position);
+			if (!reachable.contains(layerIndex)) {
+				continue;
+			}
+			Layer layer = project().layers().get(layerIndex);
+			if (!layer.visible() || !layer.sustains()) {
+				continue;
+			}
+			ComposerProject.Strikes strikes = editorStrikes(project(), layer);
+			if (strikes.step() / ticksPerPixel < 3.0) {
+				continue;
+			}
+			List<NoteEvent> notes = layer.notes();
+			for (int index = lowerBoundStart(notes, Math.max(0L, cursorTick - reach));
+					index < notes.size(); index++) {
+				NoteEvent note = notes.get(index);
+				if (note.startTick() > cursorTick) {
+					break;
+				}
+				if (note.midiNote() != midi) {
+					continue;
+				}
+				long[] nearest = {-1L};
+				strikes.forEach(note, cursorTick - grab, cursorTick + grab, tick -> {
+					if (Math.abs(tickX(tick) - mouseX) <= TRAIL_GRAB_PIXELS && (nearest[0] < 0L
+							|| Math.abs(tick - cursorTick) < Math.abs(nearest[0] - cursorTick))) {
+						nearest[0] = tick;
+					}
+				});
+				if (nearest[0] >= 0L) {
+					return noteAt(mouseX, mouseY) == null && trailEndAt(mouseX, mouseY) == null
+						? new StrikeHit(layerIndex, note, nearest[0]) : null;
+				}
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Where a dragged strike lands: the game tick nearest the cursor, counted from the song's strike
+	 * grid. A game tick because that is the finest a build can tell two strikes apart, and it is
+	 * what alternating two notes' strikes needs.
+	 */
+	private long strikeDragTick(double mouseX, ComposerProject.Strikes strikes) {
+		double gameTick = Math.max(1.0, SongAnalysis.redstoneTickSpan(project()) / 2.0);
+		long cursor = mouseTick(mouseX);
+		return Math.max(0L,
+			Math.round(strikes.origin() + Math.round((cursor - strikes.origin()) / gameTick) * gameTick));
 	}
 
 	/**
@@ -6740,6 +6838,30 @@ public final class ComposerScreen extends Screen {
 			dragPreview = null;
 			return true;
 		}
+		StrikeHit strike = strikeTickAt(event.x(), event.y());
+		if (strike != null) {
+			// A strike tick is the note's strike pattern, and it slides whole. What joins the
+			// selection follows the far end's rule: every selected note's pattern slides the same
+			// distance, which is how half a chord is set to strike between the other half.
+			NoteEvent held = strike.note();
+			if (noLayerSelected() && !selectedNotes.contains(held.id())) {
+				selectedNotes.clear();
+				selectLayer(strike.layerIndex(), false, false);
+			}
+			if (!selectedNotes.contains(held.id())) {
+				if (!event.hasControlDownWithQuirk()) {
+					selectedNotes.clear();
+				}
+				selectedNotes.add(held.id());
+			}
+			shiftingStrikes = true;
+			strikeShiftBase = project();
+			strikeHeldTick = strike.tick();
+			strikeHeldLayer = strike.layerIndex();
+			strikeShiftDelta = 0L;
+			dragPreview = null;
+			return true;
+		}
 		NoteHit hit = noteAt(event.x(), event.y());
 		if (hit != null) {
 			NoteEvent hitNote = hit.note();
@@ -6830,8 +6952,8 @@ public final class ComposerScreen extends Screen {
 		// Not while another button is already dragging something. Two live drags share one release,
 		// and whichever branch answers it first leaves the other one latched -- a right-click during
 		// a box select used to be enough to strand the box on screen.
-		if (selectingBox || draggingNotes || resizingNotes || draggingSplitter || draggingEndMarker
-				|| draggingPlayhead
+		if (selectingBox || draggingNotes || resizingNotes || shiftingStrikes || draggingSplitter
+				|| draggingEndMarker || draggingPlayhead
 				|| layerDragIndex >= 0 || bracketDragGroup >= 0 || painting != LayerPaint.NONE) {
 			return;
 		}
@@ -7124,6 +7246,20 @@ public final class ComposerScreen extends Screen {
 			}
 			return true;
 		}
+		if (shiftingStrikes) {
+			// The held strike goes to the game tick nearest the cursor, and every selected note's
+			// pattern slides by the same amount. Measured against the song as the drag found it, so
+			// dragging back to where it started is no change at all.
+			long delta = strikeDragTick(event.x(),
+				editorStrikes(strikeShiftBase, strikeShiftBase.layers().get(strikeHeldLayer)))
+				- strikeHeldTick;
+			if (delta != strikeShiftDelta) {
+				strikeShiftDelta = delta;
+				dragPreview = delta == 0L ? null
+					: strikeShiftBase.withStrikesShifted(selectedNotes, delta, finestSustainStep());
+			}
+			return true;
+		}
 		if (draggingNotes) {
 			long tickDelta = snapDelta(Math.round((event.x() - dragStartX) * ticksPerPixel));
 			int pitchDelta = (int)Math.round((dragStartY - event.y()) / rowHeight);
@@ -7230,6 +7366,20 @@ public final class ComposerScreen extends Screen {
 			}
 			dragPreview = null;
 			resizeBase = null;
+			return true;
+		}
+		if (shiftingStrikes) {
+			shiftingStrikes = false;
+			if (dragPreview != null) {
+				apply("move sustain strikes", dragPreview);
+				double gameTick = SongAnalysis.redstoneTickSpan(project()) / 2.0;
+				long gameTicks = Math.round(strikeShiftDelta / gameTick);
+				showResult(Component.literal("Strikes moved " + (gameTicks > 0 ? "later" : "earlier")
+					+ " by " + Math.abs(gameTicks) + " game tick" + (Math.abs(gameTicks) == 1 ? "" : "s")
+					+ " on " + selectedNotes.size() + (selectedNotes.size() == 1 ? " note." : " notes.")));
+			}
+			dragPreview = null;
+			strikeShiftBase = null;
 			return true;
 		}
 		if (draggingNotes) {
@@ -9853,7 +10003,7 @@ public final class ComposerScreen extends Screen {
 		clipboard = selected.stream()
 			.map(copied -> new ClipboardNote(copied.note().startTick() - clipboardOriginTick,
 				copied.note().midiNote(), copied.note().durationTicks(), copied.note().velocity(),
-				copied.layer().instrument(), copied.layer().name()))
+				copied.layer().instrument(), copied.layer().name(), copied.note().strikeShiftTicks()))
 			.toList();
 		// One clipboard: what is copied now is what paste puts back.
 		layerClipboard = List.of();
@@ -11105,6 +11255,10 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private record NoteHit(int layerIndex, NoteEvent note) {
+	}
+
+	/** One strike tick under the cursor: the note it belongs to, and the tick it is drawn at. */
+	private record StrikeHit(int layerIndex, NoteEvent note, long tick) {
 	}
 
 	/** The parts of a palette tile a click can land on. */

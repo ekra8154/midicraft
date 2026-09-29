@@ -247,13 +247,47 @@ public record ComposerProject(
 			nextNoteId, endTick, speedQuarters, speedEighths, value);
 	}
 
-	public record NoteEvent(long id, int midiNote, long startTick, long durationTicks, int velocity) {
+	public record NoteEvent(long id, int midiNote, long startTick, long durationTicks, int velocity,
+			/**
+			 * How far this note's sustain strikes sit from the song's strike grid, in composer ticks:
+			 * what dragging a strike tick sets. The whole pattern moves together, so only its phase
+			 * counts and any multiple of the step is the same as none.
+			 *
+			 * <p>Boxed, and null for none: Gson leaves a null out, so a note nobody dragged saves
+			 * exactly as it did before there was anything to drag, and a song saved before reads as
+			 * null.</p>
+			 */
+			Long strikeShift) {
 		public NoteEvent {
 			id = Math.max(1L, id);
 			midiNote = Math.max(0, Math.min(127, midiNote));
 			startTick = Math.max(0L, startTick);
 			durationTicks = Math.max(1L, durationTicks);
 			velocity = Math.max(1, Math.min(127, velocity));
+			strikeShift = strikeShift == null || strikeShift == 0L ? null : strikeShift;
+		}
+
+		/** A note whose strikes sit on the song's grid, which is every note nobody dragged. */
+		public NoteEvent(long id, int midiNote, long startTick, long durationTicks, int velocity) {
+			this(id, midiNote, startTick, durationTicks, velocity, null);
+		}
+
+		/** {@link #strikeShift} as a number, nought for none. */
+		public long strikeShiftTicks() {
+			return strikeShift == null ? 0L : strikeShift;
+		}
+
+		public NoteEvent withStrikeShift(long value) {
+			return new NoteEvent(id, midiNote, startTick, durationTicks, velocity, value);
+		}
+
+		/** The same note under another id: a copy, which strikes where the original did. */
+		public NoteEvent withId(long value) {
+			return new NoteEvent(value, midiNote, startTick, durationTicks, velocity, strikeShift);
+		}
+
+		public NoteEvent withDuration(long value) {
+			return new NoteEvent(id, midiNote, startTick, value, velocity, strikeShift);
 		}
 
 		public boolean isBuildable() {
@@ -265,7 +299,7 @@ public record ComposerProject(
 		}
 
 		public NoteEvent movedTo(long tick, int note) {
-			return new NoteEvent(id, note, tick, durationTicks, velocity);
+			return new NoteEvent(id, note, tick, durationTicks, velocity, strikeShift);
 		}
 	}
 
@@ -1104,6 +1138,10 @@ public record ComposerProject(
 		 * ticks, counted from the same origin -- so a note value the tempo does not divide still
 		 * lands where a repeater can put it. Two strikes moved onto one line are one strike, and one
 		 * moved onto the note's start or its end is left out, as it would have been there anyway.</p>
+		 *
+		 * <p>A note's own {@link NoteEvent#strikeShift} slides its lines along, all together, before
+		 * any of that: the grid stays the song's, the note just keeps its own phase on it. The build's
+		 * grid does not slide with it -- that is where a repeater can put a strike, whoever asks.</p>
 		 */
 		public void forEach(NoteEvent note, long from, long to, java.util.function.LongConsumer strike) {
 			if (!sustained(note)) {
@@ -1111,13 +1149,14 @@ public record ComposerProject(
 			}
 			long start = note.startTick();
 			long end = start + note.durationTicks();
-			long first = (long)Math.ceil((start + step / 2.0 - origin) / step - 1.0e-9);
+			double phase = origin + note.strikeShiftTicks();
+			long first = (long)Math.ceil((start + step / 2.0 - phase) / step - 1.0e-9);
 			// Floored, and the tick itself checked: a line just under from can round onto it. A grid
 			// can move a strike back by half its line, so the window opens that much earlier.
-			long window = (long)Math.floor((from - grid - origin) / step);
+			long window = (long)Math.floor((from - grid - phase) / step);
 			long last = Long.MIN_VALUE;
 			for (long index = Math.max(first, window); ; index++) {
-				long tick = Math.round(origin + index * step);
+				long tick = Math.round(phase + index * step);
 				if (tick >= end || tick > to + grid) {
 					return;
 				}
@@ -1811,8 +1850,7 @@ public record ComposerProject(
 			Layer source = layers.get(index);
 			List<NoteEvent> copied = new ArrayList<>(source.notes().size());
 			for (NoteEvent note : source.notes()) {
-				copied.add(new NoteEvent(nextId++, note.midiNote(), note.startTick(),
-					note.durationTicks(), note.velocity()));
+				copied.add(note.withId(nextId++));
 			}
 			String name = copyName(source.name(), taken);
 			taken.add(name);
@@ -2712,7 +2750,7 @@ public record ComposerProject(
 			for (ClipboardNote copied : group.getValue()) {
 				NoteEvent note = new NoteEvent(id++, copied.midiNote(),
 					Math.max(0L, startTick + copied.tickOffset()), copied.durationTicks(),
-					copied.velocity());
+					copied.velocity(), copied.strikeShift());
 				notes.add(note);
 				addedIds.add(note.id());
 			}
@@ -2748,8 +2786,7 @@ public record ComposerProject(
 		List<Layer> updated = layers.stream()
 			.map(layer -> layer.withNotes(layer.notes().stream()
 				.map(note -> ids.contains(note.id())
-					? new NoteEvent(note.id(), note.midiNote(), note.startTick(),
-						Math.max(1L, note.durationTicks() + durationDelta), note.velocity())
+					? note.withDuration(Math.max(1L, note.durationTicks() + durationDelta))
 					: note)
 				.toList()))
 			.toList();
@@ -2824,8 +2861,7 @@ public record ComposerProject(
 		for (Layer layer : incoming) {
 			List<NoteEvent> copied = new ArrayList<>(layer.notes().size());
 			for (NoteEvent note : layer.notes()) {
-				copied.add(new NoteEvent(nextId++, note.midiNote(), note.startTick(),
-					note.durationTicks(), note.velocity()));
+				copied.add(note.withId(nextId++));
 			}
 			arriving.add(layer.withNotes(copied));
 		}
@@ -2861,9 +2897,8 @@ public record ComposerProject(
 				if (notes == null) {
 					notes = new ArrayList<>(layer.notes());
 				}
-				NoteEvent copy = new NoteEvent(id++, note.midiNote(),
-					Math.max(0L, note.startTick() + tickDelta), note.durationTicks(),
-					note.velocity());
+				NoteEvent copy = note.withId(id++)
+					.movedTo(Math.max(0L, note.startTick() + tickDelta), note.midiNote());
 				notes.add(copy);
 				addedIds.add(copy.id());
 			}
@@ -2888,8 +2923,7 @@ public record ComposerProject(
 		long nextId = nextNoteId;
 		List<NoteEvent> copied = new ArrayList<>(source.notes().size());
 		for (NoteEvent note : source.notes()) {
-			copied.add(new NoteEvent(nextId++, note.midiNote(), note.startTick(), note.durationTicks(),
-				note.velocity()));
+			copied.add(note.withId(nextId++));
 		}
 		List<Layer> updated = new ArrayList<>(layers);
 		Set<String> taken = new java.util.HashSet<>();
@@ -3156,6 +3190,46 @@ public record ComposerProject(
 			case BAR -> ppq * 4.0;
 			case FINEST -> finest;
 		};
+	}
+
+	/**
+	 * These notes with their sustain strikes slid along by {@code delta} composer ticks, each note's
+	 * pattern moving whole. What dragging a strike tick does.
+	 *
+	 * <p>Only notes on a sustaining layer move: anywhere else there are no strikes to see, and a
+	 * shift stored there would be a surprise waiting for the day the layer starts sustaining. Each
+	 * shift is kept within one step of its layer, so dragging a pattern a whole step round lands it
+	 * back on the song's grid and it saves as never having moved.</p>
+	 *
+	 * @param finest what Finest is in this song, from {@link #finestSustainStep}
+	 */
+	public ComposerProject withStrikesShifted(Set<Long> ids, long delta, double finest) {
+		if (ids == null || ids.isEmpty() || delta == 0L) {
+			return this;
+		}
+		List<Layer> updated = new ArrayList<>(layers.size());
+		boolean changed = false;
+		for (Layer layer : layers) {
+			if (!layer.sustains() || layer.notes().stream().noneMatch(note -> ids.contains(note.id()))) {
+				updated.add(layer);
+				continue;
+			}
+			double step = Math.max(1.0, sustainTicks(layer.sustainOrDefault().every(), finest));
+			updated.add(layer.withNotes(layer.notes().stream()
+				.map(note -> ids.contains(note.id())
+					? note.withStrikeShift(phaseWithin(note.strikeShiftTicks() + delta, step))
+					: note)
+				.toList()));
+			changed = true;
+		}
+		return changed ? with(updated, activeLayerIndex, nextNoteId) : this;
+	}
+
+	/** A shift brought within one step, [0, step), where every whole step round is the same. */
+	private static long phaseWithin(long shift, double step) {
+		double phase = shift - Math.floor(shift / step) * step;
+		long rounded = Math.round(phase);
+		return rounded >= step - 0.5 ? 0L : rounded;
 	}
 
 	/** Where a layer's notes strike again in this song; see {@link Strikes}. */
@@ -3427,9 +3501,8 @@ public record ComposerProject(
 				int index = anchorIndex.get(pitch);
 				NoteEvent anchor = kept.get(index);
 				long absorbedEnd = note.startTick() + note.durationTicks();
-				kept.set(index, new NoteEvent(anchor.id(), anchor.midiNote(), anchor.startTick(),
-					Math.max(anchor.durationTicks(), absorbedEnd - anchor.startTick()),
-					anchor.velocity()));
+				kept.set(index, anchor.withDuration(
+					Math.max(anchor.durationTicks(), absorbedEnd - anchor.startTick())));
 				lastStart.put(pitch, note.startTick());
 				continue;
 			}
@@ -3558,7 +3631,13 @@ public record ComposerProject(
 	 * than a link -- the layer it came from may be gone by the time this is pasted.</p>
 	 */
 	public record ClipboardNote(long tickOffset, int midiNote, long durationTicks, int velocity,
-			String instrument, String sourceLayer) {
+			String instrument, String sourceLayer, long strikeShift) {
+		/** A copied note whose strikes sit on the song's grid. */
+		public ClipboardNote(long tickOffset, int midiNote, long durationTicks, int velocity,
+				String instrument, String sourceLayer) {
+			this(tickOffset, midiNote, durationTicks, velocity, instrument, sourceLayer, 0L);
+		}
+
 		public ClipboardNote {
 			tickOffset = Math.max(0L, tickOffset);
 			midiNote = Math.max(0, Math.min(127, midiNote));
