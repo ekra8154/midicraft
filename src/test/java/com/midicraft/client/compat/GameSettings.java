@@ -42,6 +42,7 @@ final class GameSettings {
 		Boolean thinChordsByStrikes;
 		Integer maxBuildFloors;
 		Integer parityReseedDelay;
+		Integer paceTolerance;
 		Boolean pasteStartTop;
 		/** The old name of {@link #pasteStartTop}, read where a file predates it. */
 		Boolean ultraLaneStartTop;
@@ -63,7 +64,8 @@ final class GameSettings {
 	 *     the walk that follows differs. The light show changes no walk and reads as false.
 	 */
 	record Values(ChordSkips.Rules thinning, int maxBuildFloors, int reseedDelay,
-			boolean startTop, boolean debugPaste, int laneWidth, int laneFloors, String pasteMode) {
+			int paceTolerance, boolean startTop, boolean debugPaste, int laneWidth, int laneFloors,
+			String pasteMode) {
 
 		SongBuilder.BuildLimits limits(int width, int floors) {
 			return limits(maxBuildFloors, width, floors);
@@ -71,7 +73,8 @@ final class GameSettings {
 
 		/** @param maxFloors an override for the cube layout's cap, the one thing it decides */
 		SongBuilder.BuildLimits limits(int maxFloors, int width, int floors) {
-			return new SongBuilder.BuildLimits(maxFloors, width, floors, startTop, reseedDelay);
+			return new SongBuilder.BuildLimits(maxFloors, width, floors, startTop, reseedDelay,
+				paceTolerance);
 		}
 
 		/**
@@ -88,7 +91,7 @@ final class GameSettings {
 		String said() {
 			return "[game: thin " + thinning.target() + (thinning.volume() ? " volume" : "")
 				+ (thinning.strikes() ? " strikes" : "") + ", dedupe per song, reseed "
-				+ reseedDelay + ", debugPaste " + debugPaste + ", maxFloors " + maxBuildFloors
+				+ reseedDelay + ", pace " + paceTolerance + ", debugPaste " + debugPaste + ", maxFloors " + maxBuildFloors
 				+ ", lanes start " + (startTop ? "top" : "bottom") + "]";
 		}
 	}
@@ -103,8 +106,9 @@ final class GameSettings {
 	}
 
 	/**
-	 * The two paste settings a probe wants to hold still while the config moves under it, given as
-	 * {@code -Dcensus.startTop=false} or {@code -Dfault.debugPaste=false}.
+	 * The paste settings a probe wants to hold still while the config moves under it, given as
+	 * {@code -Dcensus.startTop=false}, {@code -Dfault.debugPaste=false} or
+	 * {@code -Dcensus.paceTolerance=8}.
 	 *
 	 * <p>A census is only comparable to the one before it if the build it asked for is the same
 	 * build, and both of these change the walk rather than the song: the lanes going up instead of
@@ -116,19 +120,30 @@ final class GameSettings {
 	private static Values overridden(Values read) {
 		boolean startTop = flag("startTop", read.startTop());
 		boolean debugPaste = flag("debugPaste", read.debugPaste());
-		if (startTop == read.startTop() && debugPaste == read.debugPaste()) {
+		// The limits carry the configured tolerance, so a probe setting JOINT_PACE_TOLERANCE
+		// through Flags changes nothing; this is the way to ask for another one.
+		String pace = given("paceTolerance");
+		int paceTolerance = pace == null ? read.paceTolerance() : Integer.parseInt(pace);
+		if (startTop == read.startTop() && debugPaste == read.debugPaste()
+				&& paceTolerance == read.paceTolerance()) {
 			return read;
 		}
 		return new Values(read.thinning(), read.maxBuildFloors(), read.reseedDelay(),
-			startTop, debugPaste, read.laneWidth(), read.laneFloors(), read.pasteMode());
+			paceTolerance, startTop, debugPaste, read.laneWidth(), read.laneFloors(),
+			read.pasteMode());
 	}
 
 	private static boolean flag(String key, boolean fallback) {
+		String given = given(key);
+		return given == null ? fallback : Boolean.parseBoolean(given);
+	}
+
+	private static String given(String key) {
 		String given = System.getProperty("census." + key);
 		if (given == null || given.isBlank()) {
 			given = System.getProperty("fault." + key);
 		}
-		return given == null || given.isBlank() ? fallback : Boolean.parseBoolean(given.strip());
+		return given == null || given.isBlank() ? null : given.strip();
 	}
 
 	private static Values read() {
@@ -157,6 +172,9 @@ final class GameSettings {
 			clamp(stored.parityReseedDelay == null
 					? MidicraftConfig.DEFAULT_PARITY_RESEED_DELAY : stored.parityReseedDelay,
 				MidicraftConfig.MIN_PARITY_RESEED_DELAY, MidicraftConfig.MAX_PARITY_RESEED_DELAY),
+			clamp(stored.paceTolerance == null
+					? MidicraftConfig.DEFAULT_PACE_TOLERANCE : stored.paceTolerance,
+				MidicraftConfig.MIN_PACE_TOLERANCE, MidicraftConfig.MAX_PACE_TOLERANCE),
 			stored.pasteStartTop != null ? stored.pasteStartTop
 				: stored.ultraLaneStartTop != null && stored.ultraLaneStartTop,
 			stored.colorCodedPaste != null ? "NORMAL".equals(stored.colorCodedPaste)

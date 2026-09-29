@@ -534,7 +534,7 @@ public final class SongBuilder {
 	 *     and a value copied at construction would quietly ignore the flip.
 	 */
 	record BuildLimits(int maxFloors, int laneWidth, int laneFloors, boolean startTop,
-			int reseedDelay) {
+			int reseedDelay, int paceTolerance) {
 		BuildLimits(int maxFloors, int laneWidth, int laneFloors) {
 			this(maxFloors, laneWidth, laneFloors, false);
 		}
@@ -543,15 +543,29 @@ public final class SongBuilder {
 			this(maxFloors, laneWidth, laneFloors, startTop, 0);
 		}
 
+		BuildLimits(int maxFloors, int laneWidth, int laneFloors, boolean startTop,
+				int reseedDelay) {
+			this(maxFloors, laneWidth, laneFloors, startTop, reseedDelay, -1);
+		}
+
 		/** The threshold this build is planned against, which is the static unless one was stated. */
 		int reseedTicks() {
 			return reseedDelay > 0 ? reseedDelay : PARITY_MIN_DELAY_BEFORE_RESEED;
 		}
 
+		/**
+		 * The pace tolerance this build is planned against, which is the static unless one was
+		 * stated. Carried here for the reason the reseed is: the forecast plans on its own thread.
+		 */
+		int jointPaceTolerance() {
+			return paceTolerance >= 0 ? paceTolerance : JOINT_PACE_TOLERANCE;
+		}
+
 		static BuildLimits fromConfig() {
 			MidicraftConfig config = MidicraftConfig.get();
 			return new BuildLimits(config.maxBuildFloors(), config.buildLaneWidth(),
-				config.buildLaneFloors(), config.pasteStartTop(), config.parityReseedDelay());
+				config.buildLaneFloors(), config.pasteStartTop(), config.parityReseedDelay(),
+				config.paceTolerance());
 		}
 	}
 
@@ -2010,9 +2024,9 @@ public final class SongBuilder {
 					Object stateB = placements.snapshot();
 					Baton baton = new Baton(placements, stateA, stateB);
 					Pace jointA = new Pace(new int[evenEvents.size()], new int[evenEvents.size()],
-						new boolean[evenEvents.size()], baton, 0);
+						new boolean[evenEvents.size()], baton, 0, limits.jointPaceTolerance());
 					Pace jointB = new Pace(new int[oddEvents.size()], new int[oddEvents.size()],
-						new boolean[oddEvents.size()], baton, 1);
+						new boolean[oddEvents.size()], baton, 1, limits.jointPaceTolerance());
 					paceA = jointA;
 					paceB = jointB;
 					try {
@@ -10501,10 +10515,11 @@ public final class SongBuilder {
 	 * only moves the mark the other machine is chasing, which is the lockstep mistake the straight
 	 * half-tick mode measured at 29 percent of its whole length.</p>
 	 */
-	record Pace(int[] progress, int[] stretch, boolean[] asked, Baton baton, int machine) {
+	record Pace(int[] progress, int[] stretch, boolean[] asked, Baton baton, int machine,
+			int tolerance) {
 		/** The open-loop pacing: stretches planned ahead of the walk, no partner to ask. */
 		Pace(int[] progress, int[] stretch) {
-			this(progress, stretch, null, null, -1);
+			this(progress, stretch, null, null, -1, 0);
 		}
 	}
 
@@ -10531,13 +10546,23 @@ public final class SongBuilder {
 	/**
 	 * Columns a jointly-walked machine may stand behind its partner's last chord without padding.
 	 *
+	 * <p>The default for a build whose limits do not say. The game's builds say: the pace
+	 * tolerance is a paste setting ({@code MidicraftConfig.paceTolerance}), and the config
+	 * writes its value here as well, the way it does the reseed delay.</p>
+	 *
+	 * <p>Sixteen since 2026-09-29. Over the earshot census (36 two-lane songs at 19 sizes, reach
+	 * 20) level pacing added 15.6 percent to the builds' depth; sixteen keeps a third of that and
+	 * holds moments past twenty blocks at 16.7 percent against level's 16.0. Eight halves the
+	 * padding and comes out closer than level (15.3); past sixteen the lanes drift faster than
+	 * the depth falls (24: 20.1 percent, 32: 20.5).</p>
+	 *
 	 * <p>Nought is level, and it is safe to aim for here where the open-loop planner needed a whole
 	 * lane: a machine aims its chord at the column the partner's last chord started from, not at
 	 * the partner's cursor, so two level machines never take turns padding a chord's length after
 	 * each other -- the lockstep the straight half-tick mode measured at 29 percent of its own
 	 * length.</p>
 	 */
-	static int JOINT_PACE_TOLERANCE = 0;
+	public static int JOINT_PACE_TOLERANCE = 16;
 
 	/** Thrown inside a walker whose partner failed, to unwind it; never seen outside the baton. */
 	static final class WalkAbandoned extends RuntimeException {
@@ -10923,7 +10948,7 @@ public final class SongBuilder {
 					// that whatever the stretch, so the stretch buys only what is left.
 					int minimum = Math.max(0, (wait - 1) / 4);
 					int behind = partnerChord < 0 ? 0
-						: partnerChord - JOINT_PACE_TOLERANCE - (here + minimum);
+						: partnerChord - pace.tolerance() - (here + minimum);
 					pace.stretch()[index] = Math.max(0, Math.min(behind, paceCapacity(wait)));
 				}
 			}

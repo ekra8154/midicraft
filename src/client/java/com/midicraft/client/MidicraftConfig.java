@@ -273,6 +273,19 @@ public final class MidicraftConfig {
 	public static final int DEFAULT_PARITY_RESEED_DELAY = 64;
 	public static final int MIN_PARITY_RESEED_DELAY = 16;
 	public static final int MAX_PARITY_RESEED_DELAY = 512;
+	/**
+	 * Path columns an Interleaved half-tick machine may fall behind its partner before it pads to
+	 * keep up.
+	 *
+	 * <p>The two machines play the same song side by side, and whichever carries less music would
+	 * drift away from the other. The one behind lays extra dust in its waits to stay within
+	 * earshot, and that dust is depth. Nought keeps the two level and pads the most; sixteen keeps
+	 * them about as close for a third of the padding. See
+	 * {@code SongBuilder.JOINT_PACE_TOLERANCE} for the measurement.</p>
+	 */
+	public static final int DEFAULT_PACE_TOLERANCE = 16;
+	public static final int MIN_PACE_TOLERANCE = 0;
+	public static final int MAX_PACE_TOLERANCE = 64;
 	/** Repeats of a pitch closer than this many repeater ticks collapse on convert. 0 disables. */
 	public static final int DEFAULT_REPEAT_MERGE_TICKS = 1;
 	public static final int MIN_REPEAT_MERGE_TICKS = 0;
@@ -437,6 +450,7 @@ public final class MidicraftConfig {
 	private int buildLaneWidth;
 	private int buildLaneFloors;
 	private int parityReseedDelay;
+	private int paceTolerance;
 	private boolean pasteStartTop;
 	private String importDirectory;
 	private int maxBuildFloors;
@@ -602,6 +616,9 @@ public final class MidicraftConfig {
 				instance.setParityReseedDelay(
 					stored.parityReseedDelay == null
 						? DEFAULT_PARITY_RESEED_DELAY : stored.parityReseedDelay
+				);
+				instance.setPaceTolerance(
+					stored.paceTolerance == null ? DEFAULT_PACE_TOLERANCE : stored.paceTolerance
 				);
 				// Read under its old name too, from before there was one layout and the setting
 				// stopped being about the Ultra lane.
@@ -1418,6 +1435,17 @@ public final class MidicraftConfig {
 			this.parityReseedDelay;
 	}
 
+	/** @see #DEFAULT_PACE_TOLERANCE */
+	public int paceTolerance() {
+		return paceTolerance;
+	}
+
+	/** Sets the setting and the builder's copy of it together, as {@link #setParityReseedDelay} does. */
+	public void setPaceTolerance(int paceTolerance) {
+		this.paceTolerance = clampPaceTolerance(paceTolerance);
+		com.midicraft.client.compat.SongBuilder.JOINT_PACE_TOLERANCE = this.paceTolerance;
+	}
+
 	public ComposerProject.OctaveShifting convertOctaveShifting() {
 		return convertOctaveShifting;
 	}
@@ -1685,6 +1713,7 @@ public final class MidicraftConfig {
 		config.buildLaneWidth = DEFAULT_BUILD_LANE_WIDTH;
 		config.buildLaneFloors = DEFAULT_BUILD_LANE_FLOORS;
 		config.parityReseedDelay = DEFAULT_PARITY_RESEED_DELAY;
+		config.paceTolerance = DEFAULT_PACE_TOLERANCE;
 		config.pasteStartTop = false;
 		config.maxBuildFloors = DEFAULT_MAX_BUILD_FLOORS;
 		config.pasteMode = "COMPACT_CUBE";
@@ -1750,6 +1779,10 @@ public final class MidicraftConfig {
 
 	private static int clampParityReseedDelay(int ticks) {
 		return Math.max(MIN_PARITY_RESEED_DELAY, Math.min(MAX_PARITY_RESEED_DELAY, ticks));
+	}
+
+	private static int clampPaceTolerance(int columns) {
+		return Math.max(MIN_PACE_TOLERANCE, Math.min(MAX_PACE_TOLERANCE, columns));
 	}
 
 	private static double clampCommandsPerTick(double commands) {
@@ -1889,6 +1922,7 @@ public final class MidicraftConfig {
 		private Integer buildLaneWidth;
 		private Integer buildLaneFloors;
 		private Integer parityReseedDelay;
+		private Integer paceTolerance;
 		private Boolean pasteStartTop;
 		/** The old name of {@link #pasteStartTop}, read and never written. */
 		private Boolean ultraLaneStartTop;
@@ -1976,6 +2010,7 @@ public final class MidicraftConfig {
 			this.buildLaneWidth = config.buildLaneWidth;
 			this.buildLaneFloors = config.buildLaneFloors;
 			this.parityReseedDelay = config.parityReseedDelay;
+			this.paceTolerance = config.paceTolerance;
 			this.pasteStartTop = config.pasteStartTop;
 			this.importDirectory = config.importDirectory;
 			this.maxBuildFloors = config.maxBuildFloors;

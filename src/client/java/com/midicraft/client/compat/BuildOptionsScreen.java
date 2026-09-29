@@ -72,6 +72,15 @@ final class BuildOptionsScreen extends Screen {
 	private int laneWidth;
 	private int laneFloors;
 	private int reseedDelay;
+	private int paceTolerance;
+	/**
+	 * Whether the advanced rows are open: machine swapping, pace tolerance and the command rate.
+	 *
+	 * <p>Static, so the dialog opens the way it was last left for the rest of the session. These
+	 * are settings most pastes never touch, and a player who does touch them tends to keep doing
+	 * so.</p>
+	 */
+	private static boolean advancedOpen;
 	/** The width control, so its line can be rewritten when a forecast says the width was raised. */
 	private Choice widthChoice;
 	/**
@@ -372,6 +381,7 @@ final class BuildOptionsScreen extends Screen {
 		this.laneWidth = MidicraftConfig.get().buildLaneWidth();
 		this.laneFloors = MidicraftConfig.get().buildLaneFloors();
 		this.reseedDelay = MidicraftConfig.get().parityReseedDelay();
+		this.paceTolerance = MidicraftConfig.get().paceTolerance();
 	}
 
 	/** Top of the width row, which only a lane build has. Under the start and block rows. */
@@ -383,15 +393,58 @@ final class BuildOptionsScreen extends Screen {
 		return widthRow(top) + 22;
 	}
 
-	private int reseedRow(int top) {
-		// Under the width and floor rows where a layout has them, and in their place where it does
-		// not -- the straight half-tick lane folds nowhere and so shows neither.
-		return hasLaneControls() ? floorRow(top) + 22 : widthRow(top);
+	/**
+	 * The advanced toggle, under the dimensions where a layout has them and in their place where
+	 * it does not -- the straight half-tick lane folds nowhere and so shows neither.
+	 */
+	private int advancedRow(int top) {
+		return (hasLaneControls() ? floorRow(top) + 22 : widthRow(top)) + 4;
 	}
 
-	private int rateRow(int top) {
-		return widthRow(top) + (hasLaneControls() ? 48 : 0)
-			+ (hasReseedControl() ? 22 : 0) + 10;
+	/** The advanced rows in order, the first straight under the toggle. */
+	private int advancedRow(int top, int index) {
+		return advancedRow(top) + 22 * (index + 1);
+	}
+
+	/** How many advanced rows this layout has: the rate always, the other two where they apply. */
+	private int advancedRows() {
+		return 1 + (hasReseedControl() ? 1 : 0) + (hasPaceControl() ? 1 : 0);
+	}
+
+	/**
+	 * The last control row, which the forecast and the buttons hang off: the rate where the
+	 * advanced rows are open, the toggle where they are shut.
+	 */
+	private int lastRow(int top) {
+		return advancedOpen ? advancedRow(top, advancedRows() - 1) : advancedRow(top);
+	}
+
+	/**
+	 * Whether this layout paces two machines against each other, which only the interleaved paste
+	 * does: its two machines are walked together, and the pace tolerance is how far one may fall
+	 * behind the other. See {@code SongBuilder.JOINT_PACE_TOLERANCE}.
+	 */
+	private boolean hasPaceControl() {
+		return mode == SongBuilder.PasteMode.INTERLEAVED_HALF_TICK;
+	}
+
+	/** The pace tolerances offered, in path columns: fine near the default, coarse past it. */
+	private static final List<Integer> PACE_TOLERANCES = List.of(0, 4, 8, 12, 16, 20, 24, 32, 48, 64);
+
+	private static int paceRung(int columns) {
+		int best = 0;
+		for (int rung = 1; rung < PACE_TOLERANCES.size(); rung++) {
+			if (Math.abs(PACE_TOLERANCES.get(rung) - columns)
+					< Math.abs(PACE_TOLERANCES.get(best) - columns)) {
+				best = rung;
+			}
+		}
+		return best;
+	}
+
+	private static String paceLine(int columns) {
+		return columns == 0 ? "2 lanes kept level - pads the most"
+			: "2 lanes may drift " + columns + " blocks before padding";
 	}
 
 	/**
@@ -494,24 +547,57 @@ final class BuildOptionsScreen extends Screen {
 				rung -> laneFloors = MidicraftConfig.MIN_BUILD_LANE_FLOORS + rung));
 		}
 
-		if (hasReseedControl()) {
-			addRenderableWidget(new Choice(left, reseedRow(top), width, RESEED_DELAYS.size(),
-				reseedRung(reseedDelay),
-				rung -> reseedLine(RESEED_DELAYS.get(rung)),
-				rung -> reseedDelay = RESEED_DELAYS.get(rung)));
+		// Shut by default: the rows under it are about how the build is made, not what it is, and
+		// their defaults are the measured ones. Laid out again when it flips, which is what moves
+		// the forecast and the buttons down to make room.
+		addRenderableWidget(Button.builder(Component.literal(advancedOpen
+				? "Advanced \u25B2" : "Advanced \u25BC"), clicked -> {
+				advancedOpen = !advancedOpen;
+				init();
+			})
+			.bounds(left, advancedRow(top), width, 20)
+			.tooltip(Tooltip.create(Component.literal("Machine swapping, how far apart the two "
+				+ "lanes may drift, and how fast the paste sends commands.")))
+			.build());
+
+		if (advancedOpen) {
+			int row = 0;
+			if (hasReseedControl()) {
+				addRenderableWidget(new Choice(left, advancedRow(top, row++), width,
+					RESEED_DELAYS.size(), reseedRung(reseedDelay),
+					rung -> reseedLine(RESEED_DELAYS.get(rung)),
+					rung -> reseedDelay = RESEED_DELAYS.get(rung)))
+					.setTooltip(Tooltip.create(Component.literal("How long a machine may sit "
+						+ "idle on its half of the game tick before it swaps to the other half with a "
+						+ "sticky piston. Lower swaps more often, spending pistons to keep both "
+						+ "machines busy; higher keeps each on its half and pads the silence instead.")));
+			}
+			if (hasPaceControl()) {
+				addRenderableWidget(new Choice(left, advancedRow(top, row++), width,
+					PACE_TOLERANCES.size(), paceRung(paceTolerance),
+					rung -> paceLine(PACE_TOLERANCES.get(rung)),
+					rung -> paceTolerance = PACE_TOLERANCES.get(rung)))
+					.setTooltip(Tooltip.create(Component.literal("The machine carrying less music "
+						+ "falls behind the other and pads its waits with dust to keep up, so both "
+						+ "lanes play near each other. This is how far behind it may fall first, "
+						+ "along the lane. 0 keeps them level and pads the most; 16 keeps them about "
+						+ "as close with a third of the padding; higher is shorter, and the two "
+						+ "lanes drift further apart.")));
+			}
+			addRenderableWidget(new Choice(left, advancedRow(top, row), width,
+				PasteRate.RATES.size(), PasteRate.index(commandsPerTick),
+				rung -> PasteRate.label(PasteRate.RATES.get(rung)),
+				rung -> commandsPerTick = PasteRate.RATES.get(rung)));
 		}
 
-		y = rateRow(top);
-		addRenderableWidget(new Choice(left, y, width, PasteRate.RATES.size(),
-			PasteRate.index(commandsPerTick),
-			rung -> PasteRate.label(PasteRate.RATES.get(rung)),
-			rung -> commandsPerTick = PasteRate.RATES.get(rung)));
+		y = lastRow(top);
 
 		addRenderableWidget(Button.builder(Component.literal("Paste"), clicked -> {
 			MidicraftConfig.get().setCommandsPerTick(commandsPerTick);
 			MidicraftConfig.get().setBuildLaneWidth(laneWidth);
 			MidicraftConfig.get().setBuildLaneFloors(laneFloors);
 			MidicraftConfig.get().setParityReseedDelay(reseedDelay);
+			MidicraftConfig.get().setPaceTolerance(paceTolerance);
 			// Written down before the confirm, like the rest: the paste plans off the config.
 			MidicraftConfig.get().setPasteStartTop(startTop);
 			MidicraftConfig.get().setPasteMode(mode.name());
@@ -540,8 +626,11 @@ final class BuildOptionsScreen extends Screen {
 	 * lowest thing on the screen and they were already close to the bottom of a small window.</p>
 	 */
 	private int topRow() {
-		// Twenty-two higher again for the block row, which went in under the start row.
-		return Math.max(40, height / 2 - 96 - (BUTTON_ROW - 46) - 22);
+		// Twenty-two higher again for the block row, which went in under the start row; then a row
+		// either way for every row the advanced toggle adds or hides against the six this was
+		// measured with (start, blocks, width, floors, reseed, rate).
+		int rows = 2 + (hasLaneControls() ? 2 : 0) + 1 + (advancedOpen ? advancedRows() : 0);
+		return Math.max(40, height / 2 - 96 - (BUTTON_ROW - 46) - 22 - 22 * (rows - 6));
 	}
 
 	/**
@@ -555,8 +644,9 @@ final class BuildOptionsScreen extends Screen {
 		// gives up its parity to a piston instead of padding across the silence, and a build that
 		// swaps halves is a different length from one that waits. Left out, the screen answered
 		// every position of that slider with the forecast it had already made for the first.
+		// The pace tolerance likewise: it decides how much dust the lane behind lays.
 		String key = mode.name() + " " + laneWidth + " " + laneFloors + " " + reseedDelay + " "
-			+ startTop + " " + colours;
+			+ paceTolerance + " " + startTop + " " + colours;
 		if (key.equals(forecastKey)) {
 			return;
 		}
@@ -578,7 +668,7 @@ final class BuildOptionsScreen extends Screen {
 		// half-written.
 		SongBuilder.BuildLimits limits = new SongBuilder.BuildLimits(
 			MidicraftConfig.get().maxBuildFloors(), laneWidth, laneFloors,
-			startTop, reseedDelay);
+			startTop, reseedDelay, paceTolerance);
 		FORECASTER.execute(() -> {
 			// Dropped before it is worked out, not after. A press asked for one forecast; a drag
 			// across the width slider asks for a hundred and twenty, and planning a big song is tens
@@ -860,7 +950,7 @@ final class BuildOptionsScreen extends Screen {
 			left, top - 14, 0xFFFFFFFF, false);
 		graphics.text(font, "Build", left, top + 2, 0xFF8A9098, false);
 
-		int rateY = rateRow(top);
+		int rateY = lastRow(top);
 		SongBuilder.BlockCounts blocks = SongBuilder.blockCounts(sequence);
 		int commands = blocks.total();
 		double seconds = commands / (commandsPerTick * 20.0);
