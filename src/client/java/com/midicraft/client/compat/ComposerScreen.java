@@ -1425,11 +1425,9 @@ public final class ComposerScreen extends Screen {
 		}
 		Layer into = project().layers().get(merging.getFirst());
 		int notes = merging.stream().mapToInt(index -> project().layers().get(index).notes().size()).sum();
-		long instruments = merging.stream()
-			.map(index -> project().layers().get(index).instrument())
-			.distinct()
-			.count();
 		apply("merge " + merging.size() + " layers", project().mergeLayers(Set.copyOf(selectedLayers)));
+		Layer result = project().layers().get(merging.getFirst());
+		int instruments = result.sounding().size();
 		resetLayerView();
 		// The one thing a merge leaves you wanting to look at is what came out of it, so this is the
 		// exception to opening on nothing selected.
@@ -1439,8 +1437,11 @@ public final class ComposerScreen extends Screen {
 		String summary = "Merged " + merging.size() + " layers into \"" + into.name() + "\" - "
 			+ notes + " notes.";
 		if (instruments > 1) {
-			summary += " They all play " + PreviewInstrument.byId(into.instrument()).name()
-				+ " now; Ctrl+Z puts them back.";
+			summary += result.split() != null
+				? " It is a split layer with all " + instruments + " of their voices; Ctrl+Z puts "
+					+ "them back."
+				: " Every note plays all " + instruments + " of their instruments now; Ctrl+Z puts "
+					+ "them back.";
 		}
 		showResult(Component.literal(summary));
 	}
@@ -3547,8 +3548,9 @@ public final class ComposerScreen extends Screen {
 				+ "whichever layers they are on now. Ctrl+1 to Ctrl+0 do the same for the first ten "
 				+ "layers.";
 			case MERGE_SELECTED -> "Folds the selected layers into the lowest-numbered one, which "
-				+ "keeps its name and instrument -- so merging across two instruments gives every "
-				+ "note the surviving one. Ctrl+E does the same thing.";
+				+ "keeps its name. Every instrument any of them played stays: plain layers stack into "
+				+ "one layer playing them all, and if any is a split layer the result is a split "
+				+ "with every voice. Ctrl+E does the same thing.";
 			case DELETE_SELECTED -> "Removes the selected layers and every note on them. Deleting all "
 				+ "of them leaves one empty layer to work in. Ctrl+Z puts them back, and so does "
 				+ "Ctrl+V if you took them with Ctrl+X. Delete does this while the panel has the "

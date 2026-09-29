@@ -69,9 +69,9 @@ class SustainTest {
 		Layer onBeat = layer(EVERY_SIXTEENTH, new NoteEvent(3, 64, 0, 480, 90));
 		ComposerProject song = songOf(early, late, onBeat);
 
-		assertEquals(List.of(50L, 240L, 360L, 480L, 600L),
+		assertEquals(List.of(50L, 120L, 240L, 360L, 480L, 600L),
 			ticksOf(song.withSustainsExpanded(late, FINE), 60),
-			"the first strike is the first line a whole sixteenth after 50; none at the end, 650");
+			"the first strike is the first line half a sixteenth after 50; none at the end, 650");
 		assertEquals(List.of(0L, 120L, 240L, 360L),
 			ticksOf(song.withSustainsExpanded(onBeat, FINE), 64),
 			"a strike on the note's own end is not inside it");
@@ -167,7 +167,32 @@ class SustainTest {
 
 		assertEquals(all.stream().filter(tick -> tick >= 700L && tick <= 1300L).toList(), window);
 		assertEquals(all.size() + 1, strikes.soundings(held));
-		assertTrue(all.stream().allMatch(tick -> tick >= 37 + 47 && tick < 2037));
+		assertTrue(all.stream().allMatch(tick -> tick >= 37 + 47.5 / 2 && tick < 2037));
+	}
+
+	/**
+	 * A note starting just past a grid line takes the next line, not the one after it.
+	 *
+	 * <p>Thriller at 1/8 note: moving a held note one game tick later used to skip the next line
+	 * for being a tick short of a whole step, and the first gap came out nearly double the rest.
+	 * The line is taken once it is half a step clear of the start, and a line closer than that is
+	 * still left out, so a strike never lands right on top of the note it belongs to.</p>
+	 */
+	@Test
+	void theFirstStrikeIsTheFirstLineHalfAStepClear() {
+		Strikes strikes = new Strikes(0.0, 100.0, 0.0);
+
+		assertEquals(100L, firstStrike(strikes, 0L), "on a line, the next line");
+		assertEquals(100L, firstStrike(strikes, 20L),
+			"a fifth of a step past a line, still the next line, 80 ticks on");
+		assertEquals(200L, firstStrike(strikes, 60L),
+			"the next line only 40 ticks on is too close, so the one after it");
+	}
+
+	private static long firstStrike(Strikes strikes, long start) {
+		List<Long> ticks = new ArrayList<>();
+		strikes.forEach(new NoteEvent(1, 60, start, 1000, 90), 0L, Long.MAX_VALUE, ticks::add);
+		return ticks.getFirst();
 	}
 
 	@Test

@@ -323,6 +323,45 @@ class ClipboardAndLayersTest {
 			"the shared note is one note; the two that differ are their own");
 	}
 
+	/** Plain layers on different instruments merge into one layer stacking all of them. */
+	@Test
+	void mergingPlainLayersStacksTheirInstruments() {
+		ComposerProject song = songOf(
+			new Layer("One", "HARP", false, true, true, List.of(note(60, 0L))),
+			new Layer("Two", "TRUMPET", false, true, true, List.of(note(64, 0L)))
+				.withCountStepped("TRUMPET", 1));
+
+		Layer merged = song.mergeLayers(Set.of(0, 1)).layers().getFirst();
+
+		assertNull(merged.split(), "no split among them, so none on the result");
+		assertEquals(List.of("HARP", "TRUMPET"),
+			merged.mix().stream().map(ComposerProject.Split.Voice::instrument).toList());
+		assertEquals(2, merged.countOf("TRUMPET"), "at the count it had");
+		assertEquals(List.of(60, 64), pitches(merged), "and no note moved");
+	}
+
+	/**
+	 * A split among them makes the result a split with every voice, and a plain layer's notes move
+	 * to the true pitch its instrument sounded them at.
+	 */
+	@Test
+	void mergingIntoASplitAddsEveryVoiceAndKeepsHowTheNotesSounded() {
+		ComposerProject song = songOf(
+			new Layer("Keys", "HARP", false, true, true, List.of(note(60, 0L)),
+				ComposerProject.Split.melodic()),
+			new Layer("Bass", "DIDGERIDOO", false, true, true, List.of(note(60, 480L))),
+			new Layer("Snare", "SNARE", false, true, true, List.of(note(60, 960L)))
+				.withMix(List.of(ComposerProject.Split.Voice.fullRange("SNARE"),
+					ComposerProject.Split.Voice.fullRange("HAT"))));
+
+		Layer merged = song.mergeLayers(Set.of(0, 1, 2)).layers().getFirst();
+
+		assertEquals(List.of("BASS", "DIDGERIDOO", "GUITAR", "HARP", "SNARE", "FLUTE", "BELL",
+			"HAT"), voiceNames(merged), "the melodic split wins, and every voice joins it");
+		assertEquals(List.of(60, 36, 61), pitches(merged),
+			"the didgeridoo's 60 sounded as 36; the snare's pitch value 6 is 61 in its bracket");
+	}
+
 	/**
 	 * A block of layers arrives together and in its own order, however scattered it started.
 	 *

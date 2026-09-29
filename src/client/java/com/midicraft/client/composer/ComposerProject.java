@@ -1092,9 +1092,13 @@ public record ComposerProject(
 		/**
 		 * Every tick a note strikes again, in order, from {@code from} to {@code to} inclusive.
 		 *
-		 * <p>The first is the first grid line at least one step after the note starts, and the last
+		 * <p>The first is the first grid line at least half a step after the note starts, and the last
 		 * falls before the note ends, never on it. The note's own start is not one of them: that
-		 * strike is the note.</p>
+		 * strike is the note. Half a step rather than a whole one, because the grid is the song's and
+		 * not the note's: a note starting a game tick past a line used to skip the next one for being
+		 * a tick short of a full step, and its first gap came out nearly twice the rest. Half keeps the
+		 * first gap within half a step of the others and still never strikes right on top of the
+		 * note.</p>
 		 *
 		 * <p>With a {@code grid}, each strike then moves to the nearest line of it -- the build's own
 		 * ticks, counted from the same origin -- so a note value the tempo does not divide still
@@ -1107,7 +1111,7 @@ public record ComposerProject(
 			}
 			long start = note.startTick();
 			long end = start + note.durationTicks();
-			long first = (long)Math.ceil((start + step - origin) / step - 1.0e-9);
+			long first = (long)Math.ceil((start + step / 2.0 - origin) / step - 1.0e-9);
 			// Floored, and the tick itself checked: a line just under from can round onto it. A grid
 			// can move a strike back by half its line, so the window opens that much earlier.
 			long window = (long)Math.floor((from - grid - origin) / step);
@@ -1564,8 +1568,20 @@ public record ComposerProject(
 	}
 
 	/**
-	 * Folds every selected layer into the lowest-numbered one, which keeps its name, instrument and
-	 * flags. Notes are re-sorted by the layer constructor, so overlapping material interleaves.
+	 * Folds every selected layer into the lowest-numbered one, which keeps its name and flags. Notes
+	 * are re-sorted by the layer constructor, so overlapping material interleaves.
+	 *
+	 * <p>The voices are a union, not the first layer's: every instrument any of the layers sounds
+	 * sounds on the result, at the largest count it had and over the widest bracket. Ordinary layers
+	 * alone come out as one ordinary layer stacking all their instruments. Once any of them is a
+	 * split -- melodic, drums or effects -- the result is a split, the most general of the three,
+	 * and the ordinary layers' instruments join it as full-register voices.</p>
+	 *
+	 * <p>Joining a split is where an ordinary layer's notes change meaning: written in the harp
+	 * window, they become true pitch. So they move by their instrument's register first -- nothing
+	 * for the harp tier, two octaves down for a bass -- and land on the bracket that sounds them as
+	 * they sounded. The drums' registers are virtual but the same arithmetic holds, so a snare keeps
+	 * the pitch value that picked its sound.</p>
 	 */
 	public ComposerProject mergeLayers(Set<Integer> layerIndices) {
 		if (layerIndices == null || layerIndices.size() < 2) {
@@ -1580,10 +1596,31 @@ public record ComposerProject(
 			return this;
 		}
 		int target = sorted.getFirst();
+		boolean anySplit = sorted.stream().anyMatch(index -> layers.get(index).split() != null);
 		List<NoteEvent> merged = new ArrayList<>();
+		Map<String, Split.Voice> voices = new LinkedHashMap<>();
 		for (int index : sorted) {
-			merged.addAll(layers.get(index).notes());
+			Layer layer = layers.get(index);
+			boolean joiningSplit = anySplit && layer.split() == null;
+			int shift = joiningSplit && layer.pitched()
+				? InstrumentRanges.baseMidi(layer.instrument()) - NOTE_BLOCK_BASE_MIDI_NOTE
+				: 0;
+			for (NoteEvent note : layer.notes()) {
+				merged.add(shift == 0 ? note : note.movedTo(note.startTick(),
+					Math.max(0, Math.min(127, note.midiNote() + shift))));
+			}
+			for (Split.Voice voice : layer.sounding()) {
+				Split.Voice incoming = joiningSplit
+					? Split.Voice.fullRange(voice.instrument()).withCount(voice.count())
+					: voice;
+				voices.merge(voice.instrument(), incoming, (had, added) -> new Split.Voice(
+					had.instrument(), Math.min(had.lo(), added.lo()), Math.max(had.hi(), added.hi()),
+					Math.max(had.count(), added.count())));
+			}
 		}
+		Layer into = layers.get(target);
+		List<Split.Voice> union = List.copyOf(voices.values());
+		into = anySplit ? into.withSplit(new Split(union)) : into.withMix(union);
 		List<Layer> updated = new ArrayList<>();
 		int mergedIndex = 0;
 		for (int index = 0; index < layers.size(); index++) {
@@ -1591,7 +1628,7 @@ public record ComposerProject(
 				mergedIndex = updated.size();
 				// Two layers playing the same note merge into one note, not a stack: merging is
 				// asking for one part, and the stack would only ever have played once anyway.
-				updated.add(layers.get(index).withNotes(merged).withStacksMerged());
+				updated.add(into.withNotes(merged).withStacksMerged());
 			} else if (!sorted.contains(index)) {
 				updated.add(layers.get(index));
 			}
