@@ -37,7 +37,17 @@ public record ComposerProject(
 	 * in a build that only knows quarters, merely rounded to the nearest one it can express.
 	 */
 	int speedEighths,
-	List<Marker> markers
+	List<Marker> markers,
+	/**
+	 * Whether a note sounding exactly like another on the same tick is built once: false where this
+	 * song says not, null where it has never said, which is on.
+	 *
+	 * <p>The song's own because it is a fact about the arrangement. It used to be one switch for
+	 * every song, so turning it off for the one that doubles its parts on purpose quietly turned it
+	 * off for the one that only fits the chord limit with it on. Only false is stored, so a song
+	 * that keeps the default saves exactly as it did before there was anything to store.</p>
+	 */
+	Boolean dedupeIdenticalNotes
 ) {
 	public static final int DEFAULT_PPQ = 480;
 	public static final int DEFAULT_TEMPO_MICROS_PER_QUARTER = 500_000;
@@ -97,11 +107,30 @@ public record ComposerProject(
 	public ComposerProject(String name, int ppq, int tempoMicrosPerQuarter, List<Layer> layers,
 			int activeLayerIndex, long nextNoteId, long endTick, int speedQuarters) {
 		this(name, ppq, tempoMicrosPerQuarter, layers, activeLayerIndex, nextNoteId, endTick,
-			speedQuarters, 0, List.of());
+			speedQuarters, 0, List.of(), null);
+	}
+
+	/** Everything but the merging choice, for the callers written before it was the song's. */
+	public ComposerProject(String name, int ppq, int tempoMicrosPerQuarter, List<Layer> layers,
+			int activeLayerIndex, long nextNoteId, long endTick, int speedQuarters, int speedEighths,
+			List<Marker> markers) {
+		this(name, ppq, tempoMicrosPerQuarter, layers, activeLayerIndex, nextNoteId, endTick,
+			speedQuarters, speedEighths, markers, null);
+	}
+
+	/** Whether this song builds a note that sounds exactly like another on its tick once. */
+	public boolean dedupesIdentical() {
+		return dedupeIdenticalNotes == null || dedupeIdenticalNotes;
+	}
+
+	public ComposerProject withDedupeIdenticalNotes(boolean value) {
+		return new ComposerProject(name, ppq, tempoMicrosPerQuarter, layers, activeLayerIndex,
+			nextNoteId, endTick, speedQuarters, speedEighths, markers, value);
 	}
 
 	public ComposerProject {
 		name = name == null || name.isBlank() ? "Untitled sequence" : name.trim();
+		dedupeIdenticalNotes = Boolean.FALSE.equals(dedupeIdenticalNotes) ? Boolean.FALSE : null;
 		ppq = Math.max(1, ppq);
 		tempoMicrosPerQuarter = Math.max(1, tempoMicrosPerQuarter);
 		layers = normalizeLayers(layers);
@@ -164,7 +193,7 @@ public record ComposerProject(
 	 */
 	private ComposerProject with(List<Layer> updatedLayers, int active, long nextId) {
 		return new ComposerProject(name, ppq, tempoMicrosPerQuarter, updatedLayers, active, nextId,
-			endTick, speedQuarters, speedEighths, markers);
+			endTick, speedQuarters, speedEighths, markers, dedupeIdenticalNotes);
 	}
 
 	/**
@@ -244,7 +273,7 @@ public record ComposerProject(
 
 	public ComposerProject withMarkers(List<Marker> value) {
 		return new ComposerProject(name, ppq, tempoMicrosPerQuarter, layers, activeLayerIndex,
-			nextNoteId, endTick, speedQuarters, speedEighths, value);
+			nextNoteId, endTick, speedQuarters, speedEighths, value, dedupeIdenticalNotes);
 	}
 
 	public record NoteEvent(long id, int midiNote, long startTick, long durationTicks, int velocity,
@@ -2288,7 +2317,7 @@ public record ComposerProject(
 
 	public ComposerProject withTempo(int value) {
 		return new ComposerProject(name, ppq, value, layers, activeLayerIndex, nextNoteId,
-			endTick, speedQuarters, speedEighths, markers);
+			endTick, speedQuarters, speedEighths, markers, dedupeIdenticalNotes);
 	}
 
 	/**
@@ -2314,7 +2343,7 @@ public record ComposerProject(
 
 	public ComposerProject withName(String value) {
 		return new ComposerProject(value, ppq, tempoMicrosPerQuarter, layers, activeLayerIndex, nextNoteId,
-			endTick, speedQuarters, speedEighths, markers);
+			endTick, speedQuarters, speedEighths, markers, dedupeIdenticalNotes);
 	}
 
 	public MinecraftConversion convertToMinecraft(int quantizeTicks, boolean snapTempo) {
@@ -2637,7 +2666,7 @@ public record ComposerProject(
 		// a 1/8, grid set to 1/16, tempo doubled, song halved. Asking the notes cannot do that,
 		// because after quantizing their spacing is always a whole number of grid steps.
 		ComposerProject shaped = new ComposerProject(name, ppq, tempoMicrosPerQuarter, convertedLayers,
-			convertedActiveLayer, nextNoteId, endTick, speedQuarters, speedEighths, markers);
+			convertedActiveLayer, nextNoteId, endTick, speedQuarters, speedEighths, markers, dedupeIdenticalNotes);
 		NoteSpacing spacing = shaped.noteSpacing();
 		int convertedTempo = snapTempo && spacing.gridTicks() > 0L
 			? shaped.alignedTempoFor(
@@ -2672,7 +2701,8 @@ public record ComposerProject(
 			speedEighths,
 			// Left on the ticks they were written on, because the notes are: quantizing moves a note
 			// within the tick space rather than rescaling it, so a marker still names the same bar.
-			markers
+			markers,
+			dedupeIdenticalNotes
 		);
 		return new MinecraftConversion(
 			converted,
@@ -3051,7 +3081,7 @@ public record ComposerProject(
 			.map(marker -> marker.movedTo(Math.max(0L, marker.tick() - earliest)))
 			.toList();
 		return new ComposerProject(name, ppq, tempoMicrosPerQuarter, updated, activeLayerIndex,
-			nextNoteId, Math.max(1L, endTick - earliest), speedQuarters, speedEighths, pulled);
+			nextNoteId, Math.max(1L, endTick - earliest), speedQuarters, speedEighths, pulled, dedupeIdenticalNotes);
 	}
 
 	/** Where the notes actually stop, ignoring any trailing silence the marker adds. */
@@ -3071,7 +3101,7 @@ public record ComposerProject(
 	/** Moves the end marker. Values before the last note are pulled forward to it. */
 	public ComposerProject withEndTick(long value) {
 		return new ComposerProject(name, ppq, tempoMicrosPerQuarter, layers, activeLayerIndex,
-			nextNoteId, Math.max(0L, value), speedQuarters, speedEighths, markers);
+			nextNoteId, Math.max(0L, value), speedQuarters, speedEighths, markers, dedupeIdenticalNotes);
 	}
 
 	/** Kept for callers that speak in quarters; a quarter is two eighths. */
@@ -3081,7 +3111,7 @@ public record ComposerProject(
 
 	public ComposerProject withSpeedEighths(int value) {
 		return new ComposerProject(name, ppq, tempoMicrosPerQuarter, layers, activeLayerIndex,
-			nextNoteId, endTick, 0, value, markers);
+			nextNoteId, endTick, 0, value, markers, dedupeIdenticalNotes);
 	}
 
 	/**

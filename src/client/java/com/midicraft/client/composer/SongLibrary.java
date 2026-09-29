@@ -96,7 +96,7 @@ public final class SongLibrary {
 				library.songs.put(id, new ComposerProject(song.name(), song.ppq(),
 					song.tempoMicrosPerQuarter(), song.layers(), song.activeLayerIndex(),
 					song.nextNoteId(), song.endTick(), song.speedQuarters(), song.speedEighths(),
-					song.markers()));
+					song.markers(), song.dedupeIdenticalNotes()));
 			} catch (Exception unreadableSong) {
 				library.failures.add(id);
 			}

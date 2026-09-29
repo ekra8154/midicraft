@@ -357,7 +357,6 @@ public final class MidicraftConfig {
 	private boolean selectInstruments;
 	private ChordPlaceOrder chordPlaceOrder;
 	private boolean selectHarpBlocks;
-	private boolean dedupeIdenticalNotes;
 	private String activeSequenceName;
 	private int activeSequenceDelayScaleQuarters;
 	private int composerSpeedQuarters;
@@ -504,7 +503,6 @@ public final class MidicraftConfig {
 					? ChordPlaceOrder.TWO_STRIPS
 					: stored.chordPlaceOrder;
 				instance.selectHarpBlocks = stored.selectHarpBlocks == null || stored.selectHarpBlocks;
-				instance.dedupeIdenticalNotes = stored.dedupeIdenticalNotes == null || stored.dedupeIdenticalNotes;
 				instance.activeSequenceName = stored.activeSequenceName == null || stored.activeSequenceName.isBlank()
 					? "Untitled sequence"
 					: stored.activeSequenceName;
@@ -949,24 +947,6 @@ public final class MidicraftConfig {
 		return autoSelectSequenceBlock;
 	}
 
-	/**
-	 * Whether the build plays a sound once when two layers ask for it at the same instant.
-	 *
-	 * <p>On by default. Preview has always collapsed these, so a duplicate is something you cannot
-	 * hear while composing but still pay for in blocks and in the thirty notes a tick can carry.
-	 * It is a setting rather than an edit because the layers only agree for now -- change one of
-	 * their instruments and they are two different sounds again, and a delete would have been
-	 * unrecoverable.</p>
-	 */
-	public boolean dedupeIdenticalNotes() {
-		return dedupeIdenticalNotes;
-	}
-
-	public void setDedupeIdenticalNotes(boolean dedupeIdenticalNotes) {
-		this.dedupeIdenticalNotes = dedupeIdenticalNotes;
-		cachedSequence = null;
-	}
-
 	public void setAutoSelectSequenceBlock(boolean autoSelectSequenceBlock) {
 		this.autoSelectSequenceBlock = autoSelectSequenceBlock;
 	}
@@ -1058,7 +1038,8 @@ public final class MidicraftConfig {
 		ComposerProject project = composerProject();
 		if (cachedSequenceProject != project || cachedSequence == null) {
 			cachedSequenceProject = project;
-			cachedSequence = project.toSequenceTracks(java.util.Set.of(), dedupeIdenticalNotes, chordFitRules());
+			cachedSequence = project.toSequenceTracks(java.util.Set.of(), project.dedupesIdentical(),
+				chordFitRules());
 		}
 		return cachedSequence;
 	}
@@ -1654,7 +1635,6 @@ public final class MidicraftConfig {
 		config.placementSequenceEnabled = false;
 		config.sequencingEditProtection = SequencingEditProtection.RADIALS_AND_INTERACTIONS;
 		config.autoSelectSequenceBlock = true;
-		config.dedupeIdenticalNotes = true;
 		config.activeSequenceName = "Untitled sequence";
 		config.activeSequenceDelayScaleQuarters = DEFAULT_SEQUENCE_DELAY_SCALE_QUARTERS;
 		config.previewInstrument = "HARP";
@@ -1857,7 +1837,6 @@ public final class MidicraftConfig {
 		private Boolean selectInstruments;
 		private ChordPlaceOrder chordPlaceOrder;
 		private Boolean selectHarpBlocks;
-		private Boolean dedupeIdenticalNotes;
 		private String placementSequence;
 		private Integer placementSequencePosition;
 		private Map<String, Integer> placementCursors;
@@ -1938,7 +1917,6 @@ public final class MidicraftConfig {
 			this.selectInstruments = config.selectInstruments;
 			this.chordPlaceOrder = config.chordPlaceOrder;
 			this.selectHarpBlocks = config.selectHarpBlocks;
-			this.dedupeIdenticalNotes = config.dedupeIdenticalNotes;
 			this.placementSequence = config.activeTrack().sequence();
 			this.placementSequencePosition = config.placementCursor;
 			this.placementCursors = new LinkedHashMap<>(config.placementCursors);

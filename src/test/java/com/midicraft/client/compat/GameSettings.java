@@ -37,7 +37,6 @@ final class GameSettings {
 
 	/** The keys the paste reads, typed as the game stores them, so a missing one reads null. */
 	private static final class Stored {
-		Boolean dedupeIdenticalNotes;
 		Integer chordThinTarget;
 		Boolean thinChordsByVolume;
 		Boolean thinChordsByStrikes;
@@ -55,13 +54,15 @@ final class GameSettings {
 	}
 
 	/**
-	 * @param dedupe {@code dedupeIdenticalNotes}
+	 * Merging duplicate notes is not here: it is the song's own choice now, read off each song as
+	 * the Paste button reads it -- see {@link ComposerProject#dedupesIdentical()}.
+	 *
 	 * @param thinning {@code chordFitRules()}: the target with both kinds of thinning as set
 	 * @param debugPaste {@code colorCodedPaste} at {@code NORMAL}, which is
 	 *     {@code SongBuilder.DEBUG_PASTE} in the game: a collision is recorded rather than thrown, and
 	 *     the walk that follows differs. The light show changes no walk and reads as false.
 	 */
-	record Values(boolean dedupe, ChordSkips.Rules thinning, int maxBuildFloors, int reseedDelay,
+	record Values(ChordSkips.Rules thinning, int maxBuildFloors, int reseedDelay,
 			boolean startTop, boolean debugPaste, int laneWidth, int laneFloors, String pasteMode) {
 
 		SongBuilder.BuildLimits limits(int width, int floors) {
@@ -74,10 +75,11 @@ final class GameSettings {
 		}
 
 		/**
-		 * The notes the Paste button would build from: {@code notesFor} with the config's dedupe
-		 * and thinning, the sequence made the way {@code MidicraftConfig.tracks()} makes it.
+		 * The notes the Paste button would build from: {@code notesFor} with the song's merging and
+		 * the config's thinning, the sequence made the way {@code MidicraftConfig.tracks()} makes it.
 		 */
 		List<SongBuilder.EventNote> notes(ComposerProject project, SongBuilder.PasteMode mode) {
+			boolean dedupe = project.dedupesIdentical();
 			return SongBuilder.notesFor(mode, project.toSequenceTracks(Set.of(), dedupe, thinning),
 				project, dedupe, thinning);
 		}
@@ -85,7 +87,7 @@ final class GameSettings {
 		/** For a heading, so a run says what it built with. */
 		String said() {
 			return "[game: thin " + thinning.target() + (thinning.volume() ? " volume" : "")
-				+ (thinning.strikes() ? " strikes" : "") + ", dedupe " + dedupe + ", reseed "
+				+ (thinning.strikes() ? " strikes" : "") + ", dedupe per song, reseed "
 				+ reseedDelay + ", debugPaste " + debugPaste + ", maxFloors " + maxBuildFloors
 				+ ", lanes start " + (startTop ? "top" : "bottom") + "]";
 		}
@@ -117,7 +119,7 @@ final class GameSettings {
 		if (startTop == read.startTop() && debugPaste == read.debugPaste()) {
 			return read;
 		}
-		return new Values(read.dedupe(), read.thinning(), read.maxBuildFloors(), read.reseedDelay(),
+		return new Values(read.thinning(), read.maxBuildFloors(), read.reseedDelay(),
 			startTop, debugPaste, read.laneWidth(), read.laneFloors(), read.pasteMode());
 	}
 
@@ -148,7 +150,6 @@ final class GameSettings {
 		boolean volume = stored.thinChordsByVolume == null || stored.thinChordsByVolume;
 		boolean strikes = stored.thinChordsByStrikes == null || stored.thinChordsByStrikes;
 		return new Values(
-			stored.dedupeIdenticalNotes == null || stored.dedupeIdenticalNotes,
 			new ChordSkips.Rules(target, volume, strikes),
 			clamp(stored.maxBuildFloors == null
 					? MidicraftConfig.DEFAULT_MAX_BUILD_FLOORS : stored.maxBuildFloors,
@@ -184,7 +185,7 @@ final class GameSettings {
 			}
 			return new ComposerProject(song.name(), song.ppq(), song.tempoMicrosPerQuarter(),
 				song.layers(), song.activeLayerIndex(), song.nextNoteId(), song.endTick(),
-				song.speedQuarters(), song.speedEighths(), song.markers());
+				song.speedQuarters(), song.speedEighths(), song.markers(), song.dedupeIdenticalNotes());
 		}
 	}
 }

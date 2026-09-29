@@ -1862,7 +1862,7 @@ public final class ComposerScreen extends Screen {
 		ComposerProject merged = config.repeatMergeTicks() > 0
 			? source.withMergedRepeats(config.repeatMergeTicks(), Set.of())
 			: source;
-		SongAnalysis stats = SongAnalysis.of(merged, config.dedupeIdenticalNotes(), gameTicks);
+		SongAnalysis stats = SongAnalysis.of(merged, merged.dedupesIdentical(), gameTicks);
 		// Held to the grid this button is about to use, which is not the one the status bar
 		// reports. SongAnalysis measures off-grid in GAME ticks always -- halfTicksAvailable
 		// changes what it says about lanes, not what it calls off grid -- so a song with odd gaps
@@ -2181,7 +2181,7 @@ public final class ComposerScreen extends Screen {
 					Path folder = Path.of(config.importDirectory());
 					Files.createDirectories(folder);
 					NbsExporter.Result written = NbsExporter.export(project(),
-						folder.resolve(safeFileName(wanted) + ".nbs"), config.dedupeIdenticalNotes(),
+						folder.resolve(safeFileName(wanted) + ".nbs"), project().dedupesIdentical(),
 						config.chordFitRules());
 					showResult(Component.literal("Exported to " + written.path()
 						+ " - " + written.report()));
@@ -2972,14 +2972,17 @@ public final class ComposerScreen extends Screen {
 			case PASTE_IN_WORLD -> pasteInWorld();
 			case BUILD_CANCEL -> CommandPasteSender.cancel(true);
 			case TOGGLE_DEDUPE -> {
-				config.setDedupeIdenticalNotes(!config.dedupeIdenticalNotes());
-				MidicraftConfig.save();
+				// The song's own choice, so it is an edit to the song: undoable, and saved with it.
+				boolean merging = !project().dedupesIdentical();
+				apply(merging ? "merge duplicate notes" : "stop merging duplicate notes",
+					project().withDedupeIdenticalNotes(merging));
 				if (playing) {
 					resetPlaybackSchedule();
 				}
-				showResult(Component.literal(config.dedupeIdenticalNotes()
-					? "Duplicate notes merged: each is built once. Counted notes still build every copy."
-					: "Duplicate notes no longer merged: every copy is built."));
+				showResult(Component.literal(merging
+					? "Duplicate notes merged in this song: each is built once. Counted notes still "
+						+ "build every copy."
+					: "Duplicate notes no longer merged in this song: every copy is built."));
 			}
 			case TOGGLE_NOTE_TRAILS -> {
 				config.setShowNoteTrails(!config.showNoteTrails());
@@ -3353,7 +3356,7 @@ public final class ComposerScreen extends Screen {
 			}
 		}
 		ChordThinner.Result thinned =
-			ChordThinner.thin(project(), config.chordFitRules(), config.dedupeIdenticalNotes(), scope);
+			ChordThinner.thin(project(), config.chordFitRules(), project().dedupesIdentical(), scope);
 		selectedNotes.clear();
 		selectedNotes.addAll(thinned.noteIds());
 		clearRange();
@@ -3496,7 +3499,7 @@ public final class ComposerScreen extends Screen {
 				+ "of those layers a different instrument and both notes come back. Counted notes "
 				+ "are never merged: an instrument given a count in the palette, like harp x3, "
 				+ "always builds every copy, because the count is how you ask for a louder note. "
-				+ "Song info shows how many notes this merged.";
+				+ "Song info shows how many notes this merged. Set per song, and saved with it.";
 			case TOGGLE_NOTE_TRAILS -> "Draws how long each note lasts as a dark trail behind it. "
 				+ "A trail changes nothing in the build: a note block is struck once. Drag a "
 				+ "trail's end to change a note's length. Hidden, a note's right edge still does.";
@@ -3667,7 +3670,7 @@ public final class ComposerScreen extends Screen {
 			return step == null ? action.label : action.label + " " + clipped(step, 16);
 		}
 		if (action == ToolbarAction.TOGGLE_DEDUPE) {
-			return action.label + ": " + (config.dedupeIdenticalNotes() ? "On" : "Off");
+			return action.label + ": " + (project().dedupesIdentical() ? "On" : "Off");
 		}
 		if (action == ToolbarAction.TOGGLE_NOTE_TRAILS) {
 			return action.label + ": " + (config.showNoteTrails() ? "On" : "Off");
@@ -6367,7 +6370,7 @@ public final class ComposerScreen extends Screen {
 		// same sound at the same instant count once is a setting that lives in another screen
 		// entirely, and it silently re-judges every song -- so the number says which rule made it.
 		segments.add("peak " + peakChord + "/" + SongAnalysis.MAX_SIMULTANEOUS_NOTES
-			+ (config.dedupeIdenticalNotes() ? " merged" : " unmerged")
+			+ (project().dedupesIdentical() ? " merged" : " unmerged")
 			+ (overloaded > 0 ? " (" + overloaded + " over)" : ""));
 		// What fitting the chords to the thinning preference cost, beside the peak it produced.
 		ChordSkips thinning = stats.skips();
@@ -6507,12 +6510,12 @@ public final class ComposerScreen extends Screen {
 		// The speed is part of the project, so identity covers everything the composition decides.
 		// Deduplication is a setting rather than part of the song, so it has to be checked too.
 		if (cachedStatsProject == current && cachedStats != null
-				&& cachedStatsDedupe == config.dedupeIdenticalNotes()
+				&& cachedStatsDedupe == project().dedupesIdentical()
 				&& config.chordFitRules().equals(cachedStatsRules)) {
 			return cachedStats;
 		}
 		cachedStatsProject = current;
-		cachedStatsDedupe = config.dedupeIdenticalNotes();
+		cachedStatsDedupe = project().dedupesIdentical();
 		cachedStatsRules = config.chordFitRules();
 		cachedStats = SongAnalysis.of(current, cachedStatsDedupe, true, cachedStatsRules);
 		return cachedStats;
@@ -6533,11 +6536,11 @@ public final class ComposerScreen extends Screen {
 	private Map<Long, Integer> parityTicks() {
 		ComposerProject current = project();
 		if (cachedParityProject == current && cachedParityTicks != null
-				&& cachedParityDedupe == config.dedupeIdenticalNotes()) {
+				&& cachedParityDedupe == project().dedupesIdentical()) {
 			return cachedParityTicks;
 		}
 		cachedParityProject = current;
-		cachedParityDedupe = config.dedupeIdenticalNotes();
+		cachedParityDedupe = project().dedupesIdentical();
 		cachedParityTicks = SongBuilder.buildGameTickByNoteId(current, cachedParityDedupe);
 		cachedParityCounts = new int[2];
 		for (int time : cachedParityTicks.values()) {
@@ -9374,7 +9377,7 @@ public final class ComposerScreen extends Screen {
 		// which was fine while it was the only behaviour -- but with the setting off the point is to
 		// hear a doubled note as louder, and a preview that quietly played it once would be
 		// describing a different machine from the one about to be pasted.
-		if (!config.dedupeIdenticalNotes()) {
+		if (!project().dedupesIdentical()) {
 			playbackEvents = List.copyOf(events);
 			playbackEventIndex = 0;
 			return;
@@ -9702,11 +9705,11 @@ public final class ComposerScreen extends Screen {
 				+ "confirm this paste, which stops it and starts the new one."));
 		}
 		minecraft.gui.setScreen(new BuildOptionsScreen(this, project().name(), config.tracks(),
-				project(), config.dedupeIdenticalNotes(), pasteMode(), mode -> {
+				project(), project().dedupesIdentical(), pasteMode(), mode -> {
 			SongBuilder.PastePlan plan;
 			try {
 				plan = SongBuilder.plan(minecraft, config.tracks(), mode, project(),
-					config.dedupeIdenticalNotes(), config.chordFitRules());
+					project().dedupesIdentical(), config.chordFitRules());
 			} catch (IllegalArgumentException refused) {
 				minecraft.gui.setScreen(this);
 				showResult(Component.literal(refused.getMessage())
@@ -10536,7 +10539,7 @@ public final class ComposerScreen extends Screen {
 		// with each gap rounded the way the build rounds it. The end marker's trailing silence is
 		// not in it, since nothing sounds there.
 		int gameTicks = SongBuilder.gameTicksFromPress(SongBuilder.gameTickEventNotes(project(),
-			config.dedupeIdenticalNotes(), config.chordFitRules()));
+			project().dedupesIdentical(), config.chordFitRules()));
 		lines.add(SongInfoScreen.Line.of("Duration from button press", gameTicks < 0 ? "-"
 			: String.format(java.util.Locale.ROOT, "%d:%02d", gameTicks / 20 / 60,
 					gameTicks / 20 % 60)));
@@ -10583,7 +10586,7 @@ public final class ComposerScreen extends Screen {
 		// with one half at nought reads as that half alone, and one with both at nought is left off.
 		adjustmentPair(lines, "Added", "sustained notes", strikes, "composite", composite);
 		lines.add(SongInfoScreen.Line.adjustment("Merged as duplicates", merged > 0 ? "-" + merged
-			: config.dedupeIdenticalNotes() ? "0" : "off"));
+			: project().dedupesIdentical() ? "0" : "off"));
 		adjustmentPair(lines, "Thinning", "fewer copies", -thinnedCopies,
 			"strikes skipped", -thinnedStrikes);
 		// Out of range can only take notes away. A remainder that adds some is something none of

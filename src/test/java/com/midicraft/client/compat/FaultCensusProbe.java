@@ -309,7 +309,7 @@ class FaultCensusProbe {
 			// from the composition in game ticks, and handed sequence events it builds a different
 			// song than the paste would -- at the wrong speed, with the two tick parities scrambled.
 			// Asking eventNotes directly is how a probe answers for a machine nobody can paste.
-			int lanes = SongAnalysis.of(song, game.dedupe(), true, game.thinning()).lanesNeeded();
+			int lanes = SongAnalysis.of(song, song.dedupesIdentical(), true, game.thinning()).lanesNeeded();
 			if (wantLanes != 0 && lanes != wantLanes) {
 				continue;
 			}
