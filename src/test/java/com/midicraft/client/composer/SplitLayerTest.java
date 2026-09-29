@@ -143,6 +143,44 @@ class SplitLayerTest {
 			"and a harp layer gets exactly what it always got");
 	}
 
+	/**
+	 * A split layer is known by the instrument it had while that is still one of its voices, and by
+	 * the voice nearest the middle of the keyboard once the palette has taken it off.
+	 */
+	@Test
+	void aSplitLayersMainInstrumentIsItsOwnWhileItStillPlays() {
+		Layer copper = new Layer("Lead", "TRUMPET", false, true, true, List.of());
+		Layer melodic = copper.withSplit(Split.melodicKeeping(copper.sounding()));
+		assertEquals("TRUMPET", melodic.mainInstrument(), "copper is still on the middle tier");
+
+		Layer swapped = melodic.withSplit(Split.melodic());
+		assertEquals("HARP", swapped.mainInstrument(),
+			"with copper gone, the middle tier's voice is the one the layer is known by");
+
+		Layer low = copper.withSplit(new Split(List.of(Split.Voice.fullRange("BASS"),
+			Split.Voice.fullRange("GUITAR"))));
+		assertEquals("GUITAR", low.mainInstrument(), "and with no middle tier, the one nearest it");
+		assertEquals("TRUMPET", copper.mainInstrument(), "an ordinary layer is its instrument");
+	}
+
+	/** Dropping the star on another instrument the layer plays makes it the main one, sound unchanged. */
+	@Test
+	void theMainInstrumentCanBeMovedToAnythingPlaying() {
+		Layer melodic = new Layer("Lead", "HARP", false, true, true, List.of())
+			.withSplit(Split.melodic());
+		Layer bell = melodic.withMainInstrument("BELL");
+		assertEquals("BELL", bell.mainInstrument());
+		assertEquals(melodic.split(), bell.split(), "the voices are exactly what they were");
+		assertEquals(melodic, melodic.withMainInstrument("PLING"), "pling is not playing here");
+
+		Layer stacked = new Layer("Lead", "HARP", false, true, true, List.of())
+			.withMix(List.of(Split.Voice.fullRange("HARP"), Split.Voice.fullRange("FLUTE").withCount(2)));
+		Layer flute = stacked.withMainInstrument("FLUTE");
+		assertEquals("FLUTE", flute.mainInstrument());
+		assertEquals(2, flute.countOf("FLUTE"), "a stacked layer keeps its counts");
+		assertEquals(1, flute.countOf("HARP"));
+	}
+
 	/** Covered notes are in range wherever they sit; uncovered ones are out wherever they sit. */
 	@Test
 	void rangeIsTheBracketsNotTheHarpWindow() {

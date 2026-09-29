@@ -453,6 +453,13 @@ public final class ComposerScreen extends Screen {
 
 	/** How long a key stays lit after it sounds, which is about how long a note block rings for. */
 	private static final long KEY_LIGHT_MILLIS = 260L;
+	/**
+	 * How long a layer's colour stripe glows after one of its notes sounds in preview. Shorter than a
+	 * key's light, so a busy part flickers along with its rhythm rather than holding one glow.
+	 */
+	private static final long LAYER_FLASH_MILLIS = 180L;
+	/** How far toward white a stripe goes at the moment its note sounds: a flash, not a flare. */
+	private static final double LAYER_FLASH_STRENGTH = 0.8;
 	private static final long TOOLTIP_DWELL_MILLIS = 260L;
 	private static final long SCALE_COALESCE_MILLIS = 400L;
 	private static final long TOAST_MILLIS = 4500L;
@@ -615,6 +622,8 @@ public final class ComposerScreen extends Screen {
 	 */
 	private final long[] keyLitAt = new long[MAX_MIDI_NOTE + 1];
 	private final int[] keyLitColor = new int[MAX_MIDI_NOTE + 1];
+	/** When each layer last sounded a note in preview, the same kind of light as {@link #keyLitAt}. */
+	private final long[] layerLitAt = new long[ComposerProject.MAX_LAYERS];
 	private boolean draggingPlayhead;
 	/**
 	 * Layers being listened to alone.
@@ -768,6 +777,13 @@ public final class ComposerScreen extends Screen {
 	private double lastMouseX;
 	private double lastMouseY;
 	private int instrumentMenuLayer = -1;
+	/** The palette's main-instrument star while it is being carried to another tile. */
+	private boolean draggingMainStar;
+	/** The star's corner of a tile: this many pixels square, from the tile's top left. */
+	private static final int MAIN_STAR_GRAB = 8;
+	private static final int MAIN_STAR_COLOR = 0xFFFFD65A;
+	/** The star as pixels, row by row: five across, five down. */
+	private static final String[] MAIN_STAR_PIXELS = {"..#..", ".###.", "#####", ".###.", "#...#"};
 	/** Which of the palette's two tabs is showing. Follows the layer's own voice when it opens. */
 	private boolean instrumentMenuEffects;
 	private int editingLayer = -1;
@@ -3722,6 +3738,7 @@ public final class ComposerScreen extends Screen {
 		graphics.fill(menu.left(), menu.top(), menu.right(), menu.top() + 1, 0xFFAAAAAA);
 		extractInstrumentTabs(graphics, menu, mouseX, mouseY);
 		Layer menuLayer = project().layers().get(instrumentMenuLayer);
+		String mainId = menuLayer.mainInstrument();
 		List<PreviewInstrument> palette = instrumentMenuPalette();
 		PaletteHit hover = paletteHit(mouseX, mouseY);
 		int tile = PALETTE_CELL - 2;
@@ -3741,14 +3758,36 @@ public final class ComposerScreen extends Screen {
 				extractCountStrip(graphics, cellX, cellY, count, menuLayer.restingCountOf(value.id()),
 					hovered ? hover.part() : PalettePart.BODY);
 			}
-			if (hovered && hover.part() == PalettePart.BODY) {
+			boolean main = value.id().equals(mainId);
+			if (draggingMainStar && hovered && count > 0 && !main) {
+				// Where the star would land: an outline round a tile that can take it.
+				graphics.fill(cellX, cellY, cellX + tile, cellY + 1, MAIN_STAR_COLOR);
+				graphics.fill(cellX, cellY + tile - 1, cellX + tile, cellY + tile, MAIN_STAR_COLOR);
+				graphics.fill(cellX, cellY, cellX + 1, cellY + tile, MAIN_STAR_COLOR);
+				graphics.fill(cellX + tile - 1, cellY, cellX + tile, cellY + tile, MAIN_STAR_COLOR);
+			}
+			if (main && !draggingMainStar) {
+				extractMainStar(graphics, cellX + 1, cellY + 1);
+			}
+			if (hovered && hover.part() == PalettePart.BODY && !draggingMainStar) {
+				boolean onStar = main && overMainStar(mouseX, mouseY, cellX, cellY);
+				if (onStar) {
+					wantedCursorShape = GLFW.GLFW_POINTING_HAND_CURSOR;
+				}
 				// Effects carry how far they reach. The pitched half is every one of them 48, so
 				// saying so on twenty cells would be twenty copies of one fact.
 				String name = value.pitched() ? value.name() : value.label();
-				graphics.setTooltipForNextFrame(Component.literal(count > 1
-					? name + " ×" + count + ", " + count + " note blocks a note"
-					: name), mouseX, mouseY);
+				graphics.setTooltipForNextFrame(Component.literal(onStar
+					? "Main instrument: the layer's colour and icon. Drag the star to another lit "
+						+ "instrument to change it."
+					: count > 1
+						? name + " ×" + count + ", " + count + " note blocks a note"
+						: name), mouseX, mouseY);
 			}
+		}
+		if (draggingMainStar) {
+			wantedCursorShape = GLFW.GLFW_POINTING_HAND_CURSOR;
+			extractMainStar(graphics, mouseX - 2, mouseY - 2);
 		}
 		// Whose instrument is about to change. Picking one has always landed on the whole selection,
 		// and nothing on screen said so -- from a palette that looks like it belongs to the one row
@@ -3792,6 +3831,31 @@ public final class ComposerScreen extends Screen {
 			smallText(graphics, label, labelX, cellY + tile / 2 - 3,
 				count > 0 ? 0xFFFFFFFF : 0x88FFFFFF);
 		}
+	}
+
+	/**
+	 * The main-instrument star, five pixels across with a one-pixel shadow under it so it reads on a
+	 * lit tile and an unlit one alike.
+	 */
+	private void extractMainStar(GuiGraphicsExtractor graphics, int x, int y) {
+		for (int pass = 0; pass < 2; pass++) {
+			int offset = pass == 0 ? 1 : 0;
+			int color = pass == 0 ? 0xCC000000 : MAIN_STAR_COLOR;
+			for (int row = 0; row < MAIN_STAR_PIXELS.length; row++) {
+				for (int column = 0; column < MAIN_STAR_PIXELS[row].length(); column++) {
+					if (MAIN_STAR_PIXELS[row].charAt(column) == '#') {
+						graphics.fill(x + column + offset, y + row + offset, x + column + offset + 1,
+							y + row + offset + 1, color);
+					}
+				}
+			}
+		}
+	}
+
+	/** Whether a point is on the star's corner of the tile at {@code cellX, cellY}. */
+	private static boolean overMainStar(double mouseX, double mouseY, int cellX, int cellY) {
+		return mouseX >= cellX && mouseX < cellX + MAIN_STAR_GRAB
+			&& mouseY >= cellY && mouseY < cellY + MAIN_STAR_GRAB;
 	}
 
 	private static int paletteCellX(NoteRect menu, int index) {
@@ -3954,7 +4018,13 @@ public final class ComposerScreen extends Screen {
 			smallText(graphics, ordinal, left - 2 - smallTextWidth(ordinal), y + 5, 0xFF71767E);
 			// The colour stripe is how a layer is recognised once its name is gone, so it stays at
 			// every width -- narrowed to two pixels rather than dropped.
-			graphics.fill(left, y - 2, left + row.stripe(), y + rowHeight - 2, color);
+			// And it flashes toward white as the layer's notes sound in preview, so you can see which
+			// part is playing without finding it in the roll. Fades out on its own like a key does.
+			long flashFor = Util.getMillis() - layerLitAt[Math.min(index, layerLitAt.length - 1)];
+			int stripeColor = playing && flashFor >= 0L && flashFor < LAYER_FLASH_MILLIS
+				? mix(color, 0xFFFFFFFF, LAYER_FLASH_STRENGTH * (1.0 - flashFor / (double)LAYER_FLASH_MILLIS))
+				: color;
+			graphics.fill(left, y - 2, left + row.stripe(), y + rowHeight - 2, stripeColor);
 			if (activeLayer) {
 				graphics.fill(left + row.stripe(), y, right - 2, y + rowHeight - 4, 0x553D444D);
 			}
@@ -4210,19 +4280,26 @@ public final class ComposerScreen extends Screen {
 	/**
 	 * The instruments a layer's icon shows, front first, or empty for a split with no voices yet.
 	 *
-	 * <p>A split layer shows one per register, highest first, which is the first voice of each
-	 * bracket on the keyboard: the stack reads like the keyboard, high at the top. A layer sounding
-	 * several instruments at once shows each of them. Any other layer is its one instrument.</p>
+	 * <p>A split layer shows its main instrument in front, the one its colour comes from, and then
+	 * one per register, highest first, which is the first voice of each bracket on the keyboard:
+	 * the rest of the stack reads like the keyboard, high at the top. A layer sounding several
+	 * instruments at once shows each of them. Any other layer is its one instrument.</p>
 	 */
 	private List<String> layerIconInstruments(Layer layer) {
 		List<String> shown = new ArrayList<>();
 		if (layer.split() != null) {
+			if (!layer.split().voices().isEmpty()) {
+				shown.add(layer.mainInstrument());
+			}
 			List<BracketGroup> groups = new ArrayList<>(voiceBrackets(layer.split()));
 			groups.sort(Comparator.comparingInt((BracketGroup group) -> group.effects() ? 1 : 0)
 				.thenComparing(Comparator.comparingInt(BracketGroup::base).reversed())
 				.thenComparingInt(BracketGroup::lo));
 			for (BracketGroup group : groups) {
-				if (!group.instruments().isEmpty() && !shown.contains(group.instruments().getFirst())) {
+				// The main instrument already stands for its own bracket, so the stack stays one
+				// icon a register.
+				if (!group.instruments().isEmpty() && !shown.contains(group.instruments().getFirst())
+						&& !group.instruments().contains(layer.mainInstrument())) {
 					shown.add(group.instruments().getFirst());
 				}
 			}
@@ -4380,7 +4457,9 @@ public final class ComposerScreen extends Screen {
 		Map<String, Integer> members = new java.util.LinkedHashMap<>();
 		int[] colors = new int[layers.size()];
 		for (int index = 0; index < layers.size(); index++) {
-			String instrument = layers.get(index).instrument();
+			// The main instrument rather than the stored one: on a split layer the stored one is only
+			// what it was before it split, and can be a voice the palette has since taken off it.
+			String instrument = layers.get(index).mainInstrument();
 			// Two layers on one voice still have to be told apart, and the commonest reason for two
 			// is Convert splitting a part into the octaves it needed -- which is the one case where
 			// they ought to read as relatives rather than as strangers. One hue, stepped.
@@ -5536,10 +5615,6 @@ public final class ComposerScreen extends Screen {
 					}
 					if (rangeMatters && layer.outOfRange(note)) {
 						flags |= NoteCellGrid.UNBUILDABLE;
-					} else if (layer.split() != null) {
-						// Not a warning: the mark that says "this pitch is a split layer's business",
-						// so a note standing outside the red wash reads as intended, not as a mistake.
-						flags |= NoteCellGrid.SPLIT;
 					}
 					if (anyThinned && thinning.thinned(layerIndex, note.id())) {
 						// Played quieter than asked, or with strikes left out, to fit the thinning target.
@@ -7066,6 +7141,16 @@ public final class ComposerScreen extends Screen {
 		if (hit == null) {
 			return false;
 		}
+		PreviewInstrument pressed = instrumentMenuPalette().get(hit.index());
+		if (hit.part() == PalettePart.BODY
+				&& pressed.id().equals(project().layers().get(instrumentMenuLayer).mainInstrument())
+				&& overMainStar(mouseX, mouseY, paletteCellX(menu, hit.index()),
+					paletteCellY(menu, hit.index()))) {
+			// The star, picked up rather than the tile under it pressed: carried to another lit
+			// instrument, it makes that one the main. Nothing sounds and nothing toggles.
+			draggingMainStar = true;
+			return true;
+		}
 		if (hit.part() == PalettePart.COUNT) {
 			// The number between the arrows. Taken, so that a near miss of an arrow does not
 			// switch the instrument off instead.
@@ -7091,6 +7176,33 @@ public final class ComposerScreen extends Screen {
 				instrumentMenuLayer, target -> target.withInstrumentPicked(id));
 		}
 		return true;
+	}
+
+	/**
+	 * Lets go of the main-instrument star. On a tile the layer is playing, that instrument becomes
+	 * the main one, on every layer the palette is changing that plays it. Anywhere else the star
+	 * goes back where it was.
+	 */
+	private void dropMainStar(double mouseX, double mouseY) {
+		if (instrumentMenuLayer < 0 || instrumentMenuLayer >= project().layers().size()) {
+			return;
+		}
+		PaletteHit hit = paletteHit(mouseX, mouseY);
+		if (hit == null) {
+			return;
+		}
+		PreviewInstrument value = instrumentMenuPalette().get(hit.index());
+		Layer menuLayer = project().layers().get(instrumentMenuLayer);
+		if (value.id().equals(menuLayer.mainInstrument())) {
+			return;
+		}
+		if (menuLayer.countOf(value.id()) == 0) {
+			showResult(Component.literal(value.name() + " is not playing on this layer, so it cannot "
+				+ "be the main instrument. Click it on first."));
+			return;
+		}
+		updateLayers("make " + value.name() + " the main instrument", instrumentMenuLayer,
+			target -> target.withMainInstrument(value.id()));
 	}
 
 	private void openContextMenu(double mouseX, double mouseY) {
@@ -7169,6 +7281,10 @@ public final class ComposerScreen extends Screen {
 	public boolean mouseDragged(MouseButtonEvent event, double dx, double dy) {
 		lastMouseX = event.x();
 		lastMouseY = event.y();
+		if (draggingMainStar) {
+			// Drawn wherever the cursor is; nothing to work out until it is let go.
+			return true;
+		}
 		if (erasing) {
 			eraseAlong(event.x(), event.y());
 			return true;
@@ -7300,6 +7416,11 @@ public final class ComposerScreen extends Screen {
 
 	@Override
 	public boolean mouseReleased(MouseButtonEvent event) {
+		if (draggingMainStar) {
+			draggingMainStar = false;
+			dropMainStar(event.x(), event.y());
+			return true;
+		}
 		if (erasing) {
 			erasing = false;
 			// Reported only for a sweep. Taking one note is a click whose result you are looking at;
@@ -8339,6 +8460,9 @@ public final class ComposerScreen extends Screen {
 			if (event.tick() >= staleBefore && soundsPlayed < MAX_PREVIEW_SOUNDS_PER_FRAME) {
 				event.instrument().play(event.note());
 				lightKey(event.lightMidi(), event.color());
+				if (event.layer() >= 0 && event.layer() < layerLitAt.length) {
+					layerLitAt[event.layer()] = Util.getMillis();
+				}
 				soundsPlayed++;
 			}
 		}
@@ -9236,7 +9360,8 @@ public final class ComposerScreen extends Screen {
 							note.midiNote() - ComposerProject.NOTE_BLOCK_BASE_MIDI_NOTE,
 							note.midiNote() - written,
 							color,
-							copies > 1
+							copies > 1,
+							layerIndex
 						));
 					}
 				}
@@ -11248,7 +11373,7 @@ public final class ComposerScreen extends Screen {
 	 */
 	/** One preview sound. {@code counted} marks a copy of a voice with a count, which dedupe leaves alone. */
 	private record PlaybackEvent(long tick, PreviewInstrument instrument, int note, int lightMidi,
-			int color, boolean counted) {
+			int color, boolean counted, int layer) {
 		private boolean sameSound(PlaybackEvent other) {
 			return tick == other.tick && note == other.note && instrument.equals(other.instrument);
 		}

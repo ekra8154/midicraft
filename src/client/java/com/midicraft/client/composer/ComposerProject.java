@@ -648,6 +648,47 @@ public record ComposerProject(
 			return mix.isEmpty() ? List.of(Split.Voice.fullRange(instrument)) : mix;
 		}
 
+		/**
+		 * The instrument a layer is known by: its colour, and the front of its icon.
+		 *
+		 * <p>An ordinary layer's is its instrument. A split layer's instrument is only what it was
+		 * before it split -- a copper part made melodic keeps copper -- so it is the answer while it
+		 * is still one of the voices. Once the palette has swapped it out, the answer is the voice in
+		 * the middle of the keyboard, the harp tier or the one nearest it, since a split layer with a
+		 * colour nothing on it plays would be naming an instrument it does not have.</p>
+		 */
+		public String mainInstrument() {
+			if (split == null || split.voices().isEmpty()
+					|| split.voices().stream().anyMatch(voice -> voice.instrument().equals(instrument))) {
+				return instrument;
+			}
+			return split.voices().stream()
+				.min(Comparator.comparingInt((Split.Voice voice) -> Math.abs(
+					InstrumentRanges.baseMidi(voice.instrument()) - NOTE_BLOCK_BASE_MIDI_NOTE)))
+				.orElseThrow()
+				.instrument();
+		}
+
+		/**
+		 * This layer known by another of the instruments it plays: what dropping the palette's star
+		 * on a tile does. Nothing about the sound changes. A split layer takes it as its instrument,
+		 * which is what {@link #mainInstrument} reads first; a layer stacking several puts it first
+		 * in the stack, which is where its instrument comes from. An instrument the layer is not
+		 * playing cannot be its main one, and asking changes nothing.
+		 */
+		public Layer withMainInstrument(String instrumentId) {
+			if (countOf(instrumentId) == 0 || instrumentId.equals(mainInstrument())) {
+				return this;
+			}
+			if (split != null) {
+				return new Layer(name, instrumentId, muted, buildEnabled, visible, notes, split, null,
+					resting, sustain);
+			}
+			List<Split.Voice> reordered = new ArrayList<>(mix);
+			reordered.sort(Comparator.comparingInt(voice -> voice.instrument().equals(instrumentId) ? 0 : 1));
+			return withMix(reordered);
+		}
+
 		/** How many times this instrument sounds on each note, or 0 when it is not sounding. */
 		public int countOf(String instrumentId) {
 			return firstCount(sounding(), instrumentId);
