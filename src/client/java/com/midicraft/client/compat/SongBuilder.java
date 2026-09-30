@@ -13773,7 +13773,14 @@ public final class SongBuilder {
 			// See SPLIT_PARITY_WALKS_OFF_THE_CORNER.
 			int splitCornerWalk = 0;
 			if (SPLIT_PARITY_WALKS_OFF_THE_CORNER) {
-				for (Lane probe = lane.ahead(delayColumns + busyPad);
+				// From where the delay ends, not where the busy pad does: the trigger walks off the
+				// corner and the busy pad goes down after it. Probed past the pad, a lane standing on
+				// its corner behind a busy pad was asked about one column short of where the cut
+				// opens -- fireflies at eight wide over three floors, the planned head at 15 and the
+				// laid one at 13, and the clash it was nudged for landed on the cell it moved into.
+				// See CUT_WALKS_ITS_CORNER_BEFORE_THE_BUSY_PAD.
+				for (Lane probe = lane.ahead(delayColumns
+						+ (CUT_WALKS_ITS_CORNER_BEFORE_THE_BUSY_PAD ? 0 : busyPad));
 						probe.cornerAt(0) && splitCornerWalk < 4; probe = probe.ahead(1)) {
 					splitCornerWalk++;
 				}
@@ -14523,6 +14530,23 @@ public final class SongBuilder {
 					if (CUT_HEAD_ASKS_ITS_LOW_SLOTS) {
 						int loud = loudLowSlot(placements, opening, travel, depth, event.time(),
 							headed.slots());
+						if (TRACE) {
+							StringBuilder said = new StringBuilder("CUTLOW t=" + event.time() + " opening "
+								+ opening.toShortString() + " travel=" + travel + " side=" + depth + " loud="
+								+ loud + " |");
+							BlockPos lowCross = opening.relative(travel);
+							for (int side = 0; side < 2; side++) {
+								BlockPos instrument = lowCross.relative(side == 0 ? depth : depth.getOpposite());
+								said.append(" s").append(side).append(headed.slots().slot(side) == null ? "=empty"
+									: "@" + instrument.relative(travel).toShortString() + (quietAndFree(placements,
+										instrument.relative(travel), event.time()) ? " quiet" : " LOUD"));
+								said.append(" s").append(2 + side).append(headed.slots().slot(2 + side) == null
+									? "=empty" : "@" + instrument.relative(travel.getOpposite()).toShortString()
+										+ (quietAndFree(placements, instrument.relative(travel.getOpposite()),
+											event.time()) ? " quiet" : " LOUD"));
+							}
+							System.out.println(said);
+						}
 						// Refused only where something can take over: the plain cut, or the sunken
 						// rescue the catch below asks for. Where neither can carry the chord, the
 						// refusal went straight past every catch and the whole build was refused --
@@ -32368,8 +32392,30 @@ public final class SongBuilder {
 		UltraSlots laid = onTheFreeSlots(placements, opening, opens.travel(), depth, time,
 			headed.slots(), headed.shed() ? DESCENT_FLANK_SLOT : -1,
 			headed.centreFeeds() == CentreFeed.CORKSCREW);
-		return loudLowSlot(placements, opening, opens.travel(), depth, time, laid) >= 0;
+		// And topped up from the tail the way the lay does it, where the centre feeds the
+		// staircase: the note that fills an empty low slot there is one this was not asking about
+		// (fireflies at eight wide over three floors, slot one at 11 72 233 filled from the tail).
+		if (headed.centreFeeds() != CentreFeed.NONE) {
+			laid = lowsToppedUpFromTheTail(placements, opening, opens.travel(), depth, time,
+				new StackedSplit(laid, headed.head(), headed.nearTail(), headed.farTail(),
+					headed.shed(), headed.centreFeeds(), headed.centreToFront(), headed.rungNotes(),
+					headed.severNote(), headed.stairExtras())).slots();
+		}
+		int loud = loudLowSlot(placements, opening, opens.travel(), depth, time, laid);
+		if (TRACE) {
+			System.out.println("CUTPLANLOW t=" + time + " opening " + opening.toShortString()
+				+ " travel=" + opens.travel() + " feeds=" + headed.centreFeeds() + " shed=" + headed.shed()
+				+ " loud=" + loud + " slots=" + (laid.slot(0) != null) + (laid.slot(1) != null)
+				+ (laid.slot(2) != null) + (laid.slot(3) != null));
+		}
+		return loud >= 0;
 	}
+
+	/**
+	 * Whether the cut planner counts the corner the trigger walks off before the busy pad, where
+	 * the lay walks it, rather than probing for one after the pad.
+	 */
+	static boolean CUT_WALKS_ITS_CORNER_BEFORE_THE_BUSY_PAD = true;
 
 	/** Whether the cut planner asks its head's low slots the lay-time question. */
 	static boolean CUT_PLAN_ASKS_ITS_LOW_SLOTS = true;
