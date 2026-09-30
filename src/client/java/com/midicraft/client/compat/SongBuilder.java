@@ -534,7 +534,7 @@ public final class SongBuilder {
 	 *     and a value copied at construction would quietly ignore the flip.
 	 */
 	record BuildLimits(int maxFloors, int laneWidth, int laneFloors, boolean startTop,
-			int reseedDelay, int paceTolerance) {
+			int reseedDelay, int paceTolerance, int paceCatchUpTo) {
 		BuildLimits(int maxFloors, int laneWidth, int laneFloors) {
 			this(maxFloors, laneWidth, laneFloors, false);
 		}
@@ -545,7 +545,7 @@ public final class SongBuilder {
 
 		BuildLimits(int maxFloors, int laneWidth, int laneFloors, boolean startTop,
 				int reseedDelay) {
-			this(maxFloors, laneWidth, laneFloors, startTop, reseedDelay, -1);
+			this(maxFloors, laneWidth, laneFloors, startTop, reseedDelay, -1, -1);
 		}
 
 		/** The threshold this build is planned against, which is the static unless one was stated. */
@@ -561,11 +561,16 @@ public final class SongBuilder {
 			return paceTolerance >= 0 ? paceTolerance : JOINT_PACE_TOLERANCE;
 		}
 
+		/** How near a machine that has started catching up comes before it stops; see the static. */
+		int jointPaceCatchUpTo() {
+			return paceCatchUpTo >= 0 ? paceCatchUpTo : JOINT_PACE_CATCHES_UP_TO;
+		}
+
 		static BuildLimits fromConfig() {
 			MidicraftConfig config = MidicraftConfig.get();
 			return new BuildLimits(config.maxBuildFloors(), config.buildLaneWidth(),
 				config.buildLaneFloors(), config.pasteStartTop(), config.parityReseedDelay(),
-				config.paceTolerance());
+				config.paceTolerance(), config.paceCatchUpTo());
 		}
 	}
 
@@ -2024,9 +2029,11 @@ public final class SongBuilder {
 					Object stateB = placements.snapshot();
 					Baton baton = new Baton(placements, stateA, stateB);
 					Pace jointA = new Pace(new int[evenEvents.size()], new int[evenEvents.size()],
-						new boolean[evenEvents.size()], baton, 0, limits.jointPaceTolerance());
+						new boolean[evenEvents.size()], baton, 0, limits.jointPaceTolerance(),
+						limits.jointPaceCatchUpTo(), new boolean[1]);
 					Pace jointB = new Pace(new int[oddEvents.size()], new int[oddEvents.size()],
-						new boolean[oddEvents.size()], baton, 1, limits.jointPaceTolerance());
+						new boolean[oddEvents.size()], baton, 1, limits.jointPaceTolerance(),
+						limits.jointPaceCatchUpTo(), new boolean[1]);
 					paceA = jointA;
 					paceB = jointB;
 					try {
@@ -2253,11 +2260,29 @@ public final class SongBuilder {
 	 * is most of the waits in a busy song. Dust costs no time; only the refresh does. On, each spare
 	 * tick is a one-tick repeater and {@link #PACE_WIRE_RUN} dust after it, which is what a redstone
 	 * line can actually keep up with.</p>
+	 *
+	 * <p>On since 2026-09-30, with runs of fourteen: catching up to level (see
+	 * {@link #JOINT_PACE_CATCHES_UP_TO}) is only as fast as a wait can carry, and at two cells a
+	 * tick a lane behind never got there. Off since 2026-09-13 before that, for dead builds in long
+	 * stretches; the two faults behind the long ones -- a refresh the leg clamp never counted, and
+	 * a stretch filling a leg to its staircase -- are fixed at the clamp.</p>
 	 */
-	static boolean PACE_BUDGETS_THE_WIRE = false;
+	static boolean PACE_BUDGETS_THE_WIRE = true;
+
+	/**
+	 * Whether the pacing measure counts a lane on a flat turn that is armed but not yet walked as
+	 * standing on its old leg, rather than a whole leg further on. See {@code paceProgress}.
+	 */
+	static boolean PACE_PROGRESS_KNOWS_AN_ARMED_TURN = true;
+
+	/**
+	 * Whether a pace stretch clamped to its leg leaves room on that leg for the chord it pads for,
+	 * rather than only for the wait's repeaters and a seam. See the clamp in the fold.
+	 */
+	static boolean STRETCH_LEAVES_THE_CHORD_ITS_ROOM = true;
 
 	/** Dust a wire-budgeted stretch lays after each refresh. See {@link #PACE_BUDGETS_THE_WIRE}. */
-	static int PACE_WIRE_RUN = 10;
+	static int PACE_WIRE_RUN = 14;
 
 	/**
 	 * The last paced interleaved build's pacing, for probes, or null when the last one did not pace:
@@ -5097,6 +5122,23 @@ public final class SongBuilder {
 	 */
 	private static int paceProgress(Direction.Axis axis, Lane lane, Direction forward, int leg,
 			int laneWidth, int slabStep, int nearWall, int farWall) {
+		// A flat turn moves the walk onto its next leg the moment it is armed, while the lane is
+		// still on the old one running at the corner, and stays there through the link. Read with
+		// the new leg's index, every column of that was a whole leg ahead of where the lane stands
+		// -- and a chord riding the corner was recorded there, so its partner padded after a lead
+		// that did not exist. Fireflies at twenty-four wide: 85 of machine A's 510 events stood
+		// further back than the one before. Legs alternate direction, so a lane whose travel is
+		// not its leg's own is still on the leg before. See PACE_PROGRESS_KNOWS_AN_ARMED_TURN.
+		if (PACE_PROGRESS_KNOWS_AN_ARMED_TURN && leg > 0) {
+			Direction legTravel = leg % 2 == 0 ? forward : forward.getOpposite();
+			if (lane.travel().getAxis() != axis) {
+				// In the link: past the old leg's end, short of the new leg's start.
+				return (leg - 1) * (laneWidth + slabStep) + laneWidth;
+			}
+			if (lane.travel() != legTravel) {
+				leg--;
+			}
+		}
 		int into = lane.travel().getAxis() != axis ? laneWidth
 			: lane.travel() == forward
 				? (coordAlong(axis, lane.pos()) - nearWall) * stepAlong(axis, forward)
@@ -10516,10 +10558,10 @@ public final class SongBuilder {
 	 * half-tick mode measured at 29 percent of its whole length.</p>
 	 */
 	record Pace(int[] progress, int[] stretch, boolean[] asked, Baton baton, int machine,
-			int tolerance) {
+			int tolerance, int catchUpTo, boolean[] catchingUp) {
 		/** The open-loop pacing: stretches planned ahead of the walk, no partner to ask. */
 		Pace(int[] progress, int[] stretch) {
-			this(progress, stretch, null, null, -1, 0);
+			this(progress, stretch, null, null, -1, 0, 0, new boolean[1]);
 		}
 	}
 
@@ -10563,6 +10605,24 @@ public final class SongBuilder {
 	 * length.</p>
 	 */
 	public static int JOINT_PACE_TOLERANCE = 16;
+
+	/**
+	 * Columns behind its partner a jointly-walked machine catches up to, once it has fallen past
+	 * {@link #JOINT_PACE_TOLERANCE} and started padding.
+	 *
+	 * <p>At the tolerance or above it, the machine behind pads only its overshoot and rides the
+	 * border: the two lanes spend the song as far apart as the tolerance allows. Below it, a
+	 * machine that crosses the tolerance keeps padding, as fast as its waits can carry, until it
+	 * is this near, and only then lets the gap open again. The tolerance becomes the exception
+	 * rather than the norm, the user's ask of 2026-09-30: two pulses at the border are within
+	 * earshot but split between the ears. It costs more dust than riding the border wherever the
+	 * lead changes hands, because a lane that caught up spends cells closing a gap the music would
+	 * have closed on its own.</p>
+	 *
+	 * <p>The default for a build whose limits do not say; the game's builds read
+	 * {@code MidicraftConfig.paceCatchUpTo}, which writes its value here as well.</p>
+	 */
+	public static int JOINT_PACE_CATCHES_UP_TO = 0;
 
 	/** Thrown inside a walker whose partner failed, to unwind it; never seen outside the baton. */
 	static final class WalkAbandoned extends RuntimeException {
@@ -10947,8 +11007,19 @@ public final class SongBuilder {
 					// The wait's own minimum, a repeater every four ticks: the chord lands past
 					// that whatever the stretch, so the stretch buys only what is left.
 					int minimum = Math.max(0, (wait - 1) / 4);
-					int behind = partnerChord < 0 ? 0
-						: partnerChord - pace.tolerance() - (here + minimum);
+					int gap = partnerChord < 0 ? 0 : partnerChord - (here + minimum);
+					// Catching up is a state, not a threshold: entered past the tolerance, left
+					// only once the gap is down to the catch-up mark, measured where this machine
+					// really stands rather than where the stretch it asked for should have put it.
+					// See JOINT_PACE_CATCHES_UP_TO.
+					int catchTo = Math.min(pace.catchUpTo(), pace.tolerance());
+					boolean[] catching = pace.catchingUp();
+					if (partnerChord < 0 || catching[0] && gap <= catchTo) {
+						catching[0] = false;
+					} else if (!catching[0] && gap > pace.tolerance()) {
+						catching[0] = true;
+					}
+					int behind = gap - (catching[0] ? catchTo : pace.tolerance());
 					pace.stretch()[index] = Math.max(0, Math.min(behind, paceCapacity(wait)));
 				}
 			}
@@ -11279,10 +11350,21 @@ public final class SongBuilder {
 					// stretch that would cross the turn ahead needs the ticks to keep its chain
 					// alive over there -- a repeater every eleventh cell -- and one that cannot
 					// afford the crossing is clamped to this leg instead of attempting it.
+					// And the chord it pads for keeps its room on the leg too. A stretch that ran to
+					// the wall left the chord nothing but the wall column, and a leg ending in a
+					// staircase cannot turn under a chord: fireflies at sixteen wide over two
+					// floors, a bus of seven straight through the wall and five past it, once the
+					// wire-budgeted stretch was long enough to fill a leg. The rest is asked again
+					// at the next event, against where the partner then stands.
 					if (foldRepeaters + seamCells <= foldColumns
 							&& foldRepeaters <= Math.max(1, foldColumns / 8)) {
+						// Only before a staircase: a flat turn is ridden by the chord like any
+						// other, and reserving its room there cut every stretch at a leg's end.
+						boolean staircaseAhead = foldTurn.above() >= 0 && foldTurn.above() < floors;
+						int chordRoom = STRETCH_LEAVES_THE_CHORD_ITS_ROOM && staircaseAhead
+							? (event.notes().size() + 1) / 2 + 1 : 0;
 						stretchLeft = Math.min(stretchLeft,
-							Math.max(0, foldColumns - foldRepeaters - seamCells));
+							Math.max(0, foldColumns - foldRepeaters - seamCells - chordRoom));
 					}
 					// A head standing on its opening wall turns before it lays anything. The walk's
 					// rule that a lane must hold something before it can end is what stops a lane
@@ -11373,6 +11455,11 @@ public final class SongBuilder {
 								currentTime += paceRefreshDelay();
 								foldSignal = DUST_RANGE;
 								dustRun = 0;
+								// One of the stretch's cells, as the opener is: the stretch was
+								// clamped to the leg, and a refresh left uncounted stands the chord
+								// a cell further on per refresh -- nothing with eight-dust runs and
+								// short stretches, a lane past the outer wall with long ones.
+								stretchLeft--;
 							} else {
 								// Through the one helper the other five pad sites go through. A
 								// simple tail's note-block middle is lit by its handover and by

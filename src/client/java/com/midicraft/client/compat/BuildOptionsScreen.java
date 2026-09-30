@@ -73,6 +73,7 @@ final class BuildOptionsScreen extends Screen {
 	private int laneFloors;
 	private int reseedDelay;
 	private int paceTolerance;
+	private int paceCatchUpTo;
 	/**
 	 * Whether the advanced rows are open: machine swapping, pace tolerance and the command rate.
 	 *
@@ -81,6 +82,8 @@ final class BuildOptionsScreen extends Screen {
 	 * so.</p>
 	 */
 	private static boolean advancedOpen;
+	/** The catch-up control, so its line can follow the tolerance above it. */
+	private Choice catchUpChoice;
 	/** The width control, so its line can be rewritten when a forecast says the width was raised. */
 	private Choice widthChoice;
 	/**
@@ -382,6 +385,7 @@ final class BuildOptionsScreen extends Screen {
 		this.laneFloors = MidicraftConfig.get().buildLaneFloors();
 		this.reseedDelay = MidicraftConfig.get().parityReseedDelay();
 		this.paceTolerance = MidicraftConfig.get().paceTolerance();
+		this.paceCatchUpTo = MidicraftConfig.get().paceCatchUpTo();
 	}
 
 	/** Top of the width row, which only a lane build has. Under the start and block rows. */
@@ -406,9 +410,12 @@ final class BuildOptionsScreen extends Screen {
 		return advancedRow(top) + 22 * (index + 1);
 	}
 
-	/** How many advanced rows this layout has: the rate always, the other two where they apply. */
+	/**
+	 * How many advanced rows this layout has: the rate always, machine swapping and the two pace
+	 * rows where they apply.
+	 */
 	private int advancedRows() {
-		return 1 + (hasReseedControl() ? 1 : 0) + (hasPaceControl() ? 1 : 0);
+		return 1 + (hasReseedControl() ? 1 : 0) + (hasPaceControl() ? 2 : 0);
 	}
 
 	/**
@@ -445,6 +452,18 @@ final class BuildOptionsScreen extends Screen {
 	private static String paceLine(int columns) {
 		return columns == 0 ? "2 lanes kept level - pads the most"
 			: "2 lanes may drift " + columns + " blocks before padding";
+	}
+
+	/** What the catch-up row says, which depends on the tolerance above it. */
+	private String catchUpLine(int columns) {
+		if (paceTolerance == 0) {
+			return "Catch up: nothing to catch up from";
+		}
+		if (columns >= paceTolerance) {
+			return "Catch up: only back to the drift limit";
+		}
+		return columns == 0 ? "Catch up: all the way to level"
+			: "Catch up: to within " + columns + " blocks";
 	}
 
 	/**
@@ -576,13 +595,29 @@ final class BuildOptionsScreen extends Screen {
 				addRenderableWidget(new Choice(left, advancedRow(top, row++), width,
 					PACE_TOLERANCES.size(), paceRung(paceTolerance),
 					rung -> paceLine(PACE_TOLERANCES.get(rung)),
-					rung -> paceTolerance = PACE_TOLERANCES.get(rung)))
+					rung -> {
+						paceTolerance = PACE_TOLERANCES.get(rung);
+						// Its line reads off the tolerance, so it is rewritten when that moves.
+						if (catchUpChoice != null) {
+							catchUpChoice.updateMessage();
+						}
+					}))
 					.setTooltip(Tooltip.create(Component.literal("The machine carrying less music "
 						+ "falls behind the other and pads its waits with dust to keep up, so both "
 						+ "lanes play near each other. This is how far behind it may fall first, "
 						+ "along the lane. 0 keeps them level and pads the most; 16 keeps them about "
 						+ "as close with a third of the padding; higher is shorter, and the two "
 						+ "lanes drift further apart.")));
+				catchUpChoice = addRenderableWidget(new Choice(left, advancedRow(top, row++), width,
+					PACE_TOLERANCES.size(), paceRung(paceCatchUpTo),
+					rung -> catchUpLine(PACE_TOLERANCES.get(rung)),
+					rung -> paceCatchUpTo = PACE_TOLERANCES.get(rung)));
+				catchUpChoice.setTooltip(Tooltip.create(Component.literal("Once a lane has "
+					+ "fallen past the drift limit, how near it comes before it stops padding. At the "
+					+ "drift limit it pads only what it has to and rides there, so the lanes spend the "
+					+ "song as far apart as allowed. At 0 it catches up as fast as it can until the "
+					+ "two are level, then lets the gap open again: the limit is the exception rather "
+					+ "than the norm. Nearer costs more padding, most where the lead changes hands.")));
 			}
 			addRenderableWidget(new Choice(left, advancedRow(top, row), width,
 				PasteRate.RATES.size(), PasteRate.index(commandsPerTick),
@@ -598,6 +633,7 @@ final class BuildOptionsScreen extends Screen {
 			MidicraftConfig.get().setBuildLaneFloors(laneFloors);
 			MidicraftConfig.get().setParityReseedDelay(reseedDelay);
 			MidicraftConfig.get().setPaceTolerance(paceTolerance);
+			MidicraftConfig.get().setPaceCatchUpTo(paceCatchUpTo);
 			// Written down before the confirm, like the rest: the paste plans off the config.
 			MidicraftConfig.get().setPasteStartTop(startTop);
 			MidicraftConfig.get().setPasteMode(mode.name());
@@ -646,7 +682,7 @@ final class BuildOptionsScreen extends Screen {
 		// every position of that slider with the forecast it had already made for the first.
 		// The pace tolerance likewise: it decides how much dust the lane behind lays.
 		String key = mode.name() + " " + laneWidth + " " + laneFloors + " " + reseedDelay + " "
-			+ paceTolerance + " " + startTop + " " + colours;
+			+ paceTolerance + " " + paceCatchUpTo + " " + startTop + " " + colours;
 		if (key.equals(forecastKey)) {
 			return;
 		}
@@ -668,7 +704,7 @@ final class BuildOptionsScreen extends Screen {
 		// half-written.
 		SongBuilder.BuildLimits limits = new SongBuilder.BuildLimits(
 			MidicraftConfig.get().maxBuildFloors(), laneWidth, laneFloors,
-			startTop, reseedDelay, paceTolerance);
+			startTop, reseedDelay, paceTolerance, paceCatchUpTo);
 		FORECASTER.execute(() -> {
 			// Dropped before it is worked out, not after. A press asked for one forecast; a drag
 			// across the width slider asks for a hundred and twenty, and planning a big song is tens

@@ -43,6 +43,7 @@ final class GameSettings {
 		Integer maxBuildFloors;
 		Integer parityReseedDelay;
 		Integer paceTolerance;
+		Integer paceCatchUpTo;
 		Boolean pasteStartTop;
 		/** The old name of {@link #pasteStartTop}, read where a file predates it. */
 		Boolean ultraLaneStartTop;
@@ -64,8 +65,8 @@ final class GameSettings {
 	 *     the walk that follows differs. The light show changes no walk and reads as false.
 	 */
 	record Values(ChordSkips.Rules thinning, int maxBuildFloors, int reseedDelay,
-			int paceTolerance, boolean startTop, boolean debugPaste, int laneWidth, int laneFloors,
-			String pasteMode) {
+			int paceTolerance, int paceCatchUpTo, boolean startTop, boolean debugPaste,
+			int laneWidth, int laneFloors, String pasteMode) {
 
 		SongBuilder.BuildLimits limits(int width, int floors) {
 			return limits(maxBuildFloors, width, floors);
@@ -74,7 +75,7 @@ final class GameSettings {
 		/** @param maxFloors an override for the cube layout's cap, the one thing it decides */
 		SongBuilder.BuildLimits limits(int maxFloors, int width, int floors) {
 			return new SongBuilder.BuildLimits(maxFloors, width, floors, startTop, reseedDelay,
-				paceTolerance);
+				paceTolerance, paceCatchUpTo);
 		}
 
 		/**
@@ -91,7 +92,8 @@ final class GameSettings {
 		String said() {
 			return "[game: thin " + thinning.target() + (thinning.volume() ? " volume" : "")
 				+ (thinning.strikes() ? " strikes" : "") + ", dedupe per song, reseed "
-				+ reseedDelay + ", pace " + paceTolerance + ", debugPaste " + debugPaste + ", maxFloors " + maxBuildFloors
+				+ reseedDelay + ", pace " + paceTolerance + " catch up to " + paceCatchUpTo
+				+ ", debugPaste " + debugPaste + ", maxFloors " + maxBuildFloors
 				+ ", lanes start " + (startTop ? "top" : "bottom") + "]";
 		}
 	}
@@ -108,7 +110,7 @@ final class GameSettings {
 	/**
 	 * The paste settings a probe wants to hold still while the config moves under it, given as
 	 * {@code -Dcensus.startTop=false}, {@code -Dfault.debugPaste=false} or
-	 * {@code -Dcensus.paceTolerance=8}.
+	 * {@code -Dcensus.paceTolerance=8} (and {@code -Dcensus.paceCatchUpTo=0}).
 	 *
 	 * <p>A census is only comparable to the one before it if the build it asked for is the same
 	 * build, and both of these change the walk rather than the song: the lanes going up instead of
@@ -124,13 +126,15 @@ final class GameSettings {
 		// through Flags changes nothing; this is the way to ask for another one.
 		String pace = given("paceTolerance");
 		int paceTolerance = pace == null ? read.paceTolerance() : Integer.parseInt(pace);
+		String catchUp = given("paceCatchUpTo");
+		int paceCatchUpTo = catchUp == null ? read.paceCatchUpTo() : Integer.parseInt(catchUp);
 		if (startTop == read.startTop() && debugPaste == read.debugPaste()
-				&& paceTolerance == read.paceTolerance()) {
+				&& paceTolerance == read.paceTolerance() && paceCatchUpTo == read.paceCatchUpTo()) {
 			return read;
 		}
 		return new Values(read.thinning(), read.maxBuildFloors(), read.reseedDelay(),
-			paceTolerance, startTop, debugPaste, read.laneWidth(), read.laneFloors(),
-			read.pasteMode());
+			paceTolerance, paceCatchUpTo, startTop, debugPaste, read.laneWidth(),
+			read.laneFloors(), read.pasteMode());
 	}
 
 	private static boolean flag(String key, boolean fallback) {
@@ -175,6 +179,9 @@ final class GameSettings {
 			clamp(stored.paceTolerance == null
 					? MidicraftConfig.DEFAULT_PACE_TOLERANCE : stored.paceTolerance,
 				MidicraftConfig.MIN_PACE_TOLERANCE, MidicraftConfig.MAX_PACE_TOLERANCE),
+			clamp(stored.paceCatchUpTo == null
+					? MidicraftConfig.DEFAULT_PACE_CATCH_UP_TO : stored.paceCatchUpTo,
+				MidicraftConfig.MIN_PACE_CATCH_UP_TO, MidicraftConfig.MAX_PACE_CATCH_UP_TO),
 			stored.pasteStartTop != null ? stored.pasteStartTop
 				: stored.ultraLaneStartTop != null && stored.ultraLaneStartTop,
 			stored.colorCodedPaste != null ? "NORMAL".equals(stored.colorCodedPaste)

@@ -286,6 +286,15 @@ public final class MidicraftConfig {
 	public static final int DEFAULT_PACE_TOLERANCE = 16;
 	public static final int MIN_PACE_TOLERANCE = 0;
 	public static final int MAX_PACE_TOLERANCE = 64;
+	/**
+	 * How near its partner a machine comes once it has fallen past the pace tolerance and started
+	 * catching up. At the tolerance or above, it pads only back to the tolerance and rides there;
+	 * nought catches up all the way to level, so the tolerance is the exception and level is the
+	 * norm. See {@code SongBuilder.JOINT_PACE_CATCHES_UP_TO}.
+	 */
+	public static final int DEFAULT_PACE_CATCH_UP_TO = 0;
+	public static final int MIN_PACE_CATCH_UP_TO = 0;
+	public static final int MAX_PACE_CATCH_UP_TO = MAX_PACE_TOLERANCE;
 	/** Repeats of a pitch closer than this many repeater ticks collapse on convert. 0 disables. */
 	public static final int DEFAULT_REPEAT_MERGE_TICKS = 1;
 	public static final int MIN_REPEAT_MERGE_TICKS = 0;
@@ -451,6 +460,7 @@ public final class MidicraftConfig {
 	private int buildLaneFloors;
 	private int parityReseedDelay;
 	private int paceTolerance;
+	private int paceCatchUpTo;
 	private boolean pasteStartTop;
 	private String importDirectory;
 	private int maxBuildFloors;
@@ -619,6 +629,9 @@ public final class MidicraftConfig {
 				);
 				instance.setPaceTolerance(
 					stored.paceTolerance == null ? DEFAULT_PACE_TOLERANCE : stored.paceTolerance
+				);
+				instance.setPaceCatchUpTo(
+					stored.paceCatchUpTo == null ? DEFAULT_PACE_CATCH_UP_TO : stored.paceCatchUpTo
 				);
 				// Read under its old name too, from before there was one layout and the setting
 				// stopped being about the Ultra lane.
@@ -1446,6 +1459,18 @@ public final class MidicraftConfig {
 		com.midicraft.client.compat.SongBuilder.JOINT_PACE_TOLERANCE = this.paceTolerance;
 	}
 
+	/** @see #DEFAULT_PACE_CATCH_UP_TO */
+	public int paceCatchUpTo() {
+		return paceCatchUpTo;
+	}
+
+	/** Sets the setting and the builder's copy of it together, as {@link #setPaceTolerance} does. */
+	public void setPaceCatchUpTo(int paceCatchUpTo) {
+		this.paceCatchUpTo = Math.max(MIN_PACE_CATCH_UP_TO,
+			Math.min(MAX_PACE_CATCH_UP_TO, paceCatchUpTo));
+		com.midicraft.client.compat.SongBuilder.JOINT_PACE_CATCHES_UP_TO = this.paceCatchUpTo;
+	}
+
 	public ComposerProject.OctaveShifting convertOctaveShifting() {
 		return convertOctaveShifting;
 	}
@@ -1714,6 +1739,7 @@ public final class MidicraftConfig {
 		config.buildLaneFloors = DEFAULT_BUILD_LANE_FLOORS;
 		config.parityReseedDelay = DEFAULT_PARITY_RESEED_DELAY;
 		config.paceTolerance = DEFAULT_PACE_TOLERANCE;
+		config.paceCatchUpTo = DEFAULT_PACE_CATCH_UP_TO;
 		config.pasteStartTop = false;
 		config.maxBuildFloors = DEFAULT_MAX_BUILD_FLOORS;
 		config.pasteMode = "COMPACT_CUBE";
@@ -1923,6 +1949,7 @@ public final class MidicraftConfig {
 		private Integer buildLaneFloors;
 		private Integer parityReseedDelay;
 		private Integer paceTolerance;
+		private Integer paceCatchUpTo;
 		private Boolean pasteStartTop;
 		/** The old name of {@link #pasteStartTop}, read and never written. */
 		private Boolean ultraLaneStartTop;
@@ -2011,6 +2038,7 @@ public final class MidicraftConfig {
 			this.buildLaneFloors = config.buildLaneFloors;
 			this.parityReseedDelay = config.parityReseedDelay;
 			this.paceTolerance = config.paceTolerance;
+			this.paceCatchUpTo = config.paceCatchUpTo;
 			this.pasteStartTop = config.pasteStartTop;
 			this.importDirectory = config.importDirectory;
 			this.maxBuildFloors = config.maxBuildFloors;
