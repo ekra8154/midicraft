@@ -3418,6 +3418,45 @@ public final class SongBuilder {
 		return false;
 	}
 
+	/**
+	 * A seam's repeater of three, laid where the lane stands and ahead of the rest of its element,
+	 * which then goes down from cell one. Returns the cell the element resumes from.
+	 */
+	private static int layTheSeamRepeaterAhead(PlacementPlan placements, Lane lane) {
+		String was = placements.placing();
+		placements.placing("paritySeamRepeaterAheadOfItsShove");
+		set(placements, lane.pos(), "minecraft:stone");
+		set(placements, lane.pos().above(), "minecraft:repeater[facing="
+			+ repeaterFacing(lane.travel()) + ",delay=" + PARITY_SEAM_REPEATER + "]");
+		placements.padded("paritySeamRepeaterAheadOfItsShove");
+		placements.placing(was);
+		return 1;
+	}
+
+	/**
+	 * Whether a seam that has to be shoved forward lays its repeater where the lane stands before
+	 * the shove, rather than after it. See {@code layTheSeamRepeaterAhead}.
+	 */
+	static boolean SEAM_REPEATER_BEFORE_ITS_SHOVE = true;
+
+	/**
+	 * Whether a wait crossing a staircase counts the seam repeater it is about to lay before the
+	 * wall as reviving the chain, rather than asking the arriving signal to reach the landing.
+	 */
+	static boolean SEAM_REPEATER_REVIVES_ITS_CROSSING = true;
+
+	/**
+	 * Whether a parity seam owed before a descent counts as fitting its leg only where it leaves
+	 * the wall column free, so one that would fill the leg flush is cut across the staircase.
+	 */
+	static boolean SEAM_LEAVES_ITS_DESCENT_THE_WALL = true;
+
+	/**
+	 * Whether a headed cut with a loud low slot keeps its head where neither the plain cut nor the
+	 * sunken rescue can carry the chord, instead of refusing the build. See CUT_HEAD_ASKS_ITS_LOW_SLOTS.
+	 */
+	static boolean CUT_HEAD_KEEPS_A_LOUD_SLOT_WITH_NOTHING_TO_FALL_TO = true;
+
 	private static boolean paritySeamHasRoom(PlacementPlan placements, Lane lane, int from) {
 		if (!paritySeamCornersAlign(lane, from)) {
 			return false;
@@ -11226,6 +11265,12 @@ public final class SongBuilder {
 						// one. jackpot at eight wide over two floors: the rewalk re-armed the same
 						// link, decided the same bus of five on its corner, and gave up with the
 						// descent two past the wall. See FORCED_TURN_WALKS_OUT_THE_FOLDS_BEND.
+						if (TRACE_TURNS && seamCells > 0) {
+							System.out.println("FOLDSEAMBEND t=" + event.time() + " at "
+								+ coordAlong(axis, lane.pos()) + " " + lane.pos().getY() + " "
+								+ coordAcross(axis, lane.pos()) + " wantToExit=" + wantToExit
+								+ " toExit=" + toExit + " foldRepeaters=" + foldRepeaters);
+						}
 						boolean walkOutNow = forcedWalkOut
 							|| FORCED_TURN_WALKS_OUT_THE_FOLDS_BEND && turnBefore.contains(index)
 								&& !foldWalkedTheBend;
@@ -11388,8 +11433,28 @@ public final class SongBuilder {
 					if (chordCannotTurn) {
 						placements.padded("foldCarriedAnUnstartedLanesChord");
 					}
-					if (!openingOnTheWall && !chordCannotTurn && (want <= foldColumns
-							|| foldRepeaters + seamCells <= foldColumns
+					if (TRACE_TURNS && seamCells > 0) {
+						System.out.println("FOLDSEAM t=" + event.time() + " at "
+							+ coordAlong(axis, lane.pos()) + " " + lane.pos().getY() + " "
+							+ coordAcross(axis, lane.pos()) + " want=" + want + " foldColumns="
+							+ foldColumns + " seamCells=" + seamCells + " foldRepeaters=" + foldRepeaters
+							+ " staircase=" + (foldTurn.above() >= 0 && foldTurn.above() < floors)
+							+ " wall=" + foldWall + " floor=" + floor + " climb=" + climb + " floors=" + floors
+							+ " nearWallAt=" + nearWallAt(route, leg, nearWall, tipStep) + " tipWall="
+							+ tipWall(route, leg, farWall, tipStep) + " nearWall=" + nearWall + " farWall="
+							+ farWall + " leg=" + leg + " forward=" + forward);
+					}
+					// A seam owed before a descent fits only where it leaves the wall column: a lane
+					// that fills its leg exactly to the wall rests one past it and the spiral stands
+					// two past (see DESCENT_STANDS_A_COLUMN_IN). Short of that the element is cut
+					// across the staircase below, stage one before the wall and stage two on the
+					// landing leg -- HBFS at eight wide over three floors, bottom-start, a seven-cell
+					// seam on a seven-column leg and the descent two past at 0 70 318. See
+					// SEAM_LEAVES_ITS_DESCENT_THE_WALL.
+					int descentRoom = SEAM_LEAVES_ITS_DESCENT_THE_WALL && seamCells > 0 && climb < 0
+						&& foldTurn.above() >= 0 && foldTurn.above() < floors ? 1 : 0;
+					if (!openingOnTheWall && !chordCannotTurn && (want + descentRoom <= foldColumns
+							|| foldRepeaters + seamCells + descentRoom <= foldColumns
 								&& foldRepeaters <= Math.max(1, foldColumns / 8))) {
 						if (stretchLeft > 0) {
 							// Off any corner first, for the reason the staircase approach walks off
@@ -11658,6 +11723,14 @@ public final class SongBuilder {
 						// landing leg: the landing's dust, a block and three cells a stage, and
 						// the wait's reserve past that. Only where the dust still reaches the
 						// wall cell; from there the repeater's own fifteen carries the rungs.
+						if (TRACE_TURNS) {
+							System.out.println("SEAMSTAIRASK t=" + event.time() + " at "
+								+ coordAlong(axis, lane.pos()) + " " + lane.pos().getY() + " "
+								+ coordAcross(axis, lane.pos()) + " cellsToWall=" + cellsToWall
+								+ " whole=" + wholeFits + " one=" + stageOneFits + " two=" + stageTwoFits
+								+ " alive=" + alive + " laid=" + laid.laid() + " foldSignal=" + foldSignal
+								+ " newColumns=" + newColumns + " foldRepeaters=" + foldRepeaters);
+						}
 						if (SEAM_REPEATER_CROSSES_ALONE && laid.laid() == 0 && seamNext == 0
 								&& cellsToWall >= 1 && foldSignal - (cellsToWall - 1) >= 1
 								&& newColumns - 1 - 6 >= foldRepeaters + 2) {
@@ -11699,7 +11772,14 @@ public final class SongBuilder {
 					// And the wait itself has to reach the landing alive. See FOLD_CROSSES_ALIVE.
 					int toWall = (foldWall - coordAlong(axis, lane.pos()))
 						* stepAlong(axis, lane.travel());
+					// Not where the seam's repeater is going down at the top: the crossing loop lays it
+					// before the wall, and its fresh fifteen is what carries the rungs, not what the
+					// wait arrived with. Asked of the arriving signal, the check refused the very
+					// crossing SEAM_REPEATER_CROSSES_ALONE had just chosen, and the seam went down
+					// straight through the wall -- Hedwig at twenty-four wide over two floors,
+					// bottom-start, six past at 28 66 402. See SEAM_REPEATER_REVIVES_ITS_CROSSING.
 					if (FOLD_CROSSES_ALIVE && !(seamNext > 1 && seamNext < PARITY_SEAM_CELLS)
+							&& !(SEAM_REPEATER_REVIVES_ITS_CROSSING && seamRepeaterAtTheWall)
 							&& foldSignal - (toWall + foldTurn.cells() + 1) < 1
 							&& !(toWall >= 1 && event.time() - currentTime >= 2)) {
 						placements.padded("waitCannotCrossAlive");
@@ -12093,6 +12173,12 @@ public final class SongBuilder {
 				// the branch that knows about walls -- the remainder's ran an element through
 				// one and turned two past it (a dark zone at twelve wide, 1 64 679).
 				int seamFrom = seamNext == 1 ? 1 : 0;
+				if (TRACE_TURNS) {
+					System.out.println("SEAMFRESH t=" + event.time() + " at "
+						+ coordAlong(axis, lane.pos()) + " " + lane.pos().getY() + " "
+						+ coordAcross(axis, lane.pos()) + " from=" + seamFrom + " bending="
+						+ lane.bending() + " travel=" + lane.travel());
+				}
 				if (seamFrom == 0 && SEAM_OPENS_ON_A_SOFT_TIP_WITH_ITS_REPEATER
 						&& placements.softTip() && !lane.cornerAt(0)) {
 					placements.placing("paritySeamRepeaterOffASoftTip");
@@ -12252,6 +12338,20 @@ public final class SongBuilder {
 				// expensive -- the lane keeps the parity it was leaving and every shape after it
 				// is built around a signal that never arrives.
 				int shoved = 0;
+				// The repeater first, where the lane stands, when the element has to be shoved: it is
+				// the cell that reads the wire arriving, and the wire arriving is what the shove's dust
+				// would spend. The seam wants a repeater of three before its pistons, not one touching
+				// them, so the pistons land where the shove would have put them either way. Hall of
+				// the Mountain King at eight wide over three floors: a bus fed on dust ran out on its
+				// last cell, the shove laid one more dust, and the seam's repeater read nothing. See
+				// SEAM_REPEATER_BEFORE_ITS_SHOVE.
+				if (SEAM_REPEATER_BEFORE_ITS_SHOVE && seamFrom == 0 && !lane.cornerAt(0)
+						&& placements.blockAt(lane.pos().above()) == null
+						&& !paritySeamHasRoom(placements, lane, seamFrom)) {
+					seamFrom = layTheSeamRepeaterAhead(placements, lane);
+					lane = lane.ahead(1);
+					tipSignal = DUST_RANGE;
+				}
 				while (shoved < laneWidth && !paritySeamHasRoom(placements, lane, seamFrom)) {
 					addParityPad(placements, lane.pos());
 					tipSignal--;
@@ -12320,6 +12420,14 @@ public final class SongBuilder {
 						ridesTheTurn = true;
 						placements.padded("paritySeamArmedItsWall");
 						int aligned = 0;
+						// The repeater first here too, for the reason above.
+						if (SEAM_REPEATER_BEFORE_ITS_SHOVE && seamFrom == 0 && !lane.cornerAt(0)
+								&& placements.blockAt(lane.pos().above()) == null
+								&& !paritySeamHasRoom(placements, lane, seamFrom)) {
+							seamFrom = layTheSeamRepeaterAhead(placements, lane);
+							lane = lane.ahead(1);
+							tipSignal = DUST_RANGE;
+						}
 						while (aligned < laneWidth
 								&& !paritySeamHasRoom(placements, lane, seamFrom)) {
 							addParityPad(placements, lane.pos());
@@ -14398,10 +14506,26 @@ public final class SongBuilder {
 					if (CUT_HEAD_ASKS_ITS_LOW_SLOTS) {
 						int loud = loudLowSlot(placements, opening, travel, depth, event.time(),
 							headed.slots());
-						if (loud >= 0) {
+						// Refused only where something can take over: the plain cut, or the sunken
+						// rescue the catch below asks for. Where neither can carry the chord, the
+						// refusal went straight past every catch and the whole build was refused --
+						// fireflies at eight and sixteen wide over two floors, bottom-start. Then the
+						// head stays as it was laid before this check existed, and the loud slot is
+						// counted, as a rung flank with nowhere to go already is. See
+						// CUT_HEAD_KEEPS_A_LOUD_SLOT_WITH_NOTHING_TO_FALL_TO.
+						boolean canFall = HEADED_CUT_FALLS_TO_PLAIN
+							&& !(cells + splitCells > DUST_RANGE || near < 2)
+							|| SUNKEN_CUTS && climb <= 0 && sunkenCutOf(placements,
+								Lane.straight(trigger.cursor(), travel, depth), event.notes(), room,
+								splitCells, descentSide, event.time(), stairTopFree, stairBottomFree,
+								stairWallFree) != null;
+						if (loud >= 0 && (canFall || !CUT_HEAD_KEEPS_A_LOUD_SLOT_WITH_NOTHING_TO_FALL_TO)) {
 							placements.padded("cutHeadLowSlotLoud");
 							throw new IllegalArgumentException("cut head's low slot " + loud
 								+ " at " + opening.toShortString() + " is beside another tick's live block");
+						}
+						if (loud >= 0) {
+							placements.padded("cutHeadLowSlotLoudKept");
 						}
 					}
 					cursor = addStackedSplitModule(placements, opening, travel, depth,
@@ -25408,8 +25532,19 @@ public final class SongBuilder {
 	 */
 	private static Body addSunkenBusModule(PlacementPlan placements, Lane lane,
 			List<EventNote> chord, int time) {
-		return addSunkenBusModule(placements, lane.ahead(1), chord, time, Set.of());
+		// The module's own repeater cell, which a straight lane never offers -- the opening's flanks
+		// are across travel and the repeater is behind along it. Opened on a corner they are not:
+		// the opening has turned, and one of its flanks is the cell the lane came in through, where
+		// the repeater is about to stand. Hall of the Mountain King at twenty-four wide, a sunken
+		// twenty one column before its flat turn, hung a note in its own repeater; a pace stretch
+		// running to the wall put chords there all over the library. See
+		// SUNKEN_RESERVES_ITS_OWN_REPEATER.
+		return addSunkenBusModule(placements, lane.ahead(1), chord, time,
+			SUNKEN_RESERVES_ITS_OWN_REPEATER ? Set.of(lane.pos().above().immutable()) : Set.of());
 	}
+
+	/** Whether a sunken bus opened off the lane keeps its own repeater's cell out of its note slots. */
+	static boolean SUNKEN_RESERVES_ITS_OWN_REPEATER = true;
 
 	/**
 	 * @param opening the column the note block goes in, at the lane's own level -- one ahead of
@@ -25943,6 +26078,33 @@ public final class SongBuilder {
 			// sunken column in it, which is a marker lying about the machine it is marking.
 			placements.padded("sunkenBusGaveWay");
 			placements.placing("chord:BUS notes" + chord.size());
+		}
+		// No harp, and the plain bus would run out of wire: the sunken shape on a plain opening, as a
+		// trial, kept only where it lays clean. The same number of columns as the bus -- the opening
+		// holds two notes where a harp would give it three -- so the walk's measurement holds either
+		// way. See SUNKEN_OPENS_PLAIN_WHEN_A_BUS_RUNS_OUT.
+		if (placements.sunkenPlainOffered()) {
+			String was = placements.placing();
+			placements.beginTrial();
+			int troubleBefore = placements.troubleCount();
+			Body sunk = null;
+			try {
+				placements.placing("chord:SUNKEN_BUS notes" + chord.size());
+				sunk = addSunkenBusModule(placements, lane.ahead(1), chord, time,
+					SUNKEN_RESERVES_ITS_OWN_REPEATER ? Set.of(lane.pos().above().immutable())
+						: Set.of(), true);
+			} catch (IllegalArgumentException collided) {
+				sunk = null;
+			}
+			if (sunk != null && placements.troubleCount() == troubleBefore
+					&& !placements.trialCollided()) {
+				placements.commitTrial();
+				placements.padded("sunkenPlainOpening");
+				return sunk;
+			}
+			placements.rollbackTrial();
+			placements.placing(was);
+			placements.padded("sunkenPlainOpeningDidNotHelp");
 		}
 		int cells = layBus(placements, lane.ahead(1).above(), chord, time);
 		return new Body(lane.ahead(1 + cells), placements.lastBusWire);
@@ -26509,6 +26671,15 @@ public final class SongBuilder {
 		// one thing -- which is the bug this file keeps producing. Set every event, and false is what
 		// {@link #walkWall} leaves it at, so the older walk never lays one.
 		placements.sunkenOffered(sunken);
+		// And a chord with no harp, where the plain bus it stays would run out of wire: the sunken
+		// shape opening on a plain block instead. Offered, not decided -- the style stays BUS, and it
+		// is measured as the bus it is the same length as. See SUNKEN_OPENS_PLAIN_WHEN_A_BUS_RUNS_OUT.
+		placements.sunkenPlainOffered(!sunken && SUNKEN_OPENS_PLAIN_WHEN_A_BUS_RUNS_OUT
+			&& SUNKEN_BUSES && style == ChordStyle.BUS && layout.v2()
+			&& (SUNKEN_MAY_OPEN_IN_A_TURN || !inTurn)
+			&& (SUNKEN_OPENS_A_LANE || !placements.laneJustOpened())
+			&& event.notes().size() >= SUNKEN_LOWEST_CHORD && !hasAHarp(event.notes())
+			&& busRunsOut(event.notes().size(), lane));
 		if (sunken) {
 			style = ChordStyle.SUNKEN_BUS;
 		}
@@ -26857,6 +27028,35 @@ public final class SongBuilder {
 
 	/** Whether a stacked shape that falls to a bus at the cap falls to a sunken one. */
 	static boolean FALLBACK_SINKS_AT_THE_CAP = true;
+
+	/**
+	 * Whether a plain bus with no harp in its chord, long enough to run out of wire, is laid as a
+	 * sunken bus opening on a plain block instead.
+	 *
+	 * <p>The user's plain-opening design ({@link #SWAP_SINKS_A_BUS_THAT_RUNS_OUT}) was only asked
+	 * after a two-swap turn. Thriller at twenty wide over one floor, 1 65 1087: a chord of
+	 * twenty-nine with no harp, padded round a flat turn it was forced to take, stepped off the far
+	 * corner and laid plain -- fifteen cells, the whole of a repeater's reach, and the hand-over
+	 * read nought with every note after it silent. Sunk on a plain opening it is the same fifteen
+	 * columns, but the repeater drives the opening block and the dust beside it reads a fresh
+	 * fifteen a column later, which is the cell it was short.</p>
+	 */
+	static boolean SUNKEN_OPENS_PLAIN_WHEN_A_BUS_RUNS_OUT = true;
+
+	/**
+	 * Whether a plain bus of this many notes, riding the bends ahead of it, reaches the whole of a
+	 * repeater's fifteen: a bend spends one of a cell's pair on the run. The measure
+	 * {@link #fallenBus} sinks at.
+	 */
+	private static boolean busRunsOut(int notes, Lane lane) {
+		int corners = 0;
+		for (Lane.Bend bend : lane.bends()) {
+			if (bend.after() < (notes + 1) / 2 + 1) {
+				corners++;
+			}
+		}
+		return (notes + 1 + corners) / 2 >= DUST_RANGE;
+	}
 
 	private static Placed layBus(PlacementPlan placements, Lane lane, int triggerDelay,
 			EventGroup event, ChordStyle style, boolean forceBus, Layout layout) {
@@ -34495,7 +34695,8 @@ public final class SongBuilder {
 			"softTip", "softBehind",
 			"railTail", "railTailBehind", "railSeed", "railSeedTime", "railSeedOnPath",
 			"handover", "handoverBehind",
-			"turnAhead", "sunkenOffered", "laneJustOpened", "climbAhead", "seedAhead",
+			"turnAhead", "sunkenOffered", "sunkenPlainOffered", "laneJustOpened", "climbAhead",
+			"seedAhead",
 			"flankTaken", "climbFedFromCentre", "climbFedByCentre", "floorBelow",
 			"watchingLegWalls", "legWall", "legStep", "legInner", "legNearSide", "legIndex",
 			"legAxis", "legEvent", "hardInnerWalls", "softEvents", "legExit",
@@ -35306,6 +35507,8 @@ public final class SongBuilder {
 		 * what this says.</p>
 		 */
 		private boolean sunkenOffered;
+		/** See {@link #SUNKEN_OPENS_PLAIN_WHEN_A_BUS_RUNS_OUT}. Set per event, like the one above. */
+		private boolean sunkenPlainOffered;
 
 		/** Whether the chord about to be measured is the first its lane holds. */
 		private boolean laneJustOpened;
@@ -35633,6 +35836,14 @@ public final class SongBuilder {
 
 		boolean sunkenOffered() {
 			return sunkenOffered;
+		}
+
+		void sunkenPlainOffered(boolean offered) {
+			sunkenPlainOffered = offered;
+		}
+
+		boolean sunkenPlainOffered() {
+			return sunkenPlainOffered;
 		}
 
 		void turnAhead(boolean ahead) {

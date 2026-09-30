@@ -52,6 +52,18 @@ class PaceDecisionProbe {
 		ComposerProject song = GameSettings.project(file);
 		SongBuilder.PasteMode mode = SongBuilder.PasteMode.INTERLEAVED_HALF_TICK;
 		List<SongBuilder.EventNote> notes = game.notes(song, mode);
+		// The notes the paste gets at one tick, before anything plans them: -Dprobe.tick=2229.
+		String tickAsked = System.getProperty("probe.tick", "");
+		if (!tickAsked.isBlank()) {
+			int tick = Integer.parseInt(tickAsked.strip());
+			List<SongBuilder.EventNote> at = notes.stream().filter(note -> note.time() == tick).toList();
+			System.out.println("==== " + file.getFileName() + " at tick " + tick + ": " + at.size()
+				+ " notes ====");
+			at.forEach(note -> System.out.println("   pitch " + note.pitch() + "  "
+				+ note.instrumentBlock() + "  track " + note.trackNumber() + "  order " + note.order()
+				+ (note.effect() == null ? "" : "  effect " + note.effect())));
+			return;
+		}
 		boolean wasDebug = SongBuilder.DEBUG_PASTE;
 		SongBuilder.PastePlan plan;
 		// Builder switches by name, -Dprobe.set=PACE_BUDGETS_THE_WIRE=true. See Flags.

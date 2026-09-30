@@ -583,6 +583,13 @@ final class FaultView {
 					? " -- and v2's trial fallback never fired, so this is not the build that ships"
 					: ""));
 		}
+		// Every contested cell, named or not: the census counts them either way, and a report that
+		// only listed them with the shapes named hid the whole fault on the build that ships.
+		if (!build.plan().collisions().isEmpty()) {
+			System.out.println("   " + build.plan().collisions().size() + " contested cells:");
+			build.plan().collisions().entrySet().stream().limit(12).forEach(clash ->
+				System.out.println("      " + say(clash.getKey()) + "  " + clash.getValue()));
+		}
 		deadLines(build, perKind);
 		// Repeaters with nothing behind them, which the reader cannot see: it starts a fresh
 		// performance at each and calls everything after it reached. Listed with their cells,
