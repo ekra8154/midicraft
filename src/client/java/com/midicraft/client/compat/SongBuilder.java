@@ -13782,8 +13782,17 @@ public final class SongBuilder {
 			// Asked at the column the module will actually open in, which is a column further along
 			// where a busy pad bought one. That offset used to be the pin's, and the busy pad is what
 			// is left of it.
-			if (headed != null && stackedClashes(placements, lane.ahead(splitOpensAt),
-					event.time(), headed.slots())) {
+			// And the low slots as the module will actually hang them: the descent-flank shed rehomes
+			// a note the clash test above never sees, and the lay-time check refuses exactly that.
+			// Asked here, the answer is the nudge -- the parity pad -- rather than a refusal at lay
+			// time with nothing left to fall to. Fireflies at sixteen wide over two floors,
+			// bottom-start: a busy pad put the head's rehomed low slots beside the stacked bus the
+			// same machine laid a leg before. See CUT_PLAN_ASKS_ITS_LOW_SLOTS.
+			if (headed != null && (stackedClashes(placements, lane.ahead(splitOpensAt),
+					event.time(), headed.slots())
+					|| CUT_PLAN_ASKS_ITS_LOW_SLOTS
+						&& cutLowSlotsLoud(placements, lane.ahead(splitOpensAt), depth, event.time(),
+							headed))) {
 				splitClashed = true;
 				// And the same question the chord nudge is asked: does the wire still reach. This
 				// nudge lays a cell of dust where the head's repeater would have stood, on top of the
@@ -13807,6 +13816,14 @@ public final class SongBuilder {
 							|| CUT_ASKS_THE_BLOCKS_BEHIND
 								&& backPairIsFree(placements, lane.ahead(splitOpensAt + 1), event.time()),
 						stackedIsBehind, true, stairTopFree, stairBottomFree, stairWallFree, false);
+				// The nudged split asked the same low-slot question, of its own slots: it is a
+				// different split, one column shorter, and the old one's slots say nothing about it.
+				if (shifted != null && CUT_PLAN_ASKS_ITS_LOW_SLOTS
+						&& cutLowSlotsLoud(placements, lane.ahead(splitOpensAt + 1), depth,
+							event.time(), shifted)) {
+					placements.padded("planSplitNudgeLoudLowSlot");
+					shifted = null;
+				}
 				if (shifted == null) {
 					// Both cells wrong, or nothing left to cut once a column is spent. Before the head
 					// goes: shed the clashing slot instead, which costs no column and no wire -- the
@@ -32339,6 +32356,23 @@ public final class SongBuilder {
 		}
 		return new BlockPos[0];
 	}
+
+	/**
+	 * Whether a headed cut opening here would hang a low slot beside another tick's live block,
+	 * asked of the slots as the module will lay them -- after the descent-flank shed rehomes its
+	 * note -- which is what the lay-time check refuses. See CUT_PLAN_ASKS_ITS_LOW_SLOTS.
+	 */
+	private static boolean cutLowSlotsLoud(PlacementPlan placements, Lane opens, Direction depth,
+			int time, StackedSplit headed) {
+		BlockPos opening = opens.pos();
+		UltraSlots laid = onTheFreeSlots(placements, opening, opens.travel(), depth, time,
+			headed.slots(), headed.shed() ? DESCENT_FLANK_SLOT : -1,
+			headed.centreFeeds() == CentreFeed.CORKSCREW);
+		return loudLowSlot(placements, opening, opens.travel(), depth, time, laid) >= 0;
+	}
+
+	/** Whether the cut planner asks its head's low slots the lay-time question. */
+	static boolean CUT_PLAN_ASKS_ITS_LOW_SLOTS = true;
 
 	private static int loudLowSlot(PlacementPlan placements, BlockPos pos, Direction travel,
 			Direction noteSide, int time, UltraSlots slots) {
