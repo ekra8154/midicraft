@@ -114,7 +114,12 @@ class FaultProbeTest {
 					System.out.println("   (the song has nothing in that range)");
 				}
 			}
-			FaultView.Build built = FaultView.of(song, mode, width, floors, maxFloors, names);
+			// -Dfault.peak=1: the song cut to its first note a tick. See GameSettings.peaked.
+			int peak = number("peak", 0);
+			FaultView.Build built = peak > 0
+				? FaultView.of(song, GameSettings.peaked(BreachView.song(song, mode), peak), mode,
+					width, floors, maxFloors, names)
+				: FaultView.of(song, mode, width, floors, maxFloors, names);
 			// A box somebody asked for, rather than the one a fault picked. -Dfault.at=x,y,z with
 			// -Dfault.span=xSpan,ySpan,zSpan and -Dfault.view=top|north. There is no substitute for
 			// looking at the place someone is standing in.

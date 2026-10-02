@@ -193,6 +193,28 @@ final class GameSettings {
 			stored.pasteMode == null ? "COMPACT_CUBE" : stored.pasteMode);
 	}
 
+	/**
+	 * Every tick cut to its first {@code peak} notes, or the notes untouched for a peak of nought.
+	 *
+	 * <p>The thinning setting stops at eight, so no song the game can be asked for comes out with
+	 * chords of one unless it was written that way -- and the library has almost none. This is how
+	 * the whole library stands in for the sparse songs a narrow-lane rule is meant for. Read as
+	 * {@code -Dcensus.peak} by the census and {@code -Dfault.peak} by the fault probe.</p>
+	 */
+	static List<SongBuilder.EventNote> peaked(List<SongBuilder.EventNote> notes, int peak) {
+		if (peak <= 0) {
+			return notes;
+		}
+		java.util.Map<Integer, Integer> taken = new java.util.HashMap<>();
+		List<SongBuilder.EventNote> kept = new java.util.ArrayList<>();
+		for (SongBuilder.EventNote note : notes) {
+			if (taken.merge(note.time(), 1, Integer::sum) <= peak) {
+				kept.add(note);
+			}
+		}
+		return kept;
+	}
+
 	private static int clamp(int value, int low, int high) {
 		return Math.max(low, Math.min(high, value));
 	}

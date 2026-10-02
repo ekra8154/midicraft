@@ -1820,6 +1820,70 @@ public final class SongBuilder {
 	 */
 	static PastePlan createInterleavedHalfTickPastePlan(BlockPos origin, Direction forward,
 			List<EventNote> notes, BuildLimits limits, WalkStart start) {
+		if (!SINGLE_NOTE_SONGS_PACK_TWO_APART || packingLanes() || notes.isEmpty()
+				|| chordStats(notes).peak() > 1) {
+			return interleavedHalfTickPlan(origin, forward, notes, limits, start);
+		}
+		// Both, and the better of the two. See SINGLE_NOTE_SONGS_PACK_TWO_APART for why neither
+		// wins everywhere. A walk that throws is a build that is not on offer, so either plan may
+		// stand alone -- and where both throw, the spread one's refusal is the one the player has
+		// always been given.
+		PastePlan spread = null;
+		RuntimeException spreadRefused = null;
+		try {
+			spread = interleavedHalfTickPlan(origin, forward, notes, limits, start);
+		} catch (RuntimeException refused) {
+			spreadRefused = refused;
+		}
+		PastePlan packed = null;
+		PACKING_LANES.set(Boolean.TRUE);
+		try {
+			packed = interleavedHalfTickPlan(origin, forward, notes, limits, start);
+		} catch (RuntimeException refused) {
+			if (spread == null) {
+				throw spreadRefused;
+			}
+		} finally {
+			PACKING_LANES.remove();
+		}
+		if (spread == null) {
+			return packed;
+		}
+		return packed != null && (PACKED_PLAN_ALWAYS_WINS || packedWins(packed, spread))
+			? packed : spread;
+	}
+
+	/**
+	 * Probe dial: the packed plan is built whenever it plans at all, so a census can read what packing
+	 * does on its own rather than only where it won. Off in the game.
+	 */
+	static boolean PACKED_PLAN_ALWAYS_WINS = false;
+
+	/**
+	 * Whether the packed plan is the one to build: no more faults than the spread one by its own
+	 * account, and a smaller footprint.
+	 *
+	 * <p>Faults first, because a shallower build that plays a wrong note is not a better build. The
+	 * plan's own counts rather than a readback, which is the paste's to make and costs more than
+	 * both walks together; the counts are what the paste screen shows before anything is pasted.</p>
+	 */
+	private static boolean packedWins(PastePlan packed, PastePlan spread) {
+		if (planFaults(packed) > planFaults(spread)) {
+			return false;
+		}
+		long packedArea = (long) packed.spanX() * packed.spanZ();
+		long spreadArea = (long) spread.spanX() * spread.spanZ();
+		return packedArea < spreadArea
+			|| packedArea == spreadArea && packed.totalColumns() < spread.totalColumns();
+	}
+
+	private static long planFaults(PastePlan plan) {
+		return plan.faults().size() + plan.wrongNotes() + plan.collisions().size()
+			+ plan.breaches().size() + plan.innerWallBreaches() + plan.outerWallBreaches();
+	}
+
+	private static PastePlan interleavedHalfTickPlan(BlockPos origin, Direction forward,
+			List<EventNote> notes, BuildLimits limits, WalkStart start) {
 		// For probes that come in here directly rather than through the mode dispatch.
 		QUIET_SIDES_THIS_LAYOUT = true;
 		Direction.Axis axis = forward.getAxis();
@@ -7208,12 +7272,12 @@ public final class SongBuilder {
 			// misbuild -- the run lays its own notes and never asks for the shape -- but it is the one
 			// place v2's "the decision is the decision" does not hold, and it is worth closing by
 			// asking the rail question before the shape one.
-			boolean railContinues = V2_RUNS_ON_RAILS && railPhase >= 0;
+			boolean railContinues = v2RailsRun() && railPhase >= 0;
 			// Two where a chord of three has landed on the floor rail, which has no centre to give it:
 			// the blank column that gets it onto the path rail, and then its own.
 			int railColumns = railContinues
 				? railPhase == 1 && railBlank != NO_BLANK ? 2 : 1
-				: V2_RUNS_ON_RAILS
+				: v2RailsRun()
 					&& railOpens(events, index, lane, wall, layout, turning, reserve, wait,
 						railStackSeed(placements, lane, lastStyle, currentTime, turning), booked)
 					// The head's columns, its chord, and the repeater a four-tick stretch of the wait in
@@ -7453,7 +7517,7 @@ public final class SongBuilder {
 			// the wall, which is where the staircase stands. Then nothing goes between them -- the
 			// next event measures {@code columns} as nought, plans no pad and pins nothing.
 			boolean closesOnTheSeed = CLOSING_CHORD_HANGS_ON_THE_FLANKS && RAIL_SEEDS_OFF_THE_CLIMB
-				&& V2_RUNS_ON_RAILS && layout.ultra()
+				&& v2RailsRun() && layout.ultra()
 				&& above >= 0 && above < floors && climb > 0
 				&& reaches && (wall - landing) * lane.travel().getStepX() == 1;
 			// And only where the seed is going to be used. The geometry above says a ladder could
@@ -7547,7 +7611,7 @@ public final class SongBuilder {
 			// could afford, so its landing is the wall's column four levels down, and the lane below
 			// runs at the other wall. Neither depends on anything planned after this line.
 			boolean seedsDescent = false;
-			if (RAIL_SEEDS_OFF_THE_CLIMB && V2_RUNS_ON_RAILS && layout.ultra() && wantsTurn
+			if (RAIL_SEEDS_OFF_THE_CLIMB && v2RailsRun() && layout.ultra() && wantsTurn
 					&& !straddles && climb < 0 && above >= 0 && above < floors) {
 				placements.padded("descentSeedAsked");
 				Direction below = lane.travel().getOpposite();
@@ -9154,7 +9218,7 @@ public final class SongBuilder {
 					// its whole reason for existing, since a song of chords of one to three never
 					// builds a bus to climb off -- which is exactly the song a free seed is for. The
 					// collision is gone now, laid rather than gated: a mirrored climb builds no lift.
-					if (RAIL_SEEDS_OFF_THE_CLIMB && V2_RUNS_ON_RAILS && layout.ultra() && climb > 0
+					if (RAIL_SEEDS_OFF_THE_CLIMB && v2RailsRun() && layout.ultra() && climb > 0
 							&& railDelay(0, seedWait) > 0) {
 						// The lookahead. A climb only pays for a seed the lane above is going to use,
 						// and that lane does not exist yet -- so it is built here, out of the two
@@ -9758,7 +9822,7 @@ public final class SongBuilder {
 			// used to be cut off a column short of.
 			boolean intoTheCorner = RUN_RUNS_INTO_A_CORNER && railPhase >= 0
 				&& (turning || lane.bending());
-			if (!V2_RUNS_ON_RAILS || (turning || lane.bending()) && !intoTheCorner) {
+			if (!v2RailsRun() || (turning || lane.bending()) && !intoTheCorner) {
 				if (railPhase >= 0) {
 					railRunEnded(placements, railRunFloorNotes, railRunColumns, railRunBlanks);
 				}
@@ -10804,6 +10868,7 @@ public final class SongBuilder {
 		 */
 		void run(Runnable walkA, Runnable walkB, int firstTimeA, int firstTimeB) {
 			boolean tolerating = toleratingCollisions();
+			boolean packing = packingLanes();
 			Thread[] walkers = new Thread[2];
 			for (int machine = 0; machine < 2; machine++) {
 				int m = machine;
@@ -10817,6 +10882,7 @@ public final class SongBuilder {
 						// The tolerant pass is a property of the thread that runs it, so the
 						// driver's answer is carried onto this one.
 						TOLERATING_COLLISIONS.set(tolerating);
+						PACKING_LANES.set(packing);
 						// The baton is taken before the walk starts, not at its first event: the
 						// walk sets the plan's walls and depth ahead of its loop, and those are
 						// not to be written by two threads at once.
@@ -10826,6 +10892,7 @@ public final class SongBuilder {
 						thrown = failed;
 					} finally {
 						TOLERATING_COLLISIONS.remove();
+						PACKING_LANES.remove();
 						finished(m, thrown);
 					}
 				}, "midicraft walk " + (m == 0 ? "A" : "B"), 64L << 20);
@@ -12986,12 +13053,12 @@ public final class SongBuilder {
 			// misbuild -- the run lays its own notes and never asks for the shape -- but it is the one
 			// place v2's "the decision is the decision" does not hold, and it is worth closing by
 			// asking the rail question before the shape one.
-			boolean railContinues = V2_RUNS_ON_RAILS && railPhase >= 0;
+			boolean railContinues = v2RailsRun() && railPhase >= 0;
 			// Two where a chord of three has landed on the floor rail, which has no centre to give it:
 			// the blank column that gets it onto the path rail, and then its own.
 			int railColumns = railContinues
 				? railPhase == 1 && railBlank != NO_BLANK ? 2 : 1
-				: V2_RUNS_ON_RAILS
+				: v2RailsRun()
 					&& railOpens(axis, events, index, lane, wall, layout, turning, reserve, wait,
 						railStackSeed(placements, lane, lastStyle, currentTime, turning), booked)
 					// The head's columns, its chord, and the repeater a four-tick stretch of the wait in
@@ -13331,7 +13398,7 @@ public final class SongBuilder {
 			// the wall, which is where the staircase stands. Then nothing goes between them -- the
 			// next event measures {@code columns} as nought, plans no pad and pins nothing.
 			boolean closesOnTheSeed = CLOSING_CHORD_HANGS_ON_THE_FLANKS && RAIL_SEEDS_OFF_THE_CLIMB
-				&& V2_RUNS_ON_RAILS && layout.ultra()
+				&& v2RailsRun() && layout.ultra()
 				&& above >= 0 && above < floors && climb > 0
 				&& reaches && (wall - landing) * stepAlong(axis, lane.travel()) == 1;
 			// And only where the seed is going to be used. The geometry above says a ladder could
@@ -13472,7 +13539,7 @@ public final class SongBuilder {
 			// could afford, so its landing is the wall's column four levels down, and the lane below
 			// runs at the other wall. Neither depends on anything planned after this line.
 			boolean seedsDescent = false;
-			if (RAIL_SEEDS_OFF_THE_CLIMB && V2_RUNS_ON_RAILS && layout.ultra() && wantsTurn
+			if (RAIL_SEEDS_OFF_THE_CLIMB && v2RailsRun() && layout.ultra() && wantsTurn
 					&& !straddles && climb < 0 && above >= 0 && above < floors) {
 				placements.padded("descentSeedAsked");
 				Direction below = lane.travel().getOpposite();
@@ -15216,7 +15283,7 @@ public final class SongBuilder {
 					// its whole reason for existing, since a song of chords of one to three never
 					// builds a bus to climb off -- which is exactly the song a free seed is for. The
 					// collision is gone now, laid rather than gated: a mirrored climb builds no lift.
-					if (RAIL_SEEDS_OFF_THE_CLIMB && V2_RUNS_ON_RAILS && layout.ultra() && climb > 0
+					if (RAIL_SEEDS_OFF_THE_CLIMB && v2RailsRun() && layout.ultra() && climb > 0
 							&& railDelay(0, seedWait) > 0) {
 						// The lookahead. A climb only pays for a seed the lane above is going to use,
 						// and that lane does not exist yet -- so it is built here, out of the two
@@ -15952,7 +16019,7 @@ public final class SongBuilder {
 			// used to be cut off a column short of.
 			boolean intoTheCorner = RUN_RUNS_INTO_A_CORNER && railPhase >= 0
 				&& (turning || lane.bending());
-			if (!V2_RUNS_ON_RAILS || (turning || lane.bending()) && !intoTheCorner) {
+			if (!v2RailsRun() || (turning || lane.bending()) && !intoTheCorner) {
 				if (railPhase >= 0) {
 					railRunEnded(placements, railRunFloorNotes, railRunColumns, railRunBlanks);
 				}
@@ -19385,7 +19452,7 @@ public final class SongBuilder {
 			Map<Integer, Integer> booked) {
 		// The reseed lays one column of its own -- the silent one after the corner -- so the run's own
 		// columns get the rest.
-		boolean opens = RUN_OPENS_ON_A_CORNER && TWO_RAIL_RUNS && layout.ultra() && offACorner
+		boolean opens = RUN_OPENS_ON_A_CORNER && railsRun() && layout.ultra() && offACorner
 			&& !lane.bending()
 			&& railMayStart(events, index, NO_BLANK, railRoom(axis, lane, wall) - 1 - reserve, booked)
 			&& railRoom(axis, lane, wall) >= 3 + reserve;
@@ -20477,7 +20544,7 @@ public final class SongBuilder {
 		// Both sides, because the floor rail has no centre and a chord of two there fills each of
 		// them. It costs nothing over claiming one: a lane reaching one way already spaces at three,
 		// which is what {@link #laneSpacing} answers for either.
-		return TWO_RAIL_RUNS && layout.ultra() && chordSize <= RAIL_MAX_NOTES
+		return railsRun() && layout.ultra() && chordSize <= RAIL_MAX_NOTES
 			? new LaneReach(1, 1, margin, small.lowLive())
 			: small;
 	}
@@ -20786,6 +20853,50 @@ public final class SongBuilder {
 	static boolean V2_RUNS_ON_RAILS = true;
 
 	/**
+	 * Whether a song with no chord wider than one note is also planned with its lanes two apart, and
+	 * built that way where it comes out shallower.
+	 *
+	 * <p>A lone note sits on its own centre line, and a lane of them reaches nothing on either side
+	 * -- which is the lane {@link #laneSpacing} packs two apart, one empty column between the two
+	 * wires. What holds such a song at three is the rails: a floor column has no centre, so even a
+	 * chord of one hangs its note off the side, and {@link #laneReachOf} claims both sides for every
+	 * chord a run could take. Without the runs nothing claims the gap.</p>
+	 *
+	 * <p>So the price of the narrower spacing is the runs, and that is a trade the song decides, not
+	 * a rule. Measured over the library cut to one note a tick, interleaved at twelve sizes: songs
+	 * whose notes are seldom four ticks apart barely use the runs and come out a fifth to over a
+	 * quarter shallower packed, for a few percent more corridor; fast songs live on the runs, spend
+	 * three quarters more corridor without them and come out deeper anyway. Planning both and
+	 * keeping the shallower is the only answer that is right for both, at the cost of a second plan
+	 * for exactly the songs that can use it.</p>
+	 */
+	static boolean SINGLE_NOTE_SONGS_PACK_TWO_APART = true;
+
+	/**
+	 * Whether the plan being walked on this thread is the packed one: rails stood down, so that
+	 * single notes claim no reach and their lanes space two apart.
+	 *
+	 * <p>Per thread for the reason {@link #TOLERATING_COLLISIONS} is: forecasts plan on a background
+	 * thread while the paste plans on the render thread, and a global here would let one of them
+	 * decide what the other builds. The interleaved walkers carry it across the same way.</p>
+	 */
+	private static final ThreadLocal<Boolean> PACKING_LANES = ThreadLocal.withInitial(() -> Boolean.FALSE);
+
+	static boolean packingLanes() {
+		return PACKING_LANES.get();
+	}
+
+	/** {@link #TWO_RAIL_RUNS}, stood down while lanes are being packed. */
+	private static boolean railsRun() {
+		return TWO_RAIL_RUNS && !packingLanes();
+	}
+
+	/** {@link #V2_RUNS_ON_RAILS}, stood down while lanes are being packed. */
+	private static boolean v2RailsRun() {
+		return V2_RUNS_ON_RAILS && !packingLanes();
+	}
+
+	/**
 	 * Columns laid as part of a run, counted by whichever walk laid them.
 	 *
 	 * <p>A plain counter because the question it answers is "did this fire at all", and that question
@@ -20976,7 +21087,7 @@ public final class SongBuilder {
 	 */
 	private static boolean railMayStart(List<EventGroup> events, int index, int floorSeed, int room,
 			Map<Integer, Integer> booked) {
-		if (!TWO_RAIL_RUNS || index + 2 >= events.size()) {
+		if (!railsRun() || index + 2 >= events.size()) {
 			return false;
 		}
 		// Not on a parity seam: the head column would stand right after the piston works and hang
@@ -21065,7 +21176,7 @@ public final class SongBuilder {
 		int held = RAIL_LEAVES_THE_WALL_COLUMN ? Math.max(reserve, 1) : reserve;
 		int room = railRoom(axis, lane, wall)
 			- railHeadColumns(floorSeed, wait) - railPadColumns(wait) - held;
-		boolean opens = TWO_RAIL_RUNS && layout.ultra() && !turning && !lane.bending()
+		boolean opens = railsRun() && layout.ultra() && !turning && !lane.bending()
 			&& railMayStart(events, index, floorSeed, room, booked)
 			&& room >= 2;
 		if (TRACE_RAIL_HEADS && opens) {
@@ -26180,6 +26291,9 @@ public final class SongBuilder {
 	 * the walk hand the chord to a bus instead of building it into something.</p>
 	 */
 	private static boolean smallChordFits(PlacementPlan placements, Lane lane, int notes, int time) {
+		if (packingLanes() && notes == 1) {
+			return loneAnchorFits(placements, lane, time);
+		}
 		Lane body = lane.ahead(1);
 		BlockPos anchor = body.pos().above();
 		return slotIsQuiet(placements, lane, anchor, time)
@@ -26188,6 +26302,33 @@ public final class SongBuilder {
 			&& (notes < 3
 				|| slotIsQuiet(placements, lane, anchor.relative(body.noteSide().getOpposite()),
 					time));
+	}
+
+	/**
+	 * Whether a chord of one can stand as its own anchor, asked of a packed plan.
+	 *
+	 * <p>Two lanes two apart have one column between their wires, and every cell of it stands against
+	 * the other lane's centre line -- which is live wherever that lane sounds a note. So a packed
+	 * build cannot hang anything there, and the one chord that would is the chord of one that gives
+	 * up its anchor and falls to a bus: the bus hangs its note off the side, into the gap. Moonlight
+	 * cut to one note a tick, interleaved at twenty wide: 55 wrong notes, every one a corner bus of
+	 * one note sounded again by the partner's anchor across the gap.</p>
+	 *
+	 * <p>They fell to the bus on a turn, refused by {@link #LINK_KEEPS_ITS_GROUND}: at a spacing of
+	 * two the tight link is a corner, one cell and a corner, and the anchor of a chord riding it
+	 * stands on that link's own wire. The rule is there to keep <em>hanging</em> notes out of ground
+	 * the link is about to walk; an anchor is not hung, it is the wire, so it is not asked. And it is
+	 * asked where the builder will lay it -- {@link #addSpatialEventModule} walks past any corner
+	 * before it stands the repeater, so the anchor lands a cell further on than the lane says.</p>
+	 */
+	private static boolean loneAnchorFits(PlacementPlan placements, Lane lane, int time) {
+		Lane at = lane;
+		while (at.cornerAt(0)) {
+			at = at.ahead(1);
+		}
+		BlockPos anchor = at.ahead(1).pos().above();
+		return !anchor.equals(at.pos()) && !anchor.equals(at.pos().above())
+			&& placements.freeForAnchor(anchor) && !soundedByAnother(placements, anchor, time);
 	}
 
 	/**
@@ -34923,6 +35064,17 @@ public final class SongBuilder {
 			}
 			if (linkKept.contains(position.immutable())) {
 				return false;
+			}
+			return freeForAnchor(position);
+		}
+
+		/**
+		 * {@link #freeForNote} for a note that is the wire rather than hung off it, which the tight
+		 * link's ground does not refuse. See {@code loneAnchorFits}.
+		 */
+		boolean freeForAnchor(BlockPos position) {
+			if (!recording) {
+				return true;
 			}
 			// The cell above may be claimed as air and still be free: claimed air is somebody's
 			// guarantee of emptiness, which is exactly what a note wants over it. In-game reading

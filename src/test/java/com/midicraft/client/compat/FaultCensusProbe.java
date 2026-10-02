@@ -315,7 +315,7 @@ class FaultCensusProbe {
 			}
 			LANES.put(name, lanes);
 			NAMES.put(name, song.name() == null ? name : song.name());
-			List<SongBuilder.EventNote> notes = game.notes(song, mode);
+			List<SongBuilder.EventNote> notes = peakOf(game.notes(song, mode));
 			if (notes.isEmpty()) {
 				continue;
 			}
@@ -381,6 +381,11 @@ class FaultCensusProbe {
 				+ "\" matches none of the " + names.size() + " song names: " + names);
 		}
 		report(mode, sizes, rows, System.currentTimeMillis() - started, held);
+	}
+
+	/** {@code -Dcensus.peak=1}: see {@link GameSettings#peaked}. */
+	private static List<SongBuilder.EventNote> peakOf(List<SongBuilder.EventNote> notes) {
+		return GameSettings.peaked(notes, Integer.parseInt(text("peak", "0")));
 	}
 
 	/** The plan and nothing after it: what the preview does, without the reader. */
