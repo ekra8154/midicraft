@@ -423,6 +423,7 @@ public final class MidicraftConfig {
 	private String relayBlock;
 	private String transparentBlock;
 	private String supportBlock;
+	private String thinLaneBlock;
 	private int midiVelocityCutoff;
 	private int chordThinTarget;
 	/** Whether a chord over the target may play a counted instrument with fewer copies. */
@@ -603,6 +604,8 @@ public final class MidicraftConfig {
 					stored.transparentBlock));
 				instance.setSupportBlock(LaneMaterials.accepted(LaneMaterials.Role.SUPPORT,
 					stored.supportBlock));
+				instance.setThinLaneBlock(LaneMaterials.accepted(LaneMaterials.Role.THIN,
+					stored.thinLaneBlock));
 				instance.midiDefaultInstrument = stored.midiDefaultInstrument == null || stored.midiDefaultInstrument.isBlank()
 					? "HARP"
 					: stored.midiDefaultInstrument;
@@ -1348,6 +1351,16 @@ public final class MidicraftConfig {
 			LaneMaterials.placed(LaneMaterials.Role.SUPPORT, block);
 	}
 
+	public String thinLaneBlock() {
+		return thinLaneBlock;
+	}
+
+	public void setThinLaneBlock(String block) {
+		this.thinLaneBlock = block;
+		com.midicraft.client.compat.SongBuilder.THIN_LANE_BLOCK =
+			LaneMaterials.placed(LaneMaterials.Role.THIN, block);
+	}
+
 
 	public String midiDefaultInstrument() {
 		return midiDefaultInstrument;
@@ -1711,6 +1724,7 @@ public final class MidicraftConfig {
 		config.relayBlock = LaneMaterials.Role.RELAY.fallback();
 		config.transparentBlock = LaneMaterials.Role.TRANSPARENT.fallback();
 		config.supportBlock = LaneMaterials.Role.SUPPORT.fallback();
+		config.thinLaneBlock = LaneMaterials.Role.THIN.fallback();
 		config.midiDefaultInstrument = "HARP";
 		config.midiInstrumentSource = MidiInstrumentSource.FROM_FILE_THEN_NAME;
 		config.composerSpeedQuarters = DEFAULT_COMPOSER_SPEED_QUARTERS;
@@ -1921,6 +1935,7 @@ public final class MidicraftConfig {
 		private String relayBlock;
 		private String transparentBlock;
 		private String supportBlock;
+		private String thinLaneBlock;
 		private String midiDefaultInstrument;
 		private MidiInstrumentSource midiInstrumentSource;
 		private Integer midiVelocityCutoff;
@@ -2003,6 +2018,7 @@ public final class MidicraftConfig {
 			this.relayBlock = config.relayBlock;
 			this.transparentBlock = config.transparentBlock;
 			this.supportBlock = config.supportBlock;
+			this.thinLaneBlock = config.thinLaneBlock;
 			this.midiDefaultInstrument = config.midiDefaultInstrument;
 			this.midiInstrumentSource = config.midiInstrumentSource;
 			this.midiVelocityCutoff = config.midiVelocityCutoff;

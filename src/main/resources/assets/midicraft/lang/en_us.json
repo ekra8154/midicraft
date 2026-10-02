@@ -102,6 +102,8 @@
   "tooltip.midicraft.transparent_block": "What the climbs between floors are built from, glass by default. Dust runs up over it, so it must not conduct redstone and needs a top that dust can sit on. Glass under a note is that note's instrument and stays glass.",
   "option.midicraft.support_block": "Support block",
   "tooltip.midicraft.support_block": "The level under a floor: what holds up falling instruments, dust and the bottom rail's repeaters. Needs a solid top. A slab is laid as its top half. Nothing here carries power.",
+  "option.midicraft.thin_lane_block": "Thin spacing lane block",
+  "tooltip.midicraft.thin_lane_block": "What holds up the wire's dust in a build whose lanes are packed two apart, which a song of single notes on one floor gets where it comes out smaller. The next lane's notes stand right beside that dust, so the block must not conduct redstone, or the dust would sound them. Needs a top that dust can sit on. A smooth stone slab by default, laid as its top half.",
   "category.midicraft.composer": "Composer",
   "category.midicraft.keys": "Keys",
   "category.midicraft.debug": "Debug",

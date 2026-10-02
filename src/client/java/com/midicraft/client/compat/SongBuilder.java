@@ -1820,8 +1820,13 @@ public final class SongBuilder {
 	 */
 	static PastePlan createInterleavedHalfTickPastePlan(BlockPos origin, Direction forward,
 			List<EventNote> notes, BuildLimits limits, WalkStart start) {
+		// One floor only. The wall staircases were drawn for lanes three apart, and two apart a climb
+		// and the neighbouring descent stand a cell from each other with their dust joined: read back
+		// over the library cut to one note a tick, 267 of the 400 packed builds of two and three floors
+		// were dead, and not one of a single floor. The plan's own fault counts cannot see a dead wire,
+		// so packedWins cannot be what keeps those out.
 		if (!SINGLE_NOTE_SONGS_PACK_TWO_APART || packingLanes() || notes.isEmpty()
-				|| chordStats(notes).peak() > 1) {
+				|| limits.laneFloors() > 1 || chordStats(notes).peak() > 1) {
 			return interleavedHalfTickPlan(origin, forward, notes, limits, start);
 		}
 		// Both, and the better of the two. See SINGLE_NOTE_SONGS_PACK_TWO_APART for why neither
@@ -1837,14 +1842,34 @@ public final class SongBuilder {
 		}
 		PastePlan packed = null;
 		PACKING_LANES.set(Boolean.TRUE);
+		PACKED_RAILS.set(PACKED_RAILS_FOR_TWO_MACHINES
+			|| parity(notes, 0).isEmpty() || parity(notes, 1).isEmpty());
 		try {
 			packed = interleavedHalfTickPlan(origin, forward, notes, limits, start);
+			// Walked again with the input's cells barred wherever a note stands against them. Twice at
+			// most: barring a cell moves the notes near it, and those can move the machines' heads,
+			// which is where the input goes.
+			Set<BlockPos> barred = new HashSet<>();
+			for (int again = 0; again < 2; again++) {
+				Set<BlockPos> power = inputPowerCells(packed);
+				if (!touchesANote(packed, power) || !barred.addAll(power)) {
+					break;
+				}
+				PACKED_BARRED.set(Set.copyOf(barred));
+				packed = interleavedHalfTickPlan(origin, forward, notes, limits, start);
+			}
+			if (spread != null && touchesANote(packed, inputPowerCells(packed))) {
+				packed = null;
+			}
 		} catch (RuntimeException refused) {
+			packed = null;
 			if (spread == null) {
 				throw spreadRefused;
 			}
 		} finally {
 			PACKING_LANES.remove();
+			PACKED_RAILS.remove();
+			PACKED_BARRED.remove();
 		}
 		if (spread == null) {
 			return packed;
@@ -1868,13 +1893,60 @@ public final class SongBuilder {
 	 * both walks together; the counts are what the paste screen shows before anything is pasted.</p>
 	 */
 	private static boolean packedWins(PastePlan packed, PastePlan spread) {
-		if (planFaults(packed) > planFaults(spread)) {
+		// And never by trading a wrong note for something else. Counted all alike, Hedwig at eight
+		// wide went packed with a note sounding twice to save the spread build two wall breaches --
+		// and a breach is a block outside the width asked for, where a wrong note is in the music.
+		if (planFaults(packed) > planFaults(spread) || packed.wrongNotes() > spread.wrongNotes()) {
 			return false;
 		}
 		long packedArea = (long) packed.spanX() * packed.spanZ();
 		long spreadArea = (long) spread.spanX() * spread.spanZ();
 		return packedArea < spreadArea
 			|| packedArea == spreadArea && packed.totalColumns() < spread.totalColumns();
+	}
+
+	/**
+	 * Where a plan's redstone blocks stand and where their sticky pistons shove them: the cells a note
+	 * may not touch. Read off the setblocks, because the input is laid last.
+	 */
+	private static Set<BlockPos> inputPowerCells(PastePlan plan) {
+		Map<BlockPos, String> laid = new java.util.HashMap<>();
+		for (String command : plan.commands()) {
+			String[] part = command.split(" ", 5);
+			if (part.length == 5 && "setblock".equals(part[0])) {
+				try {
+					laid.put(new BlockPos(Integer.parseInt(part[1]), Integer.parseInt(part[2]),
+						Integer.parseInt(part[3])), part[4]);
+				} catch (NumberFormatException notACell) {
+					// A relative coordinate or something else that is not a plain cell.
+				}
+			}
+		}
+		Set<BlockPos> power = new HashSet<>();
+		laid.forEach((cell, block) -> {
+			if (!block.startsWith("minecraft:redstone_block")) {
+				return;
+			}
+			power.add(cell);
+			for (Direction side : Direction.Plane.HORIZONTAL) {
+				String behind = laid.getOrDefault(cell.relative(side.getOpposite()), "");
+				if (behind.startsWith("minecraft:sticky_piston[facing=" + side.getName())) {
+					power.add(cell.relative(side));
+				}
+			}
+		});
+		return power;
+	}
+
+	private static boolean touchesANote(PastePlan plan, Set<BlockPos> power) {
+		for (BlockPos note : plan.noteTicks().keySet()) {
+			for (Direction side : Direction.values()) {
+				if (power.contains(note.relative(side))) {
+					return true;
+				}
+			}
+		}
+		return false;
 	}
 
 	private static long planFaults(PastePlan plan) {
@@ -1912,7 +1984,13 @@ public final class SongBuilder {
 		List<EventNote> gtB = gtOdd;
 		List<Integer> flipsA = List.of();
 		List<Integer> flipsB = List.of();
-		if (INTERLEAVED_DYNAMIC_PARITY) {
+		// Not packed. A seam's piston and the block it shoves were laid out for rows three apart; two
+		// apart the piston stands in the gap beside the next row and the repeater after the seam reads
+		// the partner's air cell. Read back over the library cut to one note a tick on one floor: 80
+		// packed builds of 824 severed, 187 lanes, and none at all with the seams off. Packing pays for
+		// the fixed split in depth -- 12.8% shallower than spread where seams made it 17.6% -- and the
+		// plan it is weighed against keeps its seams.
+		if (INTERLEAVED_DYNAMIC_PARITY && !packingLanes()) {
 			ParitySchedule schedule = scheduleParities(notes, limits.reseedTicks());
 			if (!schedule.laneA().isEmpty() && !schedule.laneB().isEmpty()) {
 				gtA = schedule.laneA();
@@ -1954,7 +2032,7 @@ public final class SongBuilder {
 		// onto, on the legs that give up their columns. See WIDTH_HOLDS_THE_WIDEST_BUS.
 		int widestBus = WIDTH_HOLDS_THE_WIDEST_BUS
 			? Math.max(widestBusColumns(evenEvents), widestBusColumns(oddEvents)) + 1
-				+ NESTED_SHORTENING
+				+ nestedShortening()
 			: 0;
 		// The full v2 width for both machines: the nested shape has no corridors. Each machine
 		// gives up three columns at one end of one floor -- where the partner's long link runs --
@@ -4191,6 +4269,9 @@ public final class SongBuilder {
 		LaneRoute base = LaneRoute.serpentine(floors, start.floor(), start.climb());
 		int startFloor = start.floor();
 		int oppositeFloor = startFloor == 0 ? floors - 1 : 0;
+		// Settled here, on the thread that plans, rather than asked of each leg on whichever walker
+		// thread happens to walk it.
+		int shortening = nestedShortening();
 		// Where the opposite-extreme flat lands: forward's end when the floor count is odd.
 		boolean oppositeFlatFar = floors % 2 == 1;
 		return new LaneRoute() {
@@ -4216,15 +4297,15 @@ public final class SongBuilder {
 			@Override
 			public int tipExtension(int leg) {
 				return !firstMachine && oppositeFlatFar && base.floorOf(leg) == oppositeFloor
-					? -NESTED_SHORTENING : 0;
+					? -shortening : 0;
 			}
 
 			@Override
 			public int nearExtension(int leg) {
 				if (firstMachine) {
-					return base.floorOf(leg) == startFloor ? -NESTED_SHORTENING : 0;
+					return base.floorOf(leg) == startFloor ? -shortening : 0;
 				}
-				return !oppositeFlatFar && base.floorOf(leg) == oppositeFloor ? -NESTED_SHORTENING : 0;
+				return !oppositeFlatFar && base.floorOf(leg) == oppositeFloor ? -shortening : 0;
 			}
 
 			@Override
@@ -10869,6 +10950,8 @@ public final class SongBuilder {
 		void run(Runnable walkA, Runnable walkB, int firstTimeA, int firstTimeB) {
 			boolean tolerating = toleratingCollisions();
 			boolean packing = packingLanes();
+			boolean packedRails = PACKED_RAILS.get();
+			Set<BlockPos> packedBarred = PACKED_BARRED.get();
 			Thread[] walkers = new Thread[2];
 			for (int machine = 0; machine < 2; machine++) {
 				int m = machine;
@@ -10883,6 +10966,8 @@ public final class SongBuilder {
 						// driver's answer is carried onto this one.
 						TOLERATING_COLLISIONS.set(tolerating);
 						PACKING_LANES.set(packing);
+						PACKED_RAILS.set(packedRails);
+						PACKED_BARRED.set(packedBarred);
 						// The baton is taken before the walk starts, not at its first event: the
 						// walk sets the plan's walls and depth ahead of its loop, and those are
 						// not to be written by two threads at once.
@@ -10893,6 +10978,8 @@ public final class SongBuilder {
 					} finally {
 						TOLERATING_COLLISIONS.remove();
 						PACKING_LANES.remove();
+						PACKED_RAILS.remove();
+						PACKED_BARRED.remove();
 						finished(m, thrown);
 					}
 				}, "midicraft walk " + (m == 0 ? "A" : "B"), 64L << 20);
@@ -11094,6 +11181,10 @@ public final class SongBuilder {
 		// See RAIL_CLAIMS_ITS_COMMITTED_FLOOR.
 		List<BlockPos> railClaims = new ArrayList<>();
 		int railClaimTime = -1;
+		// A packed run's claims on the columns it has committed to, each with its own tick. See
+		// packedClaimPath.
+		Map<BlockPos, Integer> packedNoteClaims = new java.util.HashMap<>();
+		Map<BlockPos, Integer> packedLiveClaims = new java.util.HashMap<>();
 		// Anchored on the lane, not the cursor: ahead(n) from here reaches every column of
 		// this lane, and a lane's travel and depth do not change once it has begun.
 		ParityOracle parity = layout.ultra() ? parityOracle(axis, placements, lane) : null;
@@ -11137,6 +11228,10 @@ public final class SongBuilder {
 				}
 				railClaims.clear();
 			}
+			packedNoteClaims.forEach(placements::releaseNoteClaim);
+			packedNoteClaims.clear();
+			packedLiveClaims.forEach(placements::releaseLiveClaim);
+			packedLiveClaims.clear();
 			// Where the last corner is, in the world, kept while the route still carries the bend --
 			// once it is taken there is nothing left to ask. Bend offsets are relative and shift as
 			// the lane advances, so the position has to be read now rather than reconstructed later.
@@ -13056,15 +13151,19 @@ public final class SongBuilder {
 			boolean railContinues = v2RailsRun() && railPhase >= 0;
 			// Two where a chord of three has landed on the floor rail, which has no centre to give it:
 			// the blank column that gets it onto the path rail, and then its own.
+			int railStagger = railContinues ? 0 : packedRunStagger(placements, events, index, lane, wait,
+				railStackSeed(placements, lane, lastStyle, currentTime, turning));
 			int railColumns = railContinues
 				? railPhase == 1 && railBlank != NO_BLANK ? 2 : 1
-				: v2RailsRun()
+				: v2RailsRun() && railStagger >= 0
 					&& railOpens(axis, events, index, lane, wall, layout, turning, reserve, wait,
-						railStackSeed(placements, lane, lastStyle, currentTime, turning), booked)
+						railStackSeed(placements, lane, lastStyle, currentTime, turning), booked,
+						railStagger)
 					// The head's columns, its chord, and the repeater a four-tick stretch of the wait in
-					// front of it costs -- the same sum the plain path makes of it.
-					? railHeadColumns(railStackSeed(placements, lane, lastStyle, currentTime, turning),
-						wait) + 1 + railPadColumns(wait) : 0;
+					// front of it costs -- the same sum the plain path makes of it. And a packed run's
+					// stagger, see packedRunStagger.
+					? staggeredHeadColumns(railStackSeed(placements, lane, lastStyle, currentTime,
+						turning), wait, railStagger) + railStagger + 1 + railPadColumns(wait) : 0;
 			int landing = railColumns > 0
 				? coordAlong(axis, lane.pos()) + stepAlong(axis, lane.travel()) * (railColumns + reserve)
 				: here.end() + stepAlong(axis, lane.travel()) * reserve;
@@ -16019,14 +16118,18 @@ public final class SongBuilder {
 			// used to be cut off a column short of.
 			boolean intoTheCorner = RUN_RUNS_INTO_A_CORNER && railPhase >= 0
 				&& (turning || lane.bending());
+			// The same question the measurement asked, of the same lane. See packedRunStagger.
+			int openStagger = railPhase >= 0 ? 0 : packedRunStagger(placements, events, index, lane,
+				wait, railStackSeed(placements, lane, lastStyle, currentTime, false));
 			if (!v2RailsRun() || (turning || lane.bending()) && !intoTheCorner) {
 				if (railPhase >= 0) {
 					railRunEnded(placements, railRunFloorNotes, railRunColumns, railRunBlanks);
 				}
 				railPhase = -1;
-			} else if (railPhase >= 0 || railOpens(axis, events, index, lane, laneWall, layout, false,
+			} else if (railPhase >= 0 || openStagger >= 0
+					&& railOpens(axis, events, index, lane, laneWall, layout, false,
 					reserve, wait, railStackSeed(placements, lane, lastStyle, currentTime, false),
-					booked)
+					booked, openStagger)
 					// A corner's say-so is for the reseed and for nothing else. The corner asks for
 					// less room on purpose -- a reseed spends one silent column where a head spends
 					// two and a wait in front of it -- and a run let in on the corner's word and then
@@ -16215,12 +16318,18 @@ public final class SongBuilder {
 						event.time() - currentTime - spentPadding, layout.ultra());
 					// Off a stacked chord only where the padding did not move the lane on: the cross
 					// has to be the cell behind the trigger, and a column of wire in between puts the
-					// whole thing out of reach.
-					boolean offStack = seed != NO_BLANK && opener.lane().pos().equals(lane.pos());
+					// whole thing out of reach. Which a stagger is.
+					boolean offStack = openStagger == 0 && seed != NO_BLANK
+						&& opener.lane().pos().equals(lane.pos());
 					fromDust = !offStack;
+					Lane headAt = opener.lane();
+					if (openStagger > 0) {
+						placements.padded("railStagger");
+						headAt = emitDust(placements, headAt, openStagger, false, "railStagger");
+					}
 					lane = offStack
 						? addRailFromStack(placements, opener.lane(), opener.triggerDelay(), seed)
-						: addRailHead(placements, opener.lane(), opener.triggerDelay(), event.time());
+						: addRailHead(placements, headAt, opener.triggerDelay(), event.time());
 					railPhase = 0;
 					railBlanksRunning = 0;
 					railFloorCarried = false;
@@ -16530,7 +16639,8 @@ public final class SongBuilder {
 						// one, and the note fell back to the noisy near slot -- a dark zone at
 						// fifty-eight wide over three floors, top-start, 34 56 36 sounded 178
 						// ticks early by a stacked module's side instrument.
-						if (RAIL_MOVES_FOR_STACKS && floorChord.notes().size() < sides.size()
+						if (RAIL_MOVES_FOR_STACKS && !packingLanes()
+								&& floorChord.notes().size() < sides.size()
 								&& !railSlotTakes(placements, lane.pos().relative(near),
 									railClaimTime)
 								&& railSlotTakes(placements, lane.pos().relative(near.getOpposite()),
@@ -16545,6 +16655,33 @@ public final class SongBuilder {
 							}
 						}
 						placements.padded("railClaimedItsFloor", railClaims.size());
+					}
+					// Packed, the live blocks of the columns committed to are claimed as well, and
+					// the path column's note -- see packedClaimPath.
+					if (packingLanes() && nextDelay > 0 && index + 1 < events.size()) {
+						if (railPhase == 0) {
+							boolean blank = railBlank != NO_BLANK;
+							int floorTime = blank ? railBlank : events.get(index + 1).time();
+							packedClaim(placements, packedLiveClaims, lane.pos(), floorTime, true);
+							// The whole pair, path column and all: it was asked about now, at the commit,
+							// and the partner walks before the floor column is laid. Claimed only once the
+							// floor column was down, the path column stood unclaimed for exactly that turn
+							// -- HOTMK 2 lanes at twelve wide, the partner's head lit beside its note.
+							if (!blank) {
+								packedClaim(placements, packedNoteClaims,
+									lane.pos().relative(lane.noteSide().getOpposite()), floorTime, false);
+								if (index + 2 < events.size()) {
+									packedClaimPath(placements, lane.ahead(1), events.get(index + 2),
+										packedLiveClaims, packedNoteClaims);
+								}
+							} else {
+								packedClaimPath(placements, lane.ahead(1), events.get(index + 1),
+									packedLiveClaims, packedNoteClaims);
+							}
+						} else {
+							packedClaimPath(placements, lane, events.get(index + 1),
+								packedLiveClaims, packedNoteClaims);
+						}
 					}
 				}
 				RAIL_COLUMNS++;
@@ -17580,7 +17717,7 @@ public final class SongBuilder {
 				? delayColumns + shift + 2
 				: style == ChordStyle.SUNKEN_BUS
 					? delayColumns + 2 + sunken
-					: delayColumns + (style == ChordStyle.BUS ? 1 + cells : 2);
+					: delayColumns + (style == ChordStyle.BUS ? 1 + cells : 2 + shift);
 		int tip = style == ChordStyle.BUS ? DUST_RANGE - cells
 			: style == ChordStyle.SUNKEN_BUS ? DUST_RANGE - sunken
 			: style.busHeaded()
@@ -20544,7 +20681,10 @@ public final class SongBuilder {
 		// Both sides, because the floor rail has no centre and a chord of two there fills each of
 		// them. It costs nothing over claiming one: a lane reaching one way already spaces at three,
 		// which is what {@link #laneSpacing} answers for either.
-		return railsRun() && layout.ultra() && chordSize <= RAIL_MAX_NOTES
+		//
+		// Not of a packed plan. Its runs, where it keeps them, are kept out of the way by being out
+		// of step with the lane alongside rather than by room. See PACKED_LANES_KEEP_RAILS.
+		return railsRun() && !packingLanes() && layout.ultra() && chordSize <= RAIL_MAX_NOTES
 			? new LaneReach(1, 1, margin, small.lowLive())
 			: small;
 	}
@@ -20886,14 +21026,64 @@ public final class SongBuilder {
 		return PACKING_LANES.get();
 	}
 
-	/** {@link #TWO_RAIL_RUNS}, stood down while lanes are being packed. */
+	/**
+	 * Whether a packed plan keeps its rails, hanging their notes into the gap on the promise that
+	 * every one of them faces a repeater of the lane alongside.
+	 *
+	 * <p>A rail column holds one live block and one repeater, on the path and the floor in turn, and
+	 * a repeater powers only what it faces. So two runs side by side half a column out of step never
+	 * sound each other's notes, and two in step sound them at every column. What keeps them out of
+	 * step is {@link #packedPathTakes} and {@link #railFloorTakes}: a run opens and carries on only
+	 * where every note it hangs faces something of the lane behind that is not live.</p>
+	 *
+	 * <p>One machine only: see {@link #PACKED_RAILS}. Read back over the library cut to one note a
+	 * tick on one floor, packed with rails comes out 23% shallower than spread where packed without
+	 * them comes out 10%.</p>
+	 */
+	static boolean PACKED_LANES_KEEP_RAILS = true;
+
+	/**
+	 * Whether this packed plan keeps its rails: always one machine's, and two machines' under
+	 * {@link #PACKED_RAILS_FOR_TWO_MACHINES}.
+	 *
+	 * <p>The stagger is asked of the lane behind, and in one machine the lane behind is always built
+	 * -- lanes go down in order. In two, every other boundary is the partner's row, walked in step
+	 * with this one, and the cell a note is asked about may simply not be laid yet. Read back with
+	 * rails kept and the notes alone asking: 2,089 wrong notes, every one of them in a two-machine
+	 * song, and none in a one-machine song.</p>
+	 */
+	private static final ThreadLocal<Boolean> PACKED_RAILS = ThreadLocal.withInitial(() -> Boolean.FALSE);
+
+	/**
+	 * Whether two machines packed two apart keep their rails as well, on the strength of every live
+	 * block asking the other way: {@link #packedLiveTakes}, asked of a rail's centre, its floor
+	 * stone, its head and a lone note's anchor, so that whichever row reaches a column second
+	 * answers for both.
+	 */
+	static boolean PACKED_RAILS_FOR_TWO_MACHINES = true;
+
+	/**
+	 * Cells no note of a packed plan may stand against: where the two-machine input's redstone blocks
+	 * stand and where their pistons shove them.
+	 *
+	 * <p>A redstone block is a power source, so a note beside it sounds when it lands, whatever tick
+	 * that note was written for. Three apart nothing hangs beside the input's row; two apart the next
+	 * row's top-rail notes hang into the gap right against it -- found in game on the double-speed
+	 * Rapp riff, two notes flush against the double piston's blocks. The bottom rail hangs a level
+	 * down and touches neither. The input is laid after both machines are walked, so nothing can ask
+	 * it while the walk is going; the plan is walked, the input read off it, and the plan walked again
+	 * with these cells barred. See {@link #inputPowerCells}.</p>
+	 */
+	private static final ThreadLocal<Set<BlockPos>> PACKED_BARRED = ThreadLocal.withInitial(Set::of);
+
+	/** {@link #TWO_RAIL_RUNS}, stood down while lanes are packed unless the packing keeps them. */
 	private static boolean railsRun() {
-		return TWO_RAIL_RUNS && !packingLanes();
+		return TWO_RAIL_RUNS && (!packingLanes() || PACKED_LANES_KEEP_RAILS && PACKED_RAILS.get());
 	}
 
-	/** {@link #V2_RUNS_ON_RAILS}, stood down while lanes are being packed. */
+	/** {@link #V2_RUNS_ON_RAILS}, stood down while lanes are packed unless the packing keeps them. */
 	private static boolean v2RailsRun() {
-		return V2_RUNS_ON_RAILS && !packingLanes();
+		return V2_RUNS_ON_RAILS && (!packingLanes() || PACKED_LANES_KEEP_RAILS && PACKED_RAILS.get());
 	}
 
 	/**
@@ -21164,6 +21354,14 @@ public final class SongBuilder {
 	private static boolean railOpens(Direction.Axis axis, List<EventGroup> events, int index,
 			Lane lane, int wall, Layout layout, boolean turning, int reserve, int wait, int floorSeed,
 			Map<Integer, Integer> booked) {
+		return railOpens(axis, events, index, lane, wall, layout, turning, reserve, wait, floorSeed,
+			booked, 0);
+	}
+
+	/** @param stagger the columns of dust a packed run lays before its head; see {@link #packedRunStagger} */
+	private static boolean railOpens(Direction.Axis axis, List<EventGroup> events, int index,
+			Lane lane, int wall, Layout layout, boolean turning, int reserve, int wait, int floorSeed,
+			Map<Integer, Integer> booked, int stagger) {
 		// What is left for the run's own columns once the head, the wait in front of it and the turn's
 		// reserve are paid for -- which is the room the lookahead gets to spend.
 		//
@@ -21175,7 +21373,7 @@ public final class SongBuilder {
 		// test's, and it has to be the same rule: see {@link #RAIL_LEAVES_THE_WALL_COLUMN}.
 		int held = RAIL_LEAVES_THE_WALL_COLUMN ? Math.max(reserve, 1) : reserve;
 		int room = railRoom(axis, lane, wall)
-			- railHeadColumns(floorSeed, wait) - railPadColumns(wait) - held;
+			- staggeredHeadColumns(floorSeed, wait, stagger) - railPadColumns(wait) - held;
 		boolean opens = railsRun() && layout.ultra() && !turning && !lane.bending()
 			&& railMayStart(events, index, floorSeed, room, booked)
 			&& room >= 2;
@@ -21290,10 +21488,12 @@ public final class SongBuilder {
 		// where the run is allowed to stop. A chord the floor column cannot hold without sounding it
 		// early falls through to the blank below, which is the column that moves it up to the path
 		// rail -- the second option, and the one already built.
+		Lane path = floor == null ? null : floor.ahead(1);
 		if (railHolds(next, false) && railFloorTakes(placements, floor, next)
 				&& railDelay(floorLive, next.time()) > 0
 				&& index + 2 < events.size() && railHolds(events.get(index + 2), true)
-				&& railDelay(pathLive, events.get(index + 2).time()) > 0) {
+				&& railDelay(pathLive, events.get(index + 2).time()) > 0
+				&& packedPathTakes(placements, path, events.get(index + 2))) {
 			return new RailPair(false, next.time());
 		}
 		// Which clause of the plain pair said no, for the walk's real asks only. The plain pair is
@@ -21308,7 +21508,8 @@ public final class SongBuilder {
 					: railDelay(floorLive, next.time()) <= 0 ? "FloorOutOfTick"
 					: index + 2 >= events.size() ? "SongEnds"
 					: !railHolds(events.get(index + 2), true) ? "PathChordTooBig"
-					: "PathOutOfTick"));
+					: railDelay(pathLive, events.get(index + 2).time()) <= 0 ? "PathOutOfTick"
+					: "PathFacesALiveCell"));
 		}
 		if (!railHolds(next, true)) {
 			return railNoPair(placements, "ChordWillNotHold");
@@ -21324,8 +21525,90 @@ public final class SongBuilder {
 		int latest = floorLive + 4;
 		int blankTime = index + 2 < events.size()
 			? Math.min(latest, events.get(index + 2).time() - 1) : latest;
+		if (!packedPathTakes(placements, path, next)
+				|| floor != null && placements != null
+					&& !packedLiveTakes(placements, floor.pos(), blankTime)) {
+			return railNoPair(placements, "PathFacesALiveCell");
+		}
 		return railDelay(floorLive, blankTime) > 0 ? new RailPair(true, blankTime)
 			: railNoPair(placements, "BlankOutOfTick");
+	}
+
+	/**
+	 * Packed: how many columns of dust a run lays before its head to come out of step with the lane
+	 * behind -- nought or one -- or -1 where neither puts it out of step.
+	 *
+	 * <p>The rail parity pad. Lanes are the same length and their runs open wherever the music lets
+	 * them, so two neighbouring runs are as likely in step as not, and in step every floor note of
+	 * this one faces a live floor stone of the lane behind. The checks refuse those notes one by one
+	 * and the run carries nothing on its floor rail -- Neverending Night at fifteen wide: 25 blank
+	 * floor columns in 30, the build twice the corridor of the spread one. One cell of dust before
+	 * the head moves every column of the run along by one, and a run half a column out of step hangs
+	 * every note against a repeater. Dust carries no delay, so the ticks do not move.</p>
+	 *
+	 * <p>Asked of the run's first path column and the floor column after it, which settle the step
+	 * for the whole run. Asked where the walk measures a run and again where it builds one, with the
+	 * same arguments, so the two cannot disagree about the columns the run costs.</p>
+	 */
+	private static int packedRunStagger(PlacementPlan placements, List<EventGroup> events, int index,
+			Lane lane, int wait, int seed) {
+		if (!packingLanes()) {
+			return 0;
+		}
+		// Dust straight after a soft tip is dead, so the stagger is only on offer where the wait's
+		// own repeaters stand between the two.
+		int most = placements.softTip() && railPadColumns(wait) == 0 ? 0 : 1;
+		for (int stagger = 0; stagger <= most; stagger++) {
+			int toPath = railPadColumns(wait) + staggeredHeadColumns(seed, wait, stagger) + stagger;
+			Lane path = lane.ahead(toPath);
+			// The head's second column, whose stone the dust makes live with this chord.
+			if (packedLiveTakes(placements, lane.ahead(toPath - 1).pos(), events.get(index).time())
+					&& packedPathTakes(placements, path, events.get(index))
+					&& (index + 1 >= events.size()
+						|| railFloorTakes(placements, path.ahead(1), events.get(index + 1)))) {
+				return stagger;
+			}
+		}
+		return -1;
+	}
+
+	/**
+	 * {@link #railHeadColumns}, for a head standing after a stagger: always the full head, because the
+	 * cheap one off a stacked chord needs that chord's cross directly behind its trigger.
+	 */
+	private static int staggeredHeadColumns(int seed, int wait, int stagger) {
+		return stagger > 0 ? RAIL_HEAD_COLUMNS : railHeadColumns(seed, wait);
+	}
+
+	/**
+	 * Packed: whether a path column standing here could hang this chord's side note without the lane
+	 * behind sounding it.
+	 *
+	 * <p>The stagger, asked. A rail column holds one live block and one repeater, the path and the
+	 * floor in turn, and a repeater powers only the cell it faces -- so a run half a column out of
+	 * step with the lane behind hangs every note against that lane's repeaters, and one in step hangs
+	 * every note against its live blocks. The floor column of a pair is asked the same of its own
+	 * slot in {@link #railFloorTakes}; this is the path column's half, which spread lanes never had to
+	 * ask, because three apart nothing of the lane behind stands beside a flank.</p>
+	 *
+	 * <p>A harp note takes the centre, which is this lane's own wire, and asks nothing.</p>
+	 */
+	private static boolean packedPathTakes(PlacementPlan placements, Lane path, EventGroup event) {
+		if (!packingLanes() || placements == null || path == null) {
+			return true;
+		}
+		// The centre goes live with the chord whether it holds the harp or a stone.
+		BlockPos centre = path.pos().above();
+		if (!packedLiveTakes(placements, centre, event.time())) {
+			return false;
+		}
+		List<EventNote> hanging = new ArrayList<>(event.notes());
+		takeHarpNote(hanging);
+		if (hanging.isEmpty()) {
+			return true;
+		}
+		BlockPos slot = centre.relative(path.noteSide().getOpposite());
+		return railSlotTakes(placements, slot, event.time());
 	}
 
 	/**
@@ -21684,14 +21967,30 @@ public final class SongBuilder {
 		if (!RAIL_MOVES_FOR_STACKS || floor == null) {
 			return true;
 		}
+		// Packed, the floor stone goes live with the chord and asks the other way as well.
+		if (!packedLiveTakes(placements, floor.pos(), event.time())) {
+			return false;
+		}
 		Direction near = floor.noteSide().getOpposite();
 		int room = 0;
-		for (Direction side : List.of(near, near.getOpposite())) {
+		for (Direction side : packedSides(near)) {
 			if (railSlotTakes(placements, floor.pos().relative(side), event.time())) {
 				room++;
 			}
 		}
 		return room >= event.notes().size();
+	}
+
+	/**
+	 * The sides a run or a flanked close may hang notes on: both, or packed, the near one alone.
+	 *
+	 * <p>Two apart, the far side is the next lane's near side -- the column between the two wires
+	 * belongs to whichever lane is built second, which hangs its notes into it on the promise that
+	 * each faces something of this lane that is not live. A note of this lane there would stand
+	 * against the next lane's centre line before it exists, and nothing could keep that promise.</p>
+	 */
+	private static List<Direction> packedSides(Direction near) {
+		return packingLanes() ? List.of(near) : List.of(near, near.getOpposite());
 	}
 
 	/**
@@ -21712,7 +22011,7 @@ public final class SongBuilder {
 		// near side is the one facing the lane already built, so it is the only one that can have
 		// something in it -- and a single note that moves across costs nothing at all, where the same
 		// note left where it was sounds a stacked chord's tick instead of its own.
-		if (RAIL_MOVES_FOR_STACKS && notes.size() < sides.size()
+		if (RAIL_MOVES_FOR_STACKS && !packingLanes() && notes.size() < sides.size()
 				&& !railSlotTakes(placements, anchor.relative(near), time)
 				&& railSlotTakes(placements, anchor.relative(near.getOpposite()), time)) {
 			placements.padded("railNoteMovedForStack");
@@ -21763,7 +22062,7 @@ public final class SongBuilder {
 		}
 		Direction near = body.noteSide().getOpposite();
 		int room = 0;
-		for (Direction side : List.of(near, near.getOpposite())) {
+		for (Direction side : packedSides(near)) {
 			if (railSlotTakes(placements, body.pos().relative(side), time)) {
 				room++;
 			}
@@ -21885,8 +22184,12 @@ public final class SongBuilder {
 	 */
 	/** Whether a note here would be set off by something belonging to another tick. */
 	private static boolean soundedByAnother(PlacementPlan placements, BlockPos slot, int time) {
+		boolean packing = packingLanes();
+		Set<BlockPos> barred = packing ? PACKED_BARRED.get() : Set.of();
 		for (Direction direction : Direction.values()) {
-			if (placements.liveAt(slot.relative(direction), time)) {
+			BlockPos beside = slot.relative(direction);
+			if ((packing ? placements.foreignLiveAt(beside, time) : placements.liveAt(beside, time))
+					|| barred.contains(beside)) {
 				return true;
 			}
 		}
@@ -26328,7 +26631,63 @@ public final class SongBuilder {
 		}
 		BlockPos anchor = at.ahead(1).pos().above();
 		return !anchor.equals(at.pos()) && !anchor.equals(at.pos().above())
-			&& placements.freeForAnchor(anchor) && !soundedByAnother(placements, anchor, time);
+			&& placements.freeForAnchor(anchor) && !soundedByAnother(placements, anchor, time)
+			&& packedLiveTakes(placements, anchor, time);
+	}
+
+	/**
+	 * Packed: whether a block that goes live at this tick may stand here without sounding a note of
+	 * somebody else's tick beside it.
+	 *
+	 * <p>The other half of every note's own question. A note asks whether anything live is already
+	 * beside it ({@link #soundedByAnother}), and in one machine that is the whole of it: lanes go down
+	 * in order, so a lane's notes hang against a lane already built, and nothing live ever arrives
+	 * beside a note after it. Two machines walk their rows together, so the partner's row may hang a
+	 * note into the gap before this row has laid the block beside it -- and then this block is the one
+	 * that has to ask. The stacked parity check learned the same thing first: it asks both ways, of
+	 * whatever is already down, and whichever row reaches a column second sees the first.</p>
+	 */
+	/**
+	 * Packed: claims a committed path column -- its centre live at the chord's tick, and the note it
+	 * will hang on the near side unless the chord's one note is a harp and takes the centre.
+	 *
+	 * <p>A run commits to a column an event or two before it lays it, and two machines walk in turns
+	 * in between. The floor rail's note slots were claimed for exactly that race once already, after
+	 * a stacked module of the partner's laid beside one ({@link #RAIL_CLAIMS_ITS_COMMITTED_FLOOR}).
+	 * Two apart every column of a run is contested both ways -- the partner's notes against these
+	 * live blocks as much as these notes against the partner's -- so packed, the live blocks are
+	 * claimed too, and the path column's note with them. Released at the top of the next event, as
+	 * the floor's are.</p>
+	 */
+	private static void packedClaimPath(PlacementPlan placements, Lane path, EventGroup chord,
+			Map<BlockPos, Integer> liveClaims, Map<BlockPos, Integer> noteClaims) {
+		BlockPos centre = path.pos().above();
+		packedClaim(placements, liveClaims, centre, chord.time(), true);
+		List<EventNote> hanging = new ArrayList<>(chord.notes());
+		takeHarpNote(hanging);
+		if (!hanging.isEmpty()) {
+			packedClaim(placements, noteClaims, centre.relative(path.noteSide().getOpposite()),
+				chord.time(), false);
+		}
+	}
+
+	private static void packedClaim(PlacementPlan placements, Map<BlockPos, Integer> claims,
+			BlockPos cell, int time, boolean live) {
+		if (live ? placements.claimLive(cell, time) : placements.claimNote(cell, time)) {
+			claims.put(cell.immutable(), time);
+		}
+	}
+
+	private static boolean packedLiveTakes(PlacementPlan placements, BlockPos cell, int time) {
+		if (!packingLanes() || !placements.recording) {
+			return true;
+		}
+		for (Direction direction : Direction.values()) {
+			if (placements.foreignNoteAt(cell.relative(direction), time)) {
+				return false;
+			}
+		}
+		return true;
 	}
 
 	/**
@@ -26531,7 +26890,9 @@ public final class SongBuilder {
 		// not. In a turn the stacked shape is unavailable whatever its size, and a chord with fewer than
 		// two notes that will pass power sideways has no relays to stand the module on, so the bus is
 		// still what is left when neither holds.
-		if (style == ChordStyle.SMALL && lane.crowded()
+		// A packed chord of one is asked below instead, where it can be nudged: see packedLoneNote.
+		boolean packedLone = packingLanes() && style == ChordStyle.SMALL && event.notes().size() == 1;
+		if (style == ChordStyle.SMALL && lane.crowded() && !packedLone
 				&& !smallChordFits(placements, lane, event.notes().size(), event.time())) {
 			// Counted three ways, because in-game reading shows small chords coming out bus-shaped in game
 			// "with no explanation, especially on flat turns" and this is the only line that can do it. The
@@ -26574,6 +26935,25 @@ public final class SongBuilder {
 		// again below once the shift it chose is refused at the wire.
 		Lane askedAt = start;
 		int withoutTheMove = 0;
+		// Packed, a chord of one that cannot stand where it is takes a column of pad and stands one
+		// further on, the way a stacked chord's parity nudge does. The bus every other shape falls
+		// back to hangs its note off the side, and packed, the side is the gap -- the one place a
+		// note of this lane is sure to stand against the next lane's wire. Only where the next column
+		// will take it; where neither will, the bus is what is left, as it always was.
+		if (packedLone && !loneAnchorFits(placements, lane, event.time())) {
+			// Not straight off a soft tip: the module behind powers a repeater and no dust, and the
+			// pad's one way round that -- splitting the trigger -- needs a delay of two to split.
+			// you-spin-me-round at twenty-four wide: a run ending on its head's dust-driven column,
+			// a cell of nudge dust after it, and the rest of the lane silent.
+			if (!placements.softTip() && loneAnchorFits(placements, lane.ahead(1), event.time())) {
+				placements.padded("packedLoneNudged");
+				nudge = true;
+			} else {
+				placements.padded("packedLoneBoxedIn");
+				gaveUp = "packedLoneBoxedIn";
+				style = ChordStyle.BUS;
+			}
+		}
 		if (style.stacked()) {
 			UltraSlots slots = slotsFor(style, event.notes());
 			RelocationRoom room = relocationRoom(style, event.notes());
@@ -26978,6 +27358,13 @@ public final class SongBuilder {
 		Lane start = lane;
 		if (!style.stacked()) {
 			trace(event, lane, style, style, gaveUp);
+			// A packed chord of one nudged by shapeFor: its column of pad, then the module -- laid the
+			// way a stacked nudge lays its own, a repeater where the module behind ended soft.
+			if (nudge && style == ChordStyle.SMALL) {
+				lane = pastAnyCorner(placements, lane);
+				triggerDelay = parityPadOrSplitRepeater(placements, lane, triggerDelay);
+				lane = lane.ahead(1);
+			}
 			// A sunken bus is a bus here too. forceBus is what tells addSpatialEventModule that the
 			// small module is not on offer, and it went down as {@code style == BUS} -- so a chord
 			// measured as SUNKEN_BUS arrived at the builder with the small shape still in play and
@@ -28226,7 +28613,8 @@ public final class SongBuilder {
 				+ " tail=" + (placements.softTail() != null)
 				+ " tailBehind=" + (placements.softTailBehind() != null));
 		}
-		set(placements, cursor, "minecraft:stone");
+		// Packed, the pad's dust stands on a block that does not conduct. See THIN_LANE.
+		set(placements, cursor, packingLanes() ? THIN_LANE : "minecraft:stone");
 		set(placements, cursor.above(), "minecraft:redstone_wire");
 	}
 
@@ -31441,6 +31829,24 @@ public final class SongBuilder {
 	 */
 	private static final int NESTED_SHORTENING = 3;
 
+	/**
+	 * {@link #NESTED_SHORTENING} for a packed plan: one, so the turns nest two apart the way the lanes
+	 * do -- this machine's tight corner, one empty column, the partner's long link.
+	 *
+	 * <p>Two apart and not one, because the partner's long link does not stand on the wall: a long
+	 * link turns at the full wall and runs the column past it. So the gap between the two turns is
+	 * the shortening plus one, which is the four the user found in game at three and the three they
+	 * found again at two. The columns spread lanes keep are for notes hanging off the partner's link,
+	 * and a packed plan hangs none there: its chords are single notes, a chord riding a turn stands its
+	 * anchor on the turn's own wire ({@link #loneAnchorFits}), and two machines pack without
+	 * rails.</p>
+	 */
+	private static final int PACKED_NESTED_SHORTENING = 1;
+
+	private static int nestedShortening() {
+		return packingLanes() ? PACKED_NESTED_SHORTENING : NESTED_SHORTENING;
+	}
+
 	/** The columns the widest chord takes as a plain bus: its repeater and a cell per pair of notes. */
 	private static int widestBusColumns(List<EventGroup> events) {
 		return events.stream().mapToInt(event -> 1 + (event.notes().size() + 1) / 2).max().orElse(1);
@@ -33579,6 +33985,19 @@ public final class SongBuilder {
 	public static String RELAY_BLOCK = "minecraft:stone";
 	public static String TRANSPARENT_BLOCK = "minecraft:glass";
 	public static String SUPPORT_BLOCK = UNDERFLOOR;
+	public static String THIN_LANE_BLOCK = "minecraft:smooth_stone_slab[type=top]";
+
+	/**
+	 * What a packed lane's dust stands on wherever the dust only has to be held up: a pad, a corner.
+	 *
+	 * <p>Two lanes two apart have one column between their wires, and the next lane's notes hang in
+	 * it. Dust powers the block it stands on, and a powered block sounds every note block it stands
+	 * square against -- so on stone, each cell of wire on the centre line is a note of the next
+	 * lane's sounding at this lane's tick. Nothing reads the block under a pad's dust, so it is free
+	 * not to conduct, and on a block that does not, the dust powers nothing beside it at all. Swapped
+	 * for {@link #THIN_LANE_BLOCK} on the way out, the way the other materials are.</p>
+	 */
+	private static final String THIN_LANE = "minecraft:smooth_stone_slab[type=top]";
 
 	/**
 	 * Whether an instrument block is laid as a half-block everywhere it can be, rather than only
@@ -35046,6 +35465,36 @@ public final class SongBuilder {
 			return when != null && when != time;
 		}
 
+		/**
+		 * {@link #liveAt}, counting the other machine's block as another tick even where the number is
+		 * the same. Two machines keep their ticks on two clocks -- each is its own half of the game tick
+		 * halved -- so a tick of one and the same tick of the other are a game tick apart, and a note of
+		 * one sounded by the other's block at that tick sounds out of its turn. Spread lanes never put
+		 * the two machines' blocks side by side; packed, every boundary between rows of the two does.
+		 */
+		boolean foreignLiveAt(BlockPos position, int time) {
+			BlockPos key = position.immutable();
+			Integer when = powered.get(key);
+			if (when == null) {
+				return false;
+			}
+			return when != time || otherMachine(laneTintAt.get(key));
+		}
+
+		/** {@link #noteAt}, the same way round as {@link #foreignLiveAt}. */
+		boolean foreignNoteAt(BlockPos position, int time) {
+			BlockPos key = position.immutable();
+			Integer when = notes.get(key);
+			if (when == null) {
+				return false;
+			}
+			return when != time || otherMachine(noteMachine.get(key));
+		}
+
+		private boolean otherMachine(Integer tint) {
+			return tint != null && tint >= 0 && laneTint >= 0 && tint / 2 != laneTint / 2;
+		}
+
 		/** Scratch: what is planned here, for working out why a slot was refused. */
 		String describeBlock(BlockPos position) {
 			return blocks.getOrDefault(position.immutable(), "-");
@@ -35147,6 +35596,40 @@ public final class SongBuilder {
 			notes.put(key, time);
 			noteMachine.put(key, laneTint < 0 ? -1 : laneTint / 2);
 			return true;
+		}
+
+		/**
+		 * Records that a cell will go live at this tick, before anything is laid there, so the machine
+		 * walking alongside refuses to hang a note beside it in the meantime. See
+		 * {@code packedClaimPath}.
+		 */
+		boolean claimLive(BlockPos position, int time) {
+			if (!recording) {
+				return false;
+			}
+			BlockPos key = position.immutable();
+			if (powered.containsKey(key) || blocks.containsKey(key)) {
+				return false;
+			}
+			powered(key, time);
+			// Whose claim it is, for foreignLiveAt: there is no block yet to have been tinted.
+			if (laneTint >= 0) {
+				laneTintAt.put(key, laneTint);
+			}
+			return true;
+		}
+
+		/** Takes a live claim back where nothing was laid on it. */
+		void releaseLiveClaim(BlockPos position, int time) {
+			if (!recording) {
+				return;
+			}
+			BlockPos key = position.immutable();
+			Integer when = powered.get(key);
+			if (when != null && when == time && !blocks.containsKey(key)) {
+				powered.remove(key);
+				laneTintAt.remove(key);
+			}
 		}
 
 		/**
@@ -36774,6 +37257,13 @@ public final class SongBuilder {
 			if (UNDERFLOOR.equals(block)) {
 				return SUPPORT_BLOCK;
 			}
+			if (THIN_LANE.equals(block)) {
+				// Unless something reads it after all: a run reseeded off a corner reads the corner's
+				// stone with its floor repeater, and the corner was laid as a pad before the run knew
+				// it would. Read on the way out, when every reader is down. you-spin-me-round at
+				// sixteen wide: the reseed's floor repeater against a slab, the floor rail dead.
+				return powered.containsKey(at) || readByARepeater(at) ? RELAY_BLOCK : THIN_LANE_BLOCK;
+			}
 			return block;
 		}
 
@@ -36829,6 +37319,20 @@ public final class SongBuilder {
 
 		private boolean isWire(BlockPos at) {
 			return blocks.getOrDefault(at, "").startsWith("minecraft:redstone_wire");
+		}
+
+		/** Whether a repeater beside this cell faces into it or reads out of it: {@link #mustConduct}'s rule. */
+		private boolean readByARepeater(BlockPos at) {
+			for (Direction side : Direction.Plane.HORIZONTAL) {
+				String there = blocks.getOrDefault(at.relative(side), "");
+				if (there.startsWith("minecraft:repeater")) {
+					Direction facing = repeaterFacing(there);
+					if (facing == null || facing.getAxis() == side.getAxis()) {
+						return true;
+					}
+				}
+			}
+			return false;
 		}
 
 		/** The facing a repeater's block string names, or null if it names none. */

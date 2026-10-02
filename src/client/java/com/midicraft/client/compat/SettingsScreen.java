@@ -744,6 +744,8 @@ public final class SettingsScreen extends Screen {
 					MidicraftConfig::transparentBlock, config::setTransparentBlock)));
 				entries.add(Entry.of(new Text("support_block", LaneMaterials.Role.SUPPORT,
 					MidicraftConfig::supportBlock, config::setSupportBlock)));
+				entries.add(Entry.of(new Text("thin_lane_block", LaneMaterials.Role.THIN,
+					MidicraftConfig::thinLaneBlock, config::setThinLaneBlock)));
 			}
 			case PLACEMENT -> {
 				entries.add(Entry.of(choice("sequencing_edit_protection",
