@@ -7750,7 +7750,7 @@ public final class ComposerScreen extends Screen {
 	 */
 	private void zoomTime(double factor, double anchorX) {
 		long anchoredTick = mouseTick(anchorX);
-		ticksPerPixel = Math.max(1.5, Math.min(maxTicksPerPixel(), ticksPerPixel * factor));
+		ticksPerPixel = Math.max(minTicksPerPixel(), Math.min(maxTicksPerPixel(), ticksPerPixel * factor));
 		horizontalScroll = Math.max(0L,
 			anchoredTick - Math.round((anchorX - rollX) * ticksPerPixel));
 	}
@@ -10950,6 +10950,21 @@ public final class ComposerScreen extends Screen {
 		return Math.max(MIN_MIDI_NOTE, Math.min(MAX_MIDI_NOTE,
 			topMidiNote - (int)Math.floor((y - rollY) / rowHeight)));
 	}
+
+	private double minTicksPerPixel() {
+		return Math.min(1.5, SongAnalysis.redstoneTickSpan(project()) / 2.0 / MIN_GAME_TICK_PIXELS);
+	}
+
+	/**
+	 * How wide a game tick may always be zoomed to, in pixels.
+	 *
+	 * <p>The zoom-in limit was a flat one and a half composer ticks a pixel, which is generous for a
+	 * song at 480 PPQ -- a game tick is some forty-eight composer ticks there, thirty-two pixels at the
+	 * limit -- and useless for a song whose composer tick is a game tick, where it held each game tick
+	 * under a pixel wide with the snap set to game ticks. So the limit is also measured in the song's
+	 * own game ticks, and the finer of the two wins.</p>
+	 */
+	private static final double MIN_GAME_TICK_PIXELS = 16.0;
 
 	/**
 	 * Zoom-out limit, wide enough to always fit the whole song plus margin.

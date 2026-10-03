@@ -415,7 +415,20 @@ final class BuildOptionsScreen extends Screen {
 	 * rows where they apply.
 	 */
 	private int advancedRows() {
-		return 1 + (hasReseedControl() ? 1 : 0) + (hasPaceControl() ? 2 : 0);
+		return 1 + (hasReseedControl() ? 1 : 0) + (hasPaceControl() ? 3 : 0);
+	}
+
+	/** The lane gap choices, as {@link SongBuilder#LANE_GAP_OVERRIDE} stores them, and their names. */
+	private static final int[] LANE_GAPS = {0, 2, 3};
+	private static final String[] LANE_GAP_NAMES = {"Auto", "Force 2", "Force 3"};
+
+	private static int laneGapRung(int gap) {
+		for (int rung = 0; rung < LANE_GAPS.length; rung++) {
+			if (LANE_GAPS[rung] == gap) {
+				return rung;
+			}
+		}
+		return 0;
 	}
 
 	/**
@@ -612,6 +625,16 @@ final class BuildOptionsScreen extends Screen {
 					PACE_TOLERANCES.size(), paceRung(paceCatchUpTo),
 					rung -> catchUpLine(PACE_TOLERANCES.get(rung)),
 					rung -> paceCatchUpTo = PACE_TOLERANCES.get(rung)));
+				// Temporary: forces the lane gap a single-note song is built at. Not saved.
+				addRenderableWidget(new Choice(left, advancedRow(top, row++), width,
+					LANE_GAPS.length, laneGapRung(SongBuilder.LANE_GAP_OVERRIDE),
+					rung -> "Lane gap: " + LANE_GAP_NAMES[rung],
+					rung -> SongBuilder.LANE_GAP_OVERRIDE = LANE_GAPS[rung]))
+					.setTooltip(Tooltip.create(Component.literal("Temporary. A song with one note "
+						+ "a tick can be built with its lanes two apart or three; Auto builds both and "
+						+ "keeps the smaller. Force 2 keeps the two-apart build whenever it plans at "
+						+ "all, even where it is bigger or faulty; Force 3 never packs. Songs with "
+						+ "chords are three apart whatever this says. Back to Auto on restart.")));
 				catchUpChoice.setTooltip(Tooltip.create(Component.literal("Once a lane has "
 					+ "fallen past the drift limit, how near it comes before it stops padding. At the "
 					+ "drift limit it pads only what it has to and rides there, so the lanes spend the "

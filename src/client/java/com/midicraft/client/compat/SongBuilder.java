@@ -1820,13 +1820,13 @@ public final class SongBuilder {
 	 */
 	static PastePlan createInterleavedHalfTickPastePlan(BlockPos origin, Direction forward,
 			List<EventNote> notes, BuildLimits limits, WalkStart start) {
-		// One floor only. The wall staircases were drawn for lanes three apart, and two apart a climb
-		// and the neighbouring descent stand a cell from each other with their dust joined: read back
-		// over the library cut to one note a tick, 267 of the 400 packed builds of two and three floors
-		// were dead, and not one of a single floor. The plan's own fault counts cannot see a dead wire,
-		// so packedWins cannot be what keeps those out.
-		if (!SINGLE_NOTE_SONGS_PACK_TWO_APART || packingLanes() || notes.isEmpty()
-				|| limits.laneFloors() > 1 || chordStats(notes).peak() > 1) {
+		// Any floor count, now that a packed build's staircases keep to their lane's own row: the
+		// climb steps along travel and the descent folds back. Drawn for lanes three apart, the climb
+		// and the neighbouring descent stood a cell from each other with their dust joined -- read
+		// back over the library cut to one note a tick, 267 of the 400 packed builds of two and three
+		// floors dead, and the plan's own fault counts cannot see a dead wire.
+		if (!SINGLE_NOTE_SONGS_PACK_TWO_APART || LANE_GAP_OVERRIDE == 3 || packingLanes()
+				|| notes.isEmpty() || chordStats(notes).peak() > 1) {
 			return interleavedHalfTickPlan(origin, forward, notes, limits, start);
 		}
 		// Both, and the better of the two. See SINGLE_NOTE_SONGS_PACK_TWO_APART for why neither
@@ -1874,7 +1874,8 @@ public final class SongBuilder {
 		if (spread == null) {
 			return packed;
 		}
-		return packed != null && (PACKED_PLAN_ALWAYS_WINS || packedWins(packed, spread))
+		return packed != null && (PACKED_PLAN_ALWAYS_WINS || LANE_GAP_OVERRIDE == 2
+				|| packedWins(packed, spread))
 			? packed : spread;
 	}
 
@@ -1883,6 +1884,12 @@ public final class SongBuilder {
 	 * does on its own rather than only where it won. Off in the game.
 	 */
 	static boolean PACKED_PLAN_ALWAYS_WINS = false;
+
+	/**
+	 * Temporary, from the paste screen's Advanced rows: 0 lets the plans be weighed, 2 builds the
+	 * packed plan wherever one plans, 3 never packs. Not saved; a restart puts it back to 0.
+	 */
+	public static volatile int LANE_GAP_OVERRIDE = 0;
 
 	/**
 	 * Whether the packed plan is the one to build: no more faults than the spread one by its own
@@ -5352,7 +5359,9 @@ public final class SongBuilder {
 		int wall = travel == forward ? farWall : nearWall;
 		int above = floor + climb;
 		boolean staircase = above >= 0 && above < floors;
-		if (CLIMB_STANDS_A_COLUMN_OUT && staircase && climb > 0) {
+		// Not packed: a packed climb steps along travel, so standing it out would put its far rung two
+		// past the wall where every other turn reaches one.
+		if (CLIMB_STANDS_A_COLUMN_OUT && !packingLanes() && staircase && climb > 0) {
 			return wall + stepAlong(axis, travel);
 		}
 		if (DESCENT_STANDS_A_COLUMN_IN && staircase && climb < 0) {
@@ -7692,7 +7701,7 @@ public final class SongBuilder {
 			// could afford, so its landing is the wall's column four levels down, and the lane below
 			// runs at the other wall. Neither depends on anything planned after this line.
 			boolean seedsDescent = false;
-			if (RAIL_SEEDS_OFF_THE_CLIMB && v2RailsRun() && layout.ultra() && wantsTurn
+			if (RAIL_SEEDS_OFF_THE_CLIMB && v2RailsRun() && !packingLanes() && layout.ultra() && wantsTurn
 					&& !straddles && climb < 0 && above >= 0 && above < floors) {
 				placements.padded("descentSeedAsked");
 				Direction below = lane.travel().getOpposite();
@@ -7831,7 +7840,7 @@ public final class SongBuilder {
 			boolean stairTopFree = false;
 			boolean stairBottomFree = false;
 			boolean stairWallFree = false;
-			if (STAIR_EXTRAS && layout.ultra() && cutOffered && fold == null && climb <= 0
+			if (stairExtras() && layout.ultra() && cutOffered && fold == null && climb <= 0
 					&& above >= 0 && above < floors && CHEAP_SPLIT_DESCENT) {
 				BlockPos stairFoot = new BlockPos(wall + lane.travel().getStepX(),
 					lane.pos().getY(), lane.pos().getZ());
@@ -7855,7 +7864,7 @@ public final class SongBuilder {
 			// the pane's stone must not stand beside a note belonging to another tick (a cross
 			// descent's lowered flanks, most of all -- the two would mispower each other).
 			boolean climbRungFree = false;
-			if (ASCENT_RUNG_EXTRAS && STAIR_EXTRAS && layout.ultra() && cutOffered && rise == null
+			if (ASCENT_RUNG_EXTRAS && stairExtras() && layout.ultra() && cutOffered && rise == null
 					&& climb > 0 && above >= 0 && above < floors) {
 				BlockPos stairFoot = new BlockPos(wall + lane.travel().getStepX(),
 					lane.pos().getY(), lane.pos().getZ());
@@ -8230,7 +8239,7 @@ public final class SongBuilder {
 			// there. Twenty-eight notes across a descent, against twenty-seven for a stacked-bus head
 			// and twenty-five sunken. See {@link #CROSS_DESCENTS}.
 			CrossDescent cross = null;
-			if (CROSS_DESCENTS && layout.ultra() && cutOffered && index > 0 && above >= 0
+			if (CROSS_DESCENTS && !packingLanes() && layout.ultra() && cutOffered && index > 0 && above >= 0
 					&& above < floors && !stackedFitsInstead && headed == null && fold == null
 					&& !plainCut && sunken == null && climb <= 0 && room == 1 && room - 1 < cells) {
 				cross = crossDescentOf(placements, lane.ahead(delayColumns), event.notes(),
@@ -8248,7 +8257,7 @@ public final class SongBuilder {
 			// chord landing flush had no cut at any room below one, and walked out thirteen
 			// columns for want of this. In-game design, hand-built and signed first.
 			WallDescent wallCut = null;
-			if (WALL_DESCENTS && layout.ultra() && cutOffered && index > 0 && above >= 0
+			if (WALL_DESCENTS && !packingLanes() && layout.ultra() && cutOffered && index > 0 && above >= 0
 					&& above < floors && !stackedFitsInstead && headed == null && fold == null
 					&& !plainCut && sunken == null && cross == null && climb <= 0 && room == 0) {
 				wallCut = wallDescentOf(placements, lane.ahead(delayColumns), event.notes(),
@@ -8891,7 +8900,7 @@ public final class SongBuilder {
 				boolean solidMidRung = false;
 				if (climb > 0 && !climbedAlready
 						&& (climbRungNote != null
-							|| ASCENT_RUNG_EXTRAS && STAIR_EXTRAS && headed == null
+							|| ASCENT_RUNG_EXTRAS && stairExtras() && headed == null
 								&& climbRungFree && far.size() > 1)) {
 					BlockPos rung = stairFoot.relative(depth.getOpposite()).above(3);
 					BlockPos extraCell = rung.relative(travel.getOpposite());
@@ -8994,7 +9003,7 @@ public final class SongBuilder {
 				// in -- the harp is taken from the far half here instead, which can only shorten
 				// its run, never grow it. The plain cut's capacity was decided without it, so
 				// this is a relocation and not a claim.
-				if (STAIR_EXTRAS && STAIR_WALL_EXTRAS && headed == null && sunken == null
+				if (stairExtras() && STAIR_WALL_EXTRAS && headed == null && sunken == null
 						&& cross == null && wallCut == null && nought == null && climb <= 0
 						&& CHEAP_SPLIT_DESCENT
 						&& far.size() > 1) {
@@ -12113,13 +12122,27 @@ public final class SongBuilder {
 						laidInCrossing = true;
 						lane = lane.ahead(1);
 					}
+					// Packed, a descent is the compact foldback, its repeater taking ticks of the wait
+					// being folded. See packedFoldback.
+					PackedDescent foldedDown = packingLanes() && climb < 0
+						? packedFoldback(placements, lane, event, event.time() - currentTime,
+							currentTime, false)
+						: null;
 					BlockPos landed = climb > 0
 						? addGlassClimb(placements, lane.pos(), lane.travel(), depth, false,
 							currentTime, 0, false)
+						: foldedDown != null ? foldedDown.landing()
 						: descend(placements, lane.pos(), lane.travel(), descentSide, currentTime);
 					placements.padded(climb > 0 ? "waitFoldedClimb" : "waitFoldedDescent");
-					foldSignal = Math.max(1, foldSignal - foldTurn.cells());
-					dustRun += foldTurn.cells();
+					if (foldedDown != null) {
+						// What the foldback leaves: see PACKED_FOLDBACK_TIP.
+						currentTime += foldedDown.spent();
+						foldSignal = PACKED_FOLDBACK_TIP;
+						dustRun = DUST_RANGE - PACKED_FOLDBACK_TIP;
+					} else {
+						foldSignal = Math.max(1, foldSignal - foldTurn.cells());
+						dustRun += foldTurn.cells();
+					}
 					lane = crowdedIfUltra(Lane.straight(landed, lane.travel().getOpposite(), depth),
 						layout);
 					leg++;
@@ -13638,7 +13661,7 @@ public final class SongBuilder {
 			// could afford, so its landing is the wall's column four levels down, and the lane below
 			// runs at the other wall. Neither depends on anything planned after this line.
 			boolean seedsDescent = false;
-			if (RAIL_SEEDS_OFF_THE_CLIMB && v2RailsRun() && layout.ultra() && wantsTurn
+			if (RAIL_SEEDS_OFF_THE_CLIMB && v2RailsRun() && !packingLanes() && layout.ultra() && wantsTurn
 					&& !straddles && climb < 0 && above >= 0 && above < floors) {
 				placements.padded("descentSeedAsked");
 				Direction below = lane.travel().getOpposite();
@@ -13781,7 +13804,7 @@ public final class SongBuilder {
 			boolean stairTopFree = false;
 			boolean stairBottomFree = false;
 			boolean stairWallFree = false;
-			if (STAIR_EXTRAS && layout.ultra() && cutOffered && fold == null && climb <= 0
+			if (stairExtras() && layout.ultra() && cutOffered && fold == null && climb <= 0
 					&& above >= 0 && above < floors && CHEAP_SPLIT_DESCENT) {
 				BlockPos stairFoot = atAlong(axis, lane.pos(), wall + stepAlong(axis, lane.travel()));
 				Direction stairAway = descentSide.getOpposite();
@@ -13804,7 +13827,7 @@ public final class SongBuilder {
 			// the pane's stone must not stand beside a note belonging to another tick (a cross
 			// descent's lowered flanks, most of all -- the two would mispower each other).
 			boolean climbRungFree = false;
-			if (ASCENT_RUNG_EXTRAS && STAIR_EXTRAS && layout.ultra() && cutOffered && rise == null
+			if (ASCENT_RUNG_EXTRAS && stairExtras() && layout.ultra() && cutOffered && rise == null
 					&& climb > 0 && above >= 0 && above < floors) {
 				BlockPos stairFoot = atAlong(axis, lane.pos(), wall + stepAlong(axis, lane.travel()));
 				BlockPos rung = stairFoot.relative(depth.getOpposite()).above(3);
@@ -14217,7 +14240,7 @@ public final class SongBuilder {
 			// there. Twenty-eight notes across a descent, against twenty-seven for a stacked-bus head
 			// and twenty-five sunken. See {@link #CROSS_DESCENTS}.
 			CrossDescent cross = null;
-			if (CROSS_DESCENTS && layout.ultra() && cutOffered && index > 0 && above >= 0
+			if (CROSS_DESCENTS && !packingLanes() && layout.ultra() && cutOffered && index > 0 && above >= 0
 					&& above < floors && !stackedFitsInstead && headed == null && fold == null
 					&& !plainCut && sunken == null && climb <= 0 && room == 1 && room - 1 < cells) {
 				cross = crossDescentOf(placements, lane.ahead(delayColumns), event.notes(),
@@ -14235,7 +14258,7 @@ public final class SongBuilder {
 			// chord landing flush had no cut at any room below one, and walked out thirteen
 			// columns for want of this. In-game design, hand-built and signed first.
 			WallDescent wallCut = null;
-			if (WALL_DESCENTS && layout.ultra() && cutOffered && index > 0 && above >= 0
+			if (WALL_DESCENTS && !packingLanes() && layout.ultra() && cutOffered && index > 0 && above >= 0
 					&& above < floors && !stackedFitsInstead && headed == null && fold == null
 					&& !plainCut && sunken == null && cross == null && climb <= 0 && room == 0) {
 				wallCut = wallDescentOf(placements, lane.ahead(delayColumns), event.notes(),
@@ -14965,7 +14988,7 @@ public final class SongBuilder {
 				boolean solidMidRung = false;
 				if (climb > 0 && !climbedAlready
 						&& (climbRungNote != null
-							|| ASCENT_RUNG_EXTRAS && STAIR_EXTRAS && headed == null
+							|| ASCENT_RUNG_EXTRAS && stairExtras() && headed == null
 								&& climbRungFree && far.size() > 1)) {
 					BlockPos rung = stairFoot.relative(depth.getOpposite()).above(3);
 					BlockPos extraCell = rung.relative(travel.getOpposite());
@@ -15000,7 +15023,7 @@ public final class SongBuilder {
 						: addGlassClimb(placements, cursor, travel, depth, true, currentTime, 0,
 							false, solidMidRung))
 					: CHEAP_SPLIT_DESCENT
-						? addSplitBusDescent(placements, cursor, travel, descentSide, currentTime)
+						? descendSplit(placements, cursor, travel, descentSide, currentTime)
 						: addSpiralDescent(placements, cursor, travel, descentSide, currentTime);
 				if (solidMidRung && climbRungNote != null) {
 					placements.placing("ascentRungExtra");
@@ -15068,7 +15091,7 @@ public final class SongBuilder {
 				// in -- the harp is taken from the far half here instead, which can only shorten
 				// its run, never grow it. The plain cut's capacity was decided without it, so
 				// this is a relocation and not a claim.
-				if (STAIR_EXTRAS && STAIR_WALL_EXTRAS && headed == null && sunken == null
+				if (stairExtras() && STAIR_WALL_EXTRAS && headed == null && sunken == null
 						&& cross == null && wallCut == null && nought == null && climb <= 0
 						&& CHEAP_SPLIT_DESCENT
 						&& far.size() > 1) {
@@ -15455,12 +15478,22 @@ public final class SongBuilder {
 					// staircase that was by then rising, 22 breaks of rail:PATH into climb. So the
 					// mirror asks for what is behind it instead of taking it, which costs no column at
 					// all wherever the lane closes on a pad, a pin, or a bus.
+					// Packed, a descent is the compact foldback, its repeater taking ticks of the wait the
+					// pad has not spent. See packedFoldback.
+					PackedDescent foldedDown = packingLanes() && climb < 0
+						? packedFoldback(placements, lane, event, seedWait, currentTime + spentPadding,
+							true)
+						: null;
 					BlockPos landed = climb > 0
 						? addGlassClimb(placements, lane.pos(),
 							travel, depth,
 							raisedPad || turnsOffBus && pad.cells().isEmpty(), currentTime,
 							seedsRail ? RAIL_SEED_CLIMB_STEPS : 0, seedsRail)
+						: foldedDown != null ? foldedDown.landing()
 						: descend(placements, lane.pos(), travel, descentSide, currentTime);
+					if (foldedDown != null) {
+						currentTime += foldedDown.spent();
+					}
 					leg++;
 					floor = route.floorOf(leg);
 					climb = route.climbOf(leg);
@@ -15472,8 +15505,19 @@ public final class SongBuilder {
 					// rungs, and counting them anyway left every lane after one two blocks poorer.
 					// Through the same one place canTurn asked, so the wire this lane books itself and
 					// the wire it demanded before turning cannot be two different sums.
-					tipSignal = seedsRail ? seedTip : wouldTip;
+					tipSignal = foldedDown != null ? PACKED_FOLDBACK_TIP : seedsRail ? seedTip : wouldTip;
 					lane = crowdedIfUltra(Lane.straight(landed, travel.getOpposite(), depth), layout);
+					// The chord rode the descent: it is laid, and the floor below opens on the next one,
+					// planned from there.
+					if (foldedDown != null && foldedDown.rode()) {
+						currentTime = event.time();
+						lastStyle = ChordStyle.SMALL;
+						lastBusCells = 0;
+						laneStarted = false;
+						columnBehindBusy = !BACK_PAIR_FREE_AFTER_A_STAIRCASE;
+						replan = layout.ultra();
+						continue;
+					}
 					if (seedsRail) {
 						// The rungs past the floor and the seed's own cell of wire are already off it,
 						// in {@code seedTip} above, which is where the same sum has to be made -- the
@@ -19163,7 +19207,11 @@ public final class SongBuilder {
 		placements.placing("climb");
 		placements.turnedAt(cursor);
 		BlockPos near = cursor;
-		BlockPos far = CLIMB_STEPS_SIDEWAYS && depth != null
+		// Packed, along the lane and not across it: the side cell is the column between two lanes two
+		// apart, and two climbs a cell from each other join their dust. Stepping along travel instead
+		// keeps the whole staircase in the lane's own row -- the user's design, the panes that stood on
+		// the side now standing past the wall.
+		BlockPos far = CLIMB_STEPS_SIDEWAYS && depth != null && !packingLanes()
 			? cursor.relative(depth.getOpposite()) : cursor.relative(travel);
 		// A mirrored staircase gets neither the lift nor the skip, and the two are one fact.
 		//
@@ -19814,7 +19862,107 @@ public final class SongBuilder {
 		if (!UNIVERSAL_FOUR_DESCENT) {
 			return addSpiralDescent(placements, cursor, travel, depth, time);
 		}
+		return descendSplit(placements, cursor, travel, depth, time);
+	}
+
+	/**
+	 * {@link #addSplitBusDescent}, which a packed plan may not lay without saying so.
+	 *
+	 * <p>Packed, a descent is the compact foldback ({@link #packedFoldback}): the split descent spends
+	 * two of its four rungs in the column beside the lane, which two apart is the column between two
+	 * wires, and neighbouring descents' dust joins across it -- 267 of 400 packed builds of two and
+	 * three floors dead. Reaching here packed means the foldback could not be had, so the build says
+	 * so on the plan, where {@link #packedWins} reads it and keeps the spread plan.</p>
+	 */
+	private static BlockPos descendSplit(PlacementPlan placements, BlockPos cursor, Direction travel,
+			Direction depth, int time) {
+		if (packingLanes()) {
+			placements.padded("packedDescentFellToTheSide");
+			placements.trouble("a packed descent at tick " + time
+				+ " had to step into the column beside its lane");
+		}
 		return addSplitBusDescent(placements, cursor, travel, depth, time);
+	}
+
+	/**
+	 * Packed: the compact foldback descent from this lane -- or null, where neither form of it will go.
+	 *
+	 * <p>The user's design ({@link #addFoldbackDescent}), which keeps the whole staircase in the lane's
+	 * own row: the repeater on a top slab drives a conductor one past the wall, and the dust under it
+	 * steps back down beneath the lane. The repeater is not optional -- dust there is wire, stone,
+	 * wire, a dead line -- so it takes ticks of the wait, in one of two ways:</p>
+	 * <ul>
+	 *   <li>Where the wait has two ticks or more, all but one go in the repeater and the last is the
+	 *       chord's own trigger on the floor below.</li>
+	 *   <li>Where it has one -- most of the descents in a busy song, where the nearest wait of two can
+	 *       be forty events back -- the repeater takes the whole of it and is the chord's trigger,
+	 *       and the chord's one note rides the descent: hung beside the conductor, past the wall,
+	 *       which goes live on exactly that chord's tick. The only thing that can stand beside a note
+	 *       there is a neighbour's climb, and a climb is dust on transparent blocks, which powers
+	 *       nothing sideways. The floor below then opens on the next chord. The user's call.</li>
+	 * </ul>
+	 *
+	 * @param waitLeft the ticks still to wait before the chord sounds
+	 * @param now the tick the chain reaches this cell
+	 * @param mayRide whether the chord may ride; not where the descent is part of a wait still folding
+	 */
+	private static PackedDescent packedFoldback(PlacementPlan placements, Lane lane,
+			EventGroup chord, int waitLeft, int now, boolean mayRide) {
+		int top = packedFoldbackTop(waitLeft);
+		if (top > 0) {
+			BlockPos landed = addFoldbackDescent(placements, lane.pos(), lane.travel(), top,
+				now + top);
+			if (landed != null) {
+				placements.padded("packedFoldbackDescent");
+				return new PackedDescent(landed, top, false);
+			}
+			placements.padded("packedFoldbackRefusedTheGround");
+			return null;
+		}
+		if (!mayRide || waitLeft < 1 || waitLeft > 4 || chord.notes().size() != 1) {
+			placements.padded("packedFoldbackWaitTooShort");
+			return null;
+		}
+		BlockPos slot = lane.pos().relative(lane.travel()).above()
+			.relative(lane.noteSide().getOpposite());
+		if (!railSlotTakes(placements, slot, chord.time())) {
+			placements.padded("packedRideRefusedTheSlot");
+			return null;
+		}
+		BlockPos landed = addFoldbackDescent(placements, lane.pos(), lane.travel(), waitLeft,
+			now + waitLeft);
+		if (landed == null) {
+			placements.padded("packedFoldbackRefusedTheGround");
+			return null;
+		}
+		String was = placements.placing();
+		placements.placing("foldback descent ride");
+		placeNote(placements, slot, chord.notes().getFirst());
+		placements.placing(was);
+		placements.padded("packedNoteRodeTheDescent");
+		return new PackedDescent(landed, waitLeft, true);
+	}
+
+	/** Where a packed foldback lands, the ticks its repeater took, and whether the chord rode it. */
+	private record PackedDescent(BlockPos landing, int spent, boolean rode) {
+	}
+
+	/**
+	 * The wire a packed foldback hands the floor below: its repeater's fifteen less the three dusts
+	 * it steps down on.
+	 *
+	 * <p>Not fifteen. A repeater at the landing reads the block under the last dust and hands on a fresh
+	 * fifteen, which is what the rescue this descent came from always had after it -- but the floor
+	 * below may open on dust instead, a pad or a wait's own wire, and that dust joins the stair's last
+	 * one on the diagonal and carries the same line on. Told fifteen, the lane laid twelve more on
+	 * a line that had three left of the twelve: faded at twenty-four wide over three floors, dead at
+	 * the fifteenth column. Told what is left, it puts its repeater in time either way.</p>
+	 */
+	private static final int PACKED_FOLDBACK_TIP = DUST_RANGE - 3;
+
+	/** The ticks a packed foldback's repeater may take of a wait: all but one, at most four. */
+	private static int packedFoldbackTop(int waitLeft) {
+		return waitLeft >= 2 ? Math.min(4, waitLeft - 1) : 0;
 	}
 
 	private static BlockPos addSpiralDescent(PlacementPlan placements, BlockPos cursor,
@@ -22797,7 +22945,7 @@ public final class SongBuilder {
 		// the pool before the wire refusal, so the cut's capacity grows by the note. The walk
 		// re-asks the cell off the blocks before hanging. See {@link #CROSS_DESCENT_EXTRAS}.
 		EventNote bottomExtra = null;
-		if (STAIR_EXTRAS && CROSS_DESCENT_EXTRAS
+		if (stairExtras() && CROSS_DESCENT_EXTRAS
 				&& quietAndFree(placements,
 					wallColumn.below(CUBE_FLOOR_HEIGHT - 1).relative(away), time)) {
 			bottomExtra = takeFromTail(pool, note -> note.effect() == null);
@@ -24777,7 +24925,7 @@ public final class SongBuilder {
 		EventNote topExtra = null;
 		EventNote bottomExtra = null;
 		EventNote wallExtra = null;
-		if (STAIR_EXTRAS) {
+		if (stairExtras()) {
 			if (bottomExtraFree) {
 				bottomExtra = takeFromTail(far, note -> note.effect() == null);
 			}
@@ -29999,11 +30147,11 @@ public final class SongBuilder {
 		// it. Harp only -- the cell below the note is the air over the head's raised flank,
 		// which the hanging harp claims and guards. See {@link #ASCENT_RUNG_EXTRAS}.
 		EventNote climbExtra = null;
-		if (STAIR_EXTRAS && ASCENT_RUNG_EXTRAS && climbing && centreFeed && climbExtraFree) {
+		if (stairExtras() && ASCENT_RUNG_EXTRAS && climbing && centreFeed && climbExtraFree) {
 			climbExtra = takeFromTail(farPart, note -> note.effect() == null && isHarpNote(note),
 				CUT_COMPLETES_ON_THE_STAIRCASE);
 		}
-		if (STAIR_EXTRAS && !climbing && centreFeed) {
+		if (stairExtras() && !climbing && centreFeed) {
 			if (bottomExtraFree) {
 				bottomExtra = takeFromTail(farPart, note -> note.effect() == null,
 					CUT_COMPLETES_ON_THE_STAIRCASE);
@@ -30078,7 +30226,7 @@ public final class SongBuilder {
 					List<EventNote> shedFar = new ArrayList<>(shedTail);
 					EventNote shedBottom = null;
 					EventNote shedWall = null;
-					if (STAIR_EXTRAS && centreFeed) {
+					if (stairExtras() && centreFeed) {
 						if (bottomExtraFree) {
 							shedBottom = takeFromTail(shedFar, note -> note.effect() == null);
 						}
@@ -32293,6 +32441,14 @@ public final class SongBuilder {
 	 * decided-versus-built gap this file keeps being burned by.</p>
 	 */
 	static boolean STAIR_EXTRAS = true;
+
+	/**
+	 * {@link #STAIR_EXTRAS}, stood down while lanes are packed: every extra hangs off a staircase's
+	 * side, and packed, the side is the column between two lanes' wires.
+	 */
+	private static boolean stairExtras() {
+		return STAIR_EXTRAS && !packingLanes();
+	}
 
 	/**
 	 * v2: a third stair extra on the border, level with the descent's first rung.
