@@ -24,7 +24,7 @@ import net.minecraft.world.level.block.state.BlockState;
  * from it. A relay block carries pulses, so it has to conduct. A lane block only holds up dust and
  * repeaters, so it needs a solid top and may be glass or a slab. A climb has dust running up over
  * it and must not conduct, or the diagonal is cut and the wire powers what stands beside it. A
- * support holds up dust and repeaters, so it needs a solid top. A thin spacing block holds up the
+ * support holds up dust and repeaters, so it needs a solid top. A transparent lane block holds up the
  * dust on a lane packed two from the next, where every cell beside the wire is the next lane's
  * note, so it must not conduct either.</p>
  */
@@ -33,11 +33,11 @@ public final class LaneMaterials {
 	}
 
 	public enum Role {
-		LANE("minecraft:stone"),
+		LANE("minecraft:stone_slab"),
 		RELAY("minecraft:stone"),
-		TRANSPARENT("minecraft:glass"),
+		TRANSPARENT("minecraft:stone_slab"),
 		SUPPORT("minecraft:stone_slab"),
-		THIN("minecraft:smooth_stone_slab");
+		THIN("minecraft:stone_slab");
 
 		private final String fallback;
 

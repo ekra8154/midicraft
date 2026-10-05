@@ -34303,24 +34303,24 @@ public final class SongBuilder {
 
 	/**
 	 * The player's blocks for the two machines' lanes, the climbs and the supports, from the Build
-	 * Pasting settings. Stone, stone, glass and {@link #UNDERFLOOR} unless changed.
+	 * Pasting settings. Top stone slabs for all four unless changed.
 	 *
 	 * <p>Never read by the walk. It plans in the defaults and these are swapped in on the way out,
 	 * in {@code marked}, so no rule the walk applies can be moved by a choice of block. Written only
 	 * by the config's setters, for the same reason as {@link #DEBUG_PASTE}: the tests drive the
 	 * builder with no config, and get the defaults.</p>
 	 */
-	public static String LANE_ONE_BLOCK = "minecraft:stone";
-	public static String LANE_TWO_BLOCK = "minecraft:stone";
+	public static String LANE_ONE_BLOCK = UNDERFLOOR;
+	public static String LANE_TWO_BLOCK = UNDERFLOOR;
 	/**
 	 * The relay block: the stone that has to conduct, in either machine: what carries a chord's pulse, and what
 	 * stands over or beside dust to keep its diagonal steps cut. See {@code mustConduct}. Everything
 	 * else that was stone takes its lane's block, which is then free not to conduct.
 	 */
 	public static String RELAY_BLOCK = "minecraft:stone";
-	public static String TRANSPARENT_BLOCK = "minecraft:glass";
+	public static String TRANSPARENT_BLOCK = UNDERFLOOR;
 	public static String SUPPORT_BLOCK = UNDERFLOOR;
-	public static String THIN_LANE_BLOCK = "minecraft:smooth_stone_slab[type=top]";
+	public static String THIN_LANE_BLOCK = UNDERFLOOR;
 
 	/**
 	 * What a packed lane's dust stands on wherever the dust only has to be held up: a pad, a corner.

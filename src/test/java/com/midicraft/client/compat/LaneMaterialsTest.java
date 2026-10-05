@@ -46,12 +46,24 @@ class LaneMaterialsTest {
 
 	@AfterEach
 	void defaultsAgain() {
+		SongBuilder.LANE_ONE_BLOCK = "minecraft:stone_slab[type=top]";
+		SongBuilder.LANE_TWO_BLOCK = "minecraft:stone_slab[type=top]";
+		SongBuilder.RELAY_BLOCK = "minecraft:stone";
+		SongBuilder.TRANSPARENT_BLOCK = "minecraft:stone_slab[type=top]";
+		SongBuilder.SUPPORT_BLOCK = "minecraft:stone_slab[type=top]";
+		SongBuilder.LIGHT_SHOW = false;
+	}
+
+	/**
+	 * The blocks the walk plans in, swapped for nothing. The shipped defaults lay top slabs in most
+	 * roles, which would leave a lane, a climb and a support indistinguishable in the plain build.
+	 */
+	private static void plannerBlocks() {
 		SongBuilder.LANE_ONE_BLOCK = "minecraft:stone";
 		SongBuilder.LANE_TWO_BLOCK = "minecraft:stone";
 		SongBuilder.RELAY_BLOCK = "minecraft:stone";
 		SongBuilder.TRANSPARENT_BLOCK = "minecraft:glass";
 		SongBuilder.SUPPORT_BLOCK = "minecraft:stone_slab[type=top]";
-		SongBuilder.LIGHT_SHOW = false;
 	}
 
 	/**
@@ -76,7 +88,7 @@ class LaneMaterialsTest {
 
 	private void lanesThatDoNotConduct(String name, SongBuilder.PasteMode mode, int width, int floors)
 			throws Exception {
-		defaultsAgain();
+		plannerBlocks();
 		ComposerProject song = GameSettings.project(BreachView.songFile(name));
 		List<SongBuilder.EventNote> notes =
 			SongBuilder.notesFor(mode, song.toSequenceTracks(Set.of(), true), song, true);
@@ -218,9 +230,9 @@ class LaneMaterialsTest {
 		assertEquals("minecraft:stone",
 			LaneMaterials.accepted(LaneMaterials.Role.RELAY, "minecraft:glass"),
 			"a hand-edited relay block of glass goes back to stone");
-		assertEquals("minecraft:stone",
+		assertEquals("minecraft:stone_slab",
 			LaneMaterials.accepted(LaneMaterials.Role.LANE, "minecraft:chest"),
-			"a hand-edited lane of chests goes back to stone");
+			"a hand-edited lane of chests goes back to the stone slab");
 		assertEquals("minecraft:bricks", LaneMaterials.accepted(LaneMaterials.Role.LANE, "bricks"));
 	}
 
@@ -232,6 +244,7 @@ class LaneMaterialsTest {
 		SongBuilder.BuildLimits limits = new SongBuilder.BuildLimits(16, 24, 3);
 
 		SongBuilder.LIGHT_SHOW = lightShow;
+		plannerBlocks();
 		SongBuilder.PastePlan plainPlan =
 			SongBuilder.createPastePlan(new BlockPos(0, 64, 0), notes, mode, limits);
 		SongBuilder.LANE_ONE_BLOCK = ONE;

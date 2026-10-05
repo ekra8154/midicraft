@@ -22,6 +22,7 @@ import net.minecraft.server.Bootstrap;
 import net.minecraft.world.level.block.state.BlockState;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -46,9 +47,20 @@ class DebugPasteMarkTest {
 		Bootstrap.bootStrap();
 	}
 
+	private String laneOne;
+	private String laneTwo;
+
+	@BeforeEach
+	void rememberLanes() {
+		laneOne = SongBuilder.LANE_ONE_BLOCK;
+		laneTwo = SongBuilder.LANE_TWO_BLOCK;
+	}
+
 	@AfterEach
 	void plainAgain() {
 		SongBuilder.DEBUG_PASTE = false;
+		SongBuilder.LANE_ONE_BLOCK = laneOne;
+		SongBuilder.LANE_TWO_BLOCK = laneTwo;
 	}
 
 	/** The live build limits, so the shapes counted here are the shapes they are looking at. */
@@ -115,6 +127,10 @@ class DebugPasteMarkTest {
 	@Test
 	void aMarkedPasteIsTheSameMachineAsAPlainOne() throws Exception {
 		List<SongBuilder.EventNote> notes = song("illit-do-the-dance.json");
+		// Stone lanes, which is what a marked paste keeps them as: its lane stone is a colour in the
+		// key, so the player's lane blocks are not swapped in there.
+		SongBuilder.LANE_ONE_BLOCK = "minecraft:stone";
+		SongBuilder.LANE_TWO_BLOCK = "minecraft:stone";
 		Map<BlockPos, String> plain = laid(plan(notes));
 		SongBuilder.DEBUG_PASTE = true;
 		SongBuilder.PastePlan markedPlan = plan(notes);

@@ -20,6 +20,7 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -37,9 +38,20 @@ class LightShowTest {
 		Bootstrap.bootStrap();
 	}
 
+	private String laneOne;
+	private String laneTwo;
+
+	@BeforeEach
+	void rememberLanes() {
+		laneOne = SongBuilder.LANE_ONE_BLOCK;
+		laneTwo = SongBuilder.LANE_TWO_BLOCK;
+	}
+
 	@AfterEach
 	void plainAgain() {
 		SongBuilder.LIGHT_SHOW = false;
+		SongBuilder.LANE_ONE_BLOCK = laneOne;
+		SongBuilder.LANE_TWO_BLOCK = laneTwo;
 	}
 
 	private static final String LAMP = "minecraft:redstone_lamp";
@@ -62,6 +74,10 @@ class LightShowTest {
 			SongBuilder.notesFor(mode, song.toSequenceTracks(Set.of(), true), song, true);
 		SongBuilder.BuildLimits limits = new SongBuilder.BuildLimits(16, width, floors);
 
+		// Stone lanes, so every lamp has the stone it replaced to be checked against. The lamps are
+		// chosen before the lane blocks are swapped in, so this is the same light show either way.
+		SongBuilder.LANE_ONE_BLOCK = "minecraft:stone";
+		SongBuilder.LANE_TWO_BLOCK = "minecraft:stone";
 		SongBuilder.PastePlan plainPlan =
 			SongBuilder.createPastePlan(new BlockPos(0, 64, 0), notes, mode, limits);
 		SongBuilder.LIGHT_SHOW = true;
