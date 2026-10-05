@@ -1829,6 +1829,13 @@ public final class SongBuilder {
 				|| notes.isEmpty() || chordStats(notes).peak() > 1) {
 			return interleavedHalfTickPlan(origin, forward, notes, limits, start);
 		}
+		// Forced, the packed build and nothing else: no spread plan to fall back to and no
+		// comparison, so what is pasted is the build asked for, faults and all -- which is what a
+		// forced gap is for. A refusal goes up to createPastePlan like any build's, whose tolerant
+		// second walk lays a collision down and records it rather than refusing the paste.
+		if (LANE_GAP_OVERRIDE == 2) {
+			return packedPlan(origin, forward, notes, limits, start);
+		}
 		// Both, and the better of the two. See SINGLE_NOTE_SONGS_PACK_TWO_APART for why neither
 		// wins everywhere. A walk that throws is a build that is not on offer, so either plan may
 		// stand alone -- and where both throw, the spread one's refusal is the one the player has
@@ -1841,14 +1848,43 @@ public final class SongBuilder {
 			spreadRefused = refused;
 		}
 		PastePlan packed = null;
+		try {
+			packed = packedPlan(origin, forward, notes, limits, start);
+			if (spread != null && !PACKED_PLAN_ALWAYS_WINS
+					&& touchesANote(packed, inputPowerCells(packed))) {
+				if (TRACE_TURNS) {
+					System.out.println("PACKED dropped: a note still touches the input after replanning");
+				}
+				packed = null;
+			}
+		} catch (RuntimeException refused) {
+			if (TRACE_TURNS) {
+				System.out.println("PACKED refused: " + refused);
+			}
+			packed = null;
+			if (spread == null) {
+				throw spreadRefused;
+			}
+		}
+		if (spread == null) {
+			return packed;
+		}
+		return packed != null && (PACKED_PLAN_ALWAYS_WINS || packedWins(packed, spread))
+			? packed : spread;
+	}
+
+	/**
+	 * The packed plan: lanes two apart, walked again with the two-lane input's cells barred wherever a
+	 * note stands against them. Twice at most -- barring a cell moves the notes near it, and those can
+	 * move the machines' heads, which is where the input goes.
+	 */
+	private static PastePlan packedPlan(BlockPos origin, Direction forward, List<EventNote> notes,
+			BuildLimits limits, WalkStart start) {
 		PACKING_LANES.set(Boolean.TRUE);
 		PACKED_RAILS.set(PACKED_RAILS_FOR_TWO_MACHINES
 			|| parity(notes, 0).isEmpty() || parity(notes, 1).isEmpty());
 		try {
-			packed = interleavedHalfTickPlan(origin, forward, notes, limits, start);
-			// Walked again with the input's cells barred wherever a note stands against them. Twice at
-			// most: barring a cell moves the notes near it, and those can move the machines' heads,
-			// which is where the input goes.
+			PastePlan packed = interleavedHalfTickPlan(origin, forward, notes, limits, start);
 			Set<BlockPos> barred = new HashSet<>();
 			for (int again = 0; again < 2; again++) {
 				Set<BlockPos> power = inputPowerCells(packed);
@@ -1858,25 +1894,12 @@ public final class SongBuilder {
 				PACKED_BARRED.set(Set.copyOf(barred));
 				packed = interleavedHalfTickPlan(origin, forward, notes, limits, start);
 			}
-			if (spread != null && touchesANote(packed, inputPowerCells(packed))) {
-				packed = null;
-			}
-		} catch (RuntimeException refused) {
-			packed = null;
-			if (spread == null) {
-				throw spreadRefused;
-			}
+			return packed;
 		} finally {
 			PACKING_LANES.remove();
 			PACKED_RAILS.remove();
 			PACKED_BARRED.remove();
 		}
-		if (spread == null) {
-			return packed;
-		}
-		return packed != null && (PACKED_PLAN_ALWAYS_WINS || LANE_GAP_OVERRIDE == 2
-				|| packedWins(packed, spread))
-			? packed : spread;
 	}
 
 	/**
@@ -1886,8 +1909,10 @@ public final class SongBuilder {
 	static boolean PACKED_PLAN_ALWAYS_WINS = false;
 
 	/**
-	 * Temporary, from the paste screen's Advanced rows: 0 lets the plans be weighed, 2 builds the
-	 * packed plan wherever one plans, 3 never packs. Not saved; a restart puts it back to 0.
+	 * Temporary, from the paste screen's Advanced rows: 0 lets the plans be weighed, 2 builds only the
+	 * packed plan, 3 never packs. Either forced gap is built whatever faults it has, so it can be seen.
+	 * A song with chords is never packed and is three apart under 2 as well. Not saved; a restart puts
+	 * it back to 0.
 	 */
 	public static volatile int LANE_GAP_OVERRIDE = 0;
 
@@ -1949,6 +1974,10 @@ public final class SongBuilder {
 		for (BlockPos note : plan.noteTicks().keySet()) {
 			for (Direction side : Direction.values()) {
 				if (power.contains(note.relative(side))) {
+					if (TRACE_TURNS) {
+						System.out.println("PACKED input touch: note " + note.toShortString() + " beside "
+							+ note.relative(side).toShortString() + " laid by " + plan.laidBy().get(note));
+					}
 					return true;
 				}
 			}
@@ -1991,13 +2020,7 @@ public final class SongBuilder {
 		List<EventNote> gtB = gtOdd;
 		List<Integer> flipsA = List.of();
 		List<Integer> flipsB = List.of();
-		// Not packed. A seam's piston and the block it shoves were laid out for rows three apart; two
-		// apart the piston stands in the gap beside the next row and the repeater after the seam reads
-		// the partner's air cell. Read back over the library cut to one note a tick on one floor: 80
-		// packed builds of 824 severed, 187 lanes, and none at all with the seams off. Packing pays for
-		// the fixed split in depth -- 12.8% shallower than spread where seams made it 17.6% -- and the
-		// plan it is weighed against keeps its seams.
-		if (INTERLEAVED_DYNAMIC_PARITY && !packingLanes()) {
+		if (INTERLEAVED_DYNAMIC_PARITY) {
 			ParitySchedule schedule = scheduleParities(notes, limits.reseedTicks());
 			if (!schedule.laneA().isEmpty() && !schedule.laneB().isEmpty()) {
 				gtA = schedule.laneA();
@@ -3463,9 +3486,11 @@ public final class SongBuilder {
 			lane = lane.ahead(1);
 			set(placements, lane.pos(), "minecraft:stone");
 			set(placements, lane.pos().above(), "minecraft:redstone_block");
+			packedSeamTouches(placements, lane.pos().above());
 			lane = lane.ahead(1);
 			set(placements, lane.pos(), "minecraft:stone");
 			set(placements, lane.pos().above(), "minecraft:air");
+			packedSeamTouches(placements, lane.pos().above());
 			lane = lane.ahead(1);
 			feedNext = lane.pos();
 			available -= need;
@@ -3542,7 +3567,15 @@ public final class SongBuilder {
 				continue;
 			}
 			// Past a cut the element is a cell longer, so a corner there meets the cell before.
-			int index = cut >= 0 && at > cut ? at - 1 : at;
+			//
+			// Two cells longer, in fact: the cut lays the dust and the corner's stone before the
+			// second piston, so the piston stands at seven where it would have stood at five. At
+			// three apart the turn's far corner falls on a cell allowed either way, so the one-off
+			// never showed; two apart it falls on the second block of redstone, which the old
+			// sum read as the landing and let through -- the block went down on the next lane's
+			// own wire and severed it (faded cut to a note a tick, sixteen wide). Corrected for a
+			// packed plan, where it bites, and left as it was for every build already measured.
+			int index = cut >= 0 && at > cut ? at - (packingLanes() ? 2 : 1) : at;
 			if (!paritySeamCornerAllowedAt(index)) {
 				return false;
 			}
@@ -3606,6 +3639,43 @@ public final class SongBuilder {
 	 */
 	static boolean CUT_HEAD_KEEPS_A_LOUD_SLOT_WITH_NOTHING_TO_FALL_TO = true;
 
+	/**
+	 * Packed: how many columns a whole seam opening here would be shoved on before its blocks of
+	 * redstone stand clear of every note beside them. See {@link #paritySeamHasRoom}.
+	 *
+	 * <p>Asked where the fold weighs a seam against the wall. The shove past the next row's notes
+	 * is columns nobody booked: a run of that row hangs a top-rail note at every other column, a
+	 * block of redstone and its landing are two cells side by side, so no column clears until the
+	 * run ends -- and the seam was walked on past it into the staircase. moonlight cut to a note a
+	 * tick, 21x2, a climb three past its wall. Booked here, a seam that cannot clear before the wall
+	 * is folded across the staircase like any other that does not fit.</p>
+	 */
+	static boolean PACKED_SEAM_SHOVE_BOOKED = true;
+
+	private static int packedSeamShove(PlacementPlan placements, Lane lane) {
+		if (!PACKED_SEAM_SHOVE_BOOKED || !packingLanes() || !placements.recording) {
+			return 0;
+		}
+		int shove = 0;
+		for (; shove < DUST_RANGE; shove++) {
+			Lane at = lane.ahead(shove);
+			boolean clear = true;
+			for (int cell = 2; clear && cell < PARITY_SEAM_CELLS; cell++) {
+				BlockPos block = at.ahead(cell).pos().above();
+				for (Direction side : Direction.values()) {
+					if (placements.anyNoteAt(block.relative(side))) {
+						clear = false;
+						break;
+					}
+				}
+			}
+			if (clear) {
+				break;
+			}
+		}
+		return shove;
+	}
+
 	private static boolean paritySeamHasRoom(PlacementPlan placements, Lane lane, int from) {
 		if (!paritySeamCornersAlign(lane, from)) {
 			return false;
@@ -3620,6 +3690,18 @@ public final class SongBuilder {
 		for (int cell = 0; cell < cells; cell++) {
 			if (placements.blockAt(at.pos().above()) != null) {
 				return false;
+			}
+			// Packed, and from the first block of redstone on: no note beside it, laid or claimed.
+			// A note that is already down cannot ask the seam to keep away, so the seam asks it --
+			// two apart, the partner's row hangs its notes right against this one, and a block of
+			// redstone sounds whatever it touches. Shoved on until clear, as for any other cell.
+			if (packingLanes() && from + cell >= 2) {
+				for (Direction side : Direction.values()) {
+					if (placements.anyNoteAt(at.pos().above().relative(side))) {
+						placements.padded("packedSeamShovedPastANote");
+						return false;
+					}
+				}
 			}
 			at = at.ahead(1);
 		}
@@ -11406,6 +11488,7 @@ public final class SongBuilder {
 						? 0 : PARITY_SEAM_LANDING_READER;
 					int seamCells = seamNext == 0
 						? PARITY_SEAM_CELLS + readerCells
+							+ packedSeamShove(placements, lane.ahead(foldRepeaters + stretchLeft))
 						: seamNext < PARITY_SEAM_CELLS
 							? PARITY_SEAM_CELLS - seamNext + 2 + readerCells : 0;
 					// Between the stages: no repeater may go down anywhere, and the chain has to
@@ -12697,6 +12780,9 @@ public final class SongBuilder {
 					};
 					set(placements, lane.pos(), "minecraft:stone");
 					set(placements, lane.pos().above(), block);
+					if (cell == 2 || cell == 3 || cell == 5 || cell == 6) {
+						packedSeamTouches(placements, lane.pos().above());
+					}
 					lane = lane.ahead(1);
 				}
 				// Down in full: a re-ask of this event lays nothing more. Left at nought, the
@@ -22219,6 +22305,13 @@ public final class SongBuilder {
 			placements.padded("closingFlanksTaken");
 			return false;
 		}
+		// Packed, the stone the column stands on is live at the lane's floor level, which is where
+		// the next row's floor rail hangs its notes in the gap. Asked as a floor column asks it.
+		// moonlight cut to a note a tick, 21x2: a rail note at 17 64 378 sounded a tick early.
+		if (PACKED_CLOSING_ASKS && !packedLiveTakes(placements, body.pos(), time)) {
+			placements.padded("closingFlanksPackedLive");
+			return false;
+		}
 		return true;
 	}
 
@@ -22240,6 +22333,9 @@ public final class SongBuilder {
 	 * {@link #addRailNote}, whose flanks are at path+1 rather than at the lane's floor.</p>
 	 */
 	static boolean CLOSING_CHORD_HANGS_ON_THE_FLANKS = true;
+
+	/** Packed: a flanked close asks whether its live stone stands against a foreign note. */
+	static boolean PACKED_CLOSING_ASKS = true;
 
 	/** Two, and it is the shape rather than a budget: a flanked column has a near side and a far one. */
 	private static final int CLOSING_FLANK_SLOTS = 2;
@@ -22337,11 +22433,64 @@ public final class SongBuilder {
 		for (Direction direction : Direction.values()) {
 			BlockPos beside = slot.relative(direction);
 			if ((packing ? placements.foreignLiveAt(beside, time) : placements.liveAt(beside, time))
-					|| barred.contains(beside)) {
+					|| barred.contains(beside) || packing && seamPower(placements, beside)) {
 				return true;
 			}
 		}
 		return false;
+	}
+
+	/**
+	 * Whether a cell holds a block of redstone a piston shoves, or is the cell it is shoved into.
+	 *
+	 * <p>A block of redstone powers every note block it touches, on the tick it arrives -- whatever
+	 * tick that note was written for. Three apart nothing hangs beside a seam; two apart the next
+	 * row's notes hang in the gap right against it, so packed, no note may stand beside either cell.
+	 * The user's rule: a top-rail column beside a seam either centres its note or the run ends there;
+	 * the floor rail hangs a level down and touches neither. Read off the blocks, so it holds for every
+	 * seam builder and for the two-lane input alike: the block itself, or the air cell with a block
+	 * behind it and a sticky piston behind that, facing in.</p>
+	 */
+	private static boolean seamPower(PlacementPlan placements, BlockPos cell) {
+		String here = placements.blockAt(cell);
+		if (here == null) {
+			return false;
+		}
+		if (here.startsWith("minecraft:redstone_block")) {
+			return true;
+		}
+		if (!"minecraft:air".equals(here)) {
+			return false;
+		}
+		for (Direction shove : Direction.Plane.HORIZONTAL) {
+			BlockPos block = cell.relative(shove.getOpposite());
+			String piston = placements.blockAt(block.relative(shove.getOpposite()));
+			String pushed = placements.blockAt(block);
+			if (pushed != null && pushed.startsWith("minecraft:redstone_block") && piston != null
+					&& piston.startsWith("minecraft:sticky_piston[facing=" + shove.getName())) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Packed: says so on the plan where a seam's block of redstone, or the cell it is shoved into,
+	 * stands against a note already down -- the half of the rule a note cannot ask, because the note
+	 * came first. Read by {@link #packedWins}, which then keeps the spread plan.
+	 */
+	private static void packedSeamTouches(PlacementPlan placements, BlockPos cell) {
+		if (!packingLanes() || !placements.recording) {
+			return;
+		}
+		for (Direction direction : Direction.values()) {
+			if (placements.anyNoteAt(cell.relative(direction))) {
+				placements.padded("packedSeamBesideANote");
+				placements.trouble("a parity seam's block of redstone at " + cell.toShortString()
+					+ " stands against a note");
+				return;
+			}
+		}
 	}
 
 	/** The cells a route occupies, so a bus laid along it does not hang a note in its own way. */
@@ -25215,6 +25364,12 @@ public final class SongBuilder {
 	static boolean BUS_MEASURES_ITS_WIRE = true;
 
 	/**
+	 * Packed: a bus cell's stone is live only where it sounds a note, and thin elsewhere. See the
+	 * bus's own loop.
+	 */
+	static boolean PACKED_BUS_THIN_GROUND = true;
+
+	/**
 	 * A run of powered stone with a note down each side of it, and the dust that lights the run.
 	 *
 	 * @return how many blocks of it there are, which is also how much wire it spends -- except
@@ -25309,7 +25464,31 @@ public final class SongBuilder {
 			if (BUS_MEASURES_ITS_WIRE && cells >= limit) {
 				placements.padded("busGrewOnAShortcut");
 			}
-			placements.powered(at.pos(), "minecraft:stone", time);
+			// Packed, a cell's stone goes live only where it sounds one of the chord's notes. Two apart, a bus row's ground stands square
+			// against the gap the next row hangs its notes in, and on stone every cell of it is live
+			// whether it sounds anything or not: moonlight cut to a note a tick, 21x2, a bus of five
+			// for one note sounding two of the next row's path notes along the way. The dust carries
+			// the run on a block that does not conduct, as a packed pad's does. Decided before the
+			// cell is laid, because the block cannot be changed once it is down.
+			boolean live = true;
+			if (PACKED_BUS_THIN_GROUND && packingLanes() && placements.recording) {
+				// The slots asked exactly as the loop below asks them, so the run is as long as it
+				// always was: a bus that grew past what the walk measured would run into its own
+				// turn. Only a cell that was going to hang nothing goes thin.
+				live = placed < ordered.size() && (cells == 0
+					|| at.noteSlots().stream().anyMatch(slot -> !reserved.contains(slot)
+						&& (!crowded || (placements.freeForNote(slot)
+							|| placements.freeForHangingHarp(slot))
+						&& !soundedByAnother(placements, slot, time))));
+				if (!live) {
+					placements.padded("packedBusCellThin");
+				}
+			}
+			if (live) {
+				placements.powered(at.pos(), "minecraft:stone", time);
+			} else {
+				set(placements, at.pos(), THIN_LANE);
+			}
 			set(placements, at.pos().above(), "minecraft:redstone_wire");
 			cells++;
 			// Filled away from the next lane first. The note side is pinned to the lane step, so the
@@ -26784,18 +26963,6 @@ public final class SongBuilder {
 	}
 
 	/**
-	 * Packed: whether a block that goes live at this tick may stand here without sounding a note of
-	 * somebody else's tick beside it.
-	 *
-	 * <p>The other half of every note's own question. A note asks whether anything live is already
-	 * beside it ({@link #soundedByAnother}), and in one machine that is the whole of it: lanes go down
-	 * in order, so a lane's notes hang against a lane already built, and nothing live ever arrives
-	 * beside a note after it. Two machines walk their rows together, so the partner's row may hang a
-	 * note into the gap before this row has laid the block beside it -- and then this block is the one
-	 * that has to ask. The stacked parity check learned the same thing first: it asks both ways, of
-	 * whatever is already down, and whichever row reaches a column second sees the first.</p>
-	 */
-	/**
 	 * Packed: claims a committed path column -- its centre live at the chord's tick, and the note it
 	 * will hang on the near side unless the chord's one note is a harp and takes the centre.
 	 *
@@ -26826,6 +26993,18 @@ public final class SongBuilder {
 		}
 	}
 
+	/**
+	 * Packed: whether a block that goes live at this tick may stand here without sounding a note of
+	 * somebody else's tick beside it.
+	 *
+	 * <p>The other half of every note's own question. A note asks whether anything live is already
+	 * beside it ({@link #soundedByAnother}), and in one machine that is the whole of it: lanes go down
+	 * in order, so a lane's notes hang against a lane already built, and nothing live ever arrives
+	 * beside a note after it. Two machines walk their rows together, so the partner's row may hang a
+	 * note into the gap before this row has laid the block beside it -- and then this block is the one
+	 * that has to ask. The stacked parity check learned the same thing first: it asks both ways, of
+	 * whatever is already down, and whichever row reaches a column second sees the first.</p>
+	 */
 	private static boolean packedLiveTakes(PlacementPlan placements, BlockPos cell, int time) {
 		if (!packingLanes() || !placements.recording) {
 			return true;
@@ -35609,6 +35788,11 @@ public final class SongBuilder {
 		 * measuring a shape, and the shape is the one the real walk would get if nothing were in
 		 * the way.</p>
 		 */
+		/** Whether a note of any tick is already planned here. */
+		boolean anyNoteAt(BlockPos position) {
+			return notes.containsKey(position.immutable());
+		}
+
 		/** Whether a note belonging to another tick is already planned here. */
 		boolean noteAt(BlockPos position, int time) {
 			Integer when = notes.get(position.immutable());
@@ -36939,6 +37123,14 @@ public final class SongBuilder {
 				}
 			}
 			BlockPos key = position.immutable();
+			// A thin block is stone that does not have to conduct. Where another shape wants the cell
+			// as stone after all, it is stone, and no collision: the shape that wanted it thin only
+			// wanted it to hold dust up, and stone does that too.
+			if (THIN_LANE.equals(block) && "minecraft:stone".equals(blocks.get(key))) {
+				block = "minecraft:stone";
+			} else if ("minecraft:stone".equals(block) && THIN_LANE.equals(blocks.get(key))) {
+				blocks.put(key, block);
+			}
 			String existing = blocks.putIfAbsent(key, block);
 			if (existing == null && laneTint >= 0) {
 				laneTintAt.put(key, laneTint);
