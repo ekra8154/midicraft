@@ -312,9 +312,8 @@ public final class SettingsScreen extends Screen {
 					init();
 				})
 			.bounds(SIDEBAR_LEFT, footer, 70, CONTROL_HEIGHT)
-			.tooltip(Tooltip.create(Component.empty().append("Puts every setting under ")
-				.append(category.title())
-				.append(" back to what it was before anyone touched it.")))
+			.tooltip(Tooltip.create(Component.empty().append("Resets every setting under ")
+				.append(category.title()).append(".")))
 			.build());
 		addRenderableWidget(Button.builder(Component.literal("Reset all"), pressed -> confirmResetAll())
 			.bounds(SIDEBAR_LEFT + 74, footer, 70, CONTROL_HEIGHT)

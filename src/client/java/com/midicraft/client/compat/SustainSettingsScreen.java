@@ -61,11 +61,7 @@ public final class SustainSettingsScreen extends ModalPanelScreen {
 			})
 			.bounds(panelLeft + PADDING, y, rowWidth(), BUTTON_HEIGHT)
 			.tooltip(net.minecraft.client.gui.components.Tooltip.create(Component.literal(
-				"Moves every strike to the nearest tick the build can place: a repeater tick when "
-					+ "the song without its sustains builds on one lane, a game tick when it needs "
-					+ "two. A note value the tempo does not divide, like 1/16 at most tempos, then "
-					+ "strikes slightly unevenly instead of off the grid. Off, strikes land exactly "
-					+ "on the note value and may not build.")))
+				"Snaps strikes to ticks the build can place. Off may not build.")))
 			.build());
 
 		int buttonWidth = (rowWidth() - 6) / 2;
