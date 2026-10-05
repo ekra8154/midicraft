@@ -16,7 +16,7 @@
   "option.midicraft.mod_enabled": "Enable in-world tools",
   "tooltip.midicraft.mod_enabled": "Note block labels, scroll-to-retune and the placement sequence. The Composer works either way.",
   "option.midicraft.debug_commands": "Debug commands",
-  "tooltip.midicraft.debug_commands": "Adds /midicraft paste and asciidiagram. Syntax in the README.",
+  "tooltip.midicraft.debug_commands": "Adds /midicraft paste and asciidiagram. Syntax in docs/debug-commands.md on GitHub.",
   "option.midicraft.radial_focus_delay": "Radial focus delay (ticks)",
   "tooltip.midicraft.radial_focus_delay": "Ticks the center label must stay under the crosshair before its radial opens and accepts scrolling. 0 opens immediately.",
   "option.midicraft.repeater_control_style": "Repeater control style",
