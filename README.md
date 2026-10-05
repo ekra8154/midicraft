@@ -1,503 +1,112 @@
 # Midicraft
 
-A fully client-side Fabric mod for Minecraft Java Edition 26.2 that displays
-interactive pitch and delay controls above nearby note blocks and repeaters.
-
-Run **`/midicraft`** to open the Composer -- or `/midicraft composer`,
-which does the same thing and is easier to find by tab-completing. Settings are
-at **`/midicraft settings`**. The mod binds no keys by
-default -- taking a letter key from someone who plays with a lot of mods is a
-rude way to introduce yourself -- so the Composer, the interactive overlay and
-the placement sequence control are all unbound until you say otherwise. Bind
-them on the Keys tab of the mod's own settings, or in Minecraft's Controls
-screen, which are two views of the same binding.
-
-There are two overlays, and they are set separately. **Nearby overlays** label
-every block of the chosen types within view distance: something to read, and off
-by default. The **interactive overlay** is the one on the block under your
-crosshair, the one you can scroll to retune. Turning it on is enough on its own
--- with nearby overlays off you see and change the block you are aiming at and
-nothing else.
-
-With note blocks interactive, each one shows a billboard label for its current pitch. Hover
-that label to open a compact radial A-G menu for only that note block. While in
-normal block-interaction range:
-
-- scroll up to select the next natural/sharp pitch in that letter family;
-- scroll down to select the previous pitch in that family.
-
-The radial menu keeps the focused letter in place while scrolling repeatedly.
-Its order runs clockwise, with A at the top, B at the upper right, and G at the
-upper left whenever those letters are outside the center.
-
-Each nearby repeater shows its current `1` through `4` delay. The default radial
-style expands this into a four-number diamond with the current delay at the
-bottom. Aim at another number and scroll either way to select it; the layout
-stays pinned until focus leaves it, then rotates the new current delay to the
-bottom. An optional single-number scroll style cycles delays directionally.
-
-## Settings
-
-The Settings tab in the Composer's menu bar opens them, and so does the
-configuration button beside the mod in Mod Menu's list if that mod is installed.
-Neither route needs anything beyond Fabric API. Settings are grouped into
-Composer, Build Pasting, Placement Sequence, In-world tools, Keys, Server
-Friendliness and Debug; any one of them can be put back with the arrow beside it, and a whole tab
-or the whole mod can be reset from the buttons underneath. Resetting the whole
-mod leaves key bindings alone.
-
-The in-world half of the mod is off on a fresh install and the Composer is not:
-labels over blocks and scrolling to retune them are tools you turn on when you
-want them, rather than the first thing a new world greets you with. What the
-settings cover:
-
-- the blocks a paste is built from: each machine's lane (stone), the relay block
-  (stone), the climbs between floors (glass) and the supports under a floor
-  (stone slab). The relay block takes every cell that has to carry power, such as
-  buses, stacked chords, double rails and a descent's powered rungs, plus any
-  cell over or beside dust that keeps the wire from stepping where it should
-  not; the lanes take the rest, so they may be glass or slabs. Each is typed as
-  a block id and refused if it would break the machine: the relay block has to
-  conduct redstone, a transparent block must not, and lanes and supports need a
-  top that dust and repeaters can stand on. The block under a note is its
-  instrument and is never swapped;
-- a GUI scale for the mod's own screens, separate from Minecraft's, since a piano
-  roll wants more pixels than a hotbar does;
-- a master switch for the in-world tools, which does not touch the Composer;
-- nearby overlays: off (the default), repeaters only, note blocks only, or both;
-- the interactive overlay on or off, which is what the overlay key toggles, and
-  which block types it answers for;
-- repeater control style: radial select (default) or directional scrolling;
-- inverted scrolling;
-- configurable radial focus delay from 0 to 20 ticks, defaulting to 5;
-- shared overlay view distance from 1 to 32 blocks;
-- interaction delay from 0 to 10 extra ticks, defaulting to the original
-  one-interaction-per-client-tick speed;
-- optional server-confirmation waiting;
-- optional unobstructed line-of-sight enforcement;
-- resumable compositions with independently named tracks;
-- one instrument per track, including a Barrier instrument that mutes the
-  track without removing it from synchronized preview timing;
-- sequencing edit protection: radials only, radials and ordinary interactions
-  (default), or off;
-- a validated, whitespace-agnostic sequence using note values `0` through `24`
-  and explicit repeater delay groups `1d` through `64d`.
-
-Each track has its own sequence, instrument, collapse state, and persistent
-placement cursor. The selected Build track drives placement automation, the
-in-game timeline, counters, and hotbar selection. Preview plays every track
-together from time zero and follows the highlighted token vertically in each
-expanded editor. Existing single-track configs and saved sequences migrate to
-Track 1.
-
-For example, `0, 2d, 4, 2d, 7` expects a note block tuned to pitch 0, a repeater
-set to delay 2, and so on. A mismatched placement does not advance the sequence,
-and the sequence repeats when it reaches the end. New placements can advance
-regardless of whether earlier note blocks or repeaters are still tuning, so
-switching block types does not impose a completion wait.
-Long delay groups use the minimum number of physical repeaters: `10d` expands
-to `4d + 4d + 2d`. The HUD keeps that group in one dotted capsule while H +
-wheel and placement advance through its individual repeater dots.
-
-The sequence control key is unbound by default and can be assigned in
-Minecraft's Controls screen. Hold it to see the sequence, hold and scroll
-up/down for the previous/next step, or double-tap it to pause or resume without
-losing the current position. While paused, single taps, holds, and scrolling are
-inert for sequence control; only a completed double-tap resumes it, and the
-wheel continues to scroll the vanilla hotbar. Manual sequence scrolling stops
-at the first and last steps instead of wrapping. The sliding HUD keeps the next
-placement centered, with
-compact repeater delay markers between the fuller note labels. Each successful
-placement briefly shows only the placed step sliding aside and its successor
-becoming current. A compact `x/X` counter appears under both HUD layouts, and
-the current sequence position is saved so long melodies resume at the same
-step after restarting.
-
-The optional **Auto-select current step** setting passively changes to the note
-block or repeater required by the current sequence step whenever the cursor
-moves. This includes successful placements, H + wheel navigation in either
-direction, sequence edits that reset the cursor, and resuming the sequence. It
-never intercepts right-clicks. If the required item is not in the hotbar, the
-selected slot is left unchanged.
-
-
-## Convert for Minecraft
-
-A note block plays two octaves and one semitone, MIDI 54 to 78, and most music
-does not fit in that. Convert brings every note into it by moving notes whole
-octaves -- always whole octaves, because a part moved by anything else is not in
-a different octave, it is in a different key from the rest of the song.
-
-Two settings under **Convert for Minecraft** decide how:
-
-- **Out-of-range notes** -- `Shift the notes` moves only the notes that are out
-  of range, each by its own nearest octave, and leaves everything else exactly
-  where it was written. `Shift the layer, then the notes` moves the whole layer
-  to wherever the fewest of its notes are out of range and then shifts whatever
-  is still out, note by note. The second splits fewer layers and keeps a part's
-  intervals together; the cost is that notes with nothing wrong with them can
-  move, when moving them catches more strays than it creates. A layer already
-  wholly in range scores nothing at all and stays where it is.
-- **Split transposed notes into layers** -- when a note takes a different octave
-  from the rest of its layer, give it a layer of its own, named with the octave
-  it moved. Nothing about a layer requires this: it is so you can see what
-  Convert moved, mute it, or put it back. Off keeps the layer whole and the layer
-  count down, and two notes an octave apart that land on one pitch become one
-  note instead of one dropped layer.
-
-Both modes end with every note in range, whichever way the split is set, because
-the last step of each is the same per-note octave shift and the window is wide
-enough that no pitch class can fail. A wide part still splits either way if no
-single octave holds it -- that is the part being wider than a note block, not a
-setting being wrong.
-
-
-## Copying and repeating
-
-Dragging a box over a passage does two things. It selects the notes inside it,
-and it leaves a **selection range** behind: a tinted band across the roll with
-its length written in it, and a bracket with a handle at each end in the strip
-along the bottom of the ruler.
-
-The range is there because a set of notes is not a length. Notes end on the last
-note; a passage ends on silence, and nothing in a copy says how much. So the
-range is what Ctrl+V and Ctrl+D step by, and either end of it can be dragged --
-pull the right-hand one past the last note and watch the number change. That is
-how you say "and half a bar of rest". Right-click the strip to drop the range
-without dropping the selection.
-
-- **Ctrl+C, Ctrl+V** copy and paste. Paste lands at the playback marker and then
-  moves the marker on by the range, so pressing Ctrl+V again continues the
-  passage instead of laying a second copy on the first. Ctrl+Shift+V pastes back
-  where the copy was taken from. A copy keeps the length it was made with until
-  something else is copied.
-- **Ctrl+D** duplicates the selection immediately after itself and leaves the
-  selection on the copy, so pressing it again adds another repeat. No clipboard
-  is involved and every note stays on the layer it is already on -- a four-part
-  phrase comes back as four parts. A paste, by contrast, is aimed at a layer.
-
-Selections made without a box -- Ctrl+A, or the Select menu -- have no range, so
-the length is guessed from the notes: the last one, plus the tightest gap between
-any two of them. That is usually right for a phrase of even steps and it is
-always visible, drawn as a hairline in the same strip, before you commit to it.
-
-
-## Sorting the lists
-
-The song library and the file browser both list **newest first** by default: the
-song you last saved, or the file you just downloaded, is nearly always the one
-you came back for. A **Sort** button beside the search box switches either to
-A to Z, and the choice sticks -- it is saved with the settings, because the file
-browser is built fresh on every import and a choice that reset itself would not
-be one. Both lists follow the same setting.
-
-Each song row says when it was last saved, in the same words the order is in --
-`2 hours ago`, `3 days ago` -- so the order has a visible key rather than one you
-take on trust. Folders in the browser stay alphabetical whichever way files are
-sorted: a folder's date is about whatever was last written inside it, which is no
-help in finding the folder.
-
-
-## Dragging a file in
-
-Drag a `.mid`, `.midi`, `.nbs`, `.nbt`, `.schem` or `.litematic` file from your
-desktop onto the Minecraft window and it is imported. This works on the song
-library, in the composer, and in the file browser -- whichever is open takes it.
-
-The extension chooses the reader, so there is no need to pick the matching import
-button first. Dropping a folder onto the file browser opens that folder instead.
-Dropping several files takes the first one it can read and says so rather than
-guessing at a queue. Dropping something it cannot read says that too, because a
-drop that is silently ignored looks exactly like one the window never got.
-
-Onto the composer it goes through the same unsaved-changes check the Import menu
-entry does: a drop is easy to make by accident in a way that choosing a menu
-entry is not.
-
-
-## Notes and layers on one keyboard
-
-No pane holds the keyboard. Each shortcut says what it acts on, so nothing
-depends on which half of the composer you clicked last:
-
-- **Ctrl+A** always selects notes: every note on the selected layers, or on
-  every layer while none is selected. To select every layer, click the first
-  and shift-click the last.
-- **Ctrl+E** always merges the selected layers, from anywhere.
-- **Ctrl+C**, **Ctrl+X** and **Ctrl+D** act on the selected notes when any are
-  selected, and on the selected layers when none are. Copying says which it
-  took. Layers are copied whole -- names, instruments, states and notes -- and
-  duplicated layers land together as one block under the lowest selected layer.
-- **Ctrl+V** puts back whatever was copied last. There is one clipboard, so
-  copying layers replaces copied notes and the other way round. Pasted layers go
-  directly below the lowest selected row, or on the end when none is selected;
-  pasted notes go at the playback marker. **Ctrl+Shift+V** is for notes only
-  and does nothing when layers were copied last.
-- **Delete** and **Backspace** remove notes and never layers. A layer is
-  deleted from its right-click menu, where the row going is the row you are
-  pointing at.
-- **Escape** drops the selected notes first, then the selected layers.
-
-Changing which layers are selected drops the note selection, so a note picked
-earlier cannot be what Ctrl+C takes when it was layers you just picked. The one
-exception is right-clicking a layer, which keeps the notes so that **Move notes
-here** has something to move.
-
-Undo and redo are not routed and never were: there is one history for the whole
-composition, and Ctrl+Z takes back the last thing you did whichever pane did it.
-
-
-## What gets built
-
-A layer goes into the build if you can hear it and see it. Muting a layer or
-hiding it takes it out; setting it back to Active puts it back. There is nothing
-else to set -- what you hear in the composer is what the machine plays.
-
-**A**, **M**, **S** and **H** set the selected layers to active, muted, solo or
-hidden, the same letters their chips show. Each is a toggle: pressing the letter again, once
-they are all there, puts each layer back to what it was doing before the key
-moved it. Muting a hidden layer to hear it and then pressing M again hides it
-again rather than leaving it on.
-
-That used to be a separate flag, a dot on each row, independent of mute. It made
-the composer two things at once: preview played the unmuted layers and a build
-placed the dotted ones, with nothing connecting them, so pressing Space was not a
-preview of the build and there was no way to hear what would be built. A DAW does
-not have this problem, because a bounce is the same signal chain as the transport
--- what you heard is what you got. This is that.
-
-**Solo is the exception, on purpose.** Soloing is a lens for listening around a
-part, not a decision about the song, so the layers it silences are still built.
-That is the one case where preview and build disagree, and the status bar says so
-while any layer is soloed.
-
-Right-clicking a note selection offers **Solo selection**, which is the same lens
-held over a phrase instead of a layer: only the selected notes play. It lasts as
-long as the selection does, so putting the selection down ends it, and the row
-reads **Stop soloing** while it is on.
-
-Muting a layer to hear around it and then pasting is the mistake this invites, so
-two things say the count: the status line reads `Build: 12 of 15 layers`, and
-starting a paste says `3 layers are muted or hidden, so they are not in this
-build.`
-
-Older songs carry the old flag in their files and it is ignored. Nothing is lost
-by it: a layer that was dotted but muted is now left out, and a layer that was
-undotted but audible is now built.
-
-
-## Tempo and speed
-
-Two numbers decide how fast a song plays, and they multiply.
-
-The **tempo** is the song's own, written in the file as microseconds per quarter
-note and shown as BPM. The **Speed** slider is a ratio on top of it, from 0.25x
-to 8.00x in quarter steps. It is not a preview: it is saved with the song and the
-build runs at it, so a song at 150 BPM and 2.00x really is a 300 BPM song.
-
-The status bar shows the sum -- `150 x 2.00 = 300 BPM` -- and the song's
-resolution beside it, `480 ticks/beat`. That last number, ticks per quarter note,
-is what the fraction grid is counted in: a 1/16 line is a quarter of it. It has
-no bearing on how long anything lasts, which is why two songs at the same BPM and
-different resolutions have the same 1/16 in real time.
-
-**Edit > Apply speed to the tempo** folds the slider into the tempo and puts it
-back to 1.00x. Nothing about the song changes -- 150 at 2.00x and 300 at 1.00x
-are the same song, note for note -- but the number written in the file becomes
-the one it plays at, and the slider is free to be a ratio of the new baseline.
-Convert does this as its first step; this is that step by itself.
-
-
-## The snap grid
-
-The Snap control offers two different kinds of grid, and they are absolute about
-different things.
-
-The **note values** -- 1/4, 1/8, 1/16, 1/32 -- are absolute in the *song*. A 1/16
-is a sixteenth of a quarter note whatever the tempo is doing. They are what bars
-and beats are made of, and they are what you want when you are writing music.
-
-**Repeater tick** and **game tick** are absolute in *real time*. A repeater tick
-is 100 ms, the shortest delay a repeater can add and so the closest two notes can
-be built; a game tick is half that, reachable only by a build laying a second
-lane. Their lines are drawn where those moments actually fall, which on a song
-whose tempo does not divide into them means visibly not on the beat. That is the
-information, not a fault: it is what an unconverted song looks like, and
-Edit > Convert for Minecraft is what moves the tempo until the two grids agree.
-
-Because they measure different things, the same setting means different amounts
-of time in different songs. `Snap 1/16` is one repeater tick at 150 BPM, two at
-75, three at 50, and a quarter of one at 300 BPM played at 2.00x. So the status
-bar carries the translation -- `grid 1/16 = 1 repeater tick` -- and it moves as
-the tempo and the speed slider move. The Snap button turns amber when its grid is
-not one the current paste mode can build on, and its tooltip says why.
-
-Bar lines and bar numbers are drawn whatever the snap is set to. They used to
-appear only where a snap line happened to land on one, so choosing a redstone
-grid on an unaligned song took the bars off the roll entirely -- which is the one
-thing that makes the roll readable.
-
-
-## Markers
-
-A marker is a named position on the composer's timeline. Nothing is built from
-one and nothing sounds at one -- it is somewhere to write down what a stretch of
-the song is, so that finding the second chorus again is reading a label rather
-than counting bars.
-
-**B** puts one where the playback marker is standing, or takes away the one
-already there; **Edit > Markers** is the same three actions with the mouse. They
-appear in a strip above the ruler, which is only there while the song has
-markers -- with none, the ruler sits flush against the menu bar. Click a label to
-jump the playback marker to it, double-click to rename it, right-click to remove
-it, and click the empty part of the strip to add one where you clicked. A faint
-line drops from each one through the roll.
-
-One marker to a tick, so adding one where another already stands renames it.
-They are saved with the composition, they come forward when **Snap to song
-start** pulls the music forward, and Ctrl+Z takes back any of it.
-
-
-## Debug commands
-
-Off by default; the switch is on the Debug tab of the settings, and takes effect
-the moment you throw it -- the two subcommands come and go from tab-completion
-without a rejoin, and refuse to run while it is off. `/midicraft asciidiagram <from> <to> [view] [facing] [notes]`
-draws a region of the world as text.
-
-Color-coded paste is not behind that switch: it is picked per paste on the
-paste screen, alongside whether the build starts at the top or the bottom, and
-the last choice is remembered. **Normal** is the plain build, made of the Build Pasting blocks. **Light show** is a
-plain build that plays, with every bus, stacked chord centre and top rail block
-made a redstone lamp, so the song draws a glowing line as it runs; the lane's own
-floor, its padding and the floor rail stay stone, and nothing under a note
-changes, since that block is the note's instrument. **Color coded** colours the
-build by what laid each block -- dead wire red, wrong notes as lit copper bulbs,
-collisions in sea lantern -- and is broken on purpose wherever two shapes
-collided.
-
-The colour key for a color-coded build:
-
-| Block | Means |
+Midicraft creates a dedicated piano-roll composer inside the game, provides tooling tailored for Minecraft note blocks, and allows you to paste those songs into the game!
+
+Midicraft is a client-side mod. Import songs from a variety of sources, and shape them into real Minecraft songs that redstone can play! Unlike other note block song creation tools, Midicraft machines can play notes up to 20x/sec using half ticking, meaning they have double the precision without modifying the tick speed or using custom resource packs. It's also focused on survival feasibility, highly optimized for compactness of builds, and offers a sequencer to build simpler songs on the fly without the need for mods such as Litematica.
+
+## Features
+
+ - DAW-like composer built into the game, complete with Minecraft instruments
+ - Import songs in any way, including scanning existing builds in-world
+ - Auto-assigns instruments based on MIDI source
+ - Supports chords of up to 30 notes, allowing complex and dense songs
+ - Easy-to-use tools for advanced noteblocking techniques, tailored to creating the best sounding vanilla compatible songs
+ - Optimized for compactness and resource usage
+ - Highly customizable pasting, including the height and width of any song
+ - Builds are pasted with vanilla commands at a customizable rate
+ - In-world sequencer HUD to create simpler songs without a schematic
+ - In-world noteblocking tools and overlays
+
+
+## Quick Start
+ - Open the composer with a keybind (unbound by default), through mod menu, or with /midicraft
+ - The mod binds no keys by default, but supports binding composer, in-world sequencer, and overlay tools
+
+
+## The Composer
+ - Click to place notes. Right-click (or right-drag) to erase; with notes selected, right-click opens a menu instead. Start a song from scratch, or import from the file button at the top.
+ - Click and drag to create a selection. Move multiple notes, or copy/cut and paste based on the selection
+ - Create layers with the panel on the left. Shift click to select a range of layers, or ctrl click for individual. Operations will affect all selected layers
+ - Change layers' instrument(s) with the panel on the left. One layer can have multiple instruments, even of the same kind (which will make it louder)
+ - Instrument switching: Right click a layer and hit "convert layer: melodic". This distributes all instruments into brackets based on their true octave pitches, allowing a layer to have 3x the note range from normal.
+ - "convert to percussion" and "convert to sfx" options do similar things, but for Minecraft percussion notes and for various sound making blocks
+ - Minecraft notes cannot be held, but "sustained notes" simulates it with restrikes. Right click a layer to bring up its sustained menu and enable sustaining. MIDI files retain their original sustain trails on import
+ - The composer highlights out of range areas in red, but still allows them to play in the preview
+ - The bottom bar shows the song's status: whether it is buildable in-world or not, and why
+ - Edit has many tools to make songs buildable in-world, such as quantization, fitting into range, and tempo snapping
+ - "Convert for Minecraft" is a beginner friendly way to make any song buildable. It is not guaranteed to make an imported song sound the most faithful possible however
+ - Dense songs, especially with melodic layers, composite layers (that use multiple instruments), and restrikes, reach the chord limit of 30 very fast. Chord thinning will skip copies of the same note to make builds stay within the specified limit
+ - Playback speed does affect how fast the song plays in-world once pasted. Combined with quantization, it can be a good technique to find a balance between adjusting the original song's tempo and allowing notes to move to work with Minecraft.
+ - Export any Midicraft song as an nbs file. Playback speed is baked in as tempo, split and composite layers are expanded, and restrikes become individual note hits
+
+
+## Build Pasting
+ - Paste a build with Song --> Paste current sequence in world
+ - Pasting uses /setblock, so it needs permission to use commands (singleplayer with cheats on, or operator on a server). Without it, build simpler songs by hand with the in-world sequencer
+ - Midicraft machines always fill a width in the +x direction, and expand in the +z direction in a snaking fashion
+ - There is no hologram preview, so be sure there is nothing in the way of the build or it will be overwritten by the paste
+ - Machines with multiple floors snake up/down first, then left to right. This ensures the music audibly moves gradually forward
+ - Specify whether the machine starts at the top or the bottom floor
+ - In settings, specify each of the paste blocks
+ - Turn on light show to watch the song light up as it plays, or color coded to see the different chord types and how padding is distributed
+ - Builds are NOT guaranteed to work perfectly at any given config (mainly extremely dense and/or fast songs). The paste screen should report issues before ever pasting. If that happens, change the dimensions or other settings, or paste anyway
+ - On flat lane, a chord can play up to 33 notes. However, due to complications with turns, climbs, and edge cases, the limit is 30
+
+## Half Ticking
+ - Builds may be one lane (no half ticking), or two lanes (use half ticking)
+ - Most redstone components use repeater ticks (the length of 1 repeater delay), but Minecraft operates on game ticks, which are twice as fast
+ - So 1 repeater tick = 2 game ticks. There are 10 repeater ticks/sec, and 20 game ticks/sec. Since most redstone components take 2 game ticks, they cannot operate between repeater ticks
+ - Pistons extend in 3 game ticks (1.5 repeater ticks). By creating a second lane in the build that starts with pistons, Midicraft can play notes that fall in between repeater delays. This allows double the precision, and makes many Midicraft songs able to sound much closer to their source
+ - When a Midicraft song is converted for game ticks or reports "2 lanes needed" at the bottom, it will use half ticking
+ - With 2 lanes, Midicraft will maintain 2 interleaved lanes throughout the entire song. They work together to play the notes both on "even" ticks and "odd" ticks
+ - Using pistons, the lanes can dynamically switch between playing even and odd notes, allowing them to distribute the work equally. This makes builds more compact at the cost of adding pistons (which make noise)
+ - Sort of like Midicraft is a CPU kernel delegating work between two threads
+ - However, due to the uneven distribution of notes, the two lanes still must pad with redstone frequently in order to ensure the sounds happen close enough together that the song doesn't sound disjointed
+ - Allowed drift and catch up amount are configurable, but this means two lane builds will almost always be less space efficient than one lane builds
+
+## In-World Sequencer
+ - Build simpler songs by hand, block by block, on any server. No operator permission or schematic mod needed
+ - Only available for songs that build as one lane. Songs that need half ticking have to be pasted
+ - The song open in the composer is the sequence. Bind the Placement sequence key and hold it to see the HUD: the next note block or repeater is in the center, with the steps before and after it on either side
+ - Place blocks in order. Each note block and repeater is tuned automatically once it's placed, and a wrong block doesn't advance the sequence
+ - Chords are built two notes per block, shown as two rows in the HUD
+ - Double tap the key to pause and resume it. Hold the key and scroll to step backward or forward. Your place in each song is saved
+ - Optional settings can select the right block from your hotbar for you, make the instrument block under each note its own step, and change the order chord notes are placed in
+
+## In-World Tools
+ - Off by default. Turn them on in the In-world tools settings
+ - Nearby overlays label the note blocks and repeaters around you with their pitch or delay
+ - The interactive overlay is on the block you're aiming at. Hover a note block's label to open a radial A to G menu and scroll to retune it, or scroll a repeater to change its delay
+ - Tuning sends ordinary right-click interactions at a limited rate. The Server Friendliness settings can slow it down, wait for the server to confirm each change, or require a clear line of sight
+
+## Tips
+ - If you can make a song sound good as a one lane build, it will be more compact than if it was two lanes (and will use no pistons)
+ - Quantize to repeater ticks or game ticks will always place the notes onto either a one lane or two lane compatible grid
+ - If the high notes of a song barely don't fit, transpose the whole song down a few notes. It won't be true to the original key, but it will still sound like the song
+ - The main melody of a song often benefits from being converted to a melodic layer (instrument switching) so that the high and low notes don't have to be transposed to fit
+ - Many song speeds don't work with Minecraft well. Using one technique alone, such as tempo snapping, can significantly change the tempo of a song, even if note relations are kept perfect. Quantization on its own can cause the song to sound different, even though the tempo remains accurate
+ - Combine repeater and game tick quantization with playback speed and tempo snapping / the Convert for Minecraft button to achieve a good balance of offset notes and modified tempo to make the song sound most accurate
+
+## Shortcuts
+
+| Key | Does |
 |---|---|
-| `stone` | the lane: wire, repeaters, corners, staircases |
-| `spruce_planks` | parity padding: a module moved to land on its beat |
-| `dark_oak_planks` | busy padding: a column spent to free the slots behind, so a chord can be cut |
-| `birch_planks` | corner padding: the columns a bend costs |
-| `acacia_planks` | the closing pad: wire out to the wall, laid where a chord could not be cut |
-| `bamboo_planks` | padding of any other kind, which v2 is not supposed to need |
-| `tuff` | a standard bus; also, where two machines share one region, machine B's plain ground on the even half of the game tick |
-| `polished_tuff` | a sunken bus: a bus whose opening cell is a note block, so it carries three notes free |
-| `andesite` | a standard stacked chord |
-| `stone_bricks` | machine A's plain ground while it plays the odd half of the game tick (stone is machine A on the even half) |
-| `tuff_bricks` | machine B's plain ground while it plays the odd half of the game tick (tuff is machine B on the even half) |
-| `sticky_piston` | a parity seam: the piston shoves the redstone block on its face into the air cell, three game ticks that move this lane to the other half of the game tick |
-| `deepslate` | a stacked bus |
-| `deepslate_tiles` | a cut chord's stacked head, with its tail across the staircase |
-| `cobbled_deepslate` | a stacked simple tail |
-| `smooth_basalt` | a double rail |
-| `polished_basalt` | a foldback cut: laid along x for the descent, along y for the climb |
-| `stripped_crimson_hyphae` | a lane standing outside its wall |
-| `red_nether_bricks` | wire the signal never reaches |
-| `waxed_copper_bulb` | a note that would sound at the wrong moment |
-| `dragon_head` | a note with nothing to set it off |
-| `sea_lantern` | a cell two shapes both wanted |
+| Space / Enter | Play from the marker / from the start |
+| R | Record |
+| B | Add or remove a marker |
+| A, M, S, H | Set selected layers to active, muted, solo or hidden |
+| Ctrl+Z / Ctrl+Y | Undo / redo |
+| Ctrl+C, Ctrl+X, Ctrl+V | Copy, cut and paste notes or layers |
+| Ctrl+Shift+V | Paste notes back where they were copied from |
+| Ctrl+D | Duplicate the selection right after itself |
+| Ctrl+E | Merge selected layers |
+| Ctrl+1 to Ctrl+0 | Move selected notes to layer 1 to 10 |
+| Ctrl+A | Select all notes |
+| Ctrl+S / Ctrl+O / Ctrl+I | Save / open / import |
+| Ctrl+scroll / Ctrl+Alt+scroll | Zoom time / zoom pitch |
+| Shift+scroll / Alt+scroll | Scroll fast through time / scroll pitch |
+| Escape | Step out of the selection, then close |
 
-Stripped crimson hyphae and red nether brick replace whichever stone colour a cell
-had, and dead wire wins over a breach. The block under a note is its instrument
-and is never recoloured.
+## License
 
-The other is `/midicraft paste`, which builds a run of chords you type out
-rather than a song, for testing layouts:
-
-```
-/midicraft paste <width> <floors> [flat|up|down [turning] <columns to wall>] <chords>
-```
-
-`/midicraft paste 12 1 6 2 18` builds chords of six, two and eighteen in a
-corridor twelve wide. A chord may be repeated with `x`, given its own gap with
-`@`, and given instruments with a colon: `30x4`, `18@1`, `7:7b`. The instrument
-letters are `p` harp (air), `h` hi-hat (glass, will not carry power), `s` snare
-(sand, falls) and `b` bell (gold), with harp for any note not named.
-
-Naming a wall shape starts the walk as though it had already climbed there, and
-adding `turning` has it arrive with that wall's corners already on its route, so
-`36 1 flat turning 12` is a lane twelve columns short of a bend it is already
-committed to. Put `dry` first to report the layout without placing anything.
-Every note is the same pitch.
-
-## Sound effects
-
-The composer's instrument palette has two tabs. **Instruments** holds the tuned
-note block voices. **Sound effects** holds blocks that make their own noise when
-redstone reaches them: oak, iron and copper trapdoors, oak and iron doors, an oak
-fence gate, an oak shelf, a bell, a copper bulb, a dropper, a piston, a sculk
-shrieker, and the six note blocks that wear a mob head — skeleton, wither
-skeleton, zombie, creeper, piglin and ender dragon.
-
-There is no dispenser. An empty dispenser and an empty dropper both play
-`block.dispenser.fail`, so the two were one voice wearing two icons.
-
-A layer set to one of these is not tuned. Every hit sounds the same, so the row a
-hit is drawn on is only somewhere to put it, and two hits on the same tick are one
-hit. Nothing on such a layer is ever out of range, and Convert leaves it exactly
-where it is -- there is no octave to move it to that would sound like anything
-different, so it is neither transposed nor split.
-
-Each effect names how far it can be heard, because they are not all alike. Most
-carry 16 blocks; a bell carries 32, a mob head note block 48, and a sculk shrieker
-80. The figure is vanilla's own — the range a sound event reports for the volume
-that block plays at — so it is the distance to space a machine around rather than
-an estimate. Every tuned instrument is 48, so the Instruments tab does not repeat
-it twenty times.
-
-Each of these makes a second sound when the power leaves again — the door shuts,
-the bulb clicks off, the piston pulls back. A build sends a pulse, so that second
-sound always follows a moment behind the first.
-
-In a build each effect occupies exactly the three cells an ordinary note would:
-itself, the cell below where an instrument block would sit, and the cell above
-that a note block keeps as air. A door's upper half and a skull go in that air,
-and so does a piston's head, which is why the pistons face up. Most of these
-blocks do not carry a redstone signal onward — including the copper bulb, which
-looks like it should — so a chord containing one is built as a bus, where every
-sound is powered off its own block rather than through its neighbour. Dispensers,
-droppers and the mob head note blocks do carry a signal, and a chord led by one of
-those keeps the tighter shape.
-
-A lone effect that cannot carry a signal is not left standing where the repeater
-points, since that cell is also the one the next repeater reads. It gets a stone
-there instead and moves one block to the near side, sounded off that stone the way
-a bus sounds its notes.
-
-The hand sequencer understands these too. A sound effect step hands you the effect
-block itself rather than a note block on an instrument block, and the step is done
-the moment the block is down — there is no pitch to click it round to, and the HUD
-shows a dot instead of a note name. The mob heads take two placements, the same
-two the pitched instruments take but the other way up: the note block goes down
-first and the skull lands on top of it.
-
-NBS has no way to hold any of this, so sound effect layers are left out of an
-export and the report says how many went.
-
-## Multiplayer safety
-
-Automated tuning sends ordinary vanilla use-block interactions. By default it
-can send one interaction per client tick, matching the mod's original behavior.
-Optional settings can add delay, wait for each resulting block-state change
-from the server, and require an unobstructed line from the player to the block. Normal
-interaction range is always enforced so the mod does not send packets that the
-server must reject. These controls cannot guarantee compatibility with every
-server's rules or anti-cheat configuration.
-
-The mod sends ordinary, rate-limited right-click interactions and requires no
-server-side installation. Keep the main hand in a state where a normal
-right-click can adjust the target block.
-
-## Development
-
-Requires Java 25. Build with:
-
-```powershell
-.\gradlew.bat build
-```
+MIT
