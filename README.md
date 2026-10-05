@@ -253,8 +253,8 @@ A layer goes into the build if you can hear it and see it. Muting a layer or
 hiding it takes it out; setting it back to Active puts it back. There is nothing
 else to set -- what you hear in the composer is what the machine plays.
 
-**M**, **S** and **H** set the selected layers to muted, solo or hidden, the same
-three letters their chips show. Each is a toggle: pressing the letter again, once
+**A**, **M**, **S** and **H** set the selected layers to active, muted, solo or
+hidden, the same letters their chips show. Each is a toggle: pressing the letter again, once
 they are all there, puts each layer back to what it was doing before the key
 moved it. Muting a hidden layer to hear it and then pressing M again hides it
 again rather than leaving it on.

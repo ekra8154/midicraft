@@ -633,7 +633,7 @@ public final class ComposerScreen extends Screen {
 	 */
 	private final Set<Integer> soloedLayers = new LinkedHashSet<>();
 	/**
-	 * What M, S and H found each layer doing, so that pressing the same letter again puts it back.
+	 * What A, M, S and H found each layer doing, so that pressing the same letter again puts it back.
 	 *
 	 * <p>Not part of the composition and not saved with it: it is the memory of a keypress, and it
 	 * lasts as long as the state that keypress set.</p>
@@ -1228,7 +1228,7 @@ public final class ComposerScreen extends Screen {
 	}
 
 	/**
-	 * M, S and H: one of the dial's states as a toggle on the selected layers.
+	 * A, M, S and H: one of the dial's states as a toggle on the selected layers.
 	 *
 	 * <p>A mixed selection goes to the state: with some of them muted and some not, the press that
 	 * means anything is the one that mutes the rest. Pressed again, with all of them there, each
@@ -1263,6 +1263,12 @@ public final class ComposerScreen extends Screen {
 		Map<LayerState, List<Integer>> groups = new java.util.LinkedHashMap<>();
 		for (int index : targets) {
 			groups.computeIfAbsent(stateBeforeKey(index), state -> new ArrayList<>()).add(index);
+		}
+		// Nowhere to go back to: A on layers that were already active before any key touched them.
+		if (groups.keySet().equals(java.util.Set.of(wanted))) {
+			showResult(Component.literal("Already " + wanted.title.toLowerCase(java.util.Locale.ROOT)
+				+ "."));
+			return;
 		}
 		boolean first = true;
 		for (Map.Entry<LayerState, List<Integer>> group : groups.entrySet()) {
@@ -4085,7 +4091,7 @@ public final class ComposerScreen extends Screen {
 			+ (silence == null ? "" : "\n" + silence)
 			+ "\n\nClick for " + dial[Math.floorMod(state.ordinal() + 1, dial.length)].title
 			+ ", right-click for " + dial[Math.floorMod(state.ordinal() - 1, dial.length)].title + "."
-			+ "\nM, S and H toggle the selected layers.";
+			+ "\nA, M, S and H toggle the selected layers.";
 	}
 
 	/**
@@ -7749,10 +7755,10 @@ public final class ComposerScreen extends Screen {
 			toggleMarkerAtCursor();
 			return true;
 		}
-		// The layer dial's three away-from-active states, each on the letter its own chip shows, so
-		// the key and the chip say the same word. Bare, like the transport keys, because they are
-		// pressed as often.
+		// The layer dial's four states, each on the letter its own chip shows, so the key and the
+		// chip say the same word. Bare, like the transport keys, because they are pressed as often.
 		LayerState dialled = switch (event.key()) {
+			case GLFW.GLFW_KEY_A -> LayerState.ACTIVE;
 			case GLFW.GLFW_KEY_M -> LayerState.MUTED;
 			case GLFW.GLFW_KEY_S -> LayerState.SOLO;
 			case GLFW.GLFW_KEY_H -> LayerState.HIDDEN;
