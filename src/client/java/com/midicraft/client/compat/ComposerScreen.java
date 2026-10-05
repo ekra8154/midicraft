@@ -1026,11 +1026,9 @@ public final class ComposerScreen extends Screen {
 		recordButton = addRenderableWidget(Button.builder(recordLabel(), button -> toggleRecording())
 			.bounds(recordX, CONTROL_TOP, recordWidth, CONTROL_HEIGHT)
 			.tooltip(Tooltip.create(Component.literal(
-				"Record. The marker runs on its own, and every piano key you click is written in at "
-					+ "the marker, snapped to the grid Snap is set to. Counts you in 3, 2, 1 first.\n"
-					+ "Notes go into the selected layer; with none selected it starts one for the take, "
-					+ "and the end marker is pushed out to leave room to play into.\n"
-					+ "R or Escape stops it, and R starts it.")))
+				"Record from the current playback marker. Click piano keys to write "
+					+ "notes, snapped to the current grid setting. Goes into the selected "
+					+ "layer or a new one. Hotkey R, Esc stops.")))
 			.build());
 		playButton = addRenderableWidget(Button.builder(playLabel(), button -> togglePlayback())
 			.bounds(playX, CONTROL_TOP, playWidth, CONTROL_HEIGHT)
@@ -1107,10 +1105,8 @@ public final class ComposerScreen extends Screen {
 			}
 		}).bounds(8, y, layerPanelWidth() - 16, 18)
 			.tooltip(Tooltip.create(Component.literal(
-				"Add an empty layer (maximum " + ComposerProject.MAX_LAYERS + ").\n"
-					+ "Nothing selected is moved into it: to do that, right-click the new row and "
-					+ "pick \"Move selected notes here\", or press Ctrl+1..0."
-			)))
+				"Add an empty layer (max " + ComposerProject.MAX_LAYERS + "). To move notes into "
+					+ "it, right-click its row or press Ctrl+1..0.")))
 			.build());
 		moveLayerButtons.add(addLayerButton);
 		for (int index = 0; index < 0; index++) {
@@ -1175,16 +1171,13 @@ public final class ComposerScreen extends Screen {
 
 	private enum LayerState {
 		ACTIVE("A", "Active", 0xFFE8EAEE, 0xFF3A4048,
-			"you hear it, it is in the piano roll, and it is in the build."),
+			"heard, shown and built."),
 		MUTED("M", "Muted", 0xFFFFB05A, 0xFF3E332A,
-			"silent, and left out of the build. Still in the roll and still editable, and its "
-				+ "instrument wears a red slash."),
+			"silent and not built, but still shown and editable."),
 		SOLO("S", "Solo", 0xFFFFD65A, 0xFF453D22,
-			"the only thing you hear. Every other layer is slashed out until you turn it off -- "
-				+ "but solo is only about listening, so the others are still built."),
+			"the only layer you hear. Others are still built."),
 		HIDDEN("H", "Hidden", 0xFF787D85, 0xFF24272B,
-			"silent, out of the piano roll and left out of the build, so it is not in the way at "
-				+ "all. Its row is greyed out.");
+			"silent, not shown and not built.");
 
 		private final String letter;
 		private final String title;
@@ -1447,8 +1440,8 @@ public final class ComposerScreen extends Screen {
 			.sorted()
 			.toList();
 		if (merging.size() < 2) {
-			showResult(Component.literal("Merge needs two or more layers selected - click one in "
-				+ "the panel and shift-click another."));
+			showResult(Component.literal("Select two or more layers to merge (shift-click or "
+				+ "Ctrl-click)."));
 			return;
 		}
 		Layer into = project().layers().get(merging.getFirst());
@@ -1462,16 +1455,11 @@ public final class ComposerScreen extends Screen {
 		selectOnlyLayer(merging.getFirst());
 		layersChanged();
 		rebuildMoveLayerButtons();
-		String summary = "Merged " + merging.size() + " layers into \"" + into.name() + "\" - "
-			+ notes + " notes.";
-		if (instruments > 1) {
-			summary += result.split() != null
-				? " It is a split layer with all " + instruments + " of their voices; Ctrl+Z puts "
-					+ "them back."
-				: " Every note plays all " + instruments + " of their instruments now; Ctrl+Z puts "
-					+ "them back.";
-		}
-		showResult(Component.literal(summary));
+		String voices = instruments <= 1 ? ""
+			: result.split() != null ? ", split with " + instruments + " voices"
+			: ", " + instruments + " instruments";
+		showResult(Component.literal("Merged " + merging.size() + " layers into \"" + into.name()
+			+ "\" (" + notes + " notes" + voices + "). Ctrl+Z undoes it."));
 	}
 
 	/**
@@ -1540,8 +1528,8 @@ public final class ComposerScreen extends Screen {
 		rebuildMoveLayerButtons();
 		showResult(Component.literal("Deleted " + deleting.size()
 			+ (deleting.size() == 1 ? " layer" : " layers") + only + " and " + notes + " notes."
-			+ (all ? " That was all of them, so an empty layer is left to work in." : "")
-			+ " Ctrl+Z puts them back."));
+			+ (all ? " An empty layer was left." : "")
+			+ " Ctrl+Z undoes it."));
 	}
 
 	private void updateLayer(String label, int index, Layer layer) {
@@ -1684,9 +1672,8 @@ public final class ComposerScreen extends Screen {
 		if (!fit.worthDoing()) {
 			showResult(Component.literal(fit.outNow() == 0L
 				? "Every note is already in range - nothing to gain by moving the song."
-				: "No shift does better than where the song already sits. " + fit.outNow()
-					+ " notes are out of range because it is wider than a note block's two octaves, "
-					+ "which no key change can fix."));
+				: "Already in the best key. " + fit.outNow() + " notes are out of range because "
+					+ "the song spans more than two octaves."));
 			return;
 		}
 		apply("transpose into range", project().transposedBy(fit.semitones()));
@@ -1694,8 +1681,7 @@ public final class ComposerScreen extends Screen {
 		centerMinecraftRange();
 		layersChanged();
 		showResult(Component.literal(String.format(java.util.Locale.ROOT,
-			"Transposed %+d semitones - out of range %d -> %d, and %d -> %d of them in the melody. "
-				+ "Same tune, different key; Ctrl+Z puts it back.",
+			"Transposed %+d semitones. Out of range: %d -> %d (melody %d -> %d).",
 			fit.semitones(), fit.outNow(), fit.outAfter(), fit.melodyOutNow(), fit.melodyOutAfter())));
 	}
 
@@ -1795,11 +1781,11 @@ public final class ComposerScreen extends Screen {
 			String tempoMove = tempoMove(source, conversion);
 			if (conversion.slowedDown()) {
 				report += String.format(java.util.Locale.ROOT,
-					", SLOWED %.2fx%s - song is faster than redstone can play (max 10 notes/sec)",
+					", slowed %.2fx%s to fit redstone's max of 10 notes/sec",
 					conversion.tempoFactor(), tempoMove);
 			} else if (conversion.spedUp()) {
 				report += String.format(java.util.Locale.ROOT,
-					", SPED UP %.2fx%s - tempo aligned to repeaters",
+					", sped up %.2fx%s to align with repeaters",
 					conversion.speedFactor(), tempoMove);
 			} else if (conversion.tempoChanged()) {
 				report += ", tempo aligned to repeaters" + tempoMove;
@@ -2080,14 +2066,10 @@ public final class ComposerScreen extends Screen {
 	private Tooltip snapTooltip() {
 		long gameTicks = snapGameTicks(snapSubdivision);
 		String where = gameTicks == 0L
-			? "That is not a delay a build can place at all, so notes put on this grid fall between "
-				+ "the ticks it can reach. Edit > Convert for Minecraft moves the tempo until the "
-				+ "two line up."
+			? "Not on a game tick: Convert fixes the tempo."
 			: gameTicks % 2L == 0L
-				? "That is a whole number of repeater ticks, so a single chain places it and notes "
-					+ "put on this grid are notes any build can reach."
-				: "That is a whole number of game ticks and an odd one, so it lands between the "
-					+ "repeater ticks: placeable, and only by a build of two lanes.";
+				? "Whole repeater ticks: any build can place it."
+				: "Odd game ticks: needs two lanes.";
 		// Whether the lines on screen are the grid or a stand-in for it. Drawing every step at
 		// this zoom would be a wall of pixels, so the grid doubles until its lines are far
 		// enough apart -- which means "is that a game tick" sometimes answers no, and used to
@@ -2095,11 +2077,11 @@ public final class ComposerScreen extends Screen {
 		// the same thing in words, with how far out of true the drawing is.
 		double drawn = drawnGridSpan();
 		String zoom = drawn <= gridSpan() * 1.001
-			? "Every step is drawn at this zoom, which is what the amber lines mean."
-			: "Zoomed out: one line drawn per " + Math.round(drawn / gridSpan())
-				+ " steps. They are grey rather than amber to say they are not the grid itself.";
-		return Tooltip.create(Component.literal("Grid used when adding or dragging notes."
-			+ "\nOne step is " + snapDetail() + ".\n" + where + "\n" + zoom));
+			? ""
+			: "\nGrey lines: one drawn per " + Math.round(drawn / gridSpan())
+				+ " steps at this zoom.";
+		return Tooltip.create(Component.literal("Grid for adding and dragging notes."
+			+ "\nOne step is " + snapDetail() + ".\n" + where + zoom));
 	}
 
 	/**
@@ -2556,8 +2538,8 @@ public final class ComposerScreen extends Screen {
 		clearRange();
 		updateButtonStates();
 		showResult(Component.literal(stacks == 0 ? "No stacked notes."
-			: stacks + (stacks == 1 ? " extra note" : " extra notes") + " selected on top of "
-				+ "notes already there. Delete to clear them; a stack plays once either way."));
+			: stacks + (stacks == 1 ? " stacked note" : " stacked notes") + " selected. Delete "
+				+ "clears them without changing the sound."));
 	}
 
 	private void selectThinnedNotes() {
@@ -2980,9 +2962,8 @@ public final class ComposerScreen extends Screen {
 					resetPlaybackSchedule();
 				}
 				showResult(Component.literal(merging
-					? "Duplicate notes merged in this song: each is built once. Counted notes still "
-						+ "build every copy."
-					: "Duplicate notes no longer merged in this song: every copy is built."));
+					? "Deduplicate on: identical notes are built once."
+					: "Deduplicate off: every copy is built."));
 			}
 			case TOGGLE_NOTE_TRAILS -> {
 				config.setShowNoteTrails(!config.showNoteTrails());
@@ -3092,8 +3073,8 @@ public final class ComposerScreen extends Screen {
 		// setScale moves the widget without firing its listener, so this cannot loop back into
 		// another history entry.
 		delayScaleSlider.setScale(ComposerProject.DEFAULT_SPEED_EIGHTHS);
-		showResult(Component.literal(was + " is now " + tempoLabel()
-			+ ". The song sounds exactly as it did; only the number it is written at has moved."));
+		showResult(Component.literal("Tempo is now " + tempoLabel() + " (was " + was
+			+ "). Sounds the same."));
 	}
 
 	private void snapTempo(boolean gameTicks) {
@@ -3112,11 +3093,8 @@ public final class ComposerScreen extends Screen {
 		// grid came from a few strays and the tempo would follow them down.
 		if (spacing.smallestGapTicks() > spacing.gridTicks() * MAX_GRID_STRETCH) {
 			showResult(Component.literal(String.format(java.util.Locale.ROOT,
-				"The notes share no usable spacing: every gap is a multiple of %d ticks, but the "
-					+ "closest two are %d apart. No tempo fixes that without slowing the song %.2fx, "
-					+ "so nothing was changed. Quantize to repeater ticks moves the notes instead, "
-					+ "which is what this needs.",
-				spacing.gridTicks(), spacing.smallestGapTicks(),
+				"No usable spacing: snapping would slow the song %.2fx, so nothing changed. "
+					+ "Try Quantize > Repeater ticks.",
 				tempo / (double)baked.tempoMicrosPerQuarter()))
 				.withStyle(net.minecraft.ChatFormatting.YELLOW));
 			return;
@@ -3367,29 +3345,27 @@ public final class ComposerScreen extends Screen {
 		// that as the song being done -- and a caveat at the end of a paragraph arrives too late to
 		// stop that. Everything after the colon is about the layers named before it.
 		String where = scope.size() == layerCount
-			? "Notes from all " + layerCount + " layers"
-			: "Notes from " + scope.size() + " of " + layerCount
-				+ " layers selected (select more layers to thin more at once)";
+			? "All " + layerCount + " layers"
+			: scope.size() + " of " + layerCount + " layers";
 		if (thinned.chordsOver() == 0) {
 			showResult(Component.literal("No chord is over " + target + " - nothing to thin."));
 			return;
 		}
 		if (thinned.isEmpty()) {
-			showResult(Component.literal(where + ": nothing here can be spared, so all "
-				+ thinned.chordsOver() + " chords over " + target + " are untouched. Every sound "
-				+ "in these layers is the last of its pitch or the last of its instrument."));
+			showResult(Component.literal(where + ": nothing to thin. Every note in the "
+				+ thinned.chordsOver() + " chords over " + target + " is the last of its pitch or "
+				+ "instrument."));
 			return;
 		}
 		// Sounds and notes are different numbers whenever deduplication is on, and saying only one
 		// of them invites the obvious wrong conclusion -- that deleting the selection will take the
 		// count down by however many notes it holds.
-		StringBuilder summary = new StringBuilder(where + ": " + thinned.chordsThinned() + " of "
-			+ thinned.chordsOver() + " chords over " + target + " thinned, "
-			+ thinned.soundsRemoved() + " sounds selected as " + thinned.noteIds().size()
-			+ " notes. Delete to commit, Escape to keep them.");
+		StringBuilder summary = new StringBuilder(where + ": thinned " + thinned.chordsThinned()
+			+ " of " + thinned.chordsOver() + " chords over " + target + ", "
+			+ thinned.noteIds().size() + " notes (" + thinned.soundsRemoved()
+			+ " sounds) selected. Delete to remove them, Escape to keep them.");
 		if (thinned.chordsStillOver() > 0) {
-			summary.append(' ').append(thinned.chordsStillOver()).append(" still over ")
-				.append(target).append('.');
+			summary.append(' ').append(thinned.chordsStillOver()).append(" still over.");
 		}
 		showResult(Component.literal(summary.toString()));
 	}
@@ -3402,24 +3378,19 @@ public final class ComposerScreen extends Screen {
 	 */
 	private String toolbarActionTooltip(ToolbarAction action) {
 		return switch (action) {
-			case IMPORT -> "Reads a MIDI or NBS file in as a song of its own. Nothing you already "
-				+ "have is touched. Settings below control how it is read.";
-			case SCAN_WORLD -> "Reads a note block machine standing in the world back into a song, "
-				+ "by following its redstone. Give two corners. Only chunks your client has "
-				+ "loaded can be read, so stand near the build.";
-			case IMPORT_SCHEMATIC -> "Reads a saved build back into a song by following its "
-				+ "redstone. Structure (.nbt), Sponge (.schem) and Litematica (.litematic) files; "
-				+ "the old MCEdit .schematic stores pre-1.13 numbered blocks and cannot be read.";
+			case IMPORT -> "Read a MIDI or NBS file in as a new song. Settings below control "
+				+ "how it's read.";
+			case SCAN_WORLD -> "Read a note block machine in the world back into a song. Give "
+				+ "two corners, and stand near it so its chunks are loaded.";
+			case IMPORT_SCHEMATIC -> "Read a saved build back into a song. Supports .nbt, "
+				+ ".schem and .litematic, but not the old MCEdit .schematic.";
 			case OPEN_SONGS -> "The song library: open another composition, start one, or make a "
 				+ "copy.";
-			case EXPORT_NBS -> "Writes this composition to a .nbs file that Note Block Studio and "
-				+ "other tools can open, in the same folder imports are read from. Exports what "
-				+ "is on screen, saved or not. Instruments outside NBS's sixteen are written as "
-				+ "harp, and the report says how many were.";
+			case EXPORT_NBS -> "Save as a .nbs file for Note Block Studio, in the imports "
+				+ "folder. Instruments NBS lacks become harp.";
 			case COPY_AS_TEXT -> "Puts the build sequence on the clipboard, one line per included "
 				+ "layer. Out-of-range notes and sub-tick timing do not survive the trip.";
-			case SAVE_COMPOSITION -> "Writes this composition to its own file. Nothing else does: "
-				+ "edits live in memory until you save them.";
+			case SAVE_COMPOSITION -> "Save this song. Edits aren't kept until you do.";
 			case SAVE_COMPOSITION_AS -> "Saves a copy under a new name and opens it. Naming a song "
 				+ "that already exists offers to replace it.";
 			case RENAME_COMPOSITION -> "Renames this composition. The change is an edit like any "
@@ -3433,144 +3404,86 @@ public final class ComposerScreen extends Screen {
 			case REDO -> history.redoLabel() == null
 				? "Nothing to step forward to."
 				: "Steps forward again, putting back \"" + history.redoLabel() + "\".";
-			case TRANSPOSE_BEST_FIT -> "Moves the whole song up or down by semitones until as little "
-				+ "of it as possible falls outside the note block's two octaves. Every interval "
-				+ "survives exactly -- it is the same tune in a different key -- so what conversion "
-				+ "has left to do afterwards is that much less octave-jumping. The top note sounding "
-				+ "at any moment counts triple, so the window goes where the melody is rather than "
-				+ "where the most notes are. Greyed out when nothing beats where the song already "
-				+ "sits.";
-			case CONVERT -> "Aimed at repeater ticks, which one lane can place. The steps it takes "
-				+ "-- bake the speed, merge repeats, quantize, fit the range, snap the tempo, snap "
-				+ "the end -- are asked when you press it, and each is a box you can untick.";
-			case CONVERT_GAME_TICKS -> "The same conversion, aimed at game ticks. A game tick is "
-				+ "half a repeater tick, so the grid the notes land on is half as coarse and the "
-				+ "tempo moves at most half as far to reach it -- a song that had to be slowed or "
-				+ "swung to fit often needs neither. The build then runs as two machines woven "
-				+ "together, one playing the even game ticks and one the odd. The status bar says how many lanes a song wants once this has "
-				+ "run.";
+			case TRANSPOSE_BEST_FIT -> "Shift the whole song up or down by semitones (so it "
+				+ "can change key) to fit as much as possible in note block range. Melody "
+				+ "notes count most. Greyed out if it's already in the best key.";
+			case CONVERT -> "Snap to repeater ticks, which a one-lane build can play. The "
+				+ "tempo may need to move further.";
+			case CONVERT_GAME_TICKS -> "Snap to game ticks, half a repeater tick. The tempo "
+				+ "moves at most half as far, but the build needs two lanes.";
 			case MERGE_REPEATS -> "Collapses a pitch that re-triggers faster than the repeat "
 				+ "window. Songs fake sustain this way, and note blocks cannot sustain.";
-			case QUANTIZE_QUARTER, QUANTIZE_EIGHTH, QUANTIZE_SIXTEENTH ->
-				"Moves note starts onto that musical grid. These are note values, so 1/4 is a "
-					+ "quarter note and the coarsest of them -- the number beside each is its step "
-					+ "in song ticks. A coarser grid fixes more and changes more. Whether it makes "
-					+ "the song buildable depends on the tempo: a 1/16 only helps if a 1/16 is a "
-					+ "whole number of repeater ticks.";
-			case QUANTIZE_REPEATERS -> "Moves note starts onto whole repeater ticks -- the ruler "
-				+ "that actually decides, worked out from the tempo and the current speed, so it is "
-				+ "usually not a musical fraction at all. Notes closer than one tick land together "
-				+ "as a chord, which is how a passage faster than redstone becomes buildable without "
-				+ "slowing the whole song down. Moves the tempo by a fraction of a percent if no "
-				+ "small grid exists at the current one.";
-			case QUANTIZE_GAME_TICKS -> "The same, on the grid two lanes can reach: half the step, "
-				+ "so half the worst a note has to move, and notes a single game tick apart stay "
-				+ "apart instead of folding together. Costs the second lane -- anything landing "
-				+ "between repeater ticks needs the Half-tick lane layout to play it.";
-			case FIT_ALL_RANGE -> "Brings notes no instrument on their layer can reach into range, "
-				+ "by whichever of the four routes Settings > Out-of-range notes names: shift the "
-				+ "notes, shift the layer and then the notes, split the strays onto a melodic "
-				+ "layer, or turn the whole part into one. The last two reach F#1-F#7 without "
-				+ "changing a pitch, and the last adds no layer at all. Exactly the step Convert "
-				+ "does, on its own and without touching the timing: same setting, same result. Works "
-				+ "on the selected notes if any are selected, else on the selected layers, else on "
-				+ "the whole song.";
-			case SNAP_TEMPO -> "Moves the tempo as little as it can while making the spacing the "
-				+ "song already has land on whole repeater ticks, folding the speed slider in first. "
-				+ "Leaves every note where it is, so it does nothing for a song whose notes share no "
-				+ "usable grid -- it says so rather than dragging the tempo down to meet them.";
-			case SNAP_TEMPO_GAME -> "The same, aimed at game ticks. Half the unit means half the "
-				+ "distance the tempo ever has to move: a spacing that sits a quarter of a repeater "
-				+ "tick off costs a fifth of the song's speed to snap, and a tenth of it here. "
-				+ "Wants the Half-tick lane layout for the result.";
+			case QUANTIZE_QUARTER, QUANTIZE_EIGHTH, QUANTIZE_SIXTEENTH -> "Snap note starts to "
+				+ "this note value. Coarser fixes more but changes more. Only helps if the "
+				+ "step is a whole number of repeater ticks at this tempo.";
+			case QUANTIZE_REPEATERS -> "Snap note starts to whole repeater ticks. Notes closer "
+				+ "than a tick become chords. At some tempos the tempo is adjusted by a tiny "
+				+ "amount so the ticks line up exactly.";
+			case QUANTIZE_GAME_TICKS -> "Snap note starts to game ticks: notes need less "
+				+ "movement, but usually means a 2 lane build is needed.";
+			case FIT_ALL_RANGE -> "Bring unreachable notes into range using the method in "
+				+ "Settings > Out-of-range notes. Works on selected notes, else selected "
+				+ "layers, else the whole song.";
+			case SNAP_TEMPO -> "Nudge the tempo so the song's spacing lands on whole repeater "
+				+ "ticks. Notes don't move. Does nothing if there's no usable grid.";
+			case SNAP_TEMPO_GAME -> "Same, on game ticks: the tempo moves half as far. Needs "
+				+ "two lanes.";
 			case SNAP_END -> "Moves the end marker so its trailing delay is a whole number of "
 				+ "repeater ticks.";
 			case TRIM_END -> "Pulls the end marker back to the last note, discarding trailing "
 				+ "silence.";
-			case SONG_INFO -> "How long the song is, its tempo, how many notes it has and how many "
-				+ "the build places, the blocks that takes, and how its notes fall across the two "
-				+ "halves of the game tick. Read-only.";
+			case SONG_INFO -> "Length, tempo, note and block counts, and the even/odd game "
+				+ "tick split.";
 			case PASTE_IN_WORLD -> "Builds the sequence with /setblock. Needs permission, and "
 				+ "overwrites whatever is standing there.";
 			case BUILD_CANCEL -> "Stops a paste part-way. Blocks already placed stay put.";
-			case TOGGLE_DEDUPE -> "When two included layers ask for the same instrument and pitch at "
-				+ "the same tick, build it once. Each copy costs a note block and one of the thirty "
-				+ "a tick can carry, and preview follows this setting. Nothing is deleted: give one "
-				+ "of those layers a different instrument and both notes come back. Counted notes "
-				+ "are never merged: an instrument given a count in the palette, like harp x3, "
-				+ "always builds every copy, because the count is how you ask for a louder note. "
-				+ "Song info shows how many notes this merged. Set per song, and saved with it.";
-			case TOGGLE_NOTE_TRAILS -> "Draws how long each note lasts as a dark trail behind it. "
-				+ "A trail changes nothing in the build: a note block is struck once. Drag a "
-				+ "trail's end to change a note's length. Hidden, a note's right edge still does.";
-			case SELECT_OFF_GRID -> "Selects the notes that do not stand on a game tick, counting "
-				+ "from the first note in the song. These are the ones a build cannot place where "
-				+ "they are written, and the ones the grid lines are drawn to show.";
-			case SELECT_HALF_TICKED -> "Selects the notes that land between repeater ticks -- the "
-				+ "ones a single chain cannot place, and so the reason a song needs two lanes. Not "
-				+ "faults: a build of two lanes plays them exactly. Worth seeing when you would "
-				+ "rather nudge a handful of notes than carry a second lane for them.";
-			case SELECT_EVEN_TICKS, SELECT_ODD_TICKS -> "Selects the notes a build would sound on "
-				+ (action == ToolbarAction.SELECT_EVEN_TICKS ? "even" : "odd") + " game ticks. The "
-				+ "two halves of the tick are what the half-tick layouts are made of: one machine "
-				+ "can only play one of them, and a song that uses both needs two. Asked of the "
-				+ "builder rather than of the clock, so it is the half the notes would actually "
-				+ "land on. Notes deduplication leaves out of the build are on neither half and "
-				+ "are never selected.";
+			case TOGGLE_DEDUPE -> "Build identical notes on different layers only once. Saves "
+				+ "note blocks and chord room; nothing is deleted. Notes with a count (like "
+				+ "harp ×3) always build every copy. Saved per song.";
+			case TOGGLE_NOTE_TRAILS -> "Show each note's length as a trail. Doesn't affect the "
+				+ "build. Drag a trail's end to change the length.";
+			case SELECT_OFF_GRID -> "Select notes that aren't on a game tick, so no build can "
+				+ "place them where they are.";
+			case SELECT_HALF_TICKED -> "Select notes between repeater ticks, the ones that "
+				+ "need a second lane. Not faults; useful if you'd rather nudge them than "
+				+ "build two lanes.";
+			case SELECT_EVEN_TICKS, SELECT_ODD_TICKS -> "Select notes the build would play on "
+				+ (action == ToolbarAction.SELECT_EVEN_TICKS ? "even" : "odd") + " game ticks. "
+				+ "Each machine plays one half. Notes removed by deduplication aren't selected.";
 			case SELECT_TOO_FREQUENT -> "Selects notes arriving less than one repeater tick after "
 				+ "the previous one -- faster than redstone can retrigger.";
 			case SELECT_OUT_OF_RANGE -> "Selects notes outside the note-block range of F#3-F#5.";
-			case SELECT_OVERLOADED_CHORDS -> "Selects the notes worth least in every chord bigger "
-				+ "than the thinning target, so you can hear the song without them before deleting. "
-				+ "Never the last of a pitch or the last of an instrument, so a chord keeps its "
-				+ "harmony and keeps its drum -- only how thickly they are scored changes. Takes "
-				+ "from the selected layers only; select them all to thin the whole song.";
-			case SELECT_STACKED -> "Selects the extra notes in every stack -- copies a paste or a drag "
-				+ "left on top of a note already there -- so Delete clears them and leaves one note "
-				+ "in each place. A stack always plays once, so deleting them changes nothing you "
-				+ "hear. For a louder note, give the instrument a count or put it on a second layer.";
-			case SELECT_THINNED -> "Selects every note the chord limit plays quieter or skips strikes "
-				+ "of, to fit the chord thinning target in Settings. Nothing is deleted: the song still "
-				+ "asks for every copy and every strike, and they come back wherever a chord has room.";
-			case BAKE_SPEED -> "Folds the Speed slider into the song's own tempo and puts the slider "
-				+ "back to 1.00x. Nothing about the song changes -- 150 BPM at 2.00x and 300 BPM at "
-				+ "1.00x are the same song, note for note -- but the tempo written in the file becomes "
-				+ "the tempo it actually plays at, and the slider is free to be a ratio of the new one. Convert does this first thing; this is that step on its own.";
+			case SELECT_OVERLOADED_CHORDS -> "Select the least important notes in chords over "
+				+ "the thinning target, to hear the song without them before deleting. Never "
+				+ "the last of a pitch or instrument. Selected layers only.";
+			case SELECT_STACKED -> "Select duplicate notes stacked on the same spot, so Delete "
+				+ "leaves one. Stacks only play once, so nothing you hear changes.";
+			case SELECT_THINNED -> "Select notes the chord limit plays quieter or skips "
+				+ "strikes of. Nothing is deleted.";
+			case BAKE_SPEED -> "Fold the Speed slider into the tempo and reset it to 1.00x. "
+				+ "Sounds the same. Convert does this first.";
 			case DUPLICATE_SELECTION -> SELECTION_RANGE
-				? "Lays the selected notes down again directly after themselves, and leaves the "
-					+ "selection on the copy -- so Ctrl+D again adds another repeat. How far each "
-					+ "one steps is the selection range drawn under the ruler, which a box drag "
-					+ "leaves behind and either end of which can be dragged. Every note stays on "
-					+ "its own layer."
-				: "Lays the selected notes down again after themselves, and leaves the selection on "
-					+ "the copy -- so Ctrl+D again adds another repeat. How far each one steps is "
-					+ "the block the passage and the time marker make together, so the silence "
-					+ "between them is repeated along with the notes: park the marker a beat before "
-					+ "a phrase and every copy keeps that beat. The marker steps on with them. "
-					+ "Every note stays on its own layer.";
-			case ADD_MARKER -> "Puts a marker where the playback marker is standing, or takes away "
-				+ "the one already there. B does the same thing. A marker names a position and nothing "
-				+ "else: it is not built and it makes no sound.";
+				? "Repeat the selected notes right after themselves, stepping by the "
+					+ "selection range under the ruler. Ctrl+D again adds another repeat."
+				: "Repeat the selected notes right after themselves, including the gap "
+					+ "back to the time marker. Ctrl+D again adds another repeat.";
+			case ADD_MARKER -> "Add or remove a marker at the playback marker (B). Markers are "
+				+ "labels only: not built, no sound.";
 			case RENAME_MARKER -> "Renames the marker the playback marker is standing on. "
 				+ "Double-clicking its label in the strip above the ruler does the same thing.";
 			case CLEAR_MARKERS -> "Removes every marker, and with them the strip they are drawn in. "
 				+ "Ctrl+Z puts them back.";
 			case SELECT_ALL_NOTES -> "Selects every note on the active layers.";
-			case SELECT_NONE -> "One step out of wherever you are. Working in the layer panel, that "
-				+ "is the keyboard coming back to the roll with the layers still picked; on the roll "
-				+ "it is the selected notes, and then the selected layers. Escape walks the same "
-				+ "steps and then closes the composer.";
+			case SELECT_NONE -> "Step out one level: layer panel, then selected notes, then "
+				+ "selected layers. Escape does the same, then closes.";
 		};
 	}
 
 	private static String layerActionTooltip(LayerAction action) {
 		return switch (action) {
 			case RENAME -> "Renames this layer. Double-clicking its name does the same thing.";
-			case DUPLICATE -> "Copies this layer, notes and all, into a new one directly below it, "
-				+ "and selects the copy. The usual reason is to double a part on a second instrument, "
-				+ "so the copy is where the change goes. With several layers selected it copies all "
-				+ "of them, as one block under the lowest selected layer. Ctrl+D does the same when "
-				+ "no notes are selected.";
+			case DUPLICATE -> "Copy this layer (or the selected layers) directly below, and "
+				+ "select the copy. Ctrl+D with no notes selected.";
 			case MOVE_UP -> "Moves this layer one row up. With several selected they move together "
 				+ "as a block, keeping their order. Dragging a row by its name does the same thing.";
 			case MOVE_DOWN -> "Moves this layer one row down. With several selected they move "
@@ -3578,42 +3491,27 @@ public final class ComposerScreen extends Screen {
 			case MOVE_NOTES_HERE -> "Moves the notes selected in the roll onto this layer, out of "
 				+ "whichever layers they are on now. Ctrl+1 to Ctrl+0 do the same for the first ten "
 				+ "layers.";
-			case MERGE_SELECTED -> "Folds the selected layers into the lowest-numbered one, which "
-				+ "keeps its name. Every instrument any of them played stays: plain layers stack into "
-				+ "one layer playing them all, and if any is a split layer the result is a split "
-				+ "with every voice. Ctrl+E does the same thing.";
-			case DELETE_SELECTED -> "Removes the selected layers and every note on them. Deleting all "
-				+ "of them leaves one empty layer to work in. Ctrl+Z puts them back, and so does "
-				+ "Ctrl+V if you took them with Ctrl+X. Delete does this while the panel has the "
-				+ "keyboard, which is what the brighter highlight on these rows means.";
-			case SNAP_TO_START -> "Pulls the selected layers forward until the first of them plays "
-				+ "on tick zero, taking the silence an import left at the front off the build. They "
-				+ "all move by the same amount, so parts that did not start together still do not. "
-				+ "Select one layer to move that one alone.";
+			case MERGE_SELECTED -> "Merge the selected layers into the first one, keeping "
+				+ "every instrument. Ctrl+E.";
+			case DELETE_SELECTED -> "Delete the selected layers and their notes. Ctrl+Z undoes "
+				+ "it.";
+			case SNAP_TO_START -> "Move the selected layers so the first note is at tick zero, "
+				+ "removing leading silence. They move together.";
 			case SELECT_ALL -> "Selects every layer.";
-			case SPLIT_MELODIC -> "Turns this into a split layer: written pitch becomes true pitch "
-				+ "across six octaves, and each note sounds every instrument whose bracket covers "
-				+ "it -- bass low, guitar, harp, flute, bell high, overlapping by an octave. The "
-				+ "layer's own instruments keep their tier in place of those, and a layer with notes "
-				+ "gets every tier its notes sound on; tiers no note reaches stay empty. No note "
-				+ "moves. Solo the layer to see the brackets on the keyboard.";
+			case SPLIT_MELODIC -> "Turn this into a split layer: each note plays the "
+				+ "instrument whose register covers it, bass low through bell high, across six "
+				+ "octaves. No note moves.";
 			case SPLIT_PERCUSSION -> "Turns this into a split drum layer: kick at the bottom of "
 				+ "the keyboard, snare in the middle, hi-hats on top, each still tunable across "
 				+ "its own 25 pitches. No note moves.";
-			case SPLIT_SFX -> "Turns this into a split sound effect layer: bands of rows, one "
-				+ "sound effect each, so a rhythm of doors and pistons fits one layer. The "
-				+ "palette swaps any band's block. No note moves.";
+			case SPLIT_SFX -> "Turn this into a split sound effect layer: one sound effect per "
+				+ "band of rows. No note moves.";
 			case UNSPLIT -> "Takes the brackets off and puts the layer back on its single "
 				+ "instrument. Notes keep their written pitches, so anything outside F#3-F#5 "
 				+ "shows out of range again.";
-			case SUSTAIN_SETTINGS -> "Turns sustained notes on or off for this layer: its long notes "
-				+ "strike again and again for as long as they last, which is how a note block holds a "
-				+ "note. Their trails turn bright, with a tick at every strike, and their ends can be "
-				+ "dragged to lengthen them. Dragging a tick slides that note's strikes, and every "
-				+ "selected note's, by game ticks: half a chord moved half a step strikes between the "
-				+ "other half. Also chooses how long a note must last before it "
-				+ "sustains, how often it strikes, and whether the strikes are moved onto ticks the "
-				+ "build can place. With several layers selected it changes all of them.";
+			case SUSTAIN_SETTINGS -> "Turn sustain on for this layer: long notes strike "
+				+ "repeatedly for as long as they last. Also sets the minimum length, strike "
+				+ "rate and tick snapping. Drag a strike's tick to shift it.";
 		};
 	}
 
@@ -3627,10 +3525,8 @@ public final class ComposerScreen extends Screen {
 
 	private static String contextActionTooltip(ContextAction action) {
 		return switch (action) {
-			case SOLO_SELECTION -> "Plays only the selected notes, so a phrase can be heard out of "
-				+ "the song around it. It lasts while the selection does: putting the selection down "
-				+ "ends it, and so does this row a second time. It is about listening only -- what "
-				+ "gets built does not change.";
+			case SOLO_SELECTION -> "Hear only the selected notes until the selection is "
+				+ "dropped. Doesn't change the build.";
 			case OCTAVE_DOWN -> "Drops the selected notes an octave.";
 			case OCTAVE_UP -> "Raises the selected notes an octave.";
 			case FIT_RANGE -> "Octave-shifts the selected notes into F#3-F#5, the range note "
@@ -4189,8 +4085,7 @@ public final class ComposerScreen extends Screen {
 			+ (silence == null ? "" : "\n" + silence)
 			+ "\n\nClick for " + dial[Math.floorMod(state.ordinal() + 1, dial.length)].title
 			+ ", right-click for " + dial[Math.floorMod(state.ordinal() - 1, dial.length)].title + "."
-			+ "\nM, S and H set the selected layers to muted, solo or hidden. The same letter again "
-			+ "puts each one back to what it was doing before.";
+			+ "\nM, S and H toggle the selected layers.";
 	}
 
 	/**
@@ -4891,8 +4786,7 @@ public final class ComposerScreen extends Screen {
 		// unnamed flag on a ruler full of bar numbers says nothing at all.
 		String label = "Bar " + (at / Math.max(1L, project().ppq() * 4L) + 1L);
 		apply("add marker", project().withMarkerAt(at, label));
-		showResult(Component.literal("Marker \"" + label
-			+ "\" added. Double-click it to rename, right-click it to remove."));
+		showResult(Component.literal("Marker \"" + label + "\" added."));
 	}
 
 	private void removeMarkerAt(long tick) {
@@ -4902,7 +4796,7 @@ public final class ComposerScreen extends Screen {
 		}
 		apply("remove marker", project().withoutMarkerAt(tick));
 		showResult(Component.literal("Removed marker \"" + marker.label()
-			+ "\". Ctrl+Z puts it back."));
+			+ "\". Ctrl+Z undoes it."));
 	}
 
 	private void renameMarker(ComposerProject.Marker marker) {
@@ -4932,7 +4826,7 @@ public final class ComposerScreen extends Screen {
 		}
 		apply("clear markers", project().withMarkers(List.of()));
 		showResult(Component.literal("Removed " + count
-			+ (count == 1 ? " marker" : " markers") + ". Ctrl+Z puts them back."));
+			+ (count == 1 ? " marker" : " markers") + ". Ctrl+Z undoes it."));
 	}
 
 	/**
@@ -7429,7 +7323,7 @@ public final class ComposerScreen extends Screen {
 			// Reported only for a sweep. Taking one note is a click whose result you are looking at;
 			// taking nineteen off the far end of a passage is worth a number and a way back.
 			if (erased > 1) {
-				showResult(Component.literal("Erased " + erased + " notes. Ctrl+Z puts them back."));
+				showResult(Component.literal("Erased " + erased + " notes. Ctrl+Z undoes it."));
 			}
 			return true;
 		}
@@ -7973,8 +7867,8 @@ public final class ComposerScreen extends Screen {
 				case GLFW.GLFW_KEY_E -> {
 					// Only ever layers, so it works wherever you are.
 					if (selectedLayers.size() < 2) {
-						showResult(Component.literal("Ctrl+E merges the selected layers. "
-							+ "Select two or more: click one, then shift-click or Ctrl-click another."));
+						showResult(Component.literal("Select two or more layers to merge "
+							+ "(shift-click or Ctrl-click)."));
 					} else {
 						mergeSelectedLayers();
 					}
@@ -8329,7 +8223,7 @@ public final class ComposerScreen extends Screen {
 		updateButtonStates();
 		showResult(Component.literal(why + " recording - " + recorded
 			+ (recorded == 1 ? " note" : " notes")
-			+ (recorded > 0 ? " into \"" + into + "\". Ctrl+Z takes them back." : " written.")));
+			+ (recorded > 0 ? " into \"" + into + "\". Ctrl+Z undoes it." : " written.")));
 	}
 
 	/**
@@ -9687,8 +9581,8 @@ public final class ComposerScreen extends Screen {
 			return;
 		}
 		if (config.tracks().stream().allMatch(track -> track.sequence().isBlank())) {
-			showResult(Component.literal("Nothing to build: every layer with notes on it is muted "
-				+ "or hidden. Set one back to Active with the letter beside its name."));
+			showResult(Component.literal("Nothing to build: every layer with notes is muted or "
+				+ "hidden."));
 			return;
 		}
 		// The last chance to notice. What is built is what you can hear, so a layer muted an hour
@@ -9701,8 +9595,8 @@ public final class ComposerScreen extends Screen {
 				+ " not in this build."));
 		}
 		if (CommandPasteSender.isRunning()) {
-			showResult(Component.literal("A build is still being placed. It carries on unless you "
-				+ "confirm this paste, which stops it and starts the new one."));
+			showResult(Component.literal("A build is still being placed. Confirming this paste "
+				+ "stops it and starts the new one."));
 		}
 		minecraft.gui.setScreen(new BuildOptionsScreen(this, project().name(), config.tracks(),
 				project(), project().dedupesIdentical(), pasteMode(), mode -> {
@@ -10275,12 +10169,9 @@ public final class ComposerScreen extends Screen {
 		// Said out loud only when the paste had to change the shape of the composition. A paste that
 		// lands where you pointed it needs no announcement; one that made three layers does.
 		if (result.addedLayers() > 0) {
-			long instruments = clipboard.stream().map(ClipboardNote::instrument).distinct().count();
-			showResult(Component.literal(result.noteIds().size() + " notes pasted. The copy spans "
-				+ instruments + " instruments and a layer holds one, so "
-				+ (project().layers().size() - before)
-				+ (result.addedLayers() == 1 ? " layer was" : " layers were")
-				+ " added to keep them apart."));
+			int added = project().layers().size() - before;
+			showResult(Component.literal(result.noteIds().size() + " notes pasted, with " + added
+				+ (added == 1 ? " layer" : " layers") + " added for the extra instruments."));
 		}
 	}
 
@@ -10391,11 +10282,7 @@ public final class ComposerScreen extends Screen {
 	 */
 	private void duplicateSelection() {
 		if (selectedNotes.isEmpty()) {
-			showResult(Component.literal(SELECTION_RANGE
-				? "Nothing selected to duplicate. Drag a box over a passage first - the box also "
-					+ "sets how far each repeat steps."
-				: "Nothing selected to duplicate. Select a passage first - how far each repeat "
-					+ "steps is read from where the time marker stands over it."));
+			showResult(Component.literal("Select a passage to duplicate first."));
 			return;
 		}
 		long span = selectionSpan();
@@ -10623,11 +10510,9 @@ public final class ComposerScreen extends Screen {
 			return;
 		}
 		delayScaleSlider.setTooltip(Tooltip.create(Component.literal(
-			"Playback speed, 0.25x to 8.00x in eighth steps. Higher is faster."
+			"Playback speed, saved with the song and used by the build."
 				+ "\n" + tempoLabel() + "."
-				+ "\nThe speed is part of the song: it is saved with it and the build runs at it. "
-				+ "The button beside this folds it into the tempo and puts the slider back to "
-				+ "1.00x.")));
+				+ "\nThe button beside it folds the speed into the tempo.")));
 		if (bakeSpeedButton != null) {
 			bakeSpeedButton.active =
 				project().speedEighths() != ComposerProject.DEFAULT_SPEED_EIGHTHS;
@@ -10635,9 +10520,7 @@ public final class ComposerScreen extends Screen {
 				"Apply speed to the tempo."
 					+ "\n" + tempoLabel() + " at " + MidicraftConfig.speedLabel(
 						project().speedEighths()) + "."
-					+ "\nThe song sounds exactly as it does now; only the number it is "
-					+ "written at moves, and the slider goes back to 1.00x. Greyed out at "
-					+ "1.00x, where there is nothing to fold in.")));
+					+ "\nSounds the same; the slider goes back to 1.00x.")));
 		}
 	}
 
@@ -11457,13 +11340,9 @@ public final class ComposerScreen extends Screen {
 	 * the flat list hard to scan in the first place.</p>
 	 */
 	private enum ToolbarSubmenu {
-		CONVERT("Convert for Minecraft", "Everything a song needs before a build can hold it -- "
-				+ "merging repeats, landing the notes on a grid, folding notes into a range a note "
-				+ "block can sound, and moving the tempo until the spacing is whole build ticks. "
-				+ "Which of those actually run is asked when you press it. The two entries differ "
-				+ "only in which tick they aim at: a game tick is half a repeater tick, so the "
-				+ "two-lane grid moves the tempo at most half as far, and pays for it with a build "
-				+ "of two machines offset by half a tick.",
+		CONVERT("Convert for Minecraft", "Get a song ready to build: merge repeats, "
+				+ "snap notes to a grid, fit them into range and adjust the tempo. You pick "
+				+ "which steps run.",
 			new ToolbarAction[] {
 				ToolbarAction.CONVERT, ToolbarAction.CONVERT_GAME_TICKS
 			},
@@ -11483,13 +11362,12 @@ public final class ComposerScreen extends Screen {
 		END("End", "Where the song stops, which is a delay the build has to place like any other.",
 			new ToolbarAction[] {ToolbarAction.SNAP_END, ToolbarAction.TRIM_END},
 			new String[] {"Snap to grid", "Trim to last note"}, -1),
-		MARKERS("Markers", "Named positions on the timeline. Nothing is built from one and nothing "
-				+ "sounds at one -- they are somewhere to write down what a stretch of the song is, so "
-				+ "that finding it again is reading a label rather than counting bars.",
+		MARKERS("Markers", "Named positions on the timeline. "
+				+ "Not built and make no sound; just labels for finding parts of the song.",
 			new ToolbarAction[] {
 				ToolbarAction.ADD_MARKER, ToolbarAction.RENAME_MARKER, ToolbarAction.CLEAR_MARKERS
 			},
-			new String[] {"Add / remove (M)", "Rename...", "Remove all"}, 2);
+			new String[] {"Add / remove (B)", "Rename...", "Remove all"}, 2);
 
 		private final String label;
 		private final String description;
