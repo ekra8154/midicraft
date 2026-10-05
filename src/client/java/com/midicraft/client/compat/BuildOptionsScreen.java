@@ -420,7 +420,7 @@ final class BuildOptionsScreen extends Screen {
 
 	/** The lane gap choices, as {@link SongBuilder#LANE_GAP_OVERRIDE} stores them, and their names. */
 	private static final int[] LANE_GAPS = {0, 2, 3};
-	private static final String[] LANE_GAP_NAMES = {"Auto", "Force 2", "Force 3"};
+	private static final String[] LANE_GAP_NAMES = {"Auto", "1 block", "2 blocks"};
 
 	private static int laneGapRung(int gap) {
 		for (int rung = 0; rung < LANE_GAPS.length; rung++) {
@@ -543,11 +543,8 @@ final class BuildOptionsScreen extends Screen {
 				requestForecast();
 			})
 			.bounds(left, y, width, 20)
-			.tooltip(Tooltip.create(Component.literal("Where the build is put down. From the bottom "
-				+ "it starts on the bottom floor and climbs; from the top it starts at the top and "
-				+ "works down, wanting clear ground below the origin rather than above. Not "
-				+ "mirror images: a descent is the dearer turn, so a song can come out better one way "
-				+ "round. At one floor they are the same build.")))
+			.tooltip(Tooltip.create(Component.literal("On multifloor builds, whether the beginning "
+				+ "of the song is on the top floor or the bottom floor.")))
 			.build());
 		y += 22;
 		// Cycles in the order offered, plain first: the ordinary build is the one most pastes want.
@@ -588,8 +585,8 @@ final class BuildOptionsScreen extends Screen {
 				init();
 			})
 			.bounds(left, advancedRow(top), width, 20)
-			.tooltip(Tooltip.create(Component.literal("Machine swapping, how far apart the two "
-				+ "lanes may drift, and how fast the paste sends commands.")))
+			.tooltip(Tooltip.create(Component.literal("Machine swapping, lane drift, lane spacing "
+				+ "and paste speed.")))
 			.build());
 
 		if (advancedOpen) {
@@ -599,10 +596,9 @@ final class BuildOptionsScreen extends Screen {
 					RESEED_DELAYS.size(), reseedRung(reseedDelay),
 					rung -> reseedLine(RESEED_DELAYS.get(rung)),
 					rung -> reseedDelay = RESEED_DELAYS.get(rung)))
-					.setTooltip(Tooltip.create(Component.literal("How long a machine may sit "
-						+ "idle on its half of the game tick before it swaps to the other half with a "
-						+ "sticky piston. Lower swaps more often, spending pistons to keep both "
-						+ "machines busy; higher keeps each on its half and pads the silence instead.")));
+					.setTooltip(Tooltip.create(Component.literal("How long a lane can wait idly "
+						+ "before swapping to the other half. Lower values mean more pistons but a "
+						+ "more compact build.")));
 			}
 			if (hasPaceControl()) {
 				addRenderableWidget(new Choice(left, advancedRow(top, row++), width,
@@ -615,12 +611,9 @@ final class BuildOptionsScreen extends Screen {
 							catchUpChoice.updateMessage();
 						}
 					}))
-					.setTooltip(Tooltip.create(Component.literal("The machine carrying less music "
-						+ "falls behind the other and pads its waits with dust to keep up, so both "
-						+ "lanes play near each other. This is how far behind it may fall first, "
-						+ "along the lane. 0 keeps them level and pads the most; 16 keeps them about "
-						+ "as close with a third of the padding; higher is shorter, and the two "
-						+ "lanes drift further apart.")));
+					.setTooltip(Tooltip.create(Component.literal("How far the quieter machine may "
+						+ "fall behind before it pads to keep up. Higher values are more compact but "
+						+ "can cause one lane to get out of earshot of the other.")));
 				catchUpChoice = addRenderableWidget(new Choice(left, advancedRow(top, row++), width,
 					PACE_TOLERANCES.size(), paceRung(paceCatchUpTo),
 					rung -> catchUpLine(PACE_TOLERANCES.get(rung)),
@@ -628,19 +621,14 @@ final class BuildOptionsScreen extends Screen {
 				// Temporary: forces the lane gap a single-note song is built at. Not saved.
 				addRenderableWidget(new Choice(left, advancedRow(top, row++), width,
 					LANE_GAPS.length, laneGapRung(SongBuilder.LANE_GAP_OVERRIDE),
-					rung -> "Lane gap: " + LANE_GAP_NAMES[rung],
+					rung -> "Lane spacing: " + LANE_GAP_NAMES[rung],
 					rung -> SongBuilder.LANE_GAP_OVERRIDE = LANE_GAPS[rung]))
-					.setTooltip(Tooltip.create(Component.literal("Temporary. A song with one note "
-						+ "a tick can be built with its lanes two apart or three; Auto builds both and "
-						+ "keeps the smaller. Force 2 keeps the two-apart build whenever it plans at "
-						+ "all, even where it is bigger or faulty; Force 3 never packs. Songs with "
-						+ "chords are three apart whatever this says. Back to Auto on restart.")));
-				catchUpChoice.setTooltip(Tooltip.create(Component.literal("Once a lane has "
-					+ "fallen past the drift limit, how near it comes before it stops padding. At the "
-					+ "drift limit it pads only what it has to and rides there, so the lanes spend the "
-					+ "song as far apart as allowed. At 0 it catches up as fast as it can until the "
-					+ "two are level, then lets the gap open again: the limit is the exception rather "
-					+ "than the norm. Nearer costs more padding, most where the lead changes hands.")));
+					.setTooltip(Tooltip.create(Component.literal("Whether to leave only one block "
+						+ "between lanes when a song has no chords. Songs with chords always have 2 "
+						+ "blocks between lanes.")));
+				catchUpChoice.setTooltip(Tooltip.create(Component.literal("How close a lane catches "
+					+ "up to the other after going past the drift limit. Lower values catch up further "
+					+ "but cause slightly more padding.")));
 			}
 			addRenderableWidget(new Choice(left, advancedRow(top, row), width,
 				PasteRate.RATES.size(), PasteRate.index(commandsPerTick),
@@ -949,7 +937,7 @@ final class BuildOptionsScreen extends Screen {
 	 */
 	private String widthLine(int blocks) {
 		return labelledWidth > blocks
-			? labelledWidth + " blocks wide - raised from " + blocks + " to fit the largest chord"
+			? blocks + " blocks wide - raised to " + labelledWidth + " to fit largest chord"
 			: blocks + " blocks wide before it folds back";
 	}
 
@@ -967,18 +955,12 @@ final class BuildOptionsScreen extends Screen {
 
 	private static String blocksTooltip(MidicraftConfig.ColorCodedPaste colours) {
 		return switch (colours) {
-			case OFF -> "The ordinary build, and a build that plays. Made of the blocks set on the "
-				+ "Build Pasting tab of the settings: stone, glass and stone slabs unless changed there.";
-			case LIGHT_SHOW -> "The plain build, with every bus, stacked chord centre and "
-				+ "top rail block made a redstone lamp, so the song draws a glowing line as it runs. "
-				+ "The rest is the Build Pasting blocks, and nothing under a note changes, since that "
-				+ "block is the note's instrument.";
-			case NORMAL -> "Colours the build by what laid each block: stone by the shape that "
-				+ "placed it, dead wire in red, wrong notes as lit copper bulbs, missed ones wearing a "
-				+ "dragon head. Collisions build through and light up in sea lantern, so a build with "
-				+ "any of those is broken on purpose. The lanes and relay blocks stay stone, since stone "
-				+ "is one of the colours; the climbs and supports keep your blocks. The README has the "
-				+ "colour key.";
+			case OFF -> "Uses only the blocks specified in paste settings (default stone slabs and "
+				+ "stone).";
+			case LIGHT_SHOW -> "Uses the blocks from paste settings + lamps along the song's path "
+				+ "(mostly replaces relay blocks), so it lights up as it plays.";
+			case NORMAL -> "For debugging purposes. Marks each chord type, padding type, etc. so it's "
+				+ "easy to tell what the paster did.";
 		};
 	}
 
