@@ -76,6 +76,7 @@ class SlabInstrumentTest {
 			// a note block leaves the note hanging a half-block clear of it, which is not a floor.
 			{"minecraft:oak_planks", "minecraft:oak_slab[type=top]"},
 			{"minecraft:stone", "minecraft:stone_slab[type=top]"},
+			{"minecraft:white_wool", "minecraft:white_wool_slab[type=top]"},
 			{"minecraft:copper_block", "minecraft:waxed_cut_copper_slab[type=top]"},
 			{"minecraft:exposed_copper", "minecraft:waxed_exposed_cut_copper_slab[type=top]"},
 			{"minecraft:weathered_copper", "minecraft:waxed_weathered_cut_copper_slab[type=top]"},

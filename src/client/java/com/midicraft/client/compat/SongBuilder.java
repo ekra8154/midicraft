@@ -33790,7 +33790,7 @@ public final class SongBuilder {
 	 * <p>{@link #INSTRUMENT_SLABS} was written for the low slots and stopped short of the sides,
 	 * because the sides had to relay and a slab cannot be strongly powered. That was the right rule
 	 * for the wrong reason: the sides do not have to relay, so the very thing that disqualified the
-	 * slab is what makes it wanted -- bass, bass drum and the four coppers can all stand beside the
+	 * slab is what makes it wanted -- bass, bass drum, guitar and the four coppers can all stand beside the
 	 * centre as half-blocks and reach into nothing. Same voice either way, which the game was asked
 	 * directly (SlabInstrumentTest). See {@link #STACKED_SIDES_MAY_GO_QUIET}.</p>
 	 */
@@ -34371,10 +34371,10 @@ public final class SongBuilder {
 	 * where the note hangs at the lane's own floor level.
 	 *
 	 * <p>Half the material for the same voice, and a build you can see through rather than a solid
-	 * wall of it. Six of the twenty instruments have a half-block that plays their voice at all --
-	 * bass, bass drum and the four trumpets, asked of the registry rather than assumed
+	 * wall of it. Seven of the twenty instruments have a half-block that plays their voice at all --
+	 * bass, bass drum, guitar and the four trumpets, asked of the registry rather than assumed
 	 * ({@link com.midicraft.client.compat.SlabVoicesProbe}) -- so this is a lookup and not a
-	 * rule, and the other fourteen stay full blocks and are none the worse for it.</p>
+	 * rule, and the other thirteen stay full blocks and are none the worse for it.</p>
 	 *
 	 * <p><b>Except where the block is not decoration.</b> A slab cannot be strongly powered and does
 	 * not occlude, and some instrument blocks in this build are doing a second job: relaying a
@@ -34405,6 +34405,7 @@ public final class SongBuilder {
 	static final Map<String, String> INSTRUMENT_SLABS = Map.of(
 		"minecraft:oak_planks", "minecraft:oak_slab[type=top]",
 		"minecraft:stone", "minecraft:stone_slab[type=top]",
+		"minecraft:white_wool", "minecraft:white_wool_slab[type=top]",
 		"minecraft:waxed_copper_block", "minecraft:waxed_cut_copper_slab[type=top]",
 		"minecraft:waxed_exposed_copper", "minecraft:waxed_exposed_cut_copper_slab[type=top]",
 		"minecraft:waxed_weathered_copper", "minecraft:waxed_weathered_cut_copper_slab[type=top]",
