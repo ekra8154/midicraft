@@ -7,6 +7,9 @@ import com.midicraft.client.compat.ComposerScale;
 import com.midicraft.client.compat.ComposerScreen;
 import com.midicraft.client.compat.DebugCommandSuggestions;
 import com.midicraft.client.compat.PreviewInstrument;
+import com.midicraft.client.composer.ChordSkips;
+import com.midicraft.client.composer.ComposerProject;
+import com.midicraft.client.composer.SongAnalysis;
 import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.blaze3d.vertex.PoseStack;
 import java.util.ArrayDeque;
@@ -100,6 +103,9 @@ public final class NoteBlockOverlay {
 	private static final char[] FAMILIES = {'A', 'B', 'C', 'D', 'E', 'F', 'G'};
 	private static List<MidicraftConfig.SequenceTrack> flattenedFrom;
 	private static List<NoteSequence.Placement> flattened = List.of();
+	private static ComposerProject lanesCheckedFor;
+	private static ChordSkips.Rules lanesCheckedRules;
+	private static boolean twoLaneSong;
 	private static final KeyMapping.Category CATEGORY = KeyMapping.Category.register(
 		Identifier.fromNamespaceAndPath("midicraft", "controls")
 	);
@@ -625,8 +631,9 @@ public final class NoteBlockOverlay {
 		int y = graphics.guiHeight() / 2 + 28;
 		if (sequence.isEmpty()) {
 			drawSequenceHudHeader(graphics, centerX, y);
-			graphics.centeredText(minecraft.font, Component.translatable(
-				"message.midicraft.sequence_hud_empty"
+			graphics.centeredText(minecraft.font, Component.translatable(songNeedsTwoLanes()
+				? "message.midicraft.sequence_hud_two_lanes"
+				: "message.midicraft.sequence_hud_empty"
 			), centerX, y, 0xFFFF5555);
 			return;
 		}
@@ -991,12 +998,37 @@ public final class NoteBlockOverlay {
 	 * is already grouped and comes out unchanged.</p>
 	 */
 	private static List<NoteSequence.Placement> configuredSequence() {
+		if (songNeedsTwoLanes()) {
+			return List.of();
+		}
 		List<MidicraftConfig.SequenceTrack> tracks = MidicraftConfig.get().tracks();
 		if (tracks != flattenedFrom) {
 			flattened = flattenSequence(tracks);
 			flattenedFrom = tracks;
 		}
 		return flattened;
+	}
+
+	/**
+	 * Whether the open song needs a second lane, which the sequencer does not build.
+	 *
+	 * <p>A hand build is one chain of repeaters, and a note half a repeater tick off its neighbours
+	 * cannot be placed on one. So a two-lane song gets no sequence at all rather than a version of
+	 * itself with those notes moved: the HUD says to paste it instead. Asked the same way the
+	 * composer's status bar asks, so the two can never disagree, and cached on the composition,
+	 * which is immutable, and the chord rules, which can drop a note.</p>
+	 */
+	private static boolean songNeedsTwoLanes() {
+		MidicraftConfig config = MidicraftConfig.get();
+		ComposerProject project = config.composerProject();
+		ChordSkips.Rules rules = config.chordFitRules();
+		if (project != lanesCheckedFor || !rules.equals(lanesCheckedRules)) {
+			lanesCheckedFor = project;
+			lanesCheckedRules = rules;
+			twoLaneSong = SongAnalysis.of(project, project.dedupesIdentical(), true, rules)
+				.lanesNeeded() == 2;
+		}
+		return twoLaneSong;
 	}
 
 	/**

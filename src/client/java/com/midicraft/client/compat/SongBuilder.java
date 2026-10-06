@@ -772,9 +772,15 @@ public final class SongBuilder {
 
 	/** The same plan with the wire the signal never reaches turned red, on a marked paste. */
 	private static PastePlan withUnreachedMarked(PastePlan plan) {
-		if (!MARK_UNREACHED) {
-			return plan;
-		}
+		return MARK_UNREACHED ? readBack(plan) : plan;
+	}
+
+	/**
+	 * The readback itself, whatever {@link #MARK_UNREACHED} says. For a choice that has to see dead
+	 * wire before it is made -- the packed plan against the spread one -- which is a different
+	 * question from whether the paste reports it, and is asked by probes that switch that off.
+	 */
+	private static PastePlan readBack(PastePlan plan) {
 		Map<BlockPos, net.minecraft.world.level.block.state.BlockState> world =
 			new java.util.HashMap<>();
 		for (String command : plan.commands()) {
@@ -1826,6 +1832,7 @@ public final class SongBuilder {
 		// back over the library cut to one note a tick, 267 of the 400 packed builds of two and three
 		// floors dead, and the plan's own fault counts cannot see a dead wire.
 		if (!SINGLE_NOTE_SONGS_PACK_TWO_APART || LANE_GAP_OVERRIDE == 3 || packingLanes()
+				|| !PACKED_MULTI_FLOOR && limits.laneFloors() > 1
 				|| notes.isEmpty() || chordStats(notes).peak() > 1) {
 			return interleavedHalfTickPlan(origin, forward, notes, limits, start);
 		}
@@ -1869,8 +1876,25 @@ public final class SongBuilder {
 		if (spread == null) {
 			return packed;
 		}
-		return packed != null && (PACKED_PLAN_ALWAYS_WINS || packedWins(packed, spread))
-			? packed : spread;
+		if (packed == null || !PACKED_PLAN_ALWAYS_WINS && !packedWins(packed, spread)) {
+			return spread;
+		}
+		if (PACKED_PLAN_ALWAYS_WINS) {
+			return packed;
+		}
+		// Read back before it is chosen, not only after. The plan's own fault counts cannot see a dead
+		// wire, so packedWins can pick a packed build the readback then finds silent from a break on:
+		// a-dark-zone at 28x1, cut to one note a tick, 107 dead notes the spread build does not have.
+		// The spread build is only read when the packed one has something to lose, which is rare, so
+		// the price is one extra readback of the build that is about to be pasted anyway.
+		int packedDead = readBack(packed).deadNotes();
+		if (packedDead > 0 && packedDead > readBack(spread).deadNotes()) {
+			if (TRACE_TURNS) {
+				System.out.println("PACKED dropped: " + packedDead + " dead notes on readback");
+			}
+			return spread;
+		}
+		return packed;
 	}
 
 	/**
@@ -1909,10 +1933,18 @@ public final class SongBuilder {
 	static boolean PACKED_PLAN_ALWAYS_WINS = false;
 
 	/**
-	 * Temporary, from the paste screen's Advanced rows: 0 lets the plans be weighed, 2 builds only the
-	 * packed plan, 3 never packs. Either forced gap is built whatever faults it has, so it can be seen.
-	 * A song with chords is never packed and is three apart under 2 as well. Not saved; a restart puts
-	 * it back to 0.
+	 * Whether a build of more than one floor may be packed at all. Off for release: the one-floor
+	 * readback is clean under Auto, and the multi-floor one still has dead builds and wrong notes
+	 * left over from the staircases. A probe dial, so a census can still read what packing does on
+	 * several floors.
+	 */
+	static boolean PACKED_MULTI_FLOOR = false;
+
+	/**
+	 * A probe dial since the paste screen's Lane spacing row was taken out for release: 0 lets the plans
+	 * be weighed, 2 builds only the packed plan, 3 never packs. Either forced gap is built whatever
+	 * faults it has, so it can be seen. A song with chords is never packed and is three apart under 2
+	 * as well, and nothing of more than one floor is packed unless {@link #PACKED_MULTI_FLOOR} is on.
 	 */
 	public static volatile int LANE_GAP_OVERRIDE = 0;
 

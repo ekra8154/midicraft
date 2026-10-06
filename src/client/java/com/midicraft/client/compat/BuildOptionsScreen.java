@@ -415,20 +415,7 @@ final class BuildOptionsScreen extends Screen {
 	 * rows where they apply.
 	 */
 	private int advancedRows() {
-		return 1 + (hasReseedControl() ? 1 : 0) + (hasPaceControl() ? 3 : 0);
-	}
-
-	/** The lane gap choices, as {@link SongBuilder#LANE_GAP_OVERRIDE} stores them, and their names. */
-	private static final int[] LANE_GAPS = {0, 2, 3};
-	private static final String[] LANE_GAP_NAMES = {"Auto", "1 block", "2 blocks"};
-
-	private static int laneGapRung(int gap) {
-		for (int rung = 0; rung < LANE_GAPS.length; rung++) {
-			if (LANE_GAPS[rung] == gap) {
-				return rung;
-			}
-		}
-		return 0;
+		return 1 + (hasReseedControl() ? 1 : 0) + (hasPaceControl() ? 2 : 0);
 	}
 
 	/**
@@ -585,8 +572,8 @@ final class BuildOptionsScreen extends Screen {
 				init();
 			})
 			.bounds(left, advancedRow(top), width, 20)
-			.tooltip(Tooltip.create(Component.literal("Machine swapping, lane drift, lane spacing "
-				+ "and paste speed.")))
+			.tooltip(Tooltip.create(Component.literal("Machine swapping, lane drift and paste "
+				+ "speed.")))
 			.build());
 
 		if (advancedOpen) {
@@ -618,14 +605,6 @@ final class BuildOptionsScreen extends Screen {
 					PACE_TOLERANCES.size(), paceRung(paceCatchUpTo),
 					rung -> catchUpLine(PACE_TOLERANCES.get(rung)),
 					rung -> paceCatchUpTo = PACE_TOLERANCES.get(rung)));
-				// Temporary: forces the lane gap a single-note song is built at. Not saved.
-				addRenderableWidget(new Choice(left, advancedRow(top, row++), width,
-					LANE_GAPS.length, laneGapRung(SongBuilder.LANE_GAP_OVERRIDE),
-					rung -> "Lane spacing: " + LANE_GAP_NAMES[rung],
-					rung -> SongBuilder.LANE_GAP_OVERRIDE = LANE_GAPS[rung]))
-					.setTooltip(Tooltip.create(Component.literal("Whether to leave only one block "
-						+ "between lanes when a song has no chords. Songs with chords always have 2 "
-						+ "blocks between lanes.")));
 				catchUpChoice.setTooltip(Tooltip.create(Component.literal("How close a lane catches "
 					+ "up to the other after going past the drift limit. Lower values catch up further "
 					+ "but cause slightly more padding.")));

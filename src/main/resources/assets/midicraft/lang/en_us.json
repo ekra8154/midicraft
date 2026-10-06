@@ -7,6 +7,7 @@
   "message.midicraft.sequence_resumed": "Sequence resumed",
   "message.midicraft.sequence_paused": "Sequencing disabled",
   "message.midicraft.sequence_hud_empty": "Sequence is empty",
+  "message.midicraft.sequence_hud_two_lanes": "This song needs 2 lanes. Paste it instead.",
   "title.midicraft.config": "Midicraft Settings",
   "category.midicraft.server_friendliness": "Server Friendliness",
   "category.midicraft.placement": "Placement Sequence",
