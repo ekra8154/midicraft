@@ -446,12 +446,17 @@ public final class SongsScreen extends Screen {
 				? "Minecraft ready - " + analysis.lanesNeeded() + " lane"
 					+ (analysis.lanesNeeded() == 1 ? "" : "s")
 				: String.join(", ", analysis.problems());
-			graphics.text(font, summary(row), 14, y + 17, 0xFF8A9098, false);
-			int verdictX = 14 + font.width(summary(row)) + 10;
-			if (verdictX < width - 160) {
-				graphics.text(font, verdict, verdictX, y + 17,
-					ready ? 0xFF5AD46A : 0xFFFFAA00, false);
-			}
+			// The verdict is what the row is for, so it keeps its whole width and the summary gives way:
+			// both stop short of the buttons, the summary with an ellipsis, rather than running under
+			// Open and reading as part of its label.
+			int textRight = width - 152 - 6;
+			String shownVerdict = fitted(verdict, textRight - 14);
+			int verdictWidth = font.width(shownVerdict);
+			String shownSummary = fitted(summary(row), textRight - 14 - verdictWidth - 10);
+			graphics.text(font, shownSummary, 14, y + 17, 0xFF8A9098, false);
+			int verdictX = shownSummary.isEmpty() ? 14 : 14 + font.width(shownSummary) + 10;
+			graphics.text(font, shownVerdict, verdictX, y + 17,
+				ready ? 0xFF5AD46A : 0xFFFFAA00, false);
 		}
 		if (shown.isEmpty()) {
 			graphics.text(font, rows.isEmpty()
@@ -466,6 +471,17 @@ public final class SongsScreen extends Screen {
 		} else if (!status.isEmpty()) {
 			graphics.text(font, status, 8, height - 40, 0xFF8A9098, false);
 		}
+	}
+
+	/** {@code text} cut to {@code room} pixels with an ellipsis, or nothing where not even that fits. */
+	private String fitted(String text, int room) {
+		if (font.width(text) <= room) {
+			return text;
+		}
+		if (room <= font.width("...")) {
+			return "";
+		}
+		return font.plainSubstrByWidth(text, room - font.width("...")).stripTrailing() + "...";
 	}
 
 	@Override
