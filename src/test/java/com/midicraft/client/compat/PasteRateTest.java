@@ -96,9 +96,16 @@ class PasteRateTest {
 	}
 
 	@Test
+	void saysARateForSingleplayerOnlyPastSixtyFour() {
+		assertEquals("64 commands per tick", PasteRate.label(64));
+		assertEquals("96 commands per tick - recommended for singleplayer only", PasteRate.label(96));
+		assertEquals("128 commands per tick - recommended for singleplayer only", PasteRate.label(128));
+	}
+
+	@Test
 	void findsTheRungASliderShouldSitOn() {
 		assertEquals(0, PasteRate.index(0.25));
-		assertEquals(PasteRate.RATES.indexOf(32.0),
+		assertEquals(PasteRate.RATES.indexOf(128.0),
 			PasteRate.index(PasteRate.DEFAULT));
 		assertEquals(PasteRate.RATES.indexOf(24.0),
 			PasteRate.index(23));

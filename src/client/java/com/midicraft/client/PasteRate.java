@@ -28,7 +28,10 @@ public final class PasteRate {
 	public static final double MAX = RATES.get(RATES.size() - 1);
 
 	/** Singleplayer tolerates far more than the original fixed rate of 2. */
-	public static final double DEFAULT = 32;
+	public static final double DEFAULT = 128;
+
+	/** Above this a rate is for singleplayer, and its label says so. */
+	public static final double SINGLEPLAYER_ABOVE = 64;
 
 	private PasteRate() {
 	}
@@ -79,12 +82,16 @@ public final class PasteRate {
 	 * <p>Below one a tick, "0.25 commands per tick" is a number you have to do arithmetic on before
 	 * it means anything, and that arithmetic is the part you actually care about: how long the wait
 	 * is between one block and the next.</p>
+	 *
+	 * <p>Past {@link #SINGLEPLAYER_ABOVE} the label carries the warning itself, on the slider that
+	 * sets it, since that is where a rate gets picked and a server's spam limit is what it trips.</p>
 	 */
 	public static String label(double rate) {
 		if (rate < 1) {
 			return "one command every " + Math.round(1 / rate) + " ticks";
 		}
 		String count = rate == Math.rint(rate) ? String.valueOf((long) rate) : String.valueOf(rate);
-		return count + (rate == 1 ? " command per tick" : " commands per tick");
+		String label = count + (rate == 1 ? " command per tick" : " commands per tick");
+		return rate > SINGLEPLAYER_ABOVE ? label + " - recommended for singleplayer only" : label;
 	}
 }
