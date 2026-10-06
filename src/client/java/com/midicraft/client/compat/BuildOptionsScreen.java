@@ -1024,7 +1024,7 @@ final class BuildOptionsScreen extends Screen {
 			note += 12;
 			graphics.text(font, outside, left, note, 0xFFFFAA00, false);
 		}
-		if (commandsPerTick > 64) {
+		if (commandsPerTick > PasteRate.SINGLEPLAYER_ABOVE) {
 			note += 12;
 			graphics.text(font, "High rates can trip server command spam limits.",
 				left, note, 0xFFFFAA00, false);
