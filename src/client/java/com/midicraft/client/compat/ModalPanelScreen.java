@@ -1,11 +1,11 @@
 package com.midicraft.client.compat;
 
+import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
-import org.lwjgl.glfw.GLFW;
 
 /**
  * A small panel over the screen that opened it: the shape Convert, Sustained notes and Song info
@@ -75,8 +75,8 @@ abstract class ModalPanelScreen extends Screen {
 
 	@Override
 	public boolean keyPressed(KeyEvent event) {
-		boolean confirms = event.key() == GLFW.GLFW_KEY_ENTER || event.key() == GLFW.GLFW_KEY_KP_ENTER
-			|| spaceConfirms() && event.key() == GLFW.GLFW_KEY_SPACE;
+		boolean confirms = event.key() == InputConstants.KEY_RETURN || event.key() == InputConstants.KEY_NUMPADENTER
+			|| spaceConfirms() && event.key() == InputConstants.KEY_SPACE;
 		if (confirms && getFocused() == null) {
 			confirm();
 			return true;

@@ -8,7 +8,7 @@ import java.util.function.Function;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.world.level.block.RedStoneWireBlock;
+import net.minecraft.world.level.block.RedstoneWireBlock;
 import net.minecraft.world.level.block.RepeaterBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
@@ -387,9 +387,9 @@ public final class AsciiDiagram {
 			? raw + " (color-coded paste: " + SongBuilder.DEBUG_PASTE_KEY.get(raw) + ")"
 			: raw;
 		String path = raw.substring(raw.indexOf(':') + 1);
-		if (state.hasProperty(RedStoneWireBlock.POWER)) {
+		if (state.hasProperty(RedstoneWireBlock.POWER)) {
 			legend.putIfAbsent("w<n>", id + ", n = power, 0 to 15");
-			return "w" + state.getValue(RedStoneWireBlock.POWER);
+			return "w" + state.getValue(RedstoneWireBlock.POWER);
 		}
 		if (state.hasProperty(RepeaterBlock.DELAY)) {
 			legend.putIfAbsent("<arrow><n>", id + ", n = delay in ticks, 1 to 4");

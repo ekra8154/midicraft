@@ -34,7 +34,6 @@ import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
-import org.lwjgl.glfw.GLFW;
 
 /**
  * Every standing preference the mod has, in a screen of its own.
@@ -513,7 +512,7 @@ public final class SettingsScreen extends Screen {
 	@Override
 	public boolean keyPressed(KeyEvent event) {
 		if (listening != null) {
-			bind(listening, event.key() == GLFW.GLFW_KEY_ESCAPE
+			bind(listening, event.key() == InputConstants.KEY_ESCAPE
 				? InputConstants.UNKNOWN
 				: InputConstants.getKey(event));
 			return true;

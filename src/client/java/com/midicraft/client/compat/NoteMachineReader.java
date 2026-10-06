@@ -22,7 +22,7 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.ButtonBlock;
 import net.minecraft.world.level.block.ComparatorBlock;
 import net.minecraft.world.level.block.NoteBlock;
-import net.minecraft.world.level.block.RedStoneWireBlock;
+import net.minecraft.world.level.block.RedstoneWireBlock;
 import net.minecraft.world.level.block.RepeaterBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.RedstoneSide;
@@ -624,7 +624,7 @@ public final class NoteMachineReader {
 		}
 		Set<Direction> named = new LinkedHashSet<>();
 		for (Direction direction : Direction.Plane.HORIZONTAL) {
-			if (state.getValue(RedStoneWireBlock.PROPERTY_BY_DIRECTION.get(direction))
+			if (state.getValue(RedstoneWireBlock.PROPERTY_BY_DIRECTION.get(direction))
 					!= RedstoneSide.NONE) {
 				named.add(direction);
 			}
@@ -644,7 +644,7 @@ public final class NoteMachineReader {
 			// keeps two neighbouring lanes from feeding each other, and {@link #feedRepeater} is
 			// where that is enforced -- but this is a question about the wire's *shape*, and a wire
 			// joins a repeater it is driven by exactly as it joins one it drives. The game says so:
-			// RedStoneWireBlock.shouldConnectTo returns true for facing and for its opposite.
+			// RedstoneWireBlock.shouldConnectTo returns true for facing and for its opposite.
 			//
 			// Read as "only from behind" until 2026-08-18, which made the dust in every rail head
 			// look like a lone dust with nothing to join -- and the isolated-dust clause in
@@ -1166,7 +1166,7 @@ public final class NoteMachineReader {
 		 * Where a piston has put its block of redstone down during the walk in progress. The
 		 * region's own blocks are read as pasted, with every landing still air; a wire beside a
 		 * landing has nothing to join until the block arrives, and once it has, the game joins the
-		 * wire to it -- a block of redstone is a signal source, and RedStoneWireBlock.shouldConnectTo
+		 * wire to it -- a block of redstone is a signal source, and RedstoneWireBlock.shouldConnectTo
 		 * says yes to those. Kept here so {@link #pointsAt} can say the same.
 		 */
 		final Set<BlockPos> landed = new HashSet<>();

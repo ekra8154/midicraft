@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.function.BiConsumer;
+import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
@@ -273,8 +274,8 @@ final class RegionScanScreen extends Screen {
 		if (event.isPaste() && pastePosition()) {
 			return true;
 		}
-		if (event.key() == org.lwjgl.glfw.GLFW.GLFW_KEY_ENTER
-				|| event.key() == org.lwjgl.glfw.GLFW.GLFW_KEY_KP_ENTER) {
+		if (event.key() == InputConstants.KEY_RETURN
+				|| event.key() == InputConstants.KEY_NUMPADENTER) {
 			confirm();
 			return true;
 		}

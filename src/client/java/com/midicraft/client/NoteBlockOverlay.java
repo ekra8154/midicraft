@@ -58,7 +58,6 @@ import net.minecraft.world.level.block.RepeaterBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
-import org.lwjgl.glfw.GLFW;
 
 public final class NoteBlockOverlay {
 	private static final int RESCAN_INTERVAL_TICKS = 10;
@@ -119,15 +118,15 @@ public final class NoteBlockOverlay {
 	// Unbound. Taking a letter key from someone who plays with a lot of mods is a rude default,
 	// and the setting it toggles is reachable in the settings screen either way.
 	private final KeyMapping toggleKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
-		"key.midicraft.toggle", InputConstants.Type.KEYSYM, -1, CATEGORY
+		"key.midicraft.toggle", InputConstants.Type.KEYBOARD, -1, CATEGORY
 	));
 	private final KeyMapping placementSequenceKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
-		"key.midicraft.toggle_placement_sequence", InputConstants.Type.KEYSYM, -1, CATEGORY
+		"key.midicraft.toggle_placement_sequence", InputConstants.Type.KEYBOARD, -1, CATEGORY
 	));
 	// Unbound, like the other two. /midicraft is the way in that costs nobody a key, and
 	// Brigadier listing it as you type is better discovery than a letter you have to be told.
 	private final KeyMapping composerKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
-		"key.midicraft.open_composer", InputConstants.Type.KEYSYM, -1, CATEGORY
+		"key.midicraft.open_composer", InputConstants.Type.KEYBOARD, -1, CATEGORY
 	));
 
 	/**
@@ -309,8 +308,8 @@ public final class NoteBlockOverlay {
 	}
 
 	private static boolean controlDown(Minecraft minecraft) {
-		return InputConstants.isKeyDown(minecraft.getWindow(), GLFW.GLFW_KEY_LEFT_CONTROL)
-			|| InputConstants.isKeyDown(minecraft.getWindow(), GLFW.GLFW_KEY_RIGHT_CONTROL);
+		return InputConstants.isKeyDown(InputConstants.KEY_LCONTROL)
+			|| InputConstants.isKeyDown(InputConstants.KEY_RCONTROL);
 	}
 
 	private void tick(Minecraft minecraft) {

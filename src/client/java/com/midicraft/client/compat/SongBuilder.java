@@ -37652,7 +37652,7 @@ public final class SongBuilder {
 		 * rather than its lane's, which need not conduct at all.
 		 *
 		 * <p>A conductor does three things a lane block of glass or slab would not, and each is asked
-		 * of the blocks around the cell with the game's own rules ({@code RedStoneWireBlock},
+		 * of the blocks around the cell with the game's own rules ({@code RedstoneWireBlock},
 		 * {@code DiodeBlock}):</p>
 		 * <ul>
 		 *   <li>it carries power: a repeater facing into it or reading out of it, dust on it that a

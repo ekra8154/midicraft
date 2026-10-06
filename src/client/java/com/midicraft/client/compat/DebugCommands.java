@@ -325,8 +325,8 @@ public final class DebugCommands {
 				instanceof net.minecraft.world.level.block.entity.SignBlockEntity sign)) {
 			return null;
 		}
-		String front = signFace(sign.getFrontText());
-		return front.isBlank() ? signFace(sign.getBackText()) : front;
+		String front = signFace(sign.getText(net.minecraft.world.level.block.entity.SignTextSlot.FRONT));
+		return front.isBlank() ? signFace(sign.getText(net.minecraft.world.level.block.entity.SignTextSlot.BACK)) : front;
 	}
 
 	private static String signFace(net.minecraft.world.level.block.entity.SignText text) {

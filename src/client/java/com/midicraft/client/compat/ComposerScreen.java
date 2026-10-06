@@ -12,6 +12,8 @@ import com.midicraft.client.composer.ComposerProject.MinecraftConversion;
 import com.midicraft.client.composer.ComposerProject.NoteEvent;
 import com.midicraft.client.composer.ComposerProject.PasteResult;
 import com.mojang.blaze3d.platform.InputConstants;
+import com.mojang.blaze3d.platform.cursor.CursorType;
+import com.mojang.blaze3d.platform.cursor.CursorTypes;
 import com.mojang.logging.LogUtils;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -34,7 +36,8 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.util.Util;
 import net.minecraft.world.item.ItemStack;
-import org.lwjgl.glfw.GLFW;
+import org.lwjgl.sdl.SDLScancode;
+import org.lwjgl.sdl.SDLVideo;
 import org.slf4j.Logger;
 
 public final class ComposerScreen extends Screen {
@@ -142,8 +145,8 @@ public final class ComposerScreen extends Screen {
 	 * The grab strip on the panel's edge, and the cursor that says it can be grabbed.
 	 *
 	 * <p>The arrows are the whole affordance -- nothing about a flat edge suggests it is draggable,
-	 * and a strip three pixels wide is not going to be found by accident. GLFW's own resize cursor
-	 * rather than something drawn, so it matches every other window edge the player has ever
+	 * and a strip three pixels wide is not going to be found by accident. The system's own resize
+	 * cursor rather than something drawn, so it matches every other window edge the player has ever
 	 * dragged.</p>
 	 */
 	private void extractSplitter(GuiGraphicsExtractor graphics) {
@@ -159,7 +162,7 @@ public final class ComposerScreen extends Screen {
 			}
 		}
 		if (lit) {
-			wantedCursorShape = GLFW.GLFW_HRESIZE_CURSOR;
+			wantedCursorShape = CursorTypes.RESIZE_EW;
 		}
 	}
 
@@ -175,33 +178,6 @@ public final class ComposerScreen extends Screen {
 		int edge = layerPanelWidth();
 		return y >= TOOLBAR_HEIGHT && x >= edge - SPLITTER_GRAB && x <= edge + SPLITTER_GRAB
 			&& !overOpenMenu(x, y);
-	}
-
-	/**
-	 * Puts on the cursor this frame asked for: resize arrows over the split, a hand over a
-	 * bracket handle, the ordinary pointer everywhere else.
-	 *
-	 * <p>Asked for during the frame and set once at the end of it, rather than set by each
-	 * thing that wants one. Two of those drawing in the same frame would otherwise take turns,
-	 * and whichever drew last would win however far away its own target was.</p>
-	 *
-	 * <p>Only on the change, and put back on the way out and again when the screen closes: a
-	 * cursor is process-wide state, so leaving it set would follow the player into the world.</p>
-	 */
-	private void setCursorShape(int shape) {
-		if (shape == cursorShape || minecraft == null || minecraft.getWindow() == null) {
-			return;
-		}
-		cursorShape = shape;
-		long window = minecraft.getWindow().handle();
-		if (shape == 0) {
-			GLFW.glfwSetCursor(window, 0L);
-			return;
-		}
-		long cursor = CURSORS.computeIfAbsent(shape, GLFW::glfwCreateStandardCursor);
-		if (cursor != 0L) {
-			GLFW.glfwSetCursor(window, cursor);
-		}
 	}
 
 	/** How wide the layer panel is drawing right now, folded or not. */
@@ -953,9 +929,8 @@ public final class ComposerScreen extends Screen {
 	private boolean splitBracketsHidden;
 	/** Dragging the split between the layer panel and the roll, and whether the cursor says so. */
 	private boolean draggingSplitter;
-	/** The GLFW cursor shape now set on the window, and the one this frame has asked for. */
-	private int cursorShape;
-	private int wantedCursorShape;
+	/** The cursor this frame has asked for, or null for whatever the widgets under it asked. */
+	private CursorType wantedCursorShape;
 	private double layerDragStartY;
 	private double layerDragY;
 	private boolean layerDragActive;
@@ -2201,7 +2176,7 @@ public final class ComposerScreen extends Screen {
 	@Override
 	public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
 		long frameStart = profiling ? System.nanoTime() : 0L;
-		wantedCursorShape = 0;
+		wantedCursorShape = null;
 		updatePlayback();
 		rollX = layerPanelWidth() + PIANO_WIDTH;
 		rollY = TOOLBAR_HEIGHT + TIMELINE_RULER_HEIGHT;
@@ -2237,7 +2212,14 @@ public final class ComposerScreen extends Screen {
 		extractSnapMenu(graphics, mouseX, mouseY);
 		extractMenuDescription(graphics);
 		phase(PHASE_MENUS, mark);
-		setCursorShape(wantedCursorShape);
+		// Resize arrows over the split, a hand over a bracket handle. Asked for during the frame and
+		// requested once at the end of it, rather than by each thing that wants one: two of those in
+		// the same frame would otherwise take turns, and whichever drew last would win however far
+		// away its own target was. The game puts the ordinary pointer back on any frame that asks
+		// for nothing, including the first one after the screen closes.
+		if (wantedCursorShape != null) {
+			graphics.requestCursor(wantedCursorShape);
+		}
 		endProfiledFrame(graphics, frameStart);
 	}
 
@@ -3677,7 +3659,7 @@ public final class ComposerScreen extends Screen {
 			if (hovered && hover.part() == PalettePart.BODY && !draggingMainStar) {
 				boolean onStar = main && overMainStar(mouseX, mouseY, cellX, cellY);
 				if (onStar) {
-					wantedCursorShape = GLFW.GLFW_POINTING_HAND_CURSOR;
+					wantedCursorShape = CursorTypes.POINTING_HAND;
 				}
 				// Effects carry how far they reach. The pitched half is every one of them 48, so
 				// saying so on twenty cells would be twenty copies of one fact.
@@ -3691,7 +3673,7 @@ public final class ComposerScreen extends Screen {
 			}
 		}
 		if (draggingMainStar) {
-			wantedCursorShape = GLFW.GLFW_POINTING_HAND_CURSOR;
+			wantedCursorShape = CursorTypes.POINTING_HAND;
 			extractMainStar(graphics, mouseX - 2, mouseY - 2);
 		}
 		// Whose instrument is about to change. Picking one has always landed on the whole selection,
@@ -4871,12 +4853,12 @@ public final class ComposerScreen extends Screen {
 		// and brighter under the cursor, because an edge you can take hold of has to look like one.
 		int handle = rangeHandleAt(lastMouseX, lastMouseY);
 		if (handle != 0) {
-			wantedCursorShape = GLFW.GLFW_HRESIZE_CURSOR;
+			wantedCursorShape = CursorTypes.RESIZE_EW;
 		} else if (overRangeBand(lastMouseX, lastMouseY) && !overOpenMenu(lastMouseX, lastMouseY)
 				&& trailEndAt(lastMouseX, lastMouseY) == null) {
 			// Anywhere in it, notes and gaps alike: a press there takes hold of the selection. Not
 			// over a sustained note's end, where a press still takes hold of its length.
-			wantedCursorShape = GLFW.GLFW_RESIZE_ALL_CURSOR;
+			wantedCursorShape = CursorTypes.RESIZE_ALL;
 		}
 		if (from >= rollX) {
 			graphics.fill(from - (handle == 1 ? 1 : 0), top, from + (handle == 1 ? 2 : 1), bottom,
@@ -5565,16 +5547,16 @@ public final class ComposerScreen extends Screen {
 		extractHoveredNoteTooltip(graphics, hoveredCandidate, hoveredCandidateLayer,
 			crowded, offGrid, mouseX, mouseY);
 		if (draggingNotes) {
-			wantedCursorShape = GLFW.GLFW_RESIZE_ALL_CURSOR;
+			wantedCursorShape = CursorTypes.RESIZE_ALL;
 		}
 		// The resize arrows over a note's far end, and for the whole of a resize.
 		if (resizingNotes || !draggingNotes && !selectingBox && !erasing
 				&& !overOpenMenu(mouseX, mouseY) && trailEndAt(mouseX, mouseY) != null) {
-			wantedCursorShape = GLFW.GLFW_HRESIZE_CURSOR;
+			wantedCursorShape = CursorTypes.RESIZE_EW;
 		}
 		// The same arrows over a strike tick, which slides sideways the way a far end does.
 		if (shiftingStrikes || hoveredStrike != null) {
-			wantedCursorShape = GLFW.GLFW_HRESIZE_CURSOR;
+			wantedCursorShape = CursorTypes.RESIZE_EW;
 		}
 	}
 
@@ -6485,7 +6467,7 @@ public final class ComposerScreen extends Screen {
 		// every other test, because the alternatives were all wrong in their own way: a right-click
 		// on a menu row ran the row, one inside the palette did nothing at all, and one outside
 		// either of them closed the menu and then went on to erase the notes underneath.
-		if (event.button() == 1 && anyMenuOpen()) {
+		if (event.button() == InputConstants.MOUSE_BUTTON_RIGHT && anyMenuOpen()) {
 			closeMenus();
 			return true;
 		}
@@ -6517,7 +6499,7 @@ public final class ComposerScreen extends Screen {
 		// Before the splitter, which its corner overlaps: the arrow is the smaller and more
 		// specific target, and the panel edge is draggable along the whole rest of its height.
 		NoteRect splitToggle = splitToggleRect();
-		if (event.button() == 0 && splitToggle != null
+		if (event.button() == InputConstants.MOUSE_BUTTON_LEFT && splitToggle != null
 				&& splitToggle.contains(event.x(), event.y())) {
 			splitBracketsHidden = !splitBracketsHidden;
 			// The picker belongs to a bracket, so it goes away with them.
@@ -6526,11 +6508,11 @@ public final class ComposerScreen extends Screen {
 			}
 			return true;
 		}
-		if (event.button() == 0 && overSplitter(event.x(), event.y())) {
+		if (event.button() == InputConstants.MOUSE_BUTTON_LEFT && overSplitter(event.x(), event.y())) {
 			draggingSplitter = true;
 			return true;
 		}
-		if (event.button() == 0 && overLayerPanelFold(event.x(), event.y())) {
+		if (event.button() == InputConstants.MOUSE_BUTTON_LEFT && overLayerPanelFold(event.x(), event.y())) {
 			config.setLayerPanelCollapsed(!config.layerPanelCollapsed());
 			MidicraftConfig.save();
 			resizeLayerPanel();
@@ -6568,7 +6550,7 @@ public final class ComposerScreen extends Screen {
 		}
 		NoteRect tierMenu = tierMenuRect();
 		if (tierMenu != null) {
-			if (event.button() == 0 && handleTierMenuClick(event.x(), event.y())) {
+			if (event.button() == InputConstants.MOUSE_BUTTON_LEFT && handleTierMenuClick(event.x(), event.y())) {
 				return true;
 			}
 			if (tierMenu.contains(event.x(), event.y())) {
@@ -6581,7 +6563,7 @@ public final class ComposerScreen extends Screen {
 		}
 		NoteRect palette = instrumentMenuRect();
 		if (palette != null) {
-			if (event.button() == 0 && handleInstrumentMenuClick(event.x(), event.y())) {
+			if (event.button() == InputConstants.MOUSE_BUTTON_LEFT && handleInstrumentMenuClick(event.x(), event.y())) {
 				return true;
 			}
 			if (palette.contains(event.x(), event.y())) {
@@ -6604,7 +6586,7 @@ public final class ComposerScreen extends Screen {
 		// every time you clicked back in.
 		lastMouseX = event.x();
 		lastMouseY = event.y();
-		if (event.button() == 1) {
+		if (event.button() == InputConstants.MOUSE_BUTTON_RIGHT) {
 			int stateLayer = layerStateAt(event.x(), event.y());
 			if (stateLayer >= 0) {
 				startPainting(LayerPaint.STATE, stateLayer, cycleLayerState(stateLayer, -1));
@@ -6626,7 +6608,7 @@ public final class ComposerScreen extends Screen {
 				return true;
 			}
 		}
-		if (event.button() == 0 && doubleClick) {
+		if (event.button() == InputConstants.MOUSE_BUTTON_LEFT && doubleClick) {
 			int layerIndex = layerHeaderAt(event.x(), event.y());
 			if (layerIndex >= 0 && !controlDown() && !shiftDown()) {
 				beginLayerRename(layerIndex);
@@ -6636,7 +6618,7 @@ public final class ComposerScreen extends Screen {
 		if (layerNameBox != null && !layerNameBox.isMouseOver(event.x(), event.y())) {
 			commitLayerRename();
 		}
-		if (event.button() == 0) {
+		if (event.button() == InputConstants.MOUSE_BUTTON_LEFT) {
 			int stateLayer = layerStateAt(event.x(), event.y());
 			if (stateLayer >= 0) {
 				startPainting(LayerPaint.STATE, stateLayer, cycleLayerState(stateLayer, 1));
@@ -6660,7 +6642,7 @@ public final class ComposerScreen extends Screen {
 				return true;
 			}
 		}
-		if (event.button() == 0) {
+		if (event.button() == InputConstants.MOUSE_BUTTON_LEFT) {
 			int layerIndex = layerHeaderAt(event.x(), event.y());
 			if (layerIndex >= 0) {
 				// A plain press on a row that is already one of several selected does not collapse
@@ -6684,14 +6666,14 @@ public final class ComposerScreen extends Screen {
 				return true;
 			}
 		}
-		if (event.button() == 0 && overLayerPanelBlank(event.x(), event.y())) {
+		if (event.button() == InputConstants.MOUSE_BUTTON_LEFT && overLayerPanelBlank(event.x(), event.y())) {
 			// A change of which layers are picked, so the notes go with it; see clearLayerSelection.
 			selectedNotes.clear();
 			clearRange();
 			clearLayerSelection();
 			return true;
 		}
-		if (event.button() == 0 && overPianoKeys(event.x(), event.y())) {
+		if (event.button() == InputConstants.MOUSE_BUTTON_LEFT && overPianoKeys(event.x(), event.y())) {
 			// A bracket handle sits over the keys, and a press on one is a grab, not a note.
 			if (grabBracketHandle(event.x(), event.y())) {
 				return true;
@@ -6731,11 +6713,11 @@ public final class ComposerScreen extends Screen {
 		// marker is added, which is one way rather than two and the one that says where it lands.
 		ComposerProject.Marker markerHit = markerAtPoint(event.x(), event.y());
 		if (markerHit != null) {
-			if (event.button() == 1) {
+			if (event.button() == InputConstants.MOUSE_BUTTON_RIGHT) {
 				removeMarkerAt(markerHit.tick());
 				return true;
 			}
-			if (event.button() == 0) {
+			if (event.button() == InputConstants.MOUSE_BUTTON_LEFT) {
 				if (doubleClick) {
 					renameMarker(markerHit);
 				} else {
@@ -6744,28 +6726,28 @@ public final class ComposerScreen extends Screen {
 				return true;
 			}
 		}
-		if (event.button() == 0 && rangeHandleAt(event.x(), event.y()) != 0) {
+		if (event.button() == InputConstants.MOUSE_BUTTON_LEFT && rangeHandleAt(event.x(), event.y()) != 0) {
 			draggingRangeHandle = rangeHandleAt(event.x(), event.y());
 			return true;
 		}
-		if (event.button() == 1 && rangeHandleAt(event.x(), event.y()) != 0) {
+		if (event.button() == InputConstants.MOUSE_BUTTON_RIGHT && rangeHandleAt(event.x(), event.y()) != 0) {
 			// The way out of a range without also having to put the selection down. On the handles
 			// rather than anywhere in the band, since the rest of the band is roll and right-click
 			// on roll is the eraser.
 			clearRange();
 			return true;
 		}
-		if (event.button() == 0 && overEndMarker(event.x(), event.y())) {
+		if (event.button() == InputConstants.MOUSE_BUTTON_LEFT && overEndMarker(event.x(), event.y())) {
 			draggingEndMarker = true;
 			lastEndDragAt = 0L;
 			return true;
 		}
-		if (event.button() == 0 && insideRuler(event.x(), event.y())) {
+		if (event.button() == InputConstants.MOUSE_BUTTON_LEFT && insideRuler(event.x(), event.y())) {
 			setPlaybackStart(mouseTick(event.x()), true);
 			draggingPlayhead = true;
 			return true;
 		}
-		if (event.button() == 1 && insideRoll(event.x(), event.y())) {
+		if (event.button() == InputConstants.MOUSE_BUTTON_RIGHT && insideRoll(event.x(), event.y())) {
 			// Nothing selected: right-click is the eraser. It takes the note it lands on and every
 			// note the drag then passes over, which is the gesture for clearing a passage you do not
 			// want -- box-selecting it first and pressing Delete is three moves for one intention.
@@ -6790,7 +6772,7 @@ public final class ComposerScreen extends Screen {
 			openContextMenu(event.x(), event.y());
 			return true;
 		}
-		if (event.button() != 0 || !insideRoll(event.x(), event.y())) {
+		if (event.button() != InputConstants.MOUSE_BUTTON_LEFT || !insideRoll(event.x(), event.y())) {
 			return super.mouseClicked(event, doubleClick);
 		}
 		NoteHit end = trailEndAt(event.x(), event.y());
@@ -7149,13 +7131,13 @@ public final class ComposerScreen extends Screen {
 		}
 	}
 
-	/** Whether Minecraft has the keyboard, asked of GLFW rather than inferred from anything. */
+	/** Whether Minecraft has the keyboard, asked of SDL rather than inferred from anything. */
 	private boolean windowFocused() {
 		if (minecraft == null || minecraft.getWindow() == null) {
 			return true;
 		}
-		return GLFW.glfwGetWindowAttrib(minecraft.getWindow().handle(), GLFW.GLFW_FOCUSED)
-			== GLFW.GLFW_TRUE;
+		return (SDLVideo.SDL_GetWindowFlags(minecraft.getWindow().handle())
+			& SDLVideo.SDL_WINDOW_INPUT_FOCUS) != 0;
 	}
 
 	@Override
@@ -7712,7 +7694,7 @@ public final class ComposerScreen extends Screen {
 		if (event.isEscape() && dropSelection()) {
 			return true;
 		}
-		if (event.key() == GLFW.GLFW_KEY_F9) {
+		if (event.key() == InputConstants.KEY_F9) {
 			profiling = !profiling;
 			java.util.Arrays.fill(phaseNanos, 0L);
 			profileFrameNanos = 0L;
@@ -7726,7 +7708,7 @@ public final class ComposerScreen extends Screen {
 				: "Frame profiler off"));
 			return true;
 		}
-		if (event.key() == GLFW.GLFW_KEY_SPACE) {
+		if (event.key() == InputConstants.KEY_SPACE) {
 			if (playing || anythingAudible()) {
 				togglePlayback();
 			}
@@ -7736,13 +7718,13 @@ public final class ComposerScreen extends Screen {
 		// every sequencer has. Claimed here rather than left to fall through, because falling through
 		// pressed whichever button had the focus, which in this screen is "+ Layer": hitting Enter to
 		// hear the song from the start added an empty layer to it instead.
-		if (event.key() == GLFW.GLFW_KEY_ENTER || event.key() == GLFW.GLFW_KEY_KP_ENTER) {
+		if (event.key() == InputConstants.KEY_RETURN || event.key() == InputConstants.KEY_NUMPADENTER) {
 			playFromStart();
 			return true;
 		}
 		// Beside Space and Enter because it is the third transport key. Bare R, so Ctrl+R is left to
 		// mean whatever it comes to mean.
-		if (event.key() == GLFW.GLFW_KEY_R && !event.hasControlDownWithQuirk()
+		if (event.key() == InputConstants.KEY_R && !event.hasControlDownWithQuirk()
 				&& !event.hasShiftDown()) {
 			toggleRecording();
 			return true;
@@ -7750,7 +7732,7 @@ public final class ComposerScreen extends Screen {
 		// B for bookmark, bare, next to the transport keys because it is aimed at the same thing they
 		// are: wherever the playback marker is standing. It was M until the layer dial took that
 		// letter: a marker is one thing you drop now and then, and muting is a thing you do all day.
-		if (event.key() == GLFW.GLFW_KEY_B && !event.hasControlDownWithQuirk()
+		if (event.key() == InputConstants.KEY_B && !event.hasControlDownWithQuirk()
 				&& !event.hasShiftDown()) {
 			toggleMarkerAtCursor();
 			return true;
@@ -7758,10 +7740,10 @@ public final class ComposerScreen extends Screen {
 		// The layer dial's four states, each on the letter its own chip shows, so the key and the
 		// chip say the same word. Bare, like the transport keys, because they are pressed as often.
 		LayerState dialled = switch (event.key()) {
-			case GLFW.GLFW_KEY_A -> LayerState.ACTIVE;
-			case GLFW.GLFW_KEY_M -> LayerState.MUTED;
-			case GLFW.GLFW_KEY_S -> LayerState.SOLO;
-			case GLFW.GLFW_KEY_H -> LayerState.HIDDEN;
+			case InputConstants.KEY_A -> LayerState.ACTIVE;
+			case InputConstants.KEY_M -> LayerState.MUTED;
+			case InputConstants.KEY_S -> LayerState.SOLO;
+			case InputConstants.KEY_H -> LayerState.HIDDEN;
 			default -> null;
 		};
 		if (dialled != null && !event.hasControlDownWithQuirk() && !event.hasShiftDown()) {
@@ -7788,7 +7770,7 @@ public final class ComposerScreen extends Screen {
 		// The other half of Ctrl+A, and the shape every editor gives it. Ahead of isSelectAll, which
 		// does not look at Shift and would otherwise answer this one too.
 		if (event.hasControlDownWithQuirk() && event.hasShiftDown()
-				&& event.key() == GLFW.GLFW_KEY_A) {
+				&& shortcutIs(event, 'a')) {
 			dropSelection();
 			return true;
 		}
@@ -7838,11 +7820,11 @@ public final class ComposerScreen extends Screen {
 		// same shift-a-variant convention Ctrl+Shift+S and Ctrl+Shift+C already follow here. Notes
 		// only: with layers the last thing copied, the note half is empty and this does nothing.
 		if (event.hasControlDownWithQuirk() && event.hasShiftDown()
-				&& event.key() == GLFW.GLFW_KEY_V) {
+				&& shortcutIs(event, 'v')) {
 			pasteClipboard(true);
 			return true;
 		}
-		if (event.hasControlDownWithQuirk() && event.key() == GLFW.GLFW_KEY_Z) {
+		if (event.hasControlDownWithQuirk() && shortcutIs(event, 'z')) {
 			if (event.hasShiftDown()) {
 				redo();
 			} else {
@@ -7850,15 +7832,15 @@ public final class ComposerScreen extends Screen {
 			}
 			return true;
 		}
-		if (event.hasControlDownWithQuirk() && event.key() == GLFW.GLFW_KEY_Y) {
+		if (event.hasControlDownWithQuirk() && shortcutIs(event, 'y')) {
 			redo();
 			return true;
 		}
 		if (event.hasControlDownWithQuirk()) {
 			// Ctrl+C is already taken by copying notes, so copying the sequence takes the shifted
 			// one, the way editors usually shift a variant of an existing action.
-			switch (event.key()) {
-				case GLFW.GLFW_KEY_S -> {
+			switch (Character.toLowerCase(event.shortcutKey())) {
+				case 's' -> {
 					if (event.hasShiftDown()) {
 						saveCompositionAs();
 					} else {
@@ -7866,11 +7848,11 @@ public final class ComposerScreen extends Screen {
 					}
 					return true;
 				}
-				case GLFW.GLFW_KEY_O -> {
+				case 'o' -> {
 					openSongs();
 					return true;
 				}
-				case GLFW.GLFW_KEY_E -> {
+				case 'e' -> {
 					// Only ever layers, so it works wherever you are.
 					if (selectedLayers.size() < 2) {
 						showResult(Component.literal("Select two or more layers to merge "
@@ -7880,7 +7862,7 @@ public final class ComposerScreen extends Screen {
 					}
 					return true;
 				}
-				case GLFW.GLFW_KEY_D -> {
+				case 'd' -> {
 					if (!selectedNotes.isEmpty()) {
 						duplicateSelection();
 					} else if (!selectedLayers.isEmpty()) {
@@ -7888,19 +7870,19 @@ public final class ComposerScreen extends Screen {
 					}
 					return true;
 				}
-				case GLFW.GLFW_KEY_I -> {
+				case 'i' -> {
 					importSong();
 					return true;
 				}
 				default -> {
-					if (event.hasShiftDown() && event.key() == GLFW.GLFW_KEY_C) {
+					if (event.hasShiftDown() && shortcutIs(event, 'c')) {
 						copySequenceAsText();
 						return true;
 					}
 				}
 			}
 		}
-		int digit = event.getDigit();
+		int digit = topRowDigit(event.key());
 		if (event.hasControlDownWithQuirk() && digit >= 0) {
 			int targetLayer = digit == 0 ? 9 : digit - 1;
 			if (targetLayer >= 0 && targetLayer < ComposerProject.MAX_LAYERS) {
@@ -7910,7 +7892,7 @@ public final class ComposerScreen extends Screen {
 		}
 		// Notes only. A layer is a whole part and deleting one is a decision, so it is taken from the
 		// layer's right-click menu, where the row being deleted is the row you are pointing at.
-		if (event.key() == GLFW.GLFW_KEY_DELETE || event.key() == GLFW.GLFW_KEY_BACKSPACE) {
+		if (event.key() == InputConstants.KEY_DELETE || event.key() == InputConstants.KEY_BACKSPACE) {
 			if (!selectedNotes.isEmpty()) {
 				deleteSelectedNotes();
 			} else if (!selectedLayers.isEmpty()) {
@@ -8030,7 +8012,6 @@ public final class ComposerScreen extends Screen {
 	@Override
 	public void removed() {
 		ComposerScale.screenClosed(this);
-		setCursorShape(0);
 		super.removed();
 	}
 
@@ -8844,7 +8825,7 @@ public final class ComposerScreen extends Screen {
 			if (hovered != null && hovered.group() == index) {
 				// The hand only while a handle is actually under it, not anywhere on the bracket:
 				// what it promises is that a press here takes hold of something.
-				wantedCursorShape = GLFW.GLFW_POINTING_HAND_CURSOR;
+				wantedCursorShape = CursorTypes.POINTING_HAND;
 				graphics.setTooltipForNextFrame(Component.literal(
 					"Drag to trim this register - " + midiName(group.lo()) + " to "
 						+ midiName(group.hi())), mouseX, mouseY);
@@ -11153,13 +11134,43 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private boolean controlDown() {
-		return InputConstants.isKeyDown(minecraft.getWindow(), GLFW.GLFW_KEY_LEFT_CONTROL)
-			|| InputConstants.isKeyDown(minecraft.getWindow(), GLFW.GLFW_KEY_RIGHT_CONTROL);
+		return InputConstants.isKeyDown(InputConstants.KEY_LCONTROL)
+			|| InputConstants.isKeyDown(InputConstants.KEY_RCONTROL);
 	}
 
 	private boolean shiftDown() {
-		return InputConstants.isKeyDown(minecraft.getWindow(), GLFW.GLFW_KEY_LEFT_SHIFT)
-			|| InputConstants.isKeyDown(minecraft.getWindow(), GLFW.GLFW_KEY_RIGHT_SHIFT);
+		return InputConstants.isKeyDown(InputConstants.KEY_LSHIFT)
+			|| InputConstants.isKeyDown(InputConstants.KEY_RSHIFT);
+	}
+
+	/**
+	 * Whether a Ctrl chord is on this letter, by the letter the layout prints on the key rather than
+	 * where the key sits. That is what vanilla's own isCopy() matches, so Ctrl+Z is the key labelled
+	 * Z on AZERTY too. Lowercased because Shift may have raised it, and several chords here are
+	 * Ctrl+Shift ones.
+	 */
+	private static boolean shortcutIs(KeyEvent event, int keycode) {
+		return Character.toLowerCase(event.shortcutKey()) == keycode;
+	}
+
+	/**
+	 * The digit on a number-row key, or -1. Spelled out rather than counted from KEY_0, because SDL
+	 * numbers that row 1 through 9 and then 0, so an offset reads every digit one key off.
+	 */
+	private static int topRowDigit(int key) {
+		return switch (key) {
+			case InputConstants.KEY_1 -> 1;
+			case InputConstants.KEY_2 -> 2;
+			case InputConstants.KEY_3 -> 3;
+			case InputConstants.KEY_4 -> 4;
+			case InputConstants.KEY_5 -> 5;
+			case InputConstants.KEY_6 -> 6;
+			case InputConstants.KEY_7 -> 7;
+			case InputConstants.KEY_8 -> 8;
+			case InputConstants.KEY_9 -> 9;
+			case InputConstants.KEY_0 -> 0;
+			default -> -1;
+		};
 	}
 
 	/**
@@ -11172,15 +11183,15 @@ public final class ComposerScreen extends Screen {
 	 */
 	private static int zoomKeyDirection(int key) {
 		return switch (key) {
-			case GLFW.GLFW_KEY_EQUAL, GLFW.GLFW_KEY_KP_ADD -> 1;
-			case GLFW.GLFW_KEY_MINUS, GLFW.GLFW_KEY_KP_SUBTRACT -> -1;
+			case InputConstants.KEY_EQUALS, SDLScancode.SDL_SCANCODE_KP_PLUS -> 1;
+			case InputConstants.KEY_MINUS, SDLScancode.SDL_SCANCODE_KP_MINUS -> -1;
 			default -> 0;
 		};
 	}
 
 	private boolean altDown() {
-		return InputConstants.isKeyDown(minecraft.getWindow(), GLFW.GLFW_KEY_LEFT_ALT)
-			|| InputConstants.isKeyDown(minecraft.getWindow(), GLFW.GLFW_KEY_RIGHT_ALT);
+		return InputConstants.isKeyDown(InputConstants.KEY_LALT)
+			|| InputConstants.isKeyDown(InputConstants.KEY_RALT);
 	}
 
 	private void centerMinecraftRange() {
@@ -11311,9 +11322,6 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private static final String SUBMENU_ARROW = "▸";
-	/** Created once and kept: GLFW cursors are process-wide and there is no reason for two. */
-	/** The standard cursors asked for so far, by GLFW shape. Created once, never destroyed. */
-	private static final Map<Integer, Long> CURSORS = new java.util.HashMap<>();
 	/** Air around a submenu's rule, so the row after it does not sit on the line. */
 	private static final int SUBMENU_DIVIDER_GAP = 5;
 

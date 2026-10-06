@@ -12,7 +12,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.block.RedStoneWireBlock;
+import net.minecraft.world.level.block.RedstoneWireBlock;
 import net.minecraft.world.level.block.RepeaterBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
@@ -222,9 +222,9 @@ class AsciiDiagramTest {
 	@Test
 	void spellsOutWhatTheWireIsWorth() {
 		world.put(new BlockPos(0, 64, 0), Blocks.REDSTONE_WIRE.defaultBlockState()
-			.setValue(RedStoneWireBlock.POWER, 15));
+			.setValue(RedstoneWireBlock.POWER, 15));
 		world.put(new BlockPos(1, 64, 0), Blocks.REDSTONE_WIRE.defaultBlockState()
-			.setValue(RedStoneWireBlock.POWER, 4));
+			.setValue(RedstoneWireBlock.POWER, 4));
 		String drawn = draw(new BlockPos(0, 64, 0), new BlockPos(1, 64, 0),
 			AsciiDiagram.View.TOP);
 		String row = drawn.lines().filter(line -> line.contains("w15")).findFirst().orElseThrow();

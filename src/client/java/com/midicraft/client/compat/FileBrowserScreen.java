@@ -16,6 +16,7 @@ import java.util.function.Consumer;
 import java.util.stream.Stream;
 import com.midicraft.client.MidicraftConfig;
 import com.midicraft.client.composer.SongLibrary;
+import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
@@ -24,7 +25,6 @@ import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
-import org.lwjgl.glfw.GLFW;
 
 /**
  * Picks a file from disk without leaving the game.
@@ -277,7 +277,7 @@ final class FileBrowserScreen extends Screen {
 	/**
 	 * Files dragged onto the window from the desktop.
 	 *
-	 * <p>Minecraft installs a GLFW drop callback and hands whatever lands to whichever screen is
+	 * <p>Minecraft installs a file-drop callback and hands whatever lands to whichever screen is
 	 * open, so this needs nothing but the override. It is the shortest route there is between a file
 	 * you have just downloaded and a song: no navigating to the folder, no remembering where the
 	 * browser was last pointed.</p>
@@ -345,7 +345,7 @@ final class FileBrowserScreen extends Screen {
 	public boolean keyPressed(KeyEvent event) {
 		List<Entry> visible = matches();
 		switch (event.key()) {
-			case GLFW.GLFW_KEY_ENTER, GLFW.GLFW_KEY_KP_ENTER -> {
+			case InputConstants.KEY_RETURN, InputConstants.KEY_NUMPADENTER -> {
 				// A pasted path is a path, not a filter -- people paste them, so take the hint.
 				if (jumpToTypedPath()) {
 					return true;
@@ -353,15 +353,15 @@ final class FileBrowserScreen extends Screen {
 				openSelected();
 				return true;
 			}
-			case GLFW.GLFW_KEY_BACKSPACE -> {
+			case InputConstants.KEY_BACKSPACE -> {
 				if (filterBox != null && filterBox.getValue().isEmpty()) {
 					enter(directory.getParent());
 					return true;
 				}
 			}
-			case GLFW.GLFW_KEY_DOWN, GLFW.GLFW_KEY_UP -> {
+			case InputConstants.KEY_DOWN, InputConstants.KEY_UP -> {
 				if (!visible.isEmpty()) {
-					int step = event.key() == GLFW.GLFW_KEY_DOWN ? 1 : -1;
+					int step = event.key() == InputConstants.KEY_DOWN ? 1 : -1;
 					selected = Math.max(0, Math.min(visible.size() - 1, selected + step));
 					scroll = Math.max(0, Math.max(Math.min(scroll, selected),
 						selected - visibleRows() + 1));

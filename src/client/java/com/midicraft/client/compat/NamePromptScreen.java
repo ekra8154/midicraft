@@ -1,6 +1,7 @@
 package com.midicraft.client.compat;
 
 import java.util.function.Consumer;
+import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
@@ -62,8 +63,8 @@ final class NamePromptScreen extends Screen {
 
 	@Override
 	public boolean keyPressed(net.minecraft.client.input.KeyEvent event) {
-		if (event.key() == org.lwjgl.glfw.GLFW.GLFW_KEY_ENTER
-				|| event.key() == org.lwjgl.glfw.GLFW.GLFW_KEY_KP_ENTER) {
+		if (event.key() == InputConstants.KEY_RETURN
+				|| event.key() == InputConstants.KEY_NUMPADENTER) {
 			confirm();
 			return true;
 		}

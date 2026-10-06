@@ -86,7 +86,7 @@ public final class LaneMaterials {
 	 * registry, so only once the game is up.</p>
 	 *
 	 * <p>The support rules are the game's own: dust stays on a block with a sturdy top, or on a
-	 * hopper ({@code RedStoneWireBlock.canSurviveOn}), and a repeater on one whose top is sturdy for
+	 * hopper ({@code RedstoneWireBlock.canSurviveOn}), and a repeater on one whose top is sturdy for
 	 * a rigid block ({@code DiodeBlock.canSurviveOn}).</p>
 	 */
 	public static String problem(Role role, String normalised) {

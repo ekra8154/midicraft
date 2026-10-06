@@ -167,7 +167,7 @@ class RailDeadWireProbeTest {
 		return switch (name) {
 			case "air" -> ".";
 			case "redstone_wire" -> "w" + state.getValue(
-				net.minecraft.world.level.block.RedStoneWireBlock.POWER);
+				net.minecraft.world.level.block.RedstoneWireBlock.POWER);
 			case "repeater" -> (switch (state.getValue(
 					net.minecraft.world.level.block.HorizontalDirectionalBlock.FACING)) {
 				case EAST -> ">";
