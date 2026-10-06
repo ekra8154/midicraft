@@ -162,6 +162,36 @@ class NbsExporterTest {
 		assertEquals(800, read.header().tempoHundredths());
 	}
 
+	/**
+	 * A song converted to game ticks, which is the shape that came back sounding quantized.
+	 *
+	 * <p>At 120 BPM and the default resolution a game tick is 48 composer ticks, and a sixteenth is
+	 * 120. The file used to be written on sixteenths with every tick floored onto one, so 48 went
+	 * to nought and 144 to one: notes a game tick apart landed together.</p>
+	 */
+	@Test
+	void keepsNotesOnGameTicksWhereTheyWere(@TempDir Path folder) throws Exception {
+		ComposerProject source = project(List.of(new ComposerProject.Layer("Lead", "HARP",
+			false, true, true, List.of(note(1, 60, 0), note(2, 62, 48), note(3, 64, 144)))));
+
+		NbsSong read = NbsReader.read(NbsExporter.export(source, folder.resolve("h.nbs")).path());
+
+		assertEquals(List.of(0, 1, 3), read.notes().stream().map(NbsSong.Note::tick).toList());
+		assertEquals(2000, read.header().tempoHundredths(), "twenty game ticks a second");
+	}
+
+	@Test
+	void foldsTheSpeedIntoTheTempo(@TempDir Path folder) throws Exception {
+		ComposerProject source = project(List.of(new ComposerProject.Layer("Lead", "HARP",
+			false, true, true, List.of(note(1, 60, 0), note(2, 62, 120)))))
+			.withSpeedEighths(2 * ComposerProject.DEFAULT_SPEED_EIGHTHS);
+
+		NbsSong read = NbsReader.read(NbsExporter.export(source, folder.resolve("v.nbs")).path());
+
+		assertEquals(1600, read.header().tempoHundredths(),
+			"a sixteenth a tick at 2.00x is sixteen ticks a second, not eight");
+	}
+
 	@Test
 	void marksAMutedLayerMuted(@TempDir Path folder) throws Exception {
 		ComposerProject source = project(List.of(
