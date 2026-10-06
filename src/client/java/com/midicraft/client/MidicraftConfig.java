@@ -523,7 +523,7 @@ public final class MidicraftConfig {
 					? SequencingEditProtection.RADIALS_AND_INTERACTIONS
 					: stored.sequencingEditProtection;
 				instance.autoSelectSequenceBlock = stored.autoSelectSequenceBlock == null || stored.autoSelectSequenceBlock;
-				instance.selectInstruments = Boolean.TRUE.equals(stored.selectInstruments);
+				instance.selectInstruments = stored.selectInstruments == null || stored.selectInstruments;
 				instance.chordPlaceOrder = stored.chordPlaceOrder == null
 					? ChordPlaceOrder.TWO_STRIPS
 					: stored.chordPlaceOrder;
@@ -1701,6 +1701,7 @@ public final class MidicraftConfig {
 		config.placementSequenceEnabled = false;
 		config.sequencingEditProtection = SequencingEditProtection.RADIALS_AND_INTERACTIONS;
 		config.autoSelectSequenceBlock = true;
+		config.selectInstruments = true;
 		config.activeSequenceName = "Untitled sequence";
 		config.activeSequenceDelayScaleQuarters = DEFAULT_SEQUENCE_DELAY_SCALE_QUARTERS;
 		config.previewInstrument = "HARP";
