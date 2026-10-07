@@ -117,16 +117,20 @@ public final class NoteBlockOverlay {
 	private final Map<BlockPos, PlacementWatch> placementWatches = new HashMap<>();
 	// Unbound. Taking a letter key from someone who plays with a lot of mods is a rude default,
 	// and the setting it toggles is reachable in the settings screen either way.
+	//
+	// Unbound is InputConstants.UNKNOWN, which on 26.3 is scancode 0. The GLFW-era -1 is not
+	// unbound there: KeyMapping.setAll only skips UNKNOWN, so joining a world asked SDL's keyboard
+	// state for index -1 and crashed with an IndexOutOfBoundsException.
 	private final KeyMapping toggleKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
-		"key.midicraft.toggle", InputConstants.Type.KEYBOARD, -1, CATEGORY
+		"key.midicraft.toggle", InputConstants.Type.KEYBOARD, InputConstants.UNKNOWN.getValue(), CATEGORY
 	));
 	private final KeyMapping placementSequenceKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
-		"key.midicraft.toggle_placement_sequence", InputConstants.Type.KEYBOARD, -1, CATEGORY
+		"key.midicraft.toggle_placement_sequence", InputConstants.Type.KEYBOARD, InputConstants.UNKNOWN.getValue(), CATEGORY
 	));
 	// Unbound, like the other two. /midicraft is the way in that costs nobody a key, and
 	// Brigadier listing it as you type is better discovery than a letter you have to be told.
 	private final KeyMapping composerKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
-		"key.midicraft.open_composer", InputConstants.Type.KEYBOARD, -1, CATEGORY
+		"key.midicraft.open_composer", InputConstants.Type.KEYBOARD, InputConstants.UNKNOWN.getValue(), CATEGORY
 	));
 
 	/**
