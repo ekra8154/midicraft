@@ -1,5 +1,6 @@
 package com.midicraft.client.compat;
 
+import com.midicraft.client.McCompat;
 import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.screens.Screen;
@@ -127,6 +128,6 @@ abstract class ModalPanelScreen extends Screen {
 
 	@Override
 	public void onClose() {
-		minecraft.gui.setScreen(parent);
+		McCompat.setScreen(parent);
 	}
 }

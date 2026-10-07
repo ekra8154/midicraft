@@ -1,5 +1,6 @@
 package com.midicraft.client.compat;
 
+import com.midicraft.client.McCompat;
 import com.midicraft.client.composer.ComposerProject.Sustain;
 import com.midicraft.client.composer.ComposerProject.SustainLength;
 import java.util.List;
@@ -108,7 +109,7 @@ public final class SustainSettingsScreen extends ModalPanelScreen {
 
 	@Override
 	protected void confirm() {
-		minecraft.gui.setScreen(parent);
+		McCompat.setScreen(parent);
 		onConfirm.accept(chosen);
 	}
 

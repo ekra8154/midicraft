@@ -1,5 +1,6 @@
 package com.midicraft.client.compat;
 
+import com.midicraft.client.McCompat;
 import java.util.function.Consumer;
 import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -81,7 +82,7 @@ final class NamePromptScreen extends Screen {
 
 	@Override
 	public void onClose() {
-		minecraft.gui.setScreen(parent);
+		McCompat.setScreen(parent);
 	}
 
 	/**

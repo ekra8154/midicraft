@@ -1,5 +1,6 @@
 package com.midicraft.client.compat;
 
+import com.midicraft.client.McCompat;
 import com.midicraft.client.MidicraftConfig;
 import java.util.ArrayList;
 import java.util.List;
@@ -87,7 +88,7 @@ public final class ConvertOptionsScreen extends ModalPanelScreen {
 
 	@Override
 	protected void confirm() {
-		minecraft.gui.setScreen(parent);
+		McCompat.setScreen(parent);
 		onConfirm.run();
 	}
 

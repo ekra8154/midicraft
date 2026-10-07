@@ -1,5 +1,6 @@
 package com.midicraft.client.compat;
 
+import com.midicraft.client.McCompat;
 import com.midicraft.client.composer.ComposerProject;
 import java.util.LinkedHashSet;
 import java.util.Set;
@@ -94,7 +95,7 @@ final class NbsInstrumentSelectionScreen extends Screen {
 
 	@Override
 	public void onClose() {
-		minecraft.gui.setScreen(parent);
+		McCompat.setScreen(parent);
 	}
 
 	/**

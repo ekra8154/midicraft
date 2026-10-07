@@ -1,5 +1,6 @@
 package com.midicraft.client.compat;
 
+import com.midicraft.client.McCompat;
 import com.midicraft.client.MidicraftConfig;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -422,7 +423,7 @@ public final class CommandPasteSender {
 	 * <p>Only holds it. Cancelling is something you ask for, and it is still one button away.</p>
 	 */
 	private static boolean held(Minecraft minecraft) {
-		Screen screen = minecraft.gui.screen();
+		Screen screen = McCompat.screen();
 		return screen instanceof PauseScreen || screen instanceof ComposerScreen;
 	}
 
@@ -551,7 +552,7 @@ public final class CommandPasteSender {
 	private static void show(Component message) {
 		Minecraft minecraft = Minecraft.getInstance();
 		if (minecraft.player != null) {
-			minecraft.gui.hud.setOverlayMessage(message, true);
+			McCompat.overlayMessage(message, true);
 		}
 	}
 

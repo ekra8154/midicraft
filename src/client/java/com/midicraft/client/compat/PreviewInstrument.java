@@ -1,5 +1,6 @@
 package com.midicraft.client.compat;
 
+import com.midicraft.client.McCompat;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
@@ -64,7 +65,7 @@ public record PreviewInstrument(String id, String name, Item icon, Holder<SoundE
 		new PreviewInstrument("BASEDRUM", "Bass drum", Items.STONE, SoundEvents.NOTE_BLOCK_BASEDRUM),
 		new PreviewInstrument("SNARE", "Snare", Items.SAND, SoundEvents.NOTE_BLOCK_SNARE),
 		new PreviewInstrument("HAT", "Hi-hat", Items.GLASS, SoundEvents.NOTE_BLOCK_HAT),
-		new PreviewInstrument("GUITAR", "Guitar", Items.WOOL.white(), SoundEvents.NOTE_BLOCK_GUITAR),
+		new PreviewInstrument("GUITAR", "Guitar", McCompat.whiteWool(), SoundEvents.NOTE_BLOCK_GUITAR),
 		new PreviewInstrument("FLUTE", "Flute", Items.CLAY, SoundEvents.NOTE_BLOCK_FLUTE),
 		new PreviewInstrument("BELL", "Bell", Items.GOLD_BLOCK, SoundEvents.NOTE_BLOCK_BELL),
 		new PreviewInstrument("CHIME", "Chime", Items.PACKED_ICE, SoundEvents.NOTE_BLOCK_CHIME),
@@ -80,10 +81,10 @@ public record PreviewInstrument(String id, String name, Item icon, Holder<SoundE
 		// along. A song built with a trumpet line in it was quietly rewriting itself while it stood
 		// there, and the age it settles on is whatever the weather got to first. The same reason the
 		// sound effects have always been waxed, for once it actually changes the sound.
-		new PreviewInstrument("TRUMPET", "Trumpet", Items.COPPER_BLOCK.waxed().unaffected(), SoundEvents.NOTE_BLOCK_TRUMPET),
-		new PreviewInstrument("TRUMPET_EXPOSED", "Exposed trumpet", Items.COPPER_BLOCK.waxed().exposed(), SoundEvents.NOTE_BLOCK_TRUMPET_EXPOSED),
-		new PreviewInstrument("TRUMPET_WEATHERED", "Weathered trumpet", Items.COPPER_BLOCK.waxed().weathered(), SoundEvents.NOTE_BLOCK_TRUMPET_WEATHERED),
-		new PreviewInstrument("TRUMPET_OXIDIZED", "Oxidized trumpet", Items.COPPER_BLOCK.waxed().oxidized(), SoundEvents.NOTE_BLOCK_TRUMPET_OXIDIZED)
+		new PreviewInstrument("TRUMPET", "Trumpet", McCompat.waxedCopper(0), SoundEvents.NOTE_BLOCK_TRUMPET),
+		new PreviewInstrument("TRUMPET_EXPOSED", "Exposed trumpet", McCompat.waxedCopper(1), SoundEvents.NOTE_BLOCK_TRUMPET_EXPOSED),
+		new PreviewInstrument("TRUMPET_WEATHERED", "Weathered trumpet", McCompat.waxedCopper(2), SoundEvents.NOTE_BLOCK_TRUMPET_WEATHERED),
+		new PreviewInstrument("TRUMPET_OXIDIZED", "Oxidized trumpet", McCompat.waxedCopper(3), SoundEvents.NOTE_BLOCK_TRUMPET_OXIDIZED)
 	);
 
 	/**
@@ -117,7 +118,7 @@ public record PreviewInstrument(String id, String name, Item icon, Holder<SoundE
 			new Effect("minecraft:oak_trapdoor[facing=north]", null, false, 1.0F)),
 		effect("FX_IRON_TRAPDOOR", "Iron trapdoor", Items.IRON_TRAPDOOR, SoundEvents.IRON_TRAPDOOR_OPEN,
 			new Effect("minecraft:iron_trapdoor[facing=north]", null, false, 1.0F)),
-		effect("FX_COPPER_TRAPDOOR", "Copper trapdoor", Items.COPPER_TRAPDOOR.waxed().unaffected(),
+		effect("FX_COPPER_TRAPDOOR", "Copper trapdoor", McCompat.waxedCopperTrapdoor(),
 			SoundEvents.COPPER_TRAPDOOR_OPEN,
 			new Effect("minecraft:waxed_copper_trapdoor[facing=north]", null, false, 1.0F)),
 		effect("FX_OAK_FENCE_GATE", "Oak fence gate", Items.OAK_FENCE_GATE, SoundEvents.FENCE_GATE_OPEN,
@@ -128,7 +129,7 @@ public record PreviewInstrument(String id, String name, Item icon, Holder<SoundE
 			// Stood on the floor rather than hung on a wall, so it needs nothing beside it and the
 			// block it hangs off can be on any side -- which is what a bus gives it.
 			new Effect("minecraft:bell[attachment=floor]", null, true, 2.0F)),
-		effect("FX_COPPER_BULB", "Copper bulb", Items.COPPER_BULB.waxed().unaffected(),
+		effect("FX_COPPER_BULB", "Copper bulb", McCompat.waxedCopperBulb(),
 			SoundEvents.COPPER_BULB_TURN_ON,
 			new Effect("minecraft:waxed_copper_bulb", null, false, 1.0F)),
 		// No dispenser. An empty dispenser and an empty dropper both play block.dispenser.fail, so

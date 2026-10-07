@@ -1,5 +1,6 @@
 package com.midicraft.client.compat;
 
+import com.midicraft.client.McCompat;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
@@ -56,7 +57,7 @@ final class UnsavedChangesScreen extends Screen {
 	/** Escape means "I did not mean to leave", never "throw it away". */
 	@Override
 	public void onClose() {
-		minecraft.gui.setScreen(parent);
+		McCompat.setScreen(parent);
 	}
 
 	/**

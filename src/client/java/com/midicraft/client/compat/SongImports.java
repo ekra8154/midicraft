@@ -1,5 +1,6 @@
 package com.midicraft.client.compat;
 
+import com.midicraft.client.McCompat;
 import com.midicraft.client.MidicraftConfig;
 import com.midicraft.client.composer.ComposerProject;
 import java.nio.file.Path;
@@ -36,7 +37,7 @@ final class SongImports {
 	/** MIDI and NBS files, which are songs already and only need converting. */
 	static void chooseMidiOrNbs(Screen returnTo, MidicraftConfig config,
 			Consumer<Imported> onDone) {
-		Minecraft.getInstance().gui.setScreen(new FileBrowserScreen(returnTo, "Import MIDI or NBS",
+		McCompat.setScreen(new FileBrowserScreen(returnTo, "Import MIDI or NBS",
 			Path.of(config.importDirectory()), List.of(".mid", ".midi", ".nbs"),
 			folder -> {
 				config.setImportDirectory(folder.toString());
@@ -53,7 +54,7 @@ final class SongImports {
 				if (inspection.instruments().size() > ComposerProject.MAX_LAYERS) {
 					// Too many instruments to become layers, so which ones matter is a question
 					// only the person importing can answer.
-					Minecraft.getInstance().gui.setScreen(new NbsInstrumentSelectionScreen(
+					McCompat.setScreen(new NbsInstrumentSelectionScreen(
 						returnTo, inspection,
 						selected -> readSelectedNbs(returnTo, config, path, selected, onDone)));
 					return;
@@ -110,7 +111,7 @@ final class SongImports {
 	/** A saved build, read back into a song by following its redstone. */
 	static void chooseSchematic(Screen returnTo, MidicraftConfig config,
 			Consumer<Imported> onDone) {
-		Minecraft.getInstance().gui.setScreen(new FileBrowserScreen(returnTo, "Import a schematic",
+		McCompat.setScreen(new FileBrowserScreen(returnTo, "Import a schematic",
 			Path.of(config.importDirectory()), SchematicReader.EXTENSIONS,
 			folder -> {
 				config.setImportDirectory(folder.toString());
@@ -134,7 +135,7 @@ final class SongImports {
 
 	/** A machine standing in the world, read back the same way a schematic is. */
 	static void scanWorld(Screen returnTo, Consumer<Imported> onDone) {
-		Minecraft.getInstance().gui.setScreen(new RegionScanScreen(returnTo,
+		McCompat.setScreen(new RegionScanScreen(returnTo,
 			(from, to) -> readRegion(returnTo, from, to, onDone)));
 	}
 
@@ -170,12 +171,12 @@ final class SongImports {
 		opened.showResult(Component.literal(
 			"Imported \"" + imported.project().name() + "\" - " + imported.report()
 				+ ". Not saved yet."));
-		Minecraft.getInstance().gui.setScreen(opened);
+		McCompat.setScreen(opened);
 	}
 
 	static void showFailure(Screen returnTo, Exception failure) {
-		Minecraft.getInstance().gui.setScreen(new ConfirmScreen(
-			confirmed -> Minecraft.getInstance().gui.setScreen(returnTo),
+		McCompat.setScreen(new ConfirmScreen(
+			confirmed -> McCompat.setScreen(returnTo),
 			Component.literal("Song import failed"),
 			Component.literal(failure.getMessage() == null
 				? failure.getClass().getSimpleName()

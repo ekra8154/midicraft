@@ -1,5 +1,6 @@
 package com.midicraft.client.compat;
 
+import com.midicraft.client.McCompat;
 import com.midicraft.client.MidicraftConfig;
 import com.midicraft.client.composer.ComposerProject;
 import com.midicraft.client.composer.SongAnalysis;
@@ -308,7 +309,7 @@ public final class SongsScreen extends Screen {
 	private void open(String id) {
 		config.setActiveSongId(id);
 		MidicraftConfig.save();
-		minecraft.gui.setScreen(new ComposerScreen(parent, config));
+		McCompat.setScreen(new ComposerScreen(parent, config));
 	}
 
 	/**
@@ -332,7 +333,7 @@ public final class SongsScreen extends Screen {
 	}
 
 	private void newFromText() {
-		minecraft.gui.setScreen(new SongTextScreen(this, config));
+		McCompat.setScreen(new SongTextScreen(this, config));
 	}
 
 	private void duplicate(Row row) {
@@ -344,14 +345,14 @@ public final class SongsScreen extends Screen {
 	}
 
 	private void confirmDelete(Row row) {
-		minecraft.gui.setScreen(new ConfirmScreen(
+		McCompat.setScreen(new ConfirmScreen(
 			confirmed -> {
 				if (confirmed) {
 					MidicraftConfig.songs().delete(row.id());
 					MidicraftConfig.get().forgetPlacementPosition(row.id());
 					status = "Deleted " + row.song().name();
 				}
-				minecraft.gui.setScreen(this);
+				McCompat.setScreen(this);
 			},
 			Component.literal("Delete \"" + row.song().name() + "\"?"),
 			Component.literal(summary(row) + " - this cannot be undone"),
@@ -499,7 +500,7 @@ public final class SongsScreen extends Screen {
 	@Override
 	public void onClose() {
 		MidicraftConfig.save();
-		minecraft.gui.setScreen(parent);
+		McCompat.setScreen(parent);
 	}
 
 	/**

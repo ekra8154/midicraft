@@ -1,5 +1,6 @@
 package com.midicraft.client.compat;
 
+import com.midicraft.client.McCompat;
 import com.midicraft.client.MidicraftConfig;
 import com.midicraft.client.MidicraftConfig.ChordPlaceOrder;
 import com.midicraft.client.MidicraftConfig.MidiInstrumentSource;
@@ -568,7 +569,7 @@ public final class SettingsScreen extends Screen {
 	}
 
 	private void confirmResetAll() {
-		minecraft.gui.setScreen(new ConfirmScreen(confirmed -> {
+		McCompat.setScreen(new ConfirmScreen(confirmed -> {
 			if (confirmed) {
 				for (Category tab : Category.values()) {
 					for (Entry entry : entries(tab)) {
@@ -581,7 +582,7 @@ public final class SettingsScreen extends Screen {
 				}
 				dirty = true;
 			}
-			minecraft.gui.setScreen(this);
+			McCompat.setScreen(this);
 		}, Component.literal("Reset every setting?"),
 			Component.literal("Every setting in the mod goes back to its default. Your key "
 				+ "bindings, your songs, and where you had got to placing them, are not touched."),
@@ -638,7 +639,7 @@ public final class SettingsScreen extends Screen {
 		if (dirty) {
 			MidicraftConfig.save();
 		}
-		minecraft.gui.setScreen(parent);
+		McCompat.setScreen(parent);
 	}
 
 	private Option toggle(String key, Predicate<MidicraftConfig> read, Consumer<Boolean> write) {
@@ -716,7 +717,7 @@ public final class SettingsScreen extends Screen {
 					entries.add(Entry.of(mapping));
 				}
 				entries.add(Entry.link("all_keys",
-					() -> minecraft.gui.setScreen(
+					() -> McCompat.setScreen(
 						new KeyBindsScreen(this, minecraft.options))));
 			}
 			case SERVER -> {

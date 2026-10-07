@@ -1,5 +1,6 @@
 package com.midicraft.client.compat;
 
+import com.midicraft.client.McCompat;
 import com.midicraft.client.MidicraftConfig;
 import com.midicraft.client.composer.ChordSkips;
 import com.midicraft.client.composer.ChordThinner;
@@ -1677,7 +1678,7 @@ public final class ComposerScreen extends Screen {
 		// Asked before anything happens, because Convert is six operations and which of them run
 		// is a decision, not a constant. The popup writes the answers straight to the config, so
 		// this is also where those settings live. See {@link ConvertOptionsScreen}.
-		minecraft.gui.setScreen(new ConvertOptionsScreen(this, gameTicks,
+		McCompat.setScreen(new ConvertOptionsScreen(this, gameTicks,
 			() -> runConversion(gameTicks)));
 	}
 
@@ -1773,7 +1774,7 @@ public final class ComposerScreen extends Screen {
 			}
 			showResult(Component.literal(report));
 		} catch (IllegalStateException exception) {
-			minecraft.gui.setScreen(new ConfirmScreen(confirmed -> minecraft.gui.setScreen(this),
+			McCompat.setScreen(new ConfirmScreen(confirmed -> McCompat.setScreen(this),
 				Component.literal("Too many converted layers"),
 				Component.literal(exception.getMessage()),
 				CommonComponents.GUI_BACK, CommonComponents.GUI_CANCEL));
@@ -2121,7 +2122,7 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private void openSongs() {
-		withUnsavedChangesChecked(() -> minecraft.gui.setScreen(new SongsScreen(parent, config)));
+		withUnsavedChangesChecked(() -> McCompat.setScreen(new SongsScreen(parent, config)));
 	}
 
 	/**
@@ -2136,7 +2137,7 @@ public final class ComposerScreen extends Screen {
 	 * already thinks of as where songs come from and go.</p>
 	 */
 	private void exportAsNbs() {
-		minecraft.gui.setScreen(new NamePromptScreen(this, "Export as .nbs",
+		McCompat.setScreen(new NamePromptScreen(this, "Export as .nbs",
 			"Write \"" + project().name() + "\" to " + config.importDirectory(),
 			project().name(), "Export", name -> {
 				String wanted = name.trim().isEmpty() ? project().name() : name.trim();
@@ -2152,7 +2153,7 @@ public final class ComposerScreen extends Screen {
 					SongImports.showFailure(this, failed);
 					return;
 				}
-				minecraft.gui.setScreen(this);
+				McCompat.setScreen(this);
 			}));
 	}
 
@@ -2477,7 +2478,7 @@ public final class ComposerScreen extends Screen {
 		boolean wasOn = allSustain(row);
 		ComposerProject.Sustain start = project().layers().get(row).sustainOrDefault().withOn(wasOn);
 		int count = layersToEdit(row).size();
-		minecraft.gui.setScreen(new SustainSettingsScreen(this, start, count, chosen -> {
+		McCompat.setScreen(new SustainSettingsScreen(this, start, count, chosen -> {
 			boolean switched = chosen.on() != wasOn;
 			updateLayers(switched ? (chosen.on() ? "enable sustained notes" : "disable sustained notes")
 					: "change sustained notes", row, layer -> {
@@ -4791,11 +4792,11 @@ public final class ComposerScreen extends Screen {
 		if (marker == null) {
 			return;
 		}
-		minecraft.gui.setScreen(new NamePromptScreen(this, "Rename marker",
+		McCompat.setScreen(new NamePromptScreen(this, "Rename marker",
 			"Name for the marker at bar "
 				+ (marker.tick() / Math.max(1L, project().ppq() * 4L) + 1L),
 			marker.label(), "Rename", name -> {
-				minecraft.gui.setScreen(this);
+				McCompat.setScreen(this);
 				apply("rename marker", project().withMarkerAt(marker.tick(), name.trim()));
 				showResult(Component.literal("Marker renamed to \"" + name.trim() + "\"."));
 			}));
@@ -6484,7 +6485,7 @@ public final class ComposerScreen extends Screen {
 		if (title == ToolbarMenu.SETTINGS) {
 			toolbarMenu = ToolbarMenu.NONE;
 			openSubmenu = null;
-			minecraft.gui.setScreen(new SettingsScreen(this));
+			McCompat.setScreen(new SettingsScreen(this));
 			return true;
 		}
 		if (title != null) {
@@ -8021,7 +8022,7 @@ public final class ComposerScreen extends Screen {
 			stopPlayback();
 			syncProject();
 			onReturn.run();
-			minecraft.gui.setScreen(parent);
+			McCompat.setScreen(parent);
 		});
 	}
 
@@ -8030,7 +8031,7 @@ public final class ComposerScreen extends Screen {
 			stopPlayback();
 			syncProject();
 			onReturn.run();
-			minecraft.gui.setScreen(null);
+			McCompat.setScreen(null);
 		});
 	}
 
@@ -9430,10 +9431,10 @@ public final class ComposerScreen extends Screen {
 	 * is a lot of moving parts to hang off a typo correction.</p>
 	 */
 	private void renameComposition() {
-		minecraft.gui.setScreen(new NamePromptScreen(this, "Rename composition",
+		McCompat.setScreen(new NamePromptScreen(this, "Rename composition",
 			"A new name for \"" + project().name() + "\"",
 			project().name(), "Rename", name -> {
-				minecraft.gui.setScreen(this);
+				McCompat.setScreen(this);
 				apply("rename composition", project().withName(name.trim()));
 				showResult(Component.literal("Renamed to \"" + project().name() + "\"."));
 			}));
@@ -9517,7 +9518,7 @@ public final class ComposerScreen extends Screen {
 	 * so freezing a build means having a second composition rather than a frozen projection.</p>
 	 */
 	private void saveCompositionAs() {
-		minecraft.gui.setScreen(new NamePromptScreen(this, "Save composition as",
+		McCompat.setScreen(new NamePromptScreen(this, "Save composition as",
 			"Save a copy of \"" + project().name() + "\" under a new name",
 			project().name() + " copy", "Save copy", name -> {
 				String wanted = name.trim();
@@ -9528,11 +9529,11 @@ public final class ComposerScreen extends Screen {
 				}
 				// A name already in the library used to be quietly numbered into "Foo (2)", which
 				// is a strange answer to someone who typed the name of the song they meant.
-				minecraft.gui.setScreen(new ConfirmScreen(confirmed -> {
+				McCompat.setScreen(new ConfirmScreen(confirmed -> {
 					if (confirmed) {
 						saveCopyAs(existing, wanted);
 					} else {
-						minecraft.gui.setScreen(this);
+						McCompat.setScreen(this);
 					}
 				}, Component.literal("Replace \"" + wanted + "\"?"),
 					Component.literal("A song already goes by that name. Saving over it cannot be undone."),
@@ -9555,7 +9556,7 @@ public final class ComposerScreen extends Screen {
 		MidicraftConfig.songs().save(id, project().withName(name));
 		config.setActiveSongId(id);
 		MidicraftConfig.save();
-		minecraft.gui.setScreen(new ComposerScreen(parent, config));
+		McCompat.setScreen(new ComposerScreen(parent, config));
 	}
 
 	/** Pastes the build sequence with commands, for when you have op and would rather not place it by hand. */
@@ -9585,14 +9586,14 @@ public final class ComposerScreen extends Screen {
 			showResult(Component.literal("A build is still being placed. Confirming this paste "
 				+ "stops it and starts the new one."));
 		}
-		minecraft.gui.setScreen(new BuildOptionsScreen(this, project().name(), config.tracks(),
+		McCompat.setScreen(new BuildOptionsScreen(this, project().name(), config.tracks(),
 				project(), project().dedupesIdentical(), pasteMode(), mode -> {
 			SongBuilder.PastePlan plan;
 			try {
 				plan = SongBuilder.plan(minecraft, config.tracks(), mode, project(),
 					project().dedupesIdentical(), config.chordFitRules());
 			} catch (IllegalArgumentException refused) {
-				minecraft.gui.setScreen(this);
+				McCompat.setScreen(this);
 				showResult(Component.literal(refused.getMessage())
 					.withStyle(net.minecraft.ChatFormatting.RED));
 				return;
@@ -9601,14 +9602,14 @@ public final class ComposerScreen extends Screen {
 			// they are told first, because a breached footprint overwrites whatever was standing in
 			// the ground the paste promised to stay out of.
 			if (DenseBuildScreen.needsAsking(plan)) {
-				minecraft.gui.setScreen(new DenseBuildScreen(this, plan, () -> {
+				McCompat.setScreen(new DenseBuildScreen(this, plan, () -> {
 						CommandPasteSender.start(plan.commands(), plan.report());
-						minecraft.gui.setScreen(null);
+						McCompat.setScreen(null);
 					}));
 				return;
 			}
 			CommandPasteSender.start(plan.commands(), plan.report());
-			minecraft.gui.setScreen(null);
+			McCompat.setScreen(null);
 		}));
 	}
 
@@ -9679,7 +9680,7 @@ public final class ComposerScreen extends Screen {
 			return;
 		}
 		stopPlayback();
-		minecraft.gui.setScreen(new UnsavedChangesScreen(this, project().name(),
+		McCompat.setScreen(new UnsavedChangesScreen(this, project().name(),
 			() -> {
 				writeProject();
 				leave.run();
@@ -10401,7 +10402,7 @@ public final class ComposerScreen extends Screen {
 	/** Opens Song > Song info on the song as it stands. */
 	private void openSongInfo() {
 		stopPlayback();
-		minecraft.gui.setScreen(new SongInfoScreen(this, project().name(), songInfoLines()));
+		McCompat.setScreen(new SongInfoScreen(this, project().name(), songInfoLines()));
 	}
 
 	/** What Song info shows, worked out once when it opens: it is read-only, so it cannot go stale. */

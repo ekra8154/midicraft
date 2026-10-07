@@ -42,7 +42,6 @@ import net.minecraft.core.Direction;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.tags.ItemTags;
-import net.minecraft.util.LightCoordsUtil;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.inventory.ContainerInput;
@@ -236,7 +235,7 @@ public final class NoteBlockOverlay {
 		if (!config.modEnabled()
 			|| config.activeInteractiveOverlays() == MidicraftConfig.OverlayMode.OFF
 			|| verticalAmount == 0.0
-			|| minecraft.gui.screen() != null
+			|| McCompat.screen() != null
 			|| !isReady(minecraft)) {
 			return false;
 		}
@@ -282,7 +281,7 @@ public final class NoteBlockOverlay {
 	}
 
 	private boolean handleSequenceScroll(Minecraft minecraft, double verticalAmount) {
-		if (minecraft.gui.screen() != null || !placementSequenceKey.isDown()) {
+		if (McCompat.screen() != null || !placementSequenceKey.isDown()) {
 			return false;
 		}
 		if (!MidicraftConfig.get().placementSequenceEnabled()) {
@@ -341,15 +340,15 @@ public final class NoteBlockOverlay {
 			clearRadialFocusCandidate();
 			ticksUntilRescan = 0;
 			if (minecraft.player != null) {
-				minecraft.gui.hud.setOverlayMessage(Component.translatable(
+				McCompat.overlayMessage(Component.translatable(
 					config.interactiveOverlays()
 						? "message.midicraft.enabled" : "message.midicraft.disabled"
 				), true);
 			}
 		}
 		while (composerKey.consumeClick()) {
-			if (minecraft.gui.screen() == null) {
-				minecraft.gui.setScreen(new ComposerScreen(null, config));
+			if (McCompat.screen() == null) {
+				McCompat.setScreen(new ComposerScreen(null, config));
 			}
 		}
 
@@ -447,7 +446,7 @@ public final class NoteBlockOverlay {
 	}
 
 	private void handleSequenceControls(Minecraft minecraft, MidicraftConfig config) {
-		boolean inGame = minecraft.gui.screen() == null;
+		boolean inGame = McCompat.screen() == null;
 		// Drain click counts so operating-system key repeats can never masquerade as extra taps.
 		while (placementSequenceKey.consumeClick()) {
 		}
@@ -478,7 +477,7 @@ public final class NoteBlockOverlay {
 				showSequenceHud(minecraft, "message.midicraft.sequence_resumed");
 			} else if (minecraft.player != null) {
 				sequenceHudTicks = 0;
-				minecraft.gui.hud.setOverlayMessage(Component.translatable(
+				McCompat.overlayMessage(Component.translatable(
 					"message.midicraft.sequence_paused"
 				), true);
 			}
@@ -626,7 +625,7 @@ public final class NoteBlockOverlay {
 		if (!MidicraftConfig.get().placementSequenceEnabled()
 			|| (!keyHeld && sequenceHudTicks <= 0)
 			|| minecraft.player == null
-			|| minecraft.gui.screen() != null) {
+			|| McCompat.screen() != null) {
 			return;
 		}
 		List<NoteSequence.Placement> sequence = configuredSequence();
@@ -1508,7 +1507,7 @@ public final class NoteBlockOverlay {
 	 */
 	private int fetchInstrumentToHotbar(Minecraft minecraft, String instrument) {
 		LocalPlayer player = minecraft.player;
-		if (minecraft.gui.screen() != null || minecraft.gameMode == null) {
+		if (McCompat.screen() != null || minecraft.gameMode == null) {
 			return -1;
 		}
 		int source = -1;
@@ -1755,8 +1754,8 @@ public final class NoteBlockOverlay {
 					boolean isHovered = hovered != null && !hovered.isRepeater()
 						&& hovered.blockPos().equals(pos) && hovered.family() == family;
 					Component text = labelText(pitch, family, inRange, isHovered);
-					context.submitNodeCollector().submitNameTag(
-						poseStack, attachment, 0, text, true, LightCoordsUtil.FULL_BRIGHT, cameraState
+					McCompat.submitLabel(
+						context.submitNodeCollector(), poseStack, pos, attachment, text, cameraState
 					);
 				}
 				poseStack.popPose();
@@ -1807,8 +1806,8 @@ public final class NoteBlockOverlay {
 					} else {
 						text = text.copy().withStyle(inRange ? ChatFormatting.WHITE : ChatFormatting.GRAY);
 					}
-					context.submitNodeCollector().submitNameTag(
-						poseStack, attachment, 0, text, true, LightCoordsUtil.FULL_BRIGHT, cameraState
+					McCompat.submitLabel(
+						context.submitNodeCollector(), poseStack, pos, attachment, text, cameraState
 					);
 				}
 				poseStack.popPose();
@@ -1831,7 +1830,7 @@ public final class NoteBlockOverlay {
 			expandedRepeater = null;
 			repeaterBottomDelay = null;
 		}
-		Camera camera = minecraft.gameRenderer.mainCamera();
+		Camera camera = McCompat.mainCamera();
 		Vec3 origin = camera.position();
 		Vec3 direction = new Vec3(camera.forwardVector()).normalize();
 

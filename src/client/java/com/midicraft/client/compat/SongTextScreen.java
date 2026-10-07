@@ -1,5 +1,6 @@
 package com.midicraft.client.compat;
 
+import com.midicraft.client.McCompat;
 import com.midicraft.NoteSequence;
 import com.midicraft.client.MidicraftConfig;
 import com.midicraft.client.MidicraftConfig.SequenceTrack;
@@ -118,7 +119,7 @@ final class SongTextScreen extends Screen {
 		library.save(id, song);
 		config.setActiveSongId(id);
 		MidicraftConfig.save();
-		minecraft.gui.setScreen(new ComposerScreen(parent, config));
+		McCompat.setScreen(new ComposerScreen(parent, config));
 	}
 
 	@Override
@@ -138,7 +139,7 @@ final class SongTextScreen extends Screen {
 
 	@Override
 	public void onClose() {
-		minecraft.gui.setScreen(parent);
+		McCompat.setScreen(parent);
 	}
 
 	/**

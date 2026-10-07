@@ -1,5 +1,6 @@
 package com.midicraft.client.compat;
 
+import com.midicraft.client.McCompat;
 import com.midicraft.client.MidicraftConfig;
 import com.midicraft.client.PasteRate;
 import java.util.ArrayList;
@@ -1036,7 +1037,7 @@ final class BuildOptionsScreen extends Screen {
 		// Left without pasting, so the block choice made here goes back to what it was: it took
 		// effect when it was picked, for the forecast's sake, not because it was meant.
 		MidicraftConfig.get().setColorCodedPaste(coloursOnOpen);
-		minecraft.gui.setScreen(parent);
+		McCompat.setScreen(parent);
 	}
 
 	/**

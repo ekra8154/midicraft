@@ -1,5 +1,6 @@
 package com.midicraft.client.compat;
 
+import com.midicraft.client.McCompat;
 import com.midicraft.client.MidicraftConfig;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
@@ -65,7 +66,7 @@ public final class ComposerCommand {
 	 */
 	private static int open(Screen screen) {
 		Minecraft minecraft = Minecraft.getInstance();
-		minecraft.execute(() -> minecraft.gui.setScreen(screen));
+		minecraft.execute(() -> McCompat.setScreen(screen));
 		return 1;
 	}
 

@@ -1,5 +1,6 @@
 package com.midicraft.client.compat;
 
+import com.midicraft.client.McCompat;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -305,7 +306,7 @@ final class RegionScanScreen extends Screen {
 		// Keep whatever is in the boxes, even half-typed. Leaving to go and look something up is
 		// the commonest reason to close this, not the rarest.
 		remember();
-		minecraft.gui.setScreen(parent);
+		McCompat.setScreen(parent);
 	}
 
 	/**

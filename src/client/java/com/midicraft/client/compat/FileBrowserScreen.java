@@ -1,5 +1,6 @@
 package com.midicraft.client.compat;
 
+import com.midicraft.client.McCompat;
 import java.io.IOException;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
@@ -270,7 +271,7 @@ final class FileBrowserScreen extends Screen {
 			return;
 		}
 		rememberDirectory.accept(directory);
-		minecraft.gui.setScreen(parent);
+		McCompat.setScreen(parent);
 		chosen.accept(entry.path());
 	}
 
@@ -319,7 +320,7 @@ final class FileBrowserScreen extends Screen {
 		if (folder != null) {
 			rememberDirectory.accept(folder);
 		}
-		minecraft.gui.setScreen(parent);
+		McCompat.setScreen(parent);
 		chosen.accept(file);
 	}
 
@@ -391,7 +392,7 @@ final class FileBrowserScreen extends Screen {
 				if (path.getParent() != null) {
 					rememberDirectory.accept(path.getParent());
 				}
-				minecraft.gui.setScreen(parent);
+				McCompat.setScreen(parent);
 				chosen.accept(path);
 				return true;
 			}
@@ -462,7 +463,7 @@ final class FileBrowserScreen extends Screen {
 
 	@Override
 	public void onClose() {
-		minecraft.gui.setScreen(parent);
+		McCompat.setScreen(parent);
 	}
 
 	/**

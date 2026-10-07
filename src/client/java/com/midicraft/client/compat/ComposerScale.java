@@ -1,5 +1,6 @@
 package com.midicraft.client.compat;
 
+import com.midicraft.client.McCompat;
 import com.midicraft.client.MidicraftConfig;
 import com.mojang.blaze3d.platform.Window;
 import net.minecraft.client.Minecraft;
@@ -41,7 +42,7 @@ public final class ComposerScale {
 	}
 
 	public static void tick(Minecraft minecraft) {
-		update(minecraft, minecraft.gui.screen());
+		update(minecraft, McCompat.screen());
 	}
 
 	/**
@@ -200,7 +201,7 @@ public final class ComposerScale {
 	 * the Composer's scale into options.txt as though the player had chosen it.</p>
 	 */
 	private static void relayout(Minecraft minecraft, Window window) {
-		Screen screen = minecraft.gui.screen();
+		Screen screen = McCompat.screen();
 		if (screen != null) {
 			screen.resize(window.getGuiScaledWidth(), window.getGuiScaledHeight());
 		}
