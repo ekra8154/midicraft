@@ -844,6 +844,8 @@ public final class ComposerScreen extends Screen {
 	 * insisting there is something to write.</p>
 	 */
 	private ComposerProject savedProject;
+	/** What opening the song changed about it, held only until the screen is first laid out. */
+	private Component arrivalNote;
 	private ComposerProject unsavedCacheProject;
 	private ComposerProject unsavedCacheBaseline;
 	private boolean unsavedCacheResult;
@@ -949,8 +951,18 @@ public final class ComposerScreen extends Screen {
 		this.config = config;
 		this.onReturn = onReturn == null ? () -> {
 		} : onReturn;
-		this.history = new ComposerHistory(config.composerProject());
-		this.savedProject = baseline(config, history.current());
+		ComposerProject arrived = config.composerProject();
+		// Swapped before history or the baseline sees it, and the baseline swapped the same way, so
+		// opening a trumpet song on a version without trumpets does not count as an unsaved edit --
+		// it only becomes one in the file once something else is saved along with it.
+		InstrumentSubstitution.Swapped swapped = InstrumentSubstitution.swap(arrived);
+		this.history = new ComposerHistory(swapped.project());
+		ComposerProject onDisk = baseline(config, arrived);
+		this.savedProject = onDisk == arrived ? history.current() : InstrumentSubstitution.swap(onDisk).project();
+		if (swapped.changed()) {
+			arrivalNote = InstrumentSubstitution.describe(swapped);
+			showResult(arrivalNote);
+		}
 	}
 
 	/**
@@ -973,6 +985,7 @@ public final class ComposerScreen extends Screen {
 
 	@Override
 	protected void init() {
+		arrivalNote = null;
 		clearWidgets();
 		rollY = TOOLBAR_HEIGHT + TIMELINE_RULER_HEIGHT;
 		rollHeight = Math.max(40, height - rollY - 24);
@@ -6164,6 +6177,12 @@ public final class ComposerScreen extends Screen {
 	 * was closed -- by which point it had faded.</p>
 	 */
 	void showResult(Component message) {
+		// Whoever opened this screen may report on it straight away -- an import says what it read --
+		// and that report would replace the note about swapped instruments before anyone saw it. So
+		// until the screen is first laid out, a result carries the note along with it.
+		if (arrivalNote != null && toast == arrivalNote && message != arrivalNote) {
+			message = message.copy().append(" ").append(arrivalNote);
+		}
 		toast = message;
 		toastShownAt = Util.getMillis();
 	}

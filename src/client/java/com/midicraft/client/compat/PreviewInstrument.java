@@ -57,9 +57,14 @@ public record PreviewInstrument(String id, String name, Item icon, Holder<SoundE
 		}
 	}
 
+	/** The instruments, then the trumpets -- which join them only on a version that can play them. */
+	private static List<PreviewInstrument> concat(List<PreviewInstrument> first, List<PreviewInstrument> second) {
+		return Stream.concat(first.stream(), second.stream()).toList();
+	}
+
 	private static final int MIN_CACHED_NOTE = -64;
 	private static final float[] CACHED_PITCHES = createPitchCache();
-	static final List<PreviewInstrument> VALUES = List.of(
+	static final List<PreviewInstrument> VALUES = concat(List.of(
 		new PreviewInstrument("HARP", "Harp", Items.GRASS_BLOCK, SoundEvents.NOTE_BLOCK_HARP),
 		new PreviewInstrument("BASS", "Bass", Items.OAK_PLANKS, SoundEvents.NOTE_BLOCK_BASS),
 		new PreviewInstrument("BASEDRUM", "Bass drum", Items.STONE, SoundEvents.NOTE_BLOCK_BASEDRUM),
@@ -75,16 +80,18 @@ public record PreviewInstrument(String id, String name, Item icon, Holder<SoundE
 		new PreviewInstrument("DIDGERIDOO", "Didgeridoo", Items.PUMPKIN, SoundEvents.NOTE_BLOCK_DIDGERIDOO),
 		new PreviewInstrument("BIT", "Bit", Items.EMERALD_BLOCK, SoundEvents.NOTE_BLOCK_BIT),
 		new PreviewInstrument("BANJO", "Banjo", Items.HAY_BLOCK, SoundEvents.NOTE_BLOCK_BANJO),
-		new PreviewInstrument("PLING", "Pling", Items.GLOWSTONE, SoundEvents.NOTE_BLOCK_PLING),
+		new PreviewInstrument("PLING", "Pling", Items.GLOWSTONE, SoundEvents.NOTE_BLOCK_PLING)
+	), McCompat.HAS_TRUMPETS ? List.of(
 		// Waxed, all four of them. The four trumpets are one instrument at four ages, so an unwaxed
 		// block does not merely weather -- it walks up the list and starts playing the next voice
 		// along. A song built with a trumpet line in it was quietly rewriting itself while it stood
 		// there, and the age it settles on is whatever the weather got to first. The same reason the
 		// sound effects have always been waxed, for once it actually changes the sound.
-		new PreviewInstrument("TRUMPET", "Trumpet", McCompat.waxedCopper(0), SoundEvents.NOTE_BLOCK_TRUMPET),
-		new PreviewInstrument("TRUMPET_EXPOSED", "Exposed trumpet", McCompat.waxedCopper(1), SoundEvents.NOTE_BLOCK_TRUMPET_EXPOSED),
-		new PreviewInstrument("TRUMPET_WEATHERED", "Weathered trumpet", McCompat.waxedCopper(2), SoundEvents.NOTE_BLOCK_TRUMPET_WEATHERED),
-		new PreviewInstrument("TRUMPET_OXIDIZED", "Oxidized trumpet", McCompat.waxedCopper(3), SoundEvents.NOTE_BLOCK_TRUMPET_OXIDIZED)
+		new PreviewInstrument("TRUMPET", "Trumpet", McCompat.waxedCopper(0), McCompat.trumpetSound(0)),
+		new PreviewInstrument("TRUMPET_EXPOSED", "Exposed trumpet", McCompat.waxedCopper(1), McCompat.trumpetSound(1)),
+		new PreviewInstrument("TRUMPET_WEATHERED", "Weathered trumpet", McCompat.waxedCopper(2), McCompat.trumpetSound(2)),
+		new PreviewInstrument("TRUMPET_OXIDIZED", "Oxidized trumpet", McCompat.waxedCopper(3), McCompat.trumpetSound(3))
+	) : List.of()
 	);
 
 	/**
@@ -235,7 +242,9 @@ public record PreviewInstrument(String id, String name, Item icon, Holder<SoundE
 	}
 
 	public static PreviewInstrument byId(String id) {
-		return BY_ID.getOrDefault(id, FALLBACK);
+		// Through the stand-ins first, so a trumpet on a version without them is looked up as what
+		// actually plays it -- by the builder, the hand-build guide and the preview alike.
+		return BY_ID.getOrDefault(InstrumentSubstitution.forThisVersion(id), FALLBACK);
 	}
 
 	boolean playable() {

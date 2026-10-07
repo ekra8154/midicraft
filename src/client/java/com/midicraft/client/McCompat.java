@@ -7,7 +7,10 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.renderer.SubmitNodeCollector;
 import net.minecraft.client.renderer.state.level.CameraRenderState;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Holder;
 import net.minecraft.network.chat.Component;
+import net.minecraft.sounds.SoundEvent;
+import net.minecraft.sounds.SoundEvents;
 import net.minecraft.util.LightCoordsUtil;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
@@ -27,6 +30,12 @@ import net.minecraft.world.phys.Vec3;
  * <p>This copy is the 26.3 one.</p>
  */
 public final class McCompat {
+
+	/**
+	 * Whether copper under a note block plays a trumpet. It does from 26.1; before that it is harp,
+	 * and {@link com.midicraft.client.compat.InstrumentSubstitution} swaps the trumpets out.
+	 */
+	public static final boolean HAS_TRUMPETS = true;
 
 	private McCompat() {
 	}
@@ -73,6 +82,16 @@ public final class McCompat {
 			case 1 -> waxed.exposed();
 			case 2 -> waxed.weathered();
 			default -> waxed.oxidized();
+		};
+	}
+
+	/** The trumpet a copper block plays at an age from 0, fresh, to 3, oxidized. */
+	public static Holder<SoundEvent> trumpetSound(int age) {
+		return switch (age) {
+			case 0 -> SoundEvents.NOTE_BLOCK_TRUMPET;
+			case 1 -> SoundEvents.NOTE_BLOCK_TRUMPET_EXPOSED;
+			case 2 -> SoundEvents.NOTE_BLOCK_TRUMPET_WEATHERED;
+			default -> SoundEvents.NOTE_BLOCK_TRUMPET_OXIDIZED;
 		};
 	}
 
