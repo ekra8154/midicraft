@@ -653,6 +653,8 @@ public final class ComposerScreen extends Screen {
 	/** A strike tick drawn as something to take hold of: hovered, or sliding under the hand. */
 	private static final int SUSTAIN_TICK_HANDLE_COLOR = 0xFFFFFFFF;
 	/** The tick drawn on a sustained trail at every strike. */
+	/** The roll's mark for a note the build leaves out, used again on the layer's note count. */
+	private static final int OUT_OF_RANGE_COUNT_COLOR = 0xFFFF6B6B;
 	private static final int SUSTAIN_TICK_COLOR = 0xFFFFD27A;
 	/** A strike the chord limit leaves out, still drawn, faintly, so it reads as asked for. */
 	private static final int SUSTAIN_TICK_SKIPPED_COLOR = 0x40FFD27A;
@@ -844,6 +846,9 @@ public final class ComposerScreen extends Screen {
 	 * insisting there is something to write.</p>
 	 */
 	private ComposerProject savedProject;
+	/** Out-of-range notes per layer, for the project they were counted on. See outOfRangeOn. */
+	private ComposerProject outOfRangeCountsProject;
+	private int[] outOfRangeCounts = new int[0];
 	/** What opening the song changed about it, held only until the screen is first laid out. */
 	private Component arrivalNote;
 	private ComposerProject unsavedCacheProject;
@@ -3995,10 +4000,13 @@ public final class ComposerScreen extends Screen {
 			// How much is on the layer, out at the edge in the smallest thing that can still be
 			// read. It used to be in brackets after the name, where it was the first thing a narrow
 			// panel dropped and the last thing anyone wanted truncated into.
+			// In the roll's out-of-range red when the build will leave some of the layer's notes
+			// out, so a layer with a problem is visible without selecting it first -- the roll only
+			// marks the layers being worked on. Hovering the number says how many.
 			if (row.count()) {
 				String count = Integer.toString(layer.notes().size());
 				smallText(graphics, count, row.ordinalRight() - smallTextWidth(count), y + 5,
-					0xFF71767E);
+					outOfRangeOn(index) > 0 ? OUT_OF_RANGE_COUNT_COLOR : 0xFF71767E);
 			}
 		}
 		// The empty run under the last row is a control, and empty panel does not look like one. So
@@ -4034,7 +4042,10 @@ public final class ComposerScreen extends Screen {
 		Component text = null;
 		int stateLayer = layerStateAt(lastMouseX, lastMouseY);
 		int instrumentLayer = layerInstrumentAt(lastMouseX, lastMouseY);
-		if (stateLayer >= 0) {
+		int countLayer = layerCountAt(lastMouseX, lastMouseY);
+		if (countLayer >= 0) {
+			text = Component.literal(layerCountTooltip(countLayer));
+		} else if (stateLayer >= 0) {
 			text = Component.literal(layerStateTooltip(stateLayer));
 		} else if (instrumentLayer >= 0) {
 			// The slash is drawn on this icon, so this is where someone points to ask about it.
@@ -4069,6 +4080,48 @@ public final class ComposerScreen extends Screen {
 		if (text != null) {
 			graphics.setTooltipForNextFrame(font, font.split(text, 200), x, y);
 		}
+	}
+
+	/** The note count's tooltip: how many notes, and how many of them the build will leave out. */
+	private String layerCountTooltip(int index) {
+		int notes = project().layers().get(index).notes().size();
+		int out = outOfRangeOn(index);
+		String count = notes + (notes == 1 ? " note" : " notes");
+		if (out == 0) {
+			return count + " on this layer.";
+		}
+		String them = out == 1 ? "it" : "them";
+		return count + " on this layer, " + out + " out of range. The build leaves " + them
+			+ " out.\nSelect > Out of range finds " + them + "; Edit > Fit into range brings "
+			+ them + " in.";
+	}
+
+	/**
+	 * How many of a layer's notes the build leaves out for being out of range.
+	 *
+	 * <p>The same test the roll's red bar makes. Counted once per edit rather than per frame, since
+	 * every row asks every frame and a long song is tens of thousands of notes.</p>
+	 */
+	private int outOfRangeOn(int index) {
+		ComposerProject current = project();
+		if (outOfRangeCountsProject != current) {
+			List<Layer> layers = current.layers();
+			int[] counts = new int[layers.size()];
+			for (int i = 0; i < layers.size(); i++) {
+				Layer layer = layers.get(i);
+				if (!layer.pitched()) {
+					continue;
+				}
+				for (NoteEvent note : layer.notes()) {
+					if (layer.outOfRange(note)) {
+						counts[i]++;
+					}
+				}
+			}
+			outOfRangeCounts = counts;
+			outOfRangeCountsProject = current;
+		}
+		return index >= 0 && index < outOfRangeCounts.length ? outOfRangeCounts[index] : 0;
 	}
 
 	/**
@@ -9842,6 +9895,17 @@ public final class ComposerScreen extends Screen {
 	private int layerInstrumentAt(double x, double y) {
 		LayerRowLayout row = layerRowLayout();
 		return x >= row.instrumentX() && x < row.instrumentX() + 17 ? layerRowAt(x, y) : -1;
+	}
+
+	/** The note count at the end of a row, which is only there when the panel is wide enough. */
+	private int layerCountAt(double x, double y) {
+		LayerRowLayout row = layerRowLayout();
+		int index = row.count() ? layerRowAt(x, y) : -1;
+		if (index < 0) {
+			return -1;
+		}
+		int width = smallTextWidth(Integer.toString(project().layers().get(index).notes().size()));
+		return x >= row.ordinalRight() - width - 1 && x <= row.ordinalRight() + 1 ? index : -1;
 	}
 
 	/**
