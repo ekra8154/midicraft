@@ -33,6 +33,7 @@ import net.minecraft.client.gui.screens.ConfirmScreen;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.util.Util;
@@ -9710,6 +9711,24 @@ public final class ComposerScreen extends Screen {
 	}
 
 	/**
+	 * One thread for exports, so a second press queues behind the first rather than racing it, and a
+	 * daemon so an export in flight never holds the game open.
+	 */
+	private static final java.util.concurrent.ExecutorService EXPORTER =
+		java.util.concurrent.Executors.newSingleThreadExecutor(job -> {
+			Thread thread = new Thread(job, "midicraft-export");
+			thread.setDaemon(true);
+			return thread;
+		});
+
+	/** Whether an export is being worked out, so a second one says so instead of piling up. */
+	private static volatile boolean exporting;
+
+	/** An export worked out off the render thread: the file, where the build starts, and its faults. */
+	private record PreparedExport(Path file, BlockPos min, int wrongNotes) {
+	}
+
+	/**
 	 * Saves the build the paste dialog's settings make as a schematic, instead of pasting it.
 	 *
 	 * <p>Planned exactly as the Paste button plans, so the file is that build block for block, then
@@ -9718,26 +9737,39 @@ public final class ComposerScreen extends Screen {
 	 * {@code config/worldedit/schematics} -- so it is in the list the next time either is opened,
 	 * and the result says so and offers the folder for anyone after the file itself.</p>
 	 *
+	 * <p>Worked out on a thread of its own. Planning a big song is seconds of work -- a hundred
+	 * thousand blocks of Hedwig's theme took five -- and done here, on the render thread, it froze
+	 * the game for all of them. So what the plan reads off the game and the config is read here,
+	 * where it may be, and the planning, settling and writing happen elsewhere; only handing the file
+	 * to Litematica comes back, because Litematica's world is the render thread's.</p>
+	 *
 	 * <p>A build with faults is still written, and the result says how many notes will be wrong:
 	 * nothing is placed, so there is nothing to protect, and the file is the way to look at it.</p>
 	 */
 	private void exportBuild(SongBuilder.PasteMode mode, BuildOptionsScreen.ExportChoice choice) {
-		SchematicWriter.Format format = choice.format();
 		McCompat.setScreen(this);
-		SongBuilder.PastePlan plan;
-		try {
-			plan = SongBuilder.plan(minecraft, config.tracks(), mode, project(),
-				project().dedupesIdentical(), config.chordFitRules());
-		} catch (IllegalArgumentException refused) {
-			showResult(Component.literal(refused.getMessage())
-				.withStyle(net.minecraft.ChatFormatting.RED));
+		if (exporting) {
+			showResult(Component.literal("An export is still being prepared."));
 			return;
 		}
+		SchematicWriter.Format format = choice.format();
+		List<MidicraftConfig.SequenceTrack> tracks = config.tracks();
+		ComposerProject song = project();
+		boolean dedupe = song.dedupesIdentical();
+		ChordSkips.Rules thinning = config.chordFitRules();
+		// The plan is made where the Paste button would make it, so a loaded placement lands there.
+		BlockPos origin = SongBuilder.pasteOrigin(minecraft);
+		BlockPos standing = minecraft.player == null ? BlockPos.ZERO
+			: minecraft.player.blockPosition();
+		SongBuilder.BuildLimits limits = SongBuilder.BuildLimits.fromConfig();
+		String title = song.name();
+		String author = minecraft.player == null ? "midicraft"
+			: minecraft.player.getName().getString();
 		boolean lanes = mode != SongBuilder.PasteMode.COMPACT_CUBE
 			&& mode != SongBuilder.PasteMode.COMPACT;
 		int width = config.buildLaneWidth();
 		int floors = config.buildLaneFloors();
-		String name = safeFileName(project().name()) + (lanes ? " " + width + "x" + floors : "");
+		String name = safeFileName(title) + (lanes ? " " + width + "x" + floors : "");
 		String described = mode.label() + (lanes ? ", " + width + " wide, " + floors
 			+ (floors == 1 ? " floor" : " floors") : "")
 			+ (SongBuilder.LIGHT_SHOW ? ", light show" : "") + ". Made with midicraft.";
@@ -9745,81 +9777,102 @@ public final class ComposerScreen extends Screen {
 			? minecraft.gameDirectory.toPath().resolve("schematics")
 			: net.fabricmc.loader.api.FabricLoader.getInstance().getConfigDir()
 				.resolve("worldedit").resolve("schematics");
-		Path written;
-		SchematicWriter.Build build;
-		try {
-			build = SchematicWriter.fromCommands(plan.commands());
-			String author = minecraft.player == null ? "midicraft"
-				: minecraft.player.getName().getString();
-			if (!choice.keep()) {
-				previewInLitematica(build, author, described);
+
+		exporting = true;
+		showResult(Component.literal("Preparing \"" + title + "\"..."));
+		java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+			SongBuilder.PastePlan plan = SongBuilder.createPastePlan(origin,
+				SongBuilder.notesFor(mode, tracks, song, dedupe, thinning), mode, limits,
+				SongBuilder.WalkStart.HEAD, title);
+			SchematicWriter.Build build = SchematicWriter.fromCommands(plan.commands());
+			try {
+				Path file;
+				if (choice.keep()) {
+					file = SchematicWriter.save(build, format, folder, name, title, author,
+						described, standing);
+				} else {
+					// A preview leaves nothing behind: Litematica reads schematics from files only,
+					// so this one is written somewhere temporary and deleted once it has been read.
+					file = Files.createTempFile("midicraft-preview-", format.extension());
+					SchematicWriter.writeLitematic(build, file, title, author, described);
+				}
+				return new PreparedExport(file, build.min(), plan.report().size());
+			} catch (java.io.IOException unwritten) {
+				throw new java.io.UncheckedIOException(unwritten);
+			}
+		}, EXPORTER).whenComplete((prepared, failed) -> minecraft.execute(() -> {
+			exporting = false;
+			if (failed != null) {
+				Throwable cause = failed instanceof java.util.concurrent.CompletionException
+					&& failed.getCause() != null ? failed.getCause() : failed;
+				exportResult(Component.literal(cause instanceof IllegalArgumentException
+						? cause.getMessage() : "Could not export: " + cause.getMessage())
+					.withStyle(net.minecraft.ChatFormatting.RED), null);
 				return;
 			}
-			net.minecraft.core.BlockPos standing = minecraft.player == null
-				? net.minecraft.core.BlockPos.ZERO : minecraft.player.blockPosition();
-			written = SchematicWriter.save(build, format, folder, name, project().name(), author,
-				described, standing);
-		} catch (Exception failed) {
-			showResult(Component.literal("Could not export: " + failed.getMessage())
-				.withStyle(net.minecraft.ChatFormatting.RED));
-			return;
-		}
-		int wrong = plan.report().size();
+			finishExport(choice, prepared, title, folder);
+		}));
+	}
+
+	/** Back on the render thread: hand the file to Litematica, or just say where it went. */
+	private void finishExport(BuildOptionsScreen.ExportChoice choice, PreparedExport prepared,
+			String title, Path folder) {
+		int wrong = prepared.wrongNotes();
 		String faults = wrong == 0 ? "" : " " + wrong + " note" + (wrong == 1 ? "" : "s")
 			+ " will be wrong, as in a paste.";
-		if (choice.load()) {
-			// Placed with its corner where the plan put it, which is where Paste would have built:
-			// the plan was made from where you stand. So what you see is the paste you were about to
-			// make, there to walk around before anything is placed.
-			String unloaded = LitematicaBridge.loadAndPlace(written, build.min(), project().name(),
-				true);
-			if (unloaded == null) {
-				McCompat.setScreen(null);
-				CommandPasteSender.say(Component.literal("Saved " + written.getFileName()
-					+ " and loaded it in Litematica, placed where Paste would build it." + faults));
-				return;
-			}
-			showResult(Component.literal("Saved " + written.getFileName() + ", but could not load "
-					+ "it in Litematica: " + unloaded + ". Load it from Litematica's menu instead."
-					+ faults + " Click to open the folder.")
-				.withStyle(net.minecraft.ChatFormatting.YELLOW), () -> openFolder(folder));
+		String fileName = prepared.file().getFileName().toString();
+		if (!choice.load()) {
+			exportResult(Component.literal("Saved " + fileName + " to " + choice.format().reader()
+				+ "'s schematics folder." + faults + " Click to open the folder."),
+				() -> openFolder(folder));
 			return;
 		}
-		showResult(Component.literal("Saved " + written.getFileName() + " to " + format.reader()
-				+ "'s schematics folder." + faults + " Click to open the folder."),
-			() -> openFolder(folder));
+		// Placed with its corner where the plan put it, which is where Paste would have built: the
+		// plan was made from where you stood. So what you see is the paste you were about to make.
+		String unloaded;
+		try {
+			unloaded = LitematicaBridge.loadAndPlace(prepared.file(), prepared.min(),
+				choice.keep() ? title : title + " (preview)", choice.keep());
+		} finally {
+			if (!choice.keep()) {
+				try {
+					Files.deleteIfExists(prepared.file());
+				} catch (java.io.IOException leftBehind) {
+					// The system's temporary folder is emptied in its own time.
+				}
+			}
+		}
+		if (unloaded != null) {
+			exportResult(Component.literal((choice.keep() ? "Saved " + fileName + ", but could not "
+					+ "load it in Litematica: " + unloaded + ". Load it from Litematica's menu instead."
+					+ faults + " Click to open the folder."
+					: "Could not preview it in Litematica: " + unloaded + "."))
+				.withStyle(net.minecraft.ChatFormatting.YELLOW),
+				choice.keep() ? () -> openFolder(folder) : null);
+			return;
+		}
+		// Out to the world, to look at it -- but only from the composer: if something else has been
+		// opened in the meantime, that is where the player is, and it is left alone.
+		if (McCompat.screen() == this) {
+			McCompat.setScreen(null);
+		}
+		CommandPasteSender.say(Component.literal(choice.keep()
+			? "Saved " + fileName + " and loaded it in Litematica, placed where Paste would build it."
+				+ faults
+			: "Showing \"" + title + "\" in Litematica where Paste would build it. Nothing was "
+				+ "saved: the preview is gone when you leave the world." + faults));
 	}
 
 	/**
-	 * Shows the build in Litematica where Paste would build it, and keeps nothing.
-	 *
-	 * <p>For looking rather than building: a hologram to walk around or move somewhere better, with
-	 * no file left in the schematics folder and no placement left in Litematica's list. Litematica
-	 * reads schematics from files only, so one is written to the system's temporary folder, read, and
-	 * deleted again straight away -- the schematic lives on in Litematica's memory for as long as the
-	 * world is open, and the placement is marked not to be saved.</p>
+	 * Says how an export went: as a result on the composer if it is still showing, and in chat if
+	 * the player has gone on to something else while it was being prepared.
 	 */
-	private void previewInLitematica(SchematicWriter.Build build, String author, String described)
-			throws java.io.IOException {
-		Path temporary = Files.createTempFile("midicraft-preview-", SchematicWriter.Format.LITEMATIC
-			.extension());
-		String unloaded;
-		try {
-			SchematicWriter.writeLitematic(build, temporary, project().name(), author, described);
-			unloaded = LitematicaBridge.loadAndPlace(temporary, build.min(),
-				project().name() + " (preview)", false);
-		} finally {
-			Files.deleteIfExists(temporary);
+	private void exportResult(Component message, Runnable action) {
+		if (McCompat.screen() == this) {
+			showResult(message, action);
+		} else {
+			CommandPasteSender.say(message);
 		}
-		if (unloaded != null) {
-			showResult(Component.literal("Could not preview it in Litematica: " + unloaded + ".")
-				.withStyle(net.minecraft.ChatFormatting.YELLOW));
-			return;
-		}
-		McCompat.setScreen(null);
-		CommandPasteSender.say(Component.literal("Showing \"" + project().name() + "\" in "
-			+ "Litematica where Paste would build it. Nothing was saved: the preview is gone when you "
-			+ "leave the world."));
 	}
 
 	/**
