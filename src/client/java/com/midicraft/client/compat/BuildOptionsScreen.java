@@ -131,11 +131,15 @@ final class BuildOptionsScreen extends Screen {
 	private record PaletteSlot(String key, String shortLabel, LaneMaterials.Role role,
 			Function<MidicraftConfig, String> read, BiConsumer<MidicraftConfig, String> write) {
 		/** The full name and what the block has to do, since the label beside the box is short. */
-		Tooltip tooltip() {
-			return Tooltip.create(Component.empty()
+		Component description() {
+			return Component.empty()
 				.append(Component.translatable("option.midicraft." + key))
 				.append(": ")
-				.append(Component.translatable("tooltip.midicraft." + key)));
+				.append(Component.translatable("tooltip.midicraft." + key));
+		}
+
+		Tooltip tooltip() {
+			return Tooltip.create(description());
 		}
 	}
 
@@ -158,7 +162,7 @@ final class BuildOptionsScreen extends Screen {
 			MidicraftConfig::transparentBlock, MidicraftConfig::setTransparentBlock),
 		new PaletteSlot("support_block", "Support", LaneMaterials.Role.SUPPORT,
 			MidicraftConfig::supportBlock, MidicraftConfig::setSupportBlock),
-		new PaletteSlot("thin_lane_block", "Thin", LaneMaterials.Role.THIN,
+		new PaletteSlot("thin_lane_block", "Packed", LaneMaterials.Role.THIN,
 			MidicraftConfig::thinLaneBlock, MidicraftConfig::setThinLaneBlock));
 
 	/** The open palette's columns: two blocks a row, so six fit in three rows. */
@@ -596,8 +600,10 @@ final class BuildOptionsScreen extends Screen {
 	/** Lines kept above the buttons for what the paste needs and where it may go wrong. */
 	private static final int NOTE_LINES = 2;
 	/** Narrower than this and the forecast goes under the settings instead of beside them. */
-	private static final int TWO_COLUMNS_FROM = 460;
-	private static final int SETTINGS_WIDTH = 300;
+	private static final int TWO_COLUMNS_FROM = 400;
+	/** As wide as the longest line on the layout tab, the floor count, and no wider. */
+	private static final int SETTINGS_WIDTH = 250;
+	private static final int PANEL_MAX_WIDTH = 440;
 
 	private int panelLeft;
 	private int panelTop;
@@ -635,7 +641,7 @@ final class BuildOptionsScreen extends Screen {
 	 * it -- and one where there is not, the card under the settings.</p>
 	 */
 	private void layout() {
-		panelWidth = Math.min(560, width - 16);
+		panelWidth = Math.min(PANEL_MAX_WIDTH, width - 16);
 		twoColumns = panelWidth >= TWO_COLUMNS_FROM;
 		int inner = panelWidth - 2 * PADDING;
 		columnWidth = twoColumns ? Math.min(SETTINGS_WIDTH, inner * 3 / 5) : inner;
@@ -679,14 +685,15 @@ final class BuildOptionsScreen extends Screen {
 		addRenderableWidget(Button.builder(Component.literal("Paste (Enter)"), clicked -> paste())
 			.bounds(x, buttonsTop, each, 20)
 			.tooltip(Tooltip.create(Component.literal(direct
-				? "Builds it here, straight into the world."
-				: "Builds it here with /setblock, at the paste rate under Advanced.")))
+				? "Builds it beside you, straight into the world. Needs permission to use commands."
+				: "Builds it beside you with /setblock, at the paste rate under Advanced. Needs "
+					+ "permission to use commands.")))
 			.build());
 		x += each + 4;
 		exportButton = null;
 		if (export != null) {
-			exportButton = addRenderableWidget(Button.builder(Component.literal("Export \u25B2"),
-					clicked -> exportMenuOpen = !exportMenuOpen)
+			exportButton = addRenderableWidget(Button.builder(Component.literal(exportLabel()),
+					clicked -> setExportMenuOpen(!exportMenuOpen))
 				.bounds(x, buttonsTop, each, 20)
 				.tooltip(Tooltip.create(Component.literal("Save this build as a file instead: a "
 					+ ".litematic for Litematica or a .schem for WorldEdit. Nothing is placed.")))
@@ -862,6 +869,18 @@ final class BuildOptionsScreen extends Screen {
 	private void exportAs(SchematicWriter.Format format) {
 		remember();
 		export.accept(mode, format);
+	}
+
+	/** Export says which way its menu goes: sideways shut, up once it has opened upward. */
+	private String exportLabel() {
+		return exportMenuOpen ? "Export ^" : "Export >";
+	}
+
+	private void setExportMenuOpen(boolean open) {
+		exportMenuOpen = open;
+		if (exportButton != null) {
+			exportButton.setMessage(Component.literal(exportLabel()));
+		}
 	}
 
 	/** What the export menu offers, top to bottom. */
@@ -1211,24 +1230,29 @@ final class BuildOptionsScreen extends Screen {
 			: String.format(Locale.ROOT, "About %d blocks, roughly %s if you stay with it",
 				commands, howLong(commands / (commandsPerTick * 20.0))), HINT_COLOR));
 		lines.add(new CardLine("", HINT_COLOR));
-		lines.add(predicted.breachingLanes() == 0
-			? new CardLine("Stays inside its footprint", GOOD_COLOR)
-			: new CardLine(predicted.breachingLanes()
+		// Problems only, each on its own line. A build with none says so once rather than ticking
+		// off every check it passed: the list is worth reading when something is on it.
+		List<CardLine> problems = new ArrayList<>();
+		if (predicted.breachingLanes() > 0) {
+			problems.add(new CardLine(predicted.breachingLanes()
 				+ (predicted.breachingLanes() == 1 ? " lane breaches" : " lanes breach")
 				+ " the footprint, worst " + predicted.worstBreach(), WARN_COLOR));
+		}
 		String outside = outsideTheWorld(predicted);
-		lines.add(outside == null ? new CardLine("Fits in the world", GOOD_COLOR)
-			: new CardLine(Character.toUpperCase(outside.charAt(0)) + outside.substring(1),
+		if (outside != null) {
+			problems.add(new CardLine(Character.toUpperCase(outside.charAt(0)) + outside.substring(1),
 				WARN_COLOR));
-		if (predicted.faults().isEmpty()) {
-			lines.add(new CardLine("Plays every note", GOOD_COLOR));
 		}
 		// Red, but for a warning. Everything else here takes music away; a lane past the outer wall
 		// takes nothing away, and is amber like a breach of the footprint.
 		for (FaultLine fault : predicted.faults()) {
-			lines.add(new CardLine(fault.text(), fault.warning() ? WARN_COLOR : BAD_COLOR,
+			problems.add(new CardLine(fault.text(), fault.warning() ? WARN_COLOR : BAD_COLOR,
 				fault.detail()));
 		}
+		if (problems.isEmpty()) {
+			lines.add(new CardLine("No issues found", GOOD_COLOR));
+		}
+		lines.addAll(problems);
 		return lines;
 	}
 
@@ -1255,16 +1279,12 @@ final class BuildOptionsScreen extends Screen {
 		super.extractRenderState(graphics, mouseX, mouseY, partialTick);
 		int inner = panelWidth - 2 * PADDING;
 
-		// The title, with the layout it builds at the other end.
-		String layoutName = mode.label();
-		int titleRoom = inner - font.width(layoutName) - 12;
+		// Cut to the panel, since a song's name can be any length.
 		String heading = "Build \"" + songName + "\"";
-		if (font.width(heading) > titleRoom) {
-			heading = font.plainSubstrByWidth(heading, titleRoom - font.width("...")) + "...";
+		if (font.width(heading) > inner) {
+			heading = font.plainSubstrByWidth(heading, inner - font.width("...")) + "...";
 		}
 		graphics.text(font, heading, columnLeft, panelTop + PADDING, TEXT_COLOR, false);
-		graphics.text(font, layoutName, columnLeft + inner - font.width(layoutName),
-			panelTop + PADDING, HINT_COLOR, false);
 
 		Tab hoveredTab = tabAt(mouseX, mouseY);
 		int x = columnLeft;
@@ -1279,8 +1299,14 @@ final class BuildOptionsScreen extends Screen {
 		}
 		for (int index = 0; index < paletteLabelAt.size(); index++) {
 			int[] at = paletteLabelAt.get(index);
-			graphics.text(font, PALETTE.get(index).shortLabel(), at[0], at[1] + 6, LABEL_COLOR,
-				false);
+			PaletteSlot slot = PALETTE.get(index);
+			graphics.text(font, slot.shortLabel(), at[0], at[1] + 6, LABEL_COLOR, false);
+			// The label is one word, so it says the rest when pointed at, as the box beside it does.
+			if (mouseX >= at[0] && mouseX < at[0] + font.width(slot.shortLabel()) + 4
+					&& mouseY >= at[1] && mouseY < at[1] + 20) {
+				graphics.setTooltipForNextFrame(font, font.split(slot.description(), 240),
+					mouseX, mouseY);
+			}
 		}
 
 		Forecast predicted = forecast;
@@ -1297,8 +1323,8 @@ final class BuildOptionsScreen extends Screen {
 
 		// Over the buttons, about the paste rather than the build: what it needs and what it does.
 		List<CardLine> notes = new ArrayList<>();
-		notes.add(new CardLine("Pasting needs /setblock permission and overwrites whatever is "
-			+ "there.", HINT_COLOR));
+		notes.add(new CardLine("Paste builds it right beside you, replacing anything in the way. "
+			+ "Export saves it as a file instead.", HINT_COLOR));
 		if (!direct && commandsPerTick > PasteRate.SPAM_RISK_ABOVE) {
 			notes.add(new CardLine("High rates can trip server command spam limits.", WARN_COLOR));
 		}
@@ -1322,7 +1348,7 @@ final class BuildOptionsScreen extends Screen {
 	/** The forecast card: a heading, then the lines, wrapped to the card and cut at its foot. */
 	private void extractCard(GuiGraphicsExtractor graphics, Forecast predicted, int mouseX,
 			int mouseY) {
-		graphics.text(font, "Forecast", cardLeft, cardTop + 3, HEADING_COLOR, false);
+		graphics.text(font, "This build", cardLeft, cardTop + 3, HEADING_COLOR, false);
 		cardFaultAt.clear();
 		cardFaultDetail.clear();
 		int y = cardTop + LINE + 6;
@@ -1412,7 +1438,7 @@ final class BuildOptionsScreen extends Screen {
 	public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
 		if (exportMenuOpen) {
 			int item = exportItemAt(event.x(), event.y());
-			exportMenuOpen = false;
+			setExportMenuOpen(false);
 			if (item >= 0) {
 				runExportItem(item);
 				return true;
@@ -1439,7 +1465,7 @@ final class BuildOptionsScreen extends Screen {
 	@Override
 	public boolean keyPressed(KeyEvent event) {
 		if (exportMenuOpen && event.key() == InputConstants.KEY_ESCAPE) {
-			exportMenuOpen = false;
+			setExportMenuOpen(false);
 			return true;
 		}
 		if ((event.key() == InputConstants.KEY_RETURN || event.key() == InputConstants.KEY_NUMPADENTER)

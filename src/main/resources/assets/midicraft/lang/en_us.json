@@ -102,7 +102,7 @@
   "tooltip.midicraft.transparent_block": "The climbs between floors. Must not conduct redstone.",
   "option.midicraft.support_block": "Support block",
   "tooltip.midicraft.support_block": "The level under a floor: what holds up falling instruments, dust and the bottom rail's repeaters. Needs a solid top. A slab is laid as its top half. Nothing here carries power.",
-  "option.midicraft.thin_lane_block": "Transparent lane block",
+  "option.midicraft.thin_lane_block": "Packed lane block",
   "tooltip.midicraft.thin_lane_block": "Dust floor when lanes are packed one block apart. Must not conduct redstone.",
   "category.midicraft.composer": "Composer",
   "category.midicraft.keys": "Keys",
