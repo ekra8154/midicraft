@@ -59,7 +59,50 @@ final class BuildOptionsScreen extends Screen {
 	 * exists once a width, a floor count and the blocks are chosen, and these are the rows that
 	 * choose them. Exporting from here is exporting exactly what Paste would have built.</p>
 	 */
-	private final BiConsumer<SongBuilder.PasteMode, SchematicWriter.Format> export;
+	private final BiConsumer<SongBuilder.PasteMode, ExportChoice> export;
+
+	/**
+	 * What Export can make: either file, or the build loaded straight into Litematica and placed where
+	 * Paste would build it -- kept, for building by hand over several sessions, or as a preview that
+	 * leaves no file behind and is gone when you leave the world.
+	 */
+	enum ExportChoice {
+		LITEMATIC("Save .litematic", SchematicWriter.Format.LITEMATIC, false, true),
+		SCHEM("Save .schem", SchematicWriter.Format.SCHEM, false, true),
+		LOAD_IN_LITEMATICA("Save and load in Litematica", SchematicWriter.Format.LITEMATIC, true,
+			true),
+		PREVIEW_IN_LITEMATICA("Preview in Litematica", SchematicWriter.Format.LITEMATIC, true,
+			false);
+
+		private final String label;
+		private final SchematicWriter.Format format;
+		private final boolean load;
+		private final boolean keep;
+
+		ExportChoice(String label, SchematicWriter.Format format, boolean load, boolean keep) {
+			this.label = label;
+			this.format = format;
+			this.load = load;
+			this.keep = keep;
+		}
+
+		SchematicWriter.Format format() {
+			return format;
+		}
+
+		/** Whether the file is also loaded and placed in Litematica. */
+		boolean load() {
+			return load;
+		}
+
+		/**
+		 * Whether anything outlasts this: the file in the schematics folder, and for a load, the
+		 * placement in Litematica's list. A preview keeps neither.
+		 */
+		boolean keep() {
+			return keep;
+		}
+	}
 	/**
 	 * The layout being pasted, which is no longer asked for.
 	 *
@@ -461,7 +504,7 @@ final class BuildOptionsScreen extends Screen {
 		boolean dedupeIdenticalNotes,
 		SongBuilder.PasteMode initialMode,
 		Consumer<SongBuilder.PasteMode> confirm,
-		BiConsumer<SongBuilder.PasteMode, SchematicWriter.Format> export
+		BiConsumer<SongBuilder.PasteMode, ExportChoice> export
 	) {
 		super(Component.literal("Build composition"));
 		this.parent = parent;
@@ -696,7 +739,10 @@ final class BuildOptionsScreen extends Screen {
 					clicked -> setExportMenuOpen(!exportMenuOpen))
 				.bounds(x, buttonsTop, each, 20)
 				.tooltip(Tooltip.create(Component.literal("Save this build as a file instead: a "
-					+ ".litematic for Litematica or a .schem for WorldEdit. Nothing is placed.")))
+					+ ".litematic for Litematica or a .schem for WorldEdit. Nothing is placed."
+					+ (LitematicaBridge.installed() ? " Or load it straight into Litematica, "
+						+ "shown where Paste would build it: saved, to build over several sessions, "
+						+ "or as a preview that leaves no file behind." : ""))))
 				.build());
 			x += each + 4;
 		}
@@ -866,9 +912,9 @@ final class BuildOptionsScreen extends Screen {
 		confirm.accept(mode);
 	}
 
-	private void exportAs(SchematicWriter.Format format) {
+	private void exportAs(ExportChoice choice) {
 		remember();
-		export.accept(mode, format);
+		export.accept(mode, choice);
 	}
 
 	/** Export says which way its menu goes: sideways shut, up once it has opened upward. */
@@ -883,17 +929,22 @@ final class BuildOptionsScreen extends Screen {
 		}
 	}
 
-	/** What the export menu offers, top to bottom. */
+	/** What the export menu offers, top to bottom: loading only where Litematica is installed. */
+	private List<ExportChoice> exportChoices() {
+		return LitematicaBridge.installed()
+			? List.of(ExportChoice.LITEMATIC, ExportChoice.SCHEM, ExportChoice.LOAD_IN_LITEMATICA,
+				ExportChoice.PREVIEW_IN_LITEMATICA)
+			: List.of(ExportChoice.LITEMATIC, ExportChoice.SCHEM);
+	}
+
 	private List<String> exportItems() {
-		return List.of("Save .litematic", "Save .schem");
+		return exportChoices().stream().map(choice -> choice.label).toList();
 	}
 
 	private void runExportItem(int item) {
-		switch (item) {
-			case 0 -> exportAs(SchematicWriter.Format.LITEMATIC);
-			case 1 -> exportAs(SchematicWriter.Format.SCHEM);
-			default -> {
-			}
+		List<ExportChoice> choices = exportChoices();
+		if (item >= 0 && item < choices.size()) {
+			exportAs(choices.get(item));
 		}
 	}
 

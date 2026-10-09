@@ -45,7 +45,7 @@ Midicraft is a client-side mod. Import songs from a variety of sources, and shap
  - Pasting needs permission to use commands (singleplayer with cheats on, or operator on a server). Without it, build simpler songs by hand with the in-world sequencer, or export the build as a .litematic and place it by hand with Litematica's preview as a guide
  - In singleplayer, or a LAN world you host, the paste places blocks straight into the world, as fast as your game can spare. On a server it sends /setblock commands at the build paste rate in settings
  - Midicraft machines always fill a width in the +x direction, and expand in the +z direction in a snaking fashion
- - There is no hologram preview, so be sure there is nothing in the way of the build or it will be overwritten by the paste
+ - Pasting overwrites anything in the way of the build. With Litematica installed, Export > Save and load in Litematica shows the build as a hologram exactly where Paste would build it, so you can check first
  - Machines with multiple floors snake up/down first, then left to right. This ensures the music audibly moves gradually forward
  - Specify whether the machine starts at the top or the bottom floor
  - Under Palette in the build screen, specify each of the paste blocks. The last palette you built with is remembered

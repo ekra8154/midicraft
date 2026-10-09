@@ -9721,7 +9721,8 @@ public final class ComposerScreen extends Screen {
 	 * <p>A build with faults is still written, and the result says how many notes will be wrong:
 	 * nothing is placed, so there is nothing to protect, and the file is the way to look at it.</p>
 	 */
-	private void exportBuild(SongBuilder.PasteMode mode, SchematicWriter.Format format) {
+	private void exportBuild(SongBuilder.PasteMode mode, BuildOptionsScreen.ExportChoice choice) {
+		SchematicWriter.Format format = choice.format();
 		McCompat.setScreen(this);
 		SongBuilder.PastePlan plan;
 		try {
@@ -9745,10 +9746,15 @@ public final class ComposerScreen extends Screen {
 			: net.fabricmc.loader.api.FabricLoader.getInstance().getConfigDir()
 				.resolve("worldedit").resolve("schematics");
 		Path written;
+		SchematicWriter.Build build;
 		try {
-			SchematicWriter.Build build = SchematicWriter.fromCommands(plan.commands());
+			build = SchematicWriter.fromCommands(plan.commands());
 			String author = minecraft.player == null ? "midicraft"
 				: minecraft.player.getName().getString();
+			if (!choice.keep()) {
+				previewInLitematica(build, author, described);
+				return;
+			}
 			net.minecraft.core.BlockPos standing = minecraft.player == null
 				? net.minecraft.core.BlockPos.ZERO : minecraft.player.blockPosition();
 			written = SchematicWriter.save(build, format, folder, name, project().name(), author,
@@ -9759,12 +9765,61 @@ public final class ComposerScreen extends Screen {
 			return;
 		}
 		int wrong = plan.report().size();
+		String faults = wrong == 0 ? "" : " " + wrong + " note" + (wrong == 1 ? "" : "s")
+			+ " will be wrong, as in a paste.";
+		if (choice.load()) {
+			// Placed with its corner where the plan put it, which is where Paste would have built:
+			// the plan was made from where you stand. So what you see is the paste you were about to
+			// make, there to walk around before anything is placed.
+			String unloaded = LitematicaBridge.loadAndPlace(written, build.min(), project().name(),
+				true);
+			if (unloaded == null) {
+				McCompat.setScreen(null);
+				CommandPasteSender.say(Component.literal("Saved " + written.getFileName()
+					+ " and loaded it in Litematica, placed where Paste would build it." + faults));
+				return;
+			}
+			showResult(Component.literal("Saved " + written.getFileName() + ", but could not load "
+					+ "it in Litematica: " + unloaded + ". Load it from Litematica's menu instead."
+					+ faults + " Click to open the folder.")
+				.withStyle(net.minecraft.ChatFormatting.YELLOW), () -> openFolder(folder));
+			return;
+		}
 		showResult(Component.literal("Saved " + written.getFileName() + " to " + format.reader()
-				+ "'s schematics folder."
-				+ (wrong == 0 ? "" : " " + wrong + " note" + (wrong == 1 ? "" : "s")
-					+ " will be wrong, as in a paste.")
-				+ " Click to open the folder."),
+				+ "'s schematics folder." + faults + " Click to open the folder."),
 			() -> openFolder(folder));
+	}
+
+	/**
+	 * Shows the build in Litematica where Paste would build it, and keeps nothing.
+	 *
+	 * <p>For looking rather than building: a hologram to walk around or move somewhere better, with
+	 * no file left in the schematics folder and no placement left in Litematica's list. Litematica
+	 * reads schematics from files only, so one is written to the system's temporary folder, read, and
+	 * deleted again straight away -- the schematic lives on in Litematica's memory for as long as the
+	 * world is open, and the placement is marked not to be saved.</p>
+	 */
+	private void previewInLitematica(SchematicWriter.Build build, String author, String described)
+			throws java.io.IOException {
+		Path temporary = Files.createTempFile("midicraft-preview-", SchematicWriter.Format.LITEMATIC
+			.extension());
+		String unloaded;
+		try {
+			SchematicWriter.writeLitematic(build, temporary, project().name(), author, described);
+			unloaded = LitematicaBridge.loadAndPlace(temporary, build.min(),
+				project().name() + " (preview)", false);
+		} finally {
+			Files.deleteIfExists(temporary);
+		}
+		if (unloaded != null) {
+			showResult(Component.literal("Could not preview it in Litematica: " + unloaded + ".")
+				.withStyle(net.minecraft.ChatFormatting.YELLOW));
+			return;
+		}
+		McCompat.setScreen(null);
+		CommandPasteSender.say(Component.literal("Showing \"" + project().name() + "\" in "
+			+ "Litematica where Paste would build it. Nothing was saved: the preview is gone when you "
+			+ "leave the world."));
 	}
 
 	/**
