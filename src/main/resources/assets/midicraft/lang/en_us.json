@@ -54,7 +54,7 @@
   "option.midicraft.max_build_floors": "Max cube floors",
   "tooltip.midicraft.max_build_floors": "Most floors a Compact cube build can stack. More floors, smaller footprint.",
   "option.midicraft.commands_per_tick": "Build paste rate",
-  "tooltip.midicraft.commands_per_tick": "How fast pasting places blocks. High rates can get you kicked on servers.",
+  "tooltip.midicraft.commands_per_tick": "How fast pasting places blocks on a server. High rates can get you kicked. In singleplayer, or a LAN world you host, the paste goes straight into the world as fast as the game can spare, and this is not used.",
   "option.midicraft.midi_quantize_grid": "Convert grid",
   "option.midicraft.midi_quantize_grid.auto": "Auto",
   "option.midicraft.midi_quantize_grid.quarter": "1/4 note",

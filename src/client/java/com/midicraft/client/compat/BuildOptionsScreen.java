@@ -13,6 +13,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.IntConsumer;
 import java.util.function.IntFunction;
+import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.AbstractSliderButton;
@@ -70,6 +71,12 @@ final class BuildOptionsScreen extends Screen {
 	private MidicraftConfig.ColorCodedPaste colours;
 	private final MidicraftConfig.ColorCodedPaste coloursOnOpen;
 	private double commandsPerTick;
+	/**
+	 * Whether this paste will go straight into the world rather than by command, which decides what
+	 * the rate row and the lines under it say. Asked once, when the dialog opens: the answer is about
+	 * the world you are in, and that does not change under an open screen.
+	 */
+	private final boolean direct = DirectPasteSender.available(Minecraft.getInstance());
 	private int laneWidth;
 	private int laneFloors;
 	private int reseedDelay;
@@ -610,10 +617,15 @@ final class BuildOptionsScreen extends Screen {
 					+ "up to the other after going past the drift limit. Lower values catch up further "
 					+ "but cause slightly more padding.")));
 			}
-			addRenderableWidget(new Choice(left, advancedRow(top, row), width,
+			Choice rate = addRenderableWidget(new Choice(left, advancedRow(top, row), width,
 				PasteRate.RATES.size(), PasteRate.index(commandsPerTick),
-				rung -> PasteRate.label(PasteRate.RATES.get(rung)),
+				rung -> PasteRate.label(PasteRate.RATES.get(rung), direct),
 				rung -> commandsPerTick = PasteRate.RATES.get(rung)));
+			if (direct) {
+				rate.mute();
+				rate.setTooltip(Tooltip.create(Component.literal("Only used on servers. Here the "
+					+ "paste goes straight into the world, as fast as the game can spare.")));
+			}
 		}
 
 		y = lastRow(top);
@@ -891,11 +903,21 @@ final class BuildOptionsScreen extends Screen {
 			return rungs <= 1 ? 0 : (int) Math.round(value * (rungs - 1));
 		}
 
+		/** Drawn grey, for a setting shown here but not used here. */
+		private boolean muted;
+
+		void mute() {
+			muted = true;
+			updateMessage();
+		}
+
 		@Override
 		protected void updateMessage() {
 			// Called from the superclass constructor, before this class has its fields.
 			if (say != null) {
-				setMessage(Component.literal(say.apply(rung())));
+				Component message = Component.literal(say.apply(rung()));
+				setMessage(muted ? message.copy().withStyle(net.minecraft.ChatFormatting.GRAY)
+					: message);
 			}
 		}
 
@@ -967,7 +989,8 @@ final class BuildOptionsScreen extends Screen {
 		int left = (this.width - width) / 2;
 		int top = topRow();
 
-		graphics.text(font, "Paste the build sequence of \"" + songName + "\" with /setblock",
+		graphics.text(font, "Paste the build sequence of \"" + songName + "\""
+				+ (direct ? "" : " with /setblock"),
 			left, top - 14, 0xFFFFFFFF, false);
 		graphics.text(font, "Build", left, top + 2, 0xFF8A9098, false);
 
@@ -977,9 +1000,13 @@ final class BuildOptionsScreen extends Screen {
 		double seconds = commands / (commandsPerTick * 20.0);
 		// "If you stay with it" is the whole of the honesty here: a build longer than the loaded
 		// region around you pauses at the edge and waits to be walked to, so the figure is a floor
-		// and not an estimate.
-		graphics.text(font, String.format(Locale.ROOT,
-				"about %d blocks, roughly %s if you stay with it", commands, howLong(seconds)),
+		// and not an estimate. A direct paste has no rate to divide by -- it goes as fast as the
+		// server can spare, which nothing here can know -- so it is not given a time it would miss.
+		graphics.text(font, direct
+				? String.format(Locale.ROOT, "about %d blocks, placed straight into the world",
+					commands)
+				: String.format(Locale.ROOT, "about %d blocks, roughly %s if you stay with it",
+					commands, howLong(seconds)),
 			left, rateY + 24, 0xFF8A9098, false);
 		Forecast predicted = forecast;
 		// The width line is the one label on this screen that cannot be worked out from the setting it
@@ -1025,7 +1052,7 @@ final class BuildOptionsScreen extends Screen {
 			note += 12;
 			graphics.text(font, outside, left, note, 0xFFFFAA00, false);
 		}
-		if (commandsPerTick > PasteRate.SINGLEPLAYER_ABOVE) {
+		if (!direct && commandsPerTick > PasteRate.SPAM_RISK_ABOVE) {
 			note += 12;
 			graphics.text(font, "High rates can trip server command spam limits.",
 				left, note, 0xFFFFAA00, false);

@@ -23,6 +23,7 @@ import java.util.function.ToIntFunction;
 import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.KeyMapping;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.AbstractSliderButton;
 import net.minecraft.client.gui.components.Button;
@@ -772,10 +773,18 @@ public final class SettingsScreen extends Screen {
 				// to two hundred and fifty-six, and a slider that moved evenly across that would
 				// spend nine tenths of its travel above the point where more is no longer the
 				// question.
-				entries.add(Entry.of(slider("commands_per_tick", 0, PasteRate.RATES.size() - 1,
+				//
+				// Greyed where a paste would go straight into the world and read no rate at all, but
+				// never hidden: from the title screen there is no telling where the next world is,
+				// and the server it turns out to be is exactly when this has to be set already.
+				boolean direct = DirectPasteSender.available(Minecraft.getInstance());
+				entries.add(Entry.of(new Option("commands_per_tick", 0, PasteRate.RATES.size() - 1,
 					source -> PasteRate.index(source.commandsPerTick()),
 					rung -> config.setCommandsPerTick(PasteRate.RATES.get(rung)),
-					rung -> PasteRate.label(PasteRate.RATES.get(rung)))));
+					rung -> direct
+						? Component.literal(PasteRate.label(PasteRate.RATES.get(rung), true))
+							.withStyle(ChatFormatting.GRAY)
+						: Component.literal(PasteRate.label(PasteRate.RATES.get(rung))))));
 			}
 			case COMPOSER -> {
 				// Conversion first: it is what Edit > Convert for Minecraft does to a composition,

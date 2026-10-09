@@ -98,14 +98,20 @@ class PasteRateTest {
 	@Test
 	void saysARateForSingleplayerOnlyPastSixtyFour() {
 		assertEquals("64 commands per tick", PasteRate.label(64));
-		assertEquals("96 commands per tick - recommended for singleplayer only", PasteRate.label(96));
-		assertEquals("128 commands per tick - recommended for singleplayer only", PasteRate.label(128));
+		assertEquals("96 commands per tick - can trip server spam limits", PasteRate.label(96));
+		assertEquals("128 commands per tick - can trip server spam limits", PasteRate.label(128));
+		// Where the paste goes straight into the world the rate is only being kept for a server,
+		// so it says so, and warns about nothing.
+		assertEquals("128 commands per tick (servers only)", PasteRate.label(128, true));
+		assertEquals("one command every 4 ticks (servers only)", PasteRate.label(0.25, true));
+		assertEquals("128 commands per tick - can trip server spam limits",
+			PasteRate.label(128, false));
 	}
 
 	@Test
 	void findsTheRungASliderShouldSitOn() {
 		assertEquals(0, PasteRate.index(0.25));
-		assertEquals(PasteRate.RATES.indexOf(128.0),
+		assertEquals(PasteRate.RATES.indexOf(32.0),
 			PasteRate.index(PasteRate.DEFAULT));
 		assertEquals(PasteRate.RATES.indexOf(24.0),
 			PasteRate.index(23));

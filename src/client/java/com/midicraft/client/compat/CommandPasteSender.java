@@ -127,6 +127,8 @@ public final class CommandPasteSender {
 
 	public static void register() {
 		ClientTickEvents.END_CLIENT_TICK.register(CommandPasteSender::tick);
+		ClientTickEvents.END_CLIENT_TICK.register(DirectPasteSender::clientTick);
+		DirectPasteSender.register();
 	}
 
 	/** One command, kept with the position it names so the sender can gate it and check it. */
@@ -138,7 +140,7 @@ public final class CommandPasteSender {
 	}
 
 	static boolean isRunning() {
-		return !QUEUE.isEmpty();
+		return !QUEUE.isEmpty() || DirectPasteSender.isRunning();
 	}
 
 	static void start(List<String> commands) {
@@ -167,6 +169,18 @@ public final class CommandPasteSender {
 	private static List<String> heldReport = List.of();
 
 	static void start(List<String> commands, List<String> faults, Runnable done) {
+		// Straight into the world where the world is in this game, and the player could have run
+		// the commands anyway. Much faster and far lighter on the server; see DirectPasteSender.
+		if (DirectPasteSender.available(Minecraft.getInstance())) {
+			cancel(false);
+			DirectPasteSender.start(commands, faults, done);
+			return;
+		}
+		startByCommand(commands, faults, done);
+	}
+
+	/** The command route, for a server, and for a build the direct route could not read. */
+	static void startByCommand(List<String> commands, List<String> faults, Runnable done) {
 		cancel(false);
 		for (String command : commands) {
 			QUEUE.addLast(read(command));
@@ -198,6 +212,7 @@ public final class CommandPasteSender {
 	}
 
 	static void cancel(boolean notify) {
+		DirectPasteSender.cancel(notify);
 		if (QUEUE.isEmpty() && PENDING.isEmpty()) {
 			return;
 		}
@@ -422,7 +437,7 @@ public final class CommandPasteSender {
 	 *
 	 * <p>Only holds it. Cancelling is something you ask for, and it is still one button away.</p>
 	 */
-	private static boolean held(Minecraft minecraft) {
+	static boolean held(Minecraft minecraft) {
 		Screen screen = McCompat.screen();
 		return screen instanceof PauseScreen || screen instanceof ComposerScreen;
 	}
@@ -549,7 +564,7 @@ public final class CommandPasteSender {
 		}
 	}
 
-	private static void show(Component message) {
+	static void show(Component message) {
 		Minecraft minecraft = Minecraft.getInstance();
 		if (minecraft.player != null) {
 			McCompat.overlayMessage(message, true);
@@ -563,7 +578,7 @@ public final class CommandPasteSender {
 	 * a moment later. The outcome is the opposite: said once, and read whenever you get back to it,
 	 * so it goes where it is kept.</p>
 	 */
-	private static void say(Component message) {
+	static void say(Component message) {
 		Minecraft minecraft = Minecraft.getInstance();
 		if (minecraft.player != null) {
 			minecraft.player.sendSystemMessage(message);

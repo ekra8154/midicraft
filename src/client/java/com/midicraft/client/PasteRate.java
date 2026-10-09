@@ -27,11 +27,21 @@ public final class PasteRate {
 	public static final double MIN = RATES.get(0);
 	public static final double MAX = RATES.get(RATES.size() - 1);
 
-	/** Singleplayer tolerates far more than the original fixed rate of 2. */
-	public static final double DEFAULT = 128;
+	/**
+	 * A rate for servers, since a server is the only place the rate is read: singleplayer and a LAN
+	 * world you host paste straight into the world. Half the point where the label starts warning
+	 * about spam limits, and still sixteen times the original fixed rate of 2.
+	 */
+	public static final double DEFAULT = 32;
 
-	/** Above this a rate is for singleplayer, and its label says so. */
-	public static final double SINGLEPLAYER_ABOVE = 64;
+	/**
+	 * Above this a rate risks a server's command spam limit, and its label says so.
+	 *
+	 * <p>It used to say "singleplayer only", which was the one place a rate this high was safe.
+	 * Singleplayer does not send commands any more -- the paste goes straight into the world there --
+	 * so the rate is a server setting, and the warning is about servers.</p>
+	 */
+	public static final double SPAM_RISK_ABOVE = 64;
 
 	private PasteRate() {
 	}
@@ -83,15 +93,29 @@ public final class PasteRate {
 	 * it means anything, and that arithmetic is the part you actually care about: how long the wait
 	 * is between one block and the next.</p>
 	 *
-	 * <p>Past {@link #SINGLEPLAYER_ABOVE} the label carries the warning itself, on the slider that
+	 * <p>Past {@link #SPAM_RISK_ABOVE} the label carries the warning itself, on the slider that
 	 * sets it, since that is where a rate gets picked and a server's spam limit is what it trips.</p>
 	 */
 	public static String label(double rate) {
+		return rate > SPAM_RISK_ABOVE ? plain(rate) + " - can trip server spam limits" : plain(rate);
+	}
+
+	/**
+	 * The label for where the rate is read, or for where it is not.
+	 *
+	 * @param direct whether a paste here goes straight into the world, which reads no rate at all.
+	 *     The setting is still shown, since it is the one the next server will use, but it says
+	 *     that, and carries no warning about a limit nothing here can trip.
+	 */
+	public static String label(double rate, boolean direct) {
+		return direct ? plain(rate) + " (servers only)" : label(rate);
+	}
+
+	private static String plain(double rate) {
 		if (rate < 1) {
 			return "one command every " + Math.round(1 / rate) + " ticks";
 		}
 		String count = rate == Math.rint(rate) ? String.valueOf((long) rate) : String.valueOf(rate);
-		String label = count + (rate == 1 ? " command per tick" : " commands per tick");
-		return rate > SINGLEPLAYER_ABOVE ? label + " - recommended for singleplayer only" : label;
+		return count + (rate == 1 ? " command per tick" : " commands per tick");
 	}
 }
