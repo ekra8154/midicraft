@@ -940,7 +940,8 @@ public final class SongBuilder {
 			// says notes are unreached while no powered cell went dark is a disagreement this pass
 			// cannot explain, and sending the player to the first silent note is at least sending them
 			// somewhere the fault can be seen.
-			plan.faultSites().withDeadLine(breaks.isEmpty() ? List.of(first) : breaks, severedSites));
+			plan.faultSites().withDeadLine(breaks.isEmpty() ? List.of(first) : breaks, severedSites),
+			plan.palette());
 	}
 
 	/** The same plan with more wrong with it than it knew, and the blocks it is wrong at. */
@@ -953,7 +954,7 @@ public final class SongBuilder {
 			plan.breaches(), plan.wallBreaches(), plan.recesses(), plan.padding(), plan.nearWall(),
 			plan.farWall(),
 			plan.collisions(), plan.poweredAt(), plan.laidBy(), plan.noteTicks(),
-			plan.noteMachines(), sites);
+			plan.noteMachines(), sites, plan.palette());
 	}
 
 	/** What a build with no name to put on it is called. */
@@ -1035,7 +1036,7 @@ public final class SongBuilder {
 			plan.breaches(), plan.wallBreaches(), plan.recesses(), plan.padding(), plan.nearWall(),
 			plan.farWall(),
 			plan.collisions(), plan.poweredAt(), plan.laidBy(), plan.noteTicks(),
-			plan.noteMachines(), plan.faultSites());
+			plan.noteMachines(), plan.faultSites(), plan.palette());
 	}
 
 	/**
@@ -1652,7 +1653,7 @@ public final class SongBuilder {
 			plan.breaches(), plan.wallBreaches(), plan.recesses(), plan.padding(), plan.nearWall(),
 			plan.farWall(),
 			plan.collisions(), plan.poweredAt(), plan.laidBy(), plan.noteTicks(),
-			plan.noteMachines(), plan.faultSites());
+			plan.noteMachines(), plan.faultSites(), plan.palette());
 	}
 
 	/**
@@ -34945,13 +34946,72 @@ public final class SongBuilder {
 		}
 	}
 
+	/**
+	 * Which palette slot each swapped cell of a plan took, and the blocks that were in the slots.
+	 *
+	 * @param cells by position in the world, as the commands name them
+	 * @param blocks in {@link LaneMaterials.Slot} order, as they were laid
+	 */
+	record PaletteCells(Map<BlockPos, LaneMaterials.Slot> cells, List<String> blocks) {
+	}
+
 	record PastePlan(List<String> commands, int width, int depth, int height, int spanX, int spanZ,
 			PasteMode mode, List<String> faults, List<BlockPos> turns, List<Integer> moved,
 			List<Integer> breaches, List<WallBreach> wallBreaches, List<Integer> recesses,
 			Map<String, Integer> padding,
 			int nearWall, int farWall, Map<BlockPos, String> collisions, Set<BlockPos> poweredAt,
 			Map<BlockPos, String> laidBy, Map<BlockPos, Integer> noteTicks,
-			Map<BlockPos, Integer> noteMachines, FaultSites faultSites) {
+			Map<BlockPos, Integer> noteMachines, FaultSites faultSites, PaletteCells palette) {
+
+		/**
+		 * The same build in other blocks: every cell the palette filled, given the block now in its
+		 * slot, and nothing else touched.
+		 *
+		 * <p>Exact, not an approximation of a new plan. The walk is planned in the default blocks and
+		 * the palette is put on as the very last step, and every block the screen will accept does
+		 * what the default in its slot does -- conducts or does not, holds dust and repeaters, does not
+		 * fall -- so no choice the walk makes can depend on it. Which is what made a palette change a
+		 * second plan of the whole song, seconds for a big one, when all that differs is the text of
+		 * some of its lines.</p>
+		 *
+		 * <p>A line is only rewritten while it still says the block planned for its cell, so anything
+		 * written over a palette cell afterwards -- the debug paste's lanterns -- stays as it was.</p>
+		 *
+		 * @param blocks what goes in each slot, as laid -- see {@link LaneMaterials#placed} -- in
+		 *     {@link LaneMaterials.Slot} order
+		 */
+		PastePlan withPalette(List<String> blocks) {
+			if (blocks.equals(palette.blocks())) {
+				return this;
+			}
+			List<String> recoloured = new ArrayList<>(commands.size());
+			for (String command : commands) {
+				recoloured.add(recolour(command, blocks));
+			}
+			return new PastePlan(List.copyOf(recoloured), width, depth, height, spanX, spanZ, mode,
+				faults, turns, moved, breaches, wallBreaches, recesses, padding, nearWall, farWall,
+				collisions, poweredAt, laidBy, noteTicks, noteMachines, faultSites,
+				new PaletteCells(palette.cells(), List.copyOf(blocks)));
+		}
+
+		private String recolour(String command, List<String> blocks) {
+			String[] part = command.split(" ", 6);
+			if (part.length < 6 || !"setblock".equals(part[0])) {
+				return command;
+			}
+			LaneMaterials.Slot slot;
+			try {
+				slot = palette.cells().get(new BlockPos(Integer.parseInt(part[1]),
+					Integer.parseInt(part[2]), Integer.parseInt(part[3])));
+			} catch (NumberFormatException notACell) {
+				return command;
+			}
+			if (slot == null || !part[4].equals(palette.blocks().get(slot.ordinal()))) {
+				return command;
+			}
+			return "setblock " + part[1] + " " + part[2] + " " + part[3] + " "
+				+ blocks.get(slot.ordinal()) + " " + part[5];
+		}
 
 		/**
 		 * The width this build actually came out at, which is not always the width that was asked for.
@@ -37626,26 +37686,52 @@ public final class SongBuilder {
 			}
 			if (lanes && "minecraft:stone".equals(block)) {
 				if (mustConduct(at)) {
-					return RELAY_BLOCK;
+					return paletteBlock(at, LaneMaterials.Slot.RELAY);
 				}
 				// The tint is machine and parity together, see laneTint(int, int). A cell laid with
 				// no machine being walked -- the starter, or a one-machine layout -- is lane one.
-				return laneTintAt.getOrDefault(at, 0) / 2 == 1 ? LANE_TWO_BLOCK : LANE_ONE_BLOCK;
+				return paletteBlock(at, laneTintAt.getOrDefault(at, 0) / 2 == 1
+					? LaneMaterials.Slot.LANE_TWO : LaneMaterials.Slot.LANE_ONE);
 			}
 			if ("minecraft:glass".equals(block)) {
-				return TRANSPARENT_BLOCK;
+				return paletteBlock(at, LaneMaterials.Slot.TRANSPARENT);
 			}
 			if (UNDERFLOOR.equals(block)) {
-				return SUPPORT_BLOCK;
+				return paletteBlock(at, LaneMaterials.Slot.SUPPORT);
 			}
 			if (THIN_LANE.equals(block)) {
 				// Unless something reads it after all: a run reseeded off a corner reads the corner's
 				// stone with its floor repeater, and the corner was laid as a pad before the run knew
 				// it would. Read on the way out, when every reader is down. you-spin-me-round at
 				// sixteen wide: the reseed's floor repeater against a slab, the floor rail dead.
-				return powered.containsKey(at) || readByARepeater(at) ? RELAY_BLOCK : THIN_LANE_BLOCK;
+				return paletteBlock(at, powered.containsKey(at) || readByARepeater(at)
+					? LaneMaterials.Slot.RELAY : LaneMaterials.Slot.THIN);
 			}
 			return block;
+		}
+
+		/**
+		 * The palette as it stood when this plan started putting it on, in slot order.
+		 *
+		 * <p>Read once rather than per cell: the build screen changes the palette as it is typed, on
+		 * the render thread, while a forecast may be putting the last one on here. A plan half in one
+		 * palette and half in the next would be a plan no palette describes.</p>
+		 */
+		private List<String> paletteBlocks;
+
+		/** Every cell the palette filled, by plan position, and the slot it took. */
+		private final Map<BlockPos, LaneMaterials.Slot> paletteAt = new HashMap<>();
+
+		private String paletteBlock(BlockPos at, LaneMaterials.Slot slot) {
+			paletteAt.put(at, slot);
+			return paletteBlocks.get(slot.ordinal());
+		}
+
+		/** The palette cells where the plan lands. */
+		private PaletteCells paletteLanded(int shiftX, int shiftZ) {
+			Map<BlockPos, LaneMaterials.Slot> landed = new HashMap<>(paletteAt.size());
+			paletteAt.forEach((at, slot) -> landed.put(at.offset(shiftX, 0, shiftZ), slot));
+			return new PaletteCells(Map.copyOf(landed), paletteBlocks);
 		}
 
 		/**
@@ -37932,6 +38018,9 @@ public final class SongBuilder {
 			// its own origin for both, so outside-the-walls would mean the whole build.
 			boolean walled = mode == PasteMode.ULTRA_COMPACT_LANE && !breaches.isEmpty();
 			holdUpEverythingThatFalls();
+			paletteBlocks = List.of(LANE_ONE_BLOCK, LANE_TWO_BLOCK, RELAY_BLOCK, TRANSPARENT_BLOCK,
+				SUPPORT_BLOCK, THIN_LANE_BLOCK);
+			paletteAt.clear();
 			List<String> commands = new ArrayList<>(propsFirst().stream()
 				.map(at -> "setblock " + (at.getX() + shiftX) + " "
 					+ at.getY() + " " + (at.getZ() + shiftZ) + " "
@@ -37970,7 +38059,8 @@ public final class SongBuilder {
 				// that reads the blocks back -- it is the only thing that knows where the signal
 				// stopped, and it does not exist until the commands do.
 				new FaultSites(sited(wrongNotesAt, shiftX, shiftZ),
-					sited(missedNotesAt, shiftX, shiftZ), List.of(), List.of()));
+					sited(missedNotesAt, shiftX, shiftZ), List.of(), List.of()),
+				paletteLanded(shiftX, shiftZ));
 		}
 	}
 }

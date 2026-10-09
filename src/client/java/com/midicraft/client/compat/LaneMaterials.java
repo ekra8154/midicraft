@@ -51,6 +51,33 @@ public final class LaneMaterials {
 	}
 
 	/**
+	 * The six places a palette block goes, in the order the build screen shows them.
+	 *
+	 * <p>Finer than {@link Role}, which is what a block has to be able to do: both lanes have the lane
+	 * role, but they are two choices. A plan records which slot every swapped cell took, which is what
+	 * lets a new palette be put on a finished plan without walking the song again -- see
+	 * {@code SongBuilder.PastePlan#withPalette}.</p>
+	 */
+	public enum Slot {
+		LANE_ONE(Role.LANE),
+		LANE_TWO(Role.LANE),
+		RELAY(Role.RELAY),
+		TRANSPARENT(Role.TRANSPARENT),
+		SUPPORT(Role.SUPPORT),
+		THIN(Role.THIN);
+
+		private final Role role;
+
+		Slot(Role role) {
+			this.role = role;
+		}
+
+		public Role role() {
+			return role;
+		}
+	}
+
+	/**
 	 * What was typed, as a block id: spaces gone, lower case, {@code minecraft:} where no namespace
 	 * was given. A state in brackets is kept as written.
 	 *

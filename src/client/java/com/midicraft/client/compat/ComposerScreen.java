@@ -9684,30 +9684,60 @@ public final class ComposerScreen extends Screen {
 				+ "stops it and starts the new one."));
 		}
 		McCompat.setScreen(new BuildOptionsScreen(this, project().name(), config.tracks(),
-				project(), project().dedupesIdentical(), pasteMode(), mode -> {
-			SongBuilder.PastePlan plan;
-			try {
-				plan = SongBuilder.plan(minecraft, config.tracks(), mode, project(),
-					project().dedupesIdentical(), config.chordFitRules());
-			} catch (IllegalArgumentException refused) {
-				McCompat.setScreen(this);
-				showResult(Component.literal(refused.getMessage())
-					.withStyle(net.minecraft.ChatFormatting.RED));
-				return;
+				project(), project().dedupesIdentical(), pasteMode(), planned -> {
+			// Usually the plan the screen's forecast has already made, so this is immediate. When it
+			// is still being worked out, the composer says so and the game carries on: planning a big
+			// song is seconds, and it used to be seconds of a frozen game.
+			McCompat.setScreen(this);
+			if (!planned.isDone()) {
+				showResult(Component.literal("Preparing the paste..."));
 			}
-			// A build the layout could not place cleanly still goes up if the player says so -- but
-			// they are told first, because a breached footprint overwrites whatever was standing in
-			// the ground the paste promised to stay out of.
-			if (DenseBuildScreen.needsAsking(plan)) {
-				McCompat.setScreen(new DenseBuildScreen(this, plan, () -> {
-						CommandPasteSender.start(plan.commands(), plan.report());
-						McCompat.setScreen(null);
-					}));
-				return;
-			}
-			CommandPasteSender.start(plan.commands(), plan.report());
-			McCompat.setScreen(null);
+			planned.whenComplete((plan, failed) -> minecraft.execute(() -> pastePlanned(plan,
+				failed)));
 		}, this::exportBuild));
+	}
+
+	/**
+	 * Pastes a plan once it is ready, on the render thread.
+	 *
+	 * <p>Only from the composer: if something else has been opened while it was being prepared, that
+	 * is where the player is, and a paste or a question about one would land on top of it.</p>
+	 */
+	private void pastePlanned(SongBuilder.PastePlan plan, Throwable failed) {
+		if (failed != null) {
+			backgroundResult(Component.literal(refusal(failed))
+				.withStyle(net.minecraft.ChatFormatting.RED), null);
+			return;
+		}
+		if (McCompat.screen() != this) {
+			CommandPasteSender.say(Component.literal("The paste was not started: the composer was "
+				+ "closed while it was being prepared."));
+			return;
+		}
+		// A build the layout could not place cleanly still goes up if the player says so -- but
+		// they are told first, because a breached footprint overwrites whatever was standing in
+		// the ground the paste promised to stay out of.
+		if (DenseBuildScreen.needsAsking(plan)) {
+			McCompat.setScreen(new DenseBuildScreen(this, plan, () -> {
+					CommandPasteSender.start(plan.commands(), plan.report());
+					McCompat.setScreen(null);
+				}));
+			return;
+		}
+		CommandPasteSender.start(plan.commands(), plan.report());
+		McCompat.setScreen(null);
+	}
+
+	/** What a plan that did not come back says: the layout's own refusal, or what went wrong. */
+	private static String refusal(Throwable failed) {
+		Throwable cause = failed instanceof java.util.concurrent.CompletionException
+			&& failed.getCause() != null ? failed.getCause() : failed;
+		if (cause instanceof IllegalArgumentException) {
+			return cause.getMessage();
+		}
+		return cause instanceof java.util.concurrent.CancellationException
+			? "The build was replaced by a newer one before it was ready."
+			: "Could not work out the build: " + cause.getMessage();
 	}
 
 	/**
@@ -9746,23 +9776,17 @@ public final class ComposerScreen extends Screen {
 	 * <p>A build with faults is still written, and the result says how many notes will be wrong:
 	 * nothing is placed, so there is nothing to protect, and the file is the way to look at it.</p>
 	 */
-	private void exportBuild(SongBuilder.PasteMode mode, BuildOptionsScreen.ExportChoice choice) {
+	private void exportBuild(SongBuilder.PasteMode mode, BuildOptionsScreen.ExportChoice choice,
+			java.util.concurrent.CompletableFuture<SongBuilder.PastePlan> planned) {
 		McCompat.setScreen(this);
 		if (exporting) {
 			showResult(Component.literal("An export is still being prepared."));
 			return;
 		}
 		SchematicWriter.Format format = choice.format();
-		List<MidicraftConfig.SequenceTrack> tracks = config.tracks();
-		ComposerProject song = project();
-		boolean dedupe = song.dedupesIdentical();
-		ChordSkips.Rules thinning = config.chordFitRules();
-		// The plan is made where the Paste button would make it, so a loaded placement lands there.
-		BlockPos origin = SongBuilder.pasteOrigin(minecraft);
 		BlockPos standing = minecraft.player == null ? BlockPos.ZERO
 			: minecraft.player.blockPosition();
-		SongBuilder.BuildLimits limits = SongBuilder.BuildLimits.fromConfig();
-		String title = song.name();
+		String title = project().name();
 		String author = minecraft.player == null ? "midicraft"
 			: minecraft.player.getName().getString();
 		boolean lanes = mode != SongBuilder.PasteMode.COMPACT_CUBE
@@ -9780,10 +9804,9 @@ public final class ComposerScreen extends Screen {
 
 		exporting = true;
 		showResult(Component.literal("Preparing \"" + title + "\"..."));
-		java.util.concurrent.CompletableFuture.supplyAsync(() -> {
-			SongBuilder.PastePlan plan = SongBuilder.createPastePlan(origin,
-				SongBuilder.notesFor(mode, tracks, song, dedupe, thinning), mode, limits,
-				SongBuilder.WalkStart.HEAD, title);
+		// The plan the build screen made -- where the Paste button would make it, so a loaded
+		// placement lands there -- and the rest on the export thread once it is ready.
+		planned.thenApplyAsync(plan -> {
 			SchematicWriter.Build build = SchematicWriter.fromCommands(plan.commands());
 			try {
 				Path file;
@@ -9803,10 +9826,7 @@ public final class ComposerScreen extends Screen {
 		}, EXPORTER).whenComplete((prepared, failed) -> minecraft.execute(() -> {
 			exporting = false;
 			if (failed != null) {
-				Throwable cause = failed instanceof java.util.concurrent.CompletionException
-					&& failed.getCause() != null ? failed.getCause() : failed;
-				exportResult(Component.literal(cause instanceof IllegalArgumentException
-						? cause.getMessage() : "Could not export: " + cause.getMessage())
+				backgroundResult(Component.literal(refusal(failed))
 					.withStyle(net.minecraft.ChatFormatting.RED), null);
 				return;
 			}
@@ -9822,7 +9842,7 @@ public final class ComposerScreen extends Screen {
 			+ " will be wrong, as in a paste.";
 		String fileName = prepared.file().getFileName().toString();
 		if (!choice.load()) {
-			exportResult(Component.literal("Saved " + fileName + " to " + choice.format().reader()
+			backgroundResult(Component.literal("Saved " + fileName + " to " + choice.format().reader()
 				+ "'s schematics folder." + faults + " Click to open the folder."),
 				() -> openFolder(folder));
 			return;
@@ -9843,7 +9863,7 @@ public final class ComposerScreen extends Screen {
 			}
 		}
 		if (unloaded != null) {
-			exportResult(Component.literal((choice.keep() ? "Saved " + fileName + ", but could not "
+			backgroundResult(Component.literal((choice.keep() ? "Saved " + fileName + ", but could not "
 					+ "load it in Litematica: " + unloaded + ". Load it from Litematica's menu instead."
 					+ faults + " Click to open the folder."
 					: "Could not preview it in Litematica: " + unloaded + "."))
@@ -9864,10 +9884,10 @@ public final class ComposerScreen extends Screen {
 	}
 
 	/**
-	 * Says how an export went: as a result on the composer if it is still showing, and in chat if
+	 * Says how something done in the background went: as a result on the composer if it is still showing, and in chat if
 	 * the player has gone on to something else while it was being prepared.
 	 */
-	private void exportResult(Component message, Runnable action) {
+	private void backgroundResult(Component message, Runnable action) {
 		if (McCompat.screen() == this) {
 			showResult(message, action);
 		} else {

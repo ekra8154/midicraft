@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -50,7 +51,12 @@ final class BuildOptionsScreen extends Screen {
 	 */
 	private final com.midicraft.client.composer.ComposerProject project;
 	private final boolean dedupeIdenticalNotes;
-	private final Consumer<SongBuilder.PasteMode> confirm;
+	/**
+	 * Pastes, handed the plan for the settings as they stand: usually the very plan the forecast
+	 * already made, so Paste does no planning of its own, and otherwise the one being made. Still a
+	 * future either way, so the caller waits off the render thread rather than freezing on it.
+	 */
+	private final Consumer<CompletableFuture<SongBuilder.PastePlan>> confirm;
 	/**
 	 * Saves the build these settings make as a file instead of pasting it, or {@code null} where
 	 * the screen offers no export.
@@ -59,7 +65,13 @@ final class BuildOptionsScreen extends Screen {
 	 * exists once a width, a floor count and the blocks are chosen, and these are the rows that
 	 * choose them. Exporting from here is exporting exactly what Paste would have built.</p>
 	 */
-	private final BiConsumer<SongBuilder.PasteMode, ExportChoice> export;
+	private final Exporter export;
+
+	/** Saves the build instead of pasting it; given the plan the way {@link #confirm} is. */
+	interface Exporter {
+		void export(SongBuilder.PasteMode mode, ExportChoice choice,
+			CompletableFuture<SongBuilder.PastePlan> plan);
+	}
 
 	/**
 	 * What Export can make: either file, or the build loaded straight into Litematica and placed where
@@ -217,6 +229,14 @@ final class BuildOptionsScreen extends Screen {
 	 * Export, like the width; leaving the screen keeps the palette you had.
 	 */
 	private final String[] palette = new String[PALETTE.size()];
+	/**
+	 * The palette as the screen found it, put back if it is left without pasting or exporting.
+	 *
+	 * <p>For the reason {@link #coloursOnOpen} is: each block takes effect the moment it is typed,
+	 * so the forecast plans with it and its plan is the one Paste and Export use. Only remembering it
+	 * is held back until one of them is pressed.</p>
+	 */
+	private final String[] paletteOnOpen = new String[PALETTE.size()];
 	/** Where each palette label goes on screen, as {x, y}, for drawing it beside its box. */
 	private final List<int[]> paletteLabelAt = new ArrayList<>();
 	/** The catch-up control, so its line can follow the tolerance above it. */
@@ -495,6 +515,30 @@ final class BuildOptionsScreen extends Screen {
 	private final AtomicInteger forecastGeneration = new AtomicInteger();
 	/** The settings the last forecast was asked for, so redraws do not ask again. */
 	private String forecastKey;
+	/**
+	 * The same, without the palette: what the walk depends on. While this holds, a new palette is
+	 * put on the plan already made rather than planning the song again -- see
+	 * {@code SongBuilder.PastePlan#withPalette}.
+	 */
+	private String forecastLayoutKey;
+	/** Where the last forecast was planned from; the plan is only the paste's while this holds. */
+	private BlockPos forecastOrigin;
+	/**
+	 * The plan the last forecast is making or made, for Paste and Export to use instead of planning
+	 * the same build a second time -- for a big song, seconds of work. Cancelled if a newer request
+	 * overtakes it before it starts.
+	 */
+	private volatile CompletableFuture<SongBuilder.PastePlan> planning;
+
+	/**
+	 * The plan for the settings as they stand: the forecast's, which is planned exactly as a paste
+	 * plans -- the same notes, limits, title and blocks, from where you stand -- unless something has
+	 * moved since, in which case a new one is asked for.
+	 */
+	private CompletableFuture<SongBuilder.PastePlan> plannedBuild() {
+		requestForecast();
+		return planning;
+	}
 
 	BuildOptionsScreen(
 		Screen parent,
@@ -503,8 +547,8 @@ final class BuildOptionsScreen extends Screen {
 		com.midicraft.client.composer.ComposerProject project,
 		boolean dedupeIdenticalNotes,
 		SongBuilder.PasteMode initialMode,
-		Consumer<SongBuilder.PasteMode> confirm,
-		BiConsumer<SongBuilder.PasteMode, ExportChoice> export
+		Consumer<CompletableFuture<SongBuilder.PastePlan>> confirm,
+		Exporter export
 	) {
 		super(Component.literal("Build composition"));
 		this.parent = parent;
@@ -519,6 +563,9 @@ final class BuildOptionsScreen extends Screen {
 		this.startTop = MidicraftConfig.get().pasteStartTop();
 		this.colours = MidicraftConfig.get().colorCodedPaste();
 		this.coloursOnOpen = colours;
+		for (int slot = 0; slot < PALETTE.size(); slot++) {
+			paletteOnOpen[slot] = PALETTE.get(slot).read().apply(MidicraftConfig.get());
+		}
 		this.commandsPerTick = MidicraftConfig.get().commandsPerTick();
 		this.laneWidth = MidicraftConfig.get().buildLaneWidth();
 		this.laneFloors = MidicraftConfig.get().buildLaneFloors();
@@ -878,6 +925,8 @@ final class BuildOptionsScreen extends Screen {
 					palette[slotIndex] = block;
 					box.setTextColor(0xFFE0E0E0);
 					box.setTooltip(slot.tooltip());
+					slot.write().accept(MidicraftConfig.get(), block);
+					requestForecast();
 				} else {
 					box.setTextColor(BAD_COLOR);
 					box.setTooltip(Tooltip.create(Component.literal(wrong + ". The build keeps "
@@ -909,12 +958,12 @@ final class BuildOptionsScreen extends Screen {
 
 	private void paste() {
 		remember();
-		confirm.accept(mode);
+		confirm.accept(plannedBuild());
 	}
 
 	private void exportAs(ExportChoice choice) {
 		remember();
-		export.accept(mode, choice);
+		export.export(mode, choice, plannedBuild());
 	}
 
 	/** Export says which way its menu goes: sideways shut, up once it has opened upward. */
@@ -982,17 +1031,39 @@ final class BuildOptionsScreen extends Screen {
 		// swaps halves is a different length from one that waits. Left out, the screen answered
 		// every position of that slider with the forecast it had already made for the first.
 		// The pace tolerance likewise: it decides how much dust the lane behind lays.
-		String key = mode.name() + " " + laneWidth + " " + laneFloors + " " + reseedDelay + " "
+		String layoutKey = mode.name() + " " + laneWidth + " " + laneFloors + " " + reseedDelay + " "
 			+ paceTolerance + " " + paceCatchUpTo + " " + startTop + " " + colours;
-		if (key.equals(forecastKey)) {
-			return;
-		}
-		forecastKey = key;
-		forecast = null;
-		int generation = forecastGeneration.incrementAndGet();
+		// The palette as well, now that the plan is the one Paste uses: the blocks change nothing
+		// about the forecast's numbers, but they are what the plan builds out of.
+		String key = layoutKey + " " + String.join(",", palette);
 		// Read on the render thread. The origin comes off the player, and the limits off the config,
 		// and neither is a thing to be touching from another thread.
 		BlockPos origin = SongBuilder.pasteOrigin(minecraft);
+		if (key.equals(forecastKey) && origin.equals(forecastOrigin) && planning != null) {
+			return;
+		}
+		if (layoutKey.equals(forecastLayoutKey) && origin.equals(forecastOrigin)
+				&& planning != null) {
+			// Only the blocks moved, so the walk and everything the card says about it stand: the
+			// plan in hand, or the one about to be, gets the new palette put on. Milliseconds where
+			// planning again was seconds -- and still off the render thread, since a big song is a
+			// hundred thousand lines to go through.
+			forecastKey = key;
+			List<String> laid = new ArrayList<>();
+			for (int slot = 0; slot < PALETTE.size(); slot++) {
+				laid.add(LaneMaterials.placed(PALETTE.get(slot).role(), palette[slot]));
+			}
+			planning = planning.thenApplyAsync(plan -> plan.withPalette(laid), FORECASTER);
+			return;
+		}
+		forecastKey = key;
+		forecastLayoutKey = layoutKey;
+		forecastOrigin = origin;
+		forecast = null;
+		int generation = forecastGeneration.incrementAndGet();
+		CompletableFuture<SongBuilder.PastePlan> plan = new CompletableFuture<>();
+		planning = plan;
+		String title = project == null ? songName : project.name();
 		SongBuilder.PasteMode planned = mode;
 		// Read here with the rest of what the forecast needs, on the render thread.
 		com.midicraft.client.composer.ChordSkips.Rules thinning = MidicraftConfig.get().chordFitRules();
@@ -1012,16 +1083,19 @@ final class BuildOptionsScreen extends Screen {
 			// of milliseconds -- so a queue that does all of them is a screen that keeps answering
 			// questions nobody is asking any more, minutes after the slider stopped moving.
 			if (forecastGeneration.get() != generation) {
+				plan.cancel(false);
 				return;
 			}
 			Forecast result;
 			try {
 				// The same events the Paste button would build from, which for the half-tick lane
 				// means the composition rather than the sequence -- forecasting the sequence there
-				// would predict a build at twice the speed of the one it is about to make.
-				SongBuilder.PastePlan plan = SongBuilder.createPastePlan(origin,
+				// would predict a build at twice the speed of the one it is about to make. With the
+				// title as well, for the sign, so the plan is the paste's to the block.
+				SongBuilder.PastePlan built = SongBuilder.createPastePlan(origin,
 					SongBuilder.notesFor(planned, sequence, project, dedupeIdenticalNotes, thinning),
-					planned, limits);
+					planned, limits, SongBuilder.WalkStart.HEAD, title);
+				plan.complete(built);
 				// Off the blocks rather than off the height, which is a span and says nothing
 				// about where the span sits. getMaxY is the highest cell that takes a block, not
 				// the first that refuses one.
@@ -1036,7 +1110,7 @@ final class BuildOptionsScreen extends Screen {
 				int westmost = Integer.MAX_VALUE;
 				int southmost = Integer.MIN_VALUE;
 				int northmost = Integer.MAX_VALUE;
-				for (String command : plan.commands()) {
+				for (String command : built.commands()) {
 					String[] parts = command.split(" ", 5);
 					int x = Integer.parseInt(parts[1]);
 					int y = Integer.parseInt(parts[2]);
@@ -1056,17 +1130,19 @@ final class BuildOptionsScreen extends Screen {
 				result = new Forecast(Math.max(acrossX, acrossZ), Math.min(acrossX, acrossZ),
 					// The walk's own breaches and the plan's wall reading together: a lane the
 					// walk did not know was outside is still outside. See SongBuilder.WallBreach.
-					plan.breaches().size() + plan.wallBreaches().size(),
-					Math.max(plan.worstBreach(), plan.worstWallBreach()), faultLines(plan),
+					built.breaches().size() + built.wallBreaches().size(),
+					Math.max(built.worstBreach(), built.worstWallBreach()), faultLines(built),
 					// In long, because the no-world sentinels are the int extremes and
 					// MIN_VALUE minus a height wraps round to a large positive -- which would
 					// warn that two billion levels are below the floor of a world that is not
 					// there.
 					(int) Math.max(0, (long) highest - worldTop),
-					(int) Math.max(0, (long) worldFloor - lowest), null, plan.builtWidth());
+					(int) Math.max(0, (long) worldFloor - lowest), null, built.builtWidth());
 			} catch (IllegalArgumentException refused) {
+				plan.completeExceptionally(refused);
 				result = new Forecast(0, 0, 0, 0, List.of(), 0, 0, refused.getMessage(), 0);
 			} catch (RuntimeException | LinkageError broken) {
+				plan.completeExceptionally(broken);
 				// A forecast that throws must not take the paste down with it: the build itself may
 				// well be fine, and a screen that cannot tell you the depth is still a screen you
 				// can paste from.
@@ -1532,6 +1608,9 @@ final class BuildOptionsScreen extends Screen {
 		// Left without pasting, so the block choice made here goes back to what it was: it took
 		// effect when it was picked, for the forecast's sake, not because it was meant.
 		MidicraftConfig.get().setColorCodedPaste(coloursOnOpen);
+		for (int slot = 0; slot < PALETTE.size(); slot++) {
+			PALETTE.get(slot).write().accept(MidicraftConfig.get(), paletteOnOpen[slot]);
+		}
 		McCompat.setScreen(parent);
 	}
 
