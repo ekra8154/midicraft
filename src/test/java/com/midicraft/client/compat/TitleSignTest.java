@@ -136,10 +136,10 @@ class TitleSignTest {
 	void theSignGoesUpWithTheStartOfTheSong() throws Exception {
 		Path songs = Path.of("run", "config", "midicraft", "songs");
 		List<String> late = new ArrayList<>();
-		for (String file : List.of("illit-do-the-dance.json", "deltarune-ch-4-guardian.json",
-				"all-of-the-lights-kanye-west.json", "big-shot.json")) {
+		for (String file : List.of(TestSongs.fileName("illit-do-the-dance"), TestSongs.fileName("deltarune-ch-4-guardian"),
+				TestSongs.fileName("all-of-the-lights-kanye-west"), TestSongs.fileName("big-shot"))) {
 			List<SongBuilder.EventNote> notes;
-			try (Reader reader = Files.newBufferedReader(songs.resolve(file))) {
+			try (Reader reader = TestSongs.reader(songs.resolve(file))) {
 				ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
 				ComposerProject project = new ComposerProject(raw.name(), raw.ppq(),
 					raw.tempoMicrosPerQuarter(), raw.layers(), raw.activeLayerIndex(),
@@ -178,9 +178,9 @@ class TitleSignTest {
 		List<String> clashes = new ArrayList<>();
 		int checked = 0;
 		try (var listing = Files.list(songs)) {
-			for (Path file : listing.filter(path -> path.toString().endsWith(".json")).toList()) {
+			for (Path file : listing.filter(path -> TestSongs.isSong(path)).toList()) {
 				List<SongBuilder.EventNote> notes;
-				try (Reader reader = Files.newBufferedReader(file)) {
+				try (Reader reader = TestSongs.reader(file)) {
 					ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
 					ComposerProject project = new ComposerProject(raw.name(), raw.ppq(),
 						raw.tempoMicrosPerQuarter(), raw.layers(), raw.activeLayerIndex(),
@@ -248,9 +248,9 @@ class TitleSignTest {
 		List<String> missing = new ArrayList<>();
 		int built = 0;
 		try (var listing = Files.list(songs)) {
-			for (Path file : listing.filter(path -> path.toString().endsWith(".json")).toList()) {
+			for (Path file : listing.filter(path -> TestSongs.isSong(path)).toList()) {
 				List<SongBuilder.EventNote> notes;
-				try (Reader reader = Files.newBufferedReader(file)) {
+				try (Reader reader = TestSongs.reader(file)) {
 					ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
 					ComposerProject project = new ComposerProject(raw.name(), raw.ppq(),
 						raw.tempoMicrosPerQuarter(), raw.layers(), raw.activeLayerIndex(),

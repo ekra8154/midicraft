@@ -267,7 +267,7 @@ class FaultCensusProbe {
 				.filter(each -> !each.isEmpty()).toList();
 		List<Path> files;
 		try (Stream<Path> listing = Files.list(SONGS)) {
-			files = listing.filter(path -> path.toString().endsWith(".json"))
+			files = listing.filter(path -> TestSongs.isSong(path))
 				.filter(path -> wanted.isEmpty()
 					|| wanted.stream().anyMatch(each -> path.getFileName().toString().contains(each)))
 				.filter(path -> !realOnly || !path.getFileName().toString().startsWith("ultra-"))
@@ -280,8 +280,8 @@ class FaultCensusProbe {
 		if (!only.isEmpty() && files.isEmpty()) {
 			List<String> library;
 			try (Stream<Path> listing = Files.list(SONGS)) {
-				library = listing.filter(path -> path.toString().endsWith(".json"))
-					.map(path -> path.getFileName().toString().replace(".json", ""))
+				library = listing.filter(path -> TestSongs.isSong(path))
+					.map(path -> path.getFileName().toString().replaceFirst("\\.(json|midicraft)$", ""))
 					.sorted().toList();
 			}
 			throw new IllegalArgumentException("census.songs=\"" + only
@@ -294,7 +294,7 @@ class FaultCensusProbe {
 		List<Row> rows = new ArrayList<>();
 		long started = System.currentTimeMillis();
 		for (Path file : files) {
-			String name = file.getFileName().toString().replace(".json", "");
+			String name = file.getFileName().toString().replaceFirst("\\.(json|midicraft)$", "");
 			ComposerProject song = GameSettings.project(file);
 			if (!text("sustain", "").isEmpty()) {
 				song = new ComposerProject(song.name(), song.ppq(), song.tempoMicrosPerQuarter(),
@@ -373,7 +373,7 @@ class FaultCensusProbe {
 		if (!named.isEmpty() && rows.isEmpty()) {
 			List<String> names = new ArrayList<>();
 			for (Path file : files) {
-				try (Reader reader = Files.newBufferedReader(file)) {
+				try (Reader reader = TestSongs.reader(file)) {
 					names.add(String.valueOf(gson.fromJson(reader, ComposerProject.class).name()));
 				}
 			}

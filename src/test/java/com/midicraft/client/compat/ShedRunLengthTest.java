@@ -197,8 +197,8 @@ class ShedRunLengthTest {
 	}
 
 	private static List<SongBuilder.EventNote> load(String name) throws Exception {
-		Path file = Path.of("run", "config", "midicraft", "songs", name + ".json");
-		try (Reader reader = Files.newBufferedReader(file)) {
+		Path file = Path.of("run", "config", "midicraft", "songs", TestSongs.fileName(name));
+		try (Reader reader = TestSongs.reader(file)) {
 			ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
 			ComposerProject song = new ComposerProject(raw.name(), raw.ppq(),
 				raw.tempoMicrosPerQuarter(), raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(),

@@ -29,7 +29,7 @@ class TimescaleCeilingProbe {
 	private static final Path SONGS = Path.of("run", "config", "midicraft", "songs");
 
 	private static ComposerProject load(Path file) throws Exception {
-		try (Reader reader = Files.newBufferedReader(file)) {
+		try (Reader reader = TestSongs.reader(file)) {
 			ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
 			return new ComposerProject(raw.name(), raw.ppq(), raw.tempoMicrosPerQuarter(),
 				raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(), raw.endTick(),
@@ -69,7 +69,7 @@ class TimescaleCeilingProbe {
 	void saysHowMuchFasterEachSongCanRunNow() throws Exception {
 		List<Path> songs = new ArrayList<>();
 		try (var listing = Files.list(SONGS)) {
-			listing.filter(file -> file.toString().endsWith(".json")).sorted().forEach(songs::add);
+			listing.filter(file -> TestSongs.isSong(file)).sorted().forEach(songs::add);
 		}
 		System.out.println();
 		System.out.println("==== fastest timescale that still builds ====");

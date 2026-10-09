@@ -41,7 +41,7 @@ class InterleavedHalfTickTest {
 	}
 
 	private static List<SongBuilder.EventNote> notes(String song) throws Exception {
-		try (Reader reader = Files.newBufferedReader(BreachView.songFile(song))) {
+		try (Reader reader = TestSongs.reader(BreachView.songFile(song))) {
 			ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
 			ComposerProject project = new ComposerProject(raw.name(), raw.ppq(),
 				raw.tempoMicrosPerQuarter(), raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(),

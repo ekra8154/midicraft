@@ -26,7 +26,7 @@ class CornerRepeaterProbe {
 		for (String song : new String[] {"moonlight-sonata-3rd-movement", "neverending-night-2-lanes",
 				"illit-do-the-dance", "guardian25"}) {
 			List<SongBuilder.EventNote> notes;
-			try (Reader reader = Files.newBufferedReader(BreachView.songFile(song))) {
+			try (Reader reader = TestSongs.reader(BreachView.songFile(song))) {
 				ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
 				ComposerProject project = new ComposerProject(raw.name(), raw.ppq(),
 					raw.tempoMicrosPerQuarter(), raw.layers(), raw.activeLayerIndex(),

@@ -35,14 +35,14 @@ class NbsExportLibraryTest {
 		}
 		List<Path> files;
 		try (Stream<Path> listing = Files.list(SONGS)) {
-			files = listing.filter(path -> path.toString().endsWith(".json")).sorted().toList();
+			files = listing.filter(path -> TestSongs.isSong(path)).sorted().toList();
 		}
 		Gson gson = new Gson();
 		List<String> broken = new ArrayList<>();
 		int exported = 0;
 		for (Path file : files) {
 			ComposerProject project;
-			try (Reader reader = Files.newBufferedReader(file)) {
+			try (Reader reader = TestSongs.reader(file)) {
 				ComposerProject raw = gson.fromJson(reader, ComposerProject.class);
 				project = new ComposerProject(raw.name(), raw.ppq(), raw.tempoMicrosPerQuarter(),
 					raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(), raw.endTick(),
@@ -52,7 +52,7 @@ class NbsExportLibraryTest {
 				.flatMap(layer -> layer.notes().stream())
 				.filter(note -> note.startTick() / Math.max(1, project.ppq() / 4) <= 65_535)
 				.count();
-			String name = file.getFileName().toString().replace(".json", "");
+			String name = file.getFileName().toString().replaceFirst("\\.(json|midicraft)$", "");
 			try {
 				NbsExporter.Result result =
 					NbsExporter.export(project, folder.resolve(exported + ".nbs"));

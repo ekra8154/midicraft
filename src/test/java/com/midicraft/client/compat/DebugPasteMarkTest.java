@@ -68,7 +68,7 @@ class DebugPasteMarkTest {
 
 	private static List<SongBuilder.EventNote> song(String file) throws Exception {
 		Path songs = Path.of("run", "config", "midicraft", "songs");
-		try (Reader reader = Files.newBufferedReader(BreachView.songFile(file.replace(".json", "")))) {
+		try (Reader reader = TestSongs.reader(BreachView.songFile(file.replaceFirst("\\.(json|midicraft)$", "")))) {
 			ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
 			ComposerProject song = new ComposerProject(raw.name(), raw.ppq(),
 				raw.tempoMicrosPerQuarter(), raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(),
@@ -126,7 +126,7 @@ class DebugPasteMarkTest {
 
 	@Test
 	void aMarkedPasteIsTheSameMachineAsAPlainOne() throws Exception {
-		List<SongBuilder.EventNote> notes = song("illit-do-the-dance.json");
+		List<SongBuilder.EventNote> notes = song(TestSongs.fileName("illit-do-the-dance"));
 		// Stone lanes, which is what a marked paste keeps them as: its lane stone is a colour in the
 		// key, so the player's lane blocks are not swapped in there.
 		SongBuilder.LANE_ONE_BLOCK = "minecraft:stone";
@@ -187,9 +187,9 @@ class DebugPasteMarkTest {
 	void aCleanLaneIsNeverMarkedAsBreaching() throws Exception {
 		SongBuilder.DEBUG_PASTE = true;
 		List<String> wrong = new ArrayList<>();
-		for (String file : List.of("illit-do-the-dance.json", "deltarune-ch-4-guardian.json",
-				"all-of-the-lights-kanye-west.json", "big-shot.json")) {
-			if (!BreachView.inLibrary(file.replace(".json", ""))) {
+		for (String file : List.of(TestSongs.fileName("illit-do-the-dance"), TestSongs.fileName("deltarune-ch-4-guardian"),
+				TestSongs.fileName("all-of-the-lights-kanye-west"), TestSongs.fileName("big-shot"))) {
+			if (!BreachView.inLibrary(file.replaceFirst("\\.(json|midicraft)$", ""))) {
 				continue;
 			}
 			List<SongBuilder.EventNote> notes = song(file);
@@ -233,7 +233,7 @@ class DebugPasteMarkTest {
 		try {
 			// The song the rails actually run in: a third of its coloured stone is rail.
 			plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0),
-				song("all-of-the-lights-kanye-west.json"), SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
+				song(TestSongs.fileName("all-of-the-lights-kanye-west")), SongBuilder.PasteMode.ULTRA_COMPACT_LANE,
 				LIMITS);
 		} finally {
 			SongBuilder.RAIL_MOVES_FOR_STACKS = true;
@@ -280,7 +280,7 @@ class DebugPasteMarkTest {
 	@Test
 	void aDiagramOfAMarkedBuildSaysWhatTheColoursMean() throws Exception {
 		SongBuilder.DEBUG_PASTE = true;
-		Map<BlockPos, String> marked = laid(plan(song("illit-do-the-dance.json")));
+		Map<BlockPos, String> marked = laid(plan(song(TestSongs.fileName("illit-do-the-dance"))));
 		Map<BlockPos, BlockState> world = new java.util.HashMap<>();
 		for (Map.Entry<BlockPos, String> cell : marked.entrySet()) {
 			world.put(cell.getKey(), BlockStateParser
@@ -315,7 +315,7 @@ class DebugPasteMarkTest {
 	 */
 	@Test
 	void nothingUnderANoteIsRecoloured() throws Exception {
-		List<SongBuilder.EventNote> notes = song("illit-do-the-dance.json");
+		List<SongBuilder.EventNote> notes = song(TestSongs.fileName("illit-do-the-dance"));
 		SongBuilder.DEBUG_PASTE = true;
 		Map<BlockPos, String> marked = laid(plan(notes));
 		List<String> retuned = new ArrayList<>();

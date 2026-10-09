@@ -101,7 +101,7 @@ class WriteRailBaitSongTest {
 			ComposerProject.DEFAULT_PPQ, ComposerProject.DEFAULT_TEMPO_MICROS_PER_QUARTER,
 			List.of(new ComposerProject.Layer("harp", "HARP", false, true, true, notes)),
 			0, id, (tick + 1) * TICK, ComposerProject.DEFAULT_SPEED_QUARTERS);
-		Files.writeString(SONGS.resolve(name + ".json"), new Gson().toJson(song));
+		Files.writeString(SONGS.resolve(TestSongs.fileName(name)), new Gson().toJson(song));
 
 		// Read back off the sequence the game will actually build, not off the layer. Dedupe is on in
 		// the live config, so the layer and the build disagree by up to a sixth on a real song -- and

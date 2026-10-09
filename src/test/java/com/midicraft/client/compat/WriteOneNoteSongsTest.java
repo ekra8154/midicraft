@@ -102,7 +102,7 @@ class WriteOneNoteSongsTest {
 		ComposerProject song = new ComposerProject(name.replace('-', ' '),
 			ComposerProject.DEFAULT_PPQ, ComposerProject.DEFAULT_TEMPO_MICROS_PER_QUARTER,
 			layers, 0, id, (tick + 1) * TICK, ComposerProject.DEFAULT_SPEED_QUARTERS);
-		Files.writeString(SONGS.resolve(name + ".json"), new Gson().toJson(song));
+		Files.writeString(SONGS.resolve(TestSongs.fileName(name)), new Gson().toJson(song));
 		List<SongBuilder.EventNote> built =
 			SongBuilder.eventNotes(song.toSequenceTracks(Set.of(), true));
 		Map<Integer, Integer> perTick = new java.util.TreeMap<>();
@@ -134,7 +134,7 @@ class WriteOneNoteSongsTest {
 			ComposerProject.DEFAULT_PPQ, ComposerProject.DEFAULT_TEMPO_MICROS_PER_QUARTER,
 			List.of(new ComposerProject.Layer("scale", "HARP", false, true, true, notes)),
 			0, events + 1L, (tick + 1) * TICK, ComposerProject.DEFAULT_SPEED_QUARTERS);
-		Files.writeString(SONGS.resolve(name + ".json"), new Gson().toJson(song));
+		Files.writeString(SONGS.resolve(TestSongs.fileName(name)), new Gson().toJson(song));
 		List<SongBuilder.EventNote> built =
 			SongBuilder.eventNotes(song.toSequenceTracks(Set.of(), true));
 		int max = built.stream()

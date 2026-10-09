@@ -59,7 +59,7 @@ class BreachIsRealTest {
 	private static final Path SONGS = Path.of("run", "config", "midicraft", "songs");
 
 	private static List<SongBuilder.EventNote> load(Path file) throws Exception {
-		try (Reader reader = Files.newBufferedReader(file)) {
+		try (Reader reader = TestSongs.reader(file)) {
 			ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
 			ComposerProject song = new ComposerProject(raw.name(), raw.ppq(),
 				raw.tempoMicrosPerQuarter(), raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(),
@@ -137,7 +137,7 @@ class BreachIsRealTest {
 	void countsTheBreachesThatAreOnlyInThePromise() throws Exception {
 		List<Path> files;
 		try (Stream<Path> listing = Files.list(SONGS)) {
-			files = listing.filter(f -> f.toString().endsWith(".json")).sorted().toList();
+			files = listing.filter(f -> TestSongs.isSong(f)).sorted().toList();
 		}
 		long builds = 0;
 		// Builds where the blocks are identical with the shape on and off.
@@ -153,7 +153,7 @@ class BreachIsRealTest {
 		long offBreaches = 0;
 		TreeMap<String, Long> accountingBySong = new TreeMap<>();
 		for (Path file : files) {
-			String name = file.getFileName().toString().replace(".json", "");
+			String name = file.getFileName().toString().replaceFirst("\\.(json|midicraft)$", "");
 			if (name.startsWith("ultra-")) {
 				continue;
 			}

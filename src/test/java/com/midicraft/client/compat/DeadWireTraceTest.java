@@ -26,9 +26,9 @@ class DeadWireTraceTest {
 	@Test
 	void traces() throws Exception {
 		Path file = Path.of("run", "config", "midicraft", "songs",
-			"ultra-limit-two-thirties.json");
+			TestSongs.fileName("ultra-limit-two-thirties"));
 		ComposerProject song;
-		try (Reader reader = Files.newBufferedReader(file)) {
+		try (Reader reader = TestSongs.reader(file)) {
 			ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
 			song = new ComposerProject(raw.name(), raw.ppq(), raw.tempoMicrosPerQuarter(),
 				raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(), raw.endTick(),

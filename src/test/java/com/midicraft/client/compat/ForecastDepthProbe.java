@@ -30,15 +30,15 @@ class ForecastDepthProbe {
 	void whatTheDepthLineSays() throws Exception {
 		List<Path> files;
 		try (Stream<Path> listing = Files.list(SONGS)) {
-			files = listing.filter(p -> p.toString().endsWith(".json")).sorted().filter(f -> f.getFileName().toString().contains(System.getProperty("probe.song", ""))).toList();
+			files = listing.filter(p -> TestSongs.isSong(p)).sorted().filter(f -> f.getFileName().toString().contains(System.getProperty("probe.song", ""))).toList();
 		}
 		for (SongBuilder.PasteMode mode : List.of(SongBuilder.PasteMode.HALF_TICK_LANE,
 				SongBuilder.PasteMode.INTERLEAVED_HALF_TICK)) {
 			System.out.println("== " + mode);
 			for (Path file : files) {
-				String name = file.getFileName().toString().replace(".json", "");
+				String name = file.getFileName().toString().replaceFirst("\\.(json|midicraft)$", "");
 				ComposerProject song;
-				try (Reader reader = Files.newBufferedReader(file)) {
+				try (Reader reader = TestSongs.reader(file)) {
 					ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
 					song = new ComposerProject(raw.name(), raw.ppq(), raw.tempoMicrosPerQuarter(),
 						raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(), raw.endTick(),

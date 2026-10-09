@@ -50,7 +50,7 @@ class FoldFaultProbe {
 			.toArray(String[][]::new);
 		for (String[] build : failing) {
 			List<SongBuilder.EventNote> notes;
-			try (Reader reader = Files.newBufferedReader(BreachView.songFile(build[0]))) {
+			try (Reader reader = TestSongs.reader(BreachView.songFile(build[0]))) {
 				ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
 				ComposerProject project = new ComposerProject(raw.name(), raw.ppq(),
 					raw.tempoMicrosPerQuarter(), raw.layers(), raw.activeLayerIndex(),

@@ -42,7 +42,7 @@ class TurnShortTest {
 	private static final Path SONGS = Path.of("run", "config", "midicraft", "songs");
 
 	private static List<SongBuilder.EventNote> load(String name) throws Exception {
-		try (Reader reader = Files.newBufferedReader(BreachView.songFile(name))) {
+		try (Reader reader = TestSongs.reader(BreachView.songFile(name))) {
 			ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
 			ComposerProject song = new ComposerProject(raw.name(), raw.ppq(),
 				raw.tempoMicrosPerQuarter(), raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(),

@@ -38,7 +38,7 @@ class IllitTwoFloorPadTest {
 
 	private static List<SongBuilder.EventNote> illit() throws Exception {
 		Path songs = Path.of("run", "config", "midicraft", "songs");
-		try (Reader reader = Files.newBufferedReader(BreachView.songFile("illit-do-the-dance"))) {
+		try (Reader reader = TestSongs.reader(BreachView.songFile("illit-do-the-dance"))) {
 			ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
 			ComposerProject song = new ComposerProject(raw.name(), raw.ppq(),
 				raw.tempoMicrosPerQuarter(), raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(),

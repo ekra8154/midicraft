@@ -75,8 +75,8 @@ class ConvertLeavesGridProbe {
 	void afterConvert() throws Exception {
 		List<String> songs;
 		try (Stream<Path> files = Files.list(SONGS)) {
-			songs = files.filter(p -> p.toString().endsWith(".json"))
-				.map(p -> p.getFileName().toString().replace(".json", ""))
+			songs = files.filter(p -> TestSongs.isSong(p))
+				.map(p -> p.getFileName().toString().replaceFirst("\\.(json|midicraft)$", ""))
 				.sorted().toList();
 		}
 		for (boolean snapTempo : new boolean[] {true, false}) {
@@ -88,7 +88,7 @@ class ConvertLeavesGridProbe {
 				+ (snapTempo ? "" : "  WITH SNAP TEMPO OFF"));
 			for (String song : songs) {
 				ComposerProject raw;
-				try (Reader reader = Files.newBufferedReader(SONGS.resolve(song + ".json"))) {
+				try (Reader reader = TestSongs.reader(SONGS.resolve(TestSongs.fileName(song)))) {
 					raw = new Gson().fromJson(reader, ComposerProject.class);
 				} catch (Exception refused) {
 					continue;

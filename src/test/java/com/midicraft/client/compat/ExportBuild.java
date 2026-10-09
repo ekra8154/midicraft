@@ -239,17 +239,17 @@ final class ExportBuild {
 	/** A song by file, by file name in the library, or by name, whole or a unique part. */
 	private static Path song(String asked) throws IOException {
 		Path given = Path.of(asked);
-		if (asked.toLowerCase(Locale.ROOT).endsWith(".json") && Files.isRegularFile(given)) {
+		if (com.midicraft.client.composer.SongFile.isSongFile(asked) && Files.isRegularFile(given)) {
 			return given;
 		}
-		Path byId = SONGS.resolve(asked + ".json");
+		Path byId = SONGS.resolve(TestSongs.fileName(asked));
 		if (Files.isRegularFile(byId)) {
 			return byId;
 		}
 		String wanted = asked.toLowerCase(Locale.ROOT);
 		Map<Path, String> names = new LinkedHashMap<>();
 		try (Stream<Path> files = Files.list(SONGS)) {
-			for (Path file : files.filter(p -> p.toString().endsWith(".json")).sorted().toList()) {
+			for (Path file : files.filter(p -> TestSongs.isSong(p)).sorted().toList()) {
 				names.put(file, nameOf(file));
 			}
 		}
@@ -271,13 +271,13 @@ final class ExportBuild {
 		StringBuilder choices = new StringBuilder("\"" + asked + "\" matches "
 			+ partial.size() + " songs; give the file name of the one you mean:");
 		partial.forEach(file -> choices.append("\n  ")
-			.append(file.getFileName().toString().replaceFirst("\\.json$", ""))
+			.append(file.getFileName().toString().replaceFirst("\\.(json|midicraft)$", ""))
 			.append("  (").append(names.get(file)).append(")"));
 		throw new IllegalArgumentException(choices.toString());
 	}
 
 	private static String nameOf(Path file) {
-		try (Reader reader = Files.newBufferedReader(file)) {
+		try (Reader reader = TestSongs.reader(file)) {
 			ComposerProject song = new Gson().fromJson(reader, ComposerProject.class);
 			return song == null || song.name() == null ? "" : song.name();
 		} catch (IOException | RuntimeException unreadable) {
@@ -348,7 +348,7 @@ final class ExportBuild {
 		if (!Files.exists(GameSettings.CONFIG)) {
 			return new StoredLook();
 		}
-		try (Reader reader = Files.newBufferedReader(GameSettings.CONFIG)) {
+		try (Reader reader = TestSongs.reader(GameSettings.CONFIG)) {
 			StoredLook found = new Gson().fromJson(reader, StoredLook.class);
 			return found == null ? new StoredLook() : found;
 		}

@@ -74,7 +74,7 @@ class OrphanRepeaterProbe {
 		String only = text("songs", "");
 		List<Path> files;
 		try (Stream<Path> listing = Files.list(SONGS)) {
-			files = listing.filter(path -> path.toString().endsWith(".json"))
+			files = listing.filter(path -> TestSongs.isSong(path))
 				.filter(path -> only.isEmpty() || path.getFileName().toString().contains(only))
 				.sorted().toList();
 		}
@@ -88,9 +88,9 @@ class OrphanRepeaterProbe {
 		System.out.println();
 		System.out.println("==== repeaters with air behind them, one expected per build ====");
 		for (Path file : files) {
-			String name = file.getFileName().toString().replace(".json", "");
+			String name = file.getFileName().toString().replaceFirst("\\.(json|midicraft)$", "");
 			ComposerProject song;
-			try (Reader reader = Files.newBufferedReader(file)) {
+			try (Reader reader = TestSongs.reader(file)) {
 				ComposerProject raw = gson.fromJson(reader, ComposerProject.class);
 				song = new ComposerProject(raw.name(), raw.ppq(), raw.tempoMicrosPerQuarter(),
 					raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(), raw.endTick(),

@@ -49,7 +49,7 @@ class SplitNudgeTest {
 	void pricesTheNudgeAndReadsEveryBuildBack() throws Exception {
 		List<Path> files;
 		try (Stream<Path> listing = Files.list(SONGS)) {
-			files = listing.filter(p -> p.toString().endsWith(".json")).sorted().toList();
+			files = listing.filter(p -> TestSongs.isSong(p)).sorted().toList();
 		}
 		for (int on = 0; on <= 1; on++) {
 			SongBuilder.SPLIT_NUDGES = on == 1;
@@ -64,12 +64,12 @@ class SplitNudgeTest {
 			int mismatched = 0;
 			int readBuilds = 0;
 			for (Path file : files) {
-				String name = file.getFileName().toString().replace(".json", "");
+				String name = file.getFileName().toString().replaceFirst("\\.(json|midicraft)$", "");
 				if (name.startsWith("ultra-")) {
 					continue;
 				}
 				ComposerProject song;
-				try (Reader reader = Files.newBufferedReader(file)) {
+				try (Reader reader = TestSongs.reader(file)) {
 					ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
 					song = new ComposerProject(raw.name(), raw.ppq(), raw.tempoMicrosPerQuarter(),
 						raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(), raw.endTick(),

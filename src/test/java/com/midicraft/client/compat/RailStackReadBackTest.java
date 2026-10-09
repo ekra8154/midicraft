@@ -40,7 +40,7 @@ class RailStackReadBackTest {
 		var candidates = new TreeMap<Integer, String>();
 		List<Path> songs = new ArrayList<>();
 		try (var listing = Files.list(SONGS)) {
-			listing.filter(path -> path.toString().endsWith(".json")).sorted().forEach(songs::add);
+			listing.filter(path -> TestSongs.isSong(path)).sorted().forEach(songs::add);
 		}
 		for (Path path : songs) {
 			List<SongBuilder.EventNote> notes;
@@ -50,7 +50,7 @@ class RailStackReadBackTest {
 				continue;
 			}
 			if (notes.size() >= 40 && notes.size() <= 900 && stacks(notes)) {
-				candidates.put(notes.size(), path.getFileName().toString().replace(".json", ""));
+				candidates.put(notes.size(), path.getFileName().toString().replaceFirst("\\.(json|midicraft)$", ""));
 			}
 		}
 		int read = 0;
@@ -90,7 +90,7 @@ class RailStackReadBackTest {
 	}
 
 	private static List<SongBuilder.EventNote> load(Path path) throws java.io.IOException {
-		try (Reader reader = Files.newBufferedReader(path)) {
+		try (Reader reader = TestSongs.reader(path)) {
 			ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
 			ComposerProject song = new ComposerProject(raw.name(), raw.ppq(),
 				raw.tempoMicrosPerQuarter(), raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(),

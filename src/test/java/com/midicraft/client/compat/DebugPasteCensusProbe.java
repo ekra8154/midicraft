@@ -45,7 +45,7 @@ class DebugPasteCensusProbe {
 
 	private static List<SongBuilder.EventNote> song(String file) throws Exception {
 		Path songs = Path.of("run", "config", "midicraft", "songs");
-		try (Reader reader = Files.newBufferedReader(BreachView.songFile(file.replace(".json", "")))) {
+		try (Reader reader = TestSongs.reader(BreachView.songFile(file.replaceFirst("\\.(json|midicraft)$", "")))) {
 			ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
 			ComposerProject project = new ComposerProject(raw.name(), raw.ppq(),
 				raw.tempoMicrosPerQuarter(), raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(),
@@ -85,7 +85,7 @@ class DebugPasteCensusProbe {
 		Path songs = Path.of("run", "config", "midicraft", "songs");
 		int found = 0;
 		try (var listing = Files.list(songs)) {
-			for (Path file : listing.filter(path -> path.toString().endsWith(".json")).sorted()
+			for (Path file : listing.filter(path -> TestSongs.isSong(path)).sorted()
 					.toList()) {
 				List<SongBuilder.EventNote> notes;
 				try {
@@ -126,17 +126,17 @@ class DebugPasteCensusProbe {
 
 	@Test
 	void census() throws Exception {
-		String[] songs = {"illit-do-the-dance.json", "deltarune-ch-4-guardian.json",
-			"all-of-the-lights-kanye-west.json", "big-shot.json"};
+		String[] songs = {TestSongs.fileName("illit-do-the-dance"), TestSongs.fileName("deltarune-ch-4-guardian"),
+			TestSongs.fileName("all-of-the-lights-kanye-west"), TestSongs.fileName("big-shot")};
 		int[][] configurations = {{40, 3}, {16, 4}, {12, 3}, {24, 6}};
 		SongBuilder.DEBUG_PASTE = true;
 		for (String file : songs) {
-			if (!BreachView.inLibrary(file.replace(".json", ""))) {
+			if (!BreachView.inLibrary(file.replaceFirst("\\.(json|midicraft)$", ""))) {
 				continue;
 			}
 			List<SongBuilder.EventNote> notes = song(file);
 			for (int[] configuration : configurations) {
-				String heading = file.replace(".json", "") + "  " + configuration[0] + "x"
+				String heading = file.replaceFirst("\\.(json|midicraft)$", "") + "  " + configuration[0] + "x"
 					+ configuration[1];
 				SongBuilder.PastePlan plan;
 				try {

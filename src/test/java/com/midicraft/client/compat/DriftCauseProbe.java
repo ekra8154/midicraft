@@ -71,7 +71,7 @@ class DriftCauseProbe {
 		Gson gson = new Gson();
 		List<Path> files;
 		try (Stream<Path> listing = Files.list(SONGS)) {
-			files = listing.filter(path -> path.toString().endsWith(".json")).sorted().toList();
+			files = listing.filter(path -> TestSongs.isSong(path)).sorted().toList();
 		}
 		boolean wasDebug = SongBuilder.DEBUG_PASTE;
 		boolean wasMarking = SongBuilder.MARK_UNREACHED;
@@ -91,7 +91,7 @@ class DriftCauseProbe {
 				"plan%", "free", "builds: size  predicted worst -> measured worst (mean)  cols/plan"));
 			for (Path file : files) {
 				ComposerProject song;
-				try (Reader reader = Files.newBufferedReader(file)) {
+				try (Reader reader = TestSongs.reader(file)) {
 					ComposerProject raw = gson.fromJson(reader, ComposerProject.class);
 					song = new ComposerProject(raw.name(), raw.ppq(), raw.tempoMicrosPerQuarter(),
 						raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(), raw.endTick(),
@@ -132,7 +132,7 @@ class DriftCauseProbe {
 				}
 				System.out.println(String.format(
 					"   %-34.34s %4d/%-4d %4d/%-4d | %5d/%-5d %6d    | %5d/%-5d %6d %5.0f | %4.0f%% %5d |%s",
-					file.getFileName().toString().replace(".json", ""),
+					file.getFileName().toString().replaceFirst("\\.(json|midicraft)$", ""),
 					distinctTimes(schedule.laneA()), distinctTimes(schedule.laneB()),
 					schedule.flipsA().size(), schedule.flipsB().size(),
 					fixed.totalA(), fixed.totalB(), fixed.worst(),
@@ -161,7 +161,7 @@ class DriftCauseProbe {
 		Gson gson = new Gson();
 		List<Path> files;
 		try (Stream<Path> listing = Files.list(SONGS)) {
-			files = listing.filter(path -> path.toString().endsWith(".json")).sorted().toList();
+			files = listing.filter(path -> TestSongs.isSong(path)).sorted().toList();
 		}
 		System.out.println();
 		System.out.println("==== the two halves of the game tick, song by song ====");
@@ -170,7 +170,7 @@ class DriftCauseProbe {
 			">=13", "windows (other half silent >=13 gt before this one plays)"));
 		for (Path file : files) {
 			ComposerProject song;
-			try (Reader reader = Files.newBufferedReader(file)) {
+			try (Reader reader = TestSongs.reader(file)) {
 				ComposerProject raw = gson.fromJson(reader, ComposerProject.class);
 				song = new ComposerProject(raw.name(), raw.ppq(), raw.tempoMicrosPerQuarter(),
 					raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(), raw.endTick(),
@@ -212,7 +212,7 @@ class DriftCauseProbe {
 				}
 				System.out.println(String.format(
 					"   %-34.34s %4s %6d %6d %6.2f %6d %7.1f | %4.0f%% %5d %5d %5d %5d | %d",
-					side == 0 ? file.getFileName().toString().replace(".json", "") : "",
+					side == 0 ? file.getFileName().toString().replaceFirst("\\.(json|midicraft)$", "") : "",
 					side == 0 ? "even" : "odd", own.size(), half.size(),
 					(double) half.size() / Math.max(1, own.size()), cells, 100.0 * cells / span,
 					100.0 * gaps.stream().filter(gap -> gap <= 2).count() / Math.max(1, gaps.size()),
@@ -264,7 +264,7 @@ class DriftCauseProbe {
 			SongBuilder.MARK_UNREACHED = false;
 			for (String name : songs.split(",")) {
 				ComposerProject song;
-				try (Reader reader = Files.newBufferedReader(SONGS.resolve(name.strip() + ".json"))) {
+				try (Reader reader = TestSongs.reader(SONGS.resolve(TestSongs.fileName(name.strip())))) {
 					ComposerProject raw = gson.fromJson(reader, ComposerProject.class);
 					song = new ComposerProject(raw.name(), raw.ppq(), raw.tempoMicrosPerQuarter(),
 						raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(), raw.endTick(),

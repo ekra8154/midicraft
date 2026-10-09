@@ -58,7 +58,7 @@ class TurnBanTest {
 	void pricesTheRuleAndReadsTheMachinesBack() throws Exception {
 		List<Path> files;
 		try (Stream<Path> listing = Files.list(SONGS)) {
-			files = listing.filter(f -> f.toString().endsWith(".json")).sorted().toList();
+			files = listing.filter(f -> TestSongs.isSong(f)).sorted().toList();
 		}
 		// 0 = ban ends with the turn, 1 = ban outlasts it by a chord, 2 = the distance rule.
 		for (int mode = 1; mode >= 0; mode--) {
@@ -81,12 +81,12 @@ class TurnBanTest {
 			int mismatched = 0;
 			int readBuilds = 0;
 			for (Path file : files) {
-				String name = file.getFileName().toString().replace(".json", "");
+				String name = file.getFileName().toString().replaceFirst("\\.(json|midicraft)$", "");
 				if (name.startsWith("ultra-")) {
 					continue;
 				}
 				ComposerProject song;
-				try (Reader reader = Files.newBufferedReader(file)) {
+				try (Reader reader = TestSongs.reader(file)) {
 					ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
 					song = new ComposerProject(raw.name(), raw.ppq(), raw.tempoMicrosPerQuarter(),
 						raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(), raw.endTick(),
@@ -174,7 +174,7 @@ class TurnBanTest {
 		SongBuilder.TURN_BAN_BY_DISTANCE = true;
 		List<Path> files;
 		try (Stream<Path> listing = Files.list(SONGS)) {
-			files = listing.filter(f -> f.toString().endsWith(".json")).sorted().toList();
+			files = listing.filter(f -> TestSongs.isSong(f)).sorted().toList();
 		}
 		Map<String, Integer> bySide = new java.util.TreeMap<>();
 		Map<String, Integer> byKind = new java.util.TreeMap<>();
@@ -184,12 +184,12 @@ class TurnBanTest {
 		String example = null;
 		int collisions = 0;
 		for (Path file : files) {
-			String name = file.getFileName().toString().replace(".json", "");
+			String name = file.getFileName().toString().replaceFirst("\\.(json|midicraft)$", "");
 			if (name.startsWith("ultra-")) {
 				continue;
 			}
 			ComposerProject song;
-			try (Reader reader = Files.newBufferedReader(file)) {
+			try (Reader reader = TestSongs.reader(file)) {
 				ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
 				song = new ComposerProject(raw.name(), raw.ppq(), raw.tempoMicrosPerQuarter(),
 					raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(), raw.endTick(),
@@ -250,7 +250,7 @@ class TurnBanTest {
 	void dumpsTheSmallestWrongNote() throws Exception {
 		SongBuilder.TURN_BAN_OUTLASTS = false;
 		ComposerProject song;
-		try (Reader reader = Files.newBufferedReader(BreachView.songFile("i-wonder"))) {
+		try (Reader reader = TestSongs.reader(BreachView.songFile("i-wonder"))) {
 			ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
 			song = new ComposerProject(raw.name(), raw.ppq(), raw.tempoMicrosPerQuarter(),
 				raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(), raw.endTick(),
@@ -300,7 +300,7 @@ class TurnBanTest {
 	void dumpsTheSouthSideDouble() throws Exception {
 		SongBuilder.TURN_BAN_BY_DISTANCE = true;
 		ComposerProject song;
-		try (Reader reader = Files.newBufferedReader(BreachView.songFile("deltarune-ch-4-guardian"))) {
+		try (Reader reader = TestSongs.reader(BreachView.songFile("deltarune-ch-4-guardian"))) {
 			ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
 			song = new ComposerProject(raw.name(), raw.ppq(), raw.tempoMicrosPerQuarter(),
 				raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(), raw.endTick(),

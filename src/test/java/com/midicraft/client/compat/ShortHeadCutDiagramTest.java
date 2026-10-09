@@ -45,7 +45,7 @@ class ShortHeadCutDiagramTest {
 	private static final Path SONGS = Path.of("run", "config", "midicraft", "songs");
 
 	private static List<SongBuilder.EventNote> load(String name) throws Exception {
-		try (Reader reader = Files.newBufferedReader(BreachView.songFile(name))) {
+		try (Reader reader = TestSongs.reader(BreachView.songFile(name))) {
 			ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
 			ComposerProject song = new ComposerProject(raw.name(), raw.ppq(),
 				raw.tempoMicrosPerQuarter(), raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(),
@@ -63,10 +63,10 @@ class ShortHeadCutDiagramTest {
 		int smallest = Integer.MAX_VALUE;
 		java.util.List<Path> files;
 		try (java.util.stream.Stream<Path> listing = Files.list(SONGS)) {
-			files = listing.filter(f -> f.toString().endsWith(".json")).sorted().toList();
+			files = listing.filter(f -> TestSongs.isSong(f)).sorted().toList();
 		}
 		for (Path file : files) {
-			String name = file.getFileName().toString().replace(".json", "");
+			String name = file.getFileName().toString().replaceFirst("\\.(json|midicraft)$", "");
 			if (name.startsWith("ultra-")) {
 				continue;
 			}

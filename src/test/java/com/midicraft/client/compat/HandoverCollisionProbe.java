@@ -119,7 +119,7 @@ class HandoverCollisionProbe {
 
 	private static List<SongBuilder.EventNote> guardian() throws Exception {
 		java.nio.file.Path songs = java.nio.file.Path.of("run", "config", "midicraft", "songs");
-		try (java.io.Reader reader = java.nio.file.Files.newBufferedReader(
+		try (java.io.Reader reader = TestSongs.reader(
 				BreachView.songFile("deltarune-ch-4-guardian"))) {
 			com.midicraft.client.composer.ComposerProject raw =
 				new com.google.gson.Gson().fromJson(reader,

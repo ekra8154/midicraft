@@ -37,9 +37,9 @@ class CrossDescentHoleProbe {
 			int width = Integer.parseInt(System.getProperty("hole.width", "20"));
 			int floors = Integer.parseInt(System.getProperty("hole.floors", "5"));
 			java.nio.file.Path file = java.nio.file.Path.of("run", "config", "midicraft",
-				"songs", name + ".json");
+				"songs", TestSongs.fileName(name));
 			ComposerProject raw;
-			try (java.io.Reader reader = java.nio.file.Files.newBufferedReader(file)) {
+			try (java.io.Reader reader = TestSongs.reader(file)) {
 				raw = new com.google.gson.Gson().fromJson(reader, ComposerProject.class);
 			}
 			ComposerProject song = new ComposerProject(raw.name(), raw.ppq(),

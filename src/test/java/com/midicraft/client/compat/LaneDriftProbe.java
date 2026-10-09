@@ -98,7 +98,7 @@ class LaneDriftProbe {
 		java.nio.file.Path songs = java.nio.file.Path.of("run", "config", "midicraft", "songs");
 		List<java.nio.file.Path> files = new ArrayList<>();
 		try (var listing = java.nio.file.Files.list(songs)) {
-			listing.filter(file -> file.toString().endsWith(".json")).sorted().forEach(files::add);
+			listing.filter(file -> TestSongs.isSong(file)).sorted().forEach(files::add);
 		}
 		System.out.println();
 		System.out.println("==== drift across the library, half-tick lane ====");
@@ -113,7 +113,7 @@ class LaneDriftProbe {
 		int pastEarshotAtOwnSpeed = 0;
 		int worstAtOwnSpeed = 0;
 		for (java.nio.file.Path file : files) {
-			String name = file.getFileName().toString().replace(".json", "");
+			String name = file.getFileName().toString().replaceFirst("\\.(json|midicraft)$", "");
 			for (int speedFactor : new int[] {1, 2}) {
 				com.midicraft.client.composer.ComposerProject project = BreachView.project(name);
 				if (speedFactor != 1) {
@@ -207,7 +207,7 @@ class LaneDriftProbe {
 		java.nio.file.Path songs = java.nio.file.Path.of("run", "config", "midicraft", "songs");
 		List<java.nio.file.Path> files = new ArrayList<>();
 		try (var listing = java.nio.file.Files.list(songs)) {
-			listing.filter(file -> file.toString().endsWith(".json")).sorted().forEach(files::add);
+			listing.filter(file -> TestSongs.isSong(file)).sorted().forEach(files::add);
 		}
 		System.out.println();
 		System.out.println("==== lockstep lanes vs padding only when behind ====");
@@ -225,7 +225,7 @@ class LaneDriftProbe {
 		boolean restore = SongBuilder.MIRRORS_ONLY_WHEN_BEHIND;
 		try {
 			for (java.nio.file.Path file : files) {
-				String name = file.getFileName().toString().replace(".json", "");
+				String name = file.getFileName().toString().replaceFirst("\\.(json|midicraft)$", "");
 				for (int speedFactor : new int[] {1, 2}) {
 					com.midicraft.client.composer.ComposerProject project = BreachView.project(name);
 					if (speedFactor != 1) {

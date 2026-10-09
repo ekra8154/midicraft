@@ -26,9 +26,9 @@ class TopFirstTurnTest {
 	@Test
 	void showsTheFirstTurn() throws Exception {
 		Path file = Path.of("run", "config", "midicraft", "songs",
-			"deltarune-ch-4-guardian.json");
+			TestSongs.fileName("deltarune-ch-4-guardian"));
 		ComposerProject song;
-		try (Reader reader = Files.newBufferedReader(file)) {
+		try (Reader reader = TestSongs.reader(file)) {
 			ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
 			song = new ComposerProject(raw.name(), raw.ppq(), raw.tempoMicrosPerQuarter(),
 				raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(), raw.endTick(),

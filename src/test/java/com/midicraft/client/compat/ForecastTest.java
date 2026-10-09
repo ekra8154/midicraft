@@ -38,17 +38,17 @@ class ForecastTest {
 	void timesTheForecastOnTheBiggestSongs() throws Exception {
 		List<Path> files;
 		try (Stream<Path> listing = Files.list(SONGS)) {
-			files = listing.filter(p -> p.toString().endsWith(".json")).sorted().toList();
+			files = listing.filter(p -> TestSongs.isSong(p)).sorted().toList();
 		}
 		long worst = 0;
 		String worstName = "";
 		for (Path file : files) {
-			String name = file.getFileName().toString().replace(".json", "");
+			String name = file.getFileName().toString().replaceFirst("\\.(json|midicraft)$", "");
 			if (name.startsWith("ultra-")) {
 				continue;
 			}
 			ComposerProject song;
-			try (Reader reader = Files.newBufferedReader(file)) {
+			try (Reader reader = TestSongs.reader(file)) {
 				ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
 				song = new ComposerProject(raw.name(), raw.ppq(), raw.tempoMicrosPerQuarter(),
 					raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(), raw.endTick(),

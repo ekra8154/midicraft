@@ -1,11 +1,9 @@
 package com.midicraft.client.composer;
 
-import com.google.gson.Gson;
 import java.io.IOException;
-import java.io.Reader;
-import java.io.Writer;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -15,7 +13,8 @@ import java.util.stream.Stream;
 import net.fabricmc.loader.api.FabricLoader;
 
 /**
- * The songs on disk, one composition per file under {@code config/midicraft/songs}.
+ * The songs on disk, one composition per {@code .midicraft} file under
+ * {@code config/midicraft/songs}. See {@link SongFile} for what is in one.
  *
  * <p>Songs used to live inside the settings file, which coupled two things that fail very
  * differently. Settings are a few dozen small values; a song is most of a megabyte and is rewritten
@@ -24,14 +23,13 @@ import net.fabricmc.loader.api.FabricLoader;
  * not parse costs you that song, and says so.</p>
  */
 public final class SongLibrary {
-	/** Compact on purpose: a song is data, not something anyone reads by hand. */
-	private static final Gson GSON = new Gson();
 	private static final Path DIRECTORY = FabricLoader.getInstance()
 		.getConfigDir()
 		.resolve("midicraft")
 		.resolve("songs");
 
 	private final Map<String, ComposerProject> songs = new LinkedHashMap<>();
+	private final Map<String, SongFile.Details> details = new LinkedHashMap<>();
 	private final List<String> failures = new ArrayList<>();
 
 	private SongLibrary() {
@@ -56,7 +54,7 @@ public final class SongLibrary {
 			Files.createDirectories(folder);
 			Files.writeString(folder.resolve("README.txt"),
 				"""
-				Put .mid, .midi and .nbs files here to import them into Midicraft.
+				Put .mid, .midi, .nbs and .midicraft files here to import them into Midicraft.
 
 				The composer's Import opens this folder first. Nothing in here is read
 				automatically and nothing is ever written to or deleted from it -- importing
@@ -75,9 +73,11 @@ public final class SongLibrary {
 		if (Files.notExists(DIRECTORY)) {
 			return library;
 		}
+		library.failures.addAll(SongFile.convertLegacy(DIRECTORY, modVersion(),
+			minecraftVersion()));
 		List<Path> files;
 		try (Stream<Path> listing = Files.list(DIRECTORY)) {
-			files = listing.filter(path -> path.getFileName().toString().endsWith(".json"))
+			files = listing.filter(path -> path.getFileName().toString().endsWith(SongFile.EXTENSION))
 				.sorted()
 				.toList();
 		} catch (Exception unreadableDirectory) {
@@ -85,23 +85,39 @@ public final class SongLibrary {
 		}
 		for (Path file : files) {
 			String id = stripExtension(file.getFileName().toString());
-			try (Reader reader = Files.newBufferedReader(file)) {
-				ComposerProject song = GSON.fromJson(reader, ComposerProject.class);
-				if (song == null || song.layers() == null) {
-					library.failures.add(id);
-					continue;
-				}
-				// Round-trip through the canonical constructor so a hand-edited or older file gets
-				// the same invariants a freshly built one has.
-				library.songs.put(id, new ComposerProject(song.name(), song.ppq(),
-					song.tempoMicrosPerQuarter(), song.layers(), song.activeLayerIndex(),
-					song.nextNoteId(), song.endTick(), song.speedQuarters(), song.speedEighths(),
-					song.markers(), song.dedupeIdenticalNotes()));
+			try {
+				SongFile.Loaded loaded = SongFile.read(file);
+				library.songs.put(id, loaded.song());
+				library.details.put(id, loaded.details());
 			} catch (Exception unreadableSong) {
 				library.failures.add(id);
 			}
 		}
 		return library;
+	}
+
+	private static Path file(String id) {
+		return DIRECTORY.resolve(id + SongFile.EXTENSION);
+	}
+
+	/** Who is playing, or {@code null} where there is no game to ask. */
+	private static String playerName() {
+		try {
+			return net.minecraft.client.Minecraft.getInstance().getUser().getName();
+		} catch (RuntimeException | LinkageError noGame) {
+			return null;
+		}
+	}
+
+	/** This midicraft's version, for the file to say what wrote it. */
+	private static String modVersion() {
+		return FabricLoader.getInstance().getModContainer("midicraft")
+			.map(mod -> mod.getMetadata().getVersion().getFriendlyString()).orElse(null);
+	}
+
+	private static String minecraftVersion() {
+		return FabricLoader.getInstance().getModContainer("minecraft")
+			.map(mod -> mod.getMetadata().getVersion().getFriendlyString()).orElse(null);
 	}
 
 	/**
@@ -115,7 +131,7 @@ public final class SongLibrary {
 	 */
 	public static long modifiedAt(String id) {
 		try {
-			return Files.getLastModifiedTime(DIRECTORY.resolve(id + ".json")).toMillis();
+			return Files.getLastModifiedTime(file(id)).toMillis();
 		} catch (Exception unreadable) {
 			return 0L;
 		}
@@ -138,26 +154,47 @@ public final class SongLibrary {
 		return List.copyOf(failures);
 	}
 
-	/** Writes one song. Only this file is touched, whatever else the library holds. */
+	/** What a song's file says about it, or {@link SongFile.Details#NONE} for none. */
+	public SongFile.Details details(String id) {
+		return id == null ? SongFile.Details.NONE
+			: details.getOrDefault(id, SongFile.Details.NONE);
+	}
+
+	/** Writes one song, keeping what its file already said about it. */
 	public boolean save(String id, ComposerProject song) {
+		return save(id, song, details(id));
+	}
+
+	/**
+	 * Writes one song with these details. Only this file is touched, whatever else the library
+	 * holds.
+	 */
+	public boolean save(String id, ComposerProject song, SongFile.Details about) {
 		if (id == null || id.isBlank() || song == null) {
 			return false;
 		}
 		try {
-			Files.createDirectories(DIRECTORY);
-			Path file = DIRECTORY.resolve(id + ".json");
-			// Write beside the target and move into place, so an interrupted save cannot leave a
-			// half-written song where a whole one used to be.
-			Path temporary = DIRECTORY.resolve(id + ".json.tmp");
-			try (Writer writer = Files.newBufferedWriter(temporary)) {
-				GSON.toJson(song, writer);
+			SongFile.Details given = about == null ? SongFile.Details.NONE : about;
+			// A song saved for the first time is the player's own arrangement, so it says so -- but
+			// only the first time. Cleared afterwards, it stays cleared; and a song that arrived as
+			// a file has its own date already, and its own author.
+			if (given.created() == null && given.author() == null) {
+				given = given.withOwn(playerName(), given.credits(), given.description());
 			}
-			Files.move(temporary, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+			SongFile.Details stamped = given.written(Instant.now(), modVersion(), minecraftVersion());
+			SongFile.write(file(id), song, stamped);
 			songs.put(id, song);
+			details.put(id, stamped);
 			return true;
 		} catch (Exception failed) {
 			return false;
 		}
+	}
+
+	/** Rewrites a saved song with new details and the music it already had. */
+	public boolean setDetails(String id, SongFile.Details about) {
+		ComposerProject song = song(id);
+		return song != null && save(id, song, about);
 	}
 
 	public boolean delete(String id) {
@@ -165,11 +202,12 @@ public final class SongLibrary {
 			return false;
 		}
 		try {
-			Files.deleteIfExists(DIRECTORY.resolve(id + ".json"));
+			Files.deleteIfExists(file(id));
 		} catch (Exception ignored) {
 			return false;
 		}
 		songs.remove(id);
+		details.remove(id);
 		return true;
 	}
 
@@ -197,12 +235,12 @@ public final class SongLibrary {
 	/** A filename-safe id derived from a song's name, numbered if that name is already taken. */
 	public String newId(String name) {
 		String base = slug(name);
-		if (!songs.containsKey(base) && Files.notExists(DIRECTORY.resolve(base + ".json"))) {
+		if (!songs.containsKey(base) && Files.notExists(file(base))) {
 			return base;
 		}
 		for (int suffix = 2; suffix < 1000; suffix++) {
 			String candidate = base + "-" + suffix;
-			if (!songs.containsKey(candidate) && Files.notExists(DIRECTORY.resolve(candidate + ".json"))) {
+			if (!songs.containsKey(candidate) && Files.notExists(file(candidate))) {
 				return candidate;
 			}
 		}

@@ -117,7 +117,7 @@ class EarshotCensusProbe {
 		Gson gson = new Gson();
 		List<Path> files;
 		try (Stream<Path> listing = Files.list(SONGS)) {
-			files = listing.filter(path -> path.toString().endsWith(".json")).sorted().toList();
+			files = listing.filter(path -> TestSongs.isSong(path)).sorted().toList();
 		}
 		// The game's own settings, so the notes and the limits are the paste's. See GameSettings.
 		GameSettings.Values game = GameSettings.get();
@@ -128,7 +128,7 @@ class EarshotCensusProbe {
 			}
 			List<SongBuilder.EventNote> notes = game.notes(song, mode);
 			if (!notes.isEmpty()) {
-				songs.add(new Song(file.getFileName().toString().replace(".json", ""), notes));
+				songs.add(new Song(file.getFileName().toString().replaceFirst("\\.(json|midicraft)$", ""), notes));
 			}
 		}
 		if (songs.isEmpty()) {

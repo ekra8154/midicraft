@@ -1,5 +1,7 @@
 package com.midicraft.client.composer;
 
+import com.midicraft.client.compat.TestSongs;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -80,10 +82,10 @@ class SustainAlignTest {
 	/** Ghostbusters, whose 1/16 sustain layer put 196 notes off the grid. */
 	@Test
 	void ghostbustersBuildsWithItsSixteenths() throws Exception {
-		Path file = Path.of("run", "config", "midicraft", "songs", "ghost-busters-theme.json");
+		Path file = Path.of("run", "config", "midicraft", "songs", TestSongs.fileName("ghost-busters-theme"));
 		org.junit.jupiter.api.Assumptions.assumeTrue(Files.exists(file), "not in the library");
 		ComposerProject raw;
-		try (java.io.Reader reader = Files.newBufferedReader(file)) {
+		try (java.io.Reader reader = TestSongs.reader(file)) {
 			raw = new com.google.gson.Gson().fromJson(reader, ComposerProject.class);
 		}
 		ComposerProject ghost = new ComposerProject(raw.name(), raw.ppq(), raw.tempoMicrosPerQuarter(),

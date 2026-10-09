@@ -109,7 +109,7 @@ class RailResourceProbe {
 		String only = text("songs", "");
 		List<Path> files;
 		try (Stream<Path> listing = Files.list(SONGS)) {
-			files = listing.filter(path -> path.toString().endsWith(".json"))
+			files = listing.filter(path -> TestSongs.isSong(path))
 				.filter(path -> only.isEmpty() || path.getFileName().toString().contains(only))
 				.sorted().toList();
 		}
@@ -124,9 +124,9 @@ class RailResourceProbe {
 			"song", "w/f", "dOff", "dAll", "dFed1", "repOff", "repAll", "repFed1"));
 		int builds = 0;
 		for (Path file : files) {
-			String name = file.getFileName().toString().replace(".json", "");
+			String name = file.getFileName().toString().replaceFirst("\\.(json|midicraft)$", "");
 			ComposerProject song;
-			try (Reader reader = Files.newBufferedReader(file)) {
+			try (Reader reader = TestSongs.reader(file)) {
 				ComposerProject raw = gson.fromJson(reader, ComposerProject.class);
 				song = new ComposerProject(raw.name(), raw.ppq(), raw.tempoMicrosPerQuarter(),
 					raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(), raw.endTick(),

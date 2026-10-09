@@ -29,9 +29,9 @@ class BreachProbeTest {
 		TreeMap<Integer, Integer> byChord = new TreeMap<>();
 		TreeMap<Integer, Integer> byOvershoot = new TreeMap<>();
 		for (String name : List.of("illit-do-the-dance", "big-shot")) {
-			Path file = Path.of("run", "config", "midicraft", "songs", name + ".json");
+			Path file = Path.of("run", "config", "midicraft", "songs", TestSongs.fileName(name));
 			ComposerProject song;
-			try (Reader reader = Files.newBufferedReader(file)) {
+			try (Reader reader = TestSongs.reader(file)) {
 				ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
 				song = new ComposerProject(raw.name(), raw.ppq(), raw.tempoMicrosPerQuarter(),
 					raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(), raw.endTick(),

@@ -93,8 +93,8 @@ class ConvertCoarserProbe {
 	void neverCoarser() throws Exception {
 		List<String> songs;
 		try (Stream<Path> files = Files.list(SONGS)) {
-			songs = files.filter(p -> p.toString().endsWith(".json"))
-				.map(p -> p.getFileName().toString().replace(".json", "")).sorted().toList();
+			songs = files.filter(p -> TestSongs.isSong(p))
+				.map(p -> p.getFileName().toString().replaceFirst("\\.(json|midicraft)$", "")).sorted().toList();
 		}
 		int differ = 0;
 		int worse = 0;
@@ -103,7 +103,7 @@ class ConvertCoarserProbe {
 			System.out.println("==== " + (gameTicks ? "game ticks" : "repeater ticks"));
 			for (String song : songs) {
 				ComposerProject raw;
-				try (Reader reader = Files.newBufferedReader(SONGS.resolve(song + ".json"))) {
+				try (Reader reader = TestSongs.reader(SONGS.resolve(TestSongs.fileName(song)))) {
 					raw = new Gson().fromJson(reader, ComposerProject.class);
 				} catch (Exception refused) {
 					continue;

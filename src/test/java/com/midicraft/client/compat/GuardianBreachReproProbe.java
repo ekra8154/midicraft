@@ -31,7 +31,7 @@ class GuardianBreachReproProbe {
 
 	private static List<SongBuilder.EventNote> guardian() throws Exception {
 		java.nio.file.Path songs = java.nio.file.Path.of("run", "config", "midicraft", "songs");
-		try (java.io.Reader reader = java.nio.file.Files.newBufferedReader(
+		try (java.io.Reader reader = TestSongs.reader(
 				BreachView.songFile("deltarune-ch-4-guardian"))) {
 			com.midicraft.client.composer.ComposerProject raw =
 				new com.google.gson.Gson().fromJson(reader,
@@ -243,10 +243,10 @@ class GuardianBreachReproProbe {
 		List<java.nio.file.Path> files;
 		try (java.util.stream.Stream<java.nio.file.Path> listing = java.nio.file.Files.list(
 				java.nio.file.Path.of("run", "config", "midicraft", "songs"))) {
-			files = listing.filter(path -> path.toString().endsWith(".json")).sorted().toList();
+			files = listing.filter(path -> TestSongs.isSong(path)).sorted().toList();
 		}
 		for (java.nio.file.Path file : files) {
-			String name = file.getFileName().toString().replace(".json", "");
+			String name = file.getFileName().toString().replaceFirst("\\.(json|midicraft)$", "");
 			if (name.startsWith("ultra-")) {
 				continue;
 			}
@@ -276,7 +276,7 @@ class GuardianBreachReproProbe {
 	}
 
 	private static List<SongBuilder.EventNote> songAt(java.nio.file.Path file) throws Exception {
-		try (java.io.Reader reader = java.nio.file.Files.newBufferedReader(file)) {
+		try (java.io.Reader reader = TestSongs.reader(file)) {
 			com.midicraft.client.composer.ComposerProject raw =
 				new com.google.gson.Gson().fromJson(reader,
 					com.midicraft.client.composer.ComposerProject.class);
@@ -300,7 +300,7 @@ class GuardianBreachReproProbe {
 		List<java.nio.file.Path> files;
 		try (java.util.stream.Stream<java.nio.file.Path> listing = java.nio.file.Files.list(
 				java.nio.file.Path.of("run", "config", "midicraft", "songs"))) {
-			files = listing.filter(path -> path.toString().endsWith(".json")).sorted().toList();
+			files = listing.filter(path -> TestSongs.isSong(path)).sorted().toList();
 		}
 		Map<String, int[]> perSong = new LinkedHashMap<>();
 		for (boolean sheds : new boolean[] {false, true}) {
@@ -315,7 +315,7 @@ class GuardianBreachReproProbe {
 				long wrong = 0;
 				long overran = 0;
 				for (java.nio.file.Path file : files) {
-					String name = file.getFileName().toString().replace(".json", "");
+					String name = file.getFileName().toString().replaceFirst("\\.(json|midicraft)$", "");
 					if (name.startsWith("ultra-")) {
 						continue;
 					}
@@ -383,7 +383,7 @@ class GuardianBreachReproProbe {
 		List<java.nio.file.Path> files;
 		try (java.util.stream.Stream<java.nio.file.Path> listing = java.nio.file.Files.list(
 				java.nio.file.Path.of("run", "config", "midicraft", "songs"))) {
-			files = listing.filter(path -> path.toString().endsWith(".json")).sorted().toList();
+			files = listing.filter(path -> TestSongs.isSong(path)).sorted().toList();
 		}
 		// Bands worth telling apart: everything, then what somebody would actually paste.
 		int[][] bands = {{12, 48, 1, 6}, {24, 48, 2, 6}, {40, 48, 2, 4}, {44, 44, 3, 3}};
@@ -395,7 +395,7 @@ class GuardianBreachReproProbe {
 					int blocks = 0;
 					List<String> dirty = new ArrayList<>();
 					for (java.nio.file.Path file : files) {
-						String name = file.getFileName().toString().replace(".json", "");
+						String name = file.getFileName().toString().replaceFirst("\\.(json|midicraft)$", "");
 						if (name.startsWith("ultra-")) {
 							continue;
 						}
@@ -523,7 +523,7 @@ class GuardianBreachReproProbe {
 		List<java.nio.file.Path> files;
 		try (java.util.stream.Stream<java.nio.file.Path> listing = java.nio.file.Files.list(
 				java.nio.file.Path.of("run", "config", "midicraft", "songs"))) {
-			files = listing.filter(path -> path.toString().endsWith(".json")).sorted().toList();
+			files = listing.filter(path -> TestSongs.isSong(path)).sorted().toList();
 		}
 		String[] names = {"off                    ", "build only             ",
 			"build + price          ", "build + price + plan   "};
@@ -558,7 +558,7 @@ class GuardianBreachReproProbe {
 				int lRefused = 0;
 				long lWrong = 0;
 				for (java.nio.file.Path file : files) {
-					String name = file.getFileName().toString().replace(".json", "");
+					String name = file.getFileName().toString().replaceFirst("\\.(json|midicraft)$", "");
 					if (name.startsWith("ultra-")) {
 						continue;
 					}

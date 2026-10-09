@@ -66,7 +66,7 @@ class ExportPeakedSongsProbe {
 			}
 			String[] half = entry.strip().split(":");
 			String file = half[0];
-			ComposerProject song = GameSettings.project(SONGS.resolve(file + ".json"));
+			ComposerProject song = GameSettings.project(SONGS.resolve(TestSongs.fileName(file)));
 			List<Timed> kept = peakedWalk(song, game.thinning());
 			List<SongBuilder.EventNote> census = GameSettings.peaked(game.notes(song, mode), 1);
 			boolean walkAgrees = kept.size() == census.size();
@@ -76,7 +76,7 @@ class ExportPeakedSongsProbe {
 			}
 			Set<Long> ids = new HashSet<>();
 			kept.forEach(note -> ids.add(note.id()));
-			Path out = SONGS.resolve(file + "-1-tick.json");
+			Path out = SONGS.resolve(TestSongs.fileName(file + "-1-tick"));
 			int written = write(song.name(), out, kept);
 			ComposerProject saved = GameSettings.project(out);
 			List<SongBuilder.EventNote> reread = game.notes(saved, mode);

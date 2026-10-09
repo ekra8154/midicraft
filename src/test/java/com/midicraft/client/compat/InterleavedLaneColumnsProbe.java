@@ -101,11 +101,11 @@ class InterleavedLaneColumnsProbe {
 		List<Song> songs = new ArrayList<>();
 		List<Path> files;
 		try (Stream<Path> listed = Files.list(SONGS)) {
-			files = listed.filter(file -> file.toString().endsWith(".json")).sorted().toList();
+			files = listed.filter(file -> TestSongs.isSong(file)).sorted().toList();
 		}
 		for (Path file : files) {
-			String slug = file.getFileName().toString().replace(".json", "");
-			try (Reader reader = Files.newBufferedReader(file)) {
+			String slug = file.getFileName().toString().replaceFirst("\\.(json|midicraft)$", "");
+			try (Reader reader = TestSongs.reader(file)) {
 				ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
 				ComposerProject project = new ComposerProject(raw.name(), raw.ppq(),
 					raw.tempoMicrosPerQuarter(), raw.layers(), raw.activeLayerIndex(),

@@ -43,7 +43,7 @@ class ConvertNoOpProbe {
 	}
 
 	private static ComposerProject load(String name) throws Exception {
-		try (Reader reader = Files.newBufferedReader(SONGS.resolve(name + ".json"))) {
+		try (Reader reader = TestSongs.reader(SONGS.resolve(TestSongs.fileName(name)))) {
 			return new Gson().fromJson(reader, ComposerProject.class);
 		}
 	}
@@ -90,8 +90,8 @@ class ConvertNoOpProbe {
 			songs = List.of(only);
 		} else {
 			try (Stream<Path> files = Files.list(SONGS)) {
-				songs = files.filter(p -> p.toString().endsWith(".json"))
-					.map(p -> p.getFileName().toString().replace(".json", ""))
+				songs = files.filter(p -> TestSongs.isSong(p))
+					.map(p -> p.getFileName().toString().replaceFirst("\\.(json|midicraft)$", ""))
 					.sorted().toList();
 			}
 		}

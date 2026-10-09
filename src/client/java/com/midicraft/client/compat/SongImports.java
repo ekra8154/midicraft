@@ -3,6 +3,7 @@ package com.midicraft.client.compat;
 import com.midicraft.client.McCompat;
 import com.midicraft.client.MidicraftConfig;
 import com.midicraft.client.composer.ComposerProject;
+import com.midicraft.client.composer.SongFile;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Locale;
@@ -31,14 +32,29 @@ final class SongImports {
 	}
 
 	/** A song that has been read in, and a line about how the reading went. */
-	record Imported(ComposerProject project, String report) {
+	/**
+	 * @param details what the song's file will say about it: where it was read from, or for a song
+	 *     file, everything that file already said
+	 * @param asSaved whether the song is used exactly as read. A song file is; anything converted
+	 *     from another format starts at the default speed instead
+	 */
+	record Imported(ComposerProject project, String report, SongFile.Details details,
+			boolean asSaved) {
+		/** Converted from another format, read from the file named. */
+		Imported(ComposerProject project, String report, String source) {
+			this(project, report, SongFile.Details.importedFrom(source), false);
+		}
 	}
+
+	/** What the song browser offers: songs to convert, and songs already in midicraft's own form. */
+	private static final List<String> SONGS = List.of(".mid", ".midi", ".nbs", SongFile.EXTENSION,
+		SongFile.LEGACY_EXTENSION);
 
 	/** MIDI and NBS files, which are songs already and only need converting. */
 	static void chooseMidiOrNbs(Screen returnTo, MidicraftConfig config,
 			Consumer<Imported> onDone) {
-		McCompat.setScreen(new FileBrowserScreen(returnTo, "Import MIDI or NBS",
-			Path.of(config.importDirectory()), List.of(".mid", ".midi", ".nbs"),
+		McCompat.setScreen(new FileBrowserScreen(returnTo, "Import a song",
+			Path.of(config.importDirectory()), SONGS,
 			folder -> {
 				config.setImportDirectory(folder.toString());
 				MidicraftConfig.save();
@@ -48,7 +64,16 @@ final class SongImports {
 
 	private static void readSongFile(Screen returnTo, MidicraftConfig config, String path,
 			Consumer<Imported> onDone) {
+		String fileName = Path.of(path).getFileName().toString();
 		try {
+			if (SongFile.isSongFile(fileName)) {
+				// Already a song: opened as it was saved, with everything its file says about it.
+				SongFile.Loaded loaded = SongFile.read(Path.of(path));
+				String by = loaded.details().author();
+				onDone.accept(new Imported(loaded.song(), "midicraft song"
+					+ (by == null ? "" : " by " + by), loaded.details(), true));
+				return;
+			}
 			if (path.toLowerCase(Locale.ROOT).endsWith(".nbs")) {
 				NbsImporter.Inspection inspection = NbsImporter.inspect(path, config);
 				if (inspection.instruments().size() > ComposerProject.MAX_LAYERS) {
@@ -60,11 +85,11 @@ final class SongImports {
 					return;
 				}
 				NbsImporter.ProjectResult result = NbsImporter.importProject(path, config);
-				onDone.accept(new Imported(result.project(), result.report()));
+				onDone.accept(new Imported(result.project(), result.report(), "NBS: " + fileName));
 				return;
 			}
 			MidiImporter.ProjectResult result = MidiImporter.importProject(path, config);
-			onDone.accept(new Imported(result.project(), result.report()));
+			onDone.accept(new Imported(result.project(), result.report(), "MIDI: " + fileName));
 		} catch (Exception failed) {
 			showFailure(returnTo, failed);
 		}
@@ -74,7 +99,8 @@ final class SongImports {
 			Set<String> instruments, Consumer<Imported> onDone) {
 		try {
 			NbsImporter.ProjectResult result = NbsImporter.importProject(path, config, instruments);
-			onDone.accept(new Imported(result.project(), result.report()));
+			onDone.accept(new Imported(result.project(), result.report(),
+				"NBS: " + Path.of(path).getFileName()));
 		} catch (Exception failed) {
 			showFailure(returnTo, failed);
 		}
@@ -82,7 +108,7 @@ final class SongImports {
 
 	/** Every extension a dropped file could be read as, for the screens that accept a drop. */
 	static final List<String> IMPORTABLE = java.util.stream.Stream
-		.concat(List.of(".mid", ".midi", ".nbs").stream(), SchematicReader.EXTENSIONS.stream())
+		.concat(SONGS.stream(), SchematicReader.EXTENSIONS.stream())
 		.toList();
 
 	static boolean importable(Path file) {
@@ -127,7 +153,7 @@ final class SongImports {
 			NoteMachineReader.Reading reading = NoteMachineReader.read(name, BlockPos.ZERO,
 				schematic.size().offset(-1, -1, -1), schematic::at);
 			onDone.accept(new Imported(reading.project(),
-				schematic.format() + " - " + reading.report()));
+				schematic.format() + " - " + reading.report(), "Schematic: " + path.getFileName()));
 		} catch (Exception failed) {
 			showFailure(returnTo, failed);
 		}
@@ -144,7 +170,7 @@ final class SongImports {
 		try {
 			NoteMachineReader.Reading reading = NoteMachineReader.read("World scan", from, to,
 				Minecraft.getInstance().level::getBlockState);
-			onDone.accept(new Imported(reading.project(), reading.report()));
+			onDone.accept(new Imported(reading.project(), reading.report(), "World scan"));
 		} catch (Exception failed) {
 			showFailure(returnTo, failed);
 		}
@@ -165,8 +191,9 @@ final class SongImports {
 		// holds every setting in the mod -- the exact coupling songs were moved out of it to avoid.
 		// Left alone, the settings still point at the song that was open, so nothing is lost by
 		// declining the import and nothing is written by accepting it until Save says so.
-		config.openWorkingCopy(imported.project()
-			.withSpeedQuarters(ComposerProject.DEFAULT_SPEED_QUARTERS));
+		config.openWorkingCopy(imported.asSaved() ? imported.project()
+			: imported.project().withSpeedQuarters(ComposerProject.DEFAULT_SPEED_QUARTERS),
+			imported.details());
 		ComposerScreen opened = new ComposerScreen(composerParent, config, onReturn);
 		opened.showResult(Component.literal(
 			"Imported \"" + imported.project().name() + "\" - " + imported.report()

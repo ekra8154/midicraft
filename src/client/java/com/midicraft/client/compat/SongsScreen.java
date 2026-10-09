@@ -195,7 +195,7 @@ public final class SongsScreen extends Screen {
 				button -> SongImports.chooseMidiOrNbs(this, config, this::openImported))
 			.bounds(8, importY, importWidth, 20)
 			.tooltip(Tooltip.create(Component.literal(
-				"Read a MIDI or NBS file in as a new song.")))
+				"Read a MIDI, NBS or .midicraft file in as a new song.")))
 			.build());
 		addRenderableWidget(Button.builder(Component.literal("From schematic"),
 				button -> SongImports.chooseSchematic(this, config, this::openImported))

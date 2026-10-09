@@ -45,7 +45,7 @@ class ZFootprintTest {
 	private static final Path SONGS = Path.of("run", "config", "midicraft", "songs");
 
 	private static List<SongBuilder.EventNote> song(String name) throws Exception {
-		try (Reader reader = Files.newBufferedReader(BreachView.songFile(name))) {
+		try (Reader reader = TestSongs.reader(BreachView.songFile(name))) {
 			ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
 			ComposerProject project = new ComposerProject(raw.name(), raw.ppq(),
 				raw.tempoMicrosPerQuarter(), raw.layers(), raw.activeLayerIndex(),
@@ -96,13 +96,13 @@ class ZFootprintTest {
 	void depthOverTheWholeLibrary() throws Exception {
 		java.util.List<Path> files;
 		try (java.util.stream.Stream<Path> listing = Files.list(SONGS)) {
-			files = listing.filter(f -> f.toString().endsWith(".json")).sorted().toList();
+			files = listing.filter(f -> TestSongs.isSong(f)).sorted().toList();
 		}
 		long[] z = new long[3];
 		long[] breaches = new long[3];
 		java.util.TreeMap<String, String> perSong = new java.util.TreeMap<>();
 		for (Path file : files) {
-			String name = file.getFileName().toString().replace(".json", "");
+			String name = file.getFileName().toString().replaceFirst("\\.(json|midicraft)$", "");
 			if (name.startsWith("ultra-")) {
 				continue;
 			}

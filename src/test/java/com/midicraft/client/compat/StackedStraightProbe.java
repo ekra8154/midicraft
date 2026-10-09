@@ -33,7 +33,7 @@ class StackedStraightProbe {
 		java.nio.file.Path songs = java.nio.file.Path.of("run", "config", "midicraft", "songs");
 		List<java.nio.file.Path> files = new ArrayList<>();
 		try (var listing = java.nio.file.Files.list(songs)) {
-			listing.filter(file -> file.toString().endsWith(".json")).sorted().forEach(files::add);
+			listing.filter(file -> TestSongs.isSong(file)).sorted().forEach(files::add);
 		}
 		System.out.println();
 		System.out.println("==== stacked shapes on the straight half-tick lane ====");
@@ -46,7 +46,7 @@ class StackedStraightProbe {
 		int shown = 0;
 		int builds = 0;
 		for (java.nio.file.Path file : files) {
-			String name = file.getFileName().toString().replace(".json", "");
+			String name = file.getFileName().toString().replaceFirst("\\.(json|midicraft)$", "");
 			for (int speedFactor : new int[] {1, 2}) {
 				ComposerProject project = BreachView.project(name);
 				if (speedFactor != 1) {

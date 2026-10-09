@@ -33,8 +33,8 @@ class PitchProbe {
 	void everySong() throws Exception {
 		List<String> songs = new ArrayList<>();
 		try (Stream<Path> files = Files.list(SONGS)) {
-			files.filter(path -> path.toString().endsWith(".json"))
-				.map(path -> path.getFileName().toString().replace(".json", ""))
+			files.filter(path -> TestSongs.isSong(path))
+				.map(path -> path.getFileName().toString().replaceFirst("\\.(json|midicraft)$", ""))
 				.sorted().forEach(songs::add);
 		}
 		List<int[]> sizes = new ArrayList<>();

@@ -61,7 +61,7 @@ class ParityOrderProbe {
 	private void read() throws Exception {
 		Path songs = Path.of("run", "config", "midicraft", "songs");
 		List<SongBuilder.EventNote> notes;
-		try (Reader reader = Files.newBufferedReader(
+		try (Reader reader = TestSongs.reader(
 				BreachView.songFile(text("song", "golden-brown-2xspeed")))) {
 			ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
 			ComposerProject project = new ComposerProject(raw.name(), raw.ppq(),

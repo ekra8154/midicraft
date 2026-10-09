@@ -40,7 +40,7 @@ class RouteMirrorIdentityTest {
 	private static final BlockPos ORIGIN = new BlockPos(5, 64, 7);
 
 	private static List<SongBuilder.EventNote> notes() throws Exception {
-		try (Reader reader = Files.newBufferedReader(BreachView.songFile("illit-do-the-dance"))) {
+		try (Reader reader = TestSongs.reader(BreachView.songFile("illit-do-the-dance"))) {
 			ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
 			ComposerProject project = new ComposerProject(raw.name(), raw.ppq(),
 				raw.tempoMicrosPerQuarter(), raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(),

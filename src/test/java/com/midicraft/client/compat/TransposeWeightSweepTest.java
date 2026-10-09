@@ -34,13 +34,13 @@ class TransposeWeightSweepTest {
 	void sweeps() throws Exception {
 		List<Path> files;
 		try (Stream<Path> listing = Files.list(SONGS)) {
-			files = listing.filter(path -> path.toString().endsWith(".json")).sorted().toList();
+			files = listing.filter(path -> TestSongs.isSong(path)).sorted().toList();
 		}
 		Gson gson = new Gson();
 		List<ComposerProject> imports = new ArrayList<>();
 		for (Path file : files) {
 			ComposerProject song;
-			try (Reader reader = Files.newBufferedReader(file)) {
+			try (Reader reader = TestSongs.reader(file)) {
 				ComposerProject raw = gson.fromJson(reader, ComposerProject.class);
 				song = new ComposerProject(raw.name(), raw.ppq(), raw.tempoMicrosPerQuarter(),
 					raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(), raw.endTick(),

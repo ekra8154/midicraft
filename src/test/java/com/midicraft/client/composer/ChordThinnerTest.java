@@ -1,5 +1,7 @@
 package com.midicraft.client.composer;
 
+import com.midicraft.client.compat.TestSongs;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -234,17 +236,17 @@ class ChordThinnerTest {
 		}
 		List<java.nio.file.Path> files;
 		try (java.util.stream.Stream<java.nio.file.Path> listing = java.nio.file.Files.list(songs)) {
-			files = listing.filter(path -> path.toString().endsWith(".json")).sorted().toList();
+			files = listing.filter(path -> TestSongs.isSong(path)).sorted().toList();
 		}
 		for (java.nio.file.Path file : files) {
 			ComposerProject song;
-			try (java.io.Reader reader = java.nio.file.Files.newBufferedReader(file)) {
+			try (java.io.Reader reader = TestSongs.reader(file)) {
 				ComposerProject raw = new com.google.gson.Gson().fromJson(reader, ComposerProject.class);
 				song = new ComposerProject(raw.name(), raw.ppq(), raw.tempoMicrosPerQuarter(),
 					raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(), raw.endTick(),
 					raw.speedQuarters());
 			}
-			String name = file.getFileName().toString().replace(".json", "");
+			String name = file.getFileName().toString().replaceFirst("\\.(json|midicraft)$", "");
 			for (int target : new int[] {30, 24}) {
 				ChordThinner.Result thinned = ChordThinner.thin(song, target, true);
 				assertPitchesSurvive(song, thinned.noteIds(), name + " at " + target);

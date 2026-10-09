@@ -37,12 +37,12 @@ class SingleNoteCensusTest {
 	void namesEverySongMadeOfSmallChords() throws Exception {
 		List<Path> files;
 		try (Stream<Path> listing = Files.list(SONGS)) {
-			files = listing.filter(f -> f.toString().endsWith(".json")).sorted().toList();
+			files = listing.filter(f -> TestSongs.isSong(f)).sorted().toList();
 		}
 		System.out.println(String.format("%-38s %6s %6s %5s %6s %6s %6s %6s",
 			"song", "events", "notes", "max", "<=1", "<=3", "gap1", "gap2"));
 		for (Path file : files) {
-			String name = file.getFileName().toString().replace(".json", "");
+			String name = file.getFileName().toString().replaceFirst("\\.(json|midicraft)$", "");
 			List<SongBuilder.EventNote> notes = load(name);
 			if (notes.isEmpty()) {
 				continue;
@@ -81,7 +81,7 @@ class SingleNoteCensusTest {
 	}
 
 	private static List<SongBuilder.EventNote> load(String name) throws Exception {
-		try (Reader reader = Files.newBufferedReader(BreachView.songFile(name))) {
+		try (Reader reader = TestSongs.reader(BreachView.songFile(name))) {
 			ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
 			ComposerProject song = new ComposerProject(raw.name(), raw.ppq(),
 				raw.tempoMicrosPerQuarter(), raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(),

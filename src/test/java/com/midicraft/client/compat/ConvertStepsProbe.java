@@ -49,8 +49,8 @@ class ConvertStepsProbe {
 	void eachStepDeclines() throws Exception {
 		List<String> songs;
 		try (Stream<Path> files = Files.list(SONGS)) {
-			songs = files.filter(p -> p.toString().endsWith(".json"))
-				.map(p -> p.getFileName().toString().replace(".json", "")).sorted().toList();
+			songs = files.filter(p -> TestSongs.isSong(p))
+				.map(p -> p.getFileName().toString().replaceFirst("\\.(json|midicraft)$", "")).sorted().toList();
 		}
 		int quantizeMoved = 0;
 		int tempoMoved = 0;
@@ -59,7 +59,7 @@ class ConvertStepsProbe {
 		int checked = 0;
 		for (String song : songs) {
 			ComposerProject raw;
-			try (Reader reader = Files.newBufferedReader(SONGS.resolve(song + ".json"))) {
+			try (Reader reader = TestSongs.reader(SONGS.resolve(TestSongs.fileName(song)))) {
 				raw = new Gson().fromJson(reader, ComposerProject.class);
 			} catch (Exception refused) {
 				continue;

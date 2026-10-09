@@ -74,15 +74,15 @@ class HeadOnlyNearHalfTest {
 		SongBuilder.HEAD_ONLY_NEAR_HALF = true;
 		List<Path> files;
 		try (Stream<Path> listing = Files.list(SONGS)) {
-			files = listing.filter(p -> p.toString().endsWith(".json")).sorted().toList();
+			files = listing.filter(p -> TestSongs.isSong(p)).sorted().toList();
 		}
 		for (Path file : files) {
-			String name = file.getFileName().toString().replace(".json", "");
+			String name = file.getFileName().toString().replaceFirst("\\.(json|midicraft)$", "");
 			if (name.startsWith("ultra-")) {
 				continue;
 			}
 			ComposerProject song;
-			try (Reader reader = Files.newBufferedReader(file)) {
+			try (Reader reader = TestSongs.reader(file)) {
 				ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
 				song = new ComposerProject(raw.name(), raw.ppq(), raw.tempoMicrosPerQuarter(),
 					raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(), raw.endTick(),
@@ -214,7 +214,7 @@ class HeadOnlyNearHalfTest {
 	void pricesTheWindowAndReadsBack() throws Exception {
 		List<Path> files;
 		try (Stream<Path> listing = Files.list(SONGS)) {
-			files = listing.filter(p -> p.toString().endsWith(".json")).sorted().toList();
+			files = listing.filter(p -> TestSongs.isSong(p)).sorted().toList();
 		}
 		for (int on = 0; on <= 1; on++) {
 			SongBuilder.HEAD_ONLY_NEAR_HALF = on == 1;
@@ -228,12 +228,12 @@ class HeadOnlyNearHalfTest {
 			int mismatched = 0;
 			int readBuilds = 0;
 			for (Path file : files) {
-				String name = file.getFileName().toString().replace(".json", "");
+				String name = file.getFileName().toString().replaceFirst("\\.(json|midicraft)$", "");
 				if (name.startsWith("ultra-")) {
 					continue;
 				}
 				ComposerProject song;
-				try (Reader reader = Files.newBufferedReader(file)) {
+				try (Reader reader = TestSongs.reader(file)) {
 					ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
 					song = new ComposerProject(raw.name(), raw.ppq(), raw.tempoMicrosPerQuarter(),
 						raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(), raw.endTick(),

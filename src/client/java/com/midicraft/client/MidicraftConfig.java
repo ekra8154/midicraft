@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.midicraft.NoteSequence;
 import com.midicraft.client.compat.LaneMaterials;
+import com.midicraft.client.composer.SongFile;
 import com.midicraft.client.composer.ChordSkips;
 import com.midicraft.client.composer.ChordThinner;
 import com.midicraft.client.composer.ComposerProject;
@@ -350,6 +351,8 @@ public final class MidicraftConfig {
 	private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 	private static final Path CONFIG_PATH = FabricLoader.getInstance().getConfigDir().resolve("midicraft.json");
 	private static SongLibrary songs = SongLibrary.load();
+	/** What an unsaved import's file will say about it, kept until its first Save. */
+	private SongFile.Details workingCopyDetails = SongFile.Details.NONE;
 	private static MidicraftConfig instance = defaults();
 
 	private boolean modEnabled;
@@ -1149,8 +1152,33 @@ public final class MidicraftConfig {
 				placementCursors.put(activeSongId, placementCursor);
 				placementCursor = 0;
 			}
+			SongFile.Details details = workingCopyDetails;
+			workingCopyDetails = SongFile.Details.NONE;
+			return songs.save(activeSongId, composerProject, details);
 		}
 		return songs.save(activeSongId, composerProject);
+	}
+
+	/**
+	 * What the file of the song being edited says about it, or will say once it is saved: the
+	 * library's copy for a saved song, and what came with an import for one that is not yet.
+	 */
+	public SongFile.Details composerDetails() {
+		return activeSongId != null && songs.song(activeSongId) != null
+			? songs.details(activeSongId) : workingCopyDetails;
+	}
+
+	/**
+	 * Changes what the song's file says about it. Written straight away for a saved song -- the
+	 * details are not part of the music, so they are not held back with unsaved edits -- and held
+	 * for the first Save of one that has no file yet.
+	 */
+	public boolean setComposerDetails(SongFile.Details details) {
+		if (activeSongId != null && songs.song(activeSongId) != null) {
+			return songs.setDetails(activeSongId, details);
+		}
+		workingCopyDetails = details == null ? SongFile.Details.NONE : details;
+		return true;
 	}
 
 	/** The active song as it currently stands on disk, which is what unsaved edits differ from. */
@@ -1167,6 +1195,15 @@ public final class MidicraftConfig {
 	 * active id, Save writes a new file rather than over whatever was open before.</p>
 	 */
 	public void openWorkingCopy(ComposerProject project) {
+		openWorkingCopy(project, SongFile.Details.NONE);
+	}
+
+	/**
+	 * @param details what the song's file should say about it once it has one: where an import was
+	 *     read from, or everything a song file said. Held until the first Save writes it down.
+	 */
+	public void openWorkingCopy(ComposerProject project, SongFile.Details details) {
+		workingCopyDetails = details == null ? SongFile.Details.NONE : details;
 		if (project == null) {
 			return;
 		}

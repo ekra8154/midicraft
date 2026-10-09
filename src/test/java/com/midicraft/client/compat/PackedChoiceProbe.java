@@ -37,7 +37,7 @@ class PackedChoiceProbe {
 		int floors = Integer.parseInt(size[1]);
 		GameSettings.Values game = GameSettings.get();
 		ComposerProject project = GameSettings.project(
-			Path.of("run", "config", "midicraft", "songs", song + ".json"));
+			Path.of("run", "config", "midicraft", "songs", TestSongs.fileName(song)));
 		SongBuilder.PasteMode mode = SongBuilder.PasteMode.INTERLEAVED_HALF_TICK;
 		List<SongBuilder.EventNote> notes = game.notes(project, mode);
 		java.util.Map<Integer, Integer> perTick = new java.util.HashMap<>();

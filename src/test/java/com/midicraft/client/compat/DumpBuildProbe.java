@@ -27,7 +27,7 @@ class DumpBuildProbe {
 	void dump() throws Exception {
 		Path songs = Path.of("run", "config", "midicraft", "songs");
 		List<SongBuilder.EventNote> notes;
-		try (Reader reader = Files.newBufferedReader(BreachView.songFile("illit-do-the-dance"))) {
+		try (Reader reader = TestSongs.reader(BreachView.songFile("illit-do-the-dance"))) {
 			ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
 			ComposerProject project = new ComposerProject(raw.name(), raw.ppq(),
 				raw.tempoMicrosPerQuarter(), raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(),

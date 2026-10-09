@@ -58,10 +58,10 @@ class CutCrossesProbe {
 		int differing = 0;
 		int compared = 0;
 		try (var listing = Files.list(songs)) {
-			for (Path file : listing.filter(path -> path.toString().endsWith(".json")).sorted()
+			for (Path file : listing.filter(path -> TestSongs.isSong(path)).sorted()
 					.toList()) {
 				List<SongBuilder.EventNote> notes;
-				try (Reader reader = Files.newBufferedReader(file)) {
+				try (Reader reader = TestSongs.reader(file)) {
 					ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
 					ComposerProject project = new ComposerProject(raw.name(), raw.ppq(),
 						raw.tempoMicrosPerQuarter(), raw.layers(), raw.activeLayerIndex(),

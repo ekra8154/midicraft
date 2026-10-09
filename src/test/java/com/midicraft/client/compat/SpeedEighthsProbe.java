@@ -39,8 +39,8 @@ class SpeedEighthsProbe {
 	void savedSongsKeepTheirSpeed() throws Exception {
 		List<String> songs;
 		try (Stream<Path> files = Files.list(SONGS)) {
-			songs = files.filter(p -> p.toString().endsWith(".json"))
-				.map(p -> p.getFileName().toString().replace(".json", "")).sorted().toList();
+			songs = files.filter(p -> TestSongs.isSong(p))
+				.map(p -> p.getFileName().toString().replaceFirst("\\.(json|midicraft)$", "")).sorted().toList();
 		}
 		int checked = 0;
 		int wrongFactor = 0;
@@ -48,12 +48,12 @@ class SpeedEighthsProbe {
 		for (String song : songs) {
 			ComposerProject loaded;
 			String raw;
-			try (Reader reader = Files.newBufferedReader(SONGS.resolve(song + ".json"))) {
+			try (Reader reader = TestSongs.reader(SONGS.resolve(TestSongs.fileName(song)))) {
 				loaded = new Gson().fromJson(reader, ComposerProject.class);
 			} catch (Exception refused) {
 				continue;
 			}
-			raw = Files.readString(SONGS.resolve(song + ".json"));
+			raw = Files.readString(SONGS.resolve(TestSongs.fileName(song)));
 			if (loaded == null || loaded.noteCount() == 0) {
 				continue;
 			}

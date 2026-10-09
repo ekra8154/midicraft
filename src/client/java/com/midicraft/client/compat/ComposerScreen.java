@@ -2960,6 +2960,7 @@ public final class ComposerScreen extends Screen {
 			case EXPORT_NBS -> exportAsNbs();
 			case COPY_AS_TEXT -> copySequenceAsText();
 			case SONG_INFO -> openSongInfo();
+			case SONG_DETAILS -> openSongDetails();
 			case PASTE_IN_WORLD -> pasteInWorld();
 			case BUILD_CANCEL -> CommandPasteSender.cancel(true);
 			case TOGGLE_DEDUPE -> {
@@ -3387,8 +3388,8 @@ public final class ComposerScreen extends Screen {
 	 */
 	private String toolbarActionTooltip(ToolbarAction action) {
 		return switch (action) {
-			case IMPORT -> "Read a MIDI or NBS file in as a new song. Settings below control "
-				+ "how it's read.";
+			case IMPORT -> "Read a MIDI, NBS or .midicraft file in as a new song. Settings below "
+				+ "control how MIDI and NBS are read; a .midicraft opens exactly as it was saved.";
 			case SCAN_WORLD -> "Read a note block machine in the world back into a song. Give "
 				+ "two corners, and stand near it so its chunks are loaded.";
 			case IMPORT_SCHEMATIC -> "Read a saved build back into a song. Supports .nbt, "
@@ -3441,6 +3442,8 @@ public final class ComposerScreen extends Screen {
 				+ "repeater ticks.";
 			case TRIM_END -> "Pulls the end marker back to the last note, discarding trailing "
 				+ "silence.";
+			case SONG_DETAILS -> "Who arranged it, whose song it is, and a description, saved in "
+				+ "the song's file and shared with it. All optional.";
 			case SONG_INFO -> "Length, tempo, note and block counts, and the even/odd game "
 				+ "tick split.";
 			case PASTE_IN_WORLD -> "Builds the sequence with /setblock. Needs permission, and "
@@ -9643,7 +9646,9 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private void saveCopyAs(String id, String name) {
-		MidicraftConfig.songs().save(id, project().withName(name));
+		// The copy keeps who made it and where it came from, and starts its own dates.
+		MidicraftConfig.songs().save(id, project().withName(name),
+			config.composerDetails().copied());
 		config.setActiveSongId(id);
 		MidicraftConfig.save();
 		McCompat.setScreen(new ComposerScreen(parent, config));
@@ -10581,6 +10586,24 @@ public final class ComposerScreen extends Screen {
 	private void openSongInfo() {
 		stopPlayback();
 		McCompat.setScreen(new SongInfoScreen(this, project().name(), songInfoLines()));
+	}
+
+	/**
+	 * Edits what the song's file says about it.
+	 *
+	 * <p>Written at once for a saved song, without saving the music: details are not an edit to the
+	 * song, so they neither wait for Save nor sweep unsaved edits to the notes onto disk with them.
+	 * An unsaved song keeps them for its first Save.</p>
+	 */
+	private void openSongDetails() {
+		McCompat.setScreen(new SongDetailsScreen(this, project().name(), config.composerDetails(),
+			details -> {
+				boolean written = config.setComposerDetails(details);
+				McCompat.setScreen(this);
+				showResult(Component.literal(!written ? "Could not write the details."
+					: config.hasSongFile() ? "Details saved."
+					: "Details kept. They are written with the song's first Save."));
+			}));
 	}
 
 	/** What Song info shows, worked out once when it opens: it is read-only, so it cannot go stale. */
@@ -11608,7 +11631,7 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private enum ToolbarAction {
-		IMPORT("Import MIDI / NBS as a new song..."),
+		IMPORT("Import a song (MIDI, NBS, midicraft)..."),
 		SCAN_WORLD("Scan a build from the world as a new song..."),
 		IMPORT_SCHEMATIC("Import a schematic as a new song..."),
 		OPEN_SONGS("Open composition..."),
@@ -11636,6 +11659,7 @@ public final class ComposerScreen extends Screen {
 		SNAP_TEMPO("Snap tempo (whole song)"),
 		SNAP_TEMPO_GAME("Snap tempo to game ticks (whole song)"),
 		SONG_INFO("Song info..."),
+		SONG_DETAILS("Song details..."),
 		PASTE_IN_WORLD("Paste current sequence in world (requires op)..."),
 		BUILD_CANCEL("Cancel paste"),
 		TOGGLE_DEDUPE("Merge duplicate notes"),
@@ -11670,7 +11694,7 @@ public final class ComposerScreen extends Screen {
 			FIT_ALL_RANGE, BAKE_SPEED, SNAP_TEMPO, SNAP_TEMPO_GAME
 		};
 		private static final ToolbarAction[] SONG_ACTIONS = {
-			SONG_INFO, TOGGLE_DEDUPE, TOGGLE_NOTE_TRAILS, PASTE_IN_WORLD, BUILD_CANCEL
+			SONG_INFO, SONG_DETAILS, TOGGLE_DEDUPE, TOGGLE_NOTE_TRAILS, PASTE_IN_WORLD, BUILD_CANCEL
 		};
 		private static final ToolbarAction[] SELECT_ACTIONS = {
 			SELECT_OFF_GRID, SELECT_HALF_TICKED, SELECT_EVEN_TICKS, SELECT_ODD_TICKS,

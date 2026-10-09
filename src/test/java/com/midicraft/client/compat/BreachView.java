@@ -93,21 +93,21 @@ final class BreachView {
 	 */
 	/** Whether a name still resolves to a song, for tests that iterate several and keep going. */
 	static boolean inLibrary(String name) {
-		if (Files.exists(SONGS.resolve(name + ".json"))) {
+		if (Files.exists(SONGS.resolve(TestSongs.fileName(name)))) {
 			return true;
 		}
 		String renamed = RENAMED.get(name);
-		return renamed != null && Files.exists(SONGS.resolve(renamed + ".json"));
+		return renamed != null && Files.exists(SONGS.resolve(TestSongs.fileName(renamed)));
 	}
 
 	static Path songFile(String name) {
-		Path exact = SONGS.resolve(name + ".json");
+		Path exact = SONGS.resolve(TestSongs.fileName(name));
 		if (Files.exists(exact)) {
 			return exact;
 		}
 		String renamed = RENAMED.get(name);
-		if (renamed != null && Files.exists(SONGS.resolve(renamed + ".json"))) {
-			return SONGS.resolve(renamed + ".json");
+		if (renamed != null && Files.exists(SONGS.resolve(TestSongs.fileName(renamed)))) {
+			return SONGS.resolve(TestSongs.fileName(renamed));
 		}
 		throw new org.opentest4j.TestAbortedException(
 			"song no longer in the library (lost 2026-08-19, rebuilt without it): " + name);

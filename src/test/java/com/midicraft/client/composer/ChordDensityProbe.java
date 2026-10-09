@@ -1,5 +1,7 @@
 package com.midicraft.client.composer;
 
+import com.midicraft.client.compat.TestSongs;
+
 import com.google.gson.Gson;
 import com.midicraft.InstrumentRanges;
 import com.midicraft.client.composer.ComposerProject.Layer;
@@ -59,7 +61,7 @@ class ChordDensityProbe {
 	}
 
 	private static ComposerProject load(Path file) throws Exception {
-		try (Reader reader = Files.newBufferedReader(file)) {
+		try (Reader reader = TestSongs.reader(file)) {
 			ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
 			return new ComposerProject(raw.name(), raw.ppq(), raw.tempoMicrosPerQuarter(),
 				raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(), raw.endTick(),
@@ -86,7 +88,7 @@ class ChordDensityProbe {
 	void measuresTheLibrarysChords() throws Exception {
 		List<Path> files;
 		try (Stream<Path> listing = Files.list(SONGS)) {
-			files = listing.filter(path -> path.toString().endsWith(".json")).sorted().toList();
+			files = listing.filter(path -> TestSongs.isSong(path)).sorted().toList();
 		}
 		int songsOver30 = 0;
 		int songsOver24 = 0;
@@ -109,7 +111,7 @@ class ChordDensityProbe {
 		for (Path file : files) {
 			ComposerProject written = load(file);
 			ComposerProject song = sustained(written);
-			String name = file.getFileName().toString().replace(".json", "");
+			String name = file.getFileName().toString().replaceFirst("\\.(json|midicraft)$", "");
 			TreeMap<Long, List<Sound>> chords = chords(song);
 			TreeMap<Long, List<Sound>> writtenChords = chords(written);
 			int peak = chords.values().stream().mapToInt(List::size).max().orElse(0);
@@ -195,7 +197,7 @@ class ChordDensityProbe {
 		System.out.println("   have a neighbouring event at least 2 game ticks away:  " + roomBeside);
 
 		// The chord the library test says loses a pitch: faded-alan-walker, tick 138240, at 24.
-		Path faded = SONGS.resolve("faded-alan-walker.json");
+		Path faded = SONGS.resolve(TestSongs.fileName("faded-alan-walker"));
 		if (Files.exists(faded)) {
 			ComposerProject song = load(faded);
 			long tick = 138240L;

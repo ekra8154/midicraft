@@ -42,7 +42,7 @@ class RailAgainstStacksTest {
 			"song", "w/f", "big%", "depthOff", "depthOn", "wrongOff", "wrongOn"));
 		List<Path> songs = new ArrayList<>();
 		try (var listing = Files.list(SONGS)) {
-			listing.filter(path -> path.toString().endsWith(".json")).sorted().forEach(songs::add);
+			listing.filter(path -> TestSongs.isSong(path)).sorted().forEach(songs::add);
 		}
 		int worseOn = 0;
 		int betterOn = 0;
@@ -52,7 +52,7 @@ class RailAgainstStacksTest {
 		var deadBySong = new TreeMap<String, String>();
 		var totals = new TreeMap<String, Integer>();
 		for (Path path : songs) {
-			String name = path.getFileName().toString().replace(".json", "");
+			String name = path.getFileName().toString().replaceFirst("\\.(json|midicraft)$", "");
 			List<SongBuilder.EventNote> notes;
 			try {
 				notes = load(path);
@@ -223,7 +223,7 @@ class RailAgainstStacksTest {
 	}
 
 	private static List<SongBuilder.EventNote> load(Path path) throws java.io.IOException {
-		try (Reader reader = Files.newBufferedReader(path)) {
+		try (Reader reader = TestSongs.reader(path)) {
 			ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
 			ComposerProject song = new ComposerProject(raw.name(), raw.ppq(),
 				raw.tempoMicrosPerQuarter(), raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(),

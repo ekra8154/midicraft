@@ -43,7 +43,7 @@ class CorkscrewShapeProbe {
 			List<java.nio.file.Path> files;
 			try (java.util.stream.Stream<java.nio.file.Path> listing =
 					java.nio.file.Files.list(songs)) {
-				files = listing.filter(path -> path.toString().endsWith(".json")).sorted().toList();
+				files = listing.filter(path -> TestSongs.isSong(path)).sorted().toList();
 			}
 			com.google.gson.Gson gson = new com.google.gson.Gson();
 			for (java.nio.file.Path file : files) {
@@ -51,7 +51,7 @@ class CorkscrewShapeProbe {
 					break;
 				}
 				ComposerProject raw;
-				try (java.io.Reader reader = java.nio.file.Files.newBufferedReader(file)) {
+				try (java.io.Reader reader = TestSongs.reader(file)) {
 					raw = gson.fromJson(reader, ComposerProject.class);
 				}
 				ComposerProject song = new ComposerProject(raw.name(), raw.ppq(),
@@ -75,7 +75,7 @@ class CorkscrewShapeProbe {
 					int fed = plan.padding().getOrDefault("cutHeadFeedsTheClimb", 0);
 					if (fed > 0) {
 						System.out.println("SCREW counters "
-							+ file.getFileName().toString().replace(".json", "") + " " + size[0]
+							+ file.getFileName().toString().replaceFirst("\\.(json|midicraft)$", "") + " " + size[0]
 							+ "x" + size[1] + " fed=" + fed
 							+ " flanked=" + plan.padding().getOrDefault("cutClimbsOnFlankedRungs", 0)
 							+ " screw=" + plan.padding().getOrDefault("cutCorkscrewsAtTheWall", 0));
@@ -107,7 +107,7 @@ class CorkscrewShapeProbe {
 							break;
 						}
 					}
-					String name = file.getFileName().toString().replace(".json", "");
+					String name = file.getFileName().toString().replaceFirst("\\.(json|midicraft)$", "");
 					System.out.println("SCREW " + name + " " + size[0] + "x" + size[1]
 						+ " corkscrews=" + plan.padding().get("cutCorkscrewsAtTheWall")
 						+ " bare=" + plan.padding().getOrDefault("corkscrewRunsBareForWireBehind", 0)

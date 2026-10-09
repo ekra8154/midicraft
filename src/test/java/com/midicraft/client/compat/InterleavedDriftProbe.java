@@ -56,7 +56,7 @@ class InterleavedDriftProbe {
 		int floors = Integer.parseInt(size[1]);
 		List<Path> files;
 		try (Stream<Path> listed = Files.list(SONGS)) {
-			files = listed.filter(file -> file.toString().endsWith(".json")).sorted().toList();
+			files = listed.filter(file -> TestSongs.isSong(file)).sorted().toList();
 		}
 		System.out.println();
 		System.out.println("==== drift across the library, interleaved half-tick, " + width + "x"
@@ -68,14 +68,14 @@ class InterleavedDriftProbe {
 		int worstEver = 0;
 		for (Path file : files) {
 			List<SongBuilder.EventNote> notes;
-			try (Reader reader = Files.newBufferedReader(file)) {
+			try (Reader reader = TestSongs.reader(file)) {
 				ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
 				ComposerProject project = new ComposerProject(raw.name(), raw.ppq(),
 					raw.tempoMicrosPerQuarter(), raw.layers(), raw.activeLayerIndex(),
 					raw.nextNoteId(), raw.endTick(), raw.speedQuarters());
 				notes = SongBuilder.gameTickEventNotes(project, true);
 			}
-			String song = file.getFileName().toString().replace(".json", "");
+			String song = file.getFileName().toString().replaceFirst("\\.(json|midicraft)$", "");
 			List<List<SongBuilder.EventNote>> variants = new ArrayList<>();
 			List<String> labels = new ArrayList<>();
 			long evens = notes.stream().filter(note -> note.time() % 2 == 0).count();

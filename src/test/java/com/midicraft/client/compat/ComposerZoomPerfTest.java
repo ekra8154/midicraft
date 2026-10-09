@@ -65,7 +65,7 @@ class ComposerZoomPerfTest {
 	@Test
 	void countsAFullyZoomedOutFrame() throws Exception {
 		for (String name : DENSE) {
-			if (!Files.isRegularFile(SONGS.resolve(name + ".json"))) {
+			if (!Files.isRegularFile(SONGS.resolve(TestSongs.fileName(name)))) {
 				continue;
 			}
 			frame(name + " [row 4px]", load(name), 960, 540, MIN_ROW_HEIGHT);
@@ -78,7 +78,7 @@ class ComposerZoomPerfTest {
 			// A probe reports on whatever library it finds. Naming a song it cannot open is not a
 			// failure -- these are one person's compositions, not fixtures, and a checkout without
 			// them should still be able to run the suite.
-			if (!Files.isRegularFile(SONGS.resolve(name + ".json"))) {
+			if (!Files.isRegularFile(SONGS.resolve(TestSongs.fileName(name)))) {
 				System.out.println(name + " - not in this library, skipped");
 				continue;
 			}
@@ -225,7 +225,7 @@ class ComposerZoomPerfTest {
 	}
 
 	private static ComposerProject load(String name) throws Exception {
-		try (Reader reader = Files.newBufferedReader(SONGS.resolve(name + ".json"))) {
+		try (Reader reader = TestSongs.reader(SONGS.resolve(TestSongs.fileName(name)))) {
 			ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
 			return new ComposerProject(raw.name(), raw.ppq(), raw.tempoMicrosPerQuarter(),
 				raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(), raw.endTick(),

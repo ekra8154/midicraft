@@ -52,7 +52,7 @@ class RefusalCensusTest {
 			int marked = 0;
 			int cells = 0;
 			for (Path file : songs()) {
-				String name = file.getFileName().toString().replace(".json", "");
+				String name = file.getFileName().toString().replaceFirst("\\.(json|midicraft)$", "");
 				if (name.startsWith("ultra-")) {
 					continue;
 				}
@@ -97,7 +97,7 @@ class RefusalCensusTest {
 
 	private static List<Path> songs() throws Exception {
 		try (Stream<Path> listing = Files.list(SONGS)) {
-			return listing.filter(f -> f.toString().endsWith(".json")).sorted().toList();
+			return listing.filter(f -> TestSongs.isSong(f)).sorted().toList();
 		}
 	}
 
@@ -105,7 +105,7 @@ class RefusalCensusTest {
 	void countsEveryRefusalByWhatCollided() throws Exception {
 		List<Path> files;
 		try (Stream<Path> listing = Files.list(SONGS)) {
-			files = listing.filter(f -> f.toString().endsWith(".json")).sorted().toList();
+			files = listing.filter(f -> TestSongs.isSong(f)).sorted().toList();
 		}
 		Map<String, Integer> byKind = new TreeMap<>();
 		Map<String, Integer> bySong = new TreeMap<>();
@@ -113,7 +113,7 @@ class RefusalCensusTest {
 		int builds = 0;
 		int refused = 0;
 		for (Path file : files) {
-			String name = file.getFileName().toString().replace(".json", "");
+			String name = file.getFileName().toString().replaceFirst("\\.(json|midicraft)$", "");
 			if (name.startsWith("ultra-")) {
 				continue;
 			}
@@ -163,7 +163,7 @@ class RefusalCensusTest {
 	}
 
 	private static List<SongBuilder.EventNote> load(String name) throws Exception {
-		try (Reader reader = Files.newBufferedReader(BreachView.songFile(name))) {
+		try (Reader reader = TestSongs.reader(BreachView.songFile(name))) {
 			ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
 			ComposerProject song = new ComposerProject(raw.name(), raw.ppq(),
 				raw.tempoMicrosPerQuarter(), raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(),

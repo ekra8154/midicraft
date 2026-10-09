@@ -49,9 +49,9 @@ class TwoLanesThenOneProbe {
 	 */
 	private static List<SongBuilder.EventNote> twoLanesThenOne() throws Exception {
 		Path file = Path.of("run", "config", "midicraft", "songs",
-			System.getProperty("probe.song", "ultra-ones-gap2-odd-third") + ".json");
+			TestSongs.fileName(System.getProperty("probe.song", "ultra-ones-gap2-odd-third")));
 		List<SongBuilder.EventNote> notes;
-		try (Reader reader = Files.newBufferedReader(file)) {
+		try (Reader reader = TestSongs.reader(file)) {
 			ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
 			ComposerProject project = new ComposerProject(raw.name(), raw.ppq(),
 				raw.tempoMicrosPerQuarter(), raw.layers(), raw.activeLayerIndex(),

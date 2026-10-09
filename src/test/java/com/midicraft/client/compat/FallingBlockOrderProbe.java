@@ -174,7 +174,7 @@ class FallingBlockOrderProbe {
 	void countsEverySandSentBeforeItsProp() throws Exception {
 		List<Path> files;
 		try (Stream<Path> listing = Files.list(SONGS)) {
-			files = listing.filter(path -> path.toString().endsWith(".json")).sorted().toList();
+			files = listing.filter(path -> TestSongs.isSong(path)).sorted().toList();
 		}
 		Map<String, Block> byId = blocksById();
 		Gson gson = new Gson();
@@ -194,9 +194,9 @@ class FallingBlockOrderProbe {
 		TreeMap<String, Integer> bySong = new TreeMap<>();
 		List<String> examples = new ArrayList<>();
 		for (Path file : files) {
-			String name = file.getFileName().toString().replace(".json", "");
+			String name = file.getFileName().toString().replaceFirst("\\.(json|midicraft)$", "");
 			ComposerProject song;
-			try (Reader reader = Files.newBufferedReader(file)) {
+			try (Reader reader = TestSongs.reader(file)) {
 				ComposerProject raw = gson.fromJson(reader, ComposerProject.class);
 				song = new ComposerProject(raw.name(), raw.ppq(), raw.tempoMicrosPerQuarter(),
 					raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(), raw.endTick(),
@@ -275,7 +275,7 @@ class FallingBlockOrderProbe {
 	void asksEveryLayoutTheSameQuestion() throws Exception {
 		Path file = BreachView.songFile("big-shot");
 		ComposerProject song;
-		try (Reader reader = Files.newBufferedReader(file)) {
+		try (Reader reader = TestSongs.reader(file)) {
 			ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
 			song = new ComposerProject(raw.name(), raw.ppq(), raw.tempoMicrosPerQuarter(),
 				raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(), raw.endTick(),
@@ -351,7 +351,7 @@ class FallingBlockOrderProbe {
 	void drawsTheSandThatIsHeldUpByNothing() throws Exception {
 		Path file = BreachView.songFile("aria-math-c418");
 		ComposerProject song;
-		try (Reader reader = Files.newBufferedReader(file)) {
+		try (Reader reader = TestSongs.reader(file)) {
 			ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
 			song = new ComposerProject(raw.name(), raw.ppq(), raw.tempoMicrosPerQuarter(),
 				raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(), raw.endTick(),

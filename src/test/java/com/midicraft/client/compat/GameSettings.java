@@ -153,7 +153,7 @@ final class GameSettings {
 	private static Values read() {
 		Stored stored = new Stored();
 		if (Files.exists(CONFIG)) {
-			try (Reader reader = Files.newBufferedReader(CONFIG)) {
+			try (Reader reader = TestSongs.reader(CONFIG)) {
 				Stored found = new Gson().fromJson(reader, Stored.class);
 				if (found != null) {
 					stored = found;
@@ -225,7 +225,7 @@ final class GameSettings {
 	 * or older file gets the same invariants in the probe as in the game.
 	 */
 	static ComposerProject project(Path file) throws IOException {
-		try (Reader reader = Files.newBufferedReader(file)) {
+		try (Reader reader = TestSongs.reader(file)) {
 			ComposerProject song = new Gson().fromJson(reader, ComposerProject.class);
 			if (song == null || song.layers() == null) {
 				throw new IllegalArgumentException(file + " holds no song");

@@ -28,7 +28,7 @@ class HalfTickVerdictProbe {
 	private static final Path SONGS = Path.of("run", "config", "midicraft", "songs");
 
 	private static ComposerProject load(Path file) throws Exception {
-		try (Reader reader = Files.newBufferedReader(file)) {
+		try (Reader reader = TestSongs.reader(file)) {
 			ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
 			return new ComposerProject(raw.name(), raw.ppq(), raw.tempoMicrosPerQuarter(),
 				raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(), raw.endTick(),
@@ -89,7 +89,7 @@ class HalfTickVerdictProbe {
 			"repeater / game (worst)", "repeater / game (worst, mean)"));
 		List<Path> songs = new ArrayList<>();
 		try (var listing = Files.list(SONGS)) {
-			listing.filter(file -> file.toString().endsWith(".json")).sorted().forEach(songs::add);
+			listing.filter(file -> TestSongs.isSong(file)).sorted().forEach(songs::add);
 		}
 		double worstRepeater = 0.0;
 		double worstGame = 0.0;
@@ -157,7 +157,7 @@ class HalfTickVerdictProbe {
 	void readsTheWholeLibraryAtItsOwnSpeedAndAtDouble() throws Exception {
 		List<Path> songs = new ArrayList<>();
 		try (var listing = Files.list(SONGS)) {
-			listing.filter(file -> file.toString().endsWith(".json")).sorted().forEach(songs::add);
+			listing.filter(file -> TestSongs.isSong(file)).sorted().forEach(songs::add);
 		}
 		int oneLane = 0;
 		int twoLanes = 0;

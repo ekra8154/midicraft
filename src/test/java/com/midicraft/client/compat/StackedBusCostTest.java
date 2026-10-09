@@ -35,7 +35,7 @@ class StackedBusCostTest {
 	private static final Path SONGS = Path.of("run", "config", "midicraft", "songs");
 
 	private static ComposerProject load(Path file) throws Exception {
-		try (Reader reader = Files.newBufferedReader(file)) {
+		try (Reader reader = TestSongs.reader(file)) {
 			ComposerProject raw = new Gson().fromJson(reader, ComposerProject.class);
 			return new ComposerProject(raw.name(), raw.ppq(), raw.tempoMicrosPerQuarter(),
 				raw.layers(), raw.activeLayerIndex(), raw.nextNoteId(), raw.endTick(),
@@ -106,11 +106,11 @@ class StackedBusCostTest {
 	void everyRealSong() throws Exception {
 		List<Path> files;
 		try (Stream<Path> listing = Files.list(SONGS)) {
-			files = listing.filter(p -> p.toString().endsWith(".json")).sorted().toList();
+			files = listing.filter(p -> TestSongs.isSong(p)).sorted().toList();
 		}
 		TreeMap<String, String> rows = new TreeMap<>();
 		for (Path file : files) {
-			String name = file.getFileName().toString().replace(".json", "");
+			String name = file.getFileName().toString().replaceFirst("\\.(json|midicraft)$", "");
 			if (name.startsWith("ultra-")) {
 				continue;
 			}
@@ -152,11 +152,11 @@ class StackedBusCostTest {
 	void whereThePadWent() throws Exception {
 		List<Path> files;
 		try (Stream<Path> listing = Files.list(SONGS)) {
-			files = listing.filter(p -> p.toString().endsWith(".json")).sorted().toList();
+			files = listing.filter(p -> TestSongs.isSong(p)).sorted().toList();
 		}
 		TreeMap<String, long[]> byKey = new TreeMap<>();
 		for (Path file : files) {
-			String name = file.getFileName().toString().replace(".json", "");
+			String name = file.getFileName().toString().replaceFirst("\\.(json|midicraft)$", "");
 			if (name.startsWith("ultra-")) {
 				continue;
 			}
@@ -206,7 +206,7 @@ class StackedBusCostTest {
 	void nudgeAgainstGivingUp() throws Exception {
 		List<Path> files;
 		try (Stream<Path> listing = Files.list(SONGS)) {
-			files = listing.filter(p -> p.toString().endsWith(".json")).sorted().toList();
+			files = listing.filter(p -> TestSongs.isSong(p)).sorted().toList();
 		}
 		long[] pad = new long[2];
 		long[] parity = new long[2];
@@ -217,7 +217,7 @@ class StackedBusCostTest {
 		long[] breachBlocks = new long[2];
 		long[] wrong = new long[2];
 		for (Path file : files) {
-			String name = file.getFileName().toString().replace(".json", "");
+			String name = file.getFileName().toString().replaceFirst("\\.(json|midicraft)$", "");
 			if (name.startsWith("ultra-")) {
 				continue;
 			}
