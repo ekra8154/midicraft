@@ -3,6 +3,7 @@ package com.midicraft.client.compat;
 import com.midicraft.client.McCompat;
 import com.midicraft.client.MidicraftConfig;
 import com.midicraft.client.PasteRate;
+import com.mojang.blaze3d.platform.InputConstants;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -23,6 +24,8 @@ import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.KeyEvent;
+import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
 
@@ -95,13 +98,27 @@ final class BuildOptionsScreen extends Screen {
 	private int paceTolerance;
 	private int paceCatchUpTo;
 	/**
-	 * Whether the advanced rows are open: machine swapping, pace tolerance and the command rate.
-	 *
-	 * <p>Static, so the dialog opens the way it was last left for the rest of the session. These
-	 * are settings most pastes never touch, and a player who does touch them tends to keep doing
-	 * so.</p>
+	 * The three faces of the settings column. One shows at a time, which is what keeps the panel
+	 * one height whatever is being changed: the rows used to open downward in place, and with the
+	 * palette and the advanced rows both open the buttons went off the bottom of the window.
 	 */
-	private static boolean advancedOpen;
+	private enum Tab {
+		LAYOUT("Layout"),
+		PALETTE("Palette"),
+		ADVANCED("Advanced");
+
+		private final String label;
+
+		Tab(String label) {
+			this.label = label;
+		}
+	}
+
+	/**
+	 * The tab showing. Static, so the screen opens on the tab it was left on for the rest of the
+	 * session: the palette and the advanced rows are what a player who uses them keeps going back to.
+	 */
+	private static Tab tab = Tab.LAYOUT;
 
 	/**
 	 * One block of the palette: the role it fills, and where the config keeps it.
@@ -147,21 +164,12 @@ final class BuildOptionsScreen extends Screen {
 	/** The open palette's columns: two blocks a row, so six fit in three rows. */
 	private static final int PALETTE_COLUMNS = 2;
 	/** Room for the Default button at the end of the palette toggle, while it is open. */
-	private static final int PALETTE_DEFAULT_WIDTH = 60;
-
-	/**
-	 * Whether the palette rows are open. Shut by default, and static so the screen opens the way it
-	 * was last left, for the same reason as {@link #advancedOpen}.
-	 */
-	private static boolean paletteOpen;
 	/**
 	 * The palette being chosen, in {@link #PALETTE} order: always the last block each box held that
 	 * would work, so a half-typed name never reaches a build. Written to the config on Paste or
 	 * Export, like the width; leaving the screen keeps the palette you had.
 	 */
 	private final String[] palette = new String[PALETTE.size()];
-	/** The palette toggle, so its summary can follow the boxes under it. */
-	private Button paletteToggle;
 	/** Where each palette label goes on screen, as {x, y}, for drawing it beside its box. */
 	private final List<int[]> paletteLabelAt = new ArrayList<>();
 	/** The catch-up control, so its line can follow the tolerance above it. */
@@ -475,60 +483,6 @@ final class BuildOptionsScreen extends Screen {
 		}
 	}
 
-	/** The palette toggle, straight under the block row it belongs with. */
-	private int paletteRow(int top) {
-		return top + 14 + 2 * 22;
-	}
-
-	/**
-	 * Rows the open palette takes under its toggle, two blocks to a row.
-	 *
-	 * <p>Two columns and short labels rather than a row a block: this screen is already tall with
-	 * the advanced rows open, and six more full rows put the buttons off the bottom of a small
-	 * window.</p>
-	 */
-	private int paletteRows() {
-		return paletteOpen ? (PALETTE.size() + PALETTE_COLUMNS - 1) / PALETTE_COLUMNS : 0;
-	}
-
-	/** Top of the width row, which only a lane build has. Under the start, block and palette rows. */
-	private int widthRow(int top) {
-		return paletteRow(top) + 22 * (1 + paletteRows()) + 6;
-	}
-
-	private int floorRow(int top) {
-		return widthRow(top) + 22;
-	}
-
-	/**
-	 * The advanced toggle, under the dimensions where a layout has them and in their place where
-	 * it does not -- the straight half-tick lane folds nowhere and so shows neither.
-	 */
-	private int advancedRow(int top) {
-		return (hasLaneControls() ? floorRow(top) + 22 : widthRow(top)) + 4;
-	}
-
-	/** The advanced rows in order, the first straight under the toggle. */
-	private int advancedRow(int top, int index) {
-		return advancedRow(top) + 22 * (index + 1);
-	}
-
-	/**
-	 * How many advanced rows this layout has: the rate always, machine swapping and the two pace
-	 * rows where they apply.
-	 */
-	private int advancedRows() {
-		return 1 + (hasReseedControl() ? 1 : 0) + (hasPaceControl() ? 2 : 0);
-	}
-
-	/**
-	 * The last control row, which the forecast and the buttons hang off: the rate where the
-	 * advanced rows are open, the toggle where they are shut.
-	 */
-	private int lastRow(int top) {
-		return advancedOpen ? advancedRow(top, advancedRows() - 1) : advancedRow(top);
-	}
-
 	/**
 	 * Whether this layout paces two machines against each other, which only the interleaved paste
 	 * does: its two machines are walked together, and the pace tolerance is how far one may fall
@@ -617,14 +571,136 @@ final class BuildOptionsScreen extends Screen {
 			|| mode == SongBuilder.PasteMode.INTERLEAVED_HALF_TICK;
 	}
 
+	// ------------------------------------------------------------------ layout
+
+	/** The popups' own measurements, so this panel sits beside Song info and Convert as one of them. */
+	private static final int PADDING = ModalPanelScreen.PADDING;
+	private static final int TITLE_HEIGHT = ModalPanelScreen.TITLE_HEIGHT;
+	private static final int PANEL_FILL = 0xFF16191F;
+	private static final int PANEL_EDGE = 0xFF3C4450;
+	private static final int HEADING_COLOR = 0xFF8FD3FF;
+	private static final int TEXT_COLOR = 0xFFFFFFFF;
+	private static final int LABEL_COLOR = 0xFFD6D8DD;
+	private static final int HINT_COLOR = 0xFF8A9098;
+	private static final int GOOD_COLOR = 0xFF7ACF7A;
+	private static final int WARN_COLOR = 0xFFFFAA00;
+	private static final int BAD_COLOR = 0xFFFF5555;
+
+	private static final int ROW = 22;
+	private static final int LINE = 11;
+	private static final int TAB_HEIGHT = 14;
+	/** The tallest tab's rows -- layout and advanced both reach four -- which every tab is given. */
+	private static final int CONTENT_ROWS = 4;
+	/** Lines the forecast card keeps room for: two of size, a gap, two checks and three faults. */
+	private static final int CARD_LINES = 9;
+	/** Lines kept above the buttons for what the paste needs and where it may go wrong. */
+	private static final int NOTE_LINES = 2;
+	/** Narrower than this and the forecast goes under the settings instead of beside them. */
+	private static final int TWO_COLUMNS_FROM = 460;
+	private static final int SETTINGS_WIDTH = 300;
+
+	private int panelLeft;
+	private int panelTop;
+	private int panelWidth;
+	private int panelHeight;
+	private boolean twoColumns;
+	/** The settings column. */
+	private int columnLeft;
+	private int columnWidth;
+	private int tabsTop;
+	private int contentTop;
+	/** The forecast card. */
+	private int cardLeft;
+	private int cardTop;
+	private int cardWidth;
+	private int cardBottom;
+	private int notesTop;
+	private int buttonsTop;
+
+	private Button exportButton;
+	/** Whether the export menu is open over the buttons. */
+	private boolean exportMenuOpen;
+	/** Where the export menu was last drawn, as {left, top, width}, for a click to be aimed at it. */
+	private int[] exportMenuAt;
+	/** Where each fault line of the card was drawn, as {x, y, width}, for its tooltip. */
+	private final List<int[]> cardFaultAt = new ArrayList<>();
+	private final List<List<String>> cardFaultDetail = new ArrayList<>();
+
+	/**
+	 * Where everything goes, worked out once a layout from the window's size.
+	 *
+	 * <p>One height whatever the tab, and the buttons pinned to the bottom of the panel, so nothing
+	 * that opens can push them out of reach. Two columns where there is room for them -- the settings
+	 * on the left and what they will build on the right, so moving a slider shows its effect beside
+	 * it -- and one where there is not, the card under the settings.</p>
+	 */
+	private void layout() {
+		panelWidth = Math.min(560, width - 16);
+		twoColumns = panelWidth >= TWO_COLUMNS_FROM;
+		int inner = panelWidth - 2 * PADDING;
+		columnWidth = twoColumns ? Math.min(SETTINGS_WIDTH, inner * 3 / 5) : inner;
+		int settings = TAB_HEIGHT + 6 + CONTENT_ROWS * ROW;
+		int card = LINE + 4 + CARD_LINES * LINE;
+		int body = twoColumns ? Math.max(settings, card) : settings + 8 + card;
+		panelHeight = PADDING + TITLE_HEIGHT + body + 8 + NOTE_LINES * LINE + 4 + 20 + PADDING;
+		panelLeft = (width - panelWidth) / 2;
+		panelTop = Math.max(4, (height - panelHeight) / 2);
+		columnLeft = panelLeft + PADDING;
+		tabsTop = panelTop + PADDING + TITLE_HEIGHT;
+		contentTop = tabsTop + TAB_HEIGHT + 6;
+		cardLeft = twoColumns ? columnLeft + columnWidth + 12 : columnLeft;
+		cardTop = twoColumns ? tabsTop : tabsTop + settings + 8;
+		cardWidth = twoColumns ? panelLeft + panelWidth - PADDING - cardLeft : inner;
+		buttonsTop = panelTop + panelHeight - PADDING - 20;
+		notesTop = buttonsTop - 4 - NOTE_LINES * LINE;
+		cardBottom = notesTop - 8;
+	}
+
 	@Override
 	protected void init() {
 		clearWidgets();
-		int width = Math.min(300, this.width - 40);
-		int left = (this.width - width) / 2;
-		int top = topRow();
+		layout();
+		widthChoice = null;
+		catchUpChoice = null;
+		paletteLabelAt.clear();
+		exportMenuOpen = false;
+		switch (tab) {
+			case LAYOUT -> addLayoutRows();
+			case PALETTE -> addPaletteRows();
+			case ADVANCED -> addAdvancedRows();
+		}
 
-		int y = top + 14;
+		// Paste, Export and Cancel along the bottom, the way Convert puts its two: the action and the
+		// key for it on the button.
+		int inner = panelWidth - 2 * PADDING;
+		int buttons = export == null ? 2 : 3;
+		int each = (inner - 4 * (buttons - 1)) / buttons;
+		int x = columnLeft;
+		addRenderableWidget(Button.builder(Component.literal("Paste (Enter)"), clicked -> paste())
+			.bounds(x, buttonsTop, each, 20)
+			.tooltip(Tooltip.create(Component.literal(direct
+				? "Builds it here, straight into the world."
+				: "Builds it here with /setblock, at the paste rate under Advanced.")))
+			.build());
+		x += each + 4;
+		exportButton = null;
+		if (export != null) {
+			exportButton = addRenderableWidget(Button.builder(Component.literal("Export \u25B2"),
+					clicked -> exportMenuOpen = !exportMenuOpen)
+				.bounds(x, buttonsTop, each, 20)
+				.tooltip(Tooltip.create(Component.literal("Save this build as a file instead: a "
+					+ ".litematic for Litematica or a .schem for WorldEdit. Nothing is placed.")))
+				.build());
+			x += each + 4;
+		}
+		addRenderableWidget(Button.builder(Component.literal("Cancel (Esc)"), clicked -> onClose())
+			.bounds(x, buttonsTop, columnLeft + inner - x, 20).build());
+		requestForecast();
+	}
+
+	/** Where the build starts, what it is made of, and how wide and tall it folds. */
+	private void addLayoutRows() {
+		int y = contentTop;
 		// A button that flips rather than a slider of two rungs: there are two answers, and the one
 		// showing is the one chosen.
 		addRenderableWidget(Button.builder(Component.literal(startLine(startTop)), clicked -> {
@@ -632,11 +708,11 @@ final class BuildOptionsScreen extends Screen {
 				clicked.setMessage(Component.literal(startLine(startTop)));
 				requestForecast();
 			})
-			.bounds(left, y, width, 20)
+			.bounds(columnLeft, y, columnWidth, 20)
 			.tooltip(Tooltip.create(Component.literal("On multifloor builds, whether the beginning "
 				+ "of the song is on the top floor or the bottom floor.")))
 			.build());
-		y += 22;
+		y += ROW;
 		// Cycles in the order offered, plain first: the ordinary build is the one most pastes want.
 		addRenderableWidget(Button.builder(Component.literal(blocksLine(colours)), clicked -> {
 				MidicraftConfig.ColorCodedPaste[] all = MidicraftConfig.ColorCodedPaste.values();
@@ -646,145 +722,95 @@ final class BuildOptionsScreen extends Screen {
 				clicked.setTooltip(Tooltip.create(Component.literal(blocksTooltip(colours))));
 				requestForecast();
 			})
-			.bounds(left, y, width, 20)
+			.bounds(columnLeft, y, columnWidth, 20)
 			.tooltip(Tooltip.create(Component.literal(blocksTooltip(colours))))
 			.build());
-
-		int toggleWidth = paletteOpen ? width - PALETTE_DEFAULT_WIDTH - 4 : width;
-		paletteToggle = addRenderableWidget(Button.builder(
-				Component.literal(paletteLine(toggleWidth)), clicked -> {
-					paletteOpen = !paletteOpen;
-					init();
-				})
-			.bounds(left, paletteRow(top), toggleWidth, 20)
-			.tooltip(Tooltip.create(Component.literal("The blocks this build is made of. Remembered "
-				+ "for the next build, like the width.")))
-			.build());
-		paletteLabelAt.clear();
-		if (paletteOpen) {
-			addPaletteRows(left, width, top, toggleWidth);
-		}
-
+		y += ROW;
 		if (hasLaneControls()) {
 			labelledWidth = 0;
-			widthChoice = addRenderableWidget(new Choice(left, widthRow(top), width,
+			widthChoice = addRenderableWidget(new Choice(columnLeft, y, columnWidth,
 				MidicraftConfig.MAX_BUILD_LANE_WIDTH - MidicraftConfig.MIN_BUILD_LANE_WIDTH
 					+ 1,
 				laneWidth - MidicraftConfig.MIN_BUILD_LANE_WIDTH,
 				rung -> widthLine(MidicraftConfig.MIN_BUILD_LANE_WIDTH + rung),
 				rung -> laneWidth = MidicraftConfig.MIN_BUILD_LANE_WIDTH + rung));
-			addRenderableWidget(new Choice(left, floorRow(top), width,
+			y += ROW;
+			addRenderableWidget(new Choice(columnLeft, y, columnWidth,
 				MidicraftConfig.MAX_BUILD_LANE_FLOORS
 					- MidicraftConfig.MIN_BUILD_LANE_FLOORS + 1,
 				laneFloors - MidicraftConfig.MIN_BUILD_LANE_FLOORS,
 				rung -> floorLine(MidicraftConfig.MIN_BUILD_LANE_FLOORS + rung),
 				rung -> laneFloors = MidicraftConfig.MIN_BUILD_LANE_FLOORS + rung));
 		}
-
-		// Shut by default: the rows under it are about how the build is made, not what it is, and
-		// their defaults are the measured ones. Laid out again when it flips, which is what moves
-		// the forecast and the buttons down to make room.
-		addRenderableWidget(Button.builder(Component.literal(advancedOpen
-				? "Advanced \u25B2" : "Advanced \u25BC"), clicked -> {
-				advancedOpen = !advancedOpen;
-				init();
-			})
-			.bounds(left, advancedRow(top), width, 20)
-			.tooltip(Tooltip.create(Component.literal("Machine swapping, lane drift and paste "
-				+ "speed.")))
-			.build());
-
-		if (advancedOpen) {
-			int row = 0;
-			if (hasReseedControl()) {
-				addRenderableWidget(new Choice(left, advancedRow(top, row++), width,
-					RESEED_DELAYS.size(), reseedRung(reseedDelay),
-					rung -> reseedLine(RESEED_DELAYS.get(rung)),
-					rung -> reseedDelay = RESEED_DELAYS.get(rung)))
-					.setTooltip(Tooltip.create(Component.literal("How long a lane can wait idly "
-						+ "before swapping to the other half. Lower values mean more pistons but a "
-						+ "more compact build.")));
-			}
-			if (hasPaceControl()) {
-				addRenderableWidget(new Choice(left, advancedRow(top, row++), width,
-					PACE_TOLERANCES.size(), paceRung(paceTolerance),
-					rung -> paceLine(PACE_TOLERANCES.get(rung)),
-					rung -> {
-						paceTolerance = PACE_TOLERANCES.get(rung);
-						// Its line reads off the tolerance, so it is rewritten when that moves.
-						if (catchUpChoice != null) {
-							catchUpChoice.updateMessage();
-						}
-					}))
-					.setTooltip(Tooltip.create(Component.literal("How far the quieter machine may "
-						+ "fall behind before it pads to keep up. Higher values are more compact but "
-						+ "can cause one lane to get out of earshot of the other.")));
-				catchUpChoice = addRenderableWidget(new Choice(left, advancedRow(top, row++), width,
-					PACE_TOLERANCES.size(), paceRung(paceCatchUpTo),
-					rung -> catchUpLine(PACE_TOLERANCES.get(rung)),
-					rung -> paceCatchUpTo = PACE_TOLERANCES.get(rung)));
-				catchUpChoice.setTooltip(Tooltip.create(Component.literal("How close a lane catches "
-					+ "up to the other after going past the drift limit. Lower values catch up further "
-					+ "but cause slightly more padding.")));
-			}
-			Choice rate = addRenderableWidget(new Choice(left, advancedRow(top, row), width,
-				PasteRate.RATES.size(), PasteRate.index(commandsPerTick),
-				rung -> PasteRate.label(PasteRate.RATES.get(rung), direct),
-				rung -> commandsPerTick = PasteRate.RATES.get(rung)));
-			if (direct) {
-				rate.mute();
-				rate.setTooltip(Tooltip.create(Component.literal("Only used on servers. Here the "
-					+ "paste goes straight into the world, as fast as the game can spare.")));
-			}
-		}
-
-		y = lastRow(top);
-
-		addRenderableWidget(Button.builder(Component.literal("Paste"), clicked -> {
-			remember();
-			confirm.accept(mode);
-		}).bounds(left, y + BUTTON_ROW, width / 2 - 3, 20).build());
-		addRenderableWidget(Button.builder(CommonComponents.GUI_CANCEL, clicked -> onClose())
-			.bounds(left + width / 2 + 3, y + BUTTON_ROW, width / 2 - 3, 20).build());
-		if (export != null) {
-			addRenderableWidget(Button.builder(Component.literal("Export .litematic"), clicked -> {
-				remember();
-				export.accept(mode, SchematicWriter.Format.LITEMATIC);
-			}).bounds(left, y + BUTTON_ROW + EXPORT_ROW, width / 2 - 3, 20)
-				.tooltip(Tooltip.create(Component.literal("Save this build for Litematica, in "
-					+ "its schematics folder. Nothing is placed.")))
-				.build());
-			addRenderableWidget(Button.builder(Component.literal("Export .schem"), clicked -> {
-				remember();
-				export.accept(mode, SchematicWriter.Format.SCHEM);
-			}).bounds(left + width / 2 + 3, y + BUTTON_ROW + EXPORT_ROW, width / 2 - 3, 20)
-				.tooltip(Tooltip.create(Component.literal("Save this build for WorldEdit, in its "
-					+ "schematics folder. //paste from where you stand now puts it where Paste "
-					+ "would. Nothing is placed.")))
-				.build());
-		}
-		requestForecast();
 	}
 
 	/**
-	 * A box per block under the palette toggle, its label beside it, and a way back to the defaults.
+	 * How the build is made rather than what it is: machine swapping and drift where the layout has
+	 * them, and the rate a server paste sends at. Their defaults are the measured ones.
+	 */
+	private void addAdvancedRows() {
+		int row = 0;
+		if (hasReseedControl()) {
+			addRenderableWidget(new Choice(columnLeft, contentTop + ROW * row++, columnWidth,
+				RESEED_DELAYS.size(), reseedRung(reseedDelay),
+				rung -> reseedLine(RESEED_DELAYS.get(rung)),
+				rung -> reseedDelay = RESEED_DELAYS.get(rung)))
+				.setTooltip(Tooltip.create(Component.literal("How long a lane can wait idly "
+					+ "before swapping to the other half. Lower values mean more pistons but a "
+					+ "more compact build.")));
+		}
+		if (hasPaceControl()) {
+			addRenderableWidget(new Choice(columnLeft, contentTop + ROW * row++, columnWidth,
+				PACE_TOLERANCES.size(), paceRung(paceTolerance),
+				rung -> paceLine(PACE_TOLERANCES.get(rung)),
+				rung -> {
+					paceTolerance = PACE_TOLERANCES.get(rung);
+					// Its line reads off the tolerance, so it is rewritten when that moves.
+					if (catchUpChoice != null) {
+						catchUpChoice.updateMessage();
+					}
+				}))
+				.setTooltip(Tooltip.create(Component.literal("How far the quieter machine may "
+					+ "fall behind before it pads to keep up. Higher values are more compact but "
+					+ "can cause one lane to get out of earshot of the other.")));
+			catchUpChoice = addRenderableWidget(new Choice(columnLeft, contentTop + ROW * row++,
+				columnWidth, PACE_TOLERANCES.size(), paceRung(paceCatchUpTo),
+				rung -> catchUpLine(PACE_TOLERANCES.get(rung)),
+				rung -> paceCatchUpTo = PACE_TOLERANCES.get(rung)));
+			catchUpChoice.setTooltip(Tooltip.create(Component.literal("How close a lane catches "
+				+ "up to the other after going past the drift limit. Lower values catch up further "
+				+ "but cause slightly more padding.")));
+		}
+		Choice rate = addRenderableWidget(new Choice(columnLeft, contentTop + ROW * row,
+			columnWidth, PasteRate.RATES.size(), PasteRate.index(commandsPerTick),
+			rung -> PasteRate.label(PasteRate.RATES.get(rung), direct),
+			rung -> commandsPerTick = PasteRate.RATES.get(rung)));
+		if (direct) {
+			rate.mute();
+			rate.setTooltip(Tooltip.create(Component.literal("Only used on servers. Here the "
+				+ "paste goes straight into the world, as fast as the game can spare.")));
+		}
+	}
+
+	/**
+	 * A box per block, two to a row with its short label beside it, and a way back to the defaults.
 	 *
 	 * <p>Checked as it is typed, the way Settings checked it: a block that would not do turns red
 	 * and says why, and the build keeps the last block that would.</p>
 	 */
-	private void addPaletteRows(int left, int width, int top, int toggleWidth) {
+	private void addPaletteRows() {
 		int labelWidth = 0;
 		for (PaletteSlot slot : PALETTE) {
 			labelWidth = Math.max(labelWidth, font.width(slot.shortLabel()));
 		}
 		labelWidth += 6;
-		int column = (width - 4 * (PALETTE_COLUMNS - 1)) / PALETTE_COLUMNS;
+		int column = (columnWidth - 4 * (PALETTE_COLUMNS - 1)) / PALETTE_COLUMNS;
 		List<EditBox> boxes = new ArrayList<>();
 		for (int index = 0; index < PALETTE.size(); index++) {
 			PaletteSlot slot = PALETTE.get(index);
 			int slotIndex = index;
-			int x = left + (index % PALETTE_COLUMNS) * (column + 4);
-			int y = paletteRow(top) + 22 * (index / PALETTE_COLUMNS + 1);
+			int x = columnLeft + (index % PALETTE_COLUMNS) * (column + 4);
+			int y = contentTop + ROW * (index / PALETTE_COLUMNS);
 			paletteLabelAt.add(new int[] {x, y});
 			EditBox box = new EditBox(font, x + labelWidth, y, column - labelWidth, 20,
 				Component.literal(slot.shortLabel()));
@@ -800,46 +826,23 @@ final class BuildOptionsScreen extends Screen {
 					box.setTextColor(0xFFE0E0E0);
 					box.setTooltip(slot.tooltip());
 				} else {
-					box.setTextColor(0xFFFF5555);
+					box.setTextColor(BAD_COLOR);
 					box.setTooltip(Tooltip.create(Component.literal(wrong + ". The build keeps "
 						+ typable(palette[slotIndex]) + ".")));
 				}
-				paletteToggle.setMessage(Component.literal(paletteLine(toggleWidth)));
 			});
 			boxes.add(addRenderableWidget(box));
 		}
-		addRenderableWidget(Button.builder(Component.literal("Default"), clicked -> {
+		int rows = (PALETTE.size() + PALETTE_COLUMNS - 1) / PALETTE_COLUMNS;
+		addRenderableWidget(Button.builder(Component.literal("Default blocks"), clicked -> {
 				for (int index = 0; index < PALETTE.size(); index++) {
 					boxes.get(index).setValue(typable(PALETTE.get(index).role().fallback()));
 				}
 			})
-			.bounds(left + width - PALETTE_DEFAULT_WIDTH, paletteRow(top), PALETTE_DEFAULT_WIDTH, 20)
+			.bounds(columnLeft, contentTop + ROW * rows, columnWidth, 20)
 			.tooltip(Tooltip.create(Component.literal("Stone slabs, with stone where the build "
 				+ "carries power.")))
 			.build());
-	}
-
-	/**
-	 * The palette in one line, for the toggle: its different blocks by name, as many as fit.
-	 *
-	 * <p>Named rather than counted because the default and nearly every palette is two or three
-	 * blocks, and seeing them is what tells you whether opening the rows is worth it.</p>
-	 */
-	private String paletteLine(int width) {
-		java.util.LinkedHashSet<String> names = new java.util.LinkedHashSet<>();
-		for (String block : palette) {
-			names.add(blockName(block));
-		}
-		List<String> shown = new ArrayList<>(names);
-		String arrow = paletteOpen ? " \u25B2" : " \u25BC";
-		for (int count = shown.size(); count > 0; count--) {
-			String line = "Palette: " + String.join(", ", shown.subList(0, count))
-				+ (count < shown.size() ? ", ..." : "") + arrow;
-			if (count == 1 || font.width(line) <= width - 8) {
-				return line;
-			}
-		}
-		return "Palette" + arrow;
 	}
 
 	/**
@@ -851,17 +854,28 @@ final class BuildOptionsScreen extends Screen {
 		return block.startsWith("minecraft:") ? block.substring("minecraft:".length()) : block;
 	}
 
-	/** A block as people say it: no namespace for the game's own, no state, spaces for underscores. */
-	private static String blockName(String block) {
-		String name = block;
-		int bracket = name.indexOf('[');
-		if (bracket >= 0) {
-			name = name.substring(0, bracket);
+	private void paste() {
+		remember();
+		confirm.accept(mode);
+	}
+
+	private void exportAs(SchematicWriter.Format format) {
+		remember();
+		export.accept(mode, format);
+	}
+
+	/** What the export menu offers, top to bottom. */
+	private List<String> exportItems() {
+		return List.of("Save .litematic", "Save .schem");
+	}
+
+	private void runExportItem(int item) {
+		switch (item) {
+			case 0 -> exportAs(SchematicWriter.Format.LITEMATIC);
+			case 1 -> exportAs(SchematicWriter.Format.SCHEM);
+			default -> {
+			}
 		}
-		if (name.startsWith("minecraft:")) {
-			name = name.substring("minecraft:".length());
-		}
-		return name.replace('_', ' ');
 	}
 
 	/**
@@ -884,39 +898,6 @@ final class BuildOptionsScreen extends Screen {
 			PALETTE.get(slot).write().accept(MidicraftConfig.get(), palette[slot]);
 		}
 		MidicraftConfig.save();
-	}
-
-	/** How far below the Paste row the export row sits, or nought where there is none. */
-	private int exportRow() {
-		return export == null ? 0 : EXPORT_ROW;
-	}
-
-	private static final int EXPORT_ROW = 22;
-
-	/**
-	 * How far below the rate row the buttons sit.
-	 *
-	 * <p>Twelve lower than it used to be, for the forecast line, and {@link #FAULT_LINES} lower again
-	 * for the faults under it. They go above the buttons rather than below them because they are part
-	 * of the choice being made, not a footnote to it.</p>
-	 */
-	private static final int BUTTON_ROW = 47 + FAULT_LINES * 11 + 2;
-
-	/**
-	 * Top of the dialog.
-	 *
-	 * <p>Raised by exactly what the fault lines added below, so the dialog grew upward into the empty
-	 * half of the screen rather than downward into the two notes under the buttons. Those two are the
-	 * lowest thing on the screen and they were already close to the bottom of a small window.</p>
-	 */
-	private int topRow() {
-		// Twenty-two higher again for the block row, which went in under the start row; then a row
-		// either way for every row the advanced toggle adds or hides against the six this was
-		// measured with (start, blocks, width, floors, reseed, rate).
-		int rows = 2 + 1 + paletteRows() + (hasLaneControls() ? 2 : 0) + 1
-			+ (advancedOpen ? advancedRows() : 0);
-		return Math.max(40, height / 2 - 96 - (BUTTON_ROW - 46) - 22 - 22 * (rows - 6)
-			- exportRow());
 	}
 
 	/**
@@ -1033,33 +1014,6 @@ final class BuildOptionsScreen extends Screen {
 	}
 
 	/**
-	 * The one line that says what these settings come out as.
-	 *
-	 * <p>Both ground sides, because which of the two grows is the layout's business and not
-	 * something this line can assume. A folded lane is held to the width chosen above and grows
-	 * across; a straight lane has no width to be held to and grows along, so the one number this
-	 * used to print was the two lanes' own thickness -- three blocks, for every song, however long
-	 * the build. The height is left out: it falls out of the floor count and is the one dimension
-	 * of the three already answered by a setting on this screen.</p>
-	 */
-	private static String forecastLine(Forecast predicted) {
-		if (predicted == null) {
-			return "measuring the build...";
-		}
-		if (predicted.error() != null) {
-			return predicted.error();
-		}
-		// Kept short on purpose: the dialog is three hundred pixels wide, and a line that runs off the
-		// end of it is worse than no line. Which is why the machine's own faults moved off this line
-		// and onto the one below rather than being tacked on the end of it.
-		String verdict = predicted.breachingLanes() == 0
-			? "nothing outside the footprint"
-			: predicted.breachingLanes() + (predicted.breachingLanes() == 1 ? " lane" : " lanes")
-				+ " breach, worst " + predicted.worstBreach();
-		return predicted.longSide() + " x " + predicted.shortSide() + " blocks - " + verdict;
-	}
-
-	/**
 	 * What the world will not accept, when the build asks for more of it than there is.
 	 *
 	 * <p>A warning and not a refusal. Where a build ends up is your business -- you may be standing
@@ -1090,17 +1044,6 @@ final class BuildOptionsScreen extends Screen {
 
 	private static String levels(int deep) {
 		return deep == 1 ? "level is" : deep + " levels are";
-	}
-
-	/** Grey while it is being worked out, green when it is clean, and warm when it is not. */
-	private static int forecastColour(Forecast predicted) {
-		if (predicted == null) {
-			return 0xFF8A9098;
-		}
-		if (predicted.error() != null || predicted.broken()) {
-			return 0xFFFF5555;
-		}
-		return predicted.breachingLanes() == 0 ? 0xFF7ACF7A : 0xFFFFAA00;
 	}
 
 	/**
@@ -1229,36 +1172,117 @@ final class BuildOptionsScreen extends Screen {
 		};
 	}
 
-	@Override
-	public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
-		super.extractRenderState(graphics, mouseX, mouseY, partialTick);
-		int width = Math.min(300, this.width - 40);
-		int left = (this.width - width) / 2;
-		int top = topRow();
-
-		graphics.text(font, "Build \"" + songName + "\"",
-			left, top - 14, 0xFFFFFFFF, false);
-		graphics.text(font, "Build", left, top + 2, 0xFF8A9098, false);
-		for (int index = 0; index < paletteLabelAt.size(); index++) {
-			int[] at = paletteLabelAt.get(index);
-			graphics.text(font, PALETTE.get(index).shortLabel(), at[0], at[1] + 6, 0xFFD6D8DD,
-				false);
+	/** One line of the forecast card, and what to say if the pointer stops on it. */
+	private record CardLine(String text, int color, List<String> detail) {
+		CardLine(String text, int color) {
+			this(text, color, List.of());
 		}
+	}
 
-		int rateY = lastRow(top);
-		SongBuilder.BlockCounts blocks = SongBuilder.blockCounts(sequence);
-		int commands = blocks.total();
-		double seconds = commands / (commandsPerTick * 20.0);
+	/**
+	 * What the current settings would build, as the card says it: the size first, then a short list
+	 * of checks, each green when it holds and amber or red with what is wrong when it does not.
+	 *
+	 * <p>The faults are the ones the screen always showed -- every kind, whatever the build's colours
+	 * are set to -- and keep their tooltips. Where the build would hang out of the world moved here
+	 * from the notes under the buttons: it is a fact about this build, not about pasting.</p>
+	 */
+	private List<CardLine> cardLines(Forecast predicted) {
+		List<CardLine> lines = new ArrayList<>();
+		if (predicted == null) {
+			lines.add(new CardLine("Measuring the build...", HINT_COLOR));
+			return lines;
+		}
+		if (predicted.error() != null) {
+			lines.add(new CardLine(predicted.error(), BAD_COLOR));
+			return lines;
+		}
+		// Both ground sides and not the height: which side grows is the layout's business, and the
+		// height falls out of the floor count, a setting on this screen already.
+		lines.add(new CardLine(predicted.longSide() + " x " + predicted.shortSide() + " blocks",
+			TEXT_COLOR));
+		int commands = SongBuilder.blockCounts(sequence).total();
 		// "If you stay with it" is the whole of the honesty here: a build longer than the loaded
 		// region around you pauses at the edge and waits to be walked to, so the figure is a floor
 		// and not an estimate. A direct paste has no rate to divide by -- it goes as fast as the
 		// server can spare, which nothing here can know -- so it is not given a time it would miss.
-		graphics.text(font, direct
-				? String.format(Locale.ROOT, "about %d blocks, placed straight into the world",
-					commands)
-				: String.format(Locale.ROOT, "about %d blocks, roughly %s if you stay with it",
-					commands, howLong(seconds)),
-			left, rateY + 24, 0xFF8A9098, false);
+		lines.add(new CardLine(direct
+			? String.format(Locale.ROOT, "About %d blocks", commands)
+			: String.format(Locale.ROOT, "About %d blocks, roughly %s if you stay with it",
+				commands, howLong(commands / (commandsPerTick * 20.0))), HINT_COLOR));
+		lines.add(new CardLine("", HINT_COLOR));
+		lines.add(predicted.breachingLanes() == 0
+			? new CardLine("Stays inside its footprint", GOOD_COLOR)
+			: new CardLine(predicted.breachingLanes()
+				+ (predicted.breachingLanes() == 1 ? " lane breaches" : " lanes breach")
+				+ " the footprint, worst " + predicted.worstBreach(), WARN_COLOR));
+		String outside = outsideTheWorld(predicted);
+		lines.add(outside == null ? new CardLine("Fits in the world", GOOD_COLOR)
+			: new CardLine(Character.toUpperCase(outside.charAt(0)) + outside.substring(1),
+				WARN_COLOR));
+		if (predicted.faults().isEmpty()) {
+			lines.add(new CardLine("Plays every note", GOOD_COLOR));
+		}
+		// Red, but for a warning. Everything else here takes music away; a lane past the outer wall
+		// takes nothing away, and is amber like a breach of the footprint.
+		for (FaultLine fault : predicted.faults()) {
+			lines.add(new CardLine(fault.text(), fault.warning() ? WARN_COLOR : BAD_COLOR,
+				fault.detail()));
+		}
+		return lines;
+	}
+
+	/** The panel, drawn over the blurred world and under the buttons, as the other popups draw theirs. */
+	@Override
+	public void extractBackground(GuiGraphicsExtractor graphics, int mouseX, int mouseY,
+			float partialTick) {
+		super.extractBackground(graphics, mouseX, mouseY, partialTick);
+		int right = panelLeft + panelWidth;
+		int bottom = panelTop + panelHeight;
+		graphics.fill(panelLeft, panelTop, right, bottom, PANEL_FILL);
+		graphics.fill(panelLeft, panelTop, right, panelTop + 1, PANEL_EDGE);
+		graphics.fill(panelLeft, bottom - 1, right, bottom, PANEL_EDGE);
+		graphics.fill(panelLeft, panelTop, panelLeft + 1, bottom, PANEL_EDGE);
+		graphics.fill(right - 1, panelTop, right, bottom, PANEL_EDGE);
+		if (twoColumns) {
+			graphics.fill(cardLeft - 7, tabsTop, cardLeft - 6, cardBottom, PANEL_EDGE);
+		}
+		graphics.fill(columnLeft, notesTop - 5, right - PADDING, notesTop - 4, PANEL_EDGE);
+	}
+
+	@Override
+	public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
+		super.extractRenderState(graphics, mouseX, mouseY, partialTick);
+		int inner = panelWidth - 2 * PADDING;
+
+		// The title, with the layout it builds at the other end.
+		String layoutName = mode.label();
+		int titleRoom = inner - font.width(layoutName) - 12;
+		String heading = "Build \"" + songName + "\"";
+		if (font.width(heading) > titleRoom) {
+			heading = font.plainSubstrByWidth(heading, titleRoom - font.width("...")) + "...";
+		}
+		graphics.text(font, heading, columnLeft, panelTop + PADDING, TEXT_COLOR, false);
+		graphics.text(font, layoutName, columnLeft + inner - font.width(layoutName),
+			panelTop + PADDING, HINT_COLOR, false);
+
+		Tab hoveredTab = tabAt(mouseX, mouseY);
+		int x = columnLeft;
+		for (Tab each : Tab.values()) {
+			int w = font.width(each.label) + 12;
+			int color = each == tab ? HEADING_COLOR : each == hoveredTab ? TEXT_COLOR : HINT_COLOR;
+			graphics.text(font, each.label, x + 6, tabsTop + 3, color, false);
+			if (each == tab) {
+				graphics.fill(x, tabsTop + TAB_HEIGHT - 1, x + w, tabsTop + TAB_HEIGHT, HEADING_COLOR);
+			}
+			x += w + 4;
+		}
+		for (int index = 0; index < paletteLabelAt.size(); index++) {
+			int[] at = paletteLabelAt.get(index);
+			graphics.text(font, PALETTE.get(index).shortLabel(), at[0], at[1] + 6, LABEL_COLOR,
+				false);
+		}
+
 		Forecast predicted = forecast;
 		// The width line is the one label on this screen that cannot be worked out from the setting it
 		// shows, so it waits for the forecast and is rewritten when the answer changes. While one is in
@@ -1269,45 +1293,161 @@ final class BuildOptionsScreen extends Screen {
 			labelledWidth = built;
 			widthChoice.updateMessage();
 		}
-		graphics.text(font, forecastLine(predicted), left, rateY + 36, forecastColour(predicted),
-			false);
-		// Red, but for a warning. Everything else on these lines takes music away, and the line above
-		// them can be green at the same time -- a build that lands entirely inside its footprint and
-		// plays half the song is exactly the case worth catching before pasting rather than after. A
-		// lane past the outer wall takes nothing away, and is amber like a breach of the footprint.
-		List<FaultLine> faults = predicted == null ? List.of() : predicted.faults();
-		for (int line = 0; line < faults.size(); line++) {
-			FaultLine fault = faults.get(line);
-			int y = rateY + 47 + line * 11;
-			graphics.text(font, fault.text(), left, y, fault.warning() ? 0xFFFFAA00 : 0xFFFF5555, false);
-			// Hit-tested against the text rather than against the row, because these are drawn rather
-			// than laid out: a row-wide target on a line that ends halfway across would put a tooltip up
-			// over blank space with nothing under the pointer to explain it.
-			if (!fault.detail().isEmpty() && mouseX >= left && mouseX < left + font.width(fault.text())
-					&& mouseY >= y - 1 && mouseY < y + font.lineHeight) {
-				graphics.setTooltipForNextFrame(font,
-					font.split(Component.literal(String.join("\n", fault.detail())), 280),
-					mouseX, mouseY);
+		extractCard(graphics, predicted, mouseX, mouseY);
+
+		// Over the buttons, about the paste rather than the build: what it needs and what it does.
+		List<CardLine> notes = new ArrayList<>();
+		notes.add(new CardLine("Pasting needs /setblock permission and overwrites whatever is "
+			+ "there.", HINT_COLOR));
+		if (!direct && commandsPerTick > PasteRate.SPAM_RISK_ABOVE) {
+			notes.add(new CardLine("High rates can trip server command spam limits.", WARN_COLOR));
+		}
+		int y = notesTop;
+		for (CardLine note : notes) {
+			for (net.minecraft.util.FormattedCharSequence part
+					: font.split(Component.literal(note.text()), inner)) {
+				if (y + LINE > notesTop + NOTE_LINES * LINE) {
+					break;
+				}
+				graphics.text(font, part, columnLeft, y, note.color(), false);
+				y += LINE;
 			}
 		}
-		// Below the buttons, and stacked. These are about the paste rather than about the build --
-		// what it needs permission to do, and where it would land -- so they sit under the thing you
-		// press rather than among the faults above it.
-		int note = rateY + BUTTON_ROW + 44 + exportRow();
-		graphics.text(font, "Needs /setblock permission. Overwrites whatever is there.",
-			left, note, 0xFF8A9098, false);
-		// Stacked rather than each at its own fixed height, because either of them can be absent and
-		// a warning with a gap above it reads as a warning about something else.
-		String outside = outsideTheWorld(predicted);
-		if (outside != null) {
-			note += 12;
-			graphics.text(font, outside, left, note, 0xFFFFAA00, false);
+
+		if (exportMenuOpen && exportButton != null) {
+			extractExportMenu(graphics, mouseX, mouseY);
 		}
-		if (!direct && commandsPerTick > PasteRate.SPAM_RISK_ABOVE) {
-			note += 12;
-			graphics.text(font, "High rates can trip server command spam limits.",
-				left, note, 0xFFFFAA00, false);
+	}
+
+	/** The forecast card: a heading, then the lines, wrapped to the card and cut at its foot. */
+	private void extractCard(GuiGraphicsExtractor graphics, Forecast predicted, int mouseX,
+			int mouseY) {
+		graphics.text(font, "Forecast", cardLeft, cardTop + 3, HEADING_COLOR, false);
+		cardFaultAt.clear();
+		cardFaultDetail.clear();
+		int y = cardTop + LINE + 6;
+		for (CardLine line : cardLines(predicted)) {
+			if (line.text().isEmpty()) {
+				y += LINE / 2;
+				continue;
+			}
+			for (net.minecraft.util.FormattedCharSequence part
+					: font.split(Component.literal(line.text()), cardWidth)) {
+				if (y + LINE > cardBottom) {
+					return;
+				}
+				graphics.text(font, part, cardLeft, y, line.color(), false);
+				int partWidth = font.width(part);
+				// Hit-tested against the text rather than the row, so a tooltip only comes up over
+				// something it explains.
+				if (!line.detail().isEmpty() && mouseX >= cardLeft && mouseX < cardLeft + partWidth
+						&& mouseY >= y - 1 && mouseY < y + font.lineHeight) {
+					graphics.setTooltipForNextFrame(font,
+						font.split(Component.literal(String.join("\n", line.detail())), 280),
+						mouseX, mouseY);
+				}
+				y += LINE;
+			}
 		}
+	}
+
+	/** The export menu, opening upward from its button so it never runs off the bottom. */
+	private void extractExportMenu(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
+		List<String> items = exportItems();
+		int menuWidth = exportButton.getWidth();
+		for (String item : items) {
+			menuWidth = Math.max(menuWidth, font.width(item) + 16);
+		}
+		int itemHeight = 14;
+		int left = exportButton.getX();
+		int top = buttonsTop - 2 - items.size() * itemHeight - 4;
+		exportMenuAt = new int[] {left, top, menuWidth};
+		int bottom = top + items.size() * itemHeight + 4;
+		graphics.fill(left, top, left + menuWidth, bottom, PANEL_FILL);
+		graphics.fill(left, top, left + menuWidth, top + 1, PANEL_EDGE);
+		graphics.fill(left, bottom - 1, left + menuWidth, bottom, PANEL_EDGE);
+		graphics.fill(left, top, left + 1, bottom, PANEL_EDGE);
+		graphics.fill(left + menuWidth - 1, top, left + menuWidth, bottom, PANEL_EDGE);
+		int hovered = exportItemAt(mouseX, mouseY);
+		for (int index = 0; index < items.size(); index++) {
+			int y = top + 2 + index * itemHeight;
+			if (index == hovered) {
+				graphics.fill(left + 1, y, left + menuWidth - 1, y + itemHeight, 0xFF2A313B);
+			}
+			graphics.text(font, items.get(index), left + 8, y + 3, TEXT_COLOR, false);
+		}
+	}
+
+	/** The export menu item under the pointer, or -1. */
+	private int exportItemAt(double mouseX, double mouseY) {
+		if (!exportMenuOpen || exportMenuAt == null) {
+			return -1;
+		}
+		int left = exportMenuAt[0];
+		int top = exportMenuAt[1] + 2;
+		if (mouseX < left || mouseX >= left + exportMenuAt[2] || mouseY < top) {
+			return -1;
+		}
+		int item = (int) ((mouseY - top) / 14);
+		return item < exportItems().size() ? item : -1;
+	}
+
+	/** The tab under the pointer, or {@code null}. */
+	private Tab tabAt(double mouseX, double mouseY) {
+		if (mouseY < tabsTop || mouseY >= tabsTop + TAB_HEIGHT) {
+			return null;
+		}
+		int x = columnLeft;
+		for (Tab each : Tab.values()) {
+			int w = font.width(each.label) + 12;
+			if (mouseX >= x && mouseX < x + w) {
+				return each;
+			}
+			x += w + 4;
+		}
+		return null;
+	}
+
+	@Override
+	public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
+		if (exportMenuOpen) {
+			int item = exportItemAt(event.x(), event.y());
+			exportMenuOpen = false;
+			if (item >= 0) {
+				runExportItem(item);
+				return true;
+			}
+			// A second press on Export closes it, and so does a click anywhere else -- spent on the
+			// closing, the way a menu is, rather than also landing on whatever was under it.
+			return true;
+		}
+		Tab clicked = tabAt(event.x(), event.y());
+		if (clicked != null) {
+			if (clicked != tab) {
+				tab = clicked;
+				init();
+			}
+			return true;
+		}
+		return super.mouseClicked(event, doubleClick);
+	}
+
+	/**
+	 * Escape shuts an open export menu before it shuts the screen, and Enter pastes -- only while
+	 * nothing is focused, as in the other popups, so Enter in a palette box is not a paste.
+	 */
+	@Override
+	public boolean keyPressed(KeyEvent event) {
+		if (exportMenuOpen && event.key() == InputConstants.KEY_ESCAPE) {
+			exportMenuOpen = false;
+			return true;
+		}
+		if ((event.key() == InputConstants.KEY_RETURN || event.key() == InputConstants.KEY_NUMPADENTER)
+				&& getFocused() == null) {
+			paste();
+			return true;
+		}
+		return super.keyPressed(event);
 	}
 
 	@Override
