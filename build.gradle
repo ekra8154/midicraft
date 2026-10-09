@@ -190,3 +190,18 @@ tasks.register('sweepTest', Test) {
 	consoleOnlyLogging(it)
 	outputs.upToDateWhen { false }
 }
+
+/**
+ * A song's build saved as a .litematic and a .schem instead of pasted. See ExportBuild, or:
+ *   gradlew exportBuild --args="--help"
+ * Run from the test classpath because that is where the game starts without a client.
+ */
+tasks.register('exportBuild', JavaExec) {
+	group = 'midicraft'
+	description = 'Saves a song\'s build as a .litematic and a .schem: --args="<song> --out <folder>"'
+	classpath = sourceSets.test.runtimeClasspath
+	mainClass = 'com.midicraft.client.compat.ExportBuild'
+	workingDir = projectDir
+	systemProperty 'log4j2.configurationFile', file('gradle/log4j2-test.xml').toURI().toString()
+	systemProperty 'log4j.configurationFile', file('gradle/log4j2-test.xml').toURI().toString()
+}
