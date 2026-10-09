@@ -9778,9 +9778,12 @@ public final class ComposerScreen extends Screen {
 	 */
 	private void exportBuild(SongBuilder.PasteMode mode, BuildOptionsScreen.ExportChoice choice,
 			java.util.concurrent.CompletableFuture<SongBuilder.PastePlan> planned) {
-		McCompat.setScreen(this);
+		// Loading into Litematica ends in the world, looking at the hologram, so it goes straight
+		// there; the composer coming back for the moment the file takes to write was a flash of a
+		// screen about to close. A plain export stays, since its result is said in the composer.
+		McCompat.setScreen(choice.load() ? null : this);
 		if (exporting) {
-			showResult(Component.literal("An export is still being prepared."));
+			backgroundResult(Component.literal("An export is still being prepared."), null);
 			return;
 		}
 		SchematicWriter.Format format = choice.format();
@@ -9803,7 +9806,11 @@ public final class ComposerScreen extends Screen {
 				.resolve("worldedit").resolve("schematics");
 
 		exporting = true;
-		showResult(Component.literal("Preparing \"" + title + "\"..."));
+		if (choice.load()) {
+			CommandPasteSender.show(Component.literal("Preparing \"" + title + "\" for Litematica..."));
+		} else {
+			showResult(Component.literal("Preparing \"" + title + "\"..."));
+		}
 		// The plan the build screen made -- where the Paste button would make it, so a loaded
 		// placement lands there -- and the rest on the export thread once it is ready.
 		planned.thenApplyAsync(plan -> {

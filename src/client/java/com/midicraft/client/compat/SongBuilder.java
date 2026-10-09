@@ -989,6 +989,28 @@ public final class SongBuilder {
 	 */
 	private static PastePlan withTitleSign(PastePlan plan, String title, PasteMode mode,
 			BuildLimits limits) {
+		// A sign the walk hung itself -- the two-lane start puts one on the block its button stands
+		// on -- only wants its words. It keeps its place in the list, which the walk already made
+		// after the block it hangs on.
+		List<String> laid = plan.commands();
+		for (int index = 0; index < laid.size(); index++) {
+			String command = laid.get(index);
+			String[] parts = command.split(" ", 5);
+			if (parts.length == 5 && parts[4].startsWith("minecraft:oak_wall_sign[")
+					&& !parts[4].contains("{")) {
+				String state = parts[4].substring(0, parts[4].indexOf(']') + 1);
+				List<String> commands = new ArrayList<>(laid);
+				commands.set(index, "setblock " + parts[1] + " " + parts[2] + " " + parts[3] + " "
+					+ state + "{front_text:{messages:["
+					+ String.join(",", signLines(titled(title, mode, limits))) + "]}} replace");
+				return new PastePlan(List.copyOf(commands), plan.width(), plan.depth(),
+					plan.height(), plan.spanX(), plan.spanZ(), plan.mode(), plan.faults(),
+					plan.turns(), plan.moved(), plan.breaches(), plan.wallBreaches(),
+					plan.recesses(), plan.padding(), plan.nearWall(), plan.farWall(),
+					plan.collisions(), plan.poweredAt(), plan.laidBy(), plan.noteTicks(),
+					plan.noteMachines(), plan.faultSites(), plan.palette());
+			}
+		}
 		BlockPos head = null;
 		for (String command : plan.commands()) {
 			// The first repeater the walk laid, which is the one the player throws a switch at: blocks
@@ -2118,8 +2140,11 @@ public final class SongBuilder {
 		// or the spine lands outside the wall and the build is wider than it reports.
 		boolean oddOpensA = Math.floorMod(gtA.get(0).time(), 2) == 1;
 		boolean oddOpensB = Math.floorMod(gtB.get(0).time(), 2) == 1;
+		// A column less than that where the starter goes in the near wall itself -- the column the
+		// lanes fold back to -- rather than a column inside it. See STARTER_IN_THE_WALL.
+		int wallInset = INTERLEAVED_SHARED_INPUT && STARTER_IN_THE_WALL ? 1 : 0;
 		WalkStart headA = INTERLEAVED_SHARED_INPUT
-			? new WalkStart(head.column() + (oddOpensA ? 6 : 3), head.floor(),
+			? new WalkStart(head.column() + (oddOpensA ? 6 : 3) - wallInset, head.floor(),
 				head.climb(), head.turning())
 			: new WalkStart(head.column() + 2, head.floor(), head.climb(), head.turning());
 		// The machine on the odd half of the tick opens two columns further out, because its feed
@@ -2131,7 +2156,7 @@ public final class SongBuilder {
 		// cells reach that much further. Both counted from the same wall, so the spine stands in
 		// one straight column whatever mix of halves the two machines open on.
 		WalkStart headB = INTERLEAVED_SHARED_INPUT
-			? new WalkStart(head.column() + (oddOpensB ? 6 : 3), head.floor(),
+			? new WalkStart(head.column() + (oddOpensB ? 6 : 3) - wallInset, head.floor(),
 				head.climb(), head.turning())
 			: head;
 		BlockPos originB = originA.relative(depth, spacing);
@@ -2716,6 +2741,19 @@ public final class SongBuilder {
 	static boolean INTERLEAVED_SHARED_INPUT = true;
 
 	/**
+	 * Whether both machines open a column nearer the near wall, so the shared starter stands in the
+	 * wall's own column -- the one the lanes fold back to -- and not a column inside it.
+	 *
+	 * <p>The openings used to be held so that the whole input sat inside the near wall. But the
+	 * folds come back a column further than that, so the button stood one block in from the edge of
+	 * everything else, and since a build is slid to begin a block in front of where you stood, it
+	 * was never where the build began. Opening the machines a column sooner puts it there, with each
+	 * feed the length it has to be: nothing is stretched with wire to make up the distance. The
+	 * input's cells in that column are the start rows', which no fold ever comes back to.</p>
+	 */
+	static boolean STARTER_IN_THE_WALL = true;
+
+	/**
 	 * One input for both machines, in place of a starter button each.
 	 *
 	 * <p>Two buttons cannot be pressed on the same tick, so a build with one per machine could
@@ -2843,9 +2881,31 @@ public final class SongBuilder {
 		// tick's block events and costs two, the second pays three, and the pair is five.
 		int repeaterRow = pistonRow < 0 ? -1 : pistonRow == 0 ? 1 : pistonRow - 1;
 		Direction towardPiston = pistonRow == 0 ? toB.getOpposite() : toB;
+		// The starter, at the end of the spine away from the piston: that end's cell is a block
+		// rather than wire, at the spine's own level, with the button on top of it. Pressed, the
+		// button powers the block, and the block powers what is beside it -- the wire running up the
+		// spine and the repeater of the machine that starts in its row -- the way the wire it
+		// replaces did. A block with a button on it conducts, so it takes the palette's relay block,
+		// and nothing stands under it. The title sign hangs on its outward face, where the start is.
+		//
+		// Only where that end is plain wire. A spine one row deep with a piston in it has its other
+		// end taken by the repeater into the piston, and keeps the button on the wall below the
+		// spine that every build had before.
+		int buttonRow = pistonRow == 0 ? rows : 0;
+		boolean buttonOnTop = buttonRow != pistonRow && buttonRow != repeaterRow;
+		Direction outward = buttonRow == 0 ? toB.getOpposite() : toB;
 		for (int row = 0; row <= rows; row++) {
 			BlockPos at = spineA.relative(toB, row);
 			placements.placing("twoLaneInput");
+			if (buttonOnTop && row == buttonRow) {
+				set(placements, at, "minecraft:stone");
+				set(placements, at.above(), "minecraft:oak_button[face=floor,facing="
+					+ outward.getName() + ",powered=false]");
+				// Blank: the title is the plan's, and is written on it once the walk is done.
+				set(placements, at.relative(outward), "minecraft:oak_wall_sign[facing="
+					+ outward.getName() + "]");
+				continue;
+			}
 			set(placements, at.below(), "minecraft:stone");
 			if (row == pistonRow) {
 				// The piston stands here; its machine's own run lays it.
@@ -2860,12 +2920,14 @@ public final class SongBuilder {
 		// away from the piston -- pressed, it powers that block and the block powers the wire
 		// standing on it. Beside the piston instead it would power the piston's own floor and
 		// fire it without ever going through the repeater.
-		int buttonEnd = pistonRow == 0 ? rows + 1 : -1;
-		Direction buttonFacing = pistonRow == 0 ? toB : toB.getOpposite();
-		placements.placing("twoLaneInput");
-		set(placements, spineA.relative(toB, buttonEnd).below(),
-			String.format(java.util.Locale.ROOT, "minecraft:oak_button[face=wall,facing=%s,"
-				+ "powered=false]", buttonFacing.getName()));
+		if (!buttonOnTop) {
+			int buttonEnd = pistonRow == 0 ? rows + 1 : -1;
+			Direction buttonFacing = pistonRow == 0 ? toB : toB.getOpposite();
+			placements.placing("twoLaneInput");
+			set(placements, spineA.relative(toB, buttonEnd).below(),
+				String.format(java.util.Locale.ROOT, "minecraft:oak_button[face=wall,facing=%s,"
+					+ "powered=false]", buttonFacing.getName()));
+		}
 		for (int machine = 0; machine < 2; machine++) {
 			BlockPos head = heads[machine];
 			int columns = (coordAlong(axis, head) - wall) * step;
@@ -37750,9 +37812,15 @@ public final class SongBuilder {
 		 *   <li>it cuts the step down from dust beside it into dust under it, the same rule the other
 		 *   way.</li>
 		 * </ul>
-		 * <p>And anything a button or a piston stands against, which take and give power through the
-		 * block they touch. Erring towards conducting is the safe side: a conductor where a lane block
-		 * would have done is only the wrong colour.</p>
+		 * <p>And anything a button stands against, which powers the block it touches, and anything
+		 * beside a piston: a block with dust on it switches on the piston next to it, which is how
+		 * some seams are fed. Not the block a piston stands on: no piston a build lays is fed through
+		 * its floor -- nothing redstone touches one -- so that block is lane like the cells either
+		 * side of it, in the lane's own palette block. Turning the whole rule off took the sides with
+		 * the floor, and the builds it fed went silent behind their seams.</p>
+		 *
+		 * <p>Erring towards conducting is the safe side: a conductor where a lane block would have
+		 * done is only the wrong colour.</p>
 		 */
 		private boolean mustConduct(BlockPos at) {
 			if (powered.containsKey(at) || isWire(at.below())) {
@@ -37762,7 +37830,12 @@ public final class SongBuilder {
 			for (Direction side : Direction.values()) {
 				BlockPos next = at.relative(side);
 				String there = blocks.getOrDefault(next, "");
-				if (there.contains("_button") || there.contains("piston")) {
+				if (there.contains("_button")) {
+					return true;
+				}
+				// A piston beside or under this block reads it -- a block with dust on it switches
+				// on the piston next to it. Not the block a piston stands on: see above.
+				if (side != Direction.UP && there.contains("piston")) {
 					return true;
 				}
 				if (side.getAxis().isVertical()) {
@@ -37826,6 +37899,12 @@ public final class SongBuilder {
 		private String lamp(BlockPos at, String block) {
 			if (!"minecraft:stone".equals(block) || notes.containsKey(at.above())) {
 				return block;
+			}
+			// The block a starter button stands on: lit for as long as the button is down, so a
+			// light show starts by showing it has been started. A lamp conducts as stone does, so the
+			// start is the same machine either way.
+			if (blocks.getOrDefault(at.above(), "").contains("_button[face=floor")) {
+				return LAMP;
 			}
 			String laidBy = placedBy.get(at);
 			if (laidBy == null) {

@@ -687,8 +687,11 @@ final class BuildOptionsScreen extends Screen {
 	private static final int CONTENT_ROWS = 4;
 	/** Lines the forecast card keeps room for: two of size, a gap, two checks and three faults. */
 	private static final int CARD_LINES = 9;
-	/** Lines kept above the buttons for what the paste needs and where it may go wrong. */
-	private static final int NOTE_LINES = 2;
+	/**
+	 * Lines kept above the buttons: two for what Paste and Export/Load do, which is how far that
+	 * note wraps, and one for the spam-limit warning a fast server paste adds under it.
+	 */
+	private static final int NOTE_LINES = 3;
 	/** Narrower than this and the forecast goes under the settings instead of beside them. */
 	private static final int TWO_COLUMNS_FROM = 400;
 	/** As wide as the longest line on the layout tab, the floor count, and no wider. */
@@ -772,7 +775,7 @@ final class BuildOptionsScreen extends Screen {
 		int buttons = export == null ? 2 : 3;
 		int each = (inner - 4 * (buttons - 1)) / buttons;
 		int x = columnLeft;
-		addRenderableWidget(Button.builder(Component.literal("Paste (Enter)"), clicked -> paste())
+		addRenderableWidget(Button.builder(Component.literal("Paste directly (Enter)"), clicked -> paste())
 			.bounds(x, buttonsTop, each, 20)
 			.tooltip(Tooltip.create(Component.literal(direct
 				? "Builds it beside you, straight into the world. Needs permission to use commands."
@@ -936,7 +939,7 @@ final class BuildOptionsScreen extends Screen {
 			boxes.add(addRenderableWidget(box));
 		}
 		int rows = (PALETTE.size() + PALETTE_COLUMNS - 1) / PALETTE_COLUMNS;
-		addRenderableWidget(Button.builder(Component.literal("Default blocks"), clicked -> {
+		addRenderableWidget(Button.builder(Component.literal("Reset to default palette"), clicked -> {
 				for (int index = 0; index < PALETTE.size(); index++) {
 					boxes.get(index).setValue(typable(PALETTE.get(index).role().fallback()));
 				}
@@ -968,7 +971,7 @@ final class BuildOptionsScreen extends Screen {
 
 	/** Export says which way its menu goes: sideways shut, up once it has opened upward. */
 	private String exportLabel() {
-		return exportMenuOpen ? "Export ^" : "Export >";
+		return exportMenuOpen ? "Export/Load preview ^" : "Export/Load preview >";
 	}
 
 	private void setExportMenuOpen(boolean open) {
@@ -1451,7 +1454,8 @@ final class BuildOptionsScreen extends Screen {
 		// Over the buttons, about the paste rather than the build: what it needs and what it does.
 		List<CardLine> notes = new ArrayList<>();
 		notes.add(new CardLine("Paste builds it right beside you, replacing anything in the way. "
-			+ "Export saves it as a file instead.", HINT_COLOR));
+			+ "Export/Load saves as a file or loads a hologram (needs Litematica installed).",
+			HINT_COLOR));
 		if (!direct && commandsPerTick > PasteRate.SPAM_RISK_ABOVE) {
 			notes.add(new CardLine("High rates can trip server command spam limits.", WARN_COLOR));
 		}
