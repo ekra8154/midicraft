@@ -10,6 +10,7 @@ import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.IntConsumer;
 import java.util.function.IntFunction;
@@ -45,6 +46,15 @@ final class BuildOptionsScreen extends Screen {
 	private final com.midicraft.client.composer.ComposerProject project;
 	private final boolean dedupeIdenticalNotes;
 	private final Consumer<SongBuilder.PasteMode> confirm;
+	/**
+	 * Saves the build these settings make as a file instead of pasting it, or {@code null} where
+	 * the screen offers no export.
+	 *
+	 * <p>Here rather than in a menu of its own because a schematic is a build, not a song: it only
+	 * exists once a width, a floor count and the blocks are chosen, and these are the rows that
+	 * choose them. Exporting from here is exporting exactly what Paste would have built.</p>
+	 */
+	private final BiConsumer<SongBuilder.PasteMode, SchematicWriter.Format> export;
 	/**
 	 * The layout being pasted, which is no longer asked for.
 	 *
@@ -374,7 +384,8 @@ final class BuildOptionsScreen extends Screen {
 		com.midicraft.client.composer.ComposerProject project,
 		boolean dedupeIdenticalNotes,
 		SongBuilder.PasteMode initialMode,
-		Consumer<SongBuilder.PasteMode> confirm
+		Consumer<SongBuilder.PasteMode> confirm,
+		BiConsumer<SongBuilder.PasteMode, SchematicWriter.Format> export
 	) {
 		super(Component.literal("Paste sequence in world"));
 		this.parent = parent;
@@ -383,6 +394,7 @@ final class BuildOptionsScreen extends Screen {
 		this.project = project;
 		this.dedupeIdenticalNotes = dedupeIdenticalNotes;
 		this.confirm = confirm;
+		this.export = export;
 		this.mode = SongBuilder.PasteMode.OFFERED.contains(initialMode)
 			? initialMode : SongBuilder.PasteMode.OFFERED.getFirst();
 		this.startTop = MidicraftConfig.get().pasteStartTop();
@@ -631,22 +643,55 @@ final class BuildOptionsScreen extends Screen {
 		y = lastRow(top);
 
 		addRenderableWidget(Button.builder(Component.literal("Paste"), clicked -> {
-			MidicraftConfig.get().setCommandsPerTick(commandsPerTick);
-			MidicraftConfig.get().setBuildLaneWidth(laneWidth);
-			MidicraftConfig.get().setBuildLaneFloors(laneFloors);
-			MidicraftConfig.get().setParityReseedDelay(reseedDelay);
-			MidicraftConfig.get().setPaceTolerance(paceTolerance);
-			MidicraftConfig.get().setPaceCatchUpTo(paceCatchUpTo);
-			// Written down before the confirm, like the rest: the paste plans off the config.
-			MidicraftConfig.get().setPasteStartTop(startTop);
-			MidicraftConfig.get().setPasteMode(mode.name());
-			MidicraftConfig.save();
+			remember();
 			confirm.accept(mode);
 		}).bounds(left, y + BUTTON_ROW, width / 2 - 3, 20).build());
 		addRenderableWidget(Button.builder(CommonComponents.GUI_CANCEL, clicked -> onClose())
 			.bounds(left + width / 2 + 3, y + BUTTON_ROW, width / 2 - 3, 20).build());
+		if (export != null) {
+			addRenderableWidget(Button.builder(Component.literal("Export .litematic"), clicked -> {
+				remember();
+				export.accept(mode, SchematicWriter.Format.LITEMATIC);
+			}).bounds(left, y + BUTTON_ROW + EXPORT_ROW, width / 2 - 3, 20)
+				.tooltip(Tooltip.create(Component.literal("Save this build for Litematica, in "
+					+ "its schematics folder. Nothing is placed.")))
+				.build());
+			addRenderableWidget(Button.builder(Component.literal("Export .schem"), clicked -> {
+				remember();
+				export.accept(mode, SchematicWriter.Format.SCHEM);
+			}).bounds(left + width / 2 + 3, y + BUTTON_ROW + EXPORT_ROW, width / 2 - 3, 20)
+				.tooltip(Tooltip.create(Component.literal("Save this build for WorldEdit, in its "
+					+ "schematics folder. //paste from where you stand now puts it where Paste "
+					+ "would. Nothing is placed.")))
+				.build());
+		}
 		requestForecast();
 	}
+
+	/**
+	 * Writes the settings down, before a paste or an export plans off them.
+	 *
+	 * <p>The same for both, because an export is meant to be the build Paste would have made, and the
+	 * plan reads its limits and its blocks off the config rather than off this screen.</p>
+	 */
+	private void remember() {
+		MidicraftConfig.get().setCommandsPerTick(commandsPerTick);
+		MidicraftConfig.get().setBuildLaneWidth(laneWidth);
+		MidicraftConfig.get().setBuildLaneFloors(laneFloors);
+		MidicraftConfig.get().setParityReseedDelay(reseedDelay);
+		MidicraftConfig.get().setPaceTolerance(paceTolerance);
+		MidicraftConfig.get().setPaceCatchUpTo(paceCatchUpTo);
+		MidicraftConfig.get().setPasteStartTop(startTop);
+		MidicraftConfig.get().setPasteMode(mode.name());
+		MidicraftConfig.save();
+	}
+
+	/** How far below the Paste row the export row sits, or nought where there is none. */
+	private int exportRow() {
+		return export == null ? 0 : EXPORT_ROW;
+	}
+
+	private static final int EXPORT_ROW = 22;
 
 	/**
 	 * How far below the rate row the buttons sit.
@@ -669,7 +714,8 @@ final class BuildOptionsScreen extends Screen {
 		// either way for every row the advanced toggle adds or hides against the six this was
 		// measured with (start, blocks, width, floors, reseed, rate).
 		int rows = 2 + (hasLaneControls() ? 2 : 0) + 1 + (advancedOpen ? advancedRows() : 0);
-		return Math.max(40, height / 2 - 96 - (BUTTON_ROW - 46) - 22 - 22 * (rows - 6));
+		return Math.max(40, height / 2 - 96 - (BUTTON_ROW - 46) - 22 - 22 * (rows - 6)
+			- exportRow());
 	}
 
 	/**
@@ -1042,7 +1088,7 @@ final class BuildOptionsScreen extends Screen {
 		// Below the buttons, and stacked. These are about the paste rather than about the build --
 		// what it needs permission to do, and where it would land -- so they sit under the thing you
 		// press rather than among the faults above it.
-		int note = rateY + BUTTON_ROW + 44;
+		int note = rateY + BUTTON_ROW + 44 + exportRow();
 		graphics.text(font, "Needs /setblock permission. Overwrites whatever is there.",
 			left, note, 0xFF8A9098, false);
 		// Stacked rather than each at its own fixed height, because either of them can be absent and

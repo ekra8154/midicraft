@@ -799,6 +799,8 @@ public final class ComposerScreen extends Screen {
 	private int toolbarControlsLeft = 320;
 	private long lastScaleChangeAt;
 	private Component toast;
+	/** What clicking the result does besides putting it away, or {@code null}. */
+	private Runnable toastAction;
 	private long toastShownAt;
 	/**
 	 * Where the last toast was drawn, so a click can be aimed at it.
@@ -6230,6 +6232,17 @@ public final class ComposerScreen extends Screen {
 	 * was closed -- by which point it had faded.</p>
 	 */
 	void showResult(Component message) {
+		showResult(message, null);
+	}
+
+	/**
+	 * A result that does something when clicked, rather than only going away.
+	 *
+	 * @param action run on a click, before the result is put away. Say so in the message: nothing
+	 *     else about the result shows that it can be clicked.
+	 */
+	void showResult(Component message, Runnable action) {
+		toastAction = action;
 		// Whoever opened this screen may report on it straight away -- an import says what it read --
 		// and that report would replace the note about swapped instruments before anyone saw it. So
 		// until the screen is first laid out, a result carries the note along with it.
@@ -6551,6 +6564,11 @@ public final class ComposerScreen extends Screen {
 		if (toast != null && !anyMenuOpen() && event.x() >= toastLeft && event.x() < toastRight
 				&& event.y() >= toastTop && event.y() < toastBottom) {
 			toast = null;
+			Runnable action = toastAction;
+			toastAction = null;
+			if (action != null) {
+				action.run();
+			}
 			return true;
 		}
 		ToolbarMenu title = menuTitleAt(event.x(), event.y());
@@ -9682,7 +9700,84 @@ public final class ComposerScreen extends Screen {
 			}
 			CommandPasteSender.start(plan.commands(), plan.report());
 			McCompat.setScreen(null);
-		}));
+		}, this::exportBuild));
+	}
+
+	/**
+	 * Saves the build the paste dialog's settings make as a schematic, instead of pasting it.
+	 *
+	 * <p>Planned exactly as the Paste button plans, so the file is that build block for block, then
+	 * settled the way the world would settle it and written by {@link SchematicWriter}. Into the
+	 * folder the mod that reads it loads from -- Litematica's {@code schematics}, WorldEdit's
+	 * {@code config/worldedit/schematics} -- so it is in the list the next time either is opened,
+	 * and the result says so and offers the folder for anyone after the file itself.</p>
+	 *
+	 * <p>A build with faults is still written, and the result says how many notes will be wrong:
+	 * nothing is placed, so there is nothing to protect, and the file is the way to look at it.</p>
+	 */
+	private void exportBuild(SongBuilder.PasteMode mode, SchematicWriter.Format format) {
+		McCompat.setScreen(this);
+		SongBuilder.PastePlan plan;
+		try {
+			plan = SongBuilder.plan(minecraft, config.tracks(), mode, project(),
+				project().dedupesIdentical(), config.chordFitRules());
+		} catch (IllegalArgumentException refused) {
+			showResult(Component.literal(refused.getMessage())
+				.withStyle(net.minecraft.ChatFormatting.RED));
+			return;
+		}
+		boolean lanes = mode != SongBuilder.PasteMode.COMPACT_CUBE
+			&& mode != SongBuilder.PasteMode.COMPACT;
+		int width = config.buildLaneWidth();
+		int floors = config.buildLaneFloors();
+		String name = safeFileName(project().name()) + (lanes ? " " + width + "x" + floors : "");
+		String described = mode.label() + (lanes ? ", " + width + " wide, " + floors
+			+ (floors == 1 ? " floor" : " floors") : "")
+			+ (SongBuilder.LIGHT_SHOW ? ", light show" : "") + ". Made with midicraft.";
+		Path folder = format == SchematicWriter.Format.LITEMATIC
+			? minecraft.gameDirectory.toPath().resolve("schematics")
+			: net.fabricmc.loader.api.FabricLoader.getInstance().getConfigDir()
+				.resolve("worldedit").resolve("schematics");
+		Path written;
+		try {
+			SchematicWriter.Build build = SchematicWriter.fromCommands(plan.commands());
+			String author = minecraft.player == null ? "midicraft"
+				: minecraft.player.getName().getString();
+			net.minecraft.core.BlockPos standing = minecraft.player == null
+				? net.minecraft.core.BlockPos.ZERO : minecraft.player.blockPosition();
+			written = SchematicWriter.save(build, format, folder, name, project().name(), author,
+				described, standing);
+		} catch (Exception failed) {
+			showResult(Component.literal("Could not export: " + failed.getMessage())
+				.withStyle(net.minecraft.ChatFormatting.RED));
+			return;
+		}
+		int wrong = plan.report().size();
+		showResult(Component.literal("Saved " + written.getFileName() + " to " + format.reader()
+				+ "'s schematics folder."
+				+ (wrong == 0 ? "" : " " + wrong + " note" + (wrong == 1 ? "" : "s")
+					+ " will be wrong, as in a paste.")
+				+ " Click to open the folder."),
+			() -> openFolder(folder));
+	}
+
+	/**
+	 * Opens a folder in the system's file browser.
+	 *
+	 * <p>By the system's own command rather than the game's helper for it, which has moved between
+	 * versions. Said in the result instead if it cannot be done.</p>
+	 */
+	private void openFolder(Path folder) {
+		String system = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT);
+		String path = folder.toAbsolutePath().toString();
+		List<String> command = system.contains("win") ? List.of("explorer.exe", path)
+			: system.contains("mac") ? List.of("open", path)
+			: List.of("xdg-open", path);
+		try {
+			new ProcessBuilder(command).start();
+		} catch (java.io.IOException unopened) {
+			showResult(Component.literal("Could not open the folder. It is " + path));
+		}
 	}
 
 	private SongBuilder.PasteMode pasteMode() {

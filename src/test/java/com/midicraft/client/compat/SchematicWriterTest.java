@@ -139,6 +139,22 @@ class SchematicWriterTest {
 				build.blocks().get(new BlockPos(1, 1, 2))));
 	}
 
+	/** The export folders hold the player's own schematics too, so nothing there is written over. */
+	@Test
+	void savingNumbersRatherThanOverwrites(@TempDir Path dir) throws Exception {
+		SchematicWriter.Build build = SchematicWriter.fromCommands(commands());
+		Path first = SchematicWriter.save(build, SchematicWriter.Format.LITEMATIC, dir, "Song 32x1",
+			"Song", "test", "", BlockPos.ZERO);
+		Path second = SchematicWriter.save(build, SchematicWriter.Format.LITEMATIC, dir, "Song 32x1",
+			"Song", "test", "", BlockPos.ZERO);
+		Path schem = SchematicWriter.save(build, SchematicWriter.Format.SCHEM, dir, "Song 32x1",
+			"Song", "test", "", BlockPos.ZERO);
+		assertEquals("Song 32x1.litematic", first.getFileName().toString());
+		assertEquals("Song 32x1 (2).litematic", second.getFileName().toString());
+		assertEquals("Song 32x1.schem", schem.getFileName().toString());
+		assertEquals("sponge v3", SchematicReader.load(schem).format());
+	}
+
 	@Test
 	void refusesWhatIsNotASetblock() {
 		assertThrows(IllegalArgumentException.class,

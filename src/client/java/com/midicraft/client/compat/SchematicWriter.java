@@ -44,6 +44,52 @@ final class SchematicWriter {
 	private SchematicWriter() {
 	}
 
+	/** The two files a build can be saved as, and the mod each one is for. */
+	enum Format {
+		LITEMATIC(".litematic", "Litematica"),
+		SCHEM(".schem", "WorldEdit");
+
+		private final String extension;
+		private final String reader;
+
+		Format(String extension, String reader) {
+			this.extension = extension;
+			this.reader = reader;
+		}
+
+		String extension() {
+			return extension;
+		}
+
+		/** The mod that loads this kind of file, for saying where it went. */
+		String reader() {
+			return reader;
+		}
+	}
+
+	/**
+	 * Writes a build into a folder under a name nothing there has yet, and says where it went.
+	 *
+	 * <p>Never over an existing file: the folders these go into are the ones Litematica and
+	 * WorldEdit load from, and they hold the player's own schematics too. A second export of the same
+	 * song at the same size is numbered rather than written over the first.</p>
+	 *
+	 * @param standingAt where the player stood to plan it; see {@link #writeSponge}
+	 */
+	static Path save(Build build, Format format, Path folder, String fileName, String title,
+			String author, String description, BlockPos standingAt) throws IOException {
+		Files.createDirectories(folder);
+		Path file = folder.resolve(fileName + format.extension());
+		for (int copy = 2; Files.exists(file); copy++) {
+			file = folder.resolve(fileName + " (" + copy + ")" + format.extension());
+		}
+		switch (format) {
+			case LITEMATIC -> writeLitematic(build, file, title, author, description);
+			case SCHEM -> writeSponge(build, file, title, author, standingAt);
+		}
+		return file;
+	}
+
 	/** Litematica's own format version as of 26.x, which is what its current builds write. */
 	private static final int LITEMATIC_VERSION = 7;
 	private static final int LITEMATIC_SUB_VERSION = 1;
