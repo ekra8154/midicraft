@@ -100,15 +100,6 @@ public final class SongLibrary {
 		return DIRECTORY.resolve(id + SongFile.EXTENSION);
 	}
 
-	/** Who is playing, or {@code null} where there is no game to ask. */
-	private static String playerName() {
-		try {
-			return net.minecraft.client.Minecraft.getInstance().getUser().getName();
-		} catch (RuntimeException | LinkageError noGame) {
-			return null;
-		}
-	}
-
 	/** This midicraft's version, for the file to say what wrote it. */
 	private static String modVersion() {
 		return FabricLoader.getInstance().getModContainer("midicraft")
@@ -174,14 +165,11 @@ public final class SongLibrary {
 			return false;
 		}
 		try {
-			SongFile.Details given = about == null ? SongFile.Details.NONE : about;
-			// A song saved for the first time is the player's own arrangement, so it says so -- but
-			// only the first time. Cleared afterwards, it stays cleared; and a song that arrived as
-			// a file has its own date already, and its own author.
-			if (given.created() == null && given.author() == null) {
-				given = given.withOwn(playerName(), given.credits(), given.description());
-			}
-			SongFile.Details stamped = given.written(Instant.now(), modVersion(), minecraftVersion());
+			// Stamped with the dates and versions and nothing else. The author, credits and
+			// description are only ever what the player typed into Song details: a save never fills
+			// them in on its own.
+			SongFile.Details stamped = (about == null ? SongFile.Details.NONE : about)
+				.written(Instant.now(), modVersion(), minecraftVersion());
 			SongFile.write(file(id), song, stamped);
 			songs.put(id, song);
 			details.put(id, stamped);

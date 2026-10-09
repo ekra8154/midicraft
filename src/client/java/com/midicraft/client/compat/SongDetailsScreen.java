@@ -35,15 +35,19 @@ final class SongDetailsScreen extends Screen {
 	private final Screen parent;
 	private final SongFile.Details details;
 	private final Consumer<SongFile.Details> accept;
+	/** The name Tab fills the author box with, or {@code null}. See MidicraftConfig#suggestedAuthor. */
+	private final String authorSuggestion;
 	private EditBox author;
 	private EditBox credits;
 	private EditBox description;
 
 	SongDetailsScreen(Screen parent, String songName, SongFile.Details details,
-			Consumer<SongFile.Details> accept) {
+			String authorSuggestion, Consumer<SongFile.Details> accept) {
 		super(Component.literal("Details of \"" + songName + "\""));
 		this.parent = parent;
 		this.details = details;
+		this.authorSuggestion = authorSuggestion == null || authorSuggestion.isBlank() ? null
+			: authorSuggestion;
 		this.accept = accept;
 	}
 
@@ -53,12 +57,23 @@ final class SongDetailsScreen extends Screen {
 		int left = (width - boxWidth) / 2;
 		int top = top();
 		// Kept across a resize, as the name prompt keeps its text.
-		String typedAuthor = author == null ? orEmpty(details.author()) : author.getValue();
+		// A song that has never been saved is a new one of the player's own, so the box starts with
+		// the suggested name in it, plainly visible and removable. A saved song without an author
+		// may be somebody else's, so there it is only offered, with Tab.
+		String typedAuthor = author != null ? author.getValue()
+			: details.author() != null ? details.author()
+			: details.created() == null && authorSuggestion != null ? authorSuggestion
+			: "";
 		String typedCredits = credits == null ? orEmpty(details.credits()) : credits.getValue();
 		String typedDescription = description == null ? orEmpty(details.description())
 			: description.getValue();
 		clearWidgets();
-		author = box(left, top, boxWidth, 64, typedAuthor, "Who arranged it");
+		// No hint where there is a suggestion: the two would be drawn over each other, and the
+		// suggestion is the more useful of the two.
+		author = box(left, top, boxWidth, 64, typedAuthor,
+			authorSuggestion == null ? "Who arranged it" : "");
+		author.setResponder(this::suggestAuthor);
+		suggestAuthor(typedAuthor);
 		credits = box(left, top + FIELD_GAP, boxWidth, 256, typedCredits,
 			"The original song, and whose MIDI it was made from");
 		description = box(left, top + 2 * FIELD_GAP, boxWidth, 512, typedDescription, "");
@@ -79,6 +94,36 @@ final class SongDetailsScreen extends Screen {
 			box.setHint(Component.literal(hint).withStyle(net.minecraft.ChatFormatting.DARK_GRAY));
 		}
 		return addRenderableWidget(box);
+	}
+
+	/**
+	 * Shows the rest of the suggested author after what has been typed, the way a command line
+	 * shows the rest of a command: the whole name in an empty box, the remainder after a prefix of
+	 * it, and nothing once the typing goes another way.
+	 */
+	private void suggestAuthor(String typed) {
+		author.setSuggestion(authorRemainder(typed));
+	}
+
+	private String authorRemainder(String typed) {
+		if (authorSuggestion == null || typed.length() >= authorSuggestion.length()
+				|| !authorSuggestion.toLowerCase(Locale.ROOT)
+					.startsWith(typed.toLowerCase(Locale.ROOT))) {
+			return null;
+		}
+		return authorSuggestion.substring(typed.length());
+	}
+
+	/** Tab takes the suggestion, where there is one; otherwise it moves between the boxes. */
+	@Override
+	public boolean keyPressed(net.minecraft.client.input.KeyEvent event) {
+		if (event.key() == com.mojang.blaze3d.platform.InputConstants.KEY_TAB && author != null
+				&& author.isFocused() && authorRemainder(author.getValue()) != null) {
+			author.setValue(authorSuggestion);
+			author.moveCursorToEnd(false);
+			return true;
+		}
+		return super.keyPressed(event);
 	}
 
 	private void confirm() {
@@ -133,8 +178,12 @@ final class SongDetailsScreen extends Screen {
 		graphics.text(font, title.getString(), left, top - 26, 0xFFFFFFFF, false);
 		String[] labels = {"Author", "Credits", "Description"};
 		for (int field = 0; field < labels.length; field++) {
-			graphics.text(font, labels[field] + " (optional)", left, top + field * FIELD_GAP - 11,
-				LABEL_COLOR, false);
+			String label = labels[field] + " (optional)";
+			// Said beside the box, since the grey name in it does not say how to take it.
+			if (field == 0 && author != null && authorRemainder(author.getValue()) != null) {
+				label += " - Tab fills in " + authorSuggestion;
+			}
+			graphics.text(font, label, left, top + field * FIELD_GAP - 11, LABEL_COLOR, false);
 		}
 		int y = top + 3 * FIELD_GAP - 4;
 		for (String line : facts()) {

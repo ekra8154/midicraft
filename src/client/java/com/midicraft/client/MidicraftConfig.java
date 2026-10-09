@@ -467,6 +467,8 @@ public final class MidicraftConfig {
 	private int paceCatchUpTo;
 	private boolean pasteStartTop;
 	private String importDirectory;
+	/** The author last saved in a song's details, offered for the next. See {@link #suggestedAuthor}. */
+	private String lastAuthor;
 	private int maxBuildFloors;
 	private String pasteMode;
 
@@ -645,6 +647,7 @@ public final class MidicraftConfig {
 					: stored.ultraLaneStartTop;
 				instance.pasteStartTop = startTop != null && startTop;
 				instance.importDirectory = stored.importDirectory;
+				instance.lastAuthor = stored.lastAuthor;
 				instance.conversionGapPercentile = clampConversionGapPercentile(
 					stored.conversionGapPercentile == null
 						? DEFAULT_CONVERSION_GAP_PERCENTILE
@@ -1451,6 +1454,35 @@ public final class MidicraftConfig {
 		this.importDirectory = importDirectory;
 	}
 
+	/**
+	 * Who Song details offers as a song's author: the author last saved in any song's details, or
+	 * before there is one, the player's own name.
+	 *
+	 * <p>Only ever offered in that dialog -- put in the box for a song that has never been saved,
+	 * and offered with Tab for one that has. Nothing is written unless the dialog is saved: a save of
+	 * the song itself never adds an author, and a song somebody else made can have its author left
+	 * blank, so claiming it should be a choice.</p>
+	 *
+	 * @return {@code null} where there is neither
+	 */
+	public String suggestedAuthor() {
+		if (lastAuthor != null && !lastAuthor.isBlank()) {
+			return lastAuthor;
+		}
+		try {
+			return net.minecraft.client.Minecraft.getInstance().getUser().getName();
+		} catch (RuntimeException | LinkageError noGame) {
+			return null;
+		}
+	}
+
+	/** Remembered when a song's details are saved with an author, for the next song. */
+	public void setLastAuthor(String author) {
+		if (author != null && !author.isBlank()) {
+			this.lastAuthor = author.strip();
+		}
+	}
+
 	public int buildLaneWidth() {
 		return clampBuildLaneWidth(buildLaneWidth);
 	}
@@ -2007,6 +2039,7 @@ public final class MidicraftConfig {
 		/** The old name of {@link #pasteStartTop}, read and never written. */
 		private Boolean ultraLaneStartTop;
 		private String importDirectory;
+		private String lastAuthor;
 		private Integer maxBuildFloors;
 		private String pasteMode;
 
@@ -2095,6 +2128,7 @@ public final class MidicraftConfig {
 			this.paceCatchUpTo = config.paceCatchUpTo;
 			this.pasteStartTop = config.pasteStartTop;
 			this.importDirectory = config.importDirectory;
+			this.lastAuthor = config.lastAuthor;
 			this.maxBuildFloors = config.maxBuildFloors;
 			this.pasteMode = config.pasteMode;
 		}

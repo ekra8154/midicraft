@@ -10597,8 +10597,13 @@ public final class ComposerScreen extends Screen {
 	 */
 	private void openSongDetails() {
 		McCompat.setScreen(new SongDetailsScreen(this, project().name(), config.composerDetails(),
-			details -> {
+			config.suggestedAuthor(), details -> {
 				boolean written = config.setComposerDetails(details);
+				// The name typed here is the one offered next time, and the one a new song gets.
+				if (details.author() != null) {
+					config.setLastAuthor(details.author());
+					MidicraftConfig.save();
+				}
 				McCompat.setScreen(this);
 				showResult(Component.literal(!written ? "Could not write the details."
 					: config.hasSongFile() ? "Details saved."
