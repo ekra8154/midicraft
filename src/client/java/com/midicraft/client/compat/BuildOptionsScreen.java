@@ -12,6 +12,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.function.IntConsumer;
 import java.util.function.IntFunction;
 import net.minecraft.client.Minecraft;
@@ -19,6 +20,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.AbstractSliderButton;
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.CommonComponents;
@@ -71,7 +73,7 @@ final class BuildOptionsScreen extends Screen {
 	 */
 	private boolean startTop;
 	/**
-	 * What the blocks are made of: the Build Pasting blocks, lamps, or coloured by what laid them.
+	 * What the blocks are made of: the palette, lamps, or coloured by what laid them.
 	 *
 	 * <p>Put into effect the moment it is picked rather than on Paste, because the colour-coded build
 	 * also changes what gets built -- a collision is built through instead of refused -- and the
@@ -100,6 +102,68 @@ final class BuildOptionsScreen extends Screen {
 	 * so.</p>
 	 */
 	private static boolean advancedOpen;
+
+	/**
+	 * One block of the palette: the role it fills, and where the config keeps it.
+	 *
+	 * <p>Typed rather than picked, because there are a thousand blocks and the useful ones are
+	 * whichever the player has a stack of. Each is checked as it is typed against what that role
+	 * has to do in the machine -- see {@link LaneMaterials#problem} -- and only a block that would
+	 * work is ever kept.</p>
+	 */
+	private record PaletteSlot(String key, String shortLabel, LaneMaterials.Role role,
+			Function<MidicraftConfig, String> read, BiConsumer<MidicraftConfig, String> write) {
+		/** The full name and what the block has to do, since the label beside the box is short. */
+		Tooltip tooltip() {
+			return Tooltip.create(Component.empty()
+				.append(Component.translatable("option.midicraft." + key))
+				.append(": ")
+				.append(Component.translatable("tooltip.midicraft." + key)));
+		}
+	}
+
+	/**
+	 * The palette, in the order its rows are shown.
+	 *
+	 * <p>Here and not in Settings, beside the width and the floors, because it is what this build is
+	 * made of: chosen per build, remembered for the next one the way the width is, and in the same
+	 * place as the buttons that build or export with it. It used to be a Settings tab of its own,
+	 * which was the one part of a build you could not change from the screen that makes one.</p>
+	 */
+	private static final List<PaletteSlot> PALETTE = List.of(
+		new PaletteSlot("lane_one_block", "Lane 1", LaneMaterials.Role.LANE,
+			MidicraftConfig::laneOneBlock, MidicraftConfig::setLaneOneBlock),
+		new PaletteSlot("lane_two_block", "Lane 2", LaneMaterials.Role.LANE,
+			MidicraftConfig::laneTwoBlock, MidicraftConfig::setLaneTwoBlock),
+		new PaletteSlot("relay_block", "Relay", LaneMaterials.Role.RELAY,
+			MidicraftConfig::relayBlock, MidicraftConfig::setRelayBlock),
+		new PaletteSlot("transparent_block", "Climbs", LaneMaterials.Role.TRANSPARENT,
+			MidicraftConfig::transparentBlock, MidicraftConfig::setTransparentBlock),
+		new PaletteSlot("support_block", "Support", LaneMaterials.Role.SUPPORT,
+			MidicraftConfig::supportBlock, MidicraftConfig::setSupportBlock),
+		new PaletteSlot("thin_lane_block", "Thin", LaneMaterials.Role.THIN,
+			MidicraftConfig::thinLaneBlock, MidicraftConfig::setThinLaneBlock));
+
+	/** The open palette's columns: two blocks a row, so six fit in three rows. */
+	private static final int PALETTE_COLUMNS = 2;
+	/** Room for the Default button at the end of the palette toggle, while it is open. */
+	private static final int PALETTE_DEFAULT_WIDTH = 60;
+
+	/**
+	 * Whether the palette rows are open. Shut by default, and static so the screen opens the way it
+	 * was last left, for the same reason as {@link #advancedOpen}.
+	 */
+	private static boolean paletteOpen;
+	/**
+	 * The palette being chosen, in {@link #PALETTE} order: always the last block each box held that
+	 * would work, so a half-typed name never reaches a build. Written to the config on Paste or
+	 * Export, like the width; leaving the screen keeps the palette you had.
+	 */
+	private final String[] palette = new String[PALETTE.size()];
+	/** The palette toggle, so its summary can follow the boxes under it. */
+	private Button paletteToggle;
+	/** Where each palette label goes on screen, as {x, y}, for drawing it beside its box. */
+	private final List<int[]> paletteLabelAt = new ArrayList<>();
 	/** The catch-up control, so its line can follow the tolerance above it. */
 	private Choice catchUpChoice;
 	/** The width control, so its line can be rewritten when a forecast says the width was raised. */
@@ -387,7 +451,7 @@ final class BuildOptionsScreen extends Screen {
 		Consumer<SongBuilder.PasteMode> confirm,
 		BiConsumer<SongBuilder.PasteMode, SchematicWriter.Format> export
 	) {
-		super(Component.literal("Paste sequence in world"));
+		super(Component.literal("Build composition"));
 		this.parent = parent;
 		this.songName = songName;
 		this.sequence = sequence;
@@ -406,11 +470,30 @@ final class BuildOptionsScreen extends Screen {
 		this.reseedDelay = MidicraftConfig.get().parityReseedDelay();
 		this.paceTolerance = MidicraftConfig.get().paceTolerance();
 		this.paceCatchUpTo = MidicraftConfig.get().paceCatchUpTo();
+		for (int slot = 0; slot < PALETTE.size(); slot++) {
+			palette[slot] = PALETTE.get(slot).read().apply(MidicraftConfig.get());
+		}
 	}
 
-	/** Top of the width row, which only a lane build has. Under the start and block rows. */
+	/** The palette toggle, straight under the block row it belongs with. */
+	private int paletteRow(int top) {
+		return top + 14 + 2 * 22;
+	}
+
+	/**
+	 * Rows the open palette takes under its toggle, two blocks to a row.
+	 *
+	 * <p>Two columns and short labels rather than a row a block: this screen is already tall with
+	 * the advanced rows open, and six more full rows put the buttons off the bottom of a small
+	 * window.</p>
+	 */
+	private int paletteRows() {
+		return paletteOpen ? (PALETTE.size() + PALETTE_COLUMNS - 1) / PALETTE_COLUMNS : 0;
+	}
+
+	/** Top of the width row, which only a lane build has. Under the start, block and palette rows. */
 	private int widthRow(int top) {
-		return top + 14 + 2 * 22 + 6;
+		return paletteRow(top) + 22 * (1 + paletteRows()) + 6;
 	}
 
 	private int floorRow(int top) {
@@ -567,6 +650,21 @@ final class BuildOptionsScreen extends Screen {
 			.tooltip(Tooltip.create(Component.literal(blocksTooltip(colours))))
 			.build());
 
+		int toggleWidth = paletteOpen ? width - PALETTE_DEFAULT_WIDTH - 4 : width;
+		paletteToggle = addRenderableWidget(Button.builder(
+				Component.literal(paletteLine(toggleWidth)), clicked -> {
+					paletteOpen = !paletteOpen;
+					init();
+				})
+			.bounds(left, paletteRow(top), toggleWidth, 20)
+			.tooltip(Tooltip.create(Component.literal("The blocks this build is made of. Remembered "
+				+ "for the next build, like the width.")))
+			.build());
+		paletteLabelAt.clear();
+		if (paletteOpen) {
+			addPaletteRows(left, width, top, toggleWidth);
+		}
+
 		if (hasLaneControls()) {
 			labelledWidth = 0;
 			widthChoice = addRenderableWidget(new Choice(left, widthRow(top), width,
@@ -669,6 +767,104 @@ final class BuildOptionsScreen extends Screen {
 	}
 
 	/**
+	 * A box per block under the palette toggle, its label beside it, and a way back to the defaults.
+	 *
+	 * <p>Checked as it is typed, the way Settings checked it: a block that would not do turns red
+	 * and says why, and the build keeps the last block that would.</p>
+	 */
+	private void addPaletteRows(int left, int width, int top, int toggleWidth) {
+		int labelWidth = 0;
+		for (PaletteSlot slot : PALETTE) {
+			labelWidth = Math.max(labelWidth, font.width(slot.shortLabel()));
+		}
+		labelWidth += 6;
+		int column = (width - 4 * (PALETTE_COLUMNS - 1)) / PALETTE_COLUMNS;
+		List<EditBox> boxes = new ArrayList<>();
+		for (int index = 0; index < PALETTE.size(); index++) {
+			PaletteSlot slot = PALETTE.get(index);
+			int slotIndex = index;
+			int x = left + (index % PALETTE_COLUMNS) * (column + 4);
+			int y = paletteRow(top) + 22 * (index / PALETTE_COLUMNS + 1);
+			paletteLabelAt.add(new int[] {x, y});
+			EditBox box = new EditBox(font, x + labelWidth, y, column - labelWidth, 20,
+				Component.literal(slot.shortLabel()));
+			box.setMaxLength(256);
+			box.setValue(typable(palette[index]));
+			box.setTooltip(slot.tooltip());
+			// After the value, so filling the box in does not count as typing into it.
+			box.setResponder(typed -> {
+				String block = LaneMaterials.normalise(typed);
+				String wrong = LaneMaterials.problem(slot.role(), block);
+				if (wrong == null) {
+					palette[slotIndex] = block;
+					box.setTextColor(0xFFE0E0E0);
+					box.setTooltip(slot.tooltip());
+				} else {
+					box.setTextColor(0xFFFF5555);
+					box.setTooltip(Tooltip.create(Component.literal(wrong + ". The build keeps "
+						+ typable(palette[slotIndex]) + ".")));
+				}
+				paletteToggle.setMessage(Component.literal(paletteLine(toggleWidth)));
+			});
+			boxes.add(addRenderableWidget(box));
+		}
+		addRenderableWidget(Button.builder(Component.literal("Default"), clicked -> {
+				for (int index = 0; index < PALETTE.size(); index++) {
+					boxes.get(index).setValue(typable(PALETTE.get(index).role().fallback()));
+				}
+			})
+			.bounds(left + width - PALETTE_DEFAULT_WIDTH, paletteRow(top), PALETTE_DEFAULT_WIDTH, 20)
+			.tooltip(Tooltip.create(Component.literal("Stone slabs, with stone where the build "
+				+ "carries power.")))
+			.build());
+	}
+
+	/**
+	 * The palette in one line, for the toggle: its different blocks by name, as many as fit.
+	 *
+	 * <p>Named rather than counted because the default and nearly every palette is two or three
+	 * blocks, and seeing them is what tells you whether opening the rows is worth it.</p>
+	 */
+	private String paletteLine(int width) {
+		java.util.LinkedHashSet<String> names = new java.util.LinkedHashSet<>();
+		for (String block : palette) {
+			names.add(blockName(block));
+		}
+		List<String> shown = new ArrayList<>(names);
+		String arrow = paletteOpen ? " \u25B2" : " \u25BC";
+		for (int count = shown.size(); count > 0; count--) {
+			String line = "Palette: " + String.join(", ", shown.subList(0, count))
+				+ (count < shown.size() ? ", ..." : "") + arrow;
+			if (count == 1 || font.width(line) <= width - 8) {
+				return line;
+			}
+		}
+		return "Palette" + arrow;
+	}
+
+	/**
+	 * A block as it is shown in its box: without {@code minecraft:}, which is what anyone types and
+	 * what {@link LaneMaterials#normalise} puts back. Another mod's namespace stays, since without it
+	 * the name would be read as the game's own. The config keeps the full id either way.
+	 */
+	private static String typable(String block) {
+		return block.startsWith("minecraft:") ? block.substring("minecraft:".length()) : block;
+	}
+
+	/** A block as people say it: no namespace for the game's own, no state, spaces for underscores. */
+	private static String blockName(String block) {
+		String name = block;
+		int bracket = name.indexOf('[');
+		if (bracket >= 0) {
+			name = name.substring(0, bracket);
+		}
+		if (name.startsWith("minecraft:")) {
+			name = name.substring("minecraft:".length());
+		}
+		return name.replace('_', ' ');
+	}
+
+	/**
 	 * Writes the settings down, before a paste or an export plans off them.
 	 *
 	 * <p>The same for both, because an export is meant to be the build Paste would have made, and the
@@ -683,6 +879,10 @@ final class BuildOptionsScreen extends Screen {
 		MidicraftConfig.get().setPaceCatchUpTo(paceCatchUpTo);
 		MidicraftConfig.get().setPasteStartTop(startTop);
 		MidicraftConfig.get().setPasteMode(mode.name());
+		// The builder's copies are written by the setters, so the plan made next uses these blocks.
+		for (int slot = 0; slot < PALETTE.size(); slot++) {
+			PALETTE.get(slot).write().accept(MidicraftConfig.get(), palette[slot]);
+		}
 		MidicraftConfig.save();
 	}
 
@@ -713,7 +913,8 @@ final class BuildOptionsScreen extends Screen {
 		// Twenty-two higher again for the block row, which went in under the start row; then a row
 		// either way for every row the advanced toggle adds or hides against the six this was
 		// measured with (start, blocks, width, floors, reseed, rate).
-		int rows = 2 + (hasLaneControls() ? 2 : 0) + 1 + (advancedOpen ? advancedRows() : 0);
+		int rows = 2 + 1 + paletteRows() + (hasLaneControls() ? 2 : 0) + 1
+			+ (advancedOpen ? advancedRows() : 0);
 		return Math.max(40, height / 2 - 96 - (BUTTON_ROW - 46) - 22 - 22 * (rows - 6)
 			- exportRow());
 	}
@@ -1003,9 +1204,9 @@ final class BuildOptionsScreen extends Screen {
 
 	private static String blocksTooltip(MidicraftConfig.ColorCodedPaste colours) {
 		return switch (colours) {
-			case OFF -> "Uses only the blocks specified in paste settings (default stone slabs and "
+			case OFF -> "Uses only the blocks in the palette below (default stone slabs and "
 				+ "stone).";
-			case LIGHT_SHOW -> "Uses the blocks from paste settings + lamps along the song's path "
+			case LIGHT_SHOW -> "Uses the palette blocks + lamps along the song's path "
 				+ "(mostly replaces relay blocks), so it lights up as it plays.";
 			case NORMAL -> "For debugging purposes. Marks each chord type, padding type, etc. so it's "
 				+ "easy to tell what the paster did.";
@@ -1035,10 +1236,14 @@ final class BuildOptionsScreen extends Screen {
 		int left = (this.width - width) / 2;
 		int top = topRow();
 
-		graphics.text(font, "Paste the build sequence of \"" + songName + "\""
-				+ (direct ? "" : " with /setblock"),
+		graphics.text(font, "Build \"" + songName + "\"",
 			left, top - 14, 0xFFFFFFFF, false);
 		graphics.text(font, "Build", left, top + 2, 0xFF8A9098, false);
+		for (int index = 0; index < paletteLabelAt.size(); index++) {
+			int[] at = paletteLabelAt.get(index);
+			graphics.text(font, PALETTE.get(index).shortLabel(), at[0], at[1] + 6, 0xFFD6D8DD,
+				false);
+		}
 
 		int rateY = lastRow(top);
 		SongBuilder.BlockCounts blocks = SongBuilder.blockCounts(sequence);

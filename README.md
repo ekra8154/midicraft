@@ -41,13 +41,14 @@ Midicraft is a client-side mod. Import songs from a variety of sources, and shap
 
 
 ## Build Pasting
- - Paste a build with Song --> Paste current sequence in world
- - Pasting uses /setblock, so it needs permission to use commands (singleplayer with cheats on, or operator on a server). Without it, build simpler songs by hand with the in-world sequencer
+ - Paste a build, or export it as a .litematic or .schem, with Song --> Build composition
+ - Pasting needs permission to use commands (singleplayer with cheats on, or operator on a server). Without it, build simpler songs by hand with the in-world sequencer, or export the build as a .litematic and place it by hand with Litematica's preview as a guide
+ - In singleplayer, or a LAN world you host, the paste places blocks straight into the world, as fast as your game can spare. On a server it sends /setblock commands at the build paste rate in settings
  - Midicraft machines always fill a width in the +x direction, and expand in the +z direction in a snaking fashion
  - There is no hologram preview, so be sure there is nothing in the way of the build or it will be overwritten by the paste
  - Machines with multiple floors snake up/down first, then left to right. This ensures the music audibly moves gradually forward
  - Specify whether the machine starts at the top or the bottom floor
- - In settings, specify each of the paste blocks
+ - Under Palette in the build screen, specify each of the paste blocks. The last palette you built with is remembered
  - Turn on light show to watch the song light up as it plays, or color coded to see the different chord types and how padding is distributed
  - Builds are NOT guaranteed to work perfectly at any given config (mainly extremely dense and/or fast songs). The paste screen should report issues before ever pasting. If that happens, change the dimensions or other settings, or paste anyway
  - On flat lane, a chord can play up to 33 notes. However, due to complications with turns, climbs, and edge cases, the limit is 30

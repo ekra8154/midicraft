@@ -3446,8 +3446,9 @@ public final class ComposerScreen extends Screen {
 				+ "the song's file and shared with it. All optional.";
 			case SONG_INFO -> "Length, tempo, note and block counts, and the even/odd game "
 				+ "tick split.";
-			case PASTE_IN_WORLD -> "Builds the sequence with /setblock. Needs permission, and "
-				+ "overwrites whatever is standing there.";
+			case PASTE_IN_WORLD -> "Choose the layout, size and blocks for this song's build, then "
+				+ "paste it into the world or export it as a .litematic or .schem file. Pasting "
+				+ "needs /setblock permission and overwrites whatever is standing there.";
 			case BUILD_CANCEL -> "Stops a paste part-way. Blocks already placed stay put.";
 			case TOGGLE_DEDUPE -> "Build identical notes on different layers only once. Saves "
 				+ "note blocks and chord room; nothing is deleted. Notes with a count (like "
@@ -9660,7 +9661,7 @@ public final class ComposerScreen extends Screen {
 		// reaching for the dialog to check a setting stopped a paste halfway -- and Song > Cancel
 		// paste is the way to stop one on purpose. Confirming a new paste is what replaces it.
 		if (minecraft.player == null || minecraft.level == null) {
-			showResult(Component.literal("Join a world before pasting."));
+			showResult(Component.literal("Join a world to build or export the composition."));
 			return;
 		}
 		if (config.tracks().stream().allMatch(track -> track.sequence().isBlank())) {
@@ -11665,7 +11666,7 @@ public final class ComposerScreen extends Screen {
 		SNAP_TEMPO_GAME("Snap tempo to game ticks (whole song)"),
 		SONG_INFO("Song info..."),
 		SONG_DETAILS("Song details..."),
-		PASTE_IN_WORLD("Paste current sequence in world (requires op)..."),
+		PASTE_IN_WORLD("Build composition..."),
 		BUILD_CANCEL("Cancel paste"),
 		TOGGLE_DEDUPE("Merge duplicate notes"),
 		TOGGLE_NOTE_TRAILS("Show note trails"),

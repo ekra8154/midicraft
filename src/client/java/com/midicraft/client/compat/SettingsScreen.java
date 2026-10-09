@@ -27,7 +27,6 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.AbstractSliderButton;
 import net.minecraft.client.gui.components.Button;
-import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.ConfirmScreen;
 import net.minecraft.client.gui.screens.options.controls.KeyBindsScreen;
@@ -91,10 +90,6 @@ public final class SettingsScreen extends Screen {
 	 */
 	private List<Entry> showing = List.of();
 	private final List<Heading> headings = new ArrayList<>();
-	/** The text rows on screen, kept so their reset buttons can follow the value. */
-	private final List<TextRow> textRows = new ArrayList<>();
-	/** The labels of the text rows, which are drawn beside their boxes rather than inside them. */
-	private final List<Heading> textLabels = new ArrayList<>();
 	/** Held so it can grey out the moment the last row on the tab goes back to its default. */
 	private Button resetCategory;
 	private Category category = Category.COMPOSER;
@@ -125,9 +120,6 @@ public final class SettingsScreen extends Screen {
 		// Composer first and open first: it is what the mod is for, and the tab someone arriving
 		// from its own menu bar has already told you they were looking at.
 		COMPOSER("composer"),
-		// Straight under the Composer, because a build is where a composition goes next: what the
-		// Paste button lays the machine out of. Everything decided per paste is on the paste screen.
-		BUILD_PASTING("build_pasting"),
 		PLACEMENT("placement"),
 		IN_WORLD("in_world"),
 		KEYS("keys"),
@@ -191,53 +183,27 @@ public final class SettingsScreen extends Screen {
 	 * the quantize grid spent this long being taken for something an import does.</p>
 	 */
 	private record Entry(String heading, Option option, KeyMapping key, String link,
-			Runnable action, Text text) {
+			Runnable action) {
 		static Entry of(Option option) {
-			return new Entry(null, option, null, null, null, null);
+			return new Entry(null, option, null, null, null);
 		}
 
 		static Entry of(KeyMapping key) {
-			return new Entry(null, null, key, null, null, null);
-		}
-
-		static Entry of(Text text) {
-			return new Entry(null, null, null, null, null, text);
+			return new Entry(null, null, key, null, null);
 		}
 
 		static Entry heading(String key) {
-			return new Entry(key, null, null, null, null, null);
+			return new Entry(key, null, null, null, null);
 		}
 
 		/** A row that is only a way somewhere else. */
 		static Entry link(String key, Runnable action) {
-			return new Entry(null, null, null, key, action, null);
-		}
-	}
-
-	/**
-	 * A setting that is a block, typed.
-	 *
-	 * <p>The one kind of setting that does not reduce to an int: there are a thousand blocks, and
-	 * the useful ones are whichever the player has a stack of. So it is a text box, checked as it is
-	 * typed against what the block has to do in the build, and only written once it would work.</p>
-	 */
-	private record Text(String key, LaneMaterials.Role role, Function<MidicraftConfig, String> read,
-			Consumer<String> write) {
-		Component label() {
-			return Component.translatable("option.midicraft." + key);
-		}
-
-		Tooltip tooltip() {
-			return Tooltip.create(Component.translatable("tooltip.midicraft." + key));
+			return new Entry(null, null, null, key, action);
 		}
 	}
 
 	/** A laid-out row, kept so its caption and its reset button can follow the value. */
 	private record Row(Option option, IntConsumer show, Button reset) {
-	}
-
-	/** A laid-out text row, kept so its reset button can follow the value. */
-	private record TextRow(Text text, Button reset) {
 	}
 
 	/** A heading that has been given a position, so the render pass can draw it. */
@@ -248,8 +214,6 @@ public final class SettingsScreen extends Screen {
 	protected void init() {
 		clearWidgets();
 		rows.clear();
-		textRows.clear();
-		textLabels.clear();
 
 		showing = entries(category);
 		int visible = visibleRows();
@@ -277,8 +241,6 @@ public final class SettingsScreen extends Screen {
 					Component.translatable("category.midicraft." + entry.heading()), y));
 			} else if (entry.key() != null) {
 				addKeyRow(entry.key(), y, listWidth);
-			} else if (entry.text() != null) {
-				addTextRow(entry.text(), y, listWidth);
 			} else if (entry.link() != null) {
 				addRenderableWidget(Button.builder(
 						Component.translatable("option.midicraft." + entry.link()),
@@ -300,9 +262,6 @@ public final class SettingsScreen extends Screen {
 					for (Entry entry : entries(category)) {
 						if (entry.option() != null) {
 							entry.option().write().accept(entry.option().read().applyAsInt(defaults));
-							dirty = true;
-						} else if (entry.text() != null) {
-							entry.text().write().accept(entry.text().read().apply(defaults));
 							dirty = true;
 						} else if (entry.key() != null) {
 							entry.key().setKey(entry.key().getDefaultKey());
@@ -370,51 +329,6 @@ public final class SettingsScreen extends Screen {
 	 * half-typed id never reaches a paste. Anything else turns the text red, and the tooltip says
 	 * what is wrong with it and what is still being used instead.</p>
 	 */
-	private void addTextRow(Text text, int y, int listWidth) {
-		int wide = listWidth - RESET_WIDTH - 4;
-		// The widest label on the tab, so the boxes line up down the column.
-		int labelWidth = 0;
-		for (Entry entry : showing) {
-			if (entry.text() != null) {
-				labelWidth = Math.max(labelWidth, font.width(entry.text().label()));
-			}
-		}
-		labelWidth = Math.min(wide / 2, labelWidth + 8);
-		textLabels.add(new Heading(text.label(), y));
-		EditBox box = new EditBox(font, LIST_LEFT + labelWidth, y, wide - labelWidth, CONTROL_HEIGHT,
-			text.label());
-		box.setMaxLength(256);
-		box.setValue(text.read().apply(config));
-		box.setTooltip(text.tooltip());
-		// After the value, so filling the box in does not count as typing into it.
-		box.setResponder(typed -> {
-			String block = LaneMaterials.normalise(typed);
-			String wrong = LaneMaterials.problem(text.role(), block);
-			if (wrong == null) {
-				box.setTextColor(0xFFE0E0E0);
-				box.setTooltip(text.tooltip());
-				if (!block.equals(text.read().apply(config))) {
-					text.write().accept(block);
-					dirty = true;
-				}
-			} else {
-				box.setTextColor(0xFFFF5555);
-				box.setTooltip(Tooltip.create(Component.literal(wrong + ". Not saved: pastes still use "
-					+ text.read().apply(config) + ".")));
-			}
-			refreshResets();
-		});
-		addRenderableWidget(box);
-
-		String fallback = text.read().apply(defaults);
-		Button reset = addRenderableWidget(Button.builder(Component.literal(RESET_GLYPH),
-				pressed -> box.setValue(fallback))
-			.bounds(LIST_LEFT + listWidth - RESET_WIDTH, y, RESET_WIDTH, CONTROL_HEIGHT)
-			.tooltip(Tooltip.create(Component.literal("Reset to " + fallback)))
-			.build());
-		textRows.add(new TextRow(text, reset));
-	}
-
 	/**
 	 * A key binding row.
 	 *
@@ -551,10 +465,6 @@ public final class SettingsScreen extends Screen {
 			row.reset().active = row.option().read().applyAsInt(config)
 				!= row.option().read().applyAsInt(defaults);
 		}
-		for (TextRow row : textRows) {
-			row.reset().active = !row.text().read().apply(config)
-				.equals(row.text().read().apply(defaults));
-		}
 		if (resetCategory != null) {
 			// Asked of the whole tab, not of the rows on screen: a scrolled-past setting still
 			// counts as something this button would put back.
@@ -562,9 +472,7 @@ public final class SettingsScreen extends Screen {
 				entry.option() != null
 					? entry.option().read().applyAsInt(config)
 						!= entry.option().read().applyAsInt(defaults)
-					: entry.text() != null
-						? !entry.text().read().apply(config).equals(entry.text().read().apply(defaults))
-						: entry.key() != null && !entry.key().isDefault());
+					: entry.key() != null && !entry.key().isDefault());
 			// A link row is not a setting and has nothing to put back.
 		}
 	}
@@ -576,8 +484,6 @@ public final class SettingsScreen extends Screen {
 					for (Entry entry : entries(tab)) {
 						if (entry.option() != null) {
 							entry.option().write().accept(entry.option().read().applyAsInt(defaults));
-						} else if (entry.text() != null) {
-							entry.text().write().accept(entry.text().read().apply(defaults));
 						}
 					}
 				}
@@ -619,9 +525,6 @@ public final class SettingsScreen extends Screen {
 			graphics.text(font, heading.text(), LIST_LEFT, heading.y() + 8, 0xFF8FD3FF, false);
 			int rule = heading.y() + 19;
 			graphics.fill(LIST_LEFT, rule, LIST_LEFT + listWidth(), rule + 1, 0xFF2C333D);
-		}
-		for (Heading label : textLabels) {
-			graphics.text(font, label.text(), LIST_LEFT, label.y() + 6, 0xFFFFFFFF, false);
 		}
 
 		int hidden = showing.size() - visibleRows();
@@ -732,20 +635,6 @@ public final class SettingsScreen extends Screen {
 					config::setWaitForServerAcknowledgement)));
 				entries.add(Entry.of(toggle("require_line_of_sight",
 					MidicraftConfig::requireLineOfSight, config::setRequireLineOfSight)));
-			}
-			case BUILD_PASTING -> {
-				entries.add(Entry.of(new Text("lane_one_block", LaneMaterials.Role.LANE,
-					MidicraftConfig::laneOneBlock, config::setLaneOneBlock)));
-				entries.add(Entry.of(new Text("lane_two_block", LaneMaterials.Role.LANE,
-					MidicraftConfig::laneTwoBlock, config::setLaneTwoBlock)));
-				entries.add(Entry.of(new Text("relay_block", LaneMaterials.Role.RELAY,
-					MidicraftConfig::relayBlock, config::setRelayBlock)));
-				entries.add(Entry.of(new Text("transparent_block", LaneMaterials.Role.TRANSPARENT,
-					MidicraftConfig::transparentBlock, config::setTransparentBlock)));
-				entries.add(Entry.of(new Text("support_block", LaneMaterials.Role.SUPPORT,
-					MidicraftConfig::supportBlock, config::setSupportBlock)));
-				entries.add(Entry.of(new Text("thin_lane_block", LaneMaterials.Role.THIN,
-					MidicraftConfig::thinLaneBlock, config::setThinLaneBlock)));
 			}
 			case PLACEMENT -> {
 				entries.add(Entry.of(choice("sequencing_edit_protection",

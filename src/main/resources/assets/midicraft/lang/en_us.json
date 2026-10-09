@@ -92,7 +92,6 @@
   "tooltip.midicraft.midi_default_instrument": "Instrument id used for imported tracks, such as HARP, BASS, BELL, FLUTE, or MUTE.",
   "error.midicraft.sequence": "Notes must be 0-24 and repeater delay groups must be 1d-64d.",
   "category.midicraft.in_world": "In-world tools",
-  "category.midicraft.build_pasting": "Build Pasting",
   "option.midicraft.lane_one_block": "Lane one block",
   "tooltip.midicraft.lane_one_block": "Lane floor for the first machine. Needs a top dust can stand on.",
   "option.midicraft.lane_two_block": "Lane two block",
