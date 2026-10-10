@@ -3609,6 +3609,41 @@ public final class SongBuilder {
 	static boolean SEAM_STAGE_ONE_SHOVES_INTO_THE_RESERVE = true;
 
 	/**
+	 * A seam is cut across a staircase where its second stage fits the landing leg as the landing
+	 * actually lays it: the landing cell, three cells of stage, and the wait's repeaters and the
+	 * two columns the landing keeps clear after them.
+	 *
+	 * <p>The question charged five cells of stage, from when a piston not standing straight off
+	 * its feed got a soft-powered block in front of it; that block is gone, and on the landing the
+	 * feed is the staircase's own dust, straight. Two cells too dear, it refused the cut on every
+	 * landing leg of six at eight wide, and with no other way to go the seam was laid whole and
+	 * straight through the wall: faded's 1-tick arrangement at eight wide over two floors, a
+	 * climb four past the far wall, which is what kept that build from nesting three apart.</p>
+	 *
+	 * <p>Measured from where the staircase really lands. The landing column the question used is
+	 * {@link #nextLaneStart}'s, which is right for a climb and a column short for the fold's
+	 * descent, which lands in the wall column itself; the two spare cells of the old charge were
+	 * covering that. Asked of a descent from the foretold column, faded's 1-tick at ten wide over
+	 * four floors cut a seam onto a landing leg one column too short for its second stage, which
+	 * then went down two staircases on, 181 notes dead.</p>
+	 */
+	static boolean SEAM_STAGE_TWO_ASKS_WHAT_IT_LAYS = true;
+
+	/**
+	 * A seam owed whole does not open its first stage on a landing leg whose second stage could
+	 * only stand past the next staircase; it waits, whole, for a leg that can hold both or a cut
+	 * that can be priced.
+	 *
+	 * <p>Nothing may revive the chain between the stages, and the landing's own check on the wire
+	 * after the first stage ({@link #SEAM_STAGE_ONE_STANDS_FORWARD}) only counts a flat turn. A
+	 * staircase after it is rungs, a landing, and on three floors perhaps a bend and another
+	 * staircase before any leg has room: faded's 1-tick arrangement at eight wide over three floors,
+	 * the first stage on a landing two columns short of a climb and the second three staircases on,
+	 * 34 notes dead behind it -- 281 with the spread nesting.</p>
+	 */
+	static boolean SEAM_STAGE_ONE_WAITS_FOR_ITS_SECOND = true;
+
+	/**
 	 * A seam opening off a soft tip lays its repeater first, on the cell the module handed over.
 	 *
 	 * <p>The user's rule, from a dark zone at forty-eight wide: a stacked bus with a simple tail
@@ -12172,7 +12207,20 @@ public final class SongBuilder {
 							route.floorOf(leg + 1), route.climbOf(leg + 1), floors);
 						int newColumns = (newWall - landingColumn) * stepAlong(axis, newTravel);
 						boolean stageOneFits = cellsToWall >= 4;
-						boolean stageTwoFits = newColumns - 1 - 5 >= foldRepeaters + 2;
+						// The landing cell, the stage's three cells off the landing's straight feed, and
+						// the wait's repeaters and two columns past them -- exactly what the landing
+						// asks of laySeamCells. See SEAM_STAGE_TWO_ASKS_WHAT_IT_LAYS.
+						// Measured from where the staircase really lands: a climb where nextLaneStart
+						// says, and the fold's descent in the wall column itself -- a column further
+						// in than the landing nextLaneStart foretells, which the old charge of five
+						// was quietly paying for. The packed foldback lands elsewhere again and keeps
+						// the old charge.
+						boolean measuredLanding = SEAM_STAGE_TWO_ASKS_WHAT_IT_LAYS
+							&& (climb > 0 || !packingLanes());
+						int landingColumns = measuredLanding && climb < 0
+							? (newWall - foldWall) * stepAlong(axis, newTravel) : newColumns;
+						boolean stageTwoFits = landingColumns - 1 - (measuredLanding ? 3 : 5)
+							>= foldRepeaters + 2;
 						boolean alive = DUST_RANGE - (Math.max(0, cellsToWall - 4)
 							+ foldTurn.cells() + 1) >= 1;
 						// Or the whole element before the wall, read by the staircase's own dust.
@@ -12531,8 +12579,23 @@ public final class SongBuilder {
 								}
 							}
 						}
-						SeamLaid laid = laySeamCells(placements, lane, seamNext, seamFeedNext,
-							available, reserveAfter, true);
+						// Not a first stage at all where its second could only come after the next
+						// staircase. See SEAM_STAGE_ONE_WAITS_FOR_ITS_SECOND.
+						boolean stageOneWaits = false;
+						if (SEAM_STAGE_ONE_WAITS_FOR_ITS_SECOND && seamNext == 0) {
+							TurnCost turnAfter = turnCost(floor, climb, floors,
+								flatLink(route, leg, slabStep));
+							boolean stairAfter = turnAfter.above() >= 0 && turnAfter.above() < floors;
+							stageOneWaits = stairAfter
+								&& available - (4 + 3) < foldRepeaters + 2;
+							if (stageOneWaits) {
+								placements.padded("paritySeamStageOneWaitedForItsSecond");
+							}
+						}
+						SeamLaid laid = stageOneWaits
+							? new SeamLaid(lane, seamNext, seamFeedNext, 0)
+							: laySeamCells(placements, lane, seamNext, seamFeedNext, available,
+								reserveAfter, true);
 						placements.placing("delayBeforeChord");
 						if (laid.laid() > 0) {
 							lane = laid.lane();
