@@ -3519,6 +3519,19 @@ public final class SongBuilder {
 	static boolean SEAM_STAGE_ONE_STANDS_FORWARD = true;
 
 	/**
+	 * That shove may spend the cells the wait's repeaters were kept after the first stage, where
+	 * the stage was going down on this leg anyway, down to the two the stage itself wants.
+	 *
+	 * <p>The reserve is room for the wait's repeaters, but where the second stage is owed round
+	 * the turn none of them can stand there: nothing may revive the chain between the stages, so
+	 * they go down after the second piston, on the leg past the bend, and the cells kept for them
+	 * here only ever held dust. Bounded by the reserve, the shove came out nought and the landed
+	 * block had sixteen cells to carry -- moonlight's 1-tick arrangement at twelve wide over two
+	 * floors, the second piston dead on the cell before it and 521 notes silent after.</p>
+	 */
+	static boolean SEAM_STAGE_ONE_SHOVES_INTO_THE_RESERVE = true;
+
+	/**
 	 * A seam opening off a soft tip lays its repeater first, on the cell the module handed over.
 	 *
 	 * <p>The user's rule, from a dark zone at forty-eight wide: a stacked bus with a simple tail
@@ -12374,6 +12387,9 @@ public final class SongBuilder {
 						foldSignal--;
 						dustRun++;
 						int available = newColumns - 1;
+						// What laySeamCells keeps clear after the stage. See
+						// SEAM_STAGE_ONE_SHOVES_INTO_THE_RESERVE.
+						int reserveAfter = foldRepeaters + 2;
 						// Where only the first stage fits on this leg, it stands as far forward as
 						// the landing's wire allows, so the dust from its landed block still reaches
 						// the second piston: the rest of the leg, the flat turn, and the straight
@@ -12414,8 +12430,15 @@ public final class SongBuilder {
 									stageOne = 3;
 									placements.padded("paritySeamRepeaterAheadOfItsShove");
 								}
-								int shove = Math.min(dust - DUST_RANGE,
-									Math.min(foldSignal - 1, available - stageOne - (foldRepeaters + 2)));
+								int roomBeforeTheReserve = available - stageOne - reserveAfter;
+								int room = SEAM_STAGE_ONE_SHOVES_INTO_THE_RESERVE
+										&& roomBeforeTheReserve >= 0
+									? available - stageOne - 2 : roomBeforeTheReserve;
+								int shove = Math.min(dust - DUST_RANGE, Math.min(foldSignal - 1, room));
+								if (shove > roomBeforeTheReserve && roomBeforeTheReserve >= 0) {
+									reserveAfter -= shove - roomBeforeTheReserve;
+									placements.padded("paritySeamStageOneShovedIntoTheReserve");
+								}
 								for (int cell = 0; cell < shove; cell++) {
 									addParityPad(placements, lane.pos());
 									lane = lane.ahead(1);
@@ -12429,7 +12452,7 @@ public final class SongBuilder {
 							}
 						}
 						SeamLaid laid = laySeamCells(placements, lane, seamNext, seamFeedNext,
-							available, foldRepeaters + 2, true);
+							available, reserveAfter, true);
 						placements.placing("delayBeforeChord");
 						if (laid.laid() > 0) {
 							lane = laid.lane();
