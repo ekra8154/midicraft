@@ -1857,7 +1857,7 @@ public final class SongBuilder {
 		if (!SINGLE_NOTE_SONGS_PACK_TWO_APART || LANE_GAP_OVERRIDE == 3 || packingLanes()
 				|| !PACKED_MULTI_FLOOR && limits.laneFloors() > 1
 				|| notes.isEmpty() || chordStats(notes).peak() > 1) {
-			return interleavedHalfTickPlan(origin, forward, notes, limits, start);
+			return spreadPlan(origin, forward, notes, limits, start);
 		}
 		// Forced, the packed build and nothing else: no spread plan to fall back to and no
 		// comparison, so what is pasted is the build asked for, faults and all -- which is what a
@@ -1873,7 +1873,7 @@ public final class SongBuilder {
 		PastePlan spread = null;
 		RuntimeException spreadRefused = null;
 		try {
-			spread = interleavedHalfTickPlan(origin, forward, notes, limits, start);
+			spread = spreadPlan(origin, forward, notes, limits, start);
 		} catch (RuntimeException refused) {
 			spreadRefused = refused;
 		}
@@ -1979,6 +1979,54 @@ public final class SongBuilder {
 	 * plan's own counts rather than a readback, which is the paste's to make and costs more than
 	 * both walks together; the counts are what the paste screen shows before anything is pasted.</p>
 	 */
+	/**
+	 * The spread plan, or the snug one where every long link stood wide and the snug plan is no
+	 * worse. See {@link #SNUG_NESTING_WHERE_LONG_LINKS_STAND_WIDE}.
+	 */
+	private static PastePlan spreadPlan(BlockPos origin, Direction forward, List<EventNote> notes,
+			BuildLimits limits, WalkStart start) {
+		PastePlan spread = interleavedHalfTickPlan(origin, forward, notes, limits, start);
+		if (!SNUG_NESTING_WHERE_LONG_LINKS_STAND_WIDE || packingLanes()
+				|| spread.padding().getOrDefault(LONG_LINK_TIGHT, 0) > 0
+				|| spread.padding().getOrDefault(LONG_LINK_WIDE, 0) == 0) {
+			return spread;
+		}
+		PaceRecord spreadPace = LAST_PACE;
+		PastePlan snug = null;
+		SNUG_NESTING.set(Boolean.TRUE);
+		try {
+			snug = interleavedHalfTickPlan(origin, forward, notes, limits, start);
+		} catch (RuntimeException refused) {
+			if (TRACE_TURNS) {
+				System.out.println("SNUG refused: " + refused);
+			}
+		} finally {
+			SNUG_NESTING.set(Boolean.FALSE);
+		}
+		String why = snug == null ? null
+			: snug.padding().getOrDefault(LONG_LINK_TIGHT, 0) > 0 ? "a long link turned tight"
+			: planFaults(snug) > planFaults(spread) || snug.wrongNotes() > spread.wrongNotes()
+				? "more faults"
+			: null;
+		if (snug != null && why == null) {
+			int snugDead = readBack(snug).deadNotes();
+			if (snugDead > 0 && snugDead > readBack(spread).deadNotes()) {
+				why = snugDead + " dead notes on readback";
+			}
+		}
+		if (snug == null || why != null) {
+			if (TRACE_TURNS && why != null) {
+				System.out.println("SNUG dropped: " + why);
+			}
+			LAST_PACE = spreadPace;
+			return spread;
+		}
+		if (TRACE_TURNS) {
+			System.out.println("SNUG kept");
+		}
+		return snug;
+	}
+
 	private static boolean packedWins(PastePlan packed, PastePlan spread) {
 		// And never by trading a wrong note for something else. Counted all alike, Hedwig at eight
 		// wide went packed with a note sounding twice to save the spread build two wall breaches --
@@ -2117,7 +2165,9 @@ public final class SongBuilder {
 		// onto, on the legs that give up their columns. See WIDTH_HOLDS_THE_WIDEST_BUS.
 		int widestBus = WIDTH_HOLDS_THE_WIDEST_BUS
 			? Math.max(widestBusColumns(evenEvents), widestBusColumns(oddEvents)) + 1
-				+ nestedShortening()
+				// Sized at the spread shortening for a snug plan: the snug plan moves the short
+				// links' corners and nothing else, so its lanes are the spread plan's.
+				+ (SNUG_NESTING.get() || SNUG_NESTING_FORCED ? NESTED_SHORTENING : nestedShortening())
 			: 0;
 		// The full v2 width for both machines: the nested shape has no corridors. Each machine
 		// gives up three columns at one end of one floor -- where the partner's long link runs --
@@ -3092,6 +3142,33 @@ public final class SongBuilder {
 	 * wall -- with the return leg against machine A's bus, sounding one of its notes twice.</p>
 	 */
 	static boolean OPENING_CHORD_TURNS_ON_ITS_OWN = true;
+
+	/**
+	 * Where every long link of a spread build stood wide, the build is planned again with the
+	 * short links' wall a column further out, and kept if it is no worse.
+	 *
+	 * <p>A long link turns at the full wall and runs the column past it, so the gap between its
+	 * corner and the partner's short-link corner is the shortening plus one: four, at the three
+	 * the spread lanes keep. Three is what that ground is for -- the long link's column and the
+	 * notes it hangs inward, then the short link's own flank -- and the extra column is there
+	 * only because a long link can also turn tight, on the wall, hanging its notes a column
+	 * further in. Chord-heavy songs nearly always have a chord that pulls one tight, so they nest
+	 * three apart already; songs of one note a chord never do, and every one of their short links
+	 * stood a column further in than it needed to. The user's reading of centuries' 1-tick
+	 * arrangement at eight wide over two floors: the one inner lane the census called a breach
+	 * was the one at the right column, and every other inner lane was a column short of it.</p>
+	 *
+	 * <p>Planned again rather than decided up front, because whether a long link turns tight is
+	 * the walk's own guess from the chords riding it, and only a walk can say. Kept only where no
+	 * long link of the snug plan turned tight either -- a tight one would hang a note into the
+	 * column the short link's flank now wants -- and where it is no worse in faults, wrong notes
+	 * or notes the read-back finds dead.</p>
+	 */
+	static boolean SNUG_NESTING_WHERE_LONG_LINKS_STAND_WIDE = true;
+
+	/** Long links armed tight, and armed wide, by any walk. See {@link #SNUG_NESTING_WHERE_LONG_LINKS_STAND_WIDE}. */
+	static final String LONG_LINK_TIGHT = "longLinkArmedTight";
+	static final String LONG_LINK_WIDE = "longLinkArmedWide";
 
 	/**
 	 * A stacked module that comes to rest on its leg's wall column hangs nothing in the cells a
@@ -12007,6 +12084,9 @@ public final class SongBuilder {
 							lane = armTurn(placements, lane, depth, foldColumns,
 								flatLink(route, leg, slabStep), tight);
 						}
+						if (!route.linkArmsTight(leg)) {
+							placements.padded(tight ? LONG_LINK_TIGHT : LONG_LINK_WIDE);
+						}
 						turning = true;
 						// Not the opening's first turn. It stands where the input put the opening --
 						// on the landing, or on the note of one the head drives -- and the wall it is
@@ -15965,6 +16045,9 @@ public final class SongBuilder {
 						} else {
 							lane = armTurn(placements, lane, depth, columns,
 								flatLink(route, leg, slabStep), tight);
+						}
+						if (!route.linkArmsTight(leg)) {
+							placements.padded(tight ? LONG_LINK_TIGHT : LONG_LINK_WIDE);
 						}
 						turning = true;
 						noteCornerPastWall(placements, route, leg, wall, forward, leaving, axis, lane);
@@ -32317,8 +32400,21 @@ public final class SongBuilder {
 	 */
 	private static final int PACKED_NESTED_SHORTENING = 1;
 
+	/**
+	 * {@link #NESTED_SHORTENING} for a snug plan: two, so the turns nest three apart where the
+	 * partner's long links all stand wide. See {@link #SNUG_NESTING_WHERE_LONG_LINKS_STAND_WIDE}.
+	 */
+	private static final int SNUG_NESTED_SHORTENING = 2;
+
+	/** A probe's question: every spread plan snug, kept whatever it does. */
+	static boolean SNUG_NESTING_FORCED = false;
+
+	/** Whether the plan being walked on this thread is the snug one. */
+	private static final ThreadLocal<Boolean> SNUG_NESTING = ThreadLocal.withInitial(() -> Boolean.FALSE);
+
 	private static int nestedShortening() {
-		return packingLanes() ? PACKED_NESTED_SHORTENING : NESTED_SHORTENING;
+		return packingLanes() ? PACKED_NESTED_SHORTENING
+			: SNUG_NESTING.get() || SNUG_NESTING_FORCED ? SNUG_NESTED_SHORTENING : NESTED_SHORTENING;
 	}
 
 	/** The columns the widest chord takes as a plain bus: its repeater and a cell per pair of notes. */
