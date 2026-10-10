@@ -2565,6 +2565,32 @@ public final class SongBuilder {
 	static int PACE_WIRE_RUN = 14;
 
 	/**
+	 * Whether a pace stretch longer than its leg carries on round the flat turn ahead and down the
+	 * next leg, rather than being cut at the wall.
+	 *
+	 * <p>Cut, a lane far behind bought one leg of dust and spent the rest of its wait as the
+	 * ordinary delay: a four and a two in front of the chord, six ticks that would each have
+	 * bought a refresh and fourteen dust. HOTMK insane v2 at seventeen wide, machine B asking 68
+	 * on a wait of seven, laying 15 and staying 120 columns behind for a hundred events. Carried,
+	 * every spare tick of a wait that is behind is a one-tick refresh and a full run after it,
+	 * round corners and through links, and the chord lands where the stretch runs out.</p>
+	 *
+	 * <p>Only on flat turns and only with no seam owed: a staircase keeps its wall column and a
+	 * seam keeps its cells, as before. And only when the wait's ticks can keep the whole bend
+	 * alive, and the stretch reaches past it, so a carried stretch is never left in a link.</p>
+	 */
+	static boolean PACE_STRETCH_ROUNDS_FLAT_TURNS = true;
+
+	/**
+	 * Whether a pace stretch that finds its wait standing in a bend already armed -- a chord rode
+	 * the corner, or the link is still ahead -- walks that bend out as stretch, under the same
+	 * conditions {@link #PACE_STRETCH_ROUNDS_FLAT_TURNS} carries one round. Off, the whole stretch
+	 * of such a wait was skipped: HOTMK insane v2 at seventeen wide, machine A asking 97 on a wait
+	 * of seven and laying none.
+	 */
+	static boolean PACE_STRETCH_WALKS_A_BEND_IT_FINDS = true;
+
+	/**
 	 * The last paced interleaved build's pacing, for probes, or null when the last one did not pace:
 	 * each machine's event times, its dry-walk positions, the stretch it was handed, and the
 	 * positions its real walk recorded. The planner's model of a machine is its dry position plus
@@ -3318,6 +3344,14 @@ public final class SongBuilder {
 	 * decides its turn there, and the corner is the one cell of dust a chain needs.</p>
 	 */
 	static boolean REASKS_WHEN_THE_WAIT_OUTRUNS_THE_LEG = true;
+
+	/**
+	 * Whether a re-asked event lays its descent landing's cell of dust only when the staircase hands
+	 * it a signal, rather than always. At nought the dust is a dead line and the chord's repeater
+	 * after it reads nothing; without it that repeater stands on the landing and reads the last
+	 * rung's stone. See the re-ask in walkRouted.
+	 */
+	static boolean LANDING_DUST_NEEDS_A_SIGNAL = true;
 
 	/**
 	 * v2: an event with a turn forced in front of it also walks out a bend the fold armed during
@@ -6549,6 +6583,12 @@ public final class SongBuilder {
 				int liftAfter = raiseAfter(pad, climb > 0, above >= 0 && above < floors,
 					lastStyle.buses());
 				boolean raisedPad = liftAfter >= 0;
+				if (TRACE_TURNS) {
+					System.out.println("PADCLOSING t=" + event.time() + " at " + lane.pos().getX()
+						+ " " + lane.pos().getY() + " " + lane.pos().getZ() + " tip=" + tipSignal
+						+ " padSignal=" + pad.signal() + " cells=" + pad.cells() + " spent=" + pad.delaySpent()
+						+ " wait=" + wait + " lastStyle=" + lastStyle + " above=" + above);
+				}
 				lane = emitPad(placements, lane, pad.withSpare(wait - pad.delaySpent()), "padClosing",
 					liftAfter);
 				spentPadding = pad.delaySpent() + spentOnTheTip;
@@ -9512,6 +9552,12 @@ public final class SongBuilder {
 				int liftAfter = raiseAfter(pad, climb > 0, above >= 0 && above < floors,
 					turnsOffBus);
 				boolean raisedPad = liftAfter >= 0;
+				if (TRACE_TURNS) {
+					System.out.println("PADCLOSING t=" + event.time() + " at " + lane.pos().getX()
+						+ " " + lane.pos().getY() + " " + lane.pos().getZ() + " tip=" + tipSignal
+						+ " padSignal=" + pad.signal() + " cells=" + pad.cells() + " spent=" + pad.delaySpent()
+						+ " wait=" + wait + " lastStyle=" + lastStyle + " above=" + above);
+				}
 				lane = emitPad(placements, lane, pad.withSpare(wait - pad.delaySpent()), "padClosing",
 					liftAfter);
 				spentPadding = pad.delaySpent() + spentOnTheTip;
@@ -11709,6 +11755,13 @@ public final class SongBuilder {
 				// single starved repeater to say so -- field of hopes at twenty over two floors,
 				// 168 notes unreached.
 				int dustRun = Math.max(0, DUST_RANGE - foldSignal);
+				// Whether this event's stretch has opened, on its own repeater, so what stands
+				// behind the lane is the stretch's wire and no module: a stretch carried onto a new
+				// leg runs on from it rather than spending a tick on a second opener.
+				boolean stretchOpened = false;
+				// Whether the fold armed the turn ahead for the stretch to carry round it, so the
+				// walk-out spends the stretch through the bend. See PACE_STRETCH_ROUNDS_FLAT_TURNS.
+				boolean stretchRounds = false;
 				while (true) {
 					int foldRepeaters = Math.max(0, (event.time() - currentTime - 1) / 4);
 					// A pending seam's element wants straight cells of this leg too, so every fit
@@ -11748,6 +11801,19 @@ public final class SongBuilder {
 						// alone would have ridden. Whatever it cannot buy on this leg the next
 						// event asks for again, against where the partner then stands.
 						int wantToExit = foldRepeaters + seamCells;
+						// Unless the stretch reaches past the bend and the ticks keep the bend
+						// alive: then the bend is the stretch's to walk, whoever armed it -- a
+						// chord riding a corner left its partner's next wait standing in the
+						// link, and the whole of a seven-tick stretch was skipped there. See
+						// PACE_STRETCH_ROUNDS_FLAT_TURNS.
+						if (PACE_STRETCH_WALKS_A_BEND_IT_FINDS && PACE_BUDGETS_THE_WIRE && !stretchRounds
+								&& stretchLeft >= toExit && seamCells == 0 && !seamMid
+								&& seamNext >= PARITY_SEAM_CELLS && laneStarted && index > 0
+								&& event.time() - currentTime >= (stretchOpened ? 0 : 1)
+									+ (toExit + dustRun) / paceDustRun() + 1) {
+							stretchRounds = true;
+							placements.padded("paceStretchWalksItsBendOut");
+						}
 						// The wait ends inside the turn or just past it. The delay layer already bends
 						// through an armed corner on its own, so there is nothing left to fold. And a
 						// stretch may only pull the chain through when the ticks can keep it alive: a
@@ -11769,14 +11835,19 @@ public final class SongBuilder {
 						}
 						boolean walkOutNow = forcedWalkOut
 							|| FORCED_TURN_WALKS_OUT_THE_FOLDS_BEND && turnBefore.contains(index)
-								&& !foldWalkedTheBend;
+								&& !foldWalkedTheBend
+							|| stretchRounds;
 						if (!walkOutNow && (wantToExit <= toExit || foldRepeaters <= toExit / 8)) {
 							break;
 						}
 						forcedWalkOut = false;
+						// Carried round on purpose: the bend is the stretch's, every refresh in it a
+						// one-tick repeater. See PACE_STRETCH_ROUNDS_FLAT_TURNS.
+						boolean carrying = stretchRounds;
+						stretchRounds = false;
 						// Walk the turn out, spending the wait: a repeater wherever ticks remain, a
 						// plain pad cell where they do not, and the corner cells as corner cells.
-						placements.placing("delayBeforeChord");
+						placements.placing(carrying ? "paceStretch" : "delayBeforeChord");
 						while (lane.bending()) {
 							BlockPos beforeCorner = lane.pos();
 							lane = pastAnyCorner(placements, lane);
@@ -11821,8 +11892,13 @@ public final class SongBuilder {
 							}
 							foldLaidFirst = true;
 							boolean betweenStages = seamNext > 1 && seamNext < PARITY_SEAM_CELLS;
+							// A carried stretch opens on its own repeater, as it does on a straight
+							// leg, and refreshes early where the corners ahead would take its run
+							// past fifteen: pastAnyCorner lays them as dust with no say in it.
+							boolean carriedRefresh = carrying && stretchLeft > 0
+								&& (!stretchOpened || dustRun + cornerRunAhead(lane) >= paceDustRun());
 							boolean refreshHere = !betweenStages && ticks > paceRefresh
-								&& (stretchLeft == 0 || dustRun >= paceDustRun());
+								&& (stretchLeft == 0 || dustRun >= paceDustRun() || carriedRefresh);
 							// Or the last moment before the dust dies, with whatever the wait can
 							// spare: a walk-out padding a chord out of a turn rides the arriving
 							// wire, and that wire is what the padding exists to save. See
@@ -11837,6 +11913,12 @@ public final class SongBuilder {
 								currentTime += refresh;
 								foldSignal = DUST_RANGE;
 								dustRun = 0;
+								if (carrying && stretchLeft > 0) {
+									// One of the stretch's cells, as on a straight leg.
+									stretchLeft--;
+									stretchOpened = true;
+									placements.padded("paceStretchCarriedRefresh");
+								}
 							} else {
 								addParityPad(placements, lane.pos());
 								foldSignal--;
@@ -11844,6 +11926,9 @@ public final class SongBuilder {
 								if (stretchLeft > 0) {
 									stretchLeft--;
 								}
+							}
+							if (carrying && stretchLeft == 0) {
+								placements.placing("delayBeforeChord");
 							}
 							lane = lane.ahead(1);
 						}
@@ -11904,8 +11989,24 @@ public final class SongBuilder {
 						boolean staircaseAhead = foldTurn.above() >= 0 && foldTurn.above() < floors;
 						int chordRoom = STRETCH_LEAVES_THE_CHORD_ITS_ROOM && staircaseAhead
 							? (event.notes().size() + 1) / 2 + 1 : 0;
-						stretchLeft = Math.min(stretchLeft,
-							Math.max(0, foldColumns - foldRepeaters - seamCells - chordRoom));
+						int room = Math.max(0, foldColumns - foldRepeaters - seamCells - chordRoom);
+						// Longer than the leg and the bend after it: carried round instead of cut,
+						// where the wait's ticks keep the whole bend alive -- an opener, a refresh
+						// for every fourteen cells of it, and the chord's own tick after. See
+						// PACE_STRETCH_ROUNDS_FLAT_TURNS.
+						int bend = foldColumns + flatLink(route, leg, slabStep) + 2;
+						int ticksForTheBend = (stretchOpened ? 0 : 1)
+							+ (bend + dustRun) / paceDustRun() + 1;
+						if (PACE_STRETCH_ROUNDS_FLAT_TURNS && PACE_BUDGETS_THE_WIRE && !staircaseAhead
+								&& stretchLeft > room && stretchLeft >= bend && foldColumns >= 0
+								&& seamCells == 0 && !seamMid && seamNext >= PARITY_SEAM_CELLS
+								&& laneStarted && index > 0
+								&& event.time() - currentTime >= ticksForTheBend) {
+							stretchRounds = true;
+							placements.padded("paceStretchRoundsATurn");
+						} else {
+							stretchLeft = Math.min(stretchLeft, room);
+						}
 					}
 					// A head standing on its opening wall turns before it lays anything. The walk's
 					// rule that a lane must hold something before it can end is what stops a lane
@@ -11949,7 +12050,8 @@ public final class SongBuilder {
 					// SEAM_LEAVES_ITS_DESCENT_THE_WALL.
 					int descentRoom = SEAM_LEAVES_ITS_DESCENT_THE_WALL && seamCells > 0 && climb < 0
 						&& foldTurn.above() >= 0 && foldTurn.above() < floors ? 1 : 0;
-					if (!openingOnTheWall && !chordCannotTurn && (want + descentRoom <= foldColumns
+					if (!openingOnTheWall && !chordCannotTurn && !stretchRounds
+							&& (want + descentRoom <= foldColumns
 							|| foldRepeaters + seamCells + descentRoom <= foldColumns
 								&& foldRepeaters <= Math.max(1, foldColumns / 8))) {
 						if (stretchLeft > 0) {
@@ -11973,7 +12075,8 @@ public final class SongBuilder {
 						// was wrong often enough to kill five builds in one census. The tick it
 						// costs comes off the chord's trigger, so a wait with no tick to spare
 						// buys nothing this event.
-						if (stretchLeft > 0 && !seamMid) {
+						// Not twice: a stretch carried round a turn has its own wire behind it.
+						if (stretchLeft > 0 && !seamMid && !stretchOpened) {
 							if (event.time() - currentTime < 2) {
 								placements.padded("paceStretchNoTickToOpen");
 								stretchLeft = 0;
@@ -11990,6 +12093,7 @@ public final class SongBuilder {
 								// stretch was clamped to the leg, and a cell past that stands the
 								// chord on the wall (1,512 outer-wall cells over one census).
 								stretchLeft--;
+								stretchOpened = true;
 								folded = true;
 								laneStarted = true;
 								placements.padded("paceStretchOpenedOnARepeater");
@@ -12615,6 +12719,15 @@ public final class SongBuilder {
 							placements.padded("paritySeamCutAStaircaseLanded");
 						}
 					}
+				}
+				if (TRACE_PACE && pace != null && pace.stretch() != null && pace.stretch()[index] > 0) {
+					System.out.println("PACE m=" + pace.machine() + " e=" + index + " t=" + event.time()
+						+ " wait=" + (index == 0 ? event.time() : event.time() - events.get(index - 1).time())
+						+ " asked=" + pace.stretch()[index] + " unlaid=" + stretchLeft
+						+ " ticksLeft=" + (event.time() - currentTime) + " at " + lane.pos().getX() + " "
+						+ lane.pos().getY() + " " + lane.pos().getZ() + " bending=" + lane.bending()
+						+ " seamMid=" + (seamNext > 0 && seamNext < PARITY_SEAM_CELLS) + " seamEat="
+						+ event.seamEat() + " started=" + laneStarted);
 				}
 				if (folded) {
 					foldWalkedTheBend = true;
@@ -15668,6 +15781,12 @@ public final class SongBuilder {
 				int liftAfter = raiseAfter(pad, climb > 0, above >= 0 && above < floors,
 					turnsOffBus);
 				boolean raisedPad = liftAfter >= 0;
+				if (TRACE_TURNS) {
+					System.out.println("PADCLOSING t=" + event.time() + " at " + lane.pos().getX()
+						+ " " + lane.pos().getY() + " " + lane.pos().getZ() + " tip=" + tipSignal
+						+ " padSignal=" + pad.signal() + " cells=" + pad.cells() + " spent=" + pad.delaySpent()
+						+ " wait=" + wait + " lastStyle=" + lastStyle + " above=" + above);
+				}
 				lane = emitPad(placements, lane, pad.withSpare(wait - pad.delaySpent()), "padClosing",
 					liftAfter);
 				spentPadding = pad.delaySpent() + spentOnTheTip;
@@ -15988,11 +16107,22 @@ public final class SongBuilder {
 								// landing cell, over glass, and stone under a pad there is what stops
 								// the dust below from stepping up (clean bandit at eight wide over two
 								// floors, 617 notes dark).
-								if (route.climbOf(leg - 1) <= 0) {
+								// And only where the rung has signal to step down with. A pad that
+								// reached the descent on exactly the rungs' price leaves the last
+								// rung at one and the landing at nought, and dust there feeds the
+								// repeater after it nothing: jvp's raise up your bat at sixteen wide
+								// over five floors, 1,320 notes dark behind a closing pad of seven.
+								// The chord's repeater opens on the landing instead, reading the
+								// last rung's stone the way addSplitBusDescent builds it to be read.
+								// See LANDING_DUST_NEEDS_A_SIGNAL.
+								boolean landingLive = !LANDING_DUST_NEEDS_A_SIGNAL || tipSignal >= 1;
+								if (route.climbOf(leg - 1) <= 0 && landingLive) {
 									placements.placing("delayBeforeChord");
 									addParityPad(placements, lane.pos());
 									lane = lane.ahead(1);
 									tipSignal--;
+								} else if (!landingLive) {
+									placements.padded("reaskLandingOpensOnItsRepeater");
 								}
 								currentTime += spentPadding;
 								spentPadding = 0;
@@ -19868,6 +19998,15 @@ public final class SongBuilder {
 	 */
 	private static boolean railCornerTakes(EventGroup event) {
 		return event.notes().size() == 1 && isHarpNote(event.notes().get(0));
+	}
+
+	/** Corner cells straight after this one, which {@link #pastAnyCorner} will lay as dust. */
+	private static int cornerRunAhead(Lane lane) {
+		int corners = 0;
+		while (lane.cornerAt(corners + 1)) {
+			corners++;
+		}
+		return corners;
 	}
 
 	private static int cellsToCorner(Lane lane) {
@@ -26093,6 +26232,9 @@ public final class SongBuilder {
 	 * says not to do.</p>
 	 */
 	static boolean TRACE_TURNS = false;
+
+	/** Prints every paced event's stretch: asked, left unlaid, and where the fold stopped. */
+	static boolean TRACE_PACE = false;
 
 	/**
 	 * Whether a paste comes out marked up: coloured by shape, and wrong where it is wrong.
