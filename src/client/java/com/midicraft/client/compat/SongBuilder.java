@@ -3079,6 +3079,21 @@ public final class SongBuilder {
 	static boolean FORCED_TURN_OPENS_A_LANE = true;
 
 	/**
+	 * A machine's very first chord, overshooting the flat turn at the end of its first leg, is
+	 * turned in front of on the walk's own say-so, without waiting for the planner to force it.
+	 *
+	 * <p>The empty-lane rule is a spin guard, and the opening cannot spin: it is one event on one
+	 * leg, and once it has turned it is on the next leg and the rule is back. What the lane holds
+	 * before that event is the input -- the spine, and a parity seam where the machine opens on
+	 * the other half of the tick -- which is content, not nothing. Nyan cat at eight wide over one
+	 * floor: with the starter in the wall, machine B opens a column before its inner wall, its
+	 * first chord is a stacked front two columns long that ends on the wall column, and the corner
+	 * after it went down a column past -- outside the watch, which by then was reading the link's
+	 * wall -- with the return leg against machine A's bus, sounding one of its notes twice.</p>
+	 */
+	static boolean OPENING_CHORD_TURNS_ON_ITS_OWN = true;
+
+	/**
 	 * A stacked module that comes to rest on its leg's wall column hangs nothing in the cells a
 	 * tight turn off that wall would run through; one that would falls back to a bus. See the note
 	 * in {@link #buildShaped}.
@@ -11533,6 +11548,13 @@ public final class SongBuilder {
 				tipSignal = DUST_RANGE;
 				placements.softTip(false);
 				laneStarted = true;
+				// And the module behind the lane is this repeater now, not the bus before it -- the
+				// same two lines the seam sets below, for the same reason. Left saying "bus", a turn
+				// straight after built the off-bus ladder, three rungs starting a level up, and the
+				// repeater faced into air: Hedwig v2 at 23x3, a chord of ten ending two columns from
+				// its wall, 11207 notes silent behind it.
+				lastStyle = ChordStyle.SMALL;
+				lastBusCells = 0;
 				placements.padded("softTipRepeaterFirst");
 			}
 			if (layout.ultra() && route.foldsWaits() && railPhase < 0) {
@@ -13641,8 +13663,15 @@ public final class SongBuilder {
 			if (forcedOpensTheLane && overshoots) {
 				placements.padded("forcedTurnOpenedTheLane");
 			}
-			boolean wantsTurn = (laneStarted || chainStartsTheLane || forcedOpensTheLane)
-				&& overshoots;
+			// And a machine's opening chord the same, unforced: the lane holds the input. See
+			// OPENING_CHORD_TURNS_ON_ITS_OWN.
+			boolean openingTurns = OPENING_CHORD_TURNS_ON_ITS_OWN && !laneStarted && index == 0
+				&& leg == 0 && flatAhead && !turning;
+			if (openingTurns && overshoots && !forcedOpensTheLane) {
+				placements.padded("openingChordTurned");
+			}
+			boolean wantsTurn = (laneStarted || chainStartsTheLane || forcedOpensTheLane
+				|| openingTurns) && overshoots;
 			// A chord that overshoots a flat turn it cannot lie across from here, but could from a
 			// little further on, is walked there on dust and asked again. Not off a soft tip,
 			// where dust is dead wire, and only inside the wire the lane holds: the chord's own
@@ -14635,7 +14664,7 @@ public final class SongBuilder {
 				&& forcedTurn && flatAhead && !straddles && onWall && railPhase < 0
 				&& route.foldsWaits() && reaskedAt != index;
 			boolean canTurn = layout.ultra()
-				? (index > 0 || forcedOpensTheLane) && reachesWall && (flatAhead
+				? (index > 0 || forcedOpensTheLane || openingTurns) && reachesWall && (flatAhead
 					? straddles && straddleAffordable || padsToTheCorner
 					: pad.signal() >= turnPrice)
 				: index > 0 && events.get(index - 1).maxSafeTurnDistance() >= MAX_LANE_SPACING;
