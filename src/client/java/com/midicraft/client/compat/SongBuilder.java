@@ -2591,6 +2591,15 @@ public final class SongBuilder {
 	static boolean PACE_STRETCH_WALKS_A_BEND_IT_FINDS = true;
 
 	/**
+	 * Whether a stretch carried round turns may do so with a parity seam owed but not begun. The seam
+	 * then goes down after the stretch, on the leg the stretch ends on, where the fold's clamp has
+	 * kept its cells. Off, an owed seam stopped the carry: HOTMK insane v2 at seventeen wide,
+	 * machine A asking 117 on a wait of 65, laying 18, and its closing pad spending the other 55
+	 * ticks as a row of twelve fours.
+	 */
+	static boolean PACE_STRETCH_CARRIES_PAST_AN_UNBEGUN_SEAM = true;
+
+	/**
 	 * The last paced interleaved build's pacing, for probes, or null when the last one did not pace:
 	 * each machine's event times, its dry-walk positions, the stretch it was handed, and the
 	 * positions its real walk recorded. The planner's model of a machine is its dry position plus
@@ -11807,8 +11816,8 @@ public final class SongBuilder {
 						// link, and the whole of a seven-tick stretch was skipped there. See
 						// PACE_STRETCH_ROUNDS_FLAT_TURNS.
 						if (PACE_STRETCH_WALKS_A_BEND_IT_FINDS && PACE_BUDGETS_THE_WIRE && !stretchRounds
-								&& stretchLeft >= toExit && seamCells == 0 && !seamMid
-								&& seamNext >= PARITY_SEAM_CELLS && laneStarted && index > 0
+								&& stretchLeft >= toExit && stretchMayPassItsSeam(seamCells, seamNext)
+								&& laneStarted && index > 0
 								&& event.time() - currentTime >= (stretchOpened ? 0 : 1)
 									+ (toExit + dustRun) / paceDustRun() + 1) {
 							stretchRounds = true;
@@ -11865,8 +11874,10 @@ public final class SongBuilder {
 							// chain with nothing to stretch is the old one, a repeater per four ticks.
 							int paceRefresh = stretchLeft > 0 ? paceRefreshDelay() : 4;
 							int ticks = event.time() - currentTime;
+							// Not under a carried stretch: its own r1 is what reads the soft tip, and
+							// the seam goes down after the stretch, off the stretch's wire.
 							if (SEAM_OPENS_ON_A_SOFT_TIP_WITH_ITS_REPEATER && event.seamEat() > 0
-									&& seamNext == 0 && foldOpensOnSoft && !foldLaidFirst) {
+									&& seamNext == 0 && foldOpensOnSoft && !foldLaidFirst && !carrying) {
 								// The seam's own repeater, first: the cell after a simple tail's
 								// note middle is one only a repeater reads, and the wait's dust
 								// there is a dead line -- grim grinning ghosts at twenty-four wide
@@ -11999,8 +12010,7 @@ public final class SongBuilder {
 							+ (bend + dustRun) / paceDustRun() + 1;
 						if (PACE_STRETCH_ROUNDS_FLAT_TURNS && PACE_BUDGETS_THE_WIRE && !staircaseAhead
 								&& stretchLeft > room && stretchLeft >= bend && foldColumns >= 0
-								&& seamCells == 0 && !seamMid && seamNext >= PARITY_SEAM_CELLS
-								&& laneStarted && index > 0
+								&& stretchMayPassItsSeam(seamCells, seamNext) && laneStarted && index > 0
 								&& event.time() - currentTime >= ticksForTheBend) {
 							stretchRounds = true;
 							placements.padded("paceStretchRoundsATurn");
@@ -19998,6 +20008,19 @@ public final class SongBuilder {
 	 */
 	private static boolean railCornerTakes(EventGroup event) {
 		return event.notes().size() == 1 && isHarpNote(event.notes().get(0));
+	}
+
+	/**
+	 * Whether a pace stretch may be carried round a turn with this seam still owed: none owed, or
+	 * one not begun, which then goes down after the stretch on whatever leg it ends on. Never with
+	 * a seam between its stages, where no repeater may stand. See
+	 * {@link #PACE_STRETCH_CARRIES_PAST_AN_UNBEGUN_SEAM}.
+	 */
+	private static boolean stretchMayPassItsSeam(int seamCells, int seamNext) {
+		if (seamNext >= PARITY_SEAM_CELLS) {
+			return seamCells == 0;
+		}
+		return PACE_STRETCH_CARRIES_PAST_AN_UNBEGUN_SEAM && seamNext == 0;
 	}
 
 	/** Corner cells straight after this one, which {@link #pastAnyCorner} will lay as dust. */
