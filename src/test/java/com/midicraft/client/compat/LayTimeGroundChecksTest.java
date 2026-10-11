@@ -80,12 +80,19 @@ class LayTimeGroundChecksTest {
 			"notes the signal never reached: " + built.reading().unreachedAt());
 	}
 
+	/**
+	 * At twenty-two wide: 19x3 stopped breaching with the fix off between c719b97 and c792969, and
+	 * this is where it still does, the fix on clearing it.
+	 */
 	@Test
 	void withoutTheFoldPadTheChordRunsPastTheWall() throws Exception {
 		SongBuilder.FOLDBACK_PADS_PAST_WIRE_BEHIND = false;
-		Built built = build("let-it-happen-tame-impala", 19, 3, false);
+		Built built = build("let-it-happen-tame-impala", 22, 3, false);
 		assertTrue(!built.plan().wallBreaches().isEmpty(),
 			"the fault this test guards is no longer reproduced with the fix off");
+		SongBuilder.FOLDBACK_PADS_PAST_WIRE_BEHIND = true;
+		Built fixed = build("let-it-happen-tame-impala", 22, 3, false);
+		assertTrue(fixed.plan().wallBreaches().isEmpty(), "walls: " + fixed.plan().wallBreaches());
 	}
 
 	/**
@@ -122,14 +129,22 @@ class LayTimeGroundChecksTest {
 		assertEquals(0, built.plan().wrongNotes(), "wrong: " + built.plan().faults());
 	}
 
+	/**
+	 * At twenty-six wide: 25x1 does not drop the note with the fix off on the song as saved since
+	 * 2026-09-30, not even at the commit that wrote this test, and this is where it still does.
+	 */
 	@Test
 	void withoutSinkingTheSwappedBusDropsOne() throws Exception {
 		SongBuilder.SWAP_SINKS_A_BUS_THAT_RUNS_OUT = false;
 		// An earlier corner double-sinks and the walk never meets this chord in a swap at all.
 		SongBuilder.SWAP_DOUBLE_SINKS_A_LOUD_OPENING = false;
-		Built built = build("hall-of-the-mountain-king-2-lanes-insane-copy", 25, 1, false);
+		Built built = build("hall-of-the-mountain-king-2-lanes-insane-copy", 26, 1, false);
 		assertTrue(built.plan().missingNotes() > 0,
 			"the fault this test guards is no longer reproduced with the fix off");
+		SongBuilder.SWAP_SINKS_A_BUS_THAT_RUNS_OUT = true;
+		SongBuilder.SWAP_DOUBLE_SINKS_A_LOUD_OPENING = true;
+		Built fixed = build("hall-of-the-mountain-king-2-lanes-insane-copy", 26, 1, false);
+		assertEquals(0, fixed.plan().missingNotes(), "missing: " + fixed.plan().faults());
 	}
 
 	/**
@@ -220,14 +235,22 @@ class LayTimeGroundChecksTest {
 		assertEquals(0, built.plan().missingNotes(), "missing: " + built.plan().faults());
 	}
 
+	/**
+	 * At thirty-three wide: 38x1 does not drop the note with the fix off on the song as saved since
+	 * 2026-09-30, not even at the commit that wrote this test, and this is where it still does.
+	 */
 	@Test
 	void withoutTheBackSlotTheBusDropsOne() throws Exception {
 		SongBuilder.BUS_OPENS_WITH_ITS_BACK_SLOT = false;
 		// Or the sunk swap rescues the same note and the fix off proves nothing.
 		SongBuilder.SWAP_SINKS_A_BUS_THAT_RUNS_OUT = false;
-		Built built = build("hall-of-the-mountain-king-2-lanes-insane-copy", 38, 1, false);
+		Built built = build("hall-of-the-mountain-king-2-lanes-insane-copy", 33, 1, false);
 		assertTrue(built.plan().missingNotes() > 0,
 			"the fault this test guards is no longer reproduced with the fix off");
+		SongBuilder.BUS_OPENS_WITH_ITS_BACK_SLOT = true;
+		SongBuilder.SWAP_SINKS_A_BUS_THAT_RUNS_OUT = true;
+		Built fixed = build("hall-of-the-mountain-king-2-lanes-insane-copy", 33, 1, false);
+		assertEquals(0, fixed.plan().missingNotes(), "missing: " + fixed.plan().faults());
 	}
 
 	/** The back slot only on settled ground: all my fellas 8x1 sounded it again otherwise. */
@@ -278,12 +301,20 @@ class LayTimeGroundChecksTest {
 			"notes the signal never reached: " + built.reading().unreachedAt());
 	}
 
+	/**
+	 * Over four floors: 8x3 stopped starving with the fix off when the start moved to the wall
+	 * (6dc2a6e), and this is where it still does.
+	 */
 	@Test
 	void withoutTheStandForwardTheSeamStarves() throws Exception {
 		SongBuilder.SEAM_STAGE_ONE_STANDS_FORWARD = false;
-		Built built = build("song-of-storms-legend-of-zelda-ocarina-of-time", 8, 3, true);
+		Built built = build("song-of-storms-legend-of-zelda-ocarina-of-time", 6, 4, true);
 		assertTrue(built.reading().unreachedNotes() > 0,
 			"the fault this test guards is no longer reproduced with the fix off");
+		SongBuilder.SEAM_STAGE_ONE_STANDS_FORWARD = true;
+		Built fixed = build("song-of-storms-legend-of-zelda-ocarina-of-time", 6, 4, true);
+		assertEquals(0, fixed.reading().unreachedNotes(),
+			"notes the signal never reached: " + fixed.reading().unreachedAt());
 	}
 
 	@Test
@@ -292,12 +323,19 @@ class LayTimeGroundChecksTest {
 		assertEquals(0, built.plan().wrongNotes(), "wrong notes: " + built.plan().faults());
 	}
 
+	/**
+	 * At six wide on one floor: 8x2 stopped sounding early with the fix off when the pace stretch
+	 * began carrying round flat turns (81ea5ef), and this is where it still does.
+	 */
 	@Test
 	void withoutTheClaimTheRailNoteSoundsEarly() throws Exception {
 		SongBuilder.RAIL_CLAIMS_ITS_COMMITTED_FLOOR = false;
-		Built built = build("moonlight-sonata-3rd-movement-2-lanes-melodic", 8, 2, false);
+		Built built = build("moonlight-sonata-3rd-movement-2-lanes-melodic", 6, 1, false);
 		assertTrue(built.plan().wrongNotes() > 0,
 			"the fault this test guards is no longer reproduced with the fix off");
+		SongBuilder.RAIL_CLAIMS_ITS_COMMITTED_FLOOR = true;
+		Built fixed = build("moonlight-sonata-3rd-movement-2-lanes-melodic", 6, 1, false);
+		assertEquals(0, fixed.plan().wrongNotes(), "wrong notes: " + fixed.plan().faults());
 	}
 
 	@Test
@@ -308,12 +346,19 @@ class LayTimeGroundChecksTest {
 		assertEquals(0, built.plan().wrongNotes(), "wrong notes: " + built.plan().faults());
 	}
 
+	/**
+	 * At fifty-six wide: 63x5 stopped sounding the flank with the fix off between b3258f8 and
+	 * e86ce9f, and this is where it still does.
+	 */
 	@Test
 	void withoutTheRungAskTheClimbSoundsTheFlank() throws Exception {
 		SongBuilder.CUT_HEAD_ASKS_ITS_RUNG_FLANKS = false;
-		Built built = build("hall-of-the-mountain-king-2-lanes-insane-copy", 63, 5, true);
+		Built built = build("hall-of-the-mountain-king-2-lanes-insane-copy", 56, 5, true);
 		assertTrue(built.plan().wrongNotes() > 0,
 			"the fault this test guards is no longer reproduced with the fix off");
+		SongBuilder.CUT_HEAD_ASKS_ITS_RUNG_FLANKS = true;
+		Built fixed = build("hall-of-the-mountain-king-2-lanes-insane-copy", 56, 5, true);
+		assertEquals(0, fixed.plan().wrongNotes(), "wrong notes: " + fixed.plan().faults());
 	}
 
 	@Test
@@ -322,13 +367,28 @@ class LayTimeGroundChecksTest {
 		assertEquals(0, built.plan().wrongNotes(), "wrong notes: " + built.plan().faults());
 	}
 
+	/**
+	 * At twenty-one wide: 25x8 stopped sounding the note with the fix off when the pace stretch
+	 * began carrying round flat turns (81ea5ef), and this is where it still does.
+	 */
 	@Test
 	void withoutTheCatchRuleTheRungSoundsTheFoldbackNote() throws Exception {
 		SongBuilder.FOLDBACK_CATCH_KEEPS_OFF_THE_DESCENT_ROW = false;
-		Built built = build("a-dark-zone-2-lanes", 25, 8, true);
+		Built built = build("a-dark-zone-2-lanes", 21, 8, true);
 		assertTrue(built.plan().wrongNotes() > 0,
 			"the fault this test guards is no longer reproduced with the fix off");
+		SongBuilder.FOLDBACK_CATCH_KEEPS_OFF_THE_DESCENT_ROW = true;
+		Built fixed = build("a-dark-zone-2-lanes", 21, 8, true);
+		assertEquals(0, fixed.plan().wrongNotes(), "wrong notes: " + fixed.plan().faults());
 	}
+
+	/**
+	 * The pace the guards are pinned to, rather than whatever {@code JOINT_PACE_TOLERANCE} defaults
+	 * to: the default going from nought to sixteen (ed24bfe) moved every walk, and four guards
+	 * written at nought stopped reproducing without any of them saying why.
+	 */
+	static final int PACE_TOLERANCE = 16;
+	static final int PACE_CATCH_UP_TO = 0;
 
 	private record Built(SongBuilder.PastePlan plan, NoteMachineReader.Reading reading) {
 	}
@@ -346,7 +406,8 @@ class LayTimeGroundChecksTest {
 			SongBuilder.PastePlan plan = SongBuilder.createPastePlan(new BlockPos(0, 64, 0),
 				SongBuilder.notesFor(mode, song.toSequenceTracks(Set.of(), true, thinning), song,
 					true, thinning),
-				mode, new SongBuilder.BuildLimits(16, width, floors, startTop, 16));
+				mode, new SongBuilder.BuildLimits(16, width, floors, startTop, 16, PACE_TOLERANCE,
+					PACE_CATCH_UP_TO));
 			return new Built(plan, BreachView.readBack(name, plan));
 		} finally {
 			SongBuilder.DEBUG_PASTE = was;
