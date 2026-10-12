@@ -714,6 +714,11 @@ public final class SettingsScreen extends Screen {
 					MidicraftConfig::repeatMergeTicks, config::setRepeatMergeTicks,
 					value -> value <= MidicraftConfig.MIN_REPEAT_MERGE_TICKS
 						? "off (keep all)" : ticks(value))));
+				entries.add(Entry.of(slider("convert_snap_percent",
+					MidicraftConfig.MIN_CONVERT_SNAP_PERCENT,
+					MidicraftConfig.MAX_CONVERT_SNAP_PERCENT,
+					MidicraftConfig::convertSnapPercent, config::setConvertSnapPercent,
+					value -> value <= 0 ? "off (note grid first)" : value + "% of notes")));
 				// Next to Convert but not under it. The two are reached for at the same moment --
 				// both answer "why will this song not build" -- and the row was filed with them for
 				// that reason. But Convert never reads it: it belongs to Select > Overloaded chords

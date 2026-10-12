@@ -441,15 +441,6 @@ public final class ComposerScreen extends Screen {
 	private static final long TOOLTIP_DWELL_MILLIS = 260L;
 	private static final long SCALE_COALESCE_MILLIS = 400L;
 	private static final long TOAST_MILLIS = 4500L;
-	/**
-	 * How much finer than the song's tightest gap its shared grid may be before Snap tempo declines.
-	 *
-	 * <p>They are equal in a song whose notes sit on a grid, and the tempo then costs nothing beyond
-	 * what the music demands. Far apart means a few strays have dragged the grid below anything the
-	 * song plays, and no tempo fixes that cheaply -- gaps of five and seven units force a span of
-	 * one whatever the tempo does, so the answer is to move the notes.</p>
-	 */
-	private static final long MAX_GRID_STRETCH = 4L;
 	private static final int NOTE_TRIGGER_WIDTH = 7;
 	private static final int SNAP_REPEATER = -1;
 	/**
@@ -1719,13 +1710,30 @@ public final class ComposerScreen extends Screen {
 		ComposerProject before = project();
 		ComposerProject source = config.convertBakesSpeed() ? before.withBakedSpeed() : before;
 		int gridTicks = config.convertQuantizes() ? conversionGridTicks(source, gameTicks) : 1;
+		// The tempo first, by share, where that finds one: the nearest tempo that already puts
+		// enough of the notes on build ticks, and then only the rest moved, onto those same ticks
+		// -- so the song comes out buildable with the least tempo change and the fewest notes moved.
+		// Where no tempo near enough does, the old way below: a note grid, and the tempo moved to
+		// fit it. See SharedSnap.
+		SharedSnap shared = config.convertSnapsTempo() && config.convertQuantizes()
+			? sharedSnap(source, gameTicks, config.convertSnapPercent()) : null;
+		ComposerProject heard = source;
+		if (shared != null) {
+			ComposerProject.RepeaterQuantize onTicks = source.withTempo(shared.tempo())
+				.withQuantizedToBuildTicks(java.util.Set.of(), gameTicks);
+			source = onTicks.project();
+			gridTicks = (int)Math.min(Integer.MAX_VALUE, onTicks.gridTicks());
+		}
 		try {
 			// Always aligned, and to the grid the button named. Whether to align used to be a
 			// setting, from before there were two Convert buttons -- but landing the song on a
 			// redstone grid is the whole of what Convert is for, and Edit > Quantize is there for
 			// anyone who wants the notes moved without the tempo following.
+			// Already quantized and snapped where the share found a tempo, so a grid of one and no
+			// second snap: the gcd of notes now on the build grid is a whole number of ticks, and
+			// asking again could only round the same tempo the other way.
 			MinecraftConversion conversion = source.convertToMinecraft(
-				gridTicks, config.convertSnapsTempo(),
+				shared != null ? 1 : gridTicks, shared == null && config.convertSnapsTempo(),
 				config.convertMergesRepeats() ? config.repeatMergeTicks() : 0, gameTicks,
 				config.convertOctaveShifting(), config.convertSplitTransposed(),
 				config.convertFitsRange());
@@ -1751,7 +1759,9 @@ public final class ComposerScreen extends Screen {
 			centerMinecraftRange();
 			layersChanged();
 			rebuildMoveLayerButtons();
-			String report = "Converted at " + conversionGridLabel(gridTicks)
+			// No note value where the share snap ran: the notes went onto the build ticks
+			// themselves, which conversionGridLabel would round to a "1/16" they are not.
+			String report = (shared != null ? "Converted" : "Converted at " + conversionGridLabel(gridTicks))
 				+ (gameTicks ? " on game ticks (2 lanes)" : " on repeater ticks")
 				+ ": " + conversion.shiftedNotes() + " pitch-shifted"
 				// Said separately from the pitch shifts because it is the opposite of one: these
@@ -1781,17 +1791,23 @@ public final class ComposerScreen extends Screen {
 			// one down -- but only the slowdown ever carried a number, and the speed-up was reported
 			// as "tempo aligned to repeaters", which does not say that the song now plays faster,
 			// let alone by how much.
-			String tempoMove = tempoMove(source, conversion);
-			if (conversion.slowedDown()) {
-				report += String.format(java.util.Locale.ROOT,
-					", slowed %.2fx%s to fit redstone's max of 10 notes/sec",
-					conversion.tempoFactor(), tempoMove);
+			// Said as the speed it now plays at, the way the snap and every other step say it;
+			// see TempoText.
+			int tempoBefore = heard.tempoMicrosPerQuarter();
+			int tempoAfter = conversion.project().tempoMicrosPerQuarter();
+			if (shared != null) {
+				report += (tempoBefore == tempoAfter ? ", tempo kept"
+						: ", " + TempoText.move(tempoBefore, tempoAfter))
+					+ ": " + shared.percent() + "% of notes already on ticks, "
+					+ notesMoved(movedNotes(heard, source)) + " onto them";
+			} else if (conversion.slowedDown()) {
+				report += ", " + TempoText.move(tempoBefore, tempoAfter)
+					+ " to fit redstone's max of 10 notes/sec";
 			} else if (conversion.spedUp()) {
-				report += String.format(java.util.Locale.ROOT,
-					", sped up %.2fx%s to align with repeaters",
-					conversion.speedFactor(), tempoMove);
+				report += ", " + TempoText.move(tempoBefore, tempoAfter) + " to align with repeaters";
 			} else if (conversion.tempoChanged()) {
-				report += ", tempo aligned to repeaters" + tempoMove;
+				report += ", tempo aligned to repeaters (" + TempoText.bpm(tempoBefore)
+					.replace(" BPM", "") + " -> " + TempoText.bpm(tempoAfter) + ")";
 			}
 			showResult(Component.literal(report));
 		} catch (IllegalStateException exception) {
@@ -1800,23 +1816,6 @@ public final class ComposerScreen extends Screen {
 				Component.literal(exception.getMessage()),
 				CommonComponents.GUI_BACK, CommonComponents.GUI_CANCEL));
 		}
-	}
-
-	/**
-	 * " (120 -> 150 BPM)", the tempo move a conversion made, or "" when it made none.
-	 *
-	 * <p>A factor says how far the song moved and a BPM pair says where it moved to, and the second
-	 * is the one you can act on: it is the number the source file was written in and the number the
-	 * next thing you do to this song will be working against.</p>
-	 */
-	private static String tempoMove(ComposerProject source, MinecraftConversion conversion) {
-		int before = source.tempoMicrosPerQuarter();
-		int after = conversion.project().tempoMicrosPerQuarter();
-		if (before == after) {
-			return "";
-		}
-		return String.format(java.util.Locale.ROOT, " (%.0f -> %.0f BPM)",
-			60_000_000.0 / before, 60_000_000.0 / after);
 	}
 
 	/**
@@ -2871,7 +2870,7 @@ public final class ComposerScreen extends Screen {
 			case UNDO -> history.canUndo();
 			case REDO -> history.canRedo();
 			case CONVERT, CONVERT_GAME_TICKS, MERGE_REPEATS, FIT_ALL_RANGE, SNAP_TEMPO,
-				SNAP_TEMPO_GAME, QUANTIZE_QUARTER, QUANTIZE_EIGHTH, QUANTIZE_SIXTEENTH,
+				QUANTIZE_QUARTER, QUANTIZE_EIGHTH, QUANTIZE_SIXTEENTH,
 				QUANTIZE_REPEATERS, QUANTIZE_GAME_TICKS ->
 				project().layers().stream().anyMatch(layer -> !layer.notes().isEmpty());
 			// Greyed out when no shift beats standing still, so the menu answers "is my song already
@@ -3001,8 +3000,7 @@ public final class ComposerScreen extends Screen {
 			case FIT_ALL_RANGE -> fitIntoRange();
 			case TRANSPOSE_BEST_FIT -> transposeToBestFit();
 			case BAKE_SPEED -> bakeSpeed();
-			case SNAP_TEMPO -> snapTempo(false);
-			case SNAP_TEMPO_GAME -> snapTempo(true);
+			case SNAP_TEMPO -> openSnapTempo();
 			case DUPLICATE_SELECTION -> duplicateSelection();
 			case ADD_MARKER -> toggleMarkerAtCursor();
 			case RENAME_MARKER -> renameMarker(markerAtCursor());
@@ -3088,34 +3086,52 @@ public final class ComposerScreen extends Screen {
 			+ "). Sounds the same."));
 	}
 
-	private void snapTempo(boolean gameTicks) {
+	/**
+	 * Snap tempo, as a share of the notes: opens the popup that finds the nearest tempo either way
+	 * at which enough of them land on build ticks. See {@link SnapTempoScreen}.
+	 */
+	private void openSnapTempo() {
 		ComposerProject baked = project().withBakedSpeed();
-		ComposerProject.NoteSpacing spacing = baked.noteSpacing();
-		if (spacing.gridTicks() <= 0L) {
-			showResult(Component.literal("Not enough notes to work out a spacing."));
-			return;
-		}
-		int tempo = baked.alignedTempoFor(
-			(int)Math.min(Integer.MAX_VALUE, spacing.gridTicks()), gameTicks);
-		ComposerProject snapped = baked.withTempo(tempo);
-		// Measured against the song's own tightest gap, not against a repeater tick. A slow song
-		// whose notes are naturally sixteen ticks apart is not a problem and its tempo does not
-		// move; a song whose grid is five times finer than anything it plays is one, because that
-		// grid came from a few strays and the tempo would follow them down.
-		if (spacing.smallestGapTicks() > spacing.gridTicks() * MAX_GRID_STRETCH) {
-			showResult(Component.literal(String.format(java.util.Locale.ROOT,
-				"No usable spacing: snapping would slow the song %.2fx, so nothing changed. "
-					+ "Try Quantize > Repeater ticks.",
-				tempo / (double)baked.tempoMicrosPerQuarter()))
-				.withStyle(net.minecraft.ChatFormatting.YELLOW));
-			return;
-		}
-		applyTimingStep("Tempo snapped", "snap the tempo", snapped);
+		McCompat.setScreen(new SnapTempoScreen(this, baked, choice -> {
+			ComposerProject snapped = baked.withTempo(choice.tempo());
+			if (choice.quantize()) {
+				snapped = snapped.withQuantizedToBuildTicks(java.util.Set.of(), choice.gameTicks())
+					.project();
+			}
+			if (snapped.equals(project())) {
+				showResult(Component.literal("Nothing to change."));
+				return;
+			}
+			apply("snap the tempo", snapped);
+			layersChanged();
+			if (delayScaleSlider != null) {
+				delayScaleSlider.setScale(songSpeedEighths());
+			}
+			// Against the tempo as it was heard: the baked one, with the speed slider folded in.
+			showResult(Component.literal("Tempo snapped: "
+				+ TempoText.move(baked.tempoMicrosPerQuarter(), snapped.tempoMicrosPerQuarter())
+				+ String.format(java.util.Locale.ROOT, ", %d%% of notes on %s ticks",
+					(int)Math.floor(100.0 * choice.onTick() / Math.max(1, choice.total())),
+					choice.gameTicks() ? "game" : "repeater")
+				+ (choice.quantize() ? ", the rest quantized" : "")));
+		}));
 	}
 
 	private void quantizeTo(int gridTicks) {
-		applyStep("Quantized", "quantize to " + conversionGridLabel(gridTicks),
-			project().withQuantized(gridTicks, selectedNotes));
+		ComposerProject before = project();
+		ComposerProject quantized = before.withQuantized(gridTicks, selectedNotes);
+		if (quantized.equals(before)) {
+			showResult(Component.literal("Already on the " + conversionGridLabel(gridTicks) + " grid."));
+			return;
+		}
+		int scoped = selectedNotes.size();
+		int moved = movedNotes(before, quantized);
+		int merged = distinctStartTicks(before) - distinctStartTicks(quantized);
+		apply("quantize to " + conversionGridLabel(gridTicks), quantized);
+		layersChanged();
+		showResult(Component.literal("Quantized " + (scoped > 0 ? scoped + " selected notes" : "whole composition")
+			+ " to " + conversionGridLabel(gridTicks) + ": " + notesMoved(moved)
+			+ (merged > 0 ? ", " + merged + " folded into chords" : "")));
 	}
 
 	/**
@@ -3133,17 +3149,87 @@ public final class ComposerScreen extends Screen {
 				"Already on the " + (gameTicks ? "game-tick" : "repeater") + " grid."));
 			return;
 		}
-		int merged = distinctStartTicks(project()) - distinctStartTicks(result.project());
+		ComposerProject before = project();
+		int merged = distinctStartTicks(before) - distinctStartTicks(result.project());
 		apply("quantize to the " + (gameTicks ? "game-tick" : "repeater") + " grid",
 			result.project());
 		layersChanged();
 		String report = String.format(java.util.Locale.ROOT,
-			"Quantized to %d ticks (%d %s tick%s)%s%s",
+			"Quantized to %d ticks (%d %s tick%s): %s%s%s",
 			result.gridTicks(), result.repeaterTicks(), gameTicks ? "game" : "repeater",
 			result.repeaterTicks() == 1 ? "" : "s",
-			merged > 0 ? ", " + merged + " notes folded into chords" : "",
+			notesMoved(movedNotes(before, result.project())),
+			merged > 0 ? ", " + merged + " folded into chords" : "",
 			result.tempoNudged() ? ", tempo nudged to fit" : "");
 		showResult(Component.literal(report));
+	}
+
+	/** The tempo Convert snaps to by share, and the share of notes it already puts on ticks. */
+	private record SharedSnap(int tempo, int percent) {
+	}
+
+	/**
+	 * The tempo Convert's snap takes when asked by share: the current one where it already puts
+	 * enough notes on build ticks, else the nearer of the two the popup would offer, or
+	 * {@code null} where neither side reaches the share within the range and the old snap is used.
+	 *
+	 * @param percent the share asked for; nought turns this off
+	 */
+	private static SharedSnap sharedSnap(ComposerProject source, boolean gameTicks, int percent) {
+		if (percent <= 0) {
+			return null;
+		}
+		ComposerProject.TempoScan scan = source.tempoScan(gameTicks, CONVERT_SNAP_RANGE);
+		if (scan == null || scan.total() == 0) {
+			return null;
+		}
+		ComposerProject.TempoPicks picks = scan.pick(percent / 100.0);
+		if (scan.now() != null && scan.now().onTick() >= picks.needed()) {
+			return new SharedSnap(scan.current(), share(scan.now().onTick(), scan.total()));
+		}
+		ComposerProject.TempoPick fast = picks.faster() != null && picks.faster().reaches()
+			? picks.faster() : null;
+		ComposerProject.TempoPick slow = picks.slower() != null && picks.slower().reaches()
+			? picks.slower() : null;
+		ComposerProject.TempoPick pick = fast == null ? slow : slow == null ? fast
+			: scan.distance(fast.tempo()) <= scan.distance(slow.tempo()) ? fast : slow;
+		return pick == null ? null
+			: new SharedSnap(pick.tempo().tempo(), share(pick.tempo().onTick(), scan.total()));
+	}
+
+	/** How far Convert's snap may move the tempo: the popup's quarter either way. */
+	private static final double CONVERT_SNAP_RANGE = 0.25;
+
+	private static int share(int notes, int total) {
+		return (int)Math.floor(100.0 * notes / Math.max(1, total));
+	}
+
+	/**
+	 * Notes whose start moved between two versions of a song, matched by id. Quantizing keeps every
+	 * note's id, so this counts exactly the notes it shifted -- including the ones that then fold
+	 * into a chord, which moved as much as any.
+	 */
+	private static int movedNotes(ComposerProject before, ComposerProject after) {
+		java.util.Map<Long, Long> starts = new java.util.HashMap<>();
+		for (ComposerProject.Layer layer : before.layers()) {
+			for (ComposerProject.NoteEvent note : layer.notes()) {
+				starts.put(note.id(), note.startTick());
+			}
+		}
+		int moved = 0;
+		for (ComposerProject.Layer layer : after.layers()) {
+			for (ComposerProject.NoteEvent note : layer.notes()) {
+				Long was = starts.get(note.id());
+				if (was != null && was != note.startTick()) {
+					moved++;
+				}
+			}
+		}
+		return moved;
+	}
+
+	private static String notesMoved(int moved) {
+		return String.format(java.util.Locale.ROOT, "%,d note%s moved", moved, moved == 1 ? "" : "s");
 	}
 
 	private static int distinctStartTicks(ComposerProject project) {
@@ -3237,8 +3323,7 @@ public final class ComposerScreen extends Screen {
 		String report = label + (scoped > 0 ? " " + scoped + " selected notes" : " whole composition")
 			+ (removed > 0 ? ": " + removed + " removed" : "");
 		if (updated.tempoMicrosPerQuarter() != beforeTempo) {
-			report += String.format(java.util.Locale.ROOT, ": tempo x%.2f",
-				beforeTempo / (double)updated.tempoMicrosPerQuarter());
+			report += ": " + TempoText.move(beforeTempo, updated.tempoMicrosPerQuarter());
 		}
 		showResult(Component.literal(report));
 	}
@@ -3435,10 +3520,8 @@ public final class ComposerScreen extends Screen {
 			case FIT_ALL_RANGE -> "Bring unreachable notes into range using the method in "
 				+ "Settings > Out-of-range notes. Works on selected notes, else selected "
 				+ "layers, else the whole song.";
-			case SNAP_TEMPO -> "Nudge the tempo so the song's spacing lands on whole repeater "
-				+ "ticks. Notes don't move. Does nothing if there's no usable grid.";
-			case SNAP_TEMPO_GAME -> "Same, on game ticks: the tempo moves half as far. Needs "
-				+ "two lanes.";
+			case SNAP_TEMPO -> "Find the nearest tempo, faster or slower, that puts a chosen "
+				+ "share of the notes on whole ticks. Notes don't move unless you ask.";
 			case SNAP_END -> "Moves the end marker so its trailing delay is a whole number of "
 				+ "repeater ticks.";
 			case TRIM_END -> "Pulls the end marker back to the last note, discarding trailing "
@@ -11797,8 +11880,7 @@ public final class ComposerScreen extends Screen {
 		FIT_ALL_RANGE("Fit into range"),
 		TRANSPOSE_BEST_FIT("Transpose to best fit"),
 		BAKE_SPEED("Apply speed to the tempo"),
-		SNAP_TEMPO("Snap tempo (whole song)"),
-		SNAP_TEMPO_GAME("Snap tempo to game ticks (whole song)"),
+		SNAP_TEMPO("Snap tempo..."),
 		SONG_INFO("Song info..."),
 		SONG_DETAILS("Song details..."),
 		PASTE_IN_WORLD("Build composition..."),
@@ -11832,7 +11914,7 @@ public final class ComposerScreen extends Screen {
 		private static final ToolbarAction[] EDIT_ACTIONS = {
 			UNDO, REDO, DUPLICATE_SELECTION, MERGE_REPEATS,
 			TRANSPOSE_BEST_FIT,
-			FIT_ALL_RANGE, BAKE_SPEED, SNAP_TEMPO, SNAP_TEMPO_GAME
+			FIT_ALL_RANGE, BAKE_SPEED, SNAP_TEMPO
 		};
 		private static final ToolbarAction[] SONG_ACTIONS = {
 			SONG_INFO, SONG_DETAILS, TOGGLE_DEDUPE, TOGGLE_NOTE_TRAILS, PASTE_IN_WORLD, BUILD_CANCEL

@@ -458,6 +458,18 @@ public final class MidicraftConfig {
 	 */
 	private final Map<String, Long> songOpenedAt = new LinkedHashMap<>();
 	private int repeatMergeTicks;
+	/**
+	 * Convert's tempo snap, as a share of the notes in percent: the nearest tempo within a quarter
+	 * either way that puts at least this many on build ticks, the rest quantized onto them. Nought
+	 * for the old way, the song quantized to a note grid first and the tempo moved to fit it.
+	 */
+	private int convertSnapPercent = DEFAULT_CONVERT_SNAP_PERCENT;
+	/** Snap tempo's popup: the share of notes on a tick it looks for, in percent. */
+	private int snapTempoPercent = DEFAULT_SNAP_TEMPO_PERCENT;
+	/** Snap tempo's popup: count game ticks, which two lanes can place. */
+	private boolean snapTempoGameTicks = true;
+	/** Snap tempo's popup: quantize the notes the new tempo leaves off the grid. */
+	private boolean snapTempoQuantizes;
 	private int conversionGapPercentile;
 	private double commandsPerTick;
 	private int buildLaneWidth;
@@ -670,6 +682,14 @@ public final class MidicraftConfig {
 						? DEFAULT_REPEAT_MERGE_TICKS
 						: stored.repeatMergeTicks
 				);
+				instance.convertSnapPercent = Math.max(0, Math.min(100, stored.convertSnapPercent == null
+					? DEFAULT_CONVERT_SNAP_PERCENT : stored.convertSnapPercent));
+				instance.snapTempoPercent = clampSnapTempoPercent(stored.snapTempoPercent == null
+					? DEFAULT_SNAP_TEMPO_PERCENT : stored.snapTempoPercent);
+				instance.snapTempoGameTicks = stored.snapTempoGameTicks == null
+					|| stored.snapTempoGameTicks;
+				instance.snapTempoQuantizes = stored.snapTempoQuantizes != null
+					&& stored.snapTempoQuantizes;
 				instance.pasteMode = stored.pasteMode;
 				instance.midiVelocityCutoff = clampMidiVelocityCutoff(
 					stored.midiVelocityCutoff == null
@@ -1641,6 +1661,47 @@ public final class MidicraftConfig {
 		this.repeatMergeTicks = clampRepeatMergeTicks(repeatMergeTicks);
 	}
 
+	public static final int DEFAULT_SNAP_TEMPO_PERCENT = 90;
+	public static final int DEFAULT_CONVERT_SNAP_PERCENT = 90;
+	public static final int MIN_CONVERT_SNAP_PERCENT = 0;
+	public static final int MAX_CONVERT_SNAP_PERCENT = 100;
+
+	public int convertSnapPercent() {
+		return convertSnapPercent;
+	}
+
+	public void setConvertSnapPercent(int percent) {
+		convertSnapPercent = Math.max(MIN_CONVERT_SNAP_PERCENT, Math.min(MAX_CONVERT_SNAP_PERCENT, percent));
+	}
+
+	public int snapTempoPercent() {
+		return snapTempoPercent;
+	}
+
+	public void setSnapTempoPercent(int percent) {
+		snapTempoPercent = clampSnapTempoPercent(percent);
+	}
+
+	private static int clampSnapTempoPercent(int percent) {
+		return Math.max(1, Math.min(100, percent));
+	}
+
+	public boolean snapTempoGameTicks() {
+		return snapTempoGameTicks;
+	}
+
+	public void setSnapTempoGameTicks(boolean value) {
+		snapTempoGameTicks = value;
+	}
+
+	public boolean snapTempoQuantizes() {
+		return snapTempoQuantizes;
+	}
+
+	public void setSnapTempoQuantizes(boolean value) {
+		snapTempoQuantizes = value;
+	}
+
 	public int midiVelocityCutoff() {
 		return midiVelocityCutoff;
 	}
@@ -1809,6 +1870,10 @@ public final class MidicraftConfig {
 		config.listSortByName = false;
 		config.songOpenedAt.clear();
 		config.repeatMergeTicks = DEFAULT_REPEAT_MERGE_TICKS;
+		config.snapTempoPercent = DEFAULT_SNAP_TEMPO_PERCENT;
+		config.convertSnapPercent = DEFAULT_CONVERT_SNAP_PERCENT;
+		config.snapTempoGameTicks = true;
+		config.snapTempoQuantizes = false;
 		config.conversionGapPercentile = DEFAULT_CONVERSION_GAP_PERCENTILE;
 		config.convertOctaveShifting = ComposerProject.OctaveShifting.NOTES_ONLY;
 		config.convertSplitTransposed = true;
@@ -2020,6 +2085,10 @@ public final class MidicraftConfig {
 		private Map<String, Long> songOpenedAt;
 		private Integer composerSpeedQuarters;
 		private Integer repeatMergeTicks;
+		private Integer snapTempoPercent;
+		private Integer convertSnapPercent;
+		private Boolean snapTempoGameTicks;
+		private Boolean snapTempoQuantizes;
 		private Integer conversionGapPercentile;
 		private ComposerProject.OctaveShifting convertOctaveShifting;
 		private Boolean convertSplitTransposed;
@@ -2111,6 +2180,10 @@ public final class MidicraftConfig {
 			});
 			this.composerSpeedQuarters = config.composerSpeedQuarters;
 			this.repeatMergeTicks = config.repeatMergeTicks;
+			this.snapTempoPercent = config.snapTempoPercent;
+			this.convertSnapPercent = config.convertSnapPercent;
+			this.snapTempoGameTicks = config.snapTempoGameTicks;
+			this.snapTempoQuantizes = config.snapTempoQuantizes;
 			this.conversionGapPercentile = config.conversionGapPercentile;
 			this.convertOctaveShifting = config.convertOctaveShifting;
 			this.convertSplitTransposed = config.convertSplitTransposed;

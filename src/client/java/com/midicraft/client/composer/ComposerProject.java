@@ -2311,6 +2311,183 @@ public record ComposerProject(
 	public record NoteSpacing(long gridTicks, long smallestGapTicks) {
 	}
 
+	/**
+	 * How far a note may sit from a build tick and still count as on it, in build ticks: the same
+	 * allowance the status line uses for "off grid", so the two never disagree about a note.
+	 */
+	public static final double ON_TICK_TOLERANCE = 0.04;
+
+	/**
+	 * Every tempo worth snapping to within {@code maxChange} of the current one, each with how many
+	 * notes it puts on a whole build tick.
+	 *
+	 * <p>The gcd snap ({@link #noteSpacing}) asks for a tempo that puts every note on a tick, and a
+	 * few strays drag its grid so fine that the tempo it needs is useless. This asks the softer
+	 * question -- at which tempos do most of the notes land -- and leaves how many is most to the
+	 * caller, see {@link TempoScan#pick}.</p>
+	 *
+	 * <p>Only tempos that put some gap exactly on a whole number of ticks can change the count, so
+	 * those are the candidates: each of the song's commonest gaps divided by every tick count that
+	 * keeps the tempo in range, both integer tempos either side of the exact one, and the current
+	 * tempo. A note counts by weight, so a chord of six off the grid costs six. A note that would
+	 * land on the same tick as the note before it does not count: the tempo has folded the two into
+	 * one chord, and the rhythm with them.</p>
+	 *
+	 * @param gameTicks count game ticks, which a build of two lanes can place, rather than repeater
+	 *     ticks
+	 * @param maxChange how far the tempo may move, as a fraction: 0.25 is up to 1.25x either way
+	 * @return {@code null} where there are fewer than two note starts to space
+	 */
+	public TempoScan tempoScan(boolean gameTicks, double maxChange) {
+		java.util.TreeMap<Long, Integer> weights = new java.util.TreeMap<>();
+		for (Layer layer : layers) {
+			if (!layer.inBuild()) {
+				continue;
+			}
+			for (NoteEvent note : layer.notes()) {
+				weights.merge(note.startTick(), 1, Integer::sum);
+			}
+		}
+		if (weights.size() < 2) {
+			return null;
+		}
+		long origin = weights.firstKey();
+		long[] offsets = new long[weights.size()];
+		int[] counts = new int[weights.size()];
+		int total = 0;
+		int index = 0;
+		java.util.Map<Long, Integer> gapUses = new java.util.HashMap<>();
+		long previous = origin;
+		for (java.util.Map.Entry<Long, Integer> start : weights.entrySet()) {
+			offsets[index] = start.getKey() - origin;
+			counts[index] = start.getValue();
+			total += start.getValue();
+			if (index > 0) {
+				gapUses.merge(start.getKey() - previous, 1, Integer::sum);
+			}
+			previous = start.getKey();
+			index++;
+		}
+		double perBuildTick = gameTicks ? 2.0 : 1.0;
+		double speed = speedFactor();
+		// Composer ticks a build tick covers at a tempo: what the tempo is solved for.
+		double unitTimesTempo = ppq * 100_000.0 * speed / perBuildTick;
+		int current = tempoMicrosPerQuarter;
+		double lowest = current / (1.0 + maxChange);
+		double highest = current * (1.0 + maxChange);
+		java.util.TreeSet<Integer> candidates = new java.util.TreeSet<>();
+		candidates.add(current);
+		List<Long> commonGaps = gapUses.entrySet().stream()
+			.sorted(java.util.Map.Entry.<Long, Integer>comparingByValue().reversed())
+			.limit(TEMPO_SCAN_GAPS)
+			.map(java.util.Map.Entry::getKey)
+			.toList();
+		for (long gap : commonGaps) {
+			// A gap of g composer ticks is n build ticks at the tempo n * unitTimesTempo / g.
+			long fewest = Math.max(1L, (long)Math.ceil(lowest * gap / unitTimesTempo));
+			long most = (long)Math.floor(highest * gap / unitTimesTempo);
+			for (long ticks = fewest; ticks <= most; ticks++) {
+				double exact = ticks * unitTimesTempo / gap;
+				candidates.add((int)Math.floor(exact));
+				candidates.add((int)Math.ceil(exact));
+			}
+		}
+		List<ScannedTempo> scanned = new ArrayList<>();
+		ScannedTempo now = null;
+		for (int tempo : candidates) {
+			if (tempo < lowest || tempo > highest || tempo < 1) {
+				continue;
+			}
+			double unit = unitTimesTempo / tempo;
+			int on = 0;
+			long lastTick = Long.MIN_VALUE;
+			for (int start = 0; start < offsets.length; start++) {
+				double ticks = offsets[start] / unit;
+				long nearest = Math.round(ticks);
+				if (Math.abs(ticks - nearest) <= ON_TICK_TOLERANCE && nearest != lastTick) {
+					on += counts[start];
+					lastTick = nearest;
+				}
+			}
+			ScannedTempo result = new ScannedTempo(tempo, on);
+			scanned.add(result);
+			if (tempo == current) {
+				now = result;
+			}
+		}
+		return new TempoScan(current, total, now, List.copyOf(scanned));
+	}
+
+	/** The commonest gaps a tempo scan takes its candidates from; see {@link #tempoScan}. */
+	private static final int TEMPO_SCAN_GAPS = 48;
+
+	/** A tempo and how many notes it puts on a build tick. */
+	public record ScannedTempo(int tempo, int onTick) {
+	}
+
+	/**
+	 * What {@link #tempoScan} found: the tempo as it stands and every candidate around it.
+	 *
+	 * @param total the notes in the build, what the counts are out of
+	 */
+	public record TempoScan(int current, int total, ScannedTempo now, List<ScannedTempo> tempos) {
+		/**
+		 * The nearest tempo on each side that puts at least {@code share} of the notes on a tick,
+		 * or, where none on that side does, the one that comes closest to it.
+		 *
+		 * <p>Faster is a smaller tempo -- fewer microseconds a quarter. The current tempo itself is
+		 * on neither side, so a song that already meets the share is still shown what moving would
+		 * do.</p>
+		 */
+		public TempoPicks pick(double share) {
+			int needed = (int)Math.ceil(share * total - 1.0e-9);
+			return new TempoPicks(side(true, needed), side(false, needed), needed);
+		}
+
+		private TempoPick side(boolean faster, int needed) {
+			ScannedTempo nearest = null;
+			ScannedTempo best = null;
+			for (ScannedTempo tempo : tempos) {
+				// Not the current tempo, and not its integer neighbours either: a microsecond either
+				// side is the same song, and offered as "faster" it reads as a change that is not.
+				if ((tempo.tempo() < current) != faster || distance(tempo) < MIN_TEMPO_CHANGE) {
+					continue;
+				}
+				if (tempo.onTick() >= needed
+						&& (nearest == null || distance(tempo) < distance(nearest))) {
+					nearest = tempo;
+				}
+				if (best == null || tempo.onTick() > best.onTick()
+						|| tempo.onTick() == best.onTick() && distance(tempo) < distance(best)) {
+					best = tempo;
+				}
+			}
+			if (nearest != null) {
+				return new TempoPick(nearest, true);
+			}
+			return best == null ? null : new TempoPick(best, false);
+		}
+
+		/** The least move a pick may be: a tenth of a percent, under anything audible. */
+		private static final double MIN_TEMPO_CHANGE = 0.001;
+
+		/** How far a tempo is from the current one, as a ratio either way. */
+		public double distance(ScannedTempo tempo) {
+			return Math.abs(Math.log(tempo.tempo() / (double)current));
+		}
+	}
+
+	/**
+	 * @param reaches whether it puts the share asked for on a tick; where not, it is the closest
+	 *     that side came
+	 */
+	public record TempoPick(ScannedTempo tempo, boolean reaches) {
+	}
+
+	/** The pick on each side, either possibly {@code null}, and the note count the share means. */
+	public record TempoPicks(TempoPick faster, TempoPick slower, int needed) {
+	}
+
 	public int noteCount() {
 		return layers.stream().mapToInt(layer -> layer.notes().size()).sum();
 	}

@@ -78,6 +78,8 @@
   "tooltip.midicraft.conversion_gap_percentile": "How many tight note pairs the Auto grid may ignore, so a few don't slow the whole song.",
   "option.midicraft.repeat_merge_ticks": "Merge repeated notes",
   "tooltip.midicraft.repeat_merge_ticks": "Convert merges repeats of a pitch closer than this many repeater ticks. 0 keeps all.",
+  "option.midicraft.convert_snap_percent": "Snap tempo: notes on grid",
+  "tooltip.midicraft.convert_snap_percent": "Convert looks for the nearest tempo, within 25% either way, that already puts this share of notes on build ticks, then quantizes the rest onto them. Off, or if no tempo is close enough, it quantizes to a note grid first and moves the tempo to fit.",
   "option.midicraft.midi_velocity_cutoff": "Velocity cutoff",
   "tooltip.midicraft.midi_velocity_cutoff": "Drops imported notes quieter than this. Off by default.",
   "option.midicraft.chord_thin_target": "Thin chords to",
