@@ -142,7 +142,7 @@ public final class SongsScreen extends Screen {
 			// The picker says "Minecraft ready" beside every song here, and it would be saying it
 			// about a two-lane build in a one-lane paste mode.
 			analyses.computeIfAbsent(id, ignored -> SongAnalysis.of(song,
-				song.dedupesIdentical(), twoLanes, config.chordFitRules()));
+				song.dedupesIdentical(), twoLanes, config.chordFitRules(song)));
 		}
 
 		sortRows();

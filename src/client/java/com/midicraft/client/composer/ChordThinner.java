@@ -41,7 +41,8 @@ import java.util.TreeMap;
  * and that is not a decision to make silently.</p>
  */
 public final class ChordThinner {
-	public static final int MIN_TARGET = 8;
+	/** One note a chord, which is what a build that packs its lanes needs. */
+	public static final int MIN_TARGET = 1;
 	public static final int MAX_TARGET = SongAnalysis.MAX_SIMULTANEOUS_NOTES;
 	/**
 	 * Below the limit rather than on it, because a chord sitting exactly on thirty leaves the world
@@ -50,6 +51,14 @@ public final class ChordThinner {
 	public static final int DEFAULT_TARGET = 25;
 
 	private ChordThinner() {
+	}
+
+	/**
+	 * {@code under} notes under a song's {@code maxNotesPerChord}, never under one: the thinning
+	 * setting, which is a distance under each song's own limit rather than a number of notes.
+	 */
+	public static int targetUnder(int maxNotesPerChord, int under) {
+		return Math.max(MIN_TARGET, maxNotesPerChord - under);
 	}
 
 	/**

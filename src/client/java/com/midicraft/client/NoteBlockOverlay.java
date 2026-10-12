@@ -1023,7 +1023,7 @@ public final class NoteBlockOverlay {
 	private static boolean songNeedsTwoLanes() {
 		MidicraftConfig config = MidicraftConfig.get();
 		ComposerProject project = config.composerProject();
-		ChordSkips.Rules rules = config.chordFitRules();
+		ChordSkips.Rules rules = config.chordFitRules(project);
 		if (project != lanesCheckedFor || !rules.equals(lanesCheckedRules)) {
 			lanesCheckedFor = project;
 			lanesCheckedRules = rules;

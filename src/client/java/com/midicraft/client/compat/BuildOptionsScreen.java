@@ -1069,7 +1069,9 @@ final class BuildOptionsScreen extends Screen {
 		String title = project == null ? songName : project.name();
 		SongBuilder.PasteMode planned = mode;
 		// Read here with the rest of what the forecast needs, on the render thread.
-		com.midicraft.client.composer.ChordSkips.Rules thinning = MidicraftConfig.get().chordFitRules();
+		// Against the song's own max notes per chord: the one being built, or the composer's.
+		com.midicraft.client.composer.ChordSkips.Rules thinning = MidicraftConfig.get().chordFitRules(
+			project != null ? project : MidicraftConfig.get().composerProject());
 		// Read here with the origin, for the same reason: the level is the render thread's.
 		int worldTop = minecraft.level == null ? Integer.MAX_VALUE : minecraft.level.getMaxY();
 		int worldFloor = minecraft.level == null ? Integer.MIN_VALUE : minecraft.level.getMinY();

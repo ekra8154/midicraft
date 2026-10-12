@@ -48,18 +48,18 @@ class TitleSignTest {
 
 	@Test
 	void aShortNameGoesOnOneLine() {
-		assertEquals(List.of("Big Shot", "", "", ""), plain("Big Shot"));
+		assertEquals(List.of("Big Shot", "", "", SongBuilder.SIGN_CREDIT), plain("Big Shot"));
 	}
 
 	@Test
 	void aNameWithNoNameIsStillASign() {
-		assertEquals(List.of("Unnamed", "composition", "", ""), plain(null));
-		assertEquals(List.of("Unnamed", "composition", "", ""), plain("   "));
+		assertEquals(List.of("Unnamed", "composition", "", SongBuilder.SIGN_CREDIT), plain(null));
+		assertEquals(List.of("Unnamed", "composition", "", SongBuilder.SIGN_CREDIT), plain("   "));
 	}
 
 	@Test
 	void wordsStayWholeWhereTheyFit() {
-		assertEquals(List.of("all of the", "lights kanye", "west", ""),
+		assertEquals(List.of("all of the", "lights kanye", "west", SongBuilder.SIGN_CREDIT),
 			plain("all of the lights kanye west"));
 	}
 
@@ -70,7 +70,8 @@ class TitleSignTest {
 		System.out.println("SIGN " + lines);
 		assertTrue(lines.get(0).endsWith("-"), "the first line should carry on: " + lines);
 		assertEquals("Supercalifragilisticexpialidocious",
-			String.join("", lines).replace("-", ""), "the word came back wrong: " + lines);
+			String.join("", lines.subList(0, 3)).replace("-", ""), "the word came back wrong: " + lines);
+		assertEquals(SongBuilder.SIGN_CREDIT, lines.get(3), "three lines leave the credit room: " + lines);
 	}
 
 	/** And a name too long for the whole sign says so rather than looking like a shorter name. */
@@ -88,8 +89,23 @@ class TitleSignTest {
 				"Supercalifragilisticexpialidocious",
 				"Deltarune Chapter Four Guardian Of The Sunset Of Seven Suns",
 				"a \"quoted\" name with a \\ in it")
-			.forEach(title -> plain(title).forEach(line ->
-				assertTrue(line.length() <= SongBuilder.SIGN_LINE, "too wide for a sign: '" + line + "'")));
+			.forEach(title -> plain(title).stream()
+				// Measured in pixels rather than letters; see SIGN_CREDIT.
+				.filter(line -> !line.equals(SongBuilder.SIGN_CREDIT))
+				.forEach(line -> assertTrue(line.length() <= SongBuilder.SIGN_LINE,
+					"too wide for a sign: '" + line + "'")));
+	}
+
+	/** The title keeps all four lines when it needs them, and the credit goes without. */
+	@Test
+	void aTitleThatNeedsTheBottomLineKeepsIt() {
+		List<String> lines = plain("Deltarune Chapter Four Guardian Of The Sunset Of Seven Suns");
+		assertTrue(lines.stream().noneMatch(SongBuilder.SIGN_CREDIT::equals),
+			"the credit took a line the title needed: " + lines);
+		List<String> exactlyFour = plain("one two three four five six seven eight nine ten");
+		System.out.println("SIGN " + exactlyFour);
+		assertTrue(exactlyFour.stream().noneMatch(SongBuilder.SIGN_CREDIT::equals),
+			"the credit took a line the title needed: " + exactlyFour);
 	}
 
 	/**

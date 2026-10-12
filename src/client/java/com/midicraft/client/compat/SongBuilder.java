@@ -1129,11 +1129,26 @@ public final class SongBuilder {
 			lines.set(SIGN_LINES - 1, (last.length() > SIGN_LINE - 3
 				? last.substring(0, SIGN_LINE - 3) : last).stripTrailing() + "...");
 		}
-		while (lines.size() < SIGN_LINES) {
+		while (lines.size() < SIGN_LINES - 1) {
 			lines.add("");
+		}
+		// The bottom line says what made the build, but only where the title has left it free: a
+		// name cut short to make room for a credit would be the wrong way round.
+		if (lines.size() < SIGN_LINES) {
+			lines.add(SIGN_CREDIT);
 		}
 		return lines.stream().map(SongBuilder::quoted).toList();
 	}
+
+	/**
+	 * The bottom line of a sign whose title fits in three.
+	 *
+	 * <p>Longer than {@link #SIGN_LINE}, which is a count of the widest letters and so cautious for
+	 * most: measured off the game's own font (26.3) it is 87 pixels of the sign's 90. "with" would
+	 * make it 93. Plain text like the title, so a survival player copying a schematic can write it
+	 * on a sign by hand.</p>
+	 */
+	static final String SIGN_CREDIT = "Made w/ Midicraft";
 
 	/**
 	 * Whether the lines hold fewer letters of the name than the name has.

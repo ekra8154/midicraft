@@ -67,7 +67,7 @@ class ExportPeakedSongsProbe {
 			String[] half = entry.strip().split(":");
 			String file = half[0];
 			ComposerProject song = GameSettings.project(SONGS.resolve(TestSongs.fileName(file)));
-			List<Timed> kept = peakedWalk(song, game.thinning());
+			List<Timed> kept = peakedWalk(song, game.thinning(song));
 			List<SongBuilder.EventNote> census = GameSettings.peaked(game.notes(song, mode), 1);
 			boolean walkAgrees = kept.size() == census.size();
 			for (int index = 0; walkAgrees && index < kept.size(); index++) {

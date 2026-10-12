@@ -3,7 +3,9 @@ package com.midicraft.client.compat;
 import com.google.gson.Gson;
 import com.midicraft.client.MidicraftConfig;
 import com.midicraft.client.composer.ChordSkips;
+import com.midicraft.client.composer.ChordThinner;
 import com.midicraft.client.composer.ComposerProject;
+import com.midicraft.client.composer.SongAnalysis;
 import java.io.IOException;
 import java.io.Reader;
 import java.nio.file.Files;
@@ -37,6 +39,8 @@ final class GameSettings {
 
 	/** The keys the paste reads, typed as the game stores them, so a missing one reads null. */
 	private static final class Stored {
+		Integer chordThinUnder;
+		/** The old absolute target, read where a file predates {@link #chordThinUnder}. */
 		Integer chordThinTarget;
 		Boolean thinChordsByVolume;
 		Boolean thinChordsByStrikes;
@@ -84,8 +88,19 @@ final class GameSettings {
 		 */
 		List<SongBuilder.EventNote> notes(ComposerProject project, SongBuilder.PasteMode mode) {
 			boolean dedupe = project.dedupesIdentical();
-			return SongBuilder.notesFor(mode, project.toSequenceTracks(Set.of(), dedupe, thinning),
-				project, dedupe, thinning);
+			ChordSkips.Rules rules = thinning(project);
+			return SongBuilder.notesFor(mode, project.toSequenceTracks(Set.of(), dedupe, rules),
+				project, dedupe, rules);
+		}
+
+		/**
+		 * {@code chordFitRules(song)}: the same distance under the song's own max notes per chord
+		 * that {@link #thinning} is under the build's thirty.
+		 */
+		ChordSkips.Rules thinning(ComposerProject song) {
+			int under = SongAnalysis.MAX_SIMULTANEOUS_NOTES - thinning.target();
+			return new ChordSkips.Rules(ChordThinner.targetUnder(song.maxNotesPerChord(), under),
+				thinning.volume(), thinning.strikes());
 		}
 
 		/** For a heading, so a run says what it built with. */
@@ -162,10 +177,14 @@ final class GameSettings {
 				throw new IllegalStateException("could not read " + CONFIG.toAbsolutePath(), unreadable);
 			}
 		}
-		// The same defaults and clamps MidicraftConfig.load applies, key for key.
-		int target = clamp(stored.chordThinTarget == null
-				? MidicraftConfig.DEFAULT_CHORD_THIN_TARGET : stored.chordThinTarget,
-			MidicraftConfig.MIN_CHORD_THIN_TARGET, MidicraftConfig.MAX_CHORD_THIN_TARGET);
+		// The same defaults and clamps MidicraftConfig.load applies, key for key. Held as the target
+		// for a song left at the build's thirty; see Values#thinning(ComposerProject) for the rest.
+		int under = clamp(stored.chordThinUnder != null ? stored.chordThinUnder
+				: stored.chordThinTarget != null
+					? SongAnalysis.MAX_SIMULTANEOUS_NOTES - stored.chordThinTarget
+					: MidicraftConfig.DEFAULT_CHORD_THIN_UNDER,
+			MidicraftConfig.MIN_CHORD_THIN_UNDER, MidicraftConfig.MAX_CHORD_THIN_UNDER);
+		int target = ChordThinner.targetUnder(SongAnalysis.MAX_SIMULTANEOUS_NOTES, under);
 		boolean volume = stored.thinChordsByVolume == null || stored.thinChordsByVolume;
 		boolean strikes = stored.thinChordsByStrikes == null || stored.thinChordsByStrikes;
 		return new Values(
@@ -232,7 +251,8 @@ final class GameSettings {
 			}
 			return new ComposerProject(song.name(), song.ppq(), song.tempoMicrosPerQuarter(),
 				song.layers(), song.activeLayerIndex(), song.nextNoteId(), song.endTick(),
-				song.speedQuarters(), song.speedEighths(), song.markers(), song.dedupeIdenticalNotes());
+				song.speedQuarters(), song.speedEighths(), song.markers(), song.dedupeIdenticalNotes(),
+				song.maxChordNotes());
 		}
 	}
 }

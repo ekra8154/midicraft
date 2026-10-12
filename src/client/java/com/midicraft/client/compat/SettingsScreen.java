@@ -721,15 +721,15 @@ public final class SettingsScreen extends Screen {
 					value -> value <= 0 ? "off (note grid first)" : value + "% of notes")));
 				// Next to Convert but not under it. The two are reached for at the same moment --
 				// both answer "why will this song not build" -- and the row was filed with them for
-				// that reason. But Convert never reads it: it belongs to Select > Overloaded chords
-				// and to nothing else, and a heading naming a button is a claim about what that
-				// button consults.
+				// that reason. But Convert never reads it, and a heading naming a button is a claim
+				// about what that button consults. Relative to each song's own max notes per chord
+				// (Song menu), so it says how far under rather than a number of notes.
 				entries.add(Entry.heading("chord_thinning"));
-				entries.add(Entry.of(slider("chord_thin_target",
-					MidicraftConfig.MIN_CHORD_THIN_TARGET,
-					MidicraftConfig.MAX_CHORD_THIN_TARGET,
-					MidicraftConfig::chordThinTarget, config::setChordThinTarget,
-					value -> value + " per chord")));
+				entries.add(Entry.of(slider("chord_thin_under",
+					MidicraftConfig.MIN_CHORD_THIN_UNDER,
+					MidicraftConfig.MAX_CHORD_THIN_UNDER,
+					MidicraftConfig::chordThinUnder, config::setChordThinUnder,
+					value -> value == 0 ? "max notes" : value + " under max")));
 				// Volume first, the order the chord limit uses them: a copy less is less noticed
 				// than a skipped strike.
 				entries.add(Entry.of(toggle("chord_thin_volume",

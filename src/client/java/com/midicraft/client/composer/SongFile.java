@@ -191,7 +191,8 @@ public final class SongFile {
 	public static ComposerProject canonical(ComposerProject song) {
 		return new ComposerProject(song.name(), song.ppq(), song.tempoMicrosPerQuarter(),
 			song.layers(), song.activeLayerIndex(), song.nextNoteId(), song.endTick(),
-			song.speedQuarters(), song.speedEighths(), song.markers(), song.dedupeIdenticalNotes());
+			song.speedQuarters(), song.speedEighths(), song.markers(), song.dedupeIdenticalNotes(),
+			song.maxChordNotes());
 	}
 
 	/**

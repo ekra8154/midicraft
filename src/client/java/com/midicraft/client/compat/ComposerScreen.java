@@ -832,6 +832,7 @@ public final class ComposerScreen extends Screen {
 	private int[] cachedParityCounts;
 	private SongAnalysis cachedOverloadedStats;
 	private long[] cachedOverloadedTicks = new long[0];
+	private int cachedOverloadedLimit = -1;
 	/**
 	 * The composition as it stands on disk, which is what "unsaved" is measured against.
 	 *
@@ -931,6 +932,10 @@ public final class ComposerScreen extends Screen {
 	private boolean splitBracketsHidden;
 	/** Dragging the split between the layer panel and the roll, and whether the cursor says so. */
 	private boolean draggingSplitter;
+	/** The chord limit's track in the Song menu is being dragged. */
+	private boolean draggingChordLimit;
+	/** When the chord limit last moved, so one drag or one flick of the wheel is one undo step. */
+	private long lastChordLimitChangeAt;
 	/** The cursor this frame has asked for, or null for whatever the widgets under it asked. */
 	private CursorType wantedCursorShape;
 	private double layerDragStartY;
@@ -2166,7 +2171,7 @@ public final class ComposerScreen extends Screen {
 					Files.createDirectories(folder);
 					NbsExporter.Result written = NbsExporter.export(project(),
 						folder.resolve(safeFileName(wanted) + ".nbs"), project().dedupesIdentical(),
-						config.chordFitRules());
+						config.chordFitRules(project()));
 					showResult(Component.literal("Exported to " + written.path()
 						+ " - " + written.report()));
 				} catch (Exception failed) {
@@ -2558,7 +2563,7 @@ public final class ComposerScreen extends Screen {
 		clearRange();
 		updateButtonStates();
 		showResult(Component.literal(thinning.thinnedNoteIds().size() + " notes thinned to fit "
-			+ config.chordThinTarget() + ": " + thinning.strikesSkipped() + " strikes skipped, "
+			+ config.chordThinTarget(project()) + ": " + thinning.strikesSkipped() + " strikes skipped, "
 			+ thinning.blocksRemoved() + " note blocks left out altogether."));
 	}
 
@@ -2599,7 +2604,9 @@ public final class ComposerScreen extends Screen {
 					wantedAnchorY = rowY;
 				}
 			}
-			if (row.submenu() != null) {
+			if (row.action() == ToolbarAction.MAX_CHORD_NOTES) {
+				extractChordSlider(graphics, toolbarMenuX + menuWidth, rowY);
+			} else if (row.submenu() != null) {
 				graphics.text(font, SUBMENU_ARROW, toolbarMenuX + menuWidth - 10, rowY + 5,
 					enabled ? 0xFFAAB2BD : 0xFF5A5F66, false);
 			} else if (row.action() != null) {
@@ -2752,6 +2759,8 @@ public final class ComposerScreen extends Screen {
 		for (MenuRow row : rows) {
 			int tail = row.submenu() != null
 				? font.width(SUBMENU_ARROW) + 16
+				: row.action() == ToolbarAction.MAX_CHORD_NOTES
+					? chordSliderTail()
 				: row.action() != null && !toolbarShortcut(row.action()).isEmpty()
 					? font.width(toolbarShortcut(row.action())) + 30
 					: 14;
@@ -2884,8 +2893,7 @@ public final class ComposerScreen extends Screen {
 			case SELECT_ODD_TICKS -> parityCounts()[1] > 0 && parityCounts()[0] > 0;
 			case SELECT_TOO_FREQUENT -> !projectStats().crowdedNotes().isEmpty();
 			case SELECT_OUT_OF_RANGE -> projectStats().outOfRange() > 0;
-			case SELECT_OVERLOADED_CHORDS -> projectStats().overloadedTicks() > 0
-				|| projectStats().peakChord() > config.chordThinTarget();
+			case SELECT_OVERLOADED_CHORDS -> overloadedTicks().length > 0;
 			case SELECT_THINNED -> !projectStats().skips().thinnedNoteIds().isEmpty();
 			case SELECT_STACKED -> project().layers().stream()
 				.anyMatch(layer -> layer.visible() && !layer.stackedExtras().isEmpty());
@@ -2944,6 +2952,15 @@ public final class ComposerScreen extends Screen {
 			openSubmenu = clicked.submenu();
 			return true;
 		}
+		if (clicked.action() == ToolbarAction.MAX_CHORD_NOTES) {
+			// The menu stays open: the red columns are what the number is for, and they are to be
+			// watched while it moves. A click on the name rather than the track does nothing.
+			if (mouseX >= chordSliderLeft(toolbarMenuX + menuWidth) - CHORD_SLIDER_KNOB) {
+				draggingChordLimit = true;
+				setChordLimitAt(mouseX, toolbarMenuX + menuWidth);
+			}
+			return true;
+		}
 		toolbarMenu = ToolbarMenu.NONE;
 		openSubmenu = null;
 		performToolbarAction(clicked.action());
@@ -2963,6 +2980,9 @@ public final class ComposerScreen extends Screen {
 			case SONG_DETAILS -> openSongDetails();
 			case PASTE_IN_WORLD -> pasteInWorld();
 			case BUILD_CANCEL -> CommandPasteSender.cancel(true);
+			// Set by dragging or scrolling its row, which keeps the menu open; see setChordLimit.
+			case MAX_CHORD_NOTES -> {
+			}
 			case TOGGLE_DEDUPE -> {
 				// The song's own choice, so it is an edit to the song: undoable, and saved with it.
 				boolean merging = !project().dedupesIdentical();
@@ -3418,7 +3438,10 @@ public final class ComposerScreen extends Screen {
 	 * limit applies to every layer that is going into the build.</p>
 	 */
 	private void selectOverloadedChordNotes() {
-		int target = config.chordThinTarget();
+		// The song's own max notes per chord decides which chords are over, and is what they are
+		// thinned down to: the red columns are the chords this is for.
+		int target = project().maxNotesPerChord();
+		ChordSkips.Rules rules = config.chordFitRules(project());
 		// Scoped to the layer selection like the rest of the Select menu, so thinning one part is
 		// possible at all. How big a chord is still comes from every layer in the build -- only
 		// where the notes may be taken from narrows. Select the whole panel for the whole song.
@@ -3430,7 +3453,8 @@ public final class ComposerScreen extends Screen {
 			}
 		}
 		ChordThinner.Result thinned =
-			ChordThinner.thin(project(), config.chordFitRules(), project().dedupesIdentical(), scope);
+			ChordThinner.thin(project(), new ChordSkips.Rules(target, rules.volume(), rules.strikes()),
+				project().dedupesIdentical(), scope);
 		selectedNotes.clear();
 		selectedNotes.addAll(thinned.noteIds());
 		clearRange();
@@ -3537,6 +3561,9 @@ public final class ComposerScreen extends Screen {
 			case TOGGLE_DEDUPE -> "Build identical notes on different layers only once. Saves "
 				+ "note blocks and chord room; nothing is deleted. Notes with a count (like "
 				+ "harp ×3) always build every copy. Saved per song.";
+			case MAX_CHORD_NOTES -> "Chords with more notes than this are marked red down the "
+				+ "roll, so a stray one is easy to find. 30 is the most a build can place; 1 lets "
+				+ "a one-floor build pack its lanes closer. Drag or scroll. Saved per song.";
 			case TOGGLE_NOTE_TRAILS -> "Show each note's length as a trail. Doesn't affect the "
 				+ "build. Drag a trail's end to change the length.";
 			case SELECT_OFF_GRID -> "Select notes that aren't on a game tick, so no build can "
@@ -3550,9 +3577,9 @@ public final class ComposerScreen extends Screen {
 			case SELECT_TOO_FREQUENT -> "Selects notes arriving less than one repeater tick after "
 				+ "the previous one -- faster than redstone can retrigger.";
 			case SELECT_OUT_OF_RANGE -> "Selects notes outside the note-block range of F#3-F#5.";
-			case SELECT_OVERLOADED_CHORDS -> "Select the least important notes in chords over "
-				+ "the thinning target, to hear the song without them before deleting. Never "
-				+ "the last of a pitch or instrument. Selected layers only.";
+			case SELECT_OVERLOADED_CHORDS -> "Select the least important notes in the red chords, "
+				+ "the ones over Song > Max notes per chord, to hear the song without them before "
+				+ "deleting. Never the last of a pitch or instrument. Selected layers only.";
 			case SELECT_STACKED -> "Select duplicate notes stacked on the same spot, so Delete "
 				+ "leaves one. Stacks only play once, so nothing you hear changes.";
 			case SELECT_THINNED -> "Select notes the chord limit plays quieter or skips "
@@ -5475,10 +5502,12 @@ public final class ComposerScreen extends Screen {
 	 */
 	private long[] overloadedTicks() {
 		SongAnalysis stats = projectStats();
-		if (cachedOverloadedStats != stats) {
+		int limit = project().maxNotesPerChord();
+		if (cachedOverloadedStats != stats || cachedOverloadedLimit != limit) {
 			cachedOverloadedStats = stats;
+			cachedOverloadedLimit = limit;
 			cachedOverloadedTicks = stats.chordCounts().entrySet().stream()
-				.filter(entry -> entry.getValue() > SongAnalysis.MAX_SIMULTANEOUS_NOTES)
+				.filter(entry -> entry.getValue() > limit)
 				.mapToLong(Map.Entry::getKey)
 				.sorted()
 				.toArray();
@@ -5985,7 +6014,7 @@ public final class ComposerScreen extends Screen {
 		if (played != null) {
 			lines.add(Component.literal("Plays " + played[1] + " of " + played[0]
 					+ " note blocks here - the chord is over the thinning target of "
-					+ config.chordThinTarget())
+					+ config.chordThinTarget(project()))
 				.withStyle(net.minecraft.ChatFormatting.LIGHT_PURPLE));
 		}
 		int skippedStrikes = thinning.skippedStrikes(layerIndex, note.id());
@@ -6425,19 +6454,22 @@ public final class ComposerScreen extends Screen {
 		// The rule the peak was counted under, beside the number. Whether two layers playing the
 		// same sound at the same instant count once is a setting that lives in another screen
 		// entirely, and it silently re-judges every song -- so the number says which rule made it.
-		segments.add("peak " + peakChord + "/" + SongAnalysis.MAX_SIMULTANEOUS_NOTES
+		// Against the song's own limit, which is the build's thirty until it is set lower, and the
+		// chords over it are the red columns in the roll.
+		int overLimit = overloadedTicks().length;
+		segments.add("peak " + peakChord + "/" + project().maxNotesPerChord()
 			+ (project().dedupesIdentical() ? " merged" : " unmerged")
-			+ (overloaded > 0 ? " (" + overloaded + " over)" : ""));
+			+ (overLimit > 0 ? " (" + overLimit + " over)" : ""));
 		// What fitting the chords to the thinning preference cost, beside the peak it produced.
 		ChordSkips thinning = stats.skips();
 		if (thinning.blocksRemoved() > 0 || !thinning.stillOver().isEmpty()) {
 			List<String> fit = new ArrayList<>();
 			if (thinning.blocksRemoved() > 0) {
-				fit.add("thinned to " + config.chordThinTarget() + ": " + thinning.blocksRemoved()
+				fit.add("thinned to " + config.chordThinTarget(project()) + ": " + thinning.blocksRemoved()
 					+ " blocks left out");
 			}
 			if (!thinning.stillOver().isEmpty()) {
-				fit.add(thinning.stillOver().size() + " chords over " + config.chordThinTarget());
+				fit.add(thinning.stillOver().size() + " chords over " + config.chordThinTarget(project()));
 			}
 			segments.add(String.join(", ", fit));
 		}
@@ -6567,12 +6599,12 @@ public final class ComposerScreen extends Screen {
 		// Deduplication is a setting rather than part of the song, so it has to be checked too.
 		if (cachedStatsProject == current && cachedStats != null
 				&& cachedStatsDedupe == project().dedupesIdentical()
-				&& config.chordFitRules().equals(cachedStatsRules)) {
+				&& config.chordFitRules(project()).equals(cachedStatsRules)) {
 			return cachedStats;
 		}
 		cachedStatsProject = current;
 		cachedStatsDedupe = project().dedupesIdentical();
-		cachedStatsRules = config.chordFitRules();
+		cachedStatsRules = config.chordFitRules(project());
 		cachedStats = SongAnalysis.of(current, cachedStatsDedupe, true, cachedStatsRules);
 		return cachedStats;
 	}
@@ -7345,6 +7377,13 @@ public final class ComposerScreen extends Screen {
 	public boolean mouseDragged(MouseButtonEvent event, double dx, double dy) {
 		lastMouseX = event.x();
 		lastMouseY = event.y();
+		if (draggingChordLimit) {
+			if (toolbarMenu == ToolbarMenu.SONG) {
+				List<MenuRow> rows = menuRows(toolbarMenu);
+				setChordLimitAt(event.x(), toolbarMenuX + menuWidth(rows, TOOLBAR_MENU_WIDTH, toolbarMenuX));
+			}
+			return true;
+		}
 		if (draggingMainStar) {
 			// Drawn wherever the cursor is; nothing to work out until it is let go.
 			return true;
@@ -7480,6 +7519,10 @@ public final class ComposerScreen extends Screen {
 
 	@Override
 	public boolean mouseReleased(MouseButtonEvent event) {
+		if (draggingChordLimit) {
+			draggingChordLimit = false;
+			return true;
+		}
 		if (draggingMainStar) {
 			draggingMainStar = false;
 			dropMainStar(event.x(), event.y());
@@ -7623,6 +7666,13 @@ public final class ComposerScreen extends Screen {
 
 	@Override
 	public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+		if (overChordSliderRow(mouseX, mouseY)) {
+			int steps = wheelSteps("chord limit", scrollY);
+			if (steps != 0) {
+				setChordLimit(project().maxNotesPerChord() + (steps > 0 ? 1 : -1));
+			}
+			return true;
+		}
 		PaletteHit tierHit = tierMenuHit(mouseX, mouseY);
 		if (tierHit != null) {
 			ComposerProject.Split split = keyboardSplit();
@@ -10115,6 +10165,95 @@ public final class ComposerScreen extends Screen {
 		return true;
 	}
 
+	/** The track's width in the Song menu, about two pixels for each of the thirty settings. */
+	private static final int CHORD_SLIDER_TRACK = 58;
+	private static final int CHORD_SLIDER_KNOB = 4;
+
+	/** Room the slider takes at the end of its row: the track, the number, and the margins. */
+	private int chordSliderTail() {
+		return 14 + CHORD_SLIDER_TRACK + 6 + font.width("30") + 6;
+	}
+
+	/** Where the track starts, for a menu whose right edge is {@code menuRight}. */
+	private int chordSliderLeft(int menuRight) {
+		return menuRight - 6 - font.width("30") - 6 - CHORD_SLIDER_TRACK;
+	}
+
+	/**
+	 * The chord limit, drawn into its menu row: a track, a knob, and the number.
+	 *
+	 * <p>Drawn rather than a widget like the speed slider, because the menus are drawn and a
+	 * widget would sit over the panel whether it was open or not.</p>
+	 */
+	private void extractChordSlider(GuiGraphicsExtractor graphics, int menuRight, int rowY) {
+		int left = chordSliderLeft(menuRight);
+		int limit = project().maxNotesPerChord();
+		int middle = rowY + TOOLBAR_MENU_ROW_HEIGHT / 2;
+		graphics.fill(left, middle - 1, left + CHORD_SLIDER_TRACK, middle + 1, 0xFF3A424D);
+		int knob = left + (limit - ComposerProject.MIN_CHORD_NOTES)
+			* (CHORD_SLIDER_TRACK - CHORD_SLIDER_KNOB)
+			/ (SongAnalysis.MAX_SIMULTANEOUS_NOTES - ComposerProject.MIN_CHORD_NOTES);
+		// Amber below the build's own limit, so a song that has been given a target says so.
+		int color = limit < SongAnalysis.MAX_SIMULTANEOUS_NOTES ? 0xFFFFAA00 : 0xFFAAB2BD;
+		graphics.fill(knob, middle - 5, knob + CHORD_SLIDER_KNOB, middle + 5, color);
+		String number = Integer.toString(limit);
+		graphics.text(font, Component.literal(number), menuRight - 6 - font.width(number), rowY + 5,
+			color, false);
+	}
+
+	/** Whether the pointer is over the chord limit's row in the open Song menu. */
+	private boolean overChordSliderRow(double mouseX, double mouseY) {
+		if (toolbarMenu != ToolbarMenu.SONG) {
+			return false;
+		}
+		List<MenuRow> rows = menuRows(toolbarMenu);
+		int menuWidth = menuWidth(rows, TOOLBAR_MENU_WIDTH, toolbarMenuX);
+		if (mouseX < toolbarMenuX || mouseX >= toolbarMenuX + menuWidth) {
+			return false;
+		}
+		for (int index = 0; index < rows.size(); index++) {
+			int rowY = MENU_PANEL_TOP + 2 + index * TOOLBAR_MENU_ROW_HEIGHT;
+			if (rows.get(index).action() == ToolbarAction.MAX_CHORD_NOTES) {
+				return mouseY >= rowY && mouseY < rowY + TOOLBAR_MENU_ROW_HEIGHT;
+			}
+		}
+		return false;
+	}
+
+	/** The chord limit the track reads at {@code mouseX}. */
+	private void setChordLimitAt(double mouseX, int menuRight) {
+		double along = (mouseX - chordSliderLeft(menuRight) - CHORD_SLIDER_KNOB / 2.0)
+			/ (CHORD_SLIDER_TRACK - CHORD_SLIDER_KNOB);
+		int span = SongAnalysis.MAX_SIMULTANEOUS_NOTES - ComposerProject.MIN_CHORD_NOTES;
+		setChordLimit(ComposerProject.MIN_CHORD_NOTES
+			+ (int)Math.round(Math.max(0.0, Math.min(1.0, along)) * span));
+	}
+
+	/**
+	 * Sets the song's chord limit, a drag or a run of wheel notches folded into one undo step the
+	 * way the speed slider folds its own.
+	 */
+	private void setChordLimit(int value) {
+		int limit = Math.max(ComposerProject.MIN_CHORD_NOTES,
+			Math.min(SongAnalysis.MAX_SIMULTANEOUS_NOTES, value));
+		if (limit == project().maxNotesPerChord()) {
+			return;
+		}
+		ComposerProject next = project().withMaxNotesPerChord(limit);
+		long now = Util.getMillis();
+		if (now - lastChordLimitChangeAt < SCALE_COALESCE_MILLIS) {
+			history.replaceCurrent(next);
+			afterStateChange();
+		} else {
+			apply("change max notes per chord", next);
+		}
+		lastChordLimitChangeAt = now;
+		int over = overloadedTicks().length;
+		showResult(Component.literal("Max notes per chord: " + limit + " - "
+			+ (over == 0 ? "no chord is over." : over + (over == 1 ? " chord" : " chords")
+				+ " over, marked red.")));
+	}
+
 	private void setDelayScale(int scaleEighths) {
 		// Re-anchor first: the playhead is derived from elapsed real time, so changing the factor
 		// without pinning the current tick would make playback jump.
@@ -10839,7 +10978,7 @@ public final class ComposerScreen extends Screen {
 		// with each gap rounded the way the build rounds it. The end marker's trailing silence is
 		// not in it, since nothing sounds there.
 		int gameTicks = SongBuilder.gameTicksFromPress(SongBuilder.gameTickEventNotes(project(),
-			project().dedupesIdentical(), config.chordFitRules()));
+			project().dedupesIdentical(), config.chordFitRules(project())));
 		lines.add(SongInfoScreen.Line.of("Duration from button press", gameTicks < 0 ? "-"
 			: String.format(java.util.Locale.ROOT, "%d:%02d", gameTicks / 20 / 60,
 					gameTicks / 20 % 60)));
@@ -11886,6 +12025,7 @@ public final class ComposerScreen extends Screen {
 		PASTE_IN_WORLD("Build composition..."),
 		BUILD_CANCEL("Cancel paste"),
 		TOGGLE_DEDUPE("Merge duplicate notes"),
+		MAX_CHORD_NOTES("Max notes per chord"),
 		TOGGLE_NOTE_TRAILS("Show note trails"),
 		ADD_MARKER("Add or remove at the playback marker"),
 		RENAME_MARKER("Rename the marker here..."),
@@ -11917,7 +12057,8 @@ public final class ComposerScreen extends Screen {
 			FIT_ALL_RANGE, BAKE_SPEED, SNAP_TEMPO
 		};
 		private static final ToolbarAction[] SONG_ACTIONS = {
-			SONG_INFO, SONG_DETAILS, TOGGLE_DEDUPE, TOGGLE_NOTE_TRAILS, PASTE_IN_WORLD, BUILD_CANCEL
+			SONG_INFO, SONG_DETAILS, TOGGLE_DEDUPE, MAX_CHORD_NOTES, TOGGLE_NOTE_TRAILS, PASTE_IN_WORLD,
+			BUILD_CANCEL
 		};
 		private static final ToolbarAction[] SELECT_ACTIONS = {
 			SELECT_OFF_GRID, SELECT_HALF_TICKED, SELECT_EVEN_TICKS, SELECT_ODD_TICKS,

@@ -8,6 +8,7 @@ import com.midicraft.client.composer.SongFile;
 import com.midicraft.client.composer.ChordSkips;
 import com.midicraft.client.composer.ChordThinner;
 import com.midicraft.client.composer.ComposerProject;
+import com.midicraft.client.composer.SongAnalysis;
 import com.midicraft.client.composer.SongLibrary;
 import java.io.Reader;
 import java.io.Writer;
@@ -345,9 +346,18 @@ public final class MidicraftConfig {
 	public static final int MIN_COMPOSER_GUI_SCALE = SAME_GUI_SCALE_AS_MINECRAFT;
 	public static final int MAX_COMPOSER_GUI_SCALE = 6;
 	public static final int DEFAULT_COMPOSER_GUI_SCALE = SAME_GUI_SCALE_AS_MINECRAFT;
-	public static final int DEFAULT_CHORD_THIN_TARGET = 25;
-	public static final int MIN_CHORD_THIN_TARGET = ChordThinner.MIN_TARGET;
-	public static final int MAX_CHORD_THIN_TARGET = ChordThinner.MAX_TARGET;
+	/**
+	 * How far under a song's max notes per chord its chords are thinned to, so the target follows
+	 * the song: one meant to pack its lanes at one note a chord is thinned toward one, and one left
+	 * at the build's thirty toward twenty-five, which was the old absolute default.
+	 *
+	 * <p>Stored as the distance rather than the target. A file written when the target was an
+	 * absolute number is read as that number under thirty, so a song left at thirty thins exactly
+	 * as it did.</p>
+	 */
+	public static final int DEFAULT_CHORD_THIN_UNDER = 5;
+	public static final int MIN_CHORD_THIN_UNDER = 0;
+	public static final int MAX_CHORD_THIN_UNDER = SongAnalysis.MAX_SIMULTANEOUS_NOTES - ChordThinner.MIN_TARGET;
 	private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 	private static final Path CONFIG_PATH = FabricLoader.getInstance().getConfigDir().resolve("midicraft.json");
 	private static SongLibrary songs = SongLibrary.load();
@@ -428,7 +438,7 @@ public final class MidicraftConfig {
 	private String supportBlock;
 	private String thinLaneBlock;
 	private int midiVelocityCutoff;
-	private int chordThinTarget;
+	private int chordThinUnder;
 	/** Whether a chord over the target may play a counted instrument with fewer copies. */
 	private boolean thinChordsByVolume;
 	/** Whether a chord over the target may skip a sustain strike. */
@@ -696,10 +706,14 @@ public final class MidicraftConfig {
 						? DEFAULT_MIDI_VELOCITY_CUTOFF
 						: stored.midiVelocityCutoff
 				);
-				instance.chordThinTarget = clampChordThinTarget(
-					stored.chordThinTarget == null
-						? DEFAULT_CHORD_THIN_TARGET
-						: stored.chordThinTarget
+				// A file from before the target was relative says it as a number of notes, which is
+				// that many under the build's thirty.
+				instance.chordThinUnder = clampChordThinUnder(
+					stored.chordThinUnder != null
+						? stored.chordThinUnder
+						: stored.chordThinTarget != null
+							? SongAnalysis.MAX_SIMULTANEOUS_NOTES - stored.chordThinTarget
+							: DEFAULT_CHORD_THIN_UNDER
 				);
 				instance.thinChordsByVolume = stored.thinChordsByVolume == null || stored.thinChordsByVolume;
 				instance.thinChordsByStrikes = stored.thinChordsByStrikes == null || stored.thinChordsByStrikes;
@@ -1098,7 +1112,7 @@ public final class MidicraftConfig {
 		if (cachedSequenceProject != project || cachedSequence == null) {
 			cachedSequenceProject = project;
 			cachedSequence = project.toSequenceTracks(java.util.Set.of(), project.dedupesIdentical(),
-				chordFitRules());
+				chordFitRules(project));
 		}
 		return cachedSequence;
 	}
@@ -1719,12 +1733,12 @@ public final class MidicraftConfig {
 			Math.min(MAX_COMPOSER_GUI_SCALE, composerGuiScale));
 	}
 
-	public int chordThinTarget() {
-		return chordThinTarget;
+	public int chordThinUnder() {
+		return chordThinUnder;
 	}
 
-	public void setChordThinTarget(int chordThinTarget) {
-		this.chordThinTarget = clampChordThinTarget(chordThinTarget);
+	public void setChordThinUnder(int chordThinUnder) {
+		this.chordThinUnder = clampChordThinUnder(chordThinUnder);
 		// The sequence leaves out what the chord limit does at this target, so it is stale now.
 		cachedSequence = null;
 	}
@@ -1748,11 +1762,17 @@ public final class MidicraftConfig {
 	}
 
 	/**
-	 * The chord limit as preview, the analysis and the build apply it: the target, and whether volume
-	 * and strikes may give way to reach it.
+	 * The chord limit as preview, the analysis and the build apply it to {@code song}: the target,
+	 * which is the song's max notes per chord less {@link #chordThinUnder()}, and whether volume and
+	 * strikes may give way to reach it.
 	 */
-	public ChordSkips.Rules chordFitRules() {
-		return new ChordSkips.Rules(chordThinTarget, thinChordsByVolume, thinChordsByStrikes);
+	public ChordSkips.Rules chordFitRules(ComposerProject song) {
+		return new ChordSkips.Rules(chordThinTarget(song), thinChordsByVolume, thinChordsByStrikes);
+	}
+
+	/** How many notes {@code song}'s chords are thinned to; never under one. */
+	public int chordThinTarget(ComposerProject song) {
+		return ChordThinner.targetUnder(song.maxNotesPerChord(), chordThinUnder);
 	}
 
 	public int layerPanelWidth() {
@@ -1860,7 +1880,7 @@ public final class MidicraftConfig {
 		config.midiInstrumentSource = MidiInstrumentSource.FROM_FILE_THEN_NAME;
 		config.composerSpeedQuarters = DEFAULT_COMPOSER_SPEED_QUARTERS;
 		config.midiVelocityCutoff = DEFAULT_MIDI_VELOCITY_CUTOFF;
-		config.chordThinTarget = DEFAULT_CHORD_THIN_TARGET;
+		config.chordThinUnder = DEFAULT_CHORD_THIN_UNDER;
 		config.thinChordsByVolume = true;
 		config.thinChordsByStrikes = true;
 		config.composerGuiScale = DEFAULT_COMPOSER_GUI_SCALE;
@@ -1977,8 +1997,8 @@ public final class MidicraftConfig {
 		return Math.max(MIN_MIDI_VELOCITY_CUTOFF, Math.min(MAX_MIDI_VELOCITY_CUTOFF, velocity));
 	}
 
-	private static int clampChordThinTarget(int target) {
-		return Math.max(MIN_CHORD_THIN_TARGET, Math.min(MAX_CHORD_THIN_TARGET, target));
+	private static int clampChordThinUnder(int under) {
+		return Math.max(MIN_CHORD_THIN_UNDER, Math.min(MAX_CHORD_THIN_UNDER, under));
 	}
 
 	private static int clampLayerPanelWidth(int pixels) {
@@ -2074,6 +2094,8 @@ public final class MidicraftConfig {
 		private String midiDefaultInstrument;
 		private MidiInstrumentSource midiInstrumentSource;
 		private Integer midiVelocityCutoff;
+		private Integer chordThinUnder;
+		/** The absolute target this was before it was relative, read once and never written. */
 		private Integer chordThinTarget;
 		private Boolean thinChordsByVolume;
 		private Boolean thinChordsByStrikes;
@@ -2162,7 +2184,7 @@ public final class MidicraftConfig {
 			this.midiDefaultInstrument = config.midiDefaultInstrument;
 			this.midiInstrumentSource = config.midiInstrumentSource;
 			this.midiVelocityCutoff = config.midiVelocityCutoff;
-			this.chordThinTarget = config.chordThinTarget;
+			this.chordThinUnder = config.chordThinUnder;
 			this.thinChordsByVolume = config.thinChordsByVolume;
 			this.thinChordsByStrikes = config.thinChordsByStrikes;
 			this.composerGuiScale = config.composerGuiScale;
