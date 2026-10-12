@@ -1,5 +1,6 @@
 package com.midicraft.client.composer;
 
+import com.midicraft.InstrumentRanges;
 import com.midicraft.client.composer.ComposerProject.Layer;
 import com.midicraft.client.composer.ComposerProject.NoteEvent;
 import java.util.ArrayList;
@@ -117,70 +118,9 @@ public final class ChordThinner {
 	public static Result thin(ComposerProject project, ChordSkips.Rules thinning,
 			boolean dedupeIdentical, Set<Integer> fromLayers) {
 		int cap = Math.max(MIN_TARGET, Math.min(MAX_TARGET, thinning.target()));
-		Map<Long, Map<Voice, List<NoteEvent>>> byTick = new TreeMap<>();
-		// A sound with a copy in a layer that is not on offer cannot go: removing it would mean
-		// deleting that copy too, and reaching into layers nobody selected is not thinning, it is
-		// editing something else.
-		Map<Long, Set<Voice>> blocked = new HashMap<>();
-		double finest = project.anyBuildLayerSustains() ? project.finestSustainStep() : 0.0;
-		// Chords are weighed after what the chord limit leaves out at this same target, the way
-		// preview and the build hear them: a tick the skips already fit has nothing to thin.
-		ChordSkips skips = ChordSkips.of(project, dedupeIdentical,
-			new ChordSkips.Rules(cap, thinning.volume(), thinning.strikes()), finest);
-		int layerIndex = -1;
-		for (Layer layer : project.layers()) {
-			layerIndex++;
-			// Only what the build would place: a layer left out of the sequence cannot overload a
-			// tick it is not part of, and an out-of-range note is not placed at all.
-			if (!layer.inBuild()) {
-				continue;
-			}
-			// A split layer's notes are never on offer, only counted. Deleting a note the document
-			// stores once removes every voice it doubles into at once, so taking "one sound" from a
-			// split layer could silently take two -- and the doubling on those layers is the point
-			// of them, not padding to spare. They still weigh their full expanded size against the
-			// thirty, so thinning the ordinary layers around them stays honest.
-			boolean offered = (fromLayers == null || fromLayers.contains(layerIndex))
-				&& layer.split() == null;
-			// Sustains are weighed as the build places them, strikes and all, but a strike is never
-			// on offer: it carries its note's id, and taking it would delete the whole held note to
-			// lighten one tick of it.
-			Layer placed = project.placedForBuild(layer, finest);
-			Map<Long, Long> writtenStart = placed == layer ? null : SongAnalysis.writtenStarts(layer);
-			List<Layer> voiceLayers = placed.buildVoices();
-			for (int voiceIndex = 0; voiceIndex < voiceLayers.size(); voiceIndex++) {
-				Layer voiceLayer = voiceLayers.get(voiceIndex);
-				// A counted voice places a note block per copy, so every copy is its own sound in
-				// the chord: never merged by deduplication, and never on offer. The count is a
-				// choice about loudness somebody made in the palette, not doubling to spare.
-				int copies = voiceLayer.copies();
-				for (NoteEvent note : voiceLayer.notes()) {
-					// The same clause as the analysis: an out-of-range note is not placed at all,
-					// and a sound effect has no range to be outside of.
-					if (voiceLayer.pitched() && !note.isBuildable()) {
-						continue;
-					}
-					if (skips.skips(layerIndex, note.id(), note.startTick())) {
-						continue;
-					}
-					int played = skips.copiesAt(layerIndex, voiceIndex, note.id(), note.startTick(), copies);
-					boolean strike = writtenStart != null
-						&& writtenStart.getOrDefault(note.id(), note.startTick()) != note.startTick();
-					for (int copy = 0; copy < played; copy++) {
-						Voice voice = copies > 1
-							? new Voice(voiceLayer.instrument(), note.midiNote(), note.id(), copy + 1)
-							: new Voice(voiceLayer.instrument(), note.midiNote(),
-								dedupeIdentical ? 0L : note.id(), 0);
-						byTick.computeIfAbsent(note.startTick(), tick -> new LinkedHashMap<>())
-							.computeIfAbsent(voice, key -> new ArrayList<>())
-							.add(note);
-						if (!offered || copies > 1 || strike) {
-							blocked.computeIfAbsent(note.startTick(), tick -> new HashSet<>()).add(voice);
-						}
-					}
-				}
-			}
-		}
+		Chords chords = collect(project, cap, thinning, dedupeIdentical, fromLayers);
+		Map<Long, Map<Voice, List<NoteEvent>>> byTick = chords.byTick();
+		Map<Long, Set<Voice>> blocked = chords.blocked();
 
 		Set<Long> doomed = new LinkedHashSet<>();
 		int chordsOver = 0;
@@ -224,6 +164,209 @@ public final class ChordThinner {
 		}
 		return new Result(Set.copyOf(doomed), chordsOver, chordsThinned, soundsRemoved,
 			chordsStillOver);
+	}
+
+	/** Which end of a chord to keep: the highest notes or the lowest. */
+	public enum End {
+		TOP,
+		BOTTOM
+	}
+
+	/**
+	 * Every chord over {@code thinning}'s target cut to the target by keeping its top or bottom
+	 * sounds and taking the rest, for bringing a song down to a peak it can be built at -- one note
+	 * a chord, say, so that its lanes pack.
+	 *
+	 * <p>Unlike {@link #thin} this will take the last of a pitch or an instrument: which notes go is
+	 * decided by where they sit, and that is the point. The chord is still weighed across every
+	 * layer in the build and only notes in {@code fromLayers} are taken, so keeping the top of a
+	 * chord while the bass layer is selected takes the bass notes under it. Where what has to stay
+	 * is not on offer -- the melody above them on a layer not selected, or a strike of a held note --
+	 * the chord keeps more than the target and is counted as still over.</p>
+	 *
+	 * <p>Weighed by the note rather than the sound, because a note is what is deleted: one on a
+	 * melodic or composite layer places a block per voice it expands into, and one on a counted
+	 * voice a block per copy, and keeping it keeps all of them. Notes on the same pitch are kept from
+	 * the layer highest in the panel. Percussion -- the drum instruments and sound effects -- has no
+	 * place in the order: with {@code keepPercussion} it is never taken and uses up the room first,
+	 * and without it it is kept only where the tuned notes leave room.</p>
+	 */
+	public static Result keepEnds(ComposerProject project, ChordSkips.Rules thinning,
+			boolean dedupeIdentical, Set<Integer> fromLayers, End end, boolean keepPercussion) {
+		int cap = Math.max(MIN_TARGET, Math.min(MAX_TARGET, thinning.target()));
+		Chords chords = collect(project, cap, thinning, dedupeIdentical, fromLayers);
+		Set<Long> doomed = new LinkedHashSet<>();
+		int chordsOver = 0;
+		int chordsThinned = 0;
+		int soundsRemoved = 0;
+		int chordsStillOver = 0;
+		for (Map.Entry<Long, Map<Voice, List<NoteEvent>>> entry : chords.byTick().entrySet()) {
+			Map<Voice, List<NoteEvent>> chord = entry.getValue();
+			if (chord.size() <= cap) {
+				continue;
+			}
+			chordsOver++;
+			// Kept percussion takes its room before anything has a place.
+			Set<Voice> kept = new HashSet<>();
+			List<Unit> ranked = new ArrayList<>();
+			for (Unit unit : chords.units().getOrDefault(entry.getKey(), Map.of()).values()) {
+				if (keepPercussion && unit.percussion) {
+					kept.addAll(unit.sounds);
+				} else {
+					ranked.add(unit);
+				}
+			}
+			Comparator<Unit> byPitch = end == End.TOP
+				? Comparator.<Unit>comparingInt(unit -> -unit.high)
+				: Comparator.<Unit>comparingInt(unit -> unit.low);
+			ranked.sort(Comparator
+				// Tuned notes first, kept or taken by where they sit; percussion after, with no place.
+				.<Unit>comparingInt(unit -> unit.percussion ? 1 : 0)
+				.thenComparing(byPitch)
+				.thenComparingInt(unit -> unit.layer)
+				.thenComparingLong(unit -> unit.id));
+			// Each note kept while what it places still fits. A note is all its sounds or none of
+			// them -- every voice a melodic or composite layer expands it into, every copy of a
+			// counted voice -- since deleting it takes them all. One too big for the room left is
+			// passed over for the next one down that fits, rather than the chord left emptier.
+			// A note that cannot be taken -- on a layer not selected, or a held note's strike -- is
+			// kept where it stands, so it only crowds out what sits past it.
+			int taken = 0;
+			for (Unit unit : ranked) {
+				Set<Voice> with = new HashSet<>(kept);
+				with.addAll(unit.sounds);
+				if (unit.blocked || with.size() <= cap) {
+					kept = with;
+				} else {
+					doomed.add(unit.id);
+					taken++;
+				}
+			}
+			// Measured on the sounds rather than the notes: a sound merged from two layers only goes
+			// when every note playing it does.
+			soundsRemoved += chord.size() - kept.size();
+			if (taken > 0) {
+				chordsThinned++;
+			}
+			if (kept.size() > cap) {
+				chordsStillOver++;
+			}
+		}
+		return new Result(Set.copyOf(doomed), chordsOver, chordsThinned, soundsRemoved,
+			chordsStillOver);
+	}
+
+	/** One stored note on one tick, and every sound it places there. */
+	private static final class Unit {
+		final int layer;
+		final long id;
+		final Set<Voice> sounds = new LinkedHashSet<>();
+		int high = Integer.MIN_VALUE;
+		int low = Integer.MAX_VALUE;
+		/** Whether everything it places is percussion: drums, or sound effects. */
+		boolean percussion = true;
+		/** On a layer not on offer, or a strike of a held note. */
+		boolean blocked;
+
+		Unit(int layer, long id) {
+			this.layer = layer;
+			this.id = id;
+		}
+	}
+
+	private record UnitKey(int layer, long id) {
+	}
+
+	/** Every chord the build would place, and what in each may not be taken. */
+	private record Chords(Map<Long, Map<Voice, List<NoteEvent>>> byTick, Map<Long, Set<Voice>> blocked,
+			Map<Long, Map<UnitKey, Unit>> units) {
+	}
+
+	/**
+	 * The chords as the build counts them, after what the chord limit leaves out at {@code cap},
+	 * with every sound that is not on offer -- out of {@code fromLayers}, on a split layer, a
+	 * counted voice's copy or a sustain's strike -- marked as blocked.
+	 */
+	private static Chords collect(ComposerProject project, int cap, ChordSkips.Rules thinning,
+			boolean dedupeIdentical, Set<Integer> fromLayers) {
+		Map<Long, Map<Voice, List<NoteEvent>>> byTick = new TreeMap<>();
+		// A sound with a copy in a layer that is not on offer cannot go: removing it would mean
+		// deleting that copy too, and reaching into layers nobody selected is not thinning, it is
+		// editing something else.
+		Map<Long, Set<Voice>> blocked = new HashMap<>();
+		Map<Long, Map<UnitKey, Unit>> units = new HashMap<>();
+		double finest = project.anyBuildLayerSustains() ? project.finestSustainStep() : 0.0;
+		// Chords are weighed after what the chord limit leaves out at this same target, the way
+		// preview and the build hear them: a tick the skips already fit has nothing to thin.
+		ChordSkips skips = ChordSkips.of(project, dedupeIdentical,
+			new ChordSkips.Rules(cap, thinning.volume(), thinning.strikes()), finest);
+		int layerIndex = -1;
+		for (Layer layer : project.layers()) {
+			layerIndex++;
+			// Only what the build would place: a layer left out of the sequence cannot overload a
+			// tick it is not part of, and an out-of-range note is not placed at all.
+			if (!layer.inBuild()) {
+				continue;
+			}
+			// A split layer's notes are never on offer, only counted. Deleting a note the document
+			// stores once removes every voice it doubles into at once, so taking "one sound" from a
+			// split layer could silently take two -- and the doubling on those layers is the point
+			// of them, not padding to spare. They still weigh their full expanded size against the
+			// thirty, so thinning the ordinary layers around them stays honest.
+			boolean inScope = fromLayers == null || fromLayers.contains(layerIndex);
+			boolean offered = inScope && layer.split() == null;
+			// Sustains are weighed as the build places them, strikes and all, but a strike is never
+			// on offer: it carries its note's id, and taking it would delete the whole held note to
+			// lighten one tick of it.
+			Layer placed = project.placedForBuild(layer, finest);
+			Map<Long, Long> writtenStart = placed == layer ? null : SongAnalysis.writtenStarts(layer);
+			List<Layer> voiceLayers = placed.buildVoices();
+			for (int voiceIndex = 0; voiceIndex < voiceLayers.size(); voiceIndex++) {
+				Layer voiceLayer = voiceLayers.get(voiceIndex);
+				// A counted voice places a note block per copy, so every copy is its own sound in
+				// the chord: never merged by deduplication, and never on offer. The count is a
+				// choice about loudness somebody made in the palette, not doubling to spare.
+				int copies = voiceLayer.copies();
+				for (NoteEvent note : voiceLayer.notes()) {
+					// The same clause as the analysis: an out-of-range note is not placed at all,
+					// and a sound effect has no range to be outside of.
+					if (voiceLayer.pitched() && !note.isBuildable()) {
+						continue;
+					}
+					if (skips.skips(layerIndex, note.id(), note.startTick())) {
+						continue;
+					}
+					int played = skips.copiesAt(layerIndex, voiceIndex, note.id(), note.startTick(), copies);
+					boolean strike = writtenStart != null
+						&& writtenStart.getOrDefault(note.id(), note.startTick()) != note.startTick();
+					for (int copy = 0; copy < played; copy++) {
+						Voice voice = copies > 1
+							? new Voice(voiceLayer.instrument(), note.midiNote(), note.id(), copy + 1)
+							: new Voice(voiceLayer.instrument(), note.midiNote(),
+								dedupeIdentical ? 0L : note.id(), 0);
+						byTick.computeIfAbsent(note.startTick(), tick -> new LinkedHashMap<>())
+							.computeIfAbsent(voice, key -> new ArrayList<>())
+							.add(note);
+						// The note as Keep top and Keep bottom weigh it: everything it places here.
+						int at = layerIndex;
+						Unit unit = units.computeIfAbsent(note.startTick(), tick -> new LinkedHashMap<>())
+							.computeIfAbsent(new UnitKey(at, note.id()), key -> new Unit(at, note.id()));
+						unit.sounds.add(voice);
+						unit.high = Math.max(unit.high, note.midiNote());
+						unit.low = Math.min(unit.low, note.midiNote());
+						// Drums take a pitch on a note block, but where they sit says nothing about
+						// the harmony, so they are no chord's top or bottom.
+						unit.percussion &= !voiceLayer.pitched()
+							|| InstrumentRanges.isPercussion(voiceLayer.instrument());
+						unit.blocked |= !inScope || strike;
+						if (!offered || copies > 1 || strike) {
+							blocked.computeIfAbsent(note.startTick(), tick -> new HashSet<>()).add(voice);
+						}
+					}
+				}
+			}
+		}
+		return new Chords(byTick, blocked, units);
 	}
 
 	/**

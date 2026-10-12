@@ -443,6 +443,8 @@ public final class MidicraftConfig {
 	private boolean thinChordsByVolume;
 	/** Whether a chord over the target may skip a sustain strike. */
 	private boolean thinChordsByStrikes;
+	/** Whether Select > Overloaded chords > Keep top or Keep bottom leaves percussion alone. */
+	private boolean keepPercussionInChords;
 	private int composerGuiScale;
 	private int layerPanelWidth;
 	private boolean layerPanelCollapsed;
@@ -717,6 +719,8 @@ public final class MidicraftConfig {
 				);
 				instance.thinChordsByVolume = stored.thinChordsByVolume == null || stored.thinChordsByVolume;
 				instance.thinChordsByStrikes = stored.thinChordsByStrikes == null || stored.thinChordsByStrikes;
+				instance.keepPercussionInChords = stored.keepPercussionInChords != null
+					&& stored.keepPercussionInChords;
 				instance.setComposerGuiScale(stored.composerGuiScale == null
 					? DEFAULT_COMPOSER_GUI_SCALE
 					: stored.composerGuiScale);
@@ -1756,6 +1760,14 @@ public final class MidicraftConfig {
 		return thinChordsByStrikes;
 	}
 
+	public boolean keepPercussionInChords() {
+		return keepPercussionInChords;
+	}
+
+	public void setKeepPercussionInChords(boolean keepPercussionInChords) {
+		this.keepPercussionInChords = keepPercussionInChords;
+	}
+
 	public void setThinChordsByStrikes(boolean thinChordsByStrikes) {
 		this.thinChordsByStrikes = thinChordsByStrikes;
 		cachedSequence = null;
@@ -1883,6 +1895,7 @@ public final class MidicraftConfig {
 		config.chordThinUnder = DEFAULT_CHORD_THIN_UNDER;
 		config.thinChordsByVolume = true;
 		config.thinChordsByStrikes = true;
+		config.keepPercussionInChords = false;
 		config.composerGuiScale = DEFAULT_COMPOSER_GUI_SCALE;
 		config.layerPanelWidth = DEFAULT_LAYER_PANEL_WIDTH;
 		config.layerPanelCollapsed = false;
@@ -2099,6 +2112,7 @@ public final class MidicraftConfig {
 		private Integer chordThinTarget;
 		private Boolean thinChordsByVolume;
 		private Boolean thinChordsByStrikes;
+		private Boolean keepPercussionInChords;
 		private Integer composerGuiScale;
 		private Integer layerPanelWidth;
 		private Boolean layerPanelCollapsed;
@@ -2187,6 +2201,7 @@ public final class MidicraftConfig {
 			this.chordThinUnder = config.chordThinUnder;
 			this.thinChordsByVolume = config.thinChordsByVolume;
 			this.thinChordsByStrikes = config.thinChordsByStrikes;
+			this.keepPercussionInChords = config.keepPercussionInChords;
 			this.composerGuiScale = config.composerGuiScale;
 			this.layerPanelWidth = config.layerPanelWidth;
 			this.layerPanelCollapsed = config.layerPanelCollapsed;

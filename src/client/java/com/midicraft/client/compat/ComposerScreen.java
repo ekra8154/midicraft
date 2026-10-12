@@ -2792,7 +2792,11 @@ public final class ComposerScreen extends Screen {
 				rows.add(MenuRow.of(ToolbarSubmenu.END));
 			}
 			case SONG -> addActionRows(rows, ToolbarAction.SONG_ACTIONS);
-			case SELECT -> addActionRows(rows, ToolbarAction.SELECT_ACTIONS);
+			case SELECT -> {
+				addActionRows(rows, ToolbarAction.SELECT_ACTIONS);
+				// Where the single Overloaded chords row stood, after Out of range.
+				rows.add(6, MenuRow.of(ToolbarSubmenu.OVERLOADED));
+			}
 			// Settings opens a screen from the bar, so it never hangs a panel of its own.
 			case SETTINGS, NONE -> {
 			}
@@ -2893,7 +2897,8 @@ public final class ComposerScreen extends Screen {
 			case SELECT_ODD_TICKS -> parityCounts()[1] > 0 && parityCounts()[0] > 0;
 			case SELECT_TOO_FREQUENT -> !projectStats().crowdedNotes().isEmpty();
 			case SELECT_OUT_OF_RANGE -> projectStats().outOfRange() > 0;
-			case SELECT_OVERLOADED_CHORDS -> overloadedTicks().length > 0;
+			case SELECT_OVERLOADED_CHORDS, SELECT_OVERLOADED_KEEP_TOP, SELECT_OVERLOADED_KEEP_BOTTOM ->
+				overloadedTicks().length > 0;
 			case SELECT_THINNED -> !projectStats().skips().thinnedNoteIds().isEmpty();
 			case SELECT_STACKED -> project().layers().stream()
 				.anyMatch(layer -> layer.visible() && !layer.stackedExtras().isEmpty());
@@ -3040,6 +3045,8 @@ public final class ComposerScreen extends Screen {
 			case SELECT_OUT_OF_RANGE -> selectNotesWhere("out of range",
 				(layer, note) -> layer.outOfRange(note), true);
 			case SELECT_OVERLOADED_CHORDS -> selectOverloadedChordNotes();
+			case SELECT_OVERLOADED_KEEP_TOP -> selectChordEnds(ChordThinner.End.TOP);
+			case SELECT_OVERLOADED_KEEP_BOTTOM -> selectChordEnds(ChordThinner.End.BOTTOM);
 			case SELECT_THINNED -> selectThinnedNotes();
 			case SELECT_STACKED -> selectStackedNotes();
 			case SELECT_ALL_NOTES -> selectNotesWhere("selected", note -> true, false);
@@ -3437,6 +3444,57 @@ public final class ComposerScreen extends Screen {
 	 * at the layers being edited, while what a chord can spare depends on the whole chord and the
 	 * limit applies to every layer that is going into the build.</p>
 	 */
+	/**
+	 * Selects everything in each red chord but its top or bottom notes, as many as the song's max
+	 * notes per chord allows.
+	 *
+	 * <p>Weighed like {@link #selectOverloadedChordNotes}: the chord is as big as every layer going
+	 * into the build makes it, and only the selected layers give up notes. So keeping the top with
+	 * the bass layer selected takes the bass notes under the melody.</p>
+	 */
+	private void selectChordEnds(ChordThinner.End end) {
+		int target = project().maxNotesPerChord();
+		ChordSkips.Rules rules = config.chordFitRules(project());
+		Set<Integer> scope = selectableScope();
+		ChordThinner.Result kept = ChordThinner.keepEnds(project(),
+			new ChordSkips.Rules(target, rules.volume(), rules.strikes()), project().dedupesIdentical(),
+			scope, end, config.keepPercussionInChords());
+		selectedNotes.clear();
+		selectedNotes.addAll(kept.noteIds());
+		clearRange();
+		updateButtonStates();
+		int layerCount = project().layers().size();
+		String where = scope.size() == layerCount
+			? "All " + layerCount + " layers"
+			: scope.size() + " of " + layerCount + " layers";
+		String which = end == ChordThinner.End.TOP ? "top" : "bottom";
+		if (kept.chordsOver() == 0) {
+			showResult(Component.literal("No chord is over " + target + " - nothing to select."));
+			return;
+		}
+		StringBuilder summary = new StringBuilder(where + ": kept the " + which + " " + target
+			+ " of " + kept.chordsOver() + " chords over " + target + ", " + kept.noteIds().size()
+			+ " notes (" + kept.soundsRemoved() + " sounds) selected. Delete to remove them, "
+			+ "Escape to keep them.");
+		if (kept.chordsStillOver() > 0) {
+			summary.append(' ').append(kept.chordsStillOver()).append(" still over: what has to stay "
+				+ "is on a layer not selected, or a held note's strike.");
+		}
+		showResult(Component.literal(summary.toString()));
+	}
+
+	/** The selected layers the Select menu may take notes from: the visible ones. */
+	private Set<Integer> selectableScope() {
+		Set<Integer> scope = new LinkedHashSet<>();
+		for (int layerIndex : selectionLayers()) {
+			if (layerIndex >= 0 && layerIndex < project().layers().size()
+					&& project().layers().get(layerIndex).visible()) {
+				scope.add(layerIndex);
+			}
+		}
+		return scope;
+	}
+
 	private void selectOverloadedChordNotes() {
 		// The song's own max notes per chord decides which chords are over, and is what they are
 		// thinned down to: the red columns are the chords this is for.
@@ -3580,6 +3638,12 @@ public final class ComposerScreen extends Screen {
 			case SELECT_OVERLOADED_CHORDS -> "Select the least important notes in the red chords, "
 				+ "the ones over Song > Max notes per chord, to hear the song without them before "
 				+ "deleting. Never the last of a pitch or instrument. Selected layers only.";
+			case SELECT_OVERLOADED_KEEP_TOP -> "Select everything in the red chords but their highest "
+				+ "notes, as many as Song > Max notes per chord allows. Chords are judged across "
+				+ "every layer; notes are only taken from the selected ones.";
+			case SELECT_OVERLOADED_KEEP_BOTTOM -> "Select everything in the red chords but their "
+				+ "lowest notes, as many as Song > Max notes per chord allows. Chords are judged "
+				+ "across every layer; notes are only taken from the selected ones.";
 			case SELECT_STACKED -> "Select duplicate notes stacked on the same spot, so Delete "
 				+ "leaves one. Stacks only play once, so nothing you hear changes.";
 			case SELECT_THINNED -> "Select notes the chord limit plays quieter or skips "
@@ -11941,6 +12005,13 @@ public final class ComposerScreen extends Screen {
 		END("End", "Where the song stops, which is a delay the build has to place like any other.",
 			new ToolbarAction[] {ToolbarAction.SNAP_END, ToolbarAction.TRIM_END},
 			new String[] {"Snap to grid", "Trim to last note"}, -1),
+		OVERLOADED("Overloaded chords", "Select notes in the red chords, the ones over Song > Max "
+				+ "notes per chord, to hear the song without them before deleting.",
+			new ToolbarAction[] {
+				ToolbarAction.SELECT_OVERLOADED_CHORDS, ToolbarAction.SELECT_OVERLOADED_KEEP_TOP,
+				ToolbarAction.SELECT_OVERLOADED_KEEP_BOTTOM
+			},
+			new String[] {"Least important", "Keep top", "Keep bottom"}, -1),
 		MARKERS("Markers", "Named positions on the timeline. "
 				+ "Not built and make no sound; just labels for finding parts of the song.",
 			new ToolbarAction[] {
@@ -12039,6 +12110,8 @@ public final class ComposerScreen extends Screen {
 		SELECT_TOO_FREQUENT("Too frequent"),
 		SELECT_OUT_OF_RANGE("Out of range"),
 		SELECT_OVERLOADED_CHORDS("Overloaded chords"),
+		SELECT_OVERLOADED_KEEP_TOP("Overloaded chords: keep top"),
+		SELECT_OVERLOADED_KEEP_BOTTOM("Overloaded chords: keep bottom"),
 		SELECT_THINNED("Thinned to fit"),
 		SELECT_STACKED("Stacked notes"),
 		SELECT_ALL_NOTES("Everything"),
@@ -12063,7 +12136,7 @@ public final class ComposerScreen extends Screen {
 		private static final ToolbarAction[] SELECT_ACTIONS = {
 			SELECT_OFF_GRID, SELECT_HALF_TICKED, SELECT_EVEN_TICKS, SELECT_ODD_TICKS,
 			SELECT_TOO_FREQUENT, SELECT_OUT_OF_RANGE,
-			SELECT_OVERLOADED_CHORDS, SELECT_THINNED, SELECT_STACKED, SELECT_ALL_NOTES, SELECT_NONE
+			SELECT_THINNED, SELECT_STACKED, SELECT_ALL_NOTES, SELECT_NONE
 		};
 		private final String label;
 		/** Whether the action can be limited to the selected notes. Tempo is a property of the

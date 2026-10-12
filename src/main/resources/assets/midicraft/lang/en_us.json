@@ -88,6 +88,8 @@
   "tooltip.midicraft.chord_thin_volume": "Plays counted instruments (like harp ×3) with fewer copies in big chords.",
   "option.midicraft.chord_thin_strikes": "Thin by skipping strikes",
   "tooltip.midicraft.chord_thin_strikes": "On a chord still over the target, skip a sustain strike. The held note rings on from the strike before, and never loses two in a row. Nothing is deleted.",
+  "option.midicraft.chord_keep_percussion": "Keep top/bottom keeps percussion",
+  "tooltip.midicraft.chord_keep_percussion": "For Select > Overloaded chords > Keep top and Keep bottom. On: percussion is never selected and takes its room in the chord first. Off: percussion is selected before any pitched note.",
   "option.midicraft.midi_ignore_percussion": "Ignore percussion",
   "tooltip.midicraft.midi_ignore_percussion": "Skips MIDI channel 10, which is usually drums.",
   "option.midicraft.midi_default_instrument": "Default import instrument",

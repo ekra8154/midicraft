@@ -736,6 +736,8 @@ public final class SettingsScreen extends Screen {
 					MidicraftConfig::thinChordsByVolume, config::setThinChordsByVolume)));
 				entries.add(Entry.of(toggle("chord_thin_strikes",
 					MidicraftConfig::thinChordsByStrikes, config::setThinChordsByStrikes)));
+				entries.add(Entry.of(toggle("chord_keep_percussion",
+					MidicraftConfig::keepPercussionInChords, config::setKeepPercussionInChords)));
 
 				// What is left of import: which instrument a track arrives as, and the one setting
 				// that still drops notes on the way in. Everything else an import used to decide
