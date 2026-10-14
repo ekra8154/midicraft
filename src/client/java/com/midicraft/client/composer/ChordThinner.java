@@ -321,6 +321,13 @@ public final class ChordThinner {
 			Layer placed = project.placedForBuild(layer, finest);
 			Map<Long, Long> writtenStart = placed == layer ? null : SongAnalysis.writtenStarts(layer);
 			List<Layer> voiceLayers = placed.buildVoices();
+			// Where each note is written, which is where it sits for keeping the top or bottom. A
+			// melodic layer's voices carry their notes moved into their instrument's window -- a bass
+			// voice's two octaves up -- so their own pitches would put the bass on top.
+			Map<Long, Integer> written = new HashMap<>();
+			for (NoteEvent note : layer.notes()) {
+				written.putIfAbsent(note.id(), note.midiNote());
+			}
 			for (int voiceIndex = 0; voiceIndex < voiceLayers.size(); voiceIndex++) {
 				Layer voiceLayer = voiceLayers.get(voiceIndex);
 				// A counted voice places a note block per copy, so every copy is its own sound in
@@ -352,8 +359,9 @@ public final class ChordThinner {
 						Unit unit = units.computeIfAbsent(note.startTick(), tick -> new LinkedHashMap<>())
 							.computeIfAbsent(new UnitKey(at, note.id()), key -> new Unit(at, note.id()));
 						unit.sounds.add(voice);
-						unit.high = Math.max(unit.high, note.midiNote());
-						unit.low = Math.min(unit.low, note.midiNote());
+						int pitch = written.getOrDefault(note.id(), note.midiNote());
+						unit.high = Math.max(unit.high, pitch);
+						unit.low = Math.min(unit.low, pitch);
 						// Drums take a pitch on a note block, but where they sit says nothing about
 						// the harmony, so they are no chord's top or bottom.
 						unit.percussion &= !voiceLayer.pitched()

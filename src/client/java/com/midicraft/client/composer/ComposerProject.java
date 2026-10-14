@@ -3540,7 +3540,16 @@ public record ComposerProject(
 			}
 		}
 		double repeater = SongAnalysis.redstoneTickSpan(this);
-		double grid = SongAnalysis.ofWritten(this, true).lanesNeeded() == 2 ? repeater / 2.0 : repeater;
+		boolean twoLanes = SongAnalysis.ofWritten(this, true).lanesNeeded() == 2;
+		double span = twoLanes ? repeater / 2.0 : repeater;
+		// The quantizer's own grid where it is a whole number of song ticks to the build tick and no
+		// narrower than one. Snap tempo leaves the span a hair under a whole number on purpose --
+		// 120.9995 against notes 121 apart -- and strikes counted in the exact span slid a tick
+		// behind the notes over the length of a song: 120 apart from the next note, which reads as
+		// faster than a game tick, or one tick beside it. 322 of them on A Dark Zone v2.
+		RepeaterGrid build = buildGrid(twoLanes);
+		double grid = build.repeaterTicks() == 1L && build.gridTicks() >= span - 1.0e-9
+			? build.gridTicks() : span;
 		synchronized (SUSTAIN_GRIDS) {
 			SUSTAIN_GRIDS.add(Map.entry(this, grid));
 			if (SUSTAIN_GRIDS.size() > 4) {

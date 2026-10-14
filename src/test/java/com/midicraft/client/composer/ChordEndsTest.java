@@ -138,6 +138,27 @@ class ChordEndsTest {
 			ChordThinner.End.BOTTOM, false).noteIds());
 	}
 
+	/**
+	 * Top and bottom are where the notes are written. A melodic layer's bass voice carries its notes
+	 * two octaves up into the note-block window, which put a written 50 above a written 60 and
+	 * kept the bass as the "top".
+	 */
+	@Test
+	void aMelodicLayerIsRankedWhereItsNotesAreWritten() {
+		ComposerProject song = new ComposerProject("Song", ComposerProject.DEFAULT_PPQ,
+			ComposerProject.DEFAULT_TEMPO_MICROS_PER_QUARTER,
+			List.of(new Layer("Piano", "HARP", false, true, true, List.of(
+					new NoteEvent(BASS, 50, 0, 120, 90), new NoteEvent(INNER, 60, 0, 120, 90)))
+				.withSplit(new ComposerProject.Split(List.of(
+					new ComposerProject.Split.Voice("BASS", 30, 53, 1),
+					new ComposerProject.Split.Voice("HARP", 54, 78, 1))))),
+			0, 5L, 0L, ComposerProject.DEFAULT_SPEED_QUARTERS);
+		assertEquals(Set.of(BASS), ChordThinner.keepEnds(song, ChordSkips.Rules.at(1), true, null,
+			ChordThinner.End.TOP, false).noteIds(), "keeping the top takes the bass");
+		assertEquals(Set.of(INNER), ChordThinner.keepEnds(song, ChordSkips.Rules.at(1), true, null,
+			ChordThinner.End.BOTTOM, false).noteIds(), "keeping the bottom takes the harp");
+	}
+
 	/** Under the limit, nothing is touched. */
 	@Test
 	void aChordAtTheLimitIsLeftAlone() {

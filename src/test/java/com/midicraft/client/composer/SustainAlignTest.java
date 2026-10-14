@@ -73,6 +73,36 @@ class SustainAlignTest {
 			"and the song builds on the one lane it was written for");
 	}
 
+	/**
+	 * Strikes land where the quantizer puts notes. Snap tempo leaves a game tick a hair under a
+	 * whole number of song ticks -- 120.9995 at 198,348 microseconds -- and quantizes notes to the
+	 * whole number, 121. Struck in the exact span, a held note's strikes slid behind those notes
+	 * and came out 120 ticks after one, faster than a game tick: A Dark Zone v2, 322 of them.
+	 */
+	@Test
+	void strikesLandOnTheGridTheNotesWereQuantizedTo() {
+		List<NoteEvent> beat = new ArrayList<>();
+		// Every third game tick, so the song needs both lanes and its grid is the game tick.
+		for (long tick = 0L, id = 10L; tick < 150_000L; tick += 3L * 121L, id++) {
+			beat.add(new NoteEvent(id, 66, tick, 1L, 96));
+		}
+		Layer drums = new Layer("Beat", "HARP", false, true, true, beat);
+		Layer held = new Layer("Held", "BIT", false, true, true,
+			List.of(new NoteEvent(1L, 70, 0L, 149_000L, 96)))
+			.withSustain(new Sustain(true, SustainLength.QUARTER, SustainLength.REPEATER_TICK, true));
+		ComposerProject song = new ComposerProject("drift", 480, 198_348, List.of(drums, held), 0, 1000L,
+			150_000L, 4);
+		assertEquals(120.9995, SongAnalysis.redstoneTickSpan(song) / 2.0, 1e-3);
+		SongAnalysis stats = SongAnalysis.of(song, true);
+		assertEquals(0, stats.crowdedNotes().size(), "no strike is faster than a game tick from a note");
+		assertEquals(0, stats.offGridNotes().size());
+		List<Long> ticks = new ArrayList<>();
+		song.sustainStrikes(held, song.finestSustainStep())
+			.forEach(held.notes().getFirst(), 0L, Long.MAX_VALUE, ticks::add);
+		assertTrue(ticks.stream().allMatch(tick -> tick % 121L == 0L),
+			"every strike on the 121-tick grid the notes are on");
+	}
+
 	@Test
 	void aRateAlreadyOnTheGridIsLeftAlone() {
 		assertEquals(strikes(song(SustainLength.TWO_REPEATER_TICKS, false)),
