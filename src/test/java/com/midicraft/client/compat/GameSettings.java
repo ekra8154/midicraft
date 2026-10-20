@@ -34,8 +34,14 @@ final class GameSettings {
 	private GameSettings() {
 	}
 
-	/** The file the game reads, relative to the project root the tests run from. */
-	static final Path CONFIG = Path.of("run", "config", "midicraft.json");
+	/**
+	 * The file the game reads, relative to the project root the tests run from -- or another
+	 * install's, given as {@code -Dgame.config=<path to its config/midicraft.json>}, to answer for
+	 * the settings a player's own profile pastes with.
+	 */
+	static final Path CONFIG = System.getProperty("game.config") != null
+		? Path.of(System.getProperty("game.config"))
+		: Path.of("run", "config", "midicraft.json");
 
 	/** The keys the paste reads, typed as the game stores them, so a missing one reads null. */
 	private static final class Stored {

@@ -171,7 +171,7 @@ test {
  */
 def forwardProbeProperties(task) {
 	System.properties.each { key, value ->
-		if (['fault.', 'census.', 'probe.'].any { key.toString().startsWith(it) }) {
+		if (['fault.', 'census.', 'probe.', 'game.'].any { key.toString().startsWith(it) }) {
 			task.systemProperty(key.toString(), value)
 		}
 	}
