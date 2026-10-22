@@ -202,6 +202,8 @@ tasks.register('exportBuild', JavaExec) {
 	classpath = sourceSets.test.runtimeClasspath
 	mainClass = 'com.midicraft.client.compat.ExportBuild'
 	workingDir = projectDir
+	// -Dgame.config=<another install's midicraft.json> exports with that install's settings.
+	forwardProbeProperties(it)
 	systemProperty 'log4j2.configurationFile', file('gradle/log4j2-test.xml').toURI().toString()
 	systemProperty 'log4j.configurationFile', file('gradle/log4j2-test.xml').toURI().toString()
 }
