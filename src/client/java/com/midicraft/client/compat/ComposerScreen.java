@@ -561,6 +561,10 @@ public final class ComposerScreen extends Screen {
 	private Button addLayerButton;
 	private EditBox layerNameBox;
 	private boolean playing;
+	/** The composer whose song is playing under one of its popups. See {@link #tickBehindPopup}. */
+	private static ComposerScreen playingBehind;
+	/** Held by a full-screen popup over the composer, with the clock stopped. See {@link #underPanel}. */
+	private boolean pausedBehind;
 	private long playbackStartedAt;
 	/**
 	 * Where the clock is counting from, which is not where the marker goes back to.
@@ -990,6 +994,14 @@ public final class ComposerScreen extends Screen {
 	@Override
 	protected void init() {
 		arrivalNote = null;
+		// Back from a popup, whether the song played on under it or waited. What it changed -- a
+		// setting the preview reads, say -- changed nothing already scheduled, so the rest of the song
+		// is scheduled again.
+		if (playing) {
+			underPanel(true);
+			anchorPlayhead();
+			resetPlaybackSchedule();
+		}
 		clearWidgets();
 		rollY = TOOLBAR_HEIGHT + TIMELINE_RULER_HEIGHT;
 		rollHeight = Math.max(40, height - rollY - 24);
@@ -1691,7 +1703,6 @@ public final class ComposerScreen extends Screen {
 	 *     needs the Half-tick lane layout, and the status bar says so once this has run.
 	 */
 	private void convertToMinecraft(boolean gameTicks) {
-		stopPlayback();
 		// Asked before anything happens, because Convert is six operations and which of them run
 		// is a decision, not a constant. The popup writes the answers straight to the config, so
 		// this is also where those settings live. See {@link ConvertOptionsScreen}.
@@ -2147,7 +2158,10 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private void openSongs() {
-		withUnsavedChangesChecked(() -> McCompat.setScreen(new SongsScreen(parent, config)));
+		withUnsavedChangesChecked(() -> {
+			stopPlayback();
+			McCompat.setScreen(new SongsScreen(parent, config));
+		});
 	}
 
 	/**
@@ -8305,7 +8319,70 @@ public final class ComposerScreen extends Screen {
 	@Override
 	public void removed() {
 		ComposerScale.screenClosed(this);
+		// Whatever replaced this screen is one of its popups unless it is leaving, and every way of
+		// leaving stops playback first -- so a song still playing here is a song under a popup. It
+		// pauses where it is; a panel over it starts it again in its own added, which runs inside
+		// this same screen change, so the song does not miss a beat getting there.
+		playingBehind = playing ? this : null;
+		underPanel(false);
 		super.removed();
+	}
+
+	/**
+	 * Runs or pauses the song for a popup over it: running under a {@link ModalPanelScreen}, which
+	 * keeps this screen drawn behind it, and paused under anything that covers it.
+	 *
+	 * <p>A song you can watch is one you are editing as it plays -- Sustained notes, Convert and
+	 * Song info are all questions about the song on screen. A full screen hides the playhead the
+	 * notes are being heard against, so it holds the song and gives it back from the same place.</p>
+	 */
+	void underPanel(boolean running) {
+		if (!playing || pausedBehind == !running) {
+			return;
+		}
+		if (running) {
+			playbackStartedAt = Util.getMillis();
+		} else {
+			anchorPlayhead();
+		}
+		pausedBehind = !running;
+	}
+
+	/**
+	 * Advances a song playing under a panel the composer opened.
+	 *
+	 * <p>Playback is advanced from the screen's own tick, and the game only ticks the screen that is
+	 * showing -- so a panel used to silence the song, and on the way back it picked up wherever the
+	 * clock had got to with everything in between dropped as stale.</p>
+	 *
+	 * <p>Stopped instead when nothing of ours is up any more, or another composer is: those are
+	 * leaving, and a song playing behind the world or behind a different song is one nobody can see
+	 * to stop.</p>
+	 */
+	public static void tickBehindPopup(net.minecraft.client.Minecraft minecraft) {
+		ComposerScreen composer = playingBehind;
+		if (composer == null) {
+			return;
+		}
+		Screen showing = McCompat.screen();
+		if (showing == composer || !composer.playing) {
+			playingBehind = null;
+			return;
+		}
+		if (showing == null || showing instanceof ComposerScreen) {
+			composer.stopRecording("Stopped");
+			composer.stopPlayback();
+			playingBehind = null;
+			return;
+		}
+		if (composer.pausedBehind) {
+			return;
+		}
+		composer.updateCountIn();
+		composer.updatePlayback();
+		if (composer.recording && composer.countingInSince == 0L && !composer.playing) {
+			composer.stopRecording("Finished");
+		}
 	}
 
 	@Override
@@ -8610,6 +8687,7 @@ public final class ComposerScreen extends Screen {
 
 	private void stopPlayback() {
 		playing = false;
+		pausedBehind = false;
 		playbackEvents = List.of();
 		playbackEventIndex = 0;
 		if (playButton != null) {
@@ -8666,6 +8744,11 @@ public final class ComposerScreen extends Screen {
 	}
 
 	private long playbackTick() {
+		// The clock is stopped while a full-screen popup holds the song, so nothing that asks where
+		// it has got to -- an edit anchoring the playhead, say -- counts the pause as played.
+		if (pausedBehind) {
+			return playbackStartTick;
+		}
 		long elapsedMicros = Math.max(0L, Util.getMillis() - playbackStartedAt) * 1000L;
 		return playbackStartTick + Math.round(elapsedMicros * project().ppq() * timescaleFactor()
 			/ (double)project().tempoMicrosPerQuarter());
@@ -11006,7 +11089,6 @@ public final class ComposerScreen extends Screen {
 
 	/** Opens Song > Song info on the song as it stands. */
 	private void openSongInfo() {
-		stopPlayback();
 		McCompat.setScreen(new SongInfoScreen(this, project().name(), songInfoLines()));
 	}
 

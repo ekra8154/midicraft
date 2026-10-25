@@ -9,8 +9,8 @@ import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
 
 /**
- * A small panel over the screen that opened it: the shape Convert, Sustained notes and Song info
- * all take.
+ * A small panel over the screen that opened it: the shape Convert, Sustained notes, Song info and
+ * Song details all take.
  *
  * <p>The screen behind stays drawn, dimmed, because each of these is a question about the song on
  * it. Escape leaves, clicking outside the panel leaves, and Enter confirms -- only while nothing is
@@ -119,6 +119,24 @@ abstract class ModalPanelScreen extends Screen {
 		graphics.text(font, heading, panelLeft + PADDING, panelTop + PADDING, TEXT_COLOR, false);
 		super.extractRenderState(graphics, mouseX, mouseY, partialTick);
 		extractPanelContents(graphics, mouseX, mouseY);
+	}
+
+	/** The composer stays drawn behind a panel, so a song playing on it goes on playing. */
+	@Override
+	public void added() {
+		super.added();
+		if (parent instanceof ComposerScreen composer) {
+			composer.underPanel(true);
+		}
+	}
+
+	/** And holds where it is if what comes next covers it. Coming back to it starts it again. */
+	@Override
+	public void removed() {
+		if (parent instanceof ComposerScreen composer) {
+			composer.underPanel(false);
+		}
+		super.removed();
 	}
 
 	@Override

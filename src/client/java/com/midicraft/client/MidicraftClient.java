@@ -2,8 +2,10 @@ package com.midicraft.client;
 
 import com.midicraft.client.compat.CommandPasteSender;
 import com.midicraft.client.compat.ComposerCommand;
+import com.midicraft.client.compat.ComposerScreen;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
+import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 
 public final class MidicraftClient implements ClientModInitializer {
 	@Override
@@ -13,5 +15,6 @@ public final class MidicraftClient implements ClientModInitializer {
 		NoteBlockOverlay.INSTANCE.register();
 		CommandPasteSender.register();
 		ComposerCommand.register();
+		ClientTickEvents.END_CLIENT_TICK.register(ComposerScreen::tickBehindPopup);
 	}
 }

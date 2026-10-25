@@ -1,5 +1,7 @@
 .gradle/
 build/
+# VS Code Java extension output, one folder per source set.
+bin/
 run/
 *.launch
 .idea/

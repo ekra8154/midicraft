@@ -1,6 +1,5 @@
 package com.midicraft.client.compat;
 
-import com.midicraft.client.McCompat;
 import com.midicraft.client.composer.SongFile;
 import java.time.Instant;
 import java.time.ZoneId;
@@ -24,15 +23,21 @@ import net.minecraft.network.chat.Component;
  * and saved -- where it was read from, when it was first and last saved, and the versions that
  * wrote it -- and are shown, not edited, since a date or a source that could be typed over would
  * stop being worth reading.</p>
+ *
+ * <p>A panel over the composer like Song info, so the song stays in view and keeps playing while
+ * the details are filled in.</p>
  */
-final class SongDetailsScreen extends Screen {
+final class SongDetailsScreen extends ModalPanelScreen {
+	private static final int PANEL_WIDTH = 340;
 	private static final int FIELD_GAP = 34;
+	/** The label over each box. */
+	private static final int LABEL_HEIGHT = 11;
+	private static final int LINE_HEIGHT = 11;
 	private static final int LABEL_COLOR = 0xFF8A9098;
-	private static final int TEXT_COLOR = 0xFFD6D8DD;
+	private static final int FACT_COLOR = 0xFFD6D8DD;
 	private static final DateTimeFormatter WHEN = DateTimeFormatter
 		.ofPattern("MMM d, yyyy HH:mm", Locale.ROOT).withZone(ZoneId.systemDefault());
 
-	private final Screen parent;
 	private final SongFile.Details details;
 	private final Consumer<SongFile.Details> accept;
 	/** The name Tab fills the author box with, or {@code null}. See MidicraftConfig#suggestedAuthor. */
@@ -43,8 +48,7 @@ final class SongDetailsScreen extends Screen {
 
 	SongDetailsScreen(Screen parent, String songName, SongFile.Details details,
 			String authorSuggestion, Consumer<SongFile.Details> accept) {
-		super(Component.literal("Details of \"" + songName + "\""));
-		this.parent = parent;
+		super(Component.literal("Details of \"" + songName + "\""), parent);
 		this.details = details;
 		this.authorSuggestion = authorSuggestion == null || authorSuggestion.isBlank() ? null
 			: authorSuggestion;
@@ -53,9 +57,12 @@ final class SongDetailsScreen extends Screen {
 
 	@Override
 	protected void init() {
-		int boxWidth = boxWidth();
-		int left = (width - boxWidth) / 2;
-		int top = top();
+		// Three labelled boxes, the facts under them and the buttons along the bottom.
+		panel(PANEL_WIDTH, PADDING + TITLE_HEIGHT + LABEL_HEIGHT + 3 * FIELD_GAP
+			+ facts().size() * LINE_HEIGHT + 8 + BUTTON_HEIGHT + PADDING);
+		int boxWidth = rowWidth();
+		int left = panelLeft + PADDING;
+		int top = fieldsTop();
 		// Kept across a resize, as the name prompt keeps its text.
 		// A song that has never been saved is a new one of the player's own, so the box starts with
 		// the suggested name in it, plainly visible and removable. A saved song without an author
@@ -78,11 +85,10 @@ final class SongDetailsScreen extends Screen {
 			"The original song, and whose MIDI it was made from");
 		description = box(left, top + 2 * FIELD_GAP, boxWidth, 512, typedDescription, "");
 
-		int buttons = top + 3 * FIELD_GAP + facts().size() * 11 + 8;
 		addRenderableWidget(Button.builder(Component.literal("Save details"), button -> confirm())
-			.bounds(left, buttons, boxWidth / 2 - 3, 20).build());
+			.bounds(left, buttonTop(), boxWidth / 2 - 3, BUTTON_HEIGHT).build());
 		addRenderableWidget(Button.builder(CommonComponents.GUI_CANCEL, button -> onClose())
-			.bounds(left + boxWidth / 2 + 3, buttons, boxWidth / 2 - 3, 20).build());
+			.bounds(left + boxWidth / 2 + 3, buttonTop(), boxWidth / 2 - 3, BUTTON_HEIGHT).build());
 		setInitialFocus(author);
 	}
 
@@ -126,7 +132,8 @@ final class SongDetailsScreen extends Screen {
 		return super.keyPressed(event);
 	}
 
-	private void confirm() {
+	@Override
+	protected void confirm() {
 		accept.accept(details.withOwn(author.getValue(), credits.getValue(),
 			description.getValue()));
 	}
@@ -161,21 +168,15 @@ final class SongDetailsScreen extends Screen {
 		}
 	}
 
-	private int boxWidth() {
-		return Math.min(320, width - 40);
-	}
-
-	private int top() {
-		return Math.max(36, height / 2 - 90);
+	/** The top of the first box, under its label. */
+	private int fieldsTop() {
+		return contentTop() + LABEL_HEIGHT;
 	}
 
 	@Override
-	public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY,
-			float partialTick) {
-		super.extractRenderState(graphics, mouseX, mouseY, partialTick);
-		int left = (width - boxWidth()) / 2;
-		int top = top();
-		graphics.text(font, title.getString(), left, top - 26, 0xFFFFFFFF, false);
+	protected void extractPanelContents(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
+		int left = panelLeft + PADDING;
+		int top = fieldsTop();
 		String[] labels = {"Author", "Credits", "Description"};
 		for (int field = 0; field < labels.length; field++) {
 			String label = labels[field] + " (optional)";
@@ -183,18 +184,18 @@ final class SongDetailsScreen extends Screen {
 			if (field == 0 && author != null && authorRemainder(author.getValue()) != null) {
 				label += " - Tab fills in " + authorSuggestion;
 			}
-			graphics.text(font, label, left, top + field * FIELD_GAP - 11, LABEL_COLOR, false);
+			graphics.text(font, label, left, top + field * FIELD_GAP - LABEL_HEIGHT, LABEL_COLOR,
+				false);
 		}
 		int y = top + 3 * FIELD_GAP - 4;
 		for (String line : facts()) {
-			graphics.text(font, line, left, y, TEXT_COLOR, false);
-			y += 11;
+			// Cut to the panel, since the source line is a whole file path.
+			if (font.width(line) > rowWidth()) {
+				line = font.plainSubstrByWidth(line, rowWidth() - font.width("...")) + "...";
+			}
+			graphics.text(font, line, left, y, FACT_COLOR, false);
+			y += LINE_HEIGHT;
 		}
-	}
-
-	@Override
-	public void onClose() {
-		McCompat.setScreen(parent);
 	}
 
 	/** Hands the game its GUI scale back; see {@link NamePromptScreen#removed}. */
