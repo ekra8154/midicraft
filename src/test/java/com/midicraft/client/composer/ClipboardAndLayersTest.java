@@ -1116,6 +1116,63 @@ class ClipboardAndLayersTest {
 	}
 
 	/**
+	 * A section cut at one speed and put back at another sounds as long as it did when cut.
+	 *
+	 * <p>The way to give part of a song its own speed: set the slider, cut, set it back, paste. The
+	 * slider moves no note, so without the rescale the paste brought back the same ticks and the
+	 * section played at the song's speed again.</p>
+	 */
+	@Test
+	void aSectionCutAtAnotherSpeedKeepsItsWallClock() {
+		ComposerProject song = songOf(layer("Lead", "HARP"), layer("Target", "HARP"));
+		List<NoteEvent> notes = List.of(note(60, 0L), note(64, 480L), note(67, 960L));
+		song = song.withLayer(0, song.layers().getFirst().withNotes(notes));
+		ComposerProject fast = song.withSpeedEighths(10);
+		double copiedAt = fast.microsPerTick();
+
+		double scale = copiedAt / song.microsPerTick();
+		List<ClipboardNote> scaled = copyOf(fast, 0).stream().map(copied -> copied.scaled(scale)).toList();
+		Layer pasted = song.pasteNotes(1, scaled, 0L).project().layers().get(1);
+
+		assertEquals(List.of(0L, 384L, 768L), startTicks(pasted), "1.25x played back at 1x is 0.8 the ticks");
+		assertEquals(96L, pasted.notes().getFirst().durationTicks(), "lengths shrink with the gaps");
+		assertEquals(960L * copiedAt, 768L * song.microsPerTick(), 1e-6,
+			"and the last note lands at the moment it did when the section was cut");
+		assertEquals(song.microsPerTick(), song.withSpeedEighths(8).microsPerTick(),
+			"the same song at the same speed is the same arithmetic, so a plain paste scales by one");
+	}
+
+	/** Into a song at another tempo and resolution, the copy keeps its seconds, not its ticks. */
+	@Test
+	void aCopyPastedIntoAnotherSongKeepsItsWallClock() {
+		ComposerProject from = songOf(layer("Lead", "HARP", 60, 62, 64));
+		ComposerProject to = new ComposerProject("other", 960, 600_000, List.of(layer("Target", "HARP")),
+			0, nextId + 1000L, 4000L, 4);
+
+		double scale = from.microsPerTick() / to.microsPerTick();
+		List<ClipboardNote> scaled = copyOf(from, 0).stream().map(copied -> copied.scaled(scale)).toList();
+		Layer pasted = to.pasteNotes(0, scaled, 0L).project().layers().getFirst();
+
+		assertEquals(List.of(0L, 400L, 800L), startTicks(pasted),
+			"240 ticks of a 120 bpm quarter at 480 ppq is 0.25 s, which is 400 ticks at 100 bpm and 960");
+		assertEquals(200L, pasted.notes().getFirst().durationTicks());
+	}
+
+	/** Whole layers scale from the start of the song, and a scale of one leaves them untouched. */
+	@Test
+	void pastedLayersScaleFromTheStartOfTheSong() {
+		Layer lead = new Layer("Lead", "HARP", false, true, true,
+			List.of(note(60, 0L), note(64, 480L).withStrikeShift(60L)));
+
+		Layer halved = lead.withTimeScaled(0.5);
+
+		assertEquals(List.of(0L, 240L), startTicks(halved));
+		assertEquals(60L, halved.notes().getFirst().durationTicks());
+		assertEquals(30L, halved.notes().get(1).strikeShiftTicks(), "a dragged strike keeps its moment too");
+		assertEquals(lead, lead.withTimeScaled(1.0));
+	}
+
+	/**
 	 * Whether every note is one its own layer can build.
 	 *
 	 * <p>Deliberately asks the layer rather than {@link NoteEvent#isBuildable}, which only knows

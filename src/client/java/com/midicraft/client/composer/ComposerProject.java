@@ -651,6 +651,21 @@ public record ComposerProject(
 			return new Layer(name, instrument, muted, buildEnabled, visible, value, split, mix, resting, sustain);
 		}
 
+		/**
+		 * The layer with every tick in its notes {@code factor} times as many, measured from the start
+		 * of the song: a whole layer pasted into a song at another tempo keeps its wall clock.
+		 */
+		public Layer withTimeScaled(double factor) {
+			if (factor == 1.0) {
+				return this;
+			}
+			return withNotes(notes.stream()
+				.map(note -> new NoteEvent(note.id(), note.midiNote(), Math.round(note.startTick() * factor),
+					Math.round(note.durationTicks() * factor), note.velocity(),
+					Math.round(note.strikeShiftTicks() * factor)))
+				.toList());
+		}
+
 		public Layer withName(String value) {
 			return new Layer(value, instrument, muted, buildEnabled, visible, notes, split, mix, resting, sustain);
 		}
@@ -1816,6 +1831,18 @@ public record ComposerProject(
 	/** The speed as a multiplier, and the only place the unit is divided out. */
 	public double speedFactor() {
 		return Math.max(MIN_SPEED_EIGHTHS, speedEighths) / 8.0;
+	}
+
+	/**
+	 * How long one composer tick lasts when the song plays, in microseconds, speed included.
+	 *
+	 * <p>What a copy carries so a paste can keep its wall clock: a passage cut at one speed and put
+	 * back at another, or into a song at another tempo, sounds as long as it did where it was
+	 * copied. The speed slider counts because it is how a section gets its own speed -- set it, cut,
+	 * set it back, paste.</p>
+	 */
+	public double microsPerTick() {
+		return tempoMicrosPerQuarter / (double)Math.max(1, ppq) / speedFactor();
 	}
 
 	public boolean sameContentAs(ComposerProject other) {
@@ -3935,6 +3962,18 @@ public record ComposerProject(
 			velocity = Math.max(1, Math.min(127, velocity));
 			instrument = instrument == null || instrument.isBlank() ? "HARP" : instrument;
 			sourceLayer = sourceLayer == null || sourceLayer.isBlank() ? "Pasted" : sourceLayer;
+		}
+
+		/**
+		 * The same note with every length in it {@code factor} times as many ticks.
+		 *
+		 * <p>Each offset is rounded from the origin on its own rather than from the note before it, so
+		 * a long passage cannot drift by a tick per note.</p>
+		 */
+		public ClipboardNote scaled(double factor) {
+			return new ClipboardNote(Math.round(tickOffset * factor), midiNote,
+				Math.round(durationTicks * factor), velocity, instrument, sourceLayer,
+				Math.round(strikeShift * factor));
 		}
 	}
 

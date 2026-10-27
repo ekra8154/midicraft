@@ -520,11 +520,19 @@ public final class ComposerScreen extends Screen {
 	 * on whichever row happened to be active rather than on the one under the cursor.</p>
 	 */
 	private int layerMenuRow = -1;
-	private List<ClipboardNote> clipboard = List.of();
+	// The clipboard is static, unlike the rest of the screen's state: opening another song builds a
+	// new screen, and a copy that died with the old one could never reach a different composition.
+	private static List<ClipboardNote> clipboard = List.of();
 	/** Whole layers taken by Ctrl+C while the panel had the keyboard. Separate from the notes one. */
-	private List<Layer> layerClipboard = List.of();
+	private static List<Layer> layerClipboard = List.of();
 	/** The tick the copy started on, which is where Ctrl+Shift+V puts it back. */
-	private long clipboardOriginTick;
+	private static long clipboardOriginTick;
+	/**
+	 * How long a tick lasted where the copy was made, speed included; see
+	 * {@link ComposerProject#microsPerTick}. A paste rescales by it, so the passage keeps its wall
+	 * clock in a song at another tempo or speed -- including this one after the speed has changed.
+	 */
+	private static double clipboardMicrosPerTick = 1.0;
 	private Button playButton;
 	private Button recordButton;
 	/**
@@ -709,7 +717,7 @@ public final class ComposerScreen extends Screen {
 	 * and the selection moves on. What you copied keeps the length it was copied with until
 	 * something else is copied.</p>
 	 */
-	private long clipboardSpanTicks;
+	private static long clipboardSpanTicks;
 	/**
 	 * Where the notes stood relative to the cursor when they were copied, and how far a paste of
 	 * them moves the cursor on.
@@ -720,8 +728,8 @@ public final class ComposerScreen extends Screen {
 	 * nothing else that carries the silence at the edges of a passage, because a set of notes begins
 	 * on its first note and ends on its last.</p>
 	 */
-	private long clipboardCursorOffset;
-	private long clipboardStepTicks;
+	private static long clipboardCursorOffset;
+	private static long clipboardStepTicks;
 	private ComposerProject dragBase;
 	private ComposerProject dragPreview;
 	private long dragTickDelta;
@@ -10703,6 +10711,7 @@ public final class ComposerScreen extends Screen {
 				copied.note().midiNote(), copied.note().durationTicks(), copied.note().velocity(),
 				copied.layer().instrument(), copied.layer().name(), copied.note().strikeShiftTicks()))
 			.toList();
+		clipboardMicrosPerTick = project().microsPerTick();
 		// One clipboard: what is copied now is what paste puts back.
 		layerClipboard = List.of();
 		showResult(Component.literal("Copied " + clipboard.size()
@@ -10726,6 +10735,7 @@ public final class ComposerScreen extends Screen {
 			return;
 		}
 		layerClipboard = taken;
+		clipboardMicrosPerTick = project().microsPerTick();
 		clipboard = List.of();
 		showResult(Component.literal("Copied " + layerCountLabel(taken.size()) + "."));
 	}
@@ -10745,7 +10755,10 @@ public final class ComposerScreen extends Screen {
 		int at = selectedLayers.isEmpty()
 			? project().layers().size()
 			: selectedLayers.stream().mapToInt(Integer::intValue).max().orElse(-1) + 1;
-		ComposerProject pasted = project().withLayersInserted(at, layerClipboard);
+		double scale = clipboardScale();
+		ComposerProject pasted = project().withLayersInserted(at, layerClipboard.stream()
+			.map(layer -> layer.withTimeScaled(scale))
+			.toList());
 		if (pasted.equals(project())) {
 			showResult(Component.literal("No room for " + layerCountLabel(layerClipboard.size())
 				+ " - " + ComposerProject.MAX_LAYERS + " is the limit."));
@@ -10797,13 +10810,20 @@ public final class ComposerScreen extends Screen {
 		// rounding the place they are measured from would move every note in the phrase by up to
 		// half a grid step -- and a passage that is on the grid is on it because the cursor was,
 		// which is a thing you can see and line up before pressing the key.
+		//
+		// In place keeps the tick the copy left, not the moment: cutting a section at one speed and
+		// putting it back at another is meant to land on the same beat, which sounds at a different
+		// moment once the speed has changed. Only the notes inside are rescaled.
+		double scale = clipboardScale();
 		long startTick = inPlace
 			? clipboardOriginTick
 			: SELECTION_RANGE
 				? snapTick(playbackReturnTick)
-				: Math.max(0L, playbackReturnTick + clipboardCursorOffset);
+				: Math.max(0L, playbackReturnTick + Math.round(clipboardCursorOffset * scale));
+		List<ClipboardNote> notes = scale == 1.0 ? clipboard
+			: clipboard.stream().map(note -> note.scaled(scale)).toList();
 		int before = project().layers().size();
-		PasteResult result = project().pasteNotes(project().activeLayerIndex(), clipboard, startTick);
+		PasteResult result = project().pasteNotes(project().activeLayerIndex(), notes, startTick);
 		ComposerProject pasted = result.project();
 		// The marker steps to the far end of the block, so a second Ctrl+V lays the phrase down after
 		// the first rather than on top of it and a passage is built by holding the key. Measured
@@ -10813,7 +10833,7 @@ public final class ComposerScreen extends Screen {
 		long cursor = inPlace ? -1L
 			: SELECTION_RANGE
 				? startTick + clipboardSpan()
-				: playbackReturnTick + clipboardStepTicks;
+				: playbackReturnTick + Math.max(1L, Math.round(clipboardStepTicks * scale));
 		if (cursor >= 0L) {
 			// The end marker comes with it. It is floored at the last note, so pasting at the end of
 			// a song leaves it exactly on the note just laid -- and the next paste would then be
@@ -10905,7 +10925,18 @@ public final class ComposerScreen extends Screen {
 	 * that has not. See {@link #copySelection}.</p>
 	 */
 	private long clipboardSpan() {
-		return Math.max(1L, clipboardSpanTicks);
+		return Math.max(1L, Math.round(clipboardSpanTicks * clipboardScale()));
+	}
+
+	/**
+	 * How many of this song's ticks one of the copy's ticks is, so the paste keeps its wall clock.
+	 *
+	 * <p>One whenever nothing about time has changed since the copy, which is every paste within a
+	 * song left at the same tempo and speed -- the same arithmetic on the same numbers.</p>
+	 */
+	private double clipboardScale() {
+		double here = project().microsPerTick();
+		return here <= 0.0 || clipboardMicrosPerTick <= 0.0 ? 1.0 : clipboardMicrosPerTick / here;
 	}
 
 	/**
