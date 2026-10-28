@@ -129,5 +129,8 @@
   "tooltip.midicraft.all_keys": "Vanilla's key bindings screen.",
   "category.midicraft.display": "Display",
   "option.midicraft.composer_gui_scale": "Composer GUI scale",
-  "tooltip.midicraft.composer_gui_scale": "GUI scale for this mod's screens, separate from Minecraft's."
+  "tooltip.midicraft.composer_gui_scale": "GUI scale for this mod's screens, separate from Minecraft's.",
+  "category.midicraft.playback": "Playback",
+  "option.midicraft.pause_music_during_playback": "Pause music while playing",
+  "tooltip.midicraft.pause_music_during_playback": "Pauses Minecraft's music while a composer song plays, and resumes it from the same spot when the song stops."
 }

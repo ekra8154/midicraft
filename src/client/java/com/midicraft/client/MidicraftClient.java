@@ -2,6 +2,7 @@ package com.midicraft.client;
 
 import com.midicraft.client.compat.CommandPasteSender;
 import com.midicraft.client.compat.ComposerCommand;
+import com.midicraft.client.compat.ComposerMusicPause;
 import com.midicraft.client.compat.ComposerScreen;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
@@ -16,5 +17,6 @@ public final class MidicraftClient implements ClientModInitializer {
 		CommandPasteSender.register();
 		ComposerCommand.register();
 		ClientTickEvents.END_CLIENT_TICK.register(ComposerScreen::tickBehindPopup);
+		ClientTickEvents.END_CLIENT_TICK.register(ComposerMusicPause::tick);
 	}
 }

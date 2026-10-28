@@ -692,6 +692,11 @@ public final class SettingsScreen extends Screen {
 					MidicraftConfig::composerGuiScale, config::setComposerGuiScale,
 					ComposerScale::describe)));
 
+				entries.add(Entry.heading("playback"));
+				entries.add(Entry.of(toggle("pause_music_during_playback",
+					MidicraftConfig::pauseMusicDuringPlayback,
+					config::setPauseMusicDuringPlayback)));
+
 				entries.add(Entry.heading("conversion"));
 				entries.add(Entry.of(choice("midi_quantize_grid", MidiQuantizeGrid.values(),
 					MidicraftConfig::midiQuantizeGrid, config::setMidiQuantizeGrid)));

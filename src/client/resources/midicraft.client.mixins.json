@@ -4,7 +4,10 @@
   "compatibilityLevel": "JAVA_25",
   "client": [
     "MouseHandlerMixin",
-    "SoundEngineMixin"
+    "MusicManagerMixin",
+    "SoundEngineAccessor",
+    "SoundEngineMixin",
+    "SoundManagerAccessor"
   ],
   "injectors": {
     "defaultRequire": 1

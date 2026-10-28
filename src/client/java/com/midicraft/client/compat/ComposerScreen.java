@@ -8367,6 +8367,19 @@ public final class ComposerScreen extends Screen {
 	 * leaving, and a song playing behind the world or behind a different song is one nobody can see
 	 * to stop.</p>
 	 */
+	/**
+	 * Whether a composer song is sounding right now, on screen or under one of its popups.
+	 *
+	 * <p>A song held under a full screen is not: nothing is being heard against the music then.</p>
+	 */
+	static boolean songSounding() {
+		if (McCompat.screen() instanceof ComposerScreen composer) {
+			return composer.playing && !composer.pausedBehind;
+		}
+		ComposerScreen composer = playingBehind;
+		return composer != null && composer.playing && !composer.pausedBehind;
+	}
+
 	public static void tickBehindPopup(net.minecraft.client.Minecraft minecraft) {
 		ComposerScreen composer = playingBehind;
 		if (composer == null) {

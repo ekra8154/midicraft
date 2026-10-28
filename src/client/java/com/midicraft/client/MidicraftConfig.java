@@ -450,6 +450,8 @@ public final class MidicraftConfig {
 	private boolean layerPanelCollapsed;
 	/** Whether the composer's roll draws how long each note lasts, as a dark trail behind it. */
 	private boolean showNoteTrails;
+	/** Whether Minecraft's music pauses while a composer song plays, picking up again after. */
+	private boolean pauseMusicDuringPlayback;
 	/**
 	 * Whether the song library and the file browser list by name rather than newest first.
 	 *
@@ -681,8 +683,8 @@ public final class MidicraftConfig {
 				instance.convertOctaveShifting = stored.convertOctaveShifting == null
 					? ComposerProject.OctaveShifting.NOTES_ONLY
 					: stored.convertOctaveShifting;
-				instance.convertSplitTransposed = stored.convertSplitTransposed == null
-					|| stored.convertSplitTransposed;
+				instance.convertSplitTransposed = stored.convertSplitTransposed != null
+					&& stored.convertSplitTransposed;
 				instance.convertBakesSpeed = stored.convertBakesSpeed == null || stored.convertBakesSpeed;
 				instance.convertMergesRepeats = stored.convertMergesRepeats == null || stored.convertMergesRepeats;
 				instance.convertQuantizes = stored.convertQuantizes == null || stored.convertQuantizes;
@@ -731,6 +733,8 @@ public final class MidicraftConfig {
 				);
 				instance.layerPanelCollapsed = Boolean.TRUE.equals(stored.layerPanelCollapsed);
 				instance.showNoteTrails = stored.showNoteTrails == null || stored.showNoteTrails;
+				instance.pauseMusicDuringPlayback = stored.pauseMusicDuringPlayback == null
+					|| stored.pauseMusicDuringPlayback;
 				instance.listSortByName = Boolean.TRUE.equals(stored.listSortByName);
 				if (stored.songOpenedAt != null) {
 					stored.songOpenedAt.forEach((id, at) -> {
@@ -1830,6 +1834,14 @@ public final class MidicraftConfig {
 		this.showNoteTrails = showNoteTrails;
 	}
 
+	public boolean pauseMusicDuringPlayback() {
+		return pauseMusicDuringPlayback;
+	}
+
+	public void setPauseMusicDuringPlayback(boolean pauseMusicDuringPlayback) {
+		this.pauseMusicDuringPlayback = pauseMusicDuringPlayback;
+	}
+
 	/**
 	 * A config nobody is using, holding what every setting is worth before anyone touches it.
 	 *
@@ -1900,6 +1912,7 @@ public final class MidicraftConfig {
 		config.layerPanelWidth = DEFAULT_LAYER_PANEL_WIDTH;
 		config.layerPanelCollapsed = false;
 		config.showNoteTrails = true;
+		config.pauseMusicDuringPlayback = true;
 		config.listSortByName = false;
 		config.songOpenedAt.clear();
 		config.repeatMergeTicks = DEFAULT_REPEAT_MERGE_TICKS;
@@ -1909,7 +1922,7 @@ public final class MidicraftConfig {
 		config.snapTempoQuantizes = false;
 		config.conversionGapPercentile = DEFAULT_CONVERSION_GAP_PERCENTILE;
 		config.convertOctaveShifting = ComposerProject.OctaveShifting.NOTES_ONLY;
-		config.convertSplitTransposed = true;
+		config.convertSplitTransposed = false;
 		config.convertBakesSpeed = true;
 		config.convertMergesRepeats = true;
 		config.convertQuantizes = true;
@@ -2117,6 +2130,7 @@ public final class MidicraftConfig {
 		private Integer layerPanelWidth;
 		private Boolean layerPanelCollapsed;
 		private Boolean showNoteTrails;
+		private Boolean pauseMusicDuringPlayback;
 		private Boolean listSortByName;
 		private Map<String, Long> songOpenedAt;
 		private Integer composerSpeedQuarters;
@@ -2206,6 +2220,7 @@ public final class MidicraftConfig {
 			this.layerPanelWidth = config.layerPanelWidth;
 			this.layerPanelCollapsed = config.layerPanelCollapsed;
 			this.showNoteTrails = config.showNoteTrails;
+			this.pauseMusicDuringPlayback = config.pauseMusicDuringPlayback;
 			this.listSortByName = config.listSortByName;
 			// Only the songs that still exist. A library the player has been pruning would otherwise
 			// leave a line in the settings file for every composition ever opened.
