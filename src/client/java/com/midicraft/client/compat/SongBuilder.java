@@ -4163,6 +4163,20 @@ public final class SongBuilder {
 	 */
 	static boolean SEAM_SHOVE_BOOKED = true;
 
+	/**
+	 * Whether a turn forced in front of an event stands down where walking its bend out would kill
+	 * the wire: fewer than two ticks of wait to revive it with, and less signal than the bend has
+	 * cells.
+	 *
+	 * <p>The force is the planner's cure for a wall the event crossed, and a cure that silences the
+	 * rest of the song is worse than the breach. Coldplay's Paradise at eight wide over three floors,
+	 * split track: a seam three past the outer wall, rewalked with its turn forced, the bend walked
+	 * out on dust off a tip of eight with one tick to spare, and 1064 notes dark from there. Standing
+	 * down, the event crosses the same wall again, the planner softens that one event, and the
+	 * build keeps its breach and its music.</p>
+	 */
+	static boolean FORCED_WALK_OUT_KEEPS_ITS_WIRE = true;
+
 	private static int seamShove(PlacementPlan placements, Lane lane) {
 		// Not packed: that shove is packedSeamShove's, and the room check pads as it asks there.
 		if (!SEAM_SHOVE_BOOKED || packingLanes() || lane.bending()) {
@@ -12088,10 +12102,18 @@ public final class SongBuilder {
 								+ coordAcross(axis, lane.pos()) + " wantToExit=" + wantToExit
 								+ " toExit=" + toExit + " foldRepeaters=" + foldRepeaters);
 						}
-						boolean walkOutNow = forcedWalkOut
+						// Not where the walk-out would kill the wire: no tick to revive it with and
+						// not signal enough for the bend. See FORCED_WALK_OUT_KEEPS_ITS_WIRE.
+						boolean forcedHere = forcedWalkOut
 							|| FORCED_TURN_WALKS_OUT_THE_FOLDS_BEND && turnBefore.contains(index)
-								&& !foldWalkedTheBend
-							|| stretchRounds;
+								&& !foldWalkedTheBend;
+						if (forcedHere && !stretchRounds && FORCED_WALK_OUT_KEEPS_ITS_WIRE
+								&& event.time() - currentTime < 2 && foldSignal - toExit < 1) {
+							forcedHere = false;
+							forcedWalkOut = false;
+							placements.padded("forcedWalkOutWouldStarve");
+						}
+						boolean walkOutNow = forcedHere || stretchRounds;
 						if (!walkOutNow && (wantToExit <= toExit || foldRepeaters <= toExit / 8)) {
 							break;
 						}
