@@ -173,6 +173,54 @@ interface LaneRoute {
 		};
 	}
 
+	/**
+	 * The same route with {@link #mirrored} switched on: the split track's first machine, which
+	 * runs back from the walkway while its slab creeps the same way as its partner's.
+	 */
+	static LaneRoute mirrored(LaneRoute base) {
+		return new LaneRoute() {
+			@Override
+			public int floorOf(int leg) {
+				return base.floorOf(leg);
+			}
+
+			@Override
+			public int climbOf(int leg) {
+				return base.climbOf(leg);
+			}
+
+			@Override
+			public int linkOf(int leg) {
+				return base.linkOf(leg);
+			}
+
+			@Override
+			public int tipExtension(int leg) {
+				return base.tipExtension(leg);
+			}
+
+			@Override
+			public int nearExtension(int leg) {
+				return base.nearExtension(leg);
+			}
+
+			@Override
+			public boolean linkArmsTight(int leg) {
+				return base.linkArmsTight(leg);
+			}
+
+			@Override
+			public boolean mirrored() {
+				return true;
+			}
+
+			@Override
+			public boolean foldsWaits() {
+				return base.foldsWaits();
+			}
+		};
+	}
+
 	static LaneRoute serpentine(int floors, int startFloor, int startClimb) {
 		List<int[]> legs = new ArrayList<>();
 		legs.add(new int[] {startFloor, startClimb});

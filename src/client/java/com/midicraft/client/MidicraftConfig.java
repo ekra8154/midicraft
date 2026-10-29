@@ -297,6 +297,15 @@ public final class MidicraftConfig {
 	public static final int DEFAULT_PACE_CATCH_UP_TO = 0;
 	public static final int MIN_PACE_CATCH_UP_TO = 0;
 	public static final int MAX_PACE_CATCH_UP_TO = MAX_PACE_TOLERANCE;
+	/**
+	 * How wide a walkway runs between the interleaved paste's two machines, or nought for none.
+	 * Above nought each machine gets a one-lane track of its own, the width setting wide, mirrored
+	 * either side of the walkway; the pair is still paced and seamed as one build. The cap is only
+	 * there to keep a typo from planning a build a thousand blocks across.
+	 */
+	public static final int DEFAULT_SPLIT_TRACK = 0;
+	public static final int MIN_SPLIT_TRACK = 0;
+	public static final int MAX_SPLIT_TRACK = 256;
 	/** Repeats of a pitch closer than this many repeater ticks collapse on convert. 0 disables. */
 	public static final int DEFAULT_REPEAT_MERGE_TICKS = 1;
 	public static final int MIN_REPEAT_MERGE_TICKS = 0;
@@ -491,6 +500,8 @@ public final class MidicraftConfig {
 	private int parityReseedDelay;
 	private int paceTolerance;
 	private int paceCatchUpTo;
+	/** @see #DEFAULT_SPLIT_TRACK */
+	private int splitTrack;
 	private boolean pasteStartTop;
 	private String importDirectory;
 	/** The author last saved in a song's details, offered for the next. See {@link #suggestedAuthor}. */
@@ -666,6 +677,9 @@ public final class MidicraftConfig {
 				);
 				instance.setPaceCatchUpTo(
 					stored.paceCatchUpTo == null ? DEFAULT_PACE_CATCH_UP_TO : stored.paceCatchUpTo
+				);
+				instance.setSplitTrack(
+					stored.splitTrack == null ? DEFAULT_SPLIT_TRACK : stored.splitTrack
 				);
 				// Read under its old name too, from before there was one layout and the setting
 				// stopped being about the Ultra lane.
@@ -1595,6 +1609,15 @@ public final class MidicraftConfig {
 		com.midicraft.client.compat.SongBuilder.JOINT_PACE_CATCHES_UP_TO = this.paceCatchUpTo;
 	}
 
+	/** @see #DEFAULT_SPLIT_TRACK */
+	public int splitTrack() {
+		return splitTrack;
+	}
+
+	public void setSplitTrack(int splitTrack) {
+		this.splitTrack = Math.max(MIN_SPLIT_TRACK, Math.min(MAX_SPLIT_TRACK, splitTrack));
+	}
+
 	public ComposerProject.OctaveShifting convertOctaveShifting() {
 		return convertOctaveShifting;
 	}
@@ -1935,6 +1958,7 @@ public final class MidicraftConfig {
 		config.parityReseedDelay = DEFAULT_PARITY_RESEED_DELAY;
 		config.paceTolerance = DEFAULT_PACE_TOLERANCE;
 		config.paceCatchUpTo = DEFAULT_PACE_CATCH_UP_TO;
+		config.splitTrack = DEFAULT_SPLIT_TRACK;
 		config.pasteStartTop = false;
 		config.maxBuildFloors = DEFAULT_MAX_BUILD_FLOORS;
 		config.pasteMode = "COMPACT_CUBE";
@@ -2154,6 +2178,7 @@ public final class MidicraftConfig {
 		private Integer parityReseedDelay;
 		private Integer paceTolerance;
 		private Integer paceCatchUpTo;
+		private Integer splitTrack;
 		private Boolean pasteStartTop;
 		/** The old name of {@link #pasteStartTop}, read and never written. */
 		private Boolean ultraLaneStartTop;
@@ -2251,6 +2276,7 @@ public final class MidicraftConfig {
 			this.parityReseedDelay = config.parityReseedDelay;
 			this.paceTolerance = config.paceTolerance;
 			this.paceCatchUpTo = config.paceCatchUpTo;
+			this.splitTrack = config.splitTrack;
 			this.pasteStartTop = config.pasteStartTop;
 			this.importDirectory = config.importDirectory;
 			this.lastAuthor = config.lastAuthor;

@@ -54,6 +54,7 @@ final class GameSettings {
 		Integer parityReseedDelay;
 		Integer paceTolerance;
 		Integer paceCatchUpTo;
+		Integer splitTrack;
 		Boolean pasteStartTop;
 		/** The old name of {@link #pasteStartTop}, read where a file predates it. */
 		Boolean ultraLaneStartTop;
@@ -76,7 +77,7 @@ final class GameSettings {
 	 */
 	record Values(ChordSkips.Rules thinning, int maxBuildFloors, int reseedDelay,
 			int paceTolerance, int paceCatchUpTo, boolean startTop, boolean debugPaste,
-			int laneWidth, int laneFloors, String pasteMode) {
+			int laneWidth, int laneFloors, String pasteMode, int splitTrack) {
 
 		SongBuilder.BuildLimits limits(int width, int floors) {
 			return limits(maxBuildFloors, width, floors);
@@ -85,7 +86,7 @@ final class GameSettings {
 		/** @param maxFloors an override for the cube layout's cap, the one thing it decides */
 		SongBuilder.BuildLimits limits(int maxFloors, int width, int floors) {
 			return new SongBuilder.BuildLimits(maxFloors, width, floors, startTop, reseedDelay,
-				paceTolerance, paceCatchUpTo);
+				paceTolerance, paceCatchUpTo, splitTrack);
 		}
 
 		/**
@@ -115,7 +116,8 @@ final class GameSettings {
 				+ (thinning.strikes() ? " strikes" : "") + ", dedupe per song, reseed "
 				+ reseedDelay + ", pace " + paceTolerance + " catch up to " + paceCatchUpTo
 				+ ", debugPaste " + debugPaste + ", maxFloors " + maxBuildFloors
-				+ ", lanes start " + (startTop ? "top" : "bottom") + "]";
+				+ ", lanes start " + (startTop ? "top" : "bottom")
+				+ (splitTrack > 0 ? ", split " + splitTrack : "") + "]";
 		}
 	}
 
@@ -131,7 +133,8 @@ final class GameSettings {
 	/**
 	 * The paste settings a probe wants to hold still while the config moves under it, given as
 	 * {@code -Dcensus.startTop=false}, {@code -Dfault.debugPaste=false} or
-	 * {@code -Dcensus.paceTolerance=8} (and {@code -Dcensus.paceCatchUpTo=0}).
+	 * {@code -Dcensus.paceTolerance=8} (and {@code -Dcensus.paceCatchUpTo=0}), or
+	 * {@code -Dcensus.split=4} for a split track's walkway.
 	 *
 	 * <p>A census is only comparable to the one before it if the build it asked for is the same
 	 * build, and both of these change the walk rather than the song: the lanes going up instead of
@@ -149,13 +152,16 @@ final class GameSettings {
 		int paceTolerance = pace == null ? read.paceTolerance() : Integer.parseInt(pace);
 		String catchUp = given("paceCatchUpTo");
 		int paceCatchUpTo = catchUp == null ? read.paceCatchUpTo() : Integer.parseInt(catchUp);
+		String walkway = given("split");
+		int splitTrack = walkway == null ? read.splitTrack() : Integer.parseInt(walkway);
 		if (startTop == read.startTop() && debugPaste == read.debugPaste()
-				&& paceTolerance == read.paceTolerance() && paceCatchUpTo == read.paceCatchUpTo()) {
+				&& paceTolerance == read.paceTolerance() && paceCatchUpTo == read.paceCatchUpTo()
+				&& splitTrack == read.splitTrack()) {
 			return read;
 		}
 		return new Values(read.thinning(), read.maxBuildFloors(), read.reseedDelay(),
 			paceTolerance, paceCatchUpTo, startTop, debugPaste, read.laneWidth(),
-			read.laneFloors(), read.pasteMode());
+			read.laneFloors(), read.pasteMode(), splitTrack);
 	}
 
 	private static boolean flag(String key, boolean fallback) {
@@ -215,7 +221,9 @@ final class GameSettings {
 				: stored.buildLaneWidth,
 			stored.buildLaneFloors == null ? MidicraftConfig.DEFAULT_BUILD_LANE_FLOORS
 				: stored.buildLaneFloors,
-			stored.pasteMode == null ? "COMPACT_CUBE" : stored.pasteMode);
+			stored.pasteMode == null ? "COMPACT_CUBE" : stored.pasteMode,
+			clamp(stored.splitTrack == null ? MidicraftConfig.DEFAULT_SPLIT_TRACK : stored.splitTrack,
+				MidicraftConfig.MIN_SPLIT_TRACK, MidicraftConfig.MAX_SPLIT_TRACK));
 	}
 
 	/**

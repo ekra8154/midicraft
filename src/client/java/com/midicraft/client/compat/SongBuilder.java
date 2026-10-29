@@ -532,9 +532,17 @@ public final class SongBuilder {
 	 *     write down first would be a setting the paste could read mid-write. Nought and not the
 	 *     current value as a default because a probe flips the static after it has made its limits,
 	 *     and a value copied at construction would quietly ignore the flip.
+	 * @param splitTrack blocks of walkway between the interleaved paste's two machines, each then
+	 *     a one-lane track of its own; nought nests them as usual. See {@link #SPLIT_TRACK_LAYOUT}.
 	 */
 	record BuildLimits(int maxFloors, int laneWidth, int laneFloors, boolean startTop,
-			int reseedDelay, int paceTolerance, int paceCatchUpTo) {
+			int reseedDelay, int paceTolerance, int paceCatchUpTo, int splitTrack) {
+		BuildLimits(int maxFloors, int laneWidth, int laneFloors, boolean startTop,
+				int reseedDelay, int paceTolerance, int paceCatchUpTo) {
+			this(maxFloors, laneWidth, laneFloors, startTop, reseedDelay, paceTolerance,
+				paceCatchUpTo, 0);
+		}
+
 		BuildLimits(int maxFloors, int laneWidth, int laneFloors) {
 			this(maxFloors, laneWidth, laneFloors, false);
 		}
@@ -570,7 +578,7 @@ public final class SongBuilder {
 			MidicraftConfig config = MidicraftConfig.get();
 			return new BuildLimits(config.maxBuildFloors(), config.buildLaneWidth(),
 				config.buildLaneFloors(), config.pasteStartTop(), config.parityReseedDelay(),
-				config.paceTolerance(), config.paceCatchUpTo());
+				config.paceTolerance(), config.paceCatchUpTo(), config.splitTrack());
 		}
 	}
 
@@ -1869,7 +1877,10 @@ public final class SongBuilder {
 		// and the neighbouring descent stood a cell from each other with their dust joined -- read
 		// back over the library cut to one note a tick, 267 of the 400 packed builds of two and three
 		// floors dead, and the plan's own fault counts cannot see a dead wire.
+		// Not split either: packing was drawn for the nested pair, whose input stands among the
+		// lanes. A split build's tracks are plain serpentines with their input in the walkway.
 		if (!SINGLE_NOTE_SONGS_PACK_TWO_APART || LANE_GAP_OVERRIDE == 3 || packingLanes()
+				|| limits.splitTrack() > 0
 				|| !PACKED_MULTI_FLOOR && limits.laneFloors() > 1
 				|| notes.isEmpty() || chordStats(notes).peak() > 1) {
 			return spreadPlan(origin, forward, notes, limits, start);
@@ -2001,7 +2012,8 @@ public final class SongBuilder {
 	private static PastePlan spreadPlan(BlockPos origin, Direction forward, List<EventNote> notes,
 			BuildLimits limits, WalkStart start) {
 		PastePlan spread = interleavedHalfTickPlan(origin, forward, notes, limits, start);
-		if (!SNUG_NESTING_WHERE_LONG_LINKS_STAND_WIDE || packingLanes()
+		// Snug nesting moves the short links of a nested pair, and a split build has none.
+		if (!SNUG_NESTING_WHERE_LONG_LINKS_STAND_WIDE || packingLanes() || limits.splitTrack() > 0
 				|| spread.padding().getOrDefault(LONG_LINK_TIGHT, 0) > 0
 				|| spread.padding().getOrDefault(LONG_LINK_WIDE, 0) == 0) {
 			return spread;
@@ -2158,8 +2170,11 @@ public final class SongBuilder {
 		}
 		List<EventNote> even = laneTimes(gtA);
 		List<EventNote> odd = laneTimes(gtB);
-		BlockPos originA = origin.relative(forward, 1);
-		Layout layoutA = Layout.ultraAlong(floors, coordAlong(axis, originA)).asV2();
+		boolean split = limits.splitTrack() > 0;
+		// The near wall of the nested pair. A split build's machine A walks from the other end of
+		// its track, which waits on the lane width below.
+		BlockPos nearA = origin.relative(forward, 1);
+		Layout layoutA = Layout.ultraAlong(floors, coordAlong(axis, nearA)).asV2();
 		List<EventGroup> evenEvents = withParitySeams(eventGroups(even, layoutA), flipsA, gtA,
 			layoutA);
 		// One frame for both: same walls, same direction, same start floor. Machine B runs one
@@ -2187,7 +2202,13 @@ public final class SongBuilder {
 		// The full v2 width for both machines: the nested shape has no corridors. Each machine
 		// gives up three columns at one end of one floor -- where the partner's long link runs --
 		// and owns the whole span everywhere else.
-		int laneWidth = Math.max(Math.max(longest + 2, widestBus), limits.laneWidth() - 3);
+		// Split, each track is the one-lane serpentine at the width asked for, with nothing given
+		// up to a partner, so its widest bus is not shortened either.
+		int laneWidth = split
+			? Math.max(Math.max(longest + 2, WIDTH_HOLDS_THE_WIDEST_BUS
+					? Math.max(widestBusColumns(evenEvents), widestBusColumns(oddEvents)) + 1 : 0),
+				limits.laneWidth() - widthReserve(PasteMode.ULTRA_COMPACT_LANE_V2))
+			: Math.max(Math.max(longest + 2, widestBus), limits.laneWidth() - 3);
 		int spacing = Math.max(
 			laneSpacing(laneReach(evenEvents, 0, evenEvents.size()),
 				laneReach(evenEvents, 0, evenEvents.size())),
@@ -2224,9 +2245,23 @@ public final class SongBuilder {
 			? new WalkStart(head.column() + (oddOpensB ? 6 : 3) - wallInset, head.floor(),
 				head.climb(), head.turning())
 			: head;
-		BlockPos originB = originA.relative(depth, spacing);
-		LaneRoute routeA = nestedRoute(floors, head, spacing, longLink, true);
-		LaneRoute routeB = nestedRoute(floors, head, spacing, longLink, false);
+		// Split: the two tracks either side of the walkway, both opening on the wall beside it.
+		// Machine A's runs back toward the origin, so it is walked mirrored. See SPLIT_TRACK_LAYOUT.
+		int walkway = split ? splitWalkway(limits.splitTrack(), oddOpensA, oddOpensB) : 0;
+		Direction forwardA = split ? forward.getOpposite() : forward;
+		BlockPos originA = split ? origin.relative(forward, laneWidth + 1) : nearA;
+		BlockPos originB = split
+			? origin.relative(forward, laneWidth + 4 + walkway)
+			: originA.relative(depth, spacing);
+		LaneRoute plainRoute = LaneRoute.folding(LaneRoute.serpentine(floors, head.floor(),
+			head.climb()));
+		LaneRoute routeA = split ? LaneRoute.mirrored(plainRoute)
+			: nestedRoute(floors, head, spacing, longLink, true);
+		LaneRoute routeB = split ? plainRoute : nestedRoute(floors, head, spacing, longLink, false);
+		// The whole build's two outermost walls, for the plan's own bookkeeping.
+		int buildNear = coordAlong(axis, nearA);
+		int buildFar = coordAlong(axis, split ? originB : nearA)
+			+ laneWidth * stepAlong(axis, forward);
 		// The pacing pass: each machine dry-walked alone for its natural pulse positions, the two
 		// records simulated against each other once, and the stretches each wait owes handed to
 		// the real walks. The tolerance is a whole lane of path: two pulses within a leg of each
@@ -2251,7 +2286,7 @@ public final class SongBuilder {
 		// The joint walk needs no dry walk: its stretches are decided in the walks themselves,
 		// against positions the build really has. See INTERLEAVED_JOINT_WALK.
 		if (paced && !INTERLEAVED_JOINT_WALK) {
-			int[] dryA = dryProgress(evenEvents, originA, forward, laneWidth, floors, layoutA,
+			int[] dryA = dryProgress(evenEvents, originA, forwardA, laneWidth, floors, layoutA,
 				routeA, headA);
 			int[] dryB = dryProgress(oddEvents, originB, forward, laneWidth, floors, layoutB,
 				routeB, headB);
@@ -2333,7 +2368,7 @@ public final class SongBuilder {
 					paceB = jointB;
 					try {
 						baton.run(
-							() -> walkRouted(evenEvents, originA, forward, laneWidth, floors,
+							() -> walkRouted(evenEvents, originA, forwardA, laneWidth, floors,
 								placements, layoutA, routeA, headA, tightA, jointA, turnBeforeA),
 							() -> walkRouted(oddEvents, originB, forward, laneWidth, floors,
 								placements, layoutB, routeB, headB, tightB, jointB, turnBeforeB),
@@ -2354,7 +2389,7 @@ public final class SongBuilder {
 					placements.laneTint(0, Math.floorMod(gtA.get(0).time(), 2));
 					placements.hardInnerWalls(hardA);
 					placements.softEvents(softA);
-					walkRouted(evenEvents, originA, forward, laneWidth, floors, placements, layoutA,
+					walkRouted(evenEvents, originA, forwardA, laneWidth, floors, placements, layoutA,
 						routeA, headA, tightA, paceA, turnBeforeA);
 					placements.stopWatchingLegWalls();
 					inputA = placements.openingFeedOf(0);
@@ -2412,7 +2447,11 @@ public final class SongBuilder {
 				// One input for both, in place of a button each -- two buttons cannot be pressed
 				// on the same tick, so the machines could never be started in the step the plan
 				// worked out for them. See {@link #addTwoLaneInput}.
-				if (INTERLEAVED_SHARED_INPUT) {
+				if (INTERLEAVED_SHARED_INPUT && split) {
+					addSplitInput(placements, forward, depth, inputA, inputB,
+						Math.floorMod(gtA.get(0).time(), 2) == 1,
+						Math.floorMod(gtB.get(0).time(), 2) == 1);
+				} else if (INTERLEAVED_SHARED_INPUT) {
 					// Aimed at the cell each opening repeater reads, not at the repeater. See
 					// {@link #feedTarget}: a machine that turns before it lays a module stands its
 					// first repeater on the far side of the bend, reading across the rows, and a
@@ -2431,7 +2470,7 @@ public final class SongBuilder {
 						targetA != null && !targetA.equals(inputA),
 						targetB != null && !targetB.equals(inputB));
 				} else {
-					addStarter(placements, forward, inputA);
+					addStarter(placements, forwardA, inputA);
 					addStarter(placements, forward, inputB);
 				}
 				// Both machines pasted together rather than one whole and then the other. They
@@ -2446,10 +2485,11 @@ public final class SongBuilder {
 						dryPaceA, dryPaceB, paceA.stretch().clone(), paceB.stretch().clone(),
 						paceA.progress().clone(), paceB.progress().clone());
 				}
+				if (split) {
+					placements.padded("splitTrackWalkway", walkway);
+				}
 				return alongTheBuild(placements.finish(PasteMode.INTERLEAVED_HALF_TICK, origin,
-					coordAlong(axis, originA),
-					coordAlong(axis, originA) + laneWidth * stepAlong(axis, forward)),
-					depth.getAxis() == Direction.Axis.X ? 1 : 3);
+					buildNear, buildFar), depth.getAxis() == Direction.Axis.X ? 1 : 3);
 			} catch (FlatTurnHungOutside outside) {
 				// Each machine settles its own tight turns, one per pass, exactly as the single walk
 				// does; a pass replays deterministically up to the turn it settles.
@@ -3031,82 +3071,241 @@ public final class SongBuilder {
 		for (int machine = 0; machine < 2; machine++) {
 			BlockPos head = heads[machine];
 			int columns = (coordAlong(axis, head) - wall) * step;
-			BlockPos spine = head.relative(forward, -columns);
-			placements.placing("twoLaneInput");
-			if (odd[machine]) {
-				// The DOUBLE piston, phase-proof by the rule in PARITY_SEAM_GAME_TICKS: five game
-				// ticks from any input phase whatever, because whichever phase the edge arrives
-				// in, one piston of the pair absorbs it and the other pays the full three. A
-				// single piston here read three game ticks only when the player's own hand fed
-				// it; hooked into a contraption with a repeater anywhere in the line, it was
-				// pulled even and the offset vanished. The first piston stands in the spine and
-				// shoves its block into the cell behind the second; the second fires off that
-				// landing and shoves its own block out to the wire.
-				placements.take(spine);
-				set(placements, spine, "minecraft:sticky_piston[facing=" + forward.getName() + "]");
-				String[] run = {
-					"minecraft:redstone_block",
-					"minecraft:air",
-					"minecraft:sticky_piston[facing=" + forward.getName() + "]",
-					"minecraft:redstone_block",
-					"minecraft:air",
-				};
-				for (int column = 1; column < columns; column++) {
-					BlockPos at = spine.relative(forward, column);
-					placements.take(at);
-					// Ground under the pair as well as under the wire past it. Nothing in the
-					// machine needs it -- a redstone block hangs in the air quite happily and the
-					// pistons stand on the spine's own floor -- but a build with a hole in its
-					// bottom layer is a build that has to be selected in two pieces, and the pair
-					// is five cells of hole right at the end you start the selection from. It
-					// cannot change what the machine does: a redstone block does not power the
-					// block it stands on, so the floor stays as inert here as it is everywhere
-					// else the lane runs over it.
-					set(placements, at.below(), "minecraft:stone");
-					if (column <= run.length) {
-						set(placements, at, run[column - 1]);
-					} else {
-						set(placements, at, "minecraft:redstone_wire");
-					}
-				}
-				// A head read across the rows is the landing itself: the run stops a cell short of
-				// it and the block of redstone is pushed into the head, which the walk left as air
-				// for exactly this. Claimed as air so nothing hangs a note in it later.
-				if (columns <= run.length) {
-					BlockPos landing = spine.relative(forward, columns);
-					if ("-".equals(placements.describeBlock(landing))) {
-						set(placements, landing.below(), "minecraft:stone");
-						set(placements, landing, "minecraft:air");
-					}
-					placements.padded("twoLaneInputLandsOnTheHead");
-				}
-				placements.padded("twoLaneInputPiston");
-			} else {
-				// Straight off the spine, through two of its own repeaters: five redstone ticks,
-				// ten game ticks, against the eleven the other side spends -- its repeater of
-				// three at six and the piston pair at five -- so the two machines leave exactly
-				// one game tick apart, which is the offset the two halves of the song are written
-				// against. Repeaters deliver their whole even delay from any phase and hand the
-				// edge on phase-normalised, which makes this side as indifferent to whatever
-				// contraption pressed the button as the pair makes the other.
-				int[] delays = {4, 1};
-				for (int leg = 1; leg <= delays.length; leg++) {
-					BlockPos at = spine.relative(forward, leg);
-					set(placements, at.below(), "minecraft:stone");
-					set(placements, at, "minecraft:repeater[facing=" + repeaterFacing(forward)
-						+ ",delay=" + delays[leg - 1] + "]");
-				}
-				// And plain wire the rest of the way, which costs no ticks at all, for a machine
-				// whose own opening stands further out than its partner's.
-				for (int column = 3; column < columns; column++) {
-					BlockPos at = spine.relative(forward, column);
-					set(placements, at.below(), "minecraft:stone");
-					set(placements, at, "minecraft:redstone_wire");
-				}
-				placements.padded("twoLaneInputStraight");
-			}
+			layTwoLaneFeed(placements, forward, head.relative(forward, -columns), columns,
+				odd[machine]);
 		}
 		placements.padded("twoLaneInputRows", rows + 1);
+	}
+
+	/**
+	 * One machine's run from its spine cell to its opening: the double piston for a machine on the
+	 * odd half of the tick, two repeaters for one on the even. Shared by the nested pair's spine and
+	 * the split track's walkway, which differ only in how power reaches the spine cell.
+	 *
+	 * @param columns cells from the spine to the head, the spine itself not counted
+	 */
+	private static void layTwoLaneFeed(PlacementPlan placements, Direction forward, BlockPos spine,
+			int columns, boolean odd) {
+		placements.placing("twoLaneInput");
+		if (odd) {
+			// The DOUBLE piston, phase-proof by the rule in PARITY_SEAM_GAME_TICKS: five game
+			// ticks from any input phase whatever, because whichever phase the edge arrives
+			// in, one piston of the pair absorbs it and the other pays the full three. A
+			// single piston here read three game ticks only when the player's own hand fed
+			// it; hooked into a contraption with a repeater anywhere in the line, it was
+			// pulled even and the offset vanished. The first piston stands in the spine and
+			// shoves its block into the cell behind the second; the second fires off that
+			// landing and shoves its own block out to the wire.
+			placements.take(spine);
+			set(placements, spine, "minecraft:sticky_piston[facing=" + forward.getName() + "]");
+			String[] run = {
+				"minecraft:redstone_block",
+				"minecraft:air",
+				"minecraft:sticky_piston[facing=" + forward.getName() + "]",
+				"minecraft:redstone_block",
+				"minecraft:air",
+			};
+			for (int column = 1; column < columns; column++) {
+				BlockPos at = spine.relative(forward, column);
+				placements.take(at);
+				// Ground under the pair as well as under the wire past it. Nothing in the
+				// machine needs it -- a redstone block hangs in the air quite happily and the
+				// pistons stand on the spine's own floor -- but a build with a hole in its
+				// bottom layer is a build that has to be selected in two pieces, and the pair
+				// is five cells of hole right at the end you start the selection from. It
+				// cannot change what the machine does: a redstone block does not power the
+				// block it stands on, so the floor stays as inert here as it is everywhere
+				// else the lane runs over it.
+				set(placements, at.below(), "minecraft:stone");
+				if (column <= run.length) {
+					set(placements, at, run[column - 1]);
+				} else {
+					set(placements, at, "minecraft:redstone_wire");
+				}
+			}
+			// A head read across the rows is the landing itself: the run stops a cell short of
+			// it and the block of redstone is pushed into the head, which the walk left as air
+			// for exactly this. Claimed as air so nothing hangs a note in it later.
+			if (columns <= run.length) {
+				BlockPos landing = spine.relative(forward, columns);
+				if ("-".equals(placements.describeBlock(landing))) {
+					set(placements, landing.below(), "minecraft:stone");
+					set(placements, landing, "minecraft:air");
+				}
+				placements.padded("twoLaneInputLandsOnTheHead");
+			}
+			placements.padded("twoLaneInputPiston");
+		} else {
+			// Straight off the spine, through two of its own repeaters: five redstone ticks,
+			// ten game ticks, against the eleven the other side spends -- its repeater of
+			// three at six and the piston pair at five -- so the two machines leave exactly
+			// one game tick apart, which is the offset the two halves of the song are written
+			// against. Repeaters deliver their whole even delay from any phase and hand the
+			// edge on phase-normalised, which makes this side as indifferent to whatever
+			// contraption pressed the button as the pair makes the other.
+			int[] delays = {4, 1};
+			for (int leg = 1; leg <= delays.length; leg++) {
+				BlockPos at = spine.relative(forward, leg);
+				set(placements, at.below(), "minecraft:stone");
+				set(placements, at, "minecraft:repeater[facing=" + repeaterFacing(forward)
+					+ ",delay=" + delays[leg - 1] + "]");
+			}
+			// And plain wire the rest of the way, which costs no ticks at all, for a machine
+			// whose own opening stands further out than its partner's.
+			for (int column = 3; column < columns; column++) {
+				BlockPos at = spine.relative(forward, column);
+				set(placements, at.below(), "minecraft:stone");
+				set(placements, at, "minecraft:redstone_wire");
+			}
+			placements.padded("twoLaneInputStraight");
+		}
+	}
+
+	/**
+	 * The split track: the interleaved paste's two machines as two one-lane tracks, a walkway
+	 * between them, instead of one nested comb.
+	 *
+	 * <p>This is how the first half-tick layouts stood, two serpentines side by side, with what they
+	 * lacked since put in: the joint walk paces them against each other, the schedule seams them,
+	 * and one input starts them a game tick apart. Machine A's track runs back from the walkway and
+	 * is walked mirrored, so both open on the wall beside the walkway, the input crosses its mouth,
+	 * and two paced pulses stand the same distance either side of whoever walks down it. Each track
+	 * is the width setting wide, so the build is twice that and the walkway.</p>
+	 *
+	 * <p>A layout and not a switch: the walkway width rides on {@link BuildLimits#splitTrack}, and
+	 * nought builds the nested comb exactly as before.</p>
+	 */
+	static final String SPLIT_TRACK_LAYOUT = "split track";
+
+	/**
+	 * The walkway a split build is given: the width asked for, or the input's own need where that
+	 * is more -- a cell for the button and one for the three-tick repeater into each odd machine's
+	 * piston, all in the walkway's mouth.
+	 */
+	private static int splitWalkway(int asked, boolean oddA, boolean oddB) {
+		return Math.max(asked, 1 + (oddA ? 1 : 0) + (oddB ? 1 : 0));
+	}
+
+	/**
+	 * One input for the split track's two machines, across the mouth of the walkway.
+	 *
+	 * <p>Each machine's spine cell is the column past its own near wall, the walkway on its other
+	 * side, and each is fed exactly as the nested pair's are -- see {@link #layTwoLaneFeed} -- so
+	 * the half tick is the same five against six game ticks it has always been. What changes is how
+	 * power reaches the spines: along the walkway's front row from a button standing in it, with
+	 * the odd machine's three-tick repeater in the last cell before its piston. The two runs out of
+	 * the button are given the same number of one-tick repeaters, however wide the walkway, so
+	 * neither machine gains a tick on the other.</p>
+	 *
+	 * @param forward machine B's lane direction; machine A's is the opposite
+	 * @param depth the way the slab creeps, the front row being the one the heads open on
+	 */
+	private static void addSplitInput(PlacementPlan placements, Direction forward, Direction depth,
+			BlockPos openingA, BlockPos openingB, boolean oddA, boolean oddB) {
+		Direction.Axis axis = forward.getAxis();
+		// Aimed at the cell each opening reads, as the nested pair's feeds are. A track too narrow
+		// for its first chord turns before it lays a module, and its head then stands a row in,
+		// reading the corner on the front row across the rows. See feedTarget.
+		BlockPos headA = feedTarget(placements, forward.getOpposite(), openingA);
+		BlockPos headB = feedTarget(placements, forward, openingB);
+		boolean acrossA = headA != null && !headA.equals(openingA);
+		boolean acrossB = headB != null && !headB.equals(openingB);
+		if (headA == null || headB == null
+				|| coordAcross(axis, headA) != coordAcross(axis, headB)
+				|| headA.getY() != headB.getY()) {
+			// Two heads not on one row cannot share the walkway's front row. Each gets its own
+			// starter, and the census sees the build lost its shared start.
+			placements.padded("splitInputUnshared");
+			addStarter(placements, forward.getOpposite(), openingA);
+			addStarter(placements, forward, openingB);
+			return;
+		}
+		// Five rather than six where the head is the landing itself: the piston's block is shoved
+		// into the corner the head reads. See addTwoLaneInput.
+		int reachA = oddA ? acrossA ? 5 : 6 : 3;
+		int reachB = oddB ? acrossB ? 5 : 6 : 3;
+		BlockPos spineA = headA.relative(forward, reachA);
+		BlockPos spineB = headB.relative(forward, -reachB);
+		int cells = (coordAlong(axis, spineB) - coordAlong(axis, spineA))
+			* stepAlong(axis, forward) - 1;
+		if (cells < 1 + (oddA ? 1 : 0) + (oddB ? 1 : 0)) {
+			placements.padded("splitInputNoRoom");
+			addStarter(placements, forward.getOpposite(), openingA);
+			addStarter(placements, forward, openingB);
+			return;
+		}
+		placements.placing("splitInput");
+		// A song that ends partway round a flat turn leaves the turn's watch armed, and the
+		// walkway lies past every corner machine A turns on its near wall: the input is nobody's
+		// turn, and a stone in it is not a note hung outside the width.
+		placements.stopWatchingTheTurn();
+		// The walkway's front row, cell 1 against A's spine and cell {@code cells} against B's.
+		// The button stands in the middle of whatever the repeaters into the pistons leave.
+		int first = 1 + (oddA ? 1 : 0);
+		int last = cells - (oddB ? 1 : 0);
+		int button = (first + last) / 2;
+		// Wire out of the button each way, spine included where it is wire: a block a button
+		// powers lights the dust beside it to fifteen, and fifteen cells of dust is all that
+		// carries. Both sides get the same count of one-tick repeaters, spread evenly.
+		int towardA = button - first + (oddA ? 0 : 1);
+		int towardB = last - button + (oddB ? 0 : 1);
+		int refreshes = 0;
+		while (Math.max(towardA, towardB) - refreshes > DUST_RANGE * (refreshes + 1)) {
+			refreshes++;
+		}
+		Set<Integer> refreshAt = new HashSet<>();
+		for (int each = 1; each <= refreshes; each++) {
+			refreshAt.add(button - each * (towardA + 1) / (refreshes + 1));
+			refreshAt.add(button + each * (towardB + 1) / (refreshes + 1));
+		}
+		for (int cell = 1; cell <= cells; cell++) {
+			BlockPos at = spineA.relative(forward, cell);
+			if (cell == button) {
+				Direction outward = depth.getOpposite();
+				set(placements, at, "minecraft:stone");
+				set(placements, at.above(), "minecraft:oak_button[face=floor,facing="
+					+ outward.getName() + ",powered=false]");
+				// Blank: the title is the plan's, and is written on it once the walk is done.
+				set(placements, at.relative(outward), "minecraft:oak_wall_sign[facing="
+					+ outward.getName() + "]");
+				continue;
+			}
+			set(placements, at.below(), "minecraft:stone");
+			Direction away = cell < button ? forward.getOpposite() : forward;
+			if (cell == 1 && oddA || cell == cells && oddB) {
+				set(placements, at, "minecraft:repeater[facing=" + repeaterFacing(away)
+					+ ",delay=" + PARITY_SEAM_REPEATER + "]");
+			} else if (refreshAt.contains(cell)) {
+				set(placements, at, "minecraft:repeater[facing=" + repeaterFacing(away)
+					+ ",delay=1]");
+			} else {
+				set(placements, at, "minecraft:redstone_wire");
+			}
+		}
+		// The spines: a piston the feed lays itself, or wire running straight on into the two
+		// repeaters. Ground under both.
+		set(placements, spineA.below(), "minecraft:stone");
+		set(placements, spineB.below(), "minecraft:stone");
+		if (!oddA) {
+			set(placements, spineA, "minecraft:redstone_wire");
+		}
+		if (!oddB) {
+			set(placements, spineB, "minecraft:redstone_wire");
+		}
+		layTwoLaneFeed(placements, forward.getOpposite(), spineA, reachA, oddA);
+		layTwoLaneFeed(placements, forward, spineB, reachB, oddB);
+		// An even machine read across the rows: its two repeaters end against the corner, which
+		// the walk left empty, so wire goes in it for the head to read. The odd one's corner is
+		// its landing, and the feed has already claimed it as air.
+		BlockPos[] corners = {acrossA && !oddA ? headA : null, acrossB && !oddB ? headB : null};
+		for (BlockPos corner : corners) {
+			if (corner != null && "-".equals(placements.describeBlock(corner))) {
+				set(placements, corner.below(), "minecraft:stone");
+				set(placements, corner, "minecraft:redstone_wire");
+				placements.padded("splitInputWiresTheCorner");
+			}
+		}
+		placements.padded("splitInputRefreshes", refreshes);
 	}
 
 	/** Game ticks of waiting that fold into one column of delay chain, at a repeater's longest. */
@@ -3944,6 +4143,37 @@ public final class SongBuilder {
 	 * is folded across the staircase like any other that does not fit.</p>
 	 */
 	static boolean PACKED_SEAM_SHOVE_BOOKED = true;
+
+	/**
+	 * Whether the fold books the columns a whole seam is shoved on past cells already taken where it
+	 * would open, as {@link #PACKED_SEAM_SHOVE_BOOKED} books the packed shove.
+	 *
+	 * <p>The cell a fold walks a lane out onto is often the corner it came round, where no element
+	 * may open. {@link #paritySeamHasRoom} says so and the element is shoved on a cell, so seven
+	 * cells booked from the corner were seven cells and one: the
+	 * landing stood in the climb's own column and the climb went down two past the wall. Centuries,
+	 * faded and moonlight at eight wide over two floors, split track, every breach a seam fresh off
+	 * a near-wall corner heading for a climb. Booked here, a seam that cannot clear before the wall
+	 * is cut across the staircase like any other that does not fit.</p>
+	 *
+	 * <p>Counted from where the lane stands, not from where the seam would open behind the wait's
+	 * repeaters and stretch: whatever goes down first steps off a taken cell, and a stretch booked
+	 * ahead of the seam may yet be clamped to nothing. Faded at eight wide, a stretch of seven
+	 * booked off the corner and clamped away, the seam on the corner after all.</p>
+	 */
+	static boolean SEAM_SHOVE_BOOKED = true;
+
+	private static int seamShove(PlacementPlan placements, Lane lane) {
+		// Not packed: that shove is packedSeamShove's, and the room check pads as it asks there.
+		if (!SEAM_SHOVE_BOOKED || packingLanes() || lane.bending()) {
+			return 0;
+		}
+		int shove = 0;
+		while (shove < DUST_RANGE && !paritySeamHasRoom(placements, lane.ahead(shove), 0)) {
+			shove++;
+		}
+		return shove;
+	}
 
 	private static int packedSeamShove(PlacementPlan placements, Lane lane) {
 		if (!PACKED_SEAM_SHOVE_BOOKED || !packingLanes() || !placements.recording) {
@@ -11808,6 +12038,7 @@ public final class SongBuilder {
 					int seamCells = seamNext == 0
 						? PARITY_SEAM_CELLS + readerCells
 							+ packedSeamShove(placements, lane.ahead(foldRepeaters + stretchLeft))
+							+ seamShove(placements, lane)
 						: seamNext < PARITY_SEAM_CELLS
 							? PARITY_SEAM_CELLS - seamNext + 2 + readerCells : 0;
 					// Between the stages: no repeater may go down anywhere, and the chain has to

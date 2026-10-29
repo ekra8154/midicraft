@@ -152,6 +152,8 @@ final class BuildOptionsScreen extends Screen {
 	private int reseedDelay;
 	private int paceTolerance;
 	private int paceCatchUpTo;
+	/** Blocks of walkway between the two machines, nought for the nested build. */
+	private int splitTrack;
 	/**
 	 * The three faces of the settings column. One shows at a time, which is what keeps the panel
 	 * one height whatever is being changed: the rows used to open downward in place, and with the
@@ -239,6 +241,12 @@ final class BuildOptionsScreen extends Screen {
 	private final String[] paletteOnOpen = new String[PALETTE.size()];
 	/** Where each palette label goes on screen, as {x, y}, for drawing it beside its box. */
 	private final List<int[]> paletteLabelAt = new ArrayList<>();
+	/** Where the split track box's label is drawn, or null off the tab it is on. */
+	private int[] splitLabelAt;
+	private static final String SPLIT_LABEL = "Split track walkway";
+	private static final Tooltip SPLIT_TOOLTIP = Tooltip.create(Component.literal("Blocks of "
+		+ "walkway between the two machines. Above 0 each machine gets a one-lane track of its own, "
+		+ "the build width wide, either side of the walkway. 0 nests them together."));
 	/** The catch-up control, so its line can follow the tolerance above it. */
 	private Choice catchUpChoice;
 	/** The width control, so its line can be rewritten when a forecast says the width was raised. */
@@ -572,6 +580,7 @@ final class BuildOptionsScreen extends Screen {
 		this.reseedDelay = MidicraftConfig.get().parityReseedDelay();
 		this.paceTolerance = MidicraftConfig.get().paceTolerance();
 		this.paceCatchUpTo = MidicraftConfig.get().paceCatchUpTo();
+		this.splitTrack = MidicraftConfig.get().splitTrack();
 		for (int slot = 0; slot < PALETTE.size(); slot++) {
 			palette[slot] = PALETTE.get(slot).read().apply(MidicraftConfig.get());
 		}
@@ -683,8 +692,8 @@ final class BuildOptionsScreen extends Screen {
 	private static final int ROW = 22;
 	private static final int LINE = 11;
 	private static final int TAB_HEIGHT = 14;
-	/** The tallest tab's rows -- layout and advanced both reach four -- which every tab is given. */
-	private static final int CONTENT_ROWS = 4;
+	/** The tallest tab's rows -- advanced reaches five -- which every tab is given. */
+	private static final int CONTENT_ROWS = 5;
 	/** Lines the forecast card keeps room for: two of size, a gap, two checks and three faults. */
 	private static final int CARD_LINES = 9;
 	/**
@@ -762,6 +771,7 @@ final class BuildOptionsScreen extends Screen {
 		widthChoice = null;
 		catchUpChoice = null;
 		paletteLabelAt.clear();
+		splitLabelAt = null;
 		exportMenuOpen = false;
 		switch (tab) {
 			case LAYOUT -> addLayoutRows();
@@ -883,6 +893,33 @@ final class BuildOptionsScreen extends Screen {
 			catchUpChoice.setTooltip(Tooltip.create(Component.literal("How close a lane catches "
 				+ "up to the other after going past the drift limit. Lower values catch up further "
 				+ "but cause slightly more padding.")));
+			// A number rather than a slider: the walkway can be as wide as anyone wants it.
+			int labelWidth = font.width(SPLIT_LABEL) + 6;
+			splitLabelAt = new int[] {columnLeft, contentTop + ROW * row};
+			EditBox split = new EditBox(font, columnLeft + labelWidth, contentTop + ROW * row++,
+				columnWidth - labelWidth, 20, Component.literal(SPLIT_LABEL));
+			split.setMaxLength(3);
+			split.setValue(String.valueOf(splitTrack));
+			split.setTooltip(SPLIT_TOOLTIP);
+			// After the value, so filling the box in does not count as typing into it. Checked as
+			// it is typed, the way the palette boxes are: anything but a number turns red and the
+			// build keeps the last walkway that was one.
+			split.setResponder(typed -> {
+				if (!typed.chars().allMatch(Character::isDigit)) {
+					split.setTextColor(BAD_COLOR);
+					return;
+				}
+				int blocks = typed.isEmpty() ? 0 : Integer.parseInt(typed);
+				splitTrack = Math.max(MidicraftConfig.MIN_SPLIT_TRACK,
+					Math.min(MidicraftConfig.MAX_SPLIT_TRACK, blocks));
+				split.setTextColor(blocks > MidicraftConfig.MAX_SPLIT_TRACK ? BAD_COLOR : 0xFFE0E0E0);
+				// The width line counts the walkway in, so it is rewritten when that moves.
+				if (widthChoice != null) {
+					widthChoice.updateMessage();
+				}
+				requestForecast();
+			});
+			addRenderableWidget(split);
 		}
 		Choice rate = addRenderableWidget(new Choice(columnLeft, contentTop + ROW * row,
 			columnWidth, PasteRate.RATES.size(), PasteRate.index(commandsPerTick),
@@ -1013,6 +1050,7 @@ final class BuildOptionsScreen extends Screen {
 		MidicraftConfig.get().setParityReseedDelay(reseedDelay);
 		MidicraftConfig.get().setPaceTolerance(paceTolerance);
 		MidicraftConfig.get().setPaceCatchUpTo(paceCatchUpTo);
+		MidicraftConfig.get().setSplitTrack(splitTrack);
 		MidicraftConfig.get().setPasteStartTop(startTop);
 		MidicraftConfig.get().setPasteMode(mode.name());
 		// The builder's copies are written by the setters, so the plan made next uses these blocks.
@@ -1035,7 +1073,7 @@ final class BuildOptionsScreen extends Screen {
 		// every position of that slider with the forecast it had already made for the first.
 		// The pace tolerance likewise: it decides how much dust the lane behind lays.
 		String layoutKey = mode.name() + " " + laneWidth + " " + laneFloors + " " + reseedDelay + " "
-			+ paceTolerance + " " + paceCatchUpTo + " " + startTop + " " + colours;
+			+ paceTolerance + " " + paceCatchUpTo + " " + splitTrack + " " + startTop + " " + colours;
 		// The palette as well, now that the plan is the one Paste uses: the blocks change nothing
 		// about the forecast's numbers, but they are what the plan builds out of.
 		String key = layoutKey + " " + String.join(",", palette);
@@ -1081,7 +1119,7 @@ final class BuildOptionsScreen extends Screen {
 		// half-written.
 		SongBuilder.BuildLimits limits = new SongBuilder.BuildLimits(
 			MidicraftConfig.get().maxBuildFloors(), laneWidth, laneFloors,
-			startTop, reseedDelay, paceTolerance, paceCatchUpTo);
+			startTop, reseedDelay, paceTolerance, paceCatchUpTo, splitTrack);
 		FORECASTER.execute(() -> {
 			// Dropped before it is worked out, not after. A press asked for one forecast; a drag
 			// across the width slider asks for a hundred and twenty, and planning a big song is tens
@@ -1279,6 +1317,13 @@ final class BuildOptionsScreen extends Screen {
 	 * goes wherever it likes; it just stops promising a footprint the build will not honour.</p>
 	 */
 	private String widthLine(int blocks) {
+		// Split, the setting is each track's width, and the build is two of them and the walkway.
+		if (splitTrack > 0 && hasPaceControl()) {
+			int split = 2 * blocks + splitTrack;
+			return labelledWidth > split
+				? blocks + " per track - raised to " + labelledWidth + " overall to fit largest chord"
+				: blocks + " per track, " + split + " overall with the walkway";
+		}
 		return labelledWidth > blocks
 			? blocks + " blocks wide - raised to " + labelledWidth + " to fit largest chord"
 			: blocks + " blocks wide before it folds back";
@@ -1428,6 +1473,9 @@ final class BuildOptionsScreen extends Screen {
 				graphics.fill(x, tabsTop + TAB_HEIGHT - 1, x + w, tabsTop + TAB_HEIGHT, HEADING_COLOR);
 			}
 			x += w + 4;
+		}
+		if (splitLabelAt != null) {
+			graphics.text(font, SPLIT_LABEL, splitLabelAt[0], splitLabelAt[1] + 6, LABEL_COLOR, false);
 		}
 		for (int index = 0; index < paletteLabelAt.size(); index++) {
 			int[] at = paletteLabelAt.get(index);
