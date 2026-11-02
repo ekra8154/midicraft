@@ -3067,6 +3067,90 @@ public record ComposerProject(
 		return new PasteResult(with(updated, target, id), Set.copyOf(addedIds), added);
 	}
 
+	/**
+	 * Pastes every note back into the layer it was copied from, or the nearest thing to it.
+	 *
+	 * <p>The paste for rearranging a song. {@link #pasteNotes} aims the whole copy at one layer, which
+	 * is right for re-voicing a phrase and wrong for moving a section: a bar cut from six layers came
+	 * back as one, or as bare instruments that had lost their melodic split, their mix and their
+	 * sustain. Here each layer's notes go home on their own.</p>
+	 *
+	 * <p>Home, in order: in the same song, the row the layer was copied from if it still has that
+	 * name; any layer with the same name and the same sound; in the same song, any layer with that
+	 * name, its sound changed since the copy; and otherwise the layer made again from what was
+	 * copied, settings and all, on the end. Another song's layer of the same name is only home when
+	 * it also sounds the same, so a paste never lands on that song's unrelated "Lead".</p>
+	 *
+	 * @param sameSong whether the copy was taken from this song, which lets a layer be found by its
+	 *     row and by its name alone
+	 */
+	public PasteResult pasteNotesHome(List<ClipboardNote> clipboard, long startTick, boolean sameSong) {
+		if (clipboard == null || clipboard.isEmpty()) {
+			return new PasteResult(this, Set.of(), 0);
+		}
+		Map<List<Object>, List<ClipboardNote>> byLayer = new java.util.LinkedHashMap<>();
+		for (ClipboardNote copied : clipboard) {
+			byLayer.computeIfAbsent(List.of(copied.layerIndex(), copied.home()), key -> new ArrayList<>())
+				.add(copied);
+		}
+		List<Layer> updated = new ArrayList<>(layers);
+		Set<Long> addedIds = new LinkedHashSet<>();
+		long id = nextNoteId;
+		int added = 0;
+		for (List<ClipboardNote> group : byLayer.values()) {
+			Layer home = group.getFirst().home();
+			// Asked of the layers as they stand, the ones this paste has made included, so two
+			// copied layers that were the same layer go home to one made layer and not two.
+			int at = homeOf(updated, home, group.getFirst().layerIndex(), sameSong);
+			if (at < 0 && updated.size() < MAX_LAYERS) {
+				updated.add(home);
+				at = updated.size() - 1;
+				added++;
+			} else if (at < 0) {
+				// Out of layers. Better on the active layer than dropped.
+				at = activeLayerIndex;
+			}
+			List<NoteEvent> notes = new ArrayList<>(updated.get(at).notes());
+			for (ClipboardNote copied : group) {
+				NoteEvent note = new NoteEvent(id++, copied.midiNote(),
+					Math.max(0L, startTick + copied.tickOffset()), copied.durationTicks(),
+					copied.velocity(), copied.strikeShift());
+				notes.add(note);
+				addedIds.add(note.id());
+			}
+			updated.set(at, updated.get(at).withNotes(notes));
+		}
+		return new PasteResult(with(updated, activeLayerIndex, id), Set.copyOf(addedIds), added);
+	}
+
+	private static int homeOf(List<Layer> layers, Layer home, int row, boolean sameSong) {
+		if (sameSong && row >= 0 && row < layers.size() && layers.get(row).name().equals(home.name())) {
+			return row;
+		}
+		for (int index = 0; index < layers.size(); index++) {
+			if (layers.get(index).name().equals(home.name()) && soundsLike(layers.get(index), home)) {
+				return index;
+			}
+		}
+		if (sameSong) {
+			for (int index = 0; index < layers.size(); index++) {
+				if (layers.get(index).name().equals(home.name())) {
+					return index;
+				}
+			}
+		}
+		return -1;
+	}
+
+	/** Whether two layers make the same sound: instrument, melodic split, mix and sustain alike. */
+	private static boolean soundsLike(Layer one, Layer other) {
+		return one.instrument().equals(other.instrument())
+			&& java.util.Objects.equals(one.split(), other.split())
+			&& one.mix().equals(other.mix())
+			&& one.resting().equals(other.resting())
+			&& java.util.Objects.equals(one.sustain(), other.sustain());
+	}
+
 	public ComposerProject deleteNotes(Set<Long> ids) {
 		if (ids == null || ids.isEmpty()) {
 			return this;
@@ -3946,13 +4030,27 @@ public record ComposerProject(
 	 *
 	 * <p>{@code sourceLayer} only names the layer a new one is made after, so it is a label rather
 	 * than a link -- the layer it came from may be gone by the time this is pasted.</p>
+	 *
+	 * @param layer the layer the note was copied from, with its notes taken off: everything that
+	 *     makes it sound the way it does -- a melodic split, a composite mix, sustain -- so a paste
+	 *     that has to make the layer again makes that one and not a bare instrument. Null for a note
+	 *     copied without one, which pastes as a note always did.
+	 * @param layerIndex the row the layer stood on when copied, which is how a paste back into the
+	 *     same song finds it first; -1 when not known
 	 */
 	public record ClipboardNote(long tickOffset, int midiNote, long durationTicks, int velocity,
-			String instrument, String sourceLayer, long strikeShift) {
+			String instrument, String sourceLayer, long strikeShift, Layer layer, int layerIndex) {
 		/** A copied note whose strikes sit on the song's grid. */
 		public ClipboardNote(long tickOffset, int midiNote, long durationTicks, int velocity,
 				String instrument, String sourceLayer) {
 			this(tickOffset, midiNote, durationTicks, velocity, instrument, sourceLayer, 0L);
+		}
+
+		/** A copied note that knows its instrument and layer name but not the layer itself. */
+		public ClipboardNote(long tickOffset, int midiNote, long durationTicks, int velocity,
+				String instrument, String sourceLayer, long strikeShift) {
+			this(tickOffset, midiNote, durationTicks, velocity, instrument, sourceLayer, strikeShift,
+				null, -1);
 		}
 
 		public ClipboardNote {
@@ -3962,6 +4060,13 @@ public record ComposerProject(
 			velocity = Math.max(1, Math.min(127, velocity));
 			instrument = instrument == null || instrument.isBlank() ? "HARP" : instrument;
 			sourceLayer = sourceLayer == null || sourceLayer.isBlank() ? "Pasted" : sourceLayer;
+			layer = layer == null || layer.notes().isEmpty() ? layer : layer.withNotes(List.of());
+		}
+
+		/** The layer this note goes home to: its own, or one made from its name and instrument. */
+		public Layer home() {
+			return layer != null ? layer
+				: new Layer(sourceLayer, instrument, false, true, true, List.of());
 		}
 
 		/**
@@ -3973,7 +4078,7 @@ public record ComposerProject(
 		public ClipboardNote scaled(double factor) {
 			return new ClipboardNote(Math.round(tickOffset * factor), midiNote,
 				Math.round(durationTicks * factor), velocity, instrument, sourceLayer,
-				Math.round(strikeShift * factor));
+				Math.round(strikeShift * factor), layer, layerIndex);
 		}
 	}
 

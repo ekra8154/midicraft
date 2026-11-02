@@ -1173,6 +1173,116 @@ class ClipboardAndLayersTest {
 	}
 
 	/**
+	 * A section cut from several layers goes back into those layers, not into the one aimed at.
+	 *
+	 * <p>Rearranging a song: cut a bar across every part, put it down further on. Aimed at one
+	 * layer it came back as one part, or split by instrument onto bare new layers.</p>
+	 */
+	@Test
+	void aCopyAcrossLayersGoesHomeToEachLayer() {
+		ComposerProject song = songOf(melodic(), composite(), layer("Target", "HARP"));
+		List<ClipboardNote> copied = copyHome(song, 0, 1);
+
+		PasteResult pasted = song.pasteNotesHome(copied, 960L, true);
+
+		assertEquals(3, pasted.project().layers().size(), "every part still had its layer");
+		assertEquals(0, pasted.addedLayers());
+		assertEquals(4, pasted.project().layers().get(0).notes().size(), "the melody doubled in place");
+		assertEquals(4, pasted.project().layers().get(1).notes().size(), "and the pad in its own");
+		assertTrue(pasted.project().layers().get(2).notes().isEmpty(), "nothing landed on the aim");
+		assertEquals(List.of(0L, 240L, 960L, 1200L), startTicks(pasted.project().layers().get(0)));
+	}
+
+	/** A layer gone since the copy comes back as itself: melodic split, mix and sustain intact. */
+	@Test
+	void aDeletedLayerIsMadeAgainWithItsSettings() {
+		ComposerProject song = songOf(melodic(), composite(), layer("Target", "HARP"));
+		List<ClipboardNote> copied = copyHome(song, 0, 1);
+		ComposerProject after = song.deleteLayers(Set.of(0, 1));
+
+		PasteResult pasted = after.pasteNotesHome(copied, 0L, true);
+
+		assertEquals(2, pasted.addedLayers());
+		Layer melody = pasted.project().layers().get(1);
+		Layer pad = pasted.project().layers().get(2);
+		assertTrue(melodic().split() != null && melodic().sustain().on() && !composite().mix().isEmpty(),
+			"the layers copied really carry a split, a sustain and a mix");
+		assertEquals(melodic().split(), melody.split(), "the melodic split came back");
+		assertEquals(melodic().sustain(), melody.sustain(), "and its sustain");
+		assertEquals(composite().mix(), pad.mix(), "the composite came back as a composite");
+		assertEquals(List.of("Target", "Melody", "Pad"), names(pasted.project()));
+	}
+
+	/** Reordered since the copy, each part still finds its layer by name. */
+	@Test
+	void aMovedLayerIsFoundByItsName() {
+		ComposerProject song = songOf(melodic(), composite(), layer("Target", "HARP"));
+		List<ClipboardNote> copied = copyHome(song, 0, 1);
+		ComposerProject moved = song.moveLayersTo(Set.of(2), 0);
+
+		PasteResult pasted = moved.pasteNotesHome(copied, 960L, true);
+
+		assertEquals(List.of("Target", "Melody", "Pad"), names(pasted.project()));
+		assertEquals(0, pasted.addedLayers());
+		assertTrue(pasted.project().layers().get(0).notes().isEmpty());
+		assertEquals(4, pasted.project().layers().get(1).notes().size());
+		assertEquals(4, pasted.project().layers().get(2).notes().size());
+	}
+
+	/** In another song a layer of the same name is only home when it also sounds the same. */
+	@Test
+	void anotherSongsLayerIsHomeOnlyIfItSoundsTheSame() {
+		ComposerProject song = songOf(melodic(), composite());
+		List<ClipboardNote> copied = copyHome(song, 0, 1);
+		ComposerProject other = songOf(layer("Melody", "HARP"), composite().withNotes(List.of()));
+
+		PasteResult pasted = other.pasteNotesHome(copied, 0L, false);
+
+		assertEquals(1, pasted.addedLayers(), "the plain harp Melody is someone else's part");
+		assertTrue(pasted.project().layers().get(0).notes().isEmpty());
+		assertEquals(2, pasted.project().layers().get(1).notes().size(), "the matching pad took its notes");
+		assertEquals(melodic().split(), pasted.project().layers().get(2).split());
+		assertEquals(2, pasted.project().layers().get(2).notes().size());
+	}
+
+	/** Copied the way the composer copies: every note with its layer and the row it stood on. */
+	private static List<ClipboardNote> copyHome(ComposerProject song, int... rows) {
+		List<ClipboardNote> clipboard = new ArrayList<>();
+		long origin = Long.MAX_VALUE;
+		for (int row : rows) {
+			for (NoteEvent note : song.layers().get(row).notes()) {
+				origin = Math.min(origin, note.startTick());
+			}
+		}
+		for (int row : rows) {
+			Layer layer = song.layers().get(row);
+			for (NoteEvent note : layer.notes()) {
+				clipboard.add(new ClipboardNote(note.startTick() - origin, note.midiNote(),
+					note.durationTicks(), note.velocity(), layer.instrument(), layer.name(),
+					note.strikeShiftTicks(), layer, row));
+			}
+		}
+		return clipboard;
+	}
+
+	/** A melodic split layer with sustain on, and two notes. */
+	private static Layer melodic() {
+		return new Layer("Melody", "HARP", false, true, true,
+			List.of(new NoteEvent(9001L, 60, 0L, 120L, 100), new NoteEvent(9002L, 64, 240L, 120L, 100)),
+			ComposerProject.Split.melodic())
+			.withSustain(new ComposerProject.Sustain(true, ComposerProject.SustainLength.QUARTER,
+				ComposerProject.SustainLength.REPEATER_TICK, true));
+	}
+
+	/** A composite layer: two harps and a bell sounding together, and two notes. */
+	private static Layer composite() {
+		return new Layer("Pad", "HARP", false, true, true,
+			List.of(new NoteEvent(9003L, 55, 0L, 120L, 100), new NoteEvent(9004L, 59, 240L, 120L, 100)))
+			.withMix(List.of(new ComposerProject.Split.Voice("HARP", 0, 127, 2),
+				new ComposerProject.Split.Voice("BELL", 0, 127, 1)));
+	}
+
+	/**
 	 * Whether every note is one its own layer can build.
 	 *
 	 * <p>Deliberately asks the layer rather than {@link NoteEvent#isBuildable}, which only knows

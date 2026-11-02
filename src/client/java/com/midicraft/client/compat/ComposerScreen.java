@@ -533,6 +533,12 @@ public final class ComposerScreen extends Screen {
 	 * clock in a song at another tempo or speed -- including this one after the speed has changed.
 	 */
 	private static double clipboardMicrosPerTick = 1.0;
+	/**
+	 * The song the notes were copied from, by name. A paste back into it may find a layer by its row
+	 * or by its name alone; in another song a layer is only home when it also sounds the same. See
+	 * {@link ComposerProject#pasteNotesHome}.
+	 */
+	private static String clipboardSong = "";
 	private Button playButton;
 	private Button recordButton;
 	/**
@@ -10684,13 +10690,14 @@ public final class ComposerScreen extends Screen {
 	 * belongs to the layer and not the note -- flattening is where it used to get lost.</p>
 	 */
 	private void copySelection() {
-		record Copied(Layer layer, NoteEvent note) {
+		record Copied(Layer layer, int row, NoteEvent note) {
 		}
 		List<Copied> selected = new ArrayList<>();
-		for (Layer layer : project().layers()) {
+		for (int row = 0; row < project().layers().size(); row++) {
+			Layer layer = project().layers().get(row);
 			for (NoteEvent note : layer.notes()) {
 				if (selectedNotes.contains(note.id())) {
-					selected.add(new Copied(layer, note));
+					selected.add(new Copied(layer, row, note));
 				}
 			}
 		}
@@ -10722,9 +10729,11 @@ public final class ComposerScreen extends Screen {
 		clipboard = selected.stream()
 			.map(copied -> new ClipboardNote(copied.note().startTick() - clipboardOriginTick,
 				copied.note().midiNote(), copied.note().durationTicks(), copied.note().velocity(),
-				copied.layer().instrument(), copied.layer().name(), copied.note().strikeShiftTicks()))
+				copied.layer().instrument(), copied.layer().name(), copied.note().strikeShiftTicks(),
+				copied.layer(), copied.row()))
 			.toList();
 		clipboardMicrosPerTick = project().microsPerTick();
+		clipboardSong = project().name();
 		// One clipboard: what is copied now is what paste puts back.
 		layerClipboard = List.of();
 		showResult(Component.literal("Copied " + clipboard.size()
@@ -10836,7 +10845,14 @@ public final class ComposerScreen extends Screen {
 		List<ClipboardNote> notes = scale == 1.0 ? clipboard
 			: clipboard.stream().map(note -> note.scaled(scale)).toList();
 		int before = project().layers().size();
-		PasteResult result = project().pasteNotes(project().activeLayerIndex(), notes, startTick);
+		// Aimed or sent home. A copy from one layer goes into the active layer and takes its sound,
+		// which is how a phrase is re-voiced onto another part. A copy spanning layers, or any paste
+		// with more than one layer selected, goes back where each note came from, settings and all
+		// -- the paste for moving sections of a song about.
+		boolean home = selectedLayers.size() > 1 || clipboardLayers() > 1;
+		PasteResult result = home
+			? project().pasteNotesHome(notes, startTick, clipboardSong.equals(project().name()))
+			: project().pasteNotes(project().activeLayerIndex(), notes, startTick);
 		ComposerProject pasted = result.project();
 		// The marker steps to the far end of the block, so a second Ctrl+V lays the phrase down after
 		// the first rather than on top of it and a passage is built by holding the key. Measured
@@ -10880,8 +10896,15 @@ public final class ComposerScreen extends Screen {
 		if (result.addedLayers() > 0) {
 			int added = project().layers().size() - before;
 			showResult(Component.literal(result.noteIds().size() + " notes pasted, with " + added
-				+ (added == 1 ? " layer" : " layers") + " added for the extra instruments."));
+				+ (added == 1 ? " layer" : " layers")
+				+ (home ? " made again for parts with nowhere to go." : " added for the extra instruments.")));
 		}
+	}
+
+	/** How many layers the copied notes came from. */
+	private static int clipboardLayers() {
+		return (int) clipboard.stream().map(note -> List.of(note.layerIndex(), note.home())).distinct()
+			.count();
 	}
 
 	/**
